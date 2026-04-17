@@ -42,7 +42,7 @@ fn test_simple_param_extraction() {
 
     let param_names: Vec<String> = func.params
         .iter()
-        .filter_map(|p| extract_param_name(p))
+        .filter_map(extract_param_name)
         .collect();
 
     println!("Param names: {:?}", param_names);
@@ -76,7 +76,7 @@ fn map<U, F: fn(T) -> U>(self, f: F) -> Maybe<U> {
 
     let param_names: Vec<String> = func.params
         .iter()
-        .filter_map(|p| extract_param_name(p))
+        .filter_map(extract_param_name)
         .collect();
 
     println!("Final param names: {:?}", param_names);
@@ -109,7 +109,7 @@ fn filter<P: fn(&T) -> Bool>(self, predicate: P) -> Maybe<T> {
 
     let param_names: Vec<String> = func.params
         .iter()
-        .filter_map(|p| extract_param_name(p))
+        .filter_map(extract_param_name)
         .collect();
 
     println!("Final param names: {:?}", param_names);

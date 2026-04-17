@@ -62,7 +62,7 @@ fn id<universe u, A: Type(u)>(x: A) -> A { x }
     match &module.items[0].kind {
         ItemKind::Function(func) => {
             let generics = &func.generics;
-            assert!(generics.len() >= 1, "Should have at least 1 generic param");
+            assert!(!generics.is_empty(), "Should have at least 1 generic param");
             // First param should be a Level (universe) param named 'u'
             match &generics[0].kind {
                 GenericParamKind::Level { name } => {
@@ -138,7 +138,7 @@ fn id<u: Level, A: Type(u)>(x: A) -> A { x }
     match &module.items[0].kind {
         ItemKind::Function(func) => {
             let generics = &func.generics;
-            assert!(generics.len() >= 1);
+            assert!(!generics.is_empty());
             match &generics[0].kind {
                 GenericParamKind::Level { name } => {
                     assert_eq!(name.name.as_str(), "u");

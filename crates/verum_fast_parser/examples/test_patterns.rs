@@ -31,7 +31,7 @@ fn test_dir(dir: &str, test_type: &str) {
     paths.sort();
 
     for path in &paths {
-        let content = fs::read_to_string(&path).expect("Failed to read file");
+        let content = fs::read_to_string(path).expect("Failed to read file");
         let expected_error = extract_expected_error(&content);
 
         let parser = FastParser::new();

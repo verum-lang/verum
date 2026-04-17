@@ -25,7 +25,7 @@ fn write_program(dir: &Path, body: &str) -> PathBuf {
 
 fn run_interp(file: &Path, dir: &Path) -> Output {
     Command::new(verum_bin())
-        .args(&["run", "--interp", file.to_str().unwrap()])
+        .args(["run", "--interp", file.to_str().unwrap()])
         .current_dir(dir)
         .output()
         .expect("spawn verum")
@@ -227,7 +227,7 @@ fn aot_build_and_run_hello() {
 
     // Build to native binary
     let build = Command::new(verum_bin())
-        .args(&["build", prog.to_str().unwrap()])
+        .args(["build", prog.to_str().unwrap()])
         .current_dir(tmp.path())
         .output()
         .expect("spawn");
@@ -272,7 +272,7 @@ fn aot_build_arithmetic() {
     );
 
     let build = Command::new(verum_bin())
-        .args(&["build", prog.to_str().unwrap()])
+        .args(["build", prog.to_str().unwrap()])
         .current_dir(tmp.path())
         .output()
         .expect("spawn");
@@ -301,7 +301,7 @@ fn gate_unsafe_rejected_by_interpreter() {
         "fn main() {\n    unsafe {\n        let _x = 0;\n    }\n}\n",
     );
     let out = Command::new(verum_bin())
-        .args(&[
+        .args([
             "run",
             "--interp",
             prog.to_str().unwrap(),

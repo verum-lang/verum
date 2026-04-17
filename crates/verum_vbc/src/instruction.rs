@@ -11492,7 +11492,7 @@ mod tests {
     fn test_reg_clone_copy() {
         let r1 = Reg(100);
         let r2 = r1; // Copy
-        let r3 = r1.clone();
+        let r3 = r1;
 
         assert_eq!(r1, r2);
         assert_eq!(r1, r3);
@@ -11804,7 +11804,7 @@ mod tests {
     fn test_tensor_dtype_clone_copy() {
         let d1 = TensorDType::F32;
         let d2 = d1; // Copy
-        let d3 = d1.clone();
+        let d3 = d1;
 
         assert_eq!(d1, d2);
         assert_eq!(d1, d3);
@@ -11924,7 +11924,7 @@ mod tests {
     fn test_binary_int_op_clone_copy() {
         let op1 = BinaryIntOp::Add;
         let op2 = op1; // Copy
-        let op3 = op1.clone();
+        let op3 = op1;
 
         assert_eq!(op1, op2);
         assert_eq!(op1, op3);
@@ -12014,7 +12014,7 @@ mod tests {
     fn test_grad_mode_clone_copy() {
         let m1 = GradMode::Reverse;
         let m2 = m1; // Copy
-        let m3 = m1.clone();
+        let m3 = m1;
 
         assert_eq!(m1, m2);
         assert_eq!(m1, m3);

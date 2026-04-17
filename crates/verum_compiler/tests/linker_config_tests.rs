@@ -200,7 +200,7 @@ output = "static"
 lto = "none"
 "#;
 
-    let config: LinkerTomlConfig = toml::from_str(&toml_str).unwrap();
+    let config: LinkerTomlConfig = toml::from_str(toml_str).unwrap();
     let linking_config = config
         .to_linking_config(PathBuf::from("libtest.a"))
         .unwrap();
@@ -217,7 +217,7 @@ fn test_extra_flags() {
 extra_flags = ["-Wl,--gc-sections", "-Wl,-dead_strip", "-fuse-ld=lld"]
 "#;
 
-    let config: LinkerTomlConfig = toml::from_str(&toml_str).unwrap();
+    let config: LinkerTomlConfig = toml::from_str(toml_str).unwrap();
     let linking_config = config
         .to_linking_config(PathBuf::from("test"))
         .unwrap();
@@ -233,7 +233,7 @@ fn test_target_triple() {
 target = "x86_64-unknown-linux-gnu"
 "#;
 
-    let config: LinkerTomlConfig = toml::from_str(&toml_str).unwrap();
+    let config: LinkerTomlConfig = toml::from_str(toml_str).unwrap();
     let linking_config = config
         .to_linking_config(PathBuf::from("test"))
         .unwrap();
@@ -253,7 +253,7 @@ fn test_native_target() {
 target = "native"
 "#;
 
-    let config: LinkerTomlConfig = toml::from_str(&toml_str).unwrap();
+    let config: LinkerTomlConfig = toml::from_str(toml_str).unwrap();
     let linking_config = config
         .to_linking_config(PathBuf::from("test"))
         .unwrap();
@@ -287,7 +287,7 @@ lto = "none"
 libraries = ["base_lib"]
 "#;
 
-    let config: ProjectConfig = toml::from_str(&toml_str).unwrap();
+    let config: ProjectConfig = toml::from_str(toml_str).unwrap();
 
     // Unknown profile should fall back to base linker settings
     let unknown = config.linker_config_for_profile("unknown");

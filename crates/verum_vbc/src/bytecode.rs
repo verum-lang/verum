@@ -7102,7 +7102,7 @@ mod tests {
         test_roundtrip(&Instruction::NewClosure {
             dst: Reg(255),
             func_id: u32::MAX / 2,
-            captures: (0..20).map(|i| Reg(i)).collect(),
+            captures: (0..20).map(Reg).collect(),
         });
     }
 

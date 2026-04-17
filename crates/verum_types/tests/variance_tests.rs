@@ -36,7 +36,7 @@ fn make_param(name: &str, variance: Variance) -> TypeParam {
         name: name.into(),
         variance,
         bounds: List::new(),
-        default: None.into(),
+        default: None,
         is_meta: false,
         span: dummy_span(),
     }

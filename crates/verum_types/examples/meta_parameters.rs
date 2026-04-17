@@ -13,7 +13,6 @@ use verum_ast::{
     span::Span,
     ty::{Ident, Path},
 };
-use verum_common::List;
 use verum_types::ty::Type;
 
 fn main() {
@@ -56,7 +55,7 @@ fn example_meta_param_with_refinement() {
     println!("Code: N: meta usize{{> 0}}\n");
 
     // Create refinement predicate: > 0
-    let pred_expr = Expr::new(
+    let _pred_expr = Expr::new(
         ExprKind::Literal(Literal::int(0, Span::dummy())),
         Span::dummy(),
     );

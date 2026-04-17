@@ -534,7 +534,7 @@ mod tests {
             let _ = format!("{:?}", kind);
             // Verify conversion to FFI error code works
             let code = kind.ffi_error_code();
-            assert!(code >= 0x1001 && code <= 0x1008);
+            assert!((0x1001..=0x1008).contains(&code));
         }
     }
 

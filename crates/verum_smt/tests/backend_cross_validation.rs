@@ -1680,7 +1680,7 @@ fn try_z3(expr: &Expr, logic: Cvc5SmtLogic) -> Result<String, String> {
     };
 
     // Create solver with optional logic specialization
-    let mut z3_solver = Z3Solver::new(logic_str.map(|s| s.into()));
+    let mut z3_solver = Z3Solver::new(logic_str.map(|s| s));
 
     // Translate expression to Z3
     let translator = Translator::new(&ctx);

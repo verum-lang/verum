@@ -628,7 +628,7 @@ mod tests {
 
         let result = result.unwrap();
         // The bytecode should have been transformed
-        assert!(result.module.bytecode.len() > 0);
+        assert!(!result.module.bytecode.is_empty());
     }
 
     #[test]

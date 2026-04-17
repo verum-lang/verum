@@ -8,10 +8,10 @@ use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
 use std::hint::black_box;
 use verum_ast::span::Span;
 use verum_ast::ty::{Ident, Path};
-use verum_common::{List, Map, Maybe, Set, Text};
+use verum_common::{List, Map, Maybe, Set};
 
 use verum_types::advanced_protocols::{SpecializationInfo, SpecializationLattice};
-use verum_types::protocol::{Protocol, ProtocolChecker, ProtocolImpl};
+use verum_types::protocol::{Protocol, ProtocolImpl};
 use verum_types::specialization_selection::{CoherenceChecker, SpecializationSelector};
 use verum_types::ty::Type;
 use verum_types::unify::Unifier;
@@ -207,7 +207,7 @@ fn bench_coherence_checking(c: &mut Criterion) {
                 }
 
                 b.iter(|| {
-                    let mut checker = CoherenceChecker::new();
+                    let checker = CoherenceChecker::new();
 
                     // Check all pairs for overlap
                     for i in 0..impls.len() {

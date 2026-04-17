@@ -100,7 +100,7 @@ fn demonstrate_positive_constraint() {
     let predicate = create_binary(BinOp::Gt, create_var("x"), create_int(0));
 
     let context = ErrorContext {
-        function_name: None.into(),
+        function_name: None,
         expected_type: "Positive".into(),
         actual_type: "Int".into(),
         refinement_source: RefinementSource::TypeAnnotation,
@@ -129,7 +129,7 @@ fn demonstrate_multi_constraint() {
     let predicate = create_binary(BinOp::And, left, right);
 
     let context = ErrorContext {
-        function_name: None.into(),
+        function_name: None,
         expected_type: "SmallPositive".into(),
         actual_type: "Int".into(),
         refinement_source: RefinementSource::TypeAnnotation,
@@ -197,7 +197,7 @@ fn demonstrate_suggestions() {
 
     // Type annotation context
     let context = ErrorContext {
-        function_name: None.into(),
+        function_name: None,
         expected_type: "Positive".into(),
         actual_type: "Int".into(),
         refinement_source: RefinementSource::TypeAnnotation,
@@ -213,7 +213,7 @@ fn demonstrate_suggestions() {
 
     // Function parameter context
     let context = ErrorContext {
-        function_name: Some("divide".into()).into(),
+        function_name: Some("divide".into()),
         expected_type: "NonZero".into(),
         actual_type: "Int".into(),
         refinement_source: RefinementSource::FunctionParameter,
@@ -229,7 +229,7 @@ fn demonstrate_suggestions() {
 
     // Function return context
     let context = ErrorContext {
-        function_name: Some("sqrt".into()).into(),
+        function_name: Some("sqrt".into()),
         expected_type: "NonNegative".into(),
         actual_type: "Float".into(),
         refinement_source: RefinementSource::FunctionReturn,

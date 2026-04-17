@@ -962,7 +962,7 @@ mod tests {
     #[test]
     fn test_incremental_merger() {
         let module = VbcModule::new("test".to_string());
-        let mut merger = IncrementalMerger::new(module);
+        let merger = IncrementalMerger::new(module);
 
         assert_eq!(merger.stats().user_functions, 0);
         assert!(merger.module().bytecode.is_empty());

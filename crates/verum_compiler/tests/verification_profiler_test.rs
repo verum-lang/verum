@@ -21,7 +21,6 @@ use verum_compiler::verification_profiler::{
 };
 use verum_common::Text;
 use verum_smt::{ProofResult, VerificationCost, VerificationError, VerifyMode};
-use serde_json;
 
 fn cost(name: &str, duration: Duration, succeeded: bool) -> VerificationCost {
     VerificationCost::new(name.to_string().into(), duration, succeeded)

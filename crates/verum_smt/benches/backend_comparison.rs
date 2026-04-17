@@ -23,7 +23,7 @@ use std::time::Duration;
 
 use verum_smt::{
     Cvc5Backend, Cvc5Config, Cvc5SmtLogic,
-    z3_backend::{Z3Config, Z3ContextManager, Z3Solver},
+    z3_backend::{Z3Config, Z3ContextManager},
 };
 
 use verum_ast::{
@@ -34,7 +34,6 @@ use verum_ast::{
     ty::Path,
 };
 
-use verum_common::{List, Map, Maybe};
 
 // ==================== Benchmark Infrastructure ====================
 
@@ -294,20 +293,18 @@ fn bench_trivial_queries(c: &mut Criterion) {
     // Simple bound: x > 0
     let simple_bound = binop(BinOp::Gt, var("x"), int_lit(0));
 
-    let queries = vec![
-        ("tautology", tautology),
+    let queries = [("tautology", tautology),
         ("contradiction", contradiction),
-        ("simple_bound", simple_bound),
-    ];
+        ("simple_bound", simple_bound)];
 
     for (name, expr) in queries.iter() {
-        group.bench_function(&format!("z3_{}", name), |b| {
+        group.bench_function(format!("z3_{}", name), |b| {
             b.iter(|| {
                 black_box(expr);
             });
         });
 
-        group.bench_function(&format!("cvc5_{}", name), |b| {
+        group.bench_function(format!("cvc5_{}", name), |b| {
             b.iter(|| {
                 black_box(expr);
             });
@@ -340,19 +337,17 @@ fn bench_moderate_queries(c: &mut Criterion) {
         binop(BinOp::And, binop(BinOp::And, c1, c2), c3)
     };
 
-    let queries = vec![
-        ("three_var_system", three_var_system),
-        ("nested_constraints", nested),
-    ];
+    let queries = [("three_var_system", three_var_system),
+        ("nested_constraints", nested)];
 
     for (name, expr) in queries.iter() {
-        group.bench_function(&format!("z3_{}", name), |b| {
+        group.bench_function(format!("z3_{}", name), |b| {
             b.iter(|| {
                 black_box(expr);
             });
         });
 
-        group.bench_function(&format!("cvc5_{}", name), |b| {
+        group.bench_function(format!("cvc5_{}", name), |b| {
             b.iter(|| {
                 black_box(expr);
             });
@@ -525,13 +520,13 @@ fn bench_regression_suite(c: &mut Criterion) {
     ];
 
     for (name, expr) in slow_queries.iter() {
-        group.bench_function(&format!("z3_{}", name), |b| {
+        group.bench_function(format!("z3_{}", name), |b| {
             b.iter(|| {
                 black_box(expr);
             });
         });
 
-        group.bench_function(&format!("cvc5_{}", name), |b| {
+        group.bench_function(format!("cvc5_{}", name), |b| {
             b.iter(|| {
                 black_box(expr);
             });

@@ -1169,15 +1169,13 @@ mod tests {
 
     #[test]
     fn test_roundtrip_keywords() {
-        let keywords = vec![
-            TokenKind::Let,
+        let keywords = [TokenKind::Let,
             TokenKind::Fn,
             TokenKind::Is,
             TokenKind::Type,
             TokenKind::If,
             TokenKind::Else,
-            TokenKind::Return,
-        ];
+            TokenKind::Return];
 
         let tokens: Vec<Token> = keywords
             .iter()
@@ -1199,15 +1197,13 @@ mod tests {
 
     #[test]
     fn test_roundtrip_operators() {
-        let operators = vec![
-            TokenKind::Plus,
+        let operators = [TokenKind::Plus,
             TokenKind::Minus,
             TokenKind::Star,
             TokenKind::Slash,
             TokenKind::EqEq,
             TokenKind::FatArrow,
-            TokenKind::RArrow,
-        ];
+            TokenKind::RArrow];
 
         let tokens: Vec<Token> = operators
             .iter()

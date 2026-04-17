@@ -21,10 +21,7 @@ fn parse_ok(name: &str, source: &str) {
 fn parse_fail(name: &str, source: &str) {
     let parser = FastParser::new();
     let file_id = FileId::new(0);
-    match parser.parse_module_str(source, file_id) {
-        Ok(_) => panic!("{name}: expected parse failure but succeeded"),
-        Err(_) => {}
-    }
+    if let Ok(_) = parser.parse_module_str(source, file_id) { panic!("{name}: expected parse failure but succeeded") }
 }
 
 // =============================================================================

@@ -5,7 +5,7 @@
 //!
 //! Run with: cargo run --example tensor_shape_demo
 
-use verum_common::{List, Maybe, Text};
+use verum_common::{List, Maybe};
 use verum_verification::tensor_shapes::*;
 
 fn main() {

@@ -8,11 +8,10 @@
 
 use verum_ast::span::Span;
 use verum_ast::ty::{Ident, Path};
-use verum_common::{List, Map, Maybe, Set, Text};
+use verum_common::{List, Map, Maybe, Set};
 
-use verum_types::TypeChecker;
-use verum_types::advanced_protocols::{SpecializationInfo, SpecializationLattice};
-use verum_types::protocol::{Protocol, ProtocolChecker, ProtocolImpl, ProtocolKind, TypeParam};
+use verum_types::advanced_protocols::SpecializationLattice;
+use verum_types::protocol::{Protocol, ProtocolChecker, ProtocolKind};
 use verum_types::specialization_selection::SpecializationSelector;
 use verum_types::ty::Type;
 use verum_types::unify::Unifier;
@@ -62,12 +61,12 @@ fn main() {
 /// }
 /// ```
 fn example_basic_specialization() {
-    let mut selector = SpecializationSelector::new();
-    let protocol_checker = ProtocolChecker::new();
-    let mut unifier = Unifier::new();
+    let _selector = SpecializationSelector::new();
+    let _protocol_checker = ProtocolChecker::new();
+    let _unifier = Unifier::new();
 
     // Create Display protocol
-    let display_protocol = Protocol {
+    let _display_protocol = Protocol {
         name: "Display".into(),
         kind: ProtocolKind::Constraint, // Constraint protocol, not injectable
         type_params: List::new(),
@@ -81,7 +80,7 @@ fn example_basic_specialization() {
     };
 
     // Create Int type
-    let int_type = Type::Named {
+    let _int_type = Type::Named {
         path: Path::single(Ident::new("Int", Span::default())),
         args: List::new(),
     };

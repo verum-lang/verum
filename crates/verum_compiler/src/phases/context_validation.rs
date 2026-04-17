@@ -1338,258 +1338,6 @@ impl Visitor for ContextUsageFinder {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_phase_creation() {
-        let phase = ContextValidationPhase::new();
-        assert_eq!(phase.name(), "Phase 4b: Context System Validation");
-        assert!(!phase.allow_undefined);
-    }
-
-    #[test]
-    fn test_phase_with_undefined_allowed() {
-        let phase = ContextValidationPhase::with_undefined_allowed();
-        assert!(phase.allow_undefined);
-    }
-
-    #[test]
-    fn test_context_usage_validator_creation() {
-        let mut declared = HashSet::new();
-        declared.insert("Logger".to_string());
-        declared.insert("Database".to_string());
-
-        let validator = ContextUsageValidator::new(
-            Text::from("test_func"),
-            declared.clone(),
-            HashSet::new(), // No excluded contexts
-            false,
-        );
-
-        assert_eq!(validator.function_name, "test_func");
-        assert_eq!(validator.declared_contexts.len(), 2);
-        assert!(validator.declared_contexts.contains("Logger"));
-        assert!(validator.declared_contexts.contains("Database"));
-        assert_eq!(validator.provided_contexts.len(), 1); // One initial scope
-        assert!(validator.errors.is_empty());
-    }
-
-    #[test]
-    fn test_context_validation_error_kinds() {
-        // Test different error kinds
-        let error1 = ContextValidationError {
-            message: "Test error".to_string(),
-            span: verum_ast::Span::default(),
-            kind: ContextErrorKind::UndeclaredContext,
-            context_name: "Logger".to_string(),
-        };
-
-        let error2 = ContextValidationError {
-            message: "Test error 2".to_string(),
-            span: verum_ast::Span::default(),
-            kind: ContextErrorKind::UnprovidedContext,
-            context_name: "Database".to_string(),
-        };
-
-        assert_eq!(error1.kind, ContextErrorKind::UndeclaredContext);
-        assert_eq!(error2.kind, ContextErrorKind::UnprovidedContext);
-        assert_ne!(error1.kind, error2.kind);
-    }
-
-    #[test]
-    fn test_scope_management() {
-        let mut declared = HashSet::new();
-        declared.insert("Logger".to_string());
-
-        let mut validator = ContextUsageValidator::new(
-            Text::from("test_func"),
-            declared,
-            HashSet::new(),
-            false,
-        );
-
-        // Initially one scope
-        assert_eq!(validator.provided_contexts.len(), 1);
-
-        // Enter new scope
-        validator.enter_scope();
-        assert_eq!(validator.provided_contexts.len(), 2);
-
-        // Add context to current scope
-        validator.add_provided_context("Logger".to_string());
-        assert!(validator.is_context_provided("Logger"));
-
-        // Exit scope
-        validator.exit_scope();
-        assert_eq!(validator.provided_contexts.len(), 1);
-
-        // Context should no longer be provided after exiting scope
-        assert!(!validator.is_context_provided("Logger"));
-    }
-
-    #[test]
-    fn test_context_provision_tracking() {
-        let mut declared = HashSet::new();
-        declared.insert("Logger".to_string());
-        declared.insert("Database".to_string());
-
-        let mut validator = ContextUsageValidator::new(
-            Text::from("test_func"),
-            declared,
-            HashSet::new(),
-            false,
-        );
-
-        // Initially no contexts provided
-        assert!(!validator.is_context_provided("Logger"));
-        assert!(!validator.is_context_provided("Database"));
-
-        // Provide Logger
-        validator.add_provided_context("Logger".to_string());
-        assert!(validator.is_context_provided("Logger"));
-        assert!(!validator.is_context_provided("Database"));
-
-        // Provide Database in nested scope
-        validator.enter_scope();
-        validator.add_provided_context("Database".to_string());
-        assert!(validator.is_context_provided("Logger")); // Still available from parent
-        assert!(validator.is_context_provided("Database"));
-
-        // Exit scope
-        validator.exit_scope();
-        assert!(validator.is_context_provided("Logger")); // Still available
-        assert!(!validator.is_context_provided("Database")); // Gone after scope exit
-    }
-
-    #[test]
-    fn test_undeclared_context_detection() {
-        let mut declared = HashSet::new();
-        declared.insert("Logger".to_string());
-
-        let mut validator = ContextUsageValidator::new(
-            Text::from("test_func"),
-            declared,
-            HashSet::new(),
-            false, // Don't allow undefined
-        );
-
-        // Check accessing undeclared context
-        validator.check_context_access("Database", verum_ast::Span::default());
-
-        // Should have one error
-        assert_eq!(validator.errors.len(), 1);
-        assert_eq!(
-            validator.errors[0].kind,
-            ContextErrorKind::UndeclaredContext
-        );
-        assert_eq!(validator.errors[0].context_name, "Database");
-    }
-
-    #[test]
-    fn test_unprovided_context_detection() {
-        let mut declared = HashSet::new();
-        declared.insert("Logger".to_string());
-
-        let mut validator = ContextUsageValidator::new(
-            Text::from("test_func"),
-            declared,
-            HashSet::new(),
-            false,
-        );
-
-        // Check accessing declared but unprovided context
-        validator.check_context_access("Logger", verum_ast::Span::default());
-
-        // Should have one error for unprovided context
-        assert_eq!(validator.errors.len(), 1);
-        assert_eq!(
-            validator.errors[0].kind,
-            ContextErrorKind::UnprovidedContext
-        );
-        assert_eq!(validator.errors[0].context_name, "Logger");
-    }
-
-    #[test]
-    fn test_allow_undefined_flag() {
-        let mut declared = HashSet::new();
-        declared.insert("Logger".to_string());
-
-        let mut validator = ContextUsageValidator::new(
-            Text::from("test_func"),
-            declared,
-            HashSet::new(),
-            true, // Allow undefined
-        );
-
-        // Check accessing undeclared context with allow_undefined=true
-        validator.check_context_access("Database", verum_ast::Span::default());
-
-        // Should still check if it's provided (since it's not declared, skip that check)
-        // But with allow_undefined, it should only check provision
-        assert_eq!(validator.errors.len(), 1);
-        assert_eq!(
-            validator.errors[0].kind,
-            ContextErrorKind::UnprovidedContext
-        );
-    }
-
-    #[test]
-    fn test_excluded_context_violation() {
-        let mut declared = HashSet::new();
-        declared.insert("Logger".to_string());
-
-        let mut excluded = HashSet::new();
-        excluded.insert("Database".to_string());
-
-        let mut validator = ContextUsageValidator::new(
-            Text::from("test_func"),
-            declared,
-            excluded,
-            false,
-        );
-
-        // Check accessing excluded context
-        validator.check_context_access("Database", verum_ast::Span::default());
-
-        // Should have one error for excluded context violation
-        assert_eq!(validator.errors.len(), 1);
-        assert_eq!(
-            validator.errors[0].kind,
-            ContextErrorKind::ExcludedContextViolation
-        );
-        assert_eq!(validator.errors[0].context_name, "Database");
-    }
-
-    #[test]
-    fn test_excluded_context_takes_priority() {
-        // Negative context check takes priority over positive context requirements.
-        let mut declared = HashSet::new();
-        declared.insert("Database".to_string()); // Also declared
-
-        let mut excluded = HashSet::new();
-        excluded.insert("Database".to_string()); // But excluded
-
-        let mut validator = ContextUsageValidator::new(
-            Text::from("test_func"),
-            declared,
-            excluded,
-            false,
-        );
-
-        // Check accessing context that is both declared and excluded
-        validator.check_context_access("Database", verum_ast::Span::default());
-
-        // Should have ExcludedContextViolation error (not UnprovidedContext)
-        assert_eq!(validator.errors.len(), 1);
-        assert_eq!(
-            validator.errors[0].kind,
-            ContextErrorKind::ExcludedContextViolation
-        );
-    }
-}
-
 // ============================================================================
 // Compile-Time Condition Evaluation
 // ============================================================================
@@ -1963,5 +1711,257 @@ impl Visitor for CalleeFinder {
             }
             _ => walk_expr(self, expr),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_phase_creation() {
+        let phase = ContextValidationPhase::new();
+        assert_eq!(phase.name(), "Phase 4b: Context System Validation");
+        assert!(!phase.allow_undefined);
+    }
+
+    #[test]
+    fn test_phase_with_undefined_allowed() {
+        let phase = ContextValidationPhase::with_undefined_allowed();
+        assert!(phase.allow_undefined);
+    }
+
+    #[test]
+    fn test_context_usage_validator_creation() {
+        let mut declared = HashSet::new();
+        declared.insert("Logger".to_string());
+        declared.insert("Database".to_string());
+
+        let validator = ContextUsageValidator::new(
+            Text::from("test_func"),
+            declared.clone(),
+            HashSet::new(), // No excluded contexts
+            false,
+        );
+
+        assert_eq!(validator.function_name, "test_func");
+        assert_eq!(validator.declared_contexts.len(), 2);
+        assert!(validator.declared_contexts.contains("Logger"));
+        assert!(validator.declared_contexts.contains("Database"));
+        assert_eq!(validator.provided_contexts.len(), 1); // One initial scope
+        assert!(validator.errors.is_empty());
+    }
+
+    #[test]
+    fn test_context_validation_error_kinds() {
+        // Test different error kinds
+        let error1 = ContextValidationError {
+            message: "Test error".to_string(),
+            span: verum_ast::Span::default(),
+            kind: ContextErrorKind::UndeclaredContext,
+            context_name: "Logger".to_string(),
+        };
+
+        let error2 = ContextValidationError {
+            message: "Test error 2".to_string(),
+            span: verum_ast::Span::default(),
+            kind: ContextErrorKind::UnprovidedContext,
+            context_name: "Database".to_string(),
+        };
+
+        assert_eq!(error1.kind, ContextErrorKind::UndeclaredContext);
+        assert_eq!(error2.kind, ContextErrorKind::UnprovidedContext);
+        assert_ne!(error1.kind, error2.kind);
+    }
+
+    #[test]
+    fn test_scope_management() {
+        let mut declared = HashSet::new();
+        declared.insert("Logger".to_string());
+
+        let mut validator = ContextUsageValidator::new(
+            Text::from("test_func"),
+            declared,
+            HashSet::new(),
+            false,
+        );
+
+        // Initially one scope
+        assert_eq!(validator.provided_contexts.len(), 1);
+
+        // Enter new scope
+        validator.enter_scope();
+        assert_eq!(validator.provided_contexts.len(), 2);
+
+        // Add context to current scope
+        validator.add_provided_context("Logger".to_string());
+        assert!(validator.is_context_provided("Logger"));
+
+        // Exit scope
+        validator.exit_scope();
+        assert_eq!(validator.provided_contexts.len(), 1);
+
+        // Context should no longer be provided after exiting scope
+        assert!(!validator.is_context_provided("Logger"));
+    }
+
+    #[test]
+    fn test_context_provision_tracking() {
+        let mut declared = HashSet::new();
+        declared.insert("Logger".to_string());
+        declared.insert("Database".to_string());
+
+        let mut validator = ContextUsageValidator::new(
+            Text::from("test_func"),
+            declared,
+            HashSet::new(),
+            false,
+        );
+
+        // Initially no contexts provided
+        assert!(!validator.is_context_provided("Logger"));
+        assert!(!validator.is_context_provided("Database"));
+
+        // Provide Logger
+        validator.add_provided_context("Logger".to_string());
+        assert!(validator.is_context_provided("Logger"));
+        assert!(!validator.is_context_provided("Database"));
+
+        // Provide Database in nested scope
+        validator.enter_scope();
+        validator.add_provided_context("Database".to_string());
+        assert!(validator.is_context_provided("Logger")); // Still available from parent
+        assert!(validator.is_context_provided("Database"));
+
+        // Exit scope
+        validator.exit_scope();
+        assert!(validator.is_context_provided("Logger")); // Still available
+        assert!(!validator.is_context_provided("Database")); // Gone after scope exit
+    }
+
+    #[test]
+    fn test_undeclared_context_detection() {
+        let mut declared = HashSet::new();
+        declared.insert("Logger".to_string());
+
+        let mut validator = ContextUsageValidator::new(
+            Text::from("test_func"),
+            declared,
+            HashSet::new(),
+            false, // Don't allow undefined
+        );
+
+        // Check accessing undeclared context
+        validator.check_context_access("Database", verum_ast::Span::default());
+
+        // Should have one error
+        assert_eq!(validator.errors.len(), 1);
+        assert_eq!(
+            validator.errors[0].kind,
+            ContextErrorKind::UndeclaredContext
+        );
+        assert_eq!(validator.errors[0].context_name, "Database");
+    }
+
+    #[test]
+    fn test_unprovided_context_detection() {
+        let mut declared = HashSet::new();
+        declared.insert("Logger".to_string());
+
+        let mut validator = ContextUsageValidator::new(
+            Text::from("test_func"),
+            declared,
+            HashSet::new(),
+            false,
+        );
+
+        // Check accessing declared but unprovided context
+        validator.check_context_access("Logger", verum_ast::Span::default());
+
+        // Should have one error for unprovided context
+        assert_eq!(validator.errors.len(), 1);
+        assert_eq!(
+            validator.errors[0].kind,
+            ContextErrorKind::UnprovidedContext
+        );
+        assert_eq!(validator.errors[0].context_name, "Logger");
+    }
+
+    #[test]
+    fn test_allow_undefined_flag() {
+        let mut declared = HashSet::new();
+        declared.insert("Logger".to_string());
+
+        let mut validator = ContextUsageValidator::new(
+            Text::from("test_func"),
+            declared,
+            HashSet::new(),
+            true, // Allow undefined
+        );
+
+        // Check accessing undeclared context with allow_undefined=true
+        validator.check_context_access("Database", verum_ast::Span::default());
+
+        // Should still check if it's provided (since it's not declared, skip that check)
+        // But with allow_undefined, it should only check provision
+        assert_eq!(validator.errors.len(), 1);
+        assert_eq!(
+            validator.errors[0].kind,
+            ContextErrorKind::UnprovidedContext
+        );
+    }
+
+    #[test]
+    fn test_excluded_context_violation() {
+        let mut declared = HashSet::new();
+        declared.insert("Logger".to_string());
+
+        let mut excluded = HashSet::new();
+        excluded.insert("Database".to_string());
+
+        let mut validator = ContextUsageValidator::new(
+            Text::from("test_func"),
+            declared,
+            excluded,
+            false,
+        );
+
+        // Check accessing excluded context
+        validator.check_context_access("Database", verum_ast::Span::default());
+
+        // Should have one error for excluded context violation
+        assert_eq!(validator.errors.len(), 1);
+        assert_eq!(
+            validator.errors[0].kind,
+            ContextErrorKind::ExcludedContextViolation
+        );
+        assert_eq!(validator.errors[0].context_name, "Database");
+    }
+
+    #[test]
+    fn test_excluded_context_takes_priority() {
+        // Negative context check takes priority over positive context requirements.
+        let mut declared = HashSet::new();
+        declared.insert("Database".to_string()); // Also declared
+
+        let mut excluded = HashSet::new();
+        excluded.insert("Database".to_string()); // But excluded
+
+        let mut validator = ContextUsageValidator::new(
+            Text::from("test_func"),
+            declared,
+            excluded,
+            false,
+        );
+
+        // Check accessing context that is both declared and excluded
+        validator.check_context_access("Database", verum_ast::Span::default());
+
+        // Should have ExcludedContextViolation error (not UnprovidedContext)
+        assert_eq!(validator.errors.len(), 1);
+        assert_eq!(
+            validator.errors[0].kind,
+            ContextErrorKind::ExcludedContextViolation
+        );
     }
 }

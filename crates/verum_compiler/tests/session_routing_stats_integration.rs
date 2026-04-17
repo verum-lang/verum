@@ -211,7 +211,7 @@ fn context_without_stats_records_nothing() {
     // Plain Context — no stats installed.
     let ctx = Context::new();
     let solver = ctx.solver();
-    solver.assert(&verum_smt::z3::ast::Bool::from_bool(true));
+    solver.assert(verum_smt::z3::ast::Bool::from_bool(true));
     let _ = ctx.check(&solver);
 
     // The session's collector must still be empty.

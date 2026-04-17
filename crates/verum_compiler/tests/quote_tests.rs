@@ -208,7 +208,7 @@ fn test_parse_complex_arithmetic() {
             assert!(matches!(op, BinOp::Add));
 
             // Left should be 1
-            if let ExprKind::Literal(lit) = &left.kind { if let verum_ast::LiteralKind::Int(i) = &lit.kind { assert_eq!(i.value, 1) } }
+            if let ExprKind::Literal(lit) = &left.kind && let verum_ast::LiteralKind::Int(i) = &lit.kind { assert_eq!(i.value, 1) }
 
             // Right should be 2 * 3
             if let ExprKind::Binary { op, .. } = &right.kind {

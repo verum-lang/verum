@@ -43,10 +43,7 @@ fn make_impl(protocol: &str, for_type: Type, impl_crate: Option<&str>) -> Protoc
         associated_consts: Map::new(),
         specialization: Maybe::None,
         span: Span::default(),
-        impl_crate: match impl_crate {
-            Some(s) => Maybe::Some(s.into()),
-            None => Maybe::None,
-        },
+        impl_crate: impl_crate.map(|s| s.into()),
         type_param_fn_bounds: Map::new(),
     }
 }

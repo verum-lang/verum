@@ -81,11 +81,10 @@ fn parse_ok(source: &str) {
 
 fn find_main(module: &VbcModule) -> Result<FunctionId, String> {
     for (idx, func_desc) in module.functions.iter().enumerate() {
-        if let Some(name) = module.get_string(func_desc.name) {
-            if name == "main" {
+        if let Some(name) = module.get_string(func_desc.name)
+            && name == "main" {
                 return Ok(FunctionId(idx as u32));
             }
-        }
     }
     Err("No main function found in VBC module".to_string())
 }

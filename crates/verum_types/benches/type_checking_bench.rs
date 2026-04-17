@@ -99,7 +99,7 @@ fn bench_wide_expressions(c: &mut Criterion) {
     let mut group = c.benchmark_group("wide_expressions");
 
     for width in [10, 50, 100, 200].iter() {
-        let elements: Vec<Expr> = (0..*width).map(|i| make_int_literal(i)).collect();
+        let elements: Vec<Expr> = (0..*width).map(make_int_literal).collect();
 
         let expr = Expr::new(
             ExprKind::Tuple(elements.into()),

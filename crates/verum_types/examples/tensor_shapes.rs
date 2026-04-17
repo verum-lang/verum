@@ -26,7 +26,7 @@ use verum_ast::{
     span::Span,
     ty::Path,
 };
-use verum_common::{ConstValue, Heap, List, Map};
+use verum_common::{ConstValue, List};
 use verum_types::{
     Type, TypeChecker,
     const_eval::ConstEvaluator,
@@ -183,7 +183,7 @@ fn example_tensor_arithmetic() {
     println!("Meta parameters: N = 10, M = 20");
 
     // Compute: N + M
-    use verum_ast::ty::PathSegment;
+    
     let n_path = Path::single(Ident::new("N".to_string(), Span::dummy()));
     let m_path = Path::single(Ident::new("M".to_string(), Span::dummy()));
 

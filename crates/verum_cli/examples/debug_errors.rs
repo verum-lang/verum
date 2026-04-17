@@ -21,7 +21,7 @@ fn main() {
                 // Show context
                 let start = error.span.start as usize;
                 let end = error.span.end as usize;
-                let context_start = if start > 20 { start - 20 } else { 0 };
+                let context_start = start.saturating_sub(20);
                 let context_end = if end + 20 < source.len() {
                     end + 20
                 } else {

@@ -157,11 +157,10 @@ fn test_count_stdlib_body_errors() {
                     eprintln!("  {}", detail);
                 }
                 // Print summary line (always last)
-                if let Some(summary) = details.last() {
-                    if summary.starts_with("[SUMMARY]") {
+                if let Some(summary) = details.last()
+                    && summary.starts_with("[SUMMARY]") {
                         eprintln!("  {}", summary);
                     }
-                }
             }
             eprintln!("=====================================");
         })

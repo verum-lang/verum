@@ -10,7 +10,7 @@
 //! generated code does not collide with user-defined names at expansion sites.
 
 use verum_ast::{Literal, Span};
-use verum_common::{List, Maybe, Text};
+use verum_common::{Maybe, Text};
 use verum_compiler::hygiene::{
     BindingInfo, BindingKind, CheckResult, CheckerConfig, ExpansionConfig,
     HygieneChecker, HygieneContext, HygieneViolation, HygienicIdent, Mark, MarkSet,
@@ -464,13 +464,12 @@ fn test_nested_group_mark_propagation() {
     outer_stream.apply_mark(mark);
 
     // Mark should propagate to inner group
-    if let Some(token) = outer_stream.iter().next() {
-        if let TokenKind::Group(ref inner) = token.kind {
+    if let Some(token) = outer_stream.iter().next()
+        && let TokenKind::Group(ref inner) = token.kind {
             for inner_token in inner.iter() {
                 assert!(inner_token.marks.contains(&mark));
             }
         }
-    }
 }
 
 // ============================================================================

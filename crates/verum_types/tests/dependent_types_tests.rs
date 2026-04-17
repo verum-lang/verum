@@ -914,14 +914,13 @@ fn test_eq_term_j_substitution() {
     let replacement = EqTerm::Const(EqConst::Int(7));
     let result = motive.apply(&replacement);
 
-    if let Type::Eq { lhs, rhs, .. } = &result {
-        if let EqTerm::J { proof, motive: m, base } = lhs.as_ref() {
+    if let Type::Eq { lhs, rhs, .. } = &result
+        && let EqTerm::J { proof, motive: m, base } = lhs.as_ref() {
             assert!(matches!(**proof, EqTerm::Const(EqConst::Int(7))));
             // m should be unchanged (different variable)
             assert!(matches!(**m, EqTerm::Var(_)));
             assert!(matches!(**base, EqTerm::Const(EqConst::Int(7))));
         }
-    }
 }
 
 #[test]

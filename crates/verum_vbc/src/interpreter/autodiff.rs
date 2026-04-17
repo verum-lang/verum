@@ -3442,7 +3442,7 @@ mod tests {
         let rule4 = registry.register_jvp(4, 40, None);
 
         // All rule IDs should be unique
-        let ids = vec![rule1, rule2, rule3, rule4];
+        let ids = [rule1, rule2, rule3, rule4];
         let unique: std::collections::HashSet<_> = ids.iter().collect();
         assert_eq!(ids.len(), unique.len());
     }

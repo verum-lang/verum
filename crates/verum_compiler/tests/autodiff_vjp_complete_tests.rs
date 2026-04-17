@@ -141,7 +141,7 @@ fn create_test_module(functions: Vec<FunctionDecl>) -> Module {
         .collect();
 
     Module {
-        items: items,
+        items,
         attributes: List::new(),
         file_id: FileId::dummy(),
         span,

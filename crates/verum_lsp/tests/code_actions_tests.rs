@@ -535,7 +535,7 @@ fn test_code_actions_with_multiple_diagnostics() {
 
     let actions = code_actions(&doc, range, context, &uri);
     // Should have actions for both diagnostics
-    assert!(actions.len() >= 1, "Should have at least one action for multiple diagnostics");
+    assert!(!actions.is_empty(), "Should have at least one action for multiple diagnostics");
 }
 
 // ============================================================================

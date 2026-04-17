@@ -327,7 +327,7 @@ fn dap_socket_without_port_but_toml_has_it_succeeds_in_parse() {
     // Give it a short timeout so we don't actually hold a server.
     // The important assertion is that the "no port" error doesn't appear.
     let mut cmd = std::process::Command::new(env!("CARGO_BIN_EXE_verum"));
-    cmd.args(&["dap", "--transport", "socket"]);
+    cmd.args(["dap", "--transport", "socket"]);
     cmd.current_dir(&dir);
     cmd.stdin(std::process::Stdio::null());
     let child = cmd.spawn().expect("spawn");

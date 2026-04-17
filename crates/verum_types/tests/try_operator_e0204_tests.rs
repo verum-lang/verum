@@ -116,11 +116,11 @@ fn test_e0204_direct_vs_indirect_path() {
 
     // Register From implementations with the protocol checker
     // Direct path: ErrorA -> AppError
-    register_from_impl(&mut *checker.protocol_checker.write(), &error_a, app_error.clone());
+    register_from_impl(&mut checker.protocol_checker.write(), &error_a, app_error.clone());
 
     // Indirect path: ErrorA -> ErrorB -> AppError
-    register_from_impl(&mut *checker.protocol_checker.write(), &error_a, error_b.clone());
-    register_from_impl(&mut *checker.protocol_checker.write(), &error_b, app_error.clone());
+    register_from_impl(&mut checker.protocol_checker.write(), &error_a, error_b.clone());
+    register_from_impl(&mut checker.protocol_checker.write(), &error_b, app_error.clone());
 
     // Test the path detection
     let paths = checker.find_all_conversion_paths(&error_a, &app_error);
@@ -154,12 +154,12 @@ fn test_e0204_multiple_indirect_paths() {
 
     // Register the From implementations via protocol checker
     // Path 1: ErrorA -> ErrorB1 -> AppError
-    register_from_impl(&mut *checker.protocol_checker.write(), &error_a, error_b1.clone());
-    register_from_impl(&mut *checker.protocol_checker.write(), &error_b1, app_error.clone());
+    register_from_impl(&mut checker.protocol_checker.write(), &error_a, error_b1.clone());
+    register_from_impl(&mut checker.protocol_checker.write(), &error_b1, app_error.clone());
 
     // Path 2: ErrorA -> ErrorB2 -> AppError
-    register_from_impl(&mut *checker.protocol_checker.write(), &error_a, error_b2.clone());
-    register_from_impl(&mut *checker.protocol_checker.write(), &error_b2, app_error.clone());
+    register_from_impl(&mut checker.protocol_checker.write(), &error_a, error_b2.clone());
+    register_from_impl(&mut checker.protocol_checker.write(), &error_b2, app_error.clone());
 
     // Test that path detection handles multiple intermediate types
     let paths = checker.find_all_conversion_paths(&error_a, &app_error);
@@ -186,7 +186,7 @@ fn test_e0204_no_ambiguity_single_path() {
     let app_error = named_type("AppError");
 
     // Register only one From implementation
-    register_from_impl(&mut *checker.protocol_checker.write(), &error_a, app_error.clone());
+    register_from_impl(&mut checker.protocol_checker.write(), &error_a, app_error.clone());
 
     // Check for ambiguous conversions
     let result = checker.check_for_ambiguous_conversions(&error_a, &app_error, test_span(1, 1));
@@ -221,15 +221,15 @@ fn test_e0204_three_way_ambiguity() {
 
     // Register three conversion paths via protocol checker
     // Path 1: ErrorA -> AppError (direct)
-    register_from_impl(&mut *checker.protocol_checker.write(), &error_a, app_error.clone());
+    register_from_impl(&mut checker.protocol_checker.write(), &error_a, app_error.clone());
 
     // Path 2: ErrorA -> ErrorB -> AppError
-    register_from_impl(&mut *checker.protocol_checker.write(), &error_a, error_b.clone());
-    register_from_impl(&mut *checker.protocol_checker.write(), &error_b, app_error.clone());
+    register_from_impl(&mut checker.protocol_checker.write(), &error_a, error_b.clone());
+    register_from_impl(&mut checker.protocol_checker.write(), &error_b, app_error.clone());
 
     // Path 3: ErrorA -> ErrorC -> AppError
-    register_from_impl(&mut *checker.protocol_checker.write(), &error_a, error_c.clone());
-    register_from_impl(&mut *checker.protocol_checker.write(), &error_c, app_error.clone());
+    register_from_impl(&mut checker.protocol_checker.write(), &error_a, error_c.clone());
+    register_from_impl(&mut checker.protocol_checker.write(), &error_c, app_error.clone());
 
     let paths = checker.find_all_conversion_paths(&error_a, &app_error);
 
@@ -260,10 +260,10 @@ fn test_e0204_cycle_detection() {
     let app_error = named_type("AppError");
 
     // Register cycle and valid path via protocol checker
-    register_from_impl(&mut *checker.protocol_checker.write(), &error_a, error_b.clone());
-    register_from_impl(&mut *checker.protocol_checker.write(), &error_b, error_c.clone());
-    register_from_impl(&mut *checker.protocol_checker.write(), &error_c, error_a.clone()); // Cycle!
-    register_from_impl(&mut *checker.protocol_checker.write(), &error_c, app_error.clone()); // Valid path
+    register_from_impl(&mut checker.protocol_checker.write(), &error_a, error_b.clone());
+    register_from_impl(&mut checker.protocol_checker.write(), &error_b, error_c.clone());
+    register_from_impl(&mut checker.protocol_checker.write(), &error_c, error_a.clone()); // Cycle!
+    register_from_impl(&mut checker.protocol_checker.write(), &error_c, app_error.clone()); // Valid path
 
     // This should not hang or panic due to cycle
     let paths = checker.find_all_conversion_paths(&error_a, &app_error);
@@ -300,12 +300,12 @@ fn test_e0204_max_depth_limit() {
     let app_error = named_type("AppError");
 
     // Register a long conversion chain via protocol checker
-    register_from_impl(&mut *checker.protocol_checker.write(), &e1, e2.clone());
-    register_from_impl(&mut *checker.protocol_checker.write(), &e2, e3.clone());
-    register_from_impl(&mut *checker.protocol_checker.write(), &e3, e4.clone());
-    register_from_impl(&mut *checker.protocol_checker.write(), &e4, e5.clone());
-    register_from_impl(&mut *checker.protocol_checker.write(), &e5, e6.clone());
-    register_from_impl(&mut *checker.protocol_checker.write(), &e6, app_error.clone());
+    register_from_impl(&mut checker.protocol_checker.write(), &e1, e2.clone());
+    register_from_impl(&mut checker.protocol_checker.write(), &e2, e3.clone());
+    register_from_impl(&mut checker.protocol_checker.write(), &e3, e4.clone());
+    register_from_impl(&mut checker.protocol_checker.write(), &e4, e5.clone());
+    register_from_impl(&mut checker.protocol_checker.write(), &e5, e6.clone());
+    register_from_impl(&mut checker.protocol_checker.write(), &e6, app_error.clone());
 
     let paths = checker.find_all_conversion_paths(&e1, &app_error);
 
@@ -347,12 +347,12 @@ fn test_e0204_diamond_pattern() {
 
     // Register diamond pattern via protocol checker
     // Path 1: ErrorA -> ErrorB -> AppError
-    register_from_impl(&mut *checker.protocol_checker.write(), &error_a, error_b.clone());
-    register_from_impl(&mut *checker.protocol_checker.write(), &error_b, app_error.clone());
+    register_from_impl(&mut checker.protocol_checker.write(), &error_a, error_b.clone());
+    register_from_impl(&mut checker.protocol_checker.write(), &error_b, app_error.clone());
 
     // Path 2: ErrorA -> ErrorC -> AppError
-    register_from_impl(&mut *checker.protocol_checker.write(), &error_a, error_c.clone());
-    register_from_impl(&mut *checker.protocol_checker.write(), &error_c, app_error.clone());
+    register_from_impl(&mut checker.protocol_checker.write(), &error_a, error_c.clone());
+    register_from_impl(&mut checker.protocol_checker.write(), &error_c, app_error.clone());
 
     let paths = checker.find_all_conversion_paths(&error_a, &app_error);
 

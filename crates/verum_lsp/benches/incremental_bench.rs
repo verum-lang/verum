@@ -260,7 +260,7 @@ fn bench_position_to_offset(c: &mut Criterion) {
     for size in [100, 1000, 10000].iter() {
         group.bench_with_input(BenchmarkId::from_parameter(size), size, |b, &size| {
             let source = generate_source(size);
-            let doc = ParsedDocument::new(source, 1, FileId::new(1));
+            let _doc = ParsedDocument::new(source, 1, FileId::new(1));
 
             b.iter(|| {
                 let pos = Position {

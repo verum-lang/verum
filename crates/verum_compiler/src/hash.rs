@@ -1244,7 +1244,7 @@ mod tests {
 
     #[test]
     fn test_hash_multiple() {
-        let items = vec!["hello", "world"];
+        let items = ["hello", "world"];
         let hash = hash_multiple(items.iter().map(|s| s.as_bytes()));
         assert!(!hash.is_zero());
     }

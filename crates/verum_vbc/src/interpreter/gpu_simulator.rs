@@ -473,7 +473,7 @@ mod tests {
         assert_eq!(ctx.threads_per_block(), 32);
         assert_eq!(ctx.total_blocks(), 16);
         assert_eq!(ctx.warp_id(), 21 / 32); // 0
-        assert_eq!(ctx.lane_id(), 21 % 32); // 21
+        assert_eq!(ctx.lane_id(), 21); // 21
     }
 
     #[test]

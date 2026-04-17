@@ -344,7 +344,7 @@ fn bench_complex_expressions(c: &mut Criterion) {
     });
 
     // Wide expression (large tuple)
-    let wide_expr = make_tuple((0..200).map(|i| make_int_literal(i)).collect());
+    let wide_expr = make_tuple((0..200).map(make_int_literal).collect());
 
     group.bench_function("wide_tuple_200", |b| {
         b.iter(|| {
@@ -490,7 +490,7 @@ fn bench_worst_case(c: &mut Criterion) {
     });
 
     // Extremely wide tuple (stress test)
-    let extreme_wide = make_tuple((0..1000).map(|i| make_int_literal(i)).collect());
+    let extreme_wide = make_tuple((0..1000).map(make_int_literal).collect());
 
     group.bench_function("extreme_wide_1000", |b| {
         b.iter(|| {
