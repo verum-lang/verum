@@ -12178,12 +12178,15 @@ fn lower_cbgr_extended<'ctx>(
             if operands.len() < 2 { return Ok(()); }
             let dst = operands[0] as u16;
             let ptr = ctx.get_register(operands[1] as u16)?;
-            // Read generation from allocation header (32 bytes before user pointer)
+            // Read generation from allocation header (32 bytes before user pointer).
+            // Register may hold a raw i64 NaN-boxed pointer encoding in addition
+            // to an LLVM PointerValue, so route via `as_ptr` (see commit 04de418).
+            let ptr_as_pv = as_ptr(ctx, ptr, "getgen_ptr")?;
             let header_offset = ctx.types().i64_type().const_int(32u64.wrapping_neg(), true);
             let header_ptr = ctx.builder()
                 .build_int_to_ptr(
                     ctx.builder().build_int_add(
-                        ctx.builder().build_ptr_to_int(ptr.into_pointer_value(), ctx.types().i64_type(), "ptr_int")
+                        ctx.builder().build_ptr_to_int(ptr_as_pv, ctx.types().i64_type(), "ptr_int")
                             .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?,
                         header_offset,
                         "header_off"
@@ -12332,8 +12335,9 @@ fn lower_cbgr_extended<'ctx>(
             let field_offset = operands[2] as u64;
             let i64_ty = ctx.types().i64_type();
             let ptr_ty = ctx.types().ptr_type();
+            let base_pv = as_ptr(ctx, base, "ref_interior_base")?;
             let base_int = ctx.builder()
-                .build_ptr_to_int(base.into_pointer_value(), i64_ty, "base_int")
+                .build_ptr_to_int(base_pv, i64_ty, "base_int")
                 .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
             let new_ptr = ctx.builder()
                 .build_int_add(base_int, i64_ty.const_int(field_offset * 8, false), "field_ptr")
@@ -12354,8 +12358,9 @@ fn lower_cbgr_extended<'ctx>(
             let offset = ctx.builder()
                 .build_int_mul(index.into_int_value(), i64_ty.const_int(8, false), "elem_off")
                 .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+            let base_pv = as_ptr(ctx, base, "ref_elem_base")?;
             let base_int = ctx.builder()
-                .build_ptr_to_int(base.into_pointer_value(), i64_ty, "base_int")
+                .build_ptr_to_int(base_pv, i64_ty, "base_int")
                 .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
             let elem_int = ctx.builder()
                 .build_int_add(base_int, offset, "elem_int")
@@ -12658,8 +12663,9 @@ fn lower_cbgr_extended<'ctx>(
                 module.add_function("verum_cbgr_allocate", fn_ty, None)
             });
             let fat = checked_malloc_instr(ctx, module, i64_ty.const_int(16, false), "fat_ref")?;
+            let src_pv = as_ptr(ctx, src, "thin_to_fat_src")?;
             let ptr_as_int = ctx.builder()
-                .build_ptr_to_int(src.into_pointer_value(), i64_ty, "ptr_int")
+                .build_ptr_to_int(src_pv, i64_ty, "ptr_int")
                 .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
             ctx.builder().build_store(fat, ptr_as_int)
                 .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
@@ -12679,8 +12685,9 @@ fn lower_cbgr_extended<'ctx>(
             let fat = ctx.get_register(operands[1] as u16)?;
             let i64_ty = ctx.types().i64_type();
             let ptr_ty = ctx.types().ptr_type();
+            let fat_pv = as_ptr(ctx, fat, "fat_to_thin_fat")?;
             let ptr_int = ctx.builder()
-                .build_load(i64_ty, fat.into_pointer_value(), "ptr_int")
+                .build_load(i64_ty, fat_pv, "ptr_int")
                 .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
             let thin = ctx.builder()
                 .build_int_to_ptr(ptr_int.into_int_value(), ptr_ty, "thin_ref")
