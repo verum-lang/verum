@@ -1183,6 +1183,50 @@ fn try_dispatch_intrinsic_by_name(
             Ok(Some(Value::from_i64(0)))
         }
 
+        // mmap-shaped allocation for the stdlib CBGR page allocator
+        // (`core/mem/allocator.rs::os_mmap` → FFI `mmap`). In the Tier 0
+        // interpreter we don't go through libffi/dlopen; route straight
+        // to host allocation instead so `Shared::new`, `Map`, `List`
+        // allocations work without requiring FFI.
+        //
+        // Semantics we implement:
+        //   mmap(addr=0, len, PROT_READ|PROT_WRITE, MAP_PRIVATE|MAP_ANON,
+        //        fd=-1, off=0)  returns  ptr   (NOT -1/MAP_FAILED).
+        //   mmap with fd != -1 or unexpected flags is passed through as -1
+        //   (mapped-file case is out of scope for the interpreter — the
+        //    AOT path owns that).
+        "mmap" | "mmap_ffi" => {
+            let fd = get_i64_arg(state, 4);
+            let len = get_i64_arg(state, 1) as usize;
+            if fd != -1 || len == 0 {
+                return Ok(Some(Value::from_i64(-1)));
+            }
+            let layout = std::alloc::Layout::from_size_align(len.max(8), 16)
+                .unwrap_or(std::alloc::Layout::new::<u64>());
+            let ptr = unsafe { std::alloc::alloc_zeroed(layout) };
+            if ptr.is_null() {
+                Ok(Some(Value::from_i64(-1)))
+            } else {
+                Ok(Some(Value::from_i64(ptr as i64)))
+            }
+        }
+
+        // munmap: best-effort release. The interpreter doesn't track page
+        // lifetimes (Shared/Heap refcounts are the stdlib's job); deallocating
+        // here risks double-free when objects escape their original page.
+        // Return 0 ("success") without freeing, matching the __dealloc_raw
+        // semantics.
+        "munmap" => Ok(Some(Value::from_i64(0))),
+
+        // Memory-protection and advice syscalls: in the interpreter all
+        // pages are host-allocated rwx by default, so these are no-ops
+        // that must return 0 so the stdlib doesn't error.
+        "mprotect" | "madvise" | "mlock" | "munlock" | "msync"
+            | "madvise_willneed" | "madvise_dontneed" | "madvise_free"
+            | "madvise_free_reusable" | "madvise_free_reuse" => {
+            Ok(Some(Value::from_i64(0)))
+        }
+
         // --- Process Management ---
         "__process_spawn_raw" | "__process_exec_raw" => {
             Ok(Some(Value::from_i64(-1)))  // not available

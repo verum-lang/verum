@@ -4397,6 +4397,30 @@ pub enum FfiSubOpcode {
     /// Format: `dst:reg, deadline:reg`
     /// Returns: Result variant (Ok=unit, Err=KernReturn as Int).
     MachSleepUntil = 0x98,
+
+    // ========================================================================
+    // CBGR Memory Operations (0xA0-0xAF) — tracked allocation/deallocation
+    // with generation-and-epoch metadata. Distinct from the raw C allocator
+    // at 0x40-0x42: these return a Result tuple `(ptr, generation, epoch)`
+    // and register the allocation in the CBGR validation table.
+    // ========================================================================
+    /// Allocate memory with CBGR tracking.
+    ///
+    /// Format: `dst:reg, size:reg, align:reg`
+    /// Returns: Result tuple `(ptr, generation, epoch)` or AllocError.
+    CbgrAlloc = 0xA0,
+
+    /// Allocate zeroed memory with CBGR tracking.
+    ///
+    /// Format: `dst:reg, size:reg, align:reg`
+    /// Returns: Result tuple `(ptr, generation, epoch)` or AllocError.
+    CbgrAllocZeroed = 0xA1,
+
+    /// Deallocate memory previously allocated via `CbgrAlloc`.
+    ///
+    /// Format: `dst:reg, ptr:reg, size:reg, align:reg`
+    /// Returns: Result unit or AllocError.
+    CbgrDealloc = 0xA2,
 }
 
 impl FfiSubOpcode {
@@ -4481,6 +4505,10 @@ impl FfiSubOpcode {
             0x96 => Some(Self::MachSemWait),
             0x97 => Some(Self::MachErrorString),
             0x98 => Some(Self::MachSleepUntil),
+            // CBGR Memory Operations
+            0xA0 => Some(Self::CbgrAlloc),
+            0xA1 => Some(Self::CbgrAllocZeroed),
+            0xA2 => Some(Self::CbgrDealloc),
             _ => None,
         }
     }
@@ -4561,6 +4589,9 @@ impl FfiSubOpcode {
             Self::MachSemWait => "MACH_SEM_WAIT",
             Self::MachErrorString => "MACH_ERROR_STRING",
             Self::MachSleepUntil => "MACH_SLEEP_UNTIL",
+            Self::CbgrAlloc => "CBGR_ALLOC",
+            Self::CbgrAllocZeroed => "CBGR_ALLOC_ZEROED",
+            Self::CbgrDealloc => "CBGR_DEALLOC",
         }
     }
 

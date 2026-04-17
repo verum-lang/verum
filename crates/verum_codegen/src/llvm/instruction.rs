@@ -15620,6 +15620,63 @@ fn lower_ffi_extended<'ctx>(
             Ok(())
         }
 
+        // CBGR Memory Operations (0xA0-0xA2) — tracked allocation for
+        // Shared<T>, Heap<T>, List/Map internals. In AOT we route to the
+        // C runtime's `verum_cbgr_allocate` / `verum_cbgr_deallocate`
+        // helpers which own the actual page/slot machinery; this mirrors
+        // how the slice ops at 0x06-0x09 call `verum_cbgr_allocate`.
+        Some(FfiSubOpcode::CbgrAlloc) | Some(FfiSubOpcode::CbgrAllocZeroed) => {
+            if operands.len() < 3 { return Ok(()); }
+            let dst = operands[0] as u16;
+            let size_reg = operands[1] as u16;
+            let _align_reg = operands[2] as u16;
+            let i64_ty = ctx.types().i64_type();
+            let ptr_ty = ctx.types().ptr_type();
+            let module = ctx.get_module();
+            let alloc_name = if matches!(sub_opcode, Some(FfiSubOpcode::CbgrAllocZeroed)) {
+                "verum_cbgr_allocate_zeroed"
+            } else {
+                "verum_cbgr_allocate"
+            };
+            let size_val = as_i64(ctx, ctx.get_register(size_reg)?, "cbgr_alloc_size")?;
+            let alloc_fn = module.get_function(alloc_name).unwrap_or_else(|| {
+                let fn_ty = ptr_ty.fn_type(&[i64_ty.into()], false);
+                module.add_function(alloc_name, fn_ty, None)
+            });
+            let ptr = ctx.builder()
+                .build_call(alloc_fn, &[size_val.into()], "cbgr_alloc_ptr")
+                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                .try_as_basic_value()
+                .basic()
+                .ok_or_else(|| LlvmLoweringError::internal("cbgr_alloc returned no value"))?;
+            // Return the pointer in dst. User Verum code expects a Result
+            // tuple `(ptr, gen, epoch)`, but the AOT path currently does
+            // not materialise the tuple — the stdlib allocator wrapper
+            // handles the packaging on top. For now the raw pointer
+            // suffices for the slice/fat-ref code paths that reach here.
+            ctx.set_register(dst, ptr);
+            Ok(())
+        }
+        Some(FfiSubOpcode::CbgrDealloc) => {
+            if operands.len() < 4 { return Ok(()); }
+            let _dst = operands[0] as u16;
+            let ptr_reg = operands[1] as u16;
+            let module = ctx.get_module();
+            let i64_ty = ctx.types().i64_type();
+            let ptr_ty = ctx.types().ptr_type();
+            let dealloc_fn = module.get_function("verum_cbgr_deallocate").unwrap_or_else(|| {
+                let fn_ty = ctx.types().void_type().fn_type(&[ptr_ty.into()], false);
+                module.add_function("verum_cbgr_deallocate", fn_ty, None)
+            });
+            let raw = ctx.get_register(ptr_reg)?;
+            let ptr_val = as_ptr(ctx, raw, "cbgr_dealloc_ptr")?;
+            ctx.builder()
+                .build_call(dealloc_fn, &[ptr_val.into()], "")
+                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+            let _ = i64_ty;
+            Ok(())
+        }
+
         None => Err(LlvmLoweringError::internal(format!(
             "Unknown FFI sub-opcode: 0x{:02X}",
             sub_op

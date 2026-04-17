@@ -2234,6 +2234,89 @@ pub(in super::super) fn handle_ffi_extended(state: &mut InterpreterState) -> Int
             Ok(DispatchResult::Continue)
         }
 
+        // =================================================================
+        // CBGR Memory Operations (0xA0-0xA2) — tracked allocation for
+        // Shared<T>, Heap<T>, List/Map internals, and any code path that
+        // calls the stdlib `cbgr_alloc(size, align)` / `cbgr_dealloc`.
+        //
+        // In the Tier 0 interpreter we bypass the stdlib allocator
+        // (allocator.vr -> os_mmap -> FFI mmap) entirely and allocate
+        // through Rust's std allocator, then register the allocation in
+        // `state.cbgr_allocations` so that subsequent CBGR validation
+        // ops (ChkRef, GetGeneration, etc.) see a live allocation.
+        //
+        // The result is a tuple `(ptr, generation, epoch)` matching the
+        // shape of `AllocResult` in `core/mem/allocator.vr`. We package it
+        // as a heap-allocated tuple object so pattern-matching
+        // `Ok((ptr, gen, epoch))` continues to work unchanged in user
+        // code.
+        // =================================================================
+        Some(FfiSubOpcode::CbgrAlloc) | Some(FfiSubOpcode::CbgrAllocZeroed) => {
+            let zeroed = matches!(sub_op, Some(FfiSubOpcode::CbgrAllocZeroed));
+            let dst = read_reg(state)?;
+            let size_reg = read_reg(state)?;
+            let align_reg = read_reg(state)?;
+            let size = state.get_reg(size_reg).as_integer_compatible() as usize;
+            let align = state.get_reg(align_reg).as_integer_compatible() as usize;
+            let align = align.max(8);
+            let layout = match std::alloc::Layout::from_size_align(size.max(8), align.next_power_of_two()) {
+                Ok(l) => l,
+                Err(_) => std::alloc::Layout::from_size_align(size.max(8), 8).unwrap(),
+            };
+            // SAFETY: layout has non-zero size and valid alignment by
+            // construction. The allocator contract requires matching the
+            // layout on dealloc; callers are expected to route through
+            // CbgrDealloc (which currently leaks — see below).
+            let ptr = unsafe {
+                if zeroed { std::alloc::alloc_zeroed(layout) } else { std::alloc::alloc(layout) }
+            };
+            if ptr.is_null() {
+                // Model `AllocError::OutOfMemory` as returning a nil Value
+                // so pattern-match `Err(e) => ...` fires. The tuple shape
+                // matching below is only materialised on success.
+                state.set_reg(dst, Value::nil());
+                return Ok(DispatchResult::Continue);
+            }
+            // Track so CBGR validation ops see the allocation.
+            state.cbgr_allocations.insert(ptr as usize);
+            // Build (ptr, generation, epoch) tuple. Fresh generation = 1
+            // (0 is reserved "unallocated" in CBGR conventions), fresh
+            // epoch = current interpreter epoch counter.
+            let generation = 1i64;
+            let epoch = state.cbgr_epoch as i64;
+            // Materialise as a 3-tuple heap object matching `Pack` layout
+            // so tuple-pattern destructuring `let (ptr, g, e) = ...`
+            // reads each field at its expected offset. Mirrors the code
+            // in pattern_matching::handle_pack.
+            let data_size = 3 * std::mem::size_of::<Value>();
+            let obj = state.heap.alloc_with_init(
+                crate::types::TypeId::TUPLE,
+                data_size,
+                |_data| {},
+            )?;
+            let data_ptr = obj.data_ptr() as *mut Value;
+            unsafe {
+                std::ptr::write(data_ptr.add(0), Value::from_i64(ptr as i64));
+                std::ptr::write(data_ptr.add(1), Value::from_i64(generation));
+                std::ptr::write(data_ptr.add(2), Value::from_i64(epoch));
+            }
+            state.set_reg(dst, Value::from_ptr(obj.as_ptr()));
+            Ok(DispatchResult::Continue)
+        }
+
+        Some(FfiSubOpcode::CbgrDealloc) => {
+            let _dst = read_reg(state)?;
+            let _ptr_reg = read_reg(state)?;
+            let _size_reg = read_reg(state)?;
+            let _align_reg = read_reg(state)?;
+            // Intentional leak in the interpreter: the stdlib tracks
+            // Shared refcount / drop ordering at a level above us, but
+            // the interpreter has no way to match the exact Layout
+            // passed at allocation time without carrying extra metadata.
+            // Preferring leak over double-free matches __dealloc_raw.
+            Ok(DispatchResult::Continue)
+        }
+
         // Unimplemented sub-opcodes
         _ => {
             Err(InterpreterError::NotImplemented {

@@ -17268,7 +17268,12 @@ impl VbcCodegen {
                     operands,
                 });
             }
-            // CBGR allocation intrinsics - emit as FfiExtended calls
+            // CBGR allocation intrinsics — emit as FfiExtended calls with
+            // the CBGR-specific sub-opcodes (0xA0-0xA2). The old stubs at
+            // 0x60/0x61/0x62 collided with DerefRaw/DerefMutRaw/DerefRawPtr
+            // and silently miscompiled `Shared<T>::new` / `Heap<T>::new` /
+            // every Map+List allocation, treating the size/align arguments
+            // as pointer+size for a raw dereference.
             InlineSequenceId::CbgrAlloc => {
                 let mut operands = Vec::<u8>::new();
                 Self::write_reg(&mut operands, dest.0);
@@ -17276,7 +17281,7 @@ impl VbcCodegen {
                     Self::write_reg(&mut operands, arg.0);
                 }
                 self.ctx.emit(Instruction::FfiExtended {
-                    sub_op: 0x60, // CbgrAlloc
+                    sub_op: 0xA0, // CbgrAlloc
                     operands,
                 });
             }
@@ -17287,7 +17292,7 @@ impl VbcCodegen {
                     Self::write_reg(&mut operands, arg.0);
                 }
                 self.ctx.emit(Instruction::FfiExtended {
-                    sub_op: 0x61, // CbgrAllocZeroed
+                    sub_op: 0xA1, // CbgrAllocZeroed
                     operands,
                 });
             }
@@ -17298,7 +17303,7 @@ impl VbcCodegen {
                     Self::write_reg(&mut operands, arg.0);
                 }
                 self.ctx.emit(Instruction::FfiExtended {
-                    sub_op: 0x62, // CbgrDealloc
+                    sub_op: 0xA2, // CbgrDealloc
                     operands,
                 });
             }
