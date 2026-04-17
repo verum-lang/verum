@@ -1,0 +1,38 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L1
+// @tags: uuid, rfc4122, rfc9562, random, time-ordered
+// @timeout: 10000
+// @expect: pass
+
+mount core.base.uuid.{Uuid, UuidError};
+
+fn main() {
+    // Constructors type-check.
+    let nil = Uuid.nil();
+    let _v4 = Uuid.new_v4();
+    let _v7 = Uuid.new_v7();
+
+    // Textual round-trip.
+    let canonical = nil.to_text();
+    let _ = Uuid.parse(&canonical);
+    let _ = Uuid.parse(&"550e8400-e29b-41d4-a716-446655440000");
+
+    // Accessors.
+    let _version = nil.version();
+    let _bytes = nil.to_bytes();
+
+    // from_bytes round-trip.
+    let buf: [Byte; 16] = [
+        0x55_u8, 0x0e_u8, 0x84_u8, 0x00_u8,
+        0xe2_u8, 0x9b_u8, 0x41_u8, 0xd4_u8,
+        0xa7_u8, 0x16_u8, 0x44_u8, 0x66_u8,
+        0x55_u8, 0x44_u8, 0x00_u8, 0x00_u8,
+    ];
+    let _ = Uuid.from_bytes(&buf);
+
+    // Error type pattern-matches.
+    fn _report(e: UuidError) -> Text {
+        e.message.clone()
+    }
+}

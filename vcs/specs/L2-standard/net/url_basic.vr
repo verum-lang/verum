@@ -1,0 +1,44 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: net, url, rfc3986, percent-encoding
+// @timeout: 10000
+// @expect: pass
+
+mount core.net.url.{
+    Url,
+    UrlError,
+    UrlErrorKind,
+    MissingScheme,
+    InvalidScheme,
+    InvalidAuthority,
+    InvalidPort,
+    InvalidPercentEscape,
+    percent_encode,
+    percent_decode,
+};
+
+fn main() {
+    // Parse entry point type-checks for all URL shapes.
+    let _ = Url.parse(&"https://example.com/path");
+    let _ = Url.parse(&"https://user:pw@host:8080/api?q=1#top");
+    let _ = Url.parse(&"file:///etc/passwd");
+    let _ = Url.parse(&"mailto:a@b.c");
+    let _ = Url.parse(&"git+ssh://git@github.com/u/r.git");
+    let _ = Url.parse(&"");        // should error (MissingScheme)
+
+    // Percent-encoding helpers.
+    let _ = percent_encode(&"a b/c");
+    let _ = percent_decode(&"a%20b%2Fc");
+
+    // Error type pattern-matches with all kinds exhaustively.
+    fn _describe(err: UrlError) -> Text {
+        match err.kind {
+            MissingScheme         => "missing scheme",
+            InvalidScheme         => "invalid scheme",
+            InvalidAuthority      => "invalid authority",
+            InvalidPort           => "invalid port",
+            InvalidPercentEscape  => "invalid % escape",
+        }
+    }
+}

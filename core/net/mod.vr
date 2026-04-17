@@ -65,6 +65,7 @@ public module udp;
 public module dns;
 public module http;
 public module tls;
+public module url;
 
 // =============================================================================
 // Re-exports

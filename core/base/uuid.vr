@@ -1,0 +1,223 @@
+// =============================================================================
+// base/uuid.vr - Universally Unique IDentifiers
+// =============================================================================
+// Layer: 0 (Base)
+// Dependencies: core
+// =============================================================================
+//
+// Generates and manipulates RFC 4122 / RFC 9562 UUIDs.
+// Supports the two most commonly useful versions:
+//   * v4 — random (122 bits of entropy; uses the system CSPRNG)
+//   * v7 — time-ordered (48-bit unix-ms timestamp + 74 random bits)
+//
+// UUID v7 is strongly preferred for database primary keys: the time-
+// ordered prefix gives you locality (B-tree inserts don't fragment),
+// while 74 bits of random data is still well beyond any realistic
+// collision probability.
+//
+// Canonical textual form: 8-4-4-4-12 lowercase hex with dashes,
+//   e.g. "550e8400-e29b-41d4-a716-446655440000".
+//
+// Example:
+//   let id = Uuid.new_v4();
+//   let text = id.to_text();
+//   let round = Uuid.parse(&text)?;
+//   assert(id == round);
+// =============================================================================
+
+module core.base.uuid;
+
+mount core.*;
+mount base.{Result, Ok, Err, Text};
+
+// A 128-bit UUID stored as two 64-bit halves (big-endian byte view).
+public type Uuid is {
+    hi: Int,
+    lo: Int,
+};
+
+public type UuidError is {
+    position: Int,
+    message: Text,
+};
+
+// External primitives supplied by the runtime. The stdlib does not
+// implement time or entropy itself — those come from the platform.
+fn unix_millis() -> Int {
+    core.time.instant.unix_millis()
+}
+
+fn random_bytes(buf: &mut [Byte]) {
+    core.base.random.fill(buf)
+}
+
+implement Uuid {
+    // Generate a version-4 (random) UUID.
+    //
+    // Layout per RFC 9562 §5.4:
+    //   * 122 random bits
+    //   * 4 bits of version field = 0b0100
+    //   * 2 bits of variant field = 0b10
+    //
+    // Total: 128 bits, 122 of which are CSPRNG output.
+    public fn new_v4() -> Uuid {
+        let mut buf: [Byte; 16] = [0_u8; 16];
+        random_bytes(&mut buf);
+
+        // Stamp the version and variant fields.
+        buf[6] = (buf[6] & 0x0F_u8) | 0x40_u8;   // version 4
+        buf[8] = (buf[8] & 0x3F_u8) | 0x80_u8;   // RFC variant (10xx xxxx)
+
+        Uuid.from_bytes(&buf)
+    }
+
+    // Generate a version-7 (time-ordered) UUID.
+    //
+    // Layout per RFC 9562 §5.7:
+    //   * 48-bit unix-ms timestamp (big-endian)
+    //   * 4 bits version = 0b0111
+    //   * 12 bits random ("rand_a")
+    //   * 2 bits variant = 0b10
+    //   * 62 bits random ("rand_b")
+    //
+    // Total entropy: 74 bits. Time-ordered so v7 UUIDs sort
+    // lexicographically and chronologically — ideal for DB keys.
+    public fn new_v7() -> Uuid {
+        let mut buf: [Byte; 16] = [0_u8; 16];
+        let ts = unix_millis();
+        // Big-endian 48-bit timestamp in bytes 0..6.
+        buf[0] = ((ts >> 40) & 0xFF) as Byte;
+        buf[1] = ((ts >> 32) & 0xFF) as Byte;
+        buf[2] = ((ts >> 24) & 0xFF) as Byte;
+        buf[3] = ((ts >> 16) & 0xFF) as Byte;
+        buf[4] = ((ts >> 8) & 0xFF) as Byte;
+        buf[5] = (ts & 0xFF) as Byte;
+
+        // Fill bytes 6..16 with randomness; we'll overwrite the
+        // top nibble of byte 6 and the top two bits of byte 8.
+        let mut rand_tail: [Byte; 10] = [0_u8; 10];
+        random_bytes(&mut rand_tail);
+        let mut i = 0;
+        while i < 10 {
+            buf[6 + i] = rand_tail[i];
+            i = i + 1;
+        }
+
+        buf[6] = (buf[6] & 0x0F_u8) | 0x70_u8;   // version 7
+        buf[8] = (buf[8] & 0x3F_u8) | 0x80_u8;   // variant 10xx
+
+        Uuid.from_bytes(&buf)
+    }
+
+    // The reserved nil UUID, all zeros.
+    public fn nil() -> Uuid {
+        Uuid { hi: 0, lo: 0 }
+    }
+
+    // Version field (0..15) extracted from the top nibble of the
+    // 7th byte. 4 for random, 7 for time-ordered, etc.
+    public fn version(&self) -> Int {
+        ((self.hi >> 12) & 0x0F)
+    }
+
+    // Build a Uuid from 16 big-endian bytes.
+    public fn from_bytes(buf: &[Byte; 16]) -> Uuid {
+        let mut hi = 0;
+        let mut lo = 0;
+        let mut i = 0;
+        while i < 8 {
+            hi = (hi << 8) | (buf[i] as Int);
+            i = i + 1;
+        }
+        while i < 16 {
+            lo = (lo << 8) | (buf[i] as Int);
+            i = i + 1;
+        }
+        Uuid { hi: hi, lo: lo }
+    }
+
+    // Serialize to the 16-byte big-endian form.
+    public fn to_bytes(&self) -> [Byte; 16] {
+        let mut out: [Byte; 16] = [0_u8; 16];
+        let mut i = 0;
+        while i < 8 {
+            out[7 - i] = ((self.hi >> (i * 8)) & 0xFF) as Byte;
+            out[15 - i] = ((self.lo >> (i * 8)) & 0xFF) as Byte;
+            i = i + 1;
+        }
+        out
+    }
+
+    // Canonical textual form: 8-4-4-4-12 lowercase hex with dashes.
+    public fn to_text(&self) -> Text {
+        let bytes = self.to_bytes();
+        let mut out = Text.new();
+        let mut i = 0;
+        while i < 16 {
+            if i == 4 || i == 6 || i == 8 || i == 10 {
+                out.push_byte(0x2D_u8);       // '-'
+            }
+            let b = bytes[i] as Int;
+            out.push_byte(hex_char((b >> 4) & 0x0F));
+            out.push_byte(hex_char(b & 0x0F));
+            i = i + 1;
+        }
+        out
+    }
+
+    // Parse the canonical textual form. Accepts upper/lowercase hex;
+    // dashes are required at the standard offsets (8, 13, 18, 23).
+    public fn parse(s: &Text) -> Result<Uuid, UuidError> {
+        let bytes = s.as_bytes();
+        if bytes.len() != 36 {
+            return Err(UuidError {
+                position: 0,
+                message: "UUID must be 36 characters",
+            });
+        }
+        let mut buf: [Byte; 16] = [0_u8; 16];
+        let mut bi = 0;
+        let mut i = 0;
+        while i < 36 {
+            if i == 8 || i == 13 || i == 18 || i == 23 {
+                if bytes[i] != 0x2D_u8 {
+                    return Err(UuidError {
+                        position: i,
+                        message: "expected '-'",
+                    });
+                }
+                i = i + 1;
+            } else {
+                let hi = decode_hex(bytes[i], i)?;
+                let lo = decode_hex(bytes[i + 1], i + 1)?;
+                buf[bi] = ((hi << 4) | lo) as Byte;
+                bi = bi + 1;
+                i = i + 2;
+            }
+        }
+        Ok(Uuid.from_bytes(&buf))
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Helpers (private)
+// -----------------------------------------------------------------------------
+
+fn hex_char(n: Int) -> Byte {
+    if n < 10 { (0x30 + n) as Byte } else { (0x61 + n - 10) as Byte }
+}
+
+fn decode_hex(b: Byte, pos: Int) -> Result<Int, UuidError> {
+    if b >= 0x30_u8 && b <= 0x39_u8 {
+        Ok((b - 0x30_u8) as Int)
+    } else if b >= 0x41_u8 && b <= 0x46_u8 {
+        Ok((b - 0x41_u8 + 10) as Int)
+    } else if b >= 0x61_u8 && b <= 0x66_u8 {
+        Ok((b - 0x61_u8 + 10) as Int)
+    } else {
+        Err(UuidError {
+            position: pos,
+            message: "non-hex digit in UUID",
+        })
+    }
+}
