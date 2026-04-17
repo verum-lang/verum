@@ -24,7 +24,7 @@ fn main() {
 #[cfg(feature = "cvc5")]
 use verum_smt::{
     BackendChoice, BackendFallbackConfig, BackendPortfolioConfig, PortfolioMode,
-    SmtBackendSwitcher, SmtConfig, SwitcherConfig, BackendValidationConfig,
+    SmtBackendSwitcher, SmtConfig, BackendValidationConfig,
 };
 
 #[cfg(feature = "cvc5")]
@@ -99,7 +99,7 @@ fn example_2_manual_cvc5() {
         ..Default::default()
     };
 
-    let mut switcher = SmtBackendSwitcher::new(config.to_switcher_config());
+    let switcher = SmtBackendSwitcher::new(config.to_switcher_config());
 
     println!("✓ Created switcher with CVC5 backend");
     println!("  Backend: {:?}", switcher.current_backend());
@@ -118,7 +118,7 @@ fn example_3_auto_selection() {
         ..Default::default()
     };
 
-    let mut switcher = SmtBackendSwitcher::new(config.to_switcher_config());
+    let _switcher = SmtBackendSwitcher::new(config.to_switcher_config());
 
     println!("✓ Created switcher with Auto backend");
     println!("  The solver will automatically choose Z3 or CVC5");
@@ -144,7 +144,7 @@ fn example_4_fallback() {
         ..Default::default()
     };
 
-    let mut switcher = SmtBackendSwitcher::new(config.to_switcher_config());
+    let _switcher = SmtBackendSwitcher::new(config.to_switcher_config());
 
     println!("✓ Created switcher with Z3 + fallback to CVC5");
     println!("  Fallback triggers:");
@@ -179,7 +179,7 @@ fn example_5_portfolio() {
         ..Default::default()
     };
 
-    let mut switcher = SmtBackendSwitcher::new(config.to_switcher_config());
+    let _switcher = SmtBackendSwitcher::new(config.to_switcher_config());
 
     println!("✓ Created portfolio solver");
     println!("  Mode: FirstResult (return first SAT/UNSAT)");
@@ -199,7 +199,7 @@ fn example_5_portfolio() {
 
     // Try Consensus mode
     println!("  Alternative: Consensus mode");
-    let consensus_config = SmtConfig {
+    let _consensus_config = SmtConfig {
         backend: BackendChoice::Portfolio,
         portfolio: BackendPortfolioConfig {
             enabled: true,

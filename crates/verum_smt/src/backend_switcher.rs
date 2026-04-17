@@ -53,6 +53,7 @@ use verum_ast::expr::Expr;
 
 /// Backend selection strategy
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+#[derive(Default)]
 pub enum BackendChoice {
     /// Use Z3 exclusively
     Z3,
@@ -65,14 +66,10 @@ pub enum BackendChoice {
     /// Use the capability router: each goal routed to the best solver based on
     /// its theory signature. Hard/mixed goals run as portfolio; security-
     /// critical goals run as cross-validate. This is the recommended default.
+    #[default]
     Capability,
 }
 
-impl Default for BackendChoice {
-    fn default() -> Self {
-        Self::Capability
-    }
-}
 
 impl std::str::FromStr for BackendChoice {
     type Err = String;
@@ -697,10 +694,7 @@ impl SmtBackendSwitcher {
             ExprKind::Literal(lit) => {
                 use verum_ast::LiteralKind;
                 chars.base.num_consts += 1.0;
-                match &lit.kind {
-                    LiteralKind::Text(_) => chars.has_strings = true,
-                    _ => {}
-                }
+                if let LiteralKind::Text(_) = &lit.kind { chars.has_strings = true }
             }
 
             // --- Arithmetic operators: detect nonlinearity ---

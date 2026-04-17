@@ -1909,7 +1909,7 @@ fn test_boolean_not_logic() {
         Instruction::Not { dst: Reg(1), src: Reg(0) },
         Instruction::Ret { value: Reg(1) },
     ]);
-    assert_eq!(result.as_bool(), false);
+    assert!(!result.as_bool());
 }
 
 /// Test: mixed int and float computation

@@ -185,10 +185,7 @@ impl BvOp {
             BvOp::And(a, b) => binop(a, b, env, |x, y| x.and(y))?,
             BvOp::Or(a, b) => binop(a, b, env, |x, y| x.or(y))?,
             BvOp::Xor(a, b) => binop(a, b, env, |x, y| x.xor(y))?,
-            BvOp::Not(a) => match a.evaluate(env)? {
-                Some(v) => Some(v.not()),
-                None => None,
-            },
+            BvOp::Not(a) => a.evaluate(env)?.map(|v| v.not()),
         })
     }
 }

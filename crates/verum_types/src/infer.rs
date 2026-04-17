@@ -2826,7 +2826,7 @@ impl TypeChecker {
                     // `implement Text` blocks to work correctly even though the compiler resolves
                     // `TypeKind::Text` to the primitive `Type::Text`.
                     Type::Text => {
-                        let struct_key = format!("__struct_fields_Text");
+                        let struct_key = "__struct_fields_Text".to_string();
                         if let Some(Type::Record(fields)) = self.ctx.lookup_type(&struct_key) {
                             let field_name_key = verum_common::Text::from(field.name.as_str());
                             if let Some(field_ty) = fields.get(&field_name_key).cloned() {
@@ -12147,7 +12147,7 @@ impl TypeChecker {
                         // field accesses inside `implement Text` fail with E103. Check for
                         // user-registered struct fields before emitting the error.
                         Type::Text => {
-                            let struct_key = format!("__struct_fields_Text");
+                            let struct_key = "__struct_fields_Text".to_string();
                             if let Some(Type::Record(fields)) = self.ctx.lookup_type(&struct_key) {
                                 let field_name_key = verum_common::Text::from(field.name.as_str());
                                 if let Some(field_ty) = fields.get(&field_name_key).cloned() {

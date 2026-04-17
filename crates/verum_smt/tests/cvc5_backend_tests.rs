@@ -345,7 +345,7 @@ fn test_cvc5_bit_vectors() {
 fn test_cvc5_timeout_handling() {
     let config = Cvc5Config {
         logic: Cvc5SmtLogic::QF_LIA,
-        timeout_ms: Some(100).into(), // Very short timeout
+        timeout_ms: Some(100), // Very short timeout
         ..Default::default()
     };
 
@@ -369,14 +369,14 @@ fn test_cvc5_default_config() {
 fn test_cvc5_custom_config() {
     let config = Cvc5Config {
         logic: Cvc5SmtLogic::QF_LIA,
-        timeout_ms: Some(5000).into(),
+        timeout_ms: Some(5000),
         incremental: false,
         produce_models: false,
         produce_proofs: false,
         produce_unsat_cores: false,
         preprocessing: false,
         quantifier_mode: QuantifierMode::None,
-        random_seed: Some(42).into(),
+        random_seed: Some(42),
         verbosity: 2,
     };
 

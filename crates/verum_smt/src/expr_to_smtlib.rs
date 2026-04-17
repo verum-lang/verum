@@ -309,7 +309,7 @@ pub fn try_reflect_function(
     let return_sort = func
         .return_type
         .as_ref()
-        .map(|t| type_to_sort(t))
+        .map(type_to_sort)
         .unwrap_or_else(|| "Int".to_string());
 
     Some(crate::refinement_reflection::ReflectedFunction {

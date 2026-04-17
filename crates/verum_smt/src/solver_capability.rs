@@ -372,7 +372,7 @@ impl CapabilityRegistry {
 fn detect_z3_version() -> String {
     // The z3 crate exposes the bundled Z3 version.
     // As of the current workspace, Z3 version is 4.13+ (per Cargo.toml).
-    format!("{}", "4.13.x bundled")
+    "4.13.x bundled".to_string()
 }
 
 // ============================================================================

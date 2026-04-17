@@ -496,11 +496,10 @@ fn bool_define(b: bool) -> &'static str {
 /// then fall back to its own detection (which may fail and produce a
 /// clearer error for the user).
 fn detect_gmp_prefix() -> Option<String> {
-    if let Ok(prefix) = env::var("GMP_PREFIX") {
-        if Path::new(&prefix).join("include/gmp.h").exists() {
+    if let Ok(prefix) = env::var("GMP_PREFIX")
+        && Path::new(&prefix).join("include/gmp.h").exists() {
             return Some(prefix);
         }
-    }
 
     let candidates = [
         "/opt/homebrew",   // Apple Silicon Homebrew

@@ -1534,13 +1534,12 @@ impl CodegenContext {
             // Store alternative arities for arity-based disambiguation.
             // When a user function collides with a stdlib method of different arity,
             // we keep both so the call site can pick the right one.
-            if let Some(existing) = self.functions.get(&name) {
-                if existing.param_count != info.param_count {
+            if let Some(existing) = self.functions.get(&name)
+                && existing.param_count != info.param_count {
                     let alt_key = format!("{}#{}", name, info.param_count);
                     self.functions.insert(alt_key, info);
                     return;
                 }
-            }
             self.functions.insert(name, info);
         }
     }

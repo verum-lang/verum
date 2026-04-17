@@ -1043,8 +1043,8 @@ mod tests {
         let end_lit = end.map(|v| Heap::new(Literal::int(v, span())));
         Pattern::new(
             PatternKind::Range {
-                start: start_lit.into(),
-                end: end_lit.into(),
+                start: start_lit,
+                end: end_lit,
                 inclusive,
             },
             span(),

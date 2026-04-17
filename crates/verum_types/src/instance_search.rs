@@ -80,7 +80,7 @@ impl InstanceRegistry {
         let key = (candidate.protocol.clone(), candidate.target_type.clone());
         self.by_key
             .entry(key)
-            .or_insert_with(List::new)
+            .or_default()
             .push(candidate);
     }
 
@@ -263,7 +263,7 @@ impl InstanceResolver {
     pub fn register_superclass(&mut self, sub: impl Into<Text>, super_proto: impl Into<Text>) {
         self.superclasses
             .entry(sub.into())
-            .or_insert_with(List::new)
+            .or_default()
             .push(super_proto.into());
     }
 

@@ -6524,21 +6524,16 @@ impl VbcCodegen {
                     let has_captures = if let verum_common::Maybe::Some(ref body) = func.body {
                         let param_names: Vec<String> = func.params.iter()
                             .filter_map(|p| {
-                                if let verum_ast::decl::FunctionParamKind::Regular { pattern, .. } = &p.kind {
-                                    if let verum_ast::PatternKind::Ident { name, .. } = &pattern.kind {
+                                if let verum_ast::decl::FunctionParamKind::Regular { pattern, .. } = &p.kind
+                                    && let verum_ast::PatternKind::Ident { name, .. } = &pattern.kind {
                                         return Some(name.name.to_string());
                                     }
-                                }
                                 None
                             })
                             .collect();
                         let body_expr = match body {
                             FunctionBody::Block(blk) => {
-                                if let verum_common::Maybe::Some(e) = &blk.expr {
-                                    Some(e.as_ref())
-                                } else {
-                                    None
-                                }
+                                blk.expr.as_ref().map(|e| e.as_ref())
                             }
                             FunctionBody::Expr(e) => Some(e),
                         };
