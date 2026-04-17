@@ -277,6 +277,56 @@ public type DynTensor<T: Numeric> is {
 public type RuntimeShapedTensor<T: Numeric> is DynTensor<T>;
 
 implement<T: Numeric> DynTensor<T> {
+    // ---------------------------------------------------------------------
+    // Static constructors — mirror the module-level `zeros`/`ones`/`full`
+    // functions so that user code can write `Tensor.zeros([N])` / `.ones`
+    // / `.full` directly. Without these, `Tensor.zeros(...)` fails with
+    // "no method named `zeros` found for type `DynTensor<T>`" because
+    // the module-level functions aren't accessible via dotted-type
+    // dispatch.
+    // ---------------------------------------------------------------------
+
+    // Create tensor filled with zeros.
+    public fn zeros(shape: &[USize]) -> DynTensor<T>
+        using [ComputeDevice]
+    {
+        let data = TensorHandle.allocate(dtype_of<T>(), shape, ComputeDevice.device_type());
+        @vbc(TENSOR_FILL, data, T.zero());
+        DynTensor { data, shape: List.from(shape) }
+    }
+
+    // Create tensor filled with ones.
+    public fn ones(shape: &[USize]) -> DynTensor<T>
+        using [ComputeDevice]
+    {
+        let data = TensorHandle.allocate(dtype_of<T>(), shape, ComputeDevice.device_type());
+        @vbc(TENSOR_FILL, data, T.one());
+        DynTensor { data, shape: List.from(shape) }
+    }
+
+    // Create tensor filled with a given value.
+    public fn full(shape: &[USize], value: T) -> DynTensor<T>
+        using [ComputeDevice]
+    {
+        let data = TensorHandle.allocate(dtype_of<T>(), shape, ComputeDevice.device_type());
+        @vbc(TENSOR_FILL, data, value);
+        DynTensor { data, shape: List.from(shape) }
+    }
+
+    // Create tensor with the same shape as another, filled with zeros.
+    public fn zeros_like(x: &DynTensor<T>) -> DynTensor<T> {
+        let data = TensorHandle.allocate(dtype_of<T>(), &x.shape, x.device());
+        @vbc(TENSOR_FILL, data, T.zero());
+        DynTensor { data, shape: x.shape.clone() }
+    }
+
+    // Create tensor with the same shape as another, filled with ones.
+    public fn ones_like(x: &DynTensor<T>) -> DynTensor<T> {
+        let data = TensorHandle.allocate(dtype_of<T>(), &x.shape, x.device());
+        @vbc(TENSOR_FILL, data, T.one());
+        DynTensor { data, shape: x.shape.clone() }
+    }
+
     // Get shape reference
     public fn shape(&self) -> &[USize] {
         &self.shape

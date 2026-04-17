@@ -148,9 +148,37 @@ impl VbcCodegen {
                             }
                         } else if func.body.is_some() {
                             // Non-capturing nested function: compile as
-                            // standalone, inline in the outer scope so the
-                            // function name is accessible.
+                            // standalone so the function is emitted at the
+                            // module level and accessible by name.
+                            //
+                            // `compile_function` internally calls
+                            // `begin_function`/`end_function`, which clear
+                            // the current in_function / instructions /
+                            // registers state. Without save/restore around
+                            // the call, compiling a nested `fn` clobbers
+                            // the outer function's context and the outer's
+                            // remaining `return` statements end up emitted
+                            // with `in_function == false` → codegen error
+                            // "return statement outside of function".
+                            //
+                            // Mirror the save/restore pattern used by
+                            // compile_closure (see expressions.rs:11687).
+                            let saved_function = self.ctx.current_function.clone();
+                            let saved_instructions = std::mem::take(&mut self.ctx.instructions);
+                            let saved_registers = self.ctx.registers.snapshot();
+                            let saved_in_function = self.ctx.in_function;
+                            let saved_return_type = self.ctx.return_type.clone();
+                            let saved_closure_ctx = self.ctx.save_closure_context();
+
                             self.compile_function(func, None)?;
+
+                            // Restore parent function's compilation context.
+                            self.ctx.current_function = saved_function;
+                            self.ctx.instructions = saved_instructions;
+                            self.ctx.registers.restore_reg(&saved_registers);
+                            self.ctx.in_function = saved_in_function;
+                            self.ctx.return_type = saved_return_type;
+                            self.ctx.restore_closure_context(saved_closure_ctx);
                         }
                         // Function is fully handled here — the post-hoc
                         // compile_nested_functions pass in mod.rs should

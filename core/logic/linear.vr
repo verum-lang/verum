@@ -46,8 +46,13 @@ module core.logic.linear;
 public type LinForm is
     /// Atomic proposition.
     | Atom { name: Text }
-    /// `A ⊗ B` — multiplicative conjunction.
-    | Tensor { left: Heap<LinForm>, right: Heap<LinForm> }
+    /// `A ⊗ B` — multiplicative conjunction (tensor product).
+    ///
+    /// Named `MTensor` (multiplicative tensor) rather than bare `Tensor`
+    /// to avoid an unqualified-name collision with `core.math.tensor.Tensor`
+    /// in user code. `Tensor.zeros([N])` used to resolve to this variant's
+    /// constructor instead of the intended Tensor type.
+    | MTensor { left: Heap<LinForm>, right: Heap<LinForm> }
     /// `A ⅋ B` — multiplicative disjunction.
     | Par { left: Heap<LinForm>, right: Heap<LinForm> }
     /// `A & B` — additive conjunction.
@@ -78,7 +83,7 @@ public fn lin_atom(name: Text) -> LinForm {
 }
 
 public fn lin_tensor(a: LinForm, b: LinForm) -> LinForm {
-    LinForm.Tensor { left: Heap(a), right: Heap(b) }
+    LinForm.MTensor { left: Heap(a), right: Heap(b) }
 }
 
 public fn lin_par(a: LinForm, b: LinForm) -> LinForm {
