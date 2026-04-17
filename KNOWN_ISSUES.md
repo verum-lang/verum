@@ -61,47 +61,36 @@ now linked into user modules. The "field write out of bounds:
 field index 257/271" cascade failure — which was the surface
 symptom — is fully resolved. The remaining gap is narrower:
 
-**Remaining:** Direct method calls on variant types (e.g.
-`Maybe::as_mut`, `Maybe::take`, `Maybe::unwrap`) hit "method not
-found on value" at runtime. This is a pre-existing variant method
-dispatch limitation, not a regression. Pattern matching works
-correctly; only direct method-call syntax on variants has the gap.
+**Remaining:** Runtime construction of `Shared::new(...)` still
+crashes with "explicit panic" because the CBGR allocator's
+bootstrapped global heap (`CURRENT_HEAP`) depends on thread-local
+init via `@thread_local static`, which the interpreter does not
+yet fully support. AOT mode has the same limitation for this path.
 
-**Workaround:** Use pattern matching over method calls on variants
-in code paths that must run via the interpreter:
-  - `match x { Some(v) => v, None => default }` instead of `x.unwrap_or(default)`
-  - `match opt { Some(v) => use(v), None => () }` instead of `if let Some(v) = opt { use(v) }`
-
-AOT mode handles both patterns correctly.
+**Workaround:** avoid user code that constructs `Shared<T>` in
+interpreter mode. Single-observer patterns (direct `&T`,
+`CancellationFlag` without Shared wrapping) work today.
 
 ## Cancellation Tokens
 
-`core.async.cancellation` is API-complete and typechecks. Runtime
-construction depends on `Shared<T>`, which now has its allocator
-bootstrap fixed. Remaining dependency is variant method dispatch
-(see above) — for single-observer patterns without clones, the
-primitive is fully functional.
+`core.async.cancellation` is API-complete and typechecks. The
+runtime `Shared<T>` construction path (used for clonable tokens)
+is blocked on the thread-local static bootstrap above. Single-
+observer patterns work via the exposed `CancellationFlag` type.
 
 ## Variant Method Dispatch
 
-Direct method calls like `x.unwrap()` on variant values (Maybe,
-Result, etc.) report "method 'Maybe.unwrap' not found on value"
-at runtime even though the method is defined in
-`core/base/maybe.vr`. This is pre-existing — pattern matching via
-`match x { Some(v) => ..., None => ... }` works correctly and is
-the idiomatic Verum pattern for variant handling.
+**Status:** Fixed (commit 94b16bf). Direct method calls on
+Maybe/Result (`.unwrap`, `.unwrap_or`, `.is_some`, `.is_none`,
+`.is_ok`, `.is_err`, `.take`, `.as_ref`, `.as_mut`, `.ok`,
+`.expect`, `.unwrap_err`) now work correctly in the interpreter.
 
-**Workarounds:**
-- Use `match` instead of `.unwrap()`/`.take()`/`.is_some()` etc.
-- Use the free-function forms where available (`unwrap(x)` via
-  mount).
-
-**Root cause:** the method dispatcher searches for a function whose
-name ends with `.Maybe.unwrap` in the module's function table.
-Stdlib-imported variant method bodies are registered under
-`core.base.maybe.Maybe.unwrap` but the suffix match may fail to
-bind the generic `T` in `Maybe<T>` against the concrete type at
-the call site.
+**Background:** `core.base.maybe` is intentionally excluded from
+compilation to avoid type collisions with user-defined `Maybe`.
+The LLVM AOT path has an inline intercept in `instruction.rs:9785`;
+the interpreter now mirrors that in `dispatch_variant_method` using
+empirical variant-layout heuristics (Some/Ok = tag 0 with payload;
+None = tag 0 no payload; Err = tag 1 with payload).
 
 ## Cache Invalidation
 
