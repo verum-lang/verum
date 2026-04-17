@@ -1293,6 +1293,22 @@ impl TypeEnv {
             .or_else(|| self.parent.as_ref().and_then(|p| p.lookup(name)))
     }
 
+    /// Collect all names visible in this scope (current + parents).
+    /// Used by error messages to compute "did you mean?" suggestions.
+    /// Deduplicates inner-shadowing outer (inner scope wins, matching
+    /// regular lookup semantics).
+    pub fn visible_names(&self) -> Vec<Text> {
+        let mut seen = indexmap::IndexSet::new();
+        let mut scope = Some(self);
+        while let Some(e) = scope {
+            for k in e.bindings.keys() {
+                seen.insert(k.clone());
+            }
+            scope = e.parent.as_deref();
+        }
+        seen.into_iter().collect()
+    }
+
     /// Get all free type variables in the environment
     pub fn free_vars(&self) -> Set<TypeVar> {
         let mut vars = Set::new();

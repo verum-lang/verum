@@ -10365,10 +10365,30 @@ impl TypeChecker {
                 } else if self.stdlib_single_file_mode {
                     Ok(Type::Unknown)
                 } else {
-                    Err(TypeError::UnboundVariable {
-                        name: name.to_text(),
-                        span,
-                    })
+                    // "Did you mean ...?" — search visible scope names for
+                    // a Levenshtein-close candidate. 80% of user typos are
+                    // edit distance ≤ 2 from the intended name; threshold
+                    // kept at 3 to catch longer transpositions without
+                    // being noisy.
+                    let candidates = self.ctx.env.visible_names();
+                    let hint = candidates.iter()
+                        .filter_map(|c| {
+                            let d = levenshtein_distance(name, c.as_str());
+                            if d <= 3 && d > 0 { Some((d, c)) } else { None }
+                        })
+                        .min_by_key(|(d, _)| *d)
+                        .map(|(_, c)| c.clone());
+                    if let Some(suggestion) = hint {
+                        Err(TypeError::Other(verum_common::Text::from(format!(
+                            "unbound variable: {}\n  help: did you mean `{}`?",
+                            name, suggestion
+                        ))))
+                    } else {
+                        Err(TypeError::UnboundVariable {
+                            name: name.to_text(),
+                            span,
+                        })
+                    }
                 }
             }
         } else {
