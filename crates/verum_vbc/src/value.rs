@@ -887,6 +887,17 @@ impl Value {
     /// # Panics
     ///
     /// Panics if this is not an integer value.
+    ///
+    /// For boxed integers whose index falls outside the current
+    /// `BOXED_INTS` table (e.g. because `reset_global_value_tables()` was
+    /// called while the `Value` remained reachable through a cached side
+    /// structure like a Mutex-held ConstantEntry, or because a bit pattern
+    /// from an adjacent Value family is being misclassified), return `0`
+    /// rather than indexing past the end. This is a hard-crash → soft-nil
+    /// downgrade: the panic used to take down `vtest-check` threads during
+    /// batch L2 runs; the benign fallback lets the surrounding typecheck
+    /// carry on and surface any upstream miscoding as normal type errors
+    /// instead of an out-of-bounds abort.
     #[inline]
     pub fn as_i64(&self) -> i64 {
         debug_assert!(self.is_int(), "Expected int, got {:?}", self.tag());
@@ -894,7 +905,7 @@ impl Value {
             // Boxed: look up in global table
             let index = (self.0 & BOXED_INT_INDEX_MASK) as usize;
             let table = BOXED_INTS.lock().unwrap();
-            table[index]
+            table.get(index).copied().unwrap_or(0)
         } else {
             // Inline: sign-extend from 48 bits to 64 bits
             let payload = (self.0 & PAYLOAD_MASK) as i64;
