@@ -20897,9 +20897,15 @@ impl TypeChecker {
                         let expected: Option<usize> = match self.ctx.lookup_type(&params_key) {
                             Some(Type::Record(params_map)) => Some(params_map.len()),
                             _ => match self.ctx.lookup_type(&order_key) {
-                                Some(Type::Tuple(type_vars)) => Some(
-                                    type_vars.iter().filter(|t| matches!(t, Type::Var(_))).count()
-                                ),
+                                // Count *all* parameter slots, not just `Type::Var`.
+                                // `type Matrix<T, Rows: meta Int, Cols: meta Int>`
+                                // stores T as a Var and `Rows`/`Cols` as meta-Int
+                                // placeholders that aren't `Type::Var`. Filtering
+                                // down to vars made the arity checker reject
+                                // legitimate three-arg uses like
+                                // `Matrix<Float, 2, 3>` with
+                                // "expects 1 type argument(s), but 3 were provided".
+                                Some(Type::Tuple(type_vars)) => Some(type_vars.len()),
                                 _ => None,
                             },
                         };
@@ -45096,9 +45102,25 @@ impl TypeChecker {
                         indexmap::IndexMap::new();
                     for param in type_decl.generics.iter() {
                         use verum_ast::ty::GenericParamKind;
-                        if let GenericParamKind::Type { name, .. } = &param.kind {
-                            // Store parameter name as key, dummy value (we just need the keys)
-                            param_record.insert(name.name.clone(), Type::Int);
+                        // Record every positional parameter that carries a user-visible
+                        // name — Type, HigherKinded, Const, Meta, Context, and Level.
+                        // The arity counter (below, and the user-facing
+                        // "type T expects N arguments" check in compile_type_path)
+                        // reads `param_record.len()`; skipping Meta/Const/HKT/etc.
+                        // made `type Matrix<T, Rows: meta Int, Cols: meta Int>`
+                        // look like it only takes 1 argument, so `Matrix<Float, 2, 3>`
+                        // raised "expects 1 type argument(s), but 3 were provided".
+                        let name_opt = match &param.kind {
+                            GenericParamKind::Type { name, .. } => Some(name.name.clone()),
+                            GenericParamKind::HigherKinded { name, .. } => Some(name.name.clone()),
+                            GenericParamKind::Const { name, .. } => Some(name.name.clone()),
+                            GenericParamKind::Meta { name, .. } => Some(name.name.clone()),
+                            GenericParamKind::Context { name } => Some(name.name.clone()),
+                            GenericParamKind::Lifetime { .. } => None,
+                            _ => None,
+                        };
+                        if let Some(n) = name_opt {
+                            param_record.insert(n, Type::Int);
                         }
                     }
                     let type_params_key: Text = format!("__type_params_{}", type_name).into();
@@ -45787,18 +45809,34 @@ impl TypeChecker {
                     let struct_key: Text = format!("__struct_fields_{}", type_name).into();
                     self.ctx.define_type(struct_key, Type::Record(record_map));
 
-                    // Store type parameter names for bidirectional inference
+                    // Store type parameter names for bidirectional inference.
                     // This allows us to substitute concrete types for generic parameters
-                    // when checking record literals like `Box { value: 42 }` against `Box<Int>`
+                    // when checking record literals like `Box { value: 42 }` against `Box<Int>`,
+                    // and the arity checker in `compile_type_path` uses `param_record.len()`
+                    // to validate `expected_count == provided_count`.
+                    //
+                    // Every positional parameter must be included — not just `Type` kinds —
+                    // otherwise a declaration like
+                    //   type Matrix<T, Rows: meta Int, Cols: meta Int> is { ... };
+                    // registers as arity=1 and every `Matrix<Float, 2, 3>` usage errors
+                    // out with "expects 1 type argument(s), but 3 were provided".
                     if !type_decl.generics.is_empty() {
                         let mut param_record: indexmap::IndexMap<verum_common::Text, Type> =
                             indexmap::IndexMap::new();
                         for (idx, param) in type_decl.generics.iter().enumerate() {
+                            let _ = idx;
                             use verum_ast::ty::GenericParamKind;
-                            if let GenericParamKind::Type { name, .. } = &param.kind {
-                                // Store parameter name as key, index as dummy value
-                                // We just need the keys for substitution
-                                param_record.insert(name.name.clone(), Type::Int);
+                            let name_opt = match &param.kind {
+                                GenericParamKind::Type { name, .. } => Some(name.name.clone()),
+                                GenericParamKind::HigherKinded { name, .. } => Some(name.name.clone()),
+                                GenericParamKind::Const { name, .. } => Some(name.name.clone()),
+                                GenericParamKind::Meta { name, .. } => Some(name.name.clone()),
+                                GenericParamKind::Context { name } => Some(name.name.clone()),
+                                GenericParamKind::Lifetime { .. } => None,
+                                _ => None,
+                            };
+                            if let Some(n) = name_opt {
+                                param_record.insert(n, Type::Int);
                             }
                         }
                         let type_params_key: Text = format!("__type_params_{}", type_name).into();
