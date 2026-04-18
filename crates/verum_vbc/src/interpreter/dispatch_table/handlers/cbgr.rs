@@ -699,6 +699,13 @@ pub(in super::super) fn handle_cbgr_extended(state: &mut InterpreterState) -> In
                 unsafe { ptr.add(offset) }
             };
 
+            // Mark this pointer as "dereferences to a Value in memory" so the
+            // generic `Deref` handler reads through it (`*(ptr as *const Value)`)
+            // instead of falling through to identity-deref for heap objects.
+            // Without this, `*&arr[i]` returns the interior pointer itself
+            // (displayed as `<object type_id=N>`), not the element value —
+            // breaking every spec that builds a reference with `&arr[i]`.
+            state.cbgr_mutable_ptrs.insert(elem_ptr as usize);
             state.set_reg(dst, Value::from_ptr(elem_ptr));
             Ok(DispatchResult::Continue)
         }
