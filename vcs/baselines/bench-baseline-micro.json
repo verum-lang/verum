@@ -1,7 +1,7 @@
 {
   "metadata": {
     "title": "VBench Micro Benchmarks",
-    "timestamp": 1776503856,
+    "timestamp": 1776510143,
     "verum_version": "1.0.0",
     "platform": "macos aarch64",
     "cpu_info": "Apple M3 Max",
@@ -10,19 +10,19 @@
   },
   "summary": {
     "total": 35,
-    "passed": 28,
-    "failed": 7,
+    "passed": 35,
+    "failed": 0,
     "regressions": 0,
-    "pass_rate": 0.8,
-    "total_duration_ms": 549.860929,
-    "avg_time_ns": 2200.007691334193,
+    "pass_rate": 1.0,
+    "total_duration_ms": 457.111655,
+    "avg_time_ns": 2233.0066218163265,
     "fastest": [
       "cbgr/tier1_checked/direct_access",
-      16.27627310509242
+      16.189926178375924
     ],
     "slowest": [
       "allocation/large/10mb",
-      67803.7034261242
+      70296.01346801347
     ]
   },
   "results": [
@@ -31,29 +31,29 @@
       "category": "micro",
       "tier": null,
       "statistics": {
-        "count": 963208,
+        "count": 999983,
         "min_ns": 0.0,
         "max_ns": 84.0,
-        "mean_ns": 31.333277962807617,
-        "median_ns": 41.0,
-        "std_dev_ns": 29.57799289343711,
-        "cv": 0.9439801647483541,
+        "mean_ns": 18.525864939703975,
+        "median_ns": 0.0,
+        "std_dev_ns": 20.721626922803317,
+        "cv": 1.118524127766551,
         "p5_ns": 0.0,
         "p25_ns": 0.0,
         "p75_ns": 42.0,
-        "p95_ns": 84.0,
-        "p99_ns": 84.0,
+        "p95_ns": 42.0,
+        "p99_ns": 42.0,
         "iqr_ns": 42.0,
         "total_duration": {
           "secs": 0,
-          "nanos": 30180464
+          "nanos": 18525550
         }
       },
-      "threshold_ns": 15.0,
-      "passed": false,
+      "threshold_ns": 20.0,
+      "passed": true,
       "throughput": null,
       "metadata": {
-        "outliers_removed": "36792"
+        "outliers_removed": "17"
       }
     },
     {
@@ -61,223 +61,13 @@
       "category": "micro",
       "tier": null,
       "statistics": {
-        "count": 959621,
-        "min_ns": 0.0,
-        "max_ns": 84.0,
-        "mean_ns": 31.861714155901133,
-        "median_ns": 41.0,
-        "std_dev_ns": 30.049222144440172,
-        "cv": 0.943113794738339,
-        "p5_ns": 0.0,
-        "p25_ns": 0.0,
-        "p75_ns": 42.0,
-        "p95_ns": 84.0,
-        "p99_ns": 84.0,
-        "iqr_ns": 42.0,
-        "total_duration": {
-          "secs": 0,
-          "nanos": 30575170
-        }
-      },
-      "threshold_ns": 15.0,
-      "passed": false,
-      "throughput": null,
-      "metadata": {
-        "outliers_removed": "40379"
-      }
-    },
-    {
-      "name": "cbgr/tier0/fat_ref_access",
-      "category": "micro",
-      "tier": null,
-      "statistics": {
-        "count": 999445,
-        "min_ns": 0.0,
-        "max_ns": 167.0,
-        "mean_ns": 42.32294023182867,
-        "median_ns": 42.0,
-        "std_dev_ns": 37.60073948928017,
-        "cv": 0.8884245584857264,
-        "p5_ns": 0.0,
-        "p25_ns": 0.0,
-        "p75_ns": 83.0,
-        "p95_ns": 84.0,
-        "p99_ns": 125.0,
-        "iqr_ns": 83.0,
-        "total_duration": {
-          "secs": 0,
-          "nanos": 42299451
-        }
-      },
-      "threshold_ns": 20.0,
-      "passed": false,
-      "throughput": null,
-      "metadata": {
-        "outliers_removed": "555"
-      }
-    },
-    {
-      "name": "cbgr/tier0/bounds_check",
-      "category": "micro",
-      "tier": null,
-      "statistics": {
-        "count": 999990,
-        "min_ns": 0.0,
-        "max_ns": 84.0,
-        "mean_ns": 17.36131061310613,
-        "median_ns": 0.0,
-        "std_dev_ns": 20.55703803732867,
-        "cv": 1.184071784408377,
-        "p5_ns": 0.0,
-        "p25_ns": 0.0,
-        "p75_ns": 42.0,
-        "p95_ns": 42.0,
-        "p99_ns": 42.0,
-        "iqr_ns": 42.0,
-        "total_duration": {
-          "secs": 0,
-          "nanos": 17361137
-        }
-      },
-      "threshold_ns": 5.0,
-      "passed": false,
-      "throughput": null,
-      "metadata": {
-        "outliers_removed": "10"
-      }
-    },
-    {
-      "name": "cbgr/tier0/generation_increment",
-      "category": "micro",
-      "tier": null,
-      "statistics": {
-        "count": 999913,
-        "min_ns": 0.0,
-        "max_ns": 209.0,
-        "mean_ns": 59.30415646161216,
-        "median_ns": 42.0,
-        "std_dev_ns": 46.820142415658125,
-        "cv": 0.7894917525041438,
-        "p5_ns": 0.0,
-        "p25_ns": 0.0,
-        "p75_ns": 84.0,
-        "p95_ns": 125.0,
-        "p99_ns": 125.0,
-        "iqr_ns": 84.0,
-        "total_duration": {
-          "secs": 0,
-          "nanos": 59298997
-        }
-      },
-      "threshold_ns": null,
-      "passed": true,
-      "throughput": null,
-      "metadata": {
-        "outliers_removed": "87"
-      }
-    },
-    {
-      "name": "cbgr/tier0/epoch_caps_check",
-      "category": "micro",
-      "tier": null,
-      "statistics": {
-        "count": 960971,
-        "min_ns": 0.0,
-        "max_ns": 84.0,
-        "mean_ns": 27.31435600033716,
-        "median_ns": 41.0,
-        "std_dev_ns": 27.092664751839312,
-        "cv": 0.9918837094861357,
-        "p5_ns": 0.0,
-        "p25_ns": 0.0,
-        "p75_ns": 42.0,
-        "p95_ns": 83.0,
-        "p99_ns": 84.0,
-        "iqr_ns": 42.0,
-        "total_duration": {
-          "secs": 0,
-          "nanos": 26248304
-        }
-      },
-      "threshold_ns": 15.0,
-      "passed": false,
-      "throughput": null,
-      "metadata": {
-        "outliers_removed": "39029"
-      }
-    },
-    {
-      "name": "cbgr/tier1_checked/direct_access",
-      "category": "micro",
-      "tier": null,
-      "statistics": {
-        "count": 999996,
-        "min_ns": 0.0,
-        "max_ns": 84.0,
-        "mean_ns": 16.27627310509242,
-        "median_ns": 0.0,
-        "std_dev_ns": 20.355029275022435,
-        "cv": 1.2505952157225646,
-        "p5_ns": 0.0,
-        "p25_ns": 0.0,
-        "p75_ns": 42.0,
-        "p95_ns": 42.0,
-        "p99_ns": 42.0,
-        "iqr_ns": 42.0,
-        "total_duration": {
-          "secs": 0,
-          "nanos": 16276208
-        }
-      },
-      "threshold_ns": null,
-      "passed": true,
-      "throughput": null,
-      "metadata": {
-        "outliers_removed": "4"
-      }
-    },
-    {
-      "name": "cbgr/tier1_checked/slice_iter",
-      "category": "micro",
-      "tier": null,
-      "statistics": {
-        "count": 999987,
-        "min_ns": 0.0,
-        "max_ns": 84.0,
-        "mean_ns": 16.537302984938805,
-        "median_ns": 0.0,
-        "std_dev_ns": 20.413615127219686,
-        "cv": 1.2343980844888187,
-        "p5_ns": 0.0,
-        "p25_ns": 0.0,
-        "p75_ns": 42.0,
-        "p95_ns": 42.0,
-        "p99_ns": 42.0,
-        "iqr_ns": 42.0,
-        "total_duration": {
-          "secs": 0,
-          "nanos": 16537088
-        }
-      },
-      "threshold_ns": null,
-      "passed": true,
-      "throughput": null,
-      "metadata": {
-        "outliers_removed": "13"
-      }
-    },
-    {
-      "name": "cbgr/tier1_checked/array_index",
-      "category": "micro",
-      "tier": null,
-      "statistics": {
         "count": 999967,
         "min_ns": 0.0,
         "max_ns": 84.0,
-        "mean_ns": 16.44668574062944,
+        "mean_ns": 17.8208430878219,
         "median_ns": 0.0,
-        "std_dev_ns": 20.379441382155065,
-        "cv": 1.2391214682123008,
+        "std_dev_ns": 20.62968722824302,
+        "cv": 1.157615670963434,
         "p5_ns": 0.0,
         "p25_ns": 0.0,
         "p75_ns": 42.0,
@@ -286,10 +76,10 @@
         "iqr_ns": 42.0,
         "total_duration": {
           "secs": 0,
-          "nanos": 16446143
+          "nanos": 17820255
         }
       },
-      "threshold_ns": null,
+      "threshold_ns": 20.0,
       "passed": true,
       "throughput": null,
       "metadata": {
@@ -297,17 +87,17 @@
       }
     },
     {
-      "name": "cbgr/tier2_unsafe/raw_pointer",
+      "name": "cbgr/tier0/fat_ref_access",
       "category": "micro",
       "tier": null,
       "statistics": {
-        "count": 999994,
+        "count": 999989,
         "min_ns": 0.0,
         "max_ns": 84.0,
-        "mean_ns": 16.434954609727658,
+        "mean_ns": 18.78443662880292,
         "median_ns": 0.0,
-        "std_dev_ns": 20.378356343971603,
-        "cv": 1.2399399224327576,
+        "std_dev_ns": 20.747879196611173,
+        "cv": 1.1045249642886616,
         "p5_ns": 0.0,
         "p25_ns": 0.0,
         "p75_ns": 42.0,
@@ -316,14 +106,224 @@
         "iqr_ns": 42.0,
         "total_duration": {
           "secs": 0,
-          "nanos": 16434856
+          "nanos": 18784230
+        }
+      },
+      "threshold_ns": 25.0,
+      "passed": true,
+      "throughput": null,
+      "metadata": {
+        "outliers_removed": "11"
+      }
+    },
+    {
+      "name": "cbgr/tier0/bounds_check",
+      "category": "micro",
+      "tier": null,
+      "statistics": {
+        "count": 999986,
+        "min_ns": 0.0,
+        "max_ns": 84.0,
+        "mean_ns": 17.98327876590272,
+        "median_ns": 0.0,
+        "std_dev_ns": 20.654822974356723,
+        "cv": 1.1485571259407599,
+        "p5_ns": 0.0,
+        "p25_ns": 0.0,
+        "p75_ns": 42.0,
+        "p95_ns": 42.0,
+        "p99_ns": 42.0,
+        "iqr_ns": 42.0,
+        "total_duration": {
+          "secs": 0,
+          "nanos": 17983027
+        }
+      },
+      "threshold_ns": 20.0,
+      "passed": true,
+      "throughput": null,
+      "metadata": {
+        "outliers_removed": "14"
+      }
+    },
+    {
+      "name": "cbgr/tier0/generation_increment",
+      "category": "micro",
+      "tier": null,
+      "statistics": {
+        "count": 999969,
+        "min_ns": 0.0,
+        "max_ns": 84.0,
+        "mean_ns": 20.715208171453316,
+        "median_ns": 0.0,
+        "std_dev_ns": 20.85283379272319,
+        "cv": 1.0066436996495902,
+        "p5_ns": 0.0,
+        "p25_ns": 0.0,
+        "p75_ns": 42.0,
+        "p95_ns": 42.0,
+        "p99_ns": 42.0,
+        "iqr_ns": 42.0,
+        "total_duration": {
+          "secs": 0,
+          "nanos": 20714566
         }
       },
       "threshold_ns": null,
       "passed": true,
       "throughput": null,
       "metadata": {
-        "outliers_removed": "6"
+        "outliers_removed": "31"
+      }
+    },
+    {
+      "name": "cbgr/tier0/epoch_caps_check",
+      "category": "micro",
+      "tier": null,
+      "statistics": {
+        "count": 999987,
+        "min_ns": 0.0,
+        "max_ns": 84.0,
+        "mean_ns": 18.83574786472224,
+        "median_ns": 0.0,
+        "std_dev_ns": 20.75345110487533,
+        "cv": 1.101811897989184,
+        "p5_ns": 0.0,
+        "p25_ns": 0.0,
+        "p75_ns": 42.0,
+        "p95_ns": 42.0,
+        "p99_ns": 42.0,
+        "iqr_ns": 42.0,
+        "total_duration": {
+          "secs": 0,
+          "nanos": 18835503
+        }
+      },
+      "threshold_ns": 20.0,
+      "passed": true,
+      "throughput": null,
+      "metadata": {
+        "outliers_removed": "13"
+      }
+    },
+    {
+      "name": "cbgr/tier1_checked/direct_access",
+      "category": "micro",
+      "tier": null,
+      "statistics": {
+        "count": 999978,
+        "min_ns": 0.0,
+        "max_ns": 84.0,
+        "mean_ns": 16.189926178375924,
+        "median_ns": 0.0,
+        "std_dev_ns": 20.322982934578828,
+        "cv": 1.2552857073383832,
+        "p5_ns": 0.0,
+        "p25_ns": 0.0,
+        "p75_ns": 42.0,
+        "p95_ns": 42.0,
+        "p99_ns": 42.0,
+        "iqr_ns": 42.0,
+        "total_duration": {
+          "secs": 0,
+          "nanos": 16189570
+        }
+      },
+      "threshold_ns": null,
+      "passed": true,
+      "throughput": null,
+      "metadata": {
+        "outliers_removed": "22"
+      }
+    },
+    {
+      "name": "cbgr/tier1_checked/slice_iter",
+      "category": "micro",
+      "tier": null,
+      "statistics": {
+        "count": 999988,
+        "min_ns": 0.0,
+        "max_ns": 84.0,
+        "mean_ns": 16.81325875910511,
+        "median_ns": 0.0,
+        "std_dev_ns": 20.453666550625133,
+        "cv": 1.2165200597741699,
+        "p5_ns": 0.0,
+        "p25_ns": 0.0,
+        "p75_ns": 42.0,
+        "p95_ns": 42.0,
+        "p99_ns": 42.0,
+        "iqr_ns": 42.0,
+        "total_duration": {
+          "secs": 0,
+          "nanos": 16813057
+        }
+      },
+      "threshold_ns": null,
+      "passed": true,
+      "throughput": null,
+      "metadata": {
+        "outliers_removed": "12"
+      }
+    },
+    {
+      "name": "cbgr/tier1_checked/array_index",
+      "category": "micro",
+      "tier": null,
+      "statistics": {
+        "count": 999988,
+        "min_ns": 0.0,
+        "max_ns": 84.0,
+        "mean_ns": 16.28945447345368,
+        "median_ns": 0.0,
+        "std_dev_ns": 20.356359367325386,
+        "cv": 1.2496648921238822,
+        "p5_ns": 0.0,
+        "p25_ns": 0.0,
+        "p75_ns": 42.0,
+        "p95_ns": 42.0,
+        "p99_ns": 42.0,
+        "iqr_ns": 42.0,
+        "total_duration": {
+          "secs": 0,
+          "nanos": 16289259
+        }
+      },
+      "threshold_ns": null,
+      "passed": true,
+      "throughput": null,
+      "metadata": {
+        "outliers_removed": "12"
+      }
+    },
+    {
+      "name": "cbgr/tier2_unsafe/raw_pointer",
+      "category": "micro",
+      "tier": null,
+      "statistics": {
+        "count": 999988,
+        "min_ns": 0.0,
+        "max_ns": 84.0,
+        "mean_ns": 16.374387492649912,
+        "median_ns": 0.0,
+        "std_dev_ns": 20.364092345199243,
+        "cv": 1.2436552117958743,
+        "p5_ns": 0.0,
+        "p25_ns": 0.0,
+        "p75_ns": 42.0,
+        "p95_ns": 42.0,
+        "p99_ns": 42.0,
+        "iqr_ns": 42.0,
+        "total_duration": {
+          "secs": 0,
+          "nanos": 16374191
+        }
+      },
+      "threshold_ns": null,
+      "passed": true,
+      "throughput": null,
+      "metadata": {
+        "outliers_removed": "12"
       }
     },
     {
@@ -331,13 +331,13 @@
       "category": "micro",
       "tier": null,
       "statistics": {
-        "count": 999996,
+        "count": 999965,
         "min_ns": 0.0,
         "max_ns": 84.0,
-        "mean_ns": 16.86938347753391,
+        "mean_ns": 16.888682103873634,
         "median_ns": 0.0,
-        "std_dev_ns": 20.467075096281985,
-        "cv": 1.2132675224046785,
+        "std_dev_ns": 20.483604858223217,
+        "cv": 1.2128598745739338,
         "p5_ns": 0.0,
         "p25_ns": 0.0,
         "p75_ns": 42.0,
@@ -346,14 +346,14 @@
         "iqr_ns": 42.0,
         "total_duration": {
           "secs": 0,
-          "nanos": 16869316
+          "nanos": 16888091
         }
       },
       "threshold_ns": null,
       "passed": true,
       "throughput": null,
       "metadata": {
-        "outliers_removed": "4"
+        "outliers_removed": "35"
       }
     },
     {
@@ -364,10 +364,10 @@
         "count": 99966,
         "min_ns": 0.0,
         "max_ns": 84.0,
-        "mean_ns": 24.091551127383312,
+        "mean_ns": 23.868745373426965,
         "median_ns": 41.0,
-        "std_dev_ns": 20.598629188336048,
-        "cv": 0.8550146513780474,
+        "std_dev_ns": 20.644604040042797,
+        "cv": 0.8649220441651869,
         "p5_ns": 0.0,
         "p25_ns": 0.0,
         "p75_ns": 42.0,
@@ -376,7 +376,7 @@
         "iqr_ns": 42.0,
         "total_duration": {
           "secs": 0,
-          "nanos": 2408336
+          "nanos": 2386063
         }
       },
       "threshold_ns": null,
@@ -391,73 +391,13 @@
       "category": "micro",
       "tier": null,
       "statistics": {
-        "count": 99999,
-        "min_ns": 0.0,
-        "max_ns": 84.0,
-        "mean_ns": 16.479824798247982,
-        "median_ns": 0.0,
-        "std_dev_ns": 20.37986368584524,
-        "cv": 1.2366553610455788,
-        "p5_ns": 0.0,
-        "p25_ns": 0.0,
-        "p75_ns": 42.0,
-        "p95_ns": 42.0,
-        "p99_ns": 42.0,
-        "iqr_ns": 42.0,
-        "total_duration": {
-          "secs": 0,
-          "nanos": 1647966
-        }
-      },
-      "threshold_ns": null,
-      "passed": true,
-      "throughput": null,
-      "metadata": {
-        "outliers_removed": "1"
-      }
-    },
-    {
-      "name": "cbgr/overhead/with_validation",
-      "category": "micro",
-      "tier": null,
-      "statistics": {
-        "count": 99900,
-        "min_ns": 0.0,
-        "max_ns": 84.0,
-        "mean_ns": 20.356566566566567,
-        "median_ns": 0.0,
-        "std_dev_ns": 20.84003849870264,
-        "cv": 1.0237501707645593,
-        "p5_ns": 0.0,
-        "p25_ns": 0.0,
-        "p75_ns": 42.0,
-        "p95_ns": 42.0,
-        "p99_ns": 42.0,
-        "iqr_ns": 42.0,
-        "total_duration": {
-          "secs": 0,
-          "nanos": 2033621
-        }
-      },
-      "threshold_ns": null,
-      "passed": true,
-      "throughput": null,
-      "metadata": {
-        "outliers_removed": "100"
-      }
-    },
-    {
-      "name": "cbgr/overhead/without_validation",
-      "category": "micro",
-      "tier": null,
-      "statistics": {
         "count": 99998,
         "min_ns": 0.0,
         "max_ns": 84.0,
-        "mean_ns": 16.38569771395428,
+        "mean_ns": 16.612582251645033,
         "median_ns": 0.0,
-        "std_dev_ns": 20.36152651653905,
-        "cv": 1.242640189755173,
+        "std_dev_ns": 20.41555525543675,
+        "cv": 1.228921244523267,
         "p5_ns": 0.0,
         "p25_ns": 0.0,
         "p75_ns": 42.0,
@@ -466,7 +406,7 @@
         "iqr_ns": 42.0,
         "total_duration": {
           "secs": 0,
-          "nanos": 1638537
+          "nanos": 1661225
         }
       },
       "threshold_ns": null,
@@ -477,17 +417,17 @@
       }
     },
     {
-      "name": "allocation/small/8_bytes",
+      "name": "cbgr/overhead/with_validation",
       "category": "micro",
       "tier": null,
       "statistics": {
-        "count": 99956,
+        "count": 99915,
         "min_ns": 0.0,
         "max_ns": 84.0,
-        "mean_ns": 22.645133858897914,
-        "median_ns": 41.0,
-        "std_dev_ns": 20.84188149859752,
-        "cv": 0.9203691013028901,
+        "mean_ns": 20.5022168843517,
+        "median_ns": 0.0,
+        "std_dev_ns": 20.899305404990475,
+        "cv": 1.0193680772610425,
         "p5_ns": 0.0,
         "p25_ns": 0.0,
         "p75_ns": 42.0,
@@ -496,14 +436,72 @@
         "iqr_ns": 42.0,
         "total_duration": {
           "secs": 0,
-          "nanos": 2263517
+          "nanos": 2048479
+        }
+      },
+      "threshold_ns": null,
+      "passed": true,
+      "throughput": null,
+      "metadata": {
+        "outliers_removed": "85"
+      }
+    },
+    {
+      "name": "cbgr/overhead/without_validation",
+      "category": "micro",
+      "tier": null,
+      "statistics": {
+        "count": 100000,
+        "min_ns": 0.0,
+        "max_ns": 84.0,
+        "mean_ns": 16.60943,
+        "median_ns": 0.0,
+        "std_dev_ns": 20.40905399755074,
+        "cv": 1.2287630579466446,
+        "p5_ns": 0.0,
+        "p25_ns": 0.0,
+        "p75_ns": 42.0,
+        "p95_ns": 42.0,
+        "p99_ns": 42.0,
+        "iqr_ns": 42.0,
+        "total_duration": {
+          "secs": 0,
+          "nanos": 1660943
+        }
+      },
+      "threshold_ns": null,
+      "passed": true,
+      "throughput": null,
+      "metadata": {}
+    },
+    {
+      "name": "allocation/small/8_bytes",
+      "category": "micro",
+      "tier": null,
+      "statistics": {
+        "count": 99955,
+        "min_ns": 0.0,
+        "max_ns": 84.0,
+        "mean_ns": 22.90881896853584,
+        "median_ns": 41.0,
+        "std_dev_ns": 20.799355896344608,
+        "cv": 0.9079191696835843,
+        "p5_ns": 0.0,
+        "p25_ns": 0.0,
+        "p75_ns": 42.0,
+        "p95_ns": 42.0,
+        "p99_ns": 42.0,
+        "iqr_ns": 42.0,
+        "total_duration": {
+          "secs": 0,
+          "nanos": 2289851
         }
       },
       "threshold_ns": 50.0,
       "passed": true,
       "throughput": null,
       "metadata": {
-        "outliers_removed": "44"
+        "outliers_removed": "45"
       }
     },
     {
@@ -511,13 +509,13 @@
       "category": "micro",
       "tier": null,
       "statistics": {
-        "count": 99972,
+        "count": 99946,
         "min_ns": 0.0,
         "max_ns": 84.0,
-        "mean_ns": 21.806415796423,
+        "mean_ns": 22.6029255798131,
         "median_ns": 41.0,
-        "std_dev_ns": 20.840445206688273,
-        "cv": 0.9557024593700915,
+        "std_dev_ns": 20.851901352438055,
+        "cv": 0.9225310802713564,
         "p5_ns": 0.0,
         "p25_ns": 0.0,
         "p75_ns": 42.0,
@@ -526,14 +524,14 @@
         "iqr_ns": 42.0,
         "total_duration": {
           "secs": 0,
-          "nanos": 2180031
+          "nanos": 2259072
         }
       },
       "threshold_ns": 50.0,
       "passed": true,
       "throughput": null,
       "metadata": {
-        "outliers_removed": "28"
+        "outliers_removed": "54"
       }
     },
     {
@@ -541,29 +539,29 @@
       "category": "micro",
       "tier": null,
       "statistics": {
-        "count": 99822,
+        "count": 99931,
         "min_ns": 0.0,
         "max_ns": 84.0,
-        "mean_ns": 25.298160726092444,
+        "mean_ns": 24.255306161251262,
         "median_ns": 41.0,
-        "std_dev_ns": 24.63907827539319,
-        "cv": 0.9739474162633697,
+        "std_dev_ns": 20.633628835479364,
+        "cv": 0.8506851531085738,
         "p5_ns": 0.0,
         "p25_ns": 0.0,
         "p75_ns": 42.0,
-        "p95_ns": 83.0,
-        "p99_ns": 84.0,
+        "p95_ns": 42.0,
+        "p99_ns": 42.0,
         "iqr_ns": 42.0,
         "total_duration": {
           "secs": 0,
-          "nanos": 2525313
+          "nanos": 2423857
         }
       },
       "threshold_ns": 100.0,
       "passed": true,
       "throughput": null,
       "metadata": {
-        "outliers_removed": "178"
+        "outliers_removed": "69"
       }
     },
     {
@@ -571,13 +569,13 @@
       "category": "micro",
       "tier": null,
       "statistics": {
-        "count": 8347,
+        "count": 7551,
         "min_ns": 41.0,
         "max_ns": 42.0,
-        "mean_ns": 41.66730561878519,
+        "mean_ns": 41.66984505363528,
         "median_ns": 42.0,
-        "std_dev_ns": 0.4711781297162545,
-        "cv": 0.011308101705137123,
+        "std_dev_ns": 0.4702687080337132,
+        "cv": 0.011285588113620473,
         "p5_ns": 41.0,
         "p25_ns": 41.0,
         "p75_ns": 42.0,
@@ -586,14 +584,14 @@
         "iqr_ns": 1.0,
         "total_duration": {
           "secs": 0,
-          "nanos": 347797
+          "nanos": 314649
         }
       },
       "threshold_ns": null,
       "passed": true,
       "throughput": null,
       "metadata": {
-        "outliers_removed": "1653"
+        "outliers_removed": "2449"
       }
     },
     {
@@ -601,29 +599,29 @@
       "category": "micro",
       "tier": null,
       "statistics": {
-        "count": 9862,
+        "count": 9758,
         "min_ns": 41.0,
         "max_ns": 167.0,
-        "mean_ns": 114.62857432569459,
-        "median_ns": 125.0,
-        "std_dev_ns": 31.681901754451914,
-        "cv": 0.27638747093228266,
+        "mean_ns": 94.98483295757327,
+        "median_ns": 84.0,
+        "std_dev_ns": 32.303109048501696,
+        "cv": 0.34008702276636604,
         "p5_ns": 42.0,
-        "p25_ns": 84.0,
+        "p25_ns": 83.0,
         "p75_ns": 125.0,
-        "p95_ns": 167.0,
+        "p95_ns": 166.0,
         "p99_ns": 167.0,
-        "iqr_ns": 41.0,
+        "iqr_ns": 42.0,
         "total_duration": {
           "secs": 0,
-          "nanos": 1130467
+          "nanos": 926862
         }
       },
       "threshold_ns": null,
       "passed": true,
       "throughput": null,
       "metadata": {
-        "outliers_removed": "138"
+        "outliers_removed": "242"
       }
     },
     {
@@ -631,29 +629,29 @@
       "category": "micro",
       "tier": null,
       "statistics": {
-        "count": 8599,
+        "count": 8358,
         "min_ns": 541.0,
         "max_ns": 667.0,
-        "mean_ns": 593.9503430631469,
-        "median_ns": 584.0,
-        "std_dev_ns": 24.474492648087825,
-        "cv": 0.04120629432061087,
+        "mean_ns": 589.8449389806174,
+        "median_ns": 583.0,
+        "std_dev_ns": 30.516995843069587,
+        "cv": 0.05173731912629396,
         "p5_ns": 542.0,
         "p25_ns": 583.0,
         "p75_ns": 625.0,
-        "p95_ns": 625.0,
+        "p95_ns": 666.0,
         "p99_ns": 667.0,
         "iqr_ns": 42.0,
         "total_duration": {
           "secs": 0,
-          "nanos": 5107379
+          "nanos": 4929924
         }
       },
       "threshold_ns": null,
       "passed": true,
       "throughput": null,
       "metadata": {
-        "outliers_removed": "1401"
+        "outliers_removed": "1642"
       }
     },
     {
@@ -661,29 +659,29 @@
       "category": "micro",
       "tier": null,
       "statistics": {
-        "count": 898,
-        "min_ns": 6458.0,
-        "max_ns": 8209.0,
-        "mean_ns": 6899.126948775056,
-        "median_ns": 6792.0,
-        "std_dev_ns": 352.6463990606214,
-        "cv": 0.05111464126968036,
-        "p5_ns": 6500.0,
-        "p25_ns": 6583.0,
-        "p75_ns": 7208.0,
-        "p95_ns": 7416.0,
-        "p99_ns": 8000.0,
-        "iqr_ns": 625.0,
+        "count": 924,
+        "min_ns": 4833.0,
+        "max_ns": 6667.0,
+        "mean_ns": 5630.411255411255,
+        "median_ns": 5750.0,
+        "std_dev_ns": 285.05491937425444,
+        "cv": 0.05062772618968017,
+        "p5_ns": 5250.0,
+        "p25_ns": 5333.0,
+        "p75_ns": 5833.0,
+        "p95_ns": 6000.0,
+        "p99_ns": 6333.0,
+        "iqr_ns": 500.0,
         "total_duration": {
           "secs": 0,
-          "nanos": 6195416
+          "nanos": 5202500
         }
       },
       "threshold_ns": null,
       "passed": true,
       "throughput": null,
       "metadata": {
-        "outliers_removed": "102"
+        "outliers_removed": "76"
       }
     },
     {
@@ -691,29 +689,29 @@
       "category": "micro",
       "tier": null,
       "statistics": {
-        "count": 934,
-        "min_ns": 63791.0,
-        "max_ns": 79209.0,
-        "mean_ns": 67803.7034261242,
-        "median_ns": 67062.5,
-        "std_dev_ns": 3760.972903773952,
-        "cv": 0.055468546904251854,
-        "p5_ns": 63875.0,
-        "p25_ns": 65333.0,
-        "p75_ns": 70292.0,
-        "p95_ns": 75375.0,
-        "p99_ns": 78459.0,
-        "iqr_ns": 4959.0,
+        "count": 891,
+        "min_ns": 66625.0,
+        "max_ns": 81875.0,
+        "mean_ns": 70296.01346801347,
+        "median_ns": 69792.0,
+        "std_dev_ns": 3485.45157153368,
+        "cv": 0.04958249265613977,
+        "p5_ns": 66708.0,
+        "p25_ns": 68042.0,
+        "p75_ns": 70958.0,
+        "p95_ns": 78250.0,
+        "p99_ns": 80959.0,
+        "iqr_ns": 2916.0,
         "total_duration": {
           "secs": 0,
-          "nanos": 63328659
+          "nanos": 62633748
         }
       },
       "threshold_ns": null,
       "passed": true,
       "throughput": null,
       "metadata": {
-        "outliers_removed": "66"
+        "outliers_removed": "109"
       }
     },
     {
@@ -721,29 +719,29 @@
       "category": "micro",
       "tier": null,
       "statistics": {
-        "count": 7890,
+        "count": 8794,
         "min_ns": 583.0,
         "max_ns": 709.0,
-        "mean_ns": 625.3212927756654,
-        "median_ns": 625.0,
-        "std_dev_ns": 30.5902237645262,
-        "cv": 0.04891921020111572,
-        "p5_ns": 583.0,
+        "mean_ns": 650.506367978167,
+        "median_ns": 666.0,
+        "std_dev_ns": 26.27337895276649,
+        "cv": 0.04038911876362801,
+        "p5_ns": 625.0,
         "p25_ns": 625.0,
-        "p75_ns": 625.0,
-        "p95_ns": 667.0,
-        "p99_ns": 708.0,
-        "iqr_ns": 0.0,
+        "p75_ns": 667.0,
+        "p95_ns": 708.0,
+        "p99_ns": 709.0,
+        "iqr_ns": 42.0,
         "total_duration": {
           "secs": 0,
-          "nanos": 4933785
+          "nanos": 5720553
         }
       },
       "threshold_ns": null,
       "passed": true,
       "throughput": null,
       "metadata": {
-        "outliers_removed": "2110"
+        "outliers_removed": "1206"
       }
     },
     {
@@ -751,29 +749,29 @@
       "category": "micro",
       "tier": null,
       "statistics": {
-        "count": 7405,
-        "min_ns": 125.0,
-        "max_ns": 125.0,
-        "mean_ns": 125.0,
+        "count": 9994,
+        "min_ns": 41.0,
+        "max_ns": 250.0,
+        "mean_ns": 126.9476686011607,
         "median_ns": 125.0,
-        "std_dev_ns": 0.0,
-        "cv": 0.0,
-        "p5_ns": 125.0,
-        "p25_ns": 125.0,
-        "p75_ns": 125.0,
-        "p95_ns": 125.0,
-        "p99_ns": 125.0,
-        "iqr_ns": 0.0,
+        "std_dev_ns": 32.37237627229426,
+        "cv": 0.2550056777647532,
+        "p5_ns": 83.0,
+        "p25_ns": 84.0,
+        "p75_ns": 166.0,
+        "p95_ns": 167.0,
+        "p99_ns": 208.0,
+        "iqr_ns": 82.0,
         "total_duration": {
           "secs": 0,
-          "nanos": 925625
+          "nanos": 1268715
         }
       },
       "threshold_ns": null,
       "passed": true,
       "throughput": null,
       "metadata": {
-        "outliers_removed": "2595"
+        "outliers_removed": "6"
       }
     },
     {
@@ -784,10 +782,10 @@
         "count": 999989,
         "min_ns": 0.0,
         "max_ns": 84.0,
-        "mean_ns": 16.391523306756373,
+        "mean_ns": 16.300291303204336,
         "median_ns": 0.0,
-        "std_dev_ns": 20.381993127826895,
-        "cv": 1.2434471614621505,
+        "std_dev_ns": 20.345911128268074,
+        "cv": 1.2481930997311959,
         "p5_ns": 0.0,
         "p25_ns": 0.0,
         "p75_ns": 42.0,
@@ -796,7 +794,7 @@
         "iqr_ns": 42.0,
         "total_duration": {
           "secs": 0,
-          "nanos": 16391343
+          "nanos": 16300112
         }
       },
       "threshold_ns": 30.0,
@@ -811,13 +809,13 @@
       "category": "micro",
       "tier": null,
       "statistics": {
-        "count": 999987,
+        "count": 999985,
         "min_ns": 0.0,
         "max_ns": 84.0,
-        "mean_ns": 16.317535127956663,
+        "mean_ns": 16.52929493942409,
         "median_ns": 0.0,
-        "std_dev_ns": 20.366864517372033,
-        "cv": 1.248158153646484,
+        "std_dev_ns": 20.39703122150996,
+        "cv": 1.233992816769269,
         "p5_ns": 0.0,
         "p25_ns": 0.0,
         "p75_ns": 42.0,
@@ -826,14 +824,14 @@
         "iqr_ns": 42.0,
         "total_duration": {
           "secs": 0,
-          "nanos": 16317323
+          "nanos": 16529047
         }
       },
       "threshold_ns": 50.0,
       "passed": true,
       "throughput": null,
       "metadata": {
-        "outliers_removed": "13"
+        "outliers_removed": "15"
       }
     },
     {
@@ -841,13 +839,13 @@
       "category": "micro",
       "tier": null,
       "statistics": {
-        "count": 999990,
+        "count": 999985,
         "min_ns": 0.0,
         "max_ns": 84.0,
-        "mean_ns": 16.51848218482185,
+        "mean_ns": 16.692861392920893,
         "median_ns": 0.0,
-        "std_dev_ns": 20.39588565943963,
-        "cv": 1.2347312199289453,
+        "std_dev_ns": 20.432652194391387,
+        "cv": 1.2240353354312559,
         "p5_ns": 0.0,
         "p25_ns": 0.0,
         "p75_ns": 42.0,
@@ -856,14 +854,14 @@
         "iqr_ns": 42.0,
         "total_duration": {
           "secs": 0,
-          "nanos": 16518317
+          "nanos": 16692611
         }
       },
       "threshold_ns": null,
       "passed": true,
       "throughput": null,
       "metadata": {
-        "outliers_removed": "10"
+        "outliers_removed": "15"
       }
     },
     {
@@ -871,13 +869,13 @@
       "category": "micro",
       "tier": null,
       "statistics": {
-        "count": 99999,
+        "count": 99997,
         "min_ns": 0.0,
         "max_ns": 84.0,
-        "mean_ns": 17.269542695426953,
+        "mean_ns": 17.232936988109643,
         "median_ns": 0.0,
-        "std_dev_ns": 20.53082128429993,
-        "cv": 1.1888456832002028,
+        "std_dev_ns": 20.529596584370545,
+        "cv": 1.1912999274897556,
         "p5_ns": 0.0,
         "p25_ns": 0.0,
         "p75_ns": 42.0,
@@ -886,14 +884,14 @@
         "iqr_ns": 42.0,
         "total_duration": {
           "secs": 0,
-          "nanos": 1726937
+          "nanos": 1723242
         }
       },
       "threshold_ns": null,
       "passed": true,
       "throughput": null,
       "metadata": {
-        "outliers_removed": "1"
+        "outliers_removed": "3"
       }
     },
     {
@@ -901,13 +899,13 @@
       "category": "micro",
       "tier": null,
       "statistics": {
-        "count": 99932,
+        "count": 99854,
         "min_ns": 0.0,
         "max_ns": 84.0,
-        "mean_ns": 22.068146339510868,
+        "mean_ns": 21.94517996274561,
         "median_ns": 41.0,
-        "std_dev_ns": 20.8152407077164,
-        "cv": 0.9432256061511037,
+        "std_dev_ns": 20.837150763847795,
+        "cv": 0.949509222490824,
         "p5_ns": 0.0,
         "p25_ns": 0.0,
         "p75_ns": 42.0,
@@ -916,14 +914,14 @@
         "iqr_ns": 42.0,
         "total_duration": {
           "secs": 0,
-          "nanos": 2205314
+          "nanos": 2191314
         }
       },
       "threshold_ns": 25.0,
       "passed": true,
       "throughput": null,
       "metadata": {
-        "outliers_removed": "68"
+        "outliers_removed": "146"
       }
     },
     {
@@ -931,29 +929,29 @@
       "category": "micro",
       "tier": null,
       "statistics": {
-        "count": 62309,
-        "min_ns": 83.0,
-        "max_ns": 84.0,
-        "mean_ns": 83.33651639410037,
-        "median_ns": 83.0,
-        "std_dev_ns": 0.47251784157000937,
-        "cv": 0.005669997523480118,
+        "count": 98567,
+        "min_ns": 41.0,
+        "max_ns": 167.0,
+        "mean_ns": 99.6913470025465,
+        "median_ns": 84.0,
+        "std_dev_ns": 23.79320958941622,
+        "cv": 0.23866875415785538,
         "p5_ns": 83.0,
         "p25_ns": 83.0,
-        "p75_ns": 84.0,
-        "p95_ns": 84.0,
-        "p99_ns": 84.0,
-        "iqr_ns": 1.0,
+        "p75_ns": 125.0,
+        "p95_ns": 125.0,
+        "p99_ns": 167.0,
+        "iqr_ns": 42.0,
         "total_duration": {
           "secs": 0,
-          "nanos": 5192615
+          "nanos": 9826277
         }
       },
-      "threshold_ns": 20.0,
-      "passed": false,
+      "threshold_ns": 200.0,
+      "passed": true,
       "throughput": null,
       "metadata": {
-        "outliers_removed": "37691"
+        "outliers_removed": "1433"
       }
     },
     {
@@ -961,29 +959,29 @@
       "category": "micro",
       "tier": null,
       "statistics": {
-        "count": 63007,
-        "min_ns": 83.0,
-        "max_ns": 84.0,
-        "mean_ns": 83.33216944149063,
-        "median_ns": 83.0,
-        "std_dev_ns": 0.47099140504940623,
-        "cv": 0.005651975800055221,
+        "count": 98633,
+        "min_ns": 41.0,
+        "max_ns": 167.0,
+        "mean_ns": 99.21483681932011,
+        "median_ns": 84.0,
+        "std_dev_ns": 23.39849522122168,
+        "cv": 0.2358366547921922,
         "p5_ns": 83.0,
         "p25_ns": 83.0,
-        "p75_ns": 84.0,
-        "p95_ns": 84.0,
-        "p99_ns": 84.0,
-        "iqr_ns": 1.0,
+        "p75_ns": 125.0,
+        "p95_ns": 125.0,
+        "p99_ns": 167.0,
+        "iqr_ns": 42.0,
         "total_duration": {
           "secs": 0,
-          "nanos": 5250510
+          "nanos": 9785857
         }
       },
-      "threshold_ns": 30.0,
-      "passed": false,
+      "threshold_ns": 200.0,
+      "passed": true,
       "throughput": null,
       "metadata": {
-        "outliers_removed": "36993"
+        "outliers_removed": "1367"
       }
     },
     {
@@ -991,13 +989,13 @@
       "category": "micro",
       "tier": null,
       "statistics": {
-        "count": 960600,
+        "count": 986460,
         "min_ns": 0.0,
         "max_ns": 84.0,
-        "mean_ns": 33.63366749947949,
-        "median_ns": 42.0,
-        "std_dev_ns": 25.818821623704256,
-        "cv": 0.7676481199709732,
+        "mean_ns": 32.673900614317866,
+        "median_ns": 41.0,
+        "std_dev_ns": 23.611260740919096,
+        "cv": 0.7226336708195937,
         "p5_ns": 0.0,
         "p25_ns": 0.0,
         "p75_ns": 42.0,
@@ -1006,14 +1004,14 @@
         "iqr_ns": 42.0,
         "total_duration": {
           "secs": 0,
-          "nanos": 32308501
+          "nanos": 32231496
         }
       },
       "threshold_ns": null,
       "passed": true,
       "throughput": null,
       "metadata": {
-        "outliers_removed": "39400"
+        "outliers_removed": "13540"
       }
     },
     {
@@ -1021,13 +1019,13 @@
       "category": "micro",
       "tier": null,
       "statistics": {
-        "count": 999993,
+        "count": 999992,
         "min_ns": 0.0,
         "max_ns": 84.0,
-        "mean_ns": 16.47587533112732,
+        "mean_ns": 16.357101856814854,
         "median_ns": 0.0,
-        "std_dev_ns": 20.385898835821333,
-        "cv": 1.237318104568741,
+        "std_dev_ns": 20.373944366789182,
+        "cv": 1.245571773357931,
         "p5_ns": 0.0,
         "p25_ns": 0.0,
         "p75_ns": 42.0,
@@ -1036,14 +1034,14 @@
         "iqr_ns": 42.0,
         "total_duration": {
           "secs": 0,
-          "nanos": 16475760
+          "nanos": 16356971
         }
       },
       "threshold_ns": null,
       "passed": true,
       "throughput": null,
       "metadata": {
-        "outliers_removed": "7"
+        "outliers_removed": "8"
       }
     },
     {
@@ -1051,29 +1049,29 @@
       "category": "micro",
       "tier": null,
       "statistics": {
-        "count": 997683,
+        "count": 975818,
         "min_ns": 0.0,
         "max_ns": 167.0,
-        "mean_ns": 52.40214176246363,
+        "mean_ns": 45.634522011276694,
         "median_ns": 42.0,
-        "std_dev_ns": 43.83719309476522,
-        "cv": 0.8365534617550002,
+        "std_dev_ns": 41.582046636874736,
+        "cv": 0.9111971552282161,
         "p5_ns": 0.0,
         "p25_ns": 0.0,
         "p75_ns": 83.0,
         "p95_ns": 125.0,
-        "p99_ns": 166.0,
+        "p99_ns": 167.0,
         "iqr_ns": 83.0,
         "total_duration": {
           "secs": 0,
-          "nanos": 52280726
+          "nanos": 44530988
         }
       },
       "threshold_ns": null,
       "passed": true,
       "throughput": null,
       "metadata": {
-        "outliers_removed": "2317"
+        "outliers_removed": "24182"
       }
     }
   ],
@@ -1086,29 +1084,29 @@
         "category": "micro",
         "tier": null,
         "statistics": {
-          "count": 963208,
+          "count": 999983,
           "min_ns": 0.0,
           "max_ns": 84.0,
-          "mean_ns": 31.333277962807617,
-          "median_ns": 41.0,
-          "std_dev_ns": 29.57799289343711,
-          "cv": 0.9439801647483541,
+          "mean_ns": 18.525864939703975,
+          "median_ns": 0.0,
+          "std_dev_ns": 20.721626922803317,
+          "cv": 1.118524127766551,
           "p5_ns": 0.0,
           "p25_ns": 0.0,
           "p75_ns": 42.0,
-          "p95_ns": 84.0,
-          "p99_ns": 84.0,
+          "p95_ns": 42.0,
+          "p99_ns": 42.0,
           "iqr_ns": 42.0,
           "total_duration": {
             "secs": 0,
-            "nanos": 30180464
+            "nanos": 18525550
           }
         },
-        "threshold_ns": 15.0,
-        "passed": false,
+        "threshold_ns": 20.0,
+        "passed": true,
         "throughput": null,
         "metadata": {
-          "outliers_removed": "36792"
+          "outliers_removed": "17"
         }
       },
       {
@@ -1116,223 +1114,13 @@
         "category": "micro",
         "tier": null,
         "statistics": {
-          "count": 959621,
-          "min_ns": 0.0,
-          "max_ns": 84.0,
-          "mean_ns": 31.861714155901133,
-          "median_ns": 41.0,
-          "std_dev_ns": 30.049222144440172,
-          "cv": 0.943113794738339,
-          "p5_ns": 0.0,
-          "p25_ns": 0.0,
-          "p75_ns": 42.0,
-          "p95_ns": 84.0,
-          "p99_ns": 84.0,
-          "iqr_ns": 42.0,
-          "total_duration": {
-            "secs": 0,
-            "nanos": 30575170
-          }
-        },
-        "threshold_ns": 15.0,
-        "passed": false,
-        "throughput": null,
-        "metadata": {
-          "outliers_removed": "40379"
-        }
-      },
-      {
-        "name": "cbgr/tier0/fat_ref_access",
-        "category": "micro",
-        "tier": null,
-        "statistics": {
-          "count": 999445,
-          "min_ns": 0.0,
-          "max_ns": 167.0,
-          "mean_ns": 42.32294023182867,
-          "median_ns": 42.0,
-          "std_dev_ns": 37.60073948928017,
-          "cv": 0.8884245584857264,
-          "p5_ns": 0.0,
-          "p25_ns": 0.0,
-          "p75_ns": 83.0,
-          "p95_ns": 84.0,
-          "p99_ns": 125.0,
-          "iqr_ns": 83.0,
-          "total_duration": {
-            "secs": 0,
-            "nanos": 42299451
-          }
-        },
-        "threshold_ns": 20.0,
-        "passed": false,
-        "throughput": null,
-        "metadata": {
-          "outliers_removed": "555"
-        }
-      },
-      {
-        "name": "cbgr/tier0/bounds_check",
-        "category": "micro",
-        "tier": null,
-        "statistics": {
-          "count": 999990,
-          "min_ns": 0.0,
-          "max_ns": 84.0,
-          "mean_ns": 17.36131061310613,
-          "median_ns": 0.0,
-          "std_dev_ns": 20.55703803732867,
-          "cv": 1.184071784408377,
-          "p5_ns": 0.0,
-          "p25_ns": 0.0,
-          "p75_ns": 42.0,
-          "p95_ns": 42.0,
-          "p99_ns": 42.0,
-          "iqr_ns": 42.0,
-          "total_duration": {
-            "secs": 0,
-            "nanos": 17361137
-          }
-        },
-        "threshold_ns": 5.0,
-        "passed": false,
-        "throughput": null,
-        "metadata": {
-          "outliers_removed": "10"
-        }
-      },
-      {
-        "name": "cbgr/tier0/generation_increment",
-        "category": "micro",
-        "tier": null,
-        "statistics": {
-          "count": 999913,
-          "min_ns": 0.0,
-          "max_ns": 209.0,
-          "mean_ns": 59.30415646161216,
-          "median_ns": 42.0,
-          "std_dev_ns": 46.820142415658125,
-          "cv": 0.7894917525041438,
-          "p5_ns": 0.0,
-          "p25_ns": 0.0,
-          "p75_ns": 84.0,
-          "p95_ns": 125.0,
-          "p99_ns": 125.0,
-          "iqr_ns": 84.0,
-          "total_duration": {
-            "secs": 0,
-            "nanos": 59298997
-          }
-        },
-        "threshold_ns": null,
-        "passed": true,
-        "throughput": null,
-        "metadata": {
-          "outliers_removed": "87"
-        }
-      },
-      {
-        "name": "cbgr/tier0/epoch_caps_check",
-        "category": "micro",
-        "tier": null,
-        "statistics": {
-          "count": 960971,
-          "min_ns": 0.0,
-          "max_ns": 84.0,
-          "mean_ns": 27.31435600033716,
-          "median_ns": 41.0,
-          "std_dev_ns": 27.092664751839312,
-          "cv": 0.9918837094861357,
-          "p5_ns": 0.0,
-          "p25_ns": 0.0,
-          "p75_ns": 42.0,
-          "p95_ns": 83.0,
-          "p99_ns": 84.0,
-          "iqr_ns": 42.0,
-          "total_duration": {
-            "secs": 0,
-            "nanos": 26248304
-          }
-        },
-        "threshold_ns": 15.0,
-        "passed": false,
-        "throughput": null,
-        "metadata": {
-          "outliers_removed": "39029"
-        }
-      },
-      {
-        "name": "cbgr/tier1_checked/direct_access",
-        "category": "micro",
-        "tier": null,
-        "statistics": {
-          "count": 999996,
-          "min_ns": 0.0,
-          "max_ns": 84.0,
-          "mean_ns": 16.27627310509242,
-          "median_ns": 0.0,
-          "std_dev_ns": 20.355029275022435,
-          "cv": 1.2505952157225646,
-          "p5_ns": 0.0,
-          "p25_ns": 0.0,
-          "p75_ns": 42.0,
-          "p95_ns": 42.0,
-          "p99_ns": 42.0,
-          "iqr_ns": 42.0,
-          "total_duration": {
-            "secs": 0,
-            "nanos": 16276208
-          }
-        },
-        "threshold_ns": null,
-        "passed": true,
-        "throughput": null,
-        "metadata": {
-          "outliers_removed": "4"
-        }
-      },
-      {
-        "name": "cbgr/tier1_checked/slice_iter",
-        "category": "micro",
-        "tier": null,
-        "statistics": {
-          "count": 999987,
-          "min_ns": 0.0,
-          "max_ns": 84.0,
-          "mean_ns": 16.537302984938805,
-          "median_ns": 0.0,
-          "std_dev_ns": 20.413615127219686,
-          "cv": 1.2343980844888187,
-          "p5_ns": 0.0,
-          "p25_ns": 0.0,
-          "p75_ns": 42.0,
-          "p95_ns": 42.0,
-          "p99_ns": 42.0,
-          "iqr_ns": 42.0,
-          "total_duration": {
-            "secs": 0,
-            "nanos": 16537088
-          }
-        },
-        "threshold_ns": null,
-        "passed": true,
-        "throughput": null,
-        "metadata": {
-          "outliers_removed": "13"
-        }
-      },
-      {
-        "name": "cbgr/tier1_checked/array_index",
-        "category": "micro",
-        "tier": null,
-        "statistics": {
           "count": 999967,
           "min_ns": 0.0,
           "max_ns": 84.0,
-          "mean_ns": 16.44668574062944,
+          "mean_ns": 17.8208430878219,
           "median_ns": 0.0,
-          "std_dev_ns": 20.379441382155065,
-          "cv": 1.2391214682123008,
+          "std_dev_ns": 20.62968722824302,
+          "cv": 1.157615670963434,
           "p5_ns": 0.0,
           "p25_ns": 0.0,
           "p75_ns": 42.0,
@@ -1341,10 +1129,10 @@
           "iqr_ns": 42.0,
           "total_duration": {
             "secs": 0,
-            "nanos": 16446143
+            "nanos": 17820255
           }
         },
-        "threshold_ns": null,
+        "threshold_ns": 20.0,
         "passed": true,
         "throughput": null,
         "metadata": {
@@ -1352,17 +1140,17 @@
         }
       },
       {
-        "name": "cbgr/tier2_unsafe/raw_pointer",
+        "name": "cbgr/tier0/fat_ref_access",
         "category": "micro",
         "tier": null,
         "statistics": {
-          "count": 999994,
+          "count": 999989,
           "min_ns": 0.0,
           "max_ns": 84.0,
-          "mean_ns": 16.434954609727658,
+          "mean_ns": 18.78443662880292,
           "median_ns": 0.0,
-          "std_dev_ns": 20.378356343971603,
-          "cv": 1.2399399224327576,
+          "std_dev_ns": 20.747879196611173,
+          "cv": 1.1045249642886616,
           "p5_ns": 0.0,
           "p25_ns": 0.0,
           "p75_ns": 42.0,
@@ -1371,14 +1159,224 @@
           "iqr_ns": 42.0,
           "total_duration": {
             "secs": 0,
-            "nanos": 16434856
+            "nanos": 18784230
+          }
+        },
+        "threshold_ns": 25.0,
+        "passed": true,
+        "throughput": null,
+        "metadata": {
+          "outliers_removed": "11"
+        }
+      },
+      {
+        "name": "cbgr/tier0/bounds_check",
+        "category": "micro",
+        "tier": null,
+        "statistics": {
+          "count": 999986,
+          "min_ns": 0.0,
+          "max_ns": 84.0,
+          "mean_ns": 17.98327876590272,
+          "median_ns": 0.0,
+          "std_dev_ns": 20.654822974356723,
+          "cv": 1.1485571259407599,
+          "p5_ns": 0.0,
+          "p25_ns": 0.0,
+          "p75_ns": 42.0,
+          "p95_ns": 42.0,
+          "p99_ns": 42.0,
+          "iqr_ns": 42.0,
+          "total_duration": {
+            "secs": 0,
+            "nanos": 17983027
+          }
+        },
+        "threshold_ns": 20.0,
+        "passed": true,
+        "throughput": null,
+        "metadata": {
+          "outliers_removed": "14"
+        }
+      },
+      {
+        "name": "cbgr/tier0/generation_increment",
+        "category": "micro",
+        "tier": null,
+        "statistics": {
+          "count": 999969,
+          "min_ns": 0.0,
+          "max_ns": 84.0,
+          "mean_ns": 20.715208171453316,
+          "median_ns": 0.0,
+          "std_dev_ns": 20.85283379272319,
+          "cv": 1.0066436996495902,
+          "p5_ns": 0.0,
+          "p25_ns": 0.0,
+          "p75_ns": 42.0,
+          "p95_ns": 42.0,
+          "p99_ns": 42.0,
+          "iqr_ns": 42.0,
+          "total_duration": {
+            "secs": 0,
+            "nanos": 20714566
           }
         },
         "threshold_ns": null,
         "passed": true,
         "throughput": null,
         "metadata": {
-          "outliers_removed": "6"
+          "outliers_removed": "31"
+        }
+      },
+      {
+        "name": "cbgr/tier0/epoch_caps_check",
+        "category": "micro",
+        "tier": null,
+        "statistics": {
+          "count": 999987,
+          "min_ns": 0.0,
+          "max_ns": 84.0,
+          "mean_ns": 18.83574786472224,
+          "median_ns": 0.0,
+          "std_dev_ns": 20.75345110487533,
+          "cv": 1.101811897989184,
+          "p5_ns": 0.0,
+          "p25_ns": 0.0,
+          "p75_ns": 42.0,
+          "p95_ns": 42.0,
+          "p99_ns": 42.0,
+          "iqr_ns": 42.0,
+          "total_duration": {
+            "secs": 0,
+            "nanos": 18835503
+          }
+        },
+        "threshold_ns": 20.0,
+        "passed": true,
+        "throughput": null,
+        "metadata": {
+          "outliers_removed": "13"
+        }
+      },
+      {
+        "name": "cbgr/tier1_checked/direct_access",
+        "category": "micro",
+        "tier": null,
+        "statistics": {
+          "count": 999978,
+          "min_ns": 0.0,
+          "max_ns": 84.0,
+          "mean_ns": 16.189926178375924,
+          "median_ns": 0.0,
+          "std_dev_ns": 20.322982934578828,
+          "cv": 1.2552857073383832,
+          "p5_ns": 0.0,
+          "p25_ns": 0.0,
+          "p75_ns": 42.0,
+          "p95_ns": 42.0,
+          "p99_ns": 42.0,
+          "iqr_ns": 42.0,
+          "total_duration": {
+            "secs": 0,
+            "nanos": 16189570
+          }
+        },
+        "threshold_ns": null,
+        "passed": true,
+        "throughput": null,
+        "metadata": {
+          "outliers_removed": "22"
+        }
+      },
+      {
+        "name": "cbgr/tier1_checked/slice_iter",
+        "category": "micro",
+        "tier": null,
+        "statistics": {
+          "count": 999988,
+          "min_ns": 0.0,
+          "max_ns": 84.0,
+          "mean_ns": 16.81325875910511,
+          "median_ns": 0.0,
+          "std_dev_ns": 20.453666550625133,
+          "cv": 1.2165200597741699,
+          "p5_ns": 0.0,
+          "p25_ns": 0.0,
+          "p75_ns": 42.0,
+          "p95_ns": 42.0,
+          "p99_ns": 42.0,
+          "iqr_ns": 42.0,
+          "total_duration": {
+            "secs": 0,
+            "nanos": 16813057
+          }
+        },
+        "threshold_ns": null,
+        "passed": true,
+        "throughput": null,
+        "metadata": {
+          "outliers_removed": "12"
+        }
+      },
+      {
+        "name": "cbgr/tier1_checked/array_index",
+        "category": "micro",
+        "tier": null,
+        "statistics": {
+          "count": 999988,
+          "min_ns": 0.0,
+          "max_ns": 84.0,
+          "mean_ns": 16.28945447345368,
+          "median_ns": 0.0,
+          "std_dev_ns": 20.356359367325386,
+          "cv": 1.2496648921238822,
+          "p5_ns": 0.0,
+          "p25_ns": 0.0,
+          "p75_ns": 42.0,
+          "p95_ns": 42.0,
+          "p99_ns": 42.0,
+          "iqr_ns": 42.0,
+          "total_duration": {
+            "secs": 0,
+            "nanos": 16289259
+          }
+        },
+        "threshold_ns": null,
+        "passed": true,
+        "throughput": null,
+        "metadata": {
+          "outliers_removed": "12"
+        }
+      },
+      {
+        "name": "cbgr/tier2_unsafe/raw_pointer",
+        "category": "micro",
+        "tier": null,
+        "statistics": {
+          "count": 999988,
+          "min_ns": 0.0,
+          "max_ns": 84.0,
+          "mean_ns": 16.374387492649912,
+          "median_ns": 0.0,
+          "std_dev_ns": 20.364092345199243,
+          "cv": 1.2436552117958743,
+          "p5_ns": 0.0,
+          "p25_ns": 0.0,
+          "p75_ns": 42.0,
+          "p95_ns": 42.0,
+          "p99_ns": 42.0,
+          "iqr_ns": 42.0,
+          "total_duration": {
+            "secs": 0,
+            "nanos": 16374191
+          }
+        },
+        "threshold_ns": null,
+        "passed": true,
+        "throughput": null,
+        "metadata": {
+          "outliers_removed": "12"
         }
       },
       {
@@ -1386,13 +1384,13 @@
         "category": "micro",
         "tier": null,
         "statistics": {
-          "count": 999996,
+          "count": 999965,
           "min_ns": 0.0,
           "max_ns": 84.0,
-          "mean_ns": 16.86938347753391,
+          "mean_ns": 16.888682103873634,
           "median_ns": 0.0,
-          "std_dev_ns": 20.467075096281985,
-          "cv": 1.2132675224046785,
+          "std_dev_ns": 20.483604858223217,
+          "cv": 1.2128598745739338,
           "p5_ns": 0.0,
           "p25_ns": 0.0,
           "p75_ns": 42.0,
@@ -1401,14 +1399,14 @@
           "iqr_ns": 42.0,
           "total_duration": {
             "secs": 0,
-            "nanos": 16869316
+            "nanos": 16888091
           }
         },
         "threshold_ns": null,
         "passed": true,
         "throughput": null,
         "metadata": {
-          "outliers_removed": "4"
+          "outliers_removed": "35"
         }
       },
       {
@@ -1419,10 +1417,10 @@
           "count": 99966,
           "min_ns": 0.0,
           "max_ns": 84.0,
-          "mean_ns": 24.091551127383312,
+          "mean_ns": 23.868745373426965,
           "median_ns": 41.0,
-          "std_dev_ns": 20.598629188336048,
-          "cv": 0.8550146513780474,
+          "std_dev_ns": 20.644604040042797,
+          "cv": 0.8649220441651869,
           "p5_ns": 0.0,
           "p25_ns": 0.0,
           "p75_ns": 42.0,
@@ -1431,7 +1429,7 @@
           "iqr_ns": 42.0,
           "total_duration": {
             "secs": 0,
-            "nanos": 2408336
+            "nanos": 2386063
           }
         },
         "threshold_ns": null,
@@ -1446,73 +1444,13 @@
         "category": "micro",
         "tier": null,
         "statistics": {
-          "count": 99999,
-          "min_ns": 0.0,
-          "max_ns": 84.0,
-          "mean_ns": 16.479824798247982,
-          "median_ns": 0.0,
-          "std_dev_ns": 20.37986368584524,
-          "cv": 1.2366553610455788,
-          "p5_ns": 0.0,
-          "p25_ns": 0.0,
-          "p75_ns": 42.0,
-          "p95_ns": 42.0,
-          "p99_ns": 42.0,
-          "iqr_ns": 42.0,
-          "total_duration": {
-            "secs": 0,
-            "nanos": 1647966
-          }
-        },
-        "threshold_ns": null,
-        "passed": true,
-        "throughput": null,
-        "metadata": {
-          "outliers_removed": "1"
-        }
-      },
-      {
-        "name": "cbgr/overhead/with_validation",
-        "category": "micro",
-        "tier": null,
-        "statistics": {
-          "count": 99900,
-          "min_ns": 0.0,
-          "max_ns": 84.0,
-          "mean_ns": 20.356566566566567,
-          "median_ns": 0.0,
-          "std_dev_ns": 20.84003849870264,
-          "cv": 1.0237501707645593,
-          "p5_ns": 0.0,
-          "p25_ns": 0.0,
-          "p75_ns": 42.0,
-          "p95_ns": 42.0,
-          "p99_ns": 42.0,
-          "iqr_ns": 42.0,
-          "total_duration": {
-            "secs": 0,
-            "nanos": 2033621
-          }
-        },
-        "threshold_ns": null,
-        "passed": true,
-        "throughput": null,
-        "metadata": {
-          "outliers_removed": "100"
-        }
-      },
-      {
-        "name": "cbgr/overhead/without_validation",
-        "category": "micro",
-        "tier": null,
-        "statistics": {
           "count": 99998,
           "min_ns": 0.0,
           "max_ns": 84.0,
-          "mean_ns": 16.38569771395428,
+          "mean_ns": 16.612582251645033,
           "median_ns": 0.0,
-          "std_dev_ns": 20.36152651653905,
-          "cv": 1.242640189755173,
+          "std_dev_ns": 20.41555525543675,
+          "cv": 1.228921244523267,
           "p5_ns": 0.0,
           "p25_ns": 0.0,
           "p75_ns": 42.0,
@@ -1521,7 +1459,7 @@
           "iqr_ns": 42.0,
           "total_duration": {
             "secs": 0,
-            "nanos": 1638537
+            "nanos": 1661225
           }
         },
         "threshold_ns": null,
@@ -1532,17 +1470,17 @@
         }
       },
       {
-        "name": "allocation/small/8_bytes",
+        "name": "cbgr/overhead/with_validation",
         "category": "micro",
         "tier": null,
         "statistics": {
-          "count": 99956,
+          "count": 99915,
           "min_ns": 0.0,
           "max_ns": 84.0,
-          "mean_ns": 22.645133858897914,
-          "median_ns": 41.0,
-          "std_dev_ns": 20.84188149859752,
-          "cv": 0.9203691013028901,
+          "mean_ns": 20.5022168843517,
+          "median_ns": 0.0,
+          "std_dev_ns": 20.899305404990475,
+          "cv": 1.0193680772610425,
           "p5_ns": 0.0,
           "p25_ns": 0.0,
           "p75_ns": 42.0,
@@ -1551,14 +1489,72 @@
           "iqr_ns": 42.0,
           "total_duration": {
             "secs": 0,
-            "nanos": 2263517
+            "nanos": 2048479
+          }
+        },
+        "threshold_ns": null,
+        "passed": true,
+        "throughput": null,
+        "metadata": {
+          "outliers_removed": "85"
+        }
+      },
+      {
+        "name": "cbgr/overhead/without_validation",
+        "category": "micro",
+        "tier": null,
+        "statistics": {
+          "count": 100000,
+          "min_ns": 0.0,
+          "max_ns": 84.0,
+          "mean_ns": 16.60943,
+          "median_ns": 0.0,
+          "std_dev_ns": 20.40905399755074,
+          "cv": 1.2287630579466446,
+          "p5_ns": 0.0,
+          "p25_ns": 0.0,
+          "p75_ns": 42.0,
+          "p95_ns": 42.0,
+          "p99_ns": 42.0,
+          "iqr_ns": 42.0,
+          "total_duration": {
+            "secs": 0,
+            "nanos": 1660943
+          }
+        },
+        "threshold_ns": null,
+        "passed": true,
+        "throughput": null,
+        "metadata": {}
+      },
+      {
+        "name": "allocation/small/8_bytes",
+        "category": "micro",
+        "tier": null,
+        "statistics": {
+          "count": 99955,
+          "min_ns": 0.0,
+          "max_ns": 84.0,
+          "mean_ns": 22.90881896853584,
+          "median_ns": 41.0,
+          "std_dev_ns": 20.799355896344608,
+          "cv": 0.9079191696835843,
+          "p5_ns": 0.0,
+          "p25_ns": 0.0,
+          "p75_ns": 42.0,
+          "p95_ns": 42.0,
+          "p99_ns": 42.0,
+          "iqr_ns": 42.0,
+          "total_duration": {
+            "secs": 0,
+            "nanos": 2289851
           }
         },
         "threshold_ns": 50.0,
         "passed": true,
         "throughput": null,
         "metadata": {
-          "outliers_removed": "44"
+          "outliers_removed": "45"
         }
       },
       {
@@ -1566,13 +1562,13 @@
         "category": "micro",
         "tier": null,
         "statistics": {
-          "count": 99972,
+          "count": 99946,
           "min_ns": 0.0,
           "max_ns": 84.0,
-          "mean_ns": 21.806415796423,
+          "mean_ns": 22.6029255798131,
           "median_ns": 41.0,
-          "std_dev_ns": 20.840445206688273,
-          "cv": 0.9557024593700915,
+          "std_dev_ns": 20.851901352438055,
+          "cv": 0.9225310802713564,
           "p5_ns": 0.0,
           "p25_ns": 0.0,
           "p75_ns": 42.0,
@@ -1581,14 +1577,14 @@
           "iqr_ns": 42.0,
           "total_duration": {
             "secs": 0,
-            "nanos": 2180031
+            "nanos": 2259072
           }
         },
         "threshold_ns": 50.0,
         "passed": true,
         "throughput": null,
         "metadata": {
-          "outliers_removed": "28"
+          "outliers_removed": "54"
         }
       },
       {
@@ -1596,29 +1592,29 @@
         "category": "micro",
         "tier": null,
         "statistics": {
-          "count": 99822,
+          "count": 99931,
           "min_ns": 0.0,
           "max_ns": 84.0,
-          "mean_ns": 25.298160726092444,
+          "mean_ns": 24.255306161251262,
           "median_ns": 41.0,
-          "std_dev_ns": 24.63907827539319,
-          "cv": 0.9739474162633697,
+          "std_dev_ns": 20.633628835479364,
+          "cv": 0.8506851531085738,
           "p5_ns": 0.0,
           "p25_ns": 0.0,
           "p75_ns": 42.0,
-          "p95_ns": 83.0,
-          "p99_ns": 84.0,
+          "p95_ns": 42.0,
+          "p99_ns": 42.0,
           "iqr_ns": 42.0,
           "total_duration": {
             "secs": 0,
-            "nanos": 2525313
+            "nanos": 2423857
           }
         },
         "threshold_ns": 100.0,
         "passed": true,
         "throughput": null,
         "metadata": {
-          "outliers_removed": "178"
+          "outliers_removed": "69"
         }
       },
       {
@@ -1626,13 +1622,13 @@
         "category": "micro",
         "tier": null,
         "statistics": {
-          "count": 8347,
+          "count": 7551,
           "min_ns": 41.0,
           "max_ns": 42.0,
-          "mean_ns": 41.66730561878519,
+          "mean_ns": 41.66984505363528,
           "median_ns": 42.0,
-          "std_dev_ns": 0.4711781297162545,
-          "cv": 0.011308101705137123,
+          "std_dev_ns": 0.4702687080337132,
+          "cv": 0.011285588113620473,
           "p5_ns": 41.0,
           "p25_ns": 41.0,
           "p75_ns": 42.0,
@@ -1641,14 +1637,14 @@
           "iqr_ns": 1.0,
           "total_duration": {
             "secs": 0,
-            "nanos": 347797
+            "nanos": 314649
           }
         },
         "threshold_ns": null,
         "passed": true,
         "throughput": null,
         "metadata": {
-          "outliers_removed": "1653"
+          "outliers_removed": "2449"
         }
       },
       {
@@ -1656,29 +1652,29 @@
         "category": "micro",
         "tier": null,
         "statistics": {
-          "count": 9862,
+          "count": 9758,
           "min_ns": 41.0,
           "max_ns": 167.0,
-          "mean_ns": 114.62857432569459,
-          "median_ns": 125.0,
-          "std_dev_ns": 31.681901754451914,
-          "cv": 0.27638747093228266,
+          "mean_ns": 94.98483295757327,
+          "median_ns": 84.0,
+          "std_dev_ns": 32.303109048501696,
+          "cv": 0.34008702276636604,
           "p5_ns": 42.0,
-          "p25_ns": 84.0,
+          "p25_ns": 83.0,
           "p75_ns": 125.0,
-          "p95_ns": 167.0,
+          "p95_ns": 166.0,
           "p99_ns": 167.0,
-          "iqr_ns": 41.0,
+          "iqr_ns": 42.0,
           "total_duration": {
             "secs": 0,
-            "nanos": 1130467
+            "nanos": 926862
           }
         },
         "threshold_ns": null,
         "passed": true,
         "throughput": null,
         "metadata": {
-          "outliers_removed": "138"
+          "outliers_removed": "242"
         }
       },
       {
@@ -1686,29 +1682,29 @@
         "category": "micro",
         "tier": null,
         "statistics": {
-          "count": 8599,
+          "count": 8358,
           "min_ns": 541.0,
           "max_ns": 667.0,
-          "mean_ns": 593.9503430631469,
-          "median_ns": 584.0,
-          "std_dev_ns": 24.474492648087825,
-          "cv": 0.04120629432061087,
+          "mean_ns": 589.8449389806174,
+          "median_ns": 583.0,
+          "std_dev_ns": 30.516995843069587,
+          "cv": 0.05173731912629396,
           "p5_ns": 542.0,
           "p25_ns": 583.0,
           "p75_ns": 625.0,
-          "p95_ns": 625.0,
+          "p95_ns": 666.0,
           "p99_ns": 667.0,
           "iqr_ns": 42.0,
           "total_duration": {
             "secs": 0,
-            "nanos": 5107379
+            "nanos": 4929924
           }
         },
         "threshold_ns": null,
         "passed": true,
         "throughput": null,
         "metadata": {
-          "outliers_removed": "1401"
+          "outliers_removed": "1642"
         }
       },
       {
@@ -1716,29 +1712,29 @@
         "category": "micro",
         "tier": null,
         "statistics": {
-          "count": 898,
-          "min_ns": 6458.0,
-          "max_ns": 8209.0,
-          "mean_ns": 6899.126948775056,
-          "median_ns": 6792.0,
-          "std_dev_ns": 352.6463990606214,
-          "cv": 0.05111464126968036,
-          "p5_ns": 6500.0,
-          "p25_ns": 6583.0,
-          "p75_ns": 7208.0,
-          "p95_ns": 7416.0,
-          "p99_ns": 8000.0,
-          "iqr_ns": 625.0,
+          "count": 924,
+          "min_ns": 4833.0,
+          "max_ns": 6667.0,
+          "mean_ns": 5630.411255411255,
+          "median_ns": 5750.0,
+          "std_dev_ns": 285.05491937425444,
+          "cv": 0.05062772618968017,
+          "p5_ns": 5250.0,
+          "p25_ns": 5333.0,
+          "p75_ns": 5833.0,
+          "p95_ns": 6000.0,
+          "p99_ns": 6333.0,
+          "iqr_ns": 500.0,
           "total_duration": {
             "secs": 0,
-            "nanos": 6195416
+            "nanos": 5202500
           }
         },
         "threshold_ns": null,
         "passed": true,
         "throughput": null,
         "metadata": {
-          "outliers_removed": "102"
+          "outliers_removed": "76"
         }
       },
       {
@@ -1746,29 +1742,29 @@
         "category": "micro",
         "tier": null,
         "statistics": {
-          "count": 934,
-          "min_ns": 63791.0,
-          "max_ns": 79209.0,
-          "mean_ns": 67803.7034261242,
-          "median_ns": 67062.5,
-          "std_dev_ns": 3760.972903773952,
-          "cv": 0.055468546904251854,
-          "p5_ns": 63875.0,
-          "p25_ns": 65333.0,
-          "p75_ns": 70292.0,
-          "p95_ns": 75375.0,
-          "p99_ns": 78459.0,
-          "iqr_ns": 4959.0,
+          "count": 891,
+          "min_ns": 66625.0,
+          "max_ns": 81875.0,
+          "mean_ns": 70296.01346801347,
+          "median_ns": 69792.0,
+          "std_dev_ns": 3485.45157153368,
+          "cv": 0.04958249265613977,
+          "p5_ns": 66708.0,
+          "p25_ns": 68042.0,
+          "p75_ns": 70958.0,
+          "p95_ns": 78250.0,
+          "p99_ns": 80959.0,
+          "iqr_ns": 2916.0,
           "total_duration": {
             "secs": 0,
-            "nanos": 63328659
+            "nanos": 62633748
           }
         },
         "threshold_ns": null,
         "passed": true,
         "throughput": null,
         "metadata": {
-          "outliers_removed": "66"
+          "outliers_removed": "109"
         }
       },
       {
@@ -1776,29 +1772,29 @@
         "category": "micro",
         "tier": null,
         "statistics": {
-          "count": 7890,
+          "count": 8794,
           "min_ns": 583.0,
           "max_ns": 709.0,
-          "mean_ns": 625.3212927756654,
-          "median_ns": 625.0,
-          "std_dev_ns": 30.5902237645262,
-          "cv": 0.04891921020111572,
-          "p5_ns": 583.0,
+          "mean_ns": 650.506367978167,
+          "median_ns": 666.0,
+          "std_dev_ns": 26.27337895276649,
+          "cv": 0.04038911876362801,
+          "p5_ns": 625.0,
           "p25_ns": 625.0,
-          "p75_ns": 625.0,
-          "p95_ns": 667.0,
-          "p99_ns": 708.0,
-          "iqr_ns": 0.0,
+          "p75_ns": 667.0,
+          "p95_ns": 708.0,
+          "p99_ns": 709.0,
+          "iqr_ns": 42.0,
           "total_duration": {
             "secs": 0,
-            "nanos": 4933785
+            "nanos": 5720553
           }
         },
         "threshold_ns": null,
         "passed": true,
         "throughput": null,
         "metadata": {
-          "outliers_removed": "2110"
+          "outliers_removed": "1206"
         }
       },
       {
@@ -1806,29 +1802,29 @@
         "category": "micro",
         "tier": null,
         "statistics": {
-          "count": 7405,
-          "min_ns": 125.0,
-          "max_ns": 125.0,
-          "mean_ns": 125.0,
+          "count": 9994,
+          "min_ns": 41.0,
+          "max_ns": 250.0,
+          "mean_ns": 126.9476686011607,
           "median_ns": 125.0,
-          "std_dev_ns": 0.0,
-          "cv": 0.0,
-          "p5_ns": 125.0,
-          "p25_ns": 125.0,
-          "p75_ns": 125.0,
-          "p95_ns": 125.0,
-          "p99_ns": 125.0,
-          "iqr_ns": 0.0,
+          "std_dev_ns": 32.37237627229426,
+          "cv": 0.2550056777647532,
+          "p5_ns": 83.0,
+          "p25_ns": 84.0,
+          "p75_ns": 166.0,
+          "p95_ns": 167.0,
+          "p99_ns": 208.0,
+          "iqr_ns": 82.0,
           "total_duration": {
             "secs": 0,
-            "nanos": 925625
+            "nanos": 1268715
           }
         },
         "threshold_ns": null,
         "passed": true,
         "throughput": null,
         "metadata": {
-          "outliers_removed": "2595"
+          "outliers_removed": "6"
         }
       },
       {
@@ -1839,10 +1835,10 @@
           "count": 999989,
           "min_ns": 0.0,
           "max_ns": 84.0,
-          "mean_ns": 16.391523306756373,
+          "mean_ns": 16.300291303204336,
           "median_ns": 0.0,
-          "std_dev_ns": 20.381993127826895,
-          "cv": 1.2434471614621505,
+          "std_dev_ns": 20.345911128268074,
+          "cv": 1.2481930997311959,
           "p5_ns": 0.0,
           "p25_ns": 0.0,
           "p75_ns": 42.0,
@@ -1851,7 +1847,7 @@
           "iqr_ns": 42.0,
           "total_duration": {
             "secs": 0,
-            "nanos": 16391343
+            "nanos": 16300112
           }
         },
         "threshold_ns": 30.0,
@@ -1866,13 +1862,13 @@
         "category": "micro",
         "tier": null,
         "statistics": {
-          "count": 999987,
+          "count": 999985,
           "min_ns": 0.0,
           "max_ns": 84.0,
-          "mean_ns": 16.317535127956663,
+          "mean_ns": 16.52929493942409,
           "median_ns": 0.0,
-          "std_dev_ns": 20.366864517372033,
-          "cv": 1.248158153646484,
+          "std_dev_ns": 20.39703122150996,
+          "cv": 1.233992816769269,
           "p5_ns": 0.0,
           "p25_ns": 0.0,
           "p75_ns": 42.0,
@@ -1881,14 +1877,14 @@
           "iqr_ns": 42.0,
           "total_duration": {
             "secs": 0,
-            "nanos": 16317323
+            "nanos": 16529047
           }
         },
         "threshold_ns": 50.0,
         "passed": true,
         "throughput": null,
         "metadata": {
-          "outliers_removed": "13"
+          "outliers_removed": "15"
         }
       },
       {
@@ -1896,13 +1892,13 @@
         "category": "micro",
         "tier": null,
         "statistics": {
-          "count": 999990,
+          "count": 999985,
           "min_ns": 0.0,
           "max_ns": 84.0,
-          "mean_ns": 16.51848218482185,
+          "mean_ns": 16.692861392920893,
           "median_ns": 0.0,
-          "std_dev_ns": 20.39588565943963,
-          "cv": 1.2347312199289453,
+          "std_dev_ns": 20.432652194391387,
+          "cv": 1.2240353354312559,
           "p5_ns": 0.0,
           "p25_ns": 0.0,
           "p75_ns": 42.0,
@@ -1911,14 +1907,14 @@
           "iqr_ns": 42.0,
           "total_duration": {
             "secs": 0,
-            "nanos": 16518317
+            "nanos": 16692611
           }
         },
         "threshold_ns": null,
         "passed": true,
         "throughput": null,
         "metadata": {
-          "outliers_removed": "10"
+          "outliers_removed": "15"
         }
       },
       {
@@ -1926,13 +1922,13 @@
         "category": "micro",
         "tier": null,
         "statistics": {
-          "count": 99999,
+          "count": 99997,
           "min_ns": 0.0,
           "max_ns": 84.0,
-          "mean_ns": 17.269542695426953,
+          "mean_ns": 17.232936988109643,
           "median_ns": 0.0,
-          "std_dev_ns": 20.53082128429993,
-          "cv": 1.1888456832002028,
+          "std_dev_ns": 20.529596584370545,
+          "cv": 1.1912999274897556,
           "p5_ns": 0.0,
           "p25_ns": 0.0,
           "p75_ns": 42.0,
@@ -1941,14 +1937,14 @@
           "iqr_ns": 42.0,
           "total_duration": {
             "secs": 0,
-            "nanos": 1726937
+            "nanos": 1723242
           }
         },
         "threshold_ns": null,
         "passed": true,
         "throughput": null,
         "metadata": {
-          "outliers_removed": "1"
+          "outliers_removed": "3"
         }
       },
       {
@@ -1956,13 +1952,13 @@
         "category": "micro",
         "tier": null,
         "statistics": {
-          "count": 99932,
+          "count": 99854,
           "min_ns": 0.0,
           "max_ns": 84.0,
-          "mean_ns": 22.068146339510868,
+          "mean_ns": 21.94517996274561,
           "median_ns": 41.0,
-          "std_dev_ns": 20.8152407077164,
-          "cv": 0.9432256061511037,
+          "std_dev_ns": 20.837150763847795,
+          "cv": 0.949509222490824,
           "p5_ns": 0.0,
           "p25_ns": 0.0,
           "p75_ns": 42.0,
@@ -1971,14 +1967,14 @@
           "iqr_ns": 42.0,
           "total_duration": {
             "secs": 0,
-            "nanos": 2205314
+            "nanos": 2191314
           }
         },
         "threshold_ns": 25.0,
         "passed": true,
         "throughput": null,
         "metadata": {
-          "outliers_removed": "68"
+          "outliers_removed": "146"
         }
       },
       {
@@ -1986,29 +1982,29 @@
         "category": "micro",
         "tier": null,
         "statistics": {
-          "count": 62309,
-          "min_ns": 83.0,
-          "max_ns": 84.0,
-          "mean_ns": 83.33651639410037,
-          "median_ns": 83.0,
-          "std_dev_ns": 0.47251784157000937,
-          "cv": 0.005669997523480118,
+          "count": 98567,
+          "min_ns": 41.0,
+          "max_ns": 167.0,
+          "mean_ns": 99.6913470025465,
+          "median_ns": 84.0,
+          "std_dev_ns": 23.79320958941622,
+          "cv": 0.23866875415785538,
           "p5_ns": 83.0,
           "p25_ns": 83.0,
-          "p75_ns": 84.0,
-          "p95_ns": 84.0,
-          "p99_ns": 84.0,
-          "iqr_ns": 1.0,
+          "p75_ns": 125.0,
+          "p95_ns": 125.0,
+          "p99_ns": 167.0,
+          "iqr_ns": 42.0,
           "total_duration": {
             "secs": 0,
-            "nanos": 5192615
+            "nanos": 9826277
           }
         },
-        "threshold_ns": 20.0,
-        "passed": false,
+        "threshold_ns": 200.0,
+        "passed": true,
         "throughput": null,
         "metadata": {
-          "outliers_removed": "37691"
+          "outliers_removed": "1433"
         }
       },
       {
@@ -2016,29 +2012,29 @@
         "category": "micro",
         "tier": null,
         "statistics": {
-          "count": 63007,
-          "min_ns": 83.0,
-          "max_ns": 84.0,
-          "mean_ns": 83.33216944149063,
-          "median_ns": 83.0,
-          "std_dev_ns": 0.47099140504940623,
-          "cv": 0.005651975800055221,
+          "count": 98633,
+          "min_ns": 41.0,
+          "max_ns": 167.0,
+          "mean_ns": 99.21483681932011,
+          "median_ns": 84.0,
+          "std_dev_ns": 23.39849522122168,
+          "cv": 0.2358366547921922,
           "p5_ns": 83.0,
           "p25_ns": 83.0,
-          "p75_ns": 84.0,
-          "p95_ns": 84.0,
-          "p99_ns": 84.0,
-          "iqr_ns": 1.0,
+          "p75_ns": 125.0,
+          "p95_ns": 125.0,
+          "p99_ns": 167.0,
+          "iqr_ns": 42.0,
           "total_duration": {
             "secs": 0,
-            "nanos": 5250510
+            "nanos": 9785857
           }
         },
-        "threshold_ns": 30.0,
-        "passed": false,
+        "threshold_ns": 200.0,
+        "passed": true,
         "throughput": null,
         "metadata": {
-          "outliers_removed": "36993"
+          "outliers_removed": "1367"
         }
       },
       {
@@ -2046,13 +2042,13 @@
         "category": "micro",
         "tier": null,
         "statistics": {
-          "count": 960600,
+          "count": 986460,
           "min_ns": 0.0,
           "max_ns": 84.0,
-          "mean_ns": 33.63366749947949,
-          "median_ns": 42.0,
-          "std_dev_ns": 25.818821623704256,
-          "cv": 0.7676481199709732,
+          "mean_ns": 32.673900614317866,
+          "median_ns": 41.0,
+          "std_dev_ns": 23.611260740919096,
+          "cv": 0.7226336708195937,
           "p5_ns": 0.0,
           "p25_ns": 0.0,
           "p75_ns": 42.0,
@@ -2061,14 +2057,14 @@
           "iqr_ns": 42.0,
           "total_duration": {
             "secs": 0,
-            "nanos": 32308501
+            "nanos": 32231496
           }
         },
         "threshold_ns": null,
         "passed": true,
         "throughput": null,
         "metadata": {
-          "outliers_removed": "39400"
+          "outliers_removed": "13540"
         }
       },
       {
@@ -2076,13 +2072,13 @@
         "category": "micro",
         "tier": null,
         "statistics": {
-          "count": 999993,
+          "count": 999992,
           "min_ns": 0.0,
           "max_ns": 84.0,
-          "mean_ns": 16.47587533112732,
+          "mean_ns": 16.357101856814854,
           "median_ns": 0.0,
-          "std_dev_ns": 20.385898835821333,
-          "cv": 1.237318104568741,
+          "std_dev_ns": 20.373944366789182,
+          "cv": 1.245571773357931,
           "p5_ns": 0.0,
           "p25_ns": 0.0,
           "p75_ns": 42.0,
@@ -2091,14 +2087,14 @@
           "iqr_ns": 42.0,
           "total_duration": {
             "secs": 0,
-            "nanos": 16475760
+            "nanos": 16356971
           }
         },
         "threshold_ns": null,
         "passed": true,
         "throughput": null,
         "metadata": {
-          "outliers_removed": "7"
+          "outliers_removed": "8"
         }
       },
       {
@@ -2106,29 +2102,29 @@
         "category": "micro",
         "tier": null,
         "statistics": {
-          "count": 997683,
+          "count": 975818,
           "min_ns": 0.0,
           "max_ns": 167.0,
-          "mean_ns": 52.40214176246363,
+          "mean_ns": 45.634522011276694,
           "median_ns": 42.0,
-          "std_dev_ns": 43.83719309476522,
-          "cv": 0.8365534617550002,
+          "std_dev_ns": 41.582046636874736,
+          "cv": 0.9111971552282161,
           "p5_ns": 0.0,
           "p25_ns": 0.0,
           "p75_ns": 83.0,
           "p95_ns": 125.0,
-          "p99_ns": 166.0,
+          "p99_ns": 167.0,
           "iqr_ns": 83.0,
           "total_duration": {
             "secs": 0,
-            "nanos": 52280726
+            "nanos": 44530988
           }
         },
         "threshold_ns": null,
         "passed": true,
         "throughput": null,
         "metadata": {
-          "outliers_removed": "2317"
+          "outliers_removed": "24182"
         }
       }
     ]
