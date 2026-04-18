@@ -1822,6 +1822,22 @@ impl CodegenContext {
             return Some(info);
         }
 
+        // NEVER fall back to the last segment when the qualified path is
+        // rooted at a module-path keyword (`super`, `cog`, `.`). These are
+        // explicitly cross-module and MUST NOT silently resolve to a local
+        // symbol of the same last-segment name — that rebinding turns stdlib
+        // dispatchers like `super.darwin.tls.ctx_get(slot)` inside
+        // `core/sys/common.vr::ctx_get` into infinite self-recursion.
+        let is_rooted_module_path = qualified_name.starts_with("super::")
+            || qualified_name.starts_with("super.")
+            || qualified_name.starts_with("cog::")
+            || qualified_name.starts_with("cog.")
+            || qualified_name.starts_with(".::")
+            || qualified_name.starts_with("..");
+        if is_rooted_module_path {
+            return None;
+        }
+
         // Try without module prefix (simple resolution for single-module compilation)
         // e.g., "module::func" -> "func"
         if let Some(simple_name) = qualified_name.rsplit("::").next()

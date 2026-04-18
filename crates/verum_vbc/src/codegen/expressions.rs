@@ -2638,7 +2638,14 @@ impl VbcCodegen {
         func: &Expr,
         args: &verum_common::List<Expr>,
     ) -> CodegenResult<Option<Reg>> {
-        // Get function name from path
+        // Get function name from path. Also remember whether the path was
+        // rooted at a module-path keyword (`super`, `cog`, or `.`) — those
+        // segments don't appear in any registered function name, but they
+        // *must* disable the simple-last-segment fallback below, or a call
+        // like `super.darwin.tls.ctx_get(slot)` inside the current module's
+        // own `ctx_get` dispatcher silently resolves to a self-recursive
+        // call to the local `ctx_get` and blows the stack.
+        let mut has_module_prefix = false;
         let func_name = match &func.kind {
             ExprKind::Path(path) => {
                 if path.segments.len() == 1 {
@@ -2663,7 +2670,14 @@ impl VbcCodegen {
                     }
                 } else {
                     // Qualified path - use full path
-                    
+                    if matches!(
+                        path.segments.first(),
+                        Some(PathSegment::Super)
+                            | Some(PathSegment::Cog)
+                            | Some(PathSegment::Relative)
+                    ) {
+                        has_module_prefix = true;
+                    }
 
                     path.segments
                         .iter()
@@ -2705,10 +2719,10 @@ impl VbcCodegen {
                 // recursion. (This was the root cause of the
                 // L0 reference_system / cbgr stack-overflow failures
                 // that masked themselves as "stack limit too low".)
-                let is_qualified_module_path =
-                    func_name.starts_with("super::")
-                        || func_name.starts_with("cog::")
-                        || func_name.starts_with(".::");
+                let is_qualified_module_path = has_module_prefix
+                    || func_name.starts_with("super::")
+                    || func_name.starts_with("cog::")
+                    || func_name.starts_with(".::");
                 let fallback_result = if is_qualified_module_path {
                     None
                 } else if let Some(simple_name) = func_name.rsplit("::").next() {
