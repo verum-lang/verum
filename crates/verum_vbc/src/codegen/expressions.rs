@@ -12356,11 +12356,6 @@ impl VbcCodegen {
         }
     }
 
-    /// Emits a reference instruction based on tier.
-    ///
-    /// - Tier 0: `Ref` or `RefMut` (runtime validated)
-    /// - Tier 1: `RefChecked` (compiler proven safe)
-    /// - Tier 2: `RefUnsafe` (manual safety proof)
     /// Promote a register-resident value to a non-recyclable slot before
     /// emitting a CBGR reference to it.
     ///
@@ -12416,6 +12411,11 @@ impl VbcCodegen {
         stable
     }
 
+    /// Emits a reference instruction based on tier.
+    ///
+    /// - Tier 0: `Ref` or `RefMut` (runtime validated)
+    /// - Tier 1: `RefChecked` (compiler proven safe)
+    /// - Tier 2: `RefUnsafe` (manual safety proof)
     fn emit_ref_instruction(&mut self, dst: Reg, src: Reg, tier: CbgrTier, is_mut: bool) {
         // Record statistics
         self.ctx.record_ref_tier(tier);
