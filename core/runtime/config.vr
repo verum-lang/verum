@@ -47,7 +47,12 @@ mount core.intrinsics.{
 mount mem.{Alloc, Layout, AllocError, TieredAllocator, SimpleAllocator, StackAllocator};
 mount core.{Result, Text};
 mount core.sync.atomic.{AtomicU32, MemoryOrdering};
-type Ordering is MemoryOrdering;
+// Note: do NOT alias `Ordering = MemoryOrdering` here — it collides with
+// `core.base.ordering.Ordering` (`Less | Equal | Greater`), which is the
+// name every caller means when they write a bare `Ordering` in a function
+// signature. The atomic form is always spelled `MemoryOrdering` inside
+// this file (grep `MemoryOrdering.` for confirmation), so the alias was
+// dead weight that caused L1 variance specs to resolve the wrong type.
 
 // =============================================================================
 // Initialization Errors
