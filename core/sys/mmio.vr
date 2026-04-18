@@ -264,8 +264,13 @@ implement<T: Copy> Register<T, ReadWrite> {
     ///
     /// Reads the current value, applies the function, and writes back.
     /// NOT atomic - use with critical section if needed.
+    ///
+    /// Use `fn(T) -> T` as the parameter type rather than `F: Fn(T) -> T`
+    /// — the type checker doesn't yet resolve closure-protocol bounds at the
+    /// method-lookup stage, which previously hid this method behind a
+    /// "no method named `modify`" diagnostic for plain `r.modify(|v| ...)`.
     @inline(always)
-    public fn modify<F: Fn(T) -> T>(&self, f: F) {
+    public fn modify(&self, f: fn(T) -> T) {
         let value = volatile_load(self.addr as *volatile T);
         volatile_store(self.addr, f(value));
     }
