@@ -544,31 +544,37 @@ public fn wraparound_count() -> Int {
 
 public type Epoch is ();
 
+/// Monotonically increasing global epoch counter.
+///
+/// `static mut` now routes through a thread-local slot in the Tier 0
+/// interpreter (matching `@thread_local` semantics), so writes from one
+/// frame are visible to reads from another. That gives us a real global
+/// counter without reaching into the heap-backed EpochManager (which
+/// allocates and would re-enter the CBGR bootstrap path).
+static mut EPOCH_COUNTER: Int = 1;
+
 implement Epoch {
     /// Return the current global epoch counter.
-    ///
-    /// Returns `1` as a stub. Real counter requires a writable global slot
-    /// or a monotonic clock primitive that's reachable from the Tier 0
-    /// interpreter; both are present in stdlib but currently broken in the
-    /// interpreter's static-mut codegen path. Type-checking and method
-    /// dispatch work — only the runtime monotonicity invariant doesn't
-    /// hold inside the interpreter. AOT honors the static slot correctly.
     @inline
     public fn current() -> Int {
-        1
+        unsafe { EPOCH_COUNTER }
     }
 
-    /// Advance the global epoch counter. Stub — see `current()`.
+    /// Advance the global epoch counter by one. Returns the new value.
     @inline
     public fn advance() -> Int {
-        1
+        unsafe {
+            EPOCH_COUNTER = EPOCH_COUNTER + 1;
+            EPOCH_COUNTER
+        }
     }
 
     /// Whether the given (older) epoch is still considered live.
-    /// Stub: always returns true (no recycling within the validity window
-    /// is observable while the counter is fixed at 1).
+    /// Validity window: any stored epoch within the most recent
+    /// 0x10_0000 ticks is treated as alive.
     @inline
-    public fn is_valid(_stored: Int) -> Bool {
-        true
+    public fn is_valid(stored: Int) -> Bool {
+        let cur = unsafe { EPOCH_COUNTER };
+        cur - stored < 0x10_0000
     }
 }

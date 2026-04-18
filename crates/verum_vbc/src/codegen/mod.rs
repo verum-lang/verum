@@ -3208,8 +3208,17 @@ impl VbcCodegen {
                 self.register_constant_with_value(&const_decl.name.name, Some(&const_decl.value), Some(&const_decl.ty))?;
             }
             ItemKind::Static(static_decl) => {
-                // Check if this is a @thread_local static
-                let is_thread_local = item.attributes.iter().any(|a| a.is_named("thread_local"));
+                // `static mut` needs writable backing storage: the constant-function
+                // codegen path that plain `static` uses re-executes the initializer
+                // on every read, so writes made from one frame are invisible to
+                // subsequent reads (`EPOCH_COUNTER = EPOCH_COUNTER + 1` bumps a local
+                // copy; `Epoch.current()` from another frame reads the initializer
+                // again and returns `1`). Route mutable statics through the same TLS
+                // slot mechanism that `@thread_local` uses — that's a real heap slot
+                // that survives across frames and matches the "process-wide writable
+                // global" semantics the user expects.
+                let is_thread_local = item.attributes.iter().any(|a| a.is_named("thread_local"))
+                    || static_decl.is_mut;
                 if is_thread_local {
                     // Assign a TLS slot for this variable
                     let name = static_decl.name.name.to_string();
