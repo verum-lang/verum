@@ -540,16 +540,35 @@ impl Subtyping {
                     name: n1,
                     ty: t1,
                     refinement: r1,
+                    value: v1,
                 },
                 Meta {
                     name: n2,
                     ty: t2,
                     refinement: r2,
+                    value: v2,
                 },
             ) => {
-                // Names must match (same meta parameter)
-                if n1 != n2 {
-                    return false;
+                // Concrete values take precedence over names for subtyping checks,
+                // matching the unification behavior (see unify.rs). Two Metas with
+                // concrete compile-time values are in a subtype relation iff the
+                // values are equal.
+                match (v1, v2) {
+                    (Some(a), Some(b)) => {
+                        if a != b {
+                            return false;
+                        }
+                    }
+                    (Some(_), None) | (None, Some(_)) => {
+                        // Mixed: fall through to base-type + refinement check;
+                        // a concrete value always inhabits the variable meta slot.
+                    }
+                    (None, None) => {
+                        // Names must match (same meta parameter)
+                        if n1 != n2 {
+                            return false;
+                        }
+                    }
                 }
 
                 // Base types must be subtypes

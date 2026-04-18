@@ -735,12 +735,21 @@ pub enum Type {
     /// Meta parameters replace const generics with unified meta-system.
     /// All compile-time computation uses `meta` (no `const fn`, no `const N: usize`).
     Meta {
-        /// Parameter name (for error messages and debugging)
+        /// Parameter name (for error messages and debugging).
+        /// At declaration sites this holds the user-visible parameter name (e.g. "N").
+        /// At instantiation sites where `value` is `Some`, the name is the concrete
+        /// value's canonical Display form (e.g. "2"), preserved for diagnostics.
         name: Text,
         /// Base type of the meta parameter (e.g., usize, [usize], bool)
         ty: Box<Type>,
         /// Optional refinement constraint (e.g., {> 0})
         refinement: Option<RefinementPredicate>,
+        /// Concrete compile-time value, when this Meta is an instantiation
+        /// (e.g. the `7` in `Matrix<Float, 7, 7>`). `None` at declaration sites
+        /// or when the argument is a variable reference to another meta parameter.
+        /// Unification of two meta parameters with `value: Some(_)` on both sides
+        /// compares the values directly — this is how dimension mismatches are caught.
+        value: Option<verum_common::ConstValue>,
     },
 
     /// Future type: Future<T>
@@ -1744,13 +1753,27 @@ impl Type {
         }
     }
 
-    /// Create a meta parameter type
+    /// Create a meta parameter type (declaration-site or unresolved).
     /// Meta system: unified compile-time computation via "meta fn", "meta" parameters, @derive macros, tagged literals, all under single "meta" concept — Unified meta-system for compile-time computation
     pub fn meta(name: Text, ty: Type, refinement: Option<RefinementPredicate>) -> Self {
         Type::Meta {
             name,
             ty: Box::new(ty),
             refinement,
+            value: None,
+        }
+    }
+
+    /// Create a meta parameter type carrying a concrete compile-time value.
+    /// Used at instantiation sites (e.g. the `7` in `Matrix<Float, 7, 7>`).
+    /// The `name` is derived from the value's canonical form for diagnostics.
+    pub fn meta_value(value: verum_common::ConstValue, base_ty: Type) -> Self {
+        let name: Text = format!("{}", value).into();
+        Type::Meta {
+            name,
+            ty: Box::new(base_ty),
+            refinement: None,
+            value: Some(value),
         }
     }
 
@@ -2629,10 +2652,12 @@ impl Type {
                 name,
                 ty,
                 refinement,
+                value,
             } => Type::Meta {
                 name: name.clone(),
                 ty: Box::new(ty.apply_subst_with_depth(subst, next_depth, max_depth)),
                 refinement: refinement.clone(),
+                value: value.clone(),
             },
             Type::Future { output } => Type::Future {
                 output: Box::new(output.apply_subst_with_depth(subst, next_depth, max_depth)),
@@ -3074,7 +3099,13 @@ impl fmt::Display for Type {
                 name,
                 ty,
                 refinement,
+                value,
             } => {
+                // If we carry a concrete value, show just the value (e.g. "7")
+                // — matches what the user wrote at the call site.
+                if let Some(v) = value {
+                    return write!(f, "{}", v);
+                }
                 write!(f, "{}: meta {}", name, ty)?;
                 if let Some(pred) = refinement {
                     write!(f, "{{{}}}", pred)?;

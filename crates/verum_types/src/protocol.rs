@@ -9859,10 +9859,12 @@ impl ProtocolChecker {
                 name,
                 ty,
                 refinement,
+                value,
             } => Type::Meta {
                 name: name.clone(),
                 ty: Box::new(self.substitute_type_params(ty, subst_map)),
                 refinement: refinement.clone(),
+                value: value.clone(),
             },
 
             // Future: substitute in output type

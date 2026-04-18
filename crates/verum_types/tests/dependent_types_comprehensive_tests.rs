@@ -1066,6 +1066,7 @@ fn test_type_level_computation_with_meta() {
             args: List::new(),
         }),
         refinement: None,
+        value: None,
     };
 
     assert!(matches!(meta, Type::Meta { .. }));
@@ -1091,6 +1092,7 @@ fn test_type_level_computation_refinement() {
             args: List::new(),
         }),
         refinement: Some(RefinementPredicate::placeholder()),
+        value: None,
     };
 
     assert!(matches!(meta, Type::Meta { .. }));

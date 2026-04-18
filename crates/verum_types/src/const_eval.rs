@@ -1260,6 +1260,7 @@ impl ConstEvaluator {
                 name,
                 ty,
                 refinement,
+                value,
             } => {
                 // For now, we just return the meta type as-is
                 // Full substitution would require expression in Type::Meta
@@ -1267,6 +1268,7 @@ impl ConstEvaluator {
                     name: name.clone(),
                     ty: Box::new(self.eval_meta_type(ty)?),
                     refinement: refinement.clone(),
+                    value: value.clone(),
                 })
             }
             Type::Array { element, size } => Ok(Type::Array {

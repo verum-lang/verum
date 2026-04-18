@@ -1967,18 +1967,39 @@ impl Unifier {
                 self.unify_inner(i1, i2, span)
             }
 
-            // UPCAST: &unsafe T → &checked T (allowed)
-            // Unsafe references can coerce to any checked reference regardless of mutability.
+            // UPCAST: &unsafe T → &checked T
+            //
+            // Unsafe references coerce to checked references, but mutability
+            // still has to match (or downgrade mut→immut). Silently allowing
+            // `&unsafe mut T → &checked T` would break the guarantee that a
+            // shared `&checked T` never aliases mutable access. The managed
+            // and checked-only branches above already enforce the
+            // `m2 && !m1` rule; cross-tier unification gets the same
+            // treatment here.
             (
                 UnsafeReference {
-                    mutable: _m1,
+                    mutable: m1,
                     inner: i1,
                 },
                 CheckedReference {
-                    mutable: _m2,
+                    mutable: m2,
                     inner: i2,
                 },
             ) => {
+                if *m2 && !*m1 {
+                    return Err(TypeError::Mismatch {
+                        expected: t2.to_text(),
+                        actual: t1.to_text(),
+                        span,
+                    });
+                }
+                if !*m2 && *m1 {
+                    return Err(TypeError::Mismatch {
+                        expected: t2.to_text(),
+                        actual: t1.to_text(),
+                        span,
+                    });
+                }
                 self.unify_inner(i1, i2, span)
             }
 
@@ -2819,18 +2840,51 @@ impl Unifier {
             // 1. Names match (same compile-time parameter)
             // 2. Base types unify
             // 3. Refinements are compatible
+            // 4. Concrete compile-time values (when both sides carry one) match.
+            //    This is how `StaticMatrix<T, 2, 3>` vs `StaticMatrix<T, 3, 2>`
+            //    produces a dimension-mismatch diagnostic.
             (
                 Meta {
                     name: n1,
                     ty: t1,
                     refinement: r1,
+                    value: v1,
                 },
                 Meta {
                     name: n2,
                     ty: t2,
                     refinement: r2,
+                    value: v2,
                 },
             ) => {
+                // Value-carrying Metas take precedence: when both sides hold a
+                // concrete const value, compare the values directly. This bypasses
+                // name comparison because the canonical name is derived from the
+                // value and equal values trivially produce equal names.
+                match (v1, v2) {
+                    (Some(a), Some(b)) => {
+                        if a != b {
+                            return Err(TypeError::Mismatch {
+                                expected: format!("{}", b).into(),
+                                actual: format!("{}", a).into(),
+                                span,
+                            });
+                        }
+                        // Values match — unify base types for completeness.
+                        return self.unify_inner(t1, t2, span);
+                    }
+                    (Some(_), None) | (None, Some(_)) => {
+                        // One side is a concrete value, the other is a variable
+                        // meta parameter — the variable binds to the value.
+                        // Unify base types; substitution pickup happens at the
+                        // enclosing Generic/Named args-list traversal.
+                        return self.unify_inner(t1, t2, span);
+                    }
+                    (None, None) => {
+                        // Fall through to name-based comparison below.
+                    }
+                }
+
                 // Names must match (same meta parameter)
                 if n1 != n2 {
                     return Err(TypeError::Mismatch {
@@ -3921,6 +3975,7 @@ impl Unifier {
                 name,
                 ty: inner,
                 refinement,
+                value,
             } => {
                 let new_name = if name == from {
                     to.clone()
@@ -3931,6 +3986,7 @@ impl Unifier {
                     name: new_name,
                     ty: Box::new(Self::rename_bound_var(inner, from, to)),
                     refinement: refinement.clone(),
+                    value: value.clone(),
                 }
             }
 

@@ -4633,6 +4633,34 @@ impl TypeChecker {
     ///
     /// This creates a unique identifier that the type checker can use to infer
     /// the actual value during unification. The name follows the pattern `_tv{N}`
+    /// Evaluate a `GenericArg::Const` expression to a concrete compile-time value
+    /// and wrap it in a `Type::Meta` that carries the value.
+    ///
+    /// Returns `None` when the expression is not a compile-time constant (e.g. it
+    /// references another meta parameter whose value is only known after generic
+    /// instantiation); the caller should fall back to type-only representation
+    /// for such arguments.
+    ///
+    /// This is stdlib-agnostic: the base type is derived from the `ConstValue`
+    /// kind through its built-in primitive mapping, never by inspecting type
+    /// names or hardcoding stdlib knowledge.
+    fn eval_const_arg(&self, expr: &verum_ast::expr::Expr) -> Option<Type> {
+        let mut evaluator = crate::const_eval::ConstEvaluator::new();
+        let value = evaluator.eval(expr).ok()?;
+        let base_ty = match &value {
+            verum_common::ConstValue::Bool(_) => Type::Bool,
+            verum_common::ConstValue::Int(_) | verum_common::ConstValue::UInt(_) => Type::Int,
+            verum_common::ConstValue::Float(_) => Type::Float,
+            verum_common::ConstValue::Char(_) => Type::Char,
+            verum_common::ConstValue::Text(_) => Type::Text,
+            // Non-scalar compile-time values (aggregates, optionals, byte literals,
+            // unit) aren't yet carried through type-level unification; defer to
+            // the caller's fallback so their existing behavior is preserved.
+            _ => return None,
+        };
+        Some(Type::meta_value(value, base_ty))
+    }
+
     /// where N is a unique counter.
     fn create_type_variable_expr(&self, span: Span) -> verum_ast::expr::Expr {
         use std::sync::atomic::{AtomicU64, Ordering};
@@ -20250,10 +20278,17 @@ impl TypeChecker {
                             type_args.push(arg_ty);
                         }
                         GenericArg::Const(expr) => {
-                            // Try to infer the expression type, fallback to fresh var
-                            match self.synth_expr(expr) {
-                                Ok(result) => type_args.push(result.ty),
-                                Err(_) => type_args.push(Type::Var(TypeVar::fresh())),
+                            // Preserve the compile-time value of a const-generic argument
+                            // so downstream unification can detect dimension mismatches.
+                            // Falling back to only the expression type (Int, USize, ...)
+                            // would collapse e.g. `Matrix<Float, 7, 7>` and `Matrix<Float, 5, 5>`
+                            // to the same representation and mask the error.
+                            match self.eval_const_arg(expr) {
+                                Some(ty) => type_args.push(ty),
+                                None => match self.synth_expr(expr) {
+                                    Ok(result) => type_args.push(result.ty),
+                                    Err(_) => type_args.push(Type::Var(TypeVar::fresh())),
+                                },
                             }
                         }
                         GenericArg::Lifetime(lifetime) => {
@@ -20442,9 +20477,14 @@ impl TypeChecker {
                             type_args.push(arg_ty);
                         }
                         GenericArg::Const(expr) => {
-                            match self.synth_expr(expr) {
-                                Ok(result) => type_args.push(result.ty),
-                                Err(_) => type_args.push(Type::Var(TypeVar::fresh())),
+                            // See eval_const_arg: we preserve the compile-time value so
+                            // dimension mismatches are caught during unification.
+                            match self.eval_const_arg(expr) {
+                                Some(ty) => type_args.push(ty),
+                                None => match self.synth_expr(expr) {
+                                    Ok(result) => type_args.push(result.ty),
+                                    Err(_) => type_args.push(Type::Var(TypeVar::fresh())),
+                                },
                             }
                         }
                         GenericArg::Lifetime(lifetime) => {
@@ -20842,11 +20882,19 @@ impl TypeChecker {
                             type_args.push(arg_ty);
                         }
                         GenericArg::Const(expr) => {
-                            // Const generic arguments are compile-time values
-                            // In v6.0-BALANCED, const generics are represented as meta parameters
-                            // Infer type from the expression
-                            let expr_ty = self.synth_expr(expr)?;
-                            type_args.push(expr_ty.ty);
+                            // Const generic arguments are compile-time values.
+                            // Represent them as `Type::Meta` with the concrete `value` set
+                            // (see `eval_const_arg`) so dimension mismatches like
+                            // `Matrix<Float, 7, 7>` vs `Matrix<Float, 5, 5>` are caught
+                            // during unification instead of being collapsed to the same
+                            // `Int`-typed argument list.
+                            match self.eval_const_arg(expr) {
+                                Some(ty) => type_args.push(ty),
+                                None => {
+                                    let expr_ty = self.synth_expr(expr)?;
+                                    type_args.push(expr_ty.ty);
+                                }
+                            }
                         }
                         GenericArg::Lifetime(lifetime) => {
                             // Lifetime arguments: 'a, 'b, 'static
@@ -24082,10 +24130,12 @@ impl TypeChecker {
                 name,
                 ty: inner_ty,
                 refinement,
+                value,
             } => Meta {
                 name: name.clone(),
                 ty: Box::new(self.normalize_type_impl(inner_ty, depth + 1)),
                 refinement: refinement.clone(),
+                value: value.clone(),
             },
 
             Exists { var, body } => Exists {
@@ -24764,12 +24814,14 @@ impl TypeChecker {
                 name,
                 ty: meta_ty,
                 refinement,
+                value,
             } => Meta {
                 name: name.clone(),
                 ty: Box::new(
                     self.substitute_term_in_type_impl(meta_ty, var_name, term, next_depth),
                 ),
                 refinement: refinement.clone(),
+                value: value.clone(),
             },
 
             // Async types
@@ -47111,14 +47163,30 @@ impl TypeChecker {
                     let struct_key: Text = format!("__struct_fields_{}", type_name).into();
                     self.ctx.define_type(struct_key, Type::Record(record_map));
 
-                    // Store type parameters for bidirectional inference
+                    // Store type parameters for bidirectional inference.
+                    // Count every positional kind (Type, HigherKinded, Const, Meta,
+                    // Context), not just `Type`. The arity check in compile_type_path
+                    // reads `param_record.len()`; filtering down to `Type` broke
+                    // declarations like
+                    //   type Matrix<T, Rows: meta Int, Cols: meta Int> is { … };
+                    // where the Meta slots would otherwise vanish and
+                    // `Matrix<Float, 2, 3>` reported "expects 1 type argument, got 3".
                     if !type_decl.generics.is_empty() {
                         let mut param_record: indexmap::IndexMap<verum_common::Text, Type> =
                             indexmap::IndexMap::new();
                         for param in type_decl.generics.iter() {
                             use verum_ast::ty::GenericParamKind;
-                            if let GenericParamKind::Type { name, .. } = &param.kind {
-                                param_record.insert(name.name.clone(), Type::Int);
+                            let name_opt = match &param.kind {
+                                GenericParamKind::Type { name, .. } => Some(name.name.clone()),
+                                GenericParamKind::HigherKinded { name, .. } => Some(name.name.clone()),
+                                GenericParamKind::Const { name, .. } => Some(name.name.clone()),
+                                GenericParamKind::Meta { name, .. } => Some(name.name.clone()),
+                                GenericParamKind::Context { name } => Some(name.name.clone()),
+                                GenericParamKind::Lifetime { .. } => None,
+                                _ => None,
+                            };
+                            if let Some(n) = name_opt {
+                                param_record.insert(n, Type::Int);
                             }
                         }
                         let type_params_key: Text = format!("__type_params_{}", type_name).into();
@@ -48159,10 +48227,12 @@ impl TypeChecker {
                 name,
                 ty,
                 refinement,
+                value,
             } => Meta {
                 name: name.clone(),
                 ty: Box::new(self.substitute_placeholders_impl(ty, next_depth, resolving)),
                 refinement: refinement.clone(),
+                value: value.clone(),
             },
 
             Future { output } => Future {

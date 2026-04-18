@@ -208,6 +208,7 @@ impl Motive {
                 name: meta_name,
                 ty: meta_ty,
                 refinement,
+                value,
             } => {
                 if meta_name.as_str() == var.as_str() {
                     self.term_to_type(term)
@@ -216,6 +217,7 @@ impl Motive {
                         name: meta_name.clone(),
                         ty: Box::new(self.substitute_term_in_type(meta_ty, var, term)),
                         refinement: refinement.clone(),
+                        value: value.clone(),
                     }
                 }
             }
@@ -299,6 +301,7 @@ impl Motive {
                         name: Text::from(format!("{}", n)),
                         ty: Box::new(Type::Int),
                         refinement: None,
+                        value: Some(verum_common::ConstValue::Int(*n as i128)),
                     }
                 }
                 EqConst::Nat(n) => Type::Meta {
@@ -308,11 +311,13 @@ impl Motive {
                         args: List::new(),
                     }),
                     refinement: None,
+                    value: Some(verum_common::ConstValue::UInt(*n as u128)),
                 },
                 EqConst::Bool(b) => Type::Meta {
                     name: Text::from(if *b { "true" } else { "false" }),
                     ty: Box::new(Type::Bool),
                     refinement: None,
+                    value: Some(verum_common::ConstValue::Bool(*b)),
                 },
                 EqConst::Unit => Type::Unit,
                 EqConst::Named(name) => Type::Generic {
@@ -1198,6 +1203,7 @@ impl<'a> DependentPatternChecker<'a> {
                             args: List::new(),
                         }),
                         refinement: None,
+                        value: Some(verum_common::ConstValue::UInt(0)),
                     };
                     if let Type::Generic { name, .. } = arg {
                         refinement.index_subst.insert(name.clone(), zero.clone());

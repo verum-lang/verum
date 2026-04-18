@@ -1248,6 +1248,7 @@ impl<'a> BinaryReader<'a> {
                     name,
                     ty: Box::new(ty),
                     refinement: None,
+                    value: None,
                 })
             }
 

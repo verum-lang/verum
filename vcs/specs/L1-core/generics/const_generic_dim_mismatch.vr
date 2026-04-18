@@ -1,0 +1,24 @@
+// @test: typecheck-fail
+// @tier: 0
+// @level: L1
+// @tags: generics, const-generics, meta-parameters, dimension-mismatch
+// @expected-error: E400
+//
+// Regression anchor for L0-1: a `StaticMat<Int, 2, 3>` must NOT unify with
+// `StaticMat<Int, 3, 2>`. Before the fix, const-generic values were collapsed
+// to their base type (`USize`) during generic argument synthesis, so any two
+// matrices with the same element type unified regardless of their shapes.
+//
+// Expected behavior: dimension mismatch is caught at type-check time with
+// a type-error diagnostic (E400).
+
+public type StaticMat<T, M: meta USize{M > 0}, N: meta USize{N > 0}> is {
+    data: [T; M * N],
+};
+
+fn main() {
+    let a: StaticMat<Int, 2, 3> = StaticMat { data: [1, 2, 3, 4, 5, 6] };
+
+    // ERROR: StaticMat<Int, 2, 3> is NOT assignable to StaticMat<Int, 3, 2>.
+    let b: StaticMat<Int, 3, 2> = a;
+}

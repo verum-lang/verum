@@ -503,6 +503,7 @@ fn test_meta_parameters_send_sync() {
         name: Text::from("N"),
         ty: Box::new(Type::Int),
         refinement: None,
+        value: None,
     };
     assert!(
         derivation.is_send(&meta),

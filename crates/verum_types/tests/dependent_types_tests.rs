@@ -313,6 +313,7 @@ fn test_motive_type_substitution() {
             args: List::new(),
         }),
         refinement: None,
+        value: Some(verum_common::ConstValue::UInt(5)),
     };
 
     let result = motive.apply_type(&replacement);
@@ -744,6 +745,7 @@ fn test_absurd_meta_different_values() {
                 args: List::new(),
             }),
             refinement: None,
+            value: Some(verum_common::ConstValue::UInt(0)),
         },
         Type::Meta {
             name: Text::from("1"),
@@ -752,6 +754,7 @@ fn test_absurd_meta_different_values() {
                 args: List::new(),
             }),
             refinement: None,
+            value: Some(verum_common::ConstValue::UInt(1)),
         },
     ));
 
@@ -778,6 +781,7 @@ fn test_non_absurd_meta_same_value() {
                 args: List::new(),
             }),
             refinement: None,
+            value: Some(verum_common::ConstValue::UInt(0)),
         },
         Type::Meta {
             name: Text::from("0"),
@@ -786,6 +790,7 @@ fn test_non_absurd_meta_same_value() {
                 args: List::new(),
             }),
             refinement: None,
+            value: Some(verum_common::ConstValue::UInt(0)),
         },
     ));
 

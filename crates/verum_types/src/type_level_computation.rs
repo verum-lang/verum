@@ -713,27 +713,32 @@ impl TypeLevelEvaluator {
         match op {
             BinOp::Add => {
                 if let (Some(l), Some(r)) = (left_val.as_u128(), right_val.as_u128()) {
-                    // Type-level addition for meta Nat
+                    // Type-level addition for meta Nat — propagate the computed
+                    // value so subsequent unification can detect mismatches.
+                    let sum = l.saturating_add(r);
                     return Ok(Type::Meta {
-                        name: Text::from("_result"),
+                        name: Text::from(format!("{}", sum)),
                         ty: Box::new(Type::Named {
                             path: Path::from_ident(Ident::new("Nat", Span::dummy())),
                             args: List::new(),
                         }),
                         refinement: None,
+                        value: Some(verum_common::ConstValue::UInt(sum)),
                     });
                 }
             }
             BinOp::Mul => {
                 if let (Some(l), Some(r)) = (left_val.as_u128(), right_val.as_u128()) {
-                    // Type-level multiplication for meta Nat
+                    // Type-level multiplication for meta Nat — propagate value.
+                    let prod = l.saturating_mul(r);
                     return Ok(Type::Meta {
-                        name: Text::from("_result"),
+                        name: Text::from(format!("{}", prod)),
                         ty: Box::new(Type::Named {
                             path: Path::from_ident(Ident::new("Nat", Span::dummy())),
                             args: List::new(),
                         }),
                         refinement: None,
+                        value: Some(verum_common::ConstValue::UInt(prod)),
                     });
                 }
             }
@@ -866,6 +871,7 @@ impl TypeLevelEvaluator {
                 name,
                 ty,
                 refinement,
+                value,
             } => {
                 // Try to evaluate the meta parameter
                 // For now, just pass through (would need expression in Meta)
@@ -873,6 +879,7 @@ impl TypeLevelEvaluator {
                     name: name.clone(),
                     ty: Box::new(self.substitute_meta(ty)?),
                     refinement: refinement.clone(),
+                    value: value.clone(),
                 })
             }
 
@@ -1110,6 +1117,7 @@ pub mod meta {
             name: name.into(),
             ty: Box::new(ty),
             refinement: None,
+            value: None,
         }
     }
 
@@ -1194,19 +1202,23 @@ pub mod equality {
                 paths_equal(p1, p2) && args_equal(a1, a2)
             }
 
-            // Meta parameters must have same name and type
+            // Meta parameters must have same name, type, and concrete value (if any).
+            // A concrete-value mismatch short-circuits equality regardless of the
+            // symbolic name, so `Meta(value=2)` is distinct from `Meta(value=3)`.
             (
                 Type::Meta {
                     name: n1,
                     ty: t1,
                     refinement: r1,
+                    value: v1,
                 },
                 Type::Meta {
                     name: n2,
                     ty: t2,
                     refinement: r2,
+                    value: v2,
                 },
-            ) => n1 == n2 && types_equal(t1, t2) && refinements_equal(r1, r2),
+            ) => v1 == v2 && n1 == n2 && types_equal(t1, t2) && refinements_equal(r1, r2),
 
             // Tuples must have same arity and element types
             (Type::Tuple(elems1), Type::Tuple(elems2)) => {

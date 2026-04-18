@@ -1,0 +1,31 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L1
+// @tags: generics, const-generics, meta-parameters, dimensions
+//
+// Regression anchor for L0-1: const-generic dimensions must flow through
+// unification as concrete values, not be collapsed to their base type.
+//
+// A `StaticMat<T, M, N>` carries compile-time dimensions M and N as
+// `meta USize` parameters. Two instances with identical dimensions
+// must unify.
+
+public type StaticMat<T, M: meta USize{M > 0}, N: meta USize{N > 0}> is {
+    data: [T; M * N],
+};
+
+fn main() {
+    // 2×3 matrix
+    let a: StaticMat<Int, 2, 3> = StaticMat { data: [1, 2, 3, 4, 5, 6] };
+
+    // Binding a 2×3 to a 2×3 annotation MUST succeed.
+    let b: StaticMat<Int, 2, 3> = a;
+
+    // Round-trip through a function that preserves shape.
+    fn identity_shape<T, M: meta USize, N: meta USize>(m: StaticMat<T, M, N>) -> StaticMat<T, M, N> {
+        m
+    }
+
+    let c: StaticMat<Int, 2, 3> = identity_shape(b);
+    assert(c.data[0] == 1);
+}

@@ -40,6 +40,7 @@ fn test_meta_param_creation() {
             name,
             ty,
             refinement,
+            ..
         } => {
             assert_eq!(name, "N");
             assert_eq!(*ty, Type::Int);
@@ -65,6 +66,7 @@ fn test_meta_param_with_refinement() {
             name,
             ty,
             refinement,
+            ..
         } => {
             assert_eq!(name, "N");
             assert_eq!(*ty, Type::Int);
