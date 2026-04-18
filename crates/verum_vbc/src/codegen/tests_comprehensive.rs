@@ -2342,9 +2342,14 @@ mod cross_module_path_tests {
         let info = make_func_info(2, 1, true);
         ctx.register_function("simple_func".into(), info.clone());
 
-        // lookup_qualified_function should fallback to simple lookup
+        // Strict variant: exact match only — must NOT rebind to simple_func.
         let found = ctx.lookup_qualified_function("some_module::simple_func");
-        assert!(found.is_some(), "Should fallback to simple name lookup");
+        assert!(found.is_none(), "strict lookup must not fall back to simple name");
+
+        // Opt-in fallback variant: falls back to last-segment when qualified
+        // name is not rooted at a module-path keyword.
+        let found = ctx.lookup_qualified_function_with_fallback("some_module::simple_func");
+        assert!(found.is_some(), "fallback variant should resolve via last segment");
         assert_eq!(found.unwrap().id, FunctionId(2));
     }
 
@@ -2425,9 +2430,12 @@ mod cross_module_path_tests {
         assert!(ctx.lookup_function("my_func").is_some());
         assert!(ctx.lookup_function("module::my_func").is_none()); // Won't find
 
-        // lookup_qualified_function can fallback
+        // Strict lookup_qualified_function: exact only.
         assert!(ctx.lookup_qualified_function("my_func").is_some());
-        assert!(ctx.lookup_qualified_function("module::my_func").is_some()); // Falls back
+        assert!(ctx.lookup_qualified_function("module::my_func").is_none());
+
+        // Fallback variant: exact first, then simple-name for non-rooted paths.
+        assert!(ctx.lookup_qualified_function_with_fallback("module::my_func").is_some());
     }
 
     #[test]

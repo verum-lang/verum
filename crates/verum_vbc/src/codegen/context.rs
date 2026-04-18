@@ -1815,19 +1815,43 @@ impl CodegenContext {
 
     /// Looks up a function by qualified name (e.g., "module::function" or "Type::method").
     ///
-    /// This is used for cross-module path resolution.
+    /// Returns a match for the *exact* qualified name only. Callers that also
+    /// want a simple-name fallback (for module-style imports where only the
+    /// last segment is registered) must request it explicitly via
+    /// `lookup_qualified_function_with_fallback`. The strict default prevents
+    /// a whole class of silent rebinding bugs, for example:
+    ///
+    /// ```text
+    /// // core/mem/epoch.vr — free function
+    /// public fn current_epoch() -> UInt64 { … }
+    ///
+    /// // core/runtime/mod.vr — static method on a unit type
+    /// implement Runtime { public fn current_epoch() -> UInt32 { … } }
+    /// ```
+    ///
+    /// Here `Runtime::current_epoch` is not registered (the method is stored
+    /// as `Runtime.current_epoch`); if the qualified lookup silently returned
+    /// the bare `current_epoch`, every caller of `Runtime.current_epoch()`
+    /// would compile to a self-recursive call on the free function, blowing
+    /// the stack. Same shape as the earlier super/cog/relative regression.
     pub fn lookup_qualified_function(&self, qualified_name: &str) -> Option<&FunctionInfo> {
-        // First, try exact match
+        self.functions.get(qualified_name)
+    }
+
+    /// Looks up a qualified name, falling back to the last segment if the
+    /// exact name is not registered. Intended only for explicit module-style
+    /// imports (e.g. `mount io.print` brings "print" into scope and later
+    /// `io.print("hello")` should resolve to it). Never use this for method
+    /// dispatch — see the doc on `lookup_qualified_function` for the
+    /// regression this avoids.
+    pub fn lookup_qualified_function_with_fallback(&self, qualified_name: &str) -> Option<&FunctionInfo> {
         if let Some(info) = self.functions.get(qualified_name) {
             return Some(info);
         }
 
-        // NEVER fall back to the last segment when the qualified path is
-        // rooted at a module-path keyword (`super`, `cog`, `.`). These are
-        // explicitly cross-module and MUST NOT silently resolve to a local
-        // symbol of the same last-segment name — that rebinding turns stdlib
-        // dispatchers like `super.darwin.tls.ctx_get(slot)` inside
-        // `core/sys/common.vr::ctx_get` into infinite self-recursion.
+        // Refuse the fallback when the qualified path is rooted at a module-
+        // path keyword (`super`, `cog`, `.`): those are explicit cross-module
+        // references, not aliases.
         let is_rooted_module_path = qualified_name.starts_with("super::")
             || qualified_name.starts_with("super.")
             || qualified_name.starts_with("cog::")
@@ -1838,8 +1862,6 @@ impl CodegenContext {
             return None;
         }
 
-        // Try without module prefix (simple resolution for single-module compilation)
-        // e.g., "module::func" -> "func"
         if let Some(simple_name) = qualified_name.rsplit("::").next()
             && let Some(info) = self.functions.get(simple_name) {
                 return Some(info);
