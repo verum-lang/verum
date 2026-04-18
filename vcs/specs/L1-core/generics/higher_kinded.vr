@@ -158,10 +158,28 @@ implement Monad for Result<_, E> where E: Clone {
     }
 }
 
-// NOTE: Generic HKT functions (lift2, map_with_index, sequence, traverse,
-// filter_m, fold_m) and law-checking functions removed due to compiler
-// limitation: F<_> type parameter substitution in function bodies causes
-// type mismatches (MapFuture<_, F<_>> vs F<_>).
+// =============================================================================
+// SECTION 7: Generic HKT helpers through protocol-qualified dispatch
+// =============================================================================
+//
+// Previously (pre-L0-2) calling protocol methods through an HKT parameter
+// inside a function body produced "MapFuture<_, F<_>> vs F<_>" mismatches
+// because method resolution matched the FutureExt::map blanket before the
+// bound on F was consulted. After L0-2 (part 1), protocol-qualified calls
+// `Functor.map(...)` / `Applicative.apply(...)` dispatch through F's bound
+// and return `F<B>` / `F<C>` with the caller's F substituted through.
+//
+// The method-on-value form (`fa.map(f)`) is still routed through a different
+// resolver and remains on the L0-2 roadmap — see hkt_method_on_value.vr.
+
+// Apply a pure function inside an Applicative context (lift-2).
+fn lift2<F<_>: Applicative, A, B, C>(
+    fa: F<A>,
+    fb: F<B>,
+    f: fn(A, B) -> C,
+) -> F<C> {
+    Applicative.apply(Functor.map(fa, |a| |b| f(a, b)), fb)
+}
 
 // =============================================================================
 // SECTION 8: Main Test Cases
@@ -220,4 +238,9 @@ fn main() {
     let nested: Maybe<Maybe<Int>> = Maybe.Some(Maybe.Some(42));
     let flattened = Maybe.flatten(nested);
     assert(flattened == Maybe.Some(42));
+
+    // Generic HKT helper via protocol-qualified dispatch (post-L0-2).
+    // F := Maybe, A := Int, B := Int, C := Int.
+    let pair_summed: Maybe<Int> = lift2(Maybe.Some(40), Maybe.Some(2), |a, b| a + b);
+    assert(pair_summed == Maybe.Some(42));
 }
