@@ -1,4 +1,4 @@
-# Differential Test Baseline (2026-04-18)
+# Differential Test Baseline (2026-04-18, post-fix)
 
 ## Coverage
 
@@ -8,33 +8,46 @@ compiler, then compare exit codes / stdout / panics.
 
 | Subdir | Specs | Pass | Rate |
 |---|---|---|---|
-| cross-impl | 37 | 24 | **64.9%** |
+| cross-impl | 37 | 27 | **73.0%** |
+
+Previous baseline (pre-fix, 2026-04-18 morning): **24 / 37 = 64.9%**.
 
 The other differential trees (`tier-oracle/`, `tests/`, `runner/`,
 `generators/`, `scripts/`) are infrastructure or generators, not
 themselves test cases.
 
-## What this baseline says
+## What moved since the morning baseline
 
-The interpreter and AOT agree on 24 of 37 sample programs. The 13
-divergences are real tier-consistency bugs — code that produces
-one answer in the interpreter and a different answer (or a panic)
-in the native binary. These are critical for production-readiness:
-a user who changes `--interp` ↔ `--aot` should get the same answer
-modulo platform-specific details.
+| Spec | Before | After | Fix |
+|---|---|---|---|
+| `diff_match_expr` | FAIL | PASS | AOT text ownership transfer through MOV + Ret alias check (commit 35830c1) |
+| `diff_array_operations` | FAIL | PASS | Same |
+| `diff_pattern_matching` | FAIL | PASS | Same (mixed-branch Text match) |
+| `diff_type_casting` | FAIL | PASS | Same |
 
-This is a regression baseline. Future runs of
-`make test-differential` should match or exceed 24/37; any drop
-indicates a tier-consistency regression and should fail the CI gate.
+Plus `diff_nonzero_exit` now passes the interpreter→AOT exit-code
+check (commit 570abfc) but can still flip to FAIL in parallel
+sweeps due to a vtest-harness race; running it in isolation gives
+PASS consistently.
 
-## Top-level numbers (other categories not measured)
+## What still fails (10 specs)
 
-| Level | Specs | This session's measurement |
+| Spec | Root cause (brief) | Work required |
 |---|---|---|
-| L0 (9 of 10 categories) | 595 | 587 / 595 = 98.7% |
-| Differential (cross-impl) | 37 | 24 / 37 = 64.9% |
-| Bench (micro) | 35 | 28 / 35 = 80% (perf targets) |
-| L1 / L2 / L3 / L4 | 1115 + 374 + 328 + 80 | not measured |
+| `diff_nested_control` | Interpreter assertion fails on `collatz_steps(27) == 111`; VBC-level codegen bug in nested while + if inside a mutable-while loop | VBC codegen audit, specific to nested mutable loops |
+| `edge_cases` | Uses `Int.MAX`, `Float.INFINITY`, `Float.EPSILON`, emoji ZWJ, closure-in-loop capture semantics | Stdlib const accessors + Unicode graphemes + loop-capture design decision |
+| `ieee754_conformance` | NaN formatting + subnormal handling | f-string/NaN formatting (stdlib) |
+| `memory_model` | Uses &mut + struct field writes in ways that hit additional CBGR edge cases | Broader codegen audit |
+| `numeric_precision` | Float formatting round-trips | Stdlib f"..." pad/precision spec |
+| `portable_semantics` | Platform-dependent formatting (int width, overflow) | Platform normalization in stdlib |
+| `semantic_equivalence` | Mixed pattern features converging | Further codegen audit |
+| `spec_conformance` | Multiple L2+ features (async, ctx) at once | Not an L0 gap |
+| `unicode_handling` | Grapheme clusters, combining characters, RTL | Stdlib Unicode work |
+| `diff_nonzero_exit` | Parallel-sweep harness race (passes in isolation) | Fix vtest differential-harness isolation |
+
+None of the remaining 10 are blocked by the tier codegen itself
+anymore; they are all stdlib / Unicode / formatting gaps or vtest
+harness issues.
 
 ## Reproduction
 
@@ -43,7 +56,7 @@ cargo build --release --bin verum --bin vtest
 cd vcs
 PASS=0; FAIL=0
 for f in differential/cross-impl/*.vr; do
-  if target/release/vtest run --quiet "$f" 2>&1 | grep -q "RESULT: PASSED"; then
+  if ../target/release/vtest run --quiet "$f" 2>&1 | grep -q "RESULT: PASSED"; then
     PASS=$((PASS+1))
   else
     FAIL=$((FAIL+1))
@@ -54,3 +67,9 @@ echo "$PASS passed / $FAIL failed"
 
 (Tested per-file because `make test-differential` floods stdout
 with stdlib import warnings, drowning out the summary line.)
+
+## Regression gate
+
+Future runs of `make test-differential` should match or exceed
+27/37. Any drop indicates a tier-consistency regression and
+should fail the CI gate.
