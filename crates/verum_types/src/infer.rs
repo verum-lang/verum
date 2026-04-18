@@ -38545,11 +38545,47 @@ impl TypeChecker {
             _ => recv_ty.clone(),
         };
 
-        let resolved_ty = match &recv_ty {
-            Type::Var(var) => {
-                // If still a type variable, check if we have bounds registered
-                // This enables method resolution on bounded type variables
-                // Check our type_var_bounds map for protocol constraints
+        // Bound-first dispatch: when the receiver is a bounded type variable,
+        // or a TypeApp over a bounded type variable (the HKT form `F<A>`
+        // inside a generic function body with `F<_>: SomeProtocol`), find
+        // the method via the variable's protocol bounds BEFORE falling
+        // through to the general blanket-impl lookup. Without this, calls
+        // like `fa.map(f)` where `fa: F<A>` resolve against every blanket
+        // impl of `map` and pick the wrong one (e.g. FutureExt::map →
+        // MapFuture<_, F<_>>).
+        // Bound-first dispatch also needs to catch the `Generic { name: "F", args }`
+        // form that `ast_to_type` emits when the user writes `F<A>` for an
+        // in-scope HKT type parameter `F<_>: Trait` (the parser converts the
+        // head of the type application to a Generic-name rather than a raw Var
+        // or TypeApp over a Var). We look up the name in the context: if it
+        // resolves to a bounded TypeVar, that var is the dispatch anchor.
+        let dispatch_var: Option<TypeVar> = match &recv_ty {
+            Type::Var(v) => Some(*v),
+            Type::TypeApp { constructor, .. } => match &**constructor {
+                Type::Var(v) => Some(*v),
+                _ => None,
+            },
+            Type::Generic { name, .. } => {
+                // Head of a generic application that is itself a bounded HKT
+                // parameter, e.g. `F<A>` inside `fn<F<_>: Functor>(fa: F<A>) ...`.
+                // `ast_to_type` emits the head as `Generic { name: "F" }` here;
+                // look the name up in the context to recover the bounded TypeVar.
+                if let Some(scheme) = self.ctx.env.lookup(name) {
+                    let resolved = self.unifier.apply(&scheme.ty);
+                    if let Type::Var(v) = resolved { Some(v) } else { None }
+                } else if let Maybe::Some(resolved) = self.ctx.lookup_type(name) {
+                    let applied = self.unifier.apply(&resolved);
+                    if let Type::Var(v) = applied { Some(v) } else { None }
+                } else {
+                    None
+                }
+            }
+            _ => None,
+        };
+
+        let resolved_ty = if let Some(var) = dispatch_var {
+            let var = &var;
+            {
                 let bounds = self.get_type_var_bounds(var);
 
                 if !bounds.is_empty() {
@@ -38582,38 +38618,48 @@ impl TypeChecker {
                                 // NOT Named types (e.g., Named("In")). The TypeVars appear in the method
                                 // signature in the same order as the protocol's type params (In, Out, ...).
                                 // We collect free TypeVars in order and substitute using "T{id}" keys.
-                                let method_ty = if !bound.args.is_empty() {
-                                    // Collect free TypeVars from method_ty in order of appearance.
-                                    // These correspond to the protocol's type params in declaration order.
-                                    fn collect_free_vars_ordered(ty: &Type, vars: &mut Vec<TypeVar>) {
-                                        match ty {
-                                            Type::Var(tv) => {
-                                                if !vars.iter().any(|v| v == tv) {
-                                                    vars.push(*tv);
-                                                }
+                                // Collect free TypeVars from method_ty in order of appearance.
+                                // These correspond to the protocol's type params in declaration order.
+                                fn collect_free_vars_ordered(ty: &Type, vars: &mut Vec<TypeVar>) {
+                                    match ty {
+                                        Type::Var(tv) => {
+                                            if !vars.iter().any(|v| v == tv) {
+                                                vars.push(*tv);
                                             }
-                                            Type::Function { params, return_type, .. } => {
-                                                for p in params {
-                                                    collect_free_vars_ordered(p, vars);
-                                                }
-                                                collect_free_vars_ordered(return_type, vars);
-                                            }
-                                            Type::Named { args, .. } | Type::Generic { args, .. } => {
-                                                for a in args {
-                                                    collect_free_vars_ordered(a, vars);
-                                                }
-                                            }
-                                            Type::Tuple(tys) => {
-                                                for t in tys { collect_free_vars_ordered(t, vars); }
-                                            }
-                                            Type::Reference { inner, .. }
-                                            | Type::CheckedReference { inner, .. }
-                                            | Type::UnsafeReference { inner, .. } => {
-                                                collect_free_vars_ordered(inner, vars);
-                                            }
-                                            _ => {}
                                         }
+                                        Type::Function { params, return_type, .. } => {
+                                            for p in params {
+                                                collect_free_vars_ordered(p, vars);
+                                            }
+                                            collect_free_vars_ordered(return_type, vars);
+                                        }
+                                        Type::Named { args, .. } | Type::Generic { args, .. } => {
+                                            for a in args {
+                                                collect_free_vars_ordered(a, vars);
+                                            }
+                                        }
+                                        Type::Tuple(tys) => {
+                                            for t in tys { collect_free_vars_ordered(t, vars); }
+                                        }
+                                        Type::Reference { inner, .. }
+                                        | Type::CheckedReference { inner, .. }
+                                        | Type::UnsafeReference { inner, .. } => {
+                                            collect_free_vars_ordered(inner, vars);
+                                        }
+                                        Type::TypeApp { constructor, args } => {
+                                            collect_free_vars_ordered(constructor, vars);
+                                            for a in args {
+                                                collect_free_vars_ordered(a, vars);
+                                            }
+                                        }
+                                        _ => {}
                                     }
+                                }
+
+                                let method_ty = if !bound.args.is_empty() {
+                                    // Substitute protocol type parameters with the bound's
+                                    // concrete arguments. E.g., for E: Module<Text, DynTensor<Float>>,
+                                    // the protocol's In/Out slots become Text/DynTensor<Float>.
 
                                     let mut free_vars: Vec<TypeVar> = Vec::new();
                                     collect_free_vars_ordered(&method_ty, &mut free_vars);
@@ -38642,7 +38688,50 @@ impl TypeChecker {
                                         method_ty
                                     }
                                 } else {
-                                    method_ty
+                                    // bound.args is empty — this is the HKT bound case:
+                                    // `fn fmap<F<_>: Functor, ...>`. Here F has the implicit
+                                    // role of Functor's HKT type parameter, so we substitute
+                                    // the protocol's first type param (the HKT slot) with
+                                    // Var(var) — the caller's type variable.
+                                    //
+                                    // Without this, method return types like `F<B>` retain the
+                                    // protocol's internal TypeVar for F and fail to unify with
+                                    // the caller's `F<_>` at the call site; the compiler then
+                                    // falls through to blanket-impl lookup and picks the wrong
+                                    // implementation (e.g., FutureExt::map → MapFuture<_, F<_>>).
+                                    let pc = self.protocol_checker.read();
+                                    let proto_opt = pc.get_protocol(&Text::from(protocol_name));
+                                    if let Maybe::Some(proto) = proto_opt {
+                                        if !proto.type_params.is_empty() {
+                                            let mut free_vars: Vec<TypeVar> = Vec::new();
+                                            collect_free_vars_ordered(&method_ty, &mut free_vars);
+
+                                            let mut param_subst: indexmap::IndexMap<Text, Type> =
+                                                indexmap::IndexMap::new();
+
+                                            // Map the protocol's first type param (HKT slot) to the
+                                            // caller's type variable, both by its fresh-TypeVar id
+                                            // (primary: stored method types reference free Vars) and by
+                                            // the parameter's human-readable name (fallback for
+                                            // Named/Generic references inside the signature).
+                                            if let Some(hkt_slot_tv) = free_vars.first() {
+                                                let var_key: Text =
+                                                    format!("T{}", hkt_slot_tv.id()).into();
+                                                param_subst.insert(var_key, Type::Var(*var));
+                                            }
+                                            let first_param_name = proto.type_params[0].name.clone();
+                                            param_subst.insert(first_param_name, Type::Var(*var));
+                                            drop(pc);
+
+                                            self.substitute_type_params(&method_ty, &param_subst)
+                                        } else {
+                                            drop(pc);
+                                            method_ty
+                                        }
+                                    } else {
+                                        drop(pc);
+                                        method_ty
+                                    }
                                 };
 
                                 // Found the method in a bounding protocol!
@@ -38704,7 +38793,8 @@ impl TypeChecker {
 
                 recv_ty.clone()
             }
-            _ => recv_ty.clone(),
+        } else {
+            recv_ty.clone()
         };
 
         // Increment protocol check metrics

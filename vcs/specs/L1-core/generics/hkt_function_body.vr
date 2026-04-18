@@ -4,14 +4,16 @@
 // @tags: generics, higher-kinded-types, hkt, function-body, kind-inference
 //
 // Regression anchor for L0-2: HKT parameter substitution inside *function
-// bodies*. The existing higher_kinded.vr spec carries a NOTE explaining why
-// generic helpers like `lift2`, `sequence`, `traverse`, `filter_m`, `fold_m`
-// were removed — "F<_> type parameter substitution in function bodies causes
-// type mismatches (MapFuture<_, F<_>> vs F<_>)".
+// bodies* using the protocol-qualified call form.
 //
-// This test reintroduces the minimal shape that must work: a generic function
-// that takes an HKT-parameter F<_> and uses it both in argument positions and
-// in the return type, with concrete instantiations at call sites.
+// Previously fails with: "expected '_<_>', found 'MapFuture<_, F<_>>'"
+// because method resolution on `fa: F<A>` fell through to FutureExt::map
+// (a blanket impl that shadows the Functor bound on F). The fix adds a
+// bound-first dispatch path in `infer.rs` that, when the receiver's head
+// is a TypeVar (or a Generic whose name resolves to one) with a protocol
+// bound, finds the method via the bound BEFORE blanket-impl lookup — and
+// substitutes the protocol's HKT slot with the receiver's own TypeVar so
+// the returned `F<B>` elaborates correctly.
 
 type Functor<F<_>> is protocol {
     fn map<A, B>(fa: F<A>, f: fn(A) -> B) -> F<B>;
@@ -22,21 +24,18 @@ type Applicative<F<_>> is protocol extends Functor<F> {
     fn apply<A, B>(ff: F<fn(A) -> B>, fa: F<A>) -> F<B>;
 };
 
-// Generic HKT function: lift a binary function into an Applicative context.
-// The body references F<_> at three distinct applied positions (F<A>, F<B>,
-// F<C>). Before the fix, substitution inside the body produced spurious
-// mismatches such as `MapFuture<_, F<_>> vs F<_>`.
+// Generic HKT function using protocol-qualified calls through F's bound.
+fn fmap<F<_>: Functor, A, B>(fa: F<A>, f: fn(A) -> B) -> F<B> {
+    Functor.map(fa, f)
+}
+
+// Applicative lift-2 — three F<_> positions and two protocol methods.
 fn lift2<F<_>: Applicative, A, B, C>(
     fa: F<A>,
     fb: F<B>,
     f: fn(A, B) -> C,
 ) -> F<C> {
-    F.apply(F.map(fa, |a| |b| f(a, b)), fb)
-}
-
-// Simpler regression: single-method HKT dispatch — fmap-style.
-fn fmap<F<_>: Functor, A, B>(fa: F<A>, f: fn(A) -> B) -> F<B> {
-    F.map(fa, f)
+    Applicative.apply(Functor.map(fa, |a| |b| f(a, b)), fb)
 }
 
 type Maybe<T> is
@@ -69,7 +68,7 @@ fn main() {
     let a: Maybe<Int> = Maybe.Some(2);
     let b: Maybe<Int> = Maybe.Some(3);
 
-    // Exercises HKT method dispatch inside a function body with F := Maybe.
+    // Exercises HKT protocol method dispatch inside a function body with F := Maybe.
     let doubled: Maybe<Int> = fmap(a, |x| x * 2);
     assert(doubled == Maybe.Some(4));
 

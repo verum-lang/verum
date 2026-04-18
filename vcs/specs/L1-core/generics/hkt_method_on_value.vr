@@ -1,0 +1,47 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L1
+// @tags: generics, higher-kinded-types, hkt, method-on-value, kind-inference
+// @skip: L0-2 remaining work — method-on-value dispatch through HKT bound
+//
+// Companion anchor to `hkt_function_body.vr`. The protocol-qualified form
+//
+//     Functor.map(fa, f)
+//
+// now type-checks (after the bound-first dispatch landed in infer.rs).
+// The method-on-value form
+//
+//     fa.map(f)
+//
+// still fails with: "expected '_<_>', found 'MapFuture<_, fn(_) -> _>'".
+// The method resolver for *value-qualified* calls picks up FutureExt::map
+// via a different code path than the bound-first dispatch we added; that
+// path needs the same bound-check treatment. Tracked as the remaining
+// half of L0-2; flip `@skip` to empty (or remove it) once the fix lands.
+
+type Functor<F<_>> is protocol {
+    fn map<A, B>(self: F<A>, f: fn(A) -> B) -> F<B>;
+};
+
+type Maybe<T> is
+    | Some(T)
+    | None;
+
+implement Functor for Maybe {
+    fn map<A, B>(self: Maybe<A>, f: fn(A) -> B) -> Maybe<B> {
+        match self {
+            Maybe.Some(a) => Maybe.Some(f(a)),
+            Maybe.None => Maybe.None,
+        }
+    }
+}
+
+fn fmap<F<_>: Functor, A, B>(fa: F<A>, f: fn(A) -> B) -> F<B> {
+    fa.map(f)
+}
+
+fn main() {
+    let a: Maybe<Int> = Maybe.Some(2);
+    let doubled: Maybe<Int> = fmap(a, |x| x * 2);
+    assert(doubled == Maybe.Some(4));
+}
