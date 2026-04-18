@@ -13429,32 +13429,44 @@ impl TypeChecker {
                     {
                         let variant_name = ident.name.as_str();
 
-                        // Check if this is a variant constructor FIRST.
-                        // Variant constructors (e.g., Rect for type Shape) are registered in
-                        // the env as functions returning Variant types. We must check this
-                        // before the struct-fields fallback because variant record fields are
-                        // ALSO registered under __struct_fields_<VariantName> for pattern matching.
-                        let is_variant_ctor = if let Some(scheme) = self.ctx.env.lookup(variant_name) {
-                            let ty = scheme.instantiate();
-                            matches!(&ty, Type::Function { return_type, .. }
-                                if matches!(return_type.as_ref(), Type::Variant(_)))
-                        } else {
-                            false
-                        };
+                        // (is_variant_ctor check removed — a local record type with
+                        // matching fields takes precedence over a cross-module variant
+                        // constructor of the same name; see the has_matching_struct
+                        // comment below.)
 
-                        // PRIORITY CHECK: If a NON-variant struct type exists with matching fields,
+                        // PRIORITY CHECK: If a struct type exists with matching fields,
                         // prefer struct construction over variant construction.
-                        // This prevents cross-module variant constructors (e.g., Range from
-                        // distributed.vr) from shadowing struct types (e.g., Range from iterator.vr).
-                        // But if the name IS a variant constructor, always use the variant path.
+                        //
+                        // Per the architectural rule in crates/verum_types/src/CLAUDE.md —
+                        // "user-defined variant names must freely override built-in
+                        // convenience aliases"; symmetrically, a user module's record
+                        // type must override a cross-module variant of the same name
+                        // when the provided field names match the record's fields. This
+                        // fixes the case where stdlib `core/logic/kripke.vr` defines
+                        // `Box { inner: … }` as a variant and a user file later declares
+                        // `type Box<T> is { content: T }`: the record construction
+                        // `Box { content: … }` was being routed to the stdlib variant
+                        // constructor and erroring out because `content` isn't a field
+                        // of the variant.
+                        //
+                        // Only require an "exact" field-set match (not a superset) so
+                        // variant constructors still win when the field names are
+                        // consistent with the variant but not with any record in scope.
                         let struct_key = format!("__struct_fields_{}", variant_name);
-                        let has_matching_struct = if is_variant_ctor {
-                            false // Variant constructor takes priority
-                        } else if let Option::Some(Type::Record(struct_fields)) =
+                        let has_matching_struct = if let Option::Some(Type::Record(struct_fields)) =
                             self.ctx.lookup_type(struct_key.as_str())
                         {
-                            // Check if ALL provided field names match the struct's fields
-                            fields.iter().all(|f| struct_fields.contains_key(f.name.name.as_str()))
+                            // Check field-set equality: provided names ⊆ record fields
+                            // AND every record field is provided (or shorthand-referenced).
+                            let all_provided_valid = fields
+                                .iter()
+                                .all(|f| struct_fields.contains_key(f.name.name.as_str()));
+                            let covers_all_required = struct_fields
+                                .keys()
+                                .all(|required| {
+                                    fields.iter().any(|f| f.name.name.as_str() == required.as_str())
+                                });
+                            all_provided_valid && covers_all_required
                         } else {
                             false
                         };
