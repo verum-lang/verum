@@ -472,6 +472,18 @@ pub struct TypeChecker {
     /// better error messages when bounds are violated.
     /// Generic bounds tracking: type parameters carry protocol constraints (e.g., T: Ord) that are checked at instantiation sites
     type_var_bounds: Map<TypeVar, List<crate::protocol::ProtocolBound>>,
+    /// Lookup from a Higher-Kinded parameter name to its fresh TypeVar id.
+    ///
+    /// HKT parameters like `F<_>: Functor` are registered both as a
+    /// `Type::Var(fresh_tvar)` in `ctx.env`/`ctx.types` AND as a
+    /// `Type::TypeConstructor { name, arity, kind }` in kind-inferred contexts.
+    /// Later lookups through `ctx.env` typically see the `TypeConstructor`
+    /// form, which does not carry the TypeVar id needed to query the
+    /// protocol bounds registered in `type_var_bounds`. This side table
+    /// preserves the connection so method dispatch through an HKT
+    /// parameter's protocol bound can still be resolved via the bound-first
+    /// path in `infer_method_call_inner_impl`.
+    hkt_type_var_by_name: Map<Text, TypeVar>,
     /// Direct type bounds for type variables (e.g., F: fn() -> T).
     /// Unlike protocol bounds which reference protocols by path, type bounds
     /// store the actual type constraint. This is essential for:
@@ -972,6 +984,7 @@ impl TypeChecker {
             variant_record_fields: Map::new(),
             variant_constructor_parents: Map::new(),
             type_var_bounds: Map::new(),
+            hkt_type_var_by_name: Map::new(),
             type_var_type_bounds: Map::new(),
             deferred_constraints: List::new(),
             property_inferrer: crate::computational_properties::PropertyInferrer::new(),
@@ -1149,6 +1162,7 @@ impl TypeChecker {
             variant_record_fields: Map::new(),
             variant_constructor_parents: Map::new(),
             type_var_bounds: Map::new(),
+            hkt_type_var_by_name: Map::new(),
             type_var_type_bounds: Map::new(),
             deferred_constraints: List::new(),
             property_inferrer: crate::computational_properties::PropertyInferrer::new(),
@@ -1721,6 +1735,7 @@ impl TypeChecker {
             variant_record_fields: Map::new(),
             variant_constructor_parents: Map::new(),
             type_var_bounds: Map::new(),
+            hkt_type_var_by_name: Map::new(),
             type_var_type_bounds: Map::new(),
             deferred_constraints: List::new(),
             property_inferrer: crate::computational_properties::PropertyInferrer::new(),
@@ -1829,6 +1844,7 @@ impl TypeChecker {
             variant_record_fields: Map::new(),
             variant_constructor_parents: Map::new(),
             type_var_bounds: Map::new(),
+            hkt_type_var_by_name: Map::new(),
             type_var_type_bounds: Map::new(),
             deferred_constraints: List::new(),
             property_inferrer: crate::computational_properties::PropertyInferrer::new(),
@@ -1938,6 +1954,7 @@ impl TypeChecker {
             variant_record_fields: Map::new(),
             variant_constructor_parents: Map::new(),
             type_var_bounds: Map::new(),
+            hkt_type_var_by_name: Map::new(),
             type_var_type_bounds: Map::new(),
             deferred_constraints: List::new(),
             property_inferrer: crate::computational_properties::PropertyInferrer::new(),
@@ -7546,6 +7563,16 @@ impl TypeChecker {
                         .env
                         .insert(name.name.clone(), TypeScheme::mono(type_var.clone()));
                     self.ctx.define_type(name_text.clone(), type_var);
+
+                    // Side table: only register when the HKT carries an
+                    // explicit protocol bound (e.g., `F<_>: Functor`). Bare
+                    // HKT parameters like `F<_>` (common on bare associated
+                    // type declarations) have no dispatchable protocol bound
+                    // to find methods through, so registering them would only
+                    // risk shadowing a real bounded HKT in an outer scope.
+                    if !bounds.is_empty() {
+                        self.hkt_type_var_by_name.insert(name_text.clone(), tvar);
+                    }
 
                     // Register bounds if present (e.g., F<_>: Functor)
                     if !bounds.is_empty() {
@@ -20700,6 +20727,14 @@ impl TypeChecker {
                                 .insert(name.name.clone(), TypeScheme::mono(type_var.clone()));
                             self.ctx.define_type(name_text.clone(), type_var);
 
+                            // Side table: only register when a protocol bound
+                            // is present — bare HKT slots can't be dispatched
+                            // through anyway (see the paired site above for
+                            // full rationale).
+                            if !bounds.is_empty() {
+                                self.hkt_type_var_by_name.insert(name_text.clone(), tvar);
+                            }
+
                             // Register bounds if present
                             if !bounds.is_empty() {
                                 if let Ok(protocol_bounds) =
@@ -32966,6 +33001,13 @@ impl TypeChecker {
                     self.ctx.define_type(name_text.clone(), type_var);
                     func_type_param_vars.push(tvar);
 
+                    // Side table: only register bounded HKTs so bare slot
+                    // declarations don't shadow a real bounded HKT in an
+                    // outer scope.
+                    if !bounds.is_empty() {
+                        self.hkt_type_var_by_name.insert(name_text.clone(), tvar);
+                    }
+
                     // Track implicit parameters
                     if generic_param.is_implicit {
                         func_implicit_type_vars.insert(tvar);
@@ -32974,6 +33016,11 @@ impl TypeChecker {
                     // Register bounds if present
                     if !bounds.is_empty() {
                         if let Ok(protocol_bounds) = self.convert_type_bounds_to_protocol_bounds(bounds) {
+                            // Register protocol bounds on the TypeVar so bound-first
+                            // method dispatch in infer_method_call_inner_impl can find
+                            // the method through the bound.
+                            self.register_type_var_bounds(tvar, protocol_bounds.clone());
+
                             let type_param = crate::context::TypeParam::new(name_text, name.span)
                                 .with_bounds(protocol_bounds);
                             self.ctx.env.add_type_param(type_param);
@@ -37685,7 +37732,7 @@ impl TypeChecker {
             other => other,
         };
 
-        // ============================================================
+// ============================================================
         // CBGR INTRINSIC METHODS: Handle reference-specific methods BEFORE auto-dereference
         // CBGR implementation: epoch-based generation tracking, acquire-release memory ordering, lock-free ABA-protected maps, ThinRef 16 bytes, FatRef 24 bytes — #reference-intrinsics
         //
@@ -38112,7 +38159,7 @@ impl TypeChecker {
             }
         }
 
-        // ============================================================
+// ============================================================
         // EARLY INHERENT_METHODS LOOKUP: Before hardcoded stdlib overrides,
         // check if the method was registered from parsed .vr stdlib files
         // via impl block registration (Pass S3). If found, use the registered
@@ -38120,13 +38167,69 @@ impl TypeChecker {
         // This reduces hardcoded stdlib knowledge in the compiler.
         // ============================================================
         {
-            let early_type_name: Option<verum_common::Text> = match &recv_ty {
-                Type::Text => Some(verum_common::Text::from(WKT::Text.as_str())),
-                Type::Generic { name, .. } => Some(name.clone()),
-                Type::Named { path, .. } => {
-                    path.as_ident().map(|id| verum_common::Text::from(id.name.as_str()))
+            // Skip the early-inherent lookup when the receiver's head is a
+            // bounded type parameter (HKT or otherwise) — inherent methods
+            // don't make sense on an abstract type variable, and querying by
+            // the parameter's name can yield unrelated blanket entries whose
+            // shape matches only by accident. Instead, we want such calls to
+            // fall through to the bound-first dispatch below, which consults
+            // the variable's protocol bounds and returns the correct method.
+            let is_type_param = {
+                let head_name: Option<verum_common::Text> = match &recv_ty {
+                    Type::Var(_) => None, // handled below
+                    Type::TypeApp { constructor, .. } => match &**constructor {
+                        Type::Var(_) => None, // handled below
+                        _ => None,
+                    },
+                    Type::Generic { name, .. } => Some(name.clone()),
+                    Type::Named { path, .. } => path
+                        .as_ident()
+                        .map(|id| verum_common::Text::from(id.name.as_str())),
+                    _ => None,
+                };
+                let head_is_param = head_name
+                    .as_ref()
+                    .map(|n| {
+                        // HKT parameters are recognized via the side table
+                        // (preserves the name even when env shows a
+                        // TypeConstructor after kind inference); ordinary
+                        // bounded type params show up as Type::Var or
+                        // Type::TypeConstructor in env/types.
+                        if self.hkt_type_var_by_name.contains_key(n) {
+                            return true;
+                        }
+                        let resolved = self
+                            .ctx
+                            .env
+                            .lookup(n)
+                            .map(|s| self.unifier.apply(&s.ty))
+                            .or_else(|| match self.ctx.lookup_type(n) {
+                                Maybe::Some(t) => Some(self.unifier.apply(&t)),
+                                _ => None,
+                            });
+                        matches!(resolved, Some(Type::Var(_)) | Some(Type::TypeConstructor { .. }))
+                    })
+                    .unwrap_or(false);
+                match &recv_ty {
+                    Type::Var(_) => true,
+                    Type::TypeApp { constructor, .. } => {
+                        matches!(&**constructor, Type::Var(_))
+                    }
+                    _ => head_is_param,
                 }
-                _ => None,
+            };
+
+            let early_type_name: Option<verum_common::Text> = if is_type_param {
+                None
+            } else {
+                match &recv_ty {
+                    Type::Text => Some(verum_common::Text::from(WKT::Text.as_str())),
+                    Type::Generic { name, .. } => Some(name.clone()),
+                    Type::Named { path, .. } => {
+                        path.as_ident().map(|id| verum_common::Text::from(id.name.as_str()))
+                    }
+                    _ => None,
+                }
             };
 
             if let Some(type_name_text) = early_type_name {
@@ -38218,7 +38321,7 @@ impl TypeChecker {
             }
         }
 
-        // ============================================================
+// ============================================================
         // C-RUNTIME-INTERCEPTED COLLECTION METHODS (HARDCODED FALLBACK)
         // These overrides are reached only when inherent_methods lookup above
         // did NOT find the method (e.g., stdlib .vr files not loaded).
@@ -38392,7 +38495,7 @@ impl TypeChecker {
             }
         }
 
-        // ============================================================
+// ============================================================
         // CAPABILITY-RESTRICTED TYPE METHOD FILTERING
         // Type system improvements: refinement evidence tracking, flow-sensitive propagation, prototype mode — Section 12 - Capability Attenuation as Types
         // ============================================================
@@ -38559,6 +38662,14 @@ impl TypeChecker {
         // head of the type application to a Generic-name rather than a raw Var
         // or TypeApp over a Var). We look up the name in the context: if it
         // resolves to a bounded TypeVar, that var is the dispatch anchor.
+        // `via_hkt_side_table` distinguishes the HKT-parameter dispatch
+        // (receiver whose head is an `F<_>: SomeProtocol` we looked up
+        // through `hkt_type_var_by_name`) from ordinary bounded type-var
+        // dispatch (receiver is a `Type::Var` from a `<T: Display>` bound).
+        // For HKT dispatch we'll restrict to protocols with explicit HKT
+        // type params; for ordinary type-var dispatch, every protocol is fair
+        // game (that's how `x.fmt()` on `T: Display` works today).
+        let mut via_hkt_side_table = false;
         let dispatch_var: Option<TypeVar> = match &recv_ty {
             Type::Var(v) => Some(*v),
             Type::TypeApp { constructor, .. } => match &**constructor {
@@ -38568,21 +38679,22 @@ impl TypeChecker {
             Type::Generic { name, .. } => {
                 // Head of a generic application that is itself a bounded HKT
                 // parameter, e.g. `F<A>` inside `fn<F<_>: Functor>(fa: F<A>) ...`.
-                // `ast_to_type` emits the head as `Generic { name: "F" }` here;
-                // look the name up in the context to recover the bounded TypeVar.
-                if let Some(scheme) = self.ctx.env.lookup(name) {
-                    let resolved = self.unifier.apply(&scheme.ty);
-                    if let Type::Var(v) = resolved { Some(v) } else { None }
-                } else if let Maybe::Some(resolved) = self.ctx.lookup_type(name) {
-                    let applied = self.unifier.apply(&resolved);
-                    if let Type::Var(v) = applied { Some(v) } else { None }
-                } else {
-                    None
+                match self.hkt_type_var_by_name.get(name).copied() {
+                    Some(tv) if !self.get_type_var_bounds(&tv).is_empty() => {
+                        let still_in_scope = self.ctx.env.lookup(name).is_some()
+                            || matches!(self.ctx.lookup_type(name), Maybe::Some(_));
+                        if still_in_scope {
+                            via_hkt_side_table = true;
+                            Some(tv)
+                        } else {
+                            None
+                        }
+                    }
+                    _ => None,
                 }
             }
             _ => None,
         };
-
         let resolved_ty = if let Some(var) = dispatch_var {
             let var = &var;
             {
@@ -38598,6 +38710,33 @@ impl TypeChecker {
                             // Check if this protocol has the method we're looking for
                             let protocol_name = ident.name.as_str();
                             let method_name_text: Text = method.name.as_str().into();
+
+                            // For HKT-side-table-routed dispatch (receiver
+                            // head = `F<_>: SomeProtocol`), skip protocols
+                            // without explicit HKT type parameters. Such
+                            // protocols use associated-type HKTs like
+                            // `type F<_>;` whose `Self.F<..>` can only be
+                            // resolved via a concrete implementation's
+                            // associated types through `get_implementations`.
+                            // Running bound-first for them produces wrong
+                            // signatures like `F<M<_>><_>`.
+                            //
+                            // Ordinary bounded type-var dispatch (e.g.,
+                            // `x.fmt()` where `x: T`, `T: Display`) must
+                            // keep working for every protocol, so the skip
+                            // is gated on `via_hkt_side_table` being set.
+                            if via_hkt_side_table {
+                                let proto_has_explicit_hkt_param = {
+                                    let pc = self.protocol_checker.read();
+                                    matches!(
+                                        pc.get_protocol(&Text::from(protocol_name)),
+                                        Maybe::Some(p) if !p.type_params.is_empty()
+                                    )
+                                };
+                                if !proto_has_explicit_hkt_param {
+                                    continue;
+                                }
+                            }
 
                             // Look up the method in the protocol definition AND its superprotocols.
                             // When Hashable extends Eq + Hash, calling hash() on T: Hashable
@@ -38755,20 +38894,36 @@ impl TypeChecker {
                                     ..
                                 } = &instantiated_method_ty
                                 {
-                                    // Protocol method types already EXCLUDE the self receiver
-                                    // (it's stripped during protocol registration). The params
-                                    // here are only the non-self parameters.
-                                    let expected_params = params;
-
-                                    // #[cfg(debug_assertions)]
-                                    // eprintln!(
-                                        // "[DEBUG method_call] Method '{}' from bounding protocol: args={}, params={} (receiver={}), method_ty={:?}",
-                                        // method.name.as_str(),
-                                        // args.len(),
-                                        // expected_params.len(),
-                                        // has_receiver,
-                                        // instantiated_method_ty
-                                    // );
+                                    // Protocol method types sometimes carry an explicit
+                                    // `self` parameter (when the protocol author wrote
+                                    // `fn map(self: F<A>, ...)`) and sometimes have it
+                                    // stripped (when written as `fn map(fa: F<A>, ...)`).
+                                    // For method-on-value dispatch (`fa.map(f)`) the
+                                    // receiver is passed implicitly, so when the method
+                                    // has exactly one more param than we have args AND
+                                    // the receiver is a user value (not a `self` reference
+                                    // inside a protocol default implementation), assume
+                                    // the first param is the self receiver and drop it.
+                                    let receiver_is_self = if let verum_ast::expr::ExprKind::Path(p) = &receiver.kind {
+                                        p.segments.first().map(|s| match s {
+                                            verum_ast::ty::PathSegment::SelfValue => true,
+                                            verum_ast::ty::PathSegment::Name(id) => {
+                                                id.name.as_str() == "self"
+                                            }
+                                            _ => false,
+                                        }).unwrap_or(false)
+                                    } else {
+                                        false
+                                    };
+                                    let expected_params: List<Type> = if params.len()
+                                        == args.len() + 1
+                                        && !receiver_is_self
+                                    {
+                                        params.iter().skip(1).cloned().collect()
+                                    } else {
+                                        params.clone()
+                                    };
+                                    let expected_params = &expected_params;
                                     if args.len() != expected_params.len() {
                                         return Err(TypeError::WrongArgCount {
                                             method: method.name.as_str().to_text(),
