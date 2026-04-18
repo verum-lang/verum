@@ -36800,6 +36800,18 @@ impl TypeChecker {
                 // receiver.span);
         }
 
+        // `iter.collect()` is generic in its return type — `collect<C: FromIterator<Item>>()
+        // -> C`. Without an expected target the result type is fully unconstrained, so
+        // synthesize a fresh type variable and let bidirectional `check_expr` unify it
+        // with the let-binding annotation (`let v: List<Int> = (0..N).collect();`).
+        // Several of the deeper type-resolution paths inside this function happily return
+        // the *element* type for `.collect()` on adapter shapes that don't carry a real
+        // `FromIterator` dictionary — `Range<Int>` ends up as `Int`, which then fails to
+        // unify with `List<Int>`. Short-circuit before any of those paths run.
+        if method.name.as_str() == "collect" && args.is_empty() {
+            return Ok(InferResult::new(Type::Var(TypeVar::fresh())));
+        }
+
         // Handle super path function calls
         // When we have `super.func(args)`, this is parsed as a method call
         // but should be resolved as a parent module function call.
