@@ -1036,7 +1036,35 @@ impl VbcCodegen {
     /// This calls collect_all_declarations but should be called AFTER
     /// collect_protocol_definitions has been called on all modules.
     pub fn collect_non_protocol_declarations(&mut self, module: &Module) -> CodegenResult<()> {
-        self.collect_all_declarations(module)
+        // Scope the current source module to this file's `module X.Y.Z;`
+        // declaration (if any). Without this, functions from imported stdlib
+        // files get registered under the outer codegen's `config.module_name`
+        // (typically `"main"` for user-run single-file compilations), which
+        // loses the provenance needed to resolve cross-module paths like
+        // `super.darwin.tls.ctx_get`.
+        let prev = self.ctx.current_source_module.take();
+        if let Some(name) = Self::extract_source_module_name(module) {
+            self.ctx.current_source_module = Some(name);
+        }
+        let result = self.collect_all_declarations(module);
+        self.ctx.current_source_module = prev;
+        result
+    }
+
+    /// Extract the dotted name of the first top-level `module X.Y.Z;`
+    /// declaration in the given AST module, if any. Stdlib `.vr` files
+    /// start with exactly one such declaration; user files typically
+    /// don't have one.
+    fn extract_source_module_name(module: &Module) -> Option<String> {
+        for item in module.items.iter() {
+            if let ItemKind::Module(decl) = &item.kind {
+                let name = decl.name.name.to_string();
+                if !name.is_empty() {
+                    return Some(name);
+                }
+            }
+        }
+        None
     }
 
     /// Marks all type names in a module as user-defined.
@@ -2222,12 +2250,21 @@ impl VbcCodegen {
     /// via `collect_all_declarations()`. Unlike `compile_function_bodies()`, this does
     /// NOT call `build_module()` — call `finalize_module()` separately when done.
     pub fn compile_module_items(&mut self, module: &Module) -> CodegenResult<()> {
+        let prev = self.ctx.current_source_module.take();
+        if let Some(name) = Self::extract_source_module_name(module) {
+            self.ctx.current_source_module = Some(name);
+        }
+        let mut result = Ok(());
         for item in module.items.iter() {
             if self.should_compile_item(item) {
-                self.compile_item(item)?;
+                if let Err(e) = self.compile_item(item) {
+                    result = Err(e);
+                    break;
+                }
             }
         }
-        Ok(())
+        self.ctx.current_source_module = prev;
+        result
     }
 
     /// Compile function bodies for an imported module with error recovery.
@@ -2239,12 +2276,17 @@ impl VbcCodegen {
     /// module actually calls a skipped function, it will get a FunctionNotFound error
     /// at runtime, which is the correct behavior.
     pub fn compile_module_items_lenient(&mut self, module: &Module) -> CodegenResult<()> {
+        let prev = self.ctx.current_source_module.take();
+        if let Some(name) = Self::extract_source_module_name(module) {
+            self.ctx.current_source_module = Some(name);
+        }
         for item in module.items.iter() {
             if self.should_compile_item(item) {
                 // Use lenient item compilation that skips individual functions that fail
                 self.compile_item_lenient(item);
             }
         }
+        self.ctx.current_source_module = prev;
         Ok(())
     }
 
@@ -3440,7 +3482,50 @@ impl VbcCodegen {
             return_type_inner: None,
         };
 
-        self.ctx.register_function(name.clone(), info);
+        self.ctx.register_function(name.clone(), info.clone());
+
+        // Also register under the function's fully-qualified module path, so
+        // cross-module calls like `sys.darwin.tls.ctx_get(slot)` (and the
+        // `super.*` equivalents after super-translation at the call site)
+        // resolve without relying on the previously-catastrophic last-segment
+        // fallback. The module_name comes from the codegen config, which is
+        // set per-.vr-file from the stdlib / user build pipeline.
+        //
+        // Skip for:
+        //   - mangled nested-function names (already module-local)
+        //   - anonymous / empty module names
+        //   - names that look like already-qualified type-method registrations
+        //     ("Foo.bar") — those get their own qualified registration path
+        //     via `register_impl_function`.
+        // Prefer the *source module* (from the `module X.Y.Z;` declaration at
+        // the top of the current .vr file) over `config.module_name`. The
+        // config's module_name is fixed per-codegen-session (`"main"` for a
+        // single-file user run) but a single session processes many imported
+        // stdlib modules, each with its own path. `current_source_module` is
+        // scoped to the file currently being collected/compiled.
+        let effective_module = self.ctx.current_source_module
+            .as_deref()
+            .unwrap_or(&self.config.module_name);
+        if self.nested_function_scope.is_empty()
+            && !effective_module.is_empty()
+            && effective_module != "main"
+            && !base_name.contains('.')
+            && !base_name.contains("::")
+        {
+            let dot_qualified = format!("{}.{}", effective_module, base_name);
+            let colon_qualified = effective_module
+                .replace('.', "::")
+                + "::"
+                + &base_name;
+            // Preserve existing registrations — don't clobber user-visible
+            // qualified aliases already installed by import/mount passes.
+            if self.ctx.lookup_function(&dot_qualified).is_none() {
+                self.ctx.register_function(dot_qualified, info.clone());
+            }
+            if self.ctx.lookup_function(&colon_qualified).is_none() {
+                self.ctx.register_function(colon_qualified, info.clone());
+            }
+        }
 
         // Also register under the base name for local lookup within the parent function.
         // This allows code in the outer function to call `inner()` directly.

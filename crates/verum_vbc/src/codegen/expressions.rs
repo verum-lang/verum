@@ -4346,7 +4346,12 @@ impl VbcCodegen {
 
         // First, try to flatten the receiver as a module path and look up the full qualified function
         // This handles patterns like `sys.common.os_alloc(...)` or `super.sys.linux.syscall.exit_group(...)`
-        if let Some(mut parts) = self.try_flatten_module_path(receiver) {
+        // The *resolved* variant also translates leading `super`/`cog`/`.`
+        // segments into their absolute module path, so `super.darwin.tls.ctx_get`
+        // inside `core/sys/common.vr::ctx_get` resolves to
+        // `sys.darwin.tls.ctx_get` and matches the qualified registration
+        // installed for every top-level function.
+        if let Some(mut parts) = self.try_flatten_module_path_resolved(receiver) {
             parts.push(method.name.to_string());
 
             // Try both :: separator (Rust-style) and . separator (Verum-style)
@@ -9656,6 +9661,88 @@ impl VbcCodegen {
         }
     }
 
+    /// Like `try_flatten_module_path` but resolves any leading `super`, `cog`,
+    /// or `.` head to the absolute module path. Falls back to the raw flatten
+    /// (with the literal `super` string preserved) when resolution isn't
+    /// possible, so existing guard code downstream still recognises the
+    /// path as rooted.
+    pub(super) fn try_flatten_module_path_resolved(&self, expr: &Expr) -> Option<Vec<String>> {
+        let raw = self.try_flatten_module_path(expr)?;
+        match raw.first().map(String::as_str) {
+            Some("super") | Some("cog") | Some(".") => {
+                self.resolve_module_path_head(&raw).or(Some(raw))
+            }
+            _ => Some(raw),
+        }
+    }
+
+    /// Resolve a path head that starts with `super`, `cog`, or `.` to the
+    /// absolute module path it denotes, using the *current* module name as
+    /// reference. Returns `Some(absolute_parts)` when the path was rooted
+    /// and could be resolved, `None` when it was not rooted.
+    ///
+    /// Concretely:
+    ///   current_module = "sys.common"
+    ///   "super.darwin.tls.ctx_get"  →  ["sys", "darwin", "tls", "ctx_get"]
+    ///   ".helper"                   →  ["sys", "common", "helper"]
+    ///   "cog.foo"                   →  ["core", "foo"]    (stdlib root)
+    ///
+    /// Multiple leading `super` segments walk further up:
+    ///   current = "a.b.c";  "super.super.x"  →  ["a", "x"]
+    ///
+    /// If a path tries to walk above the module root (e.g. `super` at the
+    /// top of "main"), returns `None` — callers should emit a nil stub or a
+    /// diagnostic, never silently rebind to a local symbol of the same name.
+    pub(super) fn resolve_module_path_head(&self, parts: &[String]) -> Option<Vec<String>> {
+        if parts.is_empty() {
+            return None;
+        }
+        // Prefer the *source module* (from the `module X.Y.Z;` declaration of
+        // the file currently being compiled). `config.module_name` is fixed
+        // per-codegen-session and is "main" for single-file user runs; the
+        // source module tracks the actual file whose items are being
+        // processed right now.
+        let module_name = self.ctx.current_source_module
+            .as_deref()
+            .unwrap_or(&self.config.module_name);
+        if module_name.is_empty() || module_name == "main" {
+            return None;
+        }
+        let module_parts: Vec<&str> = module_name.split('.').collect();
+
+        match parts[0].as_str() {
+            "super" => {
+                let mut super_count = 0usize;
+                while super_count < parts.len() && parts[super_count] == "super" {
+                    super_count += 1;
+                }
+                if super_count > module_parts.len() {
+                    return None; // walked above the module root
+                }
+                let base_len = module_parts.len() - super_count;
+                let mut absolute: Vec<String> =
+                    module_parts[..base_len].iter().map(|s| s.to_string()).collect();
+                absolute.extend(parts[super_count..].iter().cloned());
+                Some(absolute)
+            }
+            "." => {
+                let mut absolute: Vec<String> =
+                    module_parts.iter().map(|s| s.to_string()).collect();
+                absolute.extend(parts[1..].iter().cloned());
+                Some(absolute)
+            }
+            "cog" => {
+                // Cog root: for stdlib/user code compiled under a "core." prefix
+                // we fall back to the first module segment as the cog root.
+                let cog_root = module_parts.first().copied().unwrap_or("core");
+                let mut absolute: Vec<String> = vec![cog_root.to_string()];
+                absolute.extend(parts[1..].iter().cloned());
+                Some(absolute)
+            }
+            _ => None,
+        }
+    }
+
     /// Compiles field access.
     ///
     /// Special handling for:
@@ -9736,8 +9823,10 @@ impl VbcCodegen {
         }
 
         // First, try to flatten the full path (base + field) and look up as a qualified function
-        // This handles module paths like `super.sys.linux.syscall.exit_group`
-        if let Some(mut parts) = self.try_flatten_module_path(base) {
+        // This handles module paths like `super.sys.linux.syscall.exit_group`.
+        // Use the *resolved* variant so `super` gets translated to the current
+        // module's parent before lookup.
+        if let Some(mut parts) = self.try_flatten_module_path_resolved(base) {
             parts.push(field.to_string());
 
             // Try both :: separator (Rust-style) and . separator (Verum-style)

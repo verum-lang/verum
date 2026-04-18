@@ -89,6 +89,21 @@ pub struct CodegenContext {
     /// Used when importing stdlib modules after user code has been registered.
     pub prefer_existing_functions: bool,
 
+    /// Dotted module path for functions currently being collected/compiled.
+    ///
+    /// The codegen's `config.module_name` is fixed per-codegen-session and
+    /// is `"main"` for a user-run of a single `.vr` file. But when that
+    /// session subsequently pulls in stdlib `imported_modules`, each of
+    /// those has its own `module X.Y.Z;` declaration at the top of the
+    /// file, and their top-level functions should be registered under
+    /// `X.Y.Z.fn_name` — not under `main.fn_name`.
+    ///
+    /// `register_function` (the method wrapper, not the HashMap setter)
+    /// reads this field to produce qualified aliases for cross-module
+    /// paths like `super.darwin.tls.ctx_get` to resolve. `None` means
+    /// "use `config.module_name` as-is".
+    pub current_source_module: Option<String>,
+
     /// Statistics for codegen.
     pub stats: CodegenStats,
 
@@ -787,6 +802,7 @@ impl CodegenContext {
             bytes_intern: HashMap::new(),
             functions: HashMap::new(),
             prefer_existing_functions: false,
+            current_source_module: None,
             stats: CodegenStats::default(),
             tier_context: TierContext::new(),
             suspend_point_count: 0,

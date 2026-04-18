@@ -10260,6 +10260,15 @@ impl<'s> CompilationPipeline<'s> {
             "core.sys.common",
             "core.sys.darwin.libsystem",
             "core.sys.darwin.thread",
+            // Platform TLS / context-slot providers. `core/sys/common.vr`'s
+            // `ctx_get` / `ctx_set` dispatchers forward to the per-platform
+            // TLS module via `super.darwin.tls.ctx_get(slot)` etc.; without
+            // these in the codegen session no `super.X.tls.*` call can be
+            // resolved and every stdlib context lookup turns into a nil
+            // stub — blowing up `is_some()` callers and `Runtime`-backed
+            // epoch / env queries.
+            "core.sys.darwin.tls",
+            "core.sys.linux.tls",
             "core.sys.linux.syscall",
             "core.sys.linux.thread",
             // Phase 2A: Already migrated and tested (979 tests pass)
