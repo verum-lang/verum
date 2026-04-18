@@ -1,0 +1,2136 @@
+{
+  "metadata": {
+    "title": "VBench Micro Benchmarks",
+    "timestamp": 1776503856,
+    "verum_version": "1.0.0",
+    "platform": "macos aarch64",
+    "cpu_info": "Apple M3 Max",
+    "memory_info": "128 GB",
+    "tags": {}
+  },
+  "summary": {
+    "total": 35,
+    "passed": 28,
+    "failed": 7,
+    "regressions": 0,
+    "pass_rate": 0.8,
+    "total_duration_ms": 549.860929,
+    "avg_time_ns": 2200.007691334193,
+    "fastest": [
+      "cbgr/tier1_checked/direct_access",
+      16.27627310509242
+    ],
+    "slowest": [
+      "allocation/large/10mb",
+      67803.7034261242
+    ]
+  },
+  "results": [
+    {
+      "name": "cbgr/tier0/generation_check",
+      "category": "micro",
+      "tier": null,
+      "statistics": {
+        "count": 963208,
+        "min_ns": 0.0,
+        "max_ns": 84.0,
+        "mean_ns": 31.333277962807617,
+        "median_ns": 41.0,
+        "std_dev_ns": 29.57799289343711,
+        "cv": 0.9439801647483541,
+        "p5_ns": 0.0,
+        "p25_ns": 0.0,
+        "p75_ns": 42.0,
+        "p95_ns": 84.0,
+        "p99_ns": 84.0,
+        "iqr_ns": 42.0,
+        "total_duration": {
+          "secs": 0,
+          "nanos": 30180464
+        }
+      },
+      "threshold_ns": 15.0,
+      "passed": false,
+      "throughput": null,
+      "metadata": {
+        "outliers_removed": "36792"
+      }
+    },
+    {
+      "name": "cbgr/tier0/thin_ref_access",
+      "category": "micro",
+      "tier": null,
+      "statistics": {
+        "count": 959621,
+        "min_ns": 0.0,
+        "max_ns": 84.0,
+        "mean_ns": 31.861714155901133,
+        "median_ns": 41.0,
+        "std_dev_ns": 30.049222144440172,
+        "cv": 0.943113794738339,
+        "p5_ns": 0.0,
+        "p25_ns": 0.0,
+        "p75_ns": 42.0,
+        "p95_ns": 84.0,
+        "p99_ns": 84.0,
+        "iqr_ns": 42.0,
+        "total_duration": {
+          "secs": 0,
+          "nanos": 30575170
+        }
+      },
+      "threshold_ns": 15.0,
+      "passed": false,
+      "throughput": null,
+      "metadata": {
+        "outliers_removed": "40379"
+      }
+    },
+    {
+      "name": "cbgr/tier0/fat_ref_access",
+      "category": "micro",
+      "tier": null,
+      "statistics": {
+        "count": 999445,
+        "min_ns": 0.0,
+        "max_ns": 167.0,
+        "mean_ns": 42.32294023182867,
+        "median_ns": 42.0,
+        "std_dev_ns": 37.60073948928017,
+        "cv": 0.8884245584857264,
+        "p5_ns": 0.0,
+        "p25_ns": 0.0,
+        "p75_ns": 83.0,
+        "p95_ns": 84.0,
+        "p99_ns": 125.0,
+        "iqr_ns": 83.0,
+        "total_duration": {
+          "secs": 0,
+          "nanos": 42299451
+        }
+      },
+      "threshold_ns": 20.0,
+      "passed": false,
+      "throughput": null,
+      "metadata": {
+        "outliers_removed": "555"
+      }
+    },
+    {
+      "name": "cbgr/tier0/bounds_check",
+      "category": "micro",
+      "tier": null,
+      "statistics": {
+        "count": 999990,
+        "min_ns": 0.0,
+        "max_ns": 84.0,
+        "mean_ns": 17.36131061310613,
+        "median_ns": 0.0,
+        "std_dev_ns": 20.55703803732867,
+        "cv": 1.184071784408377,
+        "p5_ns": 0.0,
+        "p25_ns": 0.0,
+        "p75_ns": 42.0,
+        "p95_ns": 42.0,
+        "p99_ns": 42.0,
+        "iqr_ns": 42.0,
+        "total_duration": {
+          "secs": 0,
+          "nanos": 17361137
+        }
+      },
+      "threshold_ns": 5.0,
+      "passed": false,
+      "throughput": null,
+      "metadata": {
+        "outliers_removed": "10"
+      }
+    },
+    {
+      "name": "cbgr/tier0/generation_increment",
+      "category": "micro",
+      "tier": null,
+      "statistics": {
+        "count": 999913,
+        "min_ns": 0.0,
+        "max_ns": 209.0,
+        "mean_ns": 59.30415646161216,
+        "median_ns": 42.0,
+        "std_dev_ns": 46.820142415658125,
+        "cv": 0.7894917525041438,
+        "p5_ns": 0.0,
+        "p25_ns": 0.0,
+        "p75_ns": 84.0,
+        "p95_ns": 125.0,
+        "p99_ns": 125.0,
+        "iqr_ns": 84.0,
+        "total_duration": {
+          "secs": 0,
+          "nanos": 59298997
+        }
+      },
+      "threshold_ns": null,
+      "passed": true,
+      "throughput": null,
+      "metadata": {
+        "outliers_removed": "87"
+      }
+    },
+    {
+      "name": "cbgr/tier0/epoch_caps_check",
+      "category": "micro",
+      "tier": null,
+      "statistics": {
+        "count": 960971,
+        "min_ns": 0.0,
+        "max_ns": 84.0,
+        "mean_ns": 27.31435600033716,
+        "median_ns": 41.0,
+        "std_dev_ns": 27.092664751839312,
+        "cv": 0.9918837094861357,
+        "p5_ns": 0.0,
+        "p25_ns": 0.0,
+        "p75_ns": 42.0,
+        "p95_ns": 83.0,
+        "p99_ns": 84.0,
+        "iqr_ns": 42.0,
+        "total_duration": {
+          "secs": 0,
+          "nanos": 26248304
+        }
+      },
+      "threshold_ns": 15.0,
+      "passed": false,
+      "throughput": null,
+      "metadata": {
+        "outliers_removed": "39029"
+      }
+    },
+    {
+      "name": "cbgr/tier1_checked/direct_access",
+      "category": "micro",
+      "tier": null,
+      "statistics": {
+        "count": 999996,
+        "min_ns": 0.0,
+        "max_ns": 84.0,
+        "mean_ns": 16.27627310509242,
+        "median_ns": 0.0,
+        "std_dev_ns": 20.355029275022435,
+        "cv": 1.2505952157225646,
+        "p5_ns": 0.0,
+        "p25_ns": 0.0,
+        "p75_ns": 42.0,
+        "p95_ns": 42.0,
+        "p99_ns": 42.0,
+        "iqr_ns": 42.0,
+        "total_duration": {
+          "secs": 0,
+          "nanos": 16276208
+        }
+      },
+      "threshold_ns": null,
+      "passed": true,
+      "throughput": null,
+      "metadata": {
+        "outliers_removed": "4"
+      }
+    },
+    {
+      "name": "cbgr/tier1_checked/slice_iter",
+      "category": "micro",
+      "tier": null,
+      "statistics": {
+        "count": 999987,
+        "min_ns": 0.0,
+        "max_ns": 84.0,
+        "mean_ns": 16.537302984938805,
+        "median_ns": 0.0,
+        "std_dev_ns": 20.413615127219686,
+        "cv": 1.2343980844888187,
+        "p5_ns": 0.0,
+        "p25_ns": 0.0,
+        "p75_ns": 42.0,
+        "p95_ns": 42.0,
+        "p99_ns": 42.0,
+        "iqr_ns": 42.0,
+        "total_duration": {
+          "secs": 0,
+          "nanos": 16537088
+        }
+      },
+      "threshold_ns": null,
+      "passed": true,
+      "throughput": null,
+      "metadata": {
+        "outliers_removed": "13"
+      }
+    },
+    {
+      "name": "cbgr/tier1_checked/array_index",
+      "category": "micro",
+      "tier": null,
+      "statistics": {
+        "count": 999967,
+        "min_ns": 0.0,
+        "max_ns": 84.0,
+        "mean_ns": 16.44668574062944,
+        "median_ns": 0.0,
+        "std_dev_ns": 20.379441382155065,
+        "cv": 1.2391214682123008,
+        "p5_ns": 0.0,
+        "p25_ns": 0.0,
+        "p75_ns": 42.0,
+        "p95_ns": 42.0,
+        "p99_ns": 42.0,
+        "iqr_ns": 42.0,
+        "total_duration": {
+          "secs": 0,
+          "nanos": 16446143
+        }
+      },
+      "threshold_ns": null,
+      "passed": true,
+      "throughput": null,
+      "metadata": {
+        "outliers_removed": "33"
+      }
+    },
+    {
+      "name": "cbgr/tier2_unsafe/raw_pointer",
+      "category": "micro",
+      "tier": null,
+      "statistics": {
+        "count": 999994,
+        "min_ns": 0.0,
+        "max_ns": 84.0,
+        "mean_ns": 16.434954609727658,
+        "median_ns": 0.0,
+        "std_dev_ns": 20.378356343971603,
+        "cv": 1.2399399224327576,
+        "p5_ns": 0.0,
+        "p25_ns": 0.0,
+        "p75_ns": 42.0,
+        "p95_ns": 42.0,
+        "p99_ns": 42.0,
+        "iqr_ns": 42.0,
+        "total_duration": {
+          "secs": 0,
+          "nanos": 16434856
+        }
+      },
+      "threshold_ns": null,
+      "passed": true,
+      "throughput": null,
+      "metadata": {
+        "outliers_removed": "6"
+      }
+    },
+    {
+      "name": "cbgr/tier2_unsafe/unchecked_index",
+      "category": "micro",
+      "tier": null,
+      "statistics": {
+        "count": 999996,
+        "min_ns": 0.0,
+        "max_ns": 84.0,
+        "mean_ns": 16.86938347753391,
+        "median_ns": 0.0,
+        "std_dev_ns": 20.467075096281985,
+        "cv": 1.2132675224046785,
+        "p5_ns": 0.0,
+        "p25_ns": 0.0,
+        "p75_ns": 42.0,
+        "p95_ns": 42.0,
+        "p99_ns": 42.0,
+        "iqr_ns": 42.0,
+        "total_duration": {
+          "secs": 0,
+          "nanos": 16869316
+        }
+      },
+      "threshold_ns": null,
+      "passed": true,
+      "throughput": null,
+      "metadata": {
+        "outliers_removed": "4"
+      }
+    },
+    {
+      "name": "cbgr/lifecycle/ref_create_drop",
+      "category": "micro",
+      "tier": null,
+      "statistics": {
+        "count": 99966,
+        "min_ns": 0.0,
+        "max_ns": 84.0,
+        "mean_ns": 24.091551127383312,
+        "median_ns": 41.0,
+        "std_dev_ns": 20.598629188336048,
+        "cv": 0.8550146513780474,
+        "p5_ns": 0.0,
+        "p25_ns": 0.0,
+        "p75_ns": 42.0,
+        "p95_ns": 42.0,
+        "p99_ns": 42.0,
+        "iqr_ns": 42.0,
+        "total_duration": {
+          "secs": 0,
+          "nanos": 2408336
+        }
+      },
+      "threshold_ns": null,
+      "passed": true,
+      "throughput": null,
+      "metadata": {
+        "outliers_removed": "34"
+      }
+    },
+    {
+      "name": "cbgr/lifecycle/nested_refs",
+      "category": "micro",
+      "tier": null,
+      "statistics": {
+        "count": 99999,
+        "min_ns": 0.0,
+        "max_ns": 84.0,
+        "mean_ns": 16.479824798247982,
+        "median_ns": 0.0,
+        "std_dev_ns": 20.37986368584524,
+        "cv": 1.2366553610455788,
+        "p5_ns": 0.0,
+        "p25_ns": 0.0,
+        "p75_ns": 42.0,
+        "p95_ns": 42.0,
+        "p99_ns": 42.0,
+        "iqr_ns": 42.0,
+        "total_duration": {
+          "secs": 0,
+          "nanos": 1647966
+        }
+      },
+      "threshold_ns": null,
+      "passed": true,
+      "throughput": null,
+      "metadata": {
+        "outliers_removed": "1"
+      }
+    },
+    {
+      "name": "cbgr/overhead/with_validation",
+      "category": "micro",
+      "tier": null,
+      "statistics": {
+        "count": 99900,
+        "min_ns": 0.0,
+        "max_ns": 84.0,
+        "mean_ns": 20.356566566566567,
+        "median_ns": 0.0,
+        "std_dev_ns": 20.84003849870264,
+        "cv": 1.0237501707645593,
+        "p5_ns": 0.0,
+        "p25_ns": 0.0,
+        "p75_ns": 42.0,
+        "p95_ns": 42.0,
+        "p99_ns": 42.0,
+        "iqr_ns": 42.0,
+        "total_duration": {
+          "secs": 0,
+          "nanos": 2033621
+        }
+      },
+      "threshold_ns": null,
+      "passed": true,
+      "throughput": null,
+      "metadata": {
+        "outliers_removed": "100"
+      }
+    },
+    {
+      "name": "cbgr/overhead/without_validation",
+      "category": "micro",
+      "tier": null,
+      "statistics": {
+        "count": 99998,
+        "min_ns": 0.0,
+        "max_ns": 84.0,
+        "mean_ns": 16.38569771395428,
+        "median_ns": 0.0,
+        "std_dev_ns": 20.36152651653905,
+        "cv": 1.242640189755173,
+        "p5_ns": 0.0,
+        "p25_ns": 0.0,
+        "p75_ns": 42.0,
+        "p95_ns": 42.0,
+        "p99_ns": 42.0,
+        "iqr_ns": 42.0,
+        "total_duration": {
+          "secs": 0,
+          "nanos": 1638537
+        }
+      },
+      "threshold_ns": null,
+      "passed": true,
+      "throughput": null,
+      "metadata": {
+        "outliers_removed": "2"
+      }
+    },
+    {
+      "name": "allocation/small/8_bytes",
+      "category": "micro",
+      "tier": null,
+      "statistics": {
+        "count": 99956,
+        "min_ns": 0.0,
+        "max_ns": 84.0,
+        "mean_ns": 22.645133858897914,
+        "median_ns": 41.0,
+        "std_dev_ns": 20.84188149859752,
+        "cv": 0.9203691013028901,
+        "p5_ns": 0.0,
+        "p25_ns": 0.0,
+        "p75_ns": 42.0,
+        "p95_ns": 42.0,
+        "p99_ns": 42.0,
+        "iqr_ns": 42.0,
+        "total_duration": {
+          "secs": 0,
+          "nanos": 2263517
+        }
+      },
+      "threshold_ns": 50.0,
+      "passed": true,
+      "throughput": null,
+      "metadata": {
+        "outliers_removed": "44"
+      }
+    },
+    {
+      "name": "allocation/small/64_bytes",
+      "category": "micro",
+      "tier": null,
+      "statistics": {
+        "count": 99972,
+        "min_ns": 0.0,
+        "max_ns": 84.0,
+        "mean_ns": 21.806415796423,
+        "median_ns": 41.0,
+        "std_dev_ns": 20.840445206688273,
+        "cv": 0.9557024593700915,
+        "p5_ns": 0.0,
+        "p25_ns": 0.0,
+        "p75_ns": 42.0,
+        "p95_ns": 42.0,
+        "p99_ns": 42.0,
+        "iqr_ns": 42.0,
+        "total_duration": {
+          "secs": 0,
+          "nanos": 2180031
+        }
+      },
+      "threshold_ns": 50.0,
+      "passed": true,
+      "throughput": null,
+      "metadata": {
+        "outliers_removed": "28"
+      }
+    },
+    {
+      "name": "allocation/small/256_bytes",
+      "category": "micro",
+      "tier": null,
+      "statistics": {
+        "count": 99822,
+        "min_ns": 0.0,
+        "max_ns": 84.0,
+        "mean_ns": 25.298160726092444,
+        "median_ns": 41.0,
+        "std_dev_ns": 24.63907827539319,
+        "cv": 0.9739474162633697,
+        "p5_ns": 0.0,
+        "p25_ns": 0.0,
+        "p75_ns": 42.0,
+        "p95_ns": 83.0,
+        "p99_ns": 84.0,
+        "iqr_ns": 42.0,
+        "total_duration": {
+          "secs": 0,
+          "nanos": 2525313
+        }
+      },
+      "threshold_ns": 100.0,
+      "passed": true,
+      "throughput": null,
+      "metadata": {
+        "outliers_removed": "178"
+      }
+    },
+    {
+      "name": "allocation/medium/1kb",
+      "category": "micro",
+      "tier": null,
+      "statistics": {
+        "count": 8347,
+        "min_ns": 41.0,
+        "max_ns": 42.0,
+        "mean_ns": 41.66730561878519,
+        "median_ns": 42.0,
+        "std_dev_ns": 0.4711781297162545,
+        "cv": 0.011308101705137123,
+        "p5_ns": 41.0,
+        "p25_ns": 41.0,
+        "p75_ns": 42.0,
+        "p95_ns": 42.0,
+        "p99_ns": 42.0,
+        "iqr_ns": 1.0,
+        "total_duration": {
+          "secs": 0,
+          "nanos": 347797
+        }
+      },
+      "threshold_ns": null,
+      "passed": true,
+      "throughput": null,
+      "metadata": {
+        "outliers_removed": "1653"
+      }
+    },
+    {
+      "name": "allocation/medium/4kb",
+      "category": "micro",
+      "tier": null,
+      "statistics": {
+        "count": 9862,
+        "min_ns": 41.0,
+        "max_ns": 167.0,
+        "mean_ns": 114.62857432569459,
+        "median_ns": 125.0,
+        "std_dev_ns": 31.681901754451914,
+        "cv": 0.27638747093228266,
+        "p5_ns": 42.0,
+        "p25_ns": 84.0,
+        "p75_ns": 125.0,
+        "p95_ns": 167.0,
+        "p99_ns": 167.0,
+        "iqr_ns": 41.0,
+        "total_duration": {
+          "secs": 0,
+          "nanos": 1130467
+        }
+      },
+      "threshold_ns": null,
+      "passed": true,
+      "throughput": null,
+      "metadata": {
+        "outliers_removed": "138"
+      }
+    },
+    {
+      "name": "allocation/medium/64kb",
+      "category": "micro",
+      "tier": null,
+      "statistics": {
+        "count": 8599,
+        "min_ns": 541.0,
+        "max_ns": 667.0,
+        "mean_ns": 593.9503430631469,
+        "median_ns": 584.0,
+        "std_dev_ns": 24.474492648087825,
+        "cv": 0.04120629432061087,
+        "p5_ns": 542.0,
+        "p25_ns": 583.0,
+        "p75_ns": 625.0,
+        "p95_ns": 625.0,
+        "p99_ns": 667.0,
+        "iqr_ns": 42.0,
+        "total_duration": {
+          "secs": 0,
+          "nanos": 5107379
+        }
+      },
+      "threshold_ns": null,
+      "passed": true,
+      "throughput": null,
+      "metadata": {
+        "outliers_removed": "1401"
+      }
+    },
+    {
+      "name": "allocation/large/1mb",
+      "category": "micro",
+      "tier": null,
+      "statistics": {
+        "count": 898,
+        "min_ns": 6458.0,
+        "max_ns": 8209.0,
+        "mean_ns": 6899.126948775056,
+        "median_ns": 6792.0,
+        "std_dev_ns": 352.6463990606214,
+        "cv": 0.05111464126968036,
+        "p5_ns": 6500.0,
+        "p25_ns": 6583.0,
+        "p75_ns": 7208.0,
+        "p95_ns": 7416.0,
+        "p99_ns": 8000.0,
+        "iqr_ns": 625.0,
+        "total_duration": {
+          "secs": 0,
+          "nanos": 6195416
+        }
+      },
+      "threshold_ns": null,
+      "passed": true,
+      "throughput": null,
+      "metadata": {
+        "outliers_removed": "102"
+      }
+    },
+    {
+      "name": "allocation/large/10mb",
+      "category": "micro",
+      "tier": null,
+      "statistics": {
+        "count": 934,
+        "min_ns": 63791.0,
+        "max_ns": 79209.0,
+        "mean_ns": 67803.7034261242,
+        "median_ns": 67062.5,
+        "std_dev_ns": 3760.972903773952,
+        "cv": 0.055468546904251854,
+        "p5_ns": 63875.0,
+        "p25_ns": 65333.0,
+        "p75_ns": 70292.0,
+        "p95_ns": 75375.0,
+        "p99_ns": 78459.0,
+        "iqr_ns": 4959.0,
+        "total_duration": {
+          "secs": 0,
+          "nanos": 63328659
+        }
+      },
+      "threshold_ns": null,
+      "passed": true,
+      "throughput": null,
+      "metadata": {
+        "outliers_removed": "66"
+      }
+    },
+    {
+      "name": "allocation/patterns/realloc_grow",
+      "category": "micro",
+      "tier": null,
+      "statistics": {
+        "count": 7890,
+        "min_ns": 583.0,
+        "max_ns": 709.0,
+        "mean_ns": 625.3212927756654,
+        "median_ns": 625.0,
+        "std_dev_ns": 30.5902237645262,
+        "cv": 0.04891921020111572,
+        "p5_ns": 583.0,
+        "p25_ns": 625.0,
+        "p75_ns": 625.0,
+        "p95_ns": 667.0,
+        "p99_ns": 708.0,
+        "iqr_ns": 0.0,
+        "total_duration": {
+          "secs": 0,
+          "nanos": 4933785
+        }
+      },
+      "threshold_ns": null,
+      "passed": true,
+      "throughput": null,
+      "metadata": {
+        "outliers_removed": "2110"
+      }
+    },
+    {
+      "name": "allocation/patterns/arena_style",
+      "category": "micro",
+      "tier": null,
+      "statistics": {
+        "count": 7405,
+        "min_ns": 125.0,
+        "max_ns": 125.0,
+        "mean_ns": 125.0,
+        "median_ns": 125.0,
+        "std_dev_ns": 0.0,
+        "cv": 0.0,
+        "p5_ns": 125.0,
+        "p25_ns": 125.0,
+        "p75_ns": 125.0,
+        "p95_ns": 125.0,
+        "p99_ns": 125.0,
+        "iqr_ns": 0.0,
+        "total_duration": {
+          "secs": 0,
+          "nanos": 925625
+        }
+      },
+      "threshold_ns": null,
+      "passed": true,
+      "throughput": null,
+      "metadata": {
+        "outliers_removed": "2595"
+      }
+    },
+    {
+      "name": "context/tls/simple_lookup",
+      "category": "micro",
+      "tier": null,
+      "statistics": {
+        "count": 999989,
+        "min_ns": 0.0,
+        "max_ns": 84.0,
+        "mean_ns": 16.391523306756373,
+        "median_ns": 0.0,
+        "std_dev_ns": 20.381993127826895,
+        "cv": 1.2434471614621505,
+        "p5_ns": 0.0,
+        "p25_ns": 0.0,
+        "p75_ns": 42.0,
+        "p95_ns": 42.0,
+        "p99_ns": 42.0,
+        "iqr_ns": 42.0,
+        "total_duration": {
+          "secs": 0,
+          "nanos": 16391343
+        }
+      },
+      "threshold_ns": 30.0,
+      "passed": true,
+      "throughput": null,
+      "metadata": {
+        "outliers_removed": "11"
+      }
+    },
+    {
+      "name": "context/tls/borrow_mutably",
+      "category": "micro",
+      "tier": null,
+      "statistics": {
+        "count": 999987,
+        "min_ns": 0.0,
+        "max_ns": 84.0,
+        "mean_ns": 16.317535127956663,
+        "median_ns": 0.0,
+        "std_dev_ns": 20.366864517372033,
+        "cv": 1.248158153646484,
+        "p5_ns": 0.0,
+        "p25_ns": 0.0,
+        "p75_ns": 42.0,
+        "p95_ns": 42.0,
+        "p99_ns": 42.0,
+        "iqr_ns": 42.0,
+        "total_duration": {
+          "secs": 0,
+          "nanos": 16317323
+        }
+      },
+      "threshold_ns": 50.0,
+      "passed": true,
+      "throughput": null,
+      "metadata": {
+        "outliers_removed": "13"
+      }
+    },
+    {
+      "name": "context/tls/map_lookup",
+      "category": "micro",
+      "tier": null,
+      "statistics": {
+        "count": 999990,
+        "min_ns": 0.0,
+        "max_ns": 84.0,
+        "mean_ns": 16.51848218482185,
+        "median_ns": 0.0,
+        "std_dev_ns": 20.39588565943963,
+        "cv": 1.2347312199289453,
+        "p5_ns": 0.0,
+        "p25_ns": 0.0,
+        "p75_ns": 42.0,
+        "p95_ns": 42.0,
+        "p99_ns": 42.0,
+        "iqr_ns": 42.0,
+        "total_duration": {
+          "secs": 0,
+          "nanos": 16518317
+        }
+      },
+      "threshold_ns": null,
+      "passed": true,
+      "throughput": null,
+      "metadata": {
+        "outliers_removed": "10"
+      }
+    },
+    {
+      "name": "context/nested/two_levels",
+      "category": "micro",
+      "tier": null,
+      "statistics": {
+        "count": 99999,
+        "min_ns": 0.0,
+        "max_ns": 84.0,
+        "mean_ns": 17.269542695426953,
+        "median_ns": 0.0,
+        "std_dev_ns": 20.53082128429993,
+        "cv": 1.1888456832002028,
+        "p5_ns": 0.0,
+        "p25_ns": 0.0,
+        "p75_ns": 42.0,
+        "p95_ns": 42.0,
+        "p99_ns": 42.0,
+        "iqr_ns": 42.0,
+        "total_duration": {
+          "secs": 0,
+          "nanos": 1726937
+        }
+      },
+      "threshold_ns": null,
+      "passed": true,
+      "throughput": null,
+      "metadata": {
+        "outliers_removed": "1"
+      }
+    },
+    {
+      "name": "sync/mutex/uncontended_lock",
+      "category": "micro",
+      "tier": null,
+      "statistics": {
+        "count": 99932,
+        "min_ns": 0.0,
+        "max_ns": 84.0,
+        "mean_ns": 22.068146339510868,
+        "median_ns": 41.0,
+        "std_dev_ns": 20.8152407077164,
+        "cv": 0.9432256061511037,
+        "p5_ns": 0.0,
+        "p25_ns": 0.0,
+        "p75_ns": 42.0,
+        "p95_ns": 42.0,
+        "p99_ns": 42.0,
+        "iqr_ns": 42.0,
+        "total_duration": {
+          "secs": 0,
+          "nanos": 2205314
+        }
+      },
+      "threshold_ns": 25.0,
+      "passed": true,
+      "throughput": null,
+      "metadata": {
+        "outliers_removed": "68"
+      }
+    },
+    {
+      "name": "sync/rwlock/read_uncontended",
+      "category": "micro",
+      "tier": null,
+      "statistics": {
+        "count": 62309,
+        "min_ns": 83.0,
+        "max_ns": 84.0,
+        "mean_ns": 83.33651639410037,
+        "median_ns": 83.0,
+        "std_dev_ns": 0.47251784157000937,
+        "cv": 0.005669997523480118,
+        "p5_ns": 83.0,
+        "p25_ns": 83.0,
+        "p75_ns": 84.0,
+        "p95_ns": 84.0,
+        "p99_ns": 84.0,
+        "iqr_ns": 1.0,
+        "total_duration": {
+          "secs": 0,
+          "nanos": 5192615
+        }
+      },
+      "threshold_ns": 20.0,
+      "passed": false,
+      "throughput": null,
+      "metadata": {
+        "outliers_removed": "37691"
+      }
+    },
+    {
+      "name": "sync/rwlock/write_uncontended",
+      "category": "micro",
+      "tier": null,
+      "statistics": {
+        "count": 63007,
+        "min_ns": 83.0,
+        "max_ns": 84.0,
+        "mean_ns": 83.33216944149063,
+        "median_ns": 83.0,
+        "std_dev_ns": 0.47099140504940623,
+        "cv": 0.005651975800055221,
+        "p5_ns": 83.0,
+        "p25_ns": 83.0,
+        "p75_ns": 84.0,
+        "p95_ns": 84.0,
+        "p99_ns": 84.0,
+        "iqr_ns": 1.0,
+        "total_duration": {
+          "secs": 0,
+          "nanos": 5250510
+        }
+      },
+      "threshold_ns": 30.0,
+      "passed": false,
+      "throughput": null,
+      "metadata": {
+        "outliers_removed": "36993"
+      }
+    },
+    {
+      "name": "sync/atomic/load_relaxed",
+      "category": "micro",
+      "tier": null,
+      "statistics": {
+        "count": 960600,
+        "min_ns": 0.0,
+        "max_ns": 84.0,
+        "mean_ns": 33.63366749947949,
+        "median_ns": 42.0,
+        "std_dev_ns": 25.818821623704256,
+        "cv": 0.7676481199709732,
+        "p5_ns": 0.0,
+        "p25_ns": 0.0,
+        "p75_ns": 42.0,
+        "p95_ns": 83.0,
+        "p99_ns": 84.0,
+        "iqr_ns": 42.0,
+        "total_duration": {
+          "secs": 0,
+          "nanos": 32308501
+        }
+      },
+      "threshold_ns": null,
+      "passed": true,
+      "throughput": null,
+      "metadata": {
+        "outliers_removed": "39400"
+      }
+    },
+    {
+      "name": "sync/atomic/store_relaxed",
+      "category": "micro",
+      "tier": null,
+      "statistics": {
+        "count": 999993,
+        "min_ns": 0.0,
+        "max_ns": 84.0,
+        "mean_ns": 16.47587533112732,
+        "median_ns": 0.0,
+        "std_dev_ns": 20.385898835821333,
+        "cv": 1.237318104568741,
+        "p5_ns": 0.0,
+        "p25_ns": 0.0,
+        "p75_ns": 42.0,
+        "p95_ns": 42.0,
+        "p99_ns": 42.0,
+        "iqr_ns": 42.0,
+        "total_duration": {
+          "secs": 0,
+          "nanos": 16475760
+        }
+      },
+      "threshold_ns": null,
+      "passed": true,
+      "throughput": null,
+      "metadata": {
+        "outliers_removed": "7"
+      }
+    },
+    {
+      "name": "sync/atomic/fetch_add",
+      "category": "micro",
+      "tier": null,
+      "statistics": {
+        "count": 997683,
+        "min_ns": 0.0,
+        "max_ns": 167.0,
+        "mean_ns": 52.40214176246363,
+        "median_ns": 42.0,
+        "std_dev_ns": 43.83719309476522,
+        "cv": 0.8365534617550002,
+        "p5_ns": 0.0,
+        "p25_ns": 0.0,
+        "p75_ns": 83.0,
+        "p95_ns": 125.0,
+        "p99_ns": 166.0,
+        "iqr_ns": 83.0,
+        "total_duration": {
+          "secs": 0,
+          "nanos": 52280726
+        }
+      },
+      "threshold_ns": null,
+      "passed": true,
+      "throughput": null,
+      "metadata": {
+        "outliers_removed": "2317"
+      }
+    }
+  ],
+  "comparisons": [],
+  "regressions": [],
+  "by_category": {
+    "micro": [
+      {
+        "name": "cbgr/tier0/generation_check",
+        "category": "micro",
+        "tier": null,
+        "statistics": {
+          "count": 963208,
+          "min_ns": 0.0,
+          "max_ns": 84.0,
+          "mean_ns": 31.333277962807617,
+          "median_ns": 41.0,
+          "std_dev_ns": 29.57799289343711,
+          "cv": 0.9439801647483541,
+          "p5_ns": 0.0,
+          "p25_ns": 0.0,
+          "p75_ns": 42.0,
+          "p95_ns": 84.0,
+          "p99_ns": 84.0,
+          "iqr_ns": 42.0,
+          "total_duration": {
+            "secs": 0,
+            "nanos": 30180464
+          }
+        },
+        "threshold_ns": 15.0,
+        "passed": false,
+        "throughput": null,
+        "metadata": {
+          "outliers_removed": "36792"
+        }
+      },
+      {
+        "name": "cbgr/tier0/thin_ref_access",
+        "category": "micro",
+        "tier": null,
+        "statistics": {
+          "count": 959621,
+          "min_ns": 0.0,
+          "max_ns": 84.0,
+          "mean_ns": 31.861714155901133,
+          "median_ns": 41.0,
+          "std_dev_ns": 30.049222144440172,
+          "cv": 0.943113794738339,
+          "p5_ns": 0.0,
+          "p25_ns": 0.0,
+          "p75_ns": 42.0,
+          "p95_ns": 84.0,
+          "p99_ns": 84.0,
+          "iqr_ns": 42.0,
+          "total_duration": {
+            "secs": 0,
+            "nanos": 30575170
+          }
+        },
+        "threshold_ns": 15.0,
+        "passed": false,
+        "throughput": null,
+        "metadata": {
+          "outliers_removed": "40379"
+        }
+      },
+      {
+        "name": "cbgr/tier0/fat_ref_access",
+        "category": "micro",
+        "tier": null,
+        "statistics": {
+          "count": 999445,
+          "min_ns": 0.0,
+          "max_ns": 167.0,
+          "mean_ns": 42.32294023182867,
+          "median_ns": 42.0,
+          "std_dev_ns": 37.60073948928017,
+          "cv": 0.8884245584857264,
+          "p5_ns": 0.0,
+          "p25_ns": 0.0,
+          "p75_ns": 83.0,
+          "p95_ns": 84.0,
+          "p99_ns": 125.0,
+          "iqr_ns": 83.0,
+          "total_duration": {
+            "secs": 0,
+            "nanos": 42299451
+          }
+        },
+        "threshold_ns": 20.0,
+        "passed": false,
+        "throughput": null,
+        "metadata": {
+          "outliers_removed": "555"
+        }
+      },
+      {
+        "name": "cbgr/tier0/bounds_check",
+        "category": "micro",
+        "tier": null,
+        "statistics": {
+          "count": 999990,
+          "min_ns": 0.0,
+          "max_ns": 84.0,
+          "mean_ns": 17.36131061310613,
+          "median_ns": 0.0,
+          "std_dev_ns": 20.55703803732867,
+          "cv": 1.184071784408377,
+          "p5_ns": 0.0,
+          "p25_ns": 0.0,
+          "p75_ns": 42.0,
+          "p95_ns": 42.0,
+          "p99_ns": 42.0,
+          "iqr_ns": 42.0,
+          "total_duration": {
+            "secs": 0,
+            "nanos": 17361137
+          }
+        },
+        "threshold_ns": 5.0,
+        "passed": false,
+        "throughput": null,
+        "metadata": {
+          "outliers_removed": "10"
+        }
+      },
+      {
+        "name": "cbgr/tier0/generation_increment",
+        "category": "micro",
+        "tier": null,
+        "statistics": {
+          "count": 999913,
+          "min_ns": 0.0,
+          "max_ns": 209.0,
+          "mean_ns": 59.30415646161216,
+          "median_ns": 42.0,
+          "std_dev_ns": 46.820142415658125,
+          "cv": 0.7894917525041438,
+          "p5_ns": 0.0,
+          "p25_ns": 0.0,
+          "p75_ns": 84.0,
+          "p95_ns": 125.0,
+          "p99_ns": 125.0,
+          "iqr_ns": 84.0,
+          "total_duration": {
+            "secs": 0,
+            "nanos": 59298997
+          }
+        },
+        "threshold_ns": null,
+        "passed": true,
+        "throughput": null,
+        "metadata": {
+          "outliers_removed": "87"
+        }
+      },
+      {
+        "name": "cbgr/tier0/epoch_caps_check",
+        "category": "micro",
+        "tier": null,
+        "statistics": {
+          "count": 960971,
+          "min_ns": 0.0,
+          "max_ns": 84.0,
+          "mean_ns": 27.31435600033716,
+          "median_ns": 41.0,
+          "std_dev_ns": 27.092664751839312,
+          "cv": 0.9918837094861357,
+          "p5_ns": 0.0,
+          "p25_ns": 0.0,
+          "p75_ns": 42.0,
+          "p95_ns": 83.0,
+          "p99_ns": 84.0,
+          "iqr_ns": 42.0,
+          "total_duration": {
+            "secs": 0,
+            "nanos": 26248304
+          }
+        },
+        "threshold_ns": 15.0,
+        "passed": false,
+        "throughput": null,
+        "metadata": {
+          "outliers_removed": "39029"
+        }
+      },
+      {
+        "name": "cbgr/tier1_checked/direct_access",
+        "category": "micro",
+        "tier": null,
+        "statistics": {
+          "count": 999996,
+          "min_ns": 0.0,
+          "max_ns": 84.0,
+          "mean_ns": 16.27627310509242,
+          "median_ns": 0.0,
+          "std_dev_ns": 20.355029275022435,
+          "cv": 1.2505952157225646,
+          "p5_ns": 0.0,
+          "p25_ns": 0.0,
+          "p75_ns": 42.0,
+          "p95_ns": 42.0,
+          "p99_ns": 42.0,
+          "iqr_ns": 42.0,
+          "total_duration": {
+            "secs": 0,
+            "nanos": 16276208
+          }
+        },
+        "threshold_ns": null,
+        "passed": true,
+        "throughput": null,
+        "metadata": {
+          "outliers_removed": "4"
+        }
+      },
+      {
+        "name": "cbgr/tier1_checked/slice_iter",
+        "category": "micro",
+        "tier": null,
+        "statistics": {
+          "count": 999987,
+          "min_ns": 0.0,
+          "max_ns": 84.0,
+          "mean_ns": 16.537302984938805,
+          "median_ns": 0.0,
+          "std_dev_ns": 20.413615127219686,
+          "cv": 1.2343980844888187,
+          "p5_ns": 0.0,
+          "p25_ns": 0.0,
+          "p75_ns": 42.0,
+          "p95_ns": 42.0,
+          "p99_ns": 42.0,
+          "iqr_ns": 42.0,
+          "total_duration": {
+            "secs": 0,
+            "nanos": 16537088
+          }
+        },
+        "threshold_ns": null,
+        "passed": true,
+        "throughput": null,
+        "metadata": {
+          "outliers_removed": "13"
+        }
+      },
+      {
+        "name": "cbgr/tier1_checked/array_index",
+        "category": "micro",
+        "tier": null,
+        "statistics": {
+          "count": 999967,
+          "min_ns": 0.0,
+          "max_ns": 84.0,
+          "mean_ns": 16.44668574062944,
+          "median_ns": 0.0,
+          "std_dev_ns": 20.379441382155065,
+          "cv": 1.2391214682123008,
+          "p5_ns": 0.0,
+          "p25_ns": 0.0,
+          "p75_ns": 42.0,
+          "p95_ns": 42.0,
+          "p99_ns": 42.0,
+          "iqr_ns": 42.0,
+          "total_duration": {
+            "secs": 0,
+            "nanos": 16446143
+          }
+        },
+        "threshold_ns": null,
+        "passed": true,
+        "throughput": null,
+        "metadata": {
+          "outliers_removed": "33"
+        }
+      },
+      {
+        "name": "cbgr/tier2_unsafe/raw_pointer",
+        "category": "micro",
+        "tier": null,
+        "statistics": {
+          "count": 999994,
+          "min_ns": 0.0,
+          "max_ns": 84.0,
+          "mean_ns": 16.434954609727658,
+          "median_ns": 0.0,
+          "std_dev_ns": 20.378356343971603,
+          "cv": 1.2399399224327576,
+          "p5_ns": 0.0,
+          "p25_ns": 0.0,
+          "p75_ns": 42.0,
+          "p95_ns": 42.0,
+          "p99_ns": 42.0,
+          "iqr_ns": 42.0,
+          "total_duration": {
+            "secs": 0,
+            "nanos": 16434856
+          }
+        },
+        "threshold_ns": null,
+        "passed": true,
+        "throughput": null,
+        "metadata": {
+          "outliers_removed": "6"
+        }
+      },
+      {
+        "name": "cbgr/tier2_unsafe/unchecked_index",
+        "category": "micro",
+        "tier": null,
+        "statistics": {
+          "count": 999996,
+          "min_ns": 0.0,
+          "max_ns": 84.0,
+          "mean_ns": 16.86938347753391,
+          "median_ns": 0.0,
+          "std_dev_ns": 20.467075096281985,
+          "cv": 1.2132675224046785,
+          "p5_ns": 0.0,
+          "p25_ns": 0.0,
+          "p75_ns": 42.0,
+          "p95_ns": 42.0,
+          "p99_ns": 42.0,
+          "iqr_ns": 42.0,
+          "total_duration": {
+            "secs": 0,
+            "nanos": 16869316
+          }
+        },
+        "threshold_ns": null,
+        "passed": true,
+        "throughput": null,
+        "metadata": {
+          "outliers_removed": "4"
+        }
+      },
+      {
+        "name": "cbgr/lifecycle/ref_create_drop",
+        "category": "micro",
+        "tier": null,
+        "statistics": {
+          "count": 99966,
+          "min_ns": 0.0,
+          "max_ns": 84.0,
+          "mean_ns": 24.091551127383312,
+          "median_ns": 41.0,
+          "std_dev_ns": 20.598629188336048,
+          "cv": 0.8550146513780474,
+          "p5_ns": 0.0,
+          "p25_ns": 0.0,
+          "p75_ns": 42.0,
+          "p95_ns": 42.0,
+          "p99_ns": 42.0,
+          "iqr_ns": 42.0,
+          "total_duration": {
+            "secs": 0,
+            "nanos": 2408336
+          }
+        },
+        "threshold_ns": null,
+        "passed": true,
+        "throughput": null,
+        "metadata": {
+          "outliers_removed": "34"
+        }
+      },
+      {
+        "name": "cbgr/lifecycle/nested_refs",
+        "category": "micro",
+        "tier": null,
+        "statistics": {
+          "count": 99999,
+          "min_ns": 0.0,
+          "max_ns": 84.0,
+          "mean_ns": 16.479824798247982,
+          "median_ns": 0.0,
+          "std_dev_ns": 20.37986368584524,
+          "cv": 1.2366553610455788,
+          "p5_ns": 0.0,
+          "p25_ns": 0.0,
+          "p75_ns": 42.0,
+          "p95_ns": 42.0,
+          "p99_ns": 42.0,
+          "iqr_ns": 42.0,
+          "total_duration": {
+            "secs": 0,
+            "nanos": 1647966
+          }
+        },
+        "threshold_ns": null,
+        "passed": true,
+        "throughput": null,
+        "metadata": {
+          "outliers_removed": "1"
+        }
+      },
+      {
+        "name": "cbgr/overhead/with_validation",
+        "category": "micro",
+        "tier": null,
+        "statistics": {
+          "count": 99900,
+          "min_ns": 0.0,
+          "max_ns": 84.0,
+          "mean_ns": 20.356566566566567,
+          "median_ns": 0.0,
+          "std_dev_ns": 20.84003849870264,
+          "cv": 1.0237501707645593,
+          "p5_ns": 0.0,
+          "p25_ns": 0.0,
+          "p75_ns": 42.0,
+          "p95_ns": 42.0,
+          "p99_ns": 42.0,
+          "iqr_ns": 42.0,
+          "total_duration": {
+            "secs": 0,
+            "nanos": 2033621
+          }
+        },
+        "threshold_ns": null,
+        "passed": true,
+        "throughput": null,
+        "metadata": {
+          "outliers_removed": "100"
+        }
+      },
+      {
+        "name": "cbgr/overhead/without_validation",
+        "category": "micro",
+        "tier": null,
+        "statistics": {
+          "count": 99998,
+          "min_ns": 0.0,
+          "max_ns": 84.0,
+          "mean_ns": 16.38569771395428,
+          "median_ns": 0.0,
+          "std_dev_ns": 20.36152651653905,
+          "cv": 1.242640189755173,
+          "p5_ns": 0.0,
+          "p25_ns": 0.0,
+          "p75_ns": 42.0,
+          "p95_ns": 42.0,
+          "p99_ns": 42.0,
+          "iqr_ns": 42.0,
+          "total_duration": {
+            "secs": 0,
+            "nanos": 1638537
+          }
+        },
+        "threshold_ns": null,
+        "passed": true,
+        "throughput": null,
+        "metadata": {
+          "outliers_removed": "2"
+        }
+      },
+      {
+        "name": "allocation/small/8_bytes",
+        "category": "micro",
+        "tier": null,
+        "statistics": {
+          "count": 99956,
+          "min_ns": 0.0,
+          "max_ns": 84.0,
+          "mean_ns": 22.645133858897914,
+          "median_ns": 41.0,
+          "std_dev_ns": 20.84188149859752,
+          "cv": 0.9203691013028901,
+          "p5_ns": 0.0,
+          "p25_ns": 0.0,
+          "p75_ns": 42.0,
+          "p95_ns": 42.0,
+          "p99_ns": 42.0,
+          "iqr_ns": 42.0,
+          "total_duration": {
+            "secs": 0,
+            "nanos": 2263517
+          }
+        },
+        "threshold_ns": 50.0,
+        "passed": true,
+        "throughput": null,
+        "metadata": {
+          "outliers_removed": "44"
+        }
+      },
+      {
+        "name": "allocation/small/64_bytes",
+        "category": "micro",
+        "tier": null,
+        "statistics": {
+          "count": 99972,
+          "min_ns": 0.0,
+          "max_ns": 84.0,
+          "mean_ns": 21.806415796423,
+          "median_ns": 41.0,
+          "std_dev_ns": 20.840445206688273,
+          "cv": 0.9557024593700915,
+          "p5_ns": 0.0,
+          "p25_ns": 0.0,
+          "p75_ns": 42.0,
+          "p95_ns": 42.0,
+          "p99_ns": 42.0,
+          "iqr_ns": 42.0,
+          "total_duration": {
+            "secs": 0,
+            "nanos": 2180031
+          }
+        },
+        "threshold_ns": 50.0,
+        "passed": true,
+        "throughput": null,
+        "metadata": {
+          "outliers_removed": "28"
+        }
+      },
+      {
+        "name": "allocation/small/256_bytes",
+        "category": "micro",
+        "tier": null,
+        "statistics": {
+          "count": 99822,
+          "min_ns": 0.0,
+          "max_ns": 84.0,
+          "mean_ns": 25.298160726092444,
+          "median_ns": 41.0,
+          "std_dev_ns": 24.63907827539319,
+          "cv": 0.9739474162633697,
+          "p5_ns": 0.0,
+          "p25_ns": 0.0,
+          "p75_ns": 42.0,
+          "p95_ns": 83.0,
+          "p99_ns": 84.0,
+          "iqr_ns": 42.0,
+          "total_duration": {
+            "secs": 0,
+            "nanos": 2525313
+          }
+        },
+        "threshold_ns": 100.0,
+        "passed": true,
+        "throughput": null,
+        "metadata": {
+          "outliers_removed": "178"
+        }
+      },
+      {
+        "name": "allocation/medium/1kb",
+        "category": "micro",
+        "tier": null,
+        "statistics": {
+          "count": 8347,
+          "min_ns": 41.0,
+          "max_ns": 42.0,
+          "mean_ns": 41.66730561878519,
+          "median_ns": 42.0,
+          "std_dev_ns": 0.4711781297162545,
+          "cv": 0.011308101705137123,
+          "p5_ns": 41.0,
+          "p25_ns": 41.0,
+          "p75_ns": 42.0,
+          "p95_ns": 42.0,
+          "p99_ns": 42.0,
+          "iqr_ns": 1.0,
+          "total_duration": {
+            "secs": 0,
+            "nanos": 347797
+          }
+        },
+        "threshold_ns": null,
+        "passed": true,
+        "throughput": null,
+        "metadata": {
+          "outliers_removed": "1653"
+        }
+      },
+      {
+        "name": "allocation/medium/4kb",
+        "category": "micro",
+        "tier": null,
+        "statistics": {
+          "count": 9862,
+          "min_ns": 41.0,
+          "max_ns": 167.0,
+          "mean_ns": 114.62857432569459,
+          "median_ns": 125.0,
+          "std_dev_ns": 31.681901754451914,
+          "cv": 0.27638747093228266,
+          "p5_ns": 42.0,
+          "p25_ns": 84.0,
+          "p75_ns": 125.0,
+          "p95_ns": 167.0,
+          "p99_ns": 167.0,
+          "iqr_ns": 41.0,
+          "total_duration": {
+            "secs": 0,
+            "nanos": 1130467
+          }
+        },
+        "threshold_ns": null,
+        "passed": true,
+        "throughput": null,
+        "metadata": {
+          "outliers_removed": "138"
+        }
+      },
+      {
+        "name": "allocation/medium/64kb",
+        "category": "micro",
+        "tier": null,
+        "statistics": {
+          "count": 8599,
+          "min_ns": 541.0,
+          "max_ns": 667.0,
+          "mean_ns": 593.9503430631469,
+          "median_ns": 584.0,
+          "std_dev_ns": 24.474492648087825,
+          "cv": 0.04120629432061087,
+          "p5_ns": 542.0,
+          "p25_ns": 583.0,
+          "p75_ns": 625.0,
+          "p95_ns": 625.0,
+          "p99_ns": 667.0,
+          "iqr_ns": 42.0,
+          "total_duration": {
+            "secs": 0,
+            "nanos": 5107379
+          }
+        },
+        "threshold_ns": null,
+        "passed": true,
+        "throughput": null,
+        "metadata": {
+          "outliers_removed": "1401"
+        }
+      },
+      {
+        "name": "allocation/large/1mb",
+        "category": "micro",
+        "tier": null,
+        "statistics": {
+          "count": 898,
+          "min_ns": 6458.0,
+          "max_ns": 8209.0,
+          "mean_ns": 6899.126948775056,
+          "median_ns": 6792.0,
+          "std_dev_ns": 352.6463990606214,
+          "cv": 0.05111464126968036,
+          "p5_ns": 6500.0,
+          "p25_ns": 6583.0,
+          "p75_ns": 7208.0,
+          "p95_ns": 7416.0,
+          "p99_ns": 8000.0,
+          "iqr_ns": 625.0,
+          "total_duration": {
+            "secs": 0,
+            "nanos": 6195416
+          }
+        },
+        "threshold_ns": null,
+        "passed": true,
+        "throughput": null,
+        "metadata": {
+          "outliers_removed": "102"
+        }
+      },
+      {
+        "name": "allocation/large/10mb",
+        "category": "micro",
+        "tier": null,
+        "statistics": {
+          "count": 934,
+          "min_ns": 63791.0,
+          "max_ns": 79209.0,
+          "mean_ns": 67803.7034261242,
+          "median_ns": 67062.5,
+          "std_dev_ns": 3760.972903773952,
+          "cv": 0.055468546904251854,
+          "p5_ns": 63875.0,
+          "p25_ns": 65333.0,
+          "p75_ns": 70292.0,
+          "p95_ns": 75375.0,
+          "p99_ns": 78459.0,
+          "iqr_ns": 4959.0,
+          "total_duration": {
+            "secs": 0,
+            "nanos": 63328659
+          }
+        },
+        "threshold_ns": null,
+        "passed": true,
+        "throughput": null,
+        "metadata": {
+          "outliers_removed": "66"
+        }
+      },
+      {
+        "name": "allocation/patterns/realloc_grow",
+        "category": "micro",
+        "tier": null,
+        "statistics": {
+          "count": 7890,
+          "min_ns": 583.0,
+          "max_ns": 709.0,
+          "mean_ns": 625.3212927756654,
+          "median_ns": 625.0,
+          "std_dev_ns": 30.5902237645262,
+          "cv": 0.04891921020111572,
+          "p5_ns": 583.0,
+          "p25_ns": 625.0,
+          "p75_ns": 625.0,
+          "p95_ns": 667.0,
+          "p99_ns": 708.0,
+          "iqr_ns": 0.0,
+          "total_duration": {
+            "secs": 0,
+            "nanos": 4933785
+          }
+        },
+        "threshold_ns": null,
+        "passed": true,
+        "throughput": null,
+        "metadata": {
+          "outliers_removed": "2110"
+        }
+      },
+      {
+        "name": "allocation/patterns/arena_style",
+        "category": "micro",
+        "tier": null,
+        "statistics": {
+          "count": 7405,
+          "min_ns": 125.0,
+          "max_ns": 125.0,
+          "mean_ns": 125.0,
+          "median_ns": 125.0,
+          "std_dev_ns": 0.0,
+          "cv": 0.0,
+          "p5_ns": 125.0,
+          "p25_ns": 125.0,
+          "p75_ns": 125.0,
+          "p95_ns": 125.0,
+          "p99_ns": 125.0,
+          "iqr_ns": 0.0,
+          "total_duration": {
+            "secs": 0,
+            "nanos": 925625
+          }
+        },
+        "threshold_ns": null,
+        "passed": true,
+        "throughput": null,
+        "metadata": {
+          "outliers_removed": "2595"
+        }
+      },
+      {
+        "name": "context/tls/simple_lookup",
+        "category": "micro",
+        "tier": null,
+        "statistics": {
+          "count": 999989,
+          "min_ns": 0.0,
+          "max_ns": 84.0,
+          "mean_ns": 16.391523306756373,
+          "median_ns": 0.0,
+          "std_dev_ns": 20.381993127826895,
+          "cv": 1.2434471614621505,
+          "p5_ns": 0.0,
+          "p25_ns": 0.0,
+          "p75_ns": 42.0,
+          "p95_ns": 42.0,
+          "p99_ns": 42.0,
+          "iqr_ns": 42.0,
+          "total_duration": {
+            "secs": 0,
+            "nanos": 16391343
+          }
+        },
+        "threshold_ns": 30.0,
+        "passed": true,
+        "throughput": null,
+        "metadata": {
+          "outliers_removed": "11"
+        }
+      },
+      {
+        "name": "context/tls/borrow_mutably",
+        "category": "micro",
+        "tier": null,
+        "statistics": {
+          "count": 999987,
+          "min_ns": 0.0,
+          "max_ns": 84.0,
+          "mean_ns": 16.317535127956663,
+          "median_ns": 0.0,
+          "std_dev_ns": 20.366864517372033,
+          "cv": 1.248158153646484,
+          "p5_ns": 0.0,
+          "p25_ns": 0.0,
+          "p75_ns": 42.0,
+          "p95_ns": 42.0,
+          "p99_ns": 42.0,
+          "iqr_ns": 42.0,
+          "total_duration": {
+            "secs": 0,
+            "nanos": 16317323
+          }
+        },
+        "threshold_ns": 50.0,
+        "passed": true,
+        "throughput": null,
+        "metadata": {
+          "outliers_removed": "13"
+        }
+      },
+      {
+        "name": "context/tls/map_lookup",
+        "category": "micro",
+        "tier": null,
+        "statistics": {
+          "count": 999990,
+          "min_ns": 0.0,
+          "max_ns": 84.0,
+          "mean_ns": 16.51848218482185,
+          "median_ns": 0.0,
+          "std_dev_ns": 20.39588565943963,
+          "cv": 1.2347312199289453,
+          "p5_ns": 0.0,
+          "p25_ns": 0.0,
+          "p75_ns": 42.0,
+          "p95_ns": 42.0,
+          "p99_ns": 42.0,
+          "iqr_ns": 42.0,
+          "total_duration": {
+            "secs": 0,
+            "nanos": 16518317
+          }
+        },
+        "threshold_ns": null,
+        "passed": true,
+        "throughput": null,
+        "metadata": {
+          "outliers_removed": "10"
+        }
+      },
+      {
+        "name": "context/nested/two_levels",
+        "category": "micro",
+        "tier": null,
+        "statistics": {
+          "count": 99999,
+          "min_ns": 0.0,
+          "max_ns": 84.0,
+          "mean_ns": 17.269542695426953,
+          "median_ns": 0.0,
+          "std_dev_ns": 20.53082128429993,
+          "cv": 1.1888456832002028,
+          "p5_ns": 0.0,
+          "p25_ns": 0.0,
+          "p75_ns": 42.0,
+          "p95_ns": 42.0,
+          "p99_ns": 42.0,
+          "iqr_ns": 42.0,
+          "total_duration": {
+            "secs": 0,
+            "nanos": 1726937
+          }
+        },
+        "threshold_ns": null,
+        "passed": true,
+        "throughput": null,
+        "metadata": {
+          "outliers_removed": "1"
+        }
+      },
+      {
+        "name": "sync/mutex/uncontended_lock",
+        "category": "micro",
+        "tier": null,
+        "statistics": {
+          "count": 99932,
+          "min_ns": 0.0,
+          "max_ns": 84.0,
+          "mean_ns": 22.068146339510868,
+          "median_ns": 41.0,
+          "std_dev_ns": 20.8152407077164,
+          "cv": 0.9432256061511037,
+          "p5_ns": 0.0,
+          "p25_ns": 0.0,
+          "p75_ns": 42.0,
+          "p95_ns": 42.0,
+          "p99_ns": 42.0,
+          "iqr_ns": 42.0,
+          "total_duration": {
+            "secs": 0,
+            "nanos": 2205314
+          }
+        },
+        "threshold_ns": 25.0,
+        "passed": true,
+        "throughput": null,
+        "metadata": {
+          "outliers_removed": "68"
+        }
+      },
+      {
+        "name": "sync/rwlock/read_uncontended",
+        "category": "micro",
+        "tier": null,
+        "statistics": {
+          "count": 62309,
+          "min_ns": 83.0,
+          "max_ns": 84.0,
+          "mean_ns": 83.33651639410037,
+          "median_ns": 83.0,
+          "std_dev_ns": 0.47251784157000937,
+          "cv": 0.005669997523480118,
+          "p5_ns": 83.0,
+          "p25_ns": 83.0,
+          "p75_ns": 84.0,
+          "p95_ns": 84.0,
+          "p99_ns": 84.0,
+          "iqr_ns": 1.0,
+          "total_duration": {
+            "secs": 0,
+            "nanos": 5192615
+          }
+        },
+        "threshold_ns": 20.0,
+        "passed": false,
+        "throughput": null,
+        "metadata": {
+          "outliers_removed": "37691"
+        }
+      },
+      {
+        "name": "sync/rwlock/write_uncontended",
+        "category": "micro",
+        "tier": null,
+        "statistics": {
+          "count": 63007,
+          "min_ns": 83.0,
+          "max_ns": 84.0,
+          "mean_ns": 83.33216944149063,
+          "median_ns": 83.0,
+          "std_dev_ns": 0.47099140504940623,
+          "cv": 0.005651975800055221,
+          "p5_ns": 83.0,
+          "p25_ns": 83.0,
+          "p75_ns": 84.0,
+          "p95_ns": 84.0,
+          "p99_ns": 84.0,
+          "iqr_ns": 1.0,
+          "total_duration": {
+            "secs": 0,
+            "nanos": 5250510
+          }
+        },
+        "threshold_ns": 30.0,
+        "passed": false,
+        "throughput": null,
+        "metadata": {
+          "outliers_removed": "36993"
+        }
+      },
+      {
+        "name": "sync/atomic/load_relaxed",
+        "category": "micro",
+        "tier": null,
+        "statistics": {
+          "count": 960600,
+          "min_ns": 0.0,
+          "max_ns": 84.0,
+          "mean_ns": 33.63366749947949,
+          "median_ns": 42.0,
+          "std_dev_ns": 25.818821623704256,
+          "cv": 0.7676481199709732,
+          "p5_ns": 0.0,
+          "p25_ns": 0.0,
+          "p75_ns": 42.0,
+          "p95_ns": 83.0,
+          "p99_ns": 84.0,
+          "iqr_ns": 42.0,
+          "total_duration": {
+            "secs": 0,
+            "nanos": 32308501
+          }
+        },
+        "threshold_ns": null,
+        "passed": true,
+        "throughput": null,
+        "metadata": {
+          "outliers_removed": "39400"
+        }
+      },
+      {
+        "name": "sync/atomic/store_relaxed",
+        "category": "micro",
+        "tier": null,
+        "statistics": {
+          "count": 999993,
+          "min_ns": 0.0,
+          "max_ns": 84.0,
+          "mean_ns": 16.47587533112732,
+          "median_ns": 0.0,
+          "std_dev_ns": 20.385898835821333,
+          "cv": 1.237318104568741,
+          "p5_ns": 0.0,
+          "p25_ns": 0.0,
+          "p75_ns": 42.0,
+          "p95_ns": 42.0,
+          "p99_ns": 42.0,
+          "iqr_ns": 42.0,
+          "total_duration": {
+            "secs": 0,
+            "nanos": 16475760
+          }
+        },
+        "threshold_ns": null,
+        "passed": true,
+        "throughput": null,
+        "metadata": {
+          "outliers_removed": "7"
+        }
+      },
+      {
+        "name": "sync/atomic/fetch_add",
+        "category": "micro",
+        "tier": null,
+        "statistics": {
+          "count": 997683,
+          "min_ns": 0.0,
+          "max_ns": 167.0,
+          "mean_ns": 52.40214176246363,
+          "median_ns": 42.0,
+          "std_dev_ns": 43.83719309476522,
+          "cv": 0.8365534617550002,
+          "p5_ns": 0.0,
+          "p25_ns": 0.0,
+          "p75_ns": 83.0,
+          "p95_ns": 125.0,
+          "p99_ns": 166.0,
+          "iqr_ns": 83.0,
+          "total_duration": {
+            "secs": 0,
+            "nanos": 52280726
+          }
+        },
+        "threshold_ns": null,
+        "passed": true,
+        "throughput": null,
+        "metadata": {
+          "outliers_removed": "2317"
+        }
+      }
+    ]
+  }
+}
