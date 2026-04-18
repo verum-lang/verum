@@ -9868,6 +9868,17 @@ impl<'s> CompilationPipeline<'s> {
         match result {
             Ok(value) => {
                 info!("VBC execution completed successfully: {:?}", value);
+                // Tier-parity with AOT: if `main` returns an Int, use it as
+                // the process exit code. Without this, the interpreter ran
+                // `fn main() -> Int { 1 }` to completion but the process
+                // exited 0, diverging from the AOT path (where main's return
+                // is the C-level exit status).
+                if value.is_int() {
+                    let code = value.as_i64() as i32;
+                    if code != 0 {
+                        std::process::exit(code);
+                    }
+                }
                 Ok(())
             }
             Err(e) => {
@@ -10667,7 +10678,17 @@ impl<'s> CompilationPipeline<'s> {
             let stderr = interpreter.state.take_stderr();
 
             let exit_code = match result {
-                Ok(_value) => 0,
+                // Tier-parity: if `main` returns an Int, that IS the exit
+                // code (same contract as the AOT main→C-exit mapping).
+                // Without this, differential tests would see
+                // interpreter=0 / AOT=1 for any `fn main() -> Int { 1 }`.
+                Ok(value) => {
+                    if value.is_int() {
+                        value.as_i64() as i32
+                    } else {
+                        0
+                    }
+                }
                 Err(ref e) => {
                     let error_msg = format!("{}", e);
                     if stderr.is_empty() {
