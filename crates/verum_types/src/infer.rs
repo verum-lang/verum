@@ -48656,6 +48656,18 @@ impl TypeChecker {
                 // This enables patterns like `implement TypeName { fn new() -> Self { ... } }`
                 let self_type = self.ast_to_type(for_type)?;
                 let previous_self_type = self.current_self_type.clone();
+                // Capture the impl's `for_type` argument list for
+                // per-instantiation method gating. For
+                // `implement<T: Copy> Register<T, ReadOnly>` this is
+                // `[Var(T), Named(ReadOnly)]` — Var slots match any
+                // concrete arg at lookup time; Named slots pin the
+                // receiver's arg. Same encoding as the cross-file
+                // `import_impl_blocks_for_type` path so both stdlib
+                // and user impls populate the same registry.
+                let impl_self_type_args: List<Type> = match &self_type {
+                    Type::Named { args, .. } | Type::Generic { args, .. } => args.clone(),
+                    _ => List::new(),
+                };
                 self.set_current_self_type(Maybe::Some(self_type));
 
                 // Get the type name for registering qualified method names
@@ -48927,6 +48939,39 @@ impl TypeChecker {
                                         .entry(type_name_text.clone())
                                         .or_default();
                                     methods.insert(method_name_text.clone(), method_scheme);
+                                }
+
+                                // Per-instantiation gate: record the impl
+                                // block's `for_type` arg pattern so the
+                                // method-call lookup paths that *do* check
+                                // patterns can reject calls whose receiver
+                                // pinned a generic arg to a different
+                                // concrete type. Mirrors the same record
+                                // already done in `import_impl_blocks_for_type`
+                                // (cross-file path) — without this the
+                                // in-module path leaves patterns empty for
+                                // stdlib types like `Register<T, MODE>`.
+                                //
+                                // KNOWN GAP: not every method-call
+                                // resolution path consults
+                                // `method_impl_patterns`; e.g.,
+                                // `lookup_protocol_method_for_type` and the
+                                // base-name-fallback path both bypass it.
+                                // The patterns are populated correctly here;
+                                // closing the remaining gates requires
+                                // refactoring `inherent_methods` to a
+                                // multimap keyed on (type_name, method_name)
+                                // with the constraint stored alongside each
+                                // candidate signature. Tracked as task #35.
+                                if !impl_self_type_args.is_empty() {
+                                    let mut patterns_guard = self.method_impl_patterns.write();
+                                    let type_patterns = patterns_guard
+                                        .entry(type_name_text.clone())
+                                        .or_default();
+                                    let method_patterns = type_patterns
+                                        .entry(method_name_text.clone())
+                                        .or_default();
+                                    method_patterns.push(impl_self_type_args.clone());
                                 }
 
                                 tracing::debug!(
