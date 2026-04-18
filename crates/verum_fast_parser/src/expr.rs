@@ -6084,13 +6084,25 @@ impl<'a> RecursiveParser<'a> {
         } else {
             Maybe::None
         };
+        // Anonymous function body can be either:
+        //   fn(x: A) -> A { x }    — explicit block body
+        //   fn(x: A) -> A x         — bare-expression body (like the
+        //                             sibling `|x| x` closure form).
+        // Both forms map to the same Closure AST node; the expression-form
+        // gets wrapped in an implicit `{ expr }` during lowering. This
+        // matches the grammar's `closure_expr` production which already
+        // accepts expression bodies, and unblocks stdlib modules like
+        // `core/math/hott.vr` that express equivalence-proofs with
+        //     fn(x: A) -> A x
+        // through dozens of call sites.
         let body = if self.stream.check(&TokenKind::LBrace) {
             self.parse_block_expr()?
         } else {
-            return Err(ParseError::invalid_syntax(
-                "anonymous function requires a block body `{ ... }`",
-                self.stream.current_span(),
-            ));
+            // Parse a single expression — reuse the minimum binding power
+            // that closure bodies use so operator precedence is consistent.
+            // BP 0 accepts any expression; the terminating ',' / ')' / '}'
+            // at the enclosing context stops the walk.
+            self.parse_expr_bp(0)?
         };
         let span = self.stream.make_span(start_pos);
         Ok(Expr::new(
