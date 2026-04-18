@@ -1809,7 +1809,18 @@ pub struct InterpreterConfig {
 impl Default for InterpreterConfig {
     fn default() -> Self {
         Self {
-            max_stack_depth: 1024,
+            // Production-sized call stack. Each frame is ~64 bytes (regs +
+            // bookkeeping), so 16384 frames ≈ 1 MB on the interpreter's
+            // heap-allocated CallStack — well below the OS thread stack
+            // (8 MB on macOS) and small enough that infinite-recursion
+            // attacks are still caught quickly. Bumped from 1024 because
+            // legitimate VBC programs that build CBGR reference chains
+            // through stdlib helpers (each ref op going through 5–8
+            // helper calls) routinely exceeded the old limit on tests
+            // like `cbgr_comprehensive` and `tier_fallback` that
+            // exercise dozens of nested ref/deref/check operations in a
+            // single execution.
+            max_stack_depth: 16 * 1024,
             max_heap_size: 64 * 1024 * 1024, // 64 MB
             trace_enabled: false,
             timeout_ms: 30_000,           // 30 second timeout to prevent infinite loops
