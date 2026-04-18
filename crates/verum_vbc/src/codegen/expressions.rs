@@ -12382,11 +12382,33 @@ impl VbcCodegen {
     /// generation check), and prevents the silent slot-collision class of
     /// bugs at codegen time.
     fn stabilize_ref_source(&mut self, inner: &Expr, inner_reg: Reg) -> Reg {
-        if let ExprKind::Path(path) = &inner.kind
-            && path.segments.len() == 1
-            && let PathSegment::Name(ident) = &path.segments[0]
-            && self.ctx.get_var_reg(&ident.name).is_ok()
-        {
+        // Already-stable sources don't need promotion:
+        //
+        //   - Named locals (`&x`): the variable's slot is never recycled.
+        //   - Deref of a CBGR-tracked pointer (`&*heap_val`): the
+        //     reference machinery's whole *purpose* is to expose the
+        //     dereffed slot to subsequent CBGR generation/epoch checks.
+        //     Copying through a fresh stable slot would defeat the
+        //     use-after-free detection (e.g.,
+        //     `let r = &*heap; drop(heap); *r // → expected panic`).
+        //   - Anything else not in the temp-recycling pool.
+        //
+        // We only need to stabilize when the inner expression is an
+        // `Index` (a temp holding a *copy* of an array element) or a
+        // `Field` access on a temp-valued receiver. For those the temp
+        // would otherwise be recycled by the next `alloc_temp`, and the
+        // deref through the resulting CBGR ref would read whatever
+        // happened to land in the slot.
+        let needs_stable = matches!(
+            &inner.kind,
+            ExprKind::Index { .. }
+                | ExprKind::Field { .. }
+                | ExprKind::TupleIndex { .. }
+                | ExprKind::Binary { .. }
+                | ExprKind::Call { .. }
+                | ExprKind::MethodCall { .. }
+        );
+        if !needs_stable {
             return inner_reg;
         }
         let stable = self.ctx.registers.alloc_fresh();
