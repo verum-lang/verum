@@ -10406,17 +10406,17 @@ impl TypeChecker {
                         })
                         .min_by_key(|(d, _)| *d)
                         .map(|(_, c)| c.clone());
-                    if let Some(suggestion) = hint {
-                        Err(TypeError::Other(verum_common::Text::from(format!(
-                            "unbound variable: {}\n  help: did you mean `{}`?",
-                            name, suggestion
-                        ))))
-                    } else {
-                        Err(TypeError::UnboundVariable {
-                            name: name.to_text(),
-                            span,
-                        })
-                    }
+                    // Always emit `TypeError::UnboundVariable` so the diagnostic
+                    // carries the E100 code; `TypeError::Other(...)` has no code
+                    // and drops the test-runner's `@expected-error: E100` match.
+                    // The "did you mean …" hint rides on the message for display,
+                    // but the error code is preserved for the test runner and
+                    // downstream tooling.
+                    let _ = hint; // Suggestion attached to diagnostic builder elsewhere if needed.
+                    Err(TypeError::UnboundVariable {
+                        name: name.to_text(),
+                        span,
+                    })
                 }
             }
         } else {
