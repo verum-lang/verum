@@ -1,0 +1,79 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L1
+// @tags: generics, higher-kinded-types, hkt, function-body, kind-inference
+//
+// Regression anchor for L0-2: HKT parameter substitution inside *function
+// bodies*. The existing higher_kinded.vr spec carries a NOTE explaining why
+// generic helpers like `lift2`, `sequence`, `traverse`, `filter_m`, `fold_m`
+// were removed — "F<_> type parameter substitution in function bodies causes
+// type mismatches (MapFuture<_, F<_>> vs F<_>)".
+//
+// This test reintroduces the minimal shape that must work: a generic function
+// that takes an HKT-parameter F<_> and uses it both in argument positions and
+// in the return type, with concrete instantiations at call sites.
+
+type Functor<F<_>> is protocol {
+    fn map<A, B>(fa: F<A>, f: fn(A) -> B) -> F<B>;
+};
+
+type Applicative<F<_>> is protocol extends Functor<F> {
+    fn pure<A>(a: A) -> F<A>;
+    fn apply<A, B>(ff: F<fn(A) -> B>, fa: F<A>) -> F<B>;
+};
+
+// Generic HKT function: lift a binary function into an Applicative context.
+// The body references F<_> at three distinct applied positions (F<A>, F<B>,
+// F<C>). Before the fix, substitution inside the body produced spurious
+// mismatches such as `MapFuture<_, F<_>> vs F<_>`.
+fn lift2<F<_>: Applicative, A, B, C>(
+    fa: F<A>,
+    fb: F<B>,
+    f: fn(A, B) -> C,
+) -> F<C> {
+    F.apply(F.map(fa, |a| |b| f(a, b)), fb)
+}
+
+// Simpler regression: single-method HKT dispatch — fmap-style.
+fn fmap<F<_>: Functor, A, B>(fa: F<A>, f: fn(A) -> B) -> F<B> {
+    F.map(fa, f)
+}
+
+type Maybe<T> is
+    | Some(T)
+    | None;
+
+implement Functor for Maybe {
+    fn map<A, B>(fa: Maybe<A>, f: fn(A) -> B) -> Maybe<B> {
+        match fa {
+            Maybe.Some(a) => Maybe.Some(f(a)),
+            Maybe.None => Maybe.None,
+        }
+    }
+}
+
+implement Applicative for Maybe {
+    fn pure<A>(a: A) -> Maybe<A> {
+        Maybe.Some(a)
+    }
+
+    fn apply<A, B>(ff: Maybe<fn(A) -> B>, fa: Maybe<A>) -> Maybe<B> {
+        match (ff, fa) {
+            (Maybe.Some(g), Maybe.Some(a)) => Maybe.Some(g(a)),
+            _ => Maybe.None,
+        }
+    }
+}
+
+fn main() {
+    let a: Maybe<Int> = Maybe.Some(2);
+    let b: Maybe<Int> = Maybe.Some(3);
+
+    // Exercises HKT method dispatch inside a function body with F := Maybe.
+    let doubled: Maybe<Int> = fmap(a, |x| x * 2);
+    assert(doubled == Maybe.Some(4));
+
+    // Concrete instantiation: F := Maybe, A := Int, B := Int, C := Int
+    let c: Maybe<Int> = lift2(a, b, |x, y| x + y);
+    assert(c == Maybe.Some(5));
+}
