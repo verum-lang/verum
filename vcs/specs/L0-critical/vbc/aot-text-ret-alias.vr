@@ -1,0 +1,28 @@
+// @test: differential
+// @tier: 0,1
+// @level: L0
+// @tags: aot, codegen, text, ownership, ret-alias, regression
+// @timeout: 10000
+// @expected-exit: 0
+// @expected-stdout: 7
+//
+// Regression guard: an if/else returning Text where the else branch
+// produces a heap Text (via f-string / Concat) and the then branch
+// produces a .rodata static literal used to free the caller's return
+// value in AOT — the MOV chain that moves the concat result into the
+// return register aliased the owned-text register, and the Ret
+// free-loop freed the buffer before returning it. Fixed by
+// transferring ownership through MOV in verum_codegen's lower_mov.
+
+fn classify(n: Int) -> Text {
+    if n == 1 {
+        "one"
+    } else {
+        f"{n}"
+    }
+}
+
+fn main() -> Int {
+    print(classify(7));
+    0
+}

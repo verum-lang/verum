@@ -911,41 +911,66 @@ pub fn lower_instruction<'ctx>(
         }
 
         Instruction::Ret { value } => {
-            // Free all owned text registers except the one being returned.
-            // The return value's ownership transfers to the caller.
+            // Free all owned text registers except the one being returned
+            // — and except any register that ALIASES the return register.
+            //
+            // Aliasing happens naturally in VBC: when the source returns a
+            // heap-Text from one if/else/match branch and a static literal
+            // from another, the merge point MOV-chains the value through
+            // several temporary registers before the Ret reads it. All of
+            // those registers hold the same LLVM SSA value (BasicValueEnum
+            // is Copy+Eq over LLVMValueRef), so they alias the live buffer
+            // that ownership of the return value refers to. Comparing by
+            // register number alone would free the alias and hand the
+            // caller a dangling pointer. This is how classify() returning
+            // `f"{n}"` in the else-branch ended up printing empty strings
+            // under AOT while the interpreter printed "7" — the MOV chain
+            // inside the branch kept `r4` (owned by Concat) live after
+            // `r6` (the return register) received the same pointer.
+            let ret_val_early = ctx.get_register(value.0)?;
             let ret_reg = value.0;
             let owned_regs: Vec<u16> = ctx.owned_text_registers();
             for reg in owned_regs {
-                if reg != ret_reg {
-                    if let Ok(val) = ctx.get_register(reg) {
-                        let _ = emit_text_free(ctx, val);
-                        ctx.unmark_owned_text_register(reg);
-                    }
+                if reg == ret_reg {
+                    continue;
                 }
+                let Ok(val) = ctx.get_register(reg) else { continue };
+                if val == ret_val_early {
+                    // Alias of the return register — ownership transfers
+                    // with the return value; no free here.
+                    ctx.unmark_owned_text_register(reg);
+                    continue;
+                }
+                let _ = emit_text_free(ctx, val);
+                ctx.unmark_owned_text_register(reg);
             }
 
             // Drop protocol: free Heap<T> allocations before return.
             // Return value register excluded — ownership transfers to caller.
+            // Same aliasing logic as above.
             {
                 let ret_exclude = value.0;
                 let heap_regs: Vec<u16> = ctx.heap_alloc_registers();
                 for hreg in heap_regs {
-                    if hreg != ret_exclude {
-                        if let Ok(hval) = ctx.get_register(hreg) {
-                            let _ptr_ty = ctx.types().ptr_type();
-                            let _i64_ty = ctx.types().i64_type();
-                            let _void_ty = ctx.llvm_context().void_type();
-                            let _mod = ctx.get_module();
-                            let dealloc = _mod.get_function("verum_dealloc").unwrap_or_else(|| {
-                                let ft = _void_ty.fn_type(&[_ptr_ty.into(), _i64_ty.into()], false);
-                                _mod.add_function("verum_dealloc", ft, None)
-                            });
-                            if let Ok(ptr) = ctx.builder()
-                                .build_int_to_ptr(hval.into_int_value(), _ptr_ty, "drop_ptr") {
-                                let _ = ctx.builder()
-                                    .build_call(dealloc, &[ptr.into(), _i64_ty.const_int(8, false).into()], "");
-                            }
-                        }
+                    if hreg == ret_exclude {
+                        continue;
+                    }
+                    let Ok(hval) = ctx.get_register(hreg) else { continue };
+                    if hval == ret_val_early {
+                        continue;
+                    }
+                    let _ptr_ty = ctx.types().ptr_type();
+                    let _i64_ty = ctx.types().i64_type();
+                    let _void_ty = ctx.llvm_context().void_type();
+                    let _mod = ctx.get_module();
+                    let dealloc = _mod.get_function("verum_dealloc").unwrap_or_else(|| {
+                        let ft = _void_ty.fn_type(&[_ptr_ty.into(), _i64_ty.into()], false);
+                        _mod.add_function("verum_dealloc", ft, None)
+                    });
+                    if let Ok(ptr) = ctx.builder()
+                        .build_int_to_ptr(hval.into_int_value(), _ptr_ty, "drop_ptr") {
+                        let _ = ctx.builder()
+                            .build_call(dealloc, &[ptr.into(), _i64_ty.const_int(8, false).into()], "");
                     }
                 }
             }
@@ -19392,6 +19417,18 @@ fn lower_mov<'ctx>(
 ) -> Result<()> {
     let value = ctx.get_register(src.0)?;
     ctx.set_register(dst.0, value);
+    // Ownership transfer for heap-owned text: MOV is a move, not a copy.
+    // If src holds an owned Text buffer (from Concat/ToString/CharToStr),
+    // transfer ownership to dst so the Ret-time free-loop frees exactly
+    // one register at the tail of the move chain. Without this, a chain
+    // like Concat → MOV → MOV → Ret ends up with the original Concat
+    // register still marked owned while a copy of the same pointer
+    // leaves the function, and the Ret handler frees the buffer the
+    // caller is about to use.
+    if src.0 != dst.0 && ctx.is_owned_text_register(src.0) {
+        ctx.mark_owned_text_register(dst.0);
+        ctx.unmark_owned_text_register(src.0);
+    }
     // Propagate string/bool/float/list register tracking through copies
     if ctx.is_text_register(src.0) {
         ctx.mark_text_register(dst.0);
