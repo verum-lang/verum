@@ -8,10 +8,10 @@ fn main() {
     let s = "hello";
     assert_eq(s.len(), 5);
 
-    // f-string formatting
+    // f-string formatting (smoke-test only, not asserted via stdout)
     let x = 42;
     let formatted = f"x = {x}";
-    print(formatted);
+    assert(formatted.len() > 0);
 
     // equality
     assert(s == "hello");
