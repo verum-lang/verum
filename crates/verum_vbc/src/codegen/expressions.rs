@@ -2905,8 +2905,20 @@ impl VbcCodegen {
         // Allocate result register
         let result = self.ctx.alloc_temp();
 
-        // Check if this is an FFI function
-        if let Some(ffi_symbol_id) = self.get_ffi_symbol_id(&func_name) {
+        // Check if this is an FFI function.
+        //
+        // User-defined function with the *same basename and matching arity* wins
+        // over the FFI symbol — otherwise `fn read() -> Int { 42 }` silently
+        // dispatches to the libc `read(fd, buf, nbyte)` syscall and blows up at
+        // runtime with `argument count mismatch: expected 3, got 0`. The
+        // arity-aware lookup at the top of compile_call (line 2658) has already
+        // resolved `func_info` to the user's function; we just need to guard
+        // the FFI dispatch here so we don't flip back to the extern.
+        let user_fn_matches_arity = func_info.param_count == args.len()
+            && func_info.intrinsic_name.is_none()
+            && func_info.id.0 != u32::MAX;
+        if !user_fn_matches_arity
+            && let Some(ffi_symbol_id) = self.get_ffi_symbol_id(&func_name) {
             // Emit FfiExtended.CallFfiC instruction
             // Format: symbol_idx:u32, arg_count:u8, ret_reg:reg, [arg_regs...],
             //         mut_ref_count:u8, [(arg_idx:u8, source_reg:reg)...]
