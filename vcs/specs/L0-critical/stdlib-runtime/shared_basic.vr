@@ -1,0 +1,16 @@
+// @test: run-interpreter
+// @level: L0
+// @tier: 0
+// @tags: stdlib-runtime, shared, heap, generic
+// @expected-stdout: shared ok
+
+fn main() {
+    let s_int = Shared<Int>.new(42);
+    let s_bool = Shared<Bool>.new(true);
+    let s_text = Shared<Text>.new("hello");
+
+    let h_int = Heap<Int>.new(7);
+    let h_text = Heap<Text>.new("world");
+
+    print("shared ok");
+}

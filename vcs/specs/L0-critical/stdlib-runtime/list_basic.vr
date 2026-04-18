@@ -1,0 +1,18 @@
+// @test: run-interpreter
+// @level: L0
+// @tier: 0
+// @tags: stdlib-runtime, list, basic
+// @expected-stdout: list ops ok
+
+fn main() {
+    let xs = [1, 2, 3, 4, 5];
+    assert_eq(xs.len(), 5);
+
+    let mut total = 0;
+    for i in range(0, xs.len()) {
+        total = total + xs[i];
+    }
+    assert_eq(total, 15);
+
+    print("list ops ok");
+}

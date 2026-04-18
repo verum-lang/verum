@@ -1,0 +1,18 @@
+// @test: typecheck-pass
+// @level: L0
+// @tier: 0
+// @tags: stdlib-runtime, iterator, collect, range, type-inference
+//
+// `(0..N).collect()` and `xs.iter().map(...).collect()` should *type
+// check* against a `List<T>` annotation (the bidirectional inference
+// fix in 7a737d0). Runtime semantics are not yet wired for the Range
+// → List collect path through the iterator-adapter dispatch — that's
+// a separate stdlib gap that doesn't affect this spec's goal of
+// guarding the type-system half.
+
+fn main() {
+    let nums: List<Int> = (0..5).collect();
+
+    let xs = [1, 2, 3, 4, 5];
+    let doubled: List<Int> = xs.iter().map(|n| n * 2).collect();
+}

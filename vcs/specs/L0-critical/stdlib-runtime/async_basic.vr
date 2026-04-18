@@ -1,0 +1,21 @@
+// @test: run-interpreter
+// @level: L0
+// @tier: 0
+// @tags: stdlib-runtime, async, await
+// @expected-stdout: async ok
+
+async fn add(a: Int, b: Int) -> Int {
+    a + b
+}
+
+async fn run() -> Int {
+    let x = add(1, 2).await;
+    let y = add(3, 4).await;
+    x + y
+}
+
+fn main() {
+    let r = run().await;
+    assert_eq(r, 10);
+    print("async ok");
+}

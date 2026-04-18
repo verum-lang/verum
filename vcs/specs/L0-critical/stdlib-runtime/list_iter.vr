@@ -1,0 +1,29 @@
+// @test: run-interpreter
+// @level: L0
+// @tier: 0
+// @tags: stdlib-runtime, list, iterator, map, filter, fold
+// @expected-stdout: iter ok
+
+fn main() {
+    let nums = [1, 2, 3, 4, 5];
+
+    // map
+    let doubled = nums.map(|n| n * 2);
+    assert_eq(doubled.len(), 5);
+    assert_eq(doubled[2], 6);
+
+    // filter
+    let evens = nums.filter(|n| n % 2 == 0);
+    assert_eq(evens.len(), 2);
+    assert_eq(evens[0], 2);
+    assert_eq(evens[1], 4);
+
+    // fold
+    let sum = nums.fold(0, |acc, n| acc + n);
+    assert_eq(sum, 15);
+
+    let product = nums.fold(1, |acc, n| acc * n);
+    assert_eq(product, 120);
+
+    print("iter ok");
+}

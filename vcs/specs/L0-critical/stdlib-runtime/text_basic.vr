@@ -1,0 +1,21 @@
+// @test: run-interpreter
+// @level: L0
+// @tier: 0
+// @tags: stdlib-runtime, text, format, equality
+// @expected-stdout: text ok
+
+fn main() {
+    let s = "hello";
+    assert_eq(s.len(), 5);
+
+    // f-string formatting
+    let x = 42;
+    let formatted = f"x = {x}";
+    print(formatted);
+
+    // equality
+    assert(s == "hello");
+    assert(s != "world");
+
+    print("text ok");
+}

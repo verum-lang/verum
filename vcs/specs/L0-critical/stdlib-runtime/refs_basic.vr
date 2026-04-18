@@ -1,0 +1,31 @@
+// @test: run-interpreter
+// @level: L0
+// @tier: 0
+// @tags: stdlib-runtime, references, deref, cbgr
+// @expected-stdout: refs ok
+
+type Point is { x: Int, y: Int };
+
+fn main() {
+    // Ref to local
+    let x = 42;
+    let r = &x;
+    assert_eq(*r, 42);
+
+    // Ref to struct
+    let p = Point { x: 10, y: 20 };
+    let rp = &p;
+    assert_eq(rp.x, 10);
+    assert_eq(rp.y, 20);
+
+    // Ref to array element (uses stabilize_ref_source)
+    let arr = [1, 2, 3, 4, 5];
+    let r2 = &arr[2];
+    assert_eq(*r2, 3);
+
+    // Ref to field (uses stabilize_ref_source)
+    let r3 = &p.x;
+    assert_eq(*r3, 10);
+
+    print("refs ok");
+}
