@@ -2500,15 +2500,18 @@ impl VbcCodegen {
                 }
                 // Default Tier 0 - but check tier_context for promotion
                 let tier = self.get_ref_tier_for_expr(inner);
-                self.emit_ref_instruction(dest, inner_reg, tier, false);
+                let stable_src = self.stabilize_ref_source(inner, inner_reg);
+                self.emit_ref_instruction(dest, stable_src, tier, false);
             }
             UnOp::RefChecked => {
                 // Explicitly Tier 1 from source
-                self.emit_ref_instruction(dest, inner_reg, CbgrTier::Tier1, false);
+                let stable_src = self.stabilize_ref_source(inner, inner_reg);
+                self.emit_ref_instruction(dest, stable_src, CbgrTier::Tier1, false);
             }
             UnOp::RefUnsafe => {
                 // Explicitly Tier 2 from source
-                self.emit_ref_instruction(dest, inner_reg, CbgrTier::Tier2, false);
+                let stable_src = self.stabilize_ref_source(inner, inner_reg);
+                self.emit_ref_instruction(dest, stable_src, CbgrTier::Tier2, false);
             }
             UnOp::RefMut => {
                 // Same raw pointer passthrough as Ref (see above)
@@ -2518,15 +2521,18 @@ impl VbcCodegen {
                 }
                 // Mutable reference - check tier_context for promotion
                 let tier = self.get_ref_tier_for_expr(inner);
-                self.emit_ref_instruction(dest, inner_reg, tier, true);
+                let stable_src = self.stabilize_ref_source(inner, inner_reg);
+                self.emit_ref_instruction(dest, stable_src, tier, true);
             }
             UnOp::RefCheckedMut => {
                 // Explicitly Tier 1 mutable from source
-                self.emit_ref_instruction(dest, inner_reg, CbgrTier::Tier1, true);
+                let stable_src = self.stabilize_ref_source(inner, inner_reg);
+                self.emit_ref_instruction(dest, stable_src, CbgrTier::Tier1, true);
             }
             UnOp::RefUnsafeMut => {
                 // Explicitly Tier 2 mutable from source
-                self.emit_ref_instruction(dest, inner_reg, CbgrTier::Tier2, true);
+                let stable_src = self.stabilize_ref_source(inner, inner_reg);
+                self.emit_ref_instruction(dest, stable_src, CbgrTier::Tier2, true);
             }
             UnOp::Deref => {
                 // Check if inner expression is Heap<T> or Shared<T> — these are transparent
@@ -12355,6 +12361,39 @@ impl VbcCodegen {
     /// - Tier 0: `Ref` or `RefMut` (runtime validated)
     /// - Tier 1: `RefChecked` (compiler proven safe)
     /// - Tier 2: `RefUnsafe` (manual safety proof)
+    /// Promote a register-resident value to a non-recyclable slot before
+    /// emitting a CBGR reference to it.
+    ///
+    /// CBGR references encode the absolute index of their source register,
+    /// and a Tier 0 `Deref` later reads back through that index. Refs into
+    /// a *named* variable (`&x` where `x` is a let-bound local) are stable
+    /// because variable slots aren't returned to the temp free list. Refs
+    /// into a *temporary* (`&arr[i]`, `&(a + b)`, `&f()`, …) are not — the
+    /// temp pool can recycle the slot the moment the next `alloc_temp` runs,
+    /// and the deref then reads whatever happened to land in that slot
+    /// (typically an intermediate from f-string formatting or argument
+    /// marshalling, manifesting as a baffling `Value::SmallStr("…")` or a
+    /// sudden `Value::Ptr(…)`).
+    ///
+    /// When the inner expression is a named local, return its register
+    /// untouched. Otherwise allocate a fresh, never-recycled slot, copy the
+    /// value into it, and reference that. This costs one extra `Mov` per
+    /// `&temp` (the typical Tier 0 case is already taking the 15 ns
+    /// generation check), and prevents the silent slot-collision class of
+    /// bugs at codegen time.
+    fn stabilize_ref_source(&mut self, inner: &Expr, inner_reg: Reg) -> Reg {
+        if let ExprKind::Path(path) = &inner.kind
+            && path.segments.len() == 1
+            && let PathSegment::Name(ident) = &path.segments[0]
+            && self.ctx.get_var_reg(&ident.name).is_ok()
+        {
+            return inner_reg;
+        }
+        let stable = self.ctx.registers.alloc_fresh();
+        self.ctx.emit(Instruction::Mov { dst: stable, src: inner_reg });
+        stable
+    }
+
     fn emit_ref_instruction(&mut self, dst: Reg, src: Reg, tier: CbgrTier, is_mut: bool) {
         // Record statistics
         self.ctx.record_ref_tier(tier);
