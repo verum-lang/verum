@@ -1,0 +1,129 @@
+name: Fetch Verum-LLVM prebuilt
+description: |
+  Download and unpack the Verum-specific LLVM + LLD + MLIR prebuild
+  that matches `llvm/llvm.toml` into `llvm/install/`. Falls back to
+  `./llvm/build.sh` when a prebuild asset is not available for the
+  current (runner.os, runner.arch) pair — so a missing triple does
+  not wedge the workflow.
+
+  The matching prebuild release is produced by
+  `.github/workflows/build-llvm.yml`, tagged
+  `llvm-prebuilt-<llvmorg-tag>`.
+
+inputs:
+  repository:
+    description: "Repository publishing the prebuilt releases"
+    required: false
+    default: ${{ github.repository }}
+  token:
+    description: "GitHub token with `contents:read` on `repository`"
+    required: false
+    default: ${{ github.token }}
+
+runs:
+  using: composite
+  steps:
+    - name: Resolve expected archive
+      id: resolve
+      shell: bash
+      run: |
+        set -euo pipefail
+
+        LLVM_TAG=$(awk -F'"' '/^tag[[:space:]]*=/ { print $2; exit }' llvm/llvm.toml)
+        if [[ -z "${LLVM_TAG}" ]]; then
+          echo "::error::Could not read `tag` from llvm/llvm.toml"
+          exit 1
+        fi
+        PREBUILT_TAG="llvm-prebuilt-${LLVM_TAG}"
+
+        case "${RUNNER_OS}-${RUNNER_ARCH}" in
+          Linux-X64)   TRIPLE=x86_64-unknown-linux-gnu ;;
+          Linux-ARM64) TRIPLE=aarch64-unknown-linux-gnu ;;
+          macOS-ARM64) TRIPLE=aarch64-apple-darwin ;;
+          macOS-X64)   TRIPLE=x86_64-apple-darwin ;;
+          *)
+            echo "::warning::No prebuilt triple mapping for ${RUNNER_OS}-${RUNNER_ARCH}; will build LLVM from source"
+            echo "unsupported=true" >> "$GITHUB_OUTPUT"
+            exit 0 ;;
+        esac
+
+        ARCHIVE="verum-llvm-${LLVM_TAG}-${TRIPLE}.tar.zst"
+        URL="https://github.com/${{ inputs.repository }}/releases/download/${PREBUILT_TAG}/${ARCHIVE}"
+
+        echo "tag=${LLVM_TAG}"             >> "$GITHUB_OUTPUT"
+        echo "prebuilt_tag=${PREBUILT_TAG}" >> "$GITHUB_OUTPUT"
+        echo "triple=${TRIPLE}"            >> "$GITHUB_OUTPUT"
+        echo "archive=${ARCHIVE}"          >> "$GITHUB_OUTPUT"
+        echo "url=${URL}"                  >> "$GITHUB_OUTPUT"
+        echo "unsupported=false"           >> "$GITHUB_OUTPUT"
+
+        echo "Resolved: ${PREBUILT_TAG} → ${ARCHIVE}"
+
+    - name: Install zstd
+      if: steps.resolve.outputs.unsupported != 'true'
+      shell: bash
+      run: |
+        if ! command -v zstd >/dev/null 2>&1; then
+          if [[ "${RUNNER_OS}" == "Linux" ]]; then
+            sudo apt-get update && sudo apt-get install -y zstd
+          elif [[ "${RUNNER_OS}" == "macOS" ]]; then
+            brew install zstd
+          fi
+        fi
+
+    - name: Download prebuilt LLVM
+      id: download
+      if: steps.resolve.outputs.unsupported != 'true'
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.token }}
+      run: |
+        set -euo pipefail
+
+        if [[ -f llvm/install/bin/llvm-config ]]; then
+          echo "llvm/install/ already present — skipping download"
+          echo "fetched=already_present" >> "$GITHUB_OUTPUT"
+          exit 0
+        fi
+
+        ARCHIVE="${{ steps.resolve.outputs.archive }}"
+
+        # Prefer `gh release download` (handles auth, private repos, rate limits).
+        if gh release download "${{ steps.resolve.outputs.prebuilt_tag }}" \
+             --repo "${{ inputs.repository }}" \
+             --pattern "${ARCHIVE}" \
+             --pattern "${ARCHIVE}.sha256" \
+             --dir . 2>/dev/null ; then
+          echo "Downloaded via gh release download"
+        else
+          echo "::warning::gh release download failed; falling back to source build"
+          echo "fetched=miss" >> "$GITHUB_OUTPUT"
+          exit 0
+        fi
+
+        # Verify checksum
+        if [[ -f "${ARCHIVE}.sha256" ]]; then
+          shasum -a 256 -c "${ARCHIVE}.sha256"
+        fi
+
+        mkdir -p llvm
+        # Archive contains `install/` at the top level — extract directly into llvm/
+        tar --zstd -xf "${ARCHIVE}" -C llvm
+        rm -f "${ARCHIVE}" "${ARCHIVE}.sha256"
+
+        test -f llvm/install/bin/llvm-config
+        echo "fetched=hit" >> "$GITHUB_OUTPUT"
+
+    - name: Build LLVM from source (fallback)
+      if: steps.resolve.outputs.unsupported == 'true' || steps.download.outputs.fetched == 'miss'
+      shell: bash
+      run: |
+        set -euo pipefail
+        echo "::warning::No prebuilt available — building LLVM from source (30–60 min)"
+        if [[ "${RUNNER_OS}" == "Linux" ]]; then
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build python3
+        elif [[ "${RUNNER_OS}" == "macOS" ]]; then
+          brew install cmake ninja
+        fi
+        cd llvm && ./build.sh

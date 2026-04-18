@@ -35,6 +35,9 @@ jobs:
         with:
           targets: ${{ matrix.target }}
 
+      - name: Fetch prebuilt LLVM
+        uses: ./.github/actions/fetch-llvm
+
       - name: Build release binary
         run: cargo build --release --target ${{ matrix.target }} -p verum_cli --features verification
 

@@ -29,6 +29,9 @@ jobs:
         with:
           toolchain: nightly
 
+      - name: Fetch prebuilt LLVM
+        uses: ./.github/actions/fetch-llvm
+
       - name: Cache cargo registry + target
         uses: Swatinem/rust-cache@v2
         with:
@@ -73,6 +76,9 @@ jobs:
         with:
           toolchain: nightly
 
+      - name: Fetch prebuilt LLVM
+        uses: ./.github/actions/fetch-llvm
+
       - name: Cache cargo registry + target
         uses: Swatinem/rust-cache@v2
         with:
@@ -111,6 +117,9 @@ jobs:
         uses: dtolnay/rust-toolchain@master
         with:
           toolchain: nightly
+
+      - name: Fetch prebuilt LLVM
+        uses: ./.github/actions/fetch-llvm
 
       - name: Cache cargo registry + target
         uses: Swatinem/rust-cache@v2
