@@ -2693,7 +2693,25 @@ impl VbcCodegen {
                 // Try fallback: if qualified path like "darwin::tls::init_main_thread_tls" fails,
                 // try just the simple function name "init_main_thread_tls". Functions are often
                 // registered with their simple names even when called with qualified paths.
-                let fallback_result = if let Some(simple_name) = func_name.rsplit("::").next() {
+                //
+                // SAFETY: skip this fallback when the path is rooted at a
+                // module-path keyword (`super`, `cog`, `.`). Those paths
+                // are *explicitly* cross-module, so if qualified lookup
+                // failed, the last-segment simple-name lookup would
+                // resolve to *the current module's* function of the same
+                // name — turning a cross-platform dispatch call like
+                // `super.darwin.tls.ctx_get(slot)` inside
+                // `core/sys/common.vr::ctx_get` into infinite self-
+                // recursion. (This was the root cause of the
+                // L0 reference_system / cbgr stack-overflow failures
+                // that masked themselves as "stack limit too low".)
+                let is_qualified_module_path =
+                    func_name.starts_with("super::")
+                        || func_name.starts_with("cog::")
+                        || func_name.starts_with(".::");
+                let fallback_result = if is_qualified_module_path {
+                    None
+                } else if let Some(simple_name) = func_name.rsplit("::").next() {
                     if simple_name != func_name {
                         self.ctx
                             .lookup_function(simple_name)
@@ -4339,15 +4357,28 @@ impl VbcCodegen {
                     return self.compile_static_method_call(&func_info, args);
                 }
 
-            // Try just the function name (it may have been imported)
-            // Keep param_count check to avoid false positives with unqualified names
-            if let Some(func_info) = self.ctx.lookup_function(&method.name).cloned()
-                && func_info.param_count == args.len() {
-                    if let Some(tag) = func_info.variant_tag {
-                        return self.compile_variant_constructor_with_tag(tag, args);
+            // Try just the function name (it may have been imported).
+            // Keep param_count check to avoid false positives with unqualified names.
+            //
+            // SAFETY: skip this fallback for rooted module paths (`super`,
+            // `cog`, `.`). Those paths explicitly target a cross-module
+            // symbol; falling back to the unqualified name silently
+            // rebinds the call to the *current* module's function of the
+            // same name, which turns stdlib dispatchers like
+            // `super.darwin.tls.ctx_get(slot)` inside
+            // `core/sys/common.vr::ctx_get` into infinite self-recursion.
+            // Matches the guard in `compile_call`.
+            let is_qualified_module_path = !parts.is_empty()
+                && (parts[0] == "super" || parts[0] == "cog" || parts[0] == ".");
+            if !is_qualified_module_path {
+                if let Some(func_info) = self.ctx.lookup_function(&method.name).cloned()
+                    && func_info.param_count == args.len() {
+                        if let Some(tag) = func_info.variant_tag {
+                            return self.compile_variant_constructor_with_tag(tag, args);
+                        }
+                        return self.compile_static_method_call(&func_info, args);
                     }
-                    return self.compile_static_method_call(&func_info, args);
-                }
+            }
 
             // If this is a module/type namespace (not a local variable),
             // emit a stub call rather than trying to compile the receiver as a value.
@@ -9759,39 +9790,57 @@ impl VbcCodegen {
                 return Ok(Some(dest));
             }
 
-            // Try just the last segment (function name) as a simple function lookup
-            // This handles cases where imports have already resolved the module path
-            if let Some(func_info) = self.ctx.lookup_function(field).cloned() {
-                // If it's a variant constructor, emit MakeVariant instead of Call
-                if func_info.variant_tag.is_some() {
-                    return self.compile_variant_constructor(field, &verum_common::List::new());
+            // If this looks like a qualified module path (`super.x.y.f` or
+            // `cog.a.b.f`) and we couldn't resolve it above, do NOT fall
+            // back to a simple-name `lookup_function(field)` lookup — that
+            // fallback is meant for imports like `a.b` where `b` is a
+            // constant already brought into scope. For a fully-qualified
+            // path, "last segment matches a local symbol" is a false hit:
+            // stdlib `core/sys/common.vr` has
+            // `super.darwin.tls.ctx_get(slot)` inside its own `ctx_get`
+            // dispatcher, and resolving that to the local `ctx_get`
+            // replaces the cross-platform dispatch with an infinite self-
+            // recursion. Emit the same nil stub the later branch already
+            // produces — the real symbol resolution happens after all
+            // platform modules have been registered.
+            let is_qualified_module_path =
+                parts[0] == "super" || parts[0] == "cog" || parts[0] == ".";
+
+            if !is_qualified_module_path {
+                // Try just the last segment (function name) as a simple function lookup.
+                // This handles cases where imports have already resolved the module path.
+                if let Some(func_info) = self.ctx.lookup_function(field).cloned() {
+                    // If it's a variant constructor, emit MakeVariant instead of Call
+                    if func_info.variant_tag.is_some() {
+                        return self.compile_variant_constructor(field, &verum_common::List::new());
+                    }
+                    let dest = self.ctx.alloc_temp();
+                    if func_info.param_count == 0 && !func_info.is_async && !func_info.is_generator {
+                        // Check if this is an inlineable constant (__const_val_N)
+                        if let Some(ref iname) = func_info.intrinsic_name
+                            && let Some(val_str) = iname.strip_prefix("__const_val_") {
+                                let value: i64 = val_str.parse().unwrap_or(0);
+                                self.ctx.emit(Instruction::LoadI { dst: dest, value });
+                                return Ok(Some(dest));
+                            }
+                        self.ctx.emit(Instruction::Call {
+                            dst: dest,
+                            func_id: func_info.id.0,
+                            args: crate::instruction::RegRange::new(Reg(0), 0),
+                        });
+                    } else {
+                        self.ctx.emit(Instruction::LoadI {
+                            dst: dest,
+                            value: func_info.id.0 as i64,
+                        });
+                    }
+                    return Ok(Some(dest));
                 }
-                let dest = self.ctx.alloc_temp();
-                if func_info.param_count == 0 && !func_info.is_async && !func_info.is_generator {
-                    // Check if this is an inlineable constant (__const_val_N)
-                    if let Some(ref iname) = func_info.intrinsic_name
-                        && let Some(val_str) = iname.strip_prefix("__const_val_") {
-                            let value: i64 = val_str.parse().unwrap_or(0);
-                            self.ctx.emit(Instruction::LoadI { dst: dest, value });
-                            return Ok(Some(dest));
-                        }
-                    self.ctx.emit(Instruction::Call {
-                        dst: dest,
-                        func_id: func_info.id.0,
-                        args: crate::instruction::RegRange::new(Reg(0), 0),
-                    });
-                } else {
-                    self.ctx.emit(Instruction::LoadI {
-                        dst: dest,
-                        value: func_info.id.0 as i64,
-                    });
-                }
-                return Ok(Some(dest));
             }
 
             // If this looks like a module path (starts with super/crate/.) but we can't resolve it,
             // emit a placeholder instruction rather than failing with "standalone super"
-            if parts[0] == "super" || parts[0] == "cog" || parts[0] == "." {
+            if is_qualified_module_path {
                 // For bootstrap: return a stub for unresolved module paths
                 // The actual resolution would happen at link time
                 let dest = self.ctx.alloc_temp();
