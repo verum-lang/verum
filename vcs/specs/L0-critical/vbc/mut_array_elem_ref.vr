@@ -1,0 +1,22 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: mutable-reference, list, index, cbgr, write-through
+// @timeout: 10000
+// @expected-exit: 0
+// @expected-stdout: 100
+//
+// Regression guard for `&mut arr[i]` + `*r = v` writing through to
+// the underlying List element. Previously the compile_unary path
+// wrapped `arr[i]` (a copied Value) in a CBGR register-ref, so the
+// DerefMut wrote to a temporary register instead of the List
+// backing. Fixed by emitting CbgrSubOpcode::RefListElement, which
+// produces a plain pointer into the List's backing buffer.
+
+fn main() -> Int {
+    let mut arr = [1, 2, 3, 4, 5];
+    let r = &mut arr[2];
+    *r = 100;
+    print(arr[2]);
+    0
+}

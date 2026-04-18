@@ -6623,6 +6623,24 @@ pub enum CbgrSubOpcode {
     /// Format: `dst:reg, ptr:reg, len:reg`
     RefSliceRaw = 0x0A,
 
+    /// Create interior reference to a List<T> element by element-index.
+    ///
+    /// `RefArrayElement` (0x02) assumes the source is already a pointer to
+    /// the first element; that contract fits raw arrays but not the List
+    /// heap layout `[header][len][cap][backing_ptr]` → `[header][V0, V1, …]`.
+    /// `RefListElement` walks the indirection: it reads `backing_ptr` from
+    /// the List object, adds `OBJECT_HEADER_SIZE + index * size_of::<Value>()`,
+    /// and stores the resulting element pointer as a `Value::from_ptr(…)`.
+    /// A later `DerefMut` on that ptr writes directly into arr[index].
+    ///
+    /// This is the lowering target for `&mut arr[i]` / `&arr[i]` when the
+    /// receiver is a List — without it, the generic RefMut path would
+    /// produce a reference to a register holding a *copy* of the element,
+    /// so `*r = v` would write to the copy instead of the underlying List.
+    ///
+    /// Format: `dst:reg, list:reg, index:reg`
+    RefListElement = 0x0B,
+
     // ========================================================================
     // Capability Operations (0x10-0x1F)
     // ========================================================================
@@ -6809,6 +6827,7 @@ impl CbgrSubOpcode {
             0x08 => Some(Self::SliceSubslice),
             0x09 => Some(Self::SliceSplitAt),
             0x0A => Some(Self::RefSliceRaw),
+            0x0B => Some(Self::RefListElement),
             // Capability Operations
             0x10 => Some(Self::CapAttenuate),
             0x11 => Some(Self::CapTransfer),
@@ -6864,6 +6883,7 @@ impl CbgrSubOpcode {
             Self::SliceSubslice => "CBGR_SLICE_SUBSLICE",
             Self::SliceSplitAt => "CBGR_SLICE_SPLIT_AT",
             Self::RefSliceRaw => "CBGR_REF_SLICE_RAW",
+            Self::RefListElement => "CBGR_REF_LIST_ELEM",
             Self::CapAttenuate => "CBGR_CAP_ATTENUATE",
             Self::CapTransfer => "CBGR_CAP_TRANSFER",
             Self::CapCheck => "CBGR_CAP_CHECK",
@@ -6915,6 +6935,7 @@ impl CbgrSubOpcode {
                 | Self::RefSliceRaw
                 | Self::RefInterior
                 | Self::RefArrayElement
+                | Self::RefListElement
                 | Self::RefTrait
                 | Self::ThinToFat
                 | Self::FromRawPtr

@@ -12179,6 +12179,58 @@ fn lower_cbgr_extended<'ctx>(
     operands: &[u8],
 ) -> Result<()> {
     match sub_op {
+        0x0B => {
+            // RefListElement — build a plain element pointer into a
+            // List<T> backing buffer. Produces an i64-encoded `*mut
+            // Value`; the existing DerefMut lowering for non-CBGR
+            // pointers writes through it directly, so `&mut arr[i];
+            // *r = v` becomes a real write into arr[i].
+            if operands.len() < 3 { return Ok(()); }
+            let dst = operands[0] as u16;
+            let list_reg = operands[1] as u16;
+            let index_reg = operands[2] as u16;
+
+            let list_ptr = as_ptr(ctx, ctx.get_register(list_reg)?, "rle_list_ptr")?;
+            let index = as_i64(ctx, ctx.get_register(index_reg)?, "rle_idx")?;
+            let i64_type = ctx.types().i64_type();
+            let ptr_type = ctx.types().ptr_type();
+            let i8_type = ctx.types().i8_type();
+
+            // List layout matches SetE (lower_set_element): the backing
+            // data pointer lives at LIST_PTR_OFFSET into the List object.
+            let backing_slot = unsafe {
+                ctx.builder().build_in_bounds_gep(
+                    i8_type,
+                    list_ptr,
+                    &[i64_type.const_int(super::runtime::LIST_PTR_OFFSET, false)],
+                    "rle_backing_slot",
+                ).map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+            };
+            let backing_int = ctx.builder()
+                .build_load(i64_type, backing_slot, "rle_backing_int")
+                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                .into_int_value();
+            let backing_ptr = ctx.builder()
+                .build_int_to_ptr(backing_int, ptr_type, "rle_backing_ptr")
+                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+
+            let elem_ptr = unsafe {
+                ctx.builder().build_in_bounds_gep(
+                    i64_type,
+                    backing_ptr,
+                    &[index],
+                    "rle_elem_ptr",
+                ).map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+            };
+
+            // Store as i64 NaN-boxed ptr (same convention as other CBGR
+            // ops). DerefMut will inttoptr it before writing.
+            let elem_i64 = ctx.builder()
+                .build_ptr_to_int(elem_ptr, i64_type, "rle_elem_i64")
+                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+            ctx.set_register(dst, elem_i64.into());
+            Ok(())
+        }
         0x0A => { // RefSliceRaw — build a slice Pack{ptr, len} with elem_size=1
             // Matches the interpreter-side fix (commit 3ae67c5). AOT's slice
             // representation is the standard Pack object used by Len/GetE, so

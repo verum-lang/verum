@@ -2397,6 +2397,38 @@ impl VbcCodegen {
 
     /// Compiles a unary operation.
     fn compile_unary(&mut self, op: UnOp, inner: &Expr) -> CodegenResult<Option<Reg>> {
+        // `&mut arr[i]` / `&arr[i]`: the generic path (below) would
+        // compile `arr[i]` to a register holding a *copy* of the
+        // element value and then wrap it in a CBGR register-ref,
+        // which makes `*r = v` write to the copy instead of the
+        // underlying List. Emit `RefListElement` so the ref carries
+        // a pointer into the List's backing storage and DerefMut
+        // writes through to `arr[i]` directly.
+        if matches!(op, UnOp::Ref | UnOp::RefMut)
+            && let ExprKind::Index { expr: arr_expr, index: idx_expr } = &inner.kind
+        {
+            let list_reg = self
+                .compile_expr(arr_expr)?
+                .ok_or_else(|| CodegenError::internal("index base has no value"))?;
+            let index_reg = self
+                .compile_expr(idx_expr)?
+                .ok_or_else(|| CodegenError::internal("index has no value"))?;
+            let dest = self.ctx.alloc_temp();
+
+            let mut operands = Vec::<u8>::with_capacity(6);
+            Self::write_reg(&mut operands, dest.0);
+            Self::write_reg(&mut operands, list_reg.0);
+            Self::write_reg(&mut operands, index_reg.0);
+            self.ctx.emit(Instruction::CbgrExtended {
+                sub_op: crate::instruction::CbgrSubOpcode::RefListElement as u8,
+                operands,
+            });
+
+            self.ctx.free_temp(list_reg);
+            self.ctx.free_temp(index_reg);
+            return Ok(Some(dest));
+        }
+
         let inner_reg = self
             .compile_expr(inner)?
             .ok_or_else(|| CodegenError::internal("unary operand has no value"))?;

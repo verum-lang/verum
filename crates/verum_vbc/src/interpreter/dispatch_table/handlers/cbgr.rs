@@ -633,6 +633,76 @@ pub(in super::super) fn handle_cbgr_extended(state: &mut InterpreterState) -> In
         // ================================================================
         // Slice and Interior References (0x00-0x0F)
         // ================================================================
+        Some(CbgrSubOpcode::RefListElement) => {
+            // Create interior reference to List<T> element at index.
+            // Produces a plain `Value::from_ptr(element_ptr)` so the
+            // existing DerefMut/Deref handlers for ptr values write
+            // and read through it directly.
+            //
+            // Format: dst:reg, list:reg, index:reg
+            let dst = read_reg(state)?;
+            let list_reg = read_reg(state)?;
+            let index_reg = read_reg(state)?;
+
+            let list_val = state.get_reg(list_reg);
+            let index = state.get_reg(index_reg).as_i64();
+
+            // Auto-deref CBGR register-based reference, like SetE/GetE do.
+            let list_val = if is_cbgr_ref(&list_val) {
+                let (abs_index, _gen) = decode_cbgr_ref(list_val.as_i64());
+                state.registers.get_absolute(abs_index)
+            } else if list_val.is_thin_ref() {
+                let thin_ref = list_val.as_thin_ref();
+                if thin_ref.ptr.is_null() {
+                    return Err(InterpreterError::NullPointer);
+                }
+                unsafe { *(thin_ref.ptr as *const Value) }
+            } else {
+                list_val
+            };
+
+            let ptr = list_val.as_ptr::<u8>();
+            if ptr.is_null() {
+                return Err(InterpreterError::NullPointer);
+            }
+
+            // Layout: base → ObjectHeader → [len:Value, cap:Value, backing_ptr:Value]
+            // The first element is at `backing_ptr + OBJECT_HEADER_SIZE`.
+            let header = unsafe { &*(ptr as *const heap::ObjectHeader) };
+
+            let elem_ptr = if header.type_id == TypeId::LIST {
+                let data_ptr = unsafe {
+                    ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value
+                };
+                let len = unsafe { (*data_ptr).as_i64() } as usize;
+                if index < 0 || (index as usize) >= len {
+                    return Err(InterpreterError::IndexOutOfBounds {
+                        index, length: len,
+                    });
+                }
+                let backing = unsafe { (*data_ptr.add(2)).as_ptr::<u8>() };
+                let offset = heap::OBJECT_HEADER_SIZE
+                    + (index as usize) * std::mem::size_of::<Value>();
+                unsafe { backing.add(offset) }
+            } else {
+                // Inline array / tuple: elements live directly after the
+                // header.
+                let element_count = header.size as usize
+                    / std::mem::size_of::<Value>();
+                if index < 0 || (index as usize) >= element_count {
+                    return Err(InterpreterError::IndexOutOfBounds {
+                        index, length: element_count,
+                    });
+                }
+                let offset = heap::OBJECT_HEADER_SIZE
+                    + (index as usize) * std::mem::size_of::<Value>();
+                unsafe { ptr.add(offset) }
+            };
+
+            state.set_reg(dst, Value::from_ptr(elem_ptr));
+            Ok(DispatchResult::Continue)
+        }
+
         Some(CbgrSubOpcode::RefSliceRaw) => {
             // Create a FatRef directly from a raw pointer + length, with
             // elem_size=1 (byte slice). Used to lower the generic
