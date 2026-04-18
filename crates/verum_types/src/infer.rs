@@ -36806,8 +36806,16 @@ impl TypeChecker {
         // with the let-binding annotation (`let v: List<Int> = (0..N).collect();`).
         // Several of the deeper type-resolution paths inside this function happily return
         // the *element* type for `.collect()` on adapter shapes that don't carry a real
-        // `FromIterator` dictionary — `Range<Int>` ends up as `Int`, which then fails to
-        // unify with `List<Int>`. Short-circuit before any of those paths run.
+        // `FromIterator` dictionary — `Range<Int>` ended up as `Int`, which then failed
+        // to unify with `List<Int>`. Short-circuit before any of those paths run.
+        //
+        // Audit confirmed (2026-04-18): this collect-only short-circuit is sufficient
+        // for the most-broken case. Other generic methods either resolve through their
+        // own bidirectional paths (`.into()`, `.from()`, `.parse_int()`) or have
+        // shape-specific issues that need a different fix (`.max()` returns
+        // `Item<ListIter<Int>>` because ListIter isn't in the synthetic-adapter list
+        // and the associated-type projection isn't normalized to the element type
+        // — tracked separately).
         if method.name.as_str() == "collect" && args.is_empty() {
             return Ok(InferResult::new(Type::Var(TypeVar::fresh())));
         }
