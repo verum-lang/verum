@@ -2369,9 +2369,9 @@ pub(in super::super) fn handle_ffi_extended(state: &mut InterpreterState) -> Int
             // Wrap in Ok(tuple). Result layout (from `handle_make_variant`):
             //   [tag: u32][field_count: u32][payload: Value * N]
             // Ok = tag 0, single payload field holding the tuple.
-            let variant_size = 8 + 1 * std::mem::size_of::<Value>();
+            let variant_size = 8 + std::mem::size_of::<Value>();
             let variant_obj = state.heap.alloc_with_init(
-                crate::types::TypeId(0x8000 + 0), // tag=0 = Ok
+                crate::types::TypeId(0x8000), // tag=0 = Ok (variant TypeId base | tag)
                 variant_size,
                 |data| {
                     let tag_ptr = data.as_mut_ptr() as *mut u32;

@@ -9846,23 +9846,22 @@ impl VbcCodegen {
                     if matches!(field, "size" | "alignment" | "stride" | "name")
                         && self.ctx.get_var_reg(type_name).is_err()
                         && self.ctx.lookup_function(type_name).is_none()
+                        && let Some(value) = self.layout_property_for_named(type_name, field)
                     {
-                        if let Some(value) = self.layout_property_for_named(type_name, field) {
-                            let result = self.ctx.alloc_temp();
-                            match value {
-                                TypePropertyValue::Int(v) => {
-                                    self.ctx.emit(Instruction::LoadI { dst: result, value: v });
-                                }
-                                TypePropertyValue::UInt(v) => {
-                                    self.ctx.emit(Instruction::LoadI { dst: result, value: v as i64 });
-                                }
-                                TypePropertyValue::Str(s) => {
-                                    let const_id = self.ctx.add_const_string(&s);
-                                    self.ctx.emit(Instruction::LoadK { dst: result, const_id: const_id.0 });
-                                }
+                        let result = self.ctx.alloc_temp();
+                        match value {
+                            TypePropertyValue::Int(v) => {
+                                self.ctx.emit(Instruction::LoadI { dst: result, value: v });
                             }
-                            return Ok(Some(result));
+                            TypePropertyValue::UInt(v) => {
+                                self.ctx.emit(Instruction::LoadI { dst: result, value: v as i64 });
+                            }
+                            TypePropertyValue::Str(s) => {
+                                let const_id = self.ctx.add_const_string(&s);
+                                self.ctx.emit(Instruction::LoadK { dst: result, const_id: const_id.0 });
+                            }
                         }
+                        return Ok(Some(result));
                     }
 
                     // Handle type alias field access (e.g., u64.MAX -> Int::MAX)

@@ -15,6 +15,12 @@ pub struct LlvmContextRef {
     raw: verum_mlir_sys::LLVMContextRef,
 }
 
+impl Default for LlvmContextRef {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl LlvmContextRef {
     /// Create a new LLVM context.
     pub fn new() -> Self {

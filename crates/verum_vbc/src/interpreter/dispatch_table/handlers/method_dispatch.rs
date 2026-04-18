@@ -5332,7 +5332,7 @@ pub(super) fn dispatch_variant_method(
                 // Mutate in place: clear tag and field_count to turn this
                 // variant into the None/unit shape.
                 unsafe {
-                    let tag_ptr = (base_ptr as *mut u8).add(heap::OBJECT_HEADER_SIZE) as *mut u32;
+                    let tag_ptr = base_ptr.add(heap::OBJECT_HEADER_SIZE) as *mut u32;
                     *tag_ptr = 0;
                     *tag_ptr.add(1) = 0;
                 }

@@ -220,7 +220,7 @@ pub(in super::super) fn handle_text_extended(state: &mut InterpreterState) -> In
                     (std::ptr::null_mut(), 0)
                 } else {
                     let obj = state.heap.alloc(TypeId::U8, n)?;
-                    let data_ptr = obj.data_ptr() as *mut u8;
+                    let data_ptr = obj.data_ptr();
                     unsafe {
                         std::ptr::copy_nonoverlapping(bytes.as_ptr(), data_ptr, n);
                     }

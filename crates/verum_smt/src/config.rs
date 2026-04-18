@@ -592,7 +592,6 @@ impl SmtConfig {
                 verbosity: 3,
                 ..Default::default()
             },
-            ..Default::default()
         }
     }
 }

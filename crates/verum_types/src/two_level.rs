@@ -70,21 +70,21 @@ impl Layer {
     }
 }
 
-impl PartialOrd for Layer {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        Some(match (self, other) {
+impl Ord for Layer {
+    fn cmp(&self, other: &Self) -> Ordering {
+        match (self, other) {
             (Layer::Fibrant, Layer::Fibrant) | (Layer::Strict, Layer::Strict) => {
                 Ordering::Equal
             }
             (Layer::Fibrant, Layer::Strict) => Ordering::Less,
             (Layer::Strict, Layer::Fibrant) => Ordering::Greater,
-        })
+        }
     }
 }
 
-impl Ord for Layer {
-    fn cmp(&self, other: &Self) -> Ordering {
-        self.partial_cmp(other).unwrap()
+impl PartialOrd for Layer {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
     }
 }
 

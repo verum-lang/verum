@@ -43,7 +43,7 @@ pub struct BitVec {
 impl BitVec {
     /// Construct a bit-vector. Bits beyond `width` are masked off.
     pub fn new(bits: u64, width: u8) -> Self {
-        let w = width.min(64).max(1);
+        let w = width.clamp(1, 64);
         let mask = if w >= 64 { u64::MAX } else { (1u64 << w) - 1 };
         Self {
             bits: bits & mask,

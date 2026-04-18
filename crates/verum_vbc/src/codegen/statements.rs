@@ -98,8 +98,7 @@ impl VbcCodegen {
                             false
                         };
 
-                        if has_captures && func.body.is_some() {
-                            let body = func.body.as_ref().unwrap();
+                        if has_captures && let verum_common::Maybe::Some(ref body) = func.body {
                             {
                                 // Build closure params from function params
                                 let closure_params: verum_common::List<verum_ast::expr::ClosureParam> =
