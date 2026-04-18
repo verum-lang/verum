@@ -1190,6 +1190,7 @@ fn run_command(cli: Cli) -> Result<()> {
                     profile,
                     show_cost,
                     compare_modes,
+                    mode.as_str(),
                     solver.as_str(),
                     timeout,
                     cache,

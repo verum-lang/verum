@@ -23,14 +23,22 @@ use verum_compiler::{
     verify_cmd::VerifyCommand,
 };
 
-/// Parse verify mode from string
+/// Parse verify mode from string.
+///
+/// Accepts the three core verify modes (`auto`, `runtime`, `proof`) plus
+/// the focused tactic-family aliases `cubical` and `dependent`. The
+/// tactic-family aliases route through the proof pipeline at the
+/// `VerifyMode` layer (the underlying tactic dispatch happens inside
+/// `verum_smt::tactic_evaluation` based on the obligation shape, not the
+/// CLI mode); the CLI just acknowledges the user's intent so the
+/// invocation doesn't error out.
 fn parse_verify_mode(mode: &str) -> Result<VerifyMode, CliError> {
     match mode.to_lowercase().as_str() {
         "auto" => Ok(VerifyMode::Auto),
         "runtime" => Ok(VerifyMode::Runtime),
-        "proof" => Ok(VerifyMode::Proof),
+        "proof" | "cubical" | "dependent" | "compare" => Ok(VerifyMode::Proof),
         _ => Err(CliError::InvalidArgument(format!(
-            "Invalid verify mode: {}. Must be one of: auto, runtime, proof",
+            "Invalid verify mode: {}. Must be one of: auto, runtime, proof, cubical, dependent, compare",
             mode
         ))),
     }

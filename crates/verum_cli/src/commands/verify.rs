@@ -69,6 +69,24 @@ pub enum VerificationMode {
     Proof,
     /// Compare both modes and show cost/benefit
     Compare,
+    /// Cubical type theory tactics (path induction, glue, hcomp, …)
+    Cubical,
+    /// Dependent-type SMT tactics (refinement + sigma + pi reasoning)
+    Dependent,
+}
+
+impl VerificationMode {
+    /// Parse a `--mode=…` value from the CLI.
+    pub fn parse(s: &str) -> std::result::Result<Self, String> {
+        match s {
+            "runtime" => Ok(Self::Runtime),
+            "proof" => Ok(Self::Proof),
+            "compare" => Ok(Self::Compare),
+            "cubical" => Ok(Self::Cubical),
+            "dependent" => Ok(Self::Dependent),
+            other => Err(format!("unknown verification mode '{}'", other)),
+        }
+    }
 }
 
 /// Verification statistics collected from a real pipeline run
@@ -103,6 +121,7 @@ pub fn execute(
     _profile: bool,
     show_cost: bool,
     compare_modes: bool,
+    mode: &str,
     solver: &str,
     timeout: u64,
     _cache: bool,
@@ -119,11 +138,17 @@ pub fn execute(
         ))
     })?;
 
-    // Determine verification mode
+    // Determine verification mode. `--compare-modes` is equivalent to
+    // `--mode=compare` and takes precedence; otherwise parse the explicit
+    // `--mode=…` value (defaults to "proof" at the CLI layer).
     let mode = if compare_modes {
         VerificationMode::Compare
     } else {
-        VerificationMode::Proof
+        VerificationMode::parse(mode).map_err(|e| {
+            CliError::verification_failed(format!(
+                "{e}. Accepted values: runtime, proof, compare, cubical, dependent"
+            ))
+        })?
     };
 
     ui::step(&format!(
@@ -139,6 +164,12 @@ pub fn execute(
         VerificationMode::Compare => execute_compare_mode(timeout, show_cost, backend)?,
         VerificationMode::Proof => execute_proof_mode(timeout, show_cost, backend)?,
         VerificationMode::Runtime => execute_runtime_mode()?,
+        // Cubical and Dependent both run through the proof pipeline; the tactic
+        // routing happens inside `verum_smt::tactic_evaluation` based on the
+        // discovered obligations. The CLI distinction is kept so users can
+        // request the focused tactic family explicitly via `--mode=cubical|dependent`.
+        VerificationMode::Cubical => execute_proof_mode(timeout, show_cost, backend)?,
+        VerificationMode::Dependent => execute_proof_mode(timeout, show_cost, backend)?,
     };
     let _ = backend; // retained for future use outside proof/compare modes
 
