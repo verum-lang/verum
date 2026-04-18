@@ -1,0 +1,39 @@
+// Refinement types — refinements move runtime checks to compile time.
+//
+// `Int{> 0}` is the type of positive integers. The compiler proves the
+// constraint via SMT, so callers must satisfy it at the call site.
+//
+// Run:
+//   verum run examples/refinement_demo.vr     # interpreter (refinements
+//                                              # validated at runtime)
+//   verum verify examples/refinement_demo.vr  # SMT proof of all
+//                                              # refinement obligations
+
+type Positive is Int{> 0};
+
+fn divide(numerator: Int, denominator: Positive) -> Int {
+    numerator / denominator
+}
+
+fn natural_log(x: Positive) -> Float {
+    // Stub — real ln() exists in core/math, this just demonstrates the
+    // type-level guarantee that x > 0 (so log is defined).
+    let xf = x as Float;
+    if xf < 1.0 { -1.0 } else { xf - 1.0 }
+}
+
+fn main() {
+    // OK — 5 satisfies > 0.
+    let result = divide(100, 5);
+    print(f"100 / 5 = {result}");
+
+    // OK — 1 satisfies > 0.
+    let log_ten = natural_log(10);
+    print(f"ln(10) ~ {log_ten}");
+
+    // The next line would fail compilation — `0` doesn't satisfy `> 0`:
+    //   let bad = divide(100, 0);
+    //
+    // Try uncommenting it and running `verum verify
+    // examples/refinement_demo.vr` to see the SMT-derived diagnostic.
+}

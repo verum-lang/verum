@@ -1,0 +1,27 @@
+// Async/await — the simplest case.
+//
+// `async fn`s in 0.1.0 don't yet compile to suspend/resume state machines:
+// the body runs inline and `.await` on a direct call is a no-op marker.
+// `spawn { … }` produces a real task handle whose `.await` calls into the
+// pool's adaptive spin/yield loop. Both forms exit cleanly under
+// `verum run --interp` and `verum run --aot`.
+//
+// Run:
+//   verum run examples/async_hello.vr           # interpreter
+//   verum run --aot examples/async_hello.vr     # native build + execute
+//   verum build examples/async_hello.vr         # native binary
+
+async fn add(a: Int, b: Int) -> Int {
+    a + b
+}
+
+async fn run() -> Int {
+    let x = add(1, 2).await;
+    let y = add(3, 4).await;
+    x + y
+}
+
+fn main() {
+    let result = run().await;
+    print(f"async add chain → {result}");
+}

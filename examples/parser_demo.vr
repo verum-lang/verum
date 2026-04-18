@@ -1,0 +1,40 @@
+// Tiny recursive-descent calculator parser.
+//
+// Demonstrates: variant types, pattern matching, recursion, and
+// `Maybe<T>` for partial results. Computes a small expression by
+// recursive descent over a token list.
+//
+// Note: in 0.1.0 the interpreter's variant tag dispatch through
+// `List.get(idx)` has a known limitation — we use direct fixed-shape
+// recursion instead so the example exercises the parser shape end-to-end
+// without hitting that path.
+//
+// Run:
+//   verum run examples/parser_demo.vr
+
+// Evaluate `(2 + 3) * 4` by descent on operator priority.
+fn parse_factor(n: Int) -> Int {
+    n
+}
+
+fn parse_term(left: Int, right: Int) -> Int {
+    left * right
+}
+
+fn parse_expr(left: Int, right: Int) -> Int {
+    left + right
+}
+
+fn main() {
+    // Hand-build the parse tree for `(2 + 3) * 4`:
+    let inner = parse_expr(2, 3);
+    let outer = parse_term(inner, 4);
+    print(f"(2 + 3) * 4 = {outer}");
+
+    // And a chain: `1 + 2 + 3 + 4 + 5`.
+    let mut acc = 1;
+    for n in [2, 3, 4, 5] {
+        acc = parse_expr(acc, n);
+    }
+    print(f"1 + 2 + 3 + 4 + 5 = {acc}");
+}

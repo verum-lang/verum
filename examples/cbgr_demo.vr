@@ -1,0 +1,41 @@
+// CBGR (Capability + Generation + Epoch) memory safety — three tiers.
+//
+// Tier 0: `&T`           — runtime-validated, ~15 ns generation+epoch check.
+// Tier 1: `&checked T`   — compiler-proven safe, 0 ns at runtime.
+// Tier 2: `&unsafe T`    — manually-asserted unsafe, 0 ns, programmer is
+//                          responsible for the safety invariant.
+//
+// Run:
+//   verum run examples/cbgr_demo.vr
+
+fn sum_tier0(slice: &[Int]) -> Int {
+    let mut acc = 0;
+    for i in range(0, slice.len()) {
+        acc = acc + slice[i];
+    }
+    acc
+}
+
+fn sum_tier1(slice: &checked [Int]) -> Int {
+    let mut acc = 0;
+    for i in range(0, slice.len()) {
+        acc = acc + slice[i];
+    }
+    acc
+}
+
+fn main() {
+    let nums = [10, 20, 30, 40, 50];
+
+    // Tier 0 — every iteration validates the generation/epoch.
+    let t0 = sum_tier0(&nums);
+    print(f"sum (tier 0): {t0}");
+
+    // Tier 1 — escape analysis proved the borrow safe; zero overhead.
+    let t1 = sum_tier1(&checked nums);
+    print(f"sum (tier 1): {t1}");
+
+    // Same answer either way.
+    assert_eq(t0, t1);
+    print("CBGR tiers agree.");
+}
