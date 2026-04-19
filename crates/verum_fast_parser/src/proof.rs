@@ -2291,9 +2291,11 @@ impl<'a> RecursiveParser<'a> {
             //   `if cond { t1 } else { t2 }`
             // Both branches are tactic expressions; the else branch is
             // optional. Desugars `else if` chains through nested `If`.
+            // Use `parse_expr_no_struct` so `if x { ... }` doesn't get
+            // eaten as a struct literal `x { ... }`.
             Some(TokenKind::If) => {
                 self.stream.advance();
-                let cond = self.parse_expr()?;
+                let cond = self.parse_expr_no_struct()?;
                 self.stream.expect(TokenKind::LBrace)?;
                 let then_branch = self.parse_tactic_expr()?;
                 // Consume optional trailing `;` inside the block.

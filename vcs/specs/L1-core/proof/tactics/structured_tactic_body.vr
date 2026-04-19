@@ -1,0 +1,50 @@
+// @test: parse
+// @level: L1
+// @tier: 0
+// @description: Structured tactic-body forms — let/match/if/fail — execute at the evaluator level (T1-W step 1).
+//
+// T1-O landed the parser for structured tactic bodies; T1-W step 1
+// made the evaluator execute Let/Match/If/Fail directly instead of
+// returning NotImplemented. This anchor exercises every structured
+// form inside real tactic declarations.
+
+// `let` binding inside a tactic body — records a hypothesis.
+tactic bind_local(x: Int) {
+    let local_bound: Int = x;
+    trivial
+}
+
+// `if/else` — literal-bool cond picks branch; opaque cond falls back
+// to try-then-else semantics.
+tactic gated(enabled: Bool, x: Int) {
+    if enabled {
+        trivial
+    } else {
+        skip
+    }
+}
+
+// `match` — branches on the scrutinee's head constructor.
+tactic try_prove(candidate: Prop) {
+    match candidate {
+        Maybe.Some(p) => apply(p),
+        Maybe.None    => fail("no candidate"),
+    }
+}
+
+// `fail` inside `try { ... } else { ... }` — recovery via fallback.
+tactic safe_smt() {
+    try { smt } else { fail("SMT could not close the goal") }
+}
+
+// Combined form — let + if + fail.
+tactic comprehensive(attempts: Int) {
+    let tries: Int = attempts;
+    if tries > 0 {
+        trivial
+    } else {
+        fail("no attempts remaining")
+    }
+}
+
+fn main() { }
