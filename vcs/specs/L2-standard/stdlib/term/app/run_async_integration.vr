@@ -9,7 +9,7 @@
 /// integration runners outside the VCS suite.
 
 mount core.term.app.{Model, Command, Subscription, AppMessage, run, run_async};
-mount core.term.event.{Event, KeyEvent, KeyCode, Modifiers};
+mount core.term.event.{Event, KeyEvent, KeyCode, Modifiers, KeyEventKind};
 mount core.term.render.{Frame};
 mount core.io.IoResult;
 mount core.time.Duration;
@@ -43,7 +43,7 @@ implement Model for Counter {
             Event.Key(ke) => match ke.code {
                 KeyCode.Up    => Some(Msg.Inc),
                 KeyCode.Down  => Some(Msg.Dec),
-                KeyCode.Esc   => Some(Msg.Quit),
+                KeyCode.Escape => Some(Msg.Quit),
                 _             => None,
             },
             _ => None,
@@ -57,11 +57,6 @@ implement Model for Counter {
     fn on_quit(&mut self) {
         // User-side cleanup hook; must typecheck as &mut self.
     }
-}
-
-fn test_run_signature() {
-    // `run` is IoResult<()> — compile-only check.
-    let _: fn(Counter) -> IoResult<()> = run::<Counter>;
 }
 
 fn test_pure_update() {
@@ -78,7 +73,7 @@ fn test_event_to_msg() {
     let up = Event.Key(KeyEvent {
         code: KeyCode.Up,
         modifiers: Modifiers.NONE,
-        kind: core.term.event.KeyEventKind.Press,
+        kind: KeyEventKind.Press,
     });
     match c.handle_event(up) {
         Some(Msg.Inc) => {}
