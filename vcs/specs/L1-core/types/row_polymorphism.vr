@@ -1,0 +1,28 @@
+// @test: parse
+// @level: L1
+// @tier: 0
+// @description: Row-polymorphic record types `{fields... | r}` — T1-E.
+//
+// A row-polymorphic record type specifies some fields and leaves the
+// rest open. Functions that take `{x: Int | r}` accept any record that
+// has at least an `x: Int` field, regardless of what else it contains.
+// The row variable `r` captures the additional fields.
+//
+// AST: `TypeKind::Record { fields, row_var: Maybe::Some(r) }`.
+// Elaborated type: `Type::ExtensibleRecord { fields, row_var }`.
+
+// Single-field row-polymorphic function.
+fn get_x<r>(p: {x: Int | r}) -> Int { p.x }
+
+// Multiple required fields + row variable.
+fn get_name<r>(o: {name: Text, age: Int | r}) -> Text { o.name }
+
+// Closed record (no row variable) — baseline form.
+fn sum_closed(p: {x: Int, y: Int}) -> Int { p.x + p.y }
+
+// Nested row polymorphism: the inner record is also extensible.
+fn get_nested_name<r, s>(n: {inner: {name: Text | s} | r}) -> Text {
+    n.inner.name
+}
+
+fn main() { }

@@ -2063,7 +2063,7 @@ impl<'a> RecursiveParser<'a> {
                         // Record types with value refinements:
                         // type OrderedRange is { start: Int, end: Int } where self.end >= self.start;
                         Type::new(
-                            TypeKind::Record { fields: fields.clone() },
+                            TypeKind::Record { fields: fields.clone(), row_var: Maybe::None },
                             body_span,
                         )
                     }
@@ -2727,7 +2727,7 @@ impl<'a> RecursiveParser<'a> {
 
                     // Create the base record type
                     let base_type = Type::new(
-                        TypeKind::Record { fields: fields.into_iter().collect() },
+                        TypeKind::Record { fields: fields.into_iter().collect(), row_var: Maybe::None },
                         record_span,
                     );
 
@@ -3205,7 +3205,14 @@ impl<'a> RecursiveParser<'a> {
         // Parse optional attributes: @attr VariantName(...)
         let attributes = self.parse_attributes()?;
 
-        let name = self.consume_ident_or_keyword()?;
+        // Variant constructors live in their own namespace (`Type.Variant`)
+        // and cannot collide with reserved keywords used elsewhere, so
+        // we accept *any* keyword as a variant name. This lets the
+        // HoTT stdlib name HIT path constructors `loop`, `merid`,
+        // `trunc_path`, `push`, etc. — following the canonical names
+        // in Kapulkin–Lumsdaine and Univalent Foundations without
+        // having to rename them for our lexer's benefit.
+        let name = self.consume_ident_or_any_keyword()?;
         let name_span = self.stream.current_span();
 
         // Parse optional generic parameters on variant (GADT constructors):
@@ -3298,6 +3305,62 @@ impl<'a> RecursiveParser<'a> {
         // Unit variant: None
         else {
             data = Maybe::None;
+        }
+
+        // HIT path-constructor endpoint type (second form):
+        // `| loop: Path<S1>(base, base);`
+        // `| merid(a: A): Path<Susp<A>>(north, south);`
+        // `| push(c: C): Path<Pushout<A, B, C>(f, g)>(inl(f(c)), inr(g(c)));`
+        //
+        // The stdlib `core/math/hott.vr` encodes Higher Inductive Type
+        // path constructors with a trailing type annotation after the
+        // variant's payload. Semantically the annotation is the
+        // variant's `Path<Carrier>(lhs, rhs)` identity type, which is
+        // equivalent to the range form `Seg() = lhs..rhs` already
+        // supported above. Here we accept the type-annotation spelling
+        // by pulling the `lhs`/`rhs` expressions out of the parsed
+        // PathType / DependentApp node and populating `path_endpoints`.
+        // Non-`Path<…>(…)` annotations are preserved but left without
+        // endpoint metadata — they still document the constructor's
+        // type for downstream HoTT verification passes.
+        if path_endpoints.is_none() && self.stream.check(&TokenKind::Colon) {
+            let cp = self.stream.position();
+            self.stream.advance(); // consume `:`
+            if let Some(ty) = self.optional(|p| p.parse_type_no_refinement()) {
+                match &ty.kind {
+                    // `Path<Carrier>(a, b)` — direct sugar
+                    verum_ast::ty::TypeKind::PathType { lhs, rhs, .. } => {
+                        path_endpoints = Maybe::Some((
+                            verum_common::Heap::new((**lhs).clone()),
+                            verum_common::Heap::new((**rhs).clone()),
+                        ));
+                    }
+                    // `DependentApp { carrier=Path<C>, value_args=[a, b] }` —
+                    // the generalised DependentApp form also produces path
+                    // constructors when exactly two value args are present
+                    // and the inner carrier is a Path.
+                    verum_ast::ty::TypeKind::DependentApp { value_args, .. }
+                        if value_args.len() == 2 =>
+                    {
+                        let lhs_expr = value_args.iter().next().unwrap().clone();
+                        let rhs_expr = value_args.iter().nth(1).unwrap().clone();
+                        path_endpoints = Maybe::Some((
+                            verum_common::Heap::new(lhs_expr),
+                            verum_common::Heap::new(rhs_expr),
+                        ));
+                    }
+                    _ => {
+                        // Not a recognised HIT index form. Keep parsing but
+                        // don't emit path_endpoints — the type annotation
+                        // survives only in documentation.
+                    }
+                }
+            } else {
+                // Couldn't parse as a type — roll back and let the caller
+                // see the `:` (it's likely a syntax error that should be
+                // reported at a higher level).
+                self.stream.reset_to(cp);
+            }
         }
 
         // Parse optional where clause on variant (GADT constraints):

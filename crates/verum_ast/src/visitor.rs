@@ -1963,7 +1963,7 @@ pub fn walk_type<V: Visitor>(visitor: &mut V, ty: &Type) {
                 let _ = cap; // Acknowledge the capability exists
             }
         }
-        TypeKind::Record { fields } => {
+        TypeKind::Record { fields, .. } => {
             for field in fields.iter() {
                 visitor.visit_ident(&field.name);
                 visit_child!(visitor, &field.ty, Type);

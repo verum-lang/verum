@@ -22083,7 +22083,7 @@ impl TypeChecker {
             TypeKind::Unknown => Ok(Type::Unknown),
 
             // Record types: { field1: Type1, field2: Type2, ... }
-            TypeKind::Record { fields } => {
+            TypeKind::Record { fields, .. } => {
                 use indexmap::IndexMap;
                 let mut field_types: IndexMap<Text, Type> = IndexMap::new();
                 for f in fields {

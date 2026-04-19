@@ -965,7 +965,7 @@ impl PrettyPrinter {
                 self.write("]");
             }
             TypeKind::Unknown => self.write("unknown"),
-            TypeKind::Record { fields } => {
+            TypeKind::Record { fields, .. } => {
                 self.write("{ ");
                 for (i, field) in fields.iter().enumerate() {
                     if i > 0 {

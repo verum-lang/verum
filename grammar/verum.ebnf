@@ -1097,7 +1097,12 @@ simple_type     = primitive_type
 (* Anonymous record type: { x: Int, y: Int }                                       *)
 (* Used in type expressions for anonymous structured data                           *)
 (* Can have refinement applied via type_expr: { x: Int, y: Int } { self.x > 0 }    *)
-record_type     = '{' , field_list , '}' ;
+(* Record types accept an optional trailing row variable `| r` after the
+   field list for row polymorphism (T1-E). With no row variable the
+   record is closed; with a row variable the record is extensible and
+   captures any additional fields as the row variable.
+   Example:  fn get_x<r>(p: { x: Int | r }) -> Int { p.x }  *)
+record_type     = '{' , [ field_list ] , [ '|' , identifier ] , '}' ;
 
 (* Capability-restricted types - Type-safe capability attenuation                    *)
 (* Spec: docs/improvements.md Section 12 - Capability Attenuation as Types           *)

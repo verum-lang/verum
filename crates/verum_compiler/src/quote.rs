@@ -2272,7 +2272,7 @@ impl ToTokens for Type {
             }
 
             // Record type: { field1: Type1, field2: Type2, ... }
-            TypeKind::Record { fields } => {
+            TypeKind::Record { fields, .. } => {
                 stream.push(Token::new(TokenKind::LBrace, self.span));
                 for (i, field) in fields.iter().enumerate() {
                     if i > 0 {

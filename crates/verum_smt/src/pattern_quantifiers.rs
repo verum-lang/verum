@@ -144,7 +144,7 @@ pub fn type_to_sort(ty: &Type) -> Sort {
         // Unknown type - top type with no operations. Modeled as uninterpreted sort.
         TypeKind::Unknown => Sort::uninterpreted(Symbol::String("Unknown".to_string())),
         // Record types - modeled as uninterpreted struct-like sort
-        TypeKind::Record { fields } => {
+        TypeKind::Record { fields, .. } => {
             Sort::uninterpreted(Symbol::String(format!("Record_{}", fields.len())))
         }
         // Universe types - Type(n) is a sort-of-sorts, modeled as uninterpreted

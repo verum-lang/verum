@@ -330,7 +330,7 @@ impl SpecializationVerifier {
                 self.extract_type_params_from_type(self_ty, params);
             }
             // Record types - extract from field types
-            TypeKind::Record { fields } => {
+            TypeKind::Record { fields, .. } => {
                 for field in fields {
                     self.extract_type_params_from_type(&field.ty, params);
                 }
@@ -742,7 +742,7 @@ impl SpecializationVerifier {
                 self.is_generic_with_context(base.as_ref(), impl_idx)
             }
             // Record types - check all field types for genericity
-            TypeKind::Record { fields } => fields
+            TypeKind::Record { fields, .. } => fields
                 .iter()
                 .any(|f| self.is_generic_with_context(&f.ty, impl_idx)),
             // Universe types are not generic

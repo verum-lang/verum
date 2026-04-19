@@ -588,9 +588,26 @@ pub enum TypeKind {
     /// ```
     ///
     /// # Grammar
-    /// record_type = '{' , field_list , '}' ;
+    /// record_type = '{' , field_list , [ '|' , identifier ] , '}' ;
+    ///
+    /// # Row polymorphism (T1-E)
+    ///
+    /// When `row_var` is `Some(r)`, the record is *extensible* — it
+    /// specifies some fields and leaves the rest open:
+    ///
+    /// ```verum
+    /// // Works with any record that has at least an `x: Int` field.
+    /// fn get_x<r>(p: { x: Int | r }) -> Int { p.x }
+    /// ```
+    ///
+    /// This lowers to `Type::ExtensibleRecord { fields, row_var: Some(r) }`
+    /// in the elaborated type system. A closed record (no row variable)
+    /// lowers to `Type::Record`.
     Record {
         fields: List<RecordField>,
+        /// Row variable capturing additional fields beyond `fields`.
+        /// `Maybe::None` for a closed record.
+        row_var: Maybe<Ident>,
     },
 
     /// Universe type: `Type`, `Type(0)`, `Type(1)`, `Type(N)`, etc.

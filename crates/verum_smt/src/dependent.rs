@@ -193,7 +193,7 @@ impl PiType {
             // Capability-restricted type: check base type for name references
             TypeKind::CapabilityRestricted { base, .. } => self.type_references_name(base, name),
             // Record types: check all field types for name references
-            TypeKind::Record { fields } => {
+            TypeKind::Record { fields, .. } => {
                 fields.iter().any(|f| self.type_references_name(&f.ty, name))
             }
             // Path equality type: check the carrier type for name references
@@ -1152,7 +1152,7 @@ impl DependentTypeBackend {
             // Capability-restricted types - compute depth from base
             TypeKind::CapabilityRestricted { base, .. } => self.compute_quantifier_depth(base),
             // Record types - compute max depth from field types
-            TypeKind::Record { fields } => fields
+            TypeKind::Record { fields, .. } => fields
                 .iter()
                 .map(|f| self.compute_quantifier_depth(&f.ty))
                 .max()
@@ -1442,7 +1442,7 @@ impl DependentTypeBackend {
                 Self::extract_type_names_recursive(base, names);
             }
             // Record types - extract from field types
-            TypeKind::Record { fields } => {
+            TypeKind::Record { fields, .. } => {
                 for field in fields {
                     Self::extract_type_names_recursive(&field.ty, names);
                 }
@@ -1708,7 +1708,7 @@ impl TypeDependencyGraph {
                 self.collect_dependencies_recursive(base, parent);
             }
             // Record types - collect from field types
-            TypeKind::Record { fields } => {
+            TypeKind::Record { fields, .. } => {
                 for field in fields {
                     self.collect_dependencies_recursive(&field.ty, parent);
                 }
@@ -3293,7 +3293,7 @@ impl InductiveType {
                 self.check_positivity_in_type(base, positive)
             }
             // Record types - check all field types for positivity
-            TypeKind::Record { fields } => {
+            TypeKind::Record { fields, .. } => {
                 for field in fields {
                     self.check_positivity_in_type(&field.ty, positive)?;
                 }

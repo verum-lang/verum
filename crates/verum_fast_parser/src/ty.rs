@@ -867,9 +867,18 @@ impl<'a> RecursiveParser<'a> {
         self.stream.expect(TokenKind::LBrace)?;
 
         let mut fields = List::new();
+        let mut row_var: Maybe<Ident> = Maybe::None;
 
         // Parse field list: identifier ':' type_expr { ',' identifier ':' type_expr } [ ',' ]
+        // followed by an optional row variable: '|' identifier
         while !self.stream.check(&TokenKind::RBrace) {
+            // Row variable: `{ fields... | r }` — Row Polymorphism (T1-E)
+            if self.stream.consume(&TokenKind::Pipe).is_some() {
+                let rv_span = self.stream.current_span();
+                let rv_name = self.consume_ident()?;
+                row_var = Maybe::Some(Ident::new(rv_name, rv_span));
+                break;
+            }
             let field_start = self.stream.position();
 
             // Parse field name
@@ -905,14 +914,23 @@ impl<'a> RecursiveParser<'a> {
             if self.stream.consume(&TokenKind::Comma).is_none()
                 && self.stream.consume(&TokenKind::Semicolon).is_none()
             {
+                // Not a separator — either `|` (row variable), `}` (end), or error.
                 break;
             }
+        }
+
+        // Trailing row variable (T1-E): `{ fields... | r }` — possibly after
+        // a trailing separator (`{ x: Int, | r }`) or right after the last field.
+        if self.stream.consume(&TokenKind::Pipe).is_some() {
+            let rv_span = self.stream.current_span();
+            let rv_name = self.consume_ident()?;
+            row_var = Maybe::Some(Ident::new(rv_name, rv_span));
         }
 
         self.stream.expect(TokenKind::RBrace)?;
 
         let span = self.stream.make_span(start_pos);
-        Ok(Type::new(TypeKind::Record { fields }, span))
+        Ok(Type::new(TypeKind::Record { fields, row_var }, span))
     }
 
     /// Parse universe type: `Type`, `Type(0)`, `Type(1)`, `Type(u)`.
@@ -1014,9 +1032,18 @@ impl<'a> RecursiveParser<'a> {
         debug_assert_eq!(name.as_str(), "Path");
 
         // Parse type arguments: <A>
+        //
+        // Use `expect_gt` to correctly split the outer `>` from a
+        // `>>` token produced by the lexer when the carrier itself is
+        // generic: `Path<Susp<A>>(…)` tokenises as `Path`, `<`, `Susp`,
+        // `<`, `A`, `>>`, `(…)`. Without the shift-split the inner
+        // `Susp<A>` consumes the first `>` and the outer close looks
+        // like a stray operator. The existing `parse_generic_args`
+        // follows this same pattern; aligning with it lets the stdlib
+        // use `Path<Type<Indices>>(lhs, rhs)` directly.
         self.stream.expect(TokenKind::Lt)?;
         let carrier = self.parse_type()?;
-        self.stream.expect(TokenKind::Gt)?;
+        self.expect_gt()?;
 
         // Parse endpoint expressions: (a, b) with optional trailing comma.
         // Trailing commas are a universal convention in Verum (tuples,

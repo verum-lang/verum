@@ -1553,7 +1553,7 @@ fn type_kind_to_string(kind: &verum_ast::TypeKind) -> Text {
         TypeKind::Unknown => Text::from("Unknown"),
 
         // Record types - anonymous record format
-        TypeKind::Record { fields } => {
+        TypeKind::Record { fields, .. } => {
             let field_strs: List<String> = fields
                 .iter()
                 .map(|f| format!("{}: {}", f.name.name, type_to_string(&f.ty)))

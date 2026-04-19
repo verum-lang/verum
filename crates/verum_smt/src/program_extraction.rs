@@ -2361,7 +2361,7 @@ impl CodeGenerator {
             TypeKind::Unknown => "unknown".to_string(),
 
             // Record types: { field1: Type1, field2: Type2, ... }
-            TypeKind::Record { fields } => {
+            TypeKind::Record { fields, .. } => {
                 let field_strs: Vec<String> = fields
                     .iter()
                     .map(|f| format!("{}: {}", f.name.name, self.format_type(&f.ty)))

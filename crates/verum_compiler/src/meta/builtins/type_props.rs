@@ -340,7 +340,7 @@ pub fn compute_type_size(ty: &TypeKind) -> Result<u64, MetaError> {
         }
         TypeKind::CapabilityRestricted { base, .. } => compute_type_size(&base.kind),
         // Record types: sum of field sizes (with alignment padding)
-        TypeKind::Record { fields } => {
+        TypeKind::Record { fields, .. } => {
             let mut total_size: u64 = 0;
             for field in fields {
                 total_size += compute_type_size(&field.ty.kind)?;
@@ -447,7 +447,7 @@ pub fn compute_type_alignment(ty: &TypeKind) -> Result<u64, MetaError> {
         TypeKind::CapabilityRestricted { base, .. } => compute_type_alignment(&base.kind),
 
         // Record types: max alignment of all field types
-        TypeKind::Record { fields } => {
+        TypeKind::Record { fields, .. } => {
             let mut max_align: u64 = 1;
             for field in fields {
                 max_align = max_align.max(compute_type_alignment(&field.ty.kind)?);
