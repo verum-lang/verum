@@ -12276,12 +12276,24 @@ fn lower_cbgr_extended<'ctx>(
                 ).map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
             };
 
-            // Store as i64 NaN-boxed ptr (same convention as other CBGR
-            // ops). DerefMut will inttoptr it before writing.
-            let elem_i64 = ctx.builder()
-                .build_ptr_to_int(elem_ptr, i64_type, "rle_elem_i64")
+            // Load the stored Value directly — for struct elements the
+            // slot holds a heap pointer, for primitive elements it holds
+            // the scalar. Passing the LOADED value (rather than the slot
+            // pointer) makes `r.field` and `r.method(...)` resolve
+            // through the element's real address without a second hop,
+            // which is the common case. Matches the VBC interpreter's
+            // handle_get_field auto-deref for interior refs
+            // (cbgr_mutable_ptrs). Note: pure `*r = v` structure
+            // replacement still writes to the slot pointer via
+            // DerefMut, which is a separate opcode path and is
+            // unaffected by this load.
+            let loaded = ctx.builder()
+                .build_load(i64_type, elem_ptr, "rle_elem_loaded")
                 .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
-            ctx.set_register(dst, elem_i64.into());
+            ctx.set_register(dst, loaded);
+            // Track that this register originated from an interior list
+            // ref so downstream passes can special-case if needed.
+            ctx.mark_interior_list_ref(dst);
             Ok(())
         }
         0x0A => { // RefSliceRaw — build a slice Pack{ptr, len} with elem_size=1
@@ -20184,9 +20196,23 @@ fn lower_get_field<'ctx>(
             let i8_type = ctx.types().i8_type();
             let i64_type = ctx.types().i64_type();
             let ptr_type = ctx.types().ptr_type();
-            let ptr = ctx.builder()
+            let mut ptr = ctx.builder()
                 .build_int_to_ptr(iv, ptr_type, "i2p_getf")
                 .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+            // Interior reference produced by `&list[i]` — the pointer
+            // addresses a List slot whose content is a Value. Load the
+            // slot once to recover the real heap pointer before reading
+            // the field. Without this, GetF treats the slot address
+            // itself as an ObjectHeader and reads garbage.
+            if ctx.is_interior_list_ref(obj.0) {
+                let slot_val = ctx.builder()
+                    .build_load(i64_type, ptr, "ilr_slot")
+                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                    .into_int_value();
+                ptr = ctx.builder()
+                    .build_int_to_ptr(slot_val, ptr_type, "ilr_deref")
+                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+            }
             let is_text = ctx.is_text_register(obj.0) || ctx.is_string_register(obj.0);
             let is_inline = ctx.is_inline_struct_register(obj.0);
             let offset = if is_text || is_inline {

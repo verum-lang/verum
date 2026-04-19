@@ -1031,6 +1031,18 @@ impl<'a, 'ctx> FunctionContext<'a, 'ctx> {
         self.reg_types.is_pass_through_ref_list(reg)
     }
 
+    /// Mark a register as the interior reference result of `&list[i]`
+    /// (RefListElement). Used by `lower_get_field` to insert an extra
+    /// slot → value load before header-offset field access.
+    pub fn mark_interior_list_ref(&mut self, reg: u16) {
+        self.reg_types.mark_interior_list_ref(reg);
+    }
+
+    /// Check whether this register is an interior ref into a List slot.
+    pub fn is_interior_list_ref(&self, reg: u16) -> bool {
+        self.reg_types.is_interior_list_ref(reg)
+    }
+
     /// Mark a register as holding a generic type parameter value-as-pointer.
     /// In compiled module functions, generic params (K, V, T) are `ptr` where the
     /// pointer IS the value (via inttoptr). Deref should ptrtoint, not load.

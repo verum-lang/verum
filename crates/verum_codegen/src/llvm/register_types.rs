@@ -569,6 +569,15 @@ pub struct RegisterTypeMap {
     pass_through_ref: HashSet<u16>,
     /// Orthogonal flags: pass-through ref list (List whose elements are pass-through refs).
     pass_through_ref_list: HashSet<u16>,
+    /// Interior reference produced by `&list[i]` (RefListElement).
+    /// The register holds a pointer to a List *slot* whose content is a
+    /// NaN-boxed Value — typically an object pointer for struct elements.
+    /// Field access (`ref.field`) must load the slot once to recover the
+    /// real heap pointer before doing the usual header + offset read. The
+    /// VBC interpreter handles this via `cbgr_mutable_ptrs` in
+    /// `handle_get_field`; the AOT lowering uses this flag for the same
+    /// purpose (see `lower_get_field`).
+    interior_list_ref: HashSet<u16>,
     /// Orthogonal flags: prescan float (survives set_register clearing).
     prescan_float: HashSet<u16>,
     /// Orthogonal flags: prescan text (survives set_register clearing).
@@ -586,6 +595,7 @@ impl RegisterTypeMap {
             types: HashMap::new(),
             pass_through_ref: HashSet::new(),
             pass_through_ref_list: HashSet::new(),
+            interior_list_ref: HashSet::new(),
             prescan_float: HashSet::new(),
             prescan_text: HashSet::new(),
             owned_ffi: HashSet::new(),
@@ -599,6 +609,7 @@ impl RegisterTypeMap {
         self.types.remove(&reg);
         self.pass_through_ref.remove(&reg);
         self.pass_through_ref_list.remove(&reg);
+        self.interior_list_ref.remove(&reg);
     }
 
     /// Set the type for a register.
@@ -803,6 +814,19 @@ impl RegisterTypeMap {
 
     pub fn is_pass_through_ref_list(&self, reg: u16) -> bool {
         self.pass_through_ref_list.contains(&reg)
+    }
+
+    /// Mark a register as an interior reference into a List<T> slot
+    /// (produced by `&list[i]`). The register's value is a pointer to
+    /// the slot; dereferencing the slot yields the stored `Value`.
+    /// `lower_get_field` consults this flag to perform an extra load
+    /// before the normal header+offset field access.
+    pub fn mark_interior_list_ref(&mut self, reg: u16) {
+        self.interior_list_ref.insert(reg);
+    }
+
+    pub fn is_interior_list_ref(&self, reg: u16) -> bool {
+        self.interior_list_ref.contains(&reg)
     }
 
     /// Set all prescan float registers (survives register reuse).
