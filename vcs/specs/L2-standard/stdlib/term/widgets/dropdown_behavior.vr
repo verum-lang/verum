@@ -1,0 +1,158 @@
+// @test: parse-pass
+// @tier: 0
+// @level: L2
+// @tags: stdlib, term, widget, dropdown, search
+// @description: Behaviour tests for Dropdown / DropdownState.
+
+mount core.term.widget.{Dropdown, DropdownState};
+mount core.term.event.{KeyEvent, KeyCode, Modifiers, KeyEventKind};
+
+type Item is { name: Text, value: Int };
+
+fn items() -> List<Item> {
+    let mut xs = List.new();
+    xs.push(Item { name: "apple",      value: 1 });
+    xs.push(Item { name: "banana",     value: 2 });
+    xs.push(Item { name: "cherry",     value: 3 });
+    xs.push(Item { name: "Avocado",    value: 4 });
+    xs.push(Item { name: "blueberry",  value: 5 });
+    xs
+}
+
+fn label(i: &Item) -> Text { i.name.clone() }
+
+fn key(code: KeyCode) -> KeyEvent {
+    KeyEvent { code: code, modifiers: Modifiers.NONE, kind: KeyEventKind.Press }
+}
+
+fn test_new_starts_closed_unselected() {
+    let s = DropdownState.new();
+    assert(!s.open);
+    assert(s.selected.is_none());
+    assert_eq(s.highlight, 0);
+}
+
+fn test_with_selected_preset() {
+    let s = DropdownState.with_selected(2);
+    assert(!s.open);
+    match s.selected {
+        Some(idx) => assert_eq(idx, 2),
+        None => panic("expected preset selection"),
+    }
+}
+
+fn test_toggle_opens_and_closes() {
+    let mut s = DropdownState.new();
+    s.toggle();
+    assert(s.open);
+    s.toggle();
+    assert(!s.open);
+}
+
+fn test_enter_while_closed_opens() {
+    let d = Dropdown.new(items(), label);
+    let mut s = DropdownState.new();
+    let handled = s.handle_key(&d, key(KeyCode.Enter));
+    assert(handled);
+    assert(s.open);
+}
+
+fn test_down_while_open_advances_highlight() {
+    let d = Dropdown.new(items(), label);
+    let mut s = DropdownState.new();
+    s.open_it();
+    s.handle_key(&d, key(KeyCode.Down));
+    assert_eq(s.highlight, 1);
+    s.handle_key(&d, key(KeyCode.Down));
+    assert_eq(s.highlight, 2);
+}
+
+fn test_up_at_top_does_not_underflow() {
+    let d = Dropdown.new(items(), label);
+    let mut s = DropdownState.new();
+    s.open_it();
+    s.handle_key(&d, key(KeyCode.Up));
+    assert_eq(s.highlight, 0);
+}
+
+fn test_end_key_jumps_to_last() {
+    let d = Dropdown.new(items(), label);
+    let mut s = DropdownState.new();
+    s.open_it();
+    s.handle_key(&d, key(KeyCode.End));
+    assert_eq(s.highlight, 4);   // 5 items - 1
+}
+
+fn test_enter_selects_and_closes() {
+    let d = Dropdown.new(items(), label);
+    let mut s = DropdownState.new();
+    s.open_it();
+    s.handle_key(&d, key(KeyCode.Down));
+    s.handle_key(&d, key(KeyCode.Down));
+    s.handle_key(&d, key(KeyCode.Enter));
+    assert(!s.open);
+    match s.selected {
+        Some(idx) => assert_eq(idx, 2),
+        None => panic("expected selection"),
+    }
+}
+
+fn test_esc_closes_without_selecting() {
+    let d = Dropdown.new(items(), label);
+    let mut s = DropdownState.new();
+    s.open_it();
+    s.handle_key(&d, key(KeyCode.Down));
+    s.handle_key(&d, key(KeyCode.Escape));
+    assert(!s.open);
+    assert(s.selected.is_none());
+}
+
+fn test_searchable_narrows_visible_items() {
+    let d = Dropdown.new(items(), label).searchable(true);
+    let mut s = DropdownState.new();
+    s.open_it();
+    s.handle_key(&d, key(KeyCode.Char('b')));
+    // "b" matches "banana" and "blueberry" (lowercase) only.
+    assert_eq(s.search, "b");
+    // Enter selects first match — should not be "apple"
+    s.handle_key(&d, key(KeyCode.Enter));
+    match s.selected {
+        Some(idx) => {
+            let name = items()[idx].name.clone();
+            assert(name == "banana" || name == "blueberry");
+        }
+        None => panic("expected selection of filtered item"),
+    }
+}
+
+fn test_searchable_backspace_restores_items() {
+    let d = Dropdown.new(items(), label).searchable(true);
+    let mut s = DropdownState.new();
+    s.open_it();
+    s.handle_key(&d, key(KeyCode.Char('x')));
+    s.handle_key(&d, key(KeyCode.Backspace));
+    assert_eq(s.search, "");
+}
+
+fn test_non_searchable_char_not_handled() {
+    let d = Dropdown.new(items(), label);   // searchable=false (default)
+    let mut s = DropdownState.new();
+    s.open_it();
+    let handled = s.handle_key(&d, key(KeyCode.Char('x')));
+    assert(!handled);
+}
+
+fn main() {
+    test_new_starts_closed_unselected();
+    test_with_selected_preset();
+    test_toggle_opens_and_closes();
+    test_enter_while_closed_opens();
+    test_down_while_open_advances_highlight();
+    test_up_at_top_does_not_underflow();
+    test_end_key_jumps_to_last();
+    test_enter_selects_and_closes();
+    test_esc_closes_without_selecting();
+    test_searchable_narrows_visible_items();
+    test_searchable_backspace_restores_items();
+    test_non_searchable_char_not_handled();
+}

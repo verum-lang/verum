@@ -1,0 +1,32 @@
+// @test: benchmark
+// @tier: 2
+// @level: L4
+// @tags: bench, stdlib, term, layout, flex
+// @timeout: 60000
+// @description: FlexLayout.compute — 10-item row, 1000 iterations.
+
+mount core.term.layout.{Rect, FlexLayout, FlexItem};
+
+fn bench_row_10_items() {
+    let layout = FlexLayout.row();
+    let mut items = List.new();
+    items.push(FlexItem.new().fixed(5));
+    items.push(FlexItem.new().grow(1.0));
+    items.push(FlexItem.new().fixed(10));
+    items.push(FlexItem.new().grow(2.0));
+    items.push(FlexItem.new().fixed(3));
+    items.push(FlexItem.new().grow(1.0));
+    items.push(FlexItem.new().fixed(8));
+    items.push(FlexItem.new().grow(1.0));
+    items.push(FlexItem.new().fixed(4));
+    items.push(FlexItem.new().fixed(2));
+
+    let area = Rect.new(0, 0, 200, 60);
+    for _ in 0..10000 {
+        let _ = layout.compute(area, &items);
+    }
+}
+
+fn main() {
+    bench_row_10_items();
+}

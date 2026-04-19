@@ -1,0 +1,48 @@
+// @test: benchmark
+// @tier: 2
+// @level: L4
+// @tags: bench, stdlib, term, render, buffer
+// @timeout: 60000
+// @description: Buffer.set_string throughput with cluster iteration.
+
+/// Mimics the typical render load — write many rows of varying content.
+/// Target: fill a 200x60 buffer (12k cells) in < 1 ms on release.
+
+mount core.term.render.Buffer;
+mount core.term.style.{Style, Color};
+
+fn bench_fill_ascii() {
+    let mut b = Buffer.new(200, 60);
+    let line = "the quick brown fox jumps over the lazy dog";
+    for _ in 0..100 {
+        for y in 0..60 {
+            b.set_string(0, y, &line, Style.DEFAULT);
+        }
+    }
+}
+
+fn bench_fill_styled() {
+    let mut b = Buffer.new(120, 40);
+    let s = Style.new().fg(Color.Cyan).bg(Color.Black).bold();
+    for _ in 0..200 {
+        for y in 0..40 {
+            b.set_string(0, y, &"styled row content", s);
+        }
+    }
+}
+
+fn bench_fill_cjk() {
+    let mut b = Buffer.new(80, 24);
+    let line = "中文日本語한국어 — wide chars";
+    for _ in 0..1000 {
+        for y in 0..24 {
+            b.set_string(0, y, &line, Style.DEFAULT);
+        }
+    }
+}
+
+fn main() {
+    bench_fill_ascii();
+    bench_fill_styled();
+    bench_fill_cjk();
+}

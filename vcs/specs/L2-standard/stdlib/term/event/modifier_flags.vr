@@ -1,0 +1,68 @@
+// @test: parse-pass
+// @tier: 0
+// @level: L2
+// @tags: stdlib, term, event, modifiers, key
+// @description: Modifiers bitset semantics + KeyEvent convenience constructors.
+
+mount core.term.event.{KeyEvent, KeyCode, Modifiers, KeyEventKind};
+
+fn test_modifiers_none_empty() {
+    let m = Modifiers.NONE;
+    assert(!m.contains(Modifiers.CTRL));
+    assert(!m.contains(Modifiers.SHIFT));
+    assert(!m.contains(Modifiers.ALT));
+}
+
+fn test_union_of_two_flags() {
+    let m = Modifiers.CTRL.union(Modifiers.ALT);
+    assert(m.contains(Modifiers.CTRL));
+    assert(m.contains(Modifiers.ALT));
+    assert(!m.contains(Modifiers.SHIFT));
+}
+
+fn test_triple_modifier_union() {
+    let m = Modifiers.CTRL.union(Modifiers.ALT).union(Modifiers.SHIFT);
+    assert(m.contains(Modifiers.CTRL));
+    assert(m.contains(Modifiers.ALT));
+    assert(m.contains(Modifiers.SHIFT));
+}
+
+fn test_key_press_smart_ctor() {
+    let ke = KeyEvent.press(KeyCode.Char('a'));
+    match ke.code {
+        KeyCode.Char('a') => {}
+        _ => panic("expected Char('a')"),
+    }
+    assert(!ke.modifiers.contains(Modifiers.CTRL));
+}
+
+fn test_key_with_mods_ctor() {
+    let ke = KeyEvent.with_mods(KeyCode.Char('c'), Modifiers.CTRL);
+    assert(ke.is_ctrl_c());
+}
+
+fn test_is_ctrl_c_negative() {
+    let ke = KeyEvent.with_mods(KeyCode.Char('c'), Modifiers.NONE);
+    assert(!ke.is_ctrl_c());
+}
+
+fn test_is_escape() {
+    let ke = KeyEvent.press(KeyCode.Escape);
+    assert(ke.is_escape());
+}
+
+fn test_is_enter() {
+    let ke = KeyEvent.press(KeyCode.Enter);
+    assert(ke.is_enter());
+}
+
+fn main() {
+    test_modifiers_none_empty();
+    test_union_of_two_flags();
+    test_triple_modifier_union();
+    test_key_press_smart_ctor();
+    test_key_with_mods_ctor();
+    test_is_ctrl_c_negative();
+    test_is_escape();
+    test_is_enter();
+}

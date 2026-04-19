@@ -1,0 +1,72 @@
+// @test: parse-pass
+// @tier: 0
+// @level: L2
+// @tags: stdlib, term, widget, menu, navigation, submenu
+// @description: Behaviour tests for Menu / MenuItem / MenuState.
+
+mount core.term.widget.{Menu, MenuItem, MenuState};
+
+fn build_menu() -> Menu {
+    let mut items = List.new();
+    items.push(MenuItem.new("Open").shortcut("Ctrl+O"));
+    items.push(MenuItem.new("Save").shortcut("Ctrl+S"));
+    items.push(MenuItem.separator());
+    items.push(MenuItem.new("Disabled").disabled());
+    let mut quit_children = List.new();
+    quit_children.push(MenuItem.new("Save & Quit"));
+    quit_children.push(MenuItem.new("Quit Without Saving"));
+    items.push(MenuItem.new("Quit").submenu(quit_children));
+    Menu.new(items)
+}
+
+fn test_menu_item_defaults() {
+    let m = MenuItem.new("x");
+    assert(m.enabled);
+    assert(!m.separator);
+    assert(m.children.len() == 0);
+}
+
+fn test_separator_is_not_selectable() {
+    let s = MenuItem.separator();
+    assert(s.separator);
+    assert(!s.is_selectable());
+}
+
+fn test_disabled_is_not_selectable() {
+    let d = MenuItem.new("x").disabled();
+    assert(!d.enabled);
+    assert(!d.is_selectable());
+}
+
+fn test_submenu_populates_children() {
+    let mut kids = List.new();
+    kids.push(MenuItem.new("child"));
+    let parent = MenuItem.new("Parent").submenu(kids);
+    assert(parent.has_children());
+}
+
+fn test_shortcut_attached() {
+    let m = MenuItem.new("Save").shortcut("Ctrl+S");
+    match m.shortcut {
+        Some(s) => assert_eq(s, "Ctrl+S"),
+        None => panic("expected shortcut"),
+    }
+}
+
+fn test_state_open_close_submenu() {
+    let mut s = MenuState.new();
+    assert(!s.is_submenu_open());
+    s.open_submenu();
+    assert(s.is_submenu_open());
+    s.close_submenu();
+    assert(!s.is_submenu_open());
+}
+
+fn main() {
+    test_menu_item_defaults();
+    test_separator_is_not_selectable();
+    test_disabled_is_not_selectable();
+    test_submenu_populates_children();
+    test_shortcut_attached();
+    test_state_open_close_submenu();
+}

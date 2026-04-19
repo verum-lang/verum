@@ -1,0 +1,76 @@
+// @test: parse-pass
+// @tier: 0
+// @level: L2
+// @tags: stdlib, term, app, subscription
+// @description: Subscription<Msg> constructors and batch composition.
+
+/// Coverage of `core.term.app.subscription`:
+///   * None
+///   * Interval(Duration, fn() -> Msg)
+///   * Every(Duration, fn(Instant) -> Msg)
+///   * Once(Duration, fn() -> Msg)
+///   * Batch(List<Subscription<Msg>>)
+/// Runtime dispatch is covered by `run_async_integration.vr`.
+
+mount core.term.app.{Subscription, interval, every, once, batch as sub_batch};
+mount core.time.{Duration, Instant};
+
+type M is Tick | Clock | Fire;
+
+fn test_none_variant() {
+    let n: Subscription<M> = Subscription.None;
+}
+
+fn test_interval_constructs_interval() {
+    let s: Subscription<M> = interval(Duration.from_millis(50), || M.Tick);
+    match s {
+        Subscription.Interval(_, _) => {}
+        _ => panic("expected Interval"),
+    }
+}
+
+fn test_every_passes_instant() {
+    let s: Subscription<M> = every(Duration.from_secs(1), |_t: Instant| M.Clock);
+    match s {
+        Subscription.Every(_, _) => {}
+        _ => panic("expected Every"),
+    }
+}
+
+fn test_once_constructs_once() {
+    let s: Subscription<M> = once(Duration.from_millis(10), || M.Fire);
+    match s {
+        Subscription.Once(_, _) => {}
+        _ => panic("expected Once"),
+    }
+}
+
+fn test_batch_wraps_multiple() {
+    let mut subs: List<Subscription<M>> = List.new();
+    subs.push(interval(Duration.from_millis(16), || M.Tick));
+    subs.push(once(Duration.from_secs(1), || M.Fire));
+    subs.push(every(Duration.from_secs(2), |_t: Instant| M.Clock));
+    let b: Subscription<M> = sub_batch(subs);
+    match b {
+        Subscription.Batch(xs) => assert_eq(xs.len(), 3),
+        _ => panic("expected Batch"),
+    }
+}
+
+fn test_batch_empty_is_valid() {
+    let subs: List<Subscription<M>> = List.new();
+    let b: Subscription<M> = sub_batch(subs);
+    match b {
+        Subscription.Batch(xs) => assert_eq(xs.len(), 0),
+        _ => panic("expected empty Batch"),
+    }
+}
+
+fn main() {
+    test_none_variant();
+    test_interval_constructs_interval();
+    test_every_passes_instant();
+    test_once_constructs_once();
+    test_batch_wraps_multiple();
+    test_batch_empty_is_valid();
+}

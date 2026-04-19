@@ -2122,9 +2122,49 @@ corollary_decl =
     'from' , identifier , proof_body ;
 
 (* 2.19.5 Tactic Declaration - Custom proof strategies *)
-(* tactic_decl uses block_expr *)
+(*
+   Tactics are polymorphic, typed, and structured — they can open type
+   variables, take typed parameters with defaults, and use let/match/
+   if/fail inside the body for monadic proof search. See §2.19.7.
+*)
 tactic_decl =
-    'tactic' , identifier , '(' , [ param_list ] , ')' , block_expr ;
+    'tactic' , identifier , [ generic_params ] ,
+    '(' , [ tactic_param_list ] , ')' ,
+    [ where_clause ] , tactic_body ;
+
+tactic_param_list = tactic_param , { ',' , tactic_param } ;
+
+(*
+   A tactic parameter is a typed binding. The parameter type is either
+   one of the classical tactic-DSL kinds (`Expr`, `Type`, `Tactic`,
+   `Hypothesis`, `Int`, `Prop`) or an arbitrary concrete type expression
+   (e.g. `Float`, `List<T>`, `Maybe<Proof>`). Default values are allowed
+   on any parameter: `confidence: Float = 0.9`.
+*)
+tactic_param = identifier , ':' , tactic_param_type ,
+               [ '=' , expression ] ;
+
+tactic_param_type =
+      'Expr' | 'Type' | 'Tactic' | 'Hypothesis' | 'Int' | 'Prop'
+    | type_expr ;
+
+(*
+   A tactic body is either a single tactic expression or a block of
+   tactic statements. Block bodies support let-bindings, match/if/fail,
+   and tactic expressions interleaved with `;`.
+*)
+tactic_body = tactic_expr | '{' , { tactic_stmt } , '}' ;
+
+tactic_stmt =
+      'let'   , identifier , [ ':' , type_expr ] , '=' , expression , ';'
+    | 'if'    , expression , '{' , tactic_expr , '}' ,
+                [ 'else' , ( 'if' , expression , '{' , tactic_expr , '}'
+                             (* else-if chains allowed by recursion *)
+                           | '{' , tactic_expr , '}' ) ]
+    | 'match' , expression , '{' ,
+                match_arm , { ( ',' | ';' ) , match_arm } , [ ',' | ';' ] , '}'
+    | 'fail'  , '(' , expression , ')'
+    | tactic_expr , [ ';' ] ;
 
 (* requires_clause for proof preconditions *)
 requires_clause = 'requires' , expression , { ',' , expression } ;
@@ -2148,14 +2188,23 @@ tactic_application = tactic_expr , ';' ;
 proof_justification = 'by' , ( tactic_expr | identifier ) ;
 
 (* 2.19.7 Tactic Expressions *)
+(*
+   Named tactic calls accept an optional generic-argument list, which
+   lets polymorphic tactics be instantiated at call sites:
+       category_law<F.Source>();
+       functor_law<Identity>();
+   `first` supports BOTH the block form (semicolon-separated branches)
+   and the Lean-style list form (comma-separated branches).
+*)
 tactic_expr =
-    tactic_name , [ '(' , [ argument_list ] , ')' ]
+    tactic_name , [ type_args ] , [ '(' , [ argument_list ] , ')' ]
     | tactic_expr , ';' , tactic_expr
     | '(' , tactic_expr , ')'
-    (* Tactic combinators — Phase D.1 *)
+    (* Tactic combinators — Phase D.1 + T1-O reference-grade DSL *)
     | 'try' , '{' , tactic_expr , '}' , [ 'else' , '{' , tactic_expr , '}' ]
     | 'repeat' , [ '(' , integer_lit , ')' ] , '{' , tactic_expr , '}'
     | 'first' , '{' , tactic_expr , { ';' , tactic_expr } , '}'
+    | 'first' , '[' , tactic_expr , { ',' , tactic_expr } , ']'
     | 'all_goals' , '{' , tactic_expr , '}'
     | 'focus' , '(' , integer_lit , ')' , '{' , tactic_expr , '}' ;
 

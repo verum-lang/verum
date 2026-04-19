@@ -1,0 +1,129 @@
+// @test: parse-pass
+// @tier: 0
+// @level: L2
+// @tags: stdlib, term, render, unicode, grapheme, width, emoji
+// @description: UAX #11 / UTS #51 grapheme-cluster width invariants.
+
+/// Pins the contract of `core.term.render.cell.grapheme_width`:
+///   * ASCII printable → 1
+///   * controls & combining → 0
+///   * East-Asian Wide / CJK → 2
+///   * emoji (base pictographic) → 2
+///   * base + VS16 → 2 (emoji presentation forced)
+///   * base + VS15 → 1 (text presentation forced)
+///   * Regional Indicator pair (flag) → 2
+///   * ZWJ-joined sequence → 2 (folds continuation codepoints into one cluster)
+
+mount core.term.render.cell.grapheme_width;
+
+// ---------------------------------------------------------------------------
+// ASCII and controls
+// ---------------------------------------------------------------------------
+
+fn test_ascii_one() {
+    assert_eq(grapheme_width(&"a"), 1);
+    assert_eq(grapheme_width(&" "), 1);
+    assert_eq(grapheme_width(&"Z"), 1);
+    assert_eq(grapheme_width(&"0"), 1);
+}
+
+fn test_empty_is_zero() {
+    assert_eq(grapheme_width(&""), 0);
+}
+
+fn test_ascii_control_zero() {
+    // BEL (U+0007)
+    assert_eq(grapheme_width(&"\x07"), 0);
+    // TAB is treated as control → 0 (display width; callers expand tabs themselves)
+    assert_eq(grapheme_width(&"\t"), 0);
+}
+
+// ---------------------------------------------------------------------------
+// CJK and East-Asian Wide
+// ---------------------------------------------------------------------------
+
+fn test_cjk_is_wide() {
+    assert_eq(grapheme_width(&"中"), 2);   // U+4E2D
+    assert_eq(grapheme_width(&"日"), 2);   // U+65E5
+    assert_eq(grapheme_width(&"あ"), 2);   // Hiragana U+3042
+    assert_eq(grapheme_width(&"한"), 2);   // Hangul U+D55C
+}
+
+fn test_fullwidth_forms() {
+    assert_eq(grapheme_width(&"Ａ"), 2);  // U+FF21 Fullwidth A
+}
+
+// ---------------------------------------------------------------------------
+// Emoji
+// ---------------------------------------------------------------------------
+
+fn test_simple_emoji() {
+    assert_eq(grapheme_width(&"🙂"), 2);   // U+1F642
+    assert_eq(grapheme_width(&"🌍"), 2);   // U+1F30D
+}
+
+fn test_emoji_with_skin_tone() {
+    // waving hand + skin tone modifier — one cluster, width 2
+    assert_eq(grapheme_width(&"👋🏽"), 2);
+}
+
+fn test_flag_sequence_pair() {
+    // 🇺🇸 = 🇺 + 🇸 (two Regional Indicators → one flag cluster)
+    assert_eq(grapheme_width(&"🇺🇸"), 2);
+}
+
+fn test_zwj_family_sequence() {
+    // 👨‍👩‍👧‍👦 = man ZWJ woman ZWJ girl ZWJ boy — one cluster
+    assert_eq(grapheme_width(&"👨‍👩‍👧‍👦"), 2);
+}
+
+// ---------------------------------------------------------------------------
+// Combining marks
+// ---------------------------------------------------------------------------
+
+fn test_latin_with_combining_acute() {
+    // "e" + U+0301 (combining acute) → "é" as 2 codepoints, 1 cluster, width 1
+    assert_eq(grapheme_width(&"é"), 1);   // this literal is decomposed
+}
+
+fn test_multiple_combining_marks() {
+    // "a" + U+0300 + U+0301 (two combining marks)
+    assert_eq(grapheme_width(&"à́"), 1);
+}
+
+// ---------------------------------------------------------------------------
+// Variation selectors
+// ---------------------------------------------------------------------------
+
+fn test_vs16_forces_wide_on_pictographic() {
+    // heart pictograph + VS16 — should render emoji-style wide (2).
+    // bare "♥" (U+2665) is pictographic; alone it may be narrow, but "♥️"
+    // (with VS16 U+FE0F) forces emoji presentation.
+    assert_eq(grapheme_width(&"♥️"), 2);
+}
+
+// ---------------------------------------------------------------------------
+// Sanity: common strings sum up
+// ---------------------------------------------------------------------------
+
+fn test_single_clusters_only() {
+    // grapheme_width reports the width of ONE cluster — callers sum themselves.
+    // For sanity, verify that the function does not crash on multi-cluster input.
+    let _ = grapheme_width(&"abc");       // implementation-dependent: counts one cluster
+}
+
+fn main() {
+    test_ascii_one();
+    test_empty_is_zero();
+    test_ascii_control_zero();
+    test_cjk_is_wide();
+    test_fullwidth_forms();
+    test_simple_emoji();
+    test_emoji_with_skin_tone();
+    test_flag_sequence_pair();
+    test_zwj_family_sequence();
+    test_latin_with_combining_acute();
+    test_multiple_combining_marks();
+    test_vs16_forces_wide_on_pictographic();
+    test_single_clusters_only();
+}

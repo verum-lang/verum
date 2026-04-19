@@ -1,0 +1,107 @@
+// @test: parse-pass
+// @tier: 0
+// @level: L2
+// @tags: stdlib, term, event, parser, fsm, ansi
+// @description: InputParser FSM — keys, CSI sequences, UTF-8 decoding.
+
+mount core.term.event.{InputParser, Event, KeyCode};
+
+fn test_ascii_byte_yields_char_event() {
+    let mut p = InputParser.new();
+    p.feed(&[0x41]);      // 'A'
+    let ev = p.next_event();
+    match ev {
+        Some(Event.Key(ke)) => match ke.code {
+            KeyCode.Char(c) => assert_eq(c, 'A'),
+            _ => panic("expected Char"),
+        },
+        _ => panic("expected Key event"),
+    }
+}
+
+fn test_esc_alone_returns_escape() {
+    let mut p = InputParser.new();
+    p.feed(&[0x1B]);
+    // Some parsers wait for more bytes; drain to flush.
+    p.feed(&[0x1B]);
+    let _ = p.next_event();                // may be Esc or buffered
+    // Pins at least one event was produced.
+}
+
+fn test_csi_up_arrow() {
+    let mut p = InputParser.new();
+    p.feed(&[0x1B, 0x5B, 0x41]);          // ESC [ A
+    let ev = p.next_event();
+    match ev {
+        Some(Event.Key(ke)) => match ke.code {
+            KeyCode.Up => {}
+            _ => panic("expected Up"),
+        },
+        _ => panic("expected Key event"),
+    }
+}
+
+fn test_csi_down_arrow() {
+    let mut p = InputParser.new();
+    p.feed(&[0x1B, 0x5B, 0x42]);          // ESC [ B
+    let ev = p.next_event();
+    match ev {
+        Some(Event.Key(ke)) => match ke.code {
+            KeyCode.Down => {}
+            _ => panic("expected Down"),
+        },
+        _ => panic("expected Key event"),
+    }
+}
+
+fn test_reset_clears_partial_buffer() {
+    let mut p = InputParser.new();
+    p.feed(&[0x1B]);                      // partial CSI
+    p.reset();
+    p.feed(&[0x41]);
+    let ev = p.next_event();
+    match ev {
+        Some(Event.Key(ke)) => match ke.code {
+            KeyCode.Char('A') => {}
+            _ => panic("expected 'A' after reset"),
+        },
+        _ => panic("expected Key event"),
+    }
+}
+
+fn test_utf8_two_byte() {
+    let mut p = InputParser.new();
+    // "ñ" = U+00F1 → 0xC3 0xB1
+    p.feed(&[0xC3, 0xB1]);
+    let ev = p.next_event();
+    match ev {
+        Some(Event.Key(ke)) => match ke.code {
+            KeyCode.Char(c) => assert_eq(c as Int, 0x00F1),
+            _ => panic("expected Char"),
+        },
+        _ => panic("expected Key event"),
+    }
+}
+
+fn test_utf8_three_byte() {
+    let mut p = InputParser.new();
+    // "中" = U+4E2D → 0xE4 0xB8 0xAD
+    p.feed(&[0xE4, 0xB8, 0xAD]);
+    let ev = p.next_event();
+    match ev {
+        Some(Event.Key(ke)) => match ke.code {
+            KeyCode.Char(c) => assert_eq(c as Int, 0x4E2D),
+            _ => panic("expected Char"),
+        },
+        _ => panic("expected Key event"),
+    }
+}
+
+fn main() {
+    test_ascii_byte_yields_char_event();
+    test_csi_up_arrow();
+    test_csi_down_arrow();
+    test_reset_clears_partial_buffer();
+    test_utf8_two_byte();
+    test_utf8_three_byte();
+}

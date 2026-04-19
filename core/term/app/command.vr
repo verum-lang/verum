@@ -1,46 +1,142 @@
 // =============================================================================
-// command.vr - Command type (async side effects)
+// command.vr - Command: out-going side effects for TEA applications
 // =============================================================================
+// Layer: 6 (Application Framework)
+// Spec: docs/detailed/40-terminal-tui-architecture.md Section 12 (Commands)
+// =============================================================================
+//
+// A Command describes a deferred side effect that ultimately produces a Msg.
+// The application runtime is responsible for executing commands:
+//   * `Noop`      — no effect.
+//   * `Perform`   — a synchronous thunk executed on the main loop tick.
+//   * `Async`     — a future spawned on the async runtime; result becomes Msg.
+//   * `Batch`     — several commands fanned out in parallel.
+//   * `Sequence`  — commands chained; each waits for the previous to finish.
+//   * `Tick`      — a one-shot timer that fires a Msg after `Duration`.
+//   * `Quit`      — signal the runtime to exit cleanly.
+//
+// Commands are values, not side effects — they are reified descriptions that
+// the runtime interprets. This keeps `update` pure and deterministic.
+// =============================================================================
+
 module command;
 
 mount core.time.Duration;
+mount core.async.future.Future;
+mount core.base.memory.Heap;
 
-/// Command — a deferred side effect that produces a message.
+/// A deferred side effect that produces a `Msg`.
 public type Command<Msg> is
-    | Noop                              // No effect (renamed from None to avoid collision with Maybe.None)
-    | Perform(fn() -> Msg)              // Sync side effect
-    | Async(async fn() -> Msg)          // Async side effect
-    | Batch(List<Command<Msg>>)         // Parallel execution
-    | Sequence(List<Command<Msg>>)      // Sequential execution
-    | Tick(Duration)                    // Periodic tick
-    | Quit;                            // Quit application
+    | Noop
+    | Perform(fn() -> Msg)
+    | Async(Heap<dyn Future<Output = Msg>>)
+    | Batch(List<Command<Msg>>)
+    | Sequence(List<Command<Msg>>)
+    | Tick(Duration, fn() -> Msg)
+    | Quit;
 
-/// Create a no-op command.
+// =============================================================================
+// Builders
+// =============================================================================
+
+/// Do nothing.
 public fn none<Msg>() -> Command<Msg> {
     Command.Noop
 }
 
-/// Create a sync side-effect command.
+/// Run a synchronous thunk. The thunk executes on the next runtime tick and
+/// its return value is routed to `update`.
 public fn perform<Msg>(f: fn() -> Msg) -> Command<Msg> {
     Command.Perform(f)
 }
 
-/// Create a batch of commands (run in parallel).
+/// Spawn a future on the async runtime. When the future resolves, its output
+/// is routed to `update` as a Msg.
+public fn task<Msg, F: Future<Output = Msg>>(fut: F) -> Command<Msg> {
+    Command.Async(Heap(fut))
+}
+
+/// Run `cmds` in parallel (fan-out). No ordering guarantees among them.
 public fn batch<Msg>(cmds: List<Command<Msg>>) -> Command<Msg> {
     Command.Batch(cmds)
 }
 
-/// Create a sequence of commands (run in order).
+/// Run `cmds` sequentially (fan-in). Each waits for the previous to finish.
 public fn sequence<Msg>(cmds: List<Command<Msg>>) -> Command<Msg> {
     Command.Sequence(cmds)
 }
 
-/// Create a periodic tick command.
-public fn tick<Msg>(interval: Duration) -> Command<Msg> {
-    Command.Tick(interval)
+/// Fire `f()` as a Msg after `delay`.
+public fn tick<Msg>(delay: Duration, f: fn() -> Msg) -> Command<Msg> {
+    Command.Tick(delay, f)
 }
 
-/// Create a quit command.
+/// Quit the application.
 public fn quit<Msg>() -> Command<Msg> {
     Command.Quit
+}
+
+// =============================================================================
+// Combinators
+// =============================================================================
+
+implement<Msg> Command<Msg> {
+    /// `true` iff this command is the identity (`Noop`).
+    public fn is_noop(&self) -> Bool {
+        match self {
+            Noop => true,
+            _ => false,
+        }
+    }
+
+    /// Compose two commands as a batch (parallel).
+    /// `Noop`s are absorbed — `noop.and(c) == c`.
+    public fn and(self, other: Command<Msg>) -> Command<Msg> {
+        match (self, other) {
+            (Command.Noop, rhs) => rhs,
+            (lhs, Command.Noop) => lhs,
+            (Command.Batch(mut xs), Command.Batch(ys)) => {
+                for y in ys { xs.push(y); }
+                Command.Batch(xs)
+            }
+            (Command.Batch(mut xs), rhs) => { xs.push(rhs); Command.Batch(xs) }
+            (lhs, Command.Batch(ys)) => {
+                let mut xs = List.new();
+                xs.push(lhs);
+                for y in ys { xs.push(y); }
+                Command.Batch(xs)
+            }
+            (lhs, rhs) => {
+                let mut xs = List.new();
+                xs.push(lhs);
+                xs.push(rhs);
+                Command.Batch(xs)
+            }
+        }
+    }
+
+    /// Compose two commands sequentially.
+    public fn then(self, other: Command<Msg>) -> Command<Msg> {
+        match (self, other) {
+            (Command.Noop, rhs) => rhs,
+            (lhs, Command.Noop) => lhs,
+            (Command.Sequence(mut xs), Command.Sequence(ys)) => {
+                for y in ys { xs.push(y); }
+                Command.Sequence(xs)
+            }
+            (Command.Sequence(mut xs), rhs) => { xs.push(rhs); Command.Sequence(xs) }
+            (lhs, Command.Sequence(ys)) => {
+                let mut xs = List.new();
+                xs.push(lhs);
+                for y in ys { xs.push(y); }
+                Command.Sequence(xs)
+            }
+            (lhs, rhs) => {
+                let mut xs = List.new();
+                xs.push(lhs);
+                xs.push(rhs);
+                Command.Sequence(xs)
+            }
+        }
+    }
 }

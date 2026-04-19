@@ -1,0 +1,150 @@
+// @test: parse-pass
+// @tier: 0
+// @level: L2
+// @tags: stdlib, term, app, command, combinators
+// @description: Command<Msg> builders and algebraic combinators.
+
+/// Deep behavioural coverage of every constructor + combinator in
+/// `core.term.app.command`: Noop / Perform / Async / Batch / Sequence /
+/// Tick / Quit + `and`, `then`, `is_noop`.
+
+mount core.term.app.{Command, none, perform, task, batch, sequence, tick, quit};
+mount core.time.Duration;
+
+type M is A | B | C;
+
+// ---------------------------------------------------------------------------
+// Builders
+// ---------------------------------------------------------------------------
+
+fn test_none_is_noop() {
+    let n: Command<M> = none();
+    assert(n.is_noop());
+}
+
+fn test_quit_is_not_noop() {
+    let q: Command<M> = quit();
+    assert(!q.is_noop());
+}
+
+fn test_perform_constructs_perform() {
+    let p: Command<M> = perform(|| M.A);
+    match p {
+        Command.Perform(_) => {}
+        _ => panic("expected Perform"),
+    }
+}
+
+fn test_batch_of_one_still_batch() {
+    let mut xs: List<Command<M>> = List.new();
+    xs.push(perform(|| M.A));
+    let b: Command<M> = batch(xs);
+    match b {
+        Command.Batch(ys) => assert_eq(ys.len(), 1),
+        _ => panic("expected Batch"),
+    }
+}
+
+fn test_sequence_constructs_sequence() {
+    let mut xs: List<Command<M>> = List.new();
+    xs.push(perform(|| M.A));
+    xs.push(perform(|| M.B));
+    let s: Command<M> = sequence(xs);
+    match s {
+        Command.Sequence(ys) => assert_eq(ys.len(), 2),
+        _ => panic("expected Sequence"),
+    }
+}
+
+fn test_tick_constructs_tick() {
+    let t: Command<M> = tick(Duration.from_millis(1), || M.A);
+    match t {
+        Command.Tick(_, _) => {}
+        _ => panic("expected Tick"),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// `and` combinator: absorbs Noop, flattens Batch
+// ---------------------------------------------------------------------------
+
+fn test_and_absorbs_left_noop() {
+    let r = Command.Noop.and(perform(|| M.A));
+    match r {
+        Command.Perform(_) => {}
+        _ => panic("Noop should disappear"),
+    }
+}
+
+fn test_and_absorbs_right_noop() {
+    let r = perform(|| M.A).and(Command.Noop);
+    match r {
+        Command.Perform(_) => {}
+        _ => panic("Noop should disappear"),
+    }
+}
+
+fn test_and_flattens_nested_batches() {
+    let left_pair: Command<M> = {
+        let mut xs = List.new();
+        xs.push(perform(|| M.A));
+        xs.push(perform(|| M.B));
+        batch(xs)
+    };
+    let right: Command<M> = perform(|| M.C);
+    let combined = left_pair.and(right);
+    match combined {
+        Command.Batch(xs) => assert_eq(xs.len(), 3),
+        _ => panic("expected flattened Batch"),
+    }
+}
+
+fn test_and_two_plain_forms_batch_of_two() {
+    let r = perform(|| M.A).and(perform(|| M.B));
+    match r {
+        Command.Batch(xs) => assert_eq(xs.len(), 2),
+        _ => panic("expected Batch(2)"),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// `then` combinator: absorbs Noop, flattens Sequence
+// ---------------------------------------------------------------------------
+
+fn test_then_absorbs_left_noop() {
+    let r = Command.Noop.then(perform(|| M.A));
+    match r {
+        Command.Perform(_) => {}
+        _ => panic("Noop should disappear"),
+    }
+}
+
+fn test_then_flattens_nested_sequences() {
+    let left_pair: Command<M> = {
+        let mut xs = List.new();
+        xs.push(perform(|| M.A));
+        xs.push(perform(|| M.B));
+        sequence(xs)
+    };
+    let right: Command<M> = perform(|| M.C);
+    let combined = left_pair.then(right);
+    match combined {
+        Command.Sequence(xs) => assert_eq(xs.len(), 3),
+        _ => panic("expected flattened Sequence"),
+    }
+}
+
+fn main() {
+    test_none_is_noop();
+    test_quit_is_not_noop();
+    test_perform_constructs_perform();
+    test_batch_of_one_still_batch();
+    test_sequence_constructs_sequence();
+    test_tick_constructs_tick();
+    test_and_absorbs_left_noop();
+    test_and_absorbs_right_noop();
+    test_and_flattens_nested_batches();
+    test_and_two_plain_forms_batch_of_two();
+    test_then_absorbs_left_noop();
+    test_then_flattens_nested_sequences();
+}

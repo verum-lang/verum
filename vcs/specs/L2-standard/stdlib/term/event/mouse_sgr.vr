@@ -1,0 +1,92 @@
+// @test: parse-pass
+// @tier: 0
+// @level: L2
+// @tags: stdlib, term, event, mouse, sgr, protocol
+// @description: SGR mouse parser + enable/disable sequences.
+
+mount core.term.event.mouse.{parse_sgr_mouse, mouse_enable_sequence, mouse_disable_sequence};
+mount core.term.event.{MouseEventKind, MouseButton, Modifiers};
+
+fn test_left_press_at_origin() {
+    let mut p = List.new();
+    p.push(0);   // button 0 (left)
+    p.push(1);   // x=0 (1-indexed)
+    p.push(1);   // y=0
+    let ev = parse_sgr_mouse(&p, 'M' as Byte).unwrap();
+    match ev.kind { MouseEventKind.Down(MouseButton.Left) => {} _ => panic("expected Down Left") }
+    assert_eq(ev.column, 0);
+    assert_eq(ev.row, 0);
+}
+
+fn test_right_click_release() {
+    let mut p = List.new();
+    p.push(2);   // button 2 (right)
+    p.push(10);  // x=9
+    p.push(5);   // y=4
+    let ev = parse_sgr_mouse(&p, 'm' as Byte).unwrap();
+    match ev.kind { MouseEventKind.Up(MouseButton.Right) => {} _ => panic("expected Up Right") }
+    assert_eq(ev.column, 9);
+    assert_eq(ev.row, 4);
+}
+
+fn test_scroll_up_decodes() {
+    let mut p = List.new();
+    p.push(64);   // scroll flag (bit 6) + button 0
+    p.push(1);
+    p.push(1);
+    let ev = parse_sgr_mouse(&p, 'M' as Byte).unwrap();
+    match ev.kind { MouseEventKind.ScrollUp => {} _ => panic("expected ScrollUp") }
+}
+
+fn test_drag_bit_sets_drag_variant() {
+    let mut p = List.new();
+    p.push(32);   // motion flag (bit 5) + button 0
+    p.push(5);
+    p.push(5);
+    let ev = parse_sgr_mouse(&p, 'M' as Byte).unwrap();
+    match ev.kind { MouseEventKind.Drag(MouseButton.Left) => {} _ => panic("expected Drag Left") }
+}
+
+fn test_modifier_bits_decode() {
+    let mut p = List.new();
+    p.push(4 | 8 | 16);  // SHIFT | ALT | CTRL — no button
+    p.push(1);
+    p.push(1);
+    let ev = parse_sgr_mouse(&p, 'M' as Byte).unwrap();
+    assert(ev.modifiers.contains(Modifiers.SHIFT));
+    assert(ev.modifiers.contains(Modifiers.ALT));
+    assert(ev.modifiers.contains(Modifiers.CTRL));
+}
+
+fn test_too_few_params_returns_none() {
+    let p: List<Int> = List.new();
+    assert(parse_sgr_mouse(&p, 'M' as Byte).is_none());
+    let mut p2 = List.new();
+    p2.push(0);
+    p2.push(1);  // missing 3rd param
+    assert(parse_sgr_mouse(&p2, 'M' as Byte).is_none());
+}
+
+fn test_enable_sequence_contains_1000_1003_1006() {
+    let s = mouse_enable_sequence();
+    assert(s.contains("1000"));
+    assert(s.contains("1003"));
+    assert(s.contains("1006"));
+}
+
+fn test_disable_sequence_uses_lowercase_l() {
+    let s = mouse_disable_sequence();
+    assert(s.contains("1006l"));
+    assert(s.contains("1000l"));
+}
+
+fn main() {
+    test_left_press_at_origin();
+    test_right_click_release();
+    test_scroll_up_decodes();
+    test_drag_bit_sets_drag_variant();
+    test_modifier_bits_decode();
+    test_too_few_params_returns_none();
+    test_enable_sequence_contains_1000_1003_1006();
+    test_disable_sequence_uses_lowercase_l();
+}

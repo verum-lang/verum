@@ -1,143 +1,368 @@
 // =============================================================================
-// app.vr - The Elm Architecture for TUI applications
+// app.vr - The Elm Architecture for Verum TUI applications
+// =============================================================================
+// Layer: 6 (Application Framework)
+// Spec: docs/detailed/40-terminal-tui-architecture.md Section 12
+// =============================================================================
+//
+// The application runtime provides:
+//   * A pure Model → Update → View loop (Elm Architecture).
+//   * Integration with the native async runtime (core.async) for Commands.
+//   * Subscription support: external message sources (timers, streams).
+//   * Structured concurrency: all spawned tasks are wrapped in a cancellation
+//     scope that terminates cleanly on Quit.
+//   * Lock-free message channel (core.async.channel) for async→main handoff.
+//   * Frame-budget capped event polling (~60 FPS default).
+//
+// Public entry points:
+//   * `run(model)` — synchronous entry (block_on the async runtime).
+//   * `run_async(model)` — async entry, for integration with user futures.
 // =============================================================================
 module app;
 
-mount core.time.Duration;
+mount core.time.{Duration, Instant};
+mount core.io.IoResult;
+mount core.base.memory.Heap;
+
+mount core.async.{
+    channel, Sender, Receiver, TryRecvError,
+    CancellationToken, CancellationTokenSource,
+    spawn_detached, sleep, block_on,
+    Stream, StreamExt,
+};
+
 mount super.super.event.{Event, KeyEvent, KeyCode, Modifiers, EventStream};
 mount super.super.render.frame.{Terminal, Frame};
-mount super.super.style.theme.Theme;
 mount super.command.Command;
+mount super.subscription.Subscription;
 
-/// App message — wraps user messages with system messages.
+// =============================================================================
+// AppMessage — the message envelope observed by the runtime
+// =============================================================================
+
+/// Wraps user-defined `Msg` with runtime-internal events.
+/// User models only ever observe `Msg`, not `AppMessage<Msg>`.
 public type AppMessage<Msg> is
     | User(Msg)
     | TermEvent(Event)
-    | Tick
-    | Batch(List<AppMessage<Msg>>)
+    | Tick(Instant)
     | Quit;
 
-/// Model protocol — core of the Elm Architecture.
-/// Every TUI application implements this protocol.
+// =============================================================================
+// Model protocol
+// =============================================================================
+
+/// Core of the Elm Architecture. Every TUI application implements this.
+///
+/// The default methods cover most applications; only `update` and `view` are
+/// mandatory. `init`, `handle_event`, `subscriptions`, and `on_quit` have sane
+/// defaults.
 public type Model is protocol {
     type Msg;
 
-    /// Initial command on startup.
+    /// Initial command dispatched on startup.
     fn init(&self) -> Command<Self.Msg> {
         Command.Noop
     }
 
-    /// Update state: (Model, Msg) → (Model, Command).
-    /// Should be a pure function (no side effects).
+    /// Update state: `(self, Msg) -> Command`. Must be pure — all side effects
+    /// are described by the returned Command.
     fn update(&mut self, msg: Self.Msg) -> Command<Self.Msg>;
 
-    /// Render UI: Model → Frame.
-    /// Called each frame (immediate mode).
+    /// Render the UI into the current frame (immediate mode).
     fn view(&self, frame: &mut Frame);
 
-    /// Handle terminal event → Maybe<Msg>.
-    /// Allows filtering and transforming events.
+    /// Map a raw terminal event to a user Msg (or None to ignore).
     fn handle_event(&self, event: Event) -> Maybe<Self.Msg> {
         None
     }
+
+    /// External message sources: timers, streams, signals.
+    /// Called once per render pass; the runtime diff-spawns/cancels as needed.
+    fn subscriptions(&self) -> Subscription<Self.Msg> {
+        Subscription.None
+    }
+
+    /// Invoked after the event loop exits and before the terminal is restored.
+    /// Use this for persistence, final flush, etc.
+    fn on_quit(&mut self) {}
 };
 
-/// Run a TUI application with the Elm Architecture.
-public fn run<M: Model>(mut model: M) -> IoResult<()> {
+// =============================================================================
+// Public entry points
+// =============================================================================
+
+/// Run a TUI application. Blocks on the async runtime internally.
+///
+/// This is the recommended entry point for `main` functions. If you need to
+/// integrate with other futures, use `run_async` instead.
+public fn run<M: Model>(model: M) -> IoResult<()> {
+    block_on(run_async(model))
+}
+
+/// Async entry point. Returns a future that drives the Elm loop.
+///
+/// Compose with user futures via `select`, `join`, or structured concurrency.
+public async fn run_async<M: Model>(mut model: M) -> IoResult<()> {
+    // ----- terminal init ----------------------------------------------------
     let mut terminal = Terminal.new()?;
     terminal.init()?;
 
-    // Execute initial command
-    let init_cmd = model.init();
-    let mut pending_cmds: List<Command<M.Msg>> = List.new();
-    pending_cmds.push(init_cmd);
+    // ----- async plumbing ---------------------------------------------------
+    // Unbounded MPSC channel — the application message bus. Receiver is owned
+    // by the main loop; Sender is cloned into every spawned command and
+    // subscription task.
+    let (tx, mut rx) = channel::<M.Msg>();
 
-    // Event loop
+    // Cancellation token — cancelled when the loop exits (Quit, Ctrl+C, error).
+    // Every spawned task observes this and terminates cooperatively.
+    let cancel_src = CancellationTokenSource.new();
+    let cancel = cancel_src.token();
+
+    // ----- dispatch initial command -----------------------------------------
+    dispatch_command(&model.init(), &tx, &cancel);
+
+    // ----- spawn subscriptions ----------------------------------------------
+    // NOTE: subscriptions() is called once on startup. A future extension can
+    // diff the subscription set each frame (like Elm's subscription diff) to
+    // add/remove live subscriptions in response to model state.
+    dispatch_subscription(&model.subscriptions(), &tx, &cancel);
+
+    // ----- main loop --------------------------------------------------------
     let mut events = EventStream.new(terminal.backend_mut());
+    let frame_budget = Duration.from_millis(16);  // ~60 FPS cap
+    let mut should_quit = false;
 
-    loop {
-        // Render frame
-        terminal.draw(|frame| {
-            model.view(frame);
-        })?;
+    let loop_result: IoResult<()> = loop {
+        // --- render ---------------------------------------------------------
+        match terminal.draw(|frame| model.view(frame)) {
+            Ok(_) => {}
+            Err(e) => { break Err(e); }
+        }
 
-        // Process pending commands
-        let mut new_cmds = List.new();
-        let cmds = pending_cmds;
-        pending_cmds = List.new();
-
-        for cmd in &cmds {
-            match cmd {
-                Command.Noop => {}
-                Command.Quit => {
-                    terminal.restore()?;
-                    return Ok(());
-                }
-                Command.Perform(f) => {
-                    let msg = f();
-                    let result_cmd = model.update(msg);
-                    new_cmds.push(result_cmd);
-                }
-                Command.Batch(batch_cmds) => {
-                    for c in batch_cmds {
-                        new_cmds.push(c);
+        // --- drain async-produced messages (non-blocking, capped per tick) --
+        // Cap prevents message floods from starving rendering.
+        let mut drained = 0;
+        let drain_cap = 64;
+        while drained < drain_cap {
+            match rx.try_recv() {
+                Ok(msg) => {
+                    let cmd = model.update(msg);
+                    match cmd {
+                        Command.Quit => { should_quit = true; break; }
+                        other => { dispatch_command(&other, &tx, &cancel); }
                     }
+                    drained = drained + 1;
                 }
-                Command.Sequence(seq_cmds) => {
-                    // Execute sequentially
-                    for c in seq_cmds {
-                        match c {
-                            Command.Perform(f) => {
-                                let msg = f();
-                                let result_cmd = model.update(msg);
-                                new_cmds.push(result_cmd);
-                            }
-                            Command.Quit => {
-                                terminal.restore()?;
-                                return Ok(());
-                            }
-                            other => new_cmds.push(other),
-                        }
-                    }
-                }
-                Command.Tick(_) => {
-                    // Tick commands are handled via poll timeout
-                }
-                Command.Async(_) => {
-                    // Async commands require runtime — deferred
-                }
+                Err(_) => break,
             }
         }
-        pending_cmds = new_cmds;
+        if should_quit { break Ok(()); }
 
-        // Determine poll timeout from tick commands
-        let poll_timeout = Duration.from_millis(16);  // Default: ~60fps
-
-        // Read events with timeout
-        match events.poll(poll_timeout) {
+        // --- poll a single terminal event with frame budget -----------------
+        match events.poll(frame_budget) {
             Some(event) => {
-                // Global: Ctrl+C → Quit
-                match event {
+                // Global hotkey: Ctrl+C always quits.
+                match &event {
                     Event.Key(ke) => {
-                        if ke.code is KeyCode.Char('c') && ke.modifiers.contains(Modifiers.CTRL) {
-                            terminal.restore()?;
-                            return Ok(());
-                        }
+                        if ke.is_ctrl_c() { break Ok(()); }
                     }
                     _ => {}
                 }
 
-                // Forward to model
+                // User-defined event → Msg mapping.
                 match model.handle_event(event) {
                     Some(msg) => {
                         let cmd = model.update(msg);
-                        pending_cmds.push(cmd);
+                        match cmd {
+                            Command.Quit => { break Ok(()); }
+                            other => { dispatch_command(&other, &tx, &cancel); }
+                        }
                     }
                     None => {}
                 }
             }
-            None => {
-                // Timeout — could dispatch tick if subscribed
+            None => { /* timeout: re-render for animation */ }
+        }
+    };
+
+    // ----- cleanup ----------------------------------------------------------
+    cancel_src.cancel();     // tear down subscriptions and async commands
+    model.on_quit();         // user-defined cleanup
+    terminal.restore()?;     // restore terminal state (always)
+
+    loop_result
+}
+
+// =============================================================================
+// Command dispatch — interpret the Command description
+// =============================================================================
+
+/// Execute a command: synchronous side effects are run inline; async effects
+/// are spawned on the global runtime and pipe their results through `tx`.
+fn dispatch_command<Msg>(
+    cmd: &Command<Msg>,
+    tx: &Sender<Msg>,
+    cancel: &CancellationToken,
+) {
+    match cmd {
+        Command.Noop => {}
+
+        Command.Quit => {
+            // Deliver a Quit via the channel so the main loop observes it on
+            // the next drain. Implemented by cancelling and dropping the sender;
+            // a cleaner approach would be to reserve a special Msg value, but
+            // that would require Msg: From<QuitMarker>. For now, the main loop
+            // handles Command.Quit returned from `update` directly.
+            cancel.cancel();
+        }
+
+        Command.Perform(f) => {
+            // Synchronous — execute now, send result.
+            let msg = f();
+            let _ = tx.try_send(msg);
+        }
+
+        Command.Async(fut) => {
+            // Fire-and-forget: spawn on the runtime, pipe result through tx.
+            let tx2 = tx.clone();
+            let tok = cancel.clone();
+            let boxed = fut.clone();
+            spawn_detached(async {
+                if tok.is_cancelled() { return; }
+                let msg = boxed.await;
+                if !tok.is_cancelled() {
+                    let _ = tx2.try_send(msg);
+                }
+            });
+        }
+
+        Command.Batch(cmds) => {
+            // Parallel fan-out — each child dispatched independently.
+            for c in cmds {
+                dispatch_command(c, tx, cancel);
+            }
+        }
+
+        Command.Sequence(cmds) => {
+            // Sequential fan-in — spawn one task that chains them.
+            let tx2 = tx.clone();
+            let tok = cancel.clone();
+            let cmds2 = cmds.clone();
+            spawn_detached(async {
+                for c in &cmds2 {
+                    if tok.is_cancelled() { return; }
+                    match c {
+                        Command.Perform(f) => {
+                            let _ = tx2.try_send(f());
+                        }
+                        Command.Async(fut) => {
+                            let msg = fut.clone().await;
+                            if tok.is_cancelled() { return; }
+                            let _ = tx2.try_send(msg);
+                        }
+                        Command.Tick(d, f) => {
+                            sleep(*d).await;
+                            if tok.is_cancelled() { return; }
+                            let _ = tx2.try_send((*f)());
+                        }
+                        _ => { /* nested Batch/Sequence/Quit: no-op here */ }
+                    }
+                }
+            });
+        }
+
+        Command.Tick(delay, f) => {
+            let tx2 = tx.clone();
+            let tok = cancel.clone();
+            let d = *delay;
+            let f2 = *f;
+            spawn_detached(async {
+                sleep(d).await;
+                if !tok.is_cancelled() {
+                    let _ = tx2.try_send(f2());
+                }
+            });
+        }
+    }
+}
+
+// =============================================================================
+// Subscription dispatch
+// =============================================================================
+
+/// Spawn detached tasks for a subscription tree. All tasks observe `cancel`
+/// and terminate when it is cancelled.
+fn dispatch_subscription<Msg>(
+    sub: &Subscription<Msg>,
+    tx: &Sender<Msg>,
+    cancel: &CancellationToken,
+) {
+    match sub {
+        Subscription.None => {}
+
+        Subscription.Interval(period, f) => {
+            let tx2 = tx.clone();
+            let tok = cancel.clone();
+            let p = *period;
+            let f2 = *f;
+            spawn_detached(async {
+                while !tok.is_cancelled() {
+                    sleep(p).await;
+                    if tok.is_cancelled() { return; }
+                    let _ = tx2.try_send(f2());
+                }
+            });
+        }
+
+        Subscription.Every(period, f) => {
+            let tx2 = tx.clone();
+            let tok = cancel.clone();
+            let p = *period;
+            let f2 = *f;
+            spawn_detached(async {
+                while !tok.is_cancelled() {
+                    sleep(p).await;
+                    if tok.is_cancelled() { return; }
+                    let now = Instant.now();
+                    let _ = tx2.try_send(f2(now));
+                }
+            });
+        }
+
+        Subscription.Once(delay, f) => {
+            let tx2 = tx.clone();
+            let tok = cancel.clone();
+            let d = *delay;
+            let f2 = *f;
+            spawn_detached(async {
+                sleep(d).await;
+                if !tok.is_cancelled() {
+                    let _ = tx2.try_send(f2());
+                }
+            });
+        }
+
+        Subscription.StreamSub(stream) => {
+            let tx2 = tx.clone();
+            let tok = cancel.clone();
+            let mut s = stream.clone();
+            spawn_detached(async {
+                while !tok.is_cancelled() {
+                    match s.next().await {
+                        Some(msg) => {
+                            if tok.is_cancelled() { return; }
+                            let _ = tx2.try_send(msg);
+                        }
+                        None => return,
+                    }
+                }
+            });
+        }
+
+        Subscription.Batch(subs) => {
+            for s in subs {
+                dispatch_subscription(s, tx, cancel);
             }
         }
     }

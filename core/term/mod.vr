@@ -131,11 +131,14 @@ public mount .widget.{
     Dialog, DialogButton, DialogState,
     Spinner, SpinnerFrames, SpinnerState,
     Notification, NotificationLevel,
+    TextArea, TextAreaState, WrapMode,
+    Dropdown, DropdownState,
+    Split, SplitState, SplitOrientation, SplitSize,
 };
 
 // Layer 6: App
 public mount .app.{
-    Model, Command, AppMessage, run,
+    Model, Command, AppMessage, Subscription, run, run_async,
     confirm, select, input, multi_select, password,
     SemanticZone, write_semantic_zone,
 };

@@ -3,7 +3,7 @@
 // =============================================================================
 module buffer;
 
-mount super.cell.{Cell, char_display_width};
+mount super.cell.{Cell, grapheme_width, char_display_width};
 mount super.super.style.Style;
 mount super.super.layout.Rect;
 
@@ -48,45 +48,45 @@ implement Buffer {
         x >= 0 && x < self.width && y >= 0 && y < self.height
     }
 
-    /// Write a string into the buffer starting at (x, y).
+    /// Write a string into the buffer starting at (x, y), stepping by
+    /// extended grapheme clusters (UAX #29 approximation). Wide clusters
+    /// occupy two cells; the trailing cell is marked `skip` so the diff
+    /// renderer does not emit a stray half-glyph. Invisible/combining
+    /// codepoints fold into the preceding cluster and contribute 0 columns.
+    ///
     /// Returns the column position after the written text.
     public fn set_string(&mut self, x: Int, y: Int, text: &Text, style: Style) -> Int {
         if y < 0 || y >= self.height { return x; }
 
-        let mut col = x;
         let bytes = text.as_bytes();
+        let total = bytes.len();
+        let mut col = x;
         let mut i = 0;
 
-        while i < bytes.len() {
-            if col >= self.width { break; }
+        while i < total && col < self.width {
+            let start = i;
+            i = grapheme_boundary_next(bytes, i);
+            let g = text.slice(start, i);
+            let w = grapheme_width(&g).max(1);
+
+            // Fully-clipped columns on the left — advance without writing.
+            if col + w <= 0 { col = col + w; continue; }
+
+            // Partially clipped: a wide grapheme that spans the left edge
+            // collapses to its right half (a single space cell).
             if col < 0 {
-                // Skip characters before visible area
-                if bytes[i] < 0x80 {
-                    col = col + 1;
-                    i = i + 1;
-                } else {
-                    // Skip multi-byte UTF-8
-                    let skip = utf8_char_len(bytes[i]);
-                    i = i + skip;
-                    col = col + 1; // Approximate
-                }
+                col = col + w;
                 continue;
             }
 
-            // Extract one grapheme (simplified: one UTF-8 character)
-            let char_start = i;
-            let char_len = utf8_char_len(bytes[i]);
-            i = i + char_len;
-            let grapheme = text.slice(char_start, i);
-
-            let w = char_display_width(&grapheme);
+            // Reaching the right edge — stop before we'd split a wide cell.
             if col + w > self.width { break; }
 
-            self.get_mut(col, y).set_char(&grapheme, style);
-
-            // If wide char, mark next cell as skip
+            self.get_mut(col, y).set_char(&g, style);
             if w == 2 && col + 1 < self.width {
-                self.get_mut(col + 1, y).skip = true;
+                let trailing = self.get_mut(col + 1, y);
+                trailing.set_char(" ", style);
+                trailing.skip = true;
             }
             col = col + w;
         }
@@ -165,4 +165,64 @@ fn utf8_char_len(first_byte: Byte) -> Int {
     else if first_byte < 0xE0 { 2 }
     else if first_byte < 0xF0 { 3 }
     else { 4 }
+}
+
+/// UAX #29 approximation: advance past one extended grapheme cluster.
+/// Starting at `idx`, step over a base codepoint and fold in any trailing
+/// zero-width / combining / ZWJ / variation selector continuations.
+fn grapheme_boundary_next(bytes: &[Byte], idx: Int) -> Int {
+    let n = bytes.len();
+    if idx >= n { return n; }
+    let mut i = idx + utf8_char_len(bytes[idx]);
+    while i < n {
+        let step = utf8_char_len(bytes[i]);
+        let cp = decode_cp_local(bytes, i, step);
+        if !is_extender(cp) { break; }
+        i = i + step;
+    }
+    i
+}
+
+fn decode_cp_local(bytes: &[Byte], idx: Int, step: Int) -> Int {
+    if step == 1 { return bytes[idx] as Int; }
+    if step == 2 {
+        return ((bytes[idx] as Int & 0x1F) << 6) | (bytes[idx + 1] as Int & 0x3F);
+    }
+    if step == 3 {
+        return ((bytes[idx] as Int & 0x0F) << 12)
+             | ((bytes[idx + 1] as Int & 0x3F) << 6)
+             | (bytes[idx + 2] as Int & 0x3F);
+    }
+    ((bytes[idx] as Int & 0x07) << 18)
+        | ((bytes[idx + 1] as Int & 0x3F) << 12)
+        | ((bytes[idx + 2] as Int & 0x3F) << 6)
+        | (bytes[idx + 3] as Int & 0x3F)
+}
+
+fn is_extender(cp: Int) -> Bool {
+    if cp >= 0x0300 && cp <= 0x036F { return true; }
+    if cp >= 0x0483 && cp <= 0x0489 { return true; }
+    if cp >= 0x0591 && cp <= 0x05BD { return true; }
+    if cp == 0x05BF || cp == 0x05C1 || cp == 0x05C2 { return true; }
+    if cp == 0x05C4 || cp == 0x05C5 || cp == 0x05C7 { return true; }
+    if cp >= 0x0610 && cp <= 0x061A { return true; }
+    if cp >= 0x064B && cp <= 0x065F { return true; }
+    if cp == 0x0670 { return true; }
+    if cp >= 0x06D6 && cp <= 0x06DC { return true; }
+    if cp >= 0x06DF && cp <= 0x06E4 { return true; }
+    if cp >= 0x06E7 && cp <= 0x06E8 { return true; }
+    if cp >= 0x06EA && cp <= 0x06ED { return true; }
+    if cp == 0x0711 { return true; }
+    if cp >= 0x0730 && cp <= 0x074A { return true; }
+    if cp >= 0x1AB0 && cp <= 0x1AFF { return true; }
+    if cp >= 0x1DC0 && cp <= 0x1DFF { return true; }
+    if cp >= 0x20D0 && cp <= 0x20FF { return true; }
+    if cp >= 0xFE20 && cp <= 0xFE2F { return true; }
+    if cp == 0x200D { return true; }
+    if cp >= 0x200B && cp <= 0x200F { return true; }
+    if cp >= 0x202A && cp <= 0x202E { return true; }
+    if cp >= 0x2060 && cp <= 0x206F { return true; }
+    if cp >= 0xFE00 && cp <= 0xFE0F { return true; }
+    if cp >= 0xE0100 && cp <= 0xE01EF { return true; }
+    false
 }

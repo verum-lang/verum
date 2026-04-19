@@ -1,0 +1,92 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: stdlib, term, app, async, integration
+// @description: run / run_async signatures and Model protocol conformance.
+
+/// Ensures the Model protocol + run/run_async entry points typecheck for a
+/// realistic user model. Actual execution requires a tty and is covered by
+/// integration runners outside the VCS suite.
+
+mount core.term.app.{Model, Command, Subscription, AppMessage, run, run_async};
+mount core.term.event.{Event, KeyEvent, KeyCode, Modifiers};
+mount core.term.render.{Frame};
+mount core.io.IoResult;
+mount core.time.Duration;
+
+type Msg is Inc | Dec | Quit | Tick;
+
+type Counter is { count: Int };
+
+implement Model for Counter {
+    type Msg = Msg;
+
+    fn init(&self) -> Command<Msg> {
+        Command.Noop
+    }
+
+    fn update(&mut self, msg: Msg) -> Command<Msg> {
+        match msg {
+            Msg.Inc  => { self.count = self.count + 1; Command.Noop }
+            Msg.Dec  => { self.count = self.count - 1; Command.Noop }
+            Msg.Tick => Command.Noop,
+            Msg.Quit => Command.Quit,
+        }
+    }
+
+    fn view(&self, _frame: &mut Frame) {
+        // Rendering exercised by widget layer tests; no-op here.
+    }
+
+    fn handle_event(&self, event: Event) -> Maybe<Msg> {
+        match event {
+            Event.Key(ke) => match ke.code {
+                KeyCode.Up    => Some(Msg.Inc),
+                KeyCode.Down  => Some(Msg.Dec),
+                KeyCode.Esc   => Some(Msg.Quit),
+                _             => None,
+            },
+            _ => None,
+        }
+    }
+
+    fn subscriptions(&self) -> Subscription<Msg> {
+        Subscription.Interval(Duration.from_millis(250), || Msg.Tick)
+    }
+
+    fn on_quit(&mut self) {
+        // User-side cleanup hook; must typecheck as &mut self.
+    }
+}
+
+fn test_run_signature() {
+    // `run` is IoResult<()> — compile-only check.
+    let _: fn(Counter) -> IoResult<()> = run::<Counter>;
+}
+
+fn test_pure_update() {
+    let mut c = Counter { count: 0 };
+    c.update(Msg.Inc);
+    c.update(Msg.Inc);
+    c.update(Msg.Inc);
+    c.update(Msg.Dec);
+    assert_eq(c.count, 2);
+}
+
+fn test_event_to_msg() {
+    let c = Counter { count: 0 };
+    let up = Event.Key(KeyEvent {
+        code: KeyCode.Up,
+        modifiers: Modifiers.NONE,
+        kind: core.term.event.KeyEventKind.Press,
+    });
+    match c.handle_event(up) {
+        Some(Msg.Inc) => {}
+        _ => panic("expected Msg.Inc"),
+    }
+}
+
+fn main() {
+    test_pure_update();
+    test_event_to_msg();
+}

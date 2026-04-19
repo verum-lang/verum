@@ -32,12 +32,23 @@ public fn flush_diff(
     // Begin synchronized output (Mode 2026)
     writer.begin_sync()?;
 
+    let same_shape = prev.width == next.width && prev.height == next.height;
+
     for y in 0..next.height {
+        // ---- row-level fast path: skip fully-unchanged rows --------------
+        if same_shape {
+            let mut row_equal = true;
+            for x in 0..next.width {
+                if !next.get(x, y).eq(prev.get(x, y)) { row_equal = false; break; }
+            }
+            if row_equal { continue; }
+        }
+
         for x in 0..next.width {
             let cell = next.get(x, y);
 
             // Skip unchanged cells (compare with prev if same size)
-            if prev.width == next.width && prev.height == next.height {
+            if same_shape {
                 let prev_cell = prev.get(x, y);
                 if cell.eq(prev_cell) { continue; }
             }
@@ -48,14 +59,14 @@ public fn flush_diff(
             if cursor_x != x || cursor_y != y {
                 if cursor_y == y && x == cursor_x + 1 {
                     // Natural advancement — no movement needed
-                } else if cursor_y == y && (x - cursor_x) > 0 && (x - cursor_x) <= 4 {
-                    // Short forward horizontal movement
+                } else if cursor_y == y && (x - cursor_x) > 0 {
+                    // Any forward horizontal movement — one CUF sequence
                     writer.write_csi(&[x - cursor_x], 'C' as Byte)?;
-                } else if cursor_y == y && (cursor_x - x) > 0 && (cursor_x - x) <= 4 {
-                    // Short backward horizontal movement
+                } else if cursor_y == y && (cursor_x - x) > 0 {
+                    // Any backward horizontal movement — one CUB sequence
                     writer.write_csi(&[cursor_x - x], 'D' as Byte)?;
                 } else {
-                    // Absolute positioning
+                    // Absolute positioning (different row or uninitialised)
                     writer.move_to(x, y)?;
                 }
             }

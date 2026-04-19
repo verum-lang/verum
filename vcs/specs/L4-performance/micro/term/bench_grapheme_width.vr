@@ -1,0 +1,54 @@
+// @test: benchmark
+// @tier: 2
+// @level: L4
+// @tags: bench, stdlib, term, unicode, grapheme
+// @timeout: 60000
+// @description: grapheme_width throughput — ASCII, CJK, ZWJ emoji.
+
+/// Baseline: classify ~1M graphemes across a mix of ASCII, CJK, and
+/// emoji clusters. Regression target: < 5 ns per grapheme on release.
+
+mount core.term.render.cell.grapheme_width;
+
+fn bench_ascii() {
+    let s = "abcdefghij";
+    let mut total = 0;
+    for _ in 0..100000 {
+        total = total + grapheme_width(&s);
+    }
+    assert(total >= 0);
+}
+
+fn bench_cjk() {
+    let s = "中日本";
+    let mut total = 0;
+    for _ in 0..100000 {
+        total = total + grapheme_width(&s);
+    }
+    assert(total >= 0);
+}
+
+fn bench_emoji_zwj() {
+    let s = "👨‍👩‍👧‍👦";
+    let mut total = 0;
+    for _ in 0..50000 {
+        total = total + grapheme_width(&s);
+    }
+    assert(total >= 0);
+}
+
+fn bench_mixed() {
+    let samples = ["a", "中", "🙂", "🇺🇸", "é", "Z", "日", "👋🏽"];
+    let mut total = 0;
+    for _ in 0..20000 {
+        for s in &samples { total = total + grapheme_width(s); }
+    }
+    assert(total >= 0);
+}
+
+fn main() {
+    bench_ascii();
+    bench_cjk();
+    bench_emoji_zwj();
+    bench_mixed();
+}

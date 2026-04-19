@@ -1,0 +1,60 @@
+// @test: parse-pass
+// @tier: 0
+// @level: L2
+// @tags: stdlib, term, style, modifier, bitset
+// @description: Modifier bitset — union, intersect, contains, difference.
+
+mount core.term.style.{Modifier, Style};
+
+fn test_empty_contains_nothing() {
+    let m = Modifier.NONE;
+    assert(!m.contains(Modifier.BOLD));
+    assert(!m.contains(Modifier.ITALIC));
+    assert(!m.contains(Modifier.UNDERLINED));
+}
+
+fn test_union_sets_both() {
+    let m = Modifier.BOLD.union(Modifier.ITALIC);
+    assert(m.contains(Modifier.BOLD));
+    assert(m.contains(Modifier.ITALIC));
+    assert(!m.contains(Modifier.UNDERLINED));
+}
+
+fn test_intersect_common() {
+    let a = Modifier.BOLD.union(Modifier.ITALIC);
+    let b = Modifier.BOLD.union(Modifier.UNDERLINED);
+    let common = a.intersect(b);
+    assert(common.contains(Modifier.BOLD));
+    assert(!common.contains(Modifier.ITALIC));
+    assert(!common.contains(Modifier.UNDERLINED));
+}
+
+fn test_difference_removes() {
+    let a = Modifier.BOLD.union(Modifier.ITALIC);
+    let b = Modifier.BOLD;
+    let d = a.difference(b);
+    assert(!d.contains(Modifier.BOLD));
+    assert(d.contains(Modifier.ITALIC));
+}
+
+fn test_style_bold_attaches_add_modifier() {
+    let s = Style.new().bold();
+    assert(s.add_modifier.contains(Modifier.BOLD));
+}
+
+fn test_style_patch_merges_modifiers() {
+    let a = Style.new().bold();
+    let b = Style.new().italic();
+    let merged = a.patch(b);
+    assert(merged.add_modifier.contains(Modifier.BOLD));
+    assert(merged.add_modifier.contains(Modifier.ITALIC));
+}
+
+fn main() {
+    test_empty_contains_nothing();
+    test_union_sets_both();
+    test_intersect_common();
+    test_difference_removes();
+    test_style_bold_attaches_add_modifier();
+    test_style_patch_merges_modifiers();
+}

@@ -1,0 +1,189 @@
+// @test: parse-pass
+// @tier: 0
+// @level: L2
+// @tags: stdlib, term, widget, textarea, multiline, selection
+// @description: Behaviour tests for TextArea / TextAreaState.
+
+/// Covers multiline editing: line-array storage, cursor (row, col),
+/// cross-line selection, undo/redo, clipboard, tab expansion.
+
+mount core.term.widget.{TextArea, TextAreaState, WrapMode, Pos};
+mount core.term.event.{KeyEvent, KeyCode, Modifiers, KeyEventKind};
+
+fn test_new_has_single_empty_line() {
+    let s = TextAreaState.new();
+    assert_eq(s.lines.len(), 1);
+    assert_eq(s.lines[0], "");
+    assert_eq(s.cursor.line, 0);
+    assert_eq(s.cursor.col, 0);
+}
+
+fn test_from_text_splits_lines() {
+    let s = TextAreaState.from_text(&"hello\nworld");
+    assert_eq(s.lines.len(), 2);
+    assert_eq(s.lines[0], "hello");
+    assert_eq(s.lines[1], "world");
+    assert_eq(s.cursor.line, 1);
+    assert_eq(s.cursor.col, 5);
+}
+
+fn test_to_text_rejoins_with_newlines() {
+    let s = TextAreaState.from_text(&"a\nb\nc");
+    assert_eq(s.to_text(), "a\nb\nc");
+}
+
+fn test_insert_char_single_line() {
+    let mut s = TextAreaState.new();
+    s.insert_char('H');
+    s.insert_char('i');
+    assert_eq(s.lines[0], "Hi");
+    assert_eq(s.cursor.col, 2);
+}
+
+fn test_insert_newline_splits() {
+    let mut s = TextAreaState.from_text(&"abcdef");
+    s.cursor = Pos.new(0, 3);
+    s.anchor = Pos.new(0, 3);
+    s.insert_newline();
+    assert_eq(s.lines.len(), 2);
+    assert_eq(s.lines[0], "abc");
+    assert_eq(s.lines[1], "def");
+    assert_eq(s.cursor.line, 1);
+    assert_eq(s.cursor.col, 0);
+}
+
+fn test_insert_multiline_block() {
+    let mut s = TextAreaState.from_text(&"abcdef");
+    s.cursor = Pos.new(0, 3);
+    s.anchor = Pos.new(0, 3);
+    s.insert_text(&"X\nY");
+    assert_eq(s.to_text(), "abcX\nYdef");
+}
+
+fn test_delete_backward_joins_lines() {
+    let mut s = TextAreaState.from_text(&"abc\ndef");
+    s.cursor = Pos.new(1, 0);
+    s.anchor = s.cursor;
+    s.delete_backward();
+    assert_eq(s.lines.len(), 1);
+    assert_eq(s.lines[0], "abcdef");
+    assert_eq(s.cursor.line, 0);
+    assert_eq(s.cursor.col, 3);
+}
+
+fn test_delete_forward_joins_lines() {
+    let mut s = TextAreaState.from_text(&"abc\ndef");
+    s.cursor = Pos.new(0, 3);
+    s.anchor = s.cursor;
+    s.delete_forward();
+    assert_eq(s.lines.len(), 1);
+    assert_eq(s.lines[0], "abcdef");
+}
+
+fn test_move_up_down_preserves_col_when_possible() {
+    let mut s = TextAreaState.from_text(&"hello\nworld");
+    s.cursor = Pos.new(0, 3);
+    s.anchor = s.cursor;
+    s.move_down(false);
+    assert_eq(s.cursor.line, 1);
+    assert_eq(s.cursor.col, 3);
+    s.move_up(false);
+    assert_eq(s.cursor.line, 0);
+    assert_eq(s.cursor.col, 3);
+}
+
+fn test_move_up_clamps_col_on_shorter_line() {
+    let mut s = TextAreaState.from_text(&"ab\nhello");
+    s.cursor = Pos.new(1, 4);
+    s.anchor = s.cursor;
+    s.move_up(false);
+    assert_eq(s.cursor.line, 0);
+    assert_eq(s.cursor.col, 2);   // clamped to len(lines[0]) = 2
+}
+
+fn test_line_start_end() {
+    let mut s = TextAreaState.from_text(&"hello world");
+    s.cursor = Pos.new(0, 5);
+    s.anchor = s.cursor;
+    s.move_line_start(false);
+    assert_eq(s.cursor.col, 0);
+    s.move_line_end(false);
+    assert_eq(s.cursor.col, 11);
+}
+
+fn test_document_start_end() {
+    let mut s = TextAreaState.from_text(&"a\nb\nc");
+    s.cursor = Pos.new(1, 1);
+    s.anchor = s.cursor;
+    s.move_document_start(false);
+    assert_eq(s.cursor.line, 0);
+    assert_eq(s.cursor.col, 0);
+    s.move_document_end(false);
+    assert_eq(s.cursor.line, 2);
+    assert_eq(s.cursor.col, 1);
+}
+
+fn test_selection_across_lines() {
+    let mut s = TextAreaState.from_text(&"hello\nworld");
+    s.cursor = Pos.new(0, 2);
+    s.anchor = Pos.new(1, 3);
+    assert(s.has_selection());
+    let copied = s.copy();
+    assert_eq(copied, "llo\nwor");
+}
+
+fn test_cut_removes_cross_line_selection() {
+    let mut s = TextAreaState.from_text(&"hello\nworld");
+    s.cursor = Pos.new(0, 2);
+    s.anchor = Pos.new(1, 3);
+    let _ = s.cut();
+    assert_eq(s.to_text(), "held");
+}
+
+fn test_undo_redo() {
+    let mut s = TextAreaState.from_text(&"abc");
+    s.insert_text(&"XYZ");
+    assert_eq(s.to_text(), "abcXYZ");
+    s.undo();
+    assert_eq(s.to_text(), "abc");
+    s.redo();
+    assert_eq(s.to_text(), "abcXYZ");
+}
+
+fn key(code: KeyCode, mods: Modifiers) -> KeyEvent {
+    KeyEvent { code: code, modifiers: mods, kind: KeyEventKind.Press }
+}
+
+fn test_handle_key_enter_inserts_newline() {
+    let mut s = TextAreaState.new();
+    s.insert_text(&"ab");
+    s.handle_key(key(KeyCode.Enter, Modifiers.NONE));
+    assert_eq(s.lines.len(), 2);
+    assert_eq(s.lines[1], "");
+}
+
+fn test_handle_key_tab_inserts_tab_char() {
+    let mut s = TextAreaState.new();
+    s.handle_key(key(KeyCode.Tab, Modifiers.NONE));
+    assert_eq(s.lines[0], "\t");
+}
+
+fn main() {
+    test_new_has_single_empty_line();
+    test_from_text_splits_lines();
+    test_to_text_rejoins_with_newlines();
+    test_insert_char_single_line();
+    test_insert_newline_splits();
+    test_insert_multiline_block();
+    test_delete_backward_joins_lines();
+    test_delete_forward_joins_lines();
+    test_move_up_down_preserves_col_when_possible();
+    test_move_up_clamps_col_on_shorter_line();
+    test_line_start_end();
+    test_document_start_end();
+    test_selection_across_lines();
+    test_cut_removes_cross_line_selection();
+    test_undo_redo();
+    test_handle_key_enter_inserts_newline();
+    test_handle_key_tab_inserts_tab_char();
+}

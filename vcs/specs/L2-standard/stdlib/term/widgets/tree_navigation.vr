@@ -1,0 +1,122 @@
+// @test: parse-pass
+// @tier: 0
+// @level: L2
+// @tags: stdlib, term, widget, tree, navigation, expand-collapse
+// @description: Behaviour tests for Tree / TreeItem / TreeState.
+
+mount core.term.widget.{Tree, TreeItem, TreeState};
+mount core.term.widget.paragraph.Line;
+
+fn leaf<T>(label: Text, data: T) -> TreeItem<T> {
+    TreeItem.leaf(Line.raw(label), data)
+}
+
+fn node<T>(label: Text, children: List<TreeItem<T>>, data: T) -> TreeItem<T> {
+    TreeItem.node(Line.raw(label), children, data)
+}
+
+fn tree() -> List<TreeItem<Int>> {
+    let mut inner = List.new();
+    inner.push(leaf::<Int>("child1", 11));
+    inner.push(leaf::<Int>("child2", 12));
+    let mut root = List.new();
+    root.push(node::<Int>("A", inner, 1));
+    root.push(leaf::<Int>("B", 2));
+    root
+}
+
+fn test_leaf_has_no_children() {
+    let l = leaf::<Int>("x", 0);
+    assert(!l.has_children());
+}
+
+fn test_node_has_children() {
+    let mut xs = List.new();
+    xs.push(leaf::<Int>("y", 1));
+    let n = node::<Int>("x", xs, 0);
+    assert(n.has_children());
+}
+
+fn test_new_state_is_unselected_unexpanded() {
+    let s = TreeState.new();
+    assert(s.selected.is_none());
+    assert_eq(s.expanded.len(), 0);
+    assert_eq(s.offset, 0);
+}
+
+fn test_toggle_toggles_expansion() {
+    let mut s = TreeState.new();
+    let mut path: List<Int> = List.new();
+    path.push(0);
+    s.toggle(path.clone());
+    assert(s.is_expanded(&path));
+    s.toggle(path.clone());
+    assert(!s.is_expanded(&path));
+}
+
+fn test_select_next_from_none_selects_first_visible() {
+    let mut s = TreeState.new();
+    let items = tree();
+    s.select_next(&items);
+    match s.selected {
+        Some(p) => { assert_eq(p.len(), 1); assert_eq(p[0], 0); }
+        None => panic("expected selection"),
+    }
+}
+
+fn test_select_next_advances_down_visible_list() {
+    let mut s = TreeState.new();
+    let items = tree();
+    s.select_next(&items);                 // selects A
+    s.select_next(&items);                 // next visible is B (A not expanded)
+    match s.selected {
+        Some(p) => { assert_eq(p.len(), 1); assert_eq(p[0], 1); }
+        None => panic("expected selection"),
+    }
+}
+
+fn test_select_next_into_expanded_children() {
+    let mut s = TreeState.new();
+    let items = tree();
+    let mut path0: List<Int> = List.new();
+    path0.push(0);
+    s.toggle(path0);                       // expand A
+    s.select_next(&items);                 // A
+    s.select_next(&items);                 // A.child1
+    match s.selected {
+        Some(p) => { assert_eq(p.len(), 2); assert_eq(p[0], 0); assert_eq(p[1], 0); }
+        None => panic("expected nested selection"),
+    }
+}
+
+fn test_toggle_selected_expands_current() {
+    let mut s = TreeState.new();
+    let items = tree();
+    s.select_next(&items);                 // select A
+    s.toggle_selected();
+    let mut p: List<Int> = List.new();
+    p.push(0);
+    assert(s.is_expanded(&p));
+}
+
+fn test_select_previous_wraps_to_last() {
+    let mut s = TreeState.new();
+    let items = tree();
+    s.select_previous(&items);             // from None — picks last visible
+    match s.selected {
+        Some(p) => assert_eq(p[0], 1),
+        None => panic("expected selection"),
+    }
+}
+
+fn main() {
+    test_leaf_has_no_children();
+    test_node_has_children();
+    test_new_state_is_unselected_unexpanded();
+    test_toggle_toggles_expansion();
+    test_select_next_from_none_selects_first_visible();
+    test_select_next_advances_down_visible_list();
+    test_select_next_into_expanded_children();
+    test_toggle_selected_expands_current();
+    test_select_previous_wraps_to_last();
+}

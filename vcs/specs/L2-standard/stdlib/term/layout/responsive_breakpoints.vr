@@ -1,0 +1,58 @@
+// @test: parse-pass
+// @tier: 0
+// @level: L2
+// @tags: stdlib, term, layout, responsive, breakpoints
+// @description: Breakpoint detection and responsive value selection.
+
+mount core.term.layout.responsive.{
+    Breakpoint, MOBILE, TABLET, DESKTOP, WIDE,
+    current_breakpoint, matches_breakpoint, responsive, responsive4,
+};
+
+fn test_mobile_lt_80() {
+    let bp = current_breakpoint(40);
+    assert_eq(bp.name, "mobile");
+}
+
+fn test_tablet_80_to_119() {
+    let bp = current_breakpoint(100);
+    assert_eq(bp.name, "tablet");
+}
+
+fn test_desktop_120_to_159() {
+    let bp = current_breakpoint(140);
+    assert_eq(bp.name, "desktop");
+}
+
+fn test_wide_ge_160() {
+    let bp = current_breakpoint(200);
+    assert_eq(bp.name, "wide");
+}
+
+fn test_matches_breakpoint() {
+    assert(matches_breakpoint(150, &DESKTOP));
+    assert(!matches_breakpoint(100, &DESKTOP));
+}
+
+fn test_responsive_picks_tier() {
+    assert_eq(responsive(50, 1, 2, 3), 1);
+    assert_eq(responsive(100, 1, 2, 3), 2);
+    assert_eq(responsive(140, 1, 2, 3), 3);
+}
+
+fn test_responsive4_picks_four_tiers() {
+    assert_eq(responsive4(50, 1, 2, 3, 4), 1);
+    assert_eq(responsive4(100, 1, 2, 3, 4), 2);
+    assert_eq(responsive4(140, 1, 2, 3, 4), 3);
+    assert_eq(responsive4(200, 1, 2, 3, 4), 4);
+}
+
+fn main() {
+    test_mobile_lt_80();
+    test_tablet_80_to_119();
+    test_desktop_120_to_159();
+    test_wide_ge_160();
+    test_matches_breakpoint();
+    test_responsive_picks_tier();
+    test_responsive4_picks_four_tiers();
+}

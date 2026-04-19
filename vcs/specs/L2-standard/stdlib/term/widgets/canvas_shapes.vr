@@ -1,0 +1,128 @@
+// @test: parse-pass
+// @tier: 0
+// @level: L2
+// @tags: stdlib, term, widget, canvas, shapes, braille
+// @description: Canvas + PixelCanvas + Painter + built-in shapes.
+
+mount core.term.widget.{Canvas, CanvasMode, Marker, PixelCanvas, Painter,
+                        Shape, LineShape, RectShape, CircleShape, LineSeries, ScatterPlot};
+mount core.term.style.Color;
+
+fn test_pixel_canvas_new() {
+    let pc = PixelCanvas.new(16, 8);
+    assert_eq(pc.width, 16);
+    assert_eq(pc.height, 8);
+    assert(!pc.get(0, 0));
+}
+
+fn test_pixel_canvas_set_get() {
+    let mut pc = PixelCanvas.new(10, 10);
+    pc.set(3, 4, Color.Red);
+    assert(pc.get(3, 4));
+    match pc.get_color(3, 4) {
+        Color.Red => {}
+        _ => panic("expected Red"),
+    }
+}
+
+fn test_pixel_canvas_out_of_bounds_is_noop() {
+    let mut pc = PixelCanvas.new(4, 4);
+    pc.set(-1, 0, Color.Red);
+    pc.set(0, -1, Color.Red);
+    pc.set(4, 0,  Color.Red);
+    pc.set(0, 4,  Color.Red);
+    assert(!pc.get(-1, 0));
+    assert(!pc.get(4, 0));
+}
+
+fn test_pixel_canvas_clear() {
+    let mut pc = PixelCanvas.new(4, 4);
+    pc.set(1, 1, Color.Blue);
+    pc.clear();
+    assert(!pc.get(1, 1));
+}
+
+fn test_painter_line_draws_pixels() {
+    let mut pc = PixelCanvas.new(20, 20);
+    {
+        let mut p = Painter {
+            canvas: &mut pc,
+            color: Color.White,
+            x_bounds: (0.0, 20.0),
+            y_bounds: (0.0, 20.0),
+        };
+        p.line(0.0, 0.0, 10.0, 0.0);
+    }
+    // At least some pixels along the line must be set.
+    let mut any = false;
+    for x in 0..11 {
+        if pc.get(x, 19) { any = true; break; }  // y=0 in world → bottom row
+    }
+    assert(any);
+}
+
+fn test_painter_rect_outline_sets_corners() {
+    let mut pc = PixelCanvas.new(20, 20);
+    {
+        let mut p = Painter {
+            canvas: &mut pc,
+            color: Color.White,
+            x_bounds: (0.0, 20.0),
+            y_bounds: (0.0, 20.0),
+        };
+        p.rect_outline(2.0, 2.0, 4.0, 4.0);
+    }
+    // Check that at least one corner pixel of the outline is lit.
+    // We don't pin exact coordinates (rounding) — just that SOME pixel
+    // in the outline area is set.
+    let mut any = false;
+    for y in 10..20 {
+        for x in 0..10 {
+            if pc.get(x, y) { any = true; break; }
+        }
+        if any { break; }
+    }
+    assert(any);
+}
+
+fn test_canvas_widget_builder() {
+    let mut shapes: List<Heap<dyn Shape>> = List.new();
+    shapes.push(Heap(LineShape.new(0.0, 0.0, 1.0, 1.0, Color.Red)));
+    shapes.push(Heap(CircleShape.new(0.5, 0.5, 0.3, Color.Blue)));
+    shapes.push(Heap(RectShape.new(0.0, 0.0, 0.5, 0.5, Color.Green)));
+
+    let canvas = Canvas.new()
+        .x_bounds(0.0, 1.0)
+        .y_bounds(0.0, 1.0)
+        .marker(Marker.Braille)
+        .mode(CanvasMode.Braille);
+    // Builder API compiles; actual rendering tested at L4 via snapshot.
+}
+
+fn test_scatter_plot_shape() {
+    let mut pts: List<(Float, Float)> = List.new();
+    pts.push((0.1, 0.2));
+    pts.push((0.5, 0.5));
+    pts.push((0.9, 0.8));
+    let s = ScatterPlot.new(pts, Color.Yellow);
+}
+
+fn test_line_series_shape() {
+    let mut pts: List<(Float, Float)> = List.new();
+    pts.push((0.0, 0.0));
+    pts.push((0.5, 0.7));
+    pts.push((1.0, 0.3));
+    let s = LineSeries.new(pts, Color.Cyan);
+}
+
+fn main() {
+    test_pixel_canvas_new();
+    test_pixel_canvas_set_get();
+    test_pixel_canvas_out_of_bounds_is_noop();
+    test_pixel_canvas_clear();
+    test_painter_line_draws_pixels();
+    test_painter_rect_outline_sets_corners();
+    test_canvas_widget_builder();
+    test_scatter_plot_shape();
+    test_line_series_shape();
+}

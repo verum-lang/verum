@@ -1,0 +1,39 @@
+// @test: benchmark
+// @tier: 2
+// @level: L4
+// @tags: bench, stdlib, term, widget, input, editing
+// @timeout: 60000
+// @description: TextInput insert/move/undo cost at scale.
+
+mount core.term.widget.{TextInputState};
+
+fn bench_insert_n_chars() {
+    let mut s = TextInputState.new();
+    for i in 0..10000 {
+        let ch = if (i % 26) == 0 { 'a' } else { 'b' };
+        s.insert_char(ch);
+    }
+}
+
+fn bench_mixed_ops() {
+    let mut s = TextInputState.with_value("hello world");
+    for _ in 0..5000 {
+        s.move_home(false);
+        s.move_end(false);
+        s.insert_char('!');
+        s.delete_backward();
+    }
+}
+
+fn bench_undo_redo() {
+    let mut s = TextInputState.new();
+    for _ in 0..200 { s.insert_char('x'); }
+    for _ in 0..200 { s.undo(); }
+    for _ in 0..200 { s.redo(); }
+}
+
+fn main() {
+    bench_insert_n_chars();
+    bench_mixed_ops();
+    bench_undo_redo();
+}

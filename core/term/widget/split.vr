@@ -1,0 +1,287 @@
+// =============================================================================
+// split.vr - Resizable two-pane split layout
+// =============================================================================
+// Layer: 5 (Widgets)
+//
+// `Split` computes two pane rectangles separated by an interactive divider.
+// The divider can be dragged with the mouse or resized via keyboard shortcuts.
+// The widget itself only renders the divider — callers render their own
+// widgets into the two computed pane rectangles. This keeps the API
+// composition-oriented rather than forcing a heterogeneous child-widget
+// type parameter.
+//
+// Typical usage:
+//
+//     let split = Split.horizontal().ratio(0.3).min_first(10);
+//     let (left, div, right) = split.layout(area, &state);
+//     split.render_divider(div, buf, &mut state);
+//     sidebar.render(left, buf);
+//     main.render(right, buf);
+//
+// Sizing mode is either a `ratio` (0.0..1.0) or a `fixed` cell size applied
+// to the first pane. Minimum sizes (`min_first`, `min_second`) are always
+// honoured. Resize operations clamp to these bounds so the layout never
+// collapses a pane.
+// =============================================================================
+module split;
+
+mount super.protocol.Styled;
+mount super.super.render.buffer.Buffer;
+mount super.super.layout.rect.Rect;
+mount super.super.style.style.Style;
+mount super.super.style.color.Color;
+mount super.super.event.{KeyEvent, KeyCode, MouseEvent, MouseEventKind, MouseButton, Modifiers};
+
+// =============================================================================
+// Orientation & sizing
+// =============================================================================
+
+public type SplitOrientation is Horizontal | Vertical;
+
+/// How the first pane's size is determined.
+public type SplitSize is
+    | Ratio(Float)   // 0.0..1.0 of available space
+    | Fixed(Int);    // exact cell count for the first pane
+
+// =============================================================================
+// Split — the widget (pure config)
+// =============================================================================
+
+public type Split is {
+    orientation: SplitOrientation,
+    divider_style: Style,
+    dragging_style: Style,
+    show_divider: Bool,
+    divider_width: Int,
+    min_first: Int,
+    min_second: Int,
+};
+
+implement Split {
+    /// Horizontal split — first pane on the left, divider is vertical.
+    public fn horizontal() -> Split {
+        Split {
+            orientation: SplitOrientation.Horizontal,
+            divider_style: Style.new().fg(Color.DarkGrey),
+            dragging_style: Style.new().fg(Color.Cyan),
+            show_divider: true,
+            divider_width: 1,
+            min_first: 3,
+            min_second: 3,
+        }
+    }
+
+    /// Vertical split — first pane on top, divider is horizontal.
+    public fn vertical() -> Split {
+        Split { orientation: SplitOrientation.Vertical, ..Split.horizontal() }
+    }
+
+    public fn divider_style(self, s: Style) -> Split { Split { divider_style: s, ..self } }
+    public fn dragging_style(self, s: Style) -> Split { Split { dragging_style: s, ..self } }
+    public fn show_divider(self, on: Bool) -> Split { Split { show_divider: on, ..self } }
+    public fn divider_width(self, w: Int) -> Split { Split { divider_width: w.max(0), ..self } }
+    public fn min_first(self, n: Int) -> Split { Split { min_first: n.max(0), ..self } }
+    public fn min_second(self, n: Int) -> Split { Split { min_second: n.max(0), ..self } }
+
+    /// Compute the first-pane, divider, and second-pane rectangles.
+    public fn layout(&self, area: Rect, state: &SplitState) -> (Rect, Rect, Rect) {
+        let total = match self.orientation {
+            Horizontal => area.width,
+            Vertical   => area.height,
+        };
+        let div_w = if self.show_divider { self.divider_width } else { 0 };
+        let available = (total - div_w).max(0);
+
+        let first_size = match state.size {
+            Ratio(r) => {
+                let raw = (r.clamp(0.0, 1.0) * available as Float) as Int;
+                clamp_first(raw, available, self.min_first, self.min_second)
+            }
+            Fixed(n) => clamp_first(n, available, self.min_first, self.min_second),
+        };
+        let second_size = available - first_size;
+
+        match self.orientation {
+            Horizontal => (
+                Rect.new(area.x, area.y, first_size, area.height),
+                Rect.new(area.x + first_size, area.y, div_w, area.height),
+                Rect.new(area.x + first_size + div_w, area.y, second_size, area.height),
+            ),
+            Vertical => (
+                Rect.new(area.x, area.y, area.width, first_size),
+                Rect.new(area.x, area.y + first_size, area.width, div_w),
+                Rect.new(area.x, area.y + first_size + div_w, area.width, second_size),
+            ),
+        }
+    }
+
+    /// Render the divider into `area`. Call this after `layout()`.
+    public fn render_divider(&self, area: Rect, buf: &mut Buffer, state: &SplitState) {
+        if !self.show_divider || area.is_empty() { return; }
+        let style = if state.dragging { self.dragging_style } else { self.divider_style };
+        let glyph = match self.orientation {
+            Horizontal => "│",
+            Vertical   => "─",
+        };
+        for y in area.y..area.bottom() {
+            for x in area.x..area.right() {
+                buf.get_mut(x, y).set_char(glyph, style);
+            }
+        }
+    }
+}
+
+// =============================================================================
+// SplitState
+// =============================================================================
+
+public type SplitState is {
+    size: SplitSize,
+    dragging: Bool,
+    focused_pane: Int,   // 0 or 1
+};
+
+implement SplitState {
+    public fn ratio(r: Float) -> SplitState {
+        SplitState {
+            size: SplitSize.Ratio(r.clamp(0.0, 1.0)),
+            dragging: false,
+            focused_pane: 0,
+        }
+    }
+
+    public fn fixed(n: Int) -> SplitState {
+        SplitState {
+            size: SplitSize.Fixed(n.max(0)),
+            dragging: false,
+            focused_pane: 0,
+        }
+    }
+
+    /// Move the divider by `delta` cells (positive grows the first pane).
+    public fn resize(&mut self, delta: Int, available: Int, min_first: Int, min_second: Int) {
+        match self.size {
+            Ratio(r) => {
+                let current = (r * available as Float) as Int;
+                let target = clamp_first(current + delta, available, min_first, min_second);
+                let new_r = if available > 0 { target as Float / available as Float } else { 0.0 };
+                self.size = SplitSize.Ratio(new_r);
+            }
+            Fixed(n) => {
+                let target = clamp_first(n + delta, available, min_first, min_second);
+                self.size = SplitSize.Fixed(target);
+            }
+        }
+    }
+
+    /// Set the first pane size as a ratio [0.0, 1.0].
+    public fn set_ratio(&mut self, r: Float) {
+        self.size = SplitSize.Ratio(r.clamp(0.0, 1.0));
+    }
+
+    /// Set the first pane size as a fixed cell count.
+    public fn set_fixed(&mut self, n: Int) {
+        self.size = SplitSize.Fixed(n.max(0));
+    }
+
+    /// Switch focus between panes.
+    public fn focus_next(&mut self) { self.focused_pane = 1 - self.focused_pane; }
+
+    /// Keyboard resize: Ctrl+Arrow moves the divider by `step` cells.
+    /// Returns `true` iff the key was handled.
+    pub fn handle_resize_key(
+        &mut self,
+        split: &Split,
+        area: Rect,
+        ke: KeyEvent,
+        step: Int,
+    ) -> Bool {
+        let ctrl = ke.modifiers.contains(Modifiers.CTRL);
+        if !ctrl { return false; }
+        let total = match split.orientation {
+            Horizontal => area.width,
+            Vertical   => area.height,
+        };
+        let available = (total - if split.show_divider { split.divider_width } else { 0 }).max(0);
+        match split.orientation {
+            Horizontal => {
+                match ke.code {
+                    KeyCode.Left  => { self.resize(-step, available, split.min_first, split.min_second); true }
+                    KeyCode.Right => { self.resize(step,  available, split.min_first, split.min_second); true }
+                    _ => false,
+                }
+            }
+            Vertical => {
+                match ke.code {
+                    KeyCode.Up   => { self.resize(-step, available, split.min_first, split.min_second); true }
+                    KeyCode.Down => { self.resize(step,  available, split.min_first, split.min_second); true }
+                    _ => false,
+                }
+            }
+        }
+    }
+
+    /// Mouse drag support — call with every mouse event to track the divider.
+    /// Returns `true` iff the event hit the divider (so the caller knows to
+    /// skip pane routing).
+    pub fn handle_mouse(
+        &mut self,
+        split: &Split,
+        area: Rect,
+        me: MouseEvent,
+    ) -> Bool {
+        let (first_area, divider_area, _second_area) = split.layout(area, self);
+        let on_divider = rect_contains(&divider_area, me.column, me.row);
+
+        match me.kind {
+            Down(MouseButton.Left) => {
+                if on_divider { self.dragging = true; return true; }
+                false
+            }
+            Up(MouseButton.Left) => {
+                if self.dragging { self.dragging = false; return true; }
+                false
+            }
+            Drag(MouseButton.Left) => {
+                if !self.dragging { return false; }
+                let total = match split.orientation {
+                    Horizontal => area.width,
+                    Vertical   => area.height,
+                };
+                let div_w = if split.show_divider { split.divider_width } else { 0 };
+                let available = (total - div_w).max(0);
+                let target = match split.orientation {
+                    Horizontal => me.column - area.x,
+                    Vertical   => me.row - area.y,
+                };
+                let clamped = clamp_first(target, available, split.min_first, split.min_second);
+                self.size = match self.size {
+                    Ratio(_) => {
+                        let r = if available > 0 { clamped as Float / available as Float } else { 0.0 };
+                        SplitSize.Ratio(r)
+                    }
+                    Fixed(_) => SplitSize.Fixed(clamped),
+                };
+                true
+            }
+            _ => false,
+        }
+    }
+}
+
+// =============================================================================
+// Helpers
+// =============================================================================
+
+fn clamp_first(raw: Int, available: Int, min_first: Int, min_second: Int) -> Int {
+    let upper = (available - min_second).max(0);
+    let mut v = raw;
+    if v < min_first { v = min_first; }
+    if v > upper { v = upper; }
+    if v < 0 { v = 0; }
+    v
+}
+
+fn rect_contains(r: &Rect, x: Int, y: Int) -> Bool {
+    x >= r.x && x < r.right() && y >= r.y && y < r.bottom()
+}

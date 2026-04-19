@@ -1,0 +1,177 @@
+// @test: parse-pass
+// @tier: 0
+// @level: L2
+// @tags: stdlib, term, widget, split, layout, resize
+// @description: Behaviour tests for Split / SplitState.
+
+mount core.term.widget.{Split, SplitState, SplitOrientation, SplitSize};
+mount core.term.layout.Rect;
+mount core.term.event.{KeyEvent, KeyCode, Modifiers, KeyEventKind, MouseEvent, MouseEventKind, MouseButton};
+
+fn key(code: KeyCode, mods: Modifiers) -> KeyEvent {
+    KeyEvent { code: code, modifiers: mods, kind: KeyEventKind.Press }
+}
+
+fn mouse(kind: MouseEventKind, col: Int, row: Int) -> MouseEvent {
+    MouseEvent { kind: kind, column: col, row: row, modifiers: Modifiers.NONE }
+}
+
+// ---------------------------------------------------------------------------
+// Layout — horizontal
+// ---------------------------------------------------------------------------
+
+fn test_horizontal_layout_ratio_50_50() {
+    let split = Split.horizontal();
+    let state = SplitState.ratio(0.5);
+    let area = Rect.new(0, 0, 40, 10);
+    let (left, div, right) = split.layout(area, &state);
+    assert_eq(left.x, 0);
+    assert_eq(left.width, 19);      // 39/2 = 19 rounded
+    assert_eq(div.x, 19);
+    assert_eq(div.width, 1);
+    assert_eq(right.x, 20);
+    assert_eq(right.width, 20);
+}
+
+fn test_horizontal_layout_fixed() {
+    let split = Split.horizontal();
+    let state = SplitState.fixed(12);
+    let area = Rect.new(0, 0, 40, 10);
+    let (left, _div, right) = split.layout(area, &state);
+    assert_eq(left.width, 12);
+    assert_eq(right.width, 27);     // 40 - 12 - 1(div)
+}
+
+fn test_vertical_layout() {
+    let split = Split.vertical();
+    let state = SplitState.ratio(0.3);
+    let area = Rect.new(0, 0, 20, 30);
+    let (top, div, bot) = split.layout(area, &state);
+    assert_eq(top.y, 0);
+    assert_eq(div.height, 1);
+    assert(top.height + div.height + bot.height == area.height);
+}
+
+// ---------------------------------------------------------------------------
+// Min-size clamping
+// ---------------------------------------------------------------------------
+
+fn test_min_first_clamps_up() {
+    let split = Split.horizontal().min_first(15);
+    let state = SplitState.fixed(3);
+    let area = Rect.new(0, 0, 40, 10);
+    let (left, _, _) = split.layout(area, &state);
+    assert_eq(left.width, 15);
+}
+
+fn test_min_second_clamps_first_down() {
+    let split = Split.horizontal().min_second(10);
+    let state = SplitState.fixed(35);
+    let area = Rect.new(0, 0, 40, 10);     // div=1 → available=39
+    let (left, _, right) = split.layout(area, &state);
+    // available=39, first must leave min_second=10, so first <= 29
+    assert(left.width <= 29);
+    assert(right.width >= 10);
+}
+
+// ---------------------------------------------------------------------------
+// Resize via keyboard
+// ---------------------------------------------------------------------------
+
+fn test_ctrl_right_grows_first() {
+    let split = Split.horizontal();
+    let mut state = SplitState.fixed(10);
+    let area = Rect.new(0, 0, 40, 10);
+    let handled = state.handle_resize_key(&split, area, key(KeyCode.Right, Modifiers.CTRL), 3);
+    assert(handled);
+    let (left, _, _) = split.layout(area, &state);
+    assert_eq(left.width, 13);
+}
+
+fn test_ctrl_left_shrinks_first() {
+    let split = Split.horizontal();
+    let mut state = SplitState.fixed(10);
+    let area = Rect.new(0, 0, 40, 10);
+    state.handle_resize_key(&split, area, key(KeyCode.Left, Modifiers.CTRL), 4);
+    let (left, _, _) = split.layout(area, &state);
+    assert_eq(left.width, 6);
+}
+
+fn test_plain_arrow_not_handled() {
+    let split = Split.horizontal();
+    let mut state = SplitState.fixed(10);
+    let area = Rect.new(0, 0, 40, 10);
+    let handled = state.handle_resize_key(&split, area, key(KeyCode.Right, Modifiers.NONE), 3);
+    assert(!handled);
+}
+
+fn test_vertical_only_handles_up_down() {
+    let split = Split.vertical();
+    let mut state = SplitState.fixed(5);
+    let area = Rect.new(0, 0, 20, 20);
+    let left = state.handle_resize_key(&split, area, key(KeyCode.Left, Modifiers.CTRL), 2);
+    assert(!left);
+    let down = state.handle_resize_key(&split, area, key(KeyCode.Down, Modifiers.CTRL), 2);
+    assert(down);
+}
+
+// ---------------------------------------------------------------------------
+// Mouse drag
+// ---------------------------------------------------------------------------
+
+fn test_mouse_down_on_divider_starts_drag() {
+    let split = Split.horizontal();
+    let mut state = SplitState.fixed(10);
+    let area = Rect.new(0, 0, 40, 10);
+    let (_left, div, _right) = split.layout(area, &state);
+
+    let on = state.handle_mouse(&split, area, mouse(MouseEventKind.Down(MouseButton.Left), div.x, 5));
+    assert(on);
+    assert(state.dragging);
+}
+
+fn test_mouse_down_off_divider_does_not_drag() {
+    let split = Split.horizontal();
+    let mut state = SplitState.fixed(10);
+    let area = Rect.new(0, 0, 40, 10);
+    let on = state.handle_mouse(&split, area, mouse(MouseEventKind.Down(MouseButton.Left), 0, 0));
+    assert(!on);
+    assert(!state.dragging);
+}
+
+fn test_mouse_drag_updates_size() {
+    let split = Split.horizontal();
+    let mut state = SplitState.fixed(10);
+    let area = Rect.new(0, 0, 40, 10);
+    let (_l, div, _r) = split.layout(area, &state);
+    state.handle_mouse(&split, area, mouse(MouseEventKind.Down(MouseButton.Left), div.x, 5));
+    state.handle_mouse(&split, area, mouse(MouseEventKind.Drag(MouseButton.Left), 20, 5));
+    let (left_after, _, _) = split.layout(area, &state);
+    assert_eq(left_after.width, 20);
+}
+
+fn test_mouse_up_ends_drag() {
+    let split = Split.horizontal();
+    let mut state = SplitState.fixed(10);
+    let area = Rect.new(0, 0, 40, 10);
+    let (_l, div, _r) = split.layout(area, &state);
+    state.handle_mouse(&split, area, mouse(MouseEventKind.Down(MouseButton.Left), div.x, 5));
+    state.handle_mouse(&split, area, mouse(MouseEventKind.Up(MouseButton.Left), 15, 5));
+    assert(!state.dragging);
+}
+
+fn main() {
+    test_horizontal_layout_ratio_50_50();
+    test_horizontal_layout_fixed();
+    test_vertical_layout();
+    test_min_first_clamps_up();
+    test_min_second_clamps_first_down();
+    test_ctrl_right_grows_first();
+    test_ctrl_left_shrinks_first();
+    test_plain_arrow_not_handled();
+    test_vertical_only_handles_up_down();
+    test_mouse_down_on_divider_starts_drag();
+    test_mouse_down_off_divider_does_not_drag();
+    test_mouse_drag_updates_size();
+    test_mouse_up_ends_drag();
+}

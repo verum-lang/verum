@@ -2,17 +2,27 @@
 // app/mod.vr - Layer 6: Application Framework
 // =============================================================================
 // Elm Architecture for TUI applications: Model → Update → View cycle.
+// Integrates with the native async runtime (core.async) for Commands and
+// Subscriptions; structured cancellation on Quit.
 // =============================================================================
 module app;
 
 // Sub-modules
 public module app;
 public module command;
+public module subscription;
 public module prompt;
 public module accessibility;
 
 // Re-exports
-public mount .app.{Model, AppMessage, run};
-public mount .command.{Command, none, perform, batch, sequence, tick, quit};
+public mount .app.{Model, AppMessage, run, run_async};
+public mount .command.{Command, none, perform, task, batch, sequence, tick, quit};
+public mount .subscription.{
+    Subscription,
+    none as sub_none,
+    interval, every, once,
+    from_stream as sub_from_stream,
+    batch as sub_batch,
+};
 public mount .prompt.{confirm, select, input, multi_select, password};
 public mount .accessibility.{SemanticZone, Politeness, write_semantic_zone};

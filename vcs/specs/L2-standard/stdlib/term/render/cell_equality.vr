@@ -1,0 +1,88 @@
+// @test: parse-pass
+// @tier: 0
+// @level: L2
+// @tags: stdlib, term, render, cell, equality, diff
+// @description: Cell equality (used by diff), EMPTY constant, reset semantics.
+
+mount core.term.render.Cell;
+mount core.term.style.{Style, Color, Modifier};
+
+fn test_empty_is_single_space() {
+    let e = Cell.EMPTY;
+    assert_eq(e.grapheme, " ");
+    assert(!e.skip);
+}
+
+fn test_cell_eq_equal_cells() {
+    let mut a = Cell.EMPTY;
+    let mut b = Cell.EMPTY;
+    a.set_char(&"x", Style.new().fg(Color.Red));
+    b.set_char(&"x", Style.new().fg(Color.Red));
+    assert(a.eq(&b));
+}
+
+fn test_cell_eq_differs_on_grapheme() {
+    let mut a = Cell.EMPTY;
+    let mut b = Cell.EMPTY;
+    a.set_char(&"x", Style.DEFAULT);
+    b.set_char(&"y", Style.DEFAULT);
+    assert(!a.eq(&b));
+}
+
+fn test_cell_eq_differs_on_style_fg() {
+    let mut a = Cell.EMPTY;
+    let mut b = Cell.EMPTY;
+    a.set_char(&"x", Style.new().fg(Color.Red));
+    b.set_char(&"x", Style.new().fg(Color.Blue));
+    assert(!a.eq(&b));
+}
+
+fn test_cell_eq_differs_on_skip() {
+    let mut a = Cell.EMPTY;
+    let mut b = Cell.EMPTY;
+    a.set_char(&"x", Style.DEFAULT);
+    b.set_char(&"x", Style.DEFAULT);
+    a.skip = true;
+    assert(!a.eq(&b));
+}
+
+fn test_cell_eq_differs_on_modifier() {
+    let mut a = Cell.EMPTY;
+    let mut b = Cell.EMPTY;
+    a.set_char(&"x", Style.new().bold());
+    b.set_char(&"x", Style.new());
+    assert(!a.eq(&b));
+}
+
+fn test_reset_restores_empty() {
+    let mut c = Cell.EMPTY;
+    c.set_char(&"Z", Style.new().fg(Color.Green));
+    c.reset();
+    assert_eq(c.grapheme, " ");
+    assert(!c.skip);
+    assert(c.eq(&Cell.EMPTY));
+}
+
+fn test_width_on_wide_cluster() {
+    let mut c = Cell.EMPTY;
+    c.set_char(&"中", Style.DEFAULT);
+    assert_eq(c.width(), 2);
+}
+
+fn test_width_on_ascii() {
+    let mut c = Cell.EMPTY;
+    c.set_char(&"a", Style.DEFAULT);
+    assert_eq(c.width(), 1);
+}
+
+fn main() {
+    test_empty_is_single_space();
+    test_cell_eq_equal_cells();
+    test_cell_eq_differs_on_grapheme();
+    test_cell_eq_differs_on_style_fg();
+    test_cell_eq_differs_on_skip();
+    test_cell_eq_differs_on_modifier();
+    test_reset_restores_empty();
+    test_width_on_wide_cluster();
+    test_width_on_ascii();
+}

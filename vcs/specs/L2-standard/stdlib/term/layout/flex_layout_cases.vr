@@ -1,0 +1,129 @@
+// @test: parse-pass
+// @tier: 0
+// @level: L2
+// @tags: stdlib, term, layout, flex, css-flexbox
+// @description: CSS Flexbox Level 1 edge cases — grow/shrink/basis, wrap, justify.
+
+mount core.term.layout.{Rect, FlexLayout, FlexItem, FlexDirection, FlexWrap,
+                        JustifyContent, AlignItems, FlexBasis};
+
+fn items_of(n: Int) -> List<FlexItem> {
+    let mut xs = List.new();
+    for _ in 0..n { xs.push(FlexItem.new()); }
+    xs
+}
+
+fn test_row_sum_equals_container_width() {
+    let layout = FlexLayout.row();
+    let mut items = List.new();
+    items.push(FlexItem.new().fixed(10));
+    items.push(FlexItem.new().fixed(15));
+    items.push(FlexItem.new().fixed(5));
+    let rects = layout.compute(Rect.new(0, 0, 40, 1), &items);
+    let mut total = 0;
+    for r in &rects { total = total + r.width; }
+    assert_eq(total, 30);                  // 10+15+5
+}
+
+fn test_grow_distributes_free_space() {
+    let layout = FlexLayout.row();
+    let mut items = List.new();
+    items.push(FlexItem.new().fixed(10));
+    items.push(FlexItem.new().grow(1.0));
+    items.push(FlexItem.new().fixed(5));
+    let rects = layout.compute(Rect.new(0, 0, 40, 1), &items);
+    // middle gets 40 - 10 - 5 = 25
+    assert_eq(rects[1].width, 25);
+}
+
+fn test_shrink_reduces_overflow() {
+    let layout = FlexLayout.row();
+    let mut items = List.new();
+    items.push(FlexItem.new().fixed(30));
+    items.push(FlexItem.new().fixed(30));
+    let rects = layout.compute(Rect.new(0, 0, 40, 1), &items);
+    // Total wanted = 60; container = 40; items shrink
+    let sum = rects[0].width + rects[1].width;
+    assert(sum <= 40);
+}
+
+fn test_min_size_clamps_shrink() {
+    let layout = FlexLayout.row();
+    let mut items = List.new();
+    items.push(FlexItem.new().fixed(30).min(25));
+    items.push(FlexItem.new().fixed(30));
+    let rects = layout.compute(Rect.new(0, 0, 40, 1), &items);
+    assert(rects[0].width >= 25);
+}
+
+fn test_max_size_caps_grow() {
+    let layout = FlexLayout.row();
+    let mut items = List.new();
+    items.push(FlexItem.new().grow(1.0).max(10));
+    items.push(FlexItem.new().grow(1.0));
+    let rects = layout.compute(Rect.new(0, 0, 40, 1), &items);
+    assert_eq(rects[0].width, 10);
+    assert_eq(rects[1].width, 30);
+}
+
+fn test_row_gap_between_items() {
+    let layout = FlexLayout.row().gap(2);
+    let mut items = List.new();
+    items.push(FlexItem.new().fixed(5));
+    items.push(FlexItem.new().fixed(5));
+    items.push(FlexItem.new().fixed(5));
+    let rects = layout.compute(Rect.new(0, 0, 20, 1), &items);
+    // Items should be non-overlapping with 2-cell gaps.
+    assert_eq(rects[0].x + rects[0].width + 2, rects[1].x);
+    assert_eq(rects[1].x + rects[1].width + 2, rects[2].x);
+}
+
+fn test_column_direction() {
+    let layout = FlexLayout.column();
+    let mut items = List.new();
+    items.push(FlexItem.new().fixed(3));
+    items.push(FlexItem.new().grow(1.0));
+    items.push(FlexItem.new().fixed(1));
+    let rects = layout.compute(Rect.new(0, 0, 10, 20), &items);
+    assert_eq(rects[0].height, 3);
+    assert_eq(rects[2].height, 1);
+    assert_eq(rects[1].height, 16);
+}
+
+fn test_wrap_moves_overflow_to_next_line() {
+    let layout = FlexLayout.row().wrap(FlexWrap.Wrap);
+    let mut items = List.new();
+    items.push(FlexItem.new().fixed(10));
+    items.push(FlexItem.new().fixed(10));
+    items.push(FlexItem.new().fixed(10));  // overflow — wrap to line 2
+    let rects = layout.compute(Rect.new(0, 0, 20, 4), &items);
+    // At least two y coordinates appear among items.
+    let mut seen_y: List<Int> = List.new();
+    for r in &rects {
+        let mut new = true;
+        for y in &seen_y { if *y == r.y { new = false; break; } }
+        if new { seen_y.push(r.y); }
+    }
+    assert(seen_y.len() >= 2);
+}
+
+fn test_justify_center_offsets_items() {
+    let layout = FlexLayout.row().justify(JustifyContent.Center);
+    let mut items = List.new();
+    items.push(FlexItem.new().fixed(10));
+    let rects = layout.compute(Rect.new(0, 0, 20, 1), &items);
+    assert(rects[0].x >= 4);
+    assert(rects[0].x <= 6);
+}
+
+fn main() {
+    test_row_sum_equals_container_width();
+    test_grow_distributes_free_space();
+    test_shrink_reduces_overflow();
+    test_min_size_clamps_shrink();
+    test_max_size_caps_grow();
+    test_row_gap_between_items();
+    test_column_direction();
+    test_wrap_moves_overflow_to_next_line();
+    test_justify_center_offsets_items();
+}

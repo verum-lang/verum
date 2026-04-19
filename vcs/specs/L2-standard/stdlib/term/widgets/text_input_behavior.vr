@@ -1,0 +1,333 @@
+// @test: parse-pass
+// @tier: 0
+// @level: L2
+// @tags: stdlib, term, widget, input, selection, undo, grapheme
+// @description: Deep behaviour tests for TextInput / TextInputState.
+
+/// Covers the full state machine of `TextInputState`:
+///   * insert / delete (byte and grapheme)
+///   * cursor movement (char, word, line ends)
+///   * selection (anchor vs cursor, select_all, clear)
+///   * undo / redo (with history cap)
+///   * clipboard helpers (copy / cut / paste)
+///   * kill-to-end / kill-to-start
+///   * `handle_key` dispatcher (Emacs keybindings)
+
+mount core.term.widget.{TextInput, TextInputState};
+mount core.term.event.{KeyEvent, KeyCode, Modifiers, KeyEventKind};
+
+// ---------------------------------------------------------------------------
+// Construction
+// ---------------------------------------------------------------------------
+
+fn test_new_is_empty() {
+    let s = TextInputState.new();
+    assert_eq(s.value, "");
+    assert_eq(s.cursor, 0);
+    assert_eq(s.anchor, 0);
+    assert(!s.has_selection());
+}
+
+fn test_with_value_cursor_at_end() {
+    let s = TextInputState.with_value("hello");
+    assert_eq(s.value, "hello");
+    assert_eq(s.cursor, 5);
+    assert_eq(s.anchor, 5);
+}
+
+// ---------------------------------------------------------------------------
+// Insertion
+// ---------------------------------------------------------------------------
+
+fn test_insert_char_advances_cursor() {
+    let mut s = TextInputState.new();
+    s.insert_char('a');
+    s.insert_char('b');
+    s.insert_char('c');
+    assert_eq(s.value, "abc");
+    assert_eq(s.cursor, 3);
+}
+
+fn test_insert_text_block() {
+    let mut s = TextInputState.new();
+    s.insert_text(&"hello world");
+    assert_eq(s.value, "hello world");
+    assert_eq(s.cursor, 11);
+}
+
+fn test_insert_at_middle() {
+    let mut s = TextInputState.with_value("axc");
+    s.cursor = 1;
+    s.anchor = 1;
+    s.insert_char('b');
+    assert_eq(s.value, "abxc");
+    assert_eq(s.cursor, 2);
+}
+
+// ---------------------------------------------------------------------------
+// Deletion
+// ---------------------------------------------------------------------------
+
+fn test_delete_backward() {
+    let mut s = TextInputState.with_value("abc");
+    s.delete_backward();
+    assert_eq(s.value, "ab");
+    assert_eq(s.cursor, 2);
+}
+
+fn test_delete_backward_at_start_is_noop() {
+    let mut s = TextInputState.with_value("abc");
+    s.cursor = 0;
+    s.anchor = 0;
+    s.delete_backward();
+    assert_eq(s.value, "abc");
+    assert_eq(s.cursor, 0);
+}
+
+fn test_delete_forward() {
+    let mut s = TextInputState.with_value("abc");
+    s.cursor = 0;
+    s.anchor = 0;
+    s.delete_forward();
+    assert_eq(s.value, "bc");
+    assert_eq(s.cursor, 0);
+}
+
+fn test_delete_forward_at_end_is_noop() {
+    let mut s = TextInputState.with_value("abc");
+    // cursor already at end
+    s.delete_forward();
+    assert_eq(s.value, "abc");
+}
+
+// ---------------------------------------------------------------------------
+// Cursor movement
+// ---------------------------------------------------------------------------
+
+fn test_move_left_and_right() {
+    let mut s = TextInputState.with_value("hello");
+    s.move_left(false);
+    assert_eq(s.cursor, 4);
+    s.move_left(false);
+    assert_eq(s.cursor, 3);
+    s.move_right(false);
+    assert_eq(s.cursor, 4);
+}
+
+fn test_move_home_end() {
+    let mut s = TextInputState.with_value("hello");
+    s.move_home(false);
+    assert_eq(s.cursor, 0);
+    s.move_end(false);
+    assert_eq(s.cursor, 5);
+}
+
+fn test_word_movement() {
+    let mut s = TextInputState.with_value("foo bar baz");
+    s.move_word_left(false);           // cursor at end → to start of "baz"
+    assert_eq(s.cursor, 8);
+    s.move_word_left(false);           // to start of "bar"
+    assert_eq(s.cursor, 4);
+    s.move_word_right(false);          // to start of "baz"
+    assert(s.cursor >= 7);
+}
+
+// ---------------------------------------------------------------------------
+// Selection
+// ---------------------------------------------------------------------------
+
+fn test_shift_move_extends_selection() {
+    let mut s = TextInputState.with_value("hello");
+    s.move_home(false);
+    s.move_right(true);                // Shift+Right
+    s.move_right(true);                // Shift+Right
+    assert(s.has_selection());
+    let (start, end) = s.selection_range();
+    assert_eq(start, 0);
+    assert_eq(end, 2);
+    assert_eq(s.selected_text(), "he");
+}
+
+fn test_select_all() {
+    let mut s = TextInputState.with_value("hello");
+    s.select_all();
+    assert(s.has_selection());
+    assert_eq(s.selected_text(), "hello");
+}
+
+fn test_clear_selection() {
+    let mut s = TextInputState.with_value("hello");
+    s.select_all();
+    s.clear_selection();
+    assert(!s.has_selection());
+}
+
+fn test_insert_replaces_selection() {
+    let mut s = TextInputState.with_value("hello");
+    s.select_all();
+    s.insert_text(&"bye");
+    assert_eq(s.value, "bye");
+    assert_eq(s.cursor, 3);
+    assert(!s.has_selection());
+}
+
+// ---------------------------------------------------------------------------
+// Clipboard
+// ---------------------------------------------------------------------------
+
+fn test_copy_does_not_mutate() {
+    let mut s = TextInputState.with_value("hello");
+    s.select_all();
+    let c = s.copy();
+    assert_eq(c, "hello");
+    assert_eq(s.value, "hello");
+    assert(s.has_selection());
+}
+
+fn test_cut_removes_selection() {
+    let mut s = TextInputState.with_value("hello");
+    s.anchor = 1;
+    s.cursor = 4;
+    let c = s.cut();
+    assert_eq(c, "ell");
+    assert_eq(s.value, "ho");
+    assert(!s.has_selection());
+}
+
+fn test_paste_inserts() {
+    let mut s = TextInputState.with_value("abd");
+    s.cursor = 2;
+    s.anchor = 2;
+    s.paste(&"c");
+    assert_eq(s.value, "abcd");
+}
+
+// ---------------------------------------------------------------------------
+// Kill (Ctrl-K / Ctrl-U)
+// ---------------------------------------------------------------------------
+
+fn test_kill_to_end() {
+    let mut s = TextInputState.with_value("hello world");
+    s.cursor = 5;
+    s.anchor = 5;
+    let killed = s.kill_to_end();
+    assert_eq(killed, " world");
+    assert_eq(s.value, "hello");
+}
+
+fn test_kill_to_start() {
+    let mut s = TextInputState.with_value("hello world");
+    s.cursor = 6;
+    s.anchor = 6;
+    let killed = s.kill_to_start();
+    assert_eq(killed, "hello ");
+    assert_eq(s.value, "world");
+    assert_eq(s.cursor, 0);
+}
+
+// ---------------------------------------------------------------------------
+// Undo / redo
+// ---------------------------------------------------------------------------
+
+fn test_undo_one_step() {
+    let mut s = TextInputState.new();
+    s.insert_text(&"hello");
+    assert(s.undo());
+    assert_eq(s.value, "");
+}
+
+fn test_undo_redo_roundtrip() {
+    let mut s = TextInputState.new();
+    s.insert_text(&"hello");
+    s.undo();
+    assert(s.redo());
+    assert_eq(s.value, "hello");
+}
+
+fn test_new_mutation_clears_redo() {
+    let mut s = TextInputState.new();
+    s.insert_text(&"a");
+    s.insert_text(&"b");
+    s.undo();                          // redo available
+    s.insert_text(&"x");               // new mutation
+    assert(!s.redo());                 // redo stack cleared
+    assert_eq(s.value, "ax");
+}
+
+// ---------------------------------------------------------------------------
+// handle_key dispatcher
+// ---------------------------------------------------------------------------
+
+fn key(code: KeyCode, mods: Modifiers) -> KeyEvent {
+    KeyEvent { code: code, modifiers: mods, kind: KeyEventKind.Press }
+}
+
+fn test_handle_key_plain_char() {
+    let mut s = TextInputState.new();
+    let handled = s.handle_key(key(KeyCode.Char('a'), Modifiers.NONE));
+    assert(handled);
+    assert_eq(s.value, "a");
+}
+
+fn test_handle_key_ctrl_a_home() {
+    let mut s = TextInputState.with_value("hello");
+    let handled = s.handle_key(key(KeyCode.Char('a'), Modifiers.CTRL));
+    assert(handled);
+    assert_eq(s.cursor, 0);
+}
+
+fn test_handle_key_ctrl_k_kill_to_end() {
+    let mut s = TextInputState.with_value("hello");
+    s.cursor = 2;
+    s.anchor = 2;
+    let handled = s.handle_key(key(KeyCode.Char('k'), Modifiers.CTRL));
+    assert(handled);
+    assert_eq(s.value, "he");
+}
+
+fn test_handle_key_arrows_with_shift_extend_selection() {
+    let mut s = TextInputState.with_value("hello");
+    s.move_home(false);
+    s.handle_key(key(KeyCode.Right, Modifiers.SHIFT));
+    s.handle_key(key(KeyCode.Right, Modifiers.SHIFT));
+    assert(s.has_selection());
+    assert_eq(s.selected_text(), "he");
+}
+
+fn test_handle_key_unknown_not_handled() {
+    let mut s = TextInputState.new();
+    let handled = s.handle_key(key(KeyCode.F(5), Modifiers.NONE));
+    assert(!handled);
+}
+
+fn main() {
+    test_new_is_empty();
+    test_with_value_cursor_at_end();
+    test_insert_char_advances_cursor();
+    test_insert_text_block();
+    test_insert_at_middle();
+    test_delete_backward();
+    test_delete_backward_at_start_is_noop();
+    test_delete_forward();
+    test_delete_forward_at_end_is_noop();
+    test_move_left_and_right();
+    test_move_home_end();
+    test_word_movement();
+    test_shift_move_extends_selection();
+    test_select_all();
+    test_clear_selection();
+    test_insert_replaces_selection();
+    test_copy_does_not_mutate();
+    test_cut_removes_selection();
+    test_paste_inserts();
+    test_kill_to_end();
+    test_kill_to_start();
+    test_undo_one_step();
+    test_undo_redo_roundtrip();
+    test_new_mutation_clears_redo();
+    test_handle_key_plain_char();
+    test_handle_key_ctrl_a_home();
+    test_handle_key_ctrl_k_kill_to_end();
+    test_handle_key_arrows_with_shift_extend_selection();
+    test_handle_key_unknown_not_handled();
+}

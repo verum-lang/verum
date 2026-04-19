@@ -1,0 +1,83 @@
+// @test: parse-pass
+// @tier: 0
+// @level: L2
+// @tags: stdlib, term, style, color, rgb, hsl
+// @description: RGB/HSL/hex conversions, adaptive downsampling.
+
+mount core.term.style.{Color, Rgb, Hsl, ColorProfile};
+
+fn test_rgb_constructor() {
+    let c = Rgb.new(10, 20, 30);
+    assert_eq(c.r as Int, 10);
+    assert_eq(c.g as Int, 20);
+    assert_eq(c.b as Int, 30);
+}
+
+fn test_rgb_darken_reduces_channel() {
+    let red = Rgb.new(255, 0, 0);
+    let d = red.darken(0.5);
+    assert((d.r as Int) < 255);
+}
+
+fn test_rgb_lighten_grows_channels() {
+    let red = Rgb.new(255, 0, 0);
+    let l = red.lighten(0.5);
+    assert((l.r as Int) == 255);
+    assert((l.g as Int) > 0);
+    assert((l.b as Int) > 0);
+}
+
+fn test_rgb_lerp_midpoint() {
+    let red  = Rgb.new(255, 0, 0);
+    let blue = Rgb.new(0, 0, 255);
+    let mid = red.lerp(&blue, 0.5);
+    assert((mid.r as Int) > 100 && (mid.r as Int) < 200);
+    assert((mid.b as Int) > 100 && (mid.b as Int) < 200);
+}
+
+fn test_rgb_gradient_size() {
+    let a = Rgb.new(0, 0, 0);
+    let b = Rgb.new(255, 255, 255);
+    let g = Rgb.gradient(a, b, 5);
+    assert_eq(g.len(), 5);
+}
+
+fn test_hsl_to_rgb_red() {
+    let h = Hsl.new(0.0, 1.0, 0.5);
+    let r = h.to_rgb();
+    assert((r.r as Int) >= 200);    // dominant red
+}
+
+fn test_hsl_to_rgb_green() {
+    let h = Hsl.new(120.0, 1.0, 0.5);
+    let r = h.to_rgb();
+    assert((r.g as Int) >= 200);    // dominant green
+}
+
+fn test_hsl_to_rgb_blue() {
+    let h = Hsl.new(240.0, 1.0, 0.5);
+    let r = h.to_rgb();
+    assert((r.b as Int) >= 200);    // dominant blue
+}
+
+fn test_color_profiles_present() {
+    let profiles = [
+        ColorProfile.NoColor,
+        ColorProfile.Base16,
+        ColorProfile.Ansi256,
+        ColorProfile.TrueColor,
+    ];
+    assert_eq(profiles.len(), 4);
+}
+
+fn main() {
+    test_rgb_constructor();
+    test_rgb_darken_reduces_channel();
+    test_rgb_lighten_grows_channels();
+    test_rgb_lerp_midpoint();
+    test_rgb_gradient_size();
+    test_hsl_to_rgb_red();
+    test_hsl_to_rgb_green();
+    test_hsl_to_rgb_blue();
+    test_color_profiles_present();
+}

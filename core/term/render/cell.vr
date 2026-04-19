@@ -1,6 +1,11 @@
 // =============================================================================
 // cell.vr - Terminal cell (one position in the buffer)
 // =============================================================================
+// Stores a *grapheme cluster* (extended grapheme cluster — UAX #29) together
+// with its style. Width is computed from the cluster, not a single codepoint,
+// so emoji with skin tones, ZWJ-joined families, regional flag pairs, and
+// Indic/Arabic combining sequences all occupy the correct number of columns.
+// =============================================================================
 module cell;
 
 mount super.super.style.{Style, Color, Modifier};
@@ -10,7 +15,7 @@ mount super.super.style.{Style, Color, Modifier};
 public type Cell is {
     grapheme: Text,
     style: Style,
-    skip: Bool,         // Skip during rendering (second cell of wide char)
+    skip: Bool,         // Skip during rendering (second cell of wide grapheme)
 };
 
 implement Cell {
@@ -20,12 +25,12 @@ implement Cell {
         skip: false,
     };
 
-    /// Width of the cell in columns (1 for normal chars, 2 for CJK/emoji).
+    /// Width of the cell in columns (1 for normal chars, 2 for wide clusters).
     public fn width(&self) -> Int {
-        char_display_width(&self.grapheme)
+        grapheme_width(&self.grapheme)
     }
 
-    /// Set character and style.
+    /// Set grapheme and style.
     public fn set_char(&mut self, ch: &Text, style: Style) {
         self.grapheme = ch.clone();
         self.style = style;
@@ -39,7 +44,7 @@ implement Cell {
         self.skip = false;
     }
 
-    /// Check if this cell is equal to another (for diff).
+    /// Equality for diffing. Must be cheap.
     public fn eq(&self, other: &Cell) -> Bool {
         self.grapheme == other.grapheme
             && self.style.fg == other.style.fg
@@ -50,73 +55,283 @@ implement Cell {
     }
 }
 
-/// Determine the display width of a grapheme/text fragment.
-/// ASCII = 1, CJK Unicode ranges = 2, control chars = 0.
-/// This is a simplified fallback — full Unicode width requires ICU.
-public fn char_display_width(s: &Text) -> Int {
+// =============================================================================
+// Grapheme cluster width
+// =============================================================================
+
+/// Display width of a grapheme cluster in terminal columns.
+///
+/// Iterates every codepoint in the cluster and folds a maximum-width rule:
+///   * combining marks, ZWJ, variation selectors, and format characters
+///     contribute 0 columns;
+///   * East Asian Wide/Fullwidth and emoji base characters contribute 2;
+///   * presence of VS16 (U+FE0F) on a pictographic base forces width 2
+///     (canonical emoji presentation);
+///   * Regional Indicator pairs (two flag code points) together take 2;
+///   * everything else contributes 1.
+///
+/// This is an approximation of UAX #11 + UTS #51 + the grapheme cluster
+/// segmentation rules of UAX #29, suitable for a terminal without ICU.
+public fn grapheme_width(s: &Text) -> Int {
     if s.len() == 0 { return 0; }
 
-    let first_byte = s.as_bytes()[0];
+    let bytes = s.as_bytes();
+    let total = bytes.len();
 
-    // ASCII fast path
-    if first_byte < 0x80 {
-        if first_byte < 0x20 { return 0; }  // Control characters
-        return 1;
+    let mut width = 0;
+    let mut has_vs16 = false;
+    let mut has_vs15 = false;
+    let mut has_pictographic = false;
+    let mut ri_count = 0;
+    let mut i = 0;
+
+    while i < total {
+        let (cp, step) = decode_utf8_at(bytes, i);
+        if step == 0 { break; }
+        i = i + step;
+
+        let cw = codepoint_width(cp);
+        if cw > width { width = cw; }
+
+        if cp == 0xFE0F { has_vs16 = true; }
+        else if cp == 0xFE0E { has_vs15 = true; }
+        if is_extended_pictographic(cp) { has_pictographic = true; }
+        if is_regional_indicator(cp) { ri_count = ri_count + 1; }
     }
 
-    // Decode first codepoint for width estimation
-    let cp = decode_first_codepoint(s);
+    // Canonical emoji presentation: pictographic base + VS16 → width 2.
+    if has_pictographic && has_vs16 && width < 2 { width = 2; }
+    // Text presentation selector (VS15) forces width 1 on an emoji that would
+    // otherwise default to 2 (some locales render text-presentation digits).
+    if has_vs15 && width > 1 { width = 1; }
 
-    // CJK Unified Ideographs
-    if cp >= 0x4E00 && cp <= 0x9FFF { return 2; }
-    // CJK Extension A
-    if cp >= 0x3400 && cp <= 0x4DBF { return 2; }
-    // CJK Extension B
-    if cp >= 0x20000 && cp <= 0x2A6DF { return 2; }
-    // CJK Compatibility Ideographs
-    if cp >= 0xF900 && cp <= 0xFAFF { return 2; }
-    // Hangul Syllables
-    if cp >= 0xAC00 && cp <= 0xD7AF { return 2; }
-    // Fullwidth Forms
-    if cp >= 0xFF01 && cp <= 0xFF60 { return 2; }
-    if cp >= 0xFFE0 && cp <= 0xFFE6 { return 2; }
-    // Emoji (common ranges)
-    if cp >= 0x1F600 && cp <= 0x1F64F { return 2; }
-    if cp >= 0x1F300 && cp <= 0x1F5FF { return 2; }
-    if cp >= 0x1F680 && cp <= 0x1F6FF { return 2; }
-    if cp >= 0x1F900 && cp <= 0x1F9FF { return 2; }
-    if cp >= 0x2600 && cp <= 0x26FF { return 2; }
-    if cp >= 0x2700 && cp <= 0x27BF { return 2; }
-    // Zero-width characters
-    if cp >= 0x200B && cp <= 0x200F { return 0; }
-    if cp >= 0xFE00 && cp <= 0xFE0F { return 0; }  // Variation selectors
-    if cp >= 0xE0100 && cp <= 0xE01EF { return 0; } // VS17-VS256
+    // A flag emoji is exactly two Regional Indicator codepoints and renders
+    // as one wide cluster.
+    if ri_count >= 2 && width < 2 { width = 2; }
+
+    // Control chars and empty clusters should never claim space.
+    if width < 0 { width = 0; }
+    width
+}
+
+/// Display width of a single codepoint.
+pub fn codepoint_width(cp: Int) -> Int {
+    // Controls, NUL, DEL — zero width.
+    if cp < 0x20 { return 0; }
+    if cp == 0x7F { return 0; }
+    if cp >= 0x80 && cp <= 0x9F { return 0; }
+
+    // Zero-width format/combining ranges.
+    if is_zero_width(cp) { return 0; }
+
+    // Wide (East Asian Wide / Fullwidth, CJK blocks, Hangul, emoji).
+    if is_wide(cp) { return 2; }
 
     1
 }
 
-/// Decode first Unicode codepoint from UTF-8 text.
-fn decode_first_codepoint(s: &Text) -> Int {
-    let bytes = s.as_bytes();
-    let b0 = bytes[0] as Int;
+/// True if the codepoint is a combining mark, ZWJ, VSes, or format control.
+fn is_zero_width(cp: Int) -> Bool {
+    // Soft hyphen, line tabulation set, etc.
+    if cp == 0x00AD { return true; }
 
-    if b0 < 0x80 { return b0; }
-    if b0 < 0xC0 { return 0xFFFD; }  // Invalid continuation byte
+    // Combining Diacritical Marks (Mn) across several blocks.
+    if cp >= 0x0300 && cp <= 0x036F { return true; }
+    if cp >= 0x0483 && cp <= 0x0489 { return true; }   // Cyrillic combining
+    if cp >= 0x0591 && cp <= 0x05BD { return true; }   // Hebrew points
+    if cp == 0x05BF || cp == 0x05C1 || cp == 0x05C2 { return true; }
+    if cp == 0x05C4 || cp == 0x05C5 || cp == 0x05C7 { return true; }
+    if cp >= 0x0610 && cp <= 0x061A { return true; }   // Arabic
+    if cp >= 0x064B && cp <= 0x065F { return true; }   // Arabic diacritics
+    if cp == 0x0670 { return true; }
+    if cp >= 0x06D6 && cp <= 0x06DC { return true; }
+    if cp >= 0x06DF && cp <= 0x06E4 { return true; }
+    if cp >= 0x06E7 && cp <= 0x06E8 { return true; }
+    if cp >= 0x06EA && cp <= 0x06ED { return true; }
+    if cp == 0x0711 { return true; }
+    if cp >= 0x0730 && cp <= 0x074A { return true; }   // Syriac
+    if cp >= 0x07A6 && cp <= 0x07B0 { return true; }   // Thaana
+    if cp >= 0x07EB && cp <= 0x07F3 { return true; }   // N'Ko
+    if cp >= 0x0816 && cp <= 0x0819 { return true; }
+    if cp >= 0x081B && cp <= 0x0823 { return true; }
+    if cp >= 0x0825 && cp <= 0x0827 { return true; }
+    if cp >= 0x0829 && cp <= 0x082D { return true; }
+    if cp >= 0x0859 && cp <= 0x085B { return true; }
+    if cp >= 0x08D3 && cp <= 0x08E1 { return true; }
+    if cp >= 0x08E3 && cp <= 0x0902 { return true; }   // Devanagari
+    if cp == 0x093A || cp == 0x093C { return true; }
+    if cp >= 0x0941 && cp <= 0x0948 { return true; }
+    if cp == 0x094D { return true; }
+    if cp >= 0x0951 && cp <= 0x0957 { return true; }
+    if cp >= 0x0962 && cp <= 0x0963 { return true; }
+    if cp == 0x0981 || cp == 0x09BC { return true; }   // Bengali
+    if cp >= 0x09C1 && cp <= 0x09C4 { return true; }
+    if cp == 0x09CD { return true; }
+    if cp >= 0x09E2 && cp <= 0x09E3 { return true; }
+    if cp >= 0x0A01 && cp <= 0x0A02 { return true; }   // Gurmukhi
+    if cp == 0x0A3C { return true; }
+    if cp >= 0x0A41 && cp <= 0x0A42 { return true; }
+    if cp >= 0x0A47 && cp <= 0x0A48 { return true; }
+    if cp >= 0x0A4B && cp <= 0x0A4D { return true; }
+    if cp == 0x0A51 { return true; }
+    if cp >= 0x0A70 && cp <= 0x0A71 { return true; }
+    if cp == 0x0A75 { return true; }
+    if cp >= 0x0A81 && cp <= 0x0A82 { return true; }   // Gujarati
+    if cp == 0x0ABC { return true; }
+    if cp >= 0x0AC1 && cp <= 0x0AC5 { return true; }
+    if cp >= 0x0AC7 && cp <= 0x0AC8 { return true; }
+    if cp == 0x0ACD { return true; }
+    if cp >= 0x0AE2 && cp <= 0x0AE3 { return true; }
+    if cp >= 0x0AFA && cp <= 0x0AFF { return true; }
 
-    if b0 < 0xE0 && bytes.len() >= 2 {
-        return ((b0 & 0x1F) << 6) | (bytes[1] as Int & 0x3F);
+    // ZWJ, ZWNJ, LRM, RLM, ALM, LRE/LRO/RLE/RLO/PDF, LRI/RLI/FSI/PDI, WJ.
+    if cp >= 0x200B && cp <= 0x200F { return true; }
+    if cp >= 0x202A && cp <= 0x202E { return true; }
+    if cp >= 0x2060 && cp <= 0x206F { return true; }
+    // BOM / ZWNBSP.
+    if cp == 0xFEFF { return true; }
+
+    // Variation selectors VS1..VS16 and VS17..VS256.
+    if cp >= 0xFE00 && cp <= 0xFE0F { return true; }
+    if cp >= 0xE0100 && cp <= 0xE01EF { return true; }
+
+    // Mongolian variation selectors.
+    if cp >= 0x180B && cp <= 0x180D { return true; }
+
+    // Combining half marks.
+    if cp >= 0xFE20 && cp <= 0xFE2F { return true; }
+
+    // Supplemental combining ranges we care about.
+    if cp >= 0x1AB0 && cp <= 0x1AFF { return true; }
+    if cp >= 0x1DC0 && cp <= 0x1DFF { return true; }
+    if cp >= 0x20D0 && cp <= 0x20FF { return true; }
+
+    false
+}
+
+/// True if the codepoint is East Asian Wide/Fullwidth or an emoji base.
+fn is_wide(cp: Int) -> Bool {
+    // Asian punctuation / Hangul Jamo.
+    if cp >= 0x1100 && cp <= 0x115F { return true; }
+    if cp >= 0x2E80 && cp <= 0x303E { return true; }
+    if cp >= 0x3041 && cp <= 0x33FF { return true; }
+    // CJK Unified Ideographs + Extension A + Compatibility.
+    if cp >= 0x3400 && cp <= 0x4DBF { return true; }
+    if cp >= 0x4E00 && cp <= 0x9FFF { return true; }
+    if cp >= 0xA000 && cp <= 0xA4CF { return true; }
+    // Hangul Syllables.
+    if cp >= 0xAC00 && cp <= 0xD7A3 { return true; }
+    if cp >= 0xF900 && cp <= 0xFAFF { return true; }
+    if cp >= 0xFE30 && cp <= 0xFE4F { return true; }
+    // Fullwidth Forms.
+    if cp >= 0xFF00 && cp <= 0xFF60 { return true; }
+    if cp >= 0xFFE0 && cp <= 0xFFE6 { return true; }
+    // CJK Extensions B..H.
+    if cp >= 0x20000 && cp <= 0x2FFFD { return true; }
+    if cp >= 0x30000 && cp <= 0x3FFFD { return true; }
+
+    // Emoji and pictographs.
+    if is_extended_pictographic(cp) { return true; }
+
+    false
+}
+
+/// Coarse approximation of UTS #51 Extended_Pictographic.
+fn is_extended_pictographic(cp: Int) -> Bool {
+    // Dingbats / symbols.
+    if cp == 0x00A9 || cp == 0x00AE { return true; }
+    if cp == 0x203C || cp == 0x2049 { return true; }
+    if cp == 0x2122 || cp == 0x2139 { return true; }
+    if cp >= 0x2194 && cp <= 0x2199 { return true; }
+    if cp >= 0x21A9 && cp <= 0x21AA { return true; }
+    if cp >= 0x231A && cp <= 0x231B { return true; }
+    if cp == 0x2328 || cp == 0x23CF { return true; }
+    if cp >= 0x23E9 && cp <= 0x23F3 { return true; }
+    if cp >= 0x23F8 && cp <= 0x23FA { return true; }
+    if cp == 0x24C2 { return true; }
+    if cp >= 0x25AA && cp <= 0x25AB { return true; }
+    if cp == 0x25B6 || cp == 0x25C0 { return true; }
+    if cp >= 0x25FB && cp <= 0x25FE { return true; }
+    if cp >= 0x2600 && cp <= 0x26FF { return true; }   // Misc. symbols
+    if cp >= 0x2700 && cp <= 0x27BF { return true; }   // Dingbats
+    if cp == 0x2934 || cp == 0x2935 { return true; }
+    if cp >= 0x2B05 && cp <= 0x2B07 { return true; }
+    if cp >= 0x2B1B && cp <= 0x2B1C { return true; }
+    if cp == 0x2B50 || cp == 0x2B55 { return true; }
+    if cp == 0x3030 || cp == 0x303D { return true; }
+    if cp == 0x3297 || cp == 0x3299 { return true; }
+
+    // Supplementary pictographic ranges.
+    if cp >= 0x1F000 && cp <= 0x1FAFF { return true; }
+    if cp >= 0x1FC00 && cp <= 0x1FFFD { return true; }
+
+    false
+}
+
+/// Regional Indicator Symbols — two in a row form a country flag.
+fn is_regional_indicator(cp: Int) -> Bool {
+    cp >= 0x1F1E6 && cp <= 0x1F1FF
+}
+
+// =============================================================================
+// Back-compat wrapper: old name `char_display_width` still used elsewhere.
+// =============================================================================
+
+/// Deprecated alias — prefer `grapheme_width`.
+public fn char_display_width(s: &Text) -> Int {
+    grapheme_width(s)
+}
+
+// =============================================================================
+// UTF-8 decoding (byte-indexed, no allocation)
+// =============================================================================
+
+/// Decode a single UTF-8 codepoint starting at `idx`. Returns `(codepoint,
+/// byte_length)` — `byte_length == 0` signals a malformed sequence and the
+/// caller must advance by at least 1 to make progress.
+fn decode_utf8_at(bytes: &[Byte], idx: Int) -> (Int, Int) {
+    let n = bytes.len();
+    if idx >= n { return (0, 0); }
+
+    let b0 = bytes[idx] as Int;
+
+    if b0 < 0x80 {
+        return (b0, 1);
     }
-    if b0 < 0xF0 && bytes.len() >= 3 {
-        return ((b0 & 0x0F) << 12)
-             | ((bytes[1] as Int & 0x3F) << 6)
-             | (bytes[2] as Int & 0x3F);
+    if b0 < 0xC2 {
+        // Continuation or overlong — malformed; skip one byte.
+        return (0xFFFD, 1);
     }
-    if b0 < 0xF8 && bytes.len() >= 4 {
-        return ((b0 & 0x07) << 18)
-             | ((bytes[1] as Int & 0x3F) << 12)
-             | ((bytes[2] as Int & 0x3F) << 6)
-             | (bytes[3] as Int & 0x3F);
+    if b0 < 0xE0 {
+        if idx + 1 >= n { return (0xFFFD, 1); }
+        let b1 = bytes[idx + 1] as Int;
+        if (b1 & 0xC0) != 0x80 { return (0xFFFD, 1); }
+        return (((b0 & 0x1F) << 6) | (b1 & 0x3F), 2);
+    }
+    if b0 < 0xF0 {
+        if idx + 2 >= n { return (0xFFFD, 1); }
+        let b1 = bytes[idx + 1] as Int;
+        let b2 = bytes[idx + 2] as Int;
+        if (b1 & 0xC0) != 0x80 || (b2 & 0xC0) != 0x80 { return (0xFFFD, 1); }
+        return (((b0 & 0x0F) << 12) | ((b1 & 0x3F) << 6) | (b2 & 0x3F), 3);
+    }
+    if b0 < 0xF8 {
+        if idx + 3 >= n { return (0xFFFD, 1); }
+        let b1 = bytes[idx + 1] as Int;
+        let b2 = bytes[idx + 2] as Int;
+        let b3 = bytes[idx + 3] as Int;
+        if (b1 & 0xC0) != 0x80 || (b2 & 0xC0) != 0x80 || (b3 & 0xC0) != 0x80 {
+            return (0xFFFD, 1);
+        }
+        return (
+            ((b0 & 0x07) << 18)
+              | ((b1 & 0x3F) << 12)
+              | ((b2 & 0x3F) << 6)
+              | (b3 & 0x3F),
+            4
+        );
     }
 
-    0xFFFD  // Replacement character
+    // Invalid lead byte — skip to resync.
+    (0xFFFD, 1)
 }

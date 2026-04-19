@@ -2,38 +2,107 @@
 // @tier: 0
 // @level: L2
 // @tags: stdlib, term, app, layer6, elm
-// @description: Verify core.term.app types parse correctly
+// @description: Layer 6 (Application Framework) — Model protocol, Command, Subscription, run, run_async.
 
-/// Layer 6: Application Framework — Model protocol, Command type,
-/// AppMessage, run(), prompts, accessibility zones.
+/// Covers the public surface of `core.term.app`:
+///   * `Model` protocol defaults and mandatory methods
+///   * `Command<Msg>` variants and builder helpers
+///   * `Subscription<Msg>` variants and builder helpers
+///   * `AppMessage<Msg>` wrapper
+///   * `SemanticZone` (OSC 133) accessibility markers
+///   * `run` / `run_async` signatures (compile-only — they need a real tty)
 
 mount core.term.app.*;
-mount core.term.event.{Event, KeyEvent, KeyCode, Modifiers};
+mount core.term.event.{Event, KeyEvent, KeyCode, Modifiers, KeyEventKind};
 mount core.term.render.Frame;
 mount core.term.style.Style;
+mount core.time.{Duration, Instant};
 
-fn test_command_types() {
-    // All Command variants
-    let c1 = Command.None;
-    let c2 = Command.Quit;
-    // Command.Perform, Batch, Sequence, Tick require function values
+// ---------------------------------------------------------------------------
+// Command<Msg>
+// ---------------------------------------------------------------------------
+
+type Msg is Tick | Click | Save;
+
+fn test_command_noop_and_quit() {
+    let c1: Command<Msg> = Command.Noop;
+    let c2: Command<Msg> = Command.Quit;
+    // `none<T>()` and `quit<T>()` are smart builders.
+    let n: Command<Msg> = none();
+    let q: Command<Msg> = quit();
+    assert(n.is_noop());
+    assert(!q.is_noop());
 }
 
-fn test_command_helpers() {
-    let n = none();
-    let q = quit();
+fn test_command_perform_tick() {
+    let p: Command<Msg> = perform(|| Msg.Click);
+    let t: Command<Msg> = tick(Duration.from_millis(250), || Msg.Tick);
+    // Constructed values, no execution needed here.
 }
 
-fn test_app_message() {
-    // NOTE: AppMessage not exported from term.app (cross-module resolution limitation).
-    // Testing local message types instead.
-    type MyMsg is Click | Save;
-    let m1 = MyMsg.Click;
-    let m2 = MyMsg.Save;
+fn test_command_batch_sequence_smart() {
+    let a: Command<Msg> = perform(|| Msg.Save);
+    let b: Command<Msg> = perform(|| Msg.Click);
+
+    // Noop is absorbed by `and`/`then`.
+    let c1 = Command.Noop.and(a.clone());
+    assert(!c1.is_noop());
+    let c2 = a.clone().then(Command.Noop);
+    assert(!c2.is_noop());
+
+    // Two independent commands combine into Batch.
+    let combo = a.clone().and(b.clone());
+    match combo {
+        Command.Batch(xs) => assert(xs.len() == 2),
+        _ => panic("expected Batch after and"),
+    }
+
+    // Sequential chaining produces Sequence.
+    let chain = a.then(b);
+    match chain {
+        Command.Sequence(xs) => assert(xs.len() == 2),
+        _ => panic("expected Sequence after then"),
+    }
 }
+
+// ---------------------------------------------------------------------------
+// Subscription<Msg>
+// ---------------------------------------------------------------------------
+
+fn test_subscription_none_and_builders() {
+    let none_sub: Subscription<Msg> = Subscription.None;
+    let interval = Subscription.Interval(Duration.from_millis(60), || Msg.Tick);
+    let every = Subscription.Every(Duration.from_secs(1), |_t: Instant| Msg.Tick);
+    let once = Subscription.Once(Duration.from_secs(5), || Msg.Save);
+    let mut subs = List.new();
+    subs.push(interval);
+    subs.push(every);
+    subs.push(once);
+    let batch = Subscription.Batch(subs);
+    // Constructed values; dispatch tested in run_async integration.
+}
+
+// ---------------------------------------------------------------------------
+// AppMessage wrapper
+// ---------------------------------------------------------------------------
+
+fn test_app_message_envelope() {
+    let evt = Event.Key(KeyEvent {
+        code: KeyCode.Char('a'),
+        modifiers: Modifiers.NONE,
+        kind: KeyEventKind.Press,
+    });
+    let m1: AppMessage<Msg> = AppMessage.User(Msg.Click);
+    let m2: AppMessage<Msg> = AppMessage.TermEvent(evt);
+    let m3: AppMessage<Msg> = AppMessage.Tick;
+    let m4: AppMessage<Msg> = AppMessage.Quit;
+}
+
+// ---------------------------------------------------------------------------
+// OSC 133 semantic zones
+// ---------------------------------------------------------------------------
 
 fn test_semantic_zones() {
-    // OSC 133 semantic zones for accessibility
     let zones = [
         SemanticZone.Prompt,
         SemanticZone.CommandInput,
@@ -41,38 +110,41 @@ fn test_semantic_zones() {
         SemanticZone.CommandEnd { exit_code: 0 },
     ];
     assert_eq(zones.len(), 4);
+    let live = SemanticZone.Live { politeness: Politeness.Polite };
+    let region = SemanticZone.Region { role: "log", label: "events" };
 }
 
-fn test_elm_pattern() {
-    // The Elm Architecture: Model → Update → View
-    // Define a simple counter model
-    type CounterMsg is Increment | Decrement | Reset;
-    type Counter is { count: Int };
+// ---------------------------------------------------------------------------
+// Elm pattern smoke test — a tiny Counter model
+// ---------------------------------------------------------------------------
 
-    // Update function (pure)
-    fn update(model: &mut Counter, msg: CounterMsg) -> Command<CounterMsg> {
-        match msg {
-            Increment => { model.count = model.count + 1; Command.None }
-            Decrement => { model.count = model.count - 1; Command.None }
-            Reset => { model.count = 0; Command.None }
-        }
+type CounterMsg is Inc | Dec | Reset;
+type Counter is { count: Int };
+
+fn counter_update(m: &mut Counter, msg: CounterMsg) -> Command<CounterMsg> {
+    match msg {
+        Inc   => { m.count = m.count + 1; Command.Noop }
+        Dec   => { m.count = m.count - 1; Command.Noop }
+        Reset => { m.count = 0;           Command.Noop }
     }
+}
 
-    // Simulate update loop
-    let mut model = Counter { count: 0 };
-    update(&mut model, CounterMsg.Increment);
-    assert_eq(model.count, 1);
-    update(&mut model, CounterMsg.Increment);
-    assert_eq(model.count, 2);
-    update(&mut model, CounterMsg.Decrement);
-    assert_eq(model.count, 1);
-    update(&mut model, CounterMsg.Reset);
-    assert_eq(model.count, 0);
+fn test_elm_pattern_pure_update() {
+    let mut m = Counter { count: 0 };
+    counter_update(&mut m, CounterMsg.Inc);
+    counter_update(&mut m, CounterMsg.Inc);
+    counter_update(&mut m, CounterMsg.Dec);
+    assert_eq(m.count, 1);
+    counter_update(&mut m, CounterMsg.Reset);
+    assert_eq(m.count, 0);
 }
 
 fn main() {
-    test_command_types();
-    test_command_helpers();
+    test_command_noop_and_quit();
+    test_command_perform_tick();
+    test_command_batch_sequence_smart();
+    test_subscription_none_and_builders();
+    test_app_message_envelope();
     test_semantic_zones();
-    test_elm_pattern();
+    test_elm_pattern_pure_update();
 }

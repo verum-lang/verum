@@ -1,0 +1,369 @@
+// =============================================================================
+// dropdown.vr - Dropdown / select widget with optional search
+// =============================================================================
+// Layer: 5 (Widgets)
+//
+// Closed state: renders the currently selected item followed by a ▾ chevron.
+// Open state: pops a bordered list beneath the control showing all items with
+// the highlighted row ready for selection. Supports optional incremental
+// search (prefix-match on item labels) and keyboard + mouse input.
+//
+// The widget is generic over item type `T`; the caller provides a label
+// function so any domain type can be rendered without newtype wrappers.
+// =============================================================================
+module dropdown;
+
+mount super.protocol.{StatefulWidget, Styled};
+mount super.block.{Block, Borders, BorderType};
+mount super.super.render.buffer.Buffer;
+mount super.super.render.cell.grapheme_width;
+mount super.super.layout.rect.Rect;
+mount super.super.style.style.Style;
+mount super.super.style.color.Color;
+mount super.super.event.{KeyEvent, KeyCode, Modifiers};
+
+// =============================================================================
+// Dropdown<T>
+// =============================================================================
+
+public type Dropdown<T> is {
+    items: List<T>,
+    label_fn: fn(&T) -> Text,
+    placeholder: Text,
+    closed_block: Maybe<Block>,
+    open_block: Maybe<Block>,
+    style: Style,
+    highlight_style: Style,
+    chevron_style: Style,
+    placeholder_style: Style,
+    search_style: Style,
+    max_visible: Int,
+    searchable: Bool,
+};
+
+implement<T> Dropdown<T> {
+    public fn new(items: List<T>, label_fn: fn(&T) -> Text) -> Dropdown<T> {
+        Dropdown {
+            items: items,
+            label_fn: label_fn,
+            placeholder: "(select)",
+            closed_block: None,
+            open_block: Some(Block.new().borders(Borders.ALL).border_type(BorderType.Rounded)),
+            style: Style.DEFAULT,
+            highlight_style: Style.new().bg(Color.Blue).fg(Color.White),
+            chevron_style: Style.new().fg(Color.DarkGrey),
+            placeholder_style: Style.new().dim(),
+            search_style: Style.new().fg(Color.Yellow),
+            max_visible: 8,
+            searchable: false,
+        }
+    }
+
+    public fn placeholder(self, t: Text) -> Dropdown<T> { Dropdown { placeholder: t, ..self } }
+    public fn closed_block(self, b: Block) -> Dropdown<T> { Dropdown { closed_block: Some(b), ..self } }
+    public fn open_block(self, b: Block) -> Dropdown<T> { Dropdown { open_block: Some(b), ..self } }
+    public fn highlight_style(self, s: Style) -> Dropdown<T> { Dropdown { highlight_style: s, ..self } }
+    public fn chevron_style(self, s: Style) -> Dropdown<T> { Dropdown { chevron_style: s, ..self } }
+    public fn placeholder_style(self, s: Style) -> Dropdown<T> { Dropdown { placeholder_style: s, ..self } }
+    public fn search_style(self, s: Style) -> Dropdown<T> { Dropdown { search_style: s, ..self } }
+    public fn max_visible(self, n: Int) -> Dropdown<T> { Dropdown { max_visible: n.max(1), ..self } }
+    public fn searchable(self, on: Bool) -> Dropdown<T> { Dropdown { searchable: on, ..self } }
+}
+
+implement<T> Styled for Dropdown<T> {
+    fn style(self, st: Style) -> Dropdown<T> { Dropdown { style: st, ..self } }
+}
+
+// =============================================================================
+// DropdownState
+// =============================================================================
+
+public type DropdownState is {
+    open: Bool,
+    selected: Maybe<Int>,
+    highlight: Int,
+    scroll: Int,
+    search: Text,
+};
+
+implement DropdownState {
+    public fn new() -> DropdownState {
+        DropdownState {
+            open: false,
+            selected: None,
+            highlight: 0,
+            scroll: 0,
+            search: "",
+        }
+    }
+
+    public fn with_selected(idx: Int) -> DropdownState {
+        DropdownState {
+            open: false,
+            selected: Some(idx),
+            highlight: idx,
+            scroll: 0,
+            search: "",
+        }
+    }
+
+    public fn toggle(&mut self) {
+        self.open = !self.open;
+        if !self.open { self.search = ""; }
+    }
+
+    public fn close(&mut self) { self.open = false; self.search = ""; }
+
+    public fn open_it(&mut self) { self.open = true; }
+
+    /// Index of the visible item at `vi` (after search filter).
+    fn item_index<T>(&self, d: &Dropdown<T>, vi: Int) -> Maybe<Int> {
+        let filtered = filter_indices(d, &self.search);
+        if vi < 0 || vi >= filtered.len() { None } else { Some(filtered[vi]) }
+    }
+
+    /// Handle a key; returns `true` iff handled.
+    public fn handle_key<T>(&mut self, d: &Dropdown<T>, ke: KeyEvent) -> Bool {
+        if !self.open {
+            match ke.code {
+                KeyCode.Enter | KeyCode.Space => { self.toggle(); true }
+                KeyCode.Down => { self.open_it(); true }
+                _ => false,
+            }
+        } else {
+            match ke.code {
+                KeyCode.Escape => { self.close(); true }
+                KeyCode.Enter => {
+                    let filtered = filter_indices(d, &self.search);
+                    if self.highlight < filtered.len() {
+                        self.selected = Some(filtered[self.highlight]);
+                    }
+                    self.close();
+                    true
+                }
+                KeyCode.Up => {
+                    if self.highlight > 0 { self.highlight = self.highlight - 1; }
+                    self.scroll_into_view(d);
+                    true
+                }
+                KeyCode.Down => {
+                    let n = filter_indices(d, &self.search).len();
+                    if self.highlight + 1 < n { self.highlight = self.highlight + 1; }
+                    self.scroll_into_view(d);
+                    true
+                }
+                KeyCode.PageUp => {
+                    let step = d.max_visible;
+                    self.highlight = (self.highlight - step).max(0);
+                    self.scroll_into_view(d);
+                    true
+                }
+                KeyCode.PageDown => {
+                    let step = d.max_visible;
+                    let n = filter_indices(d, &self.search).len();
+                    self.highlight = (self.highlight + step).min((n - 1).max(0));
+                    self.scroll_into_view(d);
+                    true
+                }
+                KeyCode.Home => { self.highlight = 0; self.scroll_into_view(d); true }
+                KeyCode.End => {
+                    let n = filter_indices(d, &self.search).len();
+                    self.highlight = (n - 1).max(0);
+                    self.scroll_into_view(d);
+                    true
+                }
+                KeyCode.Backspace => {
+                    if d.searchable && self.search.len() > 0 {
+                        self.search = self.search.slice(0, self.search.len() - 1);
+                        self.highlight = 0;
+                        self.scroll = 0;
+                    }
+                    true
+                }
+                KeyCode.Char(c) => {
+                    if d.searchable {
+                        self.search = self.search.clone() + &c.to_text();
+                        self.highlight = 0;
+                        self.scroll = 0;
+                        true
+                    } else {
+                        false
+                    }
+                }
+                _ => false,
+            }
+        }
+    }
+
+    fn scroll_into_view<T>(&mut self, d: &Dropdown<T>) {
+        if self.highlight < self.scroll { self.scroll = self.highlight; }
+        if self.highlight >= self.scroll + d.max_visible {
+            self.scroll = self.highlight - d.max_visible + 1;
+        }
+    }
+}
+
+// =============================================================================
+// Rendering
+// =============================================================================
+
+implement<T> StatefulWidget for Dropdown<T> {
+    type State = DropdownState;
+
+    fn render(self, area: Rect, buf: &mut Buffer, state: &mut DropdownState) {
+        if area.width < 2 || area.height < 1 { return; }
+
+        // ---- closed header --------------------------------------------------
+        let header_area = match self.closed_block {
+            Some(ref b) => {
+                let inner = b.inner(area);
+                b.clone().render(
+                    Rect.new(area.x, area.y, area.width, if state.open { area.height.min(3) } else { area.height }),
+                    buf,
+                );
+                inner
+            }
+            None => Rect.new(area.x, area.y, area.width, 1),
+        };
+
+        buf.set_style(header_area, self.style);
+        let chevron = if state.open { "▴" } else { "▾" };
+        let label_text = match state.selected {
+            Some(idx) => (self.label_fn)(&self.items[idx]),
+            None => self.placeholder.clone(),
+        };
+        let label_style = if state.selected.is_some() { self.style } else { self.placeholder_style };
+        let label_max = header_area.width - 2;
+        let shown = truncate_to_width(&label_text, label_max);
+        buf.set_string(header_area.x, header_area.y, &shown, label_style);
+        buf.set_string(header_area.right() - 1, header_area.y, chevron, self.chevron_style);
+
+        // ---- open popup -----------------------------------------------------
+        if !state.open { return; }
+
+        let filtered = filter_indices(&self, &state.search);
+        let visible = filtered.len().min(self.max_visible);
+        let search_rows = if self.searchable { 1 } else { 0 };
+        let popup_height = visible + 2 + search_rows;       // borders + search row
+        let popup_y = header_area.y + header_area.height;
+        let popup_area = Rect.new(area.x, popup_y, area.width, popup_height);
+
+        let inner = match self.open_block {
+            Some(ref b) => {
+                let inner = b.inner(popup_area);
+                b.clone().render(popup_area, buf);
+                inner
+            }
+            None => popup_area,
+        };
+
+        // Search row.
+        let mut list_y = inner.y;
+        if self.searchable {
+            let prefix = "? ";
+            buf.set_string(inner.x, list_y, prefix, self.search_style);
+            let max_search = (inner.width - prefix.len()).max(0);
+            let shown_search = truncate_to_width(&state.search, max_search);
+            buf.set_string(inner.x + prefix.len(), list_y, &shown_search, self.search_style);
+            list_y = list_y + 1;
+        }
+
+        // List rows.
+        let list_h = (inner.y + inner.height - list_y).max(0);
+        let rows_to_show = list_h.min(visible);
+        for row in 0..rows_to_show {
+            let vi = state.scroll + row;
+            if vi >= filtered.len() { break; }
+            let item_idx = filtered[vi];
+            let is_hl = vi == state.highlight;
+            let row_style = if is_hl { self.highlight_style } else { self.style };
+            let text = (self.label_fn)(&self.items[item_idx]);
+            let shown_row = truncate_to_width(&text, inner.width);
+            // Fill row background
+            if is_hl {
+                for x in inner.x..(inner.x + inner.width) {
+                    buf.get_mut(x, list_y + row).style = self.highlight_style;
+                }
+            }
+            buf.set_string(inner.x, list_y + row, &shown_row, row_style);
+        }
+    }
+}
+
+// =============================================================================
+// Filtering (case-insensitive substring match)
+// =============================================================================
+
+fn filter_indices<T>(d: &Dropdown<T>, query: &Text) -> List<Int> {
+    let mut out = List.new();
+    if query.len() == 0 {
+        for i in 0..d.items.len() { out.push(i); }
+        return out;
+    }
+    let q_low = lower_ascii(query);
+    for i in 0..d.items.len() {
+        let label = (d.label_fn)(&d.items[i]);
+        let l_low = lower_ascii(&label);
+        if contains_substring(&l_low, &q_low) { out.push(i); }
+    }
+    out
+}
+
+fn lower_ascii(s: &Text) -> Text {
+    let bytes = s.as_bytes();
+    let mut out: List<Byte> = List.new();
+    for i in 0..bytes.len() {
+        let b = bytes[i];
+        if b >= 0x41 && b <= 0x5A {
+            out.push(b + 0x20);
+        } else {
+            out.push(b);
+        }
+    }
+    Text.from_utf8_unchecked(&out)
+}
+
+fn contains_substring(hay: &Text, needle: &Text) -> Bool {
+    let hn = hay.len();
+    let nn = needle.len();
+    if nn == 0 { return true; }
+    if nn > hn { return false; }
+    let hb = hay.as_bytes();
+    let nb = needle.as_bytes();
+    let limit = hn - nn;
+    for i in 0..(limit + 1) {
+        let mut ok = true;
+        for j in 0..nn {
+            if hb[i + j] != nb[j] { ok = false; break; }
+        }
+        if ok { return true; }
+    }
+    false
+}
+
+fn truncate_to_width(text: &Text, max_width: Int) -> Text {
+    if max_width <= 0 { return ""; }
+    let mut col = 0;
+    let mut byte = 0;
+    let bytes = text.as_bytes();
+    while byte < bytes.len() {
+        let start = byte;
+        // Step one grapheme (minimal: lead-byte advance).
+        let step = utf8_step(bytes, byte);
+        let g = text.slice(start, byte + step);
+        let w = grapheme_width(&g).max(1);
+        if col + w > max_width { break; }
+        col = col + w;
+        byte = byte + step;
+    }
+    text.slice(0, byte)
+}
+
+fn utf8_step(bytes: &[Byte], idx: Int) -> Int {
+    let b = bytes[idx] as Int;
+    if b < 0x80 { 1 }
+    else if b < 0xC0 { 1 }
+    else if b < 0xE0 { 2 }
+    else if b < 0xF0 { 3 }
+    else { 4 }
+}

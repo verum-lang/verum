@@ -1,0 +1,71 @@
+// @test: parse-pass
+// @tier: 0
+// @level: L2
+// @tags: stdlib, term, raw, capabilities, detection
+// @description: Terminal capability detection — ColorProfile, UnicodeSupport, MouseProtocol.
+
+mount core.term.raw.{
+    TermCapabilities, ColorProfile, UnicodeSupport, MouseProtocol,
+};
+
+fn test_all_color_profiles() {
+    let profiles = [
+        ColorProfile.NoColor,
+        ColorProfile.Base16,
+        ColorProfile.Ansi256,
+        ColorProfile.TrueColor,
+    ];
+    assert_eq(profiles.len(), 4);
+}
+
+fn test_all_unicode_levels() {
+    let levels = [
+        UnicodeSupport.AsciiOnly,
+        UnicodeSupport.BasicWidth,
+        UnicodeSupport.Full,
+    ];
+    assert_eq(levels.len(), 3);
+}
+
+fn test_all_mouse_protocols() {
+    let mice = [
+        MouseProtocol.None,
+        MouseProtocol.X10,
+        MouseProtocol.Normal,
+        MouseProtocol.Sgr,
+    ];
+    assert_eq(mice.len(), 4);
+}
+
+fn test_build_capabilities_struct() {
+    let c = TermCapabilities {
+        color_profile: ColorProfile.TrueColor,
+        unicode_support: UnicodeSupport.Full,
+        mouse_protocol: MouseProtocol.Sgr,
+        has_alternate_screen: true,
+        has_synchronized_output: true,
+        has_bracketed_paste: true,
+        has_focus_events: true,
+        has_kitty_keyboard: false,
+        has_kitty_graphics: false,
+        has_sixel: false,
+        has_iterm_images: false,
+        has_hyperlinks: true,
+        has_osc52_clipboard: true,
+        has_cursor_shape: true,
+        term_name: "xterm-256color",
+        term_program: Some("kitty"),
+        is_tmux: false,
+        is_screen: false,
+    };
+    assert_eq(c.term_name, "xterm-256color");
+    assert(c.has_bracketed_paste);
+    assert(!c.is_tmux);
+}
+
+fn main() {
+    test_all_color_profiles();
+    test_all_unicode_levels();
+    test_all_mouse_protocols();
+    test_build_capabilities_struct();
+}
