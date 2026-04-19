@@ -28,6 +28,9 @@ verum_parser = { workspace = true }
 verum_fast_parser = { workspace = true }
 verum_types = { workspace = true }
 verum_diagnostics = { workspace = true }
+# Needed so `vtest` can run `Target::initialize_native` before any
+# rayon worker spawns — see the long-form comment in `main.rs`.
+verum_llvm = { workspace = true }
 
 # CLI and argument parsing
 clap = { workspace = true }

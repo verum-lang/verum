@@ -18973,11 +18973,21 @@ impl TypeChecker {
             Type::Generic { name, .. } => name.as_str(),
             _ => return false,
         };
+        // Recognises every sized-integer spelling Verum source can write —
+        // both the canonical UpperCamel forms (`Int8`, `UInt64`, `IntSize`)
+        // and the lower-case Rust-style aliases (`i8`, `u64`, `usize`) that
+        // VCS specs and FFI bindings use freely. Keep these two lists in
+        // sync; they are the same set under different spellings.
         matches!(
             name,
+            // Canonical names
             "Byte" | "UInt8" | "Int8" | "Int16" | "Int32" | "Int64"
                 | "UInt16" | "UInt32" | "UInt64"
-                | "ISize" | "USize" | "Int128" | "UInt128"
+                | "ISize" | "USize" | "IntSize" | "UIntSize"
+                | "Int128" | "UInt128"
+            // Lower-case aliases
+                | "i8" | "i16" | "i32" | "i64" | "i128" | "isize"
+                | "u8" | "u16" | "u32" | "u64" | "u128" | "usize"
         )
     }
 
@@ -18988,7 +18998,7 @@ impl TypeChecker {
             Type::Generic { name, .. } => name.as_str(),
             _ => return false,
         };
-        matches!(name, "Float32")
+        matches!(name, "Float32" | "Float64" | "f32" | "f64")
     }
 
     /// Infer type for binary operation.
@@ -20157,14 +20167,26 @@ impl TypeChecker {
                 }
 
                 // Bits is valid for Numeric types (sized integers and floats)
+                // and built-in `Bool` (stored as 1 byte = 8 bits) /
+                // `Char` (UTF-32 code point = 32 bits).
+                //
+                // The protocol-implements check covers stdlib-defined Numeric
+                // types; we additionally short-circuit on the lexer's built-in
+                // sized integer / float spellings (`Int8`, `UInt32`, `IntSize`,
+                // `i8`, `u64`, `usize`, `f32`, …) so VCS specs like
+                // `vbc/micro/type_properties/{int_bits,builtin_properties}.vr`
+                // typecheck without needing each alias to explicitly
+                // `implement Numeric`.
                 TypeProperty::Bits => {
-                    if matches!(resolved_ty, Type::Int | Type::Float)
+                    if matches!(resolved_ty, Type::Int | Type::Float | Type::Bool | Type::Char)
+                        || Self::is_sized_integer_type(&resolved_ty)
+                        || Self::is_float_like_type(&resolved_ty)
                         || self.protocol_checker.read().implements_protocol(&resolved_ty, "Numeric") {
                         Ok(InferResult::new(Type::int()))
                     } else {
                         Err(TypeError::Other(verum_common::Text::from(format!(
                             "Type property 'bits' is only valid for sized numeric types, but got '{}'.\n  \
-                             Hint: Use '.bits' with types like Int, Float, i8, i16, i32, i64, u8, u16, u32, u64, f32, f64",
+                             Hint: Use '.bits' with types like Int, Float, Bool, Char, i8, i16, i32, i64, u8, u16, u32, u64, f32, f64",
                             resolved_ty
                         ))))
                     }
@@ -20173,6 +20195,8 @@ impl TypeChecker {
                 // Min and max are valid for Numeric types
                 TypeProperty::Min | TypeProperty::Max => {
                     if matches!(resolved_ty, Type::Int | Type::Float)
+                        || Self::is_sized_integer_type(&resolved_ty)
+                        || Self::is_float_like_type(&resolved_ty)
                         || self.protocol_checker.read().implements_protocol(&resolved_ty, "Numeric") {
                         Ok(InferResult::new(resolved_ty))
                     } else {

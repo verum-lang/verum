@@ -638,6 +638,23 @@ fn tags_to_set(tags: &[Text]) -> Set<Text> {
 }
 
 fn main() -> ExitCode {
+    // Eager native-target initialisation — eliminates a nondeterministic
+    // SIGSEGV in LLVM pass-constructor cxa guards (bug #SIGSEGV-arm64, fixed
+    // in `verum_cli::main`). When vtest drives AOT tests through the
+    // `verum_compiler` library, the same LLVM entry points are reached, and
+    // the same race window opens against rayon workers spawned by the stdlib
+    // parse. Running `Target::initialize_native` on the main thread before
+    // any worker exists closes the window; the call is idempotent via an
+    // internal `Once`, so later uses (e.g. inside `VbcToLlvmLowering::new`)
+    // become no-ops.
+    //
+    // Without this guard, `vtest run --parallel 4 specs/L0-critical/vbc`
+    // exits 139 (SIGSEGV) silently before the summary is written — the
+    // symptom that first surfaced the bug on `verum build`.
+    let _ = verum_llvm::targets::Target::initialize_native(
+        &verum_llvm::targets::InitializationConfig::default(),
+    );
+
     // Stack size for type checker threads. Recursive type inference on deeply
     // nested expressions can exceed the default 8MB stack. Measured peak is ~8MB;
     // 64MB provides headroom for complex stdlib modules (272 modules with nested
