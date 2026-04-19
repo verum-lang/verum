@@ -588,8 +588,43 @@ pub fn extract_exports_from_module(
 
                     // For variant types, also export variant constructors as functions
                     // e.g., `type Maybe<T> is None | Some(T)` exports: Maybe (type), None (function), Some (function)
+                    //
+                    // BUT Verum's variant syntax is overloaded — the same `type X is A | B;`
+                    // form is used both for fresh constructors (`type Maybe is None | Some(T)`)
+                    // AND for type unions of pre-existing types (`type AccessMode is ReadOnly | WriteOnly`
+                    // where `ReadOnly` and `WriteOnly` are already-declared unit types). Registering the
+                    // union-case names as new constructors collides with the pre-existing Type
+                    // exports, producing spurious "Conflicting export" warnings.
+                    //
+                    // Disambiguation heuristic: a variant is a fresh constructor only when it
+                    // carries payload data (tuple fields `Some(T)` or record fields `Node { ... }`)
+                    // OR when its name is NOT already exported as a Type in this same module.
+                    // Payload-less, already-declared-as-Type names are type-union references,
+                    // not new constructors, and must not be re-registered.
                     if let verum_ast::decl::TypeDeclBody::Variant(variants) = &type_decl.body {
                         for variant in variants {
+                            let has_payload = match &variant.data {
+                                Maybe::None => false,
+                                Maybe::Some(verum_ast::decl::VariantData::Tuple(fields)) => {
+                                    !fields.is_empty()
+                                }
+                                Maybe::Some(verum_ast::decl::VariantData::Record(fields)) => {
+                                    !fields.is_empty()
+                                }
+                            };
+                            let already_type_in_this_module = match export_table
+                                .get(&Text::from(variant.name.name.as_str()))
+                            {
+                                Maybe::Some(existing) => {
+                                    existing.kind == ExportKind::Type
+                                        && existing.source_module == module_id
+                                }
+                                Maybe::None => false,
+                            };
+                            if !has_payload && already_type_in_this_module {
+                                // Type-union reference, not a fresh constructor. Skip.
+                                continue;
+                            }
                             let variant_exported = ExportedItem::new(
                                 variant.name.name.as_str(),
                                 ExportKind::Function, // Constructors are functions
