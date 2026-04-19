@@ -190,18 +190,98 @@ public type DAG<V, L> is protocol extends Graph<V, L> {
 };
 
 // =============================================================================
-// §7. Standard algorithms (to be filled in as more of T1-Y lands)
+// §7. Standard algorithms — folds over the simplicial structure
+// =============================================================================
+
+/// **Breadth-first search** — fold over level-sets of the face map.
+///
+/// At each level, collect the current frontier's out-neighbourhoods,
+/// dedup against the visited set, and emit them as the next level.
+/// Runs until the frontier is empty; returns the visitation order.
+///
+/// Complexity: O(|V| + |E|) — each vertex and each edge is touched at
+/// most once, provided the graph's `out_edges` and vertex-equality
+/// operations are O(1).
+public fn bfs<V, L, G>(g: &G, start: V) -> List<V>
+    where type G: Graph<V, L>, type V: Eq
+{
+    let mut visited: List<V> = List.new();
+    let mut frontier: List<V> = List.new();
+    visited.push(start.clone());
+    frontier.push(start);
+    while !frontier.is_empty() {
+        let mut next_frontier: List<V> = List.new();
+        for v in frontier.iter() {
+            for edge in g.out_edges(v).iter() {
+                let tgt = edge.tgt.clone();
+                if !visited.contains(&tgt) {
+                    visited.push(tgt.clone());
+                    next_frontier.push(tgt);
+                }
+            }
+        }
+        frontier = next_frontier;
+    }
+    visited
+}
+
+/// **Depth-first search** — coalgebraic unfold from a seed vertex.
+///
+/// Maintains a stack of vertices to visit; at each step pops the top,
+/// marks visited, pushes unvisited out-neighbours. Returns the
+/// visitation order in the order vertices were popped from the stack.
+///
+/// Complexity: O(|V| + |E|) with O(1) vertex equality.
+public fn dfs<V, L, G>(g: &G, start: V) -> List<V>
+    where type G: Graph<V, L>, type V: Eq
+{
+    let mut visited: List<V> = List.new();
+    let mut stack: List<V> = List.new();
+    stack.push(start);
+    while !stack.is_empty() {
+        let v = stack.pop().unwrap();
+        if visited.contains(&v) { continue; }
+        visited.push(v.clone());
+        // Push neighbours in reverse order so the leftmost child
+        // is processed first on the next iteration.
+        let out = g.out_edges(&v);
+        let mut i = out.len();
+        while i > 0 {
+            i = i - 1;
+            let tgt = out[i].tgt.clone();
+            if !visited.contains(&tgt) {
+                stack.push(tgt);
+            }
+        }
+    }
+    visited
+}
+
+/// **Reachability** — `v` is reachable from `start` iff some walk
+/// in the free category on `g` has source `start` and target `v`.
+/// Implemented as BFS membership.
+public fn reachable<V, L, G>(g: &G, start: V, target: V) -> Bool
+    where type G: Graph<V, L>, type V: Eq
+{
+    let visited = bfs(g, start);
+    visited.contains(&target)
+}
+
+/// **Euler characteristic** of a graph viewed as a 1-dimensional
+/// CW-complex: χ(G) = |V| - |E|. Defers to the simplicial-set view
+/// — this is dim 0 minus dim 1 in the face-lattice count.
+public fn euler_characteristic<V, L, G>(g: &G) -> Int
+    where type G: Graph<V, L>
+{
+    g.vertices().len() - g.edges().len()
+}
+
+// =============================================================================
+// Algorithm signatures reserved for T1-Y phase 3
 // =============================================================================
 //
-// Each algorithm is an instance of a general iterator/fold pattern
-// over the graph's simplicial / categorical structure. See T1-Y
-// phase 2 for the full algorithm library — the signatures here pin
-// the canonical names used across the stdlib.
-//
-//   fn bfs<G: Graph<V, L>, V: Eq + Hash>(g: &G, start: &V) -> List<V>;
-//   fn dfs<G: Graph<V, L>, V: Eq + Hash>(g: &G, start: &V) -> List<V>;
 //   fn dijkstra<G: WeightedGraph<V, W>, V: Eq + Hash, W: Ord>(
-//       g: &G, start: &V
+//       g: &G, start: V
 //   ) -> Map<V, W>;
 //   fn topological_sort<G: DAG<V, L>, V: Eq + Hash>(g: &G) -> List<V>;
 //   fn connected_components<G: UndirectedGraph<V, L>, V: Eq + Hash>(
