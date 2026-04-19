@@ -1,0 +1,62 @@
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @description: `proof axiom_name by tactic;` inside implement blocks — T1-R phase 2 step 1.
+//
+// When a protocol declares axioms, the model (`implement P for T`)
+// can discharge them explicitly with `proof name by tactic;`. The
+// full model-verification pass (matching clause to axiom, substituting
+// Self, running tactic) lands in subsequent steps; this anchor locks
+// the parser + AST surface.
+//
+// Inside the implement block:
+//   - `fn …` bodies realise the protocol's method signatures
+//   - `type X = …` bindings pick concrete associated types
+//   - `const X = …` bindings pick concrete associated constants
+//   - `proof X by tactic;` discharges axiom X with the given tactic
+
+type Semigroup is protocol {
+    type Elem;
+    fn op(a: Self.Elem, b: Self.Elem) -> Self.Elem;
+    axiom assoc(a: Self.Elem, b: Self.Elem, c: Self.Elem) ensures true;
+};
+
+type Monoid is protocol {
+    type Elem;
+    fn unit() -> Self.Elem;
+    fn op(a: Self.Elem, b: Self.Elem) -> Self.Elem;
+    axiom left_unit(x: Self.Elem) ensures true;
+    axiom right_unit(x: Self.Elem) ensures true;
+    axiom assoc(a: Self.Elem, b: Self.Elem, c: Self.Elem) ensures true;
+};
+
+type IntSemigroup is ();
+implement Semigroup for IntSemigroup {
+    type Elem = Int;
+    fn op(a: Int, b: Int) -> Int { a + b }
+    proof assoc by ring;
+}
+
+type IntMonoid is ();
+implement Monoid for IntMonoid {
+    type Elem = Int;
+    fn unit() -> Int { 0 }
+    fn op(a: Int, b: Int) -> Int { a + b }
+    proof left_unit by ring;
+    proof right_unit by ring;
+    proof assoc by ring;
+}
+
+// Explicit tactic combinators inside proof clauses — proves the
+// generality of the tactic-expr grammar integration.
+type BoolOr is ();
+implement Monoid for BoolOr {
+    type Elem = Bool;
+    fn unit() -> Bool { false }
+    fn op(a: Bool, b: Bool) -> Bool { a || b }
+    proof left_unit by try { smt } else { auto };
+    proof right_unit by auto;
+    proof assoc by simp;
+}
+
+fn main() { }

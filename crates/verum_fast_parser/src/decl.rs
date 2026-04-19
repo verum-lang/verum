@@ -4443,6 +4443,36 @@ impl<'a> RecursiveParser<'a> {
             }
         }
 
+        // Proof clause — `proof axiom_name by tactic;` (T1-R phase 2).
+        //
+        // Inside an `implement P for T { … }` block, this discharges
+        // the named axiom from protocol P using the given tactic. The
+        // model-verification phase matches the name against P's axiom
+        // list and runs the tactic against the self-substituted
+        // proposition instead of the default auto_prove.
+        if self.stream.check(&TokenKind::Proof) {
+            self.stream.advance();
+            let axiom_name_str = self.consume_ident_or_any_keyword()?;
+            let axiom_name_span = self.stream.current_span();
+            self.stream.expect(TokenKind::By)?;
+            // Use parse_tactic_primary (single tactic) rather than
+            // parse_tactic_expr (sequence) so that `;` terminates the
+            // proof-clause — otherwise a subsequent `proof X by …;`
+            // would be greedily absorbed as a continuation.
+            let tactic = self.parse_tactic_primary()?;
+            self.stream.consume(&TokenKind::Semicolon);
+            let span = self.stream.make_span(start_pos);
+            return Ok(ImplItem {
+                attributes: attributes.into_iter().collect(),
+                visibility: vis,
+                kind: ImplItemKind::Proof {
+                    axiom_name: Ident::new(axiom_name_str, axiom_name_span),
+                    tactic,
+                },
+                span,
+            });
+        }
+
         // Type alias
         if self.stream.check(&TokenKind::Type) {
             self.stream.advance();

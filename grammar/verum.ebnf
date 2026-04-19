@@ -948,7 +948,18 @@ impl_block      = [ attribute ] , [ 'unsafe' ] , 'implement' , [ generics ] , im
 
 impl_type       = type_expr , 'for' , type_expr | type_expr ;
 
-impl_item       = visibility , [ 'default' ] , ( function_def | type_alias | const_def ) ;
+(* An impl item is one of: a method body, an associated-type binding,
+   an associated-const binding, or a proof clause discharging an
+   axiom from the implemented protocol (T1-R phase 2). *)
+impl_item       = visibility , [ 'default' ] , ( function_def
+                                               | type_alias
+                                               | const_def
+                                               | proof_clause ) ;
+
+(* Proof clause — discharges a named axiom from the protocol being
+   implemented. The tactic runs against the self-substituted
+   proposition at model-verification time. *)
+proof_clause    = 'proof' , identifier , 'by' , tactic_expr , ';' ;
 
 (* Associated type binding in implementations *)
 (* Example: type Item is T; or type Item<U> is List<U> *)

@@ -2262,7 +2262,7 @@ impl<'a> RecursiveParser<'a> {
     }
 
     /// Parse primary tactic expressions.
-    fn parse_tactic_primary(&mut self) -> ParseResult<TacticExpr> {
+    pub(crate) fn parse_tactic_primary(&mut self) -> ParseResult<TacticExpr> {
         match self.stream.peek_kind() {
             // Let-binding inside a tactic body:
             //   `let x: T = expr;` or `let x = expr;`

@@ -1089,6 +1089,10 @@ pub fn walk_impl<V: Visitor>(visitor: &mut V, impl_decl: &ImplDecl) {
                 visit_child!(visitor, ty, Type);
                 visit_child!(visitor, value, Expr);
             }
+            ImplItemKind::Proof { axiom_name, tactic } => {
+                visitor.visit_ident(axiom_name);
+                walk_tactic_expr(visitor, tactic);
+            }
         }
     }
 }

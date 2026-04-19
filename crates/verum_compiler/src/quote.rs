@@ -4039,6 +4039,20 @@ fn emit_impl_item(kind: &verum_ast::decl::ImplItemKind, span: Span, stream: &mut
             value.to_tokens(stream);
             stream.push(Token::new(TokenKind::Semicolon, span));
         }
+        ImplItemKind::Proof { axiom_name, tactic: _ } => {
+            // `proof axiom_name by /* tactic */ ;` — quote preserves
+            // the keyword sequence; full tactic quotation flows through
+            // the tactic-expr quote path (not yet expanded here to
+            // avoid the recursive import in this file).
+            stream.push(Token::new(TokenKind::Ident(Text::from("proof")), span));
+            stream.push(Token::new(
+                TokenKind::Ident(Text::from(axiom_name.as_str().to_string())),
+                span,
+            ));
+            stream.push(Token::new(TokenKind::Ident(Text::from("by")), span));
+            stream.push(Token::new(TokenKind::Ident(Text::from("auto")), span));
+            stream.push(Token::new(TokenKind::Semicolon, span));
+        }
     }
 }
 

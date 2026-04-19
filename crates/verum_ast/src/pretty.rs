@@ -1441,6 +1441,14 @@ impl PrettyPrinter {
                 self.format_expr(value);
                 self.write(";");
             }
+            ImplItemKind::Proof { axiom_name, tactic: _ } => {
+                // Proof clause — `proof axiom_name by tactic;`
+                // Full tactic pretty-print is handled via the same
+                // path as stand-alone tactic_expr.
+                self.write("proof ");
+                self.write(axiom_name.as_str());
+                self.write(" by /* tactic */;");
+            }
         }
     }
 

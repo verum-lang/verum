@@ -1379,6 +1379,30 @@ pub enum ImplItemKind {
     },
     /// Const definition
     Const { name: Ident, ty: Type, value: Expr },
+    /// Axiom proof clause — `proof axiom_name by tactic;`
+    ///
+    /// Inside an `implement P for T { ... }` block, discharges the
+    /// named axiom from protocol `P` using the given tactic. The
+    /// model-verification phase (T1-R) matches the name against `P`'s
+    /// axiom list and runs the tactic against the self-substituted
+    /// proposition instead of the default `auto_prove`.
+    ///
+    /// Example:
+    /// ```verum
+    /// implement Group for IntGroup {
+    ///     type Elem = Int;
+    ///     fn unit() -> Int { 0 }
+    ///     fn mul(a: Int, b: Int) -> Int { a + b }
+    ///     fn inv(a: Int) -> Int { -a }
+    ///     proof assoc     by ring;
+    ///     proof left_unit by ring;
+    ///     proof left_inv  by ring;
+    /// }
+    /// ```
+    Proof {
+        axiom_name: Ident,
+        tactic: crate::decl::TacticExpr,
+    },
 }
 
 impl Spanned for ImplItem {
