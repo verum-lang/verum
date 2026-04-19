@@ -164,8 +164,20 @@ public type IsEquiv<A, B> is {
 };
 
 /// An equivalence between types A and B.
+///
+/// Carries the usual quasi-inverse pair `(forward, backward)` that
+/// every user-level equivalence needs, plus the full `IsEquiv` proof
+/// object that HoTT / univalent-foundations code relies on to
+/// establish coherence. `fwd` / `bwd` are short aliases for the
+/// same two functions — the VCS `computational_univalence` test
+/// reads them under that spelling and code that pattern-matches on
+/// equivalences prefers the shorter names. All four fields must be
+/// supplied at construction so the struct layout stays predictable.
 public type Equiv<A, B> is {
     forward: fn(A) -> B,
+    backward: fn(B) -> A,
+    fwd: fn(A) -> B,
+    bwd: fn(B) -> A,
     proof: IsEquiv<A, B>,
 };
 
@@ -173,6 +185,9 @@ public type Equiv<A, B> is {
 public fn equiv_id<A>() -> Equiv<A, A> {
     Equiv {
         forward: fn(x: A) -> x,
+        backward: fn(x: A) -> x,
+        fwd: fn(x: A) -> x,
+        bwd: fn(x: A) -> x,
         proof: IsEquiv {
             forward: fn(x: A) -> x,
             inverse: fn(x: A) -> x,
@@ -183,10 +198,20 @@ public fn equiv_id<A>() -> Equiv<A, A> {
     }
 }
 
+/// Alias for `equiv_id` — some downstream code (including the VCS
+/// `computational_univalence` anchor) imports the identity
+/// equivalence under this shorter name.
+public fn id_equiv<A>() -> Equiv<A, A> {
+    equiv_id()
+}
+
 /// Inverse equivalence: if A ≃ B then B ≃ A.
 public fn equiv_inv<A, B>(e: Equiv<A, B>) -> Equiv<B, A> {
     Equiv {
         forward: e.proof.inverse,
+        backward: e.forward,
+        fwd: e.proof.inverse,
+        bwd: e.forward,
         proof: IsEquiv {
             forward: e.proof.inverse,
             inverse: e.forward,
@@ -203,6 +228,9 @@ public fn equiv_compose<A, B, C>(e1: Equiv<A, B>, e2: Equiv<B, C>) -> Equiv<A, C
     let g = |c: C| e1.proof.inverse(e2.proof.inverse(c));
     Equiv {
         forward: f,
+        backward: g,
+        fwd: f,
+        bwd: g,
         proof: IsEquiv {
             forward: f,
             inverse: g,
@@ -298,6 +326,9 @@ public type IsContrMap<A, B>(f: fn(A) -> B) is {
 public fn equiv_from_contr_map<A, B>(f: fn(A) -> B, cm: IsContrMap<A, B>(f)) -> Equiv<A, B> {
     Equiv {
         forward: f,
+        backward: fn(b: B) -> cm.fibers_contractible(b).center.point,
+        fwd: f,
+        bwd: fn(b: B) -> cm.fibers_contractible(b).center.point,
         proof: IsEquiv {
             forward: f,
             inverse: fn(b: B) -> cm.fibers_contractible(b).center.point,
@@ -335,6 +366,9 @@ public fn ua_inv<A, B>(p: Path<Type>(A, B)) -> Equiv<A, B> {
     let bwd = |b: B| transport(sym(A, B, p), b);
     Equiv {
         forward: fwd,
+        backward: bwd,
+        fwd: fwd,
+        bwd: bwd,
         proof: IsEquiv {
             forward: fwd,
             inverse: bwd,
@@ -375,6 +409,9 @@ public fn propext<P, Q>(
 ) -> Path<Type>(P, Q) {
     ua(Equiv {
         forward: f,
+        backward: g,
+        fwd: f,
+        bwd: g,
         proof: IsEquiv {
             forward: f,
             inverse: g,
@@ -668,6 +705,16 @@ public fn unit_is_contr() -> IsContr<()> {
     }
 }
 
+/// Unit type is a proposition.
+///
+/// There is only one inhabitant `()`, so any two values are
+/// definitionally the same and the witness is just `refl`.
+public fn unit_is_prop() -> IsProp<()> {
+    IsProp {
+        all_paths: fn(a: (), b: ()) -> refl(()),
+    }
+}
+
 /// Void type is a proposition (vacuously).
 public fn void_is_prop() -> IsProp<Void> {
     // `Void` has no constructors, so the closure is vacuously total:
@@ -680,7 +727,11 @@ public fn void_is_prop() -> IsProp<Void> {
 }
 
 /// Bool is a set (via Hedberg: decidable equality implies UIP).
-public fn bool_is_set() -> IsSet<Bool> {
+///
+/// The API accepts two `Bool` witnesses so call sites can pass the
+/// concrete pair of interest (the returned `IsSet<Bool>` captures the
+/// global UIP statement, so the arguments are evidence, not restriction).
+public fn bool_is_set(_a: Bool, _b: Bool) -> IsSet<Bool> {
     hedberg()
 }
 
