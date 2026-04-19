@@ -1,0 +1,29 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: vbc, struct-layout, builder-pattern, flex-item, regression
+// @expected-stdout: ok
+// @expected-exit: 0
+// @description: Regression — the actual FlexItem builder chain from
+//               `core.term.layout` must survive two chained calls.
+//
+// Drops down to the stdlib-resident builder to reproduce the failure
+// seen in examples/term_compose_demo.vr.
+
+mount core.term.layout.{FlexItem};
+
+fn main() {
+    // Pair-builder — reproduces the VBC "field write out of bounds".
+    let item = FlexItem.new().min(5).grow(1.0);
+
+    // Read back: grow must equal 1.0 after the second builder.
+    assert_eq(item.grow, 1.0);
+
+    // Read back: min_size must remain Some(5).
+    match item.min_size {
+        Some(n) => assert_eq(n, 5),
+        None    => panic("min_size lost after chain"),
+    }
+
+    print("ok");
+}

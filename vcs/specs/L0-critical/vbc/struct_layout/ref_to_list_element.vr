@@ -1,0 +1,43 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: vbc, struct-layout, list, reference, regression
+// @expected-stdout: ok
+// @expected-exit: 0
+// @description: Regression — `&list[i]` must yield a reference through
+//               which field reads return the element's actual values,
+//               not uninitialised bytes.
+//
+// Minimal reproducer for a bug where
+//     let r = &xs[0];
+//     print(r.field);
+// returned 0.0 / undefined bytes, while
+//     let v = xs[0];
+//     let r = &v;
+//     print(r.field);
+// returned the correct value.
+
+type Box is { value: Int, name: Text };
+
+fn main() {
+    let mut xs = List.new();
+    xs.push(Box { value: 10, name: "a" });
+    xs.push(Box { value: 20, name: "b" });
+
+    // Direct indexing — baseline, already passes.
+    let v = xs[0];
+    assert_eq(v.value, 10);
+    assert_eq(v.name, "a");
+
+    // Ref through local copy — already passes.
+    let v2 = xs[1];
+    let r2 = &v2;
+    assert_eq(r2.value, 20);
+
+    // Direct ref-to-index — the regression target.
+    let r = &xs[0];
+    assert_eq(r.value, 10);
+    assert_eq(r.name, "a");
+
+    print("ok");
+}
