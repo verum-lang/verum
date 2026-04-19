@@ -232,6 +232,40 @@ impl<'a> RecursiveParser<'a> {
                 let mut reqs = Vec::new();
                 let mut enss = Vec::new();
                 loop {
+                    // Skip bare `@attr` / `@attr(args)` attributes sprinkled
+                    // between the parameter list and the contract clauses —
+                    // the stdlib (e.g. `core/math/day_convolution.vr`) writes
+                    //     theorem foo(…)
+                    //         @verify(formal)
+                    //         ensures …
+                    //         proof by auto;
+                    // The attribute is a documentation/tactic hint here, not
+                    // a decl attribute, so we discard it rather than fail.
+                    if self.stream.check(&TokenKind::At) {
+                        self.stream.advance(); // consume `@`
+                        // Consume identifier name (attribute name).
+                        if self.is_ident() {
+                            let _ = self.consume_ident_or_any_keyword();
+                        }
+                        // Optional argument list `(…)` — track paren depth.
+                        if self.stream.check(&TokenKind::LParen) {
+                            let mut depth = 0_i32;
+                            loop {
+                                if !self.tick() || self.is_aborted() { break; }
+                                match self.stream.peek_kind() {
+                                    Some(TokenKind::LParen) => { depth += 1; self.stream.advance(); }
+                                    Some(TokenKind::RParen) => {
+                                        depth -= 1;
+                                        self.stream.advance();
+                                        if depth == 0 { break; }
+                                    }
+                                    None => break,
+                                    _ => { self.stream.advance(); }
+                                }
+                            }
+                        }
+                        continue;
+                    }
                     // requires clause
                     self.skip_ghost_prefix_before(&TokenKind::Requires);
                     if self.stream.consume(&TokenKind::Requires).is_some() {
