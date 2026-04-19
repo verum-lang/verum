@@ -13496,23 +13496,38 @@ impl TypeChecker {
                         // "user-defined variant names must freely override built-in
                         // convenience aliases"; symmetrically, a user module's record
                         // type must override a cross-module variant of the same name
-                        // when the provided field names match the record's fields. This
-                        // fixes the case where stdlib `core/logic/kripke.vr` defines
-                        // `Box { inner: … }` as a variant and a user file later declares
-                        // `type Box<T> is { content: T }`: the record construction
-                        // `Box { content: … }` was being routed to the stdlib variant
-                        // constructor and erroring out because `content` isn't a field
-                        // of the variant.
+                        // when the provided field names match the record's fields.
                         //
-                        // Only require an "exact" field-set match (not a superset) so
-                        // variant constructors still win when the field names are
-                        // consistent with the variant but not with any record in scope.
+                        // Record variants also register `__struct_fields_<Variant>`
+                        // (so pattern matching sees their fields), so the struct-key
+                        // lookup alone can't tell a user record from a variant payload.
+                        // Distinguish by checking whether `variant_name` is itself a
+                        // registered top-level *type*: only a user-defined standalone
+                        // record like `type Box<T> is { content: T }` will have
+                        // `lookup_type(variant_name)` return a concrete type. Record
+                        // variants don't register their name as a standalone type —
+                        // the parent (e.g. `Expr`) does — so the variant path stays
+                        // available for `Binary { op, lhs, rhs }` inside
+                        // `type Expr is IntLit(_) | … | Binary({op, lhs, rhs}) | …`.
+                        // Variant record payloads and standalone records register
+                        // similar metadata (`__struct_fields_<Name>`, a Record in
+                        // `type_defs`). Distinguish by checking BOTH halves and
+                        // letting the *exact field-set match* on the struct_fields
+                        // table win when (and only when) the provided fields cover
+                        // the standalone record exactly:
+                        //   - Variant constructor with fn-type in env → is a variant.
+                        //   - Separate `__struct_fields_<Name>` with exact-match
+                        //     field coverage → is the user's standalone record.
+                        //   - Both present + exact match on record fields → record
+                        //     wins (e.g. `Box { content: T.default() }` in
+                        //     `type Box<T> is { content: T }` overrides a stdlib
+                        //     `Box { inner: … }` variant).
+                        //   - Variant present but fields don't cover exactly → fall
+                        //     through to variant constructor.
                         let struct_key = format!("__struct_fields_{}", variant_name);
                         let has_matching_struct = if let Option::Some(Type::Record(struct_fields)) =
                             self.ctx.lookup_type(struct_key.as_str())
                         {
-                            // Check field-set equality: provided names ⊆ record fields
-                            // AND every record field is provided (or shorthand-referenced).
                             let all_provided_valid = fields
                                 .iter()
                                 .all(|f| struct_fields.contains_key(f.name.name.as_str()));
@@ -13521,7 +13536,63 @@ impl TypeChecker {
                                 .all(|required| {
                                     fields.iter().any(|f| f.name.name.as_str() == required.as_str())
                                 });
-                            all_provided_valid && covers_all_required
+                            let exact_match = all_provided_valid && covers_all_required;
+
+                            if !exact_match {
+                                false
+                            } else {
+                                // Fields match exactly — do we also have a variant
+                                // constructor for this name? When only the record
+                                // exists, trivially route to record. When the
+                                // variant also exists AND its payload record
+                                // matches the provided fields by name, route to
+                                // variant (that's the local variant case like
+                                // `Binary { op, lhs, rhs }` inside `type Expr is ... |
+                                // Binary { op, lhs, rhs }`). Only when the variant's
+                                // *payload* disagrees with the field set do we keep
+                                // the record path, which is the cross-module
+                                // `Box { content: ... }` override case.
+                                let variant_ctor_info = self
+                                    .ctx
+                                    .env
+                                    .lookup(variant_name)
+                                    .map(|scheme| scheme.instantiate());
+                                match variant_ctor_info {
+                                    Some(Type::Function { params, .. }) => {
+                                        // Variant constructor: inspect its payload.
+                                        let variant_record_fields: Option<
+                                            indexmap::IndexMap<verum_common::Text, Type>,
+                                        > = params
+                                            .first()
+                                            .and_then(|p| match p {
+                                                Type::Record(m) => Some(m.clone()),
+                                                _ => None,
+                                            });
+                                        if let Some(vrf) = variant_record_fields {
+                                            let variant_matches = fields
+                                                .iter()
+                                                .all(|f| vrf.contains_key(f.name.name.as_str()))
+                                                && vrf.keys().all(|required| {
+                                                    fields.iter().any(|f| {
+                                                        f.name.name.as_str()
+                                                            == required.as_str()
+                                                    })
+                                                });
+                                            // Variant's payload also matches: prefer
+                                            // variant (same-module case). Record
+                                            // wins only when the variant's payload
+                                            // shape *differs* from the provided
+                                            // fields (cross-module collision case).
+                                            !variant_matches
+                                        } else {
+                                            // Variant has non-record payload (tuple,
+                                            // unit). Record wins.
+                                            true
+                                        }
+                                    }
+                                    _ => true, // No variant constructor in env — record wins.
+                                }
+                            }
                         } else {
                             false
                         };
