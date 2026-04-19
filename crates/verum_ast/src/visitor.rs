@@ -988,6 +988,10 @@ pub fn walk_type_decl<V: Visitor>(visitor: &mut V, ty_decl: &TypeDecl) {
                 }
             }
         }
+        TypeDeclBody::Quotient { base, relation } => {
+            visit_child!(visitor, base, Type);
+            visit_child!(visitor, relation.as_ref(), Expr);
+        }
         TypeDeclBody::Coinductive(protocol_body) => {
             for extend_type in &protocol_body.extends {
                 visit_child!(visitor, extend_type, Type);

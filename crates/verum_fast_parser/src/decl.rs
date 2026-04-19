@@ -1962,9 +1962,37 @@ impl<'a> RecursiveParser<'a> {
         let body = if is_alias_syntax {
             // Parse the aliased type
             let aliased_type = self.parse_type()?;
-            TypeDeclBody::Alias(aliased_type)
+            // Quotient type (T1-T): `type Q = T / relation;`
+            if self.stream.consume(&TokenKind::Slash).is_some() {
+                let relation = self.parse_expr()?;
+                TypeDeclBody::Quotient {
+                    base: aliased_type,
+                    relation: verum_common::Heap::new(relation),
+                }
+            } else {
+                TypeDeclBody::Alias(aliased_type)
+            }
         } else {
-            self.parse_type_body()?
+            let initial_body = self.parse_type_body()?;
+            // Quotient type (T1-T): `type Q is T / relation;` — when
+            // `parse_type_body` returned an Alias and the next token is
+            // `/`, lift it to a Quotient body. Any non-alias body
+            // (Record, Variant, Protocol, …) is left untouched; a `/`
+            // after those is a syntax error handled by the outer
+            // statement terminator.
+            if let TypeDeclBody::Alias(aliased_type) = initial_body {
+                if self.stream.consume(&TokenKind::Slash).is_some() {
+                    let relation = self.parse_expr()?;
+                    TypeDeclBody::Quotient {
+                        base: aliased_type,
+                        relation: verum_common::Heap::new(relation),
+                    }
+                } else {
+                    TypeDeclBody::Alias(aliased_type)
+                }
+            } else {
+                initial_body
+            }
         };
 
         // Where clause after body - can be:

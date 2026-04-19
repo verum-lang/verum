@@ -364,6 +364,13 @@ impl TypeInfo {
                 ),
                 span,
             }),
+            TypeDeclBody::Quotient { .. } => Err(DeriveError::UnsupportedTypeKind {
+                kind: Text::from("quotient"),
+                hint: Text::from(
+                    "Cannot derive for quotient types directly. Derive on the underlying carrier instead, then map through `.rep`.",
+                ),
+                span,
+            }),
         }
     }
 

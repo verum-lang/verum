@@ -5804,6 +5804,11 @@ impl VbcCodegen {
             TypeDeclBody::Inductive(_) | TypeDeclBody::Coinductive(_) => {
                 // Dependent type features (v2.0+) - no constructor registration needed yet
             }
+            TypeDeclBody::Quotient { .. } => {
+                // T1-T: quotient types lower to HITs; constructor
+                // registration for `Q::of(rep)` is emitted through
+                // the HIT path once the elaborator desugars the form.
+            }
         }
         Ok(())
     }

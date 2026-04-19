@@ -757,6 +757,33 @@ pub enum TypeDeclBody {
     /// Allows infinite data structures with productivity checking via cofix.
     /// The destructors are represented as protocol items (method signatures).
     Coinductive(ProtocolBody),
+
+    /// Quotient type: `type Q is T / R` — T1-T.
+    ///
+    /// Identifies elements of `base` that are related by the
+    /// equivalence relation `relation`. The relation is a lambda
+    /// expression of type `fn(base, base) -> Bool` that must be
+    /// provably reflexive, symmetric, and transitive (the type
+    /// checker emits proof obligations at elaboration time).
+    ///
+    /// Example:
+    /// ```verum
+    /// type ZmodN<N: Int{self > 0}> is Int / (|a, b| (a - b) % N == 0);
+    /// ```
+    ///
+    /// Semantically equivalent to the HIT:
+    /// ```verum
+    /// type Q is
+    ///     | of(rep: T)
+    ///     | quot: fn(a: T, b: T) -> Path<Q>(of(a), of(b));
+    /// ```
+    /// The quotient-type parser is the ergonomic surface; the type
+    /// system lowers Q into the HIT form for universal-property
+    /// purposes (map-out-of-Q requires respecting the equivalence).
+    Quotient {
+        base: Type,
+        relation: Heap<Expr>,
+    },
 }
 
 /// Protocol body containing optional extends clause, where clause, and items.

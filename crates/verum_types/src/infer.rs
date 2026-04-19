@@ -29437,6 +29437,12 @@ impl TypeChecker {
             TypeDeclBody::Inductive(_) | TypeDeclBody::Coinductive(_) => {
                 // Dependent type features (v2.0+) - no deps for now
             }
+            TypeDeclBody::Quotient { base, .. } => {
+                // T1-T: quotient types depend on the carrier type; the
+                // relation is a λ-expression whose free names are
+                // function/value references in the module scope.
+                extract_from_type(base, &mut deps);
+            }
         }
 
         // Convert HashSet to List
@@ -46973,6 +46979,18 @@ impl TypeChecker {
                     self.ctx.define_type(struct_key, Type::Record(fields));
                 }
             }
+            TypeDeclBody::Quotient { .. } => {
+                // T1-T: quotient types register the named carrier.
+                // Full HIT lowering (with `of` constructor + path
+                // constructor + universal property) lives in the
+                // elaborator; phase 1 just names the type so
+                // downstream code can refer to it.
+                let ty = Type::Named {
+                    path: Path::single(type_decl.name.clone()),
+                    args: List::new(),
+                };
+                self.ctx.define_type(type_name.clone(), ty);
+            }
         }
 
         // CRITICAL: Clean up type parameters from the type context
@@ -48226,6 +48244,13 @@ impl TypeChecker {
                         // Missing return type was warned at Pass 1; nothing more to do.
                     }
                 }
+            }
+            TypeDeclBody::Quotient { base, .. } => {
+                // T1-T (Pass 2): ensure the base carrier is resolvable.
+                // The equivalence relation's well-formedness (reflexive/
+                // symmetric/transitive proof obligations) is discharged
+                // by the elaborator in a future phase.
+                let _ = self.ast_to_type(base)?;
             }
         }
 

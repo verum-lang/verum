@@ -1052,6 +1052,10 @@ fn compute_type_hash(type_decl: &TypeDecl) -> HashValue {
             hasher.update_str("coinductive:");
             hasher.update_str(&format!("{:?}", proto_body));
         }
+        TypeDeclBody::Quotient { base, relation } => {
+            hasher.update_str("quotient:");
+            hasher.update_str(&format!("{:?}:{:?}", base, relation));
+        }
     }
 
     hasher.finalize()

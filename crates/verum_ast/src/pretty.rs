@@ -1166,6 +1166,10 @@ impl PrettyPrinter {
                 self.write("coinductive ");
                 self.format_protocol_body(proto_body);
             }
+            TypeDeclBody::Quotient { base, relation: _ } => {
+                self.format_type(base);
+                self.write(" / /* relation */");
+            }
         }
     }
 

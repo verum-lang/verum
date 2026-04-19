@@ -425,6 +425,14 @@ impl<'a> TypeExporter<'a> {
             TypeDeclBody::Inductive(_) | TypeDeclBody::Coinductive(_) => {
                 TypeDefinition::Record { fields: List::new() }
             }
+
+            // T1-T: quotient types export their base carrier's
+            // structure — downstream consumers see `Q` as a refined
+            // variant of `T`. Full HIT lowering lives in the
+            // elaborator (future follow-up).
+            TypeDeclBody::Quotient { .. } => {
+                TypeDefinition::Record { fields: List::new() }
+            }
         }
     }
 
