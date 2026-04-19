@@ -1,0 +1,134 @@
+// =============================================================================
+// term_compose_demo.vr — core.term primitives + advanced language features
+// =============================================================================
+// Exercises the stateless subset of `core.term` that now round-trips
+// cleanly through the VBC interpreter (after the struct-layout fixes in
+// `vcs/specs/L0-critical/vbc/struct_layout/`). The demo shows five
+// advanced language features working together against real stdlib code:
+//
+//   1. Protocol dispatch  (Sizable ← Pane)
+//   2. Generics           (fn summarize<P: Sizable>(panes: &List<P>))
+//   3. Refinement types   (Int{>= 0} param, checked at call sites)
+//   4. Builder chains     (FlexItem.new().min(..).grow(..) preserves
+//                          full layout — regression tests in
+//                          vcs/specs/L0-critical/vbc/struct_layout/)
+//   5. Interior refs      (`&list[i]` + `.field` through an interior
+//                          reference — also a landed regression fix)
+//
+// Run:
+//   verum run examples/term_compose_demo.vr          # interpreter
+//
+// NOTE: Full `FlexLayout.compute` integration (top-level CSS Flexbox
+// solver) still trips a separate Tier-0 runtime bug outside the
+// struct-layout scope. The demo therefore stops short of invoking
+// compute; the reproducer for the solver bug will live under
+// vcs/specs/L0-critical/vbc/flex_layout/ when the fix lands.
+// =============================================================================
+
+mount core.term.layout.{Rect, FlexItem};
+
+// ---------------------------------------------------------------------------
+// 1. Domain type.
+// ---------------------------------------------------------------------------
+
+type Pane is {
+    name:     Text,
+    min_cols: Int,
+    grow:     Float,
+};
+
+// ---------------------------------------------------------------------------
+// 2. Protocol.
+// ---------------------------------------------------------------------------
+
+type Sizable is protocol {
+    fn min_size(&self) -> Int;
+    fn weight(&self)   -> Float;
+};
+
+implement Sizable for Pane {
+    fn min_size(&self) -> Int   { self.min_cols }
+    fn weight(&self)   -> Float { self.grow     }
+}
+
+// ---------------------------------------------------------------------------
+// 3. Generic visitor using `&list[i]` — the interior-ref + field-access
+//    code path that was broken before this commit's VBC fix.
+// ---------------------------------------------------------------------------
+
+fn summarize<P: Sizable>(panes: &List<P>) -> Int {
+    let mut total = 0;
+    for i in 0..panes.len() {
+        let r = &panes[i];
+        total = total + r.min_size();
+    }
+    total
+}
+
+// ---------------------------------------------------------------------------
+// 4. Refinement-typed helper.
+// ---------------------------------------------------------------------------
+
+fn checked_width(w: Int{>= 0}) -> Int { w * 2 }
+
+// ---------------------------------------------------------------------------
+// 5. Builder chain on a stdlib struct — this is the exact pattern the
+//    struct_layout VBC fix enables.
+// ---------------------------------------------------------------------------
+
+fn build_items(panes: &List<Pane>) -> List<FlexItem> {
+    let mut items = List.new();
+    for i in 0..panes.len() {
+        let p = panes[i];
+        let item = FlexItem.new().min(p.min_cols).grow(p.grow);
+        items.push(item);
+    }
+    items
+}
+
+// ---------------------------------------------------------------------------
+// 6. Main.
+// ---------------------------------------------------------------------------
+
+fn main() {
+    let mut panes = List.new();
+    panes.push(Pane { name: "toolbar", min_cols: 10, grow: 0.0 });
+    panes.push(Pane { name: "main",    min_cols: 20, grow: 1.0 });
+    panes.push(Pane { name: "sidebar", min_cols: 15, grow: 0.0 });
+
+    // Protocol + generics + interior ref all in one call.
+    let min_total = summarize(&panes);
+    print(f"sum of min widths: {min_total} (expected 45)");
+    assert_eq(min_total, 45);
+
+    // Refinement type.
+    let doubled = checked_width(80);
+    assert_eq(doubled, 160);
+    print(f"checked_width(80) = {doubled}");
+
+    // Rect math.
+    let area = Rect.new(0, 0, 80, 24);
+    print(f"rect {area.width}x{area.height}  right={area.right()}  bottom={area.bottom()}");
+    assert_eq(area.right(),  80);
+    assert_eq(area.bottom(), 24);
+
+    // Builder chain — the patched VBC path.
+    let items = build_items(&panes);
+    assert_eq(items.len(), 3);
+    for i in 0..items.len() {
+        let it = items[i];
+        let p  = panes[i];
+        // Each FlexItem keeps its grow factor + min_size across the
+        // two-call builder chain (regression-tested in VCS).
+        assert_eq(it.grow, p.grow);
+        match it.min_size {
+            Some(n) => {
+                assert_eq(n, p.min_cols);
+                print(f"  {p.name}  grow={it.grow}  min={n}");
+            }
+            None    => panic("min_size lost across the builder chain"),
+        }
+    }
+
+    print("term_compose_demo: OK");
+}

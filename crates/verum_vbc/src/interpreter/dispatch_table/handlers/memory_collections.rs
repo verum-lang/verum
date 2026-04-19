@@ -197,6 +197,29 @@ pub(in super::super) fn handle_get_field(state: &mut InterpreterState) -> Interp
         }
     }
 
+    // Auto-deref for interior references produced by `&list[i]` (RefListElement)
+    // and similar `cbgr_mutable_ptrs`. These pointers address a List slot that
+    // *holds* a Value — typically an object pointer for struct elements.
+    // The generic Deref handler already auto-derefs these pointers for `*ref`,
+    // but field access (`ref.field`) arrives here and must do the same step:
+    // load the Value from the slot and, if it points to a heap object, follow
+    // the pointer so the normal header + field read operates on the element.
+    // Reproducer: vcs/specs/L0-critical/vbc/struct_layout/ref_to_list_element.vr
+    if state.cbgr_mutable_ptrs.contains(&(ptr as usize))
+        && (ptr as usize).is_multiple_of(std::mem::align_of::<Value>())
+    {
+        // SAFETY: `ptr` is tracked in `cbgr_mutable_ptrs`, meaning it was
+        // produced by an interior-ref handler that guarantees it addresses
+        // a `Value`-aligned slot (List backing store). Alignment verified.
+        let inner_value = unsafe { *(ptr as *const Value) };
+        if inner_value.is_ptr() && !inner_value.is_nil() {
+            ptr = inner_value.as_ptr::<u8>();
+            if ptr.is_null() {
+                return Err(InterpreterError::NullPointer);
+            }
+        }
+    }
+
     // Auto-deref for Heap<T> (variant wrapper with type_id >= 0x8000):
     // Heap objects are stored as variant wrappers where payload[0] is the inner value.
     // When accessing a field on a Heap<T>, we need to unwrap to get the inner T first.

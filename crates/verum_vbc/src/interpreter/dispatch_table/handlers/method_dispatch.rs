@@ -880,32 +880,83 @@ pub(in super::super) fn handle_call_method(state: &mut InterpreterState) -> Inte
         if found_func_id.is_none() {
             let expected_param_count = args.count as usize + 1; // +1 for self
 
-            for func in &state.module.functions {
-                let func_name = state.module.strings.get(func.name).unwrap_or("");
-                // Match function names based on qualification:
-                // - Qualified names (e.g., "Map.ensure_capacity"): try exact match or suffix match
-                //   with the qualified name. This allows "core.collections.map.Map.ensure_capacity"
-                //   to match "Map.ensure_capacity".
-                // - Unqualified names (e.g., "len"): only match QUALIFIED registrations
-                //   (functions whose name contains a `.`). Otherwise a bare `.map(closure)`
-                //   instance call would silently dispatch to a top-level free `fn map(...)`
-                //   that happens to share the basename — exactly the
-                //   `nums.map(|n| n*2)` → `pub fn map(pairs)` collision in core/collections/map.vr
-                //   that previously panicked with "method 'Map.resize' not found on value".
-                let matches = if is_already_qualified {
-                    // For qualified names, require the qualified suffix to match
-                    // (prevents "Result.unwrap_or" matching when looking for "Maybe.unwrap_or")
-                    func_name == method_name || func_name.ends_with(&method_suffix)
+            // Receiver-type-aware dispatch — before scanning the whole function
+            // table, peek at the receiver's heap-object header to recover the
+            // concrete type name. When a qualified function
+            // "<ReceiverType>.<method>" exists, prefer it over same-named
+            // methods on other types (core.math.elementary.min, List.min, …)
+            // which would otherwise be picked by "first suffix match wins"
+            // and lead to wrong-layout return values.
+            // See vcs/specs/L0-critical/vbc/struct_layout/ for reproducers.
+            let receiver_type: Option<String> =
+                if receiver.is_ptr() && !receiver.is_nil() && !is_already_qualified {
+                    let ptr = receiver.as_ptr::<u8>();
+                    if ptr.is_null() {
+                        None
+                    } else if (ptr as usize)
+                        .is_multiple_of(std::mem::align_of::<heap::ObjectHeader>())
+                    {
+                        // SAFETY: alignment verified; every heap object
+                        // begins with an ObjectHeader.
+                        let header = unsafe { &*(ptr as *const heap::ObjectHeader) };
+                        state
+                            .module
+                            .get_type(header.type_id)
+                            .map(|td| state.module.strings.get(td.name).unwrap_or("").to_string())
+                            .filter(|s| !s.is_empty())
+                    } else {
+                        None
+                    }
                 } else {
-                    func_name.ends_with(&method_suffix) && func_name.contains('.')
+                    None
                 };
-                if matches {
-                    // Prefer exact parameter count match (instance method: args + self)
-                    if func.params.len() == expected_param_count
-                        || func.register_count > 0 // fallback: accept if function has any code
+
+            // First pass: look for an exact receiver-type match
+            // (e.g., receiver is FlexItem → prefer "FlexItem.min" over any
+            // other "*.min"). Only runs when we recovered a type name.
+            if let Some(ref ty_name) = receiver_type {
+                // Support both qualified registrations (e.g.,
+                // "core.term.layout.FlexItem.min") and bare ones
+                // ("FlexItem.min") — the prefix must end with the type name.
+                let dotted = format!(".{}.{}", ty_name, method_name);
+                let bare = format!("{}.{}", ty_name, method_name);
+                for func in &state.module.functions {
+                    let func_name = state.module.strings.get(func.name).unwrap_or("");
+                    let type_match = func_name == bare || func_name.ends_with(&dotted);
+                    if type_match
+                        && (func.params.len() == expected_param_count
+                            || func.register_count > 0)
                     {
                         found_func_id = Some(func.id);
                         break;
+                    }
+                }
+            }
+
+            // Second pass: original suffix-match (no receiver-type constraint)
+            // — kept for the many call sites where we either have no heap
+            // receiver (small-string type names, primitives) or the type
+            // doesn't itself declare the method (protocol-default body,
+            // inherited impl, …). Preserves all existing passing tests.
+            if found_func_id.is_none() {
+                for func in &state.module.functions {
+                    let func_name = state.module.strings.get(func.name).unwrap_or("");
+                    let matches = if is_already_qualified {
+                        // For qualified names, require the qualified suffix to match
+                        // (prevents "Result.unwrap_or" matching when looking for
+                        // "Maybe.unwrap_or").
+                        func_name == method_name || func_name.ends_with(&method_suffix)
+                    } else {
+                        func_name.ends_with(&method_suffix) && func_name.contains('.')
+                    };
+                    if matches {
+                        // Prefer exact parameter count match
+                        if func.params.len() == expected_param_count
+                            || func.register_count > 0
+                        {
+                            found_func_id = Some(func.id);
+                            break;
+                        }
                     }
                 }
             }
@@ -5394,11 +5445,26 @@ pub(super) fn dispatch_array_method(
         return Ok(None);
     }
 
-    // Skip user-defined record types (16..256 range). These are not arrays/lists,
-    // and their methods (e.g. user-defined `swap`, `reverse`, `insert`) must be
-    // looked up via the user function dispatch path, not treated as List ops.
-    // Built-in semantic collection types are at 512+.
-    if (TypeId::FIRST_USER..256).contains(&type_id_val) {
+    // Skip user-defined record types. These are not arrays/lists,
+    // and their methods (e.g. user-defined `swap`, `reverse`, `insert`,
+    // or builder chain `min`/`max`) must be looked up via the user
+    // function dispatch path, not treated as List ops.
+    //
+    // Historical note: the original guard was `(FIRST_USER..256)` — but
+    // user type IDs can exceed 256 whenever the module defines >240
+    // record types (stdlib easily does). Types with IDs in the gap
+    // 256..TypeId::LIST.0 were then incorrectly routed through the
+    // array dispatch: e.g. `FlexItem.min(5)` picked the array-min
+    // built-in, which returned a truncated object and later crashed
+    // with `field access out of bounds: field index 3 (offset 24+8 =
+    // 32) exceeds object data size 16`.
+    //
+    // The correct bound is "anything below the first built-in
+    // collection id" — LIST=512 today, so the range is `16..512`. If
+    // a new built-in lands between FIRST_USER and LIST we must update
+    // this alongside. Reproducer:
+    //   vcs/specs/L0-critical/vbc/struct_layout/flex_item_builder.vr
+    if (TypeId::FIRST_USER..TypeId::LIST.0).contains(&type_id_val) {
         return Ok(None);
     }
 
