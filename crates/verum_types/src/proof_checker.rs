@@ -699,10 +699,47 @@ impl ProofChecker {
             TacticExpr::Focus(inner) => self.check_tactic(inner, goal, ctx, type_checker, span),
 
             // Named tactic
-            TacticExpr::Named { name: _, args } => {
+            TacticExpr::Named { name: _, args, .. } => {
                 // Check arguments are well-typed
                 for arg in args.iter() {
                     type_checker.infer(arg, InferMode::Synth)?;
+                }
+                Ok(())
+            }
+
+            // Let-binding inside a tactic body — type-check the bound value
+            TacticExpr::Let { ty: _, value, .. } => {
+                type_checker.infer(value, InferMode::Synth)?;
+                Ok(())
+            }
+
+            // Match on a scrutinee, then each arm's tactic is checked against
+            // the same goal (arm patterns participate in the scrutinee's type).
+            TacticExpr::Match { scrutinee, arms } => {
+                type_checker.infer(scrutinee, InferMode::Synth)?;
+                for arm in arms.iter() {
+                    if let Maybe::Some(guard) = &arm.guard {
+                        type_checker.infer(guard, InferMode::Synth)?;
+                    }
+                    self.check_tactic(&arm.body, goal, ctx, type_checker, span)?;
+                }
+                Ok(())
+            }
+
+            // Fail carries a diagnostic message — check the message is
+            // well-typed, then accept the tactic as a proof-search dead-end.
+            TacticExpr::Fail { message } => {
+                type_checker.infer(message, InferMode::Synth)?;
+                Ok(())
+            }
+
+            // Conditional tactic — both branches must be well-typed against
+            // the goal; the condition is a boolean expression.
+            TacticExpr::If { cond, then_branch, else_branch } => {
+                type_checker.infer(cond, InferMode::Synth)?;
+                self.check_tactic(then_branch, goal, ctx, type_checker, span)?;
+                if let Maybe::Some(else_b) = else_branch {
+                    self.check_tactic(else_b, goal, ctx, type_checker, span)?;
                 }
                 Ok(())
             }

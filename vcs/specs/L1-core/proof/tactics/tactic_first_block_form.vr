@@ -1,0 +1,15 @@
+// @test: parse
+// @level: L1
+// @tier: 0
+// @description: tactic combinator `first { ... }` block form (grammar §2.19.7)
+
+tactic ring_law() {
+    repeat {
+        first {
+            rewrite(ring_add_comm);
+            rewrite(ring_mul_comm);
+            rewrite(ring_distributive_left);
+        }
+    };
+    simp
+}

@@ -1,0 +1,31 @@
+// @test: parse
+// @level: L1
+// @tier: 0
+// @description: tactic parameters accept arbitrary types + optional default values
+
+tactic oracle(goal: Prop, confidence: Float = 0.9) {
+    let candidates: Giry<Prop> = oracle_candidates(goal);
+    let best: Maybe<Prop> = sample_above(candidates, confidence);
+    match best {
+        Maybe.Some(proof_term) => {
+            apply(proof_term);
+            try { smt } else { fail("oracle candidate rejected") }
+        },
+        Maybe.None => fail("oracle confidence below threshold"),
+    }
+}
+
+tactic assumption() {
+    first {
+        exact_hypothesis;
+        refl_assumption;
+        symm_assumption;
+    }
+}
+
+tactic contradiction() {
+    first {
+        exact_false_hyp;
+        try { smt } else { fail("no contradictory pair found") }
+    }
+}

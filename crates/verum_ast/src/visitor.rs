@@ -2295,10 +2295,44 @@ pub fn walk_tactic_expr<V: Visitor>(visitor: &mut V, tactic_expr: &TacticExpr) {
             }
         }
 
-        TacticExpr::Named { name, args } => {
+        TacticExpr::Named { name, generic_args, args } => {
             visitor.visit_ident(name);
+            for ty in generic_args {
+                visitor.visit_type(ty);
+            }
             for arg in args {
                 visit_child!(visitor, arg, Expr);
+            }
+        }
+
+        TacticExpr::Let { name, ty, value } => {
+            visitor.visit_ident(name);
+            if let Maybe::Some(t) = ty {
+                visitor.visit_type(t);
+            }
+            visit_child!(visitor, value.as_ref(), Expr);
+        }
+
+        TacticExpr::Match { scrutinee, arms } => {
+            visit_child!(visitor, scrutinee.as_ref(), Expr);
+            for arm in arms {
+                visitor.visit_pattern(&arm.pattern);
+                if let Maybe::Some(g) = &arm.guard {
+                    visit_child!(visitor, g.as_ref(), Expr);
+                }
+                visit_child!(visitor, arm.body.as_ref(), TacticExpr);
+            }
+        }
+
+        TacticExpr::Fail { message } => {
+            visit_child!(visitor, message.as_ref(), Expr);
+        }
+
+        TacticExpr::If { cond, then_branch, else_branch } => {
+            visit_child!(visitor, cond.as_ref(), Expr);
+            visit_child!(visitor, then_branch.as_ref(), TacticExpr);
+            if let Maybe::Some(e) = else_branch {
+                visit_child!(visitor, e.as_ref(), TacticExpr);
             }
         }
     }

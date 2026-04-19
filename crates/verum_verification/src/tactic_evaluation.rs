@@ -1398,11 +1398,23 @@ impl TacticEvaluator {
             TacticExpr::Repeat(inner) => self.apply_repeat(inner),
             TacticExpr::AllGoals(inner) => self.apply_all_goals(inner),
             TacticExpr::Focus(inner) => self.apply_focus(inner),
-            TacticExpr::Named { name, args } => self.apply_named(name, args),
+            TacticExpr::Named { name, args, .. } => self.apply_named(name, args),
             TacticExpr::Done => self.apply_done(),
             TacticExpr::Admit => self.apply_admit(),
             TacticExpr::Sorry => self.apply_sorry(),
             TacticExpr::Contradiction => self.apply_contradiction_tactic(),
+            // Tactic-DSL control-flow forms (Let/Match/Fail/If) are desugared
+            // during the proof-verification phase; if the evaluator sees one
+            // unexpanded, treat it as trivially-failed so that higher-level
+            // combinators (try/first) can recover.
+            TacticExpr::Let { .. }
+            | TacticExpr::Match { .. }
+            | TacticExpr::If { .. } => Err(TacticError::NotImplemented(Text::from(
+                "Let/Match/If tactic combinators require desugaring before evaluation",
+            ))),
+            TacticExpr::Fail { message: _ } => Err(TacticError::Failed(Text::from(
+                "tactic `fail` explicitly aborts this proof branch",
+            ))),
         };
 
         let elapsed = start.elapsed();
@@ -4889,6 +4901,18 @@ impl TacticEvaluator {
                     }
                     param_bindings.insert(param_name, arg.clone());
                 }
+                TacticParamKind::Prop => {
+                    // Propositions are first-class expressions in the tactic
+                    // DSL — no structural validation beyond what the type
+                    // checker already performs.
+                    param_bindings.insert(param_name, arg.clone());
+                }
+                TacticParamKind::Other => {
+                    // Arbitrary typed parameter — type-checking (via
+                    // `param.ty`) runs in the semantic-analysis phase, so at
+                    // this point we simply bind the argument.
+                    param_bindings.insert(param_name, arg.clone());
+                }
             }
         }
 
@@ -5048,6 +5072,7 @@ impl TacticEvaluator {
             }
             TacticExpr::Named {
                 name: inner_name,
+                generic_args: inner_generic_args,
                 args: inner_args,
             } => {
                 // Recursive named tactic - substitute arguments
@@ -5057,6 +5082,7 @@ impl TacticEvaluator {
                     .collect();
                 Ok(TacticExpr::Named {
                     name: inner_name.clone(),
+                    generic_args: inner_generic_args.clone(),
                     args: new_args,
                 })
             }
@@ -5126,6 +5152,56 @@ impl TacticEvaluator {
                 solver: solver.clone(),
                 timeout: *timeout,
             }),
+
+            // Tactic-DSL control-flow forms — substitute inside them
+            TacticExpr::Let { name, ty, value } => Ok(TacticExpr::Let {
+                name: name.clone(),
+                ty: ty.clone(),
+                value: Heap::new(self.substitute_params_in_expr(value, bindings)),
+            }),
+            TacticExpr::Match { scrutinee, arms } => {
+                let new_scrutinee = self.substitute_params_in_expr(scrutinee, bindings);
+                let new_arms: TacticResult<List<_>> = arms
+                    .iter()
+                    .map(|arm| {
+                        let new_guard = match &arm.guard {
+                            Maybe::Some(g) => Maybe::Some(Heap::new(
+                                self.substitute_params_in_expr(g, bindings),
+                            )),
+                            Maybe::None => Maybe::None,
+                        };
+                        let new_body = self.instantiate_tactic_expr(&arm.body, bindings)?;
+                        Ok(verum_ast::decl::TacticMatchArm {
+                            pattern: arm.pattern.clone(),
+                            guard: new_guard,
+                            body: Heap::new(new_body),
+                            span: arm.span,
+                        })
+                    })
+                    .collect();
+                Ok(TacticExpr::Match {
+                    scrutinee: Heap::new(new_scrutinee),
+                    arms: new_arms?,
+                })
+            }
+            TacticExpr::Fail { message } => Ok(TacticExpr::Fail {
+                message: Heap::new(self.substitute_params_in_expr(message, bindings)),
+            }),
+            TacticExpr::If { cond, then_branch, else_branch } => {
+                let new_cond = self.substitute_params_in_expr(cond, bindings);
+                let new_then = self.instantiate_tactic_expr(then_branch, bindings)?;
+                let new_else = match else_branch {
+                    Maybe::Some(e) => {
+                        Maybe::Some(Heap::new(self.instantiate_tactic_expr(e, bindings)?))
+                    }
+                    Maybe::None => Maybe::None,
+                };
+                Ok(TacticExpr::If {
+                    cond: Heap::new(new_cond),
+                    then_branch: Heap::new(new_then),
+                    else_branch: new_else,
+                })
+            }
         }
     }
 

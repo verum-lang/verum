@@ -2048,8 +2048,14 @@ pub struct TacticDecl {
     /// Tactic name
     pub name: Ident,
 
+    /// Generic type parameters (e.g. `tactic category_law<C: Category>()`)
+    pub generics: List<GenericParam>,
+
     /// Tactic parameters
     pub params: List<TacticParam>,
+
+    /// Generic type constraints (`where` clause)
+    pub generic_where_clause: Maybe<WhereClause>,
 
     /// The tactic body
     pub body: TacticBody,
@@ -2068,12 +2074,26 @@ impl Spanned for TacticDecl {
 }
 
 /// A tactic parameter.
+///
+/// Tactics take typed parameters, much like functions. The `kind` field
+/// captures the classical tactic-parameter classification (Expr, Type,
+/// Tactic, Hypothesis, Int, Prop); the `ty` field carries the concrete
+/// type expression when the parameter is declared with arbitrary typing
+/// (e.g. `confidence: Float`, `candidate: Maybe<Proof>`). The optional
+/// `default` value lets tactic authors declare default arguments like
+/// `oracle(goal: Prop, confidence: Float = 0.9)`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct TacticParam {
     /// Parameter name
     pub name: Ident,
     /// Parameter kind (expression, type, tactic, etc.)
     pub kind: TacticParamKind,
+    /// Concrete type when the parameter is annotated with an arbitrary type
+    /// expression (e.g. `x: Maybe<Proof>`). `None` for the classical
+    /// tactic-parameter kinds which are fully determined by `kind`.
+    pub ty: Maybe<Type>,
+    /// Optional default value (for parameters declared like `x: T = expr`)
+    pub default: Maybe<Heap<Expr>>,
     /// Source span
     pub span: Span,
 }
@@ -2091,6 +2111,11 @@ pub enum TacticParamKind {
     Hypothesis,
     /// Integer parameter (for iteration counts, etc.)
     Int,
+    /// Proposition parameter (a specification / formula, first-class in the tactic DSL)
+    Prop,
+    /// Any other typed parameter — the real type lives in `TacticParam::ty`.
+    /// Used for parameters declared with arbitrary types like `Float`, `List<T>`, etc.
+    Other,
 }
 
 /// A tactic body.
@@ -2422,8 +2447,56 @@ pub enum TacticExpr {
     /// Apply tactic to specific goal (`{ tactic }` inside proof)
     Focus(Heap<TacticExpr>),
 
-    /// Named tactic invocation
-    Named { name: Ident, args: List<Expr> },
+    /// Named tactic invocation.
+    ///
+    /// Tactics may be generic (e.g. `tactic category_law<C: Category>()`)
+    /// and can therefore be called with explicit type arguments:
+    ///
+    /// ```verum
+    /// category_law<F.Source>();
+    /// functor_law<Identity>();
+    /// ```
+    ///
+    /// `generic_args` is empty when no type arguments are supplied.
+    Named {
+        name: Ident,
+        generic_args: List<Type>,
+        args: List<Expr>,
+    },
+
+    /// Local let-binding inside a tactic body:
+    /// `let x: T = expr;` — computes `expr`, binds it to `x`, and makes it
+    /// available to the remaining tactic sequence. Enables monadic
+    /// composition in tactic DSLs (analogous to Lean's `let _ ← …`).
+    Let {
+        name: Ident,
+        ty: Maybe<Type>,
+        value: Heap<Expr>,
+    },
+
+    /// Pattern-match on a value inside a tactic body:
+    /// `match x { P₁ => t₁, P₂ => t₂, … }`
+    ///
+    /// Each arm's body is itself a tactic expression, allowing tactics to
+    /// branch on the shape of an auxiliary value (e.g. a `Maybe<Proof>`).
+    Match {
+        scrutinee: Heap<Expr>,
+        arms: List<TacticMatchArm>,
+    },
+
+    /// Explicit failure with a diagnostic message:
+    /// `fail("oracle candidate rejected by SMT backend")`.
+    /// Distinct from `Admit`/`Sorry`: `Fail` is a *tactic-local* control-flow
+    /// operator that feeds into surrounding `try`/`first` combinators.
+    Fail { message: Heap<Expr> },
+
+    /// Conditional tactic execution:
+    /// `if cond { t₁ } else { t₂ }` — selects a branch at tactic runtime.
+    If {
+        cond: Heap<Expr>,
+        then_branch: Heap<TacticExpr>,
+        else_branch: Maybe<Heap<TacticExpr>>,
+    },
 
     /// Done/QED marker
     Done,
@@ -2436,6 +2509,20 @@ pub enum TacticExpr {
 
     /// Contradiction tactic (proof by contradiction)
     Contradiction,
+}
+
+/// An arm of a tactic-level `match` expression: pattern, optional guard,
+/// and a tactic-expression body executed when the pattern matches.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TacticMatchArm {
+    /// The pattern to match against.
+    pub pattern: crate::pattern::Pattern,
+    /// Optional guard expression (`if cond`).
+    pub guard: Maybe<Heap<Expr>>,
+    /// Tactic body to execute when this arm matches.
+    pub body: Heap<TacticExpr>,
+    /// Source span of the arm.
+    pub span: Span,
 }
 
 impl TacticExpr {

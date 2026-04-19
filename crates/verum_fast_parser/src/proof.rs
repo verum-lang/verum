@@ -18,7 +18,7 @@ use verum_ast::decl::{
     ProofStep, ProofStepKind, ProofStructure, TacticBody, TacticDecl, TacticExpr, TacticParam,
     TacticParamKind, TheoremDecl,
 };
-use verum_ast::ty::{GenericParam, WhereClause, WherePredicateKind};
+use verum_ast::ty::{GenericArg, GenericParam, WhereClause, WherePredicateKind};
 use verum_ast::{Expr, ExprKind, Ident, Item, ItemKind, Pattern, Span, Type};
 use verum_common::{Heap, List, Maybe, Text};
 use verum_lexer::TokenKind;
@@ -602,9 +602,44 @@ impl<'a> RecursiveParser<'a> {
             }
         }
 
-        // Tactic name
-        let name = self.consume_ident()?;
+        // Tactic name. Built-in tactic keywords (`assumption`, `contradiction`,
+        // `trivial`, `simp`, `ring`, `field`, `omega`, `blast`, `smt`,
+        // `induction`, `cases`, `auto`, `proof`, `lemma`, `theorem`,
+        // `axiom`, `corollary`, `match`, `return`) can legitimately appear
+        // as user-tactic names — they override the built-in implementation
+        // within the declaring module. Accept them verbatim here so the
+        // stdlib can declare, e.g. `tactic assumption() { ... }`.
         let name_span = self.stream.current_span();
+        let name = match self.stream.peek_kind() {
+            Some(TokenKind::Assumption) => { self.stream.advance(); Text::from("assumption") }
+            Some(TokenKind::Contradiction) => { self.stream.advance(); Text::from("contradiction") }
+            Some(TokenKind::Trivial) => { self.stream.advance(); Text::from("trivial") }
+            Some(TokenKind::Simp) => { self.stream.advance(); Text::from("simp") }
+            Some(TokenKind::Ring) => { self.stream.advance(); Text::from("ring") }
+            Some(TokenKind::Field) => { self.stream.advance(); Text::from("field") }
+            Some(TokenKind::Omega) => { self.stream.advance(); Text::from("omega") }
+            Some(TokenKind::Blast) => { self.stream.advance(); Text::from("blast") }
+            Some(TokenKind::Smt) => { self.stream.advance(); Text::from("smt") }
+            Some(TokenKind::Induction) => { self.stream.advance(); Text::from("induction") }
+            Some(TokenKind::Cases) => { self.stream.advance(); Text::from("cases") }
+            Some(TokenKind::Auto) => { self.stream.advance(); Text::from("auto") }
+            Some(TokenKind::Proof) => { self.stream.advance(); Text::from("proof") }
+            Some(TokenKind::Lemma) => { self.stream.advance(); Text::from("lemma") }
+            Some(TokenKind::Theorem) => { self.stream.advance(); Text::from("theorem") }
+            Some(TokenKind::Axiom) => { self.stream.advance(); Text::from("axiom") }
+            Some(TokenKind::Corollary) => { self.stream.advance(); Text::from("corollary") }
+            _ => self.consume_ident()?,
+        };
+
+        // Optional generic parameters: tactic category_law<C: Category>()
+        // Grammar §2.19.5 (industrial-grade extension over the minimal EBNF
+        // rule `tactic_decl = 'tactic' identifier '(' ... ')' block_expr`):
+        // tactics are polymorphic, parameterised by types or protocol bounds.
+        let generics: List<GenericParam> = if self.stream.check(&TokenKind::Lt) {
+            self.parse_generic_params()?
+        } else {
+            List::new()
+        };
 
         // Optional parameters
         let params = if self.stream.check(&TokenKind::LParen) {
@@ -613,8 +648,17 @@ impl<'a> RecursiveParser<'a> {
             Vec::new()
         };
 
-        // GRAMMAR: tactic_decl = 'tactic' , identifier , '(' , [ param_list ] , ')' , block_expr ;
-        // Note: Grammar does NOT include 'is' keyword for tactic declarations
+        // Optional `where` clause on generics (e.g. `where C: Category + HasId`)
+        let generic_where_clause = if self
+            .stream
+            .peek_kind()
+            .map(|k| matches!(k, TokenKind::Ident(n) if n.as_str() == "where"))
+            .unwrap_or(false)
+        {
+            Maybe::Some(self.parse_where_clause()?)
+        } else {
+            Maybe::None
+        };
 
         // Tactic body
         let body = self.parse_tactic_body()?;
@@ -623,7 +667,9 @@ impl<'a> RecursiveParser<'a> {
         let decl = TacticDecl {
             visibility: vis,
             name: Ident::new(name, name_span),
+            generics,
             params: params.into_iter().collect(),
+            generic_where_clause,
             body,
             attributes: List::new(),
             span,
@@ -670,6 +716,12 @@ impl<'a> RecursiveParser<'a> {
     }
 
     /// Parse a single tactic parameter.
+    ///
+    /// Tactic parameters are typed bindings — either one of the classical
+    /// tactic-DSL kinds (`Expr`, `Type`, `Tactic`, `Hypothesis`, `Int`,
+    /// `Prop`) or an arbitrary concrete type (`Float`, `List<T>`,
+    /// `Maybe<Proof>`, …). An optional default value can be provided with
+    /// `= expr` so tactic authors can write `confidence: Float = 0.9`.
     fn parse_tactic_param(&mut self) -> ParseResult<TacticParam> {
         let start_pos = self.stream.position();
 
@@ -680,31 +732,83 @@ impl<'a> RecursiveParser<'a> {
         // Colon
         self.stream.expect(TokenKind::Colon)?;
 
-        // Parameter kind (Expr, Type, Tactic, Hypothesis, Int)
-        let kind_name = self.consume_ident()?;
-        let kind = match kind_name.as_str() {
-            "Expr" | "expr" => TacticParamKind::Expr,
-            "Type" | "type" => TacticParamKind::Type,
-            "Tactic" | "tactic" => TacticParamKind::Tactic,
-            "Hypothesis" | "hypothesis" | "H" => TacticParamKind::Hypothesis,
-            "Int" | "int" => TacticParamKind::Int,
-            _ => {
-                return Err(ParseError::invalid_syntax(
-                    format!(
-                        "unknown tactic parameter kind '{}', expected Expr, Type, Tactic, Hypothesis, or Int",
-                        kind_name
-                    ),
-                    self.stream.current_span(),
-                ));
+        // Peek the next identifier to decide whether we are looking at a
+        // classical kind or a full type expression. We still accept the
+        // classical kinds verbatim so `expr`, `tactic`, `hypothesis`, `int`,
+        // `Prop` declarations keep their historic semantics — but anything
+        // else (including `Float`, `List<A>`, `Maybe<Proof>`, …) is parsed as
+        // a real `Type` and stored in `ty` with `kind = Other`.
+        let (kind, ty) = match self.stream.peek_kind() {
+            Some(TokenKind::Ident(name))
+                if matches!(
+                    name.as_str(),
+                    "Expr" | "expr"
+                        | "Type"
+                        | "type"
+                        | "Tactic"
+                        | "tactic"
+                        | "Hypothesis"
+                        | "hypothesis"
+                        | "H"
+                        | "Int"
+                        | "int"
+                        | "Prop"
+                        | "prop"
+                )
+                // The classical kinds only match when they are *not* followed
+                // by `<…>` or `.` — otherwise they are the head of a real
+                // type like `Int.Max` or `Prop<A>`.
+                && !self.peek_is_type_tail_after_ident() =>
+            {
+                let kind_name = self.consume_ident()?;
+                let kind = match kind_name.as_str() {
+                    "Expr" | "expr" => TacticParamKind::Expr,
+                    "Type" | "type" => TacticParamKind::Type,
+                    "Tactic" | "tactic" => TacticParamKind::Tactic,
+                    "Hypothesis" | "hypothesis" | "H" => TacticParamKind::Hypothesis,
+                    "Int" | "int" => TacticParamKind::Int,
+                    "Prop" | "prop" => TacticParamKind::Prop,
+                    _ => unreachable!(),
+                };
+                (kind, Maybe::None)
             }
+            _ => {
+                // Full type expression — anything else (including user types).
+                let ty = self.parse_type()?;
+                (TacticParamKind::Other, Maybe::Some(ty))
+            }
+        };
+
+        // Optional default value: `= expr`
+        let default = if self.stream.consume(&TokenKind::Eq).is_some() {
+            Maybe::Some(Heap::new(self.parse_expr()?))
+        } else {
+            Maybe::None
         };
 
         let span = self.stream.make_span(start_pos);
         Ok(TacticParam {
             name: Ident::new(name, name_span),
             kind,
+            ty,
+            default,
             span,
         })
+    }
+
+    /// Peek past the current identifier to decide whether it is the head of a
+    /// composite type expression (`Int.Max`, `Prop<A>`, `Int[N]`, `Int &`…).
+    /// Used to disambiguate classical tactic-param kinds from real types with
+    /// matching names.
+    fn peek_is_type_tail_after_ident(&self) -> bool {
+        matches!(
+            self.stream.peek_nth_kind(1),
+            Some(TokenKind::Dot)
+                | Some(TokenKind::Lt)
+                | Some(TokenKind::LBracket)
+                | Some(TokenKind::Ampersand)
+                | Some(TokenKind::ColonColon)
+        )
     }
 
     /// Parse tactic body.
@@ -1149,6 +1253,7 @@ impl<'a> RecursiveParser<'a> {
                     ProofStepKind::Tactic(TacticExpr::Named {
                         name: Ident::new(Text::from("such_that"), self.stream.current_span()),
                         args: List::from_iter(std::iter::once(constraint)),
+                        generic_args: List::new(),
                     })
                 } else {
                     self.stream.expect(TokenKind::Eq)?;
@@ -1289,6 +1394,7 @@ impl<'a> RecursiveParser<'a> {
                         self.stream.consume(&TokenKind::Semicolon);
                         ProofStepKind::Tactic(TacticExpr::Named {
                             name: Ident::new(Text::from("take"), self.stream.current_span()),
+                            generic_args: List::new(),
                             args: List::from_iter(std::iter::once(
                                 Expr::ident(Ident::new(var_name, self.stream.current_span())),
                             )),
@@ -1301,6 +1407,7 @@ impl<'a> RecursiveParser<'a> {
                         ProofStepKind::Tactic(TacticExpr::Named {
                             name: Ident::new(Text::from("witness"), self.stream.current_span()),
                             args: List::from_iter(std::iter::once(expr)),
+                        generic_args: List::new(),
                         })
                     }
                     "conclude" => {
@@ -1325,6 +1432,7 @@ impl<'a> RecursiveParser<'a> {
                                 self.stream.consume(&TokenKind::Semicolon);
                                 ProofStepKind::Tactic(TacticExpr::Named {
                                     name: Ident::new(Text::from("assume"), self.stream.current_span()),
+                                    generic_args: List::new(),
                                     args: List::from_iter(std::iter::once(
                                         Expr::ident(Ident::new(ident_name, self.stream.current_span())),
                                     )),
@@ -1337,6 +1445,7 @@ impl<'a> RecursiveParser<'a> {
                                 ProofStepKind::Tactic(TacticExpr::Named {
                                     name: Ident::new(Text::from("assume"), self.stream.current_span()),
                                     args: List::from_iter(std::iter::once(expr)),
+                        generic_args: List::new(),
                                 })
                             }
                         } else {
@@ -1345,6 +1454,7 @@ impl<'a> RecursiveParser<'a> {
                             ProofStepKind::Tactic(TacticExpr::Named {
                                 name: Ident::new(Text::from("assume"), self.stream.current_span()),
                                 args: List::from_iter(std::iter::once(expr)),
+                        generic_args: List::new(),
                             })
                         }
                     }
@@ -1358,6 +1468,7 @@ impl<'a> RecursiveParser<'a> {
                         ProofStepKind::Tactic(TacticExpr::Named {
                             name: Ident::new(name_str, self.stream.current_span()),
                             args: List::new(),
+                        generic_args: List::new(),
                         })
                     }
                     _ => unreachable!(),
@@ -1372,6 +1483,7 @@ impl<'a> RecursiveParser<'a> {
                 ProofStepKind::Tactic(TacticExpr::Named {
                     name: Ident::new(Text::from("if_then_else"), self.stream.current_span()),
                     args: List::from_iter(std::iter::once(expr)),
+                        generic_args: List::new(),
                 })
             }
 
@@ -1383,6 +1495,7 @@ impl<'a> RecursiveParser<'a> {
                     ProofBody::ByMethod(m) => ProofStepKind::Tactic(TacticExpr::Named {
                         name: Ident::new(Text::from("proof_method"), self.stream.current_span()),
                         args: List::new(),
+                        generic_args: List::new(),
                     }),
                     _ => ProofStepKind::Tactic(TacticExpr::Trivial),
                 }
@@ -1399,6 +1512,7 @@ impl<'a> RecursiveParser<'a> {
                         ProofStepKind::Tactic(TacticExpr::Named {
                             name: Ident::new(Text::from("_proof_method"), self.stream.current_span()),
                             args: List::new(),
+                        generic_args: List::new(),
                         })
                     }
                     // Named proof methods: strong_induction, well_founded_induction, etc.
@@ -1433,6 +1547,7 @@ impl<'a> RecursiveParser<'a> {
                         ProofStepKind::Tactic(TacticExpr::Named {
                             name: Ident::new(Text::from("_proof_method"), self.stream.current_span()),
                             args: List::new(),
+                        generic_args: List::new(),
                         })
                     }
                     _ => {
@@ -1473,6 +1588,7 @@ impl<'a> RecursiveParser<'a> {
                     ProofStepKind::Tactic(TacticExpr::Named {
                         name: Ident::new(Text::from("_expr"), self.stream.current_span()),
                         args: List::from_iter(std::iter::once(expr)),
+                        generic_args: List::new(),
                     })
                 } else {
                     return Err(ParseError::invalid_syntax(
@@ -2079,6 +2195,117 @@ impl<'a> RecursiveParser<'a> {
     /// Parse primary tactic expressions.
     fn parse_tactic_primary(&mut self) -> ParseResult<TacticExpr> {
         match self.stream.peek_kind() {
+            // Let-binding inside a tactic body:
+            //   `let x: T = expr;` or `let x = expr;`
+            // The semicolon after the expression is consumed by the caller
+            // (`parse_tactic_seq`/`parse_tactic_body`), which treats `;` as
+            // the tactic-sequence separator.
+            Some(TokenKind::Let) => {
+                self.stream.advance();
+                let name_text = self.consume_ident()?;
+                let name_span = self.stream.current_span();
+                let ty = if self.stream.consume(&TokenKind::Colon).is_some() {
+                    Maybe::Some(self.parse_type()?)
+                } else {
+                    Maybe::None
+                };
+                self.stream.expect(TokenKind::Eq)?;
+                let value = self.parse_expr()?;
+                Ok(TacticExpr::Let {
+                    name: Ident::new(name_text, name_span),
+                    ty,
+                    value: Heap::new(value),
+                })
+            }
+
+            // Conditional tactic execution:
+            //   `if cond { t1 } else { t2 }`
+            // Both branches are tactic expressions; the else branch is
+            // optional. Desugars `else if` chains through nested `If`.
+            Some(TokenKind::If) => {
+                self.stream.advance();
+                let cond = self.parse_expr()?;
+                self.stream.expect(TokenKind::LBrace)?;
+                let then_branch = self.parse_tactic_expr()?;
+                // Consume optional trailing `;` inside the block.
+                self.stream.consume(&TokenKind::Semicolon);
+                self.stream.expect(TokenKind::RBrace)?;
+                let else_branch = if self.stream.consume(&TokenKind::Else).is_some() {
+                    // Accept either `else { body }` or `else if ...`
+                    if self.stream.check(&TokenKind::If) {
+                        Maybe::Some(Heap::new(self.parse_tactic_primary()?))
+                    } else {
+                        self.stream.expect(TokenKind::LBrace)?;
+                        let body = self.parse_tactic_expr()?;
+                        self.stream.consume(&TokenKind::Semicolon);
+                        self.stream.expect(TokenKind::RBrace)?;
+                        Maybe::Some(Heap::new(body))
+                    }
+                } else {
+                    Maybe::None
+                };
+                Ok(TacticExpr::If {
+                    cond: Heap::new(cond),
+                    then_branch: Heap::new(then_branch),
+                    else_branch,
+                })
+            }
+
+            // Pattern-match inside a tactic body:
+            //   `match scrutinee { P1 => t1, P2 => t2, ... }`
+            Some(TokenKind::Match) if self.stream.peek_nth_kind(1) != Some(&TokenKind::LParen) => {
+                self.stream.advance();
+                // Use `parse_expr_no_struct` so that `match x {` does not
+                // get greedily parsed as a record-literal `x { ... }`.
+                let scrutinee = self.parse_expr_no_struct()?;
+                self.stream.expect(TokenKind::LBrace)?;
+                let mut arms = Vec::new();
+                while !self.stream.check(&TokenKind::RBrace) && !self.stream.at_end() {
+                    let arm_start = self.stream.position();
+                    let pattern = self.parse_pattern()?;
+                    let guard = if self.stream.consume(&TokenKind::If).is_some() {
+                        Maybe::Some(Heap::new(self.parse_expr()?))
+                    } else {
+                        Maybe::None
+                    };
+                    self.stream.expect(TokenKind::FatArrow)?;
+                    let body = self.parse_tactic_expr()?;
+                    let span = self.stream.make_span(arm_start);
+                    arms.push(verum_ast::decl::TacticMatchArm {
+                        pattern,
+                        guard,
+                        body: Heap::new(body),
+                        span,
+                    });
+                    // Separator between arms — `,` or `;`, both optional at end.
+                    if self.stream.consume(&TokenKind::Comma).is_none() {
+                        self.stream.consume(&TokenKind::Semicolon);
+                    }
+                }
+                self.stream.expect(TokenKind::RBrace)?;
+                Ok(TacticExpr::Match {
+                    scrutinee: Heap::new(scrutinee),
+                    arms: arms.into_iter().collect(),
+                })
+            }
+
+            // Explicit failure with a diagnostic message:
+            //   `fail("reason")` or `fail(f"tmpl {x}")`
+            Some(TokenKind::Ident(name)) if name.as_str() == "fail" => {
+                self.stream.advance();
+                // Accept `fail(msg)` or `fail msg`.
+                let message = if self.stream.consume(&TokenKind::LParen).is_some() {
+                    let msg = self.parse_expr()?;
+                    self.stream.expect(TokenKind::RParen)?;
+                    msg
+                } else {
+                    self.parse_expr()?
+                };
+                Ok(TacticExpr::Fail {
+                    message: Heap::new(message),
+                })
+            }
+
             // Basic tactics
             Some(TokenKind::Trivial) => {
                 self.stream.advance();
@@ -2412,13 +2639,30 @@ impl<'a> RecursiveParser<'a> {
                 Ok(TacticExpr::Sorry)
             }
 
-            // First/alternative tactics: first [ t1, t2, t3 ]
+            // First/alternative tactics. Grammar allows two forms:
+            //   `first [ t1, t2, t3 ]`  — comma-separated, matches Lean/Coq list syntax
+            //   `first { t1; t2; t3 }`  — block form, matches verum.ebnf §2.19.7
+            // Both desugar to TacticExpr::Alt(...).
             Some(TokenKind::Ident(name)) if name.as_str() == "first" => {
                 self.stream.advance();
-                self.stream.expect(TokenKind::LBracket)?;
-                let tactics = self.comma_separated(|p| p.parse_tactic_expr())?;
-                self.stream.expect(TokenKind::RBracket)?;
-                Ok(TacticExpr::Alt(tactics.into_iter().collect()))
+                if self.stream.check(&TokenKind::LBrace) {
+                    self.stream.advance();
+                    let mut tactics = Vec::new();
+                    while !self.stream.check(&TokenKind::RBrace) && !self.stream.at_end() {
+                        tactics.push(self.parse_tactic_expr()?);
+                        // Accept `;` or `,` as separator; trailing separator is allowed.
+                        if self.stream.consume(&TokenKind::Semicolon).is_none() {
+                            self.stream.consume(&TokenKind::Comma);
+                        }
+                    }
+                    self.stream.expect(TokenKind::RBrace)?;
+                    Ok(TacticExpr::Alt(tactics.into_iter().collect()))
+                } else {
+                    self.stream.expect(TokenKind::LBracket)?;
+                    let tactics = self.comma_separated(|p| p.parse_tactic_expr())?;
+                    self.stream.expect(TokenKind::RBracket)?;
+                    Ok(TacticExpr::Alt(tactics.into_iter().collect()))
+                }
             }
 
             // Named tactic (user-defined) - MUST be last for Ident matches
@@ -2426,6 +2670,37 @@ impl<'a> RecursiveParser<'a> {
                 let name_text = name.clone();
                 let name_span = self.stream.current_span();
                 self.stream.advance();
+
+                // Optional generic arguments for polymorphic tactics:
+                //   category_law<C>()
+                //   functor_law<Identity>()
+                //   category_law<F.Source>()
+                //
+                // We only commit to consuming the `<...>` when the parse
+                // succeeds — otherwise we roll back so that tactic bodies
+                // using `<` as a comparison operator keep working. Only
+                // `Type::Type(...)` arguments are retained; const and
+                // lifetime arguments are allowed by the underlying
+                // parse_generic_args but are not meaningful for tactic
+                // polymorphism yet, so they are silently dropped here.
+                let generic_args: List<Type> = if self.stream.check(&TokenKind::Lt) {
+                    let checkpoint = self.stream.position();
+                    match self.parse_generic_args() {
+                        Ok(args) => args
+                            .into_iter()
+                            .filter_map(|a| match a {
+                                GenericArg::Type(t) => Some(t),
+                                _ => None,
+                            })
+                            .collect(),
+                        Err(_) => {
+                            self.stream.reset_to(checkpoint);
+                            List::new()
+                        }
+                    }
+                } else {
+                    List::new()
+                };
 
                 // Check for arguments
                 let args = if self.stream.check(&TokenKind::LParen) {
@@ -2445,6 +2720,7 @@ impl<'a> RecursiveParser<'a> {
                 Ok(TacticExpr::Named {
                     name: Ident::new(name_text, name_span),
                     args,
+                    generic_args,
                 })
             }
 
@@ -2499,6 +2775,7 @@ impl<'a> RecursiveParser<'a> {
                 Ok(TacticExpr::Named {
                     name: Ident::new(name, span),
                     args,
+                    generic_args: List::new(),
                 })
             }
 
@@ -2508,6 +2785,7 @@ impl<'a> RecursiveParser<'a> {
                     Ok(TacticExpr::Named {
                         name: Ident::new(Text::from("_expr"), self.stream.current_span()),
                         args: List::from_iter(std::iter::once(expr)),
+                        generic_args: List::new(),
                     })
                 } else {
                     Err(ParseError::invalid_syntax(

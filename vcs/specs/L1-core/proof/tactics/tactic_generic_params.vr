@@ -1,0 +1,26 @@
+// @test: parse
+// @level: L1
+// @tier: 0
+// @description: tactic declarations with generic parameters
+
+tactic category_law<C>() {
+    repeat {
+        first {
+            rewrite(C.assoc);
+            rewrite(C.id_left);
+            rewrite(C.id_right);
+        }
+    };
+    simp
+}
+
+tactic functor_law<F>() {
+    repeat {
+        first {
+            rewrite(F.map_id);
+            rewrite(F.map_compose);
+        }
+    };
+    category_law<F>();
+    try { simp } else { skip }
+}

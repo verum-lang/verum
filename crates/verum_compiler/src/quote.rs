@@ -3591,6 +3591,8 @@ impl ToTokens for verum_ast::Item {
                         verum_ast::decl::TacticParamKind::Tactic => "tactic",
                         verum_ast::decl::TacticParamKind::Hypothesis => "hypothesis",
                         verum_ast::decl::TacticParamKind::Int => "int",
+                        verum_ast::decl::TacticParamKind::Prop => "prop",
+                        verum_ast::decl::TacticParamKind::Other => "typed",
                     };
                     stream.push(Token::new(
                         TokenKind::Ident(kind_str.to_string().into()),
