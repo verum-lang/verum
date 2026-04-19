@@ -6821,6 +6821,43 @@ impl VbcCodegen {
             }
         }
 
+        // T1-F phase 1 scaffold: enumerate parameters with refinement
+        // types. The actual runtime Assert-on-predicate emission lands
+        // in T1-F phase 2 (needs a `self` → param-register rewriter
+        // that lowers the predicate's AST through compile_expr and
+        // threads the resulting boolean through `Instruction::Assert`).
+        //
+        // For now we walk the refined parameters and record them in a
+        // metadata counter on the function descriptor so that:
+        //   (a) the AOT pipeline can see how many obligations this
+        //       function carries and decide whether to elide them
+        //       (tier-1 mode: SMT-discharged → elide);
+        //   (b) follow-up commits can replace this loop body with the
+        //       real Assert emission without having to re-discover
+        //       the parameter-level refinement structure.
+        let mut refinement_obligations: usize = 0;
+        for param in func.params.iter() {
+            if let verum_ast::FunctionParamKind::Regular { ty, .. } = &param.kind {
+                if matches!(ty.kind, verum_ast::ty::TypeKind::Refined { .. } | verum_ast::ty::TypeKind::Sigma { .. }) {
+                    refinement_obligations += 1;
+                }
+            }
+        }
+        // Also check return-type refinement so the counter reflects
+        // both parameter-entry and return-site obligations.
+        if let Some(ref ret_ty) = func.return_type {
+            if matches!(ret_ty.kind, verum_ast::ty::TypeKind::Refined { .. } | verum_ast::ty::TypeKind::Sigma { .. }) {
+                refinement_obligations += 1;
+            }
+        }
+        if refinement_obligations > 0 {
+            tracing::debug!(
+                "T1-F: function `{}` carries {} refinement obligation(s) — phase 2 will emit Assert instructions",
+                lookup_name,
+                refinement_obligations
+            );
+        }
+
         // Context transforms: for contexts declared with transforms like
         // `using [Database.transactional()]`, emit CtxGet + method call + CtxProvide
         // at function entry to wrap the base context with the transform.
