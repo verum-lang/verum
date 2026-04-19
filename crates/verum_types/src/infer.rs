@@ -37121,7 +37121,16 @@ impl TypeChecker {
         // gives the compiler license to choose the context dispatch —
         // without it, a bare `Time.now()` in a non-`using` context could
         // legitimately mean the stdlib namespace.
-        if let ExprKind::Path(path) = &receiver.kind
+        //
+        // Only fire on the first call of a method chain
+        // (`!skip_static_lookup`). The iterative chain handler reuses the
+        // outermost receiver expression for every chain step, so inside
+        // `CancelCtx.get_token().check()?` the same `Path(CancelCtx)` is
+        // the receiver for both `.get_token()` and `.check()` — but
+        // `.check()` should resolve against the return type of
+        // `.get_token()`, not re-dispatch the context.
+        if !skip_static_lookup
+            && let ExprKind::Path(path) = &receiver.kind
             && path.segments.len() == 1
             && let Some(verum_ast::ty::PathSegment::Name(ident)) = path.segments.first()
         {
@@ -37840,8 +37849,19 @@ impl TypeChecker {
         // the context resolver and use it directly as the receiver type.
         // This bypasses `synth_expr` which would fail because context
         // names are not in the variable environment.
+        //
+        // Only fire on the first call of a method chain
+        // (`!skip_static_lookup`). The iterative chain handler reuses the
+        // outermost receiver expression for every chain step, so inside
+        // `Ctx.method1().method2()` the same `Path(Ctx)` is the receiver
+        // for every step — but `.method2()` must resolve against the
+        // return type of `.method1()`, not against the context's record
+        // shape. When `skip_static_lookup` is set, prefer
+        // `precomputed_recv_ty` (passed in by the chain handler) so
+        // later steps see the actual intermediate type.
         let mut context_recv_ty: Option<Type> = None;
-        if let ExprKind::Path(path) = &receiver.kind
+        if !skip_static_lookup
+            && let ExprKind::Path(path) = &receiver.kind
             && path.segments.len() == 1
             && let verum_ast::ty::PathSegment::Name(ident) = &path.segments[0]
         {
@@ -38694,9 +38714,22 @@ impl TypeChecker {
             other => other,
         };
 
-        // Check if this is a context method call - verify capabilities
+        // Check if this is a context method call - verify capabilities.
+        //
+        // The iterative method-chain handler
+        // (`infer_method_chain_iterative`) walks
+        // `CancelCtx.get_token().check()?` into three calls, all sharing
+        // the *same* `receiver` expression (`CancelCtx`). Without the
+        // `!skip_static_lookup` guard below, every call in the chain
+        // would see `receiver.kind == Path("CancelCtx")` and spuriously
+        // validate the method name against the context declaration —
+        // e.g. reporting "context `CancelCtx` has no method `check`" for
+        // a `.check()` call whose actual receiver type is `&CancelToken`.
+        // The static lookup is only relevant for the first call.
+        //
         // Context system core: "context Name { fn method(...) }" declarations, "using [Ctx1, Ctx2]" on functions, "provide Ctx = impl" for injection — 0 - Capability Attenuation
-        if let ExprKind::Path(path) = &receiver.kind
+        if !skip_static_lookup
+            && let ExprKind::Path(path) = &receiver.kind
             && path.segments.len() == 1
             && let verum_ast::ty::PathSegment::Name(ident) = &path.segments[0]
         {
