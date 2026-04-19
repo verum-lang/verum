@@ -363,7 +363,7 @@ public fn happly<A, B>(
     p: Path<fn(A) -> B>(f, g),
     x: A,
 ) -> Path<B>(f(x), g(x)) {
-    ap(|h: fn(A| B) -> h(x), f, g, p)
+    ap(|h: fn(A) -> B| h(x), f, g, p)
 }
 
 /// Univalence for propositions: logically equivalent props are equal.
