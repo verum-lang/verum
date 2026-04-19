@@ -2908,6 +2908,40 @@ impl<'a> RecursiveParser<'a> {
                 ))
             }
 
+            // Turbofish generic call: `path::<T1, T2>(args)`.
+            //
+            // Verum prefers `foo<T>(args)` in most positions, but the
+            // turbofish form is the only unambiguous way to supply
+            // explicit generic arguments to a function call that
+            // otherwise parses as a comparison (`foo < T`). The stdlib
+            // (e.g. `core/math/cubical.vr`) uses it in contract
+            // expressions where any ambiguity would be syntactic.
+            Some(TokenKind::ColonColon)
+                if self.stream.peek_nth_kind(1) == Some(&TokenKind::Lt) =>
+            {
+                self.stream.advance(); // consume `::`
+                let type_args = self.parse_generic_args()?;
+                // After `::<…>` a call `(args)` must follow — otherwise
+                // this is not a turbofish call and we shouldn't consume
+                // the turbofish; but by the grammar `::<T>` only
+                // appears as a generic-arg annotation on a call site,
+                // so treat a missing `(` as an error.
+                // parse_call_args consumes its own `(` and `)`.
+                let args = self.parse_call_args()?;
+                let span = lhs_span.merge(self.stream.make_span(start_pos));
+                return Ok((
+                    Expr::new(
+                        ExprKind::Call {
+                            func: Box::new(lhs),
+                            type_args: type_args.into_iter().collect::<List<_>>(),
+                            args: args.into(),
+                        },
+                        span,
+                    ),
+                    true,
+                ));
+            }
+
             // Function call: (args)
             Some(TokenKind::LParen) => {
                 // CRITICAL FIX: Block expressions, control flow expressions, and similar
