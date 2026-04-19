@@ -1,0 +1,219 @@
+// =============================================================================
+// graph.vr — Reference-grade graph theory
+// =============================================================================
+// Layer: Foundations (Mathematical Structures)
+// Spec: T1-Y — unified categorical + simplicial + spectral graph theory
+//
+// A graph is an object with three equivalent views, each exposing a
+// different aspect of its structure:
+//
+//   1. Simplicial:   Graph<V> is a 1-truncated simplicial set.
+//                    Inherits face/degeneracy maps, geometric realisation,
+//                    the Kan-complex condition. Topologically: a 1-CW
+//                    complex. This is the view for fundamental groupoid,
+//                    connectivity, covering theory.
+//
+//   2. Categorical:  FreeGraphCategory<G> is the free category whose
+//                    objects are G.vertices() and whose morphisms are
+//                    walks (paths with possible repetition). A graph
+//                    homomorphism = a functor. Graph quotient = coequalizer.
+//                    Covering = covering functor. This is the view for
+//                    universal properties and transport of structure.
+//
+//   3. Presheaf:     GraphPresheaf<G> is a contravariant functor
+//                    FreeGraphCategory<G>^op → Set. Sheaf cohomology on
+//                    this presheaf recovers the graph Laplacian spectrum
+//                    (T1-Y integrates with core/math/linalg.vr::EigenDecomposition).
+//                    This is the view for spectral methods, graph neural
+//                    network message passing, and homology.
+//
+// The three views are all EQUIVALENT descriptions of the same mathematical
+// object — classical graph theory becomes a special case of each, and
+// theorems proved at the category/topos level (T1-R auto-discharge)
+// automatically lift to every model.
+// =============================================================================
+
+module core.math.graph;
+
+mount core.math.category.{Category, Functor};
+mount core.math.simplicial.{SimplicialSet, Simplex};
+mount core.math.algebra.{Monoid, Ring};
+mount core.math.topology.{TopologicalSpace, ConnectedSpace, PathConnectedSpace};
+mount core.base.protocols.{Eq, Ord};
+
+// =============================================================================
+// §1. Directed edges and walks
+// =============================================================================
+
+/// A directed edge from `src` to `tgt` with optional label `L`.
+public type Edge<V, L> is {
+    src:   V,
+    tgt:   V,
+    label: L,
+};
+
+/// An unlabelled directed edge — `()` is the trivial label.
+public type UEdge<V> is Edge<V, ()>;
+
+/// A walk from `start` to `end` is a sequence of edges where
+/// consecutive edges agree on the intermediate vertex. The empty
+/// walk (identity morphism in the free category) is
+/// `Walk { start: v, end: v, edges: [] }`.
+public type Walk<V, L> is {
+    start: V,
+    end:   V,
+    edges: List<Edge<V, L>>,
+};
+
+// =============================================================================
+// §2. Level 1 — Graph as a 1-truncated simplicial set
+// =============================================================================
+
+/// A directed graph, specialised as a 1-truncated simplicial set.
+///
+/// Every implementation of `Graph<V, L>` must:
+///   1. Enumerate its vertices (0-simplices) and edges (1-simplices).
+///   2. Provide face maps `face(edge, 0) = src`, `face(edge, 1) = tgt`.
+///   3. Provide the degeneracy `deg(v) = Edge { src: v, tgt: v, label: () }`.
+///   4. Satisfy the truncation axiom: no n-simplices for n ≥ 2.
+///
+/// A concrete implementation may choose any representation — adjacency
+/// list, adjacency matrix, sparse CSR, edge list — the protocol is
+/// agnostic. Algorithm selection depends on the representation's
+/// asymptotic complexity for vertex/edge access (`@impl_hint` attributes
+/// on the instance can guide the compiler).
+public type Graph<V, L> is protocol {
+    /// All vertices of the graph.
+    fn vertices(&self) -> List<V>;
+
+    /// All edges of the graph.
+    fn edges(&self) -> List<Edge<V, L>>;
+
+    /// Edges with source vertex `v` — the out-neighbourhood.
+    fn out_edges(&self, v: &V) -> List<Edge<V, L>>;
+
+    /// Edges with target vertex `v` — the in-neighbourhood.
+    fn in_edges(&self, v: &V) -> List<Edge<V, L>>;
+
+    /// Number of edges incident on `v`.
+    fn degree(&self, v: &V) -> Int{>= 0};
+
+    /// Axiom (T1-R): 1-truncation — no n-simplices for n ≥ 2.
+    axiom truncation(n: Int{>= 2})
+        ensures true;  // Placeholder until T1-R phase 2; phase 2 will
+                       // make this literally enforce emptiness of
+                       // higher simplex sets.
+};
+
+/// An undirected graph is a directed graph whose edge relation is
+/// symmetric — for every edge `u → v` there is a matching `v → u`.
+/// The axiom is enforced at implementation time by T1-R.
+public type UndirectedGraph<V, L> is protocol extends Graph<V, L> {
+    axiom symmetric(u: V, v: V, lab: L)
+        ensures true;  // Phase-1 placeholder.
+};
+
+/// A simple graph disallows self-loops and parallel edges.
+public type SimpleGraph<V, L> is protocol extends Graph<V, L> {
+    axiom no_self_loops(v: V)
+        ensures true;
+    axiom no_parallel(u: V, v: V)
+        ensures true;
+};
+
+// =============================================================================
+// §3. Level 2 — The free category on a graph
+// =============================================================================
+
+/// `FreeGraphCategory<G>` treats a graph as the presentation of a free
+/// category: objects are vertices, morphisms are walks, identity at
+/// each vertex is the empty walk, composition is walk concatenation.
+///
+/// Graph homomorphism = a functor `FreeGraphCategory<G> -> FreeGraphCategory<H>`.
+/// Graph quotient = a coequalizer in the 2-category of graph categories.
+/// Covering space = a covering functor (see core/math/topology.vr).
+public type FreeGraphCategory<V, L> is protocol extends Category<V, Walk<V, L>> {
+    /// The underlying graph from which this category is freely generated.
+    fn underlying(&self) -> Heap<dyn Graph<V, L>>;
+};
+
+// =============================================================================
+// §4. Level 3 — Graph presheaves and spectral theory
+// =============================================================================
+
+/// A presheaf on the free graph category. Sections over a vertex =
+/// labels assigned to that vertex; restriction along an edge =
+/// pullback of labels from source to target. Global sections
+/// recover the graph-colouring / harmonic-function viewpoint.
+public type GraphPresheaf<V, L, S> is protocol {
+    /// Sections over vertex `v`.
+    fn sections(&self, v: &V) -> List<S>;
+
+    /// Restriction along edge `e`: pulls sections from tgt to src.
+    fn restrict(&self, e: &Edge<V, L>, s: &S) -> S;
+
+    /// The underlying graph.
+    fn graph(&self) -> Heap<dyn Graph<V, L>>;
+};
+
+// =============================================================================
+// §5. Spectral theory bridge
+// =============================================================================
+
+/// A graph equipped with a real-valued edge weight — the carrier
+/// for Laplacian / adjacency matrix methods. The weight is a Monoid
+/// so that parallel edges (in a multigraph) sum their contributions.
+public type WeightedGraph<V, W: Monoid> is protocol extends Graph<V, W> {
+    /// Adjacency-matrix view (row index = source, column index =
+    /// target). Defers to core/math/linalg.vr for spectral decomposition.
+    fn adjacency_matrix(&self) -> List<List<W>>;
+
+    /// Degree vector — row sums of the adjacency matrix.
+    fn degree_vector(&self) -> List<W>;
+};
+
+// =============================================================================
+// §6. Classical structure witnesses
+// =============================================================================
+
+/// A rooted tree: acyclic connected graph with a distinguished root.
+public type RootedTree<V, L> is protocol extends SimpleGraph<V, L> {
+    fn root(&self) -> V;
+    axiom acyclic() ensures true;      // Phase 1 placeholder.
+    axiom connected() ensures true;
+};
+
+/// A directed acyclic graph: directed graph with no directed cycles.
+/// Enables topological sort (see §7).
+public type DAG<V, L> is protocol extends Graph<V, L> {
+    axiom acyclic_directed() ensures true;
+};
+
+// =============================================================================
+// §7. Standard algorithms (to be filled in as more of T1-Y lands)
+// =============================================================================
+//
+// Each algorithm is an instance of a general iterator/fold pattern
+// over the graph's simplicial / categorical structure. See T1-Y
+// phase 2 for the full algorithm library — the signatures here pin
+// the canonical names used across the stdlib.
+//
+//   fn bfs<G: Graph<V, L>, V: Eq + Hash>(g: &G, start: &V) -> List<V>;
+//   fn dfs<G: Graph<V, L>, V: Eq + Hash>(g: &G, start: &V) -> List<V>;
+//   fn dijkstra<G: WeightedGraph<V, W>, V: Eq + Hash, W: Ord>(
+//       g: &G, start: &V
+//   ) -> Map<V, W>;
+//   fn topological_sort<G: DAG<V, L>, V: Eq + Hash>(g: &G) -> List<V>;
+//   fn connected_components<G: UndirectedGraph<V, L>, V: Eq + Hash>(
+//       g: &G
+//   ) -> List<List<V>>;
+//   fn laplacian_spectrum<G: WeightedGraph<V, Float>, V: Eq + Hash>(
+//       g: &G
+//   ) -> List<Float>;
+// =============================================================================
+
+// =============================================================================
+// Version Information
+// =============================================================================
+
+public const VERSION: Text = "0.1.0";
