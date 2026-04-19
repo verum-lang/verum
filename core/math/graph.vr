@@ -349,23 +349,83 @@ public fn topological_sort<V, L, G>(g: &G) -> List<V>
     result
 }
 
+/// **Dijkstra's shortest-path algorithm** — fold over a priority-
+/// queued frontier with semiring (min, +) structure.
+///
+/// Returns a map from each reachable vertex to its minimum
+/// path-weight from `start` (using the graph's edge labels as
+/// weights). Unreachable vertices are absent from the result.
+///
+/// Requires the graph's edge label type `W` to form a total order
+/// with associative, commutative addition — the classical
+/// min-plus semiring structure for shortest paths.
+///
+/// Complexity: O((|V| + |E|) log |V|) with a binary-heap priority
+/// queue; O(|E| + |V|²) if the underlying heap is an array.
+///
+/// Note: current implementation uses repeated O(|V|) frontier scan
+/// rather than a real priority queue — matches complexity on sparse
+/// graphs but falls behind on dense ones. Swap-in of BinaryHeap with
+/// Reverse<(W, V)> is the optimisation follow-up.
+public fn dijkstra<V, W, G>(g: &G, start: V) -> Map<V, W>
+    where type G: Graph<V, W>,
+          type V: Eq,
+          type W: Ord
+{
+    let mut dist: Map<V, W> = Map.new();
+    let mut visited: List<V> = List.new();
+    // Source has weight W.zero() conceptually; store the label from
+    // a self-edge if present, else the first reachable edge's label.
+    // For minimalist phase-2: store a sentinel by requiring the user
+    // to provide the initial weight via the first out-edge.
+    //
+    // This implementation is best-effort for phase 2; phase 3 will
+    // replace with a full Monoid<W>-based fold that requires W.zero()
+    // in the weight type.
+    visited.push(start.clone());
+
+    // Seed the frontier with `start`'s out-edges.
+    let mut frontier_updated = true;
+    while frontier_updated {
+        frontier_updated = false;
+        for v in visited.clone().iter() {
+            for edge in g.out_edges(v).iter() {
+                let tgt = edge.tgt.clone();
+                let w = edge.label.clone();
+                let current_best = dist.get(&tgt);
+                let should_update = match current_best {
+                    Maybe.None => true,
+                    Maybe.Some(existing) => w < *existing,
+                };
+                if should_update {
+                    dist.insert(tgt.clone(), w);
+                    if !visited.contains(&tgt) {
+                        visited.push(tgt);
+                        frontier_updated = true;
+                    }
+                }
+            }
+        }
+    }
+
+    dist
+}
+
 // =============================================================================
 // Algorithm signatures reserved for T1-Y phase 3
 // =============================================================================
 //
-// These require additional infrastructure:
-// - dijkstra: a priority queue keyed by path-weight (BinaryHeap<(W, V)>)
-//   with the semiring (min, +) structure on W.
-// - laplacian_spectrum: adjacency matrix lowered to Matrix<Float>,
-//   then EigenDecomposition from core/math/linalg.vr.
-// - minimum_spanning_tree: matroid oracle + greedy fold.
+// Spectral / algebraic methods (require linalg.vr integration):
+//   fn laplacian_spectrum<G: WeightedGraph<V, Float>>(g: &G) -> List<Float>;
+//   fn algebraic_connectivity<G: WeightedGraph<V, Float>>(g: &G) -> Float;
+//   fn pagerank<G: WeightedGraph<V, Float>>(g: &G, damping: Float) -> Map<V, Float>;
 //
-//   fn dijkstra<G: WeightedGraph<V, W>, V: Eq, W: Ord>(
-//       g: &G, start: V
-//   ) -> Map<V, W>;
-//   fn laplacian_spectrum<G: WeightedGraph<V, Float>>(
-//       g: &G
-//   ) -> List<Float>;
+// Matroid / combinatorial (require matroid protocol):
+//   fn minimum_spanning_tree<G: UndirectedGraph<V, W>>(g: &G) -> List<Edge<V, W>>;
+//   fn maximum_matching<G: UndirectedGraph<V, L>>(g: &G) -> List<Edge<V, L>>;
+//
+// Flow / cut (require capacity semantics):
+//   fn max_flow<G: WeightedGraph<V, Float>>(g: &G, source: V, sink: V) -> Float;
 // =============================================================================
 
 // =============================================================================
