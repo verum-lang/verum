@@ -2113,13 +2113,22 @@ impl<'a> RecursiveParser<'a> {
                         } else {
                             // Check if `>` after a type is actually a comparison operator
                             // E.g.: Proof<n > 0> -- `n` parsed as type, `>` is comparison
+                            //
+                            // EXCLUSION: `(` as the first token of the RHS is ambiguous
+                            // with a DependentApp value-argument list `Outer<Type<…>(…)>`.
+                            // In the stdlib HoTT pattern `Foo<Bar<A>(v)>` the `(v)` is a
+                            // DependentApp suffix of Bar<A>, not a comparison rhs; eagerly
+                            // interpreting it as `Bar > (v)` would eat the outer `>` and
+                            // strand Foo's `<…>` unclosed. Users who *do* want a comparison
+                            // with a parenthesized rhs can wrap the whole predicate in
+                            // an explicit refinement (`T{ n > (expr) }`).
                             if matches!(p.stream.peek_kind(), Some(TokenKind::Gt) | Some(TokenKind::GtEq) | Some(TokenKind::LtEq)) {
                                 let cmp_cp = p.stream.position();
                                 let cmp_tok = p.stream.peek_kind().cloned();
                                 p.stream.advance();
                                 let has_rhs = matches!(p.stream.peek_kind(),
                                     Some(TokenKind::Integer(_)) | Some(TokenKind::Float(_))
-                                    | Some(TokenKind::Ident(_)) | Some(TokenKind::LParen)
+                                    | Some(TokenKind::Ident(_))
                                     | Some(TokenKind::True) | Some(TokenKind::False)
                                     | Some(TokenKind::Minus) | Some(TokenKind::Bang));
                                 if has_rhs {
