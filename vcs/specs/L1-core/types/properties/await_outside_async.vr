@@ -1,0 +1,27 @@
+// @test: typecheck-fail
+// @tier: 0
+// @level: L1
+// @tags: types, properties, computational, async, await, enforcement
+// @expected-error: E504
+//
+// L0-3 enforcement anchor — the flip side of effect *inference*.
+//
+// `fn must_fail()` is declared `fn`, not `async fn`; its body awaits a
+// future. Before this spec, the inference pass correctly marked the
+// caller as having the {Async} property but the enforcement layer
+// only emitted a `tracing::debug!` for E504 and let the program
+// through. That meant downstream callers could invoke `must_fail`
+// from any synchronous context even though it contains async
+// operations — a silent soundness break for the async contract.
+//
+// After the fix the `.await` handler itself refuses to type-check
+// outside an async context (async fn, async block, or async
+// closure) and emits E504.
+
+async fn later() -> Int { 42 }
+
+fn must_fail() -> Int {
+    later().await
+}
+
+fn main() {}

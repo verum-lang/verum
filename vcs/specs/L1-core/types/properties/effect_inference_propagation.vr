@@ -1,0 +1,96 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L1
+// @tags: types, properties, computational, async, fallible, propagation, inference
+//
+// L0-3 anchor: effect inference must propagate through function bodies and
+// call graphs. Each definition below relies on a specific property being
+// inferred correctly:
+//
+//   * `async fn` ⇒ {Async}
+//   * body containing `.await` ⇒ {Async}
+//   * body containing `spawn` ⇒ {Async, Spawns}
+//   * body containing `throw` or `?` in a throws-annotated fn ⇒ {Fallible}
+//   * body containing a `loop {}` ⇒ {Divergent}
+//   * body containing `panic(...)` ⇒ {Divergent}
+//   * body calling another function just unions-in its properties
+//
+// If the inference pass silently loses any of these signals, downstream
+// verification (pure-fn checks, async-only-in-async-ctx, etc.) stops
+// working — so this spec pins down the basic propagation at the
+// type-check level (we do not need runtime support to exercise the
+// compiler's inference).
+
+// ---------------------------------------------------------------------------
+// Async inference
+// ---------------------------------------------------------------------------
+
+async fn delayed_double(x: Int) -> Int {
+    x * 2
+}
+
+// .await inside a body — inherits Async.
+async fn compute(a: Int) -> Int {
+    delayed_double(a).await + 1
+}
+
+// async {} block — inherits Async.
+fn make_task() -> _ {
+    async {
+        delayed_double(41).await
+    }
+}
+
+// spawn — adds Spawns on top of the inherited body properties.
+async fn spawn_it(x: Int) -> Int {
+    let h = spawn delayed_double(x);
+    h.await
+}
+
+// ---------------------------------------------------------------------------
+// Fallible inference via throws + `?`
+// ---------------------------------------------------------------------------
+
+type ParseFail is
+    | Empty
+    | BadDigit(Text);
+
+fn parse(input: &Text) throws(ParseFail) -> Int {
+    if input.is_empty() {
+        throw ParseFail.Empty;
+    }
+    42
+}
+
+// Caller with `?` — Fallible must be inferred and allowed only because we
+// declared our own throws clause.
+fn parse_twice(a: &Text, b: &Text) throws(ParseFail) -> Int {
+    parse(a)? + parse(b)?
+}
+
+// ---------------------------------------------------------------------------
+// Divergent inference via panic / infinite loop
+// ---------------------------------------------------------------------------
+
+fn always_panics() -> ! {
+    panic("unreachable");
+}
+
+fn infinite() -> ! {
+    loop {
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Cross-function propagation: the compiler must see that `user` inherits
+// whatever `delayed_double` had (Async) via the call below.
+// ---------------------------------------------------------------------------
+
+async fn user_of_async(n: Int) -> Int {
+    compute(n).await
+}
+
+fn main() {
+    // The test passes if all the above definitions type-check without
+    // error — the inference pass is exercised purely during elaboration.
+}

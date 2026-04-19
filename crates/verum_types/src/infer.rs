@@ -14152,7 +14152,25 @@ impl TypeChecker {
                     }
 
                     match self.protocol_checker.read().resolve_future_protocol(&inner_result.ty) {
-                        Some(resolution) => Ok(InferResult::new(resolution.output)),
+                        Some(resolution) => {
+                            // `.await` is only valid inside an async context
+                            // (async fn body, async {} block, or async
+                            // closure). Without this check, inference marks
+                            // the caller with the Async property but the
+                            // enforcement layer only emits a tracing::debug!
+                            // on the outer function — callers could silently
+                            // invoke it as if it were synchronous.
+                            if !self.in_async_context {
+                                return Err(TypeError::AsyncPropertyViolation {
+                                    message: verum_common::Text::from(
+                                        "`.await` can only be used inside an async context \
+                                         (async fn, async block, or async closure)",
+                                    ),
+                                    span: inner_expr.span,
+                                });
+                            }
+                            Ok(InferResult::new(resolution.output))
+                        }
                         None => {
                             // If the inner expression is inside a spawn block, the await
                             // may have been parsed as spawn({ expr }.await) rather than
