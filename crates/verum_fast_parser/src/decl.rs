@@ -2991,6 +2991,70 @@ impl<'a> RecursiveParser<'a> {
 
     /// Check if the current position looks like a variant (not a complex type).
     /// Variants start with a simple identifier, not with complex type syntax.
+    /// Decide whether a leading `@` opens an attribute on a variant
+    /// (`@serialize(...) Ok`) or a meta-type alias body (`@builtin_path`,
+    /// `@Expr`).
+    ///
+    /// Walk past `@X` and an optional `(…)` arg list, then peek. If an
+    /// identifier (the variant's own name) follows, this is an attribute
+    /// on a variant; otherwise — `;`, `,`, `|`, `)`, `where`, EOF — the
+    /// `@X` itself is the whole body: a meta type alias like
+    /// `type Path<A> is @builtin_path;`.
+    fn at_prefix_looks_like_variant_attr(&self) -> bool {
+        // Walk past any number of stacked attributes:
+        //   attribute chain:  ( @  Ident  [ ( … ) ] )+  VariantName
+        //   meta-type body :    @  Ident                (then ; , | ) where …)
+        //
+        // A variant name may be lexed as a keyword (`Ok`, `Err`, `Some`,
+        // `None`, `Result`, `Await`, etc.) — matching
+        // `consume_ident_or_keyword` in `parse_variant`. Accept any token
+        // that could start a variant name.
+        fn is_variant_start(t: Option<&TokenKind>) -> bool {
+            matches!(
+                t,
+                Some(TokenKind::Ident(_))
+                    | Some(TokenKind::Some)
+                    | Some(TokenKind::None)
+                    | Some(TokenKind::Ok)
+                    | Some(TokenKind::Err)
+                    | Some(TokenKind::Result)
+                    | Some(TokenKind::Await)
+                    | Some(TokenKind::Yield)
+            )
+        }
+
+        let mut i = 0usize;
+        loop {
+            // Must start with `@`
+            if !matches!(self.stream.peek_nth(i).map(|t| &t.kind), Some(TokenKind::At)) {
+                break;
+            }
+            i += 1;
+            // Attribute name (ident-or-keyword).
+            if !is_variant_start(self.stream.peek_nth(i).map(|t| &t.kind)) {
+                return false;
+            }
+            i += 1;
+            // Optional `(args)` — balanced-paren skip.
+            if matches!(self.stream.peek_nth(i).map(|t| &t.kind), Some(TokenKind::LParen)) {
+                let mut depth = 1i32;
+                i += 1;
+                while depth > 0 {
+                    match self.stream.peek_nth(i).map(|t| &t.kind) {
+                        Some(TokenKind::LParen) => depth += 1,
+                        Some(TokenKind::RParen) => depth -= 1,
+                        None => return false,
+                        _ => {}
+                    }
+                    i += 1;
+                }
+            }
+            // Continue the loop: another `@` begins a stacked attribute;
+            // anything else is the variant name (or meta-body terminator).
+        }
+        is_variant_start(self.stream.peek_nth(i).map(|t| &t.kind))
+    }
+
     fn looks_like_variant(&self) -> bool {
         // Variant patterns:
         // - Simple: Name
@@ -3012,6 +3076,11 @@ impl<'a> RecursiveParser<'a> {
             Some(TokenKind::Percent) => false,   // %Int
             Some(TokenKind::Star) => false,      // *const Int
             Some(TokenKind::Implement) => false, // impl Display
+            // `@`-prefixed tokens are either an attribute on a variant
+            // (`@serialize(...) Ok | @deprecated Legacy`) or a meta-type
+            // alias body (`is @builtin_path;`). Use the helper to walk
+            // past the attribute and peek.
+            Some(TokenKind::At) => self.at_prefix_looks_like_variant_attr(),
             Some(TokenKind::Ident(name)) if name.as_str() == "impl" => false, // impl Display (contextual keyword)
             Some(TokenKind::Ident(name)) if name.as_str() == "dyn" => false,  // dyn Display
             Some(TokenKind::Ident(name)) if name.as_str() == "some" => false, // some T: Bound (existential type)
