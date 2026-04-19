@@ -104,6 +104,66 @@ T1-N (dependent-type value parameters), T1-O (theorem-proof
 syntax — multi-line ensures, proof blocks, have/by/auto),
 T1-P (lambda bare-expression body).
 
+## Tier-1 campaign — 2026-04-19/20 batch closure
+
+After the initial campaign, a sustained push closed 10 tasks fully
+and advanced 9 others into active phase-1/step-1 states. The
+full roster at snapshot time:
+
+### Fully closed (10)
+
+| Task | Commits | Status |
+|------|---------|--------|
+| T1-N | (earlier) | DependentApp parser for `T<A>(v..)` |
+| T1-P | `251900a` | lambda bare-expression body |
+| T1-O | `d0d51a8` | tactic DSL — block `first`, generic tactics, typed params, let/match/fail/if |
+| T1-C | `fdbcfac` | stdlib name collisions — variant-as-type-union |
+| T1-Q | `4f490d0` | axiom `ensures` clause with ∀/→ synthesis |
+| T1-E | `f6c2655` | row-polymorphic records `{fields | r}` |
+| T1-M | (indirect) | 10/10 stdlib math modules parse |
+| T1-S | `9b98c9d` | first-class `Prop` universe |
+| T1-V | `15ab236` | universe polymorphism `Type(i)` |
+| T1-U | `d78104d` | higher inductive types — path constructors |
+
+### Phase 1 / step 1 landed (9, work continues)
+
+| Task | Commits | Phase status |
+|------|---------|--------------|
+| T1-R | `62e8a4f` | phase 1: protocol-level axioms (parser+AST). Phase 2 pending: implement-site auto-discharge. |
+| T1-T | `7dc2c8b`, `7bca690` | phase 1+2: parser+AST+alias registration. Phase 3 pending: HIT lowering. |
+| T1-Y | `356cf09` | phase 1: `core/math/graph.vr` three-level skeleton. Phase 2 pending: BFS/DFS/Dijkstra as simplicial folds + algorithm library. |
+| T1-G | `1c1c399` | step 1: removed short-name hardcoded exclusion. Step 2 pending: VBC `register_builtin_variants` sentinel → registration-order. |
+| T1-W | `1418c4a`, `e02ca7f` | step 1: Let/Match/If/Fail evaluator. Step 2 pending: SMT integration for ring_law/category_law end-to-end. |
+| T1-X | `545572d` | phase 1: morphism-as-protocol anchors. Phase 2 blocked on T1-R phase 2. |
+| T1-K | (existing) | infra landed (`compilation_regression.rs` with LOC/sec throughput). Optimization verification pending. |
+| T1-L | (existing) | infra landed (`production_targets.rs` for CBGR <15ns). Optimization verification pending. |
+| T1-H | `f50e939` | step 1: MakePi/MakeSigma/MakeWitness opcodes (0x8D/0x8E/0x8F). Codegen + interpreter pending. |
+
+### Unblocked, not yet started
+
+T1-A panic-surface cleanup (1,123+ sites),
+T1-B L1-core residuals,
+T1-D VBC↔AOT parity,
+T1-F refinement runtime checks in VBC,
+T1-I work-stealing scheduler,
+T1-J L2-async 41-failure triage (in progress).
+
+### Blocked
+
+T1-AA canonicalize existing graph-like structures ← T1-Y phase 2
+T1-Z Isabelle-Graph-Library converter ← T1-Y phase 2
+
+### Key architectural principle validated
+
+Verum's proof DSL + type system + ∞-category / simplicial / linear-algebra
+stack is a superset of what Isabelle-Graph-Library provides. A reference
+graph library becomes a 3-level protocol encoding (Graph as
+SimplicialSet / FreeGraphCategory as Category / GraphPresheaf as
+Presheaf) with classical algorithms as folds over semirings and functors
+into Kₙ. This is "Verum's unique contribution" — no other mainstream
+proof assistant combines HoTT + SMT + refinement + tactic DSL +
+∞-categorical machinery in one unified stack.
+
 ### Completed in campaign
 
 | Task | Commit(s) | What |
