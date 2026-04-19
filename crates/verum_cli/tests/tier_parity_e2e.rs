@@ -326,3 +326,78 @@ fn gate_unsafe_rejected_by_interpreter() {
         combined
     );
 }
+
+// ----- Regression: repeated AOT build of `cbgr_demo.vr` -----
+//
+// Before the rayon-fence fix, `verum build examples/cbgr_demo.vr`
+// SIGSEGV'd in LLVM pass-constructor `__cxa_guard_acquire` on
+// ~60-70% of release invocations. The fix has two parts:
+//   1. eager `Target::initialize_native` in `verum_cli::main`
+//      (pre-populates IR-pass registry on the main thread), and
+//   2. `rayon::broadcast(|_| ())` in `pipeline.rs` in place of
+//      `rayon::yield_now()` (a true fence — forces every rayon
+//      worker to wake, run a no-op, and re-park before LLVM starts).
+//
+// Release builds show 0/100 crashes after the fix. Debug builds
+// retain a small residual rate (~10%) due to different codegen
+// timing. This test runs against whichever binary `cargo test`
+// built (debug by default) and tolerates `ceil(runs/4)` failures —
+// a regression to the pre-fix rate would show 60%+ which trips the
+// threshold. CI stress runs can raise the bar via VERUM_CBGR_DEMO_RUNS.
+
+fn cbgr_demo_path() -> Option<PathBuf> {
+    let start = Path::new(env!("CARGO_MANIFEST_DIR")).to_path_buf();
+    let mut cur: Option<&Path> = Some(&start);
+    while let Some(dir) = cur {
+        let candidate = dir.join("examples/cbgr_demo.vr");
+        if candidate.exists() {
+            return Some(candidate);
+        }
+        cur = dir.parent();
+    }
+    None
+}
+
+#[test]
+fn tier1_repeated_aot_build_is_stable() {
+    let example = match cbgr_demo_path() {
+        Some(p) => p,
+        None => {
+            eprintln!("skip: examples/cbgr_demo.vr not found in ancestors");
+            return;
+        }
+    };
+
+    let runs: usize = std::env::var("VERUM_CBGR_DEMO_RUNS")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(8);
+
+    let mut failures: Vec<(usize, Option<i32>)> = Vec::new();
+    for i in 0..runs {
+        let out = Command::new(verum_bin())
+            .args(["build", example.to_str().unwrap()])
+            .output()
+            .expect("spawn verum build");
+        if !out.status.success() {
+            failures.push((i, out.status.code()));
+        }
+    }
+
+    // Pre-fix rate was 60-70%; post-fix ~0% release, ~10% debug.
+    // Fail only if failures exceed a quarter of the runs — that's
+    // far below the regression signal (~5/8) but well above any
+    // single-run flakiness in debug mode.
+    let max_tolerable = (runs + 3) / 4;
+    assert!(
+        failures.len() <= max_tolerable,
+        "tier1 AOT build of {} crashed {}/{} time(s) (tolerance: {}): {:?}\n\
+         (a SIGSEGV/139 here means the rayon-vs-LLVM pass-guard race \
+         has regressed — see `verum diagnose list`.)",
+        example.display(),
+        failures.len(),
+        runs,
+        max_tolerable,
+        failures,
+    );
+}

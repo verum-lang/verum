@@ -750,11 +750,8 @@ enum WorkspaceCommands {
 }
 
 fn main() {
-    // Install the industrial crash reporter BEFORE anything else runs.
-    // It wires the panic hook + fatal-signal handlers so a crash in
-    // argv parsing, the worker thread spawn below, or anywhere in the
-    // pipeline is captured to ~/.verum/crashes/ with breadcrumbs,
-    // environment, and backtrace.
+    // Industrial crash reporter: panic hook + fatal-signal handlers +
+    // breadcrumb-enriched structured reports to `~/.verum/crashes/`.
     verum_error::crash::install(verum_error::crash::CrashReporterConfig::default());
 
     // Eagerly initialise the LLVM native target on the main thread,

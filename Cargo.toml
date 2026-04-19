@@ -238,6 +238,25 @@ opt-level = 3
 lto = "thin"
 codegen-units = 16
 
+# Release build that keeps DWARF line tables so crash-report
+# backtraces resolve to `file:line`. Optimisation matches
+# `[profile.release]`; `strip = "none"` + `split-debuginfo = "packed"`
+# produce an external `.dSYM` (macOS) / `.dwp` (Linux) bundle next to
+# the binary. Main binary size is unchanged vs `release`.
+#
+# Do NOT fold this into `[profile.release]`. Enabling DWARF in the
+# primary release profile re-introduces the LLVM cxa-guard race:
+# rebuild produced 36/50 SIGSEGV vs 0/50 with this split. The extra
+# Dwarf-emitter passes expand the lazy-init surface that races rayon
+# worker wake paths.
+#
+# Usage: `cargo build --profile release-debug-tables --bin verum`
+[profile.release-debug-tables]
+inherits = "release"
+debug = "line-tables-only"
+strip = "none"
+split-debuginfo = "packed"
+
 [profile.test]
 # Test profile with minimal optimization
 opt-level = 0

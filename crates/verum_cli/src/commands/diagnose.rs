@@ -29,6 +29,9 @@ pub enum DiagnoseCommands {
         /// Print the structured JSON instead of the human log.
         #[clap(long)]
         json: bool,
+        /// Replace $HOME with `~` and username with `<user>` for safe sharing.
+        #[clap(long)]
+        scrub_paths: bool,
     },
     /// Bundle the latest reports into a `.tar.gz` for sharing on an issue.
     Bundle {
@@ -38,6 +41,10 @@ pub enum DiagnoseCommands {
         /// How many most-recent reports to include.
         #[clap(long, default_value = "5")]
         recent: usize,
+        /// Replace $HOME with `~` and username with `<user>` inside each
+        /// bundled file. Originals under `~/.verum/crashes` are untouched.
+        #[clap(long)]
+        scrub_paths: bool,
     },
     /// Print the captured build / host environment snapshot.
     Env {
@@ -51,15 +58,42 @@ pub enum DiagnoseCommands {
         #[clap(long)]
         yes: bool,
     },
+    /// Open a new GitHub issue with the most recent crash reports
+    /// attached via the `gh` CLI. Paths are always scrubbed before
+    /// upload. Requires `gh auth login`.
+    Submit {
+        /// GitHub repo in `owner/name` form.
+        #[clap(long, default_value = "verum-lang/verum")]
+        repo: String,
+        /// How many most-recent reports to include.
+        #[clap(long, default_value = "3")]
+        recent: usize,
+        /// Print the `gh` command without running it.
+        #[clap(long)]
+        dry_run: bool,
+    },
 }
 
 pub fn execute(cmd: DiagnoseCommands) -> Result<()> {
     match cmd {
         DiagnoseCommands::List { limit } => list(limit),
-        DiagnoseCommands::Show { path, json } => show(path.as_deref(), json),
-        DiagnoseCommands::Bundle { output, recent } => bundle(output.as_deref(), recent),
+        DiagnoseCommands::Show {
+            path,
+            json,
+            scrub_paths,
+        } => show(path.as_deref(), json, scrub_paths),
+        DiagnoseCommands::Bundle {
+            output,
+            recent,
+            scrub_paths,
+        } => bundle(output.as_deref(), recent, scrub_paths),
         DiagnoseCommands::Env { json } => env(json),
         DiagnoseCommands::Clean { yes } => clean(yes),
+        DiagnoseCommands::Submit {
+            repo,
+            recent,
+            dry_run,
+        } => submit(&repo, recent, dry_run),
     }
 }
 
@@ -120,7 +154,7 @@ fn first_report_lines(path: &Path) -> std::io::Result<Vec<String>> {
     Ok(picks)
 }
 
-fn show(path: Option<&str>, want_json: bool) -> Result<()> {
+fn show(path: Option<&str>, want_json: bool, scrub: bool) -> Result<()> {
     let log_path: PathBuf = match path {
         Some(p) => PathBuf::from(p),
         None => {
@@ -155,14 +189,15 @@ fn show(path: Option<&str>, want_json: bool) -> Result<()> {
     f.read_to_string(&mut buf)
         .map_err(|e| CliError::Custom(format!("read {}: {}", target.display(), e)))?;
 
-    print!("{}", buf);
-    if !buf.ends_with('\n') {
+    let rendered = if scrub { crash::scrub_paths(&buf) } else { buf };
+    print!("{}", rendered);
+    if !rendered.ends_with('\n') {
         println!();
     }
     Ok(())
 }
 
-fn bundle(output: Option<&str>, recent: usize) -> Result<()> {
+fn bundle(output: Option<&str>, recent: usize, scrub: bool) -> Result<()> {
     use flate2::Compression;
     use flate2::write::GzEncoder;
 
@@ -191,9 +226,9 @@ fn bundle(output: Option<&str>, recent: usize) -> Result<()> {
         // Pair the .log with its .json sibling.
         let stem = log_path.with_extension("");
         let json_path = stem.with_extension("json");
-        add_to_tar(&mut tar, &log_path)?;
+        add_to_tar(&mut tar, &log_path, scrub)?;
         if json_path.exists() {
-            add_to_tar(&mut tar, &json_path)?;
+            add_to_tar(&mut tar, &json_path, scrub)?;
         }
         included += 1;
     }
@@ -226,13 +261,107 @@ Please attach the whole archive to an issue at:\n\
     Ok(())
 }
 
-fn add_to_tar<W: Write>(tar: &mut tar::Builder<W>, path: &Path) -> Result<()> {
+fn add_to_tar<W: Write>(tar: &mut tar::Builder<W>, path: &Path, scrub: bool) -> Result<()> {
     let name = path
         .file_name()
         .map(|n| n.to_string_lossy().into_owned())
         .unwrap_or_else(|| "report.bin".into());
-    tar.append_path_with_name(path, name)
-        .map_err(|e| CliError::Custom(format!("add {}: {}", path.display(), e)))
+    if scrub {
+        let raw = fs::read_to_string(path)
+            .map_err(|e| CliError::Custom(format!("read {}: {}", path.display(), e)))?;
+        let scrubbed = crash::scrub_paths(&raw);
+        let bytes = scrubbed.as_bytes();
+        let mut header = tar::Header::new_gnu();
+        header.set_path(&name).ok();
+        header.set_size(bytes.len() as u64);
+        header.set_mode(0o644);
+        header.set_cksum();
+        tar.append(&header, bytes)
+            .map_err(|e| CliError::Custom(format!("add {}: {}", name, e)))
+    } else {
+        tar.append_path_with_name(path, name)
+            .map_err(|e| CliError::Custom(format!("add {}: {}", path.display(), e)))
+    }
+}
+
+fn submit(repo: &str, recent: usize, dry_run: bool) -> Result<()> {
+    let ts = now_secs();
+    let bundle_path =
+        std::env::temp_dir().join(format!("verum-submit-{}-{}.tar.gz", std::process::id(), ts));
+    // Always scrub when submitting externally.
+    bundle(Some(&bundle_path.to_string_lossy()), recent, true)?;
+
+    let newest = crash::list_reports()
+        .map_err(|e| CliError::Custom(e.to_string()))?
+        .into_iter()
+        .next();
+    let summary_excerpt = if let Some(p) = newest {
+        let raw = fs::read_to_string(&p).unwrap_or_default();
+        let scrubbed = crash::scrub_paths(&raw);
+        scrubbed.lines().take(40).collect::<Vec<_>>().join("\n")
+    } else {
+        "(no crash reports found)".into()
+    };
+
+    let title = "Compiler crash report (via `verum diagnose submit`)";
+    let body = format!(
+        "Automatic crash report generated by `verum diagnose submit`.\n\n\
+         The attached archive (`{}`) contains the {} most recent report(s). \
+         Paths have been scrubbed (`$HOME`→`~`, username→`<user>`).\n\n\
+         ### Most recent report excerpt\n\n```\n{}\n```\n",
+        bundle_path.display(),
+        recent,
+        summary_excerpt
+    );
+
+    let mut cmd = std::process::Command::new("gh");
+    cmd.arg("issue")
+        .arg("create")
+        .arg("--repo")
+        .arg(repo)
+        .arg("--title")
+        .arg(title)
+        .arg("--body")
+        .arg(&body);
+
+    if dry_run {
+        ui::note(&format!(
+            "Would run: gh issue create --repo {} --title \"{}\" --body <…>; attach {}",
+            repo,
+            title,
+            bundle_path.display()
+        ));
+        return Ok(());
+    }
+
+    if std::process::Command::new("gh")
+        .arg("--version")
+        .output()
+        .is_err()
+    {
+        return Err(CliError::Custom(
+            "GitHub CLI `gh` not found — install it and run `gh auth login`, then retry."
+                .into(),
+        ));
+    }
+
+    let out = cmd
+        .output()
+        .map_err(|e| CliError::Custom(format!("gh issue create: {}", e)))?;
+    if !out.status.success() {
+        return Err(CliError::Custom(format!(
+            "gh issue create failed: {}",
+            String::from_utf8_lossy(&out.stderr)
+        )));
+    }
+
+    let url = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    ui::success(&format!("Issue created: {}", url));
+    ui::note(&format!(
+        "Attach {} to the issue manually (gh issue create does not accept attachments).",
+        bundle_path.display()
+    ));
+    Ok(())
 }
 
 fn now_secs() -> u64 {

@@ -173,6 +173,25 @@ fn is_sensitive(key: &str) -> bool {
     NEEDLES.iter().any(|n| k.contains(n))
 }
 
+/// Replace `$HOME` with `~` and the current username with `<user>` in a
+/// path-like string. Idempotent; no-op when the env vars aren't set.
+/// Used by `verum diagnose` to sanitise reports before external sharing
+/// — never applied to on-disk reports.
+pub fn scrub_paths(input: &str) -> String {
+    let mut out = input.to_string();
+    if let Some(home) = std::env::var_os("HOME").and_then(|v| v.into_string().ok()) {
+        if !home.is_empty() {
+            out = out.replace(&home, "~");
+        }
+    }
+    if let Some(user) = std::env::var_os("USER").and_then(|v| v.into_string().ok()) {
+        if !user.is_empty() {
+            out = out.replace(&user, "<user>");
+        }
+    }
+    out
+}
+
 fn should_keep_env(key: &str, redact: bool) -> bool {
     // Keep a curated subset of env vars most useful for reproducing a
     // build, plus anything starting with VERUM_. Skip noisy PATH-like
@@ -598,6 +617,15 @@ pub fn install(config: CrashReporterConfig) {
             }
         }
     }
+
+    #[cfg(windows)]
+    {
+        if config.install_signal_handlers {
+            unsafe {
+                install_unhandled_exception_filter_windows();
+            }
+        }
+    }
 }
 
 /// Set or update the command currently running (e.g. `"build"`, `"run"`).
@@ -1013,6 +1041,52 @@ fn signal_name(signo: i32) -> &'static str {
 
 #[cfg(not(unix))]
 unsafe fn install_signal_handlers_unix() {}
+
+// ----- signal handling (Windows) -----
+//
+// `SetUnhandledExceptionFilter` fires before the Windows Error
+// Reporting dialog. We write the structured crash report, then return
+// `EXCEPTION_CONTINUE_SEARCH` so the OS still runs its default chain
+// (WerFault minidump, etc.) for maximum data.
+
+#[cfg(windows)]
+unsafe fn install_unhandled_exception_filter_windows() {
+    type Filter = unsafe extern "system" fn(*mut WindowsExceptionInfo) -> i32;
+    unsafe extern "system" {
+        fn SetUnhandledExceptionFilter(new: Filter) -> Filter;
+    }
+    unsafe {
+        SetUnhandledExceptionFilter(windows_exception_handler);
+    }
+}
+
+#[cfg(windows)]
+#[repr(C)]
+struct WindowsExceptionInfo {
+    _exception_record: *mut core::ffi::c_void,
+    _context_record: *mut core::ffi::c_void,
+}
+
+#[cfg(windows)]
+unsafe extern "system" fn windows_exception_handler(_info: *mut WindowsExceptionInfo) -> i32 {
+    if let Some(s) = state() {
+        if s.entered.swap(true, Ordering::SeqCst) {
+            return 0; // EXCEPTION_CONTINUE_SEARCH
+        }
+    }
+    let backtrace = capture_backtrace();
+    let report = build_report(
+        CrashKind::Signal {
+            name: "WIN32_EXCEPTION",
+            signo: 0,
+        },
+        "received unhandled Windows exception".into(),
+        None,
+        backtrace,
+    );
+    write_and_notify(&report);
+    0 // EXCEPTION_CONTINUE_SEARCH — let the OS show the standard UI.
+}
 
 // ----- public inspection APIs -----
 
