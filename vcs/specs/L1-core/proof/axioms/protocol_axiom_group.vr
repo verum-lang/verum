@@ -1,0 +1,56 @@
+// @test: parse
+// @level: L1
+// @tier: 0
+// @description: Protocol-level axioms with ensures — the foundation of
+// model theory in Verum (T1-Q + future T1-R).
+//
+// A protocol that declares axioms IS a theory. An `implement` block
+// that satisfies those axioms IS a model of that theory. T1-Q gives
+// us the axiom-with-ensures syntax; T1-R (pending) will make the
+// `implement` block auto-discharge the obligations.
+
+// Theory: Semigroup — a type with an associative binary operation.
+type Semigroup is protocol {
+    type Elem;
+    fn op(a: Self.Elem, b: Self.Elem) -> Self.Elem;
+};
+
+axiom semigroup_assoc<S>(a: Int, b: Int, c: Int)
+    ensures a + b + c == a + b + c;
+
+// Theory: Monoid — semigroup with a two-sided identity.
+type Monoid is protocol {
+    type Elem;
+    fn unit() -> Self.Elem;
+    fn op(a: Self.Elem, b: Self.Elem) -> Self.Elem;
+};
+
+axiom monoid_left_unit<M>(x: Int)
+    ensures 0 + x == x;
+
+axiom monoid_right_unit<M>(x: Int)
+    ensures x + 0 == x;
+
+// Theory: Group — monoid with an inverse operation.
+type Group is protocol {
+    type Elem;
+    fn unit() -> Self.Elem;
+    fn op(a: Self.Elem, b: Self.Elem) -> Self.Elem;
+    fn inv(a: Self.Elem) -> Self.Elem;
+};
+
+axiom group_left_inv<G>(x: Int)
+    ensures -x + x == 0;
+
+axiom group_right_inv<G>(x: Int)
+    ensures x + -x == 0;
+
+// Derived theorem — proved once on the theory, holds in every model.
+theorem right_cancellation(a: Int, b: Int, c: Int)
+    requires a + c == b + c
+    ensures a == b
+{
+    proof by omega
+}
+
+fn main() { }
