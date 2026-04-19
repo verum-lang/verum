@@ -523,6 +523,19 @@ impl<'a> RecursiveParser<'a> {
         // Example: fn parse(input: Text) throws(ParseError | ValidationError) -> AST
         let throws_clause = self.parse_throws_clause()?;
 
+        // Pre-return-type `using [Ctx]` — the alternate ordering
+        // `fn foo() using [Ctx] -> Int { … }` appears throughout the
+        // L0/vbc/context VCS specs. The canonical spelling (below)
+        // puts `using` after the return type; accepting the pre-
+        // return position too keeps both stylistic conventions valid
+        // without forcing the stdlib or tests to pick a side.
+        let mut contexts: Vec<ContextRequirement> = Vec::new();
+        if self.stream.check(&TokenKind::Using) && !contexts.is_empty() {
+            // Already populated — skip (defensive; contexts starts empty).
+        } else if self.stream.consume(&TokenKind::Using).is_some() {
+            contexts = self.parse_using_contexts()?;
+        }
+
         // Return type: -> Type
         // Use parse_type_with_lookahead to support refinements like `-> Int{>= 0}`
         // but avoid consuming the function body `{`
@@ -562,13 +575,13 @@ impl<'a> RecursiveParser<'a> {
         // Format: fn foo() -> Type using [Context1, Context2]
         // Format: fn foo() using [Context] -- when return type is unit
         // Supports both: [Database, Logger] and using Database / using [...]
-        let contexts = if self.stream.check(&TokenKind::LBracket) {
-            self.parse_context_requirements()?
-        } else if self.stream.consume(&TokenKind::Using).is_some() {
-            self.parse_using_contexts()?
-        } else {
-            Vec::new()
-        };
+        if contexts.is_empty() {
+            if self.stream.check(&TokenKind::LBracket) {
+                contexts = self.parse_context_requirements()?;
+            } else if self.stream.consume(&TokenKind::Using).is_some() {
+                contexts = self.parse_using_contexts()?;
+            }
+        }
 
         // M205: Check for duplicate using clause
         // Grammar: function_def = ... , [ context_clause ] , ... ; (at most one)

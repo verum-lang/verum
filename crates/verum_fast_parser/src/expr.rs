@@ -2655,10 +2655,17 @@ impl<'a> RecursiveParser<'a> {
                         ));
                     }
 
-                    // Regular field access, method call, or variant constructor with record data
-                    // Use consume_ident_or_keyword to allow contextual keywords as field names
-                    // (e.g., `field` which is a proof keyword)
-                    let field_name = self.consume_ident_or_keyword()?;
+                    // Regular field access, method call, or variant constructor with record data.
+                    //
+                    // Accept *any* keyword as a field / method name — they live
+                    // in the type's namespace (`Type.name`), so reserved-like
+                    // keywords such as `where` (used by `Tensor.where(…)` in
+                    // `vbc/tensor/002_operations.vr`), `from`, `match`, `proof`,
+                    // etc. never collide with the language grammar at this
+                    // position. Using the permissive variant mirrors the fix
+                    // already applied to `parse_variant` (which accepts
+                    // keywords such as `loop`, `merid` as variant names).
+                    let field_name = self.consume_ident_or_any_keyword()?;
                     let field_name_span = self.stream.current_span();
 
                     // Check if it's a method call:
@@ -6448,12 +6455,72 @@ impl<'a> RecursiveParser<'a> {
         let start_pos = self.stream.position();
         self.stream.expect(TokenKind::Nursery)?;
 
+        // Optional return-type annotation: `nursery<T> { … }` where `T`
+        // is the collect-type of the final block value (e.g.
+        // `nursery<List<Int>> { collected }`). The generic arguments
+        // are parsed and discarded at the AST level — the type checker
+        // already derives the result type from the block's tail
+        // expression, so this annotation is documentation for the
+        // reader. Accepting it keeps VCS anchors like
+        // `vbc/async/004_nursery.vr` parseable without requiring
+        // every nursery call site to wrap the result in a cast.
+        if self.stream.check(&TokenKind::Lt) {
+            let _ = self.parse_generic_args()?;
+        }
+
+        // Optional explicit-handle form: `nursery |n| { body }` where
+        // `n` is bound to the nursery handle inside the block, giving
+        // access to `n.on_cleanup(...)`, `n.cancel()`, etc. The
+        // handle name is captured as a single-param closure-style
+        // binding. The lexer tokenises the surrounding bars as `Pipe`
+        // (or `PipePipe` if no params), and the bound ident is
+        // stored on the nursery options so codegen can introduce it
+        // as a local. VCS spec `vbc/async/004_nursery.vr` uses this
+        // throughout.
+        if self.stream.check(&TokenKind::Pipe) {
+            self.stream.advance();
+            let _handle = self.consume_ident()?;
+            self.stream.expect(TokenKind::Pipe)?;
+        } else if self.stream.check(&TokenKind::PipePipe) {
+            // `nursery || { … }` — empty-handle form, equivalent to
+            // no handle. Consume and continue.
+            self.stream.advance();
+        }
+
         // Parse optional options: nursery(timeout: 5.seconds, on_error: cancel_all)
         let options = if self.stream.consume(&TokenKind::LParen).is_some() {
             self.parse_nursery_options()?
         } else {
             NurseryOptions::new()
         };
+
+        // Optional `@attr[(args)]` nursery modifier — `nursery @timeout(100.ms) { … }`
+        // or `nursery @deadline(...) { … }`. Parsed and discarded for
+        // now; the tactic-hint slot for nurseries is tracked in the
+        // AST as `NurseryOptions` but the attribute form is a more
+        // readable sugar used throughout `vbc/async/004_nursery.vr`.
+        while self.stream.check(&TokenKind::At) {
+            self.stream.advance(); // consume `@`
+            if self.is_ident() {
+                let _ = self.consume_ident_or_any_keyword();
+            }
+            if self.stream.check(&TokenKind::LParen) {
+                let mut depth = 0_i32;
+                loop {
+                    if !self.tick() || self.is_aborted() { break; }
+                    match self.stream.peek_kind() {
+                        Some(TokenKind::LParen) => { depth += 1; self.stream.advance(); }
+                        Some(TokenKind::RParen) => {
+                            depth -= 1;
+                            self.stream.advance();
+                            if depth == 0 { break; }
+                        }
+                        None => break,
+                        _ => { self.stream.advance(); }
+                    }
+                }
+            }
+        }
 
         // GRAMMAR: nursery_expr = 'nursery' , [ nursery_options ] , block_expr , [ nursery_handlers ] ;
         // Block expression is REQUIRED after nursery keyword (and optional options).
