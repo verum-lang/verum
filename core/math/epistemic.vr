@@ -487,21 +487,21 @@ theorem jep_is_grothendieck_topology()
     ensures true
     proof {
         // Maximality: identity cover has status_map = exact theory assignment.
-        have maximality: for c: Int.
+        have maximality: forall c: Int.
             EpistemicTopology.maximality(c) == true
         by { auto; };
 
         // Stability: joint faithfulness is preserved under base change
         // because the pullback restricts the status_map to the sub-theory,
         // which is a subset of the target, so all restricted ids are witnessed.
-        have stability: for c: Int, c_prime: Int, f: Int, s: Int.
+        have stability: forall c: Int, c_prime: Int, f: Int, s: Int.
             EpistemicTopology.stability(c, c_prime, f, s) == true
         by { auto; };
 
         // Transitivity: composition of jointly faithful families is
         // jointly faithful — if each intermediate claim is witnessed in
         // some source-of-source, the transitive sieve witnesses it too.
-        have transitivity: for c: Int, s: Int, r: Int.
+        have transitivity: forall c: Int, s: Int, r: Int.
             EpistemicTopology.transitivity(c, s, r) == true
         by { auto; };
     }
@@ -510,14 +510,11 @@ theorem jep_is_grothendieck_topology()
 // 7. theory_site — canonical ∞-site for epistemic theories
 // =============================================================================
 
-/// The canonical ∞-site whose objects are the claims of the universe
-/// of discourse and whose topology is the EpistemicTopology.
-///
-/// Downstream code can mount `core.math.epistemic.theory_site` to
-/// access the ambient site without constructing it explicitly.
-// Note: declared as a late-binding static; the concrete value is
-// supplied by the platform initialiser (verum_compiler/platform.rs).
-public static theory_site: Int = 0;  // handle — resolved by Mathesis runtime
+// NOTE: `theory_site` itself is defined at the bottom of this module
+// (§11 Global Constants) as a concrete `Site`. An earlier placeholder
+// `public static theory_site: Int = 0` has been removed — the real
+// definition supersedes it and using both collides in the module
+// export collector.
 
 // =============================================================================
 // 8. mathesis — the ∞-topos of epistemic sheaves
@@ -530,7 +527,7 @@ public static theory_site: Int = 0;  // handle — resolved by Mathesis runtime
 /// In the Mathesis project this ∞-topos is the semantic universe in
 /// which all formal knowledge lives: a claim is "true" iff the
 /// corresponding sheaf has a global section.
-public fn mathesis() -> SheafInfinityTopos<InfinityCategory> {
+public fn mathesis_topos() -> SheafInfinityTopos<InfinityCategory> {
     SheafInfinityTopos {
         underlying_site: theory_site,
     }
@@ -995,9 +992,7 @@ theorem obstruction_non_negative(
     theory:      &Theory,
     subsite_ids: &List<Text>,
 )
-    ensures
-        let obs = compute_obstruction(theory, subsite_ids);
-        obs.max_deviation >= 0
+    ensures compute_obstruction(theory, subsite_ids).max_deviation >= 0
     proof by auto;
 
 /// If the obstruction is zero everywhere, `is_faithful` is true.
@@ -1007,17 +1002,16 @@ theorem zero_obstruction_implies_faithful(
     subsite_ids: &List<Text>,
 )
     ensures
-        let obs = compute_obstruction(theory, subsite_ids);
-        (obs.max_deviation == 0) -> obs.is_faithful
+        compute_obstruction(theory, subsite_ids).max_deviation == 0
+        -> compute_obstruction(theory, subsite_ids).is_faithful
     proof by auto;
 
 /// propagate_status is monotone: every recorded status change is a
 /// downgrade (new_status.rank() < old_status.rank()).
 @verify(formal)
 theorem propagation_is_monotone_downgrade(theory: &mut Theory)
-    ensures
-        let changes = propagate_status(theory);
-        changes.all(fn(c) -> c.new_status.rank() < c.old_status.rank())
+    ensures propagate_status(theory)
+                .all(fn(c) -> c.new_status.rank() < c.old_status.rank())
     proof by auto;
 
 /// propagate_status terminates: the BFS queue drains in at most
@@ -1040,8 +1034,9 @@ theorem left_kan_is_pointwise_join(
     c_id:        &Text,
 )
     ensures
-        let result = compute_kan_extension(subsite_ids, theory, KanDirection.Left);
-        match result.pointwise_map.get(c_id) {
+        match compute_kan_extension(subsite_ids, theory, KanDirection.Left)
+            .pointwise_map.get(c_id)
+        {
             Some(_) => true,
             None    => false,
         }
@@ -1056,8 +1051,9 @@ theorem right_kan_is_pointwise_meet(
     c_id:        &Text,
 )
     ensures
-        let result = compute_kan_extension(subsite_ids, theory, KanDirection.Right);
-        match result.pointwise_map.get(c_id) {
+        match compute_kan_extension(subsite_ids, theory, KanDirection.Right)
+            .pointwise_map.get(c_id)
+        {
             Some(_) => true,
             None    => false,
         }

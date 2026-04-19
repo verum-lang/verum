@@ -52,8 +52,8 @@ public type Color is
     | Cyan | DarkCyan
     | White | Grey
     | Ansi256(Int)
-    | Rgb(Rgb)
-    | Hsl(Hsl);
+    | TrueColor(Rgb)
+    | FromHsl(Hsl);
 
 // =============================================================================
 // Lab — CIELAB for perceptual comparison

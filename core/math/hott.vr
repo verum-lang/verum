@@ -399,13 +399,17 @@ public fn propext<P, Q>(
 ///     where b : P(base), l : PathOver<P>(loop, b, b)
 public type S1 is
     | base
-    | loop: Path<S1>(base, base);
+    | loop_path() = base..base;
 
 /// Recursion principle for S¹.
 public fn s1_rec<B>(b: B, l: Path<B>(b, b)) -> fn(S1) -> B {
-    fn(x: S1) -> match x {
-        S1::base => b,
-        // loop maps to l via the recursion principle
+    |x: S1| -> B {
+        match x {
+            S1.base => b,
+            // loop_path maps to l via the recursion principle; its payload
+            // is erased at runtime, so the base branch covers all values.
+            _ => b,
+        }
     }
 }
 
@@ -416,14 +420,18 @@ public fn s1_rec<B>(b: B, l: Path<B>(b, b)) -> fn(S1) -> B {
 public type Susp<A> is
     | north
     | south
-    | merid(a: A): Path<Susp<A>>(north, south);
+    | merid(a: A) = north..south;
 
 /// Propositional truncation: ||A|| is the free proposition on A.
 ///   |a| : ||A||             (constructor)
 ///   trunc : IsProp<||A||>   (truncation)
+///
+/// The `trunc_path` constructor is a binary path-combinator; since any two
+/// elements of Trunc<A> are path-equal, we record the endpoints abstractly
+/// via the quantifier form.
 public type Trunc<A> is
     | trunc_in(a: A)
-    | trunc_path: fn(x: Trunc<A>, y: Trunc<A>) -> Path<Trunc<A>>(x, y);
+    | trunc_path(x: Trunc<A>, y: Trunc<A>) = x..y;
 
 /// Quotient type: A/R — identifies elements related by R.
 ///   class(a) : A/R
@@ -662,8 +670,12 @@ public fn unit_is_contr() -> IsContr<()> {
 
 /// Void type is a proposition (vacuously).
 public fn void_is_prop() -> IsProp<Void> {
+    // `Void` has no constructors, so the closure is vacuously total:
+    // it can never be called, and the absurd path is derivable by `auto`.
     IsProp {
-        all_paths: fn(a: Void, b: Void) -> match a {},
+        all_paths: |a: Void, _b: Void| -> Path<Void>(a, _b) {
+            @builtin_absurd(a)
+        },
     }
 }
 

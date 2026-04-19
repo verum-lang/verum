@@ -78,37 +78,37 @@ implement Theme {
     public fn dark() -> Theme {
         Theme {
             // Surface
-            surface:         Style.new().bg(Color.Rgb(Rgb.new(30, 30, 46))),
-            surface_dim:     Style.new().bg(Color.Rgb(Rgb.new(24, 24, 37))),
-            on_surface:      Style.new().fg(Color.Rgb(Rgb.new(205, 214, 244))),
+            surface:         Style.new().bg(Color.TrueColor(Rgb.new(30, 30, 46))),
+            surface_dim:     Style.new().bg(Color.TrueColor(Rgb.new(24, 24, 37))),
+            on_surface:      Style.new().fg(Color.TrueColor(Rgb.new(205, 214, 244))),
 
             // Interactive
-            primary:         Style.new().fg(Color.Rgb(Rgb.new(137, 180, 250))),
+            primary:         Style.new().fg(Color.TrueColor(Rgb.new(137, 180, 250))),
             on_primary:      Style.new()
-                                .fg(Color.Rgb(Rgb.new(30, 30, 46)))
-                                .bg(Color.Rgb(Rgb.new(137, 180, 250))),
-            secondary:       Style.new().fg(Color.Rgb(Rgb.new(180, 190, 254))),
-            on_secondary:    Style.new().fg(Color.Rgb(Rgb.new(30, 30, 46))),
+                                .fg(Color.TrueColor(Rgb.new(30, 30, 46)))
+                                .bg(Color.TrueColor(Rgb.new(137, 180, 250))),
+            secondary:       Style.new().fg(Color.TrueColor(Rgb.new(180, 190, 254))),
+            on_secondary:    Style.new().fg(Color.TrueColor(Rgb.new(30, 30, 46))),
 
             // Semantic
-            error:           Style.new().fg(Color.Rgb(Rgb.new(243, 139, 168))),
-            warning:         Style.new().fg(Color.Rgb(Rgb.new(249, 226, 175))),
-            success:         Style.new().fg(Color.Rgb(Rgb.new(166, 227, 161))),
-            info:            Style.new().fg(Color.Rgb(Rgb.new(148, 226, 213))),
+            error:           Style.new().fg(Color.TrueColor(Rgb.new(243, 139, 168))),
+            warning:         Style.new().fg(Color.TrueColor(Rgb.new(249, 226, 175))),
+            success:         Style.new().fg(Color.TrueColor(Rgb.new(166, 227, 161))),
+            info:            Style.new().fg(Color.TrueColor(Rgb.new(148, 226, 213))),
 
             // Borders
-            border:          Style.new().fg(Color.Rgb(Rgb.new(88, 91, 112))),
-            border_focused:  Style.new().fg(Color.Rgb(Rgb.new(137, 180, 250))),
-            divider:         Style.new().fg(Color.Rgb(Rgb.new(69, 71, 90))),
+            border:          Style.new().fg(Color.TrueColor(Rgb.new(88, 91, 112))),
+            border_focused:  Style.new().fg(Color.TrueColor(Rgb.new(137, 180, 250))),
+            divider:         Style.new().fg(Color.TrueColor(Rgb.new(69, 71, 90))),
 
             // Text
-            text:            Style.new().fg(Color.Rgb(Rgb.new(205, 214, 244))),
-            text_dim:        Style.new().fg(Color.Rgb(Rgb.new(147, 153, 178))),
-            text_muted:      Style.new().fg(Color.Rgb(Rgb.new(108, 112, 134))),
-            text_highlight:  Style.new().fg(Color.Rgb(Rgb.new(249, 226, 175))).bold(),
+            text:            Style.new().fg(Color.TrueColor(Rgb.new(205, 214, 244))),
+            text_dim:        Style.new().fg(Color.TrueColor(Rgb.new(147, 153, 178))),
+            text_muted:      Style.new().fg(Color.TrueColor(Rgb.new(108, 112, 134))),
+            text_highlight:  Style.new().fg(Color.TrueColor(Rgb.new(249, 226, 175))).bold(),
 
             // Selection
-            selection:       Style.new().bg(Color.Rgb(Rgb.new(69, 71, 90))),
+            selection:       Style.new().bg(Color.TrueColor(Rgb.new(69, 71, 90))),
             cursor:          Style.new().reversed(),
         }
     }
@@ -128,37 +128,37 @@ implement Theme {
     public fn light() -> Theme {
         Theme {
             // Surface
-            surface:         Style.new().bg(Color.Rgb(Rgb.new(239, 241, 245))),
-            surface_dim:     Style.new().bg(Color.Rgb(Rgb.new(220, 224, 232))),
-            on_surface:      Style.new().fg(Color.Rgb(Rgb.new(76, 79, 105))),
+            surface:         Style.new().bg(Color.TrueColor(Rgb.new(239, 241, 245))),
+            surface_dim:     Style.new().bg(Color.TrueColor(Rgb.new(220, 224, 232))),
+            on_surface:      Style.new().fg(Color.TrueColor(Rgb.new(76, 79, 105))),
 
             // Interactive
-            primary:         Style.new().fg(Color.Rgb(Rgb.new(30, 102, 245))),
+            primary:         Style.new().fg(Color.TrueColor(Rgb.new(30, 102, 245))),
             on_primary:      Style.new()
-                                .fg(Color.Rgb(Rgb.new(239, 241, 245)))
-                                .bg(Color.Rgb(Rgb.new(30, 102, 245))),
-            secondary:       Style.new().fg(Color.Rgb(Rgb.new(114, 135, 253))),
-            on_secondary:    Style.new().fg(Color.Rgb(Rgb.new(239, 241, 245))),
+                                .fg(Color.TrueColor(Rgb.new(239, 241, 245)))
+                                .bg(Color.TrueColor(Rgb.new(30, 102, 245))),
+            secondary:       Style.new().fg(Color.TrueColor(Rgb.new(114, 135, 253))),
+            on_secondary:    Style.new().fg(Color.TrueColor(Rgb.new(239, 241, 245))),
 
             // Semantic
-            error:           Style.new().fg(Color.Rgb(Rgb.new(210, 15, 57))),
-            warning:         Style.new().fg(Color.Rgb(Rgb.new(223, 142, 29))),
-            success:         Style.new().fg(Color.Rgb(Rgb.new(64, 160, 43))),
-            info:            Style.new().fg(Color.Rgb(Rgb.new(23, 146, 153))),
+            error:           Style.new().fg(Color.TrueColor(Rgb.new(210, 15, 57))),
+            warning:         Style.new().fg(Color.TrueColor(Rgb.new(223, 142, 29))),
+            success:         Style.new().fg(Color.TrueColor(Rgb.new(64, 160, 43))),
+            info:            Style.new().fg(Color.TrueColor(Rgb.new(23, 146, 153))),
 
             // Borders
-            border:          Style.new().fg(Color.Rgb(Rgb.new(172, 176, 190))),
-            border_focused:  Style.new().fg(Color.Rgb(Rgb.new(30, 102, 245))),
-            divider:         Style.new().fg(Color.Rgb(Rgb.new(188, 192, 204))),
+            border:          Style.new().fg(Color.TrueColor(Rgb.new(172, 176, 190))),
+            border_focused:  Style.new().fg(Color.TrueColor(Rgb.new(30, 102, 245))),
+            divider:         Style.new().fg(Color.TrueColor(Rgb.new(188, 192, 204))),
 
             // Text
-            text:            Style.new().fg(Color.Rgb(Rgb.new(76, 79, 105))),
-            text_dim:        Style.new().fg(Color.Rgb(Rgb.new(124, 127, 147))),
-            text_muted:      Style.new().fg(Color.Rgb(Rgb.new(156, 160, 176))),
-            text_highlight:  Style.new().fg(Color.Rgb(Rgb.new(223, 142, 29))).bold(),
+            text:            Style.new().fg(Color.TrueColor(Rgb.new(76, 79, 105))),
+            text_dim:        Style.new().fg(Color.TrueColor(Rgb.new(124, 127, 147))),
+            text_muted:      Style.new().fg(Color.TrueColor(Rgb.new(156, 160, 176))),
+            text_highlight:  Style.new().fg(Color.TrueColor(Rgb.new(223, 142, 29))).bold(),
 
             // Selection
-            selection:       Style.new().bg(Color.Rgb(Rgb.new(188, 192, 204))),
+            selection:       Style.new().bg(Color.TrueColor(Rgb.new(188, 192, 204))),
             cursor:          Style.new().reversed(),
         }
     }

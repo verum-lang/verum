@@ -63,8 +63,10 @@ public type TermCapabilities is {
     is_screen: Bool,                  // Running inside GNU screen
 };
 
-/// RGB color type used for background color query.
-public type Rgb is {
+/// RGB color returned by OSC 11 background-color queries.
+/// Local to the raw layer to avoid layer inversion — the style layer
+/// provides its own richer `Rgb` in `core.term.style.color`.
+public type QueryRgb is {
     r: UInt8,
     g: UInt8,
     b: UInt8,
@@ -161,7 +163,7 @@ public fn detect_capabilities(fd: FileDesc) -> TermCapabilities {
 /// NOTE: This is a blocking query with a short timeout.
 /// Sends OSC 11 query: ESC ] 11 ; ? BEL
 /// Expects: ESC ] 11 ; rgb:RRRR/GGGG/BBBB ESC \  (or BEL terminated)
-public fn query_background_color(fd: FileDesc) -> Maybe<Rgb> {
+public fn query_background_color(fd: FileDesc) -> Maybe<QueryRgb> {
     // Write the query to stdout (fd 1)
     let query = "\x1b]11;?\x07";
     let write_fd = FileDesc(1);
@@ -187,7 +189,7 @@ public fn query_background_color(fd: FileDesc) -> Maybe<Rgb> {
                 let g_hex = parts[1].slice(0, 2.min(parts[1].len()));
                 let b_hex = parts[2].slice(0, 2.min(parts[2].len()));
                 match (parse_hex_byte(&r_hex), parse_hex_byte(&g_hex), parse_hex_byte(&b_hex)) {
-                    (Some(r), Some(g), Some(b)) => Some(Rgb.new(r, g, b)),
+                    (Some(r), Some(g), Some(b)) => Some(QueryRgb { r: r, g: g, b: b }),
                     _ => None,
                 }
             } else { None }

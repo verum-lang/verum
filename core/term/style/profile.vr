@@ -39,10 +39,10 @@ public type ColorProfile is
 /// perceptually closest match via CIELAB distance.
 ///
 /// Examples:
-///   adapt_color(Color.Rgb(Rgb.new(255, 128, 0)), TrueColor) -> Rgb(255,128,0)
-///   adapt_color(Color.Rgb(Rgb.new(255, 128, 0)), Ansi256)   -> Ansi256(208)
-///   adapt_color(Color.Rgb(Rgb.new(255, 128, 0)), Base16)    -> Color.Red
-///   adapt_color(Color.Rgb(Rgb.new(255, 128, 0)), NoColor)   -> Color.Reset
+///   adapt_color(Color.TrueColor(Rgb.new(255, 128, 0)), TrueColor) -> Rgb(255,128,0)
+///   adapt_color(Color.TrueColor(Rgb.new(255, 128, 0)), Ansi256)   -> Ansi256(208)
+///   adapt_color(Color.TrueColor(Rgb.new(255, 128, 0)), Base16)    -> Color.Red
+///   adapt_color(Color.TrueColor(Rgb.new(255, 128, 0)), NoColor)   -> Color.Reset
 public fn adapt_color(color: Color, profile: ColorProfile) -> Color {
     match (color, profile) {
         // True color: no changes needed
@@ -55,7 +55,7 @@ public fn adapt_color(color: Color, profile: ColorProfile) -> Color {
         (Rgb(rgb), Base16) => rgb.to_base16(),
 
         // Hsl: convert to Rgb first, then downscale
-        (Hsl(hsl), _) => adapt_color(Color.Rgb(hsl.to_rgb()), profile),
+        (Hsl(hsl), _) => adapt_color(Color.TrueColor(hsl.to_rgb()), profile),
 
         // Ansi256 to Base16: convert via approximate Rgb
         (Ansi256(n), Base16) => {

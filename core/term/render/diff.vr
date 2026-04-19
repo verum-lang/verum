@@ -152,7 +152,7 @@ public fn write_style_diff(
     // Underline color
     if from.underline_color != to.underline_color || need_reset {
         match to.underline_color {
-            Some(Color.Rgb(rgb)) => {
+            Some(Color.TrueColor(rgb)) => {
                 writer.write_csi(&[58, 2, 0, rgb.r as Int, rgb.g as Int, rgb.b as Int], 'm' as Byte)?;
             }
             Some(_) => {}  // Non-RGB underline colors not widely supported
@@ -195,13 +195,13 @@ public fn write_color(writer: &mut (dyn EscapeWriter), color: &Color, is_fg: Boo
         Cyan => writer.write_csi(&[base + 66], 'm' as Byte),
         White => writer.write_csi(&[base + 67], 'm' as Byte),
         Ansi256(n) => writer.write_csi(&[if is_fg { 38 } else { 48 }, 5, n], 'm' as Byte),
-        Rgb(rgb) => writer.write_csi(
+        TrueColor(rgb) => writer.write_csi(
             &[if is_fg { 38 } else { 48 }, 2, rgb.r as Int, rgb.g as Int, rgb.b as Int],
             'm' as Byte,
         ),
-        Hsl(hsl) => {
+        FromHsl(hsl) => {
             let rgb = hsl.to_rgb();
-            write_color(writer, &Color.Rgb(rgb), is_fg)
+            write_color(writer, &Color.TrueColor(rgb), is_fg)
         }
     }
 }

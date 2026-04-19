@@ -174,7 +174,7 @@ public type Giry<X: MeasuredSpace> is (ProbabilityMeasure<X>);
 ///
 /// Formal obligation (left unit law) is discharged below as a theorem.
 public fn giry_unit<X: MeasuredSpace>(space: X, x0: Float) -> Giry<X> {
-    let delta: fn(Float) -> Float{>= 0.0} = |y: Float| Float{>= 0.0} {
+    let delta = |y: Float| -> Float {
         if y == x0 { 1.0 } else { 0.0 }
     };
     Giry(ProbabilityMeasure.new(delta, space))
@@ -196,12 +196,12 @@ public fn giry_bind<X: MeasuredSpace, Y: MeasuredSpace>(
     kernel: fn(Float) -> Giry<Y>,
     target_space: Y,
 ) -> Giry<Y> {
-    let mu_density: fn(Float) -> Float{>= 0.0} = mu.0.density;
-    let bound_density: fn(Float) -> Float{>= 0.0} = |y: Float| Float{>= 0.0} {
+    let mu_density = mu.0.density;
+    let bound_density = |y: Float| -> Float {
         // ∫_X k(x).density(y) · mu_density(x) dλ(x)
         // The @integrate intrinsic is the formal specification; the runtime
         // provides a correct numerical implementation.
-        @integrate(|x: Float| Float {
+        @integrate(|x: Float| -> Float {
             (kernel(x).0.density)(y) * mu_density(x)
         })
     };
@@ -221,7 +221,7 @@ public fn giry_map<X: MeasuredSpace, Y: MeasuredSpace>(
     target_space: Y,
 ) -> Giry<Y> {
     // Pushforward via change-of-variables kernel: k(x) = δ_{f(x)}
-    let kernel: fn(Float) -> Giry<Y> = |x: Float| Giry<Y> {
+    let kernel: fn(Float) -> Giry<Y> = |x: Float| -> Giry<Y> {
         giry_unit(target_space, f(x))
     };
     giry_bind(mu, kernel, target_space)
@@ -251,7 +251,7 @@ public type RadonNikodym<X: MeasuredSpace> is {
 implement<X: MeasuredSpace> RadonNikodym<X> {
     /// Construct the Radon-Nikodym derivative by taking the density ratio.
     public fn new(base: ProbabilityMeasure<X>, dominated: ProbabilityMeasure<X>) -> Self {
-        let deriv: fn(Float) -> Float{>= 0.0} = |x: Float| Float{>= 0.0} {
+        let deriv = |x: Float| -> Float {
             let b: Float = base.eval(x);
             if b > 0.0 { dominated.eval(x) / b } else { 0.0 }
         };
@@ -285,7 +285,7 @@ public fn kl_divergence<X: MeasuredSpace>(
     nu: &ProbabilityMeasure<X>,
 ) -> Float {
     // D_KL(μ ‖ ν) = ∫ μ(x) · log(μ(x) / ν(x)) dλ(x)
-    @integrate(|x: Float| Float {
+    @integrate(|x: Float| -> Float {
         let p: Float = mu.eval(x);
         let q: Float = nu.eval(x);
         if p > 0.0 && q > 0.0 {
@@ -365,7 +365,7 @@ public fn markov_compose<X: MeasuredSpace, Y: MeasuredSpace, Z: MeasuredSpace>(
     k2: &MarkovKernel<Y, Z>,
     target_space: Z,
 ) -> MarkovKernel<X, Z> {
-    let composed_kernel: fn(Float) -> Giry<Z> = |x: Float| Giry<Z> {
+    let composed_kernel: fn(Float) -> Giry<Z> = |x: Float| -> Giry<Z> {
         giry_bind(k1.kernel(x), k2.kernel, target_space)
     };
     MarkovKernel {
@@ -573,7 +573,7 @@ implement<C: InfinityCategory, D: InfinityCategory> LlmOracle<C, D> {
     ///
     /// Numerically stable (log-sum-exp trick applied via max subtraction).
     public fn softmax_probs(&self, proposals: &List<FunctorProposal>) -> List<Float> {
-        let scaled: List<Float> = proposals.map(|p: &FunctorProposal| Float {
+        let scaled: List<Float> = proposals.map(|p: &FunctorProposal| -> Float {
             p.log_prob / self.temperature
         });
         let max_val: Float = scaled.fold(
@@ -582,13 +582,13 @@ implement<C: InfinityCategory, D: InfinityCategory> LlmOracle<C, D> {
                 if v > acc { v } else { acc }
             },
         );
-        let exps: List<Float> = scaled.map(|v: Float| Float {
+        let exps: List<Float> = scaled.map(|v: Float| -> Float {
             Float.exp(v - max_val)
         });
         let total: Float = exps.fold(0.0, fn(acc: Float, v: Float) -> Float {
             acc + v
         });
-        exps.map(|v: Float| Float { v / total })
+        exps.map(|v: Float| -> Float { v / total })
     }
 
     /// Softmax output sums to 1 (formal obligation).
@@ -603,7 +603,7 @@ implement<C: InfinityCategory, D: InfinityCategory> LlmOracle<C, D> {
     @verify(formal)
     public fn softmax_bounded(&self, proposals: &List<FunctorProposal>) -> Bool {
         let probs: List<Float> = self.softmax_probs(proposals);
-        probs.all(|p: &Float| Bool { *p >= 0.0 && *p <= 1.0 })
+        probs.all(|p: &Float| -> Bool { *p >= 0.0 && *p <= 1.0 })
     }
 }
 

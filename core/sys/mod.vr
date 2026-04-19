@@ -308,7 +308,9 @@ public mount .darwin.{
     gettid,
     nanosleep,
     clock_gettime,
-    monotonic_nanos,
+    // `monotonic_nanos` deliberately NOT re-exported from darwin — the
+    // cross-platform `public fn monotonic_nanos()` below is the canonical
+    // surface and delegates internally.
     getentropy,
     kqueue,
     errno,
@@ -687,10 +689,9 @@ public mount .windows.{
     Stopwatch,
     PerfCounter,
     DeadlineTimer,
-    // Time Functions
-    monotonic_nanos,
+    // Time Functions — `monotonic_nanos` / `monotonic_millis` are exposed
+    // by the cross-platform wrappers below; windows ones stay internal.
     monotonic_micros,
-    monotonic_millis,
     sleep,
     sleep_ms,
     sleep_us,

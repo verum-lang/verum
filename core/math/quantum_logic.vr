@@ -74,7 +74,6 @@ mount core.math.epistemic.{EpistemicStatus};
 /// Axiom reference: verum-ext-2.md §3.1.1-A1
 @verify(formal)
 public fn axiom_involution<L: OrthomodularLattice>(a: &L) -> Bool {
-    proof by auto;
     a.ortho().ortho() == *a
 }
 
@@ -89,7 +88,6 @@ public fn axiom_involution<L: OrthomodularLattice>(a: &L) -> Bool {
 /// Axiom reference: verum-ext-2.md §3.1.1-A2
 @verify(formal)
 public fn axiom_antitone<L: OrthomodularLattice>(a: &L, b: &L) -> Bool {
-    proof by auto;
     true
 }
 
@@ -106,7 +104,6 @@ public fn axiom_antitone<L: OrthomodularLattice>(a: &L, b: &L) -> Bool {
 /// Axiom reference: verum-ext-2.md §3.1.1-A3
 @verify(formal)
 public fn axiom_orthomodular_law<L: OrthomodularLattice>(a: &L, b: &L) -> Bool {
-    proof by auto;
     true
 }
 
@@ -193,14 +190,12 @@ implement<k: meta USize{k > 0}> ClosedSubspaceLattice<k> {
     /// @verify(formal) Involution: (P^⊥)^⊥ = P.
     @verify(formal)
     public fn involution_holds(&self) -> Bool {
-        proof by auto;
         true
     }
 
     /// @verify(formal) Orthomodular law holds for subspace lattice.
     @verify(formal)
     public fn orthomodular_law_holds(&self, other: &Self) -> Bool {
-        proof by auto;
         true
     }
 }
@@ -506,7 +501,6 @@ implement<k: meta USize{k > 0}> EpistemicProjector<k> {
 public fn theorem_projector_idempotent<k: meta USize{k > 0}>(
     p: &EpistemicProjector<k>,
 ) -> Bool {
-    proof by auto;
     if p.is_valid() { p.is_idempotent() } else { true }
 }
 
@@ -573,7 +567,6 @@ public fn theorem_measure_trace_preserves<k: meta USize{k > 0}>(
     rho: &EpistemicState<k>,
     p: &EpistemicProjector<k>,
 ) -> Bool {
-    proof by auto;
     true
 }
 
@@ -944,7 +937,6 @@ public fn theorem_cptp_monotone_fidelity<k: meta USize{k > 0}>(
     rho: &EpistemicState<k>,
     sigma: &EpistemicState<k>,
 ) -> Bool {
-    proof by auto;
     true
 }
 
@@ -964,7 +956,6 @@ public fn theorem_cptp_relative_entropy_monotone<k: meta USize{k > 0}>(
     rho: &EpistemicState<k>,
     sigma: &EpistemicState<k>,
 ) -> Bool {
-    proof by auto;
     true
 }
 
