@@ -564,6 +564,19 @@ public fn bounded<T>(capacity: Int) -> (Sender<T>, Receiver<T>) {
     (Sender { inner: inner.clone() }, Receiver { inner: inner })
 }
 
+// Alias for `bounded` — matches the tokio-idiomatic name used in
+// async tests and user-facing docs. Both forms produce the same
+// channel; this is a pure re-export with the alternative name.
+public fn bounded_channel<T>(capacity: Int) -> (Sender<T>, Receiver<T>) {
+    bounded(capacity)
+}
+
+// Alias for `channel` — matches the tokio-idiomatic name for an
+// unbounded channel.
+public fn unbounded_channel<T>() -> (Sender<T>, Receiver<T>) {
+    channel()
+}
+
 // =============================================================================
 // oneshot - Single value channel
 // =============================================================================
