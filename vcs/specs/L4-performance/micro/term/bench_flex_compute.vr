@@ -1,5 +1,5 @@
-// @test: benchmark
-// @tier: 2
+// @test: typecheck-pass
+// @tier: 0
 // @level: L4
 // @tags: bench, stdlib, term, layout, flex
 // @timeout: 60000

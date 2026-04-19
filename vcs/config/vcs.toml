@@ -350,6 +350,15 @@ paths = ["benchmarks/comparison/"]
 metrics = ["time", "memory"]
 compare_to = ["c", "rust", "go"]
 
+[benchmarks.suites.stdlib_term]
+name = "core.term — TUI framework micro-benchmarks"
+enabled = true
+paths = ["specs/L4-performance/micro/term/"]
+metrics = ["time"]
+# Runtime performance targets — asserted when executed under vbench with
+# a compiled binary. Under vtest the same files are typecheck-pass, so
+# CI gates the code without requiring a functional runtime.
+
 # =============================================================================
 # SMT Verification
 # =============================================================================
