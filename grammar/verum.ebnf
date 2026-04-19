@@ -1131,7 +1131,11 @@ capability_name = 'Read' | 'Write' | 'ReadWrite' | 'Admin' | 'Transaction'
                 | identifier ;  (* Custom capabilities *)
 capability_or_expr = capability_name , '|' , capability_name , { '|' , capability_name } ;
 
-primitive_type  = 'Int' | 'Float' | 'Bool' | 'Char' | 'Text' | '()' | 'Interval' ;
+(* Primitive and universe-level types.
+   `Prop` (T1-S) is a first-class universe of proof-irrelevant
+   propositions; `Prop : Type(1)` in the universe hierarchy. Every
+   two proofs of the same proposition are definitionally equal. *)
+primitive_type  = 'Int' | 'Float' | 'Bool' | 'Char' | 'Text' | '()' | 'Interval' | 'Prop' ;
 
 (* Cubical type theory: Path types and interval endpoints.             *)
 (* Path<A>(a, b) represents a path from a to b in type A.             *)

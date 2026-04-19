@@ -1,0 +1,33 @@
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @description: Prop is a first-class universe — T1-S.
+//
+// Verum's type system has Prop as a distinct universe of propositions
+// (implemented as `Type::Prop` in verum_types/src/ty.rs). Propositions
+// are proof-irrelevant: any two proofs of the same proposition are
+// definitionally equal, and Prop : Type(1) in the universe hierarchy.
+//
+// Surface-level support: Prop is recognised as a type in every
+// position that expects a type — function parameters, return types,
+// fields, tactic parameters, axiom parameters, etc.
+
+// Function taking a proposition.
+fn is_refl(p: Prop) -> Bool { true }
+
+// Axiom parameter of Prop kind.
+axiom classical_excluded_middle(p: Prop)
+    ensures true;
+
+// Record field of Prop type.
+type PropBundle is {
+    claim: Prop,
+    rationale: Text,
+};
+
+// Prop field access and identity — proof-irrelevant at the
+// type-checker level (two proofs of the same proposition are
+// definitionally equal).
+fn proof_projection(bundle: PropBundle) -> Prop { bundle.claim }
+
+fn main() { }
