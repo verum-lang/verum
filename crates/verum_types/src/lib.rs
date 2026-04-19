@@ -2426,7 +2426,10 @@ impl TypeError {
                          help: check available methods in protocol documentation",
                     );
                 }
-                let mut builder = DiagnosticBuilder::error().message(msg);
+                // E400 covers semantic method/type resolution mismatches;
+                // VCS tests rely on the code to select the expected-error
+                // bucket (see `readonly_write_fail.vr` @expected-error: E400).
+                let mut builder = DiagnosticBuilder::error().code("E400").message(msg);
                 if let Some(diag_span) = convert_span(*span) {
                     builder = builder.span(diag_span);
                 }

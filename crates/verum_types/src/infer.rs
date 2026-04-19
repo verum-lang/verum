@@ -2220,6 +2220,95 @@ impl TypeChecker {
             .unwrap_or_default()
     }
 
+    /// Per-instantiation impl gate.
+    ///
+    /// When `method_impl_patterns` has one or more registered patterns
+    /// for `(type_name, method_name)`, at least one pattern must match
+    /// the receiver's concrete type arguments. Otherwise the method
+    /// is considered *not applicable* to this receiver — e.g.
+    /// `Register<UInt32, ReadOnly>.write(…)` must be rejected because
+    /// `write` is only registered for `Register<T, WriteOnly>` and
+    /// `Register<T, ReadWrite>`.
+    ///
+    /// Returns `true` when:
+    ///  - no patterns are registered (backward-compat — primitive
+    ///    types like Int/Text have no patterns), OR
+    ///  - at least one pattern is compatible with `receiver_args`.
+    ///
+    /// A pattern slot of `Type::Var(_)` (impl-level generic, e.g. `T`
+    /// in `implement<T: Copy> Register<T, ReadOnly>`) matches any
+    /// receiver arg. A concrete pattern slot (`Named`, `Generic`, …)
+    /// must structurally match the receiver slot.
+    pub fn inherent_method_pattern_allows(
+        &self,
+        type_name: &verum_common::Text,
+        method_name: &verum_common::Text,
+        receiver_args: &[Type],
+    ) -> bool {
+        let patterns_guard = self.method_impl_patterns.read();
+        let Some(method_patterns) = patterns_guard
+            .get(type_name)
+            .and_then(|m| m.get(method_name))
+        else {
+            return true; // no patterns — permissive
+        };
+        if method_patterns.is_empty() {
+            return true;
+        }
+        // At least one registered impl pattern must accept these args.
+        method_patterns
+            .iter()
+            .any(|pattern| self.type_args_match_impl_pattern(receiver_args, pattern))
+    }
+
+    /// Match receiver type args against an impl's self-type arg
+    /// pattern. Slot-by-slot; lengths must agree.
+    fn type_args_match_impl_pattern(
+        &self,
+        receiver_args: &[Type],
+        pattern: &verum_common::List<Type>,
+    ) -> bool {
+        if receiver_args.len() != pattern.len() {
+            return false;
+        }
+        receiver_args
+            .iter()
+            .zip(pattern.iter())
+            .all(|(recv, pat)| Self::impl_pattern_slot_matches(recv, pat))
+    }
+
+    /// Slot-level match: `Var` pattern slots accept anything; a
+    /// concrete slot must structurally match the receiver.
+    fn impl_pattern_slot_matches(receiver: &Type, pattern: &Type) -> bool {
+        match pattern {
+            // Impl-level generic (e.g. `T` in `implement<T: Copy> Register<T, …>`).
+            Type::Var(_) | Type::Placeholder { .. } | Type::Unknown => true,
+            Type::Named { path: pp, .. } => match receiver {
+                Type::Named { path: rp, .. } => {
+                    Self::get_protocol_name_str(pp) == Self::get_protocol_name_str(rp)
+                }
+                Type::Generic { name, .. } => {
+                    name.as_str() == Self::get_protocol_name_str(pp)
+                }
+                // A bare TypeVar receiver — nothing is known, stay
+                // permissive so inference isn't pinned prematurely.
+                Type::Var(_) | Type::Placeholder { .. } | Type::Unknown => true,
+                _ => false,
+            },
+            Type::Generic { name: pn, .. } => match receiver {
+                Type::Generic { name: rn, .. } => pn == rn,
+                Type::Named { path, .. } => pn.as_str() == Self::get_protocol_name_str(path),
+                Type::Var(_) | Type::Placeholder { .. } | Type::Unknown => true,
+                _ => false,
+            },
+            // Primitive literal slot — must equal the receiver primitive.
+            Type::Int | Type::Float | Type::Bool | Type::Text
+            | Type::Char | Type::Unit => receiver == pattern,
+            // Compound types are rare in impl headers; be permissive.
+            _ => true,
+        }
+    }
+
     // ==================== Definite Assignment Analysis ====================
     // Spec: L0-critical/memory-safety/uninitialized - Compile-time partial init detection
 
@@ -38486,6 +38575,42 @@ impl TypeChecker {
 
             if let Some(type_name_text) = early_type_name {
                 let method_name_text = verum_common::Text::from(method.name.as_str());
+                // Per-instantiation impl gating (task #35).
+                //
+                // When the stdlib or user code declares `impl<T> Foo<T,
+                // ReadOnly>` and `impl<T> Foo<T, WriteOnly>` with
+                // disjoint method sets, we must refuse `write(…)` on a
+                // `Foo<_, ReadOnly>` receiver. The method signatures
+                // themselves all landed in the flat
+                // (type_name, method_name) map when their impl blocks
+                // were registered, so this gate runs *before* the
+                // lookup succeeds and skips the early-inherent path
+                // when no registered impl pattern accepts the
+                // receiver's concrete type arguments. Subsequent
+                // lookup paths (protocol methods, universal methods)
+                // continue to run normally, producing a proper E400
+                // when none of them match either.
+                let receiver_ty_args_for_gate: verum_common::List<Type> = match &recv_ty {
+                    Type::Named { args, .. } | Type::Generic { args, .. } => args.clone(),
+                    _ => verum_common::List::new(),
+                };
+                if !self.inherent_method_pattern_allows(
+                    &type_name_text,
+                    &method_name_text,
+                    &receiver_ty_args_for_gate,
+                ) {
+                    // No registered impl pattern accepts this
+                    // instantiation — produce the canonical
+                    // "no method named X found for type Y" error
+                    // so that `readonly_write_fail.vr` /
+                    // `writeonly_read_fail.vr` reject at type check.
+                    return Err(crate::TypeError::MethodNotFound {
+                        ty: recv_ty.to_text(),
+                        method: method.name.as_str().to_text(),
+                        span: method.span,
+                        did_you_mean: verum_common::Maybe::None,
+                    });
+                }
                 let early_method_info = {
                     let methods_guard = self.inherent_methods.read();
                     methods_guard.get(&type_name_text).and_then(|methods| {
