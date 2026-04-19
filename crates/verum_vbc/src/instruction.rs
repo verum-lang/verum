@@ -467,12 +467,31 @@ pub enum Opcode {
     GetVariantDataRef = 0x8B,
     /// TypeOf: return runtime type tag of a value.
     TypeOf = 0x8C,
-    /// Reserved generic.
-    Generic8D = 0x8D,
-    /// Reserved generic.
-    Generic8E = 0x8E,
-    /// Reserved generic.
-    Generic8F = 0x8F,
+    /// **MakePi** — construct a dependent function value `Π(x: T). U(x)` (T1-H).
+    ///
+    /// At Tier-0 the dependent function is represented as a closure over the
+    /// parameter value plus a type-representing pointer. The opcode takes
+    /// (param_value, return_type_id) and packs a PiValue for the interpreter.
+    /// Typecheck enforces dependent-typing rules; at runtime the opcode
+    /// behaves like an ordinary closure call but preserves the type-level
+    /// indexing for reflection (`typeof`, @verify pipelines).
+    MakePi = 0x8D,
+    /// **MakeSigma** — construct a dependent pair `Σ(x: T). U(x)` (T1-H).
+    ///
+    /// The witness is the first component (value of type T); the payload
+    /// is the second component (of type `U(witness)`). The opcode takes
+    /// (witness, payload) and packs a SigmaValue carrying both alongside
+    /// the dependent-type descriptor for reflection and pattern elimination.
+    MakeSigma = 0x8E,
+    /// **MakeWitness** — attach a proof to a refined value (T1-H).
+    ///
+    /// Used for refinement-type constructs that carry a proof obligation,
+    /// e.g. `Int { self > 0 }`: the opcode pairs the value with the
+    /// statically-generated proof hash so the interpreter can validate
+    /// refinement predicates lazily at gradual-verification boundaries
+    /// (T1-F). Erased at Tier-1 (AOT) when the predicate is discharged
+    /// by SMT; retained at Tier-0 for runtime assertions.
+    MakeWitness = 0x8F,
 
     // ========================================================================
     // Pattern Matching + Logic (0x90-0x9F)
