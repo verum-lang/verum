@@ -170,3 +170,65 @@ public fn object_count(c: FiniteCategory) -> Int {
 public fn morphism_count(c: FiniteCategory) -> Int {
     c.morphisms.len()
 }
+
+// =============================================================================
+// 5. Graph view — T1-AA canonicalisation
+// =============================================================================
+//
+// A finite category's objects + morphisms form a labelled directed
+// multigraph. Exposing it through `core.math.graph.Edge<CatObject, Text>`
+// — where the label is the morphism's name — makes BFS/DFS/reachable/
+// dijkstra directly applicable to the category's underlying graph.
+//
+// Graph homomorphisms, limit/colimit queries, and connectivity
+// analysis of presented categories all reduce to graph algorithms on
+// this view.
+
+/// Convert one CatMorphism to a canonical graph edge. The morphism's
+/// name becomes the edge label.
+public fn cat_morphism_to_graph_edge(m: CatMorphism) -> core.math.graph.Edge<CatObject, Text> {
+    core.math.graph.Edge {
+        src: m.source,
+        tgt: m.target,
+        label: m.name,
+    }
+}
+
+/// Expose all morphisms of a finite category as a list of canonical
+/// graph edges — the input to any algorithm from `core.math.graph`.
+public fn finite_category_edges_as_graph(
+    c: &FiniteCategory,
+) -> List<core.math.graph.Edge<CatObject, Text>> {
+    let mut out: List<core.math.graph.Edge<CatObject, Text>> = [];
+    let mut i: Int = 0;
+    while i < c.morphisms.len() {
+        out.push(core.math.graph.Edge {
+            src: c.morphisms[i].source,
+            tgt: c.morphisms[i].target,
+            label: c.morphisms[i].name,
+        });
+        i = i + 1;
+    }
+    out
+}
+
+/// Out-neighbourhood of an object — the morphisms with that object as
+/// source — returned in canonical graph-edge form.
+public fn finite_category_out_edges(
+    c: &FiniteCategory,
+    obj: &CatObject,
+) -> List<core.math.graph.Edge<CatObject, Text>> {
+    let mut out: List<core.math.graph.Edge<CatObject, Text>> = [];
+    let mut i: Int = 0;
+    while i < c.morphisms.len() {
+        if c.morphisms[i].source.name == obj.name {
+            out.push(core.math.graph.Edge {
+                src: c.morphisms[i].source,
+                tgt: c.morphisms[i].target,
+                label: c.morphisms[i].name,
+            });
+        }
+        i = i + 1;
+    }
+    out
+}
