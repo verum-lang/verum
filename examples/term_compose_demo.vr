@@ -1,31 +1,21 @@
 // =============================================================================
-// term_compose_demo.vr — core.term primitives + advanced language features
+// term_compose_demo.vr — CSS Flexbox + generics + protocols on core.term
 // =============================================================================
-// Exercises the stateless subset of `core.term` that now round-trips
-// cleanly through the VBC interpreter (after the struct-layout fixes in
-// `vcs/specs/L0-critical/vbc/struct_layout/`). The demo shows five
-// advanced language features working together against real stdlib code:
+// Exercises the full Flexbox Level 1 solver in `core.term.layout` over a
+// realistic three-pane layout. Along the way the file hits five advanced
+// language features in a single pass:
 //
-//   1. Protocol dispatch  (Sizable ← Pane)
-//   2. Generics           (fn summarize<P: Sizable>(panes: &List<P>))
-//   3. Refinement types   (Int{>= 0} param, checked at call sites)
-//   4. Builder chains     (FlexItem.new().min(..).grow(..) preserves
-//                          full layout — regression tests in
-//                          vcs/specs/L0-critical/vbc/struct_layout/)
-//   5. Interior refs      (`&list[i]` + `.field` through an interior
-//                          reference — also a landed regression fix)
+//   1. Protocols with method dispatch (`Sizable` → `Pane`)
+//   2. Generics (`fn summarize<P: Sizable>(panes: &List<P>)`)
+//   3. Refinement-type parameter (`Int{>= 0}` validated by the checker)
+//   4. Builder-chain composition (`FlexItem.new().min(...).grow(...)`)
+//   5. `&list[i]` interior references + field access
 //
 // Run:
 //   verum run examples/term_compose_demo.vr          # interpreter
-//
-// NOTE: Full `FlexLayout.compute` integration (top-level CSS Flexbox
-// solver) still trips a separate Tier-0 runtime bug outside the
-// struct-layout scope. The demo therefore stops short of invoking
-// compute; the reproducer for the solver bug will live under
-// vcs/specs/L0-critical/vbc/flex_layout/ when the fix lands.
 // =============================================================================
 
-mount core.term.layout.{Rect, FlexItem};
+mount core.term.layout.{Rect, FlexLayout, FlexItem, JustifyContent};
 
 // ---------------------------------------------------------------------------
 // 1. Domain type.
@@ -52,8 +42,8 @@ implement Sizable for Pane {
 }
 
 // ---------------------------------------------------------------------------
-// 3. Generic visitor using `&list[i]` — the interior-ref + field-access
-//    code path that was broken before this commit's VBC fix.
+// 3. Generic visitor using `&list[i]` — interior-ref + field-access
+//    path landed with the VBC struct-layout fix.
 // ---------------------------------------------------------------------------
 
 fn summarize<P: Sizable>(panes: &List<P>) -> Int {
@@ -66,17 +56,16 @@ fn summarize<P: Sizable>(panes: &List<P>) -> Int {
 }
 
 // ---------------------------------------------------------------------------
-// 4. Refinement-typed helper.
+// 4. Refinement-typed helper — call-site arguments gated by the checker.
 // ---------------------------------------------------------------------------
 
 fn checked_width(w: Int{>= 0}) -> Int { w * 2 }
 
 // ---------------------------------------------------------------------------
-// 5. Builder chain on a stdlib struct — this is the exact pattern the
-//    struct_layout VBC fix enables.
+// 5. Builder chain on a stdlib struct.
 // ---------------------------------------------------------------------------
 
-fn build_items(panes: &List<Pane>) -> List<FlexItem> {
+fn to_flex_items(panes: &List<Pane>) -> List<FlexItem> {
     let mut items = List.new();
     for i in 0..panes.len() {
         let p = panes[i];
@@ -87,7 +76,7 @@ fn build_items(panes: &List<Pane>) -> List<FlexItem> {
 }
 
 // ---------------------------------------------------------------------------
-// 6. Main.
+// 6. Main — lay out a 3-pane row inside an 80-column container.
 // ---------------------------------------------------------------------------
 
 fn main() {
@@ -96,7 +85,7 @@ fn main() {
     panes.push(Pane { name: "main",    min_cols: 20, grow: 1.0 });
     panes.push(Pane { name: "sidebar", min_cols: 15, grow: 0.0 });
 
-    // Protocol + generics + interior ref all in one call.
+    // Protocol-based summary generic over the pane type.
     let min_total = summarize(&panes);
     print(f"sum of min widths: {min_total} (expected 45)");
     assert_eq(min_total, 45);
@@ -106,29 +95,32 @@ fn main() {
     assert_eq(doubled, 160);
     print(f"checked_width(80) = {doubled}");
 
-    // Rect math.
+    // Rect geometry.
     let area = Rect.new(0, 0, 80, 24);
-    print(f"rect {area.width}x{area.height}  right={area.right()}  bottom={area.bottom()}");
     assert_eq(area.right(),  80);
     assert_eq(area.bottom(), 24);
+    print(f"rect {area.width}x{area.height}  right={area.right()}  bottom={area.bottom()}");
 
-    // Builder chain — the patched VBC path.
-    let items = build_items(&panes);
-    assert_eq(items.len(), 3);
-    for i in 0..items.len() {
-        let it = items[i];
-        let p  = panes[i];
-        // Each FlexItem keeps its grow factor + min_size across the
-        // two-call builder chain (regression-tested in VCS).
-        assert_eq(it.grow, p.grow);
-        match it.min_size {
-            Some(n) => {
-                assert_eq(n, p.min_cols);
-                print(f"  {p.name}  grow={it.grow}  min={n}");
-            }
-            None    => panic("min_size lost across the builder chain"),
-        }
+    // Flex solver: 80-col row, gap = 1.
+    let layout = FlexLayout.row().justify(JustifyContent.FlexStart).gap(1);
+    let items  = to_flex_items(&panes);
+    let rects  = layout.compute(area, &items);
+    assert_eq(rects.len(), 3);
+
+    print("flex layout (80-col row, gap=1):");
+    let mut covered = 0;
+    for i in 0..rects.len() {
+        let r = rects[i];
+        let p = panes[i];
+        print(f"  {p.name}  x={r.x}  w={r.width}  h={r.height}");
+        assert(r.width >= p.min_cols);
+        covered = covered + r.width;
     }
+    // With grow on the middle pane the solver fills precisely:
+    //   10 (fixed) + 1 (gap) + G (grow) + 1 (gap) + 15 (fixed) = 80
+    //   → G = 53
+    print(f"total covered cells: {covered}  (target 78 = 80 - 2 gaps)");
+    assert_eq(covered, 78);
 
     print("term_compose_demo: OK");
 }

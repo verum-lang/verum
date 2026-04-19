@@ -1,0 +1,34 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: vbc, stdlib, flex, layout, regression
+// @expected-stdout: ok
+// @expected-exit: 0
+// @description: Regression — FlexLayout.compute must run to completion
+//               for a realistic three-pane row. The full CSS Flexbox
+//               Level 1 pipeline exercises every path that was broken
+//               when `List.with_capacity(n)` returned a bogus object.
+
+mount core.term.layout.{Rect, FlexLayout, FlexItem, JustifyContent};
+
+fn main() {
+    let layout = FlexLayout.row().justify(JustifyContent.FlexStart).gap(1);
+
+    let mut items: List<FlexItem> = List.new();
+    items.push(FlexItem.new().min(10).grow(0.0));
+    items.push(FlexItem.new().min(20).grow(1.0));
+    items.push(FlexItem.new().min(15).grow(0.0));
+
+    let rects = layout.compute(Rect.new(0, 0, 80, 24), &items);
+    assert_eq(rects.len(), 3);
+
+    let mut covered = 0;
+    for i in 0..rects.len() {
+        let r = rects[i];
+        covered = covered + r.width;
+    }
+    // 10 + gap(1) + 53(grow) + gap(1) + 15 = 80 → covered = 78
+    assert_eq(covered, 78);
+
+    print("ok");
+}

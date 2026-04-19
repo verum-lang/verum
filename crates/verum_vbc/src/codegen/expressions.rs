@@ -4318,6 +4318,46 @@ impl VbcCodegen {
             }
         }
 
+        // `List.with_capacity(n)` / `Map.with_capacity(n)` /
+        // `Set.with_capacity(n)` — the stdlib's compiled-function form
+        // returns a flat record (raw ptr + len/cap fields) that is NOT
+        // wired to the interpreter's TypeId::LIST handlers, so later
+        // `push`/`len`/`[i]` panic or silently read garbage
+        // (`len() = 51173805664` in the wild). Map the constructor to
+        // the same `NewList` / `NewMap` / `NewSet` opcodes used for
+        // `<Collection>.new()` and drop the capacity argument — our
+        // heap auto-grows, so the hint has no runtime effect.
+        if method.name == "with_capacity" && args.len() == 1
+            && let Some(ref tn) = static_receiver_type
+        {
+            let opcode = if tn == type_names::LIST {
+                Some(Instruction::NewList { dst: Reg(0) })
+            } else if tn == type_names::MAP {
+                Some(Instruction::NewMap { dst: Reg(0) })
+            } else if tn == type_names::SET {
+                Some(Instruction::NewSet { dst: Reg(0) })
+            } else {
+                None
+            };
+            if let Some(template) = opcode {
+                // Evaluate the capacity arg for its side effects
+                // (matches the compiled stdlib's observable behaviour),
+                // then drop it.
+                if let Some(cap_reg) = self.compile_expr(&args[0])? {
+                    self.ctx.free_temp(cap_reg);
+                }
+                let dest = self.ctx.alloc_temp();
+                let instr = match template {
+                    Instruction::NewList { .. } => Instruction::NewList { dst: dest },
+                    Instruction::NewMap  { .. } => Instruction::NewMap  { dst: dest },
+                    Instruction::NewSet  { .. } => Instruction::NewSet  { dst: dest },
+                    other => other,
+                };
+                self.ctx.emit(instr);
+                return Ok(Some(dest));
+            }
+        }
+
         // Generic static-method dispatch on a typed receiver: route `Foo.method` or
         // `Foo<T>.method` through the qualified-function registry. This unifies the
         // bare-Path and TypeExpr forms — type arguments are layout-irrelevant in VBC.

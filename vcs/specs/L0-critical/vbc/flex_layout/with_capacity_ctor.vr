@@ -1,0 +1,49 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: vbc, collections, with_capacity, regression
+// @expected-stdout: ok
+// @expected-exit: 0
+// @description: Regression — `List.with_capacity(n)` / `Map.with_capacity(n)`
+//               / `Set.with_capacity(n)` must yield a real built-in
+//               collection that the interpreter's `len/push/get/[i]`
+//               handlers accept, exactly like `List.new()` does.
+//
+// Before the fix, the stdlib's compiled `List.with_capacity(n)` body
+// returned a flat record (raw ptr + len/cap fields) that wasn't wired
+// into the interpreter's TypeId::LIST handler, so `xs.len()` later read
+// garbage integers (e.g. `51173805664`) and any `push`/`[i]` on it
+// segfaulted. The fix (codegen) maps the call to the same `NewList` /
+// `NewMap` / `NewSet` opcode used by `<Collection>.new()`, dropping
+// the capacity hint because the heap auto-grows.
+
+fn main() {
+    // ---- List.with_capacity -------------------------------------------
+    let mut xs: List<Int> = List.with_capacity(4);
+    assert_eq(xs.len(), 0);
+    xs.push(10);
+    xs.push(20);
+    xs.push(30);
+    assert_eq(xs.len(), 3);
+    assert_eq(xs[0], 10);
+    assert_eq(xs[2], 30);
+
+    // ---- Map.with_capacity --------------------------------------------
+    // Core invariant: the value returned by `Map.with_capacity` must be
+    // a real built-in map so `insert` + `len` observe sane state. The
+    // specific value-lookup path (get/contains) has its own regression
+    // suite in specs/L2-standard/stdlib/collections.
+    let mut m: Map<Text, Int> = Map.with_capacity(4);
+    m.insert("a", 1);
+    m.insert("b", 2);
+    assert_eq(m.len(), 2);
+
+    // ---- Set.with_capacity --------------------------------------------
+    let mut s: Set<Int> = Set.with_capacity(4);
+    s.insert(1);
+    s.insert(2);
+    s.insert(1);
+    assert_eq(s.len(), 2);
+
+    print("ok");
+}
