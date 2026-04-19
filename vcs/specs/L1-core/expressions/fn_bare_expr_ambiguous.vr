@@ -1,0 +1,44 @@
+// @test: run
+// @tier: 0
+// @level: L1
+// @tags: expressions, anonymous-fn, bare-expression-body, backtracking
+// @expected-stdout: ok
+// @expected-exit: 0
+//
+// T1-P anchor — resolves the ambiguity between
+//   `fn(x: A) -> T { expr }`   (explicit return type, block body)
+// and
+//   `fn(x: A) -> expr`         (bare-expression body, inferred type)
+//
+// When the token after `->` is a bare identifier (`x`, a path, a
+// generic), the parser could legally read it as either the return
+// TYPE followed by a body block, OR as the BARE-EXPRESSION body
+// with no annotation. The reference resolution is:
+//
+//   * speculatively parse a type after `->`;
+//   * if `{` follows, commit to the annotated form;
+//   * otherwise rewind and re-parse the same tokens as the
+//     expression body with no return annotation.
+//
+// This round-trips the idiomatic stdlib lambdas in `core/math/hott.vr`
+// (`fn(x: A) -> x`, `fn(b: A) -> refl(b)`, etc.) without ceremony.
+
+fn main() {
+    // Non-ambiguous baseline: operator expression is obviously not a type.
+    let double = fn(x: Int) -> x * 2;
+
+    // Ambiguous form: the body `x` could have been a return type.
+    let identity = fn(x: Int) -> x;
+
+    // Nested call in body — also ambiguous before T1-P.
+    let add_one_then_triple = fn(x: Int) -> triple(x + 1);
+
+    assert(double(5) == 10);
+    assert(identity(7) == 7);
+    assert(add_one_then_triple(6) == 21);
+    print("ok");
+}
+
+fn triple(n: Int) -> Int {
+    n * 3
+}

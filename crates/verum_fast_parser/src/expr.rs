@@ -6079,30 +6079,44 @@ impl<'a> RecursiveParser<'a> {
         } else {
             List::new()
         };
-        let return_type = if self.stream.consume(&TokenKind::RArrow).is_some() {
-            Maybe::Some(self.parse_type_no_refinement()?)
+        // Anonymous function surface syntax has three forms:
+        //   fn(params) { body }             — implicit return type, block body
+        //   fn(params) -> Type { body }     — explicit return type, block body
+        //   fn(params) -> expr              — no annotation, bare-expression body
+        //
+        // The third form is ambiguous when `expr` begins with something
+        // that looks like a type (a bare identifier, path, or generic).
+        // `fn(x: A) -> x` reads as both "return type = x" and "body = x".
+        // We resolve the ambiguity by speculatively parsing a type after
+        // `->` and committing only if an explicit body block follows. When
+        // the speculatively-parsed fragment is NOT followed by `{`, we
+        // rewind and re-parse the same tokens as the expression body with
+        // no return annotation. This is the shape the closure form
+        // (`|x| expr`) already takes, so the two forms stay consistent.
+        let (return_type, body) = if self.stream.check(&TokenKind::LBrace) {
+            (Maybe::None, self.parse_block_expr()?)
+        } else if self.stream.consume(&TokenKind::RArrow).is_some() {
+            let after_arrow = self.stream.position();
+            let speculative_type = self.parse_type_no_refinement();
+            let type_parsed_cleanly = speculative_type.is_ok()
+                && self.stream.check(&TokenKind::LBrace);
+            if type_parsed_cleanly {
+                let ty = speculative_type
+                    .expect("ok branch ensured by check above");
+                (Maybe::Some(ty), self.parse_block_expr()?)
+            } else {
+                // Rewind to the first token after `->` and re-parse the
+                // tail as a bare-expression body. Operator precedence
+                // binds greedily up to the enclosing terminator (`,`,
+                // `)`, `}`, `;`), matching the closure-body rule.
+                self.stream.reset_to(after_arrow);
+                (Maybe::None, self.parse_expr_bp(0)?)
+            }
         } else {
-            Maybe::None
-        };
-        // Anonymous function body can be either:
-        //   fn(x: A) -> A { x }    — explicit block body
-        //   fn(x: A) -> A x         — bare-expression body (like the
-        //                             sibling `|x| x` closure form).
-        // Both forms map to the same Closure AST node; the expression-form
-        // gets wrapped in an implicit `{ expr }` during lowering. This
-        // matches the grammar's `closure_expr` production which already
-        // accepts expression bodies, and unblocks stdlib modules like
-        // `core/math/hott.vr` that express equivalence-proofs with
-        //     fn(x: A) -> A x
-        // through dozens of call sites.
-        let body = if self.stream.check(&TokenKind::LBrace) {
-            self.parse_block_expr()?
-        } else {
-            // Parse a single expression — reuse the minimum binding power
-            // that closure bodies use so operator precedence is consistent.
-            // BP 0 accepts any expression; the terminating ',' / ')' / '}'
-            // at the enclosing context stops the walk.
-            self.parse_expr_bp(0)?
+            // No `->` and no `{` — fall back to a block parse; the parser
+            // will emit its usual "expected `{`" diagnostic if neither
+            // is present.
+            (Maybe::None, self.parse_block_expr()?)
         };
         let span = self.stream.make_span(start_pos);
         Ok(Expr::new(
