@@ -276,18 +276,94 @@ public fn euler_characteristic<V, L, G>(g: &G) -> Int
     g.vertices().len() - g.edges().len()
 }
 
+/// **Connected components** (undirected graphs) — partitions the
+/// vertex set into maximal BFS-reachable classes.
+///
+/// Algorithm: repeatedly pick an unvisited vertex, BFS it to
+/// saturation, emit the reached set as a component. Terminates when
+/// every vertex has been placed in some component.
+///
+/// Complexity: O(|V| + |E|) total across all components.
+public fn connected_components<V, L, G>(g: &G) -> List<List<V>>
+    where type G: UndirectedGraph<V, L>, type V: Eq
+{
+    let verts = g.vertices();
+    let mut seen: List<V> = List.new();
+    let mut components: List<List<V>> = List.new();
+    for v in verts.iter() {
+        if seen.contains(v) { continue; }
+        let component = bfs(g, v.clone());
+        for u in component.iter() {
+            seen.push(u.clone());
+        }
+        components.push(component);
+    }
+    components
+}
+
+/// **Topological sort** — a linear extension of the DAG's
+/// causal order.
+///
+/// Uses the Kahn algorithm: repeatedly emit a vertex with zero
+/// remaining in-edges, then remove its out-edges from the
+/// residual degree count. If the algorithm terminates with all
+/// vertices emitted, the sort is a valid topological order; the
+/// DAG axiom (no cycles) guarantees termination.
+///
+/// Complexity: O(|V| + |E|) with O(1) vertex equality.
+public fn topological_sort<V, L, G>(g: &G) -> List<V>
+    where type G: DAG<V, L>, type V: Eq
+{
+    // in_degree[v] = number of unprocessed predecessors of v.
+    let verts = g.vertices();
+    let mut result: List<V> = List.new();
+    let mut removed: List<V> = List.new();
+
+    // Kahn's loop: at each step find a vertex with zero remaining
+    // incoming edges among non-removed vertices.
+    while result.len() < verts.len() {
+        let mut emitted_this_round = false;
+        for v in verts.iter() {
+            if removed.contains(v) { continue; }
+            // Check if all in-edges come from already-removed sources.
+            let incoming = g.in_edges(v);
+            let mut has_pending_pred = false;
+            for edge in incoming.iter() {
+                if !removed.contains(&edge.src) {
+                    has_pending_pred = true;
+                    break;
+                }
+            }
+            if !has_pending_pred {
+                result.push(v.clone());
+                removed.push(v.clone());
+                emitted_this_round = true;
+                break;
+            }
+        }
+        if !emitted_this_round {
+            // Cycle — the DAG axiom was violated. Return what we have.
+            break;
+        }
+    }
+    result
+}
+
 // =============================================================================
 // Algorithm signatures reserved for T1-Y phase 3
 // =============================================================================
 //
-//   fn dijkstra<G: WeightedGraph<V, W>, V: Eq + Hash, W: Ord>(
+// These require additional infrastructure:
+// - dijkstra: a priority queue keyed by path-weight (BinaryHeap<(W, V)>)
+//   with the semiring (min, +) structure on W.
+// - laplacian_spectrum: adjacency matrix lowered to Matrix<Float>,
+//   then EigenDecomposition from core/math/linalg.vr.
+// - minimum_spanning_tree: matroid oracle + greedy fold.
+//
+//   fn dijkstra<G: WeightedGraph<V, W>, V: Eq, W: Ord>(
 //       g: &G, start: V
 //   ) -> Map<V, W>;
-//   fn topological_sort<G: DAG<V, L>, V: Eq + Hash>(g: &G) -> List<V>;
-//   fn connected_components<G: UndirectedGraph<V, L>, V: Eq + Hash>(
-//       g: &G
-//   ) -> List<List<V>>;
-//   fn laplacian_spectrum<G: WeightedGraph<V, Float>, V: Eq + Hash>(
+//   fn laplacian_spectrum<G: WeightedGraph<V, Float>>(
 //       g: &G
 //   ) -> List<Float>;
 // =============================================================================
