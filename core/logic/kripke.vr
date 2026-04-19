@@ -76,6 +76,65 @@ public fn accessible(f: KripkeFrame, w: World) -> List<World> {
 }
 
 // =============================================================================
+// 1b. Kripke frame as a canonical Graph<World, ()>  (T1-AA)
+// =============================================================================
+//
+// A Kripke frame IS a labelled directed graph — the accessibility
+// relation is its edge set. Exposing the frame through
+// `core.math.graph.Graph<World, ()>` means every graph algorithm
+// (BFS, DFS, reachable, topological_sort, dijkstra) immediately
+// applies to modal-logic semantics without bespoke traversal code.
+//
+// The wiring is a small shim because the field names differ:
+// Kripke's `Edge { from, to }` vs graph.vr's `Edge<V, L> { src, tgt, label }`.
+// The shim converts on the fly; concrete `impl Graph for KripkeFrame`
+// is deferred to the full T1-AA phase when `implement P for T {}` can
+// inject the method signatures via the Graph protocol (requires
+// T1-R phase 2 to emit the protocol-obligation proof obligations).
+//
+// For now, expose the graph view as a free function.
+
+/// Convert a Kripke edge to the canonical graph Edge shape.
+public fn kripke_edge_to_graph(e: Edge) -> core.math.graph.Edge<World, ()> {
+    core.math.graph.Edge { src: e.from, tgt: e.to, label: () }
+}
+
+/// Graph-view of a Kripke frame: edges in the canonical `core.math.graph.Edge`
+/// shape. This lets `bfs`, `dfs`, `reachable`, etc. from `core.math.graph`
+/// apply directly to the frame's accessibility relation.
+public fn kripke_edges_as_graph(f: &KripkeFrame) -> List<core.math.graph.Edge<World, ()>> {
+    let mut out: List<core.math.graph.Edge<World, ()>> = [];
+    let mut i: Int = 0;
+    while i < f.edges.len() {
+        out.push(core.math.graph.Edge {
+            src: f.edges[i].from,
+            tgt: f.edges[i].to,
+            label: (),
+        });
+        i = i + 1;
+    }
+    out
+}
+
+/// The out-neighbourhood of a world in the frame, returned as
+/// canonical graph edges. Mirrors `Graph<World, ()>.out_edges`.
+public fn kripke_out_edges(f: &KripkeFrame, w: &World) -> List<core.math.graph.Edge<World, ()>> {
+    let mut out: List<core.math.graph.Edge<World, ()>> = [];
+    let mut i: Int = 0;
+    while i < f.edges.len() {
+        if f.edges[i].from.id == w.id {
+            out.push(core.math.graph.Edge {
+                src: f.edges[i].from,
+                tgt: f.edges[i].to,
+                label: (),
+            });
+        }
+        i = i + 1;
+    }
+    out
+}
+
+// =============================================================================
 // 2. Valuation
 // =============================================================================
 
