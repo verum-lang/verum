@@ -1340,3 +1340,44 @@ public context GradientTape {
     /// Register a vector-Jacobian product (VJP) for a custom op.
     fn register_vjp(op_name: Text, vjp_fn: fn(List<DynTensor<Float>>, DynTensor<Float>) -> List<DynTensor<Float>>);
 }
+
+// =============================================================================
+// Autodiff graph as a canonical DAG view — T1-AA canonicalisation
+// =============================================================================
+//
+// An autodiff computation is a DAG of tensor operations — exactly a
+// labelled directed acyclic graph where nodes are GraphNode operations
+// and edges are GraphEdge tensor-valued data-flow arrows. Exposing it
+// through `core.math.graph.Edge<NodeId, TensorId>` lets the full graph
+// algorithm library (bfs, dfs, reachable, topological_sort) apply
+// directly. Topological sort of the autodiff graph IS the forward
+// evaluation order; reverse-topological sort is the backprop order.
+
+/// Convert one autodiff GraphEdge to the canonical graph edge shape.
+/// The tensor flowing on the edge becomes the edge label, so graph
+/// algorithms can inspect the data-flow structure.
+public fn autodiff_edge_to_graph_edge(e: GraphEdge) -> core.math.graph.Edge<NodeId, TensorId> {
+    core.math.graph.Edge {
+        src: e.from,
+        tgt: e.to,
+        label: e.tensor_id,
+    }
+}
+
+/// Convert a full list of autodiff edges to the canonical form — the
+/// input to `topological_sort` from `core.math.graph`.
+public fn autodiff_edges_as_graph(
+    edges: &List<GraphEdge>,
+) -> List<core.math.graph.Edge<NodeId, TensorId>> {
+    let mut out: List<core.math.graph.Edge<NodeId, TensorId>> = [];
+    let mut i: Int = 0;
+    while i < edges.len() {
+        out.push(core.math.graph.Edge {
+            src: edges[i].from,
+            tgt: edges[i].to,
+            label: edges[i].tensor_id,
+        });
+        i = i + 1;
+    }
+    out
+}
