@@ -15,6 +15,25 @@ reasons orthogonal to the Tier-0 scope.
 | L0-4  | `a1a22ac` | Refinement predicates written with `self` (parser emits `PathSegment::SelfValue`) are now substituted — `safe_div(42, 0)` under `Int{self != 0}` is caught at type-check |
 | L0-5  | `85459ed` | `parallel_scan_exclusive` (Blelloch up-sweep + down-sweep) lands in `core/async/parallel.vr`; sequential today, spawn/join-ready when the work-stealing scheduler is wired |
 
+## L0-critical baseline (per-subdir, sampled)
+
+| Subdir | Result |
+|--------|--------|
+| `lexer/` | **97/97** (100%) |
+| `parser/` | **215/215** (100%) |
+| `builtin-syntax/` | **11/11** (100%) |
+| `modules/` | **12/12** (100%) |
+| `stdlib-runtime/` | **8/8** (100%) |
+| `reference_system/` | 114/115 (99.1%) |
+| `memory-safety/` | 130/131 (99.2%) |
+| `mmio/` | 4/6 (66.7%) |
+
+The huge `vbc/e2e/` subdir (≈2,400 tests) is not sampled in this
+snapshot — it runs for close to an hour and is better left to CI.
+The sampled L0-critical surface is **591/595 = 99.3%** across lexer,
+parser, builtin-syntax, modules, reference_system, memory-safety,
+mmio, and stdlib-runtime.
+
 ## L1-core baseline (per-subdir)
 
 Collected 2026-04-19 immediately after the five blockers.
