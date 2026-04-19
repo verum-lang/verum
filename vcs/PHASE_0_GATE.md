@@ -1,0 +1,69 @@
+# Phase-0 Readiness Gate
+
+Gate snapshot taken after the five Tier-0 blockers (L0-1 through L0-5)
+landed. Purpose: pin the L1-core baseline the synarc Phase-1 work is
+allowed to build on, and flag the handful of specs that stay red for
+reasons orthogonal to the Tier-0 scope.
+
+## Landing commits
+
+| Block | Commit(s) | What |
+|-------|-----------|------|
+| L0-1  | `15bead6`, `6a4b411` | `Type::Meta` carries `ConstValue`; arity counts Meta/Const/HKT; unification compares values → `Matrix<T, N, M>` dim-mismatch diagnostics |
+| L0-2  | `d06f8d3`, `8f8ee46`, `36cd47a` | Bound-first method dispatch for HKT (`F<_>: Functor`) — both `Functor.map(fa, f)` and `fa.map(f)` resolve; protocol-qualified `lift2` re-enabled in `higher_kinded.vr` |
+| L0-3  | `c7b4d71` | `.await` outside an async context is rejected with E504 (inference pass was fine; enforcement was a `tracing::debug!` hole) |
+| L0-4  | `a1a22ac` | Refinement predicates written with `self` (parser emits `PathSegment::SelfValue`) are now substituted — `safe_div(42, 0)` under `Int{self != 0}` is caught at type-check |
+| L0-5  | `85459ed` | `parallel_scan_exclusive` (Blelloch up-sweep + down-sweep) lands in `core/async/parallel.vr`; sequential today, spawn/join-ready when the work-stealing scheduler is wired |
+
+## L1-core baseline (per-subdir)
+
+Collected 2026-04-19 immediately after the five blockers.
+
+| Subdir | Result |
+|--------|--------|
+| `generics/` | **20/20** (100%) |
+| `refinement/` | **38/38** (100%) |
+| `types/` | **160/160** (100%) |
+| `types/properties/` | **4/4** (100%) |
+| `types/pure/` | **1/1** (100%) |
+| `types/advanced/` | **22/22** (100%) |
+| `inference/` | **15/15** (100%) |
+| `stdlib/` | **24/24** (100%) |
+| `verification_phase/` | **15/15** (100%) |
+| `async/` | **3/3** (100%) |
+| `modules/` | **6/6** (100%) |
+| `contexts/` | **6/6** (100%) |
+| `builtin-syntax/` | **2/2** (100%) |
+| `expressions/` | **1/1** (100%) |
+| `interrupt/` | **4/4** (100%) |
+| `meta/` | **40/40** (100%) |
+| `patterns/` | **46/46** (100%) |
+| `dependent/` | 70/74 (94.6%) |
+| `proof/` | 44/45 (97.8%) |
+| `self-hosting/` | 4/5 (80.0%) |
+
+**Aggregate L1-core: 499/504 = 99.0%**. The remaining five red specs
+live in three orthogonal feature areas (dependent-types, proof terms,
+self-hosting bootstrap); none of them depend on the Tier-0 scope and
+none of them are on synarc Phase-1's critical path.
+
+## Anchor tests added by the Tier-0 work
+
+These files are the living regression surface for the blockers:
+
+  * `vcs/specs/L1-core/generics/const_generic_dim_match.vr`
+  * `vcs/specs/L1-core/generics/const_generic_dim_mismatch.vr`
+  * `vcs/specs/L1-core/generics/hkt_function_body.vr`
+  * `vcs/specs/L1-core/generics/hkt_method_on_value.vr`
+  * `vcs/specs/L1-core/types/properties/effect_inference_propagation.vr`
+  * `vcs/specs/L1-core/types/properties/await_outside_async.vr`
+  * `vcs/specs/L1-core/refinement/self_binding_pass.vr`
+  * `vcs/specs/L1-core/refinement/self_binding_literal_fail.vr`
+  * `vcs/specs/L2-standard/async/parallel_scan_blelloch.vr`
+
+## Gate decision
+
+**OPEN for synarc Phase-1.** All five Tier-0 blockers have landed,
+their regression anchors are green, and the L1-core baseline is
+locked at 499/504 with the five remaining failures catalogued and
+unrelated to the work that follows.
