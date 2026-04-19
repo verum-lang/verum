@@ -1,0 +1,62 @@
+// @test: parse
+// @level: L1
+// @tier: 0
+// @description: Protocol-level axioms (T1-R phase 1: parser+AST).
+//
+// A protocol can declare axioms inside its body. Each axiom is a
+// universally quantified proposition over the protocol's parameters
+// and the implementing type's associated types. Phase 1 (this commit)
+// parses and stores axioms in `ProtocolItemKind::Axiom(AxiomDecl)`.
+//
+// Phase 2 (future) — the `implement` block will auto-discharge each
+// axiom as an SMT proof obligation, making every successful impl a
+// model of the theory in the standard model-theoretic sense.
+
+// Semigroup — associative binary operation.
+type Semigroup is protocol {
+    type Elem;
+    fn op(a: Self.Elem, b: Self.Elem) -> Self.Elem;
+    axiom assoc(a: Int, b: Int, c: Int)
+        ensures a + b + c == a + b + c;
+};
+
+// Monoid — semigroup with two-sided identity.
+type Monoid is protocol {
+    type Elem;
+    fn unit() -> Self.Elem;
+    fn op(a: Self.Elem, b: Self.Elem) -> Self.Elem;
+    axiom left_unit(x: Int)
+        ensures 0 + x == x;
+    axiom right_unit(x: Int)
+        ensures x + 0 == x;
+};
+
+// Group — monoid with inverse.
+type Group is protocol {
+    type Elem;
+    fn unit() -> Self.Elem;
+    fn op(a: Self.Elem, b: Self.Elem) -> Self.Elem;
+    fn inv(a: Self.Elem) -> Self.Elem;
+    axiom left_unit(x: Int)
+        ensures 0 + x == x;
+    axiom left_inv(x: Int)
+        ensures -x + x == 0;
+    axiom assoc(a: Int, b: Int, c: Int)
+        ensures (a + b) + c == a + (b + c);
+};
+
+// Category — objects and morphisms with composition.
+type Category is protocol {
+    type Obj;
+    type Mor;
+    fn id(a: Self.Obj) -> Self.Mor;
+    fn compose(f: Self.Mor, g: Self.Mor) -> Self.Mor;
+    axiom id_left(f: Int)
+        ensures f == f;
+    axiom id_right(f: Int)
+        ensures f == f;
+    axiom comp_assoc(f: Int, g: Int, h: Int)
+        ensures f == f;
+};
+
+fn main() { }

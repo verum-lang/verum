@@ -896,7 +896,14 @@ ensures_item         = 'ensures' , expression ;
 (* 2.5 Protocol Implementations *)
 (* Advanced Protocols - Generic Associated Types (GATs) *)
 (* Spec: docs/detailed/18-advanced-protocols.md Section 1 - GATs *)
-protocol_item   = protocol_function | protocol_type | protocol_const ;
+(* Protocol items include function sigs, associated types/consts, and
+   axioms (T1-R foundation). Protocol-level axioms become proof
+   obligations at every `implement` site — an implementation is a
+   model of the theory iff all axioms hold on its concrete ops. *)
+protocol_item   = protocol_function
+                | protocol_type
+                | protocol_const
+                | axiom_decl ;
 
 (* Protocol functions with optional modifiers, generics, refinements *)
 (* Protocol methods may have context_clause requirements *)

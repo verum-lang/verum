@@ -3812,6 +3812,29 @@ impl<'a> RecursiveParser<'a> {
             });
         }
 
+        // Protocol-level axiom — T1-R model-theoretic semantics.
+        //
+        // Syntax: `axiom name<G>(params) [requires R] [ensures E] ;`
+        // A protocol axiom becomes a proof obligation at every
+        // `implement` site. The full parser for axiom declarations is
+        // in proof.rs; we dispatch to it here and wrap the resulting
+        // AxiomDecl in `ProtocolItemKind::Axiom`.
+        if self.stream.check(&TokenKind::Axiom) {
+            let axiom_item = self.parse_axiom(Vec::new(), verum_ast::decl::Visibility::Public)?;
+            let item_span = self.stream.make_span(start_pos);
+            if let ItemKind::Axiom(axiom_decl) = axiom_item.kind {
+                return Ok(ProtocolItem {
+                    kind: ProtocolItemKind::Axiom(axiom_decl),
+                    span: item_span,
+                });
+            } else {
+                return Err(ParseError::invalid_syntax(
+                    "expected axiom declaration inside protocol body",
+                    item_span,
+                ));
+            }
+        }
+
         // Function (with optional pure, meta, async, unsafe and optional generator *)
         // Grammar: function_modifiers = [ 'pure' ] , [ meta_modifier ] , [ 'async' ] , [ 'unsafe' ]
         // Order: [pure] [meta | meta(N)] [async] [unsafe] fn [*] name

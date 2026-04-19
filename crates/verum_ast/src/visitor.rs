@@ -957,6 +957,10 @@ pub fn walk_type_decl<V: Visitor>(visitor: &mut V, ty_decl: &TypeDecl) {
                         visitor.visit_ident(name);
                         visit_child!(visitor, ty, Type);
                     }
+                    crate::decl::ProtocolItemKind::Axiom(axiom_decl) => {
+                        visitor.visit_ident(&axiom_decl.name);
+                        visit_child!(visitor, axiom_decl.proposition.as_ref(), Expr);
+                    }
                 }
             }
         }
@@ -1010,6 +1014,10 @@ pub fn walk_type_decl<V: Visitor>(visitor: &mut V, ty_decl: &TypeDecl) {
                         visitor.visit_ident(name);
                         visit_child!(visitor, ty, Type);
                     }
+                    crate::decl::ProtocolItemKind::Axiom(axiom_decl) => {
+                        visitor.visit_ident(&axiom_decl.name);
+                        visit_child!(visitor, axiom_decl.proposition.as_ref(), Expr);
+                    }
                 }
             }
         }
@@ -1042,6 +1050,9 @@ pub fn walk_protocol<V: Visitor>(visitor: &mut V, protocol: &ProtocolDecl) {
                 }
             }
             ProtocolItemKind::Type { .. } => {}
+            ProtocolItemKind::Axiom(axiom_decl) => {
+                visit_child!(visitor, axiom_decl.proposition.as_ref(), Expr);
+            }
             ProtocolItemKind::Const { ty, .. } => {
                 visit_child!(visitor, ty, Type);
             }

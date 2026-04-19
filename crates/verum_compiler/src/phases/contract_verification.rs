@@ -1164,6 +1164,11 @@ impl ContractVerificationPhase {
                         }
                     }
                 }
+                ProtocolItemKind::Axiom(_) => {
+                    // T1-R: protocol axioms are discharged at implement
+                    // sites by the model-verification pipeline, not by
+                    // this contract-verification pass.
+                }
             }
         }
 

@@ -1292,6 +1292,17 @@ impl PrettyPrinter {
                 self.format_type(ty);
                 self.write(";");
             }
+            ProtocolItemKind::Axiom(axiom_decl) => {
+                // Protocol-level axiom — `axiom name(...) ensures ...`.
+                // Pretty-printing the full param list + proposition goes
+                // through the same machinery as top-level axioms; for now
+                // emit the axiom signature as a stable round-trippable
+                // marker so downstream consumers can at least identify
+                // which axioms a protocol declares.
+                self.write("axiom ");
+                self.write(axiom_decl.name.as_str());
+                self.write("(...);");
+            }
         }
     }
 

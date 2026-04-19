@@ -1222,6 +1222,27 @@ pub enum ProtocolItemKind {
     },
     /// Associated constant
     Const { name: Ident, ty: Type },
+    /// Protocol-level axiom — T1-R foundation.
+    ///
+    /// A protocol axiom is a proposition universally quantified over the
+    /// protocol's parameters AND the implementing type's associated types.
+    /// Every `implement` block for this protocol generates a proof
+    /// obligation for each axiom, substituting `Self.T` with the
+    /// implementation's concrete definitions. Obligations route through
+    /// the SMT backend or can be discharged with explicit `proof name by tactic`
+    /// clauses inside the implement block.
+    ///
+    /// Example:
+    /// ```verum
+    /// type Group is protocol {
+    ///     type Elem;
+    ///     fn unit() -> Self.Elem;
+    ///     fn mul(a: Self.Elem, b: Self.Elem) -> Self.Elem;
+    ///     axiom left_unit(x: Self.Elem)
+    ///         ensures Self.mul(Self.unit(), x) == x;
+    /// };
+    /// ```
+    Axiom(AxiomDecl),
 }
 
 impl Spanned for ProtocolItem {

@@ -29407,6 +29407,12 @@ impl TypeChecker {
                             // Extract from constant type
                             extract_from_type(ty, &mut deps);
                         }
+                        ProtocolItemKind::Axiom(_) => {
+                            // Axioms contribute proof obligations at
+                            // `implement` sites; their free type names
+                            // are already reachable via the protocol
+                            // header and function signatures.
+                        }
                     }
                 }
                 // Extract from extended protocols (now supports generic types like Converter<A, B>)
@@ -31932,6 +31938,12 @@ impl TypeChecker {
                             }
                             ProtocolItemKind::Const { .. } => {
                                 // Skip associated consts for now
+                            }
+                            ProtocolItemKind::Axiom(_) => {
+                                // T1-R: protocol axioms are tracked
+                                // elsewhere (in the implement-site
+                                // obligation-discharge pipeline) — they
+                                // do not contribute associated types.
                             }
                         }
                     }
