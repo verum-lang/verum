@@ -7837,9 +7837,43 @@ impl TypeChecker {
                 params,
                 body: closure_body,
                 return_type,
-                async_: _,
+                async_,
                 ..
             } => {
+                // Flip `in_async_context` for async closures so their body
+                // may use `.await`. Mirrors the synth-mode handler at
+                // ~11725. The flag is restored by the `AsyncCtxGuard`
+                // below on every return path (including early `?` errors
+                // and success).
+                struct AsyncCtxGuard<'a> {
+                    checker: *mut TypeChecker,
+                    prev: Option<bool>,
+                    _lt: std::marker::PhantomData<&'a ()>,
+                }
+                impl Drop for AsyncCtxGuard<'_> {
+                    fn drop(&mut self) {
+                        if let Some(prev) = self.prev {
+                            // SAFETY: the guard borrows `self` through the
+                            // raw pointer for its lifetime only; the
+                            // surrounding `&mut self` enforces uniqueness.
+                            unsafe { (*self.checker).in_async_context = prev; }
+                        }
+                    }
+                }
+                let _async_ctx_guard = if *async_ {
+                    let prev = std::mem::replace(&mut self.in_async_context, true);
+                    AsyncCtxGuard {
+                        checker: self as *mut TypeChecker,
+                        prev: Some(prev),
+                        _lt: std::marker::PhantomData,
+                    }
+                } else {
+                    AsyncCtxGuard {
+                        checker: self as *mut TypeChecker,
+                        prev: None,
+                        _lt: std::marker::PhantomData,
+                    }
+                };
                 // ============================================================
                 // Rank-2 Polymorphic Closure Checking
                 // Spec: grammar/verum.ebnf - rank2_function_type
@@ -11723,9 +11757,17 @@ impl TypeChecker {
                     self.ctx.enter_scope();
 
                     // Enter async scope if this is an async closure
-                    if *async_ {
+                    // Also flip `in_async_context` so the body may use
+                    // `.await` — c7b4d71's enforcement was keyed on the
+                    // function-scope flag and missed async closures. For
+                    // `async move |x| { future.await }` the body is as
+                    // valid a .await site as an `async fn` body.
+                    let prev_async_context = if *async_ {
                         self.borrow_tracker.enter_async_scope();
-                    }
+                        Some(std::mem::replace(&mut self.in_async_context, true))
+                    } else {
+                        None
+                    };
 
                     // Collect parameter names and types for dependent type analysis
                     let mut param_names = List::new();
@@ -11761,8 +11803,9 @@ impl TypeChecker {
                     };
 
                     // Exit async scope if this was an async closure
-                    if *async_ {
+                    if let Some(prev) = prev_async_context {
                         self.borrow_tracker.exit_async_scope();
+                        self.in_async_context = prev;
                     }
 
                     // Exit closure tracking and get capture set
