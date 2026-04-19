@@ -1,0 +1,43 @@
+// @test: parse
+// @level: L1
+// @tier: 0
+// @description: Higher inductive types — path constructors — T1-U.
+//
+// In Book HoTT, a higher inductive type (HIT) declares not only
+// point constructors but also *path constructors* — elements of
+// `Path<T>(a, b)` that identify otherwise-distinct points. This
+// gives a uniform account of quotients, truncations, coequalizers,
+// and the canonical spheres S¹, S², … of homotopy theory.
+//
+// Verum's HIT syntax accepts two equivalent spellings for a path
+// constructor — both already used across `core/math/hott.vr`:
+//   `| loop: Path<S1>(base, base)`
+//   `| loop() = base..base`
+//
+// Variant names can be drawn from Verum's keyword space so the
+// canonical HoTT constructor names (`loop`, `merid`, `trunc_path`,
+// `push`) work directly.
+
+// The circle S¹ — one point, one non-trivial loop.
+public type S1 is
+    | base
+    | loop: Path<S1>(base, base);
+
+// Suspension: north, south, and a path for each a: A.
+public type Susp<A> is
+    | north
+    | south
+    | merid(a: A): Path<Susp<A>>(north, south);
+
+// Propositional truncation `||A||` — free proposition on A.
+public type Trunc<A> is
+    | trunc_in(a: A)
+    | trunc_path: fn(x: Trunc<A>, y: Trunc<A>) -> Path<Trunc<A>>(x, y);
+
+// 2-sphere S² — encoded as a HIT with a 2-dimensional surface
+// constructor.
+public type S2 is
+    | base2
+    | surf: Path<Path<S2>(base2, base2)>(refl(base2), refl(base2));
+
+fn main() { }
