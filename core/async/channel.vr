@@ -227,6 +227,47 @@ implement<T> Sender<T> {
         Ok(())
     }
 
+    // Send with a timeout — block up to `duration` waiting for a
+    // bounded channel slot, then give up. Semantic mirror of
+    // `recv_timeout`: on success returns `Ok(())`; on closed channel
+    // returns `Err(SendError)`; on timeout returns `Err(SendError)`
+    // with the unsent value preserved.
+    //
+    // For an unbounded channel this degenerates to `send` because
+    // there is no capacity limit — the timeout only applies to the
+    // wait-for-slot path.
+    public fn send_timeout(&self, value: T, duration: Duration) -> Result<(), SendError<T>> {
+        if self.inner.closed.load(MemoryOrdering.Acquire) {
+            return Err(SendError(value));
+        }
+        // Unbounded: send succeeds immediately.
+        if self.inner.capacity.is_none() {
+            return self.send(value);
+        }
+        // Bounded: poll for slot availability up to `duration`. Phase 1
+        // uses a spin-with-sleep loop against the queue length; phase 2
+        // will replace this with a proper futex-backed wait once the
+        // bounded-channel wakeup protocol (sender-side) is wired.
+        let deadline = Instant.now().saturating_add(duration);
+        loop {
+            match self.try_send(value) {
+                Ok(()) => return Ok(()),
+                Err(TrySendError.Full(returned_value)) => {
+                    if Instant.now() >= deadline {
+                        return Err(SendError(returned_value));
+                    }
+                    // Short sleep to avoid busy-looping; the real
+                    // wake-up path is the bounded-channel reader
+                    // futex_wake on pop, which phase 2 will wire.
+                    sleep_millis(1);
+                }
+                Err(TrySendError.Disconnected(returned_value)) => {
+                    return Err(SendError(returned_value));
+                }
+            }
+        }
+    }
+
     // Try to send without waiting.
     public fn try_send(&self, value: T) -> Result<(), TrySendError<T>> {
         if self.inner.closed.load(MemoryOrdering.Acquire) {
