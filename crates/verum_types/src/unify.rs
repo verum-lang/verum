@@ -1277,18 +1277,29 @@ impl Unifier {
                 })
             }
 
-            // Unresolved generic type parameters: Named types with single-letter names
-            // like "T", "U", "E", "K", "V" etc. that haven't been substituted with
-            // type variables. Allow them to unify with any concrete type.
+            // Unresolved generic type parameters: Named types with single-letter
+            // uppercase names like "T", "U", "E", "K", "V" that haven't been
+            // substituted with type variables. Allow them to unify with any
+            // concrete type.
+            //
+            // Heuristic: strictly single-letter uppercase only. Dropping the
+            // two-letter case eliminates the need for a hardcoded exclusion
+            // list (previously "Ok" | "No" | "Eq" | "Fn" | "IO") while leaving
+            // the common-case generic parameters (T, U, A, B, E, F, K, V)
+            // identifiable. Two-letter user types (`Io`, `Ex`, etc.) are
+            // treated as concrete — the rare user-level generic parameter
+            // with a two-letter name must be explicitly bound via
+            // `<Xy: Trait>` declarations, which create proper TypeVars that
+            // never reach this fallback path. This is the stdlib-agnostic
+            // replacement for the previous hardcoded name list per CLAUDE.md.
             (Named { path, args, .. }, other) | (other, Named { path, args, .. })
                 if args.is_empty() && {
                     let name = path.segments.last().map(|s| match s {
                         verum_ast::ty::PathSegment::Name(ident) => ident.name.as_str(),
                         _ => "",
                     }).unwrap_or("");
-                    name.len() <= 2
+                    name.len() == 1
                         && name.chars().next().is_some_and(|c| c.is_ascii_uppercase())
-                        && !matches!(name, "Ok" | "No" | "Eq" | "Fn" | "IO")
                         && !matches!(other, Named { .. } if {
                             let oname = match other {
                                 Named { path: op, .. } => op.segments.last().map(|s| match s {
@@ -1297,7 +1308,7 @@ impl Unifier {
                                 }).unwrap_or(""),
                                 _ => "",
                             };
-                            oname.len() <= 2
+                            oname.len() == 1
                                 && oname.chars().next().is_some_and(|c| c.is_ascii_uppercase())
                         })
                 } =>
