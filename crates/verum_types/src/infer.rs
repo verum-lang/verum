@@ -37033,6 +37033,71 @@ impl TypeChecker {
             }
         }
 
+        // Context-method dispatch has priority over stdlib module dispatch.
+        //
+        // When a user declares
+        //     context Time { fn now() -> Timestamp; }
+        // and writes
+        //     pure fn f() -> Timestamp using [Time] { Time.now() }
+        // the `Time.now()` call must resolve to the context method (returning
+        // Timestamp), not to the stdlib `core.time.Time.now()` (returning
+        // Duration). Before this check the stdlib path won and produced a
+        // misleading type mismatch on the caller's annotated return type.
+        //
+        // Trigger: the first segment of the receiver path is a
+        // user-declared context name AND the current function's `using [...]`
+        // clause lists that context. The explicit `using` marker is what
+        // gives the compiler license to choose the context dispatch —
+        // without it, a bare `Time.now()` in a non-`using` context could
+        // legitimately mean the stdlib namespace.
+        if let ExprKind::Path(path) = &receiver.kind
+            && path.segments.len() == 1
+            && let Some(verum_ast::ty::PathSegment::Name(ident)) = path.segments.first()
+        {
+            let ctx_name: verum_common::Text = ident.name.clone();
+            let in_using_clause = self
+                .current_function_contexts
+                .as_ref()
+                .map(|set| set.iter().any(|req| req.name == ctx_name))
+                .unwrap_or(false);
+            if in_using_clause
+                && let Some(ctx_decl) = self.context_declarations.get(&ctx_name).cloned()
+            {
+                for ctx_method in ctx_decl.methods.iter() {
+                    if ctx_method.name.name != method.name {
+                        continue;
+                    }
+                    // Arity check: caller passes `args`; context method
+                    // carries the signature sans `self` receiver.
+                    if ctx_method.params.len() != args.len() {
+                        continue;
+                    }
+                    // Type-check each argument against the declared
+                    // parameter type. Missing or unresolvable types fall
+                    // through to `Type::Unknown` which still unifies.
+                    for (arg, param) in args.iter().zip(ctx_method.params.iter()) {
+                        let param_ty = if let verum_ast::decl::FunctionParamKind::Regular {
+                            ty: param_ty_ast,
+                            ..
+                        } = &param.kind
+                        {
+                            self.ast_to_type(param_ty_ast).unwrap_or(Type::Unknown)
+                        } else {
+                            Type::Unknown
+                        };
+                        self.check_expr(arg, &param_ty)?;
+                    }
+                    let return_ty = match &ctx_method.return_type {
+                        verum_common::Maybe::Some(rt) => self
+                            .ast_to_type(rt)
+                            .unwrap_or(Type::Unknown),
+                        verum_common::Maybe::None => Type::unit(),
+                    };
+                    return Ok(InferResult::new(return_ty));
+                }
+            }
+        }
+
         // Handle inline module function calls
         // When we have `module.func(args)`, this is parsed as a method call
         // but should be resolved as a module-qualified function call.
