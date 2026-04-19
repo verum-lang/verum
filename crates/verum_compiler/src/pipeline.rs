@@ -3701,8 +3701,15 @@ impl<'s> CompilationPipeline<'s> {
 
         let parser = VerumParser::new();
         let module = parser.parse_module(lexer, file_id).map_err(|errors| {
+            // A stdlib module that fails to parse is either a compiler bug
+            // (the parser can't handle syntax we ship in core/*.vr) or a
+            // stdlib bug (invalid syntax shipped). Either way it causes
+            // every downstream `mount core.*.X` to silently fail with
+            // "module not found", which is a far worse diagnostic than
+            // the real parse error. Emit at WARN so stdlib breakage is
+            // surfaced in normal tooling runs and cannot regress unseen.
             for error in &errors {
-                debug!("Stdlib parse error in {}: {}", module_path.as_str(), error);
+                warn!("Stdlib parse error in {}: {}", module_path.as_str(), error);
             }
             anyhow::anyhow!(
                 "Parsing stdlib module {} failed with {} error(s)",
