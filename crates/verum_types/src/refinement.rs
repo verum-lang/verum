@@ -1266,9 +1266,22 @@ impl RefinementChecker {
         value: &Expr,
         predicate: &RefinementPredicate,
     ) -> Result<VerificationCondition, RefinementError> {
-        // Substitute bound variable with actual value
+        // Substitute bound variable with actual value.
+        //
+        // The canonical bound-variable name is `predicate.bound_variable()`
+        // (default "it"), but users commonly write refinements with `self`
+        // too: `Int{self != 0}`. The AST layer stores the predicate body
+        // verbatim, so without a second pass the substitution never reaches
+        // `self` and the verifier returns Unknown, silently letting
+        // refinement violations through. Substituting both the canonical
+        // bound name AND the `self` alias covers both surface syntaxes
+        // without requiring the parser to rewrite.
         let bound_var = predicate.bound_variable();
-        let condition = self.substitute_in_expr(&predicate.predicate, &bound_var, value);
+        let mut condition = self.substitute_in_expr(&predicate.predicate, &bound_var, value);
+        let self_var: Text = "self".into();
+        if bound_var.as_str() != "self" {
+            condition = self.substitute_in_expr(&condition, &self_var, value);
+        }
 
         Ok(VerificationCondition::new(condition, predicate.span))
     }
@@ -1304,12 +1317,24 @@ impl RefinementChecker {
         let free_vars_in_value = self.collect_free_vars(value);
 
         match &expr.kind {
-            // Variable reference - direct substitution if matches
+            // Variable reference - direct substitution if matches.
+            // Handles both ordinary names (`x`) and the `self` keyword,
+            // which the parser represents as `PathSegment::SelfValue`
+            // rather than `PathSegment::Name(Ident("self"))`. Without the
+            // `SelfValue` arm, `Int{self != 0}` refinements would never
+            // have their bound variable substituted and the refinement
+            // checker would silently return Unknown.
             ExprKind::Path(path) if path.segments.len() == 1 => {
-                if let verum_ast::ty::PathSegment::Name(ident) = &path.segments[0]
-                    && ident.name.as_str() == var.as_str()
-                {
-                    return value.clone();
+                match &path.segments[0] {
+                    verum_ast::ty::PathSegment::Name(ident)
+                        if ident.name.as_str() == var.as_str() =>
+                    {
+                        return value.clone();
+                    }
+                    verum_ast::ty::PathSegment::SelfValue if var.as_str() == "self" => {
+                        return value.clone();
+                    }
+                    _ => {}
                 }
                 expr.clone()
             }

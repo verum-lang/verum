@@ -1,0 +1,23 @@
+// @test: run
+// @tier: 0
+// @level: L1
+// @tags: refinement, self-binding, dependent-types
+// @expected-stdout: 21
+// @expected-exit: 0
+//
+// L0-4 positive anchor: a refinement written with the `self` keyword must
+// be enforceable. `Int{self != 0}` is a common surface syntax for "this
+// value is not zero"; the parser represents `self` as
+// `PathSegment::SelfValue`, not as a plain `Name("self")`, so the
+// refinement checker used to silently miss the bound-variable
+// substitution and hand back Unknown. This test passes a valid value
+// (2) and verifies normal execution still works after the L0-4 fix.
+
+fn safe_div(x: Int, y: Int{self != 0}) -> Int {
+    x / y
+}
+
+fn main() {
+    let r = safe_div(42, 2);
+    print(r);
+}

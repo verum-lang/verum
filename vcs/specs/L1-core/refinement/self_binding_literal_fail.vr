@@ -1,0 +1,24 @@
+// @test: typecheck-fail
+// @tier: 0
+// @level: L1
+// @tags: refinement, self-binding, dependent-types, enforcement
+// @expected-error: E500
+//
+// L0-4 negative anchor: passing a literal that provably violates a
+// `self`-bound refinement must be rejected at type-check time.
+//
+// Before the fix, `substitute_in_expr` only replaced regular
+// identifiers; the `self` keyword in the predicate was represented as
+// `PathSegment::SelfValue` and was skipped. The verifier then saw an
+// unsubstituted `self != 0` expression, returned Unknown under gradual
+// verification, and let the obviously-bad call through.
+
+fn safe_div(x: Int, y: Int{self != 0}) -> Int {
+    x / y
+}
+
+fn main() {
+    // Literal 0 provably violates `self != 0`.
+    let r = safe_div(42, 0);
+    print(r);
+}
