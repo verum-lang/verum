@@ -1,0 +1,69 @@
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @description: Structure morphisms as protocols with coherence axioms — T1-X phase 1.
+//
+// A structure-preserving map is a protocol whose axioms encode
+// preservation: `f: A -> B` is a group homomorphism iff it preserves
+// unit (`f(1_A) == 1_B`) and the binary operation (`f(a · b) ==
+// f(a) · f(b)`).
+//
+// Once T1-R phase 2 (implement-site auto-discharge) lands, every
+// `implement Hom<A, B> for Projection` will carry these axioms as
+// proof obligations discharged by SMT or explicit proof clauses.
+// Phase 1 (this anchor) establishes the protocol surface.
+
+// Theory: groups.
+type Group is protocol {
+    type Elem;
+    fn unit() -> Self.Elem;
+    fn mul(a: Self.Elem, b: Self.Elem) -> Self.Elem;
+    fn inv(a: Self.Elem) -> Self.Elem;
+    axiom assoc(a: Self.Elem, b: Self.Elem, c: Self.Elem) ensures true;
+    axiom left_unit(x: Self.Elem) ensures true;
+    axiom left_inv(x: Self.Elem) ensures true;
+};
+
+// Theory: ring — richer structure, more axioms.
+type Ring is protocol {
+    type Elem;
+    fn zero() -> Self.Elem;
+    fn one() -> Self.Elem;
+    fn add(a: Self.Elem, b: Self.Elem) -> Self.Elem;
+    fn mul(a: Self.Elem, b: Self.Elem) -> Self.Elem;
+    fn neg(a: Self.Elem) -> Self.Elem;
+    axiom add_assoc(a: Self.Elem, b: Self.Elem, c: Self.Elem) ensures true;
+    axiom add_comm(a: Self.Elem, b: Self.Elem) ensures true;
+    axiom mul_assoc(a: Self.Elem, b: Self.Elem, c: Self.Elem) ensures true;
+    axiom distributive(a: Self.Elem, b: Self.Elem, c: Self.Elem) ensures true;
+};
+
+// Morphism: structure-preserving map between groups.
+type GroupHom<A, B> is protocol {
+    fn map(x: Int) -> Int;
+    axiom preserves_unit() ensures true;
+    axiom preserves_mul(x: Int, y: Int) ensures true;
+};
+
+// Morphism: ring homomorphism.
+type RingHom<A, B> is protocol {
+    fn map(x: Int) -> Int;
+    axiom preserves_zero() ensures true;
+    axiom preserves_one() ensures true;
+    axiom preserves_add(x: Int, y: Int) ensures true;
+    axiom preserves_mul(x: Int, y: Int) ensures true;
+};
+
+// Quotient model — ℤ with addition.
+type IntGroup is ();
+implement Group for IntGroup {
+    type Elem = Int;
+    fn unit() -> Int { 0 }
+    fn mul(a: Int, b: Int) -> Int { a + b }
+    fn inv(a: Int) -> Int { -a }
+}
+
+// ℤ / 3ℤ as a quotient type (T1-T phase 2).
+type ZmodThree is Int / (|a, b| (a - b) % 3 == 0);
+
+fn main() { }
