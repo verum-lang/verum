@@ -86,3 +86,38 @@ These files are the living regression surface for the blockers:
 their regression anchors are green, and the L1-core baseline is
 locked at 499/504 with the five remaining failures catalogued and
 unrelated to the work that follows.
+
+## Post-gate Tier-1 campaign (industrial-quality hardening)
+
+Started after the user's directive "никаких упрощений и костылей -
+архитектура и реализация языка должны быть эталонными". 13 T1-*
+tasks opened covering: panic surface (T1-A), residual L1 failures
+(T1-B), stdlib name collisions (T1-C), differential VBC↔AOT
+(T1-D), row polymorphism (T1-E), refinement runtime-checks (T1-F),
+hardcoded stdlib removal (T1-G), VBC Pi/Sigma opcodes (T1-H),
+work-stealing scheduler (T1-I), L2-async triage (T1-J), compile
+speed (T1-K), CBGR overhead (T1-L), stdlib parse failures (T1-M,
+aggregate).
+
+Parser sub-tasks opened for T1-M discovered syntax weaknesses:
+T1-N (dependent-type value parameters), T1-O (theorem-proof
+syntax — multi-line ensures, proof blocks, have/by/auto),
+T1-P (lambda bare-expression body).
+
+### Completed in campaign
+
+| Task | Commit(s) | What |
+|------|-----------|------|
+| T1-P | `251900a` | `fn(x: A) -> expr` shorthand — speculative TYPE parse + backtrack to expression body |
+| T1-N | `41ed6aa` | `TypeKind::DependentApp { carrier, value_args }` — general `T<A>(v..)` dep-app, generalises `Path<A>(a, b)` to arbitrary types + arities |
+| stdlib-loud | `622c9fb` | Parse errors in `core/*.vr` now emit at `warn!` instead of silent `debug!` — was masking 10 modules dropping entirely |
+
+### T1-M progress
+
+Stdlib parse errors before: 10 modules broken (cubical,
+day_convolution, epistemic, giry, hott, infinity_topos,
+kan_extension, quantum_logic, tactics, mathesis.core). After
+T1-N + T1-P: 8 modules still broken, with tactics/giry/
+epistemic/day_convolution dominated by theorem-proof syntax (T1-O
+pending); hott/infinity_topos/quantum_logic/kan_extension are
+mixed — partially T1-O + residual narrow T1-N edges.
