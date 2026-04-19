@@ -1,0 +1,39 @@
+// @test: parse
+// @level: L1
+// @tier: 0
+// @description: Universe polymorphism — Type(level) hierarchy — T1-V.
+//
+// Verum has a cumulative universe hierarchy:
+//
+//     Prop   : Type(1)
+//     Type(0) : Type(1) : Type(2) : ...
+//
+// This prevents Girard's paradox (Type in Type inconsistency).
+// Universe polymorphism lets a single declaration work at any
+// level — e.g. the identity function `fn identity<u: Level, T: Type(u)>`
+// applies at every universe simultaneously.
+
+// Concrete universe level.
+type BoxedType<T: Type(1)> is { value: T };
+
+// Type(0) is the default universe.
+type SimplePair<A, B> is { fst: A, snd: B };
+
+// Universe-polymorphic identity function.
+fn identity<u: Level, T: Type(u)>(x: T) -> T { x }
+
+// Universe-polymorphic composition.
+fn compose<u: Level, A: Type(u), B: Type(u), C: Type(u)>(
+    f: fn(B) -> C,
+    g: fn(A) -> B,
+) -> fn(A) -> C {
+    |x: A| f(g(x))
+}
+
+// A Level-parameterised container.
+type Stack<u: Level, T: Type(u)> is {
+    head: Maybe<T>,
+    rest: Heap<Stack<u, T>>,
+};
+
+fn main() { }
