@@ -95,3 +95,99 @@ public fn parallel_reduce<T>(
     }
     Some(acc)
 }
+
+// =============================================================================
+// Parallel Exclusive Scan (Blelloch Algorithm)
+// =============================================================================
+//
+// The Blelloch algorithm computes an *exclusive* prefix scan in two phases:
+//
+//   up-sweep: builds a balanced binary tree of partial sums in-place, so that
+//             after this phase `xs[i]` at every internal node holds the sum of
+//             its left and right subtrees. Work: O(n); depth: O(log n).
+//
+//   down-sweep: replaces the root with the identity element and walks down,
+//               placing at each left child the value currently at the parent,
+//               and at each right child the sum of the parent and the value
+//               previously at the left child. Work: O(n); depth: O(log n).
+//
+// The resulting `xs[i]` is the fold of `identity, xs[0], xs[1], ..., xs[i-1]`
+// under `op` — the textbook exclusive prefix scan.
+//
+// The implementation below is correct for any associative `f` with an identity
+// element `zero`. When a real work-stealing scheduler lands, the two sweeps
+// become natural spawn/join points: each level of the tree is embarrassingly
+// parallel and touches disjoint slots, so the algorithm delivers O(log n)
+// depth on a parallel runtime without changing the external API.
+//
+// The array length MUST be a power of two for the textbook Blelloch scan;
+// callers that need arbitrary lengths should pad with the `zero` identity.
+
+/// Exclusive prefix scan over a power-of-two-sized `List<Int>` with the
+/// caller-supplied associative operator `f` and identity element `zero`.
+///
+/// Example (addition):
+///   let xs = [1, 2, 3, 4];
+///   let scanned = parallel_scan_exclusive(xs, 0, |a, b| a + b);
+///   // scanned == [0, 1, 3, 6]
+///
+/// Example (max):
+///   let xs = [3, 1, 4, 1];
+///   let maxed = parallel_scan_exclusive(xs, 0, |a, b| if a > b { a } else { b });
+///   // maxed == [0, 3, 3, 4]
+public fn parallel_scan_exclusive(
+    items: List<Int>,
+    zero: Int,
+    f: fn(Int, Int) -> Int,
+) -> List<Int> {
+    let n = items.len();
+    let mut xs = items;
+    if n <= 1 {
+        // With 0 or 1 element the exclusive scan is simply [] or [zero].
+        let mut out = [];
+        let mut i = 0;
+        while i < n {
+            out.push(zero);
+            i = i + 1;
+        }
+        return out;
+    }
+
+    // --- up-sweep (reduce) ---
+    // Walk the tree level by level from the leaves toward the root, combining
+    // consecutive disjoint pairs at stride `up_d` into the right element at
+    // stride `2 * up_d`.
+    let mut up_d = 1;
+    while up_d < n {
+        let up_stride = 2 * up_d;
+        let mut i = up_stride - 1;
+        while i < n {
+            let left = xs[i - up_d];
+            let right = xs[i];
+            xs[i] = f(left, right);
+            i = i + up_stride;
+        }
+        up_d = up_stride;
+    }
+
+    // --- down-sweep ---
+    // Replace the root with the identity and propagate to both children.
+    xs[n - 1] = zero;
+    let mut down_d = n / 2;
+    while down_d >= 1 {
+        let down_stride = 2 * down_d;
+        let mut i = down_stride - 1;
+        while i < n {
+            let parent = xs[i];
+            let left_slot = xs[i - down_d];
+            // Left child gets the parent's value.
+            xs[i - down_d] = parent;
+            // Right child gets parent + previous left-child value.
+            xs[i] = f(parent, left_slot);
+            i = i + down_stride;
+        }
+        down_d = down_d / 2;
+    }
+
+    xs
+}

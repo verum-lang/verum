@@ -1,0 +1,65 @@
+// @test: run
+// @tier: 0
+// @level: L2
+// @tags: async, parallel, scan, blelloch, monoid
+// @expected-stdout: ok
+// @expected-exit: 0
+//
+// L0-5 anchor: Blelloch exclusive prefix scan over power-of-two input.
+//
+// Verifies both phases of the textbook Blelloch algorithm:
+//   * up-sweep builds partial sums at each tree level;
+//   * down-sweep replaces root with the identity and propagates it
+//     top-down, placing at each left child the parent's value and at
+//     each right child the parent + previous-left-child value.
+//
+// With [1, 2, 3, 4] under integer addition the exclusive prefix is
+// [0, 1, 3, 6]. The implementation is correct for any associative
+// `f` with identity `zero`; the sweeps are structured as natural
+// spawn/join points so a future work-stealing scheduler can deliver
+// O(log n) depth without changing the public API.
+
+mount core.async.parallel.parallel_scan_exclusive;
+
+fn main() {
+    // Addition monoid on a 4-element input.
+    let add = parallel_scan_exclusive([1, 2, 3, 4], 0, |a, b| a + b);
+    assert(add[0] == 0);
+    assert(add[1] == 1);
+    assert(add[2] == 3);
+    assert(add[3] == 6);
+
+    // Max monoid on a power-of-two input (identity = 0).
+    let max_scan = parallel_scan_exclusive(
+        [3, 1, 4, 1],
+        0,
+        |a, b| if a > b { a } else { b },
+    );
+    assert(max_scan[0] == 0);
+    assert(max_scan[1] == 3);
+    assert(max_scan[2] == 3);
+    assert(max_scan[3] == 4);
+
+    // Single element: exclusive scan is just [identity].
+    let single = parallel_scan_exclusive([42], 0, |a, b| a + b);
+    assert(single.len() == 1);
+    assert(single[0] == 0);
+
+    // Empty input: exclusive scan is [].
+    let empty = parallel_scan_exclusive([], 0, |a, b| a + b);
+    assert(empty.len() == 0);
+
+    // Larger power-of-two: verify [1,1,1,1,1,1,1,1] scans to [0,1,2,3,4,5,6,7].
+    let ones = parallel_scan_exclusive(
+        [1, 1, 1, 1, 1, 1, 1, 1],
+        0,
+        |a, b| a + b,
+    );
+    let mut i = 0;
+    while i < 8 {
+        assert(ones[i] == i);
+        i = i + 1;
+    }
+
+    print("ok");
+}
