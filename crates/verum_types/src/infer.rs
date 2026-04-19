@@ -14155,12 +14155,15 @@ impl TypeChecker {
                         Some(resolution) => {
                             // `.await` is only valid inside an async context
                             // (async fn body, async {} block, or async
-                            // closure). Without this check, inference marks
-                            // the caller with the Async property but the
-                            // enforcement layer only emits a tracing::debug!
-                            // on the outer function — callers could silently
-                            // invoke it as if it were synchronous.
-                            if !self.in_async_context {
+                            // closure). `main` is special: the runtime wraps
+                            // it in an implicit executor `block_on`, so a
+                            // plain `fn main() { run().await }` is a valid
+                            // top-level entry point.
+                            let in_main_entry = matches!(
+                                self.current_function_name.as_ref(),
+                                Maybe::Some(n) if n.as_str() == "main"
+                            );
+                            if !self.in_async_context && !in_main_entry {
                                 return Err(TypeError::AsyncPropertyViolation {
                                     message: verum_common::Text::from(
                                         "`.await` can only be used inside an async context \
