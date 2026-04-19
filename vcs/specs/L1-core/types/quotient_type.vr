@@ -1,0 +1,26 @@
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @description: Quotient types — `type Q is T / R` — T1-T phase 2.
+//
+// A quotient type identifies elements of a carrier type `T` that are
+// related by an equivalence relation `R: fn(T, T) -> Bool`. This is
+// the set-theoretic quotient construction `T / R`.
+//
+// Phase 1 delivered parser + AST + grammar.
+// Phase 2 (this anchor) adds type-system registration: quotient
+// types are now resolvable as first-class named types — the Pass-1
+// placeholder is replaced by a concrete Named entry in Pass 2,
+// aliased to the underlying carrier.
+//
+// Phase 3 (future) — full HIT lowering with `of: T -> Q` constructor,
+// `rep: Q -> T` accessor, and the reflexivity/symmetry/transitivity
+// proof obligations discharged by the model-verification pipeline.
+
+// ℤ/3ℤ — integers modulo 3.
+type ZmodN is Int / (|a, b| (a - b) % 3 == 0);
+
+// Scalar quotient by trivial equivalence (degenerate but legal).
+type Same is Int / (|a, b| a == b);
+
+fn main() { }

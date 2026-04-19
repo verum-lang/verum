@@ -46979,12 +46979,25 @@ impl TypeChecker {
                     self.ctx.define_type(struct_key, Type::Record(fields));
                 }
             }
-            TypeDeclBody::Quotient { .. } => {
-                // T1-T: quotient types register the named carrier.
-                // Full HIT lowering (with `of` constructor + path
-                // constructor + universal property) lives in the
-                // elaborator; phase 1 just names the type so
-                // downstream code can refer to it.
+            TypeDeclBody::Quotient { base, .. } => {
+                // T1-T phase 2: register the quotient type as an alias
+                // over its underlying carrier. Values of the quotient
+                // type are represented at runtime by values of the
+                // carrier; the equivalence relation is a compile-time
+                // constraint that the elaborator lowers to HIT path
+                // constructors when full dependent-type codegen lands.
+                //
+                // Registering as both (a) the named carrier in the
+                // type context AND (b) an alias to the base type in
+                // the unifier makes the quotient type resolvable from
+                // both name lookups and nominal-unification paths.
+                let base_resolved = self.ast_to_type(base)?;
+                self.ctx
+                    .define_alias(type_name.clone(), base_resolved.clone());
+                self.unifier.register_type_alias(
+                    type_name.clone(),
+                    base_resolved.clone(),
+                );
                 let ty = Type::Named {
                     path: Path::single(type_decl.name.clone()),
                     args: List::new(),
@@ -48246,11 +48259,26 @@ impl TypeChecker {
                 }
             }
             TypeDeclBody::Quotient { base, .. } => {
-                // T1-T (Pass 2): ensure the base carrier is resolvable.
-                // The equivalence relation's well-formedness (reflexive/
-                // symmetric/transitive proof obligations) is discharged
-                // by the elaborator in a future phase.
-                let _ = self.ast_to_type(base)?;
+                // T1-T Pass 2: resolve the carrier type and register
+                // the quotient as an alias over it. Values of the
+                // quotient type at runtime are represented by carrier
+                // values; the equivalence relation is the compile-time
+                // constraint that the elaborator lowers to HIT path
+                // constructors when full dependent-type codegen lands.
+                let base_resolved = self.ast_to_type(base)?;
+                self.ctx
+                    .define_alias(type_name.clone(), base_resolved.clone());
+                self.unifier.register_type_alias(
+                    type_name.clone(),
+                    base_resolved.clone(),
+                );
+                // Replace the Pass-1 placeholder with a concrete Named
+                // type so verify_no_placeholders sees a resolved entry.
+                let named_type = Type::Named {
+                    path: Path::single(type_decl.name.clone()),
+                    args: List::new(),
+                };
+                self.ctx.define_type(type_name.clone(), named_type);
             }
         }
 
