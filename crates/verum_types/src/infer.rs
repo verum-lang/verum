@@ -16105,12 +16105,19 @@ impl TypeChecker {
                     Ok(InferResult::new(resolved_ty))
                 }
 
-                // typeof(expr) → returns type name as Text at runtime
+                // typeof(expr) → returns a type-info record with `.name: Text`
                 ExprKind::Typeof(inner) => {
                     // Infer the inner expression type (for compile-time validation)
                     let _ = self.synth_expr(inner)?;
-                    // typeof() always returns Text
-                    Ok(InferResult::new(Type::text()))
+                    // typeof() returns a structural record { name: Text, ... }
+                    // Spec: docs/improvements.md Section 13.2 — reflection on
+                    // the runtime type yields an info record whose canonical
+                    // field is `name`. Other fields (`size`, `alignment`) can
+                    // be added later without breaking field access.
+                    let mut fields: indexmap::IndexMap<verum_common::Text, Type> =
+                        indexmap::IndexMap::new();
+                    fields.insert(verum_common::Text::from("name"), Type::text());
+                    Ok(InferResult::new(Type::Record(fields)))
                 }
 
                 // Inline assembly expression: @asm("template", operands..., options)
