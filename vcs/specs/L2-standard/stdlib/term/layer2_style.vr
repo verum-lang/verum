@@ -19,7 +19,7 @@ fn test_color_variants() {
         Color.White,
         Color.DarkGrey,
         Color.Ansi256(42),
-        Color.Rgb(Rgb.new(255, 128, 0)),
+        Color.TrueColor(Rgb.new(255, 128, 0)),
     ];
     assert(colors.len() >= 9);
 }
