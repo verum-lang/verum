@@ -1,0 +1,38 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: vbc, aot, int, min, max, clamp, regression
+// @expected-stdout: ok
+// @expected-exit: 0
+// @description: Regression — Int.min / Int.max / Int.clamp must round-trip
+//               through both the VBC interpreter (primitive dispatch) and
+//               the AOT LLVM lowering (inline compare + select).
+//
+// Before the fix, AOT codegen had no handler for these primitive Int
+// methods — the call fell through to the compiled-function lookup,
+// which has no body for them, so the native binary exited with -1
+// before main even printed. VBC had them via dispatch_primitive_method
+// (lines 1371-1383 in method_dispatch.rs) but AOT did not.
+
+fn main() {
+    // Int.max
+    assert_eq((5).max(3), 5);
+    assert_eq((3).max(5), 5);
+    assert_eq((-2).max(-7), -2);
+
+    // Int.min
+    assert_eq((5).min(3), 3);
+    assert_eq((3).min(5), 3);
+    assert_eq((-2).min(-7), -7);
+
+    // Int.clamp
+    assert_eq((5).clamp(0, 10), 5);
+    assert_eq((-1).clamp(0, 10), 0);
+    assert_eq((20).clamp(0, 10), 10);
+
+    // Composed (used extensively throughout core.term.layout)
+    let w = -3;
+    assert_eq(w.max(0), 0);
+
+    print("ok");
+}

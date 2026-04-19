@@ -7570,6 +7570,59 @@ if resolved_func_name.is_none() {
             ctx.set_register(dst.0, result);
             return Ok(());
         }
+        // Int.min / Int.max / Int.clamp — inline signed min/max via
+        // compare + select. Without these the AOT call path falls through
+        // to the compiled-function lookup, which doesn't have a body for
+        // these primitive methods, so the binary exits with -1.
+        // Matches the VBC interpreter's primitive dispatch in
+        // `method_dispatch.rs` (`"min"`, `"max"`, `"clamp"` arms under
+        // `dispatch_primitive_method`).
+        "min" if args.count == 1 => {
+            let val = as_i64(ctx, ctx.get_register(receiver.0)?, "min_a")?;
+            let other = as_i64(ctx, ctx.get_register(args.start.0)?, "min_b")?;
+            let a_le_b = ctx.builder()
+                .build_int_compare(IntPredicate::SLE, val, other, "a_le_b")
+                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+            let result = ctx.builder()
+                .build_select(a_le_b, val, other, "min_result")
+                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+            ctx.set_register(dst.0, result);
+            return Ok(());
+        }
+        "max" if args.count == 1 => {
+            let val = as_i64(ctx, ctx.get_register(receiver.0)?, "max_a")?;
+            let other = as_i64(ctx, ctx.get_register(args.start.0)?, "max_b")?;
+            let a_ge_b = ctx.builder()
+                .build_int_compare(IntPredicate::SGE, val, other, "a_ge_b")
+                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+            let result = ctx.builder()
+                .build_select(a_ge_b, val, other, "max_result")
+                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+            ctx.set_register(dst.0, result);
+            return Ok(());
+        }
+        "clamp" if args.count == 2 => {
+            let val = as_i64(ctx, ctx.get_register(receiver.0)?, "clamp_v")?;
+            let lo  = as_i64(ctx, ctx.get_register(args.start.0)?, "clamp_lo")?;
+            let hi  = as_i64(ctx, ctx.get_register(args.start.0 + 1)?, "clamp_hi")?;
+            // max(val, lo)
+            let v_lt_lo = ctx.builder()
+                .build_int_compare(IntPredicate::SLT, val, lo, "v_lt_lo")
+                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+            let lifted = ctx.builder()
+                .build_select(v_lt_lo, lo, val, "clamp_lifted")
+                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+                .into_int_value();
+            // min(lifted, hi)
+            let l_gt_hi = ctx.builder()
+                .build_int_compare(IntPredicate::SGT, lifted, hi, "l_gt_hi")
+                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+            let result = ctx.builder()
+                .build_select(l_gt_hi, hi, lifted, "clamp_result")
+                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+            ctx.set_register(dst.0, result);
+            return Ok(());
+        }
         _ => {}
     }
 }
