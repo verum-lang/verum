@@ -6,6 +6,7 @@ pub mod check;
 pub mod clean;
 pub mod config;
 pub mod deps;
+pub mod diagnose;
 pub mod doc;
 pub mod explain;
 pub mod file;

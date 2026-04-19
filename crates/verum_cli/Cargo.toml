@@ -70,6 +70,10 @@ verum_compiler = { workspace = true }
 # Direct dep on verum_llvm_sys ensures LLVM link directives reach the binary
 # (MSVC linker needs libraries visible at the final link step)
 verum_llvm_sys = { workspace = true }
+# Needed so main() can eagerly initialise the LLVM native target + pass
+# registry on the main thread before any worker (rayon/Z3) spawns. See
+# the fix for the `phase_generate_native` SIGSEGV race on arm64 macOS.
+verum_llvm = { workspace = true }
 verum_parser = { workspace = true }
 verum_types = { workspace = true }
 verum_codegen = { workspace = true }

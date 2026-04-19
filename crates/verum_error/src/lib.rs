@@ -68,7 +68,10 @@
 //! ```
 
 #![deny(missing_docs)]
-#![deny(unsafe_code)]
+// `unsafe` is permitted in the crash reporter's signal-handler path
+// (`sigaction`, `sigaltstack`, `raise`) — strictly gated behind cfg(unix)
+// and reviewed in `crash.rs`. No other module uses unsafe.
+#![allow(unsafe_code)]
 #![warn(clippy::all)]
 #![allow(unused_variables)]
 #![allow(unused_imports)]
@@ -113,6 +116,11 @@ pub mod recovery;
 
 // Panic handler integration (Level 3)
 pub mod panic_handler;
+
+// Industrial-grade crash reporter (panics + fatal signals + breadcrumbs +
+// structured reports). Installed once from the CLI main.
+pub mod breadcrumb;
+pub mod crash;
 
 // Result extension trait for structured contexts
 pub mod result_ext;

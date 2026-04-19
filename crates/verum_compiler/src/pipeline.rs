@@ -6126,6 +6126,7 @@ impl<'s> CompilationPipeline<'s> {
 
     /// Phase 4: Refinement verification
     fn phase_verify(&mut self, module: &Module) -> Result<()> {
+        let _bc = verum_error::breadcrumb::enter("compiler.phase.verify", "");
         debug!("Running refinement verification");
 
         let start = Instant::now();
@@ -9812,6 +9813,10 @@ impl<'s> CompilationPipeline<'s> {
     ///
     /// VBC-first architecture: AST → VBC Codegen → VBC Interpreter
     fn phase_interpret(&mut self, module: &Module) -> Result<()> {
+        let _bc = verum_error::breadcrumb::enter(
+            "compiler.phase.interpret",
+            self.session.options().input.display().to_string(),
+        );
         debug!("Interpreting module via VBC-first architecture");
 
         // Context system validation
@@ -10793,23 +10798,39 @@ impl<'s> CompilationPipeline<'s> {
     /// See the Phase 7 architecture comment above `phase_interpret()` for details.
     pub fn run_native_compilation(&mut self) -> Result<PathBuf> {
         let start = Instant::now();
+        let _bc_native = verum_error::breadcrumb::enter(
+            "compiler.run_native_compilation",
+            self.session
+                .options()
+                .input
+                .display()
+                .to_string(),
+        );
 
         // Phase 0: Load stdlib modules (populates self.modules for type checking)
+        let _bc_stdlib = verum_error::breadcrumb::enter("compiler.phase.stdlib_loading", "");
         let t0 = Instant::now();
         self.load_stdlib_modules()?;
         let stdlib_time = t0.elapsed();
         self.session.record_phase_metrics("Stdlib Loading", stdlib_time, 0);
+        drop(_bc_stdlib);
 
         // Phase 0.5: Load sibling project modules (enables cross-file mount imports)
+        let _bc_proj = verum_error::breadcrumb::enter("compiler.phase.project_modules", "");
         let t0 = Instant::now();
         self.load_project_modules()?;
         self.session.record_phase_metrics("Project Modules", t0.elapsed(), 0);
+        drop(_bc_proj);
 
         // Phase 1: Load source
+        let _bc_load = verum_error::breadcrumb::enter("compiler.phase.load_source", "");
         let file_id = self.phase_load_source()?;
+        drop(_bc_load);
 
         // Phase 2: Parse (phase_parse records its own timing)
+        let _bc_parse = verum_error::breadcrumb::enter("compiler.phase.parse", "");
         let module = self.phase_parse(file_id)?;
+        drop(_bc_parse);
 
         // Phase 2.5: Scan for @device(gpu) annotations to auto-enable GPU compilation.
         // Gated on [codegen].mlir_gpu: when false, GPU annotations are
@@ -10831,9 +10852,11 @@ impl<'s> CompilationPipeline<'s> {
         self.phase_safety_gate(&module)?;
 
         // Phase 3: Type check (uses self.modules for stdlib type/method registration)
+        let _bc_tc = verum_error::breadcrumb::enter("compiler.phase.type_check", "");
         let t0 = Instant::now();
         self.phase_type_check(&module)?;
         self.session.record_phase_metrics("Type Checking", t0.elapsed(), 0);
+        drop(_bc_tc);
 
         // Phase 3.5: Dependency analysis (target-constraint enforcement,
         // matching the interpreter path so AOT and Tier 0 apply the
@@ -10868,37 +10891,59 @@ impl<'s> CompilationPipeline<'s> {
         self.phase_send_sync_validation(&module);
 
         // Phase 5: CBGR analysis
+        let _bc_cbgr = verum_error::breadcrumb::enter("compiler.phase.cbgr_analysis", "");
         let t0 = Instant::now();
         self.phase_cbgr_analysis(&module)?;
         self.session.record_phase_metrics("CBGR Analysis", t0.elapsed(), 0);
+        drop(_bc_cbgr);
 
         // Phase 5b: FFI boundary validation
+        let _bc_ffi = verum_error::breadcrumb::enter("compiler.phase.ffi_validation", "");
         self.phase_ffi_validation(&module)?;
+        drop(_bc_ffi);
 
-        // Phase 5c: Z3 context barrier — force all Z3 thread-local
-        // state to be flushed before LLVM codegen starts. On arm64
-        // macOS, Z3's global-context teardown and LLVM's signal handler
-        // registration race during concurrent destruction, causing
-        // non-deterministic SIGSEGV. This barrier serializes them:
-        // Z3 work is fully complete → Z3 TLS dropped → LLVM starts.
+        // Phase 5c: rayon fence before LLVM codegen.
         //
-        // The z3 crate 0.20 uses process-global thread-local storage
-        // for its context. Calling z3::Context::interrupt on the global
-        // context from main thread ensures pending work is flushed.
-        // Dropping the session's RoutingStats Arc ensures no background
-        // references survive into the codegen phase.
+        // LLVM registers backend passes lazily via function-local
+        // statics guarded by __cxa_guard_acquire (Itanium C++ ABI).
+        // While the main thread was inside that guard, rayon workers
+        // parked after stdlib parsing would race the same guard's
+        // wake-path, corrupting its semaphore state on arm64 macOS —
+        // observable as a ~70% SIGSEGV in phase_generate_native in
+        // release builds.
+        //
+        // `rayon::broadcast(|_| ())` dispatches a no-op to every
+        // worker and waits for completion, which is a true fence: all
+        // workers run, exit their wake path, and re-park *before* we
+        // touch LLVM's cxa-guards. Combined with the eager
+        // `Target::initialize_native` in `verum_cli::main` (which
+        // pre-populates the IR-pass half of the same registry), this
+        // eliminates the race.
+        //
+        // Diagnosed via `verum diagnose` crash reports showing 14/14
+        // stacks at `__os_semaphore_wait` → `callDefaultCtor<*Pass>`.
         {
-            // Force any rayon worker threads that held Z3 solvers to
-            // drop their thread-local contexts by synchronizing.
-            // A short rayon::yield_now is sufficient — it forces a
-            // scheduling point where completed workers clean up.
-            rayon::yield_now();
+            let _bc_barrier =
+                verum_error::breadcrumb::enter("compiler.phase.rayon_fence", "broadcast");
+            let _ = rayon::broadcast(|_| ());
         }
 
-        // Phase 6: Generate native code (CPU path)
+        // Phase 6: Generate native code (CPU path) — the hot spot where
+        // the documented Z3/LLVM teardown race manifests. Mark the
+        // breadcrumb with the input file so the crash report points the
+        // reader straight at the translation unit.
+        let _bc_codegen = verum_error::breadcrumb::enter(
+            "compiler.phase.generate_native",
+            self.session
+                .options()
+                .input
+                .display()
+                .to_string(),
+        );
         let t0 = Instant::now();
         let output_path = self.phase_generate_native(&module)?;
         self.session.record_phase_metrics("Code Generation", t0.elapsed(), 0);
+        drop(_bc_codegen);
 
         // Phase 6b: GPU compilation (MLIR path) — auto-triggered by @device(gpu) detection
         // Runs alongside CPU compilation to produce GPU kernel binaries.

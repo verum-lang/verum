@@ -28,6 +28,7 @@ verum_modules = { workspace = true }
 verum_codegen = { workspace = true }
 verum_llvm_sys = { workspace = true }
 verum_vbc = { workspace = true, features = ["codegen", "ffi"] }
+verum_error = { workspace = true }
 
 clap = { workspace = true }
 anyhow = { workspace = true }

@@ -27,6 +27,11 @@ parking_lot = { workspace = true }
 # Backtrace support
 backtrace = { version = "0.3", optional = true }
 
+# Fatal-signal handlers (SIGSEGV/SIGBUS/SIGILL/SIGFPE/SIGABRT) for the crash reporter.
+# Unix only; stubbed out via cfg on other platforms.
+[target.'cfg(unix)'.dependencies]
+libc = { workspace = true }
+
 # Serialization for error reporting
 serde = { version = "1.0", features = ["derive"], optional = true }
 serde_json = { version = "1.0", optional = true }

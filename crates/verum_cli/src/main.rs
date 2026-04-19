@@ -361,6 +361,13 @@ enum Commands {
         all: bool,
     },
 
+    /// Inspect, export, or clean crash reports written by the Verum
+    /// crash reporter (panics and fatal signals). Reports live under
+    /// `~/.verum/crashes/` and are safe to attach to issue reports —
+    /// environment variables that look sensitive are redacted.
+    #[clap(subcommand)]
+    Diagnose(commands::diagnose::DiagnoseCommands),
+
     /// Watch for changes and rebuild
     Watch {
         #[clap(default_value = "build")]
@@ -743,6 +750,38 @@ enum WorkspaceCommands {
 }
 
 fn main() {
+    // Install the industrial crash reporter BEFORE anything else runs.
+    // It wires the panic hook + fatal-signal handlers so a crash in
+    // argv parsing, the worker thread spawn below, or anywhere in the
+    // pipeline is captured to ~/.verum/crashes/ with breadcrumbs,
+    // environment, and backtrace.
+    verum_error::crash::install(verum_error::crash::CrashReporterConfig::default());
+
+    // Eagerly initialise the LLVM native target on the main thread,
+    // before any rayon worker or Z3 context exists.
+    //
+    // WHY: phase_generate_native was hitting a ~70% SIGSEGV on arm64
+    // macOS. The crash always landed in LLVM pass-registry init
+    // (TargetLibraryInfoWrapperPass / CFIFixup / CallBase) under
+    // __cxa_guard_acquire → __os_semaphore_wait. The cxa guards behind
+    // LLVM's first-use pass-constructor registration are not robust
+    // against other threads' TLS teardown running in parallel. By
+    // registering the native target here — ~zero work, one call, no
+    // rayon workers alive yet — the guards are fully released before
+    // any stdlib parse spawns rayon workers or verify spawns Z3.
+    //
+    // The underlying `Target::initialize_native` is idempotent via an
+    // internal `Once`; the later call inside `VbcToLlvmLowering::new`
+    // becomes a no-op.
+    //
+    // Diagnosed by running `./target/release/verum build
+    // ./examples/cbgr_demo.vr` 20 times: 14/20 segfaults, all in
+    // phase=compiler.phase.generate_native at 307–350ms, always on
+    // verum-main, all stacks top-heavy with LLVM pass constructors.
+    let _ = verum_llvm::targets::Target::initialize_native(
+        &verum_llvm::targets::InitializationConfig::default(),
+    );
+
     // Windows default stack is 1 MB — insufficient for deep recursive
     // compiler data structures. Spawn on a thread with 16 MB stack.
     const STACK_SIZE: usize = 16 * 1024 * 1024;
@@ -912,8 +951,10 @@ fn run_command(cli: Cli) -> Result<()> {
         } => {
             let _smt_stats = smt_stats; // Will be plumbed into session options
             feature_overrides::install(feature_overrides);
+            verum_error::crash::set_command("build");
             match resolve_path(path.as_ref())? {
                 PathTarget::SingleFile(file_path) => {
+                    verum_error::crash::set_input_file(file_path.as_str());
                     ui::status("Building", file_path.as_str());
                     return commands::file::build(
                         file_path.as_str(),
@@ -1004,8 +1045,11 @@ fn run_command(cli: Cli) -> Result<()> {
             let args_list: List<Text> = args.into_iter().map(|s| s.into()).collect();
             let tier_label = if tier_num == Some(1) { "aot" } else { "interpreter" };
 
+            verum_error::crash::set_command("run");
+            verum_error::crash::set_tier(tier_label);
             match resolve_path(file.as_ref())? {
                 PathTarget::SingleFile(file_path) => {
+                    verum_error::crash::set_input_file(file_path.as_str());
                     ui::status("Running", &format!("{} ({})", file_path, tier_label));
                     commands::file::run_with_tier(file_path.as_str(), args_list, false, tier_num, timings)
                 }
@@ -1066,6 +1110,7 @@ fn run_command(cli: Cli) -> Result<()> {
             commands::doc::execute(open, document_private_items, no_deps, format.as_str())
         }
         Commands::Clean { all } => commands::clean::execute(all),
+        Commands::Diagnose(cmd) => commands::diagnose::execute(cmd),
         Commands::Watch { command, clear } => commands::watch::execute(command.as_str(), clear),
         Commands::Deps(deps_cmd) => match deps_cmd {
             DepsCommands::Add {

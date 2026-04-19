@@ -233,9 +233,9 @@ pub fn run_with_tier(
     tier: Option<u8>,
     timings: bool,
 ) -> Result<(), CliError> {
-    let (tier_num, tier_label) = match tier {
-        Some(0) | None => (0, "Tier 0: interpreter"),
-        Some(1) => (1, "Tier 1: AOT"),
+    let tier_num = match tier {
+        Some(0) | None => 0,
+        Some(1) => 1,
         Some(t) => {
             return Err(CliError::InvalidArgument(format!(
                 "Invalid tier '{}'. Valid tiers: 0 (interpreter), 1 (aot)",
@@ -243,8 +243,6 @@ pub fn run_with_tier(
             )));
         }
     };
-
-    ui::status("Running", &format!("{} ({})", file, tier_label));
 
     let input = PathBuf::from(file);
     if !input.exists() {
