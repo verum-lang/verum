@@ -2110,10 +2110,20 @@ lemma_decl =
     [ '->' , type_expr ] , [ requires_clause ] , [ ensures_clause ] ,
     proof_body ;
 
-(* 2.19.3 Axiom Declaration - Unproven assumptions *)
+(* 2.19.3 Axiom Declaration - Unproven assumptions
+   An axiom is a universally quantified proposition over its parameters;
+   `ensures E` states the asserted proposition, optionally guarded by
+   `requires R` to yield `∀params. R → E`. The `requires`-only form is
+   legacy and treats the requires clauses as the asserted proposition. *)
 axiom_decl =
     'axiom' , identifier , [ generic_params ] , '(' , [ param_list ] , ')' ,
-    [ '->' , type_expr ] , ';' ;
+    [ '->' , type_expr ] ,
+    [ requires_clause ] ,
+    [ ensures_clause ] ,
+    [ where_clause ] ,
+    ';' ;
+
+ensures_clause = 'ensures' , expression , { ',' , expression } ;
 
 (* 2.19.4 Corollary Declaration - Consequences of theorems *)
 corollary_decl =

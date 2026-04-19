@@ -498,36 +498,105 @@ impl<'a> RecursiveParser<'a> {
             Maybe::None
         };
 
-        // Optional [@ghost] requires clause(s)
+        // Optional [@ghost] requires and ensures clauses (in any order).
+        //
+        // Semantics in model theory: an axiom is a universally-quantified
+        // proposition over its parameters. `requires R ensures E` states
+        // `forall params. R → E`. `ensures E` alone states `forall params. E`.
+        // `requires R` alone is legacy and gets interpreted as the asserted
+        // proposition (for backwards compatibility with pre-T1-Q axioms).
         let mut requires_clauses: Vec<Expr> = Vec::new();
+        let mut ensures_clauses: Vec<Expr> = Vec::new();
         loop {
             self.skip_ghost_prefix_before(&TokenKind::Requires);
-            if self.stream.consume(&TokenKind::Requires).is_none() {
-                break;
-            }
-            // Parse requires expression, stopping at `,`, `:`, `;`, `where`
-            let expr = self.parse_expr_bp(4)?;
-            requires_clauses.push(expr);
-            // Allow comma-separated requires in a single line
-            while self.stream.consume(&TokenKind::Comma).is_some() {
-                if self.stream.check(&TokenKind::Colon)
-                    || self.stream.check(&TokenKind::Semicolon)
-                    || self.stream.check(&TokenKind::Where)
-                    || self.stream.check(&TokenKind::Requires)
-                {
-                    break;
-                }
+            self.skip_ghost_prefix_before(&TokenKind::Ensures);
+            if self.stream.consume(&TokenKind::Requires).is_some() {
                 let expr = self.parse_expr_bp(4)?;
                 requires_clauses.push(expr);
+                while self.stream.consume(&TokenKind::Comma).is_some() {
+                    if self.stream.check(&TokenKind::Colon)
+                        || self.stream.check(&TokenKind::Semicolon)
+                        || self.stream.check(&TokenKind::Where)
+                        || self.stream.check(&TokenKind::Requires)
+                        || self.stream.check(&TokenKind::Ensures)
+                    {
+                        break;
+                    }
+                    let expr = self.parse_expr_bp(4)?;
+                    requires_clauses.push(expr);
+                }
+            } else if self.stream.consume(&TokenKind::Ensures).is_some() {
+                let expr = self.parse_expr_bp(4)?;
+                ensures_clauses.push(expr);
+                while self.stream.consume(&TokenKind::Comma).is_some() {
+                    if self.stream.check(&TokenKind::Colon)
+                        || self.stream.check(&TokenKind::Semicolon)
+                        || self.stream.check(&TokenKind::Where)
+                        || self.stream.check(&TokenKind::Requires)
+                        || self.stream.check(&TokenKind::Ensures)
+                    {
+                        break;
+                    }
+                    let expr = self.parse_expr_bp(4)?;
+                    ensures_clauses.push(expr);
+                }
+            } else {
+                break;
             }
         }
 
-        // Optional proposition after colon: `: assertion`
-        // If there's no colon, the proposition is built from requires clauses or is `true`
+        // Optional proposition after colon: `: assertion` — explicit form.
+        // Otherwise synthesize the proposition from the clauses:
+        //   * with ensures E₁, …, Eₙ      → E₁ ∧ … ∧ Eₙ   (the canonical form)
+        //   * with requires R₁, …, Rₖ     → R₁ ∧ … ∧ Rₖ   (legacy, pre-T1-Q)
+        //   * with both                   → (R₁ ∧ …) → (E₁ ∧ …)
+        //   * neither                     → `true`
         let proposition = if self.stream.consume(&TokenKind::Colon).is_some() {
             self.parse_expr()?
+        } else if !ensures_clauses.is_empty() {
+            let conj = |mut clauses: Vec<Expr>| {
+                let first = clauses.remove(0);
+                clauses.into_iter().fold(first, |acc, rhs| {
+                    let span = Span::new(acc.span.start, rhs.span.end, acc.span.file_id);
+                    Expr::new(
+                        ExprKind::Binary {
+                            op: verum_ast::BinOp::And,
+                            left: Heap::new(acc),
+                            right: Heap::new(rhs),
+                        },
+                        span,
+                    )
+                })
+            };
+            let ensures_body = conj(ensures_clauses);
+            if requires_clauses.is_empty() {
+                ensures_body
+            } else {
+                let requires_body = conj(requires_clauses);
+                // requires → ensures  ≡  !requires || ensures
+                let span = Span::new(
+                    requires_body.span.start,
+                    ensures_body.span.end,
+                    requires_body.span.file_id,
+                );
+                let neg_req = Expr::new(
+                    ExprKind::Unary {
+                        op: verum_ast::expr::UnOp::Not,
+                        expr: Heap::new(requires_body),
+                    },
+                    span,
+                );
+                Expr::new(
+                    ExprKind::Binary {
+                        op: verum_ast::BinOp::Or,
+                        left: Heap::new(neg_req),
+                        right: Heap::new(ensures_body),
+                    },
+                    span,
+                )
+            }
         } else if !requires_clauses.is_empty() {
-            // Build proposition from requires clauses: r1 && r2 && ...
+            // Legacy form: requires-only means "the axiom asserts these hold"
             let first = requires_clauses.remove(0);
             requires_clauses.into_iter().fold(first, |acc, req| {
                 let span = Span::new(acc.span.start, req.span.end, acc.span.file_id);
