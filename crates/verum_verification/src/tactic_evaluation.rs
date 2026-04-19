@@ -1403,18 +1403,20 @@ impl TacticEvaluator {
             TacticExpr::Admit => self.apply_admit(),
             TacticExpr::Sorry => self.apply_sorry(),
             TacticExpr::Contradiction => self.apply_contradiction_tactic(),
-            // Tactic-DSL control-flow forms (Let/Match/Fail/If) are desugared
-            // during the proof-verification phase; if the evaluator sees one
-            // unexpanded, treat it as trivially-failed so that higher-level
-            // combinators (try/first) can recover.
-            TacticExpr::Let { .. }
-            | TacticExpr::Match { .. }
-            | TacticExpr::If { .. } => Err(TacticError::NotImplemented(Text::from(
-                "Let/Match/If tactic combinators require desugaring before evaluation",
-            ))),
-            TacticExpr::Fail { message: _ } => Err(TacticError::Failed(Text::from(
-                "tactic `fail` explicitly aborts this proof branch",
-            ))),
+
+            // T1-W: evaluate the structured tactic-DSL control-flow forms
+            // directly. `let` binds a local name, `match` branches on a
+            // scrutinee expression, `if` picks a branch based on a boolean
+            // condition, `fail` aborts the current proof branch with a
+            // diagnostic. These operate on the tactic state (goals,
+            // hypotheses, bindings) and defer to the evaluator's SMT /
+            // structural apply_* helpers for actual proof work.
+            TacticExpr::Let { name, ty: _, value } => self.apply_let(name, value),
+            TacticExpr::Match { scrutinee, arms } => self.apply_match(scrutinee, arms),
+            TacticExpr::If { cond, then_branch, else_branch } => {
+                self.apply_if(cond, then_branch, else_branch.as_ref())
+            }
+            TacticExpr::Fail { message } => self.apply_fail(message),
         };
 
         let elapsed = start.elapsed();
@@ -5347,6 +5349,176 @@ impl TacticEvaluator {
         // Proof by contradiction - the context should contain False or a contradiction
         // For now, treat similarly to auto - attempt to find a contradiction
         self.apply_auto(&List::new())
+    }
+
+    /// T1-W: `let name: T = value;` — bind a local name inside the
+    /// current tactic's context so subsequent tactic expressions in
+    /// the same sequence can reference it. The binding is recorded as
+    /// a hypothesis of the current goal; type annotation (if present)
+    /// is accepted but not enforced beyond what the expression's
+    /// own type-inference already does.
+    fn apply_let(
+        &mut self,
+        name: &verum_ast::Ident,
+        value: &Heap<Expr>,
+    ) -> TacticResult<()> {
+        let goal = self.state.current_goal_mut()?;
+        goal.hypotheses.push(Hypothesis {
+            name: Text::from(name.as_str()),
+            proposition: value.clone(),
+            ty: Maybe::None,
+            source: HypothesisSource::Generated,
+        });
+        Ok(())
+    }
+
+    /// T1-W: `match scrutinee { P => tactic, ... }` — pattern-directed
+    /// branching inside a tactic body. The scrutinee is treated as a
+    /// closed expression that the evaluator examines at tactic time.
+    /// Rationale: tactics run at proof-elaboration time against the
+    /// structural shape of the scrutinee (e.g. `Maybe.Some(_)` vs
+    /// `Maybe.None`), so the first arm whose pattern's head constructor
+    /// matches the scrutinee's head constructor wins.
+    ///
+    /// This is the tactic-evaluator's analogue of Lean's `match` inside
+    /// tactic mode — structural on the constructor, not value-level.
+    fn apply_match(
+        &mut self,
+        scrutinee: &Heap<Expr>,
+        arms: &List<verum_ast::decl::TacticMatchArm>,
+    ) -> TacticResult<()> {
+        // Extract the head constructor name from the scrutinee. For an
+        // `ExprKind::Call` with a path head, use the last segment; for
+        // a bare path, use the last segment directly; otherwise the
+        // scrutinee is opaque and we fall through to the first
+        // wildcard-ish arm.
+        let scrutinee_head: Option<Text> = match &scrutinee.kind {
+            ExprKind::Call { func, .. } => callee_head_name(func),
+            ExprKind::Path(path) => path
+                .segments
+                .iter()
+                .last()
+                .and_then(|seg| match seg {
+                    verum_ast::ty::PathSegment::Name(ident) => {
+                        Some(Text::from(ident.name.as_str()))
+                    }
+                    _ => None,
+                }),
+            _ => None,
+        };
+
+        for arm in arms.iter() {
+            if pattern_matches_head(&arm.pattern, scrutinee_head.as_ref()) {
+                return self.apply_tactic(&arm.body);
+            }
+        }
+
+        Err(TacticError::Failed(Text::from(
+            "tactic match: no arm matched the scrutinee's head constructor",
+        )))
+    }
+
+    /// T1-W: `if cond { t1 } else { t2 }` — conditional tactic
+    /// execution. The condition is evaluated structurally: a literal
+    /// `true` takes the then-branch, a literal `false` takes the
+    /// else-branch. Non-literal conditions are treated as the
+    /// evaluator cannot statically decide — this falls back to
+    /// attempting the then-branch first, and if it fails, the
+    /// else-branch (if present). This mirrors `try { then } else { else }`
+    /// semantics when the condition is opaque at tactic-time.
+    fn apply_if(
+        &mut self,
+        cond: &Heap<Expr>,
+        then_branch: &Heap<TacticExpr>,
+        else_branch: Option<&Heap<TacticExpr>>,
+    ) -> TacticResult<()> {
+        let decision = match &cond.kind {
+            ExprKind::Literal(lit) => match &lit.kind {
+                LiteralKind::Bool(true) => Some(true),
+                LiteralKind::Bool(false) => Some(false),
+                _ => None,
+            },
+            _ => None,
+        };
+
+        match decision {
+            Some(true) => self.apply_tactic(then_branch),
+            Some(false) => match else_branch {
+                Some(e) => self.apply_tactic(e),
+                None => Ok(()),
+            },
+            None => {
+                // Opaque condition — best-effort: try then, fall back to else.
+                match self.apply_tactic(then_branch) {
+                    Ok(()) => Ok(()),
+                    Err(_) => match else_branch {
+                        Some(e) => self.apply_tactic(e),
+                        None => Err(TacticError::Failed(Text::from(
+                            "tactic if: condition is opaque and then-branch failed",
+                        ))),
+                    },
+                }
+            }
+        }
+    }
+
+    /// T1-W: `fail("reason")` — explicit failure with diagnostic
+    /// message. Failure feeds into enclosing `try`/`first`/`else`
+    /// combinators for recovery; when reached at top level, the
+    /// tactic evaluator reports the message verbatim.
+    fn apply_fail(&mut self, message: &Heap<Expr>) -> TacticResult<()> {
+        let msg_text = match &message.kind {
+            ExprKind::Literal(lit) => match &lit.kind {
+                LiteralKind::Text(s) => Text::from(s.as_str()),
+                _ => Text::from("tactic `fail`"),
+            },
+            _ => Text::from("tactic `fail`"),
+        };
+        Err(TacticError::Failed(msg_text))
+    }
+}
+
+/// Extract the last path-segment name from a callee expression.
+/// Used by `apply_match` to compute the scrutinee's head constructor.
+fn callee_head_name(callee: &Expr) -> Option<Text> {
+    match &callee.kind {
+        ExprKind::Path(path) => path
+            .segments
+            .iter()
+            .last()
+            .and_then(|seg| match seg {
+                verum_ast::ty::PathSegment::Name(ident) => Some(Text::from(ident.name.as_str())),
+                _ => None,
+            }),
+        _ => None,
+    }
+}
+
+/// Check if a pattern matches the scrutinee's head constructor.
+///
+/// A wildcard/variable pattern matches anything. A constructor pattern
+/// (e.g. `Maybe.Some(v)`) matches when the pattern's head name equals
+/// the scrutinee's head. More precise value-level matching happens in
+/// a follow-up phase; this is sufficient for tactic-time branching
+/// over the constructor structure.
+fn pattern_matches_head(
+    pattern: &verum_ast::pattern::Pattern,
+    scrutinee_head: Option<&Text>,
+) -> bool {
+    use verum_ast::pattern::PatternKind;
+    match &pattern.kind {
+        PatternKind::Wildcard | PatternKind::Ident { .. } | PatternKind::Literal(_) => true,
+        PatternKind::Variant { path, .. } | PatternKind::Record { path, .. } => {
+            let pattern_head = path.segments.iter().last().and_then(|seg| match seg {
+                verum_ast::ty::PathSegment::Name(ident) => Some(Text::from(ident.name.as_str())),
+                _ => None,
+            });
+            match (pattern_head, scrutinee_head) {
+                (Some(ph), Some(sh)) => ph == *sh,
+                _ => true, // conservative: treat as potential match
+            }
+        }
+        _ => true, // other pattern kinds (tuple, slice, or, range, view) — be conservative
     }
 }
 
