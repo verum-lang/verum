@@ -1895,6 +1895,52 @@ impl<'a> RecursiveParser<'a> {
 
             Ok(generic_ty)
         }
+        // DependentApp without generic prefix — `C.cells(0)`, `Obj(n)`.
+        //
+        // When the base (possibly a Qualified type like `C.cells`) is
+        // followed directly by `(<literal>…)`, it is a value-indexed
+        // dependent type, not the "constructor-style" `A(B(C(Int)))`
+        // form (that branch is below and expects types inside the
+        // parens). We pick the DependentApp path when the first token
+        // after `(` is a literal or simple expression that can't be a
+        // type: integer, float, string/char, bool, unary minus, bang
+        // (negation), or a `self.field`-style expression starting with
+        // `self` / `&`. `core/math/infinity_topos.vr:54` uses this for
+        // `C.cells(0)` / `C.cells(1)` throughout.
+        else if self.stream.check(&TokenKind::LParen)
+            && matches!(
+                self.stream.peek_nth_kind(1),
+                Some(TokenKind::Integer(_)) | Some(TokenKind::Float(_))
+                | Some(TokenKind::Text(_)) | Some(TokenKind::True)
+                | Some(TokenKind::False) | Some(TokenKind::Minus)
+                | Some(TokenKind::SelfValue)
+            )
+        {
+            self.stream.advance(); // consume `(`
+            let mut value_args: Vec<Expr> = Vec::new();
+            if !self.stream.check(&TokenKind::RParen) {
+                loop {
+                    if !self.tick() || self.is_aborted() { break; }
+                    let expr = self.parse_expr_no_struct()?;
+                    value_args.push(expr);
+                    if self.stream.consume(&TokenKind::Comma).is_none() {
+                        break;
+                    }
+                    if self.stream.check(&TokenKind::RParen) {
+                        break;
+                    }
+                }
+            }
+            self.stream.expect(TokenKind::RParen)?;
+            let span = self.stream.make_span(start_pos);
+            Ok(Type::new(
+                TypeKind::DependentApp {
+                    carrier: Box::new(base_type),
+                    value_args: value_args.into_iter().collect::<List<_>>(),
+                },
+                span,
+            ))
+        }
         // Handle parenthesized type arguments: (T, U)
         // This is used for constructor-style type applications like: A(B(C(Int)))
         // Also handles function trait syntax: Fn(T, U) -> R
@@ -3846,12 +3892,31 @@ impl<'a> RecursiveParser<'a> {
             }
 
             // Parse optional associated type bindings: <Item = Int, State = String>
-            // Parse optional associated type bindings: `<Item = Int, State = String>`
+            // — OR generic type parameters of the protocol path: `Sieve<C>`.
+            //
+            // The stdlib uses `&dyn Sieve<C>` (generic protocol) widely,
+            // alongside `dyn Container<Item = Int>` (associated-type
+            // bindings). Peek at the second token after `<`: an `=` means
+            // a binding (`Item = …`), anything else is a type parameter
+            // list. We do not mix the two — that would require grammar
+            // support we don't need in today's stdlib.
             let bindings = if self.stream.check(&TokenKind::Lt) {
-                self.stream.advance(); // consume '<'
-                let bindings = self.parse_type_bindings()?;
-                self.expect_gt()?; // expect '>' (handles >> splitting for nested generics)
-                Maybe::Some(bindings)
+                let is_binding = matches!(self.stream.peek_nth_kind(1), Some(TokenKind::Ident(_)))
+                    && self.stream.peek_nth_kind(2) == Some(&TokenKind::Eq);
+                if is_binding {
+                    self.stream.advance(); // consume '<'
+                    let bindings = self.parse_type_bindings()?;
+                    self.expect_gt()?;
+                    Maybe::Some(bindings)
+                } else {
+                    // Generic type parameters on the protocol path —
+                    // discard for now; the dyn protocol's erased
+                    // representation doesn't capture them. This keeps
+                    // `&dyn Sieve<C>` parseable without perturbing the
+                    // runtime `DynProtocol` shape.
+                    let _args = self.parse_generic_args()?;
+                    Maybe::None
+                }
             } else {
                 Maybe::None
             };
