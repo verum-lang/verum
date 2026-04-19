@@ -2406,6 +2406,18 @@ impl CodeGenerator {
                     )
                 )
             }
+            // General dependent-type application: T<A1..>(v1, v2, ..).
+            TypeKind::DependentApp { carrier, value_args } => {
+                let arg_strs: Vec<String> = value_args
+                    .iter()
+                    .map(|e| self.format_expr(e))
+                    .collect();
+                format!(
+                    "{}({})",
+                    self.format_type(carrier),
+                    arg_strs.join(", ")
+                )
+            }
         }
     }
 

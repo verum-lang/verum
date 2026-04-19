@@ -355,6 +355,11 @@ pub fn compute_type_size(ty: &TypeKind) -> Result<u64, MetaError> {
         TypeKind::TypeLambda { .. } => Ok(0),
         // PathType is a dependent propositional equality type — compile-time only (size 0)
         TypeKind::PathType { .. } => Ok(0),
+        // DependentApp `T<A>(v..)` is a dependent type indexed by
+        // values; the runtime layout follows the carrier type exactly
+        // (value indices are compile-time indices that don't allocate
+        // per-instance storage).
+        TypeKind::DependentApp { carrier, .. } => compute_type_size(&carrier.kind),
     }
 }
 
@@ -468,6 +473,8 @@ pub fn compute_type_alignment(ty: &TypeKind) -> Result<u64, MetaError> {
         TypeKind::TypeLambda { .. } => Ok(1),
         // PathType is a dependent propositional equality type — compile-time only (align 1)
         TypeKind::PathType { .. } => Ok(1),
+        // DependentApp alignment follows the carrier type's alignment.
+        TypeKind::DependentApp { carrier, .. } => compute_type_alignment(&carrier.kind),
     }
 }
 

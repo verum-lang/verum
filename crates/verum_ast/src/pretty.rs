@@ -659,6 +659,21 @@ impl PrettyPrinter {
                 self.format_expr(rhs);
                 self.write(")");
             }
+            TypeKind::DependentApp { carrier, value_args } => {
+                // `carrier` already renders its own `Head<TypeArgs>`; we
+                // only tack on the value-argument parenthesized suffix.
+                self.format_type(carrier);
+                self.write("(");
+                let mut first = true;
+                for arg in value_args {
+                    if !first {
+                        self.write(", ");
+                    }
+                    first = false;
+                    self.format_expr(arg);
+                }
+                self.write(")");
+            }
             TypeKind::Tuple(types) => {
                 self.write("(");
                 let mut first = true;

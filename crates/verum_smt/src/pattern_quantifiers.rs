@@ -153,7 +153,10 @@ pub fn type_to_sort(ty: &Type) -> Sort {
         TypeKind::Meta { .. } => Sort::uninterpreted(Symbol::String("Meta".to_string())),
         TypeKind::TypeLambda { .. } => Sort::uninterpreted(Symbol::String("TypeLambda".to_string())),
         // Path equality type: use carrier type's sort
-        TypeKind::PathType { carrier, .. } => type_to_sort(carrier),
+        TypeKind::PathType { carrier, .. } | TypeKind::DependentApp { carrier, .. } => type_to_sort(carrier),
+        // Dependent type application `T<A>(v..)`: use carrier sort,
+        // value indices do not affect Z3 sort translation.
+        TypeKind::DependentApp { carrier, .. } => type_to_sort(carrier),
     }
 }
 

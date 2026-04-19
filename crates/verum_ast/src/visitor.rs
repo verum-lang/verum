@@ -1844,6 +1844,12 @@ pub fn walk_type<V: Visitor>(visitor: &mut V, ty: &Type) {
             visit_child!(visitor, lhs.as_ref(), Expr);
             visit_child!(visitor, rhs.as_ref(), Expr);
         }
+        TypeKind::DependentApp { carrier, value_args } => {
+            visit_child!(visitor, carrier.as_ref(), Type);
+            for arg in value_args.iter() {
+                visit_child!(visitor, arg, Expr);
+            }
+        }
         TypeKind::Tuple(types) => {
             for ty in types.iter() {
                 visit_child!(visitor, ty, Type);

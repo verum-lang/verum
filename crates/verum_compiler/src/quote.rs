@@ -2252,6 +2252,20 @@ impl ToTokens for Type {
                 stream.push(Token::new(TokenKind::RParen, self.span));
             }
 
+            // General dependent-type application: `carrier(v1, v2, ..)`
+            // where `carrier` already embeds its `<type_args>` (if any).
+            TypeKind::DependentApp { carrier, value_args } => {
+                carrier.to_tokens(stream);
+                stream.push(Token::new(TokenKind::LParen, self.span));
+                for (i, arg) in value_args.iter().enumerate() {
+                    if i > 0 {
+                        stream.push(Token::new(TokenKind::Comma, self.span));
+                    }
+                    arg.to_tokens(stream);
+                }
+                stream.push(Token::new(TokenKind::RParen, self.span));
+            }
+
             // Unknown type - a safe top type
             TypeKind::Unknown => {
                 stream.push(Token::new(TokenKind::Ident("Unknown".into()), self.span));

@@ -1018,11 +1018,18 @@ impl<'a> RecursiveParser<'a> {
         let carrier = self.parse_type()?;
         self.stream.expect(TokenKind::Gt)?;
 
-        // Parse endpoint expressions: (a, b)
+        // Parse endpoint expressions: (a, b) with optional trailing comma.
+        // Trailing commas are a universal convention in Verum (tuples,
+        // record literals, argument lists), and the stdlib relies on
+        // them for multi-line Path<...>(a, b,) layouts in e.g.
+        // `core/math/hott.vr`. Rejecting the trailing comma here would
+        // force the stdlib into a one-line style or introduce a pointless
+        // stylistic exception.
         self.stream.expect(TokenKind::LParen)?;
         let lhs = self.parse_expr_no_struct()?;
         self.stream.expect(TokenKind::Comma)?;
         let rhs = self.parse_expr_no_struct()?;
+        self.stream.consume(&TokenKind::Comma);
         self.stream.expect(TokenKind::RParen)?;
 
         let span = self.stream.make_span(start_pos);
@@ -1835,15 +1842,58 @@ impl<'a> RecursiveParser<'a> {
         // Handle angle-bracketed generic arguments: <T, U>
         if self.stream.check(&TokenKind::Lt) {
             let args = self.parse_generic_args()?;
-            let span = self.stream.make_span(start_pos);
+            let generic_span = self.stream.make_span(start_pos);
 
-            Ok(Type::new(
+            let generic_ty = Type::new(
                 TypeKind::Generic {
                     base: Box::new(base_type),
                     args: args.into_iter().collect::<List<_>>(),
                 },
-                span,
-            ))
+                generic_span,
+            );
+
+            // After `<…>`, check for value-argument parentheses:
+            //   Fiber<A, B>(f, b)
+            //   IsContrMap<A, B>(f)
+            //   Glue<A>(phi, T, e)
+            //
+            // This is the general dependent-type application shape that
+            // `core/math/hott.vr`, `cubical.vr`, `infinity_topos.vr`, and
+            // `kan_extension.vr` pervasively rely on. The two-argument
+            // `Path<A>(a, b)` form has its own special-cased entry earlier
+            // (`parse_path_type_expr`) for historical compatibility; every
+            // other type with value indices flows through here.
+            if self.stream.check(&TokenKind::LParen) {
+                self.stream.advance();
+                let mut value_args: Vec<Expr> = Vec::new();
+                if !self.stream.check(&TokenKind::RParen) {
+                    loop {
+                        if !self.tick() || self.is_aborted() {
+                            break;
+                        }
+                        let expr = self.parse_expr_no_struct()?;
+                        value_args.push(expr);
+                        if self.stream.consume(&TokenKind::Comma).is_none() {
+                            break;
+                        }
+                        // Allow trailing comma: `Foo<T>(a, b, )`.
+                        if self.stream.check(&TokenKind::RParen) {
+                            break;
+                        }
+                    }
+                }
+                self.stream.expect(TokenKind::RParen)?;
+                let span = self.stream.make_span(start_pos);
+                return Ok(Type::new(
+                    TypeKind::DependentApp {
+                        carrier: Box::new(generic_ty),
+                        value_args: value_args.into_iter().collect::<List<_>>(),
+                    },
+                    span,
+                ));
+            }
+
+            Ok(generic_ty)
         }
         // Handle parenthesized type arguments: (T, U)
         // This is used for constructor-style type applications like: A(B(C(Int)))

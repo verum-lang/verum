@@ -14367,7 +14367,15 @@ impl TypeChecker {
                         }
                     }
 
-                    let inner_result = self.synth_expr(expr)?;
+                    // Spawn runs its body as an async task on the executor,
+                    // so the body is an async context regardless of whether
+                    // the enclosing function is async. This lets
+                    //     spawn { sleep(d).await; limiter.refill() }
+                    // typecheck inside a non-async helper.
+                    let prev_async_context = std::mem::replace(&mut self.in_async_context, true);
+                    let inner_result = self.synth_expr(expr);
+                    self.in_async_context = prev_async_context;
+                    let inner_result = inner_result?;
 
                     // If expr is a Future<T>, result is JoinHandle<T>
                     // Otherwise, wrap the result type in JoinHandle
@@ -21030,6 +21038,23 @@ impl TypeChecker {
                     lhs: Box::new(lhs_eq),
                     rhs: Box::new(rhs_eq),
                 })
+            }
+
+            // General dependent type application `T<A>(v..)`. We do not
+            // yet check index expressions against a dependent type's
+            // signature here — the carrier carries full generic info,
+            // and the value indices are retained for downstream
+            // verification passes (see refinement / dependent solver).
+            TypeKind::DependentApp { carrier, .. } => {
+                // For now, ignore the value indices and resolve as the
+                // carrier type. A follow-up lands an index-checking
+                // pass that re-unifies these against the type
+                // constructor declaration. This matches how `Path<A>(a,
+                // b)` worked before the sugared `PathType` split, so it
+                // is the smallest change that keeps the stdlib parsing
+                // without silently dropping index info (we still retain
+                // the AST node for later passes).
+                self.ast_to_type(carrier)
             }
 
             TypeKind::Path(path) => {
@@ -45414,6 +45439,7 @@ fn type_kind_description(kind: &verum_ast::ty::TypeKind) -> String {
         TypeKind::Never => "never type !".to_string(),
         TypeKind::Path(path) => format!("path '{}'", path),
         TypeKind::PathType { .. } => "path type Path<A>(a, b)".to_string(),
+        TypeKind::DependentApp { .. } => "dependent type application T<..>(v..)".to_string(),
         TypeKind::Tuple(_) => "tuple type".to_string(),
         TypeKind::Array { .. } => "array type".to_string(),
         TypeKind::Slice(_) => "slice type".to_string(),

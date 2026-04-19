@@ -197,7 +197,15 @@ impl PiType {
                 fields.iter().any(|f| self.type_references_name(&f.ty, name))
             }
             // Path equality type: check the carrier type for name references
-            TypeKind::PathType { carrier, .. } => self.type_references_name(carrier, name),
+            TypeKind::PathType { carrier, .. } | TypeKind::DependentApp { carrier, .. } => self.type_references_name(carrier, name),
+            // Dependent type application `T<A>(v..)`: check the carrier
+            // and each value index for references to the bound name.
+            TypeKind::DependentApp { carrier, value_args } => {
+                if self.type_references_name(carrier, name) {
+                    return true;
+                }
+                value_args.iter().any(|v| self.expr_references_name(v, name))
+            }
             // Primitive types, inferred types, Never, and Unknown don't reference names
             TypeKind::Unit
             | TypeKind::Bool
@@ -987,7 +995,7 @@ impl DependentTypeBackend {
                 let var = Int::new_const(name);
                 Ok(Dynamic::from_ast(&var))
             }
-            TypeKind::PathType { carrier, .. } => {
+            TypeKind::PathType { carrier, .. } | TypeKind::DependentApp { carrier, .. } => {
                 // Path equality type - use carrier type for sort
                 self.create_fresh_var(name, carrier)
             }
@@ -1025,7 +1033,7 @@ impl DependentTypeBackend {
                 Ok(())
             }
             // Path equality type: well-formed if carrier is well-formed
-            TypeKind::PathType { carrier, .. } => self.check_type_well_formed(carrier, translator),
+            TypeKind::PathType { carrier, .. } | TypeKind::DependentApp { carrier, .. } => self.check_type_well_formed(carrier, translator),
             // All other type kinds are assumed well-formed for now
             TypeKind::Char
             | TypeKind::Text
@@ -1150,7 +1158,7 @@ impl DependentTypeBackend {
                 .max()
                 .unwrap_or(0),
             // Path equality type: depth comes from carrier
-            TypeKind::PathType { carrier, .. } => self.compute_quantifier_depth(carrier),
+            TypeKind::PathType { carrier, .. } | TypeKind::DependentApp { carrier, .. } => self.compute_quantifier_depth(carrier),
             // Primitive types and inferred types have depth 0
             TypeKind::Unit
             | TypeKind::Bool
@@ -1440,7 +1448,7 @@ impl DependentTypeBackend {
                 }
             }
             // Path equality type: recurse into carrier type
-            TypeKind::PathType { carrier, .. } => {
+            TypeKind::PathType { carrier, .. } | TypeKind::DependentApp { carrier, .. } => {
                 Self::extract_type_names_recursive(carrier, names);
             }
             // Primitives, inferred types, Never, Unknown, and Universe have no type dependencies
@@ -1706,7 +1714,7 @@ impl TypeDependencyGraph {
                 }
             }
             // Path equality type: recurse into carrier type
-            TypeKind::PathType { carrier, .. } => {
+            TypeKind::PathType { carrier, .. } | TypeKind::DependentApp { carrier, .. } => {
                 self.collect_dependencies_recursive(carrier, parent);
             }
             // Primitives, inferred types, Never, Unknown, and Universe have no dependencies
@@ -3292,7 +3300,7 @@ impl InductiveType {
                 Ok(())
             }
             // Path equality type: check carrier for positivity
-            TypeKind::PathType { carrier, .. } => self.check_positivity_in_type(carrier, positive),
+            TypeKind::PathType { carrier, .. } | TypeKind::DependentApp { carrier, .. } => self.check_positivity_in_type(carrier, positive),
             // DynProtocol, primitives, inferred, Never, Unknown, and Universe don't affect positivity
             TypeKind::DynProtocol { .. }
             | TypeKind::Unit

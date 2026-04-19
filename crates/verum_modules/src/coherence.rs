@@ -1590,6 +1590,15 @@ fn type_kind_to_string(kind: &verum_ast::TypeKind) -> Text {
         TypeKind::PathType { carrier, lhs, rhs } => {
             Text::from(format!("Path<{}>({:?}, {:?})", type_to_string(carrier), lhs, rhs))
         }
+        // General dependent-type application: T<A1..>(v1, v2, ..).
+        TypeKind::DependentApp { carrier, value_args } => {
+            let parts: Vec<String> = value_args.iter().map(|v| format!("{:?}", v)).collect();
+            Text::from(format!(
+                "{}({})",
+                type_to_string(carrier),
+                parts.join(", ")
+            ))
+        }
     }
 }
 

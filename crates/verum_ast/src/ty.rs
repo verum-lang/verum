@@ -157,6 +157,24 @@ pub enum TypeKind {
         rhs: Heap<Expr>,
     },
 
+    /// General dependent type application: `T<A1, A2>(v1, v2, v3)`.
+    ///
+    /// Covers the full scheme of type constructors indexed by values,
+    /// e.g. `Fiber<A, B>(f, b)`, `IsContrMap<A, B>(f)`,
+    /// `Glue<A>(phi, T, e)` used throughout `core/math/hott.vr`,
+    /// `cubical.vr`, `infinity_topos.vr`, `kan_extension.vr`. The
+    /// two-argument `Path<A>(a, b)` keeps its own sugared variant
+    /// (`PathType`) for backward compatibility with the existing
+    /// elaboration path; everything else goes through here.
+    ///
+    /// `carrier` is the type head (already includes the generic
+    /// `<…>` args as a `TypeKind::Generic`); `value_args` is the
+    /// positional list of index expressions.
+    DependentApp {
+        carrier: Heap<Type>,
+        value_args: List<Expr>,
+    },
+
     /// Tuple type: (T1, T2, ...)
     Tuple(List<Type>),
 
