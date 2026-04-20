@@ -1579,6 +1579,32 @@ impl CodegenContext {
         self.functions.remove(name).is_some()
     }
 
+    /// Removes every variant constructor whose `parent_type_name` matches
+    /// the given type. A variant entry is one where `variant_tag.is_some()`.
+    ///
+    /// This is used when a user-defined type redeclares a name that the
+    /// stdlib also defines: before the user's variants are registered,
+    /// the stdlib's leftover constructor entries (qualified and simple)
+    /// must be wiped so that the user's layout is the only one visible.
+    ///
+    /// Returns the number of entries removed.
+    pub fn clear_variants_for_type(&mut self, type_name: &str) -> usize {
+        let keys: Vec<String> = self
+            .functions
+            .iter()
+            .filter(|(_, info)| {
+                info.variant_tag.is_some()
+                    && info.parent_type_name.as_deref() == Some(type_name)
+            })
+            .map(|(k, _)| k.clone())
+            .collect();
+        let removed = keys.len();
+        for k in keys {
+            self.functions.remove(&k);
+        }
+        removed
+    }
+
     /// Looks up a function by name.
     pub fn lookup_function(&self, name: &str) -> Option<&FunctionInfo> {
         self.functions.get(name)

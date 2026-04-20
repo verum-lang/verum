@@ -5358,6 +5358,28 @@ impl VbcCodegen {
         match &type_decl.body {
             // Variant types: register each variant as a constructor
             TypeDeclBody::Variant(variants) => {
+                // Wholesale-replace semantics for user-defined types.
+                //
+                // Stdlib modules compile first with `prefer_existing_functions = true`
+                // (constructors register via `or_insert`). User-code compilation
+                // runs with `prefer_existing = false` and may redeclare a type
+                // that the stdlib already registered — e.g. the user writes
+                // `type Maybe is Nothing | Just(Int);` while the stdlib's
+                // `core.base.maybe` already registered `Maybe.None`/`Maybe.Some`.
+                //
+                // Without this purge the user's variants coexist with the
+                // stdlib's in the function table, which lets the compiler
+                // accept `Some(x)` against a `Maybe` that has no `Some`
+                // constructor and produces surprising dispatch.
+                //
+                // Gate: only in the user-compilation phase
+                // (`!prefer_existing_functions`). During stdlib loading we
+                // keep first-wins semantics so two stdlib modules defining
+                // the same nominal type do not clobber each other.
+                if !self.ctx.prefer_existing_functions {
+                    self.ctx.clear_variants_for_type(&type_name);
+                }
+
                 for (variant_index, variant) in variants.iter().enumerate() {
                     let variant_name = variant.name.name.to_string();
                     let qualified_name = format!("{}.{}", type_name, variant_name);
