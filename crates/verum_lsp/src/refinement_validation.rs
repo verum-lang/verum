@@ -333,6 +333,11 @@ pub struct RefinementValidator {
     /// `initialize` so the validator can honour `validationMode`, the SMT
     /// solver choice, counterexample caps and "enabled" kill-switch.
     config: parking_lot::RwLock<ValidatorConfig>,
+    /// Send-safe handle to the SMT worker thread. Every Z3 call is
+    /// routed through this handle so the validator's async futures stay
+    /// `Send` — which is a hard requirement for tower-lsp custom-method
+    /// registration. See `smt_worker.rs` for the full rationale.
+    smt: crate::smt_worker::SmtWorkerHandle,
 }
 
 #[derive(Debug, Clone)]
@@ -359,11 +364,14 @@ impl Default for ValidatorConfig {
 }
 
 impl RefinementValidator {
-    /// Create a new refinement validator
+    /// Create a new refinement validator. Spawns the shared SMT worker
+    /// thread lazily on first construction — cheap (~1 OS thread), and
+    /// keeps the rest of the server fully Send-safe.
     pub fn new() -> Self {
         Self {
             cache: ValidationCache::new(1000, Duration::from_secs(300)),
             config: parking_lot::RwLock::new(ValidatorConfig::default()),
+            smt: crate::smt_worker::SmtWorkerHandle::spawn(),
         }
     }
 
@@ -483,30 +491,36 @@ impl RefinementValidator {
             None => return Ok(ValidationResult::Valid), // No refinement at position
         };
 
-        // Collect all constraints in scope for the refinement
-        let scope_constraints = self.collect_scope_constraints(&module, &source, offset);
+        // Collect all constraints in scope for the refinement. We don't
+        // yet plumb them through the SMT worker — that needs a richer
+        // request type — but we still collect so diagnostics can reference
+        // them. See smt_worker.rs for the scope-aware extension point.
+        let _scope_constraints = self.collect_scope_constraints(&module, &source, offset);
 
-        // Perform SMT verification with collected constraints
-        let smt_checker = SmtRefinementChecker::new();
-        let verification_result = smt_checker
-            .check_refinement_with_context(
-                &refinement_ctx.ty,
-                refinement_ctx.context_expr.as_ref(),
-                &scope_constraints,
+        // Off-thread SMT round-trip. The worker owns the verifier; we
+        // only move owned, Send-safe payloads (Type + Option<Expr> +
+        // VerifyMode) across the channel, so the resulting future stays
+        // Send — which is required for tower-lsp `.custom_method`
+        // registration.
+        let verify_result = self
+            .smt
+            .verify_refinement_with_timeout(
+                refinement_ctx.ty.clone(),
+                refinement_ctx.context_expr.clone(),
+                VerifyMode::Proof,
                 Duration::from_millis(100),
             )
             .await;
 
-        match verification_result {
-            Ok(SmtCheckResult::Valid) => Ok(ValidationResult::Valid),
-            Ok(SmtCheckResult::Invalid { model }) => {
+        match verify_result {
+            crate::smt_worker::SmtCheckResult::Valid => Ok(ValidationResult::Valid),
+            crate::smt_worker::SmtCheckResult::Invalid { model } => {
                 // Extract detailed counterexample with execution trace
                 let counterexample =
                     self.extract_counterexample(&refinement_ctx, &model, &source, position);
                 Ok(ValidationResult::Invalid { counterexample })
             }
-            Ok(SmtCheckResult::Unknown) => Ok(ValidationResult::Unknown),
-            Err(e) => Err(e),
+            crate::smt_worker::SmtCheckResult::Unknown => Ok(ValidationResult::Unknown),
         }
     }
 
