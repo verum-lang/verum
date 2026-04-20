@@ -5433,6 +5433,17 @@ pub(super) fn dispatch_array_method(
         return Ok(None);
     }
 
+    // Skip Text — it's a primitive value type (type_id=4) whose stdlib
+    // `push`/`pop`/`len` methods operate on the `{ptr, len, cap}` struct
+    // layout, not on a List header. Routing them through the List
+    // dispatcher below treats the Text struct as if its first two Values
+    // were `(len, cap, backing_ptr)` — then `push` corrupts all three
+    // fields with list-header writes (field0 becomes 1, field1 becomes 8,
+    // field2 becomes an entirely new List allocation).
+    if header.type_id == TypeId::TEXT {
+        return Ok(None);
+    }
+
     // Skip Deque and Channel - they have their own dispatch in dispatch_primitive_method
     if header.type_id == TypeId::DEQUE || header.type_id == TypeId::CHANNEL {
         return Ok(None);
