@@ -38,6 +38,7 @@ mount core.math.category.{Category, Functor};
 mount core.math.simplicial.{SimplicialSet, Simplex};
 mount core.math.algebra.{Monoid, Ring};
 mount core.math.topology.{TopologicalSpace, ConnectedSpace, PathConnectedSpace};
+mount core.math.linalg.{Matrix, Vector, EigenDecomposition, eigh};
 mount core.base.protocols.{Eq, Ord};
 
 // =============================================================================
@@ -413,12 +414,105 @@ public fn dijkstra<V, W, G>(g: &G, start: V) -> Map<V, W>
 }
 
 // =============================================================================
+// §8. Spectral theory — Laplacian eigenvalues
+// =============================================================================
+
+/// The combinatorial Laplacian of a weighted graph.
+///
+/// `L = D - A` where `D` is the diagonal degree matrix (row sums of the
+/// weighted adjacency matrix) and `A` is the weighted adjacency matrix
+/// itself. This is the object whose spectrum encodes connectivity and
+/// harmonic structure — the `k`-th smallest eigenvalue counts the
+/// `k`-th connected component (Fiedler), the spectral gap bounds
+/// mixing times, and the eigenvectors diagonalise the graph-signal
+/// domain for spectral graph networks.
+///
+/// Complexity: `O(n^2)` to assemble the `n × n` Laplacian matrix,
+/// where `n = g.vertices().len()`.
+public fn laplacian_matrix<V, G>(g: &G) -> Matrix<Float>
+    where type G: WeightedGraph<V, Float>
+{
+    let adj: List<List<Float>> = g.adjacency_matrix();
+    let deg: List<Float> = g.degree_vector();
+    let n: Int = adj.len();
+    assert(deg.len() == n, "degree vector length must match adjacency size");
+
+    let mut l: Matrix<Float> = Matrix.zeros(n, n);
+    for i in 0..n {
+        let row: &List<Float> = adj.get(i);
+        assert(row.len() == n, "adjacency row length must match matrix size");
+        for j in 0..n {
+            let a_ij: Float = row.get(j);
+            if i == j {
+                // Diagonal = degree − self-loop weight. For graphs
+                // without self-loops `a_ii = 0`, so this reduces to
+                // `deg[i]`; keeping the subtraction makes the
+                // definition correct on multigraphs too.
+                l.set(i, i, deg.get(i) - a_ij);
+            } else {
+                l.set(i, j, -a_ij);
+            }
+        }
+    }
+    l
+}
+
+/// **Laplacian spectrum** — eigenvalues of `L = D - A`.
+///
+/// Returns the spectrum in the ordering produced by
+/// `core.math.linalg.eigh` (descending). The smallest eigenvalue is
+/// zero with multiplicity equal to the number of connected components;
+/// the second-smallest (the *algebraic connectivity*, or Fiedler value)
+/// bounds graph-expansion properties.
+///
+/// Contract:
+///   - Input graph must be weighted over `Float` (via `WeightedGraph`).
+///   - For undirected graphs the Laplacian is symmetric and every
+///     eigenvalue is real. For a directed graph the returned spectrum
+///     is that of the symmetric combinatorial Laplacian `D - A`, not
+///     the directed Laplacian `D_out - A`; use the latter via
+///     `laplacian_matrix` + `eig` for non-symmetric cases.
+///   - Spectrum length equals `g.vertices().len()`.
+public fn laplacian_spectrum<V, G>(g: &G) -> List<Float>
+    where type G: WeightedGraph<V, Float>
+{
+    let l: Matrix<Float> = laplacian_matrix(g);
+    let decomp: EigenDecomposition<Float> = eigh(&l);
+    let mut out: List<Float> = List.new();
+    for i in 0..decomp.values.len() {
+        out.push(decomp.values.get(i));
+    }
+    out
+}
+
+/// **Algebraic connectivity** — the Fiedler eigenvalue.
+///
+/// The second-smallest eigenvalue of the Laplacian. Zero iff the graph
+/// is disconnected; strictly positive otherwise. Larger values imply
+/// better expansion and faster mixing.
+///
+/// Contract: the graph must have at least two vertices. The empty
+/// graph has no eigenvalues, and the one-vertex graph has only a
+/// single zero eigenvalue — both cases violate the "second-smallest"
+/// notion, so the function asserts `n >= 2`.
+public fn algebraic_connectivity<V, G>(g: &G) -> Float
+    where type G: WeightedGraph<V, Float>
+{
+    let spectrum: List<Float> = laplacian_spectrum(g);
+    let n: Int = spectrum.len();
+    assert(n >= 2, "algebraic connectivity requires at least two vertices");
+
+    // `eigh` returns values in descending order, so the two smallest
+    // eigenvalues sit at the end of the list. We return the
+    // penultimate entry — the Fiedler value.
+    spectrum.get(n - 2)
+}
+
+// =============================================================================
 // Algorithm signatures reserved for future extension
 // =============================================================================
 //
 // Spectral / algebraic methods (require linalg.vr integration):
-//   fn laplacian_spectrum<G: WeightedGraph<V, Float>>(g: &G) -> List<Float>;
-//   fn algebraic_connectivity<G: WeightedGraph<V, Float>>(g: &G) -> Float;
 //   fn pagerank<G: WeightedGraph<V, Float>>(g: &G, damping: Float) -> Map<V, Float>;
 //
 // Matroid / combinatorial (require matroid protocol):
