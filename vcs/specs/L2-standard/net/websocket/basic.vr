@@ -1,0 +1,103 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: net, websocket, rfc6455, handshake, framing
+// @timeout: 10000
+// @expect: pass
+
+// RFC 6455 WebSocket API surface.
+
+mount core.net.websocket.{
+    Opcode, CloseCode, Frame,
+    encode, decode, DecodeResult, DecodeError,
+    accept_key, validate_server_handshake,
+    WEBSOCKET_MAGIC,
+};
+mount core.net.http.{Headers};
+
+// Opcode round-trip.
+fn typecheck_opcode() -> (Opcode, UInt8, Bool, Bool) {
+    let op = Opcode.Binary;
+    let b = op.to_byte();
+    let round = Opcode.from_byte(b);
+    (round, b, op.is_data(), op.is_control())
+}
+
+// CloseCode constants.
+fn typecheck_close_code() -> (CloseCode, UInt16) {
+    let c = CloseCode.new(CloseCode.NORMAL);
+    (c, c.code())
+}
+
+// Frame builders.
+fn typecheck_frames() -> (Frame, Frame, Frame, Frame, Frame) {
+    let data: List<Byte> = List.new();
+    let text = Frame.text(data.clone());
+    let bin = Frame.binary(data.clone());
+    let ping = Frame.ping(data.clone());
+    let pong = Frame.pong(data.clone());
+    let close = Frame.close(CloseCode.new(CloseCode.GOING_AWAY), &"bye".into());
+    (text, bin, ping, pong, close)
+}
+
+// Encode — server side (unmasked) + client side (masked).
+fn typecheck_encode_server(frame: &Frame) -> List<Byte> {
+    let mut out = List.new();
+    encode(frame, None, &mut out);
+    out
+}
+
+fn typecheck_encode_client(frame: &Frame) -> List<Byte> {
+    let mut out = List.new();
+    let key: [UInt8; 4] = [0x12, 0x34, 0x56, 0x78];
+    encode(frame, Some(key), &mut out);
+    out
+}
+
+// Decode — server (expects masked) vs client (expects unmasked).
+fn typecheck_decode_server(buf: &[Byte]) -> DecodeResult {
+    decode(buf, true, 1024 * 1024)
+}
+
+fn typecheck_decode_client(buf: &[Byte]) -> DecodeResult {
+    decode(buf, false, 1024 * 1024)
+}
+
+// Pattern-match on all DecodeResult variants.
+fn typecheck_decode_result(r: DecodeResult) -> Int {
+    match r {
+        DecodeResult.Decoded { frame: _, consumed } => consumed,
+        DecodeResult.NeedMore => 0,
+        DecodeResult.Err(_) => -1,
+    }
+}
+
+// Error variants.
+fn typecheck_errors() -> List<DecodeError> {
+    let mut xs: List<DecodeError> = List.new();
+    xs.push(DecodeError.IncompleteFrame);
+    xs.push(DecodeError.InvalidOpcode(0x0F));
+    xs.push(DecodeError.ControlFrameFragmented);
+    xs.push(DecodeError.ControlFramePayloadTooLong);
+    xs.push(DecodeError.ReservedBitsSet);
+    xs.push(DecodeError.PayloadTooLong { limit: 1024 });
+    xs.push(DecodeError.ExpectedMasked);
+    xs.push(DecodeError.UnexpectedlyMasked);
+    xs
+}
+
+// Handshake — derive Sec-WebSocket-Accept.
+fn typecheck_accept_key() -> Text {
+    // Canonical example from RFC 6455 §1.3:
+    // key = "dGhlIHNhbXBsZSBub25jZQ=="
+    // expected accept = "s3pPLMBiTxaQ9kYGzzhZRbK+xOo="
+    accept_key(&"dGhlIHNhbXBsZSBub25jZQ==".into())
+}
+
+fn typecheck_validate_handshake(headers: &Headers) -> Maybe<Text> {
+    validate_server_handshake(headers)
+}
+
+fn main() {
+    // Shape-only.
+}

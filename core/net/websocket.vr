@@ -1,0 +1,445 @@
+// =============================================================================
+// net/websocket.vr — RFC 6455 WebSocket protocol
+// =============================================================================
+// Layer: 5 (Network)
+// Dependencies: core.net.http, core.net.http_parser, core.security.hash.sha1,
+//               core.encoding.base64, core.io
+// Spec: https://datatracker.ietf.org/doc/html/rfc6455
+//       permessage-deflate: RFC 7692 (not yet implemented)
+// =============================================================================
+//
+// Covers:
+// - Opening handshake (client + server) — Sec-WebSocket-Accept derivation
+// - Frame format (FIN/RSV/opcode + MASK/length/masking-key/payload)
+// - Fragmentation (continuation frames)
+// - Close codes per §7.4
+// - Ping/pong control frames
+//
+// Deferred (tracked as follow-up):
+// - permessage-deflate extension (RFC 7692)
+// - Subprotocol negotiation helper beyond plain passthrough
+//
+// # Handshake
+//
+// Client → Server request:
+// ```
+// GET / HTTP/1.1
+// Host: example.com
+// Upgrade: websocket
+// Connection: Upgrade
+// Sec-WebSocket-Key: <base64(16 random bytes)>
+// Sec-WebSocket-Version: 13
+// ```
+//
+// Server → Client response:
+// ```
+// HTTP/1.1 101 Switching Protocols
+// Upgrade: websocket
+// Connection: Upgrade
+// Sec-WebSocket-Accept: base64(sha1(key || MAGIC))
+// ```
+//
+// MAGIC = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11" (RFC 6455 §4.2.2).
+//
+// # Frame format (§5.2)
+//
+// ```
+//  0                   1                   2                   3
+//  0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
+// +-+-+-+-+-------+-+-------------+-------------------------------+
+// |F|R|R|R| opcode|M| Payload len |    Extended payload length    |
+// |I|S|S|S|  (4)  |A|     (7)     |             (16/64)           |
+// |N|V|V|V|       |S|             |   (if payload len==126/127)   |
+// | |1|2|3|       |K|             |                               |
+// +-+-+-+-+-------+-+-------------+ - - - - - - - - - - - - - - - +
+// |     Extended payload length continued, if payload len == 127  |
+// + - - - - - - - - - - - - - - - +-------------------------------+
+// |                               |Masking-key, if MASK set to 1  |
+// +-------------------------------+-------------------------------+
+// |     Masking-key (continued)   |          Payload Data         |
+// +-------------------------------- - - - - - - - - - - - - - - - +
+// |                    Payload Data continued ...                 |
+// +---------------------------------------------------------------+
+// ```
+// =============================================================================
+
+module core.net.websocket;
+
+mount core.*;
+mount core.net.http.{Headers};
+mount core.security.hash.sha1.{Sha1};
+mount core.encoding.base64;
+
+// =============================================================================
+// Opcodes
+// =============================================================================
+
+public type Opcode is
+    | Continuation
+    | Textual
+    | Binary
+    | Close
+    | Ping
+    | Pong
+    | Reserved(UInt8);
+
+implement Opcode {
+    pub fn to_byte(&self) -> UInt8 {
+        match self {
+            Opcode.Continuation => 0x0,
+            Opcode.Textual      => 0x1,
+            Opcode.Binary       => 0x2,
+            Opcode.Close        => 0x8,
+            Opcode.Ping         => 0x9,
+            Opcode.Pong         => 0xA,
+            Opcode.Reserved(b)  => *b,
+        }
+    }
+
+    pub fn from_byte(b: UInt8) -> Opcode {
+        match b {
+            0x0 => Opcode.Continuation,
+            0x1 => Opcode.Textual,
+            0x2 => Opcode.Binary,
+            0x8 => Opcode.Close,
+            0x9 => Opcode.Ping,
+            0xA => Opcode.Pong,
+            _   => Opcode.Reserved(b),
+        }
+    }
+
+    pub fn is_control(&self) -> Bool {
+        match self {
+            Opcode.Close | Opcode.Ping | Opcode.Pong => true,
+            _ => false,
+        }
+    }
+
+    pub fn is_data(&self) -> Bool {
+        match self {
+            Opcode.Textual | Opcode.Binary | Opcode.Continuation => true,
+            _ => false,
+        }
+    }
+}
+
+// =============================================================================
+// Close codes — RFC 6455 §7.4
+// =============================================================================
+
+public type CloseCode is {
+    code: UInt16,
+}
+
+implement CloseCode {
+    pub const NORMAL: UInt16 = 1000;
+    pub const GOING_AWAY: UInt16 = 1001;
+    pub const PROTOCOL_ERROR: UInt16 = 1002;
+    pub const UNSUPPORTED_DATA: UInt16 = 1003;
+    pub const INVALID_FRAME_PAYLOAD: UInt16 = 1007;
+    pub const POLICY_VIOLATION: UInt16 = 1008;
+    pub const MESSAGE_TOO_BIG: UInt16 = 1009;
+    pub const INTERNAL_ERROR: UInt16 = 1011;
+
+    pub fn new(code: UInt16) -> CloseCode { CloseCode { code: code } }
+    pub fn code(&self) -> UInt16 { self.code }
+}
+
+// =============================================================================
+// Frame — parsed wire representation
+// =============================================================================
+
+public type Frame is {
+    fin: Bool,
+    rsv1: Bool,
+    rsv2: Bool,
+    rsv3: Bool,
+    opcode: Opcode,
+    payload: List<Byte>,
+}
+
+implement Frame {
+    pub fn text(payload: List<Byte>) -> Frame {
+        Frame {
+            fin: true, rsv1: false, rsv2: false, rsv3: false,
+            opcode: Opcode.Textual, payload: payload,
+        }
+    }
+
+    pub fn binary(payload: List<Byte>) -> Frame {
+        Frame {
+            fin: true, rsv1: false, rsv2: false, rsv3: false,
+            opcode: Opcode.Binary, payload: payload,
+        }
+    }
+
+    pub fn close(code: CloseCode, reason: &Text) -> Frame {
+        let mut payload = List.with_capacity(2 + reason.len());
+        payload.push(((code.code() >> 8) & 0xFF) as Byte);
+        payload.push((code.code() & 0xFF) as Byte);
+        let reason_bytes = reason.as_bytes();
+        let mut i = 0;
+        while i < reason_bytes.len() {
+            payload.push(reason_bytes[i]);
+            i = i + 1;
+        }
+        Frame {
+            fin: true, rsv1: false, rsv2: false, rsv3: false,
+            opcode: Opcode.Close, payload: payload,
+        }
+    }
+
+    pub fn ping(payload: List<Byte>) -> Frame {
+        Frame {
+            fin: true, rsv1: false, rsv2: false, rsv3: false,
+            opcode: Opcode.Ping, payload: payload,
+        }
+    }
+
+    pub fn pong(payload: List<Byte>) -> Frame {
+        Frame {
+            fin: true, rsv1: false, rsv2: false, rsv3: false,
+            opcode: Opcode.Pong, payload: payload,
+        }
+    }
+}
+
+// =============================================================================
+// Encoding
+// =============================================================================
+
+/// Encode a frame to bytes. `mask_key` Some(4 bytes) sets MASK=1 and
+/// XORs the payload per RFC 6455 §5.3; None (server side) leaves it
+/// unmasked per the server-never-masks rule.
+public fn encode(frame: &Frame, mask_key: Maybe<[UInt8; 4]>, out: &mut List<Byte>) {
+    let b0: UInt8 =
+        (if frame.fin { 0x80 } else { 0 }) |
+        (if frame.rsv1 { 0x40 } else { 0 }) |
+        (if frame.rsv2 { 0x20 } else { 0 }) |
+        (if frame.rsv3 { 0x10 } else { 0 }) |
+        (frame.opcode.to_byte() & 0x0F);
+    out.push(b0 as Byte);
+
+    let masked = mask_key.is_some();
+    let mask_bit: UInt8 = if masked { 0x80 } else { 0 };
+    let len = frame.payload.len();
+    if len < 126 {
+        out.push((mask_bit | (len as UInt8)) as Byte);
+    } else if len <= 65535 {
+        out.push((mask_bit | 126_u8) as Byte);
+        out.push(((len >> 8) & 0xFF) as Byte);
+        out.push((len & 0xFF) as Byte);
+    } else {
+        out.push((mask_bit | 127_u8) as Byte);
+        let big = len as UInt64;
+        let mut i = 7;
+        while i >= 0 {
+            out.push(((big >> (i * 8)) & 0xFF) as Byte);
+            i = i - 1;
+        }
+    }
+
+    match mask_key {
+        Some(key) => {
+            let mut i = 0;
+            while i < 4 { out.push(key[i] as Byte); i = i + 1; }
+            // Masked payload
+            let mut j = 0;
+            while j < frame.payload.len() {
+                out.push(frame.payload[j] ^ key[j % 4]);
+                j = j + 1;
+            }
+        }
+        None => {
+            let mut j = 0;
+            while j < frame.payload.len() {
+                out.push(frame.payload[j]);
+                j = j + 1;
+            }
+        }
+    }
+}
+
+// =============================================================================
+// Decoding (resumable)
+// =============================================================================
+
+public type DecodeError is
+    | IncompleteFrame
+    | InvalidOpcode(UInt8)
+    | ControlFrameFragmented
+    | ControlFramePayloadTooLong
+    | ReservedBitsSet
+    | PayloadTooLong { limit: Int }
+    | ExpectedMasked
+    | UnexpectedlyMasked;
+
+public type DecodeResult is
+    | Decoded { frame: Frame, consumed: Int }
+    | NeedMore
+    | Err(DecodeError);
+
+/// Decode one frame from `buf`. `expect_masked` is true on the server
+/// (client must mask) and false on the client (server must not mask).
+/// `max_payload` caps the payload size for DoS protection.
+public fn decode(buf: &[Byte], expect_masked: Bool, max_payload: Int) -> DecodeResult {
+    if buf.len() < 2 { return DecodeResult.NeedMore; }
+    let b0 = buf[0];
+    let b1 = buf[1];
+
+    let fin = (b0 & 0x80) != 0;
+    let rsv1 = (b0 & 0x40) != 0;
+    let rsv2 = (b0 & 0x20) != 0;
+    let rsv3 = (b0 & 0x10) != 0;
+    let op_byte = b0 & 0x0F;
+    let opcode = Opcode.from_byte(op_byte);
+
+    if rsv1 || rsv2 || rsv3 {
+        // RSV bits are reserved for extensions (permessage-deflate uses RSV1);
+        // current impl rejects all RSV bits.
+        return DecodeResult.Err(DecodeError.ReservedBitsSet);
+    }
+
+    if opcode.is_control() && !fin {
+        return DecodeResult.Err(DecodeError.ControlFrameFragmented);
+    }
+
+    let masked = (b1 & 0x80) != 0;
+    if expect_masked && !masked { return DecodeResult.Err(DecodeError.ExpectedMasked); }
+    if !expect_masked && masked { return DecodeResult.Err(DecodeError.UnexpectedlyMasked); }
+
+    let short_len = (b1 & 0x7F) as Int;
+    let mut pos = 2;
+    let payload_len: Int;
+    if short_len < 126 {
+        payload_len = short_len;
+    } else if short_len == 126 {
+        if buf.len() < pos + 2 { return DecodeResult.NeedMore; }
+        payload_len = ((buf[pos] as Int) << 8) | (buf[pos + 1] as Int);
+        pos = pos + 2;
+    } else {
+        if buf.len() < pos + 8 { return DecodeResult.NeedMore; }
+        let mut v: UInt64 = 0;
+        let mut i = 0;
+        while i < 8 {
+            v = (v << 8) | (buf[pos + i] as UInt64);
+            i = i + 1;
+        }
+        if v > (9223372036854775807 as UInt64) {
+            return DecodeResult.Err(DecodeError.PayloadTooLong { limit: max_payload });
+        }
+        payload_len = v as Int;
+        pos = pos + 8;
+    }
+    if payload_len > max_payload {
+        return DecodeResult.Err(DecodeError.PayloadTooLong { limit: max_payload });
+    }
+    if opcode.is_control() && payload_len > 125 {
+        return DecodeResult.Err(DecodeError.ControlFramePayloadTooLong);
+    }
+
+    let mut mask_key: [UInt8; 4] = [0; 4];
+    if masked {
+        if buf.len() < pos + 4 { return DecodeResult.NeedMore; }
+        let mut i = 0;
+        while i < 4 { mask_key[i] = buf[pos + i] as UInt8; i = i + 1; }
+        pos = pos + 4;
+    }
+
+    if buf.len() < pos + payload_len { return DecodeResult.NeedMore; }
+    let mut payload = List.with_capacity(payload_len);
+    let mut i = 0;
+    while i < payload_len {
+        let b = buf[pos + i];
+        if masked {
+            payload.push(b ^ (mask_key[i % 4] as Byte));
+        } else {
+            payload.push(b);
+        }
+        i = i + 1;
+    }
+
+    let frame = Frame {
+        fin: fin,
+        rsv1: rsv1, rsv2: rsv2, rsv3: rsv3,
+        opcode: opcode,
+        payload: payload,
+    };
+    DecodeResult.Decoded { frame: frame, consumed: pos + payload_len }
+}
+
+// =============================================================================
+// Handshake helpers
+// =============================================================================
+
+public const WEBSOCKET_MAGIC: [Byte; 36] = [
+    0x32, 0x35, 0x38, 0x45, 0x41, 0x46, 0x41, 0x35, 0x2D,  // "258EAFA5-"
+    0x45, 0x39, 0x31, 0x34, 0x2D,                          // "E914-"
+    0x34, 0x37, 0x44, 0x41, 0x2D,                          // "47DA-"
+    0x39, 0x35, 0x43, 0x41, 0x2D,                          // "95CA-"
+    0x43, 0x35, 0x41, 0x42, 0x30, 0x44, 0x43, 0x38, 0x35,  // "C5AB0DC85"
+    0x42, 0x31, 0x31,                                      // "B11"
+];
+
+/// Derive `Sec-WebSocket-Accept` from the client's `Sec-WebSocket-Key`
+/// per RFC 6455 §4.2.2: base64(sha1(key || MAGIC)).
+public fn accept_key(client_key: &Text) -> Text {
+    let mut hasher = Sha1.new();
+    hasher.update(client_key.as_bytes());
+    hasher.update(&WEBSOCKET_MAGIC);
+    let digest = hasher.finalize();
+    let mut digest_bytes = List.with_capacity(20);
+    let mut i = 0;
+    while i < 20 {
+        digest_bytes.push(digest[i]);
+        i = i + 1;
+    }
+    base64.encode(&digest_bytes)
+}
+
+/// Validate the required server-side handshake headers. Returns the
+/// client's Sec-WebSocket-Key (for accept_key derivation) on success.
+public fn validate_server_handshake(headers: &Headers) -> Maybe<Text> {
+    let upgrade = headers.get(&"upgrade".into())?;
+    if !ascii_eq_ci(upgrade.as_bytes(), b"websocket") { return None; }
+    let connection = headers.get(&"connection".into())?;
+    if !contains_token_ci(connection.as_bytes(), b"upgrade") { return None; }
+    let version = headers.get(&"sec-websocket-version".into())?;
+    if *version != "13".into() { return None; }
+    let key = headers.get(&"sec-websocket-key".into())?;
+    Some(key.clone())
+}
+
+// =============================================================================
+// Header parsing helpers
+// =============================================================================
+
+fn ascii_eq_ci(a: &[Byte], b: &[Byte]) -> Bool {
+    if a.len() != b.len() { return false; }
+    let mut i = 0;
+    while i < a.len() {
+        let ca = a[i] | 0x20;
+        let cb = b[i] | 0x20;
+        if ca != cb { return false; }
+        i = i + 1;
+    }
+    true
+}
+
+fn contains_token_ci(haystack: &[Byte], needle: &[Byte]) -> Bool {
+    // Split on comma, trim OWS, case-insensitive compare.
+    let mut start = 0;
+    let mut i = 0;
+    while i <= haystack.len() {
+        if i == haystack.len() || haystack[i] == 0x2C {
+            let mut s = start;
+            let mut e = i;
+            while s < e && (haystack[s] == 0x20 || haystack[s] == 0x09) { s = s + 1; }
+            while e > s && (haystack[e - 1] == 0x20 || haystack[e - 1] == 0x09) { e = e - 1; }
+            if ascii_eq_ci(&haystack[s..e], needle) { return true; }
+            start = i + 1;
+        }
+        i = i + 1;
+    }
+    false
+}

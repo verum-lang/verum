@@ -69,6 +69,7 @@ public module tls;
 public module url;
 public module http_parser;
 public module shutdown;
+public module websocket;
 
 // =============================================================================
 // Re-exports

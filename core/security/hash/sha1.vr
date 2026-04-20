@@ -1,0 +1,172 @@
+// =============================================================================
+// security/hash/sha1.vr — FIPS 180-4 SHA-1 reference implementation
+// =============================================================================
+// NOTE: SHA-1 is cryptographically broken for digital-signature purposes.
+// This implementation exists specifically for RFC 6455 WebSocket
+// Sec-WebSocket-Accept handshake and legacy HMAC-SHA-1 use cases. Do not
+// use for new digital-signature / MAC constructions — prefer SHA-256.
+// =============================================================================
+
+module core.security.hash.sha1;
+
+mount core.*;
+
+pub const SHA1_DIGEST_SIZE: Int = 20;
+pub const SHA1_BLOCK_SIZE: Int = 64;
+
+const H0: UInt32 = 0x67452301;
+const H1: UInt32 = 0xEFCDAB89;
+const H2: UInt32 = 0x98BADCFE;
+const H3: UInt32 = 0x10325476;
+const H4: UInt32 = 0xC3D2E1F0;
+
+public type Sha1 is {
+    h: [UInt32; 5],
+    buf: [Byte; 64],
+    buf_len: Int,
+    length_bytes: UInt64,
+}
+
+implement Sha1 {
+    pub fn new() -> Sha1 {
+        Sha1 {
+            h: [H0, H1, H2, H3, H4],
+            buf: [0; 64],
+            buf_len: 0,
+            length_bytes: 0,
+        }
+    }
+
+    /// One-shot digest.
+    pub fn digest(data: &[Byte]) -> [Byte; 20] {
+        let mut s = Sha1.new();
+        s.update(data);
+        s.finalize()
+    }
+
+    pub fn update(&mut self, data: &[Byte]) {
+        self.length_bytes = self.length_bytes + (data.len() as UInt64);
+        let mut i = 0;
+        // Drain buffered partial block first
+        if self.buf_len > 0 {
+            let need = SHA1_BLOCK_SIZE - self.buf_len;
+            let take = if data.len() < need { data.len() } else { need };
+            let mut j = 0;
+            while j < take {
+                self.buf[self.buf_len + j] = data[j];
+                j = j + 1;
+            }
+            self.buf_len = self.buf_len + take;
+            i = take;
+            if self.buf_len == SHA1_BLOCK_SIZE {
+                let block = self.buf;
+                self.compress_block(&block);
+                self.buf_len = 0;
+            }
+        }
+        // Process whole blocks directly from input
+        while data.len() - i >= SHA1_BLOCK_SIZE {
+            let mut block: [Byte; 64] = [0; 64];
+            let mut k = 0;
+            while k < 64 {
+                block[k] = data[i + k];
+                k = k + 1;
+            }
+            self.compress_block(&block);
+            i = i + SHA1_BLOCK_SIZE;
+        }
+        // Remainder
+        while i < data.len() {
+            self.buf[self.buf_len] = data[i];
+            self.buf_len = self.buf_len + 1;
+            i = i + 1;
+        }
+    }
+
+    pub fn finalize(mut self) -> [Byte; 20] {
+        let total_bits = self.length_bytes * 8;
+        // Pad: append 0x80 then zeros until 56 mod 64, then 8-byte length big-endian.
+        self.buf[self.buf_len] = 0x80;
+        self.buf_len = self.buf_len + 1;
+        if self.buf_len > 56 {
+            while self.buf_len < 64 { self.buf[self.buf_len] = 0; self.buf_len = self.buf_len + 1; }
+            let block = self.buf;
+            self.compress_block(&block);
+            self.buf_len = 0;
+        }
+        while self.buf_len < 56 { self.buf[self.buf_len] = 0; self.buf_len = self.buf_len + 1; }
+        let mut k = 0;
+        while k < 8 {
+            self.buf[56 + k] = ((total_bits >> ((7 - k) * 8)) & 0xFF) as Byte;
+            k = k + 1;
+        }
+        let block = self.buf;
+        self.compress_block(&block);
+
+        let mut out: [Byte; 20] = [0; 20];
+        let mut i = 0;
+        while i < 5 {
+            let v = self.h[i];
+            out[i * 4 + 0] = ((v >> 24) & 0xFF) as Byte;
+            out[i * 4 + 1] = ((v >> 16) & 0xFF) as Byte;
+            out[i * 4 + 2] = ((v >> 8) & 0xFF) as Byte;
+            out[i * 4 + 3] = (v & 0xFF) as Byte;
+            i = i + 1;
+        }
+        out
+    }
+
+    fn compress_block(&mut self, block: &[Byte; 64]) {
+        let mut w: [UInt32; 80] = [0; 80];
+        let mut t = 0;
+        while t < 16 {
+            let b0 = block[t * 4 + 0] as UInt32;
+            let b1 = block[t * 4 + 1] as UInt32;
+            let b2 = block[t * 4 + 2] as UInt32;
+            let b3 = block[t * 4 + 3] as UInt32;
+            w[t] = (b0 << 24) | (b1 << 16) | (b2 << 8) | b3;
+            t = t + 1;
+        }
+        while t < 80 {
+            w[t] = rotl32(w[t - 3] ^ w[t - 8] ^ w[t - 14] ^ w[t - 16], 1);
+            t = t + 1;
+        }
+
+        let mut a = self.h[0];
+        let mut b = self.h[1];
+        let mut c = self.h[2];
+        let mut d = self.h[3];
+        let mut e = self.h[4];
+
+        t = 0;
+        while t < 80 {
+            let (f, k) = if t < 20 {
+                ((b & c) | (!b & d), 0x5A827999_u32)
+            } else if t < 40 {
+                (b ^ c ^ d, 0x6ED9EBA1_u32)
+            } else if t < 60 {
+                ((b & c) | (b & d) | (c & d), 0x8F1BBCDC_u32)
+            } else {
+                (b ^ c ^ d, 0xCA62C1D6_u32)
+            };
+            let temp = rotl32(a, 5).wrapping_add(f).wrapping_add(e).wrapping_add(k).wrapping_add(w[t]);
+            e = d;
+            d = c;
+            c = rotl32(b, 30);
+            b = a;
+            a = temp;
+            t = t + 1;
+        }
+
+        self.h[0] = self.h[0].wrapping_add(a);
+        self.h[1] = self.h[1].wrapping_add(b);
+        self.h[2] = self.h[2].wrapping_add(c);
+        self.h[3] = self.h[3].wrapping_add(d);
+        self.h[4] = self.h[4].wrapping_add(e);
+    }
+}
+
+@inline
+fn rotl32(v: UInt32, n: Int) -> UInt32 {
+    (v << n) | (v >> (32 - n))
+}
