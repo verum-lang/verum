@@ -200,6 +200,19 @@ pub struct VbcCodegen {
     /// treated as user test functions by the @test runner.
     propagate_test_attr: bool,
 
+    /// Declared return type of the function currently being compiled.
+    /// Populated at the start of body compilation and consulted by
+    /// `compile_return` (explicit `return expr;` statements) to emit
+    /// the refinement-Assert before the Ret instruction. Cleared once
+    /// the function finishes so it can never leak across compilations.
+    pub(super) current_return_ast_type: Option<verum_ast::ty::Type>,
+
+    /// Fully-qualified name of the function currently being compiled.
+    /// Used for refinement-violation messages at explicit returns;
+    /// the implicit-return sites in `compile_function` have direct
+    /// access to `lookup_name` and do not need this.
+    pub(super) current_fn_lookup_name: Option<String>,
+
     // ========================================================================
     // FFI Tables (populated from @ffi extern blocks)
     // ========================================================================
@@ -889,6 +902,8 @@ impl VbcCodegen {
             // Pending @thread_local static initializations
             pending_tls_inits: Vec::new(),
             propagate_test_attr: true,
+            current_return_ast_type: None,
+            current_fn_lookup_name: None,
         }
     }
 
@@ -2346,6 +2361,12 @@ impl VbcCodegen {
                             // Skip - this function has unresolvable dependencies
                             let fname = func.name.name.as_str();
                             tracing::debug!("[lenient] SKIP {}.{}: {}", type_name.as_deref().unwrap_or("?"), fname, e);
+                            if std::env::var("VERUM_DEBUG_LENIENT").is_ok() {
+                                eprintln!("[lenient] SKIP {}.{}: {}", type_name.as_deref().unwrap_or("?"), fname, e);
+                            }
+                        } else if std::env::var("VERUM_DEBUG_LENIENT").is_ok() {
+                            let fname = func.name.name.as_str();
+                            eprintln!("[lenient] OK   {}.{}", type_name.as_deref().unwrap_or("?"), fname);
                         }
 
                         // Compile nested functions even if parent failed
@@ -6809,6 +6830,15 @@ impl VbcCodegen {
         // stdlib's "GeneralCategory"), this allows preferring the correct parent type.
         self.ctx.current_return_type_name = func_info.return_type_name.clone();
 
+        // Stash the full AST return type + function name so that
+        // explicit `return expr;` statements compiled inside the body
+        // (via `compile_return` in expressions.rs) can emit the
+        // refinement Assert before the Ret instruction. These are
+        // cleared right after `ensure_return` below so they never
+        // leak across functions.
+        self.current_return_ast_type = func.return_type.as_ref().map(|t| t.clone());
+        self.current_fn_lookup_name = Some(lookup_name.clone());
+
         // Set `self` type name for method calls within impl methods.
         // This MUST be after begin_function which clears variable_type_names.
         // This enables compile_method_call to qualify `self.method()` calls properly.
@@ -7019,6 +7049,11 @@ impl VbcCodegen {
 
         // Ensure function ends with return
         self.ensure_return()?;
+
+        // Clear the refinement return-type stash so it cannot leak
+        // into the next function's compilation.
+        self.current_return_ast_type = None;
+        self.current_fn_lookup_name = None;
 
         // End function compilation
         let (instructions, register_count) = self.ctx.end_function();

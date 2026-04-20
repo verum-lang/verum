@@ -6280,6 +6280,19 @@ impl VbcCodegen {
             let reg = self
                 .compile_expr(expr)?
                 .ok_or_else(|| CodegenError::internal("return value has no value"))?;
+
+            // If the enclosing function's declared return type carries
+            // a refinement predicate, emit the runtime Assert before
+            // the Ret instruction. The AST return type + function name
+            // are stashed on `VbcCodegen` at body-compile entry and
+            // cleared after `ensure_return`.
+            if let (Some(ret_ty), Some(fn_name)) = (
+                self.current_return_ast_type.clone(),
+                self.current_fn_lookup_name.clone(),
+            ) {
+                self.emit_return_refinement_assert(reg, Some(&ret_ty), &fn_name);
+            }
+
             self.ctx.emit(Instruction::Ret { value: reg });
         } else {
             self.ctx.emit(Instruction::RetV);
