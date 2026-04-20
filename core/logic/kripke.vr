@@ -76,7 +76,7 @@ public fn accessible(f: KripkeFrame, w: World) -> List<World> {
 }
 
 // =============================================================================
-// 1b. Kripke frame as a canonical Graph<World, ()>  (T1-AA)
+// 1b. Kripke frame as a canonical Graph<World, ()>
 // =============================================================================
 //
 // A Kripke frame IS a labelled directed graph — the accessibility
@@ -88,9 +88,9 @@ public fn accessible(f: KripkeFrame, w: World) -> List<World> {
 // The wiring is a small shim because the field names differ:
 // Kripke's `Edge { from, to }` vs graph.vr's `Edge<V, L> { src, tgt, label }`.
 // The shim converts on the fly; concrete `impl Graph for KripkeFrame`
-// is deferred to the full T1-AA phase when `implement P for T {}` can
-// inject the method signatures via the Graph protocol (requires
-// T1-R phase 2 to emit the protocol-obligation proof obligations).
+// is available via a companion `implement Graph for KripkeFrame {…}`
+// wrapper once the modal-logic library promotes the frame to a
+// full Graph instance; the shim functions below cover the interim.
 //
 // For now, expose the graph view as a free function.
 

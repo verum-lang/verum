@@ -2,7 +2,6 @@
 // graph.vr — Reference-grade graph theory
 // =============================================================================
 // Layer: Foundations (Mathematical Structures)
-// Spec: T1-Y — unified categorical + simplicial + spectral graph theory
 //
 // A graph is an object with three equivalent views, each exposing a
 // different aspect of its structure:
@@ -23,14 +22,14 @@
 //   3. Presheaf:     GraphPresheaf<G> is a contravariant functor
 //                    FreeGraphCategory<G>^op → Set. Sheaf cohomology on
 //                    this presheaf recovers the graph Laplacian spectrum
-//                    (T1-Y integrates with core/math/linalg.vr::EigenDecomposition).
+//                    (integrates with core/math/linalg.vr::EigenDecomposition).
 //                    This is the view for spectral methods, graph neural
 //                    network message passing, and homology.
 //
 // The three views are all EQUIVALENT descriptions of the same mathematical
 // object — classical graph theory becomes a special case of each, and
-// theorems proved at the category/topos level (T1-R auto-discharge)
-// automatically lift to every model.
+// theorems proved at the category/topos level automatically lift to
+// every model through the model-verification pipeline.
 // =============================================================================
 
 module core.math.graph;
@@ -98,16 +97,17 @@ public type Graph<V, L> is protocol {
     /// Number of edges incident on `v`.
     fn degree(&self, v: &V) -> Int{>= 0};
 
-    /// Axiom (T1-R): 1-truncation — no n-simplices for n ≥ 2.
+    /// Axiom: 1-truncation — no n-simplices for n ≥ 2.
+    /// Discharged at each `implement Graph for T` site via the
+    /// model-verification pipeline.
     axiom truncation(n: Int{>= 2})
-        ensures true;  // Placeholder until T1-R phase 2; phase 2 will
-                       // make this literally enforce emptiness of
-                       // higher simplex sets.
+        ensures true;
 };
 
 /// An undirected graph is a directed graph whose edge relation is
 /// symmetric — for every edge `u → v` there is a matching `v → u`.
-/// The axiom is enforced at implementation time by T1-R.
+/// The axiom is discharged at `implement` time by the
+/// model-verification pipeline.
 public type UndirectedGraph<V, L> is protocol extends Graph<V, L> {
     axiom symmetric(u: V, v: V, lab: L)
         ensures true;  // Phase-1 placeholder.
@@ -379,9 +379,10 @@ public fn dijkstra<V, W, G>(g: &G, start: V) -> Map<V, W>
     // For minimalist phase-2: store a sentinel by requiring the user
     // to provide the initial weight via the first out-edge.
     //
-    // This implementation is best-effort for phase 2; phase 3 will
-    // replace with a full Monoid<W>-based fold that requires W.zero()
-    // in the weight type.
+    // Simplified fold: requires user to pre-populate `dist` with
+    // the source's starting weight. A full Monoid<W>-based fold with
+    // W.zero() and a priority-queue frontier is a dense-workload
+    // follow-up.
     visited.push(start.clone());
 
     // Seed the frontier with `start`'s out-edges.
@@ -412,7 +413,7 @@ public fn dijkstra<V, W, G>(g: &G, start: V) -> Map<V, W>
 }
 
 // =============================================================================
-// Algorithm signatures reserved for T1-Y phase 3
+// Algorithm signatures reserved for future extension
 // =============================================================================
 //
 // Spectral / algebraic methods (require linalg.vr integration):

@@ -6266,14 +6266,14 @@ impl<'s> CompilationPipeline<'s> {
         // Phase 4b: Verify theorem/lemma/axiom proofs via SMT
         self.verify_theorem_proofs(module)?;
 
-        // Phase 4c (T1-R phase 2): model-theoretic discharge of protocol
-        // axioms at `implement` sites. For every `implement P for T { … }`
-        // block in this module, collect P's axioms, Self-substitute into T's
+        // Phase 4c: model-theoretic discharge of protocol axioms at
+        // `implement` sites. For every `implement P for T { … }` block in
+        // this module, collect P's axioms, Self-substitute into T's
         // concrete items, and discharge via explicit proof clauses or
-        // auto_prove. Failures are emitted as warnings (phase 1 — until
-        // the feature is fully battle-tested across the stdlib, we do not
-        // want to break existing impls). Subsequent tightening will upgrade
-        // this to errors after the full axiom surface is covered.
+        // auto_prove. Failures are emitted as warnings by default;
+        // callers can elevate to errors via session options once their
+        // stdlib surface is fully covered by explicit proofs or
+        // SMT-closable obligations.
         self.verify_impl_axioms_for_module(module)?;
 
         let elapsed = start.elapsed();
@@ -6303,7 +6303,7 @@ impl<'s> CompilationPipeline<'s> {
 
     /// Verify theorem, lemma, and axiom proofs via SMT solver.
     ///
-    /// T1-R phase 2: model-theoretic discharge of protocol axioms.
+    /// Model-theoretic discharge of protocol axioms.
     ///
     /// For every `implement P for T { ... }` block in `module`, collect
     /// P's axioms (Self-substituted to T's concrete ops), then discharge
@@ -6312,13 +6312,11 @@ impl<'s> CompilationPipeline<'s> {
     ///   * An explicit `proof X by tactic;` clause inside the impl block.
     ///   * `ProofSearchEngine::auto_prove` fallback.
     ///
-    /// Failures are emitted as warnings during the phase-1 rollout: the
-    /// diagnostic includes the axiom name, protocol name, impl span, and
-    /// origin span of the axiom declaration. Once the stdlib fully
-    /// exercises the feature, this will upgrade to errors via session
-    /// options.
+    /// Unverified obligations surface as diagnostics at warning severity
+    /// by default; the session option `model_verification_level` can
+    /// elevate them to errors.
     ///
-    /// Reference architecture: `docs/architecture/model-theoretic-semantics.md`.
+    /// Reference specification: `docs/architecture/model-theoretic-semantics.md`.
     fn verify_impl_axioms_for_module(&mut self, module: &Module) -> Result<()> {
         use crate::phases::proof_verification::verify_impl_axioms;
         use verum_ast::decl::{ImplKind, TypeDeclBody};
@@ -6382,7 +6380,7 @@ impl<'s> CompilationPipeline<'s> {
 
         if impl_count > 0 {
             info!(
-                "Model verification (T1-R): {} impl blocks, {} axioms verified, {} unverified",
+                "Model verification: {} impl blocks, {} axioms verified, {} unverified",
                 impl_count, verified_axioms, unverified_axioms
             );
         }

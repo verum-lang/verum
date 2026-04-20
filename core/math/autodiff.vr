@@ -1342,7 +1342,7 @@ public context GradientTape {
 }
 
 // =============================================================================
-// Autodiff graph as a canonical DAG view — T1-AA canonicalisation
+// Autodiff graph as a canonical DAG view
 // =============================================================================
 //
 // An autodiff computation is a DAG of tensor operations — exactly a

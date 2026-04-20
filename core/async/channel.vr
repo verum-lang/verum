@@ -245,9 +245,8 @@ implement<T> Sender<T> {
             return self.send(value);
         }
         // Bounded: poll for slot availability up to `duration`. Phase 1
-        // uses a spin-with-sleep loop against the queue length; phase 2
-        // will replace this with a proper futex-backed wait once the
-        // bounded-channel wakeup protocol (sender-side) is wired.
+        // uses a spin-with-sleep loop against the queue length; a
+        // futex-backed sender-side wait is a future replacement.
         let deadline = Instant.now().saturating_add(duration);
         loop {
             match self.try_send(value) {
@@ -258,7 +257,7 @@ implement<T> Sender<T> {
                     }
                     // Short sleep to avoid busy-looping; the real
                     // wake-up path is the bounded-channel reader
-                    // futex_wake on pop, which phase 2 will wire.
+                    // futex_wake on pop (reserved extension point).
                     sleep_millis(1);
                 }
                 Err(TrySendError.Disconnected(returned_value)) => {

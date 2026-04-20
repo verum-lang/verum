@@ -243,7 +243,7 @@ public module observational;
 // Bit vectors for verified hardware and cryptography.
 public module bitvec;
 
-// Graph theory (T1-Y): unified categorical + simplicial + spectral
+// Graph theory: unified categorical + simplicial + spectral
 // foundation. Graph<V, L> as a 1-truncated simplicial set;
 // FreeGraphCategory<G> as the free category on a graph (homomorphism =
 // functor); GraphPresheaf<G> for sheaf cohomology and the Laplacian

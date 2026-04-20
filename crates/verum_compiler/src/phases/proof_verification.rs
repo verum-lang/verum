@@ -1556,7 +1556,7 @@ fn build_suggestions_from_proof_error(err: &ProofError) -> List<Text> {
 }
 
 // ============================================================================
-// T1-R phase 2: model-theoretic discharge of protocol axioms
+// Model-theoretic discharge of protocol axioms at `implement` sites
 // ============================================================================
 
 use verum_ast::decl::{ImplDecl, TypeDecl};
@@ -1611,9 +1611,8 @@ pub struct ImplObligationFailure {
 /// on the compiler's diagnostic channel — callers (e.g. the pipeline) decide
 /// how to present failures.
 ///
-/// This implements T1-R phase 2 step 3 (after T2-R2 Self-substitution and
-/// T2-R3 obligation collection). Reference architecture:
-/// `docs/architecture/model-theoretic-semantics.md`.
+/// See `docs/architecture/model-theoretic-semantics.md` for the full
+/// specification.
 pub fn verify_impl_axioms(
     impl_decl: &ImplDecl,
     protocol_decl: &TypeDecl,

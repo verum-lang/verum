@@ -172,7 +172,7 @@ public fn morphism_count(c: FiniteCategory) -> Int {
 }
 
 // =============================================================================
-// 5. Graph view — T1-AA canonicalisation
+// 5. Graph view — canonical projection to core.math.graph
 // =============================================================================
 //
 // A finite category's objects + morphisms form a labelled directed

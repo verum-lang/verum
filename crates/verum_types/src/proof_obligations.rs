@@ -1,12 +1,13 @@
 //! # Proof Obligations — Model-Theoretic Discharge of Protocol Axioms
 //!
-//! Implements T1-R phase 2: when an `implement P for T { ... }` block is
-//! compiled, every axiom declared in `P`'s body becomes a proof obligation
-//! for `T`. This module collects those obligations by substituting
-//! `Self` and `Self.X` references with the concrete items provided by the
+//! When an `implement P for T { ... }` block is compiled, every axiom
+//! declared in `P`'s body becomes a proof obligation for `T`. This
+//! module collects those obligations by substituting `Self` and
+//! `Self.X` references with the concrete items provided by the
 //! `implement` block.
 //!
-//! See `docs/architecture/model-theoretic-semantics.md` for the full design.
+//! See `docs/architecture/model-theoretic-semantics.md` for the full
+//! specification.
 
 use smallvec::{smallvec, SmallVec};
 use verum_ast::decl::{ImplDecl, ImplItem, ImplItemKind, ProtocolItemKind, TypeDecl, TypeDeclBody};

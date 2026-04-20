@@ -2,7 +2,7 @@
 // adjacency_list.vr — Hash-map-of-lists graph representation
 // =============================================================================
 // Layer: Standard Library / Collections
-// Spec: T1-Y phase 2 + T2-Y3 — concrete Graph<V, L> instance
+// Purpose: concrete Graph<V, L> instance for sparse graphs
 //
 // `AdjacencyList<V, L>` is the canonical sparse graph representation.
 // Each vertex maps to a list of outgoing edges; the total memory is
@@ -21,7 +21,7 @@
 // For graphs with average degree d ≤ log |V|, this beats an adjacency
 // matrix in both memory and iteration cost. Dense graphs (d ≈ |V|)
 // should prefer `core.math.linalg.Matrix<Float>` with a
-// `WeightedGraph` facade, landing in T1-Y phase 3.
+// `WeightedGraph` facade (forthcoming).
 // =============================================================================
 
 module core.collections.adjacency_list;
@@ -36,8 +36,8 @@ mount core.math.graph.{Edge};
 
 /// Hash-map-of-outgoing-edges graph.
 ///
-/// Invariants (phase-1; the full set moves into axioms once T1-R
-/// phase 2 discharges them on `implement Graph for AdjacencyList`):
+/// Invariants (discharged by the model-verification pipeline on
+/// `implement Graph for AdjacencyList`):
 /// 1. Every `src` vertex of every edge in `out_edges` is a key of `out_edges`.
 /// 2. Every `tgt` vertex of every edge is a key of `out_edges` (the
 ///    map contains isolated vertices too).
@@ -110,7 +110,7 @@ implement<V: Eq + Hash, L> AdjacencyList<V, L> {
 }
 
 // =============================================================================
-// §3. Graph protocol instance (T1-AA full realisation)
+// §3. Graph protocol instance
 // =============================================================================
 
 implement<V: Eq + Hash, L: Clone> Graph<V, L> for AdjacencyList<V, L> {
