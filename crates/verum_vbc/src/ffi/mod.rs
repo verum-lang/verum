@@ -149,13 +149,43 @@ impl CTypeRuntime {
     }
 }
 
-impl From<crate::module::CType> for CTypeRuntime {
-    /// Converts CType to CTypeRuntime.
-    ///
-    /// Note: For StructValue and StructPtr, this panics. Use `CTypeRuntime::from_ctype_with_layout`
-    /// when you need to convert struct-related types.
-    fn from(ct: crate::module::CType) -> Self {
-        match ct {
+/// Error surfaced when a struct-bearing `CType` is converted without a
+/// layout index. Returned by the `TryFrom<CType>` impl below; the
+/// infallible `From` impl panics with the same message for
+/// backwards-compatibility with pre-T1-A callers.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CTypeConvertError {
+    /// `StructPtr` needs the per-struct layout index to lower to
+    /// a `CTypeRuntime::StructPtr(layout_idx)`.
+    StructPtrRequiresLayout,
+    /// `StructValue` needs the per-struct layout index to lower to
+    /// a `CTypeRuntime::StructValue(layout_idx)`.
+    StructValueRequiresLayout,
+}
+
+impl std::fmt::Display for CTypeConvertError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::StructPtrRequiresLayout => f.write_str(
+                "StructPtr requires layout index - use CTypeRuntime::from_ctype_with_layout",
+            ),
+            Self::StructValueRequiresLayout => f.write_str(
+                "StructValue requires layout index - use CTypeRuntime::from_ctype_with_layout",
+            ),
+        }
+    }
+}
+
+impl std::error::Error for CTypeConvertError {}
+
+impl CTypeRuntime {
+    /// Fallible conversion that returns a typed error for struct
+    /// variants instead of panicking. Prefer this over the infallible
+    /// [`From`] impl when the caller has an error channel.
+    pub fn try_from_ctype(
+        ct: crate::module::CType,
+    ) -> Result<Self, CTypeConvertError> {
+        Ok(match ct {
             crate::module::CType::Void => Self::Void,
             crate::module::CType::I8 => Self::I8,
             crate::module::CType::I16 => Self::I16,
@@ -173,13 +203,32 @@ impl From<crate::module::CType> for CTypeRuntime {
             crate::module::CType::Size => Self::Size,
             crate::module::CType::Ssize => Self::Ssize,
             crate::module::CType::StructPtr => {
-                panic!("StructPtr requires layout index - use CTypeRuntime::from_ctype_with_layout")
+                return Err(CTypeConvertError::StructPtrRequiresLayout);
             }
             crate::module::CType::ArrayPtr => Self::ArrayPtr,
             crate::module::CType::FnPtr => Self::FnPtr,
             crate::module::CType::StructValue => {
-                panic!("StructValue requires layout index - use CTypeRuntime::from_ctype_with_layout")
+                return Err(CTypeConvertError::StructValueRequiresLayout);
             }
+        })
+    }
+}
+
+impl From<crate::module::CType> for CTypeRuntime {
+    /// Infallible conversion kept for backwards compatibility.
+    ///
+    /// # Panics
+    ///
+    /// Panics for `StructPtr` / `StructValue` since both require a
+    /// per-struct layout index that this signature cannot carry.
+    /// Prefer [`try_from_ctype`][Self::try_from_ctype] when you have
+    /// an error channel, or use
+    /// [`CTypeRuntime::from_ctype_with_layout`][Self::from_ctype_with_layout]
+    /// when you know the layout index at the call site.
+    fn from(ct: crate::module::CType) -> Self {
+        match Self::try_from_ctype(ct) {
+            Ok(rt) => rt,
+            Err(e) => panic!("{}", e),
         }
     }
 }

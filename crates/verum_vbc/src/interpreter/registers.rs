@@ -24,7 +24,7 @@ use crate::value::Value;
 const INITIAL_CAPACITY: usize = 1024;
 
 /// Maximum register file size (to prevent runaway allocation).
-const MAX_SIZE: usize = 16 * 1024 * 1024; // 16M registers = 128MB
+pub const MAX_SIZE: usize = 16 * 1024 * 1024; // 16M registers = 128MB
 
 /// Maximum generation value before overflow triggers epoch advancement.
 /// Matches spec: GEN_MAX = 0xFFFF_FFFE (leaves room for wraparound detection).
@@ -106,26 +106,25 @@ impl RegisterFile {
         }
     }
 
-    /// Allocates registers for a new frame.
+    /// Fallibly allocates registers for a new frame.
     ///
-    /// Returns the base offset for the frame's registers.
-    ///
-    /// # Panics
-    ///
-    /// Panics if the register file exceeds [`MAX_SIZE`].
-    pub fn push_frame(&mut self, count: u16) -> u32 {
+    /// Returns the base offset for the frame's registers, or the
+    /// would-be register count when the request would exceed
+    /// [`MAX_SIZE`]. Callers that have an error channel should prefer
+    /// this variant — a pathological input (deeply-nested recursion,
+    /// a corrupted bytecode with an inflated register_count) would
+    /// otherwise bring down the whole interpreter.
+    pub fn try_push_frame(&mut self, count: u16) -> Result<u32, usize> {
         let base = self.top as u32;
         let new_top = self.top + count as usize;
+
+        if new_top > MAX_SIZE {
+            return Err(new_top);
+        }
 
         // Grow if needed
         if new_top > self.registers.len() {
             let new_size = (new_top * 2).min(MAX_SIZE);
-            if new_top > MAX_SIZE {
-                panic!(
-                    "Register file overflow: requested {} registers, max {}",
-                    new_top, MAX_SIZE
-                );
-            }
             self.registers.resize(new_size, Value::unit());
             self.slot_generations.resize(new_size, GEN_INITIAL);
             self.slot_epochs.resize(new_size, 0);
@@ -142,7 +141,27 @@ impl RegisterFile {
         }
 
         self.top = new_top;
-        base
+        Ok(base)
+    }
+
+    /// Allocates registers for a new frame.
+    ///
+    /// Returns the base offset for the frame's registers.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the register file exceeds [`MAX_SIZE`]. Prefer
+    /// [`try_push_frame`][Self::try_push_frame] when the caller has
+    /// an error channel — the panic here signals a corrupted module
+    /// or a runaway recursion that the interpreter has no way to
+    /// recover from locally.
+    pub fn push_frame(&mut self, count: u16) -> u32 {
+        self.try_push_frame(count).unwrap_or_else(|new_top| {
+            panic!(
+                "Register file overflow: requested {} registers, max {}",
+                new_top, MAX_SIZE
+            )
+        })
     }
 
     /// Releases registers from the current frame.

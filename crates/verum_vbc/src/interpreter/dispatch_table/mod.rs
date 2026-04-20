@@ -735,7 +735,12 @@ pub(crate) fn call_closure_sync(
     let entry_depth = state.call_stack.depth();
 
     let new_base = state.call_stack.push_frame(func_id, reg_count, return_pc, Reg(0))?;
-    state.registers.push_frame(reg_count);
+    state.registers.try_push_frame(reg_count).map_err(|new_top| {
+        InterpreterError::StackOverflow {
+            depth: new_top,
+            max_depth: crate::interpreter::registers::MAX_SIZE,
+        }
+    })?;
 
     // Copy captured values
     // SAFETY: Closure layout guarantees captures_offset (header + 8) followed by
@@ -773,7 +778,12 @@ fn call_function_sync(
     let entry_depth = state.call_stack.depth();
 
     let new_base = state.call_stack.push_frame(func_id, reg_count, return_pc, Reg(0))?;
-    state.registers.push_frame(reg_count);
+    state.registers.try_push_frame(reg_count).map_err(|new_top| {
+        InterpreterError::StackOverflow {
+            depth: new_top,
+            max_depth: crate::interpreter::registers::MAX_SIZE,
+        }
+    })?;
 
     for (i, val) in args.iter().enumerate() {
         state.registers.set(new_base, Reg(i as u16), *val);
