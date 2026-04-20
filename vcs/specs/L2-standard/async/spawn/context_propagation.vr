@@ -5,27 +5,53 @@
 // @tags: async, spawn, context
 // @description: Context propagation across spawn boundaries
 
-context RequestId: Text;
-context UserId: Text;
+// Value-carrying context protocols. Each context exposes its payload
+// through a single `value()` accessor; concrete providers implement
+// the protocol on a newtype wrapper around the payload type.
+context RequestId {
+    fn value(&self) -> Text;
+}
+
+context UserId {
+    fn value(&self) -> Text;
+}
+
+type RequestIdValue is { value: Text };
+type UserIdValue is { value: Text };
+
+implement RequestId for RequestIdValue {
+    fn value(&self) -> Text { self.value.clone() }
+}
+
+implement UserId for UserIdValue {
+    fn value(&self) -> Text { self.value.clone() }
+}
 
 async fn child_task() using [RequestId, UserId] {
-    println(f"Child sees request_id: {RequestId}");
-    println(f"Child sees user_id: {UserId}");
+    let rid = RequestId.value();
+    let uid = UserId.value();
+    println(f"Child sees request_id: {rid}");
+    println(f"Child sees user_id: {uid}");
 }
 
 async fn parent_task() using [RequestId] {
-    println(f"Parent request_id: {RequestId}");
+    let rid = RequestId.value();
+    println(f"Parent request_id: {rid}");
 
-    // Spawn with additional context
-    provide UserId = "user-456" {
-        // Context is automatically propagated to spawned tasks
+    // Shadow scope provides an additional context to the spawned
+    // task. The `using [...]` clause on the spawned function declares
+    // which contexts flow across the spawn boundary.
+    let uid_ctx = UserIdValue { value: "user-456" };
+    {
+        provide UserId = uid_ctx;
         let handle = spawn child_task();
         handle.await;
     }
 }
 
 async fn main() {
-    provide RequestId = "req-123" {
-        parent_task().await;
-    }
+    let rid_ctx = RequestIdValue { value: "req-123" };
+    provide RequestId = rid_ctx;
+
+    parent_task().await;
 }
