@@ -116,9 +116,65 @@ VBC uses NaN-boxing for efficient tagged values in 64 bits:
 | String | 0x7FFD | Small string or ptr |
 | Object | 0x7FFE | Object reference |
 
+## Dependent-Type Runtime Packaging (T1-H)
+
+Three heap-tagged 2-slot records carry Π / Σ / refinement data
+through the Tier-0 interpreter:
+
+| Opcode | Byte | TypeId | Slot 0 | Slot 1 |
+|--------|------|--------|--------|--------|
+| `MakePi` | `0x8D` | 524 (PI) | param Value | return_type_id u64 |
+| `MakeSigma` | `0x8E` | 525 (SIGMA) | witness Value | payload Value |
+| `MakeWitness` | `0x8F` | 526 (WITNESS) | value Value | proof_hash u64 |
+
+Layout is bit-compatible with variant payloads
+(`OBJECT_HEADER_SIZE + 8`) so `GetVariantData` with field index 0/1
+acts as a projection primitive until dedicated projection opcodes
+land. Elided at Tier-1 when the predicate / dependent-type
+obligation was discharged by the static verifier.
+
+## Refinement Runtime Asserts (T1-F)
+
+`Int{ it > 0 }` and `where`-form refinements compile to
+`Instruction::Assert` at three sites:
+parameter entry (commit 8e04295), implicit tail-expression return
+(978db38), explicit `return expr;` (e483b4f). The binding name
+(`it` or explicit) is aliased to the value register via
+`enter_scope + define_var + Mov`, with VarTypeKind + type-name
+mirrored so predicate compilation selects integer-vs-float
+comparisons correctly. Violations raise `AssertionFailed` with
+`refinement violation: parameter \`x\` of \`f\`` or
+`refinement violation: return value of \`f\``.
+
+## Work-Stealing TaskQueue (T1-I)
+
+`TaskQueue` (`interpreter/state.rs`) holds ready tasks in a
+`VecDeque` with two ends:
+
+  - `next_ready()` pops LIFO (back) — owner-local, cache-hot for
+    recursive spawn patterns.
+  - `steal_ready()` pops FIFO (front) — forward-compatibility hook
+    for a future multi-worker scheduler; not exercised by the
+    current single-threaded interpreter.
+
+## Panic-Surface Graceful Paths (T1-A)
+
+Two production runtime sites have fallible counterparts:
+
+  - `Registers::try_push_frame(count) -> Result<u32, usize>` —
+    register-file overflow surfaces as the would-be count instead
+    of aborting. Interpreter call paths route through this and
+    return `InterpreterError::StackOverflow`.
+  - `CTypeRuntime::try_from_ctype(ct) -> Result<Self, CTypeConvertError>`
+    — FFI layout-required struct variants produce a typed error
+    instead of panicking.
+
+The original panicking APIs are retained and delegate to the
+fallible variants; new callers should prefer the fallible surface.
+
 ## Test Coverage
 
-- 850+ unit tests in the crate
+- 900+ unit tests in the crate
 - 25 intrinsics test files in `vcs/specs/stdlib/sys/intrinsics/`
 - 6 context system tests in `vcs/specs/L2-standard/contexts/runtime/`
 

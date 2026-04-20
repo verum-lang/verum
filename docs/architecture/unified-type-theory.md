@@ -275,10 +275,31 @@ the same goal (confluence).
 | Tactic engine (`ring`, `auto`, `smt` in one monad) | Rule 5 |
 | Runtime refinement assert under `@verify(runtime)` | Rule 2 |
 | Runtime representation of Pi/Sigma/Witness values | Rule 4 (QTT erasure) |
-| Quotient type `T / R` | Fibrant-universe HIT |
+| Quotient type `T / R` with `Q.of` / `q.rep` projections | Fibrant-universe HIT |
 | Graph algorithms (BFS, Dijkstra, …) | `(Strict, 0, Many, ⊤)` |
 | Morphism coherence (`Hom<A, B>`) | Rule 3 (special case) |
 | Stdlib-agnostic type system | Rule 1 (stratification) |
+
+### Runtime-side realisation
+
+Each surface feature has a concrete lowering on the Tier-0
+interpreter. The table is not the spec (the rules above are) but it
+keeps the implementation honest:
+
+| Feature | Tier-0 lowering |
+|---------|------------------|
+| `Int { it > 0 }` parameter | `Assert { cond, message_id }` at fn entry |
+| `Int { it > 0 }` return | `Assert` at each `Ret` site (tail-expr + `return expr;`) |
+| `Π(x: T). U(x)` at runtime | `MakePi` opcode → 2-slot heap record tagged `TypeId::PI (524)` |
+| `Σ(x: T). U(x)` at runtime | `MakeSigma` → tagged `TypeId::SIGMA (525)` |
+| Refined value with proof hash | `MakeWitness` → tagged `TypeId::WITNESS (526)` |
+| `type Q is T / R` construction | `Q.of(rep)` → identity `Mov` at Tier-0 |
+| `type Q is T / R` projection | `q.rep()` → identity `Mov` at Tier-0 |
+
+All three dependent-type packagings share a 2-slot layout
+compatible with the variant-payload offset convention, so
+`GetVariantData` field 0 / 1 acts as a projection primitive until
+dedicated projection opcodes land.
 
 ---
 

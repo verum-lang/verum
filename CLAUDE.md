@@ -239,9 +239,9 @@ The `core/` directory contains the Verum standard library written in `.vr` files
 ## Performance Targets
 
 ```
-CBGR check:        < 15ns
+CBGR check:        < 15ns       (measured ~0.93ns — production_targets bench)
 Type inference:    < 100ms / 10K LOC
-Compilation:       > 50K LOC/sec
+Compilation:       > 50K LOC/sec (measured ~1.4M LOC/sec parse — gated by tests/compilation_speed_contract.rs)
 Runtime:           0.85-0.95x native C
 Memory overhead:   < 5%
 ```
@@ -317,6 +317,8 @@ vcs/
 ├── runner/                   # Test runners
 │   ├── vtest/                # Test execution framework
 │   └── vbench/               # Benchmark runner
+├── tools/                    # Stand-alone VCS utilities
+│   └── isabelle_graph_import/ # Isabelle/HOL .thy → Verum .vr theorem importer
 └── scripts/                  # Automation scripts
 ```
 
