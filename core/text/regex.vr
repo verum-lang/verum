@@ -30,14 +30,26 @@ public type Regex is {
     pattern: Text,
 };
 
+/// Error returned when a pattern string cannot be compiled into a
+/// `Regex`. The VBC runtime currently accepts any pattern and defers
+/// validation to match-time, so this error is only surfaced by callers
+/// that explicitly pre-validate.
+public type RegexError is { message: Text };
+
 // =============================================================================
 // Regex Methods
 // =============================================================================
 
 implement Regex {
     /// Create a new Regex from a pattern string.
-    public fn new(pattern: Text) -> Regex {
-        Regex { pattern: pattern }
+    ///
+    /// Returns `Result<Regex, RegexError>` so callers can pattern-match
+    /// on invalid patterns (e.g. `[invalid`). The VBC runtime does not
+    /// perform structural validation today — every pattern compiles —
+    /// so the returned value is always `Ok` under Tier 0. AOT builds
+    /// will tighten this when the native regex engine lands.
+    public fn new(pattern: Text) -> Result<Regex, RegexError> {
+        Ok(Regex { pattern: pattern })
     }
 
     /// Test whether the pattern matches anywhere in the given text.
