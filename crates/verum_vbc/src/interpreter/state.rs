@@ -1031,15 +1031,39 @@ pub struct Task {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct TaskId(pub u64);
 
-/// Queue of async tasks.
+/// Queue of async tasks with work-stealing-ready semantics.
+///
+/// Ready tasks live in a `VecDeque` with explicit ownership of both
+/// ends so the scheduler can operate in two distinct modes:
+///
+///   * **Local execution (LIFO, back).** The current worker
+///     [`next_ready`][Self::next_ready] pops the most recently
+///     spawned task. This matches the recursive-nested-task access
+///     pattern — a newly spawned continuation is the hottest cache
+///     line and the most likely to hold references to registers that
+///     were live at the spawn point.
+///
+///   * **Stealing (FIFO, front).** A foreign worker
+///     [`steal_ready`][Self::steal_ready] pops the oldest ready task.
+///     Taking from the far end minimises contention with the owning
+///     worker's LIFO accesses and tends to transfer larger
+///     subcomputations (older tasks tend to be the root of wider
+///     task trees), amortising the steal cost.
+///
+/// The current VBC interpreter is single-threaded, so only the LIFO
+/// path is exercised in production. The FIFO stealing API is a
+/// forward-compatibility surface: when a multi-threaded scheduler
+/// lands (one `TaskQueue` per worker + cross-worker stealing), the
+/// existing interpreter code keeps working and new worker threads
+/// plug into `steal_ready` without touching the local path.
 #[derive(Debug, Clone, Default)]
 pub struct TaskQueue {
     /// All tasks by ID.
     tasks: HashMap<TaskId, Task>,
     /// Next task ID to assign.
     next_id: u64,
-    /// Ready tasks (pending or running).
-    ready: Vec<TaskId>,
+    /// Ready tasks (pending) — back = own end, front = steal end.
+    ready: std::collections::VecDeque<TaskId>,
 }
 
 impl TaskQueue {
@@ -1048,7 +1072,7 @@ impl TaskQueue {
         Self {
             tasks: HashMap::new(),
             next_id: 0,
-            ready: Vec::new(),
+            ready: std::collections::VecDeque::new(),
         }
     }
 
@@ -1070,7 +1094,7 @@ impl TaskQueue {
         };
 
         self.tasks.insert(id, task);
-        self.ready.push(id);
+        self.ready.push_back(id);
         id
     }
 
@@ -1104,7 +1128,7 @@ impl TaskQueue {
         };
 
         self.tasks.insert(id, task);
-        self.ready.push(id);
+        self.ready.push_back(id);
         id
     }
 
@@ -1136,7 +1160,7 @@ impl TaskQueue {
         };
 
         self.tasks.insert(id, task);
-        self.ready.push(id);
+        self.ready.push_back(id);
         id
     }
 
@@ -1165,15 +1189,52 @@ impl TaskQueue {
         }
     }
 
-    /// Returns the next ready task.
+    /// Returns the next ready task for the owning worker (LIFO).
+    ///
+    /// Pops from the back of the deque — the most recently spawned
+    /// task. Cache-hot, recursive-spawn-friendly, matches the
+    /// synchronous call pattern that most async programs resemble.
+    /// Skips tasks whose status has drifted away from `Pending` since
+    /// they were enqueued (e.g. cancellation between spawn and pop).
     pub fn next_ready(&mut self) -> Option<TaskId> {
-        while let Some(id) = self.ready.pop() {
+        while let Some(id) = self.ready.pop_back() {
             if let Some(task) = self.tasks.get(&id)
                 && task.status == TaskStatus::Pending {
                     return Some(id);
                 }
         }
         None
+    }
+
+    /// Steals the oldest ready task (FIFO) on behalf of a foreign worker.
+    ///
+    /// Pops from the front of the deque. Targeted by the work-stealing
+    /// scheduler when a remote worker's local deque runs dry and it
+    /// needs to acquire work from a victim queue without colliding with
+    /// the victim's own LIFO accesses. Skips non-Pending tasks for the
+    /// same reason as [`next_ready`].
+    ///
+    /// Currently unused in production — the VBC interpreter executes
+    /// on a single OS thread — but the contract is stable so a future
+    /// multi-threaded scheduler can plug in without reshaping the
+    /// TaskQueue surface.
+    pub fn steal_ready(&mut self) -> Option<TaskId> {
+        while let Some(id) = self.ready.pop_front() {
+            if let Some(task) = self.tasks.get(&id)
+                && task.status == TaskStatus::Pending {
+                    return Some(id);
+                }
+        }
+        None
+    }
+
+    /// Number of ready (enqueued, possibly not yet started) tasks.
+    ///
+    /// Used by the scheduler and by steal-victim selection heuristics
+    /// to pick queues that are most likely to yield a steal.
+    #[inline]
+    pub fn ready_len(&self) -> usize {
+        self.ready.len()
     }
 
     /// Takes the execution info from a pending task, marking it as Running.
@@ -3038,5 +3099,72 @@ mod tests {
 
         // Same input should produce same output (deterministic)
         assert_eq!(splitmix64(seed), result1);
+    }
+
+    // ========================================================================
+    // Work-stealing TaskQueue (T1-I)
+    // ========================================================================
+
+    #[test]
+    fn test_task_queue_local_is_lifo() {
+        // Local worker pops the most recently spawned task first.
+        // Rationale: recursive spawn patterns keep the cache hot.
+        let mut q = TaskQueue::new();
+        let a = q.spawn(FunctionId(1));
+        let b = q.spawn(FunctionId(2));
+        let c = q.spawn(FunctionId(3));
+        assert_eq!(q.ready_len(), 3);
+        assert_eq!(q.next_ready(), Some(c));
+        assert_eq!(q.next_ready(), Some(b));
+        assert_eq!(q.next_ready(), Some(a));
+        assert_eq!(q.next_ready(), None);
+    }
+
+    #[test]
+    fn test_task_queue_steal_is_fifo() {
+        // A foreign worker stealing takes the OLDEST task first so it
+        // doesn't contend with the owner's LIFO pops.
+        let mut q = TaskQueue::new();
+        let a = q.spawn(FunctionId(1));
+        let b = q.spawn(FunctionId(2));
+        let c = q.spawn(FunctionId(3));
+        assert_eq!(q.steal_ready(), Some(a));
+        assert_eq!(q.steal_ready(), Some(b));
+        assert_eq!(q.steal_ready(), Some(c));
+        assert_eq!(q.steal_ready(), None);
+    }
+
+    #[test]
+    fn test_task_queue_mixed_local_and_steal() {
+        // Local pops from back, remote steals from front — they do not
+        // collide on the same task even when the deque holds several.
+        let mut q = TaskQueue::new();
+        let a = q.spawn(FunctionId(1));
+        let b = q.spawn(FunctionId(2));
+        let c = q.spawn(FunctionId(3));
+        let d = q.spawn(FunctionId(4));
+
+        // Owner takes the newest (d), thief takes the oldest (a).
+        assert_eq!(q.next_ready(), Some(d));
+        assert_eq!(q.steal_ready(), Some(a));
+        // Owner takes c, thief takes b — zero overlap.
+        assert_eq!(q.next_ready(), Some(c));
+        assert_eq!(q.steal_ready(), Some(b));
+        assert!(q.next_ready().is_none());
+        assert!(q.steal_ready().is_none());
+    }
+
+    #[test]
+    fn test_task_queue_skips_cancelled_on_both_ends() {
+        // Tasks whose status drifted away from Pending between enqueue
+        // and pop/steal must be skipped so a cancelled task never runs.
+        let mut q = TaskQueue::new();
+        let a = q.spawn(FunctionId(1));
+        let b = q.spawn(FunctionId(2));
+        let c = q.spawn(FunctionId(3));
+        q.fail(b);                       // middle task failed
+        assert_eq!(q.next_ready(), Some(c));   // back, still pending
+        assert_eq!(q.next_ready(), Some(a));   // skips b, yields a
+        assert_eq!(q.next_ready(), None);
     }
 }
