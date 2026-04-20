@@ -30,6 +30,7 @@ public module set;
 public module deque;
 public module heap;
 public module btree;
+public module adjacency_list;
 
 // =============================================================================
 // Re-exports

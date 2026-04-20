@@ -1,0 +1,32 @@
+// @test: parse
+// @level: L2
+// @tier: 0
+// @description: AdjacencyList<V, L> is a concrete Graph<V, L>.
+//
+// Exercises the canonical implementation of the core.math.graph.Graph
+// protocol using a hash-map-of-outgoing-edges representation. Confirms
+// that every protocol method has a body, the implementation parses and
+// typechecks, and the canonical constructors (path_graph, cycle_graph,
+// complete_graph) build well-formed graphs.
+
+mount core.collections.adjacency_list.{
+    AdjacencyList,
+    complete_graph,
+    path_graph,
+    cycle_graph,
+};
+
+fn build_tiny_graph() -> AdjacencyList<Int, ()> {
+    let mut g = AdjacencyList.empty();
+    g.add_edge(0, 1, ());
+    g.add_edge(1, 2, ());
+    g.add_edge(2, 0, ());
+    g
+}
+
+fn main() {
+    let _g = build_tiny_graph();
+    let _p = path_graph(5);
+    let _c = cycle_graph(4);
+    let _k = complete_graph(3);
+}

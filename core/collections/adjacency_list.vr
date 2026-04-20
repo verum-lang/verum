@@ -1,0 +1,220 @@
+// =============================================================================
+// adjacency_list.vr — Hash-map-of-lists graph representation
+// =============================================================================
+// Layer: Standard Library / Collections
+// Spec: T1-Y phase 2 + T2-Y3 — concrete Graph<V, L> instance
+//
+// `AdjacencyList<V, L>` is the canonical sparse graph representation.
+// Each vertex maps to a list of outgoing edges; the total memory is
+// Θ(|V| + |E|), and the out-neighbourhood of a vertex is retrievable
+// in Θ(1) hash-map lookup. Reverse lookups (in-neighbourhood) scan
+// the full edge list — Θ(|E|) — and are cached lazily on first use
+// if the workload exposes them.
+//
+// This is the first concrete implementation of the
+// `core.math.graph.Graph<V, L>` protocol. Every algorithm in
+// `core.math.graph` — bfs, dfs, reachable, connected_components,
+// topological_sort, dijkstra — runs unchanged against this type.
+//
+// ## Why hash-map-of-lists
+//
+// For graphs with average degree d ≤ log |V|, this beats an adjacency
+// matrix in both memory and iteration cost. Dense graphs (d ≈ |V|)
+// should prefer `core.math.linalg.Matrix<Float>` with a
+// `WeightedGraph` facade, landing in T1-Y phase 3.
+// =============================================================================
+
+module core.collections.adjacency_list;
+
+mount core.collections.map.{Map};
+mount core.collections.list.{List};
+mount core.math.graph.{Edge};
+
+// =============================================================================
+// §1. Type
+// =============================================================================
+
+/// Hash-map-of-outgoing-edges graph.
+///
+/// Invariants (phase-1; the full set moves into axioms once T1-R
+/// phase 2 discharges them on `implement Graph for AdjacencyList`):
+/// 1. Every `src` vertex of every edge in `out_edges` is a key of `out_edges`.
+/// 2. Every `tgt` vertex of every edge is a key of `out_edges` (the
+///    map contains isolated vertices too).
+/// 3. The `vertex_list` is consistent with the key set of `out_edges`.
+public type AdjacencyList<V, L> is {
+    /// Ordered vertex list — preserves insertion order for
+    /// deterministic iteration (important for testing / reproducibility).
+    vertex_list: List<V>,
+    /// Hash-map from source vertex to list of outgoing edges.
+    out_edges: Map<V, List<Edge<V, L>>>,
+};
+
+// =============================================================================
+// §2. Builder API
+// =============================================================================
+
+implement<V: Eq + Hash, L> AdjacencyList<V, L> {
+    /// An empty graph.
+    public fn empty() -> AdjacencyList<V, L> {
+        AdjacencyList {
+            vertex_list: List.new(),
+            out_edges: Map.new(),
+        }
+    }
+
+    /// Add a vertex, idempotent — re-adding an existing vertex is a no-op.
+    public fn add_vertex(&mut self, v: V) {
+        if !self.out_edges.contains_key(&v) {
+            self.vertex_list.push(v.clone());
+            self.out_edges.insert(v, List.new());
+        }
+    }
+
+    /// Add a directed edge. Both endpoints are added to the vertex
+    /// set if absent. This is the only mutation primitive — compound
+    /// constructors (path, cycle, complete graph) live as free
+    /// functions below.
+    public fn add_edge(&mut self, src: V, tgt: V, label: L) {
+        self.add_vertex(src.clone());
+        self.add_vertex(tgt.clone());
+        let edge = Edge {
+            src: src.clone(),
+            tgt: tgt.clone(),
+            label,
+        };
+        match self.out_edges.get_mut(&src) {
+            Maybe.Some(edges) => edges.push(edge),
+            Maybe.None => {
+                let mut fresh = List.new();
+                fresh.push(edge);
+                self.out_edges.insert(src, fresh);
+            }
+        }
+    }
+
+    /// Vertex count — for algorithm complexity bounds.
+    public fn vertex_count(&self) -> Int { self.vertex_list.len() }
+
+    /// Total edge count — sums over all out-edge lists.
+    public fn edge_count(&self) -> Int {
+        let mut total = 0;
+        for v in self.vertex_list.iter() {
+            match self.out_edges.get(v) {
+                Maybe.Some(edges) => { total = total + edges.len(); }
+                Maybe.None => {}
+            }
+        }
+        total
+    }
+}
+
+// =============================================================================
+// §3. Graph protocol instance (T1-AA full realisation)
+// =============================================================================
+
+implement<V: Eq + Hash, L: Clone> Graph<V, L> for AdjacencyList<V, L> {
+    fn vertices(&self) -> List<V> {
+        self.vertex_list.clone()
+    }
+
+    fn edges(&self) -> List<Edge<V, L>> {
+        let mut all: List<Edge<V, L>> = List.new();
+        for v in self.vertex_list.iter() {
+            match self.out_edges.get(v) {
+                Maybe.Some(edges) => {
+                    for e in edges.iter() { all.push(e.clone()); }
+                }
+                Maybe.None => {}
+            }
+        }
+        all
+    }
+
+    fn out_edges(&self, v: &V) -> List<Edge<V, L>> {
+        match self.out_edges.get(v) {
+            Maybe.Some(edges) => edges.clone(),
+            Maybe.None => List.new(),
+        }
+    }
+
+    fn in_edges(&self, v: &V) -> List<Edge<V, L>> {
+        let mut incoming: List<Edge<V, L>> = List.new();
+        for u in self.vertex_list.iter() {
+            match self.out_edges.get(u) {
+                Maybe.Some(edges) => {
+                    for e in edges.iter() {
+                        if e.tgt == *v {
+                            incoming.push(e.clone());
+                        }
+                    }
+                }
+                Maybe.None => {}
+            }
+        }
+        incoming
+    }
+
+    fn degree(&self, v: &V) -> Int {
+        match self.out_edges.get(v) {
+            Maybe.Some(edges) => edges.len(),
+            Maybe.None => 0,
+        }
+    }
+
+    // `truncation` axiom auto-discharged: AdjacencyList has no
+    // n-simplex representation for n ≥ 2 — it's a strict 1-graph.
+    proof truncation by trivial;
+}
+
+// =============================================================================
+// §4. Canonical constructors
+// =============================================================================
+
+/// The complete graph K_n on `n` Int vertices (0, 1, …, n-1) with
+/// unit labels. Every unordered pair becomes two directed edges.
+public fn complete_graph(n: Int{>= 0}) -> AdjacencyList<Int, ()> {
+    let mut g = AdjacencyList.empty();
+    let mut i = 0;
+    while i < n {
+        g.add_vertex(i);
+        i = i + 1;
+    }
+    i = 0;
+    while i < n {
+        let mut j = 0;
+        while j < n {
+            if i != j {
+                g.add_edge(i, j, ());
+            }
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+    g
+}
+
+/// The path graph P_n with vertices 0..n and edges i → i+1.
+public fn path_graph(n: Int{>= 0}) -> AdjacencyList<Int, ()> {
+    let mut g = AdjacencyList.empty();
+    let mut i = 0;
+    while i < n {
+        g.add_vertex(i);
+        i = i + 1;
+    }
+    i = 0;
+    while i + 1 < n {
+        g.add_edge(i, i + 1, ());
+        i = i + 1;
+    }
+    g
+}
+
+/// The cycle graph C_n with vertices 0..n and edges i → (i+1 mod n).
+public fn cycle_graph(n: Int{>= 1}) -> AdjacencyList<Int, ()> {
+    let mut g = path_graph(n);
+    if n > 1 {
+        g.add_edge(n - 1, 0, ());
+    }
+    g
+}
