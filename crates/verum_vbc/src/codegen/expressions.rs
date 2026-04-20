@@ -15635,16 +15635,26 @@ impl VbcCodegen {
                 }
             }
 
-            // Pointer offset: byte-level addressing (ptr + count)
-            // All core/ stdlib uses ptr_offset for raw byte pointers.
+            // Pointer offset: byte-level addressing (ptr + count).
+            //
+            // All core/ stdlib uses `ptr_offset` for raw byte pointers, so
+            // the stride is 1 byte per `count`. Route through
+            // `FfiExtended::PtrAdd` (0x63) rather than a plain `BinaryI::Add`
+            // so the result keeps its `Value::from_ptr` tag — the integer
+            // path strips the pointer tag, which causes downstream
+            // `Value::as_ptr()` callers to see an Int and either panic in
+            // debug or silently read the payload bits as an address in
+            // release. The FFI op also wraps the raw-address arithmetic in
+            // `checked_add_signed`/`checked_sub`, trapping overflow.
             InlineSequenceId::PtrOffset => {
                 if args.len() >= 2 {
-                    // dst = ptr + count (byte offset)
-                    self.ctx.emit(Instruction::BinaryI {
-                        op: BinaryIntOp::Add,
-                        dst: dest,
-                        a: args[0],
-                        b: args[1],
+                    let mut operands = Vec::<u8>::new();
+                    Self::write_reg(&mut operands, dest.0);
+                    Self::write_reg(&mut operands, args[0].0);
+                    Self::write_reg(&mut operands, args[1].0);
+                    self.ctx.emit(Instruction::FfiExtended {
+                        sub_op: 0x63, // PtrAdd
+                        operands,
                     });
                 } else {
                     self.ctx.emit(Instruction::Mov { dst: dest, src: args[0] });
