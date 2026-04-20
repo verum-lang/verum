@@ -1,0 +1,160 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: tracing, opentelemetry, span, trace-context, w3c, sampler
+// @timeout: 15000
+// @expect: pass
+
+// OpenTelemetry-compatible tracing API surface.
+
+mount core.tracing.{
+    TraceId, SpanId, SpanContext, TraceFlags, TraceState,
+    AttributeValue, AttributeSet, Resource,
+    Sampler, SamplingDecision, SamplingResult,
+    AlwaysOn, AlwaysOff, TraceIdRatio, ParentBased,
+    SpanExporter, ExportResult, NoopExporter, StdoutExporter,
+    SpanProcessor, SimpleProcessor, BatchProcessor,
+    Span, SpanKind, SpanStatus, StatusCode, SpanEvent, SpanLink, SpanData,
+    Tracer, TracerProvider, NoopTracer,
+    get_tracer, global_tracer_provider, set_global_tracer_provider,
+    TextMapPropagator, W3CTraceContext,
+    inject_traceparent, extract_traceparent,
+    generate_trace_id, generate_span_id,
+};
+mount core.tracing.processor.{BatchConfig};
+mount core.time.duration.{Duration};
+
+// Identifier shape — generation, hex codec.
+fn typecheck_ids() -> (TraceId, SpanId) {
+    let tid = generate_trace_id();
+    let sid = generate_span_id();
+    let _hex_t = tid.to_hex();
+    let _hex_s = sid.to_hex();
+    (tid, sid)
+}
+
+fn typecheck_id_from_hex(hex: &[Byte]) -> Maybe<TraceId> {
+    TraceId.from_hex(hex)
+}
+
+// Context + flags + state.
+fn typecheck_context() -> SpanContext {
+    let tid = generate_trace_id();
+    let sid = generate_span_id();
+    let flags = TraceFlags.sampled();
+    let state = TraceState.empty().with("vendor".into(), "value".into());
+    SpanContext.new(tid, sid, flags, state, false)
+}
+
+fn typecheck_invalid() -> SpanContext {
+    SpanContext.invalid()
+}
+
+// Resource.
+fn typecheck_resource() -> Resource {
+    Resource.service(&"svc".into(), &"1.0".into())
+        .with_attribute("deployment.env".into(), AttributeValue.Text("prod".into()))
+}
+
+// Attribute values — all primitive shapes.
+fn typecheck_attribute_values() -> AttributeSet {
+    let mut s = AttributeSet.new();
+    s.set("a.text".into(), AttributeValue.Text("v".into()));
+    s.set("a.bool".into(), AttributeValue.Bool(true));
+    s.set("a.int".into(), AttributeValue.Int(42));
+    s.set("a.float".into(), AttributeValue.Float(3.14));
+    s
+}
+
+// Samplers.
+fn typecheck_samplers(parent: &SpanContext, trace_id: &TraceId, attrs: &AttributeSet) {
+    let on = AlwaysOn.new();
+    let off = AlwaysOff.new();
+    let ratio = TraceIdRatio.new(0.1);
+    let pb = ParentBased.new(Heap.new(AlwaysOn.new()) as Heap<dyn Sampler>);
+    let _a = on.should_sample(parent, trace_id, &"n".into(), SpanKind.Internal, attrs);
+    let _b = off.should_sample(parent, trace_id, &"n".into(), SpanKind.Internal, attrs);
+    let _c = ratio.should_sample(parent, trace_id, &"n".into(), SpanKind.Internal, attrs);
+    let _d = pb.should_sample(parent, trace_id, &"n".into(), SpanKind.Internal, attrs);
+}
+
+// Exporters.
+fn typecheck_exporters() -> (NoopExporter, StdoutExporter) {
+    (NoopExporter.new(), StdoutExporter.new())
+}
+
+fn typecheck_export(exp: &NoopExporter, spans: &List<SpanData>) -> ExportResult {
+    exp.export(spans)
+}
+
+// Processors.
+fn typecheck_simple_processor(exporter: Heap<dyn SpanExporter>) -> SimpleProcessor {
+    SimpleProcessor.new(exporter)
+}
+
+fn typecheck_batch_processor(exporter: Heap<dyn SpanExporter>) -> BatchProcessor {
+    BatchProcessor.with_config(
+        exporter,
+        BatchConfig.default()
+            .with_queue_size(4096)
+            .with_max_export_batch_size(256)
+            .with_scheduled_delay(Duration.millis(500)),
+    )
+}
+
+// Tracer + TracerProvider.
+fn typecheck_tracer_provider() -> TracerProvider {
+    TracerProvider.builder()
+        .with_resource(Resource.service(&"svc".into(), &"1.0".into()))
+        .with_sampler(Heap.new(AlwaysOn.new()) as Heap<dyn Sampler>)
+        .with_processor(
+            Heap.new(SimpleProcessor.new(
+                Heap.new(NoopExporter.new()) as Heap<dyn SpanExporter>,
+            )) as Heap<dyn SpanProcessor>,
+        )
+        .build()
+}
+
+fn typecheck_global() {
+    set_global_tracer_provider(typecheck_tracer_provider());
+    let _provider = global_tracer_provider();
+    let _tracer = get_tracer(&"my.instrumentation".into(), &"1.0".into());
+}
+
+// Full start-span flow using a concrete NoopTracer.
+fn typecheck_span_flow() {
+    let tracer = NoopTracer.new("scope".into(), "1.0".into());
+    let parent = SpanContext.invalid();
+    let attrs = AttributeSet.new();
+    let links: List<SpanLink> = List.new();
+    let span = tracer.start_span(&"handle".into(), SpanKind.Server, attrs, links, &parent);
+    span.set_attribute("http.method".into(), AttributeValue.Text("GET".into()));
+    span.add_event_now("request.received".into());
+    span.set_status(SpanStatus.ok());
+    let _data = span.end();
+}
+
+// W3C traceparent / tracestate codec.
+fn typecheck_w3c() -> SpanContext {
+    let prop = W3CTraceContext.new();
+    let mut headers: List<(Text, Text)> = List.new();
+    let ctx = SpanContext.new(
+        generate_trace_id(), generate_span_id(),
+        TraceFlags.sampled(), TraceState.empty(), false,
+    );
+    prop.inject(&ctx, &mut headers);
+    prop.extract(&headers)
+}
+
+fn typecheck_inject_extract() -> SpanContext {
+    let ctx = SpanContext.new(
+        generate_trace_id(), generate_span_id(),
+        TraceFlags.sampled(), TraceState.empty(), false,
+    );
+    let hdr = inject_traceparent(&ctx);
+    extract_traceparent(&hdr)
+}
+
+fn main() {
+    // Shape-only test.
+}

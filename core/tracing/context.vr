@@ -1,0 +1,193 @@
+// =============================================================================
+// tracing/context.vr — SpanContext + TraceFlags + TraceState
+// =============================================================================
+// W3C Trace Context propagation types. Follows spec rev 2021-11-23:
+//   https://www.w3.org/TR/trace-context/
+// =============================================================================
+
+module core.tracing.context;
+
+mount core.*;
+mount core.tracing.id.{TraceId, SpanId};
+
+// =============================================================================
+// TraceFlags — 1 byte, bit 0 = sampled, bits 1–7 reserved
+// =============================================================================
+
+public type TraceFlags is {
+    bits: UInt8,
+};
+
+implement TraceFlags {
+    pub fn new(bits: UInt8) -> TraceFlags {
+        TraceFlags { bits: bits }
+    }
+
+    pub fn default() -> TraceFlags {
+        TraceFlags { bits: 0 }
+    }
+
+    pub fn sampled() -> TraceFlags {
+        TraceFlags { bits: 0x01 }
+    }
+
+    pub fn is_sampled(&self) -> Bool {
+        (self.bits & 0x01) != 0
+    }
+
+    pub fn with_sampled(&self, sampled: Bool) -> TraceFlags {
+        if sampled {
+            TraceFlags { bits: self.bits | 0x01 }
+        } else {
+            TraceFlags { bits: self.bits & 0xFE }
+        }
+    }
+
+    pub fn to_byte(&self) -> UInt8 { self.bits }
+}
+
+// =============================================================================
+// TraceState — W3C-compliant key/value vendor list (§3.3.1)
+// =============================================================================
+//
+// Limits per spec:
+//   max 32 members; each key <= 256 chars; each value <= 256 chars; total
+//   combined serialised length <= 512 chars. Members preserve insertion
+//   order; new members prepend so the latest mutator is first.
+//
+// Storage: fixed-capacity list of (Text, Text). We enforce the count
+// limit at mutation time; key/value length is caller-validated.
+
+public const TRACESTATE_MAX_MEMBERS: Int = 32;
+public const TRACESTATE_MAX_KEY_LEN: Int = 256;
+public const TRACESTATE_MAX_VALUE_LEN: Int = 256;
+
+public type TraceState is {
+    entries: List<(Text, Text)>,
+};
+
+implement TraceState {
+    pub fn empty() -> TraceState {
+        TraceState { entries: List.new() }
+    }
+
+    pub fn len(&self) -> Int { self.entries.len() }
+    pub fn is_empty(&self) -> Bool { self.entries.is_empty() }
+
+    /// Look up a key (first match wins).
+    pub fn get(&self, key: &Text) -> Maybe<&Text> {
+        let mut i = 0;
+        while i < self.entries.len() {
+            if self.entries[i].0 == *key {
+                return Some(&self.entries[i].1);
+            }
+            i = i + 1;
+        }
+        None
+    }
+
+    /// Insert / update a key. New keys prepend per W3C §3.3.1.1.
+    /// Validates key + value length; returns unchanged state if either
+    /// is too long or if the list is full.
+    pub fn with(&self, key: Text, value: Text) -> TraceState {
+        if key.len() == 0 || key.len() > TRACESTATE_MAX_KEY_LEN { return self.clone(); }
+        if value.len() > TRACESTATE_MAX_VALUE_LEN { return self.clone(); }
+        let mut entries = List.with_capacity(self.entries.len() + 1);
+        entries.push((key, value));
+        let key_ref = &entries[0].0;
+        let mut i = 0;
+        while i < self.entries.len() {
+            if self.entries[i].0 != *key_ref
+                && entries.len() < TRACESTATE_MAX_MEMBERS
+            {
+                entries.push((self.entries[i].0.clone(), self.entries[i].1.clone()));
+            }
+            i = i + 1;
+        }
+        TraceState { entries: entries }
+    }
+
+    pub fn clone(&self) -> TraceState {
+        let mut entries = List.with_capacity(self.entries.len());
+        let mut i = 0;
+        while i < self.entries.len() {
+            entries.push((self.entries[i].0.clone(), self.entries[i].1.clone()));
+            i = i + 1;
+        }
+        TraceState { entries: entries }
+    }
+
+    pub fn entries(&self) -> &List<(Text, Text)> { &self.entries }
+}
+
+// =============================================================================
+// SpanContext — immutable {TraceId, SpanId, TraceFlags, TraceState, remote}
+// =============================================================================
+
+public type SpanContext is {
+    trace_id: TraceId,
+    span_id: SpanId,
+    flags: TraceFlags,
+    trace_state: TraceState,
+    is_remote: Bool,
+};
+
+implement SpanContext {
+    pub fn new(
+        trace_id: TraceId,
+        span_id: SpanId,
+        flags: TraceFlags,
+        trace_state: TraceState,
+        is_remote: Bool,
+    ) -> SpanContext {
+        SpanContext {
+            trace_id: trace_id,
+            span_id: span_id,
+            flags: flags,
+            trace_state: trace_state,
+            is_remote: is_remote,
+        }
+    }
+
+    /// The "invalid" sentinel context (used to mean "no parent").
+    pub fn invalid() -> SpanContext {
+        SpanContext {
+            trace_id: TraceId.invalid(),
+            span_id: SpanId.invalid(),
+            flags: TraceFlags.default(),
+            trace_state: TraceState.empty(),
+            is_remote: false,
+        }
+    }
+
+    pub fn is_valid(&self) -> Bool {
+        !self.trace_id.is_invalid() && !self.span_id.is_invalid()
+    }
+
+    pub fn trace_id(&self) -> &TraceId { &self.trace_id }
+    pub fn span_id(&self) -> &SpanId { &self.span_id }
+    pub fn flags(&self) -> TraceFlags { self.flags }
+    pub fn trace_state(&self) -> &TraceState { &self.trace_state }
+    pub fn is_remote(&self) -> Bool { self.is_remote }
+
+    pub fn is_sampled(&self) -> Bool { self.flags.is_sampled() }
+
+    pub fn clone(&self) -> SpanContext {
+        SpanContext {
+            trace_id: self.trace_id,
+            span_id: self.span_id,
+            flags: self.flags,
+            trace_state: self.trace_state.clone(),
+            is_remote: self.is_remote,
+        }
+    }
+}
+
+/// Shared invalid-context constant — use as default for root spans.
+public const INVALID_SPAN_CONTEXT_VAL: () = ();
+
+/// Function form matching the re-export (constants with complex types
+/// cannot always be imported directly).
+public fn INVALID_SPAN_CONTEXT() -> SpanContext {
+    SpanContext.invalid()
+}

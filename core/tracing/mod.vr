@@ -1,0 +1,129 @@
+// =============================================================================
+// tracing/mod.vr — Distributed tracing (OpenTelemetry-compatible)
+// =============================================================================
+// Layer: 4.9 (depends on core, text, collections, async, sync, time, net)
+// Spec: docs/detailed/tracing-architecture.md
+//       https://opentelemetry.io/docs/specs/otel/trace/api/
+// =============================================================================
+//
+// OpenTelemetry-compatible tracing primitives. Provides:
+//
+// - TraceId / SpanId — opaque identifiers (128-bit / 64-bit)
+// - SpanContext — trace_id + span_id + flags + trace_state (W3C Trace Context)
+// - Span — unit of work, attributes, events, links, status
+// - Tracer — span factory with parent-context propagation
+// - Sampler — head-based sampling decision
+// - SpanProcessor — on-start / on-end pipeline stage
+// - SpanExporter — pluggable sink (stdout, OTLP/gRPC, OTLP/HTTP, Jaeger)
+// - TextMapPropagator — W3C traceparent / tracestate header codec
+// - Resource — process-wide attributes (service.name, service.version, ...)
+//
+// # Design choices
+//
+// - Zero runtime dependencies beyond core + sync + time.
+// - SpanContext is a 32-byte POD for cheap propagation.
+// - TextMapPropagator encodes/decodes in-place into caller-provided
+//   List<Byte> buffers — zero allocation for the hot path.
+// - The global Tracer is behind an AtomicPtr for safe late-initialisation.
+// - Span attributes / events are append-only `List`s allocated per-span;
+//   reuse is via ObjectPool<Span> when the BatchProcessor releases.
+//
+// # Minimal usage
+//
+// ```verum
+// mount core.tracing.*;
+//
+// // Configure once at startup
+// set_global_tracer_provider(
+//     TracerProvider.builder()
+//         .with_resource(Resource.service("weft-edge", "1.0"))
+//         .with_sampler(Sampler.parent_based(Sampler.always_on()))
+//         .with_processor(BatchProcessor.new(StdoutExporter.new()))
+//         .build()
+// );
+//
+// // Use anywhere
+// let tracer = get_tracer("edge.handler", "1.0");
+// let span = tracer.start_span("handle_request");
+// span.set_attribute("http.method", AttributeValue.Text("GET"));
+// span.set_attribute("http.path", AttributeValue.Text(&path));
+// // ... work ...
+// span.set_status(SpanStatus.Ok);
+// span.end();
+// ```
+// =============================================================================
+
+module core.tracing;
+
+public module id;
+public module context;
+public module attribute;
+public module resource;
+public module sampler;
+public module exporter;
+public module processor;
+public module span;
+public module tracer;
+public module propagation;
+
+// =============================================================================
+// Re-exports — flat public API
+// =============================================================================
+
+// Identifiers
+public mount .id.TraceId;
+public mount .id.SpanId;
+public mount .id.generate_trace_id;
+public mount .id.generate_span_id;
+
+// Context
+public mount .context.SpanContext;
+public mount .context.TraceFlags;
+public mount .context.TraceState;
+public mount .context.INVALID_SPAN_CONTEXT;
+
+// Attribute
+public mount .attribute.AttributeValue;
+public mount .attribute.AttributeSet;
+
+// Resource
+public mount .resource.Resource;
+
+// Sampler
+public mount .sampler.Sampler;
+public mount .sampler.SamplingDecision;
+public mount .sampler.SamplingResult;
+public mount .sampler.AlwaysOn;
+public mount .sampler.AlwaysOff;
+public mount .sampler.TraceIdRatio;
+public mount .sampler.ParentBased;
+
+// Exporter + processor
+public mount .exporter.SpanExporter;
+public mount .exporter.ExportResult;
+public mount .exporter.NoopExporter;
+public mount .exporter.StdoutExporter;
+public mount .processor.SpanProcessor;
+public mount .processor.SimpleProcessor;
+public mount .processor.BatchProcessor;
+
+// Span + tracer
+public mount .span.Span;
+public mount .span.SpanKind;
+public mount .span.SpanStatus;
+public mount .span.StatusCode;
+public mount .span.SpanEvent;
+public mount .span.SpanLink;
+public mount .span.SpanData;
+public mount .tracer.Tracer;
+public mount .tracer.TracerProvider;
+public mount .tracer.NoopTracer;
+public mount .tracer.get_tracer;
+public mount .tracer.global_tracer_provider;
+public mount .tracer.set_global_tracer_provider;
+
+// Propagation
+public mount .propagation.TextMapPropagator;
+public mount .propagation.W3CTraceContext;
+public mount .propagation.inject_traceparent;
+public mount .propagation.extract_traceparent;

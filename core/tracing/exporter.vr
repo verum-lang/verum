@@ -1,0 +1,154 @@
+// =============================================================================
+// tracing/exporter.vr — SpanExporter protocol + in-tree exporters
+// =============================================================================
+// An exporter consumes a batch of SpanData and writes them somewhere —
+// stdout, OTLP-gRPC, OTLP-HTTP, Jaeger, Zipkin, Datadog, etc. Third-party
+// exporters live in separate cogs.
+// Spec: https://opentelemetry.io/docs/specs/otel/trace/sdk/#span-exporter
+// =============================================================================
+
+module core.tracing.exporter;
+
+mount core.*;
+mount core.io.{Write};
+mount core.sync.mutex.{Mutex};
+mount core.time.duration.{Duration};
+mount core.tracing.span.{SpanData, StatusCode};
+mount core.tracing.attribute.{AttributeValue};
+
+// =============================================================================
+// Protocol
+// =============================================================================
+
+public type ExportResult is
+    | Success
+    | Failure(Text);
+
+public type SpanExporter is protocol {
+    /// Export a batch of spans. Called from a processor (usually the
+    /// Batch one, on a worker task). May block on I/O — should be made
+    /// async by the processor, not the exporter.
+    fn export(&self, spans: &List<SpanData>) -> ExportResult;
+
+    /// Flush any pending spans. Called during shutdown + on timer.
+    fn force_flush(&self, timeout: Duration) -> ExportResult;
+
+    /// Shutdown — the exporter should release all resources.
+    fn shutdown(&self, timeout: Duration) -> ExportResult;
+};
+
+// =============================================================================
+// NoopExporter — discard everything
+// =============================================================================
+
+public type NoopExporter is ();
+
+implement NoopExporter {
+    pub fn new() -> NoopExporter { () }
+}
+
+implement SpanExporter for NoopExporter {
+    fn export(&self, _spans: &List<SpanData>) -> ExportResult { ExportResult.Success }
+    fn force_flush(&self, _t: Duration) -> ExportResult { ExportResult.Success }
+    fn shutdown(&self, _t: Duration) -> ExportResult { ExportResult.Success }
+}
+
+// =============================================================================
+// StdoutExporter — human-readable text per span (dev / debugging)
+// =============================================================================
+//
+// Format is line-oriented, one line per span:
+//   [trace_id:span_id] name kind status duration attrs...
+//
+// A Mutex serialises writes to stdout to avoid interleaving partial
+// spans under concurrent export.
+
+public type StdoutExporter is {
+    lock: Shared<Mutex<()>>,
+};
+
+implement StdoutExporter {
+    pub fn new() -> StdoutExporter {
+        StdoutExporter { lock: Shared.new(Mutex.new(())) }
+    }
+}
+
+implement SpanExporter for StdoutExporter {
+    fn export(&self, spans: &List<SpanData>) -> ExportResult {
+        let _guard = self.lock.lock();
+        let mut i = 0;
+        while i < spans.len() {
+            let s = &spans[i];
+            let line = format_span_line(s);
+            print(&line);
+            println("");
+            i = i + 1;
+        }
+        ExportResult.Success
+    }
+
+    fn force_flush(&self, _t: Duration) -> ExportResult {
+        ExportResult.Success
+    }
+
+    fn shutdown(&self, _t: Duration) -> ExportResult {
+        ExportResult.Success
+    }
+}
+
+// =============================================================================
+// Internal formatting helpers
+// =============================================================================
+
+fn format_span_line(s: &SpanData) -> Text {
+    let tid = s.context().trace_id().to_hex();
+    let sid = s.context().span_id().to_hex();
+    let status = match s.status().code() {
+        StatusCode.Unset => "UNSET",
+        StatusCode.Ok => "OK",
+        StatusCode.Error => "ERROR",
+    };
+    let dur_ns = s.duration().as_nanos();
+    let kind = kind_name(s.kind());
+    let attrs = format_attrs(s.attributes().entries());
+    f"[{tid}:{sid}] {s.name()} kind={kind} status={status} dur_ns={dur_ns} {attrs}"
+}
+
+fn kind_name(k: core.tracing.span.SpanKind) -> &'static Text {
+    match k {
+        core.tracing.span.SpanKind.Internal => "INTERNAL",
+        core.tracing.span.SpanKind.Client => "CLIENT",
+        core.tracing.span.SpanKind.Server => "SERVER",
+        core.tracing.span.SpanKind.Producer => "PRODUCER",
+        core.tracing.span.SpanKind.Consumer => "CONSUMER",
+    }
+}
+
+fn format_attrs(entries: &List<(Text, AttributeValue)>) -> Text {
+    if entries.is_empty() { return "".into(); }
+    let mut out = Text.with_capacity(64);
+    out.push_str("attrs={");
+    let mut i = 0;
+    while i < entries.len() {
+        if i > 0 { out.push_str(", "); }
+        out.push_str(&entries[i].0);
+        out.push_str("=");
+        out.push_str(&format_attr_value(&entries[i].1));
+        i = i + 1;
+    }
+    out.push_str("}");
+    out
+}
+
+fn format_attr_value(v: &AttributeValue) -> Text {
+    match v {
+        AttributeValue.Text(t) => f"\"{t}\"",
+        AttributeValue.Bool(b) => f"{b}",
+        AttributeValue.Int(i) => f"{i}",
+        AttributeValue.Float(f) => f"{f}",
+        AttributeValue.TextArray(xs) => f"[{xs.len()} strings]",
+        AttributeValue.BoolArray(xs) => f"[{xs.len()} bools]",
+        AttributeValue.IntArray(xs) => f"[{xs.len()} ints]",
+        AttributeValue.FloatArray(xs) => f"[{xs.len()} floats]",
+    }
+}

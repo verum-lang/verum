@@ -1,0 +1,236 @@
+// =============================================================================
+// tracing/sampler.vr — Sampler protocol + standard samplers
+// =============================================================================
+// Head-based sampling decision. Consulted by Tracer.start_span() with the
+// parent context and span attributes; returns RecordAndSample / RecordOnly /
+// Drop plus an updated TraceState.
+// Spec: https://opentelemetry.io/docs/specs/otel/trace/sdk/#sampler
+// =============================================================================
+
+module core.tracing.sampler;
+
+mount core.*;
+mount core.tracing.id.{TraceId};
+mount core.tracing.context.{SpanContext, TraceFlags, TraceState};
+mount core.tracing.attribute.{AttributeSet};
+mount core.tracing.span.{SpanKind};
+
+// =============================================================================
+// Types
+// =============================================================================
+
+public type SamplingDecision is
+    /// Drop — span is not recorded nor sampled.
+    | Drop
+    /// Record but do not sample (for internal aggregation only).
+    | RecordOnly
+    /// Record AND include in sampled output (with sampled flag set).
+    | RecordAndSample;
+
+public type SamplingResult is {
+    decision: SamplingDecision,
+    /// Overrides for the new span's TraceState (may clone / modify parent).
+    trace_state: TraceState,
+};
+
+implement SamplingResult {
+    pub fn new(decision: SamplingDecision, trace_state: TraceState) -> SamplingResult {
+        SamplingResult { decision: decision, trace_state: trace_state }
+    }
+
+    pub fn decision(&self) -> SamplingDecision { self.decision }
+    pub fn trace_state(&self) -> &TraceState { &self.trace_state }
+}
+
+// =============================================================================
+// Protocol
+// =============================================================================
+
+public type Sampler is protocol {
+    /// Decide whether to sample. Pure function — no side effects.
+    fn should_sample(
+        &self,
+        parent: &SpanContext,
+        trace_id: &TraceId,
+        name: &Text,
+        kind: SpanKind,
+        attributes: &AttributeSet,
+    ) -> SamplingResult;
+
+    /// Human-readable identifier for telemetry / diagnostics.
+    fn description(&self) -> Text;
+};
+
+// =============================================================================
+// AlwaysOn — every span sampled
+// =============================================================================
+
+public type AlwaysOn is ();
+
+implement AlwaysOn {
+    pub fn new() -> AlwaysOn { () }
+}
+
+implement Sampler for AlwaysOn {
+    fn should_sample(
+        &self,
+        parent: &SpanContext,
+        _trace_id: &TraceId,
+        _name: &Text,
+        _kind: SpanKind,
+        _attributes: &AttributeSet,
+    ) -> SamplingResult {
+        SamplingResult.new(SamplingDecision.RecordAndSample, parent.trace_state().clone())
+    }
+
+    fn description(&self) -> Text { "AlwaysOnSampler".into() }
+}
+
+// =============================================================================
+// AlwaysOff — nothing sampled
+// =============================================================================
+
+public type AlwaysOff is ();
+
+implement AlwaysOff {
+    pub fn new() -> AlwaysOff { () }
+}
+
+implement Sampler for AlwaysOff {
+    fn should_sample(
+        &self,
+        parent: &SpanContext,
+        _trace_id: &TraceId,
+        _name: &Text,
+        _kind: SpanKind,
+        _attributes: &AttributeSet,
+    ) -> SamplingResult {
+        SamplingResult.new(SamplingDecision.Drop, parent.trace_state().clone())
+    }
+
+    fn description(&self) -> Text { "AlwaysOffSampler".into() }
+}
+
+// =============================================================================
+// TraceIdRatio — deterministic ratio sampling by TraceId high 64 bits
+// =============================================================================
+//
+// Sample if trace_id_high_u64 < ratio_threshold, where ratio_threshold
+// scales the u64 space by `ratio` ∈ [0.0, 1.0]. Identical TraceIds will
+// always produce the same decision, so parent + child spans agree.
+
+public type TraceIdRatio is {
+    ratio: Float,
+    threshold: UInt64,
+};
+
+implement TraceIdRatio {
+    pub fn new(ratio: Float) -> TraceIdRatio {
+        let r = if ratio < 0.0 { 0.0 } else if ratio > 1.0 { 1.0 } else { ratio };
+        let threshold = (r * (18446744073709551615.0 as Float)) as UInt64;
+        TraceIdRatio { ratio: r, threshold: threshold }
+    }
+
+    fn trace_id_high(bytes: &[UInt8; 16]) -> UInt64 {
+        let mut n: UInt64 = 0;
+        let mut i = 0;
+        while i < 8 {
+            n = (n << 8) | (bytes[i] as UInt64);
+            i = i + 1;
+        }
+        n
+    }
+}
+
+implement Sampler for TraceIdRatio {
+    fn should_sample(
+        &self,
+        parent: &SpanContext,
+        trace_id: &TraceId,
+        _name: &Text,
+        _kind: SpanKind,
+        _attributes: &AttributeSet,
+    ) -> SamplingResult {
+        let high = TraceIdRatio.trace_id_high(trace_id.as_bytes());
+        if high < self.threshold {
+            SamplingResult.new(SamplingDecision.RecordAndSample, parent.trace_state().clone())
+        } else {
+            SamplingResult.new(SamplingDecision.Drop, parent.trace_state().clone())
+        }
+    }
+
+    fn description(&self) -> Text {
+        f"TraceIdRatioSampler{{ratio={self.ratio}}}"
+    }
+}
+
+// =============================================================================
+// ParentBased — defer to parent; fall back to `root` for remote / missing
+// =============================================================================
+
+public type ParentBased is {
+    root: Heap<dyn Sampler>,
+    remote_parent_sampled: Heap<dyn Sampler>,
+    remote_parent_not_sampled: Heap<dyn Sampler>,
+    local_parent_sampled: Heap<dyn Sampler>,
+    local_parent_not_sampled: Heap<dyn Sampler>,
+};
+
+implement ParentBased {
+    /// Convenience — all-AlwaysOn/Off derivatives of `root`.
+    pub fn new(root: Heap<dyn Sampler>) -> ParentBased {
+        ParentBased {
+            root: root,
+            remote_parent_sampled: Heap.new(AlwaysOn.new()),
+            remote_parent_not_sampled: Heap.new(AlwaysOff.new()),
+            local_parent_sampled: Heap.new(AlwaysOn.new()),
+            local_parent_not_sampled: Heap.new(AlwaysOff.new()),
+        }
+    }
+}
+
+implement Sampler for ParentBased {
+    fn should_sample(
+        &self,
+        parent: &SpanContext,
+        trace_id: &TraceId,
+        name: &Text,
+        kind: SpanKind,
+        attributes: &AttributeSet,
+    ) -> SamplingResult {
+        if !parent.is_valid() {
+            return self.root.should_sample(parent, trace_id, name, kind, attributes);
+        }
+        let sampled = parent.is_sampled();
+        let sampler = if parent.is_remote() {
+            if sampled { &self.remote_parent_sampled } else { &self.remote_parent_not_sampled }
+        } else {
+            if sampled { &self.local_parent_sampled } else { &self.local_parent_not_sampled }
+        };
+        sampler.should_sample(parent, trace_id, name, kind, attributes)
+    }
+
+    fn description(&self) -> Text {
+        f"ParentBased{{root={self.root.description()}}}"
+    }
+}
+
+// =============================================================================
+// Factory functions used in the tracing.mod re-exports
+// =============================================================================
+
+public fn always_on() -> Heap<dyn Sampler> {
+    Heap.new(AlwaysOn.new()) as Heap<dyn Sampler>
+}
+
+public fn always_off() -> Heap<dyn Sampler> {
+    Heap.new(AlwaysOff.new()) as Heap<dyn Sampler>
+}
+
+public fn trace_id_ratio(ratio: Float) -> Heap<dyn Sampler> {
+    Heap.new(TraceIdRatio.new(ratio)) as Heap<dyn Sampler>
+}
+
+public fn parent_based(root: Heap<dyn Sampler>) -> Heap<dyn Sampler> {
+    Heap.new(ParentBased.new(root)) as Heap<dyn Sampler>
+}

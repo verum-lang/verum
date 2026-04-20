@@ -205,6 +205,16 @@ public module security;
 public module compress;
 
 // =============================================================================
+// Layer 4.95: Tracing (Depends on: core, text, collections, async, sync, time)
+// =============================================================================
+
+// Distributed tracing (OpenTelemetry-compatible): TraceId/SpanId,
+// SpanContext, Span, Tracer, Sampler, SpanProcessor, SpanExporter,
+// W3C Trace Context (traceparent/tracestate) propagation.
+// Spec: docs/detailed/tracing-architecture.md
+public module tracing;
+
+// =============================================================================
 // Layer 5: Network (Depends on: core, text, collections, io, async)
 // =============================================================================
 

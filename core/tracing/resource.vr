@@ -1,0 +1,91 @@
+// =============================================================================
+// tracing/resource.vr — Resource (process-wide attributes)
+// =============================================================================
+// A Resource identifies the entity producing telemetry. In practice this
+// is a container/process/pod name plus service.name + service.version,
+// and is attached to every exported span / metric / log.
+// Spec: https://opentelemetry.io/docs/specs/otel/resource/sdk/
+// =============================================================================
+
+module core.tracing.resource;
+
+mount core.*;
+mount core.tracing.attribute.{AttributeValue, AttributeSet};
+
+public type Resource is {
+    attributes: AttributeSet,
+    schema_url: Maybe<Text>,
+};
+
+implement Resource {
+    pub fn empty() -> Resource {
+        Resource {
+            attributes: AttributeSet.new(),
+            schema_url: None,
+        }
+    }
+
+    /// Convenience — single (service.name, service.version) pair which
+    /// is by far the most common resource shape.
+    pub fn service(name: &Text, version: &Text) -> Resource {
+        let mut attrs = AttributeSet.new();
+        attrs.set("service.name".into(), AttributeValue.Text(name.clone()));
+        attrs.set("service.version".into(), AttributeValue.Text(version.clone()));
+        Resource {
+            attributes: attrs,
+            schema_url: None,
+        }
+    }
+
+    pub fn from_attributes(attributes: AttributeSet) -> Resource {
+        Resource {
+            attributes: attributes,
+            schema_url: None,
+        }
+    }
+
+    pub fn with_schema_url(mut self, url: Text) -> Resource {
+        self.schema_url = Some(url);
+        self
+    }
+
+    pub fn with_attribute(mut self, key: Text, value: AttributeValue) -> Resource {
+        self.attributes.set(key, value);
+        self
+    }
+
+    /// Merge — values from `other` take precedence on conflict
+    /// (per OTel SDK spec — newer resources override older).
+    pub fn merge(&self, other: &Resource) -> Resource {
+        let mut merged = self.attributes.clone();
+        let entries = other.attributes.entries();
+        let mut i = 0;
+        while i < entries.len() {
+            merged.set(entries[i].0.clone(), entries[i].1.clone());
+            i = i + 1;
+        }
+        Resource {
+            attributes: merged,
+            schema_url: match &other.schema_url {
+                Some(u) => Some(u.clone()),
+                None => match &self.schema_url {
+                    Some(u) => Some(u.clone()),
+                    None => None,
+                }
+            }
+        }
+    }
+
+    pub fn attributes(&self) -> &AttributeSet { &self.attributes }
+    pub fn schema_url(&self) -> &Maybe<Text> { &self.schema_url }
+
+    pub fn clone(&self) -> Resource {
+        Resource {
+            attributes: self.attributes.clone(),
+            schema_url: match &self.schema_url {
+                Some(u) => Some(u.clone()),
+                None => None,
+            }
+        }
+    }
+}

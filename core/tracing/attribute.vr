@@ -1,0 +1,140 @@
+// =============================================================================
+// tracing/attribute.vr — AttributeValue + AttributeSet
+// =============================================================================
+// Key/value attributes attached to spans, events, links, and resources.
+// The value shape follows the OpenTelemetry spec: Text | Bool | Int |
+// Float | ArrayOf(primitive).
+// =============================================================================
+
+module core.tracing.attribute;
+
+mount core.*;
+
+// =============================================================================
+// AttributeValue
+// =============================================================================
+
+public type AttributeValue is
+    | Text(Text)
+    | Bool(Bool)
+    | Int(Int)
+    | Float(Float)
+    | TextArray(List<Text>)
+    | BoolArray(List<Bool>)
+    | IntArray(List<Int>)
+    | FloatArray(List<Float>);
+
+implement AttributeValue {
+    /// Type-tag for efficient dispatch by exporters.
+    pub fn kind(&self) -> AttributeKind {
+        match self {
+            AttributeValue.Text(_) => AttributeKind.KText,
+            AttributeValue.Bool(_) => AttributeKind.KBool,
+            AttributeValue.Int(_) => AttributeKind.KInt,
+            AttributeValue.Float(_) => AttributeKind.KFloat,
+            AttributeValue.TextArray(_) => AttributeKind.KTextArray,
+            AttributeValue.BoolArray(_) => AttributeKind.KBoolArray,
+            AttributeValue.IntArray(_) => AttributeKind.KIntArray,
+            AttributeValue.FloatArray(_) => AttributeKind.KFloatArray,
+        }
+    }
+
+    pub fn clone(&self) -> AttributeValue {
+        match self {
+            AttributeValue.Text(t) => AttributeValue.Text(t.clone()),
+            AttributeValue.Bool(b) => AttributeValue.Bool(*b),
+            AttributeValue.Int(i) => AttributeValue.Int(*i),
+            AttributeValue.Float(f) => AttributeValue.Float(*f),
+            AttributeValue.TextArray(xs) => AttributeValue.TextArray(clone_text_list(xs)),
+            AttributeValue.BoolArray(xs) => AttributeValue.BoolArray(xs.clone()),
+            AttributeValue.IntArray(xs) => AttributeValue.IntArray(xs.clone()),
+            AttributeValue.FloatArray(xs) => AttributeValue.FloatArray(xs.clone()),
+        }
+    }
+}
+
+public type AttributeKind is
+    | KText
+    | KBool
+    | KInt
+    | KFloat
+    | KTextArray
+    | KBoolArray
+    | KIntArray
+    | KFloatArray;
+
+// =============================================================================
+// AttributeSet — key/value list with insertion-order preservation
+// =============================================================================
+//
+// Ordered linear scan is fine up to ~32 entries (the OpenTelemetry default
+// limit per span). Callers that need large counts can use a separate Map.
+
+public const ATTRIBUTE_COUNT_LIMIT: Int = 128;
+
+public type AttributeSet is {
+    entries: List<(Text, AttributeValue)>,
+};
+
+implement AttributeSet {
+    pub fn new() -> AttributeSet {
+        AttributeSet { entries: List.new() }
+    }
+
+    pub fn with_capacity(cap: Int) -> AttributeSet {
+        AttributeSet { entries: List.with_capacity(cap) }
+    }
+
+    pub fn len(&self) -> Int { self.entries.len() }
+    pub fn is_empty(&self) -> Bool { self.entries.is_empty() }
+
+    /// Look up a key (first match).
+    pub fn get(&self, key: &Text) -> Maybe<&AttributeValue> {
+        let mut i = 0;
+        while i < self.entries.len() {
+            if self.entries[i].0 == *key {
+                return Some(&self.entries[i].1);
+            }
+            i = i + 1;
+        }
+        None
+    }
+
+    /// Insert or replace. Silently drops if over ATTRIBUTE_COUNT_LIMIT.
+    pub fn set(&mut self, key: Text, value: AttributeValue) {
+        let mut i = 0;
+        while i < self.entries.len() {
+            if self.entries[i].0 == key {
+                self.entries[i].1 = value;
+                return;
+            }
+            i = i + 1;
+        }
+        if self.entries.len() >= ATTRIBUTE_COUNT_LIMIT { return; }
+        self.entries.push((key, value));
+    }
+
+    pub fn entries(&self) -> &List<(Text, AttributeValue)> { &self.entries }
+
+    pub fn clone(&self) -> AttributeSet {
+        let mut out = List.with_capacity(self.entries.len());
+        let mut i = 0;
+        while i < self.entries.len() {
+            out.push((self.entries[i].0.clone(), self.entries[i].1.clone()));
+            i = i + 1;
+        }
+        AttributeSet { entries: out }
+    }
+}
+
+// -------------------------------------------------------------------------
+
+fn clone_text_list(xs: &List<Text>) -> List<Text> {
+    let mut out = List.with_capacity(xs.len());
+    let mut i = 0;
+    while i < xs.len() {
+        out.push(xs[i].clone());
+        i = i + 1;
+    }
+    out
+}

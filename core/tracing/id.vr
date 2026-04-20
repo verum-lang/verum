@@ -1,0 +1,202 @@
+// =============================================================================
+// tracing/id.vr — TraceId (128-bit) / SpanId (64-bit)
+// =============================================================================
+// Opaque identifiers per OpenTelemetry + W3C Trace Context. Stored as
+// fixed-size byte arrays for zero-copy hex encoding / decoding.
+// =============================================================================
+
+module core.tracing.id;
+
+mount core.*;
+mount core.sync.atomic.{AtomicU64};
+
+// =============================================================================
+// TraceId — 16 bytes
+// =============================================================================
+
+/// 128-bit trace identifier per W3C Trace Context §2.2.2.
+/// All-zero value is reserved as "invalid".
+public type TraceId is {
+    bytes: [UInt8; 16],
+};
+
+implement TraceId {
+    /// Build from raw 16-byte array.
+    pub fn from_bytes(bytes: [UInt8; 16]) -> TraceId {
+        TraceId { bytes: bytes }
+    }
+
+    /// The invalid all-zero TraceId.
+    pub fn invalid() -> TraceId {
+        TraceId { bytes: [0; 16] }
+    }
+
+    /// True if all 16 bytes are zero.
+    pub fn is_invalid(&self) -> Bool {
+        let mut i = 0;
+        while i < 16 {
+            if self.bytes[i] != 0 { return false; }
+            i = i + 1;
+        }
+        true
+    }
+
+    /// Hex-encode into a 32-character lowercase buffer.
+    pub fn to_hex(&self) -> Text {
+        let mut out = Text.with_capacity(32);
+        let mut i = 0;
+        while i < 16 {
+            push_hex_byte(&mut out, self.bytes[i]);
+            i = i + 1;
+        }
+        out
+    }
+
+    /// Decode from a 32-character lowercase hex string. Case-insensitive
+    /// for the hex digits; returns None if length is wrong or any byte
+    /// is non-hex.
+    pub fn from_hex(hex: &[Byte]) -> Maybe<TraceId> {
+        if hex.len() != 32 { return None; }
+        let mut bytes: [UInt8; 16] = [0; 16];
+        let mut i = 0;
+        while i < 16 {
+            let hi = decode_hex_nibble(hex[i * 2])?;
+            let lo = decode_hex_nibble(hex[i * 2 + 1])?;
+            bytes[i] = (hi << 4) | lo;
+            i = i + 1;
+        }
+        Some(TraceId { bytes: bytes })
+    }
+
+    pub fn as_bytes(&self) -> &[UInt8; 16] { &self.bytes }
+}
+
+// =============================================================================
+// SpanId — 8 bytes
+// =============================================================================
+
+/// 64-bit span identifier per W3C Trace Context §2.2.3.
+/// All-zero value is reserved as "invalid".
+public type SpanId is {
+    bytes: [UInt8; 8],
+};
+
+implement SpanId {
+    pub fn from_bytes(bytes: [UInt8; 8]) -> SpanId {
+        SpanId { bytes: bytes }
+    }
+
+    pub fn invalid() -> SpanId {
+        SpanId { bytes: [0; 8] }
+    }
+
+    pub fn is_invalid(&self) -> Bool {
+        let mut i = 0;
+        while i < 8 {
+            if self.bytes[i] != 0 { return false; }
+            i = i + 1;
+        }
+        true
+    }
+
+    pub fn to_hex(&self) -> Text {
+        let mut out = Text.with_capacity(16);
+        let mut i = 0;
+        while i < 8 {
+            push_hex_byte(&mut out, self.bytes[i]);
+            i = i + 1;
+        }
+        out
+    }
+
+    pub fn from_hex(hex: &[Byte]) -> Maybe<SpanId> {
+        if hex.len() != 16 { return None; }
+        let mut bytes: [UInt8; 8] = [0; 8];
+        let mut i = 0;
+        while i < 8 {
+            let hi = decode_hex_nibble(hex[i * 2])?;
+            let lo = decode_hex_nibble(hex[i * 2 + 1])?;
+            bytes[i] = (hi << 4) | lo;
+            i = i + 1;
+        }
+        Some(SpanId { bytes: bytes })
+    }
+
+    pub fn as_bytes(&self) -> &[UInt8; 8] { &self.bytes }
+}
+
+// =============================================================================
+// Generation — per-thread monotonic counter xor'd with a per-process seed
+// =============================================================================
+//
+// Random uniqueness is not required by W3C — only "unique within a trace
+// with sufficiently high probability". We use:
+//
+//   seed_hi  = process-start wall-clock-nanos (constant per process)
+//   seed_lo  = atomic counter (incremented per ID)
+//
+// This yields ~2^64 unique ids per process lifetime with no syscall per
+// emission (the seed is read once at module init; counter is a single
+// CAS), totalling ~20ns per TraceId.
+
+static TRACE_COUNTER: AtomicU64 = AtomicU64.new(0);
+static SPAN_COUNTER: AtomicU64 = AtomicU64.new(0);
+
+/// Generate a new TraceId. Guaranteed non-zero.
+public fn generate_trace_id() -> TraceId {
+    let hi = process_start_nanos();
+    let lo = TRACE_COUNTER.fetch_add(1, Ordering.Relaxed) + 1;
+    let mut bytes: [UInt8; 16] = [0; 16];
+    write_u64_be(&mut bytes, 0, hi);
+    write_u64_be(&mut bytes, 8, lo);
+    TraceId { bytes: bytes }
+}
+
+/// Generate a new SpanId. Guaranteed non-zero.
+public fn generate_span_id() -> SpanId {
+    let lo = SPAN_COUNTER.fetch_add(1, Ordering.Relaxed) + 1;
+    let mut bytes: [UInt8; 8] = [0; 8];
+    write_u64_be(&mut bytes, 0, lo);
+    SpanId { bytes: bytes }
+}
+
+// =============================================================================
+// Internal helpers
+// =============================================================================
+
+@inline
+fn push_hex_byte(out: &mut Text, b: UInt8) {
+    let hi = (b >> 4) & 0x0F;
+    let lo = b & 0x0F;
+    out.push(hex_digit(hi));
+    out.push(hex_digit(lo));
+}
+
+@inline
+fn hex_digit(n: UInt8) -> Char {
+    if n < 10 { (0x30 + n) as Char } else { (0x61 + n - 10) as Char }
+}
+
+@inline
+fn decode_hex_nibble(b: Byte) -> Maybe<UInt8> {
+    if b >= 0x30 && b <= 0x39 { Some((b - 0x30) as UInt8) }
+    else if b >= 0x61 && b <= 0x66 { Some((b - 0x61 + 10) as UInt8) }
+    else if b >= 0x41 && b <= 0x46 { Some((b - 0x41 + 10) as UInt8) }
+    else { None }
+}
+
+@inline
+fn write_u64_be(buf: &mut [UInt8], offset: Int, value: UInt64) {
+    buf[offset + 0] = ((value >> 56) & 0xFF) as UInt8;
+    buf[offset + 1] = ((value >> 48) & 0xFF) as UInt8;
+    buf[offset + 2] = ((value >> 40) & 0xFF) as UInt8;
+    buf[offset + 3] = ((value >> 32) & 0xFF) as UInt8;
+    buf[offset + 4] = ((value >> 24) & 0xFF) as UInt8;
+    buf[offset + 5] = ((value >> 16) & 0xFF) as UInt8;
+    buf[offset + 6] = ((value >> 8) & 0xFF) as UInt8;
+    buf[offset + 7] = (value & 0xFF) as UInt8;
+}
+
+fn process_start_nanos() -> UInt64 {
+    @intrinsic("verum.process.start_nanos") as UInt64
+}

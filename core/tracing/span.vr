@@ -1,0 +1,365 @@
+// =============================================================================
+// tracing/span.vr — Span primary type + SpanKind / SpanStatus / SpanEvent
+// =============================================================================
+// A Span is a unit of work. It has a start and end timestamp, zero-or-more
+// attributes, events, links, and a final status. Spans are immutable
+// after `end()`; the finished SpanData is what flows through the
+// processor → exporter pipeline.
+// Spec: https://opentelemetry.io/docs/specs/otel/trace/api/#span
+// =============================================================================
+
+module core.tracing.span;
+
+mount core.*;
+mount core.time.instant.{Instant};
+mount core.time.duration.{Duration};
+mount core.sync.mutex.{Mutex};
+mount core.tracing.id.{TraceId, SpanId};
+mount core.tracing.context.{SpanContext, TraceFlags, TraceState};
+mount core.tracing.attribute.{AttributeValue, AttributeSet};
+mount core.tracing.resource.{Resource};
+
+// =============================================================================
+// SpanKind — role of the span in the trace
+// =============================================================================
+
+public type SpanKind is
+    /// Default — no specific role.
+    | Internal
+    /// Outgoing synchronous or async request.
+    | Client
+    /// Handling of an incoming request.
+    | Server
+    /// Producing a message for asynchronous delivery.
+    | Producer
+    /// Consuming a message from asynchronous delivery.
+    | Consumer;
+
+// =============================================================================
+// SpanStatus — final status
+// =============================================================================
+
+public type StatusCode is
+    | Unset
+    | Ok
+    | Error;
+
+public type SpanStatus is {
+    code: StatusCode,
+    description: Maybe<Text>,
+};
+
+implement SpanStatus {
+    pub fn unset() -> SpanStatus {
+        SpanStatus { code: StatusCode.Unset, description: None }
+    }
+
+    pub fn ok() -> SpanStatus {
+        SpanStatus { code: StatusCode.Ok, description: None }
+    }
+
+    pub fn error(description: Text) -> SpanStatus {
+        SpanStatus { code: StatusCode.Error, description: Some(description) }
+    }
+
+    pub fn code(&self) -> StatusCode { self.code }
+    pub fn description(&self) -> &Maybe<Text> { &self.description }
+}
+
+// =============================================================================
+// SpanEvent — timestamped annotation on the span
+// =============================================================================
+
+public type SpanEvent is {
+    name: Text,
+    timestamp: Instant,
+    attributes: AttributeSet,
+};
+
+implement SpanEvent {
+    pub fn new(name: Text, timestamp: Instant, attributes: AttributeSet) -> SpanEvent {
+        SpanEvent { name: name, timestamp: timestamp, attributes: attributes }
+    }
+
+    pub fn name(&self) -> &Text { &self.name }
+    pub fn timestamp(&self) -> Instant { self.timestamp }
+    pub fn attributes(&self) -> &AttributeSet { &self.attributes }
+}
+
+// =============================================================================
+// SpanLink — reference to another span (typically a different trace)
+// =============================================================================
+
+public type SpanLink is {
+    context: SpanContext,
+    attributes: AttributeSet,
+};
+
+implement SpanLink {
+    pub fn new(context: SpanContext, attributes: AttributeSet) -> SpanLink {
+        SpanLink { context: context, attributes: attributes }
+    }
+
+    pub fn context(&self) -> &SpanContext { &self.context }
+    pub fn attributes(&self) -> &AttributeSet { &self.attributes }
+}
+
+// =============================================================================
+// SpanData — frozen exported form
+// =============================================================================
+
+public type SpanData is {
+    name: Text,
+    context: SpanContext,
+    parent_span_id: Maybe<SpanId>,
+    kind: SpanKind,
+    start_time: Instant,
+    end_time: Instant,
+    attributes: AttributeSet,
+    events: List<SpanEvent>,
+    links: List<SpanLink>,
+    status: SpanStatus,
+    resource: Shared<Resource>,
+    instrumentation_scope: Text,
+    instrumentation_version: Text,
+};
+
+implement SpanData {
+    pub fn duration(&self) -> Duration {
+        self.end_time - self.start_time
+    }
+
+    pub fn name(&self) -> &Text { &self.name }
+    pub fn context(&self) -> &SpanContext { &self.context }
+    pub fn parent_span_id(&self) -> &Maybe<SpanId> { &self.parent_span_id }
+    pub fn kind(&self) -> SpanKind { self.kind }
+    pub fn start_time(&self) -> Instant { self.start_time }
+    pub fn end_time(&self) -> Instant { self.end_time }
+    pub fn attributes(&self) -> &AttributeSet { &self.attributes }
+    pub fn events(&self) -> &List<SpanEvent> { &self.events }
+    pub fn links(&self) -> &List<SpanLink> { &self.links }
+    pub fn status(&self) -> &SpanStatus { &self.status }
+    pub fn resource(&self) -> &Resource { &self.resource }
+    pub fn instrumentation_scope(&self) -> &Text { &self.instrumentation_scope }
+    pub fn instrumentation_version(&self) -> &Text { &self.instrumentation_version }
+}
+
+// =============================================================================
+// Span — mutable handle the instrumenter uses
+// =============================================================================
+//
+// Invariants:
+// - Mutation after `end()` is silently ignored (idempotent semantics).
+// - Internal Mutex serialises attribute / event / link mutation;
+//   a single-writer fast path would require a separate non-blocking
+//   design — acceptable trade-off given attribute count ≤ 128 per span.
+
+public const SPAN_EVENT_LIMIT: Int = 128;
+public const SPAN_LINK_LIMIT: Int = 128;
+
+public type Span is {
+    inner: Shared<Mutex<SpanInner>>,
+};
+
+public type SpanInner is {
+    name: Text,
+    context: SpanContext,
+    parent_span_id: Maybe<SpanId>,
+    kind: SpanKind,
+    start_time: Instant,
+    end_time: Maybe<Instant>,
+    attributes: AttributeSet,
+    events: List<SpanEvent>,
+    links: List<SpanLink>,
+    status: SpanStatus,
+    resource: Shared<Resource>,
+    instrumentation_scope: Text,
+    instrumentation_version: Text,
+    recording: Bool,
+}
+
+implement Span {
+    /// Construct a span handle from an already-initialised inner.
+    /// Used by Tracer.start_span; instrumenters never call this directly.
+    pub fn from_inner(inner: SpanInner) -> Span {
+        Span {
+            inner: Shared.new(Mutex.new(inner)),
+        }
+    }
+
+    /// Construct a no-op span (for Drop sampling). Records nothing.
+    pub fn noop() -> Span {
+        let inner = SpanInner {
+            name: "".into(),
+            context: SpanContext.invalid(),
+            parent_span_id: None,
+            kind: SpanKind.Internal,
+            start_time: Instant.now(),
+            end_time: None,
+            attributes: AttributeSet.new(),
+            events: List.new(),
+            links: List.new(),
+            status: SpanStatus.unset(),
+            resource: Shared.new(Resource.empty()),
+            instrumentation_scope: "".into(),
+            instrumentation_version: "".into(),
+            recording: false,
+        };
+        Span { inner: Shared.new(Mutex.new(inner)) }
+    }
+
+    /// Get a copy of the SpanContext for propagation.
+    pub fn context(&self) -> SpanContext {
+        let guard = (&*self.inner).lock().unwrap();
+        let inner: &SpanInner = &*guard;
+        inner.context.clone()
+    }
+
+    pub fn is_recording(&self) -> Bool {
+        let guard = (&*self.inner).lock().unwrap();
+        let inner: &SpanInner = &*guard;
+        inner.recording && inner.end_time.is_none()
+    }
+
+    pub fn set_attribute(&self, key: Text, value: AttributeValue) {
+        let mut guard = (&*self.inner).lock().unwrap();
+        let inner: &mut SpanInner = &mut *guard;
+        if !inner.recording || inner.end_time.is_some() { return; }
+        inner.attributes.set(key, value);
+    }
+
+    pub fn add_event(&self, name: Text, attributes: AttributeSet) {
+        let mut guard = (&*self.inner).lock().unwrap();
+        let inner: &mut SpanInner = &mut *guard;
+        if !inner.recording || inner.end_time.is_some() { return; }
+        if inner.events.len() >= SPAN_EVENT_LIMIT { return; }
+        inner.events.push(SpanEvent.new(name, Instant.now(), attributes));
+    }
+
+    pub fn add_event_now(&self, name: Text) {
+        self.add_event(name, AttributeSet.new());
+    }
+
+    pub fn add_link(&self, link: SpanLink) {
+        let mut guard = (&*self.inner).lock().unwrap();
+        let inner: &mut SpanInner = &mut *guard;
+        if !inner.recording || inner.end_time.is_some() { return; }
+        if inner.links.len() >= SPAN_LINK_LIMIT { return; }
+        inner.links.push(link);
+    }
+
+    pub fn set_status(&self, new_status: SpanStatus) {
+        let mut guard = (&*self.inner).lock().unwrap();
+        let inner: &mut SpanInner = &mut *guard;
+        if !inner.recording || inner.end_time.is_some() { return; }
+        // Per OTel spec §5.1.5: Ok can only transition from Unset;
+        // Error is final.
+        let cur_code = inner.status.code();
+        let new_code = new_status.code();
+        let should_set = match cur_code {
+            StatusCode.Error => false,
+            StatusCode.Ok => match new_code { StatusCode.Error => true, _ => false },
+            StatusCode.Unset => true,
+        };
+        if should_set {
+            inner.status = new_status;
+        }
+    }
+
+    pub fn update_name(&self, name: Text) {
+        let mut guard = (&*self.inner).lock().unwrap();
+        let inner: &mut SpanInner = &mut *guard;
+        if !inner.recording || inner.end_time.is_some() { return; }
+        inner.name = name;
+    }
+
+    /// Record an exception as an event "exception" with attributes
+    /// exception.type, exception.message, exception.stacktrace.
+    /// (Convenience — matches OTel semantic conventions.)
+    pub fn record_exception(&self, type_name: &Text, message: &Text) {
+        let mut attrs = AttributeSet.new();
+        attrs.set("exception.type".into(), AttributeValue.Text(type_name.clone()));
+        attrs.set("exception.message".into(), AttributeValue.Text(message.clone()));
+        self.add_event("exception".into(), attrs);
+    }
+
+    /// Finalise. After this call, further mutations are silently dropped.
+    /// Returns the frozen SpanData (which processors consume).
+    /// Idempotent — second call returns None.
+    pub fn end(&self) -> Maybe<SpanData> {
+        let mut guard = (&*self.inner).lock().unwrap();
+        let inner: &mut SpanInner = &mut *guard;
+        if inner.end_time.is_some() { return None; }
+        let now = Instant.now();
+        inner.end_time = Some(now);
+        Some(freeze(inner, now))
+    }
+
+    /// End with an explicit timestamp (for replay / test scenarios).
+    pub fn end_at(&self, ts: Instant) -> Maybe<SpanData> {
+        let mut guard = (&*self.inner).lock().unwrap();
+        let inner: &mut SpanInner = &mut *guard;
+        if inner.end_time.is_some() { return None; }
+        inner.end_time = Some(ts);
+        Some(freeze(inner, ts))
+    }
+}
+
+fn span_status_code(inner: &SpanInner) -> StatusCode {
+    inner.status.code()
+}
+
+fn write_status(inner: &mut SpanInner, s: SpanStatus) {
+    inner.status = s;
+}
+
+fn freeze(inner: &SpanInner, end: Instant) -> SpanData {
+    SpanData {
+        name: inner.name.clone(),
+        context: inner.context.clone(),
+        parent_span_id: inner.parent_span_id,
+        kind: inner.kind,
+        start_time: inner.start_time,
+        end_time: end,
+        attributes: inner.attributes.clone(),
+        events: clone_events(&inner.events),
+        links: clone_links(&inner.links),
+        status: SpanStatus {
+            code: inner.status.code(),
+            description: match inner.status.description() {
+                Some(d) => Some(d.clone()),
+                None => None,
+            }
+        },
+        resource: inner.resource.clone(),
+        instrumentation_scope: inner.instrumentation_scope.clone(),
+        instrumentation_version: inner.instrumentation_version.clone(),
+    }
+}
+
+fn clone_events(src: &List<SpanEvent>) -> List<SpanEvent> {
+    let mut out = List.with_capacity(src.len());
+    let mut i = 0;
+    while i < src.len() {
+        out.push(SpanEvent {
+            name: src[i].name.clone(),
+            timestamp: src[i].timestamp,
+            attributes: src[i].attributes.clone(),
+        });
+        i = i + 1;
+    }
+    out
+}
+
+fn clone_links(src: &List<SpanLink>) -> List<SpanLink> {
+    let mut out = List.with_capacity(src.len());
+    let mut i = 0;
+    while i < src.len() {
+        out.push(SpanLink {
+            context: src[i].context.clone(),
+            attributes: src[i].attributes.clone(),
+        });
+        i = i + 1;
+    }
+    out
+}

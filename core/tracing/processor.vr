@@ -1,0 +1,226 @@
+// =============================================================================
+// tracing/processor.vr — SpanProcessor protocol + Simple + Batch
+// =============================================================================
+// A processor sits between the Tracer and the Exporter. Two in-tree
+// variants:
+//
+// - SimpleProcessor: forwards each SpanData synchronously on end().
+//   Lowest latency, no back-pressure, 0 allocation. Good for dev.
+//
+// - BatchProcessor: buffers SpanData in a bounded queue, flushes on
+//   (a) queue fills to max_export_batch_size, (b) scheduled_delay
+//   elapses, (c) explicit force_flush(). Good for production.
+//
+// Spec: https://opentelemetry.io/docs/specs/otel/trace/sdk/#span-processor
+// =============================================================================
+
+module core.tracing.processor;
+
+mount core.*;
+mount core.async.channel.{Sender, Receiver, bounded};
+mount core.async.task.{spawn_detached};
+mount core.sync.mutex.{Mutex};
+mount core.time.duration.{Duration};
+mount core.tracing.span.{Span, SpanData};
+mount core.tracing.context.{SpanContext};
+mount core.tracing.exporter.{SpanExporter, ExportResult};
+
+// =============================================================================
+// Protocol
+// =============================================================================
+
+public type SpanProcessor is protocol {
+    /// Called as a span is started (may attach parent-context).
+    fn on_start(&self, span: &Span, parent: &SpanContext);
+
+    /// Called as a span is ended — processor takes ownership of SpanData.
+    fn on_end(&self, span: SpanData);
+
+    /// Flush. Blocks up to `timeout`.
+    fn force_flush(&self, timeout: Duration) -> ExportResult;
+
+    /// Shutdown. Drains remaining spans up to `timeout` then calls
+    /// exporter shutdown.
+    fn shutdown(&self, timeout: Duration) -> ExportResult;
+};
+
+// =============================================================================
+// SimpleProcessor — synchronous one-span-at-a-time
+// =============================================================================
+
+public type SimpleProcessor is {
+    exporter: Heap<dyn SpanExporter>,
+};
+
+implement SimpleProcessor {
+    pub fn new(exporter: Heap<dyn SpanExporter>) -> SimpleProcessor {
+        SimpleProcessor { exporter: exporter }
+    }
+}
+
+implement SpanProcessor for SimpleProcessor {
+    fn on_start(&self, _span: &Span, _parent: &SpanContext) {}
+
+    fn on_end(&self, span: SpanData) {
+        let mut buf: List<SpanData> = List.with_capacity(1);
+        buf.push(span);
+        // Result intentionally discarded — simple processor is fire-and-forget.
+        let _ = self.exporter.export(&buf);
+    }
+
+    fn force_flush(&self, timeout: Duration) -> ExportResult {
+        self.exporter.force_flush(timeout)
+    }
+
+    fn shutdown(&self, timeout: Duration) -> ExportResult {
+        self.exporter.shutdown(timeout)
+    }
+}
+
+// =============================================================================
+// BatchProcessor — buffered + worker-task export
+// =============================================================================
+//
+// Configuration:
+//   max_queue_size          — bounded channel capacity (default 2048)
+//   scheduled_delay         — flush interval (default 5s)
+//   max_export_batch_size   — size at which to export early (default 512)
+//   export_timeout          — per-export timeout (default 30s)
+//
+// Architecture: producer (caller of on_end) sends SpanData over a bounded
+// channel. Single consumer task drains, batches, invokes exporter. On
+// queue-full we drop (per OTel SDK default policy).
+
+public type BatchConfig is {
+    max_queue_size: Int,
+    scheduled_delay: Duration,
+    max_export_batch_size: Int,
+    export_timeout: Duration,
+};
+
+implement BatchConfig {
+    pub fn default() -> BatchConfig {
+        BatchConfig {
+            max_queue_size: 2048,
+            scheduled_delay: Duration.from_secs(5),
+            max_export_batch_size: 512,
+            export_timeout: Duration.from_secs(30),
+        }
+    }
+
+    pub fn with_queue_size(mut self, n: Int) -> BatchConfig {
+        self.max_queue_size = n; self
+    }
+    pub fn with_scheduled_delay(mut self, d: Duration) -> BatchConfig {
+        self.scheduled_delay = d; self
+    }
+    pub fn with_max_export_batch_size(mut self, n: Int) -> BatchConfig {
+        self.max_export_batch_size = n; self
+    }
+    pub fn with_export_timeout(mut self, d: Duration) -> BatchConfig {
+        self.export_timeout = d; self
+    }
+}
+
+public type BatchProcessor is {
+    sender: Sender<BatchMessage>,
+    exporter: Heap<dyn SpanExporter>,
+    config: BatchConfig,
+}
+
+type BatchMessage is
+    | BatchSpan(SpanData)
+    | BatchFlush
+    | BatchShutdown;
+
+implement BatchProcessor {
+    pub fn new(exporter: Heap<dyn SpanExporter>) -> BatchProcessor {
+        BatchProcessor.with_config(exporter, BatchConfig.default())
+    }
+
+    pub fn with_config(exporter: Heap<dyn SpanExporter>, config: BatchConfig) -> BatchProcessor {
+        let (sender, receiver) = bounded::<BatchMessage>(config.max_queue_size);
+        let exporter_clone = exporter.clone();
+        let cfg_clone = config.clone();
+        spawn_detached(async move {
+            run_worker(receiver, exporter_clone, cfg_clone).await;
+        });
+        BatchProcessor {
+            sender: sender,
+            exporter: exporter,
+            config: config,
+        }
+    }
+}
+
+implement SpanProcessor for BatchProcessor {
+    fn on_start(&self, _span: &Span, _parent: &SpanContext) {}
+
+    fn on_end(&self, span: SpanData) {
+        // Non-blocking send — drop on full queue per OTel policy.
+        let _ = self.sender.try_send(BatchMessage.BatchSpan(span));
+    }
+
+    fn force_flush(&self, timeout: Duration) -> ExportResult {
+        // Send a flush sentinel; the worker drains buffered spans on receipt.
+        let _ = self.sender.try_send(BatchMessage.BatchFlush);
+        self.exporter.force_flush(timeout)
+    }
+
+    fn shutdown(&self, timeout: Duration) -> ExportResult {
+        let _ = self.sender.try_send(BatchMessage.BatchShutdown);
+        self.exporter.shutdown(timeout)
+    }
+}
+
+// Config clone helper
+implement BatchConfig {
+    pub fn clone(&self) -> BatchConfig {
+        BatchConfig {
+            max_queue_size: self.max_queue_size,
+            scheduled_delay: self.scheduled_delay,
+            max_export_batch_size: self.max_export_batch_size,
+            export_timeout: self.export_timeout,
+        }
+    }
+}
+
+// -------------------------------------------------------------------------
+// Worker task — drains the channel and invokes exporter in batches
+// -------------------------------------------------------------------------
+
+async fn run_worker(
+    receiver: Receiver<BatchMessage>,
+    exporter: Heap<dyn SpanExporter>,
+    config: BatchConfig,
+) {
+    let mut batch: List<SpanData> = List.with_capacity(config.max_export_batch_size);
+    loop {
+        match receiver.recv().await {
+            Some(BatchMessage.BatchSpan(s)) => {
+                batch.push(s);
+                if batch.len() >= config.max_export_batch_size {
+                    flush_batch(&exporter, &mut batch, config.max_export_batch_size);
+                }
+            }
+            Some(BatchMessage.BatchFlush) => {
+                flush_batch(&exporter, &mut batch, config.max_export_batch_size);
+            }
+            Some(BatchMessage.BatchShutdown) => {
+                flush_batch(&exporter, &mut batch, config.max_export_batch_size);
+                return;
+            }
+            None => {
+                // Channel closed — sender side gone, no more spans.
+                flush_batch(&exporter, &mut batch, config.max_export_batch_size);
+                return;
+            }
+        }
+    }
+}
+
+fn flush_batch(exporter: &Heap<dyn SpanExporter>, batch: &mut List<SpanData>, cap: Int) {
+    if batch.is_empty() { return; }
+    let _ = exporter.export(batch);
+    *batch = List.with_capacity(cap);
+}

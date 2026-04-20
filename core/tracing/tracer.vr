@@ -1,0 +1,401 @@
+// =============================================================================
+// tracing/tracer.vr — Tracer + TracerProvider + global registry
+// =============================================================================
+// Entry point for instrumentation. Configure once at startup via
+// `set_global_tracer_provider`; call `get_tracer(name, version)`
+// anywhere thereafter to obtain a named Tracer.
+// Spec: https://opentelemetry.io/docs/specs/otel/trace/api/#tracerprovider
+// =============================================================================
+
+module core.tracing.tracer;
+
+mount core.*;
+mount core.sync.atomic.{AtomicPtr};
+mount core.sync.mutex.{Mutex};
+mount core.time.instant.{Instant};
+mount core.tracing.id.{TraceId, SpanId, generate_trace_id, generate_span_id};
+mount core.tracing.context.{SpanContext, TraceFlags, TraceState};
+mount core.tracing.attribute.{AttributeSet};
+mount core.tracing.resource.{Resource};
+mount core.tracing.sampler.{Sampler, SamplingDecision, SamplingResult, AlwaysOff, ParentBased, AlwaysOn};
+mount core.tracing.span.{Span, SpanKind, SpanStatus, SpanLink, SpanInner};
+mount core.tracing.processor.{SpanProcessor};
+
+// =============================================================================
+// Tracer protocol — callers interact via start_span
+// =============================================================================
+
+public type Tracer is protocol {
+    fn start_span(
+        &self,
+        name: &Text,
+        kind: SpanKind,
+        attributes: AttributeSet,
+        links: List<SpanLink>,
+        parent: &SpanContext,
+    ) -> Span;
+
+    fn instrumentation_scope(&self) -> &Text;
+    fn instrumentation_version(&self) -> &Text;
+};
+
+// =============================================================================
+// NoopTracer — used when no provider is installed
+// =============================================================================
+
+public type NoopTracer is {
+    scope: Text,
+    version: Text,
+};
+
+implement NoopTracer {
+    pub fn new(scope: Text, version: Text) -> NoopTracer {
+        NoopTracer { scope: scope, version: version }
+    }
+}
+
+implement Tracer for NoopTracer {
+    fn start_span(
+        &self,
+        _name: &Text,
+        _kind: SpanKind,
+        _attributes: AttributeSet,
+        _links: List<SpanLink>,
+        _parent: &SpanContext,
+    ) -> Span {
+        Span.noop()
+    }
+
+    fn instrumentation_scope(&self) -> &Text { &self.scope }
+    fn instrumentation_version(&self) -> &Text { &self.version }
+}
+
+// =============================================================================
+// SdkTracer — production Tracer backed by sampler + processor + resource
+// =============================================================================
+
+public type SdkTracer is {
+    scope: Text,
+    version: Text,
+    sampler: Heap<dyn Sampler>,
+    processor: Heap<dyn SpanProcessor>,
+    resource: Shared<Resource>,
+};
+
+implement SdkTracer {
+    pub fn new(
+        scope: Text,
+        version: Text,
+        sampler: Heap<dyn Sampler>,
+        processor: Heap<dyn SpanProcessor>,
+        resource: Shared<Resource>,
+    ) -> SdkTracer {
+        SdkTracer {
+            scope: scope,
+            version: version,
+            sampler: sampler,
+            processor: processor,
+            resource: resource,
+        }
+    }
+}
+
+implement Tracer for SdkTracer {
+    fn start_span(
+        &self,
+        name: &Text,
+        kind: SpanKind,
+        attributes: AttributeSet,
+        links: List<SpanLink>,
+        parent: &SpanContext,
+    ) -> Span {
+        let trace_id = if parent.is_valid() {
+            *parent.trace_id()
+        } else {
+            generate_trace_id()
+        };
+        let span_id = generate_span_id();
+
+        let result = self.sampler.should_sample(parent, &trace_id, name, kind, &attributes);
+        match result.decision() {
+            SamplingDecision.Drop => {
+                return Span.noop();
+            }
+            _ => {}
+        }
+
+        let sampled = match result.decision() {
+            SamplingDecision.RecordAndSample => true,
+            _ => false,
+        };
+        let flags = TraceFlags.default().with_sampled(sampled);
+        let parent_span_id = if parent.is_valid() { Some(*parent.span_id()) } else { None };
+
+        let context = SpanContext.new(
+            trace_id, span_id, flags, result.trace_state().clone(), false,
+        );
+
+        let inner = SpanInner {
+            name: name.clone(),
+            context: context,
+            parent_span_id: parent_span_id,
+            kind: kind,
+            start_time: Instant.now(),
+            end_time: None,
+            attributes: attributes,
+            events: List.new(),
+            links: links,
+            status: SpanStatus.unset(),
+            resource: self.resource.clone(),
+            instrumentation_scope: self.scope.clone(),
+            instrumentation_version: self.version.clone(),
+            recording: true,
+        };
+
+        let span = Span.from_inner(inner);
+        self.processor.on_start(&span, parent);
+        span
+    }
+
+    fn instrumentation_scope(&self) -> &Text { &self.scope }
+    fn instrumentation_version(&self) -> &Text { &self.version }
+}
+
+// =============================================================================
+// TracerProvider — manages samplers, processors, resource
+// =============================================================================
+
+public type TracerProvider is {
+    sampler: Heap<dyn Sampler>,
+    processors: List<Heap<dyn SpanProcessor>>,
+    resource: Shared<Resource>,
+    tracers: Shared<Mutex<List<(Text, Text, Heap<SdkTracer>)>>>,
+};
+
+implement TracerProvider {
+    pub fn builder() -> TracerProviderBuilder {
+        TracerProviderBuilder {
+            sampler: None,
+            processors: List.new(),
+            resource: Resource.empty(),
+        }
+    }
+
+    pub fn noop() -> TracerProvider {
+        TracerProvider {
+            sampler: Heap.new(AlwaysOff.new()) as Heap<dyn Sampler>,
+            processors: List.new(),
+            resource: Shared.new(Resource.empty()),
+            tracers: Shared.new(Mutex.new(List.new())),
+        }
+    }
+
+    /// Obtain (or create) a Tracer for the given instrumentation scope.
+    /// Same (name, version) pair returns the same Tracer to amortise
+    /// Shared-clone cost.
+    pub fn tracer(&self, name: &Text, version: &Text) -> Heap<dyn Tracer> {
+        let mut guard = self.tracers.lock().unwrap();
+        let mut i = 0;
+        while i < guard.len() {
+            if guard[i].0 == *name && guard[i].1 == *version {
+                return guard[i].2.clone() as Heap<dyn Tracer>;
+            }
+            i = i + 1;
+        }
+        // No processors — return a NoopTracer.
+        if self.processors.is_empty() {
+            return Heap.new(NoopTracer.new(name.clone(), version.clone())) as Heap<dyn Tracer>;
+        }
+        let composite: Heap<dyn SpanProcessor> = if self.processors.len() == 1 {
+            self.processors[0].clone()
+        } else {
+            Heap.new(CompositeProcessor { processors: clone_proc_list(&self.processors) })
+                as Heap<dyn SpanProcessor>
+        };
+        let tracer = Heap.new(SdkTracer.new(
+            name.clone(), version.clone(),
+            self.sampler.clone(), composite, self.resource.clone(),
+        ));
+        guard.push((name.clone(), version.clone(), tracer.clone()));
+        tracer as Heap<dyn Tracer>
+    }
+}
+
+fn clone_proc_list(xs: &List<Heap<dyn SpanProcessor>>) -> List<Heap<dyn SpanProcessor>> {
+    let mut out = List.with_capacity(xs.len());
+    let mut i = 0;
+    while i < xs.len() {
+        out.push(xs[i].clone());
+        i = i + 1;
+    }
+    out
+}
+
+// =============================================================================
+// Builder
+// =============================================================================
+
+public type TracerProviderBuilder is {
+    sampler: Maybe<Heap<dyn Sampler>>,
+    processors: List<Heap<dyn SpanProcessor>>,
+    resource: Resource,
+};
+
+implement TracerProviderBuilder {
+    pub fn with_sampler(mut self, sampler: Heap<dyn Sampler>) -> TracerProviderBuilder {
+        self.sampler = Some(sampler); self
+    }
+    pub fn with_resource(mut self, resource: Resource) -> TracerProviderBuilder {
+        self.resource = resource; self
+    }
+    pub fn with_processor(mut self, processor: Heap<dyn SpanProcessor>) -> TracerProviderBuilder {
+        self.processors.push(processor); self
+    }
+
+    pub fn build(self) -> TracerProvider {
+        let default_sampler: Heap<dyn Sampler> =
+            Heap.new(ParentBased.new(Heap.new(AlwaysOn.new()) as Heap<dyn Sampler>))
+                as Heap<dyn Sampler>;
+        TracerProvider {
+            sampler: match self.sampler {
+                Some(s) => s,
+                None => default_sampler,
+            },
+            processors: self.processors,
+            resource: Shared.new(self.resource),
+            tracers: Shared.new(Mutex.new(List.new())),
+        }
+    }
+}
+
+// =============================================================================
+// CompositeProcessor — fans SpanData out to multiple processors
+// =============================================================================
+
+type CompositeProcessor is {
+    processors: List<Heap<dyn SpanProcessor>>,
+}
+
+implement SpanProcessor for CompositeProcessor {
+    fn on_start(&self, span: &Span, parent: &SpanContext) {
+        let mut i = 0;
+        while i < self.processors.len() {
+            self.processors[i].on_start(span, parent);
+            i = i + 1;
+        }
+    }
+
+    fn on_end(&self, span: core.tracing.span.SpanData) {
+        let mut i = 0;
+        while i < self.processors.len() {
+            // Each processor may clone internally; we pass a fresh copy.
+            self.processors[i].on_end(clone_span_data(&span));
+            i = i + 1;
+        }
+    }
+
+    fn force_flush(&self, timeout: core.time.duration.Duration)
+        -> core.tracing.exporter.ExportResult
+    {
+        let mut last = core.tracing.exporter.ExportResult.Success;
+        let mut i = 0;
+        while i < self.processors.len() {
+            last = self.processors[i].force_flush(timeout);
+            i = i + 1;
+        }
+        last
+    }
+
+    fn shutdown(&self, timeout: core.time.duration.Duration)
+        -> core.tracing.exporter.ExportResult
+    {
+        let mut last = core.tracing.exporter.ExportResult.Success;
+        let mut i = 0;
+        while i < self.processors.len() {
+            last = self.processors[i].shutdown(timeout);
+            i = i + 1;
+        }
+        last
+    }
+}
+
+fn clone_span_data(s: &core.tracing.span.SpanData) -> core.tracing.span.SpanData {
+    core.tracing.span.SpanData {
+        name: s.name().clone(),
+        context: s.context().clone(),
+        parent_span_id: *s.parent_span_id(),
+        kind: s.kind(),
+        start_time: s.start_time(),
+        end_time: s.end_time(),
+        attributes: s.attributes().clone(),
+        events: clone_events(s.events()),
+        links: clone_links(s.links()),
+        status: core.tracing.span.SpanStatus {
+            code: s.status().code(),
+            description: match s.status().description() {
+                Some(d) => Some(d.clone()),
+                None => None,
+            }
+        },
+        resource: Shared.new(s.resource().clone()),
+        instrumentation_scope: s.instrumentation_scope().clone(),
+        instrumentation_version: s.instrumentation_version().clone(),
+    }
+}
+
+fn clone_events(src: &List<core.tracing.span.SpanEvent>) -> List<core.tracing.span.SpanEvent> {
+    let mut out = List.with_capacity(src.len());
+    let mut i = 0;
+    while i < src.len() {
+        out.push(core.tracing.span.SpanEvent.new(
+            src[i].name().clone(),
+            src[i].timestamp(),
+            src[i].attributes().clone(),
+        ));
+        i = i + 1;
+    }
+    out
+}
+
+fn clone_links(src: &List<SpanLink>) -> List<SpanLink> {
+    let mut out = List.with_capacity(src.len());
+    let mut i = 0;
+    while i < src.len() {
+        out.push(SpanLink.new(src[i].context().clone(), src[i].attributes().clone()));
+        i = i + 1;
+    }
+    out
+}
+
+// =============================================================================
+// Global provider — single OnceCell-style slot
+// =============================================================================
+//
+// Store behind Shared<Mutex<...>> for safe set/get race. Hot reads clone
+// the Shared which is a refcount bump — no lock acquired on get.
+
+static GLOBAL_PROVIDER: Shared<Mutex<Maybe<Shared<TracerProvider>>>> =
+    Shared.new(Mutex.new(None));
+
+/// Install the global TracerProvider. Intended to be called once at
+/// startup. Replaces any previous provider (its processors are NOT
+/// flushed — the caller is responsible for orderly shutdown).
+public fn set_global_tracer_provider(provider: TracerProvider) {
+    let mut guard = GLOBAL_PROVIDER.lock().unwrap();
+    *guard = Some(Shared.new(provider));
+}
+
+/// Return the installed provider, or a fresh NoopTracerProvider if none
+/// has been installed. This lets `get_tracer(...)` always succeed.
+public fn global_tracer_provider() -> Shared<TracerProvider> {
+    let guard = GLOBAL_PROVIDER.lock().unwrap();
+    match &*guard {
+        Some(p) => p.clone(),
+        None => Shared.new(TracerProvider.noop()),
+    }
+}
+
+/// Shorthand — `get_tracer(name, version)` = `global_tracer_provider().tracer(...)`.
+public fn get_tracer(name: &Text, version: &Text) -> Heap<dyn Tracer> {
+    global_tracer_provider().tracer(name, version)
+}
