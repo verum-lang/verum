@@ -1,0 +1,81 @@
+// =============================================================================
+// metrics/mod.vr — Prometheus-compatible metrics registry
+// =============================================================================
+// Layer: 4.95 (depends on core, text, collections, sync, time)
+// Spec: docs/detailed/metrics-architecture.md
+//       https://prometheus.io/docs/concepts/metric_types/
+//       https://opentelemetry.io/docs/specs/otel/metrics/api/
+// =============================================================================
+//
+// Concurrency-safe Counter / UpDownCounter / Gauge / Histogram / Summary
+// primitives with label-cardinality control, a pluggable exporter surface,
+// and a Prometheus text-format encoder (0.0.4).
+//
+// # Design goals
+//
+// - Prometheus-native, OTel-compatible. Each family (Counter, Gauge,
+//   Histogram) maps one-to-one to a Prometheus metric type and a
+//   corresponding OTel instrument.
+// - Lock-free fast-path. All counters / gauges use atomic 64-bit
+//   operations. Histogram buckets are per-bucket atomics.
+// - Bounded cardinality. `MetricFamily` caches a small table of
+//   label-value combinations; lookups are linear (Prometheus metrics
+//   typically have ≤ a few dozen distinct label sets per family).
+// - Zero-allocation hot path. Once a metric + labels are resolved, the
+//   recording path is a single atomic op.
+//
+// # Minimal usage
+//
+// ```verum
+// mount core.metrics.*;
+//
+// let registry = Registry.new();
+// let requests_total = registry.counter(
+//     CounterConfig {
+//         name: "http_requests_total".into(),
+//         help: "Total HTTP requests".into(),
+//         labels: ["method".into(), "status".into()],
+//     }
+// );
+//
+// requests_total.with(&[&"GET".into(), &"200".into()]).inc();
+//
+// // Expose via Prometheus text format
+// let body = prometheus::encode(&registry);
+// ```
+// =============================================================================
+
+module core.metrics;
+
+public module label;
+public module value;
+public module instrument;
+public module histogram;
+public module registry;
+public module exporter;
+public module prometheus;
+
+// Re-exports — flat public API
+public mount .label.LabelSet;
+public mount .label.LabelValue;
+
+public mount .instrument.Counter;
+public mount .instrument.UpDownCounter;
+public mount .instrument.Gauge;
+
+public mount .histogram.Histogram;
+public mount .histogram.HistogramBuckets;
+public mount .histogram.DEFAULT_BUCKETS;
+
+public mount .registry.Registry;
+public mount .registry.CounterConfig;
+public mount .registry.UpDownCounterConfig;
+public mount .registry.GaugeConfig;
+public mount .registry.HistogramConfig;
+public mount .registry.MetricFamily;
+public mount .registry.MetricKind;
+
+public mount .exporter.MetricsExporter;
+public mount .exporter.ExportResult;
+public mount .prometheus.encode;
+public mount .prometheus.encode_into;

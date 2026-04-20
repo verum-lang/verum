@@ -1,0 +1,59 @@
+// =============================================================================
+// metrics/label.vr — LabelSet (insertion-order key/value list)
+// =============================================================================
+// Labels are the cardinality dimension of Prometheus metrics. Each
+// distinct label-value tuple produces a distinct time series. The set
+// is ordered (insertion order) and compared value-by-value.
+// =============================================================================
+
+module core.metrics.label;
+
+mount core.*;
+
+public type LabelValue is Text;
+
+/// Ordered list of label values. The corresponding label-name list is
+/// stored once per MetricFamily; this type stores only values.
+public type LabelSet is {
+    values: List<LabelValue>,
+};
+
+implement LabelSet {
+    pub fn new() -> LabelSet {
+        LabelSet { values: List.new() }
+    }
+
+    pub fn from_slice(values: &[&Text]) -> LabelSet {
+        let mut out = List.with_capacity(values.len());
+        let mut i = 0;
+        while i < values.len() {
+            out.push(values[i].clone());
+            i = i + 1;
+        }
+        LabelSet { values: out }
+    }
+
+    pub fn values(&self) -> &List<LabelValue> { &self.values }
+    pub fn len(&self) -> Int { self.values.len() }
+    pub fn is_empty(&self) -> Bool { self.values.is_empty() }
+
+    pub fn equals(&self, other: &LabelSet) -> Bool {
+        if self.values.len() != other.values.len() { return false; }
+        let mut i = 0;
+        while i < self.values.len() {
+            if self.values[i] != other.values[i] { return false; }
+            i = i + 1;
+        }
+        true
+    }
+
+    pub fn clone(&self) -> LabelSet {
+        let mut out = List.with_capacity(self.values.len());
+        let mut i = 0;
+        while i < self.values.len() {
+            out.push(self.values[i].clone());
+            i = i + 1;
+        }
+        LabelSet { values: out }
+    }
+}

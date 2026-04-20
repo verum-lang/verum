@@ -1,0 +1,204 @@
+// =============================================================================
+// metrics/histogram.vr — Fixed-bucket histogram (Prometheus style)
+// =============================================================================
+// A Prometheus histogram records observations into cumulative buckets
+// plus a count and sum. Each bucket has an upper-bound — observations
+// ≤ bound increment that bucket's count.
+// =============================================================================
+
+module core.metrics.histogram;
+
+mount core.*;
+mount core.sync.atomic.{AtomicU64, MemoryOrdering};
+mount core.metrics.value.{AtomicF64};
+
+// =============================================================================
+// Default exponential buckets — Prometheus client_golang default
+// =============================================================================
+//
+// Covers ~1 µs to ~10 s in 2× steps, suitable for HTTP / RPC latency
+// distributions. Users specialise via HistogramConfig.buckets.
+
+public const DEFAULT_BUCKETS: [Float; 11] = [
+    0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0,
+];
+
+// =============================================================================
+// HistogramBuckets — immutable sorted upper-bound list
+// =============================================================================
+
+public type HistogramBuckets is {
+    bounds: List<Float>,
+};
+
+implement HistogramBuckets {
+    pub fn defaults() -> HistogramBuckets {
+        let mut out = List.with_capacity(11);
+        let mut i = 0;
+        while i < 11 {
+            out.push(DEFAULT_BUCKETS[i]);
+            i = i + 1;
+        }
+        HistogramBuckets { bounds: out }
+    }
+
+    /// Custom bounds — must be strictly increasing. Invalid input
+    /// silently sorts and dedups at construction.
+    pub fn custom(bounds: &[Float]) -> HistogramBuckets {
+        let mut out = List.with_capacity(bounds.len());
+        let mut i = 0;
+        while i < bounds.len() {
+            out.push(bounds[i]);
+            i = i + 1;
+        }
+        sort_asc(&mut out);
+        dedup(&mut out);
+        HistogramBuckets { bounds: out }
+    }
+
+    /// Linear buckets: `start`, `start+width`, ..., `count` bounds.
+    pub fn linear(start: Float, width: Float, count: Int) -> HistogramBuckets {
+        let mut out = List.with_capacity(count);
+        let mut i = 0;
+        while i < count {
+            out.push(start + (i as Float) * width);
+            i = i + 1;
+        }
+        HistogramBuckets { bounds: out }
+    }
+
+    /// Exponential buckets: `start`, `start*factor`, ..., `count` bounds.
+    pub fn exponential(start: Float, factor: Float, count: Int) -> HistogramBuckets {
+        let mut out = List.with_capacity(count);
+        let mut v = start;
+        let mut i = 0;
+        while i < count {
+            out.push(v);
+            v = v * factor;
+            i = i + 1;
+        }
+        HistogramBuckets { bounds: out }
+    }
+
+    pub fn bounds(&self) -> &List<Float> { &self.bounds }
+    pub fn len(&self) -> Int { self.bounds.len() }
+
+    pub fn clone(&self) -> HistogramBuckets {
+        HistogramBuckets { bounds: self.bounds.clone() }
+    }
+}
+
+// =============================================================================
+// Histogram — atomic per-bucket counters + atomic sum
+// =============================================================================
+//
+// A histogram with N buckets uses N+2 atomics (per bucket + count + sum).
+// +Inf bucket is implicit via `count` minus the last bound's count.
+// All atomics are MemoryOrdering.Relaxed for maximum throughput; Prometheus
+// scrape-then-snapshot tolerates slightly-skewed reads.
+
+public type Histogram is {
+    buckets: HistogramBuckets,
+    bucket_counts: List<AtomicU64>,
+    sum: AtomicF64,
+    count: AtomicU64,
+};
+
+implement Histogram {
+    pub fn new(buckets: HistogramBuckets) -> Histogram {
+        let n = buckets.len();
+        let mut counts = List.with_capacity(n);
+        let mut i = 0;
+        while i < n {
+            counts.push(AtomicU64.new(0));
+            i = i + 1;
+        }
+        Histogram {
+            buckets: buckets,
+            bucket_counts: counts,
+            sum: AtomicF64.new(0.0),
+            count: AtomicU64.new(0),
+        }
+    }
+
+    /// Record an observation.
+    pub fn observe(&self, value: Float) {
+        // Walk buckets — cumulative: every bucket with upper-bound >= value is incremented.
+        let bounds = self.buckets.bounds();
+        let mut i = 0;
+        while i < bounds.len() {
+            if value <= bounds[i] {
+                let _ = self.bucket_counts[i].fetch_add(1, MemoryOrdering.Relaxed);
+            }
+            i = i + 1;
+        }
+        let _ = self.count.fetch_add(1, MemoryOrdering.Relaxed);
+        let _ = self.sum.fetch_add(value, MemoryOrdering.Relaxed);
+    }
+
+    /// Take a read-only snapshot of the histogram state.
+    pub fn snapshot(&self) -> HistogramSnapshot {
+        let n = self.bucket_counts.len();
+        let mut counts = List.with_capacity(n);
+        let mut i = 0;
+        while i < n {
+            counts.push(self.bucket_counts[i].load(MemoryOrdering.Relaxed));
+            i = i + 1;
+        }
+        HistogramSnapshot {
+            bucket_bounds: self.buckets.clone(),
+            bucket_counts: counts,
+            count: self.count.load(MemoryOrdering.Relaxed),
+            sum: self.sum.load(MemoryOrdering.Relaxed),
+        }
+    }
+}
+
+// =============================================================================
+// HistogramSnapshot — read-only value-type
+// =============================================================================
+
+public type HistogramSnapshot is {
+    bucket_bounds: HistogramBuckets,
+    bucket_counts: List<UInt64>,
+    count: UInt64,
+    sum: Float,
+};
+
+implement HistogramSnapshot {
+    pub fn bounds(&self) -> &List<Float> { self.bucket_bounds.bounds() }
+    pub fn counts(&self) -> &List<UInt64> { &self.bucket_counts }
+    pub fn count(&self) -> UInt64 { self.count }
+    pub fn sum(&self) -> Float { self.sum }
+}
+
+// =============================================================================
+// Small sorting helper (used only at construction)
+// =============================================================================
+
+fn sort_asc(xs: &mut List<Float>) {
+    // Insertion sort — buckets are tiny (≤ ~32 typical).
+    let mut i = 1;
+    while i < xs.len() {
+        let mut j = i;
+        while j > 0 && xs[j - 1] > xs[j] {
+            let tmp = xs[j]; xs[j] = xs[j - 1]; xs[j - 1] = tmp;
+            j = j - 1;
+        }
+        i = i + 1;
+    }
+}
+
+fn dedup(xs: &mut List<Float>) {
+    if xs.is_empty() { return; }
+    let mut out: List<Float> = List.with_capacity(xs.len());
+    out.push(xs[0]);
+    let mut i = 1;
+    while i < xs.len() {
+        if xs[i] != out[out.len() - 1] {
+            out.push(xs[i]);
+        }
+        i = i + 1;
+    }
+    *xs = out;
+}

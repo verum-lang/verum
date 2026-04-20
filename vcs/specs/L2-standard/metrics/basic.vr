@@ -1,0 +1,118 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: metrics, prometheus, counter, gauge, histogram, registry
+// @timeout: 10000
+// @expect: pass
+
+// Prometheus-compatible metrics registry API surface.
+
+mount core.metrics.{
+    LabelSet,
+    Counter, UpDownCounter, Gauge,
+    Histogram, HistogramBuckets,
+    Registry, CounterConfig, UpDownCounterConfig, GaugeConfig, HistogramConfig,
+    MetricFamily, MetricKind,
+    encode, encode_into,
+};
+
+// Registry creation.
+fn typecheck_registry() -> Registry {
+    Registry.new()
+}
+
+// Counter registration + recording.
+fn typecheck_counter(registry: &Registry) {
+    let requests_total = registry.counter(CounterConfig {
+        name: "http_requests_total".into(),
+        help: "Total HTTP requests".into(),
+        labels: ["method".into(), "status".into()].to_list(),
+    });
+    let c = requests_total.with(&[&"GET".into(), &"200".into()]);
+    c.inc();
+    c.add(2.0);
+    let _v = c.value();
+
+    let unlabeled = registry.counter(CounterConfig {
+        name: "events_total".into(),
+        help: "Events".into(),
+        labels: List.new(),
+    });
+    unlabeled.unlabeled().inc();
+}
+
+// UpDownCounter.
+fn typecheck_up_down(registry: &Registry) {
+    let h = registry.up_down_counter(UpDownCounterConfig {
+        name: "active_connections".into(),
+        help: "Open conns".into(),
+        labels: List.new(),
+    });
+    let c = h.unlabeled();
+    c.inc();
+    c.add(5.0);
+    c.sub(2.0);
+    c.dec();
+    let _v = c.value();
+}
+
+// Gauge.
+fn typecheck_gauge(registry: &Registry) {
+    let h = registry.gauge(GaugeConfig {
+        name: "memory_usage_bytes".into(),
+        help: "RSS".into(),
+        labels: ["region".into()].to_list(),
+    });
+    let g = h.with(&[&"eu-west".into()]);
+    g.set(12345.0);
+    g.inc();
+    g.dec();
+    let _v = g.value();
+}
+
+// Histogram with custom buckets.
+fn typecheck_histogram(registry: &Registry) {
+    let h = registry.histogram(HistogramConfig {
+        name: "request_duration_seconds".into(),
+        help: "Request latency".into(),
+        labels: ["route".into()].to_list(),
+        buckets: HistogramBuckets.exponential(0.001, 2.0, 12),
+    });
+    let hist = h.with(&[&"/v1/orders".into()]);
+    hist.observe(0.023);
+    hist.observe(0.150);
+    let _snap = hist.snapshot();
+}
+
+// Default buckets.
+fn typecheck_default_buckets() -> HistogramBuckets {
+    HistogramBuckets.defaults()
+}
+
+// Linear + exponential bucket constructors.
+fn typecheck_bucket_constructors() -> (HistogramBuckets, HistogramBuckets) {
+    (HistogramBuckets.linear(0.1, 0.1, 10),
+     HistogramBuckets.exponential(0.001, 2.0, 12))
+}
+
+// Prometheus text-format encode.
+fn typecheck_prometheus_encode(registry: &Registry) -> Text {
+    encode(registry)
+}
+
+fn typecheck_prometheus_encode_into(registry: &Registry, buf: &mut Text) {
+    encode_into(registry, buf)
+}
+
+// Snapshot surface.
+fn typecheck_snapshot(registry: &Registry) -> List<Shared<MetricFamily>> {
+    registry.snapshot()
+}
+
+fn typecheck_family_accessors(family: &MetricFamily) -> (MetricKind, &Text, &Text) {
+    (family.kind(), family.name(), family.help())
+}
+
+fn main() {
+    // Shape-only test.
+}

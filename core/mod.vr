@@ -215,6 +215,16 @@ public module compress;
 public module tracing;
 
 // =============================================================================
+// Layer 4.96: Metrics (Depends on: core, text, collections, sync, time)
+// =============================================================================
+
+// Prometheus-compatible metrics: Counter, UpDownCounter, Gauge,
+// Histogram with bucketed observations, label-cardinality control,
+// Registry, and text-format exposition.
+// Spec: docs/detailed/metrics-architecture.md
+public module metrics;
+
+// =============================================================================
 // Layer 5: Network (Depends on: core, text, collections, io, async)
 // =============================================================================
 

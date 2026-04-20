@@ -1,0 +1,259 @@
+// =============================================================================
+// metrics/prometheus.vr — Prometheus text-format exposition (0.0.4)
+// =============================================================================
+// Encodes a Registry snapshot into the Prometheus text exposition format
+// per https://prometheus.io/docs/instrumenting/exposition_formats/
+//
+// Grammar (simplified):
+//   ["# HELP" SP metric_name SP help_escaped NL]
+//   ["# TYPE" SP metric_name SP type_name NL]
+//   metric_name "{" label_name "=" "\"" value_esc "\"" {"," ...} "}" SP value NL
+//
+// - Counter → "counter"
+// - UpDownCounter → "gauge" (Prometheus has no direct bidirectional counter)
+// - Gauge → "gauge"
+// - Histogram → "histogram" with _bucket{le="..."}, _sum, _count series
+// =============================================================================
+
+module core.metrics.prometheus;
+
+mount core.*;
+mount core.metrics.label.{LabelSet};
+mount core.metrics.registry.{Registry, MetricFamily, MetricEntry, MetricKind};
+mount core.metrics.instrument.{Counter, UpDownCounter, Gauge};
+mount core.metrics.histogram.{Histogram};
+
+// =============================================================================
+// Public API
+// =============================================================================
+
+/// Encode the registry to a Text buffer.
+public fn encode(registry: &Registry) -> Text {
+    let mut out = Text.with_capacity(4096);
+    encode_into(registry, &mut out);
+    out
+}
+
+/// Encode the registry into a caller-provided Text buffer. Useful when
+/// writing directly to an HTTP response body to avoid double-copy.
+public fn encode_into(registry: &Registry, out: &mut Text) {
+    let families = registry.snapshot();
+    let mut i = 0;
+    while i < families.len() {
+        encode_family(&families[i], out);
+        i = i + 1;
+    }
+}
+
+// =============================================================================
+// Internal — per-family encoding
+// =============================================================================
+
+fn encode_family(family: &MetricFamily, out: &mut Text) {
+    let name = family.name();
+    let help = family.help();
+    let kind = family.kind();
+
+    // # HELP line
+    out.push_str("# HELP ");
+    out.push_str(name);
+    out.push(' ');
+    write_help_escaped(out, help);
+    out.push('\n');
+
+    // # TYPE line
+    out.push_str("# TYPE ");
+    out.push_str(name);
+    out.push(' ');
+    out.push_str(type_string(kind));
+    out.push('\n');
+
+    let entries = family.snapshot_entries();
+    let mut i = 0;
+    while i < entries.len() {
+        match kind {
+            MetricKind.KCounter => encode_counter_entry(name, family.label_names(), &entries[i], out),
+            MetricKind.KUpDownCounter => encode_up_down_entry(name, family.label_names(), &entries[i], out),
+            MetricKind.KGauge => encode_gauge_entry(name, family.label_names(), &entries[i], out),
+            MetricKind.KHistogram => encode_histogram_entry(name, family.label_names(), &entries[i], out),
+        }
+        i = i + 1;
+    }
+}
+
+fn type_string(kind: MetricKind) -> &'static Text {
+    match kind {
+        MetricKind.KCounter => "counter",
+        MetricKind.KUpDownCounter => "gauge",
+        MetricKind.KGauge => "gauge",
+        MetricKind.KHistogram => "histogram",
+    }
+}
+
+fn encode_counter_entry(name: &Text, label_names: &List<Text>, entry: &MetricEntry, out: &mut Text) {
+    match &entry.counter {
+        Some(c) => {
+            out.push_str(name);
+            write_label_block(out, label_names, &entry.labels, None);
+            out.push(' ');
+            write_float(out, c.get().value());
+            out.push('\n');
+        }
+        None => {}
+    }
+}
+
+fn encode_up_down_entry(name: &Text, label_names: &List<Text>, entry: &MetricEntry, out: &mut Text) {
+    match &entry.up_down {
+        Some(c) => {
+            out.push_str(name);
+            write_label_block(out, label_names, &entry.labels, None);
+            out.push(' ');
+            write_float(out, c.get().value());
+            out.push('\n');
+        }
+        None => {}
+    }
+}
+
+fn encode_gauge_entry(name: &Text, label_names: &List<Text>, entry: &MetricEntry, out: &mut Text) {
+    match &entry.gauge {
+        Some(c) => {
+            out.push_str(name);
+            write_label_block(out, label_names, &entry.labels, None);
+            out.push(' ');
+            write_float(out, c.get().value());
+            out.push('\n');
+        }
+        None => {}
+    }
+}
+
+fn encode_histogram_entry(name: &Text, label_names: &List<Text>, entry: &MetricEntry, out: &mut Text) {
+    match &entry.histogram {
+        Some(h) => {
+            let snap = h.snapshot();
+            let bounds = snap.bounds();
+            let counts = snap.counts();
+
+            // _bucket lines (cumulative per Prometheus convention).
+            let mut i = 0;
+            while i < bounds.len() {
+                out.push_str(name);
+                out.push_str("_bucket");
+                let le = float_to_text(bounds[i]);
+                write_label_block(out, label_names, &entry.labels, Some(("le".into(), le)));
+                out.push(' ');
+                write_uint(out, counts[i]);
+                out.push('\n');
+                i = i + 1;
+            }
+
+            // +Inf bucket (total count).
+            out.push_str(name);
+            out.push_str("_bucket");
+            write_label_block(out, label_names, &entry.labels, Some(("le".into(), "+Inf".into())));
+            out.push(' ');
+            write_uint(out, snap.count());
+            out.push('\n');
+
+            // _sum
+            out.push_str(name);
+            out.push_str("_sum");
+            write_label_block(out, label_names, &entry.labels, None);
+            out.push(' ');
+            write_float(out, snap.sum());
+            out.push('\n');
+
+            // _count
+            out.push_str(name);
+            out.push_str("_count");
+            write_label_block(out, label_names, &entry.labels, None);
+            out.push(' ');
+            write_uint(out, snap.count());
+            out.push('\n');
+        }
+        None => {}
+    }
+}
+
+// =============================================================================
+// Formatting helpers
+// =============================================================================
+
+fn write_label_block(
+    out: &mut Text,
+    label_names: &List<Text>,
+    labels: &LabelSet,
+    extra: Maybe<(Text, Text)>,
+) {
+    let any_label = !label_names.is_empty() || extra.is_some();
+    if !any_label { return; }
+    out.push('{');
+    let mut first = true;
+    let values = labels.values();
+    let mut i = 0;
+    while i < label_names.len() && i < values.len() {
+        if !first { out.push(','); }
+        first = false;
+        out.push_str(&label_names[i]);
+        out.push('=');
+        out.push('"');
+        write_value_escaped(out, &values[i]);
+        out.push('"');
+        i = i + 1;
+    }
+    match &extra {
+        Some(kv) => {
+            if !first { out.push(','); }
+            out.push_str(&kv.0);
+            out.push('=');
+            out.push('"');
+            write_value_escaped(out, &kv.1);
+            out.push('"');
+        }
+        None => {}
+    }
+    out.push('}');
+}
+
+fn write_help_escaped(out: &mut Text, help: &Text) {
+    let bytes = help.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        let b = bytes[i];
+        if b == 0x5C { out.push_str("\\\\"); }
+        else if b == 0x0A { out.push_str("\\n"); }
+        else { out.push(b as Char); }
+        i = i + 1;
+    }
+}
+
+fn write_value_escaped(out: &mut Text, value: &Text) {
+    let bytes = value.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        let b = bytes[i];
+        if b == 0x5C { out.push_str("\\\\"); }
+        else if b == 0x22 { out.push_str("\\\""); }
+        else if b == 0x0A { out.push_str("\\n"); }
+        else { out.push(b as Char); }
+        i = i + 1;
+    }
+}
+
+fn write_float(out: &mut Text, v: Float) {
+    out.push_str(&float_to_text(v));
+}
+
+fn write_uint(out: &mut Text, v: UInt64) {
+    out.push_str(&uint_to_text(v));
+}
+
+fn float_to_text(v: Float) -> Text {
+    f"{v}"
+}
+
+fn uint_to_text(v: UInt64) -> Text {
+    f"{v}"
+}

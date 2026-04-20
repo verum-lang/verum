@@ -1,0 +1,67 @@
+// =============================================================================
+// metrics/value.vr — Atomic 64-bit float counter value
+// =============================================================================
+// Prometheus counters / gauges are floats on the wire. We store them as
+// UInt64 bit-patterns and mutate via AtomicU64 CAS, since the stdlib's
+// AtomicU64 is lock-free on all target platforms.
+// =============================================================================
+
+module core.metrics.value;
+
+mount core.*;
+mount core.sync.atomic.{AtomicU64, MemoryOrdering};
+
+// =============================================================================
+// AtomicF64 — build on AtomicU64 bit representation
+// =============================================================================
+
+public type AtomicF64 is {
+    bits: AtomicU64,
+}
+
+implement AtomicF64 {
+    pub fn new(v: Float) -> AtomicF64 {
+        AtomicF64 { bits: AtomicU64.new(f64_to_bits(v)) }
+    }
+
+    pub fn load(&self, ord: MemoryOrdering) -> Float {
+        bits_to_f64(self.bits.load(ord))
+    }
+
+    pub fn store(&self, v: Float, ord: MemoryOrdering) {
+        self.bits.store(f64_to_bits(v), ord)
+    }
+
+    /// Atomic add with CAS retry loop. Safe for concurrent increments.
+    /// Returns the previous value.
+    pub fn fetch_add(&self, v: Float, ord: MemoryOrdering) -> Float {
+        loop {
+            let cur_bits = self.bits.load(ord);
+            let cur = bits_to_f64(cur_bits);
+            let new_bits = f64_to_bits(cur + v);
+            match self.bits.compare_exchange_weak(cur_bits, new_bits, ord, ord) {
+                Ok(_) => return cur,
+                Err(_) => continue,
+            }
+        }
+    }
+
+    /// Atomic subtract (== fetch_add(-v)).
+    pub fn fetch_sub(&self, v: Float, ord: MemoryOrdering) -> Float {
+        self.fetch_add(-v, ord)
+    }
+}
+
+// =============================================================================
+// Bit encoding helpers (IEEE 754 double)
+// =============================================================================
+
+@inline
+fn f64_to_bits(v: Float) -> UInt64 {
+    @intrinsic("verum.float.f64_to_bits", v) as UInt64
+}
+
+@inline
+fn bits_to_f64(b: UInt64) -> Float {
+    @intrinsic("verum.float.bits_to_f64", b) as Float
+}

@@ -1,0 +1,360 @@
+// =============================================================================
+// metrics/registry.vr — MetricFamily, Registry, config types
+// =============================================================================
+// Registration + lookup surface. A `Registry` owns a flat list of metric
+// families; each family stores its per-label-set instruments in a
+// small associative list (linear scan; typical Prometheus cardinality
+// is ≤ a few dozen per family so this is faster than hashing).
+// =============================================================================
+
+module core.metrics.registry;
+
+mount core.*;
+mount core.sync.mutex.{Mutex};
+mount core.metrics.label.{LabelSet};
+mount core.metrics.instrument.{Counter, UpDownCounter, Gauge};
+mount core.metrics.histogram.{Histogram, HistogramBuckets};
+
+// =============================================================================
+// Metric kind tag
+// =============================================================================
+
+public type MetricKind is
+    | KCounter
+    | KUpDownCounter
+    | KGauge
+    | KHistogram;
+
+// =============================================================================
+// Config types (one per metric kind)
+// =============================================================================
+
+public type CounterConfig is {
+    name: Text,
+    help: Text,
+    labels: List<Text>,
+};
+
+public type UpDownCounterConfig is {
+    name: Text,
+    help: Text,
+    labels: List<Text>,
+};
+
+public type GaugeConfig is {
+    name: Text,
+    help: Text,
+    labels: List<Text>,
+};
+
+public type HistogramConfig is {
+    name: Text,
+    help: Text,
+    labels: List<Text>,
+    buckets: HistogramBuckets,
+};
+
+// =============================================================================
+// MetricFamily — one metric-name, multiple label-sets
+// =============================================================================
+
+public type MetricFamily is {
+    name: Text,
+    help: Text,
+    kind: MetricKind,
+    label_names: List<Text>,
+    buckets: HistogramBuckets,
+    entries: Shared<Mutex<List<MetricEntry>>>,
+};
+
+public type MetricEntry is {
+    labels: LabelSet,
+    counter: Maybe<Shared<Counter>>,
+    up_down: Maybe<Shared<UpDownCounter>>,
+    gauge: Maybe<Shared<Gauge>>,
+    histogram: Maybe<Shared<Histogram>>,
+};
+
+implement MetricFamily {
+    pub fn name(&self) -> &Text { &self.name }
+    pub fn help(&self) -> &Text { &self.help }
+    pub fn kind(&self) -> MetricKind { self.kind }
+    pub fn label_names(&self) -> &List<Text> { &self.label_names }
+
+    /// Snapshot the family for export — clones entries, including
+    /// atomic values (via each instrument's Shared handle).
+    pub fn snapshot_entries(&self) -> List<MetricEntry> {
+        let guard = (&*self.entries).lock().unwrap();
+        let inner: &List<MetricEntry> = &*guard;
+        clone_entries(inner)
+    }
+
+    fn resolve_counter(&self, labels: &LabelSet) -> Shared<Counter> {
+        let mut guard = (&*self.entries).lock().unwrap();
+        let entries: &mut List<MetricEntry> = &mut *guard;
+        let mut i = 0;
+        while i < entries.len() {
+            if entries[i].labels.equals(labels) {
+                match &entries[i].counter {
+                    Some(c) => return c.clone(),
+                    None => {}
+                }
+            }
+            i = i + 1;
+        }
+        let c = Shared.new(Counter.new());
+        entries.push(MetricEntry {
+            labels: labels.clone(),
+            counter: Some(c.clone()),
+            up_down: None,
+            gauge: None,
+            histogram: None,
+        });
+        c
+    }
+
+    fn resolve_up_down(&self, labels: &LabelSet) -> Shared<UpDownCounter> {
+        let mut guard = (&*self.entries).lock().unwrap();
+        let entries: &mut List<MetricEntry> = &mut *guard;
+        let mut i = 0;
+        while i < entries.len() {
+            if entries[i].labels.equals(labels) {
+                match &entries[i].up_down {
+                    Some(c) => return c.clone(),
+                    None => {}
+                }
+            }
+            i = i + 1;
+        }
+        let c = Shared.new(UpDownCounter.new());
+        entries.push(MetricEntry {
+            labels: labels.clone(),
+            counter: None,
+            up_down: Some(c.clone()),
+            gauge: None,
+            histogram: None,
+        });
+        c
+    }
+
+    fn resolve_gauge(&self, labels: &LabelSet) -> Shared<Gauge> {
+        let mut guard = (&*self.entries).lock().unwrap();
+        let entries: &mut List<MetricEntry> = &mut *guard;
+        let mut i = 0;
+        while i < entries.len() {
+            if entries[i].labels.equals(labels) {
+                match &entries[i].gauge {
+                    Some(c) => return c.clone(),
+                    None => {}
+                }
+            }
+            i = i + 1;
+        }
+        let c = Shared.new(Gauge.new());
+        entries.push(MetricEntry {
+            labels: labels.clone(),
+            counter: None,
+            up_down: None,
+            gauge: Some(c.clone()),
+            histogram: None,
+        });
+        c
+    }
+
+    fn resolve_histogram(&self, labels: &LabelSet) -> Shared<Histogram> {
+        let mut guard = (&*self.entries).lock().unwrap();
+        let entries: &mut List<MetricEntry> = &mut *guard;
+        let mut i = 0;
+        while i < entries.len() {
+            if entries[i].labels.equals(labels) {
+                match &entries[i].histogram {
+                    Some(c) => return c.clone(),
+                    None => {}
+                }
+            }
+            i = i + 1;
+        }
+        let h = Shared.new(Histogram.new(self.buckets.clone()));
+        entries.push(MetricEntry {
+            labels: labels.clone(),
+            counter: None,
+            up_down: None,
+            gauge: None,
+            histogram: Some(h.clone()),
+        });
+        h
+    }
+}
+
+// =============================================================================
+// Registry — owns the list of families
+// =============================================================================
+
+public type Registry is {
+    families: Shared<Mutex<List<Shared<MetricFamily>>>>,
+};
+
+implement Registry {
+    pub fn new() -> Registry {
+        Registry { families: Shared.new(Mutex.new(List.new())) }
+    }
+
+    /// Register (or retrieve) a Counter family. Same-name is idempotent
+    /// if (kind, label_names) match; otherwise panics (metric-name
+    /// collision is a programming error).
+    pub fn counter(&self, config: CounterConfig) -> CounterHandle {
+        let family = self.ensure_family(
+            config.name, config.help, MetricKind.KCounter,
+            config.labels, HistogramBuckets.defaults(),
+        );
+        CounterHandle { family: family }
+    }
+
+    pub fn up_down_counter(&self, config: UpDownCounterConfig) -> UpDownCounterHandle {
+        let family = self.ensure_family(
+            config.name, config.help, MetricKind.KUpDownCounter,
+            config.labels, HistogramBuckets.defaults(),
+        );
+        UpDownCounterHandle { family: family }
+    }
+
+    pub fn gauge(&self, config: GaugeConfig) -> GaugeHandle {
+        let family = self.ensure_family(
+            config.name, config.help, MetricKind.KGauge,
+            config.labels, HistogramBuckets.defaults(),
+        );
+        GaugeHandle { family: family }
+    }
+
+    pub fn histogram(&self, config: HistogramConfig) -> HistogramHandle {
+        let family = self.ensure_family(
+            config.name, config.help, MetricKind.KHistogram,
+            config.labels, config.buckets,
+        );
+        HistogramHandle { family: family }
+    }
+
+    /// Take a snapshot of all families for export.
+    pub fn snapshot(&self) -> List<Shared<MetricFamily>> {
+        let guard = (&*self.families).lock().unwrap();
+        let inner: &List<Shared<MetricFamily>> = &*guard;
+        let mut out = List.with_capacity(inner.len());
+        let mut i = 0;
+        while i < inner.len() {
+            out.push(inner[i].clone());
+            i = i + 1;
+        }
+        out
+    }
+
+    fn ensure_family(
+        &self,
+        name: Text,
+        help: Text,
+        kind: MetricKind,
+        label_names: List<Text>,
+        buckets: HistogramBuckets,
+    ) -> Shared<MetricFamily> {
+        let mut guard = (&*self.families).lock().unwrap();
+        let families: &mut List<Shared<MetricFamily>> = &mut *guard;
+        let mut i = 0;
+        while i < families.len() {
+            if *families[i].name() == name {
+                // Validate kind + label shape match.
+                match (families[i].kind(), kind) {
+                    (MetricKind.KCounter, MetricKind.KCounter) => {}
+                    (MetricKind.KUpDownCounter, MetricKind.KUpDownCounter) => {}
+                    (MetricKind.KGauge, MetricKind.KGauge) => {}
+                    (MetricKind.KHistogram, MetricKind.KHistogram) => {}
+                    _ => panic(&f"metric {name}: kind mismatch on re-register"),
+                }
+                return families[i].clone();
+            }
+            i = i + 1;
+        }
+        let f = Shared.new(MetricFamily {
+            name: name,
+            help: help,
+            kind: kind,
+            label_names: label_names,
+            buckets: buckets,
+            entries: Shared.new(Mutex.new(List.new())),
+        });
+        families.push(f.clone());
+        f
+    }
+}
+
+// =============================================================================
+// Handles — ergonomic label-binding wrappers
+// =============================================================================
+
+public type CounterHandle is {
+    family: Shared<MetricFamily>,
+};
+
+implement CounterHandle {
+    pub fn with(&self, values: &[&Text]) -> Shared<Counter> {
+        self.family.resolve_counter(&LabelSet.from_slice(values))
+    }
+    pub fn unlabeled(&self) -> Shared<Counter> {
+        self.family.resolve_counter(&LabelSet.new())
+    }
+}
+
+public type UpDownCounterHandle is {
+    family: Shared<MetricFamily>,
+};
+
+implement UpDownCounterHandle {
+    pub fn with(&self, values: &[&Text]) -> Shared<UpDownCounter> {
+        self.family.resolve_up_down(&LabelSet.from_slice(values))
+    }
+    pub fn unlabeled(&self) -> Shared<UpDownCounter> {
+        self.family.resolve_up_down(&LabelSet.new())
+    }
+}
+
+public type GaugeHandle is {
+    family: Shared<MetricFamily>,
+};
+
+implement GaugeHandle {
+    pub fn with(&self, values: &[&Text]) -> Shared<Gauge> {
+        self.family.resolve_gauge(&LabelSet.from_slice(values))
+    }
+    pub fn unlabeled(&self) -> Shared<Gauge> {
+        self.family.resolve_gauge(&LabelSet.new())
+    }
+}
+
+public type HistogramHandle is {
+    family: Shared<MetricFamily>,
+};
+
+implement HistogramHandle {
+    pub fn with(&self, values: &[&Text]) -> Shared<Histogram> {
+        self.family.resolve_histogram(&LabelSet.from_slice(values))
+    }
+    pub fn unlabeled(&self) -> Shared<Histogram> {
+        self.family.resolve_histogram(&LabelSet.new())
+    }
+}
+
+// -------------------------------------------------------------------------
+
+fn clone_entries(xs: &List<MetricEntry>) -> List<MetricEntry> {
+    let mut out = List.with_capacity(xs.len());
+    let mut i = 0;
+    while i < xs.len() {
+        out.push(MetricEntry {
+            labels: xs[i].labels.clone(),
+            counter: match &xs[i].counter { Some(c) => Some(c.clone()), None => None },
+            up_down: match &xs[i].up_down { Some(c) => Some(c.clone()), None => None },
+            gauge: match &xs[i].gauge { Some(c) => Some(c.clone()), None => None },
+            histogram: match &xs[i].histogram { Some(c) => Some(c.clone()), None => None },
+        });
+        i = i + 1;
+    }
+    out
+}

@@ -1,0 +1,26 @@
+// =============================================================================
+// metrics/exporter.vr — MetricsExporter protocol
+// =============================================================================
+// Pluggable exporter surface. In-tree implementation is
+// `core.metrics.prometheus` (text-format encoder / HTTP handler);
+// third-party OTLP, StatsD, Datadog, Graphite exporters live in
+// separate cogs.
+// =============================================================================
+
+module core.metrics.exporter;
+
+mount core.*;
+mount core.time.duration.{Duration};
+mount core.metrics.registry.{Registry};
+
+public type ExportResult is
+    | Success
+    | Failure(Text);
+
+public type MetricsExporter is protocol {
+    /// Collect + emit a snapshot of the registry state.
+    fn export(&self, registry: &Registry) -> ExportResult;
+
+    /// Shut down. Must drain any outstanding export work.
+    fn shutdown(&self, timeout: Duration) -> ExportResult;
+};
