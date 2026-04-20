@@ -10459,6 +10459,8 @@ impl<'s> CompilationPipeline<'s> {
             "core.async.generator",
             "core.async.spawn_with",
             "core.async.parallel",
+            "core.async.select",          // join_all, select_all, race family
+            "core.async.spawn_config",    // spawn_with_config
             // Runtime context bridge for AOT spawn/provide/using
             "core.runtime.ctx_bridge",
             // I/O type definitions — needed before io/net modules that use IoError/IoErrorKind
