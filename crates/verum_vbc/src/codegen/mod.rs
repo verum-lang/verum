@@ -2912,15 +2912,39 @@ impl VbcCodegen {
         self.context_names.clear();
     }
 
-    /// Register builtin variant constructors so that pattern matching can
-    /// resolve their tags without requiring explicit type definitions.
+    /// Seeds sentinel variant constructors (`None`, `Some`, `Ok`, `Err`,
+    /// `Less`, `Equal`, `Greater`) so standalone compilation paths that do
+    /// not pre-load `core/base/{maybe,result,ordering}.vr` can still
+    /// resolve these names — e.g. a user writing `let x = Some(42);`
+    /// without declaring a `Maybe` type.
     ///
-    /// NOTE: Variant tags are NOT hardcoded. They are auto-assigned from
-    /// declaration order when the type definition is compiled. This method
-    /// only provides fallback registrations for programs that use Maybe/Result
-    /// variants without explicitly defining those types (e.g., test snippets).
-    /// When a real type definition is compiled (e.g., `type Maybe<T> is None | Some(T);`),
-    /// it overwrites these sentinel entries with the actual tags from the definition.
+    /// First-wins dispatch. Real registrations from actual type
+    /// declarations take precedence via two complementary guards in
+    /// `register_type_constructors`:
+    ///
+    ///   * User-phase (`prefer_existing_functions = false`): any existing
+    ///     variants for the redeclared type are purged via
+    ///     `clear_variants_for_type` before the new set is registered —
+    ///     this wipes these sentinels.
+    ///
+    ///   * Stdlib-phase (`prefer_existing_functions = true`): if a prior
+    ///     registration has already populated variants for this nominal
+    ///     type, `has_variants_for_type` short-circuits the re-registration
+    ///     so stdlib variants do not leak into a user type of the same
+    ///     name.
+    ///
+    /// Sentinel IDs (`u32::MAX - tag`) never overlap with real function
+    /// IDs or the `u32::MAX / 2` range reserved for newtype pass-through.
+    /// Tag values are kept in lock-step with the canonical declarations
+    /// in `core/base/maybe.vr`, `core/base/result.vr`, and
+    /// `core/base/ordering.vr` so a sentinel-seeded value is
+    /// bit-compatible with a stdlib-seeded one.
+    ///
+    /// Long-term, this seed should be deleted entirely and replaced with
+    /// an unconditional `ALWAYS_INCLUDE` of the relevant `core.base.*`
+    /// modules. That refactor touches standalone-codegen call sites
+    /// (REPL, `meta::vbc_executor`, bench harnesses) that drive
+    /// `VbcCodegen::compile_module` without a pipeline-assembled stdlib.
     fn register_builtin_variants(&mut self) {
         // Register a fixed set of stdlib variant constructors so that user
         // code like `Maybe.Some(42)`, `Result.Ok(x)`, `Ordering.Less` compiles
