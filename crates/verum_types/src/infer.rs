@@ -33394,14 +33394,38 @@ impl TypeChecker {
 
         // Resolve and expand context requirements
         // Context group expansion: resolving context group names to their constituent contexts recursively — Context group expansion
-        let context_requirement = if !func.contexts.is_empty() {
+        //
+        // Module-level `using [Ctx]` clauses at the top of a file are parsed
+        // as a synthetic context group named `__module_contexts__`. Its
+        // contents should be implicitly added to every function's required
+        // contexts, so callers don't have to repeat `using [Ctx]` on every
+        // function in a file that already declares it at module scope.
+        let module_level_contexts = match self
+            .context_resolver
+            .get_group("__module_contexts__")
+        {
+            verum_common::Maybe::Some(g) => g.contexts.clone(),
+            verum_common::Maybe::None => List::new(),
+        };
+
+        let context_requirement = if !func.contexts.is_empty()
+            || !module_level_contexts.is_empty()
+        {
             // Convert Vec to List for the resolver
             let contexts_list: List<_> = func.contexts.iter().cloned().collect();
 
             // Expand context groups and validate all contexts
-            let requirement = self
-                .context_resolver
-                .resolve_requirement(&contexts_list, func.span)?;
+            let mut requirement = if !contexts_list.is_empty() {
+                self.context_resolver
+                    .resolve_requirement(&contexts_list, func.span)?
+            } else {
+                crate::di::requirement::ContextRequirement::empty()
+            };
+
+            // Merge in module-level contexts.
+            for ctx in module_level_contexts.iter() {
+                requirement.add_context(ctx.clone());
+            }
 
             Some(requirement)
         } else {
