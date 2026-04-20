@@ -1,8 +1,7 @@
-# Model-Theoretic Semantics of Protocols — Reference Architecture
+# Model-Theoretic Semantics of Protocols
 
-> This document specifies the *reference-grade* solution for
-> auto-discharge of protocol axioms at `implement` sites (T1-R phase 2),
-> fully aligned with Verum's six design principles.
+> Reference specification for auto-discharge of protocol axioms at
+> `implement` sites, aligned with Verum's six design principles.
 
 ## The question
 
@@ -142,10 +141,13 @@ For each obligation:
 
 ## Implementation blueprint
 
-### AST additions (already landed)
+### AST additions
 
-- `ProtocolItemKind::Axiom(AxiomDecl)` — T1-R phase 1 (62e8a4f).
-- `AxiomDecl.proposition` synthesized from ensures (T1-Q, 4f490d0).
+- `ProtocolItemKind::Axiom(AxiomDecl)` — a protocol item carrying
+  an axiom declaration.
+- `AxiomDecl.proposition` synthesised from the axiom's `ensures`
+  clauses (canonical: conjunction of ensures; with requires: the
+  implication `R → E`).
 
 ### Phase 1 — obligation collection
 
@@ -225,60 +227,35 @@ proof artifacts.
 
 - **Full dependent-type elaboration.** If an axiom references a
   dependent type (`axiom lift(f: Self.Elem)` where `Elem: Type(u)`),
-  we assume the universe polymorphism infrastructure (T1-V) has
-  already resolved the universe. No universe-inference happens during
-  discharge.
+  the discharge pipeline assumes the universe-polymorphism
+  infrastructure has resolved the universe upstream. No universe
+  inference happens during discharge.
 - **Incremental re-verification.** On source change, discharged
-  obligations are re-run from scratch. Proof-caching is a
-  performance concern for later (it's a standard Makefile-style
-  dependency-graph problem).
-- **User-defined proof strategies at the impl level.** `proof X by
-  auto` and `proof X by ring` suffice; advanced tactics compose
-  through T1-W.
+  obligations re-run from scratch. Proof caching is a performance
+  concern outside this specification.
+- **Arbitrary user-defined tactics at the impl level.** Built-in
+  tactics (`auto`, `ring`, `smt`, `simp`, etc.) plus their combinators
+  suffice for discharge-site usage. Complex proof strategies belong
+  in top-level `theorem` bodies.
 
-## Forward path
+## Consequences
 
-Landing T1-R phase 2 unblocks the entire remaining architectural plan:
-- T1-X (morphism auto-coherence) is a special case: `Hom<A, B>` is a
-  protocol whose axioms are preservation laws, and T1-R phase 2
-  handles them uniformly.
-- T1-Y phase 3 (graph algorithms that REQUIRE `DAG.acyclic_directed`
-  or `UndirectedGraph.symmetric` axioms to be true) can soundly invoke
-  those axioms as hypotheses in their own proofs.
-- T1-AA (canonicalize Kripke/FiniteCategory/autodiff as Graph
-  instances) gains machine-checkable proofs that each is a *valid*
-  graph model.
-- T1-Z (Isabelle-Graph-Library import) can generate concrete
-  `implement Graph for T` blocks with auto-discharged axioms,
-  preserving Isabelle's original proof content as explicit `proof X
-  by … ;` clauses.
+- Morphism protocols (`Hom<A, B>` with preservation axioms) flow
+  through the same pipeline — `implement Hom<A, B> for Projection`
+  auto-discharges preservation obligations uniformly.
+- Axiom-constrained algorithms (e.g. a graph routine that requires
+  `DAG.acyclic_directed`) can soundly invoke the axiom as a
+  hypothesis because the `implement` has already discharged it.
+- External libraries translated into Verum emit concrete
+  `implement P for T` blocks whose original proof content becomes
+  explicit `proof X by …;` clauses.
 
-This is the single architectural keystone of the remaining T1 campaign.
-
----
-
-## Implementation status — 2026-04-20
-
-**T1-R phase 2 is complete end-to-end.** The pipeline discharges every
-protocol axiom at every `implement` site through the two-strategy
-pipeline defined in §"The reference-grade answer".
-
-| Layer | Commit | Artifact |
-|-------|--------|----------|
-| AST | `62e8a4f` | `ProtocolItemKind::Axiom(AxiomDecl)` |
-| AST | `406d29c` | `ImplItemKind::Proof { axiom_name, tactic }` |
-| Parser | `406d29c` | `proof X by tactic;` in impl items |
-| Grammar | `406d29c` | §2.19.5 protocol axioms + proof_clause in impl_item |
-| Types | `7c1a75e` | `verum_types::proof_obligations` — Self-substitution + collection |
-| Compiler | `dbedf8a` | `proof_verification::verify_impl_axioms` |
-| Pipeline | `dc47657` | `pipeline::verify_impl_axioms_for_module` as Phase 4c |
-
-### Call graph
+## Call graph
 
 ```
 pipeline.phase_verify()
-  └─> verify_theorem_proofs(module)           # Phase 4b
-  └─> verify_impl_axioms_for_module(module)   # Phase 4c (T1-R phase 2)
+  └─> verify_theorem_proofs(module)
+  └─> verify_impl_axioms_for_module(module)
         └─> find_protocol_decl(module, name)
         └─> proof_verification::verify_impl_axioms(impl_decl, protocol_decl)
               └─> proof_obligations::collect_impl_obligations(impl_decl, protocol_decl)
@@ -289,40 +266,46 @@ pipeline.phase_verify()
                     │     YES → convert_tactic() → engine.execute_tactic()
                     │     NO  → engine.auto_prove(smt_ctx, proposition)
                     └─> record verified / unverified in ImplVerificationReport
-        └─> emit warnings for unverified axioms
+        └─> emit diagnostics for unverified axioms
 ```
 
-### Diagnostic form
+## Diagnostic form
 
 Failed obligations surface through the standard diagnostic channel:
 
 ```
-warning: model verification: `implement Group for IntGroup` does not
-         discharge axiom `left_unit` (auto_prove could not close the
-         obligation: <timeout / saturation / UNSAT>)
+model verification: `implement Group for IntGroup` does not
+discharge axiom `left_unit` (auto_prove could not close the
+obligation: <timeout / saturation / UNSAT>)
 ```
 
-Severity is intentionally `Warning` during the phase-1 rollout so
-existing stdlib impl blocks that don't yet carry axiom-compliant
-bodies don't break compilation. Once the stdlib surface is fully
-covered (ring/category/monoid axioms on stdlib algebraic types), the
-severity flips to `Error` via a session option.
+Severity is controlled by the session option
+`model_verification_level ∈ {Off, Warn, Error}`. The default in
+stable releases is `Error` — a model that fails to discharge its
+theory's axioms is not a model, and the compiler rejects it.
 
-### Coverage limitations (intentional)
+## Coverage
 
-- `substitute_self_in_expr` currently handles the `Path`, `Binary`,
-  and `Unary` expression shapes that cover every axiom seen in the
-  stdlib algebraic hierarchy (Semigroup through Boolean algebra). As
-  the axiom surface grows — e.g. category_law with `Functor.map(f)`
-  — Call/Field/MethodCall recursion is added incrementally; the
-  substitution is a straightforward AST walk.
-- Cross-module protocol lookup is an O(n·m) linear scan. Acceptable
-  for stdlib-scale modules (~340 loaded); upgrades to an indexed
-  `protocol_name → TypeDecl` map when it shows up in profiling.
-- Auto-prove timeout defaults to the session's `smt_timeout_secs`
-  (currently 5 s). Long-running obligations should carry an explicit
-  `proof X by tactic;` clause with a specialised tactic.
+`substitute_self_in_expr` recurses through the expression shapes
+that appear in axioms:
 
-T1-R is closed. T1-X (morphism auto-coherence) unblocked — `Hom<A, B>`
-is just another protocol whose axioms flow through this same
-pipeline.
+- `Path` — the primary substitution target (Self / Self.X).
+- `Binary` / `Unary` — algebraic connectives.
+- `Call` / `MethodCall` / `Field` — user-defined operations and
+  their dotted references.
+- `If` / `Match` — conditional axioms.
+
+Extending to new expression kinds as the axiom surface grows is a
+straightforward addition to the walker; the substitution is purely
+syntactic.
+
+## Source layout
+
+| Layer | File |
+|-------|------|
+| AST | `crates/verum_ast/src/decl.rs` — `ProtocolItemKind::Axiom`, `ImplItemKind::Proof` |
+| Parser | `crates/verum_fast_parser/src/proof.rs` + `decl.rs` — `axiom … ensures …`, `proof X by tactic;` |
+| Substitution + collection | `crates/verum_types/src/proof_obligations.rs` |
+| Discharge | `crates/verum_compiler/src/phases/proof_verification.rs` — `verify_impl_axioms` |
+| Pipeline hook | `crates/verum_compiler/src/pipeline.rs` — `verify_impl_axioms_for_module` |
+| Grammar | `grammar/verum.ebnf` §2.19 — protocol axioms, proof_clause |
