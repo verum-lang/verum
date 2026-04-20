@@ -205,6 +205,16 @@ public module security;
 public module compress;
 
 // =============================================================================
+// Layer 4.7.5: Protobuf (Depends on: core)
+// =============================================================================
+
+// Protocol Buffers wire-format codec: varint, tag, wire-types, ZigZag,
+// fixed32/64, float, string, bytes, bool. Low-level surface intended
+// for gRPC/Connect clients. Higher-level schema-driven codegen is a
+// meta-programming follow-up.
+public module protobuf;
+
+// =============================================================================
 // Layer 4.95: Tracing (Depends on: core, text, collections, async, sync, time)
 // =============================================================================
 

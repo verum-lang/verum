@@ -1,0 +1,25 @@
+// =============================================================================
+// protobuf/error.vr — ProtobufError
+// =============================================================================
+
+module core.protobuf.error;
+
+mount core.*;
+
+public type ProtobufError is
+    /// Buffer ended mid-field — streamed reader should read more.
+    | UnexpectedEof
+    /// Varint exceeded 10 bytes.
+    | VarintOverflow
+    /// Unrecognised wire-type tag bits.
+    | InvalidWireType(UInt8)
+    /// Length-delimited field claims a length larger than the buffer.
+    | InvalidLength { declared: Int, available: Int }
+    /// UTF-8 validation failed on a `string` field.
+    | InvalidUtf8
+    /// Field number out of range — fields must be 1..=2^29-1.
+    | InvalidFieldNumber(UInt64)
+    /// Deprecated start-group / end-group wire types encountered.
+    | UnsupportedGroup;
+
+public type DecodeResult<T> is Result<T, ProtobufError>;

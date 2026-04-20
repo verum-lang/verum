@@ -1,0 +1,123 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: protobuf, wire-format, varint, zigzag, grpc
+// @timeout: 10000
+// @expect: pass
+
+// Protocol Buffers wire-codec API surface.
+
+mount core.protobuf.{
+    WireType, Cursor, ProtobufError, DecodeResult,
+    write_tag, write_varint, write_sint32, write_sint64,
+    write_fixed32, write_fixed64, write_float32, write_float64,
+    write_bool, write_string, write_bytes,
+    read_varint, read_sint32, read_sint64,
+    read_fixed32, read_fixed64,
+    tag_value, encode_zigzag_32, encode_zigzag_64,
+    decode_zigzag_32, decode_zigzag_64,
+};
+
+// WireType round-trip.
+fn typecheck_wire_type() -> (WireType, UInt8, Result<WireType, ProtobufError>) {
+    let wt = WireType.LengthDelim;
+    let b = wt.to_u8();
+    let round = WireType.from_u8(b);
+    (wt, b, round)
+}
+
+// Tag encoding.
+fn typecheck_tag() -> UInt32 {
+    tag_value(1, WireType.Varint)
+}
+
+// Varint encode/decode.
+fn typecheck_varint() -> List<Byte> {
+    let mut out: List<Byte> = List.new();
+    write_varint(&mut out, 150);
+    write_varint(&mut out, 18446744073709551615);  // u64 max
+    out
+}
+
+fn typecheck_read_varint(buf: &[Byte]) -> Result<(UInt64, Int), ProtobufError> {
+    read_varint(buf, 0)
+}
+
+// ZigZag round-trip.
+fn typecheck_zigzag() -> (UInt32, Int32, UInt64, Int64) {
+    let a = encode_zigzag_32(-5);
+    let b = decode_zigzag_32(a);
+    let c = encode_zigzag_64(-9223372036854775808);
+    let d = decode_zigzag_64(c);
+    (a, b, c, d)
+}
+
+// Fixed-width write.
+fn typecheck_fixed() -> List<Byte> {
+    let mut out: List<Byte> = List.new();
+    write_fixed32(&mut out, 0xDEADBEEF);
+    write_fixed64(&mut out, 0x0123456789ABCDEF);
+    out
+}
+
+// Field-level write helpers.
+fn typecheck_field_writes() -> List<Byte> {
+    let mut out: List<Byte> = List.new();
+    write_tag(&mut out, 1, WireType.Varint);
+    write_varint(&mut out, 150);
+
+    write_tag(&mut out, 2, WireType.LengthDelim);
+    write_string(&mut out, &"hello".into());
+
+    write_tag(&mut out, 3, WireType.LengthDelim);
+    let bytes: [Byte; 3] = [1, 2, 3];
+    write_bytes(&mut out, &bytes);
+
+    write_tag(&mut out, 4, WireType.Varint);
+    write_bool(&mut out, true);
+
+    write_tag(&mut out, 5, WireType.Varint);
+    write_sint32(&mut out, -42);
+
+    write_tag(&mut out, 6, WireType.Fixed64);
+    write_float64(&mut out, 3.14);
+
+    out
+}
+
+// Cursor — streaming read.
+fn typecheck_cursor_read(buf: &[Byte]) -> Result<Int, ProtobufError> {
+    let mut cursor = Cursor.new(buf);
+    let mut total: Int = 0;
+    while !cursor.at_end() {
+        let (field, wire_type) = cursor.read_tag()?;
+        match (field, wire_type) {
+            (1, WireType.Varint) => { let _ = cursor.read_varint()?; }
+            (2, WireType.LengthDelim) => { let _ = cursor.read_string()?; }
+            (3, WireType.LengthDelim) => { let _ = cursor.read_bytes()?; }
+            (4, WireType.Varint) => { let _ = cursor.read_bool()?; }
+            (5, WireType.Varint) => { let _ = cursor.read_sint32()?; }
+            (6, WireType.Fixed64) => { let _ = cursor.read_fixed64()?; }
+            (_, wt) => cursor.skip(wt)?,
+        }
+        total = total + 1;
+    }
+    Ok(total)
+}
+
+// Error variants.
+fn typecheck_errors() -> List<ProtobufError> {
+    let mut xs: List<ProtobufError> = List.new();
+    xs.push(ProtobufError.UnexpectedEof);
+    xs.push(ProtobufError.VarintOverflow);
+    xs.push(ProtobufError.InvalidWireType(7));
+    xs.push(ProtobufError.InvalidLength { declared: 100, available: 10 });
+    xs.push(ProtobufError.InvalidUtf8);
+    xs.push(ProtobufError.InvalidFieldNumber(0));
+    xs.push(ProtobufError.UnsupportedGroup);
+    xs
+}
+
+fn main() {
+    // Shape-only.
+}

@@ -1,0 +1,84 @@
+// =============================================================================
+// protobuf/mod.vr — Protocol Buffers wire-format codec
+// =============================================================================
+// Layer: 4.7 (Encoding; alongside core.encoding)
+// Dependencies: core
+// Spec: https://protobuf.dev/programming-guides/encoding/
+//       https://github.com/protocolbuffers/protobuf/blob/main/src/google/protobuf/descriptor.proto
+// =============================================================================
+//
+// Low-level protobuf wire encoder + decoder. Sufficient to hand-build
+// message layouts for gRPC / Connect clients. Higher-level schema-driven
+// code generation is a meta-programming follow-up.
+//
+// # Wire types
+//
+// | Wire | Kind          | Used for                         |
+// |------|---------------|----------------------------------|
+// |   0  | Varint        | int32/int64/uint32/uint64/bool/enum/sint32/sint64 |
+// |   1  | Fixed64       | fixed64, sfixed64, double        |
+// |   2  | Length-delim  | string, bytes, message, packed-repeat |
+// |   5  | Fixed32       | fixed32, sfixed32, float         |
+//
+// Tag wire-format: `(field_number << 3) | wire_type`.
+//
+// # ZigZag — sint32 / sint64 signed-varint encoding
+//
+// ```
+// encoded = (n << 1) ^ (n >> 31)     // sint32
+// encoded = (n << 1) ^ (n >> 63)     // sint64
+// ```
+//
+// # Usage
+//
+// ```verum
+// // Encode a message: { f1: int32 = 150 }
+// let mut out = List.new();
+// wire.write_tag(&mut out, 1, WireType.Varint);
+// wire.write_varint(&mut out, 150);
+//
+// // Decode
+// let mut cursor = wire.Cursor.new(&out);
+// while !cursor.at_end() {
+//     let (field, wire_type) = cursor.read_tag()?;
+//     match (field, wire_type) {
+//         (1, WireType.Varint) => {
+//             let v = cursor.read_varint()?;
+//         }
+//         (_, wt) => cursor.skip(wt)?,
+//     }
+// }
+// ```
+// =============================================================================
+
+module core.protobuf;
+
+public module wire;
+public module error;
+
+public mount .wire.WireType;
+public mount .wire.Cursor;
+public mount .wire.write_tag;
+public mount .wire.write_varint;
+public mount .wire.write_sint32;
+public mount .wire.write_sint64;
+public mount .wire.write_fixed32;
+public mount .wire.write_fixed64;
+public mount .wire.write_float32;
+public mount .wire.write_float64;
+public mount .wire.write_bool;
+public mount .wire.write_string;
+public mount .wire.write_bytes;
+public mount .wire.read_varint;
+public mount .wire.read_sint32;
+public mount .wire.read_sint64;
+public mount .wire.read_fixed32;
+public mount .wire.read_fixed64;
+public mount .wire.tag_value;
+public mount .wire.encode_zigzag_32;
+public mount .wire.encode_zigzag_64;
+public mount .wire.decode_zigzag_32;
+public mount .wire.decode_zigzag_64;
+
+public mount .error.ProtobufError;
+public mount .error.DecodeResult;

@@ -1,0 +1,324 @@
+// =============================================================================
+// protobuf/wire.vr — Varint, tag, wire-type codec
+// =============================================================================
+
+module core.protobuf.wire;
+
+mount core.*;
+mount core.protobuf.error.{ProtobufError, DecodeResult};
+
+// =============================================================================
+// WireType
+// =============================================================================
+
+public type WireType is
+    | Varint
+    | Fixed64
+    | LengthDelim
+    | Fixed32;
+
+implement WireType {
+    pub fn to_u8(&self) -> UInt8 {
+        match self {
+            WireType.Varint      => 0,
+            WireType.Fixed64     => 1,
+            WireType.LengthDelim => 2,
+            WireType.Fixed32     => 5,
+        }
+    }
+
+    pub fn from_u8(b: UInt8) -> Result<WireType, ProtobufError> {
+        match b {
+            0 => Ok(WireType.Varint),
+            1 => Ok(WireType.Fixed64),
+            2 => Ok(WireType.LengthDelim),
+            3 => Err(ProtobufError.UnsupportedGroup),
+            4 => Err(ProtobufError.UnsupportedGroup),
+            5 => Ok(WireType.Fixed32),
+            _ => Err(ProtobufError.InvalidWireType(b)),
+        }
+    }
+}
+
+// =============================================================================
+// Tag — (field_number << 3) | wire_type
+// =============================================================================
+
+/// Encode a (field_number, wire_type) tag as a varint tag-value.
+@inline
+pub fn tag_value(field_number: UInt32, wire_type: WireType) -> UInt32 {
+    (field_number << 3) | (wire_type.to_u8() as UInt32)
+}
+
+pub fn write_tag(out: &mut List<Byte>, field_number: UInt32, wire_type: WireType) {
+    write_varint(out, tag_value(field_number, wire_type) as UInt64);
+}
+
+// =============================================================================
+// Varint encode / decode
+// =============================================================================
+
+/// Write an unsigned 64-bit varint. Maximum 10 bytes.
+pub fn write_varint(out: &mut List<Byte>, value: UInt64) {
+    let mut v = value;
+    while v >= 0x80 {
+        out.push(((v & 0x7F) | 0x80) as Byte);
+        v = v >> 7;
+    }
+    out.push((v & 0x7F) as Byte);
+}
+
+/// Read an unsigned 64-bit varint. Consumes up to 10 bytes.
+pub fn read_varint(buf: &[Byte], pos: Int) -> Result<(UInt64, Int), ProtobufError> {
+    let mut v: UInt64 = 0;
+    let mut shift = 0;
+    let mut p = pos;
+    let mut bytes_read = 0;
+    while bytes_read < 10 {
+        if p >= buf.len() { return Err(ProtobufError.UnexpectedEof); }
+        let b = buf[p] as UInt64;
+        v = v | ((b & 0x7F) << shift);
+        p = p + 1;
+        bytes_read = bytes_read + 1;
+        if (b & 0x80) == 0 {
+            return Ok((v, p));
+        }
+        shift = shift + 7;
+    }
+    // 10 bytes with MSB still set → overflow (u64 max fits in 10 varint bytes).
+    Err(ProtobufError.VarintOverflow)
+}
+
+// =============================================================================
+// ZigZag — signed-varint encoding
+// =============================================================================
+
+@inline
+pub fn encode_zigzag_32(n: Int32) -> UInt32 {
+    ((n << 1) ^ (n >> 31)) as UInt32
+}
+
+@inline
+pub fn encode_zigzag_64(n: Int64) -> UInt64 {
+    ((n << 1) ^ (n >> 63)) as UInt64
+}
+
+@inline
+pub fn decode_zigzag_32(n: UInt32) -> Int32 {
+    ((n >> 1) as Int32) ^ -((n & 1) as Int32)
+}
+
+@inline
+pub fn decode_zigzag_64(n: UInt64) -> Int64 {
+    ((n >> 1) as Int64) ^ -((n & 1) as Int64)
+}
+
+pub fn write_sint32(out: &mut List<Byte>, value: Int32) {
+    write_varint(out, encode_zigzag_32(value) as UInt64);
+}
+
+pub fn write_sint64(out: &mut List<Byte>, value: Int64) {
+    write_varint(out, encode_zigzag_64(value));
+}
+
+pub fn read_sint32(buf: &[Byte], pos: Int) -> Result<(Int32, Int), ProtobufError> {
+    let (v, p) = read_varint(buf, pos)?;
+    Ok((decode_zigzag_32(v as UInt32), p))
+}
+
+pub fn read_sint64(buf: &[Byte], pos: Int) -> Result<(Int64, Int), ProtobufError> {
+    let (v, p) = read_varint(buf, pos)?;
+    Ok((decode_zigzag_64(v), p))
+}
+
+// =============================================================================
+// Fixed-width encode / decode (little-endian)
+// =============================================================================
+
+pub fn write_fixed32(out: &mut List<Byte>, value: UInt32) {
+    out.push((value & 0xFF) as Byte);
+    out.push(((value >> 8) & 0xFF) as Byte);
+    out.push(((value >> 16) & 0xFF) as Byte);
+    out.push(((value >> 24) & 0xFF) as Byte);
+}
+
+pub fn write_fixed64(out: &mut List<Byte>, value: UInt64) {
+    let mut i = 0;
+    while i < 8 {
+        out.push(((value >> (i * 8)) & 0xFF) as Byte);
+        i = i + 1;
+    }
+}
+
+pub fn read_fixed32(buf: &[Byte], pos: Int) -> Result<(UInt32, Int), ProtobufError> {
+    if pos + 4 > buf.len() { return Err(ProtobufError.UnexpectedEof); }
+    let v = (buf[pos] as UInt32)
+        | ((buf[pos + 1] as UInt32) << 8)
+        | ((buf[pos + 2] as UInt32) << 16)
+        | ((buf[pos + 3] as UInt32) << 24);
+    Ok((v, pos + 4))
+}
+
+pub fn read_fixed64(buf: &[Byte], pos: Int) -> Result<(UInt64, Int), ProtobufError> {
+    if pos + 8 > buf.len() { return Err(ProtobufError.UnexpectedEof); }
+    let mut v: UInt64 = 0;
+    let mut i = 0;
+    while i < 8 {
+        v = v | ((buf[pos + i] as UInt64) << (i * 8));
+        i = i + 1;
+    }
+    Ok((v, pos + 8))
+}
+
+pub fn write_float32(out: &mut List<Byte>, value: Float) {
+    write_fixed32(out, @intrinsic("verum.float.f32_to_bits", value) as UInt32);
+}
+
+pub fn write_float64(out: &mut List<Byte>, value: Float) {
+    write_fixed64(out, @intrinsic("verum.float.f64_to_bits", value) as UInt64);
+}
+
+// =============================================================================
+// Bool / String / Bytes
+// =============================================================================
+
+pub fn write_bool(out: &mut List<Byte>, value: Bool) {
+    write_varint(out, if value { 1_u64 } else { 0_u64 });
+}
+
+pub fn write_string(out: &mut List<Byte>, value: &Text) {
+    let bytes = value.as_bytes();
+    write_varint(out, bytes.len() as UInt64);
+    let mut i = 0;
+    while i < bytes.len() {
+        out.push(bytes[i]);
+        i = i + 1;
+    }
+}
+
+pub fn write_bytes(out: &mut List<Byte>, value: &[Byte]) {
+    write_varint(out, value.len() as UInt64);
+    let mut i = 0;
+    while i < value.len() {
+        out.push(value[i]);
+        i = i + 1;
+    }
+}
+
+// =============================================================================
+// Cursor — streaming reader
+// =============================================================================
+
+public type Cursor is {
+    buf: List<Byte>,
+    pos: Int,
+}
+
+implement Cursor {
+    pub fn new(buf: &[Byte]) -> Cursor {
+        let mut copy = List.with_capacity(buf.len());
+        let mut i = 0;
+        while i < buf.len() { copy.push(buf[i]); i = i + 1; }
+        Cursor { buf: copy, pos: 0 }
+    }
+
+    pub fn at_end(&self) -> Bool { self.pos >= self.buf.len() }
+    pub fn position(&self) -> Int { self.pos }
+
+    /// Read a tag — returns (field_number, wire_type).
+    pub fn read_tag(&mut self) -> Result<(UInt32, WireType), ProtobufError> {
+        let (tag, new_pos) = read_varint(&self.buf, self.pos)?;
+        self.pos = new_pos;
+        let wire_type = WireType.from_u8((tag & 0x07) as UInt8)?;
+        let field_number = (tag >> 3) as UInt32;
+        if field_number == 0 {
+            return Err(ProtobufError.InvalidFieldNumber(field_number as UInt64));
+        }
+        Ok((field_number, wire_type))
+    }
+
+    pub fn read_varint(&mut self) -> Result<UInt64, ProtobufError> {
+        let (v, p) = read_varint(&self.buf, self.pos)?;
+        self.pos = p;
+        Ok(v)
+    }
+
+    pub fn read_sint32(&mut self) -> Result<Int32, ProtobufError> {
+        let (v, p) = read_sint32(&self.buf, self.pos)?;
+        self.pos = p;
+        Ok(v)
+    }
+
+    pub fn read_sint64(&mut self) -> Result<Int64, ProtobufError> {
+        let (v, p) = read_sint64(&self.buf, self.pos)?;
+        self.pos = p;
+        Ok(v)
+    }
+
+    pub fn read_fixed32(&mut self) -> Result<UInt32, ProtobufError> {
+        let (v, p) = read_fixed32(&self.buf, self.pos)?;
+        self.pos = p;
+        Ok(v)
+    }
+
+    pub fn read_fixed64(&mut self) -> Result<UInt64, ProtobufError> {
+        let (v, p) = read_fixed64(&self.buf, self.pos)?;
+        self.pos = p;
+        Ok(v)
+    }
+
+    pub fn read_bool(&mut self) -> Result<Bool, ProtobufError> {
+        let v = self.read_varint()?;
+        Ok(v != 0)
+    }
+
+    /// Read a length-delimited slice. Returns (start, len) offsets into
+    /// the buffer (no copy).
+    pub fn read_length_delim_view(&mut self) -> Result<(Int, Int), ProtobufError> {
+        let len = self.read_varint()? as Int;
+        if self.pos + len > self.buf.len() {
+            return Err(ProtobufError.InvalidLength {
+                declared: len,
+                available: self.buf.len() - self.pos,
+            });
+        }
+        let start = self.pos;
+        self.pos = self.pos + len;
+        Ok((start, len))
+    }
+
+    /// Read a string (validates UTF-8).
+    pub fn read_string(&mut self) -> Result<Text, ProtobufError> {
+        let (start, len) = self.read_length_delim_view()?;
+        let mut copy = List.with_capacity(len);
+        let mut i = 0;
+        while i < len { copy.push(self.buf[start + i]); i = i + 1; }
+        match Text.from_utf8(&copy) {
+            Ok(t) => Ok(t),
+            Err(_) => Err(ProtobufError.InvalidUtf8),
+        }
+    }
+
+    /// Read a `bytes` field as an owned List.
+    pub fn read_bytes(&mut self) -> Result<List<Byte>, ProtobufError> {
+        let (start, len) = self.read_length_delim_view()?;
+        let mut out = List.with_capacity(len);
+        let mut i = 0;
+        while i < len { out.push(self.buf[start + i]); i = i + 1; }
+        Ok(out)
+    }
+
+    /// Skip an entire field of the given wire type. Used for unknown
+    /// fields that the receiver doesn't care about.
+    pub fn skip(&mut self, wire_type: WireType) -> Result<(), ProtobufError> {
+        match wire_type {
+            WireType.Varint => { let _ = self.read_varint()?; Ok(()) }
+            WireType.Fixed64 => { let _ = self.read_fixed64()?; Ok(()) }
+            WireType.Fixed32 => { let _ = self.read_fixed32()?; Ok(()) }
+            WireType.LengthDelim => {
+                let _ = self.read_length_delim_view()?;
+                Ok(())
+            }
+        }
+    }
+}
