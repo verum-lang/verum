@@ -1,0 +1,131 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: net, http, parser, rfc7230, zero-copy, simd
+// @timeout: 10000
+// @expect: pass
+
+// HTTP/1.1 wire-parser shape + API surface.
+
+mount core.net.http_parser.{
+    HttpParser, HeaderView, ParseProgress, ParseError,
+    ChunkedDecoder, ChunkProgress,
+};
+mount core.net.http.{Method, StatusCode, Version};
+
+// Request-mode parser instantiation.
+fn typecheck_request_parser() -> HttpParser {
+    HttpParser.request()
+}
+
+// Response-mode parser instantiation.
+fn typecheck_response_parser() -> HttpParser {
+    HttpParser.response()
+}
+
+// Feed bytes — streaming API.
+fn typecheck_feed(parser: &mut HttpParser, buf: &[Byte]) -> ParseProgress {
+    parser.feed(buf)
+}
+
+// Progress pattern-match — the three variants.
+fn typecheck_progress(p: ParseProgress) -> Int {
+    match p {
+        ParseProgress.NeedMore => 0,
+        ParseProgress.Done { consumed, body_len, body_start } => consumed + body_start,
+        ParseProgress.Error(_) => -1,
+    }
+}
+
+// Accessors.
+fn typecheck_accessors(parser: &HttpParser) -> (Maybe<Method>, Maybe<StatusCode>, Version, Maybe<Int>, Bool) {
+    (parser.method(), parser.status(), parser.version(),
+     parser.content_length(), parser.is_chunked())
+}
+
+// Zero-copy header views.
+fn typecheck_header_views(parser: &HttpParser) -> &List<HeaderView> {
+    parser.headers()
+}
+
+// HeaderView.key / value resolve to buffer slices.
+fn typecheck_header_slice<'a>(hv: &HeaderView, buf: &'a [Byte]) -> (&'a [Byte], &'a [Byte]) {
+    (hv.key(buf), hv.value(buf))
+}
+
+// Request path / response reason — buffer-relative slices.
+fn typecheck_request_path<'a>(parser: &HttpParser, buf: &'a [Byte]) -> &'a [Byte] {
+    parser.path(buf)
+}
+
+fn typecheck_response_reason<'a>(parser: &HttpParser, buf: &'a [Byte]) -> &'a [Byte] {
+    parser.reason(buf)
+}
+
+// End-to-end streaming shape: multi-feed with NeedMore.
+fn typecheck_streaming_shape(parser: &mut HttpParser, chunks: &List<List<Byte>>) -> Bool {
+    let mut i = 0;
+    while i < chunks.len() {
+        match parser.feed(&chunks[i]) {
+            ParseProgress.NeedMore => { i = i + 1; continue; }
+            ParseProgress.Done { .. } => return true,
+            ParseProgress.Error(_) => return false,
+        }
+    }
+    false
+}
+
+// ParseError variants — spot check the public API surface.
+fn typecheck_parse_error_variants() -> List<ParseError> {
+    let mut errs: List<ParseError> = List.new();
+    errs.push(ParseError.InvalidMethod("FOO".into()));
+    errs.push(ParseError.InvalidVersion("HTTP/9".into()));
+    errs.push(ParseError.InvalidStatusCode(0));
+    errs.push(ParseError.InvalidHeaderName("bad".into()));
+    errs.push(ParseError.InvalidHeaderValue("bad".into()));
+    errs.push(ParseError.HeaderTooLong { limit: 16384 });
+    errs.push(ParseError.TooManyHeaders { limit: 128 });
+    errs.push(ParseError.RequestLineTooLong { limit: 8192 });
+    errs.push(ParseError.BadRequestLine("bad".into()));
+    errs.push(ParseError.InvalidChunkSize("xx".into()));
+    errs.push(ParseError.InvalidTrailer("t".into()));
+    errs.push(ParseError.InvalidContentLength("-1".into()));
+    errs.push(ParseError.ConflictingContentLength);
+    errs.push(ParseError.IncompleteFrame);
+    errs
+}
+
+// ChunkedDecoder — instantiation + feed.
+fn typecheck_chunked_decoder_new() -> ChunkedDecoder {
+    ChunkedDecoder.new()
+}
+
+fn typecheck_chunked_decoder_feed(dec: &mut ChunkedDecoder, buf: &[Byte]) -> ChunkProgress {
+    dec.feed(buf)
+}
+
+fn typecheck_chunk_progress(p: ChunkProgress) -> Int {
+    match p {
+        ChunkProgress.ChunkNeedMore => 0,
+        ChunkProgress.ChunkOutput { consumed, data_start, data_len } => consumed + data_start + data_len,
+        ChunkProgress.ChunkEnd { consumed } => consumed,
+        ChunkProgress.ChunkErr(_) => -1,
+    }
+}
+
+// Drain a chunked body — Output*/End loop.
+fn typecheck_drain_chunked(dec: &mut ChunkedDecoder, buf: &[Byte]) -> Int {
+    let mut total: Int = 0;
+    loop {
+        match dec.feed(buf) {
+            ChunkProgress.ChunkNeedMore => return total,
+            ChunkProgress.ChunkOutput { data_len, .. } => { total = total + data_len; continue; }
+            ChunkProgress.ChunkEnd { .. } => return total,
+            ChunkProgress.ChunkErr(_) => return -1,
+        }
+    }
+}
+
+fn main() {
+    // Shape-only tests.
+}
