@@ -178,6 +178,7 @@ pub mod linear_logic; // Full linear logic: ⊗ ⅋ & ⊕ ! ?
 pub mod region_calculus; // Tofte-Talpin region calculus
 pub mod pi_calculus; // π-calculus process algebra
 pub mod kripke; // Kripke semantics: modal worlds
+pub mod proof_obligations; // T1-R phase 2: model-theoretic discharge of protocol axioms
 pub mod category_algebra; // Categorical morphism algebra
 pub mod continuation_calculus; // Delimited continuations
 pub mod cbpv; // Call-by-push-value
