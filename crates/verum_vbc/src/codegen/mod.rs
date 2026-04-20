@@ -6877,41 +6877,90 @@ impl VbcCodegen {
             }
         }
 
-        // T1-F phase 1 scaffold: enumerate parameters with refinement
-        // types. The actual runtime Assert-on-predicate emission lands
-        // in T1-F phase 2 (needs a `self` → param-register rewriter
-        // that lowers the predicate's AST through compile_expr and
-        // threads the resulting boolean through `Instruction::Assert`).
+        // Emit runtime Assert for each refined parameter.
         //
-        // For now we walk the refined parameters and record them in a
-        // metadata counter on the function descriptor so that:
-        //   (a) the AOT pipeline can see how many obligations this
-        //       function carries and decide whether to elide them
-        //       (tier-1 mode: SMT-discharged → elide);
-        //   (b) follow-up commits can replace this loop body with the
-        //       real Assert emission without having to re-discover
-        //       the parameter-level refinement structure.
-        let mut refinement_obligations: usize = 0;
+        // For `fn f(x: Int { x > 0 })` the compiler wraps entry with
+        // a check of the predicate — if it fails, the interpreter
+        // raises a refinement violation instead of allowing the
+        // function to operate on an unsound argument. At Tier-1 (AOT)
+        // the Assert instructions survive when the predicate is not
+        // SMT-discharged; when the verifier proved the obligation
+        // during compilation they are elided at link time.
+        //
+        // Three binding shapes feed this loop:
+        //   Rule 1  `T{pred}`            — predicate uses `it`.
+        //   Rule 2  `T where |x| pred`   — predicate uses `x`.
+        //   Rule 3  `x: T where pred`    — predicate uses `x`.
+        //
+        // The binding name is aliased to the parameter's register via
+        // a `Mov` into a freshly-named local so `compile_expr` on the
+        // predicate resolves the reference normally. When the binding
+        // happens to coincide with the parameter name (common case
+        // for pattern `fn f(x: Int { x > 0 })` with implicit `it`
+        // collision guarded against), no alias is introduced.
         for param in func.params.iter() {
-            if let verum_ast::FunctionParamKind::Regular { ty, .. } = &param.kind {
-                if matches!(ty.kind, verum_ast::ty::TypeKind::Refined { .. } | verum_ast::ty::TypeKind::Sigma { .. }) {
-                    refinement_obligations += 1;
+            let verum_ast::FunctionParamKind::Regular { ty, .. } = &param.kind else { continue };
+            let Some((param_name, _)) = self.extract_param_name_and_mutable(param) else { continue };
+
+            // Extract (predicate_expr, binding_name) from Refined / Sigma.
+            let (pred_expr, binding_name) = match &ty.kind {
+                verum_ast::ty::TypeKind::Refined { predicate, .. } => {
+                    let bname = match &predicate.binding {
+                        verum_common::Maybe::Some(id) => id.name.to_string(),
+                        verum_common::Maybe::None    => "it".to_string(),
+                    };
+                    (predicate.expr.clone(), bname)
                 }
+                verum_ast::ty::TypeKind::Sigma { name, predicate, .. } => {
+                    ((**predicate).clone(), name.name.to_string())
+                }
+                _ => continue,
+            };
+
+            // Resolve the parameter register. If resolution fails we
+            // skip this obligation — a missing param register means
+            // the function never reached body compilation (extern /
+            // placeholder) and there is nothing to assert against.
+            let Ok(param_reg) = self.ctx.get_var_reg(&param_name) else { continue };
+
+            let message_id = {
+                let msg = format!(
+                    "refinement violation: parameter `{}` of `{}`",
+                    param_name, lookup_name
+                );
+                self.intern_string(&msg)
+            };
+
+            if binding_name == param_name {
+                // No aliasing needed — predicate already references the
+                // parameter by the same name the caller bound.
+                if let Ok(Some(cond_reg)) = self.compile_expr(&pred_expr) {
+                    self.ctx.emit(Instruction::Assert { cond: cond_reg, message_id });
+                    self.ctx.free_temp(cond_reg);
+                }
+            } else {
+                // Scope the alias so it does not leak into the
+                // function body and shadow a subsequent `it` or
+                // rebind a legitimate user variable. Mirror the
+                // parameter's VarType / type-name for the alias so
+                // `compile_expr` selects the correct comparison ops
+                // (Int < vs Float lt, record field resolution, etc.).
+                self.ctx.enter_scope();
+                let alias_reg = self.ctx.define_var(&binding_name, false);
+                self.ctx.emit(Instruction::Mov { dst: alias_reg, src: param_reg });
+
+                let vt = self.ctx.get_variable_type(&param_name);
+                self.ctx.register_variable_type(&binding_name, vt);
+                if let Some(type_name) = self.ctx.variable_type_names.get(&param_name).cloned() {
+                    self.ctx.variable_type_names.insert(binding_name.clone(), type_name);
+                }
+
+                if let Ok(Some(cond_reg)) = self.compile_expr(&pred_expr) {
+                    self.ctx.emit(Instruction::Assert { cond: cond_reg, message_id });
+                    self.ctx.free_temp(cond_reg);
+                }
+                self.ctx.exit_scope(false);
             }
-        }
-        // Also check return-type refinement so the counter reflects
-        // both parameter-entry and return-site obligations.
-        if let Some(ref ret_ty) = func.return_type {
-            if matches!(ret_ty.kind, verum_ast::ty::TypeKind::Refined { .. } | verum_ast::ty::TypeKind::Sigma { .. }) {
-                refinement_obligations += 1;
-            }
-        }
-        if refinement_obligations > 0 {
-            tracing::debug!(
-                "T1-F: function `{}` carries {} refinement obligation(s) — phase 2 will emit Assert instructions",
-                lookup_name,
-                refinement_obligations
-            );
         }
 
         // Context transforms: for contexts declared with transforms like
