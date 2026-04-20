@@ -1602,6 +1602,15 @@ pub(in super::super) fn handle_map_contains(state: &mut InterpreterState) -> Int
 }
 
 /// Clone (0x78) - Clone a value (deep copy for heap objects).
+///
+/// For primitives and for pointers that do NOT point at a tracked heap
+/// object (e.g. raw buffers returned by the `alloc` intrinsic), this is a
+/// straight Value copy. Attempting to deep-copy a raw byte buffer would
+/// read the user's payload as an `ObjectHeader` and allocate a bogus
+/// replacement object from whatever bytes happen to be there — that was
+/// the root of the stdlib `Text { ptr, … }` literal producing a struct
+/// whose `ptr` field pointed to a freshly-allocated "Clone" of the raw
+/// buffer instead of the buffer itself.
 pub(in super::super) fn handle_clone(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
     let dst = read_reg(state)?;
     let src = read_reg(state)?;
@@ -1609,8 +1618,12 @@ pub(in super::super) fn handle_clone(state: &mut InterpreterState) -> Interprete
 
     if value.is_ptr() && !value.is_nil() {
         let src_ptr = value.as_ptr::<u8>();
-        if !src_ptr.is_null() {
-            // Read the source object header to get type_id and size
+        if !src_ptr.is_null()
+            && state.heap.contains(src_ptr as *const heap::ObjectHeader)
+        {
+            // SAFETY: `contains` verified `src_ptr` is the head of a
+            // tracked heap object whose first `OBJECT_HEADER_SIZE` bytes
+            // are a real `ObjectHeader`.
             let header = unsafe { &*(src_ptr as *const heap::ObjectHeader) };
             let type_id = header.type_id;
             let data_size = header.size as usize;
@@ -1628,6 +1641,7 @@ pub(in super::super) fn handle_clone(state: &mut InterpreterState) -> Interprete
 
             state.set_reg(dst, Value::from_ptr(new_obj.as_ptr() as *mut u8));
         } else {
+            // Raw pointer (opaque buffer) or null — just copy the pointer
             state.set_reg(dst, value);
         }
     } else {

@@ -556,6 +556,21 @@ impl Heap {
         self.objects.len()
     }
 
+    /// Returns true iff `ptr` was produced by this heap's allocator (i.e. is a
+    /// tracked object whose first 24 bytes are a real `ObjectHeader`).
+    ///
+    /// Pointers that satisfy `Value::is_ptr` may originate from either this
+    /// heap or from the system allocator (via `MemExtended::Alloc`). The
+    /// latter are opaque byte buffers with no header; code that needs to
+    /// inspect headers safely — most importantly `handle_clone` — must
+    /// consult this method first.
+    pub fn contains(&self, ptr: *const ObjectHeader) -> bool {
+        if ptr.is_null() {
+            return false;
+        }
+        self.objects.iter().any(|nn| nn.as_ptr() as *const ObjectHeader == ptr)
+    }
+
     /// Validates a CBGR reference against an object.
     ///
     /// This performs full CBGR validation including generation and epoch checks.

@@ -10377,22 +10377,39 @@ impl VbcCodegen {
                 // This prevents aliasing when the same variable is used for
                 // multiple fields (e.g., Mat3 { r0: z, r1: z, r2: z }).
                 // For primitives, Clone is a no-op (just copies the register).
-                let cloned_reg = self.ctx.alloc_temp();
-                self.ctx.emit(Instruction::Clone {
-                    dst: cloned_reg,
-                    src: value_reg,
-                });
-
+                //
+                // Exception: raw pointers (e.g. results of `alloc()`) must NOT
+                // be Cloned. `handle_clone` treats a pointer value as a heap
+                // object, reads its first 24 bytes as an `ObjectHeader`, and
+                // allocates a replacement based on that. For a raw byte buffer
+                // the "header" is whatever the user has written into it, so
+                // Clone produces a pointer to a bogus object. Passing the
+                // pointer through unchanged is the correct behavior.
                 let field_idx = self.resolve_field_index(Some(&type_name), &field.name.name);
-                self.ctx.emit(Instruction::SetF {
-                    obj: result,
-                    field_idx,
-                    value: cloned_reg,
-                });
-
-                self.ctx.free_temp(cloned_reg);
-                if field.value.is_some() {
-                    self.ctx.free_temp(value_reg);
+                if self.ctx.is_raw_pointer(value_reg) {
+                    self.ctx.emit(Instruction::SetF {
+                        obj: result,
+                        field_idx,
+                        value: value_reg,
+                    });
+                    if field.value.is_some() {
+                        self.ctx.free_temp(value_reg);
+                    }
+                } else {
+                    let cloned_reg = self.ctx.alloc_temp();
+                    self.ctx.emit(Instruction::Clone {
+                        dst: cloned_reg,
+                        src: value_reg,
+                    });
+                    self.ctx.emit(Instruction::SetF {
+                        obj: result,
+                        field_idx,
+                        value: cloned_reg,
+                    });
+                    self.ctx.free_temp(cloned_reg);
+                    if field.value.is_some() {
+                        self.ctx.free_temp(value_reg);
+                    }
                 }
             }
         }
@@ -17672,7 +17689,15 @@ impl VbcCodegen {
                     operands,
                 });
             }
-            // Heap memory allocation intrinsics - handled via MemExtended opcode
+            // Heap memory allocation intrinsics - handled via MemExtended opcode.
+            // Mark the result as a raw pointer so downstream `Clone` and field
+            // writes treat it as an opaque byte buffer (no `ObjectHeader`).
+            // Without the mark `handle_clone` reads the user's payload bytes
+            // as an `ObjectHeader` and allocates a bogus object based on that
+            // garbage — this was the root of the stdlib `Text { ptr, … }`
+            // literal producing a struct whose `ptr` field pointed to a
+            // freshly-allocated "Clone" of the raw buffer instead of the
+            // buffer itself.
             InlineSequenceId::Alloc => {
                 // args: [size, align], returns ptr
                 let mut operands = Vec::<u8>::new();
@@ -17684,6 +17709,7 @@ impl VbcCodegen {
                     sub_op: 0x00, // alloc
                     operands,
                 });
+                self.ctx.mark_raw_pointer(dest);
             }
             InlineSequenceId::AllocZeroed => {
                 // args: [size, align], returns ptr
@@ -17696,6 +17722,7 @@ impl VbcCodegen {
                     sub_op: 0x01, // alloc_zeroed
                     operands,
                 });
+                self.ctx.mark_raw_pointer(dest);
             }
             InlineSequenceId::Dealloc => {
                 // args: [ptr, size, align], no return
