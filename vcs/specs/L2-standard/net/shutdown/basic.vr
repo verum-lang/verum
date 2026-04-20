@@ -1,0 +1,79 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: net, shutdown, graceful, drain, fd-handoff, systemd
+// @timeout: 10000
+// @expect: pass
+
+// Graceful-shutdown API surface.
+
+mount core.net.shutdown.{
+    GracefulShutdown, ConnectionGuard, ShutdownError,
+    tcp_listener_from_raw_fd, unix_listener_from_raw_fd,
+    listen_fds, listen_fd, ListenFdsError,
+};
+mount core.async.cancellation.{CancellationToken};
+mount core.time.duration.{Duration};
+mount core.sys.common.{FileDesc};
+
+// Controller creation + token.
+fn typecheck_shutdown() -> (GracefulShutdown, CancellationToken) {
+    let s = GracefulShutdown.new();
+    let t = s.token();
+    (s, t)
+}
+
+// Track a connection — RAII guard.
+fn typecheck_track(s: &GracefulShutdown) -> ConnectionGuard {
+    s.track()
+}
+
+// In-flight count.
+fn typecheck_count(s: &GracefulShutdown) -> UInt64 {
+    s.in_flight()
+}
+
+// Initiate + idempotency check.
+fn typecheck_initiate(s: &GracefulShutdown) -> Bool {
+    s.initiate();
+    s.is_initiated()
+}
+
+// Full shutdown flow.
+async fn typecheck_shutdown_flow(s: &GracefulShutdown) -> Result<(), ShutdownError> {
+    s.shutdown(Duration.from_secs(30)).await
+}
+
+// Wait-drained (no initiate — use if accept-loop exited naturally).
+async fn typecheck_wait_drained(s: &GracefulShutdown) -> Result<(), ShutdownError> {
+    s.wait_drained(Duration.from_secs(10)).await
+}
+
+// Error shape
+fn typecheck_error(e: ShutdownError) -> Int {
+    match e {
+        ShutdownError.DrainTimeout { remaining } => remaining,
+    }
+}
+
+// FD handoff.
+fn typecheck_tcp_handoff(fd: FileDesc) -> core.net.tcp.TcpListener {
+    tcp_listener_from_raw_fd(fd)
+}
+
+fn typecheck_unix_handoff(fd: FileDesc) -> core.net.unix.UnixListener {
+    unix_listener_from_raw_fd(fd)
+}
+
+// systemd LISTEN_FDS protocol.
+fn typecheck_listen_fds() -> Result<Int, ListenFdsError> {
+    listen_fds()
+}
+
+fn typecheck_listen_fd(i: Int) -> Result<FileDesc, ListenFdsError> {
+    listen_fd(i)
+}
+
+fn main() {
+    // Shape-only test.
+}

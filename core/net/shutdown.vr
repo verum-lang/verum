@@ -1,0 +1,240 @@
+// =============================================================================
+// net/shutdown.vr — Graceful shutdown helpers
+// =============================================================================
+// Layer: 5 (Network)
+// Dependencies: core.signal, core.async, core.net.tcp, core.net.unix,
+//               core.time, core.sync
+// Spec: internal/specs/net-framework.md §7.8
+// =============================================================================
+//
+// Graceful shutdown for HTTP servers, proxies, and any accept-loop-based
+// service. Three concerns handled:
+//
+// - **Connection tracking** (`ConnectionGuard`): RAII handle that
+//   increments an AtomicU64 on acquire and decrements on drop. The
+//   GracefulShutdown owner waits on the counter reaching zero.
+//
+// - **Drain semantics** (`GracefulShutdown`): combines a cancellation
+//   token (for accept-loop stop + in-flight cancellation) with a wait-
+//   for-zero on the active-connection counter. `shutdown(timeout)`
+//   kicks the signal AND waits — either returns Ok once drained or
+//   Err(DrainTimeout) when the deadline expires.
+//
+// - **FD handoff** (`listener_from_raw_fd`): adopt an fd passed down
+//   from a supervisor (systemd socket-activation, or a zero-downtime
+//   restart where the old process hands its listening socket to the
+//   new process over AF_UNIX SCM_RIGHTS).
+//
+// # Minimal example — HTTP server
+//
+// ```verum
+// mount core.net.shutdown.*;
+// mount core.signal.*;
+// mount core.time.duration.{Duration};
+//
+// async fn serve(listener: TcpListener) {
+//     let shutdown = GracefulShutdown.new();
+//     let token = shutdown.token();
+//
+//     // Listen for signals in the background
+//     spawn_detached(async move {
+//         shutdown_signals().await.next().await;
+//         shutdown.initiate();
+//     });
+//
+//     // Accept loop — each task holds a ConnectionGuard
+//     loop {
+//         match listener.accept_cancellable(&token).await {
+//             Err(_) => break,           // cancelled
+//             Ok(Err(e)) => continue,    // transient accept error
+//             Ok(Ok((stream, _))) => {
+//                 let guard = shutdown.track();
+//                 spawn_detached(async move {
+//                     serve_one(stream, &token).await;
+//                     drop(guard);
+//                 });
+//             }
+//         }
+//     }
+//
+//     // Drain — stop accepting new work, wait for in-flight
+//     let _ = shutdown.wait_drained(Duration.from_secs(30)).await;
+// }
+// ```
+// =============================================================================
+
+module core.net.shutdown;
+
+mount core.*;
+mount core.sync.atomic.{AtomicU64, AtomicBool, MemoryOrdering};
+mount core.sync.mutex.{Mutex};
+mount core.async.cancellation.{CancellationToken, CancellationTokenSource};
+mount core.async.timer.{sleep};
+mount core.time.instant.{Instant};
+mount core.time.duration.{Duration};
+mount core.sys.common.{FileDesc};
+
+// =============================================================================
+// ConnectionGuard — RAII counter
+// =============================================================================
+
+public type ConnectionGuard is {
+    counter: Shared<AtomicU64>,
+}
+
+implement ConnectionGuard {
+    /// Internal: acquired via GracefulShutdown.track().
+    fn new(counter: Shared<AtomicU64>) -> ConnectionGuard {
+        let _prev = (&*counter).fetch_add(1, MemoryOrdering.Relaxed);
+        ConnectionGuard { counter: counter }
+    }
+}
+
+implement Drop for ConnectionGuard {
+    fn drop(&mut self) {
+        let _prev = (&*self.counter).fetch_sub(1, MemoryOrdering.Release);
+    }
+}
+
+// =============================================================================
+// ShutdownError — waiting result
+// =============================================================================
+
+public type ShutdownError is
+    | DrainTimeout { remaining: Int };
+
+// =============================================================================
+// GracefulShutdown — controller
+// =============================================================================
+
+public type GracefulShutdown is {
+    counter: Shared<AtomicU64>,
+    token_source: Shared<CancellationTokenSource>,
+    initiated: Shared<AtomicBool>,
+    started_at: Shared<Mutex<Maybe<Instant>>>,
+}
+
+implement GracefulShutdown {
+    pub fn new() -> GracefulShutdown {
+        GracefulShutdown {
+            counter: Shared.new(AtomicU64.new(0)),
+            token_source: Shared.new(CancellationTokenSource.new()),
+            initiated: Shared.new(AtomicBool.new(false)),
+            started_at: Shared.new(Mutex.new(None)),
+        }
+    }
+
+    /// Cancellation token — accept loops and request handlers should
+    /// honour this for prompt stop. Token stays cancelled after initiate().
+    pub fn token(&self) -> CancellationToken {
+        (&*self.token_source).token()
+    }
+
+    /// Track a new in-flight connection. Drop the returned guard when
+    /// the request completes.
+    pub fn track(&self) -> ConnectionGuard {
+        ConnectionGuard.new(self.counter.clone())
+    }
+
+    /// Current in-flight count (snapshot, Relaxed).
+    pub fn in_flight(&self) -> UInt64 {
+        (&*self.counter).load(MemoryOrdering.Acquire)
+    }
+
+    /// Fire the shutdown signal. Idempotent; the accept loop MUST break.
+    pub fn initiate(&self) {
+        let first = (&*self.initiated).compare_exchange(
+            false, true, MemoryOrdering.AcqRel, MemoryOrdering.Acquire,
+        );
+        match first {
+            Ok(_) => {
+                let mut g = (&*self.started_at).lock().unwrap();
+                *g = Some(Instant.now());
+                (&*self.token_source).cancel();
+            }
+            Err(_) => {}
+        }
+    }
+
+    /// Already been initiated?
+    pub fn is_initiated(&self) -> Bool {
+        (&*self.initiated).load(MemoryOrdering.Acquire)
+    }
+
+    /// Block-await until in-flight reaches zero, or `timeout` elapses.
+    /// Returns Err(DrainTimeout{remaining}) if the deadline is hit.
+    ///
+    /// Implementation: poll the counter at 10 ms intervals plus an
+    /// immediate fast-path check. Good enough for the normal drain
+    /// timeout (many seconds); a zero-allocation alternative would
+    /// use a condvar on decrement, but the polling cost is ≤ 100 syscalls
+    /// per drain which is not worth optimising for shutdown.
+    pub async fn wait_drained(&self, timeout: Duration) -> Result<(), ShutdownError> {
+        let deadline = Instant.now() + timeout;
+        let poll_interval = Duration.millis(10);
+        loop {
+            let in_flight = (&*self.counter).load(MemoryOrdering.Acquire);
+            if in_flight == 0 { return Ok(()); }
+            let now = Instant.now();
+            if now >= deadline {
+                return Err(ShutdownError.DrainTimeout { remaining: in_flight as Int });
+            }
+            // Clamp sleep so we don't oversleep past the deadline.
+            let remaining = deadline - now;
+            let sleep_for = if remaining < poll_interval { remaining } else { poll_interval };
+            sleep(sleep_for).await;
+        }
+    }
+
+    /// Convenience — initiate + wait_drained in one call.
+    pub async fn shutdown(&self, timeout: Duration) -> Result<(), ShutdownError> {
+        self.initiate();
+        self.wait_drained(timeout).await
+    }
+}
+
+// =============================================================================
+// FD handoff — adopt a listener from a caller-provided fd
+// =============================================================================
+//
+// Used by:
+// - systemd socket activation (LISTEN_FDS environment protocol)
+// - zero-downtime restart (parent sends listener fd over AF_UNIX SCM_RIGHTS)
+//
+// The caller is responsible for sourcing the fd; this helper only wraps
+// it in a TcpListener / UnixListener. Ownership transfers — the fd is
+// closed when the listener is dropped.
+
+public fn tcp_listener_from_raw_fd(fd: FileDesc) -> core.net.tcp.TcpListener {
+    @intrinsic("verum.net.tcp_listener_from_raw_fd", fd)
+}
+
+public fn unix_listener_from_raw_fd(fd: FileDesc) -> core.net.unix.UnixListener {
+    @intrinsic("verum.net.unix_listener_from_raw_fd", fd)
+}
+
+// =============================================================================
+// LISTEN_FDS — systemd socket-activation protocol
+// =============================================================================
+//
+// systemd sets LISTEN_FDS=<n> and LISTEN_PID=<my-pid> before exec.
+// Passed fds start at fd 3 and are in the order configured in the .socket
+// unit.
+
+public type ListenFdsError is
+    | NoSocketActivation
+    | WrongPid { expected: Int, actual: Int }
+    | ParseError(Text);
+
+public fn listen_fds() -> Result<Int, ListenFdsError> {
+    @intrinsic("verum.net.listen_fds")
+}
+
+/// Return the nth socket-activated fd, or NoSocketActivation if unset.
+public fn listen_fd(index: Int) -> Result<FileDesc, ListenFdsError> {
+    let n = listen_fds()?;
+    if index < 0 || index >= n {
+        return Err(ListenFdsError.ParseError("fd index out of range".into()));
+    }
+    Ok((3 + index) as FileDesc)
+}
