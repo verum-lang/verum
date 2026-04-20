@@ -1554,3 +1554,156 @@ fn build_suggestions_from_proof_error(err: &ProofError) -> List<Text> {
     )));
     suggestions
 }
+
+// ============================================================================
+// T1-R phase 2: model-theoretic discharge of protocol axioms
+// ============================================================================
+
+use verum_ast::decl::{ImplDecl, TypeDecl};
+use verum_types::proof_obligations::{
+    collect_impl_obligations, find_proof_clause_for, ProofObligation,
+};
+
+/// Result of attempting to verify all obligations of an `implement` block.
+#[derive(Debug, Clone)]
+pub struct ImplVerificationReport {
+    /// The impl block that was verified.
+    pub impl_span: verum_ast::span::Span,
+
+    /// The protocol whose axioms were discharged.
+    pub protocol_name: Text,
+
+    /// Obligations that were successfully discharged (axiom name + tactic used).
+    pub verified: Vec<(Text, Text)>,
+
+    /// Obligations that could not be discharged (axiom name + failure reason
+    /// + origin/impl spans for the diagnostic cursor).
+    pub unverified: Vec<ImplObligationFailure>,
+
+    /// Total wall-clock time spent verifying this impl block.
+    pub total_duration: Duration,
+}
+
+impl ImplVerificationReport {
+    /// Whether every obligation was discharged (zero failures).
+    pub fn is_fully_verified(&self) -> bool {
+        self.unverified.is_empty()
+    }
+}
+
+/// A single unmet proof obligation, with the data a diagnostic needs.
+#[derive(Debug, Clone)]
+pub struct ImplObligationFailure {
+    pub axiom_name: Text,
+    pub reason: Text,
+    pub origin_span: verum_ast::span::Span,
+    pub impl_span: verum_ast::span::Span,
+    pub attempted_tactic: Text,
+}
+
+/// Verify every axiom of the implemented protocol against the implementation's
+/// concrete items. Each axiom is either:
+///
+///   1. Discharged by an explicit `proof axiom_name by tactic;` clause in
+///      the impl block — the tactic is converted via `convert_tactic` and
+///      executed against the self-substituted proposition.
+///   2. Discharged by `ProofSearchEngine::auto_prove` with a bounded budget.
+///
+/// Returns a report listing verified obligations and failures. No side effect
+/// on the compiler's diagnostic channel — callers (e.g. the pipeline) decide
+/// how to present failures.
+///
+/// This implements T1-R phase 2 step 3 (after T2-R2 Self-substitution and
+/// T2-R3 obligation collection). Reference architecture:
+/// `docs/architecture/model-theoretic-semantics.md`.
+pub fn verify_impl_axioms(
+    impl_decl: &ImplDecl,
+    protocol_decl: &TypeDecl,
+) -> ImplVerificationReport {
+    let start = Instant::now();
+    let protocol_name = Text::from(protocol_decl.name.name.as_str());
+    let impl_span = impl_decl.span;
+
+    let obligations = collect_impl_obligations(impl_decl, protocol_decl);
+
+    let mut engine = ProofSearchEngine::new();
+    let smt_ctx = Context::new();
+
+    let mut verified = Vec::new();
+    let mut unverified = Vec::new();
+
+    for obligation in obligations.iter() {
+        let axiom_name_text = Text::from(obligation.axiom_name.name.as_str());
+
+        // Strategy 1: explicit proof clause.
+        if let Some(tactic) = find_proof_clause_for(impl_decl, obligation.axiom_name.name.as_str()) {
+            let proof_tactic = convert_tactic(tactic);
+            let goal = ProofGoal::new(obligation.proposition.clone());
+            match engine.execute_tactic(&proof_tactic, &goal) {
+                Ok(_subgoals) => {
+                    verified.push((axiom_name_text.clone(), tactic_summary(&proof_tactic)));
+                }
+                Err(err) => {
+                    unverified.push(ImplObligationFailure {
+                        axiom_name: axiom_name_text,
+                        reason: Text::from(format!(
+                            "explicit tactic failed: {}",
+                            err
+                        )),
+                        origin_span: obligation.origin_span,
+                        impl_span,
+                        attempted_tactic: tactic_summary(&proof_tactic),
+                    });
+                }
+            }
+            continue;
+        }
+
+        // Strategy 2: auto_prove.
+        match engine.auto_prove(&smt_ctx, &obligation.proposition) {
+            Ok(_) => {
+                verified.push((axiom_name_text, Text::from("auto")));
+            }
+            Err(err) => {
+                unverified.push(ImplObligationFailure {
+                    axiom_name: axiom_name_text,
+                    reason: Text::from(format!(
+                        "auto_prove could not close the obligation: {}",
+                        err
+                    )),
+                    origin_span: obligation.origin_span,
+                    impl_span,
+                    attempted_tactic: Text::from("auto"),
+                });
+            }
+        }
+    }
+
+    ImplVerificationReport {
+        impl_span,
+        protocol_name,
+        verified,
+        unverified,
+        total_duration: start.elapsed(),
+    }
+}
+
+/// Return a short human-readable label for a ProofTactic (used in the
+/// report's `verified` and `attempted_tactic` fields).
+fn tactic_summary(tactic: &ProofTactic) -> Text {
+    match tactic {
+        ProofTactic::Auto => Text::from("auto"),
+        ProofTactic::AutoWith { .. } => Text::from("auto"),
+        ProofTactic::Ring => Text::from("ring"),
+        ProofTactic::Simplify => Text::from("simp"),
+        ProofTactic::SimpWith { .. } => Text::from("simp"),
+        ProofTactic::Field => Text::from("field"),
+        ProofTactic::Reflexivity => Text::from("refl"),
+        ProofTactic::Assumption => Text::from("assumption"),
+        ProofTactic::Intro => Text::from("intro"),
+        ProofTactic::Apply { .. } => Text::from("apply"),
+        ProofTactic::Induction { .. } => Text::from("induction"),
+        ProofTactic::Named { name, .. } => Text::from(name.as_str()),
+        _ => Text::from("<tactic>"),
+    }
+}
