@@ -1,0 +1,109 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: net, unix, af_unix, async, ipc
+// @timeout: 10000
+// @expect: pass
+
+// AF_UNIX stream socket — shape + async I/O + peer cred.
+
+mount core.net.unix.{
+    UnixStream, UnixListener, UnixIncoming, UnixError,
+    PeerCred, ShutdownKind, UnixReadFut, UnixWriteFut,
+    FdPassingError,
+};
+mount core.io.async_protocols.{AsyncRead, AsyncWrite};
+mount core.async.poll.{Poll};
+mount core.async.waker.{Context};
+mount core.async.stream.{Stream};
+mount core.async.async_iterator.{AsyncIterator};
+mount core.async.cancellation.{CancellationToken, CancellationTokenSource, CancellationError};
+
+// Shape: connect / bind / accept round-trip
+fn typecheck_connect() -> Result<UnixStream, UnixError> {
+    UnixStream.connect(&"/tmp/app.sock")
+}
+
+fn typecheck_bind() -> Result<UnixListener, UnixError> {
+    UnixListener.bind(&"/tmp/app.sock")
+}
+
+fn typecheck_accept(listener: &UnixListener) -> Result<(UnixStream, Maybe<Text>), UnixError> {
+    listener.accept()
+}
+
+async fn typecheck_connect_async() -> Result<UnixStream, UnixError> {
+    UnixStream.connect_async(&"/tmp/app.sock").await
+}
+
+async fn typecheck_accept_async(listener: &UnixListener)
+    -> Result<(UnixStream, Maybe<Text>), UnixError>
+{
+    listener.accept_async().await
+}
+
+// AsyncRead/AsyncWrite protocol shape
+fn typecheck_async_io(stream: &mut UnixStream, cx: &mut Context) {
+    let mut buf: List<Int> = [];
+    let _: Poll<Result<Int, IoError>> = stream.poll_read(cx, &mut buf);
+    let _: Poll<Result<Int, IoError>> = stream.poll_write(cx, &buf);
+    let _: Poll<Result<(), IoError>> = stream.poll_flush(cx);
+    let _: Poll<Result<(), IoError>> = stream.poll_shutdown(cx);
+}
+
+// Shutdown directions
+fn typecheck_shutdown(stream: &UnixStream) {
+    let _ = stream.shutdown(ShutdownKind.Read);
+    let _ = stream.shutdown(ShutdownKind.Write);
+    let _ = stream.shutdown(ShutdownKind.Both);
+}
+
+// UnixIncoming — Stream + AsyncIterator
+fn typecheck_incoming(listener: &UnixListener) -> UnixIncoming {
+    listener.incoming_async()
+}
+
+fn typecheck_incoming_poll_next(inc: &mut UnixIncoming, cx: &mut Context)
+    -> Poll<Maybe<Result<UnixStream, UnixError>>>
+{
+    inc.poll_next(cx)
+}
+
+// Cancellable async I/O
+async fn typecheck_cancellable_read(stream: &mut UnixStream, token: &CancellationToken)
+    -> Result<Result<Int, IoError>, CancellationError>
+{
+    let mut buf: List<Int> = [];
+    stream.read_cancellable(&mut buf, token).await
+}
+
+async fn typecheck_cancellable_accept(listener: &UnixListener, token: &CancellationToken)
+    -> Result<Result<(UnixStream, Maybe<Text>), UnixError>, CancellationError>
+{
+    listener.accept_cancellable(token).await
+}
+
+// Peer credentials (Linux primary)
+@cfg(target_os = "linux")
+fn typecheck_peer_cred(stream: &UnixStream) -> Result<PeerCred, UnixError> {
+    stream.peer_cred()
+}
+
+// FD-passing shape (returns NotImplemented currently — follow-up per spec)
+fn typecheck_fd_passing(stream: &UnixStream) -> Result<Int, FdPassingError> {
+    let buf: [Byte; 4] = [0, 0, 0, 0];
+    let fds: [FileDesc; 1] = [0 as FileDesc];
+    stream.send_fds(&buf, &fds)
+}
+
+// Abstract namespace (Linux-only; empty path prefix \0)
+@cfg(target_os = "linux")
+fn typecheck_abstract_namespace() -> Result<UnixListener, UnixError> {
+    // "\0my-service" — abstract-namespace path
+    let path: Text = "\x00my-service".into();
+    UnixListener.bind(&path)
+}
+
+fn main() {
+    // Shape-only tests.
+}
