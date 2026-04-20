@@ -205,7 +205,10 @@ struct SerializableRegistryCache {
 
 /// Current cache format version. Bump when SerializableRegistryCache changes.
 /// Bumped to 2 after adding llvm_version field.
-const REGISTRY_CACHE_FORMAT_VERSION: u32 = 2;
+/// Bumped to 3 after switching the on-disk format from bincode 1 to CBOR
+/// (ciborium). Any pre-existing `registry.bin` from older compilers will
+/// fail to parse and fall through to the full stdlib load.
+const REGISTRY_CACHE_FORMAT_VERSION: u32 = 3;
 
 /// Compute blake3 content hash of all .vr files under a directory.
 fn compute_stdlib_content_hash(stdlib_path: &Path) -> String {
@@ -275,7 +278,12 @@ fn try_load_registry_from_disk(
     }
 
     let data = std::fs::read(&cache_file).ok()?;
-    let cached: SerializableRegistryCache = bincode::deserialize(&data).ok()?;
+    // CBOR (via ciborium) instead of bincode 1 — see the note in
+    // verum_compiler/Cargo.toml. Skip quietly on any parse error so a
+    // stale cache from a previous compiler version falls through to the
+    // full stdlib load path instead of crashing startup.
+    let cached: SerializableRegistryCache =
+        ciborium::de::from_reader(std::io::Cursor::new(&data)).ok()?;
 
     // Validate cache
     if cached.format_version != REGISTRY_CACHE_FORMAT_VERSION {
@@ -341,8 +349,9 @@ fn save_registry_to_disk(
     };
 
     let cache_file = cache_dir.join("registry.bin");
-    match bincode::serialize(&cached) {
-        Ok(data) => {
+    let mut data: Vec<u8> = Vec::new();
+    match ciborium::ser::into_writer(&cached, &mut data) {
+        Ok(()) => {
             if let Err(e) = std::fs::write(&cache_file, &data) {
                 debug!("Failed to write stdlib registry cache: {}", e);
             } else {
@@ -10614,7 +10623,16 @@ impl<'s> CompilationPipeline<'s> {
     /// are retained so their bodies can be compiled to VBC → LLVM.
     /// Modules containing only type/protocol declarations are cleared — their
     /// type information was already extracted during type-checking.
-    fn clear_non_compilable_stdlib_modules(&mut self) {
+    ///
+    /// `user_module`, when provided, is scanned for `mount` statements and any
+    /// stdlib modules matching the mount target (plus their submodules) are
+    /// retained. Without this, user code that mounts a stdlib module outside
+    /// the `ALWAYS_INCLUDE` allowlist (e.g. `mount core.term.layout.Rect`)
+    /// would lose the impl-block ASTs before VBC codegen runs, the impl
+    /// methods would never reach `compile_module_items_lenient`, and the
+    /// LLVM backend would emit unresolved `Call`s that const-fold to bogus
+    /// pointers — the bug tracked by `vcs/specs/L0-critical/vbc/aot_stdlib_return/`.
+    fn clear_non_compilable_stdlib_modules(&mut self, user_module: Option<&Module>) {
         // Only retain stdlib modules whose functions are actually compiled to
         // native code via VBC → LLVM. Most stdlib modules only provide type
         // definitions used during type checking and should be dropped to avoid
@@ -10690,20 +10708,77 @@ impl<'s> CompilationPipeline<'s> {
             // Included in the type-checking ALWAYS_INCLUDE list (list 1) above.
         ];
 
+        // Collect user-mounted module paths so their ASTs survive the cull.
+        // A user `mount core.term.layout.Rect` should keep `core.term.layout`,
+        // `core.term.layout.rect` (the module the type lives in), and every
+        // other submodule under the mounted prefix that participates in type
+        // resolution. We do not filter by AST shape here — the per-item
+        // lenient compilation already skips functions whose bodies fail to
+        // compile, so a few extra type-only modules cost nothing.
+        let mut user_mount_prefixes: Vec<String> = Vec::new();
+        if let Some(module) = user_module {
+            for item in &module.items {
+                if let verum_ast::ItemKind::Mount(mount_decl) = &item.kind {
+                    let parent = self.extract_import_module_path(&mount_decl.tree.kind);
+                    if !parent.is_empty() {
+                        user_mount_prefixes.push(parent);
+                    }
+                    // Also remember the *full* mounted path (incl. last
+                    // segment). `extract_import_module_path` strips the last
+                    // segment because it usually names an item rather than a
+                    // module, but when the mount targets a module directly
+                    // (e.g. `mount core.sys.darwin.libsystem`) the full path
+                    // is the one we need.
+                    use verum_ast::MountTreeKind;
+                    if let MountTreeKind::Path(path) = &mount_decl.tree.kind {
+                        let full = path.segments.iter()
+                            .filter_map(|seg| match seg {
+                                verum_ast::ty::PathSegment::Name(ident) =>
+                                    Some(ident.name.as_str().to_string()),
+                                _ => None,
+                            })
+                            .collect::<Vec<_>>()
+                            .join(".");
+                        if !full.is_empty() {
+                            user_mount_prefixes.push(full.clone());
+                            // `std.*` aliasing: stdlib modules live under
+                            // `core.*` in self.modules, so translate here.
+                            if let Some(rest) = full.strip_prefix("std.") {
+                                user_mount_prefixes.push(format!("core.{rest}"));
+                            }
+                            if !full.starts_with("core.") && !full.starts_with("std.") {
+                                user_mount_prefixes.push(format!("core.{full}"));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        let retains_user_path = |p: &str| -> bool {
+            user_mount_prefixes.iter().any(|prefix| {
+                // Exact match, ancestor (parent module of item), or descendant
+                // (submodule under a mounted prefix).
+                p == prefix
+                    || p.starts_with(&format!("{prefix}."))
+                    || prefix.starts_with(&format!("{p}."))
+            })
+        };
+
         let total_before = self.modules.len();
         let retained: Map<Text, Arc<Module>> = self.modules
             .drain()
             .filter(|(path, _module)| {
                 let p = path.as_str();
-                ALWAYS_INCLUDE.contains(&p)
+                ALWAYS_INCLUDE.contains(&p) || retains_user_path(p)
             })
             .collect();
 
         let retained_count = retained.len();
         self.modules = retained;
         debug!(
-            "Retained {}/{} stdlib modules for AOT compilation",
-            retained_count, total_before
+            "Retained {}/{} stdlib modules for AOT compilation ({} user-mount paths)",
+            retained_count, total_before, user_mount_prefixes.len()
         );
     }
 
@@ -11005,7 +11080,7 @@ impl<'s> CompilationPipeline<'s> {
         //
         // The retained modules' function bodies will be compiled to VBC and then
         // lowered to LLVM IR, replacing the need for C runtime implementations.
-        self.clear_non_compilable_stdlib_modules();
+        self.clear_non_compilable_stdlib_modules(Some(&module));
 
         // Phase 4: Refinement verification (if enabled)
         if self.session.options().verify_mode.use_smt() {

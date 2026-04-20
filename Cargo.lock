@@ -2222,6 +2222,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a6cb138bb79a146c1bd460005623e142ef0181e3d0219cb493e02f7d08a35695"
 
 [[package]]
+name = "isabelle_graph_import"
+version = "0.1.0"
+
+[[package]]
 name = "itertools"
 version = "0.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5155,6 +5159,7 @@ dependencies = [
  "bincode 1.3.3",
  "blake3",
  "chrono",
+ "ciborium",
  "clap",
  "colored",
  "criterion",
@@ -5694,6 +5699,7 @@ dependencies = [
  "verum_diagnostics",
  "verum_fast_parser",
  "verum_lexer",
+ "verum_llvm",
  "verum_parser",
  "verum_types",
  "wait-timeout",

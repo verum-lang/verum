@@ -1,0 +1,24 @@
+// @test: run
+// @tier: 1
+// @level: L0
+// @tags: aot, stdlib, record, layout, regression
+// @expected-exit: 0
+// @description: Construct a `Rect` with a user-side struct literal, then call
+//               a stdlib method on it. Regression for the bug where the
+//               stdlib impl block never reached VBC codegen (because the
+//               mounted module was culled by
+//               `clear_non_compilable_stdlib_modules`), so `area()` had no
+//               body and read zeros for every `self.*` field.
+
+mount core.term.layout.Rect;
+
+fn main() {
+    let r = Rect { x: 5, y: 10, width: 80, height: 24 };
+    // area() = width * height. With the bug, self.* read zero → area=0.
+    assert_eq(r.area(), 1920);
+    // Also exercise other stdlib methods that depend on field layout.
+    assert_eq(r.left(), 5);
+    assert_eq(r.top(), 10);
+    assert_eq(r.right(), 85);
+    assert_eq(r.bottom(), 34);
+}

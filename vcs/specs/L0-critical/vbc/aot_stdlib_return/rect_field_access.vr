@@ -1,0 +1,23 @@
+// @test: run
+// @tier: 1
+// @level: L0
+// @tags: aot, stdlib, record, layout, regression
+// @expected-exit: 0
+// @description: A `Rect` returned from stdlib `Rect.new` must let user code
+//               read its fields via `GetF`. Regression for the bug where
+//               `clear_non_compilable_stdlib_modules` dropped mounted
+//               stdlib modules before VBC codegen saw their impl blocks,
+//               causing the LLVM backend to const-fold the unresolved
+//               `Call Rect.new` to a bogus near-null pointer (SIGSEGV on
+//               the first `r.x`). Exit-code-only check — AOT runner prefixes
+//               stdout with "Running …" banners that defeat @expected-stdout.
+
+mount core.term.layout.Rect;
+
+fn main() {
+    let r = Rect.new(5, 10, 80, 24);
+    assert_eq(r.x, 5);
+    assert_eq(r.y, 10);
+    assert_eq(r.width, 80);
+    assert_eq(r.height, 24);
+}

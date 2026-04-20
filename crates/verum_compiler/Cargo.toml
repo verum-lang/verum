@@ -50,8 +50,15 @@ smallvec = { workspace = true }
 indexmap = { workspace = true }
 num_cpus = "1.17"
 
-# Binary serialization for cache
+# Binary serialization for cache.
+#
+# `bincode` is kept for other callers; the stdlib registry disk cache uses
+# `ciborium` (CBOR) instead because bincode 1 is positional and silently
+# breaks round-trip for any type that uses `#[serde(skip_serializing_if)]`
+# (e.g. `Stmt.attributes`). CBOR encodes maps with keys so the skip guards
+# round-trip correctly at the cost of a modestly larger on-disk payload.
 bincode = { workspace = true }
+ciborium = "0.2"
 
 # Unified hashing (Blake3)
 blake3 = { workspace = true }

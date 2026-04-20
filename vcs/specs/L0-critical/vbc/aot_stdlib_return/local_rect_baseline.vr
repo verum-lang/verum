@@ -1,0 +1,30 @@
+// @test: run
+// @tier: 0
+// @level: L0
+// @tags: record, layout, baseline
+// @expected-stdout: x=5 y=10 w=80 h=24 area=1920
+// @expected-exit: 0
+// @description: Baseline — a user-defined record with the exact same shape
+//               as `core.term.layout.Rect` compiles and runs correctly.
+//               Proves the bug in the sibling `@skip` tests is specific to
+//               stdlib-compiled nominal types, not records in general.
+
+type LocalRect is {
+    x: Int,
+    y: Int,
+    width: Int,
+    height: Int,
+};
+
+implement LocalRect {
+    public fn new(x: Int, y: Int, w: Int, h: Int) -> LocalRect {
+        LocalRect { x: x, y: y, width: w, height: h }
+    }
+
+    public fn area(&self) -> Int { self.width * self.height }
+}
+
+fn main() {
+    let r = LocalRect.new(5, 10, 80, 24);
+    print(f"x={r.x} y={r.y} w={r.width} h={r.height} area={r.area()}");
+}
