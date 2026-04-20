@@ -303,6 +303,97 @@ public async fn join4<A, B, C, D,
     (ab.0, ab.1, cd.0, cd.1)
 }
 
+/// Wait for five futures to complete.
+public async fn join5<A, B, C, D, E,
+    FA: Future<Output>,
+    FB: Future<Output>,
+    FC: Future<Output>,
+    FD: Future<Output>,
+    FE: Future<Output>>(
+    fut_a: FA,
+    fut_b: FB,
+    fut_c: FC,
+    fut_d: FD,
+    fut_e: FE,
+) -> (A, B, C, D, E) {
+    let abcd: (A, B, C, D) = join4(fut_a, fut_b, fut_c, fut_d).await;
+    let e: E = fut_e.await;
+    (abcd.0, abcd.1, abcd.2, abcd.3, e)
+}
+
+/// Race three futures — returns the first one to complete.
+public async fn race3<T,
+    FA: Future<Output = T>,
+    FB: Future<Output = T>,
+    FC: Future<Output = T>>(
+    fut_a: FA,
+    fut_b: FB,
+    fut_c: FC,
+) -> T {
+    // Pair-wise: race(a, race(b, c))
+    race(fut_a, race(fut_b, fut_c)).await
+}
+
+/// Race two futures — alias for `race` to match the `race{N}` naming family.
+public async fn race2<T,
+    FA: Future<Output = T>,
+    FB: Future<Output = T>>(
+    fut_a: FA,
+    fut_b: FB,
+) -> T {
+    race(fut_a, fut_b).await
+}
+
+/// Wait for all fallible futures in a collection; short-circuit on first error.
+public async fn try_join_all<T, E, F: Future<Output = Result<T, E>>>(
+    futures: List<F>,
+) -> Result<List<T>, E> {
+    let results = join_all(futures).await;
+    let mut unwrapped: List<T> = List.new();
+    for r in results.into_iter() {
+        match r {
+            Ok(v) => unwrapped.push(v),
+            Err(e) => return Err(e),
+        }
+    }
+    Ok(unwrapped)
+}
+
+/// Join two fallible futures. Short-circuits on first Err.
+public async fn try_join<A, B, E,
+    FA: Future<Output = Result<A, E>>,
+    FB: Future<Output = Result<B, E>>>(
+    fut_a: FA,
+    fut_b: FB,
+) -> Result<(A, B), E> {
+    let a = fut_a.await?;
+    let b = fut_b.await?;
+    Ok((a, b))
+}
+
+/// Join three fallible futures. Short-circuits on first Err.
+public async fn try_join3<A, B, C, E,
+    FA: Future<Output = Result<A, E>>,
+    FB: Future<Output = Result<B, E>>,
+    FC: Future<Output = Result<C, E>>>(
+    fut_a: FA,
+    fut_b: FB,
+    fut_c: FC,
+) -> Result<(A, B, C), E> {
+    let a = fut_a.await?;
+    let b = fut_b.await?;
+    let c = fut_c.await?;
+    Ok((a, b, c))
+}
+
+/// Race a collection of futures — returns the first one to complete.
+/// Alias for `select_all` that drops the index and the remaining futures.
+public async fn race_all<T, F: Future<Output = T>>(
+    futures: List<F>,
+) -> T {
+    select_all(futures).await.value
+}
+
 // =============================================================================
 // Join All - Wait for collection
 // =============================================================================
