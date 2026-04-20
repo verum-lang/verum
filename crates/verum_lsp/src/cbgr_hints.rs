@@ -37,12 +37,14 @@
 //!    the NoEscape property.
 
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicBool, Ordering};
+
 use tower_lsp::lsp_types::{
     CodeAction, CodeActionKind, CodeActionOrCommand, CodeActionParams, InlayHint, InlayHintKind,
     InlayHintLabel, Position, Range, TextEdit, Url, WorkspaceEdit,
 };
 use verum_cbgr::analysis::{EscapeAnalyzer, EscapeResult, RefId};
-use verum_cbgr::tier_types::ReferenceTier;
+use verum_cbgr::tier_types::{ReferenceTier, Tier0Reason};
 use verum_common::{List, Map, Maybe};
 
 use crate::document::DocumentState;
@@ -58,6 +60,12 @@ pub struct CbgrHintProvider {
     tier_cache: Map<Url, Map<RefId, ReferenceTier>>,
     /// Enable detailed hints
     detailed_hints: bool,
+    /// Master switch for CBGR inlay hints. Off by default: otherwise every
+    /// `&x` in a file gets a long block-comment hint like
+    /// `/* can promote → &checked T: 0ns (saves ~15ns) */`, which VS Code
+    /// renders inline and makes the source nearly unreadable. Flipped on
+    /// via the client's `cbgrShowOptimizationHints` init option.
+    enabled: AtomicBool,
 }
 
 impl CbgrHintProvider {
@@ -67,12 +75,122 @@ impl CbgrHintProvider {
             escape_cache: Map::new(),
             tier_cache: Map::new(),
             detailed_hints: true,
+            enabled: AtomicBool::new(false),
         }
     }
 
     /// Enable or disable detailed hints
     pub fn set_detailed_hints(&mut self, enabled: bool) {
         self.detailed_hints = enabled;
+    }
+
+    /// Master on/off for CBGR inlay hints. Safe to call on shared `&self`.
+    pub fn set_enabled(&self, enabled: bool) {
+        self.enabled.store(enabled, Ordering::Relaxed);
+    }
+
+    pub fn is_enabled(&self) -> bool {
+        self.enabled.load(Ordering::Relaxed)
+    }
+
+    /// Analyze the reference whose sigil sits under `position`, if any.
+    ///
+    /// This is the public entry point used by hover to produce CBGR
+    /// information without requiring the user to enable the full inlay-hint
+    /// stream. It always runs, regardless of [`is_enabled`].
+    ///
+    /// Returns `None` if `position` is not inside a reference sigil.
+    pub fn analyze_at_position(
+        &self,
+        document: &DocumentState,
+        position: Position,
+    ) -> Option<RefAnalysis> {
+        // Widen the scan to the line containing `position` — cheap and
+        // enough to resolve the sigil without scanning the whole file.
+        let line_range = Range::new(
+            Position::new(position.line, 0),
+            Position::new(position.line + 1, 0),
+        );
+        let refs = self.find_references_in_range(document, line_range);
+
+        let hit = refs
+            .into_iter()
+            .find(|r| self.position_in_range(&position, &r.range))?;
+
+        let escape = self.analyze_reference(document, hit.ref_id);
+
+        Some(RefAnalysis {
+            range: hit.range,
+            sigil: hit.text,
+            tier: hit.tier,
+            mutable: hit.mutable,
+            context: hit.context,
+            escape,
+        })
+    }
+
+    /// Render a `RefAnalysis` as Markdown suitable for a hover bubble.
+    ///
+    /// Format is stable and consumed by `hover::hover_at_position`. Kept here
+    /// so that the same structured view backs hover, code-lens and code
+    /// actions without duplicated string-building logic.
+    pub fn format_hover_markdown(&self, analysis: &RefAnalysis) -> String {
+        let mut out = String::new();
+        out.push_str(&format!(
+            "### Reference `{}` — {}\n\n",
+            analysis.sigil,
+            analysis.tier_label()
+        ));
+        if analysis.mutable {
+            out.push_str("- Mutability: **mutable borrow**\n");
+        } else {
+            out.push_str("- Mutability: shared borrow\n");
+        }
+        out.push_str(&format!(
+            "- Runtime cost: ~{}ns per deref\n",
+            analysis.deref_cost_ns()
+        ));
+
+        match analysis.context {
+            RefContext::TypePosition => {
+                out.push_str(
+                    "- Context: **type position** (signature/field) — no runtime borrow \
+                     is created here, so no CBGR cost is charged at this site.\n",
+                );
+            }
+            RefContext::ValueExpression => {
+                out.push_str("- Context: value expression (runtime borrow)\n");
+                out.push_str(&format!(
+                    "- Escape analysis: `{}`\n",
+                    analysis.escape.reason()
+                ));
+
+                if analysis.is_promotable() {
+                    out.push_str(
+                        "\n> ✓ **Promotable.** This borrow never escapes its scope. Replacing \
+                         `&` with `&checked` eliminates the ~15ns runtime check at zero risk.\n",
+                    );
+                    out.push_str(
+                        "\nRun the *Promote to `&checked T`* code action to apply \
+                         the rewrite automatically.\n",
+                    );
+                } else if matches!(analysis.tier, ReferenceTier::Tier0 { .. }) {
+                    out.push_str(&format!(
+                        "\n> Not promotable: {}. The ~15ns CBGR check is required for safety.\n",
+                        analysis.escape.reason()
+                    ));
+                }
+            }
+        }
+
+        if matches!(analysis.tier, ReferenceTier::Tier2) {
+            out.push_str(
+                "\n> ⚠ **Unsafe reference.** Bypasses CBGR and borrow-checker. \
+                 Caller must manually prove aliasing/lifetime safety.\n",
+            );
+        }
+
+        out
     }
 
     /// Provide inlay hints for a document
@@ -84,10 +202,27 @@ impl CbgrHintProvider {
     pub fn provide_hints(&self, document: &DocumentState, range: Range) -> List<InlayHint> {
         let mut hints = List::new();
 
+        if !self.is_enabled() {
+            return hints;
+        }
+
         // Parse document to find reference declarations
         let references = self.find_references_in_range(document, range);
 
         for ref_info in references {
+            // Skip references that are already zero-cost — no inlay needed.
+            if matches!(ref_info.tier, ReferenceTier::Tier1 | ReferenceTier::Tier2) {
+                continue;
+            }
+
+            // Skip references that appear in type-signature position.
+            // `fn f(p: &List<T>) -> ...` describes a parameter type, not a
+            // runtime reference creation — there is no CBGR cost to annotate.
+            // Same for struct fields and return types.
+            if matches!(ref_info.context, RefContext::TypePosition) {
+                continue;
+            }
+
             // Get or create escape analysis
             let escape_result = self.analyze_reference(document, ref_info.ref_id);
 
@@ -202,25 +337,30 @@ impl CbgrHintProvider {
 
                 // Determine reference type by looking at following text
                 let remaining = &scan_text[i..];
-                let ref_text = if remaining.starts_with("&checked mut") {
-                    "&checked mut"
+                let (ref_text, tier, mutable) = if remaining.starts_with("&checked mut") {
+                    ("&checked mut", ReferenceTier::Tier1, true)
                 } else if remaining.starts_with("&checked") {
-                    "&checked"
+                    ("&checked", ReferenceTier::Tier1, false)
                 } else if remaining.starts_with("&unsafe mut") {
-                    "&unsafe mut"
+                    ("&unsafe mut", ReferenceTier::Tier2, true)
                 } else if remaining.starts_with("&unsafe") {
-                    "&unsafe"
+                    ("&unsafe", ReferenceTier::Tier2, false)
                 } else if remaining.starts_with("&mut") {
-                    "&mut"
+                    ("&mut", ReferenceTier::tier0(Tier0Reason::NotAnalyzed), true)
                 } else {
-                    "&"
+                    ("&", ReferenceTier::tier0(Tier0Reason::NotAnalyzed), false)
                 };
+
+                let context = detect_ref_context(text, ref_start);
 
                 refs.push(ReferenceInfo {
                     ref_id: RefId(ref_counter),
                     position: pos,
                     range: Range::new(pos, Position::new(line, col + ref_text.len() as u32)),
                     text: ref_text.to_string(),
+                    tier,
+                    mutable,
+                    context,
                 });
                 ref_counter += 1;
             }
@@ -321,18 +461,15 @@ impl CbgrHintProvider {
         Maybe::None
     }
 
-    /// Create promotion hint for promotable reference
+    /// Create promotion hint for promotable reference.
+    ///
+    /// The label is intentionally tiny (`0ns` / `→✓`) so it doesn't overlay the
+    /// source line. All the detail lives in the tooltip and in the hover.
     fn create_promotion_hint(&self, ref_info: ReferenceInfo, can_promote: bool) -> InlayHint {
         let label = if can_promote {
-            if self.detailed_hints {
-                InlayHintLabel::String(
-                    " /* can promote → &checked T: 0ns (saves ~15ns) */".to_string(),
-                )
-            } else {
-                InlayHintLabel::String(" /* → &checked T */".to_string())
-            }
+            InlayHintLabel::String("0ns".to_string())
         } else {
-            InlayHintLabel::String(" /* CBGR: ~15ns */".to_string())
+            InlayHintLabel::String("~15ns".to_string())
         };
 
         InlayHint {
@@ -341,23 +478,24 @@ impl CbgrHintProvider {
             kind: Some(InlayHintKind::TYPE),
             text_edits: None,
             tooltip: Some(tower_lsp::lsp_types::InlayHintTooltip::String(
-                "CBGR reference can be promoted to zero-cost &checked T".to_string(),
+                "CBGR reference can be promoted to zero-cost &checked T. \
+                 Hover the `&` for details."
+                    .to_string(),
             )),
-            padding_left: Some(false),
+            padding_left: Some(true),
             padding_right: Some(false),
             data: None,
         }
     }
 
-    /// Create overhead hint for non-promotable reference
+    /// Create overhead hint for non-promotable reference.
     fn create_overhead_hint(&self, ref_info: ReferenceInfo, reason: EscapeResult) -> InlayHint {
-        let label = if self.detailed_hints {
-            InlayHintLabel::String(format!(
-                " /* CBGR: ~15ns per deref ({}) */",
-                reason.reason()
-            ))
+        let label = InlayHintLabel::String("~15ns".to_string());
+
+        let tooltip = if self.detailed_hints {
+            format!("CBGR overhead ~15ns per deref — {}", reason.reason())
         } else {
-            InlayHintLabel::String(" /* CBGR: ~15ns */".to_string())
+            "CBGR overhead ~15ns per deref".to_string()
         };
 
         InlayHint {
@@ -365,11 +503,8 @@ impl CbgrHintProvider {
             label,
             kind: Some(InlayHintKind::TYPE),
             text_edits: None,
-            tooltip: Some(tower_lsp::lsp_types::InlayHintTooltip::String(format!(
-                "CBGR overhead: {}",
-                reason.reason()
-            ))),
-            padding_left: Some(false),
+            tooltip: Some(tower_lsp::lsp_types::InlayHintTooltip::String(tooltip)),
+            padding_left: Some(true),
             padding_right: Some(false),
             data: None,
         }
@@ -408,6 +543,10 @@ impl CbgrHintProvider {
         ref_info: ReferenceInfo,
         _escape_result: EscapeResult,
     ) -> CodeActionOrCommand {
+        // The command arguments are `[uri, { line, character }]` — the VS Code
+        // client queries `verum/getEscapeAnalysis` at that position and opens
+        // a panel with the markdown report. Using a position rather than an
+        // opaque `ref_id` keeps the command stable across re-parses.
         CodeActionOrCommand::CodeAction(CodeAction {
             title: "View escape analysis details".to_string(),
             kind: Some(CodeActionKind::QUICKFIX),
@@ -418,7 +557,10 @@ impl CbgrHintProvider {
                 command: "verum.showEscapeAnalysis".to_string(),
                 arguments: Some(vec![
                     serde_json::json!(uri.to_string()),
-                    serde_json::json!(ref_info.ref_id.0),
+                    serde_json::json!({
+                        "line": ref_info.position.line,
+                        "character": ref_info.position.character,
+                    }),
                 ]),
             }),
             is_preferred: None,
@@ -463,17 +605,182 @@ impl Default for CbgrHintProvider {
 struct ReferenceInfo {
     /// Reference ID
     ref_id: RefId,
-    /// Position in document
+    /// Position of the `&` sigil in the document
     position: Position,
-    /// Range of reference
+    /// Range covering the reference sigil (`&`, `&mut`, `&checked`, ...)
     range: Range,
-    /// Original text
+    /// Original text of the sigil
     text: String,
+    /// Tier implied by the sigil (Tier 0 for `&`, Tier 1 for `&checked`, ...).
+    tier: ReferenceTier,
+    /// Whether the reference is mutable (`&mut` / `&checked mut` / `&unsafe mut`).
+    mutable: bool,
+    /// Syntactic context of this reference — used to suppress inlay hints on
+    /// references that appear in type-signature position (parameter types,
+    /// field types, return types) where there is no runtime cost to annotate.
+    context: RefContext,
+}
+
+/// Syntactic context of a reference in source.
+///
+/// The CBGR model attaches a runtime cost to *reference creation* — `let r = &x`
+/// or `f(&x)`. A reference *type* in a function signature (`fn f(p: &List<T>)`)
+/// is not a reference creation; the cost belongs to the caller's borrow.
+/// Treating both alike produces noisy, incorrect hints on every parameter list.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RefContext {
+    /// The reference is an *expression* that creates a borrow at runtime.
+    /// Example: `let r = &panes[i];`, `foo(&items);`
+    ValueExpression,
+    /// The reference is a *type annotation* — parameter type, field type,
+    /// return type, generic argument.
+    /// Example: `fn f(p: &List<T>) -> &Self`
+    TypePosition,
+}
+
+/// Public analysis result for a single reference.
+///
+/// Consumed by hover, code-actions and inlay-hint code paths. Keeping this
+/// type public lets other LSP surfaces (hover, code lens, diagnostics) share
+/// one source of truth for reference-level CBGR information.
+#[derive(Debug, Clone)]
+pub struct RefAnalysis {
+    /// Range in the document covering the reference sigil.
+    pub range: Range,
+    /// Text of the sigil (`&`, `&mut`, `&checked`, ...).
+    pub sigil: String,
+    pub tier: ReferenceTier,
+    pub mutable: bool,
+    pub context: RefContext,
+    pub escape: EscapeResult,
+}
+
+impl RefAnalysis {
+    /// Can this reference be promoted to `&checked T` (0ns)?
+    ///
+    /// Only Tier 0 references that do not escape their scope are promotable.
+    pub fn is_promotable(&self) -> bool {
+        matches!(self.tier, ReferenceTier::Tier0 { .. })
+            && !matches!(self.context, RefContext::TypePosition)
+            && matches!(self.escape, EscapeResult::DoesNotEscape)
+    }
+
+    /// Estimated runtime cost per deref, in nanoseconds.
+    pub fn deref_cost_ns(&self) -> u32 {
+        match self.tier {
+            ReferenceTier::Tier0 { .. } => 15,
+            ReferenceTier::Tier1 | ReferenceTier::Tier2 => 0,
+        }
+    }
+
+    /// Human-readable tier label.
+    pub fn tier_label(&self) -> &'static str {
+        match self.tier {
+            ReferenceTier::Tier0 { .. } => "Tier 0 — CBGR-managed",
+            ReferenceTier::Tier1 => "Tier 1 — compiler-verified",
+            ReferenceTier::Tier2 => "Tier 2 — unsafe (manual proof)",
+        }
+    }
 }
 
 // =============================================================================
 // LSP Integration Helpers
 // =============================================================================
+
+/// Classify the syntactic context of a `&` sigil at `ref_start` (byte offset).
+///
+/// A `&` is in *type position* when the immediately preceding non-whitespace,
+/// non-comment token is one of `:`, `->` or `<` — i.e. it introduces a type
+/// annotation on a parameter, field, return, or generic argument. In every
+/// other position we treat it as a runtime borrow expression.
+///
+/// This is a pragmatic text-level heuristic; a full AST-based classifier
+/// would be strictly more precise but also strictly more expensive and is
+/// unnecessary for surfacing hover/inlay information.
+fn detect_ref_context(text: &str, ref_start: usize) -> RefContext {
+    let bytes = text.as_bytes();
+
+    // Walk backward past whitespace.
+    let mut i = ref_start;
+    while i > 0 {
+        let c = bytes[i - 1] as char;
+        if !c.is_whitespace() {
+            break;
+        }
+        i -= 1;
+    }
+    if i == 0 {
+        return RefContext::ValueExpression;
+    }
+
+    // Inspect the immediately preceding token.
+    let c = bytes[i - 1] as char;
+
+    // `->` — return type.
+    if c == '>' && i >= 2 && bytes[i - 2] as char == '-' {
+        return RefContext::TypePosition;
+    }
+    // `:` — parameter/field type or let-type ascription (`let x: &T = ...`).
+    if c == ':' {
+        return RefContext::TypePosition;
+    }
+    // `<` — generic argument directly after an opening bracket.
+    if c == '<' {
+        return RefContext::TypePosition;
+    }
+
+    // `,` — ambiguous: could be a generic-arg list (`Map<K, &V>`) or a value
+    // argument list (`foo(a, &b)`). Walk back through nested brackets to the
+    // enclosing opener and decide from that.
+    if c == ',' {
+        return classify_by_enclosing_bracket(bytes, i - 1);
+    }
+
+    // Anything else — identifiers, parens, operators — the `&` is a borrow
+    // expression.
+    RefContext::ValueExpression
+}
+
+/// Scan backward from `start` past balanced `(...)` / `[...]` / `<...>` groups
+/// until the innermost unclosed opener. Returns `TypePosition` for `<`, and
+/// `ValueExpression` for `(` / `[` or top of file.
+fn classify_by_enclosing_bracket(bytes: &[u8], start: usize) -> RefContext {
+    let mut depth_paren = 0i32;
+    let mut depth_brack = 0i32;
+    let mut depth_angle = 0i32;
+
+    let mut i = start;
+    while i > 0 {
+        i -= 1;
+        match bytes[i] as char {
+            ')' => depth_paren += 1,
+            ']' => depth_brack += 1,
+            '>' => depth_angle += 1,
+            '(' => {
+                if depth_paren == 0 {
+                    return RefContext::ValueExpression;
+                }
+                depth_paren -= 1;
+            }
+            '[' => {
+                if depth_brack == 0 {
+                    return RefContext::ValueExpression;
+                }
+                depth_brack -= 1;
+            }
+            '<' => {
+                if depth_angle == 0 {
+                    return RefContext::TypePosition;
+                }
+                depth_angle -= 1;
+            }
+            '{' => return RefContext::ValueExpression,
+            ';' => return RefContext::ValueExpression,
+            _ => {}
+        }
+    }
+    RefContext::ValueExpression
+}
 
 /// Convert Verum position to LSP position
 #[allow(dead_code)] // Reserved for future CBGR hint positioning
@@ -536,31 +843,107 @@ mod tests {
         assert_eq!(range.end.character, 10);
     }
 
+    fn tier0_ref_info() -> ReferenceInfo {
+        ReferenceInfo {
+            ref_id: RefId(0),
+            position: verum_pos_to_lsp(5, 10),
+            range: verum_range_to_lsp(5, 10, 5, 11),
+            text: "&".to_string(),
+            tier: ReferenceTier::tier0(Tier0Reason::NotAnalyzed),
+            mutable: false,
+            context: RefContext::ValueExpression,
+        }
+    }
+
     #[test]
     fn test_promotion_hint_creation() {
         let provider = CbgrHintProvider::new();
-        let ref_info = ReferenceInfo {
-            ref_id: RefId(0),
-            position: verum_pos_to_lsp(5, 10),
-            range: verum_range_to_lsp(5, 10, 5, 20),
-            text: "&data".to_string(),
-        };
-
-        let hint = provider.create_promotion_hint(ref_info, true);
+        let hint = provider.create_promotion_hint(tier0_ref_info(), true);
         assert_eq!(hint.kind, Some(InlayHintKind::TYPE));
     }
 
     #[test]
     fn test_overhead_hint_creation() {
         let provider = CbgrHintProvider::new();
-        let ref_info = ReferenceInfo {
-            ref_id: RefId(0),
-            position: verum_pos_to_lsp(5, 10),
-            range: verum_range_to_lsp(5, 10, 5, 20),
-            text: "&data".to_string(),
-        };
-
-        let hint = provider.create_overhead_hint(ref_info, EscapeResult::EscapesViaReturn);
+        let hint =
+            provider.create_overhead_hint(tier0_ref_info(), EscapeResult::EscapesViaReturn);
         assert_eq!(hint.kind, Some(InlayHintKind::TYPE));
+    }
+
+    #[test]
+    fn detect_context_type_vs_value() {
+        // Parameter type: `: &List<T>`
+        let src = "fn f(p: &List<T>)";
+        let pos = src.find('&').unwrap();
+        assert_eq!(detect_ref_context(src, pos), RefContext::TypePosition);
+
+        // Return type: `-> &Self`
+        let src = "fn g() -> &Self { ... }";
+        let pos = src.find('&').unwrap();
+        assert_eq!(detect_ref_context(src, pos), RefContext::TypePosition);
+
+        // Generic arg: `Map<K, &V>`
+        let src = "let m: Map<K, &V>";
+        let pos = src.find('&').unwrap();
+        assert_eq!(detect_ref_context(src, pos), RefContext::TypePosition);
+
+        // Value borrow: `foo(&x)`
+        let src = "foo(&x)";
+        let pos = src.find('&').unwrap();
+        assert_eq!(detect_ref_context(src, pos), RefContext::ValueExpression);
+
+        // Let binding rhs: `let r = &panes[i];`
+        let src = "let r = &panes[i];";
+        let pos = src.find('&').unwrap();
+        assert_eq!(detect_ref_context(src, pos), RefContext::ValueExpression);
+    }
+
+    #[test]
+    fn hover_markdown_promotable_ref() {
+        let provider = CbgrHintProvider::new();
+        let analysis = RefAnalysis {
+            range: verum_range_to_lsp(0, 0, 0, 1),
+            sigil: "&".to_string(),
+            tier: ReferenceTier::tier0(Tier0Reason::NotAnalyzed),
+            mutable: false,
+            context: RefContext::ValueExpression,
+            escape: EscapeResult::DoesNotEscape,
+        };
+        let md = provider.format_hover_markdown(&analysis);
+        assert!(md.contains("Tier 0"));
+        assert!(md.contains("Promotable"));
+        assert!(md.contains("`&checked`"));
+    }
+
+    #[test]
+    fn hover_markdown_type_position_notes_no_cost() {
+        let provider = CbgrHintProvider::new();
+        let analysis = RefAnalysis {
+            range: verum_range_to_lsp(0, 0, 0, 1),
+            sigil: "&".to_string(),
+            tier: ReferenceTier::tier0(Tier0Reason::NotAnalyzed),
+            mutable: false,
+            context: RefContext::TypePosition,
+            escape: EscapeResult::DoesNotEscape,
+        };
+        let md = provider.format_hover_markdown(&analysis);
+        assert!(md.contains("type position"));
+        assert!(!md.contains("Promotable"));
+    }
+
+    #[test]
+    fn hover_markdown_tier2_is_unsafe() {
+        let provider = CbgrHintProvider::new();
+        let analysis = RefAnalysis {
+            range: verum_range_to_lsp(0, 0, 0, 7),
+            sigil: "&unsafe".to_string(),
+            tier: ReferenceTier::Tier2,
+            mutable: false,
+            context: RefContext::ValueExpression,
+            escape: EscapeResult::DoesNotEscape,
+        };
+        let md = provider.format_hover_markdown(&analysis);
+        assert!(md.contains("Tier 2"));
+        assert!(md.contains("Unsafe"));
     }
 }

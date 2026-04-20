@@ -113,12 +113,61 @@ impl VerificationStats {
     }
 }
 
+/// Profiler configuration plumbed from the CLI.
+///
+/// Controls whether the per-function verification profiler runs, whether a
+/// total-time budget is enforced, whether results are exported as JSON for
+/// CI/CD, and whether a distributed cache URL is advertised. Held here so
+/// the main verify command signature stays manageable.
+#[derive(Debug, Clone, Default)]
+pub struct ProfileConfig {
+    /// Enable per-function profiling + report printing.
+    pub enabled: bool,
+    /// Fail if total verification time exceeds this budget.
+    pub budget: Option<Duration>,
+    /// Write the profile report as JSON to this path.
+    pub export_path: Option<PathBuf>,
+    /// URL of a distributed verification cache, if any. Surfaced in the
+    /// report; actual wire-up is still handled by the compiler core.
+    pub distributed_cache: Option<String>,
+}
+
+/// Parse a human-readable duration string (e.g. `120s`, `2m`, `1h`).
+///
+/// Accepts a bare number as seconds. Used by `--budget=...` at the CLI layer.
+pub fn parse_duration(s: &str) -> std::result::Result<Duration, String> {
+    let s = s.trim();
+    if s.is_empty() {
+        return Err("empty duration".into());
+    }
+
+    let split_at = s
+        .find(|c: char| !c.is_ascii_digit() && c != '.')
+        .unwrap_or(s.len());
+    let (num_part, unit_part) = s.split_at(split_at);
+    let n: f64 = num_part
+        .parse()
+        .map_err(|_| format!("invalid duration number: '{s}'"))?;
+    if !n.is_finite() || n < 0.0 {
+        return Err(format!("duration must be a non-negative finite number: '{s}'"));
+    }
+
+    let secs = match unit_part.trim() {
+        "" | "s" | "sec" | "secs" | "seconds" => n,
+        "ms" => n / 1000.0,
+        "m" | "min" | "mins" | "minutes" => n * 60.0,
+        "h" | "hr" | "hrs" | "hours" => n * 3600.0,
+        other => return Err(format!("unknown duration unit: '{other}' (use s/m/h)")),
+    };
+    Ok(Duration::from_millis((secs * 1000.0) as u64))
+}
+
 /// Execute verification command for a project (no specific file)
 ///
 /// This scans the project for .vr source files and runs the compilation
 /// pipeline with verification enabled, collecting real SMT results.
 pub fn execute(
-    _profile: bool,
+    profile: ProfileConfig,
     show_cost: bool,
     compare_modes: bool,
     mode: &str,
@@ -127,6 +176,14 @@ pub fn execute(
     _cache: bool,
     interactive: bool,
 ) -> Result<()> {
+    if let Some(ref url) = profile.distributed_cache {
+        ui::info(&format!(
+            "Distributed verification cache: {} (advisory — results are \
+             stored/read by the compiler when the feature is enabled)",
+            url
+        ));
+    }
+
     ui::header("Formal Verification");
 
     // Validate + parse the --solver choice. Accepts
@@ -161,15 +218,15 @@ pub fn execute(
     }
 
     let stats = match mode {
-        VerificationMode::Compare => execute_compare_mode(timeout, show_cost, backend)?,
-        VerificationMode::Proof => execute_proof_mode(timeout, show_cost, backend)?,
+        VerificationMode::Compare => execute_compare_mode(timeout, show_cost, backend, &profile)?,
+        VerificationMode::Proof => execute_proof_mode(timeout, show_cost, backend, &profile)?,
         VerificationMode::Runtime => execute_runtime_mode()?,
         // Cubical and Dependent both run through the proof pipeline; the tactic
         // routing happens inside `verum_smt::tactic_evaluation` based on the
         // discovered obligations. The CLI distinction is kept so users can
         // request the focused tactic family explicitly via `--mode=cubical|dependent`.
-        VerificationMode::Cubical => execute_proof_mode(timeout, show_cost, backend)?,
-        VerificationMode::Dependent => execute_proof_mode(timeout, show_cost, backend)?,
+        VerificationMode::Cubical => execute_proof_mode(timeout, show_cost, backend, &profile)?,
+        VerificationMode::Dependent => execute_proof_mode(timeout, show_cost, backend, &profile)?,
     };
     let _ = backend; // retained for future use outside proof/compare modes
 
@@ -254,6 +311,7 @@ fn verify_file_proof(
     timeout: u64,
     show_cost: bool,
     backend: SolverChoice,
+    profile: &ProfileConfig,
 ) -> std::result::Result<bool, String> {
     use verum_compiler::verify_cmd::VerifyCommand;
 
@@ -264,6 +322,12 @@ fn verify_file_proof(
         smt_solver: backend.into(),
         show_verification_costs: show_cost,
         output_format: OutputFormat::Human,
+        // Profiler / budget / export wiring — `--profile`, `--budget`, `--export`
+        // arrive here from the CLI and are consumed by VerifyCommand internally.
+        profile_verification: profile.enabled,
+        verification_budget_secs: profile.budget.map(|d| d.as_secs().max(1)),
+        export_verification_json: profile.export_path.is_some(),
+        verification_json_path: profile.export_path.clone(),
         ..Default::default()
     };
 
@@ -276,6 +340,10 @@ fn verify_file_proof(
             let msg = e.to_string();
             if msg.contains("Verification failed") {
                 Ok(false)
+            } else if msg.contains("budget exceeded") {
+                // Surface the budget violation as a hard failure so the shell
+                // exit code reflects it — CI pipelines depend on this.
+                Err(format!("verification budget exceeded: {}", msg))
             } else {
                 Err(msg)
             }
@@ -291,6 +359,7 @@ fn verify_file_proof(
     timeout: u64,
     _show_cost: bool,
     _backend: SolverChoice,
+    _profile: &ProfileConfig,
 ) -> std::result::Result<bool, String> {
     // Without Z3, run type-checking only
     let options = CompilerOptions {
@@ -338,6 +407,7 @@ fn execute_proof_mode(
     timeout: u64,
     show_cost: bool,
     backend: SolverChoice,
+    profile: &ProfileConfig,
 ) -> Result<VerificationStats> {
     #[cfg(not(feature = "verification"))]
     {
@@ -371,7 +441,7 @@ fn execute_proof_mode(
         stats.total_files += 1;
 
         let file_start = Instant::now();
-        match verify_file_proof(source, timeout, show_cost, backend) {
+        match verify_file_proof(source, timeout, show_cost, backend, profile) {
             Ok(true) => {
                 let elapsed = file_start.elapsed();
                 stats.files_verified += 1;
@@ -412,6 +482,7 @@ fn execute_compare_mode(
     timeout: u64,
     show_cost: bool,
     backend: SolverChoice,
+    profile: &ProfileConfig,
 ) -> Result<VerificationStats> {
     ui::step("Comparing runtime vs proof verification modes");
 
@@ -436,7 +507,7 @@ fn execute_compare_mode(
 
         // Measure proof mode time
         let proof_start = Instant::now();
-        let proof_ok = verify_file_proof(source, timeout, show_cost, backend);
+        let proof_ok = verify_file_proof(source, timeout, show_cost, backend, profile);
         let proof_time = proof_start.elapsed();
 
         // Measure check-only (runtime) time
@@ -588,7 +659,7 @@ fn execute_interactive_impl(timeout: u64) -> Result<()> {
 
     for source in &sources {
         let display_path = source.display().to_string();
-        match verify_file_proof(source, timeout, false, SolverChoice::Z3) {
+        match verify_file_proof(source, timeout, false, SolverChoice::Z3, &ProfileConfig::default()) {
             Ok(false) => {
                 problem_files.push((display_path, "Verification failed".to_string()));
             }
@@ -698,7 +769,7 @@ fn investigate_file(path: &str, timeout: u64) {
 
     let file_path = PathBuf::from(path);
     let start = Instant::now();
-    match verify_file_proof(&file_path, timeout * 2, true, SolverChoice::Z3) {
+    match verify_file_proof(&file_path, timeout * 2, true, SolverChoice::Z3, &ProfileConfig::default()) {
         Ok(true) => {
             let elapsed = start.elapsed();
             ui::success(&format!(

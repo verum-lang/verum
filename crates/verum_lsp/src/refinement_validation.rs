@@ -205,8 +205,8 @@ pub struct CodeLocation {
 /// Simple LRU cache for validation results
 pub struct ValidationCache {
     cache: Arc<RwLock<HashMap<String, CachedValidationResult>>>,
-    max_entries: usize,
-    ttl: Duration,
+    max_entries: parking_lot::Mutex<usize>,
+    ttl: parking_lot::Mutex<Duration>,
 }
 
 #[derive(Clone)]
@@ -227,16 +227,40 @@ impl ValidationCache {
     fn new(max_entries: usize, ttl: Duration) -> Self {
         Self {
             cache: Arc::new(RwLock::new(HashMap::new())),
-            max_entries,
-            ttl,
+            max_entries: parking_lot::Mutex::new(max_entries),
+            ttl: parking_lot::Mutex::new(ttl),
+        }
+    }
+
+    /// Hot-swap the cache's capacity and TTL at runtime. Called when the
+    /// client updates `cacheTtlSeconds` / `cacheMaxEntries`. Keeps existing
+    /// entries; a subsequent `insert` will enforce the new capacity.
+    pub fn resize(&self, max_entries: usize, ttl: Duration) {
+        *self.max_entries.lock() = max_entries;
+        *self.ttl.lock() = ttl;
+
+        // If the new capacity is smaller than the current fill, evict
+        // oldest entries immediately so memory pressure is bounded.
+        let mut cache = self.cache.write();
+        while cache.len() > max_entries {
+            if let Some(oldest_key) = cache
+                .iter()
+                .min_by_key(|(_, v)| v.timestamp)
+                .map(|(k, _)| k.clone())
+            {
+                cache.remove(&oldest_key);
+            } else {
+                break;
+            }
         }
     }
 
     /// Get cached result if available and not expired
     fn get(&self, query: &str) -> Maybe<ValidationResult> {
+        let ttl = *self.ttl.lock();
         let cache = self.cache.read();
         if let Some(cached) = cache.get(query)
-            && cached.timestamp.elapsed() < self.ttl
+            && cached.timestamp.elapsed() < ttl
         {
             return Maybe::Some(cached.result.clone());
         }
@@ -245,10 +269,11 @@ impl ValidationCache {
 
     /// Insert result into cache
     fn insert(&self, query: String, result: ValidationResult) {
+        let max_entries = *self.max_entries.lock();
         let mut cache = self.cache.write();
 
         // Evict oldest entries if at capacity
-        if cache.len() >= self.max_entries {
+        if cache.len() >= max_entries {
             // Find oldest entry
             if let Some(oldest_key) = cache
                 .iter()
@@ -275,17 +300,19 @@ impl ValidationCache {
 
     /// Get cache statistics
     pub fn stats(&self) -> CacheStats {
+        let ttl = *self.ttl.lock();
+        let capacity = *self.max_entries.lock();
         let cache = self.cache.read();
         let now = Instant::now();
         let expired = cache
             .values()
-            .filter(|v| now.duration_since(v.timestamp) >= self.ttl)
+            .filter(|v| now.duration_since(v.timestamp) >= ttl)
             .count();
 
         CacheStats {
             total_entries: cache.len(),
             expired_entries: expired,
-            capacity: self.max_entries,
+            capacity,
         }
     }
 }
@@ -302,6 +329,33 @@ pub struct CacheStats {
 /// Main refinement validator
 pub struct RefinementValidator {
     cache: ValidationCache,
+    /// Mirror of the relevant LSP config fields. Driven by the server on
+    /// `initialize` so the validator can honour `validationMode`, the SMT
+    /// solver choice, counterexample caps and "enabled" kill-switch.
+    config: parking_lot::RwLock<ValidatorConfig>,
+}
+
+#[derive(Debug, Clone)]
+struct ValidatorConfig {
+    enabled: bool,
+    default_mode: ValidationMode,
+    smt_timeout: Duration,
+    show_counterexamples: bool,
+    max_counterexample_traces: u32,
+    cache_enabled: bool,
+}
+
+impl Default for ValidatorConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            default_mode: ValidationMode::Quick,
+            smt_timeout: Duration::from_millis(50),
+            show_counterexamples: true,
+            max_counterexample_traces: 5,
+            cache_enabled: true,
+        }
+    }
 }
 
 impl RefinementValidator {
@@ -309,7 +363,36 @@ impl RefinementValidator {
     pub fn new() -> Self {
         Self {
             cache: ValidationCache::new(1000, Duration::from_secs(300)),
+            config: parking_lot::RwLock::new(ValidatorConfig::default()),
         }
+    }
+
+    /// Apply an externally-owned LSP configuration. Called from the server's
+    /// `initialize` handler; safe to call on `&self` so the `LanguageServer`
+    /// trait signature doesn't need to change.
+    pub fn apply_config(&self, cfg: &crate::lsp_config::LspConfig) {
+        let mut guard = self.config.write();
+        guard.enabled = cfg.enable_refinement_validation;
+        guard.default_mode = match cfg.validation_mode {
+            crate::lsp_config::ValidationMode::Quick => ValidationMode::Quick,
+            crate::lsp_config::ValidationMode::Thorough => ValidationMode::Thorough,
+            crate::lsp_config::ValidationMode::Complete => ValidationMode::Thorough,
+        };
+        guard.smt_timeout = cfg.smt_timeout;
+        guard.show_counterexamples = cfg.show_counterexamples;
+        guard.max_counterexample_traces = cfg.max_counterexample_traces;
+        guard.cache_enabled = cfg.cache_validation_results;
+
+        // Resize the cache to match the new capacity/TTL. We do this by
+        // rebuilding; the few cached entries that get dropped here are not
+        // load-bearing (they're revalidated on the next request anyway).
+        self.cache.resize(cfg.cache_max_entries, cfg.cache_ttl);
+    }
+
+    /// Whether this validator is currently enabled. Hot-path callers should
+    /// short-circuit when this returns `false`.
+    pub fn is_enabled(&self) -> bool {
+        self.config.read().enabled
     }
 
     /// Validate refinement at cursor position

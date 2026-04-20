@@ -248,7 +248,9 @@ impl LanguageServer for IncrementalBackend {
         let document = self.document_cache.get_document_state(&uri);
 
         if let Some(doc) = document {
-            return Ok(hover::hover_at_position(&doc, position));
+            // Incremental backend does not own a CbgrHintProvider; hover still
+            // works, only the reference-sigil path is disabled here.
+            return Ok(hover::hover_at_position(&doc, None, position));
         }
 
         Ok(None)

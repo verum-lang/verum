@@ -131,6 +131,7 @@ fn test_hover_builtin_type() {
 
     let hover_info = hover::hover_at_position(
         &state,
+        None,
         Position {
             line: 0,
             character: 8,
@@ -155,6 +156,7 @@ fn test_hover_keyword() {
 
     let hover_info = hover::hover_at_position(
         &state,
+        None,
         Position {
             line: 0,
             character: 1,

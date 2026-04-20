@@ -6,6 +6,8 @@ use tower_lsp::jsonrpc::Result;
 use tower_lsp::lsp_types::*;
 use tower_lsp::{Client, LanguageServer};
 
+use std::sync::Arc;
+
 use crate::cbgr_hints::CbgrHintProvider;
 use crate::code_actions;
 use crate::completion;
@@ -13,6 +15,7 @@ use crate::diagnostics;
 use crate::document::{DocumentStore, SymbolKind as VerumSymbolKind};
 use crate::formatting;
 use crate::hover;
+use crate::lsp_config::SharedLspConfig;
 use crate::references;
 use crate::refinement_validation::{
     InferRefinementParams, PromoteToCheckedParams, RefinementValidator, ValidateRefinementParams,
@@ -38,11 +41,16 @@ pub struct Backend {
     workspace_index: WorkspaceIndex,
     /// Cache for semantic token deltas
     semantic_token_cache: dashmap::DashMap<Url, (String, SemanticTokens)>,
+    /// Shared, thread-safe view of the client's `initializationOptions`.
+    /// Populated in `initialize` and read from every component that needs
+    /// a configurable knob (refinement cache size, SMT timeout, etc.).
+    config: Arc<SharedLspConfig>,
 }
 
 impl Backend {
     /// Create a new backend
     pub fn new(client: Client) -> Self {
+        let config = Arc::new(SharedLspConfig::new());
         Self {
             client,
             documents: DocumentStore::new(),
@@ -51,7 +59,13 @@ impl Backend {
             semantic_provider: SemanticTokenProvider::new(),
             workspace_index: WorkspaceIndex::new(),
             semantic_token_cache: dashmap::DashMap::new(),
+            config,
         }
+    }
+
+    /// Shared config accessor — used by test harnesses and outside callers.
+    pub fn config(&self) -> &Arc<SharedLspConfig> {
+        &self.config
     }
 
     /// Index a document in the workspace index
@@ -142,7 +156,27 @@ impl LanguageServer for Backend {
             self.workspace_index.initialize(&root_path);
         }
 
-        tracing::info!("Initializing Verum LSP server");
+        // Merge every `initializationOptions` key the client sends into the
+        // shared config. Individual components then read the relevant knob
+        // lazily — see `refinement_validator.rs` and `cbgr_hints.rs`.
+        if let Some(opts) = params.initialization_options.as_ref() {
+            self.config.apply_json(opts);
+        }
+        let cfg = self.config.snapshot();
+
+        // Apply immediately-propagated knobs to stateful components.
+        self.cbgr_hints.set_enabled(cfg.cbgr_show_optimization_hints);
+        self.refinement_validator.apply_config(&cfg);
+
+        tracing::info!(
+            "Verum LSP init: refinement={}, mode={}, smt={}, cache={}@{}s, cbgr_hints={}",
+            cfg.enable_refinement_validation,
+            cfg.validation_mode.as_str(),
+            cfg.smt_solver.as_str(),
+            cfg.cache_max_entries,
+            cfg.cache_ttl.as_secs(),
+            cfg.cbgr_show_optimization_hints,
+        );
 
         Ok(InitializeResult {
             server_info: Some(ServerInfo {
@@ -273,15 +307,14 @@ impl LanguageServer for Backend {
                         work_done_progress_options: WorkDoneProgressOptions::default(),
                     },
                 )),
-                // Execute command support
-                execute_command_provider: Some(ExecuteCommandOptions {
-                    commands: vec![
-                        "verum.runFile".to_string(),
-                        "verum.runTest".to_string(),
-                        "verum.verifyFunction".to_string(),
-                    ],
-                    work_done_progress_options: WorkDoneProgressOptions::default(),
-                }),
+                // NOTE: no execute_command_provider.
+                // `verum.runFile` / `verum.runTest` / `verum.verifyFunction` are
+                // code-lens command ids handled entirely by the VS Code client
+                // (see vscode-extension/src/extension.ts). Declaring them here
+                // would make vscode-languageclient's ExecuteCommandFeature try
+                // to register the same command ids a second time at init time,
+                // which throws "command 'verum.runFile' already exists" and
+                // crashes the LSP client into a restart loop.
                 ..ServerCapabilities::default()
             },
         })
@@ -401,9 +434,12 @@ impl LanguageServer for Backend {
 
         tracing::debug!("Hover requested at {}:{}", uri, position.line);
 
+        let cbgr = &self.cbgr_hints;
         Ok(self
             .documents
-            .with_document(&uri, |doc| hover::hover_at_position(doc, position))
+            .with_document(&uri, |doc| {
+                hover::hover_at_position(doc, Some(cbgr), position)
+            })
             .flatten())
     }
 
@@ -1505,12 +1541,8 @@ impl LanguageServer for Backend {
         }
     }
 
-    async fn execute_command(&self, params: ExecuteCommandParams) -> Result<Option<serde_json::Value>> {
-        tracing::debug!("Execute command: {}", params.command);
-        // These commands are triggered by code lens clicks.
-        // The actual actions are handled client-side -- we just acknowledge them.
-        Ok(Some(serde_json::json!({"command": params.command, "status": "dispatched"})))
-    }
+    // No `execute_command` handler: code-lens commands are dispatched entirely
+    // by the client. See the note on `execute_command_provider` above.
 
     // ==================== Type Hierarchy ====================
 
@@ -1960,6 +1992,64 @@ impl Backend {
                 Err(tower_lsp::jsonrpc::Error::internal_error())
             }
         }
+    }
+
+    /// Handle `verum/getEscapeAnalysis` — detailed CBGR escape-analysis report
+    /// for the reference sigil at a given position.
+    ///
+    /// Request shape: `{ textDocument: { uri }, position: { line, character } }`.
+    /// Response: `{ markdown, range, sigil, tier, escape, promotable }` or
+    /// `{ markdown: "(no reference at this position)" }` if the cursor is
+    /// not on a reference sigil.
+    pub async fn handle_get_escape_analysis(
+        &self,
+        params: serde_json::Value,
+    ) -> Result<serde_json::Value> {
+        let uri_str = params
+            .get("textDocument")
+            .and_then(|td| td.get("uri"))
+            .and_then(|u| u.as_str())
+            .ok_or_else(|| tower_lsp::jsonrpc::Error::invalid_params("missing textDocument.uri"))?;
+        let line = params
+            .get("position")
+            .and_then(|p| p.get("line"))
+            .and_then(|v| v.as_u64())
+            .ok_or_else(|| tower_lsp::jsonrpc::Error::invalid_params("missing position.line"))?;
+        let character = params
+            .get("position")
+            .and_then(|p| p.get("character"))
+            .and_then(|v| v.as_u64())
+            .ok_or_else(|| {
+                tower_lsp::jsonrpc::Error::invalid_params("missing position.character")
+            })?;
+
+        let uri = Url::parse(uri_str)
+            .map_err(|e| tower_lsp::jsonrpc::Error::invalid_params(e.to_string()))?;
+        let pos = Position::new(line as u32, character as u32);
+
+        let analysis = self
+            .documents
+            .with_document(&uri, |doc| self.cbgr_hints.analyze_at_position(doc, pos))
+            .flatten();
+
+        let body = match analysis {
+            Some(a) => serde_json::json!({
+                "markdown": self.cbgr_hints.format_hover_markdown(&a),
+                "range": {
+                    "start": { "line": a.range.start.line, "character": a.range.start.character },
+                    "end":   { "line": a.range.end.line,   "character": a.range.end.character },
+                },
+                "sigil": a.sigil,
+                "tier": a.tier_label(),
+                "derefCostNs": a.deref_cost_ns(),
+                "promotable": a.is_promotable(),
+            }),
+            None => serde_json::json!({
+                "markdown": "_No CBGR reference under cursor._\n\nPlace the cursor on a `&`, `&mut`, `&checked`, or `&unsafe` sigil and try again.",
+            }),
+        };
+
+        Ok(body)
     }
 
     /// Handle verum/getProfile custom request for profiling data

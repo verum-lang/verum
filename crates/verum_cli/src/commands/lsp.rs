@@ -13,6 +13,17 @@ use tower_lsp::{LspService, Server};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 use verum_lsp::Backend;
 
+/// Build an `LspService` for the Verum language server.
+///
+/// Shared by every transport so the server is constructed identically over
+/// stdio / TCP / named-pipe. Custom `verum/*` methods are currently exercised
+/// via the VS Code client using built-in LSP primitives (hover, code-actions)
+/// — see `internal/vscode-extension/src/extension.ts` — rather than direct
+/// JSON-RPC requests, which keeps the server fully standards-compatible.
+fn build_verum_service() -> (LspService<Backend>, tower_lsp::ClientSocket) {
+    LspService::new(Backend::new)
+}
+
 /// LSP transport mode
 #[derive(Debug, Clone, Copy)]
 pub enum Transport {
@@ -87,7 +98,7 @@ fn init_logging() {
 async fn run_lsp_server() {
     tracing::info!("Starting Verum Language Server via CLI");
 
-    let (service, socket) = LspService::new(Backend::new);
+    let (service, socket) = build_verum_service();
 
     Server::new(tokio::io::stdin(), tokio::io::stdout(), socket)
         .serve(service)
@@ -166,7 +177,7 @@ where
 {
     let (read, write) = tokio::io::split(stream);
 
-    let (service, socket) = LspService::new(Backend::new);
+    let (service, socket) = build_verum_service();
 
     Server::new(read, write, socket).serve(service).await;
 
@@ -269,7 +280,7 @@ async fn run_lsp_server_pipe() {
 async fn handle_lsp_pipe_connection(stream: tokio::net::UnixStream) -> std::io::Result<()> {
     let (read, write) = tokio::io::split(stream);
 
-    let (service, socket) = LspService::new(Backend::new);
+    let (service, socket) = build_verum_service();
 
     Server::new(read, write, socket).serve(service).await;
 
@@ -351,7 +362,7 @@ async fn handle_lsp_pipe_connection_windows(
 ) -> std::io::Result<()> {
     let (read, write) = tokio::io::split(stream);
 
-    let (service, socket) = LspService::new(|client| Backend::new(client));
+    let (service, socket) = build_verum_service();
 
     Server::new(read, write, socket).serve(service).await;
 

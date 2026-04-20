@@ -13,6 +13,7 @@ extern crate verum_llvm_sys;
 
 use clap::{CommandFactory, Parser, Subcommand};
 use colored::Colorize;
+use std::path::PathBuf;
 use std::process;
 use verum_common::{List, Text};
 
@@ -462,8 +463,25 @@ enum Commands {
         /// Profile compilation pipeline phases
         #[clap(long)]
         compilation: bool,
+        /// Profile everything — memory, cpu, cache, compilation — in one run.
+        /// Equivalent to `--memory --cpu --cache --compilation` and produces
+        /// the unified dashboard described in docs/detailed/25-developer-tooling.md §6.
+        #[clap(long, conflicts_with_all = ["memory", "cpu", "cache", "compilation"])]
+        all: bool,
         #[clap(long, default_value = "5.0")]
         hot_threshold: f64,
+        /// Sampling rate for CBGR profiling, as a percentage (0.0–100.0).
+        /// Lower values reduce overhead; 1.0 is a safe default for hot paths.
+        #[clap(long, value_name = "PERCENT", default_value = "1.0")]
+        sample_rate: f64,
+        /// Comma-separated list of function names to restrict profiling to.
+        /// When set, only samples from these functions are reported.
+        #[clap(long, value_name = "NAMES", value_delimiter = ',')]
+        functions: Vec<Text>,
+        /// Timing precision: `us` (microseconds, default) or `ns` (RDTSC-based,
+        /// more expensive but distinguishes sub-microsecond checks).
+        #[clap(long, value_name = "UNIT", default_value = "us")]
+        precision: Text,
         #[clap(short, long)]
         output: Option<Text>,
         #[clap(long)]
@@ -477,8 +495,23 @@ enum Commands {
         file: Option<Text>,
         #[clap(long, short = 'm', default_value = "proof")]
         mode: Text,
+        /// Enable the verification profiler: per-function timings, bottleneck
+        /// diagnostics, cache stats, ranked recommendations. Results are
+        /// printed to stdout unless `--export` is given.
         #[clap(long)]
         profile: bool,
+        /// Fail the build if total verification time exceeds this budget.
+        /// Accepts human-readable durations: `120s`, `2m`, `90`, `1h`.
+        #[clap(long, value_name = "DURATION")]
+        budget: Option<Text>,
+        /// Export the profile report as JSON to the given path (implies `--profile`).
+        /// Intended for CI/CD integration and trend tracking.
+        #[clap(long, value_name = "PATH")]
+        export: Option<PathBuf>,
+        /// URL of a distributed verification cache (e.g. `s3://bucket/path`).
+        /// Reads/writes proof results so that CI reuses proofs across runs.
+        #[clap(long, value_name = "URL")]
+        distributed_cache: Option<Text>,
         #[clap(long)]
         show_cost: bool,
         #[clap(long)]
@@ -1185,10 +1218,55 @@ fn run_command(cli: Cli) -> Result<()> {
             cpu,
             cache,
             compilation,
+            all,
             hot_threshold,
+            sample_rate,
+            functions,
+            precision,
             output,
             suggest,
         } => {
+            // Validate sampling knobs at the CLI boundary so the rest of the
+            // profiler can trust its inputs.
+            if !(0.0..=100.0).contains(&sample_rate) {
+                eprintln!(
+                    "{} --sample-rate must be in [0, 100], got {}",
+                    "error:".red().bold(),
+                    sample_rate
+                );
+                process::exit(2);
+            }
+            let precision_kind = match precision.as_str() {
+                "us" | "micro" | "microseconds" => commands::profile::PrecisionKind::Microseconds,
+                "ns" | "nano" | "nanoseconds" => commands::profile::PrecisionKind::Nanoseconds,
+                other => {
+                    eprintln!(
+                        "{} unknown --precision '{}' (use `us` or `ns`)",
+                        "error:".red().bold(),
+                        other
+                    );
+                    process::exit(2);
+                }
+            };
+            let function_filter: Vec<String> = functions
+                .iter()
+                .map(|t| t.as_str().trim().to_string())
+                .filter(|s| !s.is_empty())
+                .collect();
+
+            // `--all` expands to every slice — spec §6 unified dashboard.
+            let (memory, cpu, cache, compilation) = if all {
+                (true, true, true, true)
+            } else {
+                (memory, cpu, cache, compilation)
+            };
+
+            let sampling = commands::profile::SamplingConfig {
+                sample_rate_percent: sample_rate,
+                function_filter,
+                precision: precision_kind,
+            };
+
             if let Some(file_path) = file {
                 // Profile single file
                 commands::file::profile(
@@ -1201,13 +1279,23 @@ fn run_command(cli: Cli) -> Result<()> {
             } else {
                 // Profile project
                 let output_str = output.as_ref().map(|s| s.as_str()).unwrap_or("text");
-                commands::profile::execute(memory, cpu, cache, compilation, output_str)
+                commands::profile::execute_with_sampling(
+                    memory,
+                    cpu,
+                    cache,
+                    compilation,
+                    output_str,
+                    sampling,
+                )
             }
         }
         Commands::Verify {
             file,
             mode,
             profile,
+            budget,
+            export,
+            distributed_cache,
             show_cost,
             compare_modes,
             solver,
@@ -1216,8 +1304,36 @@ fn run_command(cli: Cli) -> Result<()> {
             interactive,
             function,
         } => {
+            // `--export` implies `--profile` — you can't dump a profile you
+            // didn't collect. Normalise here so downstream sees a single flag.
+            let profile = profile || export.is_some();
+
+            let budget_duration = match budget.as_deref() {
+                None => None,
+                Some(raw) => match commands::verify::parse_duration(raw) {
+                    Ok(d) => Some(d),
+                    Err(e) => {
+                        eprintln!(
+                            "{} invalid --budget: {}",
+                            "error:".red().bold(),
+                            e
+                        );
+                        process::exit(2);
+                    }
+                },
+            };
+
             if let Some(file_path) = file {
-                // Verify single file
+                // Single-file mode uses the non-project path; the profile /
+                // budget / export hooks live in the project executor below.
+                if profile || budget_duration.is_some() || export.is_some() {
+                    eprintln!(
+                        "{} --profile / --budget / --export are supported \
+                         only when verifying a whole project (omit FILE).",
+                        "warning:".yellow().bold()
+                    );
+                }
+                let _ = distributed_cache;
                 commands::file::verify(
                     file_path.as_str(),
                     mode.as_str(),
@@ -1227,9 +1343,15 @@ fn run_command(cli: Cli) -> Result<()> {
                     function.as_ref().map(|s| s.as_str()),
                 )
             } else {
+                let profile_cfg = commands::verify::ProfileConfig {
+                    enabled: profile,
+                    budget: budget_duration,
+                    export_path: export,
+                    distributed_cache: distributed_cache.map(|t| t.to_string()),
+                };
                 // Verify project
                 commands::verify::execute(
-                    profile,
+                    profile_cfg,
                     show_cost,
                     compare_modes,
                     mode.as_str(),

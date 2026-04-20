@@ -43,6 +43,66 @@ pub enum OutputFormat {
     Flamegraph,
 }
 
+/// Timing precision requested on the CLI (`--precision us|ns`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PrecisionKind {
+    /// Microsecond granularity. Cheap, adequate for compilation-phase timings.
+    Microseconds,
+    /// Nanosecond granularity (RDTSC-based). Higher overhead but resolves
+    /// sub-microsecond CBGR checks; enables distribution-style CBGR reports.
+    Nanoseconds,
+}
+
+impl PrecisionKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            PrecisionKind::Microseconds => "us",
+            PrecisionKind::Nanoseconds => "ns",
+        }
+    }
+}
+
+/// Sampling / filter knobs for CBGR profiling, driven by
+/// `--sample-rate`, `--functions` and `--precision` on the CLI.
+#[derive(Debug, Clone)]
+pub struct SamplingConfig {
+    /// Sampling rate as a percentage in `[0, 100]`. `0.0` disables sampling
+    /// (zero runtime overhead); `100.0` records every CBGR check.
+    pub sample_rate_percent: f64,
+    /// When non-empty, profiling results are restricted to these function
+    /// names. Matches by exact identifier.
+    pub function_filter: Vec<String>,
+    /// Timer resolution requested by the user.
+    pub precision: PrecisionKind,
+}
+
+impl SamplingConfig {
+    pub fn sample_rate(&self) -> f64 {
+        (self.sample_rate_percent / 100.0).clamp(0.0, 1.0)
+    }
+
+    pub fn is_default(&self) -> bool {
+        (self.sample_rate_percent - 1.0).abs() < f64::EPSILON
+            && self.function_filter.is_empty()
+            && matches!(self.precision, PrecisionKind::Microseconds)
+    }
+
+    /// True when `name` should be included in the report given the filter.
+    pub fn accepts(&self, name: &str) -> bool {
+        self.function_filter.is_empty() || self.function_filter.iter().any(|f| f == name)
+    }
+}
+
+impl Default for SamplingConfig {
+    fn default() -> Self {
+        Self {
+            sample_rate_percent: 1.0,
+            function_filter: Vec::new(),
+            precision: PrecisionKind::Microseconds,
+        }
+    }
+}
+
 /// Collected profiling data from a real compilation run
 struct ProfileData {
     /// Finalized compilation metrics (real phase timings)
@@ -350,11 +410,59 @@ pub fn execute_with_input(
     output: &str,
     input: Option<&str>,
 ) -> Result<()> {
+    execute_with_input_and_sampling(
+        memory,
+        cpu,
+        cache,
+        compilation,
+        output,
+        input,
+        SamplingConfig::default(),
+    )
+}
+
+/// Project-level profile entry point that accepts a sampling config.
+pub fn execute_with_sampling(
+    memory: bool,
+    cpu: bool,
+    cache: bool,
+    compilation: bool,
+    output: &str,
+    sampling: SamplingConfig,
+) -> Result<()> {
+    execute_with_input_and_sampling(memory, cpu, cache, compilation, output, None, sampling)
+}
+
+/// Internal entry point shared by the file-level and project-level commands.
+pub fn execute_with_input_and_sampling(
+    memory: bool,
+    cpu: bool,
+    cache: bool,
+    compilation: bool,
+    output: &str,
+    input: Option<&str>,
+    sampling: SamplingConfig,
+) -> Result<()> {
     let format = match output {
         "json" => OutputFormat::Json,
         "flamegraph" => OutputFormat::Flamegraph,
         _ => OutputFormat::Text,
     };
+
+    // Surface sampling knobs for operator feedback when non-default.
+    if !sampling.is_default() {
+        let filter = if sampling.function_filter.is_empty() {
+            "<all>".to_string()
+        } else {
+            sampling.function_filter.join(", ")
+        };
+        ui::info(&format!(
+            "CBGR profiler: sample {:.2}%, precision {}, filter {}",
+            sampling.sample_rate_percent,
+            sampling.precision.as_str(),
+            filter,
+        ));
+    }
 
     let targets = match (memory, cpu, cache, compilation) {
         (false, false, false, false) => vec![ProfileTarget::All],
@@ -386,7 +494,7 @@ pub fn execute_with_input(
     });
 
     for (i, target) in targets.iter().enumerate() {
-        run_profile(*target, format, profile_data.as_ref())?;
+        run_profile(*target, format, profile_data.as_ref(), &sampling)?;
         if i < targets.len() - 1 {
             println!();
         }
@@ -400,14 +508,18 @@ fn run_profile(
     target: ProfileTarget,
     format: OutputFormat,
     data: Option<&ProfileData>,
+    sampling: &SamplingConfig,
 ) -> Result<()> {
     match target {
-        ProfileTarget::Memory => profile_memory(format, data)?,
+        ProfileTarget::Memory => profile_memory(format, data, sampling)?,
         ProfileTarget::Cpu => profile_cpu(format, data)?,
         ProfileTarget::Cache => profile_cache(format, data)?,
         ProfileTarget::Compilation => profile_compilation(format, data)?,
         ProfileTarget::All => {
-            profile_memory(format, data)?;
+            // Unified dashboard (spec §6): all four slices, one header block.
+            ui::section("Verum Performance Analysis");
+            println!();
+            profile_memory(format, data, sampling)?;
             println!();
             profile_cpu(format, data)?;
             println!();
@@ -441,10 +553,53 @@ fn print_summary_header() {
 // CBGR Memory Profile (--memory)
 // ============================================================================
 
-fn profile_memory(format: OutputFormat, data: Option<&ProfileData>) -> Result<()> {
+fn profile_memory(
+    format: OutputFormat,
+    data: Option<&ProfileData>,
+    sampling: &SamplingConfig,
+) -> Result<()> {
     match data {
-        Some(profile_data) => profile_memory_real(format, profile_data),
+        Some(profile_data) => {
+            // Apply the --functions filter upstream so every downstream
+            // section (hot-spots, reference-breakdown, recommendations)
+            // operates on the same restricted population.
+            if sampling.function_filter.is_empty() {
+                profile_memory_real(format, profile_data)
+            } else {
+                let filtered = filter_profile_data(profile_data, sampling);
+                profile_memory_real(format, &filtered)
+            }
+        }
         None => profile_memory_no_input(format),
+    }
+}
+
+/// Return a copy of `data` with `function_ref_counts` narrowed to the
+/// names allowed by `sampling.function_filter`.
+///
+/// We currently only filter the per-function ref-count view — tier
+/// statistics are global and cheap, so recomputing them is overkill
+/// for the small set of functions a user usually targets.
+fn filter_profile_data(data: &ProfileData, sampling: &SamplingConfig) -> ProfileData {
+    let kept: Vec<FunctionRefCount> = data
+        .function_ref_counts
+        .iter()
+        .filter(|f| sampling.accepts(&f.name))
+        .map(|f| FunctionRefCount {
+            name: f.name.clone(),
+            cbgr_refs: f.cbgr_refs,
+            checked_refs: f.checked_refs,
+            unsafe_refs: f.unsafe_refs,
+            expression_count: f.expression_count,
+            max_loop_depth: f.max_loop_depth,
+        })
+        .collect();
+
+    ProfileData {
+        compilation_report: data.compilation_report.clone(),
+        tier_stats: data.tier_stats.clone(),
+        tier_analyses: data.tier_analyses.clone(),
+        function_ref_counts: kept,
     }
 }
 

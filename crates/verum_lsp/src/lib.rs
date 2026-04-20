@@ -66,6 +66,7 @@ pub mod formatting;
 pub mod goto_definition;
 pub mod hover;
 pub mod incremental;
+pub mod lsp_config;
 pub mod position_utils;
 pub mod quick_fixes; // Comprehensive refinement violation quick fixes
 pub mod references;

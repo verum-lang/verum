@@ -139,7 +139,7 @@ fn test_hover_on_function_name() {
         character: 3,
     };
 
-    let result = hover_at_position(&doc, position);
+    let result = hover_at_position(&doc, None, position);
     // Should return hover with function signature
 }
 
@@ -157,7 +157,7 @@ fn test_hover_on_parameter() {
         character: 11,
     };
 
-    let result = hover_at_position(&doc, position);
+    let result = hover_at_position(&doc, None, position);
     // Should return hover with parameter info
 }
 
@@ -175,7 +175,7 @@ fn test_hover_on_type_annotation() {
         character: 14,
     };
 
-    let result = hover_at_position(&doc, position);
+    let result = hover_at_position(&doc, None, position);
     // Should return hover with Int type info
 }
 
@@ -193,7 +193,7 @@ fn test_hover_on_keyword() {
         character: 0,
     };
 
-    let result = hover_at_position(&doc, position);
+    let result = hover_at_position(&doc, None, position);
     // Should return hover with fn keyword info
     if let Some(hover) = result {
         match hover.contents {
@@ -229,7 +229,7 @@ fn test_hover_on_local_variable() {
         character: 4,
     };
 
-    let result = hover_at_position(&doc, position);
+    let result = hover_at_position(&doc, None, position);
     // Should return hover with variable info
 }
 
@@ -252,7 +252,7 @@ fn origin() -> Point {
         character: 5,
     };
 
-    let result = hover_at_position(&doc, position);
+    let result = hover_at_position(&doc, None, position);
     // Should return hover with type definition
 }
 
@@ -270,7 +270,7 @@ fn test_hover_on_protocol_name() {
         character: 9,
     };
 
-    let result = hover_at_position(&doc, position);
+    let result = hover_at_position(&doc, None, position);
     // Should return hover with protocol info
 }
 
@@ -286,7 +286,7 @@ fn test_hover_empty_document() {
         character: 0,
     };
 
-    let result = hover_at_position(&doc, position);
+    let result = hover_at_position(&doc, None, position);
     assert!(result.is_none());
 }
 
@@ -300,7 +300,7 @@ fn test_hover_out_of_bounds() {
         character: 0,
     };
 
-    let result = hover_at_position(&doc, position);
+    let result = hover_at_position(&doc, None, position);
     assert!(result.is_none());
 }
 
@@ -315,7 +315,7 @@ fn test_hover_on_whitespace() {
         character: 12,
     };
 
-    let result = hover_at_position(&doc, position);
+    let result = hover_at_position(&doc, None, position);
     // Should return None for whitespace
 }
 
@@ -333,7 +333,7 @@ fn test_hover_on_operator() {
         character: 14,
     };
 
-    let result = hover_at_position(&doc, position);
+    let result = hover_at_position(&doc, None, position);
     // May or may not return hover for operators
 }
 
@@ -351,7 +351,7 @@ fn test_hover_on_numeric_literal() {
         character: 12,
     };
 
-    let result = hover_at_position(&doc, position);
+    let result = hover_at_position(&doc, None, position);
     // May or may not return hover for literals
 }
 
@@ -369,7 +369,7 @@ fn test_hover_on_string_literal() {
         character: 14,
     };
 
-    let result = hover_at_position(&doc, position);
+    let result = hover_at_position(&doc, None, position);
     // May or may not return hover for string content
 }
 
@@ -389,7 +389,7 @@ fn test_hover_shows_cbgr_cost() {
         character: 11,
     };
 
-    let result = hover_at_position(&doc, position);
+    let result = hover_at_position(&doc, None, position);
     // If CBGR cost is available, it should be included in hover
 }
 
@@ -410,7 +410,7 @@ fn square(x: Int) -> Int {
         character: 3,
     };
 
-    let result = hover_at_position(&doc, position);
+    let result = hover_at_position(&doc, None, position);
     // Should include doc comment in hover
 }
 
@@ -427,7 +427,7 @@ fn test_hover_returns_correct_range() {
         character: 5,
     };
 
-    let result = hover_at_position(&doc, position);
+    let result = hover_at_position(&doc, None, position);
 
     // If hover has a range, it should span the identifier
     if let Some(hover) = result

@@ -9,13 +9,36 @@
 //! - Attribute documentation (for @attribute syntax)
 
 use crate::ast_format::{format_function_signature, format_type_decl, get_builtin_info};
+use crate::cbgr_hints::CbgrHintProvider;
 use crate::document::{CbgrCostInfo, DocumentState, SymbolKind};
 use tower_lsp::lsp_types::*;
 use verum_ast::attr::{ArgSpec, ArgType, AttributeTarget};
 use verum_types::attr::registry;
 
-/// Generate hover information for a position in the document
-pub fn hover_at_position(document: &DocumentState, position: Position) -> Option<Hover> {
+/// Generate hover information for a position in the document.
+///
+/// When `cbgr` is provided and the cursor is on a `&` sigil, a detailed
+/// CBGR analysis (tier, escape, promotion availability) is returned instead
+/// of the usual symbol hover.
+pub fn hover_at_position(
+    document: &DocumentState,
+    cbgr: Option<&CbgrHintProvider>,
+    position: Position,
+) -> Option<Hover> {
+    // Reference sigil? This runs first so `&panes[i]` gives CBGR info even
+    // though `&` is not a word.
+    if let Some(cbgr) = cbgr {
+        if let Some(analysis) = cbgr.analyze_at_position(document, position) {
+            return Some(Hover {
+                contents: HoverContents::Markup(MarkupContent {
+                    kind: MarkupKind::Markdown,
+                    value: cbgr.format_hover_markdown(&analysis),
+                }),
+                range: Some(analysis.range),
+            });
+        }
+    }
+
     // First, check if we're hovering over an attribute (after '@')
     if let Some(attr_hover) = get_attribute_hover(document, position) {
         return Some(attr_hover);
