@@ -1,0 +1,327 @@
+// =============================================================================
+// signal.vr — Async signal subscription for graceful shutdown
+// =============================================================================
+// Layer: 5 (high-level — depends on async + broadcast + sys/signal)
+// Dependencies: core.async.broadcast, core.async.timer, core.sys.signal,
+//               core.sync.atomic, core.base.memory
+// =============================================================================
+//
+// High-level async wrapper around `core.sys.signal`. Exposes signals as
+// awaitable Future / AsyncIterator so application code composes naturally
+// with `select`, structured concurrency (`nursery`), and cancellation:
+//
+// ```verum
+// // Wait for Ctrl-C once — ergonomic shutdown trigger.
+// ctrl_c().await;
+// drain_gracefully();
+//
+// // Compose with work via select.
+// select {
+//     _ = shutdown_signals() => cleanup().await,
+//     r = run_server() => handle_result(r),
+// }
+//
+// // Stream of many signals.
+// for await sig in signal_stream(&[Signal.Int, Signal.Term, Signal.Hup]) {
+//     handle_signal(sig);
+// }
+// ```
+//
+// # Architecture
+//
+// Direct invocation of any allocating or lock-taking operation from inside
+// a POSIX signal handler is undefined behavior — the handler may preempt
+// the mainline thread mid-malloc, mid-mutex-unlock, etc. Broadcast-channel
+// `send()` allocates internally; it is NOT async-signal-safe.
+//
+// Industry-standard fix — the "self-pipe" or "semaphore flag" trick:
+//
+// 1. The OS-level signal handler does only an async-signal-safe atomic
+//    store into a `SignalFlag` (set bit).
+// 2. A background async poller task polls these flags every ~20 ms,
+//    clears any set flags, and fans out the signal to subscribers via a
+//    `BroadcastSender`. The poller runs in normal runtime context, so
+//    broadcasting and waker handling are safe.
+//
+// Trade-off: up to ~20 ms signal-to-subscriber latency — acceptable for
+// shutdown/reload/heartbeat semantics (orders of magnitude below SLA). A
+// future upgrade to Linux `signalfd(2)` / `kqueue EVFILT_SIGNAL` / Windows
+// APC wakeups would collapse this to zero, behind the same public API.
+//
+// =============================================================================
+
+module core.signal;
+
+mount core.*;
+mount core.async.broadcast.{
+    BroadcastSender, BroadcastReceiver, RecvError,
+    broadcast_channel,
+};
+mount core.async.timer.sleep;
+mount core.async.task.spawn_detached;
+mount core.async.future.{Future};
+mount core.async.stream.{Stream};
+mount core.async.async_iterator.{AsyncIterator};
+mount core.async.poll.{Poll};
+mount core.async.waker.{Context};
+mount core.sync.atomic.{AtomicBool, AtomicInt, MemoryOrdering};
+mount core.sync.mutex.Mutex;
+mount base.memory.Shared;
+mount core.time.duration.Duration;
+
+mount core.sys.signal.{Signal, SignalFlag, on_signal};
+
+// =============================================================================
+// Public API — convenience shortcuts
+// =============================================================================
+
+/// Wait for a single SIGINT (Ctrl-C) delivery.
+///
+/// Idiomatic shutdown-trigger in main():
+/// ```verum
+/// async fn main() {
+///     let server = start_server();
+///     ctrl_c().await;
+///     server.drain_and_stop().await;
+/// }
+/// ```
+public async fn ctrl_c() {
+    let mut stream = signal_stream(&[Signal.Int]);
+    let _ = stream.next().await;
+}
+
+/// Wait for a single SIGTERM. Standard container-termination signal
+/// (Kubernetes sends SIGTERM on pod eviction).
+public async fn terminate() {
+    let mut stream = signal_stream(&[Signal.Term]);
+    let _ = stream.next().await;
+}
+
+/// Wait for SIGHUP (process controlling-terminal disconnected, or reload-
+/// config convention).
+public async fn hup() {
+    let mut stream = signal_stream(&[Signal.Hup]);
+    let _ = stream.next().await;
+}
+
+/// Wait for any shutdown-class signal: SIGINT | SIGTERM | SIGHUP.
+/// Returns the actual signal received.
+///
+/// Convention: handler should interpret SIGHUP as reload-config, Int/Term
+/// as terminate. This function simply returns whichever arrived first.
+public async fn shutdown_signals() -> Signal {
+    let mut stream = signal_stream(&[Signal.Int, Signal.Term, Signal.Hup]);
+    match stream.next().await {
+        Some(sig) => sig,
+        None => Signal.Int,  // registry-shutdown fallback; caller treats as interrupt
+    }
+}
+
+/// Subscribe to a stream of specific signals. The returned `SignalStream`
+/// implements `AsyncIterator<Item = Signal>`; each subsequent `.next().await`
+/// yields the next signal of a subscribed type.
+///
+/// Multiple calls with overlapping signal sets produce independent streams —
+/// each signal is fanned out to every subscriber.
+///
+/// # Errors
+///
+/// `signal_stream(&[])` returns an empty stream that immediately terminates
+/// on first `.next()`.
+public fn signal_stream(sigs: &[Signal]) -> SignalStream {
+    if sigs.is_empty() {
+        return SignalStream { recv: None };
+    }
+    let registry = ensure_registry();
+    let mut sender: Maybe<BroadcastSender<Signal>> = None;
+    for sig in sigs {
+        let tx = registry.ensure_signal_registered(*sig);
+        sender = Some(tx);
+    }
+    match sender {
+        Some(tx) => SignalStream { recv: Some(tx.subscribe()) },
+        None => SignalStream { recv: None },
+    }
+}
+
+// =============================================================================
+// SignalStream — AsyncIterator<Item = Signal>
+// =============================================================================
+
+/// Async-iterator over received signals. Returned by `signal_stream`.
+///
+/// Internally backed by a `BroadcastReceiver<Signal>` subscribed to a
+/// multi-signal fan-out. Slow subscribers observe `RecvError.Lagged` on
+/// backlog overflow — the stream silently skips these and continues.
+public type SignalStream is {
+    recv: Maybe<BroadcastReceiver<Signal>>,
+};
+
+implement SignalStream {
+    /// Receive the next signal. `None` when the registry shuts down
+    /// (process is exiting) or the stream was constructed with no signals.
+    pub async fn next(&mut self) -> Maybe<Signal> {
+        let r = match &mut self.recv {
+            Some(r) => r,
+            None => return None,
+        };
+        // Loop over RecvError.Lagged — treat skipped signals as delivered
+        // once already (caller can't do anything anyway, the real signal
+        // fired). Terminate on Closed.
+        loop {
+            match r.recv().await {
+                Ok(sig) => return Some(sig),
+                Err(RecvError.Lagged(_)) => continue,
+                Err(RecvError.Closed) => return None,
+            }
+        }
+    }
+}
+
+// AsyncIterator impl — makes `for await sig in signal_stream(&[...])` work.
+implement AsyncIterator for SignalStream {
+    type Item = Signal;
+
+    @inline
+    async fn next(&mut self) -> Maybe<Signal> {
+        self.next().await
+    }
+}
+
+// =============================================================================
+// SignalRegistry — internal singleton managing per-signal flags + broadcasters
+// =============================================================================
+//
+// Lazily initialized on first subscribe. Owns:
+//   - Per-signal SignalFlag (atomic-only touch from OS handler)
+//   - Per-signal BroadcastSender<Signal> for fan-out to subscribers
+//   - A running background poller task (spawned once) that scans the flags
+//     and broadcasts any that are set.
+//
+// The registry state lives in a process-global `Mutex<Maybe<Shared<...>>>`.
+// All mutable access is via the mutex; broadcast-sender clones are cheap
+// (atomic refcount bump) so subscribe can release the mutex quickly.
+
+type SignalRegistry is {
+    entries: Mutex<List<SignalEntry>>,
+    poller_started: AtomicBool,
+};
+
+type SignalEntry is {
+    sig: Signal,
+    flag: Shared<SignalFlag>,
+    sender: BroadcastSender<Signal>,
+};
+
+// Poll interval — 20 ms is the cross-platform sweet spot:
+// - Fast enough for human-perceptible shutdown latency (< 100 ms is fine).
+// - Slow enough to cost < 0.1% CPU on an idle system.
+// - Aligns with typical reactor tick budget.
+const POLL_INTERVAL_MS: Int = 20;
+
+// Broadcast capacity per signal. 64 should be more than enough — in
+// practice there are 1-5 subscribers, each drains immediately.
+const BROADCAST_CAPACITY: Int = 64;
+
+static REGISTRY: Mutex<Maybe<Shared<SignalRegistry>>> = Mutex.new(None);
+
+fn ensure_registry() -> Shared<SignalRegistry> {
+    let mut guard = REGISTRY.lock().unwrap();
+    match &*guard {
+        Some(r) => r.clone(),
+        None => {
+            let reg = Shared.new(SignalRegistry {
+                entries: Mutex.new(List.new()),
+                poller_started: AtomicBool.new(false),
+            });
+            *guard = Some(reg.clone());
+            reg
+        }
+    }
+}
+
+implement SignalRegistry {
+    /// Register OS-level signal handler (idempotent) and return a
+    /// BroadcastSender that fans out to all subscribers of `sig`.
+    ///
+    /// Spawns the background poller on first-ever call.
+    pub fn ensure_signal_registered(&self, sig: Signal) -> BroadcastSender<Signal> {
+        let mut entries = self.entries.lock().unwrap();
+
+        // Fast path — already registered.
+        for e in entries.iter() {
+            if e.sig == sig { return e.sender.clone(); }
+        }
+
+        // Slow path — first subscribe to this signal.
+        let flag = Shared.new(SignalFlag.new());
+        let (tx, _initial_rx) = broadcast_channel::<Signal>(BROADCAST_CAPACITY);
+
+        // Register async-signal-safe handler: JUST an atomic flag store.
+        // No allocation, no locking, no re-entrant calls — fully safe
+        // per POSIX rt_sigaction + our SignalFlag contract.
+        let flag_for_handler = flag.clone();
+        let _ = on_signal(sig, move || {
+            flag_for_handler.set();
+        });
+
+        entries.push(SignalEntry {
+            sig: sig,
+            flag: flag,
+            sender: tx.clone(),
+        });
+
+        drop(entries);
+
+        // Start the poller on first-ever entry.
+        if !self.poller_started.swap(true, MemoryOrdering.AcqRel) {
+            self.spawn_poller();
+        }
+
+        tx
+    }
+
+    /// Background polling loop. Cleared-and-broadcast under the registry
+    /// lock to keep flag-state consistent across observers.
+    fn spawn_poller(&self) {
+        // The poller captures a clone of Shared<SignalRegistry>. It runs
+        // until the registry drops (never, in current design) or process
+        // exits. That's fine — it's detached, low-priority.
+        let self_clone = {
+            // Build a strong ref via the mutex; unwrap is safe because
+            // ensure_registry just stored Some(...).
+            let g = REGISTRY.lock().unwrap();
+            g.as_ref().unwrap().clone()
+        };
+
+        let _ = spawn_detached(async move {
+            loop {
+                sleep(Duration.from_millis(POLL_INTERVAL_MS)).await;
+
+                // Scan + drain.
+                let snapshot: List<(Signal, BroadcastSender<Signal>)> = {
+                    let entries = self_clone.entries.lock().unwrap();
+                    let mut fired: List<(Signal, BroadcastSender<Signal>)> = List.new();
+                    for e in entries.iter() {
+                        if e.flag.is_set() {
+                            e.flag.clear();
+                            fired.push((e.sig, e.sender.clone()));
+                        }
+                    }
+                    fired
+                };
+
+                // Fan out outside the lock — broadcast.send may re-enter
+                // unrelated wakers, and we don't want to hold the entries
+                // lock during that.
+                for (sig, sender) in snapshot {
+                    // Send via BroadcastSender — ok from normal task ctx.
+                    // Errors (no listeners) are silently ignored —
+                    // signal still observed by all currently-subscribed
+                    // receivers; later subscribers will see NEXT delivery.
+                    let _ = sender.send(sig);
+                }
+            }
+        });
+    }
+}

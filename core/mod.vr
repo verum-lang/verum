@@ -160,6 +160,15 @@ public module async;
 public module runtime;
 
 // =============================================================================
+// Layer 3.3: Async signal subscription (Depends on: async, broadcast, sys/signal)
+// =============================================================================
+
+// Async wrappers for OS signals — ctrl_c, terminate, shutdown_signals,
+// signal_stream. Backed by self-pipe-pattern over core.sys.signal flags.
+// Spec: internal/specs/net-framework.md §7.8 (graceful shutdown)
+public module signal;
+
+// =============================================================================
 // Layer 3.5: Terminal (Depends on: core, text, collections, io, sync, time)
 // =============================================================================
 

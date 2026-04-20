@@ -1,0 +1,72 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: signal, async, shutdown, graceful
+// @timeout: 10000
+// @expect: pass
+
+// Async signal subscription — ctrl_c / terminate / hup / shutdown_signals.
+
+mount core.signal.{
+    ctrl_c, terminate, hup, shutdown_signals, signal_stream, SignalStream,
+};
+mount core.sys.signal.{Signal};
+
+// Shape: shortcuts return await-ready futures.
+async fn wait_ctrl_c() {
+    ctrl_c().await;
+}
+
+async fn wait_terminate() {
+    terminate().await;
+}
+
+async fn wait_hup() {
+    hup().await;
+}
+
+// shutdown_signals returns the actual Signal received
+async fn wait_shutdown() -> Signal {
+    shutdown_signals().await
+}
+
+// signal_stream yields Signal values repeatedly via AsyncIterator
+async fn poll_multiple_signals() -> Int {
+    let mut stream = signal_stream(&[Signal.Int, Signal.Term]);
+    let mut count = 0;
+    // First signal
+    if let Some(_sig) = stream.next().await {
+        count = count + 1;
+    }
+    // Second signal
+    if let Some(_sig) = stream.next().await {
+        count = count + 1;
+    }
+    count
+}
+
+// Empty signal list — stream immediately returns None.
+async fn empty_stream_terminates() -> Bool {
+    let mut stream = signal_stream(&[]);
+    stream.next().await.is_none()
+}
+
+// Use with select for graceful shutdown.
+async fn server_loop_with_shutdown() {
+    select {
+        _ = ctrl_c().await => {
+            // cleanup + shutdown
+        },
+        _ = run_work().await => {
+            // work completed normally
+        },
+    }
+}
+
+async fn run_work() {
+    // Placeholder for actual server-work future.
+}
+
+fn main() {
+    // Shape-only tests.
+}
