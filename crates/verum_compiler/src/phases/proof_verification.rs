@@ -1560,9 +1560,7 @@ fn build_suggestions_from_proof_error(err: &ProofError) -> List<Text> {
 // ============================================================================
 
 use verum_ast::decl::{ImplDecl, TypeDecl};
-use verum_types::proof_obligations::{
-    collect_impl_obligations, find_proof_clause_for, ProofObligation,
-};
+use verum_types::proof_obligations::{collect_impl_obligations, find_proof_clause_for};
 
 /// Result of attempting to verify all obligations of an `implement` block.
 #[derive(Debug, Clone)]
