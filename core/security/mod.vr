@@ -1,0 +1,63 @@
+// =============================================================================
+// security/mod.vr — Security primitives module
+// =============================================================================
+// Layer: 1 (crypto primitives + capability labels)
+// =============================================================================
+//
+// Organization:
+//
+// - `hash/`        — hash functions (SHA-256, SHA-512 (planned), SHA-3 (planned))
+// - `mac/`         — message authentication codes (HMAC-SHA-256, HMAC-SHA-512)
+// - `kdf/`         — key derivation functions (HKDF-SHA-256, PBKDF2 (planned))
+// - `util/`        — timing-safe primitives (constant_time_eq), etc.
+// - `labels.vr`    — capability labels (information-flow)
+// - `regions.vr`   — region-based memory safety
+//
+// Backends:
+//
+// Current implementations are pure-Verum reference code. Industrial
+// deployments should enable a hardware-accelerated / formally-verified
+// backend at link-time via one of:
+//
+//   `@cfg(feature = "crypto-hacl-star")`   — Project Everest HACL*
+//                                             (formally verified)
+//   `@cfg(feature = "crypto-openssl")`      — OpenSSL 3.x FFI
+//   `@cfg(feature = "crypto-ring")`         — ring 0.17+ FFI
+//
+// Reference implementations remain available for bootstrap, cross-check,
+// and golden-test vectors regardless of backend choice.
+//
+// =============================================================================
+
+module core.security;
+
+// Crypto primitive submodules.
+public module hash {
+    public module sha256;
+}
+
+public module mac {
+    public module hmac;
+}
+
+public module kdf {
+    public module hkdf;
+}
+
+public module util {
+    public module constant_time;
+}
+
+// Legacy capability / region modules (pre-crypto).
+public module labels;
+public module regions;
+
+// Re-exports of most-used surface.
+//
+// NOTE: module `hash.sha256` and a free function `sha256` would collide
+// at import site — `Sha256.digest(bytes)` is the idiomatic one-shot form.
+// The streaming `Sha256.new() / update / finalize` is the general form.
+public mount .hash.sha256.Sha256;
+public mount .mac.hmac.{HmacSha256, hmac_sha256};
+public mount .kdf.hkdf.{hkdf_extract_sha256, hkdf_expand_sha256, hkdf_sha256, HkdfError};
+public mount .util.constant_time.{constant_time_eq, constant_time_compare};

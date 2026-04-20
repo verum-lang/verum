@@ -1,0 +1,113 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: security, crypto, sha256, hmac, hkdf, constant-time
+// @timeout: 10000
+// @expect: pass
+
+// Crypto primitive API surface — SHA-256, HMAC-SHA-256, HKDF-SHA-256,
+// and constant-time comparison.
+
+mount core.security.{
+    Sha256,
+    HmacSha256, hmac_sha256,
+    hkdf_extract_sha256, hkdf_expand_sha256, hkdf_sha256, HkdfError,
+    constant_time_eq, constant_time_compare,
+};
+
+// =============================================================================
+// SHA-256 shape
+// =============================================================================
+
+fn typecheck_sha256_oneshot(data: &[Byte]) -> [Byte; 32] {
+    Sha256.digest(data)
+}
+
+fn typecheck_sha256_streaming(chunks: &[&[Byte]]) -> [Byte; 32] {
+    let mut h = Sha256.new();
+    for chunk in chunks {
+        h.update(chunk);
+    }
+    h.finalize()
+}
+
+// =============================================================================
+// HMAC-SHA-256 shape
+// =============================================================================
+
+fn typecheck_hmac_oneshot(key: &[Byte], data: &[Byte]) -> [Byte; 32] {
+    hmac_sha256(key, data)
+}
+
+fn typecheck_hmac_streaming(key: &[Byte], chunks: &[&[Byte]]) -> [Byte; 32] {
+    let mut h = HmacSha256.new(key);
+    for c in chunks {
+        h.update(c);
+    }
+    h.finalize()
+}
+
+// =============================================================================
+// HKDF-SHA-256 shape
+// =============================================================================
+
+fn typecheck_hkdf_extract(salt: &[Byte], ikm: &[Byte]) -> [Byte; 32] {
+    hkdf_extract_sha256(salt, ikm)
+}
+
+fn typecheck_hkdf_expand(prk: &[Byte], info: &[Byte])
+    -> Result<List<Byte>, HkdfError>
+{
+    let mut out: List<Byte> = List.with_capacity(42);
+    hkdf_expand_sha256(prk, info, 42, &mut out)?;
+    Ok(out)
+}
+
+fn typecheck_hkdf_full(salt: &[Byte], ikm: &[Byte], info: &[Byte])
+    -> Result<List<Byte>, HkdfError>
+{
+    let mut out: List<Byte> = List.with_capacity(64);
+    hkdf_sha256(salt, ikm, info, 64, &mut out)?;
+    Ok(out)
+}
+
+// =============================================================================
+// Constant-time equality
+// =============================================================================
+
+fn typecheck_constant_time_eq(a: &[Byte], b: &[Byte]) -> Bool {
+    constant_time_eq(a, b)
+}
+
+fn typecheck_constant_time_compare(a: &[Byte], b: &[Byte]) -> Int {
+    constant_time_compare(a, b)
+}
+
+// =============================================================================
+// Integration — SCRAM-SHA-256-style client proof computation
+// =============================================================================
+//
+// Demonstrates the primitives composing for the auth exchange Spindle
+// uses for Postgres SCRAM-SHA-256-PLUS (database.md §6.13).
+
+fn typecheck_scram_client_proof(password: &[Byte], salt: &[Byte], iterations: Int) {
+    // SaltedPassword = PBKDF2(password, salt, iterations)
+    // — PBKDF2 pending; for SCRAM-SHA-256 we use HMAC iterations manually
+    // in the absence of a dedicated PBKDF2 primitive. Pattern shape shown.
+
+    // ClientKey = HMAC(SaltedPassword, "Client Key")
+    let salted_password = hmac_sha256(password, salt);   // placeholder
+    let client_key_bytes = "Client Key".as_bytes();
+    let client_key = hmac_sha256(&salted_password, client_key_bytes);
+
+    // StoredKey = SHA-256(ClientKey)
+    let stored_key = Sha256.digest(&client_key);
+
+    // Verify stored_key against received value in constant time.
+    let received_stored_key = [0 as Byte; 32];
+    let _ok = constant_time_eq(&stored_key, &received_stored_key);
+}
+
+fn main() {
+    // Shape-only tests.
+}

@@ -187,6 +187,15 @@ public module term;
 public module encoding;
 
 // =============================================================================
+// Layer 4.8: Security (Depends on: core, base, util)
+// =============================================================================
+
+// Crypto primitives: SHA-256, HMAC-SHA-256, HKDF-SHA-256, constant-time
+// compare. Pure-Verum reference + pluggable HACL* / OpenSSL backend.
+// Plus legacy labels.vr / regions.vr (capability/region models).
+public module security;
+
+// =============================================================================
 // Layer 5: Network (Depends on: core, text, collections, io, async)
 // =============================================================================
 

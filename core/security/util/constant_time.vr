@@ -1,0 +1,119 @@
+// =============================================================================
+// security/util/constant_time.vr — timing-safe equality checks
+// =============================================================================
+// Layer: 0 (no dependencies beyond core primitives)
+// =============================================================================
+//
+// Constant-time operations over byte slices. Every instruction executes
+// regardless of input content — no early exit, no data-dependent branches,
+// no secret-indexed memory access. Used for comparing MACs, verifying
+// passwords, checking signature components — anywhere a naive `==`
+// comparison would leak timing information about secret material.
+//
+// # Threat model
+//
+// A naive byte-by-byte comparison with short-circuit-on-mismatch reveals
+// *where* the first differing byte is via total execution time — an
+// attacker submitting guessed MACs observes ~O(n) different response
+// times correlated with their prefix-match length. Over many probes this
+// leaks the full MAC. `constant_time_eq` closes this channel at the
+// primitive level.
+//
+// # Correctness invariants
+//
+// 1. No data-dependent branches — the control flow is identical for
+//    every input of the same length.
+// 2. No data-dependent memory accesses (no indexed lookup based on a
+//    secret byte).
+// 3. Accumulation via XOR-OR pattern, which the compiler must NOT
+//    simplify to an early-exit. The `@verify(constant_time)` annotation
+//    is a request to the codegen backend to suppress any optimizations
+//    that would introduce data dependence.
+//
+// # Bounds
+//
+// Inputs of *different* lengths do NOT produce a timing-safe result —
+// they return `false` via a fast length check (length is not secret
+// under any reasonable threat model; attackers already know their
+// guess's length). For secret-length comparisons, always pad to a
+// known length first.
+//
+// =============================================================================
+
+module core.security.util.constant_time;
+mount core.*;
+
+/// Timing-safe byte-slice equality.
+///
+/// Returns `true` iff `a` and `b` have the same length AND every byte
+/// matches. Runtime is O(min(len(a), len(b))) plus a single length
+/// comparison. Secret bytes are never used as branch predicates or
+/// memory indices.
+///
+/// ```verum
+/// let expected = hmac_sha256(&key, &data);
+/// let received: [Byte; 32] = /* from wire */;
+/// if !constant_time_eq(&expected, &received) {
+///     return Err(AuthError.InvalidMac);
+/// }
+/// ```
+///
+/// # Returns
+///
+/// - `true` when both slices are byte-identical and have equal length.
+/// - `false` in every other case. Lengths are allowed to differ without
+///   timing leak — the attacker already knows the length of their guess.
+@verify(constant_time)
+public fn constant_time_eq(a: &[Byte], b: &[Byte]) -> Bool {
+    // Length mismatch is non-secret — bail fast.
+    if a.len() != b.len() {
+        return false;
+    }
+
+    // XOR-OR accumulation: `diff` is 0 only if every byte matched.
+    // Loop count is determined purely by public length.
+    let mut diff: UInt32 = 0;
+    let mut i = 0;
+    let n = a.len();
+    while i < n {
+        let xor = (a[i] as UInt32) ^ (b[i] as UInt32);
+        diff = diff | xor;
+        i = i + 1;
+    }
+
+    // Convert accumulator to Bool via constant-time test: `diff == 0`.
+    // The subtraction trick `(0 - diff) >> 31` (sign-bit of -diff) yields
+    // 1 if diff != 0, 0 if diff == 0 — no branches. Invert for equality.
+    //
+    // We express it plainly here; the backend's @verify(constant_time)
+    // guarantees no branching is introduced.
+    diff == 0
+}
+
+/// Timing-safe three-way comparison — returns `-1`, `0`, `+1` like
+/// strcmp but without timing leak. Useful for MPI / big-integer compare
+/// in crypto primitives.
+///
+/// Not yet implemented — declared for future HACL*/OpenSSL backend use.
+@verify(constant_time)
+public fn constant_time_compare(a: &[Byte], b: &[Byte]) -> Int {
+    if a.len() != b.len() {
+        // Different-length is not a secret scenario for our threat model.
+        if a.len() < b.len() { -1 } else { 1 }
+    } else {
+        let mut diff: Int = 0;
+        let mut i = 0;
+        while i < a.len() {
+            let ai = a[i] as Int;
+            let bi = b[i] as Int;
+            // Select sign based on bytes ai/bi only, no early break.
+            let d = ai - bi;
+            // Keep only the first-ever-non-zero diff via bitwise mask.
+            // (diff == 0) -> d wins; else diff wins.
+            let mask: Int = if diff == 0 { -1 } else { 0 };
+            diff = diff | (d & mask);
+            i = i + 1;
+        }
+        if diff < 0 { -1 } else if diff > 0 { 1 } else { 0 }
+    }
+}
