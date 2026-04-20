@@ -5378,6 +5378,16 @@ impl VbcCodegen {
                 // the same nominal type do not clobber each other.
                 if !self.ctx.prefer_existing_functions {
                     self.ctx.clear_variants_for_type(&type_name);
+                } else if self.ctx.has_variants_for_type(&type_name) {
+                    // First-wins: a prior (user or stdlib) declaration has
+                    // already populated the variant set for this nominal
+                    // type. Skip re-registering under `prefer_existing`
+                    // mode — otherwise stdlib's `Maybe = None | Some(T)`
+                    // would leak `None`/`Some` constructors into a user
+                    // program that redeclared `type Maybe is Nothing |
+                    // Just(Int)` and they would coexist in the function
+                    // table, producing nondeterministic dispatch.
+                    return Ok(());
                 }
 
                 for (variant_index, variant) in variants.iter().enumerate() {

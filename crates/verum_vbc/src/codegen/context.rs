@@ -1579,6 +1579,19 @@ impl CodegenContext {
         self.functions.remove(name).is_some()
     }
 
+    /// Returns true iff at least one variant constructor is currently
+    /// registered whose `parent_type_name` matches the given type name.
+    ///
+    /// Used by the variant-registration fast-path to short-circuit
+    /// stdlib loading when the user has already declared a type of the
+    /// same name — see `register_type_constructors`.
+    pub fn has_variants_for_type(&self, type_name: &str) -> bool {
+        self.functions.iter().any(|(_, info)| {
+            info.variant_tag.is_some()
+                && info.parent_type_name.as_deref() == Some(type_name)
+        })
+    }
+
     /// Removes every variant constructor whose `parent_type_name` matches
     /// the given type. A variant entry is one where `variant_tag.is_some()`.
     ///
