@@ -48,7 +48,8 @@ mount base.memory.{Shared, take as mem_take};
 mount .poll.{Poll};
 mount .waker.{Waker, Context};
 mount .future.{Future};
-mount .stream.{Stream};
+mount .stream.{Stream, StreamNext};
+mount .async_iterator.{AsyncIterator};
 mount .cancellation.{CancellationToken, CancellationError};
 
 // =============================================================================
@@ -372,6 +373,17 @@ implement<T> Stream for BroadcastReceiver<T> {
             TryRecvResult.Closed => Poll.Ready(None),
             TryRecvResult.Empty => Poll.Pending,
         }
+    }
+}
+
+// AsyncIterator for for-await ergonomics. Item is Result<T, RecvError> —
+// loop body may observe Lagged errors without terminating the iterator.
+implement<T> AsyncIterator for BroadcastReceiver<T> {
+    type Item = Result<T, RecvError>;
+
+    @inline
+    async fn next(&mut self) -> Maybe<Result<T, RecvError>> {
+        StreamNext { stream: self }.await
     }
 }
 

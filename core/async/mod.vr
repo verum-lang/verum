@@ -50,6 +50,9 @@ public module parallel;
 // Cooperative cancellation tokens
 public module cancellation;
 
+// AsyncIterator protocol (for-await loop desugaring target)
+public module async_iterator;
+
 // =============================================================================
 // Re-exports
 // =============================================================================
@@ -108,6 +111,10 @@ public mount .select.ReadyFuture;
 public mount .stream.Stream;
 public mount .stream.StreamExt;
 public mount .stream.IntoStream;
+
+// From async_iterator — for-await loop lowering target
+public mount .async_iterator.AsyncIterator;
+public mount .async_iterator.IntoAsyncIterator;
 
 // From generator
 public mount .generator.Generator;

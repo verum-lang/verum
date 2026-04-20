@@ -50,7 +50,8 @@ mount core.io.async_protocols.{AsyncRead, AsyncWrite, IoResult};
 mount core.async.poll.{Poll};
 mount core.async.waker.{Context};
 mount core.async.future.{Future};
-mount core.async.stream.{Stream};
+mount core.async.stream.{Stream, StreamNext};
+mount core.async.async_iterator.{AsyncIterator};
 mount core.async.cancellation.{CancellationToken, CancellationError};
 mount .addr.*;
 
@@ -1246,6 +1247,16 @@ implement<'a> Stream for AsyncIncoming<'a> {
             }
             Err(e) => Poll.Ready(Some(Err(IoError.from_os_error(e)))),
         }
+    }
+}
+
+// AsyncIterator — for-await over accepted connections.
+implement<'a> AsyncIterator for AsyncIncoming<'a> {
+    type Item = Result<TcpStream, IoError>;
+
+    @inline
+    async fn next(&mut self) -> Maybe<Result<TcpStream, IoError>> {
+        StreamNext { stream: self }.await
     }
 }
 

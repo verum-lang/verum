@@ -17,7 +17,8 @@ mount sync.*;
 mount .poll.*;
 mount .waker.*;
 mount .future.*;
-mount .stream.{Stream};
+mount .stream.{Stream, StreamNext};
+mount .async_iterator.{AsyncIterator};
 mount .cancellation.{CancellationToken, CancellationError, CancelReason};
 
 // Cross-platform futex for blocking recv
@@ -579,6 +580,19 @@ implement<T> Stream for Receiver<T> {
     fn size_hint(&self) -> (Int, Maybe<Int>) {
         let g = self.inner.queue.lock().unwrap();
         (g.len(), self.inner.capacity)
+    }
+}
+
+// AsyncIterator<Item = T> — for-await loop target. Stream ∘ StreamNext
+// bridge; zero-extra allocation. (A blanket `impl<S: Stream> AsyncIterator
+// for S` would collapse this, but current compiler can't project `S.Item`
+// through blanket impls — see core/async/async_iterator.vr.)
+implement<T> AsyncIterator for Receiver<T> {
+    type Item = T;
+
+    @inline
+    async fn next(&mut self) -> Maybe<T> {
+        StreamNext { stream: self }.await
     }
 }
 

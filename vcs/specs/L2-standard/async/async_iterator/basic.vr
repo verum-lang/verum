@@ -1,0 +1,39 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: async, iterator, for-await, stream
+// @timeout: 10000
+// @expect: pass
+
+// AsyncIterator protocol — core shape + blanket impl over Stream.
+
+mount core.async.async_iterator.{AsyncIterator, IntoAsyncIterator};
+mount core.async.stream.{Stream};
+mount core.async.channel.{Receiver, bounded};
+mount core.async.broadcast.{BroadcastReceiver, broadcast_channel};
+
+// Concrete-type AsyncIterator usage via channel Receiver.
+async fn channel_as_async_iter() -> Maybe<Int> {
+    let (_tx, mut rx): (_, Receiver<Int>) = bounded(8);
+    rx.next().await
+}
+
+// Concrete-type usage via BroadcastReceiver.
+async fn broadcast_as_async_iter() {
+    let (_tx, mut rx) = broadcast_channel::<Int>(8);
+    let _ = rx.next().await;
+}
+
+// for-await lowering on a Stream-typed iterator.
+async fn for_await_over_receiver() -> Int {
+    let (_tx, mut rx): (_, Receiver<Int>) = bounded(8);
+    let mut sum = 0;
+    for await v in rx {
+        sum = sum + v;
+    }
+    sum
+}
+
+fn main() {
+    // Shape-only; runtime exercise lives in integration tests.
+}

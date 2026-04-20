@@ -19,13 +19,20 @@ fn typecheck_incoming_async(listener: &TcpListener) -> AsyncIncoming {
     listener.incoming_async()
 }
 
-// Typecheck: manual Stream iteration via poll_next (for-await needs
-// AsyncStream/AsyncIterator protocol landing — tracked separately).
+// Typecheck: manual Stream iteration via poll_next.
 fn typecheck_poll_next(
     inc: &mut AsyncIncoming,
     cx: &mut Context,
 ) -> Poll<Maybe<Result<TcpStream, IoError>>> {
     inc.poll_next(cx)
+}
+
+// for-await over AsyncIncoming — compiler finds AsyncIterator impl.
+async fn typecheck_for_await_incoming() {
+    let listener = TcpListener.bind("127.0.0.1:0").expect("bind");
+    for await conn in listener.incoming_async() {
+        let _ = conn;
+    }
 }
 
 // Cancellable accept (single-shot)

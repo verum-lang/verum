@@ -1,0 +1,149 @@
+// =============================================================================
+// async_iterator.vr — AsyncIterator protocol for `for await ... in ...` loops
+// =============================================================================
+// Layer: 4 (Async)
+// Dependencies: core, async/poll, async/waker, async/future, async/stream
+// Grammar ref: grammar/verum.ebnf — for_await_loop production (v2.10)
+// Compiler ref: verum_types/protocol.rs::resolve_async_iterator_protocol
+// =============================================================================
+//
+// AsyncIterator is the protocol that `for await item in ...` desugars to.
+// It is intentionally distinct from Stream:
+//
+// - `Stream` uses `poll_next(cx: &mut Context) -> Poll<Maybe<Item>>` and is
+//   the *low-level* pollable interface — required when you need direct waker
+//   control (e.g., multi-source select combinators, custom backpressure).
+//
+// - `AsyncIterator` uses `async fn next(&mut self) -> Maybe<Item>` and is
+//   the *ergonomic* surface — what compiler lowering of `for await` talks to.
+//   Every Stream is automatically an AsyncIterator via a blanket impl; no
+//   user of a Stream needs to manually implement AsyncIterator.
+//
+// # Usage
+//
+// ```verum
+// // Direct — the for-await loop desugars to this:
+// let mut it = stream.into_async_iter();
+// loop {
+//     match it.next().await {
+//         Some(item) => { process(item); }
+//         None => { break; }
+//     }
+// }
+//
+// // Ergonomic surface — for-await syntax:
+// for await item in stream {
+//     process(item);
+// }
+// ```
+//
+// # Design notes
+//
+// - The compiler resolves `for await x in y { ... }` by looking up the
+//   `AsyncIterator` protocol impl on `y`'s type. `Item` associated type gives
+//   the loop-variable type.
+// - `Stream<Item = T>` implementors get `AsyncIterator<Item = T>` for free
+//   via the blanket `implement<S: Stream> AsyncIterator for S` below.
+// - `IntoAsyncIterator` mirrors `IntoIterator` — lets users produce an
+//   iterator from a collection-shaped thing. Every AsyncIterator is
+//   trivially IntoAsyncIterator.
+// - The distinction between `Stream` (raw poll) and `AsyncIterator` (awaitable)
+//   follows Rust's async_std::stream::Stream vs futures::stream::StreamExt
+//   split, and matches Scheme-ish "observer" vs "iterator" separation.
+//
+// =============================================================================
+
+module core.async.async_iterator;
+mount core.*;
+mount .poll.{Poll};
+mount .waker.{Context};
+mount .future.{Future};
+mount .stream.{Stream, StreamNext};
+
+// -----------------------------------------------------------------------------
+// AsyncIterator — ergonomic awaitable surface for `for await`
+// -----------------------------------------------------------------------------
+//
+// Implementors provide `next`, which returns a Future that resolves to
+// `Some(item)` for each available value or `None` when exhausted. The
+// compiler's for-await-loop lowering invokes this method repeatedly,
+// awaiting each call, until it observes None.
+//
+// Implementors may optionally provide `size_hint` for pre-allocation. The
+// default returns `(0, None)` — unknown.
+
+public type AsyncIterator is protocol {
+    /// The type of items produced by this iterator.
+    type Item;
+
+    /// Fetch the next item. Returns `Some(item)` if one is available,
+    /// `None` when the iterator is exhausted.
+    ///
+    /// After returning `None`, further calls are allowed but will continue
+    /// returning `None` — the iterator is not restarted (matches the
+    /// "fused" behavior of std::iter::Fuse / futures::stream::Fuse).
+    async fn next(&mut self) -> Maybe<Self.Item>;
+
+    /// Bounds on the remaining length of the iterator. Returns
+    /// `(lower_bound, optional_upper_bound)`. Implementors MAY override
+    /// for better pre-allocation; default returns `(0, None)`.
+    fn size_hint(&self) -> (Int, Maybe<Int>) {
+        (0, None)
+    }
+}
+
+// -----------------------------------------------------------------------------
+// IntoAsyncIterator — mirror of IntoIterator for async
+// -----------------------------------------------------------------------------
+//
+// A type that can be *converted* into an AsyncIterator. Every AsyncIterator
+// is trivially IntoAsyncIterator (blanket impl below). Allows the for-await
+// loop to accept either a bare iterator OR something that produces one
+// (e.g., `for await msg in channel_handle { ... }` where `channel_handle`
+// has `into_async_iter() -> SomeIterator`).
+
+public type IntoAsyncIterator is protocol {
+    /// The type of items produced by the resulting async iterator.
+    type Item;
+
+    /// The concrete AsyncIterator type produced by `into_async_iter()`.
+    type IntoAsyncIter: AsyncIterator<Item = Self.Item>;
+
+    /// Consume `self` and return an AsyncIterator.
+    fn into_async_iter(self) -> Self.IntoAsyncIter;
+}
+
+// Every AsyncIterator is trivially convertible to itself.
+implement<A: AsyncIterator> IntoAsyncIterator for A {
+    type Item = A.Item;
+    type IntoAsyncIter = A;
+
+    @inline
+    fn into_async_iter(self) -> A {
+        self
+    }
+}
+
+// -----------------------------------------------------------------------------
+// AsyncIterator impls — hosted in owning modules
+// -----------------------------------------------------------------------------
+//
+// A blanket `implement<S: Stream> AsyncIterator for S` is semantically
+// the right answer and is what this module *wants* to express. The current
+// compiler does not reduce associated-type projections (`S.Item`) through
+// blanket impls — `for await v in receiver { ... }` ends up with `v`
+// typed as an unresolved `Item<Receiver<T>>` instead of the concrete `T`.
+//
+// Until the compiler's protocol resolver gains blanket-impl projection
+// reduction, each Stream-shaped type carries its own direct impl of
+// AsyncIterator alongside its Stream impl, in the module that owns the
+// type (so orphan rule is satisfied trivially):
+//
+// - core/async/channel.vr          — Receiver<T>
+// - core/async/broadcast.vr        — BroadcastReceiver<T>
+// - core/net/tcp.vr                — AsyncIncoming<'a>
+// - core/async/stream.vr           — StreamIter, StreamOnce, etc. (if exposed)
+//
+// These impls are one-liners wrapping `StreamNext { stream: self }.await`
+// and can be collapsed into a single blanket with zero user-visible change
+// once the compiler supports it.
