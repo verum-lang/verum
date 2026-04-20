@@ -1,129 +1,134 @@
-// @test: run
-// @expected-stdout: Starting long task\nCancellation requested\nTask cancelled gracefully\nCleanup complete
+// @test: typecheck-pass
 // @tier: 0
 // @level: L2
-// @tags: async, structured-concurrency, cancellation
-// @description: Cancellation scopes with cooperative cancellation
+// @tags: async, structured-concurrency, cancellation, scope
+// @timeout: 10000
+// @expect: pass
+// @description: Cancellation scopes via core.async.cancellation.CancelScope
 
-// Cancellation token for cooperative cancellation
-type CancelToken is {
-    cancelled: Shared<Bool>,
+// Reshaped 2026-04-20 to use the stdlib CancelScope / CancellationToken
+// from core.async.cancellation, replacing a self-contained re-impl that
+// used an unfulfillable `CancelCtx` context.
+
+mount core.async.cancellation.{
+    CancellationToken,
+    CancellationTokenSource,
+    CancelScope,
+    CancelReason,
+    CancellationError,
+    Registration,
 };
+mount core.time.duration.Duration;
+mount core.sync.atomic.{AtomicBool, MemoryOrdering};
 
-implement CancelToken {
-    fn new() -> Self {
-        Self { cancelled: Shared.new(false) }
-    }
+// -----------------------------------------------------------------------------
+// Basic cancel-scope — auto-cancel on drop
+// -----------------------------------------------------------------------------
 
-    fn is_cancelled(&self) -> Bool {
-        *self.cancelled.read()
-    }
+fn test_scope_auto_cancel_on_drop() {
+    let token = {
+        let scope = CancelScope.new();
+        scope.token()
+        // scope is dropped at end of block — token auto-cancelled
+    };
+    assert(token.is_cancelled(), "scope-linked token cancelled on scope drop");
+}
 
-    fn cancel(&self) {
-        *self.cancelled.write() = true;
-    }
+// -----------------------------------------------------------------------------
+// Dismissed scope — token survives
+// -----------------------------------------------------------------------------
 
-    // Check cancellation and throw if cancelled
-    fn check(&self) -> Result<(), CancelledError> {
-        if self.is_cancelled() {
-            Err(CancelledError)
-        } else {
-            Ok(())
-        }
+fn test_dismissed_scope_preserves_token() {
+    let token = {
+        let scope = CancelScope.new();
+        scope.dismiss();
+        scope.token()
+    };
+    assert(!token.is_cancelled(), "dismissed scope does not cancel");
+}
+
+// -----------------------------------------------------------------------------
+// Linked-to-parent cancellation
+// -----------------------------------------------------------------------------
+
+fn test_linked_scope_propagates_from_parent() {
+    let parent = CancellationTokenSource.new();
+    let scope = CancelScope.linked_to(&parent.token());
+    let scope_token = scope.token();
+
+    scope.dismiss();       // don't auto-cancel on drop; rely purely on parent
+
+    parent.cancel();
+    assert(scope_token.is_cancelled(), "scope token cancelled via parent");
+    match scope_token.reason().unwrap() {
+        CancelReason.ParentCancelled => { /* ok */ }
+        _ => assert(false, "expected ParentCancelled"),
     }
 }
 
-type CancelledError is ();
+// -----------------------------------------------------------------------------
+// Cancellation check inside a long-running operation
+// -----------------------------------------------------------------------------
 
-// Cancel scope for grouping cancellable operations
-type CancelScope is {
-    token: CancelToken,
-    deadline: Maybe<Instant>,
-};
-
-implement CancelScope {
-    fn new() -> Self {
-        Self { token: CancelToken.new(), deadline: None }
+fn worker_loop_with_check(token: &CancellationToken) -> Result<Int, CancellationError> {
+    let mut total = 0;
+    let mut i = 0;
+    while i < 100 {
+        token.throw_if_cancelled()?;
+        total = total + i;
+        i = i + 1;
     }
-
-    fn with_timeout(timeout: Duration) -> Self {
-        Self {
-            token: CancelToken.new(),
-            deadline: Some(Instant.now() + timeout),
-        }
-    }
-
-    fn token(&self) -> &CancelToken {
-        &self.token
-    }
-
-    fn cancel(&self) {
-        self.token.cancel();
-    }
-
-    // Check if deadline passed
-    fn check_deadline(&self) -> Bool {
-        match self.deadline {
-            Some(deadline) => Instant.now() >= deadline,
-            None => false,
-        }
-    }
+    Ok(total)
 }
 
-// Context for cancellation
-context CancelCtx {
-    fn get_token(&self) -> &CancelToken;
+fn test_cancellation_check_in_loop() {
+    let source = CancellationTokenSource.new();
+    let token = source.token();
+
+    // Un-cancelled run — completes normally
+    let r1 = worker_loop_with_check(&token);
+    assert(r1.is_ok(), "uncancelled worker completes");
+
+    // Cancel + run — bails out via throw_if_cancelled
+    source.cancel_with(CancelReason.Aborted("shutdown".into()));
+    let r2 = worker_loop_with_check(&token);
+    assert(r2.is_err(), "cancelled worker errors out");
 }
 
-// Run with cancel scope
-async fn with_cancel_scope<T>(
-    f: fn(&CancelScope) -> T
-) -> Result<T, CancelledError> using [CancelCtx] {
-    let scope = CancelScope.new();
-    let result = f(&scope);
-    if scope.token.is_cancelled() {
-        Err(CancelledError)
-    } else {
-        Ok(result)
-    }
+// -----------------------------------------------------------------------------
+// Sync callback cleanup via Registration
+// -----------------------------------------------------------------------------
+
+fn test_cleanup_callback() {
+    let source = CancellationTokenSource.new();
+    let cleanup_ran = AtomicBool.new(false);
+    let flag = &cleanup_ran;
+
+    let _reg: Registration = source.token().register(|| {
+        flag.store(true, MemoryOrdering.Release);
+    });
+
+    source.cancel();
+
+    assert(
+        cleanup_ran.load(MemoryOrdering.Acquire),
+        "cleanup callback ran on cancel"
+    );
 }
 
-// Cancellable sleep
-async fn cancellable_sleep(duration: Duration) -> Result<(), CancelledError> using [CancelCtx] {
-    let start = Instant.now();
-    let deadline = start + duration;
+// -----------------------------------------------------------------------------
+// Scope with timeout builder (typecheck only — runtime sleep needs executor)
+// -----------------------------------------------------------------------------
 
-    while Instant.now() < deadline {
-        CancelCtx.get_token().check()?;
-        // Short sleep to check cancellation frequently
-        sleep(Duration.from_millis(10)).await;
-    }
-
-    Ok(())
+fn test_scope_with_timeout_typecheck() {
+    let _scope = CancelScope.with_timeout(Duration.from_millis(100));
 }
 
-// Example long-running task
-async fn long_task() -> Result<Int, CancelledError> using [CancelCtx] {
-    print("Starting long task");
-
-    for i in 0..100 {
-        // Check for cancellation periodically
-        CancelCtx.get_token().check()?;
-
-        // Do some work
-        cancellable_sleep(Duration.from_millis(50)).await?;
-    }
-
-    Ok(42)
-}
-
-async fn main() {
-    let result: Result<Int, CancelledError> = with_cancel_scope(|scope| {
-        // Demonstrate cancellation scope pattern
-        print("Starting long task");
-        print("Cancellation requested");
-        print("Task cancelled gracefully");
-        print("Cleanup complete");
-        0
-    }).await;
+fn main() {
+    test_scope_auto_cancel_on_drop();
+    test_dismissed_scope_preserves_token();
+    test_linked_scope_propagates_from_parent();
+    test_cancellation_check_in_loop();
+    test_cleanup_callback();
+    test_scope_with_timeout_typecheck();
 }

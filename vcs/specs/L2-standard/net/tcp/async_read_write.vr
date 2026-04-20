@@ -1,0 +1,42 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: net, tcp, async, read, write
+// @timeout: 10000
+// @expect: pass
+
+// AsyncRead / AsyncWrite impl for TcpStream — enables async I/O with
+// waker-based readiness waits.
+
+mount core.net.tcp.{TcpStream, TcpListener};
+mount core.io.async_protocols.{AsyncRead, AsyncWrite};
+mount core.async.poll.{Poll};
+mount core.async.waker.{Context};
+mount core.async.future.{Future};
+
+// Shape: poll_read signature (AsyncRead protocol)
+fn typecheck_poll_read(stream: &mut TcpStream, cx: &mut Context, buf: &mut List<Int>)
+    -> Poll<Result<Int, IoError>>
+{
+    stream.poll_read(cx, buf)
+}
+
+// Shape: poll_write
+fn typecheck_poll_write(stream: &mut TcpStream, cx: &mut Context, buf: &List<Int>)
+    -> Poll<Result<Int, IoError>>
+{
+    stream.poll_write(cx, buf)
+}
+
+// Shape: poll_flush / poll_shutdown
+fn typecheck_poll_flush(stream: &mut TcpStream, cx: &mut Context) -> Poll<Result<(), IoError>> {
+    stream.poll_flush(cx)
+}
+
+fn typecheck_poll_shutdown(stream: &mut TcpStream, cx: &mut Context) -> Poll<Result<(), IoError>> {
+    stream.poll_shutdown(cx)
+}
+
+fn main() {
+    // Shape-only tests.
+}

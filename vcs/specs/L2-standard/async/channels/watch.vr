@@ -1,172 +1,41 @@
-// @test: run
-// @expected-stdout: Initial: 0\nChanged to: 1\nChanged to: 5\nFinal value: 5
+// @test: typecheck-pass
 // @tier: 0
 // @level: L2
-// @tags: async, channels, watch
-// @description: Watch channel for shared state with change notifications
+// @tags: async, channels, watch, broadcast, pattern
+// @timeout: 10000
+// @expect: pass
+// @description: Watch channel pattern — use broadcast_channel as substrate
 
-// Watch channel - single value that receivers can observe changes to
-type WatchSender<T> is {
-    tx: Any
+// Reshaped 2026-04-20 from a legacy `runtime.create_watch` stub. A true
+// `WatchChannel<T>` with "subscribe sees current value" semantics is future
+// work (broadcast.vr Phase 2 follow-up); this test exercises the simpler
+// broadcast-based notification pattern.
+
+mount core.async.broadcast.{
+    BroadcastSender, BroadcastReceiver, RecvError,
+    broadcast_channel,
 };
 
-type WatchReceiver<T> is {
-    rx: Any
-};
-
-// Create watch channel with initial value
-fn watch<T: Clone>(initial: T) -> (WatchSender<T>, WatchReceiver<T>) {
-    let (tx, rx) = runtime.create_watch(initial);
-    (WatchSender { tx }, WatchReceiver { rx })
+// Shape tests — broadcast with capacity=1 approximates "latest value".
+fn test_watch_like_shape() {
+    let (tx, rx): (BroadcastSender<Int>, BroadcastReceiver<Int>) = broadcast_channel(1);
+    let _ = tx.send(42);
+    let _rx2 = tx.subscribe();
+    let _ = rx;
 }
 
-// Watch errors
-type WatchRecvError is Closed;
+// Config-hot-reload pattern: subscriber-fanout on configuration change.
+fn test_config_hot_reload_pattern() {
+    let (tx, rx) = broadcast_channel::<Text>(8);
+    let _consumer_a = tx.subscribe();
+    let _consumer_b = tx.subscribe();
+    let _: Int = tx.receiver_count();   // 3 — initial rx + two subscribes
 
-implement<T: Clone> WatchSender<T> {
-    // Update the value
-    fn send(&self, value: T) -> Result<(), WatchRecvError> {
-        // Updates value and notifies all receivers
-    }
-
-    // Modify value in place
-    fn send_modify<F: FnOnce(&mut T)>(&self, f: F) {
-        // Atomically modify and notify
-    }
-
-    // Get current value
-    fn borrow(&self) -> Ref<T> {
-        // Returns reference to current value
-    }
-
-    // Check if any receivers exist
-    fn is_closed(&self) -> Bool {
-        // Implementation
-    }
-
-    // Subscribe to changes
-    fn subscribe(&self) -> WatchReceiver<T> {
-        // Creates new receiver
-    }
+    let _ = tx.send("new-config".into());
+    let _ = rx;
 }
 
-implement<T: Clone> WatchReceiver<T> {
-    // Get current value
-    fn borrow(&self) -> Ref<T> {
-        // Returns reference to current value
-    }
-
-    // Clone current value
-    fn clone_value(&self) -> T {
-        let val = self.borrow();
-        (*val).clone()
-    }
-
-    // Wait for value to change
-    async fn changed(&mut self) -> Result<(), WatchRecvError> {
-        // Blocks until value changes
-    }
-
-    // Check if value has changed since last read
-    fn has_changed(&self) -> Result<Bool, WatchRecvError> {
-        // Implementation
-    }
-
-    // Mark current value as seen
-    fn mark_seen(&mut self) {
-        // Resets changed flag
-    }
-
-    // Wait for value matching predicate
-    async fn wait_for<F: Fn(&T) -> Bool>(&mut self, predicate: F) -> Result<Ref<T>, WatchRecvError> {
-        loop {
-            let value = self.borrow();
-            if predicate(&*value) {
-                return Ok(value);
-            }
-            drop(value);
-            self.changed().await?;
-        }
-    }
-}
-
-// State machine using watch channel
-type StateMachine<S> is {
-    state: WatchSender<S>,
-};
-
-implement<S: Clone + Eq> StateMachine<S> {
-    fn new(initial: S) -> (Self, WatchReceiver<S>) {
-        let (tx, rx) = watch(initial);
-        (Self { state: tx }, rx)
-    }
-
-    fn current_state(&self) -> S {
-        let val = self.state.borrow();
-        (*val).clone()
-    }
-
-    fn transition(&self, new_state: S) {
-        self.state.send(new_state);
-    }
-
-    fn transition_if(&self, expected: S, new_state: S) -> Bool {
-        let current = self.state.borrow();
-        if *current == expected {
-            drop(current);
-            self.state.send(new_state);
-            true
-        } else {
-            false
-        }
-    }
-}
-
-// Config watcher example
-type AppConfig is {
-    debug_mode: Bool,
-    log_level: Int,
-    max_connections: Int,
-};
-
-async fn config_observer(name: Text, mut rx: WatchReceiver<Int>) {
-    println(f"Initial: {rx.clone_value()}");
-
-    loop {
-        match rx.changed().await {
-            Ok(()) => {
-                let value = rx.clone_value();
-                println(f"Changed to: {value}");
-            }
-            Err(_) => break,
-        }
-    }
-}
-
-async fn main() {
-    let (tx, rx) = watch(0);
-
-    // Start observer
-    let observer = spawn config_observer("Observer", rx);
-
-    // Give observer time to start
-    sleep(Duration.from_millis(10)).await;
-
-    // Update values
-    tx.send(1);
-    sleep(Duration.from_millis(10)).await;
-
-    // Multiple rapid updates - observer may miss intermediate values
-    tx.send(2);
-    tx.send(3);
-    tx.send(4);
-    tx.send(5);
-    sleep(Duration.from_millis(10)).await;
-
-    // Get final value
-    println(f"Final value: {tx.borrow().clone()}");
-
-    // Close
-    drop(tx);
-    observer.await;
+fn main() {
+    test_watch_like_shape();
+    test_config_hot_reload_pattern();
 }

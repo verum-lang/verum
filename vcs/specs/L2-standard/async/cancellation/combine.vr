@@ -1,0 +1,82 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: async, cancellation, combine, any-of
+// @timeout: 10000
+// @expect: pass
+
+// Combine — produces a token that fires when any of the input tokens fires.
+// Enables patterns like "cancel when either shutdown-signal OR request-timeout".
+
+mount core.async.cancellation.{
+    CancellationToken,
+    CancellationTokenSource,
+    CancelReason,
+};
+
+fn test_combine_fires_on_first() {
+    let s1 = CancellationTokenSource.new();
+    let s2 = CancellationTokenSource.new();
+    let combined = CancellationToken.combine(&[s1.token(), s2.token()]);
+
+    assert(!combined.is_cancelled(), "combined starts uncancelled");
+
+    s1.cancel();
+
+    assert(combined.is_cancelled(), "combined fires when s1 fires");
+}
+
+fn test_combine_fires_on_any() {
+    let s1 = CancellationTokenSource.new();
+    let s2 = CancellationTokenSource.new();
+    let s3 = CancellationTokenSource.new();
+    let combined = CancellationToken.combine(&[s1.token(), s2.token(), s3.token()]);
+
+    s2.cancel();
+
+    assert(combined.is_cancelled(), "combined fires on middle input");
+}
+
+fn test_combine_all_already_cancelled() {
+    let s1 = CancellationTokenSource.new();
+    let s2 = CancellationTokenSource.new();
+    s1.cancel();
+    s2.cancel();
+
+    let combined = CancellationToken.combine(&[s1.token(), s2.token()]);
+
+    assert(combined.is_cancelled(), "combined fires immediately if inputs already cancelled");
+}
+
+fn test_combine_empty_never_fires() {
+    let empty: [CancellationToken; 0] = [];
+    let combined = CancellationToken.combine(&empty);
+
+    assert(!combined.is_cancelled(), "empty combine never fires");
+}
+
+fn test_combine_with_parent_and_sibling() {
+    // Simulates "cancel when parent shuts down OR sibling task errors"
+    let parent = CancellationTokenSource.new();
+    let sibling_err = CancellationTokenSource.new();
+
+    let me = CancellationToken.combine(&[parent.token(), sibling_err.token()]);
+
+    sibling_err.cancel_with(CancelReason.Aborted("sibling errored".into()));
+
+    assert(me.is_cancelled(), "me cancelled because sibling errored");
+    // The `reason` we see is whatever the propagation chain carries —
+    // current impl gives ParentCancelled (sibling_err is our "parent").
+    match me.reason().unwrap() {
+        CancelReason.ParentCancelled => { /* expected */ }
+        _ => assert(false, "combined-token sees ParentCancelled via propagation"),
+    }
+}
+
+fn main() {
+    test_combine_fires_on_first();
+    test_combine_fires_on_any();
+    test_combine_all_already_cancelled();
+    test_combine_empty_never_fires();
+    test_combine_with_parent_and_sibling();
+}

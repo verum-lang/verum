@@ -1,0 +1,79 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: async, cancellation, scope, RAII, structured
+// @timeout: 10000
+// @expect: pass
+
+// CancelScope — RAII wrapper that auto-cancels its token when the scope
+// drops, unless dismiss() is called first. Trio-inspired.
+
+mount core.async.cancellation.{
+    CancellationToken,
+    CancellationTokenSource,
+    CancelScope,
+    CancelReason,
+};
+mount core.time.duration.Duration;
+
+fn test_scope_auto_cancels_on_drop() {
+    let token = {
+        let scope = CancelScope.new();
+        let t = scope.token();
+        assert(!scope.is_cancelled(), "scope starts active");
+        assert(!t.is_cancelled(), "token from active scope uncancelled");
+        t
+        // scope dropped here — auto-cancel fires
+    };
+
+    assert(token.is_cancelled(), "token cancelled when scope dropped");
+}
+
+fn test_scope_dismiss_prevents_drop_cancel() {
+    let token = {
+        let scope = CancelScope.new();
+        let t = scope.token();
+        scope.dismiss();        // opt-out of auto-cancel
+        t
+        // scope dropped — dismiss()-ed, so no cancel
+    };
+
+    assert(!token.is_cancelled(), "dismissed scope does not cancel on drop");
+}
+
+fn test_scope_explicit_cancel_works() {
+    let scope = CancelScope.new();
+    let token = scope.token();
+    scope.cancel();
+
+    assert(scope.is_cancelled(), "scope cancelled via explicit cancel()");
+    assert(token.is_cancelled(), "token sees cancel");
+}
+
+fn test_scope_linked_to_parent() {
+    let parent = CancellationTokenSource.new();
+    let scope = CancelScope.linked_to(&parent.token());
+    let scope_token = scope.token();
+
+    parent.cancel();
+
+    assert(scope.is_cancelled(), "linked scope cancels via parent");
+    assert(scope_token.is_cancelled(), "scope-token cancels too");
+    match scope_token.reason().unwrap() {
+        CancelReason.ParentCancelled => { /* ok */ }
+        _ => assert(false, "reason should be ParentCancelled"),
+    }
+}
+
+fn test_scope_with_timeout_typecheck() {
+    // Timeout path — just typecheck; runtime test needs scheduler.
+    let _scope = CancelScope.with_timeout(Duration.millis(100));
+}
+
+fn main() {
+    test_scope_auto_cancels_on_drop();
+    test_scope_dismiss_prevents_drop_cancel();
+    test_scope_explicit_cancel_works();
+    test_scope_linked_to_parent();
+    test_scope_with_timeout_typecheck();
+}

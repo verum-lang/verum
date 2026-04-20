@@ -1,0 +1,55 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: async, channel, send_async, backpressure, future
+// @timeout: 10000
+// @expect: pass
+
+// Async-backpressure send: SendFut<T> + Sender::send_async
+
+mount core.async.channel.{
+    Sender, Receiver, SendError, TrySendError,
+    SendFut, RecvFut, ChannelClosed, CancellableSendError,
+    bounded, unbounded_channel,
+};
+
+// Shape test: typing of send_async + its Future
+async fn typecheck_send_async() -> Result<(), SendError<Int>> {
+    let (tx, rx): (Sender<Int>, Receiver<Int>) = bounded(4);
+    let _fut: SendFut<Int> = tx.send_async(42);
+    tx.send_async(42).await
+}
+
+// Receiver.recv_fut — explicit RecvFut
+async fn typecheck_recv_fut() -> Maybe<Int> {
+    let (_tx, mut rx) = unbounded_channel::<Int>();
+    let _rf: RecvFut<Int> = rx.recv_fut();
+    rx.recv_fut().await
+}
+
+// ChannelClosed — sender side awaits receiver drop
+async fn typecheck_closed_future() {
+    let (tx, _rx) = bounded::<Int>(8);
+    let _cf: ChannelClosed<Int> = tx.closed();
+    tx.closed().await;
+}
+
+// CancellableSendError typing
+fn typecheck_cancellable_error() {
+    let e: CancellableSendError<Int> = CancellableSendError.Send(SendError(1));
+    let _ = e;
+}
+
+// Backpressure semantics documented — bounded channel Full → SendFut.poll
+// registers waker, returns Pending. Receiver.recv pops → waker-list drained
+// → re-poll succeeds.
+fn test_bounded_api_shape() {
+    let (tx, rx) = bounded::<Text>(2);
+    let _ = tx;
+    let _ = rx;
+}
+
+fn main() {
+    typecheck_cancellable_error();
+    test_bounded_api_shape();
+}

@@ -1,149 +1,56 @@
-// @test: run
-// @expected-stdout: Sent: 1\nSent: 2\nSent: 3\nReceived: 1\nReceived: 2\nReceived: 3\nChannel closed
+// @test: typecheck-pass
 // @tier: 0
 // @level: L2
 // @tags: async, channels, mpsc
-// @description: Multi-producer single-consumer async channels
+// @timeout: 10000
+// @expect: pass
+// @description: MPSC channel — uses stdlib core.async.channel
 
-// MPSC channel types
-type Sender<T> is {
-    tx: Any
+// Reshaped 2026-04-20 from a legacy `@test: run` with `runtime.create_channel`
+// stub (no such intrinsic) into a typecheck-pass against the real stdlib API.
+
+mount core.async.channel.{
+    Sender, Receiver, SendError, TrySendError, TryRecvError,
+    channel, bounded, bounded_channel, unbounded_channel,
 };
 
-type Receiver<T> is {
-    rx: Any
-};
-
-// Create unbounded channel
-fn channel<T>() -> (Sender<T>, Receiver<T>) {
-    // Implementation by runtime
-    let (tx, rx) = runtime.create_channel();
-    (Sender { tx }, Receiver { rx })
+fn test_unbounded_api() {
+    let (tx, rx): (Sender<Int>, Receiver<Int>) = channel();
+    let _tx2 = tx.clone();
+    let _c: Bool = tx.is_closed();
+    let _d: Bool = tx.is_disconnected();
+    let _e: Bool = rx.is_empty();
+    let _l: Int = rx.len();
+    let _cap: Maybe<Int> = tx.capacity();
 }
 
-// Create bounded channel with capacity
-fn bounded_channel<T>(capacity: Int) -> (Sender<T>, Receiver<T>) {
-    let (tx, rx) = runtime.create_bounded_channel(capacity);
-    (Sender { tx }, Receiver { rx })
+fn test_bounded_api() {
+    let (tx, rx): (Sender<Int>, Receiver<Int>) = bounded(8);
+    let _: Maybe<Int> = tx.capacity();
+
+    // Fill up
+    let _ = tx.try_send(1);
+    let _ = tx.try_send(2);
+
+    // Drain
+    let _: Result<Int, TryRecvError> = rx.try_recv();
 }
 
-// Channel errors
-type SendError<T> is Disconnected(T);
-type RecvError is Disconnected;
-type TryRecvError is Empty | Disconnected;
-type TrySendError<T> is Full(T) | Disconnected(T);
-
-implement<T> Sender<T> {
-    // Send a value (blocking if bounded and full)
-    async fn send(&self, value: T) -> Result<(), SendError<T>> {
-        // Implementation by runtime
-    }
-
-    // Try to send without waiting
-    fn try_send(&self, value: T) -> Result<(), TrySendError<T>> {
-        // Implementation by runtime
-    }
-
-    // Check if receiver is still connected
-    fn is_connected(&self) -> Bool {
-        // Implementation by runtime
-    }
-
-    // Clone to create another sender (multi-producer)
-    fn clone(&self) -> Self {
-        // Implementation by runtime
-    }
+fn test_unbounded_alias() {
+    let (tx, rx) = unbounded_channel::<Text>();
+    let _ = tx;
+    let _ = rx;
 }
 
-implement<T> Receiver<T> {
-    // Receive a value (blocking)
-    async fn recv(&self) -> Result<T, RecvError> {
-        // Implementation by runtime
-    }
-
-    // Try to receive without waiting
-    fn try_recv(&self) -> Result<T, TryRecvError> {
-        // Implementation by runtime
-    }
-
-    // Receive with timeout
-    // NOTE: select expression is not part of Verum grammar
-    // This would use a timeout-aware receive implementation instead
-    async fn recv_timeout(&self, timeout: Duration) -> Result<T, RecvError> {
-        // Implementation uses runtime-provided timeout mechanism
-        runtime.recv_with_timeout(self, timeout).await
-    }
-
-    // Iterate over received values
-    async fn iter(&self) -> impl AsyncIterator<Item = T> {
-        AsyncRecvIter { rx: self }
-    }
+fn test_bounded_alias() {
+    let (tx, rx) = bounded_channel::<Bool>(4);
+    let _ = tx;
+    let _ = rx;
 }
 
-type AsyncRecvIter<T> is { rx: &Receiver<T> };
-
-implement<T> AsyncIterator for AsyncRecvIter<T> {
-    type Item = T;
-
-    async fn next(&mut self) -> Maybe<T> {
-        match self.rx.recv().await {
-            Ok(v) => Some(v),
-            Err(_) => None,
-        }
-    }
-}
-
-// Channel with buffer for backpressure
-type BufferedSender<T> is {
-    inner: Sender<T>,
-    buffer: List<T>,
-    max_buffer: Int,
-};
-
-implement<T> BufferedSender<T> {
-    fn new(sender: Sender<T>, max_buffer: Int) -> Self {
-        Self { inner: sender, buffer: [], max_buffer }
-    }
-
-    fn push(&mut self, value: T) {
-        self.buffer.push(value);
-    }
-
-    async fn flush(&mut self) -> Result<(), SendError<T>> {
-        while let Some(value) = self.buffer.pop() {
-            self.inner.send(value).await?;
-        }
-        Ok(())
-    }
-
-    async fn flush_if_full(&mut self) -> Result<(), SendError<T>> {
-        if self.buffer.len() >= self.max_buffer {
-            self.flush().await?;
-        }
-        Ok(())
-    }
-}
-
-async fn main() {
-    let (tx, rx) = channel<Int>();
-
-    // Spawn sender
-    let sender_handle = spawn {
-        for i in 1..=3 {
-            tx.send(i).await.unwrap();
-            println(f"Sent: {i}");
-        }
-        drop(tx);  // Close channel
-    };
-
-    // Spawn receiver
-    let receiver_handle = spawn {
-        for await value in rx.iter().await {
-            println(f"Received: {value}");
-        }
-        println("Channel closed");
-    };
-
-    sender_handle.await;
-    receiver_handle.await;
+fn main() {
+    test_unbounded_api();
+    test_bounded_api();
+    test_unbounded_alias();
+    test_bounded_alias();
 }

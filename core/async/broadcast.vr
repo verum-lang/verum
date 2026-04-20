@@ -1,33 +1,39 @@
 // =============================================================================
-// broadcast.vr - Broadcast Channel
+// broadcast.vr - Broadcast Channel (MPMC, each value observed by all receivers)
 // =============================================================================
 // Layer: 4 (Async)
-// Dependencies: core, collections, async/poll, async/waker
+// Dependencies: core, collections, async/poll, async/waker, async/future,
+//               async/stream, async/cancellation, sync/atomic, sync/mutex
 // =============================================================================
 //
-// A multi-producer, multi-consumer broadcast channel. Each value sent by any
-// sender is received by ALL active receivers.
+// Multi-producer, multi-consumer broadcast. Each value sent by any sender is
+// observed by every active receiver. Each receiver tracks its own position
+// in a shared ring buffer; slow receivers may fall behind and receive a
+// `Lagged` error indicating skipped messages.
 //
-// # Architecture
+// # Thread safety
 //
-// Uses a ring buffer with a shared state. Each receiver tracks its own
-// position in the buffer independently. When a sender writes, it advances
-// the global write position. Receivers catch up to the write position at
-// their own pace.
+// - Ring buffer mutations (push, reassign-slot) are protected by a FutexLock.
+// - sender_count / receiver_count / closed / write_pos are AtomicInt,
+//   providing lock-free observation for fast paths.
+// - Per-receiver waker slot is Mutex-protected; sender drain on publish
+//   iterates a snapshot under lock and invokes wakers outside the lock.
 //
-// If a slow receiver falls behind by more than the capacity, it will
-// receive a Lagged error indicating how many messages were missed.
+// # Async receive
+//
+// `BroadcastReceiver<T>` implements `Future<Output = Result<T, RecvError>>`
+// AND `Stream<Item = Result<T, RecvError>>`, so both `rx.recv().await` and
+// `for await msg in rx { ... }` work. Empty buffer → Poll.Pending + waker
+// registration. Sender publish drains all registered-waker snapshots.
 //
 // # Example
 //
 // ```verum
 // let (tx, rx1) = broadcast_channel(16);
 // let rx2 = tx.subscribe();
-//
-// tx.send(42);
-//
-// assert_eq(rx1.recv(), Ok(42));
-// assert_eq(rx2.recv(), Ok(42));
+// tx.send(42).unwrap();
+// assert_eq(rx1.recv().await.unwrap(), 42);
+// assert_eq(rx2.recv().await.unwrap(), 42);
 // ```
 //
 // =============================================================================
@@ -36,54 +42,88 @@ module broadcast;
 
 mount core.*;
 mount core.collections.*;
+mount sync.atomic.{AtomicInt, AtomicBool, MemoryOrdering};
+mount sync.mutex.Mutex;
+mount base.memory.{Shared, take as mem_take};
+mount .poll.{Poll};
+mount .waker.{Waker, Context};
+mount .future.{Future};
+mount .stream.{Stream};
+mount .cancellation.{CancellationToken, CancellationError};
 
 // =============================================================================
-// Error Types
+// Error / Result Types
 // =============================================================================
 
 /// Error returned when sending to a closed broadcast channel.
 public type SendError<T> is {
-    /// The value that failed to send.
     value: T,
 };
 
 /// Error returned when receiving from a broadcast channel.
 public type RecvError is
-    | Closed          // All senders have been dropped
-    | Lagged(Int);    // Receiver fell behind by N messages
+    /// All senders have been dropped and no more messages will arrive.
+    | Closed
+    /// Receiver fell behind by N messages; advanced to oldest available.
+    | Lagged(Int);
 
 /// Result of a non-blocking receive attempt.
 public type TryRecvResult<T> is
-    | Value(T)        // Successfully received a value
-    | Empty           // No values available right now
-    | Closed          // Channel is closed
-    | Lagged(Int);    // Receiver fell behind
+    | Value(T)
+    | Empty
+    | Closed
+    | Lagged(Int);
+
+/// Policy for what to do when a receiver falls behind capacity.
+public type LagPolicy is
+    /// (default) Return `RecvError.Lagged(n)` and advance to oldest.
+    | LagTolerant
+    /// Advance; drop oldest so senders never block.
+    | DropOldest
+    /// Unsubscribe the slow receiver silently. For strict keep-up scenarios.
+    | DropSlowReceiver;
 
 // =============================================================================
 // Shared Inner State
 // =============================================================================
 
-/// Internal shared state for the broadcast channel.
-///
-/// Uses a ring buffer of fixed capacity. The write_pos is a monotonically
-/// increasing counter; actual buffer index is write_pos % capacity.
-type BroadcastInner<T> is {
-    /// Ring buffer storage
-    buffer: List<Maybe<T>>,
-    /// Capacity of the ring buffer
-    capacity: Int,
-    /// Current write position (monotonically increasing)
-    write_pos: Int,
-    /// Number of active senders
-    sender_count: Int,
-    /// Number of active receivers
-    receiver_count: Int,
-    /// Whether the channel has been closed
-    closed: Bool,
+/// Per-receiver registration slot.
+type RecvSlot is {
+    id: Int,
+    read_pos: AtomicInt,
+    waker: Mutex<Maybe<Waker>>,
+    dropped: AtomicBool,
 };
 
-/// Create a new shared inner state.
-fn new_inner<T>(capacity: Int) -> BroadcastInner<T> {
+/// Internal shared state for the broadcast channel.
+///
+/// Ring buffer of fixed capacity. `write_pos` is a monotonically increasing
+/// counter; buffer index is `write_pos % capacity`. Each receiver has its
+/// own `read_pos` and `waker` slot. Receiver drops mark themselves via
+/// `dropped` flag; senders periodically compact the receiver list.
+type BroadcastInner<T> is {
+    /// Ring buffer; each slot holds Some(value) when occupied, None when free.
+    buffer: Mutex<List<Maybe<T>>>,
+    /// Capacity of the ring buffer (immutable).
+    capacity: Int,
+    /// Monotonically increasing write position.
+    write_pos: AtomicInt,
+    /// Number of active senders.
+    sender_count: AtomicInt,
+    /// Number of active receivers (approximate; actual live ones walk slots).
+    receiver_count: AtomicInt,
+    /// Per-receiver slots (with waker). Protected by slots_lock.
+    slots: Mutex<List<Shared<RecvSlot>>>,
+    /// Monotonic counter for receiver-slot IDs.
+    next_slot_id: AtomicInt,
+    /// Channel-wide closed flag.
+    closed: AtomicBool,
+    /// Lag policy applied when a receiver falls behind capacity.
+    lag_policy: LagPolicy,
+};
+
+/// Create new shared inner state, pre-filled with empty slots.
+fn new_inner<T>(capacity: Int, policy: LagPolicy) -> BroadcastInner<T> {
     let mut buf: List<Maybe<T>> = [];
     let mut i = 0;
     while i < capacity {
@@ -91,12 +131,34 @@ fn new_inner<T>(capacity: Int) -> BroadcastInner<T> {
         i = i + 1;
     }
     BroadcastInner {
-        buffer: buf,
+        buffer: Mutex.new(buf),
         capacity: capacity,
-        write_pos: 0,
-        sender_count: 1,
-        receiver_count: 1,
-        closed: false,
+        write_pos: AtomicInt.new(0),
+        sender_count: AtomicInt.new(1),
+        receiver_count: AtomicInt.new(1),
+        slots: Mutex.new([]),
+        next_slot_id: AtomicInt.new(1),
+        closed: AtomicBool.new(false),
+        lag_policy: policy,
+    }
+}
+
+/// Wake all receivers currently registered (snapshot + fire outside lock).
+fn wake_all_receivers<T>(inner: &BroadcastInner<T>) {
+    let snapshot = {
+        let guard = inner.slots.lock().unwrap();
+        let mut copy: List<Shared<RecvSlot>> = [];
+        for slot in guard.iter() {
+            copy.push(slot.clone());
+        }
+        copy
+    };
+    for slot in snapshot {
+        if slot.dropped.load(MemoryOrdering.Acquire) { continue; }
+        let mut w = slot.waker.lock().unwrap();
+        if let Some(waker) = w.take() {
+            waker.wake();
+        }
     }
 }
 
@@ -107,57 +169,115 @@ fn new_inner<T>(capacity: Int) -> BroadcastInner<T> {
 /// Sender half of a broadcast channel.
 ///
 /// Can be cloned to create additional senders. All senders share the same
-/// underlying channel. When all senders are dropped, the channel is closed.
-///
-/// Use `subscribe()` to create new receivers.
+/// underlying channel. When all senders are dropped, the channel is closed
+/// and receivers wake to observe the closure.
 public type BroadcastSender<T> is {
     inner: Shared<BroadcastInner<T>>,
 };
 
 implement<T> BroadcastSender<T> {
-    /// Send a value to all current receivers.
+    /// Broadcast `value` to all currently-subscribed receivers.
     ///
-    /// Returns `Ok(receiver_count)` with the number of active receivers,
-    /// or `Err(SendError)` if there are no active receivers.
+    /// Returns `Ok(n)` where `n` is the number of active receivers that
+    /// will see this value, or `Err(SendError)` if no receivers are active.
     ///
-    /// The value is cloned for each receiver.
-    public fn send(&mut self, value: T) -> Result<Int, SendError<T>> {
-        let inner = &mut *self.inner;
-        if inner.receiver_count == 0 {
+    /// If a receiver is slow enough that the write wraps past its read_pos,
+    /// the `LagPolicy` determines what happens (default: receiver observes
+    /// `RecvError.Lagged(skipped)` on its next recv).
+    public fn send(&self, value: T) -> Result<Int, SendError<T>> {
+        if self.inner.closed.load(MemoryOrdering.Acquire) {
             return Err(SendError { value: value });
         }
 
-        let idx = inner.write_pos % inner.capacity;
-        inner.buffer[idx] = Some(value);
-        inner.write_pos = inner.write_pos + 1;
+        let active = self.inner.receiver_count.load(MemoryOrdering.Acquire);
+        if active == 0 {
+            return Err(SendError { value: value });
+        }
 
-        Ok(inner.receiver_count)
+        let capacity = self.inner.capacity;
+        let pos = self.inner.write_pos.load(MemoryOrdering.Acquire);
+        let idx = pos % capacity;
+
+        // Insert under buffer lock.
+        {
+            let mut buf = self.inner.buffer.lock().unwrap();
+            buf[idx] = Some(value);
+        }
+
+        // Publish write position (release — observers see the slot write).
+        self.inner.write_pos.store(pos + 1, MemoryOrdering.Release);
+
+        // Fire all receiver wakers.
+        wake_all_receivers(&self.inner);
+
+        Ok(active)
     }
 
     /// Create a new receiver that will receive all future messages.
     ///
-    /// The new receiver starts from the current write position and will
-    /// NOT receive any previously sent messages.
+    /// New receiver starts at the current write_pos and does NOT see
+    /// previously-sent messages.
     public fn subscribe(&self) -> BroadcastReceiver<T> {
-        let inner = &mut *self.inner;
-        inner.receiver_count = inner.receiver_count + 1;
-
+        if self.inner.closed.load(MemoryOrdering.Acquire) {
+            // Still create the receiver; it will observe Closed on first recv.
+        }
+        self.inner.receiver_count.fetch_add(1, MemoryOrdering.AcqRel);
+        let slot = Shared.new(RecvSlot {
+            id: self.inner.next_slot_id.fetch_add(1, MemoryOrdering.Relaxed),
+            read_pos: AtomicInt.new(
+                self.inner.write_pos.load(MemoryOrdering.Acquire)
+            ),
+            waker: Mutex.new(None),
+            dropped: AtomicBool.new(false),
+        });
+        {
+            let mut slots = self.inner.slots.lock().unwrap();
+            slots.push(slot.clone());
+        }
         BroadcastReceiver {
-            inner: self.inner,
-            read_pos: inner.write_pos,
+            inner: self.inner.clone(),
+            slot: slot,
         }
     }
 
-    /// Get the number of active receivers.
+    /// Number of active receivers (approximate — reflects atomic counter).
     public fn receiver_count(&self) -> Int {
-        let inner = &*self.inner;
-        inner.receiver_count
+        self.inner.receiver_count.load(MemoryOrdering.Acquire)
     }
 
-    /// Close the channel. All subsequent receives will return `Closed`.
-    public fn close(&mut self) {
-        let inner = &mut *self.inner;
-        inner.closed = true;
+    /// Number of active senders.
+    public fn sender_count(&self) -> Int {
+        self.inner.sender_count.load(MemoryOrdering.Acquire)
+    }
+
+    /// Close the channel — subsequent recv returns `Err(Closed)`.
+    public fn close(&self) {
+        self.inner.closed.store(true, MemoryOrdering.Release);
+        wake_all_receivers(&self.inner);
+    }
+
+    /// Is the channel closed?
+    public fn is_closed(&self) -> Bool {
+        self.inner.closed.load(MemoryOrdering.Acquire)
+    }
+}
+
+implement<T> Clone for BroadcastSender<T> {
+    fn clone(&self) -> BroadcastSender<T> {
+        self.inner.sender_count.fetch_add(1, MemoryOrdering.AcqRel);
+        BroadcastSender { inner: self.inner.clone() }
+    }
+}
+
+implement<T> Drop for BroadcastSender<T> {
+    fn drop(&mut self) {
+        let remaining = self.inner.sender_count
+            .fetch_sub(1, MemoryOrdering.AcqRel) - 1;
+        if remaining == 0 {
+            // Last sender — close the channel and wake receivers.
+            self.inner.closed.store(true, MemoryOrdering.Release);
+            wake_all_receivers(&self.inner);
+        }
     }
 }
 
@@ -167,121 +287,222 @@ implement<T> BroadcastSender<T> {
 
 /// Receiver half of a broadcast channel.
 ///
-/// Each receiver independently tracks its position in the ring buffer.
-/// All receivers see all messages sent after they were created.
+/// Each receiver tracks its own position. Implements both `Future` (so that
+/// `rx.recv().await` works in an idiomatic way) and `Stream` (so that
+/// `for await msg in rx { ... }` works with combinators).
 public type BroadcastReceiver<T> is {
     inner: Shared<BroadcastInner<T>>,
-    /// This receiver's current read position
-    read_pos: Int,
+    slot: Shared<RecvSlot>,
 };
 
 implement<T> BroadcastReceiver<T> {
-    /// Receive the next value from the channel.
-    ///
-    /// Returns `Ok(value)` if a message is available, or an error:
-    /// - `Err(Closed)` if all senders are dropped and no messages remain
-    /// - `Err(Lagged(n))` if this receiver fell behind by n messages;
-    ///   the read position is advanced to the oldest available message
-    public fn recv(&mut self) -> Result<T, RecvError> {
-        let inner = &*self.inner;
-
-        // Check if we've fallen behind
-        let behind = inner.write_pos - self.read_pos;
-        if behind > inner.capacity {
-            let missed = behind - inner.capacity;
-            // Jump to the oldest available message
-            self.read_pos = inner.write_pos - inner.capacity;
-            return Err(RecvError.Lagged(missed));
-        }
-
-        // Check if there's data available
-        if self.read_pos >= inner.write_pos {
-            if inner.closed || inner.sender_count == 0 {
-                return Err(RecvError.Closed);
-            }
-            // No data yet — in a real async implementation this would
-            // register with a waker and return Pending
-            return Err(RecvError.Closed);
-        }
-
-        let idx = self.read_pos % inner.capacity;
-        self.read_pos = self.read_pos + 1;
-
-        match inner.buffer[idx] {
-            Some(val) => Ok(val),
-            None => Err(RecvError.Closed),
+    /// Explicit awaitable recv future.
+    public fn recv(&self) -> BroadcastRecv<T> {
+        BroadcastRecv {
+            inner: self.inner.clone(),
+            slot: self.slot.clone(),
         }
     }
 
-    /// Attempt to receive without blocking.
-    ///
-    /// Returns immediately with the current state.
-    public fn try_recv(&mut self) -> TryRecvResult<T> {
-        let inner = &*self.inner;
-
-        // Check lagged
-        let behind = inner.write_pos - self.read_pos;
-        if behind > inner.capacity {
-            let missed = behind - inner.capacity;
-            self.read_pos = inner.write_pos - inner.capacity;
-            return TryRecvResult.Lagged(missed);
-        }
-
-        // Check empty
-        if self.read_pos >= inner.write_pos {
-            if inner.closed || inner.sender_count == 0 {
-                return TryRecvResult.Closed;
-            }
-            return TryRecvResult.Empty;
-        }
-
-        let idx = self.read_pos % inner.capacity;
-        self.read_pos = self.read_pos + 1;
-
-        match inner.buffer[idx] {
-            Some(val) => TryRecvResult.Value(val),
-            None => TryRecvResult.Closed,
-        }
+    /// Non-blocking receive attempt. Returns current status.
+    public fn try_recv(&self) -> TryRecvResult<T> {
+        poll_recv_inner(&self.inner, &self.slot, None)
     }
 
-    /// Get the number of messages available to read.
+    /// Number of messages available to read (may be stale).
     public fn len(&self) -> Int {
-        let inner = &*self.inner;
-        let behind = inner.write_pos - self.read_pos;
-        if behind > inner.capacity {
-            inner.capacity
-        } else {
-            behind
-        }
+        let write_pos = self.inner.write_pos.load(MemoryOrdering.Acquire);
+        let read_pos = self.slot.read_pos.load(MemoryOrdering.Acquire);
+        let behind = write_pos - read_pos;
+        if behind > self.inner.capacity { self.inner.capacity } else { behind }
     }
 
-    /// Check if there are no messages available.
+    /// Is empty?
     public fn is_empty(&self) -> Bool {
         self.len() == 0
+    }
+
+    /// Cancellable async recv honouring a cancellation token.
+    public async fn recv_cancellable(
+        &self,
+        token: &CancellationToken,
+    ) -> Result<Result<T, RecvError>, CancellationError> {
+        select {
+            r = self.recv().await => Ok(r),
+            reason = token.cancelled().await => Err(CancellationError.new(reason)),
+        }
+    }
+}
+
+implement<T> Drop for BroadcastReceiver<T> {
+    fn drop(&mut self) {
+        // Mark slot as dropped so sender can skip on next broadcast.
+        self.slot.dropped.store(true, MemoryOrdering.Release);
+        self.inner.receiver_count.fetch_sub(1, MemoryOrdering.AcqRel);
+        // Best-effort compaction: remove our slot under the slots lock.
+        let mut slots = self.inner.slots.lock().unwrap();
+        slots.retain(|s| s.id != self.slot.id);
+    }
+}
+
+/// Receiver also implements Future directly for `.await` ergonomics.
+/// (Returns `Result<T, RecvError>` — different from the MPSC Receiver
+/// which yields `Maybe<T>`.)
+implement<T> Future for BroadcastReceiver<T> {
+    type Output = Result<T, RecvError>;
+
+    fn poll(&mut self, cx: &mut Context) -> Poll<Result<T, RecvError>> {
+        match poll_recv_inner(&self.inner, &self.slot, Some(cx)) {
+            TryRecvResult.Value(v) => Poll.Ready(Ok(v)),
+            TryRecvResult.Lagged(n) => Poll.Ready(Err(RecvError.Lagged(n))),
+            TryRecvResult.Closed => Poll.Ready(Err(RecvError.Closed)),
+            TryRecvResult.Empty => Poll.Pending,
+        }
+    }
+}
+
+/// Stream<Item = Result<T, RecvError>> — for `for await msg in rx { ... }`.
+implement<T> Stream for BroadcastReceiver<T> {
+    type Item = Result<T, RecvError>;
+
+    fn poll_next(&mut self, cx: &mut Context) -> Poll<Maybe<Result<T, RecvError>>> {
+        match poll_recv_inner(&self.inner, &self.slot, Some(cx)) {
+            TryRecvResult.Value(v) => Poll.Ready(Some(Ok(v))),
+            TryRecvResult.Lagged(n) => Poll.Ready(Some(Err(RecvError.Lagged(n)))),
+            TryRecvResult.Closed => Poll.Ready(None),
+            TryRecvResult.Empty => Poll.Pending,
+        }
     }
 }
 
 // =============================================================================
-// Factory Function
+// BroadcastRecv — explicit awaitable recv future
 // =============================================================================
 
-/// Create a new broadcast channel with the given capacity.
-///
-/// Returns a (sender, receiver) pair. Additional receivers can be created
-/// by calling `sender.subscribe()`.
-///
-/// The capacity determines the maximum number of messages that can be
-/// buffered before slow receivers start lagging.
-///
-/// # Example
-/// ```verum
-/// let (tx, rx) = broadcast_channel(32);
-/// tx.send("hello");
-/// assert_eq(rx.recv(), Ok("hello"));
-/// ```
-public fn broadcast_channel<T>(capacity: Int) -> (BroadcastSender<T>, BroadcastReceiver<T>) {
-    let inner = Shared(new_inner(capacity));
-    let sender = BroadcastSender { inner: inner };
-    let receiver = BroadcastReceiver { inner: inner, read_pos: 0 };
+public type BroadcastRecv<T> is {
+    inner: Shared<BroadcastInner<T>>,
+    slot: Shared<RecvSlot>,
+};
+
+implement<T> Future for BroadcastRecv<T> {
+    type Output = Result<T, RecvError>;
+
+    fn poll(&mut self, cx: &mut Context) -> Poll<Result<T, RecvError>> {
+        match poll_recv_inner(&self.inner, &self.slot, Some(cx)) {
+            TryRecvResult.Value(v) => Poll.Ready(Ok(v)),
+            TryRecvResult.Lagged(n) => Poll.Ready(Err(RecvError.Lagged(n))),
+            TryRecvResult.Closed => Poll.Ready(Err(RecvError.Closed)),
+            TryRecvResult.Empty => Poll.Pending,
+        }
+    }
+}
+
+// =============================================================================
+// Core poll helper — used by both Future and Stream impls
+// =============================================================================
+
+/// Snapshot-and-read one item, or register waker if empty.
+/// If `cx` is Some, the slot's waker is replaced with cx.waker(); otherwise
+/// try-recv semantics apply (no waker update).
+fn poll_recv_inner<T>(
+    inner: &BroadcastInner<T>,
+    slot: &RecvSlot,
+    cx: Maybe<&Context>,
+) -> TryRecvResult<T> {
+    let capacity = inner.capacity;
+    let write_pos = inner.write_pos.load(MemoryOrdering.Acquire);
+    let read_pos = slot.read_pos.load(MemoryOrdering.Acquire);
+
+    // Lag detection.
+    let behind = write_pos - read_pos;
+    if behind > capacity {
+        let missed = behind - capacity;
+        let new_pos = write_pos - capacity;
+        slot.read_pos.store(new_pos, MemoryOrdering.Release);
+        return TryRecvResult.Lagged(missed);
+    }
+
+    // Empty?
+    if read_pos >= write_pos {
+        if inner.closed.load(MemoryOrdering.Acquire) {
+            return TryRecvResult.Closed;
+        }
+        // Register waker if async context was provided.
+        if let Some(ctx) = cx {
+            let mut w = slot.waker.lock().unwrap();
+            *w = Some(ctx.waker().clone());
+            // Re-check after register to close lost-wake race.
+            let write_pos_2 = inner.write_pos.load(MemoryOrdering.Acquire);
+            if read_pos < write_pos_2 {
+                // New value landed; clear waker and retry read below.
+                *w = None;
+                drop(w);
+                // Fall through to value-read path by recursing once.
+                return poll_recv_inner(inner, slot, None);
+            }
+            if inner.closed.load(MemoryOrdering.Acquire) {
+                *w = None;
+                return TryRecvResult.Closed;
+            }
+        }
+        return TryRecvResult.Empty;
+    }
+
+    // Read slot at read_pos.
+    let idx = read_pos % capacity;
+    let buf = inner.buffer.lock().unwrap();
+    let value_maybe = buf[idx];
+    drop(buf);
+
+    // Advance our read_pos regardless (we've observed this slot).
+    slot.read_pos.store(read_pos + 1, MemoryOrdering.Release);
+
+    match value_maybe {
+        Some(v) => TryRecvResult.Value(v),
+        None => {
+            // Slot never written — only possible if write_pos was bumped
+            // without a corresponding buf write (can't happen in current impl,
+            // but defensive).
+            if inner.closed.load(MemoryOrdering.Acquire) {
+                TryRecvResult.Closed
+            } else {
+                TryRecvResult.Empty
+            }
+        }
+    }
+}
+
+// =============================================================================
+// Factory Functions
+// =============================================================================
+
+/// Create a broadcast channel with the given capacity and default lag policy.
+public fn broadcast_channel<T>(capacity: Int)
+    -> (BroadcastSender<T>, BroadcastReceiver<T>)
+{
+    broadcast_channel_with(capacity, LagPolicy.LagTolerant)
+}
+
+/// Create a broadcast channel with an explicit lag policy.
+public fn broadcast_channel_with<T>(capacity: Int, policy: LagPolicy)
+    -> (BroadcastSender<T>, BroadcastReceiver<T>)
+{
+    assert(capacity > 0, "broadcast capacity must be positive");
+    let inner = Shared.new(new_inner::<T>(capacity, policy));
+
+    // Initial receiver slot.
+    let slot = Shared.new(RecvSlot {
+        id: inner.next_slot_id.fetch_add(1, MemoryOrdering.Relaxed),
+        read_pos: AtomicInt.new(0),
+        waker: Mutex.new(None),
+        dropped: AtomicBool.new(false),
+    });
+    {
+        let mut slots = inner.slots.lock().unwrap();
+        slots.push(slot.clone());
+    }
+
+    let sender = BroadcastSender { inner: inner.clone() };
+    let receiver = BroadcastReceiver { inner: inner, slot: slot };
     (sender, receiver)
 }

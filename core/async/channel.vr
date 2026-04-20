@@ -17,6 +17,8 @@ mount sync.*;
 mount .poll.*;
 mount .waker.*;
 mount .future.*;
+mount .stream.{Stream};
+mount .cancellation.{CancellationToken, CancellationError, CancelReason};
 
 // Cross-platform futex for blocking recv
 @cfg(target_os = "linux")
@@ -203,28 +205,73 @@ public type Sender<T> is {
 };
 
 implement<T> Sender<T> {
-    // Send value, waiting if channel is full.
+    // Send value synchronously. For unbounded — always succeeds immediately.
+    // For bounded — if full, BLOCKS current thread via futex until a slot
+    // frees (or channel closes). Use `send_async(value).await` for the
+    // async equivalent that yields to the executor instead of blocking.
     public fn send(&self, value: T) -> Result<(), SendError<T>> {
         if self.inner.closed.load(MemoryOrdering.Acquire) {
             return Err(SendError(value));
         }
 
-        // For unbounded, just push
-        // For bounded, would need to wait
-        let mut guard = self.inner.queue.lock().unwrap();
-        guard.push_back(value);
+        loop {
+            let seq = self.inner.notify_seq.load(MemoryOrdering.Acquire);
 
-        // Notify receiver — increment seq and wake via futex
-        self.inner.notify_seq.fetch_add(1, MemoryOrdering.Release);
-        let _ = sys_futex_wake(&self.inner.notify_seq.value, 1);
+            let mut guard = self.inner.queue.lock().unwrap();
+            // Bounded-capacity check under the same lock as the push — no TOCTOU.
+            if let Some(cap) = self.inner.capacity {
+                if guard.len() >= cap {
+                    drop(guard);
+                    if self.inner.closed.load(MemoryOrdering.Acquire) {
+                        return Err(SendError(value));
+                    }
+                    // Wait until a receiver pops.
+                    let _ = sys_futex_wait(&self.inner.notify_seq.value, seq, None);
+                    continue;
+                }
+            }
 
-        // Also wake async receiver if registered
-        let waker_guard = self.inner.receiver_waker.lock().unwrap();
-        if let Some(waker) = waker_guard.as_ref() {
-            waker.wake_by_ref();
+            guard.push_back(value);
+            drop(guard);
+
+            self.inner.notify_seq.fetch_add(1, MemoryOrdering.Release);
+            let _ = sys_futex_wake(&self.inner.notify_seq.value, 1);
+
+            let waker_guard = self.inner.receiver_waker.lock().unwrap();
+            if let Some(waker) = waker_guard.as_ref() {
+                waker.wake_by_ref();
+            }
+
+            return Ok(());
         }
+    }
 
-        Ok(())
+    // Async send — returns a Future. On bounded-full, yields (Pending) and
+    // registers caller waker; wakes when receiver pops.
+    public fn send_async(&self, value: T) -> SendFut<T> {
+        SendFut {
+            inner: self.inner.clone(),
+            value: Some(value),
+            waker_registered: false,
+        }
+    }
+
+    // Send honouring a cancellation token — resolves to Err(Cancelled) if
+    // the token fires before send completes.
+    public async fn send_cancellable(
+        &self,
+        value: T,
+        token: &CancellationToken,
+    ) -> Result<(), CancellableSendError<T>> {
+        select {
+            r = self.send_async(value).await => match r {
+                Ok(()) => Ok(()),
+                Err(e) => Err(CancellableSendError.Send(e)),
+            },
+            reason = token.cancelled().await => {
+                Err(CancellableSendError.Cancelled(CancellationError.new(reason)))
+            },
+        }
     }
 
     // Send with a timeout — block up to `duration` waiting for a
@@ -267,30 +314,44 @@ implement<T> Sender<T> {
         }
     }
 
-    // Try to send without waiting.
+    // Try to send without waiting. Capacity-check + push under one lock
+    // to avoid TOCTOU between check and push.
     public fn try_send(&self, value: T) -> Result<(), TrySendError<T>> {
         if self.inner.closed.load(MemoryOrdering.Acquire) {
             return Err(TrySendError.Disconnected(value));
         }
 
-        // Check capacity for bounded channel
+        let mut guard = self.inner.queue.lock().unwrap();
+
         if let Some(cap) = self.inner.capacity {
-            let guard = self.inner.queue.lock().unwrap();
             if guard.len() >= cap {
                 return Err(TrySendError.Full(value));
             }
         }
 
-        let mut guard = self.inner.queue.lock().unwrap();
         guard.push_back(value);
+        drop(guard);
 
-        // Wake receiver
+        self.inner.notify_seq.fetch_add(1, MemoryOrdering.Release);
+        let _ = sys_futex_wake(&self.inner.notify_seq.value, 1);
+
         let waker_guard = self.inner.receiver_waker.lock().unwrap();
         if let Some(waker) = waker_guard.as_ref() {
             waker.wake_by_ref();
         }
 
         Ok(())
+    }
+
+    // Alias for is_closed — matches tokio naming.
+    public fn is_disconnected(&self) -> Bool {
+        self.is_closed()
+    }
+
+    // Future that resolves when the channel closes (all senders or receiver
+    // dropped). Composable with `select { ... }` on the sender side.
+    public fn closed(&self) -> ChannelClosed<T> {
+        ChannelClosed { inner: self.inner.clone() }
     }
 
     // Check if receiver has been dropped.
@@ -455,6 +516,186 @@ implement<T> Drop for Receiver<T> {
 implement<T> Debug for Receiver<T> {
     fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
         f.write_str("Receiver { .. }")
+    }
+}
+
+implement<T> Receiver<T> {
+    // Batch-drain up to `max` items in a single lock acquisition. Populates
+    // `out` via push_back; returns number of items drained. Zero indicates
+    // empty-and-still-open or closed — distinguish via `is_closed`.
+    public fn recv_many(&mut self, out: &mut List<T>, max: Int) -> Int {
+        let mut guard = self.inner.queue.lock().unwrap();
+        let mut n = 0;
+        while n < max {
+            match guard.pop_front() {
+                Some(value) => { out.push(value); n = n + 1; }
+                None => break,
+            }
+        }
+        n
+    }
+
+    // Explicit awaitable recv future (same semantics as using Receiver as
+    // a Future directly, but more readable in select-bodies).
+    public fn recv_fut(&mut self) -> RecvFut<T> {
+        RecvFut { inner: self.inner.clone() }
+    }
+
+    // Async recv honouring a cancellation token.
+    public async fn recv_cancellable(
+        &mut self,
+        token: &CancellationToken,
+    ) -> Result<Maybe<T>, CancellationError> {
+        select {
+            v = self.recv_fut().await => Ok(v),
+            reason = token.cancelled().await => Err(CancellationError.new(reason)),
+        }
+    }
+}
+
+// Stream<Item = T> impl — enables `for await msg in rx { ... }`.
+implement<T> Stream for Receiver<T> {
+    type Item = T;
+
+    fn poll_next(&mut self, cx: &mut Context) -> Poll<Maybe<T>> {
+        let mut guard = self.inner.queue.lock().unwrap();
+        if let Some(value) = guard.pop_front() {
+            let mut wakers = self.inner.sender_wakers.lock().unwrap();
+            if let Some(waker) = wakers.pop() {
+                waker.wake();
+            }
+            return Poll.Ready(Some(value));
+        }
+
+        if self.inner.closed.load(MemoryOrdering.Acquire) {
+            return Poll.Ready(None);
+        }
+
+        let mut waker_guard = self.inner.receiver_waker.lock().unwrap();
+        *waker_guard = Some(cx.waker().clone());
+        Poll.Pending
+    }
+
+    fn size_hint(&self) -> (Int, Maybe<Int>) {
+        let g = self.inner.queue.lock().unwrap();
+        (g.len(), self.inner.capacity)
+    }
+}
+
+// =============================================================================
+// SendFut<T> — async-backpressure future for bounded channels
+// =============================================================================
+
+public type SendFut<T> is {
+    inner: Shared<ChannelInner<T>>,
+    value: Maybe<T>,
+    waker_registered: Bool,
+};
+
+implement<T> Future for SendFut<T> {
+    type Output = Result<(), SendError<T>>;
+
+    fn poll(&mut self, cx: &mut Context) -> Poll<Result<(), SendError<T>>> {
+        if self.inner.closed.load(MemoryOrdering.Acquire) {
+            let v = self.value.take().unwrap();
+            return Poll.Ready(Err(SendError(v)));
+        }
+
+        let mut guard = self.inner.queue.lock().unwrap();
+
+        if let Some(cap) = self.inner.capacity {
+            if guard.len() >= cap {
+                if !self.waker_registered {
+                    let mut wakers = self.inner.sender_wakers.lock().unwrap();
+                    wakers.push(cx.waker().clone());
+                    self.waker_registered = true;
+                }
+                return Poll.Pending;
+            }
+        }
+
+        let v = self.value.take().unwrap();
+        guard.push_back(v);
+        drop(guard);
+
+        self.inner.notify_seq.fetch_add(1, MemoryOrdering.Release);
+        let _ = sys_futex_wake(&self.inner.notify_seq.value, 1);
+
+        let waker_guard = self.inner.receiver_waker.lock().unwrap();
+        if let Some(waker) = waker_guard.as_ref() {
+            waker.wake_by_ref();
+        }
+
+        Poll.Ready(Ok(()))
+    }
+}
+
+// =============================================================================
+// RecvFut<T> — explicit awaitable recv future
+// =============================================================================
+
+public type RecvFut<T> is {
+    inner: Shared<ChannelInner<T>>,
+};
+
+implement<T> Future for RecvFut<T> {
+    type Output = Maybe<T>;
+
+    fn poll(&mut self, cx: &mut Context) -> Poll<Maybe<T>> {
+        let mut guard = self.inner.queue.lock().unwrap();
+        if let Some(value) = guard.pop_front() {
+            let mut wakers = self.inner.sender_wakers.lock().unwrap();
+            if let Some(waker) = wakers.pop() {
+                waker.wake();
+            }
+            return Poll.Ready(Some(value));
+        }
+
+        if self.inner.closed.load(MemoryOrdering.Acquire) {
+            return Poll.Ready(None);
+        }
+
+        let mut waker_guard = self.inner.receiver_waker.lock().unwrap();
+        *waker_guard = Some(cx.waker().clone());
+        Poll.Pending
+    }
+}
+
+// =============================================================================
+// ChannelClosed<T> — sender-side awaitable for disconnect detection
+// =============================================================================
+
+public type ChannelClosed<T> is {
+    inner: Shared<ChannelInner<T>>,
+};
+
+implement<T> Future for ChannelClosed<T> {
+    type Output = ();
+
+    fn poll(&mut self, cx: &mut Context) -> Poll<()> {
+        if self.inner.closed.load(MemoryOrdering.Acquire) {
+            return Poll.Ready(());
+        }
+        let mut waker_guard = self.inner.receiver_waker.lock().unwrap();
+        *waker_guard = Some(cx.waker().clone());
+        Poll.Pending
+    }
+}
+
+// =============================================================================
+// CancellableSendError<T> — error from send_cancellable
+// =============================================================================
+
+public type CancellableSendError<T> is
+    | Send(SendError<T>)
+    | Cancelled(CancellationError);
+
+implement<T> Debug for CancellableSendError<T> {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            Send(_) => f.write_str("CancellableSendError.Send(..)"),
+            Cancelled(_) => f.write_str("CancellableSendError.Cancelled(..)"),
+        }
     }
 }
 

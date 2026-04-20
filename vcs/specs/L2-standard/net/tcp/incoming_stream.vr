@@ -1,0 +1,42 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: net, tcp, listener, incoming, stream, for-await
+// @timeout: 10000
+// @expect: pass
+
+// AsyncIncoming — Stream<Item = Result<TcpStream, IoError>> from a listener.
+
+mount core.net.tcp.{TcpListener, TcpStream, AsyncIncoming};
+mount core.async.stream.{Stream};
+mount core.async.poll.{Poll};
+mount core.async.waker.{Context};
+mount core.async.cancellation.{CancellationToken, CancellationTokenSource, CancellationError};
+mount core.net.addr.SocketAddr;
+
+// Shape: incoming_async returns AsyncIncoming
+fn typecheck_incoming_async(listener: &TcpListener) -> AsyncIncoming {
+    listener.incoming_async()
+}
+
+// Typecheck: manual Stream iteration via poll_next (for-await needs
+// AsyncStream/AsyncIterator protocol landing — tracked separately).
+fn typecheck_poll_next(
+    inc: &mut AsyncIncoming,
+    cx: &mut Context,
+) -> Poll<Maybe<Result<TcpStream, IoError>>> {
+    inc.poll_next(cx)
+}
+
+// Cancellable accept (single-shot)
+async fn typecheck_accept_cancellable()
+    -> Result<Result<(TcpStream, SocketAddr), IoError>, CancellationError>
+{
+    let listener = TcpListener.bind("127.0.0.1:0").await?;
+    let source = CancellationTokenSource.new();
+    listener.accept_cancellable(&source.token()).await
+}
+
+fn main() {
+    // Shape-only tests.
+}

@@ -1,0 +1,54 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: async, channel, recv_many, batch
+// @timeout: 10000
+// @expect: pass
+
+// recv_many — batch-drain up to N items in one lock acquisition.
+
+mount core.async.channel.{
+    Sender, Receiver, bounded, unbounded_channel,
+};
+
+fn test_recv_many_api() {
+    let (tx, mut rx): (Sender<Int>, Receiver<Int>) = bounded(8);
+
+    // Push some values via try_send (sync path)
+    let _ = tx.try_send(1);
+    let _ = tx.try_send(2);
+    let _ = tx.try_send(3);
+
+    // Drain up to 10 — should get the 3 available.
+    let mut buf: List<Int> = [];
+    let n = rx.recv_many(&mut buf, 10);
+    assert(n == 3, "drained 3 items");
+    assert(buf.len() == 3, "buf populated");
+
+    // Drain again — empty.
+    let mut buf2: List<Int> = [];
+    let n2 = rx.recv_many(&mut buf2, 10);
+    assert(n2 == 0, "empty drain returns 0");
+}
+
+fn test_recv_many_partial() {
+    let (tx, mut rx): (Sender<Int>, Receiver<Int>) = unbounded_channel();
+    for i in 0..20 {
+        let _ = tx.try_send(i);
+    }
+
+    let mut buf: List<Int> = [];
+    let n = rx.recv_many(&mut buf, 5);
+    assert(n == 5, "drained exactly 5");
+    assert(buf.len() == 5, "buf len = 5");
+
+    // 15 remaining
+    let mut buf2: List<Int> = [];
+    let n2 = rx.recv_many(&mut buf2, 100);
+    assert(n2 == 15, "drained remaining 15");
+}
+
+fn main() {
+    test_recv_many_api();
+    test_recv_many_partial();
+}

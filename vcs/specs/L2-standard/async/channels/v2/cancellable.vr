@@ -1,0 +1,46 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: async, channel, cancellation, cooperative
+// @timeout: 10000
+// @expect: pass
+
+// Cancellable send/recv — integrate with core.async.cancellation.
+
+mount core.async.channel.{
+    Sender, Receiver, SendError, CancellableSendError,
+    bounded, unbounded_channel,
+};
+mount core.async.cancellation.{
+    CancellationToken, CancellationTokenSource, CancellationError,
+};
+
+// Shape: recv_cancellable resolves to Ok(Maybe<T>) or Err(CancellationError)
+async fn typecheck_recv_cancellable() -> Result<Maybe<Int>, CancellationError> {
+    let (_tx, mut rx) = bounded::<Int>(4);
+    let source = CancellationTokenSource.new();
+    let token = source.token();
+    rx.recv_cancellable(&token).await
+}
+
+// Shape: send_cancellable resolves to Ok(()) or CancellableSendError<T>
+async fn typecheck_send_cancellable() -> Result<(), CancellableSendError<Int>> {
+    let (tx, _rx) = bounded::<Int>(4);
+    let source = CancellationTokenSource.new();
+    let token = source.token();
+    tx.send_cancellable(42, &token).await
+}
+
+// is_disconnected alias
+fn typecheck_is_disconnected<T>(tx: &Sender<T>) -> Bool {
+    tx.is_disconnected()
+}
+
+// closed() returns ChannelClosed future
+async fn typecheck_closed<T>(tx: &Sender<T>) {
+    tx.closed().await;
+}
+
+fn main() {
+    // Shape checks only.
+}

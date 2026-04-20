@@ -1,0 +1,51 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: async, cancellation, cancelled, future, await
+// @timeout: 10000
+// @expect: pass
+
+// Async `cancelled()` future — the core composability primitive for
+// structured concurrency (select { work vs cancel }). Typecheck-level test.
+
+mount core.async.cancellation.{
+    CancellationToken,
+    CancellationTokenSource,
+    CancelledFuture,
+    CancelReason,
+};
+mount core.async.future.{Future, ready};
+
+// `cancelled()` returns a Future<Output = CancelReason>. Verify shape.
+async fn wait_for_cancel(token: &CancellationToken) -> CancelReason {
+    token.cancelled().await
+}
+
+// Select-based composition: race work-future vs cancel-future.
+// Note: select arms require `x = future.await => ...` syntax.
+async fn run_until_cancel(
+    token: &CancellationToken,
+) -> Result<Int, CancelReason> {
+    let work = ready(42);
+    select {
+        r = work.await => Ok(r),
+        reason = token.cancelled().await => Err(reason),
+    }
+}
+
+fn test_cancelled_future_shape() {
+    let source = CancellationTokenSource.new();
+    let token = source.token();
+    let _fut: CancelledFuture = token.cancelled();
+}
+
+fn test_never_sentinel_shape() {
+    let never = CancellationToken.never();
+    assert(!never.is_cancelled(), "never token is never cancelled");
+    let _fut = never.cancelled();
+}
+
+fn main() {
+    test_cancelled_future_shape();
+    test_never_sentinel_shape();
+}

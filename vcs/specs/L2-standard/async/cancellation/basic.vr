@@ -1,0 +1,121 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: async, cancellation, cooperative, basic
+// @timeout: 10000
+// @expect: pass
+
+// Extended basic smoke test for core.async.cancellation — exercises
+// cancel_with, reason, idempotency, clones share state.
+
+mount core.async.cancellation.{
+    CancellationToken,
+    CancellationTokenSource,
+    CancellationError,
+    CancelReason,
+};
+mount core.time.instant.Instant;
+
+fn test_default_reason() {
+    let source = CancellationTokenSource.new();
+    let token = source.token();
+
+    // Initially — no reason, not cancelled
+    assert(!token.is_cancelled(), "token should start uncancelled");
+    assert(token.reason().is_none(), "reason none before cancel");
+
+    source.cancel();
+
+    assert(token.is_cancelled(), "token cancelled after source.cancel()");
+    let r = token.reason();
+    assert(r.is_some(), "reason set after cancel");
+    match r.unwrap() {
+        CancelReason.Cancelled => { /* ok */ }
+        _ => assert(false, "default reason should be Cancelled"),
+    }
+}
+
+fn test_cancel_with_timeout_reason() {
+    let source = CancellationTokenSource.new();
+    let token = source.token();
+
+    let deadline = Instant.now();
+    source.cancel_with(CancelReason.Timeout { deadline: deadline });
+
+    match token.reason().unwrap() {
+        CancelReason.Timeout { deadline: d } => {
+            assert(d == deadline, "deadline preserved");
+        }
+        _ => assert(false, "Timeout variant expected"),
+    }
+}
+
+fn test_clone_shares_state() {
+    let source = CancellationTokenSource.new();
+    let t1 = source.token();
+    let t2 = t1.clone();
+    let t3 = source.token();
+
+    assert(!t1.is_cancelled(), "t1 uncancelled");
+    assert(!t2.is_cancelled(), "t2 uncancelled");
+    assert(!t3.is_cancelled(), "t3 uncancelled");
+
+    source.cancel();
+
+    assert(t1.is_cancelled(), "t1 cancelled via source");
+    assert(t2.is_cancelled(), "t2 clone saw cancel");
+    assert(t3.is_cancelled(), "t3 issued from same source saw cancel");
+}
+
+fn test_cancel_is_idempotent() {
+    let source = CancellationTokenSource.new();
+    source.cancel();
+    source.cancel();       // second call — no-op, no panic
+    source.cancel_with(CancelReason.Aborted("ignored".into()));
+
+    // First cancel wins — reason stays Cancelled (not Aborted)
+    match source.token().reason().unwrap() {
+        CancelReason.Cancelled => { /* ok */ }
+        _ => assert(false, "first cancel-reason should stick"),
+    }
+}
+
+fn test_throw_if_cancelled() {
+    let source = CancellationTokenSource.new();
+    let token = source.token();
+
+    assert(token.throw_if_cancelled().is_ok(), "uncancelled → Ok");
+
+    source.cancel_with(CancelReason.Aborted("shutdown".into()));
+
+    let err = token.throw_if_cancelled().unwrap_err();
+    let msg = err.message();
+    // Message contains "aborted: shutdown"
+    assert(msg.len() > 0, "error message non-empty");
+}
+
+fn test_reason_message_shapes() {
+    let r1 = CancelReason.Cancelled;
+    let r2 = CancelReason.Timeout { deadline: Instant.now() };
+    let r3 = CancelReason.ParentCancelled;
+    let r4 = CancelReason.Aborted("custom".into());
+
+    assert(r1.message().len() > 0, "Cancelled message");
+    assert(r2.message().len() > 0, "Timeout message");
+    assert(r3.message().len() > 0, "ParentCancelled message");
+    assert(r4.message().len() > 0, "Aborted message");
+
+    assert(!r1.is_timeout(), "Cancelled is not timeout");
+    assert(r2.is_timeout(), "Timeout is timeout");
+    assert(!r3.is_timeout(), "ParentCancelled is not timeout");
+    assert(!r4.is_timeout(), "Aborted is not timeout");
+}
+
+fn main() {
+    test_default_reason();
+    test_cancel_with_timeout_reason();
+    test_clone_shares_state();
+    test_cancel_is_idempotent();
+    test_throw_if_cancelled();
+    test_reason_message_shapes();
+}

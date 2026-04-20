@@ -1,0 +1,70 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: simd, bytes, find, search, utf8, crc32
+// @timeout: 10000
+// @expect: pass
+
+// SIMD byte-scan primitives — type-level shape tests for the helpers in
+// core/simd/bytes.vr. Runtime perf characteristics are tested by benchmarks,
+// once the LLVM codegen-backend for @intrinsic("simd_*") lands.
+
+mount core.simd.bytes.{
+    find_byte, find_any_of, find_header_terminator, find_subslice,
+    is_valid_utf8, skip_whitespace,
+    crc32c, crc32c_update,
+    base64_encode, base64_decode,
+    hex_encode, hex_decode,
+};
+
+fn typecheck_find_byte(buf: &[Byte]) -> Maybe<Int> {
+    find_byte(buf, 0x0A as Byte)
+}
+
+fn typecheck_find_any_of(buf: &[Byte], needles: &[Byte]) -> Maybe<(Int, Int)> {
+    find_any_of(buf, needles)
+}
+
+fn typecheck_header_terminator(buf: &[Byte]) -> Maybe<Int> {
+    find_header_terminator(buf)
+}
+
+fn typecheck_find_subslice(haystack: &[Byte], needle: &[Byte]) -> Maybe<Int> {
+    find_subslice(haystack, needle)
+}
+
+fn typecheck_utf8(bytes: &[Byte]) -> Bool {
+    is_valid_utf8(bytes)
+}
+
+fn typecheck_skip_whitespace(bytes: &[Byte]) -> Int {
+    skip_whitespace(bytes)
+}
+
+fn typecheck_crc32c(bytes: &[Byte]) -> u32 {
+    crc32c(bytes)
+}
+
+fn typecheck_crc32c_update(prev: u32, bytes: &[Byte]) -> u32 {
+    crc32c_update(prev, bytes)
+}
+
+fn typecheck_base64_encode(input: &[Byte], out: &mut List<Byte>) -> Int {
+    base64_encode(input, out)
+}
+
+fn typecheck_base64_decode(input: &[Byte], out: &mut List<Byte>) -> Result<Int, Int> {
+    base64_decode(input, out)
+}
+
+fn typecheck_hex_encode(input: &[Byte], out: &mut List<Byte>) -> Int {
+    hex_encode(input, out)
+}
+
+fn typecheck_hex_decode(input: &[Byte], out: &mut List<Byte>) -> Result<Int, Int> {
+    hex_decode(input, out)
+}
+
+fn main() {
+    // Shape-only tests.
+}

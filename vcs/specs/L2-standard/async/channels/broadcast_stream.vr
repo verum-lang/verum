@@ -1,0 +1,70 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: async, channels, broadcast, stream, cancellation
+// @timeout: 10000
+// @expect: pass
+
+// Stream impl for BroadcastReceiver + cancellable recv.
+
+mount core.async.broadcast.{
+    BroadcastSender, BroadcastReceiver, RecvError, BroadcastRecv,
+    broadcast_channel,
+};
+mount core.async.stream.{Stream, StreamExt};
+mount core.async.cancellation.{CancellationToken, CancellationTokenSource, CancellationError};
+mount core.async.poll.{Poll};
+mount core.async.waker.{Context};
+
+// Stream impl shape — receiver yields Result<T, RecvError>.
+fn typecheck_stream_poll_next<T>(
+    rx: &mut BroadcastReceiver<T>,
+    cx: &mut Context,
+) -> Poll<Maybe<Result<T, RecvError>>> {
+    rx.poll_next(cx)
+}
+
+// StreamExt auto-impls: .next() for manual iteration.
+async fn typecheck_stream_next() {
+    let (_tx, mut rx) = broadcast_channel::<Int>(8);
+    let _ = rx.next().await;
+}
+
+// Cancellable recv: Ok(Result<T, RecvError>) | Err(CancellationError).
+async fn typecheck_cancellable_recv()
+    -> Result<Result<Int, RecvError>, CancellationError>
+{
+    let (_tx, rx) = broadcast_channel::<Int>(4);
+    let source = CancellationTokenSource.new();
+    let token = source.token();
+    rx.recv_cancellable(&token).await
+}
+
+// Explicit BroadcastRecv future
+async fn typecheck_explicit_recv_future() -> Result<Int, RecvError> {
+    let (_tx, rx) = broadcast_channel::<Int>(4);
+    let _fut: BroadcastRecv<Int> = rx.recv();
+    rx.recv().await
+}
+
+// Drop semantics: receiver decrement counts on drop.
+fn test_receiver_drop_shape() {
+    let (tx, rx) = broadcast_channel::<Int>(4);
+    assert(tx.receiver_count() == 1, "initially 1 receiver");
+    let _ = rx;
+    // rx dropped — count decrements (async path; atomic decrement is eager).
+}
+
+// Sender clone/drop — last drop closes channel.
+fn test_sender_lifecycle() {
+    let (tx, _rx) = broadcast_channel::<Int>(4);
+    let tx2 = tx.clone();
+    assert(tx.sender_count() == 2, "2 senders after clone");
+    let _ = tx2;
+    // When last sender drops, channel is closed. Shape check only here.
+}
+
+fn main() {
+    test_receiver_drop_shape();
+    test_sender_lifecycle();
+}

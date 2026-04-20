@@ -29,6 +29,11 @@ module net.tls;
 
 mount core.*;
 mount core.io.protocols.{Read, Write};
+mount core.io.async_protocols.{AsyncRead, AsyncWrite};
+mount core.async.poll.{Poll};
+mount core.async.waker.{Context};
+mount core.async.future.{Future};
+mount core.async.cancellation.{CancellationToken, CancellationError};
 mount core.net.tcp.{TcpStream};
 
 // =============================================================================
@@ -653,6 +658,132 @@ implement TlsStream {
     /// Get the peer's certificate, if available.
     public fn peer_certificate(&self) -> Maybe<Certificate> {
         @intrinsic("verum.tls.peer_cert", &self.session)
+    }
+
+    /// Export the `tls-server-end-point` channel-binding data — SHA-256 hash of
+    /// the server certificate, as required by SCRAM-SHA-256-PLUS (RFC 5929).
+    /// Returns None if not computable (e.g., DH-only cipher without cert).
+    public fn peer_cert_hash_sha256(&self) -> Maybe<[Byte; 32]> {
+        @intrinsic("verum.tls.peer_cert_hash_sha256", &self.session)
+    }
+
+    /// RFC 5705 TLS-exporter: derive application-level keys from the
+    /// established session. `label` identifies the usage; `context` is optional
+    /// binding data; `length` is the number of bytes to derive.
+    pub fn export_keying_material(
+        &self,
+        label: &Text,
+        context: Maybe<&[Byte]>,
+        length: Int,
+    ) -> Result<List<Byte>, TlsError> {
+        @intrinsic("verum.tls.export_keying_material",
+            &self.session, label, context, length)
+    }
+
+    /// Negotiated ALPN-protocol, if any.
+    pub fn alpn(&self) -> Maybe<&Text> {
+        self.alpn_protocol.as_ref()
+    }
+
+    /// Enable Kernel TLS (KTLS) offload on the underlying socket — hands session
+    /// keys to the kernel so `sendfile(2)` zero-copies through NIC crypto
+    /// hardware. Requires Linux ≥ 6.0 + OpenSSL ≥ 3.2 / rustls ktls-feature
+    /// backend. Returns Err(Unsupported) if backend doesn't expose keys.
+    pub fn enable_ktls(&mut self) -> Result<(), TlsError> {
+        @intrinsic("verum.tls.enable_ktls", &self.session, self.inner.fd)
+    }
+}
+
+// =============================================================================
+// AsyncRead / AsyncWrite — non-blocking TLS I/O
+// =============================================================================
+//
+// Readiness waits go through the underlying TcpStream reactor; the @intrinsic
+// layer does the TLS record decode/encode. A real backend (rustls/OpenSSL/HACL*)
+// is wired via `verum.tls.*` symbols in the runtime — see backend abstraction
+// notes in internal/website/docs/stdlib/net.md.
+
+implement AsyncRead for TlsStream {
+    fn poll_read(&mut self, cx: &mut Context, buf: &mut List<Int>) -> Poll<Result<Int, IoError>> {
+        @intrinsic("verum.tls.poll_read", &self.session, cx, buf)
+    }
+}
+
+implement AsyncWrite for TlsStream {
+    fn poll_write(&mut self, cx: &mut Context, buf: &List<Int>) -> Poll<Result<Int, IoError>> {
+        @intrinsic("verum.tls.poll_write", &self.session, cx, buf)
+    }
+
+    fn poll_flush(&mut self, cx: &mut Context) -> Poll<Result<(), IoError>> {
+        @intrinsic("verum.tls.poll_flush", &self.session, cx)
+    }
+
+    fn poll_shutdown(&mut self, cx: &mut Context) -> Poll<Result<(), IoError>> {
+        @intrinsic("verum.tls.poll_shutdown", &self.session, cx)
+    }
+}
+
+implement TlsStream {
+    /// Cancellable async read.
+    pub async fn read_cancellable(
+        &mut self,
+        buf: &mut List<Int>,
+        token: &CancellationToken,
+    ) -> Result<Result<Int, IoError>, CancellationError> {
+        select {
+            r = self.read_async(buf).await => Ok(r),
+            reason = token.cancelled().await => Err(CancellationError.new(reason)),
+        }
+    }
+
+    /// Cancellable async write.
+    pub async fn write_cancellable(
+        &mut self,
+        buf: &List<Int>,
+        token: &CancellationToken,
+    ) -> Result<Result<Int, IoError>, CancellationError> {
+        select {
+            r = self.write_async(buf).await => Ok(r),
+            reason = token.cancelled().await => Err(CancellationError.new(reason)),
+        }
+    }
+
+    /// Ergonomic async read — returns Result<Int, IoError>.
+    pub async fn read_async(&mut self, buf: &mut List<Int>) -> Result<Int, IoError> {
+        let mut fut = TlsReadFut { stream: self, buf: buf };
+        fut.await
+    }
+
+    /// Ergonomic async write.
+    pub async fn write_async(&mut self, buf: &List<Int>) -> Result<Int, IoError> {
+        let mut fut = TlsWriteFut { stream: self, buf: buf };
+        fut.await
+    }
+}
+
+// Helper Future types for read_async / write_async.
+
+public type TlsReadFut<'a> is {
+    stream: &'a mut TlsStream,
+    buf: &'a mut List<Int>,
+};
+
+implement<'a> Future for TlsReadFut<'a> {
+    type Output = Result<Int, IoError>;
+    fn poll(&mut self, cx: &mut Context) -> Poll<Result<Int, IoError>> {
+        self.stream.poll_read(cx, self.buf)
+    }
+}
+
+public type TlsWriteFut<'a> is {
+    stream: &'a mut TlsStream,
+    buf: &'a List<Int>,
+};
+
+implement<'a> Future for TlsWriteFut<'a> {
+    type Output = Result<Int, IoError>;
+    fn poll(&mut self, cx: &mut Context) -> Poll<Result<Int, IoError>> {
+        self.stream.poll_write(cx, self.buf)
     }
 }
 

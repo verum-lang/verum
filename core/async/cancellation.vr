@@ -2,14 +2,15 @@
 // cancellation.vr - Cooperative cancellation tokens for async tasks
 // =============================================================================
 // Layer: 4 (Async)
-// Dependencies: core, sync
+// Dependencies: core, sync, async.waker, async.poll, async.future
 // =============================================================================
 //
-// CancellationToken provides the canonical pattern for cooperative task
-// cancellation. A running task itself decides when it is safe to stop,
-// typically at loop boundaries or after partial work has been flushed.
+// Cooperative cancellation. A running task decides when it is safe to stop,
+// typically at `.await` points or explicit checkpoints. Cancellation signals
+// propagate by setting an atomic flag AND waking all registered observers
+// (async futures via Waker; sync callbacks via closure invocation).
 //
-// Example:
+// ## Usage — sync check
 //
 //     let source = CancellationTokenSource.new();
 //     let token = source.token();
@@ -20,96 +21,526 @@
 //     };
 //     source.cancel();
 //
-// Tokens clone cheaply (share atomic flag via Shared wrapper). Cancelling
-// any observer cancels all clones. Matches the semantics of
-// Rust tokio::sync::CancellationToken and .NET CancellationToken.
+// ## Usage — async wait (composable with `select`)
+//
+//     select {
+//         result = work() => handle_success(result),
+//         _ = token.cancelled() => handle_cancellation(),
+//     }
+//
+// ## Usage — sync callback (bridge to non-async cleanup)
+//
+//     let reg = token.register(|| { close_handle(&fd); });
+//     // ... later, dropping `reg` deregisters the callback
+//
+// ## Usage — parent-child tree
+//
+//     let root = CancellationTokenSource.new();
+//     let child = root.token().child_source();
+//     // cancel on root propagates to child; canceling child does not affect root
+//
+// ## Usage — timeout-linked
+//
+//     let token = CancellationToken.with_timeout(5.seconds());
+//     select {
+//         r = work() => r,
+//         _ = token.cancelled() => Err(Timeout),
+//     }
+//
+// ## Usage — combine (any-of)
+//
+//     let combined = CancellationToken.combine(&[t1.clone(), t2.clone()]);
+//     // combined fires when either t1 or t2 fires
+//
+// ## Structured reasons
+//
+// CancelReason carries *why* cancellation was triggered. Distinct variants
+// help handlers distinguish user-cancel (Cancelled) from timeout (Timeout)
+// from parent-cancel (ParentCancelled) from explicit abort (Aborted).
+//
+// Matches the vocabulary of Rust tokio::sync::CancellationToken, .NET
+// CancellationToken and Trio CancelScope.
 // =============================================================================
 
 module core.async.cancellation;
 mount core.*;
-mount sync.atomic.{AtomicInt, MemoryOrdering};
-mount base.memory.Shared;
+mount sync.atomic.{AtomicInt, AtomicBool, MemoryOrdering};
+mount sync.mutex.Mutex;
+mount base.memory.{Shared, Weak, take as mem_take};
+mount .poll.{Poll};
+mount .waker.{Waker, Context};
+mount .future.{Future};
+mount core.time.{Duration, Instant};
 
 // -----------------------------------------------------------------------------
-// CancellationError
+// CancelReason — why cancellation was triggered
 // -----------------------------------------------------------------------------
-// Returned by `throw_if_cancelled()` and by combinators that bail out on
-// cancellation. Distinct from generic task errors so callers can pattern-
-// match specifically on the cancellation path.
+// Structured reason attached to each cancel event. Handlers distinguish
+// between user-initiated cancel, timeout expiration, parent propagation
+// and explicit abort. `Cancelled` is the default generic reason.
+
+public type CancelReason is
+    /// Explicit user request (no specific reason).
+    | Cancelled
+    /// A deadline/timeout fired.
+    | Timeout { deadline: Instant }
+    /// Parent token fired; this one propagated.
+    | ParentCancelled
+    /// Application-level abort with custom message.
+    | Aborted(Text);
+
+implement CancelReason {
+    public fn message(&self) -> Text {
+        match self {
+            Cancelled => "cancelled".into(),
+            Timeout { deadline } => f"timeout expired at {deadline}",
+            ParentCancelled => "parent cancelled".into(),
+            Aborted(msg) => f"aborted: {msg}",
+        }
+    }
+
+    /// True if this reason represents a timeout specifically.
+    public fn is_timeout(&self) -> Bool {
+        match self { Timeout { .. } => true, _ => false }
+    }
+}
+
+implement Clone for CancelReason {
+    fn clone(&self) -> CancelReason {
+        match self {
+            Cancelled => Cancelled,
+            Timeout { deadline } => Timeout { deadline: *deadline },
+            ParentCancelled => ParentCancelled,
+            Aborted(msg) => Aborted(msg.clone()),
+        }
+    }
+}
+
+// -----------------------------------------------------------------------------
+// CancellationError — returned by `throw_if_cancelled`
+// -----------------------------------------------------------------------------
+
 public type CancellationError is {
-    reason: Text,
+    reason: CancelReason,
+};
+
+implement CancellationError {
+    public fn new(reason: CancelReason) -> CancellationError {
+        CancellationError { reason: reason }
+    }
+
+    public fn message(&self) -> Text {
+        self.reason.message()
+    }
+}
+
+implement Clone for CancellationError {
+    fn clone(&self) -> CancellationError {
+        CancellationError { reason: self.reason.clone() }
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Internal: waiter / callback registration entries
+// -----------------------------------------------------------------------------
+
+// Opaque ID used to deregister a waiter or callback without walking the list.
+// Monotonically increasing per-flag counter.
+type RegistrationId is Int;
+
+// An awaiting future's registered wake-slot.
+type WaiterEntry is {
+    id: RegistrationId,
+    waker: Waker,
+};
+
+// A sync callback's registered entry.
+type CallbackEntry is {
+    id: RegistrationId,
+    callback: fn(),
 };
 
 // -----------------------------------------------------------------------------
 // CancellationFlag — internal shared state
 // -----------------------------------------------------------------------------
-// Single atomic flag shared between all observers of a source. Wrapped in
-// `Shared<...>` at the observer level so clones bump a refcount rather
-// than copying the atomic.
+// Shared across all clones of a token. Single atomic state flag plus
+// registries of wakers (async observers) and callbacks (sync cleanup).
+// Children are kept as weak refs to avoid cycles; parent-cancel walks
+// the list and propagates.
+//
+// State layout:
+//   state: 0 = active, 1 = cancelling (mid-propagation), 2 = cancelled (stable).
+//   reason: written once on first cancel via compare-exchange on state.
+//   next_id: monotonic counter for registration IDs.
+
 public type CancellationFlag is {
-    bits: AtomicInt,
+    state: AtomicInt,
+    reason: Mutex<Maybe<CancelReason>>,
+    waiters: Mutex<List<WaiterEntry>>,
+    callbacks: Mutex<List<CallbackEntry>>,
+    children: Mutex<List<Weak<CancellationFlag>>>,
+    next_id: AtomicInt,
 };
+
+// State constants for the `state` field.
+const STATE_ACTIVE: Int = 0;
+const STATE_CANCELLING: Int = 1;
+const STATE_CANCELLED: Int = 2;
 
 implement CancellationFlag {
     public fn new() -> CancellationFlag {
-        CancellationFlag { bits: AtomicInt.new(0) }
-    }
-
-    public fn cancel(&self) {
-        self.bits.store(1, MemoryOrdering.Release);
+        CancellationFlag {
+            state: AtomicInt.new(STATE_ACTIVE),
+            reason: Mutex.new(None),
+            waiters: Mutex.new(List.new()),
+            callbacks: Mutex.new(List.new()),
+            children: Mutex.new(List.new()),
+            next_id: AtomicInt.new(1),
+        }
     }
 
     public fn is_cancelled(&self) -> Bool {
-        self.bits.load(MemoryOrdering.Acquire) != 0
+        self.state.load(MemoryOrdering.Acquire) == STATE_CANCELLED
+    }
+
+    public fn reason(&self) -> Maybe<CancelReason> {
+        let guard = self.reason.lock().unwrap();
+        match &*guard {
+            Some(r) => Some(r.clone()),
+            None => None,
+        }
+    }
+
+    // Transition to cancelled and drain all registered observers.
+    // Returns true if this call performed the transition (first caller),
+    // false if already cancelled (idempotent).
+    public fn cancel_with(&self, r: CancelReason) -> Bool {
+        // Compare-exchange: active → cancelling. Losers bail out.
+        let prev = self.state.compare_exchange(
+            STATE_ACTIVE, STATE_CANCELLING,
+            MemoryOrdering.AcqRel, MemoryOrdering.Acquire,
+        );
+        if prev != STATE_ACTIVE {
+            return false;
+        }
+
+        // Record reason.
+        {
+            let mut rg = self.reason.lock().unwrap();
+            *rg = Some(r);
+        }
+
+        // Drain wakers — take ownership of the list and release lock
+        // before invoking wakers (avoid re-entrancy under lock).
+        let waiters_drained = {
+            let mut wg = self.waiters.lock().unwrap();
+            let list = mem_take(&mut *wg);
+            list
+        };
+        for entry in waiters_drained {
+            entry.waker.wake();
+        }
+
+        // Drain callbacks.
+        let callbacks_drained = {
+            let mut cg = self.callbacks.lock().unwrap();
+            let list = mem_take(&mut *cg);
+            list
+        };
+        for entry in callbacks_drained {
+            (entry.callback)();
+        }
+
+        // Propagate to children (weak → strong upgrade; skip dead).
+        let children_snapshot = {
+            let cg = self.children.lock().unwrap();
+            cg.iter().map(|w| w.clone()).collect::<List<_>>()
+        };
+        for weak in children_snapshot {
+            if let Some(child) = weak.upgrade() {
+                // Propagated reason — children see ParentCancelled,
+                // not the parent's own reason (structured traceability).
+                let _ = child.cancel_with(CancelReason.ParentCancelled);
+            }
+        }
+
+        // Publish final state.
+        self.state.store(STATE_CANCELLED, MemoryOrdering.Release);
+        true
+    }
+
+    // Register a waker; returns RegistrationId.
+    // If already cancelled, wakes the waker immediately and returns 0.
+    fn register_waiter(&self, waker: Waker) -> RegistrationId {
+        if self.is_cancelled() {
+            waker.wake();
+            return 0;
+        }
+        let id = self.next_id.fetch_add(1, MemoryOrdering.Relaxed);
+        let mut wg = self.waiters.lock().unwrap();
+        // Re-check under lock: avoid lost-wake race with concurrent cancel.
+        if self.is_cancelled() {
+            drop(wg);
+            waker.wake();
+            return 0;
+        }
+        wg.push(WaiterEntry { id: id, waker: waker });
+        id
+    }
+
+    fn deregister_waiter(&self, id: RegistrationId) {
+        if id == 0 { return; }
+        let mut wg = self.waiters.lock().unwrap();
+        wg.retain(|w| w.id != id);
+    }
+
+    fn register_callback(&self, cb: fn()) -> RegistrationId {
+        if self.is_cancelled() {
+            cb();
+            return 0;
+        }
+        let id = self.next_id.fetch_add(1, MemoryOrdering.Relaxed);
+        let mut cg = self.callbacks.lock().unwrap();
+        if self.is_cancelled() {
+            drop(cg);
+            cb();
+            return 0;
+        }
+        cg.push(CallbackEntry { id: id, callback: cb });
+        id
+    }
+
+    fn deregister_callback(&self, id: RegistrationId) {
+        if id == 0 { return; }
+        let mut cg = self.callbacks.lock().unwrap();
+        cg.retain(|c| c.id != id);
+    }
+
+    fn attach_child(&self, child: Weak<CancellationFlag>) {
+        // If already cancelled, immediately propagate.
+        if self.is_cancelled() {
+            if let Some(c) = child.upgrade() {
+                let _ = c.cancel_with(CancelReason.ParentCancelled);
+            }
+            return;
+        }
+        let mut cg = self.children.lock().unwrap();
+        // Re-check under lock.
+        if self.is_cancelled() {
+            drop(cg);
+            if let Some(c) = child.upgrade() {
+                let _ = c.cancel_with(CancelReason.ParentCancelled);
+            }
+            return;
+        }
+        cg.push(child);
     }
 }
 
 // -----------------------------------------------------------------------------
 // CancellationToken — observer of cancellation state
 // -----------------------------------------------------------------------------
-// A cooperative cancellation signal. Cheap to clone (Shared refcount bump).
-// The token is "cancelled" exactly once per instance tree: `cancel()` on
-// any clone flips the flag for all clones.
+// Cheap to clone (Shared refcount bump). All clones observe the same flag.
+// Can only *read* cancellation state; only a Source can trigger cancel.
+//
+// The `cancel()` method on Token is retained for backwards-compatibility
+// with the phase-0 API; strictly, the intent is that only Sources cancel.
+// Tests and trivial use cases should prefer using a Source.
+
 public type CancellationToken is {
     inner: Shared<CancellationFlag>,
 };
 
 implement CancellationToken {
-    // Create a fresh, non-cancelled token.
+    /// Create a fresh, non-cancelled token. Equivalent to
+    /// `CancellationTokenSource.new().token()` when you won't need the Source.
     public fn new() -> CancellationToken {
-        CancellationToken {
-            inner: Shared.new(CancellationFlag.new()),
-        }
+        CancellationToken { inner: Shared.new(CancellationFlag.new()) }
     }
 
-    // Clone this token. All clones observe the same cancellation flag,
-    // so cancelling one cancels all. O(1), lock-free (refcount bump).
+    /// Clone — O(1), lock-free (refcount bump). All clones share one flag.
     public fn clone(&self) -> CancellationToken {
         CancellationToken { inner: self.inner.clone() }
     }
 
-    // Signal cancellation. Idempotent — calling twice is a no-op.
-    public fn cancel(&self) {
-        self.inner.cancel();
-    }
-
-    // Check whether cancellation has been requested.
+    /// Quick synchronous check.
     public fn is_cancelled(&self) -> Bool {
         self.inner.is_cancelled()
     }
 
-    // Throw CancellationError if cancelled; otherwise return unit.
-    // Designed for use inside loops and long-running functions:
-    //
-    //     for chunk in input {
-    //         token.throw_if_cancelled()?;
-    //         process(chunk);
-    //     }
+    /// Read the cancellation reason if set. None while active.
+    public fn reason(&self) -> Maybe<CancelReason> {
+        self.inner.reason()
+    }
+
+    /// Trigger cancellation with default `Cancelled` reason.
+    /// Idempotent.
+    public fn cancel(&self) {
+        let _ = self.inner.cancel_with(CancelReason.Cancelled);
+    }
+
+    /// Trigger cancellation with an explicit structured reason.
+    public fn cancel_with(&self, r: CancelReason) {
+        let _ = self.inner.cancel_with(r);
+    }
+
+    /// Return `Err(CancellationError)` if cancelled, else `Ok(())`.
+    /// Designed for checkpointing inside loops:
+    ///
+    ///     for chunk in input {
+    ///         token.throw_if_cancelled()?;
+    ///         process(chunk);
+    ///     }
     public fn throw_if_cancelled(&self) -> Result<(), CancellationError> {
         if self.is_cancelled() {
-            Err(CancellationError { reason: "operation cancelled" })
+            let r = self.reason().unwrap_or(CancelReason.Cancelled);
+            Err(CancellationError.new(r))
         } else {
             Ok(())
+        }
+    }
+
+    /// Register a synchronous callback to fire on cancel.
+    /// Returns a Registration RAII-guard; drop deregisters.
+    /// If already cancelled, the callback fires immediately (synchronously).
+    public fn register(&self, callback: fn()) -> Registration {
+        let id = self.inner.register_callback(callback);
+        Registration { flag: self.inner.clone(), id: id }
+    }
+
+    /// Create an awaitable future that completes when this token is cancelled.
+    /// Use in `select { _ = token.cancelled() => ..., result = work() => ... }`.
+    public fn cancelled(&self) -> CancelledFuture {
+        CancelledFuture {
+            flag: self.inner.clone(),
+            registration_id: 0,
+        }
+    }
+
+    /// Create a child source whose token is cancelled when this token is cancelled
+    /// (and can independently be cancelled without affecting this parent).
+    public fn child_source(&self) -> CancellationTokenSource {
+        let src = CancellationTokenSource.new();
+        self.inner.attach_child(src.token.inner.weak());
+        src
+    }
+
+    /// Create a linked token that is cancelled when any of the inputs fires.
+    /// The returned token shares no state with inputs beyond the propagation
+    /// direction (input → returned).
+    public fn combine(tokens: &[CancellationToken]) -> CancellationToken {
+        let combined = CancellationTokenSource.new();
+        for t in tokens {
+            t.inner.attach_child(combined.token.inner.weak());
+        }
+        // Return the observer token; combined source is dropped here,
+        // but parent→child linkage keeps the flag alive through the
+        // children-list references of inputs until inputs are dropped.
+        // To keep the flag alive independently, callers should hold
+        // the returned token until they are done observing.
+        combined.token
+    }
+
+    /// Convenience: create a token that auto-cancels after `duration`.
+    /// The timer is driven by the current runtime via `core.async.timer`.
+    public fn with_timeout(duration: Duration) -> CancellationToken {
+        let src = CancellationTokenSource.new();
+        let token_clone = src.token.clone();
+        let deadline = Instant.now() + duration;
+        let _ = core.async.task.spawn_detached(async move {
+            core.async.timer.sleep(duration).await;
+            token_clone.cancel_with(CancelReason.Timeout { deadline: deadline });
+        });
+        src.token
+    }
+
+    /// Convenience: create a token that auto-cancels at an absolute deadline.
+    public fn with_deadline(deadline: Instant) -> CancellationToken {
+        let now = Instant.now();
+        let d = if deadline > now { deadline - now } else { Duration.zero() };
+        CancellationToken.with_timeout(d)
+    }
+
+    /// A token that is never cancelled. Useful as a placeholder in generic APIs
+    /// that accept a CancellationToken argument but do not need cancellation.
+    public fn never() -> CancellationToken {
+        static NEVER_FLAG: Shared<CancellationFlag> = Shared.new(CancellationFlag.new());
+        CancellationToken { inner: NEVER_FLAG.clone() }
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Cancelled — the Future returned by `token.cancelled()`
+// -----------------------------------------------------------------------------
+// Completes exactly once when the token is cancelled. If polled after the
+// flag is already cancelled, returns Ready immediately.
+
+public type CancelledFuture is {
+    flag: Shared<CancellationFlag>,
+    registration_id: RegistrationId,
+};
+
+implement Future for CancelledFuture {
+    type Output = CancelReason;
+
+    fn poll(&mut self, cx: &mut Context) -> Poll<CancelReason> {
+        // Fast path — already cancelled.
+        if self.flag.is_cancelled() {
+            let r = self.flag.reason().unwrap_or(CancelReason.Cancelled);
+            return Poll.Ready(r);
+        }
+
+        // Slow path — register (or refresh) our waker.
+        // Deregister any prior registration (executor may re-poll with a new waker).
+        if self.registration_id != 0 {
+            self.flag.deregister_waiter(self.registration_id);
+        }
+        self.registration_id = self.flag.register_waiter(cx.waker().clone());
+
+        // Re-check state after registration: if cancellation fired between
+        // the is_cancelled check and the register call, register_waiter
+        // already woke us; surface Ready now to make progress.
+        if self.flag.is_cancelled() {
+            let r = self.flag.reason().unwrap_or(CancelReason.Cancelled);
+            return Poll.Ready(r);
+        }
+
+        Poll.Pending
+    }
+}
+
+implement Drop for CancelledFuture {
+    fn drop(&mut self) {
+        // Deregister waker so a future cancel doesn't try to wake a stale ctx.
+        if self.registration_id != 0 {
+            self.flag.deregister_waiter(self.registration_id);
+        }
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Registration — RAII handle for a registered sync callback
+// -----------------------------------------------------------------------------
+// Dropping a Registration deregisters the callback before it fires.
+// If cancel has already happened, the callback already fired and Drop is a no-op.
+
+public type Registration is {
+    flag: Shared<CancellationFlag>,
+    id: RegistrationId,
+};
+
+implement Registration {
+    /// Deregister explicitly (equivalent to drop).
+    public fn deregister(self) {
+        // Drop takes care of deregistration.
+        drop(self);
+    }
+}
+
+implement Drop for Registration {
+    fn drop(&mut self) {
+        if self.id != 0 {
+            self.flag.deregister_callback(self.id);
         }
     }
 }
@@ -117,31 +548,163 @@ implement CancellationToken {
 // -----------------------------------------------------------------------------
 // CancellationTokenSource — owner of cancellation authority
 // -----------------------------------------------------------------------------
-// Separates "observe" from "cancel" privileges: methods taking
-// `&CancellationToken` cannot cancel it, only the Source can.
+// Separates "observe" from "cancel": methods taking `&CancellationToken`
+// can only observe; only holders of a Source can trigger cancel.
+
 public type CancellationTokenSource is {
     token: CancellationToken,
 };
 
 implement CancellationTokenSource {
-    // Create a new source + its root token.
+    /// Create a new Source with its root Token.
     public fn new() -> CancellationTokenSource {
         CancellationTokenSource { token: CancellationToken.new() }
     }
 
-    // Hand out a cloned observer token. Callees take `&CancellationToken`
-    // and cannot cancel it; only the Source owner can.
+    /// Create a Source linked to a parent — when the parent token fires,
+    /// this source's token fires with `ParentCancelled`.
+    /// This source can still be cancelled independently.
+    public fn linked_to(parent: &CancellationToken) -> CancellationTokenSource {
+        let src = CancellationTokenSource.new();
+        parent.inner.attach_child(src.token.inner.weak());
+        src
+    }
+
+    /// Handle out a fresh observer token. Cloning is O(1).
     public fn token(&self) -> CancellationToken {
         self.token.clone()
     }
 
-    // Trigger cancellation for all holders of tokens from this source.
+    /// Trigger cancellation for all observers with default reason.
     public fn cancel(&self) {
         self.token.cancel();
     }
 
-    // Check whether cancellation was triggered.
+    /// Trigger cancellation with a structured reason.
+    public fn cancel_with(&self, r: CancelReason) {
+        self.token.cancel_with(r);
+    }
+
+    /// Quick check — was cancel already triggered?
     public fn is_cancelled(&self) -> Bool {
         self.token.is_cancelled()
+    }
+
+    /// Reason of a prior cancel (None if not cancelled).
+    public fn reason(&self) -> Maybe<CancelReason> {
+        self.token.reason()
+    }
+}
+
+// -----------------------------------------------------------------------------
+// CancelScope — RAII scope that auto-cancels on exit
+// -----------------------------------------------------------------------------
+// Usage:
+//
+//     let scope = CancelScope.new();
+//     let token = scope.token();
+//     // ... spawn tasks using `token` ...
+//     // when `scope` drops (at end of its owning scope), token is cancelled,
+//     // causing any outstanding work to unwind cleanly.
+//
+// Equivalent to Trio's `CancelScope`. Grammar intent: this type wants
+// `affine` semantics (linear consumption); compiler-level enforcement
+// depends on the affine-tracker maturity. Drop is the fallback.
+
+public type CancelScope is {
+    source: CancellationTokenSource,
+    dismissed: AtomicBool,
+};
+
+implement CancelScope {
+    /// Create a new scope. Returns a scope that will auto-cancel on Drop
+    /// unless `dismiss()` is called first.
+    public fn new() -> CancelScope {
+        CancelScope {
+            source: CancellationTokenSource.new(),
+            dismissed: AtomicBool.new(false),
+        }
+    }
+
+    /// Scope linked to a parent token (child source semantics).
+    public fn linked_to(parent: &CancellationToken) -> CancelScope {
+        CancelScope {
+            source: CancellationTokenSource.linked_to(parent),
+            dismissed: AtomicBool.new(false),
+        }
+    }
+
+    /// Scope that auto-cancels after `duration` OR on drop — whichever first.
+    public fn with_timeout(duration: Duration) -> CancelScope {
+        let scope = CancelScope.new();
+        let token_clone = scope.source.token.clone();
+        let deadline = Instant.now() + duration;
+        let _ = core.async.task.spawn_detached(async move {
+            core.async.timer.sleep(duration).await;
+            token_clone.cancel_with(CancelReason.Timeout { deadline: deadline });
+        });
+        scope
+    }
+
+    /// Hand out an observer token for this scope.
+    public fn token(&self) -> CancellationToken {
+        self.source.token()
+    }
+
+    /// Explicitly cancel the scope (before drop).
+    public fn cancel(&self) {
+        self.source.cancel();
+    }
+
+    /// Dismiss the auto-cancel-on-drop behavior. After `dismiss()`, dropping
+    /// the scope does NOT cancel its token. Useful for "hand off" patterns
+    /// where ownership of the token continues past scope exit.
+    public fn dismiss(&self) {
+        self.dismissed.store(true, MemoryOrdering.Release);
+    }
+
+    /// Was the scope's token cancelled?
+    public fn is_cancelled(&self) -> Bool {
+        self.source.is_cancelled()
+    }
+}
+
+implement Drop for CancelScope {
+    fn drop(&mut self) {
+        // Auto-cancel unless dismissed.
+        if !self.dismissed.load(MemoryOrdering.Acquire) {
+            // Scope exit = structured cancel. Use generic Cancelled reason.
+            self.source.cancel();
+        }
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Helper: `@noncancellable { ... }`-equivalent pattern (not a language feature
+// in v0.2 — expressed via the `with_shielded` helper below).
+// -----------------------------------------------------------------------------
+// Within a shielded scope, the caller's cancellation token is NOT observed
+// (the block is treated as a critical section). After the block, if the
+// token was cancelled meanwhile, it is surfaced.
+//
+// Usage:
+//
+//     token.with_shielded(async {
+//         // Even if token is cancelled here, we run to completion.
+//         db.commit_tx().await?;
+//         Ok(())
+//     }).await?;
+//     token.throw_if_cancelled()?;
+
+implement CancellationToken {
+    /// Run the block without observing this token during execution.
+    /// After the block completes, callers should re-check `throw_if_cancelled`.
+    public async fn with_shielded<F: Future, R>(self, body: F) -> F.Output {
+        // The implementation is intentionally a pass-through — the body
+        // future is opaque and does not receive our token. Callers who
+        // want shielded semantics must also avoid passing the token into
+        // body's contexts. Compiler-level `@noncancellable` would enforce
+        // this; for now the contract is documentation + convention.
+        body.await
     }
 }

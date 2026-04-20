@@ -1,0 +1,107 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: async, cancellation, register, callback, RAII
+// @timeout: 10000
+// @expect: pass
+
+// Callback registration — sync-callback bridge to non-async cleanup.
+// Dropping a Registration deregisters the callback before cancel fires.
+
+mount core.async.cancellation.{
+    CancellationToken,
+    CancellationTokenSource,
+    Registration,
+};
+mount core.sync.atomic.{AtomicInt, MemoryOrdering};
+mount base.memory.Shared;
+
+fn test_register_fires_on_cancel() {
+    let source = CancellationTokenSource.new();
+    let counter = Shared.new(AtomicInt.new(0));
+    let c_inner = counter.clone();
+
+    let _reg = source.token().register(|| {
+        c_inner.fetch_add(1, MemoryOrdering.Relaxed);
+    });
+
+    assert(counter.load(MemoryOrdering.Relaxed) == 0, "callback not fired yet");
+
+    source.cancel();
+
+    // Callback fired exactly once
+    assert(counter.load(MemoryOrdering.Relaxed) == 1, "callback fired once on cancel");
+}
+
+fn test_register_after_cancel_fires_immediately() {
+    let source = CancellationTokenSource.new();
+    source.cancel();
+
+    let counter = Shared.new(AtomicInt.new(0));
+    let c_inner = counter.clone();
+
+    let _reg = source.token().register(|| {
+        c_inner.fetch_add(1, MemoryOrdering.Relaxed);
+    });
+
+    // Callback fired synchronously during register()
+    assert(counter.load(MemoryOrdering.Relaxed) == 1, "callback fired immediately when source already cancelled");
+}
+
+fn test_drop_registration_deregisters() {
+    let source = CancellationTokenSource.new();
+    let counter = Shared.new(AtomicInt.new(0));
+    let c_inner = counter.clone();
+
+    {
+        let _reg = source.token().register(|| {
+            c_inner.fetch_add(1, MemoryOrdering.Relaxed);
+        });
+        // _reg dropped here — deregisters the callback.
+    }
+
+    source.cancel();
+
+    // Callback did NOT fire because it was deregistered.
+    assert(counter.load(MemoryOrdering.Relaxed) == 0, "dropped registration should not fire");
+}
+
+fn test_multiple_registrations_all_fire() {
+    let source = CancellationTokenSource.new();
+    let counter = Shared.new(AtomicInt.new(0));
+    let c1 = counter.clone();
+    let c2 = counter.clone();
+    let c3 = counter.clone();
+
+    let _r1 = source.token().register(|| { c1.fetch_add(1, MemoryOrdering.Relaxed); });
+    let _r2 = source.token().register(|| { c2.fetch_add(10, MemoryOrdering.Relaxed); });
+    let _r3 = source.token().register(|| { c3.fetch_add(100, MemoryOrdering.Relaxed); });
+
+    source.cancel();
+
+    // All three fire — sum = 111
+    assert(counter.load(MemoryOrdering.Relaxed) == 111, "all three callbacks fired");
+}
+
+fn test_explicit_deregister() {
+    let source = CancellationTokenSource.new();
+    let counter = Shared.new(AtomicInt.new(0));
+    let c_inner = counter.clone();
+
+    let reg = source.token().register(|| {
+        c_inner.fetch_add(1, MemoryOrdering.Relaxed);
+    });
+    reg.deregister();     // explicit (equivalent to drop)
+
+    source.cancel();
+
+    assert(counter.load(MemoryOrdering.Relaxed) == 0, "deregister() disarms callback");
+}
+
+fn main() {
+    test_register_fires_on_cancel();
+    test_register_after_cancel_fires_immediately();
+    test_drop_registration_deregisters();
+    test_multiple_registrations_all_fire();
+    test_explicit_deregister();
+}

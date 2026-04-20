@@ -46,6 +46,12 @@
 module core.net.tcp;
 mount core.*;
 mount io.*;
+mount core.io.async_protocols.{AsyncRead, AsyncWrite, IoResult};
+mount core.async.poll.{Poll};
+mount core.async.waker.{Context};
+mount core.async.future.{Future};
+mount core.async.stream.{Stream};
+mount core.async.cancellation.{CancellationToken, CancellationError};
 mount .addr.*;
 
 // =============================================================================
@@ -642,6 +648,174 @@ implement Write for TcpStream {
     }
 }
 
+// =============================================================================
+// AsyncRead / AsyncWrite — non-blocking protocol implementation
+// =============================================================================
+//
+// Wraps the sync recv/send syscalls with readiness-waiting via AsyncIoReady.
+// poll_read: if data ready → recv() → Ready(n); if WouldBlock → Pending +
+// waker registered with I/O engine so receiver is woken on next read event.
+//
+// Buffer parameter is `&mut List<Int>` per the protocol contract; each Int
+// holds one byte. For higher performance, callers should use the explicit
+// byte-slice methods `read_async` / `write_async` below.
+
+implement AsyncRead for TcpStream {
+    fn poll_read(&mut self, cx: &mut Context, buf: &mut List<Int>) -> Poll<IoResult<Int>> {
+        // Try a non-blocking read first. If WouldBlock, register waker.
+        let cap = buf.capacity();
+        let mut byte_buf = [0_u8; 65536];   // stack buffer, 64 KiB
+        let read_len = if cap < 65536 { cap } else { 65536 };
+        if read_len == 0 {
+            return Poll.Ready(Ok(0));
+        }
+
+        @cfg(any(target_os = "linux", target_os = "windows"))
+        let result = {
+            const MSG_NOSIGNAL: Int = 0x4000;
+            const MSG_DONTWAIT: Int = 0x40;
+            recv(self.fd, &mut byte_buf[..read_len], MSG_NOSIGNAL | MSG_DONTWAIT)
+        };
+
+        @cfg(target_os = "macos")
+        let result = {
+            // MSG_DONTWAIT on macOS is 0x80; SO_NOSIGPIPE set at socket creation
+            sys_recv(self.fd, &mut byte_buf[..read_len], 0x80)
+        };
+
+        match result {
+            Ok(n) => {
+                for i in 0..n as Int { buf.push(byte_buf[i] as Int); }
+                Poll.Ready(Ok(n as Int))
+            }
+            Err(e) if e.would_block() => {
+                // Register waker with I/O engine for read-ready event.
+                let io_engine = IOEngine.current();
+                io_engine.register(self.fd, IOInterest.Read, cx.waker());
+                Poll.Pending
+            }
+            Err(e) => Poll.Ready(Err(IoError.from_os_error(e))),
+        }
+    }
+}
+
+implement AsyncWrite for TcpStream {
+    fn poll_write(&mut self, cx: &mut Context, buf: &List<Int>) -> Poll<IoResult<Int>> {
+        if buf.is_empty() {
+            return Poll.Ready(Ok(0));
+        }
+
+        // Marshal List<Int> back to byte slice.
+        let mut byte_buf = [0_u8; 65536];
+        let write_len = if buf.len() < 65536 { buf.len() } else { 65536 };
+        for i in 0..write_len { byte_buf[i] = (buf[i] & 0xFF) as u8; }
+
+        @cfg(any(target_os = "linux", target_os = "windows"))
+        let result = {
+            const MSG_NOSIGNAL: Int = 0x4000;
+            const MSG_DONTWAIT: Int = 0x40;
+            send(self.fd, &byte_buf[..write_len], MSG_NOSIGNAL | MSG_DONTWAIT)
+        };
+
+        @cfg(target_os = "macos")
+        let result = sys_send(self.fd, &byte_buf[..write_len], 0x80);
+
+        match result {
+            Ok(n) => Poll.Ready(Ok(n as Int)),
+            Err(e) if e.would_block() => {
+                let io_engine = IOEngine.current();
+                io_engine.register(self.fd, IOInterest.Write, cx.waker());
+                Poll.Pending
+            }
+            Err(e) => Poll.Ready(Err(IoError.from_os_error(e))),
+        }
+    }
+
+    fn poll_flush(&mut self, _cx: &mut Context) -> Poll<IoResult<()>> {
+        // TCP has no application-level buffering. Kernel buffer is controlled
+        // via TCP_NODELAY; explicit flush is a no-op.
+        Poll.Ready(Ok(()))
+    }
+
+    fn poll_shutdown(&mut self, _cx: &mut Context) -> Poll<IoResult<()>> {
+        match self.shutdown(Shutdown.Write) {
+            Ok(()) => Poll.Ready(Ok(())),
+            Err(e) => Poll.Ready(Err(e)),
+        }
+    }
+}
+
+// =============================================================================
+// TcpStream async read/write methods (ergonomic wrappers)
+// =============================================================================
+
+implement TcpStream {
+    /// Async read — returns the number of bytes read.
+    pub async fn read_async(&mut self, buf: &mut List<Int>) -> Result<Int, IoError> {
+        // Simple poll-driven loop. Real implementation builds a Future.
+        let mut fut = AsyncReadFut { stream: self, buf: buf };
+        fut.await
+    }
+
+    /// Async write — returns the number of bytes written.
+    pub async fn write_async(&mut self, buf: &List<Int>) -> Result<Int, IoError> {
+        let mut fut = AsyncWriteFut { stream: self, buf: buf };
+        fut.await
+    }
+
+    /// Cancellable async read — returns Err on token fire.
+    pub async fn read_cancellable(
+        &mut self,
+        buf: &mut List<Int>,
+        token: &CancellationToken,
+    ) -> Result<Result<Int, IoError>, CancellationError> {
+        select {
+            r = self.read_async(buf).await => Ok(r),
+            reason = token.cancelled().await => Err(CancellationError.new(reason)),
+        }
+    }
+
+    /// Cancellable async write.
+    pub async fn write_cancellable(
+        &mut self,
+        buf: &List<Int>,
+        token: &CancellationToken,
+    ) -> Result<Result<Int, IoError>, CancellationError> {
+        select {
+            r = self.write_async(buf).await => Ok(r),
+            reason = token.cancelled().await => Err(CancellationError.new(reason)),
+        }
+    }
+}
+
+// Helper Future types for read_async/write_async.
+
+public type AsyncReadFut<'a> is {
+    stream: &'a mut TcpStream,
+    buf: &'a mut List<Int>,
+};
+
+implement<'a> Future for AsyncReadFut<'a> {
+    type Output = Result<Int, IoError>;
+
+    fn poll(&mut self, cx: &mut Context) -> Poll<Result<Int, IoError>> {
+        self.stream.poll_read(cx, self.buf)
+    }
+}
+
+public type AsyncWriteFut<'a> is {
+    stream: &'a mut TcpStream,
+    buf: &'a List<Int>,
+};
+
+implement<'a> Future for AsyncWriteFut<'a> {
+    type Output = Result<Int, IoError>;
+
+    fn poll(&mut self, cx: &mut Context) -> Poll<Result<Int, IoError>> {
+        self.stream.poll_write(cx, self.buf)
+    }
+}
+
 implement Drop for TcpStream {
     fn drop(&mut self) {
         @cfg(any(target_os = "linux", target_os = "windows")) {
@@ -1024,6 +1198,78 @@ implement Iterator for Incoming {
 
     fn next(&mut self) -> Maybe<Result<TcpStream, IoError>> {
         Some(self.listener.accept().map(|(stream, _)| stream))
+    }
+}
+
+// =============================================================================
+// AsyncIncoming — Stream<Item = Result<TcpStream, IoError>>
+// =============================================================================
+//
+// Enables `for await conn in listener.incoming_async() { ... }` pattern.
+
+public type AsyncIncoming<'a> is {
+    listener: &'a TcpListener,
+};
+
+implement<'a> Stream for AsyncIncoming<'a> {
+    type Item = Result<TcpStream, IoError>;
+
+    fn poll_next(&mut self, cx: &mut Context) -> Poll<Maybe<Result<TcpStream, IoError>>> {
+        let mut addr_buf = [0_u8; 128];
+        let mut addr_len: Int = 128;
+
+        @cfg(any(target_os = "linux", target_os = "windows"))
+        let accept_result = accept4(
+            self.listener.fd,
+            &mut addr_buf, &mut addr_len,
+            SOCK_CLOEXEC | SOCK_NONBLOCK,
+        );
+
+        @cfg(target_os = "macos")
+        let accept_result = sys_accept(self.listener.fd, &mut addr_buf, &mut addr_len);
+
+        match accept_result {
+            Ok(client_fd) => {
+                @cfg(target_os = "macos")
+                let _ = safe_set_nosigpipe(client_fd, true);
+
+                match deserialize_socket_addr(&addr_buf[..addr_len as Int]) {
+                    Ok(peer) => Poll.Ready(Some(Ok(TcpStream { fd: client_fd, peer_addr: peer }))),
+                    Err(e) => Poll.Ready(Some(Err(e))),
+                }
+            }
+            Err(e) if e.code == EAGAIN => {
+                // No connection pending — register I/O readiness waker.
+                let io_engine = IOEngine.current();
+                io_engine.register(self.listener.fd, IOInterest.Read, cx.waker());
+                Poll.Pending
+            }
+            Err(e) => Poll.Ready(Some(Err(IoError.from_os_error(e)))),
+        }
+    }
+}
+
+implement TcpListener {
+    /// Async-iterator over incoming connections.
+    ///
+    /// Usage:
+    ///   for await conn in listener.incoming_async() {
+    ///       let stream = conn?;
+    ///       spawn handle(stream);
+    ///   }
+    pub fn incoming_async(&self) -> AsyncIncoming {
+        AsyncIncoming { listener: self }
+    }
+
+    /// Cancellable async accept — single accept with cancel-aware shutdown.
+    pub async fn accept_cancellable(
+        &self,
+        token: &CancellationToken,
+    ) -> Result<Result<(TcpStream, SocketAddr), IoError>, CancellationError> {
+        select {
+            r = self.accept_async().await => Ok(r),
+            reason = token.cancelled().await => Err(CancellationError.new(reason)),
+        }
     }
 }
 

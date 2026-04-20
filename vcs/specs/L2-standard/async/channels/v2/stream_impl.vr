@@ -1,0 +1,36 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: async, channel, stream, for-await
+// @timeout: 10000
+// @expect: pass
+
+// Stream impl for Receiver — unlocks `for await msg in rx { ... }` syntax.
+
+mount core.async.channel.{
+    Sender, Receiver, bounded,
+};
+mount core.async.stream.{Stream, StreamExt};
+mount core.async.poll.{Poll};
+mount core.async.waker.{Context};
+
+// Verify Stream trait is implemented — poll_next signature typechecks.
+fn typecheck_stream_impl<T>(rx: &mut Receiver<T>, cx: &mut Context) -> Poll<Maybe<T>> {
+    rx.poll_next(cx)
+}
+
+// StreamExt combinators auto-available because Stream is auto-implemented.
+async fn typecheck_stream_ext_methods() {
+    let (_tx, mut rx) = bounded::<Int>(16);
+    let _next = rx.next().await;
+    // Note: full for-await loop requires runtime; keep shape-only here.
+}
+
+// size_hint returns (current_len, capacity).
+fn typecheck_size_hint<T>(rx: &Receiver<T>) -> (Int, Maybe<Int>) {
+    rx.size_hint()
+}
+
+fn main() {
+    // Shape checks only.
+}

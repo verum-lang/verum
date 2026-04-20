@@ -1,0 +1,60 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: net, tls, async, cancellation
+// @timeout: 10000
+// @expect: pass
+
+// TLS async-I/O shape tests — AsyncRead/AsyncWrite, cancellable, channel-binding.
+// Note: `TlsError` identifier clashes with `core.sys.{linux,darwin,windows}.tls.TlsError`
+// (thread-local-storage errors). Tests refer to TLS functions without returning
+// TlsError at the test-level — the stdlib module itself uses its own TlsError.
+
+mount core.net.tls.{
+    TlsStream, TlsConfig, TlsConnector, TlsAcceptor, TlsVersion,
+    Certificate, PrivateKey, TlsReadFut, TlsWriteFut,
+};
+mount core.io.async_protocols.{AsyncRead, AsyncWrite};
+mount core.async.poll.{Poll};
+mount core.async.waker.{Context};
+mount core.async.cancellation.{CancellationToken, CancellationTokenSource, CancellationError};
+
+// Shape: AsyncRead/AsyncWrite on TlsStream
+fn typecheck_poll_read(stream: &mut TlsStream, cx: &mut Context, buf: &mut List<Int>)
+    -> Poll<Result<Int, IoError>>
+{
+    stream.poll_read(cx, buf)
+}
+
+fn typecheck_poll_write(stream: &mut TlsStream, cx: &mut Context, buf: &List<Int>)
+    -> Poll<Result<Int, IoError>>
+{
+    stream.poll_write(cx, buf)
+}
+
+fn typecheck_poll_flush_shutdown(stream: &mut TlsStream, cx: &mut Context) {
+    let _: Poll<Result<(), IoError>> = stream.poll_flush(cx);
+    let _: Poll<Result<(), IoError>> = stream.poll_shutdown(cx);
+}
+
+// Channel binding for SCRAM-SHA-256-PLUS
+fn typecheck_channel_binding(stream: &TlsStream) -> Maybe<[Byte; 32]> {
+    stream.peer_cert_hash_sha256()
+}
+
+// alpn getter
+fn typecheck_alpn(stream: &TlsStream) -> Maybe<&Text> {
+    stream.alpn()
+}
+
+// TlsConfig builder
+fn typecheck_config_builder() -> TlsConfig {
+    TlsConfig.client()
+        .with_min_version(TlsVersion.Tls13)
+        .with_alpn(["h2".into(), "http/1.1".into()])
+        .with_system_certs(true)
+}
+
+fn main() {
+    // Shape-only tests.
+}

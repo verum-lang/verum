@@ -1,0 +1,94 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: async, cancellation, tree, parent-child, propagation
+// @timeout: 10000
+// @expect: pass
+
+// Parent-child cancellation propagation. When parent fires, child fires
+// with CancelReason.ParentCancelled. Cancelling child does NOT cancel parent.
+
+mount core.async.cancellation.{
+    CancellationToken,
+    CancellationTokenSource,
+    CancelReason,
+};
+
+fn test_parent_cancel_propagates_to_child() {
+    let parent = CancellationTokenSource.new();
+    let child_src = parent.token().child_source();
+    let child_token = child_src.token();
+
+    assert(!parent.is_cancelled(), "parent uncancelled");
+    assert(!child_token.is_cancelled(), "child uncancelled");
+
+    parent.cancel_with(CancelReason.Aborted("parent aborted".into()));
+
+    assert(parent.is_cancelled(), "parent now cancelled");
+    assert(child_token.is_cancelled(), "child propagated");
+
+    // Child sees ParentCancelled (not the parent's own reason —
+    // structured traceability distinguishes own-cancel from propagated)
+    match child_token.reason().unwrap() {
+        CancelReason.ParentCancelled => { /* expected */ }
+        _ => assert(false, "child should see ParentCancelled"),
+    }
+}
+
+fn test_child_cancel_does_not_affect_parent() {
+    let parent = CancellationTokenSource.new();
+    let child_src = parent.token().child_source();
+
+    child_src.cancel();
+
+    assert(child_src.is_cancelled(), "child cancelled");
+    assert(!parent.is_cancelled(), "parent unaffected");
+}
+
+fn test_linked_source_variant() {
+    let parent = CancellationTokenSource.new();
+    let linked = CancellationTokenSource.linked_to(&parent.token());
+
+    assert(!linked.is_cancelled(), "linked starts uncancelled");
+
+    parent.cancel();
+
+    assert(linked.is_cancelled(), "linked cancelled via parent");
+    match linked.reason().unwrap() {
+        CancelReason.ParentCancelled => { /* ok */ }
+        _ => assert(false, "linked sees ParentCancelled"),
+    }
+}
+
+fn test_deep_tree_propagation() {
+    // three-level tree: grandparent → parent → child
+    let gp = CancellationTokenSource.new();
+    let parent_src = gp.token().child_source();
+    let child_src = parent_src.token().child_source();
+
+    let child_token = child_src.token();
+
+    gp.cancel();
+
+    assert(gp.is_cancelled(), "gp cancelled");
+    assert(parent_src.is_cancelled(), "parent propagated");
+    assert(child_token.is_cancelled(), "child propagated");
+}
+
+fn test_already_cancelled_parent_propagates_immediately() {
+    let parent = CancellationTokenSource.new();
+    parent.cancel();
+
+    // Attach child AFTER parent cancelled — should fire immediately.
+    let child_src = parent.token().child_source();
+
+    assert(child_src.is_cancelled(), "child fires immediately when parent already cancelled");
+}
+
+fn main() {
+    test_parent_cancel_propagates_to_child();
+    test_child_cancel_does_not_affect_parent();
+    test_linked_source_variant();
+    test_deep_tree_propagation();
+    test_already_cancelled_parent_propagates_immediately();
+}
