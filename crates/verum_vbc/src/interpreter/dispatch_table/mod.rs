@@ -96,6 +96,7 @@ use handlers::pattern_matching::{
     handle_make_variant, handle_set_variant_data, handle_get_variant_data,
     handle_get_variant_data_ref, handle_match_tag, handle_get_tag,
     handle_unpack, handle_pack,
+    handle_make_pi, handle_make_sigma, handle_make_witness,
 };
 use handlers::iterators::{
     handle_iter_new, handle_iter_next, handle_new_range,
@@ -383,7 +384,9 @@ const fn build_dispatch_table() -> [Handler; 256] {
     table[0x8A] = handle_new_closure;     // NewClosure = 0x8A
     table[0x8B] = handle_get_variant_data_ref; // GetVariantDataRef = 0x8B (ref to field)
     table[0x8C] = handle_type_of;          // TypeOf = 0x8C (runtime type tag)
-    // 0x8D-0x8F: Reserved generic
+    table[0x8D] = handle_make_pi;          // MakePi = 0x8D (Π-value packaging)
+    table[0x8E] = handle_make_sigma;       // MakeSigma = 0x8E (Σ-pair packaging)
+    table[0x8F] = handle_make_witness;     // MakeWitness = 0x8F (refined + proof hash)
 
     // ========================================================================
     // Pattern Matching + Logic (0x90-0x9F) - matches instruction.rs

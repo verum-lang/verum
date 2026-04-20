@@ -7887,7 +7887,12 @@ impl Opcode {
             Opcode::MakeVariant => "MAKE_VARIANT",
             Opcode::SetVariantData => "SET_VARIANT_DATA",
             Opcode::GetVariantData => "GET_VARIANT_DATA",
+            Opcode::GetVariantDataRef => "GET_VARIANT_DATA_REF",
             Opcode::GetTag => "GET_TAG",
+            Opcode::TypeOf => "TYPE_OF",
+            Opcode::MakePi => "MAKE_PI",
+            Opcode::MakeSigma => "MAKE_SIGMA",
+            Opcode::MakeWitness => "MAKE_WITNESS",
             Opcode::NewClosure => "NEW_CLOSURE",
             // Pattern + Logic (0x90-0x9F)
             Opcode::IsVar => "IS_VAR",
@@ -9262,6 +9267,66 @@ pub enum Instruction {
         variant: Reg,
         /// Field index within variant.
         field: u32,
+    },
+    /// **MakePi** — construct a dependent function value `Π(x: T). U(x)`.
+    ///
+    /// At Tier-0 a dependent function is represented as a 2-slot heap
+    /// record tagged `TypeId::PI` with layout `[header | param : Value |
+    /// type_id : u64]`. The `param` slot captures the pre-image value
+    /// (an ordinary NaN-boxed `Value`) and `type_id` carries the
+    /// return-type descriptor's 32-bit id widened to 64 bits so the
+    /// interpreter and future reflection tactics can recover the
+    /// dependent return type.
+    ///
+    /// The opcode does *not* perform any dependent-type coercion by
+    /// itself — upstream typecheck has already validated the call
+    /// site. This is purely the runtime packaging primitive.
+    MakePi {
+        /// Destination register receiving the packed Pi value.
+        dst: Reg,
+        /// Register holding the parameter value captured by the Pi.
+        param: Reg,
+        /// Return-type descriptor id.
+        return_type_id: u32,
+    },
+    /// **MakeSigma** — construct a dependent pair `Σ(x: T). U(x)`.
+    ///
+    /// At Tier-0 a dependent pair is a 2-slot heap record tagged
+    /// `TypeId::SIGMA` with layout `[header | witness : Value |
+    /// payload : Value]`. The `witness` is the first component (value
+    /// of type `T`) and `payload` the second (of type `U(witness)`).
+    /// Projection is performed by `GetVariantData` with field index 0
+    /// (witness) or 1 (payload), or by dedicated `PiProj` / `SigmaFst`
+    /// / `SigmaSnd` opcodes once they land.
+    MakeSigma {
+        /// Destination register receiving the packed Sigma pair.
+        dst: Reg,
+        /// Register holding the first component (the witness).
+        witness: Reg,
+        /// Register holding the second component (the dependent payload).
+        payload: Reg,
+    },
+    /// **MakeWitness** — attach a proof hash to a refined value.
+    ///
+    /// At Tier-0 a witness is a 2-slot heap record tagged
+    /// `TypeId::WITNESS` with layout `[header | value : Value |
+    /// proof_hash : u64]`. The hash is emitted by the static verifier
+    /// at compile time and uniquely identifies the proof term that
+    /// discharged the refinement obligation. Runtime consumers
+    /// (gradual verification boundaries, tier-promotion checks) can
+    /// compare hashes to decide whether to re-verify or accept.
+    ///
+    /// At Tier-1 the opcode is elided when the predicate was
+    /// SMT-discharged during compilation — only the underlying value
+    /// survives into LLVM IR.
+    MakeWitness {
+        /// Destination register receiving the packed witness.
+        dst: Reg,
+        /// Register holding the refined value.
+        value: Reg,
+        /// 32-bit hash of the static proof term that discharged the
+        /// predicate (widened to u64 on the wire for future growth).
+        proof_hash: u32,
     },
     /// Make list with initial capacity/length.
     MakeList {

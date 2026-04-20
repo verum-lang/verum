@@ -546,3 +546,152 @@ pub(in super::super) fn handle_pack(state: &mut InterpreterState) -> Interpreter
     Ok(DispatchResult::Continue)
 }
 
+
+// ============================================================================
+// Dependent-type runtime packaging (T1-H)
+// ============================================================================
+//
+// Pi / Sigma / Witness are 2-slot heap records that survive at Tier-0 so the
+// interpreter can preserve enough structure for reflection tactics and for
+// gradual verification boundaries. At Tier-1 (AOT) the static verifier elides
+// them when the predicate / dependent-return-type obligation is discharged at
+// compile time.
+//
+// Shared layout: `[header | slot0 | slot1]` where each slot is 8 bytes. The
+// type_id on the heap header distinguishes the three:
+//
+//   TypeId::PI      (524) — slot0: captured param Value; slot1: return type id
+//   TypeId::SIGMA   (525) — slot0: witness Value;        slot1: payload Value
+//   TypeId::WITNESS (526) — slot0: refined value Value;  slot1: proof hash
+//
+// Projection onto these values piggybacks on the existing variant-payload
+// accessors (GetVariantData field 0 / 1) because the slot layout matches the
+// variant-payload convention (header + 8-byte tag/len word + value slots).
+// Until dedicated projection opcodes land (`PiProj`, `SigmaFst`, `SigmaSnd`)
+// the offsets here must stay aligned with `handle_get_variant_data`'s
+// `payload_offset = OBJECT_HEADER_SIZE + 8`.
+
+/// MakePi (0x8D) — pack a Π-value.
+///
+/// Encoding: opcode + dst:reg + param:reg + return_type_id:varint.
+pub(in super::super) fn handle_make_pi(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
+    let dst = read_reg(state)?;
+    let param_reg = read_reg(state)?;
+    let return_type_id = read_varint(state)? as u32;
+
+    let param_value = state.get_reg(param_reg);
+
+    // Payload = 8 bytes reserved tag/len word + 2 × 8-byte slots. The first
+    // slot is a Value (the captured param); the second stores the return type
+    // id widened to u64 so it is bit-compatible with the Value slot width.
+    let data_size = 8 + 2 * std::mem::size_of::<Value>();
+    let obj = state.heap.alloc_with_init(
+        TypeId::PI,
+        data_size,
+        |data| {
+            // Write 0 at the tag word so it is never confused with a variant.
+            let tag_ptr = data.as_mut_ptr() as *mut u32;
+            unsafe {
+                *tag_ptr = 0;
+                *tag_ptr.add(1) = 2; // field_count, for observer helpers
+            }
+        },
+    )?;
+    state.record_allocation();
+
+    let base_ptr = obj.as_ptr() as *mut u8;
+    unsafe {
+        let payload = base_ptr.add(heap::OBJECT_HEADER_SIZE + 8);
+        std::ptr::write(payload as *mut Value, param_value);
+        // The second slot holds the return type id. We store it as a u64
+        // cast so a future projection opcode can read it via the same
+        // Value-wide load path.
+        std::ptr::write(
+            payload.add(std::mem::size_of::<Value>()) as *mut u64,
+            return_type_id as u64,
+        );
+    }
+
+    state.set_reg(dst, Value::from_ptr(base_ptr));
+    Ok(DispatchResult::Continue)
+}
+
+/// MakeSigma (0x8E) — pack a Σ-pair.
+///
+/// Encoding: opcode + dst:reg + witness:reg + payload:reg.
+pub(in super::super) fn handle_make_sigma(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
+    let dst = read_reg(state)?;
+    let witness_reg = read_reg(state)?;
+    let payload_reg = read_reg(state)?;
+
+    let witness = state.get_reg(witness_reg);
+    let payload = state.get_reg(payload_reg);
+
+    let data_size = 8 + 2 * std::mem::size_of::<Value>();
+    let obj = state.heap.alloc_with_init(
+        TypeId::SIGMA,
+        data_size,
+        |data| {
+            let tag_ptr = data.as_mut_ptr() as *mut u32;
+            unsafe {
+                *tag_ptr = 0;
+                *tag_ptr.add(1) = 2;
+            }
+        },
+    )?;
+    state.record_allocation();
+
+    let base_ptr = obj.as_ptr() as *mut u8;
+    unsafe {
+        let slot0 = base_ptr.add(heap::OBJECT_HEADER_SIZE + 8);
+        std::ptr::write(slot0 as *mut Value, witness);
+        std::ptr::write(slot0.add(std::mem::size_of::<Value>()) as *mut Value, payload);
+    }
+
+    state.set_reg(dst, Value::from_ptr(base_ptr));
+    Ok(DispatchResult::Continue)
+}
+
+/// MakeWitness (0x8F) — pack a refined value together with its proof hash.
+///
+/// Encoding: opcode + dst:reg + value:reg + proof_hash:varint.
+pub(in super::super) fn handle_make_witness(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
+    let dst = read_reg(state)?;
+    let value_reg = read_reg(state)?;
+    let proof_hash = read_varint(state)? as u32;
+
+    let value = state.get_reg(value_reg);
+
+    let data_size = 8 + 2 * std::mem::size_of::<Value>();
+    let obj = state.heap.alloc_with_init(
+        TypeId::WITNESS,
+        data_size,
+        |data| {
+            let tag_ptr = data.as_mut_ptr() as *mut u32;
+            unsafe {
+                *tag_ptr = 0;
+                *tag_ptr.add(1) = 2;
+            }
+        },
+    )?;
+    state.record_allocation();
+
+    let base_ptr = obj.as_ptr() as *mut u8;
+    unsafe {
+        let slot0 = base_ptr.add(heap::OBJECT_HEADER_SIZE + 8);
+        std::ptr::write(slot0 as *mut Value, value);
+        std::ptr::write(
+            slot0.add(std::mem::size_of::<Value>()) as *mut u64,
+            proof_hash as u64,
+        );
+    }
+
+    state.set_reg(dst, Value::from_ptr(base_ptr));
+    Ok(DispatchResult::Continue)
+}

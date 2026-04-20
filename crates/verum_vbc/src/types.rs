@@ -163,11 +163,33 @@ impl TypeId {
     /// Layout: [len: i64, cap: i64, head: i64, buffer_ptr: *u8, closed: i64]
     pub const CHANNEL: TypeId = TypeId(523);
 
+    /// Pi — dependent function value (Π-type packaging).
+    /// Layout: [param: Value, return_type_id: u64].
+    /// Constructed by `MakePi`; consumed by future Π-elimination opcodes.
+    pub const PI: TypeId = TypeId(524);
+
+    /// Sigma — dependent pair (Σ-type packaging).
+    /// Layout: [witness: Value, payload: Value].
+    /// Constructed by `MakeSigma`; projected by `GetVariantData` (fields
+    /// 0 and 1) until dedicated `SigmaFst` / `SigmaSnd` opcodes land.
+    pub const SIGMA: TypeId = TypeId(525);
+
+    /// Witness — refined value + static proof-term hash.
+    /// Layout: [value: Value, proof_hash: u64].
+    /// Constructed by `MakeWitness`; the hash identifies the static
+    /// proof term that discharged the refinement predicate.
+    pub const WITNESS: TypeId = TypeId(526);
+
     /// First semantic type ID (for range checks).
     pub const FIRST_SEMANTIC: u32 = 512;
 
     /// Last semantic type ID (for range checks).
     pub const LAST_SEMANTIC: u32 = 1023;
+
+    /// Checks if this is a dependent-type runtime packaging (Pi / Sigma / Witness).
+    pub fn is_dependent_package(self) -> bool {
+        matches!(self.0, 524..=526)
+    }
 
     /// Checks if this is a meta-system type (TokenStream, Token, etc.).
     pub fn is_meta_type(self) -> bool {

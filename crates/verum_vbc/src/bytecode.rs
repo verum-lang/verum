@@ -2123,6 +2123,27 @@ pub fn encode_instruction(instr: &Instruction, output: &mut Vec<u8>) -> usize {
             encode_varint(*field as u64, output);
         }
 
+        Instruction::MakePi { dst, param, return_type_id } => {
+            output.push(Opcode::MakePi.to_byte());
+            encode_reg(*dst, output);
+            encode_reg(*param, output);
+            encode_varint(*return_type_id as u64, output);
+        }
+
+        Instruction::MakeSigma { dst, witness, payload } => {
+            output.push(Opcode::MakeSigma.to_byte());
+            encode_reg(*dst, output);
+            encode_reg(*witness, output);
+            encode_reg(*payload, output);
+        }
+
+        Instruction::MakeWitness { dst, value, proof_hash } => {
+            output.push(Opcode::MakeWitness.to_byte());
+            encode_reg(*dst, output);
+            encode_reg(*value, output);
+            encode_varint(*proof_hash as u64, output);
+        }
+
         Instruction::MakeList { dst, len } => {
             output.push(Opcode::NewList.to_byte());
             encode_reg(*dst, output);
@@ -4783,6 +4804,30 @@ pub fn decode_instruction(data: &[u8], offset: &mut usize) -> VbcResult<Instruct
         }
 
         // ====================================================================
+        // Dependent-type runtime packaging (T1-H)
+        // ====================================================================
+        Opcode::MakePi => {
+            let dst = decode_reg(data, offset)?;
+            let param = decode_reg(data, offset)?;
+            let return_type_id = decode_varint(data, offset)? as u32;
+            Ok(Instruction::MakePi { dst, param, return_type_id })
+        }
+
+        Opcode::MakeSigma => {
+            let dst = decode_reg(data, offset)?;
+            let witness = decode_reg(data, offset)?;
+            let payload = decode_reg(data, offset)?;
+            Ok(Instruction::MakeSigma { dst, witness, payload })
+        }
+
+        Opcode::MakeWitness => {
+            let dst = decode_reg(data, offset)?;
+            let value = decode_reg(data, offset)?;
+            let proof_hash = decode_varint(data, offset)? as u32;
+            Ok(Instruction::MakeWitness { dst, value, proof_hash })
+        }
+
+        // ====================================================================
         // Reserved Opcodes
         // ====================================================================
         _ => Ok(Instruction::Raw {
@@ -7217,5 +7262,56 @@ mod tests {
         for (original, decoded) in instructions.iter().zip(decoded.iter()) {
             assert_eq!(original, decoded);
         }
+    }
+
+    // ========================================================================
+    // Dependent-type packaging roundtrips (T1-H)
+    // ========================================================================
+
+    #[test]
+    fn test_make_pi_roundtrip() {
+        test_roundtrip(&Instruction::MakePi {
+            dst: Reg(5),
+            param: Reg(7),
+            return_type_id: 524,
+        });
+        test_roundtrip(&Instruction::MakePi {
+            dst: Reg(0),
+            param: Reg(1),
+            return_type_id: 0,
+        });
+        test_roundtrip(&Instruction::MakePi {
+            dst: Reg(255),
+            param: Reg(254),
+            return_type_id: u32::MAX,
+        });
+    }
+
+    #[test]
+    fn test_make_sigma_roundtrip() {
+        test_roundtrip(&Instruction::MakeSigma {
+            dst: Reg(10),
+            witness: Reg(11),
+            payload: Reg(12),
+        });
+        test_roundtrip(&Instruction::MakeSigma {
+            dst: Reg(0),
+            witness: Reg(0),
+            payload: Reg(0),
+        });
+    }
+
+    #[test]
+    fn test_make_witness_roundtrip() {
+        test_roundtrip(&Instruction::MakeWitness {
+            dst: Reg(3),
+            value: Reg(4),
+            proof_hash: 0xDEADBEEF,
+        });
+        test_roundtrip(&Instruction::MakeWitness {
+            dst: Reg(1),
+            value: Reg(2),
+            proof_hash: 0,
+        });
     }
 }
