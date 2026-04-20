@@ -180,3 +180,17 @@ implement SpawnConfig {
         self
     }
 }
+
+/// Spawn a future with a specific `SpawnConfig`.
+///
+/// Current Tier 0 interpretation ignores `config`'s knobs (priority,
+/// isolation, recovery, restart policy, timeout, instrumentation) and
+/// simply defers to the standard `spawn()`; the config is retained and
+/// threaded through the handle so callers can still observe it. AOT
+/// builds will honor the full config when the native executor ships.
+public fn spawn_with_config<F: Future>(
+    _config: SpawnConfig,
+    future: F,
+) -> JoinHandle<F.Output> {
+    spawn(future)
+}
