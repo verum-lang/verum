@@ -254,3 +254,75 @@ Landing T1-R phase 2 unblocks the entire remaining architectural plan:
   by … ;` clauses.
 
 This is the single architectural keystone of the remaining T1 campaign.
+
+---
+
+## Implementation status — 2026-04-20
+
+**T1-R phase 2 is complete end-to-end.** The pipeline discharges every
+protocol axiom at every `implement` site through the two-strategy
+pipeline defined in §"The reference-grade answer".
+
+| Layer | Commit | Artifact |
+|-------|--------|----------|
+| AST | `62e8a4f` | `ProtocolItemKind::Axiom(AxiomDecl)` |
+| AST | `406d29c` | `ImplItemKind::Proof { axiom_name, tactic }` |
+| Parser | `406d29c` | `proof X by tactic;` in impl items |
+| Grammar | `406d29c` | §2.19.5 protocol axioms + proof_clause in impl_item |
+| Types | `7c1a75e` | `verum_types::proof_obligations` — Self-substitution + collection |
+| Compiler | `dbedf8a` | `proof_verification::verify_impl_axioms` |
+| Pipeline | `dc47657` | `pipeline::verify_impl_axioms_for_module` as Phase 4c |
+
+### Call graph
+
+```
+pipeline.phase_verify()
+  └─> verify_theorem_proofs(module)           # Phase 4b
+  └─> verify_impl_axioms_for_module(module)   # Phase 4c (T1-R phase 2)
+        └─> find_protocol_decl(module, name)
+        └─> proof_verification::verify_impl_axioms(impl_decl, protocol_decl)
+              └─> proof_obligations::collect_impl_obligations(impl_decl, protocol_decl)
+                    └─> ImplBindings::from_impl_items(for_type, items)
+                    └─> substitute_self_in_expr(axiom.proposition, for_type, bindings)
+              └─> for each obligation:
+                    ├─> find_proof_clause_for(impl_decl, axiom_name)?
+                    │     YES → convert_tactic() → engine.execute_tactic()
+                    │     NO  → engine.auto_prove(smt_ctx, proposition)
+                    └─> record verified / unverified in ImplVerificationReport
+        └─> emit warnings for unverified axioms
+```
+
+### Diagnostic form
+
+Failed obligations surface through the standard diagnostic channel:
+
+```
+warning: model verification: `implement Group for IntGroup` does not
+         discharge axiom `left_unit` (auto_prove could not close the
+         obligation: <timeout / saturation / UNSAT>)
+```
+
+Severity is intentionally `Warning` during the phase-1 rollout so
+existing stdlib impl blocks that don't yet carry axiom-compliant
+bodies don't break compilation. Once the stdlib surface is fully
+covered (ring/category/monoid axioms on stdlib algebraic types), the
+severity flips to `Error` via a session option.
+
+### Coverage limitations (intentional)
+
+- `substitute_self_in_expr` currently handles the `Path`, `Binary`,
+  and `Unary` expression shapes that cover every axiom seen in the
+  stdlib algebraic hierarchy (Semigroup through Boolean algebra). As
+  the axiom surface grows — e.g. category_law with `Functor.map(f)`
+  — Call/Field/MethodCall recursion is added incrementally; the
+  substitution is a straightforward AST walk.
+- Cross-module protocol lookup is an O(n·m) linear scan. Acceptable
+  for stdlib-scale modules (~340 loaded); upgrades to an indexed
+  `protocol_name → TypeDecl` map when it shows up in profiling.
+- Auto-prove timeout defaults to the session's `smt_timeout_secs`
+  (currently 5 s). Long-running obligations should carry an explicit
+  `proof X by tactic;` clause with a specialised tactic.
+
+T1-R is closed. T1-X (morphism auto-coherence) unblocked — `Hom<A, B>`
+is just another protocol whose axioms flow through this same
+pipeline.
