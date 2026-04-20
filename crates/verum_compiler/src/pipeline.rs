@@ -5564,14 +5564,25 @@ impl<'s> CompilationPipeline<'s> {
                                         let ctx_name = verum_common::Text::from(
                                             ctx_decl.name.name.as_str(),
                                         );
-                                        if !self.collected_contexts.contains(&ctx_name) {
-                                            // Register with FULL method signatures
-                                            checker.register_stdlib_context_full(
-                                                ctx_name,
-                                                ctx_decl.clone(),
-                                            );
-                                            found_count += 1;
-                                        }
+                                        // Register with FULL method signatures in
+                                        // both resolver and checker. We do NOT skip
+                                        // on `collected_contexts.contains(&ctx_name)`
+                                        // because the collected_contexts loop above
+                                        // only calls `register_protocol_as_context`
+                                        // (resolver-only), leaving the context_checker
+                                        // unaware of the declaration — which made
+                                        // call-site `check_provided_contexts` fail
+                                        // with "undefined context" even though the
+                                        // resolver accepted it.
+                                        //
+                                        // `register_stdlib_context_full` is idempotent
+                                        // enough: a second registration overwrites
+                                        // the declaration with the same content.
+                                        checker.register_stdlib_context_full(
+                                            ctx_name,
+                                            ctx_decl.clone(),
+                                        );
+                                        found_count += 1;
                                     }
                                 }
                             }
