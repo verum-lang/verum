@@ -1,0 +1,54 @@
+// =============================================================================
+// compress/mod_zstd.vr — zstd (Facebook)
+// =============================================================================
+// Backend: `compress-zstd` feature — FFI to libzstd.
+// Tunable speed/ratio; HTTP `Content-Encoding: zstd`, QUIC keys, RocksDB blocks.
+// =============================================================================
+
+module core.compress.mod_zstd;
+mount core.*;
+mount core.compress.{Algorithm, CompressError};
+
+const ZSTD_DEFAULT_LEVEL: Int = 3;
+const ZSTD_MAX_LEVEL: Int = 22;
+const ZSTD_MIN_LEVEL: Int = -131072;      // negative = "fast" mode
+
+/// zstd codec.
+public type Zstd is ();
+
+implement Zstd {
+    pub const ALGORITHM: Algorithm = Algorithm.Zstd;
+
+    pub fn encode(input: &[Byte], level: Int, out: &mut List<Byte>)
+        -> Result<Int, CompressError>
+    {
+        let l = if level < ZSTD_MIN_LEVEL || level > ZSTD_MAX_LEVEL {
+            ZSTD_DEFAULT_LEVEL
+        } else { level };
+        @intrinsic("verum.compress.zstd_encode", input, l, out)
+    }
+
+    pub fn decode(input: &[Byte], max_output_bytes: Int, out: &mut List<Byte>)
+        -> Result<Int, CompressError>
+    {
+        @intrinsic("verum.compress.zstd_decode", input, max_output_bytes, out)
+    }
+
+    /// Encode with a precomputed dictionary. Zstd dictionaries dramatically
+    /// improve ratio for short similar payloads (JSON events, logs).
+    pub fn encode_with_dict(input: &[Byte], dict: &[Byte], level: Int,
+                             out: &mut List<Byte>) -> Result<Int, CompressError>
+    {
+        let l = if level < ZSTD_MIN_LEVEL || level > ZSTD_MAX_LEVEL {
+            ZSTD_DEFAULT_LEVEL
+        } else { level };
+        @intrinsic("verum.compress.zstd_encode_dict", input, dict, l, out)
+    }
+
+    pub fn decode_with_dict(input: &[Byte], dict: &[Byte],
+                             max_output_bytes: Int, out: &mut List<Byte>)
+        -> Result<Int, CompressError>
+    {
+        @intrinsic("verum.compress.zstd_decode_dict", input, dict, max_output_bytes, out)
+    }
+}

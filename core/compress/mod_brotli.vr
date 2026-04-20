@@ -1,0 +1,47 @@
+// =============================================================================
+// compress/mod_brotli.vr — Brotli (RFC 7932)
+// =============================================================================
+// Backend: `compress-brotli` feature — FFI to libbrotli.
+// Dense, text-optimized. HTTP `Content-Encoding: br`, TLS cert compression.
+// =============================================================================
+
+module core.compress.mod_brotli;
+mount core.*;
+mount core.compress.{Algorithm, CompressError};
+
+const BROTLI_DEFAULT_LEVEL: Int = 4;
+const BROTLI_MAX_LEVEL: Int = 11;
+
+/// Brotli codec.
+public type Brotli is ();
+
+implement Brotli {
+    pub const ALGORITHM: Algorithm = Algorithm.Brotli;
+
+    pub fn encode(input: &[Byte], level: Int, out: &mut List<Byte>)
+        -> Result<Int, CompressError>
+    {
+        let l = if level < 0 || level > BROTLI_MAX_LEVEL {
+            BROTLI_DEFAULT_LEVEL
+        } else { level };
+        @intrinsic("verum.compress.brotli_encode", input, l, out)
+    }
+
+    pub fn decode(input: &[Byte], max_output_bytes: Int, out: &mut List<Byte>)
+        -> Result<Int, CompressError>
+    {
+        @intrinsic("verum.compress.brotli_decode", input, max_output_bytes, out)
+    }
+
+    /// Encode with a custom quality/window preset per brotli API. Useful
+    /// for text-specific tuning (mode=BROTLI_MODE_TEXT).
+    pub fn encode_with(input: &[Byte], level: Int, window_bits: Int,
+                        out: &mut List<Byte>) -> Result<Int, CompressError>
+    {
+        let l = if level < 0 || level > BROTLI_MAX_LEVEL {
+            BROTLI_DEFAULT_LEVEL
+        } else { level };
+        let w = if window_bits < 10 || window_bits > 24 { 22 } else { window_bits };
+        @intrinsic("verum.compress.brotli_encode_windowed", input, l, w, out)
+    }
+}

@@ -1,0 +1,49 @@
+// =============================================================================
+// compress/mod_lz4.vr — LZ4 (pure speed)
+// =============================================================================
+// Backend: `compress-lz4` feature — FFI to liblz4.
+// Dense I/O hot paths: QUIC key offload, RDMA payloads, in-process IPC.
+// =============================================================================
+
+module core.compress.mod_lz4;
+mount core.*;
+mount core.compress.{Algorithm, CompressError};
+
+const LZ4_DEFAULT_LEVEL: Int = 1;
+const LZ4_MAX_LEVEL: Int = 12;
+
+/// LZ4 codec.
+public type Lz4 is ();
+
+implement Lz4 {
+    pub const ALGORITHM: Algorithm = Algorithm.Lz4;
+
+    pub fn encode(input: &[Byte], level: Int, out: &mut List<Byte>)
+        -> Result<Int, CompressError>
+    {
+        let l = if level < 1 || level > LZ4_MAX_LEVEL {
+            LZ4_DEFAULT_LEVEL
+        } else { level };
+        @intrinsic("verum.compress.lz4_encode", input, l, out)
+    }
+
+    pub fn decode(input: &[Byte], max_output_bytes: Int, out: &mut List<Byte>)
+        -> Result<Int, CompressError>
+    {
+        @intrinsic("verum.compress.lz4_decode", input, max_output_bytes, out)
+    }
+
+    /// Raw-block encode for LZ4-frame-less messaging — frame header
+    /// handled by caller (e.g., QUIC frame's own length prefix).
+    pub fn encode_raw(input: &[Byte], out: &mut List<Byte>)
+        -> Result<Int, CompressError>
+    {
+        @intrinsic("verum.compress.lz4_encode_raw", input, out)
+    }
+
+    pub fn decode_raw(input: &[Byte], max_output_bytes: Int, out: &mut List<Byte>)
+        -> Result<Int, CompressError>
+    {
+        @intrinsic("verum.compress.lz4_decode_raw", input, max_output_bytes, out)
+    }
+}

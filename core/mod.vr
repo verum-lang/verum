@@ -196,6 +196,15 @@ public module encoding;
 public module security;
 
 // =============================================================================
+// Layer 4.9: Compression (Depends on: core)
+// =============================================================================
+
+// Compression codecs: gzip / deflate / zlib (RFC 1950-1952), brotli
+// (RFC 7932), zstd, lz4. HTTP Content-Encoding, WebSocket deflate, TLS
+// cert-compression, QUIC/RDMA payload paths.
+public module compress;
+
+// =============================================================================
 // Layer 5: Network (Depends on: core, text, collections, io, async)
 // =============================================================================
 

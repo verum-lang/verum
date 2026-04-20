@@ -1,0 +1,73 @@
+// =============================================================================
+// compress/mod_gzip.vr — gzip / deflate / zlib (RFC 1950/1951/1952)
+// =============================================================================
+// Backend: `compress-zlib` feature — default. Falls through to miniz-style
+// pure-C bundled sources when no system zlib is present.
+// =============================================================================
+
+module core.compress.mod_gzip;
+mount core.*;
+mount core.compress.{Algorithm, CompressError};
+
+const GZIP_DEFAULT_LEVEL: Int = 6;
+
+/// gzip (RFC 1952) — deflate wrapped in gzip member format.
+public type Gzip is ();
+
+implement Gzip {
+    pub const ALGORITHM: Algorithm = Algorithm.Gzip;
+
+    pub fn encode(input: &[Byte], level: Int, out: &mut List<Byte>)
+        -> Result<Int, CompressError>
+    {
+        let l = if level < 0 || level > 9 { GZIP_DEFAULT_LEVEL } else { level };
+        @intrinsic("verum.compress.gzip_encode", input, l, out)
+    }
+
+    pub fn decode(input: &[Byte], max_output_bytes: Int, out: &mut List<Byte>)
+        -> Result<Int, CompressError>
+    {
+        @intrinsic("verum.compress.gzip_decode", input, max_output_bytes, out)
+    }
+}
+
+/// Raw deflate (RFC 1951) — no container bytes.
+public type Deflate is ();
+
+implement Deflate {
+    pub const ALGORITHM: Algorithm = Algorithm.Deflate;
+
+    pub fn encode(input: &[Byte], level: Int, out: &mut List<Byte>)
+        -> Result<Int, CompressError>
+    {
+        let l = if level < 0 || level > 9 { GZIP_DEFAULT_LEVEL } else { level };
+        @intrinsic("verum.compress.deflate_encode", input, l, out)
+    }
+
+    pub fn decode(input: &[Byte], max_output_bytes: Int, out: &mut List<Byte>)
+        -> Result<Int, CompressError>
+    {
+        @intrinsic("verum.compress.deflate_decode", input, max_output_bytes, out)
+    }
+}
+
+/// zlib container (RFC 1950) — deflate + 2-byte header + 4-byte Adler-32.
+/// Distinct from gzip framing; used in PNG, HTTP (rare), zip.
+public type Zlib is ();
+
+implement Zlib {
+    pub const ALGORITHM: Algorithm = Algorithm.Zlib;
+
+    pub fn encode(input: &[Byte], level: Int, out: &mut List<Byte>)
+        -> Result<Int, CompressError>
+    {
+        let l = if level < 0 || level > 9 { GZIP_DEFAULT_LEVEL } else { level };
+        @intrinsic("verum.compress.zlib_encode", input, l, out)
+    }
+
+    pub fn decode(input: &[Byte], max_output_bytes: Int, out: &mut List<Byte>)
+        -> Result<Int, CompressError>
+    {
+        @intrinsic("verum.compress.zlib_decode", input, max_output_bytes, out)
+    }
+}

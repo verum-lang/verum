@@ -1,0 +1,83 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: compress, gzip, brotli, zstd, lz4, content-encoding
+// @timeout: 10000
+// @expect: pass
+
+// Compression codec API surface.
+
+mount core.compress.{
+    Algorithm, CompressError,
+    encode, decode,
+};
+mount core.compress.mod_gzip.{Gzip, Deflate, Zlib};
+mount core.compress.mod_brotli.Brotli;
+mount core.compress.mod_zstd.Zstd;
+mount core.compress.mod_lz4.Lz4;
+
+// Algorithm parsing
+fn typecheck_parse_content_encoding(token: &Text) -> Maybe<Algorithm> {
+    Algorithm.from_content_encoding(token)
+}
+
+fn typecheck_to_content_encoding(algo: Algorithm) -> &'static Text {
+    algo.content_encoding()
+}
+
+// Runtime dispatch via encode/decode
+fn typecheck_dispatch_encode(algo: Algorithm, input: &[Byte])
+    -> Result<Int, CompressError>
+{
+    let mut out: List<Byte> = List.new();
+    encode(algo, input, 6, &mut out)
+}
+
+fn typecheck_dispatch_decode(algo: Algorithm, input: &[Byte])
+    -> Result<Int, CompressError>
+{
+    let mut out: List<Byte> = List.new();
+    decode(algo, input, 10_000_000, &mut out)
+}
+
+// Direct codec call — gzip
+fn typecheck_gzip_encode(input: &[Byte]) -> Result<Int, CompressError> {
+    let mut out: List<Byte> = List.new();
+    Gzip.encode(input, 6, &mut out)
+}
+
+fn typecheck_gzip_decode(input: &[Byte]) -> Result<Int, CompressError> {
+    let mut out: List<Byte> = List.new();
+    Gzip.decode(input, 10_000_000, &mut out)
+}
+
+// Brotli with windowed variant
+fn typecheck_brotli_windowed(input: &[Byte]) -> Result<Int, CompressError> {
+    let mut out: List<Byte> = List.new();
+    Brotli.encode_with(input, 5, 22, &mut out)
+}
+
+// Zstd with dictionary
+fn typecheck_zstd_dict(input: &[Byte], dict: &[Byte])
+    -> Result<Int, CompressError>
+{
+    let mut out: List<Byte> = List.new();
+    Zstd.encode_with_dict(input, dict, 3, &mut out)
+}
+
+// Lz4 raw (no frame header)
+fn typecheck_lz4_raw(input: &[Byte]) -> Result<Int, CompressError> {
+    let mut out: List<Byte> = List.new();
+    Lz4.encode_raw(input, &mut out)
+}
+
+// Identity — no-op roundtrip through dispatch layer
+fn typecheck_identity() -> Result<Int, CompressError> {
+    let input: [Byte; 4] = [1, 2, 3, 4];
+    let mut out: List<Byte> = List.new();
+    encode(Algorithm.Identity, &input, 0, &mut out)
+}
+
+fn main() {
+    // Shape-only tests.
+}

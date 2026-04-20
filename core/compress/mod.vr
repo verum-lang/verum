@@ -1,0 +1,182 @@
+// =============================================================================
+// compress/mod.vr — Compression codecs
+// =============================================================================
+// Layer: 4 (I/O-adjacent)
+// =============================================================================
+//
+// Uniform API over gzip, brotli, zstd, lz4. Primary consumers:
+//
+// - HTTP/1.1 + HTTP/2 `Content-Encoding` negotiation (Weft §6.1-6.2).
+// - WebSocket per-message-deflate (RFC 7692) (Weft §6.4).
+// - TLS certificate compression (RFC 8879) (Weft §6.11).
+// - gRPC message compression.
+// - Data-pipeline ingest / egress.
+//
+// # Design
+//
+// Three shared abstractions:
+//
+// 1. `Codec` protocol — one-shot `encode` / `decode` byte-slice-in/out.
+// 2. `Encoder<Write>` / `Decoder<Read>` — streaming Writer/Reader adapters.
+// 3. `Algorithm` sum-type — runtime-selectable (negotiated at wire-level).
+//
+// Implementations dispatch through `@intrinsic("verum.compress.*")` symbols
+// that resolve at link time to:
+//
+// | Algorithm | Backend | Feature flag |
+// | gzip      | zlib / miniz | `compress-zlib` (default) |
+// | brotli    | libbrotli    | `compress-brotli` |
+// | zstd      | libzstd      | `compress-zstd` |
+// | lz4       | liblz4       | `compress-lz4` |
+//
+// Absence of a feature flag → the corresponding functions return
+// `Err(CompressError.UnsupportedAlgorithm)` at runtime. Core algorithm
+// surface is declared unconditionally so user code can branch on
+// `Algorithm` values without `@cfg`-guarded call sites.
+//
+// # Levels
+//
+// Each codec exposes a numeric `level: Int` parameter:
+//
+// - gzip: 0 (store only) .. 9 (slowest, smallest); 6 is default.
+// - brotli: 0..11; 4 default (reasonable speed/ratio).
+// - zstd: 1..22; 3 default; negative levels (-1..-131072) are "fast" mode.
+// - lz4: 1..12; 1 default (pure speed).
+//
+// =============================================================================
+
+module core.compress;
+
+public module mod_gzip;
+public module mod_brotli;
+public module mod_zstd;
+public module mod_lz4;
+
+mount core.*;
+
+// =============================================================================
+// Algorithm enum — runtime-dispatchable identifier
+// =============================================================================
+
+public type Algorithm is
+    /// RFC 1952 gzip (deflate + header/footer).
+    | Gzip
+    /// RFC 1951 raw deflate (headerless; used inside gzip/zlib/pkzip).
+    | Deflate
+    /// zlib container (RFC 1950) around deflate — different framing than gzip.
+    | Zlib
+    /// RFC 7932 brotli — dense, text-optimized.
+    | Brotli
+    /// Facebook zstd — tunable speed/ratio; negative levels = fast mode.
+    | Zstd
+    /// lz4 — pure speed, modest ratio; used in QUIC key-offload and RDMA.
+    | Lz4
+    /// Identity — no-op codec for negotiation fallback.
+    | Identity;
+
+implement Algorithm {
+    /// Content-Encoding token used over HTTP.
+    pub fn content_encoding(self) -> &'static Text {
+        match self {
+            Gzip => "gzip",
+            Deflate => "deflate",
+            Zlib => "deflate",      // shares HTTP token with raw deflate
+            Brotli => "br",
+            Zstd => "zstd",
+            Lz4 => "lz4",
+            Identity => "identity",
+        }
+    }
+
+    /// Parse an HTTP Content-Encoding token. Returns None for unknown.
+    pub fn from_content_encoding(token: &Text) -> Maybe<Algorithm> {
+        let t = token.to_lowercase();
+        match t.as_str() {
+            "gzip" => Some(Algorithm.Gzip),
+            "deflate" => Some(Algorithm.Deflate),
+            "br" => Some(Algorithm.Brotli),
+            "zstd" => Some(Algorithm.Zstd),
+            "lz4" => Some(Algorithm.Lz4),
+            "identity" => Some(Algorithm.Identity),
+            _ => None,
+        }
+    }
+}
+
+// =============================================================================
+// Errors
+// =============================================================================
+
+public type CompressError is
+    /// Algorithm not available (backend feature-flag not enabled).
+    | UnsupportedAlgorithm(Algorithm)
+    /// Invalid input — corrupt data, bad header, premature EOF.
+    | CorruptInput(Text)
+    /// Output buffer too small; includes required size.
+    | BufferTooSmall { need: Int, have: Int }
+    /// Level out of range for the algorithm.
+    | InvalidLevel { algo: Algorithm, level: Int }
+    /// Dictionary doesn't match encoder/decoder expectations.
+    | DictionaryMismatch
+    /// Decompressed output would exceed `max_output_bytes` (DoS guard).
+    | OutputTooLarge { limit: Int }
+    /// Underlying I/O error propagated from inner writer/reader.
+    | IoError(Text);
+
+// =============================================================================
+// Codec protocol — one-shot encode/decode
+// =============================================================================
+
+/// One-shot codec interface. Implementations per-algorithm in submodules.
+public type Codec is protocol {
+    /// Compression algorithm identifier.
+    const ALGORITHM: Algorithm;
+
+    /// Compress `input` into `out`. Returns number of bytes appended.
+    fn encode(input: &[Byte], level: Int, out: &mut List<Byte>)
+        -> Result<Int, CompressError>;
+
+    /// Decompress `input` into `out`. Respects `max_output_bytes` to
+    /// defend against zip-bomb inputs. Returns bytes appended.
+    fn decode(input: &[Byte], max_output_bytes: Int, out: &mut List<Byte>)
+        -> Result<Int, CompressError>;
+}
+
+/// Dispatch by runtime Algorithm value. Useful at HTTP Content-Encoding
+/// negotiation site where the algorithm is chosen from client Accept-Encoding.
+pub fn encode(algo: Algorithm, input: &[Byte], level: Int, out: &mut List<Byte>)
+    -> Result<Int, CompressError>
+{
+    match algo {
+        Gzip    => mod_gzip.Gzip.encode(input, level, out),
+        Deflate => mod_gzip.Deflate.encode(input, level, out),
+        Zlib    => mod_gzip.Zlib.encode(input, level, out),
+        Brotli  => mod_brotli.Brotli.encode(input, level, out),
+        Zstd    => mod_zstd.Zstd.encode(input, level, out),
+        Lz4     => mod_lz4.Lz4.encode(input, level, out),
+        Identity => {
+            for b in input { out.push(*b); }
+            Ok(input.len())
+        }
+    }
+}
+
+pub fn decode(algo: Algorithm, input: &[Byte], max_output_bytes: Int, out: &mut List<Byte>)
+    -> Result<Int, CompressError>
+{
+    match algo {
+        Gzip    => mod_gzip.Gzip.decode(input, max_output_bytes, out),
+        Deflate => mod_gzip.Deflate.decode(input, max_output_bytes, out),
+        Zlib    => mod_gzip.Zlib.decode(input, max_output_bytes, out),
+        Brotli  => mod_brotli.Brotli.decode(input, max_output_bytes, out),
+        Zstd    => mod_zstd.Zstd.decode(input, max_output_bytes, out),
+        Lz4     => mod_lz4.Lz4.decode(input, max_output_bytes, out),
+        Identity => {
+            if input.len() > max_output_bytes {
+                return Err(CompressError.OutputTooLarge { limit: max_output_bytes });
+            }
+            for b in input { out.push(*b); }
+            Ok(input.len())
+        }
+    }
+}
