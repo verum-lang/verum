@@ -1,0 +1,22 @@
+[package]
+name = "isabelle_graph_import"
+description = "Import Isabelle/HOL Graph_Library theorem statements into Verum regression tests."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[[bin]]
+name = "verum-isabelle-import"
+path = "src/main.rs"
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]

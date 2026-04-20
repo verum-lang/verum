@@ -39,6 +39,7 @@ members = [
     "vcs/runner/vtest",
     "vcs/runner/vbench",
     "vcs/runner/vfuzz",
+    "vcs/tools/isabelle_graph_import",
 ]
 
 [workspace.package]
