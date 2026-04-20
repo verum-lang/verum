@@ -290,6 +290,55 @@ pub struct VerifyConfig {
     /// that module and its descendants.
     #[serde(default)]
     pub modules: Map<Text, VerifyModuleOverride>,
+
+    // ─────────────────────────────────────────────────────────────
+    // Profiler / budget / cache block — see
+    // docs/detailed/25-developer-tooling.md §1.5
+    // CLI flags (--profile / --budget / --export / --distributed-cache)
+    // override these values when present.
+    // ─────────────────────────────────────────────────────────────
+    /// Human-readable project-wide verification budget (e.g. `"120s"`,
+    /// `"5m"`). When set, builds fail if total verification time exceeds
+    /// this limit. `None` means unbounded. Overridden by `--budget=…`.
+    #[serde(default)]
+    pub total_budget: Option<Text>,
+
+    /// Per-function slow-verification threshold. Functions whose SMT run
+    /// exceeds this duration are flagged in the `--profile` report.
+    /// Default: `"5s"` (matches spec §1.5).
+    #[serde(default)]
+    pub slow_threshold: Option<Text>,
+
+    /// Path (relative to workspace root) where the on-disk verification
+    /// cache lives. Defaults to `.verum/verify-cache`.
+    #[serde(default)]
+    pub cache_dir: Option<Text>,
+
+    /// Cache size cap, e.g. `"500MB"`. `None` means unbounded.
+    #[serde(default)]
+    pub cache_max_size: Option<Text>,
+
+    /// Cache TTL, e.g. `"30d"`, `"24h"`. Entries older than this are
+    /// evicted on the next run. `None` disables TTL-based eviction.
+    #[serde(default)]
+    pub cache_ttl: Option<Text>,
+
+    /// URL of a distributed verification cache (e.g.
+    /// `s3://bucket/verify-cache`, `redis://host/`). `None` disables.
+    /// Overridden by `--distributed-cache=…`.
+    #[serde(default)]
+    pub distributed_cache: Option<Text>,
+
+    /// Turn on per-function profiling of slow verifications. Default:
+    /// `true` — the profiler is enabled iff `--profile` is passed on
+    /// the CLI.
+    #[serde(default = "default_true")]
+    pub profile_slow_functions: bool,
+
+    /// Threshold above which a function counts as "slow" for the
+    /// profiler. Default: `"1s"`.
+    #[serde(default)]
+    pub profile_threshold: Option<Text>,
 }
 
 impl Default for VerifyConfig {
@@ -301,6 +350,14 @@ impl Default for VerifyConfig {
             persist_stats: true,
             fail_on_divergence: true,
             modules: Map::new(),
+            total_budget: None,
+            slow_threshold: None,
+            cache_dir: None,
+            cache_max_size: None,
+            cache_ttl: None,
+            distributed_cache: None,
+            profile_slow_functions: true,
+            profile_threshold: None,
         }
     }
 }

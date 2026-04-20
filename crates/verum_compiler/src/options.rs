@@ -123,6 +123,15 @@ pub struct CompilerOptions {
     /// Enable verification profiling (detailed bottleneck analysis)
     pub profile_verification: bool,
 
+    /// URL of a distributed verification cache (e.g. `s3://bucket/path`,
+    /// `redis://host:6379`, `file:///nfs/verify-cache`).
+    ///
+    /// When set, cache lookups and stores are routed through the configured
+    /// backend in addition to the in-memory cache. Intended for CI/CD where
+    /// multiple agents share proofs. The actual transport is owned by the
+    /// verification cache layer; the option here is the CLI handle.
+    pub distributed_cache_url: Option<String>,
+
     // Profiling Options (P0!)
     /// Enable CBGR memory profiling
     pub profile_memory: bool,
@@ -279,6 +288,7 @@ impl Default for CompilerOptions {
             export_verification_json: false,
             verification_json_path: None,
             profile_verification: false,
+            distributed_cache_url: None,
             profile_memory: false,
             hot_path_threshold: 5.0,
             optimization_level: 0,

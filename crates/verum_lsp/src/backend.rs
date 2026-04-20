@@ -1522,8 +1522,65 @@ impl LanguageServer for Backend {
         Ok(links)
     }
 
-    async fn did_change_configuration(&self, _params: DidChangeConfigurationParams) {
-        tracing::info!("Configuration changed, revalidating open documents");
+    async fn did_change_configuration(&self, params: DidChangeConfigurationParams) {
+        tracing::info!("Configuration changed — applying and revalidating open documents");
+
+        // `params.settings` is the raw JSON blob the client sent. VS Code
+        // sends an object shaped like `{"verum": { "lsp": {...}, "cbgr": {...} }}`
+        // on `workspace/configuration` pulls and a similar shape here on
+        // push. Flatten both levels into the same key/value pairs the
+        // `initializationOptions` parser recognises, so the config runtime
+        // and the initial load agree.
+        let mut flat = serde_json::Map::new();
+
+        fn collect(prefix: &str, value: &serde_json::Value, out: &mut serde_json::Map<String, serde_json::Value>) {
+            if let Some(obj) = value.as_object() {
+                for (k, v) in obj {
+                    if v.is_object() {
+                        // Recurse into nested groups like `verum.lsp.*`.
+                        collect(k, v, out);
+                    } else {
+                        // Terminal key — preserve under both the raw name
+                        // (`enableRefinementValidation`) and the
+                        // `group.key` variant VS Code sometimes sends.
+                        out.insert(k.clone(), v.clone());
+                        if !prefix.is_empty() {
+                            out.insert(format!("{prefix}.{k}"), v.clone());
+                        }
+                    }
+                }
+            }
+        }
+        collect("", &params.settings, &mut flat);
+
+        // Map VS Code's "verum.lsp.enableRefinementValidation" etc. to the
+        // short keys our LspConfig::apply_json expects.
+        for (from, to) in [
+            ("lsp.enableRefinementValidation", "enableRefinementValidation"),
+            ("lsp.validationMode", "validationMode"),
+            ("lsp.smtSolver", "smtSolver"),
+            ("lsp.smtTimeout", "smtTimeout"),
+            ("lsp.showCounterexamples", "showCounterexamples"),
+            ("lsp.maxCounterexampleTraces", "maxCounterexampleTraces"),
+            ("lsp.cacheValidationResults", "cacheValidationResults"),
+            ("lsp.cacheTtlSeconds", "cacheTtlSeconds"),
+            ("lsp.cacheMaxEntries", "cacheMaxEntries"),
+            ("cbgr.enableProfiling", "cbgrEnableProfiling"),
+            ("cbgr.showOptimizationHints", "cbgrShowOptimizationHints"),
+            ("verification.showCostWarnings", "verificationShowCostWarnings"),
+            ("verification.slowThresholdMs", "verificationSlowThresholdMs"),
+        ] {
+            if let Some(v) = flat.get(from).cloned() {
+                flat.entry(to.to_string()).or_insert(v);
+            }
+        }
+
+        let merged = serde_json::Value::Object(flat);
+        self.config.apply_json(&merged);
+        let cfg = self.config.snapshot();
+        self.cbgr_hints.set_enabled(cfg.cbgr_show_optimization_hints);
+        self.refinement_validator.apply_config(&cfg);
+
         // Revalidate all open documents with potentially new settings
         let uris: Vec<Url> = self.documents.document_uris();
         for uri in uris {

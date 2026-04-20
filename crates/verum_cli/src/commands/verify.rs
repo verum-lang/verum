@@ -132,6 +132,46 @@ pub struct ProfileConfig {
     pub distributed_cache: Option<String>,
 }
 
+/// Merge CLI-provided profile knobs with whatever the project's
+/// `verum.toml` declares under `[verify]`. CLI flags always win — the
+/// manifest only fills in the gaps left by the command line.
+///
+/// Called from `execute` before we start iterating sources.
+fn merge_with_manifest(cli: ProfileConfig) -> ProfileConfig {
+    let manifest_dir = match crate::config::Manifest::find_manifest_dir() {
+        Ok(dir) => dir,
+        Err(_) => return cli,
+    };
+    let manifest_path = crate::config::Manifest::manifest_path(&manifest_dir);
+    let manifest = match crate::config::Manifest::from_file(&manifest_path) {
+        Ok(m) => m,
+        Err(_) => return cli,
+    };
+    let v = &manifest.verify;
+
+    // Only consult the manifest for fields the CLI didn't already set.
+    // `profile_slow_functions` in the manifest implicitly enables the
+    // profiler for the whole project when the user hasn't passed
+    // `--profile` on the command line.
+    let mut out = cli;
+    if !out.enabled && v.profile_slow_functions && v.total_budget.is_some() {
+        // If the manifest declares a budget, opt the profile on by default —
+        // users asking for a budget definitely want the report.
+        out.enabled = true;
+    }
+    if out.budget.is_none() {
+        if let Some(b) = v.total_budget.as_deref() {
+            if let Ok(d) = parse_duration(b) {
+                out.budget = Some(d);
+            }
+        }
+    }
+    if out.distributed_cache.is_none() {
+        out.distributed_cache = v.distributed_cache.as_ref().map(|t| t.to_string());
+    }
+    out
+}
+
 /// Parse a human-readable duration string (e.g. `120s`, `2m`, `1h`).
 ///
 /// Accepts a bare number as seconds. Used by `--budget=...` at the CLI layer.
@@ -176,6 +216,10 @@ pub fn execute(
     _cache: bool,
     interactive: bool,
 ) -> Result<()> {
+    // Merge [verify] block from verum.toml (if any) with CLI flags. CLI
+    // wins — per spec §1.5 / §6.1 CLI arguments override manifest defaults.
+    let profile = merge_with_manifest(profile);
+
     if let Some(ref url) = profile.distributed_cache {
         ui::info(&format!(
             "Distributed verification cache: {} (advisory — results are \
@@ -328,6 +372,7 @@ fn verify_file_proof(
         verification_budget_secs: profile.budget.map(|d| d.as_secs().max(1)),
         export_verification_json: profile.export_path.is_some(),
         verification_json_path: profile.export_path.clone(),
+        distributed_cache_url: profile.distributed_cache.clone(),
         ..Default::default()
     };
 
@@ -436,12 +481,38 @@ fn execute_proof_mode(
     let mut stats = VerificationStats::default();
     let overall_start = Instant::now();
 
+    // Per-project budget accounting (spec §1.2 / §1.4): if the user passed
+    // `--budget=120s`, we bound the *total* project time, not per-file time.
+    // The inner VerifyCommand's BudgetTracker resets on every file, so the
+    // project-level guard lives here.
+    let project_budget = profile.budget;
+    let mut stopped_on_budget = false;
+
     for source in &sources {
+        // Per-file budget: shrink the compiler-side budget to whatever
+        // remains in the project budget, so even a single file can't blow
+        // past the total.
+        let mut per_file_profile = profile.clone();
+        if let Some(budget) = project_budget {
+            let elapsed = overall_start.elapsed();
+            if elapsed >= budget {
+                stopped_on_budget = true;
+                ui::warn(&format!(
+                    "Verification budget exhausted after {:.2}s — skipping remaining \
+                     {} file(s).",
+                    elapsed.as_secs_f64(),
+                    sources.len() - stats.total_files,
+                ));
+                break;
+            }
+            per_file_profile.budget = Some(budget - elapsed);
+        }
+
         let display_path = source.display().to_string();
         stats.total_files += 1;
 
         let file_start = Instant::now();
-        match verify_file_proof(source, timeout, show_cost, backend, profile) {
+        match verify_file_proof(source, timeout, show_cost, backend, &per_file_profile) {
             Ok(true) => {
                 let elapsed = file_start.elapsed();
                 stats.files_verified += 1;
@@ -475,6 +546,19 @@ fn execute_proof_mode(
     }
 
     stats.total_time = overall_start.elapsed();
+
+    // Surface the budget overshoot to callers. `execute` already returns
+    // CliError::verification_failed on any files_failed > 0, but an empty
+    // budget-abort would otherwise succeed silently — use a sentinel failure.
+    if stopped_on_budget {
+        stats.files_failed = stats.files_failed.max(1);
+        return Err(CliError::verification_failed(format!(
+            "project verification budget of {:.1}s exceeded after {} file(s)",
+            project_budget.unwrap().as_secs_f64(),
+            stats.total_files,
+        )));
+    }
+
     Ok(stats)
 }
 
@@ -839,4 +923,53 @@ fn print_summary(stats: &VerificationStats) {
     println!();
     println!("  Success rate: {:.1}%", stats.success_rate());
     println!("  Total time:   {:.2}s", stats.total_time.as_secs_f64());
+}
+
+// ============================================================================
+// Tests
+// ============================================================================
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_duration_accepts_bare_seconds() {
+        assert_eq!(parse_duration("120").unwrap(), Duration::from_secs(120));
+    }
+
+    #[test]
+    fn parse_duration_supports_time_units() {
+        assert_eq!(parse_duration("90s").unwrap(), Duration::from_secs(90));
+        assert_eq!(parse_duration("2m").unwrap(), Duration::from_secs(120));
+        assert_eq!(parse_duration("1h").unwrap(), Duration::from_secs(3600));
+        assert_eq!(parse_duration("500ms").unwrap(), Duration::from_millis(500));
+    }
+
+    #[test]
+    fn parse_duration_rejects_invalid() {
+        assert!(parse_duration("").is_err());
+        assert!(parse_duration("abc").is_err());
+        assert!(parse_duration("10x").is_err());
+        assert!(parse_duration("-1s").is_err());
+    }
+
+    #[test]
+    fn profile_config_default_is_noop() {
+        let cfg = ProfileConfig::default();
+        assert!(!cfg.enabled);
+        assert!(cfg.budget.is_none());
+        assert!(cfg.export_path.is_none());
+        assert!(cfg.distributed_cache.is_none());
+    }
+
+    #[test]
+    fn verification_stats_success_rate_rounds() {
+        let mut stats = VerificationStats::default();
+        stats.total_files = 4;
+        stats.files_verified = 3;
+        assert!((stats.success_rate() - 75.0).abs() < 0.001);
+        stats.total_files = 0;
+        assert!((stats.success_rate() - 100.0).abs() < 0.001);
+    }
 }

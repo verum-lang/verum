@@ -15,11 +15,24 @@ use verum_lsp::Backend;
 
 /// Build an `LspService` for the Verum language server.
 ///
-/// Shared by every transport so the server is constructed identically over
-/// stdio / TCP / named-pipe. Custom `verum/*` methods are currently exercised
-/// via the VS Code client using built-in LSP primitives (hover, code-actions)
-/// — see `internal/vscode-extension/src/extension.ts` — rather than direct
-/// JSON-RPC requests, which keeps the server fully standards-compatible.
+/// # Custom `verum/*` methods are not yet router-registered.
+///
+/// tower-lsp 0.20's `.custom_method` is bound by
+/// `for<'a> Method<&'a S, P, R>`, which transitively requires the handler
+/// future to be `Send`. Every `Backend::handle_*` async method currently
+/// captures `&Backend` across an `.await` point, and `Backend` transitively
+/// owns the `RefinementValidator` which in turn owns Z3 bindings
+/// (`Rc<z3::context::ContextInternal>`, `NonNull<_Z3_pattern>`). Those are
+/// `!Send`, so the futures fail the router's `Send` bound.
+///
+/// Making these handlers routable requires isolating the Z3 session behind
+/// a dedicated thread / `tokio::task::spawn_blocking` bridge — see
+/// `docs/detailed/25-developer-tooling.md` §3.5 "SMT solver pool". Until
+/// that refactor lands, every client-facing Verum flow that would have
+/// used one of these requests is driven through built-in LSP surfaces
+/// instead: the VS Code extension dispatches `editor.action.showHover`
+/// for escape analysis, code-action code paths already live client-side,
+/// and the `verify` / `profile` CLI commands cover non-interactive cases.
 fn build_verum_service() -> (LspService<Backend>, tower_lsp::ClientSocket) {
     LspService::new(Backend::new)
 }

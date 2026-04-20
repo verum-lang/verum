@@ -60,6 +60,39 @@ impl PrecisionKind {
             PrecisionKind::Nanoseconds => "ns",
         }
     }
+
+    /// Human-readable description of the timer granularity for the
+    /// report header. `Instant::now` on macOS/Linux is already ns-native
+    /// (mach_absolute_time / CLOCK_MONOTONIC), so `ns` mode just means we
+    /// *display* more precision, not that we take extra measurements.
+    pub fn description(self) -> &'static str {
+        match self {
+            PrecisionKind::Microseconds => "microseconds (default)",
+            PrecisionKind::Nanoseconds => "nanoseconds (Instant::now native resolution)",
+        }
+    }
+}
+
+/// Format a `Duration` at the requested precision.
+///
+/// `Microseconds` → milliseconds, integer (`42ms`) — unchanged from the
+/// historical default. `Nanoseconds` → microseconds with one decimal
+/// (`41.7µs`), or nanoseconds (`842ns`) if sub-microsecond, so per-check
+/// CBGR-style costs render legibly.
+pub fn format_duration(d: std::time::Duration, precision: PrecisionKind) -> String {
+    match precision {
+        PrecisionKind::Microseconds => format!("{}ms", d.as_millis()),
+        PrecisionKind::Nanoseconds => {
+            let ns = d.as_nanos();
+            if ns < 1_000 {
+                format!("{}ns", ns)
+            } else if ns < 1_000_000 {
+                format!("{:.1}µs", d.as_nanos() as f64 / 1_000.0)
+            } else {
+                format!("{:.3}ms", d.as_nanos() as f64 / 1_000_000.0)
+            }
+        }
+    }
 }
 
 /// Sampling / filter knobs for CBGR profiling, driven by
@@ -512,21 +545,161 @@ fn run_profile(
 ) -> Result<()> {
     match target {
         ProfileTarget::Memory => profile_memory(format, data, sampling)?,
-        ProfileTarget::Cpu => profile_cpu(format, data)?,
+        ProfileTarget::Cpu => profile_cpu(format, data, sampling.precision)?,
         ProfileTarget::Cache => profile_cache(format, data)?,
-        ProfileTarget::Compilation => profile_compilation(format, data)?,
+        ProfileTarget::Compilation => profile_compilation(format, data, sampling.precision)?,
         ProfileTarget::All => {
-            // Unified dashboard (spec §6): all four slices, one header block.
-            ui::section("Verum Performance Analysis");
-            println!();
-            profile_memory(format, data, sampling)?;
-            println!();
-            profile_cpu(format, data)?;
-            println!();
-            profile_cache(format, data)?;
-            println!();
-            profile_compilation(format, data)?;
+            render_unified_dashboard(format, data, sampling)?;
         }
+    }
+
+    Ok(())
+}
+
+// ============================================================================
+// Unified dashboard (spec §6)
+// ============================================================================
+
+/// Render `verum profile --all` as a single, correlated dashboard.
+///
+/// Emulates the output shape documented in
+/// `docs/detailed/25-developer-tooling.md §6`:
+/// compilation-time breakdown + runtime breakdown + ranked hot-spots +
+/// actionable recommendations, all under one header, rather than four
+/// disjoint reports. Individual slices are still available via
+/// `--memory` / `--cpu` / `--cache` / `--compilation`.
+fn render_unified_dashboard(
+    format: OutputFormat,
+    data: Option<&ProfileData>,
+    sampling: &SamplingConfig,
+) -> Result<()> {
+    if format == OutputFormat::Json {
+        // JSON consumers always get the full slices back-to-back — the
+        // nice table layout is irrelevant to them.
+        profile_memory(format, data, sampling)?;
+        profile_cpu(format, data, sampling.precision)?;
+        profile_cache(format, data)?;
+        profile_compilation(format, data, sampling.precision)?;
+        return Ok(());
+    }
+
+    ui::section("Verum Performance Analysis");
+    println!();
+    if !matches!(sampling.precision, PrecisionKind::Microseconds) {
+        ui::info(&format!("Timer precision: {}", sampling.precision.description()));
+        println!();
+    }
+
+    if let Some(profile_data) = data {
+        // ── Compilation time breakdown (spec §6 top block) ─────────────
+        let report = &profile_data.compilation_report;
+        println!("{}", "Compilation Time".bold());
+        println!(
+            "  Total: {}",
+            format_duration(report.total_duration, sampling.precision)
+        );
+        if !report.phase_metrics.is_empty() {
+            for phase in &report.phase_metrics {
+                let marker = if phase.time_percentage > 40.0 {
+                    " ⚠ SLOW".red().to_string()
+                } else {
+                    String::new()
+                };
+                println!(
+                    "  ├─ {:18} {:>10} ({:>5.1}%){}",
+                    phase.phase_name.as_str(),
+                    format_duration(phase.duration, sampling.precision),
+                    phase.time_percentage,
+                    marker
+                );
+            }
+        }
+        println!();
+
+        // ── Runtime / CBGR breakdown ───────────────────────────────────
+        let ts = &profile_data.tier_stats;
+        let overhead_per_call_ns = if ts.functions_analyzed > 0 {
+            (ts.tier0_count * 15) as f64 / ts.functions_analyzed as f64
+        } else {
+            0.0
+        };
+        println!("{}", "Runtime Performance".bold());
+        println!("  Functions analysed: {}", ts.functions_analyzed);
+        println!(
+            "  CBGR tiers: Tier0 {} · Tier1 {} · Tier2 {}",
+            ts.tier0_count, ts.tier1_count, ts.tier2_count
+        );
+        if overhead_per_call_ns > 0.0 {
+            println!(
+                "  Estimated CBGR overhead: ~{:.1}ns per analysed function",
+                overhead_per_call_ns
+            );
+        }
+        println!();
+
+        // ── Ranked hot-spots ───────────────────────────────────────────
+        let mut hot: Vec<&FunctionRefCount> = profile_data
+            .function_ref_counts
+            .iter()
+            .filter(|f| f.cbgr_refs > 0 && sampling.accepts(&f.name))
+            .collect();
+        hot.sort_by(|a, b| b.cbgr_refs.cmp(&a.cbgr_refs));
+
+        println!("{}", "Hot Spots".bold());
+        if hot.is_empty() {
+            println!("  (no CBGR-managed references detected)");
+        } else {
+            for (rank, func) in hot.iter().take(5).enumerate() {
+                let tag = if func.max_loop_depth >= 2 {
+                    " (inner-loop — high amplification)".yellow().to_string()
+                } else {
+                    String::new()
+                };
+                println!(
+                    "  {}. {}() — {} managed ref(s){}",
+                    rank + 1,
+                    func.name.as_str().bold(),
+                    func.cbgr_refs,
+                    tag
+                );
+            }
+        }
+        println!();
+
+        // ── Recommendations ────────────────────────────────────────────
+        println!("{}", "Recommendations".bold());
+        let mut any = false;
+        for phase in &report.phase_metrics {
+            if phase.time_percentage > 40.0 {
+                println!(
+                    "  • Compilation phase `{}` took {:.1}% of total time — \
+                     consider splitting or caching at this stage.",
+                    phase.phase_name.as_str(),
+                    phase.time_percentage
+                );
+                any = true;
+            }
+        }
+        for func in hot.iter().take(3) {
+            if func.max_loop_depth >= 2 && func.cbgr_refs > 0 {
+                println!(
+                    "  • Promote inner-loop refs in `{}()` to `&checked T` \
+                     (run `verum analyze --escape` for a proof obligation).",
+                    func.name
+                );
+                any = true;
+            }
+        }
+        if !any {
+            println!("  (no actionable findings above threshold)");
+        }
+    } else {
+        println!(
+            "  {}",
+            "Provide a source file for a full unified dashboard: \
+             verum profile --all path/to/main.vr"
+                .yellow()
+        );
     }
 
     Ok(())
@@ -1003,7 +1176,11 @@ fn profile_memory_json(data: &ProfileData) -> Result<()> {
 // CPU Profile (--cpu)
 // ============================================================================
 
-fn profile_cpu(format: OutputFormat, data: Option<&ProfileData>) -> Result<()> {
+fn profile_cpu(
+    format: OutputFormat,
+    data: Option<&ProfileData>,
+    precision: PrecisionKind,
+) -> Result<()> {
     if format == OutputFormat::Json {
         return profile_cpu_json(data);
     }
@@ -1028,17 +1205,17 @@ fn profile_cpu(format: OutputFormat, data: Option<&ProfileData>) -> Result<()> {
                     let bar_len = (phase.time_percentage / 5.0) as usize;
                     let bar = "=".repeat(bar_len.min(20));
                     println!(
-                        "    {:20} {:>6}ms ({:>5.1}%) {}",
+                        "    {:20} {:>10} ({:>5.1}%) {}",
                         phase.phase_name.as_str(),
-                        phase.duration.as_millis(),
+                        format_duration(phase.duration, precision),
                         phase.time_percentage,
                         bar.cyan()
                     );
                 }
                 println!();
                 println!(
-                    "  Total compilation time: {}ms",
-                    report.total_duration.as_millis()
+                    "  Total compilation time: {}",
+                    format_duration(report.total_duration, precision)
                 );
             }
         }
@@ -1175,10 +1352,14 @@ fn profile_cache_json(data: Option<&ProfileData>) -> Result<()> {
 // Compilation Pipeline Profile (--compilation)
 // ============================================================================
 
-fn profile_compilation(format: OutputFormat, data: Option<&ProfileData>) -> Result<()> {
+fn profile_compilation(
+    format: OutputFormat,
+    data: Option<&ProfileData>,
+    precision: PrecisionKind,
+) -> Result<()> {
     match data {
         Some(profile_data) => {
-            profile_compilation_real(format, &profile_data.compilation_report)
+            profile_compilation_real(format, &profile_data.compilation_report, precision)
         }
         None => profile_compilation_no_input(format),
     }
@@ -1208,20 +1389,21 @@ fn profile_compilation_no_input(format: OutputFormat) -> Result<()> {
 fn profile_compilation_real(
     format: OutputFormat,
     report: &CompilationProfileReport,
+    precision: PrecisionKind,
 ) -> Result<()> {
     match format {
         OutputFormat::Json => print_compilation_json(report),
         OutputFormat::Flamegraph => {
             ui::warn("Flamegraph output not available for compilation profiling");
-            print_compilation_text(report);
+            print_compilation_text(report, precision);
         }
-        OutputFormat::Text => print_compilation_text(report),
+        OutputFormat::Text => print_compilation_text(report, precision),
     }
 
     Ok(())
 }
 
-fn print_compilation_text(report: &CompilationProfileReport) {
+fn print_compilation_text(report: &CompilationProfileReport, precision: PrecisionKind) {
     print_section_header("Compilation Pipeline Profile");
     println!();
 
@@ -1236,9 +1418,9 @@ fn print_compilation_text(report: &CompilationProfileReport) {
             let bar_len = (phase.time_percentage / 5.0) as usize;
             let bar = "=".repeat(bar_len.min(20));
             println!(
-                "    {:20} {:>6}ms ({:>5.1}%) {}",
+                "    {:20} {:>10} ({:>5.1}%) {}",
                 phase.phase_name.as_str(),
-                phase.duration.as_millis(),
+                format_duration(phase.duration, precision),
                 phase.time_percentage,
                 bar.cyan()
             );
@@ -1248,8 +1430,8 @@ fn print_compilation_text(report: &CompilationProfileReport) {
 
     println!("  {} Statistics:", "Stats".cyan().bold());
     println!(
-        "    Total time:     {}ms",
-        report.total_duration.as_millis()
+        "    Total time:     {}",
+        format_duration(report.total_duration, precision)
     );
     if report.stats.total_loc > 0 {
         println!(
@@ -1347,5 +1529,67 @@ mod tests {
     fn test_profile_targets() {
         assert_eq!(ProfileTarget::Memory, ProfileTarget::Memory);
         assert_ne!(ProfileTarget::Memory, ProfileTarget::Cpu);
+    }
+
+    #[test]
+    fn sampling_default_matches_spec() {
+        let s = SamplingConfig::default();
+        assert_eq!(s.sample_rate_percent, 1.0);
+        assert!(s.function_filter.is_empty());
+        assert!(matches!(s.precision, PrecisionKind::Microseconds));
+        assert!(s.is_default());
+    }
+
+    #[test]
+    fn sampling_rate_clamps_to_unit() {
+        let s = SamplingConfig {
+            sample_rate_percent: 250.0,
+            ..Default::default()
+        };
+        // `.sample_rate()` clamps at 1.0 — even a nonsensical >100% rate
+        // cannot produce a probability above 1.
+        assert!((s.sample_rate() - 1.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn sampling_accepts_respects_filter() {
+        let s = SamplingConfig {
+            function_filter: vec!["foo".into(), "bar".into()],
+            ..Default::default()
+        };
+        assert!(s.accepts("foo"));
+        assert!(s.accepts("bar"));
+        assert!(!s.accepts("baz"));
+        // Empty filter == allow all.
+        let open = SamplingConfig::default();
+        assert!(open.accepts("anything"));
+    }
+
+    #[test]
+    fn format_duration_microseconds_renders_ms() {
+        let d = std::time::Duration::from_micros(42_500); // 42.5ms
+        assert_eq!(format_duration(d, PrecisionKind::Microseconds), "42ms");
+    }
+
+    #[test]
+    fn format_duration_ns_switches_unit_by_magnitude() {
+        // < 1µs → ns
+        let sub_micro = std::time::Duration::from_nanos(842);
+        assert_eq!(
+            format_duration(sub_micro, PrecisionKind::Nanoseconds),
+            "842ns"
+        );
+        // 1µs ≤ x < 1ms → µs with 1 fractional digit
+        let micros = std::time::Duration::from_nanos(41_700);
+        assert_eq!(
+            format_duration(micros, PrecisionKind::Nanoseconds),
+            "41.7µs"
+        );
+        // ≥ 1ms → ms with 3 fractional digits
+        let millis = std::time::Duration::from_nanos(2_500_000);
+        assert_eq!(
+            format_duration(millis, PrecisionKind::Nanoseconds),
+            "2.500ms"
+        );
     }
 }
