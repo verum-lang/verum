@@ -394,6 +394,15 @@ public async fn race_all<T, F: Future<Output = T>>(
     select_all(futures).await.value
 }
 
+/// Wait for all futures and return their results; does NOT short-circuit
+/// on error. Each element is the `Future`'s final output (typically a
+/// `Result`), preserving the per-future outcome.
+public async fn join_all_settled<T, F: Future<Output = T>>(
+    futures: List<F>,
+) -> List<T> {
+    join_all(futures).await
+}
+
 // =============================================================================
 // Join All - Wait for collection
 // =============================================================================
