@@ -4339,6 +4339,75 @@ impl VbcCodegen {
             return Ok(Some(result));
         }
 
+        // Intercept `Text.from(text)` — stdlib has both `From<&str>` and
+        // `From<Char>` impls on Text, and the current method resolver picks
+        // the `From<Char>` impl for text literals, re-entering `push_byte`
+        // with "world" treated as a Char. `encode_utf8` is then called on
+        // the string and the result is garbage. Short-circuit to
+        // `from_utf8_unchecked(arg.as_bytes())` when arg is a Text.
+        if method.name == "from" && args.len() == 1
+            && let Some(ref tn) = static_receiver_type
+            && tn == "Text"
+        {
+            let arg_type = self
+                .extract_expr_type_name(&args[0])
+                .as_deref()
+                .map(VbcCodegen::strip_generic_args)
+                .map(str::to_string);
+            let is_text_arg = arg_type
+                .as_deref()
+                .map(|t| t == "Text" || t == "&Text" || t == "&mut Text" || t == "str" || t == "&str")
+                .unwrap_or(false);
+            if is_text_arg {
+                // Compile arg, then route through `Text.from_utf8_unchecked(arg.as_bytes())`
+                // by emitting AsBytes then calling the stdlib function.
+                let arg_reg = self
+                    .compile_expr(&args[0])?
+                    .ok_or_else(|| CodegenError::internal("Text.from arg has no value"))?;
+                let bytes_reg = self.ctx.alloc_temp();
+                let mut ab_operands = Vec::with_capacity(4);
+                let push_reg = |operands: &mut Vec<u8>, r: Reg| {
+                    if r.is_short() {
+                        operands.push(r.0 as u8);
+                    } else {
+                        operands.push(0x80 | ((r.0 >> 8) as u8));
+                        operands.push(r.0 as u8);
+                    }
+                };
+                push_reg(&mut ab_operands, bytes_reg);
+                push_reg(&mut ab_operands, arg_reg);
+                self.ctx.emit(Instruction::TextExtended {
+                    sub_op: crate::instruction::TextSubOpcode::AsBytes as u8,
+                    operands: ab_operands,
+                });
+                self.ctx.free_temp(arg_reg);
+                // Now call Text.from_utf8_unchecked(bytes_reg). It's a
+                // registered stdlib function whose body was already fixed
+                // by commit 90bcb59 (raw-pointer Clone handling) + 02dd6c8
+                // (Text list-dispatch guard).
+                if let Some(func_info) = self.ctx.lookup_function("Text.from_utf8_unchecked").cloned() {
+                    let result = self.ctx.alloc_temp();
+                    let mut args_reg = self.ctx.registers.alloc_fresh();
+                    // Move bytes_reg to args_reg if different
+                    if bytes_reg != args_reg {
+                        self.ctx.emit(Instruction::Mov { dst: args_reg, src: bytes_reg });
+                        self.ctx.free_temp(bytes_reg);
+                    } else {
+                        // Same register — consume the fresh alloc
+                        let _ = args_reg;
+                        args_reg = bytes_reg;
+                    }
+                    self.ctx.emit(Instruction::Call {
+                        dst: result,
+                        func_id: func_info.id.0,
+                        args: crate::instruction::RegRange { start: args_reg, count: 1 },
+                    });
+                    return Ok(Some(result));
+                }
+                self.ctx.free_temp(bytes_reg);
+            }
+        }
+
         // Intercept collection .new() calls FIRST — must emit builtin opcodes so the
         // interpreter creates proper heap objects with TypeId::LIST/MAP/SET headers.
         // The stdlib compiled .new() functions return flat structs with raw pointers

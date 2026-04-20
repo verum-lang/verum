@@ -480,19 +480,41 @@ pub(in super::super) fn handle_call_method(state: &mut InterpreterState) -> Inte
 
     // Handle Text.from(string) - string conversion
     // VBC-internal: interpreter runtime dispatch — Text.from() is a no-op in
-    // VBC because strings are already Text values in the NaN-boxed representation.
+    // VBC when the argument is already a Text value (small string or heap
+    // string). For any other argument shape (Char, Int, &Byte buffer,
+    // user-defined type with a `From` impl) fall through to the regular
+    // user-function dispatch so the stdlib `impl From<T> for Text` body
+    // runs.
     if bare_method_name == "from"
+        && args.count > 0
         && let Some(ref name) = receiver_type_name
             && WKT::Text.matches(name) {
-                // Text.from(value) returns the value as-is (strings are already Text in VBC)
                 let caller_base = state.reg_base();
-                let value = if args.count > 0 {
-                    state.registers.get(caller_base, Reg(args.start.0))
-                } else {
-                    Value::unit()
+                let value = state.registers.get(caller_base, Reg(args.start.0));
+                // Only short-circuit when the arg is already a Text
+                // representation. Anything else (Char, Int, raw byte slice,
+                // user-defined type) must go through the compiled stdlib
+                // `From<T>::from` body.
+                let is_already_text = value.is_small_string() || {
+                    value.is_ptr()
+                        && !value.is_nil()
+                        && !value.is_boxed_int()
+                        && {
+                            let p = value.as_ptr::<u8>();
+                            if p.is_null() {
+                                false
+                            } else {
+                                let header = unsafe { &*(p as *const heap::ObjectHeader) };
+                                header.type_id == TypeId::TEXT
+                                    || header.type_id == TypeId(0x0001)
+                            }
+                        }
                 };
-                state.set_reg(dst, value);
-                return Ok(DispatchResult::Continue);
+                if is_already_text {
+                    state.set_reg(dst, value);
+                    return Ok(DispatchResult::Continue);
+                }
+                // Otherwise fall through to user-function lookup.
             }
 
     // Handle static constructor methods (e.g., List.new(), Set.new(), Map.new())
