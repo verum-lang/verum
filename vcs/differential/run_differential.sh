@@ -117,7 +117,7 @@ fi
 
 # --------------------------------------------------------------------------
 # Run a single differential test
-#   Compares: verum run --tier interpreter <file>
+#   Compares: verum run --tier interpret <file>
 #        vs:  verum run --tier aot <file>
 # --------------------------------------------------------------------------
 run_one_test() {
@@ -137,7 +137,7 @@ run_one_test() {
     local aot_exit=0
 
     # --- Tier 0: interpreter ---
-    timeout "$TIMEOUT" "$VERUM_BIN" run --tier interpreter "$test_file" \
+    timeout "$TIMEOUT" "$VERUM_BIN" run --tier interpret "$test_file" \
         >"$interp_stdout" 2>"$interp_stderr" || interp_exit=$?
 
     # --- Tier 1: AOT ---
