@@ -2420,19 +2420,22 @@ impl ProofSearchEngine {
             .as_bool()
             .ok_or_else(|| VerificationError::SolverError("goal is not boolean".to_text()))?;
 
-        // Create solver and check
+        // Validity check: assert the NEGATION of the goal.
+        //   Unsat  → no counterexample → goal is valid (proven).
+        //   Sat    → counterexample exists → goal is not valid.
+        //   Unknown→ solver could not decide in its resource budget.
         let solver = context.solver();
-        solver.assert(&z3_bool);
+        solver.assert(&z3_bool.not());
 
         match solver.check() {
-            z3::SatResult::Sat => {
-                // Goal is satisfiable (proven)
+            z3::SatResult::Unsat => {
+                // No counterexample to the goal — proven valid.
                 let cost =
                     VerificationCost::new(format!("decision_{}", proc.name).into(), proc.timeout, true);
                 Ok(ProofResult::new(cost))
             }
-            z3::SatResult::Unsat => {
-                // Goal is not satisfiable
+            z3::SatResult::Sat => {
+                // Counterexample exists — goal is not valid.
                 Err(VerificationError::CannotProve {
                     constraint: format!("{:?}", goal).into(),
                     counterexample: None,
@@ -4065,19 +4068,30 @@ impl ProofSearchEngine {
             solver.from_string(block.as_str().to_string());
         }
 
-        solver.assert(&z3_bool);
+        // Validity check: a proposition `F` is valid iff `¬F` is
+        // unsatisfiable. We assert the NEGATION of the formula and
+        // read Z3's verdict:
+        //   Unsat  → no counterexample exists, so F is valid (proven).
+        //   Sat    → a counterexample exists, so F is not valid.
+        //   Unknown→ solver couldn't decide within its resource budget.
+        //
+        // Asserting `F` directly and reading Sat as "proven" would be
+        // wrong: Sat on `F` only means *some* assignment satisfies
+        // it, not that every assignment does. That is a satisfiability
+        // oracle, not a validity oracle.
+        solver.assert(&z3_bool.not());
 
         match solver.check() {
-            z3::SatResult::Sat => {
-                // Goal is satisfiable (proven)
+            z3::SatResult::Unsat => {
+                // No counterexample to `F` — goal is valid.
                 let proof_term = ProofTerm::SmtProof {
                     solver: "z3".into(),
                     formula: goal.goal.clone(),
                 };
                 Ok(Maybe::Some(proof_term))
             }
-            z3::SatResult::Unsat => {
-                // Goal is not satisfiable
+            z3::SatResult::Sat => {
+                // Counterexample exists — goal is not valid.
                 Ok(Maybe::None)
             }
             z3::SatResult::Unknown => {
