@@ -6996,6 +6996,7 @@ impl VbcCodegen {
                         .map_err(|e| e.with_context(format!("in function {}", lookup_name)))?;
                     // Return the block result if present (implicit return)
                     if let Some(reg) = result {
+                        self.emit_return_refinement_assert(reg, func.return_type.as_ref(), &lookup_name);
                         self.ctx.emit(Instruction::Ret { value: reg });
                     }
                 }
@@ -7004,6 +7005,7 @@ impl VbcCodegen {
                         .map_err(|e| e.with_context(format!("in function {}", lookup_name)))?;
                     // Return the expression result
                     if let Some(reg) = result {
+                        self.emit_return_refinement_assert(reg, func.return_type.as_ref(), &lookup_name);
                         self.ctx.emit(Instruction::Ret { value: reg });
                     } else {
                         self.ctx.emit(Instruction::RetV);
@@ -7138,6 +7140,83 @@ impl VbcCodegen {
         }
 
         Ok(final_result)
+    }
+
+    /// Emits an `Instruction::Assert` on the given return register when
+    /// the function's declared return type is `Refined` or `Sigma`.
+    ///
+    /// Called at each implicit-return site (tail expression / block
+    /// result). Explicit `return expr;` statements go through
+    /// `compile_return` in `expressions.rs`, which invokes the same
+    /// helper, so every return path exits through the predicate check.
+    ///
+    /// See the parameter-entry Assert emission (same file, around the
+    /// body-compile prologue) for the binding-alias + VarType mirror
+    /// idiom — the same idiom is used here so predicates like
+    /// `Int { it > 0 }` in a return type lower to the correct
+    /// integer comparison instead of falling back to an Unknown
+    /// comparator that always yields `true`.
+    pub(super) fn emit_return_refinement_assert(
+        &mut self,
+        result_reg: Reg,
+        return_type: Option<&verum_ast::ty::Type>,
+        fn_name: &str,
+    ) {
+        let Some(ret_ty) = return_type else { return };
+        let (pred_expr, binding_name) = match &ret_ty.kind {
+            verum_ast::ty::TypeKind::Refined { predicate, .. } => {
+                let bname = match &predicate.binding {
+                    verum_common::Maybe::Some(id) => id.name.to_string(),
+                    verum_common::Maybe::None    => "it".to_string(),
+                };
+                (predicate.expr.clone(), bname)
+            }
+            verum_ast::ty::TypeKind::Sigma { name, predicate, .. } => {
+                ((**predicate).clone(), name.name.to_string())
+            }
+            _ => return,
+        };
+
+        // Derive VarType from the underlying base (peel the refinement
+        // layer) so predicate compilation picks the right comparisons.
+        let base_vt = match &ret_ty.kind {
+            verum_ast::ty::TypeKind::Refined { base, .. } => {
+                self.type_kind_to_var_type(&base.kind)
+            }
+            verum_ast::ty::TypeKind::Sigma { base, .. } => {
+                self.type_kind_to_var_type(&base.kind)
+            }
+            _ => context::VarTypeKind::Unknown,
+        };
+        let base_type_name = match &ret_ty.kind {
+            verum_ast::ty::TypeKind::Refined { base, .. } => {
+                Self::extract_type_name_from_ast(base)
+            }
+            verum_ast::ty::TypeKind::Sigma { base, .. } => {
+                Self::extract_type_name_from_ast(base)
+            }
+            _ => String::new(),
+        };
+
+        let message_id = {
+            let msg = format!("refinement violation: return value of `{}`", fn_name);
+            self.intern_string(&msg)
+        };
+
+        self.ctx.enter_scope();
+        let alias_reg = self.ctx.define_var(&binding_name, false);
+        self.ctx.emit(Instruction::Mov { dst: alias_reg, src: result_reg });
+
+        self.ctx.register_variable_type(&binding_name, base_vt);
+        if !base_type_name.is_empty() && base_type_name != "()" {
+            self.ctx.variable_type_names.insert(binding_name.clone(), base_type_name);
+        }
+
+        if let Ok(Some(cond_reg)) = self.compile_expr(&pred_expr) {
+            self.ctx.emit(Instruction::Assert { cond: cond_reg, message_id });
+            self.ctx.free_temp(cond_reg);
+        }
+        self.ctx.exit_scope(false);
     }
 
     /// Ensures function ends with a return instruction.
