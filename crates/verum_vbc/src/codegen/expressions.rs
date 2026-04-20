@@ -4251,6 +4251,51 @@ impl VbcCodegen {
             _ => None,
         };
 
+        // Intercept `Q.of(x)` for quotient types (and any other type the
+        // codegen has registered in `newtype_names` as a pass-through
+        // carrier) — the quotient layer is compile-time only, so the
+        // static constructor is just an identity Mov at Tier-0.
+        if method.name == "of" && args.len() == 1
+            && let Some(ref tn) = static_receiver_type
+            && self.ctx.newtype_names.contains(tn)
+        {
+            let inner = self
+                .compile_expr(&args[0])?
+                .ok_or_else(|| CodegenError::internal("Q.of arg has no value"))?;
+            let dst = self.ctx.alloc_temp();
+            self.ctx.emit(Instruction::Mov { dst, src: inner });
+            self.ctx.free_temp(inner);
+            // Record the result's type so subsequent method lookups on the
+            // returned value see the quotient's nominal name instead of
+            // the carrier's.
+            self.ctx.variable_type_names
+                .insert(format!("__temp_r{}", dst.0), tn.clone());
+            return Ok(Some(dst));
+        }
+
+        // Intercept `q.rep()` for quotient values — identity Mov, same
+        // rationale as `Q.of`. The receiver's static type name must be
+        // a quotient registered in `newtype_names`; a non-quotient type
+        // that happens to define its own `rep` method falls through to
+        // the regular dispatch path below.
+        if method.name == "rep" && args.is_empty() {
+            if let Some(receiver_type_name) = self.infer_expr_type_name(receiver)
+                && self.ctx.newtype_names.contains(&receiver_type_name)
+            {
+                let base_reg = self
+                    .compile_expr(receiver)?
+                    .ok_or_else(|| CodegenError::internal("q.rep receiver has no value"))?;
+                let dst = self.ctx.alloc_temp();
+                self.ctx.emit(Instruction::Mov { dst, src: base_reg });
+                self.ctx.free_temp(base_reg);
+                if let Some(inner) = self.ctx.newtype_inner_type.get(&receiver_type_name).cloned() {
+                    self.ctx.variable_type_names
+                        .insert(format!("__temp_r{}", dst.0), inner);
+                }
+                return Ok(Some(dst));
+            }
+        }
+
         // Intercept Heap.new(value) / Shared.new(value) — emit CBGR-tracked allocation
         // via CallM so the interpreter's `dispatch_primitive_method` runs the
         // intrinsic path (method_dispatch.rs `Heap.new` / `Shared.new`). The stdlib's

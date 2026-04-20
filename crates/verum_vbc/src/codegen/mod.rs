@@ -2361,12 +2361,6 @@ impl VbcCodegen {
                             // Skip - this function has unresolvable dependencies
                             let fname = func.name.name.as_str();
                             tracing::debug!("[lenient] SKIP {}.{}: {}", type_name.as_deref().unwrap_or("?"), fname, e);
-                            if std::env::var("VERUM_DEBUG_LENIENT").is_ok() {
-                                eprintln!("[lenient] SKIP {}.{}: {}", type_name.as_deref().unwrap_or("?"), fname, e);
-                            }
-                        } else if std::env::var("VERUM_DEBUG_LENIENT").is_ok() {
-                            let fname = func.name.name.as_str();
-                            eprintln!("[lenient] OK   {}.{}", type_name.as_deref().unwrap_or("?"), fname);
                         }
 
                         // Compile nested functions even if parent failed
@@ -5881,10 +5875,87 @@ impl VbcCodegen {
             TypeDeclBody::Inductive(_) | TypeDeclBody::Coinductive(_) => {
                 // Dependent type features (v2.0+) - no constructor registration needed yet
             }
-            TypeDeclBody::Quotient { .. } => {
-                // T1-T: quotient types lower to HITs; constructor
-                // registration for `Q::of(rep)` is emitted through
-                // the HIT path once the elaborator desugars the form.
+            TypeDeclBody::Quotient { base, .. } => {
+                // Register `Q.of` (static) and `Q.rep` (instance) as
+                // identity-pass-through projections. At Tier-0 a
+                // quotient type is represented at runtime by the
+                // carrier value itself — the equivalence relation is
+                // a compile-time obligation discharged by the model-
+                // verification pipeline, not a runtime quotienting of
+                // the representation. So `Q.of(t)` emits `Mov dst, t`
+                // and `q.rep()` emits `Mov dst, q`. The type checker
+                // (see verum_types::infer) has already enforced that
+                // the return types match `Q` and the base carrier
+                // respectively, so no runtime coercion is required.
+                //
+                // The newtype-pass-through sentinel id `u32::MAX / 2`
+                // is shared with newtype / single-element-tuple
+                // constructors; the call-site codegen recognises it
+                // and emits the identity Mov.
+                let pass_through_id = FunctionId(u32::MAX / 2);
+                let base_type_name = self.type_to_simple_name(base);
+
+                // `Q.of(rep: T) -> Q`
+                let of_info = FunctionInfo {
+                    id: pass_through_id,
+                    param_count: 1,
+                    param_names: vec!["rep".to_string()],
+                    param_type_names: if base_type_name.is_empty() {
+                        vec![]
+                    } else {
+                        vec![base_type_name.clone()]
+                    },
+                    is_async: false,
+                    is_generator: false,
+                    contexts: vec![],
+                    return_type: None,
+                    yield_type: None,
+                    intrinsic_name: None,
+                    variant_tag: None,
+                    parent_type_name: Some(type_name.clone()),
+                    variant_payload_types: None,
+                    is_partial_pattern: false,
+                    takes_self_mut_ref: false,
+                    return_type_name: Some(type_name.clone()),
+                    return_type_inner: None,
+                };
+                let of_qualified = format!("{}.of", type_name);
+                self.ctx.register_function(of_qualified, of_info);
+
+                // `q.rep(&self) -> T`
+                let rep_info = FunctionInfo {
+                    id: pass_through_id,
+                    param_count: 1,
+                    param_names: vec!["self".to_string()],
+                    param_type_names: vec![type_name.clone()],
+                    is_async: false,
+                    is_generator: false,
+                    contexts: vec![],
+                    return_type: None,
+                    yield_type: None,
+                    intrinsic_name: None,
+                    variant_tag: None,
+                    parent_type_name: Some(type_name.clone()),
+                    variant_payload_types: None,
+                    is_partial_pattern: false,
+                    takes_self_mut_ref: false,
+                    return_type_name: if base_type_name.is_empty() {
+                        None
+                    } else {
+                        Some(base_type_name)
+                    },
+                    return_type_inner: None,
+                };
+                let rep_qualified = format!("{}.rep", type_name);
+                self.ctx.register_function(rep_qualified, rep_info);
+
+                // Mark the quotient as a newtype for the pass-through
+                // codegen paths (Q ≡ carrier at runtime).
+                self.ctx.newtype_names.insert(type_name.clone());
+                let inner = self.type_to_simple_name(base);
+                if !inner.is_empty() {
+                    self.ctx.newtype_inner_type.insert(type_name.clone(), inner);
+                }
             }
         }
         Ok(())

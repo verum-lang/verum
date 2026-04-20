@@ -1,0 +1,22 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L1
+// @tags: quotient, hit, dependent
+// @description: Quotient type constructors `Q.of` and `q.rep` are identity
+//               projections at Tier-0 — the equivalence relation is a
+//               compile-time obligation and the runtime representation is
+//               bit-identical to the carrier.
+// @expected-stdout: 42
+// @expected-exit: 0
+
+// ℤ/3ℤ with the obvious congruence. The relation is witnessed by the
+// model-verification pipeline; at this level we only exercise that the
+// projection primitives round-trip values through the quotient boundary.
+type ZmodN is Int / (|a, b| (a - b) % 3 == 0);
+
+fn main() {
+    let q: ZmodN = ZmodN.of(42);
+    let r: Int = q.rep();
+    assert_eq(r, 42);
+    print(r);
+}

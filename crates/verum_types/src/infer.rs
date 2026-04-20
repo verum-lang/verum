@@ -48284,11 +48284,20 @@ impl TypeChecker {
             }
             TypeDeclBody::Quotient { base, .. } => {
                 // T1-T Pass 2: resolve the carrier type and register
-                // the quotient as an alias over it. Values of the
-                // quotient type at runtime are represented by carrier
-                // values; the equivalence relation is the compile-time
-                // constraint that the elaborator lowers to HIT path
-                // constructors when full dependent-type codegen lands.
+                // the quotient as a nominal type sharing the carrier's
+                // runtime representation. The equivalence relation is
+                // a compile-time obligation discharged by the model-
+                // verification pipeline; at Tier-0 a value of Q is
+                // bit-identical to a value of the carrier.
+                //
+                // Two projection methods are registered here:
+                //   Q.of(rep: T) -> Q   (static constructor)
+                //   q.rep(&self) -> T   (instance accessor)
+                //
+                // Both are identity at runtime; typecheck uses them to
+                // guard the boundary between Q and its carrier so
+                // user code has to name the quotient explicitly when
+                // crossing it in either direction.
                 let base_resolved = self.ast_to_type(base)?;
                 self.ctx
                     .define_alias(type_name.clone(), base_resolved.clone());
@@ -48302,7 +48311,36 @@ impl TypeChecker {
                     path: Path::single(type_decl.name.clone()),
                     args: List::new(),
                 };
-                self.ctx.define_type(type_name.clone(), named_type);
+                self.ctx.define_type(type_name.clone(), named_type.clone());
+
+                // Register the `of` static constructor and `rep`
+                // instance accessor in the protocol checker's method
+                // registry so `Q.of(x)` and `q.rep()` resolve against
+                // the quotient's nominal name rather than falling
+                // through to the carrier's method set.
+                use crate::core_integration::ProtocolCheckerExt;
+                use crate::protocol::MethodSignature;
+                {
+                    let mut checker = self.protocol_checker.write();
+                    let mut of_params = List::new();
+                    of_params.push(base_resolved.clone());
+                    checker.register_method_public(
+                        type_name.as_str(),
+                        MethodSignature::static_method(
+                            Text::from("of"),
+                            of_params,
+                            named_type.clone(),
+                        ),
+                    );
+                    checker.register_method_public(
+                        type_name.as_str(),
+                        MethodSignature::immutable(
+                            Text::from("rep"),
+                            List::new(),
+                            base_resolved,
+                        ),
+                    );
+                }
             }
         }
 
