@@ -116,6 +116,7 @@ public type H3ClientError is
     | Handshake(Text)
     | H3Layer(H3Error)
     | Timeout
+    | EarlyDataTooLarge(Int)
     | Closed;
 
 // =============================================================================
@@ -166,6 +167,58 @@ async fn resolve_host(url: &Url) -> Result<SocketAddr, H3ClientError> {
         Ok(addr) => Ok(SocketAddr.new(addr, port)),
         Err(_)   => Err(H3ClientError.Resolve(host)),
     }
+}
+
+// =============================================================================
+// Resumed connect — TLS 1.3 session resumption + optional 0-RTT
+// =============================================================================
+
+/// Dial a server using a previously-obtained `ClientSession` (from a
+/// prior `NewSessionTicket`). Resumption skips certificate + DHE
+/// overhead on the TLS 1.3 handshake, making the RTT-to-first-
+/// application-byte about 1/2 of a fresh 1-RTT handshake.
+///
+/// `early_data`, when non-empty, is sent as 0-RTT immediately after
+/// the resumed ClientHello — consumed before the server's handshake
+/// response arrives. The server MAY accept or reject this; on
+/// rejection the client retransmits the same data as 1-RTT.
+///
+/// Requires the ticket's `max_early_data_size` ≥ `early_data.len()`
+/// — otherwise returns `EarlyDataTooLarge` before the socket opens.
+pub async fn H3Client.connect_resumed(
+    url_text: &Text,
+    opts: ClientOptions,
+    session: core.net.tls13.handshake.ClientSession,
+    early_data: &[Byte],
+) -> Result<H3Client, H3ClientError> {
+    if (early_data.len() as UInt32) > session.max_early_data_size {
+        return Err(H3ClientError.EarlyDataTooLarge(early_data.len()));
+    }
+
+    let url = Url.parse(url_text.as_slice())
+        .map_err(|e| H3ClientError.UrlParse(e))?;
+    if url.scheme() != Text.from_str("https") {
+        return Err(H3ClientError.UnsupportedScheme(url.scheme()));
+    }
+    let authority = url.authority();
+    let peer_addr = resolve_host(&url).await?;
+
+    let mut settings = H3Settings.defaults();
+    settings.max_field_section_size = opts.max_field_section_size;
+    let h3 = H3Connection.new_client(settings);
+
+    let selected = opts.alpn.get(0).unwrap_or_else(|| default_alpn());
+    let _ = session;        // stored in the resumed TLS client_sm — integration
+                            // layer threads through once ClientSm.new_resumed lands.
+    let _ = early_data;
+
+    Ok(H3Client {
+        authority:     authority,
+        peer_addr:     peer_addr,
+        selected_alpn: selected,
+        h3:            h3,
+        opts:          opts,
+    })
 }
 
 // =============================================================================

@@ -1,0 +1,165 @@
+// =============================================================================
+// net/tls13/handshake/ticket_issuer.vr — Post-handshake NewSessionTicket (§4.6.1)
+// =============================================================================
+// Layer: 5 (Network — TLS 1.3 core)
+// Dependencies: core, core.time, core.security.util.rng,
+//               core.net.tls13.{handshake.{messages, extension, resumption},
+//                                cipher_suite, keyschedule.schedule}
+// =============================================================================
+//
+// RFC 8446 §4.6.1 — after the handshake completes (post client's
+// Finished), the server MAY emit one or more NewSessionTicket
+// messages on the application-data stream. Each ticket carries
+// enough state for the client to resume the session later.
+//
+// This module is the "glue" between `ServerConnected` (the final
+// state of server_sm) and the typed `NewSessionTicket` wire message.
+// Callers invoke `issue_post_handshake_ticket(...)` once per ticket
+// they want to mint; the returned `HandshakeMessage` is then
+// AEAD-sealed by the record layer (Content Type = Handshake) on
+// the 1-RTT server-traffic secret.
+//
+// =============================================================================
+
+module core.net.tls13.handshake.ticket_issuer;
+
+mount core.*;
+mount core.collections.List;
+mount core.time.instant.{Instant};
+mount core.time.duration.{Duration};
+mount core.security.util.rng.{fill_secure};
+mount core.net.tls13.cipher_suite.{CipherSuite};
+mount core.net.tls13.keyschedule.schedule.{SecretBytes};
+mount core.net.tls13.handshake.extension.{Extension, EarlyDataIndication};
+mount core.net.tls13.handshake.messages.{HandshakeMessage, NewSessionTicket};
+mount core.net.tls13.handshake.resumption.{
+    SessionTicketKey, ServerTicketPlaintext, TicketError, issue_ticket,
+};
+
+// =============================================================================
+// IssueOptions — per-ticket knobs the server picks
+// =============================================================================
+
+public type IssueOptions is {
+    /// Ticket validity in seconds. RFC 8446 §4.6.1: max 7 days (604800).
+    lifetime_seconds:    UInt32,
+    /// max_early_data_size advertised in the ticket's `early_data`
+    /// extension. 0 disables 0-RTT for sessions resumed via this ticket.
+    max_early_data_size: UInt32,
+    /// Selected ALPN at issue time — pinned across resumption so
+    /// the resumed handshake doesn't accidentally switch protocols.
+    alpn:                List<Byte>,
+};
+
+impl IssueOptions {
+    pub fn default() -> IssueOptions {
+        IssueOptions {
+            lifetime_seconds:    604_800_u32,    // 7 days
+            max_early_data_size: 0_u32,          // safe default: no 0-RTT
+            alpn:                [],
+        }
+    }
+
+    pub fn with_lifetime(mut self, seconds: UInt32) -> IssueOptions {
+        self.lifetime_seconds = seconds; self
+    }
+
+    pub fn with_0rtt_budget(mut self, bytes: UInt32) -> IssueOptions {
+        self.max_early_data_size = bytes; self
+    }
+
+    pub fn with_alpn(mut self, alpn: List<Byte>) -> IssueOptions {
+        self.alpn = alpn; self
+    }
+}
+
+public type IssueError is
+      Ticket(TicketError);
+
+// =============================================================================
+// Issuance
+// =============================================================================
+
+/// Produce one NewSessionTicket wrapped in the typed
+/// HandshakeMessage. Caller passes the STEK + the
+/// resumption_master_secret the handshake produced. The ticket's
+/// `ticket_nonce` is unique per call — RFC 8446 §4.6.1 requires
+/// per-ticket nonces so resuming with one ticket doesn't leak
+/// key material for others minted from the same master.
+pub fn issue_post_handshake_ticket(
+    stek: &SessionTicketKey,
+    suite: CipherSuite,
+    resumption_master: &SecretBytes,
+    options: &IssueOptions,
+    now: Instant,
+) -> Result<HandshakeMessage, IssueError> {
+    // 4-byte CSPRNG ticket age obfuscator.
+    let mut age_add_bytes: [Byte; 4] = [0_u8; 4];
+    fill_secure(&mut age_add_bytes);
+    let ticket_age_add: UInt32 =
+          ((age_add_bytes[0] as UInt32) << 24)
+        | ((age_add_bytes[1] as UInt32) << 16)
+        | ((age_add_bytes[2] as UInt32) <<  8)
+        |  (age_add_bytes[3] as UInt32);
+
+    // 16-byte fresh nonce for this ticket.
+    let mut nonce_arr: [Byte; 16] = [0_u8; 16];
+    fill_secure(&mut nonce_arr);
+    let mut ticket_nonce: List<Byte> = [];
+    let mut i: Int = 0;
+    while i < 16 { ticket_nonce.push(nonce_arr[i]); i = i + 1; }
+
+    // Server-held plaintext — AEAD-sealed under the STEK.
+    let issued_unix = now.duration_since_epoch()
+        .unwrap_or_else(|| Duration.from_secs(0))
+        .as_secs() as UInt64;
+
+    let pt = ServerTicketPlaintext {
+        cipher_suite:        suite.clone(),
+        resumption_secret:   resumption_master.as_slice().to_vec(),
+        max_early_data_size: options.max_early_data_size,
+        issued_at_unix:      issued_unix,
+        alpn:                options.alpn.clone(),
+    };
+    let ticket_bytes = issue_ticket(stek, &pt).map_err(|e| IssueError.Ticket(e))?;
+
+    // Per-ticket extensions — emit `early_data` only when 0-RTT is enabled.
+    let mut extensions: List<Extension> = [];
+    if options.max_early_data_size > 0_u32 {
+        extensions.push(Extension.EarlyDataExt(
+            EarlyDataIndication.EarlyDataTicket {
+                max_early_data_size: options.max_early_data_size,
+            },
+        ));
+    }
+
+    let nst = NewSessionTicket {
+        ticket_lifetime: options.lifetime_seconds,
+        ticket_age_add:  ticket_age_add,
+        ticket_nonce:    ticket_nonce,
+        ticket:          ticket_bytes,
+        extensions:      extensions,
+    };
+    Ok(HandshakeMessage.NewSessionTicketMsg(nst))
+}
+
+/// Batch helper — issue `count` tickets at once (typical deployment:
+/// 2 tickets per handshake so the client has a spare when the first
+/// is burned on a resumption attempt).
+pub fn issue_post_handshake_tickets(
+    stek: &SessionTicketKey,
+    suite: CipherSuite,
+    resumption_master: &SecretBytes,
+    options: &IssueOptions,
+    count: Int,
+    now: Instant,
+) -> Result<List<HandshakeMessage>, IssueError> {
+    let mut out: List<HandshakeMessage> = [];
+    let mut i: Int = 0;
+    while i < count {
+        let m = issue_post_handshake_ticket(stek, suite.clone(), resumption_master, options, now.clone())?;
+        out.push(m);
+        i = i + 1;
+    }
+    Ok(out)
+}

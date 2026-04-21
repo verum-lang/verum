@@ -1,0 +1,44 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: tls13, rfc8446, ticket-issuer, typecheck
+// @timeout: 10000
+// @expect: pass
+
+mount core.net.tls13.handshake.{
+    IssueOptions, IssueError,
+    SessionTicketKey,
+    issue_post_handshake_ticket, issue_post_handshake_tickets,
+};
+mount core.net.tls13.cipher_suite.{CipherSuite};
+mount core.net.tls13.keyschedule.schedule.{SecretBytes};
+mount core.time.instant.{Instant};
+
+fn check_issue() -> Result<(), IssueError> {
+    let stek = SessionTicketKey.generate();
+    let rm = SecretBytes.from([0_u8; 32].to_vec());
+    let opts = IssueOptions.default()
+        .with_lifetime(3600_u32)
+        .with_0rtt_budget(16384_u32)
+        .with_alpn(b"h3".to_vec());
+
+    let _ = issue_post_handshake_ticket(
+        &stek, CipherSuite.TlsAes128GcmSha256, &rm, &opts, Instant.now(),
+    )?;
+    let _ = issue_post_handshake_tickets(
+        &stek, CipherSuite.TlsAes128GcmSha256, &rm, &opts, 2, Instant.now(),
+    )?;
+    Ok(())
+}
+
+fn check_h3_resumed_connect_shape() {
+    // H3Client.connect_resumed is an async fn taking a ClientSession +
+    // an early_data byte slice. Typecheck shape only; real connect
+    // requires live transport.
+    let _ = core.net.h3.client.H3Client.connect_resumed;
+}
+
+fn main() {
+    let _ = check_issue();
+    check_h3_resumed_connect_shape();
+}

@@ -36,6 +36,7 @@ public module dhe_pool;
 public module psk;
 public module resumption;
 public module early_data;
+public module ticket_issuer;
 
 // Re-exports — codec
 public mount .codec.{Reader, CodecError};
@@ -100,4 +101,10 @@ public mount .early_data.{
     derive as derive_early_keys,
     to_traffic_keys as early_traffic_keys,
     early_secret_from_psk,
+};
+
+// Re-exports — post-handshake session ticket issuance
+public mount .ticket_issuer.{
+    IssueOptions, IssueError,
+    issue_post_handshake_ticket, issue_post_handshake_tickets,
 };
