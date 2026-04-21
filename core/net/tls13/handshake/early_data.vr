@@ -1,0 +1,172 @@
+// =============================================================================
+// net/tls13/handshake/early_data.vr — 0-RTT early-data keys (RFC 8446 §4.2.10)
+// =============================================================================
+// Layer: 5 (Network — TLS 1.3 core)
+// Dependencies: core, core.net.tls13.{cipher_suite, keyschedule}
+// =============================================================================
+//
+// RFC 8446 §4.2.10: when a client resumes via a PSK with non-zero
+// max_early_data_size it MAY send application data encrypted under
+// `client_early_traffic_secret` BEFORE the server's handshake
+// response arrives. The server accepts or rejects the offer via
+// the `early_data` extension in EncryptedExtensions.
+//
+// Key derivation (RFC 8446 §7.1):
+//
+//   client_early_traffic_secret =
+//       Derive-Secret(early_secret, "c e traffic", ClientHello)
+//   early_exporter_master_secret =
+//       Derive-Secret(early_secret, "e exp master", ClientHello)
+//
+// Per-direction AEAD keys + IV then derive via
+// `TrafficSecret.derive_keys` (already in `keyschedule.schedule`).
+//
+// # Replay-protection discipline (RFC 8446 §8)
+//
+// 0-RTT data is replay-able — a network adversary can retransmit the
+// encrypted early-data records. Servers MUST enforce at least ONE of:
+//
+//   (a) Single-use tickets — each `psk_identity` is burned on first
+//       use.
+//   (b) Bloom-filter dedup — record (psk_id, ClientHello hash) pairs
+//       within a sliding time window.
+//   (c) Application-level idempotency — forward early data only to
+//       safe-to-replay verbs (HTTP GET / OPTIONS, no mutations).
+//
+// v0.1 servers enable 0-RTT opt-in via max_early_data_size on
+// ticket issuance; replay-protection lives in the Phase 8 anti-
+// replay module. Safe default: servers may refuse 0-RTT by setting
+// max_early_data_size = 0.
+//
+// =============================================================================
+
+module core.net.tls13.handshake.early_data;
+
+mount core.*;
+mount core.collections.List;
+mount core.security.kdf.hkdf.{HkdfError};
+mount core.net.tls13.cipher_suite.{CipherSuite, HashKind};
+mount core.net.tls13.keyschedule.schedule.{
+    EarlySecret, TrafficSecret, SecretBytes, TrafficKeys,
+};
+
+// =============================================================================
+// Early-data state
+// =============================================================================
+
+/// Derived secrets for a 0-RTT flight. Client fills via
+/// `client_derive`, server mirrors via `server_derive` using the
+/// same PSK + ClientHello transcript.
+public type EarlyKeys is {
+    suite:             CipherSuite,
+    /// Client → Server AEAD key material for 0-RTT records.
+    client_early:      TrafficSecret,
+    /// Exporter-master for early-data — RFC 5705 EKM for 0-RTT
+    /// (consumed by some higher-layer protocols like QUIC initial
+    /// secret derivation when running 0-RTT).
+    early_exporter:    SecretBytes,
+}
+
+// =============================================================================
+// derive — client + server symmetric
+// =============================================================================
+
+/// Derive the 0-RTT secrets from a freshly-extracted EarlySecret
+/// (i.e. EarlySecret.derive_with_psk(resumption_psk)) and the
+/// running transcript snapshot that covers the full ClientHello
+/// (binders included).
+pub fn derive(
+    early: &EarlySecret,
+    suite: CipherSuite,
+    ch_transcript_hash: &[Byte],
+) -> Result<EarlyKeys, HkdfError> {
+    // client_early_traffic_secret = Derive-Secret(early, "c e traffic", CH)
+    let client_early = early.client_early_traffic(ch_transcript_hash)?;
+    // early_exporter_master_secret = Derive-Secret(early, "e exp master", CH)
+    let early_exporter = derive_early_exporter(early, ch_transcript_hash)?;
+    Ok(EarlyKeys {
+        suite:          suite,
+        client_early:   client_early,
+        early_exporter: early_exporter,
+    })
+}
+
+fn derive_early_exporter(
+    early: &EarlySecret,
+    ch_transcript_hash: &[Byte],
+) -> Result<SecretBytes, HkdfError> {
+    use core.net.tls13.keyschedule.derive_secret.{
+        derive_secret, LABEL_EARLY_EXPORTER_MASTER,
+    };
+    let hash = early.hash.clone();
+    let out = derive_secret(hash, early.secret.as_slice(),
+                            &LABEL_EARLY_EXPORTER_MASTER, ch_transcript_hash)?;
+    Ok(SecretBytes.from(out))
+}
+
+// =============================================================================
+// AEAD key projection
+// =============================================================================
+
+/// Project the per-record AEAD (key, iv) pair for the 0-RTT flight.
+/// Key length matches the cipher suite's AEAD (16 or 32 bytes).
+pub fn to_traffic_keys(early: &EarlyKeys) -> Result<TrafficKeys, HkdfError> {
+    let key_len = match early.suite.aead_kind() {
+        core.net.tls13.cipher_suite.AeadKind.Aes128Gcm        => 16,
+        core.net.tls13.cipher_suite.AeadKind.Aes256Gcm        => 32,
+        core.net.tls13.cipher_suite.AeadKind.ChaCha20Poly1305 => 32,
+        _ => 16,
+    };
+    early.client_early.derive_keys(key_len, 12)
+}
+
+// =============================================================================
+// Resumption PSK → EarlySecret helper
+// =============================================================================
+
+/// Given a client-session resumption PSK + the cipher-suite hash,
+/// build the EarlySecret that both client and server will use as
+/// the root of the resumed handshake's key schedule.
+pub fn early_secret_from_psk(
+    suite: CipherSuite,
+    psk: &[Byte],
+) -> Result<EarlySecret, HkdfError> {
+    EarlySecret.derive_with_psk(suite.hash_kind(), psk)
+}
+
+// =============================================================================
+// Max-early-data budget — record-level accounting
+// =============================================================================
+
+/// Tracks how many bytes of 0-RTT data we've already emitted/received
+/// against the server-advertised cap. RFC 8446 §4.2.10: "the server
+/// MUST return the agreed upon limit in EncryptedExtensions; the
+/// client MUST NOT exceed this limit, and the server MUST close
+/// the connection if it is exceeded".
+public type EarlyDataBudget is {
+    /// Cap from server side (max_early_data_size in EncryptedExtensions).
+    limit:     UInt32,
+    /// Bytes we've shipped / accepted so far.
+    consumed:  UInt32,
+}
+
+impl EarlyDataBudget {
+    pub fn new(limit: UInt32) -> EarlyDataBudget {
+        EarlyDataBudget { limit: limit, consumed: 0_u32 }
+    }
+
+    /// Attempt to reserve `n` bytes. Returns the granted count
+    /// (<= requested) — caller truncates writes.
+    pub fn try_consume(&mut self, n: UInt32) -> UInt32 {
+        if self.consumed >= self.limit { return 0_u32; }
+        let left = self.limit - self.consumed;
+        let grant = if n < left { n } else { left };
+        self.consumed = self.consumed + grant;
+        grant
+    }
+
+    pub fn exceeded(&self) -> Bool { self.consumed > self.limit }
+    pub fn remaining(&self) -> UInt32 {
+        if self.consumed >= self.limit { 0_u32 } else { self.limit - self.consumed }
+    }
+}

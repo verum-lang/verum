@@ -1,0 +1,423 @@
+// =============================================================================
+// net/tls13/handshake/resumption.vr — Session tickets + resumption (RFC 8446 §4.6.1)
+// =============================================================================
+// Layer: 5 (Network — TLS 1.3 core)
+// Dependencies: core, core.time, core.security.{aead, util.rng},
+//               core.net.tls13.{cipher_suite, keyschedule}
+// =============================================================================
+//
+// RFC 8446 §4.6.1 — NewSessionTicket:
+//
+//   struct {
+//       uint32 ticket_lifetime;
+//       uint32 ticket_age_add;
+//       opaque ticket_nonce<0..255>;
+//       opaque ticket<1..2^16-1>;
+//       Extension extensions<0..2^16-2>;
+//   } NewSessionTicket;
+//
+// Resumption flow:
+//
+//   1. Server chooses a STEK (Session Ticket Encryption Key) — a
+//      long-lived symmetric key stored server-side only.
+//   2. On handshake success, server packages
+//      (cipher_suite, resumption_secret, max_early_data_size,
+//       issued_at) as plaintext, encrypts under the STEK via
+//      AEAD_AES_128_GCM, and ships as `ticket` in NewSessionTicket.
+//   3. Client stores { ticket, ticket_age_add, ticket_lifetime,
+//      psk_identity=ticket, resumption_secret, cipher_suite,
+//      created_at, max_early_data_size } — the `ClientSession`.
+//   4. Future connect: client sends CH with pre_shared_key listing
+//      ticket as identity + HMAC binder over the truncated CH; if
+//      max_early_data_size > 0 and app offers early data, client
+//      also sends 0-RTT application data encrypted under
+//      client_early_traffic_secret.
+//   5. Server decrypts ticket under STEK → validates obfuscated
+//      age is within ticket_lifetime → selects ticket → replies
+//      with ServerHello carrying selected_identity index.
+//
+// # Scope — v0.1
+//
+//   Single ticket per session (resumption_master-based, not
+//   full-session-resumption). No 0-RTT *replay* protection yet
+//   (bloom filter of seen PSK-ID + CH hash lands in Phase 8); in
+//   v0.1 servers may choose to disable 0-RTT by emitting
+//   max_early_data_size=0 unconditionally.
+//
+// =============================================================================
+
+module core.net.tls13.handshake.resumption;
+
+mount core.*;
+mount core.collections.List;
+mount core.time.instant.{Instant};
+mount core.time.duration.{Duration};
+mount core.security.aead.aes_gcm.{aes128_gcm_seal, aes128_gcm_open};
+mount core.security.util.rng.{fill_secure};
+mount core.security.kdf.hkdf.{HkdfError};
+mount core.net.tls13.cipher_suite.{CipherSuite, HashKind};
+mount core.net.tls13.keyschedule.hkdf_label.{hkdf_expand_label};
+mount core.net.tls13.keyschedule.derive_secret.{LABEL_RESUMPTION};
+mount core.net.tls13.keyschedule.schedule.{MasterSecret, SecretBytes};
+
+// =============================================================================
+// ClientSession — what the client stores after receiving NewSessionTicket
+// =============================================================================
+
+public type ClientSession is {
+    /// Opaque server-issued ticket — re-emitted verbatim as PSK identity.
+    ticket:              List<Byte>,
+    /// RFC 8446 §4.6.1: obfuscator added to true age before sending.
+    ticket_age_add:      UInt32,
+    /// Max age (seconds) the server is willing to resume with.
+    ticket_lifetime_sec: UInt32,
+    /// Cipher suite negotiated at issuance time — resumption requires
+    /// the same suite.
+    cipher_suite:        CipherSuite,
+    /// Resumption master secret (RFC 8446 §7.1) — the input key
+    /// material for the resumed handshake's EarlySecret.
+    resumption_secret:   List<Byte>,
+    /// Server-advertised max_early_data_size (0 disables 0-RTT).
+    max_early_data_size: UInt32,
+    /// Wall-clock when we received the ticket.
+    created_at:          Instant,
+    /// ticket_nonce echoed from NewSessionTicket — becomes an input
+    /// to resumption_psk_from_master.
+    ticket_nonce:        List<Byte>,
+}
+
+impl ClientSession {
+    /// Is the ticket still valid given current time?
+    pub fn is_fresh(&self, now: Instant) -> Bool {
+        let elapsed = now.duration_since(self.created_at.clone())
+            .unwrap_or_else(|| Duration.from_secs(0));
+        elapsed.as_secs() <= (self.ticket_lifetime_sec as Int)
+    }
+
+    /// Elapsed-since-issue in milliseconds, bounded to u32.
+    pub fn obfuscated_age(&self, now: Instant) -> UInt32 {
+        let elapsed = now.duration_since(self.created_at.clone())
+            .unwrap_or_else(|| Duration.from_secs(0));
+        let ms = elapsed.as_millis() as UInt64;
+        ((ms as UInt32)) + self.ticket_age_add
+    }
+
+    /// Derive the resumption PSK per RFC 8446 §4.6.1 formula:
+    ///   PSK = HKDF-Expand-Label(resumption_master,
+    ///                           "resumption", ticket_nonce, Hash.length)
+    pub fn derive_psk(&self) -> Result<List<Byte>, HkdfError> {
+        let hash = self.cipher_suite.hash_kind();
+        let out_len = match hash {
+            HashKind.Sha256 => 32,
+            HashKind.Sha384 => 48,
+        };
+        hkdf_expand_label(
+            hash,
+            self.resumption_secret.as_slice(),
+            &LABEL_RESUMPTION,
+            self.ticket_nonce.as_slice(),
+            out_len,
+        )
+    }
+}
+
+// =============================================================================
+// SessionTicketKey — server-held STEK
+// =============================================================================
+
+/// Long-lived server-side AES-128-GCM key used to encrypt ticket
+/// plaintext. Rotated periodically (typically daily) — rotation is
+/// a caller responsibility; this module ships a `generate()` constructor.
+public type SessionTicketKey is {
+    /// 16-byte AES-128 key.
+    key: [Byte; 16],
+    /// 8-byte key identifier — prefixed to every emitted ticket so
+    /// the server can look up the right decryption key during
+    /// key-rotation windows (old ticket + new STEK co-exist).
+    key_id: [Byte; 8],
+    /// Wall-clock issuance — for cache-aging policies.
+    issued_at: Instant,
+}
+
+impl SessionTicketKey {
+    /// Generate a fresh STEK from the CSPRNG.
+    pub fn generate() -> SessionTicketKey {
+        let mut key: [Byte; 16] = [0_u8; 16];
+        let mut kid: [Byte; 8]  = [0_u8; 8];
+        fill_secure(&mut key);
+        fill_secure(&mut kid);
+        SessionTicketKey { key: key, key_id: kid, issued_at: Instant.now() }
+    }
+}
+
+// =============================================================================
+// ServerTicketPlaintext — what the server encrypts into the ticket blob
+// =============================================================================
+
+/// The decrypted plaintext a ticket holds. Written/read by the
+/// server only; clients treat tickets as opaque blobs.
+public type ServerTicketPlaintext is {
+    cipher_suite:        CipherSuite,
+    resumption_secret:   List<Byte>,
+    max_early_data_size: UInt32,
+    issued_at_unix:      UInt64,
+    /// Selected ALPN at issue time — stored so resumed handshakes
+    /// can enforce the same ALPN without a full round-trip.
+    alpn:                List<Byte>,
+}
+
+// =============================================================================
+// Encryption envelope
+// =============================================================================
+//
+// Wire format:
+//   key_id            (8 bytes)
+//   nonce             (12 bytes)
+//   ciphertext || tag (ptlen + 16 bytes, AES-128-GCM)
+//
+// AAD = key_id (binds ciphertext to the specific STEK — prevents
+// cross-key reuse).
+//
+// =============================================================================
+
+public type TicketError is
+      SealFailure
+    | OpenFailure
+    | WrongKeyId
+    | MalformedTicket
+    | Expired
+    | HkdfFailure;
+
+pub fn issue_ticket(
+    stek: &SessionTicketKey,
+    plaintext: &ServerTicketPlaintext,
+) -> Result<List<Byte>, TicketError> {
+    let pt = encode_plaintext(plaintext);
+
+    // Fresh 12-byte nonce per ticket.
+    let mut nonce: [Byte; 12] = [0_u8; 12];
+    fill_secure(&mut nonce);
+
+    // Encrypt.
+    let mut sealed: List<Byte> = [];
+    aes128_gcm_seal(
+        &stek.key,
+        &nonce,
+        &stek.key_id,     // AAD
+        pt.as_slice(),
+        &mut sealed,
+    ).map_err(|_| TicketError.SealFailure)?;
+
+    // Assemble wire: key_id || nonce || sealed.
+    let mut out: List<Byte> = [];
+    let mut i: Int = 0;
+    while i < 8  { out.push(stek.key_id[i]); i = i + 1; }
+    let mut j: Int = 0;
+    while j < 12 { out.push(nonce[j]); j = j + 1; }
+    let mut k: Int = 0;
+    while k < sealed.len() { out.push(sealed[k]); k = k + 1; }
+    Ok(out)
+}
+
+pub fn decrypt_ticket(
+    stek: &SessionTicketKey,
+    wire: &[Byte],
+) -> Result<ServerTicketPlaintext, TicketError> {
+    if wire.len() < 8 + 12 + 16 {
+        return Err(TicketError.MalformedTicket);
+    }
+    // Check key_id matches.
+    let mut i: Int = 0;
+    while i < 8 {
+        if wire[i] != stek.key_id[i] {
+            return Err(TicketError.WrongKeyId);
+        }
+        i = i + 1;
+    }
+    let mut nonce: [Byte; 12] = [0_u8; 12];
+    let mut j: Int = 0;
+    while j < 12 { nonce[j] = wire[8 + j]; j = j + 1; }
+    let ct_start = 20;
+
+    // Collect ciphertext + tag slice.
+    let mut ct: List<Byte> = [];
+    let mut k: Int = ct_start;
+    while k < wire.len() { ct.push(wire[k]); k = k + 1; }
+
+    let mut pt: List<Byte> = [];
+    aes128_gcm_open(&stek.key, &nonce, &stek.key_id, ct.as_slice(), &mut pt)
+        .map_err(|_| TicketError.OpenFailure)?;
+
+    decode_plaintext(pt.as_slice())
+}
+
+// =============================================================================
+// Plaintext encode/decode — versioned wire-level layout
+// =============================================================================
+//
+//   version             u8 (always 1)
+//   cipher_suite        u16
+//   resumption_len      u16
+//   resumption_secret   bytes
+//   max_early_data_size u32
+//   issued_at_unix      u64
+//   alpn_len            u8
+//   alpn                bytes
+//
+// =============================================================================
+
+fn encode_plaintext(pt: &ServerTicketPlaintext) -> List<Byte> {
+    let mut out: List<Byte> = [];
+    out.push(1_u8);    // version
+    let cs_u16 = pt.cipher_suite.to_u16();
+    out.push(((cs_u16 >> 8) & 0xFF_u16) as Byte);
+    out.push((cs_u16 & 0xFF_u16) as Byte);
+    let rs_len = pt.resumption_secret.len() as UInt16;
+    out.push(((rs_len >> 8) & 0xFF_u16) as Byte);
+    out.push((rs_len & 0xFF_u16) as Byte);
+    let mut i: Int = 0;
+    while i < pt.resumption_secret.len() {
+        out.push(pt.resumption_secret[i]); i = i + 1;
+    }
+    let m = pt.max_early_data_size;
+    out.push(((m >> 24) & 0xFF_u32) as Byte);
+    out.push(((m >> 16) & 0xFF_u32) as Byte);
+    out.push(((m >>  8) & 0xFF_u32) as Byte);
+    out.push((m & 0xFF_u32) as Byte);
+    let t = pt.issued_at_unix;
+    out.push(((t >> 56) & 0xFF_u64) as Byte);
+    out.push(((t >> 48) & 0xFF_u64) as Byte);
+    out.push(((t >> 40) & 0xFF_u64) as Byte);
+    out.push(((t >> 32) & 0xFF_u64) as Byte);
+    out.push(((t >> 24) & 0xFF_u64) as Byte);
+    out.push(((t >> 16) & 0xFF_u64) as Byte);
+    out.push(((t >>  8) & 0xFF_u64) as Byte);
+    out.push((t & 0xFF_u64) as Byte);
+    out.push(pt.alpn.len() as Byte);
+    let mut j: Int = 0;
+    while j < pt.alpn.len() { out.push(pt.alpn[j]); j = j + 1; }
+    out
+}
+
+fn decode_plaintext(buf: &[Byte]) -> Result<ServerTicketPlaintext, TicketError> {
+    if buf.len() < 1 + 2 + 2 + 0 + 4 + 8 + 1 { return Err(TicketError.MalformedTicket); }
+    if buf[0] != 1_u8 { return Err(TicketError.MalformedTicket); }
+    let cs_u16: UInt16 = ((buf[1] as UInt16) << 8) | (buf[2] as UInt16);
+    let cipher = CipherSuite.from_u16(cs_u16);
+    let rs_len: Int = (((buf[3] as UInt16) << 8) | (buf[4] as UInt16)) as Int;
+    let rs_end = 5 + rs_len;
+    if rs_end + 4 + 8 + 1 > buf.len() { return Err(TicketError.MalformedTicket); }
+    let mut rs: List<Byte> = [];
+    let mut i: Int = 5;
+    while i < rs_end { rs.push(buf[i]); i = i + 1; }
+
+    let m: UInt32 =
+          ((buf[rs_end] as UInt32) << 24)
+        | ((buf[rs_end + 1] as UInt32) << 16)
+        | ((buf[rs_end + 2] as UInt32) <<  8)
+        |  (buf[rs_end + 3] as UInt32);
+    let t_base = rs_end + 4;
+    let t: UInt64 =
+          ((buf[t_base] as UInt64) << 56)
+        | ((buf[t_base + 1] as UInt64) << 48)
+        | ((buf[t_base + 2] as UInt64) << 40)
+        | ((buf[t_base + 3] as UInt64) << 32)
+        | ((buf[t_base + 4] as UInt64) << 24)
+        | ((buf[t_base + 5] as UInt64) << 16)
+        | ((buf[t_base + 6] as UInt64) <<  8)
+        |  (buf[t_base + 7] as UInt64);
+    let alpn_base = t_base + 8;
+    let alpn_len = buf[alpn_base] as Int;
+    let alpn_end = alpn_base + 1 + alpn_len;
+    if alpn_end > buf.len() { return Err(TicketError.MalformedTicket); }
+    let mut alpn: List<Byte> = [];
+    let mut k: Int = alpn_base + 1;
+    while k < alpn_end { alpn.push(buf[k]); k = k + 1; }
+
+    Ok(ServerTicketPlaintext {
+        cipher_suite:        cipher,
+        resumption_secret:   rs,
+        max_early_data_size: m,
+        issued_at_unix:      t,
+        alpn:                alpn,
+    })
+}
+
+// =============================================================================
+// ClientSession builder from NewSessionTicket
+// =============================================================================
+
+/// Construct a ClientSession from a newly-arrived NewSessionTicket
+/// message + handshake context.
+pub fn session_from_new_ticket(
+    ticket:              List<Byte>,
+    ticket_nonce:        List<Byte>,
+    ticket_age_add:      UInt32,
+    ticket_lifetime_sec: UInt32,
+    cipher_suite:        CipherSuite,
+    resumption_secret:   List<Byte>,
+    max_early_data_size: UInt32,
+    now:                 Instant,
+) -> ClientSession {
+    ClientSession {
+        ticket:              ticket,
+        ticket_age_add:      ticket_age_add,
+        ticket_lifetime_sec: ticket_lifetime_sec,
+        cipher_suite:        cipher_suite,
+        resumption_secret:   resumption_secret,
+        max_early_data_size: max_early_data_size,
+        created_at:          now,
+        ticket_nonce:        ticket_nonce,
+    }
+}
+
+// =============================================================================
+// ClientSessionStore — simple in-memory ticket cache
+// =============================================================================
+
+/// Minimal LRU-style store keyed by server authority (hostname:port).
+/// Ticket reuse: RFC 8446 §C.4 recommends each ticket is used at
+/// most once for anti-replay. `take` pops the ticket from the store
+/// when consumed.
+public type ClientSessionStore is {
+    entries: List<(Text, ClientSession)>,
+    /// Capacity (entries evict FIFO beyond this).
+    capacity: Int,
+};
+
+impl ClientSessionStore {
+    pub fn new(capacity: Int) -> ClientSessionStore {
+        ClientSessionStore { entries: [], capacity: capacity }
+    }
+
+    pub fn insert(&mut self, authority: Text, session: ClientSession) {
+        while self.entries.len() >= self.capacity {
+            let _ = self.entries.remove(0);
+        }
+        self.entries.push((authority, session));
+    }
+
+    /// Consume one fresh session for the given authority (removes from
+    /// store). Returns None when no fresh match is present.
+    pub fn take(&mut self, authority: &Text, now: Instant) -> Maybe<ClientSession> {
+        let mut i: Int = 0;
+        while i < self.entries.len() {
+            let (auth, sess) = &self.entries[i];
+            if text_eq(auth, authority) {
+                if sess.is_fresh(now.clone()) {
+                    let (_, s) = self.entries.remove(i);
+                    return Some(s);
+                } else {
+                    let _ = self.entries.remove(i);
+                    continue;
+                }
+            }
+            i = i + 1;
+        }
+        None
+    }
+
+    pub fn len(&self) -> Int { self.entries.len() }
+}
+
+fn text_eq(a: &Text, b: &Text) -> Bool { a.as_bytes() == b.as_bytes() }

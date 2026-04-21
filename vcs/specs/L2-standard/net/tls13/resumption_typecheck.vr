@@ -1,0 +1,87 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: tls13, rfc8446, resumption, psk, early-data, typecheck
+// @timeout: 10000
+// @expect: pass
+
+mount core.net.tls13.handshake.{
+    PskIdentity, OfferedPsks, BinderFlavor,
+    ClientSession, SessionTicketKey, ServerTicketPlaintext,
+    ClientSessionStore, TicketError,
+    EarlyKeys, EarlyDataBudget,
+    compute_binder, verify_binder, obfuscated_ticket_age,
+    issue_ticket, decrypt_ticket, session_from_new_ticket,
+    early_secret_from_psk,
+};
+mount core.net.tls13.handshake.early_data as early;
+mount core.net.tls13.cipher_suite.{CipherSuite, HashKind};
+mount core.net.tls13.keyschedule.schedule.{EarlySecret, SecretBytes};
+mount core.time.instant.{Instant};
+
+fn check_ticket_roundtrip() -> Result<(), TicketError> {
+    let stek = SessionTicketKey.generate();
+    let pt = ServerTicketPlaintext {
+        cipher_suite:        CipherSuite.TlsAes128GcmSha256,
+        resumption_secret:   [0_u8; 32].to_vec(),
+        max_early_data_size: 16384_u32,
+        issued_at_unix:      1_700_000_000_u64,
+        alpn:                b"h3".to_vec(),
+    };
+    let wire = issue_ticket(&stek, &pt)?;
+    let recovered = decrypt_ticket(&stek, wire.as_slice())?;
+    let _ = recovered;
+    Ok(())
+}
+
+fn check_client_store() {
+    let mut store = ClientSessionStore.new(16);
+    let now = Instant.now();
+    let sess = session_from_new_ticket(
+        /* ticket */      b"opaque-ticket".to_vec(),
+        /* nonce */       b"\x00\x01".to_vec(),
+        /* age_add */     12345_u32,
+        /* lifetime */    604_800_u32,
+        /* suite */       CipherSuite.TlsAes128GcmSha256,
+        /* resumption */  [0_u8; 32].to_vec(),
+        /* max_early */   16384_u32,
+        /* now */         now.clone(),
+    );
+    store.insert(Text.from_str("api.example.com"), sess);
+    let _ = store.take(&Text.from_str("api.example.com"), now);
+    let _ = store.len();
+}
+
+fn check_binder() -> Result<(), core.security.kdf.hkdf.HkdfError> {
+    let hash = HashKind.Sha256;
+    let early = EarlySecret.derive_with_psk(hash.clone(), &[0_u8; 32])?;
+    let bk = early.binder_key(false)?;    // "res binder"
+    let transcript_hash: [Byte; 32] = [0_u8; 32];
+    let _ = compute_binder(hash.clone(), &bk, &transcript_hash)?;
+    let _ = verify_binder(hash, &bk, &transcript_hash, &[0_u8; 32])?;
+    Ok(())
+}
+
+fn check_early_data_budget() {
+    let mut budget = EarlyDataBudget.new(16384_u32);
+    let _ = budget.try_consume(4096_u32);
+    let _ = budget.remaining();
+    let _ = budget.exceeded();
+}
+
+fn check_early_keys() -> Result<(), core.security.kdf.hkdf.HkdfError> {
+    let early = early_secret_from_psk(CipherSuite.TlsAes128GcmSha256, &[0_u8; 32])?;
+    let transcript: [Byte; 32] = [0_u8; 32];
+    let early_keys = early::derive(&early, CipherSuite.TlsAes128GcmSha256, &transcript)?;
+    let _ = early::to_traffic_keys(&early_keys)?;
+    Ok(())
+}
+
+fn main() {
+    let _ = check_ticket_roundtrip();
+    check_client_store();
+    let _ = check_binder();
+    check_early_data_budget();
+    let _ = check_early_keys();
+    let _ = obfuscated_ticket_age(1000_u64, 42_u32);
+}

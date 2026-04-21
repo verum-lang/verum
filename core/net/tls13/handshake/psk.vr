@@ -1,0 +1,235 @@
+// =============================================================================
+// net/tls13/handshake/psk.vr — PSK binder + OfferedPsks (RFC 8446 §4.2.11)
+// =============================================================================
+// Layer: 5 (Network — TLS 1.3 core)
+// Dependencies: core, core.security.{mac, kdf}, core.net.tls13.{cipher_suite,
+//               keyschedule.{hkdf_label, derive_secret, schedule}}
+// =============================================================================
+//
+// RFC 8446 §4.2.11 — a resuming ClientHello carries an `OfferedPsks`
+// extension (aka pre_shared_key) listing identity blobs + per-PSK
+// HMAC-based binders. Each binder is computed over a synthetic
+// "truncated" ClientHello ending at the pre_shared_key extension's
+// identities field — the binders themselves are excluded from the
+// transcript that's hashed.
+//
+// Binder key derivation (§7.1 + §4.2.11.2):
+//
+//   binder_key = HKDF-Expand-Label(early_secret,
+//                                  "res binder" | "ext binder",
+//                                  "",
+//                                  Hash.length)
+//   finished_key = HKDF-Expand-Label(binder_key, "finished", "", Hash.length)
+//   binder = HMAC-Hash(finished_key,
+//                      Transcript-Hash(Truncate(ClientHello1)))
+//
+// "res binder" for a resumption PSK (from NewSessionTicket);
+// "ext binder" for an external PSK (out-of-band provisioning).
+//
+// =============================================================================
+
+module core.net.tls13.handshake.psk;
+
+mount core.*;
+mount core.collections.List;
+mount core.security.mac.hmac.{HmacSha256, HmacSha384};
+mount core.security.kdf.hkdf.{HkdfError};
+mount core.net.tls13.cipher_suite.{CipherSuite, HashKind};
+mount core.net.tls13.keyschedule.hkdf_label.{hkdf_expand_label};
+mount core.net.tls13.keyschedule.derive_secret.{
+    LABEL_RES_BINDER, LABEL_EXT_BINDER, LABEL_FINISHED, LABEL_RESUMPTION,
+};
+mount core.net.tls13.keyschedule.schedule.{EarlySecret, SecretBytes};
+mount core.net.tls13.handshake.codec.{
+    put_u8, put_u16, put_u24, put_u32, put_bytes, vec_u16, CodecError,
+};
+
+// =============================================================================
+// PSK identity type + offered-PSKs extension body
+// =============================================================================
+
+public type PskIdentity is {
+    /// Server-opaque ticket bytes (as stored in
+    /// NewSessionTicket.ticket).
+    identity:        List<Byte>,
+    /// obfuscated_ticket_age = (elapsed_millis + ticket_age_add)
+    ///                          mod 2^32
+    /// Peer recovers the real age by subtracting the peer-supplied
+    /// ticket_age_add that was delivered inside NewSessionTicket.
+    obfuscated_age:  UInt32,
+};
+
+/// The `pre_shared_key` ClientHello extension body when resumption
+/// is offered. Server picks 0 or more PSKs to accept by echoing a
+/// single `selected_identity` index in ServerHello's matching
+/// extension.
+public type OfferedPsks is {
+    identities: List<PskIdentity>,
+    /// Binders run in lock-step with identities — one binder per
+    /// identity. Length equals `identities.len()`.
+    binders:    List<List<Byte>>,
+};
+
+// =============================================================================
+// Extension encoder — emits the "truncated" ClientHello bytes that
+// the binder computation needs, plus the full form once binders are
+// known.
+// =============================================================================
+
+/// Serialize just the identities portion of the `pre_shared_key`
+/// extension. This is what goes on the wire INSIDE the binder's
+/// transcript-hash domain — everything up to (but not including) the
+/// binder list itself. Caller hashes `ch_prefix || identities_encoded`
+/// to produce the binder input.
+pub fn encode_identities(idents: &List<PskIdentity>, out: &mut List<Byte>) -> Result<(), CodecError> {
+    vec_u16(out, |b| {
+        let mut i: Int = 0;
+        while i < idents.len() {
+            vec_u16(b, |b2| {
+                put_bytes(b2, idents[i].identity.as_slice());
+                Ok(())
+            })?;
+            put_u32(b, idents[i].obfuscated_age);
+            i = i + 1;
+        }
+        Ok(())
+    })
+}
+
+/// Serialize the binders block. `binder_size` is the HMAC-Hash output
+/// length in bytes (32 for SHA-256, 48 for SHA-384). One binder per
+/// identity, length-prefixed with u8.
+pub fn encode_binders(binders: &List<List<Byte>>, out: &mut List<Byte>) -> Result<(), CodecError> {
+    vec_u16(out, |b| {
+        let mut i: Int = 0;
+        while i < binders.len() {
+            let bin = &binders[i];
+            put_u8(b, bin.len() as UInt8);
+            put_bytes(b, bin.as_slice());
+            i = i + 1;
+        }
+        Ok(())
+    })
+}
+
+/// Convenience: encode the full `pre_shared_key` extension body
+/// (identities || binders) once both halves are known.
+pub fn encode_offered_psks(o: &OfferedPsks, out: &mut List<Byte>) -> Result<(), CodecError> {
+    encode_identities(&o.identities, out)?;
+    encode_binders(&o.binders, out)?;
+    Ok(())
+}
+
+// =============================================================================
+// Binder key derivation
+// =============================================================================
+
+public type BinderFlavor is ResumptionBinder | ExternalBinder;
+
+impl BinderFlavor {
+    pub fn label(&self) -> &[Byte] {
+        match self {
+            BinderFlavor.ResumptionBinder => &LABEL_RES_BINDER,
+            BinderFlavor.ExternalBinder   => &LABEL_EXT_BINDER,
+        }
+    }
+}
+
+/// Derive the binder_key from an EarlySecret — per RFC 8446 §7.1:
+///   binder_key = Derive-Secret(early_secret, "{res|ext} binder", "")
+/// i.e. HKDF-Expand-Label(early_secret, label, Hash(""), hash_len).
+pub fn derive_binder_key(
+    early: &EarlySecret,
+    flavor: BinderFlavor,
+) -> Result<SecretBytes, HkdfError> {
+    early.binder_key(match flavor {
+        BinderFlavor.ResumptionBinder => true,    // EarlySecret.binder_key(is_ext=false)?
+        BinderFlavor.ExternalBinder   => false,
+    })
+}
+
+/// Derive the per-PSK `finished_key` used to MAC the binder input.
+pub fn derive_binder_finished_key(
+    hash: HashKind,
+    binder_key: &SecretBytes,
+) -> Result<List<Byte>, HkdfError> {
+    let out_len = match hash {
+        HashKind.Sha256 => 32,
+        HashKind.Sha384 => 48,
+    };
+    hkdf_expand_label(hash, binder_key.as_slice(), &LABEL_FINISHED, &[], out_len)
+}
+
+// =============================================================================
+// Binder computation
+// =============================================================================
+
+/// Compute one PSK binder value given:
+///   hash              — the cipher-suite hash (SHA-256 or SHA-384).
+///   binder_key        — derived via `derive_binder_key`.
+///   truncated_ch_hash — Transcript-Hash over the truncated
+///                       ClientHello (everything before the
+///                       binder list).
+///
+/// Returns the raw HMAC bytes to drop into OfferedPsks.binders.
+pub fn compute_binder(
+    hash: HashKind,
+    binder_key: &SecretBytes,
+    truncated_ch_hash: &[Byte],
+) -> Result<List<Byte>, HkdfError> {
+    let finished_key = derive_binder_finished_key(hash.clone(), binder_key)?;
+    let mac = match hash {
+        HashKind.Sha256 => {
+            let mut h = HmacSha256.new(finished_key.as_slice());
+            h.update(truncated_ch_hash);
+            h.finalize().to_vec()
+        },
+        HashKind.Sha384 => {
+            let mut h = HmacSha384.new(finished_key.as_slice());
+            h.update(truncated_ch_hash);
+            h.finalize().to_vec()
+        },
+    };
+    Ok(mac)
+}
+
+// =============================================================================
+// Server-side binder verification
+// =============================================================================
+
+/// Verify a PSK binder the client sent. Returns Ok(true) when the
+/// MAC matches; Ok(false) when it doesn't. Server SM rejects a
+/// false result with HandshakeFailure (RFC 8446 §4.2.11.2).
+///
+/// Constant-time comparison via `diff | byte` accumulator — no
+/// short-circuit on first-byte mismatch.
+pub fn verify_binder(
+    hash: HashKind,
+    binder_key: &SecretBytes,
+    truncated_ch_hash: &[Byte],
+    received_binder:   &[Byte],
+) -> Result<Bool, HkdfError> {
+    let expected = compute_binder(hash, binder_key, truncated_ch_hash)?;
+    Ok(constant_time_eq(expected.as_slice(), received_binder))
+}
+
+fn constant_time_eq(a: &[Byte], b: &[Byte]) -> Bool {
+    if a.len() != b.len() { return false; }
+    let mut diff: UInt8 = 0_u8;
+    let mut i: Int = 0;
+    while i < a.len() {
+        diff = diff | (a[i] ^ b[i]);
+        i = i + 1;
+    }
+    diff == 0_u8
+}
+
+// =============================================================================
+// Obfuscated ticket age
+// =============================================================================
+
+/// Compute the obfuscated_ticket_age per RFC 8446 §4.2.11.1:
+///   obfuscated_age = (elapsed_millis + ticket_age_add) mod 2^32
+pub fn obfuscated_ticket_age(elapsed_ms: UInt64, ticket_age_add: UInt32) -> UInt32 {
+    (elapsed_ms as UInt32) + ticket_age_add
+}

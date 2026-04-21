@@ -33,6 +33,9 @@ public module transcript;
 public module client_sm;
 public module server_sm;
 public module dhe_pool;
+public module psk;
+public module resumption;
+public module early_data;
 
 // Re-exports — codec
 public mount .codec.{Reader, CodecError};
@@ -75,3 +78,26 @@ public mount .server_sm.{
 
 // Re-exports — DHE keypair pool
 public mount .dhe_pool.{DhePool, LocalDhePool, DheKeyPair, generate_client_keyshares};
+
+// Re-exports — PSK binder + OfferedPsks extension encoding
+public mount .psk.{
+    PskIdentity, OfferedPsks, BinderFlavor,
+    encode_identities, encode_binders, encode_offered_psks,
+    derive_binder_key, derive_binder_finished_key,
+    compute_binder, verify_binder, obfuscated_ticket_age,
+};
+
+// Re-exports — session tickets + resumption cache
+public mount .resumption.{
+    ClientSession, SessionTicketKey, ServerTicketPlaintext,
+    ClientSessionStore, TicketError,
+    issue_ticket, decrypt_ticket, session_from_new_ticket,
+};
+
+// Re-exports — 0-RTT early data
+public mount .early_data.{
+    EarlyKeys, EarlyDataBudget,
+    derive as derive_early_keys,
+    to_traffic_keys as early_traffic_keys,
+    early_secret_from_psk,
+};
