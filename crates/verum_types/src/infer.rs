@@ -22737,6 +22737,26 @@ impl TypeChecker {
         self.substitute_self_type(method_ty, receiver_ty)
     }
 
+    /// Compute how many of the method scheme's `ordered_fresh_vars` should be bound
+    /// positionally against the receiver's type arguments.
+    ///
+    /// `impl_var_count` is the number of impl-level type params in the scheme (set
+    /// at registration time — all method-scheme sites in
+    /// `register_impl_block_inner` do this). Method-level params (the method's own
+    /// `<U>`) live *after* the impl-level ones in `ordered_fresh_vars` and must
+    /// NEVER be bound from receiver args. See #57: `Range<Int>.chain(b)` has
+    /// impl_var_count=0 (impl takes no generic params) with a single method-level
+    /// `U`; binding U := Int would pin U before the argument `b: Range<Int>` is
+    /// checked.
+    #[inline]
+    fn resolve_bind_limit(
+        impl_var_count: usize,
+        fresh_vars_len: usize,
+        receiver_args_len: usize,
+    ) -> usize {
+        impl_var_count.min(fresh_vars_len).min(receiver_args_len)
+    }
+
     /// Instantiate a method's type parameters and optionally unify with explicit type arguments.
     ///
     /// For generic methods like `fn collect<U>(&self) -> List<U>`, when called as
@@ -38750,11 +38770,8 @@ impl TypeChecker {
                             };
 
                             // Bind type variables from receiver type args
-                            let bind_limit = if impl_var_count > 0 {
-                                impl_var_count
-                            } else {
-                                ordered_fresh_vars.len()
-                            };
+                            let bind_limit = Self::resolve_bind_limit(
+                                impl_var_count, ordered_fresh_vars.len(), receiver_type_args.len());
                             let mut combined_subst = crate::ty::Substitution::new();
                             for (type_var, type_arg) in
                                 ordered_fresh_vars.iter().take(bind_limit).zip(receiver_type_args.iter())
@@ -40256,11 +40273,8 @@ impl TypeChecker {
                         // type vars from receiver type args. Method-level vars (like F in
                         // modify<F: Fn(T) -> T>) must NOT be bound from receiver type args —
                         // they are inferred from the method's arguments instead.
-                        let bind_limit = if impl_var_count > 0 {
-                            impl_var_count
-                        } else {
-                            ordered_fresh_vars.len()
-                        };
+                        let bind_limit = Self::resolve_bind_limit(
+                            impl_var_count, ordered_fresh_vars.len(), receiver_type_args.len());
                         let mut combined_subst = crate::ty::Substitution::new();
                         for (type_var, type_arg) in
                             ordered_fresh_vars.iter().take(bind_limit).zip(receiver_type_args.iter())
@@ -41078,11 +41092,8 @@ impl TypeChecker {
                             }
                         };
 
-                        let bind_limit = if impl_var_count > 0 {
-                            impl_var_count
-                        } else {
-                            ordered_fresh_vars.len()
-                        };
+                        let bind_limit = Self::resolve_bind_limit(
+                            impl_var_count, ordered_fresh_vars.len(), receiver_type_args.len());
                         let mut combined_subst = crate::ty::Substitution::new();
                         for (type_var, type_arg) in
                             ordered_fresh_vars.iter().take(bind_limit).zip(receiver_type_args.iter())
@@ -49753,6 +49764,9 @@ impl TypeChecker {
                                     ordered_params.push(param.clone());
                                 }
                                 let mut func_scheme = self.ctx.generalize_ordered(func_ty, &ordered_params);
+                                // Record how many ordered vars are impl-level so method-level params
+                                // (e.g., method's own <U>) aren't bound from receiver type args at call time.
+                                func_scheme.impl_var_count = type_param_names.len();
 
                                 // CRITICAL: Add type bounds to the TypeScheme for closure type inference
                                 if !method_type_var_bounds.is_empty() {
@@ -49866,6 +49880,9 @@ impl TypeChecker {
                                     ordered_params.push(param.clone());
                                 }
                                 let mut method_scheme = self.ctx.generalize_ordered(method_ty, &ordered_params);
+                                // Record how many ordered vars are impl-level so method-level params
+                                // (e.g., method's own <U>) aren't bound from receiver type args at call time.
+                                method_scheme.impl_var_count = type_param_names.len();
 
                                 // CRITICAL: Add type bounds to the TypeScheme for closure type inference
                                 // This enables: fn map<U, F: fn(T) -> U>(self, f: F) -> Maybe<U>
@@ -50098,6 +50115,8 @@ impl TypeChecker {
                                     ordered_params.push(param.clone());
                                 }
                                 let mut method_scheme = self.ctx.generalize_ordered(method_ty, &ordered_params);
+                                // Record impl-level vs method-level split for correct bind_limit at call sites.
+                                method_scheme.impl_var_count = type_param_names.len();
 
                                 // Add type bounds for closure type inference
                                 if !method_type_var_bounds.is_empty() {
@@ -50184,6 +50203,8 @@ impl TypeChecker {
                                     ordered_params.push(param.clone());
                                 }
                                 let mut method_scheme = self.ctx.generalize_ordered(method_ty, &ordered_params);
+                                // Record impl-level vs method-level split for correct bind_limit at call sites.
+                                method_scheme.impl_var_count = type_param_names.len();
 
                                 // Add type bounds for closure type inference
                                 if !method_type_var_bounds.is_empty() {
@@ -50267,7 +50288,13 @@ impl TypeChecker {
                                 }
 
                                 // Create a TypeScheme with all type parameters
-                                let method_scheme = self.ctx.generalize_ordered(method_ty.clone(), &all_param_names);
+                                let mut method_scheme = self.ctx.generalize_ordered(method_ty.clone(), &all_param_names);
+                                // Record impl-level vs method-level split. For `impl Iterator for Range<Int>`
+                                // type_param_names is empty, so impl_var_count = 0 — method-level params
+                                // like U in chain<U: Iterator<Item = Self.Item>> must NOT be bound to
+                                // receiver type args (Range's Int). Without this, bind_limit falls back
+                                // to fresh_vars.len() and pins U := Int (see #57).
+                                method_scheme.impl_var_count = type_param_names.len();
 
                                 // CRITICAL: Transfer type param bounds from the protocol method
                                 // The bounds are keyed by param NAME, so we can look up the corresponding TypeVar
