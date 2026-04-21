@@ -1,0 +1,224 @@
+// =============================================================================
+// security/x509/ext/name_constraints.vr — RFC 5280 §4.2.1.10
+// =============================================================================
+//
+// NameConstraints ::= SEQUENCE {
+//     permittedSubtrees       [0]     GeneralSubtrees OPTIONAL,
+//     excludedSubtrees        [1]     GeneralSubtrees OPTIONAL
+// }
+// GeneralSubtrees ::= SEQUENCE SIZE (1..MAX) OF GeneralSubtree
+// GeneralSubtree ::= SEQUENCE {
+//     base                    GeneralName,
+//     minimum         [0]     BaseDistance DEFAULT 0,
+//     maximum         [1]     BaseDistance OPTIONAL
+// }
+//
+// RFC 5280 §4.2.1.10 mandates: `minimum` MUST be 0; `maximum` MUST
+// NOT be present. We enforce that — reject anything else as
+// MalformedDer (a violating cert would never validate under WebPKI
+// rules).
+//
+// Matching semantics per RFC 5280 §4.2.1.10 ("Name Constraints"):
+//
+//   * A certificate is excluded if any of its GeneralNames falls inside
+//     an excludedSubtrees entry.
+//   * A certificate is included only if every GeneralName (of matching
+//     type) falls inside at least one permittedSubtrees entry.
+//
+// For DNS names, a permitted subtree `foo.com` matches `foo.com`,
+// `sub.foo.com`, `deep.sub.foo.com`, etc., but NOT `barfoo.com`.
+// RFC 5280 notes the tricky case where `foo.com` does NOT match
+// `foo.com` exactly when ACME Baseline says it must — CAs have
+// historically disagreed; we follow the strict RFC 5280 reading.
+//
+// =============================================================================
+
+module core.security.x509.ext.name_constraints;
+
+mount core.*;
+mount core.collections.List;
+mount core.encoding.der.{DerReader, DerError, DerErrorKind, Tag, TagClass};
+mount core.security.x509.ext.subject_alt_name.{GeneralName, parse_general_name};
+
+public type GeneralSubtree is {
+    base: GeneralName,
+};
+
+public type NameConstraints is {
+    permitted: List<GeneralSubtree>,
+    excluded:  List<GeneralSubtree>,
+};
+
+impl NameConstraints {
+    public fn empty() -> NameConstraints {
+        NameConstraints { permitted: [], excluded: [] }
+    }
+
+    /// Test whether the given hostname is acceptable under these
+    /// constraints. Returns `true` when:
+    ///   - not excluded by any `excludedSubtrees` DNS entry, AND
+    ///   - either no `permittedSubtrees` DNS entry exists, or the name
+    ///     matches at least one permitted entry.
+    public fn permits_dns(&self, host: &Text) -> Bool {
+        let mut i: Int = 0;
+        while i < self.excluded.len() {
+            match &self.excluded[i].base {
+                GeneralName.DnsName(sub) => {
+                    if dns_within_subtree(host, sub) { return false; }
+                },
+                _ => {},
+            }
+            i = i + 1;
+        }
+
+        let mut has_dns_permitted = false;
+        let mut j: Int = 0;
+        while j < self.permitted.len() {
+            match &self.permitted[j].base {
+                GeneralName.DnsName(sub) => {
+                    has_dns_permitted = true;
+                    if dns_within_subtree(host, sub) { return true; }
+                },
+                _ => {},
+            }
+            j = j + 1;
+        }
+
+        // If no DNS permitted entries, other-type constraints don't
+        // restrict DNS names — RFC 5280 §4.2.1.10 last paragraph.
+        !has_dns_permitted
+    }
+}
+
+public fn parse(value: &[Byte]) -> Result<NameConstraints, DerError> {
+    let mut r = DerReader.new(value);
+    let mut seq = r.read_sequence()?;
+    let mut out = NameConstraints.empty();
+
+    while !seq.is_at_end() {
+        let t = seq.peek_tag()?;
+        let is_ctx = match t.class_ { TagClass.ContextSpecific => true, _ => false };
+        if !is_ctx {
+            return Err(DerError {
+                kind: DerErrorKind.UnexpectedTag,
+                position: 0,
+                message: "NameConstraints entry not context-tagged",
+            });
+        }
+        match t.number {
+            0_u32 => {
+                let mut inner = seq.read_explicit(0_u32)?;
+                // read a GeneralSubtrees
+                let mut gs_seq = inner.read_sequence()?;
+                while !gs_seq.is_at_end() {
+                    let st = parse_subtree(&mut gs_seq)?;
+                    out.permitted.push(st);
+                }
+                gs_seq.expect_end()?;
+                inner.expect_end()?;
+            },
+            1_u32 => {
+                let mut inner = seq.read_explicit(1_u32)?;
+                let mut gs_seq = inner.read_sequence()?;
+                while !gs_seq.is_at_end() {
+                    let st = parse_subtree(&mut gs_seq)?;
+                    out.excluded.push(st);
+                }
+                gs_seq.expect_end()?;
+                inner.expect_end()?;
+            },
+            _ => {
+                // Unknown context-tagged — skip.
+                let (_, len, _, _) = seq.peek_element_span()?;
+                let _ = seq.read_tag_length()?;
+                let _ = seq.take_bytes(len)?;
+            },
+        }
+    }
+    seq.expect_end()?;
+    r.expect_end()?;
+    Ok(out)
+}
+
+fn parse_subtree(r: &mut DerReader) -> Result<GeneralSubtree, DerError> {
+    let mut s = r.read_sequence()?;
+    let base = parse_general_name(&mut s)?;
+
+    // RFC 5280 §4.2.1.10: minimum MUST be 0 (absent or [0] IMPLICIT 0),
+    // maximum MUST NOT be present.
+    while !s.is_at_end() {
+        let t = s.peek_tag()?;
+        let is_ctx = match t.class_ { TagClass.ContextSpecific => true, _ => false };
+        if !is_ctx {
+            return Err(DerError {
+                kind: DerErrorKind.MalformedDer,
+                position: 0,
+                message: "stray element in GeneralSubtree",
+            });
+        }
+        if t.number == 0_u32 {
+            let (_, len, _, _) = s.peek_element_span()?;
+            let _ = s.read_tag_length()?;
+            let bytes = s.take_bytes(len)?;
+            if bytes.len() != 1 || bytes[0] != 0_u8 {
+                return Err(DerError {
+                    kind: DerErrorKind.MalformedDer,
+                    position: 0,
+                    message: "GeneralSubtree.minimum must be 0",
+                });
+            }
+        } else if t.number == 1_u32 {
+            return Err(DerError {
+                kind: DerErrorKind.MalformedDer,
+                position: 0,
+                message: "GeneralSubtree.maximum MUST NOT be present",
+            });
+        } else {
+            return Err(DerError {
+                kind: DerErrorKind.UnexpectedTag,
+                position: 0,
+                message: "unexpected GeneralSubtree element",
+            });
+        }
+    }
+    s.expect_end()?;
+    Ok(GeneralSubtree { base: base })
+}
+
+// =============================================================================
+// DNS subtree matching
+// =============================================================================
+//
+// RFC 5280 §4.2.1.10: "DNS name restrictions are expressed as foo.bar.com.
+// Any DNS name that can be constructed by simply adding zero or more
+// labels to the left-hand side of the name satisfies the name constraint.
+// For example, www.foo.bar.com satisfies the constraint foo.bar.com."
+//
+// Edge case: a leading "." in the constraint ("foo.bar.com" vs
+// ".foo.bar.com") is not recognised by RFC 5280 — we follow the
+// common practice of treating the two forms identically.
+//
+// =============================================================================
+
+fn dns_within_subtree(host: &Text, subtree: &Text) -> Bool {
+    let h = host.to_lowercase();
+    let mut s = subtree.to_lowercase();
+    // Normalise: strip leading "."
+    if s.as_bytes().len() > 0 && s.as_bytes()[0] == ('.' as Byte) {
+        s = Text.from_utf8_lossy(&s.as_bytes()[1..]);
+    }
+    let hb = h.as_bytes();
+    let sb = s.as_bytes();
+    if sb.len() == 0 { return true; }    // Empty subtree matches everything
+    if hb.len() < sb.len() { return false; }
+    // Suffix match; additionally require either exact equality or a
+    // label boundary immediately before the suffix.
+    let offset = hb.len() - sb.len();
+    let mut i: Int = 0;
+    while i < sb.len() {
+        if hb[offset + i] != sb[i] { return false; }
+        i = i + 1;
+    }
+    if offset == 0 { return true; }
+    hb[offset - 1] == ('.' as Byte)
+}

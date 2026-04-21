@@ -1,0 +1,65 @@
+// =============================================================================
+// security/x509/ext/basic_constraints.vr — RFC 5280 §4.2.1.9
+// =============================================================================
+//
+// BasicConstraints ::= SEQUENCE {
+//     cA                 BOOLEAN DEFAULT FALSE,
+//     pathLenConstraint  INTEGER (0..MAX) OPTIONAL
+// }
+//
+// For CA certs, `cA = TRUE` MUST be present and MUST be critical.
+// `pathLenConstraint` limits the number of intermediate CAs below
+// this cert in a chain. Absence = unlimited.
+//
+// For EE certs, this extension SHOULD be absent; if present, `cA` is
+// FALSE and `pathLenConstraint` is absent. Many real-world EE certs
+// include it explicitly for belt-and-braces reasons — accept and
+// ignore.
+//
+// =============================================================================
+
+module core.security.x509.ext.basic_constraints;
+
+mount core.*;
+mount core.encoding.der.{DerReader, DerError, DerErrorKind, TagClass};
+
+public type BasicConstraints is {
+    is_ca:            Bool,
+    path_len_constraint: Maybe<Int>,
+};
+
+public fn parse(value: &[Byte]) -> Result<BasicConstraints, DerError> {
+    let mut r = DerReader.new(value);
+    let mut seq = r.read_sequence()?;
+
+    let mut is_ca: Bool = false;
+    if !seq.is_at_end() {
+        // Tag BOOLEAN (universal 1)?
+        let t = seq.peek_tag()?;
+        let is_bool = match t.class_ { TagClass.Universal => t.number == 1_u32, _ => false };
+        if is_bool {
+            is_ca = seq.read_boolean()?;
+        }
+    }
+
+    let mut path_len: Maybe<Int> = None;
+    if !seq.is_at_end() {
+        let t = seq.peek_tag()?;
+        let is_int = match t.class_ { TagClass.Universal => t.number == 2_u32, _ => false };
+        if is_int {
+            let v = seq.read_int64()?;
+            if v < 0_i64 {
+                return Err(DerError {
+                    kind: DerErrorKind.MalformedDer,
+                    position: 0,
+                    message: "pathLenConstraint must be non-negative",
+                });
+            }
+            path_len = Some(v as Int);
+        }
+    }
+
+    seq.expect_end()?;
+    r.expect_end()?;
+    Ok(BasicConstraints { is_ca: is_ca, path_len_constraint: path_len })
+}

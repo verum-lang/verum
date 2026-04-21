@@ -1,0 +1,119 @@
+// =============================================================================
+// security/x509/time.vr — Certificate validity time helpers (RFC 5280 §4.1.2.5)
+// =============================================================================
+// Layer: 3 (X.509 subsystem)
+// Dependencies: core, encoding.der (Time type), time.instant
+// =============================================================================
+//
+// X.509 encodes validity as two points: notBefore and notAfter. Both are
+// CHOICE { UTCTime, GeneralizedTime } per RFC 5280 §4.1.2.5 — UTCTime for
+// years ≤ 2049, GeneralizedTime for years ≥ 2050. `core.encoding.der`
+// already lowers both into a common `Time { year, month, day, hour,
+// minute, second }` struct; this module wraps with the validity-specific
+// API X.509 verify paths actually use:
+//
+//   * total ordering
+//   * comparison against `Instant` (current time)
+//   * construction from Unix epoch seconds (for test vectors)
+//
+// RFC 5280 bans leap seconds + fractional seconds + non-UTC time zones,
+// so our Time is always UTC on an integer second boundary — equality on
+// the 6-tuple is exact.
+//
+// =============================================================================
+
+module core.security.x509.time;
+
+mount core.*;
+mount core.encoding.der.{Time};
+mount core.time.instant.{Instant};
+
+// =============================================================================
+// Validity window
+// =============================================================================
+
+/// Certificate validity window. Both ends are inclusive per RFC 5280
+/// §4.1.2.5 ("[...] the GeneralTime type shall be used for all validity
+/// periods ending after December 31, 9999, and the UTCTime type shall
+/// be used otherwise.").
+public type Validity is {
+    not_before: Time,
+    not_after:  Time,
+};
+
+// =============================================================================
+// Ordering on Time — lexicographic over (year, month, day, hour, minute, second)
+// =============================================================================
+
+/// Returns -1 if `a < b`, 0 if `a == b`, +1 if `a > b`.
+public fn time_cmp(a: &Time, b: &Time) -> Int {
+    if a.year   != b.year   { return if a.year   < b.year   { -1 } else { 1 }; }
+    if a.month  != b.month  { return if a.month  < b.month  { -1 } else { 1 }; }
+    if a.day    != b.day    { return if a.day    < b.day    { -1 } else { 1 }; }
+    if a.hour   != b.hour   { return if a.hour   < b.hour   { -1 } else { 1 }; }
+    if a.minute != b.minute { return if a.minute < b.minute { -1 } else { 1 }; }
+    if a.second != b.second { return if a.second < b.second { -1 } else { 1 }; }
+    0
+}
+
+public fn time_eq(a: &Time, b: &Time) -> Bool  { time_cmp(a, b) == 0 }
+public fn time_lt(a: &Time, b: &Time) -> Bool  { time_cmp(a, b) <  0 }
+public fn time_le(a: &Time, b: &Time) -> Bool  { time_cmp(a, b) <= 0 }
+public fn time_gt(a: &Time, b: &Time) -> Bool  { time_cmp(a, b) >  0 }
+public fn time_ge(a: &Time, b: &Time) -> Bool  { time_cmp(a, b) >= 0 }
+
+// =============================================================================
+// Unix epoch conversion
+// =============================================================================
+//
+// Verum's core.time.instant.Instant is a monotonic clock — not wall-time.
+// For X.509 we need wall-time (year/month/day in UTC), which we pull
+// from Verum's realtime clock surface `core.time.instant.now_utc` (returns
+// a `(secs, nanos)` tuple since Unix epoch).
+//
+// The civil-calendar arithmetic below follows Howard Hinnant's algorithm
+// ("days_from_civil" / "civil_from_days"), using proleptic Gregorian
+// calendar. Leap year rule: year % 4 == 0 && (year % 100 != 0 || year % 400 == 0).
+// No DST, no leap seconds — X.509 lives in pure UTC.
+
+/// Convert (year, month, day) to days since Unix epoch (1970-01-01).
+/// Correct for any year in [-9999, 9999]. Source: Howard Hinnant,
+/// "chrono-Compatible Low-Level Date Algorithms".
+fn days_from_civil(y: Int64, m: UInt8, d: UInt8) -> Int64 {
+    let ym: Int64 = if (m as Int64) <= 2_i64 { y - 1_i64 } else { y };
+    let era: Int64 = if ym >= 0_i64 { ym / 400_i64 } else { (ym - 399_i64) / 400_i64 };
+    let yoe: Int64 = ym - era * 400_i64;                       // 0..=399
+    let mo:  Int64 = if (m as Int64) > 2_i64 { (m as Int64) - 3_i64 } else { (m as Int64) + 9_i64 };
+    let doy: Int64 = (153_i64 * mo + 2_i64) / 5_i64 + (d as Int64) - 1_i64;
+    let doe: Int64 = yoe * 365_i64 + yoe / 4_i64 - yoe / 100_i64 + doy;
+    era * 146097_i64 + doe - 719468_i64
+}
+
+/// Convert `Time` to seconds since the Unix epoch (1970-01-01T00:00:00Z).
+/// Returns Int64; values before the epoch are negative.
+public fn time_to_unix(t: &Time) -> Int64 {
+    let days = days_from_civil(t.year as Int64, t.month, t.day);
+    days * 86400_i64
+        + (t.hour   as Int64) * 3600_i64
+        + (t.minute as Int64) *   60_i64
+        + (t.second as Int64)
+}
+
+/// Is `t` strictly in the past relative to Unix-epoch seconds `now_secs`?
+public fn is_in_past(t: &Time, now_secs: Int64) -> Bool {
+    time_to_unix(t) < now_secs
+}
+
+/// Is `t` strictly in the future relative to Unix-epoch seconds `now_secs`?
+public fn is_in_future(t: &Time, now_secs: Int64) -> Bool {
+    time_to_unix(t) > now_secs
+}
+
+/// Is Unix-second timestamp `now_secs` contained in `[validity.not_before,
+/// validity.not_after]` (inclusive)? This is the RFC 5280 §6.1.3(a)(2)
+/// certificate validity check.
+public fn is_valid_at(validity: &Validity, now_secs: Int64) -> Bool {
+    let nb = time_to_unix(&validity.not_before);
+    let na = time_to_unix(&validity.not_after);
+    nb <= now_secs && now_secs <= na
+}

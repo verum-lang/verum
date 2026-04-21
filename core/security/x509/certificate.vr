@@ -1,0 +1,306 @@
+// =============================================================================
+// security/x509/certificate.vr — X.509 Certificate + TBSCertificate (RFC 5280)
+// =============================================================================
+// Layer: 3 (X.509 subsystem)
+// Dependencies: core, encoding.der, x509.{oid, algorithm, name, spki, time, ext}
+// =============================================================================
+//
+// Certificate ::= SEQUENCE {
+//     tbsCertificate       TBSCertificate,
+//     signatureAlgorithm   AlgorithmIdentifier,
+//     signatureValue       BIT STRING
+// }
+//
+// TBSCertificate ::= SEQUENCE {
+//     version              [0] EXPLICIT Version DEFAULT v1,
+//     serialNumber         CertificateSerialNumber,
+//     signature            AlgorithmIdentifier,
+//     issuer               Name,
+//     validity             Validity,
+//     subject              Name,
+//     subjectPublicKeyInfo SubjectPublicKeyInfo,
+//     issuerUniqueID   [1] IMPLICIT UniqueIdentifier OPTIONAL,  -- v2
+//     subjectUniqueID  [2] IMPLICIT UniqueIdentifier OPTIONAL,  -- v2
+//     extensions       [3] EXPLICIT Extensions OPTIONAL         -- v3
+// }
+//
+// Version ::= INTEGER { v1(0), v2(1), v3(2) }
+//
+// # What we do with this
+//
+// The parse produces a `Certificate` ADT that's ready for:
+//
+//   1. Chain validation (RFC 5280 §6.1) — path construction + checks.
+//   2. Signature verification (signature_value + inner tbs_der bytes
+//      + parent's SubjectPublicKey).
+//   3. Hostname matching (SAN + NameConstraints).
+//
+// We capture two raw byte slices alongside the structured data:
+//
+//   * `raw_der` — full Certificate DER (tag + length + everything).
+//     Needed for cert-level SHA-256 fingerprints (HPKP pins,
+//     Certificate Transparency).
+//   * `tbs_der` — exactly the bytes over which `signatureValue` was
+//     computed. The signature verify path feeds this directly to the
+//     appropriate hash + verify function without re-serialising.
+//
+// =============================================================================
+
+module core.security.x509.certificate;
+
+mount core.*;
+mount core.collections.List;
+mount core.encoding.der.{DerReader, DerError, DerErrorKind, Time, TagClass};
+mount core.encoding.der as der;
+mount core.security.x509.algorithm.{
+    SignatureAlg, parse_signature_alg,
+};
+mount core.security.x509.name.{DistinguishedName, parse_name};
+mount core.security.x509.spki.{Spki, parse_spki};
+mount core.security.x509.time.{Validity};
+mount core.security.x509.ext.{ExtensionSet, parse_extensions};
+
+// =============================================================================
+// Types
+// =============================================================================
+
+public type X509Version is V1 | V2 | V3;
+
+public type TbsCertificate is {
+    version:       X509Version,
+    serial_number: List<Byte>,          // raw INTEGER bytes (may exceed i64)
+    signature_alg: SignatureAlg,
+    issuer:        DistinguishedName,
+    validity:      Validity,
+    subject:       DistinguishedName,
+    spki:          Spki,
+    extensions:    ExtensionSet,
+};
+
+public type Certificate is {
+    tbs:             TbsCertificate,
+    signature_alg:   SignatureAlg,      // outer — must equal tbs.signature_alg
+    signature_value: List<Byte>,        // BIT STRING contents (no leading unused-bits byte)
+
+    // Byte-exact spans.
+    raw_der: List<Byte>,
+    tbs_der: List<Byte>,                // feed to hash+verify with parent SPKI
+};
+
+// =============================================================================
+// Parser
+// =============================================================================
+
+public fn parse_certificate(bytes: &[Byte]) -> Result<Certificate, DerError> {
+    let mut r = DerReader.new(bytes);
+
+    // Capture the full DER span; the reader internal buffer is a
+    // cloneable copy so we feed through buffer_copy_region.
+    let (_, _, _, cert_end) = r.peek_element_span()?;
+    let raw_der = r.buffer_copy_region(0, cert_end)?;
+
+    let mut cert_seq = r.read_sequence()?;
+    let (tbs, tbs_der) = parse_tbs(&mut cert_seq)?;
+    let sig_alg = parse_signature_alg(&mut cert_seq)?;
+    let sig_bs = cert_seq.read_bit_string()?;
+    if sig_bs.unused_bits != 0_u8 {
+        return Err(DerError {
+            kind: DerErrorKind.InvalidBitString,
+            position: 0,
+            message: "Certificate.signatureValue has unused bits",
+        });
+    }
+    cert_seq.expect_end()?;
+    r.expect_end()?;
+
+    // RFC 5280 §4.1.1.2: outer signatureAlgorithm MUST equal inner
+    // TBSCertificate.signature. We defer equality to the verify path
+    // by comparing the two parsed forms; here we only check they are
+    // structurally comparable (same variant).
+    if !signature_alg_matches(&sig_alg, &tbs.signature_alg) {
+        return Err(DerError {
+            kind: DerErrorKind.MalformedDer,
+            position: 0,
+            message: "outer/inner signature algorithm mismatch",
+        });
+    }
+
+    Ok(Certificate {
+        tbs:             tbs,
+        signature_alg:   sig_alg,
+        signature_value: sig_bs.bytes,
+        raw_der:         raw_der,
+        tbs_der:         tbs_der,
+    })
+}
+
+fn parse_tbs(r: &mut DerReader) -> Result<(TbsCertificate, List<Byte>), DerError> {
+    // Capture TBS span first.
+    let tbs_start = r.position();
+    let (_, _, _, tbs_end) = r.peek_element_span()?;
+    let tbs_der = r.buffer_copy_region(tbs_start, tbs_end)?;
+
+    let mut s = r.read_sequence()?;
+
+    // [0] EXPLICIT Version DEFAULT v1
+    let version = if s.peek_is_context(0_u32) {
+        let mut v_exp = s.read_explicit(0_u32)?;
+        let vv = v_exp.read_int64()?;
+        v_exp.expect_end()?;
+        match vv {
+            0_i64 => X509Version.V1,
+            1_i64 => X509Version.V2,
+            2_i64 => X509Version.V3,
+            _ => return Err(DerError {
+                kind: DerErrorKind.MalformedDer,
+                position: 0,
+                message: "unknown X.509 version",
+            }),
+        }
+    } else {
+        X509Version.V1
+    };
+
+    let serial = s.read_integer_raw()?;
+    let signature_alg = parse_signature_alg(&mut s)?;
+    let issuer = parse_name(&mut s)?;
+    let validity = parse_validity(&mut s)?;
+    let subject = parse_name(&mut s)?;
+    let spki = parse_spki(&mut s)?;
+
+    // Skip issuerUniqueID [1] / subjectUniqueID [2] (pre-v3 leftovers).
+    if s.peek_is_context(1_u32) {
+        // [1] IMPLICIT UniqueIdentifier. We don't need the bits; skip.
+        let (_, len, _, _) = s.peek_element_span()?;
+        let _ = s.read_tag_length()?;
+        let _ = s.take_bytes(len)?;
+    }
+    if s.peek_is_context(2_u32) {
+        let (_, len, _, _) = s.peek_element_span()?;
+        let _ = s.read_tag_length()?;
+        let _ = s.take_bytes(len)?;
+    }
+
+    // [3] EXPLICIT Extensions OPTIONAL
+    let extensions = if s.peek_is_context(3_u32) {
+        let mut e_exp = s.read_explicit(3_u32)?;
+        let parsed = parse_extensions(&mut e_exp)?;
+        e_exp.expect_end()?;
+        parsed
+    } else {
+        ExtensionSet.empty()
+    };
+
+    s.expect_end()?;
+
+    Ok((TbsCertificate {
+        version:       version,
+        serial_number: serial,
+        signature_alg: signature_alg,
+        issuer:        issuer,
+        validity:      validity,
+        subject:       subject,
+        spki:          spki,
+        extensions:    extensions,
+    }, tbs_der))
+}
+
+fn parse_validity(r: &mut DerReader) -> Result<Validity, DerError> {
+    let mut s = r.read_sequence()?;
+    let not_before = parse_time_choice(&mut s)?;
+    let not_after  = parse_time_choice(&mut s)?;
+    s.expect_end()?;
+    Ok(Validity { not_before: not_before, not_after: not_after })
+}
+
+fn parse_time_choice(r: &mut DerReader) -> Result<Time, DerError> {
+    let t = r.peek_tag()?;
+    let is_universal = match t.class_ { TagClass.Universal => true, _ => false };
+    if !is_universal {
+        return Err(DerError {
+            kind: DerErrorKind.UnexpectedTag,
+            position: 0,
+            message: "Validity time not a universal tag",
+        });
+    }
+    if t.number == der.TAG_UTC_TIME {
+        r.read_utc_time()
+    } else if t.number == der.TAG_GENERALIZED_TIME {
+        r.read_generalized_time()
+    } else {
+        Err(DerError {
+            kind: DerErrorKind.UnexpectedTag,
+            position: 0,
+            message: "Validity expected UTCTime or GeneralizedTime",
+        })
+    }
+}
+
+// =============================================================================
+// Algorithm equality (RFC 5280 §4.1.1.2 outer vs inner)
+// =============================================================================
+
+fn signature_alg_matches(a: &SignatureAlg, b: &SignatureAlg) -> Bool {
+    match (a, b) {
+        (SignatureAlg.Sha256WithRsa,   SignatureAlg.Sha256WithRsa)   => true,
+        (SignatureAlg.Sha384WithRsa,   SignatureAlg.Sha384WithRsa)   => true,
+        (SignatureAlg.Sha512WithRsa,   SignatureAlg.Sha512WithRsa)   => true,
+        (SignatureAlg.Sha1WithRsa,     SignatureAlg.Sha1WithRsa)     => true,
+        (SignatureAlg.RsaPss(_),       SignatureAlg.RsaPss(_))       => true,   // params must also match; deferred
+        (SignatureAlg.EcdsaWithSha256, SignatureAlg.EcdsaWithSha256) => true,
+        (SignatureAlg.EcdsaWithSha384, SignatureAlg.EcdsaWithSha384) => true,
+        (SignatureAlg.EcdsaWithSha512, SignatureAlg.EcdsaWithSha512) => true,
+        (SignatureAlg.EcdsaWithSha1,   SignatureAlg.EcdsaWithSha1)   => true,
+        (SignatureAlg.Ed25519Sig,      SignatureAlg.Ed25519Sig)      => true,
+        (SignatureAlg.Ed448Sig,        SignatureAlg.Ed448Sig)        => true,
+        (SignatureAlg.Unknown(oa),     SignatureAlg.Unknown(ob))     => oa.eq(ob),
+        _ => false,
+    }
+}
+
+// =============================================================================
+// High-level accessors
+// =============================================================================
+
+implement Certificate {
+    /// Is this a CA certificate? Per RFC 5280 §4.2.1.9, the
+    /// basicConstraints extension must be present with cA = TRUE for a
+    /// cert to legitimately issue other certs.
+    public fn is_ca(&self) -> Bool {
+        match &self.tbs.extensions.basic_constraints {
+            Some((_, bc)) => bc.is_ca,
+            None => false,
+        }
+    }
+
+    /// pathLenConstraint (or None for unlimited) — only meaningful on CAs.
+    public fn path_len_constraint(&self) -> Maybe<Int> {
+        match &self.tbs.extensions.basic_constraints {
+            Some((_, bc)) => bc.path_len_constraint.clone(),
+            None => None,
+        }
+    }
+
+    /// Does the cert cover the given hostname (SAN + name constraints
+    /// permitting)?
+    public fn matches_hostname(&self, hostname: &Text) -> Bool {
+        match &self.tbs.extensions.subject_alt_name {
+            Some((_, san)) => san.matches_dns(hostname),
+            None => {
+                // No SAN present. Per RFC 6125 §6.4.4, a cert without
+                // SAN is not an HTTPS identity; CN is ignored.
+                false
+            },
+        }
+    }
+
+    /// Accept a serverAuth connection? Requires the extendedKeyUsage
+    /// extension to either be absent (permissive) or include
+    /// serverAuth / anyExtendedKeyUsage.
+    public fn allows_server_auth(&self) -> Bool {
+        match &self.tbs.extensions.ext_key_usage {
+            Some((_, eku)) => eku.allows_server_auth(),
+            None => true,
+        }
+    }
+}

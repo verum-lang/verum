@@ -1,0 +1,278 @@
+// =============================================================================
+// security/x509/trust_store.vr — Trusted root CA storage
+// =============================================================================
+// Layer: 3 (X.509 subsystem)
+// Dependencies: core, sys.*, x509.{certificate, name}
+// =============================================================================
+//
+// A TrustStore is a collection of anchor certificates — CAs the
+// validator is willing to treat as chain roots. Three shapes:
+//
+//   1. TrustStore.system()    — platform-native loader (Linux / macOS /
+//      Windows). Falls back to bundled Mozilla NSS root store when the
+//      platform store is unavailable or empty (CI sandboxes, minimal
+//      containers).
+//   2. TrustStore.from_der(ders)   — explicit anchors supplied by the
+//      application (private CAs, development roots).
+//   3. TrustStore.empty() + .add() — incremental construction.
+//
+// # Platform backends
+//
+// | OS       | Source                                               |
+// |----------|------------------------------------------------------|
+// | Linux    | /etc/ssl/certs/ca-certificates.crt (Debian/Ubuntu)   |
+// |          | /etc/pki/tls/certs/ca-bundle.crt (RHEL/Fedora)       |
+// |          | fallback: bundled Mozilla NSS root store             |
+// | macOS    | SecTrustCopyAnchorCertificates via CoreFoundation    |
+// |          | fallback: bundled Mozilla NSS root store             |
+// | Windows  | CertEnumCertificatesInStore("ROOT")                  |
+// |          | fallback: bundled Mozilla NSS root store             |
+//
+// v0.1 landing: Linux PEM bundle path + bundled fallback as a sealed
+// `BUNDLED_MOZILLA_NSS` byte blob in a sibling module
+// (`trust_store_mozilla.vr`). macOS / Windows backends land in Phase 1
+// follow-up (blocked only on FFI binding boilerplate; the dispatch
+// structure is ready).
+//
+// =============================================================================
+
+module core.security.x509.trust_store;
+
+mount core.*;
+mount core.collections.List;
+mount core.security.x509.certificate.{Certificate, parse_certificate};
+mount core.security.x509.name.{DistinguishedName};
+
+// =============================================================================
+// Error type
+// =============================================================================
+
+public type TrustError is
+      NoSystemStore
+    | InvalidCertificate(Int)         // index
+    | IoError(Text);
+
+// =============================================================================
+// TrustStore
+// =============================================================================
+
+public type TrustStore is {
+    anchors: List<Certificate>,
+};
+
+implement TrustStore {
+    public fn empty() -> TrustStore {
+        TrustStore { anchors: [] }
+    }
+
+    public fn from_der(ders: &[List<Byte>]) -> Result<TrustStore, TrustError> {
+        let mut out: List<Certificate> = [];
+        let mut i: Int = 0;
+        while i < ders.len() {
+            match parse_certificate(ders[i].as_slice()) {
+                Ok(c) => out.push(c),
+                Err(_) => return Err(TrustError.InvalidCertificate(i)),
+            }
+            i = i + 1;
+        }
+        Ok(TrustStore { anchors: out })
+    }
+
+    public fn from_pem_bundle(pem: &Text) -> Result<TrustStore, TrustError> {
+        let ders = parse_pem_bundle(pem)?;
+        TrustStore.from_der(ders.as_slice())
+    }
+
+    /// Platform-native system store. Falls back to bundled Mozilla NSS
+    /// root store if no platform source is found.
+    public fn system() -> Result<TrustStore, TrustError> {
+        match try_load_linux_bundle() {
+            Ok(s) => return Ok(s),
+            Err(_) => {},
+        }
+        // Fallback: bundled Mozilla NSS roots (Phase 1 follow-up
+        // materialises the byte blob).
+        load_bundled_mozilla()
+    }
+
+    public fn add(&mut self, cert: Certificate) {
+        self.anchors.push(cert);
+    }
+
+    public fn len(&self) -> Int { self.anchors.len() }
+
+    /// Does the store contain an anchor with byte-exact subject-DN +
+    /// byte-exact SPKI equality with `cert`? Used by chain-builder to
+    /// identify self-signed roots present both in the chain and the
+    /// store (avoid spurious "UnknownIssuer" when chain carries its
+    /// own root).
+    public fn contains(&self, cert: &Certificate) -> Bool {
+        let mut i: Int = 0;
+        while i < self.anchors.len() {
+            let a = &self.anchors[i];
+            if a.tbs.subject.raw_eq(&cert.tbs.subject)
+                && a.tbs.spki.raw_der.len() == cert.tbs.spki.raw_der.len() {
+                let mut eq = true;
+                let mut j: Int = 0;
+                while j < a.tbs.spki.raw_der.len() {
+                    if a.tbs.spki.raw_der[j] != cert.tbs.spki.raw_der[j] { eq = false; break; }
+                    j = j + 1;
+                }
+                if eq { return true; }
+            }
+            i = i + 1;
+        }
+        false
+    }
+
+    /// Find the first anchor whose subject matches `issuer_dn` byte-exactly.
+    /// Used by chain-builder to look up the root when the chain omits it
+    /// (typical case: TLS server sends EE + intermediates, root stays
+    /// on the client).
+    public fn find_by_subject(&self, issuer_dn: &DistinguishedName) -> Maybe<Certificate> {
+        let mut i: Int = 0;
+        while i < self.anchors.len() {
+            if self.anchors[i].tbs.subject.raw_eq(issuer_dn) {
+                return Some(self.anchors[i].clone());
+            }
+            i = i + 1;
+        }
+        None
+    }
+}
+
+// =============================================================================
+// Linux: /etc/ssl/certs path enumeration + PEM parse
+// =============================================================================
+
+fn try_load_linux_bundle() -> Result<TrustStore, TrustError> {
+    let paths: [Text; 5] = [
+        Text.from_str("/etc/ssl/certs/ca-certificates.crt"),       // Debian / Ubuntu
+        Text.from_str("/etc/pki/tls/certs/ca-bundle.crt"),         // RHEL / Fedora
+        Text.from_str("/etc/ssl/cert.pem"),                         // OpenBSD
+        Text.from_str("/etc/ssl/ca-bundle.pem"),                    // SUSE
+        Text.from_str("/usr/local/etc/openssl/cert.pem"),           // macOS (Homebrew openssl)
+    ];
+    let mut i: Int = 0;
+    while i < paths.len() {
+        match read_file_to_text(&paths[i]) {
+            Ok(contents) => return TrustStore.from_pem_bundle(&contents),
+            Err(_) => {},
+        }
+        i = i + 1;
+    }
+    Err(TrustError.NoSystemStore)
+}
+
+fn read_file_to_text(path: &Text) -> Result<Text, TrustError> {
+    match core.io.file.File.read_to_text(path) {
+        Ok(t) => Ok(t),
+        Err(e) => Err(TrustError.IoError(Text.from_str(f"read {path} failed"))),
+    }
+}
+
+// =============================================================================
+// Bundled Mozilla NSS root store — fallback
+// =============================================================================
+//
+// The bundled blob lives in `trust_store_mozilla.vr` as a constant
+// byte array + per-cert offset table (Phase 1 step 7 follow-up
+// auto-generates from Mozilla's `certdata.txt` snapshot). Until then
+// this stub returns an empty store and the system loader will fail
+// closed — tests that need trust must pass anchors explicitly via
+// `TrustStore.from_der` / `from_pem_bundle`.
+// =============================================================================
+
+fn load_bundled_mozilla() -> Result<TrustStore, TrustError> {
+    Ok(TrustStore.empty())
+}
+
+// =============================================================================
+// PEM parser (minimal — single-line-begin, base64 body, single-line-end)
+// =============================================================================
+//
+// PEM format per RFC 7468 §3:
+//
+//   -----BEGIN CERTIFICATE-----
+//   <base64 body, may be line-wrapped at 64 chars>
+//   -----END CERTIFICATE-----
+//
+// Multiple blocks concatenate. We accept CRLF or LF line endings and
+// skip blank lines + "# comment" lines between blocks.
+// =============================================================================
+
+fn parse_pem_bundle(pem: &Text) -> Result<List<List<Byte>>, TrustError> {
+    let bytes = pem.as_bytes();
+    let mut out: List<List<Byte>> = [];
+    let mut i: Int = 0;
+    let begin = Text.from_str("-----BEGIN CERTIFICATE-----");
+    let end   = Text.from_str("-----END CERTIFICATE-----");
+    let begin_b = begin.as_bytes();
+    let end_b   = end.as_bytes();
+
+    while i < bytes.len() {
+        let start = find_slice(bytes, begin_b, i);
+        match start {
+            None => break,
+            Some(s) => {
+                let body_start = s + begin_b.len();
+                // Find line end
+                let mut body_begin = body_start;
+                while body_begin < bytes.len()
+                    && (bytes[body_begin] == ('\r' as Byte) || bytes[body_begin] == ('\n' as Byte)) {
+                    body_begin = body_begin + 1;
+                }
+                let end_pos = find_slice(bytes, end_b, body_begin);
+                match end_pos {
+                    None => break,
+                    Some(e) => {
+                        // Extract base64 body, stripping whitespace.
+                        let body = strip_whitespace(&bytes[body_begin..e]);
+                        let der = decode_base64(&body)
+                            .map_err(|_| TrustError.IoError(Text.from_str("PEM base64 decode failed")))?;
+                        out.push(der);
+                        i = e + end_b.len();
+                    },
+                }
+            },
+        }
+    }
+    Ok(out)
+}
+
+fn find_slice(haystack: &[Byte], needle: &[Byte], from: Int) -> Maybe<Int> {
+    if needle.len() == 0 { return Some(from); }
+    let mut i: Int = from;
+    while i + needle.len() <= haystack.len() {
+        let mut j: Int = 0;
+        let mut all_eq = true;
+        while j < needle.len() {
+            if haystack[i + j] != needle[j] { all_eq = false; break; }
+            j = j + 1;
+        }
+        if all_eq { return Some(i); }
+        i = i + 1;
+    }
+    None
+}
+
+fn strip_whitespace(input: &[Byte]) -> List<Byte> {
+    let mut out: List<Byte> = [];
+    let mut i: Int = 0;
+    while i < input.len() {
+        let b = input[i];
+        if b != (' ' as Byte) && b != ('\t' as Byte)
+            && b != ('\r' as Byte) && b != ('\n' as Byte) {
+            out.push(b);
+        }
+        i = i + 1;
+    }
+    out
+}
+
+fn decode_base64(body: &List<Byte>) -> Result<List<Byte>, TrustError> {
+    match core.encoding.base64.decode_bytes(body.as_slice()) {
+        Ok(v) => Ok(v),
+        Err(_) => Err(TrustError.IoError(Text.from_str("base64 decode"))),
+    }
+}

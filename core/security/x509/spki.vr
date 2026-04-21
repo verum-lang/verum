@@ -1,0 +1,267 @@
+// =============================================================================
+// security/x509/spki.vr — SubjectPublicKeyInfo (RFC 5280 §4.1.2.7)
+// =============================================================================
+// Layer: 3 (X.509 subsystem)
+// Dependencies: core, encoding.der, x509.{oid, algorithm}
+// =============================================================================
+//
+// SubjectPublicKeyInfo ::= SEQUENCE {
+//     algorithm         AlgorithmIdentifier,
+//     subjectPublicKey  BIT STRING
+// }
+//
+// The `subjectPublicKey` is a BIT STRING whose content depends on the
+// algorithm:
+//
+//   * RSA (rsaEncryption):
+//     -- RFC 3279 §2.3.1, RFC 8017 §A.1.1 RSAPublicKey ::= SEQUENCE {
+//          modulus          INTEGER,
+//          publicExponent   INTEGER
+//        }
+//
+//   * EC (id-ecPublicKey):
+//     -- RFC 5480 §2.2
+//     ECPoint ::= OCTET STRING
+//     The BIT STRING contents is the uncompressed EC point:
+//       0x04 || X || Y   (length = 1 + 2*field_size)
+//     Compressed forms (0x02 / 0x03) MAY be accepted by decoders but
+//     WebPKI (CA/Browser Forum Baseline §7.1.2.7) forbids them.
+//
+//   * Ed25519 / Ed448 (RFC 8410 §4):
+//     The BIT STRING contents is the 32-/57-byte raw public key.
+//
+//   * X25519 / X448:
+//     Same raw form as Ed25519 — these appear in Raw Public Key modes
+//     but never in TLS 1.3 WebPKI EE certs.
+//
+// We decode into a typed SubjectPublicKey ADT so downstream verify
+// paths pattern-match on the algorithm rather than re-parse raw bytes.
+//
+// =============================================================================
+
+module core.security.x509.spki;
+
+mount core.*;
+mount core.collections.List;
+mount core.encoding.der.{DerReader, DerError, DerErrorKind};
+mount core.security.x509.algorithm.{
+    PublicKeyAlg, EcNamedCurve, parse_public_key_alg,
+};
+
+// =============================================================================
+// Typed public key
+// =============================================================================
+
+/// Structurally-typed public key; ready for signature-verify passes.
+public type SubjectPublicKey is
+      Rsa(RsaPublicKey)
+    | EcP256(EcPublicKeyBytes)
+    | EcP384(EcPublicKeyBytes)
+    | EcP521(EcPublicKeyBytes)
+    | Ed25519(Ed25519PublicKeyBytes)
+    | Ed448(Ed448PublicKeyBytes)
+    | X25519(X25519PublicKeyBytes)
+    | X448(X448PublicKeyBytes)
+    | Unsupported;
+
+public type RsaPublicKey is {
+    modulus:  List<Byte>,    // big-endian, minimal encoding (no leading 0x00)
+    exponent: List<Byte>,    // big-endian, minimal encoding
+};
+
+/// Uncompressed EC point: first byte 0x04, followed by X||Y at
+/// coordinate length (32 for P-256, 48 for P-384, 66 for P-521).
+public type EcPublicKeyBytes is { bytes: List<Byte> };
+
+public type Ed25519PublicKeyBytes is { bytes: [Byte; 32] };
+public type Ed448PublicKeyBytes   is { bytes: [Byte; 57] };
+public type X25519PublicKeyBytes  is { bytes: [Byte; 32] };
+public type X448PublicKeyBytes    is { bytes: [Byte; 56] };
+
+/// Raw SubjectPublicKeyInfo wrapping — keeps both the structured form
+/// and a byte-exact DER span of the full SPKI sequence.  The latter is
+/// needed for authorityKeyIdentifier matching (RFC 5280 §4.2.1.1) and
+/// for SubjectKeyIdentifier derivation (RFC 5280 §4.2.1.2).
+public type Spki is {
+    algorithm:  PublicKeyAlg,
+    public_key: SubjectPublicKey,
+    raw_der:    List<Byte>,
+};
+
+// =============================================================================
+// Parser
+// =============================================================================
+
+public fn parse_spki(r: &mut DerReader) -> Result<Spki, DerError> {
+    // Capture full span before consuming.
+    let start = r.position();
+    let (_, _, _, elem_end) = r.peek_element_span()?;
+    let raw = r.buffer_copy_region(start, elem_end)?;
+
+    let mut seq = r.read_sequence()?;
+    let alg = parse_public_key_alg(&mut seq)?;
+    let bitstr = seq.read_bit_string()?;
+    if bitstr.unused_bits != 0_u8 {
+        return Err(DerError {
+            kind: DerErrorKind.InvalidBitString,
+            position: 0,
+            message: "SPKI public key BIT STRING has unused bits",
+        });
+    }
+    seq.expect_end()?;
+
+    let key = decode_public_key(&alg, &bitstr.bytes)?;
+
+    Ok(Spki {
+        algorithm:  alg,
+        public_key: key,
+        raw_der:    raw,
+    })
+}
+
+// =============================================================================
+// Algorithm-specific decoders
+// =============================================================================
+
+fn decode_public_key(alg: &PublicKeyAlg, bytes: &List<Byte>) -> Result<SubjectPublicKey, DerError> {
+    match alg {
+        PublicKeyAlg.RsaEncryption => decode_rsa(bytes),
+
+        PublicKeyAlg.EcPublicKey(curve) => match curve {
+            EcNamedCurve.P256 => decode_ec_uncompressed(bytes, 32).map(|k| SubjectPublicKey.EcP256(k)),
+            EcNamedCurve.P384 => decode_ec_uncompressed(bytes, 48).map(|k| SubjectPublicKey.EcP384(k)),
+            EcNamedCurve.P521 => decode_ec_uncompressed(bytes, 66).map(|k| SubjectPublicKey.EcP521(k)),
+            EcNamedCurve.UnknownCurve(_) => Ok(SubjectPublicKey.Unsupported),
+        },
+
+        PublicKeyAlg.Ed25519Key => {
+            let arr = copy_fixed_32(bytes)?;
+            Ok(SubjectPublicKey.Ed25519(Ed25519PublicKeyBytes { bytes: arr }))
+        },
+        PublicKeyAlg.Ed448Key => {
+            let arr = copy_fixed_57(bytes)?;
+            Ok(SubjectPublicKey.Ed448(Ed448PublicKeyBytes { bytes: arr }))
+        },
+        PublicKeyAlg.X25519Key => {
+            let arr = copy_fixed_32(bytes)?;
+            Ok(SubjectPublicKey.X25519(X25519PublicKeyBytes { bytes: arr }))
+        },
+        PublicKeyAlg.X448Key => {
+            let arr = copy_fixed_56(bytes)?;
+            Ok(SubjectPublicKey.X448(X448PublicKeyBytes { bytes: arr }))
+        },
+
+        PublicKeyAlg.UnknownPubKey(_) => Ok(SubjectPublicKey.Unsupported),
+    }
+}
+
+fn decode_rsa(bytes: &List<Byte>) -> Result<SubjectPublicKey, DerError> {
+    let mut r = DerReader.new(bytes.as_slice());
+    let mut seq = r.read_sequence()?;
+    let n_raw = seq.read_integer_raw()?;
+    let e_raw = seq.read_integer_raw()?;
+    seq.expect_end()?;
+    r.expect_end()?;
+
+    // Strip the leading 0x00 INTEGER sign byte if present — RSA moduli
+    // are always unsigned but DER INTEGER adds 0x00 when high bit = 1.
+    let modulus = strip_leading_zero(&n_raw);
+    let exponent = strip_leading_zero(&e_raw);
+
+    // Sanity: modulus length >= 128 bytes (1024-bit). Shorter keys
+    // are rejected downstream per WebPKI Baseline but pass the
+    // structural parser.
+    if modulus.len() < 1 {
+        return Err(DerError {
+            kind: DerErrorKind.MalformedDer,
+            position: 0,
+            message: "RSA modulus empty",
+        });
+    }
+
+    Ok(SubjectPublicKey.Rsa(RsaPublicKey {
+        modulus:  modulus,
+        exponent: exponent,
+    }))
+}
+
+fn decode_ec_uncompressed(bytes: &List<Byte>, coord_size: Int) -> Result<EcPublicKeyBytes, DerError> {
+    let expected = 1 + 2 * coord_size;
+    if bytes.len() != expected {
+        return Err(DerError {
+            kind: DerErrorKind.MalformedDer,
+            position: 0,
+            message: "EC point length mismatch",
+        });
+    }
+    if bytes[0] != 0x04_u8 {
+        return Err(DerError {
+            kind: DerErrorKind.MalformedDer,
+            position: 0,
+            message: "EC point not uncompressed (leading byte ≠ 0x04)",
+        });
+    }
+    let mut out: List<Byte> = [];
+    let mut i: Int = 0;
+    while i < bytes.len() {
+        out.push(bytes[i]);
+        i = i + 1;
+    }
+    Ok(EcPublicKeyBytes { bytes: out })
+}
+
+// =============================================================================
+// Helpers
+// =============================================================================
+
+fn strip_leading_zero(bytes: &List<Byte>) -> List<Byte> {
+    let mut out: List<Byte> = [];
+    let mut i: Int = if bytes.len() > 1 && bytes[0] == 0x00_u8 { 1 } else { 0 };
+    while i < bytes.len() {
+        out.push(bytes[i]);
+        i = i + 1;
+    }
+    out
+}
+
+fn copy_fixed_32(bytes: &List<Byte>) -> Result<[Byte; 32], DerError> {
+    if bytes.len() != 32 {
+        return Err(DerError {
+            kind: DerErrorKind.MalformedDer,
+            position: 0,
+            message: "expected 32-byte key",
+        });
+    }
+    let mut out: [Byte; 32] = [0_u8; 32];
+    let mut i: Int = 0;
+    while i < 32 { out[i] = bytes[i]; i = i + 1; }
+    Ok(out)
+}
+
+fn copy_fixed_56(bytes: &List<Byte>) -> Result<[Byte; 56], DerError> {
+    if bytes.len() != 56 {
+        return Err(DerError {
+            kind: DerErrorKind.MalformedDer,
+            position: 0,
+            message: "expected 56-byte key",
+        });
+    }
+    let mut out: [Byte; 56] = [0_u8; 56];
+    let mut i: Int = 0;
+    while i < 56 { out[i] = bytes[i]; i = i + 1; }
+    Ok(out)
+}
+
+fn copy_fixed_57(bytes: &List<Byte>) -> Result<[Byte; 57], DerError> {
+    if bytes.len() != 57 {
+        return Err(DerError {
+            kind: DerErrorKind.MalformedDer,
+            position: 0,
+            message: "expected 57-byte key",
+        });
+    }
+    let mut out: [Byte; 57] = [0_u8; 57];
+    let mut i: Int = 0;
+    while i < 57 { out[i] = bytes[i]; i = i + 1; }
+    Ok(out)
+}

@@ -170,6 +170,56 @@ implement DerReader {
     /// Is the reader positioned exactly at the end of its region?
     public fn is_at_end(&self) -> Bool { self.pos >= self.end }
 
+    /// Snap the cursor to the end of the region, discarding any
+    /// remaining bytes without validation. Use when parsing an
+    /// unknown-algorithm parameter blob where the structure is not
+    /// known but the length *is* — the outer reader has already
+    /// delimited the region on entry, so skipping past is safe.
+    public fn skip_to_end(&mut self) { self.pos = self.end; }
+
+    /// Current absolute cursor position inside the underlying buffer.
+    /// Useful for capturing byte-exact DER spans (issuer/subject DN,
+    /// TBSCertificate) that need to feed into signature verification.
+    public fn position(&self) -> Int { self.pos }
+
+    /// Copy bytes `[start, end)` out of the backing buffer. Bounds are
+    /// validated against the reader's region; returns `UnexpectedEndOfInput`
+    /// if the caller walked past the region limit.
+    public fn buffer_copy_region(&self, start: Int, end: Int) -> Result<List<Byte>, DerError> {
+        if start < 0 || end < start || end > self.buf.len() {
+            return Err(err(UnexpectedEndOfInput, start, "buffer_copy_region out of bounds"));
+        }
+        let mut out: List<Byte> = [];
+        let mut i: Int = start;
+        while i < end {
+            out.push(self.buf[i]);
+            i = i + 1;
+        }
+        Ok(out)
+    }
+
+    /// Parse the next element's tag + length without advancing the
+    /// cursor; return `(tag, length, value_start, element_end)` where
+    /// `value_start` is the position of the first value octet and
+    /// `element_end = value_start + length` is the first octet past
+    /// the element. The cursor remains at the pre-call position.
+    ///
+    /// Implementation: uses a scratch clone of the reader so the
+    /// parse is non-destructive; cheap because `List<Byte>` buffers
+    /// share their backing storage through Verum's arena semantics.
+    public fn peek_element_span(&self) -> Result<(Tag, Int, Int, Int), DerError> {
+        let mut probe = DerReader {
+            buf: self.buf.clone(),
+            pos: self.pos,
+            end: self.end,
+        };
+        let save = probe.pos;
+        let (t, len) = probe.read_tag_length()?;
+        let value_start = probe.pos;
+        Ok((t, len, value_start, value_start + len))
+        // save unused — retained for symmetry with other peek_* calls
+    }
+
     /// Assert-at-end. Use after parsing an expected fixed structure to
     /// reject trailing bytes.
     public fn expect_end(&self) -> Result<(), DerError> {

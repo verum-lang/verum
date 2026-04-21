@@ -1,0 +1,91 @@
+// =============================================================================
+// security/x509/ext/key_usage.vr — RFC 5280 §4.2.1.3
+// =============================================================================
+//
+// KeyUsage ::= BIT STRING {
+//     digitalSignature   (0),
+//     nonRepudiation     (1),   -- recent editions of X.509 use contentCommitment
+//     keyEncipherment    (2),
+//     dataEncipherment   (3),
+//     keyAgreement       (4),
+//     keyCertSign        (5),
+//     cRLSign            (6),
+//     encipherOnly       (7),
+//     decipherOnly       (8)
+// }
+//
+// The BIT STRING is big-endian: bit 0 is the MSB of the first byte
+// per RFC 5280 §4.2.1.3. Typical WebPKI EE certs set digitalSignature
+// + keyEncipherment (RSA) or digitalSignature (ECDSA). CAs set
+// keyCertSign + (optionally) cRLSign.
+//
+// =============================================================================
+
+module core.security.x509.ext.key_usage;
+
+mount core.*;
+mount core.encoding.der.{DerReader, DerError, DerErrorKind};
+
+public type KeyUsage is {
+    digital_signature:   Bool,
+    non_repudiation:     Bool,
+    key_encipherment:    Bool,
+    data_encipherment:   Bool,
+    key_agreement:       Bool,
+    key_cert_sign:       Bool,
+    crl_sign:            Bool,
+    encipher_only:       Bool,
+    decipher_only:       Bool,
+};
+
+implement KeyUsage {
+    public fn empty() -> KeyUsage {
+        KeyUsage {
+            digital_signature:   false,
+            non_repudiation:     false,
+            key_encipherment:    false,
+            data_encipherment:   false,
+            key_agreement:       false,
+            key_cert_sign:       false,
+            crl_sign:            false,
+            encipher_only:       false,
+            decipher_only:       false,
+        }
+    }
+
+    /// Convenience — any KU bit set?
+    public fn is_any(&self) -> Bool {
+        self.digital_signature || self.non_repudiation
+         || self.key_encipherment || self.data_encipherment
+         || self.key_agreement || self.key_cert_sign
+         || self.crl_sign || self.encipher_only || self.decipher_only
+    }
+}
+
+public fn parse(value: &[Byte]) -> Result<KeyUsage, DerError> {
+    let mut r = DerReader.new(value);
+    let bs = r.read_bit_string()?;
+    r.expect_end()?;
+
+    // The BIT STRING contents has up to 2 bytes (9 bits).
+    if bs.bytes.len() == 0 {
+        return Ok(KeyUsage.empty());
+    }
+
+    let b0 = bs.bytes[0];
+    let b1 = if bs.bytes.len() > 1 { bs.bytes[1] } else { 0_u8 };
+
+    // Big-endian bit convention: bit 0 is 0x80 of first byte.
+    let ku = KeyUsage {
+        digital_signature: (b0 & 0x80_u8) != 0_u8,
+        non_repudiation:   (b0 & 0x40_u8) != 0_u8,
+        key_encipherment:  (b0 & 0x20_u8) != 0_u8,
+        data_encipherment: (b0 & 0x10_u8) != 0_u8,
+        key_agreement:     (b0 & 0x08_u8) != 0_u8,
+        key_cert_sign:     (b0 & 0x04_u8) != 0_u8,
+        crl_sign:          (b0 & 0x02_u8) != 0_u8,
+        encipher_only:     (b0 & 0x01_u8) != 0_u8,
+        decipher_only:     (b1 & 0x80_u8) != 0_u8,
+    };
+    Ok(ku)
+}

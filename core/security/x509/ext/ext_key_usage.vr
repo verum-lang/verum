@@ -1,0 +1,93 @@
+// =============================================================================
+// security/x509/ext/ext_key_usage.vr — RFC 5280 §4.2.1.12
+// =============================================================================
+//
+// ExtKeyUsageSyntax ::= SEQUENCE SIZE (1..MAX) OF KeyPurposeId
+// KeyPurposeId ::= OBJECT IDENTIFIER
+//
+// Most relevant id-kp values for WebPKI:
+//   id-kp-serverAuth     — TLS server auth (MANDATORY on TLS server EE)
+//   id-kp-clientAuth     — TLS client auth
+//   id-kp-codeSigning    — signing binaries
+//   id-kp-emailProtection — S/MIME
+//   id-kp-timeStamping   — TSA
+//   id-kp-OCSPSigning    — OCSP responder delegated signing
+//   anyExtendedKeyUsage  — 2.5.29.37.0 — grants ALL purposes
+//
+// =============================================================================
+
+module core.security.x509.ext.ext_key_usage;
+
+mount core.*;
+mount core.collections.List;
+mount core.encoding.der.{DerReader, DerError};
+mount core.security.x509.oid.{Oid};
+mount core.security.x509.oid as pkix_oid;
+
+public type ExtKeyUsagePurpose is
+      ServerAuth
+    | ClientAuth
+    | CodeSigning
+    | EmailProtection
+    | TimeStamping
+    | OcspSigning
+    | AnyPurpose
+    | Other(Oid);
+
+public type ExtKeyUsage is {
+    purposes: List<ExtKeyUsagePurpose>,
+};
+
+implement ExtKeyUsage {
+    public fn allows_server_auth(&self) -> Bool {
+        let mut i: Int = 0;
+        while i < self.purposes.len() {
+            match &self.purposes[i] {
+                ExtKeyUsagePurpose.ServerAuth => return true,
+                ExtKeyUsagePurpose.AnyPurpose => return true,
+                _ => {},
+            }
+            i = i + 1;
+        }
+        false
+    }
+
+    public fn allows_client_auth(&self) -> Bool {
+        let mut i: Int = 0;
+        while i < self.purposes.len() {
+            match &self.purposes[i] {
+                ExtKeyUsagePurpose.ClientAuth => return true,
+                ExtKeyUsagePurpose.AnyPurpose => return true,
+                _ => {},
+            }
+            i = i + 1;
+        }
+        false
+    }
+}
+
+public fn parse(value: &[Byte]) -> Result<ExtKeyUsage, DerError> {
+    let mut r = DerReader.new(value);
+    let mut seq = r.read_sequence()?;
+    let mut out: List<ExtKeyUsagePurpose> = [];
+    while !seq.is_at_end() {
+        let arcs = seq.read_oid()?;
+        let oid = Oid.from(arcs.as_slice());
+        let p = classify(&oid);
+        out.push(p);
+    }
+    seq.expect_end()?;
+    r.expect_end()?;
+    Ok(ExtKeyUsage { purposes: out })
+}
+
+fn classify(oid: &Oid) -> ExtKeyUsagePurpose {
+    if oid.eq(&pkix_oid.eku_server_auth())      { return ExtKeyUsagePurpose.ServerAuth; }
+    if oid.eq(&pkix_oid.eku_client_auth())      { return ExtKeyUsagePurpose.ClientAuth; }
+    if oid.eq(&pkix_oid.eku_code_signing())     { return ExtKeyUsagePurpose.CodeSigning; }
+    if oid.eq(&pkix_oid.eku_email_protection()) { return ExtKeyUsagePurpose.EmailProtection; }
+    if oid.eq(&pkix_oid.eku_time_stamping())    { return ExtKeyUsagePurpose.TimeStamping; }
+    if oid.eq(&pkix_oid.eku_ocsp_signing())     { return ExtKeyUsagePurpose.OcspSigning; }
+    if oid.eq(&pkix_oid.eku_any())              { return ExtKeyUsagePurpose.AnyPurpose; }
+    ExtKeyUsagePurpose.Other(oid.clone())
+}

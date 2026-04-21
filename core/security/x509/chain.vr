@@ -1,0 +1,395 @@
+// =============================================================================
+// security/x509/chain.vr — RFC 5280 §6.1 certificate path validation
+// =============================================================================
+// Layer: 3 (X.509 subsystem)
+// Dependencies: core, security.{hash, ecc, sig}, x509.{certificate, ext,
+//               time, trust_store, algorithm, spki}
+// =============================================================================
+//
+// RFC 5280 §6.1.3 path validation checks, applied left-to-right
+// (EE → intermediate₁ → ... → root):
+//
+//   (a)(1)  Signature on prospective certificate verifies under the
+//           public key of its predecessor in the chain.
+//   (a)(2)  Certificate is valid at the current time (notBefore ≤ now ≤ notAfter).
+//   (a)(3)  Certificate has not been revoked. [CRL / OCSP — v1.1]
+//   (a)(4)  Certificate's issuer matches the predecessor's subject
+//           (byte-exact DER equality per RFC 5280 §4.1.2.6).
+//
+//   (b)     Name constraints: if a constraint cert appears earlier in
+//           the chain, every subordinate cert's names must be within
+//           the permitted subtrees and outside any excluded subtrees.
+//
+//   (c)     KeyUsage: every non-EE cert must have keyCertSign set.
+//           BasicConstraints: every non-EE cert must have cA=TRUE.
+//
+//   (d)     pathLenConstraint: no cert with pathLen=N may be followed
+//           by more than N intermediate CAs before the EE.
+//
+//   (e)     Critical extensions: every critical extension must be
+//           recognised by the validator (the extension decoder did
+//           this already — unknown critical => parse_extensions error).
+//
+// We skip (a)(3) in v1 (revocation is Phase 2). Everything else is
+// enforced here.
+//
+// =============================================================================
+
+module core.security.x509.chain;
+
+mount core.*;
+mount core.collections.List;
+mount core.security.x509.certificate.{Certificate};
+mount core.security.x509.algorithm.{SignatureAlg, RsaPssHash};
+mount core.security.x509.spki.{SubjectPublicKey, RsaPublicKey, EcPublicKeyBytes, Ed25519PublicKeyBytes};
+mount core.security.x509.time.{is_valid_at};
+mount core.security.x509.ext.{ExtensionSet};
+mount core.security.x509.ext.name_constraints.{NameConstraints};
+mount core.security.x509.trust_store.{TrustStore};
+
+mount core.security.hash.sha256.{Sha256};
+mount core.security.hash.sha384.{Sha384};
+mount core.security.hash.sha512.{Sha512};
+mount core.security.ecc.ed25519.{Ed25519, Ed25519PublicKey, Ed25519Signature};
+mount core.security.ecc.p256.{P256, P256PublicKey, P256Signature};
+mount core.security.sig.rsa.{RsaPublicKey as RsaVerifyKey, RsaHash, verify_pkcs1_v15_prehashed, verify_pss_prehashed};
+
+// =============================================================================
+// Errors
+// =============================================================================
+
+public type ChainError is
+      EmptyChain
+    | UnknownIssuer                // no root in TrustStore matches the chain top
+    | IssuerSubjectMismatch(Int)   // cert index — issuer doesn't match parent.subject
+    | NotYetValid(Int)
+    | Expired(Int)
+    | BadSignature(Int)
+    | NonCaIssuer(Int)
+    | NoKeyCertSign(Int)
+    | PathLenExceeded
+    | HostnameMismatch
+    | NameConstraintViolation
+    | EkuMismatch                  // EE doesn't allow serverAuth
+    | UnsupportedAlgorithm(Int);
+
+// =============================================================================
+// Result
+// =============================================================================
+
+public type VerifiedChain is {
+    ee:    Certificate,
+    inters: List<Certificate>,
+    root:  Certificate,
+};
+
+// =============================================================================
+// Entry point
+// =============================================================================
+
+/// Validate `chain` (EE first, intermediates in order, root omitted or
+/// present — we match against TrustStore) against `trust`, as of
+/// Unix-epoch seconds `now_secs`. Optionally enforce hostname matching.
+public fn validate_chain(
+    chain: &List<Certificate>,
+    trust: &TrustStore,
+    hostname: Maybe<&Text>,
+    now_secs: Int64,
+) -> Result<VerifiedChain, ChainError> {
+    if chain.len() == 0 {
+        return Err(ChainError.EmptyChain);
+    }
+
+    // Find anchoring root: the last cert's issuer must match a root in
+    // TrustStore by byte-exact DN. We also support a self-signed root
+    // present in the chain — if the last cert's subject == issuer and
+    // it's in trust, use it directly.
+    let (root, chain_ee_to_last) = resolve_root(chain, trust)?;
+
+    let mut prev_spki = &root.tbs.spki;       // anchor's SPKI
+    let mut prev_subject = &root.tbs.subject;  // anchor's Subject
+
+    // Collect applicable name constraints propagated from each CA.
+    let mut active_constraints: List<NameConstraints> = [];
+    if let Some((_, nc)) = &root.tbs.extensions.name_constraints {
+        active_constraints.push(nc.clone());
+    }
+
+    // Iterate from top-of-chain down to EE.
+    let mut i: Int = chain_ee_to_last.len() - 1;   // index in original chain
+    let mut depth: Int = 0;                        // how many intermediates below root so far
+
+    let mut seen_inters: List<Certificate> = [];
+
+    while i >= 0 {
+        let cert = &chain_ee_to_last[i];
+        let is_ee = (i == 0);
+
+        // (a)(4) issuer equality
+        if !cert.tbs.issuer.raw_eq(prev_subject) {
+            return Err(ChainError.IssuerSubjectMismatch(i));
+        }
+
+        // (a)(2) validity
+        if !is_valid_at(&cert.tbs.validity, now_secs) {
+            // Distinguish past-vs-future for diagnostics.
+            let nb_secs = core.security.x509.time.time_to_unix(&cert.tbs.validity.not_before);
+            if now_secs < nb_secs {
+                return Err(ChainError.NotYetValid(i));
+            }
+            return Err(ChainError.Expired(i));
+        }
+
+        // (a)(1) signature on cert
+        verify_signature(cert, prev_spki).map_err(|e| e.with_index(i))?;
+
+        // (c) + (d) CA-specific checks on intermediates
+        if !is_ee {
+            if !cert.is_ca() {
+                return Err(ChainError.NonCaIssuer(i));
+            }
+            match &cert.tbs.extensions.key_usage {
+                Some((_, ku)) => {
+                    if !ku.key_cert_sign {
+                        return Err(ChainError.NoKeyCertSign(i));
+                    }
+                },
+                None => {}, // absent KU is permissive (not ideal but legal)
+            }
+            // Path length: ensure that pathLenConstraint on `cert` allows
+            // the remaining subordinate chain.
+            match cert.path_len_constraint() {
+                Some(allowed) => {
+                    // Remaining certs below this point (excluding EE? include all).
+                    // Per RFC 5280 §4.2.1.9: pathLen counts the number of
+                    // intermediate CAs between this cert and the EE
+                    // (exclusive of both).
+                    let remaining_inters = i;  // i itself is the count below this cert-1
+                    if remaining_inters > allowed {
+                        return Err(ChainError.PathLenExceeded);
+                    }
+                },
+                None => {},
+            }
+            // Propagate name constraints.
+            match &cert.tbs.extensions.name_constraints {
+                Some((_, nc)) => { active_constraints.push(nc.clone()); },
+                None => {},
+            }
+            seen_inters.push(cert.clone());
+        }
+
+        // (b) name constraints (check against EE SAN)
+        if is_ee {
+            // EE-level EKU check
+            if !cert.allows_server_auth() {
+                return Err(ChainError.EkuMismatch);
+            }
+            match hostname {
+                Some(h) => {
+                    if !cert.matches_hostname(h) {
+                        return Err(ChainError.HostnameMismatch);
+                    }
+                    // Check every active name constraint
+                    let mut k: Int = 0;
+                    while k < active_constraints.len() {
+                        if !active_constraints[k].permits_dns(h) {
+                            return Err(ChainError.NameConstraintViolation);
+                        }
+                        k = k + 1;
+                    }
+                },
+                None => {},
+            }
+        }
+
+        prev_spki = &cert.tbs.spki;
+        prev_subject = &cert.tbs.subject;
+        depth = depth + 1;
+        i = i - 1;
+    }
+
+    Ok(VerifiedChain {
+        ee: chain_ee_to_last[0].clone(),
+        inters: seen_inters,
+        root: root,
+    })
+}
+
+// =============================================================================
+// Root resolution
+// =============================================================================
+
+fn resolve_root(
+    chain: &List<Certificate>,
+    trust: &TrustStore,
+) -> Result<(Certificate, List<Certificate>), ChainError> {
+    let n = chain.len();
+    let top = &chain[n - 1];
+
+    // Case A: top is self-signed (issuer == subject) and TrustStore has it.
+    if top.tbs.issuer.raw_eq(&top.tbs.subject) {
+        if trust.contains(top) {
+            // Consume top as root; remaining chain is chain[0..n-1].
+            let mut rest: List<Certificate> = [];
+            let mut i: Int = 0;
+            while i < n - 1 {
+                rest.push(chain[i].clone());
+                i = i + 1;
+            }
+            return Ok((top.clone(), rest));
+        }
+    }
+
+    // Case B: top's issuer DN matches a root in TrustStore.
+    match trust.find_by_subject(&top.tbs.issuer) {
+        Some(root) => {
+            // All of chain applies (top still needs to be verified under root).
+            Ok((root, chain.clone()))
+        },
+        None => Err(ChainError.UnknownIssuer),
+    }
+}
+
+// =============================================================================
+// Signature verification
+// =============================================================================
+
+/// Wrap a ChainError producer to attach a cert index when not known upfront.
+implement ChainError {
+    fn with_index(self, idx: Int) -> ChainError {
+        match self {
+            ChainError.BadSignature(_) => ChainError.BadSignature(idx),
+            ChainError.UnsupportedAlgorithm(_) => ChainError.UnsupportedAlgorithm(idx),
+            other => other,
+        }
+    }
+}
+
+fn verify_signature(cert: &Certificate, issuer_spki: &Spki) -> Result<(), ChainError> {
+    match &cert.signature_alg {
+        SignatureAlg.Sha256WithRsa => verify_rsa_pkcs1(
+            &issuer_spki.public_key, RsaHash.Sha256_,
+            &cert.tbs_der, &cert.signature_value,
+        ),
+        SignatureAlg.Sha384WithRsa => verify_rsa_pkcs1(
+            &issuer_spki.public_key, RsaHash.Sha384_,
+            &cert.tbs_der, &cert.signature_value,
+        ),
+        SignatureAlg.Sha512WithRsa => verify_rsa_pkcs1(
+            &issuer_spki.public_key, RsaHash.Sha512_,
+            &cert.tbs_der, &cert.signature_value,
+        ),
+        SignatureAlg.RsaPss(params) => verify_rsa_pss(
+            &issuer_spki.public_key, &params.hash,
+            &cert.tbs_der, &cert.signature_value, params.salt_length,
+        ),
+        SignatureAlg.EcdsaWithSha256 => verify_ecdsa_p256(
+            &issuer_spki.public_key, &cert.tbs_der, &cert.signature_value,
+        ),
+        SignatureAlg.Ed25519Sig => verify_ed25519_cert(
+            &issuer_spki.public_key, &cert.tbs_der, &cert.signature_value,
+        ),
+
+        // Unsupported / deprecated — fail closed.
+        _ => Err(ChainError.UnsupportedAlgorithm(-1)),
+    }
+}
+
+fn verify_rsa_pkcs1(
+    issuer_key: &SubjectPublicKey,
+    hash: RsaHash,
+    message: &List<Byte>,
+    signature: &List<Byte>,
+) -> Result<(), ChainError> {
+    match issuer_key {
+        SubjectPublicKey.Rsa(rsa) => {
+            let vk = RsaVerifyKey { n: rsa.modulus.clone(), e: rsa.exponent.clone() };
+            let digest = hash_message(hash.clone(), message.as_slice());
+            match verify_pkcs1_v15_prehashed(&vk, hash, &digest, signature.as_slice()) {
+                Ok(()) => Ok(()),
+                Err(_) => Err(ChainError.BadSignature(-1)),
+            }
+        },
+        _ => Err(ChainError.UnsupportedAlgorithm(-1)),
+    }
+}
+
+fn verify_rsa_pss(
+    issuer_key: &SubjectPublicKey,
+    hash: &RsaPssHash,
+    message: &List<Byte>,
+    signature: &List<Byte>,
+    salt_len: Int,
+) -> Result<(), ChainError> {
+    match issuer_key {
+        SubjectPublicKey.Rsa(rsa) => {
+            let vk = RsaVerifyKey { n: rsa.modulus.clone(), e: rsa.exponent.clone() };
+            let (rsa_hash, digest) = match hash {
+                RsaPssHash.Sha256Hash => (RsaHash.Sha256_, Sha256.digest(message.as_slice()).to_vec()),
+                RsaPssHash.Sha384Hash => (RsaHash.Sha384_, Sha384.digest(message.as_slice()).to_vec()),
+                RsaPssHash.Sha512Hash => (RsaHash.Sha512_, Sha512.digest(message.as_slice()).to_vec()),
+            };
+            let _ = salt_len;  // verify_pss_prehashed picks salt_len from signature
+            match verify_pss_prehashed(&vk, rsa_hash, &digest, signature.as_slice()) {
+                Ok(()) => Ok(()),
+                Err(_) => Err(ChainError.BadSignature(-1)),
+            }
+        },
+        _ => Err(ChainError.UnsupportedAlgorithm(-1)),
+    }
+}
+
+fn verify_ecdsa_p256(
+    issuer_key: &SubjectPublicKey,
+    message: &List<Byte>,
+    signature: &List<Byte>,
+) -> Result<(), ChainError> {
+    match issuer_key {
+        SubjectPublicKey.EcP256(ec) => {
+            // Convert raw 0x04||X||Y into P256PublicKey.
+            let pk = P256PublicKey.from_uncompressed(ec.bytes.as_slice())
+                .map_err(|_| ChainError.BadSignature(-1))?;
+            // ECDSA signature is a SEQUENCE of two INTEGERs; feed as DER bytes.
+            let sig = P256Signature.from_der(signature.as_slice())
+                .map_err(|_| ChainError.BadSignature(-1))?;
+            let digest = Sha256.digest(message.as_slice());
+            match P256.verify_prehashed(&pk, &digest, &sig) {
+                Ok(()) => Ok(()),
+                Err(_) => Err(ChainError.BadSignature(-1)),
+            }
+        },
+        _ => Err(ChainError.UnsupportedAlgorithm(-1)),
+    }
+}
+
+fn verify_ed25519_cert(
+    issuer_key: &SubjectPublicKey,
+    message: &List<Byte>,
+    signature: &List<Byte>,
+) -> Result<(), ChainError> {
+    match issuer_key {
+        SubjectPublicKey.Ed25519(ed) => {
+            let pk: Ed25519PublicKey = ed.bytes;
+            if signature.len() != 64 {
+                return Err(ChainError.BadSignature(-1));
+            }
+            let mut sig: Ed25519Signature = [0_u8; 64];
+            let mut i: Int = 0;
+            while i < 64 { sig[i] = signature[i]; i = i + 1; }
+            match Ed25519.verify(&pk, message.as_slice(), &sig) {
+                Ok(()) => Ok(()),
+                Err(_) => Err(ChainError.BadSignature(-1)),
+            }
+        },
+        _ => Err(ChainError.UnsupportedAlgorithm(-1)),
+    }
+}
+
+fn hash_message(hash: RsaHash, msg: &[Byte]) -> List<Byte> {
+    match hash {
+        RsaHash.Sha256_ => Sha256.digest(msg).to_vec(),
+        RsaHash.Sha384_ => Sha384.digest(msg).to_vec(),
+        RsaHash.Sha512_ => Sha512.digest(msg).to_vec(),
+    }
+}

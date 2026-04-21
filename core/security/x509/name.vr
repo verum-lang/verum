@@ -1,0 +1,342 @@
+// =============================================================================
+// security/x509/name.vr — Distinguished Name (RFC 5280 §4.1.2.4)
+// =============================================================================
+// Layer: 3 (X.509 subsystem)
+// Dependencies: core, encoding.der, x509.oid
+// =============================================================================
+//
+// Name ::= CHOICE { rdnSequence RDNSequence }
+// RDNSequence ::= SEQUENCE OF RelativeDistinguishedName
+// RelativeDistinguishedName ::= SET SIZE (1..MAX) OF AttributeTypeAndValue
+// AttributeTypeAndValue ::= SEQUENCE { type AttributeType, value AttributeValue }
+// AttributeType ::= OBJECT IDENTIFIER
+// AttributeValue ::= ANY
+//
+// DirectoryString ::= CHOICE {
+//   teletexString        TeletexString   (SIZE (1..MAX)),
+//   printableString      PrintableString (SIZE (1..MAX)),
+//   universalString      UniversalString (SIZE (1..MAX)),
+//   utf8String           UTF8String      (SIZE (1..MAX)),
+//   bmpString            BMPString       (SIZE (1..MAX))
+// }
+//
+// # Practical simplifications
+//
+// Real-world X.509 Names use a narrow slice of this universe:
+//
+//   * Each RDN is almost always a singleton SET — multi-valued RDNs
+//     exist but are rare (LDAPv3 §4.1). We parse the SET but do not
+//     treat multi-valued specially in matching.
+//   * `DirectoryString` values are overwhelmingly PrintableString /
+//     UTF8String in WebPKI. We keep `T.61String` as a fallback for
+//     legacy roots (Verisign, pre-2002 certs). We never emit
+//     UniversalString or BMPString but decode both lossy-to-UTF8.
+//   * The DN comparison rules in RFC 5280 §7.1 are byte-identity for
+//     verified chains (RFC 5280 §4.1.2.6 — "verified by byte-for-byte
+//     comparison"). Hostname matching happens in SAN, not CN.
+//
+// This module therefore returns both a structured `DistinguishedName`
+// ADT (for human display / extension logic) AND the raw DER bytes of
+// the full RDNSequence (for byte-exact issuer/subject chain matching).
+//
+// =============================================================================
+
+module core.security.x509.name;
+
+mount core.*;
+mount core.collections.List;
+mount core.encoding.der.{DerReader, DerError, DerErrorKind, Tag, TagClass};
+mount core.encoding.der as der;
+mount core.security.x509.oid.{Oid};
+mount core.security.x509.oid as pkix_oid;
+
+// =============================================================================
+// Typed attribute value — narrow CHOICE of what we care about
+// =============================================================================
+
+/// Lowered DirectoryString. We keep the raw Text for display; the raw
+/// DER bytes are preserved at the RDNSequence level for byte-exact
+/// issuer/subject chain matching.
+public type NameAttribute is {
+    kind:  NameAttributeKind,
+    value: Text,
+};
+
+public type NameAttributeKind is
+      CommonName              // id-at-commonName          (2.5.4.3)
+    | Surname                 // id-at-surname             (2.5.4.4)
+    | SerialNumber            // id-at-serialNumber        (2.5.4.5)
+    | CountryName             // id-at-countryName         (2.5.4.6)
+    | Locality                // id-at-localityName        (2.5.4.7)
+    | StateOrProvince         // id-at-stateOrProvinceName (2.5.4.8)
+    | Organization            // id-at-organizationName    (2.5.4.10)
+    | OrganizationalUnit      // id-at-organizationalUnitName (2.5.4.11)
+    | Title                   // id-at-title               (2.5.4.12)
+    | GivenName               // id-at-givenName           (2.5.4.42)
+    | DomainComponent         // dc (0.9.2342.19200300.100.1.25)
+    | UserId                  // uid (0.9.2342.19200300.100.1.1)
+    | Pseudonym               // id-at-pseudonym           (2.5.4.65)
+    | Other(Oid);             // anything else — preserved for round-trip
+
+/// One RDN = a set of (type, value) pairs. Single-valued in 99% of
+/// real-world certs; kept as a list for completeness.
+public type RelativeDistinguishedName is {
+    attributes: List<NameAttribute>,
+};
+
+/// A Distinguished Name — sequence of RDNs from root to leaf.
+///
+/// `raw_der` is the byte-exact DER encoding of the full `Name` SEQUENCE
+/// including outer tag + length — this is what RFC 5280 §4.1.2.6 uses
+/// for issuer/subject chain matching. Storing it here avoids a
+/// re-serialisation step in the verify hot path.
+public type DistinguishedName is {
+    rdns:    List<RelativeDistinguishedName>,
+    raw_der: List<Byte>,
+};
+
+// =============================================================================
+// Parser
+// =============================================================================
+
+/// Parse an `Name` (wrapping RDNSequence). The reader must be positioned
+/// at the outer SEQUENCE tag. Both the structured form and the byte-
+/// exact DER span are returned for downstream consumers.
+///
+/// This parser does NOT verify the LDAP-style ordering of RDNs
+/// (no dedup across the whole Name). Subject/issuer matching in
+/// `chain.rs` uses `raw_der` byte-equality anyway per RFC 5280 §7.1.
+public fn parse_name(r: &mut DerReader) -> Result<DistinguishedName, DerError> {
+    // Capture the byte span covering the whole SEQUENCE (tag + length
+    // + value) before consuming. RFC 5280 §4.1.2.6 mandates
+    // byte-exact comparison for issuer/subject chain matching.
+    let name_span = peek_full_span(r as &DerReader)?;
+
+    let mut seq = r.read_sequence()?;
+    let mut rdns: List<RelativeDistinguishedName> = [];
+    while !seq.is_at_end() {
+        let rdn = parse_rdn(&mut seq)?;
+        rdns.push(rdn);
+    }
+    seq.expect_end()?;
+
+    Ok(DistinguishedName { rdns: rdns, raw_der: name_span })
+}
+
+fn parse_rdn(r: &mut DerReader) -> Result<RelativeDistinguishedName, DerError> {
+    let mut set = r.read_set()?;
+    let mut attrs: List<NameAttribute> = [];
+    while !set.is_at_end() {
+        let attr = parse_atv(&mut set)?;
+        attrs.push(attr);
+    }
+    set.expect_end()?;
+    if attrs.len() == 0 {
+        return Err(DerError {
+            kind: DerErrorKind.MalformedDer,
+            position: 0,
+            message: "RDN with zero attributes",
+        });
+    }
+    Ok(RelativeDistinguishedName { attributes: attrs })
+}
+
+fn parse_atv(r: &mut DerReader) -> Result<NameAttribute, DerError> {
+    let mut sub = r.read_sequence()?;
+    let arcs = sub.read_oid()?;
+    let oid = Oid.from(arcs.as_slice());
+    let value = read_directory_string(&mut sub)?;
+    sub.expect_end()?;
+
+    let kind = kind_from_oid(&oid);
+    Ok(NameAttribute { kind: kind, value: value })
+}
+
+/// Decode the `AttributeValue` (`ANY`) as a DirectoryString. WebPKI
+/// certs reliably use PrintableString, UTF8String, or IA5String (for
+/// domainComponent). We accept T.61String lossy as latin-1 for legacy
+/// roots. UniversalString / BMPString are decoded as UTF-8 from their
+/// big-endian UTF-16 / UTF-32 forms — rare in the wild but supported
+/// for root-store compatibility.
+fn read_directory_string(r: &mut DerReader) -> Result<Text, DerError> {
+    if r.is_at_end() {
+        return Err(DerError {
+            kind: DerErrorKind.MalformedDer,
+            position: 0,
+            message: "AttributeValue empty",
+        });
+    }
+    let tag = r.peek_tag()?;
+    let is_universal = match tag.class_ { TagClass.Universal => true, _ => false };
+    if !is_universal {
+        return Err(DerError {
+            kind: DerErrorKind.UnexpectedTag,
+            position: 0,
+            message: "AttributeValue not a universal tag",
+        });
+    }
+    match tag.number {
+        n if n == der.TAG_PRINTABLE_STRING => r.read_printable_string(),
+        n if n == der.TAG_UTF8_STRING      => r.read_utf8_string(),
+        n if n == der.TAG_IA5_STRING       => r.read_ia5_string(),
+        n if n == der.TAG_T61_STRING       => {
+            // Treat as Latin-1 (T.61 is ISO-8859-1 in practice for WebPKI).
+            let len = r.read_universal(der.TAG_T61_STRING, false)?;
+            let bytes = r.take_bytes(len)?;
+            Ok(Text.from_utf8_lossy(bytes.as_slice()))
+        },
+        n if n == der.TAG_VISIBLE_STRING => {
+            let len = r.read_universal(der.TAG_VISIBLE_STRING, false)?;
+            let bytes = r.take_bytes(len)?;
+            Ok(Text.from_utf8_lossy(bytes.as_slice()))
+        },
+        n if n == der.TAG_UNIVERSAL_STRING => {
+            // UCS-4 big-endian → UTF-8
+            let len = r.read_universal(der.TAG_UNIVERSAL_STRING, false)?;
+            let bytes = r.take_bytes(len)?;
+            Ok(decode_ucs4_be(bytes.as_slice()))
+        },
+        n if n == der.TAG_BMP_STRING => {
+            // UCS-2 big-endian → UTF-8
+            let len = r.read_universal(der.TAG_BMP_STRING, false)?;
+            let bytes = r.take_bytes(len)?;
+            Ok(decode_ucs2_be(bytes.as_slice()))
+        },
+        _ => Err(DerError {
+            kind: DerErrorKind.UnexpectedTag,
+            position: 0,
+            message: "AttributeValue not a DirectoryString choice",
+        }),
+    }
+}
+
+fn kind_from_oid(oid: &Oid) -> NameAttributeKind {
+    if oid.eq(&pkix_oid.dn_common_name())         { return NameAttributeKind.CommonName; }
+    if oid.eq(&pkix_oid.dn_surname())             { return NameAttributeKind.Surname; }
+    if oid.eq(&pkix_oid.dn_serial_number())       { return NameAttributeKind.SerialNumber; }
+    if oid.eq(&pkix_oid.dn_country_name())        { return NameAttributeKind.CountryName; }
+    if oid.eq(&pkix_oid.dn_locality())            { return NameAttributeKind.Locality; }
+    if oid.eq(&pkix_oid.dn_state_or_province())   { return NameAttributeKind.StateOrProvince; }
+    if oid.eq(&pkix_oid.dn_organization())        { return NameAttributeKind.Organization; }
+    if oid.eq(&pkix_oid.dn_organizational_unit()) { return NameAttributeKind.OrganizationalUnit; }
+    if oid.eq(&pkix_oid.dn_title())               { return NameAttributeKind.Title; }
+    if oid.eq(&pkix_oid.dn_given_name())          { return NameAttributeKind.GivenName; }
+    if oid.eq(&pkix_oid.dn_domain_component())    { return NameAttributeKind.DomainComponent; }
+    if oid.eq(&pkix_oid.dn_user_id())             { return NameAttributeKind.UserId; }
+    if oid.eq(&pkix_oid.dn_pseudonym())           { return NameAttributeKind.Pseudonym; }
+    NameAttributeKind.Other(oid.clone())
+}
+
+// =============================================================================
+// Accessors
+// =============================================================================
+
+implement DistinguishedName {
+    /// Byte-exact DN equality (RFC 5280 §4.1.2.6 / §7.1).
+    public fn raw_eq(&self, other: &DistinguishedName) -> Bool {
+        if self.raw_der.len() != other.raw_der.len() { return false; }
+        let mut i: Int = 0;
+        while i < self.raw_der.len() {
+            if self.raw_der[i] != other.raw_der[i] { return false; }
+            i = i + 1;
+        }
+        true
+    }
+
+    /// Return the first Common Name attribute, if present.
+    public fn common_name(&self) -> Maybe<Text> {
+        let mut i: Int = 0;
+        while i < self.rdns.len() {
+            let rdn = &self.rdns[i];
+            let mut j: Int = 0;
+            while j < rdn.attributes.len() {
+                let a = &rdn.attributes[j];
+                match &a.kind {
+                    NameAttributeKind.CommonName => return Some(a.value.clone()),
+                    _ => {},
+                }
+                j = j + 1;
+            }
+            i = i + 1;
+        }
+        None
+    }
+
+    /// Return the first Organization attribute, if present.
+    public fn organization(&self) -> Maybe<Text> {
+        let mut i: Int = 0;
+        while i < self.rdns.len() {
+            let rdn = &self.rdns[i];
+            let mut j: Int = 0;
+            while j < rdn.attributes.len() {
+                let a = &rdn.attributes[j];
+                match &a.kind {
+                    NameAttributeKind.Organization => return Some(a.value.clone()),
+                    _ => {},
+                }
+                j = j + 1;
+            }
+            i = i + 1;
+        }
+        None
+    }
+}
+
+// =============================================================================
+// Helpers
+// =============================================================================
+
+/// Capture the full DER span of the next element (tag + length + value)
+/// without advancing the cursor. Used to preserve byte-exact issuer /
+/// subject DN regions for RFC 5280 §4.1.2.6 equality matching.
+fn peek_full_span(r: &DerReader) -> Result<List<Byte>, DerError> {
+    let start = r.position();
+    let (_, _, _, elem_end) = r.peek_element_span()?;
+    r.buffer_copy_region(start, elem_end)
+}
+
+fn decode_ucs2_be(bytes: &[Byte]) -> Text {
+    // Two bytes per code unit, big-endian; non-BMP cannot appear in UCS-2.
+    // We decode to UTF-8 lossy for characters > 0x7F.
+    let mut out: List<Byte> = [];
+    let mut i: Int = 0;
+    while i + 1 < bytes.len() {
+        let cp: UInt32 = ((bytes[i] as UInt32) << 8) | (bytes[i + 1] as UInt32);
+        encode_utf8(cp, &mut out);
+        i = i + 2;
+    }
+    Text.from_utf8_lossy(out.as_slice())
+}
+
+fn decode_ucs4_be(bytes: &[Byte]) -> Text {
+    let mut out: List<Byte> = [];
+    let mut i: Int = 0;
+    while i + 3 < bytes.len() {
+        let cp: UInt32 =
+              ((bytes[i + 0] as UInt32) << 24)
+            | ((bytes[i + 1] as UInt32) << 16)
+            | ((bytes[i + 2] as UInt32) <<  8)
+            |  (bytes[i + 3] as UInt32);
+        encode_utf8(cp, &mut out);
+        i = i + 4;
+    }
+    Text.from_utf8_lossy(out.as_slice())
+}
+
+fn encode_utf8(cp: UInt32, out: &mut List<Byte>) {
+    if cp < 0x80_u32 {
+        out.push(cp as Byte);
+    } else if cp < 0x800_u32 {
+        out.push((0xC0_u32 | (cp >> 6)) as Byte);
+        out.push((0x80_u32 | (cp & 0x3F_u32)) as Byte);
+    } else if cp < 0x10000_u32 {
+        out.push((0xE0_u32 |  (cp >> 12)) as Byte);
+        out.push((0x80_u32 | ((cp >> 6) & 0x3F_u32)) as Byte);
+        out.push((0x80_u32 |  (cp & 0x3F_u32)) as Byte);
+    } else {
+        out.push((0xF0_u32 |  (cp >> 18)) as Byte);
+        out.push((0x80_u32 | ((cp >> 12) & 0x3F_u32)) as Byte);
+        out.push((0x80_u32 | ((cp >>  6) & 0x3F_u32)) as Byte);
+        out.push((0x80_u32 |  (cp & 0x3F_u32)) as Byte);
+    }
+}

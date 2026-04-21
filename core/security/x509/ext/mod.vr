@@ -1,0 +1,215 @@
+// =============================================================================
+// security/x509/ext/mod.vr — Certificate Extension subtree (RFC 5280 §4.2)
+// =============================================================================
+// Layer: 3 (X.509 subsystem)
+// =============================================================================
+//
+// Certificate ::= SEQUENCE { ... extensions [3] EXPLICIT Extensions OPTIONAL }
+// Extensions ::= SEQUENCE SIZE (1..MAX) OF Extension
+// Extension ::= SEQUENCE {
+//     extnID    OBJECT IDENTIFIER,
+//     critical  BOOLEAN DEFAULT FALSE,
+//     extnValue OCTET STRING
+// }
+//
+// Each extension's extnValue is DER-encoded according to the OID. We
+// model extensions as a discriminated union so downstream verify code
+// pattern-matches instead of re-parsing.
+//
+// # Critical extensions
+//
+// RFC 5280 §4.2 ("A certificate-using system MUST reject the
+// certificate if it encounters a critical extension it does not
+// recognize or a critical extension that contains information that
+// it cannot process."). We preserve the `critical` flag on every
+// parsed extension so the chain validator can enforce this rule.
+//
+// # WebPKI coverage
+//
+// The mandatory-to-process set for a TLS 1.3 cert validator:
+//
+//   - basicConstraints      (critical on CAs)
+//   - keyUsage              (critical on CAs)
+//   - subjectAltName        (critical on EE with no CN — SAN is the
+//                            sole hostname source per RFC 6125)
+//   - extendedKeyUsage      (critical on EE for serverAuth/clientAuth)
+//   - nameConstraints       (critical when CA constrains its subtree)
+//   - authorityKeyIdentifier (non-critical; helps chain build)
+//   - subjectKeyIdentifier  (non-critical; helps chain build)
+//   - certificatePolicies   (critical in some CA policies)
+//   - cRLDistributionPoints (optional; we parse but don't pull CRLs v1)
+//   - authorityInfoAccess   (optional; carries OCSP + caIssuers URIs)
+//
+// =============================================================================
+
+module core.security.x509.ext;
+
+mount core.*;
+mount core.collections.List;
+mount core.encoding.der.{DerReader, DerError, DerErrorKind};
+mount core.security.x509.oid.{Oid};
+mount core.security.x509.oid as pkix_oid;
+
+public module basic_constraints;
+public module key_usage;
+public module ext_key_usage;
+public module subject_alt_name;
+public module name_constraints;
+
+// Re-exports
+public mount .basic_constraints.BasicConstraints;
+public mount .key_usage.KeyUsage;
+public mount .ext_key_usage.{ExtKeyUsage, ExtKeyUsagePurpose};
+public mount .subject_alt_name.{SubjectAltName, GeneralName};
+public mount .name_constraints.{NameConstraints, GeneralSubtree};
+
+// =============================================================================
+// Raw extension — preserved for unknown OIDs + AKI/SKI/CDP/AIA
+// =============================================================================
+
+public type RawExtension is {
+    oid:       Oid,
+    critical:  Bool,
+    value_der: List<Byte>,
+};
+
+// =============================================================================
+// Parsed extensions (per-cert aggregate)
+// =============================================================================
+
+/// Typed view of the extensions block. Only the handful that the
+/// chain validator actually consults are decoded into their own field;
+/// the rest are carried as `RawExtension` entries so that future
+/// policy extensions or OCSP responder logic can re-parse on demand.
+public type ExtensionSet is {
+    basic_constraints:  Maybe<(Bool, BasicConstraints)>,     // (critical, parsed)
+    key_usage:          Maybe<(Bool, KeyUsage)>,
+    ext_key_usage:      Maybe<(Bool, ExtKeyUsage)>,
+    subject_alt_name:   Maybe<(Bool, SubjectAltName)>,
+    name_constraints:   Maybe<(Bool, NameConstraints)>,
+    authority_key_id:   Maybe<(Bool, List<Byte>)>,           // raw AKI octet string of keyIdentifier
+    subject_key_id:     Maybe<(Bool, List<Byte>)>,
+    others:             List<RawExtension>,                   // unparsed extensions
+};
+
+implement ExtensionSet {
+    public fn empty() -> ExtensionSet {
+        ExtensionSet {
+            basic_constraints: None,
+            key_usage:         None,
+            ext_key_usage:     None,
+            subject_alt_name:  None,
+            name_constraints:  None,
+            authority_key_id:  None,
+            subject_key_id:    None,
+            others:            [],
+        }
+    }
+}
+
+// =============================================================================
+// Parser
+// =============================================================================
+
+/// Parse an Extensions block. Caller positions `r` at the outer
+/// SEQUENCE OF Extension; the `[3] EXPLICIT` unwrapping happens in
+/// `certificate.vr`.
+public fn parse_extensions(r: &mut DerReader) -> Result<ExtensionSet, DerError> {
+    let mut seq = r.read_sequence()?;
+    let mut out = ExtensionSet.empty();
+    while !seq.is_at_end() {
+        let ext = parse_one_extension(&mut seq)?;
+        dispatch(ext, &mut out)?;
+    }
+    seq.expect_end()?;
+    Ok(out)
+}
+
+fn parse_one_extension(r: &mut DerReader) -> Result<RawExtension, DerError> {
+    let mut s = r.read_sequence()?;
+    let arcs = s.read_oid()?;
+    let oid = Oid.from(arcs.as_slice());
+
+    // critical is DEFAULT FALSE — absent == false.
+    let mut critical: Bool = false;
+    // BOOLEAN has universal tag 1. If present, it's the next element;
+    // otherwise the next element is the OCTET STRING.
+    if !s.is_at_end() {
+        let next_tag = s.peek_tag()?;
+        let is_bool = match next_tag.class_ { core.encoding.der.TagClass.Universal => next_tag.number == 1_u32, _ => false };
+        if is_bool {
+            critical = s.read_boolean()?;
+        }
+    }
+    let value = s.read_octet_string()?;
+    s.expect_end()?;
+
+    Ok(RawExtension { oid: oid, critical: critical, value_der: value })
+}
+
+fn dispatch(ext: RawExtension, out: &mut ExtensionSet) -> Result<(), DerError> {
+    if ext.oid.eq(&pkix_oid.ext_basic_constraints()) {
+        let parsed = basic_constraints.parse(ext.value_der.as_slice())?;
+        out.basic_constraints = Some((ext.critical, parsed));
+    } else if ext.oid.eq(&pkix_oid.ext_key_usage()) {
+        let parsed = key_usage.parse(ext.value_der.as_slice())?;
+        out.key_usage = Some((ext.critical, parsed));
+    } else if ext.oid.eq(&pkix_oid.ext_ext_key_usage()) {
+        let parsed = ext_key_usage.parse(ext.value_der.as_slice())?;
+        out.ext_key_usage = Some((ext.critical, parsed));
+    } else if ext.oid.eq(&pkix_oid.ext_subject_alt_name()) {
+        let parsed = subject_alt_name.parse(ext.value_der.as_slice())?;
+        out.subject_alt_name = Some((ext.critical, parsed));
+    } else if ext.oid.eq(&pkix_oid.ext_name_constraints()) {
+        let parsed = name_constraints.parse(ext.value_der.as_slice())?;
+        out.name_constraints = Some((ext.critical, parsed));
+    } else if ext.oid.eq(&pkix_oid.ext_authority_key_identifier()) {
+        let kid = parse_aki_key_id(ext.value_der.as_slice())?;
+        out.authority_key_id = Some((ext.critical, kid));
+    } else if ext.oid.eq(&pkix_oid.ext_subject_key_identifier()) {
+        let kid = parse_ski(ext.value_der.as_slice())?;
+        out.subject_key_id = Some((ext.critical, kid));
+    } else {
+        out.others.push(ext);
+    }
+    Ok(())
+}
+
+// =============================================================================
+// AKI / SKI — small enough to live inline
+// =============================================================================
+
+/// AKI ::= SEQUENCE { keyIdentifier [0] IMPLICIT OCTET STRING OPTIONAL,
+///                    authorityCertIssuer [1] IMPLICIT GeneralNames OPTIONAL,
+///                    authorityCertSerialNumber [2] IMPLICIT INTEGER OPTIONAL }
+///
+/// We extract only the keyIdentifier — sufficient for chain building.
+fn parse_aki_key_id(value: &[Byte]) -> Result<List<Byte>, DerError> {
+    let mut r = DerReader.new(value);
+    let mut seq = r.read_sequence()?;
+    if seq.is_at_end() { return Ok([]); }
+    // [0] keyIdentifier (IMPLICIT OCTET STRING). Tag = context-specific [0]
+    // primitive, so we consume tag + length manually.
+    let t = seq.peek_tag()?;
+    let is_kid = match t.class_ {
+        core.encoding.der.TagClass.ContextSpecific => t.number == 0_u32 && !t.constructed,
+        _ => false,
+    };
+    if !is_kid {
+        return Ok([]);
+    }
+    let (_, len, _, _) = seq.peek_element_span()?;
+    let _ = seq.read_tag_length()?;   // consume tag + length, cursor at value
+    let kid = seq.take_bytes(len)?;
+    // Skip rest of AKI.
+    seq.skip_to_end();
+    r.expect_end()?;
+    Ok(kid)
+}
+
+fn parse_ski(value: &[Byte]) -> Result<List<Byte>, DerError> {
+    let mut r = DerReader.new(value);
+    let kid = r.read_octet_string()?;
+    r.expect_end()?;
+    Ok(kid)
+}

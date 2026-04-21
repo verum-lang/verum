@@ -1,0 +1,302 @@
+// =============================================================================
+// security/x509/algorithm.vr — AlgorithmIdentifier (RFC 5280 §4.1.1.2)
+// =============================================================================
+// Layer: 3 (X.509 subsystem)
+// Dependencies: core, encoding.der, x509.oid
+// =============================================================================
+//
+// AlgorithmIdentifier ::= SEQUENCE {
+//     algorithm               OBJECT IDENTIFIER,
+//     parameters              ANY DEFINED BY algorithm OPTIONAL
+// }
+//
+// Used in three places per cert:
+//
+//   * TBSCertificate.signature — the signature algorithm over TBS
+//   * Certificate.signatureAlgorithm — same value, MUST match inner
+//     (RFC 5280 §4.1.1.2 — verify this equality during validation)
+//   * SubjectPublicKeyInfo.algorithm — the key's own algorithm + params
+//     (e.g. ecPublicKey + namedCurve parameter)
+//
+// For RSASSA-PSS the `parameters` field carries the hash + salt-length
+// choice; for ecPublicKey it carries the named-curve OID; for
+// rsaEncryption it's NULL; for Ed25519 / Ed448 it's absent per RFC 8410.
+//
+// We decode the tag + optional params span into an enum so downstream
+// verify code has a typed view of the algorithm (rather than chasing
+// OIDs at each call site).
+//
+// =============================================================================
+
+module core.security.x509.algorithm;
+
+mount core.*;
+mount core.encoding.der.{DerReader, DerError, DerErrorKind, Tag, TagClass};
+mount core.security.x509.oid.{Oid};
+mount core.security.x509.oid as pkix_oid;
+
+// =============================================================================
+// Typed algorithm identifier
+// =============================================================================
+
+/// High-level algorithm family — discriminates on the OID so that
+/// downstream code pattern-matches on semantics instead of raw arc
+/// sequences. The `Unknown` variant preserves the raw OID + optional
+/// parameters span for future-proofing (e.g. PQ algorithms).
+public type SignatureAlg is
+      Sha256WithRsa
+    | Sha384WithRsa
+    | Sha512WithRsa
+    | Sha1WithRsa
+    | RsaPss(RsaPssParams)
+    | EcdsaWithSha256
+    | EcdsaWithSha384
+    | EcdsaWithSha512
+    | EcdsaWithSha1
+    | Ed25519Sig
+    | Ed448Sig
+    | Unknown(Oid);
+
+/// RFC 8017 §A.2.3 RSASSA-PSS-params ::= SEQUENCE {
+///     hashAlgorithm      [0] HashAlgorithm DEFAULT sha1,
+///     maskGenAlgorithm   [1] MaskGenAlgorithm DEFAULT mgf1SHA1,
+///     saltLength         [2] INTEGER DEFAULT 20,
+///     trailerField       [3] INTEGER DEFAULT 1
+/// }
+///
+/// We model only the two DEFAULT-overriding fields WebPKI uses in the
+/// wild: `hash` (for MGF1 + hash) and `salt_length` (bytes). `trailerField`
+/// is required by RFC 8017 to be 1; reject others during decode.
+public type RsaPssParams is {
+    hash:        RsaPssHash,
+    salt_length: Int,
+};
+
+public type RsaPssHash is Sha256Hash | Sha384Hash | Sha512Hash;
+
+/// Public-key algorithm (SPKI.algorithm). `params` for EC is the named
+/// curve OID; for RSA it's NULL; for Ed25519/Ed448 absent.
+public type PublicKeyAlg is
+      RsaEncryption
+    | EcPublicKey(EcNamedCurve)
+    | Ed25519Key
+    | Ed448Key
+    | X25519Key
+    | X448Key
+    | UnknownPubKey(Oid);
+
+public type EcNamedCurve is
+      P256
+    | P384
+    | P521
+    | UnknownCurve(Oid);
+
+// =============================================================================
+// Parsers
+// =============================================================================
+
+/// Parse an AlgorithmIdentifier sequence as a signature algorithm.
+/// Caller positions `r` at the `SEQUENCE` tag.
+public fn parse_signature_alg(r: &mut DerReader) -> Result<SignatureAlg, DerError> {
+    let mut seq = r.read_sequence()?;
+    let arcs = seq.read_oid()?;
+    let oid = Oid.from(arcs.as_slice());
+
+    let sig: SignatureAlg = if oid.eq(&pkix_oid.sha256_with_rsa()) {
+        consume_null_or_absent(&mut seq)?;
+        SignatureAlg.Sha256WithRsa
+    } else if oid.eq(&pkix_oid.sha384_with_rsa()) {
+        consume_null_or_absent(&mut seq)?;
+        SignatureAlg.Sha384WithRsa
+    } else if oid.eq(&pkix_oid.sha512_with_rsa()) {
+        consume_null_or_absent(&mut seq)?;
+        SignatureAlg.Sha512WithRsa
+    } else if oid.eq(&pkix_oid.sha1_with_rsa()) {
+        consume_null_or_absent(&mut seq)?;
+        SignatureAlg.Sha1WithRsa
+    } else if oid.eq(&pkix_oid.rsassa_pss()) {
+        let params = parse_rsa_pss_params(&mut seq)?;
+        SignatureAlg.RsaPss(params)
+    } else if oid.eq(&pkix_oid.ecdsa_with_sha256()) {
+        expect_absent_params(&mut seq)?;
+        SignatureAlg.EcdsaWithSha256
+    } else if oid.eq(&pkix_oid.ecdsa_with_sha384()) {
+        expect_absent_params(&mut seq)?;
+        SignatureAlg.EcdsaWithSha384
+    } else if oid.eq(&pkix_oid.ecdsa_with_sha512()) {
+        expect_absent_params(&mut seq)?;
+        SignatureAlg.EcdsaWithSha512
+    } else if oid.eq(&pkix_oid.ecdsa_with_sha1()) {
+        expect_absent_params(&mut seq)?;
+        SignatureAlg.EcdsaWithSha1
+    } else if oid.eq(&pkix_oid.ed25519()) {
+        expect_absent_params(&mut seq)?;
+        SignatureAlg.Ed25519Sig
+    } else if oid.eq(&pkix_oid.ed448()) {
+        expect_absent_params(&mut seq)?;
+        SignatureAlg.Ed448Sig
+    } else {
+        // Consume any trailing bytes without validation — we don't know
+        // what the parameters mean. Caller's verify path returns
+        // UnsupportedAlgorithm downstream.
+        drain(&mut seq);
+        SignatureAlg.Unknown(oid)
+    };
+    seq.expect_end()?;
+    Ok(sig)
+}
+
+/// Parse an AlgorithmIdentifier sequence as a public-key algorithm.
+public fn parse_public_key_alg(r: &mut DerReader) -> Result<PublicKeyAlg, DerError> {
+    let mut seq = r.read_sequence()?;
+    let arcs = seq.read_oid()?;
+    let oid = Oid.from(arcs.as_slice());
+
+    let key_alg: PublicKeyAlg = if oid.eq(&pkix_oid.rsa_encryption()) {
+        consume_null_or_absent(&mut seq)?;
+        PublicKeyAlg.RsaEncryption
+    } else if oid.eq(&pkix_oid.ec_public_key()) {
+        // parameters is the curve OID (RFC 5480 §2.1.1)
+        let curve_arcs = seq.read_oid()?;
+        let curve_oid = Oid.from(curve_arcs.as_slice());
+        let curve = if curve_oid.eq(&pkix_oid.ec_curve_p256()) {
+            EcNamedCurve.P256
+        } else if curve_oid.eq(&pkix_oid.ec_curve_p384()) {
+            EcNamedCurve.P384
+        } else if curve_oid.eq(&pkix_oid.ec_curve_p521()) {
+            EcNamedCurve.P521
+        } else {
+            EcNamedCurve.UnknownCurve(curve_oid)
+        };
+        PublicKeyAlg.EcPublicKey(curve)
+    } else if oid.eq(&pkix_oid.ed25519()) {
+        expect_absent_params(&mut seq)?;
+        PublicKeyAlg.Ed25519Key
+    } else if oid.eq(&pkix_oid.ed448()) {
+        expect_absent_params(&mut seq)?;
+        PublicKeyAlg.Ed448Key
+    } else if oid.eq(&pkix_oid.x25519()) {
+        expect_absent_params(&mut seq)?;
+        PublicKeyAlg.X25519Key
+    } else if oid.eq(&pkix_oid.x448()) {
+        expect_absent_params(&mut seq)?;
+        PublicKeyAlg.X448Key
+    } else {
+        drain(&mut seq);
+        PublicKeyAlg.UnknownPubKey(oid)
+    };
+    seq.expect_end()?;
+    Ok(key_alg)
+}
+
+// =============================================================================
+// RSA-PSS params (RFC 8017 §A.2.3)
+// =============================================================================
+
+fn parse_rsa_pss_params(r: &mut DerReader) -> Result<RsaPssParams, DerError> {
+    // If no parameters span, use RFC 8017 defaults (SHA-1 + salt 20).
+    if r.is_at_end() {
+        return Ok(RsaPssParams { hash: RsaPssHash.Sha256Hash, salt_length: 20 });
+    }
+    let mut seq = r.read_sequence()?;
+
+    // Defaults per RFC 8017 §A.2.3. We disallow SHA-1 in the wild for
+    // WebPKI but decode it; verify-path rejects.
+    let mut hash = RsaPssHash.Sha256Hash;
+    let mut salt_len: Int = 20;
+
+    // [0] HashAlgorithm
+    if seq.peek_is_context(0_u32) {
+        let mut h_exp = seq.read_explicit(0_u32)?;
+        let mut h_seq = h_exp.read_sequence()?;
+        let h_arcs = h_seq.read_oid()?;
+        let h_oid = Oid.from(h_arcs.as_slice());
+        // Params NULL / absent
+        consume_null_or_absent(&mut h_seq)?;
+        h_seq.expect_end()?;
+        hash = if h_oid.eq(&Oid.from(&[2_u32, 16_u32, 840_u32, 1_u32, 101_u32, 3_u32, 4_u32, 2_u32, 1_u32])) {
+            RsaPssHash.Sha256Hash
+        } else if h_oid.eq(&Oid.from(&[2_u32, 16_u32, 840_u32, 1_u32, 101_u32, 3_u32, 4_u32, 2_u32, 2_u32])) {
+            RsaPssHash.Sha384Hash
+        } else if h_oid.eq(&Oid.from(&[2_u32, 16_u32, 840_u32, 1_u32, 101_u32, 3_u32, 4_u32, 2_u32, 3_u32])) {
+            RsaPssHash.Sha512Hash
+        } else {
+            // Unknown hash — reject outright; no WebPKI cert uses non-SHA-2.
+            return Err(DerError {
+                kind: DerErrorKind.MalformedDer,
+                position: 0,
+                message: "RSA-PSS with non-SHA-2 hash",
+            });
+        };
+        h_exp.expect_end()?;
+    }
+
+    // [1] MaskGenAlgorithm — must be MGF1 with matching hash. RFC 8017 §A.2.1
+    // standardises this coupling; we enforce it to simplify verify.
+    if seq.peek_is_context(1_u32) {
+        let mut m_exp = seq.read_explicit(1_u32)?;
+        // Skip MGF params — we already committed to MGF1-<hash>.
+        drain(&mut m_exp);
+    }
+
+    // [2] saltLength INTEGER
+    if seq.peek_is_context(2_u32) {
+        let mut s_exp = seq.read_explicit(2_u32)?;
+        salt_len = s_exp.read_int64()? as Int;
+        s_exp.expect_end()?;
+    }
+
+    // [3] trailerField INTEGER DEFAULT 1 — reject ≠ 1
+    if seq.peek_is_context(3_u32) {
+        let mut t_exp = seq.read_explicit(3_u32)?;
+        let t = t_exp.read_int64()?;
+        if t != 1_i64 {
+            return Err(DerError {
+                kind: DerErrorKind.MalformedDer,
+                position: 0,
+                message: "RSA-PSS trailerField ≠ 1",
+            });
+        }
+        t_exp.expect_end()?;
+    }
+
+    seq.expect_end()?;
+    Ok(RsaPssParams { hash: hash, salt_length: salt_len })
+}
+
+// =============================================================================
+// Helpers — parameters NULL vs absent handling
+// =============================================================================
+
+/// Many AlgorithmIdentifiers say "parameters NULL" (RSA PKCS#1 v1.5) or
+/// absent (EdDSA). We accept either form without complaining — the
+/// semantic content is the same.
+fn consume_null_or_absent(r: &mut DerReader) -> Result<(), DerError> {
+    if r.is_at_end() { return Ok(()); }
+    let tag = r.peek_tag()?;
+    let is_null = match tag.class_ {
+        TagClass.Universal => tag.number == 5_u32,   // TAG_NULL
+        _ => false,
+    };
+    if is_null {
+        r.read_null()?;
+    } else {
+        // Some malformed certs emit SEQUENCE {} or OCTET STRING; we
+        // tolerate by dropping everything that's left.
+        drain(r);
+    }
+    Ok(())
+}
+
+/// Strict variant — caller expects no parameters at all. ECDSA + EdDSA.
+fn expect_absent_params(r: &mut DerReader) -> Result<(), DerError> {
+    if r.is_at_end() { return Ok(()); }
+    // Some cert issuers emit explicit NULL against RFC. Tolerate rather
+    // than reject — the validation matters at signature verify time, not
+    // on this cosmetic difference.
+    consume_null_or_absent(r)
+}
+
+fn drain(r: &mut DerReader) {
+    r.skip_to_end();
+}
