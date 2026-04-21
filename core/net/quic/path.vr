@@ -1,0 +1,280 @@
+// =============================================================================
+// net/quic/path.vr — Path validation + anti-amplification (RFC 9000 §8, §21.1.1.3)
+// =============================================================================
+// Layer: 5 (Network — QUIC)
+// Dependencies: core, core.time, core.net.addr
+// =============================================================================
+//
+// RFC 9000 §8 — before a sender uses a new path, it MUST run path
+// validation: send a PATH_CHALLENGE with 8 random bytes and accept
+// only a PATH_RESPONSE that echoes the same bytes within a bounded
+// time window. Server-initiated paths have an additional constraint:
+//
+// §21.1.1.3 anti-amplification: the server MUST NOT send more than
+// 3× the bytes it has received from the client on a not-yet-validated
+// path. This is the DDoS mitigation that prevents QUIC servers from
+// being used as amplification reflectors.
+//
+// # States
+//
+//   Unvalidated(AmpBudget)   — initial; enforces 3× cap.
+//   Validating(Challenge)     — challenge in flight; wait for response.
+//   Validated                 — path is real; no budget limit.
+//   Failed                    — challenge timeout; path abandoned.
+//
+// # Migration
+//
+// When a client migrates (new local address) or a peer migrates
+// (reported new remote address), a fresh Path is spun up on the
+// target 4-tuple. The old path stays validated until PATH_CHALLENGE
+// confirms the new one, at which point the old is retired.
+//
+// =============================================================================
+
+module core.net.quic.path;
+
+mount core.*;
+mount core.time.instant.{Instant};
+mount core.time.duration.{Duration};
+mount core.net.addr.{SocketAddr};
+mount core.security.util.rng.{fill_secure};
+
+// =============================================================================
+// State
+// =============================================================================
+
+public type PathState is
+      Unvalidated { received_bytes: UInt64, sent_bytes: UInt64 }
+    | Validating { challenge: [Byte; 8], sent_at: Instant, attempts: UInt32 }
+    | Validated
+    | Failed;
+
+public type Path is {
+    local:   SocketAddr,
+    remote:  SocketAddr,
+    state:   PathState,
+    /// RTT seen on this specific path (populated on PATH_RESPONSE
+    /// acceptance). Separate from the overall connection RTT
+    /// estimator — useful for migration decisions.
+    last_rtt: Maybe<Duration>,
+};
+
+public type PathError is
+      AmplificationLimitExceeded
+    | ChallengeTimeout
+    | UnexpectedResponse;
+
+// =============================================================================
+// Constants
+// =============================================================================
+
+pub const ANTI_AMPLIFICATION_FACTOR: UInt64 = 3_u64;
+pub const CHALLENGE_TIMEOUT: Duration = Duration.from_millis(500);
+pub const MAX_CHALLENGE_ATTEMPTS: UInt32 = 3_u32;
+
+// =============================================================================
+// API
+// =============================================================================
+
+implement Path {
+    /// New path — server-initiated paths start Unvalidated to enforce
+    /// anti-amplification; client-initiated paths that have already
+    /// verified 4-tuple via handshake may start Validated.
+    pub fn new(local: SocketAddr, remote: SocketAddr, initially_validated: Bool) -> Path {
+        let state = if initially_validated {
+            PathState.Validated
+        } else {
+            PathState.Unvalidated { received_bytes: 0_u64, sent_bytes: 0_u64 }
+        };
+        Path { local: local, remote: remote, state: state, last_rtt: None }
+    }
+
+    /// Can we send `n` bytes under the current anti-amplification
+    /// budget? Returns Err if the path is Failed or if sending would
+    /// exceed the 3× cap while unvalidated.
+    pub fn can_send(&self, n: UInt64) -> Result<(), PathError> {
+        match &self.state {
+            PathState.Validated => Ok(()),
+            PathState.Validating {..} => Ok(()),
+            PathState.Unvalidated { received_bytes, sent_bytes } => {
+                let budget = ANTI_AMPLIFICATION_FACTOR * (*received_bytes);
+                if (*sent_bytes) + n > budget {
+                    Err(PathError.AmplificationLimitExceeded)
+                } else {
+                    Ok(())
+                }
+            },
+            PathState.Failed => Err(PathError.ChallengeTimeout),
+        }
+    }
+
+    pub fn on_bytes_sent(&mut self, n: UInt64) {
+        match &mut self.state {
+            PathState.Unvalidated { received_bytes: _, sent_bytes } => {
+                *sent_bytes = *sent_bytes + n;
+            },
+            _ => {},
+        }
+    }
+
+    pub fn on_bytes_received(&mut self, n: UInt64) {
+        match &mut self.state {
+            PathState.Unvalidated { received_bytes, sent_bytes: _ } => {
+                *received_bytes = *received_bytes + n;
+            },
+            _ => {},
+        }
+    }
+
+    /// Begin validation — generate an 8-byte challenge and transition
+    /// to Validating. Caller MUST emit a PATH_CHALLENGE frame carrying
+    /// the returned bytes.
+    pub fn begin_validation(&mut self, now: Instant) -> [Byte; 8] {
+        let mut challenge: [Byte; 8] = [0_u8; 8];
+        fill_secure(&mut challenge);
+        let attempts = match &self.state {
+            PathState.Validating { attempts: a, ..} => *a + 1_u32,
+            _ => 1_u32,
+        };
+        self.state = PathState.Validating {
+            challenge: challenge.clone(),
+            sent_at:   now,
+            attempts:  attempts,
+        };
+        challenge
+    }
+
+    /// Peer sent a PATH_RESPONSE. Returns Ok(true) if the response
+    /// echoes our pending challenge and the path transitions to
+    /// Validated; Ok(false) if the response is stale or path wasn't
+    /// being validated; Err if genuinely malformed (response on a
+    /// Failed path).
+    pub fn on_path_response(&mut self, data: &[Byte; 8], now: Instant) -> Result<Bool, PathError> {
+        match &self.state {
+            PathState.Validating { challenge, sent_at, .. } => {
+                let mut matches = true;
+                let mut i: Int = 0;
+                while i < 8 {
+                    if data[i] != challenge[i] { matches = false; break; }
+                    i = i + 1;
+                }
+                if !matches { return Ok(false); }
+                let rtt = now.duration_since(sent_at.clone())
+                    .unwrap_or_else(|| Duration.from_micros(0));
+                self.last_rtt = Some(rtt);
+                self.state = PathState.Validated;
+                Ok(true)
+            },
+            PathState.Validated => Ok(false),
+            PathState.Unvalidated {..} => Ok(false),
+            PathState.Failed => Err(PathError.UnexpectedResponse),
+        }
+    }
+
+    /// Timer fire — check for challenge timeout. Returns a signal the
+    /// caller uses to re-challenge (if attempts < MAX) or retire the
+    /// path (if MAX reached).
+    pub fn on_timer(&mut self, now: Instant) -> TimerOutcome {
+        match &self.state {
+            PathState.Validating { sent_at, attempts, .. } => {
+                if now.duration_since(sent_at.clone())
+                    .unwrap_or_else(|| Duration.from_micros(0)) >= CHALLENGE_TIMEOUT {
+                    if *attempts >= MAX_CHALLENGE_ATTEMPTS {
+                        self.state = PathState.Failed;
+                        TimerOutcome.Failed
+                    } else {
+                        TimerOutcome.ShouldReChallenge
+                    }
+                } else {
+                    TimerOutcome.NoAction
+                }
+            },
+            _ => TimerOutcome.NoAction,
+        }
+    }
+
+    pub fn is_validated(&self) -> Bool {
+        match &self.state { PathState.Validated => true, _ => false }
+    }
+
+    pub fn is_failed(&self) -> Bool {
+        match &self.state { PathState.Failed => true, _ => false }
+    }
+
+    pub fn remote_addr(&self) -> SocketAddr { self.remote.clone() }
+    pub fn local_addr(&self)  -> SocketAddr { self.local.clone() }
+}
+
+public type TimerOutcome is NoAction | ShouldReChallenge | Failed;
+
+// =============================================================================
+// PathManager — multi-path bookkeeping for connection migration
+// =============================================================================
+//
+// When a peer migrates (apparent source 4-tuple change), the
+// PathManager tracks the old (primary) path as Validated and spins
+// up a new Path as Unvalidated. Once the new path validates, the
+// old one can be retired.
+//
+// =============================================================================
+
+public type PathManager is {
+    /// Currently-active path. Writes go here; reads may arrive on
+    /// `standby` when peer migration is in progress.
+    active:  Path,
+    /// Candidate migration target; None when no migration in flight.
+    standby: Maybe<Path>,
+};
+
+impl PathManager {
+    pub fn new(initial: Path) -> PathManager {
+        PathManager { active: initial, standby: None }
+    }
+
+    /// Peer sent a packet from an unexpected 4-tuple → start a
+    /// migration attempt. If there's no standby or `remote` differs
+    /// from the current standby, replace it.
+    pub fn on_new_remote(&mut self, local: SocketAddr, remote: SocketAddr) {
+        let replace = match &self.standby {
+            Some(s) => !addr_eq(&s.remote, &remote),
+            None    => true,
+        };
+        if replace {
+            // Server MUST start unvalidated (§8.1); client considers
+            // peer migration path unvalidated too until PATH_CHALLENGE
+            // succeeds.
+            self.standby = Some(Path.new(local, remote, false));
+        }
+    }
+
+    /// Standby path validated → promote it as active; retire old.
+    pub fn promote_standby(&mut self) -> Maybe<SocketAddr> {
+        match self.standby.clone() {
+            Some(s) => {
+                if s.is_validated() {
+                    let retired_remote = self.active.remote.clone();
+                    self.active = s;
+                    self.standby = None;
+                    Some(retired_remote)
+                } else { None }
+            },
+            None => None,
+        }
+    }
+
+    pub fn active(&self) -> &Path { &self.active }
+    pub fn active_mut(&mut self) -> &mut Path { &mut self.active }
+    pub fn standby_mut(&mut self) -> Maybe<&mut Path> {
+        match &mut self.standby {
+            Some(s) => Some(s),
+            None => None,
+        }
+    }
+}
+
+fn addr_eq(a: &SocketAddr, b: &SocketAddr) -> Bool {
+    // SocketAddr's protocol equality — delegate to whatever the
+    // stdlib exposes. If `eq` is missing, wire through string-form
+    // comparison as a safe fallback.
+    a.to_text() == b.to_text()
+}

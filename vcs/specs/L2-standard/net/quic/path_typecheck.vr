@@ -1,0 +1,55 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: quic, rfc9000, path, migration, anti-amplification, typecheck
+// @timeout: 10000
+// @expect: pass
+
+mount core.net.quic.path.{
+    Path, PathState, PathError, PathManager, TimerOutcome,
+    ANTI_AMPLIFICATION_FACTOR, CHALLENGE_TIMEOUT, MAX_CHALLENGE_ATTEMPTS,
+};
+mount core.net.addr.{SocketAddr};
+mount core.time.instant.{Instant};
+
+fn dummy_addr() -> SocketAddr {
+    SocketAddr.from_text(Text.from_str("127.0.0.1:443"))
+        .unwrap_or_else(|_| SocketAddr.from_text(Text.from_str("[::]:0")).unwrap())
+}
+
+fn check_validation_flow() {
+    let local = dummy_addr();
+    let remote = dummy_addr();
+    let mut path = Path.new(local, remote, false);
+
+    // Initially unvalidated → cannot send without peer receive.
+    let _ = path.can_send(100_u64);
+    path.on_bytes_received(1500_u64);
+    let _ = path.can_send(1500_u64);
+    path.on_bytes_sent(4500_u64);
+
+    // Begin validation
+    let challenge = path.begin_validation(Instant.now());
+    // Response with matching bytes promotes to Validated.
+    let _ = path.on_path_response(&challenge, Instant.now());
+
+    let _ = path.is_validated();
+    let _ = path.is_failed();
+    let _ = path.remote_addr();
+    let _ = path.local_addr();
+
+    let _ = path.on_timer(Instant.now());
+}
+
+fn check_path_manager() {
+    let initial = Path.new(dummy_addr(), dummy_addr(), true);
+    let mut pm = PathManager.new(initial);
+    pm.on_new_remote(dummy_addr(), dummy_addr());
+    let _ = pm.promote_standby();
+    let _ = pm.active();
+}
+
+fn main() {
+    check_validation_flow();
+    check_path_manager();
+}
