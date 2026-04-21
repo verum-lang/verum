@@ -76,6 +76,7 @@ public module keys;
 public module tx;
 public module rx;
 public module dispatch;
+public module handshake_driver;
 
 mount core.*;
 mount core.collections.List;
@@ -122,7 +123,7 @@ public type QuicKeys is {
     app:        Maybe<(QuicSpaceKeys, QuicSpaceKeys)>,
 };
 
-impl QuicKeys {
+implement QuicKeys {
     pub fn empty() -> QuicKeys {
         QuicKeys { initial: None, handshake: None, app: None }
     }

@@ -226,7 +226,7 @@ public type PathManager is {
     standby: Maybe<Path>,
 };
 
-impl PathManager {
+implement PathManager {
     pub fn new(initial: Path) -> PathManager {
         PathManager { active: initial, standby: None }
     }
