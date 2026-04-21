@@ -116,18 +116,12 @@ implement Crc32 {
     /// Feed `chunk` into the CRC. Safe to call repeatedly; the internal
     /// state carries across calls.
     public fn update(&mut self, chunk: &[Byte]) {
-        // NB: the explicit `& 0xFFFFFFFF_u32` masks in the shift step are
-        // required to keep the running state in exactly 32 bits — some
-        // Verum back-ends sign-extend UInt32 values whose bit 31 is set
-        // when they flow through an XOR with a table entry, which then
-        // corrupts the next `>> 8` step. The masks are no-ops on a true
-        // u32 and cheap on 64-bit backends.
         let mut s: UInt32 = self.state;
         let mut i: Int = 0;
         while i < chunk.len() {
             let b: UInt32 = chunk[i] as UInt32;
             let idx: Int = ((s ^ b) & 0xFF_u32) as Int;
-            s = ((s >> 8) ^ TABLE[idx]) & 0xFFFFFFFF_u32;
+            s = (s >> 8) ^ TABLE[idx];
             i = i + 1;
         }
         self.state = s;

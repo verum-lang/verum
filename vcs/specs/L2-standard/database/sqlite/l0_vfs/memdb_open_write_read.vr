@@ -70,19 +70,20 @@ fn main() {
         j = j + 1;
     }
 
-    // File extends past the last write.
-    {
-        let sz_result = memdb_size(&file);
-        match sz_result {
-            Ok(n)  => assert_eq(n, 4096 + 128),
-            Err(_) => panic("size failed"),
-        }
+    // File extends past the last write. No explicit scope block required —
+    // the NLL analysis ends the immutable borrow of `file` at the match
+    // arm boundary, so the subsequent `memdb_close(&mut file)` sees a
+    // fresh base.
+    let sz_result = memdb_size(&file);
+    match sz_result {
+        Ok(n)  => assert_eq(n, 4096 + 128),
+        Err(_) => panic("size failed"),
     }
 
-    // Cleanup is handled by scope-drop — MemDbFile holds no OS resources;
-    // explicit memdb_close exists for API parity with PosixVfs but isn't
-    // required here. (The NLL borrow-checker analysis currently flags an
-    // explicit close on the same binding as a mutable re-borrow — tracked
-    // as a stdlib-integration issue.)
+    match memdb_close(&mut file) {
+        Ok(_) => {},
+        Err(_) => panic("close failed"),
+    };
+
     print("memdb_vfs ok");
 }

@@ -37,37 +37,55 @@ Pure-Verum SQLite reimplementation. Spec: `internal/specs/sqlite-native.md`.
 
 ## Language-implementation issues surfaced during Phase 0 scaffolding
 
-Documented for future root-cause fixes in the compiler/runtime crates:
+### 1. [FIXED — landed in binary] `[lenient] SKIP` silently drops methods
 
-### 1. `[lenient] SKIP` silently drops methods in `implement` blocks
+**Root cause:** the common case was *not* a genuine compile failure but a
+disambiguation miss. In `compile_record` (plain struct / record-variant
+literal), each field value expression was compiled without the enclosing
+field's declared type in scope, so `find_function_by_suffix(".Variant")`
+returned `None` whenever the same variant name existed in more than one
+type (e.g., `Closed` in `DoorState` *and* `LockState`). The enclosing
+method's codegen then bailed with `undefined variable: Closed`, the
+`[lenient] SKIP` fallback dropped the method, and users got
+`method '...' not found on value` at runtime.
 
-Location: `crates/verum_vbc/src/codegen/mod.rs:2363`
+**Fix** (`crates/verum_vbc/src/codegen/expressions.rs`):
+`compile_record` now pushes the field's declared type into
+`ctx.current_return_type_name` before compiling the field-value
+expression and restores it afterwards, giving
+`find_function_by_suffix` a disambiguation hint. New helper
+`push_field_type_context` / `pop_field_type_context`. ~8 SKIP entries
+in the stdlib (including `MemDbFile.size`) eliminated on first pass.
 
-When `compile_function` for an `implement Type { fn ... }` method fails,
-it is silently dropped with only a `tracing::debug!` message, leading to
-runtime `method '...' not found on value` panics rather than compile-time
-diagnostics. Reproduced when the `MemDbFile` impl block was declared in a
-new cross-module directory (`core/database/sqlite/native/l0_vfs/`).
+**Regression test:** `vcs/specs/L1-core/types/field_type_disambiguation.vr`
+exercises two enums that share a variant name and verifies the method
+containing a struct literal with that variant dispatches correctly.
 
-**Suggested fix:** surface `compile_function` errors as hard compile-
-time diagnostics, or at minimum emit a `tracing::warn!` visible at
-default verbosity so users notice methods vanishing.
+### 2. [FIXED — source landed, binary awaits LLVM-env rebuild] UInt32 sign-extension on typed-array read
 
-### 2. UInt32 XOR sign-extended when table lookup bit 31 = 1
+**Root cause (two places):**
 
-Location: `crates/verum_vbc/src/interpreter/`
+1. `handle_get_index` in
+   `crates/verum_vbc/src/interpreter/dispatch_table/handlers/memory_collections.rs`
+   read 4-byte typed-array elements as `*const i32`, then cast to `i64`.
+   Any element with bit 31 set (e.g., a CRC32 table entry like
+   `0xB0D09822`) came back as `0xFFFFFFFF_B0D09822` because `i32 as i64`
+   sign-extends. The fix reads as `*const u32` — zero-extension — and
+   covers the `elem_size=2` path the same way (`u16` instead of `i16`).
 
-Example:
-```verum
-let table: [UInt32; 256] = [...];
-let s: UInt32 = table[idx];   // if t[idx] bit 31 = 1, s now stored as i64
-// with upper 32 = 0xFFFFFFFF; subsequent `s >> 8` carries those bits down.
-```
+2. `BinOp::Shr` in `crates/verum_vbc/src/codegen/expressions.rs` always
+   emitted `BitwiseOp::Shr` (arithmetic shift). Even when the left
+   operand is declared `UInt32`, the shift would sign-preserve. The fix
+   inspects the left operand's inferred type name via
+   `is_unsigned_int_type_name` and emits `BitwiseOp::Ushr` (logical)
+   for `UInt8`/`UInt16`/`UInt32`/`UInt64`/`USize`/`Byte`, matching
+   C and Rust semantics.
 
-Workaround currently shipped in `core/security/hash/crc32.vr` — an explicit
-`& 0xFFFFFFFF_u32` after every XOR with a table entry to mask off the
-sign-extended upper half. A true fix should keep `[UInt32; N]` reads
-zero-extended through the NaN-boxed value representation.
+**Regression test:** `vcs/specs/L1-core/types/unsigned_shr_logical.vr`.
+
+The `& 0xFFFFFFFF_u32` workaround in
+`core/security/hash/crc32.vr::update` can be removed once the binary is
+rebuilt — it is now a belt-and-suspenders clamp.
 
 ### 3. `Type.method()` style parsed as context-lookup
 
