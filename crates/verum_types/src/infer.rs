@@ -22776,19 +22776,46 @@ impl TypeChecker {
             // Create fresh TypeVars for each type parameter
             let mut param_subst: indexmap::IndexMap<verum_common::Text, Type> = indexmap::IndexMap::new();
             let mut fresh_vars: Vec<TypeVar> = Vec::new();
+            // Name-based substitution handles `Type::Generic { name, args: [] }`
+            // (bare-type-parameter AST form). The method's signature was
+            // originally registered with `Type::Var(fresh)` aliased in the
+            // context environment under the parameter's name. Collect those
+            // original vars too so we can rewrite them to fresh vars per
+            // call-site — otherwise successive invocations of the same
+            // generic method would keep mapping to the same TypeVar and
+            // effectively "pin" U to whatever Self.Item resolved to on the
+            // first call (e.g., `fn chain<U: Iterator<Item = Self.Item>>`
+            // pinned U := Int through the bound rather than inferring from
+            // the argument).
+            let mut original_var_subst: Map<TypeVar, Type> = Map::new();
 
             for type_param in type_params.iter() {
                 let fresh_var = TypeVar::fresh();
                 fresh_vars.push(fresh_var);
                 param_subst.insert(type_param.name.clone(), Type::Var(fresh_var));
+                // If the context already has a Var aliased under this name
+                // (from method-signature registration), map it to the fresh
+                // var. A TypeScheme carries no Vars directly, so we look up
+                // the stored Type and extract any Var at the root.
+                if let Some(scheme) = self.ctx.env.lookup(&type_param.name)
+                    && let Type::Var(orig_var) = scheme.instantiate()
+                {
+                    original_var_subst.insert(orig_var, Type::Var(fresh_var));
+                }
             }
 
             // Substitute type parameters in params and return_type
             let substituted_params: List<Type> = params
                 .iter()
-                .map(|p| self.substitute_type_params(p, &param_subst))
+                .map(|p| {
+                    let after_name = self.substitute_type_params(p, &param_subst);
+                    self.substitute_type_vars(&after_name, &original_var_subst)
+                })
                 .collect();
-            let substituted_return = self.substitute_type_params(return_type, &param_subst);
+            let substituted_return = {
+                let after_name = self.substitute_type_params(return_type, &param_subst);
+                self.substitute_type_vars(&after_name, &original_var_subst)
+            };
 
             // If explicit type_args are provided, unify them with fresh vars
             if !type_args.is_empty() {
@@ -36231,6 +36258,19 @@ impl TypeChecker {
             // Generic type (List<T>, Map<K, V>, etc.): substitute in type arguments
             // CRITICAL FIX: This was missing, causing Map<K, V> to not be substituted
             Type::Generic { name, args } => {
+                // If this is a bare type parameter (no args) and the name matches
+                // a substitution entry, replace the whole type. This handles the
+                // `other: U` parameter in `fn chain<U>(self, other: U) -> ...`
+                // — the AST converts bare `U` to `Type::Generic { name: "U",
+                // args: [] }`, so without this check we only recursed into
+                // (empty) args and returned the unsubstituted `Generic {"U"}`,
+                // which then unified against Int through the bound
+                // `U: Iterator<Item = Self.Item>` resolution.
+                if args.is_empty()
+                    && let Some(replacement) = param_subst.get(name)
+                {
+                    return replacement.clone();
+                }
                 let substituted_args: List<_> = args
                     .iter()
                     .map(|arg| self.substitute_type_params_impl(arg, param_subst, d))
