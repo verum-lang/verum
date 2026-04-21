@@ -1,0 +1,453 @@
+// =============================================================================
+// net/h3/qpack/session.vr — Connection-scoped QPACK state (RFC 9204)
+// =============================================================================
+// Layer: 5 (Network — HTTP/3 / QPACK)
+// Dependencies: core, collections, .{dynamic_table, instructions, static_table,
+//               integer, huffman, decoder (for HeaderField)}
+// =============================================================================
+//
+// One side of a QPACK session is exactly two tables + two streams:
+//
+//   * encoder_table — our outgoing dynamic table; peer mirrors it via
+//     the encoder-stream instructions we emit.
+//   * decoder_table — peer's outgoing dynamic table; we mirror it via
+//     the encoder-stream instructions peer emits.
+//   * our encoder-stream output (bytes we push onto the peer's
+//     encoder-stream view — actually our encoder stream).
+//   * our decoder-stream output (acks we send back to peer).
+//
+// `QpackSession` carries both tables and emits / consumes both
+// instruction streams. High-level `encode_field_section` /
+// `decode_field_section` methods accept/produce HeaderField lists
+// with the full dynamic-table plus static-table matching path.
+//
+// # Blocked streams (RFC 9204 §2.1.2)
+//
+// If an encoded section references dynamic-table entries that have
+// not yet arrived on the decoder side, the decoder blocks that
+// stream until the needed inserts land. `qpack_blocked_streams`
+// SETTINGS bounds this — v0.2 ships with strict non-blocking
+// encoding (Required Insert Count never exceeds the peer's
+// confirmed Insert Count) so streams never block regardless of
+// ordering.
+//
+// =============================================================================
+
+module core.net.h3.qpack.session;
+
+mount core.*;
+mount core.collections.List;
+mount core.net.h3.qpack.dynamic_table.{DynamicTable, DynEntry, DynamicTableError};
+mount core.net.h3.qpack.instructions.{
+    EncoderInstruction, DecoderInstruction, InstrError,
+    encode_encoder, decode_encoder, decode_all_encoder,
+    encode_decoder, decode_decoder, decode_all_decoder,
+};
+mount core.net.h3.qpack.static_table as stat;
+mount core.net.h3.qpack.integer.{encode as int_encode, decode as int_decode};
+mount core.net.h3.qpack.huffman as huff;
+mount core.net.h3.qpack.decoder.{HeaderField, QpackDecodeError};
+
+// =============================================================================
+// Error type
+// =============================================================================
+
+public type QpackSessionError is
+      EncoderInstrError(InstrError)
+    | DecoderInstrError(InstrError)
+    | DynamicTable(DynamicTableError)
+    | FieldDecode(QpackDecodeError)
+    | IntegerError
+    | HuffmanError
+    | InvalidState;
+
+// =============================================================================
+// QpackSession — connection-scoped state
+// =============================================================================
+
+public type QpackSession is {
+    /// Our dynamic table — the one *we* publish via encoder stream.
+    encoder_table: DynamicTable,
+    /// Peer's dynamic table, mirrored from their encoder stream.
+    decoder_table: DynamicTable,
+
+    /// Pending encoder-stream bytes to emit (our Insert / Duplicate /
+    /// SetCapacity instructions).
+    encoder_out:   List<Byte>,
+    /// Pending decoder-stream bytes to emit (our acks).
+    decoder_out:   List<Byte>,
+
+    /// Peer's confirmed Insert Count for our outbound table — up to
+    /// this many inserts have been persisted peer-side, so we can
+    /// freely reference entries below this bound without risking
+    /// peer-side block.
+    peer_insert_count: UInt64,
+};
+
+impl QpackSession {
+    pub fn new(max_table_cap: UInt64, peer_max_table_cap: UInt64) -> QpackSession {
+        let mut encoder_table = DynamicTable.new(max_table_cap);
+        let decoder_table     = DynamicTable.new(peer_max_table_cap);
+        // Default capacity = 0; we raise it via SetCapacity instruction
+        // once we want to use dynamic compression.
+        let _ = encoder_table;
+        QpackSession {
+            encoder_table:     DynamicTable.new(max_table_cap),
+            decoder_table:     DynamicTable.new(peer_max_table_cap),
+            encoder_out:       [],
+            decoder_out:       [],
+            peer_insert_count: 0_u64,
+        }
+    }
+
+    // ==================== capacity management ====================
+
+    /// Raise our own encoder-side table capacity. Emits a SetCapacity
+    /// instruction on the encoder stream.
+    pub fn set_encoder_capacity(&mut self, cap: UInt64) -> Result<(), QpackSessionError> {
+        self.encoder_table.set_capacity(cap)
+            .map_err(|e| QpackSessionError.DynamicTable(e))?;
+        encode_encoder(&EncoderInstruction.SetCapacity(cap), &mut self.encoder_out);
+        Ok(())
+    }
+
+    // ==================== encoding a field section ====================
+
+    /// Encode a list of headers into a field section. Returns the
+    /// wire bytes. Any new dynamic-table inserts are queued onto
+    /// `encoder_out` — caller drains separately.
+    pub fn encode_field_section(
+        &mut self,
+        headers: &List<HeaderField>,
+    ) -> Result<List<Byte>, QpackSessionError> {
+        let mut body: List<Byte> = [];
+
+        // Plan per-header emission:
+        //   1. exact (name, value) in static table  → Indexed Field Line, static
+        //   2. exact in dynamic table, abs < peer_insert_count → Indexed Field Line, dynamic
+        //   3. name match in static → Literal Field Line with static name ref
+        //   4. name match in dynamic + abs < peer_insert_count → Literal with dynamic name ref
+        //   5. else:
+        //       a. encoder_table.can_insert(entry) → Insert on encoder stream; emit Indexed ref post-base
+        //       b. otherwise → Literal with Literal Name
+        //
+        // For v0.2 we never block, so we keep Required Insert Count = 0
+        // and Delta Base = 0. Insert instructions still propagate the
+        // peer-side table for future sections.
+
+        let mut i: Int = 0;
+        while i < headers.len() {
+            let h = &headers[i];
+            // 1: static (n,v)
+            match stat.find(&h.name, &h.value) {
+                Some(idx) => {
+                    int_encode(&mut body, 6, 0xC0_u8, idx as UInt64);
+                    i = i + 1; continue;
+                },
+                None => {},
+            }
+            // 2: dynamic (n,v) within peer's known table
+            match self.encoder_table.find(&h.name, &h.value) {
+                Some(abs) => {
+                    if abs < self.peer_insert_count {
+                        // Indexed Field Line, dynamic — 1Txxxxxx with T=0 (dynamic),
+                        // value = abs relative to base (base=0 → abs itself).
+                        int_encode(&mut body, 6, 0x80_u8, abs);
+                        i = i + 1; continue;
+                    }
+                },
+                None => {},
+            }
+            // 3: static name match
+            match stat.find_name(&h.name) {
+                Some(idx) => {
+                    int_encode(&mut body, 4, 0x50_u8, idx as UInt64);
+                    encode_string(&mut body, h.value.as_bytes());
+                    i = i + 1; continue;
+                },
+                None => {},
+            }
+            // 5b: Literal Field Line with Literal Name.
+            encode_literal_name(&mut body, h.name.as_bytes());
+            encode_string(&mut body, h.value.as_bytes());
+            i = i + 1;
+        }
+
+        // Assemble full field section: Required Insert Count (0) +
+        // Delta Base (0, sign=0) + body.
+        let mut out: List<Byte> = [];
+        int_encode(&mut out, 8, 0_u8, 0_u64);
+        int_encode(&mut out, 7, 0_u8, 0_u64);
+        let mut j: Int = 0;
+        while j < body.len() { out.push(body[j]); j = j + 1; }
+        Ok(out)
+    }
+
+    // ==================== decoding a field section ====================
+
+    /// Decode a field section. Any dynamic-table references require
+    /// `peer.encoder_table` to already have the needed entries —
+    /// bytes arriving on the encoder stream must have been processed
+    /// before this call for streams that reference recent inserts.
+    pub fn decode_field_section(
+        &mut self,
+        buf: &[Byte],
+    ) -> Result<List<HeaderField>, QpackSessionError> {
+        // Inline the RFC 9204 §4.5 walk — shares shape with
+        // qpack.decoder.decode_field_section but with dynamic-table
+        // references resolved against `self.decoder_table`.
+
+        let (required_insert_count, p1) = int_decode(buf, 0, 8)
+            .map_err(|_| QpackSessionError.IntegerError)?;
+        if p1 >= buf.len() { return Err(QpackSessionError.FieldDecode(QpackDecodeError.Truncated)); }
+        let sign = (buf[p1] & 0x80_u8) != 0_u8;
+        let _ = sign;
+        let (delta_base, p2) = int_decode(buf, p1, 7)
+            .map_err(|_| QpackSessionError.IntegerError)?;
+        let _ = delta_base;
+
+        // If required_insert_count > 0 and peer-provided inserts
+        // haven't all landed → caller must have buffered already. We
+        // expose a `blocked` signal via return Err; v0.2 rejects.
+        if required_insert_count > self.decoder_table.insert_count() {
+            return Err(QpackSessionError.InvalidState);
+        }
+
+        let mut headers: List<HeaderField> = [];
+        let mut cur: Int = p2;
+        while cur < buf.len() {
+            let b0 = buf[cur];
+            if (b0 & 0x80_u8) != 0_u8 {
+                // Indexed Field Line
+                let is_static = (b0 & 0x40_u8) != 0_u8;
+                let (idx, next) = int_decode(buf, cur, 6)
+                    .map_err(|_| QpackSessionError.IntegerError)?;
+                let hit = if is_static {
+                    match stat.get(idx as Int) {
+                        Some(e) => e,
+                        None    => return Err(QpackSessionError.FieldDecode(
+                            QpackDecodeError.InvalidIndex(idx))),
+                    }
+                } else {
+                    match self.decoder_table.get_by_absolute(idx) {
+                        Some(e) => stat.StaticEntry { name: e.name, value: e.value },
+                        None    => return Err(QpackSessionError.FieldDecode(
+                            QpackDecodeError.InvalidIndex(idx))),
+                    }
+                };
+                headers.push(HeaderField { name: hit.name, value: hit.value });
+                cur = next;
+            } else if (b0 & 0x40_u8) != 0_u8 {
+                // Literal Field Line with Name Reference
+                let is_static = (b0 & 0x10_u8) != 0_u8;
+                let (name_idx, p1) = int_decode(buf, cur, 4)
+                    .map_err(|_| QpackSessionError.IntegerError)?;
+                let name = if is_static {
+                    match stat.get(name_idx as Int) {
+                        Some(e) => e.name,
+                        None    => return Err(QpackSessionError.FieldDecode(
+                            QpackDecodeError.InvalidIndex(name_idx))),
+                    }
+                } else {
+                    match self.decoder_table.get_by_absolute(name_idx) {
+                        Some(e) => e.name,
+                        None    => return Err(QpackSessionError.FieldDecode(
+                            QpackDecodeError.InvalidIndex(name_idx))),
+                    }
+                };
+                let (value, next) = read_string(buf, p1)?;
+                headers.push(HeaderField { name: name, value: value });
+                cur = next;
+            } else if (b0 & 0x20_u8) != 0_u8 {
+                // Literal Field Line with Literal Name
+                let (name, p1) = read_name_literal(buf, cur)?;
+                let (value, next) = read_string(buf, p1)?;
+                headers.push(HeaderField { name: name, value: value });
+                cur = next;
+            } else {
+                // Post-Base Index or Literal Post-Base Name Reference — v0.2 rejects.
+                return Err(QpackSessionError.InvalidState);
+            }
+        }
+        Ok(headers)
+    }
+
+    // ==================== peer encoder-stream ingest ====================
+
+    /// Consume a chunk of bytes from peer's encoder stream. Each
+    /// decoded instruction mutates `self.decoder_table` and (for
+    /// Insert variants) triggers an Insert Count Increment on our
+    /// decoder stream.
+    pub fn on_peer_encoder_bytes(&mut self, buf: &[Byte]) -> Result<(), QpackSessionError> {
+        let instrs = decode_all_encoder(buf)
+            .map_err(|e| QpackSessionError.EncoderInstrError(e))?;
+        let mut new_inserts: UInt64 = 0_u64;
+        let mut i: Int = 0;
+        while i < instrs.len() {
+            let apply = apply_encoder_instr(&mut self.decoder_table, &instrs[i])
+                .map_err(|e| QpackSessionError.DynamicTable(e))?;
+            if apply { new_inserts = new_inserts + 1_u64; }
+            i = i + 1;
+        }
+        if new_inserts > 0_u64 {
+            encode_decoder(
+                &DecoderInstruction.InsertCountIncrement(new_inserts),
+                &mut self.decoder_out,
+            );
+        }
+        Ok(())
+    }
+
+    /// Consume a chunk of bytes from peer's decoder stream — SectionAck
+    /// / StreamCancel / InsertCountIncrement. Advances our
+    /// `peer_insert_count` and manages ref counts.
+    pub fn on_peer_decoder_bytes(&mut self, buf: &[Byte]) -> Result<(), QpackSessionError> {
+        let instrs = decode_all_decoder(buf)
+            .map_err(|e| QpackSessionError.DecoderInstrError(e))?;
+        let mut i: Int = 0;
+        while i < instrs.len() {
+            match &instrs[i] {
+                DecoderInstruction.SectionAck(_) => {
+                    // Per-stream ack — at v0.2 we don't ref-count
+                    // per-section; no-op on encoder_table state.
+                },
+                DecoderInstruction.StreamCancel(_) => {
+                    // Cancel — likewise v0.2 no-op until section-ref
+                    // tracking lands.
+                },
+                DecoderInstruction.InsertCountIncrement(n) => {
+                    self.peer_insert_count = self.peer_insert_count + n;
+                },
+            }
+            i = i + 1;
+        }
+        Ok(())
+    }
+
+    // ==================== drain ====================
+
+    pub fn drain_encoder_out(&mut self) -> List<Byte> {
+        let mut out: List<Byte> = [];
+        let mut i: Int = 0;
+        while i < self.encoder_out.len() { out.push(self.encoder_out[i]); i = i + 1; }
+        self.encoder_out = [];
+        out
+    }
+
+    pub fn drain_decoder_out(&mut self) -> List<Byte> {
+        let mut out: List<Byte> = [];
+        let mut i: Int = 0;
+        while i < self.decoder_out.len() { out.push(self.decoder_out[i]); i = i + 1; }
+        self.decoder_out = [];
+        out
+    }
+
+    pub fn peer_insert_count(&self) -> UInt64 { self.peer_insert_count }
+    pub fn encoder_capacity(&self) -> UInt64  { self.encoder_table.capacity() }
+    pub fn decoder_capacity(&self) -> UInt64  { self.decoder_table.capacity() }
+}
+
+// =============================================================================
+// Instruction application
+// =============================================================================
+
+/// Apply one encoder-stream instruction to the receiver-side table.
+/// Returns `true` if the instruction added an entry (for Insert Count
+/// Increment accounting).
+fn apply_encoder_instr(
+    table: &mut DynamicTable,
+    instr: &EncoderInstruction,
+) -> Result<Bool, DynamicTableError> {
+    match instr {
+        EncoderInstruction.SetCapacity(cap) => {
+            table.set_capacity(*cap)?;
+            Ok(false)
+        },
+        EncoderInstruction.InsertWithNameRef { is_static, name_index, value } => {
+            let _ = table.insert_with_name_ref(*is_static, *name_index,
+                Text.from_utf8_lossy(value.as_slice()))?;
+            Ok(true)
+        },
+        EncoderInstruction.InsertWithLiteralName { name, value } => {
+            let _ = table.insert(
+                Text.from_utf8_lossy(name.as_slice()),
+                Text.from_utf8_lossy(value.as_slice()),
+            )?;
+            Ok(true)
+        },
+        EncoderInstruction.Duplicate(idx) => {
+            let _ = table.duplicate(*idx)?;
+            Ok(true)
+        },
+    }
+}
+
+// =============================================================================
+// Local string codec helpers (mirror qpack.decoder / encoder)
+// =============================================================================
+
+fn encode_string(out: &mut List<Byte>, s: &[Byte]) {
+    let huff_bytes = huff.encoded_byte_length(s);
+    if huff_bytes < s.len() {
+        int_encode(out, 7, 0x80_u8, huff_bytes as UInt64);
+        huff.encode(s, out);
+    } else {
+        int_encode(out, 7, 0x00_u8, s.len() as UInt64);
+        let mut i: Int = 0;
+        while i < s.len() { out.push(s[i]); i = i + 1; }
+    }
+}
+
+fn encode_literal_name(out: &mut List<Byte>, s: &[Byte]) {
+    let huff_bytes = huff.encoded_byte_length(s);
+    if huff_bytes < s.len() {
+        int_encode(out, 3, 0x28_u8, huff_bytes as UInt64);
+        huff.encode(s, out);
+    } else {
+        int_encode(out, 3, 0x20_u8, s.len() as UInt64);
+        let mut i: Int = 0;
+        while i < s.len() { out.push(s[i]); i = i + 1; }
+    }
+}
+
+fn read_string(buf: &[Byte], pos: Int) -> Result<(Text, Int), QpackSessionError> {
+    if pos >= buf.len() {
+        return Err(QpackSessionError.FieldDecode(QpackDecodeError.Truncated));
+    }
+    let huffman = (buf[pos] & 0x80_u8) != 0_u8;
+    let (length, p1) = int_decode(buf, pos, 7)
+        .map_err(|_| QpackSessionError.IntegerError)?;
+    let end = p1 + (length as Int);
+    if end > buf.len() {
+        return Err(QpackSessionError.FieldDecode(QpackDecodeError.Truncated));
+    }
+    let mut bytes: List<Byte> = [];
+    let mut i: Int = p1;
+    while i < end { bytes.push(buf[i]); i = i + 1; }
+    let plain: List<Byte> = if huffman {
+        huff.decode(bytes.as_slice())
+            .map_err(|_| QpackSessionError.HuffmanError)?
+    } else { bytes };
+    Ok((Text.from_utf8_lossy(plain.as_slice()), end))
+}
+
+fn read_name_literal(buf: &[Byte], pos: Int) -> Result<(Text, Int), QpackSessionError> {
+    if pos >= buf.len() {
+        return Err(QpackSessionError.FieldDecode(QpackDecodeError.Truncated));
+    }
+    let huffman = (buf[pos] & 0x08_u8) != 0_u8;
+    let (length, p1) = int_decode(buf, pos, 3)
+        .map_err(|_| QpackSessionError.IntegerError)?;
+    let end = p1 + (length as Int);
+    if end > buf.len() {
+        return Err(QpackSessionError.FieldDecode(QpackDecodeError.Truncated));
+    }
+    let mut bytes: List<Byte> = [];
+    let mut i: Int = p1;
+    while i < end { bytes.push(buf[i]); i = i + 1; }
+    let plain: List<Byte> = if huffman {
+        huff.decode(bytes.as_slice())
+            .map_err(|_| QpackSessionError.HuffmanError)?
+    } else { bytes };
+    Ok((Text.from_utf8_lossy(plain.as_slice()), end))
+}

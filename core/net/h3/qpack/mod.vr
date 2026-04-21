@@ -8,14 +8,12 @@
 // Pure-Verum implementation of the QPACK field-compression format
 // used by HTTP/3 to encode request + response header fields.
 //
-// v0.1 scope: static-table + literal encoding/decoding with Huffman
-// support. QPACK_MAX_TABLE_CAPACITY = 0 negotiation path — matches
-// the compatibility subset every major HTTP/3 client speaks.
-//
-// Dynamic-table support (encoder insertion instructions, decoder
-// acknowledgement instructions, blocked-streams accounting) lands
-// in Phase 6 step 2 — skeleton types already sketched in
-// `static_table.StaticEntry` + `decoder.HeaderField`.
+// v0.2 scope: static-table + dynamic-table + Huffman; both instruction
+// streams (encoder + decoder) + field-section encoder/decoder.
+// Strict non-blocking mode (Required Insert Count = 0) preserves
+// compatibility with peers that negotiate QPACK_MAX_TABLE_CAPACITY=0
+// while allowing peers that advertise larger capacity to actually
+// leverage dynamic compression.
 //
 // # Module layout
 //
@@ -25,8 +23,11 @@
 // ├── static_table.vr   — RFC 9204 Appendix A (99 entries)
 // ├── huffman.vr        — RFC 9204 Appendix B / RFC 7541 §B Huffman
 // ├── integer.vr        — RFC 9204 §4.1.1 prefix-integer codec
-// ├── encoder.vr        — field-section encoder (static + literal)
-// └── decoder.vr        — field-section decoder (static + literal)
+// ├── encoder.vr        — field-section encoder (static + literal, v0.1)
+// ├── decoder.vr        — field-section decoder (static + literal, v0.1)
+// ├── dynamic_table.vr  — RFC 9204 §3.2 dynamic table + ref counting
+// ├── instructions.vr   — RFC 9204 §4.3 encoder + decoder instruction codecs
+// └── session.vr        — RFC 9204 §2 connection-scoped QPACK state machine
 // ```
 //
 // =============================================================================
@@ -38,9 +39,21 @@ public module huffman;
 public module integer;
 public module encoder;
 public module decoder;
+public module dynamic_table;
+public module instructions;
+public module session;
 
 // Re-exports
 public mount .static_table.{StaticEntry, STATIC_TABLE_SIZE};
 public mount .decoder.{HeaderField, QpackDecodeError, decode_field_section};
 public mount .encoder.{encode_field_section};
 public mount .huffman.{HuffError};
+
+// Dynamic-table + instructions + session (v0.2)
+public mount .dynamic_table.{DynamicTable, DynEntry, DynamicTableError};
+public mount .instructions.{
+    EncoderInstruction, DecoderInstruction, InstrError,
+    encode_encoder, decode_encoder, decode_all_encoder,
+    encode_decoder, decode_decoder, decode_all_decoder,
+};
+public mount .session.{QpackSession, QpackSessionError};

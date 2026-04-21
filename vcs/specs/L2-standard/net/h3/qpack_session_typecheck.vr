@@ -1,0 +1,96 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: h3, qpack, session, dynamic-table, typecheck
+// @timeout: 10000
+// @expect: pass
+
+mount core.net.h3.qpack.{
+    QpackSession, QpackSessionError,
+    DynamicTable, DynamicTableError,
+    EncoderInstruction, DecoderInstruction, InstrError,
+    HeaderField,
+    encode_encoder, decode_encoder,
+    encode_decoder, decode_decoder,
+};
+
+fn check_dynamic_table() -> Result<(), DynamicTableError> {
+    let mut dt = DynamicTable.new(4096_u64);
+    dt.set_capacity(4096_u64)?;
+    let _ = dt.insert(Text.from_str("custom-key"), Text.from_str("custom-val"))?;
+    let _ = dt.insert_with_name_ref(true, 17_u64, Text.from_str("GET-ish"))?;
+    let _ = dt.duplicate(0_u64)?;
+    let _ = dt.find(&Text.from_str("custom-key"), &Text.from_str("custom-val"));
+    let _ = dt.find_name(&Text.from_str("custom-key"));
+    let _ = dt.insert_count();
+    Ok(())
+}
+
+fn check_instructions_roundtrip() -> Result<(), InstrError> {
+    let instrs: List<EncoderInstruction> = [
+        EncoderInstruction.SetCapacity(4096_u64),
+        EncoderInstruction.InsertWithNameRef {
+            is_static: true, name_index: 17_u64, value: b"GET".to_vec(),
+        },
+        EncoderInstruction.InsertWithLiteralName {
+            name:  b"x-custom".to_vec(),
+            value: b"yes".to_vec(),
+        },
+        EncoderInstruction.Duplicate(0_u64),
+    ];
+    let mut buf: List<Byte> = [];
+    let mut i: Int = 0;
+    while i < instrs.len() {
+        encode_encoder(&instrs[i], &mut buf);
+        i = i + 1;
+    }
+    let _ = decode_encoder(buf.as_slice(), 0)?;
+
+    let dec: List<DecoderInstruction> = [
+        DecoderInstruction.SectionAck(0_u64),
+        DecoderInstruction.StreamCancel(4_u64),
+        DecoderInstruction.InsertCountIncrement(3_u64),
+    ];
+    let mut dbuf: List<Byte> = [];
+    let mut j: Int = 0;
+    while j < dec.len() {
+        encode_decoder(&dec[j], &mut dbuf);
+        j = j + 1;
+    }
+    let _ = decode_decoder(dbuf.as_slice(), 0)?;
+    Ok(())
+}
+
+fn check_session() -> Result<(), QpackSessionError> {
+    let mut sess = QpackSession.new(4096_u64, 4096_u64);
+    sess.set_encoder_capacity(4096_u64)?;
+
+    let headers: List<HeaderField> = [
+        HeaderField { name: Text.from_str(":method"), value: Text.from_str("GET") },
+        HeaderField { name: Text.from_str(":scheme"), value: Text.from_str("https") },
+        HeaderField { name: Text.from_str(":authority"), value: Text.from_str("api.example.com") },
+        HeaderField { name: Text.from_str(":path"),   value: Text.from_str("/v1/users/42") },
+        HeaderField { name: Text.from_str("user-agent"), value: Text.from_str("verum-h3") },
+    ];
+    let encoded = sess.encode_field_section(&headers)?;
+    // Drain both instruction streams (encoder-stream inserts queued,
+    // decoder-stream acks likewise).
+    let enc_stream_bytes = sess.drain_encoder_out();
+    let dec_stream_bytes = sess.drain_decoder_out();
+    let _ = enc_stream_bytes;
+    let _ = dec_stream_bytes;
+
+    // Round-trip through a symmetric peer session.
+    let mut peer = QpackSession.new(4096_u64, 4096_u64);
+    // Peer must ingest the encoder-stream bytes before it can decode
+    // the field section; in v0.2 non-blocking mode with RIC=0 the
+    // field section decodes without dynamic refs.
+    let _ = peer.decode_field_section(encoded.as_slice())?;
+    Ok(())
+}
+
+fn main() {
+    let _ = check_dynamic_table();
+    let _ = check_instructions_roundtrip();
+    let _ = check_session();
+}

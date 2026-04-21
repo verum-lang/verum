@@ -1,0 +1,245 @@
+// =============================================================================
+// net/h3/qpack/instructions.vr — QPACK encoder + decoder instructions (RFC 9204 §4.3)
+// =============================================================================
+// Layer: 5 (Network — HTTP/3 / QPACK)
+// Dependencies: core, collections, .{integer, huffman}
+// =============================================================================
+//
+// Two dedicated unidirectional streams carry out-of-band QPACK state
+// synchronisation:
+//
+//   Encoder stream (type 0x02, §4.3.1)
+//     Set Dynamic Table Capacity    001xxxxx (5-bit prefix)
+//     Insert with Name Reference    1Txxxxxx (6-bit prefix + literal value)
+//     Insert with Literal Name      01Hxxxxx (5-bit prefix + value literal)
+//     Duplicate                     000xxxxx (5-bit prefix)
+//
+//   Decoder stream (type 0x03, §4.3.2)
+//     Section Acknowledgment        1xxxxxxx (7-bit prefix)
+//     Stream Cancellation           01xxxxxx (6-bit prefix)
+//     Insert Count Increment        00xxxxxx (6-bit prefix)
+//
+// Instruction codec symmetric with the rest of QPACK — prefix
+// integers from integer.vr + optional Huffman on literal strings
+// from huffman.vr.
+//
+// =============================================================================
+
+module core.net.h3.qpack.instructions;
+
+mount core.*;
+mount core.collections.List;
+mount core.net.h3.qpack.huffman as huff;
+mount core.net.h3.qpack.integer.{encode as int_encode, decode as int_decode};
+
+// =============================================================================
+// Error
+// =============================================================================
+
+public type InstrError is
+      Truncated
+    | HuffmanError
+    | IntegerError
+    | UnknownOpcode;
+
+fn iferr<T>(_: core.net.h3.qpack.integer.IntError) -> Result<T, InstrError> {
+    Err(InstrError.IntegerError)
+}
+fn hferr<T>(_: huff.HuffError) -> Result<T, InstrError> {
+    Err(InstrError.HuffmanError)
+}
+
+// =============================================================================
+// Encoder instructions (§4.3.1)
+// =============================================================================
+
+public type EncoderInstruction is
+      SetCapacity(UInt64)
+    | InsertWithNameRef { is_static: Bool, name_index: UInt64, value: List<Byte> }
+    | InsertWithLiteralName { name: List<Byte>, value: List<Byte> }
+    | Duplicate(UInt64);
+
+pub fn encode_encoder(instr: &EncoderInstruction, out: &mut List<Byte>) {
+    match instr {
+        EncoderInstruction.SetCapacity(cap) => {
+            // Opcode: 001xxxxx, prefix=5
+            int_encode(out, 5, 0x20_u8, *cap);
+        },
+        EncoderInstruction.InsertWithNameRef { is_static, name_index, value } => {
+            // Opcode: 1Txxxxxx, prefix=6 (T=1 for static, T=0 for dynamic)
+            let op: Byte = if *is_static { 0xC0_u8 } else { 0x80_u8 };
+            int_encode(out, 6, op, *name_index);
+            encode_string(out, value.as_slice());
+        },
+        EncoderInstruction.InsertWithLiteralName { name, value } => {
+            // Opcode: 01Hxxxxx, prefix=5 (H = Huffman bit — we decide
+            // per-string based on encoded length).
+            encode_literal_name_5bit(out, 0x40_u8, name.as_slice());
+            encode_string(out, value.as_slice());
+        },
+        EncoderInstruction.Duplicate(idx) => {
+            // Opcode: 000xxxxx, prefix=5
+            int_encode(out, 5, 0x00_u8, *idx);
+        },
+    }
+}
+
+pub fn decode_encoder(buf: &[Byte], pos: Int) -> Result<(EncoderInstruction, Int), InstrError> {
+    if pos >= buf.len() { return Err(InstrError.Truncated); }
+    let b0 = buf[pos];
+    if (b0 & 0x80_u8) != 0_u8 {
+        // Insert with Name Reference — 1Txxxxxx
+        let is_static = (b0 & 0x40_u8) != 0_u8;
+        let (idx, p1) = int_decode(buf, pos, 6).or_else(iferr)?;
+        let (val, next) = decode_string(buf, p1)?;
+        Ok((EncoderInstruction.InsertWithNameRef {
+            is_static: is_static, name_index: idx, value: val,
+        }, next))
+    } else if (b0 & 0x40_u8) != 0_u8 {
+        // Insert with Literal Name — 01Hxxxxx
+        let (name, p1) = decode_literal_name_5bit(buf, pos, 0x40_u8)?;
+        let (val, next) = decode_string(buf, p1)?;
+        Ok((EncoderInstruction.InsertWithLiteralName { name: name, value: val }, next))
+    } else if (b0 & 0x20_u8) != 0_u8 {
+        // Set Dynamic Table Capacity — 001xxxxx
+        let (cap, next) = int_decode(buf, pos, 5).or_else(iferr)?;
+        Ok((EncoderInstruction.SetCapacity(cap), next))
+    } else {
+        // Duplicate — 000xxxxx
+        let (idx, next) = int_decode(buf, pos, 5).or_else(iferr)?;
+        Ok((EncoderInstruction.Duplicate(idx), next))
+    }
+}
+
+// =============================================================================
+// Decoder instructions (§4.3.2)
+// =============================================================================
+
+public type DecoderInstruction is
+      SectionAck(UInt64)
+    | StreamCancel(UInt64)
+    | InsertCountIncrement(UInt64);
+
+pub fn encode_decoder(instr: &DecoderInstruction, out: &mut List<Byte>) {
+    match instr {
+        DecoderInstruction.SectionAck(sid) => {
+            // 1xxxxxxx, prefix=7
+            int_encode(out, 7, 0x80_u8, *sid);
+        },
+        DecoderInstruction.StreamCancel(sid) => {
+            // 01xxxxxx, prefix=6
+            int_encode(out, 6, 0x40_u8, *sid);
+        },
+        DecoderInstruction.InsertCountIncrement(n) => {
+            // 00xxxxxx, prefix=6
+            int_encode(out, 6, 0x00_u8, *n);
+        },
+    }
+}
+
+pub fn decode_decoder(buf: &[Byte], pos: Int) -> Result<(DecoderInstruction, Int), InstrError> {
+    if pos >= buf.len() { return Err(InstrError.Truncated); }
+    let b0 = buf[pos];
+    if (b0 & 0x80_u8) != 0_u8 {
+        // Section Ack — 1xxxxxxx
+        let (sid, next) = int_decode(buf, pos, 7).or_else(iferr)?;
+        Ok((DecoderInstruction.SectionAck(sid), next))
+    } else if (b0 & 0x40_u8) != 0_u8 {
+        // Stream Cancel — 01xxxxxx
+        let (sid, next) = int_decode(buf, pos, 6).or_else(iferr)?;
+        Ok((DecoderInstruction.StreamCancel(sid), next))
+    } else {
+        // Insert Count Increment — 00xxxxxx
+        let (n, next) = int_decode(buf, pos, 6).or_else(iferr)?;
+        Ok((DecoderInstruction.InsertCountIncrement(n), next))
+    }
+}
+
+// =============================================================================
+// Bulk-stream helpers — parse every instruction from a buffer
+// =============================================================================
+
+pub fn decode_all_encoder(buf: &[Byte]) -> Result<List<EncoderInstruction>, InstrError> {
+    let mut out: List<EncoderInstruction> = [];
+    let mut pos: Int = 0;
+    while pos < buf.len() {
+        let (inst, next) = decode_encoder(buf, pos)?;
+        out.push(inst);
+        pos = next;
+    }
+    Ok(out)
+}
+
+pub fn decode_all_decoder(buf: &[Byte]) -> Result<List<DecoderInstruction>, InstrError> {
+    let mut out: List<DecoderInstruction> = [];
+    let mut pos: Int = 0;
+    while pos < buf.len() {
+        let (inst, next) = decode_decoder(buf, pos)?;
+        out.push(inst);
+        pos = next;
+    }
+    Ok(out)
+}
+
+// =============================================================================
+// String helpers — same 7-bit / 5-bit prefix + Huffman flag codec
+// =============================================================================
+
+fn encode_string(out: &mut List<Byte>, s: &[Byte]) {
+    // 7-bit prefix with Huffman flag in the high bit — standard QPACK
+    // string literal form (RFC 9204 §4.1.2).
+    let huff_bytes = huff.encoded_byte_length(s);
+    if huff_bytes < s.len() {
+        int_encode(out, 7, 0x80_u8, huff_bytes as UInt64);
+        huff.encode(s, out);
+    } else {
+        int_encode(out, 7, 0x00_u8, s.len() as UInt64);
+        let mut i: Int = 0;
+        while i < s.len() { out.push(s[i]); i = i + 1; }
+    }
+}
+
+fn decode_string(buf: &[Byte], pos: Int) -> Result<(List<Byte>, Int), InstrError> {
+    if pos >= buf.len() { return Err(InstrError.Truncated); }
+    let huffman = (buf[pos] & 0x80_u8) != 0_u8;
+    let (len, p1) = int_decode(buf, pos, 7).or_else(iferr)?;
+    let end = p1 + (len as Int);
+    if end > buf.len() { return Err(InstrError.Truncated); }
+    let mut bytes: List<Byte> = [];
+    let mut i: Int = p1;
+    while i < end { bytes.push(buf[i]); i = i + 1; }
+    let out = if huffman {
+        huff.decode(bytes.as_slice()).or_else(hferr)?
+    } else { bytes };
+    Ok((out, end))
+}
+
+fn encode_literal_name_5bit(out: &mut List<Byte>, opcode: Byte, s: &[Byte]) {
+    let huff_bytes = huff.encoded_byte_length(s);
+    // Huffman bit lives at 0x20 position within the 5-bit prefix word
+    // for encoder stream Insert-with-Literal-Name.
+    if huff_bytes < s.len() {
+        int_encode(out, 5, opcode | 0x20_u8, huff_bytes as UInt64);
+        huff.encode(s, out);
+    } else {
+        int_encode(out, 5, opcode, s.len() as UInt64);
+        let mut i: Int = 0;
+        while i < s.len() { out.push(s[i]); i = i + 1; }
+    }
+}
+
+fn decode_literal_name_5bit(buf: &[Byte], pos: Int, opcode_mask: Byte) -> Result<(List<Byte>, Int), InstrError> {
+    let _ = opcode_mask;
+    if pos >= buf.len() { return Err(InstrError.Truncated); }
+    let huffman = (buf[pos] & 0x20_u8) != 0_u8;
+    let (len, p1) = int_decode(buf, pos, 5).or_else(iferr)?;
+    let end = p1 + (len as Int);
+    if end > buf.len() { return Err(InstrError.Truncated); }
+    let mut bytes: List<Byte> = [];
+    let mut i: Int = p1;
+    while i < end { bytes.push(buf[i]); i = i + 1; }
+    let out = if huffman {
+        huff.decode(bytes.as_slice()).or_else(hferr)?
+    } else { bytes };
+    Ok((out, end))
+}
