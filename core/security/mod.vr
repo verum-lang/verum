@@ -52,6 +52,10 @@ public module util {
 // SPIFFE workload identity (SVID + Workload API client).
 public module spiffe;
 
+// Secret-manager clients (Vault / AWS Secrets Manager / GCP Secret Manager)
+// + the shared SecretStore protocol.
+public module secrets;
+
 // Legacy capability / region modules (pre-crypto).
 public module labels;
 public module regions;
