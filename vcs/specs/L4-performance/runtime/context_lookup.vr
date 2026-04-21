@@ -25,28 +25,28 @@ const BENCHMARK_ITERATIONS: Int = 10_000_000;
 
 /// Test context definitions
 context Logger {
-    fn log(&self, msg: Text);
-    fn level(&self) -> LogLevel;
+    fn log(msg: Text);
+    fn level() -> LogLevel;
 }
 
 context Database {
-    fn query(&self, sql: Text) -> List<Row>;
-    fn execute(&self, sql: Text) -> Int;
+    fn query(sql: Text) -> List<Row>;
+    fn execute(sql: Text) -> Int;
 }
 
 context Config {
-    fn get(&self, key: Text) -> Maybe<Text>;
-    fn get_int(&self, key: Text) -> Maybe<Int>;
+    fn get(key: Text) -> Maybe<Text>;
+    fn get_int(key: Text) -> Maybe<Int>;
 }
 
 context Cache {
-    fn get<T>(&self, key: Text) -> Maybe<T>;
-    fn set<T>(&self, key: Text, value: T);
+    fn get<T>(key: Text) -> Maybe<T>;
+    fn set<T>(key: Text, value: T);
 }
 
 context Metrics {
-    fn counter(&self, name: Text) -> Counter;
-    fn gauge(&self, name: Text) -> Gauge;
+    fn counter(name: Text) -> Counter;
+    fn gauge(name: Text) -> Gauge;
 }
 
 /// Log level enumeration

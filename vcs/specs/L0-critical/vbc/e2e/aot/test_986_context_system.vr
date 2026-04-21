@@ -5,7 +5,7 @@
 // @description: Test context system (dependency injection)
 
 context Logger {
-    fn log(&self, msg: Text) -> Text;
+    fn log(msg: Text) -> Text;
 }
 
 type PrefixLogger is {
@@ -19,7 +19,7 @@ implement Logger for PrefixLogger {
 }
 
 context Config {
-    fn max_retries(&self) -> Int;
+    fn max_retries() -> Int;
 }
 
 type AppConfig is {

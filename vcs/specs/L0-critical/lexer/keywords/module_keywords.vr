@@ -142,22 +142,22 @@ implement<T> Iterator for List<T> {
 
 // Context definition
 context Database {
-    fn query(&self, sql: Text) -> Result<Rows, Error>;
-    fn execute(&self, sql: Text) -> Result<Int, Error>;
-    fn transaction<T>(&self, f: fn() -> T) -> Result<T, Error>;
+    fn query(sql: Text) -> Result<Rows, Error>;
+    fn execute(sql: Text) -> Result<Int, Error>;
+    fn transaction<T>(f: fn() -> T) -> Result<T, Error>;
 }
 
 context Logger {
-    fn debug(&self, msg: Text);
-    fn info(&self, msg: Text);
-    fn warn(&self, msg: Text);
-    fn error(&self, msg: Text);
+    fn debug(msg: Text);
+    fn info(msg: Text);
+    fn warn(msg: Text);
+    fn error(msg: Text);
 }
 
 context FileSystem {
-    fn read(&self, path: Text) -> Result<Bytes, Error>;
-    fn write(&self, path: Text, data: Bytes) -> Result<(), Error>;
-    fn exists(&self, path: Text) -> Bool;
+    fn read(path: Text) -> Result<Bytes, Error>;
+    fn write(path: Text, data: Bytes) -> Result<(), Error>;
+    fn exists(path: Text) -> Bool;
 }
 
 // Context group

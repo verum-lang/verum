@@ -9,8 +9,8 @@ context Empty {
 
 // Basic context
 context Database {
-    fn query(&self, sql: Text) -> List<Row>;
-    fn execute(&mut self, sql: Text) -> Int;
+    fn query(sql: Text) -> List<Row>;
+    fn execute(sql: Text) -> Int;
 }
 
 // Async context (keyword before context)
@@ -27,55 +27,55 @@ context async NetworkClient {
 
 // Context with multiple methods
 context Logger {
-    fn log(&self, level: Int, message: Text);
-    fn debug(&self, message: Text);
-    fn info(&self, message: Text);
-    fn warn(&self, message: Text);
-    fn error(&self, message: Text);
+    fn log(level: Int, message: Text);
+    fn debug(message: Text);
+    fn info(message: Text);
+    fn warn(message: Text);
+    fn error(message: Text);
 }
 
 // Context with various method signatures
 context FileSystem {
-    fn read(&self, path: Text) -> Result<Text, IoError>;
-    fn write(&mut self, path: Text, content: Text) -> Result<(), IoError>;
-    fn exists(&self, path: Text) -> Bool;
-    fn delete(&mut self, path: Text) -> Result<(), IoError>;
-    fn list_dir(&self, path: Text) -> List<Text>;
+    fn read(path: Text) -> Result<Text, IoError>;
+    fn write(path: Text, content: Text) -> Result<(), IoError>;
+    fn exists(path: Text) -> Bool;
+    fn delete(path: Text) -> Result<(), IoError>;
+    fn list_dir(path: Text) -> List<Text>;
 }
 
 // Context with methods using Self types (no type/const declarations)
 context Repository {
-    fn find_by_id(&self, id: Int) -> Maybe<Entity>;
-    fn save(&mut self, entity: Entity) -> Int;
+    fn find_by_id(id: Int) -> Maybe<Entity>;
+    fn save(entity: Entity) -> Int;
 }
 
 // Context with configuration-like methods
 context Configuration {
-    fn version(&self) -> Int;
-    fn name(&self) -> Text;
-    fn get(&self, key: Text) -> Maybe<Text>;
-    fn set(&mut self, key: Text, value: Text);
+    fn version() -> Int;
+    fn name() -> Text;
+    fn get(key: Text) -> Maybe<Text>;
+    fn set(key: Text, value: Text);
 }
 
 // Generic context
 context Cache<T> {
-    fn get(&self, key: Text) -> Maybe<T>;
-    fn set(&mut self, key: Text, value: T);
-    fn invalidate(&mut self, key: Text);
-    fn clear(&mut self);
+    fn get(key: Text) -> Maybe<T>;
+    fn set(key: Text, value: T);
+    fn invalidate(key: Text);
+    fn clear();
 }
 
 // Context with multiple type parameters
 context Mapper<A, B> {
-    fn map(&self, a: A) -> B;
-    fn unmap(&self, b: B) -> A;
+    fn map(a: A) -> B;
+    fn unmap(b: B) -> A;
 }
 
 // Context with bounds
 context OrderedCache<T: Ord> {
-    fn get_min(&self) -> Maybe<T>;
-    fn get_max(&self) -> Maybe<T>;
-    fn range(&self, min: T, max: T) -> List<T>;
+    fn get_min() -> Maybe<T>;
+    fn get_max() -> Maybe<T>;
+    fn range(min: T, max: T) -> List<T>;
 }
 
 context HashCache<K: Hash + Eq, V> {
@@ -85,17 +85,17 @@ context HashCache<K: Hash + Eq, V> {
 
 // Context with context requirements on methods
 context TransactionalDatabase {
-    fn begin(&mut self) using [Database];
-    fn commit(&mut self) using [Database];
-    fn rollback(&mut self) using [Database];
+    fn begin() using [Database];
+    fn commit() using [Database];
+    fn rollback() using [Database];
 }
 
 context ServiceA {
-    fn do_work(&self) using [Logger];
+    fn do_work() using [Logger];
 }
 
 context ServiceB {
-    fn process(&self, data: Data) -> Result<Data, Error> using [ServiceA, Logger];
+    fn process(data: Data) -> Result<Data, Error> using [ServiceA, Logger];
 }
 
 // Context with visibility modifiers
@@ -113,22 +113,22 @@ protected context ProtectedContext {
 
 // Context with method (no visibility on methods - not supported)
 context SingleVisibility {
-    fn method_one(&self);
-    fn method_two(&self);
+    fn method_one();
+    fn method_two();
 }
 
 // Context with reference parameters
 context BufferManager {
-    fn read(&self, buf: &mut [u8]) -> Int;
-    fn write(&mut self, buf: &[u8]) -> Int;
-    fn peek(&self, buf: &[u8]) -> &[u8];
+    fn read(buf: &mut [u8]) -> Int;
+    fn write(buf: &[u8]) -> Int;
+    fn peek(buf: &[u8]) -> &[u8];
 }
 
 // Context with function type parameters
 context CallbackRegistry {
-    fn register(&mut self, name: Text, callback: fn());
-    fn register_with_arg(&mut self, name: Text, callback: fn(Int));
-    fn register_async(&mut self, name: Text, callback: fn() -> Future<()>);
+    fn register(name: Text, callback: fn());
+    fn register_with_arg(name: Text, callback: fn(Int));
+    fn register_async(name: Text, callback: fn() -> Future<()>);
 }
 
 // Context protocol (dual-kind - both constraint and injectable)
@@ -192,15 +192,15 @@ using LoggingOnly = [Logger];
 
 // Generic context without where clause
 context EntityRepository<T: Entity> {
-    fn find(&self, id: Int) -> Maybe<T>;
-    fn find_all(&self) -> List<T>;
-    fn save(&mut self, entity: T) -> Int;
-    fn delete(&mut self, id: Int) -> Bool;
+    fn find(id: Int) -> Maybe<T>;
+    fn find_all() -> List<T>;
+    fn save(entity: T) -> Int;
+    fn delete(id: Int) -> Bool;
 }
 
 // Context with where clause on context itself
 context Transformer<A, B> {
-    fn transform(&self, a: A) -> B;
+    fn transform(a: A) -> B;
 }
 
 // Async context with complex async methods
@@ -212,24 +212,24 @@ async context StreamProcessor {
 
 // Context with generic methods
 context GenericProcessor {
-    fn process<T: Clone>(&self, value: T) -> T;
-    fn transform<A, B>(&self, value: A, f: fn(A) -> B) -> B;
+    fn process<T: Clone>(value: T) -> T;
+    fn transform<A, B>(value: A, f: fn(A) -> B) -> B;
 }
 
 // Large context with many methods (no type/const declarations)
 context CompleteDatabase {
-    fn connect(&mut self, url: Text) -> Result<(), DbError>;
-    fn disconnect(&mut self);
-    fn is_connected(&self) -> Bool;
+    fn connect(url: Text) -> Result<(), DbError>;
+    fn disconnect();
+    fn is_connected() -> Bool;
 
-    fn query(&self, sql: Text) -> Result<List<Row>, DbError>;
-    fn query_one(&self, sql: Text) -> Result<Maybe<Row>, DbError>;
-    fn execute(&mut self, sql: Text) -> Result<Int, DbError>;
-    fn execute_batch(&mut self, statements: List<Text>) -> Result<List<Int>, DbError>;
+    fn query(sql: Text) -> Result<List<Row>, DbError>;
+    fn query_one(sql: Text) -> Result<Maybe<Row>, DbError>;
+    fn execute(sql: Text) -> Result<Int, DbError>;
+    fn execute_batch(statements: List<Text>) -> Result<List<Int>, DbError>;
 
-    fn begin_transaction(&mut self) -> Result<Transaction, DbError>;
-    fn commit(&mut self, tx: Transaction) -> Result<(), DbError>;
-    fn rollback(&mut self, tx: Transaction) -> Result<(), DbError>;
+    fn begin_transaction() -> Result<Transaction, DbError>;
+    fn commit(tx: Transaction) -> Result<(), DbError>;
+    fn rollback(tx: Transaction) -> Result<(), DbError>;
 
     async fn query_async(&self, sql: Text) -> Result<List<Row>, DbError>;
     async fn execute_async(&mut self, sql: Text) -> Result<Int, DbError>;

@@ -6,7 +6,7 @@
 // @expected-exit: 0
 
 context Config {
-    fn get_value(&self) -> Int;
+    fn get_value() -> Int;
 }
 
 type SimpleConfig is { val: Int };

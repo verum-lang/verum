@@ -5,7 +5,7 @@
 // @description: Context system (dependency injection) e2e
 
 context AppConfig {
-    fn get_max_retries(&self) -> Int;
+    fn get_max_retries() -> Int;
 }
 
 type MyConfig is { retries: Int };

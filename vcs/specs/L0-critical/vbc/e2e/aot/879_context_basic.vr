@@ -8,7 +8,7 @@
 // Provides a Config context, calls a function that uses it.
 
 context Config {
-    fn get_value(&self) -> Int;
+    fn get_value() -> Int;
 }
 
 type SimpleConfig is {

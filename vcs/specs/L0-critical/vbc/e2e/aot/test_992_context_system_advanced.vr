@@ -5,8 +5,8 @@
 // @description: Advanced context system — nested scoping, multiple providers, context in spawned tasks
 
 context Counter {
-    fn increment(&mut self) -> Int;
-    fn get(&self) -> Int;
+    fn increment() -> Int;
+    fn get() -> Int;
 }
 
 type SimpleCounter is {
@@ -24,7 +24,7 @@ implement Counter for SimpleCounter {
 }
 
 context Formatter {
-    fn format(&self, val: Int) -> Text;
+    fn format(val: Int) -> Text;
 }
 
 type DecimalFormatter is {

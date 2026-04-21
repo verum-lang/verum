@@ -14,7 +14,7 @@ implement AppConfig {
 }
 
 context Config {
-    fn get_port(&self) -> Int;
+    fn get_port() -> Int;
 }
 
 implement Config for AppConfig {

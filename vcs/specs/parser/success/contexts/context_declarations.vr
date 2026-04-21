@@ -5,17 +5,17 @@
 
 // Basic context declaration
 context Logger {
-    fn log(&self, message: Text);
-    fn error(&self, message: Text);
-    fn warn(&self, message: Text);
-    fn debug(&self, message: Text);
+    fn log(message: Text);
+    fn error(message: Text);
+    fn warn(message: Text);
+    fn debug(message: Text);
 }
 
 // Context with return types
 context Database {
-    fn query(&self, sql: Text) -> Result<Rows, Error>;
-    fn execute(&mut self, sql: Text) -> Result<Int, Error>;
-    fn transaction(&mut self) -> Transaction;
+    fn query(sql: Text) -> Result<Rows, Error>;
+    fn execute(sql: Text) -> Result<Int, Error>;
+    fn transaction() -> Transaction;
 }
 
 // Async context
@@ -34,48 +34,48 @@ context async HttpClient {
 
 // Context with generics
 context Repository<T> {
-    fn find(&self, id: Int) -> Maybe<T>;
-    fn find_all(&self) -> List<T>;
-    fn save(&mut self, entity: T) -> Result<T, Error>;
-    fn delete(&mut self, id: Int) -> Result<(), Error>;
+    fn find(id: Int) -> Maybe<T>;
+    fn find_all() -> List<T>;
+    fn save(entity: T) -> Result<T, Error>;
+    fn delete(id: Int) -> Result<(), Error>;
 }
 
 // Context with multiple type parameters
 context Cache<K, V> {
-    fn get(&self, key: K) -> Maybe<V>;
-    fn set(&mut self, key: K, value: V);
-    fn remove(&mut self, key: K) -> Maybe<V>;
-    fn clear(&mut self);
+    fn get(key: K) -> Maybe<V>;
+    fn set(key: K, value: V);
+    fn remove(key: K) -> Maybe<V>;
+    fn clear();
 }
 
 // Context with bounded generics
 context EventStore<E: Event> {
-    fn append(&mut self, event: E) -> EventId;
-    fn read(&self, from: EventId) -> List<E>;
-    fn subscribe(&self, handler: fn(E));
+    fn append(event: E) -> EventId;
+    fn read(from: EventId) -> List<E>;
+    fn subscribe(handler: fn(E));
 }
 
 // Context with path operations
 context FileSystem {
-    fn open(&self, path: Text) -> Result<FileHandle, Error>;
-    fn read(&self, file: FileHandle) -> Result<List<Byte>, Error>;
-    fn write(&mut self, file: FileHandle, data: List<Byte>) -> Result<(), Error>;
-    fn close(&mut self, file: FileHandle);
+    fn open(path: Text) -> Result<FileHandle, Error>;
+    fn read(file: FileHandle) -> Result<List<Byte>, Error>;
+    fn write(file: FileHandle, data: List<Byte>) -> Result<(), Error>;
+    fn close(file: FileHandle);
 }
 
 // Context for configuration
 context Config {
-    fn max_retries(&self) -> Int;
-    fn timeout_ms(&self) -> Int;
-    fn get(&self, key: Text) -> Maybe<Text>;
-    fn set(&mut self, key: Text, value: Text);
+    fn max_retries() -> Int;
+    fn timeout_ms() -> Int;
+    fn get(key: Text) -> Maybe<Text>;
+    fn set(key: Text, value: Text);
 }
 
 // Public context
 public context MetricsCollector {
-    fn increment(&mut self, name: Text);
-    fn gauge(&mut self, name: Text, value: Float);
-    fn histogram(&mut self, name: Text, value: Float);
+    fn increment(name: Text);
+    fn gauge(name: Text, value: Float);
+    fn histogram(name: Text, value: Float);
 }
 
 // Internal context
@@ -86,9 +86,9 @@ internal context InternalState {
 
 // Context with complex method signatures
 context MessageQueue {
-    fn send<T: Serialize>(&mut self, topic: Text, message: T) -> Result<MessageId, Error>;
-    fn receive<T: Deserialize>(&mut self, topic: Text) -> Result<Maybe<T>, Error>;
-    fn acknowledge(&mut self, id: MessageId) -> Result<(), Error>;
+    fn send<T: Serialize>(topic: Text, message: T) -> Result<MessageId, Error>;
+    fn receive<T: Deserialize>(topic: Text) -> Result<Maybe<T>, Error>;
+    fn acknowledge(id: MessageId) -> Result<(), Error>;
 }
 
 // Empty context (marker)
@@ -97,7 +97,7 @@ context Authenticated {
 
 // Context for secure storage
 context SecureStorage {
-    fn read(&self, key: Text) -> Maybe<Bytes>;
-    fn write(&mut self, key: Text, value: Bytes);
-    fn delete(&mut self, key: Text);
+    fn read(key: Text) -> Maybe<Bytes>;
+    fn write(key: Text, value: Bytes);
+    fn delete(key: Text);
 }

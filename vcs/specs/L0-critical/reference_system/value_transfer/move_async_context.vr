@@ -75,7 +75,7 @@ async fn test_copy_across_await() {
 
 /// Context for testing
 context Database {
-    fn query(&self, q: Text) -> List<Row>;
+    fn query(q: Text) -> List<Row>;
 }
 
 type Row is {

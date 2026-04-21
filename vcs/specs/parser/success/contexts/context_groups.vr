@@ -30,42 +30,42 @@ using TransactionalContexts = [Database.transactional(), Cache.scoped()];
 // Standard library context groups with @std attribute
 @std(io)
 context FileSystem {
-    fn read(&self, path: Text) -> Result<Bytes, IoError>;
-    fn write(&mut self, path: Text, data: Bytes) -> Result<(), IoError>;
+    fn read(path: Text) -> Result<Bytes, IoError>;
+    fn write(path: Text, data: Bytes) -> Result<(), IoError>;
 }
 
 @std(io)
 context Network {
-    fn connect(&self, host: Text, port: Int) -> Result<Connection, NetError>;
+    fn connect(host: Text, port: Int) -> Result<Connection, NetError>;
 }
 
 @std(logging)
 context Logger {
-    fn log(&self, level: LogLevel, msg: Text);
-    fn info(&self, msg: Text);
-    fn warn(&self, msg: Text);
-    fn error(&self, msg: Text);
-    fn debug(&self, msg: Text);
+    fn log(level: LogLevel, msg: Text);
+    fn info(msg: Text);
+    fn warn(msg: Text);
+    fn error(msg: Text);
+    fn debug(msg: Text);
 }
 
 @std(metrics)
 context Metrics {
-    fn counter(&mut self, name: Text, value: Int);
-    fn gauge(&mut self, name: Text, value: Float);
-    fn histogram(&mut self, name: Text, value: Float);
+    fn counter(name: Text, value: Int);
+    fn gauge(name: Text, value: Float);
+    fn histogram(name: Text, value: Float);
 }
 
 @std(time)
 context Clock {
-    fn now(&self) -> Instant;
-    fn sleep(&self, duration: Duration);
+    fn now() -> Instant;
+    fn sleep(duration: Duration);
 }
 
 @std(random)
 context Random {
-    fn next_int(&mut self) -> Int;
-    fn next_float(&mut self) -> Float;
-    fn next_bool(&mut self) -> Bool;
+    fn next_int() -> Int;
+    fn next_float() -> Float;
+    fn next_bool() -> Bool;
 }
 
 // Function using context group

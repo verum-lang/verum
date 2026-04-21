@@ -144,11 +144,11 @@ fn async_clone_debug() -> async fn<T: Clone + Debug>(T) -> Text { async |x| x.de
 // =============================================================================
 
 context Database {
-    fn query(&self, sql: Text) -> Result<Data, Error>;
+    fn query(sql: Text) -> Result<Data, Error>;
 }
 
 context Logger {
-    fn log(&self, message: Text);
+    fn log(message: Text);
 }
 
 type Data is { value: Text };

@@ -5,10 +5,10 @@
 
 // Context with generics
 context Repository<T: Entity> {
-    fn find_by_id(&self, id: T.Id) -> Maybe<T>;
-    fn save(&mut self, entity: T) -> T.Id;
-    fn delete(&mut self, id: T.Id) -> Bool;
-    fn find_all(&self) -> List<T>;
+    fn find_by_id(id: T.Id) -> Maybe<T>;
+    fn save(entity: T) -> T.Id;
+    fn delete(id: T.Id) -> Bool;
+    fn find_all() -> List<T>;
 }
 
 // Context with type constraints

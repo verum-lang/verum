@@ -8,20 +8,20 @@
 
 // Define contexts
 context Database {
-    fn query(&self, sql: Text) -> Result<Rows, DbError>;
-    fn execute(&self, sql: Text) -> Result<Int, DbError>;
+    fn query(sql: Text) -> Result<Rows, DbError>;
+    fn execute(sql: Text) -> Result<Int, DbError>;
 }
 
 context Logger {
-    fn info(&self, msg: Text);
-    fn warn(&self, msg: Text);
-    fn error(&self, msg: Text);
+    fn info(msg: Text);
+    fn warn(msg: Text);
+    fn error(msg: Text);
 }
 
 context Cache {
-    fn get(&self, key: Text) -> Maybe<Bytes>;
-    fn set(&self, key: Text, value: Bytes);
-    fn invalidate(&self, key: Text);
+    fn get(key: Text) -> Maybe<Bytes>;
+    fn set(key: Text, value: Bytes);
+    fn invalidate(key: Text);
 }
 
 type DbError is { message: Text };

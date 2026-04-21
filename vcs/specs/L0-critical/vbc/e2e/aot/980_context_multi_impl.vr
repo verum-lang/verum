@@ -6,8 +6,8 @@
 // @expected-exit: 0
 
 context Counter {
-    fn get(&self) -> Int;
-    fn increment(&mut self) -> Int;
+    fn get() -> Int;
+    fn increment() -> Int;
 }
 
 type UpCounter is { value: Int };

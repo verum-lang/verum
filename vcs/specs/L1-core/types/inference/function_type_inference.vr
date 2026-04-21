@@ -62,11 +62,11 @@ fn test_async_application_inference() {
 // =============================================================================
 
 context Database {
-    fn query(&self, sql: Text) -> Result<Data, Error>;
+    fn query(sql: Text) -> Result<Data, Error>;
 }
 
 context Logger {
-    fn log(&self, message: Text);
+    fn log(message: Text);
 }
 
 type Data is { value: Text };
