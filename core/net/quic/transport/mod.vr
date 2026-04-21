@@ -27,6 +27,7 @@ module core.net.quic.transport;
 
 public module abstraction;
 public module pump;
+public module listener;
 
 // Re-exports
 public mount .abstraction.{
@@ -34,3 +35,4 @@ public mount .abstraction.{
     InboundDatagram, EcnCodepoint, TransportError,
 };
 public mount .pump.{ConnectionPump, PumpPhase, PumpError};
+public mount .listener.{ServerListener, AcceptedConnection, ListenerError};

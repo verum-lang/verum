@@ -1,0 +1,48 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: quic, listener, stream-assembler, typecheck
+// @timeout: 10000
+// @expect: pass
+
+mount core.net.quic.transport.{
+    ServerListener, AcceptedConnection, ListenerError,
+};
+mount core.net.quic.connection_sm.stream_assembler.{
+    AssemblyBudget, assemble_stream_frames, maybe_emit_flow_control_updates,
+};
+mount core.net.quic.recovery.{NewReno, CongestionCtrl};
+mount core.net.quic.stream_sm.{SendStream, RecvStream, ConnFlowControl};
+mount core.net.quic.frame.{Frame};
+
+fn check_budget() {
+    let cc = NewReno.new();
+    let flow = ConnFlowControl.new(1_000_000_u64, 1_000_000_u64, 100_u64, 100_u64, 100_u64, 100_u64);
+    let _ = AssemblyBudget.from_caps(1200, &cc, &flow);
+}
+
+fn check_stream_assembly() {
+    let mut streams: List<(UInt64, SendStream)> = [];
+    let mut flow = ConnFlowControl.new(1_000_000_u64, 1_000_000_u64, 100_u64, 100_u64, 100_u64, 100_u64);
+    let cc = NewReno.new();
+
+    let mut s = SendStream.new(4_u64, 65536_u64);
+    let data: [Byte; 5] = [0x68_u8, 0x65_u8, 0x6c_u8, 0x6c_u8, 0x6f_u8];
+    let _ = s.write(&data, 65536_u64);
+    streams.push((4_u64, s));
+
+    let budget = AssemblyBudget.from_caps(1200, &cc, &flow);
+    let (_frames, _cursor) = assemble_stream_frames(&mut streams, &mut flow, budget, 0_u64);
+}
+
+fn check_fc_updates() {
+    let mut recv: List<(UInt64, RecvStream)> = [];
+    let mut flow = ConnFlowControl.new(1_000_000_u64, 1_000_000_u64, 100_u64, 100_u64, 100_u64, 100_u64);
+    let _ = maybe_emit_flow_control_updates(&mut recv, &mut flow, 2_000_000_u64);
+}
+
+fn main() {
+    check_budget();
+    check_stream_assembly();
+    check_fc_updates();
+}

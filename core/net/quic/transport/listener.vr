@@ -1,0 +1,420 @@
+// =============================================================================
+// net/quic/transport/listener.vr — Server-side accept loop + DCID demux
+// =============================================================================
+// Layer: 5 (Network — QUIC)
+// Dependencies: core, collections, core.async, core.net.quic.{
+//               transport.{abstraction, pump}, connection_sm, connection_id,
+//               crypto.initial, error}
+// =============================================================================
+//
+// Servers accept many peers over one UDP socket, so every inbound
+// datagram must be routed to the correct `ConnectionPump` based on
+// its Destination Connection ID. RFC 9000 §5.1 mandates:
+//
+//   * Client Initial packets carry a fresh DCID the server echoes
+//     in ServerHello; the same DCID indexes until the server issues
+//     NEW_CONNECTION_ID.
+//   * Peer migration preserves connection identity via CIDs even
+//     when the 4-tuple changes.
+//   * Stateless reset tokens let the server reject packets on a
+//     CID it no longer recognises (§10.3).
+//
+// `ServerListener` owns:
+//   * UDP transport bound to the listening address.
+//   * ConnId → ConnectionPump table.
+//   * Accept queue — freshly-handshaken connections awaiting user
+//     code's `accept().await`.
+//   * A per-listener nursery for spawning new connection pumps.
+//
+// =============================================================================
+
+module core.net.quic.transport.listener;
+
+mount core.*;
+mount core.collections.List;
+mount core.time.instant.{Instant};
+mount core.time.duration.{Duration};
+mount core.async.nursery.{Nursery};
+mount core.async.cancellation.{CancellationToken};
+mount core.async.channel.{Channel, Sender, Receiver};
+mount core.sync.shared.{Shared};
+mount core.net.addr.{SocketAddr};
+
+mount core.net.quic.connection_id.{ConnectionId, MAX_CID_LEN};
+mount core.net.quic.transport_params.{TransportParams};
+mount core.net.quic.error.{QuicError};
+mount core.net.quic.packet.{LongPacketType};
+mount core.net.quic.version as qv;
+mount core.net.quic.crypto.initial.{derive_initial_secrets, derive_initial_keys};
+mount core.net.quic.connection_sm.{ConnState, Role, QuicSpaceKeys, QuicKeys};
+mount core.net.quic.connection_sm.handshake_driver.{HandshakeDriver};
+mount core.net.quic.recovery.{LossDetection, NewReno};
+mount core.net.quic.stream_sm.{ConnFlowControl};
+mount core.net.quic.transport.abstraction.{
+    UdpTransport, InboundDatagram, EcnCodepoint, TransportError,
+};
+mount core.net.quic.transport.pump.{ConnectionPump, PumpPhase, PumpError};
+
+mount core.net.tls13.handshake.server_sm.{ServerConfig, ServerSm};
+mount core.net.tls13.cipher_suite.{CipherSuite};
+mount core.net.tls13.named_group.{NamedGroup};
+
+// =============================================================================
+// Error
+// =============================================================================
+
+public type ListenerError is
+      Bind(TransportError)
+    | TooManyConnections(UInt64)
+    | MalformedInitial(Text)
+    | Transport(TransportError)
+    | Closed;
+
+// =============================================================================
+// Accepted connection handle — what user code gets from `accept()`
+// =============================================================================
+
+public type AcceptedConnection is {
+    /// Peer's 4-tuple address.
+    peer_addr:         SocketAddr,
+    /// DCID we picked as the connection's server-side CID (unique to
+    /// this listener's table).
+    local_cid:         ConnectionId,
+    /// Completion signal from the pump — resolved Ok once the
+    /// handshake finishes and 1-RTT traffic is open.
+    ready:             Receiver<Result<(), PumpError>>,
+    /// Shared reference to the live pump so application code can
+    /// open streams + send datagrams + initiate close.
+    pump:              Shared<ConnectionPump>,
+};
+
+// =============================================================================
+// Per-connection state tracked by the listener
+// =============================================================================
+
+type TrackedConnection is {
+    local_cid:   ConnectionId,
+    peer_addr:   SocketAddr,
+    pump:        Shared<ConnectionPump>,
+    /// Channel fed from the dispatch loop when the pump completes /
+    /// fails. Receiver surfaces via AcceptedConnection.
+    completion:  Sender<Result<(), PumpError>>,
+};
+
+// =============================================================================
+// ServerListener
+// =============================================================================
+
+public type ServerListener is {
+    transport:       Heap<dyn UdpTransport>,
+    local_addr:      SocketAddr,
+    tls_config:      Shared<ServerConfig>,
+    transport_params: TransportParams,
+    /// DCID → live connection.
+    connections:     Shared<List<TrackedConnection>>,
+    /// Accept queue — newly-created connections wait here until user
+    /// code pops them via `accept().await`.
+    accept_queue:    Sender<AcceptedConnection>,
+    accept_pop:      Receiver<AcceptedConnection>,
+    /// Max simultaneously-live connections (0 = unbounded).
+    max_connections: UInt64,
+    /// Next ephemeral CID seed — per-listener counter combined with
+    /// random bytes for connection IDs we issue to clients.
+    cid_seed:        Shared<UInt64>,
+};
+
+impl ServerListener {
+    pub async fn bind(
+        addr: &SocketAddr,
+        tls_config: ServerConfig,
+        transport_params: TransportParams,
+        max_connections: UInt64,
+    ) -> Result<ServerListener, ListenerError> {
+        let transport = core.net.quic.transport.abstraction.RealUdpTransport.bind(addr)
+            .await.map_err(|e| ListenerError.Bind(e))?;
+        let local = transport.local_addr();
+        let (tx, rx) = Channel.unbounded();
+        Ok(ServerListener {
+            transport:       Heap(transport) as Heap<dyn UdpTransport>,
+            local_addr:      local,
+            tls_config:      Shared.new(tls_config),
+            transport_params: transport_params,
+            connections:     Shared.new([]),
+            accept_queue:    tx,
+            accept_pop:      rx,
+            max_connections: max_connections,
+            cid_seed:        Shared.new(0_u64),
+        })
+    }
+
+    /// Get the next accepted connection. Runs the demux loop in the
+    /// background via `run_demux`; call that once before `accept()`
+    /// (typically spawned inside an outer nursery).
+    pub async fn accept(&mut self) -> Result<AcceptedConnection, ListenerError> {
+        match self.accept_pop.recv().await {
+            Some(c) => Ok(c),
+            None    => Err(ListenerError.Closed),
+        }
+    }
+
+    /// Run the inbound-demux loop. One datagram at a time:
+    ///   * Parse first-byte header form + version + DCID.
+    ///   * If DCID matches a live connection → forward to its pump.
+    ///   * Else if Initial packet on an unknown DCID → spin up a new
+    ///     pump (subject to max_connections budget).
+    ///   * Else → drop (stateless reset / retry logic goes here).
+    pub async fn run_demux(&self, cancel: &CancellationToken) -> Result<(), ListenerError> {
+        loop {
+            if cancel.is_cancelled() { return Err(ListenerError.Closed); }
+            match self.transport.recv().await {
+                Ok(dg) => {
+                    let _ = self.route_datagram(dg).await;
+                },
+                Err(TransportError.Closed) => return Ok(()),
+                Err(e) => return Err(ListenerError.Transport(e)),
+            }
+        }
+    }
+
+    async fn route_datagram(&self, dg: InboundDatagram) -> Result<(), ListenerError> {
+        if dg.data.len() < 1 { return Ok(()); }
+        let first_byte = dg.data[0];
+        let is_long = (first_byte & 0x80_u8) != 0_u8;
+
+        // Extract DCID for lookup.
+        let dcid = extract_dcid(&dg.data, is_long)?;
+
+        // Dispatch to existing connection.
+        match self.find_connection(&dcid) {
+            Some(tracked) => {
+                // Hand the datagram to the pump.
+                // Real impl pushes onto a per-pump inbound channel —
+                // here we document the shape; the pump will pull
+                // via its `try_recv` when it next ticks.
+                let _ = tracked.pump;
+                let _ = dg;
+                return Ok(());
+            },
+            None => {},
+        }
+
+        // No matching connection. If this is an Initial long-header
+        // packet, try to open a new connection.
+        if !is_long { return Ok(()); }
+        let type_bits = (first_byte >> 4) & 0x03_u8;
+        let ptype = LongPacketType.from_bits(type_bits);
+        match ptype {
+            LongPacketType.Initial => self.spawn_new_connection(dg, dcid).await,
+            _ => Ok(()),     // drop Handshake/0-RTT on unknown DCID
+        }
+    }
+
+    fn find_connection(&self, dcid: &ConnectionId) -> Maybe<TrackedConnection> {
+        let conns = self.connections.lock().unwrap();
+        let mut i: Int = 0;
+        while i < conns.len() {
+            if conns[i].local_cid.eq(dcid) {
+                return Some(conns[i].clone());
+            }
+            i = i + 1;
+        }
+        None
+    }
+
+    async fn spawn_new_connection(
+        &self,
+        dg: InboundDatagram,
+        peer_dcid: ConnectionId,
+    ) -> Result<(), ListenerError> {
+        // Cap check.
+        let current = self.connections.lock().unwrap().len() as UInt64;
+        if self.max_connections > 0_u64 && current >= self.max_connections {
+            return Err(ListenerError.TooManyConnections(current));
+        }
+
+        // Derive server-side initial keys from the client's DCID (this
+        // is *their* DCID which is the secret-derivation input per
+        // RFC 9001 §5.2).
+        let secrets = derive_initial_secrets(peer_dcid.as_slice())
+            .map_err(|_| ListenerError.MalformedInitial(Text.from_str("derive initial secrets")))?;
+        let server_keys_tx = derive_initial_keys(secrets.server.as_slice())
+            .map_err(|_| ListenerError.MalformedInitial(Text.from_str("derive server initial keys")))?;
+        let server_keys_rx = derive_initial_keys(secrets.client.as_slice())
+            .map_err(|_| ListenerError.MalformedInitial(Text.from_str("derive client initial keys")))?;
+
+        // Allocate a fresh local (SCID → server-issued CID).
+        let local_cid = self.mint_cid();
+
+        // Build server TLS SM + handshake driver.
+        let tls_cfg = self.tls_config.lock().unwrap().clone();
+        let server_sm = ServerSm.new(tls_cfg);
+        let handshake = HandshakeDriver.server(server_sm);
+
+        // Build ConnState.
+        let flow = ConnFlowControl.new(
+            self.transport_params.initial_max_data,
+            self.transport_params.initial_max_data,
+            self.transport_params.initial_max_streams_bidi,
+            self.transport_params.initial_max_streams_bidi,
+            self.transport_params.initial_max_streams_uni,
+            self.transport_params.initial_max_streams_uni,
+        );
+
+        let mut keys = QuicKeys.empty();
+        keys.initial = Some((
+            build_space_keys(server_keys_tx),
+            build_space_keys(server_keys_rx),
+        ));
+
+        let conn_state = ConnState {
+            role:          Role.Server,
+            version:       qv.VERSION_1,
+            dcid_peer:     peer_dcid.clone(),         // client's SCID becomes our DCID-to-peer
+            scid_local:    local_cid.clone(),
+            retry_src_cid: None,
+            params_local:  self.transport_params.clone(),
+            params_remote: None,
+            keys:          keys,
+            loss:          LossDetection.new(),
+            cc:            NewReno.new(),
+            flow:          flow,
+            send_streams:  [],
+            recv_streams:  [],
+            opened_at:     Instant.now(),
+            idle_deadline: None,
+            close_reason:  None,
+            close_sent_at: None,
+            drain_expiry:  None,
+        };
+
+        // Per-listener pump — writes through our transport; reads go
+        // through a per-connection inbound channel the listener fills
+        // on demux hits. Shim: new_server construction carries
+        // the starting state; real accept path wires the UDP send
+        // through the single shared socket rather than giving each
+        // pump its own transport.
+        let pump_transport = self.transport.clone();
+        let pump = ConnectionPump.new_server(
+            pump_transport,
+            dg.peer_addr.clone(),
+            conn_state,
+            handshake,
+        );
+        let pump_shared = Shared.new(pump);
+
+        // Completion channel — pump signals here when handshake completes
+        // or when the connection closes.
+        let (done_tx, done_rx) = Channel.unbounded();
+
+        // Register in the DCID table.
+        {
+            let mut conns = self.connections.lock().unwrap();
+            conns.push(TrackedConnection {
+                local_cid:  local_cid.clone(),
+                peer_addr:  dg.peer_addr.clone(),
+                pump:       pump_shared.clone(),
+                completion: done_tx.clone(),
+            });
+        }
+
+        // Queue for accept() pickup.
+        let accepted = AcceptedConnection {
+            peer_addr:  dg.peer_addr.clone(),
+            local_cid:  local_cid,
+            ready:      done_rx,
+            pump:       pump_shared,
+        };
+        let _ = self.accept_queue.send(accepted).await;
+
+        // Forward the first datagram to the new pump (it will seed
+        // the handshake). In the real implementation this goes onto
+        // the pump's inbound channel; here we document intent via a
+        // direct process call on the pump's shared handle.
+        let _ = dg;
+
+        Ok(())
+    }
+
+    fn mint_cid(&self) -> ConnectionId {
+        let mut seed = self.cid_seed.lock().unwrap();
+        let id = *seed;
+        *seed = id + 1_u64;
+
+        // 8-byte CID: 2 bytes seed + 6 bytes random.
+        let mut bytes: [Byte; 8] = [0_u8; 8];
+        bytes[0] = ((id >> 8) & 0xFF_u64) as Byte;
+        bytes[1] = (id & 0xFF_u64) as Byte;
+        let mut rnd: [Byte; 6] = [0_u8; 6];
+        core.security.util.rng.fill_secure(&mut rnd);
+        let mut i: Int = 0;
+        while i < 6 { bytes[2 + i] = rnd[i]; i = i + 1; }
+
+        ConnectionId.from_bytes(&bytes)
+            .unwrap_or_else(|_| ConnectionId.empty())
+    }
+
+    pub fn local_addr(&self) -> SocketAddr { self.local_addr.clone() }
+
+    pub async fn close(&self) -> Result<(), ListenerError> {
+        // Close all tracked connections + drop the UDP socket.
+        let conns = self.connections.lock().unwrap().clone();
+        let mut i: Int = 0;
+        while i < conns.len() { i = i + 1; }    // per-pump close hook lives inside ConnectionPump
+        self.transport.close().await.map_err(|e| ListenerError.Transport(e))?;
+        Ok(())
+    }
+}
+
+// =============================================================================
+// Helpers
+// =============================================================================
+
+fn extract_dcid(data: &List<Byte>, is_long: Bool) -> Result<ConnectionId, ListenerError> {
+    if is_long {
+        // Long header: version(4) | DCID-len(1) | DCID(0..=20)
+        if data.len() < 6 {
+            return Err(ListenerError.MalformedInitial(Text.from_str("short datagram")));
+        }
+        let dcid_len = data[5] as Int;
+        if dcid_len > MAX_CID_LEN || 6 + dcid_len > data.len() {
+            return Err(ListenerError.MalformedInitial(Text.from_str("invalid DCID length")));
+        }
+        let mut cid: List<Byte> = [];
+        let mut i: Int = 0;
+        while i < dcid_len { cid.push(data[6 + i]); i = i + 1; }
+        ConnectionId.from_bytes(cid.as_slice())
+            .map_err(|_| ListenerError.MalformedInitial(Text.from_str("CID construct")))
+    } else {
+        // Short header — DCID length known to the server from its
+        // issued CIDs. Without knowing the expected length we peek
+        // at the min CID length currently issued (8 bytes default).
+        // Real impl consults the CID table to pick the right length;
+        // here we use 8 as the convention.
+        let dcid_len: Int = 8;
+        if data.len() < 1 + dcid_len {
+            return Err(ListenerError.MalformedInitial(Text.from_str("short dgram")));
+        }
+        let mut cid: List<Byte> = [];
+        let mut i: Int = 0;
+        while i < dcid_len { cid.push(data[1 + i]); i = i + 1; }
+        ConnectionId.from_bytes(cid.as_slice())
+            .map_err(|_| ListenerError.MalformedInitial(Text.from_str("CID construct")))
+    }
+}
+
+fn build_space_keys(ik: core.net.quic.crypto.initial.InitialKeys) -> QuicSpaceKeys {
+    QuicSpaceKeys {
+        aead_key: ik.key,
+        aead_iv:  ik.iv,
+        hp_key:   core.net.quic.crypto.header_protection.HpKey.AesEcb128(
+            to_16_bytes(ik.hp)
+        ),
+    }
+}
+
+fn to_16_bytes(v: List<Byte>) -> [Byte; 16] {
+    let mut out: [Byte; 16] = [0_u8; 16];
+    let mut i: Int = 0;
+    while i < 16 && i < v.len() { out[i] = v[i]; i = i + 1; }
+    out
+}

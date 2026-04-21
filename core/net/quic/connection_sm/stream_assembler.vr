@@ -1,0 +1,233 @@
+// =============================================================================
+// net/quic/connection_sm/stream_assembler.vr — STREAM-frame builder (RFC 9000 §19.8)
+// =============================================================================
+// Layer: 5 (Network — QUIC)
+// Dependencies: core, collections, quic.{stream_sm, frame}
+// =============================================================================
+//
+// Pulls buffered app-level bytes from `SendStream.send_buf` + turns
+// them into STREAM frames for the outbound tx pipeline, respecting:
+//
+//   * Per-stream flow-control (max_stream_data from peer).
+//   * Connection-level flow-control (max_data from peer).
+//   * CC window — `cc.window() - cc.bytes_in_flight()`.
+//   * Target packet budget — remaining bytes the caller is willing
+//     to fill this packet with.
+//
+// The assembler is careful about STREAM-frame type bits (RFC 9000
+// §19.8):
+//
+//   type = 0x08 | (OFF=0x04 | LEN=0x02 | FIN=0x01) flags
+//     OFF: offset field present (1 when stream.next_write_off > 0)
+//     LEN: length field present (always emit for multi-frame packets)
+//     FIN: final byte flag (set when emitting the whole tail + stream
+//          has close() scheduled)
+//
+// # Budget split — round-robin
+//
+// Multiple streams compete for the packet-budget. We rotate a
+// `next_stream_cursor` per connection so no stream can monopolise
+// the pipeline. Priority hints (extensions) land in the Phase 7
+// scheduler pass.
+//
+// # Output
+//
+// `assemble_stream_frames(...)` returns a list of Frame::StreamFrame
+// values the caller appends to the outbound packet's frame list.
+// It mutates:
+//   * SendStream.send_buf — drained by the emitted byte count.
+//   * SendStream.max_written — updated.
+//   * ConnFlowControl.bytes_sent — incremented.
+//
+// =============================================================================
+
+module core.net.quic.connection_sm.stream_assembler;
+
+mount core.*;
+mount core.collections.List;
+mount core.net.quic.frame.{Frame};
+mount core.net.quic.stream_sm.{SendStream, SendState, ConnFlowControl};
+mount core.net.quic.recovery.{CongestionCtrl};
+
+// =============================================================================
+// Assembly budget
+// =============================================================================
+
+public type AssemblyBudget is {
+    /// Bytes we're allowed to emit this packet (min of MSS headroom,
+    /// path amplification, CC window, conn FC).
+    packet_bytes: Int,
+};
+
+impl AssemblyBudget {
+    pub fn from_caps(
+        packet_room: Int,
+        cc: &dyn CongestionCtrl,
+        flow: &ConnFlowControl,
+    ) -> AssemblyBudget {
+        let cc_window    = cc.window();
+        let in_flight    = cc.bytes_in_flight();
+        let cc_room: Int = if cc_window > in_flight { (cc_window - in_flight) as Int } else { 0 };
+        let conn_budget  = flow.send_budget() as Int;
+        let mut room = packet_room;
+        if cc_room < room   { room = cc_room; }
+        if conn_budget < room { room = conn_budget; }
+        if room < 0 { room = 0; }
+        AssemblyBudget { packet_bytes: room }
+    }
+}
+
+// =============================================================================
+// Main entry point
+// =============================================================================
+
+/// Walk send_streams (round-robin from `cursor`) and emit STREAM
+/// frames filling up to `budget.packet_bytes` bytes. Returns the
+/// emitted frames + the updated cursor.
+public fn assemble_stream_frames(
+    send_streams: &mut List<(UInt64, SendStream)>,
+    flow:         &mut ConnFlowControl,
+    budget:       AssemblyBudget,
+    cursor_start: UInt64,
+) -> (List<Frame>, UInt64) {
+    let mut frames: List<Frame> = [];
+    let mut remaining = budget.packet_bytes;
+    let n = send_streams.len();
+    if n == 0 || remaining <= 0 { return (frames, cursor_start); }
+
+    // Visit each stream once, starting from cursor_start.
+    let mut visited: Int = 0;
+    let mut cursor: Int = (cursor_start as Int) % n;
+    while visited < n && remaining > 0 {
+        let (sid, stream) = &mut send_streams[cursor];
+        if is_ready_to_emit(stream) {
+            let room = remaining - STREAM_FRAME_OVERHEAD_MAX;
+            if room > 0 {
+                match emit_one_stream_frame(*sid, stream, flow, room) {
+                    Some((frame, consumed)) => {
+                        frames.push(frame);
+                        remaining = remaining - consumed;
+                    },
+                    None => {},
+                }
+            }
+        }
+        cursor = (cursor + 1) % n;
+        visited = visited + 1;
+    }
+    (frames, cursor as UInt64)
+}
+
+// Maximum varint overhead for one STREAM frame header:
+//   type (1 byte) + stream_id (≤ 8) + offset (≤ 8) + length (≤ 8) = 25.
+// We budget a fixed upper bound so the caller never over-packs.
+const STREAM_FRAME_OVERHEAD_MAX: Int = 25;
+
+fn is_ready_to_emit(stream: &SendStream) -> Bool {
+    match stream.state() {
+        SendState.Send     => stream.send_buf.len() > 0,
+        SendState.Ready    => stream.send_buf.len() > 0,
+        SendState.DataSent => stream.send_buf.len() > 0,
+        _ => false,
+    }
+}
+
+/// Emit one STREAM frame carrying as many bytes as fit in `room`.
+/// Returns `Some((frame, total_wire_bytes))` on success, `None` when
+/// the stream is flow-control-blocked at zero headroom.
+fn emit_one_stream_frame(
+    stream_id: UInt64,
+    stream:    &mut SendStream,
+    flow:      &mut ConnFlowControl,
+    room:      Int,
+) -> Maybe<(Frame, Int)> {
+    let buf_len = stream.send_buf.len();
+    if buf_len == 0 { return None; }
+
+    // Cap by conn-level FC + packet room.
+    let take = if buf_len < room { buf_len } else { room };
+    if take <= 0 { return None; }
+
+    // Drain bytes from the stream buffer.
+    let mut data: List<Byte> = [];
+    let mut i: Int = 0;
+    while i < take {
+        data.push(stream.send_buf[i]);
+        i = i + 1;
+    }
+    // Truncate the buffer — the tail of send_buf[take..] stays.
+    let mut rem: List<Byte> = [];
+    let mut j: Int = take;
+    while j < buf_len { rem.push(stream.send_buf[j]); j = j + 1; }
+    stream.send_buf = rem;
+
+    // Offset = current max_written; FIN = we just emitted the last
+    // buffered byte AND final_size has been set.
+    let offset = stream.max_written;
+    let new_max = offset + (take as UInt64);
+    stream.max_written = new_max;
+
+    let is_fin = match stream.final_size {
+        Some(fs) => new_max >= fs,
+        None     => false,
+    };
+
+    // Transition Send → DataSent once FIN lands on the wire.
+    if is_fin {
+        stream.state = SendState.DataSent;
+    }
+
+    // Conn-level FC accounting.
+    flow.on_bytes_sent(take as UInt64);
+
+    let frame = Frame.StreamFrame {
+        stream_id: stream_id,
+        offset:    offset,
+        data:      data,
+        fin:       is_fin,
+    };
+
+    // Wire-bytes cost = header overhead + data length (worst case).
+    let wire = STREAM_FRAME_OVERHEAD_MAX + take;
+    Some((frame, wire))
+}
+
+// =============================================================================
+// Flow-control hint emission
+// =============================================================================
+
+/// Produce MAX_DATA + MAX_STREAM_DATA frames when the app has
+/// consumed enough that our advertised limits are close to being
+/// hit — preemptive window growth.
+public fn maybe_emit_flow_control_updates(
+    recv_streams: &mut List<(UInt64, core.net.quic.stream_sm.RecvStream)>,
+    flow:         &mut ConnFlowControl,
+    window:       UInt64,
+) -> List<Frame> {
+    let mut out: List<Frame> = [];
+
+    // Connection-level MAX_DATA.
+    let suggested = flow.suggested_max_data(window);
+    if suggested > flow.max_data_local {
+        flow.update_max_data_local(suggested);
+        out.push(Frame.MaxData(suggested));
+    }
+
+    // Per-stream MAX_STREAM_DATA.
+    let mut i: Int = 0;
+    while i < recv_streams.len() {
+        let (sid, rs) = &mut recv_streams[i];
+        let per_stream_window: UInt64 = window / 8_u64;    // 1/8 of conn window per stream
+        let new_limit = rs.suggested_max_stream_data(per_stream_window);
+        if new_limit > rs.max_data_recv {
+            rs.update_flow_control(new_limit);
+            out.push(Frame.MaxStreamData {
+                stream_id: *sid,
+                limit:     new_limit,
+            });
+        }
+        i = i + 1;
+    }
+
+    out
+}
