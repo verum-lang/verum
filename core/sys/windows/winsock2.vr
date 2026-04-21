@@ -187,7 +187,7 @@ fn ws2_select(nfds: Int, readfds: &unsafe Byte, writefds: &unsafe Byte, exceptfd
 // =============================================================================
 
 /// WSA initialization state: 0=not started, 1=in progress, 2=done
-let wsa_state: AtomicInt = AtomicInt.new(0);
+static wsa_state: AtomicInt = AtomicInt.new(0);
 
 /// Initialize Winsock2 subsystem. Called automatically on first socket operation.
 /// Thread-safe via atomic CAS — only the first caller performs initialization.
