@@ -4,25 +4,29 @@
 // @tags: contexts, using, typecheck, vbc
 // @description: Tests type checking for context method calls with using clause
 
-// Logger context - simple context with only sync methods
+// Logger context - simple context with only sync methods.
+// Note: context methods do NOT take `&self` — the receiver is the
+// context value, resolved from the task-local context stack at call
+// time (see verum.ebnf `context_def`). The `&self` spelling matches
+// ordinary instance methods, not context methods.
 context Logger {
-    fn log(&self, level: Int, message: Text);
-    fn info(&self, message: Text);
-    fn warn(&self, message: Text);
-    fn error(&self, message: Text);
+    fn log(level: Int, message: Text);
+    fn info(message: Text);
+    fn warn(message: Text);
+    fn error(message: Text);
 }
 
 // Counter context - context with mutation
 context Counter {
-    fn get(&self) -> Int;
-    fn increment(&mut self);
-    fn reset(&mut self);
+    fn get() -> Int;
+    fn increment();
+    fn reset();
 }
 
 // Config context - context returning optional values
 context Config {
-    fn get(&self, key: Text) -> Text;
-    fn get_or_default(&self, key: Text, default: Text) -> Text;
+    fn get(key: Text) -> Text;
+    fn get_or_default(key: Text, default: Text) -> Text;
 }
 
 // Single context function
