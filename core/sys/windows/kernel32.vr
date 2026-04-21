@@ -337,6 +337,44 @@ public fn GetFileSizeEx(
 public fn FlushFileBuffers(file: Handle) -> Bool;
 
 // =============================================================================
+// Byte-range File Locking
+// =============================================================================
+// LockFileEx / UnlockFileEx take offset + length via an OVERLAPPED struct
+// (whose Offset / OffsetHigh fields are repurposed for the lock region).
+// Advisory locks — they block other LockFileEx calls on the same bytes
+// but do not prevent unlocked read/write. Windows equivalent of the
+// POSIX `fcntl(F_SETLK)` family used by the SQLite VFS locking protocol.
+
+/// Acquire at least a shared, or optionally an exclusive, advisory
+/// byte-range lock on `[offset, offset + length)`. Non-blocking when
+/// `dwFlags` includes `LOCKFILE_FAIL_IMMEDIATELY`.
+@extern("kernel32.dll")
+public fn LockFileEx(
+    file: Handle,
+    flags: UInt32,                           // LOCKFILE_EXCLUSIVE_LOCK | LOCKFILE_FAIL_IMMEDIATELY
+    reserved: UInt32,                        // must be 0
+    bytes_low: UInt32,
+    bytes_high: UInt32,
+    overlapped: &mut Overlapped,
+) -> Bool;
+
+/// Release an advisory byte-range lock previously acquired by
+/// `LockFileEx`. The region must match exactly.
+@extern("kernel32.dll")
+public fn UnlockFileEx(
+    file: Handle,
+    reserved: UInt32,                        // must be 0
+    bytes_low: UInt32,
+    bytes_high: UInt32,
+    overlapped: &mut Overlapped,
+) -> Bool;
+
+/// Fail immediately rather than block waiting for the lock.
+public const LOCKFILE_FAIL_IMMEDIATELY: UInt32 = 0x00000001;
+/// Request an exclusive lock (omit for a shared lock).
+public const LOCKFILE_EXCLUSIVE_LOCK: UInt32 = 0x00000002;
+
+// =============================================================================
 // Memory Operations
 // =============================================================================
 

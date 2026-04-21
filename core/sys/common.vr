@@ -515,10 +515,27 @@ public fn pread(fd: FileDesc, buf: &mut [Byte], offset: Int) -> Result<Int, OSEr
 
     @cfg(target_os = "windows")
     {
-        return Err(OSError {
-            code: -1,
-            message: "pread: Windows platform not implemented in v0.1 — use PosixVfs under WSL or wait for Win32Vfs in Phase 1",
-        });
+        // ReadFile with OVERLAPPED whose Offset/OffsetHigh encode the
+        // absolute byte. On a handle opened without FILE_FLAG_OVERLAPPED
+        // this is a synchronous, explicit-offset read — one direct
+        // kernel32 call, no emulation layer above it.
+        let mut ov = super.windows.kernel32.Overlapped.new();
+        ov.set_offset(offset as UInt64);
+        let mut bytes_read: UInt32 = 0 as UInt32;
+        let ok = unsafe {
+            super.windows.kernel32.ReadFile(
+                super.windows.kernel32.Handle(fd.0),
+                buf.as_mut_ptr() as &unsafe mut Byte,
+                buf.len() as UInt32,
+                &mut bytes_read,
+                &mut ov,
+            )
+        };
+        if !ok {
+            let err = super.windows.kernel32.GetLastError() as Int;
+            return Err(OSError { code: err, message: "ReadFile failed" });
+        }
+        return Ok(bytes_read as Int);
     }
 }
 
@@ -532,10 +549,23 @@ public fn pwrite(fd: FileDesc, buf: &[Byte], offset: Int) -> Result<Int, OSError
 
     @cfg(target_os = "windows")
     {
-        return Err(OSError {
-            code: -1,
-            message: "pwrite: Windows platform not implemented in v0.1 — use PosixVfs under WSL or wait for Win32Vfs in Phase 1",
-        });
+        let mut ov = super.windows.kernel32.Overlapped.new();
+        ov.set_offset(offset as UInt64);
+        let mut bytes_written: UInt32 = 0 as UInt32;
+        let ok = unsafe {
+            super.windows.kernel32.WriteFile(
+                super.windows.kernel32.Handle(fd.0),
+                buf.as_ptr() as &unsafe Byte,
+                buf.len() as UInt32,
+                &mut bytes_written,
+                &mut ov,
+            )
+        };
+        if !ok {
+            let err = super.windows.kernel32.GetLastError() as Int;
+            return Err(OSError { code: err, message: "WriteFile failed" });
+        }
+        return Ok(bytes_written as Int);
     }
 }
 
@@ -567,10 +597,19 @@ public fn full_fsync(fd: FileDesc) -> Result<(), OSError> {
 
     @cfg(target_os = "windows")
     {
-        return Err(OSError {
-            code: -1,
-            message: "full_fsync: Windows platform not implemented in v0.1 (use FlushFileBuffers directly in platform-specific code)",
-        });
+        // FlushFileBuffers flushes both the kernel cache and the disk's
+        // write cache to persistent media — direct kernel32 equivalent
+        // of Darwin's F_FULLFSYNC.
+        let ok = unsafe {
+            super.windows.kernel32.FlushFileBuffers(
+                super.windows.kernel32.Handle(fd.0),
+            )
+        };
+        if !ok {
+            let err = super.windows.kernel32.GetLastError() as Int;
+            return Err(OSError { code: err, message: "FlushFileBuffers failed" });
+        }
+        return Ok(());
     }
 }
 
@@ -598,6 +637,168 @@ public fn sync_directory(path: &[Byte]) -> Result<(), OSError> {
 
     @cfg(target_os = "windows")
     { return Ok(()); }
+}
+
+// =============================================================================
+// Byte-Range Advisory File Locking (POSIX `fcntl(F_SETLK)` family)
+// =============================================================================
+//
+// Advisory locks over explicit byte ranges on a file descriptor. The
+// primary consumer is the SQLite VFS locking protocol (sqlite-native.md
+// Gap 1), which owns five disjoint bytes in the lock-page region and
+// uses SHARED/EXCLUSIVE locks to coordinate readers and writers across
+// processes.
+//
+// Two POSIX flavours exist:
+//   * Traditional `F_SETLK` — locks are owned by the (pid, file
+//     inode) pair. Closing ANY fd of the same file releases ALL the
+//     caller's locks on that file. This misfeature makes traditional
+//     POSIX locks hostile to library code that opens side-fd's for
+//     logging, metadata, etc.
+//   * `F_OFD_SETLK` (Linux 3.15+) — locks are owned by the
+//     (open-file-description, inode) pair. Each `open()` gets its own
+//     lock, solving the traditional problem.
+// Darwin does not expose F_OFD_SETLK; we use traditional F_SETLK there
+// and the SQLite-style convention of a single VFS-owned fd per db.
+//
+// Windows uses `LockFileEx` / `UnlockFileEx` via kernel32 — direct
+// call, no emulation layer, same non-blocking semantics as the POSIX
+// `F_OFD_SETLK` / `F_SETLK` paths. Implemented in the `@cfg(target_os
+// = "windows")` arm of `try_lock_region` below.
+// =============================================================================
+
+/// POSIX `struct flock` — pointer-argument for `fcntl(F_SETLK, &flock)`.
+/// Layout is ABI-critical: Linux and Darwin both order the fields as
+/// (l_type: short, l_whence: short, l_start: off_t, l_len: off_t,
+/// l_pid: pid_t) with the natural C padding.
+@repr(C)
+public type Flock is {
+    l_type: Int16,     // F_RDLCK | F_WRLCK | F_UNLCK
+    l_whence: Int16,   // SEEK_SET (0) — caller passes absolute offsets
+    l_start: Int64,    // byte offset of the lock region
+    l_len: Int64,      // byte length (0 = from l_start to EOF)
+    l_pid: Int32,      // output only — set by F_GETLK
+};
+
+public const SEEK_SET: Int16 = 0;
+public const F_RDLCK: Int16 = 0;
+public const F_WRLCK: Int16 = 1;
+public const F_UNLCK: Int16 = 2;
+
+/// Kind of byte-range lock — the caller's side of the type.
+public type LockKind is
+      Shared       // F_RDLCK — multiple holders permitted
+    | Exclusive    // F_WRLCK — sole holder
+    | Unlock;      // F_UNLCK — release
+
+fn lock_kind_to_ltype(k: LockKind) -> Int16 {
+    match k {
+        Shared    => F_RDLCK,
+        Exclusive => F_WRLCK,
+        Unlock    => F_UNLCK,
+    }
+}
+
+/// Non-blocking acquire / release of an advisory byte-range lock.
+///
+/// `start` / `len` are absolute byte offsets; `len == 0` means "to EOF".
+/// Returns `Err(OSError { code: EAGAIN / EWOULDBLOCK, … })` on conflict
+/// so callers can poll or wait; returns `Err` on other failures.
+///
+/// Semantics:
+///   * Linux — uses `F_OFD_SETLK` (open-file-description locks). Per-fd
+///     ownership, so a stray `close()` elsewhere cannot drop the lock.
+///   * Darwin — uses `F_SETLK`. Traditional POSIX semantics apply.
+///   * Windows — not implemented in v0.1; returns an informative
+///     `OSError`.
+public fn try_lock_region(fd: FileDesc, kind: LockKind, start: Int, len: Int) -> Result<(), OSError> {
+    let mut fl: Flock = Flock {
+        l_type: lock_kind_to_ltype(kind),
+        l_whence: SEEK_SET,
+        l_start: start as Int64,
+        l_len: len as Int64,
+        l_pid: 0 as Int32,
+    };
+
+    @cfg(target_os = "linux")
+    {
+        // F_OFD_SETLK = 37 on Linux; the third arg is `&Flock`.
+        let ptr = &fl as Int;
+        let _ = super.linux.syscall.fcntl(fd, 37 /* F_OFD_SETLK */, ptr)?;
+        return Ok(());
+    }
+
+    @cfg(target_os = "macos")
+    {
+        // F_SETLK = 8 on Darwin (see libsystem.vr constants).
+        let ptr = &fl as Int;
+        let _ = super.darwin.libsystem.safe_fcntl(fd, 8 /* F_SETLK */, ptr)?;
+        return Ok(());
+    }
+
+    @cfg(target_os = "windows")
+    {
+        // Windows takes the lock region as (offset in OVERLAPPED,
+        // length split into low/high 32-bit halves). Direct kernel32
+        // call — no emulation layer. Advisory semantics match POSIX.
+        let len_u64 = len as UInt64;
+        let bytes_low = (len_u64 & 0xFFFFFFFF) as UInt32;
+        let bytes_high = (len_u64 >> 32) as UInt32;
+        let mut ov = super.windows.kernel32.Overlapped.new();
+        ov.set_offset(start as UInt64);
+
+        match kind {
+            Unlock => {
+                let ok = unsafe {
+                    super.windows.kernel32.UnlockFileEx(
+                        super.windows.kernel32.Handle(fd.0),
+                        0 as UInt32,
+                        bytes_low,
+                        bytes_high,
+                        &mut ov,
+                    )
+                };
+                if !ok {
+                    let err = super.windows.kernel32.GetLastError() as Int;
+                    return Err(OSError { code: err, message: "UnlockFileEx failed" });
+                }
+                return Ok(());
+            }
+            _ => {
+                let mut flags: UInt32 =
+                    super.windows.kernel32.LOCKFILE_FAIL_IMMEDIATELY;
+                match kind {
+                    Exclusive => {
+                        flags = flags
+                            | super.windows.kernel32.LOCKFILE_EXCLUSIVE_LOCK;
+                    }
+                    _ => {}   // Shared — omit LOCKFILE_EXCLUSIVE_LOCK
+                }
+                let ok = unsafe {
+                    super.windows.kernel32.LockFileEx(
+                        super.windows.kernel32.Handle(fd.0),
+                        flags,
+                        0 as UInt32,
+                        bytes_low,
+                        bytes_high,
+                        &mut ov,
+                    )
+                };
+                if !ok {
+                    let err = super.windows.kernel32.GetLastError() as Int;
+                    return Err(OSError { code: err, message: "LockFileEx failed" });
+                }
+                return Ok(());
+            }
+        }
+    }
+}
+
+/// Convenience: release the lock on a region. Equivalent to calling
+/// `try_lock_region(fd, Unlock, start, len)` but with intent explicit
+/// at the call site.
+public fn unlock_region(fd: FileDesc, start: Int, len: Int) -> Result<(), OSError> {
+    try_lock_region(fd, Unlock, start, len)
 }
 
 // =============================================================================
