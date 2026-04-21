@@ -769,11 +769,21 @@ impl<'s> CompilationPipeline<'s> {
             ic
         };
         let module_loader = session.create_module_loader();
-        // Create a shared lazy resolver for on-demand module loading.
-        // Uses a separate ModuleLoader instance with the same root path.
+        // Non-bootstrap builds still load `core/*` modules lazily on
+        // demand. Both forms (`core.foo.bar` and `foo.bar`) must
+        // canonicalise to the same key — otherwise the same stdlib
+        // file ends up registered twice under two ModuleIds with
+        // duplicate exports. Pin cog_name="core" on the lazy
+        // resolver; the primary module_loader keeps its inherited
+        // setting (user-code imports never use "core." as cog alias).
         let lazy_resolver: SharedModuleResolver = std::sync::Arc::new(
-            std::sync::Mutex::new(ModuleLoader::new(module_loader.root_path()))
+            std::sync::Mutex::new(
+                ModuleLoader::new(module_loader.root_path()).with_cog_name("core")
+            )
         );
+        // Registry also canonicalises by "core" so its dedupe logic
+        // matches the lazy resolver's key.
+        session.module_registry().write().set_cog_name("core");
         Self {
             session,
             meta_registry: MetaRegistry::new(),
@@ -835,12 +845,21 @@ impl<'s> CompilationPipeline<'s> {
     /// ```
     pub fn new_core(session: &'s mut Session, config: CoreConfig) -> Self {
         let incremental = IncrementalCompiler::new(); // Stdlib bootstrap doesn't use incremental
-        let module_loader = session.create_module_loader();
+        let mut module_loader = session.create_module_loader();
+        // Stdlib is cog "core": any import that writes `core.foo.bar`
+        // is canonicalised to `foo.bar` before filesystem lookup and
+        // before the registry compares source_module on re-exports.
+        // Without this both forms live as distinct entries and
+        // ExportTable raises spurious "Conflicting export" warnings.
+        module_loader.set_cog_name("core");
+        session.module_registry().write().set_cog_name("core");
         let resolver = StdlibModuleResolver::new(&config.stdlib_path);
         // Create a shared lazy resolver for on-demand module loading.
         // For stdlib bootstrap, uses the stdlib path as the root.
         let lazy_resolver: SharedModuleResolver = std::sync::Arc::new(
-            std::sync::Mutex::new(ModuleLoader::new(&config.stdlib_path))
+            std::sync::Mutex::new(
+                ModuleLoader::new(&config.stdlib_path).with_cog_name("core")
+            )
         );
 
         Self {

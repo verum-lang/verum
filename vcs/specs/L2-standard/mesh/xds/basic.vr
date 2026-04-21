@@ -129,7 +129,7 @@ fn typecheck_cluster_enums() -> (ClusterDiscoveryType, LbPolicy, HealthStatus) {
 // Route actions.
 fn typecheck_route_actions() -> List<RouteAction> {
     let mut xs: List<RouteAction> = List.new();
-    xs.push(RouteAction.Cluster("backend".into()));
+    xs.push(RouteAction.ForwardCluster("backend".into()));
     let mut w: List<WeightedCluster> = List.new();
     w.push(WeightedCluster { cluster_name: "a".into(), weight: 70 });
     w.push(WeightedCluster { cluster_name: "b".into(), weight: 30 });

@@ -61,6 +61,17 @@ impl ModuleSource {
 pub struct ModuleLoader {
     /// Root directory for module search
     root_path: PathBuf,
+    /// Name of the cog rooted at `root_path`. When set, any module path
+    /// whose first segment equals this name is treated as rooted at
+    /// the cog itself — the prefix is stripped before file lookup.
+    ///
+    /// This is the canonicalisation seam. Without it, the same file
+    /// appears under *two* dotted paths: the "absolute" form declared
+    /// in the source (`module core.mesh.xds.resources;`) and the
+    /// "relative" form derived from the filesystem
+    /// (`mesh.xds.resources`, since the loader's root is `core/`).
+    /// Both forms now canonicalise to the same key.
+    cog_name: Option<String>,
     /// File ID / ModuleId allocator — monotonic counter shared by both
     next_file_id: u32,
     /// Cache of loaded files (by absolute path)
@@ -94,6 +105,7 @@ impl ModuleLoader {
     pub fn new(root_path: impl Into<PathBuf>) -> Self {
         Self {
             root_path: root_path.into(),
+            cog_name: None,
             next_file_id: 0,
             loaded_files: Map::new(),
             module_path_to_id: Map::new(),
@@ -101,6 +113,46 @@ impl ModuleLoader {
             cfg_evaluator: CfgEvaluator::new(),
             cog_resolver: None,
         }
+    }
+
+    /// Set the cog name for this loader's root. When a module path
+    /// starts with this segment (e.g. `core.mesh.xds`), it's treated
+    /// as rooted at the loader's `root_path` (so the file lookup
+    /// becomes `mesh/xds.vr`, not `core/mesh/xds.vr`). This is what
+    /// keeps the absolute form declared in source and the relative
+    /// form derived from the filesystem from being treated as two
+    /// distinct modules.
+    pub fn set_cog_name(&mut self, cog_name: impl Into<String>) {
+        self.cog_name = Some(cog_name.into());
+    }
+
+    /// Builder-style equivalent of `set_cog_name`.
+    pub fn with_cog_name(mut self, cog_name: impl Into<String>) -> Self {
+        self.cog_name = Some(cog_name.into());
+        self
+    }
+
+    /// Current cog name, if set.
+    pub fn cog_name(&self) -> Option<&str> {
+        self.cog_name.as_deref()
+    }
+
+    /// Canonicalise a dotted path against the current cog name. If
+    /// the path's first segment matches `cog_name`, it's stripped.
+    /// Used both as the key for the loader's own caches and by
+    /// `module_path_to_file_path` below.
+    fn canonical_key(&self, path: &str) -> String {
+        if let Some(cog) = &self.cog_name {
+            if path == cog.as_str() {
+                return String::new();
+            }
+            if let Some(rest) = path.strip_prefix(cog.as_str()) {
+                if let Some(tail) = rest.strip_prefix('.') {
+                    return tail.to_string();
+                }
+            }
+        }
+        path.to_string()
     }
 
     /// Attach a CogResolver for cross-cog module resolution.
@@ -126,6 +178,7 @@ impl ModuleLoader {
     pub fn for_target(root_path: impl Into<PathBuf>, target_triple: &str) -> Self {
         Self {
             root_path: root_path.into(),
+            cog_name: None,
             next_file_id: 0,
             loaded_files: Map::new(),
             module_path_to_id: Map::new(),
@@ -144,6 +197,7 @@ impl ModuleLoader {
     pub fn with_config(root_path: impl Into<PathBuf>, config: TargetConfig) -> Self {
         Self {
             root_path: root_path.into(),
+            cog_name: None,
             next_file_id: 0,
             loaded_files: Map::new(),
             module_path_to_id: Map::new(),
@@ -349,15 +403,34 @@ impl ModuleLoader {
 
     /// Convert a module path to a filesystem path.
     ///
-    /// Example: `std.collections.List` → `std/collections/List`
+    /// Example: `std.collections.List` → `std/collections/List`.
     ///
-    /// Rejects path segments containing ".." or absolute path components
-    /// to prevent path traversal attacks.
+    /// If the first segment matches the current `cog_name`, it is
+    /// stripped — the loader's `root_path` is *already* the cog
+    /// root. Without this, `core.mesh.xds.resources` would try to
+    /// locate `core/mesh/xds/resources.vr` under a root that is
+    /// itself `core/`, producing `core/core/mesh/xds/resources.vr`
+    /// which doesn't exist — and a later resolver would retry with
+    /// the short form under a new ModuleId, leading to the
+    /// "Conflicting export" class of bugs.
+    ///
+    /// Rejects path segments containing ".." or absolute path
+    /// components to prevent path traversal attacks.
     fn module_path_to_file_path(&self, module_path: &ModulePath) -> PathBuf {
         let segments = module_path.segments();
         let mut path = PathBuf::new();
 
-        for segment in segments {
+        let mut skip_first = false;
+        if let (Some(cog), Some(first)) = (&self.cog_name, segments.first()) {
+            if first.as_str() == cog.as_str() {
+                skip_first = true;
+            }
+        }
+
+        for (idx, segment) in segments.iter().enumerate() {
+            if skip_first && idx == 0 {
+                continue;
+            }
             let s = segment.as_str();
             // Reject path traversal attempts and absolute path segments
             if s == ".." || s == "." || s.contains('/') || s.contains('\\') || s.contains('\0') {
@@ -666,7 +739,9 @@ pub trait LazyModuleResolver: Send + Sync {
 impl LazyModuleResolver for ModuleLoader {
     fn resolve_module(&mut self, module_path: &str) -> ModuleResult<ModuleInfo> {
         // Canonical-path dedupe — see field docs on `module_path_to_id`.
-        let key = module_path.to_string();
+        // The key strips the cog-name prefix so that `core.foo.bar` and
+        // `foo.bar` (at cog_name="core") share the same cache slot.
+        let key = self.canonical_key(module_path);
         if let Some(cached) = self.module_info_cache.get(&key) {
             return Ok(cached.clone());
         }

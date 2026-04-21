@@ -163,6 +163,69 @@ fn verify_llvm_version(llvm_dir: &Path) {
     }
 }
 
+/// Library-name fragments that identify MLIR dialects / helpers Verum
+/// never reaches at runtime. Anything whose stem *contains* one of these
+/// substrings is excluded from the link line.
+///
+/// Rationale (Verum uses CPU codegen for X86/AArch64/WebAssembly and GPU
+/// codegen via NVVM/ROCDL/SPIRV). The dialects below are specialised
+/// extensions that none of the Verum passes target.
+const MLIR_LIB_SKIP_FRAGMENTS: &[&str] = &[
+    // Framework directives / HPC runtimes not in the Verum pipeline.
+    "OpenMP", "OpenACC", "MPI",
+    // Tensor Operator Set Architecture — not part of Verum's tensor path.
+    "Tosa",
+    // Architecture-specific vector extensions Verum does not emit.
+    "ArmSME", "ArmSVE", "ArmNeon", "AMX", "X86Vector",
+    // Sparse-tensor and friends.
+    "SparseTensor",
+    // Specialty / research dialects.
+    "Quant", "Polynomial", "Mesh", "Shape",
+    // Pattern-Descriptor DSL — only needed when user code defines dialects.
+    "IRDL", "PDL", "PDLInterp", "PDLToPDLInterp",
+    // C-source emission backend.
+    "EmitC", "TargetCpp",
+    // Async runtime (Verum has its own async in core/async/).
+    "AsyncDialect", "AsyncToLLVM", "AsyncToAsyncRuntime", "AsyncTransforms",
+    "AsyncRuntime",
+    // High-level GPU wrapper (we lower straight to NVVM / ROCDL / SPIRV).
+    "NVGPU",
+];
+
+/// LLVM component names that ship in `llvm-config --libnames` but are
+/// only relevant to host-tooling paths Verum never enters. Each entry is
+/// matched against the stripped library name (`LLVMFoo`) as an exact
+/// prefix — e.g. `LLVMXRay` matches `LLVMXRay` but not `LLVMCore`.
+const LLVM_LIB_SKIP_EXACT: &[&str] = &[
+    "LLVMXRay",                        // runtime tracing
+    "LLVMCoverage",                    // code-coverage tooling
+    "LLVMLineEditor",                  // REPL line editor
+    "LLVMLibDriver",                   // lib.exe driver shim
+    "LLVMDlltoolDriver",               // Windows dlltool driver
+    "LLVMWindowsManifest",             // Windows manifest compiler
+    "LLVMTextAPIBinaryReader",         // Apple .tbd reader
+    "LLVMTelemetry",                   // telemetry hooks
+    "LLVMSymbolize",                   // addr2line / llvm-symbolizer
+    "LLVMDebugInfoPDB",                // Windows PDB debuginfo
+    "LLVMDebugInfoMSF",                // Windows MSF container
+    "LLVMDebugInfoLogicalView",        // specialised debug-info viewer
+    "LLVMDebugInfoBTF",                // BPF BTF debug format
+    "LLVMDebugInfoGSYM",               // GSYM symbolication format
+    "LLVMDWP",                         // DWARF package tool
+    "LLVMObjCopy",                     // llvm-objcopy
+    "LLVMMCA",                         // machine-code analyser
+];
+
+fn mlir_lib_is_skipped(name: &str) -> bool {
+    MLIR_LIB_SKIP_FRAGMENTS
+        .iter()
+        .any(|fragment| name.contains(fragment))
+}
+
+fn llvm_lib_is_skipped(stem: &str) -> bool {
+    LLVM_LIB_SKIP_EXACT.iter().any(|exact| stem == *exact)
+}
+
 /// Link MLIR static libraries
 fn link_mlir_libraries(llvm_dir: &Path, llvm_config: &Path) {
     let lib_dir = llvm_dir.join("lib");
@@ -170,23 +233,29 @@ fn link_mlir_libraries(llvm_dir: &Path, llvm_config: &Path) {
     // Add library search path
     println!("cargo:rustc-link-search=native={}", lib_dir.display());
 
-    // Link all MLIR static libraries
+    // Link MLIR static libraries, skipping dialects that Verum does not
+    // reach. See `MLIR_LIB_SKIP_FRAGMENTS` for rationale.
     if let Ok(entries) = read_dir(&lib_dir) {
         for entry in entries.filter_map(|e| e.ok()) {
             let path = entry.path();
             let Some(name) = path.file_name().and_then(OsStr::to_str) else {
                 continue;
             };
-            if name.starts_with("libMLIR")
-                && name.ends_with(".a")
-                && let Some(lib_name) = parse_archive_name(name)
-            {
-                println!("cargo:rustc-link-lib=static={}", lib_name);
+            if !name.starts_with("libMLIR") || !name.ends_with(".a") {
+                continue;
             }
+            let Some(lib_name) = parse_archive_name(name) else {
+                continue;
+            };
+            if mlir_lib_is_skipped(lib_name) {
+                continue;
+            }
+            println!("cargo:rustc-link-lib=static={}", lib_name);
         }
     }
 
-    // Get LLVM libraries via llvm-config
+    // Get LLVM libraries via llvm-config, filtering host-tooling-only
+    // components that never land on the Verum runtime code path.
     let output = Command::new(llvm_config)
         .args(["--link-static", "--libnames"])
         .output()
@@ -194,9 +263,13 @@ fn link_mlir_libraries(llvm_dir: &Path, llvm_config: &Path) {
 
     let libs_output = String::from_utf8_lossy(&output.stdout);
     for name in libs_output.trim().split(' ') {
-        if let Some(lib_name) = parse_archive_name(name) {
-            println!("cargo:rustc-link-lib={}", lib_name);
+        let Some(lib_name) = parse_archive_name(name) else {
+            continue;
+        };
+        if llvm_lib_is_skipped(lib_name) {
+            continue;
         }
+        println!("cargo:rustc-link-lib={}", lib_name);
     }
 
     // Link system libraries

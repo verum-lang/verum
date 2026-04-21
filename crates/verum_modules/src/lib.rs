@@ -289,10 +289,16 @@ impl ModuleInfo {
 pub struct ModuleRegistry {
     /// All loaded modules by ID
     modules: Map<ModuleId, Shared<ModuleInfo>>,
-    /// Module path to ID mapping
+    /// Canonical (cog-name-stripped) module path → ID mapping.
     path_to_id: Map<Text, ModuleId>,
     /// Next module ID to allocate
     next_id: Shared<std::sync::atomic::AtomicU32>,
+    /// Name of the primary cog under compilation. When set, module
+    /// paths beginning with this segment are canonicalised by stripping
+    /// the prefix before being used as a lookup key. Mirrors
+    /// `ModuleLoader::cog_name` so that loader and registry agree on
+    /// the same canonical form.
+    cog_name: Option<String>,
 }
 
 impl ModuleRegistry {
@@ -301,7 +307,35 @@ impl ModuleRegistry {
             modules: Map::new(),
             path_to_id: Map::new(),
             next_id: Shared::new(std::sync::atomic::AtomicU32::new(0)),
+            cog_name: None,
         }
+    }
+
+    /// Set the primary cog name (for path canonicalisation on
+    /// register / get_by_path).
+    pub fn set_cog_name(&mut self, cog_name: impl Into<String>) {
+        self.cog_name = Some(cog_name.into());
+    }
+
+    /// Current cog name, if set.
+    pub fn cog_name(&self) -> Option<&str> {
+        self.cog_name.as_deref()
+    }
+
+    /// Canonicalise a dotted module path by stripping the cog-name
+    /// prefix when present.
+    fn canonical_key(&self, path: &str) -> String {
+        if let Some(cog) = &self.cog_name {
+            if path == cog.as_str() {
+                return String::new();
+            }
+            if let Some(rest) = path.strip_prefix(cog.as_str()) {
+                if let Some(tail) = rest.strip_prefix('.') {
+                    return tail.to_string();
+                }
+            }
+        }
+        path.to_string()
     }
 
     /// Allocate a new module ID
@@ -330,7 +364,8 @@ impl ModuleRegistry {
     /// coalesce into a single authoritative record.
     pub fn register(&mut self, module: ModuleInfo) -> ModuleId {
         let path_str = module.path.to_string();
-        let path_key = Text::from(path_str.clone());
+        let canonical = self.canonical_key(&path_str);
+        let path_key = Text::from(canonical);
         if let Some(&existing_id) = self.path_to_id.get(&path_key) {
             // Merge exports from the incoming registration into the
             // already-stored entry. Keep the original ModuleId so that
@@ -363,9 +398,12 @@ impl ModuleRegistry {
         self.modules.get(&id).cloned()
     }
 
-    /// Get a module by path
+    /// Get a module by path. Accepts either the absolute form
+    /// (`core.foo.bar`) or the cog-relative form (`foo.bar`) —
+    /// both canonicalise to the same key.
     pub fn get_by_path(&self, path: &str) -> Maybe<Shared<ModuleInfo>> {
-        match self.path_to_id.get(&Text::from(path)) {
+        let canonical = self.canonical_key(path);
+        match self.path_to_id.get(&Text::from(canonical)) {
             Some(id) => self.modules.get(id).cloned(),
             None => Maybe::None,
         }
@@ -459,6 +497,7 @@ impl ModuleRegistry {
             modules: self.modules.clone(),
             path_to_id: self.path_to_id.clone(),
             next_id: Shared::new(std::sync::atomic::AtomicU32::new(max_id + 1)),
+            cog_name: self.cog_name.clone(),
         }
     }
 

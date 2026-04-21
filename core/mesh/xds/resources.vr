@@ -133,7 +133,10 @@ public type RouteMatch is
     | Connect;
 
 public type RouteAction is
-    | Cluster(Text)
+    /// Forward to a named Cluster (by cluster_name). Named `ForwardCluster`
+    /// rather than `Cluster` to avoid colliding with the top-level `Cluster`
+    /// type export — Verum flattens variant names into the module namespace.
+    | ForwardCluster(Text)
     | WeightedClusters(List<WeightedCluster>)
     | Redirect(Text)
     | DirectResponse { code: UInt16, body: Text };
