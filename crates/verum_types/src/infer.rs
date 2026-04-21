@@ -10183,6 +10183,12 @@ impl TypeChecker {
                     } else if args.len() == 1 {
                         // Fallback: single-arg generic types are likely smart pointer wrappers
                         Ok(self.unifier.apply(&args[0]))
+                    } else if name.as_str() == "Result" && args.len() == 2 {
+                        // `*result` where result: Result<T, E> — auto-unwrap to T.
+                        // Panic-on-Err at runtime (semantic C from #55 tail). Used
+                        // mainly for `*mutex.lock()` and similar idioms where the
+                        // caller is operating in panic-on-poison mode.
+                        Ok(self.unifier.apply(&args[0]))
                     } else {
                         Err(TypeError::Other(
                             format!("Cannot dereference non-reference type: {}", inner_ty).into(),
@@ -10206,6 +10212,10 @@ impl TypeChecker {
                         }
                     } else if args.len() == 1 {
                         // Fallback: single-arg generic types are likely smart pointer wrappers
+                        Ok(self.unifier.apply(&args[0]))
+                    } else if path.as_ident().map(|id| id.name.as_str() == "Result").unwrap_or(false) && args.len() == 2 {
+                        // `*result` where result: Result<T, E> — auto-unwrap to T.
+                        // Panic-on-Err at runtime (semantic C from #55 tail).
                         Ok(self.unifier.apply(&args[0]))
                     } else {
                         Err(TypeError::Other(
