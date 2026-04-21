@@ -37,7 +37,7 @@ public type H3Settings is {
 }
 
 implement H3Settings {
-    pub fn defaults() -> H3Settings {
+    public fn defaults() -> H3Settings {
         H3Settings {
             qpack_max_table_capacity: 0_u64,
             max_field_section_size:   0xFFFFFFFFFFFFFFFF_u64,    // unlimited
@@ -50,7 +50,7 @@ implement H3Settings {
 
     /// Collect a SETTINGS frame's (id, value) pairs into the typed
     /// struct. Unknown IDs accumulate in `extras`.
-    pub fn from_entries(entries: &List<(UInt64, UInt64)>) -> H3Settings {
+    public fn from_entries(entries: &List<(UInt64, UInt64)>) -> H3Settings {
         let mut out = H3Settings.defaults();
         let mut i: Int = 0;
         while i < entries.len() {
@@ -69,7 +69,7 @@ implement H3Settings {
     }
 
     /// Re-serialise to `(id, value)` pairs for encoding.
-    pub fn to_entries(&self) -> List<(UInt64, UInt64)> {
+    public fn to_entries(&self) -> List<(UInt64, UInt64)> {
         let mut out: List<(UInt64, UInt64)> = [];
         out.push((0x01_u64, self.qpack_max_table_capacity));
         out.push((0x06_u64, self.max_field_section_size));

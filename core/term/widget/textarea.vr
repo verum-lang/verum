@@ -174,7 +174,7 @@ implement TextAreaState {
         self.cursor = Pos.new(last, self.lines[last].len());
     }
 
-    pub fn clear_selection(&mut self) { self.anchor = self.cursor; }
+    public fn clear_selection(&mut self) { self.anchor = self.cursor; }
 
     // ---- history -----------------------------------------------------------
 

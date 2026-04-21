@@ -45,14 +45,14 @@ public type RetryBudget is {
 };
 
 implement RetryBudget {
-    pub fn new(ceiling: Int) -> RetryBudget {
+    public fn new(ceiling: Int) -> RetryBudget {
         RetryBudget {
             remaining: Shared.new(AtomicInt.new(ceiling)),
             ceiling: ceiling,
         }
     }
 
-    pub fn try_consume(&self) -> Bool {
+    public fn try_consume(&self) -> Bool {
         let prev = self.remaining.fetch_sub(1, MemoryOrdering.AcqRel);
         if prev > 0 {
             true
@@ -65,7 +65,7 @@ implement RetryBudget {
     }
 
     /// Periodic refill; caller schedules a timer task to invoke.
-    pub fn refill(&self) {
+    public fn refill(&self) {
         self.remaining.store(self.ceiling, MemoryOrdering.Release);
     }
 }
@@ -82,7 +82,7 @@ public type RetryLayer is {
 };
 
 implement RetryLayer {
-    pub fn new(max_attempts: Int) -> RetryLayer {
+    public fn new(max_attempts: Int) -> RetryLayer {
         RetryLayer {
             max_attempts: max_attempts,
             backoff_base_ms: 50,
@@ -91,11 +91,11 @@ implement RetryLayer {
         }
     }
 
-    pub fn with_backoff(self, base_ms: Int, max_ms: Int) -> RetryLayer {
+    public fn with_backoff(self, base_ms: Int, max_ms: Int) -> RetryLayer {
         RetryLayer { backoff_base_ms: base_ms, backoff_max_ms: max_ms, ..self }
     }
 
-    pub fn with_budget(self, budget: RetryBudget) -> RetryLayer {
+    public fn with_budget(self, budget: RetryBudget) -> RetryLayer {
         RetryLayer { budget: Some(budget), ..self }
     }
 

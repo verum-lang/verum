@@ -670,7 +670,7 @@ implement TlsStream {
     /// RFC 5705 TLS-exporter: derive application-level keys from the
     /// established session. `label` identifies the usage; `context` is optional
     /// binding data; `length` is the number of bytes to derive.
-    pub fn export_keying_material(
+    public fn export_keying_material(
         &self,
         label: &Text,
         context: Maybe<&[Byte]>,
@@ -681,7 +681,7 @@ implement TlsStream {
     }
 
     /// Negotiated ALPN-protocol, if any.
-    pub fn alpn(&self) -> Maybe<&Text> {
+    public fn alpn(&self) -> Maybe<&Text> {
         self.alpn_protocol.as_ref()
     }
 
@@ -689,7 +689,7 @@ implement TlsStream {
     /// keys to the kernel so `sendfile(2)` zero-copies through NIC crypto
     /// hardware. Requires Linux ≥ 6.0 + OpenSSL ≥ 3.2 / rustls ktls-feature
     /// backend. Returns Err(Unsupported) if backend doesn't expose keys.
-    pub fn enable_ktls(&mut self) -> Result<(), TlsError> {
+    public fn enable_ktls(&mut self) -> Result<(), TlsError> {
         @intrinsic("verum.tls.enable_ktls", &self.session, self.inner.fd)
     }
 }

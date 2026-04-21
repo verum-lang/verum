@@ -127,7 +127,7 @@ public type ConnectionPump is {
 public type PumpPhase is PumpInitial | PumpHandshake | PumpOneRtt | PumpClosing | PumpDraining;
 
 impl ConnectionPump {
-    pub fn new_client(
+    public fn new_client(
         transport: Heap<dyn UdpTransport>,
         peer_addr: SocketAddr,
         connection: ConnState,
@@ -147,7 +147,7 @@ impl ConnectionPump {
         }
     }
 
-    pub fn new_server(
+    public fn new_server(
         transport: Heap<dyn UdpTransport>,
         peer_addr: SocketAddr,
         connection: ConnState,
@@ -591,8 +591,8 @@ impl ConnectionPump {
 
     // ==================== accessors ====================
 
-    pub fn phase(&self) -> PumpPhase { self.phase_tag.clone() }
-    pub fn peer_addr(&self) -> SocketAddr { self.peer_addr.clone() }
+    public fn phase(&self) -> PumpPhase { self.phase_tag.clone() }
+    public fn peer_addr(&self) -> SocketAddr { self.peer_addr.clone() }
 }
 
 fn any_ack_eliciting(frames: &List<Frame>) -> Bool {

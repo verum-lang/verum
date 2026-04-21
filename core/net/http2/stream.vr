@@ -70,21 +70,21 @@ public type StreamFsm is {
 }
 
 implement StreamFsm {
-    pub fn new(stream_id: UInt32) -> StreamFsm {
+    public fn new(stream_id: UInt32) -> StreamFsm {
         StreamFsm { stream_id: stream_id, state: StreamState.Idle }
     }
 
-    pub fn state(&self) -> StreamState { self.state }
-    pub fn stream_id(&self) -> UInt32 { self.stream_id }
+    public fn state(&self) -> StreamState { self.state }
+    public fn stream_id(&self) -> UInt32 { self.stream_id }
 
-    pub fn is_terminal(&self) -> Bool {
+    public fn is_terminal(&self) -> Bool {
         match self.state { StreamState.Closed => true, _ => false }
     }
 
     /// Apply a wire-protocol event to the stream. Returns the new state
     /// or a StreamTransitionError if the event is invalid for the
     /// current state (translates to PROTOCOL_ERROR per §5.1).
-    pub fn step(&mut self, event: &StreamEvent) -> Result<StreamState, StreamTransitionError> {
+    public fn step(&mut self, event: &StreamEvent) -> Result<StreamState, StreamTransitionError> {
         let next = match (self.state, event) {
             // Idle
             (StreamState.Idle, StreamEvent.SendHeaders { end_stream: true }) =>

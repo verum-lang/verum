@@ -31,7 +31,7 @@ mount core.net.tls13.cipher_suite.{HashKind};
 /// Maximum HkdfLabel size per RFC 8446 §7.1 (length-prefix bounds).
 /// label ≤ 255 bytes incl. "tls13 " prefix; context ≤ 255 bytes.
 /// Sanity upper bound on decoded HkdfLabel wire form.
-pub const TLS13_LABEL_PREFIX: [Byte; 6] = [
+public const TLS13_LABEL_PREFIX: [Byte; 6] = [
     0x74_u8, 0x6C_u8, 0x73_u8, 0x31_u8, 0x33_u8, 0x20_u8,  // "tls13 "
 ];
 

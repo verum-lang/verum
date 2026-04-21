@@ -84,7 +84,7 @@ public type Opcode is
     | Reserved(UInt8);
 
 implement Opcode {
-    pub fn to_byte(&self) -> UInt8 {
+    public fn to_byte(&self) -> UInt8 {
         match self {
             Opcode.Continuation => 0x0,
             Opcode.Textual      => 0x1,
@@ -96,7 +96,7 @@ implement Opcode {
         }
     }
 
-    pub fn from_byte(b: UInt8) -> Opcode {
+    public fn from_byte(b: UInt8) -> Opcode {
         match b {
             0x0 => Opcode.Continuation,
             0x1 => Opcode.Textual,
@@ -108,14 +108,14 @@ implement Opcode {
         }
     }
 
-    pub fn is_control(&self) -> Bool {
+    public fn is_control(&self) -> Bool {
         match self {
             Opcode.Close | Opcode.Ping | Opcode.Pong => true,
             _ => false,
         }
     }
 
-    pub fn is_data(&self) -> Bool {
+    public fn is_data(&self) -> Bool {
         match self {
             Opcode.Textual | Opcode.Binary | Opcode.Continuation => true,
             _ => false,
@@ -132,17 +132,17 @@ public type CloseCode is {
 }
 
 implement CloseCode {
-    pub const NORMAL: UInt16 = 1000;
-    pub const GOING_AWAY: UInt16 = 1001;
-    pub const PROTOCOL_ERROR: UInt16 = 1002;
-    pub const UNSUPPORTED_DATA: UInt16 = 1003;
-    pub const INVALID_FRAME_PAYLOAD: UInt16 = 1007;
-    pub const POLICY_VIOLATION: UInt16 = 1008;
-    pub const MESSAGE_TOO_BIG: UInt16 = 1009;
-    pub const INTERNAL_ERROR: UInt16 = 1011;
+    public const NORMAL: UInt16 = 1000;
+    public const GOING_AWAY: UInt16 = 1001;
+    public const PROTOCOL_ERROR: UInt16 = 1002;
+    public const UNSUPPORTED_DATA: UInt16 = 1003;
+    public const INVALID_FRAME_PAYLOAD: UInt16 = 1007;
+    public const POLICY_VIOLATION: UInt16 = 1008;
+    public const MESSAGE_TOO_BIG: UInt16 = 1009;
+    public const INTERNAL_ERROR: UInt16 = 1011;
 
-    pub fn new(code: UInt16) -> CloseCode { CloseCode { code: code } }
-    pub fn code(&self) -> UInt16 { self.code }
+    public fn new(code: UInt16) -> CloseCode { CloseCode { code: code } }
+    public fn code(&self) -> UInt16 { self.code }
 }
 
 // =============================================================================
@@ -159,21 +159,21 @@ public type Frame is {
 }
 
 implement Frame {
-    pub fn text(payload: List<Byte>) -> Frame {
+    public fn text(payload: List<Byte>) -> Frame {
         Frame {
             fin: true, rsv1: false, rsv2: false, rsv3: false,
             opcode: Opcode.Textual, payload: payload,
         }
     }
 
-    pub fn binary(payload: List<Byte>) -> Frame {
+    public fn binary(payload: List<Byte>) -> Frame {
         Frame {
             fin: true, rsv1: false, rsv2: false, rsv3: false,
             opcode: Opcode.Binary, payload: payload,
         }
     }
 
-    pub fn close(code: CloseCode, reason: &Text) -> Frame {
+    public fn close(code: CloseCode, reason: &Text) -> Frame {
         let mut payload = List.with_capacity(2 + reason.len());
         payload.push(((code.code() >> 8) & 0xFF) as Byte);
         payload.push((code.code() & 0xFF) as Byte);
@@ -189,14 +189,14 @@ implement Frame {
         }
     }
 
-    pub fn ping(payload: List<Byte>) -> Frame {
+    public fn ping(payload: List<Byte>) -> Frame {
         Frame {
             fin: true, rsv1: false, rsv2: false, rsv3: false,
             opcode: Opcode.Ping, payload: payload,
         }
     }
 
-    pub fn pong(payload: List<Byte>) -> Frame {
+    public fn pong(payload: List<Byte>) -> Frame {
         Frame {
             fin: true, rsv1: false, rsv2: false, rsv3: false,
             opcode: Opcode.Pong, payload: payload,

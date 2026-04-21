@@ -99,7 +99,7 @@ public type NewCid is {
 };
 
 implement DispatchOutcome {
-    pub fn empty() -> DispatchOutcome {
+    public fn empty() -> DispatchOutcome {
         DispatchOutcome {
             outbound_frames: [],
             crypto_chunks:   [],

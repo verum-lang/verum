@@ -33,31 +33,31 @@ public const QUIC_INITIAL_SALT_V1: [Byte; 20] = [
 
 /// "client in" — per-RFC 9001 §5.2, derives the client-side initial
 /// secret from the top-level initial secret.
-pub const LABEL_CLIENT_IN: [Byte; 9] = [
+public const LABEL_CLIENT_IN: [Byte; 9] = [
     0x63_u8, 0x6C_u8, 0x69_u8, 0x65_u8, 0x6E_u8, 0x74_u8, 0x20_u8, 0x69_u8, 0x6E_u8,  // "client in"
 ];
 
-pub const LABEL_SERVER_IN: [Byte; 9] = [
+public const LABEL_SERVER_IN: [Byte; 9] = [
     0x73_u8, 0x65_u8, 0x72_u8, 0x76_u8, 0x65_u8, 0x72_u8, 0x20_u8, 0x69_u8, 0x6E_u8,  // "server in"
 ];
 
 /// "quic key" — per-direction AEAD key derivation.
-pub const LABEL_QUIC_KEY: [Byte; 8] = [
+public const LABEL_QUIC_KEY: [Byte; 8] = [
     0x71_u8, 0x75_u8, 0x69_u8, 0x63_u8, 0x20_u8, 0x6B_u8, 0x65_u8, 0x79_u8,  // "quic key"
 ];
 
 /// "quic iv" — per-direction AEAD nonce derivation.
-pub const LABEL_QUIC_IV: [Byte; 7] = [
+public const LABEL_QUIC_IV: [Byte; 7] = [
     0x71_u8, 0x75_u8, 0x69_u8, 0x63_u8, 0x20_u8, 0x69_u8, 0x76_u8,  // "quic iv"
 ];
 
 /// "quic hp" — header-protection key derivation.
-pub const LABEL_QUIC_HP: [Byte; 7] = [
+public const LABEL_QUIC_HP: [Byte; 7] = [
     0x71_u8, 0x75_u8, 0x69_u8, 0x63_u8, 0x20_u8, 0x68_u8, 0x70_u8,  // "quic hp"
 ];
 
 /// "quic ku" — key update.
-pub const LABEL_QUIC_KU: [Byte; 7] = [
+public const LABEL_QUIC_KU: [Byte; 7] = [
     0x71_u8, 0x75_u8, 0x69_u8, 0x63_u8, 0x20_u8, 0x6B_u8, 0x75_u8,  // "quic ku"
 ];
 
@@ -65,6 +65,6 @@ pub const LABEL_QUIC_KU: [Byte; 7] = [
 /// packets are encrypted with AES-128-GCM — fixed by RFC 9001 §5.2
 /// regardless of the cipher suite later negotiated for Handshake /
 /// 1-RTT packets.
-pub const INITIAL_KEY_LEN: Int = 16;        // AES-128
-pub const INITIAL_IV_LEN:  Int = 12;
-pub const INITIAL_HP_LEN:  Int = 16;        // AES-128-ECB for HP masks
+public const INITIAL_KEY_LEN: Int = 16;        // AES-128
+public const INITIAL_IV_LEN:  Int = 12;
+public const INITIAL_HP_LEN:  Int = 16;        // AES-128-ECB for HP masks

@@ -130,7 +130,7 @@ implement EarlySecret {
     }
 
     /// client_early_traffic_secret (0-RTT application data cipher key).
-    pub fn client_early_traffic(&self, transcript_after_ch: &[Byte]) -> Result<TrafficSecret, HkdfError> {
+    public fn client_early_traffic(&self, transcript_after_ch: &[Byte]) -> Result<TrafficSecret, HkdfError> {
         let out = derive_secret(
             self.hash,
             self.secret.as_slice(),
@@ -304,7 +304,7 @@ implement TrafficSecret {
 
     /// Finished-MAC key per RFC 8446 §4.4.4:
     ///   finished_key = HKDF-Expand-Label(secret, "finished", "", Hash.length)
-    pub fn finished_key(&self) -> Result<SecretBytes, HkdfError> {
+    public fn finished_key(&self) -> Result<SecretBytes, HkdfError> {
         let out_len = match self.hash { HashKind.Sha256 => 32, HashKind.Sha384 => 48 };
         let v = hkdf_expand_label(self.hash, self.secret.as_slice(), &LABEL_FINISHED, &[], out_len)?;
         Ok(SecretBytes.from(v))
@@ -312,7 +312,7 @@ implement TrafficSecret {
 
     /// Key update (RFC 8446 §4.6.3):
     ///   next = HKDF-Expand-Label(current, "traffic upd", "", Hash.length)
-    pub fn next_generation(&self) -> Result<TrafficSecret, HkdfError> {
+    public fn next_generation(&self) -> Result<TrafficSecret, HkdfError> {
         let out_len = match self.hash { HashKind.Sha256 => 32, HashKind.Sha384 => 48 };
         let next = hkdf_expand_label(self.hash, self.secret.as_slice(), &LABEL_TRAFFIC_UPD, &[], out_len)?;
         Ok(TrafficSecret {

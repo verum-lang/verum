@@ -47,7 +47,7 @@ public type NewReno is {
 };
 
 implement NewReno {
-    pub fn new() -> NewReno {
+    public fn new() -> NewReno {
         NewReno {
             cwnd:            INITIAL_WINDOW_BYTES,
             ssthresh:        0xFFFFFFFF_u32,      // "infinity" — slow start
@@ -171,7 +171,7 @@ implement CongestionCtrl for NewReno {
 implement NewReno {
     /// Called by the outer loss-detection loop when an ACK advances
     /// past the recovery start time — transitions recovery → avoidance.
-    pub fn exit_recovery_if_appropriate(&mut self, acked_time_sent: Instant) {
+    public fn exit_recovery_if_appropriate(&mut self, acked_time_sent: Instant) {
         match self.recovery_start {
             Some(rs) => {
                 if acked_time_sent >= rs {

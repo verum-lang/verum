@@ -131,7 +131,7 @@ implement P256 {
     /// scalar is rejection-sampled in [1, n-1] — the intrinsic
     /// loops until a valid scalar is drawn (at most ~2 iterations
     /// on average).
-    pub fn generate_private_key() -> P256PrivateKey {
+    public fn generate_private_key() -> P256PrivateKey {
         let bytes = @intrinsic("verum.p256.keygen", ());
         let mut sk: [Byte; 32] = [0; 32];
         let mut i = 0;
@@ -141,20 +141,20 @@ implement P256 {
 
     /// Derive the public key (uncompressed, 65 bytes) from a private
     /// key scalar.
-    pub fn public_key(sk: &P256PrivateKey) -> Result<P256PublicKey, P256Error> {
+    public fn public_key(sk: &P256PrivateKey) -> Result<P256PublicKey, P256Error> {
         @intrinsic("verum.p256.public_key", sk)
     }
 
     /// Accept a user-supplied 32-byte scalar. Validates that the
     /// scalar is in [1, n-1]; returns `InvalidPrivateKey` for zero
     /// or out-of-range scalars.
-    pub fn private_key_from_bytes(raw: &[Byte; 32]) -> Result<P256PrivateKey, P256Error> {
+    public fn private_key_from_bytes(raw: &[Byte; 32]) -> Result<P256PrivateKey, P256Error> {
         @intrinsic("verum.p256.private_key_from_bytes", raw)
     }
 
     /// Accept a SEC 1-encoded public-key blob (33 or 65 bytes).
     /// Validates the point is on-curve and non-identity.
-    pub fn public_key_from_bytes(raw: &[Byte]) -> Result<P256PublicKey, P256Error> {
+    public fn public_key_from_bytes(raw: &[Byte]) -> Result<P256PublicKey, P256Error> {
         @intrinsic("verum.p256.public_key_from_bytes", raw)
     }
 
@@ -170,7 +170,7 @@ implement P256 {
     /// Like [`x25519.diffie_hellman`](x25519.vr), the caller MUST
     /// run this through HKDF before using as a key. Never use the
     /// raw x-coordinate directly.
-    pub fn ecdh(
+    public fn ecdh(
         sk: &P256PrivateKey,
         peer_pk: &P256PublicKey,
     ) -> Result<P256SharedSecret, P256Error> {
@@ -189,7 +189,7 @@ implement P256 {
     /// `message` is NOT pre-hashed — this function internally
     /// computes SHA-256(message). If your protocol requires a
     /// different hash, use `sign_prehashed` instead.
-    pub fn sign(
+    public fn sign(
         sk: &P256PrivateKey,
         message: &[Byte],
     ) -> Result<P256Signature, P256Error> {
@@ -199,7 +199,7 @@ implement P256 {
     /// Sign a pre-computed 32-byte hash (e.g. SHA-384 truncated, or
     /// SHA-256 you already computed). Hash-algorithm agility —
     /// caller decides the digest.
-    pub fn sign_prehashed(
+    public fn sign_prehashed(
         sk: &P256PrivateKey,
         digest: &[Byte; 32],
     ) -> Result<P256Signature, P256Error> {
@@ -210,7 +210,7 @@ implement P256 {
     /// signature. Needed for some FIPS-validated deployments that
     /// require NIST SP 800-90A RBG-sourced nonces. Most callers
     /// want `sign` (deterministic) instead.
-    pub fn sign_random(
+    public fn sign_random(
         sk: &P256PrivateKey,
         message: &[Byte],
     ) -> Result<P256Signature, P256Error> {
@@ -225,7 +225,7 @@ implement P256 {
     /// Strict validation per FIPS 186-5 §6.4.2:
     ///   * r, s ∈ [1, n-1]
     ///   * public key on curve, non-identity
-    pub fn verify(
+    public fn verify(
         pk: &P256PublicKey,
         message: &[Byte],
         signature: &P256Signature,
@@ -234,7 +234,7 @@ implement P256 {
     }
 
     /// Verify against a pre-computed digest.
-    pub fn verify_prehashed(
+    public fn verify_prehashed(
         pk: &P256PublicKey,
         digest: &[Byte; 32],
         signature: &P256Signature,
@@ -249,13 +249,13 @@ implement P256 {
     /// Encode a fixed-width signature as an ASN.1 DER SEQUENCE of
     /// two INTEGERs (`ECDSA-Sig-Value` per RFC 3279 §2.2.3). Used
     /// in X.509 cert signatures and some legacy JSON protocols.
-    pub fn signature_to_der(sig: &P256Signature) -> List<Byte> {
+    public fn signature_to_der(sig: &P256Signature) -> List<Byte> {
         @intrinsic("verum.p256.signature_to_der", sig)
     }
 
     /// Decode a DER-encoded `ECDSA-Sig-Value` into the fixed-width
     /// form. Fails on non-canonical encodings or out-of-range r/s.
-    pub fn signature_from_der(der: &[Byte]) -> Result<P256Signature, P256Error> {
+    public fn signature_from_der(der: &[Byte]) -> Result<P256Signature, P256Error> {
         @intrinsic("verum.p256.signature_from_der", der)
     }
 }

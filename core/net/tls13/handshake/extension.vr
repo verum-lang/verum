@@ -105,14 +105,14 @@ public type ServerName is {
 public type PskKeMode is PskKe | PskDheKe | UnknownMode(UInt8);
 
 implement PskKeMode {
-    pub fn to_u8(&self) -> UInt8 {
+    public fn to_u8(&self) -> UInt8 {
         match self {
             PskKeMode.PskKe         => 0_u8,
             PskKeMode.PskDheKe      => 1_u8,
             PskKeMode.UnknownMode(v) => *v,
         }
     }
-    pub fn from_u8(v: UInt8) -> PskKeMode {
+    public fn from_u8(v: UInt8) -> PskKeMode {
         match v {
             0_u8 => PskKeMode.PskKe,
             1_u8 => PskKeMode.PskDheKe,

@@ -83,7 +83,7 @@ implement WeftQuicConfig {
     /// Build a server config with the §6.11 defaults: ALPN "h3",
     /// PQ-hybrid KEX / ML-KEM-768 is on by default inside QuicConfig
     /// (intrinsic picks current best available).
-    pub fn server(identity: Certificate, key: PrivateKey) -> WeftQuicConfig {
+    public fn server(identity: Certificate, key: PrivateKey) -> WeftQuicConfig {
         let alpn: [Text; 1] = ["h3"];
         let quic = QuicConfig.server()
             .with_alpn(&alpn)
@@ -99,12 +99,12 @@ implement WeftQuicConfig {
         }
     }
 
-    pub fn with_max_concurrent_requests(mut self, n: Int) -> WeftQuicConfig {
+    public fn with_max_concurrent_requests(mut self, n: Int) -> WeftQuicConfig {
         self.max_concurrent_requests = n;
         self
     }
 
-    pub fn with_allow_0rtt(mut self, allow: Bool) -> WeftQuicConfig {
+    public fn with_allow_0rtt(mut self, allow: Bool) -> WeftQuicConfig {
         self.allow_0rtt = allow;
         self
     }
@@ -141,11 +141,11 @@ implement<H: Handler + Send + Sync + 'static> Http3WeftServer<H> {
         })
     }
 
-    pub fn shutdown_token(&self) -> CancellationToken {
+    public fn shutdown_token(&self) -> CancellationToken {
         self.token.clone()
     }
 
-    pub fn shutdown(&self) {
+    public fn shutdown(&self) {
         self.draining.store(true, MemoryOrdering.Release);
         self.token.cancel();
     }

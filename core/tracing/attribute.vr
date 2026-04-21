@@ -26,7 +26,7 @@ public type AttributeValue is
 
 implement AttributeValue {
     /// Type-tag for efficient dispatch by exporters.
-    pub fn kind(&self) -> AttributeKind {
+    public fn kind(&self) -> AttributeKind {
         match self {
             AttributeValue.Text(_) => AttributeKind.KText,
             AttributeValue.Bool(_) => AttributeKind.KBool,
@@ -39,7 +39,7 @@ implement AttributeValue {
         }
     }
 
-    pub fn clone(&self) -> AttributeValue {
+    public fn clone(&self) -> AttributeValue {
         match self {
             AttributeValue.Text(t) => AttributeValue.Text(t.clone()),
             AttributeValue.Bool(b) => AttributeValue.Bool(*b),
@@ -77,19 +77,19 @@ public type AttributeSet is {
 };
 
 implement AttributeSet {
-    pub fn new() -> AttributeSet {
+    public fn new() -> AttributeSet {
         AttributeSet { entries: List.new() }
     }
 
-    pub fn with_capacity(cap: Int) -> AttributeSet {
+    public fn with_capacity(cap: Int) -> AttributeSet {
         AttributeSet { entries: List.with_capacity(cap) }
     }
 
-    pub fn len(&self) -> Int { self.entries.len() }
-    pub fn is_empty(&self) -> Bool { self.entries.is_empty() }
+    public fn len(&self) -> Int { self.entries.len() }
+    public fn is_empty(&self) -> Bool { self.entries.is_empty() }
 
     /// Look up a key (first match).
-    pub fn get(&self, key: &Text) -> Maybe<&AttributeValue> {
+    public fn get(&self, key: &Text) -> Maybe<&AttributeValue> {
         let mut i = 0;
         while i < self.entries.len() {
             if self.entries[i].0 == *key {
@@ -101,7 +101,7 @@ implement AttributeSet {
     }
 
     /// Insert or replace. Silently drops if over ATTRIBUTE_COUNT_LIMIT.
-    pub fn set(&mut self, key: Text, value: AttributeValue) {
+    public fn set(&mut self, key: Text, value: AttributeValue) {
         let mut i = 0;
         while i < self.entries.len() {
             if self.entries[i].0 == key {
@@ -114,9 +114,9 @@ implement AttributeSet {
         self.entries.push((key, value));
     }
 
-    pub fn entries(&self) -> &List<(Text, AttributeValue)> { &self.entries }
+    public fn entries(&self) -> &List<(Text, AttributeValue)> { &self.entries }
 
-    pub fn clone(&self) -> AttributeSet {
+    public fn clone(&self) -> AttributeSet {
         let mut out = List.with_capacity(self.entries.len());
         let mut i = 0;
         while i < self.entries.len() {

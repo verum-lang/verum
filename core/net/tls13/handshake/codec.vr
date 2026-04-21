@@ -126,14 +126,14 @@ implement Reader {
     public fn is_at_end(&self) -> Bool { self.pos >= self.end }
     public fn position(&self) -> Int { self.pos }
 
-    pub fn take_u8(&mut self) -> Result<UInt8, CodecError> {
+    public fn take_u8(&mut self) -> Result<UInt8, CodecError> {
         if self.pos >= self.end { return Err(CodecError.Truncated); }
         let v = self.buf[self.pos];
         self.pos = self.pos + 1;
         Ok(v)
     }
 
-    pub fn take_u16(&mut self) -> Result<UInt16, CodecError> {
+    public fn take_u16(&mut self) -> Result<UInt16, CodecError> {
         if self.pos + 2 > self.end { return Err(CodecError.Truncated); }
         let v: UInt16 = ((self.buf[self.pos] as UInt16) << 8)
                       | (self.buf[self.pos + 1] as UInt16);
@@ -141,7 +141,7 @@ implement Reader {
         Ok(v)
     }
 
-    pub fn take_u24(&mut self) -> Result<UInt32, CodecError> {
+    public fn take_u24(&mut self) -> Result<UInt32, CodecError> {
         if self.pos + 3 > self.end { return Err(CodecError.Truncated); }
         let v: UInt32 =
               ((self.buf[self.pos] as UInt32) << 16)
@@ -151,7 +151,7 @@ implement Reader {
         Ok(v)
     }
 
-    pub fn take_u32(&mut self) -> Result<UInt32, CodecError> {
+    public fn take_u32(&mut self) -> Result<UInt32, CodecError> {
         if self.pos + 4 > self.end { return Err(CodecError.Truncated); }
         let v: UInt32 =
               ((self.buf[self.pos] as UInt32) << 24)
@@ -162,7 +162,7 @@ implement Reader {
         Ok(v)
     }
 
-    pub fn take_bytes(&mut self, n: Int) -> Result<List<Byte>, CodecError> {
+    public fn take_bytes(&mut self, n: Int) -> Result<List<Byte>, CodecError> {
         if n < 0 || self.pos + n > self.end { return Err(CodecError.Truncated); }
         let mut out: List<Byte> = [];
         let mut i: Int = 0;
@@ -172,24 +172,24 @@ implement Reader {
     }
 
     /// Read a u8-length-prefixed byte vector.
-    pub fn take_vec_u8(&mut self) -> Result<List<Byte>, CodecError> {
+    public fn take_vec_u8(&mut self) -> Result<List<Byte>, CodecError> {
         let len = self.take_u8()?;
         self.take_bytes(len as Int)
     }
 
-    pub fn take_vec_u16(&mut self) -> Result<List<Byte>, CodecError> {
+    public fn take_vec_u16(&mut self) -> Result<List<Byte>, CodecError> {
         let len = self.take_u16()?;
         self.take_bytes(len as Int)
     }
 
-    pub fn take_vec_u24(&mut self) -> Result<List<Byte>, CodecError> {
+    public fn take_vec_u24(&mut self) -> Result<List<Byte>, CodecError> {
         let len = self.take_u24()?;
         self.take_bytes(len as Int)
     }
 
     /// Enter a length-prefixed sub-region; returns a sub-reader bounded
     /// to that region's contents. Parent advances past it.
-    pub fn sub_u16(&mut self) -> Result<Reader, CodecError> {
+    public fn sub_u16(&mut self) -> Result<Reader, CodecError> {
         let len = self.take_u16()? as Int;
         if self.pos + len > self.end { return Err(CodecError.Truncated); }
         let start = self.pos;
@@ -197,7 +197,7 @@ implement Reader {
         Ok(Reader { buf: self.buf.clone(), pos: start, end: start + len })
     }
 
-    pub fn sub_u8(&mut self) -> Result<Reader, CodecError> {
+    public fn sub_u8(&mut self) -> Result<Reader, CodecError> {
         let len = self.take_u8()? as Int;
         if self.pos + len > self.end { return Err(CodecError.Truncated); }
         let start = self.pos;
@@ -205,7 +205,7 @@ implement Reader {
         Ok(Reader { buf: self.buf.clone(), pos: start, end: start + len })
     }
 
-    pub fn sub_u24(&mut self) -> Result<Reader, CodecError> {
+    public fn sub_u24(&mut self) -> Result<Reader, CodecError> {
         let len = self.take_u24()? as Int;
         if self.pos + len > self.end { return Err(CodecError.Truncated); }
         let start = self.pos;

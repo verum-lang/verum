@@ -19,27 +19,27 @@ public type TransportErrorCode is {
 }
 
 implement TransportErrorCode {
-    pub const NO_ERROR: UInt64                    = 0x00;
-    pub const INTERNAL_ERROR: UInt64              = 0x01;
-    pub const CONNECTION_REFUSED: UInt64          = 0x02;
-    pub const FLOW_CONTROL_ERROR: UInt64          = 0x03;
-    pub const STREAM_LIMIT_ERROR: UInt64          = 0x04;
-    pub const STREAM_STATE_ERROR: UInt64          = 0x05;
-    pub const FINAL_SIZE_ERROR: UInt64            = 0x06;
-    pub const FRAME_ENCODING_ERROR: UInt64        = 0x07;
-    pub const TRANSPORT_PARAMETER_ERROR: UInt64   = 0x08;
-    pub const CONNECTION_ID_LIMIT_ERROR: UInt64   = 0x09;
-    pub const PROTOCOL_VIOLATION: UInt64          = 0x0A;
-    pub const INVALID_TOKEN: UInt64               = 0x0B;
-    pub const APPLICATION_ERROR: UInt64           = 0x0C;
-    pub const CRYPTO_BUFFER_EXCEEDED: UInt64      = 0x0D;
-    pub const KEY_UPDATE_ERROR: UInt64            = 0x0E;
-    pub const AEAD_LIMIT_REACHED: UInt64          = 0x0F;
-    pub const NO_VIABLE_PATH: UInt64              = 0x10;
-    pub const CRYPTO_ERROR_BASE: UInt64           = 0x0100;  // + TLS alert code
+    public const NO_ERROR: UInt64                    = 0x00;
+    public const INTERNAL_ERROR: UInt64              = 0x01;
+    public const CONNECTION_REFUSED: UInt64          = 0x02;
+    public const FLOW_CONTROL_ERROR: UInt64          = 0x03;
+    public const STREAM_LIMIT_ERROR: UInt64          = 0x04;
+    public const STREAM_STATE_ERROR: UInt64          = 0x05;
+    public const FINAL_SIZE_ERROR: UInt64            = 0x06;
+    public const FRAME_ENCODING_ERROR: UInt64        = 0x07;
+    public const TRANSPORT_PARAMETER_ERROR: UInt64   = 0x08;
+    public const CONNECTION_ID_LIMIT_ERROR: UInt64   = 0x09;
+    public const PROTOCOL_VIOLATION: UInt64          = 0x0A;
+    public const INVALID_TOKEN: UInt64               = 0x0B;
+    public const APPLICATION_ERROR: UInt64           = 0x0C;
+    public const CRYPTO_BUFFER_EXCEEDED: UInt64      = 0x0D;
+    public const KEY_UPDATE_ERROR: UInt64            = 0x0E;
+    public const AEAD_LIMIT_REACHED: UInt64          = 0x0F;
+    public const NO_VIABLE_PATH: UInt64              = 0x10;
+    public const CRYPTO_ERROR_BASE: UInt64           = 0x0100;  // + TLS alert code
 
-    pub fn new(code: UInt64) -> TransportErrorCode { TransportErrorCode { code: code } }
-    pub fn value(&self) -> UInt64 { self.code }
+    public fn new(code: UInt64) -> TransportErrorCode { TransportErrorCode { code: code } }
+    public fn value(&self) -> UInt64 { self.code }
 }
 
 // =============================================================================
@@ -51,8 +51,8 @@ public type ApplicationErrorCode is {
 }
 
 implement ApplicationErrorCode {
-    pub fn new(code: UInt64) -> ApplicationErrorCode { ApplicationErrorCode { code: code } }
-    pub fn value(&self) -> UInt64 { self.code }
+    public fn new(code: UInt64) -> ApplicationErrorCode { ApplicationErrorCode { code: code } }
+    public fn value(&self) -> UInt64 { self.code }
 }
 
 // =============================================================================

@@ -91,7 +91,7 @@ public type WsConfig is {
 };
 
 implement WsConfig {
-    pub fn default() -> WsConfig {
+    public fn default() -> WsConfig {
         WsConfig {
             max_message_bytes: 1 * 1024 * 1024,   // 1 MiB
             handshake_timeout_ms: 5_000,
@@ -99,11 +99,11 @@ implement WsConfig {
         }
     }
 
-    pub fn with_max_message_bytes(self, n: Int) -> WsConfig {
+    public fn with_max_message_bytes(self, n: Int) -> WsConfig {
         WsConfig { max_message_bytes: n, ..self }
     }
 
-    pub fn with_subprotocols(self, protos: List<Text>) -> WsConfig {
+    public fn with_subprotocols(self, protos: List<Text>) -> WsConfig {
         WsConfig { offered_subprotocols: protos, ..self }
     }
 }
@@ -166,7 +166,7 @@ type PartialMessage is {
 };
 
 implement<T: WeftTransport> WsSession<T> {
-    pub fn new(transport: T, peer: SocketAddr, max_message_bytes: Int) -> WsSession<T> {
+    public fn new(transport: T, peer: SocketAddr, max_message_bytes: Int) -> WsSession<T> {
         WsSession {
             transport: transport,
             max_message_bytes: max_message_bytes,
@@ -278,7 +278,7 @@ implement<T: WeftTransport> WsSession<T> {
         r
     }
 
-    pub fn peer_addr(&self) -> SocketAddr { self.peer }
+    public fn peer_addr(&self) -> SocketAddr { self.peer }
 
     // -----------------------------------------------------------------
     // Internal — frame-level I/O
@@ -400,7 +400,7 @@ public type WsRunner<H> is {
 };
 
 implement<H: WsHandler + Send + Sync + 'static> WsRunner<H> {
-    pub fn new(
+    public fn new(
         handler: Heap<H>,
         token: CancellationToken,
         draining: Shared<AtomicBool>,
@@ -626,7 +626,7 @@ public type WsServer<H> is {
 };
 
 implement<H: WsHandler + Send + Sync + 'static> WsServer<H> {
-    pub fn bind(
+    public fn bind(
         addr: Text,
         handler: H,
         listener_cfg: ListenerConfig,
@@ -650,11 +650,11 @@ implement<H: WsHandler + Send + Sync + 'static> WsServer<H> {
         })
     }
 
-    pub fn shutdown_token(&self) -> CancellationToken {
+    public fn shutdown_token(&self) -> CancellationToken {
         self.token.clone()
     }
 
-    pub fn shutdown(&self) {
+    public fn shutdown(&self) {
         self.draining.store(true, MemoryOrdering.Release);
         self.token.cancel();
     }

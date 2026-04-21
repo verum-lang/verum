@@ -65,7 +65,7 @@ public type CircuitBreakerLayer is {
 };
 
 implement CircuitBreakerLayer {
-    pub fn new(
+    public fn new(
         failure_threshold: Int,
         reset_timeout_ms: Int,
         success_threshold: Int,
@@ -84,11 +84,11 @@ implement CircuitBreakerLayer {
 
     /// Typical config: 5 consecutive failures → open; 30s reset timeout;
     /// 2 consecutive successes in HalfOpen → close.
-    pub fn default() -> CircuitBreakerLayer {
+    public fn default() -> CircuitBreakerLayer {
         Self.new(5, 30_000, 2)
     }
 
-    pub fn current_state(&self) -> Int {
+    public fn current_state(&self) -> Int {
         self.state.state.load(MemoryOrdering.Acquire)
     }
 }

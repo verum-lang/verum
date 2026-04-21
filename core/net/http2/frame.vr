@@ -18,7 +18,7 @@ public const FRAME_HEADER_SIZE: Int = 9;
 public const MAX_FRAME_SIZE_INITIAL: Int = 16384;
 
 /// MUST never exceed 2^24-1 bytes on the wire (§4.1 length field is 24-bit).
-pub const FRAME_LENGTH_LIMIT: Int = 0xFFFFFF;
+public const FRAME_LENGTH_LIMIT: Int = 0xFFFFFF;
 
 // =============================================================================
 // FrameType — 8-bit wire identifier
@@ -38,7 +38,7 @@ public type FrameType is
     | Unknown(UInt8);
 
 implement FrameType {
-    pub fn to_u8(&self) -> UInt8 {
+    public fn to_u8(&self) -> UInt8 {
         match self {
             FrameType.Data         => 0x0,
             FrameType.Headers      => 0x1,
@@ -54,7 +54,7 @@ implement FrameType {
         }
     }
 
-    pub fn from_u8(b: UInt8) -> FrameType {
+    public fn from_u8(b: UInt8) -> FrameType {
         match b {
             0x0 => FrameType.Data,
             0x1 => FrameType.Headers,
@@ -80,19 +80,19 @@ public type FrameFlags is {
 };
 
 implement FrameFlags {
-    pub const END_STREAM: UInt8  = 0x01;   // DATA, HEADERS
-    pub const END_HEADERS: UInt8 = 0x04;   // HEADERS, PUSH_PROMISE, CONTINUATION
-    pub const PADDED: UInt8      = 0x08;   // DATA, HEADERS, PUSH_PROMISE
-    pub const PRIORITY: UInt8    = 0x20;   // HEADERS only
-    pub const ACK: UInt8         = 0x01;   // SETTINGS, PING (bit 0)
+    public const END_STREAM: UInt8  = 0x01;   // DATA, HEADERS
+    public const END_HEADERS: UInt8 = 0x04;   // HEADERS, PUSH_PROMISE, CONTINUATION
+    public const PADDED: UInt8      = 0x08;   // DATA, HEADERS, PUSH_PROMISE
+    public const PRIORITY: UInt8    = 0x20;   // HEADERS only
+    public const ACK: UInt8         = 0x01;   // SETTINGS, PING (bit 0)
 
-    pub fn new(bits: UInt8) -> FrameFlags { FrameFlags { bits: bits } }
-    pub fn none() -> FrameFlags { FrameFlags { bits: 0 } }
-    pub fn raw(&self) -> UInt8 { self.bits }
+    public fn new(bits: UInt8) -> FrameFlags { FrameFlags { bits: bits } }
+    public fn none() -> FrameFlags { FrameFlags { bits: 0 } }
+    public fn raw(&self) -> UInt8 { self.bits }
 
-    pub fn has(&self, flag: UInt8) -> Bool { (self.bits & flag) != 0 }
-    pub fn with(&self, flag: UInt8) -> FrameFlags { FrameFlags { bits: self.bits | flag } }
-    pub fn without(&self, flag: UInt8) -> FrameFlags { FrameFlags { bits: self.bits & !flag } }
+    public fn has(&self, flag: UInt8) -> Bool { (self.bits & flag) != 0 }
+    public fn with(&self, flag: UInt8) -> FrameFlags { FrameFlags { bits: self.bits | flag } }
+    public fn without(&self, flag: UInt8) -> FrameFlags { FrameFlags { bits: self.bits & !flag } }
 }
 
 // =============================================================================
@@ -107,7 +107,7 @@ public type FrameHeader is {
 };
 
 implement FrameHeader {
-    pub fn encode(&self, out: &mut List<Byte>) {
+    public fn encode(&self, out: &mut List<Byte>) {
         // length: 24-bit big-endian
         out.push(((self.length >> 16) & 0xFF) as Byte);
         out.push(((self.length >> 8) & 0xFF) as Byte);
@@ -122,7 +122,7 @@ implement FrameHeader {
         out.push((sid & 0xFF) as Byte);
     }
 
-    pub fn decode(buf: &[Byte]) -> Result<FrameHeader, Http2Error> {
+    public fn decode(buf: &[Byte]) -> Result<FrameHeader, Http2Error> {
         if buf.len() < FRAME_HEADER_SIZE { return Err(Http2Error.NeedMore); }
         let length: Int =
             ((buf[0] as Int) << 16) | ((buf[1] as Int) << 8) | (buf[2] as Int);
@@ -218,7 +218,7 @@ public type PriorityData is {
 implement Frame {
     /// Decode the payload bytes given an already-parsed header.
     /// `payload.len() == header.length`.
-    pub fn decode_payload(header: &FrameHeader, payload: &[Byte]) -> Result<Frame, Http2Error> {
+    public fn decode_payload(header: &FrameHeader, payload: &[Byte]) -> Result<Frame, Http2Error> {
         if payload.len() != header.length {
             return Err(Http2Error.MalformedFrame("payload length mismatch".into()));
         }

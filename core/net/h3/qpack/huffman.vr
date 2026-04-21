@@ -64,7 +64,7 @@ public type HuffError is
 // =============================================================================
 
 /// Number of Huffman-encoded bits in `input`.
-pub fn encoded_bit_length(input: &[Byte]) -> Int {
+public fn encoded_bit_length(input: &[Byte]) -> Int {
     let mut bits: Int = 0;
     let mut i: Int = 0;
     while i < input.len() {
@@ -75,7 +75,7 @@ pub fn encoded_bit_length(input: &[Byte]) -> Int {
 }
 
 /// Huffman-encoded byte length (padded up to byte boundary).
-pub fn encoded_byte_length(input: &[Byte]) -> Int {
+public fn encoded_byte_length(input: &[Byte]) -> Int {
     let b = encoded_bit_length(input);
     (b + 7) / 8
 }
@@ -84,7 +84,7 @@ pub fn encoded_byte_length(input: &[Byte]) -> Int {
 // Encode — bit-level packing MSB-first
 // =============================================================================
 
-pub fn encode(input: &[Byte], out: &mut List<Byte>) {
+public fn encode(input: &[Byte], out: &mut List<Byte>) {
     let mut bit_buf: UInt64 = 0_u64;
     let mut bit_count: Int = 0;
     let mut i: Int = 0;
@@ -127,7 +127,7 @@ pub fn encode(input: &[Byte], out: &mut List<Byte>) {
 //
 // =============================================================================
 
-pub fn decode(input: &[Byte]) -> Result<List<Byte>, HuffError> {
+public fn decode(input: &[Byte]) -> Result<List<Byte>, HuffError> {
     let mut out: List<Byte> = [];
     let mut state: Int = 0;     // root
     let mut accum: UInt64 = 0_u64;

@@ -52,7 +52,7 @@ public type IssueOptions is {
 };
 
 impl IssueOptions {
-    pub fn default() -> IssueOptions {
+    public fn default() -> IssueOptions {
         IssueOptions {
             lifetime_seconds:    604_800_u32,    // 7 days
             max_early_data_size: 0_u32,          // safe default: no 0-RTT
@@ -60,15 +60,15 @@ impl IssueOptions {
         }
     }
 
-    pub fn with_lifetime(mut self, seconds: UInt32) -> IssueOptions {
+    public fn with_lifetime(mut self, seconds: UInt32) -> IssueOptions {
         self.lifetime_seconds = seconds; self
     }
 
-    pub fn with_0rtt_budget(mut self, bytes: UInt32) -> IssueOptions {
+    public fn with_0rtt_budget(mut self, bytes: UInt32) -> IssueOptions {
         self.max_early_data_size = bytes; self
     }
 
-    pub fn with_alpn(mut self, alpn: List<Byte>) -> IssueOptions {
+    public fn with_alpn(mut self, alpn: List<Byte>) -> IssueOptions {
         self.alpn = alpn; self
     }
 }
@@ -86,7 +86,7 @@ public type IssueError is
 /// `ticket_nonce` is unique per call — RFC 8446 §4.6.1 requires
 /// per-ticket nonces so resuming with one ticket doesn't leak
 /// key material for others minted from the same master.
-pub fn issue_post_handshake_ticket(
+public fn issue_post_handshake_ticket(
     stek: &SessionTicketKey,
     suite: CipherSuite,
     resumption_master: &SecretBytes,
@@ -146,7 +146,7 @@ pub fn issue_post_handshake_ticket(
 /// Batch helper — issue `count` tickets at once (typical deployment:
 /// 2 tickets per handshake so the client has a spare when the first
 /// is burned on a resumption attempt).
-pub fn issue_post_handshake_tickets(
+public fn issue_post_handshake_tickets(
     stek: &SessionTicketKey,
     suite: CipherSuite,
     resumption_master: &SecretBytes,

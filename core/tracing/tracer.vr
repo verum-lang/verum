@@ -49,7 +49,7 @@ public type NoopTracer is {
 };
 
 implement NoopTracer {
-    pub fn new(scope: Text, version: Text) -> NoopTracer {
+    public fn new(scope: Text, version: Text) -> NoopTracer {
         NoopTracer { scope: scope, version: version }
     }
 }
@@ -83,7 +83,7 @@ public type SdkTracer is {
 };
 
 implement SdkTracer {
-    pub fn new(
+    public fn new(
         scope: Text,
         version: Text,
         sampler: Heap<dyn Sampler>,
@@ -173,7 +173,7 @@ public type TracerProvider is {
 };
 
 implement TracerProvider {
-    pub fn builder() -> TracerProviderBuilder {
+    public fn builder() -> TracerProviderBuilder {
         TracerProviderBuilder {
             sampler: None,
             processors: List.new(),
@@ -181,7 +181,7 @@ implement TracerProvider {
         }
     }
 
-    pub fn noop() -> TracerProvider {
+    public fn noop() -> TracerProvider {
         TracerProvider {
             sampler: Heap.new(AlwaysOff.new()) as Heap<dyn Sampler>,
             processors: List.new(),
@@ -193,7 +193,7 @@ implement TracerProvider {
     /// Obtain (or create) a Tracer for the given instrumentation scope.
     /// Same (name, version) pair returns the same Tracer to amortise
     /// Shared-clone cost.
-    pub fn tracer(&self, name: &Text, version: &Text) -> Heap<dyn Tracer> {
+    public fn tracer(&self, name: &Text, version: &Text) -> Heap<dyn Tracer> {
         let mut guard = self.tracers.lock().unwrap();
         let mut i = 0;
         while i < guard.len() {
@@ -242,17 +242,17 @@ public type TracerProviderBuilder is {
 };
 
 implement TracerProviderBuilder {
-    pub fn with_sampler(mut self, sampler: Heap<dyn Sampler>) -> TracerProviderBuilder {
+    public fn with_sampler(mut self, sampler: Heap<dyn Sampler>) -> TracerProviderBuilder {
         self.sampler = Some(sampler); self
     }
-    pub fn with_resource(mut self, resource: Resource) -> TracerProviderBuilder {
+    public fn with_resource(mut self, resource: Resource) -> TracerProviderBuilder {
         self.resource = resource; self
     }
-    pub fn with_processor(mut self, processor: Heap<dyn SpanProcessor>) -> TracerProviderBuilder {
+    public fn with_processor(mut self, processor: Heap<dyn SpanProcessor>) -> TracerProviderBuilder {
         self.processors.push(processor); self
     }
 
-    pub fn build(self) -> TracerProvider {
+    public fn build(self) -> TracerProvider {
         let default_sampler: Heap<dyn Sampler> =
             Heap.new(ParentBased.new(Heap.new(AlwaysOn.new()) as Heap<dyn Sampler>))
                 as Heap<dyn Sampler>;

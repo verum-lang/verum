@@ -23,18 +23,18 @@ mount core.*;
 // Constants
 // =============================================================================
 
-pub const ML_KEM_SHARED_SECRET_LEN: Int = 32;
-pub const ML_KEM_512_PK_LEN: Int = 800;
-pub const ML_KEM_512_SK_LEN: Int = 1632;
-pub const ML_KEM_512_CT_LEN: Int = 768;
+public const ML_KEM_SHARED_SECRET_LEN: Int = 32;
+public const ML_KEM_512_PK_LEN: Int = 800;
+public const ML_KEM_512_SK_LEN: Int = 1632;
+public const ML_KEM_512_CT_LEN: Int = 768;
 
-pub const ML_KEM_768_PK_LEN: Int = 1184;
-pub const ML_KEM_768_SK_LEN: Int = 2400;
-pub const ML_KEM_768_CT_LEN: Int = 1088;
+public const ML_KEM_768_PK_LEN: Int = 1184;
+public const ML_KEM_768_SK_LEN: Int = 2400;
+public const ML_KEM_768_CT_LEN: Int = 1088;
 
-pub const ML_KEM_1024_PK_LEN: Int = 1568;
-pub const ML_KEM_1024_SK_LEN: Int = 3168;
-pub const ML_KEM_1024_CT_LEN: Int = 1568;
+public const ML_KEM_1024_PK_LEN: Int = 1568;
+public const ML_KEM_1024_SK_LEN: Int = 3168;
+public const ML_KEM_1024_CT_LEN: Int = 1568;
 
 // =============================================================================
 // Variants
@@ -46,7 +46,7 @@ public type MlKemVariant is
     | MlKem1024;
 
 implement MlKemVariant {
-    pub fn public_key_len(&self) -> Int {
+    public fn public_key_len(&self) -> Int {
         match self {
             MlKemVariant.MlKem512 => ML_KEM_512_PK_LEN,
             MlKemVariant.MlKem768 => ML_KEM_768_PK_LEN,
@@ -54,7 +54,7 @@ implement MlKemVariant {
         }
     }
 
-    pub fn secret_key_len(&self) -> Int {
+    public fn secret_key_len(&self) -> Int {
         match self {
             MlKemVariant.MlKem512 => ML_KEM_512_SK_LEN,
             MlKemVariant.MlKem768 => ML_KEM_768_SK_LEN,
@@ -62,7 +62,7 @@ implement MlKemVariant {
         }
     }
 
-    pub fn ciphertext_len(&self) -> Int {
+    public fn ciphertext_len(&self) -> Int {
         match self {
             MlKemVariant.MlKem512 => ML_KEM_512_CT_LEN,
             MlKemVariant.MlKem768 => ML_KEM_768_CT_LEN,
@@ -70,7 +70,7 @@ implement MlKemVariant {
         }
     }
 
-    pub fn shared_secret_len(&self) -> Int { ML_KEM_SHARED_SECRET_LEN }
+    public fn shared_secret_len(&self) -> Int { ML_KEM_SHARED_SECRET_LEN }
 }
 
 // =============================================================================

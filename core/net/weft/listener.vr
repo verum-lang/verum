@@ -117,7 +117,7 @@ public type PlainHttp1Runner<H> is {
 };
 
 implement<H: Handler + Send + Sync + 'static> PlainHttp1Runner<H> {
-    pub fn new(
+    public fn new(
         app: Heap<H>,
         token: CancellationToken,
         draining: Shared<AtomicBool>,

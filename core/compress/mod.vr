@@ -76,7 +76,7 @@ public type Algorithm is
 
 implement Algorithm {
     /// Content-Encoding token used over HTTP.
-    pub fn content_encoding(self) -> &'static Text {
+    public fn content_encoding(self) -> &'static Text {
         match self {
             Gzip => "gzip",
             Deflate => "deflate",
@@ -89,7 +89,7 @@ implement Algorithm {
     }
 
     /// Parse an HTTP Content-Encoding token. Returns None for unknown.
-    pub fn from_content_encoding(token: &Text) -> Maybe<Algorithm> {
+    public fn from_content_encoding(token: &Text) -> Maybe<Algorithm> {
         let t = token.to_lowercase();
         match t.as_str() {
             "gzip" => Some(Algorithm.Gzip),
@@ -144,7 +144,7 @@ public type Codec is protocol {
 
 /// Dispatch by runtime Algorithm value. Useful at HTTP Content-Encoding
 /// negotiation site where the algorithm is chosen from client Accept-Encoding.
-pub fn encode(algo: Algorithm, input: &[Byte], level: Int, out: &mut List<Byte>)
+public fn encode(algo: Algorithm, input: &[Byte], level: Int, out: &mut List<Byte>)
     -> Result<Int, CompressError>
 {
     match algo {
@@ -161,7 +161,7 @@ pub fn encode(algo: Algorithm, input: &[Byte], level: Int, out: &mut List<Byte>)
     }
 }
 
-pub fn decode(algo: Algorithm, input: &[Byte], max_output_bytes: Int, out: &mut List<Byte>)
+public fn decode(algo: Algorithm, input: &[Byte], max_output_bytes: Int, out: &mut List<Byte>)
     -> Result<Int, CompressError>
 {
     match algo {

@@ -53,7 +53,7 @@ public type QuicServerOptions is {
 };
 
 impl QuicServerOptions {
-    pub fn from_cert(cert_chain: List<List<Byte>>, signer: Heap<dyn CertSigner>) -> QuicServerOptions {
+    public fn from_cert(cert_chain: List<List<Byte>>, signer: Heap<dyn CertSigner>) -> QuicServerOptions {
         let mut params = TransportParams.defaults();
         params.initial_max_data                    = 10_485_760_u64;    // 10 MiB
         params.initial_max_stream_data_bidi_local  = 1_048_576_u64;     // 1 MiB
@@ -81,7 +81,7 @@ impl QuicServerOptions {
         }
     }
 
-    pub fn with_alpn(mut self, alpn: List<List<Byte>>) -> QuicServerOptions {
+    public fn with_alpn(mut self, alpn: List<List<Byte>>) -> QuicServerOptions {
         self.alpn_prefs = alpn;
         self
     }
@@ -204,5 +204,5 @@ impl QuicServer {
         }
     }
 
-    pub fn local_addr(&self) -> SocketAddr { self.local_addr.clone() }
+    public fn local_addr(&self) -> SocketAddr { self.local_addr.clone() }
 }

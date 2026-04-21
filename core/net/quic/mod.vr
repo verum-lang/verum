@@ -124,7 +124,7 @@ public type QuicConfig is {
 }
 
 implement QuicConfig {
-    pub fn client(server_name: &Text) -> QuicConfig {
+    public fn client(server_name: &Text) -> QuicConfig {
         let mut c = QuicConfig.defaults();
         c.is_client = true;
         c.server_name = Some(server_name.clone());
@@ -132,7 +132,7 @@ implement QuicConfig {
         c
     }
 
-    pub fn server() -> QuicConfig {
+    public fn server() -> QuicConfig {
         let mut c = QuicConfig.defaults();
         c.is_client = false;
         c.verify_peer = false;
@@ -168,45 +168,45 @@ implement QuicConfig {
         }
     }
 
-    pub fn with_alpn(mut self, alpn: &[Text]) -> QuicConfig {
+    public fn with_alpn(mut self, alpn: &[Text]) -> QuicConfig {
         let mut i = 0;
         while i < alpn.len() { self.alpn.push(alpn[i].clone()); i = i + 1; }
         self
     }
 
-    pub fn with_certificate(mut self, cert: Certificate) -> QuicConfig {
+    public fn with_certificate(mut self, cert: Certificate) -> QuicConfig {
         self.certificates.push(cert); self
     }
 
-    pub fn with_private_key(mut self, key: PrivateKey) -> QuicConfig {
+    public fn with_private_key(mut self, key: PrivateKey) -> QuicConfig {
         self.private_key = Some(key); self
     }
 
-    pub fn with_verify_peer(mut self, verify: Bool) -> QuicConfig {
+    public fn with_verify_peer(mut self, verify: Bool) -> QuicConfig {
         self.verify_peer = verify; self
     }
 
-    pub fn with_initial_max_data(mut self, n: UInt64) -> QuicConfig {
+    public fn with_initial_max_data(mut self, n: UInt64) -> QuicConfig {
         self.initial_max_data = n; self
     }
 
-    pub fn with_initial_max_stream_data_bidi_local(mut self, n: UInt64) -> QuicConfig {
+    public fn with_initial_max_stream_data_bidi_local(mut self, n: UInt64) -> QuicConfig {
         self.initial_max_stream_data_bidi_local = n; self
     }
 
-    pub fn with_initial_max_streams_bidi(mut self, n: UInt64) -> QuicConfig {
+    public fn with_initial_max_streams_bidi(mut self, n: UInt64) -> QuicConfig {
         self.initial_max_streams_bidi = n; self
     }
 
-    pub fn with_max_idle_timeout(mut self, t: Duration) -> QuicConfig {
+    public fn with_max_idle_timeout(mut self, t: Duration) -> QuicConfig {
         self.max_idle_timeout = t; self
     }
 
-    pub fn with_early_data(mut self, enable: Bool) -> QuicConfig {
+    public fn with_early_data(mut self, enable: Bool) -> QuicConfig {
         self.enable_early_data = enable; self
     }
 
-    pub fn with_datagrams(mut self, enable: Bool) -> QuicConfig {
+    public fn with_datagrams(mut self, enable: Bool) -> QuicConfig {
         self.enable_datagrams = enable; self
     }
 }

@@ -245,7 +245,7 @@ implement SignalRegistry {
     /// BroadcastSender that fans out to all subscribers of `sig`.
     ///
     /// Spawns the background poller on first-ever call.
-    pub fn ensure_signal_registered(&self, sig: Signal) -> BroadcastSender<Signal> {
+    public fn ensure_signal_registered(&self, sig: Signal) -> BroadcastSender<Signal> {
         let mut entries = self.entries.lock().unwrap();
 
         // Fast path — already registered.

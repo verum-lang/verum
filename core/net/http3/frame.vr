@@ -23,7 +23,7 @@ public type H3FrameType is
     | Reserved(UInt64);
 
 implement H3FrameType {
-    pub fn to_u64(&self) -> UInt64 {
+    public fn to_u64(&self) -> UInt64 {
         match self {
             H3FrameType.Data         => 0x0,
             H3FrameType.Headers      => 0x1,
@@ -36,7 +36,7 @@ implement H3FrameType {
         }
     }
 
-    pub fn from_u64(v: UInt64) -> H3FrameType {
+    public fn from_u64(v: UInt64) -> H3FrameType {
         match v {
             0x0 => H3FrameType.Data,
             0x1 => H3FrameType.Headers,
@@ -77,13 +77,13 @@ public type H3Frame is
 
 /// Encode `value` as a QUIC varint (1, 2, 4, or 8 bytes).
 /// Deprecated: prefer `core.encoding.varint.quic_encode_into` directly.
-pub fn write_varint(out: &mut List<Byte>, value: UInt64) {
+public fn write_varint(out: &mut List<Byte>, value: UInt64) {
     let _ = quic_encode_into(out, value);
 }
 
 /// Decode a QUIC varint starting at `buf[pos]`, returning (value, next_pos).
 /// Deprecated: prefer `core.encoding.varint.quic_decode` directly.
-pub fn read_varint(buf: &[Byte], pos: Int) -> Result<(UInt64, Int), Http3Error> {
+public fn read_varint(buf: &[Byte], pos: Int) -> Result<(UInt64, Int), Http3Error> {
     match quic_decode(buf, pos) {
         Ok((v, next)) => Ok((v, next)),
         Err(_)        => Err(Http3Error.NeedMore),

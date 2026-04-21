@@ -92,16 +92,16 @@ implement RsaPublicKey {
     /// Construct from raw big-endian `n` and `e`. No validation
     /// performed here — verify calls will fail cleanly on invalid
     /// inputs.
-    pub fn new(n: List<Byte>, e: List<Byte>) -> RsaPublicKey {
+    public fn new(n: List<Byte>, e: List<Byte>) -> RsaPublicKey {
         RsaPublicKey { n: n, e: e }
     }
 
     /// Modulus size in bytes.
-    pub fn modulus_bytes(&self) -> Int { self.n.len() }
+    public fn modulus_bytes(&self) -> Int { self.n.len() }
 
     /// Nominal security level in bits — informational only. Uses
     /// NIST SP 800-57 Part 1 §5.6.1 (Table 2) mapping.
-    pub fn security_level_bits(&self) -> Int {
+    public fn security_level_bits(&self) -> Int {
         let n = self.n.len() * 8;
         if n >= 15360 { 256 }
         else if n >= 7680 { 192 }

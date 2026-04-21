@@ -34,12 +34,12 @@ public type SamplingResult is {
 };
 
 implement SamplingResult {
-    pub fn new(decision: SamplingDecision, trace_state: TraceState) -> SamplingResult {
+    public fn new(decision: SamplingDecision, trace_state: TraceState) -> SamplingResult {
         SamplingResult { decision: decision, trace_state: trace_state }
     }
 
-    pub fn decision(&self) -> SamplingDecision { self.decision }
-    pub fn trace_state(&self) -> &TraceState { &self.trace_state }
+    public fn decision(&self) -> SamplingDecision { self.decision }
+    public fn trace_state(&self) -> &TraceState { &self.trace_state }
 }
 
 // =============================================================================
@@ -68,7 +68,7 @@ public type Sampler is protocol {
 public type AlwaysOn is ();
 
 implement AlwaysOn {
-    pub fn new() -> AlwaysOn { () }
+    public fn new() -> AlwaysOn { () }
 }
 
 implement Sampler for AlwaysOn {
@@ -93,7 +93,7 @@ implement Sampler for AlwaysOn {
 public type AlwaysOff is ();
 
 implement AlwaysOff {
-    pub fn new() -> AlwaysOff { () }
+    public fn new() -> AlwaysOff { () }
 }
 
 implement Sampler for AlwaysOff {
@@ -125,7 +125,7 @@ public type TraceIdRatio is {
 };
 
 implement TraceIdRatio {
-    pub fn new(ratio: Float) -> TraceIdRatio {
+    public fn new(ratio: Float) -> TraceIdRatio {
         let r = if ratio < 0.0 { 0.0 } else if ratio > 1.0 { 1.0 } else { ratio };
         let threshold = (r * (18446744073709551615.0 as Float)) as UInt64;
         TraceIdRatio { ratio: r, threshold: threshold }
@@ -178,7 +178,7 @@ public type ParentBased is {
 
 implement ParentBased {
     /// Convenience — all-AlwaysOn/Off derivatives of `root`.
-    pub fn new(root: Heap<dyn Sampler>) -> ParentBased {
+    public fn new(root: Heap<dyn Sampler>) -> ParentBased {
         ParentBased {
             root: root,
             remote_parent_sampled: Heap.new(AlwaysOn.new()),

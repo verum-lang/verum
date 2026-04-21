@@ -54,7 +54,7 @@ const TRACEPARENT_VERSION: &'static Text = "00";
 
 
 implement W3CTraceContext {
-    pub fn new() -> W3CTraceContext { () }
+    public fn new() -> W3CTraceContext { () }
 }
 
 implement TextMapPropagator for W3CTraceContext {

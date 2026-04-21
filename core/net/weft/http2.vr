@@ -93,7 +93,7 @@ public type Http2Limits is {
 };
 
 implement Http2Limits {
-    pub fn default() -> Http2Limits {
+    public fn default() -> Http2Limits {
         Http2Limits {
             max_concurrent_streams: 128,
             initial_window_size:    65_535,
@@ -133,7 +133,7 @@ public type Http2cRunner<H> is {
 };
 
 implement<H: Handler + Send + Sync + 'static> Http2cRunner<H> {
-    pub fn new(
+    public fn new(
         app: Heap<H>,
         token: CancellationToken,
         draining: Shared<AtomicBool>,

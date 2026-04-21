@@ -30,7 +30,7 @@ public type X509Svid is {
 }
 
 implement X509Svid {
-    pub fn new(
+    public fn new(
         id: SpiffeId,
         cert_chain: List<Certificate>,
         private_key: PrivateKey,
@@ -44,13 +44,13 @@ implement X509Svid {
         }
     }
 
-    pub fn id(&self) -> &SpiffeId { &self.id }
-    pub fn cert_chain(&self) -> &List<Certificate> { &self.cert_chain }
-    pub fn private_key(&self) -> &PrivateKey { &self.private_key }
-    pub fn expires_at(&self) -> Instant { self.expires_at }
+    public fn id(&self) -> &SpiffeId { &self.id }
+    public fn cert_chain(&self) -> &List<Certificate> { &self.cert_chain }
+    public fn private_key(&self) -> &PrivateKey { &self.private_key }
+    public fn expires_at(&self) -> Instant { self.expires_at }
 
     /// Convenience — is the SVID expired relative to `now`?
-    pub fn is_expired(&self, now: Instant) -> Bool {
+    public fn is_expired(&self, now: Instant) -> Bool {
         now >= self.expires_at
     }
 }
@@ -75,13 +75,13 @@ public type JwtSvid is {
 }
 
 implement JwtSvid {
-    pub fn id(&self) -> &SpiffeId { &self.id }
-    pub fn token(&self) -> &Text { &self.token }
-    pub fn audiences(&self) -> &List<Text> { &self.audiences }
-    pub fn expires_at(&self) -> Instant { self.expires_at }
-    pub fn issued_at(&self) -> &Maybe<Instant> { &self.issued_at }
+    public fn id(&self) -> &SpiffeId { &self.id }
+    public fn token(&self) -> &Text { &self.token }
+    public fn audiences(&self) -> &List<Text> { &self.audiences }
+    public fn expires_at(&self) -> Instant { self.expires_at }
+    public fn issued_at(&self) -> &Maybe<Instant> { &self.issued_at }
 
-    pub fn is_expired(&self, now: Instant) -> Bool {
+    public fn is_expired(&self, now: Instant) -> Bool {
         now >= self.expires_at
     }
 }
@@ -98,12 +98,12 @@ public type X509Bundle is {
 }
 
 implement X509Bundle {
-    pub fn new(trust_domain: Text, cas: List<Certificate>) -> X509Bundle {
+    public fn new(trust_domain: Text, cas: List<Certificate>) -> X509Bundle {
         X509Bundle { trust_domain: trust_domain, cas: cas }
     }
 
-    pub fn trust_domain(&self) -> &Text { &self.trust_domain }
-    pub fn cas(&self) -> &List<Certificate> { &self.cas }
+    public fn trust_domain(&self) -> &Text { &self.trust_domain }
+    public fn cas(&self) -> &List<Certificate> { &self.cas }
 }
 
 /// JWT trust bundle — the set of JWKs authorised to sign peer JWT-SVIDs
@@ -114,12 +114,12 @@ public type JwtBundle is {
 }
 
 implement JwtBundle {
-    pub fn new(trust_domain: Text, jwks: Text) -> JwtBundle {
+    public fn new(trust_domain: Text, jwks: Text) -> JwtBundle {
         JwtBundle { trust_domain: trust_domain, jwks: jwks }
     }
 
-    pub fn trust_domain(&self) -> &Text { &self.trust_domain }
-    pub fn jwks(&self) -> &Text { &self.jwks }
+    public fn trust_domain(&self) -> &Text { &self.trust_domain }
+    public fn jwks(&self) -> &Text { &self.jwks }
 }
 
 // =============================================================================
@@ -131,9 +131,9 @@ public type X509BundleSet is {
 }
 
 implement X509BundleSet {
-    pub fn empty() -> X509BundleSet { X509BundleSet { bundles: List.new() } }
+    public fn empty() -> X509BundleSet { X509BundleSet { bundles: List.new() } }
 
-    pub fn insert(&mut self, b: X509Bundle) {
+    public fn insert(&mut self, b: X509Bundle) {
         let mut i = 0;
         while i < self.bundles.len() {
             if self.bundles[i].trust_domain() == b.trust_domain() {
@@ -145,7 +145,7 @@ implement X509BundleSet {
         self.bundles.push(b);
     }
 
-    pub fn get(&self, trust_domain: &Text) -> Maybe<&X509Bundle> {
+    public fn get(&self, trust_domain: &Text) -> Maybe<&X509Bundle> {
         let mut i = 0;
         while i < self.bundles.len() {
             if self.bundles[i].trust_domain() == *trust_domain {
@@ -156,7 +156,7 @@ implement X509BundleSet {
         None
     }
 
-    pub fn all(&self) -> &List<X509Bundle> { &self.bundles }
+    public fn all(&self) -> &List<X509Bundle> { &self.bundles }
 }
 
 public type JwtBundleSet is {
@@ -164,9 +164,9 @@ public type JwtBundleSet is {
 }
 
 implement JwtBundleSet {
-    pub fn empty() -> JwtBundleSet { JwtBundleSet { bundles: List.new() } }
+    public fn empty() -> JwtBundleSet { JwtBundleSet { bundles: List.new() } }
 
-    pub fn insert(&mut self, b: JwtBundle) {
+    public fn insert(&mut self, b: JwtBundle) {
         let mut i = 0;
         while i < self.bundles.len() {
             if self.bundles[i].trust_domain() == b.trust_domain() {
@@ -178,7 +178,7 @@ implement JwtBundleSet {
         self.bundles.push(b);
     }
 
-    pub fn get(&self, trust_domain: &Text) -> Maybe<&JwtBundle> {
+    public fn get(&self, trust_domain: &Text) -> Maybe<&JwtBundle> {
         let mut i = 0;
         while i < self.bundles.len() {
             if self.bundles[i].trust_domain() == *trust_domain {
@@ -189,7 +189,7 @@ implement JwtBundleSet {
         None
     }
 
-    pub fn all(&self) -> &List<JwtBundle> { &self.bundles }
+    public fn all(&self) -> &List<JwtBundle> { &self.bundles }
 }
 
 // =============================================================================

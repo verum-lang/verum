@@ -65,7 +65,7 @@ public type PacketError is
 public type LongPacketType is Initial | ZeroRtt | Handshake | Retry;
 
 implement LongPacketType {
-    pub fn to_bits(&self) -> UInt8 {
+    public fn to_bits(&self) -> UInt8 {
         match self {
             LongPacketType.Initial   => 0b00_u8,
             LongPacketType.ZeroRtt   => 0b01_u8,
@@ -74,7 +74,7 @@ implement LongPacketType {
         }
     }
 
-    pub fn from_bits(b: UInt8) -> LongPacketType {
+    public fn from_bits(b: UInt8) -> LongPacketType {
         match b & 0x03_u8 {
             0_u8 => LongPacketType.Initial,
             1_u8 => LongPacketType.ZeroRtt,
@@ -342,7 +342,7 @@ fn parse_pn_and_payload(
 // issued and their lengths.
 // =============================================================================
 
-pub fn parse_short(buf: &[Byte], dcid_len: Int) -> Result<Packet, PacketError> {
+public fn parse_short(buf: &[Byte], dcid_len: Int) -> Result<Packet, PacketError> {
     if buf.len() < 1 + dcid_len + 1 { return Err(PacketError.Truncated); }
     let first = buf[0];
     if (first & 0x80_u8) != 0_u8 { return Err(PacketError.InvalidHeaderForm); }

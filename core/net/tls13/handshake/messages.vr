@@ -87,7 +87,7 @@ public type ServerHello is {
 
 /// HRR is structurally a ServerHello with a specific `random` value
 /// (RFC 8446 §4.1.3). Caller detects via `is_hello_retry_request`.
-pub const HRR_RANDOM: [Byte; 32] = [
+public const HRR_RANDOM: [Byte; 32] = [
     0xCF_u8, 0x21_u8, 0xAD_u8, 0x74_u8, 0xE5_u8, 0x9A_u8, 0x61_u8, 0x11_u8,
     0xBE_u8, 0x1D_u8, 0x8C_u8, 0x02_u8, 0x1E_u8, 0x65_u8, 0xB8_u8, 0x91_u8,
     0xC2_u8, 0xA2_u8, 0x11_u8, 0x16_u8, 0x7A_u8, 0xBB_u8, 0x8C_u8, 0x5E_u8,
@@ -140,13 +140,13 @@ public type KeyUpdate is {
 public type KeyUpdateRequest is UpdateNotRequested | UpdateRequested;
 
 implement KeyUpdateRequest {
-    pub fn to_u8(&self) -> UInt8 {
+    public fn to_u8(&self) -> UInt8 {
         match self {
             KeyUpdateRequest.UpdateNotRequested => 0_u8,
             KeyUpdateRequest.UpdateRequested    => 1_u8,
         }
     }
-    pub fn from_u8(v: UInt8) -> KeyUpdateRequest {
+    public fn from_u8(v: UInt8) -> KeyUpdateRequest {
         match v {
             1_u8 => KeyUpdateRequest.UpdateRequested,
             _    => KeyUpdateRequest.UpdateNotRequested,

@@ -99,7 +99,7 @@ public fn build_inner_plaintext(
 /// Parse a decrypted inner-plaintext — strip trailing zero-padding,
 /// then extract the trailing ContentType byte. Returns (type, content)
 /// where content is the plaintext fragment (excl. type + padding).
-pub fn parse_inner_plaintext(inner: &[Byte]) -> Result<(ContentType, List<Byte>), RecordDecodeError> {
+public fn parse_inner_plaintext(inner: &[Byte]) -> Result<(ContentType, List<Byte>), RecordDecodeError> {
     // Scan from the end to find the first non-zero byte (= ContentType).
     let mut end: Int = inner.len() - 1;
     while end >= 0 && inner[end] == 0_u8 { end = end - 1; }

@@ -15,23 +15,23 @@ public type ErrorCode is {
 }
 
 implement ErrorCode {
-    pub const NO_ERROR: UInt32           = 0x00;
-    pub const PROTOCOL_ERROR: UInt32     = 0x01;
-    pub const INTERNAL_ERROR: UInt32     = 0x02;
-    pub const FLOW_CONTROL_ERROR: UInt32 = 0x03;
-    pub const SETTINGS_TIMEOUT: UInt32   = 0x04;
-    pub const STREAM_CLOSED: UInt32      = 0x05;
-    pub const FRAME_SIZE_ERROR: UInt32   = 0x06;
-    pub const REFUSED_STREAM: UInt32     = 0x07;
-    pub const CANCEL: UInt32             = 0x08;
-    pub const COMPRESSION_ERROR: UInt32  = 0x09;
-    pub const CONNECT_ERROR: UInt32      = 0x0A;
-    pub const ENHANCE_YOUR_CALM: UInt32  = 0x0B;
-    pub const INADEQUATE_SECURITY: UInt32 = 0x0C;
-    pub const HTTP_1_1_REQUIRED: UInt32  = 0x0D;
+    public const NO_ERROR: UInt32           = 0x00;
+    public const PROTOCOL_ERROR: UInt32     = 0x01;
+    public const INTERNAL_ERROR: UInt32     = 0x02;
+    public const FLOW_CONTROL_ERROR: UInt32 = 0x03;
+    public const SETTINGS_TIMEOUT: UInt32   = 0x04;
+    public const STREAM_CLOSED: UInt32      = 0x05;
+    public const FRAME_SIZE_ERROR: UInt32   = 0x06;
+    public const REFUSED_STREAM: UInt32     = 0x07;
+    public const CANCEL: UInt32             = 0x08;
+    public const COMPRESSION_ERROR: UInt32  = 0x09;
+    public const CONNECT_ERROR: UInt32      = 0x0A;
+    public const ENHANCE_YOUR_CALM: UInt32  = 0x0B;
+    public const INADEQUATE_SECURITY: UInt32 = 0x0C;
+    public const HTTP_1_1_REQUIRED: UInt32  = 0x0D;
 
-    pub fn new(code: UInt32) -> ErrorCode { ErrorCode { code: code } }
-    pub fn value(&self) -> UInt32 { self.code }
+    public fn new(code: UInt32) -> ErrorCode { ErrorCode { code: code } }
+    public fn value(&self) -> UInt32 { self.code }
 }
 
 // =============================================================================

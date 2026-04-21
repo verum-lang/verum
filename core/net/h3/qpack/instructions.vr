@@ -59,7 +59,7 @@ public type EncoderInstruction is
     | InsertWithLiteralName { name: List<Byte>, value: List<Byte> }
     | Duplicate(UInt64);
 
-pub fn encode_encoder(instr: &EncoderInstruction, out: &mut List<Byte>) {
+public fn encode_encoder(instr: &EncoderInstruction, out: &mut List<Byte>) {
     match instr {
         EncoderInstruction.SetCapacity(cap) => {
             // Opcode: 001xxxxx, prefix=5
@@ -84,7 +84,7 @@ pub fn encode_encoder(instr: &EncoderInstruction, out: &mut List<Byte>) {
     }
 }
 
-pub fn decode_encoder(buf: &[Byte], pos: Int) -> Result<(EncoderInstruction, Int), InstrError> {
+public fn decode_encoder(buf: &[Byte], pos: Int) -> Result<(EncoderInstruction, Int), InstrError> {
     if pos >= buf.len() { return Err(InstrError.Truncated); }
     let b0 = buf[pos];
     if (b0 & 0x80_u8) != 0_u8 {
@@ -120,7 +120,7 @@ public type DecoderInstruction is
     | StreamCancel(UInt64)
     | InsertCountIncrement(UInt64);
 
-pub fn encode_decoder(instr: &DecoderInstruction, out: &mut List<Byte>) {
+public fn encode_decoder(instr: &DecoderInstruction, out: &mut List<Byte>) {
     match instr {
         DecoderInstruction.SectionAck(sid) => {
             // 1xxxxxxx, prefix=7
@@ -137,7 +137,7 @@ pub fn encode_decoder(instr: &DecoderInstruction, out: &mut List<Byte>) {
     }
 }
 
-pub fn decode_decoder(buf: &[Byte], pos: Int) -> Result<(DecoderInstruction, Int), InstrError> {
+public fn decode_decoder(buf: &[Byte], pos: Int) -> Result<(DecoderInstruction, Int), InstrError> {
     if pos >= buf.len() { return Err(InstrError.Truncated); }
     let b0 = buf[pos];
     if (b0 & 0x80_u8) != 0_u8 {
@@ -159,7 +159,7 @@ pub fn decode_decoder(buf: &[Byte], pos: Int) -> Result<(DecoderInstruction, Int
 // Bulk-stream helpers — parse every instruction from a buffer
 // =============================================================================
 
-pub fn decode_all_encoder(buf: &[Byte]) -> Result<List<EncoderInstruction>, InstrError> {
+public fn decode_all_encoder(buf: &[Byte]) -> Result<List<EncoderInstruction>, InstrError> {
     let mut out: List<EncoderInstruction> = [];
     let mut pos: Int = 0;
     while pos < buf.len() {
@@ -170,7 +170,7 @@ pub fn decode_all_encoder(buf: &[Byte]) -> Result<List<EncoderInstruction>, Inst
     Ok(out)
 }
 
-pub fn decode_all_decoder(buf: &[Byte]) -> Result<List<DecoderInstruction>, InstrError> {
+public fn decode_all_decoder(buf: &[Byte]) -> Result<List<DecoderInstruction>, InstrError> {
     let mut out: List<DecoderInstruction> = [];
     let mut pos: Int = 0;
     while pos < buf.len() {

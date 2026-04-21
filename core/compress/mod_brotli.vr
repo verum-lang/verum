@@ -16,9 +16,9 @@ const BROTLI_MAX_LEVEL: Int = 11;
 public type Brotli is ();
 
 implement Brotli {
-    pub const ALGORITHM: Algorithm = Algorithm.Brotli;
+    public const ALGORITHM: Algorithm = Algorithm.Brotli;
 
-    pub fn encode(input: &[Byte], level: Int, out: &mut List<Byte>)
+    public fn encode(input: &[Byte], level: Int, out: &mut List<Byte>)
         -> Result<Int, CompressError>
     {
         let l = if level < 0 || level > BROTLI_MAX_LEVEL {
@@ -27,7 +27,7 @@ implement Brotli {
         @intrinsic("verum.compress.brotli_encode", input, l, out)
     }
 
-    pub fn decode(input: &[Byte], max_output_bytes: Int, out: &mut List<Byte>)
+    public fn decode(input: &[Byte], max_output_bytes: Int, out: &mut List<Byte>)
         -> Result<Int, CompressError>
     {
         @intrinsic("verum.compress.brotli_decode", input, max_output_bytes, out)
@@ -35,7 +35,7 @@ implement Brotli {
 
     /// Encode with a custom quality/window preset per brotli API. Useful
     /// for text-specific tuning (mode=BROTLI_MODE_TEXT).
-    pub fn encode_with(input: &[Byte], level: Int, window_bits: Int,
+    public fn encode_with(input: &[Byte], level: Int, window_bits: Int,
                         out: &mut List<Byte>) -> Result<Int, CompressError>
     {
         let l = if level < 0 || level > BROTLI_MAX_LEVEL {

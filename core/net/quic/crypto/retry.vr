@@ -30,13 +30,13 @@ mount core.collections.List;
 mount core.security.aead.aes_gcm.{aes128_gcm_seal, aes128_gcm_open, AesGcmError};
 
 /// RFC 9001 §5.8 — key for QUIC v1 retry integrity tag.
-pub const RETRY_INTEGRITY_KEY_V1: [Byte; 16] = [
+public const RETRY_INTEGRITY_KEY_V1: [Byte; 16] = [
     0xbe_u8, 0x0c_u8, 0x69_u8, 0x0b_u8, 0x9f_u8, 0x66_u8, 0x57_u8, 0x5a_u8,
     0x1d_u8, 0x76_u8, 0x6b_u8, 0x54_u8, 0xe3_u8, 0x68_u8, 0xc8_u8, 0x4e_u8,
 ];
 
 /// RFC 9001 §5.8 — nonce for QUIC v1 retry integrity tag.
-pub const RETRY_INTEGRITY_NONCE_V1: [Byte; 12] = [
+public const RETRY_INTEGRITY_NONCE_V1: [Byte; 12] = [
     0x46_u8, 0x15_u8, 0x99_u8, 0xd3_u8, 0x5d_u8, 0x63_u8, 0x2b_u8, 0xf2_u8,
     0x23_u8, 0x98_u8, 0x25_u8, 0xbb_u8,
 ];

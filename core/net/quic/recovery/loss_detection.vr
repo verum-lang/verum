@@ -43,11 +43,11 @@ mount core.net.quic.recovery.cc.{CongestionCtrl};
 // Constants (RFC 9002 §6.1.1 / §6.2.1)
 // =============================================================================
 
-pub const K_PACKET_THRESHOLD: UInt64 = 3_u64;
-pub const K_GRANULARITY_US:   UInt64 = 1_000_u64;    // 1 ms
-pub const K_TIME_THRESHOLD_NUM: UInt64 = 9_u64;       // 9/8 scale
-pub const K_TIME_THRESHOLD_DEN: UInt64 = 8_u64;
-pub const MAX_PTO_BACKOFF:    UInt32 = 8_u32;
+public const K_PACKET_THRESHOLD: UInt64 = 3_u64;
+public const K_GRANULARITY_US:   UInt64 = 1_000_u64;    // 1 ms
+public const K_TIME_THRESHOLD_NUM: UInt64 = 9_u64;       // 9/8 scale
+public const K_TIME_THRESHOLD_DEN: UInt64 = 8_u64;
+public const MAX_PTO_BACKOFF:    UInt32 = 8_u32;
 
 // =============================================================================
 // LossDetection state
@@ -69,7 +69,7 @@ public type LossDetection is {
 };
 
 implement LossDetection {
-    pub fn new() -> LossDetection {
+    public fn new() -> LossDetection {
         LossDetection {
             rtt:    RttEstimator.new(),
             spaces: [
@@ -94,7 +94,7 @@ implement LossDetection {
     }
 
     /// Register a freshly-sent packet.
-    pub fn on_packet_sent(
+    public fn on_packet_sent(
         &mut self,
         kind: PnSpaceKind,
         info: SentPacketInfo,
@@ -113,7 +113,7 @@ implement LossDetection {
     /// Process an incoming ACK frame for a given PN space.
     /// Returns the list of frames the caller must retransmit (from
     /// lost packets detected in the same pass).
-    pub fn on_ack_received(
+    public fn on_ack_received(
         &mut self,
         kind: PnSpaceKind,
         largest_acked: UInt64,
@@ -296,7 +296,7 @@ implement LossDetection {
     /// Timer fire hook. Returns `Some(kind)` indicating the PN space
     /// that must emit a PROBE packet. `None` if the timer was armed for
     /// loss-only detection and lost packets have already been handled.
-    pub fn on_timer(&mut self, now: Instant, cc: &mut dyn CongestionCtrl) -> Maybe<PnSpaceKind> {
+    public fn on_timer(&mut self, now: Instant, cc: &mut dyn CongestionCtrl) -> Maybe<PnSpaceKind> {
         // If we have in-flight packets in any space, a timer fire is
         // always a PTO (not pure loss): RFC 9002 §6.2.4.
         self.pto_count = self.pto_count + 1_u32;
@@ -308,12 +308,12 @@ implement LossDetection {
     }
 
     /// Hook called when Initial or Handshake keys are discarded.
-    pub fn on_keys_discarded(&mut self, kind: PnSpaceKind) {
+    public fn on_keys_discarded(&mut self, kind: PnSpaceKind) {
         self.space_mut(kind).discard();
         self.time_of_last_ack_eliciting_packet[kind.as_index()] = None;
         self.set_loss_detection_timer();
     }
 
-    pub fn timer_fires_at(&self) -> Maybe<Instant> { self.loss_detection_timer }
-    pub fn pto_count(&self) -> UInt32 { self.pto_count }
+    public fn timer_fires_at(&self) -> Maybe<Instant> { self.loss_detection_timer }
+    public fn pto_count(&self) -> UInt32 { self.pto_count }
 }

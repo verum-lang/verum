@@ -24,7 +24,7 @@ public type StaticEntry is {
     value: Text,
 };
 
-pub const STATIC_TABLE_SIZE: Int = 99;
+public const STATIC_TABLE_SIZE: Int = 99;
 
 /// Look up a static-table entry by its index. Returns None for
 /// indices outside [0, 98].
@@ -36,7 +36,7 @@ public fn get(index: Int) -> Maybe<StaticEntry> {
 /// Find the static-table index of an exact (name, value) match.
 /// Returns the smallest matching index when multiple entries share
 /// a name — picks the best value match first.
-pub fn find(name: &Text, value: &Text) -> Maybe<Int> {
+public fn find(name: &Text, value: &Text) -> Maybe<Int> {
     let mut i: Int = 0;
     while i < STATIC_TABLE_SIZE {
         let e = entry(i);
@@ -50,7 +50,7 @@ pub fn find(name: &Text, value: &Text) -> Maybe<Int> {
 
 /// Find any static-table index with a matching name (for name-
 /// reference encoding). Returns the smallest matching index or None.
-pub fn find_name(name: &Text) -> Maybe<Int> {
+public fn find_name(name: &Text) -> Maybe<Int> {
     let mut i: Int = 0;
     while i < STATIC_TABLE_SIZE {
         let e = entry(i);

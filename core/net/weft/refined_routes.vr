@@ -54,7 +54,7 @@ public type PathRefinement<T> is {
 };
 
 implement<T> PathRefinement<T> {
-    pub fn new(name: Text, expected: Text, check: fn(&T) -> Bool) -> PathRefinement<T> {
+    public fn new(name: Text, expected: Text, check: fn(&T) -> Bool) -> PathRefinement<T> {
         PathRefinement {
             name: name,
             check: check,
@@ -98,7 +98,7 @@ public fn refined_path_int(
 }
 
 /// Text variant — reject on empty string + apply `check`.
-pub fn refined_path_text(
+public fn refined_path_text(
     req: &mut WeftRequest,
     refinement: &PathRefinement<Text>,
 ) -> Result<Text, ExtractRejection> {
@@ -123,7 +123,7 @@ pub fn refined_path_text(
 
 /// Integer bounded above and below (inclusive). Corresponds to the
 /// `type UserId is Int where |n| { min <= n && n <= max }` pattern.
-pub fn int_between(name: Text, min: Int, max: Int) -> PathRefinement<Int> {
+public fn int_between(name: Text, min: Int, max: Int) -> PathRefinement<Int> {
     let lo = min;
     let hi = max;
     let expected = f"integer in [{lo}, {hi}]";
@@ -131,7 +131,7 @@ pub fn int_between(name: Text, min: Int, max: Int) -> PathRefinement<Int> {
 }
 
 /// Text matching a small set of literal values (e.g. API versions).
-pub fn text_one_of(name: Text, allowed: List<Text>) -> PathRefinement<Text> {
+public fn text_one_of(name: Text, allowed: List<Text>) -> PathRefinement<Text> {
     let expected = f"one of {allowed.len()} allowed values";
     let owned = allowed.clone();
     PathRefinement.new(name, expected, |s| {
@@ -144,7 +144,7 @@ pub fn text_one_of(name: Text, allowed: List<Text>) -> PathRefinement<Text> {
 
 /// Slug — length 1..=64, alphanumeric + hyphen. §8.1 example
 /// refinement made ergonomic.
-pub fn slug(name: Text) -> PathRefinement<Text> {
+public fn slug(name: Text) -> PathRefinement<Text> {
     PathRefinement.new(
         name,
         "slug: 1..64 chars, [0-9a-zA-Z-]",

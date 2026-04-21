@@ -144,12 +144,12 @@ public type ServerStepOutput is {
 // =============================================================================
 
 implement ServerSm {
-    pub fn new(config: ServerConfig) -> ServerSm {
+    public fn new(config: ServerConfig) -> ServerSm {
         ServerSm.WaitClientHelloSm(WaitClientHello { config: config })
     }
 
     /// Feed an inbound handshake message.
-    pub fn on_handshake(self, wire: &[Byte]) -> Result<(ServerSm, ServerStepOutput), TlsError> {
+    public fn on_handshake(self, wire: &[Byte]) -> Result<(ServerSm, ServerStepOutput), TlsError> {
         let mut r = Reader.new(wire);
         let msg = decode_handshake(&mut r).map_err(|_| TlsError.DecodeError)?;
 

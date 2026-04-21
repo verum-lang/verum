@@ -85,7 +85,7 @@ public type QpackSession is {
 };
 
 impl QpackSession {
-    pub fn new(max_table_cap: UInt64, peer_max_table_cap: UInt64) -> QpackSession {
+    public fn new(max_table_cap: UInt64, peer_max_table_cap: UInt64) -> QpackSession {
         let mut encoder_table = DynamicTable.new(max_table_cap);
         let decoder_table     = DynamicTable.new(peer_max_table_cap);
         // Default capacity = 0; we raise it via SetCapacity instruction
@@ -104,7 +104,7 @@ impl QpackSession {
 
     /// Raise our own encoder-side table capacity. Emits a SetCapacity
     /// instruction on the encoder stream.
-    pub fn set_encoder_capacity(&mut self, cap: UInt64) -> Result<(), QpackSessionError> {
+    public fn set_encoder_capacity(&mut self, cap: UInt64) -> Result<(), QpackSessionError> {
         self.encoder_table.set_capacity(cap)
             .map_err(|e| QpackSessionError.DynamicTable(e))?;
         encode_encoder(&EncoderInstruction.SetCapacity(cap), &mut self.encoder_out);
@@ -116,7 +116,7 @@ impl QpackSession {
     /// Encode a list of headers into a field section. Returns the
     /// wire bytes. Any new dynamic-table inserts are queued onto
     /// `encoder_out` — caller drains separately.
-    pub fn encode_field_section(
+    public fn encode_field_section(
         &mut self,
         headers: &List<HeaderField>,
     ) -> Result<List<Byte>, QpackSessionError> {
@@ -189,7 +189,7 @@ impl QpackSession {
     /// `peer.encoder_table` to already have the needed entries —
     /// bytes arriving on the encoder stream must have been processed
     /// before this call for streams that reference recent inserts.
-    pub fn decode_field_section(
+    public fn decode_field_section(
         &mut self,
         buf: &[Byte],
     ) -> Result<List<HeaderField>, QpackSessionError> {
@@ -278,7 +278,7 @@ impl QpackSession {
     /// decoded instruction mutates `self.decoder_table` and (for
     /// Insert variants) triggers an Insert Count Increment on our
     /// decoder stream.
-    pub fn on_peer_encoder_bytes(&mut self, buf: &[Byte]) -> Result<(), QpackSessionError> {
+    public fn on_peer_encoder_bytes(&mut self, buf: &[Byte]) -> Result<(), QpackSessionError> {
         let instrs = decode_all_encoder(buf)
             .map_err(|e| QpackSessionError.EncoderInstrError(e))?;
         let mut new_inserts: UInt64 = 0_u64;
@@ -301,7 +301,7 @@ impl QpackSession {
     /// Consume a chunk of bytes from peer's decoder stream — SectionAck
     /// / StreamCancel / InsertCountIncrement. Advances our
     /// `peer_insert_count` and manages ref counts.
-    pub fn on_peer_decoder_bytes(&mut self, buf: &[Byte]) -> Result<(), QpackSessionError> {
+    public fn on_peer_decoder_bytes(&mut self, buf: &[Byte]) -> Result<(), QpackSessionError> {
         let instrs = decode_all_decoder(buf)
             .map_err(|e| QpackSessionError.DecoderInstrError(e))?;
         let mut i: Int = 0;
@@ -326,7 +326,7 @@ impl QpackSession {
 
     // ==================== drain ====================
 
-    pub fn drain_encoder_out(&mut self) -> List<Byte> {
+    public fn drain_encoder_out(&mut self) -> List<Byte> {
         let mut out: List<Byte> = [];
         let mut i: Int = 0;
         while i < self.encoder_out.len() { out.push(self.encoder_out[i]); i = i + 1; }
@@ -334,7 +334,7 @@ impl QpackSession {
         out
     }
 
-    pub fn drain_decoder_out(&mut self) -> List<Byte> {
+    public fn drain_decoder_out(&mut self) -> List<Byte> {
         let mut out: List<Byte> = [];
         let mut i: Int = 0;
         while i < self.decoder_out.len() { out.push(self.decoder_out[i]); i = i + 1; }
@@ -342,9 +342,9 @@ impl QpackSession {
         out
     }
 
-    pub fn peer_insert_count(&self) -> UInt64 { self.peer_insert_count }
-    pub fn encoder_capacity(&self) -> UInt64  { self.encoder_table.capacity() }
-    pub fn decoder_capacity(&self) -> UInt64  { self.decoder_table.capacity() }
+    public fn peer_insert_count(&self) -> UInt64 { self.peer_insert_count }
+    public fn encoder_capacity(&self) -> UInt64  { self.encoder_table.capacity() }
+    public fn decoder_capacity(&self) -> UInt64  { self.decoder_table.capacity() }
 }
 
 // =============================================================================

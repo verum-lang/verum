@@ -131,7 +131,7 @@ implement RateLimitLayer {
 
     /// Non-blocking attempt to consume one token. Returns true on
     /// success, false if the bucket is empty.
-    pub fn try_consume(&self) -> Bool {
+    public fn try_consume(&self) -> Bool {
         let bucket = &*self.state;
         let now = monotonic_ms();
         let last = bucket.last_refill_ms.load(MemoryOrdering.Relaxed);

@@ -162,7 +162,7 @@ implement TextInputState {
     }
 
     /// Collapse selection to the cursor.
-    pub fn clear_selection(&mut self) {
+    public fn clear_selection(&mut self) {
         self.anchor = self.cursor;
     }
 
@@ -549,7 +549,7 @@ implement StatefulWidget for TextInput {
 /// Byte offset of the next grapheme cluster boundary after `idx`.
 /// Approximation: step over the base codepoint then any trailing zero-width
 /// continuations (combining marks, ZWJ+linker, variation selectors).
-pub fn grapheme_next(s: &Text, idx: Int) -> Int {
+public fn grapheme_next(s: &Text, idx: Int) -> Int {
     let bytes = s.as_bytes();
     let n = bytes.len();
     if idx >= n { return n; }
@@ -564,7 +564,7 @@ pub fn grapheme_next(s: &Text, idx: Int) -> Int {
 }
 
 /// Byte offset of the previous grapheme cluster boundary before `idx`.
-pub fn grapheme_prev(s: &Text, idx: Int) -> Int {
+public fn grapheme_prev(s: &Text, idx: Int) -> Int {
     if idx == 0 { return 0; }
     let bytes = s.as_bytes();
     let mut i = idx - 1;

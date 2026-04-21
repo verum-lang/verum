@@ -98,7 +98,7 @@ public type X25519Error is
 // =============================================================================
 
 /// The RFC 7748 base-point u-coordinate (= 9, little-endian 32 bytes).
-pub const BASE_POINT: [Byte; 32] = [
+public const BASE_POINT: [Byte; 32] = [
     9, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
 ];

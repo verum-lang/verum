@@ -17,9 +17,9 @@ const ZSTD_MIN_LEVEL: Int = -131072;      // negative = "fast" mode
 public type Zstd is ();
 
 implement Zstd {
-    pub const ALGORITHM: Algorithm = Algorithm.Zstd;
+    public const ALGORITHM: Algorithm = Algorithm.Zstd;
 
-    pub fn encode(input: &[Byte], level: Int, out: &mut List<Byte>)
+    public fn encode(input: &[Byte], level: Int, out: &mut List<Byte>)
         -> Result<Int, CompressError>
     {
         let l = if level < ZSTD_MIN_LEVEL || level > ZSTD_MAX_LEVEL {
@@ -28,7 +28,7 @@ implement Zstd {
         @intrinsic("verum.compress.zstd_encode", input, l, out)
     }
 
-    pub fn decode(input: &[Byte], max_output_bytes: Int, out: &mut List<Byte>)
+    public fn decode(input: &[Byte], max_output_bytes: Int, out: &mut List<Byte>)
         -> Result<Int, CompressError>
     {
         @intrinsic("verum.compress.zstd_decode", input, max_output_bytes, out)
@@ -36,7 +36,7 @@ implement Zstd {
 
     /// Encode with a precomputed dictionary. Zstd dictionaries dramatically
     /// improve ratio for short similar payloads (JSON events, logs).
-    pub fn encode_with_dict(input: &[Byte], dict: &[Byte], level: Int,
+    public fn encode_with_dict(input: &[Byte], dict: &[Byte], level: Int,
                              out: &mut List<Byte>) -> Result<Int, CompressError>
     {
         let l = if level < ZSTD_MIN_LEVEL || level > ZSTD_MAX_LEVEL {
@@ -45,7 +45,7 @@ implement Zstd {
         @intrinsic("verum.compress.zstd_encode_dict", input, dict, l, out)
     }
 
-    pub fn decode_with_dict(input: &[Byte], dict: &[Byte],
+    public fn decode_with_dict(input: &[Byte], dict: &[Byte],
                              max_output_bytes: Int, out: &mut List<Byte>)
         -> Result<Int, CompressError>
     {

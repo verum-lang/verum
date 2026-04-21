@@ -119,10 +119,10 @@ implement QuicStream {
         Ok(())
     }
 
-    pub fn stream_id(&self) -> UInt64 { self.stream_id }
+    public fn stream_id(&self) -> UInt64 { self.stream_id }
 
     /// Split into independent send + recv halves for concurrent use.
-    pub fn into_halves(self) -> (QuicSendStream, QuicRecvStream) {
+    public fn into_halves(self) -> (QuicSendStream, QuicRecvStream) {
         (
             QuicSendStream { stream_id: self.stream_id, send: self.send },
             QuicRecvStream { stream_id: self.stream_id, recv: self.recv },
@@ -148,7 +148,7 @@ implement QuicRecvStream {
         Ok(out)
     }
 
-    pub fn stream_id(&self) -> UInt64 { self.stream_id }
+    public fn stream_id(&self) -> UInt64 { self.stream_id }
 }
 
 implement QuicSendStream {
@@ -175,5 +175,5 @@ implement QuicSendStream {
         Ok(())
     }
 
-    pub fn stream_id(&self) -> UInt64 { self.stream_id }
+    public fn stream_id(&self) -> UInt64 { self.stream_id }
 }

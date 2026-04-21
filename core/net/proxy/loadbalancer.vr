@@ -47,7 +47,7 @@ public type UpstreamEntry is {
 };
 
 implement UpstreamEntry {
-    pub fn new(upstream: Upstream) -> UpstreamEntry {
+    public fn new(upstream: Upstream) -> UpstreamEntry {
         UpstreamEntry {
             upstream: upstream,
             health: HealthStatus.new(),
@@ -55,15 +55,15 @@ implement UpstreamEntry {
         }
     }
 
-    pub fn healthy(&self) -> Bool {
+    public fn healthy(&self) -> Bool {
         self.health.is_healthy()
     }
 
-    pub fn mark_acquire(&self) {
+    public fn mark_acquire(&self) {
         self.in_flight.fetch_add(1, MemoryOrdering.AcqRel);
     }
 
-    pub fn mark_release(&self) {
+    public fn mark_release(&self) {
         self.in_flight.fetch_sub(1, MemoryOrdering.AcqRel);
     }
 }
@@ -80,7 +80,7 @@ public type LbPool is {
 };
 
 implement LbPool {
-    pub fn new(strategy: LoadBalancer, upstreams: List<Upstream>) -> LbPool {
+    public fn new(strategy: LoadBalancer, upstreams: List<Upstream>) -> LbPool {
         let mut entries = List.with_capacity(upstreams.len());
         for u in upstreams.iter() {
             entries.push(UpstreamEntry.new(u.clone()));
@@ -95,7 +95,7 @@ implement LbPool {
     /// Pick one healthy upstream per the configured strategy. Returns
     /// an index into `self.entries`; caller bumps `in_flight` via
     /// `mark_acquire` on the returned entry.
-    pub fn pick(&self, req_salt: Int) -> Maybe<Int> {
+    public fn pick(&self, req_salt: Int) -> Maybe<Int> {
         let n = self.entries.len();
         if n == 0 { return None; }
         match self.strategy {

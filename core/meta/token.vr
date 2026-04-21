@@ -635,7 +635,7 @@ implement Group {
     }
 
     /// Unwrap to inner tokens
-    pub fn into_tokens(self) -> TokenStream {
+    public fn into_tokens(self) -> TokenStream {
         self.tokens
     }
 }

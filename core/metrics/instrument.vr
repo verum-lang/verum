@@ -20,23 +20,23 @@ public type Counter is {
 };
 
 implement Counter {
-    pub fn new() -> Counter {
+    public fn new() -> Counter {
         Counter { value: AtomicF64.new(0.0) }
     }
 
     /// Increment by 1.
-    pub fn inc(&self) { self.add(1.0); }
+    public fn inc(&self) { self.add(1.0); }
 
     /// Add `v`. Panics if `v < 0` (counters are monotonic per Prometheus
     /// spec). Callers that need decrement semantics use UpDownCounter.
-    pub fn add(&self, v: Float) {
+    public fn add(&self, v: Float) {
         if v < 0.0 {
             panic("Counter.add: negative delta");
         }
         let _ = self.value.fetch_add(v, MemoryOrdering.Relaxed);
     }
 
-    pub fn value(&self) -> Float {
+    public fn value(&self) -> Float {
         self.value.load(MemoryOrdering.Relaxed)
     }
 }
@@ -50,22 +50,22 @@ public type UpDownCounter is {
 };
 
 implement UpDownCounter {
-    pub fn new() -> UpDownCounter {
+    public fn new() -> UpDownCounter {
         UpDownCounter { value: AtomicF64.new(0.0) }
     }
 
-    pub fn add(&self, v: Float) {
+    public fn add(&self, v: Float) {
         let _ = self.value.fetch_add(v, MemoryOrdering.Relaxed);
     }
 
-    pub fn sub(&self, v: Float) {
+    public fn sub(&self, v: Float) {
         let _ = self.value.fetch_sub(v, MemoryOrdering.Relaxed);
     }
 
-    pub fn inc(&self) { self.add(1.0); }
-    pub fn dec(&self) { self.sub(1.0); }
+    public fn inc(&self) { self.add(1.0); }
+    public fn dec(&self) { self.sub(1.0); }
 
-    pub fn value(&self) -> Float {
+    public fn value(&self) -> Float {
         self.value.load(MemoryOrdering.Relaxed)
     }
 }
@@ -79,26 +79,26 @@ public type Gauge is {
 };
 
 implement Gauge {
-    pub fn new() -> Gauge {
+    public fn new() -> Gauge {
         Gauge { value: AtomicF64.new(0.0) }
     }
 
-    pub fn set(&self, v: Float) {
+    public fn set(&self, v: Float) {
         self.value.store(v, MemoryOrdering.Relaxed);
     }
 
-    pub fn inc(&self) { self.add(1.0); }
-    pub fn dec(&self) { self.sub(1.0); }
+    public fn inc(&self) { self.add(1.0); }
+    public fn dec(&self) { self.sub(1.0); }
 
-    pub fn add(&self, v: Float) {
+    public fn add(&self, v: Float) {
         let _ = self.value.fetch_add(v, MemoryOrdering.Relaxed);
     }
 
-    pub fn sub(&self, v: Float) {
+    public fn sub(&self, v: Float) {
         let _ = self.value.fetch_sub(v, MemoryOrdering.Relaxed);
     }
 
-    pub fn value(&self) -> Float {
+    public fn value(&self) -> Float {
         self.value.load(MemoryOrdering.Relaxed)
     }
 }

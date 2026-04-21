@@ -71,7 +71,7 @@ public type UnixError is
     | PeerClosed;
 
 implement UnixError {
-    pub fn from_os_error(e: OsError) -> UnixError {
+    public fn from_os_error(e: OsError) -> UnixError {
         match e.code {
             1 => UnixError.PermissionDenied,           // EPERM
             2 => UnixError.NotFound(f"{e}"),           // ENOENT
@@ -200,18 +200,18 @@ implement UnixStream {
     }
 
     /// Peer path (from connect/accept) if known.
-    pub fn peer_addr(&self) -> Maybe<&Text> {
+    public fn peer_addr(&self) -> Maybe<&Text> {
         self.peer_path.as_ref()
     }
 
     /// Underlying raw file descriptor for advanced operations
     /// (setsockopt, getsockopt, sendmsg, etc.).
-    pub fn as_raw_fd(&self) -> FileDesc {
+    public fn as_raw_fd(&self) -> FileDesc {
         self.fd
     }
 
     /// Graceful shutdown of one or both directions.
-    pub fn shutdown(&self, how: ShutdownKind) -> Result<(), UnixError> {
+    public fn shutdown(&self, how: ShutdownKind) -> Result<(), UnixError> {
         let how_int = match how {
             ShutdownKind.Read => 0,   // SHUT_RD
             ShutdownKind.Write => 1,  // SHUT_WR
@@ -429,7 +429,7 @@ implement UnixListener {
         UnixListener.bind_with_backlog(path, DEFAULT_BACKLOG)
     }
 
-    pub fn bind_with_backlog(path: &Text, backlog: Int) -> Result<UnixListener, UnixError> {
+    public fn bind_with_backlog(path: &Text, backlog: Int) -> Result<UnixListener, UnixError> {
         let fd = create_unix_socket()?;
         let addr = serialize_unix_addr(path)?;
 
@@ -457,7 +457,7 @@ implement UnixListener {
     }
 
     /// Synchronous accept (blocks).
-    pub fn accept(&self) -> Result<(UnixStream, Maybe<Text>), UnixError> {
+    public fn accept(&self) -> Result<(UnixStream, Maybe<Text>), UnixError> {
         let mut addr_buf = [0_u8; SUN_PATH_MAX + 2];
         let mut addr_len: Int = SUN_PATH_MAX + 2;
 
@@ -504,11 +504,11 @@ implement UnixListener {
         }
     }
 
-    pub fn local_addr(&self) -> &Text {
+    public fn local_addr(&self) -> &Text {
         &self.local_path
     }
 
-    pub fn as_raw_fd(&self) -> FileDesc {
+    public fn as_raw_fd(&self) -> FileDesc {
         self.fd
     }
 
@@ -524,7 +524,7 @@ implement UnixListener {
     }
 
     /// Async-stream of incoming connections.
-    pub fn incoming_async(&self) -> UnixIncoming {
+    public fn incoming_async(&self) -> UnixIncoming {
         UnixIncoming { listener: self }
     }
 }
@@ -661,7 +661,7 @@ implement UnixStream {
     /// AF_UNIX SOCK_STREAM connections; not available over socketpair or
     /// on Windows.
     @cfg(target_os = "linux")
-    pub fn peer_cred(&self) -> Result<PeerCred, UnixError> {
+    public fn peer_cred(&self) -> Result<PeerCred, UnixError> {
         // struct ucred { pid_t pid; uid_t uid; gid_t gid; }; — 12 bytes
         // SOL_SOCKET = 1, SO_PEERCRED = 17
         const SOL_SOCKET: Int = 1;
@@ -691,14 +691,14 @@ implement UnixStream {
     }
 
     @cfg(target_os = "macos")
-    pub fn peer_cred(&self) -> Result<PeerCred, UnixError> {
+    public fn peer_cred(&self) -> Result<PeerCred, UnixError> {
         // macOS: LOCAL_PEERCRED returns struct xucred, shape differs.
         // Minimal-scope helper left to a follow-up.
         Err(UnixError.IoError("peer_cred: macOS impl deferred".into()))
     }
 
     @cfg(target_os = "windows")
-    pub fn peer_cred(&self) -> Result<PeerCred, UnixError> {
+    public fn peer_cred(&self) -> Result<PeerCred, UnixError> {
         Err(UnixError.IoError("peer_cred: not available on Windows".into()))
     }
 }
@@ -735,7 +735,7 @@ implement UnixStream {
     ///
     /// Currently stubbed — returns `Err(NotImplemented)`. Tracked as
     /// follow-up (net-framework.md §7.8 graceful-shutdown FD handoff).
-    pub fn send_fds(&self, _buf: &[Byte], _fds: &[FileDesc])
+    public fn send_fds(&self, _buf: &[Byte], _fds: &[FileDesc])
         -> Result<Int, FdPassingError>
     {
         Err(FdPassingError.NotImplemented(
@@ -744,7 +744,7 @@ implement UnixStream {
     }
 
     /// Receive bytes plus any file descriptors passed as SCM_RIGHTS.
-    pub fn recv_fds(&self, _buf: &mut [Byte], _fds: &mut List<FileDesc>)
+    public fn recv_fds(&self, _buf: &mut [Byte], _fds: &mut List<FileDesc>)
         -> Result<Int, FdPassingError>
     {
         Err(FdPassingError.NotImplemented(

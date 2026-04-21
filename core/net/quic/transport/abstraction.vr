@@ -53,7 +53,7 @@ public type InboundDatagram is {
 public type EcnCodepoint is NotEct | Ect1 | Ect0 | Ce;
 
 impl EcnCodepoint {
-    pub fn to_u8(&self) -> UInt8 {
+    public fn to_u8(&self) -> UInt8 {
         match self {
             EcnCodepoint.NotEct => 0_u8,
             EcnCodepoint.Ect1   => 1_u8,
@@ -61,7 +61,7 @@ impl EcnCodepoint {
             EcnCodepoint.Ce     => 3_u8,
         }
     }
-    pub fn from_u8(v: UInt8) -> EcnCodepoint {
+    public fn from_u8(v: UInt8) -> EcnCodepoint {
         match v & 0x03_u8 {
             0_u8 => EcnCodepoint.NotEct,
             1_u8 => EcnCodepoint.Ect1,
@@ -194,18 +194,18 @@ public type SimNetwork is {
 };
 
 impl SimNetwork {
-    pub fn new() -> SimNetwork {
+    public fn new() -> SimNetwork {
         SimNetwork { inflight: [], loss_rate: 0.0, reorder_rate: 0.0, closed: false }
     }
 
     /// Drop every datagram whose index hits the loss gate.
-    pub fn with_loss_rate(mut self, rate: Float) -> SimNetwork {
+    public fn with_loss_rate(mut self, rate: Float) -> SimNetwork {
         self.loss_rate = rate; self
     }
 }
 
 impl SimUdpTransport {
-    pub fn bind(addr: SocketAddr, network: Shared<SimNetwork>) -> SimUdpTransport {
+    public fn bind(addr: SocketAddr, network: Shared<SimNetwork>) -> SimUdpTransport {
         SimUdpTransport { addr: addr, network: network }
     }
 }

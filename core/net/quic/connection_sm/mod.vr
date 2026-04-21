@@ -128,7 +128,7 @@ public type QuicKeys is {
 };
 
 implement QuicKeys {
-    pub fn empty() -> QuicKeys {
+    public fn empty() -> QuicKeys {
         QuicKeys { initial: None, handshake: None, app: None }
     }
 }
@@ -188,7 +188,7 @@ implement QuicConnection<Initial> {
     /// Construct a client-side connection bound for `peer_dcid` with
     /// initial keys derived from the client's Destination CID per
     /// RFC 9001 §5.2.
-    pub fn client_new(
+    public fn client_new(
         peer_dcid: ConnectionId,
         scid_local: ConnectionId,
         params_local: TransportParams,
@@ -232,7 +232,7 @@ implement QuicConnection<Initial> {
 
     /// Promote to Handshake phase. Caller supplies the handshake-phase
     /// AEAD+HP keys derived by the TLS 1.3 handshake SM post-ServerHello.
-    pub fn promote_to_handshake(
+    public fn promote_to_handshake(
         mut self,
         hs_keys_tx: QuicSpaceKeys,
         hs_keys_rx: QuicSpaceKeys,
@@ -246,7 +246,7 @@ implement QuicConnection<Handshake> {
     /// Promote to 1-RTT phase. After promotion, caller should call
     /// `discard_initial_keys` and `discard_handshake_keys` at the
     /// RFC 9001 §4.9 discharge points.
-    pub fn promote_to_app(
+    public fn promote_to_app(
         mut self,
         app_keys_tx: QuicSpaceKeys,
         app_keys_rx: QuicSpaceKeys,
@@ -258,7 +258,7 @@ implement QuicConnection<Handshake> {
     /// RFC 9001 §4.9.1 — drop Initial keys on first Handshake packet
     /// successfully validated (client) or after sending a Handshake
     /// packet (server). Idempotent.
-    pub fn discard_initial_keys(&mut self) {
+    public fn discard_initial_keys(&mut self) {
         self.inner.keys.initial = None;
         self.inner.loss.on_keys_discarded(core.net.quic.recovery.PnSpaceKind.Initial);
     }
@@ -268,13 +268,13 @@ implement QuicConnection<OneRtt> {
     /// RFC 9001 §4.9.2 — drop Handshake keys on first HANDSHAKE_DONE
     /// (client) or after sending 1-RTT response to HANDSHAKE_DONE
     /// (server). Idempotent.
-    pub fn discard_handshake_keys(&mut self) {
+    public fn discard_handshake_keys(&mut self) {
         self.inner.keys.handshake = None;
         self.inner.loss.on_keys_discarded(core.net.quic.recovery.PnSpaceKind.Handshake);
     }
 
     /// Open a locally-initiated bidirectional stream.
-    pub fn open_bidi(&mut self) -> Result<UInt64, QuicError> {
+    public fn open_bidi(&mut self) -> Result<UInt64, QuicError> {
         let is_server = match self.inner.role {
             Role.Client => false,
             Role.Server => true,
@@ -294,7 +294,7 @@ implement QuicConnection<OneRtt> {
     }
 
     /// Open a locally-initiated unidirectional stream (send only).
-    pub fn open_uni(&mut self) -> Result<UInt64, QuicError> {
+    public fn open_uni(&mut self) -> Result<UInt64, QuicError> {
         let is_server = match self.inner.role {
             Role.Client => false,
             Role.Server => true,
@@ -313,7 +313,7 @@ implement QuicConnection<OneRtt> {
 
     /// Transition to Closing — caller sends a CONNECTION_CLOSE frame
     /// and waits 3*PTO before fully releasing state.
-    pub fn close(mut self, error_code: UInt64, reason: List<Byte>, now: Instant) -> QuicConnection<Closing> {
+    public fn close(mut self, error_code: UInt64, reason: List<Byte>, now: Instant) -> QuicConnection<Closing> {
         let _ = error_code;
         self.inner.close_reason = Some(reason);
         self.inner.close_sent_at = Some(now);
@@ -326,7 +326,7 @@ implement QuicConnection<OneRtt> {
 implement QuicConnection<Closing> {
     /// Incoming packet during close: may re-trigger an echo of the
     /// CONNECTION_CLOSE frame. Caller re-emits if needed.
-    pub fn is_expired(&self, now: Instant) -> Bool {
+    public fn is_expired(&self, now: Instant) -> Bool {
         match self.inner.drain_expiry {
             Some(d) => now >= d,
             None    => false,
@@ -335,14 +335,14 @@ implement QuicConnection<Closing> {
 
     /// Peer signalled close — we move to Draining (stop sending, wait
     /// for timer).
-    pub fn recv_peer_close(mut self, now: Instant) -> QuicConnection<Draining> {
+    public fn recv_peer_close(mut self, now: Instant) -> QuicConnection<Draining> {
         self.inner.drain_expiry = Some(now);   // refine externally
         QuicConnection { inner: self.inner }
     }
 }
 
 implement QuicConnection<Draining> {
-    pub fn is_expired(&self, now: Instant) -> Bool {
+    public fn is_expired(&self, now: Instant) -> Bool {
         match self.inner.drain_expiry {
             Some(d) => now >= d,
             None    => false,
@@ -355,9 +355,9 @@ implement QuicConnection<Draining> {
 // =============================================================================
 
 implement<S> QuicConnection<S> {
-    pub fn role(&self) -> Role { self.inner.role.clone() }
-    pub fn version(&self) -> UInt32 { self.inner.version }
-    pub fn peer_cid(&self) -> &ConnectionId { &self.inner.dcid_peer }
-    pub fn local_cid(&self) -> &ConnectionId { &self.inner.scid_local }
-    pub fn opened_at(&self) -> Instant { self.inner.opened_at.clone() }
+    public fn role(&self) -> Role { self.inner.role.clone() }
+    public fn version(&self) -> UInt32 { self.inner.version }
+    public fn peer_cid(&self) -> &ConnectionId { &self.inner.dcid_peer }
+    public fn local_cid(&self) -> &ConnectionId { &self.inner.scid_local }
+    public fn opened_at(&self) -> Instant { self.inner.opened_at.clone() }
 }

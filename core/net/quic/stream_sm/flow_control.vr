@@ -53,7 +53,7 @@ public type ConnFlowControl is {
 };
 
 implement ConnFlowControl {
-    pub fn new(
+    public fn new(
         max_data_remote: UInt64,
         max_data_local:  UInt64,
         max_streams_bidi_remote: UInt64,
@@ -79,7 +79,7 @@ implement ConnFlowControl {
 
     /// Budget remaining for us to send new application data on this
     /// connection (bytes).
-    pub fn send_budget(&self) -> UInt64 {
+    public fn send_budget(&self) -> UInt64 {
         if self.max_data_remote >= self.bytes_sent {
             self.max_data_remote - self.bytes_sent
         } else {
@@ -88,13 +88,13 @@ implement ConnFlowControl {
     }
 
     /// Record bytes emitted. Caller MUST check `send_budget()` first.
-    pub fn on_bytes_sent(&mut self, n: UInt64) {
+    public fn on_bytes_sent(&mut self, n: UInt64) {
         self.bytes_sent = self.bytes_sent + n;
     }
 
     /// Record bytes received (enforces the connection-level limit;
     /// violation → connection-level FLOW_CONTROL_ERROR).
-    pub fn on_bytes_recv(&mut self, n: UInt64) -> Result<(), ()> {
+    public fn on_bytes_recv(&mut self, n: UInt64) -> Result<(), ()> {
         let new_total = self.bytes_recv + n;
         if new_total > self.max_data_local {
             return Err(());
@@ -104,37 +104,37 @@ implement ConnFlowControl {
     }
 
     /// Peer raised MAX_DATA.
-    pub fn on_peer_max_data(&mut self, new_limit: UInt64) {
+    public fn on_peer_max_data(&mut self, new_limit: UInt64) {
         if new_limit > self.max_data_remote {
             self.max_data_remote = new_limit;
         }
     }
 
     /// Suggested new MAX_DATA we publish to peer — ≈ bytes_recv + window.
-    pub fn suggested_max_data(&self, window: UInt64) -> UInt64 {
+    public fn suggested_max_data(&self, window: UInt64) -> UInt64 {
         self.bytes_recv + window
     }
 
     /// Raise our own publish-to-peer limit.
-    pub fn update_max_data_local(&mut self, new_limit: UInt64) {
+    public fn update_max_data_local(&mut self, new_limit: UInt64) {
         if new_limit > self.max_data_local {
             self.max_data_local = new_limit;
         }
     }
 
     /// Can we open a new locally-initiated bidi stream?
-    pub fn can_open_bidi(&self) -> Bool {
+    public fn can_open_bidi(&self) -> Bool {
         self.next_stream_bidi_local < self.max_streams_bidi_remote
     }
 
-    pub fn can_open_uni(&self) -> Bool {
+    public fn can_open_uni(&self) -> Bool {
         self.next_stream_uni_local < self.max_streams_uni_remote
     }
 
     /// Allocate a locally-initiated bidirectional stream id, returns
     /// the raw stream_id with the correct initiator/direction bits set.
     /// RFC 9000 §2.1: stream_id bit 0 = server, bit 1 = uni.
-    pub fn alloc_stream_bidi(&mut self, is_server: Bool) -> Maybe<UInt64> {
+    public fn alloc_stream_bidi(&mut self, is_server: Bool) -> Maybe<UInt64> {
         if !self.can_open_bidi() { return None; }
         let low_bits: UInt64 = if is_server { 0x01_u64 } else { 0x00_u64 };
         let sid = (self.next_stream_bidi_local << 2) | low_bits;
@@ -142,7 +142,7 @@ implement ConnFlowControl {
         Some(sid)
     }
 
-    pub fn alloc_stream_uni(&mut self, is_server: Bool) -> Maybe<UInt64> {
+    public fn alloc_stream_uni(&mut self, is_server: Bool) -> Maybe<UInt64> {
         if !self.can_open_uni() { return None; }
         let low_bits: UInt64 = if is_server { 0x03_u64 } else { 0x02_u64 };
         let sid = (self.next_stream_uni_local << 2) | low_bits;
@@ -150,13 +150,13 @@ implement ConnFlowControl {
         Some(sid)
     }
 
-    pub fn on_peer_max_streams_bidi(&mut self, new_limit: UInt64) {
+    public fn on_peer_max_streams_bidi(&mut self, new_limit: UInt64) {
         if new_limit > self.max_streams_bidi_remote {
             self.max_streams_bidi_remote = new_limit;
         }
     }
 
-    pub fn on_peer_max_streams_uni(&mut self, new_limit: UInt64) {
+    public fn on_peer_max_streams_uni(&mut self, new_limit: UInt64) {
         if new_limit > self.max_streams_uni_remote {
             self.max_streams_uni_remote = new_limit;
         }

@@ -86,10 +86,10 @@ public type H3Frame is
     | MaxPushIdFrame(UInt64)
     | ReservedFrame { frame_type: UInt64, payload: List<Byte> };
 
-impl H3Frame {
+implement H3Frame {
     /// Frames legal on the control stream (RFC 9114 §6.2.1 +
     /// §7.2.4).
-    pub fn is_control_stream_legal(&self) -> Bool {
+    public fn is_control_stream_legal(&self) -> Bool {
         match self {
             H3Frame.SettingsFrame(_)       => true,
             H3Frame.GoawayFrame(_)          => true,
@@ -101,7 +101,7 @@ impl H3Frame {
     }
 
     /// Frames legal on a request / response stream.
-    pub fn is_request_stream_legal(&self) -> Bool {
+    public fn is_request_stream_legal(&self) -> Bool {
         match self {
             H3Frame.DataFrame(_)            => true,
             H3Frame.HeadersFrame(_)         => true,

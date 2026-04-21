@@ -97,7 +97,7 @@ public fn parse(value: &[Byte]) -> Result<SubjectAltName, DerError> {
     Ok(SubjectAltName { names: names })
 }
 
-pub fn parse_general_name(r: &mut DerReader) -> Result<GeneralName, DerError> {
+public fn parse_general_name(r: &mut DerReader) -> Result<GeneralName, DerError> {
     let save = r.position();
     let (tag, len, val_start, elem_end) = r.peek_element_span()?;
     let is_ctx = match tag.class_ { TagClass.ContextSpecific => true, _ => false };

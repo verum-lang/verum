@@ -53,7 +53,7 @@ public type SimpleProcessor is {
 };
 
 implement SimpleProcessor {
-    pub fn new(exporter: Heap<dyn SpanExporter>) -> SimpleProcessor {
+    public fn new(exporter: Heap<dyn SpanExporter>) -> SimpleProcessor {
         SimpleProcessor { exporter: exporter }
     }
 }
@@ -99,7 +99,7 @@ public type BatchConfig is {
 };
 
 implement BatchConfig {
-    pub fn default() -> BatchConfig {
+    public fn default() -> BatchConfig {
         BatchConfig {
             max_queue_size: 2048,
             scheduled_delay: Duration.from_secs(5),
@@ -108,16 +108,16 @@ implement BatchConfig {
         }
     }
 
-    pub fn with_queue_size(mut self, n: Int) -> BatchConfig {
+    public fn with_queue_size(mut self, n: Int) -> BatchConfig {
         self.max_queue_size = n; self
     }
-    pub fn with_scheduled_delay(mut self, d: Duration) -> BatchConfig {
+    public fn with_scheduled_delay(mut self, d: Duration) -> BatchConfig {
         self.scheduled_delay = d; self
     }
-    pub fn with_max_export_batch_size(mut self, n: Int) -> BatchConfig {
+    public fn with_max_export_batch_size(mut self, n: Int) -> BatchConfig {
         self.max_export_batch_size = n; self
     }
-    pub fn with_export_timeout(mut self, d: Duration) -> BatchConfig {
+    public fn with_export_timeout(mut self, d: Duration) -> BatchConfig {
         self.export_timeout = d; self
     }
 }
@@ -134,11 +134,11 @@ type BatchMessage is
     | BatchShutdown;
 
 implement BatchProcessor {
-    pub fn new(exporter: Heap<dyn SpanExporter>) -> BatchProcessor {
+    public fn new(exporter: Heap<dyn SpanExporter>) -> BatchProcessor {
         BatchProcessor.with_config(exporter, BatchConfig.default())
     }
 
-    pub fn with_config(exporter: Heap<dyn SpanExporter>, config: BatchConfig) -> BatchProcessor {
+    public fn with_config(exporter: Heap<dyn SpanExporter>, config: BatchConfig) -> BatchProcessor {
         let (sender, receiver) = bounded::<BatchMessage>(config.max_queue_size);
         let exporter_clone = exporter.clone();
         let cfg_clone = config.clone();
@@ -175,7 +175,7 @@ implement SpanProcessor for BatchProcessor {
 
 // Config clone helper
 implement BatchConfig {
-    pub fn clone(&self) -> BatchConfig {
+    public fn clone(&self) -> BatchConfig {
         BatchConfig {
             max_queue_size: self.max_queue_size,
             scheduled_delay: self.scheduled_delay,

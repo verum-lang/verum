@@ -59,7 +59,7 @@ implement RttEstimator {
     /// Fresh estimator — RFC 9002 §5.3 defaults:
     ///   smoothed_rtt = 333 ms (kInitialRtt)
     ///   rttvar       = smoothed_rtt / 2
-    pub fn new() -> RttEstimator {
+    public fn new() -> RttEstimator {
         let initial_us: UInt64 = 333_000_u64;
         RttEstimator {
             latest_us:   0_u64,
@@ -72,7 +72,7 @@ implement RttEstimator {
 
     /// Record a new RTT sample. `ack_delay_us` is the peer-reported
     /// ACK delay (already unscaled and capped by max_ack_delay).
-    pub fn on_rtt_sample(&mut self, latest_us: UInt64, ack_delay_us: UInt64) {
+    public fn on_rtt_sample(&mut self, latest_us: UInt64, ack_delay_us: UInt64) {
         self.latest_us = latest_us;
 
         if !self.has_sample {
@@ -107,21 +107,21 @@ implement RttEstimator {
         self.smoothed_us = ((self.smoothed_us * 7_u64) + adjusted_us) >> 3;
     }
 
-    pub fn smoothed(&self) -> Duration {
+    public fn smoothed(&self) -> Duration {
         Duration.from_micros(self.smoothed_us as Int)
     }
 
-    pub fn rttvar(&self) -> Duration {
+    public fn rttvar(&self) -> Duration {
         Duration.from_micros(self.rttvar_us as Int)
     }
 
-    pub fn min_rtt(&self) -> Duration {
+    public fn min_rtt(&self) -> Duration {
         Duration.from_micros(self.min_rtt_us as Int)
     }
 
-    pub fn latest(&self) -> Duration {
+    public fn latest(&self) -> Duration {
         Duration.from_micros(self.latest_us as Int)
     }
 
-    pub fn has_first_sample(&self) -> Bool { self.has_sample }
+    public fn has_first_sample(&self) -> Bool { self.has_sample }
 }

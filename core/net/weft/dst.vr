@@ -91,25 +91,25 @@ public type TestClock is {
 };
 
 implement TestClock {
-    pub fn seeded(seed: UInt64) -> TestClock {
+    public fn seeded(seed: UInt64) -> TestClock {
         TestClock {
             seed: seed,
             now_ns: Shared.new(AtomicInt.new(0)),
         }
     }
 
-    pub fn now_ns(&self) -> Int {
+    public fn now_ns(&self) -> Int {
         self.now_ns.load(MemoryOrdering.Acquire)
     }
 
     /// Advance simulation time by `delta`. Called by the DST runtime
     /// between scheduled events.
-    pub fn advance(&self, delta: Duration) {
+    public fn advance(&self, delta: Duration) {
         let dn = delta.as_nanos();
         self.now_ns.fetch_add(dn, MemoryOrdering.AcqRel);
     }
 
-    pub fn as_instant(&self) -> Instant {
+    public fn as_instant(&self) -> Instant {
         Instant.from_nanos(self.now_ns())
     }
 }
@@ -129,7 +129,7 @@ public type SeededRng is {
 };
 
 implement SeededRng {
-    pub fn new(seed: UInt64) -> SeededRng {
+    public fn new(seed: UInt64) -> SeededRng {
         let s = if seed == 0 { 0xDA9A_C0DE_F00D_BABE } else { seed };
         SeededRng { state: Shared.new(AtomicInt.new(s as Int)) }
     }
@@ -137,7 +137,7 @@ implement SeededRng {
     /// 64-bit raw word. PCG-style (LCG with permutation) — cheap and
     /// good enough for simulation; cryptographic randomness lives in
     /// core.security.rng for real use.
-    pub fn next_u64(&self) -> UInt64 {
+    public fn next_u64(&self) -> UInt64 {
         let s = self.state.load(MemoryOrdering.Acquire) as UInt64;
         let next = s * 6_364_136_223_846_793_005 + 1_442_695_040_888_963_407;
         self.state.store(next as Int, MemoryOrdering.Release);
@@ -147,18 +147,18 @@ implement SeededRng {
         (xorshifted >> rot) | (xorshifted << ((-(rot as Int)) & 31) as UInt64)
     }
 
-    pub fn next_u32(&self) -> UInt32 {
+    public fn next_u32(&self) -> UInt32 {
         (self.next_u64() & 0xFFFF_FFFF) as UInt32
     }
 
     /// Uniform in [0, bound). Clamps overflow safely.
-    pub fn next_bounded(&self, bound: Int) -> Int {
+    public fn next_bounded(&self, bound: Int) -> Int {
         if bound <= 0 { return 0; }
         (self.next_u64() % (bound as UInt64)) as Int
     }
 
     /// Fair coin flip — half the time true.
-    pub fn flip(&self) -> Bool {
+    public fn flip(&self) -> Bool {
         (self.next_u64() & 1) == 1
     }
 }
@@ -196,7 +196,7 @@ public type SimNetworkConfig is {
 };
 
 implement SimNetworkConfig {
-    pub fn default() -> SimNetworkConfig {
+    public fn default() -> SimNetworkConfig {
         SimNetworkConfig {
             packet_loss_permille: 0,
             mean_latency_us: 100,
@@ -205,7 +205,7 @@ implement SimNetworkConfig {
         }
     }
 
-    pub fn chaos() -> SimNetworkConfig {
+    public fn chaos() -> SimNetworkConfig {
         SimNetworkConfig {
             packet_loss_permille: 5,      // 0.5%
             mean_latency_us: 1_000,       // 1 ms
@@ -214,19 +214,19 @@ implement SimNetworkConfig {
         }
     }
 
-    pub fn with_packet_loss_permille(self, permille: Int) -> SimNetworkConfig {
+    public fn with_packet_loss_permille(self, permille: Int) -> SimNetworkConfig {
         SimNetworkConfig { packet_loss_permille: permille, ..self }
     }
 
-    pub fn with_mean_latency_us(self, us: Int) -> SimNetworkConfig {
+    public fn with_mean_latency_us(self, us: Int) -> SimNetworkConfig {
         SimNetworkConfig { mean_latency_us: us, ..self }
     }
 
-    pub fn with_reorder_permille(self, permille: Int) -> SimNetworkConfig {
+    public fn with_reorder_permille(self, permille: Int) -> SimNetworkConfig {
         SimNetworkConfig { reorder_permille: permille, ..self }
     }
 
-    pub fn with_partition_permille(self, permille: Int) -> SimNetworkConfig {
+    public fn with_partition_permille(self, permille: Int) -> SimNetworkConfig {
         SimNetworkConfig { partition_permille: permille, ..self }
     }
 }
@@ -251,11 +251,11 @@ public type NetworkEventStream is {
 };
 
 implement NetworkEventStream {
-    pub fn new(rng: SeededRng, config: SimNetworkConfig) -> NetworkEventStream {
+    public fn new(rng: SeededRng, config: SimNetworkConfig) -> NetworkEventStream {
         NetworkEventStream { config: config, rng: rng }
     }
 
-    pub fn next_event(&self) -> NetworkEvent {
+    public fn next_event(&self) -> NetworkEvent {
         // Permille-based dice; choose at most one chaos event per op.
         let d = self.rng.next_bounded(1000);
         if d < self.config.packet_loss_permille { return NetworkEvent.PacketLoss; }
@@ -293,7 +293,7 @@ public type RoundRobinSchedule is {
 };
 
 implement RoundRobinSchedule {
-    pub fn new() -> RoundRobinSchedule {
+    public fn new() -> RoundRobinSchedule {
         RoundRobinSchedule { cursor: Shared.new(AtomicInt.new(0)) }
     }
 }
@@ -311,7 +311,7 @@ public type RandomSchedule is {
 };
 
 implement RandomSchedule {
-    pub fn new(rng: SeededRng) -> RandomSchedule {
+    public fn new(rng: SeededRng) -> RandomSchedule {
         RandomSchedule { rng: rng }
     }
 }
@@ -336,7 +336,7 @@ implement SimConfig {
     /// Default config built from a single seed — all three DST
     /// sub-systems share the same RNG stream so one seed replays the
     /// entire execution.
-    pub fn from_seed(seed: UInt64) -> SimConfig {
+    public fn from_seed(seed: UInt64) -> SimConfig {
         SimConfig {
             clock: TestClock.seeded(seed),
             rng: SeededRng.new(seed),
@@ -345,7 +345,7 @@ implement SimConfig {
     }
 
     /// Chaos preset — packet loss + latency + reorder + rare partitions.
-    pub fn chaos_from_seed(seed: UInt64) -> SimConfig {
+    public fn chaos_from_seed(seed: UInt64) -> SimConfig {
         SimConfig {
             clock: TestClock.seeded(seed),
             rng: SeededRng.new(seed),
@@ -365,7 +365,7 @@ public type WeftSimulator is {
 };
 
 implement WeftSimulator {
-    pub fn new(config: SimConfig) -> WeftSimulator {
+    public fn new(config: SimConfig) -> WeftSimulator {
         WeftSimulator {
             config: config,
             invariants_failed: Shared.new(AtomicBool.new(false)),
@@ -373,28 +373,28 @@ implement WeftSimulator {
         }
     }
 
-    pub fn clock(&self) -> TestClock { self.config.clock.clone() }
-    pub fn rng(&self) -> SeededRng { self.config.rng.clone() }
+    public fn clock(&self) -> TestClock { self.config.clock.clone() }
+    public fn rng(&self) -> SeededRng { self.config.rng.clone() }
 
     /// Reachable via property-test bodies to advance simulation until
     /// an invariant triggers or a budget expires.
-    pub fn advance(&self, by: Duration) {
+    public fn advance(&self, by: Duration) {
         self.config.clock.advance(by);
         self.ticks.fetch_add(1, MemoryOrdering.AcqRel);
     }
 
     /// Call an invariant predicate; on false, flip the failure flag.
-    pub fn check<F: fn() -> Bool>(&self, invariant: F) {
+    public fn check<F: fn() -> Bool>(&self, invariant: F) {
         if !invariant() {
             self.invariants_failed.store(true, MemoryOrdering.Release);
         }
     }
 
-    pub fn invariants_ok(&self) -> Bool {
+    public fn invariants_ok(&self) -> Bool {
         !self.invariants_failed.load(MemoryOrdering.Acquire)
     }
 
-    pub fn ticks(&self) -> Int {
+    public fn ticks(&self) -> Int {
         self.ticks.load(MemoryOrdering.Acquire)
     }
 }

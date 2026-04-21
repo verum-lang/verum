@@ -55,8 +55,8 @@ public type WorkloadApiError is
 // Endpoint discovery
 // =============================================================================
 
-pub const DEFAULT_SOCKET: &'static Text = "/tmp/spire-agent/public/api.sock";
-pub const SOCKET_ENV: &'static Text = "SPIFFE_ENDPOINT_SOCKET";
+public const DEFAULT_SOCKET: &'static Text = "/tmp/spire-agent/public/api.sock";
+public const SOCKET_ENV: &'static Text = "SPIFFE_ENDPOINT_SOCKET";
 
 /// Resolve the Workload API socket path from the environment, falling
 /// back to the default. Strips the "unix://" prefix if present.
@@ -113,7 +113,7 @@ implement WorkloadApiClient {
         @intrinsic("verum.spiffe.workload_api_connect", socket_path).await
     }
 
-    pub fn socket_path(&self) -> &Text { &self.socket_path }
+    public fn socket_path(&self) -> &Text { &self.socket_path }
 
     /// One-shot X.509-SVID fetch. For rotation-aware apps use
     /// `x509_svid_stream` which yields updates on rotation.
@@ -123,7 +123,7 @@ implement WorkloadApiClient {
 
     /// Streaming X.509-SVID updates. Yields on every rotation or when
     /// the trust bundle changes. Honour `token` for cancellation.
-    pub fn x509_svid_stream(&self, token: &CancellationToken) -> X509SvidStream {
+    public fn x509_svid_stream(&self, token: &CancellationToken) -> X509SvidStream {
         @intrinsic("verum.spiffe.x509_svid_stream", self.handle, token)
     }
 
@@ -137,7 +137,7 @@ implement WorkloadApiClient {
     }
 
     /// Stream JWT trust-bundle updates.
-    pub fn jwt_bundles_stream(&self, token: &CancellationToken) -> JwtBundlesStream {
+    public fn jwt_bundles_stream(&self, token: &CancellationToken) -> JwtBundlesStream {
         @intrinsic("verum.spiffe.jwt_bundles_stream", self.handle, token)
     }
 

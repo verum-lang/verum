@@ -81,7 +81,7 @@ public type OfferedPsks is {
 /// transcript-hash domain — everything up to (but not including) the
 /// binder list itself. Caller hashes `ch_prefix || identities_encoded`
 /// to produce the binder input.
-pub fn encode_identities(idents: &List<PskIdentity>, out: &mut List<Byte>) -> Result<(), CodecError> {
+public fn encode_identities(idents: &List<PskIdentity>, out: &mut List<Byte>) -> Result<(), CodecError> {
     vec_u16(out, |b| {
         let mut i: Int = 0;
         while i < idents.len() {
@@ -99,7 +99,7 @@ pub fn encode_identities(idents: &List<PskIdentity>, out: &mut List<Byte>) -> Re
 /// Serialize the binders block. `binder_size` is the HMAC-Hash output
 /// length in bytes (32 for SHA-256, 48 for SHA-384). One binder per
 /// identity, length-prefixed with u8.
-pub fn encode_binders(binders: &List<List<Byte>>, out: &mut List<Byte>) -> Result<(), CodecError> {
+public fn encode_binders(binders: &List<List<Byte>>, out: &mut List<Byte>) -> Result<(), CodecError> {
     vec_u16(out, |b| {
         let mut i: Int = 0;
         while i < binders.len() {
@@ -114,7 +114,7 @@ pub fn encode_binders(binders: &List<List<Byte>>, out: &mut List<Byte>) -> Resul
 
 /// Convenience: encode the full `pre_shared_key` extension body
 /// (identities || binders) once both halves are known.
-pub fn encode_offered_psks(o: &OfferedPsks, out: &mut List<Byte>) -> Result<(), CodecError> {
+public fn encode_offered_psks(o: &OfferedPsks, out: &mut List<Byte>) -> Result<(), CodecError> {
     encode_identities(&o.identities, out)?;
     encode_binders(&o.binders, out)?;
     Ok(())
@@ -127,7 +127,7 @@ pub fn encode_offered_psks(o: &OfferedPsks, out: &mut List<Byte>) -> Result<(), 
 public type BinderFlavor is ResumptionBinder | ExternalBinder;
 
 impl BinderFlavor {
-    pub fn label(&self) -> &[Byte] {
+    public fn label(&self) -> &[Byte] {
         match self {
             BinderFlavor.ResumptionBinder => &LABEL_RES_BINDER,
             BinderFlavor.ExternalBinder   => &LABEL_EXT_BINDER,
@@ -138,7 +138,7 @@ impl BinderFlavor {
 /// Derive the binder_key from an EarlySecret — per RFC 8446 §7.1:
 ///   binder_key = Derive-Secret(early_secret, "{res|ext} binder", "")
 /// i.e. HKDF-Expand-Label(early_secret, label, Hash(""), hash_len).
-pub fn derive_binder_key(
+public fn derive_binder_key(
     early: &EarlySecret,
     flavor: BinderFlavor,
 ) -> Result<SecretBytes, HkdfError> {
@@ -149,7 +149,7 @@ pub fn derive_binder_key(
 }
 
 /// Derive the per-PSK `finished_key` used to MAC the binder input.
-pub fn derive_binder_finished_key(
+public fn derive_binder_finished_key(
     hash: HashKind,
     binder_key: &SecretBytes,
 ) -> Result<List<Byte>, HkdfError> {
@@ -172,7 +172,7 @@ pub fn derive_binder_finished_key(
 ///                       binder list).
 ///
 /// Returns the raw HMAC bytes to drop into OfferedPsks.binders.
-pub fn compute_binder(
+public fn compute_binder(
     hash: HashKind,
     binder_key: &SecretBytes,
     truncated_ch_hash: &[Byte],
@@ -203,7 +203,7 @@ pub fn compute_binder(
 ///
 /// Constant-time comparison via `diff | byte` accumulator — no
 /// short-circuit on first-byte mismatch.
-pub fn verify_binder(
+public fn verify_binder(
     hash: HashKind,
     binder_key: &SecretBytes,
     truncated_ch_hash: &[Byte],
@@ -230,6 +230,6 @@ fn constant_time_eq(a: &[Byte], b: &[Byte]) -> Bool {
 
 /// Compute the obfuscated_ticket_age per RFC 8446 §4.2.11.1:
 ///   obfuscated_age = (elapsed_millis + ticket_age_add) mod 2^32
-pub fn obfuscated_ticket_age(elapsed_ms: UInt64, ticket_age_add: UInt32) -> UInt32 {
+public fn obfuscated_ticket_age(elapsed_ms: UInt64, ticket_age_add: UInt32) -> UInt32 {
     (elapsed_ms as UInt32) + ticket_age_add
 }

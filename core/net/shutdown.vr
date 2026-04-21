@@ -115,7 +115,7 @@ public type GracefulShutdown is {
 }
 
 implement GracefulShutdown {
-    pub fn new() -> GracefulShutdown {
+    public fn new() -> GracefulShutdown {
         GracefulShutdown {
             counter: Shared.new(AtomicU64.new(0)),
             token_source: Shared.new(CancellationTokenSource.new()),
@@ -126,23 +126,23 @@ implement GracefulShutdown {
 
     /// Cancellation token — accept loops and request handlers should
     /// honour this for prompt stop. Token stays cancelled after initiate().
-    pub fn token(&self) -> CancellationToken {
+    public fn token(&self) -> CancellationToken {
         (&*self.token_source).token()
     }
 
     /// Track a new in-flight connection. Drop the returned guard when
     /// the request completes.
-    pub fn track(&self) -> ConnectionGuard {
+    public fn track(&self) -> ConnectionGuard {
         ConnectionGuard.new(self.counter.clone())
     }
 
     /// Current in-flight count (snapshot, Relaxed).
-    pub fn in_flight(&self) -> UInt64 {
+    public fn in_flight(&self) -> UInt64 {
         (&*self.counter).load(MemoryOrdering.Acquire)
     }
 
     /// Fire the shutdown signal. Idempotent; the accept loop MUST break.
-    pub fn initiate(&self) {
+    public fn initiate(&self) {
         let first = (&*self.initiated).compare_exchange(
             false, true, MemoryOrdering.AcqRel, MemoryOrdering.Acquire,
         );
@@ -157,7 +157,7 @@ implement GracefulShutdown {
     }
 
     /// Already been initiated?
-    pub fn is_initiated(&self) -> Bool {
+    public fn is_initiated(&self) -> Bool {
         (&*self.initiated).load(MemoryOrdering.Acquire)
     }
 

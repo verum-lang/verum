@@ -142,11 +142,11 @@ public type HeaderView is {
 implement HeaderView {
     /// Look up the header name (case-insensitive ASCII) in the parser's
     /// buffer. Returns the value slice if found.
-    pub fn key<'a>(&self, buf: &'a [Byte]) -> &'a [Byte] {
+    public fn key<'a>(&self, buf: &'a [Byte]) -> &'a [Byte] {
         &buf[self.key_start..self.key_start + self.key_len]
     }
 
-    pub fn value<'a>(&self, buf: &'a [Byte]) -> &'a [Byte] {
+    public fn value<'a>(&self, buf: &'a [Byte]) -> &'a [Byte] {
         &buf[self.value_start..self.value_start + self.value_len]
     }
 }
@@ -189,7 +189,7 @@ type State is
 
 implement HttpParser {
     /// Fresh parser for server-side — next feed() expects a request-line.
-    pub fn request() -> HttpParser {
+    public fn request() -> HttpParser {
         HttpParser {
             mode: ParserMode.RequestMode,
             state: State.StartLine,
@@ -207,7 +207,7 @@ implement HttpParser {
     }
 
     /// Fresh parser for client-side — next feed() expects a status-line.
-    pub fn response() -> HttpParser {
+    public fn response() -> HttpParser {
         HttpParser {
             mode: ParserMode.ResponseMode,
             state: State.StartLine,
@@ -228,7 +228,7 @@ implement HttpParser {
     /// the wire-stream OR must be the continuation starting at the parser's
     /// saved position. The parser records progress via `self.pos` so
     /// repeated `feed(&buf[0..])` calls with a growing buffer are idempotent.
-    pub fn feed(&mut self, buf: &[Byte]) -> ParseProgress {
+    public fn feed(&mut self, buf: &[Byte]) -> ParseProgress {
         loop {
             let remaining = &buf[self.pos..];
             match self.state {
@@ -273,32 +273,32 @@ implement HttpParser {
     }
 
     /// Parsed headers (views into buf).
-    pub fn headers(&self) -> &List<HeaderView> { &self.headers }
+    public fn headers(&self) -> &List<HeaderView> { &self.headers }
 
     /// Parsed method (request mode).
-    pub fn method(&self) -> Maybe<Method> { self.method }
+    public fn method(&self) -> Maybe<Method> { self.method }
 
     /// Parsed status (response mode).
-    pub fn status(&self) -> Maybe<StatusCode> { self.status }
+    public fn status(&self) -> Maybe<StatusCode> { self.status }
 
     /// Parsed version.
-    pub fn version(&self) -> Version { self.version }
+    public fn version(&self) -> Version { self.version }
 
     /// Request path (view into buf) — request mode only.
-    pub fn path<'a>(&self, buf: &'a [Byte]) -> &'a [Byte] {
+    public fn path<'a>(&self, buf: &'a [Byte]) -> &'a [Byte] {
         &buf[self.path_start..self.path_start + self.path_len]
     }
 
     /// Response reason phrase (view into buf) — response mode only.
-    pub fn reason<'a>(&self, buf: &'a [Byte]) -> &'a [Byte] {
+    public fn reason<'a>(&self, buf: &'a [Byte]) -> &'a [Byte] {
         &buf[self.reason_start..self.reason_start + self.reason_len]
     }
 
     /// Content-Length extracted from headers, if present.
-    pub fn content_length(&self) -> Maybe<Int> { self.content_length }
+    public fn content_length(&self) -> Maybe<Int> { self.content_length }
 
     /// True iff Transfer-Encoding: chunked was seen.
-    pub fn is_chunked(&self) -> Bool { self.chunked }
+    public fn is_chunked(&self) -> Bool { self.chunked }
 }
 
 // =============================================================================
@@ -675,7 +675,7 @@ public type ChunkProgress is
     | ChunkErr(ParseError);
 
 implement ChunkedDecoder {
-    pub fn new() -> ChunkedDecoder {
+    public fn new() -> ChunkedDecoder {
         ChunkedDecoder {
             state: ChunkState.ChunkSize,
             remaining: 0,
@@ -686,7 +686,7 @@ implement ChunkedDecoder {
 
     /// Process input. Returns a chunk of output bytes (`data_start..data_start+data_len`)
     /// on each successful decode, ChunkEnd on terminator, NeedMore otherwise.
-    pub fn feed(&mut self, buf: &[Byte]) -> ChunkProgress {
+    public fn feed(&mut self, buf: &[Byte]) -> ChunkProgress {
         loop {
             let remaining = &buf[self.pos..];
             match self.state {
@@ -774,7 +774,7 @@ implement ChunkedDecoder {
         }
     }
 
-    pub fn trailers(&self) -> &List<HeaderView> { &self.trailers }
+    public fn trailers(&self) -> &List<HeaderView> { &self.trailers }
 }
 
 // =============================================================================

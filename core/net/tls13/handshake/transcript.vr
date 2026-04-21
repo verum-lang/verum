@@ -103,7 +103,7 @@ implement Transcript {
         self.append(prefix.as_slice());
     }
 
-    pub fn hash_kind(&self) -> HashKind {
+    public fn hash_kind(&self) -> HashKind {
         match self {
             Transcript.Sha256Tr(_) => HashKind.Sha256,
             Transcript.Sha384Tr(_) => HashKind.Sha384,

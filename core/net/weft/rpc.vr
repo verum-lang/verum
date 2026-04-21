@@ -77,7 +77,7 @@ public type RpcStatus is
     | Unauthenticated;
 
 implement RpcStatus {
-    pub fn to_code(&self) -> Int {
+    public fn to_code(&self) -> Int {
         match self {
             Ok                  => 0,
             Cancelled           => 1,
@@ -101,7 +101,7 @@ implement RpcStatus {
 
     /// Per the Connect protocol status table: each gRPC status has a
     /// canonical HTTP code. Used when the transport is HTTP/1.1.
-    pub fn to_http_status(&self) -> Int {
+    public fn to_http_status(&self) -> Int {
         match self {
             Ok                  => 200,
             Cancelled           => 408,
@@ -125,7 +125,7 @@ implement RpcStatus {
 
     /// Short, lowercase identifier used on the wire ("Cancelled" →
     /// "cancelled"). Matches Connect JSON error encoding.
-    pub fn name(&self) -> Text {
+    public fn name(&self) -> Text {
         match self {
             Ok                  => "ok",
             Cancelled           => "canceled",
@@ -168,17 +168,17 @@ public type RpcError is {
 };
 
 implement RpcError {
-    pub fn new(status: RpcStatus, message: Text) -> RpcError {
+    public fn new(status: RpcStatus, message: Text) -> RpcError {
         RpcError { status: status, message: message, details_json: None }
     }
 
-    pub fn with_details_json(self, details: Text) -> RpcError {
+    public fn with_details_json(self, details: Text) -> RpcError {
         RpcError { details_json: Some(details), ..self }
     }
 
     /// Render as the Connect error envelope:
     ///     { "code": "<status.name>", "message": "<text>", "details": [...] }
-    pub fn to_json_envelope(&self) -> Text {
+    public fn to_json_envelope(&self) -> Text {
         let details = match &self.details_json {
             Some(d) => f",\"details\":{d}",
             None    => "",
@@ -262,7 +262,7 @@ public type RpcAdapter<R> is {
 };
 
 implement<R: UnaryRpcHandler> RpcAdapter<R> {
-    pub fn new(inner: R, response_content_type: Text) -> RpcAdapter<R> {
+    public fn new(inner: R, response_content_type: Text) -> RpcAdapter<R> {
         RpcAdapter { inner: inner, response_content_type: response_content_type }
     }
 }
@@ -312,7 +312,7 @@ implement Router {
     /// Connect convention `/package.Service/Method`. The response
     /// content-type defaults to `application/json`; override via
     /// `rpc_unary_with_ct` when the handler emits proto / connect+proto.
-    pub fn rpc_unary<R: UnaryRpcHandler + Send + Sync + 'static>(
+    public fn rpc_unary<R: UnaryRpcHandler + Send + Sync + 'static>(
         self,
         path: Text,
         handler: R,
@@ -320,7 +320,7 @@ implement Router {
         self.rpc_unary_with_ct(path, handler, "application/json".into())
     }
 
-    pub fn rpc_unary_with_ct<R: UnaryRpcHandler + Send + Sync + 'static>(
+    public fn rpc_unary_with_ct<R: UnaryRpcHandler + Send + Sync + 'static>(
         self,
         path: Text,
         handler: R,

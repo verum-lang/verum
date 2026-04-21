@@ -44,7 +44,7 @@ public type SpanExporter is protocol {
 public type NoopExporter is ();
 
 implement NoopExporter {
-    pub fn new() -> NoopExporter { () }
+    public fn new() -> NoopExporter { () }
 }
 
 implement SpanExporter for NoopExporter {
@@ -68,7 +68,7 @@ public type StdoutExporter is {
 };
 
 implement StdoutExporter {
-    pub fn new() -> StdoutExporter {
+    public fn new() -> StdoutExporter {
         StdoutExporter { lock: Shared.new(Mutex.new(())) }
     }
 }

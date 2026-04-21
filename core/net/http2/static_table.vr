@@ -10,7 +10,7 @@ module core.net.http2.static_table;
 
 mount core.*;
 
-pub const STATIC_TABLE_SIZE: Int = 61;
+public const STATIC_TABLE_SIZE: Int = 61;
 
 public type StaticEntry is {
     name: &'static Text,
@@ -24,7 +24,7 @@ public fn entry(index: Int) -> Maybe<StaticEntry> {
     Some(ENTRIES[index - 1])
 }
 
-pub const ENTRIES: [StaticEntry; 61] = [
+public const ENTRIES: [StaticEntry; 61] = [
     StaticEntry { name: ":authority",                  value: "" },
     StaticEntry { name: ":method",                     value: "GET" },
     StaticEntry { name: ":method",                     value: "POST" },

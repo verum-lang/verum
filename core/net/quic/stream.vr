@@ -24,8 +24,8 @@ public type QuicStream is {
 }
 
 implement QuicStream {
-    pub fn stream_id(&self) -> UInt64 { self.stream_id }
-    pub fn direction(&self) -> StreamDirection { self.direction }
+    public fn stream_id(&self) -> UInt64 { self.stream_id }
+    public fn direction(&self) -> StreamDirection { self.direction }
 
     /// Write payload; returns bytes accepted (may be less than
     /// `buf.len()` under flow-control pressure).

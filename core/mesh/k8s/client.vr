@@ -47,7 +47,7 @@ public type ListOptions is {
 }
 
 implement ListOptions {
-    pub fn new() -> ListOptions {
+    public fn new() -> ListOptions {
         ListOptions {
             label_selector: None,
             field_selector: None,
@@ -58,27 +58,27 @@ implement ListOptions {
         }
     }
 
-    pub fn with_labels(mut self, selector: Text) -> ListOptions {
+    public fn with_labels(mut self, selector: Text) -> ListOptions {
         self.label_selector = Some(selector); self
     }
 
-    pub fn with_fields(mut self, selector: Text) -> ListOptions {
+    public fn with_fields(mut self, selector: Text) -> ListOptions {
         self.field_selector = Some(selector); self
     }
 
-    pub fn with_resource_version(mut self, v: Text) -> ListOptions {
+    public fn with_resource_version(mut self, v: Text) -> ListOptions {
         self.resource_version = Some(v); self
     }
 
-    pub fn with_limit(mut self, n: UInt32) -> ListOptions {
+    public fn with_limit(mut self, n: UInt32) -> ListOptions {
         self.limit = Some(n); self
     }
 
-    pub fn with_continue(mut self, token: Text) -> ListOptions {
+    public fn with_continue(mut self, token: Text) -> ListOptions {
         self.continue_token = Some(token); self
     }
 
-    pub fn with_timeout(mut self, t: Duration) -> ListOptions {
+    public fn with_timeout(mut self, t: Duration) -> ListOptions {
         self.timeout = Some(t); self
     }
 }
@@ -117,7 +117,7 @@ implement KubeClient {
         @intrinsic("verum.k8s.connect", &config).await
     }
 
-    pub fn namespace(&self) -> &Maybe<Text> { &self.namespace }
+    public fn namespace(&self) -> &Maybe<Text> { &self.namespace }
 
     /// Resource-generic list. `resource` is the plural form
     /// ("gateways", "pods"). `api_version` is "v1" or "apps/v1".
@@ -179,7 +179,7 @@ implement KubeClient {
     }
 
     /// Watch stream. Token honoured for cancellation.
-    pub fn watch<T>(
+    public fn watch<T>(
         &self,
         api_version: &Text,
         resource: &Text,

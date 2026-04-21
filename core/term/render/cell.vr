@@ -115,7 +115,7 @@ public fn grapheme_width(s: &Text) -> Int {
 }
 
 /// Display width of a single codepoint.
-pub fn codepoint_width(cp: Int) -> Int {
+public fn codepoint_width(cp: Int) -> Int {
     // Controls, NUL, DEL — zero width.
     if cp < 0x20 { return 0; }
     if cp == 0x7F { return 0; }

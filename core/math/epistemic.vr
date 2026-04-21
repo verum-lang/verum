@@ -375,7 +375,7 @@ implement EpistemicTopology {
     /// must be witnessed with a status no weaker than the theory's own
     /// assignment.  This catches covers that include a claim but
     /// downgrade it relative to the target theory.
-    pub fn status_coherent(
+    public fn status_coherent(
         target:     &Theory,
         cover:      &List<CoverMorphism>,
     ) -> Bool {

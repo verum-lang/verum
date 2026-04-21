@@ -233,7 +233,7 @@ implement Aes128Gcm {
     /// (additional authenticated data) is authenticated but not
     /// encrypted. `iv` MUST be 12 bytes and MUST NOT be reused with
     /// the same key (RFC 8446 §5.3 nonce construction).
-    pub fn encrypt(
+    public fn encrypt(
         &self,
         iv: &[Byte; 12],
         aad: &[Byte],
@@ -255,7 +255,7 @@ implement Aes128Gcm {
     /// Open ciphertext. Verifies tag in constant time; returns
     /// `GcmError.TagMismatch` and clears `plaintext` if verification
     /// fails (caller must NOT use partial output).
-    pub fn decrypt(
+    public fn decrypt(
         &self,
         iv: &[Byte; 12],
         aad: &[Byte],
@@ -283,7 +283,7 @@ implement Aes256Gcm {
         Aes256Gcm { rk: rk, h: h_block }
     }
 
-    pub fn encrypt(
+    public fn encrypt(
         &self,
         iv: &[Byte; 12],
         aad: &[Byte],
@@ -302,7 +302,7 @@ implement Aes256Gcm {
         );
     }
 
-    pub fn decrypt(
+    public fn decrypt(
         &self,
         iv: &[Byte; 12],
         aad: &[Byte],

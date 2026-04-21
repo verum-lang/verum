@@ -19,23 +19,23 @@ public type TraceFlags is {
 };
 
 implement TraceFlags {
-    pub fn new(bits: UInt8) -> TraceFlags {
+    public fn new(bits: UInt8) -> TraceFlags {
         TraceFlags { bits: bits }
     }
 
-    pub fn default() -> TraceFlags {
+    public fn default() -> TraceFlags {
         TraceFlags { bits: 0 }
     }
 
-    pub fn sampled() -> TraceFlags {
+    public fn sampled() -> TraceFlags {
         TraceFlags { bits: 0x01 }
     }
 
-    pub fn is_sampled(&self) -> Bool {
+    public fn is_sampled(&self) -> Bool {
         (self.bits & 0x01) != 0
     }
 
-    pub fn with_sampled(&self, sampled: Bool) -> TraceFlags {
+    public fn with_sampled(&self, sampled: Bool) -> TraceFlags {
         if sampled {
             TraceFlags { bits: self.bits | 0x01 }
         } else {
@@ -43,7 +43,7 @@ implement TraceFlags {
         }
     }
 
-    pub fn to_byte(&self) -> UInt8 { self.bits }
+    public fn to_byte(&self) -> UInt8 { self.bits }
 }
 
 // =============================================================================
@@ -67,15 +67,15 @@ public type TraceState is {
 };
 
 implement TraceState {
-    pub fn empty() -> TraceState {
+    public fn empty() -> TraceState {
         TraceState { entries: List.new() }
     }
 
-    pub fn len(&self) -> Int { self.entries.len() }
-    pub fn is_empty(&self) -> Bool { self.entries.is_empty() }
+    public fn len(&self) -> Int { self.entries.len() }
+    public fn is_empty(&self) -> Bool { self.entries.is_empty() }
 
     /// Look up a key (first match wins).
-    pub fn get(&self, key: &Text) -> Maybe<&Text> {
+    public fn get(&self, key: &Text) -> Maybe<&Text> {
         let mut i = 0;
         while i < self.entries.len() {
             if self.entries[i].0 == *key {
@@ -89,7 +89,7 @@ implement TraceState {
     /// Insert / update a key. New keys prepend per W3C §3.3.1.1.
     /// Validates key + value length; returns unchanged state if either
     /// is too long or if the list is full.
-    pub fn with(&self, key: Text, value: Text) -> TraceState {
+    public fn with(&self, key: Text, value: Text) -> TraceState {
         if key.len() == 0 || key.len() > TRACESTATE_MAX_KEY_LEN { return self.clone(); }
         if value.len() > TRACESTATE_MAX_VALUE_LEN { return self.clone(); }
         let mut entries = List.with_capacity(self.entries.len() + 1);
@@ -107,7 +107,7 @@ implement TraceState {
         TraceState { entries: entries }
     }
 
-    pub fn clone(&self) -> TraceState {
+    public fn clone(&self) -> TraceState {
         let mut entries = List.with_capacity(self.entries.len());
         let mut i = 0;
         while i < self.entries.len() {
@@ -117,7 +117,7 @@ implement TraceState {
         TraceState { entries: entries }
     }
 
-    pub fn entries(&self) -> &List<(Text, Text)> { &self.entries }
+    public fn entries(&self) -> &List<(Text, Text)> { &self.entries }
 }
 
 // =============================================================================
@@ -133,7 +133,7 @@ public type SpanContext is {
 };
 
 implement SpanContext {
-    pub fn new(
+    public fn new(
         trace_id: TraceId,
         span_id: SpanId,
         flags: TraceFlags,
@@ -150,7 +150,7 @@ implement SpanContext {
     }
 
     /// The "invalid" sentinel context (used to mean "no parent").
-    pub fn invalid() -> SpanContext {
+    public fn invalid() -> SpanContext {
         SpanContext {
             trace_id: TraceId.invalid(),
             span_id: SpanId.invalid(),
@@ -160,19 +160,19 @@ implement SpanContext {
         }
     }
 
-    pub fn is_valid(&self) -> Bool {
+    public fn is_valid(&self) -> Bool {
         !self.trace_id.is_invalid() && !self.span_id.is_invalid()
     }
 
-    pub fn trace_id(&self) -> &TraceId { &self.trace_id }
-    pub fn span_id(&self) -> &SpanId { &self.span_id }
-    pub fn flags(&self) -> TraceFlags { self.flags }
-    pub fn trace_state(&self) -> &TraceState { &self.trace_state }
-    pub fn is_remote(&self) -> Bool { self.is_remote }
+    public fn trace_id(&self) -> &TraceId { &self.trace_id }
+    public fn span_id(&self) -> &SpanId { &self.span_id }
+    public fn flags(&self) -> TraceFlags { self.flags }
+    public fn trace_state(&self) -> &TraceState { &self.trace_state }
+    public fn is_remote(&self) -> Bool { self.is_remote }
 
-    pub fn is_sampled(&self) -> Bool { self.flags.is_sampled() }
+    public fn is_sampled(&self) -> Bool { self.flags.is_sampled() }
 
-    pub fn clone(&self) -> SpanContext {
+    public fn clone(&self) -> SpanContext {
         SpanContext {
             trace_id: self.trace_id,
             span_id: self.span_id,

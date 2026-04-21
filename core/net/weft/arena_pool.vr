@@ -74,7 +74,7 @@ public type ArenaPoolConfig is {
 };
 
 implement ArenaPoolConfig {
-    pub fn default() -> ArenaPoolConfig {
+    public fn default() -> ArenaPoolConfig {
         ArenaPoolConfig {
             warm_count: 64,
             per_arena_bytes: 64 * 1024,
@@ -82,15 +82,15 @@ implement ArenaPoolConfig {
         }
     }
 
-    pub fn with_warm_count(self, n: Int) -> ArenaPoolConfig {
+    public fn with_warm_count(self, n: Int) -> ArenaPoolConfig {
         ArenaPoolConfig { warm_count: n, ..self }
     }
 
-    pub fn with_per_arena_bytes(self, n: Int) -> ArenaPoolConfig {
+    public fn with_per_arena_bytes(self, n: Int) -> ArenaPoolConfig {
         ArenaPoolConfig { per_arena_bytes: n, ..self }
     }
 
-    pub fn with_max_total(self, n: Int) -> ArenaPoolConfig {
+    public fn with_max_total(self, n: Int) -> ArenaPoolConfig {
         ArenaPoolConfig { max_total: n, ..self }
     }
 }
@@ -130,7 +130,7 @@ public type ArenaPool is {
 };
 
 implement ArenaPool {
-    pub fn new(config: ArenaPoolConfig) -> ArenaPool {
+    public fn new(config: ArenaPoolConfig) -> ArenaPool {
         let mut warm: List<GenerationalArena> = List.with_capacity(config.warm_count);
         let mut i: Int = 0;
         while i < config.warm_count {
@@ -148,13 +148,13 @@ implement ArenaPool {
         }
     }
 
-    pub fn default() -> ArenaPool {
+    public fn default() -> ArenaPool {
         Self.new(ArenaPoolConfig.default())
     }
 
     /// Acquire an arena for the lifetime of a request. On drop the
     /// lease calls `reset()` and returns the arena to the free list.
-    pub fn acquire(&self) -> ArenaLease {
+    public fn acquire(&self) -> ArenaLease {
         let arena = {
             let mut free = self.state.free.lock();
             match free.pop() {
@@ -176,23 +176,23 @@ implement ArenaPool {
     }
 
     /// Total arenas (warm + leased).
-    pub fn total(&self) -> Int {
+    public fn total(&self) -> Int {
         self.state.total.load(MemoryOrdering.Acquire)
     }
 
     /// Number of arenas currently warm in the pool.
-    pub fn warm_count(&self) -> Int {
+    public fn warm_count(&self) -> Int {
         let free = self.state.free.lock();
         free.len()
     }
 
     /// Number of arena-lease acquisitions since pool creation.
-    pub fn leases_total(&self) -> Int {
+    public fn leases_total(&self) -> Int {
         self.state.leases_total.load(MemoryOrdering.Acquire)
     }
 
     /// Number of burst-allocations (acquire when warm pool empty).
-    pub fn bursts_total(&self) -> Int {
+    public fn bursts_total(&self) -> Int {
         self.state.bursts_total.load(MemoryOrdering.Acquire)
     }
 }
@@ -214,7 +214,7 @@ public type ArenaLease is {
 
 implement ArenaLease {
     /// Borrow the arena mutably; the caller bumps allocates into it.
-    pub fn arena_mut(&mut self) -> &mut GenerationalArena {
+    public fn arena_mut(&mut self) -> &mut GenerationalArena {
         match &mut self.arena {
             Some(a) => a,
             None    => panic("ArenaLease: arena already returned"),
@@ -223,7 +223,7 @@ implement ArenaLease {
 
     /// Current generation — handlers that create ThinRefs must stamp
     /// them with this value so CBGR can reject them after reset().
-    pub fn generation(&self) -> Int {
+    public fn generation(&self) -> Int {
         match &self.arena {
             Some(a) => a.generation(),
             None    => 0,
@@ -231,7 +231,7 @@ implement ArenaLease {
     }
 
     /// Bytes currently allocated in the arena.
-    pub fn used(&self) -> Int {
+    public fn used(&self) -> Int {
         match &self.arena {
             Some(a) => a.used(),
             None    => 0,
@@ -241,7 +241,7 @@ implement ArenaLease {
     /// Capacity — fixed per lease (arena doesn't grow once the pool
     /// created it). Handlers that detect impending overflow raise
     /// `WeftError.Overloaded` or trim their response.
-    pub fn capacity(&self) -> Int {
+    public fn capacity(&self) -> Int {
         match &self.arena {
             Some(a) => a.capacity(),
             None    => 0,

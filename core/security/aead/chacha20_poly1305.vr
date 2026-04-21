@@ -77,7 +77,7 @@ public type ChaCha20Poly1305 is {
 };
 
 implement ChaCha20Poly1305 {
-    pub fn new(key: &ChaChaKey) -> ChaCha20Poly1305 {
+    public fn new(key: &ChaChaKey) -> ChaCha20Poly1305 {
         let mut k: [Byte; 32] = [0; 32];
         let mut i = 0;
         while i < 32 { k[i] = key[i]; i = i + 1; }
@@ -85,7 +85,7 @@ implement ChaCha20Poly1305 {
     }
 
     /// Seal plaintext → (ciphertext, 16-byte tag).
-    pub fn encrypt(
+    public fn encrypt(
         &self,
         nonce: &ChaChaNonce,
         aad: &[Byte],
@@ -125,7 +125,7 @@ implement ChaCha20Poly1305 {
 
     /// Open ciphertext; fails (TagMismatch) without exposing plaintext
     /// if integrity check fails.
-    pub fn decrypt(
+    public fn decrypt(
         &self,
         nonce: &ChaChaNonce,
         aad: &[Byte],

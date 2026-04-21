@@ -71,7 +71,7 @@ public type ServerOptions is {
 impl ServerOptions {
     /// Canonical constructor — caller provides a pre-loaded cert
     /// chain and signer; the rest falls back to industrial defaults.
-    pub fn from_cert(
+    public fn from_cert(
         cert_chain: List<List<Byte>>,
         signer: Heap<dyn CertSigner>,
     ) -> ServerOptions {
@@ -92,12 +92,12 @@ impl ServerOptions {
         }
     }
 
-    pub fn with_alpn(mut self, alpn: List<List<Byte>>) -> ServerOptions {
+    public fn with_alpn(mut self, alpn: List<List<Byte>>) -> ServerOptions {
         self.alpn_prefs = alpn;
         self
     }
 
-    pub fn with_idle_timeout(mut self, d: Duration) -> ServerOptions {
+    public fn with_idle_timeout(mut self, d: Duration) -> ServerOptions {
         self.idle_timeout = d;
         self
     }

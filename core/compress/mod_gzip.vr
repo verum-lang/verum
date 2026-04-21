@@ -15,16 +15,16 @@ const GZIP_DEFAULT_LEVEL: Int = 6;
 public type Gzip is ();
 
 implement Gzip {
-    pub const ALGORITHM: Algorithm = Algorithm.Gzip;
+    public const ALGORITHM: Algorithm = Algorithm.Gzip;
 
-    pub fn encode(input: &[Byte], level: Int, out: &mut List<Byte>)
+    public fn encode(input: &[Byte], level: Int, out: &mut List<Byte>)
         -> Result<Int, CompressError>
     {
         let l = if level < 0 || level > 9 { GZIP_DEFAULT_LEVEL } else { level };
         @intrinsic("verum.compress.gzip_encode", input, l, out)
     }
 
-    pub fn decode(input: &[Byte], max_output_bytes: Int, out: &mut List<Byte>)
+    public fn decode(input: &[Byte], max_output_bytes: Int, out: &mut List<Byte>)
         -> Result<Int, CompressError>
     {
         @intrinsic("verum.compress.gzip_decode", input, max_output_bytes, out)
@@ -35,16 +35,16 @@ implement Gzip {
 public type Deflate is ();
 
 implement Deflate {
-    pub const ALGORITHM: Algorithm = Algorithm.Deflate;
+    public const ALGORITHM: Algorithm = Algorithm.Deflate;
 
-    pub fn encode(input: &[Byte], level: Int, out: &mut List<Byte>)
+    public fn encode(input: &[Byte], level: Int, out: &mut List<Byte>)
         -> Result<Int, CompressError>
     {
         let l = if level < 0 || level > 9 { GZIP_DEFAULT_LEVEL } else { level };
         @intrinsic("verum.compress.deflate_encode", input, l, out)
     }
 
-    pub fn decode(input: &[Byte], max_output_bytes: Int, out: &mut List<Byte>)
+    public fn decode(input: &[Byte], max_output_bytes: Int, out: &mut List<Byte>)
         -> Result<Int, CompressError>
     {
         @intrinsic("verum.compress.deflate_decode", input, max_output_bytes, out)
@@ -56,16 +56,16 @@ implement Deflate {
 public type Zlib is ();
 
 implement Zlib {
-    pub const ALGORITHM: Algorithm = Algorithm.Zlib;
+    public const ALGORITHM: Algorithm = Algorithm.Zlib;
 
-    pub fn encode(input: &[Byte], level: Int, out: &mut List<Byte>)
+    public fn encode(input: &[Byte], level: Int, out: &mut List<Byte>)
         -> Result<Int, CompressError>
     {
         let l = if level < 0 || level > 9 { GZIP_DEFAULT_LEVEL } else { level };
         @intrinsic("verum.compress.zlib_encode", input, l, out)
     }
 
-    pub fn decode(input: &[Byte], max_output_bytes: Int, out: &mut List<Byte>)
+    public fn decode(input: &[Byte], max_output_bytes: Int, out: &mut List<Byte>)
         -> Result<Int, CompressError>
     {
         @intrinsic("verum.compress.zlib_decode", input, max_output_bytes, out)

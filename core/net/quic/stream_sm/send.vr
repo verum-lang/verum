@@ -162,7 +162,7 @@ implement SendStream {
 
     /// Called when the wire layer has shipped bytes [from..to) of the
     /// stream in a STREAM frame. Updates `max_written`.
-    pub fn on_bytes_sent(&mut self, to: UInt64) {
+    public fn on_bytes_sent(&mut self, to: UInt64) {
         if to > self.max_written { self.max_written = to; }
         // Transition Send → DataSent if we've now written everything
         // including the FIN bit.
@@ -183,7 +183,7 @@ implement SendStream {
     /// Drops acked bytes from `send_buf`, updates `max_acked`, and
     /// potentially transitions DataSent → DataRecvd / ResetSent →
     /// ResetRecvd.
-    pub fn on_bytes_acked(&mut self, to: UInt64) {
+    public fn on_bytes_acked(&mut self, to: UInt64) {
         if to > self.max_acked { self.max_acked = to; }
         match self.state {
             SendState.DataSent => {
@@ -203,15 +203,15 @@ implement SendStream {
     }
 
     /// Peer raised our stream-level max_stream_data.
-    pub fn on_max_stream_data(&mut self, new_limit: UInt64) {
+    public fn on_max_stream_data(&mut self, new_limit: UInt64) {
         if new_limit > self.max_stream_data {
             self.max_stream_data = new_limit;
         }
     }
 
-    pub fn state(&self) -> SendState { self.state.clone() }
+    public fn state(&self) -> SendState { self.state.clone() }
 
-    pub fn is_finished(&self) -> Bool {
+    public fn is_finished(&self) -> Bool {
         match self.state {
             SendState.DataRecvd | SendState.ResetRecvd => true,
             _ => false,

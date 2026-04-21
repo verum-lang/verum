@@ -93,7 +93,7 @@ implement RecvStream {
 
     /// Ingest an incoming STREAM frame chunk at `offset` carrying
     /// `data`. `is_fin` signals the final byte.
-    pub fn on_stream_frame(
+    public fn on_stream_frame(
         &mut self,
         offset: UInt64,
         data: &[Byte],
@@ -133,7 +133,7 @@ implement RecvStream {
     }
 
     /// Peer RESET_STREAM — transitions to ResetRecvd.
-    pub fn on_reset(&mut self, error_code: UInt64, final_size: UInt64) -> Result<(), RecvError> {
+    public fn on_reset(&mut self, error_code: UInt64, final_size: UInt64) -> Result<(), RecvError> {
         match self.state {
             RecvState.DataRead => return Err(RecvError.ResetAfterFin),
             RecvState.ResetRecvd | RecvState.ResetRead => {
@@ -162,7 +162,7 @@ implement RecvStream {
 
     /// Read the next contiguous chunk of received bytes. Returns
     /// `(bytes, is_fin)` — bytes is ordered from `bytes_read` onwards.
-    pub fn read(&mut self) -> (List<Byte>, Bool) {
+    public fn read(&mut self) -> (List<Byte>, Bool) {
         let mut out: List<Byte> = [];
         // Consume the first run if it aligns with bytes_read.
         while self.runs.len() > 0 && self.runs[0].start == self.bytes_read {
@@ -190,7 +190,7 @@ implement RecvStream {
     }
 
     /// App finished reading — marks stream as terminal DataRead.
-    pub fn close_read(&mut self) {
+    public fn close_read(&mut self) {
         match self.state {
             RecvState.DataRecvd => self.state = RecvState.DataRead,
             RecvState.ResetRecvd => self.state = RecvState.ResetRead,
@@ -200,7 +200,7 @@ implement RecvStream {
 
     /// Raise our advertised max_stream_data limit. Typically called
     /// after `read` consumes bytes: caller sends MAX_STREAM_DATA frame.
-    pub fn update_flow_control(&mut self, new_limit: UInt64) {
+    public fn update_flow_control(&mut self, new_limit: UInt64) {
         if new_limit > self.max_data_recv {
             self.max_data_recv = new_limit;
         }
@@ -209,12 +209,12 @@ implement RecvStream {
     /// Suggested MAX_STREAM_DATA value: 2 × buffer pane above current
     /// delivered, clamped to (bytes_read + window). Caller decides
     /// when to actually emit the frame.
-    pub fn suggested_max_stream_data(&self, window: UInt64) -> UInt64 {
+    public fn suggested_max_stream_data(&self, window: UInt64) -> UInt64 {
         self.bytes_read + window
     }
 
-    pub fn state(&self) -> RecvState { self.state.clone() }
-    pub fn is_finished(&self) -> Bool {
+    public fn state(&self) -> RecvState { self.state.clone() }
+    public fn is_finished(&self) -> Bool {
         match self.state {
             RecvState.DataRead | RecvState.ResetRead => true,
             _ => false,

@@ -49,7 +49,7 @@ public type SentPacketInfo is {
 public type PnSpaceKind is Initial | Handshake | Application;
 
 implement PnSpaceKind {
-    pub fn as_index(&self) -> Int {
+    public fn as_index(&self) -> Int {
         match self {
             PnSpaceKind.Initial     => 0,
             PnSpaceKind.Handshake   => 1,
@@ -83,7 +83,7 @@ public type PnSpace is {
 };
 
 implement PnSpace {
-    pub fn new(kind: PnSpaceKind) -> PnSpace {
+    public fn new(kind: PnSpaceKind) -> PnSpace {
         PnSpace {
             kind: kind,
             next_pn: 0_u64,
@@ -101,20 +101,20 @@ implement PnSpace {
     /// start at packet number 0. Subsequent packets sent in the same
     /// packet-number space MUST increase the packet number by at
     /// least one.").
-    pub fn next_packet_number(&mut self) -> UInt64 {
+    public fn next_packet_number(&mut self) -> UInt64 {
         let pn = self.next_pn;
         self.next_pn = pn + 1_u64;
         pn
     }
 
     /// Record a freshly sent packet for loss tracking.
-    pub fn record_sent(&mut self, info: SentPacketInfo) {
+    public fn record_sent(&mut self, info: SentPacketInfo) {
         self.sent_packets.push(info);
     }
 
     /// Mark the space as discarded (RFC 9001 §4.9 — Initial / Handshake
     /// keys dropped). After this, no further sends or acks are accepted.
-    pub fn discard(&mut self) {
+    public fn discard(&mut self) {
         self.discarded = true;
         self.sent_packets = [];
         self.ack_ranges = [];
@@ -123,7 +123,7 @@ implement PnSpace {
     /// Incorporate an incoming packet's PN into our outgoing ACK set.
     /// Ensures descending order with no overlapping ranges; merges
     /// adjacent values into the same range.
-    pub fn on_packet_received(&mut self, pn: UInt64) {
+    public fn on_packet_received(&mut self, pn: UInt64) {
         // Update peer-PN high-watermark.
         let should_update = match self.largest_acked_received {
             Some(v) => pn > v,
@@ -136,7 +136,7 @@ implement PnSpace {
 
     /// Incorporate an ACK received from the peer. Returns freshly-acked
     /// packet metadata so the caller can feed CC + RTT.
-    pub fn on_ack_received(
+    public fn on_ack_received(
         &mut self,
         largest_acked: UInt64,
         ranges: &List<AckRange>,
@@ -167,7 +167,7 @@ implement PnSpace {
 
     /// Build an ACK frame ready to ship, or None if we have no
     /// outstanding received packets to acknowledge.
-    pub fn build_ack_frame(&self, ack_delay_us: UInt64) -> Maybe<Frame> {
+    public fn build_ack_frame(&self, ack_delay_us: UInt64) -> Maybe<Frame> {
         let largest = match self.largest_acked_received { Some(v) => v, None => return None };
         // Emit ECN counts only if any counter is non-zero. Some peers
         // require explicit ECN counts to be absent when none are seen.
@@ -256,7 +256,7 @@ fn insert_pn_into_ack_ranges(ranges: &mut List<AckRange>, pn: UInt64) {
 }
 
 /// Does the list of ACK ranges contain `pn`?
-pub fn ranges_contain(ranges: &List<AckRange>, pn: UInt64) -> Bool {
+public fn ranges_contain(ranges: &List<AckRange>, pn: UInt64) -> Bool {
     let mut i: Int = 0;
     while i < ranges.len() {
         let r = &ranges[i];

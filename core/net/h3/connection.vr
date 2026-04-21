@@ -139,7 +139,7 @@ public type H3Connection is {
 // =============================================================================
 
 implement H3Connection {
-    pub fn new_client(settings: H3Settings) -> H3Connection {
+    public fn new_client(settings: H3Settings) -> H3Connection {
         let mut conn = H3Connection {
             role: H3Role.Client,
             phase: H3Phase.InitialPhase,
@@ -160,7 +160,7 @@ implement H3Connection {
         conn
     }
 
-    pub fn new_server(settings: H3Settings) -> H3Connection {
+    public fn new_server(settings: H3Settings) -> H3Connection {
         let mut conn = H3Connection {
             role: H3Role.Server,
             phase: H3Phase.InitialPhase,
@@ -231,7 +231,7 @@ implement H3Connection {
     /// response will arrive. Caller collects the response via
     /// `take_response(stream_id)` once the dispatch loop marks it
     /// complete.
-    pub fn send_request(&mut self, req: &H3Request) -> Result<UInt64, H3Error> {
+    public fn send_request(&mut self, req: &H3Request) -> Result<UInt64, H3Error> {
         let sid = self.alloc_bidi_stream_id();
         let mut wire: List<Byte> = [];
         // HEADERS frame with QPACK-encoded field section.
@@ -247,7 +247,7 @@ implement H3Connection {
         Ok(sid)
     }
 
-    pub fn take_response(&mut self, stream_id: UInt64) -> Maybe<H3Response> {
+    public fn take_response(&mut self, stream_id: UInt64) -> Maybe<H3Response> {
         let mut i: Int = 0;
         while i < self.inbound_responses.len() {
             let (sid, _) = &self.inbound_responses[i];
@@ -264,7 +264,7 @@ implement H3Connection {
 
     /// Server: consume the next accepted request. Returns (stream_id,
     /// request) — caller must use the stream_id when replying.
-    pub fn take_request(&mut self) -> Maybe<(UInt64, H3Request)> {
+    public fn take_request(&mut self) -> Maybe<(UInt64, H3Request)> {
         // Pair inbound requests with their originating stream.
         let mut j: Int = 0;
         while j < self.peer_req_streams.len() {
@@ -284,7 +284,7 @@ implement H3Connection {
 
     /// Server: send a response on the given stream. Closes the stream
     /// with FIN.
-    pub fn send_response(&mut self, stream_id: UInt64, resp: &H3Response) -> Result<(), H3Error> {
+    public fn send_response(&mut self, stream_id: UInt64, resp: &H3Response) -> Result<(), H3Error> {
         let mut wire: List<Byte> = [];
         let field_bytes = encode_field_section(&resp.to_field_list());
         encode_frame(&H3Frame.HeadersFrame(field_bytes), &mut wire);
@@ -304,7 +304,7 @@ implement H3Connection {
     // ==================== inbound dispatch ====================
 
     /// Feed bytes that arrived on a unidirectional stream.
-    pub fn on_uni_stream(&mut self, stream_id: UInt64, bytes: &[Byte]) -> Result<(), H3Error> {
+    public fn on_uni_stream(&mut self, stream_id: UInt64, bytes: &[Byte]) -> Result<(), H3Error> {
         let st = self.find_or_create_uni(stream_id);
         match &mut st.kind {
             PeerUniKind.UnknownUni => {
@@ -441,7 +441,7 @@ implement H3Connection {
 
     /// Feed bytes that arrived on a bidirectional (request) stream.
     /// `fin` signals peer closed the write-side.
-    pub fn on_bidi_stream(
+    public fn on_bidi_stream(
         &mut self,
         stream_id: UInt64,
         bytes: &[Byte],
@@ -559,7 +559,7 @@ implement H3Connection {
     }
 
     /// Drain queued outbound writes.
-    pub fn drain_outbound(&mut self) -> List<StreamWrite> {
+    public fn drain_outbound(&mut self) -> List<StreamWrite> {
         let mut out: List<StreamWrite> = [];
         while self.outbound.len() > 0 {
             out.push(self.outbound.remove(0));
@@ -567,6 +567,6 @@ implement H3Connection {
         out
     }
 
-    pub fn phase(&self) -> H3Phase { self.phase.clone() }
-    pub fn peer_settings(&self) -> Maybe<H3Settings> { self.peer_settings.clone() }
+    public fn phase(&self) -> H3Phase { self.phase.clone() }
+    public fn peer_settings(&self) -> Maybe<H3Settings> { self.peer_settings.clone() }
 }

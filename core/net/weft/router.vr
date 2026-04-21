@@ -172,7 +172,7 @@ implement Router {
         self
     }
 
-    pub fn match_request(&self, req: &mut WeftRequest)
+    public fn match_request(&self, req: &mut WeftRequest)
         -> Maybe<&Heap<dyn Handler>>
     {
         let segments = split_path(&req.path);

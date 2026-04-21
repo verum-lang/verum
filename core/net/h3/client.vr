@@ -58,7 +58,7 @@ public type ClientOptions is {
 };
 
 implement ClientOptions {
-    pub fn default() -> ClientOptions {
+    public fn default() -> ClientOptions {
         ClientOptions {
             trust:            TrustStore.empty(),
             alpn:             [default_alpn()],
@@ -69,7 +69,7 @@ implement ClientOptions {
         }
     }
 
-    pub fn with_system_trust() -> ClientOptions {
+    public fn with_system_trust() -> ClientOptions {
         let mut opts = ClientOptions.default();
         match TrustStore.system() {
             Ok(t) => { opts.trust = t; },
@@ -313,9 +313,9 @@ implement H3Client {
         ))
     }
 
-    pub fn authority(&self) -> Text { self.authority.clone() }
-    pub fn peer_addr(&self) -> SocketAddr { self.peer_addr.clone() }
-    pub fn selected_alpn(&self) -> List<Byte> { self.selected_alpn.clone() }
+    public fn authority(&self) -> Text { self.authority.clone() }
+    public fn peer_addr(&self) -> SocketAddr { self.peer_addr.clone() }
+    public fn selected_alpn(&self) -> List<Byte> { self.selected_alpn.clone() }
 }
 
 type ReadBatch is (

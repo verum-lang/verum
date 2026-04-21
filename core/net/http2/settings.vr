@@ -12,28 +12,28 @@ public type SettingId is {
 }
 
 implement SettingId {
-    pub const HEADER_TABLE_SIZE: UInt16      = 0x1;
-    pub const ENABLE_PUSH: UInt16            = 0x2;
-    pub const MAX_CONCURRENT_STREAMS: UInt16 = 0x3;
-    pub const INITIAL_WINDOW_SIZE: UInt16    = 0x4;
-    pub const MAX_FRAME_SIZE: UInt16         = 0x5;
-    pub const MAX_HEADER_LIST_SIZE: UInt16   = 0x6;
+    public const HEADER_TABLE_SIZE: UInt16      = 0x1;
+    public const ENABLE_PUSH: UInt16            = 0x2;
+    public const MAX_CONCURRENT_STREAMS: UInt16 = 0x3;
+    public const INITIAL_WINDOW_SIZE: UInt16    = 0x4;
+    public const MAX_FRAME_SIZE: UInt16         = 0x5;
+    public const MAX_HEADER_LIST_SIZE: UInt16   = 0x6;
 
-    pub fn new(v: UInt16) -> SettingId { SettingId { value: v } }
-    pub fn value(&self) -> UInt16 { self.value }
+    public fn new(v: UInt16) -> SettingId { SettingId { value: v } }
+    public fn value(&self) -> UInt16 { self.value }
 }
 
 // Default per-parameter values per RFC 7540 §6.5.2.
-pub const DEFAULT_HEADER_TABLE_SIZE: UInt32      = 4096;
-pub const DEFAULT_ENABLE_PUSH: UInt32            = 1;
-pub const DEFAULT_MAX_CONCURRENT_STREAMS: UInt32 = 0xFFFFFFFF;  // unbounded
-pub const DEFAULT_INITIAL_WINDOW_SIZE: UInt32    = 65535;
-pub const DEFAULT_MAX_FRAME_SIZE: UInt32         = 16384;
-pub const DEFAULT_MAX_HEADER_LIST_SIZE: UInt32   = 0xFFFFFFFF;  // unbounded
+public const DEFAULT_HEADER_TABLE_SIZE: UInt32      = 4096;
+public const DEFAULT_ENABLE_PUSH: UInt32            = 1;
+public const DEFAULT_MAX_CONCURRENT_STREAMS: UInt32 = 0xFFFFFFFF;  // unbounded
+public const DEFAULT_INITIAL_WINDOW_SIZE: UInt32    = 65535;
+public const DEFAULT_MAX_FRAME_SIZE: UInt32         = 16384;
+public const DEFAULT_MAX_HEADER_LIST_SIZE: UInt32   = 0xFFFFFFFF;  // unbounded
 
-pub const MAX_INITIAL_WINDOW_SIZE: UInt32 = 0x7FFFFFFF;
-pub const MIN_MAX_FRAME_SIZE: UInt32      = 16384;
-pub const MAX_MAX_FRAME_SIZE: UInt32      = 16777215;  // 2^24-1
+public const MAX_INITIAL_WINDOW_SIZE: UInt32 = 0x7FFFFFFF;
+public const MIN_MAX_FRAME_SIZE: UInt32      = 16384;
+public const MAX_MAX_FRAME_SIZE: UInt32      = 16777215;  // 2^24-1
 
 /// In-memory settings snapshot — mutated as SETTINGS frames arrive.
 public type Settings is {
@@ -46,7 +46,7 @@ public type Settings is {
 };
 
 implement Settings {
-    pub fn defaults() -> Settings {
+    public fn defaults() -> Settings {
         Settings {
             header_table_size: DEFAULT_HEADER_TABLE_SIZE,
             enable_push: true,
@@ -59,7 +59,7 @@ implement Settings {
 
     /// Apply a single identifier / value pair with RFC-mandated bounds
     /// checks. Returns a connection-level error on out-of-range.
-    pub fn apply(&mut self, id: UInt16, value: UInt32) -> Result<(), Http2Error> {
+    public fn apply(&mut self, id: UInt16, value: UInt32) -> Result<(), Http2Error> {
         if id == SettingId.HEADER_TABLE_SIZE {
             self.header_table_size = value;
             return Ok(());

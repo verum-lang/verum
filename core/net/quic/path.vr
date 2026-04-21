@@ -68,9 +68,9 @@ public type PathError is
 // Constants
 // =============================================================================
 
-pub const ANTI_AMPLIFICATION_FACTOR: UInt64 = 3_u64;
-pub const CHALLENGE_TIMEOUT: Duration = Duration.from_millis(500);
-pub const MAX_CHALLENGE_ATTEMPTS: UInt32 = 3_u32;
+public const ANTI_AMPLIFICATION_FACTOR: UInt64 = 3_u64;
+public const CHALLENGE_TIMEOUT: Duration = Duration.from_millis(500);
+public const MAX_CHALLENGE_ATTEMPTS: UInt32 = 3_u32;
 
 // =============================================================================
 // API
@@ -80,7 +80,7 @@ implement Path {
     /// New path — server-initiated paths start Unvalidated to enforce
     /// anti-amplification; client-initiated paths that have already
     /// verified 4-tuple via handshake may start Validated.
-    pub fn new(local: SocketAddr, remote: SocketAddr, initially_validated: Bool) -> Path {
+    public fn new(local: SocketAddr, remote: SocketAddr, initially_validated: Bool) -> Path {
         let state = if initially_validated {
             PathState.Validated
         } else {
@@ -92,7 +92,7 @@ implement Path {
     /// Can we send `n` bytes under the current anti-amplification
     /// budget? Returns Err if the path is Failed or if sending would
     /// exceed the 3× cap while unvalidated.
-    pub fn can_send(&self, n: UInt64) -> Result<(), PathError> {
+    public fn can_send(&self, n: UInt64) -> Result<(), PathError> {
         match &self.state {
             PathState.Validated => Ok(()),
             PathState.Validating {..} => Ok(()),
@@ -108,7 +108,7 @@ implement Path {
         }
     }
 
-    pub fn on_bytes_sent(&mut self, n: UInt64) {
+    public fn on_bytes_sent(&mut self, n: UInt64) {
         match &mut self.state {
             PathState.Unvalidated { received_bytes: _, sent_bytes } => {
                 *sent_bytes = *sent_bytes + n;
@@ -117,7 +117,7 @@ implement Path {
         }
     }
 
-    pub fn on_bytes_received(&mut self, n: UInt64) {
+    public fn on_bytes_received(&mut self, n: UInt64) {
         match &mut self.state {
             PathState.Unvalidated { received_bytes, sent_bytes: _ } => {
                 *received_bytes = *received_bytes + n;
@@ -129,7 +129,7 @@ implement Path {
     /// Begin validation — generate an 8-byte challenge and transition
     /// to Validating. Caller MUST emit a PATH_CHALLENGE frame carrying
     /// the returned bytes.
-    pub fn begin_validation(&mut self, now: Instant) -> [Byte; 8] {
+    public fn begin_validation(&mut self, now: Instant) -> [Byte; 8] {
         let mut challenge: [Byte; 8] = [0_u8; 8];
         fill_secure(&mut challenge);
         let attempts = match &self.state {
@@ -149,7 +149,7 @@ implement Path {
     /// Validated; Ok(false) if the response is stale or path wasn't
     /// being validated; Err if genuinely malformed (response on a
     /// Failed path).
-    pub fn on_path_response(&mut self, data: &[Byte; 8], now: Instant) -> Result<Bool, PathError> {
+    public fn on_path_response(&mut self, data: &[Byte; 8], now: Instant) -> Result<Bool, PathError> {
         match &self.state {
             PathState.Validating { challenge, sent_at, .. } => {
                 let mut matches = true;
@@ -174,7 +174,7 @@ implement Path {
     /// Timer fire — check for challenge timeout. Returns a signal the
     /// caller uses to re-challenge (if attempts < MAX) or retire the
     /// path (if MAX reached).
-    pub fn on_timer(&mut self, now: Instant) -> TimerOutcome {
+    public fn on_timer(&mut self, now: Instant) -> TimerOutcome {
         match &self.state {
             PathState.Validating { sent_at, attempts, .. } => {
                 if now.duration_since(sent_at.clone())
@@ -193,16 +193,16 @@ implement Path {
         }
     }
 
-    pub fn is_validated(&self) -> Bool {
+    public fn is_validated(&self) -> Bool {
         match &self.state { PathState.Validated => true, _ => false }
     }
 
-    pub fn is_failed(&self) -> Bool {
+    public fn is_failed(&self) -> Bool {
         match &self.state { PathState.Failed => true, _ => false }
     }
 
-    pub fn remote_addr(&self) -> SocketAddr { self.remote.clone() }
-    pub fn local_addr(&self)  -> SocketAddr { self.local.clone() }
+    public fn remote_addr(&self) -> SocketAddr { self.remote.clone() }
+    public fn local_addr(&self)  -> SocketAddr { self.local.clone() }
 }
 
 public type TimerOutcome is NoAction | ShouldReChallenge | Failed;
@@ -227,14 +227,14 @@ public type PathManager is {
 };
 
 implement PathManager {
-    pub fn new(initial: Path) -> PathManager {
+    public fn new(initial: Path) -> PathManager {
         PathManager { active: initial, standby: None }
     }
 
     /// Peer sent a packet from an unexpected 4-tuple → start a
     /// migration attempt. If there's no standby or `remote` differs
     /// from the current standby, replace it.
-    pub fn on_new_remote(&mut self, local: SocketAddr, remote: SocketAddr) {
+    public fn on_new_remote(&mut self, local: SocketAddr, remote: SocketAddr) {
         let replace = match &self.standby {
             Some(s) => !addr_eq(&s.remote, &remote),
             None    => true,
@@ -248,7 +248,7 @@ implement PathManager {
     }
 
     /// Standby path validated → promote it as active; retire old.
-    pub fn promote_standby(&mut self) -> Maybe<SocketAddr> {
+    public fn promote_standby(&mut self) -> Maybe<SocketAddr> {
         match self.standby.clone() {
             Some(s) => {
                 if s.is_validated() {
@@ -262,9 +262,9 @@ implement PathManager {
         }
     }
 
-    pub fn active(&self) -> &Path { &self.active }
-    pub fn active_mut(&mut self) -> &mut Path { &mut self.active }
-    pub fn standby_mut(&mut self) -> Maybe<&mut Path> {
+    public fn active(&self) -> &Path { &self.active }
+    public fn active_mut(&mut self) -> &mut Path { &mut self.active }
+    public fn standby_mut(&mut self) -> Maybe<&mut Path> {
         match &mut self.standby {
             Some(s) => Some(s),
             None => None,

@@ -36,7 +36,7 @@ mount core.net.h3.qpack.static_table as stat;
 mount core.net.h3.qpack.decoder.{HeaderField};
 
 /// Encode a field section into a fresh byte vector.
-pub fn encode_field_section(headers: &List<HeaderField>) -> List<Byte> {
+public fn encode_field_section(headers: &List<HeaderField>) -> List<Byte> {
     let mut out: List<Byte> = [];
 
     // Required Insert Count = 0 (§4.5.1 — `Encoded Required Insert Count = 0`).

@@ -60,7 +60,7 @@ public type AssemblyBudget is {
 };
 
 impl AssemblyBudget {
-    pub fn from_caps(
+    public fn from_caps(
         packet_room: Int,
         cc: &dyn CongestionCtrl,
         flow: &ConnFlowControl,

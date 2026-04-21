@@ -82,7 +82,7 @@ public type RetryAcceptOutcome is {
 
 /// Verify the Retry packet's integrity tag against the pseudo-packet
 /// (§5.8), then derive fresh Initial keys seeded from the new DCID.
-pub fn accept_retry(
+public fn accept_retry(
     retry: &RetryPacket,
     /// The ODCID we originally sent in the first ClientHello Initial.
     original_dcid:     &ConnectionId,
@@ -149,7 +149,7 @@ pub fn accept_retry(
 ///     (becomes the client's new peer-DCID when it retries).
 ///   * token — server-chosen retry token (opaque blob; server
 ///     re-validates on the retried Initial).
-pub fn build_server_retry(
+public fn build_server_retry(
     version:      UInt32,
     client_dcid:  &ConnectionId,
     retry_scid:   &ConnectionId,
@@ -206,7 +206,7 @@ pub fn build_server_retry(
 ///
 /// Returns `Ok(())` when the transport-parameters match, `Err` on
 /// forgery / mismatch — caller aborts with TRANSPORT_PARAMETER_ERROR.
-pub fn verify_tp_retry_sentinels(
+public fn verify_tp_retry_sentinels(
     server_original_dcid:   &Maybe<ConnectionId>,
     server_retry_src_cid:   &Maybe<ConnectionId>,
     client_sent_original:   &ConnectionId,

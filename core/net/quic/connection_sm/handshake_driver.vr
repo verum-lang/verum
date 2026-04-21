@@ -67,13 +67,13 @@ public type CryptoStream is {
 type CryptoRun is { start: UInt64, bytes: List<Byte> };
 
 implement CryptoStream {
-    pub fn new() -> CryptoStream {
+    public fn new() -> CryptoStream {
         CryptoStream { next_readable: 0_u64, runs: [], tx_offset: 0_u64 }
     }
 
     /// Insert a CRYPTO frame chunk. Idempotent on retransmit — already-
     /// delivered bytes are silently dropped.
-    pub fn insert(&mut self, offset: UInt64, data: &[Byte]) {
+    public fn insert(&mut self, offset: UInt64, data: &[Byte]) {
         if data.len() == 0 { return; }
         let end = offset + (data.len() as UInt64);
         // Early-drop everything below next_readable.
@@ -121,7 +121,7 @@ implement CryptoStream {
 
     /// Drain the contiguous readable prefix. Returns empty when
     /// nothing new is available.
-    pub fn drain_readable(&mut self) -> List<Byte> {
+    public fn drain_readable(&mut self) -> List<Byte> {
         let mut out: List<Byte> = [];
         while self.runs.len() > 0 && self.runs[0].start == self.next_readable {
             let head = &self.runs[0];
@@ -137,7 +137,7 @@ implement CryptoStream {
         out
     }
 
-    pub fn reserve_outbound(&mut self, n: Int) -> UInt64 {
+    public fn reserve_outbound(&mut self, n: Int) -> UInt64 {
         let off = self.tx_offset;
         self.tx_offset = self.tx_offset + (n as UInt64);
         off
@@ -168,7 +168,7 @@ public type HandshakeOutput is
     | ServerHandshakeOutput(core.net.tls13.handshake.server_sm.ServerConnected);
 
 implement HandshakeDriver {
-    pub fn client(sm: ClientSm) -> HandshakeDriver {
+    public fn client(sm: ClientSm) -> HandshakeDriver {
         HandshakeDriver {
             role:       HandshakeRole.Client(sm),
             initial:    CryptoStream.new(),
@@ -179,7 +179,7 @@ implement HandshakeDriver {
         }
     }
 
-    pub fn server(sm: ServerSm) -> HandshakeDriver {
+    public fn server(sm: ServerSm) -> HandshakeDriver {
         HandshakeDriver {
             role:       HandshakeRole.Server(sm),
             initial:    CryptoStream.new(),
@@ -192,7 +192,7 @@ implement HandshakeDriver {
 
     /// Emit initial ClientHello (client only). After this, caller
     /// pumps `on_crypto_chunk` with peer responses.
-    pub fn start_client(&mut self) -> Result<(), TlsError> {
+    public fn start_client(&mut self) -> Result<(), TlsError> {
         match self.role.clone() {
             HandshakeRole.Client(sm) => {
                 let (sm2, wire) = sm.start()?;
@@ -207,7 +207,7 @@ implement HandshakeDriver {
     /// Ingest a CRYPTO chunk from a given PN space. Retries
     /// reassembly on that space and feeds the TLS SM if a full
     /// handshake message is now available.
-    pub fn on_crypto_chunk(&mut self, chunk: &CryptoChunk) -> Result<(), TlsError> {
+    public fn on_crypto_chunk(&mut self, chunk: &CryptoChunk) -> Result<(), TlsError> {
         let space = chunk.space.clone();
         let stream = self.stream_for(&space);
         stream.insert(chunk.offset, chunk.data.as_slice());
@@ -303,7 +303,7 @@ implement HandshakeDriver {
     /// Pull all queued outbound CRYPTO frames by PN space. Returns
     /// them batched so the caller can route to the right packet type
     /// (Initial / Handshake packets for their respective frames).
-    pub fn take_outbound(&mut self) -> List<(PnSpaceKind, Frame)> {
+    public fn take_outbound(&mut self) -> List<(PnSpaceKind, Frame)> {
         let mut out: List<(PnSpaceKind, Frame)> = [];
         while self.outbound.len() > 0 {
             let item = self.outbound.remove(0);
@@ -312,11 +312,11 @@ implement HandshakeDriver {
         out
     }
 
-    pub fn handshake_complete(&self) -> Bool {
+    public fn handshake_complete(&self) -> Bool {
         match &self.connected_secrets { Some(_) => true, None => false }
     }
 
-    pub fn completion(&self) -> Maybe<HandshakeOutput> {
+    public fn completion(&self) -> Maybe<HandshakeOutput> {
         self.connected_secrets.clone()
     }
 }

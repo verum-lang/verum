@@ -88,14 +88,14 @@ public type ClientSession is {
 
 impl ClientSession {
     /// Is the ticket still valid given current time?
-    pub fn is_fresh(&self, now: Instant) -> Bool {
+    public fn is_fresh(&self, now: Instant) -> Bool {
         let elapsed = now.duration_since(self.created_at.clone())
             .unwrap_or_else(|| Duration.from_secs(0));
         elapsed.as_secs() <= (self.ticket_lifetime_sec as Int)
     }
 
     /// Elapsed-since-issue in milliseconds, bounded to u32.
-    pub fn obfuscated_age(&self, now: Instant) -> UInt32 {
+    public fn obfuscated_age(&self, now: Instant) -> UInt32 {
         let elapsed = now.duration_since(self.created_at.clone())
             .unwrap_or_else(|| Duration.from_secs(0));
         let ms = elapsed.as_millis() as UInt64;
@@ -105,7 +105,7 @@ impl ClientSession {
     /// Derive the resumption PSK per RFC 8446 §4.6.1 formula:
     ///   PSK = HKDF-Expand-Label(resumption_master,
     ///                           "resumption", ticket_nonce, Hash.length)
-    pub fn derive_psk(&self) -> Result<List<Byte>, HkdfError> {
+    public fn derive_psk(&self) -> Result<List<Byte>, HkdfError> {
         let hash = self.cipher_suite.hash_kind();
         let out_len = match hash {
             HashKind.Sha256 => 32,
@@ -141,7 +141,7 @@ public type SessionTicketKey is {
 
 impl SessionTicketKey {
     /// Generate a fresh STEK from the CSPRNG.
-    pub fn generate() -> SessionTicketKey {
+    public fn generate() -> SessionTicketKey {
         let mut key: [Byte; 16] = [0_u8; 16];
         let mut kid: [Byte; 8]  = [0_u8; 8];
         fill_secure(&mut key);
@@ -188,7 +188,7 @@ public type TicketError is
     | Expired
     | HkdfFailure;
 
-pub fn issue_ticket(
+public fn issue_ticket(
     stek: &SessionTicketKey,
     plaintext: &ServerTicketPlaintext,
 ) -> Result<List<Byte>, TicketError> {
@@ -219,7 +219,7 @@ pub fn issue_ticket(
     Ok(out)
 }
 
-pub fn decrypt_ticket(
+public fn decrypt_ticket(
     stek: &SessionTicketKey,
     wire: &[Byte],
 ) -> Result<ServerTicketPlaintext, TicketError> {
@@ -349,7 +349,7 @@ fn decode_plaintext(buf: &[Byte]) -> Result<ServerTicketPlaintext, TicketError> 
 
 /// Construct a ClientSession from a newly-arrived NewSessionTicket
 /// message + handshake context.
-pub fn session_from_new_ticket(
+public fn session_from_new_ticket(
     ticket:              List<Byte>,
     ticket_nonce:        List<Byte>,
     ticket_age_add:      UInt32,
@@ -386,11 +386,11 @@ public type ClientSessionStore is {
 };
 
 impl ClientSessionStore {
-    pub fn new(capacity: Int) -> ClientSessionStore {
+    public fn new(capacity: Int) -> ClientSessionStore {
         ClientSessionStore { entries: [], capacity: capacity }
     }
 
-    pub fn insert(&mut self, authority: Text, session: ClientSession) {
+    public fn insert(&mut self, authority: Text, session: ClientSession) {
         while self.entries.len() >= self.capacity {
             let _ = self.entries.remove(0);
         }
@@ -399,7 +399,7 @@ impl ClientSessionStore {
 
     /// Consume one fresh session for the given authority (removes from
     /// store). Returns None when no fresh match is present.
-    pub fn take(&mut self, authority: &Text, now: Instant) -> Maybe<ClientSession> {
+    public fn take(&mut self, authority: &Text, now: Instant) -> Maybe<ClientSession> {
         let mut i: Int = 0;
         while i < self.entries.len() {
             let (auth, sess) = &self.entries[i];
@@ -417,7 +417,7 @@ impl ClientSessionStore {
         None
     }
 
-    pub fn len(&self) -> Int { self.entries.len() }
+    public fn len(&self) -> Int { self.entries.len() }
 }
 
 fn text_eq(a: &Text, b: &Text) -> Bool { a.as_bytes() == b.as_bytes() }

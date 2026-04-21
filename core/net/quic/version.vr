@@ -21,9 +21,9 @@ module core.net.quic.version;
 
 mount core.*;
 
-pub const VERSION_NEGOTIATION: UInt32 = 0x00000000_u32;
-pub const VERSION_1:           UInt32 = 0x00000001_u32;
-pub const VERSION_2:           UInt32 = 0x6B3343CF_u32;
+public const VERSION_NEGOTIATION: UInt32 = 0x00000000_u32;
+public const VERSION_1:           UInt32 = 0x00000001_u32;
+public const VERSION_2:           UInt32 = 0x6B3343CF_u32;
 
 /// Is this a QUIC version recognised by warp? Currently v1 only.
 public fn is_supported(v: UInt32) -> Bool {

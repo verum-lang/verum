@@ -58,12 +58,12 @@ public type TlsTransport is {
 };
 
 implement TlsTransport {
-    pub fn new(inner: TlsStream, peer: SocketAddr) -> TlsTransport {
+    public fn new(inner: TlsStream, peer: SocketAddr) -> TlsTransport {
         TlsTransport { inner: inner, peer: peer }
     }
 
     /// Negotiated ALPN protocol (post-handshake).
-    pub fn alpn_protocol(&self) -> Maybe<&Text> {
+    public fn alpn_protocol(&self) -> Maybe<&Text> {
         self.inner.alpn_protocol()
     }
 
@@ -134,7 +134,7 @@ public type TlsHttp1Runner<H> is {
 };
 
 implement<H: Handler + Send + Sync + 'static> TlsHttp1Runner<H> {
-    pub fn new(
+    public fn new(
         app: Heap<H>,
         token: CancellationToken,
         draining: Shared<AtomicBool>,

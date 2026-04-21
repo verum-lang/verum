@@ -67,13 +67,13 @@ public type Principal is {
 implement Principal {
     /// Does this principal's SPIFFE ID match a prefix pattern like
     /// "spiffe://prod/*/sa/admin"? Implements §8.13 example.
-    pub fn matches(&self, pattern: &Text) -> Bool {
+    public fn matches(&self, pattern: &Text) -> Bool {
         spiffe_pattern_matches(&self.spiffe_id.to_uri(), pattern)
     }
 
-    pub fn spiffe_id(&self) -> &SpiffeId { &self.spiffe_id }
-    pub fn expires_at(&self) -> Instant { self.expires_at }
-    pub fn claims(&self) -> &Map<Text, Text> { &self.claims }
+    public fn spiffe_id(&self) -> &SpiffeId { &self.spiffe_id }
+    public fn expires_at(&self) -> Instant { self.expires_at }
+    public fn claims(&self) -> &Map<Text, Text> { &self.claims }
 }
 
 /// Match `id` against a SPIFFE URI with `*` segment wildcards. `*` is
@@ -127,11 +127,11 @@ public type SpiffeAuthLayer<P> is {
 };
 
 implement<P: TrustBundleProvider + Send + Sync + 'static> SpiffeAuthLayer<P> {
-    pub fn jwt(bundles: P) -> SpiffeAuthLayer<P> {
+    public fn jwt(bundles: P) -> SpiffeAuthLayer<P> {
         SpiffeAuthLayer { mode: AuthMode.Jwt, bundles: Heap.new(bundles) }
     }
 
-    pub fn mtls(bundles: P) -> SpiffeAuthLayer<P> {
+    public fn mtls(bundles: P) -> SpiffeAuthLayer<P> {
         SpiffeAuthLayer { mode: AuthMode.Mtls, bundles: Heap.new(bundles) }
     }
 }
@@ -191,7 +191,7 @@ public type AuthRejection is
     | UntrustedSource;
 
 implement AuthRejection {
-    pub fn http_status(&self) -> Int {
+    public fn http_status(&self) -> Int {
         match self {
             MissingCredential   => 401,
             InvalidCredential(_) => 401,
@@ -200,7 +200,7 @@ implement AuthRejection {
         }
     }
 
-    pub fn public_message(&self) -> Text {
+    public fn public_message(&self) -> Text {
         match self {
             MissingCredential   => "missing credential",
             InvalidCredential(_) => "invalid credential",

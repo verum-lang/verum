@@ -68,7 +68,7 @@ public type BufferPoolConfig is {
 };
 
 implement BufferPoolConfig {
-    pub fn default() -> BufferPoolConfig {
+    public fn default() -> BufferPoolConfig {
         BufferPoolConfig {
             count: 256,
             buf_size: 16 * 1024,
@@ -76,15 +76,15 @@ implement BufferPoolConfig {
         }
     }
 
-    pub fn with_count(self, n: Int) -> BufferPoolConfig {
+    public fn with_count(self, n: Int) -> BufferPoolConfig {
         BufferPoolConfig { count: n, ..self }
     }
 
-    pub fn with_buf_size(self, n: Int) -> BufferPoolConfig {
+    public fn with_buf_size(self, n: Int) -> BufferPoolConfig {
         BufferPoolConfig { buf_size: n, ..self }
     }
 
-    pub fn with_io_uring(self, enabled: Bool) -> BufferPoolConfig {
+    public fn with_io_uring(self, enabled: Bool) -> BufferPoolConfig {
         BufferPoolConfig { try_register_iouring: enabled, ..self }
     }
 }
@@ -128,7 +128,7 @@ public type BufferPool is {
 };
 
 implement BufferPool {
-    pub fn new(config: BufferPoolConfig) -> BufferPool {
+    public fn new(config: BufferPoolConfig) -> BufferPool {
         if config.count <= 0 || config.buf_size < 4096 {
             panic("BufferPool: count > 0 and buf_size >= 4096 required");
         }
@@ -157,13 +157,13 @@ implement BufferPool {
         }
     }
 
-    pub fn default() -> BufferPool {
+    public fn default() -> BufferPool {
         Self.new(BufferPoolConfig.default())
     }
 
     /// Try to lease a buffer. Returns `None` if the pool is exhausted
     /// — caller is expected to fall back to on-heap List<Byte>.
-    pub fn acquire(&self) -> Maybe<BufferHandle> {
+    public fn acquire(&self) -> Maybe<BufferHandle> {
         self.state.acquires_total.fetch_add(1, MemoryOrdering.AcqRel);
         let mut free = self.state.free_indices.lock();
         match free.pop() {
@@ -178,20 +178,20 @@ implement BufferPool {
         }
     }
 
-    pub fn iouring_registered(&self) -> Bool {
+    public fn iouring_registered(&self) -> Bool {
         self.state.iouring_registered
     }
 
-    pub fn free_count(&self) -> Int {
+    public fn free_count(&self) -> Int {
         let free = self.state.free_indices.lock();
         free.len()
     }
 
-    pub fn acquires_total(&self) -> Int {
+    public fn acquires_total(&self) -> Int {
         self.state.acquires_total.load(MemoryOrdering.Acquire)
     }
 
-    pub fn misses_total(&self) -> Int {
+    public fn misses_total(&self) -> Int {
         self.state.misses_total.load(MemoryOrdering.Acquire)
     }
 }
@@ -214,7 +214,7 @@ public type BufferHandle is {
 implement BufferHandle {
     /// Returns (start, len) into the pool's slab for this buffer.
     /// Use with `slab_mut(pool)` for direct write access.
-    pub fn slot(&self) -> (Int, Int) {
+    public fn slot(&self) -> (Int, Int) {
         let size = self.pool.config.buf_size;
         (self.index * size, size)
     }
@@ -222,13 +222,13 @@ implement BufferHandle {
     /// Zero-based buffer index — this IS the `IOSQE_BUFFER_SELECT`
     /// handle that io_uring expects once the intrinsic path is
     /// wired up.
-    pub fn fd_offset(&self) -> Int {
+    public fn fd_offset(&self) -> Int {
         self.index
     }
 
     /// Write bytes into the buffer starting at offset 0. Returns the
     /// number actually written (capped at buf_size).
-    pub fn write_at(&mut self, data: &[Byte]) -> Int {
+    public fn write_at(&mut self, data: &[Byte]) -> Int {
         let (start, size) = self.slot();
         let n = if data.len() < size { data.len() } else { size };
         // Mutex-lock slab only long enough to copy — low contention

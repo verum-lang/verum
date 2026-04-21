@@ -32,7 +32,7 @@ mount core.net.h3.qpack.decoder.{HeaderField};
 public type H3Method is Get | Post | Put | Delete | Head | Options | Patch | Connect | Other(Text);
 
 impl H3Method {
-    pub fn as_text(&self) -> Text {
+    public fn as_text(&self) -> Text {
         match self {
             H3Method.Get     => Text.from_str("GET"),
             H3Method.Post    => Text.from_str("POST"),
@@ -46,7 +46,7 @@ impl H3Method {
         }
     }
 
-    pub fn from_text(s: &Text) -> H3Method {
+    public fn from_text(s: &Text) -> H3Method {
         match s.as_bytes() {
             b"GET"     => H3Method.Get,
             b"POST"    => H3Method.Post,
@@ -80,7 +80,7 @@ public type H3Response is {
 };
 
 impl H3Request {
-    pub fn get(authority: Text, path: Text) -> H3Request {
+    public fn get(authority: Text, path: Text) -> H3Request {
         H3Request {
             method: H3Method.Get,
             scheme: Text.from_str("https"),
@@ -91,7 +91,7 @@ impl H3Request {
         }
     }
 
-    pub fn post(authority: Text, path: Text, body: List<Byte>) -> H3Request {
+    public fn post(authority: Text, path: Text, body: List<Byte>) -> H3Request {
         H3Request {
             method: H3Method.Post,
             scheme: Text.from_str("https"),
@@ -102,7 +102,7 @@ impl H3Request {
         }
     }
 
-    pub fn with_header(mut self, name: Text, value: Text) -> H3Request {
+    public fn with_header(mut self, name: Text, value: Text) -> H3Request {
         self.headers.push(HeaderField { name: name, value: value });
         self
     }
@@ -111,7 +111,7 @@ impl H3Request {
     /// headers, ready for QPACK encoding. Per RFC 9114 §4.3.1,
     /// pseudo-headers MUST appear in the field section before any
     /// regular headers.
-    pub fn to_field_list(&self) -> List<HeaderField> {
+    public fn to_field_list(&self) -> List<HeaderField> {
         let mut out: List<HeaderField> = [];
         out.push(HeaderField { name: Text.from_str(":method"),    value: self.method.as_text() });
         out.push(HeaderField { name: Text.from_str(":scheme"),    value: self.scheme.clone() });
@@ -127,7 +127,7 @@ impl H3Request {
 }
 
 impl H3Response {
-    pub fn ok(body: List<Byte>) -> H3Response {
+    public fn ok(body: List<Byte>) -> H3Response {
         H3Response {
             status: 200_u16,
             headers: [],
@@ -136,7 +136,7 @@ impl H3Response {
         }
     }
 
-    pub fn status(code: UInt16) -> H3Response {
+    public fn status(code: UInt16) -> H3Response {
         H3Response {
             status: code,
             headers: [],
@@ -145,12 +145,12 @@ impl H3Response {
         }
     }
 
-    pub fn with_header(mut self, name: Text, value: Text) -> H3Response {
+    public fn with_header(mut self, name: Text, value: Text) -> H3Response {
         self.headers.push(HeaderField { name: name, value: value });
         self
     }
 
-    pub fn to_field_list(&self) -> List<HeaderField> {
+    public fn to_field_list(&self) -> List<HeaderField> {
         let mut out: List<HeaderField> = [];
         let s = format_status(self.status);
         out.push(HeaderField { name: Text.from_str(":status"), value: s });
@@ -177,7 +177,7 @@ fn format_status(code: UInt16) -> Text {
 // Field-list → structured parsers
 // =============================================================================
 
-pub fn parse_request_from_fields(fields: &List<HeaderField>, body: List<Byte>) -> Maybe<H3Request> {
+public fn parse_request_from_fields(fields: &List<HeaderField>, body: List<Byte>) -> Maybe<H3Request> {
     let mut method:    Maybe<Text> = None;
     let mut scheme:    Maybe<Text> = None;
     let mut authority: Maybe<Text> = None;
@@ -211,7 +211,7 @@ pub fn parse_request_from_fields(fields: &List<HeaderField>, body: List<Byte>) -
     }
 }
 
-pub fn parse_response_from_fields(fields: &List<HeaderField>, body: List<Byte>) -> Maybe<H3Response> {
+public fn parse_response_from_fields(fields: &List<HeaderField>, body: List<Byte>) -> Maybe<H3Response> {
     let mut status_text: Maybe<Text> = None;
     let mut headers:     List<HeaderField> = [];
     let mut i: Int = 0;

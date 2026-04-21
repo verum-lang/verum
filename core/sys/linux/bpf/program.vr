@@ -161,7 +161,7 @@ public fn attach_tc(
 }
 
 /// Attach to a cgroup v2 at the given hook.
-pub fn attach_cgroup(
+public fn attach_cgroup(
     program: &ProgramDescriptor,
     cgroup_fd: FileDesc,
     attach_type: AttachType,
@@ -170,7 +170,7 @@ pub fn attach_cgroup(
 }
 
 /// Attach to a static kernel tracepoint (e.g. "syscalls:sys_enter_open").
-pub fn attach_tracepoint(
+public fn attach_tracepoint(
     program: &ProgramDescriptor,
     category: &Text,
     name: &Text,
@@ -179,7 +179,7 @@ pub fn attach_tracepoint(
 }
 
 /// Attach to a kprobe / kretprobe.
-pub fn attach_kprobe(
+public fn attach_kprobe(
     program: &ProgramDescriptor,
     symbol: &Text,
     return_probe: Bool,

@@ -39,14 +39,14 @@ public type QpackEncoder is {
 }
 
 implement QpackEncoder {
-    pub fn new(max_table_capacity: UInt64, max_blocked_streams: UInt64) -> QpackEncoder {
+    public fn new(max_table_capacity: UInt64, max_blocked_streams: UInt64) -> QpackEncoder {
         @intrinsic("verum.qpack.encoder_new", max_table_capacity, max_blocked_streams)
     }
 
     /// Encode a header block for `stream_id`. Writes the block body to
     /// `block_out` and any required encoder-stream updates to
     /// `encoder_stream_out`.
-    pub fn encode(
+    public fn encode(
         &self,
         stream_id: UInt64,
         headers: &List<HeaderField>,
@@ -59,7 +59,7 @@ implement QpackEncoder {
 
     /// Feed an incoming decoder-stream update (peer's acks /
     /// insert-count-increments / stream-cancellations).
-    pub fn feed_decoder_stream(&self, data: &[Byte]) -> Result<(), QpackError> {
+    public fn feed_decoder_stream(&self, data: &[Byte]) -> Result<(), QpackError> {
         @intrinsic("verum.qpack.encoder_feed_decoder_stream", self.handle, data)
     }
 }
@@ -79,14 +79,14 @@ public type QpackDecoder is {
 }
 
 implement QpackDecoder {
-    pub fn new(max_table_capacity: UInt64, max_blocked_streams: UInt64) -> QpackDecoder {
+    public fn new(max_table_capacity: UInt64, max_blocked_streams: UInt64) -> QpackDecoder {
         @intrinsic("verum.qpack.decoder_new", max_table_capacity, max_blocked_streams)
     }
 
     /// Decode a single header block. May return `Blocked` if the block
     /// references dynamic-table entries that have not yet arrived over
     /// the encoder stream.
-    pub fn decode(
+    public fn decode(
         &self,
         stream_id: UInt64,
         block: &[Byte],
@@ -95,13 +95,13 @@ implement QpackDecoder {
     }
 
     /// Feed an incoming encoder-stream update.
-    pub fn feed_encoder_stream(&self, data: &[Byte]) -> Result<(), QpackError> {
+    public fn feed_encoder_stream(&self, data: &[Byte]) -> Result<(), QpackError> {
         @intrinsic("verum.qpack.decoder_feed_encoder_stream", self.handle, data)
     }
 
     /// Produce pending decoder-stream bytes for transmission (acks /
     /// stream-cancellations / insert-count-increments).
-    pub fn take_decoder_stream(&self, out: &mut List<Byte>) -> Int {
+    public fn take_decoder_stream(&self, out: &mut List<Byte>) -> Int {
         @intrinsic("verum.qpack.decoder_take_decoder_stream", self.handle, out) as Int
     }
 }

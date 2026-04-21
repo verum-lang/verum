@@ -68,7 +68,7 @@ public type HkdfError is
 // =============================================================================
 
 /// Maximum expand output — RFC 5869 §2.3: 255 × HashLen.
-pub const MAX_EXPAND_OUTPUT_256: Int = 255 * 32;
+public const MAX_EXPAND_OUTPUT_256: Int = 255 * 32;
 
 public fn hkdf_extract_sha256(salt: &[Byte], ikm: &[Byte]) -> [Byte; 32] {
     if salt.len() == 0 {
@@ -134,7 +134,7 @@ public fn hkdf_sha256(
 // SHA-384 variant
 // =============================================================================
 
-pub const MAX_EXPAND_OUTPUT_384: Int = 255 * 48;
+public const MAX_EXPAND_OUTPUT_384: Int = 255 * 48;
 
 public fn hkdf_extract_sha384(salt: &[Byte], ikm: &[Byte]) -> [Byte; 48] {
     if salt.len() == 0 {
@@ -199,7 +199,7 @@ public fn hkdf_sha384(
 // SHA-512 variant
 // =============================================================================
 
-pub const MAX_EXPAND_OUTPUT_512: Int = 255 * 64;
+public const MAX_EXPAND_OUTPUT_512: Int = 255 * 64;
 
 public fn hkdf_extract_sha512(salt: &[Byte], ikm: &[Byte]) -> [Byte; 64] {
     if salt.len() == 0 {

@@ -76,13 +76,13 @@ public type MapDescriptor is {
 // CRUD
 // =============================================================================
 
-pub fn create_map(config: &MapConfig) -> Result<MapDescriptor, BpfError> {
+public fn create_map(config: &MapConfig) -> Result<MapDescriptor, BpfError> {
     @intrinsic("verum.bpf.create_map", config)
 }
 
 /// Look up `key` in the map. `value_out.len()` must equal
 /// `map.value_size`.
-pub fn map_lookup(
+public fn map_lookup(
     map: &MapDescriptor,
     key: &[Byte],
     value_out: &mut [Byte],
@@ -94,7 +94,7 @@ pub fn map_lookup(
 ///   0   — BPF_ANY (insert or overwrite)
 ///   1   — BPF_NOEXIST (insert only; fail if present)
 ///   2   — BPF_EXIST (update only; fail if absent)
-pub fn map_update(
+public fn map_update(
     map: &MapDescriptor,
     key: &[Byte],
     value: &[Byte],
@@ -103,13 +103,13 @@ pub fn map_update(
     @intrinsic("verum.bpf.map_update", map, key, value, flags)
 }
 
-pub fn map_delete(map: &MapDescriptor, key: &[Byte]) -> Result<(), BpfError> {
+public fn map_delete(map: &MapDescriptor, key: &[Byte]) -> Result<(), BpfError> {
     @intrinsic("verum.bpf.map_delete", map, key)
 }
 
 /// Iterate keys. Returns a snapshot of all keys at call time (may be
 /// stale by the time the caller finishes). For concurrent maps prefer
 /// the batch APIs in newer kernels.
-pub fn map_iterate(map: &MapDescriptor) -> Result<List<List<Byte>>, BpfError> {
+public fn map_iterate(map: &MapDescriptor) -> Result<List<List<Byte>>, BpfError> {
     @intrinsic("verum.bpf.map_iterate", map)
 }

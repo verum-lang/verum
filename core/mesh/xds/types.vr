@@ -16,25 +16,25 @@ public type TypeUrl is {
 }
 
 implement TypeUrl {
-    pub const LISTENER: &'static Text =
+    public const LISTENER: &'static Text =
         "type.googleapis.com/envoy.config.listener.v3.Listener";
-    pub const CLUSTER: &'static Text =
+    public const CLUSTER: &'static Text =
         "type.googleapis.com/envoy.config.cluster.v3.Cluster";
-    pub const ROUTE_CONFIGURATION: &'static Text =
+    public const ROUTE_CONFIGURATION: &'static Text =
         "type.googleapis.com/envoy.config.route.v3.RouteConfiguration";
-    pub const CLUSTER_LOAD_ASSIGNMENT: &'static Text =
+    public const CLUSTER_LOAD_ASSIGNMENT: &'static Text =
         "type.googleapis.com/envoy.config.endpoint.v3.ClusterLoadAssignment";
-    pub const SECRET: &'static Text =
+    public const SECRET: &'static Text =
         "type.googleapis.com/envoy.extensions.transport_sockets.tls.v3.Secret";
-    pub const SCOPED_ROUTE_CONFIGURATION: &'static Text =
+    public const SCOPED_ROUTE_CONFIGURATION: &'static Text =
         "type.googleapis.com/envoy.config.route.v3.ScopedRouteConfiguration";
-    pub const VIRTUAL_HOST: &'static Text =
+    public const VIRTUAL_HOST: &'static Text =
         "type.googleapis.com/envoy.config.route.v3.VirtualHost";
-    pub const RUNTIME: &'static Text =
+    public const RUNTIME: &'static Text =
         "type.googleapis.com/envoy.service.runtime.v3.Runtime";
 
-    pub fn new(url: Text) -> TypeUrl { TypeUrl { url: url } }
-    pub fn value(&self) -> &Text { &self.url }
+    public fn new(url: Text) -> TypeUrl { TypeUrl { url: url } }
+    public fn value(&self) -> &Text { &self.url }
 }
 
 // =============================================================================
@@ -46,12 +46,12 @@ public type ResourceName is {
 }
 
 implement ResourceName {
-    pub fn new(name: Text) -> ResourceName { ResourceName { name: name } }
-    pub fn value(&self) -> &Text { &self.name }
+    public fn new(name: Text) -> ResourceName { ResourceName { name: name } }
+    public fn value(&self) -> &Text { &self.name }
 
     /// "xdstp://authority/type/path?context" resource names per
     /// https://github.com/cncf/xds/blob/main/proposals/TP1-xds-transport-next.md
-    pub fn xdstp(authority: &Text, type_: &Text, path: &Text) -> ResourceName {
+    public fn xdstp(authority: &Text, type_: &Text, path: &Text) -> ResourceName {
         let mut s = Text.with_capacity(9 + authority.len() + 1 + type_.len() + 1 + path.len());
         s.push_str("xdstp://");
         s.push_str(authority);
@@ -79,7 +79,7 @@ public type Node is {
 }
 
 implement Node {
-    pub fn new(id: Text, cluster: Text) -> Node {
+    public fn new(id: Text, cluster: Text) -> Node {
         Node {
             id: id,
             cluster: cluster,
@@ -92,7 +92,7 @@ implement Node {
         }
     }
 
-    pub fn with_locality(
+    public fn with_locality(
         mut self,
         region: Text,
         zone: Text,
@@ -104,13 +104,13 @@ implement Node {
         self
     }
 
-    pub fn with_user_agent(mut self, name: Text, version: Text) -> Node {
+    public fn with_user_agent(mut self, name: Text, version: Text) -> Node {
         self.user_agent_name = name;
         self.user_agent_version = version;
         self
     }
 
-    pub fn with_metadata_json(mut self, json: Text) -> Node {
+    public fn with_metadata_json(mut self, json: Text) -> Node {
         self.metadata_json = json; self
     }
 }
@@ -140,7 +140,7 @@ public type AdsConfig is {
 }
 
 implement AdsConfig {
-    pub fn new(address: Text, node: Node) -> AdsConfig {
+    public fn new(address: Text, node: Node) -> AdsConfig {
         AdsConfig {
             address: address,
             node: node,
@@ -153,15 +153,15 @@ implement AdsConfig {
         }
     }
 
-    pub fn with_auth(mut self, auth: AdsAuth) -> AdsConfig {
+    public fn with_auth(mut self, auth: AdsAuth) -> AdsConfig {
         self.auth = auth; self
     }
 
-    pub fn with_use_delta(mut self, delta: Bool) -> AdsConfig {
+    public fn with_use_delta(mut self, delta: Bool) -> AdsConfig {
         self.use_delta = delta; self
     }
 
-    pub fn with_keepalive(mut self, interval: Duration) -> AdsConfig {
+    public fn with_keepalive(mut self, interval: Duration) -> AdsConfig {
         self.keepalive_interval = interval; self
     }
 }

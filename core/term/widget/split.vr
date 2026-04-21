@@ -189,7 +189,7 @@ implement SplitState {
 
     /// Keyboard resize: Ctrl+Arrow moves the divider by `step` cells.
     /// Returns `true` iff the key was handled.
-    pub fn handle_resize_key(
+    public fn handle_resize_key(
         &mut self,
         split: &Split,
         area: Rect,
@@ -224,7 +224,7 @@ implement SplitState {
     /// Mouse drag support — call with every mouse event to track the divider.
     /// Returns `true` iff the event hit the divider (so the caller knows to
     /// skip pane routing).
-    pub fn handle_mouse(
+    public fn handle_mouse(
         &mut self,
         split: &Split,
         area: Rect,

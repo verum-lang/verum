@@ -93,7 +93,7 @@ public type WasmCapabilities is {
 };
 
 implement WasmCapabilities {
-    pub fn deny_all() -> WasmCapabilities {
+    public fn deny_all() -> WasmCapabilities {
         WasmCapabilities {
             read_request_headers: false,
             read_request_body: false,
@@ -103,7 +103,7 @@ implement WasmCapabilities {
         }
     }
 
-    pub fn default() -> WasmCapabilities {
+    public fn default() -> WasmCapabilities {
         WasmCapabilities {
             read_request_headers: true,
             read_request_body: false,
@@ -127,7 +127,7 @@ implement Clone for WasmCapabilities {
 }
 
 implement WasmFilterConfig {
-    pub fn default() -> WasmFilterConfig {
+    public fn default() -> WasmFilterConfig {
         WasmFilterConfig {
             cpu_quota_ms: 10,
             memory_bytes: 8 * 1024 * 1024,
@@ -136,19 +136,19 @@ implement WasmFilterConfig {
         }
     }
 
-    pub fn with_cpu_quota_ms(self, ms: Int) -> WasmFilterConfig {
+    public fn with_cpu_quota_ms(self, ms: Int) -> WasmFilterConfig {
         WasmFilterConfig { cpu_quota_ms: ms, ..self }
     }
 
-    pub fn with_memory_bytes(self, n: Int) -> WasmFilterConfig {
+    public fn with_memory_bytes(self, n: Int) -> WasmFilterConfig {
         WasmFilterConfig { memory_bytes: n, ..self }
     }
 
-    pub fn with_instruction_limit(self, n: Int) -> WasmFilterConfig {
+    public fn with_instruction_limit(self, n: Int) -> WasmFilterConfig {
         WasmFilterConfig { instruction_limit: n, ..self }
     }
 
-    pub fn with_capabilities(self, caps: WasmCapabilities) -> WasmFilterConfig {
+    public fn with_capabilities(self, caps: WasmCapabilities) -> WasmFilterConfig {
         WasmFilterConfig { capabilities: caps, ..self }
     }
 }
@@ -196,7 +196,7 @@ implement WasmFilter {
     /// Load a Wasm module from its raw bytes. Parses + validates
     /// (basic wasm-header / import-surface check); actual
     /// instantiation is deferred until first invocation.
-    pub fn load_from_bytes(bytes: List<Byte>, config: WasmFilterConfig)
+    public fn load_from_bytes(bytes: List<Byte>, config: WasmFilterConfig)
         -> Result<WasmFilter, WasmFilterError>
     {
         // Surface-level sanity check: Wasm magic \0asm + version 1.
@@ -218,15 +218,15 @@ implement WasmFilter {
         })
     }
 
-    pub fn invocations(&self) -> Int {
+    public fn invocations(&self) -> Int {
         self.invocations.load(MemoryOrdering.Acquire)
     }
 
-    pub fn caps_exceeded(&self) -> Int {
+    public fn caps_exceeded(&self) -> Int {
         self.caps_exceeded.load(MemoryOrdering.Acquire)
     }
 
-    pub fn skipped_no_runtime(&self) -> Int {
+    public fn skipped_no_runtime(&self) -> Int {
         self.skipped_no_runtime.load(MemoryOrdering.Acquire)
     }
 }
@@ -252,7 +252,7 @@ public type WasmFilterLayer is {
 };
 
 implement WasmFilterLayer {
-    pub fn new(filter: WasmFilter) -> WasmFilterLayer {
+    public fn new(filter: WasmFilter) -> WasmFilterLayer {
         WasmFilterLayer { filter: filter }
     }
 }

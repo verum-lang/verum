@@ -35,11 +35,11 @@ public type HeaderField is {
 }
 
 implement HeaderField {
-    pub fn new(name: Text, value: Text) -> HeaderField {
+    public fn new(name: Text, value: Text) -> HeaderField {
         HeaderField { name: name, value: value }
     }
 
-    pub fn size(&self) -> Int {
+    public fn size(&self) -> Int {
         // Per §4.1: size = name_len + value_len + 32 bytes overhead.
         self.name.len() + self.value.len() + 32
     }
@@ -56,7 +56,7 @@ public type DynamicTable is {
 }
 
 implement DynamicTable {
-    pub fn new(max_size: Int) -> DynamicTable {
+    public fn new(max_size: Int) -> DynamicTable {
         DynamicTable {
             entries: List.new(),
             total_size: 0,
@@ -64,12 +64,12 @@ implement DynamicTable {
         }
     }
 
-    pub fn len(&self) -> Int { self.entries.len() }
+    public fn len(&self) -> Int { self.entries.len() }
 
     /// Insert at the front (index 1). Evicts from the back until total
     /// ≤ max_size. If a single entry exceeds max_size the table is
     /// cleared and the entry silently dropped (§4.4).
-    pub fn insert(&mut self, field: HeaderField) {
+    public fn insert(&mut self, field: HeaderField) {
         let size = field.size();
         if size > self.max_size {
             self.clear();
@@ -94,7 +94,7 @@ implement DynamicTable {
     }
 
     /// Resize — evicts from back until ≤ new_max.
-    pub fn resize(&mut self, new_max: Int) {
+    public fn resize(&mut self, new_max: Int) {
         self.max_size = new_max;
         while self.total_size > self.max_size && self.entries.len() > 0 {
             self.evict_oldest();
@@ -103,7 +103,7 @@ implement DynamicTable {
 
     /// Lookup by combined index (1-based). 1..=STATIC_TABLE_SIZE goes
     /// to static table; STATIC+1.. goes to dynamic table front-first.
-    pub fn lookup(&self, index: Int) -> Maybe<HeaderField> {
+    public fn lookup(&self, index: Int) -> Maybe<HeaderField> {
         if index >= 1 && index <= static_table.STATIC_TABLE_SIZE {
             match static_table.entry(index) {
                 Some(e) => Some(HeaderField.new(e.name.clone(), e.value.clone())),
@@ -149,7 +149,7 @@ implement DynamicTable {
 /// Encode an integer with an `n`-bit prefix (n in 1..8). The high bits
 /// of the first byte carry caller flags (masked in / out). The emitted
 /// first byte is OR'd with `flags_mask` — set to 0 for pure integers.
-pub fn encode_integer(value: UInt64, n: Int, flags_mask: UInt8, out: &mut List<Byte>) {
+public fn encode_integer(value: UInt64, n: Int, flags_mask: UInt8, out: &mut List<Byte>) {
     let max: UInt64 = (1_u64 << n) - 1;
     if value < max {
         out.push((flags_mask | (value as UInt8)) as Byte);
@@ -166,7 +166,7 @@ pub fn encode_integer(value: UInt64, n: Int, flags_mask: UInt8, out: &mut List<B
 
 /// Decode an n-bit-prefix integer starting at offset `pos`. Returns the
 /// new position on success.
-pub fn decode_integer(buf: &[Byte], pos: Int, n: Int) -> Result<(UInt64, Int), HpackError> {
+public fn decode_integer(buf: &[Byte], pos: Int, n: Int) -> Result<(UInt64, Int), HpackError> {
     if pos >= buf.len() { return Err(HpackError.Truncated); }
     let max: UInt64 = (1_u64 << n) - 1;
     let first_mask: UInt8 = max as UInt8;
@@ -207,7 +207,7 @@ public type HpackError is
 /// Write a string literal with optional Huffman. `huffman: true` sets
 /// the H bit in the first byte and emits the Huffman-encoded bytes;
 /// false emits the raw bytes.
-pub fn encode_string(input: &[Byte], use_huffman: Bool, out: &mut List<Byte>) {
+public fn encode_string(input: &[Byte], use_huffman: Bool, out: &mut List<Byte>) {
     if use_huffman {
         let enc_len: Int = core.net.http2.huffman.encoded_length(input);
         encode_integer(enc_len as UInt64, 7, 0x80, out);
@@ -222,7 +222,7 @@ pub fn encode_string(input: &[Byte], use_huffman: Bool, out: &mut List<Byte>) {
     }
 }
 
-pub fn decode_string(buf: &[Byte], pos: Int, max_length: Int)
+public fn decode_string(buf: &[Byte], pos: Int, max_length: Int)
     -> Result<(List<Byte>, Int), HpackError>
 {
     if pos >= buf.len() { return Err(HpackError.Truncated); }
@@ -258,7 +258,7 @@ public type HpackEncoder is {
 }
 
 implement HpackEncoder {
-    pub fn new() -> HpackEncoder {
+    public fn new() -> HpackEncoder {
         HpackEncoder {
             table: DynamicTable.new(DEFAULT_HEADER_TABLE_SIZE as Int),
             huffman_enabled: true,
@@ -266,7 +266,7 @@ implement HpackEncoder {
         }
     }
 
-    pub fn with_max_table_size(size: Int) -> HpackEncoder {
+    public fn with_max_table_size(size: Int) -> HpackEncoder {
         HpackEncoder {
             table: DynamicTable.new(size),
             huffman_enabled: true,
@@ -276,12 +276,12 @@ implement HpackEncoder {
 
     /// Enable / disable Huffman — disabled is useful for testing or
     /// when trading CPU for wire bandwidth.
-    pub fn set_huffman(&mut self, enabled: Bool) {
+    public fn set_huffman(&mut self, enabled: Bool) {
         self.huffman_enabled = enabled;
     }
 
     /// Encode a list of headers in order.
-    pub fn encode(&mut self, headers: &List<HeaderField>, out: &mut List<Byte>) {
+    public fn encode(&mut self, headers: &List<HeaderField>, out: &mut List<Byte>) {
         // Emit a pending table-size update if any.
         match self.pending_resize {
             Some(new_size) => {
@@ -312,13 +312,13 @@ implement HpackEncoder {
     }
 
     /// §6.2.3 — Literal never-indexed (for Authorization / Cookie).
-    pub fn encode_never_indexed(&self, field: &HeaderField, out: &mut List<Byte>) {
+    public fn encode_never_indexed(&self, field: &HeaderField, out: &mut List<Byte>) {
         encode_integer(0, 4, 0x10, out);
         encode_string(field.name.as_bytes(), self.huffman_enabled, out);
         encode_string(field.value.as_bytes(), self.huffman_enabled, out);
     }
 
-    pub fn schedule_resize(&mut self, new_size: Int) {
+    public fn schedule_resize(&mut self, new_size: Int) {
         self.pending_resize = Some(new_size);
     }
 }
@@ -334,7 +334,7 @@ public type HpackDecoder is {
 }
 
 implement HpackDecoder {
-    pub fn new() -> HpackDecoder {
+    public fn new() -> HpackDecoder {
         HpackDecoder {
             table: DynamicTable.new(DEFAULT_HEADER_TABLE_SIZE as Int),
             max_table_size_settings: DEFAULT_HEADER_TABLE_SIZE as Int,
@@ -342,7 +342,7 @@ implement HpackDecoder {
         }
     }
 
-    pub fn with_max_table_size(size: Int) -> HpackDecoder {
+    public fn with_max_table_size(size: Int) -> HpackDecoder {
         HpackDecoder {
             table: DynamicTable.new(size),
             max_table_size_settings: size,
@@ -350,20 +350,20 @@ implement HpackDecoder {
         }
     }
 
-    pub fn set_max_table_size(&mut self, size: Int) {
+    public fn set_max_table_size(&mut self, size: Int) {
         self.max_table_size_settings = size;
         if self.table.max_size > size {
             self.table.resize(size);
         }
     }
 
-    pub fn set_max_header_list_size(&mut self, size: Int) {
+    public fn set_max_header_list_size(&mut self, size: Int) {
         self.max_header_list_size = size;
     }
 
     /// Decode a complete header block. Cross-frame continuations must
     /// be concatenated by the caller before decoding (§4.3).
-    pub fn decode(&mut self, block: &[Byte]) -> Result<List<HeaderField>, HpackError> {
+    public fn decode(&mut self, block: &[Byte]) -> Result<List<HeaderField>, HpackError> {
         let mut out: List<HeaderField> = List.new();
         let mut pos = 0;
         while pos < block.len() {

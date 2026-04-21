@@ -48,8 +48,8 @@ implement Connection {
         @intrinsic("verum.quic.connect", peer, &config).await
     }
 
-    pub fn peer_addr(&self) -> &SocketAddr { &self.peer }
-    pub fn local_addr(&self) -> &SocketAddr { &self.local }
+    public fn peer_addr(&self) -> &SocketAddr { &self.peer }
+    public fn local_addr(&self) -> &SocketAddr { &self.local }
 
     /// Open a new outgoing bidirectional stream (§2.1).
     pub async fn open_bidi_stream(&self) -> Result<QuicStream, QuicError> {
@@ -79,7 +79,7 @@ implement Connection {
 
     /// Whether the handshake has fully completed. 0-RTT streams may
     /// already be usable earlier if early_data was negotiated.
-    pub fn is_established(&self) -> Bool {
+    public fn is_established(&self) -> Bool {
         @intrinsic("verum.quic.is_established", self.handle)
     }
 }
@@ -108,7 +108,7 @@ implement QuicListener {
         @intrinsic("verum.quic.listen", local, &config).await
     }
 
-    pub fn local_addr(&self) -> &SocketAddr { &self.local }
+    public fn local_addr(&self) -> &SocketAddr { &self.local }
 
     pub async fn accept(&self) -> Result<(Connection, SocketAddr), QuicError> {
         @intrinsic("verum.quic.accept", self.handle).await

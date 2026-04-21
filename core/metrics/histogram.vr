@@ -32,7 +32,7 @@ public type HistogramBuckets is {
 };
 
 implement HistogramBuckets {
-    pub fn defaults() -> HistogramBuckets {
+    public fn defaults() -> HistogramBuckets {
         let mut out = List.with_capacity(11);
         let mut i = 0;
         while i < 11 {
@@ -44,7 +44,7 @@ implement HistogramBuckets {
 
     /// Custom bounds — must be strictly increasing. Invalid input
     /// silently sorts and dedups at construction.
-    pub fn custom(bounds: &[Float]) -> HistogramBuckets {
+    public fn custom(bounds: &[Float]) -> HistogramBuckets {
         let mut out = List.with_capacity(bounds.len());
         let mut i = 0;
         while i < bounds.len() {
@@ -57,7 +57,7 @@ implement HistogramBuckets {
     }
 
     /// Linear buckets: `start`, `start+width`, ..., `count` bounds.
-    pub fn linear(start: Float, width: Float, count: Int) -> HistogramBuckets {
+    public fn linear(start: Float, width: Float, count: Int) -> HistogramBuckets {
         let mut out = List.with_capacity(count);
         let mut i = 0;
         while i < count {
@@ -68,7 +68,7 @@ implement HistogramBuckets {
     }
 
     /// Exponential buckets: `start`, `start*factor`, ..., `count` bounds.
-    pub fn exponential(start: Float, factor: Float, count: Int) -> HistogramBuckets {
+    public fn exponential(start: Float, factor: Float, count: Int) -> HistogramBuckets {
         let mut out = List.with_capacity(count);
         let mut v = start;
         let mut i = 0;
@@ -80,10 +80,10 @@ implement HistogramBuckets {
         HistogramBuckets { bounds: out }
     }
 
-    pub fn bounds(&self) -> &List<Float> { &self.bounds }
-    pub fn len(&self) -> Int { self.bounds.len() }
+    public fn bounds(&self) -> &List<Float> { &self.bounds }
+    public fn len(&self) -> Int { self.bounds.len() }
 
-    pub fn clone(&self) -> HistogramBuckets {
+    public fn clone(&self) -> HistogramBuckets {
         HistogramBuckets { bounds: self.bounds.clone() }
     }
 }
@@ -105,7 +105,7 @@ public type Histogram is {
 };
 
 implement Histogram {
-    pub fn new(buckets: HistogramBuckets) -> Histogram {
+    public fn new(buckets: HistogramBuckets) -> Histogram {
         let n = buckets.len();
         let mut counts = List.with_capacity(n);
         let mut i = 0;
@@ -122,7 +122,7 @@ implement Histogram {
     }
 
     /// Record an observation.
-    pub fn observe(&self, value: Float) {
+    public fn observe(&self, value: Float) {
         // Walk buckets — cumulative: every bucket with upper-bound >= value is incremented.
         let bounds = self.buckets.bounds();
         let mut i = 0;
@@ -137,7 +137,7 @@ implement Histogram {
     }
 
     /// Take a read-only snapshot of the histogram state.
-    pub fn snapshot(&self) -> HistogramSnapshot {
+    public fn snapshot(&self) -> HistogramSnapshot {
         let n = self.bucket_counts.len();
         let mut counts = List.with_capacity(n);
         let mut i = 0;
@@ -166,10 +166,10 @@ public type HistogramSnapshot is {
 };
 
 implement HistogramSnapshot {
-    pub fn bounds(&self) -> &List<Float> { self.bucket_bounds.bounds() }
-    pub fn counts(&self) -> &List<UInt64> { &self.bucket_counts }
-    pub fn count(&self) -> UInt64 { self.count }
-    pub fn sum(&self) -> Float { self.sum }
+    public fn bounds(&self) -> &List<Float> { self.bucket_bounds.bounds() }
+    public fn counts(&self) -> &List<UInt64> { &self.bucket_counts }
+    public fn count(&self) -> UInt64 { self.count }
+    public fn sum(&self) -> Float { self.sum }
 }
 
 // =============================================================================

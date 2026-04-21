@@ -53,7 +53,7 @@ public type DynEntry is {
 };
 
 impl DynEntry {
-    pub fn new(name: Text, value: Text) -> DynEntry {
+    public fn new(name: Text, value: Text) -> DynEntry {
         let size = (name.as_bytes().len() as UInt64) + (value.as_bytes().len() as UInt64) + 32_u64;
         DynEntry { name: name, value: value, size: size, refs: 0_u64 }
     }
@@ -78,7 +78,7 @@ public type DynamicTable is {
 }
 
 impl DynamicTable {
-    pub fn new(max_capacity: UInt64) -> DynamicTable {
+    public fn new(max_capacity: UInt64) -> DynamicTable {
         DynamicTable {
             entries:       [],
             current_size:  0_u64,
@@ -94,7 +94,7 @@ impl DynamicTable {
     /// Process a "Set Dynamic Table Capacity" instruction. New
     /// capacity MUST be ≤ max_capacity (peer-declared upper bound).
     /// Evicts entries until current_size ≤ new capacity.
-    pub fn set_capacity(&mut self, new_cap: UInt64) -> Result<(), DynamicTableError> {
+    public fn set_capacity(&mut self, new_cap: UInt64) -> Result<(), DynamicTableError> {
         if new_cap > self.max_capacity {
             return Err(DynamicTableError.CapacityExceedsSettings);
         }
@@ -105,7 +105,7 @@ impl DynamicTable {
 
     /// Returns true if inserting `entry_size` additional bytes would
     /// fit — caller checks before emitting Insert instructions.
-    pub fn can_insert(&self, entry_size: UInt64) -> Bool {
+    public fn can_insert(&self, entry_size: UInt64) -> Bool {
         // Compute what we could evict (unreferenced FIFO prefix).
         let evictable_size = self.evictable_size();
         self.current_size + entry_size <= self.capacity + evictable_size
@@ -115,7 +115,7 @@ impl DynamicTable {
 
     /// Insert a fresh (name, value). Returns the absolute index of
     /// the new entry.
-    pub fn insert(&mut self, name: Text, value: Text) -> Result<UInt64, DynamicTableError> {
+    public fn insert(&mut self, name: Text, value: Text) -> Result<UInt64, DynamicTableError> {
         let entry = DynEntry.new(name, value);
         if entry.size > self.capacity {
             // RFC 9204 §3.2.2: entries larger than current capacity are
@@ -133,7 +133,7 @@ impl DynamicTable {
     /// Insert with name reference — reuse an existing entry's name;
     /// useful when encoding headers that share the common set of
     /// static-table names with new values.
-    pub fn insert_with_name_ref(
+    public fn insert_with_name_ref(
         &mut self,
         is_static: Bool,
         name_idx: UInt64,
@@ -156,7 +156,7 @@ impl DynamicTable {
     /// Duplicate — clone an existing dynamic-table entry as the new
     /// tail. Useful for the encoder to keep frequently-used entries
     /// fresh against FIFO eviction.
-    pub fn duplicate(&mut self, abs_idx: UInt64) -> Result<UInt64, DynamicTableError> {
+    public fn duplicate(&mut self, abs_idx: UInt64) -> Result<UInt64, DynamicTableError> {
         let e = match self.get_by_absolute(abs_idx) {
             Some(x) => x,
             None    => return Err(DynamicTableError.InvalidNameRef),
@@ -168,14 +168,14 @@ impl DynamicTable {
 
     /// Increment the reference count for `abs_idx` — caller holds a
     /// live field section referencing this entry until decoder acks.
-    pub fn add_ref(&mut self, abs_idx: UInt64) -> Result<(), DynamicTableError> {
+    public fn add_ref(&mut self, abs_idx: UInt64) -> Result<(), DynamicTableError> {
         let slot = self.absolute_to_slot(abs_idx)?;
         self.entries[slot].refs = self.entries[slot].refs + 1_u64;
         Ok(())
     }
 
     /// Decrement ref count (field section acknowledged / cancelled).
-    pub fn release_ref(&mut self, abs_idx: UInt64) -> Result<(), DynamicTableError> {
+    public fn release_ref(&mut self, abs_idx: UInt64) -> Result<(), DynamicTableError> {
         let slot = self.absolute_to_slot(abs_idx)?;
         if self.entries[slot].refs == 0_u64 {
             return Err(DynamicTableError.RefUnderflow);
@@ -186,7 +186,7 @@ impl DynamicTable {
 
     // ==================== lookups ====================
 
-    pub fn get_by_absolute(&self, abs_idx: UInt64) -> Maybe<DynEntry> {
+    public fn get_by_absolute(&self, abs_idx: UInt64) -> Maybe<DynEntry> {
         let slot = self.absolute_to_slot(abs_idx);
         match slot {
             Ok(i) => Some(self.entries[i].clone()),
@@ -197,7 +197,7 @@ impl DynamicTable {
     /// Find the most-recently-inserted entry matching (name, value).
     /// Returns the absolute index or None. Iterates tail-first so
     /// freshest matches win for better encoder efficiency.
-    pub fn find(&self, name: &Text, value: &Text) -> Maybe<UInt64> {
+    public fn find(&self, name: &Text, value: &Text) -> Maybe<UInt64> {
         let mut i: Int = self.entries.len() - 1;
         while i >= 0 {
             let e = &self.entries[i];
@@ -211,7 +211,7 @@ impl DynamicTable {
 
     /// Find by name only — used for "Insert with Name Reference" or
     /// "Literal Field Line with Name Reference" encoder choices.
-    pub fn find_name(&self, name: &Text) -> Maybe<UInt64> {
+    public fn find_name(&self, name: &Text) -> Maybe<UInt64> {
         let mut i: Int = self.entries.len() - 1;
         while i >= 0 {
             let e = &self.entries[i];
@@ -225,11 +225,11 @@ impl DynamicTable {
 
     // ==================== accessors ====================
 
-    pub fn insert_count(&self) -> UInt64  { self.insert_count }
-    pub fn capacity(&self) -> UInt64      { self.capacity }
-    pub fn max_capacity(&self) -> UInt64  { self.max_capacity }
-    pub fn current_size(&self) -> UInt64  { self.current_size }
-    pub fn len(&self) -> Int              { self.entries.len() }
+    public fn insert_count(&self) -> UInt64  { self.insert_count }
+    public fn capacity(&self) -> UInt64      { self.capacity }
+    public fn max_capacity(&self) -> UInt64  { self.max_capacity }
+    public fn current_size(&self) -> UInt64  { self.current_size }
+    public fn len(&self) -> Int              { self.entries.len() }
 
     // ==================== internals ====================
 

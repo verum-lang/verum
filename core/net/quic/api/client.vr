@@ -55,7 +55,7 @@ public type QuicClientOptions is {
 };
 
 impl QuicClientOptions {
-    pub fn default() -> QuicClientOptions {
+    public fn default() -> QuicClientOptions {
         let mut params = TransportParams.defaults();
         params.initial_max_data              = 1024_u64 * 1024_u64;
         params.initial_max_stream_data_bidi_local  = 256_u64 * 1024_u64;
@@ -84,12 +84,12 @@ impl QuicClientOptions {
         }
     }
 
-    pub fn with_alpn(mut self, alpn: List<List<Byte>>) -> QuicClientOptions {
+    public fn with_alpn(mut self, alpn: List<List<Byte>>) -> QuicClientOptions {
         self.alpn = alpn;
         self
     }
 
-    pub fn with_system_trust() -> QuicClientOptions {
+    public fn with_system_trust() -> QuicClientOptions {
         let mut opts = QuicClientOptions.default();
         match TrustStore.system() {
             Ok(t) => { opts.trust = t; },
@@ -185,8 +185,8 @@ impl QuicClient {
         Ok(())
     }
 
-    pub fn authority(&self) -> Text      { self.authority.clone() }
-    pub fn peer_addr(&self) -> SocketAddr { self.peer_addr.clone() }
+    public fn authority(&self) -> Text      { self.authority.clone() }
+    public fn peer_addr(&self) -> SocketAddr { self.peer_addr.clone() }
 }
 
 // =============================================================================

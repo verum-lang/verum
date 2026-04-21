@@ -1268,7 +1268,7 @@ implement TcpListener {
     ///       let stream = conn?;
     ///       spawn handle(stream);
     ///   }
-    pub fn incoming_async(&self) -> AsyncIncoming {
+    public fn incoming_async(&self) -> AsyncIncoming {
         AsyncIncoming { listener: self }
     }
 

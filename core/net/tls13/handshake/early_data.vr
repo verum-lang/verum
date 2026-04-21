@@ -75,7 +75,7 @@ public type EarlyKeys is {
 /// (i.e. EarlySecret.derive_with_psk(resumption_psk)) and the
 /// running transcript snapshot that covers the full ClientHello
 /// (binders included).
-pub fn derive(
+public fn derive(
     early: &EarlySecret,
     suite: CipherSuite,
     ch_transcript_hash: &[Byte],
@@ -110,7 +110,7 @@ fn derive_early_exporter(
 
 /// Project the per-record AEAD (key, iv) pair for the 0-RTT flight.
 /// Key length matches the cipher suite's AEAD (16 or 32 bytes).
-pub fn to_traffic_keys(early: &EarlyKeys) -> Result<TrafficKeys, HkdfError> {
+public fn to_traffic_keys(early: &EarlyKeys) -> Result<TrafficKeys, HkdfError> {
     let key_len = match early.suite.aead_kind() {
         core.net.tls13.cipher_suite.AeadKind.Aes128Gcm        => 16,
         core.net.tls13.cipher_suite.AeadKind.Aes256Gcm        => 32,
@@ -127,7 +127,7 @@ pub fn to_traffic_keys(early: &EarlyKeys) -> Result<TrafficKeys, HkdfError> {
 /// Given a client-session resumption PSK + the cipher-suite hash,
 /// build the EarlySecret that both client and server will use as
 /// the root of the resumed handshake's key schedule.
-pub fn early_secret_from_psk(
+public fn early_secret_from_psk(
     suite: CipherSuite,
     psk: &[Byte],
 ) -> Result<EarlySecret, HkdfError> {
@@ -151,13 +151,13 @@ public type EarlyDataBudget is {
 }
 
 impl EarlyDataBudget {
-    pub fn new(limit: UInt32) -> EarlyDataBudget {
+    public fn new(limit: UInt32) -> EarlyDataBudget {
         EarlyDataBudget { limit: limit, consumed: 0_u32 }
     }
 
     /// Attempt to reserve `n` bytes. Returns the granted count
     /// (<= requested) — caller truncates writes.
-    pub fn try_consume(&mut self, n: UInt32) -> UInt32 {
+    public fn try_consume(&mut self, n: UInt32) -> UInt32 {
         if self.consumed >= self.limit { return 0_u32; }
         let left = self.limit - self.consumed;
         let grant = if n < left { n } else { left };
@@ -165,8 +165,8 @@ impl EarlyDataBudget {
         grant
     }
 
-    pub fn exceeded(&self) -> Bool { self.consumed > self.limit }
-    pub fn remaining(&self) -> UInt32 {
+    public fn exceeded(&self) -> Bool { self.consumed > self.limit }
+    public fn remaining(&self) -> UInt32 {
         if self.consumed >= self.limit { 0_u32 } else { self.limit - self.consumed }
     }
 }

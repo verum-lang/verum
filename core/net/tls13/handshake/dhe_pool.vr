@@ -61,7 +61,7 @@ public type DhePool is protocol {
 public type LocalDhePool is ();
 
 implement LocalDhePool {
-    pub fn new() -> LocalDhePool { () }
+    public fn new() -> LocalDhePool { () }
 }
 
 implement DhePool for LocalDhePool {

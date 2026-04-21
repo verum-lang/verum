@@ -18,7 +18,7 @@ public type Resource is {
 };
 
 implement Resource {
-    pub fn empty() -> Resource {
+    public fn empty() -> Resource {
         Resource {
             attributes: AttributeSet.new(),
             schema_url: None,
@@ -27,7 +27,7 @@ implement Resource {
 
     /// Convenience — single (service.name, service.version) pair which
     /// is by far the most common resource shape.
-    pub fn service(name: &Text, version: &Text) -> Resource {
+    public fn service(name: &Text, version: &Text) -> Resource {
         let mut attrs = AttributeSet.new();
         attrs.set("service.name".into(), AttributeValue.Text(name.clone()));
         attrs.set("service.version".into(), AttributeValue.Text(version.clone()));
@@ -37,26 +37,26 @@ implement Resource {
         }
     }
 
-    pub fn from_attributes(attributes: AttributeSet) -> Resource {
+    public fn from_attributes(attributes: AttributeSet) -> Resource {
         Resource {
             attributes: attributes,
             schema_url: None,
         }
     }
 
-    pub fn with_schema_url(mut self, url: Text) -> Resource {
+    public fn with_schema_url(mut self, url: Text) -> Resource {
         self.schema_url = Some(url);
         self
     }
 
-    pub fn with_attribute(mut self, key: Text, value: AttributeValue) -> Resource {
+    public fn with_attribute(mut self, key: Text, value: AttributeValue) -> Resource {
         self.attributes.set(key, value);
         self
     }
 
     /// Merge — values from `other` take precedence on conflict
     /// (per OTel SDK spec — newer resources override older).
-    pub fn merge(&self, other: &Resource) -> Resource {
+    public fn merge(&self, other: &Resource) -> Resource {
         let mut merged = self.attributes.clone();
         let entries = other.attributes.entries();
         let mut i = 0;
@@ -76,10 +76,10 @@ implement Resource {
         }
     }
 
-    pub fn attributes(&self) -> &AttributeSet { &self.attributes }
-    pub fn schema_url(&self) -> &Maybe<Text> { &self.schema_url }
+    public fn attributes(&self) -> &AttributeSet { &self.attributes }
+    public fn schema_url(&self) -> &Maybe<Text> { &self.schema_url }
 
-    pub fn clone(&self) -> Resource {
+    public fn clone(&self) -> Resource {
         Resource {
             attributes: self.attributes.clone(),
             schema_url: match &self.schema_url {

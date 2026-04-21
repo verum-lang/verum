@@ -50,20 +50,20 @@ public type SpanStatus is {
 };
 
 implement SpanStatus {
-    pub fn unset() -> SpanStatus {
+    public fn unset() -> SpanStatus {
         SpanStatus { code: StatusCode.Unset, description: None }
     }
 
-    pub fn ok() -> SpanStatus {
+    public fn ok() -> SpanStatus {
         SpanStatus { code: StatusCode.Ok, description: None }
     }
 
-    pub fn error(description: Text) -> SpanStatus {
+    public fn error(description: Text) -> SpanStatus {
         SpanStatus { code: StatusCode.Error, description: Some(description) }
     }
 
-    pub fn code(&self) -> StatusCode { self.code }
-    pub fn description(&self) -> &Maybe<Text> { &self.description }
+    public fn code(&self) -> StatusCode { self.code }
+    public fn description(&self) -> &Maybe<Text> { &self.description }
 }
 
 // =============================================================================
@@ -77,13 +77,13 @@ public type SpanEvent is {
 };
 
 implement SpanEvent {
-    pub fn new(name: Text, timestamp: Instant, attributes: AttributeSet) -> SpanEvent {
+    public fn new(name: Text, timestamp: Instant, attributes: AttributeSet) -> SpanEvent {
         SpanEvent { name: name, timestamp: timestamp, attributes: attributes }
     }
 
-    pub fn name(&self) -> &Text { &self.name }
-    pub fn timestamp(&self) -> Instant { self.timestamp }
-    pub fn attributes(&self) -> &AttributeSet { &self.attributes }
+    public fn name(&self) -> &Text { &self.name }
+    public fn timestamp(&self) -> Instant { self.timestamp }
+    public fn attributes(&self) -> &AttributeSet { &self.attributes }
 }
 
 // =============================================================================
@@ -96,12 +96,12 @@ public type SpanLink is {
 };
 
 implement SpanLink {
-    pub fn new(context: SpanContext, attributes: AttributeSet) -> SpanLink {
+    public fn new(context: SpanContext, attributes: AttributeSet) -> SpanLink {
         SpanLink { context: context, attributes: attributes }
     }
 
-    pub fn context(&self) -> &SpanContext { &self.context }
-    pub fn attributes(&self) -> &AttributeSet { &self.attributes }
+    public fn context(&self) -> &SpanContext { &self.context }
+    public fn attributes(&self) -> &AttributeSet { &self.attributes }
 }
 
 // =============================================================================
@@ -125,23 +125,23 @@ public type SpanData is {
 };
 
 implement SpanData {
-    pub fn duration(&self) -> Duration {
+    public fn duration(&self) -> Duration {
         self.end_time - self.start_time
     }
 
-    pub fn name(&self) -> &Text { &self.name }
-    pub fn context(&self) -> &SpanContext { &self.context }
-    pub fn parent_span_id(&self) -> &Maybe<SpanId> { &self.parent_span_id }
-    pub fn kind(&self) -> SpanKind { self.kind }
-    pub fn start_time(&self) -> Instant { self.start_time }
-    pub fn end_time(&self) -> Instant { self.end_time }
-    pub fn attributes(&self) -> &AttributeSet { &self.attributes }
-    pub fn events(&self) -> &List<SpanEvent> { &self.events }
-    pub fn links(&self) -> &List<SpanLink> { &self.links }
-    pub fn status(&self) -> &SpanStatus { &self.status }
-    pub fn resource(&self) -> &Resource { &self.resource }
-    pub fn instrumentation_scope(&self) -> &Text { &self.instrumentation_scope }
-    pub fn instrumentation_version(&self) -> &Text { &self.instrumentation_version }
+    public fn name(&self) -> &Text { &self.name }
+    public fn context(&self) -> &SpanContext { &self.context }
+    public fn parent_span_id(&self) -> &Maybe<SpanId> { &self.parent_span_id }
+    public fn kind(&self) -> SpanKind { self.kind }
+    public fn start_time(&self) -> Instant { self.start_time }
+    public fn end_time(&self) -> Instant { self.end_time }
+    public fn attributes(&self) -> &AttributeSet { &self.attributes }
+    public fn events(&self) -> &List<SpanEvent> { &self.events }
+    public fn links(&self) -> &List<SpanLink> { &self.links }
+    public fn status(&self) -> &SpanStatus { &self.status }
+    public fn resource(&self) -> &Resource { &self.resource }
+    public fn instrumentation_scope(&self) -> &Text { &self.instrumentation_scope }
+    public fn instrumentation_version(&self) -> &Text { &self.instrumentation_version }
 }
 
 // =============================================================================
@@ -181,14 +181,14 @@ public type SpanInner is {
 implement Span {
     /// Construct a span handle from an already-initialised inner.
     /// Used by Tracer.start_span; instrumenters never call this directly.
-    pub fn from_inner(inner: SpanInner) -> Span {
+    public fn from_inner(inner: SpanInner) -> Span {
         Span {
             inner: Shared.new(Mutex.new(inner)),
         }
     }
 
     /// Construct a no-op span (for Drop sampling). Records nothing.
-    pub fn noop() -> Span {
+    public fn noop() -> Span {
         let inner = SpanInner {
             name: "".into(),
             context: SpanContext.invalid(),
@@ -209,26 +209,26 @@ implement Span {
     }
 
     /// Get a copy of the SpanContext for propagation.
-    pub fn context(&self) -> SpanContext {
+    public fn context(&self) -> SpanContext {
         let guard = (&*self.inner).lock().unwrap();
         let inner: &SpanInner = &*guard;
         inner.context.clone()
     }
 
-    pub fn is_recording(&self) -> Bool {
+    public fn is_recording(&self) -> Bool {
         let guard = (&*self.inner).lock().unwrap();
         let inner: &SpanInner = &*guard;
         inner.recording && inner.end_time.is_none()
     }
 
-    pub fn set_attribute(&self, key: Text, value: AttributeValue) {
+    public fn set_attribute(&self, key: Text, value: AttributeValue) {
         let mut guard = (&*self.inner).lock().unwrap();
         let inner: &mut SpanInner = &mut *guard;
         if !inner.recording || inner.end_time.is_some() { return; }
         inner.attributes.set(key, value);
     }
 
-    pub fn add_event(&self, name: Text, attributes: AttributeSet) {
+    public fn add_event(&self, name: Text, attributes: AttributeSet) {
         let mut guard = (&*self.inner).lock().unwrap();
         let inner: &mut SpanInner = &mut *guard;
         if !inner.recording || inner.end_time.is_some() { return; }
@@ -236,11 +236,11 @@ implement Span {
         inner.events.push(SpanEvent.new(name, Instant.now(), attributes));
     }
 
-    pub fn add_event_now(&self, name: Text) {
+    public fn add_event_now(&self, name: Text) {
         self.add_event(name, AttributeSet.new());
     }
 
-    pub fn add_link(&self, link: SpanLink) {
+    public fn add_link(&self, link: SpanLink) {
         let mut guard = (&*self.inner).lock().unwrap();
         let inner: &mut SpanInner = &mut *guard;
         if !inner.recording || inner.end_time.is_some() { return; }
@@ -248,7 +248,7 @@ implement Span {
         inner.links.push(link);
     }
 
-    pub fn set_status(&self, new_status: SpanStatus) {
+    public fn set_status(&self, new_status: SpanStatus) {
         let mut guard = (&*self.inner).lock().unwrap();
         let inner: &mut SpanInner = &mut *guard;
         if !inner.recording || inner.end_time.is_some() { return; }
@@ -266,7 +266,7 @@ implement Span {
         }
     }
 
-    pub fn update_name(&self, name: Text) {
+    public fn update_name(&self, name: Text) {
         let mut guard = (&*self.inner).lock().unwrap();
         let inner: &mut SpanInner = &mut *guard;
         if !inner.recording || inner.end_time.is_some() { return; }
@@ -276,7 +276,7 @@ implement Span {
     /// Record an exception as an event "exception" with attributes
     /// exception.type, exception.message, exception.stacktrace.
     /// (Convenience — matches OTel semantic conventions.)
-    pub fn record_exception(&self, type_name: &Text, message: &Text) {
+    public fn record_exception(&self, type_name: &Text, message: &Text) {
         let mut attrs = AttributeSet.new();
         attrs.set("exception.type".into(), AttributeValue.Text(type_name.clone()));
         attrs.set("exception.message".into(), AttributeValue.Text(message.clone()));
@@ -286,7 +286,7 @@ implement Span {
     /// Finalise. After this call, further mutations are silently dropped.
     /// Returns the frozen SpanData (which processors consume).
     /// Idempotent — second call returns None.
-    pub fn end(&self) -> Maybe<SpanData> {
+    public fn end(&self) -> Maybe<SpanData> {
         let mut guard = (&*self.inner).lock().unwrap();
         let inner: &mut SpanInner = &mut *guard;
         if inner.end_time.is_some() { return None; }
@@ -296,7 +296,7 @@ implement Span {
     }
 
     /// End with an explicit timestamp (for replay / test scenarios).
-    pub fn end_at(&self, ts: Instant) -> Maybe<SpanData> {
+    public fn end_at(&self, ts: Instant) -> Maybe<SpanData> {
         let mut guard = (&*self.inner).lock().unwrap();
         let inner: &mut SpanInner = &mut *guard;
         if inner.end_time.is_some() { return None; }

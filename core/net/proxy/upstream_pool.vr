@@ -171,7 +171,7 @@ public type ConnectionLease is {
 
 implement ConnectionLease {
     /// Borrow the underlying TcpStream mutably.
-    pub fn stream_mut(&mut self) -> &mut TcpStream {
+    public fn stream_mut(&mut self) -> &mut TcpStream {
         match &mut self.stream {
             Some(s) => s,
             None    => panic("ConnectionLease: connection already released"),
@@ -180,7 +180,7 @@ implement ConnectionLease {
 
     /// Explicitly close instead of returning to pool. Useful when the
     /// caller detected a protocol error that makes reuse unsafe.
-    pub fn close(mut self) {
+    public fn close(mut self) {
         self.stream = None;
     }
 }
@@ -200,7 +200,7 @@ public type UpstreamPool is {
 };
 
 implement UpstreamPool {
-    pub fn new(config: PoolConfig) -> UpstreamPool {
+    public fn new(config: PoolConfig) -> UpstreamPool {
         UpstreamPool {
             state: Shared.new(PoolState {
                 config: config,
@@ -210,7 +210,7 @@ implement UpstreamPool {
     }
 
     /// Default configuration — 100 total idle, 10 per host, 90s timeout.
-    pub fn default() -> UpstreamPool {
+    public fn default() -> UpstreamPool {
         UpstreamPool.new(PoolConfig.new())
     }
 
@@ -254,7 +254,7 @@ implement UpstreamPool {
     }
 
     /// Introspection: idle count per upstream key.
-    pub fn idle_count(&self, upstream: &Upstream) -> Int {
+    public fn idle_count(&self, upstream: &Upstream) -> Int {
         let key = UpstreamKey.from_upstream(upstream);
         let idle = self.state.idle.lock();
         match idle.get(&key) {

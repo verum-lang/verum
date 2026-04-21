@@ -265,7 +265,7 @@ implement DerReader {
 
     /// Read the next tag + length. Advances the cursor past both.
     /// Callers then consume the value (length bytes).
-    pub fn read_tag_length(&mut self) -> Result<(Tag, Int), DerError> {
+    public fn read_tag_length(&mut self) -> Result<(Tag, Int), DerError> {
         let b0 = self.take_byte()?;
         let class_code = b0 >> 6;
         let constructed = (b0 & 0x20_u8) != 0_u8;
@@ -341,7 +341,7 @@ implement DerReader {
     /// Read a tag + length and immediately verify the tag matches
     /// expected UNIVERSAL tag number + constructed bit. Returns the
     /// length of the value portion (value bytes live at `pos..pos+len`).
-    pub fn read_universal(&mut self, expected_tag: UInt32, constructed: Bool) -> Result<Int, DerError> {
+    public fn read_universal(&mut self, expected_tag: UInt32, constructed: Bool) -> Result<Int, DerError> {
         let save_pos = self.pos;
         let (tag, len) = self.read_tag_length()?;
         let is_universal = match tag.class_ {
@@ -620,7 +620,7 @@ implement DerReader {
 
     /// Peek the next tag without consuming. Useful for optional-field
     /// lookahead: `if r.peek_is_context(0) { let body = r.read_explicit(0)?; ... }`.
-    pub fn peek_tag(&self) -> Result<Tag, DerError> {
+    public fn peek_tag(&self) -> Result<Tag, DerError> {
         if self.pos >= self.end {
             return Err(err(UnexpectedEndOfInput, self.pos, "peek_tag past end"));
         }
@@ -635,7 +635,7 @@ implement DerReader {
     }
 
     /// Check if the next tag is context-specific `[n]`.
-    pub fn peek_is_context(&self, context_tag: UInt32) -> Bool {
+    public fn peek_is_context(&self, context_tag: UInt32) -> Bool {
         match self.peek_tag() {
             Ok(t) => matches_context_specific(&t, context_tag, false)
                   || matches_context_specific(&t, context_tag, true),

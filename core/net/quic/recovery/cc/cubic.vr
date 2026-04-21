@@ -59,9 +59,9 @@ mount core.net.quic.recovery.cc.{
 // Constants (RFC 9438 §4.2)
 // =============================================================================
 
-pub const CUBIC_C: Float = 0.4;
-pub const CUBIC_BETA: Float = 0.7;
-pub const CUBIC_FAST_CONV_FACTOR: Float = 0.85;
+public const CUBIC_C: Float = 0.4;
+public const CUBIC_BETA: Float = 0.7;
+public const CUBIC_FAST_CONV_FACTOR: Float = 0.85;
 
 // =============================================================================
 // State
@@ -96,7 +96,7 @@ public type Cubic is {
 // =============================================================================
 
 impl Cubic {
-    pub fn new() -> Cubic {
+    public fn new() -> Cubic {
         Cubic {
             cwnd:             INITIAL_WINDOW_BYTES,
             ssthresh:         0xFFFFFFFF_u32,
@@ -261,7 +261,7 @@ implement CongestionCtrl for Cubic {
 };
 
 impl Cubic {
-    pub fn exit_recovery_if_appropriate(&mut self, acked_time_sent: Instant) {
+    public fn exit_recovery_if_appropriate(&mut self, acked_time_sent: Instant) {
         match self.recovery_start {
             Some(rs) => {
                 if acked_time_sent >= rs {
