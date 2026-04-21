@@ -1,0 +1,42 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: quic, rfc-bbr, cc, typecheck
+// @timeout: 10000
+// @expect: pass
+
+mount core.net.quic.recovery.cc.bbr.{
+    Bbr, BbrPhase, ProbeBwPhase,
+    HIGH_GAIN, DRAIN_GAIN, CRUISE_GAIN, PROBE_UP_GAIN, PROBE_DOWN_GAIN,
+    STARTUP_FULL_BW_THRESH, STARTUP_FULL_BW_COUNT,
+    PROBE_RTT_INTERVAL, PROBE_RTT_DURATION, MIN_RTT_WINDOW,
+};
+mount core.time.instant.{Instant};
+mount core.time.duration.{Duration};
+
+fn check_bbr_cycle() {
+    let mut cc = Bbr.new();
+    // Startup phase: ACKs drive bandwidth growth.
+    cc.on_packet_sent(1500_u32);
+    cc.on_ack_received(1500_u32, Duration.from_millis(20), Instant.now());
+    let _ = cc.window();
+    let _ = cc.bytes_in_flight();
+    let _ = cc.pacing_rate();
+    let _ = cc.should_pace();
+    let _ = cc.phase();
+    let _ = cc.estimated_bandwidth();
+    let _ = cc.estimated_min_rtt();
+
+    // Loss event — BBRv2 caps inflight_hi on elevated loss.
+    cc.on_packets_lost(1500_u32, Instant.now());
+
+    // PTO hook — BBR no-op.
+    cc.on_pto(Instant.now());
+
+    // Recovery exit via LossDetection integration.
+    cc.exit_recovery_if_appropriate(Instant.now());
+}
+
+fn main() {
+    check_bbr_cycle();
+}

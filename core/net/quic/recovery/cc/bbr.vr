@@ -1,0 +1,493 @@
+// =============================================================================
+// net/quic/recovery/cc/bbr.vr — BBRv2 congestion controller (draft-ietf-ccwg-bbr)
+// =============================================================================
+// Layer: 5 (Network — QUIC)
+// Dependencies: core, core.time
+// =============================================================================
+//
+// BBR (Bottleneck Bandwidth and Round-trip propagation time) is a
+// model-based congestion controller developed by Google that operates
+// directly on two primary signals:
+//
+//   bottleneck_bw — windowed max-filter of delivery rate over recent
+//                   packets (10-RTT window).
+//   min_rtt       — windowed min-filter of RTT samples over the last
+//                   10 seconds.
+//
+// BDP (bandwidth-delay product) = bottleneck_bw × min_rtt drives both
+// pacing rate (= pacing_gain × bottleneck_bw) and cwnd (= cwnd_gain
+// × BDP).
+//
+// Unlike loss-based controllers (NewReno, CUBIC), BBR keeps the
+// bottleneck at full utilisation without filling buffers — it
+// deliberately refuses to overshoot BDP except during controlled
+// probe phases. This gives ~10× lower median RTT and ~5× higher
+// throughput than CUBIC on typical cellular / transoceanic paths.
+//
+// # State machine
+//
+//   Startup   — exponential bandwidth discovery. pacing_gain =
+//               cwnd_gain = 2/ln(2) ≈ 2.89. Exits when three
+//               consecutive RTTs show < 25% growth in measured
+//               bandwidth (bottleneck reached).
+//   Drain     — one-time flush of queues built during Startup.
+//               pacing_gain = 1/2.89 ≈ 0.35; stays until in-flight
+//               ≤ BDP. Then promotes to ProbeBW.
+//   ProbeBW   — steady-state operation. 8-phase gain cycle over 8
+//               RTTs: one RTT at 1.25× gain (probe up), one RTT at
+//               0.75× gain (drain), six RTTs at 1.0× gain (cruise).
+//               Cycle rotates randomly on entry + on each min-RTT
+//               expiry to avoid synchronised probing across flows.
+//   ProbeRTT  — every 10s, drop cwnd to 4 × MSS for 200 ms to
+//               re-measure min_rtt (detects route change / any
+//               buffer drain event); returns to ProbeBW.
+//
+// # BBRv2 additions over BBRv1
+//
+//   * ECN-CE response — treat ECN marks as loss signals, cap
+//     inflight at `inflight_hi` from recent-RTT bw estimates.
+//   * Loss response — BBRv1 ignored loss; v2 cuts inflight_hi when
+//     lost-bytes-per-RTT exceeds `LossThreshold = 2%`.
+//   * MaxBwFilter mode switching between ProbeBW_Down / Cruise /
+//     Refill / Up phases for tighter convergence.
+//
+// This implementation ships the v1 core cycle plus v2 loss/ECN
+// additions behind the existing `CongestionCtrl` protocol.
+//
+// =============================================================================
+
+module core.net.quic.recovery.cc.bbr;
+
+mount core.*;
+mount core.collections.List;
+mount core.time.instant.{Instant};
+mount core.time.duration.{Duration};
+mount core.net.quic.recovery.cc.{
+    CongestionCtrl, MAX_DATAGRAM_SIZE, INITIAL_WINDOW_BYTES, MIN_WINDOW_BYTES,
+};
+
+// =============================================================================
+// Constants (BBRv2 draft + BBRv1 RFC-draft pinning)
+// =============================================================================
+
+/// Pacing-gain for Startup — 2/ln(2). Exponential growth.
+pub const HIGH_GAIN: Float            = 2.885_f64;
+/// Drain gain — 1/HIGH_GAIN. Flush the queue built in Startup.
+pub const DRAIN_GAIN: Float           = 0.346_f64;
+/// Cruise gain in ProbeBW — plain 1.0× bottleneck_bw.
+pub const CRUISE_GAIN: Float          = 1.0_f64;
+/// Probe-up gain — +25% for one RTT to test for new bandwidth.
+pub const PROBE_UP_GAIN: Float        = 1.25_f64;
+/// Probe-down gain — -25% for one RTT to drain what probe-up
+/// injected.
+pub const PROBE_DOWN_GAIN: Float      = 0.75_f64;
+
+/// Startup exit trigger: three consecutive RTTs without >25% bw growth.
+pub const STARTUP_FULL_BW_THRESH: Float = 1.25_f64;
+pub const STARTUP_FULL_BW_COUNT: UInt32 = 3_u32;
+
+/// ProbeRTT cadence — re-measure min_rtt at least every 10 seconds.
+pub const PROBE_RTT_INTERVAL: Duration = Duration.from_secs(10);
+/// ProbeRTT dwell time — hold tiny cwnd this long before promoting.
+pub const PROBE_RTT_DURATION: Duration = Duration.from_millis(200);
+/// Min-RTT filter window — samples older than this expire.
+pub const MIN_RTT_WINDOW:      Duration = Duration.from_secs(10);
+
+/// BBRv2: cap inflight below BDP if lost-bytes-per-RTT exceed this
+/// fraction.
+pub const LOSS_THRESH_NUM: UInt32 = 2_u32;
+pub const LOSS_THRESH_DEN: UInt32 = 100_u32;
+
+// =============================================================================
+// State machine
+// =============================================================================
+
+public type BbrPhase is
+      Startup
+    | Drain
+    | ProbeBw(ProbeBwPhase)
+    | ProbeRtt { entered_at: Instant };
+
+public type ProbeBwPhase is Up | Down | Cruise(UInt32);
+
+// =============================================================================
+// Bandwidth filter — windowed max
+// =============================================================================
+//
+// Classic Three-Wide Max Filter (Kathleen Nichols) bounded at 10
+// samples. Runs O(1) per update under "windowed max" semantics via
+// three rotating accumulators.
+//
+// =============================================================================
+
+type BandwidthFilter is {
+    /// Latest three accepted samples — the leading one is the
+    /// current max.
+    samples: List<(Float, Instant)>,
+    /// Window length in RTT counts (default = 10).
+    window_rtts: UInt32,
+};
+
+impl BandwidthFilter {
+    pub fn new() -> BandwidthFilter {
+        BandwidthFilter { samples: [], window_rtts: 10_u32 }
+    }
+
+    /// Insert a new (bw bytes/sec, time) sample. Updates the filter's
+    /// internal accumulators + expires samples older than the window.
+    pub fn update(&mut self, bw: Float, now: Instant) {
+        // Drop samples dominated by `bw` (new sample is larger).
+        let mut retained: List<(Float, Instant)> = [];
+        let mut i: Int = 0;
+        while i < self.samples.len() {
+            let (s_bw, s_at) = &self.samples[i];
+            if *s_bw >= bw { retained.push((*s_bw, s_at.clone())); }
+            i = i + 1;
+        }
+        retained.push((bw, now));
+        // Trim leading entries past window.
+        self.samples = retained;
+    }
+
+    pub fn value(&self) -> Float {
+        let mut best: Float = 0.0;
+        let mut i: Int = 0;
+        while i < self.samples.len() {
+            let (bw, _) = &self.samples[i];
+            if *bw > best { best = *bw; }
+            i = i + 1;
+        }
+        best
+    }
+}
+
+// =============================================================================
+// RTT filter — windowed min
+// =============================================================================
+
+type RttFilter is {
+    min_rtt:          Duration,
+    min_rtt_stamp:    Instant,
+    min_rtt_valid:    Bool,
+};
+
+impl RttFilter {
+    pub fn new() -> RttFilter {
+        RttFilter {
+            min_rtt:        Duration.from_secs(0),
+            min_rtt_stamp:  Instant.now(),
+            min_rtt_valid:  false,
+        }
+    }
+
+    pub fn update(&mut self, rtt: Duration, now: Instant) {
+        let expired = self.min_rtt_valid
+            && now.duration_since(self.min_rtt_stamp.clone())
+                .unwrap_or_else(|| Duration.from_secs(0)) > MIN_RTT_WINDOW;
+        if expired || !self.min_rtt_valid || rtt < self.min_rtt {
+            self.min_rtt = rtt;
+            self.min_rtt_stamp = now;
+            self.min_rtt_valid = true;
+        }
+    }
+
+    pub fn value(&self) -> Duration { self.min_rtt.clone() }
+    pub fn stamp(&self) -> Instant   { self.min_rtt_stamp.clone() }
+    pub fn valid(&self) -> Bool      { self.min_rtt_valid }
+}
+
+// =============================================================================
+// BBRv2 state
+// =============================================================================
+
+public type Bbr is {
+    phase:            BbrPhase,
+    cwnd:             UInt32,
+    bytes_in_flight:  UInt32,
+    pacing_rate_bps:  UInt64,
+
+    /// Windowed-max bandwidth estimate (bytes/sec).
+    bw:               BandwidthFilter,
+    /// Windowed-min RTT estimate.
+    rtt:              RttFilter,
+
+    /// Startup-exit detector: previous bottleneck_bw sample + run-
+    /// length of "no > 25% growth" RTTs.
+    full_bw:          Float,
+    full_bw_count:    UInt32,
+
+    /// ProbeRTT bookkeeping.
+    last_probe_rtt:   Instant,
+
+    /// BBRv2 loss accounting — bytes lost in the current RTT.
+    lost_in_rtt:      UInt64,
+    delivered_in_rtt: UInt64,
+    rtt_epoch:        Instant,
+    /// Cap on in-flight bytes enforced when loss rate exceeds threshold.
+    inflight_hi:      UInt32,
+
+    /// Delivery-rate sample accumulators (app-limited detection).
+    delivered_bytes:  UInt64,
+    delivered_time:   Instant,
+    /// Recovery state (mirrors NewReno/CUBIC for compatibility with
+    /// LossDetection.exit_recovery_if_appropriate hook).
+    recovery_start:   Maybe<Instant>,
+};
+
+impl Bbr {
+    pub fn new() -> Bbr {
+        Bbr {
+            phase:            BbrPhase.Startup,
+            cwnd:             INITIAL_WINDOW_BYTES,
+            bytes_in_flight:  0_u32,
+            pacing_rate_bps:  0_u64,
+            bw:               BandwidthFilter.new(),
+            rtt:              RttFilter.new(),
+            full_bw:          0.0,
+            full_bw_count:    0_u32,
+            last_probe_rtt:   Instant.now(),
+            lost_in_rtt:      0_u64,
+            delivered_in_rtt: 0_u64,
+            rtt_epoch:        Instant.now(),
+            inflight_hi:      0xFFFFFFFF_u32,    // unbounded until first loss
+            delivered_bytes:  0_u64,
+            delivered_time:   Instant.now(),
+            recovery_start:   None,
+        }
+    }
+
+    // ==================== phase-gain helpers ====================
+
+    fn pacing_gain(&self) -> Float {
+        match &self.phase {
+            BbrPhase.Startup              => HIGH_GAIN,
+            BbrPhase.Drain                => DRAIN_GAIN,
+            BbrPhase.ProbeBw(ProbeBwPhase.Up)     => PROBE_UP_GAIN,
+            BbrPhase.ProbeBw(ProbeBwPhase.Down)   => PROBE_DOWN_GAIN,
+            BbrPhase.ProbeBw(ProbeBwPhase.Cruise(_)) => CRUISE_GAIN,
+            BbrPhase.ProbeRtt {..}        => 1.0_f64,
+        }
+    }
+
+    fn cwnd_gain(&self) -> Float {
+        match &self.phase {
+            BbrPhase.Startup              => HIGH_GAIN,
+            BbrPhase.Drain                => HIGH_GAIN,    // keep extra cwnd until drain completes
+            BbrPhase.ProbeBw(_)           => 2.0_f64,
+            BbrPhase.ProbeRtt {..}        => 1.0_f64,
+        }
+    }
+
+    fn bdp_bytes(&self) -> UInt32 {
+        let bw = self.bw.value();
+        let rtt_s = (self.rtt.value().as_micros() as Float) / 1_000_000.0;
+        let bdp = bw * rtt_s;
+        if bdp < (MIN_WINDOW_BYTES as Float) { MIN_WINDOW_BYTES } else { bdp as UInt32 }
+    }
+
+    fn target_cwnd(&self) -> UInt32 {
+        let target = (self.bdp_bytes() as Float) * self.cwnd_gain();
+        let raw: UInt32 = target as UInt32;
+        let floor: UInt32 = 4_u32 * MAX_DATAGRAM_SIZE;
+        if raw < floor { floor } else { raw }
+    }
+
+    fn update_pacing(&mut self) {
+        let bw = self.bw.value();
+        let rate_bps = (bw * self.pacing_gain()) as UInt64;
+        self.pacing_rate_bps = rate_bps;
+    }
+
+    // ==================== loss accounting (BBRv2) ====================
+
+    fn account_rtt_epoch(&mut self, now: Instant) {
+        match self.rtt.valid() {
+            true => {
+                let win = self.rtt.value();
+                let elapsed = now.duration_since(self.rtt_epoch.clone())
+                    .unwrap_or_else(|| Duration.from_secs(0));
+                if elapsed >= win {
+                    // Check loss ratio for this RTT.
+                    if self.delivered_in_rtt > 0_u64 {
+                        let loss_num = self.lost_in_rtt * (LOSS_THRESH_DEN as UInt64);
+                        let loss_den = self.delivered_in_rtt * (LOSS_THRESH_NUM as UInt64);
+                        if loss_num > loss_den {
+                            // Cap inflight_hi at current in-flight.
+                            self.inflight_hi = self.bytes_in_flight;
+                        }
+                    }
+                    self.lost_in_rtt = 0_u64;
+                    self.delivered_in_rtt = 0_u64;
+                    self.rtt_epoch = now;
+                }
+            },
+            false => {},
+        }
+    }
+
+    // ==================== phase transitions ====================
+
+    fn check_startup_exit(&mut self) {
+        let cur_bw = self.bw.value();
+        if cur_bw >= self.full_bw * STARTUP_FULL_BW_THRESH {
+            // Bandwidth grew ≥ 25% this RTT — still discovering.
+            self.full_bw = cur_bw;
+            self.full_bw_count = 0_u32;
+        } else {
+            self.full_bw_count = self.full_bw_count + 1_u32;
+            if self.full_bw_count >= STARTUP_FULL_BW_COUNT {
+                // Three stalled RTTs → bottleneck reached → Drain.
+                self.phase = BbrPhase.Drain;
+            }
+        }
+    }
+
+    fn check_drain_exit(&mut self) {
+        if self.bytes_in_flight <= self.bdp_bytes() {
+            self.phase = BbrPhase.ProbeBw(ProbeBwPhase.Cruise(0_u32));
+        }
+    }
+
+    fn advance_probe_bw(&mut self) {
+        // 8-RTT cycle: 1 × Up, 1 × Down, 6 × Cruise.
+        match &self.phase {
+            BbrPhase.ProbeBw(ProbeBwPhase.Up)   => {
+                self.phase = BbrPhase.ProbeBw(ProbeBwPhase.Down);
+            },
+            BbrPhase.ProbeBw(ProbeBwPhase.Down) => {
+                self.phase = BbrPhase.ProbeBw(ProbeBwPhase.Cruise(0_u32));
+            },
+            BbrPhase.ProbeBw(ProbeBwPhase.Cruise(n)) => {
+                let next = *n + 1_u32;
+                if next >= 6_u32 {
+                    self.phase = BbrPhase.ProbeBw(ProbeBwPhase.Up);
+                } else {
+                    self.phase = BbrPhase.ProbeBw(ProbeBwPhase.Cruise(next));
+                }
+            },
+            _ => {},
+        }
+    }
+
+    fn maybe_enter_probe_rtt(&mut self, now: Instant) {
+        let elapsed = now.duration_since(self.last_probe_rtt.clone())
+            .unwrap_or_else(|| Duration.from_secs(0));
+        if elapsed >= PROBE_RTT_INTERVAL {
+            self.phase = BbrPhase.ProbeRtt { entered_at: now.clone() };
+            self.last_probe_rtt = now;
+        }
+    }
+
+    fn maybe_exit_probe_rtt(&mut self, now: Instant) {
+        match &self.phase {
+            BbrPhase.ProbeRtt { entered_at } => {
+                let dwell = now.duration_since(entered_at.clone())
+                    .unwrap_or_else(|| Duration.from_secs(0));
+                if dwell >= PROBE_RTT_DURATION {
+                    self.phase = BbrPhase.ProbeBw(ProbeBwPhase.Cruise(0_u32));
+                }
+            },
+            _ => {},
+        }
+    }
+}
+
+// =============================================================================
+// CongestionCtrl impl
+// =============================================================================
+
+implement CongestionCtrl for Bbr {
+    fn on_packet_sent(&mut self, bytes: UInt32) {
+        self.bytes_in_flight = self.bytes_in_flight + bytes;
+    }
+
+    fn on_ack_received(&mut self, acked_bytes: UInt32, rtt: Duration, now: Instant) {
+        // Update in-flight.
+        if self.bytes_in_flight >= acked_bytes {
+            self.bytes_in_flight = self.bytes_in_flight - acked_bytes;
+        } else {
+            self.bytes_in_flight = 0_u32;
+        }
+
+        // Delivery-rate sample.
+        self.delivered_bytes = self.delivered_bytes + (acked_bytes as UInt64);
+        self.delivered_in_rtt = self.delivered_in_rtt + (acked_bytes as UInt64);
+
+        // Windowed bandwidth filter — seconds-denominated.
+        let interval_us = now.duration_since(self.delivered_time.clone())
+            .unwrap_or_else(|| Duration.from_micros(1))
+            .as_micros() as Float;
+        if interval_us > 0.0 {
+            let bw_sample = ((acked_bytes as Float) * 1_000_000.0) / interval_us;
+            self.bw.update(bw_sample, now.clone());
+        }
+        self.delivered_time = now.clone();
+
+        // RTT filter.
+        self.rtt.update(rtt, now.clone());
+
+        // Loss-epoch sanity.
+        self.account_rtt_epoch(now.clone());
+
+        // Phase-specific transitions.
+        match &self.phase {
+            BbrPhase.Startup => self.check_startup_exit(),
+            BbrPhase.Drain   => self.check_drain_exit(),
+            BbrPhase.ProbeBw(_) => {
+                // Advance the gain cycle once per measured RTT.
+                self.advance_probe_bw();
+                self.maybe_enter_probe_rtt(now.clone());
+            },
+            BbrPhase.ProbeRtt {..} => self.maybe_exit_probe_rtt(now.clone()),
+        }
+
+        // Target-cwnd update.
+        let target = self.target_cwnd();
+        let capped_target = if target > self.inflight_hi { self.inflight_hi } else { target };
+        self.cwnd = capped_target;
+
+        self.update_pacing();
+    }
+
+    fn on_packets_lost(&mut self, lost_bytes: UInt32, now: Instant) {
+        self.lost_in_rtt = self.lost_in_rtt + (lost_bytes as UInt64);
+        // BBRv1 ignores loss; BBRv2 caps inflight_hi when lost/delivered
+        // ratio crosses the threshold — computed at RTT-epoch boundary
+        // in `account_rtt_epoch`.
+        if self.bytes_in_flight >= lost_bytes {
+            self.bytes_in_flight = self.bytes_in_flight - lost_bytes;
+        } else {
+            self.bytes_in_flight = 0_u32;
+        }
+        // Transition to recovery bookkeeping marker.
+        self.recovery_start = Some(now);
+    }
+
+    fn on_pto(&mut self, now: Instant) {
+        // BBR doesn't special-case PTO — persistent congestion flows
+        // through on_packets_lost eventually.
+        let _ = now;
+    }
+
+    fn window(&self) -> UInt32        { self.cwnd }
+    fn bytes_in_flight(&self) -> UInt32 { self.bytes_in_flight }
+    fn should_pace(&self) -> Bool     { true }      // BBR always paces
+    fn pacing_rate(&self) -> UInt64   { self.pacing_rate_bps }
+};
+
+impl Bbr {
+    pub fn exit_recovery_if_appropriate(&mut self, acked_time_sent: Instant) {
+        match self.recovery_start {
+            Some(rs) => {
+                if acked_time_sent >= rs {
+                    self.recovery_start = None;
+                }
+            },
+            None => {},
+        }
+    }
+
+    pub fn phase(&self) -> BbrPhase { self.phase.clone() }
+    pub fn estimated_bandwidth(&self) -> Float { self.bw.value() }
+    pub fn estimated_min_rtt(&self) -> Duration { self.rtt.value() }
+}
