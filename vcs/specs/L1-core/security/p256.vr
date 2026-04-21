@@ -1,0 +1,67 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L1
+// @tags: security, crypto, p256, ecdsa, ecdh, nist, fips186
+// @timeout: 10000
+// @expect: pass
+
+// NIST P-256 (secp256r1) ECDSA + ECDHE surface verification.
+
+mount core.collections.list.{List};
+mount core.security.ecc.p256.{
+    P256, P256PrivateKey, P256PublicKey, P256SharedSecret, P256Signature,
+    P256Error,
+    PRIVATE_KEY_SIZE, PUBLIC_KEY_UNCOMPRESSED_SIZE,
+    PUBLIC_KEY_COMPRESSED_SIZE, SHARED_SECRET_SIZE, SIGNATURE_SIZE,
+};
+
+fn typecheck_sizes() -> (Int, Int, Int, Int, Int) {
+    (PRIVATE_KEY_SIZE, PUBLIC_KEY_UNCOMPRESSED_SIZE,
+     PUBLIC_KEY_COMPRESSED_SIZE, SHARED_SECRET_SIZE, SIGNATURE_SIZE)
+}
+
+fn typecheck_pk_from_sk(sk: &P256PrivateKey) -> Result<P256PublicKey, P256Error> {
+    P256.public_key(sk)
+}
+
+fn typecheck_ecdh(sk: &P256PrivateKey, pk: &P256PublicKey)
+    -> Result<P256SharedSecret, P256Error>
+{
+    P256.ecdh(sk, pk)
+}
+
+fn typecheck_sign(sk: &P256PrivateKey) -> Result<P256Signature, P256Error> {
+    P256.sign(sk, b"hello p256")
+}
+
+fn typecheck_sign_prehashed(sk: &P256PrivateKey) -> Result<P256Signature, P256Error> {
+    let digest: [Byte; 32] = [0; 32];
+    P256.sign_prehashed(sk, &digest)
+}
+
+fn typecheck_verify(
+    pk: &P256PublicKey,
+    sig: &P256Signature,
+) -> Result<(), P256Error> {
+    P256.verify(pk, b"hello p256", sig)
+}
+
+fn typecheck_der_roundtrip(sig: &P256Signature) -> Result<P256Signature, P256Error> {
+    let der = P256.signature_to_der(sig);
+    P256.signature_from_der(&der)
+}
+
+fn typecheck_from_bytes() -> Result<P256PrivateKey, P256Error> {
+    let raw: [Byte; 32] = [
+        0xc9, 0xaf, 0xa9, 0xd8, 0x45, 0xba, 0x75, 0x16,
+        0x6b, 0x5c, 0x21, 0x57, 0x67, 0xb1, 0xd6, 0x93,
+        0x4e, 0x50, 0xc3, 0xdb, 0x36, 0xe8, 0x9b, 0x12,
+        0x7b, 0x8a, 0x62, 0x2b, 0x12, 0x0f, 0x67, 0x21,
+    ];
+    P256.private_key_from_bytes(&raw)
+}
+
+fn main() {
+    let _ = typecheck_sizes();
+    let _ = typecheck_from_bytes();
+}

@@ -1,0 +1,261 @@
+// =============================================================================
+// security/ecc/p256.vr — NIST P-256 (secp256r1) — ECDSA + ECDHE
+// =============================================================================
+// Layer: 2 (core primitive)
+// Dependencies: core, core.security.hash.sha256 (internal)
+// Reference: NIST FIPS 186-5 §6 — Digital Signature Standard (ECDSA)
+//            NIST SP 800-186 §3.2.1 — P-256 parameters (aka secp256r1)
+//            SECG SEC 2 v2.0 — the curve was first standardised here
+//            RFC 6979 — deterministic ECDSA (§3)
+// =============================================================================
+//
+// NIST P-256 (also known as secp256r1 / prime256v1) is the "safe
+// classical" elliptic curve for:
+//
+//   * **Legacy certificate chains** — most public-CA X.509 certs use
+//     ECDSA-P256 (or ECDSA-P384 for higher-security) — we ship P-256
+//     here, leaving P-384 as a future extension.
+//   * **TLS 1.3 fallback key_share** when the peer does not advertise
+//     X25519.
+//   * **FIPS-mandated deployments** — U.S. federal environments that
+//     require FIPS 140-2 / 140-3 validated crypto prefer NIST-curves
+//     over Bernstein's Curve25519.
+//   * **JWT with ES256** — one of the most common JWT signature
+//     algorithms for public-key JWTs.
+//
+// # Why Curve25519 + P-256, not just one?
+//
+// They have different failure modes:
+//
+// | | Curve25519 | P-256 |
+// |---|---|---|
+// | Designer | DJB (2006) | NIST (1999, NSA-assisted parameters) |
+// | Addition formula | Complete, naturally constant-time | Incomplete, requires careful constant-time impl |
+// | Invalid-curve attacks | Structurally impossible | Possible if peer PK not validated |
+// | FIPS approval | Ed25519 approved in FIPS 186-5 (2023) | Approved since FIPS 186-2 (2000) |
+// | Performance (software) | ~2× faster | Slower, PCLMULQDQ-accelerated variants narrow the gap |
+//
+// Modern protocol recommendation: **prefer X25519/Ed25519 when you
+// have the choice**; fall back to P-256 for interop with legacy
+// clients or FIPS-mandated deployments.
+//
+// # Sizes (FIPS 186-5 §6)
+//
+// | Object       | Size | Encoding |
+// |--------------|------|-----------|
+// | Private key  | 32 B | big-endian scalar in [1, n-1] |
+// | Public key   | 65 B (uncompressed) / 33 B (compressed) | SEC 1 §2.3.3 |
+// | Shared secret (ECDH) | 32 B | x-coordinate big-endian |
+// | Signature    | 64 B (r || s) fixed-width OR DER-encoded variable |
+//
+// Our API uses **raw fixed-width 64-byte** signatures (`r || s`) by
+// default — the TLS 1.3 / JWT convention. For DER-encoded signatures
+// (X.509 certs, some legacy JSON), use `signature_to_der` / `_from_der`.
+//
+// # Strict verification
+//
+// Verify rejects:
+//
+//   * r or s ≤ 0 or ≥ n (curve order) — signature malleability fix.
+//   * Public key not on curve (SEC 1 §3.2.2.1 point-on-curve check).
+//   * Public key = ∞ (identity).
+//
+// These checks match FIPS 186-5 §6.4.2 "Full Public Key Validation".
+//
+// # Intrinsic-backed
+//
+// Point operations route through `@intrinsic`:
+//
+//   * `verum.p256.keygen`
+//   * `verum.p256.ecdh`
+//   * `verum.p256.ecdsa_sign`          (RFC 6979 deterministic)
+//   * `verum.p256.ecdsa_sign_random`   (random k)
+//   * `verum.p256.ecdsa_verify`
+//
+// Backend: fiat-crypto's formally-verified P-256 (the same one
+// BoringSSL / rustls / libsodium use).
+//
+// =============================================================================
+
+module core.security.ecc.p256;
+mount core.*;
+
+// =============================================================================
+// Sizes
+// =============================================================================
+
+public const PRIVATE_KEY_SIZE: Int = 32;
+public const PUBLIC_KEY_UNCOMPRESSED_SIZE: Int = 65;
+public const PUBLIC_KEY_COMPRESSED_SIZE: Int = 33;
+public const SHARED_SECRET_SIZE: Int = 32;
+public const SIGNATURE_SIZE: Int = 64;
+
+public type P256PrivateKey is [Byte; 32];
+public type P256PublicKey is {
+    /// SEC 1 §2.3.3: either a compressed (33 B, 0x02/0x03 prefix) or
+    /// uncompressed (65 B, 0x04 prefix) point encoding. The
+    /// operations automatically handle either — callers don't need
+    /// to pre-canonicalise.
+    bytes: List<Byte>,
+};
+public type P256SharedSecret is [Byte; 32];
+
+/// ECDSA signature as fixed-width `r || s` (32 + 32 bytes). For
+/// X.509 interop use `signature_to_der` / `signature_from_der`.
+public type P256Signature is [Byte; 64];
+
+// =============================================================================
+// Errors
+// =============================================================================
+
+public type P256Error is
+    | InvalidPrivateKey(Text)
+    | InvalidPublicKey(Text)
+    | InvalidSignature(Text)
+    | VerificationFailed
+    | DerDecodeError(Text)
+    | BackendNotReady;
+
+// =============================================================================
+// P-256 namespace
+// =============================================================================
+
+public type P256 is ();
+
+implement P256 {
+    // -----------------------------------------------------------------
+    // Key generation
+    // -----------------------------------------------------------------
+
+    /// Generate a fresh private key via the runtime CSPRNG. The
+    /// scalar is rejection-sampled in [1, n-1] — the intrinsic
+    /// loops until a valid scalar is drawn (at most ~2 iterations
+    /// on average).
+    pub fn generate_private_key() -> P256PrivateKey {
+        let bytes = @intrinsic("verum.p256.keygen", ());
+        let mut sk: [Byte; 32] = [0; 32];
+        let mut i = 0;
+        while i < 32 { sk[i] = bytes[i]; i = i + 1; }
+        sk
+    }
+
+    /// Derive the public key (uncompressed, 65 bytes) from a private
+    /// key scalar.
+    pub fn public_key(sk: &P256PrivateKey) -> Result<P256PublicKey, P256Error> {
+        @intrinsic("verum.p256.public_key", sk)
+    }
+
+    /// Accept a user-supplied 32-byte scalar. Validates that the
+    /// scalar is in [1, n-1]; returns `InvalidPrivateKey` for zero
+    /// or out-of-range scalars.
+    pub fn private_key_from_bytes(raw: &[Byte; 32]) -> Result<P256PrivateKey, P256Error> {
+        @intrinsic("verum.p256.private_key_from_bytes", raw)
+    }
+
+    /// Accept a SEC 1-encoded public-key blob (33 or 65 bytes).
+    /// Validates the point is on-curve and non-identity.
+    pub fn public_key_from_bytes(raw: &[Byte]) -> Result<P256PublicKey, P256Error> {
+        @intrinsic("verum.p256.public_key_from_bytes", raw)
+    }
+
+    // -----------------------------------------------------------------
+    // ECDHE
+    // -----------------------------------------------------------------
+
+    /// P-256 ECDHE — compute the shared secret from this side's
+    /// private key + peer's public key. Returns the 32-byte
+    /// x-coordinate in big-endian form (FIPS 186-5 §6.1.3 + §5.7.1.2
+    /// of SP 800-56A).
+    ///
+    /// Like [`x25519.diffie_hellman`](x25519.vr), the caller MUST
+    /// run this through HKDF before using as a key. Never use the
+    /// raw x-coordinate directly.
+    pub fn ecdh(
+        sk: &P256PrivateKey,
+        peer_pk: &P256PublicKey,
+    ) -> Result<P256SharedSecret, P256Error> {
+        @intrinsic("verum.p256.ecdh", sk, peer_pk)
+    }
+
+    // -----------------------------------------------------------------
+    // ECDSA
+    // -----------------------------------------------------------------
+
+    /// Deterministic ECDSA-P256 signature per RFC 6979 — nonce k is
+    /// derived from HMAC-SHA-256 over the private key + message
+    /// hash, eliminating the need for a high-quality RNG at sign
+    /// time. Preferred over the random variant for most use cases.
+    ///
+    /// `message` is NOT pre-hashed — this function internally
+    /// computes SHA-256(message). If your protocol requires a
+    /// different hash, use `sign_prehashed` instead.
+    pub fn sign(
+        sk: &P256PrivateKey,
+        message: &[Byte],
+    ) -> Result<P256Signature, P256Error> {
+        @intrinsic("verum.p256.ecdsa_sign_rfc6979", sk, message)
+    }
+
+    /// Sign a pre-computed 32-byte hash (e.g. SHA-384 truncated, or
+    /// SHA-256 you already computed). Hash-algorithm agility —
+    /// caller decides the digest.
+    pub fn sign_prehashed(
+        sk: &P256PrivateKey,
+        digest: &[Byte; 32],
+    ) -> Result<P256Signature, P256Error> {
+        @intrinsic("verum.p256.ecdsa_sign_prehashed", sk, digest)
+    }
+
+    /// Non-deterministic sign — draws a fresh random k per
+    /// signature. Needed for some FIPS-validated deployments that
+    /// require NIST SP 800-90A RBG-sourced nonces. Most callers
+    /// want `sign` (deterministic) instead.
+    pub fn sign_random(
+        sk: &P256PrivateKey,
+        message: &[Byte],
+    ) -> Result<P256Signature, P256Error> {
+        @intrinsic("verum.p256.ecdsa_sign_random", sk, message)
+    }
+
+    /// Verify an ECDSA-P256 signature over `message`. Returns
+    /// `Ok(())` on valid, `Err(VerificationFailed)` on clean
+    /// reject, `Err(InvalidSignature)` on malformed input
+    /// (r, s out of range).
+    ///
+    /// Strict validation per FIPS 186-5 §6.4.2:
+    ///   * r, s ∈ [1, n-1]
+    ///   * public key on curve, non-identity
+    pub fn verify(
+        pk: &P256PublicKey,
+        message: &[Byte],
+        signature: &P256Signature,
+    ) -> Result<(), P256Error> {
+        @intrinsic("verum.p256.ecdsa_verify", pk, message, signature)
+    }
+
+    /// Verify against a pre-computed digest.
+    pub fn verify_prehashed(
+        pk: &P256PublicKey,
+        digest: &[Byte; 32],
+        signature: &P256Signature,
+    ) -> Result<(), P256Error> {
+        @intrinsic("verum.p256.ecdsa_verify_prehashed", pk, digest, signature)
+    }
+
+    // -----------------------------------------------------------------
+    // DER conversion (for X.509 interop)
+    // -----------------------------------------------------------------
+
+    /// Encode a fixed-width signature as an ASN.1 DER SEQUENCE of
+    /// two INTEGERs (`ECDSA-Sig-Value` per RFC 3279 §2.2.3). Used
+    /// in X.509 cert signatures and some legacy JSON protocols.
+    pub fn signature_to_der(sig: &P256Signature) -> List<Byte> {
+        @intrinsic("verum.p256.signature_to_der", sig)
+    }
+
+    /// Decode a DER-encoded `ECDSA-Sig-Value` into the fixed-width
+    /// form. Fails on non-canonical encodings or out-of-range r/s.
+    pub fn signature_from_der(der: &[Byte]) -> Result<P256Signature, P256Error> {
+        @intrinsic("verum.p256.signature_from_der", der)
+    }
+}

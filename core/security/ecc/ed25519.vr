@@ -1,0 +1,202 @@
+// =============================================================================
+// security/ecc/ed25519.vr — Edwards-curve Digital Signature (RFC 8032)
+// =============================================================================
+// Layer: 2 (core primitive)
+// Dependencies: core, core.security.hash.sha512 (internally used by backend)
+// Reference: RFC 8032 — Edwards-Curve Digital Signature Algorithm (EdDSA)
+//            NIST FIPS 186-5 §7 — approves Ed25519 for U.S. federal use
+// =============================================================================
+//
+// Ed25519 is the modern public-key signature scheme used everywhere
+// modern crypto is deployed — SSH (OpenSSH default since 2014),
+// Signal, Wireguard, Tor, modern TLS 1.3 certs, EdDSA JWTs, package
+// signing in apt/cargo/npm. It was designed by Daniel J. Bernstein
+// et al. with safety-by-default in mind:
+//
+//   * **Deterministic signatures** — same (key, message) → same
+//     signature. No need for a high-quality RNG at sign time; the
+//     "random" nonce is derived from the private key + message hash.
+//   * **Small key / signature sizes** — 32-byte public key,
+//     32-byte private seed, 64-byte signature.
+//   * **Fast** — single-core Ed25519 verify runs at ~100 k/s on a
+//     modern x86 with the reference implementation.
+//   * **Naturally constant-time** — the Edwards-form addition
+//     formula is complete (no exceptional cases), so no
+//     data-dependent branches appear in the scalar multiplication.
+//
+// # Key sizes
+//
+// | Object         | Size |
+// |----------------|------|
+// | Private seed   | 32 B |
+// | Public key     | 32 B |
+// | Signature      | 64 B |
+//
+// The "secret key" in some Ed25519 APIs is a 64-byte expanded key
+// (seed + public key); Verum's API keeps the two separate so the
+// 32-byte seed is the ONLY long-term secret to protect.
+//
+// # Architecture — intrinsic-backed
+//
+// Just like [`x25519`](x25519.vr), Ed25519's scalar multiplication
+// and Edwards-curve arithmetic route through `@intrinsic`:
+//
+//   * `verum.ed25519.keygen` — derive public key from seed
+//   * `verum.ed25519.sign`   — produce signature
+//   * `verum.ed25519.verify` — verify signature
+//
+// The runtime binds these to a fiat-crypto-based (F\*-verified)
+// implementation, the same lineage used by BoringSSL / libsodium /
+// rustls. A pure-Verum ref10-style port is tracked as a future
+// audit-hardening item.
+//
+// # Strict verification
+//
+// Verum's verify is the **strict** variant of Ed25519 per RFC 8032
+// §5.1.7:
+//
+//   * Malleability-check: S < L (the curve order).
+//   * Non-small-order: rejects signatures where A or R is a
+//     small-order point (12 specific values).
+//   * Point-on-curve: decodes A and R strictly per RFC 8032 §5.1.3.
+//
+// This matches the "ZIP-215" rule set used by Zcash / Cosmos /
+// Ethereum 2.0, which made Ed25519 compliance interop-consistent
+// across chains. Do NOT loosen these checks — doing so enables
+// signature-malleability attacks.
+//
+// =============================================================================
+
+module core.security.ecc.ed25519;
+mount core.*;
+
+// =============================================================================
+// Sizes
+// =============================================================================
+
+public const SEED_SIZE: Int = 32;
+public const PUBLIC_KEY_SIZE: Int = 32;
+public const SIGNATURE_SIZE: Int = 64;
+
+public type Ed25519Seed is [Byte; 32];
+public type Ed25519PublicKey is [Byte; 32];
+public type Ed25519Signature is [Byte; 64];
+
+// =============================================================================
+// Errors
+// =============================================================================
+
+public type Ed25519Error is
+    /// Signature was syntactically ill-formed (wrong length, S ≥ L,
+    /// R not decodable, public key not on curve, small-order point).
+    | Malformed(Text)
+    /// Verification failed — signature does not match the message
+    /// under the given public key. This is the "normal" rejection
+    /// case for a wrong signature; auth-layer code maps it to 401.
+    | VerificationFailed
+    /// Backend intrinsic is not wired up. Indicates a runtime
+    /// misconfiguration, not a user error.
+    | BackendNotReady;
+
+// =============================================================================
+// Ed25519 namespace
+// =============================================================================
+
+public type Ed25519 is ();
+
+implement Ed25519 {
+    /// Generate a fresh 32-byte seed using the runtime CSPRNG. The
+    /// seed is the private key material; derive the public key
+    /// separately via `public_key`.
+    ///
+    /// Callers that need a matching (seed, public_key) pair can
+    /// combine this with `public_key`:
+    ///
+    /// ```verum
+    /// let seed = Ed25519.generate_seed();
+    /// let pk   = Ed25519.public_key(&seed);
+    /// ```
+    public fn generate_seed() -> Ed25519Seed {
+        let mut s: [Byte; 32] = [0; 32];
+        fill_random(&mut s);
+        s
+    }
+
+    /// Derive the public key from a seed. Pure; same seed → same PK.
+    ///
+    /// Internally:
+    ///   1. `h = SHA-512(seed)`
+    ///   2. `s = h[0..32]` with clamping (bottom 3 bits cleared,
+    ///      top bit cleared, second-highest set)
+    ///   3. `A = s * B`   (B = Ed25519 base point)
+    ///   4. Public key = compressed encoding of A
+    public fn public_key(seed: &Ed25519Seed) -> Ed25519PublicKey {
+        let bytes = @intrinsic("verum.ed25519.keygen", seed);
+        let mut pk: [Byte; 32] = [0; 32];
+        let mut i = 0;
+        while i < 32 { pk[i] = bytes[i]; i = i + 1; }
+        pk
+    }
+
+    /// Deterministic sign. Same (seed, message) always produces the
+    /// same signature — no RNG at sign time. Security depends only
+    /// on seed secrecy and SHA-512 collision-resistance; there is
+    /// no nonce-reuse failure mode.
+    ///
+    /// ```verum
+    /// let sig = Ed25519.sign(&seed, b"release 1.2.3 sha256=...");
+    /// ```
+    public fn sign(seed: &Ed25519Seed, message: &[Byte]) -> Ed25519Signature {
+        let bytes = @intrinsic("verum.ed25519.sign", seed, message);
+        let mut sig: [Byte; 64] = [0; 64];
+        let mut i = 0;
+        while i < 64 { sig[i] = bytes[i]; i = i + 1; }
+        sig
+    }
+
+    /// Strict Ed25519 verification per RFC 8032 §5.1.7 + ZIP-215.
+    /// Returns `Ok(())` on valid, `Err(VerificationFailed)` on
+    /// clean rejection, `Err(Malformed(...))` on syntactically bad
+    /// inputs.
+    ///
+    /// ```verum
+    /// match Ed25519.verify(&peer_pk, message, &sig) {
+    ///     Ok(()) => /* valid — proceed */,
+    ///     Err(Ed25519Error.VerificationFailed) => return 401,
+    ///     Err(Ed25519Error.Malformed(_)) => return 400,
+    ///     Err(Ed25519Error.BackendNotReady) => panic("runtime misconfigured"),
+    /// }
+    /// ```
+    public fn verify(
+        public_key: &Ed25519PublicKey,
+        message: &[Byte],
+        signature: &Ed25519Signature,
+    ) -> Result<(), Ed25519Error> {
+        @intrinsic("verum.ed25519.verify", public_key, message, signature)
+    }
+
+    /// Re-expand a (seed, public_key) pair into a "full" 64-byte
+    /// Ed25519 secret key — the classical OpenSSL / libsodium
+    /// layout. Primarily for interop with tools that expect that
+    /// format.
+    public fn expanded_secret_key(
+        seed: &Ed25519Seed,
+        public_key: &Ed25519PublicKey,
+    ) -> [Byte; 64] {
+        let mut out: [Byte; 64] = [0; 64];
+        let mut i = 0;
+        while i < 32 { out[i] = seed[i]; i = i + 1; }
+        while i < 64 { out[i] = public_key[i - 32]; i = i + 1; }
+        out
+    }
+}
+
+// =============================================================================
+// Internal RNG binding
+// =============================================================================
+
+fn fill_random(buf: &mut [Byte; 32]) {
+    let filled = @intrinsic("verum.rng.fill_secure", 32);
+    let mut i = 0;
+    while i < 32 { buf[i] = filled[i]; i = i + 1; }
+}

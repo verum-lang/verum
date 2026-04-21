@@ -1,0 +1,67 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L1
+// @tags: security, crypto, ed25519, signatures, rfc8032, eddsa
+// @timeout: 10000
+// @expect: pass
+
+// RFC 8032 Ed25519 surface — keygen, public_key, sign, verify, strict
+// rejection semantics.
+
+mount core.security.ecc.ed25519.{
+    Ed25519, Ed25519Seed, Ed25519PublicKey, Ed25519Signature,
+    Ed25519Error,
+    SEED_SIZE, PUBLIC_KEY_SIZE, SIGNATURE_SIZE,
+};
+
+fn typecheck_sizes() -> (Int, Int, Int) {
+    (SEED_SIZE, PUBLIC_KEY_SIZE, SIGNATURE_SIZE)
+}
+
+fn typecheck_public_key_from_seed(seed: &Ed25519Seed) -> Ed25519PublicKey {
+    Ed25519.public_key(seed)
+}
+
+fn typecheck_sign(seed: &Ed25519Seed, msg: &[Byte]) -> Ed25519Signature {
+    Ed25519.sign(seed, msg)
+}
+
+fn typecheck_verify(
+    pk: &Ed25519PublicKey,
+    msg: &[Byte],
+    sig: &Ed25519Signature,
+) -> Result<(), Ed25519Error> {
+    Ed25519.verify(pk, msg, sig)
+}
+
+fn typecheck_expanded(
+    seed: &Ed25519Seed,
+    pk: &Ed25519PublicKey,
+) -> [Byte; 64] {
+    Ed25519.expanded_secret_key(seed, pk)
+}
+
+// RFC 8032 §7.1 test vector 1 — the canonical empty-message test.
+//
+//   SECRET KEY  = 9d61b19deffd5a60ba844af492ec2cc44449c5697b326919703bac031cae7f60
+//   PUBLIC KEY  = d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a
+//   MESSAGE     = (empty)
+//   SIGNATURE   = e5564300c360ac729086e2cc806e828a84877f1eb8e5d974d873e06522490155
+//                 5fb8821590a33bacc61e39701cf9b46bd25bf5f0595bbe24655141438e7a100b
+//
+// Byte-exact discharge lives in L1-core/security/run/ed25519_rfc8032.vr —
+// shape test below.
+fn typecheck_rfc8032_vector_1() -> Ed25519Seed {
+    let seed: Ed25519Seed = [
+        0x9d, 0x61, 0xb1, 0x9d, 0xef, 0xfd, 0x5a, 0x60,
+        0xba, 0x84, 0x4a, 0xf4, 0x92, 0xec, 0x2c, 0xc4,
+        0x44, 0x49, 0xc5, 0x69, 0x7b, 0x32, 0x69, 0x19,
+        0x70, 0x3b, 0xac, 0x03, 0x1c, 0xae, 0x7f, 0x60,
+    ];
+    seed
+}
+
+fn main() {
+    let _ = typecheck_sizes();
+    let _ = typecheck_rfc8032_vector_1();
+}

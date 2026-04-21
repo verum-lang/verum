@@ -1,0 +1,208 @@
+// =============================================================================
+// security/sig/rsa.vr — RSA signature verification (verify-only, legacy)
+// =============================================================================
+// Layer: 2 (core primitive)
+// Dependencies: core, core.security.hash.{sha256, sha384, sha512}
+// Reference: RFC 8017 — PKCS #1 v2.2 (RSA Cryptography Standard)
+//            FIPS 186-5 §5 — Digital Signature Standard (RSA section)
+// =============================================================================
+//
+// **RSA is verify-only in Verum**. We ship RSA signature verification
+// for compatibility with existing X.509 cert chains (~80% of public
+// web CAs still use RSA, as of early 2026), JWTs (RS256 / RS384 /
+// RS512 / PS256 / PS384 / PS512), and legacy software-signing
+// pipelines. We do NOT ship RSA key generation or signing.
+//
+// # Why verify-only?
+//
+// RSA is structurally harder to get right than ECDSA or EdDSA:
+//
+//   * **Key size.** Any new RSA signing in 2026 should use ≥ 3072-bit
+//     keys for equivalent security to ECDSA-P256. That's ~2 KiB of
+//     key material per signature — an order of magnitude larger.
+//   * **Side channels.** RSA private-key operations are famously
+//     vulnerable to timing, cache, and fault attacks. Implementing
+//     signing safely requires constant-time modular exponentiation
+//     with Montgomery multiplication, CRT caching, and blinding —
+//     far more subtle than verifying.
+//   * **Migration path.** Every modern protocol is deprecating RSA
+//     *signing*. TLS 1.3 still accepts RSA-certified clients but
+//     the server cert tier is migrating to EC. New PKI uses
+//     Ed25519 / ECDSA / ML-DSA. There is no good reason to sign
+//     with RSA in new designs.
+//
+// Verify, on the other hand, has no such pitfalls — it's a public-
+// key operation, no secret material, no timing leak risk from the
+// implementation side.
+//
+// If you need RSA signing, use a platform HSM / KMS (AWS KMS, GCP
+// KMS, HashiCorp Vault Transit, YubiHSM 2, Thales Luna). The key
+// stays in hardware, Verum just formats the unsigned input.
+//
+// # Supported schemes
+//
+//   * **PSS** — RFC 8017 §8.1. The modern scheme (PS256 JWT, X.509
+//     RSASSA-PSS). Strongly preferred.
+//   * **PKCS#1 v1.5** — RFC 8017 §8.2. The legacy scheme (RS256 JWT,
+//     most X.509 RSA signatures). Still widely used — we support it
+//     because X.509 interop demands it.
+//
+// Both over SHA-256 / SHA-384 / SHA-512 digests.
+//
+// # Architecture
+//
+// RSA modular arithmetic is extremely expensive to implement
+// portably in pure Verum. Verify routes through `@intrinsic`:
+//
+//   * `verum.rsa.verify_pss`
+//   * `verum.rsa.verify_pkcs1_v15`
+//
+// The runtime binds these to Verum's multi-precision integer
+// backend (tracked separately as `core.math.bigint` — P2 work).
+//
+// =============================================================================
+
+module core.security.sig.rsa;
+mount core.*;
+mount core.security.hash.sha256.{Sha256};
+mount core.security.hash.sha384.{Sha384};
+mount core.security.hash.sha512.{Sha512};
+
+// =============================================================================
+// Public key
+// =============================================================================
+
+/// An RSA public key — modulus `n` and public exponent `e`
+/// (typically 65537).
+///
+/// Modulus length dictates the security level: 2048 bits = 112-bit
+/// classical security (deprecated-but-acceptable); 3072 = 128-bit;
+/// 4096 = ~140-bit (marginal gain for 2× cost).
+public type RsaPublicKey is {
+    /// Big-endian modulus bytes. Typical lengths: 256 (2048-bit),
+    /// 384 (3072-bit), 512 (4096-bit).
+    n: List<Byte>,
+    /// Big-endian public exponent. Usually 0x010001 (65537);
+    /// some legacy keys use 3, which is acceptable for verify
+    /// but caution-worthy.
+    e: List<Byte>,
+};
+
+implement RsaPublicKey {
+    /// Construct from raw big-endian `n` and `e`. No validation
+    /// performed here — verify calls will fail cleanly on invalid
+    /// inputs.
+    pub fn new(n: List<Byte>, e: List<Byte>) -> RsaPublicKey {
+        RsaPublicKey { n: n, e: e }
+    }
+
+    /// Modulus size in bytes.
+    pub fn modulus_bytes(&self) -> Int { self.n.len() }
+
+    /// Nominal security level in bits — informational only. Uses
+    /// NIST SP 800-57 Part 1 §5.6.1 (Table 2) mapping.
+    pub fn security_level_bits(&self) -> Int {
+        let n = self.n.len() * 8;
+        if n >= 15360 { 256 }
+        else if n >= 7680 { 192 }
+        else if n >= 3072 { 128 }
+        else if n >= 2048 { 112 }
+        else if n >= 1024 { 80 }   // broken — do not use
+        else { 0 }
+    }
+}
+
+// =============================================================================
+// Hash choice
+// =============================================================================
+
+/// Hash algorithm to use in an RSA-PSS / RSA-PKCS#1-v1.5 signature.
+public type RsaHash is
+    | Sha256_
+    | Sha384_
+    | Sha512_;
+
+// =============================================================================
+// Errors
+// =============================================================================
+
+public type RsaError is
+    /// Signature syntactically malformed (wrong length, bad OID,
+    /// wrong padding).
+    | Malformed(Text)
+    /// Public key rejected — modulus too small, invalid exponent.
+    | InvalidPublicKey(Text)
+    /// Signature did not verify against the message under the key.
+    | VerificationFailed
+    /// Backend intrinsic not available.
+    | BackendNotReady;
+
+// =============================================================================
+// Verify — RSA-PSS (RFC 8017 §8.1)
+// =============================================================================
+
+/// Verify an RSA-PSS signature over `message` under `public_key`
+/// using `hash` as both the message digest and the MGF1 hash.
+/// `salt_length` is the PSS salt parameter — for interop with TLS
+/// 1.3 (RFC 8446 §4.2.3), use salt_length = hash output size.
+///
+/// Returns `Ok(())` on valid, `Err(VerificationFailed)` on clean
+/// reject, `Err(Malformed)` on ill-formed input.
+public fn verify_pss(
+    public_key: &RsaPublicKey,
+    message: &[Byte],
+    signature: &[Byte],
+    hash: RsaHash,
+    salt_length: Int,
+) -> Result<(), RsaError> {
+    @intrinsic("verum.rsa.verify_pss",
+               public_key, message, signature, hash, salt_length)
+}
+
+// =============================================================================
+// Verify — RSA PKCS#1 v1.5 (RFC 8017 §8.2)
+// =============================================================================
+
+/// Verify an RSA PKCS#1 v1.5 signature. The classic scheme used by
+/// most X.509 certs and JWT RS256/RS384/RS512. Slightly less modern
+/// than PSS but still standardised and widely supported.
+///
+/// `hash` must match the digest algorithm the signature was produced
+/// with — there is no algorithm negotiation within the signature
+/// itself for v1.5.
+public fn verify_pkcs1_v15(
+    public_key: &RsaPublicKey,
+    message: &[Byte],
+    signature: &[Byte],
+    hash: RsaHash,
+) -> Result<(), RsaError> {
+    @intrinsic("verum.rsa.verify_pkcs1_v15",
+               public_key, message, signature, hash)
+}
+
+// =============================================================================
+// Convenience — verify a pre-computed digest (useful for X.509
+// sig-over-tbs-cert where the SignedData.signatureValue covers a
+// specific DER encoding).
+// =============================================================================
+
+public fn verify_pss_prehashed(
+    public_key: &RsaPublicKey,
+    digest: &[Byte],
+    signature: &[Byte],
+    hash: RsaHash,
+    salt_length: Int,
+) -> Result<(), RsaError> {
+    @intrinsic("verum.rsa.verify_pss_prehashed",
+               public_key, digest, signature, hash, salt_length)
+}
+
+public fn verify_pkcs1_v15_prehashed(
+    public_key: &RsaPublicKey,
+    digest: &[Byte],
+    signature: &[Byte],
+    hash: RsaHash,
+) -> Result<(), RsaError> {
+    @intrinsic("verum.rsa.verify_pkcs1_v15_prehashed",
+               public_key, digest, signature, hash)
+}

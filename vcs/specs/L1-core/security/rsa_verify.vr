@@ -1,0 +1,64 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L1
+// @tags: security, crypto, rsa, pss, pkcs1, verify, legacy, pki
+// @timeout: 10000
+// @expect: pass
+
+// RSA verify surface — PSS and PKCS#1 v1.5 over SHA-2 family.
+
+mount core.collections.list.{List};
+mount core.security.sig.rsa.{
+    RsaPublicKey, RsaHash, RsaError,
+    verify_pss, verify_pkcs1_v15,
+    verify_pss_prehashed, verify_pkcs1_v15_prehashed,
+};
+
+fn typecheck_pk_build() -> RsaPublicKey {
+    // A dummy 256-byte modulus + 65537 exponent to check the type
+    // shape. Real callers pull these from a parsed X.509 cert.
+    let mut n = List.new();
+    let mut i = 0;
+    while i < 256 { n.push(0xFF as Byte); i = i + 1; }
+    let mut e = List.new();
+    e.push(0x01); e.push(0x00); e.push(0x01);     // 65537
+    RsaPublicKey.new(n, e)
+}
+
+fn typecheck_pk_metrics(pk: &RsaPublicKey) -> (Int, Int) {
+    (pk.modulus_bytes(), pk.security_level_bits())
+}
+
+fn typecheck_verify_pss(
+    pk: &RsaPublicKey,
+    msg: &[Byte],
+    sig: &[Byte],
+) -> Result<(), RsaError> {
+    verify_pss(pk, msg, sig, RsaHash.Sha256_, 32)
+}
+
+fn typecheck_verify_pkcs1(
+    pk: &RsaPublicKey,
+    msg: &[Byte],
+    sig: &[Byte],
+) -> Result<(), RsaError> {
+    verify_pkcs1_v15(pk, msg, sig, RsaHash.Sha384_)
+}
+
+fn typecheck_verify_prehashed(
+    pk: &RsaPublicKey,
+    digest: &[Byte],
+    sig: &[Byte],
+) -> Result<(), RsaError> {
+    verify_pss_prehashed(pk, digest, sig, RsaHash.Sha512_, 64)
+}
+
+fn typecheck_hash_variants() -> (RsaHash, RsaHash, RsaHash) {
+    (RsaHash.Sha256_, RsaHash.Sha384_, RsaHash.Sha512_)
+}
+
+fn main() {
+    let pk = typecheck_pk_build();
+    let _ = typecheck_pk_metrics(&pk);
+    let _ = typecheck_hash_variants();
+}
