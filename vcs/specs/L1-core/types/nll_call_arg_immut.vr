@@ -1,0 +1,46 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L1
+// @tags: borrow, nll, call-arg, immutable, regression
+// @timeout: 5000
+// @expected-exit: 0
+//
+// Regression for Issue #4 (root fix in
+// crates/verum_types/src/aliasing.rs::borrow_immut_for_call +
+// crates/verum_types/src/infer.rs UnOp::Ref case).
+//
+// A sequence `call(&value); mutate(&mut value);` — with no `value`-derived
+// reference surviving the first call's return — must type-check without
+// complaint. The previous implementation had a `borrow_mut_for_call`
+// helper that released transient mut-call-arg borrows at the boundary,
+// but no symmetric helper for the immutable case: every `&value` in a
+// call-arg position created a tracked, persistent borrow that lingered
+// with no live holder and phantom-conflicted with the subsequent
+// `&mut value`.
+
+public type Counter is { n: Int };
+
+public fn read_n(c: &Counter) -> Int {
+    c.n
+}
+
+public fn incr(c: &mut Counter) {
+    c.n = c.n + 1;
+}
+
+fn main() {
+    let mut c = Counter { n: 0 };
+
+    // First: immutable call-arg. Borrow must release at call return.
+    let observed = read_n(&c);
+    assert_eq(observed, 0);
+
+    // Now a mutable call-arg on the same variable — must succeed.
+    incr(&mut c);
+    incr(&mut c);
+
+    let after = read_n(&c);
+    assert_eq(after, 2);
+
+    print("nll_call_arg_immut ok");
+}

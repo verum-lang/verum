@@ -8920,11 +8920,27 @@ impl TypeChecker {
                         Ok(_) => {
                             // Borrow tracking for aliasing detection
                             // CRITICAL: Do NOT discard the Result — borrow conflicts must propagate
+                            //
+                            // Root fix for Issue #4 (NLL over-retain): when
+                            // the `&x` appears in a call-argument position,
+                            // use `borrow_immut_for_call` — a transient
+                            // borrow that does not persist past the call
+                            // boundary. The symmetric `borrow_mut_for_call`
+                            // already exists for the RefMut arm below; the
+                            // missing immut counterpart caused
+                            // `call(&value); mutate(&mut value)` sequences
+                            // to fail with a phantom "previous immutable
+                            // borrow" because the call-arg borrow lingered
+                            // in the tracker with no live holder.
                             match &inner.kind {
                                 ExprKind::Path(path) => {
                                     if let Some(verum_ast::ty::PathSegment::Name(id)) = path.segments.first() {
                                         let var_name = id.name.as_str();
-                                        self.borrow_tracker.borrow_immut(var_name, expr.span)?;
+                                        if self.in_call_arg_context {
+                                            self.borrow_tracker.borrow_immut_for_call(var_name, expr.span)?;
+                                        } else {
+                                            self.borrow_tracker.borrow_immut(var_name, expr.span)?;
+                                        }
                                     }
                                 }
                                 _ => {}

@@ -441,6 +441,56 @@ impl BorrowTracker {
         Ok(ref_id)
     }
 
+    /// Create an *immutable* borrow for a function call argument (NLL behavior).
+    ///
+    /// Analogue of `borrow_mut_for_call` for the common `call(&value)` pattern.
+    /// The returned borrow is NOT persisted in the tracker — a function call
+    /// argument is live only for the duration of the call itself, and the
+    /// callee cannot leak the reference into any enclosing binding unless
+    /// the return type explicitly contains a reference (that case is handled
+    /// elsewhere by `link_holder_to_last_borrow`).
+    ///
+    /// Root fix for Issue #4 (NLL liveness over-retain): before this
+    /// existed, `borrow_immut` was the only entry point and it always
+    /// created a tracked, scope-lifetime borrow. A sequence like
+    ///
+    /// ```verum
+    /// let sz = call(&value);     // `&value` tracked past the call return
+    /// mutate(&mut value);        // ERROR: "previous immutable borrow"
+    /// ```
+    ///
+    /// reported a false conflict because the immutable borrow was still
+    /// "active" at the `&mut value` site even though it had no live holder.
+    /// This function fixes the asymmetry with `borrow_mut_for_call`.
+    pub fn borrow_immut_for_call(
+        &mut self,
+        target: impl Into<Text>,
+        span: Span,
+    ) -> Result<RefId, TypeError> {
+        let target = target.into();
+
+        // An immutable call-arg read is compatible with existing immutable
+        // borrows (multiple readers are fine). Still reject if a *mutable*
+        // borrow is outstanding — the mutable side must be sole-owner by
+        // contract.
+        if let Some(mut_borrows) = self.active_mut_borrows.get(&target)
+            && let Some(existing) = mut_borrows.first()
+        {
+            return Err(TypeError::BorrowConflict {
+                var: target,
+                existing_borrow_span: existing.span,
+                existing_is_mut: true,
+                new_borrow_span: span,
+                new_is_mut: false,
+            });
+        }
+
+        // Do NOT register the borrow: it has no persistent holder and will
+        // not outlive the call. Returning a fresh RefId keeps the infer.rs
+        // call sites uniform with `borrow_mut_for_call`.
+        Ok(RefId::new())
+    }
+
     /// Create a mutable borrow for a function call argument (NLL behavior).
     /// Unlike `borrow_mut`, this releases field borrows first to simulate NLL.
     /// This is used when passing `&mut whole_struct` to a function, where
