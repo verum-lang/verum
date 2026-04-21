@@ -42120,10 +42120,12 @@ impl TypeChecker {
             // type with a Deref::Target (e.g. `Heap<T>`,
             // `Shared<T>`, `MutexGuard<T>`) and the method exists
             // on any type in the deref chain, suggest going through
-            // the target. Full auto-deref method dispatch through
-            // `Heap<dyn Protocol>` needs a dedicated vtable codegen
-            // path (tracked as task #35); in the meantime this hint
-            // helps the user find the right shape without hunting.
+            // the target. Direct `Heap<dyn P>.method()` dispatch is
+            // wired through the auto-deref cascade + post-cascade
+            // DynProtocol resolution (task #35, closed); this hint
+            // remains for the corner case where the cascade failed
+            // to propagate — it points at the explicit-deref form
+            // `(&*h).method(...)` as a manual workaround.
             {
                 let method_name_for_hint: Text = method.name.as_str().into();
                 let mut target_ty_opt = {
@@ -42151,10 +42153,10 @@ impl TypeChecker {
                                         span,
                                         did_you_mean: verum_common::Maybe::Some(
                                             verum_common::Text::from(format!(
-                                                "deref to access `{}` on `dyn {}` — \
-                                                 `Heap<dyn Protocol>.method()` dispatch \
-                                                 requires vtable codegen (tracked)",
-                                                method.name.as_str(), proto_name
+                                                "try `(&*receiver).{}(...)` to call `{}` on `dyn {}` \
+                                                 directly — the auto-deref cascade should have \
+                                                 reached it but did not on this call site",
+                                                method.name.as_str(), method.name.as_str(), proto_name
                                             )),
                                         ),
                                     });
