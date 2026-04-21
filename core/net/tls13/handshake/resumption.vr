@@ -86,7 +86,7 @@ public type ClientSession is {
     ticket_nonce:        List<Byte>,
 }
 
-impl ClientSession {
+implement ClientSession {
     /// Is the ticket still valid given current time?
     public fn is_fresh(&self, now: Instant) -> Bool {
         let elapsed = now.duration_since(self.created_at.clone())
@@ -139,7 +139,7 @@ public type SessionTicketKey is {
     issued_at: Instant,
 }
 
-impl SessionTicketKey {
+implement SessionTicketKey {
     /// Generate a fresh STEK from the CSPRNG.
     public fn generate() -> SessionTicketKey {
         let mut key: [Byte; 16] = [0_u8; 16];
@@ -385,7 +385,7 @@ public type ClientSessionStore is {
     capacity: Int,
 };
 
-impl ClientSessionStore {
+implement ClientSessionStore {
     public fn new(capacity: Int) -> ClientSessionStore {
         ClientSessionStore { entries: [], capacity: capacity }
     }

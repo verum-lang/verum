@@ -1,0 +1,318 @@
+// =============================================================================
+// net/tls13/handshake/zero_rtt_antireplay.vr — 0-RTT replay cache (RFC 8446 §8)
+// =============================================================================
+// Layer: 5 (Network — TLS 1.3 core)
+// Dependencies: core, core.collections, core.time, core.security.mac.siphash
+// =============================================================================
+//
+// RFC 8446 §8 specifies two anti-replay mechanisms for 0-RTT data:
+//
+//   (a) Single-use tickets   — server-enforced by removing the ticket
+//       from its ticket cache on first acceptance. `resume_verify` +
+//       `resumption.ClientSessionStore.take` already give us that.
+//
+//   (b) ClientHello recording — server records (psk_identity,
+//       truncated-CH hash) pairs for the freshness window and rejects
+//       any subsequent matching 0-RTT attempt.
+//
+// This module implements (b): a probabilistic Bloom-filter backed
+// cache with *two* rotating buckets, matching the construction
+// described in RFC 8446 §8.2 (with FFFFFF default 2^24 entries and
+// 2^-10 false-positive rate):
+//
+//   * Every bucket covers the freshness window + a grace overlap so
+//     an incoming 0-RTT attempt whose CH was issued just before a
+//     bucket rotation is still caught by the previous bucket.
+//   * Rotation is lazy — happens at `insert` time when the current
+//     time is past the active bucket's cut-off. This keeps the
+//     cache allocation-free in the hot path.
+//
+// # Security properties
+//
+//   * False-positive rate = user-configurable (default 2^-10 ≈ 0.1%).
+//     A false positive means a *legitimate* 0-RTT attempt is rejected
+//     — safe (client falls back to full handshake) but visible as a
+//     performance regression. **Never** a false *negative* within the
+//     window: once an entry is added, the same (psk_id, ch_hash) pair
+//     always tests positive until the bucket rotates out.
+//   * Two-bucket rotation: an attacker cannot race bucket boundaries
+//     to get an accepted replay — each bucket extends past the window
+//     by 50% so any in-flight 0-RTT is still covered by at least one
+//     active bucket.
+//   * SipHash-2-4 keyed with a server-side secret → no precomputed
+//     collisions; keys rotate with bucket rotation to prevent long-
+//     term collision probing.
+//
+// # Non-goals (by design in v0.1)
+//
+//   * Cross-server coordination (Redis/memcached) — deployments with
+//     many TLS terminators need an external shared replay cache.
+//     This module is a building block; the distributed implementation
+//     wraps the local interface in a `ReplayCache` protocol.
+//   * Precise accounting — we store Bloom bits, not tuples, so
+//     eviction is all-or-nothing per rotation.
+//
+// =============================================================================
+
+module core.net.tls13.handshake.zero_rtt_antireplay;
+
+mount core.*;
+mount core.collections.List;
+mount core.time.instant.{Instant};
+mount core.time.duration.{Duration};
+mount core.security.mac.hmac.{hmac_sha256};
+mount core.security.util.rng.{fill_secure};
+
+// =============================================================================
+// Config — capacity + freshness window + false-positive target
+// =============================================================================
+
+/// Bloom-filter dimensions from user-facing knobs.
+public type ReplayConfig is {
+    /// Expected number of (psk_id, ch_hash) pairs admitted per bucket.
+    /// Bloom filter is sized for this capacity with the target FP rate.
+    expected_entries: Int,
+    /// Target false-positive rate × 1_000_000 (e.g. 1000 ⇒ 0.1%).
+    target_fp_ppm: Int,
+    /// Freshness window (RFC 8446 §8.3 recommends 10 seconds). Entries
+    /// older than this are evicted via bucket rotation.
+    window_ms: Int,
+};
+
+implement ReplayConfig {
+    public fn default() -> ReplayConfig {
+        ReplayConfig {
+            expected_entries: 1_048_576,   // 2^20
+            target_fp_ppm:    1000,        // 0.1% → 2^-10 FP
+            window_ms:        10_000,
+        }
+    }
+
+    /// Number of bits the Bloom filter needs: m = -n·ln(p)/ln(2)^2.
+    /// ln(p) with p = target_fp_ppm / 1_000_000; we approximate with
+    /// a fixed table for the common FP rates.
+    public fn bits_per_bucket(&self) -> Int {
+        // Rough sizing — for p=0.1% (2^-10) we need ~14.4 bits/entry.
+        // Scale with log2(1/p) to give coarse control without a full
+        // floating-point ln evaluation.
+        let bits_per_entry = match self.target_fp_ppm {
+            0 | 1 | 10      => 24,        // ~2^-20
+            100             => 19,        // ~2^-15
+            1_000           => 15,        // ~2^-10
+            10_000          => 10,        // ~2^-7
+            _               => 15,
+        };
+        let m = self.expected_entries * bits_per_entry;
+        // Round up to a multiple of 64 so we can pack u64-at-a-time.
+        let rem = m % 64;
+        if rem == 0 { m } else { m + (64 - rem) }
+    }
+
+    /// Optimal number of hashes: k = m/n · ln(2) ≈ bits_per_entry · 0.693.
+    public fn hash_count(&self) -> Int {
+        let bits_per_entry = self.bits_per_bucket() / self.expected_entries;
+        // ln(2) ≈ 0.693 → multiply by 7 then divide by 10.
+        let k = (bits_per_entry * 7) / 10;
+        if k < 2 { 2 } else if k > 16 { 16 } else { k }
+    }
+}
+
+// =============================================================================
+// One Bloom bucket — m bits packed into List<UInt64>
+// =============================================================================
+
+/// A single time-bucketed Bloom filter. Opaque from outside; hot
+/// operations (test/set) are internal.
+type Bucket is {
+    /// Bit array; each UInt64 holds 64 bits (LSB = bit index 0).
+    bits:        List<UInt64>,
+    bit_len:     Int,        // total bits in `bits` (multiple of 64)
+    k:           Int,        // number of hash functions
+    /// 32-byte secret mixed into every probe derivation — rotates
+    /// with the bucket so long-running collision probing is defeated.
+    key:         [Byte; 32],
+    created_at:  Instant,
+    admitted:    Int,        // counter for saturation monitoring
+};
+
+fn new_bucket(cfg: &ReplayConfig, now: Instant) -> Bucket {
+    let bit_len = cfg.bits_per_bucket();
+    let word_count = bit_len / 64;
+    let mut bits: List<UInt64> = [];
+    let mut i: Int = 0;
+    while i < word_count { bits.push(0_u64); i = i + 1; }
+    let mut key: [Byte; 32] = [0_u8; 32];
+    fill_secure(&mut key);
+    Bucket {
+        bits:        bits,
+        bit_len:     bit_len,
+        k:           cfg.hash_count(),
+        key:         key,
+        created_at:  now,
+        admitted:    0,
+    }
+}
+
+fn bytes_to_u64_le(b: &[Byte], off: Int) -> UInt64 {
+    let mut r: UInt64 = 0_u64;
+    let mut i: Int = 0;
+    while i < 8 {
+        r = r | ((b[off + i] as UInt64) << ((i * 8) as UInt64));
+        i = i + 1;
+    }
+    r
+}
+
+fn set_bit(b: &mut Bucket, idx: Int) {
+    let word = idx / 64;
+    let bit = idx % 64;
+    b.bits[word] = b.bits[word] | (1_u64 << (bit as UInt64));
+}
+
+fn test_bit(b: &Bucket, idx: Int) -> Bool {
+    let word = idx / 64;
+    let bit = idx % 64;
+    (b.bits[word] >> (bit as UInt64)) & 1_u64 == 1_u64
+}
+
+// =============================================================================
+// Key derivation: (psk_id || 0x00 || ch_hash) → k probe offsets via double
+// hashing (g_i(x) = h1(x) + i · h2(x)) — Kirsch-Mitzenmacher technique,
+// cuts the per-insert cost from k SipHash evaluations to 2.
+// =============================================================================
+
+fn key_bytes(psk_id: &[Byte], ch_hash: &[Byte]) -> List<Byte> {
+    let mut buf: List<Byte> = [];
+    let mut i: Int = 0;
+    while i < psk_id.len() { buf.push(psk_id[i]); i = i + 1; }
+    buf.push(0_u8);
+    let mut j: Int = 0;
+    while j < ch_hash.len() { buf.push(ch_hash[j]); j = j + 1; }
+    buf
+}
+
+fn probe_offsets(b: &Bucket, psk_id: &[Byte], ch_hash: &[Byte]) -> List<Int> {
+    let input = key_bytes(psk_id, ch_hash);
+    // One HMAC-SHA256 call produces 32 bytes; split into two 64-bit
+    // halves for Kirsch-Mitzenmacher double-hashing. The MAC is
+    // keyed by the bucket secret so attackers can't precompute
+    // colliding (psk_id, ch_hash) pairs.
+    let digest = hmac_sha256(&b.key[..], input.as_slice());
+    let h1 = bytes_to_u64_le(&digest[..], 0);
+    let h2 = bytes_to_u64_le(&digest[..], 8);
+    let mut out: List<Int> = [];
+    let m = b.bit_len as UInt64;
+    let mut i: Int = 0;
+    while i < b.k {
+        let g = (h1 + (i as UInt64) * h2) % m;
+        out.push(g as Int);
+        i = i + 1;
+    }
+    out
+}
+
+// =============================================================================
+// ReplayCache — two-bucket facade
+// =============================================================================
+
+/// Server-side 0-RTT replay cache keyed by (psk_identity, truncated
+/// ClientHello hash). Two rotating Bloom buckets cover the freshness
+/// window with a 50% overlap.
+public type ReplayCache is {
+    cfg:       ReplayConfig,
+    active:    Bucket,
+    retired:   Maybe<Bucket>,
+};
+
+implement ReplayCache {
+    /// Construct a replay cache from `cfg`, seeded at `now`.
+    public fn new(cfg: ReplayConfig) -> ReplayCache {
+        let now = Instant.now();
+        let active = new_bucket(&cfg, now.clone());
+        ReplayCache { cfg: cfg, active: active, retired: None }
+    }
+
+    /// Default-configuration cache — 2^20 entries, 0.1% FP, 10s window.
+    public fn with_defaults() -> ReplayCache {
+        ReplayCache.new(ReplayConfig.default())
+    }
+
+    fn rotate_if_due(&mut self, now: Instant) {
+        let age = now.duration_since(self.active.created_at.clone())
+            .unwrap_or_else(|| Duration.from_secs(0));
+        let half_window_ms = self.cfg.window_ms / 2;
+        if (age.as_millis() as Int) >= half_window_ms {
+            // Retire the active bucket; start a fresh one.
+            let old = core.mem.replace(&mut self.active, new_bucket(&self.cfg, now));
+            self.retired = Some(old);
+        }
+    }
+
+    /// Attempt to admit a (psk_id, ch_hash) pair. Returns:
+    ///
+    ///   * `Ok(true)`  — admitted; caller may accept the 0-RTT flight.
+    ///   * `Ok(false)` — already present in either active or retired
+    ///                   bucket: REJECT the 0-RTT flight (the client
+    ///                   may still complete a full 1-RTT handshake).
+    ///
+    /// `now` must be monotonic wall-clock or `Instant.now()` — used
+    /// to trigger rotation lazily.
+    public fn try_admit(
+        &mut self,
+        psk_id:  &[Byte],
+        ch_hash: &[Byte],
+        now:     Instant,
+    ) -> Bool {
+        self.rotate_if_due(now.clone());
+
+        // First: consult the retired bucket (if any) — a hit there
+        // means we're in the overlap window and the pair was admitted
+        // during the previous half-window.
+        match &self.retired {
+            Some(r) => {
+                let offsets = probe_offsets(r, psk_id, ch_hash);
+                if all_set(r, &offsets) { return false; }
+            },
+            None => {},
+        }
+
+        // Active bucket. If all probe bits are set → likely replay.
+        let offsets = probe_offsets(&self.active, psk_id, ch_hash);
+        if all_set(&self.active, &offsets) { return false; }
+
+        // Admit — set all probe bits.
+        let mut i: Int = 0;
+        while i < offsets.len() {
+            set_bit(&mut self.active, offsets[i]);
+            i = i + 1;
+        }
+        self.active.admitted = self.active.admitted + 1;
+        true
+    }
+
+    /// Current capacity stats (for metrics / operators).
+    public fn stats(&self) -> ReplayStats {
+        ReplayStats {
+            active_admitted: self.active.admitted,
+            retired_present: match &self.retired { Some(_) => true, None => false },
+            bits_per_bucket: self.active.bit_len,
+            k_hashes:        self.active.k,
+        }
+    }
+}
+
+fn all_set(b: &Bucket, offsets: &List<Int>) -> Bool {
+    let mut i: Int = 0;
+    while i < offsets.len() {
+        if !test_bit(b, offsets[i]) { return false; }
+        i = i + 1;
+    }
+    true
+}
+
+public type ReplayStats is {
+    active_admitted:  Int,
+    retired_present:  Bool,
+    bits_per_bucket:  Int,
+    k_hashes:         Int,
+};

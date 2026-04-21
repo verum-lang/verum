@@ -51,7 +51,7 @@ public type IssueOptions is {
     alpn:                List<Byte>,
 };
 
-impl IssueOptions {
+implement IssueOptions {
     public fn default() -> IssueOptions {
         IssueOptions {
             lifetime_seconds:    604_800_u32,    // 7 days

@@ -38,6 +38,7 @@ public module resumption;
 public module early_data;
 public module ticket_issuer;
 public module resume_verify;
+public module zero_rtt_antireplay;
 
 // Re-exports — codec
 public mount .codec.{Reader, CodecError};
@@ -114,4 +115,9 @@ public mount .ticket_issuer.{
 public mount .resume_verify.{
     ResumedSession, ResumeVerifyError,
     verify_offered_psks, DEFAULT_FRESHNESS_WINDOW_MS,
+};
+
+// Re-exports — 0-RTT replay cache (RFC 8446 §8)
+public mount .zero_rtt_antireplay.{
+    ReplayCache, ReplayConfig, ReplayStats,
 };

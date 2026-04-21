@@ -1,0 +1,47 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: tls13, rfc8446, zero-rtt, antireplay, bloom, typecheck
+// @timeout: 10000
+// @expect: pass
+
+mount core.net.tls13.handshake.{
+    ReplayCache, ReplayConfig, ReplayStats,
+};
+mount core.time.instant.{Instant};
+
+fn exercise_replay_cache() {
+    // Default config: 2^20 expected entries, 0.1% FP, 10 s window.
+    let mut cache = ReplayCache.with_defaults();
+
+    let psk_id:  [Byte; 8]  = [0x11_u8, 0x22_u8, 0x33_u8, 0x44_u8,
+                                0x55_u8, 0x66_u8, 0x77_u8, 0x88_u8];
+    let ch_hash: [Byte; 32] = [0_u8; 32];
+
+    let now = Instant.now();
+
+    // First admission → fresh: should be accepted.
+    let _first  = cache.try_admit(&psk_id[..], &ch_hash[..], now.clone());
+    // Second admission of the same pair → rejected (replay).
+    let _second = cache.try_admit(&psk_id[..], &ch_hash[..], now.clone());
+
+    // A different pair — still accepted inside the same window.
+    let ch_hash2: [Byte; 32] = [0xFF_u8; 32];
+    let _other  = cache.try_admit(&psk_id[..], &ch_hash2[..], now.clone());
+
+    let _stats: ReplayStats = cache.stats();
+
+    // Custom config path — tuned for small edge deployments.
+    let cfg = ReplayConfig {
+        expected_entries: 4_096,
+        target_fp_ppm:    1_000,
+        window_ms:        5_000,
+    };
+    let mut small = ReplayCache.new(cfg);
+    let _ = small.try_admit(&psk_id[..], &ch_hash[..], now.clone());
+    let _ = small.stats();
+}
+
+fn main() {
+    exercise_replay_cache();
+}
