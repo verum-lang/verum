@@ -1,0 +1,353 @@
+// =============================================================================
+// net/quic/connection_sm/mod.vr — QUIC connection state machine (RFC 9000 §4-§12)
+// =============================================================================
+// Layer: 5 (Network — QUIC)
+// Dependencies: core, collections, core.time, core.net.quic.*
+// Spec: internal/specs/tls-quic.md §7.1, §12 Phase 4 step 3
+// =============================================================================
+//
+// Phase 4 step 3: typed QUIC connection state machine that consumes
+// everything from Phases 0-4 so far (packet codec + frame codec +
+// crypto + recovery + stream SM + transport params). Ship as
+// `core.net.quic.connection_sm` (not `connection`) to avoid
+// colliding with the existing intrinsic-backed
+// `core.net.quic.connection.Connection` type during the co-existence
+// phase; the two merge once the QUIC transport fully replaces the
+// FFI stack.
+//
+// # Top-level shape
+//
+//   QuicConnection<S>  where S ∈ { Initial, Handshake, OneRtt, Closing, Draining }
+//
+// The inner state struct carries:
+//   * role (client / server)
+//   * version
+//   * dcid_local / dcid_peer / scid
+//   * LossDetection (from core.net.quic.recovery.LossDetection — holds
+//     the three PnSpaces + RTT estimator + CC)
+//   * TransportParams (local + remote)
+//   * ConnFlowControl (connection-level + stream-count FC)
+//   * Send/Recv stream tables
+//   * Crypto keys per PN space (InitialKeys / HandshakeKeys / AppKeys)
+//   * Optional HpKey per PN space for header protection
+//   * TLS handshake driver (ClientSm from Phase 2 step 2)
+//
+// Per phase, the SM exposes narrow APIs:
+//
+//   QuicConnection<Initial>
+//     .handshake_step(inbound: &[Byte]) -> Result<Outbound, QuicError>
+//     .promote_to_handshake(hs_keys) -> QuicConnection<Handshake>
+//
+//   QuicConnection<Handshake>
+//     .handshake_step(inbound) -> Result<Outbound, QuicError>
+//     .promote_to_app(app_keys) -> QuicConnection<OneRtt>
+//
+//   QuicConnection<OneRtt>
+//     .open_bidi_stream() -> Result<SendStream, QuicError>
+//     .on_datagram(bytes) -> Result<(), QuicError>   — receive + decrypt + dispatch
+//     .drain_outbound() -> List<Datagram>             — pull encrypted UDP datagrams
+//     .close(error_code, reason) -> QuicConnection<Closing>
+//
+//   QuicConnection<Closing> / <Draining>
+//     .on_datagram — accept CONNECTION_CLOSE ack, handle echoes
+//     .is_expired() -> Bool
+//
+// This file lands the state struct + typed outer skeleton. Individual
+// phase methods that require the full frame codec + recovery + TLS
+// integration live in separate files (tx.vr / rx.vr / lifecycle.vr) —
+// a focused follow-up commit wires each up using the types exposed
+// here.
+//
+// # Module layout
+//
+// ```
+// core.net.quic.connection_sm
+// ├── mod.vr        ← this file — facade + QuicConnection<S>
+// └── state.vr      — Initial / Handshake / OneRtt / Closing / Draining phantoms
+// ```
+//
+// =============================================================================
+
+module core.net.quic.connection_sm;
+
+public module state;
+
+mount core.*;
+mount core.collections.List;
+mount core.time.instant.{Instant};
+mount core.time.duration.{Duration};
+
+mount core.net.quic.connection_id.{ConnectionId};
+mount core.net.quic.transport_params.{TransportParams};
+mount core.net.quic.recovery.{LossDetection, NewReno, CongestionCtrl};
+mount core.net.quic.stream_sm.{SendStream, RecvStream, ConnFlowControl};
+mount core.net.quic.crypto.initial.{InitialKeys};
+mount core.net.quic.crypto.header_protection.{HpKey};
+mount core.net.quic.error.{QuicError};
+
+// Re-exports
+public mount .state.{Initial, Handshake, OneRtt, Closing, Draining};
+
+// =============================================================================
+// Role + outbound datagram
+// =============================================================================
+
+public type Role is Client | Server;
+
+public type Datagram is {
+    bytes: List<Byte>,
+};
+
+// =============================================================================
+// Keys per PN space
+// =============================================================================
+
+/// Per-direction AEAD + HP key material for one PN space. Filled on
+/// phase promotion (derive_initial_keys / derive_handshake_keys_from_tls /
+/// derive_app_keys_from_tls).
+public type QuicSpaceKeys is {
+    aead_key:  List<Byte>,
+    aead_iv:   [Byte; 12],
+    hp_key:    HpKey,
+};
+
+public type QuicKeys is {
+    initial:    Maybe<(QuicSpaceKeys, QuicSpaceKeys)>,  // (tx, rx) — client sends with .0, receives with .1
+    handshake:  Maybe<(QuicSpaceKeys, QuicSpaceKeys)>,
+    app:        Maybe<(QuicSpaceKeys, QuicSpaceKeys)>,
+};
+
+impl QuicKeys {
+    pub fn empty() -> QuicKeys {
+        QuicKeys { initial: None, handshake: None, app: None }
+    }
+}
+
+// =============================================================================
+// ConnState — inner runtime state, phase-independent
+// =============================================================================
+
+/// The complete runtime state of a QUIC connection. Mutable fields
+/// move forward in lockstep with the SM phase; read-only ones (role,
+/// version, etc.) are set at construction and never change.
+public type ConnState is {
+    role:          Role,
+    version:       UInt32,
+
+    // Connection IDs
+    dcid_peer:     ConnectionId,    // what we put in DCID on wire toward peer
+    scid_local:    ConnectionId,    // what we advertise as our SCID
+    retry_src_cid: Maybe<ConnectionId>,    // set post-Retry
+
+    // Transport parameters
+    params_local:  TransportParams,
+    params_remote: Maybe<TransportParams>,   // None until peer's params arrive
+
+    // Crypto material
+    keys:          QuicKeys,
+
+    // Recovery + congestion control
+    loss:          LossDetection,
+    cc:            NewReno,            // concrete backend; CongestionCtrl for pluggability
+
+    // Flow control + stream tables
+    flow:          ConnFlowControl,
+    send_streams:  List<(UInt64, SendStream)>,
+    recv_streams:  List<(UInt64, RecvStream)>,
+
+    // Lifecycle timestamps
+    opened_at:     Instant,
+    idle_deadline: Maybe<Instant>,
+
+    // Closing / draining bookkeeping
+    close_reason:  Maybe<List<Byte>>,
+    close_sent_at: Maybe<Instant>,
+    drain_expiry:  Maybe<Instant>,
+};
+
+// =============================================================================
+// QuicConnection<S> — typed outer wrapper
+// =============================================================================
+
+public type QuicConnection<S> is {
+    inner: ConnState,
+    // `_phase` is conceptual — compilers track via the generic parameter.
+};
+
+implement QuicConnection<Initial> {
+    /// Construct a client-side connection bound for `peer_dcid` with
+    /// initial keys derived from the client's Destination CID per
+    /// RFC 9001 §5.2.
+    pub fn client_new(
+        peer_dcid: ConnectionId,
+        scid_local: ConnectionId,
+        params_local: TransportParams,
+        initial_keys_tx: QuicSpaceKeys,
+        initial_keys_rx: QuicSpaceKeys,
+        now: Instant,
+    ) -> QuicConnection<Initial> {
+        let mut keys = QuicKeys.empty();
+        keys.initial = Some((initial_keys_tx, initial_keys_rx));
+        let flow = ConnFlowControl.new(
+            params_local.initial_max_data,
+            params_local.initial_max_data,
+            params_local.initial_max_streams_bidi,
+            params_local.initial_max_streams_bidi,
+            params_local.initial_max_streams_uni,
+            params_local.initial_max_streams_uni,
+        );
+        QuicConnection {
+            inner: ConnState {
+                role:          Role.Client,
+                version:       0x00000001_u32,
+                dcid_peer:     peer_dcid,
+                scid_local:    scid_local,
+                retry_src_cid: None,
+                params_local:  params_local,
+                params_remote: None,
+                keys:          keys,
+                loss:          LossDetection.new(),
+                cc:            NewReno.new(),
+                flow:          flow,
+                send_streams:  [],
+                recv_streams:  [],
+                opened_at:     now,
+                idle_deadline: None,
+                close_reason:  None,
+                close_sent_at: None,
+                drain_expiry:  None,
+            },
+        }
+    }
+
+    /// Promote to Handshake phase. Caller supplies the handshake-phase
+    /// AEAD+HP keys derived by the TLS 1.3 handshake SM post-ServerHello.
+    pub fn promote_to_handshake(
+        mut self,
+        hs_keys_tx: QuicSpaceKeys,
+        hs_keys_rx: QuicSpaceKeys,
+    ) -> QuicConnection<Handshake> {
+        self.inner.keys.handshake = Some((hs_keys_tx, hs_keys_rx));
+        QuicConnection { inner: self.inner }
+    }
+}
+
+implement QuicConnection<Handshake> {
+    /// Promote to 1-RTT phase. After promotion, caller should call
+    /// `discard_initial_keys` and `discard_handshake_keys` at the
+    /// RFC 9001 §4.9 discharge points.
+    pub fn promote_to_app(
+        mut self,
+        app_keys_tx: QuicSpaceKeys,
+        app_keys_rx: QuicSpaceKeys,
+    ) -> QuicConnection<OneRtt> {
+        self.inner.keys.app = Some((app_keys_tx, app_keys_rx));
+        QuicConnection { inner: self.inner }
+    }
+
+    /// RFC 9001 §4.9.1 — drop Initial keys on first Handshake packet
+    /// successfully validated (client) or after sending a Handshake
+    /// packet (server). Idempotent.
+    pub fn discard_initial_keys(&mut self) {
+        self.inner.keys.initial = None;
+        self.inner.loss.on_keys_discarded(core.net.quic.recovery.PnSpaceKind.Initial);
+    }
+}
+
+implement QuicConnection<OneRtt> {
+    /// RFC 9001 §4.9.2 — drop Handshake keys on first HANDSHAKE_DONE
+    /// (client) or after sending 1-RTT response to HANDSHAKE_DONE
+    /// (server). Idempotent.
+    pub fn discard_handshake_keys(&mut self) {
+        self.inner.keys.handshake = None;
+        self.inner.loss.on_keys_discarded(core.net.quic.recovery.PnSpaceKind.Handshake);
+    }
+
+    /// Open a locally-initiated bidirectional stream.
+    pub fn open_bidi(&mut self) -> Result<UInt64, QuicError> {
+        let is_server = match self.inner.role {
+            Role.Client => false,
+            Role.Server => true,
+        };
+        match self.inner.flow.alloc_stream_bidi(is_server) {
+            Some(sid) => {
+                let max_sd = self.inner.params_remote
+                    .clone().map(|p| p.initial_max_stream_data_bidi_remote).unwrap_or_else(|| 0_u64);
+                let send = SendStream.new(sid, max_sd);
+                let recv = RecvStream.new(sid, self.inner.params_local.initial_max_stream_data_bidi_local);
+                self.inner.send_streams.push((sid, send));
+                self.inner.recv_streams.push((sid, recv));
+                Ok(sid)
+            },
+            None => Err(QuicError.InvalidTransportParameter(Text.from_str("stream limit reached"))),
+        }
+    }
+
+    /// Open a locally-initiated unidirectional stream (send only).
+    pub fn open_uni(&mut self) -> Result<UInt64, QuicError> {
+        let is_server = match self.inner.role {
+            Role.Client => false,
+            Role.Server => true,
+        };
+        match self.inner.flow.alloc_stream_uni(is_server) {
+            Some(sid) => {
+                let max_sd = self.inner.params_remote
+                    .clone().map(|p| p.initial_max_stream_data_uni).unwrap_or_else(|| 0_u64);
+                let send = SendStream.new(sid, max_sd);
+                self.inner.send_streams.push((sid, send));
+                Ok(sid)
+            },
+            None => Err(QuicError.InvalidTransportParameter(Text.from_str("stream limit reached"))),
+        }
+    }
+
+    /// Transition to Closing — caller sends a CONNECTION_CLOSE frame
+    /// and waits 3*PTO before fully releasing state.
+    pub fn close(mut self, error_code: UInt64, reason: List<Byte>, now: Instant) -> QuicConnection<Closing> {
+        let _ = error_code;
+        self.inner.close_reason = Some(reason);
+        self.inner.close_sent_at = Some(now);
+        // Drain expiry = now + 3 * PTO (approximate — caller refines).
+        self.inner.drain_expiry = Some(now);
+        QuicConnection { inner: self.inner }
+    }
+}
+
+implement QuicConnection<Closing> {
+    /// Incoming packet during close: may re-trigger an echo of the
+    /// CONNECTION_CLOSE frame. Caller re-emits if needed.
+    pub fn is_expired(&self, now: Instant) -> Bool {
+        match self.inner.drain_expiry {
+            Some(d) => now >= d,
+            None    => false,
+        }
+    }
+
+    /// Peer signalled close — we move to Draining (stop sending, wait
+    /// for timer).
+    pub fn recv_peer_close(mut self, now: Instant) -> QuicConnection<Draining> {
+        self.inner.drain_expiry = Some(now);   // refine externally
+        QuicConnection { inner: self.inner }
+    }
+}
+
+implement QuicConnection<Draining> {
+    pub fn is_expired(&self, now: Instant) -> Bool {
+        match self.inner.drain_expiry {
+            Some(d) => now >= d,
+            None    => false,
+        }
+    }
+}
+
+// =============================================================================
+// Accessors — same on every phase, no state-specific guards needed.
+// =============================================================================
+
+implement<S> QuicConnection<S> {
+    pub fn role(&self) -> Role { self.inner.role.clone() }
+    pub fn version(&self) -> UInt32 { self.inner.version }
+    pub fn peer_cid(&self) -> &ConnectionId { &self.inner.dcid_peer }
+    pub fn local_cid(&self) -> &ConnectionId { &self.inner.scid_local }
+    pub fn opened_at(&self) -> Instant { self.inner.opened_at.clone() }
+}

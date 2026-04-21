@@ -1,0 +1,38 @@
+// =============================================================================
+// net/quic/connection_sm/state.vr — Connection state phases (RFC 9000 §4)
+// =============================================================================
+// Layer: 5 (Network — QUIC)
+// =============================================================================
+//
+// RFC 9000 §4 defines the connection lifecycle with five phases
+// distinguished by which PN spaces are active:
+//
+//   InitialPhase    — Initial packets only. Transport parameters not yet
+//                     validated. Subject to the 3× anti-amplification limit
+//                     on the server until PATH_CHALLENGE succeeds.
+//   HandshakePhase  — Handshake packets in flight; Initial still active
+//                     until keys are discarded.
+//   ApplicationPhase — 1-RTT keys installed. Initial + Handshake keys
+//                      discarded. Streams and application data flow.
+//   Closing         — Either side emitted CONNECTION_CLOSE; we echo it
+//                     back until the drain timer expires.
+//   Draining        — Remote peer closed; we stop sending, drain until
+//                     expiry, then drop state.
+//
+// Rather than a runtime enum with state-guarded method dispatch, each
+// phase is its own type; `QuicConnection<Initial>` exposes only the
+// initial-phase surface (send CRYPTO / receive CRYPTO / derive handshake
+// keys), and so on.
+//
+// =============================================================================
+
+module core.net.quic.connection_sm.state;
+
+mount core.*;
+
+// Phantom state markers.
+public type Initial     is ();
+public type Handshake   is ();
+public type OneRtt      is ();
+public type Closing     is ();
+public type Draining    is ();

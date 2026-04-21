@@ -1,0 +1,61 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: quic, rfc9000, connection, state-machine, typecheck
+// @timeout: 10000
+// @expect: pass
+
+mount core.net.quic.connection_sm.*;
+mount core.net.quic.connection_id.{ConnectionId};
+mount core.net.quic.transport_params.{TransportParams};
+mount core.net.quic.crypto.header_protection.{HpKey};
+mount core.time.instant.{Instant};
+
+fn make_initial_keys() -> QuicSpaceKeys {
+    QuicSpaceKeys {
+        aead_key: [0_u8, 1_u8, 2_u8],
+        aead_iv:  [0_u8; 12],
+        hp_key:   HpKey.AesEcb128([0_u8; 16]),
+    }
+}
+
+fn check_phase_transitions() -> Result<(), core.net.quic.error.QuicError> {
+    let dcid = ConnectionId.from_bytes(&[1_u8, 2_u8, 3_u8, 4_u8, 5_u8, 6_u8, 7_u8, 8_u8])
+        .unwrap_or_else(|_| ConnectionId.empty());
+    let scid = ConnectionId.empty();
+    let params = TransportParams.defaults();
+
+    let conn_initial = QuicConnection.client_new(
+        dcid, scid, params,
+        make_initial_keys(),
+        make_initial_keys(),
+        Instant.now(),
+    );
+
+    let conn_handshake = conn_initial.promote_to_handshake(
+        make_initial_keys(),
+        make_initial_keys(),
+    );
+
+    let mut conn_1rtt = conn_handshake.promote_to_app(
+        make_initial_keys(),
+        make_initial_keys(),
+    );
+
+    conn_1rtt.discard_handshake_keys();
+
+    let _ = conn_1rtt.open_bidi()?;
+    let _ = conn_1rtt.open_uni()?;
+
+    let conn_closing = conn_1rtt.close(0_u64, [0x62_u8, 0x79_u8, 0x65_u8], Instant.now());
+    let _ = conn_closing.is_expired(Instant.now());
+
+    let conn_draining = conn_closing.recv_peer_close(Instant.now());
+    let _ = conn_draining.is_expired(Instant.now());
+
+    Ok(())
+}
+
+fn main() {
+    let _ = check_phase_transitions();
+}
