@@ -248,6 +248,55 @@ public fn write(fd: FileDesc, buf: &[Byte]) -> Result<Int, OSError> {
     }
 }
 
+/// Read at explicit `offset` without moving the file cursor (POSIX `pread`).
+///
+/// Atomic with respect to concurrent `pread` / `pwrite` on the same `fd`,
+/// which is the contract `read + lseek` does NOT satisfy. Required by the
+/// SQLite VFS layer (sqlite-native.md Gap 3) and by any code that needs
+/// an explicit-offset read path — always prefer this over `read` + `lseek`.
+/// Partial reads at EOF return `Ok(n)` where `n < buf.len()`.
+public fn pread(fd: FileDesc, buf: &mut [Byte], offset: Int) -> Result<Int, OSError> {
+    let result = unsafe {
+        syscall_raw(
+            SYS_PREAD64,
+            fd.as_raw(),
+            buf.as_ptr() as Int,
+            buf.len(),
+            offset,
+            0,
+            0,
+        )
+    };
+    if result < 0 {
+        Err(OSError.from_code(-result as Int))
+    } else {
+        Ok(result)
+    }
+}
+
+/// Write at explicit `offset` without moving the file cursor (POSIX `pwrite`).
+/// See `pread` for the atomicity contract. Partial writes return `Ok(n)`
+/// with `n < buf.len()` — callers must loop until the full buffer lands
+/// if they require all-or-nothing semantics.
+public fn pwrite(fd: FileDesc, buf: &[Byte], offset: Int) -> Result<Int, OSError> {
+    let result = unsafe {
+        syscall_raw(
+            SYS_PWRITE64,
+            fd.as_raw(),
+            buf.as_ptr() as Int,
+            buf.len(),
+            offset,
+            0,
+            0,
+        )
+    };
+    if result < 0 {
+        Err(OSError.from_code(-result as Int))
+    } else {
+        Ok(result)
+    }
+}
+
 /// Close a file descriptor.
 public fn close(fd: FileDesc) -> Result<(), OSError> {
     let result = unsafe {

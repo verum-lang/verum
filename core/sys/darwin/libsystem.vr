@@ -883,6 +883,15 @@ public const F_SETOWN: Int = 6;
 public const F_GETLK: Int = 7;
 public const F_SETLK: Int = 8;
 public const F_SETLKW: Int = 9;
+/// `fcntl(fd, F_FULLFSYNC, 0)` — Darwin-specific command that forces the
+/// disk to flush its write cache to persistent media. A plain `fsync`
+/// on Darwin only flushes the kernel's dirty-page list to the disk,
+/// which is insufficient for crash-safety on consumer-grade SSDs where
+/// the drive itself buffers writes. Required by the SQLite VFS
+/// (sqlite-native.md Gap 2) and by any workload that cares about
+/// write-through semantics. Has no Linux equivalent (Linux `fsync`
+/// already flushes the disk cache on modern kernels).
+public const F_FULLFSYNC: Int = 51;
 public const F_SETNOSIGPIPE: Int = 73;
 public const F_GETNOSIGPIPE: Int = 74;
 
@@ -945,6 +954,36 @@ public fn safe_write(fd: FileDesc, buf: &[Byte]) -> Result<Int, OSError> {
 /// Write to file descriptor (low-level) - takes pointer and count
 public fn safe_write_raw(fd: FileDesc, buf: &Byte, count: Int) -> Result<Int, OSError> {
     let result = unsafe { write(fd.0, buf, count) };
+    if result < 0 {
+        let err = errno();
+        Err(OSError { code: err, message: errno_to_message(err) })
+    } else {
+        Ok(result)
+    }
+}
+
+/// Read at explicit `offset` without moving the file cursor (POSIX `pread`).
+/// Atomic with respect to concurrent `pread`/`pwrite` on the same `fd`
+/// (unlike `lseek`+`read`). Safe wrapper around the libSystem `pread`
+/// FFI binding above. Required by the SQLite VFS layer
+/// (sqlite-native.md Gap 3) and any other code that needs explicit-offset
+/// reads. Partial reads at EOF return `Ok(n)` where `n < buf.len()`.
+public fn safe_pread(fd: FileDesc, buf: &mut [Byte], offset: Int) -> Result<Int, OSError> {
+    let result = unsafe { pread(fd.0, buf.as_mut_ptr() as &unsafe Byte, buf.len(), offset) };
+    if result < 0 {
+        let err = errno();
+        Err(OSError { code: err, message: errno_to_message(err) })
+    } else {
+        Ok(result)
+    }
+}
+
+/// Write at explicit `offset` without moving the file cursor (POSIX `pwrite`).
+/// See `safe_pread` for the atomicity contract. Partial writes return
+/// `Ok(n)` with `n < buf.len()` — callers must loop until the full
+/// buffer lands if they need all-or-nothing semantics.
+public fn safe_pwrite(fd: FileDesc, buf: &[Byte], offset: Int) -> Result<Int, OSError> {
+    let result = unsafe { pwrite(fd.0, buf.as_ptr(), buf.len(), offset) };
     if result < 0 {
         let err = errno();
         Err(OSError { code: err, message: errno_to_message(err) })
@@ -1190,6 +1229,20 @@ public fn safe_fstat(fd: FileDesc, stat_buf: &mut Stat) -> Result<(), OSError> {
 }
 
 /// Sync file to disk (safe wrapper)
+/// Darwin `F_FULLFSYNC` wrapper — the only way to achieve true
+/// write-through durability on macOS. On any other platform use the
+/// cross-platform `core.sys.common.full_fsync` dispatcher instead of
+/// calling this directly.
+public fn safe_full_fsync(fd: FileDesc) -> Result<(), OSError> {
+    let result = unsafe { fcntl(fd.0, F_FULLFSYNC, 0) };
+    if result < 0 {
+        let err = errno();
+        Err(OSError { code: err, message: errno_to_message(err) })
+    } else {
+        Ok(())
+    }
+}
+
 public fn safe_fsync(fd: FileDesc) -> Result<(), OSError> {
     let result = unsafe { fsync(fd.0) };
     if result < 0 {

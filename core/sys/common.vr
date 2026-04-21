@@ -483,6 +483,124 @@ public fn get_thread_id() -> UInt64 {
 // =============================================================================
 
 // =============================================================================
+// Cross-Platform Explicit-Offset I/O (POSIX `pread` / `pwrite`)
+// =============================================================================
+//
+// Atomic read/write at an explicit byte offset without modifying the file
+// cursor. Required by the SQLite VFS layer (sqlite-native.md Gap 3) and
+// by any code that performs concurrent offset-keyed reads/writes on the
+// same file descriptor — `lseek`+`read` is NOT atomic relative to other
+// threads sharing the fd.
+//
+// Dispatches to the platform primitive:
+//   * Linux   — `SYS_pread64` / `SYS_pwrite64` via
+//               `core.sys.linux.syscall.pread` / `pwrite`.
+//   * macOS   — libSystem `pread` / `pwrite` via safe wrappers in
+//               `core.sys.darwin.libsystem.safe_pread` / `safe_pwrite`.
+//   * Windows — unimplemented in v0.1 (filesystem I/O on Windows will
+//               come with the full PosixVfs/Win32Vfs split in Phase 1).
+//
+// Partial reads at EOF return `Ok(n)` with `n < buf.len()`. Partial
+// writes return `Ok(n)` and must be looped by the caller if
+// all-or-nothing semantics are required.
+// =============================================================================
+
+/// Cross-platform `pread(2)` — read into `buf` from `fd` at `offset`.
+public fn pread(fd: FileDesc, buf: &mut [Byte], offset: Int) -> Result<Int, OSError> {
+    @cfg(target_os = "linux")
+    { return super.linux.syscall.pread(fd, buf, offset); }
+
+    @cfg(target_os = "macos")
+    { return super.darwin.libsystem.safe_pread(fd, buf, offset); }
+
+    @cfg(target_os = "windows")
+    {
+        return Err(OSError {
+            code: -1,
+            message: "pread: Windows platform not implemented in v0.1 — use PosixVfs under WSL or wait for Win32Vfs in Phase 1",
+        });
+    }
+}
+
+/// Cross-platform `pwrite(2)` — write `buf` to `fd` at `offset`.
+public fn pwrite(fd: FileDesc, buf: &[Byte], offset: Int) -> Result<Int, OSError> {
+    @cfg(target_os = "linux")
+    { return super.linux.syscall.pwrite(fd, buf, offset); }
+
+    @cfg(target_os = "macos")
+    { return super.darwin.libsystem.safe_pwrite(fd, buf, offset); }
+
+    @cfg(target_os = "windows")
+    {
+        return Err(OSError {
+            code: -1,
+            message: "pwrite: Windows platform not implemented in v0.1 — use PosixVfs under WSL or wait for Win32Vfs in Phase 1",
+        });
+    }
+}
+
+// =============================================================================
+// Cross-Platform Durability Primitives
+// =============================================================================
+//
+// `full_fsync` — forces the disk to flush its write cache to persistent
+// media. Stronger than `fsync` on Darwin (where plain fsync does not
+// flush the SSD's onboard cache — a decades-old Apple design choice).
+// On Linux, `fsync` already has write-through semantics on modern
+// kernels, so this dispatches there.
+//
+// `sync_directory` — fsyncs the *directory* entry, not a file within
+// it. Required after `rename`/`unlink`/`creat` to guarantee the name
+// change survives a power cut; without it, the file's data may be
+// durable but the filename pointing at it may not be. Critical for
+// SQLite's "atomic rename then sync dir" journal-commit pattern.
+// Covers sqlite-native.md Gap 2.
+// =============================================================================
+
+/// Cross-platform `full_fsync(fd)` — write-through flush.
+public fn full_fsync(fd: FileDesc) -> Result<(), OSError> {
+    @cfg(target_os = "linux")
+    { return super.linux.syscall.fsync(fd); }
+
+    @cfg(target_os = "macos")
+    { return super.darwin.libsystem.safe_full_fsync(fd); }
+
+    @cfg(target_os = "windows")
+    {
+        return Err(OSError {
+            code: -1,
+            message: "full_fsync: Windows platform not implemented in v0.1 (use FlushFileBuffers directly in platform-specific code)",
+        });
+    }
+}
+
+/// `fsync(dirfd)` on POSIX — opens the directory read-only, syncs, closes.
+/// Required to make `rename` / `creat` / `unlink` on the contained files
+/// survive a power cut. A no-op return of `Ok(())` on Windows because
+/// NTFS journals directory updates synchronously in the FS layer and
+/// has no analogous "open + sync dir" primitive.
+public fn sync_directory(path: &[Byte]) -> Result<(), OSError> {
+    @cfg(target_os = "linux")
+    {
+        let fd = super.linux.syscall.open(path, 0 /* O_RDONLY */, 0)?;
+        let result = super.linux.syscall.fsync(fd);
+        let _ = super.linux.syscall.close(fd);
+        return result;
+    }
+
+    @cfg(target_os = "macos")
+    {
+        let fd = super.darwin.libsystem.safe_open(path, 0 /* O_RDONLY */, 0)?;
+        let result = super.darwin.libsystem.safe_fsync(fd);
+        let _ = super.darwin.libsystem.safe_close(fd);
+        return result;
+    }
+
+    @cfg(target_os = "windows")
+    { return Ok(()); }
+}
+
+// =============================================================================
 // Cross-Platform Context System
 // =============================================================================
 // V-LLSI Context System provides unified access to thread-local context slots
