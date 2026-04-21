@@ -15,6 +15,19 @@
 - `82ce88d` fix(types): prioritise user inherent methods over protocol-method static lookup (third guard)
 - `882b7bf` feat(types): `*result` auto-unwraps Result<T,E> → T at typecheck (#55 tail)
 - `e0b8781` fix(types): tighten name-collision guard — check specific method name
+- `fe13cae` fix(L2/tests): align test code with current stdlib channel/int APIs
+- `65d0728` fix(types): alias lowercase int widths to per-width Named types (pending llvm rebuild)
+
+## ⚠️ LLVM build state
+`llvm/install/` отсутствует в working tree (snapshot этой сессии). Compilation crates
+`verum_llvm_sys` / `verum_mlir_sys` / `verum_tblgen` требуют локально собранную
+LLVM 21.1.8. Для восстановления build:
+```bash
+cd llvm && ./build.sh
+```
+Занимает ~2–3ч. Существующие `target/release/verum` и `target/release/vtest`
+бинарники остаются функциональны для тестирования (L0 8/8 держится) — новые
+infer.rs изменения (65d0728) не применяются до rebuild.
 
 ## Known-unfixed
 - **context/type name collision для SYNTH path**: `Benchmark.new(x)` в файле с `type Benchmark` + `using [Benchmark]` всё ещё может дать неверный тип через какой-то непокрытый путь (мой minimal repro `/tmp/test_min_using.vr` всё ещё падает). Guard в register_function + method_call_inner_impl не ловит все места. Есть какой-то третий путь env.insert("Benchmark", Record) который я не нашёл без глубокого трассирования. Требует дальнейшего исследования.
