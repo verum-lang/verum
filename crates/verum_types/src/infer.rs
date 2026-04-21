@@ -38210,7 +38210,21 @@ impl TypeChecker {
                 // not a variable name (starts with lowercase). This prevents false positives where
                 // `file.read_to_string()` would incorrectly try to look up methods on a type named "file".
                 let is_type_name = type_name.chars().next().map(|c| c.is_uppercase()).unwrap_or(false);
-                if is_type_name {
+                // NAME-COLLISION GUARD: if the user has a same-named type
+                // with inherent methods, skip the protocol-method static
+                // lookup and let the downstream inherent-methods path
+                // handle `X.method(...)`. Without this, a stdlib context
+                // `context X { fn new(...) -> Y; ... }` would hijack
+                // `X.new(...)` calls in user files even when user has
+                // `type X is { ... }` + `implement X { fn new(...) -> X }`.
+                let user_has_inherent = {
+                    let methods_guard = self.inherent_methods.read();
+                    methods_guard
+                        .get(&verum_common::Text::from(type_name))
+                        .map(|m| !m.is_empty())
+                        .unwrap_or(false)
+                };
+                if is_type_name && !user_has_inherent {
                     // Build the lookup type from the type name.
                     // For generic types like Wrapper, this creates Wrapper with no args, and
                     // lookup_protocol_method will match it against Wrapper<T> implementations.
