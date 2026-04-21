@@ -1,0 +1,20 @@
+// =============================================================================
+// core/net/proxy/mod.vr — L7 reverse-proxy toolkit
+// =============================================================================
+// Layer: 6 (Weft)
+// Spec:  internal/specs/net-framework.md §6, §9.3
+// =============================================================================
+//
+// Building blocks for proxy / API-gateway servers. Sits on top of Weft
+// Service/Layer; each piece is usable in isolation for non-proxy
+// workloads (e.g. the circuit breaker can wrap a DB driver).
+//
+// =============================================================================
+
+module core.net.proxy;
+
+public mount super.net.proxy.upstream_pool.*;
+public mount super.net.proxy.health_check.*;
+public mount super.net.proxy.loadbalancer.*;
+public mount super.net.proxy.circuit_breaker.*;
+public mount super.net.proxy.retry.*;

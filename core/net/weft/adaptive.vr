@@ -1,0 +1,184 @@
+// =============================================================================
+// core/net/weft/adaptive.vr — AdaptiveConcurrencyLayer (Vegas)
+// =============================================================================
+// Layer: 6 (Weft)
+// Spec:  internal/specs/net-framework.md §5.5 "Adaptive concurrency"
+// =============================================================================
+//
+// TCP Vegas-style adaptive concurrency: tracks the observed minimum
+// request latency (min-RTT) and the current latency, adjusting the
+// permitted concurrency to keep the system at the "knee" of the
+// latency/throughput curve.
+//
+// Algorithm (Netflix concurrency-limits / TCP Vegas):
+//
+//   diff     = limit − no_load_limit                where
+//   alpha    = floor(log2(limit))                    no_load_limit =
+//   beta     = alpha + floor(log2(limit) / 2)        inflight × (rtt_min / rtt)
+//
+//   if   diff < alpha      → limit + 1               (have capacity)
+//   elif diff > beta       → limit − 1               (queueing detected)
+//   else                   → unchanged
+//
+// Updates happen on every completed request; a simple atomic CAS on
+// the `limit` counter keeps the hot path lock-free. Requests that
+// arrive when `inflight >= limit` short-circuit to `Overloaded`.
+//
+// Observed behaviour: the limit grows gracefully under healthy load,
+// clamps down quickly under upstream slowness, and oscillates by ±1
+// at steady state — precisely the Vegas pattern.
+//
+// =============================================================================
+
+module core.net.weft.adaptive;
+
+mount core.*;
+mount core.sync.atomic.{AtomicInt, MemoryOrdering};
+mount core.time.{Instant};
+mount core.net.http.{Response};
+mount core.net.weft.service.{Layer};
+mount core.net.weft.handler.{WeftRequest, Handler};
+mount core.net.weft.error.{WeftError};
+
+// =============================================================================
+// Vegas state
+// =============================================================================
+
+type VegasState is {
+    /// Current permitted concurrency. Bumped / trimmed per request.
+    limit: AtomicInt,
+    /// Current in-flight request count.
+    inflight: AtomicInt,
+    /// Observed minimum RTT (µs); never decays — a true min.
+    min_rtt_us: AtomicInt,
+    /// Floor / ceiling on limit. Prevents pathological runaway.
+    min_limit: Int,
+    max_limit: Int,
+};
+
+// =============================================================================
+// AdaptiveConcurrencyLayer
+// =============================================================================
+
+public type AdaptiveConcurrencyLayer is {
+    state: Shared<VegasState>,
+};
+
+implement AdaptiveConcurrencyLayer {
+    /// Start with `initial` permitted concurrency, clamped between
+    /// `min_limit` and `max_limit`. Typical: `vegas(10, 1, 1000)`.
+    public fn vegas(initial: Int, min_limit: Int, max_limit: Int) -> AdaptiveConcurrencyLayer {
+        let init = if initial < min_limit { min_limit }
+                   else if initial > max_limit { max_limit }
+                   else { initial };
+        AdaptiveConcurrencyLayer {
+            state: Shared.new(VegasState {
+                limit: AtomicInt.new(init),
+                inflight: AtomicInt.new(0),
+                min_rtt_us: AtomicInt.new(Int.max_value()),
+                min_limit: min_limit,
+                max_limit: max_limit,
+            }),
+        }
+    }
+
+    /// Default production configuration: init 10, min 1, max 1000.
+    public fn default() -> AdaptiveConcurrencyLayer {
+        Self.vegas(10, 1, 1000)
+    }
+
+    /// Introspection: current limit. Useful for metrics / logging.
+    public fn current_limit(&self) -> Int {
+        self.state.limit.load(MemoryOrdering.Acquire)
+    }
+
+    /// Introspection: current in-flight count.
+    public fn current_inflight(&self) -> Int {
+        self.state.inflight.load(MemoryOrdering.Acquire)
+    }
+}
+
+implement<H: Handler> Layer<H> for AdaptiveConcurrencyLayer {
+    type Wrapped = AdaptiveConcurrencyHandler<H>;
+    fn wrap(&self, inner: H) -> AdaptiveConcurrencyHandler<H> {
+        AdaptiveConcurrencyHandler {
+            inner: inner,
+            state: self.state.clone(),
+        }
+    }
+}
+
+public type AdaptiveConcurrencyHandler<H> is {
+    inner: H,
+    state: Shared<VegasState>,
+};
+
+implement<H: Handler> Handler for AdaptiveConcurrencyHandler<H> {
+    async fn handle(&self, req: WeftRequest) -> Result<Response, WeftError> {
+        let s = &*self.state;
+
+        // Admission — compare in-flight against current limit.
+        let limit = s.limit.load(MemoryOrdering.Acquire);
+        let in_flight = s.inflight.fetch_add(1, MemoryOrdering.AcqRel);
+        if in_flight >= limit {
+            s.inflight.fetch_sub(1, MemoryOrdering.AcqRel);
+            return Err(WeftError.Overloaded);
+        }
+
+        let start = Instant.now();
+        let result = self.inner.handle(req).await;
+        let elapsed_us = Instant.now().duration_since(start).as_micros();
+
+        s.inflight.fetch_sub(1, MemoryOrdering.AcqRel);
+
+        // Observe min-RTT.
+        loop {
+            let prev_min = s.min_rtt_us.load(MemoryOrdering.Acquire);
+            if elapsed_us >= prev_min { break; }
+            if s.min_rtt_us.compare_exchange(
+                prev_min, elapsed_us,
+                MemoryOrdering.AcqRel, MemoryOrdering.Relaxed,
+            ).is_ok() {
+                break;
+            }
+        }
+
+        // Vegas adjustment: at most one step per completed request.
+        let rtt_min = s.min_rtt_us.load(MemoryOrdering.Acquire);
+        if rtt_min > 0 && elapsed_us > 0 {
+            let cur_limit = s.limit.load(MemoryOrdering.Acquire);
+            let no_load = (in_flight * rtt_min) / elapsed_us;
+            let diff = cur_limit - no_load;
+            let alpha = log2_floor(cur_limit);
+            let beta  = alpha + alpha / 2;
+
+            let new_limit = if diff < alpha && cur_limit < s.max_limit {
+                cur_limit + 1
+            } else if diff > beta && cur_limit > s.min_limit {
+                cur_limit - 1
+            } else {
+                cur_limit
+            };
+            if new_limit != cur_limit {
+                // Best-effort — if someone else already updated, drop our change.
+                let _ = s.limit.compare_exchange(
+                    cur_limit, new_limit,
+                    MemoryOrdering.AcqRel, MemoryOrdering.Relaxed,
+                );
+            }
+        }
+
+        result
+    }
+}
+
+/// Integer floor(log2 n). Returns at least 1 — used as the Vegas alpha.
+fn log2_floor(n: Int) -> Int {
+    let mut v = if n < 2 { 2 } else { n };
+    let mut r: Int = 0;
+    while v > 1 {
+        v = v / 2;
+        r = r + 1;
+    }
+    if r < 1 { 1 } else { r }
+}

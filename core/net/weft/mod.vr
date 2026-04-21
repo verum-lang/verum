@@ -15,6 +15,8 @@ public mount super.net.weft.router.*;
 public mount super.net.weft.connection.*;
 public mount super.net.weft.listener.*;
 public mount super.net.weft.app.*;
+public mount super.net.weft.backpressure.*;
+public mount super.net.weft.adaptive.*;
 public mount super.net.weft.timeout.*;
 public mount super.net.weft.tracing.*;
 public mount super.net.weft.metrics.*;

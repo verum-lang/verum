@@ -1,0 +1,55 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: net, weft, backpressure, concurrency, ratelimit, loadshed, layer
+// @timeout: 10000
+// @expect: pass
+
+// §5.5 — ConcurrencyLimitLayer / RateLimitLayer / LoadShedLayer compose
+// as ordinary Layers over any Handler.
+
+mount core.net.http.{Response};
+mount core.net.weft.service.{ServiceBuilder};
+mount core.net.weft.handler.{WeftRequest, Handler};
+mount core.net.weft.backpressure.{
+    ConcurrencyLimitLayer, RateLimitLayer, LoadShedLayer,
+};
+mount core.net.weft.error.{WeftError};
+mount core.net.weft.response_ext.{resp_ok};
+
+type Noop is {};
+implement Handler for Noop {
+    async fn handle(&self, _req: WeftRequest) -> Result<Response, WeftError> {
+        Ok(resp_ok())
+    }
+}
+
+fn typecheck_concurrency_limit() -> impl Handler {
+    ServiceBuilder.new(Noop {})
+        .layer(ConcurrencyLimitLayer.new(100))
+        .build()
+}
+
+fn typecheck_rate_limit() -> impl Handler {
+    ServiceBuilder.new(Noop {})
+        .layer(RateLimitLayer.new(1000, 100))
+        .build()
+}
+
+fn typecheck_stacked_backpressure() -> impl Handler {
+    ServiceBuilder.new(Noop {})
+        .layer(LoadShedLayer.default())
+        .layer(RateLimitLayer.new(1000, 100))
+        .layer(ConcurrencyLimitLayer.new(50))
+        .build()
+}
+
+fn typecheck_try_consume() -> Bool {
+    RateLimitLayer.new(10, 10).try_consume()
+}
+
+fn main() {
+    let _ = typecheck_concurrency_limit();
+    let _ = typecheck_rate_limit();
+    let _ = typecheck_stacked_backpressure();
+}

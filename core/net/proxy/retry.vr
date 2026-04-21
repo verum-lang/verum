@@ -1,0 +1,216 @@
+// =============================================================================
+// core/net/proxy/retry.vr — RetryLayer with budgets
+// =============================================================================
+// Layer: 6 (Weft)
+// Spec:  internal/specs/net-framework.md §9.3
+// =============================================================================
+//
+// Retry middleware with three built-in knobs:
+//
+//   * `max_attempts`    — total attempts including the first (≥ 1).
+//   * `backoff_base_ms` — exponential base; i-th retry waits 2^i × base
+//                         capped at `backoff_max_ms`.
+//   * `budget`          — (optional) global retry budget enforced by
+//                         a shared counter; prevents retry storms when
+//                         the entire upstream fleet is in trouble.
+//
+// The retry decision respects `ErrorCategory.is_retryable()` — errors
+// classified as Transient or Upstream retry; Permanent / Client /
+// Security do not. This is the key §5.6 insight that avoids the
+// "blind retry on 400 Bad Request" bug class.
+//
+// =============================================================================
+
+module core.net.proxy.retry;
+
+mount core.*;
+mount core.sync.atomic.{AtomicInt, MemoryOrdering};
+mount core.time.{Duration};
+mount core.async.timer;
+mount core.net.http.{Response};
+mount core.net.weft.service.{Layer};
+mount core.net.weft.handler.{WeftRequest, Handler};
+mount core.net.weft.error.{WeftError};
+
+// =============================================================================
+// RetryBudget
+// =============================================================================
+
+/// Global budget shared across all calls through a given RetryLayer.
+/// Default is 10% headroom over live-traffic rate: `max_retries = rps / 10`.
+/// Configured by `new(max_retries)`.
+public type RetryBudget is {
+    remaining: Shared<AtomicInt>,
+    ceiling: Int,
+};
+
+implement RetryBudget {
+    pub fn new(ceiling: Int) -> RetryBudget {
+        RetryBudget {
+            remaining: Shared.new(AtomicInt.new(ceiling)),
+            ceiling: ceiling,
+        }
+    }
+
+    pub fn try_consume(&self) -> Bool {
+        let prev = self.remaining.fetch_sub(1, MemoryOrdering.AcqRel);
+        if prev > 0 {
+            true
+        } else {
+            // Restore the under-counted value so the next caller can
+            // still attempt — without this we'd drift below zero.
+            self.remaining.fetch_add(1, MemoryOrdering.AcqRel);
+            false
+        }
+    }
+
+    /// Periodic refill; caller schedules a timer task to invoke.
+    pub fn refill(&self) {
+        self.remaining.store(self.ceiling, MemoryOrdering.Release);
+    }
+}
+
+// =============================================================================
+// RetryLayer
+// =============================================================================
+
+public type RetryLayer is {
+    max_attempts: Int,
+    backoff_base_ms: Int,
+    backoff_max_ms: Int,
+    budget: Maybe<RetryBudget>,
+};
+
+implement RetryLayer {
+    pub fn new(max_attempts: Int) -> RetryLayer {
+        RetryLayer {
+            max_attempts: max_attempts,
+            backoff_base_ms: 50,
+            backoff_max_ms: 5_000,
+            budget: None,
+        }
+    }
+
+    pub fn with_backoff(self, base_ms: Int, max_ms: Int) -> RetryLayer {
+        RetryLayer { backoff_base_ms: base_ms, backoff_max_ms: max_ms, ..self }
+    }
+
+    pub fn with_budget(self, budget: RetryBudget) -> RetryLayer {
+        RetryLayer { budget: Some(budget), ..self }
+    }
+
+    fn backoff_ms_for(&self, attempt: Int) -> Int {
+        // attempt starts at 1 for the first retry.
+        let exp = pow2(attempt);
+        let v = exp * self.backoff_base_ms;
+        if v > self.backoff_max_ms { self.backoff_max_ms } else { v }
+    }
+}
+
+fn pow2(n: Int) -> Int {
+    let mut r: Int = 1;
+    let mut i: Int = 0;
+    while i < n { r = r * 2; i = i + 1; }
+    r
+}
+
+implement<H: Handler> Layer<H> for RetryLayer {
+    type Wrapped = RetryHandler<H>;
+    fn wrap(&self, inner: H) -> RetryHandler<H> {
+        RetryHandler {
+            inner: inner,
+            layer: RetryLayer {
+                max_attempts: self.max_attempts,
+                backoff_base_ms: self.backoff_base_ms,
+                backoff_max_ms: self.backoff_max_ms,
+                budget: match &self.budget {
+                    Some(b) => Some(RetryBudget {
+                        remaining: b.remaining.clone(),
+                        ceiling: b.ceiling,
+                    }),
+                    None => None,
+                },
+            },
+        }
+    }
+}
+
+public type RetryHandler<H> is {
+    inner: H,
+    layer: RetryLayer,
+};
+
+implement<H: Handler> Handler for RetryHandler<H> {
+    async fn handle(&self, req: WeftRequest) -> Result<Response, WeftError> {
+        // WeftRequest doesn't currently implement Clone (body can be
+        // huge); retries only work for methods that carry no body (safe
+        // + idempotent). See http.vr Method.is_idempotent().
+        if !req.method.is_idempotent() {
+            return self.inner.handle(req).await;
+        }
+
+        let mut attempt: Int = 0;
+        let mut last_err: Maybe<WeftError> = None;
+
+        while attempt < self.layer.max_attempts {
+            if attempt > 0 {
+                // Budget check before sleeping so a totally-exhausted
+                // budget exits immediately without burning the backoff.
+                match &self.layer.budget {
+                    Some(b) => if !b.try_consume() {
+                        return match last_err {
+                            Some(e) => Err(e),
+                            None    => Err(WeftError.Overloaded),
+                        };
+                    },
+                    None => {}
+                }
+                timer.sleep_ms(self.layer.backoff_ms_for(attempt)).await;
+            }
+
+            // NOTE: body-stealing retry would require a WeftRequest clone;
+            // phase-2 limits retries to idempotent-without-body paths.
+            let cloned = clone_idempotent_request(&req);
+            let result = self.inner.handle(cloned).await;
+
+            match result {
+                Ok(r) => {
+                    let code = r.status.code();
+                    if code == 502 || code == 503 || code == 504 {
+                        // Treat upstream-class as retryable.
+                        last_err = Some(WeftError.UpstreamIo(f"upstream {code}"));
+                        attempt = attempt + 1;
+                        continue;
+                    }
+                    return Ok(r);
+                }
+                Err(e) => {
+                    if !e.category().is_retryable() {
+                        return Err(e);
+                    }
+                    last_err = Some(e);
+                    attempt = attempt + 1;
+                }
+            }
+        }
+
+        match last_err {
+            Some(e) => Err(e),
+            None    => Err(WeftError.Overloaded),
+        }
+    }
+}
+
+/// Shallow clone of a request sufficient for retry of idempotent,
+/// no-body methods (GET/HEAD/OPTIONS/TRACE).
+fn clone_idempotent_request(req: &WeftRequest) -> WeftRequest {
+    WeftRequest {
+        method: req.method.clone(),
+        path: req.path.clone(),
+        raw_query: req.raw_query.clone(),
+        headers: req.headers.clone(),
+        body: req.body.clone(),
+        path_params: req.path_params.clone(),
+        peer_addr: req.peer_addr,
+    }
+}

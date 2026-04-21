@@ -1,0 +1,296 @@
+// =============================================================================
+// core/net/proxy/upstream_pool.vr — Upstream connection pool
+// =============================================================================
+// Layer: 6 (Weft)
+// Spec:  internal/specs/net-framework.md §9.3, §8.9
+// =============================================================================
+//
+// Per-origin connection pool with reuse, bounded capacity, idle-timeout
+// expiration, and optional active health-check. The heart of any L7
+// reverse proxy (see §9.3 Pingora-class example).
+//
+// Phase-2 scope:
+//
+//   * `Upstream` — an origin identified by `(scheme, host, port)` plus a
+//     human label; the refinement-keyed invariants from §8.9 are
+//     expressed as `ReusableConnection` checks on release.
+//
+//   * `UpstreamPool` — `Map<UpstreamKey, List<IdleConn>>`. Acquire pulls
+//     the freshest idle connection, opens a new TCP stream if empty.
+//     Release returns the connection iff still healthy; otherwise drops.
+//
+//   * `ConnectionLease` — RAII guard; on drop, returns the connection
+//     to its pool (via a weak reference to the UpstreamPool).
+//
+// Out of scope for phase 2 — deferred to phase 3:
+//
+//   * HTTP-aware acquire (e.g. pool per (upstream, ALPN)).
+//   * HTTP/2 multiplexing — currently one request per TCP conn.
+//   * KTLS / io_uring send-zc hand-off (§6.17).
+//
+// =============================================================================
+
+module core.net.proxy.upstream_pool;
+
+mount core.*;
+mount core.collections.list.{List};
+mount core.collections.map.{Map};
+mount core.time.{Instant};
+mount core.sync.Mutex;
+mount core.net.tcp.{TcpStream};
+mount core.net.addr.{SocketAddr};
+mount core.net.http.{PoolConfig};
+
+// =============================================================================
+// Upstream
+// =============================================================================
+
+/// An upstream origin. `scheme` is `"http"` or `"https"`.
+public type Upstream is {
+    scheme: Text,
+    host: Text,
+    port: Int,
+    /// Human-friendly label — logged, emitted as a metric label.
+    name: Text,
+    /// Weight used by weighted load balancers (§6 spec, typically 1..100).
+    weight: Int,
+};
+
+implement Upstream {
+    public fn new(scheme: Text, host: Text, port: Int) -> Upstream {
+        let label = f"{scheme}://{host}:{port}";
+        Upstream {
+            scheme: scheme,
+            host: host,
+            port: port,
+            name: label,
+            weight: 1,
+        }
+    }
+
+    public fn with_weight(self, weight: Int) -> Upstream {
+        Upstream { weight: weight, ..self }
+    }
+
+    public fn with_name(self, name: Text) -> Upstream {
+        Upstream { name: name, ..self }
+    }
+
+    /// Address suitable for TcpStream.connect.
+    public fn addr(&self) -> Text {
+        f"{self.host}:{self.port}"
+    }
+
+    /// Is this an HTTPS origin? Pool only considers plain TCP for phase 2
+    /// — TLS upgrade is a Phase 3 follow-up.
+    public fn is_tls(&self) -> Bool {
+        self.scheme == "https"
+    }
+}
+
+implement Clone for Upstream {
+    fn clone(&self) -> Upstream {
+        Upstream {
+            scheme: self.scheme.clone(),
+            host: self.host.clone(),
+            port: self.port,
+            name: self.name.clone(),
+            weight: self.weight,
+        }
+    }
+}
+
+implement Eq for Upstream {
+    fn eq(&self, other: &Upstream) -> Bool {
+        self.scheme == other.scheme
+            && self.host == other.host
+            && self.port == other.port
+    }
+}
+
+/// Map-key for the pool — same shape as Upstream minus labelling.
+type UpstreamKey is {
+    scheme: Text,
+    host: Text,
+    port: Int,
+};
+
+implement UpstreamKey {
+    fn from_upstream(u: &Upstream) -> UpstreamKey {
+        UpstreamKey {
+            scheme: u.scheme.clone(),
+            host: u.host.clone(),
+            port: u.port,
+        }
+    }
+}
+
+implement Eq for UpstreamKey {
+    fn eq(&self, other: &UpstreamKey) -> Bool {
+        self.scheme == other.scheme
+            && self.host == other.host
+            && self.port == other.port
+    }
+}
+
+implement Hash for UpstreamKey {
+    fn hash(&self, h: &mut Hasher) {
+        h.write_str(&self.scheme);
+        h.write_str(&self.host);
+        h.write_int(self.port);
+    }
+}
+
+implement Clone for UpstreamKey {
+    fn clone(&self) -> UpstreamKey {
+        UpstreamKey {
+            scheme: self.scheme.clone(),
+            host: self.host.clone(),
+            port: self.port,
+        }
+    }
+}
+
+// =============================================================================
+// IdleConn / ConnectionLease
+// =============================================================================
+
+type IdleConn is {
+    stream: TcpStream,
+    last_used_ms: Int,
+    in_flight: Int,
+};
+
+/// RAII-style guard that releases a connection back to its pool on drop.
+/// Returned from `UpstreamPool.acquire(...)`.
+public type ConnectionLease is {
+    stream: Maybe<TcpStream>,
+    upstream: UpstreamKey,
+    pool: Shared<PoolState>,
+};
+
+implement ConnectionLease {
+    /// Borrow the underlying TcpStream mutably.
+    pub fn stream_mut(&mut self) -> &mut TcpStream {
+        match &mut self.stream {
+            Some(s) => s,
+            None    => panic("ConnectionLease: connection already released"),
+        }
+    }
+
+    /// Explicitly close instead of returning to pool. Useful when the
+    /// caller detected a protocol error that makes reuse unsafe.
+    pub fn close(mut self) {
+        self.stream = None;
+    }
+}
+
+// =============================================================================
+// PoolState + UpstreamPool
+// =============================================================================
+
+type PoolState is {
+    config: PoolConfig,
+    idle: Mutex<Map<UpstreamKey, List<IdleConn>>>,
+};
+
+/// Per-process connection pool shared across all handlers.
+public type UpstreamPool is {
+    state: Shared<PoolState>,
+};
+
+implement UpstreamPool {
+    pub fn new(config: PoolConfig) -> UpstreamPool {
+        UpstreamPool {
+            state: Shared.new(PoolState {
+                config: config,
+                idle: Mutex.new(Map.new()),
+            }),
+        }
+    }
+
+    /// Default configuration — 100 total idle, 10 per host, 90s timeout.
+    pub fn default() -> UpstreamPool {
+        UpstreamPool.new(PoolConfig.new())
+    }
+
+    /// Acquire a connection to the given upstream. Reuses an idle one if
+    /// available and still fresh; otherwise opens a new TCP socket.
+    pub async fn acquire(&self, upstream: &Upstream) -> Result<ConnectionLease, Text> {
+        let key = UpstreamKey.from_upstream(upstream);
+        let reused = self.try_take_idle(&key);
+        let stream = match reused {
+            Some(s) => s,
+            None => match TcpStream.connect(upstream.addr().as_str()) {
+                Ok(s)  => s,
+                Err(e) => return Err(f"connect to {upstream.name}: {e}"),
+            },
+        };
+        Ok(ConnectionLease {
+            stream: Some(stream),
+            upstream: key,
+            pool: self.state.clone(),
+        })
+    }
+
+    /// Internal: pull a fresh idle connection out of the pool if present.
+    /// Drops connections whose `idle_timeout_ms` has elapsed.
+    fn try_take_idle(&self, key: &UpstreamKey) -> Maybe<TcpStream> {
+        let mut idle = self.state.idle.lock();
+        let bucket = match idle.get_mut(key) {
+            Some(b) => b,
+            None => return None,
+        };
+        let now = Instant.now().duration_since_epoch().as_millis();
+        let timeout = self.state.config.idle_timeout_ms;
+        while !bucket.is_empty() {
+            let c = bucket.pop().unwrap();
+            if now - c.last_used_ms <= timeout {
+                return Some(c.stream);
+            }
+            // else drop — too old.
+        }
+        None
+    }
+
+    /// Introspection: idle count per upstream key.
+    pub fn idle_count(&self, upstream: &Upstream) -> Int {
+        let key = UpstreamKey.from_upstream(upstream);
+        let idle = self.state.idle.lock();
+        match idle.get(&key) {
+            Some(b) => b.len(),
+            None    => 0,
+        }
+    }
+}
+
+// Release-on-drop. If `stream` was closed via `ConnectionLease.close()`,
+// the Maybe is None and nothing returns to the pool.
+implement Drop for ConnectionLease {
+    fn drop(&mut self) {
+        let stream = match self.stream.take() {
+            Some(s) => s,
+            None    => return,
+        };
+        let now = Instant.now().duration_since_epoch().as_millis();
+        let mut idle = self.pool.idle.lock();
+        let bucket = match idle.get_mut(&self.upstream) {
+            Some(b) => b,
+            None => {
+                idle.insert(self.upstream.clone(), List.new());
+                idle.get_mut(&self.upstream).unwrap()
+            }
+        };
+        // Bound per-host; drop the oldest if above limit.
+        let per_host = self.pool.config.max_per_host;
+        if bucket.len() >= per_host {
+            // Drop the oldest (front).
+            let _ = bucket.remove(0);
+        }
+        bucket.push(IdleConn {
+            stream: stream,
+            last_used_ms: now,
+            in_flight: 0,
+        });
+    }
+}

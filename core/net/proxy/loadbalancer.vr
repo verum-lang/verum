@@ -1,0 +1,154 @@
+// =============================================================================
+// core/net/proxy/loadbalancer.vr — Request distribution strategies
+// =============================================================================
+// Layer: 6 (Weft)
+// Spec:  internal/specs/net-framework.md §9.3
+// =============================================================================
+//
+// Strategies for picking one upstream out of N. Phase-2 ships the three
+// most-useful policies in production:
+//
+//   * RoundRobin          — trivial, fair under uniform load.
+//   * Random              — surprisingly effective under skewed load;
+//                           no coordination cost.
+//   * WeightedLeastConn   — per-upstream weight × current in-flight.
+//                           Mimics Envoy/HAProxy default.
+//
+// Maglev / power-of-two-choices variants arrive in phase 3 together
+// with the consistent-hash machinery required for cache locality.
+//
+// Every policy returns `None` if zero upstreams are healthy; callers
+// (typically `proxy_handler`) turn that into `WeftError.Overloaded`.
+//
+// =============================================================================
+
+module core.net.proxy.loadbalancer;
+
+mount core.*;
+mount core.collections.list.{List};
+mount core.sync.atomic.{AtomicInt, MemoryOrdering};
+mount core.net.proxy.upstream_pool.{Upstream};
+mount core.net.proxy.health_check.{HealthStatus};
+
+// =============================================================================
+// LoadBalancer
+// =============================================================================
+
+public type LoadBalancer is
+    | RoundRobin
+    | Random
+    | WeightedLeastConn;
+
+/// A concrete upstream entry with live counters the LB can read.
+public type UpstreamEntry is {
+    upstream: Upstream,
+    health: HealthStatus,
+    in_flight: Shared<AtomicInt>,
+};
+
+implement UpstreamEntry {
+    pub fn new(upstream: Upstream) -> UpstreamEntry {
+        UpstreamEntry {
+            upstream: upstream,
+            health: HealthStatus.new(),
+            in_flight: Shared.new(AtomicInt.new(0)),
+        }
+    }
+
+    pub fn healthy(&self) -> Bool {
+        self.health.is_healthy()
+    }
+
+    pub fn mark_acquire(&self) {
+        self.in_flight.fetch_add(1, MemoryOrdering.AcqRel);
+    }
+
+    pub fn mark_release(&self) {
+        self.in_flight.fetch_sub(1, MemoryOrdering.AcqRel);
+    }
+}
+
+// =============================================================================
+// Pool — LB over N upstreams
+// =============================================================================
+
+public type LbPool is {
+    strategy: LoadBalancer,
+    entries: List<UpstreamEntry>,
+    /// Round-robin cursor — shared atomic, increments on each pick.
+    cursor: Shared<AtomicInt>,
+};
+
+implement LbPool {
+    pub fn new(strategy: LoadBalancer, upstreams: List<Upstream>) -> LbPool {
+        let mut entries = List.with_capacity(upstreams.len());
+        for u in upstreams.iter() {
+            entries.push(UpstreamEntry.new(u.clone()));
+        }
+        LbPool {
+            strategy: strategy,
+            entries: entries,
+            cursor: Shared.new(AtomicInt.new(0)),
+        }
+    }
+
+    /// Pick one healthy upstream per the configured strategy. Returns
+    /// an index into `self.entries`; caller bumps `in_flight` via
+    /// `mark_acquire` on the returned entry.
+    pub fn pick(&self, req_salt: Int) -> Maybe<Int> {
+        let n = self.entries.len();
+        if n == 0 { return None; }
+        match self.strategy {
+            RoundRobin        => self.pick_round_robin(n),
+            Random            => self.pick_random(n, req_salt),
+            WeightedLeastConn => self.pick_weighted_least_conn(),
+        }
+    }
+
+    fn pick_round_robin(&self, n: Int) -> Maybe<Int> {
+        let start = self.cursor.fetch_add(1, MemoryOrdering.AcqRel) % n;
+        self.scan_healthy(start, n)
+    }
+
+    fn pick_random(&self, n: Int, salt: Int) -> Maybe<Int> {
+        let start = if salt < 0 { (-salt) % n } else { salt % n };
+        self.scan_healthy(start, n)
+    }
+
+    /// Scan up to `n` entries starting at `start`, returning the first
+    /// healthy index. O(n) worst case; fine for typical N ≤ 100.
+    fn scan_healthy(&self, start: Int, n: Int) -> Maybe<Int> {
+        let mut i: Int = 0;
+        while i < n {
+            let idx = (start + i) % n;
+            if self.entries[idx].healthy() {
+                return Some(idx);
+            }
+            i = i + 1;
+        }
+        None
+    }
+
+    fn pick_weighted_least_conn(&self) -> Maybe<Int> {
+        let n = self.entries.len();
+        let mut best: Maybe<Int> = None;
+        let mut best_score: Int = Int.max_value();
+        let mut i: Int = 0;
+        while i < n {
+            let e = &self.entries[i];
+            if !e.healthy() {
+                i = i + 1; continue;
+            }
+            let in_flight = e.in_flight.load(MemoryOrdering.Acquire);
+            let weight = if e.upstream.weight < 1 { 1 } else { e.upstream.weight };
+            // Lower score = better. Normalising by weight mimics WLCDN.
+            let score = (in_flight * 1000) / weight;
+            if score < best_score {
+                best_score = score;
+                best = Some(i);
+            }
+            i = i + 1;
+        }
+        best
+    }
+}

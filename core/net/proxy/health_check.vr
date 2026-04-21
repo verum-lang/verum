@@ -1,0 +1,117 @@
+// =============================================================================
+// core/net/proxy/health_check.vr — Active / passive upstream health checks
+// =============================================================================
+// Layer: 6 (Weft)
+// Spec:  internal/specs/net-framework.md §9.3
+// =============================================================================
+//
+// Health-check machinery for upstream origins. Two flavours:
+//
+//   * Active  — periodic background probe (HTTP GET to a configurable
+//               path; 2xx → healthy, otherwise → unhealthy).
+//   * Passive — observe live traffic; after `unhealthy_threshold`
+//               consecutive failures mark the upstream unhealthy until
+//               `recovery_check_interval_ms` passes.
+//
+// A single `HealthStatus` snapshot is queried by the load-balancer on
+// every request pick. Updates are cheap atomic writes — probing tasks
+// run on the shared runtime via `core.async.task.spawn`.
+//
+// =============================================================================
+
+module core.net.proxy.health_check;
+
+mount core.*;
+mount core.sync.atomic.{AtomicBool, AtomicInt, MemoryOrdering};
+mount core.time.{Duration};
+mount core.net.proxy.upstream_pool.{Upstream};
+
+// =============================================================================
+// HealthStatus
+// =============================================================================
+
+/// Observed health for a single upstream. Thread-safe: consumers read
+/// the atomics with `Acquire`, probing tasks update with `Release`.
+public type HealthStatus is {
+    healthy: Shared<AtomicBool>,
+    /// Monotonic count of consecutive failures. Feeds passive policy.
+    consecutive_failures: Shared<AtomicInt>,
+    /// Monotonic count of consecutive successes.
+    consecutive_successes: Shared<AtomicInt>,
+};
+
+implement HealthStatus {
+    pub fn new() -> HealthStatus {
+        HealthStatus {
+            healthy: Shared.new(AtomicBool.new(true)),
+            consecutive_failures: Shared.new(AtomicInt.new(0)),
+            consecutive_successes: Shared.new(AtomicInt.new(0)),
+        }
+    }
+
+    pub fn is_healthy(&self) -> Bool {
+        self.healthy.load(MemoryOrdering.Acquire)
+    }
+
+    pub fn mark_healthy(&self) {
+        self.healthy.store(true, MemoryOrdering.Release);
+        self.consecutive_failures.store(0, MemoryOrdering.Release);
+        self.consecutive_successes.fetch_add(1, MemoryOrdering.AcqRel);
+    }
+
+    pub fn mark_unhealthy(&self) {
+        self.healthy.store(false, MemoryOrdering.Release);
+        self.consecutive_successes.store(0, MemoryOrdering.Release);
+        self.consecutive_failures.fetch_add(1, MemoryOrdering.AcqRel);
+    }
+
+    pub fn clone_handle(&self) -> HealthStatus {
+        HealthStatus {
+            healthy: self.healthy.clone(),
+            consecutive_failures: self.consecutive_failures.clone(),
+            consecutive_successes: self.consecutive_successes.clone(),
+        }
+    }
+}
+
+// =============================================================================
+// HealthCheck config
+// =============================================================================
+
+public type HealthCheck is
+    /// No checks — always healthy. Useful for tests.
+    | Disabled
+    /// Active HTTP probe; runs every `period_ms` and updates status.
+    | Active {
+        period_ms: Int,
+        path: Text,                     // e.g. "/healthz"
+        timeout_ms: Int,
+        healthy_threshold: Int,         // successive OKs to mark healthy
+        unhealthy_threshold: Int,       // successive failures to mark unhealthy
+    }
+    /// Passive: mark unhealthy after N consecutive live-traffic errors;
+    /// re-probe after `recovery_interval_ms`.
+    | Passive {
+        unhealthy_threshold: Int,
+        recovery_interval_ms: Int,
+    };
+
+implement HealthCheck {
+    /// Active probe with typical defaults (5s period, /healthz, 1s timeout).
+    pub fn active(period_ms: Int, path: Text) -> HealthCheck {
+        HealthCheck.Active {
+            period_ms: period_ms,
+            path: path,
+            timeout_ms: 1000,
+            healthy_threshold: 2,
+            unhealthy_threshold: 3,
+        }
+    }
+
+    pub fn passive_default() -> HealthCheck {
+        HealthCheck.Passive {
+            unhealthy_threshold: 5,
+            recovery_interval_ms: 30_000,
+        }
+    }
+}

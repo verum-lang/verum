@@ -1,0 +1,70 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: net, proxy, circuit-breaker, retry, loadbalancer, health-check
+// @timeout: 10000
+// @expect: pass
+
+// §9.3 — CircuitBreakerLayer + RetryLayer + LbPool + HealthCheck shape.
+
+mount core.collections.list.{List};
+mount core.net.http.{Response};
+mount core.net.weft.service.{ServiceBuilder};
+mount core.net.weft.handler.{WeftRequest, Handler};
+mount core.net.weft.error.{WeftError};
+mount core.net.weft.response_ext.{resp_ok};
+mount core.net.proxy.upstream_pool.{Upstream};
+mount core.net.proxy.health_check.{HealthCheck, HealthStatus};
+mount core.net.proxy.loadbalancer.{LoadBalancer, LbPool, UpstreamEntry};
+mount core.net.proxy.circuit_breaker.{CircuitBreakerLayer};
+mount core.net.proxy.retry.{RetryLayer, RetryBudget};
+
+type Noop is {};
+implement Handler for Noop {
+    async fn handle(&self, _req: WeftRequest) -> Result<Response, WeftError> {
+        Ok(resp_ok())
+    }
+}
+
+fn typecheck_circuit_breaker() -> impl Handler {
+    ServiceBuilder.new(Noop {})
+        .layer(CircuitBreakerLayer.default())
+        .build()
+}
+
+fn typecheck_retry_with_budget() -> impl Handler {
+    let budget = RetryBudget.new(100);
+    let retry = RetryLayer.new(3)
+        .with_backoff(25, 2_000)
+        .with_budget(budget);
+    ServiceBuilder.new(Noop {})
+        .layer(retry)
+        .build()
+}
+
+fn typecheck_lb_pool() -> LbPool {
+    let mut upstreams = List.new();
+    upstreams.push(Upstream.new("http", "a.example", 80).with_weight(5));
+    upstreams.push(Upstream.new("http", "b.example", 80).with_weight(3));
+    LbPool.new(LoadBalancer.WeightedLeastConn, upstreams)
+}
+
+fn typecheck_lb_pick(pool: &LbPool) -> Maybe<Int> {
+    pool.pick(0)
+}
+
+fn typecheck_health_check_variants() -> (HealthCheck, HealthCheck, HealthCheck) {
+    (
+        HealthCheck.Disabled,
+        HealthCheck.active(5_000, "/_health/live"),
+        HealthCheck.passive_default(),
+    )
+}
+
+fn main() {
+    let _ = typecheck_circuit_breaker();
+    let _ = typecheck_retry_with_budget();
+    let p = typecheck_lb_pool();
+    let _ = typecheck_lb_pick(&p);
+    let _ = typecheck_health_check_variants();
+}

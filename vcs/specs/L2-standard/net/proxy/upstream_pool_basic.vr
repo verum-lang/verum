@@ -1,0 +1,48 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: net, proxy, upstream, pool, connection-reuse
+// @timeout: 10000
+// @expect: pass
+
+// §9.3 / §8.9 — Upstream + UpstreamPool shape. No actual TCP connect
+// at typecheck time.
+
+mount core.net.http.{PoolConfig};
+mount core.net.proxy.upstream_pool.{
+    Upstream, UpstreamPool, ConnectionLease,
+};
+
+fn typecheck_upstream_build() -> Upstream {
+    Upstream.new("http", "api.example.com", 8080)
+        .with_weight(10)
+        .with_name("api-primary")
+}
+
+fn typecheck_pool_new() -> UpstreamPool {
+    UpstreamPool.new(
+        PoolConfig.new()
+            .with_max_idle(200)
+            .with_max_per_host(20)
+            .with_idle_timeout_ms(60_000),
+    )
+}
+
+fn typecheck_pool_default() -> UpstreamPool {
+    UpstreamPool.default()
+}
+
+async fn typecheck_pool_acquire(pool: &UpstreamPool, upstream: &Upstream)
+    -> Result<ConnectionLease, Text>
+{
+    pool.acquire(upstream).await
+}
+
+fn typecheck_idle_count(pool: &UpstreamPool, upstream: &Upstream) -> Int {
+    pool.idle_count(upstream)
+}
+
+fn main() {
+    let _ = typecheck_upstream_build();
+    let _ = typecheck_pool_default();
+}

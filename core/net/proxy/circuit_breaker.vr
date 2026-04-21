@@ -1,0 +1,170 @@
+// =============================================================================
+// core/net/proxy/circuit_breaker.vr — Hystrix-style circuit breaker
+// =============================================================================
+// Layer: 6 (Weft)
+// Spec:  internal/specs/net-framework.md §9.3
+// =============================================================================
+//
+// A classic three-state circuit breaker:
+//
+//   Closed     (default)              — requests pass through.
+//   Open       (after too many fails) — requests short-circuit to
+//                                       `WeftError.Overloaded` without
+//                                       ever touching the inner handler.
+//   HalfOpen   (after `reset_timeout`) — one probe request allowed; on
+//                                       success return to Closed, on
+//                                       failure return to Open.
+//
+// The breaker considers an invocation a "failure" iff:
+//
+//   * Inner returned `Err(_)` AND the error's ErrorCategory is
+//     Transient or Upstream (retryable classes).
+//   * Response status is in {502, 503, 504}.
+//
+// Client errors (4xx) are NOT failures — see §5.6 "category()" rule.
+//
+// =============================================================================
+
+module core.net.proxy.circuit_breaker;
+
+mount core.*;
+mount core.sync.atomic.{AtomicInt, MemoryOrdering};
+mount core.time.{Instant};
+mount core.net.http.{Response};
+mount core.net.weft.service.{Layer};
+mount core.net.weft.handler.{WeftRequest, Handler};
+mount core.net.weft.error.{WeftError};
+
+// =============================================================================
+// State encoding
+// =============================================================================
+
+const STATE_CLOSED: Int    = 0;
+const STATE_OPEN: Int      = 1;
+const STATE_HALF_OPEN: Int = 2;
+
+type BreakerState is {
+    state: AtomicInt,
+    /// Rolling count of consecutive failures within current window.
+    consecutive_failures: AtomicInt,
+    /// Timestamp of transition to Open — used to decide when to HalfOpen.
+    opened_at_ms: AtomicInt,
+
+    /// Config (read-only after construction).
+    failure_threshold: Int,
+    reset_timeout_ms: Int,
+    success_threshold: Int,
+};
+
+// =============================================================================
+// CircuitBreakerLayer
+// =============================================================================
+
+public type CircuitBreakerLayer is {
+    state: Shared<BreakerState>,
+};
+
+implement CircuitBreakerLayer {
+    pub fn new(
+        failure_threshold: Int,
+        reset_timeout_ms: Int,
+        success_threshold: Int,
+    ) -> CircuitBreakerLayer {
+        CircuitBreakerLayer {
+            state: Shared.new(BreakerState {
+                state: AtomicInt.new(STATE_CLOSED),
+                consecutive_failures: AtomicInt.new(0),
+                opened_at_ms: AtomicInt.new(0),
+                failure_threshold: failure_threshold,
+                reset_timeout_ms: reset_timeout_ms,
+                success_threshold: success_threshold,
+            }),
+        }
+    }
+
+    /// Typical config: 5 consecutive failures → open; 30s reset timeout;
+    /// 2 consecutive successes in HalfOpen → close.
+    pub fn default() -> CircuitBreakerLayer {
+        Self.new(5, 30_000, 2)
+    }
+
+    pub fn current_state(&self) -> Int {
+        self.state.state.load(MemoryOrdering.Acquire)
+    }
+}
+
+implement<H: Handler> Layer<H> for CircuitBreakerLayer {
+    type Wrapped = CircuitBreakerHandler<H>;
+    fn wrap(&self, inner: H) -> CircuitBreakerHandler<H> {
+        CircuitBreakerHandler {
+            inner: inner,
+            state: self.state.clone(),
+        }
+    }
+}
+
+public type CircuitBreakerHandler<H> is {
+    inner: H,
+    state: Shared<BreakerState>,
+};
+
+implement<H: Handler> Handler for CircuitBreakerHandler<H> {
+    async fn handle(&self, req: WeftRequest) -> Result<Response, WeftError> {
+        let s = &*self.state;
+        let now = Instant.now().duration_since_epoch().as_millis();
+
+        match s.state.load(MemoryOrdering.Acquire) {
+            STATE_OPEN => {
+                let opened = s.opened_at_ms.load(MemoryOrdering.Acquire);
+                if now - opened >= s.reset_timeout_ms {
+                    // Allow one probe request through.
+                    let _ = s.state.compare_exchange(
+                        STATE_OPEN, STATE_HALF_OPEN,
+                        MemoryOrdering.AcqRel, MemoryOrdering.Relaxed,
+                    );
+                    self.dispatch(req, s).await
+                } else {
+                    Err(WeftError.Overloaded)
+                }
+            }
+            _ => self.dispatch(req, s).await,
+        }
+    }
+}
+
+implement<H: Handler> CircuitBreakerHandler<H> {
+    async fn dispatch(&self, req: WeftRequest, s: &BreakerState)
+        -> Result<Response, WeftError>
+    {
+        let result = self.inner.handle(req).await;
+        let is_failure = classify_as_failure(&result);
+        if is_failure {
+            let failures = s.consecutive_failures.fetch_add(1, MemoryOrdering.AcqRel) + 1;
+            if failures >= s.failure_threshold {
+                let now = Instant.now().duration_since_epoch().as_millis();
+                s.opened_at_ms.store(now, MemoryOrdering.Release);
+                s.state.store(STATE_OPEN, MemoryOrdering.Release);
+            }
+        } else {
+            s.consecutive_failures.store(0, MemoryOrdering.Release);
+            // Return from HalfOpen to Closed on success.
+            let _ = s.state.compare_exchange(
+                STATE_HALF_OPEN, STATE_CLOSED,
+                MemoryOrdering.AcqRel, MemoryOrdering.Relaxed,
+            );
+        }
+        result
+    }
+}
+
+/// §5.6 classification: only Transient/Upstream errors and 5xx statuses
+/// count as breaker failures. Client 4xx do NOT.
+fn classify_as_failure(result: &Result<Response, WeftError>) -> Bool {
+    match result {
+        Err(e) => e.category().is_retryable(),
+        Ok(r)  => {
+            let code = r.status.code();
+            code == 502 || code == 503 || code == 504
+        }
+    }
+}

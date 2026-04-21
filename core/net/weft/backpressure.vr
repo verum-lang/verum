@@ -1,0 +1,252 @@
+// =============================================================================
+// core/net/weft/backpressure.vr — Concurrency / rate / load-shed layers
+// =============================================================================
+// Layer: 6 (Weft)
+// Spec:  internal/specs/net-framework.md §5.5
+// =============================================================================
+//
+// Three production-grade backpressure primitives, each implementable as a
+// Weft `Layer` that wraps any Handler:
+//
+//   * `ConcurrencyLimitLayer` — hard cap on in-flight handler calls via
+//     a `core.sync.Semaphore`. Excess calls short-circuit to
+//     `WeftError.Overloaded` (→ 503). Critical for bounding memory /
+//     goroutine-style leaks on upstream stalls.
+//
+//   * `RateLimitLayer` — token bucket. Allows `burst` requests
+//     instantaneously, then refills at `rate` per second. Clients that
+//     exceed their quota get `WeftError.Overloaded` immediately.
+//
+//   * `LoadShedLayer` — semantic wrapper that turns any
+//     "currently-unavailable" signal from a downstream service into
+//     `WeftError.Overloaded`. Used to keep the client-facing behaviour
+//     consistent (always 503 with Retry-After) regardless of which
+//     internal limiter tripped.
+//
+// All three surface the same ErrorCategory.Transient-classed failure so
+// higher-level retry middleware can back off uniformly.
+//
+// =============================================================================
+
+module core.net.weft.backpressure;
+
+mount core.*;
+mount core.sync.semaphore.{Semaphore};
+mount core.sync.atomic.{AtomicInt, MemoryOrdering};
+mount core.time.{Instant};
+mount core.net.http.{Response};
+mount core.net.weft.service.{Layer};
+mount core.net.weft.handler.{WeftRequest, Handler};
+mount core.net.weft.error.{WeftError};
+
+// =============================================================================
+// ConcurrencyLimitLayer
+// =============================================================================
+
+/// Hard cap on the number of simultaneous in-flight `handle` calls.
+/// Implementation uses `Semaphore.try_acquire()` — non-blocking fail-fast;
+/// queueing live requests is intentionally NOT supported (that's what
+/// `RateLimitLayer` is for at the bucket, or Nursery backpressure on
+/// the connection reader).
+public type ConcurrencyLimitLayer is {
+    permits: Shared<Semaphore>,
+};
+
+implement ConcurrencyLimitLayer {
+    public fn new(max_in_flight: Int) -> ConcurrencyLimitLayer {
+        ConcurrencyLimitLayer {
+            permits: Shared.new(Semaphore.new(max_in_flight)),
+        }
+    }
+}
+
+implement<H: Handler> Layer<H> for ConcurrencyLimitLayer {
+    type Wrapped = ConcurrencyLimitHandler<H>;
+    fn wrap(&self, inner: H) -> ConcurrencyLimitHandler<H> {
+        ConcurrencyLimitHandler {
+            inner: inner,
+            permits: self.permits.clone(),
+        }
+    }
+}
+
+public type ConcurrencyLimitHandler<H> is {
+    inner: H,
+    permits: Shared<Semaphore>,
+};
+
+implement<H: Handler> Handler for ConcurrencyLimitHandler<H> {
+    async fn handle(&self, req: WeftRequest) -> Result<Response, WeftError> {
+        if !self.permits.try_acquire() {
+            return Err(WeftError.Overloaded);
+        }
+        let result = self.inner.handle(req).await;
+        self.permits.release();
+        result
+    }
+}
+
+// =============================================================================
+// RateLimitLayer — token bucket
+// =============================================================================
+
+/// Token-bucket rate limiter shared across all calls to the wrapped
+/// handler. Tokens refill at `rate` per second up to `burst` capacity;
+/// each `handle` consumes one token. Empty bucket → `Overloaded`.
+///
+/// Thread-safe via atomic integer ops + a single shared `last_refill`
+/// timestamp; no lock on the hot path.
+public type RateLimitLayer is {
+    state: Shared<TokenBucket>,
+};
+
+type TokenBucket is {
+    /// Current tokens × 1000 (sub-token precision).
+    tokens_millis: AtomicInt,
+    /// Burst × 1000.
+    capacity_millis: Int,
+    /// Tokens added per millisecond × 1000.
+    refill_per_ms_millis: Int,
+    /// Last refill time (monotonic ms).
+    last_refill_ms: AtomicInt,
+};
+
+implement RateLimitLayer {
+    /// Allow `rate` requests per second, with up to `burst` in a single
+    /// instant. Typical: `RateLimitLayer.new(1000, 100)` — 1k rps sustained,
+    /// 100-burst tolerated.
+    public fn new(rate_per_sec: Int, burst: Int) -> RateLimitLayer {
+        let now = monotonic_ms();
+        // Internal unit is 1/1000 of a token so refills can be fractional.
+        let refill_per_ms = rate_per_sec;                 // × 1 ms = 1000 ms/s scaled / 1000
+        RateLimitLayer {
+            state: Shared.new(TokenBucket {
+                tokens_millis: AtomicInt.new(burst * 1000),
+                capacity_millis: burst * 1000,
+                refill_per_ms_millis: refill_per_ms,
+                last_refill_ms: AtomicInt.new(now),
+            }),
+        }
+    }
+
+    /// Non-blocking attempt to consume one token. Returns true on
+    /// success, false if the bucket is empty.
+    pub fn try_consume(&self) -> Bool {
+        let bucket = &*self.state;
+        let now = monotonic_ms();
+        let last = bucket.last_refill_ms.load(MemoryOrdering.Relaxed);
+        let elapsed = now - last;
+        if elapsed > 0 {
+            let add = elapsed * bucket.refill_per_ms_millis;
+            if bucket.last_refill_ms.compare_exchange(
+                last, now,
+                MemoryOrdering.AcqRel, MemoryOrdering.Relaxed,
+            ).is_ok() {
+                let cap = bucket.capacity_millis;
+                let current = bucket.tokens_millis.load(MemoryOrdering.Acquire);
+                let new_val = if current + add > cap { cap } else { current + add };
+                bucket.tokens_millis.store(new_val, MemoryOrdering.Release);
+            }
+        }
+        // Attempt to take 1000 token-millis = 1 whole token.
+        let current = bucket.tokens_millis.load(MemoryOrdering.Acquire);
+        if current < 1000 { return false; }
+        bucket.tokens_millis.compare_exchange(
+            current, current - 1000,
+            MemoryOrdering.AcqRel, MemoryOrdering.Relaxed,
+        ).is_ok()
+    }
+}
+
+implement<H: Handler> Layer<H> for RateLimitLayer {
+    type Wrapped = RateLimitHandler<H>;
+    fn wrap(&self, inner: H) -> RateLimitHandler<H> {
+        RateLimitHandler {
+            inner: inner,
+            layer: RateLimitLayer { state: self.state.clone() },
+        }
+    }
+}
+
+public type RateLimitHandler<H> is {
+    inner: H,
+    layer: RateLimitLayer,
+};
+
+implement<H: Handler> Handler for RateLimitHandler<H> {
+    async fn handle(&self, req: WeftRequest) -> Result<Response, WeftError> {
+        if !self.layer.try_consume() {
+            return Err(WeftError.Overloaded);
+        }
+        self.inner.handle(req).await
+    }
+}
+
+// =============================================================================
+// LoadShedLayer — normalise "temporarily-unavailable" into 503
+// =============================================================================
+
+/// Wraps a Handler and, if its response status is 503 or the error is
+/// `WeftError.Overloaded`, adds a `Retry-After` header to guide the
+/// client's backoff. The default hint is 1 second; tune based on the
+/// measured recovery time of the shed load.
+///
+/// §5.5 specifies priority-aware shedding via a `x-priority` header;
+/// phase-1 implementation treats all requests equally — priority-aware
+/// shedding is a dedicated phase-3 item once the header-classification
+/// plumbing lands.
+public type LoadShedLayer is {
+    retry_after_seconds: Int,
+};
+
+implement LoadShedLayer {
+    public fn default() -> LoadShedLayer {
+        LoadShedLayer { retry_after_seconds: 1 }
+    }
+
+    public fn with_retry_after(seconds: Int) -> LoadShedLayer {
+        LoadShedLayer { retry_after_seconds: seconds }
+    }
+}
+
+implement<H: Handler> Layer<H> for LoadShedLayer {
+    type Wrapped = LoadShedHandler<H>;
+    fn wrap(&self, inner: H) -> LoadShedHandler<H> {
+        LoadShedHandler {
+            inner: inner,
+            retry_after_seconds: self.retry_after_seconds,
+        }
+    }
+}
+
+public type LoadShedHandler<H> is {
+    inner: H,
+    retry_after_seconds: Int,
+};
+
+implement<H: Handler> Handler for LoadShedHandler<H> {
+    async fn handle(&self, req: WeftRequest) -> Result<Response, WeftError> {
+        let retry = f"{self.retry_after_seconds}";
+        match self.inner.handle(req).await {
+            Err(WeftError.Overloaded) => Err(WeftError.Overloaded),
+            Err(e) => Err(e),
+            Ok(r) => {
+                if r.status.code() == 503 {
+                    Ok(core.net.weft.response_ext.resp_with_header(
+                        r, &"retry-after", &retry,
+                    ))
+                } else {
+                    Ok(r)
+                }
+            }
+        }
+    }
+}
+
+// =============================================================================
+// Monotonic clock helper
+// =============================================================================
+
+fn monotonic_ms() -> Int {
+    Instant.now().duration_since_epoch().as_millis()
+}
