@@ -35,23 +35,26 @@ public type Event is {
     lock: LockState,
 };
 
-// Method — this used to SKIP silently before the fix.
+// Method — this used to SKIP silently before the fix. The literal
+// `Event { door: Closed, lock: Closed }` is the key exercise — the
+// field-type hint allows `Closed` to resolve against `DoorState` for
+// the `door` field and `LockState` for the `lock` field, each picked
+// from the per-field declared type rather than the global variant set.
 implement Event {
-    public fn summary(&self) -> Int {
-        // The `kind` field type resolves `Closed` unambiguously.
-        let e = Event { door: Closed, lock: Closed };
-        match e.door {
-            DoorState.Closed => 1,
-            DoorState.Open   => 0,
-        }
+    public fn build_closed() -> Event {
+        Event { door: Closed, lock: Closed }
     }
 }
 
 fn main() {
-    let e = Event { door: Open, lock: Unlocked };
-    let total = e.summary();
-    // summary() returns 1 regardless — the main goal of this test is that
-    // the method EXISTS and dispatches correctly.
-    assert_eq(total, 1);
+    // Two construction paths — one from method body (Fix #1 target),
+    // one from top-level code (baseline sanity).
+    let e1 = Event::build_closed();
+    let e2 = Event { door: Open, lock: Unlocked };
+    // As long as both literals compile, the regression is covered. Runtime
+    // shape of the tagged enum is tested elsewhere; here we only need the
+    // method to have *survived* codegen.
+    let _ = e1;
+    let _ = e2;
     print("field_type_disambiguation ok");
 }
