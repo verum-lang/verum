@@ -5109,13 +5109,29 @@ impl TypeChecker {
         // COMPATIBILITY ALIASES (FFI - Rust/C style names)
         // These map to their semantic equivalents
         // ============================================================
-        // Signed integers (compat names -> semantic)
-        self.ctx.define_type(verum_common::Text::from("i8"), Type::Int);
-        self.ctx.define_type(verum_common::Text::from("i16"), Type::Int);
-        self.ctx.define_type(verum_common::Text::from("i32"), Type::Int);
-        self.ctx.define_type(verum_common::Text::from("i64"), Type::Int);
-        self.ctx.define_type(verum_common::Text::from("i128"), Type::Int);
-        self.ctx.define_type(verum_common::Text::from("isize"), Type::Int);
+        // Signed integers (compat names -> semantic Named types).
+        // Map to the stdlib-defined `Int8` / `Int16` / … so that associated
+        // constants (`Int64.MAX`, `Int8.MIN`, …) are reachable via the
+        // shorthand `i8.MAX` form used by L2 tests. Previously all aliased
+        // to `Type::Int`, which erased the per-width identity and made
+        // `i64.MAX` resolve to the bare `Int` type (no MAX constant) at
+        // typecheck, then crash with NullPointer at VBC runtime.
+        for (compat, canonical) in [
+            ("i8", "Int8"),
+            ("i16", "Int16"),
+            ("i32", "Int32"),
+            ("i64", "Int64"),
+            ("i128", "Int128"),
+            ("isize", "ISize"),
+        ] {
+            self.ctx.define_type(
+                verum_common::Text::from(compat),
+                Type::Named {
+                    path: verum_ast::ty::Path::single(verum_ast::ty::Ident::new(canonical, Span::default())),
+                    args: List::new(),
+                },
+            );
+        }
         // Unsigned integers (compat names -> semantic Named types)
         // These map to the same Named types as their semantic equivalents (UInt8, etc.)
         self.ctx.define_type(
