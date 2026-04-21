@@ -1,0 +1,52 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L1
+// @tags: unsigned, shift, shr, ushr, regression
+// @timeout: 5000
+// @expected-exit: 0
+//
+// Regression test for Issue #2 (root fix in crates/verum_vbc/src/codegen/
+// expressions.rs::compile_binary BinOp::Shr path).
+//
+// `>>` on an unsigned type must be a LOGICAL (zero-filling) shift, not
+// arithmetic. The handler `handle_shr` in
+// `interpreter/dispatch_table/handlers/bitwise.rs` is sign-preserving
+// (because all Verum values land in i64 inside the NaN-box). The codegen
+// now picks `BitwiseOp::Ushr` for any operand whose declared type is
+// UInt8/16/32/64, Byte, or USize.
+//
+// Without the fix, CRC32 table entries whose bit 31 is set (e.g.
+// 0xB0D09822 = TABLE[0x7A]) would be sign-extended on subsequent `>> 8`,
+// corrupting the running checksum. The canonical symptom was
+// crc32("12345678") ≠ zlib's 0x9AE0DAAF.
+
+fn main() {
+    // Value with bit 31 set — arithmetic shift would preserve that bit
+    // in the high halves.
+    let x: UInt32 = 0xEDB88320_u32;
+
+    // Logical right shift by 1: 0x76DC4190.
+    let y: UInt32 = x >> 1;
+    assert_eq(y, 0x76DC4190_u32);
+
+    // Another bit-31-set value.
+    let a: UInt32 = 0xB0D09822_u32;
+    let b: UInt32 = a >> 8;
+    assert_eq(b, 0x00B0D098_u32);
+
+    // Full shift-by-31 drops the bit.
+    let c: UInt32 = 0x80000000_u32;
+    let d: UInt32 = c >> 31;
+    assert_eq(d, 1_u32);
+
+    // Cascade of shifts + XORs — the exact pattern that corrupted CRC32.
+    // Each step should preserve 32-bit semantics; no sign extension.
+    let mut s: UInt32 = 0xFFFFFFFF_u32;
+    s = (s >> 8) ^ 0xEDB88320_u32;          // → 0x12476CDF ^ 0xEDB88320 == 0xFFFFEFFF ... wait
+    // Correct arithmetic:
+    //   0xFFFFFFFF >> 8 = 0x00FFFFFF
+    //   0x00FFFFFF XOR 0xEDB88320 = 0xED477CDF
+    assert_eq(s, 0xED477CDF_u32);
+
+    print("unsigned_shr_logical ok");
+}

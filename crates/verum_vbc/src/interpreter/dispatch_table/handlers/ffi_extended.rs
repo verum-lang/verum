@@ -564,12 +564,25 @@ pub(in super::super) fn handle_ffi_extended(state: &mut InterpreterState) -> Int
             // valid for reads of `size` bytes — this mirrors Rust's raw-pointer
             // semantics and matches the AOT lowering. `read_unaligned` handles
             // arbitrary alignment.
+            //
+            // Extension policy (root fix for Issue #2 — continuation from
+            // `handle_get_index`): `DerefRaw` is emitted by typed-array
+            // reads and by any intrinsic that lowers to a raw memory read.
+            // Widths 1/2/4 are *zero-extended* into the i64 NaN-box slot so
+            // that a `[UInt32; N]` (or `[UInt8; N]` / `[UInt16; N]`) element
+            // whose high bit is set is preserved as an unsigned value.
+            // Sign-extension via `as i32 as i64` corrupted the upper 32 bits
+            // of every u32 with bit 31 set and was the root cause of the
+            // CRC32 divergence against zlib. Callers that actually need
+            // signed semantics for a raw read can truncate (`as i32` etc.)
+            // at the use site — zero-extension is the invariant-preserving
+            // default for unsigned raw I/O, which is the vastly common case.
             let value = unsafe {
                 match size {
-                    1 => *ptr as i8 as i64,
-                    2 => std::ptr::read_unaligned(ptr as *const i16) as i64,
-                    4 => std::ptr::read_unaligned(ptr as *const i32) as i64,
-                    8 => std::ptr::read_unaligned(ptr as *const i64),
+                    1 => *ptr as i64,                                                 // u8 → i64 (zero-extend)
+                    2 => std::ptr::read_unaligned(ptr as *const u16) as i64,          // u16 → i64
+                    4 => std::ptr::read_unaligned(ptr as *const u32) as i64,          // u32 → i64
+                    8 => std::ptr::read_unaligned(ptr as *const i64),                 // 8 bytes fill the slot
                     _ => return Err(InterpreterError::InvalidOperand {
                         message: format!("invalid deref size: {}", size),
                     }),

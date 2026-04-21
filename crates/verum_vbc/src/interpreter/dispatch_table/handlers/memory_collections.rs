@@ -432,17 +432,34 @@ pub(in super::super) fn handle_get_index(state: &mut InterpreterState) -> Interp
                 Value::from_i64(unsafe { *element_ptr } as i64)
             }
             2 => {
-                // Raw i16
-                let element_ptr = unsafe { base_ptr.add(idx_val * 2) as *const i16 };
+                // Raw 2-byte element. Read as u16 and zero-extend to i64
+                // so that `[UInt16; N]` lookups preserve the unsigned
+                // interpretation (an i16 reader would sign-extend any
+                // element whose bit 15 is set). Callers that want a
+                // signed-16 value can truncate the i64 downstream.
+                let element_ptr = unsafe { base_ptr.add(idx_val * 2) as *const u16 };
                 Value::from_i64(unsafe { std::ptr::read_unaligned(element_ptr) } as i64)
             }
             4 => {
-                // Raw i32
-                let element_ptr = unsafe { base_ptr.add(idx_val * 4) as *const i32 };
+                // Raw 4-byte element. Root fix for Issue #2: read as u32
+                // (not i32) so a value with bit 31 set — canonical case
+                // being a `[UInt32; 256]` lookup table like the CRC32
+                // per-byte table — is zero-extended into the i64 NaN-box
+                // slot instead of being sign-extended. The previous
+                // `i32 as i64` cast filled bits 32..63 with ones and the
+                // sign garbage then propagated through arithmetic shifts,
+                // corrupting every computation downstream.
+                //
+                // Callers that need signed-32 semantics can truncate with
+                // `as i32` at the use site; zero-extension is the
+                // invariant-preserving choice for raw byte-level work.
+                let element_ptr = unsafe { base_ptr.add(idx_val * 4) as *const u32 };
                 Value::from_i64(unsafe { std::ptr::read_unaligned(element_ptr) } as i64)
             }
             8 => {
-                // Raw i64 (typed arrays like [Int; N])
+                // Raw i64 (typed arrays like [Int; N]). 8-byte values
+                // already occupy the whole Value slot — no extension
+                // needed either way.
                 let element_ptr = unsafe { base_ptr.add(idx_val * 8) as *const i64 };
                 Value::from_i64(unsafe { std::ptr::read_unaligned(element_ptr) })
             }
@@ -646,13 +663,27 @@ pub(in super::super) fn handle_get_index(state: &mut InterpreterState) -> Interp
             };
             state.set_reg(dst, Value::from_i64(unsafe { *data_ptr } as i64));
         } else if header.type_id == TypeId::U32 {
-            // 32-bit typed array (Int32, UInt32, Float32)
+            // 32-bit typed array (UInt32 / Int32 / Float32 storage).
+            //
+            // Root fix for Issue #2 (third code path, after the FatRef
+            // branch above and `DerefRaw` in `ffi_extended.rs`): read as
+            // `*const u32` and zero-extend into the i64 NaN-box slot. The
+            // prior `i32 as i64` cast sign-extended any element whose
+            // bit 31 was set, which propagated 0xFFFFFFFF into the upper
+            // half of subsequent shift/XOR results — the canonical
+            // symptom being a `[UInt32; 256]` CRC32 table lookup
+            // returning a "negative" i64 representation of the same bits.
+            //
+            // Callers needing signed-32 semantics can truncate at the use
+            // site (`as i32`); zero-extension is the invariant-preserving
+            // default for unsigned raw storage, matching the policy used
+            // in `handle_get_index`'s FatRef branch and `DerefRaw`.
             let element_count = header_size / 4;
             if index < 0 || index as usize >= element_count {
                 return Err(InterpreterError::IndexOutOfBounds { index, length: element_count });
             }
             let data_ptr = unsafe {
-                ptr.add(heap::OBJECT_HEADER_SIZE + (index as usize) * 4) as *const i32
+                ptr.add(heap::OBJECT_HEADER_SIZE + (index as usize) * 4) as *const u32
             };
             state.set_reg(dst, Value::from_i64(unsafe { *data_ptr } as i64));
         } else if header.type_id == TypeId::U64 {
