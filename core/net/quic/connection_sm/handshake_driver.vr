@@ -1,0 +1,322 @@
+// =============================================================================
+// net/quic/connection_sm/handshake_driver.vr — TLS ↔ QUIC CRYPTO bridge
+// =============================================================================
+// Layer: 5 (Network — QUIC)
+// Dependencies: core, collections,
+//               core.net.tls13.handshake.{client_sm, server_sm},
+//               core.net.quic.{frame, recovery}
+// =============================================================================
+//
+// QUIC runs the TLS 1.3 handshake over a dedicated per-PN-space stream
+// carried inside CRYPTO frames (RFC 9001 §4). Each PN space (Initial,
+// Handshake, Application) has its own crypto offset counter starting
+// at 0; the frames carry `(offset, data)` pairs and the receiver
+// reassembles them before feeding into the TLS SM.
+//
+// Per RFC 9001:
+//   * Initial-space CRYPTO  — ClientHello / server-side (ServerHello on
+//                             its own — the rest already moves to
+//                             Handshake keys).
+//   * Handshake-space CRYPTO — EncryptedExtensions / Certificate /
+//                              CertificateVerify / Finished.
+//   * Application-space CRYPTO — NewSessionTicket / KeyUpdate signals.
+//
+// HandshakeDriver maintains:
+//   * Inbound buffer per space (handles out-of-order CRYPTO frames).
+//   * Outbound offset counter per space.
+//   * An opaque role-specific TLS SM reference (client or server).
+//
+// Callers pump incoming CRYPTO frames via `on_crypto_chunk`, pull any
+// emitted outbound bytes via `take_outbound` (per-space CRYPTO frames
+// ready for wire assembly), and query `completion()` to know when the
+// handshake has produced 1-RTT traffic keys so the connection_sm can
+// promote to OneRtt.
+//
+// =============================================================================
+
+module core.net.quic.connection_sm.handshake_driver;
+
+mount core.*;
+mount core.collections.List;
+mount core.net.quic.frame.{Frame};
+mount core.net.quic.recovery.{PnSpaceKind};
+mount core.net.quic.connection_sm.dispatch.{CryptoChunk};
+
+mount core.net.tls13.handshake.client_sm.{ClientSm, StepOutput};
+mount core.net.tls13.handshake.server_sm.{ServerSm, ServerStepOutput};
+mount core.net.tls13.error.{TlsError};
+mount core.net.tls13.keyschedule.{TrafficSecret};
+
+// =============================================================================
+// Per-space CRYPTO stream reassembly buffer
+// =============================================================================
+
+/// Out-of-order reassembly of received CRYPTO bytes in one PN space.
+/// Runs are stored sorted by `start` with no overlap; `next_readable`
+/// advances past contiguous prefix as bytes become deliverable.
+public type CryptoStream is {
+    /// Next offset we are ready to consume.
+    next_readable: UInt64,
+    /// Sorted non-overlapping runs of received bytes, keyed by
+    /// starting offset.
+    runs:          List<CryptoRun>,
+    /// Offset for our outbound CRYPTO frames in this space.
+    tx_offset:     UInt64,
+};
+
+type CryptoRun is { start: UInt64, bytes: List<Byte> };
+
+implement CryptoStream {
+    pub fn new() -> CryptoStream {
+        CryptoStream { next_readable: 0_u64, runs: [], tx_offset: 0_u64 }
+    }
+
+    /// Insert a CRYPTO frame chunk. Idempotent on retransmit — already-
+    /// delivered bytes are silently dropped.
+    pub fn insert(&mut self, offset: UInt64, data: &[Byte]) {
+        if data.len() == 0 { return; }
+        let end = offset + (data.len() as UInt64);
+        // Early-drop everything below next_readable.
+        if end <= self.next_readable { return; }
+
+        let (eff_start, eff_data) = if offset < self.next_readable {
+            let skip = (self.next_readable - offset) as Int;
+            let mut d: List<Byte> = [];
+            let mut i: Int = skip;
+            while i < data.len() { d.push(data[i]); i = i + 1; }
+            (self.next_readable, d)
+        } else {
+            let mut d: List<Byte> = [];
+            let mut i: Int = 0;
+            while i < data.len() { d.push(data[i]); i = i + 1; }
+            (offset, d)
+        };
+
+        // Sorted insert + forward merge.
+        let mut i: Int = 0;
+        while i < self.runs.len() && self.runs[i].start < eff_start { i = i + 1; }
+        self.runs.insert(i, CryptoRun { start: eff_start, bytes: eff_data });
+        self.merge_forward(i);
+    }
+
+    fn merge_forward(&mut self, mut j: Int) {
+        while j + 1 < self.runs.len() {
+            let cur_end = self.runs[j].start + (self.runs[j].bytes.len() as UInt64);
+            let next = &self.runs[j + 1];
+            if cur_end >= next.start {
+                if next.start + (next.bytes.len() as UInt64) > cur_end {
+                    let gap = (cur_end - next.start) as Int;
+                    let mut k: Int = gap;
+                    while k < next.bytes.len() {
+                        self.runs[j].bytes.push(next.bytes[k]);
+                        k = k + 1;
+                    }
+                }
+                let _ = self.runs.remove(j + 1);
+            } else {
+                break;
+            }
+        }
+    }
+
+    /// Drain the contiguous readable prefix. Returns empty when
+    /// nothing new is available.
+    pub fn drain_readable(&mut self) -> List<Byte> {
+        let mut out: List<Byte> = [];
+        while self.runs.len() > 0 && self.runs[0].start == self.next_readable {
+            let head = &self.runs[0];
+            let n = head.bytes.len();
+            let mut i: Int = 0;
+            while i < n {
+                out.push(head.bytes[i]);
+                i = i + 1;
+            }
+            self.next_readable = self.next_readable + (n as UInt64);
+            let _ = self.runs.remove(0);
+        }
+        out
+    }
+
+    pub fn reserve_outbound(&mut self, n: Int) -> UInt64 {
+        let off = self.tx_offset;
+        self.tx_offset = self.tx_offset + (n as UInt64);
+        off
+    }
+}
+
+// =============================================================================
+// HandshakeDriver — role-specific TLS SM wrapper
+// =============================================================================
+
+public type HandshakeRole is Client(ClientSm) | Server(ServerSm);
+
+public type HandshakeDriver is {
+    role:       HandshakeRole,
+    /// Per-space inbound CRYPTO reassembly + outbound offset tracking.
+    initial:    CryptoStream,
+    handshake:  CryptoStream,
+    application: CryptoStream,
+    /// Queued outbound CRYPTO frames, tagged with target PN space.
+    outbound:   List<(PnSpaceKind, Frame)>,
+    /// Populated once the handshake produces the application
+    /// (1-RTT) traffic secrets.
+    connected_secrets: Maybe<HandshakeOutput>,
+};
+
+public type HandshakeOutput is
+      ClientHandshakeOutput(core.net.tls13.handshake.client_sm.Connected)
+    | ServerHandshakeOutput(core.net.tls13.handshake.server_sm.ServerConnected);
+
+implement HandshakeDriver {
+    pub fn client(sm: ClientSm) -> HandshakeDriver {
+        HandshakeDriver {
+            role:       HandshakeRole.Client(sm),
+            initial:    CryptoStream.new(),
+            handshake:  CryptoStream.new(),
+            application: CryptoStream.new(),
+            outbound:   [],
+            connected_secrets: None,
+        }
+    }
+
+    pub fn server(sm: ServerSm) -> HandshakeDriver {
+        HandshakeDriver {
+            role:       HandshakeRole.Server(sm),
+            initial:    CryptoStream.new(),
+            handshake:  CryptoStream.new(),
+            application: CryptoStream.new(),
+            outbound:   [],
+            connected_secrets: None,
+        }
+    }
+
+    /// Emit initial ClientHello (client only). After this, caller
+    /// pumps `on_crypto_chunk` with peer responses.
+    pub fn start_client(&mut self) -> Result<(), TlsError> {
+        match self.role.clone() {
+            HandshakeRole.Client(sm) => {
+                let (sm2, wire) = sm.start()?;
+                self.role = HandshakeRole.Client(sm2);
+                self.enqueue_outbound(PnSpaceKind.Initial, wire);
+                Ok(())
+            },
+            HandshakeRole.Server(_) => Err(TlsError.UnexpectedMessage),
+        }
+    }
+
+    /// Ingest a CRYPTO chunk from a given PN space. Retries
+    /// reassembly on that space and feeds the TLS SM if a full
+    /// handshake message is now available.
+    pub fn on_crypto_chunk(&mut self, chunk: &CryptoChunk) -> Result<(), TlsError> {
+        let space = chunk.space.clone();
+        let stream = self.stream_for(&space);
+        stream.insert(chunk.offset, chunk.data.as_slice());
+
+        // Drain any ready bytes and feed to the TLS SM one message at
+        // a time. The SM's decode layer picks message boundaries off
+        // the uint24 length field in the Handshake record header.
+        loop {
+            let data = self.stream_for(&space).drain_readable();
+            if data.len() == 0 { break; }
+            let (consumed, produced_space, out_wire, connected) =
+                self.feed_tls(data.as_slice())?;
+            if consumed == 0 { break; }
+            if out_wire.len() > 0 {
+                self.enqueue_outbound(produced_space, out_wire);
+            }
+            match connected {
+                Some(ho) => { self.connected_secrets = Some(ho); },
+                None => {},
+            }
+        }
+        Ok(())
+    }
+
+    fn stream_for(&mut self, space: &PnSpaceKind) -> &mut CryptoStream {
+        match space {
+            PnSpaceKind.Initial     => &mut self.initial,
+            PnSpaceKind.Handshake   => &mut self.handshake,
+            PnSpaceKind.Application => &mut self.application,
+        }
+    }
+
+    fn feed_tls(&mut self, wire: &[Byte]) ->
+        Result<(Int, PnSpaceKind, List<Byte>, Maybe<HandshakeOutput>), TlsError>
+    {
+        match self.role.clone() {
+            HandshakeRole.Client(sm) => {
+                let (sm2, step) = sm.on_handshake(wire)?;
+                self.role = HandshakeRole.Client(sm2);
+                // Outbound flows into the next PN space by phase:
+                //   * Pre-ServerHello → we're in Initial (shouldn't emit
+                //     past CH; first on_handshake call receives SH).
+                //   * After ServerHello, client's next message is
+                //     client Finished in Handshake space.
+                let target_space = self.client_out_space();
+                let connected: Maybe<HandshakeOutput> = match step.connected {
+                    Some(c) => Some(HandshakeOutput.ClientHandshakeOutput(c)),
+                    None    => None,
+                };
+                Ok((wire.len(), target_space, step.outbound_handshake, connected))
+            },
+            HandshakeRole.Server(sm) => {
+                let (sm2, step) = sm.on_handshake(wire)?;
+                self.role = HandshakeRole.Server(sm2);
+                let target_space = self.server_out_space();
+                let connected: Maybe<HandshakeOutput> = match step.connected {
+                    Some(c) => Some(HandshakeOutput.ServerHandshakeOutput(c)),
+                    None    => None,
+                };
+                Ok((wire.len(), target_space, step.outbound_handshake, connected))
+            },
+        }
+    }
+
+    fn client_out_space(&self) -> PnSpaceKind {
+        match &self.role {
+            HandshakeRole.Client(sm) => match sm {
+                ClientSm.StartSm {..} => PnSpaceKind.Initial,
+                ClientSm.WaitServerHelloSm(_) => PnSpaceKind.Initial,
+                _ => PnSpaceKind.Handshake,
+            },
+            _ => PnSpaceKind.Initial,
+        }
+    }
+
+    fn server_out_space(&self) -> PnSpaceKind {
+        match &self.role {
+            HandshakeRole.Server(sm) => match sm {
+                ServerSm.WaitClientHelloSm(_) => PnSpaceKind.Initial,
+                _ => PnSpaceKind.Handshake,
+            },
+            _ => PnSpaceKind.Initial,
+        }
+    }
+
+    fn enqueue_outbound(&mut self, space: PnSpaceKind, wire: List<Byte>) {
+        if wire.len() == 0 { return; }
+        let offset = self.stream_for(&space).reserve_outbound(wire.len());
+        let frame = Frame.CryptoFrame { offset: offset, data: wire };
+        self.outbound.push((space, frame));
+    }
+
+    /// Pull all queued outbound CRYPTO frames by PN space. Returns
+    /// them batched so the caller can route to the right packet type
+    /// (Initial / Handshake packets for their respective frames).
+    pub fn take_outbound(&mut self) -> List<(PnSpaceKind, Frame)> {
+        let mut out: List<(PnSpaceKind, Frame)> = [];
+        while self.outbound.len() > 0 {
+            let item = self.outbound.remove(0);
+            out.push(item);
+        }
+        out
+    }
+
+    pub fn handshake_complete(&self) -> Bool {
+        match &self.connected_secrets { Some(_) => true, None => false }
+    }
+
+    pub fn completion(&self) -> Maybe<HandshakeOutput> {
+        self.connected_secrets.clone()
+    }
+}

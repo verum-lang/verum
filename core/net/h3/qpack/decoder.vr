@@ -1,0 +1,185 @@
+// =============================================================================
+// net/h3/qpack/decoder.vr — QPACK field-section decoder (RFC 9204 §4.5)
+// =============================================================================
+// Layer: 5 (Network — HTTP/3 / QPACK)
+// Dependencies: core, collections, .{huffman, integer, static_table}
+// =============================================================================
+//
+// RFC 9204 §4.5 — decode a QPACK-encoded field section. Each field
+// section starts with:
+//
+//   Required Insert Count (varint, 8-bit prefix)
+//   Delta Base            (varint, 7-bit prefix, with sign bit)
+//
+// Then a sequence of representation bytes — each starts with a
+// pattern telling us which variant we're decoding:
+//
+//   1xxxxxxx  Indexed Field Line                              (§4.5.2)
+//   01xxxxxx  Literal Field Line with Name Reference          (§4.5.4)
+//   001xxxxx  Literal Field Line with Literal Name            (§4.5.6)
+//   0001xxxx  Indexed Field Line with Post-Base Index         (§4.5.3)
+//   0000xxxx  Literal Field Line with Post-Base Name Reference(§4.5.5)
+//
+// # v0.1 scope
+//
+// Static-table + literal-only. Required Insert Count MUST be 0 and
+// Delta Base MUST be 0 — any reference to the dynamic table is
+// rejected as QpackDecoderStreamError. This matches the subset all
+// major HTTP/3 clients (curl, Chrome, Firefox) can negotiate via
+// QPACK_MAX_TABLE_CAPACITY = 0. Full dynamic-table support lands in
+// a follow-up commit.
+//
+// =============================================================================
+
+module core.net.h3.qpack.decoder;
+
+mount core.*;
+mount core.collections.List;
+mount core.net.h3.qpack.huffman as huff;
+mount core.net.h3.qpack.integer.{encode as int_encode, decode as int_decode};
+mount core.net.h3.qpack.static_table as stat;
+
+// =============================================================================
+// Error type
+// =============================================================================
+
+public type QpackDecodeError is
+      Truncated
+    | InvalidIndex(UInt64)
+    | DynamicTableNotSupported
+    | HuffmanError
+    | IntegerError;
+
+public type HeaderField is {
+    name:  Text,
+    value: Text,
+};
+
+// =============================================================================
+// Entry point
+// =============================================================================
+
+/// Decode a QPACK field section. Returns the decoded headers in
+/// emission order.
+public fn decode_field_section(buf: &[Byte]) -> Result<List<HeaderField>, QpackDecodeError> {
+    // Required Insert Count (8-bit prefix, varint).
+    let (required_insert_count, p1) = int_decode(buf, 0, 8)
+        .map_err(|_| QpackDecodeError.IntegerError)?;
+
+    // Delta Base: first byte top bit = sign, next 7 = magnitude.
+    if p1 >= buf.len() { return Err(QpackDecodeError.Truncated); }
+    let sign = (buf[p1] & 0x80_u8) != 0_u8;
+    let _ = sign;
+    let (delta_base, p2) = int_decode(buf, p1, 7)
+        .map_err(|_| QpackDecodeError.IntegerError)?;
+
+    // v0.1: dynamic table disabled → both must be 0.
+    if required_insert_count != 0_u64 || delta_base != 0_u64 {
+        return Err(QpackDecodeError.DynamicTableNotSupported);
+    }
+
+    let mut headers: List<HeaderField> = [];
+    let mut cur: Int = p2;
+    while cur < buf.len() {
+        let b0 = buf[cur];
+        if (b0 & 0x80_u8) != 0_u8 {
+            // Indexed Field Line — 1Txxxxxx where T selects static(1)/dynamic(0).
+            let is_static = (b0 & 0x40_u8) != 0_u8;
+            if !is_static { return Err(QpackDecodeError.DynamicTableNotSupported); }
+            let (index, next) = int_decode(buf, cur, 6)
+                .map_err(|_| QpackDecodeError.IntegerError)?;
+            let entry = stat.get(index as Int)
+                .unwrap_or_else(|| {
+                    let _ = 0;
+                    return;
+                });
+            let hit = match stat.get(index as Int) {
+                Some(e) => e,
+                None => return Err(QpackDecodeError.InvalidIndex(index)),
+            };
+            headers.push(HeaderField { name: hit.name, value: hit.value });
+            cur = next;
+        } else if (b0 & 0x40_u8) != 0_u8 {
+            // Literal Field Line with Name Reference — 01NTxxxx
+            //   N: never-indexed bit (we ignore — v0.1 never inserts)
+            //   T: static(1)/dynamic(0)
+            let is_static = (b0 & 0x10_u8) != 0_u8;
+            if !is_static { return Err(QpackDecodeError.DynamicTableNotSupported); }
+            let (name_index, p1) = int_decode(buf, cur, 4)
+                .map_err(|_| QpackDecodeError.IntegerError)?;
+            let entry = match stat.get(name_index as Int) {
+                Some(e) => e,
+                None => return Err(QpackDecodeError.InvalidIndex(name_index)),
+            };
+            let (value, next) = read_string(buf, p1)?;
+            headers.push(HeaderField { name: entry.name, value: value });
+            cur = next;
+        } else if (b0 & 0x20_u8) != 0_u8 {
+            // Literal Field Line with Literal Name — 001Nxxxx
+            let (name, p1) = read_name_literal(buf, cur)?;
+            let (value, next) = read_string(buf, p1)?;
+            headers.push(HeaderField { name: name, value: value });
+            cur = next;
+        } else if (b0 & 0x10_u8) != 0_u8 {
+            // Indexed Field Line with Post-Base Index — 0001xxxx
+            return Err(QpackDecodeError.DynamicTableNotSupported);
+        } else {
+            // Literal Field Line with Post-Base Name Reference — 0000xxxx
+            return Err(QpackDecodeError.DynamicTableNotSupported);
+        }
+    }
+
+    Ok(headers)
+}
+
+// =============================================================================
+// String literal — RFC 9204 §4.1.2
+// =============================================================================
+//
+//   Hxxxxxxx  where H = Huffman-flag, x = 7-bit-prefix length.
+//
+// =============================================================================
+
+fn read_string(buf: &[Byte], pos: Int) -> Result<(Text, Int), QpackDecodeError> {
+    if pos >= buf.len() { return Err(QpackDecodeError.Truncated); }
+    let huffman = (buf[pos] & 0x80_u8) != 0_u8;
+    let (length, p1) = int_decode(buf, pos, 7)
+        .map_err(|_| QpackDecodeError.IntegerError)?;
+    let end = p1 + (length as Int);
+    if end > buf.len() { return Err(QpackDecodeError.Truncated); }
+
+    let bytes = slice_of(buf, p1, end);
+    let plain: List<Byte> = if huffman {
+        huff.decode(bytes.as_slice())
+            .map_err(|_| QpackDecodeError.HuffmanError)?
+    } else {
+        bytes
+    };
+    Ok((Text.from_utf8_lossy(plain.as_slice()), end))
+}
+
+/// Parse a literal-name field (first byte is `001NHxxx` — N = never-
+/// indexed flag, H = huffman flag, xxx = 3-bit prefix for length).
+fn read_name_literal(buf: &[Byte], pos: Int) -> Result<(Text, Int), QpackDecodeError> {
+    if pos >= buf.len() { return Err(QpackDecodeError.Truncated); }
+    let huffman = (buf[pos] & 0x08_u8) != 0_u8;
+    let (length, p1) = int_decode(buf, pos, 3)
+        .map_err(|_| QpackDecodeError.IntegerError)?;
+    let end = p1 + (length as Int);
+    if end > buf.len() { return Err(QpackDecodeError.Truncated); }
+    let bytes = slice_of(buf, p1, end);
+    let plain: List<Byte> = if huffman {
+        huff.decode(bytes.as_slice())
+            .map_err(|_| QpackDecodeError.HuffmanError)?
+    } else {
+        bytes
+    };
+    Ok((Text.from_utf8_lossy(plain.as_slice()), end))
+}
+
+fn slice_of(buf: &[Byte], start: Int, end: Int) -> List<Byte> {
+    let mut out: List<Byte> = [];
+    let mut i: Int = start;
+    while i < end { out.push(buf[i]); i = i + 1; }
+    out
+}

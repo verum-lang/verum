@@ -1,0 +1,46 @@
+// =============================================================================
+// net/h3/qpack/mod.vr — QPACK field compression for HTTP/3 (RFC 9204)
+// =============================================================================
+// Layer: 5 (Network — HTTP/3 / QPACK)
+// Spec: internal/specs/tls-quic.md §1.1 HTTP/3, §12 Phase 6
+// =============================================================================
+//
+// Pure-Verum implementation of the QPACK field-compression format
+// used by HTTP/3 to encode request + response header fields.
+//
+// v0.1 scope: static-table + literal encoding/decoding with Huffman
+// support. QPACK_MAX_TABLE_CAPACITY = 0 negotiation path — matches
+// the compatibility subset every major HTTP/3 client speaks.
+//
+// Dynamic-table support (encoder insertion instructions, decoder
+// acknowledgement instructions, blocked-streams accounting) lands
+// in Phase 6 step 2 — skeleton types already sketched in
+// `static_table.StaticEntry` + `decoder.HeaderField`.
+//
+// # Module layout
+//
+// ```
+// core.net.h3.qpack
+// ├── mod.vr            ← this file (re-exports)
+// ├── static_table.vr   — RFC 9204 Appendix A (99 entries)
+// ├── huffman.vr        — RFC 9204 Appendix B / RFC 7541 §B Huffman
+// ├── integer.vr        — RFC 9204 §4.1.1 prefix-integer codec
+// ├── encoder.vr        — field-section encoder (static + literal)
+// └── decoder.vr        — field-section decoder (static + literal)
+// ```
+//
+// =============================================================================
+
+module core.net.h3.qpack;
+
+public module static_table;
+public module huffman;
+public module integer;
+public module encoder;
+public module decoder;
+
+// Re-exports
+public mount .static_table.{StaticEntry, STATIC_TABLE_SIZE};
+public mount .decoder.{HeaderField, QpackDecodeError, decode_field_section};
+public mount .encoder.{encode_field_section};
+public mount .huffman.{HuffError};

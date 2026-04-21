@@ -1,0 +1,49 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: quic, tls, rfc9001, handshake-driver, typecheck
+// @timeout: 10000
+// @expect: pass
+
+mount core.net.quic.connection_sm.handshake_driver.{
+    HandshakeDriver, HandshakeRole, HandshakeOutput,
+    CryptoStream,
+};
+mount core.net.quic.connection_sm.dispatch.{CryptoChunk};
+mount core.net.quic.recovery.{PnSpaceKind};
+
+mount core.net.tls13.handshake.client_sm.{ClientSm, ClientConfig};
+mount core.net.tls13.cipher_suite.{CipherSuite};
+mount core.net.tls13.named_group.{NamedGroup};
+mount core.net.tls13.sig_scheme.{SignatureScheme};
+mount core.security.x509.{TrustStore};
+
+fn check_crypto_stream_reassembly() {
+    let mut s = CryptoStream.new();
+    // Out-of-order: feed chunk [0..5) after chunk [5..10).
+    s.insert(5_u64, &[0x66_u8, 0x6f_u8, 0x6f_u8, 0x62_u8, 0x61_u8]);
+    s.insert(0_u64, &[0x68_u8, 0x65_u8, 0x6c_u8, 0x6c_u8, 0x6f_u8]);
+    let _ = s.drain_readable();
+    let _ = s.reserve_outbound(4);
+}
+
+fn check_driver_construction() {
+    let config = ClientConfig {
+        server_name: Text.from_str("example.com"),
+        alpn:        [],
+        trust:       TrustStore.empty(),
+        groups:      [NamedGroup.X25519],
+        suites:      [CipherSuite.TlsAes128GcmSha256],
+        sig_schemes: SignatureScheme.default_offer_list(),
+        verify_hostname: true,
+        random:      [0_u8; 32],
+        key_shares:  [],
+    };
+    let sm = ClientSm.new(config);
+    let _ = HandshakeDriver.client(sm);
+}
+
+fn main() {
+    check_crypto_stream_reassembly();
+    check_driver_construction();
+}

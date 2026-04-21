@@ -1,0 +1,307 @@
+// =============================================================================
+// net/h3/frame.vr — HTTP/3 frame layer (RFC 9114 §7)
+// =============================================================================
+// Layer: 5 (Network — HTTP/3)
+// Dependencies: core, collections, core.encoding.varint
+// =============================================================================
+//
+// RFC 9114 §7.2 — every HTTP/3 frame is:
+//
+//   HTTP/3 Frame Format {
+//       Type (i),
+//       Length (i),
+//       Frame Payload (..),
+//   }
+//
+// Both Type and Length are QUIC varints. Unknown frame types on
+// request / control streams MUST be ignored (§7.2.8) — pass-through
+// via `FrameType::Reserved(v)` so client code can decide.
+//
+// Frame catalogue (RFC 9114 §7.2):
+//
+//   0x00  DATA            — request/response body
+//   0x01  HEADERS         — QPACK-encoded field section
+//   0x03  CANCEL_PUSH     — cancel an outstanding server push
+//   0x04  SETTINGS        — control-stream only; negotiated params
+//   0x05  PUSH_PROMISE    — request-stream; server push announce
+//   0x07  GOAWAY          — control-stream; graceful shutdown
+//   0x0D  MAX_PUSH_ID     — control-stream; raise push budget
+//
+// Reserved frame type `0xff` is reserved for extensions; GREASE
+// values (0x1f × N + 0x21) MUST be ignored per RFC 9114 §7.2.8 +
+// RFC 8701.
+//
+// =============================================================================
+
+module core.net.h3.frame;
+
+mount core.*;
+mount core.collections.List;
+mount core.encoding.varint.{quic_encode_into, quic_decode, VarintError};
+
+// =============================================================================
+// Error type
+// =============================================================================
+
+public type H3FrameError is
+      Truncated
+    | VarintFailure
+    | InvalidValue(Text);
+
+fn vfail<T>(_: VarintError) -> Result<T, H3FrameError> { Err(H3FrameError.VarintFailure) }
+
+// =============================================================================
+// Frame-type IANA codes
+// =============================================================================
+
+public const FT_DATA:          UInt64 = 0x00;
+public const FT_HEADERS:       UInt64 = 0x01;
+public const FT_CANCEL_PUSH:   UInt64 = 0x03;
+public const FT_SETTINGS:      UInt64 = 0x04;
+public const FT_PUSH_PROMISE:  UInt64 = 0x05;
+public const FT_GOAWAY:        UInt64 = 0x07;
+public const FT_MAX_PUSH_ID:   UInt64 = 0x0D;
+
+// =============================================================================
+// SETTINGS identifiers (RFC 9114 §7.2.4.1 + RFC 9204)
+// =============================================================================
+
+public const SETTING_QPACK_MAX_TABLE_CAPACITY:    UInt64 = 0x01;
+public const SETTING_MAX_FIELD_SECTION_SIZE:      UInt64 = 0x06;
+public const SETTING_QPACK_BLOCKED_STREAMS:       UInt64 = 0x07;
+public const SETTING_ENABLE_CONNECT_PROTOCOL:     UInt64 = 0x08;   // RFC 9220
+public const SETTING_H3_DATAGRAM:                 UInt64 = 0x33;   // RFC 9297
+
+// =============================================================================
+// Frame ADT
+// =============================================================================
+
+public type H3Frame is
+      DataFrame(List<Byte>)                                 // raw body chunk
+    | HeadersFrame(List<Byte>)                              // QPACK field section
+    | CancelPushFrame(UInt64)                               // push_id
+    | SettingsFrame(List<(UInt64, UInt64)>)                 // (id, value) pairs
+    | PushPromiseFrame { push_id: UInt64, encoded_headers: List<Byte> }
+    | GoawayFrame(UInt64)                                   // stream_id (req stream) or push_id (control)
+    | MaxPushIdFrame(UInt64)
+    | ReservedFrame { frame_type: UInt64, payload: List<Byte> };
+
+impl H3Frame {
+    /// Frames legal on the control stream (RFC 9114 §6.2.1 +
+    /// §7.2.4).
+    pub fn is_control_stream_legal(&self) -> Bool {
+        match self {
+            H3Frame.SettingsFrame(_)       => true,
+            H3Frame.GoawayFrame(_)          => true,
+            H3Frame.MaxPushIdFrame(_)       => true,
+            H3Frame.CancelPushFrame(_)      => true,
+            H3Frame.ReservedFrame {..}      => true,
+            _ => false,
+        }
+    }
+
+    /// Frames legal on a request / response stream.
+    pub fn is_request_stream_legal(&self) -> Bool {
+        match self {
+            H3Frame.DataFrame(_)            => true,
+            H3Frame.HeadersFrame(_)         => true,
+            H3Frame.PushPromiseFrame {..}   => true,
+            H3Frame.ReservedFrame {..}      => true,
+            _ => false,
+        }
+    }
+}
+
+// =============================================================================
+// Decode
+// =============================================================================
+
+public fn decode_frame(buf: &[Byte], pos: Int) -> Result<(H3Frame, Int), H3FrameError> {
+    let (frame_type, p1) = quic_decode(buf, pos).or_else(vfail)?;
+    let (length, p2) = quic_decode(buf, p1).or_else(vfail)?;
+    let end = p2 + (length as Int);
+    if end > buf.len() { return Err(H3FrameError.Truncated); }
+
+    let result = match frame_type {
+        0_u64 /* DATA */     => H3Frame.DataFrame(take_bytes(buf, p2, end)),
+        1_u64 /* HEADERS */  => H3Frame.HeadersFrame(take_bytes(buf, p2, end)),
+        3_u64 /* CANCEL_PUSH */ => {
+            let (id, p3) = quic_decode(buf, p2).or_else(vfail)?;
+            if p3 != end { return Err(H3FrameError.InvalidValue(Text.from_str("CANCEL_PUSH trailing bytes"))); }
+            H3Frame.CancelPushFrame(id)
+        },
+        4_u64 /* SETTINGS */ => H3Frame.SettingsFrame(decode_settings(buf, p2, end)?),
+        5_u64 /* PUSH_PROMISE */ => {
+            let (pid, p3) = quic_decode(buf, p2).or_else(vfail)?;
+            H3Frame.PushPromiseFrame {
+                push_id: pid,
+                encoded_headers: take_bytes(buf, p3, end),
+            }
+        },
+        7_u64 /* GOAWAY */ => {
+            let (id, p3) = quic_decode(buf, p2).or_else(vfail)?;
+            if p3 != end { return Err(H3FrameError.InvalidValue(Text.from_str("GOAWAY trailing bytes"))); }
+            H3Frame.GoawayFrame(id)
+        },
+        13_u64 /* MAX_PUSH_ID */ => {
+            let (id, p3) = quic_decode(buf, p2).or_else(vfail)?;
+            if p3 != end { return Err(H3FrameError.InvalidValue(Text.from_str("MAX_PUSH_ID trailing bytes"))); }
+            H3Frame.MaxPushIdFrame(id)
+        },
+        _ => H3Frame.ReservedFrame {
+            frame_type: frame_type,
+            payload:    take_bytes(buf, p2, end),
+        },
+    };
+    Ok((result, end))
+}
+
+fn decode_settings(buf: &[Byte], start: Int, end: Int) -> Result<List<(UInt64, UInt64)>, H3FrameError> {
+    let mut out: List<(UInt64, UInt64)> = [];
+    let mut cur: Int = start;
+    while cur < end {
+        let (id, p1) = quic_decode(buf, cur).or_else(vfail)?;
+        let (value, p2) = quic_decode(buf, p1).or_else(vfail)?;
+        out.push((id, value));
+        cur = p2;
+    }
+    if cur != end {
+        return Err(H3FrameError.InvalidValue(Text.from_str("SETTINGS trailing bytes")));
+    }
+    Ok(out)
+}
+
+fn take_bytes(buf: &[Byte], start: Int, end: Int) -> List<Byte> {
+    let mut out: List<Byte> = [];
+    let mut i: Int = start;
+    while i < end { out.push(buf[i]); i = i + 1; }
+    out
+}
+
+// =============================================================================
+// Encode
+// =============================================================================
+
+public fn encode_frame(frame: &H3Frame, out: &mut List<Byte>) {
+    match frame {
+        H3Frame.DataFrame(body) => {
+            let _ = quic_encode_into(out, FT_DATA);
+            let _ = quic_encode_into(out, body.len() as UInt64);
+            append(out, body);
+        },
+        H3Frame.HeadersFrame(encoded) => {
+            let _ = quic_encode_into(out, FT_HEADERS);
+            let _ = quic_encode_into(out, encoded.len() as UInt64);
+            append(out, encoded);
+        },
+        H3Frame.CancelPushFrame(push_id) => {
+            let mut body: List<Byte> = [];
+            let _ = quic_encode_into(&mut body, *push_id);
+            let _ = quic_encode_into(out, FT_CANCEL_PUSH);
+            let _ = quic_encode_into(out, body.len() as UInt64);
+            append(out, &body);
+        },
+        H3Frame.SettingsFrame(entries) => {
+            let mut body: List<Byte> = [];
+            let mut i: Int = 0;
+            while i < entries.len() {
+                let (id, val) = &entries[i];
+                let _ = quic_encode_into(&mut body, *id);
+                let _ = quic_encode_into(&mut body, *val);
+                i = i + 1;
+            }
+            let _ = quic_encode_into(out, FT_SETTINGS);
+            let _ = quic_encode_into(out, body.len() as UInt64);
+            append(out, &body);
+        },
+        H3Frame.PushPromiseFrame { push_id, encoded_headers } => {
+            let mut body: List<Byte> = [];
+            let _ = quic_encode_into(&mut body, *push_id);
+            append(&mut body, encoded_headers);
+            let _ = quic_encode_into(out, FT_PUSH_PROMISE);
+            let _ = quic_encode_into(out, body.len() as UInt64);
+            append(out, &body);
+        },
+        H3Frame.GoawayFrame(id) => {
+            let mut body: List<Byte> = [];
+            let _ = quic_encode_into(&mut body, *id);
+            let _ = quic_encode_into(out, FT_GOAWAY);
+            let _ = quic_encode_into(out, body.len() as UInt64);
+            append(out, &body);
+        },
+        H3Frame.MaxPushIdFrame(id) => {
+            let mut body: List<Byte> = [];
+            let _ = quic_encode_into(&mut body, *id);
+            let _ = quic_encode_into(out, FT_MAX_PUSH_ID);
+            let _ = quic_encode_into(out, body.len() as UInt64);
+            append(out, &body);
+        },
+        H3Frame.ReservedFrame { frame_type, payload } => {
+            let _ = quic_encode_into(out, *frame_type);
+            let _ = quic_encode_into(out, payload.len() as UInt64);
+            append(out, payload);
+        },
+    }
+}
+
+fn append(out: &mut List<Byte>, src: &List<Byte>) {
+    let mut i: Int = 0;
+    while i < src.len() { out.push(src[i]); i = i + 1; }
+}
+
+// =============================================================================
+// Stream-type prefix (RFC 9114 §6.2)
+// =============================================================================
+//
+// Unidirectional streams open with a QUIC-varint stream-type prefix:
+//
+//   0x00  Control stream
+//   0x01  Push stream
+//   0x02  QPACK encoder stream  (RFC 9204)
+//   0x03  QPACK decoder stream  (RFC 9204)
+//
+// Plus reserved values (0x1f × N + 0x21 — GREASE).
+//
+// =============================================================================
+
+public const STREAM_TYPE_CONTROL:       UInt64 = 0x00;
+public const STREAM_TYPE_PUSH:          UInt64 = 0x01;
+public const STREAM_TYPE_QPACK_ENCODER: UInt64 = 0x02;
+public const STREAM_TYPE_QPACK_DECODER: UInt64 = 0x03;
+
+public type UniStreamType is
+      ControlStream
+    | PushStream(UInt64)        // push_id follows the stream-type prefix
+    | QpackEncoderStream
+    | QpackDecoderStream
+    | ReservedStream(UInt64);
+
+/// Parse the leading stream-type varint (+ push_id for Push streams).
+/// Returns the typed stream-kind plus the cursor past the prefix.
+public fn decode_stream_type(buf: &[Byte]) -> Result<(UniStreamType, Int), H3FrameError> {
+    let (ty, p1) = quic_decode(buf, 0).or_else(vfail)?;
+    match ty {
+        0_u64 => Ok((UniStreamType.ControlStream,        p1)),
+        2_u64 => Ok((UniStreamType.QpackEncoderStream,    p1)),
+        3_u64 => Ok((UniStreamType.QpackDecoderStream,    p1)),
+        1_u64 => {
+            let (pid, p2) = quic_decode(buf, p1).or_else(vfail)?;
+            Ok((UniStreamType.PushStream(pid), p2))
+        },
+        _ => Ok((UniStreamType.ReservedStream(ty), p1)),
+    }
+}
+
+/// Encode a stream-type prefix at the head of `out`.
+public fn encode_stream_type(st: &UniStreamType, out: &mut List<Byte>) {
+    match st {
+        UniStreamType.ControlStream        => { let _ = quic_encode_into(out, STREAM_TYPE_CONTROL); },
+        UniStreamType.QpackEncoderStream   => { let _ = quic_encode_into(out, STREAM_TYPE_QPACK_ENCODER); },
+        UniStreamType.QpackDecoderStream   => { let _ = quic_encode_into(out, STREAM_TYPE_QPACK_DECODER); },
+        UniStreamType.PushStream(pid) => {
+            let _ = quic_encode_into(out, STREAM_TYPE_PUSH);
+            let _ = quic_encode_into(out, *pid);
+        },
+        UniStreamType.ReservedStream(v) => { let _ = quic_encode_into(out, *v); },
+    }
+}

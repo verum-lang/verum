@@ -1,0 +1,60 @@
+// =============================================================================
+// net/h3/mod.vr — HTTP/3 (RFC 9114) + QPACK (RFC 9204)
+// =============================================================================
+// Layer: 5 (Network)
+// Dependencies: core, core.encoding.varint, core.net.quic
+// Spec: internal/specs/tls-quic.md §1.1 HTTP/3, §12 Phase 6
+// =============================================================================
+//
+// Pure-Verum HTTP/3 implementation. Ships alongside the intrinsic-
+// backed core.net.http3 during the co-existence phase; merges once
+// the connection_sm + handshake_driver pipeline lands end-to-end.
+//
+// # Module layout
+//
+// ```
+// core.net.h3
+// ├── mod.vr       ← this file (re-exports)
+// ├── frame.vr     — RFC 9114 §7 frame codec + stream-type prefix
+// ├── error.vr     — H3ErrorCode + H3Error enum (RFC 9114 §8 + RFC 9204 §6)
+// └── qpack/       — QPACK field compression (RFC 9204)
+// ```
+//
+// # Status
+//
+// Phase 6 step 1: wire-level frame codec + QPACK static/literal
+// encoder/decoder. Client + server request-response drivers and
+// full dynamic-table support arrive in Phase 6 steps 2-3 once the
+// connection_sm pipeline can carry application-stream bytes end
+// to end.
+//
+// =============================================================================
+
+module core.net.h3;
+
+public module frame;
+public module error;
+public module qpack;
+
+// Re-exports — frame layer
+public mount .frame.{
+    H3Frame, H3FrameError,
+    UniStreamType,
+    encode_frame, decode_frame,
+    encode_stream_type, decode_stream_type,
+    FT_DATA, FT_HEADERS, FT_SETTINGS, FT_GOAWAY, FT_CANCEL_PUSH,
+    FT_MAX_PUSH_ID, FT_PUSH_PROMISE,
+    SETTING_QPACK_MAX_TABLE_CAPACITY, SETTING_MAX_FIELD_SECTION_SIZE,
+    SETTING_QPACK_BLOCKED_STREAMS,
+    STREAM_TYPE_CONTROL, STREAM_TYPE_PUSH,
+    STREAM_TYPE_QPACK_ENCODER, STREAM_TYPE_QPACK_DECODER,
+};
+
+// Re-exports — error codes
+public mount .error.{H3Error, H3ErrorCode};
+
+// Re-exports — QPACK
+public mount .qpack.{
+    HeaderField, QpackDecodeError,
+    encode_field_section, decode_field_section,
+};

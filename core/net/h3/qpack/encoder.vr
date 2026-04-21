@@ -1,0 +1,119 @@
+// =============================================================================
+// net/h3/qpack/encoder.vr — QPACK field-section encoder (RFC 9204 §4.5)
+// =============================================================================
+// Layer: 5 (Network — HTTP/3 / QPACK)
+// =============================================================================
+//
+// Minimal encoder covering the subset negotiated when
+// QPACK_MAX_TABLE_CAPACITY = 0:
+//
+//   * Required Insert Count = 0
+//   * Delta Base            = 0 (sign = 0)
+//
+// Each header is encoded as:
+//
+//   1. Look up (name, value) in the static table — if found, emit
+//      "Indexed Field Line, static (1Txxxxxx)".
+//   2. Else look up name — if found, emit "Literal Field Line with
+//      Name Reference, static (01NTxxxx)" + Huffman-encoded value.
+//   3. Else emit "Literal Field Line with Literal Name (001NHxxx)"
+//      with Huffman-encoded name + value.
+//
+// Huffman encoding is always-on for strings ≥ 3 bytes when the
+// encoded form is shorter than raw. Otherwise emit raw.
+//
+// Dynamic-table insertions are deferred to v1.1 per spec §12 Phase 6.
+//
+// =============================================================================
+
+module core.net.h3.qpack.encoder;
+
+mount core.*;
+mount core.collections.List;
+mount core.net.h3.qpack.huffman as huff;
+mount core.net.h3.qpack.integer.{encode as int_encode};
+mount core.net.h3.qpack.static_table as stat;
+mount core.net.h3.qpack.decoder.{HeaderField};
+
+/// Encode a field section into a fresh byte vector.
+pub fn encode_field_section(headers: &List<HeaderField>) -> List<Byte> {
+    let mut out: List<Byte> = [];
+
+    // Required Insert Count = 0 (§4.5.1 — `Encoded Required Insert Count = 0`).
+    int_encode(&mut out, 8, 0_u8, 0_u64);
+
+    // Delta Base sign = 0, value = 0.
+    int_encode(&mut out, 7, 0_u8, 0_u64);
+
+    // Emit each header.
+    let mut i: Int = 0;
+    while i < headers.len() {
+        emit_header(&headers[i], &mut out);
+        i = i + 1;
+    }
+    out
+}
+
+fn emit_header(h: &HeaderField, out: &mut List<Byte>) {
+    // Best case — exact (name, value) in the static table.
+    match stat.find(&h.name, &h.value) {
+        Some(idx) => {
+            // Indexed Field Line, static — opcode `11` in high bits
+            // followed by a 6-bit-prefix integer.
+            int_encode(out, 6, 0xC0_u8, idx as UInt64);
+            return;
+        },
+        None => {},
+    }
+    // Name-only match in the static table.
+    match stat.find_name(&h.name) {
+        Some(idx) => {
+            // Literal Field Line with Name Reference, static
+            // — opcode `0101` high bits (never-indexed = 0, static = 1)
+            // → byte prefix 0x50, 4-bit prefix for the index.
+            int_encode(out, 4, 0x50_u8, idx as UInt64);
+            encode_string(out, h.value.as_bytes());
+            return;
+        },
+        None => {},
+    }
+    // Literal Field Line with Literal Name — opcode `0010` in high bits
+    // (never-indexed = 0). The first byte has a 3-bit length prefix
+    // for the name with a Huffman bit in the 4th-from-high position:
+    //   0 0 1 0 N H x x x   where xxx = 3-bit length prefix.
+    //   N = never-indexed (0 here), H = Huffman flag.
+    encode_literal_name(out, h.name.as_bytes());
+    encode_string(out, h.value.as_bytes());
+}
+
+/// Emit a 7-bit-prefix string literal: `HXXXXXXX` byte with Huffman
+/// flag + 7-bit length prefix, followed by the string body.
+fn encode_string(out: &mut List<Byte>, s: &[Byte]) {
+    // Decide Huffman vs raw based on encoded length.
+    let huff_bytes = huff.encoded_byte_length(s);
+    if huff_bytes < s.len() {
+        int_encode(out, 7, 0x80_u8, huff_bytes as UInt64);
+        huff.encode(s, out);
+    } else {
+        int_encode(out, 7, 0x00_u8, s.len() as UInt64);
+        let mut i: Int = 0;
+        while i < s.len() { out.push(s[i]); i = i + 1; }
+    }
+}
+
+/// Emit a literal-name prefix (`0010NHxxx`) + name bytes. Name
+/// length prefix is 3 bits.
+fn encode_literal_name(out: &mut List<Byte>, s: &[Byte]) {
+    // Opcode base: 0010 in high nibble, N=0, H decided below.
+    //   raw:     0010 0xxx  (0x20)
+    //   huffman: 0010 1xxx  (0x28)
+    let huff_bytes = huff.encoded_byte_length(s);
+    if huff_bytes < s.len() {
+        int_encode(out, 3, 0x28_u8, huff_bytes as UInt64);
+        huff.encode(s, out);
+    } else {
+        int_encode(out, 3, 0x20_u8, s.len() as UInt64);
+        let mut i: Int = 0;
+        while i < s.len() { out.push(s[i]); i = i + 1; }
+    }
+}

@@ -1,0 +1,54 @@
+// =============================================================================
+// net/h3/error.vr — HTTP/3 error codes (RFC 9114 §8.1, RFC 9204 §6)
+// =============================================================================
+
+module core.net.h3.error;
+
+mount core.*;
+
+// =============================================================================
+// HTTP/3 connection + stream error codes (RFC 9114 §8.1)
+// =============================================================================
+
+public type H3ErrorCode is {
+    code: UInt64,
+};
+
+implement H3ErrorCode {
+    // Core HTTP/3 codes
+    pub const H3_NO_ERROR:                       UInt64 = 0x0100;
+    pub const H3_GENERAL_PROTOCOL_ERROR:         UInt64 = 0x0101;
+    pub const H3_INTERNAL_ERROR:                 UInt64 = 0x0102;
+    pub const H3_STREAM_CREATION_ERROR:          UInt64 = 0x0103;
+    pub const H3_CLOSED_CRITICAL_STREAM:         UInt64 = 0x0104;
+    pub const H3_FRAME_UNEXPECTED:               UInt64 = 0x0105;
+    pub const H3_FRAME_ERROR:                    UInt64 = 0x0106;
+    pub const H3_EXCESSIVE_LOAD:                 UInt64 = 0x0107;
+    pub const H3_ID_ERROR:                       UInt64 = 0x0108;
+    pub const H3_SETTINGS_ERROR:                 UInt64 = 0x0109;
+    pub const H3_MISSING_SETTINGS:               UInt64 = 0x010A;
+    pub const H3_REQUEST_REJECTED:               UInt64 = 0x010B;
+    pub const H3_REQUEST_CANCELLED:              UInt64 = 0x010C;
+    pub const H3_REQUEST_INCOMPLETE:             UInt64 = 0x010D;
+    pub const H3_MESSAGE_ERROR:                  UInt64 = 0x010E;
+    pub const H3_CONNECT_ERROR:                  UInt64 = 0x010F;
+    pub const H3_VERSION_FALLBACK:               UInt64 = 0x0110;
+
+    // QPACK codes (RFC 9204 §6)
+    pub const QPACK_DECOMPRESSION_FAILED:        UInt64 = 0x0200;
+    pub const QPACK_ENCODER_STREAM_ERROR:        UInt64 = 0x0201;
+    pub const QPACK_DECODER_STREAM_ERROR:        UInt64 = 0x0202;
+
+    pub fn new(code: UInt64) -> H3ErrorCode { H3ErrorCode { code: code } }
+    pub fn value(&self) -> UInt64 { self.code }
+}
+
+public type H3Error is
+      ConnectionError { code: H3ErrorCode, reason: Text }
+    | StreamError { stream_id: UInt64, code: H3ErrorCode }
+    | FrameDecode(Text)
+    | StreamTypeDecode
+    | UnexpectedFrame { on_stream_kind: Text, frame_type: UInt64 }
+    | MissingSettings
+    | SettingsRepeat
+    | ConnectionClosed;

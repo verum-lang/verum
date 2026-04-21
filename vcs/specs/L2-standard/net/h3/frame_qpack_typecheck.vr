@@ -1,0 +1,62 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: h3, qpack, rfc9114, rfc9204, typecheck
+// @timeout: 10000
+// @expect: pass
+
+mount core.net.h3.*;
+mount core.net.h3.qpack.*;
+mount core.net.h3.qpack.static_table as stat;
+
+fn check_frame_roundtrip() {
+    let f = H3Frame.SettingsFrame([
+        (SETTING_QPACK_MAX_TABLE_CAPACITY, 0_u64),
+        (SETTING_QPACK_BLOCKED_STREAMS, 0_u64),
+    ]);
+    let mut buf: List<Byte> = [];
+    encode_frame(&f, &mut buf);
+    let _ = decode_frame(buf.as_slice(), 0);
+}
+
+fn check_stream_type() {
+    let mut buf: List<Byte> = [];
+    encode_stream_type(&UniStreamType.ControlStream, &mut buf);
+    let _ = decode_stream_type(buf.as_slice());
+}
+
+fn check_qpack_static_table() {
+    let _ = stat.get(0);
+    let _ = stat.get(98);
+    let _ = stat.find(&Text.from_str(":method"), &Text.from_str("GET"));
+    let _ = stat.find_name(&Text.from_str(":status"));
+}
+
+fn check_qpack_roundtrip() -> Result<(), QpackDecodeError> {
+    let headers: List<HeaderField> = [
+        HeaderField { name: Text.from_str(":method"), value: Text.from_str("GET") },
+        HeaderField { name: Text.from_str(":scheme"), value: Text.from_str("https") },
+        HeaderField { name: Text.from_str(":path"),   value: Text.from_str("/api/users/42") },
+        HeaderField { name: Text.from_str(":authority"), value: Text.from_str("example.com") },
+        HeaderField { name: Text.from_str("user-agent"), value: Text.from_str("verum-h3/0.1") },
+    ];
+    let encoded = encode_field_section(&headers);
+    let _ = decode_field_section(encoded.as_slice())?;
+    Ok(())
+}
+
+fn check_huffman_shape() {
+    let bytes: [Byte; 5] = [0x68_u8, 0x65_u8, 0x6c_u8, 0x6c_u8, 0x6f_u8];  // "hello"
+    let _ = huffman.encoded_bit_length(&bytes);
+    let mut out: List<Byte> = [];
+    huffman.encode(&bytes, &mut out);
+    let _ = huffman.decode(out.as_slice());
+}
+
+fn main() {
+    check_frame_roundtrip();
+    check_stream_type();
+    check_qpack_static_table();
+    let _ = check_qpack_roundtrip();
+    check_huffman_shape();
+}

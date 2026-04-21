@@ -1,0 +1,76 @@
+// =============================================================================
+// net/h3/qpack/integer.vr — QPACK integer encoding (RFC 9204 §4.1.1)
+// =============================================================================
+// Layer: 5 (Network — HTTP/3 / QPACK)
+// =============================================================================
+//
+// QPACK reuses HPACK's integer encoding (RFC 7541 §5.1). An integer
+// is encoded in a "prefix" bit-field (within the first byte of the
+// enclosing instruction) plus optional continuation bytes:
+//
+//   if value < (2^N - 1):
+//       emit value in N prefix bits.
+//   else:
+//       emit (2^N - 1) in N prefix bits.
+//       value -= (2^N - 1)
+//       while value >= 128:
+//           emit (value % 128 | 0x80)
+//           value /= 128
+//       emit value as final byte.
+//
+// The prefix bits occupy the low N bits of the first byte; the other
+// (8 - N) bits carry the instruction opcode — caller ORs it in.
+//
+// =============================================================================
+
+module core.net.h3.qpack.integer;
+
+mount core.*;
+mount core.collections.List;
+
+public type IntError is
+      Truncated
+    | Overflow;
+
+/// Encode `value` with an N-bit prefix, already-set high bits in
+/// `first_byte_opcode`. Appends to `out`.
+pub fn encode(out: &mut List<Byte>, prefix_bits: Int, first_byte_opcode: Byte, value: UInt64) {
+    let mask: UInt64 = (1_u64 << (prefix_bits as UInt64)) - 1_u64;
+    if value < mask {
+        out.push(first_byte_opcode | (value as Byte));
+        return;
+    }
+    out.push(first_byte_opcode | (mask as Byte));
+    let mut v = value - mask;
+    while v >= 128_u64 {
+        out.push(((v & 0x7F_u64) | 0x80_u64) as Byte);
+        v = v >> 7;
+    }
+    out.push(v as Byte);
+}
+
+/// Decode an integer starting at `pos`, consuming at least one byte.
+/// `prefix_bits` must match the encoder's choice. Returns the value
+/// plus the new cursor position.
+pub fn decode(buf: &[Byte], pos: Int, prefix_bits: Int) -> Result<(UInt64, Int), IntError> {
+    if pos >= buf.len() { return Err(IntError.Truncated); }
+    let mask: UInt64 = (1_u64 << (prefix_bits as UInt64)) - 1_u64;
+    let first = (buf[pos] as UInt64) & mask;
+    if first < mask {
+        return Ok((first, pos + 1));
+    }
+    let mut value: UInt64 = first;
+    let mut shift: Int = 0;
+    let mut cur = pos + 1;
+    loop {
+        if cur >= buf.len() { return Err(IntError.Truncated); }
+        let b = buf[cur];
+        cur = cur + 1;
+        // Overflow check: max 63 useful bits before we'd wrap.
+        if shift >= 63 { return Err(IntError.Overflow); }
+        value = value + (((b as UInt64) & 0x7F_u64) << (shift as UInt64));
+        shift = shift + 7;
+        if (b & 0x80_u8) == 0_u8 { break; }
+    }
+    Ok((value, cur))
+}
