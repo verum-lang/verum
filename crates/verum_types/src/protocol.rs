@@ -8477,8 +8477,28 @@ impl ProtocolChecker {
         ty: &Type,
         method_name: &Text,
     ) -> Result<List<Type>, ProtocolError> {
-        let impls = self.get_implementations(ty);
         let mut results = List::new();
+
+        // Dyn-protocol receivers (e.g. `dyn Tracer`) have no concrete
+        // impl registered — their method signatures come directly
+        // from the protocol declaration. Serve them from there so
+        // that call sites like `(&dyn Tracer).start_span(...)` and
+        // `Heap<dyn Tracer>.start_span(...)` (after auto-deref to
+        // `dyn Tracer`) both resolve.
+        if let Type::DynProtocol { bounds, .. } = ty {
+            for proto_name in bounds.iter() {
+                if let Maybe::Some(proto) = self.get_protocol(proto_name) {
+                    if let Some(pm) = proto.methods.get(method_name) {
+                        results.push(pm.ty.clone());
+                    }
+                }
+            }
+            if !results.is_empty() {
+                return Ok(results);
+            }
+        }
+
+        let impls = self.get_implementations(ty);
 
         // Fetch the protocol's method-level type-param names (if we
         // can locate the protocol declaration). These names must be

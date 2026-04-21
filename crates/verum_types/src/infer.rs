@@ -2852,6 +2852,52 @@ impl TypeChecker {
     ///
     /// This is like check_expr but skips initialization checking,
     /// since the assignment is what initializes the variable.
+    /// Does `ty` have a method `method_name` reachable WITHOUT any
+    /// auto-deref? Checks both the inherent methods table (for
+    /// `implement T { fn m(...) }` cases) and the protocol-impl set
+    /// for `ty` (via `lookup_all_protocol_methods`), plus the
+    /// dyn-protocol path when `ty` is a `DynProtocol`.
+    ///
+    /// Used by the auto-deref cascade in method resolution — the
+    /// cascade MUST NOT unwrap `Mutex<T>` to `T` when the user
+    /// actually called `mutex.lock()`, so we stop the chain as soon
+    /// as `ty` itself owns the method.
+    fn type_or_dyn_has_method(&self, ty: &Type, method_name: &Text) -> bool {
+        // Inherent method on the exact type name.
+        let type_name: Text = self.type_to_name(ty).to_string().into();
+        {
+            let inherents = self.inherent_methods.read();
+            if let Some(methods) = inherents.get(&type_name) {
+                if methods.contains_key(method_name) {
+                    return true;
+                }
+                // Also try the static-method marker form.
+                let static_key: Text = format!("$static${}", method_name.as_str()).into();
+                if methods.contains_key(&static_key) {
+                    return true;
+                }
+            }
+        }
+        // Dyn-protocol direct method check.
+        if let Type::DynProtocol { bounds, .. } = ty {
+            let checker = self.protocol_checker.read();
+            for proto_name in bounds.iter() {
+                if let Maybe::Some(proto) = checker.get_protocol(proto_name) {
+                    if proto.methods.contains_key(method_name) {
+                        return true;
+                    }
+                }
+            }
+            return false;
+        }
+        // Protocol-impl lookup for the concrete type.
+        let checker = self.protocol_checker.read();
+        match checker.lookup_all_protocol_methods(ty, method_name) {
+            Ok(candidates) => !candidates.is_empty(),
+            Err(_) => false,
+        }
+    }
+
     /// Does `ty` directly define a field named `field_name`?
     /// Used by the auto-deref cascade in assignment-target field
     /// resolution — we only need a structural lookup, not full
@@ -39114,6 +39160,68 @@ impl TypeChecker {
         let recv_ty = match recv_ty {
             Type::CapabilityRestricted { base, .. } => *base,
             other => other,
+        };
+
+        // Smart-pointer auto-deref for method resolution. If the
+        // receiver is a type with a Deref::Target AND (a) the method
+        // is NOT defined on the receiver itself but (b) IS defined
+        // somewhere along the deref chain, unwrap the smart pointer
+        // so protocol-method lookup on the inner type succeeds.
+        //
+        // Primary motivation: `Heap<dyn Tracer>.start_span(...)`
+        // works the same as `(&*h).start_span(...)`. No hardcoded
+        // list of smart pointers — we consult `Deref::Target` from
+        // the stdlib's protocol declarations.
+        //
+        // Chain examples:
+        //   * `Heap<Concrete>`            → unwrap to Concrete
+        //   * `Shared<Mutex<T>>`          → unwrap to Mutex<T> if
+        //                                    the method lives there;
+        //                                    otherwise keep going
+        //   * `MutexGuard<T>`             → unwrap to T
+        //
+        // Bounded to 8 hops. Never unwraps when the current level
+        // already has the method (so `Mutex.lock()` still binds to
+        // Mutex, not to the inner T).
+        let recv_ty = {
+            let method_name_t: Text = method.name.as_str().into();
+            let mut current = recv_ty;
+            let mut hops = 0;
+            while hops < 8 && !self.type_or_dyn_has_method(&current, &method_name_t) {
+                let next = {
+                    let checker = self.protocol_checker.read();
+                    checker.try_find_associated_type(
+                        &current,
+                        &verum_common::Text::from("Target"),
+                    )
+                };
+                match next {
+                    Some(target) => {
+                        let unwrapped = self.unwrap_reference_type(&target).clone();
+                        let normalised = self.normalize_type(&unwrapped);
+                        // DynProtocol is unsized and cannot be a
+                        // by-value receiver. `Heap<dyn Tracer>` → deref
+                        // gives `dyn Tracer`, which is the right
+                        // *mathematical* target but not a usable
+                        // receiver form. Method resolution expects a
+                        // sized receiver, so we wrap plain DynProtocol
+                        // in `&dyn ...` — that is the form used by
+                        // every existing working dyn-dispatch call
+                        // site (e.g. `(&*heap).method()` / `fn f(&dyn
+                        // Tracer)`).
+                        current = match normalised {
+                            Type::DynProtocol { .. } => Type::Reference {
+                                mutable: false,
+                                inner: Box::new(normalised),
+                            },
+                            other => other,
+                        };
+                        hops += 1;
+                    }
+                    None => break,
+                }
+            }
+            current
         };
 
         // Check if this is a context method call - verify capabilities.
