@@ -85,12 +85,20 @@ implement Node {
     }
 }
 
+/// A nested sub-router attached under a literal prefix.
+type NestedEntry is {
+    prefix: Text,
+    inner: Heap<Router>,
+};
+
 /// HTTP router. Register routes via `.route(...)` / `.get(...)` / etc.;
-/// install a fallback via `.fallback(...)`; dispatch via `.dispatch(req)`.
-/// Router itself implements Handler.
+/// install a fallback via `.fallback(...)`; mount sub-routers via
+/// `.nest(...)`; dispatch via `.dispatch(req)`. Router itself
+/// implements Handler.
 public type Router is {
     root: Heap<Node>,
     fallback: Maybe<Heap<dyn Handler>>,
+    nested: List<NestedEntry>,
 };
 
 implement Router {
@@ -98,6 +106,7 @@ implement Router {
         Router {
             root: Heap.new(Node.new()),
             fallback: None,
+            nested: List.new(),
         }
     }
 
@@ -137,6 +146,32 @@ implement Router {
         self
     }
 
+    /// Mount a sub-router under a literal prefix (must start with `/`
+    /// and must NOT end with a slash unless it is the root `/`).
+    /// Matching attempts the main tree first, then each nested
+    /// sub-router in registration order; falls through to `fallback`
+    /// otherwise.
+    ///
+    /// Requests whose path starts with `prefix + "/"` have that prefix
+    /// stripped before being handed to the inner router, so a sub-router
+    /// registered under `/api/v1` sees paths like `/users/42` in its own
+    /// tree — this mirrors axum::Router::nest.
+    public fn nest(mut self, prefix: Text, inner: Router) -> Router {
+        if !prefix.starts_with("/") {
+            panic(f"Router.nest: prefix must start with '/': {prefix}");
+        }
+        let clean = if prefix.len() > 1 && prefix.ends_with("/") {
+            prefix.slice(0, prefix.len() - 1)
+        } else {
+            prefix
+        };
+        self.nested.push(NestedEntry {
+            prefix: clean,
+            inner: Heap.new(inner),
+        });
+        self
+    }
+
     pub fn match_request(&self, req: &mut WeftRequest)
         -> Maybe<&Heap<dyn Handler>>
     {
@@ -158,14 +193,46 @@ implement Router {
     pub async fn dispatch(&self, mut req: WeftRequest)
         -> Result<Response, WeftError>
     {
+        // 1. Main tree — exact radix match against the full request path.
         match self.match_request(&mut req) {
-            Some(handler) => handler.handle(req).await,
-            None => match &self.fallback {
-                Some(fb) => fb.handle(req).await,
-                None     => Err(WeftError.RouteNotFound),
+            Some(handler) => return handler.handle(req).await,
+            None => {}
+        }
+
+        // 2. Nested sub-routers in registration order. The first
+        //    prefix that matches wins; we strip the prefix and dispatch.
+        for entry in self.nested.iter() {
+            match strip_prefix(&req.path, &entry.prefix) {
+                None => continue,
+                Some(remainder) => {
+                    let mut inner_req = WeftRequest { path: remainder, ..req };
+                    return (&*entry.inner).dispatch(inner_req).await;
+                }
             }
         }
+
+        // 3. Fallback.
+        match &self.fallback {
+            Some(fb) => fb.handle(req).await,
+            None     => Err(WeftError.RouteNotFound),
+        }
     }
+}
+
+/// Return `Some(remainder)` iff `path` starts with `prefix + "/"` or
+/// equals `prefix` exactly; otherwise `None`. Yields "/" for an exact
+/// match so sub-router root handlers can be registered as `/`.
+fn strip_prefix(path: &Text, prefix: &Text) -> Maybe<Text> {
+    if path == prefix {
+        return Some("/");
+    }
+    // Nested prefix must be followed by `/` to avoid false positives
+    // (e.g. prefix "/api" should not match "/apix").
+    let with_slash = f"{prefix}/";
+    if path.starts_with(&with_slash) {
+        return Some(path.slice(prefix.len(), path.len()));
+    }
+    None
 }
 
 fn split_path(path: &Text) -> List<Text> {

@@ -1,0 +1,49 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: net, weft, router, nest, sub-router
+// @timeout: 10000
+// @expect: pass
+
+// §5.4 + Phase-2 extension — Router.nest() mounts a sub-router under a
+// literal prefix; requests under that prefix see the path with the
+// prefix stripped.
+
+mount core.net.http.{Response};
+mount core.net.weft.handler.{WeftRequest, Handler};
+mount core.net.weft.router.{Router};
+mount core.net.weft.error.{WeftError};
+mount core.net.weft.response_ext.{resp_ok};
+
+type Noop is {};
+implement Handler for Noop {
+    async fn handle(&self, _req: WeftRequest) -> Result<Response, WeftError> {
+        Ok(resp_ok())
+    }
+}
+
+fn typecheck_nested_router() -> Router {
+    let v1 = Router.new()
+        .get("/users/:id", Noop {})
+        .get("/things",    Noop {});
+
+    let v2 = Router.new()
+        .get("/users/:id", Noop {})
+        .post("/things",   Noop {});
+
+    Router.new()
+        .get("/",       Noop {})
+        .nest("/api/v1", v1)
+        .nest("/api/v2", v2)
+        .fallback(Noop {})
+}
+
+async fn typecheck_dispatch_through_nested(r: &Router, req: WeftRequest)
+    -> Result<Response, WeftError>
+{
+    r.dispatch(req).await
+}
+
+fn main() {
+    let _ = typecheck_nested_router();
+}

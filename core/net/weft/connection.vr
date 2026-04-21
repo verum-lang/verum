@@ -12,7 +12,10 @@ mount core.collections.list.{List};
 mount core.net.tcp.{TcpStream};
 mount core.net.addr.{SocketAddr};
 mount core.net.http.{Method, StatusCode, Version, Headers, Response};
-mount core.net.http_parser.{HttpParser, ParseProgress, HeaderView, ParseError};
+mount core.net.http_parser.{
+    HttpParser, ParseProgress, HeaderView, ParseError,
+    ChunkedDecoder, ChunkProgress,
+};
 mount core.async.cancellation.{CancellationToken};
 mount core.net.weft.handler.{WeftRequest, Handler};
 mount core.net.weft.error.{WeftError, IntoResponse};
@@ -140,35 +143,42 @@ async fn serve_one_message<S: Handler>(
     let (path, raw_query) = split_path_query(parser.path(&buf_bytes));
     let headers = materialize_headers(parser.headers(), &buf_bytes);
 
-    if parser.is_chunked() {
-        let _ = write_response(stream, &mk_501_chunked()).await;
-        return Err(ConnError.UnsupportedTransferEncoding("chunked input"));
-    }
-
-    let body_len = match hdr.body_len {
-        Some(n) => n,
-        None    => 0,
-    };
-    if body_len > config.max_request_size {
-        let _ = write_response(stream, &mk_413()).await;
-        return Err(ConnError.TooLarge);
-    }
-    while accum.len() - hdr.body_start < body_len {
-        let mut chunk: List<Int> = List.with_capacity(4096);
-        let rr = stream.read_cancellable(&mut chunk, token).await;
-        let n = match rr {
-            Err(_) => return Err(ConnError.Cancelled),
-            Ok(Err(e)) => return Err(ConnError.Io(f"{e}")),
-            Ok(Ok(n)) => n,
+    let body: List<Byte> = if parser.is_chunked() {
+        match read_chunked_body(stream, &mut accum, hdr.body_start, token, config).await {
+            Ok(b) => b,
+            Err(e) => {
+                // Protocol error on chunked stream — 400, then close.
+                let _ = write_response(stream, &mk_400_chunk()).await;
+                return Err(e);
+            }
+        }
+    } else {
+        let body_len = match hdr.body_len {
+            Some(n) => n,
+            None    => 0,
         };
-        if n == 0 { return Err(ConnError.ClientClosed); }
-        for i in 0..n { accum.push(chunk[i]); }
-    }
-    let mut body: List<Byte> = List.with_capacity(body_len);
-    let start = hdr.body_start;
-    for i in 0..body_len {
-        body.push((accum[start + i] & 0xFF) as Byte);
-    }
+        if body_len > config.max_request_size {
+            let _ = write_response(stream, &mk_413()).await;
+            return Err(ConnError.TooLarge);
+        }
+        while accum.len() - hdr.body_start < body_len {
+            let mut chunk: List<Int> = List.with_capacity(4096);
+            let rr = stream.read_cancellable(&mut chunk, token).await;
+            let n = match rr {
+                Err(_) => return Err(ConnError.Cancelled),
+                Ok(Err(e)) => return Err(ConnError.Io(f"{e}")),
+                Ok(Ok(n)) => n,
+            };
+            if n == 0 { return Err(ConnError.ClientClosed); }
+            for i in 0..n { accum.push(chunk[i]); }
+        }
+        let mut out: List<Byte> = List.with_capacity(body_len);
+        let start = hdr.body_start;
+        for i in 0..body_len {
+            out.push((accum[start + i] & 0xFF) as Byte);
+        }
+        out
+    };
 
     let keep_alive = decide_keep_alive(&version, &headers, config.keep_alive);
 
@@ -301,12 +311,68 @@ fn mk_413() -> Response {
     )
 }
 
-fn mk_501_chunked() -> Response {
+fn mk_400_chunk() -> Response {
     resp_with_body_text(
         resp_with_header(
-            resp_status(StatusCode.new(501)),
+            resp_status(StatusCode.new(400)),
             &"connection", &"close",
         ),
-        "chunked transfer-encoding not yet supported",
+        "malformed chunked body",
     )
+}
+
+/// Decode the chunked body starting at `body_start` into a fresh
+/// `List<Byte>`. Reads more bytes from the stream as needed; caps the
+/// total decoded size at `config.max_request_size`.
+async fn read_chunked_body(
+    stream: &mut TcpStream,
+    accum: &mut List<Int>,
+    body_start: Int,
+    token: &CancellationToken,
+    config: &ConnectionConfig,
+) -> Result<List<Byte>, ConnError> {
+    let mut decoder = ChunkedDecoder.new();
+    let mut out: List<Byte> = List.new();
+    loop {
+        // Feed everything we have after body_start into the decoder.
+        let tail_bytes = int_list_tail_to_bytes(accum, body_start);
+        match decoder.feed(&tail_bytes) {
+            ChunkProgress.ChunkOutput { consumed, data_start, data_len } => {
+                // Append decoded payload.
+                let abs_start = body_start + data_start;
+                for i in 0..data_len {
+                    out.push((accum[abs_start + i] & 0xFF) as Byte);
+                }
+                if out.len() > config.max_request_size {
+                    return Err(ConnError.TooLarge);
+                }
+                // Decoder already advanced — no extra consumption logic.
+            }
+            ChunkProgress.ChunkEnd { .. } => {
+                return Ok(out);
+            }
+            ChunkProgress.ChunkNeedMore => {
+                // Read more bytes and re-feed.
+                let mut chunk: List<Int> = List.with_capacity(4096);
+                let rr = stream.read_cancellable(&mut chunk, token).await;
+                let n = match rr {
+                    Err(_)     => return Err(ConnError.Cancelled),
+                    Ok(Err(e)) => return Err(ConnError.Io(f"{e}")),
+                    Ok(Ok(n))  => n,
+                };
+                if n == 0 { return Err(ConnError.ClientClosed); }
+                for i in 0..n { accum.push(chunk[i]); }
+            }
+            ChunkProgress.ChunkErr(e) => return Err(ConnError.Parse(e)),
+        }
+    }
+}
+
+/// Same as `int_list_to_bytes` but skips the first `start` entries.
+fn int_list_tail_to_bytes(src: &List<Int>, start: Int) -> List<Byte> {
+    let mut out = List.with_capacity(src.len() - start);
+    for i in start..src.len() {
+        out.push((src[i] & 0xFF) as Byte);
+    }
+    out
 }
