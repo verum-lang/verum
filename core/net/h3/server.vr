@@ -1,0 +1,299 @@
+// =============================================================================
+// net/h3/server.vr — High-level HTTP/3 server facade
+// =============================================================================
+// Layer: 5 (Network — HTTP/3)
+// Dependencies: core, core.net.{udp, quic, h3, tls13}, core.security.x509
+// =============================================================================
+//
+// User-facing server that listens on a UDP socket, accepts incoming
+// QUIC connections, and routes each HTTP/3 request through a
+// `Handler` callback:
+//
+//   fn handler(req: H3Request) -> H3Response { ... }
+//
+//   let server = H3Server.bind("[::]:443", ServerOptions.from_cert(...)).await?;
+//   server.run(handler).await?;
+//
+// Or with the protocol-style handler type for statefully-dispatched
+// request routing:
+//
+//   type Api is protocol {
+//       async fn serve(&self, req: H3Request) -> H3Response;
+//   };
+//
+//   let my_api: Heap<dyn Api> = ...;
+//   server.run_with(my_api).await?;
+//
+// =============================================================================
+
+module core.net.h3.server;
+
+mount core.*;
+mount core.collections.List;
+mount core.time.duration.{Duration};
+mount core.net.addr.{SocketAddr};
+mount core.net.h3.{
+    H3Connection, H3Settings, H3Request, H3Response, H3Error, StreamWrite,
+    H3Role,
+};
+mount core.net.tls13.handshake.server_sm.{ServerConfig, CertSigner};
+mount core.net.tls13.handshake.dhe_pool.{DhePool, LocalDhePool};
+mount core.net.tls13.named_group.{NamedGroup};
+mount core.net.tls13.cipher_suite.{CipherSuite};
+
+// =============================================================================
+// Options
+// =============================================================================
+
+public type ServerOptions is {
+    /// Leaf-first DER cert chain. Must be non-empty.
+    cert_chain:    List<List<Byte>>,
+    /// CertificateVerify signer — typically plugs a Ed25519 / P-256 /
+    /// RSA-PSS key backed by in-process crypto or an HSM.
+    signer:        Heap<dyn CertSigner>,
+    /// ALPN protocols we advertise. Server picks first intersection
+    /// with the client's list; default `[b"h3"]`.
+    alpn_prefs:    List<List<Byte>>,
+    /// Accepted TLS key-share groups in priority order.
+    accepted_groups: List<NamedGroup>,
+    /// Accepted cipher suites in priority order.
+    suites:        List<CipherSuite>,
+    /// DHE keypair pool — default `LocalDhePool`.
+    dhe_pool:      Heap<dyn DhePool>,
+    /// Idle timeout per connection.
+    idle_timeout:  Duration,
+    /// Maximum concurrent requests per connection (default 100).
+    max_concurrent_requests: Int,
+    /// Maximum accepted header section bytes.
+    max_field_section_size:  UInt64,
+};
+
+impl ServerOptions {
+    /// Canonical constructor — caller provides a pre-loaded cert
+    /// chain and signer; the rest falls back to industrial defaults.
+    pub fn from_cert(
+        cert_chain: List<List<Byte>>,
+        signer: Heap<dyn CertSigner>,
+    ) -> ServerOptions {
+        ServerOptions {
+            cert_chain:    cert_chain,
+            signer:        signer,
+            alpn_prefs:    [default_alpn()],
+            accepted_groups: [NamedGroup.X25519, NamedGroup.Secp256r1],
+            suites:        [
+                CipherSuite.TlsAes128GcmSha256,
+                CipherSuite.TlsChaCha20Poly1305Sha256,
+                CipherSuite.TlsAes256GcmSha384,
+            ],
+            dhe_pool:      Heap(LocalDhePool.new()) as Heap<dyn DhePool>,
+            idle_timeout:  Duration.from_secs(30),
+            max_concurrent_requests: 100,
+            max_field_section_size:  0xFFFFFFFFFFFFFFFF_u64,
+        }
+    }
+
+    pub fn with_alpn(mut self, alpn: List<List<Byte>>) -> ServerOptions {
+        self.alpn_prefs = alpn;
+        self
+    }
+
+    pub fn with_idle_timeout(mut self, d: Duration) -> ServerOptions {
+        self.idle_timeout = d;
+        self
+    }
+}
+
+fn default_alpn() -> List<Byte> {
+    let mut v: List<Byte> = [];
+    v.push(0x68_u8); v.push(0x33_u8);
+    v
+}
+
+// =============================================================================
+// Handler protocol
+// =============================================================================
+
+/// Server-side request callback. Implementations produce an
+/// H3Response (or an error) for each incoming H3Request.
+public type H3Handler is protocol {
+    async fn serve(&self, req: H3Request) -> H3Response;
+};
+
+// =============================================================================
+// Server
+// =============================================================================
+
+public type H3Server is {
+    local_addr: SocketAddr,
+    opts:       ServerOptions,
+    /// Alive connections keyed by peer CID — the integration layer
+    /// manages this against QuicListener in the full wire-up.
+    active:     List<H3Connection>,
+};
+
+public type H3ServerError is
+      Bind(Text)
+    | Transport(Text)
+    | H3Layer(H3Error)
+    | Closed;
+
+impl H3Server {
+    /// Bind a UDP socket + prepare the accept loop. The returned
+    /// server is idle until `run` / `run_with` drives it.
+    pub async fn bind(addr_text: &Text, opts: ServerOptions) -> Result<H3Server, H3ServerError> {
+        let addr = SocketAddr.from_text(addr_text.clone())
+            .map_err(|_| H3ServerError.Bind(Text.from_str(f"parse addr {addr_text}")))?;
+        // UDP socket creation + QUIC listener attach are in the
+        // transport integration layer (wires through `core.net.quic.
+        // connection.QuicListener` once the pure-Verum transport
+        // fully lands). The server value is ready to `run`.
+        Ok(H3Server {
+            local_addr: addr,
+            opts:       opts,
+            active:     [],
+        })
+    }
+
+    /// Run the accept loop with a closure-based handler. Each request
+    /// gets its own `handler` invocation inside the connection's
+    /// nursery; responses ship back via the same stream.
+    pub async fn run<F>(&mut self, handler: F) -> Result<(), H3ServerError>
+    where F: fn(H3Request) -> H3Response,
+    {
+        loop {
+            let mut conn = self.accept_connection().await?;
+            // Nursery-spawn the per-connection loop. Structured
+            // concurrency means a panic / close in any one handler
+            // does not leak.
+            let handler_ref = handler.clone();
+            core.async.nursery.spawn(async move {
+                let _ = self.drive_connection(&mut conn, handler_ref).await;
+            });
+        }
+    }
+
+    /// Same as `run` but takes a protocol-shaped handler — useful for
+    /// statefully-dispatched request routing (e.g. typed REST APIs,
+    /// middleware chains, gRPC-equivalent codecs).
+    pub async fn run_with(&mut self, handler: Heap<dyn H3Handler>) -> Result<(), H3ServerError> {
+        loop {
+            let mut conn = self.accept_connection().await?;
+            let h = handler.clone();
+            core.async.nursery.spawn(async move {
+                let _ = self.drive_connection_proto(&mut conn, h).await;
+            });
+        }
+    }
+
+    // ==================== per-connection loop ====================
+
+    async fn accept_connection(&mut self) -> Result<H3Connection, H3ServerError> {
+        // Integration layer: block on QUIC listener accept, then wrap
+        // the settled connection in `H3Connection.new_server`. Full
+        // wire-up lands with the end-to-end pipeline.
+        let settings = {
+            let mut s = H3Settings.defaults();
+            s.max_field_section_size = self.opts.max_field_section_size;
+            s
+        };
+        Ok(H3Connection.new_server(settings))
+    }
+
+    async fn drive_connection<F>(
+        &self,
+        conn: &mut H3Connection,
+        handler: F,
+    ) -> Result<(), H3ServerError>
+    where F: fn(H3Request) -> H3Response,
+    {
+        loop {
+            // Drain any queued writes produced by the previous tick.
+            let writes = conn.drain_outbound();
+            self.flush_writes(writes).await?;
+
+            // Pull a request if one became complete.
+            match conn.take_request() {
+                Some((sid, req)) => {
+                    let resp = handler(req);
+                    conn.send_response(sid, &resp)
+                        .map_err(|e| H3ServerError.H3Layer(e))?;
+                },
+                None => {
+                    // Try to read from the transport.
+                    let (bidi, uni, closed) = self.read_step(conn).await?;
+                    if closed { return Ok(()); }
+                    let mut i: Int = 0;
+                    while i < bidi.len() {
+                        let (sid, bytes, fin) = &bidi[i];
+                        conn.on_bidi_stream(*sid, bytes.as_slice(), *fin)
+                            .map_err(|e| H3ServerError.H3Layer(e))?;
+                        i = i + 1;
+                    }
+                    let mut j: Int = 0;
+                    while j < uni.len() {
+                        let (sid, bytes) = &uni[j];
+                        conn.on_uni_stream(*sid, bytes.as_slice())
+                            .map_err(|e| H3ServerError.H3Layer(e))?;
+                        j = j + 1;
+                    }
+                },
+            }
+        }
+    }
+
+    async fn drive_connection_proto(
+        &self,
+        conn: &mut H3Connection,
+        handler: Heap<dyn H3Handler>,
+    ) -> Result<(), H3ServerError> {
+        loop {
+            let writes = conn.drain_outbound();
+            self.flush_writes(writes).await?;
+            match conn.take_request() {
+                Some((sid, req)) => {
+                    let resp = handler.serve(req).await;
+                    conn.send_response(sid, &resp)
+                        .map_err(|e| H3ServerError.H3Layer(e))?;
+                },
+                None => {
+                    let (bidi, uni, closed) = self.read_step(conn).await?;
+                    if closed { return Ok(()); }
+                    let mut i: Int = 0;
+                    while i < bidi.len() {
+                        let (sid, bytes, fin) = &bidi[i];
+                        conn.on_bidi_stream(*sid, bytes.as_slice(), *fin)
+                            .map_err(|e| H3ServerError.H3Layer(e))?;
+                        i = i + 1;
+                    }
+                    let mut j: Int = 0;
+                    while j < uni.len() {
+                        let (sid, bytes) = &uni[j];
+                        conn.on_uni_stream(*sid, bytes.as_slice())
+                            .map_err(|e| H3ServerError.H3Layer(e))?;
+                        j = j + 1;
+                    }
+                },
+            }
+        }
+    }
+
+    // ==================== integration-layer shims ====================
+
+    async fn flush_writes(&self, writes: List<StreamWrite>) -> Result<(), H3ServerError> {
+        // Forward to the QUIC SendStream for each stream_id in `writes`.
+        // Full wire-up with connection_sm lands in a follow-up commit.
+        let _ = writes;
+        Ok(())
+    }
+
+    async fn read_step(&self, conn: &H3Connection)
+        -> Result<(List<(UInt64, List<Byte>, Bool)>,
+                   List<(UInt64, List<Byte>)>,
+                   Bool), H3ServerError>
+    {
+        let _ = conn;
+        Ok((List<(UInt64, List<Byte>, Bool)>.new(),
+            List<(UInt64, List<Byte>)>.new(),
+            false))
+    }
+}

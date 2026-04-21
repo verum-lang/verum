@@ -32,6 +32,7 @@ public module messages;
 public module transcript;
 public module client_sm;
 public module server_sm;
+public module dhe_pool;
 
 // Re-exports — codec
 public mount .codec.{Reader, CodecError};
@@ -71,3 +72,6 @@ public mount .server_sm.{
     CertSigner,
     WaitClientHello, WaitClientFinished,
 };
+
+// Re-exports — DHE keypair pool
+public mount .dhe_pool.{DhePool, LocalDhePool, DheKeyPair, generate_client_keyshares};

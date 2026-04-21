@@ -1,0 +1,165 @@
+// =============================================================================
+// net/quic/connection_sm/path_control.vr — Path + dispatch/tx integration
+// =============================================================================
+// Layer: 5 (Network — QUIC)
+// Dependencies: core, core.time, core.net.quic.{path, frame}
+// =============================================================================
+//
+// Ties the Phase-5 Path / PathManager primitives into the RX / TX
+// pipeline:
+//
+//   * Inbound bytes → `on_inbound_bytes(pm, n)` — feeds byte-count
+//     into the current active path's anti-amplification accounting.
+//   * PATH_CHALLENGE frame → `on_path_challenge(pm, data)` — emits
+//     the PATH_RESPONSE echo via the returned outbound frame list.
+//   * PATH_RESPONSE frame → `on_path_response(pm, data, now)` —
+//     validates the active / standby path (whichever matches) and
+//     potentially promotes standby to active.
+//   * Outbound tx gate → `gate_outbound(pm, bytes)` — before the
+//     sender picks a packet size, this checks Path.can_send against
+//     the anti-amplification budget and returns the clamped byte
+//     budget the sender is allowed to emit right now.
+//
+// Integration note: the TX pipeline currently emits one packet per
+// call; this module exposes the per-tx gate so that the caller can
+// decide whether to clamp payload size or pad to MAX_DATAGRAM_SIZE
+// based on current path status.
+//
+// =============================================================================
+
+module core.net.quic.connection_sm.path_control;
+
+mount core.*;
+mount core.collections.List;
+mount core.time.instant.{Instant};
+mount core.net.quic.frame.{Frame};
+mount core.net.quic.path.{Path, PathManager, PathError, TimerOutcome};
+
+// =============================================================================
+// Inbound byte accounting
+// =============================================================================
+
+/// Record that `n` bytes arrived on the active path. Important
+/// primarily for the server-side anti-amplification budget (RFC 9000
+/// §21.1.1.3) before the client-side path validates via handshake.
+pub fn on_inbound_bytes(pm: &mut PathManager, n: UInt64) {
+    pm.active_mut().on_bytes_received(n);
+    // Standby paths also accumulate their own received bytes while
+    // Unvalidated — so a server under migration keeps a separate 3×
+    // cap on the prospective new path.
+    match pm.standby_mut() {
+        Some(s) => s.on_bytes_received(n),
+        None => {},
+    }
+}
+
+/// Record that `n` bytes were emitted on the active path. Updates
+/// anti-amplification counters if the path is still Unvalidated.
+pub fn on_outbound_bytes(pm: &mut PathManager, n: UInt64) {
+    pm.active_mut().on_bytes_sent(n);
+}
+
+// =============================================================================
+// PATH_CHALLENGE / PATH_RESPONSE handling
+// =============================================================================
+
+/// Emit a PATH_RESPONSE echo. Returns the Frame the caller must
+/// enqueue for the next outbound packet. Separate from the generic
+/// dispatch module so callers can route the response through a
+/// probing packet on the standby path when appropriate (RFC 9000
+/// §9.3.1).
+pub fn on_path_challenge(data: &[Byte; 8]) -> Frame {
+    Frame.PathResponse(data.clone())
+}
+
+/// Peer sent a PATH_RESPONSE. Checks against both active and
+/// standby paths. Returns a PathUpdate enum signalling whether a
+/// path was validated and whether the active path changed
+/// (promote_standby).
+pub fn on_path_response(
+    pm: &mut PathManager,
+    data: &[Byte; 8],
+    now: Instant,
+) -> PathUpdate {
+    // Try active first — most common during initial validation.
+    match pm.active_mut().on_path_response(data, now.clone()) {
+        Ok(true) => return PathUpdate.ActiveValidated,
+        _ => {},
+    }
+    // Then standby — migration in flight.
+    match pm.standby_mut() {
+        Some(s) => {
+            match s.on_path_response(data, now) {
+                Ok(true) => {
+                    // Standby validated — promote to active.
+                    let retired = pm.promote_standby();
+                    return match retired {
+                        Some(addr) => PathUpdate.StandbyPromoted { retired_remote: addr },
+                        None       => PathUpdate.StandbyValidated,
+                    };
+                },
+                _ => {},
+            }
+        },
+        None => {},
+    }
+    PathUpdate.NoChange
+}
+
+public type PathUpdate is
+      NoChange
+    | ActiveValidated
+    | StandbyValidated
+    | StandbyPromoted { retired_remote: core.net.addr.SocketAddr };
+
+// =============================================================================
+// Outbound tx gate
+// =============================================================================
+
+/// Given a desired packet size `requested`, return the actual byte
+/// budget the caller is allowed to emit right now. Returns 0 when
+/// the path is Failed or when the unvalidated budget is exhausted.
+pub fn gate_outbound(pm: &Path, requested: UInt64) -> UInt64 {
+    match pm.can_send(requested) {
+        Ok(())  => requested,
+        Err(PathError.AmplificationLimitExceeded) => {
+            // Compute remaining budget. Can_send returned Err, so
+            // either we're in Unvalidated with insufficient budget,
+            // or the path is Failed.
+            amplification_remaining(pm)
+        },
+        Err(_) => 0_u64,
+    }
+}
+
+fn amplification_remaining(_p: &Path) -> UInt64 {
+    // Budget inspection goes through a matching view on Path.state;
+    // the exact accessor lives inside path.vr and is private by
+    // design. Callers that need precise remaining bytes compute
+    // against `3 * received_bytes - sent_bytes` via the Path view;
+    // until a public accessor lands we conservatively return 0 so
+    // the caller retries on the next inbound-byte event.
+    0_u64
+}
+
+// =============================================================================
+// Timer integration
+// =============================================================================
+
+/// Active-path timer tick. Caller drives this from the connection's
+/// main timer wheel. Returns a TimerOutcome — ShouldReChallenge ⇒
+/// emit a fresh PATH_CHALLENGE; Failed ⇒ retire the path.
+pub fn on_timer(pm: &mut PathManager, now: Instant) -> TimerOutcome {
+    let outcome_active = pm.active_mut().on_timer(now.clone());
+    // If the active path failed, that's a fatal connection event —
+    // caller escalates. Otherwise the standby's timer is worth a tick.
+    match outcome_active {
+        TimerOutcome.NoAction => {
+            match pm.standby_mut() {
+                Some(s) => s.on_timer(now),
+                None    => TimerOutcome.NoAction,
+            }
+        },
+        other => other,
+    }
+}

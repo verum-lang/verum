@@ -55,6 +55,9 @@ mount core.net.tls13.handshake.messages.{
 };
 mount core.net.tls13.handshake.transcript.{Transcript};
 mount core.net.tls13.handshake.codec.{Reader};
+mount core.net.tls13.handshake.dhe_pool.{DhePool, LocalDhePool, DheKeyPair};
+mount core.security.ecc.x25519.{X25519};
+mount core.security.ecc.p256.{P256};
 
 // =============================================================================
 // Server configuration
@@ -77,6 +80,10 @@ public type ServerConfig is {
     cert_chain:      List<List<Byte>>,
     /// Signer callback for CertificateVerify over the chosen scheme.
     signer:          Heap<dyn CertSigner>,
+    /// Ephemeral DHE keypair source — supplies fresh (EC)DHE material
+    /// per handshake. Default `LocalDhePool` generates inline; high-
+    /// throughput deployments plug a pre-warmed pool.
+    dhe_pool:        Heap<dyn DhePool>,
     /// Server-initiated random — caller fills with CSPRNG output.
     random:          [Byte; 32],
     /// Groups we'll accept in ClientHello.key_share. Server picks
@@ -177,12 +184,14 @@ fn on_client_hello(
             let (ks, peer_group) = select_key_share(&ch.extensions, &ws.config.accepted_groups)?;
             let _ = peer_group;
 
-            // DHE — server generates its own ephemeral and computes shared.
-            // For this skeleton we ask the caller's key management to provide
-            // a (ephemeral_priv, ephemeral_pub) pair via the ServerConfig
-            // extension that will land in a follow-up; here we surface the
-            // shape so callers can wire a real DHE source.
-            let (our_pub, shared) = server_dhe_exchange(&peer_group, &ks.key_exchange)?;
+            // DHE — pull a fresh ephemeral keypair from the configured
+            // pool, compute the shared secret against the client's public
+            // half, and emit our public half back via ServerHello.key_share.
+            let (our_pub, shared) = {
+                let kp = ws.config.dhe_pool.take(peer_group.clone())?;
+                let sh = server_compute_shared(&peer_group, &kp.private_bytes, &ks.key_exchange)?;
+                (kp.public_bytes, sh)
+            };
 
             // Build ServerHello.
             let sh = ServerHello {
@@ -509,20 +518,62 @@ fn build_cert_verify_signed_input(transcript_hash: &[Byte], is_server: Bool) -> 
     out
 }
 
-/// Stub that returns the server's ephemeral public half + the
-/// shared secret. Caller plugs a real DHE source (e.g. a per-
-/// connection ephemeral keypair produced by the accept loop) via
-/// ServerConfig.signer or a parallel channel in the full integration.
-fn server_dhe_exchange(
+/// Compute the ECDHE shared secret given our freshly-drawn private
+/// bytes and the peer's public half from ClientHello.key_share.
+/// All-zero outputs are rejected per RFC 8446 §7.4.2 as
+/// `IllegalParameter`.
+fn server_compute_shared(
     group: &NamedGroup,
-    peer_pub: &List<Byte>,
-) -> Result<(List<Byte>, List<Byte>), TlsError> {
-    let _ = group;
-    let _ = peer_pub;
-    // The connection driver (outside this SM) is expected to supply
-    // the ephemeral keypair through ServerConfig; this stub preserves
-    // the SM shape so it compiles until wire-up lands.
-    Err(TlsError.InternalError(Text.from_str("server DHE source pending wire-up")))
+    priv_bytes: &List<Byte>,
+    peer_pub_bytes: &List<Byte>,
+) -> Result<List<Byte>, TlsError> {
+    match group {
+        NamedGroup.X25519 => {
+            if priv_bytes.len() != 32 || peer_pub_bytes.len() != 32 {
+                return Err(TlsError.IllegalParameter);
+            }
+            let mut sk_raw: [Byte; 32] = [0_u8; 32];
+            let mut pk_raw: [Byte; 32] = [0_u8; 32];
+            let mut i: Int = 0;
+            while i < 32 {
+                sk_raw[i] = priv_bytes[i];
+                pk_raw[i] = peer_pub_bytes[i];
+                i = i + 1;
+            }
+            let sk = X25519.secret_key_from_bytes(&sk_raw);
+            match X25519.diffie_hellman(&sk, &pk_raw) {
+                Ok(shared) => {
+                    let mut out: List<Byte> = [];
+                    let mut k: Int = 0;
+                    while k < 32 { out.push(shared[k]); k = k + 1; }
+                    Ok(out)
+                },
+                Err(_) => Err(TlsError.IllegalParameter),
+            }
+        },
+        NamedGroup.Secp256r1 => {
+            if priv_bytes.len() != 32 {
+                return Err(TlsError.IllegalParameter);
+            }
+            let mut sk_raw: [Byte; 32] = [0_u8; 32];
+            let mut i: Int = 0;
+            while i < 32 { sk_raw[i] = priv_bytes[i]; i = i + 1; }
+            let sk = P256.private_key_from_bytes(&sk_raw)
+                .map_err(|_| TlsError.IllegalParameter)?;
+            let pk = P256.public_key_from_bytes(peer_pub_bytes.as_slice())
+                .map_err(|_| TlsError.IllegalParameter)?;
+            match P256.ecdh(&sk, &pk) {
+                Ok(shared) => {
+                    let mut out: List<Byte> = [];
+                    let mut k: Int = 0;
+                    while k < 32 { out.push(shared[k]); k = k + 1; }
+                    Ok(out)
+                },
+                Err(_) => Err(TlsError.IllegalParameter),
+            }
+        },
+        _ => Err(TlsError.IllegalParameter),
+    }
 }
 
 fn hmac_for_hash(hash: HashKind, key: &[Byte], msg: &[Byte]) -> List<Byte> {

@@ -1,0 +1,39 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: h3, client, server, facade, typecheck
+// @timeout: 10000
+// @expect: pass
+
+mount core.net.h3.*;
+mount core.net.h3.client.{H3Client, ClientOptions, H3ClientError};
+mount core.net.h3.server.{H3Server, ServerOptions, H3Handler, H3ServerError};
+
+async fn check_client_api() -> Result<(), H3ClientError> {
+    let opts = ClientOptions.default();
+    let mut client = H3Client.connect(&Text.from_str("https://example.com/"), opts).await?;
+    let _ = client.authority();
+    let _ = client.peer_addr();
+    let _ = client.selected_alpn();
+
+    // Typecheck the request helpers.
+    let _ = client.get(&Text.from_str("/api/v1/ping")).await;
+    let _ = client.post(
+        &Text.from_str("/api/v1/users"),
+        &Text.from_str("application/json"),
+        b"{}".to_vec(),
+    ).await;
+    Ok(())
+}
+
+fn check_server_api_shape() {
+    // Server construction shape — full flow exercised in the
+    // integration commit once QUIC transport end-to-end wires in.
+    let _ = ServerOptions.from_cert;
+    let _ = H3Server.bind;
+}
+
+fn main() {
+    let _ = check_client_api;
+    check_server_api_shape();
+}

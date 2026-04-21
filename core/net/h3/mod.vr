@@ -38,6 +38,8 @@ public module qpack;
 public module settings;
 public module request;
 public module connection;
+public module client;
+public module server;
 
 // Re-exports — frame layer
 public mount .frame.{
@@ -75,3 +77,9 @@ public mount .request.{
 public mount .connection.{
     H3Connection, H3Role, H3Phase, StreamWrite,
 };
+
+// Re-exports — high-level client
+public mount .client.{H3Client, ClientOptions, H3ClientError};
+
+// Re-exports — high-level server
+public mount .server.{H3Server, ServerOptions, H3Handler, H3ServerError};

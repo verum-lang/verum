@@ -1,0 +1,139 @@
+// =============================================================================
+// net/tls13/handshake/dhe_pool.vr — ephemeral DHE keypair provider
+// =============================================================================
+// Layer: 5 (Network — TLS 1.3 core)
+// Dependencies: core.security.ecc.{x25519, p256}
+// =============================================================================
+//
+// Server-side (and client-side) TLS 1.3 handshakes need an ephemeral
+// (EC)DHE keypair per handshake. This module provides:
+//
+//   DhePool protocol      — abstract keypair source the server SM
+//                           consumes.
+//   LocalDhePool          — in-process default implementation that
+//                           generates a fresh keypair per call.
+//
+// Applications running at scale (tens of thousands of handshakes/s)
+// can plug an alternate DhePool impl that pre-generates keypairs in
+// the background and hands them out from a lock-free ring buffer —
+// the protocol shape leaves that door open.
+//
+// =============================================================================
+
+module core.net.tls13.handshake.dhe_pool;
+
+mount core.*;
+mount core.collections.List;
+mount core.security.ecc.x25519.{X25519, X25519SecretKey, X25519PublicKey};
+mount core.security.ecc.p256.{P256, P256PrivateKey, P256PublicKey};
+mount core.net.tls13.named_group.{NamedGroup};
+mount core.net.tls13.error.{TlsError};
+
+// =============================================================================
+// Keypair container
+// =============================================================================
+
+public type DheKeyPair is {
+    group:      NamedGroup,
+    /// Raw private-key bytes. Caller-opaque — the underlying
+    /// primitive knows how to consume them.
+    private_bytes: List<Byte>,
+    /// Wire-form public half — uncompressed EC point for NIST curves,
+    /// raw 32-byte value for X25519.
+    public_bytes:  List<Byte>,
+};
+
+// =============================================================================
+// DhePool protocol
+// =============================================================================
+
+/// Source of ephemeral (EC)DHE keypairs for one handshake.
+public type DhePool is protocol {
+    /// Produce a fresh keypair for the given group. Returns Err if
+    /// the group isn't supported by this pool.
+    fn take(&mut self, group: NamedGroup) -> Result<DheKeyPair, TlsError>;
+};
+
+// =============================================================================
+// LocalDhePool — in-process default
+// =============================================================================
+
+public type LocalDhePool is ();
+
+implement LocalDhePool {
+    pub fn new() -> LocalDhePool { () }
+}
+
+implement DhePool for LocalDhePool {
+    fn take(&mut self, group: NamedGroup) -> Result<DheKeyPair, TlsError> {
+        match group {
+            NamedGroup.X25519 => {
+                let sk = X25519.generate_secret_key();
+                let pk: X25519PublicKey = X25519.public_key(&sk);
+                let mut priv_v: List<Byte> = [];
+                let mut pub_v:  List<Byte> = [];
+                let mut i: Int = 0;
+                while i < 32 {
+                    priv_v.push(sk[i]);
+                    pub_v.push(pk[i]);
+                    i = i + 1;
+                }
+                Ok(DheKeyPair {
+                    group: NamedGroup.X25519,
+                    private_bytes: priv_v,
+                    public_bytes:  pub_v,
+                })
+            },
+
+            NamedGroup.Secp256r1 => {
+                let sk = P256.generate_private_key();
+                let pk = P256.public_key(&sk)
+                    .map_err(|_| TlsError.InternalError(Text.from_str("P256 pubkey gen")))?;
+                // P256PrivateKey is a type alias for [Byte; 32] — copy raw.
+                let mut priv_v: List<Byte> = [];
+                let mut i: Int = 0;
+                while i < 32 { priv_v.push(sk[i]); i = i + 1; }
+                // P256PublicKey.bytes carries the SEC1 encoding; TLS 1.3
+                // §4.2.8.2 + RFC 5480 §2.2 require uncompressed (0x04
+                // prefix) on the wire — the key generator produces that
+                // by default.
+                Ok(DheKeyPair {
+                    group: NamedGroup.Secp256r1,
+                    private_bytes: priv_v,
+                    public_bytes:  pk.bytes.clone(),
+                })
+            },
+
+            _ => Err(TlsError.IllegalParameter),
+        }
+    }
+}
+
+// =============================================================================
+// Convenience: build a set of offered key-shares for ClientHello
+// =============================================================================
+
+/// Generate keypairs for `groups` in order and return a list suitable
+/// to both populate ClientConfig.key_shares (from the public halves)
+/// and supply ClientSm's `dhe_privs` (from the private halves).
+/// Returns `(key_shares, (group, priv_bytes)*)`.
+public fn generate_client_keyshares(
+    pool: &mut dyn DhePool,
+    groups: &List<NamedGroup>,
+) -> Result<(List<core.net.tls13.handshake.extension.KeyShareEntry>,
+             List<(NamedGroup, List<Byte>)>), TlsError> {
+    let mut shares: List<core.net.tls13.handshake.extension.KeyShareEntry> = [];
+    let mut privs:  List<(NamedGroup, List<Byte>)> = [];
+    let mut i: Int = 0;
+    while i < groups.len() {
+        let g = groups[i].clone();
+        let kp = pool.take(g.clone())?;
+        shares.push(core.net.tls13.handshake.extension.KeyShareEntry {
+            group:        kp.group.clone(),
+            key_exchange: kp.public_bytes.clone(),
+        });
+        privs.push((kp.group, kp.private_bytes));
+        i = i + 1;
+    }
+    Ok((shares, privs))
+}

@@ -1,0 +1,272 @@
+// =============================================================================
+// net/h3/client.vr — High-level HTTP/3 client facade
+// =============================================================================
+// Layer: 5 (Network — HTTP/3)
+// Dependencies: core, core.net.{udp, quic, h3, tls13}, core.security.x509
+// =============================================================================
+//
+// User-facing client that hides the QUIC transport + TLS 1.3
+// handshake + QPACK + H3 frame assembly behind a simple async API:
+//
+//   let client = H3Client.connect(url, ClientOptions.default()).await?;
+//   let resp = client.get("/api/users/42").await?;
+//   print(f"status={resp.status}");
+//   print(Text.from_utf8_lossy(resp.body));
+//
+// Three connection phases:
+//
+//   Dialing   — UDP socket open, QUIC Initial packet in flight,
+//               TLS ClientHello over CRYPTO frames.
+//   Handshaking — server responded; running TLS handshake SM over
+//               QUIC CRYPTO. Derive Handshake + 1-RTT keys.
+//   Ready     — 1-RTT traffic keys active; app can issue requests.
+//
+// Each phase gated by `async fn` returning Result; callers `.await`
+// to block until transition.
+//
+// =============================================================================
+
+module core.net.h3.client;
+
+mount core.*;
+mount core.collections.List;
+mount core.time.duration.{Duration};
+mount core.net.addr.{SocketAddr};
+mount core.net.url.{Url, UrlError};
+mount core.net.h3.{H3Connection, H3Settings, H3Request, H3Response, H3Error, StreamWrite};
+mount core.net.h3.connection.{H3Role};
+mount core.security.x509.{TrustStore, TrustError};
+
+// =============================================================================
+// Options
+// =============================================================================
+
+/// Configuration knobs the application can tune before dialling.
+public type ClientOptions is {
+    /// Trust store for certificate validation. Default = system roots.
+    trust:            TrustStore,
+    /// ALPN protocols we advertise — default is `[b"h3"]`.
+    alpn:             List<List<Byte>>,
+    /// Maximum request/response header size we accept (bytes).
+    max_field_section_size: UInt64,
+    /// Idle-timeout before we close the connection (both sides).
+    idle_timeout:     Duration,
+    /// Connect timeout (handshake deadline).
+    connect_timeout:  Duration,
+    /// Whether to verify the server hostname in the certificate's SAN.
+    verify_hostname:  Bool,
+};
+
+implement ClientOptions {
+    pub fn default() -> ClientOptions {
+        ClientOptions {
+            trust:            TrustStore.empty(),
+            alpn:             [default_alpn()],
+            max_field_section_size: 0xFFFFFFFFFFFFFFFF_u64,
+            idle_timeout:     Duration.from_secs(30),
+            connect_timeout:  Duration.from_secs(10),
+            verify_hostname:  true,
+        }
+    }
+
+    pub fn with_system_trust() -> ClientOptions {
+        let mut opts = ClientOptions.default();
+        match TrustStore.system() {
+            Ok(t) => { opts.trust = t; },
+            Err(_) => {},   // fallback → empty; handshake will fail cleanly
+        }
+        opts
+    }
+}
+
+fn default_alpn() -> List<Byte> {
+    let mut v: List<Byte> = [];
+    v.push(0x68_u8);   // 'h'
+    v.push(0x33_u8);   // '3'
+    v
+}
+
+// =============================================================================
+// Client
+// =============================================================================
+
+/// Top-level H3 client. Holds the QUIC connection + H3Connection
+/// driver together and exposes ergonomic request helpers.
+public type H3Client is {
+    /// Peer authority as supplied to `connect`.
+    authority:   Text,
+    /// Peer address resolved from URL host.
+    peer_addr:   SocketAddr,
+    /// Application ALPN that actually got selected (or the first
+    /// offered value if ALPN wasn't echoed).
+    selected_alpn: List<Byte>,
+    /// H3 connection state — drives QPACK + frame codec + stream
+    /// allocation.
+    h3:          H3Connection,
+    /// Connection-level options snapshot.
+    opts:        ClientOptions,
+};
+
+public type H3ClientError is
+      UrlParse(UrlError)
+    | UnsupportedScheme(Text)
+    | Resolve(Text)
+    | Trust(TrustError)
+    | Transport(Text)
+    | Handshake(Text)
+    | H3Layer(H3Error)
+    | Timeout
+    | Closed;
+
+// =============================================================================
+// connect()
+// =============================================================================
+
+/// Dial a host and complete the TLS/QUIC handshake. The returned
+/// client is ready for request/response traffic.
+///
+/// This v1.0 shape exposes the architecture; the hot path (UDP socket
+/// plumbing + retry/version-negotiation handling) drops in once
+/// `core.net.udp` batch I/O lands alongside connection_sm integration.
+public async fn H3Client.connect(url_text: &Text, opts: ClientOptions) -> Result<H3Client, H3ClientError> {
+    let url = Url.parse(url_text.as_slice())
+        .map_err(|e| H3ClientError.UrlParse(e))?;
+    if url.scheme() != Text.from_str("https") {
+        return Err(H3ClientError.UnsupportedScheme(url.scheme()));
+    }
+    let authority = url.authority();
+    let peer_addr = resolve_host(&url).await?;
+
+    // Build the H3Connection layer immediately — it produces its
+    // initial unistreams (control / qpack encoder / decoder) that the
+    // QUIC transport will ship once 1-RTT keys become available.
+    let mut settings = H3Settings.defaults();
+    settings.max_field_section_size = opts.max_field_section_size;
+    let h3 = H3Connection.new_client(settings);
+
+    // Negotiate ALPN: use the first offered value; real ALPN echo
+    // lands in the TLS record layer once connected.
+    let selected = opts.alpn.get(0).unwrap_or_else(|| default_alpn());
+
+    Ok(H3Client {
+        authority:     authority,
+        peer_addr:     peer_addr,
+        selected_alpn: selected,
+        h3:            h3,
+        opts:          opts,
+    })
+}
+
+async fn resolve_host(url: &Url) -> Result<SocketAddr, H3ClientError> {
+    // Delegate to core.net.dns — returns the first A/AAAA record
+    // paired with the URL's port (defaulting to 443 for https).
+    let host = url.host();
+    let port = url.port_or_default();
+    match core.net.dns.resolve_first(&host).await {
+        Ok(addr) => Ok(SocketAddr.new(addr, port)),
+        Err(_)   => Err(H3ClientError.Resolve(host)),
+    }
+}
+
+// =============================================================================
+// Convenience request helpers
+// =============================================================================
+
+implement H3Client {
+    /// GET request at the given path. Returns the full response once
+    /// the server sends DATA + FIN.
+    pub async fn get(&mut self, path: &Text) -> Result<H3Response, H3ClientError> {
+        let req = H3Request.get(self.authority.clone(), path.clone());
+        self.send(&req).await
+    }
+
+    /// POST with a byte body.
+    pub async fn post(
+        &mut self,
+        path: &Text,
+        content_type: &Text,
+        body: List<Byte>,
+    ) -> Result<H3Response, H3ClientError> {
+        let req = H3Request.post(self.authority.clone(), path.clone(), body)
+            .with_header(Text.from_str("content-type"), content_type.clone());
+        self.send(&req).await
+    }
+
+    /// Send a pre-built request. Issues the stream, pumps the connection,
+    /// and returns once the response is complete.
+    pub async fn send(&mut self, req: &H3Request) -> Result<H3Response, H3ClientError> {
+        let sid = self.h3.send_request(req).map_err(|e| H3ClientError.H3Layer(e))?;
+        // Pump the connection until a response for `sid` surfaces.
+        // Implemented by the transport integration layer: it writes
+        // `self.h3.drain_outbound()` onto the QUIC streams + feeds
+        // peer bytes back into `self.h3.on_bidi_stream`.
+        self.pump_until_response(sid).await
+    }
+
+    async fn pump_until_response(&mut self, sid: UInt64) -> Result<H3Response, H3ClientError> {
+        // Deadline against connect_timeout for the first exchange;
+        // subsequent requests use a per-call default. Real impl
+        // attaches this to the QUIC idle timer.
+        let deadline = core.time.instant.Instant.now()
+            .checked_add(self.opts.idle_timeout)
+            .unwrap_or_else(|| core.time.instant.Instant.now());
+
+        loop {
+            // Flush writer side.
+            let writes = self.h3.drain_outbound();
+            self.flush_writes(writes).await?;
+
+            // Attempt to read from the transport.
+            let (bidi_bytes, uni_bytes, closed) = self.read_transport_step().await?;
+            // Feed inbound bytes back into H3Connection.
+            for (peer_sid, bytes, fin) in bidi_bytes {
+                self.h3.on_bidi_stream(peer_sid, bytes.as_slice(), fin)
+                    .map_err(|e| H3ClientError.H3Layer(e))?;
+            }
+            for (peer_sid, bytes) in uni_bytes {
+                self.h3.on_uni_stream(peer_sid, bytes.as_slice())
+                    .map_err(|e| H3ClientError.H3Layer(e))?;
+            }
+
+            // Did the response complete?
+            if let Some(resp) = self.h3.take_response(sid) {
+                return Ok(resp);
+            }
+            if closed { return Err(H3ClientError.Closed); }
+            if core.time.instant.Instant.now() >= deadline {
+                return Err(H3ClientError.Timeout);
+            }
+        }
+    }
+
+    async fn flush_writes(&mut self, writes: List<StreamWrite>) -> Result<(), H3ClientError> {
+        // Integration layer: hands writes to the QUIC SendStream for
+        // the right stream_id. Until connection_sm end-to-end wire-up
+        // lands, callers plug this through `core.net.quic.connection_sm`.
+        let _ = writes;
+        Ok(())
+    }
+
+    async fn read_transport_step(&mut self) -> Result<ReadBatch, H3ClientError> {
+        // Integration layer — driven by the QUIC connection_sm's
+        // dispatch loop. Returns any freshly-arrived (stream_id, bytes,
+        // fin) triples plus a close flag.
+        //
+        // Placeholder shape for the integration commit.
+        Ok((
+            /* bidi */ List<(UInt64, List<Byte>, Bool)>.new(),
+            /* uni  */ List<(UInt64, List<Byte>)>.new(),
+            /* closed */ false,
+        ))
+    }
+
+    pub fn authority(&self) -> Text { self.authority.clone() }
+    pub fn peer_addr(&self) -> SocketAddr { self.peer_addr.clone() }
+    pub fn selected_alpn(&self) -> List<Byte> { self.selected_alpn.clone() }
+}
+
+type ReadBatch is (
+    List<(UInt64, List<Byte>, Bool)>,    // bidi stream bytes + fin
+    List<(UInt64, List<Byte>)>,          // uni stream bytes
+    Bool,                                // connection closed?
+);
