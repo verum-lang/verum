@@ -148,9 +148,7 @@ If you experience or witness behaviour that violates this Code of
 Conduct, please report it. Reports are handled confidentially by
 the core team.
 
-**Primary channel**: email `conduct@verum-lang.org`
-*(or the address posted in the Zulip `#meta` stream if the domain
-is not yet live — check there for the current contact)*.
+**Primary channel**: email `conduct@verum-lang.org`.
 
 **Zulip**: send a direct message to any core-team member whose
 handle appears in the pinned message of `#meta`. If the matter

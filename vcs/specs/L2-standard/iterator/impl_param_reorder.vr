@@ -1,0 +1,42 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: iterator, generics, regression, impl-method-collision
+// @timeout: 10000
+// @expect: pass
+
+// Regression for the impl-level-param-reorder bug.
+//
+// `implement<I: Iterator, B, F: fn(I.Item) -> B> Iterator for MappedIter<I, F>`
+// declares three impl-level type parameters (I, B, F), but `for_type =
+// MappedIter<I, F>` only mentions two (I, F). Before the reorder fix,
+// `scheme.vars` was `[I, B, F]` in declaration order and `impl_var_count = 3`
+// — but `receiver.args.len() == 2` at call sites, so the bind loop picked
+// `{I := receiver_arg[0], B := receiver_arg[1]}`, pinning `B` to the closure
+// type and poisoning `Maybe<B>` at `.next()` call sites.
+//
+// The fix reorders so impl vars that appear in `for_type` come first
+// (in declaration order), then impl vars NOT in `for_type`, then
+// method-level vars. `impl_var_count` now reflects the FIRST group
+// size so `bind_limit = impl_var_count` aligns positionally with
+// `receiver.args.len()`.
+
+mount core.base.iterator.{once_with};
+
+fn typecheck_once_with_map() -> Int {
+    let mut iter = once_with(|| 5).map(|x| x * 10);
+    match iter.next() {
+        Some(v) => v,
+        None => 0,
+    }
+}
+
+fn typecheck_explicit_annotation() {
+    let mut iter = once_with(|| 5).map(|x| x * 10);
+    if let Some(v) = iter.next() {
+        // The reproducer: this binding should be Int, not fn(Int) -> Int.
+        let _check: Int = v;
+    }
+}
+
+fn main() {}

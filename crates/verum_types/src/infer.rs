@@ -49969,7 +49969,7 @@ impl TypeChecker {
                     Type::Named { args, .. } | Type::Generic { args, .. } => args.clone(),
                     _ => List::new(),
                 };
-                self.set_current_self_type(Maybe::Some(self_type));
+                self.set_current_self_type(Maybe::Some(self_type.clone()));
 
                 // Get the type name for registering qualified method names
                 let type_name = match &for_type.kind {
@@ -50210,22 +50210,76 @@ impl TypeChecker {
                                 let type_name_text = verum_common::Text::from(type_name_str.as_str());
                                 let method_name_text = verum_common::Text::from(func.name.name.as_str());
 
-                                // CRITICAL FIX: Use generalize_ordered to preserve type parameter order
-                                // This ensures that for `implement<L, R> Either<L, R> { fn map_left<L2>(...) }`
-                                // the TypeScheme.vars will be [L, R, L2] in that order, matching the
-                                // order of receiver type args when binding during method calls.
+                                // Build ordered TypeVar list for generalisation.
                                 //
-                                // Previously, generalize() used free_vars() which returns a Set with
-                                // arbitrary order, causing incorrect type variable bindings like
-                                // L2 being bound to Int instead of L.
-                                let mut ordered_params: List<verum_common::Text> = type_param_names.clone();
-                                for param in &method_type_param_names {
-                                    ordered_params.push(param.clone());
+                                // CRITICAL correctness rule: scheme.vars must be
+                                // ordered so that the FIRST N entries correspond
+                                // positionally to the receiver type's type
+                                // arguments, where N = number of impl-level
+                                // TypeVars that appear in `for_type`.
+                                //
+                                // Concretely: for
+                                //   implement<I: Iterator, B, F: fn(I.Item) -> B>
+                                //   Iterator for MappedIter<I, F>
+                                // declaration order is [I, B, F] but `for_type`
+                                // is `MappedIter<I, F>` — so the positional
+                                // arguments at call time are [I_arg, F_arg],
+                                // length 2. If we keep declaration order in
+                                // scheme.vars, a bind_limit of 2 binds I and B
+                                // — with B=F_arg (the closure type), which then
+                                // taints the return type `Maybe<B>` into
+                                // `Maybe<fn(Int)->Int>` at `.next()` call sites.
+                                //
+                                // Reorder: impl TypeVars present in `for_type`
+                                // go first (in declaration order), then
+                                // impl TypeVars NOT in `for_type` (e.g. B),
+                                // then method-level TypeVars. Everyone stays in
+                                // a predictable slot, and bind_limit stays
+                                // aligned with `receiver.args.len()`.
+                                let for_type_free: std::collections::HashSet<TypeVar> =
+                                    self_type.free_vars().iter().copied().collect();
+
+                                let mut ordered_vars: List<TypeVar> = List::new();
+                                let mut impl_vars_in_for_type: Vec<TypeVar> = Vec::new();
+                                let mut impl_vars_outside: Vec<TypeVar> = Vec::new();
+                                for name in type_param_names.iter() {
+                                    if let Option::Some(Type::Var(v)) =
+                                        self.ctx.lookup_type(name.as_str())
+                                    {
+                                        if for_type_free.contains(&v) {
+                                            impl_vars_in_for_type.push(*v);
+                                        } else {
+                                            impl_vars_outside.push(*v);
+                                        }
+                                    }
                                 }
-                                let mut method_scheme = self.ctx.generalize_ordered(method_ty, &ordered_params);
-                                // Record how many ordered vars are impl-level so method-level params
-                                // (e.g., method's own <U>) aren't bound from receiver type args at call time.
-                                method_scheme.impl_var_count = type_param_names.len();
+                                for v in &impl_vars_in_for_type {
+                                    ordered_vars.push(*v);
+                                }
+                                for v in &impl_vars_outside {
+                                    ordered_vars.push(*v);
+                                }
+                                // Method-level vars (e.g. `map<U, F: …>`): already
+                                // registered in method_type_param_names, resolve
+                                // to their fresh TypeVars here.
+                                for name in method_type_param_names.iter() {
+                                    if let Option::Some(Type::Var(v)) =
+                                        self.ctx.lookup_type(name.as_str())
+                                    {
+                                        ordered_vars.push(*v);
+                                    }
+                                }
+
+                                let mut method_scheme =
+                                    self.ctx.generalize_with_vars(method_ty, &ordered_vars);
+                                // impl_var_count is the number of impl-level
+                                // vars IN for_type, i.e. the first block.
+                                // This is exactly `receiver.args.len()` at call
+                                // time, so bind_limit = impl_var_count binds
+                                // receiver args to their correct positional
+                                // TypeVars and leaves impl_vars_outside free
+                                // (to be inferred from bounds / unification).
+                                method_scheme.impl_var_count = impl_vars_in_for_type.len();
 
                                 // CRITICAL: Add type bounds to the TypeScheme for closure type inference
                                 // This enables: fn map<U, F: fn(T) -> U>(self, f: F) -> Maybe<U>
@@ -50452,14 +50506,49 @@ impl TypeChecker {
                                 let type_name_text = verum_common::Text::from(type_name_str.as_str());
                                 let method_name_text = verum_common::Text::from(func.name.name.as_str());
 
-                                // Generalize with type parameters
-                                let mut ordered_params: List<verum_common::Text> = type_param_names.clone();
-                                for param in &method_type_param_names {
-                                    ordered_params.push(param.clone());
+                                // Resolve impl TypeVars against `for_type`'s
+                                // free vars so the first block of scheme.vars
+                                // positionally corresponds to the receiver's
+                                // type arguments (see extended rationale in
+                                // the Inherent branch — same rule for
+                                // protocol-impl methods).
+                                let self_type_for_reorder = self
+                                    .ast_to_type(for_type)
+                                    .unwrap_or(Type::Unit);
+                                let for_type_free: std::collections::HashSet<TypeVar> =
+                                    self_type_for_reorder.free_vars().iter().copied().collect();
+
+                                let mut ordered_vars: List<TypeVar> = List::new();
+                                let mut impl_vars_in_for_type: Vec<TypeVar> = Vec::new();
+                                let mut impl_vars_outside: Vec<TypeVar> = Vec::new();
+                                for name in type_param_names.iter() {
+                                    if let Option::Some(Type::Var(v)) =
+                                        self.ctx.lookup_type(name.as_str())
+                                    {
+                                        if for_type_free.contains(&v) {
+                                            impl_vars_in_for_type.push(*v);
+                                        } else {
+                                            impl_vars_outside.push(*v);
+                                        }
+                                    }
                                 }
-                                let mut method_scheme = self.ctx.generalize_ordered(method_ty, &ordered_params);
-                                // Record impl-level vs method-level split for correct bind_limit at call sites.
-                                method_scheme.impl_var_count = type_param_names.len();
+                                for v in &impl_vars_in_for_type {
+                                    ordered_vars.push(*v);
+                                }
+                                for v in &impl_vars_outside {
+                                    ordered_vars.push(*v);
+                                }
+                                for name in method_type_param_names.iter() {
+                                    if let Option::Some(Type::Var(v)) =
+                                        self.ctx.lookup_type(name.as_str())
+                                    {
+                                        ordered_vars.push(*v);
+                                    }
+                                }
+
+                                let mut method_scheme =
+                                    self.ctx.generalize_with_vars(method_ty, &ordered_vars);
+                                method_scheme.impl_var_count = impl_vars_in_for_type.len();
 
                                 // Add type bounds for closure type inference
                                 if !method_type_var_bounds.is_empty() {
@@ -50540,14 +50629,49 @@ impl TypeChecker {
                                 let type_name_text = verum_common::Text::from(type_name_str.as_str());
                                 let method_name_text = verum_common::Text::from(func.name.name.as_str());
 
-                                // Generalize with type parameters
-                                let mut ordered_params: List<verum_common::Text> = type_param_names.clone();
-                                for param in &method_type_param_names {
-                                    ordered_params.push(param.clone());
+                                // Resolve impl TypeVars against `for_type`'s
+                                // free vars so the first block of scheme.vars
+                                // positionally corresponds to the receiver's
+                                // type arguments (see extended rationale in
+                                // the Inherent branch — same rule for
+                                // protocol-impl methods).
+                                let self_type_for_reorder = self
+                                    .ast_to_type(for_type)
+                                    .unwrap_or(Type::Unit);
+                                let for_type_free: std::collections::HashSet<TypeVar> =
+                                    self_type_for_reorder.free_vars().iter().copied().collect();
+
+                                let mut ordered_vars: List<TypeVar> = List::new();
+                                let mut impl_vars_in_for_type: Vec<TypeVar> = Vec::new();
+                                let mut impl_vars_outside: Vec<TypeVar> = Vec::new();
+                                for name in type_param_names.iter() {
+                                    if let Option::Some(Type::Var(v)) =
+                                        self.ctx.lookup_type(name.as_str())
+                                    {
+                                        if for_type_free.contains(&v) {
+                                            impl_vars_in_for_type.push(*v);
+                                        } else {
+                                            impl_vars_outside.push(*v);
+                                        }
+                                    }
                                 }
-                                let mut method_scheme = self.ctx.generalize_ordered(method_ty, &ordered_params);
-                                // Record impl-level vs method-level split for correct bind_limit at call sites.
-                                method_scheme.impl_var_count = type_param_names.len();
+                                for v in &impl_vars_in_for_type {
+                                    ordered_vars.push(*v);
+                                }
+                                for v in &impl_vars_outside {
+                                    ordered_vars.push(*v);
+                                }
+                                for name in method_type_param_names.iter() {
+                                    if let Option::Some(Type::Var(v)) =
+                                        self.ctx.lookup_type(name.as_str())
+                                    {
+                                        ordered_vars.push(*v);
+                                    }
+                                }
+
+                                let mut method_scheme =
+                                    self.ctx.generalize_with_vars(method_ty, &ordered_vars);
+                                method_scheme.impl_var_count = impl_vars_in_for_type.len();
 
                                 // Add type bounds for closure type inference
                                 if !method_type_var_bounds.is_empty() {
