@@ -70,6 +70,7 @@ public module url;
 public module http_parser;
 public module shutdown;
 public module websocket;
+public module http2;
 
 // =============================================================================
 // Re-exports

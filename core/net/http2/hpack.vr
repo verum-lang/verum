@@ -1,0 +1,440 @@
+// =============================================================================
+// net/http2/hpack.vr — HPACK header compression (RFC 7541)
+// =============================================================================
+//
+// HPACK combines a static + dynamic index table with integer and string
+// literal encodings. The wire format is a stream of "representations":
+//
+//   - Indexed header field (0b1xxxxxxx)        — §6.1
+//   - Literal w/ incremental indexing (0b01x…) — §6.2.1
+//   - Literal w/o indexing (0b0000x…)          — §6.2.2
+//   - Literal never-indexed (0b0001x…)         — §6.2.3
+//   - Dynamic table size update (0b001x…)      — §6.3
+//
+// The integer encoding uses a variable-length "N-bit prefix" scheme
+// (§5.1) that we implement generically.
+//
+// String literals may be raw or Huffman-encoded (§5.2); the bit-0 of
+// the length prefix byte selects.
+// =============================================================================
+
+module core.net.http2.hpack;
+
+mount core.*;
+mount core.net.http2.static_table;
+mount core.net.http2.huffman;
+mount core.net.http2.settings.{DEFAULT_HEADER_TABLE_SIZE};
+
+// =============================================================================
+// HeaderField — name + value pair (always lower-cased name for HTTP/2)
+// =============================================================================
+
+public type HeaderField is {
+    name: Text,
+    value: Text,
+}
+
+implement HeaderField {
+    pub fn new(name: Text, value: Text) -> HeaderField {
+        HeaderField { name: name, value: value }
+    }
+
+    pub fn size(&self) -> Int {
+        // Per §4.1: size = name_len + value_len + 32 bytes overhead.
+        self.name.len() + self.value.len() + 32
+    }
+}
+
+// =============================================================================
+// DynamicTable — FIFO ring-buffer of HeaderFields, size-bounded
+// =============================================================================
+
+public type DynamicTable is {
+    entries: List<HeaderField>,
+    total_size: Int,
+    max_size: Int,
+}
+
+implement DynamicTable {
+    pub fn new(max_size: Int) -> DynamicTable {
+        DynamicTable {
+            entries: List.new(),
+            total_size: 0,
+            max_size: max_size,
+        }
+    }
+
+    pub fn len(&self) -> Int { self.entries.len() }
+
+    /// Insert at the front (index 1). Evicts from the back until total
+    /// ≤ max_size. If a single entry exceeds max_size the table is
+    /// cleared and the entry silently dropped (§4.4).
+    pub fn insert(&mut self, field: HeaderField) {
+        let size = field.size();
+        if size > self.max_size {
+            self.clear();
+            return;
+        }
+        while self.total_size + size > self.max_size && self.entries.len() > 0 {
+            self.evict_oldest();
+        }
+        self.total_size = self.total_size + size;
+        // Insert at front
+        let mut new_entries: List<HeaderField> = List.with_capacity(self.entries.len() + 1);
+        new_entries.push(field);
+        let mut i = 0;
+        while i < self.entries.len() {
+            new_entries.push(HeaderField.new(
+                self.entries[i].name.clone(),
+                self.entries[i].value.clone(),
+            ));
+            i = i + 1;
+        }
+        self.entries = new_entries;
+    }
+
+    /// Resize — evicts from back until ≤ new_max.
+    pub fn resize(&mut self, new_max: Int) {
+        self.max_size = new_max;
+        while self.total_size > self.max_size && self.entries.len() > 0 {
+            self.evict_oldest();
+        }
+    }
+
+    /// Lookup by combined index (1-based). 1..=STATIC_TABLE_SIZE goes
+    /// to static table; STATIC+1.. goes to dynamic table front-first.
+    pub fn lookup(&self, index: Int) -> Maybe<HeaderField> {
+        if index >= 1 && index <= static_table.STATIC_TABLE_SIZE {
+            match static_table.entry(index) {
+                Some(e) => Some(HeaderField.new(e.name.clone(), e.value.clone())),
+                None => None,
+            }
+        } else {
+            let d = index - static_table.STATIC_TABLE_SIZE - 1;
+            if d < 0 || d >= self.entries.len() { return None; }
+            Some(HeaderField.new(
+                self.entries[d].name.clone(),
+                self.entries[d].value.clone(),
+            ))
+        }
+    }
+
+    fn clear(&mut self) {
+        self.entries = List.new();
+        self.total_size = 0;
+    }
+
+    fn evict_oldest(&mut self) {
+        if self.entries.is_empty() { return; }
+        let last = self.entries.len() - 1;
+        let size = self.entries[last].size();
+        self.total_size = self.total_size - size;
+        let mut new_entries: List<HeaderField> = List.with_capacity(last);
+        let mut i = 0;
+        while i < last {
+            new_entries.push(HeaderField.new(
+                self.entries[i].name.clone(),
+                self.entries[i].value.clone(),
+            ));
+            i = i + 1;
+        }
+        self.entries = new_entries;
+    }
+}
+
+// =============================================================================
+// Integer codec — RFC 7541 §5.1
+// =============================================================================
+
+/// Encode an integer with an `n`-bit prefix (n in 1..8). The high bits
+/// of the first byte carry caller flags (masked in / out). The emitted
+/// first byte is OR'd with `flags_mask` — set to 0 for pure integers.
+pub fn encode_integer(value: UInt64, n: Int, flags_mask: UInt8, out: &mut List<Byte>) {
+    let max: UInt64 = (1_u64 << n) - 1;
+    if value < max {
+        out.push((flags_mask | (value as UInt8)) as Byte);
+        return;
+    }
+    out.push((flags_mask | (max as UInt8)) as Byte);
+    let mut v = value - max;
+    while v >= 128 {
+        out.push(((v & 0x7F) | 0x80) as Byte);
+        v = v >> 7;
+    }
+    out.push((v & 0x7F) as Byte);
+}
+
+/// Decode an n-bit-prefix integer starting at offset `pos`. Returns the
+/// new position on success.
+pub fn decode_integer(buf: &[Byte], pos: Int, n: Int) -> Result<(UInt64, Int), HpackError> {
+    if pos >= buf.len() { return Err(HpackError.Truncated); }
+    let max: UInt64 = (1_u64 << n) - 1;
+    let first_mask: UInt8 = max as UInt8;
+    let mut value: UInt64 = (buf[pos] as UInt64) & (first_mask as UInt64);
+    let mut p = pos + 1;
+    if value < max { return Ok((value, p)); }
+
+    let mut shift = 0;
+    let mut bytes_read = 0;
+    while bytes_read < 10 {
+        if p >= buf.len() { return Err(HpackError.Truncated); }
+        let b = buf[p] as UInt64;
+        value = value + ((b & 0x7F) << shift);
+        p = p + 1;
+        bytes_read = bytes_read + 1;
+        if (b & 0x80) == 0 { return Ok((value, p)); }
+        shift = shift + 7;
+    }
+    Err(HpackError.IntegerOverflow)
+}
+
+// =============================================================================
+// HpackError
+// =============================================================================
+
+public type HpackError is
+    | Truncated
+    | IntegerOverflow
+    | InvalidIndex(UInt64)
+    | InvalidHuffman
+    | InvalidRepresentation(UInt8)
+    | DynamicTableSizeExceedsSettings;
+
+// =============================================================================
+// String literal codec — §5.2
+// =============================================================================
+
+/// Write a string literal with optional Huffman. `huffman: true` sets
+/// the H bit in the first byte and emits the Huffman-encoded bytes;
+/// false emits the raw bytes.
+pub fn encode_string(input: &[Byte], use_huffman: Bool, out: &mut List<Byte>) {
+    if use_huffman {
+        let enc_len: Int = core.net.http2.huffman.encoded_length(input);
+        encode_integer(enc_len as UInt64, 7, 0x80, out);
+        let mut buf: List<Byte> = List.with_capacity(enc_len);
+        core.net.http2.huffman.encode(input, &mut buf);
+        let mut i = 0;
+        while i < buf.len() { out.push(buf[i]); i = i + 1; }
+    } else {
+        encode_integer(input.len() as UInt64, 7, 0, out);
+        let mut i = 0;
+        while i < input.len() { out.push(input[i]); i = i + 1; }
+    }
+}
+
+pub fn decode_string(buf: &[Byte], pos: Int, max_length: Int)
+    -> Result<(List<Byte>, Int), HpackError>
+{
+    if pos >= buf.len() { return Err(HpackError.Truncated); }
+    let huffman_bit = (buf[pos] & 0x80) != 0;
+    let (length_u64, after_len) = decode_integer(buf, pos, 7)?;
+    let length = length_u64 as Int;
+    if length > max_length || after_len + length > buf.len() {
+        return Err(HpackError.Truncated);
+    }
+    let raw = &buf[after_len..after_len + length];
+    if huffman_bit {
+        let mut out: List<Byte> = List.with_capacity(length * 2);
+        match core.net.http2.huffman.decode(raw, max_length, &mut out) {
+            Ok(_) => Ok((out, after_len + length)),
+            Err(_) => Err(HpackError.InvalidHuffman),
+        }
+    } else {
+        let mut out: List<Byte> = List.with_capacity(length);
+        let mut i = 0;
+        while i < length { out.push(raw[i]); i = i + 1; }
+        Ok((out, after_len + length))
+    }
+}
+
+// =============================================================================
+// HpackEncoder
+// =============================================================================
+
+public type HpackEncoder is {
+    table: DynamicTable,
+    huffman_enabled: Bool,
+    pending_resize: Maybe<Int>,
+}
+
+implement HpackEncoder {
+    pub fn new() -> HpackEncoder {
+        HpackEncoder {
+            table: DynamicTable.new(DEFAULT_HEADER_TABLE_SIZE as Int),
+            huffman_enabled: true,
+            pending_resize: None,
+        }
+    }
+
+    pub fn with_max_table_size(size: Int) -> HpackEncoder {
+        HpackEncoder {
+            table: DynamicTable.new(size),
+            huffman_enabled: true,
+            pending_resize: None,
+        }
+    }
+
+    /// Enable / disable Huffman — disabled is useful for testing or
+    /// when trading CPU for wire bandwidth.
+    pub fn set_huffman(&mut self, enabled: Bool) {
+        self.huffman_enabled = enabled;
+    }
+
+    /// Encode a list of headers in order.
+    pub fn encode(&mut self, headers: &List<HeaderField>, out: &mut List<Byte>) {
+        // Emit a pending table-size update if any.
+        match self.pending_resize {
+            Some(new_size) => {
+                self.table.resize(new_size);
+                encode_integer(new_size as UInt64, 5, 0x20, out);
+                self.pending_resize = None;
+            }
+            None => {}
+        }
+
+        let mut i = 0;
+        while i < headers.len() {
+            self.encode_one(&headers[i], out);
+            i = i + 1;
+        }
+    }
+
+    /// Encode a single field — use literal-with-incremental-indexing by
+    /// default. Callers that want a specific representation (e.g. the
+    /// "never index" form for sensitive values like Authorization) can
+    /// invoke `encode_never_indexed` directly.
+    fn encode_one(&mut self, field: &HeaderField, out: &mut List<Byte>) {
+        // Literal with incremental indexing (§6.2.1) — 0b01xxxxxx prefix.
+        encode_integer(0, 6, 0x40, out);
+        encode_string(field.name.as_bytes(), self.huffman_enabled, out);
+        encode_string(field.value.as_bytes(), self.huffman_enabled, out);
+        self.table.insert(HeaderField.new(field.name.clone(), field.value.clone()));
+    }
+
+    /// §6.2.3 — Literal never-indexed (for Authorization / Cookie).
+    pub fn encode_never_indexed(&self, field: &HeaderField, out: &mut List<Byte>) {
+        encode_integer(0, 4, 0x10, out);
+        encode_string(field.name.as_bytes(), self.huffman_enabled, out);
+        encode_string(field.value.as_bytes(), self.huffman_enabled, out);
+    }
+
+    pub fn schedule_resize(&mut self, new_size: Int) {
+        self.pending_resize = Some(new_size);
+    }
+}
+
+// =============================================================================
+// HpackDecoder
+// =============================================================================
+
+public type HpackDecoder is {
+    table: DynamicTable,
+    max_table_size_settings: Int,
+    max_header_list_size: Int,
+}
+
+implement HpackDecoder {
+    pub fn new() -> HpackDecoder {
+        HpackDecoder {
+            table: DynamicTable.new(DEFAULT_HEADER_TABLE_SIZE as Int),
+            max_table_size_settings: DEFAULT_HEADER_TABLE_SIZE as Int,
+            max_header_list_size: 0x7FFFFFFF,
+        }
+    }
+
+    pub fn with_max_table_size(size: Int) -> HpackDecoder {
+        HpackDecoder {
+            table: DynamicTable.new(size),
+            max_table_size_settings: size,
+            max_header_list_size: 0x7FFFFFFF,
+        }
+    }
+
+    pub fn set_max_table_size(&mut self, size: Int) {
+        self.max_table_size_settings = size;
+        if self.table.max_size > size {
+            self.table.resize(size);
+        }
+    }
+
+    pub fn set_max_header_list_size(&mut self, size: Int) {
+        self.max_header_list_size = size;
+    }
+
+    /// Decode a complete header block. Cross-frame continuations must
+    /// be concatenated by the caller before decoding (§4.3).
+    pub fn decode(&mut self, block: &[Byte]) -> Result<List<HeaderField>, HpackError> {
+        let mut out: List<HeaderField> = List.new();
+        let mut pos = 0;
+        while pos < block.len() {
+            let b = block[pos];
+            if (b & 0x80) != 0 {
+                // 0b1xxxxxxx — indexed header field §6.1
+                let (index, next) = decode_integer(block, pos, 7)?;
+                if index == 0 {
+                    return Err(HpackError.InvalidIndex(0));
+                }
+                let field = self.table.lookup(index as Int)
+                    .ok_or(HpackError.InvalidIndex(index))?;
+                out.push(field);
+                pos = next;
+            } else if (b & 0x40) != 0 {
+                // 0b01xxxxxx — literal with incremental indexing §6.2.1
+                pos = self.decode_literal(block, pos, 6, true, &mut out)?;
+            } else if (b & 0x20) != 0 {
+                // 0b001xxxxx — dynamic table size update §6.3
+                let (new_max, next) = decode_integer(block, pos, 5)?;
+                if (new_max as Int) > self.max_table_size_settings {
+                    return Err(HpackError.DynamicTableSizeExceedsSettings);
+                }
+                self.table.resize(new_max as Int);
+                pos = next;
+            } else if (b & 0x10) != 0 {
+                // 0b0001xxxx — literal never indexed §6.2.3
+                pos = self.decode_literal(block, pos, 4, false, &mut out)?;
+            } else {
+                // 0b0000xxxx — literal without indexing §6.2.2
+                pos = self.decode_literal(block, pos, 4, false, &mut out)?;
+            }
+        }
+        Ok(out)
+    }
+
+    fn decode_literal(
+        &mut self,
+        block: &[Byte],
+        pos: Int,
+        prefix_bits: Int,
+        indexed: Bool,
+        out: &mut List<HeaderField>,
+    ) -> Result<Int, HpackError> {
+        let (name_index, after_index) = decode_integer(block, pos, prefix_bits)?;
+        let name: Text;
+        let start: Int;
+        if name_index == 0 {
+            let (name_bytes, after_name) = decode_string(block, after_index, self.max_header_list_size)?;
+            name = text_from_bytes(&name_bytes)?;
+            start = after_name;
+        } else {
+            let field = self.table.lookup(name_index as Int)
+                .ok_or(HpackError.InvalidIndex(name_index))?;
+            name = field.name;
+            start = after_index;
+        }
+        let (value_bytes, after_value) = decode_string(block, start, self.max_header_list_size)?;
+        let value = text_from_bytes(&value_bytes)?;
+        let field = HeaderField.new(name, value);
+        if indexed {
+            self.table.insert(HeaderField.new(field.name.clone(), field.value.clone()));
+        }
+        out.push(field);
+        Ok(after_value)
+    }
+}
+
+fn text_from_bytes(bytes: &[Byte]) -> Result<Text, HpackError> {
+    match Text.from_utf8(bytes) {
+        Ok(t) => Ok(t),
+        Err(_) => Err(HpackError.InvalidRepresentation(0)),
+    }
+}

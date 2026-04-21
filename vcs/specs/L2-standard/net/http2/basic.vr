@@ -1,0 +1,124 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: net, http2, rfc7540, hpack, rfc7541, framing, stream-fsm
+// @timeout: 10000
+// @expect: pass
+
+// RFC 7540 HTTP/2 + RFC 7541 HPACK API surface.
+
+mount core.net.http2.{
+    PREFACE,
+    Http2Error, ErrorCode, connection_error, stream_error,
+    FrameHeader, FrameType, FrameFlags, Frame,
+    FRAME_HEADER_SIZE, MAX_FRAME_SIZE_INITIAL,
+    Settings, SettingId,
+    HpackEncoder, HpackDecoder, HeaderField, HpackError,
+    StreamState, StreamTransitionError, StreamFsm,
+};
+mount core.net.http2.stream.{StreamEvent, next_client_stream_id, next_server_stream_id};
+
+// Preface constant.
+fn typecheck_preface() -> Int {
+    let mut n: Int = 0;
+    let mut i = 0;
+    while i < 24 { n = n + (PREFACE[i] as Int); i = i + 1; }
+    n
+}
+
+// FrameType round-trip.
+fn typecheck_frame_type() -> (UInt8, FrameType) {
+    let t = FrameType.Headers;
+    let b = t.to_u8();
+    (b, FrameType.from_u8(b))
+}
+
+// Flags.
+fn typecheck_flags() -> (Bool, Bool, FrameFlags) {
+    let f = FrameFlags.none()
+        .with(FrameFlags.END_HEADERS)
+        .with(FrameFlags.END_STREAM);
+    (f.has(FrameFlags.END_HEADERS), f.has(FrameFlags.END_STREAM), f)
+}
+
+// FrameHeader encode + decode round-trip.
+fn typecheck_frame_header() -> Result<FrameHeader, Http2Error> {
+    let h = FrameHeader {
+        length: 128,
+        frame_type: FrameType.Data,
+        flags: FrameFlags.new(FrameFlags.END_STREAM),
+        stream_id: 3,
+    };
+    let mut buf: List<Byte> = List.new();
+    h.encode(&mut buf);
+    FrameHeader.decode(&buf)
+}
+
+// Decode payload — try all frame types.
+fn typecheck_frame_decode(header: &FrameHeader, payload: &[Byte]) -> Result<Frame, Http2Error> {
+    Frame.decode_payload(header, payload)
+}
+
+// Error helpers.
+fn typecheck_errors() -> (Http2Error, Http2Error) {
+    (connection_error(ErrorCode.PROTOCOL_ERROR, &"bad".into()),
+     stream_error(3, ErrorCode.STREAM_CLOSED, &"closed".into()))
+}
+
+// Settings: defaults + apply.
+fn typecheck_settings() -> Result<(), Http2Error> {
+    let mut s = Settings.defaults();
+    s.apply(SettingId.INITIAL_WINDOW_SIZE, 1_048_576)?;
+    s.apply(SettingId.MAX_FRAME_SIZE, 32_768)?;
+    s.apply(SettingId.MAX_CONCURRENT_STREAMS, 1000)?;
+    Ok(())
+}
+
+// HPACK — encode a request.
+fn typecheck_hpack_encode() -> List<Byte> {
+    let mut enc = HpackEncoder.new();
+    let mut headers: List<HeaderField> = List.new();
+    headers.push(HeaderField.new(":method".into(), "GET".into()));
+    headers.push(HeaderField.new(":scheme".into(), "https".into()));
+    headers.push(HeaderField.new(":path".into(), "/v1/orders".into()));
+    headers.push(HeaderField.new(":authority".into(), "example.com".into()));
+    headers.push(HeaderField.new("user-agent".into(), "verum-http2/0.1".into()));
+    let mut out: List<Byte> = List.new();
+    enc.encode(&headers, &mut out);
+    out
+}
+
+// HPACK — decode.
+fn typecheck_hpack_decode(block: &[Byte]) -> Result<List<HeaderField>, HpackError> {
+    let mut dec = HpackDecoder.new();
+    dec.decode(block)
+}
+
+// Never-indexed literal.
+fn typecheck_never_indexed() -> List<Byte> {
+    let enc = HpackEncoder.new();
+    let mut out: List<Byte> = List.new();
+    enc.encode_never_indexed(
+        &HeaderField.new("authorization".into(), "Bearer secret".into()),
+        &mut out,
+    );
+    out
+}
+
+// Stream FSM.
+fn typecheck_stream_fsm() -> Result<StreamState, StreamTransitionError> {
+    let mut fsm = StreamFsm.new(3);
+    let s1 = fsm.step(&StreamEvent.RecvHeaders { end_stream: false })?;   // Idle → Open
+    let s2 = fsm.step(&StreamEvent.SendHeaders { end_stream: false })?;   // Open → Open
+    let s3 = fsm.step(&StreamEvent.SendData { end_stream: true })?;       // Open → HalfClosedLocal
+    let s4 = fsm.step(&StreamEvent.RecvData { end_stream: true })?;       // HalfClosedLocal → Closed
+    Ok(s4)
+}
+
+fn typecheck_stream_id() -> (Maybe<UInt32>, Maybe<UInt32>) {
+    (next_client_stream_id(1), next_server_stream_id(2))
+}
+
+fn main() {
+    // Shape-only test.
+}

@@ -1,0 +1,68 @@
+// =============================================================================
+// net/http2/error.vr — Http2Error + ErrorCode (RFC 7540 §7)
+// =============================================================================
+
+module core.net.http2.error;
+
+mount core.*;
+
+// =============================================================================
+// ErrorCode — 32-bit wire value (§7)
+// =============================================================================
+
+public type ErrorCode is {
+    code: UInt32,
+}
+
+implement ErrorCode {
+    pub const NO_ERROR: UInt32           = 0x00;
+    pub const PROTOCOL_ERROR: UInt32     = 0x01;
+    pub const INTERNAL_ERROR: UInt32     = 0x02;
+    pub const FLOW_CONTROL_ERROR: UInt32 = 0x03;
+    pub const SETTINGS_TIMEOUT: UInt32   = 0x04;
+    pub const STREAM_CLOSED: UInt32      = 0x05;
+    pub const FRAME_SIZE_ERROR: UInt32   = 0x06;
+    pub const REFUSED_STREAM: UInt32     = 0x07;
+    pub const CANCEL: UInt32             = 0x08;
+    pub const COMPRESSION_ERROR: UInt32  = 0x09;
+    pub const CONNECT_ERROR: UInt32      = 0x0A;
+    pub const ENHANCE_YOUR_CALM: UInt32  = 0x0B;
+    pub const INADEQUATE_SECURITY: UInt32 = 0x0C;
+    pub const HTTP_1_1_REQUIRED: UInt32  = 0x0D;
+
+    pub fn new(code: UInt32) -> ErrorCode { ErrorCode { code: code } }
+    pub fn value(&self) -> UInt32 { self.code }
+}
+
+// =============================================================================
+// Http2Error — protocol-level error with scope (connection vs stream)
+// =============================================================================
+
+public type Http2Error is
+    /// Connection-level error — MUST emit GOAWAY and terminate the connection.
+    | ConnectionError { code: ErrorCode, reason: Text }
+    /// Stream-level error — MUST emit RST_STREAM on that stream only.
+    | StreamError { stream_id: UInt32, code: ErrorCode, reason: Text }
+    /// Wire buffer too short — caller should read more and retry.
+    | NeedMore
+    /// Client sent an invalid preface (not the 24-byte magic).
+    | BadClientPreface
+    /// Malformed frame header (reserved bits / unknown type in strict mode).
+    | MalformedFrame(Text)
+    /// HPACK decoding failed (RFC 7541 §4.4 / §8.2).
+    | HpackError(Text)
+    /// Frame exceeded the negotiated MAX_FRAME_SIZE.
+    | FrameSizeExceeded { size: Int, limit: Int };
+
+// Convenience constructors.
+public fn connection_error(code: UInt32, reason: &Text) -> Http2Error {
+    Http2Error.ConnectionError { code: ErrorCode.new(code), reason: reason.clone() }
+}
+
+public fn stream_error(stream_id: UInt32, code: UInt32, reason: &Text) -> Http2Error {
+    Http2Error.StreamError {
+        stream_id: stream_id,
+        code: ErrorCode.new(code),
+        reason: reason.clone(),
+    }
+}

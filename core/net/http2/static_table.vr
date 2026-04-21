@@ -1,0 +1,89 @@
+// =============================================================================
+// net/http2/static_table.vr — HPACK static table (RFC 7541 Appendix A)
+// =============================================================================
+// 61 well-known (name, value) pairs. Index 0 is reserved; entries are
+// numbered 1..61. Indexes 62+ refer to the dynamic table in the
+// combined index space.
+// =============================================================================
+
+module core.net.http2.static_table;
+
+mount core.*;
+
+pub const STATIC_TABLE_SIZE: Int = 61;
+
+public type StaticEntry is {
+    name: &'static Text,
+    value: &'static Text,
+}
+
+/// Entry lookup — 1-indexed per RFC 7541 §2.3.3. Returns None for
+/// index 0 or > STATIC_TABLE_SIZE.
+public fn entry(index: Int) -> Maybe<StaticEntry> {
+    if index < 1 || index > STATIC_TABLE_SIZE { return None; }
+    Some(ENTRIES[index - 1])
+}
+
+pub const ENTRIES: [StaticEntry; 61] = [
+    StaticEntry { name: ":authority",                  value: "" },
+    StaticEntry { name: ":method",                     value: "GET" },
+    StaticEntry { name: ":method",                     value: "POST" },
+    StaticEntry { name: ":path",                       value: "/" },
+    StaticEntry { name: ":path",                       value: "/index.html" },
+    StaticEntry { name: ":scheme",                     value: "http" },
+    StaticEntry { name: ":scheme",                     value: "https" },
+    StaticEntry { name: ":status",                     value: "200" },
+    StaticEntry { name: ":status",                     value: "204" },
+    StaticEntry { name: ":status",                     value: "206" },
+    StaticEntry { name: ":status",                     value: "304" },
+    StaticEntry { name: ":status",                     value: "400" },
+    StaticEntry { name: ":status",                     value: "404" },
+    StaticEntry { name: ":status",                     value: "500" },
+    StaticEntry { name: "accept-charset",              value: "" },
+    StaticEntry { name: "accept-encoding",             value: "gzip, deflate" },
+    StaticEntry { name: "accept-language",             value: "" },
+    StaticEntry { name: "accept-ranges",               value: "" },
+    StaticEntry { name: "accept",                      value: "" },
+    StaticEntry { name: "access-control-allow-origin", value: "" },
+    StaticEntry { name: "age",                         value: "" },
+    StaticEntry { name: "allow",                       value: "" },
+    StaticEntry { name: "authorization",               value: "" },
+    StaticEntry { name: "cache-control",               value: "" },
+    StaticEntry { name: "content-disposition",         value: "" },
+    StaticEntry { name: "content-encoding",            value: "" },
+    StaticEntry { name: "content-language",            value: "" },
+    StaticEntry { name: "content-length",              value: "" },
+    StaticEntry { name: "content-location",            value: "" },
+    StaticEntry { name: "content-range",               value: "" },
+    StaticEntry { name: "content-type",                value: "" },
+    StaticEntry { name: "cookie",                      value: "" },
+    StaticEntry { name: "date",                        value: "" },
+    StaticEntry { name: "etag",                        value: "" },
+    StaticEntry { name: "expect",                      value: "" },
+    StaticEntry { name: "expires",                     value: "" },
+    StaticEntry { name: "from",                        value: "" },
+    StaticEntry { name: "host",                        value: "" },
+    StaticEntry { name: "if-match",                    value: "" },
+    StaticEntry { name: "if-modified-since",           value: "" },
+    StaticEntry { name: "if-none-match",               value: "" },
+    StaticEntry { name: "if-range",                    value: "" },
+    StaticEntry { name: "if-unmodified-since",         value: "" },
+    StaticEntry { name: "last-modified",               value: "" },
+    StaticEntry { name: "link",                        value: "" },
+    StaticEntry { name: "location",                    value: "" },
+    StaticEntry { name: "max-forwards",                value: "" },
+    StaticEntry { name: "proxy-authenticate",          value: "" },
+    StaticEntry { name: "proxy-authorization",         value: "" },
+    StaticEntry { name: "range",                       value: "" },
+    StaticEntry { name: "referer",                     value: "" },
+    StaticEntry { name: "refresh",                     value: "" },
+    StaticEntry { name: "retry-after",                 value: "" },
+    StaticEntry { name: "server",                      value: "" },
+    StaticEntry { name: "set-cookie",                  value: "" },
+    StaticEntry { name: "strict-transport-security",   value: "" },
+    StaticEntry { name: "transfer-encoding",           value: "" },
+    StaticEntry { name: "user-agent",                  value: "" },
+    StaticEntry { name: "vary",                        value: "" },
+    StaticEntry { name: "via",                         value: "" },
+    StaticEntry { name: "www-authenticate",            value: "" },
+];

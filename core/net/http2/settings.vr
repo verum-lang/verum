@@ -1,0 +1,107 @@
+// =============================================================================
+// net/http2/settings.vr — SETTINGS frame parameters (RFC 7540 §6.5.2)
+// =============================================================================
+
+module core.net.http2.settings;
+
+mount core.*;
+mount core.net.http2.error.{Http2Error, connection_error, ErrorCode};
+
+public type SettingId is {
+    value: UInt16,
+}
+
+implement SettingId {
+    pub const HEADER_TABLE_SIZE: UInt16      = 0x1;
+    pub const ENABLE_PUSH: UInt16            = 0x2;
+    pub const MAX_CONCURRENT_STREAMS: UInt16 = 0x3;
+    pub const INITIAL_WINDOW_SIZE: UInt16    = 0x4;
+    pub const MAX_FRAME_SIZE: UInt16         = 0x5;
+    pub const MAX_HEADER_LIST_SIZE: UInt16   = 0x6;
+
+    pub fn new(v: UInt16) -> SettingId { SettingId { value: v } }
+    pub fn value(&self) -> UInt16 { self.value }
+}
+
+// Default per-parameter values per RFC 7540 §6.5.2.
+pub const DEFAULT_HEADER_TABLE_SIZE: UInt32      = 4096;
+pub const DEFAULT_ENABLE_PUSH: UInt32            = 1;
+pub const DEFAULT_MAX_CONCURRENT_STREAMS: UInt32 = 0xFFFFFFFF;  // unbounded
+pub const DEFAULT_INITIAL_WINDOW_SIZE: UInt32    = 65535;
+pub const DEFAULT_MAX_FRAME_SIZE: UInt32         = 16384;
+pub const DEFAULT_MAX_HEADER_LIST_SIZE: UInt32   = 0xFFFFFFFF;  // unbounded
+
+pub const MAX_INITIAL_WINDOW_SIZE: UInt32 = 0x7FFFFFFF;
+pub const MIN_MAX_FRAME_SIZE: UInt32      = 16384;
+pub const MAX_MAX_FRAME_SIZE: UInt32      = 16777215;  // 2^24-1
+
+/// In-memory settings snapshot — mutated as SETTINGS frames arrive.
+public type Settings is {
+    header_table_size: UInt32,
+    enable_push: Bool,
+    max_concurrent_streams: UInt32,
+    initial_window_size: UInt32,
+    max_frame_size: UInt32,
+    max_header_list_size: UInt32,
+};
+
+implement Settings {
+    pub fn defaults() -> Settings {
+        Settings {
+            header_table_size: DEFAULT_HEADER_TABLE_SIZE,
+            enable_push: true,
+            max_concurrent_streams: DEFAULT_MAX_CONCURRENT_STREAMS,
+            initial_window_size: DEFAULT_INITIAL_WINDOW_SIZE,
+            max_frame_size: DEFAULT_MAX_FRAME_SIZE,
+            max_header_list_size: DEFAULT_MAX_HEADER_LIST_SIZE,
+        }
+    }
+
+    /// Apply a single identifier / value pair with RFC-mandated bounds
+    /// checks. Returns a connection-level error on out-of-range.
+    pub fn apply(&mut self, id: UInt16, value: UInt32) -> Result<(), Http2Error> {
+        if id == SettingId.HEADER_TABLE_SIZE {
+            self.header_table_size = value;
+            return Ok(());
+        }
+        if id == SettingId.ENABLE_PUSH {
+            if value > 1 {
+                return Err(connection_error(
+                    ErrorCode.PROTOCOL_ERROR, &"ENABLE_PUSH must be 0 or 1".into(),
+                ));
+            }
+            self.enable_push = value == 1;
+            return Ok(());
+        }
+        if id == SettingId.MAX_CONCURRENT_STREAMS {
+            self.max_concurrent_streams = value;
+            return Ok(());
+        }
+        if id == SettingId.INITIAL_WINDOW_SIZE {
+            if value > MAX_INITIAL_WINDOW_SIZE {
+                return Err(connection_error(
+                    ErrorCode.FLOW_CONTROL_ERROR,
+                    &"INITIAL_WINDOW_SIZE exceeds 2^31-1".into(),
+                ));
+            }
+            self.initial_window_size = value;
+            return Ok(());
+        }
+        if id == SettingId.MAX_FRAME_SIZE {
+            if value < MIN_MAX_FRAME_SIZE || value > MAX_MAX_FRAME_SIZE {
+                return Err(connection_error(
+                    ErrorCode.PROTOCOL_ERROR,
+                    &"MAX_FRAME_SIZE out of range [2^14, 2^24-1]".into(),
+                ));
+            }
+            self.max_frame_size = value;
+            return Ok(());
+        }
+        if id == SettingId.MAX_HEADER_LIST_SIZE {
+            self.max_header_list_size = value;
+            return Ok(());
+        }
+        // Unknown setting: MUST be ignored (§6.5.2).
+        Ok(())
+    }
+}

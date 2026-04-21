@@ -1,0 +1,47 @@
+// =============================================================================
+// net/http2/huffman.vr — HPACK Huffman codec (RFC 7541 Appendix B)
+// =============================================================================
+// The HPACK Huffman table is fixed — 256 code-length pairs plus an EOS
+// symbol (257). Rather than duplicating the 300-line constant table in
+// Verum source, this module delegates to the canonical runtime-level
+// intrinsics; each intrinsic wraps the same constant table.
+//
+// # Contract
+//
+// - `encode` produces the minimum number of bytes with EOS padding up
+//   to the nearest byte boundary (all-ones padding, per RFC 7541 §5.2).
+// - `decode` returns Err(DecodeError.Invalid) if a prefix doesn't match
+//   any code or the trailing padding exceeds 7 bits / uses EOS.
+// - Maximum expansion during encode: a pathological string of 255-byte
+//   values (30-bit codes) produces 30/8 = 3.75× output. The decoder's
+//   `max_output` parameter caps this.
+// =============================================================================
+
+module core.net.http2.huffman;
+
+mount core.*;
+
+public type DecodeError is
+    | Invalid
+    | OutputTooLarge { limit: Int };
+
+/// Encode `input` with the HPACK Huffman code. The result is appended
+/// to `out` with the standard all-ones padding on the trailing byte.
+public fn encode(input: &[Byte], out: &mut List<Byte>) {
+    @intrinsic("verum.http2.hpack_huffman_encode", input, out)
+}
+
+/// Produce the encoded length without allocating the bytes (used by
+/// the encoder to decide whether the Huffman form is actually shorter
+/// than the literal per RFC 7541 §5.2).
+public fn encoded_length(input: &[Byte]) -> Int {
+    @intrinsic("verum.http2.hpack_huffman_encoded_length", input) as Int
+}
+
+/// Decode `input` into `out`, appending at most `max_output` bytes
+/// before raising OutputTooLarge.
+public fn decode(input: &[Byte], max_output: Int, out: &mut List<Byte>)
+    -> Result<Int, DecodeError>
+{
+    @intrinsic("verum.http2.hpack_huffman_decode", input, max_output, out)
+}

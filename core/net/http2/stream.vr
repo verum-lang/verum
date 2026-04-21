@@ -1,0 +1,189 @@
+// =============================================================================
+// net/http2/stream.vr — HTTP/2 stream state machine (RFC 7540 §5.1)
+// =============================================================================
+//
+// Stream states:
+//
+// ```
+//                             +--------+
+//                     send PP |        | recv PP
+//                    ,--------|  idle  |--------.
+//                   /         |        |         \
+//                  v          +--------+          v
+//           +----------+          |           +----------+
+//           |          |          | send H /  |          |
+//    ,------| reserved |          | recv H    | reserved |------.
+//    |      | (local)  |          |           | (remote) |      |
+//    |      +----------+          v           +----------+      |
+//    |          |             +--------+             |          |
+//    |          |     recv ES |        | send ES     |          |
+//    |   send H |     ,-------|  open  |-------.     | recv H   |
+//    |          |    /        |        |        \    |          |
+//    |          v   v         +--------+         v   v          |
+//    |      +----------+          |           +----------+      |
+//    |      |   half   |          |           |   half   |      |
+//    |      |  closed  |          | send R /  |  closed  |      |
+//    |      | (remote) |          | recv R    | (local)  |      |
+//    |      +----------+          |           +----------+      |
+//    |           |                |                 |           |
+//    |           | send ES /      |       recv ES / |           |
+//    |           | send R /       v       send R /  |           |
+//    |           | recv R     +--------+   recv R   |           |
+//    | send R /  `----------->|        |<-----------'  send R / |
+//    | recv R                 | closed |               recv R   |
+//    `----------------------->|        |<----------------------'
+//                             +--------+
+// ```
+// =============================================================================
+
+module core.net.http2.stream;
+
+mount core.*;
+mount core.net.http2.error.{Http2Error, ErrorCode, connection_error, stream_error};
+
+public type StreamState is
+    | Idle
+    | ReservedLocal
+    | ReservedRemote
+    | Open
+    | HalfClosedLocal
+    | HalfClosedRemote
+    | Closed;
+
+public type StreamEvent is
+    | SendHeaders { end_stream: Bool }
+    | RecvHeaders { end_stream: Bool }
+    | SendPushPromise
+    | RecvPushPromise
+    | SendData { end_stream: Bool }
+    | RecvData { end_stream: Bool }
+    | SendRstStream
+    | RecvRstStream;
+
+public type StreamTransitionError is
+    | InvalidTransition { state: StreamState, event: Text }
+    | OverflowedStreamId;
+
+public type StreamFsm is {
+    stream_id: UInt32,
+    state: StreamState,
+}
+
+implement StreamFsm {
+    pub fn new(stream_id: UInt32) -> StreamFsm {
+        StreamFsm { stream_id: stream_id, state: StreamState.Idle }
+    }
+
+    pub fn state(&self) -> StreamState { self.state }
+    pub fn stream_id(&self) -> UInt32 { self.stream_id }
+
+    pub fn is_terminal(&self) -> Bool {
+        match self.state { StreamState.Closed => true, _ => false }
+    }
+
+    /// Apply a wire-protocol event to the stream. Returns the new state
+    /// or a StreamTransitionError if the event is invalid for the
+    /// current state (translates to PROTOCOL_ERROR per §5.1).
+    pub fn step(&mut self, event: &StreamEvent) -> Result<StreamState, StreamTransitionError> {
+        let next = match (self.state, event) {
+            // Idle
+            (StreamState.Idle, StreamEvent.SendHeaders { end_stream: true }) =>
+                StreamState.HalfClosedLocal,
+            (StreamState.Idle, StreamEvent.SendHeaders { end_stream: false }) =>
+                StreamState.Open,
+            (StreamState.Idle, StreamEvent.RecvHeaders { end_stream: true }) =>
+                StreamState.HalfClosedRemote,
+            (StreamState.Idle, StreamEvent.RecvHeaders { end_stream: false }) =>
+                StreamState.Open,
+            (StreamState.Idle, StreamEvent.SendPushPromise) =>
+                StreamState.ReservedLocal,
+            (StreamState.Idle, StreamEvent.RecvPushPromise) =>
+                StreamState.ReservedRemote,
+
+            // ReservedLocal — server after PUSH_PROMISE
+            (StreamState.ReservedLocal, StreamEvent.SendHeaders { end_stream: true }) =>
+                StreamState.Closed,
+            (StreamState.ReservedLocal, StreamEvent.SendHeaders { end_stream: false }) =>
+                StreamState.HalfClosedRemote,
+            (StreamState.ReservedLocal, StreamEvent.SendRstStream) => StreamState.Closed,
+            (StreamState.ReservedLocal, StreamEvent.RecvRstStream) => StreamState.Closed,
+
+            // ReservedRemote — client after PUSH_PROMISE
+            (StreamState.ReservedRemote, StreamEvent.RecvHeaders { end_stream: true }) =>
+                StreamState.Closed,
+            (StreamState.ReservedRemote, StreamEvent.RecvHeaders { end_stream: false }) =>
+                StreamState.HalfClosedLocal,
+            (StreamState.ReservedRemote, StreamEvent.SendRstStream) => StreamState.Closed,
+            (StreamState.ReservedRemote, StreamEvent.RecvRstStream) => StreamState.Closed,
+
+            // Open
+            (StreamState.Open, StreamEvent.SendData { end_stream: true }) =>
+                StreamState.HalfClosedLocal,
+            (StreamState.Open, StreamEvent.SendHeaders { end_stream: true }) =>
+                StreamState.HalfClosedLocal,
+            (StreamState.Open, StreamEvent.RecvData { end_stream: true }) =>
+                StreamState.HalfClosedRemote,
+            (StreamState.Open, StreamEvent.RecvHeaders { end_stream: true }) =>
+                StreamState.HalfClosedRemote,
+            (StreamState.Open, StreamEvent.SendData { end_stream: false }) => StreamState.Open,
+            (StreamState.Open, StreamEvent.RecvData { end_stream: false }) => StreamState.Open,
+            (StreamState.Open, StreamEvent.SendHeaders { end_stream: false }) => StreamState.Open,
+            (StreamState.Open, StreamEvent.RecvHeaders { end_stream: false }) => StreamState.Open,
+            (StreamState.Open, StreamEvent.SendRstStream) => StreamState.Closed,
+            (StreamState.Open, StreamEvent.RecvRstStream) => StreamState.Closed,
+
+            // HalfClosedLocal — we've finished sending
+            (StreamState.HalfClosedLocal, StreamEvent.RecvData { end_stream: true }) =>
+                StreamState.Closed,
+            (StreamState.HalfClosedLocal, StreamEvent.RecvHeaders { end_stream: true }) =>
+                StreamState.Closed,
+            (StreamState.HalfClosedLocal, StreamEvent.RecvData { end_stream: false }) =>
+                StreamState.HalfClosedLocal,
+            (StreamState.HalfClosedLocal, StreamEvent.RecvHeaders { end_stream: false }) =>
+                StreamState.HalfClosedLocal,
+            (StreamState.HalfClosedLocal, StreamEvent.SendRstStream) => StreamState.Closed,
+            (StreamState.HalfClosedLocal, StreamEvent.RecvRstStream) => StreamState.Closed,
+
+            // HalfClosedRemote — peer has finished sending
+            (StreamState.HalfClosedRemote, StreamEvent.SendData { end_stream: true }) =>
+                StreamState.Closed,
+            (StreamState.HalfClosedRemote, StreamEvent.SendHeaders { end_stream: true }) =>
+                StreamState.Closed,
+            (StreamState.HalfClosedRemote, StreamEvent.SendData { end_stream: false }) =>
+                StreamState.HalfClosedRemote,
+            (StreamState.HalfClosedRemote, StreamEvent.SendHeaders { end_stream: false }) =>
+                StreamState.HalfClosedRemote,
+            (StreamState.HalfClosedRemote, StreamEvent.SendRstStream) => StreamState.Closed,
+            (StreamState.HalfClosedRemote, StreamEvent.RecvRstStream) => StreamState.Closed,
+
+            // Closed — any data is a PROTOCOL_ERROR (§5.1)
+            (StreamState.Closed, _) => {
+                return Err(StreamTransitionError.InvalidTransition {
+                    state: self.state, event: "closed".into(),
+                });
+            }
+
+            // Anything else is invalid.
+            (s, _) => {
+                return Err(StreamTransitionError.InvalidTransition {
+                    state: s, event: "invalid".into(),
+                });
+            }
+        };
+        self.state = next;
+        Ok(next)
+    }
+}
+
+/// Allocate the next client-side (odd) stream id. Returns None if we
+/// have exhausted the 31-bit id space (§5.1.1).
+public fn next_client_stream_id(current: UInt32) -> Maybe<UInt32> {
+    let candidate = if current == 0 { 1 } else { current + 2 };
+    if candidate > 0x7FFFFFFF { None } else { Some(candidate) }
+}
+
+/// Allocate the next server-side (even) stream id for PUSH_PROMISE.
+public fn next_server_stream_id(current: UInt32) -> Maybe<UInt32> {
+    let candidate = if current == 0 { 2 } else { current + 2 };
+    if candidate > 0x7FFFFFFF { None } else { Some(candidate) }
+}
