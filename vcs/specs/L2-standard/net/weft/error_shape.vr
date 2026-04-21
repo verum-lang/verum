@@ -1,0 +1,47 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: net, weft, error, into-response
+// @timeout: 10000
+// @expect: pass
+
+// §5.6 — IntoResponse, WeftError taxonomy, ErrorCategory.
+
+mount core.net.http.{Response, StatusCode};
+mount core.net.weft.error.{
+    IntoResponse, WeftError, ErrorCategory, ExtractRejection,
+};
+
+// Every WeftError variant has a category + status + public message.
+fn typecheck_error_api(e: WeftError) -> (ErrorCategory, StatusCode, Text) {
+    (e.category(), e.status(), e.public_message())
+}
+
+// Blanket IntoResponse impls: Text, StatusCode, Response, ().
+fn typecheck_into_response_text(t: Text) -> Response     { t.into_response() }
+fn typecheck_into_response_status(s: StatusCode) -> Response { s.into_response() }
+fn typecheck_into_response_unit() -> Response            { ().into_response() }
+fn typecheck_into_response_resp(r: Response) -> Response { r.into_response() }
+
+// WeftError itself implements IntoResponse.
+fn typecheck_into_response_error(e: WeftError) -> Response { e.into_response() }
+
+// ExtractRejection's status() + IntoResponse.
+fn typecheck_extract_rejection(r: ExtractRejection) -> (StatusCode, Response) {
+    (r.status(), r.into_response())
+}
+
+// Retryability classification.
+fn typecheck_retryable() -> (Bool, Bool, Bool, Bool, Bool) {
+    (ErrorCategory.Transient.is_retryable(),
+     ErrorCategory.Upstream.is_retryable(),
+     ErrorCategory.Permanent.is_retryable(),
+     ErrorCategory.Security.is_retryable(),
+     ErrorCategory.Client.is_retryable())
+}
+
+fn main() {
+    let _ = typecheck_error_api(WeftError.RouteNotFound);
+    let _ = typecheck_into_response_unit();
+    let _ = typecheck_retryable();
+}

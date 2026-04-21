@@ -1,0 +1,41 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: net, weft, health, liveness, readiness, k8s
+// @timeout: 10000
+// @expect: pass
+
+// §7.4 — LivenessHandler / ReadinessHandler + Readiness aggregator.
+
+mount core.net.http.{Response};
+mount core.net.weft.handler.{WeftRequest, Handler};
+mount core.net.weft.error.{WeftError};
+mount core.net.weft.health.{
+    Readiness, ReadinessFlag, ReadinessCheck,
+    LivenessHandler, ReadinessHandler, health_handlers,
+};
+mount core.async.cancellation.{CancellationToken};
+
+fn typecheck_readiness_build() -> Readiness {
+    let r = Readiness.new();
+    r.add(ReadinessFlag.new("db"));
+    r.add(ReadinessFlag.new("cache"));
+    r
+}
+
+fn typecheck_bind_to_shutdown(r: &Readiness, tok: &CancellationToken) {
+    r.bind_to_shutdown(tok)
+}
+
+fn typecheck_health_pair(r: Readiness) -> (LivenessHandler, ReadinessHandler) {
+    health_handlers(r)
+}
+
+async fn typecheck_readiness_query(r: &Readiness) -> (Bool, Text) {
+    (r.is_ready().await, r.diagnostic_body().await)
+}
+
+fn main() {
+    let r = typecheck_readiness_build();
+    let _ = typecheck_health_pair(r);
+}

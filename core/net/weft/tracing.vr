@@ -1,0 +1,217 @@
+// =============================================================================
+// core/net/weft/tracing.vr — TracingLayer
+// =============================================================================
+// Layer: 6 (Weft)
+// Spec:  internal/specs/net-framework.md §7.1, §7.7 (OTLP)
+// =============================================================================
+//
+// Minimal request-scoped tracing. Phase-1 goals:
+//
+//   1. Generate a `trace_id` (W3C Trace Context format) per request,
+//      propagating an inbound `traceparent` header when present.
+//   2. Attach the trace fields to every log line emitted during the
+//      request via the `core.base.logger` context.
+//   3. Record a single SPAN_ROOT_START / SPAN_ROOT_END event pair for
+//      the request (method, path, status, duration_ms).
+//
+// Out of scope for phase 1 (tracked in §7.7 / follow-up):
+//
+//   * OTLP export (wire format, grpc channel, batching).
+//   * Exemplar-linked metrics.
+//   * Tail-based sampling / continuous profiler.
+//
+// The span format used here is forward-compatible with OTLP: the fields
+// emitted by `LogSpan` can be dumped straight into an OTLP Span proto
+// without re-keying.
+//
+// =============================================================================
+
+module core.net.weft.tracing;
+
+mount core.*;
+mount core.time.{Instant};
+mount core.net.http.{Response, StatusCode, Headers};
+mount core.net.weft.service.{Layer};
+mount core.net.weft.handler.{WeftRequest, Handler};
+mount core.net.weft.error.{WeftError, IntoResponse};
+mount core.net.weft.response_ext.{resp_with_header};
+
+// =============================================================================
+// Trace context
+// =============================================================================
+
+/// W3C Trace Context propagated per request. Minimum viable subset:
+/// 128-bit trace_id, 64-bit span_id, trace_flags. `tracestate` is parsed
+/// but not semantically interpreted in phase 1.
+public type TraceContext is {
+    trace_id: Text,     // 32 hex chars (128-bit)
+    span_id: Text,      // 16 hex chars (64-bit)
+    sampled: Bool,
+};
+
+implement TraceContext {
+    /// Parse an inbound `traceparent` header. Returns `None` if malformed
+    /// — callers should synthesise a fresh context in that case.
+    public fn parse_header(h: &Text) -> Maybe<TraceContext> {
+        // Format: "00-<32 hex>-<16 hex>-<2 hex flags>"
+        let parts: List<Text> = h.split("-").collect();
+        if parts.len() != 4 {
+            return None;
+        }
+        let version = &parts[0];
+        let tid = &parts[1];
+        let sid = &parts[2];
+        let flags = &parts[3];
+        if version != "00" || tid.len() != 32 || sid.len() != 16 || flags.len() != 2 {
+            return None;
+        }
+        let sampled = match flags.parse_hex_int() {
+            Ok(n)  => (n & 0x01) == 0x01,
+            Err(_) => false,
+        };
+        Some(TraceContext {
+            trace_id: tid.clone(),
+            span_id: sid.clone(),
+            sampled: sampled,
+        })
+    }
+
+    /// Synthesise a fresh trace context using the runtime RNG. IDs are
+    /// cryptographically random — collision probability is negligible.
+    public fn synthesise() -> TraceContext {
+        TraceContext {
+            trace_id: random_hex(32),
+            span_id:  random_hex(16),
+            sampled:  true,
+        }
+    }
+
+    /// Render as a W3C `traceparent` header value for downstream calls.
+    public fn to_header(&self) -> Text {
+        let flags = if self.sampled { "01" } else { "00" };
+        f"00-{self.trace_id}-{self.span_id}-{flags}"
+    }
+}
+
+fn random_hex(n_chars: Int) -> Text {
+    let mut out = Text.builder();
+    const HEX: [Byte; 16] = [
+        0x30, 0x31, 0x32, 0x33, 0x34, 0x35, 0x36, 0x37,
+        0x38, 0x39, 0x61, 0x62, 0x63, 0x64, 0x65, 0x66,
+    ];
+    let mut i: Int = 0;
+    while i < n_chars {
+        let r = core.runtime.env.random_u8();
+        out.push_byte(HEX[(r & 0x0F) as Int]);
+        i = i + 1;
+    }
+    out.finish()
+}
+
+// =============================================================================
+// TracingLayer
+// =============================================================================
+
+public type TracingLayer is {
+    /// Service name recorded in every span. Typically the running app's
+    /// name (e.g. "my-api").
+    service_name: Text,
+};
+
+implement TracingLayer {
+    public fn new() -> TracingLayer {
+        TracingLayer { service_name: "weft-app" }
+    }
+
+    public fn named(name: Text) -> TracingLayer {
+        TracingLayer { service_name: name }
+    }
+}
+
+implement<H: Handler> Layer<H> for TracingLayer {
+    type Wrapped = TracingHandler<H>;
+    fn wrap(&self, inner: H) -> TracingHandler<H> {
+        TracingHandler {
+            inner: inner,
+            service_name: self.service_name.clone(),
+        }
+    }
+}
+
+// =============================================================================
+// TracingHandler
+// =============================================================================
+
+public type TracingHandler<H> is {
+    inner: H,
+    service_name: Text,
+};
+
+implement<H: Handler> Handler for TracingHandler<H> {
+    async fn handle(&self, req: WeftRequest) -> Result<Response, WeftError> {
+        let ctx = match req.headers.get(&"traceparent") {
+            Some(v) => TraceContext.parse_header(v).unwrap_or_else(TraceContext.synthesise),
+            None    => TraceContext.synthesise(),
+        };
+
+        let start = Instant.now();
+        let method = req.method.as_str();
+        let path = req.path.clone();
+
+        log_span_start(&self.service_name, &ctx, &method, &path);
+
+        let result = self.inner.handle(req).await;
+
+        let duration_ms = Instant.now().duration_since(start).as_millis();
+        let (status_code, err_kind): (Int, Maybe<Text>) = match &result {
+            Ok(r)  => (r.status.code(), None),
+            Err(e) => {
+                let s = e.status();
+                (s.code(), Some(f"{e}"))
+            }
+        };
+        log_span_end(&self.service_name, &ctx, status_code, duration_ms, &err_kind);
+
+        // Stamp the response so downstream caches / load-balancers can
+        // correlate with the same trace.
+        match result {
+            Ok(r)  => Ok(resp_with_header(r, &"traceparent", &ctx.to_header())),
+            Err(e) => Err(e),
+        }
+    }
+}
+
+// Log emitters kept tiny and free of external dependencies.
+// When the OpenTelemetry exporter lands (phase 5) these functions become
+// the single rewrite point.
+
+fn log_span_start(
+    service: &Text,
+    ctx: &TraceContext,
+    method: &Text,
+    path: &Text,
+) {
+    core.base.logger.info(
+        f"span.start service={service} trace_id={ctx.trace_id} span_id={ctx.span_id} \
+          method={method} path={path}"
+    );
+}
+
+fn log_span_end(
+    service: &Text,
+    ctx: &TraceContext,
+    status: Int,
+    duration_ms: Int,
+    err: &Maybe<Text>,
+) {
+    match err {
+        None => core.base.logger.info(
+            f"span.end   service={service} trace_id={ctx.trace_id} span_id={ctx.span_id} \
+              status={status} duration_ms={duration_ms}"
+        ),
+        Some(msg) => core.base.logger.warn(
+            f"span.end   service={service} trace_id={ctx.trace_id} span_id={ctx.span_id} \
+              status={status} duration_ms={duration_ms} err={msg}"
+        ),
+    }
+}

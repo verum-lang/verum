@@ -1,0 +1,226 @@
+// =============================================================================
+// core/net/weft/health.vr — /_health/live and /_health/ready
+// =============================================================================
+// Layer: 6 (Weft)
+// Spec:  internal/specs/net-framework.md §7.4
+// =============================================================================
+//
+// Kubernetes-idiomatic liveness and readiness endpoints.
+//
+//   * `/_health/live` — always returns 200 "ok" while the process is
+//     alive enough to handle requests. Does no downstream checks; this
+//     is the kubelet "is the container worth restarting?" probe.
+//
+//   * `/_health/ready` — returns 200 only when every registered
+//     `ReadinessCheck` signals ready. Used by the kubelet + load
+//     balancers to decide whether to route traffic to this pod.
+//     During graceful shutdown (§7.8 phase 1 "Signal") the readiness
+//     handler auto-fails even before checks run so LBs stop routing
+//     new traffic while in-flight requests drain.
+//
+// Both handlers are thin `Handler` implementations so they register via
+// the normal router API:
+//
+//     let (live, ready) = health_handlers(readiness);
+//     let app = Router.new()
+//         .get("/_health/live",  live)
+//         .get("/_health/ready", ready)
+//         .get("/api/...",       my_handler);
+//
+// =============================================================================
+
+module core.net.weft.health;
+
+mount core.*;
+mount core.collections.list.{List};
+mount core.net.http.{Response, StatusCode};
+mount core.net.weft.response_ext.{resp_status, resp_text, resp_with_body_text};
+mount core.async.cancellation.{CancellationToken};
+mount core.sync.atomic.{AtomicBool, MemoryOrdering};
+mount core.net.weft.handler.{WeftRequest, Handler};
+mount core.net.weft.error.{WeftError};
+
+// =============================================================================
+// Readiness check interface
+// =============================================================================
+
+/// One dependency's readiness signal. Implementations should be FAST
+/// and NON-BLOCKING: the /_health/ready endpoint is called repeatedly
+/// by kubelet and must not spawn connections of its own.
+///
+/// Typical pattern: a long-running task updates a `ReadinessFlag` via
+/// `.set(true/false)`; the handler reads it.
+public type ReadinessCheck is protocol {
+    async fn is_ready(&self) -> Bool;
+    fn name(&self) -> Text;
+};
+
+/// Atomic-flag readiness check. The ambient task writes to the flag;
+/// the health handler reads it.
+public type ReadinessFlag is {
+    name: Text,
+    flag: Shared<AtomicBool>,
+};
+
+implement ReadinessFlag {
+    public fn new(name: Text) -> ReadinessFlag {
+        ReadinessFlag {
+            name: name,
+            flag: Shared.new(AtomicBool.new(false)),
+        }
+    }
+
+    public fn set(&self, ready: Bool) {
+        self.flag.store(ready, MemoryOrdering.Release);
+    }
+
+    public fn clone_handle(&self) -> ReadinessFlag {
+        ReadinessFlag {
+            name: self.name.clone(),
+            flag: self.flag.clone(),
+        }
+    }
+}
+
+implement ReadinessCheck for ReadinessFlag {
+    async fn is_ready(&self) -> Bool {
+        self.flag.load(MemoryOrdering.Acquire)
+    }
+    fn name(&self) -> Text {
+        self.name.clone()
+    }
+}
+
+// =============================================================================
+// Readiness aggregator
+// =============================================================================
+
+public type Readiness is {
+    checks: Shared<sync.Mutex<List<Heap<dyn ReadinessCheck>>>>,
+    draining: Shared<AtomicBool>,
+};
+
+implement Readiness {
+    public fn new() -> Readiness {
+        Readiness {
+            checks: Shared.new(sync.Mutex.new(List.new())),
+            draining: Shared.new(AtomicBool.new(false)),
+        }
+    }
+
+    public fn add<C: ReadinessCheck + 'static>(&self, check: C) {
+        let mut g = self.checks.lock();
+        g.push(Heap.new(check));
+    }
+
+    /// Tie readiness to a cancellation token: the token firing ==
+    /// draining phase begins; all readiness calls now return false.
+    /// Typically wired to the listener's shutdown token.
+    public fn bind_to_shutdown(&self, token: &CancellationToken) {
+        let draining = self.draining.clone();
+        let tok = token.clone();
+        let _ = core.async.task.spawn(async move {
+            tok.cancelled().await;
+            draining.store(true, MemoryOrdering.Release);
+        });
+    }
+
+    /// True iff NOT draining AND every registered check is ready.
+    pub async fn is_ready(&self) -> Bool {
+        if self.draining.load(MemoryOrdering.Acquire) {
+            return false;
+        }
+        let checks = self.checks.lock();
+        for c in checks.iter() {
+            if !c.is_ready().await {
+                return false;
+            }
+        }
+        true
+    }
+
+    /// Render a multi-line diagnostic body, one check per line. Returned
+    /// as the response body when readiness fails so operators can see
+    /// which dependency is blocking traffic.
+    pub async fn diagnostic_body(&self) -> Text {
+        let mut out = Text.builder();
+        if self.draining.load(MemoryOrdering.Acquire) {
+            out.push_str("draining=true\n");
+        }
+        let checks = self.checks.lock();
+        for c in checks.iter() {
+            let ok = c.is_ready().await;
+            let mark = if ok { "ok  " } else { "FAIL" };
+            out.push_str(f"{mark} {c.name()}\n");
+        }
+        out.finish()
+    }
+
+    public fn clone_handle(&self) -> Readiness {
+        Readiness {
+            checks: self.checks.clone(),
+            draining: self.draining.clone(),
+        }
+    }
+}
+
+// =============================================================================
+// Handlers
+// =============================================================================
+
+public type LivenessHandler is {};
+
+implement LivenessHandler {
+    public fn new() -> LivenessHandler { LivenessHandler {} }
+}
+
+implement Handler for LivenessHandler {
+    async fn handle(&self, _req: WeftRequest) -> Result<Response, WeftError> {
+        Ok(resp_text("ok"))
+    }
+}
+
+public type ReadinessHandler is {
+    readiness: Readiness,
+};
+
+implement ReadinessHandler {
+    public fn new(readiness: Readiness) -> ReadinessHandler {
+        ReadinessHandler { readiness: readiness }
+    }
+}
+
+implement Handler for ReadinessHandler {
+    async fn handle(&self, _req: WeftRequest) -> Result<Response, WeftError> {
+        let ready = self.readiness.is_ready().await;
+        let body = self.readiness.diagnostic_body().await;
+        if ready {
+            Ok(resp_with_body_text(resp_status(StatusCode.ok()), body))
+        } else {
+            Ok(resp_with_body_text(resp_status(StatusCode.new(503)), body))
+        }
+    }
+}
+
+// =============================================================================
+// Convenience factory
+// =============================================================================
+
+/// Build a `(live, ready)` handler pair sharing one Readiness aggregator.
+/// Typical use:
+///
+/// ```verum
+/// let readiness = Readiness.new();
+/// readiness.add(ReadinessFlag.new(Text.from_str("db")));
+/// readiness.bind_to_shutdown(&server.shutdown_token());
+///
+/// let (live, ready) = health_handlers(readiness.clone_handle());
+/// let app = Router.new()
+///     .get("/_health/live",  live)
+///     .get("/_health/ready", ready);
+/// ```
+public fn health_handlers(readiness: Readiness)
+    -> (LivenessHandler, ReadinessHandler)
+{
+    (LivenessHandler.new(), ReadinessHandler.new(readiness))
+}

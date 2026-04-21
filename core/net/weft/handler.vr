@@ -1,0 +1,318 @@
+// =============================================================================
+// core/net/weft/handler.vr — Handler, WeftRequest, extractors
+// =============================================================================
+// Layer: 6 (Weft)
+// Spec:  internal/specs/net-framework.md §5.3
+// =============================================================================
+
+module core.net.weft.handler;
+
+mount core.*;
+mount core.collections.map.{Map};
+mount core.collections.list.{List};
+mount core.net.http.{Method, Headers, Request as HttpRequest, Response};
+mount core.net.addr.{SocketAddr};
+mount core.net.weft.error.{WeftError, ExtractRejection};
+
+// -----------------------------------------------------------------------------
+// WeftRequest
+// -----------------------------------------------------------------------------
+
+/// Server-side enriched HTTP request. Produced by the listener after
+/// parsing; augmented by the router with path parameters on a match.
+public type WeftRequest is {
+    method: Method,
+    path: Text,
+    raw_query: Maybe<Text>,
+    headers: Headers,
+    body: List<Byte>,
+    path_params: Map<Text, Text>,
+    peer_addr: Maybe<SocketAddr>,
+};
+
+implement WeftRequest {
+    public fn new(
+        method: Method,
+        path: Text,
+        raw_query: Maybe<Text>,
+        headers: Headers,
+        body: List<Byte>,
+    ) -> WeftRequest {
+        WeftRequest {
+            method: method,
+            path: path,
+            raw_query: raw_query,
+            headers: headers,
+            body: body,
+            path_params: Map.new(),
+            peer_addr: None,
+        }
+    }
+
+    public fn with_peer(self, addr: SocketAddr) -> WeftRequest {
+        WeftRequest { peer_addr: Some(addr), ..self }
+    }
+
+    public fn path_param(&self, name: &Text) -> Maybe<&Text> {
+        self.path_params.get(name)
+    }
+
+    public fn path_param_int(&self, name: &Text) -> Maybe<Int> {
+        match self.path_params.get(name) {
+            Some(v) => v.parse_int().ok(),
+            None    => None,
+        }
+    }
+
+    public fn query_param(&self, name: &Text) -> Maybe<Text> {
+        match &self.raw_query {
+            None    => None,
+            Some(q) => find_query_param(q, name),
+        }
+    }
+
+    public fn header(&self, name: &Text) -> Maybe<&Text> {
+        self.headers.get(name)
+    }
+
+    public fn body_text(&self) -> Text {
+        Text.from_utf8_lossy(&self.body)
+    }
+
+    public fn body_bytes(&self) -> &[Byte] {
+        &self.body
+    }
+
+    public fn content_type(&self) -> Maybe<&Text> {
+        self.headers.get(&"content-type")
+    }
+
+    public fn to_http_request(&self, url: Text) -> HttpRequest {
+        let mut req = HttpRequest.new(self.method.clone(), url);
+        req.headers = self.headers.clone();
+        req.body = if self.body.is_empty() {
+            None
+        } else {
+            Some(self.body.clone())
+        };
+        req
+    }
+}
+
+fn find_query_param(query: &Text, name: &Text) -> Maybe<Text> {
+    for pair in query.split("&") {
+        match pair.find("=") {
+            Some(idx) => {
+                let k = pair.slice(0, idx);
+                let v = pair.slice(idx + 1, pair.len());
+                if k == *name {
+                    return Some(percent_decode(v));
+                }
+            }
+            None => {
+                if pair == *name {
+                    return Some("");
+                }
+            }
+        }
+    }
+    None
+}
+
+fn percent_decode(s: Text) -> Text {
+    if !s.contains("%") && !s.contains("+") {
+        return s;
+    }
+    let mut out = Text.builder();
+    let bytes = s.as_bytes();
+    let n = bytes.len();
+    let mut i: Int = 0;
+    while i < n {
+        let b = bytes[i];
+        if b == 0x25 && i + 2 < n {
+            let hi = hex_nibble(bytes[i + 1]);
+            let lo = hex_nibble(bytes[i + 2]);
+            match (hi, lo) {
+                (Some(h), Some(l)) => {
+                    out.push_byte(((h << 4) | l) as Byte);
+                    i = i + 3;
+                    continue;
+                }
+                _ => {}
+            }
+        }
+        if b == 0x2B {
+            out.push_byte(0x20);
+            i = i + 1;
+            continue;
+        }
+        out.push_byte(b);
+        i = i + 1;
+    }
+    out.finish()
+}
+
+fn hex_nibble(b: Byte) -> Maybe<Int> {
+    if b >= 0x30 && b <= 0x39 { Some((b - 0x30) as Int) }
+    else if b >= 0x41 && b <= 0x46 { Some((b - 0x41 + 10) as Int) }
+    else if b >= 0x61 && b <= 0x66 { Some((b - 0x61 + 10) as Int) }
+    else { None }
+}
+
+// -----------------------------------------------------------------------------
+// Handler protocol
+// -----------------------------------------------------------------------------
+
+public type Handler is protocol {
+    async fn handle(&self, req: WeftRequest) -> Result<Response, WeftError>;
+};
+
+// -----------------------------------------------------------------------------
+// FromRequest — typed extractors
+// -----------------------------------------------------------------------------
+
+public type FromRequest is protocol {
+    type Rejection;
+    async fn from_request(req: &mut WeftRequest) -> Result<Self, Self.Rejection>;
+};
+
+/// Typed path-parameter wrapper. Stored as a record so that
+/// `implement PathParam<Text>` / `implement PathParam<Int>` specializations parse
+/// cleanly — generic tuple-struct + specialisation currently confuses
+/// the parser (see handler.vr history).
+public type PathParam<T> is { value: T };
+
+implement<T> PathParam<T> {
+    public fn new(v: T) -> PathParam<T> { PathParam { value: v } }
+    public fn into_inner(self) -> T { self.value }
+}
+
+/// Extract a Text path-param by name. Named API: Verum's current
+/// turbofish only works in expression position, not on static methods,
+/// so we keep a distinct function per T.
+public fn path_text(
+    req: &mut WeftRequest,
+    name: &Text,
+) -> Result<PathParam<Text>, ExtractRejection> {
+    match req.path_params.get(name) {
+        Some(v) => Ok(PathParam.new(v.clone())),
+        None    => Err(ExtractRejection.MissingParam(name.clone())),
+    }
+}
+
+public fn path_int(
+    req: &mut WeftRequest,
+    name: &Text,
+) -> Result<PathParam<Int>, ExtractRejection> {
+    match req.path_params.get(name) {
+        None => Err(ExtractRejection.MissingParam(name.clone())),
+        Some(raw) => match raw.parse_int() {
+            Ok(n)  => Ok(PathParam.new(n)),
+            Err(_) => Err(ExtractRejection.InvalidParam {
+                name: name.clone(),
+                value: raw.clone(),
+                expected: "integer",
+            }),
+        }
+    }
+}
+
+public type QueryParam<T> is { value: T };
+
+implement<T> QueryParam<T> {
+    public fn new(v: T) -> QueryParam<T> { QueryParam { value: v } }
+    public fn into_inner(self) -> T { self.value }
+}
+
+public fn query_text(
+    req: &mut WeftRequest,
+    name: &Text,
+) -> Result<QueryParam<Text>, ExtractRejection> {
+    match req.query_param(name) {
+        Some(v) => Ok(QueryParam.new(v)),
+        None    => Err(ExtractRejection.MissingParam(name.clone())),
+    }
+}
+
+public fn query_text_optional(
+    req: &mut WeftRequest,
+    name: &Text,
+) -> Maybe<QueryParam<Text>> {
+    req.query_param(name).map(QueryParam.new)
+}
+
+public fn query_int(
+    req: &mut WeftRequest,
+    name: &Text,
+) -> Result<QueryParam<Int>, ExtractRejection> {
+    match req.query_param(name) {
+        None      => Err(ExtractRejection.MissingParam(name.clone())),
+        Some(raw) => match raw.parse_int() {
+            Ok(n)  => Ok(QueryParam.new(n)),
+            Err(_) => Err(ExtractRejection.InvalidParam {
+                name: name.clone(),
+                value: raw,
+                expected: "integer",
+            }),
+        }
+    }
+}
+
+/// Raw body bytes extractor.
+public type Bytes is { inner: List<Byte> };
+
+implement Bytes {
+    public fn into_inner(self) -> List<Byte> { self.inner }
+    public fn as_slice(&self) -> &[Byte] { &self.inner }
+    public fn len(&self) -> Int { self.inner.len() }
+}
+
+implement FromRequest for Bytes {
+    type Rejection = ExtractRejection;
+    async fn from_request(req: &mut WeftRequest) -> Result<Bytes, ExtractRejection> {
+        Ok(Bytes { inner: req.body.clone() })
+    }
+}
+
+/// UTF-8 body text extractor.
+public type BodyText is { inner: Text };
+
+implement BodyText {
+    public fn into_inner(self) -> Text { self.inner }
+    public fn as_str(&self) -> &Text { &self.inner }
+}
+
+implement FromRequest for BodyText {
+    type Rejection = ExtractRejection;
+    async fn from_request(req: &mut WeftRequest) -> Result<BodyText, ExtractRejection> {
+        match Text.from_utf8(&req.body) {
+            Ok(t)  => Ok(BodyText { inner: t }),
+            Err(_) => Err(ExtractRejection.InvalidBody("non-UTF8 body")),
+        }
+    }
+}
+
+/// JSON extractor placeholder. Actual deserialization binds in phase 2.
+public type Json<T> is { inner: T };
+
+implement<T> Json<T> {
+    public fn into_inner(self) -> T { self.inner }
+    public fn as_ref(&self) -> &T { &self.inner }
+}
+
+/// Adapter letting ad-hoc closures satisfy the Handler protocol.
+public type ClosureHandler<F> is { f: F };
+
+implement<F> ClosureHandler<F> {
+    public fn new(f: F) -> ClosureHandler<F> {
+        ClosureHandler { f: f }
+    }
+}
+
+implement<F> Handler for ClosureHandler<F>
+    where F: fn(WeftRequest) -> Result<Response, WeftError>
+{
+    async fn handle(&self, req: WeftRequest) -> Result<Response, WeftError> {
+        (self.f)(req)
+    }
+}

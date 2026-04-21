@@ -1,0 +1,312 @@
+// =============================================================================
+// core/net/weft/connection.vr — Per-connection HTTP/1.1 pipeline
+// =============================================================================
+// Layer: 6 (Weft)
+// Spec:  internal/specs/net-framework.md §4.4, §6.1
+// =============================================================================
+
+module core.net.weft.connection;
+
+mount core.*;
+mount core.collections.list.{List};
+mount core.net.tcp.{TcpStream};
+mount core.net.addr.{SocketAddr};
+mount core.net.http.{Method, StatusCode, Version, Headers, Response};
+mount core.net.http_parser.{HttpParser, ParseProgress, HeaderView, ParseError};
+mount core.async.cancellation.{CancellationToken};
+mount core.net.weft.handler.{WeftRequest, Handler};
+mount core.net.weft.error.{WeftError, IntoResponse};
+mount core.net.weft.response_ext.{
+    resp_status, resp_with_header, resp_with_body_text,
+};
+
+public type ConnectionConfig is {
+    max_request_size: Int,
+    read_buffer_capacity: Int,
+    keep_alive: Bool,
+};
+
+implement ConnectionConfig {
+    public fn default() -> ConnectionConfig {
+        ConnectionConfig {
+            max_request_size: 1 * 1024 * 1024,
+            read_buffer_capacity: 16 * 1024,
+            keep_alive: true,
+        }
+    }
+}
+
+implement Clone for ConnectionConfig {
+    fn clone(&self) -> ConnectionConfig {
+        ConnectionConfig {
+            max_request_size: self.max_request_size,
+            read_buffer_capacity: self.read_buffer_capacity,
+            keep_alive: self.keep_alive,
+        }
+    }
+}
+
+public type ConnError is
+    | ClientClosed
+    | Cancelled
+    | Io(Text)
+    | Parse(ParseError)
+    | TooLarge
+    | UnsupportedTransferEncoding(Text)
+    | HandlerError(WeftError);
+
+type KeepAlive is
+    | Continue
+    | Close;
+
+/// Serve one TCP connection using HTTP/1.1 keep-alive.
+public async fn serve_http1<S: Handler>(
+    mut stream: TcpStream,
+    peer_addr: SocketAddr,
+    app: Heap<S>,
+    token: CancellationToken,
+    config: ConnectionConfig,
+) -> Result<(), ConnError> {
+    loop {
+        if token.is_cancelled() {
+            return Err(ConnError.Cancelled);
+        }
+        match serve_one_message(&mut stream, &peer_addr, &*app, &token, &config).await {
+            Ok(KeepAlive.Continue) => continue,
+            Ok(KeepAlive.Close)    => return Ok(()),
+            Err(e)                 => return Err(e),
+        }
+    }
+}
+
+async fn serve_one_message<S: Handler>(
+    stream: &mut TcpStream,
+    peer_addr: &SocketAddr,
+    app: &S,
+    token: &CancellationToken,
+    config: &ConnectionConfig,
+) -> Result<KeepAlive, ConnError> {
+    let mut parser = HttpParser.request();
+    let mut accum: List<Int> = List.with_capacity(config.read_buffer_capacity);
+    let mut hdr_frame: Maybe<HeaderFrame> = None;
+
+    loop {
+        if accum.len() > config.max_request_size {
+            let _ = write_response(stream, &mk_413()).await;
+            return Err(ConnError.TooLarge);
+        }
+        let mut chunk: List<Int> = List.with_capacity(4096);
+        let rr = stream.read_cancellable(&mut chunk, token).await;
+        let n = match rr {
+            Err(_) => return Err(ConnError.Cancelled),
+            Ok(Err(e)) => return Err(ConnError.Io(f"{e}")),
+            Ok(Ok(n)) => n,
+        };
+        if n == 0 {
+            if accum.is_empty() {
+                return Ok(KeepAlive.Close);
+            }
+            return Err(ConnError.ClientClosed);
+        }
+        for i in 0..n {
+            accum.push(chunk[i]);
+        }
+        let bytes = int_list_to_bytes(&accum);
+        match parser.feed(&bytes) {
+            ParseProgress.NeedMore => continue,
+            ParseProgress.Error(e) => return Err(ConnError.Parse(e)),
+            ParseProgress.Done { consumed, body_len, body_start } => {
+                hdr_frame = Some(HeaderFrame {
+                    header_bytes: consumed,
+                    body_start: body_start,
+                    body_len: body_len,
+                });
+                break;
+            }
+        }
+    }
+
+    let hdr = match hdr_frame {
+        Some(h) => h,
+        None    => return Err(ConnError.Parse(ParseError.IncompleteFrame)),
+    };
+
+    let buf_bytes = int_list_to_bytes(&accum);
+    let method = match parser.method() {
+        Some(m) => m,
+        None    => return Err(ConnError.Parse(ParseError.BadRequestLine("no method"))),
+    };
+    let version = parser.version();
+    let (path, raw_query) = split_path_query(parser.path(&buf_bytes));
+    let headers = materialize_headers(parser.headers(), &buf_bytes);
+
+    if parser.is_chunked() {
+        let _ = write_response(stream, &mk_501_chunked()).await;
+        return Err(ConnError.UnsupportedTransferEncoding("chunked input"));
+    }
+
+    let body_len = match hdr.body_len {
+        Some(n) => n,
+        None    => 0,
+    };
+    if body_len > config.max_request_size {
+        let _ = write_response(stream, &mk_413()).await;
+        return Err(ConnError.TooLarge);
+    }
+    while accum.len() - hdr.body_start < body_len {
+        let mut chunk: List<Int> = List.with_capacity(4096);
+        let rr = stream.read_cancellable(&mut chunk, token).await;
+        let n = match rr {
+            Err(_) => return Err(ConnError.Cancelled),
+            Ok(Err(e)) => return Err(ConnError.Io(f"{e}")),
+            Ok(Ok(n)) => n,
+        };
+        if n == 0 { return Err(ConnError.ClientClosed); }
+        for i in 0..n { accum.push(chunk[i]); }
+    }
+    let mut body: List<Byte> = List.with_capacity(body_len);
+    let start = hdr.body_start;
+    for i in 0..body_len {
+        body.push((accum[start + i] & 0xFF) as Byte);
+    }
+
+    let keep_alive = decide_keep_alive(&version, &headers, config.keep_alive);
+
+    let req = WeftRequest.new(method, path, raw_query, headers, body)
+        .with_peer(*peer_addr);
+
+    let response = match app.handle(req).await {
+        Ok(r)  => r,
+        Err(e) => e.into_response(),
+    };
+
+    let response = if keep_alive {
+        resp_with_header(response, &"connection", &"keep-alive")
+    } else {
+        resp_with_header(response, &"connection", &"close")
+    };
+
+    match write_response(stream, &response).await {
+        Err(e) => return Err(ConnError.Io(f"{e}")),
+        Ok(()) => {}
+    }
+
+    if keep_alive {
+        Ok(KeepAlive.Continue)
+    } else {
+        Ok(KeepAlive.Close)
+    }
+}
+
+type HeaderFrame is {
+    header_bytes: Int,
+    body_start: Int,
+    body_len: Maybe<Int>,
+};
+
+fn int_list_to_bytes(src: &List<Int>) -> List<Byte> {
+    let mut out = List.with_capacity(src.len());
+    for i in 0..src.len() {
+        out.push((src[i] & 0xFF) as Byte);
+    }
+    out
+}
+
+fn split_path_query(raw: &[Byte]) -> (Text, Maybe<Text>) {
+    let s = Text.from_utf8_lossy(raw);
+    match s.find("?") {
+        Some(i) => (s.slice(0, i), Some(s.slice(i + 1, s.len()))),
+        None    => (s, None),
+    }
+}
+
+fn materialize_headers(views: &List<HeaderView>, buf: &[Byte]) -> Headers {
+    let mut h = Headers.with_capacity(views.len());
+    for v in views.iter() {
+        let k = Text.from_utf8_lossy(v.key(buf));
+        let val = Text.from_utf8_lossy(v.value(buf));
+        h.append(&k, &val);
+    }
+    h
+}
+
+fn decide_keep_alive(
+    version: &Version,
+    headers: &Headers,
+    server_allows: Bool,
+) -> Bool {
+    if !server_allows { return false; }
+    let conn = headers.get(&"connection").map(|v| v.to_lowercase());
+    match version {
+        Version.Http11 => match &conn {
+            Some(v) if v == &"close" => false,
+            _                        => true,
+        },
+        Version.Http10 => match &conn {
+            Some(v) if v == &"keep-alive" => true,
+            _                             => false,
+        },
+        _ => false,
+    }
+}
+
+async fn write_response(
+    stream: &mut TcpStream,
+    resp: &Response,
+) -> Result<(), core.io.protocols.IoError> {
+    let mut out: List<Int> = List.with_capacity(512 + resp.body.len());
+    push_str(&mut out, &resp.version.as_str());
+    push_byte(&mut out, 0x20);
+    push_str(&mut out, &f"{resp.status.code()}");
+    push_byte(&mut out, 0x20);
+    push_str(&mut out, &resp.status.reason_phrase());
+    push_crlf(&mut out);
+    for (k, v) in resp.headers.iter().iter() {
+        push_str(&mut out, k);
+        push_byte(&mut out, 0x3A);
+        push_byte(&mut out, 0x20);
+        push_str(&mut out, v);
+        push_crlf(&mut out);
+    }
+    push_crlf(&mut out);
+    for i in 0..resp.body.len() {
+        out.push(resp.body[i] as Int);
+    }
+    stream.write_async(&out).await.map(|_| ())
+}
+
+fn push_str(out: &mut List<Int>, s: &Text) {
+    let b = s.as_bytes();
+    for i in 0..b.len() {
+        out.push(b[i] as Int);
+    }
+}
+
+fn push_byte(out: &mut List<Int>, b: Byte) {
+    out.push(b as Int);
+}
+
+fn push_crlf(out: &mut List<Int>) {
+    out.push(0x0D);
+    out.push(0x0A);
+}
+
+fn mk_413() -> Response {
+    resp_with_body_text(
+        resp_with_header(
+            resp_status(StatusCode.new(413)),
+            &"connection", &"close",
+        ),
+        "payload too large",
+    )
+}
+
+fn mk_501_chunked() -> Response {
+    resp_with_body_text(
+        resp_with_header(
+            resp_status(StatusCode.new(501)),
+            &"connection", &"close",
+        ),
+        "chunked transfer-encoding not yet supported",
+    )
+}

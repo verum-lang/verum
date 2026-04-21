@@ -1,0 +1,89 @@
+// =============================================================================
+// core/net/weft/timeout.vr — TimeoutLayer
+// =============================================================================
+// Layer: 6 (Weft)
+// Spec:  internal/specs/net-framework.md §5.5
+// =============================================================================
+//
+// Wraps any `Handler` with a per-request deadline. On timeout the
+// wrapped call is cancelled (Future drop => cancellation propagates
+// through structured-concurrency to whatever I/O is inside) and the
+// framework returns `WeftError.Timeout` (→ 504 Gateway Timeout).
+//
+// # Example
+//
+// ```verum
+// let svc = ServiceBuilder.new(router)
+//     .layer(TimeoutLayer.ms(5000))
+//     .build();
+// ```
+//
+// # Zero-overhead on the happy path
+//
+// Implementation is a plain `select` against a timer; no extra
+// allocations, no boxed future. Matches Tower's `Timeout` cost profile.
+//
+// =============================================================================
+
+module core.net.weft.timeout;
+
+mount core.*;
+mount core.time.{Duration};
+mount core.net.http.{Response};
+mount core.net.weft.service.{Layer};
+mount core.net.weft.handler.{WeftRequest, Handler};
+mount core.net.weft.error.{WeftError};
+
+// =============================================================================
+// TimeoutLayer
+// =============================================================================
+
+/// Per-request deadline. Applied as a `Layer`, yields a `TimeoutHandler`.
+public type TimeoutLayer is {
+    duration: Duration,
+};
+
+implement TimeoutLayer {
+    /// Build from milliseconds.
+    public fn ms(millis: Int) -> TimeoutLayer {
+        TimeoutLayer { duration: Duration.from_millis(millis) }
+    }
+
+    /// Build from seconds.
+    public fn secs(seconds: Int) -> TimeoutLayer {
+        TimeoutLayer { duration: Duration.from_secs(seconds) }
+    }
+
+    /// Build directly from a `Duration`.
+    public fn new(duration: Duration) -> TimeoutLayer {
+        TimeoutLayer { duration: duration }
+    }
+}
+
+implement<H: Handler> Layer<H> for TimeoutLayer {
+    type Wrapped = TimeoutHandler<H>;
+    fn wrap(&self, inner: H) -> TimeoutHandler<H> {
+        TimeoutHandler {
+            inner: inner,
+            duration: self.duration,
+        }
+    }
+}
+
+// =============================================================================
+// TimeoutHandler
+// =============================================================================
+
+public type TimeoutHandler<H> is {
+    inner: H,
+    duration: Duration,
+};
+
+implement<H: Handler> Handler for TimeoutHandler<H> {
+    async fn handle(&self, req: WeftRequest) -> Result<Response, WeftError> {
+        match core.async.select.timeout(self.duration, self.inner.handle(req)).await {
+            Ok(r)  => r,
+            Err(_) => Err(WeftError.Timeout),
+        }
+    }
+}

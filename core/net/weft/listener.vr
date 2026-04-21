@@ -1,0 +1,199 @@
+// =============================================================================
+// core/net/weft/listener.vr — TCP listener + accept loop
+// =============================================================================
+// Layer: 6 (Weft)
+// Spec:  internal/specs/net-framework.md §4.2, §4.4, §7.5
+// =============================================================================
+//
+// Turns a bound `TcpListener` into a serving server: loops on accept,
+// spawns a per-connection task, feeds each connection through
+// `serve_http1` from `connection.vr`.
+//
+// Responsibilities kept HERE (not in connection.vr):
+//
+//   * Lifecycle. Own the cancellation token that drives graceful
+//     shutdown. A single `.shutdown()` on the listener flips the token,
+//     `accept_cancellable` returns, and every in-flight connection's
+//     next awaitable I/O call returns `CancellationError`.
+//
+//   * Concurrency budget. `max_concurrent_connections` bounds total
+//     in-flight connections; excess accept()-ed sockets are closed
+//     immediately with a 503 "connection throttled" log. Back-pressure
+//     on TCP accept is the cleanest way to deal with runaway load —
+//     do not buffer sockets we cannot serve.
+//
+//   * Per-connection task isolation. Each connection runs in its own
+//     spawned task. If one panics, the supervisor (configured by
+//     WeftApp) restarts the listener; but adjacent connections keep
+//     running until their handlers return.
+//
+// Not here (kept elsewhere):
+//
+//   * io_uring registered buffers / multi-shot accept (§4.2.1/4.2.2) —
+//     phase 5, goes through `core/io/engine.vr` extensions.
+//
+//   * TLS termination — a `TlsListener` wrapper lives in `tls.vr`; this
+//     module deals with plain TCP only.
+//
+// =============================================================================
+
+module core.net.weft.listener;
+
+mount core.*;
+mount core.net.tcp.{TcpListener, TcpStream};
+mount core.net.addr.{SocketAddr};
+mount core.async.cancellation.{CancellationToken};
+mount core.async.task;
+mount core.net.weft.handler.{Handler};
+mount core.net.weft.connection.{serve_http1, ConnectionConfig, ConnError};
+
+// =============================================================================
+// Config
+// =============================================================================
+
+public type ListenerConfig is {
+    /// Soft cap on in-flight connections. Sockets accepted while at the
+    /// cap are closed immediately (best-effort 503 write).
+    max_concurrent_connections: Int,
+    /// Per-connection config handed to `serve_http1`.
+    connection: ConnectionConfig,
+};
+
+implement ListenerConfig {
+    public fn default() -> ListenerConfig {
+        ListenerConfig {
+            max_concurrent_connections: 10_000,
+            connection: ConnectionConfig.default(),
+        }
+    }
+}
+
+// =============================================================================
+// Server
+// =============================================================================
+
+/// Server: bound listener + shared `Handler`. Call `.serve().await` to
+/// run until cancellation. `.shutdown()` triggers graceful drain.
+public type Server<H> is {
+    listener: TcpListener,
+    app: Heap<H>,
+    config: ListenerConfig,
+    token: CancellationToken,
+};
+
+implement<H: Handler + Send + Sync + 'static> Server<H> {
+    /// Bind a TCP listener and wrap it with the given handler (commonly
+    /// a `Router`).
+    public fn bind(addr: Text, app: H, config: ListenerConfig) -> Result<Server<H>, Text> {
+        match TcpListener.bind(addr) {
+            Err(e) => Err(f"bind failed: {e}"),
+            Ok(listener) => Ok(Server {
+                listener: listener,
+                app: Heap.new(app),
+                config: config,
+                token: CancellationToken.new(),
+            }),
+        }
+    }
+
+    /// Expose the local bound address — useful for tests that bind to
+    /// port 0 and then need to know which port the OS assigned.
+    public fn local_addr(&self) -> Result<SocketAddr, Text> {
+        self.listener.local_addr().map_err(|e| f"{e}")
+    }
+
+    /// Expose the cancellation token. Wiring it to a signal handler or a
+    /// supervisor restart callback turns graceful shutdown on.
+    public fn shutdown_token(&self) -> CancellationToken {
+        self.token.clone()
+    }
+
+    /// Flip the cancellation token; equivalent to `shutdown_token().cancel()`.
+    public fn shutdown(&self) {
+        self.token.cancel();
+    }
+
+    /// Run the accept loop until the token fires. Returns `Ok(())` on
+    /// clean shutdown, `Err(...)` on unrecoverable listener-level I/O.
+    public async fn serve(self) -> Result<(), Text> {
+        let Server { listener, app, config, token } = self;
+
+        // In-flight counter. Signed `Int` is fine — we never go negative
+        // in normal operation, and a runaway decrement is loud enough to
+        // show up in monitoring.
+        let in_flight: Shared<sync.atomic.AtomicInt> =
+            Shared.new(sync.atomic.AtomicInt.new(0));
+        let max = config.max_concurrent_connections;
+
+        loop {
+            if token.is_cancelled() {
+                break;
+            }
+
+            // Cancellable accept. Cancelling the token wakes us out of
+            // the kernel wait.
+            let accept_res = listener.accept_cancellable(&token).await;
+            match accept_res {
+                Err(_cancelled) => break,
+                Ok(Err(e)) => {
+                    // Accept failed but the listener is still alive (e.g.
+                    // EMFILE). Back off briefly to give the OS / kernel
+                    // time to recover file-descriptor limits.
+                    core.async.timer.sleep_ms(10).await;
+                    continue;
+                }
+                Ok(Ok((stream, peer))) => {
+                    // Enforce the concurrency budget BEFORE spawning.
+                    let current = in_flight.fetch_add(1, sync.atomic.MemoryOrdering.AcqRel) + 1;
+                    if current > max {
+                        in_flight.fetch_sub(1, sync.atomic.MemoryOrdering.AcqRel);
+                        drop_overloaded(stream).await;
+                        continue;
+                    }
+
+                    let app_clone = app.clone();
+                    let tok_clone = token.clone();
+                    let conn_cfg = config.connection.clone();
+                    let counter = in_flight.clone();
+
+                    let _ = task.spawn(async move {
+                        let _ = serve_http1(
+                            stream, peer, app_clone, tok_clone, conn_cfg,
+                        ).await;
+                        counter.fetch_sub(1, sync.atomic.MemoryOrdering.AcqRel);
+                    });
+                }
+            }
+        }
+
+        // Graceful drain: wait for in-flight connections to clear, with
+        // a bounded deadline (30s per §7.8).
+        drain(&in_flight, 30_000).await;
+        Ok(())
+    }
+}
+
+/// Write a tiny 503 "overloaded" response and drop the socket. We do not
+/// go through the full response pipeline here — the socket's peer did
+/// not even finish the handshake we want to speak, so best-effort is
+/// appropriate.
+async fn drop_overloaded(mut stream: TcpStream) {
+    let msg = "HTTP/1.1 503 Service Unavailable\r\nconnection: close\r\ncontent-length: 13\r\n\r\noverloaded\r\n\r\n";
+    let mut buf: List<Int> = List.with_capacity(msg.len());
+    for b in msg.as_bytes().iter() {
+        buf.push(*b as Int);
+    }
+    let _ = stream.write_async(&buf).await;
+}
+
+/// Poll the in-flight counter every 50ms until it hits zero or the
+/// deadline elapses. Does NOT interrupt in-flight handlers — the token
+/// they received already signals cancellation; this function just
+/// bounds the wait.
+async fn drain(counter: &Shared<sync.atomic.AtomicInt>, max_ms: Int) {
+    let mut elapsed: Int = 0;
+    while counter.load(sync.atomic.MemoryOrdering.Acquire) > 0 && elapsed < max_ms {
+        core.async.timer.sleep_ms(50).await;
+        elapsed = elapsed + 50;
+    }
+}

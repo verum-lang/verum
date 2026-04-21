@@ -1,0 +1,215 @@
+// =============================================================================
+// core/net/weft/error.vr — Error model for Weft
+// =============================================================================
+// Layer: 6 (Weft)
+// Spec:  internal/specs/net-framework.md §5.6
+// =============================================================================
+
+module core.net.weft.error;
+
+mount core.*;
+mount core.net.http.{Response, StatusCode};
+mount core.net.weft.response_ext.{
+    resp_status, resp_ok, resp_text, resp_with_body_text,
+};
+
+/// Turn a value into an HTTP Response. Every `Service.Error` in Weft must
+/// implement this so the framework can always send a reply, even for
+/// errors the handler didn't anticipate.
+public type IntoResponse is protocol {
+    fn into_response(self) -> Response;
+};
+
+implement IntoResponse for Response {
+    fn into_response(self) -> Response { self }
+}
+
+implement IntoResponse for StatusCode {
+    fn into_response(self) -> Response { resp_status(self) }
+}
+
+implement IntoResponse for Text {
+    fn into_response(self) -> Response { resp_text(self) }
+}
+
+implement IntoResponse for () {
+    fn into_response(self) -> Response { resp_ok() }
+}
+
+/// High-level classification used by retry / circuit-breaker middleware
+/// to decide whether to retry an error (§5.6).
+public type ErrorCategory is
+    | Transient
+    | Permanent
+    | Security
+    | Client
+    | Upstream;
+
+implement ErrorCategory {
+    public fn default_status(&self) -> StatusCode {
+        match self {
+            Transient => StatusCode.new(503),
+            Permanent => StatusCode.new(500),
+            Security  => StatusCode.new(403),
+            Client    => StatusCode.new(400),
+            Upstream  => StatusCode.new(502),
+        }
+    }
+
+    public fn is_retryable(&self) -> Bool {
+        match self {
+            Transient => true,
+            Upstream  => true,
+            _         => false,
+        }
+    }
+}
+
+implement Eq for ErrorCategory {
+    fn eq(&self, other: &ErrorCategory) -> Bool {
+        match (self, other) {
+            (Transient, Transient) => true,
+            (Permanent, Permanent) => true,
+            (Security,  Security)  => true,
+            (Client,    Client)    => true,
+            (Upstream,  Upstream)  => true,
+            _                      => false,
+        }
+    }
+}
+
+implement Copy for ErrorCategory {}
+implement Clone for ErrorCategory {
+    fn clone(&self) -> ErrorCategory { *self }
+}
+
+/// Base error taxonomy for framework-internal failures.
+public type WeftError is
+    | BadRequest(Text)
+    | RouteNotFound
+    | MethodNotAllowed
+    | ExtractionRejected(Text)
+    | Timeout
+    | Overloaded
+    | UpstreamIo(Text)
+    | Internal(Text);
+
+implement WeftError {
+    public fn category(&self) -> ErrorCategory {
+        match self {
+            BadRequest(_)         => ErrorCategory.Client,
+            RouteNotFound         => ErrorCategory.Client,
+            MethodNotAllowed      => ErrorCategory.Client,
+            ExtractionRejected(_) => ErrorCategory.Client,
+            Timeout               => ErrorCategory.Transient,
+            Overloaded            => ErrorCategory.Transient,
+            UpstreamIo(_)         => ErrorCategory.Upstream,
+            Internal(_)           => ErrorCategory.Permanent,
+        }
+    }
+
+    public fn status(&self) -> StatusCode {
+        match self {
+            BadRequest(_)         => StatusCode.bad_request(),
+            RouteNotFound         => StatusCode.not_found(),
+            MethodNotAllowed      => StatusCode.new(405),
+            ExtractionRejected(_) => StatusCode.bad_request(),
+            Timeout               => StatusCode.new(504),
+            Overloaded            => StatusCode.new(503),
+            UpstreamIo(_)         => StatusCode.new(502),
+            Internal(_)           => StatusCode.internal_server_error(),
+        }
+    }
+
+    public fn public_message(&self) -> Text {
+        match self {
+            BadRequest(_)         => "bad request",
+            RouteNotFound         => "not found",
+            MethodNotAllowed      => "method not allowed",
+            ExtractionRejected(_) => "request validation failed",
+            Timeout               => "gateway timeout",
+            Overloaded            => "service unavailable",
+            UpstreamIo(_)         => "upstream unavailable",
+            Internal(_)           => "internal error",
+        }
+    }
+}
+
+implement IntoResponse for WeftError {
+    fn into_response(self) -> Response {
+        let status = self.status();
+        let msg = self.public_message();
+        resp_with_body_text(resp_status(status), msg)
+    }
+}
+
+implement Debug for WeftError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            BadRequest(m)         => f.write_str(f"WeftError.BadRequest({m})"),
+            RouteNotFound         => f.write_str("WeftError.RouteNotFound"),
+            MethodNotAllowed      => f.write_str("WeftError.MethodNotAllowed"),
+            ExtractionRejected(m) => f.write_str(f"WeftError.ExtractionRejected({m})"),
+            Timeout               => f.write_str("WeftError.Timeout"),
+            Overloaded            => f.write_str("WeftError.Overloaded"),
+            UpstreamIo(m)         => f.write_str(f"WeftError.UpstreamIo({m})"),
+            Internal(m)           => f.write_str(f"WeftError.Internal({m})"),
+        }
+    }
+}
+
+implement Display for WeftError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str(self.public_message())
+    }
+}
+
+/// Extractor rejection sum-type. Every `FromRequest` impl's `Rejection`
+/// must implement `IntoResponse`; this one covers the common cases.
+public type ExtractRejection is
+    | MissingParam(Text)
+    | InvalidParam { name: Text, value: Text, expected: Text }
+    | MissingHeader(Text)
+    | InvalidBody(Text)
+    | PayloadTooLarge(Int)
+    | MissingContext(Text);
+
+implement ExtractRejection {
+    public fn status(&self) -> StatusCode {
+        match self {
+            PayloadTooLarge(_) => StatusCode.new(413),
+            _                  => StatusCode.bad_request(),
+        }
+    }
+
+    public fn public_message(&self) -> Text {
+        match self {
+            MissingParam(name) =>
+                f"missing required parameter: {name}",
+            InvalidParam { name, value, expected } =>
+                f"parameter `{name}` = `{value}` is not a valid {expected}",
+            MissingHeader(name) =>
+                f"missing required header: {name}",
+            InvalidBody(reason) =>
+                f"invalid request body: {reason}",
+            PayloadTooLarge(limit) =>
+                f"payload exceeds {limit} bytes",
+            MissingContext(name) =>
+                f"required context not provided: {name}",
+        }
+    }
+}
+
+implement IntoResponse for ExtractRejection {
+    fn into_response(self) -> Response {
+        let status = self.status();
+        let msg = self.public_message();
+        resp_with_body_text(resp_status(status), msg)
+    }
+}
+
+implement Debug for ExtractRejection {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        f.write_str(self.public_message())
+    }
+}

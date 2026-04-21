@@ -1,0 +1,236 @@
+// =============================================================================
+// core/net/weft/metrics.vr — MetricsLayer + Prometheus-style registry
+// =============================================================================
+// Layer: 6 (Weft)
+// Spec:  internal/specs/net-framework.md §7.2
+// =============================================================================
+//
+// A minimal metrics registry that records per-request counters and
+// latency histograms in a Prometheus-compatible shape. Phase 1 exports
+// a text endpoint rendering (same as `/metrics` in a Prometheus job);
+// OTLP push and exemplars arrive in phase 5 (§7.7).
+//
+// The registry itself is thread-safe via a single Mutex. Hot paths (the
+// MetricsHandler below) take the lock only to update counters; for the
+// baseline 4 metrics that each handler touches this is uncontended in
+// practice. A future lock-free per-shard variant is straightforward.
+//
+// =============================================================================
+
+module core.net.weft.metrics;
+
+mount core.*;
+mount core.collections.map.{Map};
+mount core.collections.list.{List};
+mount core.time.{Instant};
+mount core.sync.Mutex;
+mount core.net.http.{Response};
+mount core.net.weft.service.{Layer};
+mount core.net.weft.handler.{WeftRequest, Handler};
+mount core.net.weft.error.{WeftError};
+
+// =============================================================================
+// Metric types
+// =============================================================================
+
+public type Counter is {
+    inner: Mutex<Int>,
+};
+
+implement Counter {
+    public fn new() -> Counter { Counter { inner: Mutex.new(0) } }
+
+    public fn incr(&self) {
+        let mut g = self.inner.lock();
+        *g = *g + 1;
+    }
+
+    public fn add(&self, n: Int) {
+        let mut g = self.inner.lock();
+        *g = *g + n;
+    }
+
+    public fn value(&self) -> Int {
+        *self.inner.lock()
+    }
+}
+
+/// Fixed-bucket histogram. The default set of bucket boundaries is the
+/// Prometheus client default (in ms — SLI-style), adjusted for web
+/// handlers: 5 15 30 60 120 250 500 1000 2500 5000 10000.
+public type Histogram is {
+    bounds_ms: List<Int>,
+    counts: Mutex<List<Int>>,
+    sum_ms: Mutex<Int>,
+    count: Mutex<Int>,
+};
+
+implement Histogram {
+    public fn new() -> Histogram {
+        let bounds = List.from([5, 15, 30, 60, 120, 250, 500, 1000, 2500, 5000, 10000]);
+        let mut zero = List.with_capacity(bounds.len() + 1);
+        let mut i: Int = 0;
+        while i <= bounds.len() { zero.push(0); i = i + 1; }
+        Histogram {
+            bounds_ms: bounds,
+            counts: Mutex.new(zero),
+            sum_ms: Mutex.new(0),
+            count: Mutex.new(0),
+        }
+    }
+
+    public fn observe_ms(&self, ms: Int) {
+        let mut total = self.count.lock();
+        *total = *total + 1;
+        let mut sum = self.sum_ms.lock();
+        *sum = *sum + ms;
+        let mut cs = self.counts.lock();
+        let mut placed = false;
+        let mut i: Int = 0;
+        while i < self.bounds_ms.len() {
+            if ms <= self.bounds_ms[i] {
+                cs[i] = cs[i] + 1;
+                placed = true;
+                break;
+            }
+            i = i + 1;
+        }
+        if !placed {
+            let last = cs.len() - 1;
+            cs[last] = cs[last] + 1;
+        }
+    }
+}
+
+// =============================================================================
+// Registry
+// =============================================================================
+
+public type Registry is {
+    counters: Mutex<Map<Text, Shared<Counter>>>,
+    histograms: Mutex<Map<Text, Shared<Histogram>>>,
+};
+
+implement Registry {
+    public fn new() -> Registry {
+        Registry {
+            counters: Mutex.new(Map.new()),
+            histograms: Mutex.new(Map.new()),
+        }
+    }
+
+    /// Get-or-create a counter with the given name.
+    public fn counter(&self, name: &Text) -> Shared<Counter> {
+        let mut m = self.counters.lock();
+        match m.get(name) {
+            Some(c) => c.clone(),
+            None => {
+                let c = Shared.new(Counter.new());
+                m.insert(name.clone(), c.clone());
+                c
+            }
+        }
+    }
+
+    /// Get-or-create a histogram with the given name.
+    public fn histogram(&self, name: &Text) -> Shared<Histogram> {
+        let mut m = self.histograms.lock();
+        match m.get(name) {
+            Some(h) => h.clone(),
+            None => {
+                let h = Shared.new(Histogram.new());
+                m.insert(name.clone(), h.clone());
+                h
+            }
+        }
+    }
+
+    /// Render in Prometheus text exposition format. Suitable for a
+    /// `GET /metrics` handler.
+    public fn render_prometheus(&self) -> Text {
+        let mut out = Text.builder();
+        // Counters.
+        let cs = self.counters.lock();
+        for (name, counter) in cs.iter() {
+            out.push_str(f"# TYPE {name} counter\n");
+            out.push_str(f"{name} {counter.value()}\n");
+        }
+        // Histograms.
+        let hs = self.histograms.lock();
+        for (name, hist) in hs.iter() {
+            out.push_str(f"# TYPE {name} histogram\n");
+            let counts = hist.counts.lock();
+            let mut cumulative: Int = 0;
+            let mut i: Int = 0;
+            while i < hist.bounds_ms.len() {
+                cumulative = cumulative + counts[i];
+                out.push_str(f"{name}_bucket{{le=\"{hist.bounds_ms[i]}\"}} {cumulative}\n");
+                i = i + 1;
+            }
+            let total = *hist.count.lock();
+            out.push_str(f"{name}_bucket{{le=\"+Inf\"}} {total}\n");
+            out.push_str(f"{name}_sum {*hist.sum_ms.lock()}\n");
+            out.push_str(f"{name}_count {total}\n");
+        }
+        out.finish()
+    }
+}
+
+// =============================================================================
+// MetricsLayer
+// =============================================================================
+
+public type MetricsLayer is {
+    registry: Shared<Registry>,
+};
+
+implement MetricsLayer {
+    public fn new(registry: Shared<Registry>) -> MetricsLayer {
+        MetricsLayer { registry: registry }
+    }
+
+    /// Convenience: wire up a fresh Registry and return both.
+    public fn with_new_registry() -> (MetricsLayer, Shared<Registry>) {
+        let reg = Shared.new(Registry.new());
+        (MetricsLayer { registry: reg.clone() }, reg)
+    }
+}
+
+implement<H: Handler> Layer<H> for MetricsLayer {
+    type Wrapped = MetricsHandler<H>;
+    fn wrap(&self, inner: H) -> MetricsHandler<H> {
+        MetricsHandler {
+            inner: inner,
+            registry: self.registry.clone(),
+        }
+    }
+}
+
+public type MetricsHandler<H> is {
+    inner: H,
+    registry: Shared<Registry>,
+};
+
+implement<H: Handler> Handler for MetricsHandler<H> {
+    async fn handle(&self, req: WeftRequest) -> Result<Response, WeftError> {
+        let total = self.registry.counter(&Text.from_str("http_requests_total"));
+        let latency = self.registry.histogram(&Text.from_str("http_request_duration_ms"));
+
+        total.incr();
+        let start = Instant.now();
+        let result = self.inner.handle(req).await;
+        let dt = Instant.now().duration_since(start).as_millis();
+        latency.observe_ms(dt);
+
+        match &result {
+            Err(_) => self.registry.counter(&Text.from_str("http_requests_errors_total")).incr(),
+            Ok(r) if r.status.is_server_error() =>
+                self.registry.counter(&Text.from_str("http_requests_5xx_total")).incr(),
+            Ok(r) if r.status.is_client_error() =>
+                self.registry.counter(&Text.from_str("http_requests_4xx_total")).incr(),
+            _ => {}
+        }
+
+        result
+    }
+}

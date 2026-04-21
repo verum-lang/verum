@@ -1,0 +1,61 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: net, weft, hello-world, end-to-end, server
+// @timeout: 10000
+// @expect: pass
+
+// §9.1 "Простейший HTTP-сервер в 20 строк" — shape-only compile test.
+// Does NOT actually bind to a port at test time (no runtime dependency).
+
+mount core.net.http.{Method, Response};
+mount core.net.weft.service.{ServiceBuilder};
+mount core.net.weft.handler.{WeftRequest, Handler};
+mount core.net.weft.router.{Router};
+mount core.net.weft.app.{WeftApp};
+mount core.net.weft.timeout.{TimeoutLayer};
+mount core.net.weft.tracing.{TracingLayer};
+mount core.net.weft.metrics.{MetricsLayer};
+mount core.net.weft.error.{WeftError};
+mount core.net.weft.response_ext.{resp_text};
+
+// Tiny handler that returns a text body.
+type Hello is {};
+
+implement Handler for Hello {
+    async fn handle(&self, _req: WeftRequest) -> Result<Response, WeftError> {
+        Ok(resp_text("Hello from Weft!"))
+    }
+}
+
+// Parametrised handler — demonstrates the "named path param" extractor.
+type Echo is {};
+
+implement Handler for Echo {
+    async fn handle(&self, req: WeftRequest) -> Result<Response, WeftError> {
+        match req.path_param(&"name") {
+            Some(n) => Ok(resp_text(f"Hello, {n}!")),
+            None    => Err(WeftError.ExtractionRejected("name")),
+        }
+    }
+}
+
+// Build the serving pipeline. No .serve() — this is a shape test.
+fn build_app() -> WeftApp<impl Handler> {
+    let (metrics, _registry) = MetricsLayer.with_new_registry();
+    let router = Router.new()
+        .get("/",             Hello {})
+        .get("/hello/:name",  Echo {});
+
+    let svc = ServiceBuilder.new(router)
+        .layer(TimeoutLayer.ms(5000))
+        .layer(TracingLayer.new())
+        .layer(metrics)
+        .build();
+
+    WeftApp.new(svc)
+}
+
+fn main() {
+    let _ = build_app();
+}

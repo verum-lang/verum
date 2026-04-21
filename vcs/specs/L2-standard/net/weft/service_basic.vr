@@ -1,0 +1,30 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: net, weft, service, layer, middleware
+// @timeout: 10000
+// @expect: pass
+
+// Service / Layer / ServiceBuilder shape — the §5.1 primitives must
+// exist with the documented signatures.
+
+mount core.net.weft.service.{Service, Layer, ServiceBuilder, Identity};
+
+// Any value implementing Handler is usable — use Identity as the stand-in
+// type to demonstrate the chaining shape without needing a real handler.
+
+fn typecheck_builder_compose() -> Identity {
+    let builder = ServiceBuilder.new(Identity.new());
+    builder.build()
+}
+
+fn typecheck_builder_with_identity_layer() -> Identity {
+    ServiceBuilder.new(Identity.new())
+        .layer(Identity.new())
+        .build()
+}
+
+fn main() {
+    let _ = typecheck_builder_compose();
+    let _ = typecheck_builder_with_identity_layer();
+}

@@ -1,0 +1,21 @@
+// =============================================================================
+// core/net/weft/mod.vr — Weft public surface
+// =============================================================================
+// Layer: 6 (Weft — server framework core)
+// Spec:  internal/specs/net-framework.md §10
+// =============================================================================
+
+module core.net.weft;
+
+public mount super.net.weft.response_ext.*;
+public mount super.net.weft.service.*;
+public mount super.net.weft.error.*;
+public mount super.net.weft.handler.*;
+public mount super.net.weft.router.*;
+public mount super.net.weft.connection.*;
+public mount super.net.weft.listener.*;
+public mount super.net.weft.app.*;
+public mount super.net.weft.timeout.*;
+public mount super.net.weft.tracing.*;
+public mount super.net.weft.metrics.*;
+public mount super.net.weft.health.*;

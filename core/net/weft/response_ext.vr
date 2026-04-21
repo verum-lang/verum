@@ -1,0 +1,101 @@
+// =============================================================================
+// core/net/weft/response_ext.vr — Weft Response builders (free functions)
+// =============================================================================
+// Layer: 6 (Weft)
+// =============================================================================
+//
+// Server-side `core.net.http.Response` constructors exposed as free
+// functions. Methods on externally-defined types live in the owning
+// module only; rather than add these to `core/net/http.vr`, Weft keeps
+// them local under a clear `resp_*` naming scheme.
+//
+// =============================================================================
+
+module core.net.weft.response_ext;
+
+mount core.*;
+mount core.collections.list.{List};
+mount core.net.http.{Response, StatusCode, Version, Headers};
+
+/// Empty response with the given status code.
+public fn resp_status(status: StatusCode) -> Response {
+    Response {
+        status: status,
+        version: Version.Http11,
+        headers: Headers.new(),
+        body: List.new(),
+    }
+}
+
+/// `200 OK` with no body.
+public fn resp_ok() -> Response {
+    resp_status(StatusCode.ok())
+}
+
+/// `200 OK` with UTF-8 text body + content-type text/plain + content-length.
+public fn resp_text(body: Text) -> Response {
+    let bytes = body.into_bytes();
+    let mut headers = Headers.new();
+    headers.set(&"content-type", &"text/plain; charset=utf-8");
+    headers.set(&"content-length", &f"{bytes.len()}");
+    Response {
+        status: StatusCode.ok(),
+        version: Version.Http11,
+        headers: headers,
+        body: bytes,
+    }
+}
+
+/// `200 OK` with raw JSON body + content-type application/json.
+public fn resp_json(body: Text) -> Response {
+    let bytes = body.into_bytes();
+    let mut headers = Headers.new();
+    headers.set(&"content-type", &"application/json");
+    headers.set(&"content-length", &f"{bytes.len()}");
+    Response {
+        status: StatusCode.ok(),
+        version: Version.Http11,
+        headers: headers,
+        body: bytes,
+    }
+}
+
+/// `404 Not Found` with empty body.
+public fn resp_not_found() -> Response {
+    resp_status(StatusCode.not_found())
+}
+
+/// `400 Bad Request` with empty body.
+public fn resp_bad_request() -> Response {
+    resp_status(StatusCode.bad_request())
+}
+
+/// `500 Internal Server Error` with empty body.
+public fn resp_internal_error() -> Response {
+    resp_status(StatusCode.internal_server_error())
+}
+
+/// Set/replace a response header. Returns a new Response value.
+public fn resp_with_header(r: Response, name: &Text, value: &Text) -> Response {
+    let mut out = r;
+    out.headers.set(name, value);
+    out
+}
+
+/// Set body from UTF-8 text (adds content-type/content-length if absent).
+public fn resp_with_body_text(r: Response, body: Text) -> Response {
+    let bytes = body.into_bytes();
+    let mut out = Response { body: bytes, ..r };
+    if !out.headers.contains(&"content-type") {
+        out.headers.set(&"content-type", &"text/plain; charset=utf-8");
+    }
+    out.headers.set(&"content-length", &f"{out.body.len()}");
+    out
+}
+
+/// Set body from raw bytes; updates content-length.
+public fn resp_with_body_bytes(r: Response, body: List<Byte>) -> Response {
+    let mut out = Response { body: body, ..r };
+    out.headers.set(&"content-length", &f"{out.body.len()}");
+    out
+}

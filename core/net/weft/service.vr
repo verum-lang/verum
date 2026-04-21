@@ -1,0 +1,59 @@
+// =============================================================================
+// core/net/weft/service.vr — Service / Layer / ServiceBuilder
+// =============================================================================
+// Layer: 6 (Weft)
+// Spec:  internal/specs/net-framework.md §5.1
+// =============================================================================
+
+module core.net.weft.service;
+
+mount core.*;
+mount core.async.poll.{Poll};
+mount core.async.waker.{Context};
+
+/// Base protocol for every request-handling component in Weft.
+/// `poll_ready` is mandatory — §5.1 rationale.
+public type Service<Req, Resp> is protocol {
+    type Error;
+
+    fn poll_ready(&mut self, cx: &mut Context) -> Poll<Result<(), Self.Error>>;
+    async fn call(&mut self, req: Req) -> Result<Resp, Self.Error>;
+};
+
+/// Service transformer — middleware. Takes Inner, returns a wrapped Service.
+public type Layer<Inner> is protocol {
+    type Wrapped;
+    fn wrap(&self, inner: Inner) -> Self.Wrapped;
+};
+
+/// Fluent composition of Layers around a root Service.
+public type ServiceBuilder<S> is {
+    inner: S,
+};
+
+implement<S> ServiceBuilder<S> {
+    public fn new(svc: S) -> ServiceBuilder<S> {
+        ServiceBuilder { inner: svc }
+    }
+
+    public fn layer<L: Layer<S>>(self, l: L) -> ServiceBuilder<L.Wrapped> {
+        ServiceBuilder { inner: l.wrap(self.inner) }
+    }
+
+    public fn build(self) -> S {
+        self.inner
+    }
+}
+
+/// Identity Layer — passes Inner through unchanged. Useful for conditional
+/// layering (`.layer(if cfg { real } else { Identity })`).
+public type Identity is {};
+
+implement Identity {
+    public fn new() -> Identity { Identity {} }
+}
+
+implement<S> Layer<S> for Identity {
+    type Wrapped = S;
+    fn wrap(&self, inner: S) -> S { inner }
+}

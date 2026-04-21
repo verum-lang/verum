@@ -1,0 +1,54 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: net, weft, router, radix, dispatch
+// @timeout: 10000
+// @expect: pass
+
+// §5.4 — Router surface: .new / .get / .post / .route / .fallback /
+// .match_request / .dispatch. Use a trivial handler for shape checking.
+
+mount core.net.http.{Method, Response, Headers};
+mount core.collections.list.{List};
+mount core.net.weft.handler.{WeftRequest, Handler};
+mount core.net.weft.router.{Router};
+mount core.net.weft.error.{WeftError};
+mount core.net.weft.response_ext.{resp_ok};
+
+type Noop is {};
+
+implement Noop {
+    fn new() -> Noop { Noop {} }
+}
+
+implement Handler for Noop {
+    async fn handle(&self, _req: WeftRequest) -> Result<Response, WeftError> {
+        Ok(resp_ok())
+    }
+}
+
+fn typecheck_router_build() -> Router {
+    Router.new()
+        .get("/", Noop.new())
+        .get("/users/:id", Noop.new())
+        .post("/users", Noop.new())
+        .get("/files/*path", Noop.new())
+        .fallback(Noop.new())
+}
+
+fn typecheck_router_match(r: &Router, req: &mut WeftRequest) -> Maybe<&Heap<dyn Handler>> {
+    r.match_request(req)
+}
+
+async fn typecheck_router_dispatch(r: &Router, req: WeftRequest) -> Result<Response, WeftError> {
+    r.dispatch(req).await
+}
+
+// Router itself is a Handler (so it can be wrapped by Layer).
+fn typecheck_router_is_handler(r: Router) -> impl Handler {
+    r
+}
+
+fn main() {
+    let _ = typecheck_router_build();
+}

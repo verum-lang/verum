@@ -1,0 +1,50 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: net, weft, middleware, timeout, tracing, metrics, layer
+// @timeout: 10000
+// @expect: pass
+
+// Phase-1 middleware: TimeoutLayer + TracingLayer + MetricsLayer compose
+// over a router / raw Handler through ServiceBuilder.
+
+mount core.net.http.{Method, Response};
+mount core.net.weft.service.{ServiceBuilder};
+mount core.net.weft.handler.{WeftRequest, Handler};
+mount core.net.weft.router.{Router};
+mount core.net.weft.timeout.{TimeoutLayer};
+mount core.net.weft.tracing.{TracingLayer, TraceContext};
+mount core.net.weft.metrics.{MetricsLayer, Registry};
+mount core.net.weft.error.{WeftError};
+mount core.net.weft.response_ext.{resp_ok};
+
+type Noop is {};
+implement Handler for Noop {
+    async fn handle(&self, _req: WeftRequest) -> Result<Response, WeftError> {
+        Ok(resp_ok())
+    }
+}
+
+fn typecheck_middleware_stack() -> impl Handler {
+    let (metrics_layer, _registry) = MetricsLayer.with_new_registry();
+    ServiceBuilder.new(Noop {})
+        .layer(TimeoutLayer.ms(5000))
+        .layer(TracingLayer.new())
+        .layer(metrics_layer)
+        .build()
+}
+
+fn typecheck_trace_context_parse() -> Maybe<TraceContext> {
+    TraceContext.parse_header(
+        &"00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01"
+    )
+}
+
+fn typecheck_trace_context_synthesise() -> Text {
+    TraceContext.synthesise().to_header()
+}
+
+fn main() {
+    let _ = typecheck_middleware_stack();
+    let _ = typecheck_trace_context_synthesise();
+}

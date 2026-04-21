@@ -1,0 +1,298 @@
+// =============================================================================
+// core/net/weft/router.vr — Radix-tree HTTP router
+// =============================================================================
+// Layer: 6 (Weft)
+// Spec:  internal/specs/net-framework.md §5.4
+// =============================================================================
+
+module core.net.weft.router;
+
+mount core.*;
+mount core.collections.map.{Map};
+mount core.collections.list.{List};
+mount core.net.http.{Method, Response};
+mount core.net.weft.handler.{WeftRequest, Handler};
+mount core.net.weft.error.{WeftError};
+
+type Segment is
+    | Static(Text)
+    | Param(Text)
+    | Wildcard(Text);
+
+fn parse_pattern(pattern: &Text) -> Result<List<Segment>, Text> {
+    let mut out = List.new();
+    if !pattern.starts_with("/") {
+        return Err(f"route pattern must start with '/': {pattern}");
+    }
+    let tail = pattern.slice(1, pattern.len());
+    if tail.is_empty() {
+        return Ok(out);
+    }
+    let parts = tail.split("/");
+    let nparts = parts.len();
+    for (i, part) in parts.iter().enumerate() {
+        if part.is_empty() {
+            return Err(f"empty segment in pattern: {pattern}");
+        }
+        let seg = if part.starts_with(":") {
+            let name = part.slice(1, part.len());
+            if name.is_empty() {
+                return Err(f"empty param name in pattern: {pattern}");
+            }
+            Segment.Param(name)
+        } else if part.starts_with("*") {
+            if i != nparts - 1 {
+                return Err(f"wildcard must be the last segment: {pattern}");
+            }
+            let name = part.slice(1, part.len());
+            if name.is_empty() {
+                return Err(f"empty wildcard name in pattern: {pattern}");
+            }
+            Segment.Wildcard(name)
+        } else {
+            Segment.Static(part.clone())
+        };
+        out.push(seg);
+    }
+    Ok(out)
+}
+
+type Node is {
+    handlers: Map<Text, Heap<dyn Handler>>,
+    static_children: Map<Text, Heap<Node>>,
+    param_child: Maybe<ParamEdge>,
+    wildcard_child: Maybe<WildcardEdge>,
+};
+
+type ParamEdge is {
+    name: Text,
+    node: Heap<Node>,
+};
+
+type WildcardEdge is {
+    name: Text,
+    handlers: Map<Text, Heap<dyn Handler>>,
+};
+
+implement Node {
+    fn new() -> Node {
+        Node {
+            handlers: Map.new(),
+            static_children: Map.new(),
+            param_child: None,
+            wildcard_child: None,
+        }
+    }
+}
+
+/// HTTP router. Register routes via `.route(...)` / `.get(...)` / etc.;
+/// install a fallback via `.fallback(...)`; dispatch via `.dispatch(req)`.
+/// Router itself implements Handler.
+public type Router is {
+    root: Heap<Node>,
+    fallback: Maybe<Heap<dyn Handler>>,
+};
+
+implement Router {
+    public fn new() -> Router {
+        Router {
+            root: Heap.new(Node.new()),
+            fallback: None,
+        }
+    }
+
+    public fn route<H: Handler + 'static>(
+        mut self,
+        pattern: Text,
+        method: Method,
+        handler: H,
+    ) -> Router {
+        match parse_pattern(&pattern) {
+            Err(msg) => panic(f"Router.route: {msg}"),
+            Ok(segments) => {
+                insert_route(&mut self.root, &segments, 0, method, Heap.new(handler));
+            }
+        }
+        self
+    }
+
+    public fn get<H: Handler + 'static>(self, pattern: Text, handler: H) -> Router {
+        self.route(pattern, Method.Get, handler)
+    }
+    public fn post<H: Handler + 'static>(self, pattern: Text, handler: H) -> Router {
+        self.route(pattern, Method.Post, handler)
+    }
+    public fn put<H: Handler + 'static>(self, pattern: Text, handler: H) -> Router {
+        self.route(pattern, Method.Put, handler)
+    }
+    public fn delete<H: Handler + 'static>(self, pattern: Text, handler: H) -> Router {
+        self.route(pattern, Method.Delete, handler)
+    }
+    public fn patch<H: Handler + 'static>(self, pattern: Text, handler: H) -> Router {
+        self.route(pattern, Method.Patch, handler)
+    }
+
+    public fn fallback<H: Handler + 'static>(mut self, handler: H) -> Router {
+        self.fallback = Some(Heap.new(handler));
+        self
+    }
+
+    pub fn match_request(&self, req: &mut WeftRequest)
+        -> Maybe<&Heap<dyn Handler>>
+    {
+        let segments = split_path(&req.path);
+        let method_key = req.method.as_str();
+        let mut captured: Map<Text, Text> = Map.new();
+        let found = match_node(&*self.root, &segments, 0, &method_key, &mut captured);
+        match found {
+            Some(h) => {
+                for (k, v) in captured.iter() {
+                    req.path_params.insert(k.clone(), v.clone());
+                }
+                Some(h)
+            }
+            None => None,
+        }
+    }
+
+    pub async fn dispatch(&self, mut req: WeftRequest)
+        -> Result<Response, WeftError>
+    {
+        match self.match_request(&mut req) {
+            Some(handler) => handler.handle(req).await,
+            None => match &self.fallback {
+                Some(fb) => fb.handle(req).await,
+                None     => Err(WeftError.RouteNotFound),
+            }
+        }
+    }
+}
+
+fn split_path(path: &Text) -> List<Text> {
+    let mut segs = List.new();
+    if path.is_empty() || path == "/" {
+        return segs;
+    }
+    let trimmed = if path.starts_with("/") {
+        path.slice(1, path.len())
+    } else {
+        path.clone()
+    };
+    for part in trimmed.split("/") {
+        segs.push(part);
+    }
+    segs
+}
+
+fn insert_route(
+    node: &mut Node,
+    segments: &List<Segment>,
+    idx: Int,
+    method: Method,
+    handler: Heap<dyn Handler>,
+) {
+    if idx >= segments.len() {
+        node.handlers.insert(method.as_str(), handler);
+        return;
+    }
+    match &segments[idx] {
+        Segment.Static(lit) => {
+            let child = match node.static_children.get_mut(lit) {
+                Some(n) => n,
+                None => {
+                    node.static_children.insert(lit.clone(), Heap.new(Node.new()));
+                    node.static_children.get_mut(lit).unwrap()
+                }
+            };
+            insert_route(&mut **child, segments, idx + 1, method, handler);
+        }
+        Segment.Param(name) => {
+            let edge = match &mut node.param_child {
+                Some(e) => {
+                    if e.name != *name {
+                        panic(f"Router.route: conflicting param names {e.name} vs {name}");
+                    }
+                    e
+                }
+                None => {
+                    node.param_child = Some(ParamEdge {
+                        name: name.clone(),
+                        node: Heap.new(Node.new()),
+                    });
+                    match &mut node.param_child {
+                        Some(e) => e,
+                        None => unreachable(),
+                    }
+                }
+            };
+            insert_route(&mut *edge.node, segments, idx + 1, method, handler);
+        }
+        Segment.Wildcard(name) => {
+            let mut existing = match &node.wildcard_child {
+                Some(wc) => {
+                    if wc.name != *name {
+                        panic(f"Router.route: conflicting wildcard names {wc.name} vs {name}");
+                    }
+                    wc.handlers.clone()
+                }
+                None => Map.new(),
+            };
+            existing.insert(method.as_str(), handler);
+            node.wildcard_child = Some(WildcardEdge {
+                name: name.clone(),
+                handlers: existing,
+            });
+        }
+    }
+}
+
+fn match_node<'a>(
+    node: &'a Node,
+    segments: &List<Text>,
+    idx: Int,
+    method: &Text,
+    captured: &mut Map<Text, Text>,
+) -> Maybe<&'a Heap<dyn Handler>> {
+    if idx >= segments.len() {
+        return node.handlers.get(method);
+    }
+    let seg = &segments[idx];
+
+    if let Some(child) = node.static_children.get(seg) {
+        if let Some(h) = match_node(&**child, segments, idx + 1, method, captured) {
+            return Some(h);
+        }
+    }
+
+    if let Some(edge) = &node.param_child {
+        let name = edge.name.clone();
+        let prev = captured.get(&name).cloned();
+        captured.insert(name.clone(), seg.clone());
+        if let Some(h) = match_node(&*edge.node, segments, idx + 1, method, captured) {
+            return Some(h);
+        }
+        match prev {
+            Some(v) => { captured.insert(name, v); }
+            None    => { captured.remove(&name); }
+        }
+    }
+
+    if let Some(wc) = &node.wildcard_child {
+        let mut joined = Text.builder();
+        for (i, s) in segments.iter().enumerate() {
+            if i < idx { continue; }
+            if i > idx { joined.push_str("/"); }
+            joined.push_str(s);
+        }
+        captured.insert(wc.name.clone(), joined.finish());
+        return wc.handlers.get(method);
+    }
+
+    None
+}
+
+implement Handler for Router {
+    async fn handle(&self, req: WeftRequest) -> Result<Response, WeftError> {
+        self.dispatch(req).await
+    }
+}

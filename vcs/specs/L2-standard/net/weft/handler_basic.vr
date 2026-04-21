@@ -1,0 +1,51 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: net, weft, handler, extractor, request
+// @timeout: 10000
+// @expect: pass
+
+// §5.3 — WeftRequest + Handler + FromRequest + Path/Query/Bytes/BodyText.
+
+mount core.net.http.{Method, Headers, Response};
+mount core.collections.list.{List};
+mount core.net.weft.handler.{
+    WeftRequest, Handler, FromRequest,
+    PathParam, QueryParam, Bytes, BodyText, Json, ClosureHandler,
+    path_int, query_text_optional,
+};
+mount core.net.weft.error.{WeftError, ExtractRejection};
+
+// Construction shape.
+fn typecheck_request_build() -> WeftRequest {
+    WeftRequest.new(
+        Method.Get,
+        "/users/42",
+        Some("q=1"),
+        Headers.new(),
+        List.new(),
+    )
+}
+
+// Accessors.
+fn typecheck_request_accessors(r: &WeftRequest) -> (Maybe<&Text>, Maybe<Int>, Maybe<Text>, Maybe<&Text>) {
+    (r.path_param(&"id"),
+     r.path_param_int(&"id"),
+     r.query_param(&"q"),
+     r.header(&"content-type"))
+}
+
+// Path<Int> extractor — free-function API for phase 1.
+fn typecheck_path_int(r: &mut WeftRequest) -> Result<PathParam<Int>, ExtractRejection> {
+    path_int(r, &"id")
+}
+
+// QueryParam<Text> extractor — optional variant.
+fn typecheck_query_opt(r: &mut WeftRequest) -> Maybe<QueryParam<Text>> {
+    query_text_optional(r, &"page")
+}
+
+fn main() {
+    let r = typecheck_request_build();
+    let _ = typecheck_request_accessors(&r);
+}
