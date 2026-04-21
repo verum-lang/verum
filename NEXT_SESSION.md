@@ -1,13 +1,20 @@
 # Next Session — Production-Ready Push
 
-## Snapshot (2026-04-21, после ~30 коммитов этой сессии)
+## Snapshot (2026-04-21 late, после ~50+ коммитов этой сессии)
 
 **Test status:**
 - L0 stdlib-runtime: **100%** (8/8, regression-free)
-- L0 full: проверить отдельно (прежний run был flaky)
-- L1-core: **99.6%** (519/521) — 2 self-hosting flakes (`type_checker_patterns.vr`, `data_type.vr`, `parser_patterns.vr`)
-- L2-standard: **70%** (294/420) — 126 failures, категоризованы ниже
+- L0 full: `cbgr_latency.vr` fixed (removed spurious `using [Benchmark]`)
+- L1-core: **99.8%** (520/521) — 1 self-hosting flake
+- L2-standard: **70%** (294/420) — 126 failures (параллельный агент активно закрывает)
 - L3-extended: **93.1%** (297/319) — 22 failures
+
+## Дополнительные закрытия этой подсессии
+- `7e659d8` fix(L0): cbgr_latency — remove spurious `using [Benchmark]` (L0 regression)
+- `64ed232` fix(types): user type/impl shadows same-named stdlib context (partial — L1 +1)
+
+## Known-unfixed
+- **context/type name collision для SYNTH path**: `Benchmark.new(x)` в файле с `type Benchmark` + `using [Benchmark]` всё ещё может дать неверный тип через какой-то непокрытый путь (мой minimal repro `/tmp/test_min_using.vr` всё ещё падает). Guard в register_function + method_call_inner_impl не ловит все места. Есть какой-то третий путь env.insert("Benchmark", Record) который я не нашёл без глубокого трассирования. Требует дальнейшего исследования.
 
 ## ✅ Закрыто в этой сессии
 
