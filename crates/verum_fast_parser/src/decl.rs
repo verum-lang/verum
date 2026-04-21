@@ -80,11 +80,20 @@ impl<'a> RecursiveParser<'a> {
             ));
         }
 
-        // If there were any errors during parsing, return the first one
-        if let Some(error) = self.errors.first() {
-            return Err(error.clone());
-        }
-
+        // Root fix for Issue #5 (parser error duplication):
+        //
+        // Return `Ok(items)` even when `self.errors` is non-empty; the
+        // caller (`parse_module_internal` in lib.rs) already checks
+        // `parser.errors.is_empty()` on the Ok-path and converts a
+        // populated error list into `Err(errors)` there. Previously we
+        // *also* returned `Err(self.errors.first().clone())` here,
+        // which the caller then re-appended to `parser.errors` in its
+        // Err-arm — duplicating the very first error across the final
+        // error list. Concretely, three `assert!(...)` lines produced
+        // four diagnostics: the original three plus a second copy of
+        // the first. With this change, the caller's pre-existing
+        // empty-check is the single source of truth for promoting the
+        // parse to a failure, and no diagnostic is emitted twice.
         Ok(items)
     }
 

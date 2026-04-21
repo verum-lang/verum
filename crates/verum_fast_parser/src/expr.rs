@@ -7322,11 +7322,32 @@ impl<'a> RecursiveParser<'a> {
     fn parse_macro_call(&mut self) -> ParseResult<Expr> {
         let start_pos = self.stream.position();
 
-        // Check for Rust macro syntax before parsing
+        // Check for Rust macro syntax before parsing.
+        //
+        // Root fix for Issue #5: when we detect a Rust-style macro call
+        // (`assert!(...)`, `println!(...)`, etc.), consume the `ident` token,
+        // the `!`, and the delimited args *before* returning the helpful
+        // diagnostic. Without this, the parser stays pointed at the same
+        // token and the caller's error-recovery loop re-enters
+        // `parse_macro_call` at the identical offset, emitting the same
+        // diagnostic for every retry and drowning the real rest-of-file
+        // errors in duplicates. Advancing past the offending syntax gives
+        // the recovery loop fresh ground to stand on and keeps the
+        // diagnostic count equal to the number of actual mistakes.
         if let Some(TokenKind::Ident(name)) = self.stream.peek_kind() {
             let name_str = name.clone();
             if let Some(verum_equiv) = rust_macro_to_verum(name_str.as_str()) {
                 let span = self.stream.current_span();
+                // Advance past `ident`.
+                self.stream.advance();
+                // Skip the `!` if present (expected by grammar but missing
+                // is tolerated — we're already in the error path).
+                if self.stream.check(&TokenKind::Bang) {
+                    self.stream.advance();
+                }
+                // Skip the delimited args as a balanced token tree so the
+                // parser lands immediately after the macro invocation.
+                self.skip_balanced_macro_args();
                 return Err(ParseError::rust_macro_syntax_with_equivalent(
                     name_str.as_str(),
                     verum_equiv,
@@ -7403,6 +7424,34 @@ impl<'a> RecursiveParser<'a> {
 
         let span = self.stream.make_span(start_pos);
         Ok(Path::new(segments.into_iter().collect::<List<_>>(), span))
+    }
+
+    /// Skip a balanced macro-args token tree for error-recovery: if the
+    /// stream is currently at `(`, `[`, or `{`, consume tokens up to and
+    /// including the matching closer, tracking nested depths of every
+    /// paren/bracket/brace combination. If the stream is not at an opener,
+    /// this is a no-op. Infallible and never advances past a non-opener.
+    ///
+    /// Used by the Issue-#5 recovery path in `parse_macro_call` so that a
+    /// `assert!(x)` / `println!(...)` diagnostic doesn't leave the parser
+    /// pointed back at the same token for the next recovery iteration.
+    fn skip_balanced_macro_args(&mut self) {
+        let (open, close) = match self.stream.peek_kind() {
+            Some(TokenKind::LParen) => (TokenKind::LParen, TokenKind::RParen),
+            Some(TokenKind::LBracket) => (TokenKind::LBracket, TokenKind::RBracket),
+            Some(TokenKind::LBrace) => (TokenKind::LBrace, TokenKind::RBrace),
+            _ => return,
+        };
+        self.stream.advance(); // consume the opener
+        let mut depth: usize = 1;
+        while depth > 0 {
+            match self.stream.peek_kind() {
+                Some(k) if *k == open => { depth += 1; self.stream.advance(); }
+                Some(k) if *k == close => { depth -= 1; self.stream.advance(); }
+                Some(_) => { self.stream.advance(); }
+                None => break, // EOF — bail rather than loop forever
+            }
+        }
     }
 
     /// Parse macro arguments with delimiters: (tt) or [tt] or {tt}

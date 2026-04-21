@@ -1,0 +1,33 @@
+// @test: parse-fail
+// @tier: 0
+// @level: L0
+// @tags: parser, recovery, rust-macro, diagnostics, regression
+// @expected-error: E0E2
+// @expected-error-count: 3
+//
+// Regression for Issue #5 (root fix in
+// crates/verum_fast_parser/src/expr.rs::parse_macro_call +
+// crates/verum_fast_parser/src/decl.rs::parse_module).
+//
+// Two distinct bugs combined to inflate the diagnostic count on Rust-
+// style macro syntax:
+//
+//   (a) `parse_macro_call` returned the "use `assert(...)` instead"
+//       diagnostic without consuming the offending `ident!(...)` tokens,
+//       so the outer statement loop retried at the same offset and
+//       re-emitted the diagnostic on the next recovery pass.
+//
+//   (b) `parse_module` returned `Err(self.errors.first().clone())` when
+//       the accumulated error list was non-empty; the caller in lib.rs
+//       then pushed that clone back onto `parser.errors`, duplicating
+//       the first diagnostic across the final list.
+//
+// With both fixes, the three `assert!` lines below produce exactly
+// three distinct diagnostics — one per actual syntax mistake — and the
+// parser stays synchronised on subsequent statements without cascading.
+
+fn main() {
+    assert!(1 == 1);
+    assert!(2 == 2);
+    assert!(3 == 3);
+}
