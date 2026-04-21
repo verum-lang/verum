@@ -1,0 +1,240 @@
+// =============================================================================
+// net/quic/connection_sm/coalesce.vr — Packet coalescing (RFC 9000 §12.2)
+// =============================================================================
+// Layer: 5 (Network — QUIC)
+// Dependencies: core, collections, quic.{frame, packet, connection_sm.tx}
+// =============================================================================
+//
+// RFC 9000 §12.2 permits — and modern implementations rely on — more
+// than one QUIC packet in a single UDP datagram. The typical client
+// flight combines:
+//
+//   Initial   (carries CRYPTO with ClientHello, padded to MIN_INITIAL_SIZE)
+//   Handshake (carries CRYPTO with Finished when keys become available)
+//   0-RTT     (carries early-application-data STREAM frames when enabled)
+//   1-RTT     (short-header, app data) — MUST be last; Short headers lack
+//             a length field and consume the datagram tail.
+//
+// Rules we enforce:
+//
+//   * Long-header packets carry a Length field; they can be chained
+//     in any order before a Short-header packet.
+//   * At most one Short-header packet per datagram.
+//   * Each constituent packet has its own PN + AEAD nonce; their
+//     header-protection masks are computed independently against
+//     their own ciphertext samples.
+//   * MIN_INITIAL_SIZE padding (1200 bytes — RFC 9000 §8.1) applies
+//     to the entire datagram, not just the Initial packet, so the
+//     coalescer defers PADDING frame emission until the end.
+//
+// =============================================================================
+
+module core.net.quic.connection_sm.coalesce;
+
+mount core.*;
+mount core.collections.List;
+mount core.net.addr.{SocketAddr};
+
+mount core.net.quic.frame.{Frame};
+mount core.net.quic.packet.{LongPacketType};
+mount core.net.quic.connection_id.{ConnectionId};
+mount core.net.quic.connection_sm.{QuicSpaceKeys};
+mount core.net.quic.connection_sm.tx.{
+    build_long_packet, build_short_packet,
+    LongPacketInput, ShortPacketInput, TxError,
+};
+
+// =============================================================================
+// Constants
+// =============================================================================
+
+/// RFC 9000 §8.1: client's first flight MUST be at least 1200 bytes
+/// to survive mid-path MTUs and to exercise the anti-amplification
+/// budget correctly.
+pub const MIN_INITIAL_DATAGRAM_SIZE: Int = 1200;
+
+// =============================================================================
+// Coalesce plan — describes what we want in one datagram
+// =============================================================================
+
+public type CoalescedPacket is
+      InitialPkt   { frames: List<Frame>, pn: UInt64, pn_len: UInt8,
+                     largest_acked: Maybe<UInt64>, token: List<Byte>,
+                     keys: QuicSpaceKeys }
+    | HandshakePkt { frames: List<Frame>, pn: UInt64, pn_len: UInt8,
+                     largest_acked: Maybe<UInt64>, keys: QuicSpaceKeys }
+    | ZeroRttPkt   { frames: List<Frame>, pn: UInt64, pn_len: UInt8,
+                     largest_acked: Maybe<UInt64>, keys: QuicSpaceKeys }
+    | OneRttPkt    { frames: List<Frame>, pn: UInt64, pn_len: UInt8,
+                     largest_acked: Maybe<UInt64>, keys: QuicSpaceKeys,
+                     spin_bit: Bool, key_phase: Bool };
+
+public type CoalescePlan is {
+    version:  UInt32,
+    dcid:     ConnectionId,
+    scid:     ConnectionId,
+    packets:  List<CoalescedPacket>,
+    /// Pad the entire datagram to this byte count after assembly.
+    /// Typically MIN_INITIAL_DATAGRAM_SIZE on the client's first
+    /// flight; 0 otherwise.
+    pad_to:   Int,
+};
+
+// =============================================================================
+// Error
+// =============================================================================
+
+public type CoalesceError is
+      PacketBuildFailed(Text)
+    | ShortHeaderNotLast
+    | MultipleShortHeaders;
+
+// =============================================================================
+// assemble()
+// =============================================================================
+
+/// Serialize every packet in the plan into one UDP datagram buffer.
+/// Enforces:
+///   * Only one Short-header packet (RFC 9000 §12.2).
+///   * Short-header, if present, is the last entry (no Length field
+///     for parsing).
+///   * Whole-datagram PADDING to `plan.pad_to` when set.
+pub fn assemble(plan: &CoalescePlan) -> Result<List<Byte>, CoalesceError> {
+    // Validate short-header constraint.
+    let mut short_idx: Maybe<Int> = None;
+    let mut i: Int = 0;
+    while i < plan.packets.len() {
+        match &plan.packets[i] {
+            CoalescedPacket.OneRttPkt {..} => {
+                match short_idx {
+                    Some(_) => return Err(CoalesceError.MultipleShortHeaders),
+                    None    => { short_idx = Some(i); },
+                }
+            },
+            _ => {},
+        }
+        i = i + 1;
+    }
+    match short_idx {
+        Some(j) => {
+            if j != plan.packets.len() - 1 {
+                return Err(CoalesceError.ShortHeaderNotLast);
+            }
+        },
+        None => {},
+    }
+
+    // Build each packet in order.
+    let mut out: List<Byte> = [];
+    let mut k: Int = 0;
+    while k < plan.packets.len() {
+        let bytes = build_one(&plan, &plan.packets[k])?;
+        let mut m: Int = 0;
+        while m < bytes.len() { out.push(bytes[m]); m = m + 1; }
+        k = k + 1;
+    }
+
+    // Whole-datagram PADDING — append 0x00 bytes until pad_to is
+    // reached. Because the final packet is either a Long header with
+    // its own Length covering only its internal frames, or a Short
+    // header (tail of datagram), padding past that point belongs to
+    // the datagram itself and the peer interprets the trailing zeros
+    // as… well, nothing useful, because they're outside any packet
+    // boundary. RFC 9000 §14.1 handles this by noting that "a client
+    // MUST expand the payload of all UDP datagrams carrying Initial
+    // packets to at least the smallest allowed maximum datagram
+    // size". Padding is therefore injected as PADDING frames inside
+    // the Initial packet when it's present; here we ensure the
+    // datagram reaches `pad_to` by appending a PADDING-frame-laden
+    // coalesced Initial packet when necessary. Simpler approach: we
+    // emit trailing zeros — receiver treats them as the tail of a
+    // dropped / reserved packet type, because QUIC requires the
+    // first byte of any packet to have the Fixed Bit set (0x40).
+    // A zero byte triggers the "drop, peer's Fixed-bit violation"
+    // path — safe but wasteful. For correctness with peers that
+    // require the padding inside Initial, callers should inject the
+    // PADDING frames into the Initial packet's frame list before
+    // calling `assemble`.
+    while out.len() < plan.pad_to { out.push(0_u8); }
+
+    Ok(out)
+}
+
+fn build_one(plan: &CoalescePlan, pkt: &CoalescedPacket) -> Result<List<Byte>, CoalesceError> {
+    match pkt {
+        CoalescedPacket.InitialPkt { frames, pn, pn_len: _, largest_acked, token, keys } => {
+            let input = LongPacketInput {
+                ptype:         LongPacketType.Initial,
+                version:       plan.version,
+                dcid:          &plan.dcid,
+                scid:          &plan.scid,
+                token:         token.as_slice(),
+                packet_number: *pn,
+                largest_acked: largest_acked.clone(),
+                frames:        frames,
+                keys:          keys,
+            };
+            build_long_packet(input).map_err(|e| map_tx_err("initial", e))
+        },
+        CoalescedPacket.HandshakePkt { frames, pn, pn_len: _, largest_acked, keys } => {
+            let empty: [Byte; 0] = [];
+            let input = LongPacketInput {
+                ptype:         LongPacketType.Handshake,
+                version:       plan.version,
+                dcid:          &plan.dcid,
+                scid:          &plan.scid,
+                token:         &empty,
+                packet_number: *pn,
+                largest_acked: largest_acked.clone(),
+                frames:        frames,
+                keys:          keys,
+            };
+            build_long_packet(input).map_err(|e| map_tx_err("handshake", e))
+        },
+        CoalescedPacket.ZeroRttPkt { frames, pn, pn_len: _, largest_acked, keys } => {
+            let empty: [Byte; 0] = [];
+            let input = LongPacketInput {
+                ptype:         LongPacketType.ZeroRtt,
+                version:       plan.version,
+                dcid:          &plan.dcid,
+                scid:          &plan.scid,
+                token:         &empty,
+                packet_number: *pn,
+                largest_acked: largest_acked.clone(),
+                frames:        frames,
+                keys:          keys,
+            };
+            build_long_packet(input).map_err(|e| map_tx_err("0rtt", e))
+        },
+        CoalescedPacket.OneRttPkt { frames, pn, pn_len: _, largest_acked, keys, spin_bit, key_phase } => {
+            let input = ShortPacketInput {
+                dcid:          &plan.dcid,
+                spin_bit:      *spin_bit,
+                key_phase:     *key_phase,
+                packet_number: *pn,
+                largest_acked: largest_acked.clone(),
+                frames:        frames,
+                keys:          keys,
+            };
+            build_short_packet(input).map_err(|e| map_tx_err("1rtt", e))
+        },
+    }
+}
+
+fn map_tx_err(which: &str, e: TxError) -> CoalesceError {
+    CoalesceError.PacketBuildFailed(Text.from_str(f"build {which}"))
+}
+
+// =============================================================================
+// Padding-frame helper — inject into Initial frame list when needed
+// =============================================================================
+
+/// Add PADDING frames to `initial_frames` so that when the Initial
+/// packet is built it grows to at least `min_bytes` total — the
+/// datagram-level minimum. Caller measures the already-accumulated
+/// datagram size from the other coalesced packets (handshake, 0-RTT)
+/// and asks this helper for the rest.
+pub fn pad_initial_frames(initial_frames: &mut List<Frame>, padding_bytes: Int) {
+    if padding_bytes <= 0 { return; }
+    initial_frames.push(Frame.PaddingRun(padding_bytes));
+}

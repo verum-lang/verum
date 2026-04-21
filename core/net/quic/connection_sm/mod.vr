@@ -79,6 +79,8 @@ public module dispatch;
 public module handshake_driver;
 public module path_control;
 public module stream_assembler;
+public module coalesce;
+public module retry;
 
 mount core.*;
 mount core.collections.List;

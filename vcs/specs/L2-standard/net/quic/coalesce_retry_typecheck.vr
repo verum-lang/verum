@@ -1,0 +1,94 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: quic, coalesce, retry, rfc9000, typecheck
+// @timeout: 10000
+// @expect: pass
+
+mount core.net.quic.connection_sm.coalesce.{
+    CoalescePlan, CoalescedPacket, CoalesceError,
+    assemble, pad_initial_frames,
+    MIN_INITIAL_DATAGRAM_SIZE,
+};
+mount core.net.quic.connection_sm.retry.{
+    RetryPacket, RetryError, RetryAcceptOutcome,
+    accept_retry, build_server_retry, verify_tp_retry_sentinels,
+};
+mount core.net.quic.connection_id.{ConnectionId};
+mount core.net.quic.connection_sm.{QuicSpaceKeys};
+mount core.net.quic.crypto.header_protection.{HpKey};
+mount core.net.quic.frame.{Frame};
+
+fn make_keys() -> QuicSpaceKeys {
+    QuicSpaceKeys {
+        aead_key: [0_u8; 16].to_vec(),
+        aead_iv:  [0_u8; 12],
+        hp_key:   HpKey.AesEcb128([0_u8; 16]),
+    }
+}
+
+fn check_coalesce_shape() -> Result<(), CoalesceError> {
+    let mut initial_frames: List<Frame> = [Frame.PingFrame];
+    pad_initial_frames(&mut initial_frames, 200);
+
+    let plan = CoalescePlan {
+        version: 0x00000001_u32,
+        dcid:    ConnectionId.empty(),
+        scid:    ConnectionId.empty(),
+        packets: [
+            CoalescedPacket.InitialPkt {
+                frames:        initial_frames,
+                pn:            0_u64,
+                pn_len:        1_u8,
+                largest_acked: None,
+                token:         [],
+                keys:          make_keys(),
+            },
+            CoalescedPacket.OneRttPkt {
+                frames:        [Frame.PingFrame],
+                pn:            0_u64,
+                pn_len:        1_u8,
+                largest_acked: None,
+                keys:          make_keys(),
+                spin_bit:      false,
+                key_phase:     false,
+            },
+        ],
+        pad_to:  MIN_INITIAL_DATAGRAM_SIZE,
+    };
+    let _ = assemble(&plan)?;
+    Ok(())
+}
+
+fn check_retry_flow() -> Result<(), RetryError> {
+    let odcid = ConnectionId.from_bytes(&[1_u8, 2_u8, 3_u8, 4_u8]).unwrap();
+    let retry_scid = ConnectionId.from_bytes(&[9_u8, 8_u8, 7_u8, 6_u8]).unwrap();
+    let token: [Byte; 5] = [0x74_u8, 0x6f_u8, 0x6b_u8, 0x65_u8, 0x6e_u8];
+
+    // Server builds a Retry wire packet.
+    let _ = build_server_retry(0x00000001_u32, &odcid, &retry_scid, &token)?;
+
+    // Client accepts it (wire-level verify + key re-derive).
+    let pkt = RetryPacket {
+        version:        0x00000001_u32,
+        destination_id: odcid.clone(),
+        source_id:      retry_scid.clone(),
+        retry_token:    token.to_vec(),
+        integrity_tag:  [0_u8; 16],
+    };
+    let _ = accept_retry(&pkt, &odcid);
+
+    // Transport-parameter sentinel check.
+    let _ = verify_tp_retry_sentinels(
+        &Some(odcid.clone()),
+        &Some(retry_scid.clone()),
+        &odcid,
+        &Some(retry_scid),
+    );
+    Ok(())
+}
+
+fn main() {
+    let _ = check_coalesce_shape();
+    let _ = check_retry_flow();
+}
