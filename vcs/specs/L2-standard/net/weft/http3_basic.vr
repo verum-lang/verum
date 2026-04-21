@@ -1,0 +1,43 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: net, weft, http3, quic, pq-hybrid, alpn
+// @timeout: 10000
+// @expect: pass
+
+// §6.3 / §6.11 — Http3WeftServer + WeftQuicConfig shape. No actual
+// QUIC bind at typecheck time (no certs).
+
+mount core.net.http.{Response};
+mount core.net.tls.{Certificate, PrivateKey};
+mount core.net.addr.{SocketAddr};
+mount core.net.weft.handler.{WeftRequest, Handler};
+mount core.net.weft.router.{Router};
+mount core.net.weft.http3.{WeftQuicConfig, Http3WeftServer};
+mount core.net.weft.error.{WeftError};
+mount core.net.weft.response_ext.{resp_ok};
+
+type Noop is {};
+implement Handler for Noop {
+    async fn handle(&self, _req: WeftRequest) -> Result<Response, WeftError> {
+        Ok(resp_ok())
+    }
+}
+
+fn typecheck_quic_config(cert: Certificate, key: PrivateKey) -> WeftQuicConfig {
+    WeftQuicConfig.server(cert, key)
+        .with_max_concurrent_requests(50_000)
+        .with_allow_0rtt(false)
+}
+
+async fn typecheck_bind_shape(
+    addr: SocketAddr,
+    cert: Certificate,
+    key: PrivateKey,
+) -> Result<Http3WeftServer<Router>, Text> {
+    let router = Router.new().get("/", Noop {});
+    let cfg = WeftQuicConfig.server(cert, key);
+    Http3WeftServer.bind(addr, router, cfg).await
+}
+
+fn main() {}

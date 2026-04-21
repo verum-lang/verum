@@ -1,0 +1,250 @@
+// =============================================================================
+// core/net/weft/http3.vr — HTTP/3 (QUIC) server adapter
+// =============================================================================
+// Layer: 6 (Weft)
+// Spec:  internal/specs/net-framework.md §6.3 / §6.10 / §6.11
+// RFCs:  9114 (HTTP/3), 9204 (QPACK), 9221 (QUIC datagrams),
+//        9218 (H3 extensible priorities), 9297 (H3 datagrams),
+//        draft-ietf-webtrans-http3-15 (WebTransport)
+// =============================================================================
+//
+// Plugs `core/net/http3.Http3Server` (intrinsic-backed, ~1200 LOC of
+// QUIC+QPACK stdlib) into Weft's `Handler` + `Router` stack. No QUIC,
+// QPACK, or frame logic duplicated — this file only:
+//
+//   1. Owns an Http3Server + the app's Handler.
+//   2. Loops `Http3Server.accept()`; for each accepted request,
+//      spawns a task that:
+//        a) Converts `Http3Request` → `WeftRequest`.
+//        b) Dispatches through the Handler / Router.
+//        c) Writes the response body to `Http3RequestHandle`.
+//
+// Why a distinct `Http3WeftServer` (rather than `Server<H>.serve_h3()`)?
+// HTTP/3 multiplexes at the QUIC-stream level, not the TCP-connection
+// level; the accept-loop cadence is "accept request" not "accept TCP".
+// A separate server type keeps that cleanly separated while reusing
+// the entire Handler / Router / Middleware stack unchanged.
+//
+// Phase-4 scope (in):
+//
+//   * Unary request/response over h3 streams (the 90% case).
+//   * Response stamping via H3 frames (HEADERS, DATA, END_STREAM
+//     implicit in `finish()`).
+//   * QuicConfig exposure with the Weft-blessed PQ-hybrid defaults
+//     (§6.11) — MLKEM768 + X25519 + TLS 1.3 mandatory.
+//
+// Phase-4 scope (deferred to follow-up):
+//
+//   * Server-streaming via multiple DATA writes before finish.
+//   * WebTransport sessions (§6.10 CONNECT + bidi/uni streams +
+//     DATAGRAM fan-out).
+//   * Multipath QUIC path scheduler (§6.10 draft-ietf-quic-multipath-21).
+//   * QUIC-LB connection-ID rotation (§6.10 draft-ietf-quic-load-balancers).
+//   * 0-RTT idempotent-only admission (§6.10 "0-RTT replay-defence").
+//   * Priority header (§6.10 RFC 9218).
+//
+// =============================================================================
+
+module core.net.weft.http3;
+
+mount core.*;
+mount core.collections.list.{List};
+mount core.collections.map.{Map};
+mount core.net.addr.{SocketAddr};
+mount core.net.http.{Method, StatusCode, Headers, Response};
+mount core.net.http2.hpack.{HeaderField};
+mount core.net.quic.{QuicConfig};
+mount core.net.http3.server.{Http3Server, Http3Request, Http3RequestHandle};
+mount core.net.http3.error.{Http3Error};
+mount core.net.tls.{Certificate, PrivateKey};
+mount core.async.cancellation.{CancellationToken};
+mount core.async.task;
+mount core.sync.atomic.{AtomicBool, AtomicInt, MemoryOrdering};
+mount core.net.weft.handler.{WeftRequest, Handler};
+mount core.net.weft.error.{WeftError, IntoResponse};
+
+// =============================================================================
+// WeftQuicConfig — §6.11 PQ-hybrid defaults
+// =============================================================================
+
+public type WeftQuicConfig is {
+    /// Underlying QUIC handshake + transport parameters.
+    quic: QuicConfig,
+    /// Max concurrent in-flight HTTP/3 requests per process. Excess
+    /// streams receive a best-effort `REQUEST_REJECTED`.
+    max_concurrent_requests: Int,
+    /// If true, handlers may run against 0-RTT data. Phase-4 ships
+    /// with this off — enabling it requires the idempotent-method
+    /// gate per §6.10 "0-RTT replay defence".
+    allow_0rtt: Bool,
+};
+
+implement WeftQuicConfig {
+    /// Build a server config with the §6.11 defaults: ALPN "h3",
+    /// PQ-hybrid KEX / ML-KEM-768 is on by default inside QuicConfig
+    /// (intrinsic picks current best available).
+    pub fn server(identity: Certificate, key: PrivateKey) -> WeftQuicConfig {
+        let alpn: [Text; 1] = ["h3"];
+        let quic = QuicConfig.server()
+            .with_alpn(&alpn)
+            .with_certificate(identity)
+            .with_private_key(key)
+            .with_max_idle_timeout(core.time.Duration.from_secs(30))
+            .with_datagrams(true)
+            .with_early_data(false);
+        WeftQuicConfig {
+            quic: quic,
+            max_concurrent_requests: 10_000,
+            allow_0rtt: false,
+        }
+    }
+
+    pub fn with_max_concurrent_requests(mut self, n: Int) -> WeftQuicConfig {
+        self.max_concurrent_requests = n;
+        self
+    }
+
+    pub fn with_allow_0rtt(mut self, allow: Bool) -> WeftQuicConfig {
+        self.allow_0rtt = allow;
+        self
+    }
+}
+
+// =============================================================================
+// Http3WeftServer<H>
+// =============================================================================
+
+public type Http3WeftServer<H> is {
+    inner: Http3Server,
+    app: Heap<H>,
+    config: WeftQuicConfig,
+    token: CancellationToken,
+    draining: Shared<AtomicBool>,
+};
+
+implement<H: Handler + Send + Sync + 'static> Http3WeftServer<H> {
+    pub async fn bind(
+        addr: SocketAddr,
+        app: H,
+        config: WeftQuicConfig,
+    ) -> Result<Http3WeftServer<H>, Text> {
+        let server = match Http3Server.bind(&addr, config.quic.clone()).await {
+            Ok(s)  => s,
+            Err(e) => return Err(f"h3 bind: {e}"),
+        };
+        Ok(Http3WeftServer {
+            inner: server,
+            app: Heap.new(app),
+            config: config,
+            token: CancellationToken.new(),
+            draining: Shared.new(AtomicBool.new(false)),
+        })
+    }
+
+    pub fn shutdown_token(&self) -> CancellationToken {
+        self.token.clone()
+    }
+
+    pub fn shutdown(&self) {
+        self.draining.store(true, MemoryOrdering.Release);
+        self.token.cancel();
+    }
+
+    /// Accept-dispatch loop. Exits when token fires OR draining is
+    /// set; in-flight requests get cancellation notification on their
+    /// next await inside the handler.
+    pub async fn serve(self) -> Result<(), Text> {
+        let Http3WeftServer { inner, app, config, token, draining } = self;
+        let in_flight: Shared<AtomicInt> = Shared.new(AtomicInt.new(0));
+        let max = config.max_concurrent_requests;
+
+        loop {
+            if token.is_cancelled() { break; }
+            if draining.load(MemoryOrdering.Acquire) { break; }
+
+            match inner.accept().await {
+                Err(_e) => {
+                    // Listener-level errors bail the loop; caller can
+                    // restart via supervisor (§4.5).
+                    break;
+                }
+                Ok((req, handle)) => {
+                    let cur = in_flight.fetch_add(1, MemoryOrdering.AcqRel) + 1;
+                    if cur > max {
+                        in_flight.fetch_sub(1, MemoryOrdering.AcqRel);
+                        let _ = handle.reset(0xF1).await;   // H3 REQUEST_REJECTED
+                        continue;
+                    }
+                    let app_c = app.clone();
+                    let tok_c = token.clone();
+                    let counter = in_flight.clone();
+                    let _ = task.spawn(async move {
+                        let _ = dispatch_one_request(req, handle, &*app_c, &tok_c).await;
+                        counter.fetch_sub(1, MemoryOrdering.AcqRel);
+                    });
+                }
+            }
+        }
+
+        // Drain wait — poll-based.
+        let mut elapsed: Int = 0;
+        while in_flight.load(MemoryOrdering.Acquire) > 0 && elapsed < 30_000 {
+            core.async.timer.sleep_ms(50).await;
+            elapsed = elapsed + 50;
+        }
+        Ok(())
+    }
+}
+
+// =============================================================================
+// Per-request dispatch
+// =============================================================================
+
+async fn dispatch_one_request<H: Handler>(
+    req: Http3Request,
+    handle: Http3RequestHandle,
+    app: &H,
+    _token: &CancellationToken,
+) -> Result<(), Http3Error> {
+    // 1. Convert Http3Request → WeftRequest.
+    let mut headers = Headers.with_capacity(req.headers.len());
+    for f in req.headers.iter() {
+        headers.append(&f.name, &f.value);
+    }
+    let (path, raw_query) = split_path_query(&req.path);
+    let peer_addr: Maybe<SocketAddr> = None;  // §6.10 follow-up — QUIC peer lookup.
+
+    // H/3 request bodies arrive on the stream — phase-4 scaffolding
+    // assumes empty body for now (works for GET/HEAD/OPTIONS/TRACE).
+    // Body-reading via `handle.read_body()` is a follow-up once the
+    // QUIC stream read API stabilises.
+    let body: List<Byte> = List.new();
+
+    let weft_req = WeftRequest.new(req.method, path, raw_query, headers, body);
+
+    // 2. Dispatch.
+    let response = match app.handle(weft_req).await {
+        Ok(r)  => r,
+        Err(e) => e.into_response(),
+    };
+
+    // 3. Emit response via H3 primitives.
+    let mut h3_headers: List<HeaderField> = List.new();
+    // `:status` pseudo-header is implicit in send_response_headers;
+    // all other response headers copy across verbatim.
+    for (k, v) in response.headers.iter().iter() {
+        h3_headers.push(HeaderField.new(k.clone(), v.clone()));
+    }
+    handle.send_response_headers(response.status, &h3_headers).await?;
+    if !response.body.is_empty() {
+        handle.write_body(&response.body).await?;
+    }
+    handle.finish().await
+}
+
+fn split_path_query(raw: &Text) -> (Text, Maybe<Text>) {
+    match raw.find("?") {
+        Some(i) => (raw.slice(0, i), Some(raw.slice(i + 1, raw.len()))),
+        None    => (raw.clone(), None),
+    }
+}
