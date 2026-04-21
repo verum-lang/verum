@@ -9,6 +9,7 @@
 module core.net.http3.frame;
 
 mount core.*;
+mount core.encoding.varint.{quic_encode_into, quic_decode, VarintError, VarintErrorKind};
 mount core.net.http3.error.{Http3Error, Http3ErrorCode};
 
 public type H3FrameType is
@@ -65,50 +66,26 @@ public type H3Frame is
     | UnknownFrame { type_: UInt64, payload: List<Byte> };
 
 // =============================================================================
-// Varint codec (RFC 9000 §16 — same as QUIC)
+// Varint codec — thin re-export over core.encoding.varint.quic_*
 // =============================================================================
+//
+// QUIC/H3 varint lives in `core.encoding.varint` so that the full QUIC
+// transport stack (and other consumers like transport_parameters) can
+// reach for it without importing an HTTP/3-internal module. The two
+// wrappers below preserve the historical H3-level names + error type
+// and should be considered deprecated for new call sites.
 
 /// Encode `value` as a QUIC varint (1, 2, 4, or 8 bytes).
+/// Deprecated: prefer `core.encoding.varint.quic_encode_into` directly.
 pub fn write_varint(out: &mut List<Byte>, value: UInt64) {
-    if value < 64 {
-        out.push(value as Byte);
-    } else if value < 16384 {
-        out.push(((value >> 8) as Byte) | 0x40);
-        out.push((value & 0xFF) as Byte);
-    } else if value < 1073741824 {
-        out.push(((value >> 24) as Byte) | 0x80);
-        out.push(((value >> 16) & 0xFF) as Byte);
-        out.push(((value >> 8) & 0xFF) as Byte);
-        out.push((value & 0xFF) as Byte);
-    } else {
-        out.push(((value >> 56) as Byte) | 0xC0);
-        out.push(((value >> 48) & 0xFF) as Byte);
-        out.push(((value >> 40) & 0xFF) as Byte);
-        out.push(((value >> 32) & 0xFF) as Byte);
-        out.push(((value >> 24) & 0xFF) as Byte);
-        out.push(((value >> 16) & 0xFF) as Byte);
-        out.push(((value >> 8) & 0xFF) as Byte);
-        out.push((value & 0xFF) as Byte);
-    }
+    let _ = quic_encode_into(out, value);
 }
 
+/// Decode a QUIC varint starting at `buf[pos]`, returning (value, next_pos).
+/// Deprecated: prefer `core.encoding.varint.quic_decode` directly.
 pub fn read_varint(buf: &[Byte], pos: Int) -> Result<(UInt64, Int), Http3Error> {
-    if pos >= buf.len() { return Err(Http3Error.NeedMore); }
-    let first = buf[pos];
-    let prefix = first >> 6;
-    let len: Int = match prefix {
-        0 => 1,
-        1 => 2,
-        2 => 4,
-        3 => 8,
-        _ => 1,
-    };
-    if pos + len > buf.len() { return Err(Http3Error.NeedMore); }
-    let mut v: UInt64 = (first & 0x3F) as UInt64;
-    let mut i = 1;
-    while i < len {
-        v = (v << 8) | (buf[pos + i] as UInt64);
-        i = i + 1;
+    match quic_decode(buf, pos) {
+        Ok((v, next)) => Ok((v, next)),
+        Err(_)        => Err(Http3Error.NeedMore),
     }
-    Ok((v, pos + len))
 }

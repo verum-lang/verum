@@ -1,0 +1,144 @@
+// @test: run
+// @tier: 0
+// @level: L2
+// @tags: encoding, varint, quic, rfc9000
+// @timeout: 10000
+// @expected-stdout: OK
+// @expected-exit: 0
+//
+// RFC 9000 §16 QUIC varint vectors. The four length classes plus the
+// four "shortest-form" boundaries are enough to cover every branch in
+// the encoder/decoder, and the "different encodings of the same value"
+// test from RFC 9000 §16 is included below.
+//
+// Canonical vectors (RFC 9000 §16 "Sample Variable-Length Integer
+// Decodings"):
+//
+//   Encoded bytes                             | Decoded value
+//   ------------------------------------------|--------------
+//   c2 19 7c 5e ff 14 e8 8c                   | 151288809941952652
+//   9d 7f 3e 7d                               | 494878333
+//   7b bd                                     | 15293
+//   25                                        | 37
+//   40 25                                     | 37         (2-byte form)
+//   80 00 00 25                               | 37         (4-byte form)
+//   c0 00 00 00 00 00 00 25                   | 37         (8-byte form)
+
+mount core.encoding.varint.{
+    quic_encoded_len, quic_encode, quic_encode_into, quic_decode,
+    QUIC_VARINT_MAX,
+};
+
+fn bytes_eq(a: &[Byte], b: &[Byte]) -> Bool {
+    if a.len() != b.len() { return false; }
+    let mut i = 0;
+    while i < a.len() {
+        if a[i] != b[i] { return false; }
+        i = i + 1;
+    }
+    true
+}
+
+fn check_roundtrip(value: UInt64, expected: &[Byte], label: &str) -> Bool {
+    // Encode → bytes
+    let encoded = quic_encode(value);
+    if !bytes_eq(encoded.as_slice(), expected) {
+        print(f"FAIL encode {label}: got len {encoded.len()} expected {expected.len()}");
+        return false;
+    }
+    // Decode → value + cursor
+    match quic_decode(expected, 0) {
+        Ok((v, pos)) => {
+            if v != value {
+                print(f"FAIL decode {label}: got value");
+                return false;
+            }
+            if pos != expected.len() {
+                print(f"FAIL decode {label}: cursor mismatch");
+                return false;
+            }
+            true
+        },
+        Err(_) => {
+            print(f"FAIL decode {label}: returned Err");
+            false
+        },
+    }
+}
+
+fn main() {
+    // --- Length classifier at boundaries ---
+    if quic_encoded_len(0_u64) != 1 { print("FAIL len 0"); return; }
+    if quic_encoded_len(63_u64) != 1 { print("FAIL len 63"); return; }
+    if quic_encoded_len(64_u64) != 2 { print("FAIL len 64"); return; }
+    if quic_encoded_len(16383_u64) != 2 { print("FAIL len 16383"); return; }
+    if quic_encoded_len(16384_u64) != 4 { print("FAIL len 16384"); return; }
+    if quic_encoded_len(1073741823_u64) != 4 { print("FAIL len 2^30-1"); return; }
+    if quic_encoded_len(1073741824_u64) != 8 { print("FAIL len 2^30"); return; }
+    if quic_encoded_len(QUIC_VARINT_MAX) != 8 { print("FAIL len max"); return; }
+
+    // --- RFC 9000 §16 shortest-form vectors ---
+
+    // 8-byte: 151288809941952652
+    let v1_bytes: [Byte; 8] = [0xc2, 0x19, 0x7c, 0x5e, 0xff, 0x14, 0xe8, 0x8c];
+    if !check_roundtrip(151288809941952652_u64, &v1_bytes, "v1 8-byte") { return; }
+
+    // 4-byte: 494878333
+    let v2_bytes: [Byte; 4] = [0x9d, 0x7f, 0x3e, 0x7d];
+    if !check_roundtrip(494878333_u64, &v2_bytes, "v2 4-byte") { return; }
+
+    // 2-byte: 15293
+    let v3_bytes: [Byte; 2] = [0x7b, 0xbd];
+    if !check_roundtrip(15293_u64, &v3_bytes, "v3 2-byte") { return; }
+
+    // 1-byte: 37 (shortest form)
+    let v4_bytes: [Byte; 1] = [0x25];
+    if !check_roundtrip(37_u64, &v4_bytes, "v4 1-byte") { return; }
+
+    // --- Non-shortest forms MUST still decode (RFC 9000 §16) ---
+    // 37 in 2-byte form
+    let alt2: [Byte; 2] = [0x40, 0x25];
+    match quic_decode(&alt2, 0) {
+        Ok((v, p)) => {
+            if v != 37_u64 || p != 2 { print("FAIL decode alt2"); return; }
+        },
+        Err(_) => { print("FAIL decode alt2 err"); return; },
+    }
+    // 37 in 4-byte form
+    let alt4: [Byte; 4] = [0x80, 0x00, 0x00, 0x25];
+    match quic_decode(&alt4, 0) {
+        Ok((v, p)) => {
+            if v != 37_u64 || p != 4 { print("FAIL decode alt4"); return; }
+        },
+        Err(_) => { print("FAIL decode alt4 err"); return; },
+    }
+    // 37 in 8-byte form
+    let alt8: [Byte; 8] = [0xc0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x25];
+    match quic_decode(&alt8, 0) {
+        Ok((v, p)) => {
+            if v != 37_u64 || p != 8 { print("FAIL decode alt8"); return; }
+        },
+        Err(_) => { print("FAIL decode alt8 err"); return; },
+    }
+
+    // --- Truncated input → Err ---
+    let trunc: [Byte; 1] = [0xc0];   // announces 8 bytes, has 1
+    match quic_decode(&trunc, 0) {
+        Ok(_) => { print("FAIL trunc accepted"); return; },
+        Err(_) => {},
+    }
+
+    // --- Edge: maximum representable value ---
+    let maxv = QUIC_VARINT_MAX;
+    let encoded = quic_encode(maxv);
+    if encoded.len() != 8 { print("FAIL max len"); return; }
+    if encoded[0] != 0xFF_u8 { print("FAIL max first byte"); return; }
+    match quic_decode(encoded.as_slice(), 0) {
+        Ok((v, p)) => {
+            if v != maxv || p != 8 { print("FAIL max roundtrip"); return; }
+        },
+        Err(_) => { print("FAIL max decode"); return; },
+    }
+
+    print("OK");
+}

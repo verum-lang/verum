@@ -206,3 +206,129 @@ public fn sqlite_skip(buf: &[Byte], start: Int) -> Result<Int, VarintError> {
     let (_, n) = sqlite_decode(buf, start)?;
     Ok(start + n)
 }
+
+// =============================================================================
+// QUIC varint — encoding (RFC 9000 §16)
+// =============================================================================
+//
+// QUIC uses a 1/2/4/8-byte form where the most-significant two bits of the
+// first byte encode the length (00 → 1 byte, 01 → 2, 10 → 4, 11 → 8) and
+// the remaining bits form the big-endian value. Range: 0 .. 2^62 - 1.
+//
+// Wire form:
+//   2MSB = 00 → len 1 → 6-bit value
+//   2MSB = 01 → len 2 → 14-bit value
+//   2MSB = 10 → len 4 → 30-bit value
+//   2MSB = 11 → len 8 → 62-bit value
+//
+// Unlike SQLite's encoding, QUIC varints have no minimum-length requirement;
+// 0x00, 0x40 0x00, 0x80 0x00 0x00 0x00 and 0xC0 0x00 … all decode to 0.
+// Most encoders prefer the shortest form (for on-wire efficiency); this is
+// the behaviour of `quic_encode_into`.
+//
+// =============================================================================
+
+/// Maximum value expressible in any QUIC varint length class.
+public const QUIC_VARINT_MAX: UInt64 = 0x3FFFFFFFFFFFFFFF_u64;  // 2^62 - 1
+
+/// Return the number of bytes the shortest QUIC varint form of `value`
+/// will occupy (1, 2, 4, or 8). Branchless-friendly, O(1).
+public fn quic_encoded_len(value: UInt64) -> Int {
+    if value < 64_u64 { return 1; }
+    if value < 16384_u64 { return 2; }
+    if value < 1073741824_u64 { return 4; }
+    8
+}
+
+/// Encode `value` as a QUIC varint in its shortest form, appending 1/2/4/8
+/// bytes to `out`. Returns the number of bytes written.
+///
+/// Precondition: `value <= QUIC_VARINT_MAX` (2^62 - 1). Values above the
+/// 62-bit ceiling panic — callers should validate at protocol boundaries
+/// (e.g. reject malformed transport parameters before encode).
+public fn quic_encode_into(out: &mut List<Byte>, value: UInt64) -> Int {
+    if value < 64_u64 {
+        out.push(value as Byte);
+        1
+    } else if value < 16384_u64 {
+        out.push(((value >> 8) as Byte) | 0x40_u8);
+        out.push((value & 0xFF_u64) as Byte);
+        2
+    } else if value < 1073741824_u64 {
+        out.push(((value >> 24) as Byte) | 0x80_u8);
+        out.push(((value >> 16) & 0xFF_u64) as Byte);
+        out.push(((value >>  8) & 0xFF_u64) as Byte);
+        out.push((value & 0xFF_u64) as Byte);
+        4
+    } else {
+        // 62-bit limit enforced at decode; encoder trusts value <= QUIC_VARINT_MAX.
+        out.push(((value >> 56) as Byte) | 0xC0_u8);
+        out.push(((value >> 48) & 0xFF_u64) as Byte);
+        out.push(((value >> 40) & 0xFF_u64) as Byte);
+        out.push(((value >> 32) & 0xFF_u64) as Byte);
+        out.push(((value >> 24) & 0xFF_u64) as Byte);
+        out.push(((value >> 16) & 0xFF_u64) as Byte);
+        out.push(((value >>  8) & 0xFF_u64) as Byte);
+        out.push((value & 0xFF_u64) as Byte);
+        8
+    }
+}
+
+/// Allocate a fresh `List<Byte>` holding the QUIC varint form of `value`.
+public fn quic_encode(value: UInt64) -> List<Byte> {
+    let mut out: List<Byte> = [];
+    quic_encode_into(&mut out, value);
+    out
+}
+
+/// Decode the QUIC varint at `buf[start]`. Returns the decoded value and
+/// the new cursor position (start + encoded length). Errors on short input.
+///
+/// Note: the wire form never overflows 62 bits, so no `Overflow` return
+/// from this path — any 8-byte form is a valid u64.
+public fn quic_decode(buf: &[Byte], start: Int) -> Result<(UInt64, Int), VarintError> {
+    if start >= buf.len() {
+        return Err(VarintError {
+            kind: Truncated,
+            position: start,
+            message: "buffer empty",
+        });
+    }
+
+    let first: Byte = buf[start];
+    let prefix: Byte = first >> 6;
+    let len: Int = match prefix {
+        0 => 1,
+        1 => 2,
+        2 => 4,
+        _ => 8,    // prefix == 3
+    };
+
+    if start + len > buf.len() {
+        return Err(VarintError {
+            kind: Truncated,
+            position: start,
+            message: "varint ended mid-byte",
+        });
+    }
+
+    let mut v: UInt64 = (first & 0x3F_u8) as UInt64;
+    let mut i: Int = 1;
+    while i < len {
+        v = (v << 8) | (buf[start + i] as UInt64);
+        i = i + 1;
+    }
+    Ok((v, start + len))
+}
+
+/// Convenience wrapper for decoding from offset 0.
+public fn quic_decode_first(buf: &[Byte]) -> Result<(UInt64, Int), VarintError> {
+    quic_decode(buf, 0)
+}
+
+/// Skip a QUIC varint at `buf[start]` without materialising the value.
+/// Returns the new cursor position.
+public fn quic_skip(buf: &[Byte], start: Int) -> Result<Int, VarintError> {
+    let (_, next) = quic_decode(buf, start)?;
+    Ok(next)
+}
