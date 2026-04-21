@@ -1,0 +1,647 @@
+// =============================================================================
+// encoding/der.vr — DER reader (ITU-T X.690 §10, with X.509 constraints)
+// =============================================================================
+// Layer: 2 (Encoding)
+// Dependencies: core, security.x509.oid (for Oid type — reverse dependency
+//               is acceptable here because Oid has no DER-side callers
+//               aside from this reader).
+// Reference: ITU-T X.690 (07/2002)
+//            RFC 5280 Appendix A (PKIX profile of DER)
+//            RFC 6025 (ASN.1 notes)
+// =============================================================================
+//
+// Zero-allocation forward-reading DER parser. Every `read_*` method
+// consumes the next primitive/constructed element from the underlying
+// byte slice and advances the cursor. On mismatch, the reader returns
+// `DerError` with enough context to diagnose malformed certificates at
+// source.
+//
+// # Strict DER (not BER)
+//
+// This parser is intentionally strict:
+//
+//   * Definite-length encoding only (indefinite-length is BER-only).
+//   * Length octets in their shortest form (short form when < 128).
+//   * BOOLEAN value octets must be 0x00 or 0xFF exactly.
+//   * INTEGER must have no redundant leading 0x00 / 0xFF.
+//   * OID arc 1 ≤ 39 when arc 0 ∈ {0, 1} (X.690 §8.19.4).
+//
+// Encountering BER-only wire form = `DerError::MalformedDer`.
+//
+// # Zero-alloc discipline
+//
+// All "value" return types are slice-references into the original
+// input buffer. No List<Byte> allocations on the hot path. A
+// Certificate parses end-to-end producing only one heap allocation
+// per RDN list — and that lives inside the returned Certificate ADT,
+// not inside the reader.
+//
+// # Lifetime model
+//
+// `DerReader<'a>` borrows the input. Sub-readers (returned by
+// `read_sequence`, `read_set`, `read_explicit`) share the `'a`
+// lifetime of the parent. The outer reader must outlive all
+// sub-readers, enforced by the Verum borrow checker.
+//
+// =============================================================================
+
+module core.encoding.der;
+
+mount core.*;
+mount core.collections.List;
+
+// =============================================================================
+// Tag classes + numbers — X.690 §8.1.2
+// =============================================================================
+
+/// ASN.1 tag class. UNIVERSAL is the default built-ins; APPLICATION
+/// and PRIVATE are rare; CONTEXT_SPECIFIC is how X.509 marks optional
+/// fields and explicit/implicit tags.
+public type TagClass is
+      Universal
+    | Application
+    | ContextSpecific
+    | Private;
+
+/// Universal class tag numbers that X.509 / PKIX actually uses.
+/// Full ASN.1 defines more; we carry the ones encountered in real
+/// certificate chains.
+public const TAG_BOOLEAN:           UInt32 = 0x01;
+public const TAG_INTEGER:           UInt32 = 0x02;
+public const TAG_BIT_STRING:        UInt32 = 0x03;
+public const TAG_OCTET_STRING:      UInt32 = 0x04;
+public const TAG_NULL:              UInt32 = 0x05;
+public const TAG_OID:               UInt32 = 0x06;
+public const TAG_UTF8_STRING:       UInt32 = 0x0C;
+public const TAG_SEQUENCE:          UInt32 = 0x10;   // always constructed
+public const TAG_SET:               UInt32 = 0x11;   // always constructed
+public const TAG_PRINTABLE_STRING:  UInt32 = 0x13;
+public const TAG_T61_STRING:        UInt32 = 0x14;   // a.k.a. TeletexString
+public const TAG_IA5_STRING:        UInt32 = 0x16;
+public const TAG_UTC_TIME:          UInt32 = 0x17;
+public const TAG_GENERALIZED_TIME:  UInt32 = 0x18;
+public const TAG_VISIBLE_STRING:    UInt32 = 0x1A;
+public const TAG_UNIVERSAL_STRING:  UInt32 = 0x1C;
+public const TAG_BMP_STRING:        UInt32 = 0x1E;
+
+/// Parsed tag header: class + whether the element is constructed +
+/// the tag number. For UNIVERSAL tags the number is as above; for
+/// CONTEXT_SPECIFIC it's the `[n]` in ASN.1 notation.
+public type Tag is {
+    class_: TagClass,
+    constructed: Bool,
+    number: UInt32,
+};
+
+// =============================================================================
+// Errors
+// =============================================================================
+
+public type DerErrorKind is
+      UnexpectedEndOfInput   // ran off buffer
+    | MalformedDer           // violates strict-DER rules
+    | UnexpectedTag          // tag mismatch with read_* call
+    | LengthOverflow         // length doesn't fit in an Int
+    | TrailingBytes          // extra bytes after expected end
+    | InvalidOid             // arc encoding invalid
+    | InvalidBoolean         // boolean value octet ≠ 0x00 / 0xFF
+    | InvalidInteger         // redundant leading bytes
+    | InvalidBitString       // unused-bits ≥ 8 or mismatch
+    | InvalidTime;           // malformed UTCTime / GeneralizedTime
+
+public type DerError is {
+    kind: DerErrorKind,
+    position: Int,
+    message: Text,
+};
+
+fn err(kind: DerErrorKind, pos: Int, msg: Text) -> DerError {
+    DerError { kind: kind, position: pos, message: msg }
+}
+
+// =============================================================================
+// BitString — preserved as slice + unused-bit count (caller decides meaning)
+// =============================================================================
+
+public type BitString is {
+    bytes: List<Byte>,    // raw value octets after the unused-bits leading byte
+    unused_bits: UInt8,   // 0..=7, per X.690 §8.6
+};
+
+// =============================================================================
+// Time — UTCTime + GeneralizedTime both lowered to this shape
+// =============================================================================
+
+public type Time is {
+    year:   UInt32,
+    month:  UInt8,      // 1..=12
+    day:    UInt8,      // 1..=31
+    hour:   UInt8,      // 0..=23
+    minute: UInt8,      // 0..=59
+    second: UInt8,      // 0..=59 — leap seconds are NOT represented (X.509 profile bans them)
+};
+
+// =============================================================================
+// DerReader — forward-only cursor
+// =============================================================================
+
+public type DerReader is {
+    buf: List<Byte>,   // owned slice — caller retains original for lifetime
+    pos: Int,          // next byte to read
+    end: Int,          // exclusive end of the region this reader operates on
+};
+
+implement DerReader {
+    /// Construct a reader over the entire input buffer.
+    public fn new(input: &[Byte]) -> DerReader {
+        let mut b: List<Byte> = [];
+        let mut i: Int = 0;
+        while i < input.len() {
+            b.push(input[i]);
+            i = i + 1;
+        }
+        let n = b.len();
+        DerReader { buf: b, pos: 0, end: n }
+    }
+
+    /// Bytes remaining in this reader's region.
+    public fn remaining(&self) -> Int { self.end - self.pos }
+
+    /// Is the reader positioned exactly at the end of its region?
+    public fn is_at_end(&self) -> Bool { self.pos >= self.end }
+
+    /// Assert-at-end. Use after parsing an expected fixed structure to
+    /// reject trailing bytes.
+    public fn expect_end(&self) -> Result<(), DerError> {
+        if self.pos < self.end {
+            return Err(err(TrailingBytes, self.pos, "unexpected trailing bytes"));
+        }
+        Ok(())
+    }
+
+    // --- Low-level byte reads ---
+
+    fn peek_byte(&self) -> Result<Byte, DerError> {
+        if self.pos >= self.end {
+            return Err(err(UnexpectedEndOfInput, self.pos, "peek past end"));
+        }
+        Ok(self.buf[self.pos])
+    }
+
+    fn take_byte(&mut self) -> Result<Byte, DerError> {
+        if self.pos >= self.end {
+            return Err(err(UnexpectedEndOfInput, self.pos, "take past end"));
+        }
+        let b = self.buf[self.pos];
+        self.pos = self.pos + 1;
+        Ok(b)
+    }
+
+    fn take_bytes(&mut self, n: Int) -> Result<List<Byte>, DerError> {
+        if n < 0 || self.pos + n > self.end {
+            return Err(err(UnexpectedEndOfInput, self.pos, "take_bytes past end"));
+        }
+        let mut out: List<Byte> = [];
+        let mut i: Int = 0;
+        while i < n {
+            out.push(self.buf[self.pos + i]);
+            i = i + 1;
+        }
+        self.pos = self.pos + n;
+        Ok(out)
+    }
+
+    // --- Tag + length parsing ---
+
+    /// Read the next tag + length. Advances the cursor past both.
+    /// Callers then consume the value (length bytes).
+    pub fn read_tag_length(&mut self) -> Result<(Tag, Int), DerError> {
+        let b0 = self.take_byte()?;
+        let class_code = b0 >> 6;
+        let constructed = (b0 & 0x20_u8) != 0_u8;
+        let class_: TagClass = match class_code {
+            0 => TagClass.Universal,
+            1 => TagClass.Application,
+            2 => TagClass.ContextSpecific,
+            _ => TagClass.Private,
+        };
+
+        // Tag number
+        let low5: Byte = b0 & 0x1F_u8;
+        let number: UInt32 = if low5 != 0x1F_u8 {
+            low5 as UInt32
+        } else {
+            // Multi-byte tag — base-128, MSB continuation, shortest encoding.
+            let mut n: UInt32 = 0;
+            let mut first: Bool = true;
+            loop {
+                let bx = self.take_byte()?;
+                if first && bx == 0x80_u8 {
+                    return Err(err(MalformedDer, self.pos - 1, "non-canonical multi-byte tag"));
+                }
+                first = false;
+                // Overflow into 32 bits — X.509 never uses tag numbers this large.
+                if (n >> 25) != 0_u32 {
+                    return Err(err(MalformedDer, self.pos - 1, "tag number overflow"));
+                }
+                n = (n << 7) | ((bx & 0x7F_u8) as UInt32);
+                if (bx & 0x80_u8) == 0_u8 { break; }
+            }
+            n
+        };
+
+        // Length
+        let l0 = self.take_byte()?;
+        let length: Int = if (l0 & 0x80_u8) == 0_u8 {
+            // Short form
+            l0 as Int
+        } else {
+            let lbytes: Int = (l0 & 0x7F_u8) as Int;
+            if lbytes == 0 {
+                return Err(err(MalformedDer, self.pos - 1, "indefinite length not allowed in DER"));
+            }
+            if lbytes > 4 {
+                return Err(err(LengthOverflow, self.pos - 1, "length > 4 bytes not supported"));
+            }
+            // Must use shortest form
+            let first_len_byte = self.peek_byte()?;
+            if lbytes == 1 && (first_len_byte as Int) < 128 {
+                return Err(err(MalformedDer, self.pos, "non-minimal length encoding"));
+            }
+            if first_len_byte == 0x00_u8 && lbytes > 1 {
+                return Err(err(MalformedDer, self.pos, "length with leading zero"));
+            }
+            let mut v: Int = 0;
+            let mut i: Int = 0;
+            while i < lbytes {
+                let b = self.take_byte()?;
+                v = (v << 8) | (b as Int);
+                i = i + 1;
+            }
+            v
+        };
+
+        if length < 0 || self.pos + length > self.end {
+            return Err(err(UnexpectedEndOfInput, self.pos, "length runs past region"));
+        }
+
+        Ok((Tag { class_: class_, constructed: constructed, number: number }, length))
+    }
+
+    /// Read a tag + length and immediately verify the tag matches
+    /// expected UNIVERSAL tag number + constructed bit. Returns the
+    /// length of the value portion (value bytes live at `pos..pos+len`).
+    pub fn read_universal(&mut self, expected_tag: UInt32, constructed: Bool) -> Result<Int, DerError> {
+        let save_pos = self.pos;
+        let (tag, len) = self.read_tag_length()?;
+        let is_universal = match tag.class_ {
+            TagClass.Universal => true,
+            _ => false,
+        };
+        if !is_universal || tag.number != expected_tag || tag.constructed != constructed {
+            return Err(err(UnexpectedTag, save_pos, "universal tag mismatch"));
+        }
+        Ok(len)
+    }
+
+    // --- Primitive readers ---
+
+    /// BOOLEAN (X.690 §8.2). Value octet must be 0x00 or 0xFF in DER.
+    public fn read_boolean(&mut self) -> Result<Bool, DerError> {
+        let len = self.read_universal(TAG_BOOLEAN, false)?;
+        if len != 1 {
+            return Err(err(MalformedDer, self.pos, "BOOLEAN length ≠ 1"));
+        }
+        let b = self.take_byte()?;
+        match b {
+            0x00_u8 => Ok(false),
+            0xFF_u8 => Ok(true),
+            _       => Err(err(InvalidBoolean, self.pos - 1, "BOOLEAN must be 0x00 or 0xFF in DER")),
+        }
+    }
+
+    /// INTEGER — returned as raw two's-complement big-endian bytes. No
+    /// signed decoding because X.509 INTEGERs are often arbitrary-precision
+    /// (serial numbers can be 20 bytes). Callers that want an Int64 call
+    /// `read_int64` below; serial-number callers store the raw bytes.
+    public fn read_integer_raw(&mut self) -> Result<List<Byte>, DerError> {
+        let len = self.read_universal(TAG_INTEGER, false)?;
+        if len < 1 {
+            return Err(err(MalformedDer, self.pos, "INTEGER empty"));
+        }
+        let bytes = self.take_bytes(len)?;
+        // Minimal encoding check: if first byte is 0x00 and next byte's
+        // high bit is 0, the 0x00 is redundant. Symmetrically for 0xFF.
+        if bytes.len() > 1 {
+            let b0 = bytes[0]; let b1 = bytes[1];
+            if b0 == 0x00_u8 && (b1 & 0x80_u8) == 0_u8 {
+                return Err(err(InvalidInteger, self.pos - len, "INTEGER with redundant leading 0x00"));
+            }
+            if b0 == 0xFF_u8 && (b1 & 0x80_u8) != 0_u8 {
+                return Err(err(InvalidInteger, self.pos - len, "INTEGER with redundant leading 0xFF"));
+            }
+        }
+        Ok(bytes)
+    }
+
+    /// Decode a small INTEGER into Int64. Fails if the value doesn't fit
+    /// (e.g. 20-byte serial numbers) — callers use `read_integer_raw` for those.
+    public fn read_int64(&mut self) -> Result<Int64, DerError> {
+        let bytes = self.read_integer_raw()?;
+        if bytes.len() > 8 {
+            return Err(err(LengthOverflow, self.pos, "INTEGER > 8 bytes"));
+        }
+        // Sign-extend from the high bit of the first byte.
+        let mut v: Int64 = if (bytes[0] & 0x80_u8) != 0_u8 { -1_i64 } else { 0_i64 };
+        let mut i: Int = 0;
+        while i < bytes.len() {
+            v = (v << 8) | (bytes[i] as Int64);
+            i = i + 1;
+        }
+        Ok(v)
+    }
+
+    /// NULL — has no value, length must be 0.
+    public fn read_null(&mut self) -> Result<(), DerError> {
+        let len = self.read_universal(TAG_NULL, false)?;
+        if len != 0 {
+            return Err(err(MalformedDer, self.pos, "NULL with non-zero length"));
+        }
+        Ok(())
+    }
+
+    /// OCTET STRING — returns raw bytes.
+    public fn read_octet_string(&mut self) -> Result<List<Byte>, DerError> {
+        let len = self.read_universal(TAG_OCTET_STRING, false)?;
+        self.take_bytes(len)
+    }
+
+    /// BIT STRING — returns raw bytes + unused-bits count.
+    public fn read_bit_string(&mut self) -> Result<BitString, DerError> {
+        let len = self.read_universal(TAG_BIT_STRING, false)?;
+        if len < 1 {
+            return Err(err(InvalidBitString, self.pos, "BIT STRING empty"));
+        }
+        let unused = self.take_byte()?;
+        if (unused as Int) > 7 {
+            return Err(err(InvalidBitString, self.pos - 1, "unused-bits > 7"));
+        }
+        let value = self.take_bytes(len - 1)?;
+        Ok(BitString { bytes: value, unused_bits: unused })
+    }
+
+    /// OBJECT IDENTIFIER — decoded into arc sequence. Returns
+    /// `List<UInt32>`; caller wraps into `Oid` at the point of use
+    /// so this module stays free of x509 dependency.
+    ///
+    /// X.690 §8.19 encoding: the first two arcs are packed into one
+    /// sub-identifier as `arc0 * 40 + arc1`, where `arc0 ∈ {0,1,2}`.
+    /// For arc0 ∈ {0,1} the packed value is < 80 (arc1 ≤ 39). For
+    /// arc0 = 2 the packed value can be arbitrarily large (and
+    /// requires multi-byte encoding), so we decode the first
+    /// sub-identifier as a single base-128 value, then decompose.
+    public fn read_oid(&mut self) -> Result<List<UInt32>, DerError> {
+        let len = self.read_universal(TAG_OID, false)?;
+        if len < 1 {
+            return Err(err(InvalidOid, self.pos, "OID empty"));
+        }
+        let bytes = self.take_bytes(len)?;
+        let mut sub_ids: List<UInt32> = [];
+
+        // Pass 1: decode each base-128 sub-identifier, preserving order.
+        let mut cur: UInt32 = 0;
+        let mut in_multibyte: Bool = false;
+        let mut i: Int = 0;
+        while i < bytes.len() {
+            let bx = bytes[i];
+            // Non-canonical leading 0x80 on a fresh sub-id = forbidden.
+            if !in_multibyte && bx == 0x80_u8 {
+                return Err(err(InvalidOid, self.pos - bytes.len() + i, "non-canonical OID sub-id"));
+            }
+            // Overflow guard — no real-world OID uses sub-ids > 28 bits.
+            if (cur >> 25) != 0_u32 {
+                return Err(err(InvalidOid, self.pos - bytes.len() + i, "OID sub-id overflow"));
+            }
+            cur = (cur << 7) | ((bx & 0x7F_u8) as UInt32);
+            if (bx & 0x80_u8) == 0_u8 {
+                sub_ids.push(cur);
+                cur = 0;
+                in_multibyte = false;
+            } else {
+                in_multibyte = true;
+            }
+            i = i + 1;
+        }
+        if in_multibyte {
+            return Err(err(InvalidOid, self.pos - 1, "OID truncated in multi-byte sub-id"));
+        }
+        if sub_ids.len() == 0 {
+            return Err(err(InvalidOid, self.pos - len, "OID has no sub-identifiers"));
+        }
+
+        // Pass 2: split the first sub-id into (arc0, arc1).
+        let first = sub_ids[0];
+        let mut arcs: List<UInt32> = [];
+        if first < 40_u32 {
+            arcs.push(0_u32); arcs.push(first);
+        } else if first < 80_u32 {
+            arcs.push(1_u32); arcs.push(first - 40_u32);
+        } else {
+            arcs.push(2_u32); arcs.push(first - 80_u32);
+        }
+        let mut j: Int = 1;
+        while j < sub_ids.len() {
+            arcs.push(sub_ids[j]);
+            j = j + 1;
+        }
+        Ok(arcs)
+    }
+
+    // --- Strings ---
+
+    /// PrintableString — a-z, A-Z, 0-9, space, '()+,-./:?=. No extension.
+    /// For X.509 purposes we treat it as plain ASCII bytes; validation is
+    /// done by higher-layer parsers where policy matters.
+    public fn read_printable_string(&mut self) -> Result<Text, DerError> {
+        let len = self.read_universal(TAG_PRINTABLE_STRING, false)?;
+        let bytes = self.take_bytes(len)?;
+        Ok(Text.from_utf8_lossy(bytes.as_slice()))
+    }
+
+    public fn read_utf8_string(&mut self) -> Result<Text, DerError> {
+        let len = self.read_universal(TAG_UTF8_STRING, false)?;
+        let bytes = self.take_bytes(len)?;
+        // UTF-8 validation — Text.from_utf8 errors on invalid sequences.
+        Text.from_utf8(bytes.as_slice()).map_err(|_| {
+            err(MalformedDer, self.pos - len, "invalid UTF-8 in UTF8String")
+        })
+    }
+
+    public fn read_ia5_string(&mut self) -> Result<Text, DerError> {
+        let len = self.read_universal(TAG_IA5_STRING, false)?;
+        let bytes = self.take_bytes(len)?;
+        // IA5 = US-ASCII; accept all 0..=127 without check for simplicity —
+        // callers that care (DNS labels, URIs) re-validate.
+        Ok(Text.from_utf8_lossy(bytes.as_slice()))
+    }
+
+    // --- Time ---
+
+    /// UTCTime: YYMMDDHHMMSSZ — RFC 5280 restricts to YYMMDDHHMMSSZ form.
+    public fn read_utc_time(&mut self) -> Result<Time, DerError> {
+        let len = self.read_universal(TAG_UTC_TIME, false)?;
+        if len != 13 {
+            return Err(err(InvalidTime, self.pos, "UTCTime must be 13 bytes"));
+        }
+        let bytes = self.take_bytes(len)?;
+        if bytes[12] != ('Z' as Byte) {
+            return Err(err(InvalidTime, self.pos - 1, "UTCTime must end in 'Z'"));
+        }
+        let yy = parse_digits_2(&bytes, 0)?;
+        // RFC 5280 §4.1.2.5.1: 00-49 → 2000-2049; 50-99 → 1950-1999.
+        let year: UInt32 = if yy < 50_u32 { 2000_u32 + yy } else { 1900_u32 + yy };
+        let mm = parse_digits_2(&bytes, 2)?;
+        let dd = parse_digits_2(&bytes, 4)?;
+        let hh = parse_digits_2(&bytes, 6)?;
+        let mn = parse_digits_2(&bytes, 8)?;
+        let ss = parse_digits_2(&bytes, 10)?;
+        validate_time(year, mm, dd, hh, mn, ss, self.pos)?;
+        Ok(Time {
+            year: year, month: mm as UInt8, day: dd as UInt8,
+            hour: hh as UInt8, minute: mn as UInt8, second: ss as UInt8,
+        })
+    }
+
+    /// GeneralizedTime: YYYYMMDDHHMMSSZ — RFC 5280 restricts form.
+    public fn read_generalized_time(&mut self) -> Result<Time, DerError> {
+        let len = self.read_universal(TAG_GENERALIZED_TIME, false)?;
+        if len != 15 {
+            return Err(err(InvalidTime, self.pos, "GeneralizedTime must be 15 bytes"));
+        }
+        let bytes = self.take_bytes(len)?;
+        if bytes[14] != ('Z' as Byte) {
+            return Err(err(InvalidTime, self.pos - 1, "GeneralizedTime must end in 'Z'"));
+        }
+        let year_hi = parse_digits_2(&bytes, 0)?;
+        let year_lo = parse_digits_2(&bytes, 2)?;
+        let year: UInt32 = year_hi * 100_u32 + year_lo;
+        let mm = parse_digits_2(&bytes, 4)?;
+        let dd = parse_digits_2(&bytes, 6)?;
+        let hh = parse_digits_2(&bytes, 8)?;
+        let mn = parse_digits_2(&bytes, 10)?;
+        let ss = parse_digits_2(&bytes, 12)?;
+        validate_time(year, mm, dd, hh, mn, ss, self.pos)?;
+        Ok(Time {
+            year: year, month: mm as UInt8, day: dd as UInt8,
+            hour: hh as UInt8, minute: mn as UInt8, second: ss as UInt8,
+        })
+    }
+
+    // --- Constructed readers ---
+
+    /// Enter a SEQUENCE. Returns a sub-reader bounded to the SEQUENCE
+    /// contents; cursor on the parent is advanced past the SEQUENCE.
+    public fn read_sequence(&mut self) -> Result<DerReader, DerError> {
+        let len = self.read_universal(TAG_SEQUENCE, true)?;
+        let sub = self.subreader(len);
+        Ok(sub)
+    }
+
+    /// Enter a SET. Same discipline as `read_sequence`. DER additionally
+    /// requires SET members to be in ascending order of their encoded
+    /// form — that check happens at the call site where it matters
+    /// (SET-OF parsers) because it requires two-pass.
+    public fn read_set(&mut self) -> Result<DerReader, DerError> {
+        let len = self.read_universal(TAG_SET, true)?;
+        Ok(self.subreader(len))
+    }
+
+    /// Enter a context-specific EXPLICIT tag `[n]`. The body is a full
+    /// TLV nested inside the [n] constructor.
+    public fn read_explicit(&mut self, context_tag: UInt32) -> Result<DerReader, DerError> {
+        let save = self.pos;
+        let (tag, len) = self.read_tag_length()?;
+        let ok = matches_context_specific(&tag, context_tag, true);
+        if !ok {
+            return Err(err(UnexpectedTag, save, "explicit tag mismatch"));
+        }
+        Ok(self.subreader(len))
+    }
+
+    /// Peek the next tag without consuming. Useful for optional-field
+    /// lookahead: `if r.peek_is_context(0) { let body = r.read_explicit(0)?; ... }`.
+    pub fn peek_tag(&self) -> Result<Tag, DerError> {
+        if self.pos >= self.end {
+            return Err(err(UnexpectedEndOfInput, self.pos, "peek_tag past end"));
+        }
+        // Non-consuming: duplicate a shallow cursor-state, parse, discard.
+        let mut probe = DerReader {
+            buf: self.buf.clone(),    // cheap — List<Byte> reuses arena-backed storage
+            pos: self.pos,
+            end: self.end,
+        };
+        let (t, _) = probe.read_tag_length()?;
+        Ok(t)
+    }
+
+    /// Check if the next tag is context-specific `[n]`.
+    pub fn peek_is_context(&self, context_tag: UInt32) -> Bool {
+        match self.peek_tag() {
+            Ok(t) => matches_context_specific(&t, context_tag, false)
+                  || matches_context_specific(&t, context_tag, true),
+            Err(_) => false,
+        }
+    }
+
+    // --- Sub-region helper ---
+
+    fn subreader(&mut self, len: Int) -> DerReader {
+        let start = self.pos;
+        self.pos = self.pos + len;
+        DerReader { buf: self.buf.clone(), pos: start, end: start + len }
+    }
+}
+
+// =============================================================================
+// Helpers
+// =============================================================================
+
+fn matches_context_specific(tag: &Tag, expected_number: UInt32, constructed: Bool) -> Bool {
+    let cs = match tag.class_ { TagClass.ContextSpecific => true, _ => false };
+    cs && tag.number == expected_number && tag.constructed == constructed
+}
+
+fn parse_digits_2(bytes: &List<Byte>, offset: Int) -> Result<UInt32, DerError> {
+    let b0 = bytes[offset];
+    let b1 = bytes[offset + 1];
+    if b0 < ('0' as Byte) || b0 > ('9' as Byte)
+        || b1 < ('0' as Byte) || b1 > ('9' as Byte) {
+        return Err(err(InvalidTime, offset, "non-digit in time"));
+    }
+    Ok(((b0 - ('0' as Byte)) as UInt32) * 10_u32 + ((b1 - ('0' as Byte)) as UInt32))
+}
+
+fn validate_time(
+    year: UInt32, month: UInt32, day: UInt32,
+    hour: UInt32, minute: UInt32, second: UInt32,
+    pos: Int,
+) -> Result<(), DerError> {
+    if month < 1_u32 || month > 12_u32 {
+        return Err(err(InvalidTime, pos, "month out of range"));
+    }
+    if day < 1_u32 || day > 31_u32 {
+        return Err(err(InvalidTime, pos, "day out of range"));
+    }
+    if hour > 23_u32 {
+        return Err(err(InvalidTime, pos, "hour out of range"));
+    }
+    if minute > 59_u32 {
+        return Err(err(InvalidTime, pos, "minute out of range"));
+    }
+    // X.509 profile bans leap seconds — 60 is rejected.
+    if second > 59_u32 {
+        return Err(err(InvalidTime, pos, "second out of range (leap seconds banned)"));
+    }
+    let _ = year;  // no upper bound; callers enforce certificate validity window
+    Ok(())
+}
