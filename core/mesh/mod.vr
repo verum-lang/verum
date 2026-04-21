@@ -18,3 +18,4 @@
 module core.mesh;
 
 public module xds;
+public module k8s;

@@ -1,0 +1,51 @@
+// =============================================================================
+// mesh/k8s/mod.vr — Kubernetes API client + Gateway API CRD client
+// =============================================================================
+// Layer: 5.5 (alongside xds)
+// Dependencies: core.net.http, core.net.tls, core.security.spiffe (optional)
+// Spec: https://gateway-api.sigs.k8s.io/
+//       https://kubernetes.io/docs/reference/using-api/
+//
+// Minimal talk-to-kube-apiserver client covering:
+// - kubeconfig + in-cluster auth resolution
+// - list / get / watch on arbitrary CRDs (typed via generics)
+// - Typed views of the core Gateway API v1 resources:
+//     Gateway, GatewayClass, HTTPRoute, TLSRoute, ReferenceGrant
+// - Server-side-apply patch support
+// =============================================================================
+
+module core.mesh.k8s;
+
+public module config;
+public module client;
+public module gateway;
+public module httproute;
+public module tlsroute;
+
+mount core.*;
+mount core.time.duration.{Duration};
+
+public mount .config.KubeConfig;
+public mount .config.ClusterEndpoint;
+public mount .config.AuthInfo;
+public mount .config.KubeConfigError;
+
+public mount .client.KubeClient;
+public mount .client.KubeError;
+public mount .client.ListOptions;
+public mount .client.WatchEvent;
+public mount .client.Patch;
+
+public mount .gateway.Gateway;
+public mount .gateway.GatewayClass;
+public mount .gateway.Listener;
+public mount .gateway.ListenerAddress;
+public mount .gateway.ListenerTls;
+
+public mount .httproute.HTTPRoute;
+public mount .httproute.HttpRouteRule;
+public mount .httproute.HttpRouteMatch;
+public mount .httproute.HttpBackendRef;
+
+public mount .tlsroute.TLSRoute;
+public mount .tlsroute.TlsRouteRule;

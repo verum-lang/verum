@@ -1,0 +1,221 @@
+// =============================================================================
+// mesh/k8s/client.vr — Kubernetes REST client
+// =============================================================================
+// Resource-generic list / get / watch / create / patch / delete over
+// the kube-apiserver REST surface. Authenticates per KubeConfig; uses
+// core.net.http + core.net.tls at the runtime level.
+// =============================================================================
+
+module core.mesh.k8s.client;
+
+mount core.*;
+mount core.async.async_iterator.{AsyncIterator};
+mount core.async.stream.{Stream};
+mount core.async.poll.{Poll};
+mount core.async.waker.{Context};
+mount core.async.cancellation.{CancellationToken};
+mount core.time.duration.{Duration};
+mount core.mesh.k8s.config.{KubeConfig};
+
+// =============================================================================
+// Errors
+// =============================================================================
+
+public type KubeError is
+    | NotFound(Text)
+    | Unauthorized(Text)
+    | Forbidden(Text)
+    | Conflict(Text)
+    | ServerError { status: Int, message: Text }
+    | InvalidResource(Text)
+    | RequestTimeout
+    | RateLimited { retry_after: Duration }
+    | BadApiResponse(Text)
+    | Cancelled;
+
+// =============================================================================
+// ListOptions + watch events
+// =============================================================================
+
+public type ListOptions is {
+    label_selector: Maybe<Text>,
+    field_selector: Maybe<Text>,
+    resource_version: Maybe<Text>,
+    limit: Maybe<UInt32>,
+    continue_token: Maybe<Text>,
+    timeout: Maybe<Duration>,
+}
+
+implement ListOptions {
+    pub fn new() -> ListOptions {
+        ListOptions {
+            label_selector: None,
+            field_selector: None,
+            resource_version: None,
+            limit: None,
+            continue_token: None,
+            timeout: None,
+        }
+    }
+
+    pub fn with_labels(mut self, selector: Text) -> ListOptions {
+        self.label_selector = Some(selector); self
+    }
+
+    pub fn with_fields(mut self, selector: Text) -> ListOptions {
+        self.field_selector = Some(selector); self
+    }
+
+    pub fn with_resource_version(mut self, v: Text) -> ListOptions {
+        self.resource_version = Some(v); self
+    }
+
+    pub fn with_limit(mut self, n: UInt32) -> ListOptions {
+        self.limit = Some(n); self
+    }
+
+    pub fn with_continue(mut self, token: Text) -> ListOptions {
+        self.continue_token = Some(token); self
+    }
+
+    pub fn with_timeout(mut self, t: Duration) -> ListOptions {
+        self.timeout = Some(t); self
+    }
+}
+
+/// Watch events as emitted by kube-apiserver (ETag-driven).
+public type WatchEvent<T> is
+    | Added(T)
+    | Modified(T)
+    | Deleted(T)
+    /// Bookmark — signals the watch is up to date; resource_version
+    /// can be persisted for resumption.
+    | Bookmark { resource_version: Text }
+    /// Resource version we requested was too old; caller must re-list.
+    | Expired(Text)
+    /// Internal stream error, usually network.
+    | StreamError(KubeError);
+
+/// Server-side apply patch.
+public type Patch is
+    | StrategicMerge(Text)      // application/strategic-merge-patch+json
+    | JsonMerge(Text)           // application/merge-patch+json
+    | JsonPatch(Text)           // application/json-patch+json
+    | Apply { field_manager: Text, body: Text };  // application/apply-patch+yaml
+
+// =============================================================================
+// KubeClient — the top-level handle
+// =============================================================================
+
+public type KubeClient is {
+    handle: UInt64,
+    namespace: Maybe<Text>,
+}
+
+implement KubeClient {
+    pub async fn connect(config: KubeConfig) -> Result<KubeClient, KubeError> {
+        @intrinsic("verum.k8s.connect", &config).await
+    }
+
+    pub fn namespace(&self) -> &Maybe<Text> { &self.namespace }
+
+    /// Resource-generic list. `resource` is the plural form
+    /// ("gateways", "pods"). `api_version` is "v1" or "apps/v1".
+    /// `namespace` None for cluster-scoped resources.
+    pub async fn list<T>(
+        &self,
+        api_version: &Text,
+        resource: &Text,
+        namespace: Maybe<&Text>,
+        options: &ListOptions,
+    ) -> Result<List<T>, KubeError> {
+        @intrinsic("verum.k8s.list", self.handle,
+            api_version, resource, namespace, options).await
+    }
+
+    pub async fn get<T>(
+        &self,
+        api_version: &Text,
+        resource: &Text,
+        namespace: Maybe<&Text>,
+        name: &Text,
+    ) -> Result<T, KubeError> {
+        @intrinsic("verum.k8s.get", self.handle,
+            api_version, resource, namespace, name).await
+    }
+
+    pub async fn create<T>(
+        &self,
+        api_version: &Text,
+        resource: &Text,
+        namespace: Maybe<&Text>,
+        body: &T,
+    ) -> Result<T, KubeError> {
+        @intrinsic("verum.k8s.create", self.handle,
+            api_version, resource, namespace, body).await
+    }
+
+    pub async fn patch<T>(
+        &self,
+        api_version: &Text,
+        resource: &Text,
+        namespace: Maybe<&Text>,
+        name: &Text,
+        patch: &Patch,
+    ) -> Result<T, KubeError> {
+        @intrinsic("verum.k8s.patch", self.handle,
+            api_version, resource, namespace, name, patch).await
+    }
+
+    pub async fn delete(
+        &self,
+        api_version: &Text,
+        resource: &Text,
+        namespace: Maybe<&Text>,
+        name: &Text,
+    ) -> Result<(), KubeError> {
+        @intrinsic("verum.k8s.delete", self.handle,
+            api_version, resource, namespace, name).await
+    }
+
+    /// Watch stream. Token honoured for cancellation.
+    pub fn watch<T>(
+        &self,
+        api_version: &Text,
+        resource: &Text,
+        namespace: Maybe<&Text>,
+        options: &ListOptions,
+        token: &CancellationToken,
+    ) -> WatchStream<T> {
+        @intrinsic("verum.k8s.watch", self.handle,
+            api_version, resource, namespace, options, token)
+    }
+
+    pub async fn close(&self) -> Result<(), KubeError> {
+        @intrinsic("verum.k8s.close", self.handle).await
+    }
+}
+
+// =============================================================================
+// WatchStream — AsyncIterator<WatchEvent<T>>
+// =============================================================================
+
+public type WatchStream<T> is {
+    handle: UInt64,
+}
+
+implement<T> Stream for WatchStream<T> {
+    type Item = WatchEvent<T>;
+
+    fn poll_next(&mut self, cx: &mut Context) -> Poll<Maybe<Self.Item>> {
+        @intrinsic("verum.k8s.watch_poll", self.handle, cx)
+    }
+}
+
+implement<T> AsyncIterator for WatchStream<T> {
+    type Item = WatchEvent<T>;
+
+    async fn next(&mut self) -> Maybe<Self.Item> {
+        @intrinsic("verum.k8s.watch_next", self.handle).await
+    }
+}

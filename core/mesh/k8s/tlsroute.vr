@@ -1,0 +1,32 @@
+// =============================================================================
+// mesh/k8s/tlsroute.vr — Gateway API Experimental TLSRoute
+// =============================================================================
+// Spec: https://gateway-api.sigs.k8s.io/api-types/tlsroute/
+// =============================================================================
+
+module core.mesh.k8s.tlsroute;
+
+mount core.*;
+mount core.mesh.k8s.httproute.{ParentReference};
+
+public type TLSRoute is {
+    name: Text,
+    namespace: Text,
+    parent_refs: List<ParentReference>,
+    hostnames: List<Text>,           // SNI match
+    rules: List<TlsRouteRule>,
+}
+
+public type TlsRouteRule is {
+    name: Maybe<Text>,
+    backend_refs: List<TlsBackendRef>,
+}
+
+public type TlsBackendRef is {
+    group: Text,
+    kind: Text,
+    name: Text,
+    namespace: Maybe<Text>,
+    port: Maybe<UInt16>,
+    weight: UInt32,
+}

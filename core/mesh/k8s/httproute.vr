@@ -1,0 +1,114 @@
+// =============================================================================
+// mesh/k8s/httproute.vr — Gateway API v1 HTTPRoute
+// =============================================================================
+// Spec: https://gateway-api.sigs.k8s.io/api-types/httproute/
+// =============================================================================
+
+module core.mesh.k8s.httproute;
+
+mount core.*;
+mount core.time.duration.{Duration};
+
+public type HTTPRoute is {
+    name: Text,
+    namespace: Text,
+    parent_refs: List<ParentReference>,
+    hostnames: List<Text>,
+    rules: List<HttpRouteRule>,
+}
+
+public type ParentReference is {
+    group: Text,
+    kind: Text,
+    namespace: Maybe<Text>,
+    name: Text,
+    section_name: Maybe<Text>,
+    port: Maybe<UInt16>,
+}
+
+public type HttpRouteRule is {
+    name: Maybe<Text>,
+    matches: List<HttpRouteMatch>,
+    filters: List<HttpRouteFilter>,
+    backend_refs: List<HttpBackendRef>,
+    timeouts: Maybe<HttpTimeouts>,
+    session_persistence: Maybe<SessionPersistence>,
+}
+
+public type HttpRouteMatch is {
+    path: Maybe<HttpPathMatch>,
+    headers: List<HttpHeaderMatch>,
+    query_params: List<HttpQueryParamMatch>,
+    method: Maybe<Text>,
+}
+
+public type HttpPathMatch is {
+    type_: PathMatchType,
+    value: Text,
+}
+
+public type PathMatchType is
+    | Exact
+    | PathPrefix
+    | RegularExpression;
+
+public type HttpHeaderMatch is {
+    type_: HeaderMatchType,
+    name: Text,
+    value: Text,
+}
+
+public type HeaderMatchType is
+    | HExact
+    | HRegularExpression;
+
+public type HttpQueryParamMatch is {
+    type_: HeaderMatchType,
+    name: Text,
+    value: Text,
+}
+
+public type HttpRouteFilter is
+    | RequestHeaderModifier { set: List<(Text, Text)>, add: List<(Text, Text)>, remove: List<Text> }
+    | ResponseHeaderModifier { set: List<(Text, Text)>, add: List<(Text, Text)>, remove: List<Text> }
+    | RequestRedirect {
+        scheme: Maybe<Text>,
+        hostname: Maybe<Text>,
+        path: Maybe<HttpPathModifier>,
+        port: Maybe<UInt16>,
+        status_code: Maybe<UInt16>,
+    }
+    | RequestMirror { backend: HttpBackendRef, percent: Maybe<UInt32> }
+    | URLRewrite { hostname: Maybe<Text>, path: Maybe<HttpPathModifier> }
+    | ExtensionRef { group: Text, kind: Text, name: Text };
+
+public type HttpPathModifier is
+    | ReplaceFullPath(Text)
+    | ReplacePrefixMatch(Text);
+
+public type HttpBackendRef is {
+    group: Text,
+    kind: Text,
+    name: Text,
+    namespace: Maybe<Text>,
+    port: Maybe<UInt16>,
+    weight: UInt32,
+    filters: List<HttpRouteFilter>,
+}
+
+public type HttpTimeouts is {
+    request: Maybe<Duration>,
+    backend_request: Maybe<Duration>,
+}
+
+public type SessionPersistence is {
+    session_name: Maybe<Text>,
+    absolute_timeout: Maybe<Duration>,
+    idle_timeout: Maybe<Duration>,
+    type_: SessionType,
+    cookie_lifetime: Maybe<Duration>,
+}
+
+public type SessionType is
+    | Cookie
+    | HeaderStrategy;

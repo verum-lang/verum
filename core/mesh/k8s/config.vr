@@ -1,0 +1,78 @@
+// =============================================================================
+// mesh/k8s/config.vr — kubeconfig + in-cluster auth resolution
+// =============================================================================
+
+module core.mesh.k8s.config;
+
+mount core.*;
+
+public type KubeConfigError is
+    | NotFound(Text)
+    | InvalidYaml(Text)
+    | ContextNotFound(Text)
+    | NoAuth(Text)
+    | IoError(Text);
+
+// =============================================================================
+// Cluster endpoint
+// =============================================================================
+
+public type ClusterEndpoint is {
+    server: Text,                            // https://<addr>:6443
+    ca_bundle_pem: Maybe<Text>,
+    insecure_skip_verify: Bool,
+}
+
+// =============================================================================
+// Auth
+// =============================================================================
+
+public type AuthInfo is
+    /// Bearer token (service-account / static).
+    | Token(Text)
+    /// Client-cert + private key pair.
+    | ClientCertificate { cert_pem: Text, key_pem: Text }
+    /// Exec plugin (kubectl-style).
+    | ExecPlugin { command: Text, args: List<Text>, env_json: Text }
+    /// In-cluster — read /var/run/secrets/kubernetes.io/serviceaccount.
+    | InCluster;
+
+// =============================================================================
+// KubeConfig — resolved context
+// =============================================================================
+
+public type KubeConfig is {
+    cluster: ClusterEndpoint,
+    auth: AuthInfo,
+    namespace: Maybe<Text>,
+}
+
+implement KubeConfig {
+    /// Load the first available source in preference order:
+    ///   1. $KUBECONFIG env var (:-separated paths)
+    ///   2. ~/.kube/config
+    ///   3. /var/run/secrets/kubernetes.io/serviceaccount (in-cluster)
+    pub async fn load_default() -> Result<KubeConfig, KubeConfigError> {
+        @intrinsic("verum.k8s.load_default_kubeconfig").await
+    }
+
+    /// Load a specific context from an explicit kubeconfig path.
+    pub async fn load_context(path: &Text, context: &Text)
+        -> Result<KubeConfig, KubeConfigError>
+    {
+        @intrinsic("verum.k8s.load_kubeconfig_context", path, context).await
+    }
+
+    /// Construct from an explicit endpoint + auth.
+    pub fn from_endpoint(cluster: ClusterEndpoint, auth: AuthInfo) -> KubeConfig {
+        KubeConfig { cluster: cluster, auth: auth, namespace: None }
+    }
+
+    pub fn with_namespace(mut self, namespace: Text) -> KubeConfig {
+        self.namespace = Some(namespace); self
+    }
+
+    pub fn cluster(&self) -> &ClusterEndpoint { &self.cluster }
+    pub fn auth(&self) -> &AuthInfo { &self.auth }
+    pub fn namespace(&self) -> &Maybe<Text> { &self.namespace }
+}

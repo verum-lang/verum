@@ -1,0 +1,199 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: mesh, k8s, kubernetes, gateway-api, crd, watch
+// @timeout: 10000
+// @expect: pass
+
+// Kubernetes API client + Gateway API v1 CRD surface.
+
+mount core.mesh.k8s.{
+    KubeConfig, ClusterEndpoint, AuthInfo, KubeConfigError,
+    KubeClient, KubeError, ListOptions, WatchEvent, Patch,
+    Gateway, GatewayClass, Listener, ListenerAddress, ListenerTls,
+    HTTPRoute, HttpRouteRule, HttpRouteMatch, HttpBackendRef,
+    TLSRoute, TlsRouteRule,
+};
+mount core.mesh.k8s.client.{WatchStream};
+mount core.mesh.k8s.gateway.{
+    ListenerProtocol, TlsMode, SecretObjectReference,
+    AddressType, AllowedRoutes, FromNamespaces, RouteGroupKind,
+    ParametersRef,
+};
+mount core.mesh.k8s.httproute.{
+    ParentReference, HttpPathMatch, PathMatchType,
+    HttpHeaderMatch, HeaderMatchType, HttpRouteFilter,
+    HttpPathModifier, HttpTimeouts, SessionPersistence, SessionType,
+};
+mount core.mesh.k8s.tlsroute.{TlsBackendRef};
+mount core.async.cancellation.{CancellationToken};
+mount core.time.duration.{Duration};
+
+// Config load.
+async fn typecheck_load_default() -> Result<KubeConfig, KubeConfigError> {
+    KubeConfig.load_default().await
+}
+
+async fn typecheck_load_context() -> Result<KubeConfig, KubeConfigError> {
+    KubeConfig.load_context(&"/etc/kube/config".into(), &"prod".into()).await
+}
+
+fn typecheck_from_endpoint() -> KubeConfig {
+    let cluster = ClusterEndpoint {
+        server: "https://api:6443".into(),
+        ca_bundle_pem: Some("-----".into()),
+        insecure_skip_verify: false,
+    };
+    KubeConfig.from_endpoint(cluster, AuthInfo.InCluster)
+        .with_namespace("default".into())
+}
+
+// Auth variants.
+fn typecheck_auth_variants() -> List<AuthInfo> {
+    let mut xs: List<AuthInfo> = List.new();
+    xs.push(AuthInfo.Token("bearer".into()));
+    xs.push(AuthInfo.ClientCertificate {
+        cert_pem: "-----".into(),
+        key_pem: "-----".into(),
+    });
+    xs.push(AuthInfo.ExecPlugin {
+        command: "aws".into(),
+        args: ["eks".into(), "get-token".into()].to_list(),
+        env_json: "{}".into(),
+    });
+    xs.push(AuthInfo.InCluster);
+    xs
+}
+
+// Client lifecycle.
+async fn typecheck_connect(config: KubeConfig) -> Result<KubeClient, KubeError> {
+    KubeClient.connect(config).await
+}
+
+// List / get / watch over Gateway.
+fn typecheck_list_options() -> ListOptions {
+    ListOptions.new()
+        .with_labels("app=foo".into())
+        .with_fields("status.phase=Running".into())
+        .with_limit(50)
+        .with_timeout(Duration.from_secs(30))
+}
+
+async fn typecheck_list_gateways(c: &KubeClient, opts: &ListOptions)
+    -> Result<List<Gateway>, KubeError>
+{
+    let ns = &"istio-system".into();
+    c.list::<Gateway>(
+        &"gateway.networking.k8s.io/v1".into(),
+        &"gateways".into(),
+        Some(ns),
+        opts,
+    ).await
+}
+
+async fn typecheck_get_gateway(c: &KubeClient) -> Result<Gateway, KubeError> {
+    let ns = &"istio-system".into();
+    c.get::<Gateway>(
+        &"gateway.networking.k8s.io/v1".into(),
+        &"gateways".into(),
+        Some(ns),
+        &"main".into(),
+    ).await
+}
+
+async fn typecheck_patch_gateway(c: &KubeClient) -> Result<Gateway, KubeError> {
+    let ns = &"istio-system".into();
+    c.patch::<Gateway>(
+        &"gateway.networking.k8s.io/v1".into(),
+        &"gateways".into(),
+        Some(ns),
+        &"main".into(),
+        &Patch.Apply { field_manager: "verum".into(), body: "apiVersion: ...".into() },
+    ).await
+}
+
+fn typecheck_watch_httproutes(c: &KubeClient, tok: &CancellationToken)
+    -> WatchStream<HTTPRoute>
+{
+    let ns = &"istio-system".into();
+    c.watch::<HTTPRoute>(
+        &"gateway.networking.k8s.io/v1".into(),
+        &"httproutes".into(),
+        Some(ns),
+        &ListOptions.new(),
+        tok,
+    )
+}
+
+// Watch event pattern match.
+fn typecheck_watch_event(e: WatchEvent<HTTPRoute>) -> Int {
+    match e {
+        WatchEvent.Added(_) => 1,
+        WatchEvent.Modified(_) => 2,
+        WatchEvent.Deleted(_) => 3,
+        WatchEvent.Bookmark { .. } => 0,
+        WatchEvent.Expired(_) => -1,
+        WatchEvent.StreamError(_) => -2,
+    }
+}
+
+// Patch variants.
+fn typecheck_patches() -> List<Patch> {
+    let mut xs: List<Patch> = List.new();
+    xs.push(Patch.StrategicMerge("{}".into()));
+    xs.push(Patch.JsonMerge("{}".into()));
+    xs.push(Patch.JsonPatch("[]".into()));
+    xs.push(Patch.Apply { field_manager: "me".into(), body: "k".into() });
+    xs
+}
+
+// Listener protocol + TLS mode enums.
+fn typecheck_listener_protocols() -> (ListenerProtocol, ListenerProtocol, TlsMode) {
+    (ListenerProtocol.Https, ListenerProtocol.Grpc, TlsMode.Passthrough)
+}
+
+// HttpRouteFilter variants.
+fn typecheck_filters() -> List<HttpRouteFilter> {
+    let mut xs: List<HttpRouteFilter> = List.new();
+    xs.push(HttpRouteFilter.RequestHeaderModifier {
+        set: List.new(), add: List.new(), remove: List.new(),
+    });
+    xs.push(HttpRouteFilter.ResponseHeaderModifier {
+        set: List.new(), add: List.new(), remove: List.new(),
+    });
+    xs.push(HttpRouteFilter.RequestRedirect {
+        scheme: Some("https".into()),
+        hostname: None,
+        path: Some(HttpPathModifier.ReplaceFullPath("/new".into())),
+        port: Some(443),
+        status_code: Some(301),
+    });
+    xs.push(HttpRouteFilter.URLRewrite {
+        hostname: None,
+        path: Some(HttpPathModifier.ReplacePrefixMatch("/v2".into())),
+    });
+    xs.push(HttpRouteFilter.ExtensionRef {
+        group: "my.group".into(), kind: "RateLimit".into(), name: "default".into(),
+    });
+    xs
+}
+
+// Errors.
+fn typecheck_kube_errors() -> List<KubeError> {
+    let mut xs: List<KubeError> = List.new();
+    xs.push(KubeError.NotFound("gw/main".into()));
+    xs.push(KubeError.Unauthorized("expired".into()));
+    xs.push(KubeError.Forbidden("rbac".into()));
+    xs.push(KubeError.Conflict("resource_version".into()));
+    xs.push(KubeError.ServerError { status: 500, message: "oops".into() });
+    xs.push(KubeError.InvalidResource("bad yaml".into()));
+    xs.push(KubeError.RequestTimeout);
+    xs.push(KubeError.RateLimited { retry_after: Duration.from_secs(5) });
+    xs.push(KubeError.BadApiResponse("short read".into()));
+    xs.push(KubeError.Cancelled);
+    xs
+}
+
+fn main() {
+    // Shape-only.
+}

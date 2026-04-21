@@ -1,0 +1,88 @@
+// =============================================================================
+// mesh/k8s/gateway.vr — Gateway API v1 Gateway + GatewayClass
+// =============================================================================
+// Spec: https://gateway-api.sigs.k8s.io/api-types/gateway/
+//       https://gateway-api.sigs.k8s.io/api-types/gatewayclass/
+// =============================================================================
+
+module core.mesh.k8s.gateway;
+
+mount core.*;
+
+public type GatewayClass is {
+    name: Text,
+    controller_name: Text,
+    parameters_ref: Maybe<ParametersRef>,
+}
+
+public type ParametersRef is {
+    group: Text,
+    kind: Text,
+    name: Text,
+}
+
+public type Gateway is {
+    name: Text,
+    namespace: Text,
+    gateway_class_name: Text,
+    listeners: List<Listener>,
+    addresses: List<ListenerAddress>,
+}
+
+public type Listener is {
+    name: Text,
+    port: UInt16,
+    protocol: ListenerProtocol,
+    hostname: Maybe<Text>,
+    tls: Maybe<ListenerTls>,
+    allowed_routes: AllowedRoutes,
+}
+
+public type ListenerProtocol is
+    | Http
+    | Https
+    | Tcp
+    | Tls
+    | Udp
+    | Grpc;
+
+public type ListenerTls is {
+    mode: TlsMode,
+    certificate_refs: List<SecretObjectReference>,
+}
+
+public type TlsMode is
+    | Terminate
+    | Passthrough;
+
+public type SecretObjectReference is {
+    group: Text,
+    kind: Text,
+    name: Text,
+    namespace: Maybe<Text>,
+}
+
+public type ListenerAddress is {
+    type_: AddressType,
+    value: Text,
+}
+
+public type AddressType is
+    | IPAddress
+    | Hostname
+    | NamedAddress;
+
+public type AllowedRoutes is {
+    namespaces_from: FromNamespaces,
+    kinds: List<RouteGroupKind>,
+}
+
+public type FromNamespaces is
+    | All
+    | Selector(Text)        // label-selector string
+    | Same;
+
+public type RouteGroupKind is {
+    group: Text,
+    kind: Text,
+}
