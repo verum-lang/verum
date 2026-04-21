@@ -1,0 +1,57 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L1
+// @tags: variant, disambiguation, field-type, struct-literal, regression
+// @timeout: 5000
+// @expected-exit: 0
+//
+// Regression test for Issue #1 (root fix in crates/verum_vbc/src/codegen/
+// expressions.rs::push_field_type_context).
+//
+// Bare variant names (e.g. `Closed`, `None`) inside struct-literal field
+// values must be disambiguated against the field's declared type instead
+// of the whole program's registered variants. Without this, a user-defined
+// `type State is Open | Closed;` would fail to compile inside a method
+// that returns `Foo { state: Closed, ... }` with "undefined variable:
+// Closed" because `Closed` collides with e.g. `CircuitBreakerState.Closed`
+// from the stdlib.
+//
+// Prior to the fix, the enclosing `implement` block's method was then
+// silently dropped via the `[lenient] SKIP` fallback, leading to runtime
+// `method '...' not found on value` panics.
+
+// Two independent enums that share a variant name.
+public type DoorState is
+      Open
+    | Closed;
+
+public type LockState is
+      Unlocked
+    | Locked
+    | Closed;  // Same variant name as DoorState.
+
+public type Event is {
+    door: DoorState,
+    lock: LockState,
+};
+
+// Method — this used to SKIP silently before the fix.
+implement Event {
+    public fn summary(&self) -> Int {
+        // The `kind` field type resolves `Closed` unambiguously.
+        let e = Event { door: Closed, lock: Closed };
+        match e.door {
+            DoorState.Closed => 1,
+            DoorState.Open   => 0,
+        }
+    }
+}
+
+fn main() {
+    let e = Event { door: Open, lock: Unlocked };
+    let total = e.summary();
+    // summary() returns 1 regardless — the main goal of this test is that
+    // the method EXISTS and dispatches correctly.
+    assert_eq(total, 1);
+    print("field_type_disambiguation ok");
+}

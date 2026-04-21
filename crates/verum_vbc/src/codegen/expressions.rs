@@ -10408,6 +10408,39 @@ impl VbcCodegen {
 
     // ==================== Struct Creation ====================
 
+    /// Temporarily set `ctx.current_return_type_name` to the declared type of
+    /// the given field (looked up via `type_field_type_names`). Returns the
+    /// previous value so `pop_field_type_context` can restore it.
+    ///
+    /// This is the root fix for Issue #1: without this hint, compiling
+    /// `Foo { kind: SomeVariant }` inside a cross-module `implement` block
+    /// calls `find_function_by_suffix(".SomeVariant")`, which finds
+    /// multiple matches across the whole program and gives up, returning
+    /// `undefined variable: SomeVariant`. The enclosing `compile_function`
+    /// then hits the `[lenient] SKIP` path in `mod.rs`, and the method
+    /// quietly disappears from the compiled module.
+    ///
+    /// With the field's declared type provided as context,
+    /// `find_function_by_suffix` can pick the variant whose
+    /// `parent_type_name` matches, eliminating the ambiguity.
+    fn push_field_type_context(
+        &mut self,
+        type_name: &str,
+        field_name: &str,
+    ) -> Option<String> {
+        let saved = self.ctx.current_return_type_name.clone();
+        if let Some(ft) = self.field_type_name(type_name, field_name) {
+            // Strip any generic args — variants register under the base name.
+            let base = ft.split('<').next().unwrap_or(ft).to_string();
+            self.ctx.current_return_type_name = Some(base);
+        }
+        saved
+    }
+
+    fn pop_field_type_context(&mut self, saved: Option<String>) {
+        self.ctx.current_return_type_name = saved;
+    }
+
     /// Compiles a record (struct) creation.
     fn compile_record(
         &mut self,
@@ -10442,13 +10475,21 @@ impl VbcCodegen {
         if let Some(tag) = variant_tag {
             // Record variant: create variant object and set fields as variant data
             self.ctx.emit(Instruction::MakeVariant { dst: result, tag, field_count: fields.len() as u32 });
+            // For variant records, disambiguation uses the variant's own payload
+            // types; the per-field logic mirrors the plain-record path below.
+            let variant_type_name = format!("{}", path);
             for (i, field) in fields.iter().enumerate() {
+                let saved_field_type = self
+                    .push_field_type_context(&variant_type_name, &field.name.name);
+
                 let value_reg = if let Some(ref v) = field.value {
                     self.compile_expr(v)?
                         .ok_or_else(|| CodegenError::internal("field value has no value"))?
                 } else {
                     self.ctx.get_var_reg(&field.name.name)?
                 };
+
+                self.pop_field_type_context(saved_field_type);
 
                 // Clone for value semantics (same reason as plain record fields)
                 let cloned_reg = self.ctx.alloc_temp();
@@ -10503,12 +10544,24 @@ impl VbcCodegen {
             let type_name = format!("{}", path);
 
             for field in fields.iter() {
+                // Root fix for Issue #1 (silent impl-method SKIP with
+                // "undefined variable: <Variant>"):
+                // Before compiling the field value expression, push the
+                // field's declared type into `current_return_type_name` so
+                // that bare variant names (e.g. `Closed` referring to
+                // `VfsErrorKind.Closed`) can be disambiguated against
+                // other types exporting the same variant.
+                let saved_field_type = self
+                    .push_field_type_context(&type_name, &field.name.name);
+
                 let value_reg = if let Some(ref v) = field.value {
                     self.compile_expr(v)?
                         .ok_or_else(|| CodegenError::internal("field value has no value"))?
                 } else {
                     self.ctx.get_var_reg(&field.name.name)?
                 };
+
+                self.pop_field_type_context(saved_field_type);
 
                 // Clone the value before storing into the field to ensure
                 // value semantics: each field gets an independent copy.
