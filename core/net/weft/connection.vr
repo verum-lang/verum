@@ -62,19 +62,31 @@ type KeepAlive is
     | Continue
     | Close;
 
-/// Serve one TCP connection using HTTP/1.1 keep-alive.
+/// Serve one TCP connection using HTTP/1.1 keep-alive. Accepts an
+/// optional `draining` flag from the owning listener — when raised,
+/// the next response is stamped `Connection: close` and the loop exits
+/// after that message (§7.8 phase 2 "Listener closure" in §7.8).
 public async fn serve_http1<S: Handler>(
     mut stream: TcpStream,
     peer_addr: SocketAddr,
     app: Heap<S>,
     token: CancellationToken,
+    draining: Shared<core.sync.atomic.AtomicBool>,
     config: ConnectionConfig,
 ) -> Result<(), ConnError> {
     loop {
         if token.is_cancelled() {
             return Err(ConnError.Cancelled);
         }
-        match serve_one_message(&mut stream, &peer_addr, &*app, &token, &config).await {
+        // If the listener started draining, disable keep-alive for the
+        // next message so this connection closes cleanly afterwards.
+        let drain_now = draining.load(core.sync.atomic.MemoryOrdering.Acquire);
+        let effective_cfg = if drain_now {
+            ConnectionConfig { keep_alive: false, ..config.clone() }
+        } else {
+            config.clone()
+        };
+        match serve_one_message(&mut stream, &peer_addr, &*app, &token, &effective_cfg).await {
             Ok(KeepAlive.Continue) => continue,
             Ok(KeepAlive.Close)    => return Ok(()),
             Err(e)                 => return Err(e),

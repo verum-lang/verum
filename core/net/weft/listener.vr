@@ -57,6 +57,14 @@ public type ListenerConfig is {
     max_concurrent_connections: Int,
     /// Per-connection config handed to `serve_http1`.
     connection: ConnectionConfig,
+    /// Maximum milliseconds `shutdown()` will wait for in-flight
+    /// connections to finish before forcibly dropping them (§7.8 phase 5
+    /// "Hard stop"). 30s matches the Kubernetes default.
+    drain_grace_ms: Int,
+    /// Bind with SO_REUSEPORT — enables seamless blue/green handoff at
+    /// the OS level (§7.8 phase 4). When true, `TcpListener.bind_reuseport`
+    /// is used so sibling processes on the same port share accept queues.
+    reuseport: Bool,
 };
 
 implement ListenerConfig {
@@ -64,7 +72,17 @@ implement ListenerConfig {
         ListenerConfig {
             max_concurrent_connections: 10_000,
             connection: ConnectionConfig.default(),
+            drain_grace_ms: 30_000,
+            reuseport: false,
         }
+    }
+
+    public fn with_drain_grace_ms(self, ms: Int) -> ListenerConfig {
+        ListenerConfig { drain_grace_ms: ms, ..self }
+    }
+
+    public fn with_reuseport(self, enabled: Bool) -> ListenerConfig {
+        ListenerConfig { reuseport: enabled, ..self }
     }
 }
 
@@ -74,24 +92,41 @@ implement ListenerConfig {
 
 /// Server: bound listener + shared `Handler`. Call `.serve().await` to
 /// run until cancellation. `.shutdown()` triggers graceful drain.
+///
+/// Two-phase shutdown (§7.8):
+///   1. `begin_drain()` — stop accepting new connections, mark the
+///      `draining` flag so existing keep-alive connections add
+///      `Connection: close` to their next response and close cleanly.
+///   2. `shutdown()`    — both `begin_drain()` and cancel-token fire;
+///      after `drain_grace_ms` any still-running handler is dropped.
 public type Server<H> is {
     listener: TcpListener,
     app: Heap<H>,
     config: ListenerConfig,
     token: CancellationToken,
+    /// Phase-1 drain signal — soft shutdown without cancellation.
+    /// Read by connection.vr between HTTP/1.1 messages.
+    draining: Shared<sync.atomic.AtomicBool>,
 };
 
 implement<H: Handler + Send + Sync + 'static> Server<H> {
     /// Bind a TCP listener and wrap it with the given handler (commonly
-    /// a `Router`).
+    /// a `Router`). Honours `config.reuseport` to pick between
+    /// `TcpListener.bind` and `TcpListener.bind_reuseport`.
     public fn bind(addr: Text, app: H, config: ListenerConfig) -> Result<Server<H>, Text> {
-        match TcpListener.bind(addr) {
+        let listener_res = if config.reuseport {
+            TcpListener.bind_reuseport(addr)
+        } else {
+            TcpListener.bind(addr)
+        };
+        match listener_res {
             Err(e) => Err(f"bind failed: {e}"),
             Ok(listener) => Ok(Server {
                 listener: listener,
                 app: Heap.new(app),
                 config: config,
                 token: CancellationToken.new(),
+                draining: Shared.new(sync.atomic.AtomicBool.new(false)),
             }),
         }
     }
@@ -108,15 +143,33 @@ implement<H: Handler + Send + Sync + 'static> Server<H> {
         self.token.clone()
     }
 
-    /// Flip the cancellation token; equivalent to `shutdown_token().cancel()`.
+    /// Flip the cancellation token; equivalent to
+    /// `begin_drain()` followed by `shutdown_token().cancel()`.
+    /// Existing handlers see cancellation immediately on their next
+    /// await point; listener stops accepting new connections.
     public fn shutdown(&self) {
+        self.begin_drain();
         self.token.cancel();
+    }
+
+    /// Phase-1 shutdown: stop accepting new connections and flip the
+    /// `draining` flag so keep-alive connections stamp their next
+    /// response with `Connection: close` and exit the loop. Does NOT
+    /// cancel in-flight handlers — those get to finish cleanly.
+    public fn begin_drain(&self) {
+        self.draining.store(true, sync.atomic.MemoryOrdering.Release);
+    }
+
+    /// Read the drain flag — connection.vr uses this as the "should I
+    /// keep this connection alive?" signal between messages.
+    public fn drain_handle(&self) -> Shared<sync.atomic.AtomicBool> {
+        self.draining.clone()
     }
 
     /// Run the accept loop until the token fires. Returns `Ok(())` on
     /// clean shutdown, `Err(...)` on unrecoverable listener-level I/O.
     public async fn serve(self) -> Result<(), Text> {
-        let Server { listener, app, config, token } = self;
+        let Server { listener, app, config, token, draining } = self;
 
         // In-flight counter. Signed `Int` is fine — we never go negative
         // in normal operation, and a runaway decrement is loud enough to
@@ -127,6 +180,11 @@ implement<H: Handler + Send + Sync + 'static> Server<H> {
 
         loop {
             if token.is_cancelled() {
+                break;
+            }
+            // Drain-phase: stop accepting new connections but let
+            // in-flight ones finish.
+            if draining.load(sync.atomic.MemoryOrdering.Acquire) {
                 break;
             }
 
@@ -155,10 +213,12 @@ implement<H: Handler + Send + Sync + 'static> Server<H> {
                     let tok_clone = token.clone();
                     let conn_cfg = config.connection.clone();
                     let counter = in_flight.clone();
+                    let drain_clone = draining.clone();
 
                     let _ = task.spawn(async move {
                         let _ = serve_http1(
-                            stream, peer, app_clone, tok_clone, conn_cfg,
+                            stream, peer, app_clone, tok_clone,
+                            drain_clone, conn_cfg,
                         ).await;
                         counter.fetch_sub(1, sync.atomic.MemoryOrdering.AcqRel);
                     });
@@ -167,8 +227,8 @@ implement<H: Handler + Send + Sync + 'static> Server<H> {
         }
 
         // Graceful drain: wait for in-flight connections to clear, with
-        // a bounded deadline (30s per §7.8).
-        drain(&in_flight, 30_000).await;
+        // the configured grace period (§7.8).
+        drain(&in_flight, config.drain_grace_ms).await;
         Ok(())
     }
 }

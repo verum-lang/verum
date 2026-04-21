@@ -39,6 +39,7 @@ mount core.*;
 mount core.net.weft.handler.{Handler};
 mount core.net.weft.listener.{Server, ListenerConfig};
 mount core.net.weft.connection.{ConnectionConfig};
+mount core.runtime.supervisor.{ChildSpec};
 
 // =============================================================================
 // WeftApp
@@ -90,10 +91,27 @@ implement<H: Handler + Send + Sync + 'static> WeftApp<H> {
         Server.bind(addr, self.app, self.config)
     }
 
-    // ChildSpec integration with `core.runtime.supervisor` is deferred to
-    // phase 2: the supervisor's ChildSpec builder API is still in flux
-    // (memory 2026-04-20) and wiring it up via `async move` closures
-    // needs a dedicated review. Until then, callers construct a
-    // supervisor ChildSpec manually and call `bind(...).serve()` inside
-    // its `with_start` thunk.
+    /// Build a `ChildSpec.permanent` for this app. Pair with a future
+    /// factory to feed `supervisor.supervise(factory, spec)`. Callers
+    /// build the factory themselves — `async` closures capturing owned
+    /// state remain a Phase-3 ergonomics item.
+    ///
+    /// Example:
+    /// ```verum
+    /// let app    = WeftApp.new(router);
+    /// let spec   = app.child_spec("http-listener");
+    /// let addr   = Text.from_str("0.0.0.0:8080");
+    /// supervisor.supervise(
+    ///     fn() -> async {
+    ///         WeftApp.new(router.clone())
+    ///             .bind(addr.clone()).unwrap()
+    ///             .serve().await
+    ///     },
+    ///     spec,
+    /// ).await
+    /// ```
+    public fn child_spec(&self, name: Text) -> ChildSpec {
+        ChildSpec.permanent(name)
+            .with_shutdown_timeout_ms(30_000)
+    }
 }

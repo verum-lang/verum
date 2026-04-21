@@ -1,0 +1,34 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: net, weft, supervisor, otp, child-spec
+// @timeout: 10000
+// @expect: pass
+
+// §4.5 — WeftApp integrates with core/runtime/supervisor via a
+// ChildSpec produced by WeftApp.child_spec(name).
+
+mount core.net.http.{Response};
+mount core.net.weft.service.{ServiceBuilder};
+mount core.net.weft.handler.{WeftRequest, Handler};
+mount core.net.weft.router.{Router};
+mount core.net.weft.app.{WeftApp};
+mount core.net.weft.error.{WeftError};
+mount core.net.weft.response_ext.{resp_ok};
+mount core.runtime.supervisor.{ChildSpec};
+
+type Noop is {};
+implement Handler for Noop {
+    async fn handle(&self, _req: WeftRequest) -> Result<Response, WeftError> {
+        Ok(resp_ok())
+    }
+}
+
+fn typecheck_child_spec() -> ChildSpec {
+    let app = WeftApp.new(Router.new().get("/", Noop {}));
+    app.child_spec("http-listener")
+}
+
+fn main() {
+    let _ = typecheck_child_spec();
+}
