@@ -8480,6 +8480,20 @@ impl ProtocolChecker {
         let impls = self.get_implementations(ty);
         let mut results = List::new();
 
+        // Fetch the protocol's method-level type-param names (if we
+        // can locate the protocol declaration). These names must be
+        // EXCLUDED from the impl-level substitution map — without
+        // this guard, a method declared as `fn map<B, F>` inherits an
+        // impl-level `F` binding and its method-local `F` parameter
+        // gets silently replaced, producing type errors like
+        // "expected Int, found fn(Int) -> Int".
+        let method_level_param_names: Option<List<Text>> = impls
+            .iter()
+            .find_map(|impl_| {
+                let proto = self.lookup_protocol(&impl_.protocol)?;
+                proto.methods.get(method_name).map(|pm| pm.type_param_names.clone())
+            });
+
         for impl_ in impls.iter() {
             if let Some(method_ty) = impl_.methods.get(method_name) {
                 let mut result_ty = method_ty.clone();
@@ -8487,6 +8501,15 @@ impl ProtocolChecker {
                 // Build substitution map by unifying for_type with lookup type
                 let mut subst_map = Map::new();
                 let _ = self.unify_types(&impl_.for_type, ty, &mut subst_map);
+
+                // Prune method-level params from the subst_map. This
+                // is what stops method-scoped `F` from being captured
+                // by an impl-scoped `F` binding.
+                if let Some(ref method_names) = method_level_param_names {
+                    for name in method_names.iter() {
+                        subst_map.remove(name);
+                    }
+                }
 
                 // Add Self -> impl_.for_type mapping
                 subst_map.insert(Text::from("Self"), impl_.for_type.clone());

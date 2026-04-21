@@ -46991,7 +46991,23 @@ impl TypeChecker {
                                 has_default,
                             );
                             protocol_method.receiver_kind = resolved_receiver_kind;
+                            // Record method-level type-param names so
+                            // downstream substitution (e.g.
+                            // lookup_all_protocol_methods) can exclude
+                            // them from impl-level substitution and
+                            // avoid shadow-replacing a method-scoped
+                            // `F` with an impl-scoped `F` of the
+                            // same spelling.
+                            protocol_method.type_param_names =
+                                method_type_param_names.clone();
                             protocol_methods.insert(method_name, protocol_method);
+                        }
+
+                        // Clean up method-level type-param bindings so
+                        // they don't leak into sibling methods or into
+                        // the enclosing protocol / module scope.
+                        for name in &method_type_param_names {
+                            self.ctx.remove_type(name);
                         }
                     }
                 }
@@ -48292,7 +48308,23 @@ impl TypeChecker {
                                 has_default,
                             );
                             protocol_method.receiver_kind = resolved_receiver_kind;
+                            // Record method-level type-param names so
+                            // downstream substitution (e.g.
+                            // lookup_all_protocol_methods) can exclude
+                            // them from impl-level substitution and
+                            // avoid shadow-replacing a method-scoped
+                            // `F` with an impl-scoped `F` of the
+                            // same spelling.
+                            protocol_method.type_param_names =
+                                method_type_param_names.clone();
                             protocol_methods.insert(method_name, protocol_method);
+                        }
+
+                        // Clean up method-level type-param bindings so
+                        // they don't leak into sibling methods or into
+                        // the enclosing protocol / module scope.
+                        for name in &method_type_param_names {
+                            self.ctx.remove_type(name);
                         }
                     }
                 }
@@ -49420,6 +49452,57 @@ impl TypeChecker {
                 };
                 // Track receiver kind for object safety checks
                 let mut method_receiver_kind = verum_common::Maybe::None;
+
+                // Register method-level generic params as fresh TypeVars
+                // BEFORE lowering the signature. Without this step,
+                // `fn map<B, F: fn(Self.Item) -> B>` lowers to a
+                // signature with Type::Named("B") / Type::Named("F")
+                // — and later `substitute_type_params` during
+                // `lookup_all_protocol_methods` cannot tell these
+                // names apart from *impl-level* generics that happen
+                // to share spelling. For instance, a receiver of
+                // `MappedIter<I, F>` binds impl's `F` → closure_ty
+                // in the subst map, and then shadow-substitutes
+                // the method's unrelated `F` parameter to that
+                // same closure_ty. The observable failure was
+                // `once_with(|| 5).map(|x| x*10).next()` typing as
+                // `fn(Int) -> Int` instead of `Int`.
+                //
+                // Using a fresh TypeVar gives each method-level
+                // generic an ID-based identity; substitute_type_params
+                // matches Named-by-name and Var-by-id, so method vars
+                // are structurally disjoint from impl vars even when
+                // the written names coincide.
+                self.ctx.enter_scope();
+                let mut method_param_names: verum_common::List<verum_common::Text> =
+                    verum_common::List::new();
+                let mut method_param_bounds:
+                    verum_common::Map<verum_common::Text, Type> =
+                    verum_common::Map::new();
+                for generic_param in &func.generics {
+                    use verum_ast::ty::GenericParamKind;
+                    if let GenericParamKind::Type { name, bounds, .. } = &generic_param.kind {
+                        let tv = crate::ty::TypeVar::fresh();
+                        let name_text: verum_common::Text = name.name.clone();
+                        self.ctx.define_type(name_text.clone(), Type::Var(tv));
+                        method_param_names.push(name_text.clone());
+                        // Capture function-type bounds (F: fn(X) -> Y)
+                        // so that closure type inference can consult them
+                        // during method calls.
+                        for bound in bounds {
+                            if let verum_ast::ty::TypeBoundKind::Equality(bt)
+                            | verum_ast::ty::TypeBoundKind::GenericProtocol(bt) = &bound.kind
+                            {
+                                if let verum_ast::ty::TypeKind::Function { .. } = &bt.kind {
+                                    if let Ok(bound_ty) = self.ast_to_type(bt) {
+                                        method_param_bounds.insert(name_text.clone(), bound_ty);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
                 // Collect only non-self parameters (self is implicit in method calls)
                 let params: verum_common::List<Type> = func.params.iter()
                     .filter_map(|p| {
@@ -49456,10 +49539,17 @@ impl TypeChecker {
                     contexts: None,
                     type_params: verum_common::List::new(),
                 };
+                // Exit method scope — impl callers won't accidentally see
+                // these TypeVars in lookup_type, so they can't be shadowed
+                // or reused.
+                self.ctx.exit_scope();
+
                 let mut pm = crate::protocol::ProtocolMethod::simple(
                     method_name.clone(), method_ty, default_impl.is_some(),
                 );
                 pm.receiver_kind = method_receiver_kind;
+                pm.type_param_names = method_param_names;
+                pm.type_param_bounds = method_param_bounds;
                 protocol_methods.insert(method_name, pm);
             }
         }
