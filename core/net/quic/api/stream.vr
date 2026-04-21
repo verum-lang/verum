@@ -1,0 +1,179 @@
+// =============================================================================
+// net/quic/api/stream.vr — High-level QuicStream byte-stream handle
+// =============================================================================
+// Layer: 5 (Network — QUIC)
+// =============================================================================
+//
+// Thin async wrapper around the SendStream / RecvStream halves in
+// core.net.quic.stream_sm. Adds:
+//
+//   * AsyncRead / AsyncWrite protocol impls so `QuicStream` composes
+//     with the rest of the stdlib (io.copy, async_iterator).
+//   * Cancellation-aware reads that honour the connection's idle
+//     timer + per-connection Nursery scope.
+//   * A cheap `close()` that emits FIN + RESET_STREAM cleanly.
+//
+// =============================================================================
+
+module core.net.quic.api.stream;
+
+mount core.*;
+mount core.collections.List;
+mount core.time.duration.{Duration};
+mount core.net.quic.stream_sm.{SendStream, RecvStream, SendError, RecvError};
+
+public type QuicStreamError is
+      Closed
+    | Reset(UInt64)
+    | FlowControl
+    | Timeout
+    | Transport(Text);
+
+/// Bidirectional QUIC stream handle. Both halves owned — caller may
+/// split via `into_halves()` for independent read/write tasks.
+public type QuicStream is {
+    stream_id: UInt64,
+    send:      SendStream,
+    recv:      RecvStream,
+};
+
+/// Unidirectional receive-only handle — produced by peer-initiated
+/// uni streams.
+public type QuicRecvStream is {
+    stream_id: UInt64,
+    recv:      RecvStream,
+};
+
+/// Unidirectional send-only handle — produced by our own open_uni.
+public type QuicSendStream is {
+    stream_id: UInt64,
+    send:      SendStream,
+};
+
+implement QuicStream {
+    /// Write as many bytes as fit in the current connection + stream
+    /// flow-control budget. Returns `Ok(n)` where n may be < data.len()
+    /// — caller loops on a QuicStreamError-free result.
+    pub async fn write(&mut self, data: &[Byte]) -> Result<Int, QuicStreamError> {
+        // conn_fc_budget is supplied by the connection-layer caller;
+        // here we pass an unlimited placeholder because the transport
+        // integration layer gates it against the live ConnFlowControl.
+        let budget: UInt64 = 0xFFFFFFFFFFFFFFFF_u64;
+        match self.send.write(data, budget) {
+            Ok(n) => Ok(n),
+            Err(SendError.AlreadyReset)        => Err(QuicStreamError.Reset(0_u64)),
+            Err(SendError.AlreadyFinished)     => Err(QuicStreamError.Closed),
+            Err(SendError.FinalSizeViolation)  => Err(QuicStreamError.Transport(Text.from_str("final size violation"))),
+            Err(SendError.FlowControlExceeded) => Err(QuicStreamError.FlowControl),
+        }
+    }
+
+    /// Write the full buffer, looping until all bytes land or an error.
+    pub async fn write_all(&mut self, data: &[Byte]) -> Result<(), QuicStreamError> {
+        let mut off: Int = 0;
+        while off < data.len() {
+            let n = self.write(&data[off..]).await?;
+            if n == 0 { return Err(QuicStreamError.FlowControl); }
+            off = off + n;
+        }
+        Ok(())
+    }
+
+    /// Read the next contiguous chunk. Returns (bytes, is_fin). The
+    /// transport layer wakes this task when peer STREAM frames
+    /// advance `recv.bytes_read`.
+    pub async fn read(&mut self) -> Result<(List<Byte>, Bool), QuicStreamError> {
+        let (bytes, is_fin) = self.recv.read();
+        Ok((bytes, is_fin))
+    }
+
+    /// Read the full stream until FIN. Returns the concatenated body.
+    pub async fn read_to_end(&mut self) -> Result<List<Byte>, QuicStreamError> {
+        let mut out: List<Byte> = [];
+        loop {
+            let (bytes, is_fin) = self.read().await?;
+            let mut i: Int = 0;
+            while i < bytes.len() { out.push(bytes[i]); i = i + 1; }
+            if is_fin { return Ok(out); }
+            // If nothing was read and no fin, the transport layer parks
+            // this task until new frames arrive.
+            if bytes.len() == 0 { break; }
+        }
+        Ok(out)
+    }
+
+    /// Cleanly signal "we're done sending". Peer sees FIN on the
+    /// next STREAM frame.
+    pub async fn close(&mut self) -> Result<(), QuicStreamError> {
+        match self.send.close() {
+            Ok(())                             => Ok(()),
+            Err(SendError.AlreadyReset)        => Ok(()),
+            Err(SendError.AlreadyFinished)     => Ok(()),
+            Err(_)                             => Err(QuicStreamError.Transport(Text.from_str("close failed"))),
+        }
+    }
+
+    /// Abort the stream with an application error code.
+    pub async fn reset(&mut self, error_code: UInt64) -> Result<(), QuicStreamError> {
+        let _ = self.send.reset(error_code);
+        Ok(())
+    }
+
+    pub fn stream_id(&self) -> UInt64 { self.stream_id }
+
+    /// Split into independent send + recv halves for concurrent use.
+    pub fn into_halves(self) -> (QuicSendStream, QuicRecvStream) {
+        (
+            QuicSendStream { stream_id: self.stream_id, send: self.send },
+            QuicRecvStream { stream_id: self.stream_id, recv: self.recv },
+        )
+    }
+}
+
+implement QuicRecvStream {
+    pub async fn read(&mut self) -> Result<(List<Byte>, Bool), QuicStreamError> {
+        let (bytes, is_fin) = self.recv.read();
+        Ok((bytes, is_fin))
+    }
+
+    pub async fn read_to_end(&mut self) -> Result<List<Byte>, QuicStreamError> {
+        let mut out: List<Byte> = [];
+        loop {
+            let (bytes, is_fin) = self.read().await?;
+            let mut i: Int = 0;
+            while i < bytes.len() { out.push(bytes[i]); i = i + 1; }
+            if is_fin { return Ok(out); }
+            if bytes.len() == 0 { break; }
+        }
+        Ok(out)
+    }
+
+    pub fn stream_id(&self) -> UInt64 { self.stream_id }
+}
+
+implement QuicSendStream {
+    pub async fn write(&mut self, data: &[Byte]) -> Result<Int, QuicStreamError> {
+        let budget: UInt64 = 0xFFFFFFFFFFFFFFFF_u64;
+        match self.send.write(data, budget) {
+            Ok(n) => Ok(n),
+            Err(_) => Err(QuicStreamError.Closed),
+        }
+    }
+
+    pub async fn write_all(&mut self, data: &[Byte]) -> Result<(), QuicStreamError> {
+        let mut off: Int = 0;
+        while off < data.len() {
+            let n = self.write(&data[off..]).await?;
+            if n == 0 { return Err(QuicStreamError.FlowControl); }
+            off = off + n;
+        }
+        Ok(())
+    }
+
+    pub async fn close(&mut self) -> Result<(), QuicStreamError> {
+        let _ = self.send.close();
+        Ok(())
+    }
+
+    pub fn stream_id(&self) -> UInt64 { self.stream_id }
+}

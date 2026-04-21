@@ -65,6 +65,7 @@ public module recovery;                // RFC 9002 loss detection + NewReno
 public module stream_sm;               // RFC 9000 §3/§4 stream state machines + FC
 public module connection_sm;           // Typed connection SM (Initial → ... → OneRtt)
 public module path;                    // RFC 9000 §8 path validation + migration
+public module api;                     // High-level QuicClient / QuicServer facade
 
 mount core.*;
 mount core.time.duration.{Duration};

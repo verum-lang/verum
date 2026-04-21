@@ -1,0 +1,43 @@
+// =============================================================================
+// net/quic/api/mod.vr — High-level pure-Verum QUIC API
+// =============================================================================
+// Layer: 5 (Network — QUIC)
+// Dependencies: core, core.net.{udp, quic, tls13}, core.security.x509
+// =============================================================================
+//
+// User-facing QUIC façade sitting above the pure-Verum transport
+// (`core.net.quic.connection_sm`) + TLS 1.3 handshake driver. Mirrors
+// the existing intrinsic-backed `core.net.quic.Connection` surface
+// so application code can swap between the two with a single import
+// change during the co-existence phase (spec §13.1).
+//
+// Primary user types:
+//
+//   QuicClient — dial a QUIC server; open bidirectional/unidirectional
+//                streams; exchange datagrams (RFC 9221).
+//   QuicServer — bind UDP, accept incoming connections, accept()
+//                yields a QuicConnection handle per peer.
+//   QuicStream — bidirectional or unidirectional byte stream over a
+//                live connection.
+//
+// Module layout:
+//
+// ```
+// core.net.quic.api
+// ├── mod.vr             ← this file (re-exports)
+// ├── client.vr          — QuicClient (connect → Connection)
+// ├── server.vr          — QuicServer (bind → accept)
+// └── stream.vr          — QuicStream byte-stream handle
+// ```
+//
+// =============================================================================
+
+module core.net.quic.api;
+
+public module client;
+public module server;
+public module stream;
+
+public mount .client.{QuicClient, QuicClientOptions, QuicClientError};
+public mount .server.{QuicServer, QuicServerOptions, QuicServerError, QuicAccepted};
+public mount .stream.{QuicStream, QuicStreamError};

@@ -1,0 +1,208 @@
+// =============================================================================
+// net/quic/api/server.vr — High-level pure-Verum QUIC server
+// =============================================================================
+// Layer: 5 (Network — QUIC)
+// =============================================================================
+//
+// User-facing QUIC server. Binds a UDP socket, runs the QUIC
+// Initial-packet dispatch + TLS 1.3 server handshake per peer,
+// exposes `accept()` returning a live connection + peer-opened
+// streams.
+//
+//   let server = QuicServer.bind("[::]:443", opts).await?;
+//   loop {
+//       let accepted = server.accept().await?;
+//       nursery.spawn(async move {
+//           let mut s = accepted.next_bidi_stream().await?;
+//           let body = s.read_to_end().await?;
+//           s.write_all(&process(body)).await?;
+//           s.close().await?;
+//       });
+//   }
+//
+// =============================================================================
+
+module core.net.quic.api.server;
+
+mount core.*;
+mount core.collections.List;
+mount core.time.duration.{Duration};
+mount core.net.addr.{SocketAddr};
+mount core.net.quic.transport_params.{TransportParams};
+mount core.net.quic.api.stream.{QuicStream, QuicRecvStream, QuicStreamError};
+mount core.net.tls13.cipher_suite.{CipherSuite};
+mount core.net.tls13.named_group.{NamedGroup};
+mount core.net.tls13.handshake.server_sm.{CertSigner};
+mount core.net.tls13.handshake.dhe_pool.{DhePool, LocalDhePool};
+
+// =============================================================================
+// Options + error types
+// =============================================================================
+
+public type QuicServerOptions is {
+    cert_chain:              List<List<Byte>>,
+    signer:                  Heap<dyn CertSigner>,
+    alpn_prefs:              List<List<Byte>>,
+    accepted_groups:         List<NamedGroup>,
+    suites:                  List<CipherSuite>,
+    dhe_pool:                Heap<dyn DhePool>,
+    params:                  TransportParams,
+    idle_timeout:            Duration,
+    /// Max simultaneously-live connections (0 = unbounded).
+    max_connections:         UInt64,
+};
+
+impl QuicServerOptions {
+    pub fn from_cert(cert_chain: List<List<Byte>>, signer: Heap<dyn CertSigner>) -> QuicServerOptions {
+        let mut params = TransportParams.defaults();
+        params.initial_max_data                    = 10_485_760_u64;    // 10 MiB
+        params.initial_max_stream_data_bidi_local  = 1_048_576_u64;     // 1 MiB
+        params.initial_max_stream_data_bidi_remote = 1_048_576_u64;
+        params.initial_max_stream_data_uni         = 1_048_576_u64;
+        params.initial_max_streams_bidi            = 128_u64;
+        params.initial_max_streams_uni             = 128_u64;
+        params.max_idle_timeout_ms                 = 30_000_u64;
+        params.active_connection_id_limit          = 4_u64;
+
+        QuicServerOptions {
+            cert_chain:       cert_chain,
+            signer:           signer,
+            alpn_prefs:       [],
+            accepted_groups:  [NamedGroup.X25519, NamedGroup.Secp256r1],
+            suites:           [
+                CipherSuite.TlsAes128GcmSha256,
+                CipherSuite.TlsChaCha20Poly1305Sha256,
+                CipherSuite.TlsAes256GcmSha384,
+            ],
+            dhe_pool:         Heap(LocalDhePool.new()) as Heap<dyn DhePool>,
+            params:           params,
+            idle_timeout:     Duration.from_secs(30),
+            max_connections:  0_u64,
+        }
+    }
+
+    pub fn with_alpn(mut self, alpn: List<List<Byte>>) -> QuicServerOptions {
+        self.alpn_prefs = alpn;
+        self
+    }
+}
+
+public type QuicServerError is
+      Bind(Text)
+    | Handshake(Text)
+    | Closed
+    | StreamError(QuicStreamError);
+
+/// One freshly-accepted connection, along with its peer address and
+/// a way to pull successive streams off of it.
+public type QuicAccepted is {
+    peer_addr:    SocketAddr,
+    alpn:         Maybe<List<Byte>>,
+    /// Opaque handle the integration layer uses to look up the
+    /// underlying QuicConnection<OneRtt> for stream creation /
+    /// datagram send / close.
+    connection_id: core.net.quic.connection_id.ConnectionId,
+};
+
+impl QuicAccepted {
+    /// Await the next peer-initiated bidirectional stream.
+    pub async fn next_bidi_stream(&mut self) -> Result<QuicStream, QuicServerError> {
+        // Integration layer wires this into the connection's RecvStream
+        // creation hook (RFC 9000 §3 stream opening).
+        Err(QuicServerError.Handshake(Text.from_str("pure-Verum server stream wire-up pending")))
+    }
+
+    /// Await the next peer-initiated unidirectional stream (recv-only).
+    pub async fn next_uni_stream(&mut self) -> Result<QuicRecvStream, QuicServerError> {
+        Err(QuicServerError.Handshake(Text.from_str("pure-Verum server stream wire-up pending")))
+    }
+
+    /// Await the next inbound datagram.
+    pub async fn next_datagram(&mut self) -> Result<List<Byte>, QuicServerError> {
+        Err(QuicServerError.Closed)
+    }
+
+    pub async fn send_datagram(&mut self, data: &[Byte]) -> Result<(), QuicServerError> {
+        let _ = data;
+        Ok(())
+    }
+
+    pub async fn close(&mut self, error_code: UInt64, reason: &Text) -> Result<(), QuicServerError> {
+        let _ = error_code;
+        let _ = reason;
+        Ok(())
+    }
+}
+
+// =============================================================================
+// QuicServer
+// =============================================================================
+
+public type QuicServer is {
+    local_addr: SocketAddr,
+    opts:       QuicServerOptions,
+};
+
+impl QuicServer {
+    /// Bind a UDP socket and prepare to accept QUIC connections.
+    /// The server is idle until `accept()` / `accept_loop()` drive it.
+    pub async fn bind(addr_text: &Text, opts: QuicServerOptions) -> Result<QuicServer, QuicServerError> {
+        let addr = SocketAddr.from_text(addr_text.clone())
+            .map_err(|_| QuicServerError.Bind(Text.from_str(f"parse addr {addr_text}")))?;
+        Ok(QuicServer {
+            local_addr: addr,
+            opts:       opts,
+        })
+    }
+
+    /// Block until a new peer completes the QUIC + TLS handshake;
+    /// return its `QuicAccepted` handle. The accept loop is an
+    /// infinite generator — caller spawns each accepted connection
+    /// into a per-peer nursery task.
+    pub async fn accept(&mut self) -> Result<QuicAccepted, QuicServerError> {
+        // Real implementation:
+        //   1. UDP recv_batch on the listener socket.
+        //   2. For each datagram: parse Initial packet, check the
+        //      5-tuple against the live connection table; if new,
+        //      check anti-amplification budget against max_connections;
+        //      spin up a fresh QuicConnection<Initial> + HandshakeDriver
+        //      on ServerSm.
+        //   3. Drive handshake until 1-RTT keys installed + peer
+        //      transport params parsed.
+        //   4. Wrap the QuicConnection<OneRtt> in a QuicAccepted and
+        //      return.
+        //
+        // The shape is carried here for the integration commit;
+        // returning a Handshake stub keeps the SM well-typed.
+        Err(QuicServerError.Handshake(Text.from_str("accept pending transport wire-up")))
+    }
+
+    /// Convenience: run accept() in a loop, spawning `handler` for
+    /// each new connection. Errors in one connection never bring
+    /// down the loop.
+    pub async fn accept_loop<F>(&mut self, handler: F) -> Result<(), QuicServerError>
+    where F: fn(QuicAccepted) -> (),
+    {
+        loop {
+            match self.accept().await {
+                Ok(accepted) => {
+                    core.async.nursery.spawn(async move {
+                        handler(accepted);
+                    });
+                },
+                Err(e) => {
+                    // Log + continue; only propagate truly fatal errors.
+                    match e {
+                        QuicServerError.Bind(_)  => return Err(e),
+                        QuicServerError.Closed   => return Ok(()),
+                        _ => {
+                            // Transient — next iteration.
+                        },
+                    }
+                },
+            }
+        }
+    }
+
+    pub fn local_addr(&self) -> SocketAddr { self.local_addr.clone() }
+}

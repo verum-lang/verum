@@ -1,0 +1,33 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: quic, api, client, server, typecheck
+// @timeout: 10000
+// @expect: pass
+
+mount core.net.quic.api.{
+    QuicClient, QuicClientOptions, QuicClientError,
+    QuicServer, QuicServerOptions, QuicServerError, QuicAccepted,
+    QuicStream, QuicStreamError,
+};
+
+async fn check_client_api() -> Result<(), QuicClientError> {
+    let opts = QuicClientOptions.default();
+    let mut client = QuicClient.connect(&Text.from_str("example.com:443"), opts).await?;
+    let _ = client.authority();
+    let _ = client.peer_addr();
+    let _ = client.open_bidi_stream().await;
+    let _ = client.open_uni_stream().await;
+    let _ = client.send_datagram(b"ping").await;
+    Ok(())
+}
+
+fn check_server_shape() {
+    let _ = QuicServerOptions.from_cert;
+    let _ = QuicServer.bind;
+}
+
+fn main() {
+    let _ = check_client_api;
+    check_server_shape();
+}
