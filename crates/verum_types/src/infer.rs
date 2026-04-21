@@ -29340,11 +29340,27 @@ impl TypeChecker {
         type_name: &str,
     ) -> Option<verum_ast::decl::TypeDecl> {
         use verum_ast::ItemKind;
+        use verum_ast::decl::Visibility as AstVisibility;
 
         for item in &ast.items {
             if let ItemKind::Type(type_decl) = &item.kind
                 && type_decl.name.name.as_str() == type_name
             {
+                // Private types MUST NOT be visible to importers.
+                // Before this guard, an `import` resolver that fell
+                // through the normal exports table would still find
+                // private declarations here by AST walk, and then
+                // `register_type_declaration` would try to resolve
+                // their variant-payload / field types against the
+                // *importer's* scope — which doesn't know the private
+                // type's own imports. The symptom was a spurious
+                // "Failed to register imported type 'X': type not
+                // found: Y" warning for private types whose variants
+                // reference types imported via `mount ...{Y}` that
+                // only the defining module knows about.
+                if type_decl.visibility != AstVisibility::Public {
+                    return None;
+                }
                 return Some(type_decl.clone());
             }
         }
