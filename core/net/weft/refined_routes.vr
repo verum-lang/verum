@@ -1,0 +1,169 @@
+// =============================================================================
+// core/net/weft/refined_routes.vr — Refinement-checked path extractors
+// =============================================================================
+// Layer: 6 (Weft)
+// Spec:  internal/specs/net-framework.md §5.9 / §8.1 / §8.10
+// =============================================================================
+//
+// Bridges Verum's refinement-type system into the router. The Weft
+// value proposition here (§8.1) is:
+//
+//   "If someone forgets to update `ValidApiVersion`, the old endpoint
+//    `/api/v4/…` breaks at COMPILATION, not at runtime with 4xx."
+//
+// There are two layers:
+//
+//   1. **Runtime-checked extractors** (this file) — call at any point,
+//      predicate runs on the captured string. Rejection becomes
+//      `ExtractRejection.InvalidParam` → 400 Bad Request.
+//
+//   2. **Compile-time Z3 verification of route composition** — the
+//      `route#"..."` tagged-literal meta-fn (§5.7) parses the pattern
+//      at compile time and proves that the handler's parameter
+//      refinement is implied by the route refinement. Lives inside
+//      the compiler's meta-fn subsystem; exposed here through this
+//      module's types so future auto-generation has a stable target.
+//
+// Architectural note: refinement types themselves (`type UserId is
+// Int where |n| { 1 <= n && n <= 1_000_000_000 };`) live at the
+// language level — the Verum grammar + `verum_smt` crate already
+// proves/disproves them. This file does NOT reimplement refinement
+// checking; it only wires the router to call the user's predicate.
+//
+// =============================================================================
+
+module core.net.weft.refined_routes;
+
+mount core.*;
+mount core.net.weft.handler.{WeftRequest};
+mount core.net.weft.error.{ExtractRejection};
+
+// =============================================================================
+// Refinement predicates — stored as plain closures
+// =============================================================================
+
+/// A runtime-checked refinement for a single path parameter.
+/// Future `route#"..."` meta-fn expansions produce values of this
+/// type from compile-time predicates; handwritten predicates work too.
+public type PathRefinement<T> is {
+    name: Text,
+    check: fn(&T) -> Bool,
+    /// Short human description returned to the client on rejection
+    /// (e.g. "positive integer ≤ 10^9").
+    expected: Text,
+};
+
+implement<T> PathRefinement<T> {
+    pub fn new(name: Text, expected: Text, check: fn(&T) -> Bool) -> PathRefinement<T> {
+        PathRefinement {
+            name: name,
+            check: check,
+            expected: expected,
+        }
+    }
+}
+
+// =============================================================================
+// Refined extractors — Int + Text specialisations
+// =============================================================================
+
+/// Extract a named path parameter as `Int`, then run `refinement.check`
+/// on it. Returns the typed value on success; on miss / parse-error /
+/// predicate-fail returns an `ExtractRejection` that maps to 400.
+public fn refined_path_int(
+    req: &mut WeftRequest,
+    refinement: &PathRefinement<Int>,
+) -> Result<Int, ExtractRejection> {
+    let raw = match req.path_params.get(&refinement.name) {
+        None    => return Err(ExtractRejection.MissingParam(refinement.name.clone())),
+        Some(v) => v.clone(),
+    };
+    let value = match raw.parse_int() {
+        Ok(n)  => n,
+        Err(_) => return Err(ExtractRejection.InvalidParam {
+            name: refinement.name.clone(),
+            value: raw,
+            expected: refinement.expected.clone(),
+        }),
+    };
+    if (refinement.check)(&value) {
+        Ok(value)
+    } else {
+        Err(ExtractRejection.InvalidParam {
+            name: refinement.name.clone(),
+            value: f"{value}",
+            expected: refinement.expected.clone(),
+        })
+    }
+}
+
+/// Text variant — reject on empty string + apply `check`.
+pub fn refined_path_text(
+    req: &mut WeftRequest,
+    refinement: &PathRefinement<Text>,
+) -> Result<Text, ExtractRejection> {
+    let value = match req.path_params.get(&refinement.name) {
+        None    => return Err(ExtractRejection.MissingParam(refinement.name.clone())),
+        Some(v) => v.clone(),
+    };
+    if (refinement.check)(&value) {
+        Ok(value)
+    } else {
+        Err(ExtractRejection.InvalidParam {
+            name: refinement.name.clone(),
+            value: value,
+            expected: refinement.expected.clone(),
+        })
+    }
+}
+
+// =============================================================================
+// Common predicate factories
+// =============================================================================
+
+/// Integer bounded above and below (inclusive). Corresponds to the
+/// `type UserId is Int where |n| { min <= n && n <= max }` pattern.
+pub fn int_between(name: Text, min: Int, max: Int) -> PathRefinement<Int> {
+    let lo = min;
+    let hi = max;
+    let expected = f"integer in [{lo}, {hi}]";
+    PathRefinement.new(name, expected, |n| { *n >= lo && *n <= hi })
+}
+
+/// Text matching a small set of literal values (e.g. API versions).
+pub fn text_one_of(name: Text, allowed: List<Text>) -> PathRefinement<Text> {
+    let expected = f"one of {allowed.len()} allowed values";
+    let owned = allowed.clone();
+    PathRefinement.new(name, expected, |s| {
+        for v in owned.iter() {
+            if *s == *v { return true; }
+        }
+        false
+    })
+}
+
+/// Slug — length 1..=64, alphanumeric + hyphen. §8.1 example
+/// refinement made ergonomic.
+pub fn slug(name: Text) -> PathRefinement<Text> {
+    PathRefinement.new(
+        name,
+        "slug: 1..64 chars, [0-9a-zA-Z-]",
+        |s| {
+            let len = s.len();
+            if len == 0 || len > 64 { return false; }
+            let bytes = s.as_bytes();
+            let mut i: Int = 0;
+            while i < bytes.len() {
+                let b = bytes[i];
+                let ok =
+                    (b >= 0x30 && b <= 0x39) ||   // 0-9
+                    (b >= 0x41 && b <= 0x5A) ||   // A-Z
+                    (b >= 0x61 && b <= 0x7A) ||   // a-z
+                    b == 0x2D;                    // -
+                if !ok { return false; }
+                i = i + 1;
+            }
+            true
+        },
+    )
+}

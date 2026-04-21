@@ -1,0 +1,50 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: net, weft, refinement, routes, predicate, phase5
+// @timeout: 10000
+// @expect: pass
+
+// §5.9 / §8.1 — PathRefinement + refined_path_int / refined_path_text.
+// Runtime-checked predicates; compile-time route-meta-fn lives in the
+// compiler and is a separate follow-up.
+
+mount core.collections.list.{List};
+mount core.net.weft.handler.{WeftRequest};
+mount core.net.weft.error.{ExtractRejection};
+mount core.net.weft.refined_routes.{
+    PathRefinement,
+    refined_path_int, refined_path_text,
+    int_between, text_one_of, slug,
+};
+
+fn typecheck_factories() -> (PathRefinement<Int>, PathRefinement<Text>, PathRefinement<Text>) {
+    let mut versions: List<Text> = List.new();
+    versions.push("v1"); versions.push("v2"); versions.push("v3");
+    (
+        int_between("id".into(), 1, 1_000_000_000),
+        text_one_of("version".into(), versions),
+        slug("handle".into()),
+    )
+}
+
+fn typecheck_custom_predicate() -> PathRefinement<Int> {
+    PathRefinement.new(
+        "port".into(),
+        "port in [1024, 65535]".into(),
+        |n| { *n >= 1024 && *n <= 65535 },
+    )
+}
+
+fn typecheck_extract_int(req: &mut WeftRequest, r: &PathRefinement<Int>) -> Result<Int, ExtractRejection> {
+    refined_path_int(req, r)
+}
+
+fn typecheck_extract_text(req: &mut WeftRequest, r: &PathRefinement<Text>) -> Result<Text, ExtractRejection> {
+    refined_path_text(req, r)
+}
+
+fn main() {
+    let _ = typecheck_factories();
+    let _ = typecheck_custom_predicate();
+}
