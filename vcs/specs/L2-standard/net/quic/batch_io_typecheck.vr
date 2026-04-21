@@ -1,0 +1,59 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: quic, rfc9000, batch-io, gso, gro, ecn, typecheck
+// @timeout: 10000
+// @expect: pass
+
+mount core.net.quic.transport.{
+    BatchTransport, BatchCapabilities, OutboundDatagram, RealBatchUdp,
+    DEFAULT_BATCH_SIZE, MAX_BATCH_SIZE,
+    EcnCodepoint, TransportError,
+};
+mount core.net.addr.{SocketAddr};
+mount core.collections.List;
+
+async fn exercise_batch_surface(t: &RealBatchUdp, peer: &SocketAddr)
+    -> Result<(), TransportError>
+{
+    // GSO pre-arm: 1200 bytes/segment (PMTU-ish).
+    let _ = t.enable_gso(1200_u16).await;
+    let _ = t.enable_gro().await;
+    let _ = t.enable_ecn().await;
+
+    // Build a two-datagram batch. Datagram 0 uses GSO (4 800-byte
+    // wire segments), datagram 1 is a plain Not-ECT Initial.
+    let mut d0: List<Byte> = [];
+    let mut i: Int = 0;
+    while i < 3200 { d0.push(0_u8); i = i + 1; }
+    let mut d1: List<Byte> = [];
+    let mut j: Int = 0;
+    while j < 64 { d1.push(1_u8); j = j + 1; }
+
+    let batch: List<OutboundDatagram> = [
+        OutboundDatagram {
+            bytes: d0, peer: peer.clone(),
+            ecn: EcnCodepoint.Ect0, gso_segment_size: 800_u16,
+        },
+        OutboundDatagram {
+            bytes: d1, peer: peer.clone(),
+            ecn: EcnCodepoint.NotEct, gso_segment_size: 0_u16,
+        },
+    ];
+    let _ = t.send_batch(&batch).await;
+
+    // Recv side: one syscall fetches up to DEFAULT_BATCH_SIZE datagrams.
+    let _ = t.recv_batch(DEFAULT_BATCH_SIZE).await;
+    let _ = t.recv_batch(MAX_BATCH_SIZE).await;
+
+    let _caps: BatchCapabilities = t.batch_capabilities();
+    let _none = BatchCapabilities.none();
+    Ok(())
+}
+
+fn main() {
+    // This test only typechecks the batch-I/O surface — the runtime
+    // path requires a bound socket, which `bind(...)` would provide
+    // when the system syscall intrinsics land in core.sys.linux.
+    let _ = exercise_batch_surface;
+}
