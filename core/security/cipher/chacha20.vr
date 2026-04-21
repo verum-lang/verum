@@ -75,12 +75,19 @@ const SIGMA: [UInt32; 4] = [
 // Quarter round — RFC 8439 §2.1
 // =============================================================================
 
+// Inlined rotate-left — avoids primitive-method dispatch in the
+// VBC interpreter, keeping the hot loop self-contained.
+@inline
+fn rotl32(x: UInt32, n: UInt32) -> UInt32 {
+    (x << n) | (x >> ((32 as UInt32) - n))
+}
+
 @inline
 fn quarter_round(s: &mut [UInt32; 16], a: Int, b: Int, c: Int, d: Int) {
-    s[a] = s[a].wrapping_add(s[b]); s[d] = (s[d] ^ s[a]).rotate_left(16);
-    s[c] = s[c].wrapping_add(s[d]); s[b] = (s[b] ^ s[c]).rotate_left(12);
-    s[a] = s[a].wrapping_add(s[b]); s[d] = (s[d] ^ s[a]).rotate_left(8);
-    s[c] = s[c].wrapping_add(s[d]); s[b] = (s[b] ^ s[c]).rotate_left(7);
+    s[a] = s[a].wrapping_add(s[b]); s[d] = rotl32(s[d] ^ s[a], 16);
+    s[c] = s[c].wrapping_add(s[d]); s[b] = rotl32(s[b] ^ s[c], 12);
+    s[a] = s[a].wrapping_add(s[b]); s[d] = rotl32(s[d] ^ s[a], 8);
+    s[c] = s[c].wrapping_add(s[d]); s[b] = rotl32(s[b] ^ s[c], 7);
 }
 
 // =============================================================================

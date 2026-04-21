@@ -244,7 +244,9 @@ implement Sha512 {
 
 @inline
 fn ch(x: UInt64, y: UInt64, z: UInt64) -> UInt64 {
-    (x & y) ^ ((x.not()) & z)
+    // Bitwise-NOT via XOR with all-ones — self-contained so we don't
+    // depend on primitive-type method dispatch in the VBC interpreter.
+    (x & y) ^ ((x ^ (0xFFFFFFFFFFFFFFFF as UInt64)) & z)
 }
 
 @inline
@@ -252,24 +254,31 @@ fn maj(x: UInt64, y: UInt64, z: UInt64) -> UInt64 {
     (x & y) ^ (x & z) ^ (y & z)
 }
 
+// Inlined rotate-right — self-contained so we don't depend on the
+// method-dispatch table for primitives in the VBC interpreter.
+@inline
+fn rotr64(x: UInt64, n: UInt64) -> UInt64 {
+    (x >> n) | (x << ((64 as UInt64) - n))
+}
+
 @inline
 fn big_sigma0(x: UInt64) -> UInt64 {
-    x.rotate_right(28) ^ x.rotate_right(34) ^ x.rotate_right(39)
+    rotr64(x, 28) ^ rotr64(x, 34) ^ rotr64(x, 39)
 }
 
 @inline
 fn big_sigma1(x: UInt64) -> UInt64 {
-    x.rotate_right(14) ^ x.rotate_right(18) ^ x.rotate_right(41)
+    rotr64(x, 14) ^ rotr64(x, 18) ^ rotr64(x, 41)
 }
 
 @inline
 fn small_sigma0(x: UInt64) -> UInt64 {
-    x.rotate_right(1) ^ x.rotate_right(8) ^ (x >> (7 as UInt64))
+    rotr64(x, 1) ^ rotr64(x, 8) ^ (x >> (7 as UInt64))
 }
 
 @inline
 fn small_sigma1(x: UInt64) -> UInt64 {
-    x.rotate_right(19) ^ x.rotate_right(61) ^ (x >> (6 as UInt64))
+    rotr64(x, 19) ^ rotr64(x, 61) ^ (x >> (6 as UInt64))
 }
 
 // =============================================================================

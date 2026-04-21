@@ -222,7 +222,9 @@ implement Sha256 {
 
 @inline
 fn ch(x: UInt32, y: UInt32, z: UInt32) -> UInt32 {
-    (x & y) ^ ((x.not()) & z)
+    // Bitwise-NOT via XOR with all-ones — self-contained so we don't
+    // depend on primitive-type method dispatch in the VBC interpreter.
+    (x & y) ^ ((x ^ (0xFFFFFFFF as UInt32)) & z)
 }
 
 @inline
@@ -230,24 +232,32 @@ fn maj(x: UInt32, y: UInt32, z: UInt32) -> UInt32 {
     (x & y) ^ (x & z) ^ (y & z)
 }
 
+// Rotate-right is inlined via shift-or to avoid depending on the
+// method-dispatch table for primitive types in the VBC interpreter;
+// keeps the reference implementation self-contained.
+@inline
+fn rotr32(x: UInt32, n: UInt32) -> UInt32 {
+    (x >> n) | (x << ((32 as UInt32) - n))
+}
+
 @inline
 fn big_sigma0(x: UInt32) -> UInt32 {
-    x.rotate_right(2) ^ x.rotate_right(13) ^ x.rotate_right(22)
+    rotr32(x, 2) ^ rotr32(x, 13) ^ rotr32(x, 22)
 }
 
 @inline
 fn big_sigma1(x: UInt32) -> UInt32 {
-    x.rotate_right(6) ^ x.rotate_right(11) ^ x.rotate_right(25)
+    rotr32(x, 6) ^ rotr32(x, 11) ^ rotr32(x, 25)
 }
 
 @inline
 fn small_sigma0(x: UInt32) -> UInt32 {
-    x.rotate_right(7) ^ x.rotate_right(18) ^ (x >> (3 as UInt32))
+    rotr32(x, 7) ^ rotr32(x, 18) ^ (x >> (3 as UInt32))
 }
 
 @inline
 fn small_sigma1(x: UInt32) -> UInt32 {
-    x.rotate_right(17) ^ x.rotate_right(19) ^ (x >> (10 as UInt32))
+    rotr32(x, 17) ^ rotr32(x, 19) ^ (x >> (10 as UInt32))
 }
 
 /// Core compression: merge one 64-byte block into hash state.
