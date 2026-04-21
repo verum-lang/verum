@@ -9,10 +9,10 @@
 
 // Context declarations
 context Logger {
-    fn log(&self, level: LogLevel, message: Text);
-    fn debug(&self, message: Text);
-    fn info(&self, message: Text);
-    fn error(&self, message: Text);
+    fn log(level: LogLevel, message: Text);
+    fn debug(message: Text);
+    fn info(message: Text);
+    fn error(message: Text);
 }
 
 context async Database {

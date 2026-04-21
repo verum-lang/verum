@@ -7,8 +7,8 @@
 
 // Depth tracking context
 context DepthTracker {
-    fn get_depth(&self) -> Int;
-    fn increment(&mut self);
+    fn get_depth() -> Int;
+    fn increment();
 }
 
 // Concrete implementation

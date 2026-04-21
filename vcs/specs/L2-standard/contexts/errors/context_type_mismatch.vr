@@ -9,13 +9,13 @@
 /// the expected context trait.
 
 context Database {
-    fn query(&self, sql: Text) -> Result<Rows, DbError>;
-    fn execute(&self, sql: Text) -> Result<Int, DbError>;
+    fn query(sql: Text) -> Result<Rows, DbError>;
+    fn execute(sql: Text) -> Result<Int, DbError>;
 }
 
 context Cache {
-    fn get(&self, key: Text) -> Maybe<Text>;
-    fn set(&self, key: Text, value: Text);
+    fn get(key: Text) -> Maybe<Text>;
+    fn set(key: Text, value: Text);
 }
 
 type PostgresDb is { conn: Text };
@@ -64,8 +64,8 @@ fn main() {
 
 /// More complex type mismatch: generic constraints
 context Repository<T> {
-    fn find(&self, id: Int) -> Maybe<T>;
-    fn save(&self, item: T) -> Result<Int, DbError>;
+    fn find(id: Int) -> Maybe<T>;
+    fn save(item: T) -> Result<Int, DbError>;
 }
 
 type User is { id: Int, name: Text };

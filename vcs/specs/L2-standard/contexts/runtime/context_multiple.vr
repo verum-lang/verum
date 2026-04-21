@@ -7,13 +7,13 @@
 
 // Logger context
 context Logger {
-    fn log(&self, message: Text);
+    fn log(message: Text);
 }
 
 // Metrics context
 context Metrics {
-    fn increment(&mut self);
-    fn get_counter(&self) -> Int;
+    fn increment();
+    fn get_counter() -> Int;
 }
 
 // Concrete implementations

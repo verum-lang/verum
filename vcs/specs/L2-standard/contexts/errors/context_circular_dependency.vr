@@ -9,11 +9,11 @@
 /// This would require each context to exist before the other.
 
 context ServiceA {
-    fn do_a(&self) -> Int;
+    fn do_a() -> Int;
 }
 
 context ServiceB {
-    fn do_b(&self) -> Int;
+    fn do_b() -> Int;
 }
 
 /// Type that requires ServiceB to construct
@@ -54,7 +54,7 @@ fn main() {
 
 /// Pattern 1: Lazy initialization
 context LazyServiceA {
-    fn get(&self) -> &ServiceA;
+    fn get() -> &ServiceA;
 }
 
 type LazyServiceAImpl is {
@@ -63,7 +63,7 @@ type LazyServiceAImpl is {
 
 /// Pattern 2: Trait objects with late binding
 context DynamicServiceA {
-    fn do_a(&self) -> Int;
+    fn do_a() -> Int;
 }
 
 type DynamicAImpl is {
@@ -72,8 +72,8 @@ type DynamicAImpl is {
 
 /// Pattern 3: Event-based communication
 context EventBus {
-    fn publish(&self, event: Event);
-    fn subscribe(&self, handler: fn(Event));
+    fn publish(event: Event);
+    fn subscribe(handler: fn(Event));
 }
 
 type Event is

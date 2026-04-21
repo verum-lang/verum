@@ -7,7 +7,7 @@
 
 // Configuration context
 context Config {
-    fn get_env(&self) -> Text;
+    fn get_env() -> Text;
 }
 
 // Concrete config implementations

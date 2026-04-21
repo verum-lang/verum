@@ -9,7 +9,7 @@
 /// values cannot escape their providing scope.
 
 context Database {
-    fn query(&self, sql: Text) -> Result<Rows, DbError>;
+    fn query(sql: Text) -> Result<Rows, DbError>;
 }
 
 type PostgresDb is { conn: Text };

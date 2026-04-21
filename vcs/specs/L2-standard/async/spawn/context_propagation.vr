@@ -9,11 +9,11 @@
 // through a single `value()` accessor; concrete providers implement
 // the protocol on a newtype wrapper around the payload type.
 context RequestId {
-    fn value(&self) -> Text;
+    fn value() -> Text;
 }
 
 context UserId {
-    fn value(&self) -> Text;
+    fn value() -> Text;
 }
 
 type RequestIdValue is { value: Text };

@@ -9,15 +9,15 @@
 /// Occurs when a required context is not available.
 
 context Database {
-    fn query(&self, sql: Text) -> Result<Rows, DbError>;
+    fn query(sql: Text) -> Result<Rows, DbError>;
 }
 
 context Logger {
-    fn log(&self, level: LogLevel, message: Text);
+    fn log(level: LogLevel, message: Text);
 }
 
 context Cache {
-    fn get(&self, key: Text) -> Maybe<Text>;
+    fn get(key: Text) -> Maybe<Text>;
 }
 
 /// Function requiring context

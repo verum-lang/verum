@@ -9,8 +9,8 @@
 /// a conflict occurs that must be resolved explicitly.
 
 context Database {
-    fn query(&self, sql: Text) -> Result<Rows, DbError>;
-    fn execute(&self, sql: Text) -> Result<Int, DbError>;
+    fn query(sql: Text) -> Result<Rows, DbError>;
+    fn execute(sql: Text) -> Result<Int, DbError>;
 }
 
 // Two implementations of Database

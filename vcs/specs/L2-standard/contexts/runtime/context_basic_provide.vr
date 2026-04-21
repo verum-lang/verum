@@ -7,8 +7,8 @@
 
 // A simple context for tracking a counter value
 context Counter {
-    fn get(&self) -> Int;
-    fn set(&mut self, value: Int);
+    fn get() -> Int;
+    fn set(value: Int);
 }
 
 // Concrete implementation

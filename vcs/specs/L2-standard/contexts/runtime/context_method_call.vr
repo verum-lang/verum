@@ -7,9 +7,9 @@
 
 // Logger context declaration
 context Logger {
-    fn debug(&self, message: Text);
-    fn info(&self, message: Text);
-    fn error(&self, message: Text);
+    fn debug(message: Text);
+    fn info(message: Text);
+    fn error(message: Text);
 }
 
 // Concrete logger implementation

@@ -263,7 +263,7 @@ type HierarchicalLock<T> is {
 
 // Thread-local to track current lock level
 context CurrentLockLevel {
-    fn level(&self) -> Int;
+    fn level() -> Int;
 }
 
 implement HierarchicalLock<T> {

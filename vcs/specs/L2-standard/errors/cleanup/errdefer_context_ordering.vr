@@ -17,23 +17,23 @@
 // === Context Definitions ===
 
 context Logger {
-    fn log(&self, level: LogLevel, message: &Text);
-    fn info(&self, message: &Text);
-    fn warn(&self, message: &Text);
-    fn error(&self, message: &Text);
+    fn log(level: LogLevel, message: &Text);
+    fn info(message: &Text);
+    fn warn(message: &Text);
+    fn error(message: &Text);
 }
 
 type LogLevel is Info | Warn | Error | Debug;
 
 context Database {
-    fn query(&self, sql: &Text) -> Result<QueryResult, DbError>;
-    fn connect(&self) -> Result<Connection, DbError>;
-    fn release(&self, conn: &Connection);
+    fn query(sql: &Text) -> Result<QueryResult, DbError>;
+    fn connect() -> Result<Connection, DbError>;
+    fn release(conn: &Connection);
 }
 
 context Metrics {
-    fn increment(&self, name: &Text);
-    fn record(&self, name: &Text, value: Int);
+    fn increment(name: &Text);
+    fn record(name: &Text, value: Int);
 }
 
 // === Supporting Types ===

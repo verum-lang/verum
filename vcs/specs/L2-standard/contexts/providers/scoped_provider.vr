@@ -37,9 +37,9 @@ implement ConnectionPool {
 
 // Request-scoped transaction
 context Transaction {
-    fn id(&self) -> Text;
-    fn commit(&mut self) -> Result<(), TransactionError>;
-    fn rollback(&mut self);
+    fn id() -> Text;
+    fn commit() -> Result<(), TransactionError>;
+    fn rollback();
 }
 
 type TransactionError is CommitFailed(Text);

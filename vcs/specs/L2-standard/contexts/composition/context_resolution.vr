@@ -10,8 +10,8 @@
 /// explicit naming resolves ambiguity.
 
 context Database {
-    fn query(&self, sql: Text) -> Result<Rows, DbError>;
-    fn name(&self) -> Text;
+    fn query(sql: Text) -> Result<Rows, DbError>;
+    fn name() -> Text;
 }
 
 type ProductionDb is { conn: Text };
@@ -80,12 +80,12 @@ fn inner_function() using [Database] {
 
 /// Multiple context inheritance
 context Logger {
-    fn log(&self, level: LogLevel, message: Text);
+    fn log(level: LogLevel, message: Text);
 }
 
 context Cache {
-    fn get(&self, key: Text) -> Maybe<Text>;
-    fn set(&self, key: Text, value: Text);
+    fn get(key: Text) -> Maybe<Text>;
+    fn set(key: Text, value: Text);
 }
 
 fn full_application() using [Database, Logger, Cache] {
