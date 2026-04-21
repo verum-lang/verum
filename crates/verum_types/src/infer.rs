@@ -2852,6 +2852,31 @@ impl TypeChecker {
     ///
     /// This is like check_expr but skips initialization checking,
     /// since the assignment is what initializes the variable.
+    /// Does `ty` directly define a field named `field_name`?
+    /// Used by the auto-deref cascade in assignment-target field
+    /// resolution — we only need a structural lookup, not full
+    /// unification.
+    fn type_has_field(&self, ty: &Type, field_name: &Text) -> bool {
+        match ty {
+            Type::Record(fields) => fields.contains_key(field_name),
+            Type::Named { path, .. } => {
+                let type_name = self.path_to_string(path);
+                let struct_key = format!("__struct_fields_{}", type_name);
+                matches!(
+                    self.ctx.lookup_type(struct_key.as_str()),
+                    Option::Some(Type::Record(fields)) if fields.contains_key(field_name)
+                )
+            }
+            Type::Text => {
+                matches!(
+                    self.ctx.lookup_type("__struct_fields_Text"),
+                    Option::Some(Type::Record(fields)) if fields.contains_key(field_name)
+                )
+            }
+            _ => false,
+        }
+    }
+
     fn check_expr_assignment_target(&mut self, expr: &Expr, expected: &Type) -> Result<InferResult> {
         use verum_ast::expr::ExprKind;
 
@@ -2875,11 +2900,43 @@ impl TypeChecker {
                 // Get the object type without init checking
                 let obj_result = self.synth_expr_for_field_access(obj)?;
                 let dereferenced_ty = self.unwrap_reference_type(&obj_result.ty);
-                let normalized_ty = self.normalize_type(dereferenced_ty);
+                let mut normalized_ty = self.normalize_type(dereferenced_ty);
 
                 // Never propagation: any field access on Never produces Never
                 if matches!(normalized_ty, Type::Never) {
                     return Ok(InferResult::new(Type::Never));
+                }
+
+                // Auto-deref cascade for smart-pointer receivers in
+                // assignment-target position. Without this,
+                //     let mut g = mutex.lock().unwrap();
+                //     g.val = 100;
+                // fails with "field 'val' not found in type 'MutexGuard'"
+                // even though MutexGuard impls DerefMut<Target = Inner>.
+                // We walk the Deref::Target chain (bounded to 8 hops
+                // to catch accidental cycles) until we find a type
+                // that actually has the field, or until no further
+                // Target is defined.
+                {
+                    let field_name_t: Text = field.name.as_str().into();
+                    let mut hops = 0;
+                    while hops < 8 && !self.type_has_field(&normalized_ty, &field_name_t) {
+                        let next = {
+                            let checker = self.protocol_checker.read();
+                            checker.try_find_associated_type(
+                                &normalized_ty,
+                                &verum_common::Text::from("Target"),
+                            )
+                        };
+                        match next {
+                            Some(target) => {
+                                let unwrapped = self.unwrap_reference_type(&target);
+                                normalized_ty = self.normalize_type(unwrapped);
+                                hops += 1;
+                            }
+                            None => break,
+                        }
+                    }
                 }
 
                 // Look up the field type

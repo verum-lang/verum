@@ -2700,6 +2700,17 @@ impl VbcCodegen {
             return Ok(result);
         }
 
+        // `format("fmt", args...)` — compile-time desugar into the
+        // InterpolatedString lowering path so it shares the exact same codegen
+        // as literal `f"..."`. Only matches the single-segment `format` name
+        // with a `Text` literal as first argument; anything else falls
+        // through to the normal function-lookup path.
+        if func_name == "format"
+            && let Some(result) = self.try_compile_format_call(args)?
+        {
+            return Ok(result);
+        }
+
         // Look up function - use arity-based disambiguation when available
         let (resolved_name, func_info) = match self.ctx.lookup_function_with_arity(&func_name, args.len()) {
             Some(info) => (func_name.clone(), info.clone()),
@@ -20799,6 +20810,108 @@ impl VbcCodegen {
     }
 
     // ==================== String Interpolation ====================
+
+    /// Desugar `format("fmt", args...)` at VBC codegen time by reusing the
+    /// `InterpolatedString` lowering path. Returns:
+    ///  - `Ok(Some(reg))` — format call matched and was emitted;
+    ///  - `Ok(None)`      — not a `format` shape we handle (empty args, first
+    ///                      arg isn't a `Text` literal, malformed fmt string,
+    ///                      or placeholder count ≠ supplied-arg count). The
+    ///                      caller falls through to the regular function
+    ///                      lookup path, which will raise `UndefinedFunction`
+    ///                      if no `format` is registered.
+    ///
+    /// Supported fmt syntax (anonymous placeholders only):
+    ///  - `{}` anonymous placeholder
+    ///  - `{:spec}` anonymous with spec (spec is discarded, matching the way
+    ///    `f"..."` currently strips its specifier at parse time)
+    ///  - `{{` / `}}` escaped braces
+    ///
+    /// Positional/named placeholders (`{0}`, `{name}`) are deliberately not
+    /// supported — they'd need either variable-binding rewriting or a
+    /// dedicated format-string AST node. The stdlib/L2 call sites all use the
+    /// anonymous form.
+    fn try_compile_format_call(
+        &mut self,
+        args: &verum_common::List<Expr>,
+    ) -> CodegenResult<Option<Option<Reg>>> {
+        if args.is_empty() {
+            return Ok(None);
+        }
+
+        // First arg must be a Text literal.
+        let fmt_str = match &args[0].kind {
+            ExprKind::Literal(lit) => match &lit.kind {
+                verum_ast::LiteralKind::Text(s) => s.as_str().to_string(),
+                _ => return Ok(None),
+            },
+            _ => return Ok(None),
+        };
+
+        // Parse fmt into parts + placeholder count, matching f-string semantics.
+        let mut parts: Vec<verum_common::Text> = Vec::new();
+        let mut current = String::new();
+        let mut chars = fmt_str.chars().peekable();
+        let mut placeholder_count: usize = 0;
+
+        while let Some(ch) = chars.next() {
+            match ch {
+                '{' => {
+                    if chars.peek() == Some(&'{') {
+                        chars.next();
+                        current.push('{');
+                        continue;
+                    }
+                    // Placeholder: consume up to matching `}` (accounting for
+                    // nested balanced braces — spec content may contain them).
+                    let mut depth = 0i32;
+                    let mut closed = false;
+                    for inner in chars.by_ref() {
+                        match inner {
+                            '{' => depth += 1,
+                            '}' if depth == 0 => {
+                                closed = true;
+                                break;
+                            }
+                            '}' => depth -= 1,
+                            _ => {}
+                        }
+                    }
+                    if !closed {
+                        return Ok(None);
+                    }
+                    parts.push(verum_common::Text::from(std::mem::take(&mut current)));
+                    placeholder_count += 1;
+                }
+                '}' => {
+                    if chars.peek() == Some(&'}') {
+                        chars.next();
+                        current.push('}');
+                    } else {
+                        return Ok(None);
+                    }
+                }
+                _ => current.push(ch),
+            }
+        }
+        parts.push(verum_common::Text::from(current));
+
+        // Arity: placeholders must match supplied args (excluding fmt literal).
+        let provided = args.len() - 1;
+        if placeholder_count != provided {
+            return Ok(None);
+        }
+
+        // Collect the interpolated expressions.
+        let exprs_list: verum_common::List<Expr> = args.iter().skip(1).cloned().collect();
+        let parts_list: verum_common::List<verum_common::Text> = parts.into();
+        let handler = verum_common::Text::from("f");
+
+        // Delegate to the existing interpolation codegen.
+        let reg = self.compile_interpolated_string(&handler, &parts_list, &exprs_list)?;
+        Ok(Some(reg))
+    }
+
 
     /// Compiles interpolated string: f"Hello {name}"
     fn compile_interpolated_string(
