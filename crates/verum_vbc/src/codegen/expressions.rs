@@ -5880,10 +5880,31 @@ impl VbcCodegen {
         inner_method: &verum_ast::Ident,
         outer_method_name: &verum_ast::Ident,
     ) -> String {
-        // Known methods that return UInt64
+        // Known methods that return UInt64.
+        //
+        // Root fix for Issue #6: do NOT include generic collection-shape
+        // methods (`len` / `capacity` / `count` / `size`) in this set —
+        // they exist on multiple types (List, Text, Slice, Map, Set, …)
+        // with `-> Int` return types, and hardcoding them forced EVERY
+        // chained `.len().something()` / `.size().something()` to
+        // dispatch to `uint64$something`. When no such primitive exists
+        // (e.g. `.min`, which `uint64` never implemented) the caller
+        // hit a runtime `method 'uint64$min' not found on value` panic.
+        //
+        // Narrative fix + stdlib-philosophy fix in one: keep only
+        // genuinely type-specific names whose return shape is `UInt64`
+        // across the stdlib by construction (Duration / Instant nanos
+        // accessors, `Float.to_bits`). Generic collection lengths flow
+        // through the proper FunctionInfo / variable_type_names path
+        // further down, which consults the actual declared return type
+        // rather than pattern-matching on a name.
+        //
+        // Per crates/verum_types/src/CLAUDE.md — "NEVER hardcode
+        // stdlib/core type knowledge in the compiler". This list
+        // shrinks to the minimum that's legitimately type-specific.
         const UINT64_METHODS: &[&str] = &[
             "as_nanos", "as_micros", "as_millis", "as_secs", "as_secs_f64",
-            "to_bits", "len", "capacity", "count", "size",
+            "to_bits",
             "elapsed_nanos", "elapsed_micros", "elapsed_millis", "elapsed_secs",
         ];
 

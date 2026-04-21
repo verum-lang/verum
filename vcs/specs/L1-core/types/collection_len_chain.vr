@@ -1,0 +1,49 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L1
+// @tags: method-dispatch, collection, len, chain, regression
+// @timeout: 5000
+// @expected-exit: 0
+//
+// Regression for Issue #6 (root fix in
+// crates/verum_vbc/src/codegen/expressions.rs
+// ::determine_method_return_type_prefix UINT64_METHODS list).
+//
+// `list.len()` / `text.len()` / `slice.len()` return `Int` per their
+// stdlib declarations. Prior to the fix, the prefix resolver had
+// `len` / `capacity` / `count` / `size` hardcoded into the
+// UINT64_METHODS table, which forced every chained
+// `collection.len().xxx()` / `collection.size().xxx()` call to
+// dispatch to `uint64$xxx`. For methods that don't exist on the u64
+// dispatch table (e.g., `min`, `max`), this surfaced as a runtime
+// `method 'uint64$min' not found on value` panic that blocked any
+// user code doing `path.len().min(4095)` etc. — a common pattern
+// that `core.sys.darwin.libsystem.safe_open` and countless other
+// stdlib helpers rely on.
+//
+// Removing the generic collection-shape names (`len` / `capacity` /
+// `count` / `size`) from the UINT64_METHODS allow-list lets the
+// proper FunctionInfo-based lookup downstream see the actual
+// declared `-> Int` return and dispatch to plain `int$min` / `int$max`.
+//
+// This also aligns the resolver with the CLAUDE.md invariant
+// "NEVER hardcode stdlib/core type knowledge in the compiler".
+
+mount collections.List;
+
+fn main() {
+    let mut b: List<Byte> = [];
+    b.push(0x41 as Byte);
+    b.push(0x42 as Byte);
+    b.push(0x43 as Byte);
+
+    // The exact pattern that broke `safe_open` upstream:
+    let clamped = b.len().min(2);
+    assert_eq(clamped, 2);
+
+    // And the symmetric `.max`:
+    let floored = b.len().max(10);
+    assert_eq(floored, 10);
+
+    print("collection_len_chain ok");
+}
