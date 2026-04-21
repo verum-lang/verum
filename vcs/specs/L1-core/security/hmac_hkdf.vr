@@ -1,0 +1,75 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L1
+// @tags: security, crypto, hmac, hkdf, sha2, rfc2104, rfc5869
+// @timeout: 10000
+// @expect: pass
+
+// RFC 2104 (HMAC) + RFC 5869 (HKDF) surface coverage across the three
+// SHA-2 variants. Byte-exact vectors discharged in run/hmac_rfc4231.vr
+// and run/hkdf_rfc5869.vr (L1-core/security/run/).
+
+mount core.collections.list.{List};
+mount core.security.mac.hmac.{
+    HmacSha256, HmacSha384, HmacSha512,
+    hmac_sha256, hmac_sha384, hmac_sha512,
+};
+mount core.security.kdf.hkdf.{
+    HkdfError,
+    hkdf_extract_sha256, hkdf_expand_sha256, hkdf_sha256,
+    hkdf_extract_sha384, hkdf_expand_sha384, hkdf_sha384,
+    hkdf_extract_sha512, hkdf_expand_sha512, hkdf_sha512,
+};
+
+fn typecheck_hmac_one_shot() -> ([Byte; 32], [Byte; 48], [Byte; 64]) {
+    let k = b"key";
+    let d = b"data";
+    (hmac_sha256(k, d), hmac_sha384(k, d), hmac_sha512(k, d))
+}
+
+fn typecheck_hmac_streaming() -> ([Byte; 32], [Byte; 48], [Byte; 64]) {
+    let mut a = HmacSha256.new(b"key");
+    a.update(b"part1");
+    a.update(b"part2");
+    let mut b = HmacSha384.new(b"key");
+    b.update(b"part1");
+    b.update(b"part2");
+    let mut c = HmacSha512.new(b"key");
+    c.update(b"part1");
+    c.update(b"part2");
+    (a.finalize(), b.finalize(), c.finalize())
+}
+
+fn typecheck_hkdf_extract() -> ([Byte; 32], [Byte; 48], [Byte; 64]) {
+    (
+        hkdf_extract_sha256(b"salt", b"ikm"),
+        hkdf_extract_sha384(b"salt", b"ikm"),
+        hkdf_extract_sha512(b"salt", b"ikm"),
+    )
+}
+
+fn typecheck_hkdf_expand_256() -> Result<(), HkdfError> {
+    let prk = hkdf_extract_sha256(b"salt", b"ikm");
+    let mut out: List<Byte> = List.new();
+    hkdf_expand_sha256(&prk, b"info", 42, &mut out)
+}
+
+fn typecheck_hkdf_expand_384() -> Result<(), HkdfError> {
+    let prk = hkdf_extract_sha384(b"salt", b"ikm");
+    let mut out: List<Byte> = List.new();
+    hkdf_expand_sha384(&prk, b"info", 48, &mut out)
+}
+
+fn typecheck_hkdf_combined() -> Result<(), HkdfError> {
+    let mut out: List<Byte> = List.new();
+    hkdf_sha512(b"salt", b"ikm", b"info", 64, &mut out)
+}
+
+fn main() {
+    let _ = typecheck_hmac_one_shot();
+    let _ = typecheck_hmac_streaming();
+    let _ = typecheck_hkdf_extract();
+    let _ = typecheck_hkdf_expand_256();
+    let _ = typecheck_hkdf_expand_384();
+    let _ = typecheck_hkdf_combined();
+}

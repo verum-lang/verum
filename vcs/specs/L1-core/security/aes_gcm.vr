@@ -1,0 +1,85 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L1
+// @tags: security, crypto, aes, aes-gcm, aead, nist, fips-197
+// @timeout: 10000
+// @expect: pass
+
+// FIPS 197 AES + NIST SP 800-38D GCM surface.
+
+mount core.collections.list.{List};
+mount core.security.cipher.aes.{
+    AesKey128, AesKey256,
+    RoundKeys128, RoundKeys256,
+    aes128_encrypt_block, aes256_encrypt_block,
+    BLOCK_SIZE,
+};
+mount core.security.aead.aes_gcm.{
+    Aes128Gcm, Aes256Gcm, GcmError,
+    GCM_IV_LEN, GCM_TAG_LEN,
+};
+
+fn typecheck_aes128_expand() -> RoundKeys128 {
+    let key: AesKey128 = [
+        0x2b, 0x7e, 0x15, 0x16, 0x28, 0xae, 0xd2, 0xa6,
+        0xab, 0xf7, 0x15, 0x88, 0x09, 0xcf, 0x4f, 0x3c,
+    ];
+    RoundKeys128.expand(&key)
+}
+
+fn typecheck_aes128_block_encrypt() -> [Byte; 16] {
+    let rk = typecheck_aes128_expand();
+    let mut block: [Byte; 16] = [
+        0x32, 0x43, 0xf6, 0xa8, 0x88, 0x5a, 0x30, 0x8d,
+        0x31, 0x31, 0x98, 0xa2, 0xe0, 0x37, 0x07, 0x34,
+    ];
+    aes128_encrypt_block(&rk, &mut block);
+    block
+}
+
+fn typecheck_aes256_expand() -> RoundKeys256 {
+    let key: AesKey256 = [0; 32];
+    RoundKeys256.expand(&key)
+}
+
+async fn typecheck_gcm128_seal() -> (List<Byte>, [Byte; 16]) {
+    let key: AesKey128 = [0; 16];
+    let iv: [Byte; 12] = [0; 12];
+    let cipher = Aes128Gcm.new(&key);
+    let mut ct = List.new();
+    let mut tag: [Byte; 16] = [0; 16];
+    cipher.encrypt(&iv, b"aad", b"hello world", &mut ct, &mut tag);
+    (ct, tag)
+}
+
+async fn typecheck_gcm128_open() -> Result<(), GcmError> {
+    let key: AesKey128 = [0; 16];
+    let iv: [Byte; 12] = [0; 12];
+    let cipher = Aes128Gcm.new(&key);
+    let mut ct = List.new();
+    let mut tag: [Byte; 16] = [0; 16];
+    cipher.encrypt(&iv, b"aad", b"hello", &mut ct, &mut tag);
+    let mut pt = List.new();
+    cipher.decrypt(&iv, b"aad", ct.as_slice(), &tag, &mut pt)
+}
+
+async fn typecheck_gcm256_roundtrip() -> Result<(), GcmError> {
+    let key: AesKey256 = [0; 32];
+    let iv: [Byte; 12] = [1; 12];
+    let cipher = Aes256Gcm.new(&key);
+    let mut ct = List.new();
+    let mut tag: [Byte; 16] = [0; 16];
+    cipher.encrypt(&iv, b"", b"hello256", &mut ct, &mut tag);
+    let mut pt = List.new();
+    cipher.decrypt(&iv, b"", ct.as_slice(), &tag, &mut pt)
+}
+
+fn typecheck_constants() -> (Int, Int, Int) {
+    (BLOCK_SIZE, GCM_IV_LEN, GCM_TAG_LEN)
+}
+
+fn main() {
+    let _ = typecheck_aes128_block_encrypt();
+    let _ = typecheck_aes256_expand();
+    let _ = typecheck_constants();
+}

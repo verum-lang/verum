@@ -1,0 +1,54 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L1
+// @tags: security, crypto, hash, sha2, sha256, sha384, sha512, nist-kat
+// @timeout: 10000
+// @expect: pass
+
+// FIPS 180-4 SHA-256 / SHA-384 / SHA-512 surface + streaming API.
+// Full NIST KAT discharge runs in `run` tests under L1-core/security/run/;
+// this file validates shape at typecheck level.
+
+mount core.security.hash.sha256.{Sha256,
+    BLOCK_SIZE as SHA256_BLOCK, OUTPUT_SIZE as SHA256_OUTPUT};
+mount core.security.hash.sha384.{Sha384,
+    BLOCK_SIZE as SHA384_BLOCK, OUTPUT_SIZE as SHA384_OUTPUT};
+mount core.security.hash.sha512.{Sha512,
+    BLOCK_SIZE as SHA512_BLOCK, OUTPUT_SIZE as SHA512_OUTPUT};
+
+fn typecheck_sha256() -> [Byte; 32] {
+    let mut s = Sha256.new();
+    s.update(b"abc");
+    s.finalize()
+}
+
+fn typecheck_sha384() -> [Byte; 48] {
+    let mut s = Sha384.new();
+    s.update(b"abc");
+    s.finalize()
+}
+
+fn typecheck_sha512() -> [Byte; 64] {
+    let mut s = Sha512.new();
+    s.update(b"abc");
+    s.finalize()
+}
+
+fn typecheck_oneshot() -> (Int, Int, Int) {
+    let a: [Byte; 32] = Sha256.digest(b"abc");
+    let b: [Byte; 48] = Sha384.digest(b"abc");
+    let c: [Byte; 64] = Sha512.digest(b"abc");
+    (SHA256_OUTPUT + a.len(), SHA384_OUTPUT + b.len(), SHA512_OUTPUT + c.len())
+}
+
+fn typecheck_block_sizes() -> (Int, Int, Int) {
+    (SHA256_BLOCK, SHA384_BLOCK, SHA512_BLOCK)
+}
+
+fn main() {
+    let _ = typecheck_sha256();
+    let _ = typecheck_sha384();
+    let _ = typecheck_sha512();
+    let _ = typecheck_oneshot();
+    let _ = typecheck_block_sizes();
+}

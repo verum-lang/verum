@@ -1,0 +1,47 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L1
+// @tags: security, crypto, x25519, curve25519, ecdh, rfc7748, tls13
+// @timeout: 10000
+// @expect: pass
+
+// RFC 7748 X25519 surface + clamping + all-zero-output rejection.
+
+mount core.security.ecc.x25519.{
+    X25519, X25519SecretKey, X25519PublicKey, X25519SharedSecret,
+    X25519Error,
+    SCALAR_SIZE, POINT_SIZE, SHARED_SECRET_SIZE, BASE_POINT,
+};
+
+fn typecheck_sizes() -> (Int, Int, Int) {
+    (SCALAR_SIZE, POINT_SIZE, SHARED_SECRET_SIZE)
+}
+
+fn typecheck_from_bytes() -> X25519SecretKey {
+    let raw: [Byte; 32] = [
+        0x77, 0x07, 0x6d, 0x0a, 0x73, 0x18, 0xa5, 0x7d,
+        0x3c, 0x16, 0xc1, 0x72, 0x51, 0xb2, 0x66, 0x45,
+        0xdf, 0x4c, 0x2f, 0x87, 0xeb, 0xc0, 0x99, 0x2a,
+        0xb1, 0x77, 0xfb, 0xa5, 0x1d, 0xb9, 0x2c, 0x2a,
+    ];
+    X25519.secret_key_from_bytes(&raw)
+}
+
+fn typecheck_pubkey_derivation(sk: &X25519SecretKey) -> X25519PublicKey {
+    X25519.public_key(sk)
+}
+
+fn typecheck_dh(sk: &X25519SecretKey, pk: &X25519PublicKey)
+    -> Result<X25519SharedSecret, X25519Error>
+{
+    X25519.diffie_hellman(sk, pk)
+}
+
+fn typecheck_base_point() -> [Byte; 32] { BASE_POINT }
+
+fn main() {
+    let sk = typecheck_from_bytes();
+    let _ = typecheck_pubkey_derivation(&sk);
+    let _ = typecheck_base_point();
+    let _ = typecheck_sizes();
+}

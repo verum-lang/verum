@@ -1,0 +1,190 @@
+// =============================================================================
+// security/aead/chacha20_poly1305.vr — ChaCha20-Poly1305 AEAD (RFC 8439)
+// =============================================================================
+// Layer: 3 (depends on cipher/chacha20 + mac/poly1305)
+// Dependencies: core.security.cipher.chacha20
+//               core.security.mac.poly1305
+//               core.security.util.constant_time
+// Reference: RFC 8439 §2.8 — AEAD construction
+//            RFC 7905 — TLS cipher-suite registration
+//            RFC 9001 — QUIC usage
+// =============================================================================
+//
+// The RFC 8439 AEAD construction combining ChaCha20 and Poly1305.
+// This is the mandatory-to-implement cipher for TLS 1.3
+// (`TLS_CHACHA20_POLY1305_SHA256`) and a first-class choice for QUIC
+// on hosts without AES hardware.
+//
+// # Construction (RFC 8439 §2.8.1)
+//
+// ```
+// poly_key = ChaCha20-Block(key, counter=0, nonce) [first 32 bytes]
+// ciphertext = ChaCha20-XOR(key, counter=1, nonce, plaintext)
+// mac_data =
+//      AAD                || pad16(AAD)
+//   || ciphertext         || pad16(ciphertext)
+//   || len(AAD)   (8 LE)  || len(ciphertext) (8 LE)
+// tag = Poly1305(poly_key, mac_data)
+// ```
+//
+// Poly1305 is used exactly once per (key, nonce) pair — poly_key is
+// regenerated each call via ChaCha20(counter=0). Never reuse a nonce.
+//
+// # API
+//
+//   * `ChaCha20Poly1305.new(&key)` — precomputes nothing (stateless
+//     pair with fresh per-message poly_key).
+//   * `.encrypt(iv, aad, plaintext, &mut ciphertext, &mut tag)`.
+//   * `.decrypt(iv, aad, ciphertext, &tag, &mut plaintext)` — tag
+//     verified in constant time before any plaintext is exposed.
+//
+// # Errors
+//
+//   * `TagMismatch`   — integrity check failed; output NOT usable.
+//
+// =============================================================================
+
+module core.security.aead.chacha20_poly1305;
+mount core.*;
+mount core.collections.list.{List};
+mount core.security.cipher.chacha20.{
+    ChaChaKey, ChaChaNonce,
+    chacha20_block, chacha20_xor,
+};
+mount core.security.mac.poly1305.{
+    Poly1305, Poly1305Key, Poly1305Tag, poly1305_mac,
+};
+mount core.security.util.constant_time.{constant_time_eq};
+
+// =============================================================================
+// Constants
+// =============================================================================
+
+public const KEY_SIZE: Int = 32;
+public const NONCE_SIZE: Int = 12;
+public const TAG_SIZE: Int = 16;
+
+public type AeadError is
+    | TagMismatch
+    | InvalidInput { reason: Text };
+
+// =============================================================================
+// Keyed AEAD
+// =============================================================================
+
+public type ChaCha20Poly1305 is {
+    key: ChaChaKey,
+};
+
+implement ChaCha20Poly1305 {
+    pub fn new(key: &ChaChaKey) -> ChaCha20Poly1305 {
+        let mut k: [Byte; 32] = [0; 32];
+        let mut i = 0;
+        while i < 32 { k[i] = key[i]; i = i + 1; }
+        ChaCha20Poly1305 { key: k }
+    }
+
+    /// Seal plaintext → (ciphertext, 16-byte tag).
+    pub fn encrypt(
+        &self,
+        nonce: &ChaChaNonce,
+        aad: &[Byte],
+        plaintext: &[Byte],
+        ciphertext: &mut List<Byte>,
+        tag: &mut [Byte; 16],
+    ) {
+        // Derive one-time Poly1305 key from ChaCha20(counter=0).
+        let block0 = chacha20_block(&self.key, 0, nonce);
+        let mut poly_key: Poly1305Key = [0; 32];
+        let mut i = 0;
+        while i < 32 { poly_key[i] = block0[i]; i = i + 1; }
+
+        // Encrypt body starting at counter=1.
+        let ct_start_len = ciphertext.len();
+        chacha20_xor(&self.key, 1, nonce, plaintext, ciphertext);
+
+        // Compute tag over AAD || pad16 || C || pad16 || len(A)||len(C).
+        let mut mac = Poly1305.new(&poly_key);
+        mac.update(aad);
+        pad_to_16(aad.len(), &mut mac);
+        let ct_slice = ciphertext.as_slice();
+        let ct_view = &ct_slice[ct_start_len..ct_slice.len()];
+        mac.update(ct_view);
+        pad_to_16(ct_view.len(), &mut mac);
+
+        // 8-byte LE length encodings.
+        let mut lens: [Byte; 16] = [0; 16];
+        write_u64_le(aad.len() as UInt64, &mut lens, 0);
+        write_u64_le(ct_view.len() as UInt64, &mut lens, 8);
+        mac.update(&lens);
+
+        let t = mac.finalize();
+        let mut j = 0;
+        while j < 16 { tag[j] = t[j]; j = j + 1; }
+    }
+
+    /// Open ciphertext; fails (TagMismatch) without exposing plaintext
+    /// if integrity check fails.
+    pub fn decrypt(
+        &self,
+        nonce: &ChaChaNonce,
+        aad: &[Byte],
+        ciphertext: &[Byte],
+        tag: &[Byte; 16],
+        plaintext: &mut List<Byte>,
+    ) -> Result<(), AeadError> {
+        // Derive poly_key.
+        let block0 = chacha20_block(&self.key, 0, nonce);
+        let mut poly_key: Poly1305Key = [0; 32];
+        let mut i = 0;
+        while i < 32 { poly_key[i] = block0[i]; i = i + 1; }
+
+        // Recompute tag FIRST — do not decrypt unless it matches.
+        let mut mac = Poly1305.new(&poly_key);
+        mac.update(aad);
+        pad_to_16(aad.len(), &mut mac);
+        mac.update(ciphertext);
+        pad_to_16(ciphertext.len(), &mut mac);
+
+        let mut lens: [Byte; 16] = [0; 16];
+        write_u64_le(aad.len() as UInt64, &mut lens, 0);
+        write_u64_le(ciphertext.len() as UInt64, &mut lens, 8);
+        mac.update(&lens);
+
+        let expected = mac.finalize();
+        if !constant_time_eq(&expected, tag) {
+            return Err(AeadError.TagMismatch);
+        }
+
+        // Tag valid — decrypt.
+        chacha20_xor(&self.key, 1, nonce, ciphertext, plaintext);
+        Ok(())
+    }
+}
+
+// =============================================================================
+// Helpers
+// =============================================================================
+
+/// Feed N zero bytes to bring a running running-byte counter up to
+/// the next 16-byte boundary. Used by RFC 8439 pad16().
+fn pad_to_16(length: Int, mac: &mut Poly1305) {
+    let rem = length & 15;
+    if rem == 0 { return; }
+    let pad_len = 16 - rem;
+    let zeros: [Byte; 16] = [0; 16];
+    let slice = &zeros[0..pad_len];
+    mac.update(slice);
+}
+
+/// Write a 64-bit value little-endian into `dst[off..off+8]`.
+fn write_u64_le(v: UInt64, dst: &mut [Byte; 16], off: Int) {
+    dst[off + 0] = (v & 0xFF) as Byte;
+    dst[off + 1] = ((v >> 8) & 0xFF) as Byte;
+    dst[off + 2] = ((v >> 16) & 0xFF) as Byte;
+    dst[off + 3] = ((v >> 24) & 0xFF) as Byte;
+    dst[off + 4] = ((v >> 32) & 0xFF) as Byte;
+    dst[off + 5] = ((v >> 40) & 0xFF) as Byte;
+    dst[off + 6] = ((v >> 48) & 0xFF) as Byte;
+    dst[off + 7] = ((v >> 56) & 0xFF) as Byte;
+}

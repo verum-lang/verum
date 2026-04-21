@@ -1,147 +1,124 @@
 // =============================================================================
-// security/kdf/hkdf.vr — HKDF-SHA-256 (RFC 5869)
+// security/kdf/hkdf.vr — HKDF (RFC 5869) — SHA-256 / SHA-384 / SHA-512
 // =============================================================================
-// Layer: 3 (depends on hmac)
+// Layer: 2 (depends on HMAC primitive)
 // Dependencies: core.security.mac.hmac
-// Reference: RFC 5869, Appendix A (test vectors)
+// Reference: RFC 5869, NIST SP 800-56C Rev.2
 // =============================================================================
 //
-// HMAC-based Key Derivation Function. Two-step: extract (compress high-
-// entropy input to a uniform pseudorandom key) + expand (generate
-// arbitrary-length output from that key). Used in TLS 1.3 key schedule,
-// QUIC-TLS, Noise Protocol, SPIFFE JWT validation.
+// Two-stage HMAC-based key-derivation function:
 //
-// # Algorithm (RFC 5869)
+//   1. `hkdf_extract_*(salt, ikm)` — compresses low-entropy input
+//      keying material (IKM) into a fixed-length pseudorandom key
+//      (PRK). `salt` can be empty (treated as an all-zeros HashLen
+//      salt per RFC 5869 §2.2).
 //
-// ```
-// extract:
-//     salt := salt or zero-filled(HASH_LEN)
-//     PRK := HMAC-Hash(salt, IKM)
+//   2. `hkdf_expand_*(prk, info, length, out)` — expands the PRK into
+//      `length` bytes of output keyed by the optional `info` context
+//      string. Up to 255 × HashLen bytes total.
 //
-// expand:
-//     N = ceil(L / HASH_LEN)
-//     T[0] = ""
-//     T[i] = HMAC-Hash(PRK, T[i-1] || info || i)    for i = 1..N
-//     OKM = T[1] || T[2] || ... || T[N]  (truncated to L bytes)
-// ```
+// # Three variants, one algorithm
 //
-// # Usage
+// The algorithm is identical across hash primitives; only the HashLen
+// output size varies. We ship explicit entry-points per variant
+// because call-sites benefit from the fixed-size return type of the
+// `extract` stage:
 //
-// ```verum
-// // Common pattern — do both in one call:
-// let mut out: List<Byte> = List.with_capacity(42);
-// hkdf_sha256(&salt, &ikm, &info, 42, &mut out)?;
+//   | Hash     | HashLen | hkdf_extract_* | Extract return    |
+//   |----------|---------|----------------|-------------------|
+//   | SHA-256  | 32      | _sha256        | [Byte; 32]        |
+//   | SHA-384  | 48      | _sha384        | [Byte; 48]        |
+//   | SHA-512  | 64      | _sha512        | [Byte; 64]        |
 //
-// // Or step-by-step for efficiency when reusing PRK:
-// let prk: [Byte; 32] = hkdf_extract_sha256(&salt, &ikm);
-// hkdf_expand_sha256(&prk, &info_1, &mut out_1, 32)?;
-// hkdf_expand_sha256(&prk, &info_2, &mut out_2, 48)?;
-// ```
+// `expand` consumes the PRK by slice + writes to `List<Byte>`, so it
+// is variant-aware only through its `HashLen` constant.
+//
+// # TLS 1.3 + QUIC HKDF-Expand-Label
+//
+// Both protocols layer a "HKDF-Expand-Label" macro on top of
+// `hkdf_expand` — a fixed label-schema that gets hashed with the
+// context to form the `info` parameter. That macro lives in
+// `core/net/tls.vr` (and will be re-used by `core/net/quic/crypto`)
+// because the label set is protocol-specific; this file keeps the
+// primitive pure.
 //
 // =============================================================================
 
 module core.security.kdf.hkdf;
 mount core.*;
-mount core.security.mac.hmac.{HmacSha256, hmac_sha256};
-mount core.security.hash.sha256.OUTPUT_SIZE as HASH_LEN;
+mount core.security.mac.hmac.{
+    HmacSha256, hmac_sha256,
+    HmacSha384, hmac_sha384,
+    HmacSha512, hmac_sha512,
+};
+mount core.security.hash.sha256.OUTPUT_SIZE as SHA256_LEN;
+mount core.security.hash.sha384.OUTPUT_SIZE as SHA384_LEN;
+mount core.security.hash.sha512.OUTPUT_SIZE as SHA512_LEN;
 
 // =============================================================================
-// HKDF-Extract — compress IKM to uniform PRK
+// Common errors
 // =============================================================================
-
-/// RFC 5869 §2.2 — compress input keying material to a 32-byte
-/// pseudorandom key. `salt` may be empty (uses an all-zeros salt
-/// per the spec).
-public fn hkdf_extract_sha256(salt: &[Byte], ikm: &[Byte]) -> [Byte; 32] {
-    if salt.len() == 0 {
-        let zero_salt: [Byte; 32] = [0; 32];
-        hmac_sha256(&zero_salt, ikm)
-    } else {
-        hmac_sha256(salt, ikm)
-    }
-}
-
-// =============================================================================
-// HKDF-Expand — derive output of arbitrary length
-// =============================================================================
-
-/// Maximum output length per RFC 5869 §2.3: 255 × HashLen.
-/// For SHA-256: 255 × 32 = 8160 bytes.
-public const MAX_EXPAND_OUTPUT: Int = 255 * 32;
 
 public type HkdfError is
     | OutputTooLong { requested: Int, limit: Int }
     | InvalidPrk { len: Int };
 
-/// RFC 5869 §2.3 — expand `prk` into `out` with optional context `info`.
-/// `out.len()` determines how much material is produced, up to 8160 bytes.
-///
-/// The output buffer is appended to (push_back); callers can reserve
-/// capacity upfront for zero-allocation expansion.
+// =============================================================================
+// SHA-256 variant
+// =============================================================================
+
+/// Maximum expand output — RFC 5869 §2.3: 255 × HashLen.
+pub const MAX_EXPAND_OUTPUT_256: Int = 255 * 32;
+
+public fn hkdf_extract_sha256(salt: &[Byte], ikm: &[Byte]) -> [Byte; 32] {
+    if salt.len() == 0 {
+        let zero: [Byte; 32] = [0; 32];
+        hmac_sha256(&zero, ikm)
+    } else {
+        hmac_sha256(salt, ikm)
+    }
+}
+
 public fn hkdf_expand_sha256(
     prk: &[Byte],
     info: &[Byte],
     length: Int,
     out: &mut List<Byte>,
 ) -> Result<(), HkdfError> {
-    if prk.len() < HASH_LEN {
+    if prk.len() < SHA256_LEN {
         return Err(HkdfError.InvalidPrk { len: prk.len() });
     }
-    if length > MAX_EXPAND_OUTPUT {
-        return Err(HkdfError.OutputTooLong {
-            requested: length,
-            limit: MAX_EXPAND_OUTPUT,
-        });
+    if length > MAX_EXPAND_OUTPUT_256 {
+        return Err(HkdfError.OutputTooLong { requested: length, limit: MAX_EXPAND_OUTPUT_256 });
     }
     if length <= 0 { return Ok(()); }
 
-    // N = ceil(length / HASH_LEN)
-    let n_blocks = (length + HASH_LEN - 1) / HASH_LEN;
-
-    // T(i) chain.
+    let n_blocks = (length + SHA256_LEN - 1) / SHA256_LEN;
     let mut t_prev: [Byte; 32] = [0; 32];
     let mut produced = 0;
 
     let mut i = 1;
     while i <= n_blocks {
-        // T(i) = HMAC(PRK, T(i-1) || info || counter_byte)
         let mut mac = HmacSha256.new(prk);
-        if i > 1 {
-            mac.update(&t_prev);
-        }
+        if i > 1 { mac.update(&t_prev); }
         mac.update(info);
-        // Single-byte counter; i is always 1..=255 guaranteed by
-        // the N ≤ 255 check in the length-limit logic above.
         let ctr: [Byte; 1] = [i as Byte];
         mac.update(&ctr);
         let t_i = mac.finalize();
 
-        // Append to output, truncating last block if needed.
-        let take = if produced + HASH_LEN > length {
-            length - produced
-        } else {
-            HASH_LEN
-        };
+        let take = if produced + SHA256_LEN > length { length - produced } else { SHA256_LEN };
         let mut j = 0;
         while j < take { out.push(t_i[j]); j = j + 1; }
         produced = produced + take;
 
-        // Chain: T(i) becomes T(i-1) for next iteration.
         let mut k = 0;
-        while k < HASH_LEN { t_prev[k] = t_i[k]; k = k + 1; }
-
+        while k < SHA256_LEN { t_prev[k] = t_i[k]; k = k + 1; }
         i = i + 1;
     }
-
     Ok(())
 }
 
-// =============================================================================
-// One-shot HKDF (extract + expand combined)
-// =============================================================================
-
-/// RFC 5869 §2 combined extract+expand. Convenience wrapper when PRK
-/// is single-use.
+/// Combined HKDF-SHA-256 — extract + expand in one call.
 public fn hkdf_sha256(
     salt: &[Byte],
     ikm: &[Byte],
@@ -151,4 +128,134 @@ public fn hkdf_sha256(
 ) -> Result<(), HkdfError> {
     let prk = hkdf_extract_sha256(salt, ikm);
     hkdf_expand_sha256(&prk, info, length, out)
+}
+
+// =============================================================================
+// SHA-384 variant
+// =============================================================================
+
+pub const MAX_EXPAND_OUTPUT_384: Int = 255 * 48;
+
+public fn hkdf_extract_sha384(salt: &[Byte], ikm: &[Byte]) -> [Byte; 48] {
+    if salt.len() == 0 {
+        let zero: [Byte; 48] = [0; 48];
+        hmac_sha384(&zero, ikm)
+    } else {
+        hmac_sha384(salt, ikm)
+    }
+}
+
+public fn hkdf_expand_sha384(
+    prk: &[Byte],
+    info: &[Byte],
+    length: Int,
+    out: &mut List<Byte>,
+) -> Result<(), HkdfError> {
+    if prk.len() < SHA384_LEN {
+        return Err(HkdfError.InvalidPrk { len: prk.len() });
+    }
+    if length > MAX_EXPAND_OUTPUT_384 {
+        return Err(HkdfError.OutputTooLong { requested: length, limit: MAX_EXPAND_OUTPUT_384 });
+    }
+    if length <= 0 { return Ok(()); }
+
+    let n_blocks = (length + SHA384_LEN - 1) / SHA384_LEN;
+    let mut t_prev: [Byte; 48] = [0; 48];
+    let mut produced = 0;
+
+    let mut i = 1;
+    while i <= n_blocks {
+        let mut mac = HmacSha384.new(prk);
+        if i > 1 { mac.update(&t_prev); }
+        mac.update(info);
+        let ctr: [Byte; 1] = [i as Byte];
+        mac.update(&ctr);
+        let t_i = mac.finalize();
+
+        let take = if produced + SHA384_LEN > length { length - produced } else { SHA384_LEN };
+        let mut j = 0;
+        while j < take { out.push(t_i[j]); j = j + 1; }
+        produced = produced + take;
+
+        let mut k = 0;
+        while k < SHA384_LEN { t_prev[k] = t_i[k]; k = k + 1; }
+        i = i + 1;
+    }
+    Ok(())
+}
+
+public fn hkdf_sha384(
+    salt: &[Byte],
+    ikm: &[Byte],
+    info: &[Byte],
+    length: Int,
+    out: &mut List<Byte>,
+) -> Result<(), HkdfError> {
+    let prk = hkdf_extract_sha384(salt, ikm);
+    hkdf_expand_sha384(&prk, info, length, out)
+}
+
+// =============================================================================
+// SHA-512 variant
+// =============================================================================
+
+pub const MAX_EXPAND_OUTPUT_512: Int = 255 * 64;
+
+public fn hkdf_extract_sha512(salt: &[Byte], ikm: &[Byte]) -> [Byte; 64] {
+    if salt.len() == 0 {
+        let zero: [Byte; 64] = [0; 64];
+        hmac_sha512(&zero, ikm)
+    } else {
+        hmac_sha512(salt, ikm)
+    }
+}
+
+public fn hkdf_expand_sha512(
+    prk: &[Byte],
+    info: &[Byte],
+    length: Int,
+    out: &mut List<Byte>,
+) -> Result<(), HkdfError> {
+    if prk.len() < SHA512_LEN {
+        return Err(HkdfError.InvalidPrk { len: prk.len() });
+    }
+    if length > MAX_EXPAND_OUTPUT_512 {
+        return Err(HkdfError.OutputTooLong { requested: length, limit: MAX_EXPAND_OUTPUT_512 });
+    }
+    if length <= 0 { return Ok(()); }
+
+    let n_blocks = (length + SHA512_LEN - 1) / SHA512_LEN;
+    let mut t_prev: [Byte; 64] = [0; 64];
+    let mut produced = 0;
+
+    let mut i = 1;
+    while i <= n_blocks {
+        let mut mac = HmacSha512.new(prk);
+        if i > 1 { mac.update(&t_prev); }
+        mac.update(info);
+        let ctr: [Byte; 1] = [i as Byte];
+        mac.update(&ctr);
+        let t_i = mac.finalize();
+
+        let take = if produced + SHA512_LEN > length { length - produced } else { SHA512_LEN };
+        let mut j = 0;
+        while j < take { out.push(t_i[j]); j = j + 1; }
+        produced = produced + take;
+
+        let mut k = 0;
+        while k < SHA512_LEN { t_prev[k] = t_i[k]; k = k + 1; }
+        i = i + 1;
+    }
+    Ok(())
+}
+
+public fn hkdf_sha512(
+    salt: &[Byte],
+    ikm: &[Byte],
+    info: &[Byte],
+    length: Int,
+    out: &mut List<Byte>,
+) -> Result<(), HkdfError> {
+    let prk = hkdf_extract_sha512(salt, ikm);
+    hkdf_expand_sha512(&prk, info, length, out)
 }

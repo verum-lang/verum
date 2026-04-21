@@ -263,11 +263,14 @@ fn compress_block(h: &mut [UInt32; 8], block: &[Byte; 64]) {
     let mut w: [UInt32; 64] = [0; 64];
 
     // Load W[0..16] from block as big-endian u32 words.
+    // Parens around each cast-and-shift are load-bearing: Verum's
+    // parser reads `UInt32 <<` as the start of a generic-argument
+    // list without them.
     let mut t = 0;
     while t < 16 {
-        w[t] = (block[t * 4 + 0] as UInt32 << 24)
-             | (block[t * 4 + 1] as UInt32 << 16)
-             | (block[t * 4 + 2] as UInt32 << 8)
+        w[t] = ((block[t * 4 + 0] as UInt32) << 24)
+             | ((block[t * 4 + 1] as UInt32) << 16)
+             | ((block[t * 4 + 2] as UInt32) << 8)
              | (block[t * 4 + 3] as UInt32);
         t = t + 1;
     }

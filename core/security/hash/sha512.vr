@@ -1,0 +1,359 @@
+// =============================================================================
+// security/hash/sha512.vr — SHA-512 (FIPS 180-4)
+// =============================================================================
+// Layer: 2 (depends on core primitives only)
+// Dependencies: core
+// Reference: FIPS PUB 180-4 §6.4 — SHA-512 specification
+//            RFC 6234 (informational)
+// =============================================================================
+//
+// SHA-512 is the 64-bit variant of the SHA-2 family. It operates on
+// 128-byte blocks, uses 64-bit words, runs 80 rounds, and produces a
+// 64-byte (512-bit) digest.
+//
+// It is the core primitive for:
+//
+//   * TLS 1.3 ciphersuite `TLS_AES_256_GCM_SHA384` (SHA-384 is a
+//     truncation of SHA-512; see `sha384.vr`, which is 20 lines on
+//     top of this module).
+//   * Ed25519 signatures (RFC 8032) — pre-hash stage uses SHA-512.
+//   * HKDF-SHA512 key-derivation for higher-security-margin protocols.
+//
+// # Usage
+//
+// ```verum
+// // One-shot
+// let digest: [Byte; 64] = Sha512.digest(b"hello");
+//
+// // Streaming
+// let mut s = Sha512.new();
+// s.update(chunk1);
+// s.update(chunk2);
+// let digest: [Byte; 64] = s.finalize();
+// ```
+//
+// # Performance
+//
+// Reference implementation runs ~150-250 MB/s on modern x86_64 with
+// `@inline`-folded rounds. For bulk workloads enable the accelerated
+// `crypto-accel` feature, which substitutes `compress_block` with
+// hand-written AVX2 / ARMv8 SHA-512 extensions (~2-4 GB/s).
+//
+// # Safety
+//
+// Constant-time by construction: no data-dependent branches, no
+// memory accesses indexed by secret data. Word constants (H_INIT,
+// K) are fixed; round loop is straight-line.
+//
+// =============================================================================
+
+module core.security.hash.sha512;
+mount core.*;
+
+// =============================================================================
+// Constants — FIPS 180-4 §4.2.3
+// =============================================================================
+
+/// Initial hash values — first 64 bits of the fractional parts of the
+/// square roots of the first 8 primes 2..19. FIPS 180-4 §5.3.5.
+const H_INIT: [UInt64; 8] = [
+    0x6A09E667F3BCC908, 0xBB67AE8584CAA73B,
+    0x3C6EF372FE94F82B, 0xA54FF53A5F1D36F1,
+    0x510E527FADE682D1, 0x9B05688C2B3E6C1F,
+    0x1F83D9ABFB41BD6B, 0x5BE0CD19137E2179,
+];
+
+/// Round constants — first 64 bits of the fractional parts of the
+/// cube roots of the first 80 primes 2..409. FIPS 180-4 §4.2.3.
+const K: [UInt64; 80] = [
+    0x428A2F98D728AE22, 0x7137449123EF65CD, 0xB5C0FBCFEC4D3B2F, 0xE9B5DBA58189DBBC,
+    0x3956C25BF348B538, 0x59F111F1B605D019, 0x923F82A4AF194F9B, 0xAB1C5ED5DA6D8118,
+    0xD807AA98A3030242, 0x12835B0145706FBE, 0x243185BE4EE4B28C, 0x550C7DC3D5FFB4E2,
+    0x72BE5D74F27B896F, 0x80DEB1FE3B1696B1, 0x9BDC06A725C71235, 0xC19BF174CF692694,
+    0xE49B69C19EF14AD2, 0xEFBE4786384F25E3, 0x0FC19DC68B8CD5B5, 0x240CA1CC77AC9C65,
+    0x2DE92C6F592B0275, 0x4A7484AA6EA6E483, 0x5CB0A9DCBD41FBD4, 0x76F988DA831153B5,
+    0x983E5152EE66DFAB, 0xA831C66D2DB43210, 0xB00327C898FB213F, 0xBF597FC7BEEF0EE4,
+    0xC6E00BF33DA88FC2, 0xD5A79147930AA725, 0x06CA6351E003826F, 0x142929670A0E6E70,
+    0x27B70A8546D22FFC, 0x2E1B21385C26C926, 0x4D2C6DFC5AC42AED, 0x53380D139D95B3DF,
+    0x650A73548BAF63DE, 0x766A0ABB3C77B2A8, 0x81C2C92E47EDAEE6, 0x92722C851482353B,
+    0xA2BFE8A14CF10364, 0xA81A664BBC423001, 0xC24B8B70D0F89791, 0xC76C51A30654BE30,
+    0xD192E819D6EF5218, 0xD69906245565A910, 0xF40E35855771202A, 0x106AA07032BBD1B8,
+    0x19A4C116B8D2D0C8, 0x1E376C085141AB53, 0x2748774CDF8EEB99, 0x34B0BCB5E19B48A8,
+    0x391C0CB3C5C95A63, 0x4ED8AA4AE3418ACB, 0x5B9CCA4F7763E373, 0x682E6FF3D6B2B8A3,
+    0x748F82EE5DEFB2FC, 0x78A5636F43172F60, 0x84C87814A1F0AB72, 0x8CC702081A6439EC,
+    0x90BEFFFA23631E28, 0xA4506CEBDE82BDE9, 0xBEF9A3F7B2C67915, 0xC67178F2E372532B,
+    0xCA273ECEEA26619C, 0xD186B8C721C0C207, 0xEADA7DD6CDE0EB1E, 0xF57D4F7FEE6ED178,
+    0x06F067AA72176FBA, 0x0A637DC5A2C898A6, 0x113F9804BEF90DAE, 0x1B710B35131C471B,
+    0x28DB77F523047D84, 0x32CAAB7B40C72493, 0x3C9EBE0A15C9BEBC, 0x431D67C49C100D4C,
+    0x4CC5D4BECB3E42B6, 0x597F299CFC657E2A, 0x5FCB6FAB3AD6FAEC, 0x6C44198C4A475817,
+];
+
+/// Block size in bytes — SHA-512 processes 128-byte (1024-bit) blocks.
+public const BLOCK_SIZE: Int = 128;
+
+/// Output size in bytes — 512 bits.
+public const OUTPUT_SIZE: Int = 64;
+
+// =============================================================================
+// Sha512 — streaming digest state
+// =============================================================================
+
+/// SHA-512 streaming digest. Feed via `update()`, complete via
+/// `finalize()`. State is consumed on finalize.
+public type Sha512 is {
+    /// Current hash values H[0..8], 64-bit words.
+    h: [UInt64; 8],
+    /// Incomplete block buffer (strictly less than BLOCK_SIZE bytes).
+    buf: [Byte; 128],
+    /// Valid bytes in `buf`.
+    buf_len: Int,
+    /// Total bytes processed. SHA-512 encodes the length as a 128-bit
+    /// big-endian integer on finalize; `length_hi` + `length_lo`
+    /// together hold the byte count. Messages up to 2^125 bytes are
+    /// addressable — far beyond any realistic workload.
+    length_lo: UInt64,
+    length_hi: UInt64,
+};
+
+implement Sha512 {
+    /// Create a fresh SHA-512 state initialised with H(0) constants.
+    @inline
+    public fn new() -> Sha512 {
+        Sha512 {
+            h: [
+                H_INIT[0], H_INIT[1], H_INIT[2], H_INIT[3],
+                H_INIT[4], H_INIT[5], H_INIT[6], H_INIT[7],
+            ],
+            buf: [0; 128],
+            buf_len: 0,
+            length_lo: 0,
+            length_hi: 0,
+        }
+    }
+
+    /// Feed bytes. May be called any number of times before finalize.
+    public fn update(&mut self, data: &[Byte]) {
+        // 128-bit length accumulator, propagating carry from lo into hi.
+        let data_len = data.len() as UInt64;
+        let new_lo = self.length_lo.wrapping_add(data_len);
+        if new_lo < self.length_lo {
+            self.length_hi = self.length_hi.wrapping_add(1);
+        }
+        self.length_lo = new_lo;
+
+        let mut offset = 0;
+        let n = data.len();
+
+        if self.buf_len > 0 {
+            let need = BLOCK_SIZE - self.buf_len;
+            let take = if n < need { n } else { need };
+            let mut i = 0;
+            while i < take {
+                self.buf[self.buf_len + i] = data[i];
+                i = i + 1;
+            }
+            self.buf_len = self.buf_len + take;
+            offset = offset + take;
+            if self.buf_len == BLOCK_SIZE {
+                compress_block(&mut self.h, &self.buf);
+                self.buf_len = 0;
+            }
+        }
+
+        // Process full blocks without staging through the internal buf.
+        while offset + BLOCK_SIZE <= n {
+            let mut block: [Byte; 128] = [0; 128];
+            let mut j = 0;
+            while j < BLOCK_SIZE {
+                block[j] = data[offset + j];
+                j = j + 1;
+            }
+            compress_block(&mut self.h, &block);
+            offset = offset + BLOCK_SIZE;
+        }
+
+        while offset < n {
+            self.buf[self.buf_len] = data[offset];
+            self.buf_len = self.buf_len + 1;
+            offset = offset + 1;
+        }
+    }
+
+    /// Finalise and produce the 64-byte digest. Consumes self.
+    public fn finalize(self) -> [Byte; 64] {
+        let mut h = self.h;
+        let mut buf = self.buf;
+        let mut buf_len = self.buf_len;
+
+        // Total length in BITS, as 128-bit big-endian.
+        // length_bits = length_lo * 8 + length_hi * 2^64 * 8
+        let bits_lo = self.length_lo << (3 as UInt64);
+        let carry = self.length_lo >> (61 as UInt64);
+        let bits_hi = (self.length_hi << (3 as UInt64)) | carry;
+
+        // Append the 0x80 separator.
+        buf[buf_len] = 0x80;
+        buf_len = buf_len + 1;
+
+        // SHA-512 reserves the LAST 16 bytes for the 128-bit length.
+        if buf_len > BLOCK_SIZE - 16 {
+            while buf_len < BLOCK_SIZE { buf[buf_len] = 0; buf_len = buf_len + 1; }
+            compress_block(&mut h, &buf);
+            buf_len = 0;
+        }
+        while buf_len < BLOCK_SIZE - 16 { buf[buf_len] = 0; buf_len = buf_len + 1; }
+
+        // Length: hi first, then lo — big-endian.
+        let hi_bytes = bits_hi.to_be_bytes();
+        let lo_bytes = bits_lo.to_be_bytes();
+        let mut k = 0;
+        while k < 8 {
+            buf[BLOCK_SIZE - 16 + k] = hi_bytes[k];
+            buf[BLOCK_SIZE - 8 + k]  = lo_bytes[k];
+            k = k + 1;
+        }
+        compress_block(&mut h, &buf);
+
+        // Serialise H[0..8] as big-endian u64 → 64 bytes.
+        let mut out: [Byte; 64] = [0; 64];
+        let mut i = 0;
+        while i < 8 {
+            let be = h[i].to_be_bytes();
+            let base = i * 8;
+            out[base + 0] = be[0]; out[base + 1] = be[1];
+            out[base + 2] = be[2]; out[base + 3] = be[3];
+            out[base + 4] = be[4]; out[base + 5] = be[5];
+            out[base + 6] = be[6]; out[base + 7] = be[7];
+            i = i + 1;
+        }
+        out
+    }
+
+    /// One-shot helper — hash a slice, get the digest.
+    @inline
+    public fn digest(data: &[Byte]) -> [Byte; 64] {
+        let mut s = Sha512.new();
+        s.update(data);
+        s.finalize()
+    }
+}
+
+// =============================================================================
+// Bitwise helpers — FIPS 180-4 §4.1.3 (SHA-512 variants, 64-bit)
+// =============================================================================
+
+@inline
+fn ch(x: UInt64, y: UInt64, z: UInt64) -> UInt64 {
+    (x & y) ^ ((x.not()) & z)
+}
+
+@inline
+fn maj(x: UInt64, y: UInt64, z: UInt64) -> UInt64 {
+    (x & y) ^ (x & z) ^ (y & z)
+}
+
+@inline
+fn big_sigma0(x: UInt64) -> UInt64 {
+    x.rotate_right(28) ^ x.rotate_right(34) ^ x.rotate_right(39)
+}
+
+@inline
+fn big_sigma1(x: UInt64) -> UInt64 {
+    x.rotate_right(14) ^ x.rotate_right(18) ^ x.rotate_right(41)
+}
+
+@inline
+fn small_sigma0(x: UInt64) -> UInt64 {
+    x.rotate_right(1) ^ x.rotate_right(8) ^ (x >> (7 as UInt64))
+}
+
+@inline
+fn small_sigma1(x: UInt64) -> UInt64 {
+    x.rotate_right(19) ^ x.rotate_right(61) ^ (x >> (6 as UInt64))
+}
+
+// =============================================================================
+// Core compression — FIPS 180-4 §6.4.2
+// =============================================================================
+
+/// Merge one 128-byte block into the SHA-512 hash state. Pure,
+/// branch-free over secret data.
+///
+/// Exposed `public` because SHA-384 and SHA-512/256 (FIPS 180-4 §5.3.6)
+/// all share this core compression; they only differ in the initial
+/// H-values and output-truncation rule. Downstream implementations
+/// (`sha384.vr`) call this directly instead of re-deriving it.
+///
+/// When built with `@cfg(feature = "crypto-accel")`, this symbol is
+/// substituted at link-time with a hand-written AVX2 / ARMv8 SHA-512
+/// implementation. The reference below remains for correctness
+/// validation (`@test dst property_sha512_reference_matches_accel`).
+public fn compress_block(h: &mut [UInt64; 8], block: &[Byte; 128]) {
+    // Message schedule W[0..80].
+    let mut w: [UInt64; 80] = [0; 80];
+
+    // W[0..16] — 16 big-endian 64-bit words from the block. The extra
+    // parens around each cast-and-shift are load-bearing: Verum's
+    // parser reads `UInt64 <<` as the start of a generic-argument
+    // list without them.
+    let mut t = 0;
+    while t < 16 {
+        let base = t * 8;
+        w[t] = ((block[base + 0] as UInt64) << 56)
+             | ((block[base + 1] as UInt64) << 48)
+             | ((block[base + 2] as UInt64) << 40)
+             | ((block[base + 3] as UInt64) << 32)
+             | ((block[base + 4] as UInt64) << 24)
+             | ((block[base + 5] as UInt64) << 16)
+             | ((block[base + 6] as UInt64) <<  8)
+             | (block[base + 7] as UInt64);
+        t = t + 1;
+    }
+    // W[16..80] — FIPS 180-4 §6.4.2 step 1.
+    while t < 80 {
+        w[t] = small_sigma1(w[t - 2])
+            .wrapping_add(w[t - 7])
+            .wrapping_add(small_sigma0(w[t - 15]))
+            .wrapping_add(w[t - 16]);
+        t = t + 1;
+    }
+
+    // Working variables — FIPS step 2.
+    let mut a = h[0];
+    let mut b = h[1];
+    let mut c = h[2];
+    let mut d = h[3];
+    let mut e = h[4];
+    let mut f = h[5];
+    let mut g = h[6];
+    let mut hh = h[7];
+
+    // 80 rounds — FIPS step 3.
+    t = 0;
+    while t < 80 {
+        let t1 = hh.wrapping_add(big_sigma1(e))
+                   .wrapping_add(ch(e, f, g))
+                   .wrapping_add(K[t])
+                   .wrapping_add(w[t]);
+        let t2 = big_sigma0(a).wrapping_add(maj(a, b, c));
+        hh = g;
+        g = f;
+        f = e;
+        e = d.wrapping_add(t1);
+        d = c;
+        c = b;
+        b = a;
+        a = t1.wrapping_add(t2);
+        t = t + 1;
+    }
+
+    // Feed-forward — FIPS step 4.
+    h[0] = h[0].wrapping_add(a);
+    h[1] = h[1].wrapping_add(b);
+    h[2] = h[2].wrapping_add(c);
+    h[3] = h[3].wrapping_add(d);
+    h[4] = h[4].wrapping_add(e);
+    h[5] = h[5].wrapping_add(f);
+    h[6] = h[6].wrapping_add(g);
+    h[7] = h[7].wrapping_add(hh);
+}

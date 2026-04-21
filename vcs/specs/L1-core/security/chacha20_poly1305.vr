@@ -1,0 +1,71 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L1
+// @tags: security, crypto, chacha20, poly1305, aead, rfc8439, tls13
+// @timeout: 10000
+// @expect: pass
+
+// RFC 8439 ChaCha20 / Poly1305 / ChaCha20-Poly1305 AEAD surface.
+
+mount core.collections.list.{List};
+mount core.security.cipher.chacha20.{
+    ChaChaKey, ChaChaNonce,
+    chacha20_block, chacha20_xor,
+    KEY_SIZE as CC_KEY, NONCE_SIZE as CC_NONCE, BLOCK_SIZE as CC_BLOCK,
+};
+mount core.security.mac.poly1305.{
+    Poly1305, Poly1305Key, Poly1305Tag, poly1305_mac,
+    KEY_SIZE as POLY_KEY, TAG_SIZE as POLY_TAG,
+};
+mount core.security.aead.chacha20_poly1305.{
+    ChaCha20Poly1305, AeadError,
+    KEY_SIZE as AEAD_KEY, NONCE_SIZE as AEAD_NONCE, TAG_SIZE as AEAD_TAG,
+};
+
+fn typecheck_chacha20_block() -> [Byte; 64] {
+    let key: ChaChaKey = [0; 32];
+    let nonce: ChaChaNonce = [0; 12];
+    chacha20_block(&key, 1, &nonce)
+}
+
+fn typecheck_chacha20_xor() -> List<Byte> {
+    let key: ChaChaKey = [0; 32];
+    let nonce: ChaChaNonce = [0; 12];
+    let mut out = List.new();
+    chacha20_xor(&key, 1, &nonce, b"hello", &mut out);
+    out
+}
+
+fn typecheck_poly1305() -> Poly1305Tag {
+    let key: Poly1305Key = [0; 32];
+    poly1305_mac(&key, b"data")
+}
+
+fn typecheck_poly1305_streaming() -> Poly1305Tag {
+    let key: Poly1305Key = [0; 32];
+    let mut p = Poly1305.new(&key);
+    p.update(b"hello");
+    p.update(b" world");
+    p.finalize()
+}
+
+async fn typecheck_aead_roundtrip() -> Result<(), AeadError> {
+    let key: ChaChaKey = [0; 32];
+    let nonce: ChaChaNonce = [7; 12];
+    let aead = ChaCha20Poly1305.new(&key);
+    let mut ct = List.new();
+    let mut tag: [Byte; 16] = [0; 16];
+    aead.encrypt(&nonce, b"aad", b"hello world", &mut ct, &mut tag);
+    let mut pt = List.new();
+    aead.decrypt(&nonce, b"aad", ct.as_slice(), &tag, &mut pt)
+}
+
+fn typecheck_size_constants() -> (Int, Int, Int, Int, Int, Int) {
+    (CC_KEY, CC_NONCE, CC_BLOCK, POLY_KEY, POLY_TAG, AEAD_TAG)
+}
+
+fn main() {
+    let _ = typecheck_chacha20_block();
+    let _ = typecheck_poly1305();
+    let _ = typecheck_size_constants();
+}

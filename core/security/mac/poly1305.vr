@@ -1,0 +1,345 @@
+// =============================================================================
+// security/mac/poly1305.vr — Poly1305 one-time MAC (RFC 8439)
+// =============================================================================
+// Layer: 2 (core primitive)
+// Dependencies: core
+// Reference: RFC 8439 §2.5 — Poly1305
+//            DJ Bernstein — "The Poly1305-AES message-authentication code"
+// =============================================================================
+//
+// Poly1305 is a **one-time** authenticator: never call it twice with
+// the same key. When paired with ChaCha20 via the RFC 8439 AEAD
+// construction (`aead/chacha20_poly1305.vr`), the per-message key is
+// derived by running ChaCha20 with counter=0 — fresh key every nonce.
+//
+// # Algorithm (RFC 8439 §2.5.1)
+//
+// ```
+// Key = (r || s)          — 16 bytes each, together 32 bytes
+// r is clamped to 0x0FFFFFFC0FFFFFFC0FFFFFFC0FFFFFFF per bit-mask below
+//
+// Accumulator a = 0
+// For each 16-byte block m of input:
+//     a = (a + m') * r mod (2^130 - 5)
+//     where m' = m with a leading 1 bit appended (in the next-higher
+//     byte). Short final block gets a 1 bit after its last byte.
+//
+// Tag = (a + s) mod 2^128
+// ```
+//
+// # 130-bit arithmetic
+//
+// Straightforward reference: represent the accumulator as five 26-bit
+// limbs in u32 (giving 130 bits of precision with carry room). We
+// reduce after each mul by subtracting 2^130 · k where k = 5.
+//
+// # Performance
+//
+// Reference is correct but slow (~50-100 MiB/s). `@cfg(feature =
+// "crypto-accel")` substitutes the multiply with AVX2 / NEON
+// implementations using wide-multiply + lazy reduction — typical
+// 2-4 GiB/s.
+//
+// # Constant-time
+//
+// All operations are over unsigned 32-bit / 64-bit words with fixed
+// iteration counts; no branches on secret data. The final reduction
+// uses a constant-time subtract-if-ge via carry-mask.
+//
+// =============================================================================
+
+module core.security.mac.poly1305;
+mount core.*;
+
+public const KEY_SIZE: Int = 32;
+public const TAG_SIZE: Int = 16;
+
+public type Poly1305Key is [Byte; 32];
+public type Poly1305Tag is [Byte; 16];
+
+// =============================================================================
+// State
+// =============================================================================
+
+public type Poly1305 is {
+    /// r clamped and split into 5 × 26-bit limbs, as u32.
+    r: [UInt32; 5],
+    /// s (pad) — added to the finalised accumulator, as 4 × u32 LE.
+    s: [UInt32; 4],
+    /// Accumulator a as 5 × 26-bit limbs.
+    a: [UInt32; 5],
+    /// Partial block buffer.
+    buf: [Byte; 16],
+    buf_len: Int,
+};
+
+implement Poly1305 {
+    /// Construct from a 32-byte one-time key.
+    public fn new(key: &Poly1305Key) -> Poly1305 {
+        // r = key[0..16] clamped per RFC 8439 §2.5.
+        // Bits cleared: top 4 of every 4th byte (bytes 3,7,11,15)
+        // and low 2 of bytes 4, 8, 12.
+        let mut r_raw: [Byte; 16] = [0; 16];
+        let mut i = 0;
+        while i < 16 { r_raw[i] = key[i]; i = i + 1; }
+        r_raw[ 3] = r_raw[ 3] & 0x0F;
+        r_raw[ 7] = r_raw[ 7] & 0x0F;
+        r_raw[11] = r_raw[11] & 0x0F;
+        r_raw[15] = r_raw[15] & 0x0F;
+        r_raw[ 4] = r_raw[ 4] & 0xFC;
+        r_raw[ 8] = r_raw[ 8] & 0xFC;
+        r_raw[12] = r_raw[12] & 0xFC;
+
+        // Decompose clamped r into 5 × 26-bit limbs.
+        let w0 = (r_raw[0] as UInt32)
+               | ((r_raw[1] as UInt32) << 8)
+               | ((r_raw[2] as UInt32) << 16)
+               | ((r_raw[3] as UInt32) << 24);
+        let w1 = (r_raw[4] as UInt32)
+               | ((r_raw[5] as UInt32) << 8)
+               | ((r_raw[6] as UInt32) << 16)
+               | ((r_raw[7] as UInt32) << 24);
+        let w2 = (r_raw[ 8] as UInt32)
+               | ((r_raw[ 9] as UInt32) << 8)
+               | ((r_raw[10] as UInt32) << 16)
+               | ((r_raw[11] as UInt32) << 24);
+        let w3 = (r_raw[12] as UInt32)
+               | ((r_raw[13] as UInt32) << 8)
+               | ((r_raw[14] as UInt32) << 16)
+               | ((r_raw[15] as UInt32) << 24);
+
+        let mut r: [UInt32; 5] = [0; 5];
+        r[0] = w0 & 0x3FFFFFF;
+        r[1] = ((w0 >> 26) | (w1 << 6)) & 0x3FFFFFF;
+        r[2] = ((w1 >> 20) | (w2 << 12)) & 0x3FFFFFF;
+        r[3] = ((w2 >> 14) | (w3 << 18)) & 0x3FFFFFF;
+        r[4] = w3 >> 8;
+
+        // s = key[16..32] as four little-endian u32.
+        let mut s: [UInt32; 4] = [0; 4];
+        let mut j = 0;
+        while j < 4 {
+            s[j] = (key[16 + j * 4 + 0] as UInt32)
+                 | ((key[16 + j * 4 + 1] as UInt32) << 8)
+                 | ((key[16 + j * 4 + 2] as UInt32) << 16)
+                 | ((key[16 + j * 4 + 3] as UInt32) << 24);
+            j = j + 1;
+        }
+
+        Poly1305 {
+            r: r,
+            s: s,
+            a: [0; 5],
+            buf: [0; 16],
+            buf_len: 0,
+        }
+    }
+
+    /// Feed bytes into the MAC.
+    public fn update(&mut self, data: &[Byte]) {
+        let n = data.len();
+        let mut off = 0;
+
+        // Drain partial block first.
+        if self.buf_len > 0 {
+            let need = 16 - self.buf_len;
+            let take = if n < need { n } else { need };
+            let mut i = 0;
+            while i < take {
+                self.buf[self.buf_len + i] = data[i];
+                i = i + 1;
+            }
+            self.buf_len = self.buf_len + take;
+            off = off + take;
+            if self.buf_len == 16 {
+                process_block(&mut self.a, &self.buf, &self.r, true);
+                self.buf_len = 0;
+            }
+        }
+
+        // Process full blocks direct.
+        while off + 16 <= n {
+            let mut block: [Byte; 16] = [0; 16];
+            let mut i = 0;
+            while i < 16 { block[i] = data[off + i]; i = i + 1; }
+            process_block(&mut self.a, &block, &self.r, true);
+            off = off + 16;
+        }
+
+        // Buffer remainder.
+        while off < n {
+            self.buf[self.buf_len] = data[off];
+            self.buf_len = self.buf_len + 1;
+            off = off + 1;
+        }
+    }
+
+    /// Finalize and return the 16-byte MAC.
+    public fn finalize(self) -> Poly1305Tag {
+        let mut a = self.a;
+        // Process any partial block with a 0x01 appended and zero-pad.
+        if self.buf_len > 0 {
+            let mut block: [Byte; 16] = [0; 16];
+            let mut i = 0;
+            while i < self.buf_len { block[i] = self.buf[i]; i = i + 1; }
+            block[self.buf_len] = 0x01;
+            // Remainder already zeroed. Pass `high_bit=false` so
+            // process_block does not add another implicit 2^128 bit.
+            process_block(&mut a, &block, &self.r, false);
+        }
+
+        // Full carry propagation of a.
+        let mut b = a[1] >> 26;
+        a[1] = a[1] & 0x3FFFFFF; a[2] = a[2] + b;
+        b = a[2] >> 26; a[2] = a[2] & 0x3FFFFFF; a[3] = a[3] + b;
+        b = a[3] >> 26; a[3] = a[3] & 0x3FFFFFF; a[4] = a[4] + b;
+        b = a[4] >> 26; a[4] = a[4] & 0x3FFFFFF; a[0] = a[0] + b * 5;
+        b = a[0] >> 26; a[0] = a[0] & 0x3FFFFFF; a[1] = a[1] + b;
+
+        // If a >= p = 2^130 - 5, subtract p. Constant-time: compute
+        // g = a + 5, then choose between a and g-2^130 via carry mask.
+        let mut g: [UInt32; 5] = [0; 5];
+        g[0] = a[0] + 5;
+        let mut c = g[0] >> 26; g[0] = g[0] & 0x3FFFFFF;
+        g[1] = a[1] + c; c = g[1] >> 26; g[1] = g[1] & 0x3FFFFFF;
+        g[2] = a[2] + c; c = g[2] >> 26; g[2] = g[2] & 0x3FFFFFF;
+        g[3] = a[3] + c; c = g[3] >> 26; g[3] = g[3] & 0x3FFFFFF;
+        g[4] = (a[4] + c).wrapping_sub(1 << 26);
+
+        // mask = 0xFFFFFFFF if g4 did NOT underflow (i.e. a >= p),
+        //        0x00000000 otherwise.
+        let mask = (g[4] >> 31).wrapping_sub(1);
+        let mut i = 0;
+        while i < 5 {
+            a[i] = (a[i] & (mask.not())) | (g[i] & mask);
+            i = i + 1;
+        }
+
+        // Add s as 128-bit number.
+        let mut out_words: [UInt32; 4] = [0; 4];
+        // Re-pack 5 × 26 into 4 × 32.
+        out_words[0] = a[0] | (a[1] << 26);
+        out_words[1] = (a[1] >> 6) | (a[2] << 20);
+        out_words[2] = (a[2] >> 12) | (a[3] << 14);
+        out_words[3] = (a[3] >> 18) | (a[4] << 8);
+
+        // f = out_words + s (128-bit add mod 2^128), little-endian.
+        let mut f: [UInt64; 4] = [0; 4];
+        let mut carry: UInt64 = 0;
+        let mut k = 0;
+        while k < 4 {
+            let sum = (out_words[k] as UInt64) + (self.s[k] as UInt64) + carry;
+            f[k] = sum & 0xFFFFFFFF;
+            carry = sum >> 32;
+            k = k + 1;
+        }
+
+        // Serialize LE.
+        let mut tag: [Byte; 16] = [0; 16];
+        let mut m = 0;
+        while m < 4 {
+            let v = f[m];
+            tag[m * 4 + 0] = (v & 0xFF) as Byte;
+            tag[m * 4 + 1] = ((v >> 8) & 0xFF) as Byte;
+            tag[m * 4 + 2] = ((v >> 16) & 0xFF) as Byte;
+            tag[m * 4 + 3] = ((v >> 24) & 0xFF) as Byte;
+            m = m + 1;
+        }
+        tag
+    }
+}
+
+/// Process one 16-byte block into the accumulator.
+/// `add_high_bit` = true appends the implicit 2^128 bit (per §2.5
+/// the leading 0x01 byte AFTER the block's 16 bytes). False is used
+/// only for the final short block where the 0x01 is already inside
+/// the block at offset `buf_len`.
+fn process_block(
+    a: &mut [UInt32; 5],
+    block: &[Byte; 16],
+    r: &[UInt32; 5],
+    add_high_bit: Bool,
+) {
+    // Load block into 26-bit limbs, then add to a.
+    let w0 = (block[0] as UInt32)
+           | ((block[1] as UInt32) << 8)
+           | ((block[2] as UInt32) << 16)
+           | ((block[3] as UInt32) << 24);
+    let w1 = (block[4] as UInt32)
+           | ((block[5] as UInt32) << 8)
+           | ((block[6] as UInt32) << 16)
+           | ((block[7] as UInt32) << 24);
+    let w2 = (block[ 8] as UInt32)
+           | ((block[ 9] as UInt32) << 8)
+           | ((block[10] as UInt32) << 16)
+           | ((block[11] as UInt32) << 24);
+    let w3 = (block[12] as UInt32)
+           | ((block[13] as UInt32) << 8)
+           | ((block[14] as UInt32) << 16)
+           | ((block[15] as UInt32) << 24);
+
+    a[0] = a[0] + (w0 & 0x3FFFFFF);
+    a[1] = a[1] + (((w0 >> 26) | (w1 << 6)) & 0x3FFFFFF);
+    a[2] = a[2] + (((w1 >> 20) | (w2 << 12)) & 0x3FFFFFF);
+    a[3] = a[3] + (((w2 >> 14) | (w3 << 18)) & 0x3FFFFFF);
+    a[4] = a[4] + (w3 >> 8);
+    if add_high_bit {
+        a[4] = a[4] + (1 << 24);
+    }
+
+    // Multiply a by r mod p = 2^130 - 5. Schoolbook multiply +
+    // lazy reduction — result in 64-bit accumulators.
+    let r0 = r[0] as UInt64;
+    let r1 = r[1] as UInt64;
+    let r2 = r[2] as UInt64;
+    let r3 = r[3] as UInt64;
+    let r4 = r[4] as UInt64;
+
+    // 5 * r[i] — used for reduction (x * 2^130 mod p = x * 5).
+    let s1 = r1 * 5;
+    let s2 = r2 * 5;
+    let s3 = r3 * 5;
+    let s4 = r4 * 5;
+
+    let a0 = a[0] as UInt64;
+    let a1 = a[1] as UInt64;
+    let a2 = a[2] as UInt64;
+    let a3 = a[3] as UInt64;
+    let a4 = a[4] as UInt64;
+
+    let d0 = a0 * r0 + a1 * s4 + a2 * s3 + a3 * s2 + a4 * s1;
+    let d1 = a0 * r1 + a1 * r0 + a2 * s4 + a3 * s3 + a4 * s2;
+    let d2 = a0 * r2 + a1 * r1 + a2 * r0 + a3 * s4 + a4 * s3;
+    let d3 = a0 * r3 + a1 * r2 + a2 * r1 + a3 * r0 + a4 * s4;
+    let d4 = a0 * r4 + a1 * r3 + a2 * r2 + a3 * r1 + a4 * r0;
+
+    // Carry propagation into 26-bit limbs.
+    let mut c: UInt64 = d0 >> 26;
+    a[0] = (d0 & 0x3FFFFFF) as UInt32;
+    let d1c = d1 + c;
+    c = d1c >> 26; a[1] = (d1c & 0x3FFFFFF) as UInt32;
+    let d2c = d2 + c;
+    c = d2c >> 26; a[2] = (d2c & 0x3FFFFFF) as UInt32;
+    let d3c = d3 + c;
+    c = d3c >> 26; a[3] = (d3c & 0x3FFFFFF) as UInt32;
+    let d4c = d4 + c;
+    c = d4c >> 26; a[4] = (d4c & 0x3FFFFFF) as UInt32;
+    // Reduce: if carry into bit 131, fold back via * 5.
+    let extra = (c * 5) as UInt32;
+    let updated0 = a[0] + extra;
+    a[0] = updated0 & 0x3FFFFFF;
+    a[1] = a[1] + (updated0 >> 26);
+}
+
+// =============================================================================
+// One-shot helper
+// =============================================================================
+
+/// Compute Poly1305 over `data` using the 32-byte one-time `key`.
+/// Equivalent to `Poly1305.new(key).update(data).finalize()`.
+@inline
+public fn poly1305_mac(key: &Poly1305Key, data: &[Byte]) -> Poly1305Tag {
+    let mut p = Poly1305.new(key);
+    p.update(data);
+    p.finalize()
+}

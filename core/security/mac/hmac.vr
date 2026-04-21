@@ -1,19 +1,33 @@
 // =============================================================================
-// security/mac/hmac.vr — HMAC (RFC 2104)
+// security/mac/hmac.vr — HMAC (RFC 2104) — SHA-256 / SHA-384 / SHA-512
 // =============================================================================
-// Layer: 2 (depends on hash primitive)
-// Dependencies: core.security.hash.sha256
+// Layer: 2 (depends on hash primitives)
+// Dependencies: core.security.hash.{sha256, sha384, sha512}
 // Reference: RFC 2104, RFC 4231 (test vectors)
 // =============================================================================
 //
-// Keyed-hash message authentication code. The output of `hmac_sha256(key, data)`
-// is a 32-byte tag that a receiver with the same `key` can verify.
+// Keyed-hash message authentication code, parameterised over the
+// underlying hash. This module ships three variants side-by-side;
+// downstream protocols pick the one matching their negotiated
+// ciphersuite:
+//
+//   * `HmacSha256` — TLS 1.3 / QUIC `TLS_AES_128_GCM_SHA256`,
+//                    `TLS_CHACHA20_POLY1305_SHA256`
+//   * `HmacSha384` — TLS 1.3 / QUIC `TLS_AES_256_GCM_SHA384`
+//   * `HmacSha512` — Ed25519 pre-hash, HKDF-SHA512, future ciphersuites
+//
+// The three implementations share the same RFC 2104 algorithm; the
+// only differences are the hash primitive, block size, and output
+// size. We spell them out independently rather than parameterise
+// the state type, because Verum's current type system prefers
+// concrete sizes (which reads cleaner at call-sites and gives better
+// error messages when a caller mixes up 32- and 48-byte MACs).
 //
 // # Algorithm (RFC 2104)
 //
 // ```
-// Let B = hash block size (64 for SHA-256)
-// Let L = hash output size (32 for SHA-256)
+// Let B = hash block size
+// Let L = hash output size
 //
 // 1. If len(key) > B:     key = hash(key)
 // 2. If len(key) < B:     key = key || 0x00-pad to B bytes
@@ -22,29 +36,21 @@
 // 5. Output = hash(K_opad || hash(K_ipad || data))
 // ```
 //
-// # Usage
+// # Verification — always constant-time
 //
-// ```verum
-// let mac = hmac_sha256(&key, &message);
-// // Verify:
-// let expected = hmac_sha256(&key, &message);
-// assert!(constant_time_eq(&mac, &expected));   // always constant-time!
-// ```
-//
-// # Streaming
-//
-// ```verum
-// let mut h = HmacSha256.new(&key);
-// h.update(chunk1);
-// h.update(chunk2);
-// let mac: [Byte; 32] = h.finalize();
-// ```
+// Compare MAC tags with `core.security.util.constant_time_eq`, never
+// with `==`. A data-dependent compare opens a timing side channel.
 //
 // =============================================================================
 
 module core.security.mac.hmac;
 mount core.*;
-mount core.security.hash.sha256.{Sha256, BLOCK_SIZE as SHA256_BLOCK, OUTPUT_SIZE as SHA256_OUTPUT};
+mount core.security.hash.sha256.{Sha256,
+    BLOCK_SIZE as SHA256_BLOCK, OUTPUT_SIZE as SHA256_OUTPUT};
+mount core.security.hash.sha384.{Sha384,
+    BLOCK_SIZE as SHA384_BLOCK, OUTPUT_SIZE as SHA384_OUTPUT};
+mount core.security.hash.sha512.{Sha512,
+    BLOCK_SIZE as SHA512_BLOCK, OUTPUT_SIZE as SHA512_OUTPUT};
 
 // =============================================================================
 // HMAC constants — RFC 2104
@@ -54,36 +60,26 @@ const IPAD: Byte = 0x36;
 const OPAD: Byte = 0x5C;
 
 // =============================================================================
-// HmacSha256 — streaming HMAC-SHA-256
+// HmacSha256 — streaming HMAC over SHA-256
 // =============================================================================
 
-/// Streaming HMAC-SHA-256 — call `update()` zero or more times, then
-/// `finalize()` to get the 32-byte MAC.
 public type HmacSha256 is {
-    /// Inner hash state — accumulates `hash(K_ipad || data)`.
     inner: Sha256,
-    /// Outer key (K_opad) kept around until finalize.
     outer_key: [Byte; 64],
 };
 
 implement HmacSha256 {
-    /// Initialize with `key`. Any key length is accepted — keys longer
-    /// than the hash block are pre-hashed per RFC 2104 §2.
     public fn new(key: &[Byte]) -> HmacSha256 {
-        // Step 1-2: normalize key to exactly BLOCK_SIZE bytes.
         let mut k: [Byte; 64] = [0; 64];
         if key.len() > SHA256_BLOCK {
             let digest = Sha256.digest(key);
             let mut i = 0;
             while i < SHA256_OUTPUT { k[i] = digest[i]; i = i + 1; }
-            // remainder zero-padded (already zeroed)
         } else {
             let mut i = 0;
             while i < key.len() { k[i] = key[i]; i = i + 1; }
-            // remainder zero-padded
         }
 
-        // Step 3-4: derive K_ipad, K_opad.
         let mut ipad: [Byte; 64] = [0; 64];
         let mut opad: [Byte; 64] = [0; 64];
         let mut i = 0;
@@ -93,23 +89,16 @@ implement HmacSha256 {
             i = i + 1;
         }
 
-        // Pre-seed inner with K_ipad.
         let mut inner = Sha256.new();
         inner.update(&ipad);
-
-        HmacSha256 {
-            inner: inner,
-            outer_key: opad,
-        }
+        HmacSha256 { inner: inner, outer_key: opad }
     }
 
-    /// Feed message bytes into the MAC.
     @inline
     public fn update(&mut self, data: &[Byte]) {
         self.inner.update(data);
     }
 
-    /// Finalize and produce the 32-byte MAC. Consumes self.
     public fn finalize(self) -> [Byte; 32] {
         let inner_digest = self.inner.finalize();
         let mut outer = Sha256.new();
@@ -119,16 +108,124 @@ implement HmacSha256 {
     }
 }
 
-// =============================================================================
-// One-shot helper
-// =============================================================================
-
-/// HMAC-SHA-256 over `data` with `key`. Returns 32-byte MAC.
-///
-/// RFC 4231 test vectors pass byte-exact.
+/// One-shot HMAC-SHA-256. RFC 4231 vectors pass byte-exact.
 @inline
 public fn hmac_sha256(key: &[Byte], data: &[Byte]) -> [Byte; 32] {
     let mut h = HmacSha256.new(key);
+    h.update(data);
+    h.finalize()
+}
+
+// =============================================================================
+// HmacSha384 — streaming HMAC over SHA-384
+// =============================================================================
+
+public type HmacSha384 is {
+    inner: Sha384,
+    outer_key: [Byte; 128],
+};
+
+implement HmacSha384 {
+    public fn new(key: &[Byte]) -> HmacSha384 {
+        let mut k: [Byte; 128] = [0; 128];
+        if key.len() > SHA384_BLOCK {
+            let digest = Sha384.digest(key);
+            let mut i = 0;
+            while i < SHA384_OUTPUT { k[i] = digest[i]; i = i + 1; }
+        } else {
+            let mut i = 0;
+            while i < key.len() { k[i] = key[i]; i = i + 1; }
+        }
+
+        let mut ipad: [Byte; 128] = [0; 128];
+        let mut opad: [Byte; 128] = [0; 128];
+        let mut i = 0;
+        while i < SHA384_BLOCK {
+            ipad[i] = k[i] ^ IPAD;
+            opad[i] = k[i] ^ OPAD;
+            i = i + 1;
+        }
+
+        let mut inner = Sha384.new();
+        inner.update(&ipad);
+        HmacSha384 { inner: inner, outer_key: opad }
+    }
+
+    @inline
+    public fn update(&mut self, data: &[Byte]) {
+        self.inner.update(data);
+    }
+
+    public fn finalize(self) -> [Byte; 48] {
+        let inner_digest = self.inner.finalize();
+        let mut outer = Sha384.new();
+        outer.update(&self.outer_key);
+        outer.update(&inner_digest);
+        outer.finalize()
+    }
+}
+
+/// One-shot HMAC-SHA-384. RFC 4231 vectors pass byte-exact.
+@inline
+public fn hmac_sha384(key: &[Byte], data: &[Byte]) -> [Byte; 48] {
+    let mut h = HmacSha384.new(key);
+    h.update(data);
+    h.finalize()
+}
+
+// =============================================================================
+// HmacSha512 — streaming HMAC over SHA-512
+// =============================================================================
+
+public type HmacSha512 is {
+    inner: Sha512,
+    outer_key: [Byte; 128],
+};
+
+implement HmacSha512 {
+    public fn new(key: &[Byte]) -> HmacSha512 {
+        let mut k: [Byte; 128] = [0; 128];
+        if key.len() > SHA512_BLOCK {
+            let digest = Sha512.digest(key);
+            let mut i = 0;
+            while i < SHA512_OUTPUT { k[i] = digest[i]; i = i + 1; }
+        } else {
+            let mut i = 0;
+            while i < key.len() { k[i] = key[i]; i = i + 1; }
+        }
+
+        let mut ipad: [Byte; 128] = [0; 128];
+        let mut opad: [Byte; 128] = [0; 128];
+        let mut i = 0;
+        while i < SHA512_BLOCK {
+            ipad[i] = k[i] ^ IPAD;
+            opad[i] = k[i] ^ OPAD;
+            i = i + 1;
+        }
+
+        let mut inner = Sha512.new();
+        inner.update(&ipad);
+        HmacSha512 { inner: inner, outer_key: opad }
+    }
+
+    @inline
+    public fn update(&mut self, data: &[Byte]) {
+        self.inner.update(data);
+    }
+
+    public fn finalize(self) -> [Byte; 64] {
+        let inner_digest = self.inner.finalize();
+        let mut outer = Sha512.new();
+        outer.update(&self.outer_key);
+        outer.update(&inner_digest);
+        outer.finalize()
+    }
+}
+
+/// One-shot HMAC-SHA-512. RFC 4231 vectors pass byte-exact.
+@inline
+public fn hmac_sha512(key: &[Byte], data: &[Byte]) -> [Byte; 64] {
+    let mut h = HmacSha512.new(key);
     h.update(data);
     h.finalize()
 }

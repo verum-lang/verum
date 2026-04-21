@@ -1,0 +1,196 @@
+// =============================================================================
+// security/hash/sha384.vr — SHA-384 (FIPS 180-4)
+// =============================================================================
+// Layer: 2 (depends on hash/sha512)
+// Dependencies: core, core.security.hash.sha512
+// Reference: FIPS PUB 180-4 §5.3.4 + §6.5
+// =============================================================================
+//
+// SHA-384 is SHA-512 with:
+//
+//   * Different initial hash values H(0) (FIPS 180-4 §5.3.4).
+//   * Output truncated to 48 bytes (first 6 of the 8 H[]-words).
+//
+// Everything else — block size, compression function, round schedule
+// — is identical to SHA-512 and is reused verbatim from `sha512.vr`
+// (`compress_block` is public for this purpose, and shares any
+// `crypto-accel` intrinsic substitution automatically).
+//
+// # Where SHA-384 matters
+//
+//   * TLS 1.3 ciphersuite `TLS_AES_256_GCM_SHA384` — the HKDF used in
+//     that cipher's key schedule is HMAC-SHA384.
+//   * QUIC — whenever the negotiated TLS 1.3 ciphersuite is
+//     `TLS_AES_256_GCM_SHA384`, packet-protection key derivation uses
+//     HKDF-Expand-Label over SHA-384.
+//
+// # Usage
+//
+// ```verum
+// let digest: [Byte; 48] = Sha384.digest(b"hello");
+//
+// let mut s = Sha384.new();
+// s.update(chunk1);
+// s.update(chunk2);
+// let digest: [Byte; 48] = s.finalize();
+// ```
+//
+// # Performance
+//
+// Same throughput as SHA-512 (same compression); output serialisation
+// is 16 bytes shorter.
+//
+// =============================================================================
+
+module core.security.hash.sha384;
+mount core.*;
+mount core.security.hash.sha512.{compress_block, BLOCK_SIZE as SHA512_BLOCK};
+
+// =============================================================================
+// Initial hash values — FIPS 180-4 §5.3.4
+// =============================================================================
+
+/// Initial H(0) per FIPS 180-4 §5.3.4 — first 64 bits of fractional
+/// parts of square roots of primes 23..53.
+const H_INIT: [UInt64; 8] = [
+    0xCBBB9D5DC1059ED8, 0x629A292A367CD507,
+    0x9159015A3070DD17, 0x152FECD8F70E5939,
+    0x67332667FFC00B31, 0x8EB44A8768581511,
+    0xDB0C2E0D64F98FA7, 0x47B5481DBEFA4FA4,
+];
+
+/// Block size in bytes — inherited from SHA-512.
+public const BLOCK_SIZE: Int = 128;
+
+/// Output size in bytes — 384 bits.
+public const OUTPUT_SIZE: Int = 48;
+
+// =============================================================================
+// Sha384 — streaming digest
+// =============================================================================
+
+/// SHA-384 streaming digest state. Identical shape to `Sha512` except
+/// the initial H-values and the output truncation.
+public type Sha384 is {
+    h: [UInt64; 8],
+    buf: [Byte; 128],
+    buf_len: Int,
+    length_lo: UInt64,
+    length_hi: UInt64,
+};
+
+implement Sha384 {
+    /// Fresh state with SHA-384 H(0). No compression runs yet.
+    @inline
+    public fn new() -> Sha384 {
+        Sha384 {
+            h: [
+                H_INIT[0], H_INIT[1], H_INIT[2], H_INIT[3],
+                H_INIT[4], H_INIT[5], H_INIT[6], H_INIT[7],
+            ],
+            buf: [0; 128],
+            buf_len: 0,
+            length_lo: 0,
+            length_hi: 0,
+        }
+    }
+
+    /// Feed bytes into the digest.
+    public fn update(&mut self, data: &[Byte]) {
+        let data_len = data.len() as UInt64;
+        let new_lo = self.length_lo.wrapping_add(data_len);
+        if new_lo < self.length_lo {
+            self.length_hi = self.length_hi.wrapping_add(1);
+        }
+        self.length_lo = new_lo;
+
+        let mut offset = 0;
+        let n = data.len();
+
+        if self.buf_len > 0 {
+            let need = SHA512_BLOCK - self.buf_len;
+            let take = if n < need { n } else { need };
+            let mut i = 0;
+            while i < take {
+                self.buf[self.buf_len + i] = data[i];
+                i = i + 1;
+            }
+            self.buf_len = self.buf_len + take;
+            offset = offset + take;
+            if self.buf_len == SHA512_BLOCK {
+                compress_block(&mut self.h, &self.buf);
+                self.buf_len = 0;
+            }
+        }
+
+        while offset + SHA512_BLOCK <= n {
+            let mut block: [Byte; 128] = [0; 128];
+            let mut j = 0;
+            while j < SHA512_BLOCK {
+                block[j] = data[offset + j];
+                j = j + 1;
+            }
+            compress_block(&mut self.h, &block);
+            offset = offset + SHA512_BLOCK;
+        }
+
+        while offset < n {
+            self.buf[self.buf_len] = data[offset];
+            self.buf_len = self.buf_len + 1;
+            offset = offset + 1;
+        }
+    }
+
+    /// Finalise; output = first 48 bytes of H[] (H[0..6] big-endian).
+    public fn finalize(self) -> [Byte; 48] {
+        let mut h = self.h;
+        let mut buf = self.buf;
+        let mut buf_len = self.buf_len;
+
+        let bits_lo = self.length_lo << (3 as UInt64);
+        let carry = self.length_lo >> (61 as UInt64);
+        let bits_hi = (self.length_hi << (3 as UInt64)) | carry;
+
+        buf[buf_len] = 0x80;
+        buf_len = buf_len + 1;
+
+        if buf_len > SHA512_BLOCK - 16 {
+            while buf_len < SHA512_BLOCK { buf[buf_len] = 0; buf_len = buf_len + 1; }
+            compress_block(&mut h, &buf);
+            buf_len = 0;
+        }
+        while buf_len < SHA512_BLOCK - 16 { buf[buf_len] = 0; buf_len = buf_len + 1; }
+
+        let hi_bytes = bits_hi.to_be_bytes();
+        let lo_bytes = bits_lo.to_be_bytes();
+        let mut k = 0;
+        while k < 8 {
+            buf[SHA512_BLOCK - 16 + k] = hi_bytes[k];
+            buf[SHA512_BLOCK - 8 + k]  = lo_bytes[k];
+            k = k + 1;
+        }
+        compress_block(&mut h, &buf);
+
+        // Truncate to H[0..6] → 48 bytes.
+        let mut out: [Byte; 48] = [0; 48];
+        let mut i = 0;
+        while i < 6 {
+            let be = h[i].to_be_bytes();
+            let base = i * 8;
+            out[base + 0] = be[0]; out[base + 1] = be[1];
+            out[base + 2] = be[2]; out[base + 3] = be[3];
+            out[base + 4] = be[4]; out[base + 5] = be[5];
+            out[base + 6] = be[6]; out[base + 7] = be[7];
+            i = i + 1;
+        }
+        out
+    }
+
+    /// One-shot convenience helper.
+    @inline
+    public fn digest(data: &[Byte]) -> [Byte; 48] {
+        let mut s = Sha384.new();
+        s.update(data);
+        s.finalize()
+    }
+}
