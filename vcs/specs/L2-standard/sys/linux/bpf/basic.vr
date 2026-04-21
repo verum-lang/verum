@@ -1,0 +1,114 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sys, linux, bpf, ebpf, xdp, tc, cgroup
+// @timeout: 10000
+// @expect: pass
+
+// eBPF program-loading + map API surface.
+
+mount core.sys.linux.bpf.{
+    BpfError,
+    ProgramType, AttachType, ProgramDescriptor, ProgramBytecode, Link,
+    load_program,
+    attach_xdp, attach_tc, attach_cgroup, attach_tracepoint, attach_kprobe,
+    MapType, MapDescriptor, MapConfig,
+    create_map, map_lookup, map_update, map_delete, map_iterate,
+};
+mount core.sys.common.{FileDesc};
+
+// Program load.
+fn typecheck_load() -> Result<ProgramDescriptor, BpfError> {
+    let bc = ProgramBytecode {
+        program_type: ProgramType.Xdp,
+        insns: List.new(),
+        license: "GPL".into(),
+        kernel_version: 0,
+        name: "drop_bad".into(),
+    };
+    load_program(&bc)
+}
+
+// XDP attach.
+fn typecheck_attach_xdp(p: &ProgramDescriptor) -> Result<Link, BpfError> {
+    attach_xdp(p, 2 /* ifindex */, 0)
+}
+
+// TC attach.
+fn typecheck_attach_tc(p: &ProgramDescriptor) -> Result<Link, BpfError> {
+    attach_tc(p, 2, 1 /* ingress */, 100)
+}
+
+// Cgroup attach.
+fn typecheck_attach_cgroup(p: &ProgramDescriptor, cg: FileDesc)
+    -> Result<Link, BpfError>
+{
+    attach_cgroup(p, cg, AttachType.CgroupInetIngress)
+}
+
+// Tracepoint + kprobe.
+fn typecheck_attach_tp(p: &ProgramDescriptor) -> Result<Link, BpfError> {
+    attach_tracepoint(p, &"syscalls".into(), &"sys_enter_openat".into())
+}
+
+fn typecheck_attach_kp(p: &ProgramDescriptor) -> Result<Link, BpfError> {
+    attach_kprobe(p, &"tcp_connect".into(), false)
+}
+
+// Map creation.
+fn typecheck_map_create() -> Result<MapDescriptor, BpfError> {
+    create_map(&MapConfig {
+        map_type: MapType.LruHash,
+        key_size: 4,
+        value_size: 8,
+        max_entries: 10000,
+        name: "flows".into(),
+        flags: 0,
+    })
+}
+
+// Map CRUD.
+fn typecheck_map_lookup(m: &MapDescriptor) -> Result<Bool, BpfError> {
+    let key: [Byte; 4] = [1, 2, 3, 4];
+    let mut value: [Byte; 8] = [0; 8];
+    map_lookup(m, &key, &mut value)
+}
+
+fn typecheck_map_update(m: &MapDescriptor) -> Result<(), BpfError> {
+    let key: [Byte; 4] = [1, 2, 3, 4];
+    let value: [Byte; 8] = [0, 0, 0, 0, 0, 0, 0, 42];
+    map_update(m, &key, &value, 0 /* BPF_ANY */)
+}
+
+fn typecheck_map_delete(m: &MapDescriptor) -> Result<(), BpfError> {
+    let key: [Byte; 4] = [1, 2, 3, 4];
+    map_delete(m, &key)
+}
+
+fn typecheck_map_iterate(m: &MapDescriptor) -> Result<List<List<Byte>>, BpfError> {
+    map_iterate(m)
+}
+
+// Error variants.
+fn typecheck_errors() -> List<BpfError> {
+    let mut xs: List<BpfError> = List.new();
+    xs.push(BpfError.OsError { errno: 22 });
+    xs.push(BpfError.VerifierRejected { log: "invalid mem access".into() });
+    xs.push(BpfError.InvalidAttachType {
+        program: "Xdp".into(),
+        attach: "TraceFentry".into(),
+    });
+    xs.push(BpfError.FeatureNotSupported("BTF kfunc".into()));
+    xs.push(BpfError.MapTypeMismatch {
+        expected: "Hash".into(),
+        actual: "LruHash".into(),
+    });
+    xs.push(BpfError.SizeMismatch { expected: 4, actual: 8 });
+    xs.push(BpfError.NotFound);
+    xs.push(BpfError.UnsupportedHelper(42));
+    xs
+}
+
+fn main() {
+    // Shape-only.
+}

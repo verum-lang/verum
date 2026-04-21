@@ -1,0 +1,28 @@
+// =============================================================================
+// sys/linux/bpf/error.vr — BpfError
+// =============================================================================
+
+module core.sys.linux.bpf.error;
+
+mount core.*;
+
+public type BpfError is
+    /// bpf() syscall failed with this errno.
+    | OsError { errno: Int }
+    /// Kernel verifier rejected the program. `log` holds the verifier
+    /// log (up to 1 MiB) for diagnosis.
+    | VerifierRejected { log: Text }
+    /// Attach point invalid for the program type.
+    | InvalidAttachType { program: Text, attach: Text }
+    /// The kernel doesn't support this eBPF feature — common for
+    /// BTF-tagged programs on kernels older than the one the
+    /// BTF was generated against.
+    | FeatureNotSupported(Text)
+    /// Map of the wrong type for the requested operation.
+    | MapTypeMismatch { expected: Text, actual: Text }
+    /// Key / value size mismatch against the map's declared geometry.
+    | SizeMismatch { expected: Int, actual: Int }
+    /// No such key / program / map.
+    | NotFound
+    /// Program requested a helper the current kernel does not expose.
+    | UnsupportedHelper(UInt32);

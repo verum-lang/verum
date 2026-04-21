@@ -42,6 +42,10 @@ public module tls;
 /// Asynchronous I/O (io_uring + epoll)
 public module io;
 
+/// eBPF program load / map primitives (userspace half of the
+/// bpf() syscall). Verum → eBPF bytecode codegen lives in verum_codegen.
+public module bpf;
+
 /// Thread creation and synchronization
 public module thread;
 

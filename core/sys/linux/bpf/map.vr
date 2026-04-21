@@ -1,0 +1,115 @@
+// =============================================================================
+// sys/linux/bpf/map.vr — eBPF map primitives
+// =============================================================================
+// The userspace half of the producer/consumer contract with eBPF
+// programs. Maps are shared key/value stores indexed by type — Hash,
+// Array, Ringbuffer, LPM_TRIE (longest-prefix-match, handy for
+// IP/CIDR lookups), and more.
+// =============================================================================
+
+module core.sys.linux.bpf.map;
+
+mount core.*;
+mount core.sys.common.{FileDesc};
+mount core.sys.linux.bpf.error.{BpfError};
+
+// =============================================================================
+// Map type (matches `enum bpf_map_type`)
+// =============================================================================
+
+public type MapType is
+    | Hash
+    | Array
+    | ProgArray
+    | PerfEventArray
+    | PercpuHash
+    | PercpuArray
+    | StackTrace
+    | CgroupArray
+    | LruHash
+    | LruPercpuHash
+    | LpmTrie
+    | ArrayOfMaps
+    | HashOfMaps
+    | Devmap
+    | Sockmap
+    | Cpumap
+    | Xskmap
+    | Sockhash
+    | CgroupStorage
+    | Reuseport_sockarray
+    | PercpuCgroupStorage
+    | Queue
+    | Stack
+    | SkStorage
+    | DevmapHash
+    | StructOpsMap
+    | RingBuf
+    | InodeStorage
+    | TaskStorage
+    | BloomFilter;
+
+// =============================================================================
+// Config + descriptor
+// =============================================================================
+
+public type MapConfig is {
+    map_type: MapType,
+    key_size: UInt32,
+    value_size: UInt32,
+    max_entries: UInt32,
+    name: Text,
+    /// Flags — BPF_F_NO_PREALLOC / BPF_F_RDONLY_PROG / BPF_F_MMAPABLE /
+    /// BPF_F_INNER_MAP etc. Pass 0 for defaults.
+    flags: UInt32,
+}
+
+public type MapDescriptor is {
+    fd: FileDesc,
+    map_type: MapType,
+    key_size: UInt32,
+    value_size: UInt32,
+    max_entries: UInt32,
+}
+
+// =============================================================================
+// CRUD
+// =============================================================================
+
+pub fn create_map(config: &MapConfig) -> Result<MapDescriptor, BpfError> {
+    @intrinsic("verum.bpf.create_map", config)
+}
+
+/// Look up `key` in the map. `value_out.len()` must equal
+/// `map.value_size`.
+pub fn map_lookup(
+    map: &MapDescriptor,
+    key: &[Byte],
+    value_out: &mut [Byte],
+) -> Result<Bool, BpfError> {
+    @intrinsic("verum.bpf.map_lookup", map, key, value_out)
+}
+
+/// Insert or replace a (key, value). `flags` is one of:
+///   0   — BPF_ANY (insert or overwrite)
+///   1   — BPF_NOEXIST (insert only; fail if present)
+///   2   — BPF_EXIST (update only; fail if absent)
+pub fn map_update(
+    map: &MapDescriptor,
+    key: &[Byte],
+    value: &[Byte],
+    flags: UInt64,
+) -> Result<(), BpfError> {
+    @intrinsic("verum.bpf.map_update", map, key, value, flags)
+}
+
+pub fn map_delete(map: &MapDescriptor, key: &[Byte]) -> Result<(), BpfError> {
+    @intrinsic("verum.bpf.map_delete", map, key)
+}
+
+/// Iterate keys. Returns a snapshot of all keys at call time (may be
+/// stale by the time the caller finishes). For concurrent maps prefer
+/// the batch APIs in newer kernels.
+pub fn map_iterate(map: &MapDescriptor) -> Result<List<List<Byte>>, BpfError> {
+    @intrinsic("verum.bpf.map_iterate", map)
+}

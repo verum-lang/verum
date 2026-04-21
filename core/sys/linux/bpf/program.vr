@@ -1,0 +1,188 @@
+// =============================================================================
+// sys/linux/bpf/program.vr — Program load + attach
+// =============================================================================
+
+module core.sys.linux.bpf.program;
+
+mount core.*;
+mount core.sys.common.{FileDesc};
+mount core.sys.linux.bpf.error.{BpfError};
+
+// =============================================================================
+// Program type (matches `enum bpf_prog_type` in <linux/bpf.h>)
+// =============================================================================
+
+public type ProgramType is
+    | Unspec
+    | SocketFilter
+    | Kprobe
+    | SchedCls
+    | SchedAct
+    | Tracepoint
+    | Xdp
+    | PerfEvent
+    | CgroupSkb
+    | CgroupSock
+    | LwtIn
+    | LwtOut
+    | LwtXmit
+    | SockOps
+    | SkSkb
+    | CgroupDevice
+    | SkMsg
+    | RawTracepoint
+    | CgroupSockAddr
+    | LwtSeg6Local
+    | LircMode2
+    | SkReuseport
+    | FlowDissector
+    | CgroupSysctl
+    | RawTracepointWritable
+    | CgroupSockopt
+    | Tracing
+    | StructOps
+    | Ext
+    | Lsm
+    | SkLookup
+    | Syscall;
+
+// =============================================================================
+// Attach type (matches `enum bpf_attach_type`)
+// =============================================================================
+
+public type AttachType is
+    | CgroupInetIngress
+    | CgroupInetEgress
+    | CgroupInetSockCreate
+    | CgroupSockOps
+    | SkSkbStreamParser
+    | SkSkbStreamVerdict
+    | CgroupDeviceA
+    | SkMsgVerdict
+    | CgroupInet4Bind
+    | CgroupInet6Bind
+    | CgroupInet4Connect
+    | CgroupInet6Connect
+    | CgroupInet4PostBind
+    | CgroupInet6PostBind
+    | CgroupUdp4Sendmsg
+    | CgroupUdp6Sendmsg
+    | CgroupUdp4Recvmsg
+    | CgroupUdp6Recvmsg
+    | CgroupSysctl
+    | CgroupGetsockopt
+    | CgroupSetsockopt
+    | TraceRawTp
+    | TraceFentry
+    | TraceFexit
+    | ModifyReturn
+    | LsmMac
+    | TraceIter
+    | CgroupInet4Getpeername
+    | CgroupInet6Getpeername
+    | CgroupInet4Getsockname
+    | CgroupInet6Getsockname
+    | XdpDevmap
+    | CgroupInetSockRelease
+    | XdpCpumap
+    | SkLookup
+    | XdpDrv
+    | SkReuseportSelect
+    | SkReuseportSelectOrMigrate
+    | PerfEvent
+    | TraceKprobeMulti;
+
+// =============================================================================
+// Program loader
+// =============================================================================
+
+/// ELF-encoded program bytecode (output of llvm / Verum codegen).
+/// `license` must evaluate to "GPL" for programs that call GPL-only
+/// helpers; "dual BSD/GPL" is also accepted.
+public type ProgramBytecode is {
+    program_type: ProgramType,
+    /// Classic-BPF-style `struct bpf_insn` little-endian stream,
+    /// 8 bytes per instruction.
+    insns: List<Byte>,
+    license: Text,
+    kernel_version: UInt32,    // 0 for KERNEL_VERSION-independent
+    name: Text,
+}
+
+public type ProgramDescriptor is {
+    fd: FileDesc,
+    program_type: ProgramType,
+    name: Text,
+}
+
+/// Load (and verify) a program into the kernel. On failure the verifier
+/// log is attached to `BpfError.VerifierRejected`.
+public fn load_program(bytecode: &ProgramBytecode)
+    -> Result<ProgramDescriptor, BpfError>
+{
+    @intrinsic("verum.bpf.load_program", bytecode)
+}
+
+// =============================================================================
+// Link — a handle representing an attached program. Dropping it
+// detaches the program from the attachment point.
+// =============================================================================
+
+public type Link is {
+    fd: FileDesc,
+    program_fd: FileDesc,
+    attach_type: AttachType,
+}
+
+// =============================================================================
+// Attach helpers (one per attachment-class)
+// =============================================================================
+
+/// XDP — eXpress Data Path. Attaches to a NIC ifindex at either
+/// `XdpDrv` (driver-level hook) or generic mode. Program type must
+/// be `Xdp`.
+public fn attach_xdp(
+    program: &ProgramDescriptor,
+    ifindex: UInt32,
+    flags: UInt32,
+) -> Result<Link, BpfError> {
+    @intrinsic("verum.bpf.attach_xdp", program, ifindex, flags)
+}
+
+/// TC (traffic-control) classifier / action. `direction` is
+/// 1 = ingress, 2 = egress.
+public fn attach_tc(
+    program: &ProgramDescriptor,
+    ifindex: UInt32,
+    direction: UInt32,
+    priority: UInt32,
+) -> Result<Link, BpfError> {
+    @intrinsic("verum.bpf.attach_tc", program, ifindex, direction, priority)
+}
+
+/// Attach to a cgroup v2 at the given hook.
+pub fn attach_cgroup(
+    program: &ProgramDescriptor,
+    cgroup_fd: FileDesc,
+    attach_type: AttachType,
+) -> Result<Link, BpfError> {
+    @intrinsic("verum.bpf.attach_cgroup", program, cgroup_fd, attach_type)
+}
+
+/// Attach to a static kernel tracepoint (e.g. "syscalls:sys_enter_open").
+pub fn attach_tracepoint(
+    program: &ProgramDescriptor,
+    category: &Text,
+    name: &Text,
+) -> Result<Link, BpfError> {
+    @intrinsic("verum.bpf.attach_tracepoint", program, category, name)
+}
+
+/// Attach to a kprobe / kretprobe.
+pub fn attach_kprobe(
+    program: &ProgramDescriptor,
+    symbol: &Text,
+    return_probe: Bool,
+) -> Result<Link, BpfError> {
+    @intrinsic("verum.bpf.attach_kprobe", program, symbol, return_probe)
+}
