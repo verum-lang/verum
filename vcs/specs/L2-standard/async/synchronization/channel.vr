@@ -79,11 +79,13 @@ async fn test_send_timeout() {
 
     tx.send(1).await.ok();
 
-    // Channel is full, this will timeout
-    match tx.send_timeout(2, Duration.from_millis(10)).await {
+    // Channel is full, this will timeout — send_timeout returns
+    // Result<(), SendError<T>> (timeout and disconnect share the same
+    // error shape in stdlib; the unsent value is carried inside the
+    // SendError tuple). Destructure and log the unsent payload.
+    match tx.send_timeout(2, Duration.from_millis(10)) {
         Ok(()) => println("Sent"),
-        Err(SendTimeoutError.Timeout(v)) => println(f"Timeout, value: {v}"),
-        Err(SendTimeoutError.Disconnected(v)) => println(f"Disconnected, value: {v}"),
+        Err(e) => println(f"SendError (timeout or disconnect): {e:?}"),
     }
 }
 

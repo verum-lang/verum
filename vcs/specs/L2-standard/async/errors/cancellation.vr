@@ -284,9 +284,9 @@ async fn test_backpressure_cancel() {
     let producer = spawn {
         for i in 0.. {
             // Send may be cancelled if receiver drops
-            match tx.send(i).await {
+            match tx.send_async(i).await {
                 Ok(()) => {}
-                Err(SendError.Closed(_)) => {
+                Err(_) => {
                     println("Receiver dropped, stopping");
                     break;
                 }

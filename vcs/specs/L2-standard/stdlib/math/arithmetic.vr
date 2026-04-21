@@ -25,13 +25,13 @@ fn test_basic_arithmetic() {
     assert(2 + 3 == 5);
     assert(-5 + 3 == -2);
     assert(0 + 0 == 0);
-    assert(i64.MAX + 0 == i64.MAX);
+    assert(Int64.MAX + 0 == Int64.MAX);
 
     // Subtraction
     assert(5 - 3 == 2);
     assert(3 - 5 == -2);
     assert(0 - 0 == 0);
-    assert(i64.MIN - 0 == i64.MIN);
+    assert(Int64.MIN - 0 == Int64.MIN);
 
     // Multiplication
     assert(3 * 4 == 12);
@@ -188,7 +188,7 @@ fn test_numeric_properties() {
     // BITS constant
     assert(u8.BITS == 8);
     assert(u32.BITS == 32);
-    assert(u64.BITS == 64);
+    assert(UInt64.BITS == 64);
 
     // Power of two checks
     assert(1u32.is_power_of_two());
