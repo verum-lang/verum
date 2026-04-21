@@ -48,7 +48,7 @@ public type SentPacketInfo is {
 
 public type PnSpaceKind is Initial | Handshake | Application;
 
-impl PnSpaceKind {
+implement PnSpaceKind {
     pub fn as_index(&self) -> Int {
         match self {
             PnSpaceKind.Initial     => 0,

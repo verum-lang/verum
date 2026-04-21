@@ -21,7 +21,7 @@ mount core.*;
 
 public type AlertLevel is Warning | Fatal;
 
-impl AlertLevel {
+implement AlertLevel {
     pub fn to_u8(&self) -> UInt8 {
         match self {
             AlertLevel.Warning => 1_u8,

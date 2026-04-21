@@ -49,7 +49,7 @@ public type NameConstraints is {
     excluded:  List<GeneralSubtree>,
 };
 
-impl NameConstraints {
+implement NameConstraints {
     public fn empty() -> NameConstraints {
         NameConstraints { permitted: [], excluded: [] }
     }

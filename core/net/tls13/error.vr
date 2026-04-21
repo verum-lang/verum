@@ -41,7 +41,7 @@ public type TlsError is
     // IO
     | IoError(Text);
 
-impl TlsError {
+implement TlsError {
     /// Translate this error into the AlertDescription we'd send to
     /// the peer. `None` for errors that don't yield an outgoing alert
     /// (e.g. we already received `close_notify`).

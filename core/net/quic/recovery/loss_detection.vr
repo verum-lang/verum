@@ -68,7 +68,7 @@ public type LossDetection is {
     pto_armed_for_space:        Maybe<PnSpaceKind>,
 };
 
-impl LossDetection {
+implement LossDetection {
     pub fn new() -> LossDetection {
         LossDetection {
             rtt:    RttEstimator.new(),

@@ -168,7 +168,7 @@ implement CongestionCtrl for NewReno {
     fn pacing_rate(&self) -> UInt64 { self.pacing_rate_bps }
 };
 
-impl NewReno {
+implement NewReno {
     /// Called by the outer loss-detection loop when an ACK advances
     /// past the recovery start time — transitions recovery → avoidance.
     pub fn exit_recovery_if_appropriate(&mut self, acked_time_sent: Instant) {
