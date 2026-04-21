@@ -1,0 +1,100 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sys, linux, io_uring, multi-shot, send-zc, registered-buffers, pbuf-ring
+// @timeout: 10000
+// @expect: pass
+
+// Advanced io_uring features added to core.sys.linux.io:
+// multi-shot accept / recv, zero-copy send (SEND_ZC / SENDMSG_ZC),
+// fixed-buffer I/O, registered files / buffers, and provided-buffer
+// rings (PBUF_RING). Linux-only; typecheck-only verification here.
+
+mount core.sys.linux.io.{
+    IoUringDriver, IoDriverError,
+    IORING_OP_SEND_ZC, IORING_OP_SENDMSG_ZC,
+    IORING_RECV_MULTISHOT, IORING_ACCEPT_MULTISHOT,
+    IORING_SEND_ZC_REPORT_USAGE,
+    IORING_REGISTER_PBUF_RING, IORING_UNREGISTER_PBUF_RING,
+    IORING_REGISTER_FILES_UPDATE,
+};
+mount core.sys.common.{IOVec};
+mount core.sys.io_engine.{MsgHdr};
+
+// New opcodes + flag constants are referenceable.
+fn typecheck_new_constants() -> (UInt8, UInt8, UInt32, UInt32, UInt32, UInt32, UInt32, UInt32) {
+    (IORING_OP_SEND_ZC, IORING_OP_SENDMSG_ZC,
+     IORING_RECV_MULTISHOT, IORING_ACCEPT_MULTISHOT,
+     IORING_SEND_ZC_REPORT_USAGE,
+     IORING_REGISTER_PBUF_RING, IORING_UNREGISTER_PBUF_RING,
+     IORING_REGISTER_FILES_UPDATE)
+}
+
+// New prep_* methods on the driver.
+fn typecheck_prep_multishot_accept(d: &mut IoUringDriver, fd: Int) -> Result<(), IoDriverError> {
+    d.prep_accept_multishot(fd, 42)
+}
+
+fn typecheck_prep_multishot_recv(d: &mut IoUringDriver, fd: Int) -> Result<(), IoDriverError> {
+    d.prep_recv_multishot(fd, 7 /* buf_group */, 0 /* flags */, 43)
+}
+
+fn typecheck_prep_send_zc(d: &mut IoUringDriver, fd: Int, buf: &[Byte])
+    -> Result<(), IoDriverError>
+{
+    d.prep_send_zc(fd, buf, 0, 44)
+}
+
+fn typecheck_prep_sendmsg_zc(d: &mut IoUringDriver, fd: Int, msg: &MsgHdr)
+    -> Result<(), IoDriverError>
+{
+    d.prep_sendmsg_zc(fd, msg, 0, 45)
+}
+
+fn typecheck_prep_read_fixed(d: &mut IoUringDriver, fd: Int)
+    -> Result<(), IoDriverError>
+{
+    d.prep_read_fixed(fd, 0 /* buf_index */, 0 /* buf_ptr */, 4096, 0, 46)
+}
+
+fn typecheck_prep_write_fixed(d: &mut IoUringDriver, fd: Int)
+    -> Result<(), IoDriverError>
+{
+    d.prep_write_fixed(fd, 0, 0, 4096, 0, 47)
+}
+
+// Register / unregister helpers.
+fn typecheck_register_buffers(d: &mut IoUringDriver, iovs: &[IOVec]) -> Result<(), IoDriverError> {
+    d.register_buffers(iovs)
+}
+
+fn typecheck_unregister_buffers(d: &mut IoUringDriver) -> Result<(), IoDriverError> {
+    d.unregister_buffers()
+}
+
+fn typecheck_register_files(d: &mut IoUringDriver, fds: &[Int32]) -> Result<(), IoDriverError> {
+    d.register_files(fds)
+}
+
+fn typecheck_unregister_files(d: &mut IoUringDriver) -> Result<(), IoDriverError> {
+    d.unregister_files()
+}
+
+fn typecheck_register_pbuf(d: &mut IoUringDriver) -> Result<(), IoDriverError> {
+    // reg_ptr would point at an io_uring_buf_reg struct in real use;
+    // shape test only.
+    d.register_pbuf_ring(0, 256, 1)
+}
+
+fn typecheck_unregister_pbuf(d: &mut IoUringDriver) -> Result<(), IoDriverError> {
+    d.unregister_pbuf_ring(1)
+}
+
+// New error variant.
+fn typecheck_register_failed_variant() -> IoDriverError {
+    IoDriverError.RegisterFailed { errno: 1 }
+}
+
+fn main() {
+    // Shape-only.
+}

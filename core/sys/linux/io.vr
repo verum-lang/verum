@@ -66,7 +66,11 @@ public const IORING_REGISTER_FILES: UInt32 = 2;
 public const IORING_UNREGISTER_FILES: UInt32 = 3;
 public const IORING_REGISTER_EVENTFD: UInt32 = 4;
 public const IORING_UNREGISTER_EVENTFD: UInt32 = 5;
+public const IORING_REGISTER_FILES_UPDATE: UInt32 = 6;
 public const IORING_REGISTER_PROBE: UInt32 = 8;
+/// Provided-buffer ring register (Linux 5.19+).
+public const IORING_REGISTER_PBUF_RING: UInt32 = 22;
+public const IORING_UNREGISTER_PBUF_RING: UInt32 = 23;
 
 /// SQE opcodes
 public const IORING_OP_NOP: UInt8 = 0;
@@ -94,7 +98,21 @@ public const IORING_OP_WRITE: UInt8 = 23;
 public const IORING_OP_SEND: UInt8 = 26;
 public const IORING_OP_RECV: UInt8 = 27;
 public const IORING_OP_OPENAT2: UInt8 = 28;
+public const IORING_OP_SEND_ZC: UInt8 = 33;       // Zero-copy send (Linux 6.0+)
+public const IORING_OP_SENDMSG_ZC: UInt8 = 35;    // Zero-copy sendmsg (Linux 6.1+)
 public const IORING_OP_SOCKET: UInt8 = 45;
+
+/// Op-specific flags
+/// IORING_RECV_MULTISHOT — stay armed until peer closes (Linux 6.0+).
+/// Passed in sqe.op_flags of IORING_OP_RECV.
+public const IORING_RECV_MULTISHOT: UInt32 = 1 << 1;
+
+/// IORING_ACCEPT_MULTISHOT — pass in sqe.op_flags of IORING_OP_ACCEPT
+/// to keep posting new accept CQEs until cancelled (Linux 5.19+).
+public const IORING_ACCEPT_MULTISHOT: UInt32 = 1 << 0;
+
+/// IORING_SEND_ZC flags
+public const IORING_SEND_ZC_REPORT_USAGE: UInt32 = 1 << 3;
 
 /// SQE flags
 public const IOSQE_FIXED_FILE: UInt8 = 1 << 0;
@@ -224,6 +242,7 @@ public type IoDriverError is
     | MmapFailed { code: Int }
     | SubmitFailed { code: Int }
     | WaitFailed { code: Int }
+    | RegisterFailed { errno: Int }
     | QueueFull
     | Unsupported
     | EpollFailed { code: Int }
@@ -709,6 +728,260 @@ implement IoUringDriver {
             (*sqe).user_data = user_data;
         }
         self.submit_sqe();
+        Ok(())
+    }
+
+    /// Prepare a multi-shot accept — one SQE produces unlimited CQEs
+    /// (each with IORING_CQE_F_MORE set) until cancelled or the socket
+    /// is closed. Requires Linux 5.19+.
+    public fn prep_accept_multishot(&mut self, fd: Int, user_data: UInt64)
+        -> Result<(), IoDriverError>
+    {
+        let sqe = self.get_sqe()?;
+        unsafe {
+            (*sqe).opcode = IORING_OP_ACCEPT;
+            (*sqe).flags = 0;
+            (*sqe).fd = fd as Int32;
+            (*sqe).off_addr2 = 0;
+            (*sqe).addr_splice = 0;
+            (*sqe).op_flags = IORING_ACCEPT_MULTISHOT;
+            (*sqe).user_data = user_data;
+        }
+        self.submit_sqe();
+        Ok(())
+    }
+
+    /// Prepare a multi-shot recv with a provided-buffer group. The
+    /// kernel pulls the next available buffer from the ring identified
+    /// by `buf_group` and emits one CQE per incoming read. Requires
+    /// Linux 6.0+. IOSQE_BUFFER_SELECT is set automatically.
+    public fn prep_recv_multishot(
+        &mut self,
+        fd: Int,
+        buf_group: UInt16,
+        flags: Int32,
+        user_data: UInt64,
+    ) -> Result<(), IoDriverError> {
+        let sqe = self.get_sqe()?;
+        unsafe {
+            (*sqe).opcode = IORING_OP_RECV;
+            (*sqe).flags = IOSQE_BUFFER_SELECT;
+            (*sqe).fd = fd as Int32;
+            (*sqe).off_addr2 = 0;
+            (*sqe).addr_splice = 0;
+            (*sqe).len = 0;
+            (*sqe).op_flags = (flags as UInt32) | IORING_RECV_MULTISHOT;
+            (*sqe).buf_index = buf_group;
+            (*sqe).user_data = user_data;
+        }
+        self.submit_sqe();
+        Ok(())
+    }
+
+    /// Prepare a zero-copy send (IORING_OP_SEND_ZC). The kernel emits
+    /// TWO completions — the first with the byte count, the second
+    /// (with IORING_CQE_F_NOTIF set) when the userspace buffer is safe
+    /// to free. The caller MUST keep `buf` valid until the notification.
+    /// Requires Linux 6.0+.
+    public fn prep_send_zc(
+        &mut self,
+        fd: Int,
+        buf: &[Byte],
+        flags: Int32,
+        user_data: UInt64,
+    ) -> Result<(), IoDriverError> {
+        let sqe = self.get_sqe()?;
+        unsafe {
+            (*sqe).opcode = IORING_OP_SEND_ZC;
+            (*sqe).flags = 0;
+            (*sqe).fd = fd as Int32;
+            (*sqe).off_addr2 = 0;
+            (*sqe).addr_splice = buf.as_ptr() as UInt64;
+            (*sqe).len = buf.len() as UInt32;
+            (*sqe).op_flags = flags as UInt32;
+            (*sqe).user_data = user_data;
+        }
+        self.submit_sqe();
+        Ok(())
+    }
+
+    /// Prepare a zero-copy sendmsg (IORING_OP_SENDMSG_ZC).
+    /// Requires Linux 6.1+.
+    public fn prep_sendmsg_zc(
+        &mut self,
+        fd: Int,
+        msg: &MsgHdr,
+        flags: Int32,
+        user_data: UInt64,
+    ) -> Result<(), IoDriverError> {
+        let sqe = self.get_sqe()?;
+        unsafe {
+            (*sqe).opcode = IORING_OP_SENDMSG_ZC;
+            (*sqe).flags = 0;
+            (*sqe).fd = fd as Int32;
+            (*sqe).off_addr2 = 0;
+            (*sqe).addr_splice = msg as UInt64;
+            (*sqe).len = 1;
+            (*sqe).op_flags = flags as UInt32;
+            (*sqe).user_data = user_data;
+        }
+        self.submit_sqe();
+        Ok(())
+    }
+
+    /// Prepare a fixed-buffer read — references a previously registered
+    /// buffer via `buf_index` instead of pinning a new one per op.
+    public fn prep_read_fixed(
+        &mut self,
+        fd: Int,
+        buf_index: UInt16,
+        buf_ptr: UInt64,
+        len: UInt32,
+        offset: Int64,
+        user_data: UInt64,
+    ) -> Result<(), IoDriverError> {
+        let sqe = self.get_sqe()?;
+        unsafe {
+            (*sqe).opcode = IORING_OP_READ_FIXED;
+            (*sqe).flags = 0;
+            (*sqe).fd = fd as Int32;
+            (*sqe).off_addr2 = offset as UInt64;
+            (*sqe).addr_splice = buf_ptr;
+            (*sqe).len = len;
+            (*sqe).buf_index = buf_index;
+            (*sqe).user_data = user_data;
+        }
+        self.submit_sqe();
+        Ok(())
+    }
+
+    /// Prepare a fixed-buffer write.
+    public fn prep_write_fixed(
+        &mut self,
+        fd: Int,
+        buf_index: UInt16,
+        buf_ptr: UInt64,
+        len: UInt32,
+        offset: Int64,
+        user_data: UInt64,
+    ) -> Result<(), IoDriverError> {
+        let sqe = self.get_sqe()?;
+        unsafe {
+            (*sqe).opcode = IORING_OP_WRITE_FIXED;
+            (*sqe).flags = 0;
+            (*sqe).fd = fd as Int32;
+            (*sqe).off_addr2 = offset as UInt64;
+            (*sqe).addr_splice = buf_ptr;
+            (*sqe).len = len;
+            (*sqe).buf_index = buf_index;
+            (*sqe).user_data = user_data;
+        }
+        self.submit_sqe();
+        Ok(())
+    }
+
+    /// Register a set of fixed buffers with the kernel. Pointers are
+    /// pinned in memory; subsequent prep_read_fixed / prep_write_fixed
+    /// reference them by buf_index. Caller must keep the backing
+    /// iovec array alive for the lifetime of the registration.
+    public fn register_buffers(&mut self, iovecs: &[IOVec]) -> Result<(), IoDriverError> {
+        let ret = unsafe {
+            syscall_raw(
+                SYS_IO_URING_REGISTER,
+                self.ring_fd,
+                IORING_REGISTER_BUFFERS as Int,
+                iovecs.as_ptr() as Int,
+                iovecs.len() as Int,
+                0, 0,
+            )
+        };
+        if ret < 0 {
+            return Err(IoDriverError.RegisterFailed { errno: -ret as Int });
+        }
+        Ok(())
+    }
+
+    public fn unregister_buffers(&mut self) -> Result<(), IoDriverError> {
+        let ret = unsafe {
+            syscall_raw(
+                SYS_IO_URING_REGISTER,
+                self.ring_fd,
+                IORING_UNREGISTER_BUFFERS as Int,
+                0, 0, 0, 0,
+            )
+        };
+        if ret < 0 { return Err(IoDriverError.RegisterFailed { errno: -ret as Int }); }
+        Ok(())
+    }
+
+    /// Register a fixed-size file-descriptor table. Slots can be updated
+    /// later without unregistering the whole table.
+    public fn register_files(&mut self, fds: &[Int32]) -> Result<(), IoDriverError> {
+        let ret = unsafe {
+            syscall_raw(
+                SYS_IO_URING_REGISTER,
+                self.ring_fd,
+                IORING_REGISTER_FILES as Int,
+                fds.as_ptr() as Int,
+                fds.len() as Int,
+                0, 0,
+            )
+        };
+        if ret < 0 { return Err(IoDriverError.RegisterFailed { errno: -ret as Int }); }
+        Ok(())
+    }
+
+    public fn unregister_files(&mut self) -> Result<(), IoDriverError> {
+        let ret = unsafe {
+            syscall_raw(
+                SYS_IO_URING_REGISTER,
+                self.ring_fd,
+                IORING_UNREGISTER_FILES as Int,
+                0, 0, 0, 0,
+            )
+        };
+        if ret < 0 { return Err(IoDriverError.RegisterFailed { errno: -ret as Int }); }
+        Ok(())
+    }
+
+    /// Register a provided-buffer ring of `entries` buffers under the
+    /// chosen `group_id`. `reg_ptr` points at a `struct io_uring_buf_reg`
+    /// — caller is responsible for its layout and for the backing ring
+    /// memory. The kernel picks an unused buffer for each matching
+    /// recv completion. Requires Linux 5.19+.
+    public fn register_pbuf_ring(
+        &mut self,
+        reg_ptr: UInt64,
+        entries: UInt32,
+        group_id: UInt16,
+    ) -> Result<(), IoDriverError> {
+        let packed = (entries & 0xFFFF) | ((group_id as UInt32) << 16);
+        let ret = unsafe {
+            syscall_raw(
+                SYS_IO_URING_REGISTER,
+                self.ring_fd,
+                IORING_REGISTER_PBUF_RING as Int,
+                reg_ptr as Int,
+                packed as Int,
+                0, 0,
+            )
+        };
+        if ret < 0 { return Err(IoDriverError.RegisterFailed { errno: -ret as Int }); }
+        Ok(())
+    }
+
+    public fn unregister_pbuf_ring(&mut self, group_id: UInt16) -> Result<(), IoDriverError> {
+        let ret = unsafe {
+            syscall_raw(
+                SYS_IO_URING_REGISTER,
+                self.ring_fd,
+                IORING_UNREGISTER_PBUF_RING as Int,
+                0,
+                group_id as Int,
+                0, 0,
+            )
+        };
+        if ret < 0 { return Err(IoDriverError.RegisterFailed { errno: -ret as Int }); }
         Ok(())
     }
 
