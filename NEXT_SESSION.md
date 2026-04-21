@@ -1,114 +1,150 @@
 # Next Session — Production-Ready Push
 
-## Snapshot at Session End (2026-04-21)
+## Snapshot (2026-04-21, после ~30 коммитов этой сессии)
 
-**Test status (after 14 session commits):**
+**Test status:**
 - L0 stdlib-runtime: **100%** (8/8, regression-free)
-- L1 full: 92.3% (1051/1139)
-- L2-standard: **69.8%** (up from 66.1% baseline)
-- L2/async subset: **50.7%** (24→35 passing, +50% relative)
+- L0 full: проверить отдельно (прежний run был flaky)
+- L1-core: **99.6%** (519/521) — 2 self-hosting flakes (`type_checker_patterns.vr`, `data_type.vr`, `parser_patterns.vr`)
+- L2-standard: **70%** (294/420) — 126 failures, категоризованы ниже
+- L3-extended: **93.1%** (297/319) — 22 failures
 
-**14 landed commits this session:**
-- `a968295` Text dual-layout print
-- `90bcb59` handle_clone raw-pointer safety
-- `5cf7565` stdlib From<&str> → &Text
-- `02dd6c8` Text list-dispatch guard
-- `db0c94f` Text.from codegen intercept
-- `ea77b84` module-level using [Ctx] propagation
-- `41a20bf` ptr_offset tag-preserving PtrAdd
-- `ea70bb8` auto-include core.async.select + spawn_config
-- `a00fae0` 7 async combinators (join5, race*, try_join*)
-- `b95ebd7` join_all_settled
-- `b38c5c4` Regex.new → Result<Regex, RegexError>
-- `465871c` spawn_with_config wrapper
-- `6402320` stdlib context fallback scan registers in both resolver + checker **(biggest L2 boost)**
-- `bb08b7c` method type-param substitution hardening
+## ✅ Закрыто в этой сессии
 
----
+### Инфраструктурные (параллельный агент)
+- `47de5d0` refactor(A,I): unified ModuleId allocator + single SoT ModuleRegistry
+- `a494f83` fix(modules,stdlib): canonicalise path across loader/registry, dedup Cluster
+- `a3f667e` fix(types): respect Visibility::Public in cross-module type lookup
+- `eaebe4f` refactor(C,D,E,H,J): 5 architectural refinements
+- `270681d` refactor(J): populate ProtocolMethod.type_param_names, exclude from subst_map
+- `08e24bb` feat(F-partial): deref-aware hint for Heap/Shared<dyn Protocol>.method()
+- `5b3e127` feat(B): auto-deref cascade on assignment-target field access
+- `05501cd` feat(F): smart-pointer auto-deref in method resolution (infrastructure)
+- **`63c61ec` fix(J): positional-alignment reordering of impl-level type-params**
+  → закрывает `once_with(|| 5).map(|x| x*10).next()` — `val: Int` вместо `fn(Int)→Int`
+- `fddd2e7` fix(F): post-cascade DynProtocol resolution for Heap/Shared<dyn P>.method()
+- `76c9220` chore: rebrand luxquant/axiom → verum-lang/verum
 
-## Open Tasks (4) — Each Requires Focused Subsystem Work
+### Моё в этой сессии
+- **`b37d61a` fix(verum_types): correct impl_var_count для method schemes (#57)**
+  → `a.chain(b)` на `Range<Int>` теперь валиден
+  → добавил `resolve_bind_limit` helper, прописал `impl_var_count` в 5 сайтах `register_impl_block_inner`
+- **`5b3e127` частично:** мой `format(...)` desugar был включён параллельным агентом в этот коммит
+  → VBC codegen: `try_compile_format_call`, macro_expansion: `try_desugar_format_call`
+  → оба делегируют в `compile_interpolated_string` — единый lowering с литеральным `f"..."`
+  → поддержка `{}`, `{:spec}`, `{{`, `}}`
+- **`44dd5b9` feat(stdlib/async): Sender.is_full / send_all / Receiver.recv_batch**
+  → закрывает API gap для L2 channel tests
+- **docs:** обновлён `internal/website/docs/language/syntax.md` — раздел про `format()`
+  (файл в отдельном git repo — uncommitted, требует авторизации пользователя)
 
-### #57 Iterator generic method inference
-**Concrete reproducer:** `let a = range(0,3); let b = range(10,13); let c = a.chain(b);` → `Type mismatch: expected 'Int', found 'Range<Int>'`.
+## 🔴 Оставшиеся проблемы (P0 — критично для production)
 
-**Root cause identified:** when `chain<U: Iterator<Item = Self.Item>>` method is instantiated for `Range<Int>`, the bound `Item = Self.Item` eagerly resolves `Self.Item = Int` via `substitute_self_type`'s `try_resolve_associated_type_projection` (infer.rs:23386). The associated-type resolution then pins `U := Int` before the argument `b: Range<Int>` is checked against U. Result: unify(Range<Int>, Int) fails.
+### 1. L2 async non-determinism: 41 stdout mismatch
+- Порядок завершения задач в executor не детерминирован
+- Nursery/cancellation ordering
+- Supervision tree error paths
+- **Требует индивидуальной диагностики каждого теста** — нет единого root cause
+- Файлы: `core/async/nursery.vr`, `core/async/cancellation.vr`, `crates/verum_vbc/src/interpreter/kernel/`
 
-**Affects:** 27 L1 iterator tests + several L2 tests using `.chain()`, `.zip()`, `.enumerate()`, etc. with generic method type params.
+### 2. L2 typecheck-unexpectedly-failed: 24 теста
+Конкретные симптомы (grep по вчерашним запускам):
+- `Cannot dereference non-reference type: Result<_, _>` — задача #55, частично покрыта `5b3e127 feat(B)` (только field access), **не покрыт `let x = *result`, `match *result {...}`**
+- `Pattern expects a variant type, but scrutinee has type SendError` — variant pattern на generic newtype
+- `type not found: Repository` — generic context types (`Repository<T>.find(1)`)
+- `context 'unknown' (id=N) not provided` — contexts с TypeVar ID вместо имени
+- `no method named recv_batch found for type Receiver<Int>` — **частично закрыто `44dd5b9`**, но остаются другие missing-method для channel (see L2 channel.vr)
 
-**Partial work in commit `bb08b7c`:**
-- `substitute_type_params` on bare `Type::Generic { name, args: [] }` now substitutes by name (previously only recursed args).
-- `instantiate_method_type_params` additionally collects the *original* `TypeVar` stored under each param's name in ctx.env and rewrites those vars to fresh ones per call-site.
+### 3. L2 `undefined function: public_api / distance / None` — 10 тестов
+- `mount outer.{public_api}` — inline-module + mount resolution
+- Возможно закроется оставшимся ModuleRegistry refactor'ом параллельного агента
 
-**Needed fix (architectural):** Decouple bound constraint resolution from fresh-var allocation. When a bound `U: Iterator<Item = Self.Item>` carries an associated-type projection that references `Self`, the projection must remain *lazy* (as a deferred constraint) until U gets its concrete value from the argument — NOT eagerly resolved during signature instantiation. Likely sites:
-- `crates/verum_types/src/infer.rs::substitute_self_type` (around line 23386 — `try_resolve_associated_type_projection` fires too early when base_ty is concrete).
-- `crates/verum_types/src/infer.rs::instantiate_method_for_receiver` — may need to skip bound contents during Self-substitution.
-- Protocol bound resolver in context — should register bounds on fresh vars as deferred predicates.
+### 4. L2 null pointer dereference: 4 теста 🔴 memory safety
+- Runtime падение — недопустимо для production
+- Конкретные файлы надо выделить (vtest output заблокирован в предыдущем прогоне)
 
----
+### 5. L2 stack overflow depth 16384: 2 теста
+- Бесконечная рекурсия в type inference / protocol lookup
 
-### #46 L2/async runtime — 39 stdout mismatches
-**Status:** 35/69 passing after this session's context + combinator fixes.
+## 🟡 Оставшиеся проблемы (P1 — deployment blocker)
 
-**Remaining failures cluster:**
-- ~20 stdout reordering (async executor scheduling nondeterminism: tasks complete in wrong order)
-- Cancellation propagation through nested nurseries
-- Nested async closure captures (`undefined variable: owned/i` in spawned closure body)
-- `panic_in_async`, `supervision_recovery`, `try_recover_finally` — supervisor-tree error paths
+### 6. Associated-type eager resolution (частично #57)
+- `try_resolve_associated_type_projection` в `substitute_self_type` (infer.rs:~23386) резолвит `::Item<T>` до того как U получит bound
+- Фундаментально: bounds должны быть deferred constraints
+- Закрывает: iterator-generic tests (не только `chain`, но `zip`, `enumerate`, `peekable`, `chain_many`)
 
-**Key files:**
-- `core/async/nursery.vr` — structured concurrency
-- `core/async/cancellation.vr` — CancellationToken observer
-- `crates/verum_vbc/src/interpreter/kernel/` — Tier 0 executor
-- `crates/verum_vbc/src/codegen/expressions.rs` — closure capture lowering
+### 7. Полноценный `*guard` deref для Result/MutexGuard (#55 остаток)
+- `5b3e127 feat(B)` закрыл только `g.val = 100` (field assignment через MutexGuard<Inner>)
+- Не покрыт: `let x = *guard;`, `match *result {...}`, передача `&*guard` в fn
+- Требует: либо `Deref` protocol, либо auto-unwrap `Result` на `*` в read-mode тоже
 
-Each test needs individual diagnosis. No shared root cause for all 39.
+### 8. Format specifier rendering
+- `{:?}`, `{:x}`, `{:.3}`, `{:b}`, `{:e}` сейчас парсятся, но spec DISCARDED
+- Для Debug/Display protocol dispatch нужен spec-aware rendering
+- Место: `crates/verum_vbc/src/codegen/expressions.rs::compile_interpolated_string`
 
----
+### 9. Stdlib method gaps (помимо channel)
+Обнаружены грепом по L2 failure reasons:
+- `SocketAddr.to_socket_addrs()` — protocol lookup fails (protocol есть, но resolution не срабатывает)
+- `Sender<Int>.into_iter()` — protocol conflict или missing
+- `*.east_opt()`, `*.uint64` — возможно временные или generic
+- `Set.filter_map`, `Set.fold`, `Set.for_each` — "Custom iterator 'Set' missing both has_next and next methods" (warning на prelude) → **Set нужен Iterator impl**
 
-### #53 Stdlib `format(fmt, ...args)` variadic
-**Test sites:** L2 error-handling tests use `format("released_{}", id)`, `format("Expected: {:?}", v)`, `format("{:.3}ms", nanos)` — 1-4 args, format specs `{}`, `{:?}`, `{:b}`, `{:o}`, `{:x}`, `{:.N}`, `{:NwN}`, `{:e}`.
+### 10. Contexts с TypeVar IDs
+- `context 'unknown' (id=22) not provided` — context resolver теряет имя, использует TypeVar ID
+- Нужно: протащить имя контекста до warning/lookup
 
-**Two paths:**
-1. **Language-level variadic fn.** No precedent in Verum — would need `fn format(fmt: &Text, ...args: Display) -> Text` grammar, AST, codegen support for variadic arg packing.
-2. **Compile-time macro.** Rewrite `format("x={}", v)` at parse-time to `f"x={v}"` (which is already supported). Requires:
-   - Recognize `format(...)` calls in a pre-pass
-   - Extract format spec, locate argument positions, synthesize interpolation literal
-   - Sites: `crates/verum_fast_parser/src/expr.rs` post-parse, or a dedicated desugar pass in `verum_ast`.
+## 🟢 Желательно (P2 — quality)
 
-Path 2 is smaller. Path 1 is more general (supports runtime format strings).
+### 11. rust-analyzer stale errors
+Не критично для сборки, но мешает IDE:
+- `expected Text, found String` в `infer.rs` (~30 мест) — несоответствие Text/String после чьей-то миграции
+- `proc macro server error: Cannot create expander ... mismatched ABI expected rustc 1.96 got 1.97-nightly`
+- **Фикс:** `cargo clean && cargo build` или обновить rust-analyzer
 
----
+### 12. Set Iterator implementation
+`core/collections/set.vr` должен получить `implement Iterator for SetIter` чтобы `for x in set { ... }` работал и stdlib не спамил warnings при загрузке
 
-### #55 MutexGuard / Result deref protocol (`*guard` syntax)
-**Error:** `Cannot dereference non-reference type: Result<_, _>` at `*guard` where `guard: Result<MutexGuard<T>, PoisonError>` from `mutex.lock()`.
+### 13. Поддержка positional/named placeholders в format()
+Сейчас `format("{0}", x)` и `format("{name}", name)` не поддерживаются (только анонимные). Добавить в `try_compile_format_call` / `try_desugar_format_call`.
 
-**Affects:** deadlock_prevention, ref_across_await, shared_state (L2/async safety).
+## Архитектурные ориентиры
 
-**Design decision needed:**
-- Option A: `Mutex.lock()` returns `MutexGuard<T>` directly (panic on poison, Rust 1.0+ idiom). Separate `try_lock_poisoned()` for explicit handling. Clean but breaks Rust-compat API.
-- Option B: `Deref` protocol for `Result<T, E>` — `*result` auto-unwraps on Ok, panics on Err. Semantic hazard.
-- Option C: Grammar/type-system change: `await?` or implicit `?` after `await` on Result-returning async fns.
+### Почему generalize_ordered shadow-коллизия БЫЛА уязвима
+`context.rs:1937` делает `self.lookup_type(name)` — name-based. Когда у impl и method один `F`, `define_type("F", method_var)` перекрывает `impl_F` в scope, и при lookup для quantified-list берётся method_F вместо impl_F. Параллельный агент закрыл это через **positional-alignment reordering**: scheme.vars теперь хранит impl-vars, присутствующие в `for_type` **первыми**, потом impl-vars НЕ в `for_type`, потом method-level. `impl_var_count` = размер первой группы (не всех impl). `bind_limit` даёт точное совпадение с `receiver.args.len()`. См. `63c61ec`.
 
-Both (A) and (C) were explored mid-session; (A) breaks `Shared.new(Mutex.new(...))` through Shared's own Result wrapping. Orthogonal stdlib cleanup needed first.
+### Почему `*guard` для Result требует архитектурного решения
+Текущее: `*x` ожидает `Deref` protocol или встроенный reference-тип. Mutex.lock() возвращает `Result<MutexGuard<T>, PoisonError>` — два слоя. Нужно ИЛИ:
+- (A) `Mutex.lock()` возвращает `MutexGuard<T>` (panic on poison), с отдельным `try_lock_poisoned()` для explicit handling
+- (B) Implicit `?` после `await` на Result-returning async fn (`await?`)
+- (C) `Deref` для `Result<T, E>` → `T` (panic on Err) — семантический hazard
 
----
+Решение (A) самое чистое. Требует обновления всех call-sites `mutex.lock().unwrap()` → `mutex.lock()`.
 
-## Reproducer Files (keep for next session)
+## Reproducers (сохранено для следующей сессии)
 
-- `/tmp/test_chain_min.vr` — `range().chain(range())` — #57
-- `/tmp/test_fs3.vr` — module-level using — already fixed (#58)
-- `/tmp/test_simple.vr`, `/tmp/test_direct.vr`, `/tmp/test_final.vr` — Text tests
+- `/tmp/test_chain_min.vr` — `range().chain(range())` — **#57 решено**
+- `/tmp/test_once_with_map.vr` — map на OnceWith — **решено `63c61ec`**
+- `/tmp/test_format_basic.vr`, `/tmp/test_format_full.vr` — `format()` desugar — **решено**
 
 ## Investigation Shortcuts
-
-- `VERUM_UNIFY_DEBUG=1` — prints unification failures (revert after use, currently not in tree)
-- `VERUM_CTX_DEBUG=1` — prints `check_item: FileSystem defined=true/false` (currently not in tree)
+- `VERUM_UNIFY_DEBUG=1`, `VERUM_CTX_DEBUG=1` — убраны из дерева, добавить обратно при необходимости
 - Archive inspection: `zstd -d -c target/release/build/verum_compiler-*/out/stdlib_archive.zst | grep -ao "public context [A-Z][a-zA-Z]*" | sort -u`
 
 ## Regression Baseline
 
-Run after every significant change:
+Каждый коммит должен удовлетворять:
 ```bash
 target/release/vtest run -l L0 vcs/specs/L0-critical/stdlib-runtime
 ```
-Must stay at 8/8. If it drops, revert.
+Ожидаемо: L0 8/8. **Текущее: 8/8.** ✓
+
+## Рекомендуемый план следующей сессии
+
+1. **Дождаться завершения ModuleRegistry refactor'а** параллельного агента (остаются P0 #3 public_api/distance/None)
+2. **Associated-type eager resolution (#57 хвост)** — фикс в `infer.rs::substitute_self_type`, закрывает ~10-15 L2 typecheck failures
+3. **`*guard` для Result (#55 хвост)** — выбрать дизайн (A/B/C), применить
+4. **Null pointer dereferences** — триаж и фикс (memory safety, release blocker)
+5. **Stack overflow** — найти цикл, ограничить/правильно завершить
+6. **Async non-determinism** — сложная категория, последней
+7. **Set Iterator impl** — простая задача, убирает stdlib warnings
