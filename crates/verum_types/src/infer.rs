@@ -7326,6 +7326,39 @@ impl TypeChecker {
         self.current_module_path = path.into();
     }
 
+    /// Register a type definition in the current module's scope, ALONGSIDE the
+    /// unqualified flat registration that feeds `ctx.lookup_type`.
+    ///
+    /// Motivation (architectural): stdlib module A and stdlib module B can
+    /// legitimately both declare `public type RecvError is …`. Prior to this
+    /// helper, the flat `ctx.type_defs` map was the only store, and whichever
+    /// module loaded last won the unqualified name — which meant signatures
+    /// compiled *inside module A* could silently resolve `RecvError` to B's
+    /// definition (the last-registered one), producing confusing
+    /// cross-module type mismatches at call sites (see
+    /// `broadcast_stream.vr` vs `quic.stream_sm.recv`).
+    ///
+    /// This helper additionally registers the type under the fully qualified
+    /// key `{module_path}.{name}`. Resolver code (`ast_to_type_inner` for
+    /// `TypeKind::Path`) then tries the qualified key first before falling
+    /// back to the unqualified one, so types compiled inside a module always
+    /// see that module's own definitions first — regardless of load order.
+    ///
+    /// No-op fallback (`current_module_path == "cog"` or empty) means
+    /// user-code phase / unknown-module context: register only flat, so
+    /// behaviour matches pre-change semantics there.
+    pub(crate) fn define_type_in_current_module(&mut self, name: Text, ty: Type) {
+        let mod_path = self.current_module_path.clone();
+        // Always write the unqualified flat entry (back-compat + fast path).
+        self.ctx.define_type(name.clone(), ty.clone());
+        // Additionally publish under the fully qualified name when we have a
+        // real module path to attribute the type to.
+        if !mod_path.as_str().is_empty() && mod_path.as_str() != "cog" {
+            let qualified: Text = format!("{}.{}", mod_path, name).into();
+            self.ctx.define_type(qualified, ty);
+        }
+    }
+
     /// Get the current module path
     /// Name resolution across modules: qualified paths, import disambiguation, re-exports, path resolution in imports — Path resolution in imports
     pub fn current_module_path(&self) -> &Text {
@@ -46349,7 +46382,10 @@ impl TypeChecker {
                     path: Path::single(type_decl.name.clone()),
                     args: List::new(),
                 };
-                self.ctx.define_type(type_name.clone(), named_type);
+                // Module-aware: register both unqualified (back-compat) AND
+                // fully-qualified so signatures inside this module always
+                // resolve their own types first, regardless of load order.
+                self.define_type_in_current_module(type_name.clone(), named_type);
 
                 // CRITICAL FIX: Register type parameters for generic type aliases
                 // This enables proper substitution when the alias is instantiated with concrete types
@@ -46451,8 +46487,10 @@ impl TypeChecker {
                     )),
                     args: List::new(), // Empty args - specific instances will fill them
                 };
-                self.ctx
-                    .define_type(type_name.clone(), placeholder_type);
+                // Module-aware: also publish under `{module_path}.{type_name}`
+                // so cross-module name collisions (e.g. multiple `RecvError`
+                // in stdlib) resolve to the declaring module's definition.
+                self.define_type_in_current_module(type_name.clone(), placeholder_type);
 
                 // Convert variant declarations to Type::Variant.
                 // HIT path-constructors (variants with `path_endpoints`)
@@ -46536,8 +46574,12 @@ impl TypeChecker {
                 }
 
                 let variant_type = Type::Variant(variant_map.clone());
-                self.ctx
-                    .define_type(type_name.clone(), variant_type.clone());
+                // Module-aware registration: the same name (e.g. `RecvError`)
+                // can legitimately appear in multiple stdlib modules. Publish
+                // under `{current_module}.{type_name}` alongside the flat key
+                // so signatures inside this module resolve their own variant
+                // regardless of load order.
+                self.define_type_in_current_module(type_name.clone(), variant_type.clone());
 
                 // Register HIT path-constructor metadata (if any) for
                 // consumption by HIT-aware tactics like `cubical` and
@@ -47948,7 +47990,10 @@ impl TypeChecker {
                     path: Path::single(type_decl.name.clone()),
                     args: List::new(),
                 };
-                self.ctx.define_type(type_name.clone(), named_type);
+                // Module-aware: register both unqualified (back-compat) AND
+                // fully-qualified so signatures inside this module always
+                // resolve their own types first, regardless of load order.
+                self.define_type_in_current_module(type_name.clone(), named_type);
 
                 // CRITICAL FIX: Register type parameters for generic type aliases
                 // This enables proper substitution when the alias is instantiated
@@ -48004,7 +48049,11 @@ impl TypeChecker {
                     )),
                     args: List::new(),
                 };
-                self.ctx.define_type(type_name.clone(), placeholder_type);
+                // Module-aware: register under both unqualified and qualified
+                // keys so recursive references inside this type's module
+                // resolve to THIS placeholder (and later to the real variant),
+                // not to a same-named type from a different module.
+                self.define_type_in_current_module(type_name.clone(), placeholder_type);
 
                 // Convert variant declarations to Type::Variant
                 let mut variant_map: IndexMap<Text, Type> = IndexMap::new();
@@ -48085,8 +48134,10 @@ impl TypeChecker {
                 }
 
                 // NOW store the variant type definition (after constructors are in env)
-                self.ctx
-                    .define_type(type_name.clone(), variant_type.clone());
+                // Module-aware: publish under {module}.{name} too, so signatures
+                // inside this module always find THIS variant (not a same-named
+                // one last-registered by another module).
+                self.define_type_in_current_module(type_name.clone(), variant_type.clone());
 
                 // CRITICAL: Register variant type to name mapping for instance method lookup
                 if let Some(sig) = Self::variant_type_signature(&variant_type) {
@@ -48249,8 +48300,10 @@ impl TypeChecker {
                 // CRITICAL: Register a placeholder type FIRST to handle recursive type definitions
                 // and prevent infinite recursion when processing field types.
                 let placeholder_var = TypeVar::fresh();
-                self.ctx
-                    .define_type(type_name.clone(), Type::Var(placeholder_var));
+                // Module-aware: publish the placeholder under the qualified key
+                // so same-named record types in different modules don't clobber
+                // each other during recursive resolution.
+                self.define_type_in_current_module(type_name.clone(), Type::Var(placeholder_var));
 
                 // Use lenient resolution fallback for cross-module imports
                 let mut record_map: IndexMap<Text, Type> = IndexMap::new();
@@ -48283,7 +48336,8 @@ impl TypeChecker {
                             })
                             .collect(),
                     };
-                    self.ctx.define_type(type_name.clone(), named_type);
+                    // Module-aware: empty record registration.
+                    self.define_type_in_current_module(type_name.clone(), named_type);
 
                     // CRITICAL: Also register empty struct fields for pattern matching
                     // Empty record allows `match e { Empty {} => ... }` patterns
@@ -48311,7 +48365,8 @@ impl TypeChecker {
                             .collect(),
                     };
 
-                    self.ctx.define_type(type_name.clone(), named_type.clone());
+                    // Module-aware: non-empty record registration.
+                    self.define_type_in_current_module(type_name.clone(), named_type.clone());
 
                     // CRITICAL FIX: Resolve placeholder TypeApp references in record field types.
                     // Same fix as in register_type_declaration_body — see comment there.

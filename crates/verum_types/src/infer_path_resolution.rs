@@ -49,6 +49,26 @@ impl TypeChecker {
             }
         }
 
+        // Step 0: Architectural module-aware lookup. When two stdlib
+        // modules legitimately declare a type with the same simple name
+        // (e.g. `RecvError` in both `core.async.broadcast` and
+        // `core.net.quic.stream_sm.recv`), the flat `ctx.type_defs` map's
+        // "last-registered wins" semantics used to silently reroute
+        // references in the *declaring* module to the other module's type
+        // — producing confusing cross-module type mismatches
+        // (`broadcast_stream.vr`). We now publish every type under the
+        // fully-qualified key `{module_path}.{name}` in addition to the
+        // flat name (see `define_type_in_current_module`). Here we prefer
+        // that qualified lookup first, so the declaring module always
+        // resolves its own types regardless of load order.
+        let mod_path = self.current_module_path.clone();
+        if !mod_path.as_str().is_empty() && mod_path.as_str() != "cog" {
+            let qualified: verum_common::Text =
+                format!("{}.{}", mod_path, name).into();
+            if let Some(ty) = self.ctx.lookup_type(qualified.as_str()) {
+                return Ok(ty.clone());
+            }
+        }
         // Step 1: Try current module first (fast path)
         if let Maybe::Some(ty) = self.ctx.lookup_type(name) {
             return Ok(ty.clone());

@@ -1766,7 +1766,22 @@ impl<'s> CompilationPipeline<'s> {
             eprintln!("  Pass 3: Registering function signatures from all modules...");
         }
         for (module_name, ast_modules) in all_modules {
-            for (_file_path, ast_module) in ast_modules {
+            for (file_path, ast_module) in ast_modules {
+                // Module-scoped resolution: free fn signatures reference types
+                // (`Result<_, RecvError>`) that may collide across modules, so
+                // anchor each file to its qualified module path before
+                // registration.
+                let per_file_module_path = if let Some(file_stem) = file_path.file_stem().and_then(|s| s.to_str()) {
+                    if file_stem == "mod" {
+                        module_name.clone()
+                    } else {
+                        format!("{}.{}", module_name, file_stem)
+                    }
+                } else {
+                    module_name.clone()
+                };
+                type_checker.set_current_module_path(per_file_module_path);
+
                 for item in &ast_module.items {
                     if let verum_ast::ItemKind::Function(func) = &item.kind {
                         if let Err(e) = type_checker.register_function_signature(func) {
@@ -1786,7 +1801,19 @@ impl<'s> CompilationPipeline<'s> {
             eprintln!("  Pass 4: Registering protocols from all modules...");
         }
         for (module_name, ast_modules) in all_modules {
-            for (_file_path, ast_module) in ast_modules {
+            for (file_path, ast_module) in ast_modules {
+                // Module-scoped resolution for protocol method signatures.
+                let per_file_module_path = if let Some(file_stem) = file_path.file_stem().and_then(|s| s.to_str()) {
+                    if file_stem == "mod" {
+                        module_name.clone()
+                    } else {
+                        format!("{}.{}", module_name, file_stem)
+                    }
+                } else {
+                    module_name.clone()
+                };
+                type_checker.set_current_module_path(per_file_module_path);
+
                 for item in &ast_module.items {
                     if let verum_ast::ItemKind::Protocol(protocol_decl) = &item.kind {
                         if let Err(e) = type_checker.register_protocol(protocol_decl) {
@@ -1806,7 +1833,23 @@ impl<'s> CompilationPipeline<'s> {
             eprintln!("  Pass 5: Registering impl blocks from all modules...");
         }
         for (module_name, ast_modules) in all_modules {
-            for (_file_path, ast_module) in ast_modules {
+            for (file_path, ast_module) in ast_modules {
+                // Architectural: set the current module path so that type
+                // references inside impl-block signatures (e.g. `RecvError` in
+                // `Stream for BroadcastReceiver`) resolve against the
+                // qualified-name layer first — avoiding collisions between
+                // same-named types in different stdlib modules.
+                let per_file_module_path = if let Some(file_stem) = file_path.file_stem().and_then(|s| s.to_str()) {
+                    if file_stem == "mod" {
+                        module_name.clone()
+                    } else {
+                        format!("{}.{}", module_name, file_stem)
+                    }
+                } else {
+                    module_name.clone()
+                };
+                type_checker.set_current_module_path(per_file_module_path);
+
                 for item in &ast_module.items {
                     if let verum_ast::ItemKind::Impl(impl_decl) = &item.kind {
                         if let Err(e) = type_checker.register_impl_block(impl_decl) {
@@ -2861,17 +2904,24 @@ impl<'s> CompilationPipeline<'s> {
                     let depth_b = b.as_str().matches('.').count();
                     depth_a.cmp(&depth_b).then_with(|| a.as_str().cmp(b.as_str()))
                 });
-                let stdlib_modules: Vec<_> = stdlib_entries.iter().map(|(_, v)| v.clone()).collect();
 
-                if !stdlib_modules.is_empty() {
+                // Preserve the user-file module path so we can restore it after
+                // stdlib registration transiently rebinds it per-module.
+                let saved_module_path = checker.current_module_path().clone();
+
+                if !stdlib_entries.is_empty() {
                     if self.stdlib_metadata.is_none() {
-                        // S0a: Register stdlib type names
-                        for stdlib_mod in &stdlib_modules {
+                        // S0a: Register stdlib type names (module-scoped so the
+                        // fully-qualified `{mod}.{name}` key is populated and
+                        // same-named stdlib types don't collide on flat lookup).
+                        for (module_path, stdlib_mod) in &stdlib_entries {
+                            checker.set_current_module_path(module_path.clone());
                             checker.register_all_type_names(&stdlib_mod.items);
                         }
                         // S0b: Resolve stdlib type definitions
                         let mut resolution_stack = List::new();
-                        for stdlib_mod in &stdlib_modules {
+                        for (module_path, stdlib_mod) in &stdlib_entries {
+                            checker.set_current_module_path(module_path.clone());
                             for item in &stdlib_mod.items {
                                 if let verum_ast::ItemKind::Type(type_decl) = &item.kind {
                                     let _ = checker.resolve_type_definition(type_decl, &mut resolution_stack);
@@ -2879,7 +2929,8 @@ impl<'s> CompilationPipeline<'s> {
                             }
                         }
                         // S1: Register stdlib function signatures
-                        for stdlib_mod in &stdlib_modules {
+                        for (module_path, stdlib_mod) in &stdlib_entries {
+                            checker.set_current_module_path(module_path.clone());
                             for item in &stdlib_mod.items {
                                 if let verum_ast::ItemKind::Function(func) = &item.kind {
                                     if !checker.is_function_preregistered(func.name.name.as_str()) {
@@ -2889,7 +2940,8 @@ impl<'s> CompilationPipeline<'s> {
                             }
                         }
                         // S2: Register stdlib protocols
-                        for stdlib_mod in &stdlib_modules {
+                        for (module_path, stdlib_mod) in &stdlib_entries {
+                            checker.set_current_module_path(module_path.clone());
                             for item in &stdlib_mod.items {
                                 if let verum_ast::ItemKind::Protocol(protocol_decl) = &item.kind {
                                     let _ = checker.register_protocol(protocol_decl);
@@ -2898,8 +2950,11 @@ impl<'s> CompilationPipeline<'s> {
                         }
                     }
 
-                    // S3: ALWAYS register stdlib impl blocks
-                    for stdlib_mod in &stdlib_modules {
+                    // S3: ALWAYS register stdlib impl blocks (module-scoped so
+                    // method signatures reference the *declaring* module's
+                    // same-named types).
+                    for (module_path, stdlib_mod) in &stdlib_entries {
+                        checker.set_current_module_path(module_path.clone());
                         for item in &stdlib_mod.items {
                             if let verum_ast::ItemKind::Impl(impl_decl) = &item.kind {
                                 let _ = checker.register_impl_block(impl_decl);
@@ -2907,6 +2962,11 @@ impl<'s> CompilationPipeline<'s> {
                         }
                     }
                 }
+
+                // Restore the user-file module path so subsequent passes
+                // (user type / impl / function registration) run in the right
+                // resolution scope.
+                checker.set_current_module_path(saved_module_path);
 
                 // Signal transition to user code phase
                 checker.set_user_code_phase();
@@ -4899,20 +4959,27 @@ impl<'s> CompilationPipeline<'s> {
                 let depth_b = b.as_str().matches('.').count();
                 depth_a.cmp(&depth_b).then_with(|| a.as_str().cmp(b.as_str()))
             });
-            let stdlib_modules: Vec<_> = stdlib_entries.iter().map(|(_, v)| v.clone()).collect();
 
-            if !stdlib_modules.is_empty() {
+            // Preserve the user-file module path so we can restore it after
+            // stdlib registration transiently rebinds it per-module.
+            let saved_module_path = checker.current_module_path().clone();
+
+            if !stdlib_entries.is_empty() {
                 if self.stdlib_metadata.is_none() {
-                    debug!("analyze_module: Registering {} stdlib modules into type checker", stdlib_modules.len());
+                    debug!("analyze_module: Registering {} stdlib modules into type checker", stdlib_entries.len());
 
-                    // Pass S0a: Register all stdlib type names
-                    for stdlib_mod in &stdlib_modules {
+                    // Pass S0a: Register all stdlib type names (module-scoped so
+                    // fully-qualified `{mod}.{name}` keys are populated for
+                    // same-named stdlib types across different modules).
+                    for (module_path, stdlib_mod) in &stdlib_entries {
+                        checker.set_current_module_path(module_path.clone());
                         checker.register_all_type_names(&stdlib_mod.items);
                     }
 
                     // Pass S0b: Resolve all stdlib type definitions
                     let mut resolution_stack = List::new();
-                    for stdlib_mod in &stdlib_modules {
+                    for (module_path, stdlib_mod) in &stdlib_entries {
+                        checker.set_current_module_path(module_path.clone());
                         for item in &stdlib_mod.items {
                             if let ItemKind::Type(type_decl) = &item.kind {
                                 if let Err(e) = checker.resolve_type_definition(type_decl, &mut resolution_stack) {
@@ -4923,7 +4990,8 @@ impl<'s> CompilationPipeline<'s> {
                     }
 
                     // Pass S1: Register stdlib function signatures
-                    for stdlib_mod in &stdlib_modules {
+                    for (module_path, stdlib_mod) in &stdlib_entries {
+                        checker.set_current_module_path(module_path.clone());
                         for item in &stdlib_mod.items {
                             if let ItemKind::Function(func) = &item.kind {
                                 if !checker.is_function_preregistered(func.name.name.as_str()) {
@@ -4936,7 +5004,8 @@ impl<'s> CompilationPipeline<'s> {
                     }
 
                     // Pass S2: Register stdlib protocols
-                    for stdlib_mod in &stdlib_modules {
+                    for (module_path, stdlib_mod) in &stdlib_entries {
+                        checker.set_current_module_path(module_path.clone());
                         for item in &stdlib_mod.items {
                             if let ItemKind::Protocol(protocol_decl) = &item.kind {
                                 if let Err(e) = checker.register_protocol(protocol_decl) {
@@ -4950,8 +5019,9 @@ impl<'s> CompilationPipeline<'s> {
                 // Pass S3: ALWAYS register stdlib impl blocks (this registers methods
                 // in inherent_methods). This must run even when metadata IS available,
                 // because metadata doesn't populate inherent_methods from implement blocks.
-                debug!("analyze_module: Registering stdlib impl blocks ({} modules)", stdlib_modules.len());
-                for stdlib_mod in &stdlib_modules {
+                debug!("analyze_module: Registering stdlib impl blocks ({} modules)", stdlib_entries.len());
+                for (module_path, stdlib_mod) in &stdlib_entries {
+                    checker.set_current_module_path(module_path.clone());
                     for item in &stdlib_mod.items {
                         if let ItemKind::Impl(impl_decl) = &item.kind {
                             if let Err(e) = checker.register_impl_block(impl_decl) {
@@ -4963,6 +5033,10 @@ impl<'s> CompilationPipeline<'s> {
 
                 debug!("analyze_module: Stdlib registration complete");
             }
+
+            // Restore the user-file module path so subsequent passes run in
+            // the right resolution scope.
+            checker.set_current_module_path(saved_module_path);
         }
 
         // Signal transition to user code phase
@@ -5812,20 +5886,25 @@ impl<'s> CompilationPipeline<'s> {
             let depth_b = b.as_str().matches('.').count();
             depth_a.cmp(&depth_b).then_with(|| a.as_str().cmp(b.as_str()))
         });
-        let stdlib_modules: Vec<_> = stdlib_entries.iter().map(|(_, v)| v.clone()).collect();
 
-        if !stdlib_modules.is_empty() {
+        // Preserve the user-file module path so we can restore it after
+        // stdlib registration transiently rebinds it per-module.
+        let saved_module_path = checker.current_module_path().clone();
+
+        if !stdlib_entries.is_empty() {
             if self.stdlib_metadata.is_none() {
-                debug!("Registering {} stdlib modules into type checker (bootstrap mode)", stdlib_modules.len());
+                debug!("Registering {} stdlib modules into type checker (bootstrap mode)", stdlib_entries.len());
 
-                // Pass S0a: Register all stdlib type names
-                for stdlib_mod in &stdlib_modules {
+                // Pass S0a: Register all stdlib type names (module-scoped).
+                for (module_path, stdlib_mod) in &stdlib_entries {
+                    checker.set_current_module_path(module_path.clone());
                     checker.register_all_type_names(&stdlib_mod.items);
                 }
 
                 // Pass S0b: Resolve all stdlib type definitions
                 let mut resolution_stack = List::new();
-                for stdlib_mod in &stdlib_modules {
+                for (module_path, stdlib_mod) in &stdlib_entries {
+                    checker.set_current_module_path(module_path.clone());
                     for item in &stdlib_mod.items {
                         if let verum_ast::ItemKind::Type(type_decl) = &item.kind {
                             if let Err(e) = checker.resolve_type_definition(type_decl, &mut resolution_stack) {
@@ -5836,7 +5915,8 @@ impl<'s> CompilationPipeline<'s> {
                 }
 
                 // Pass S1: Register stdlib function signatures
-                for stdlib_mod in &stdlib_modules {
+                for (module_path, stdlib_mod) in &stdlib_entries {
+                    checker.set_current_module_path(module_path.clone());
                     for item in &stdlib_mod.items {
                         if let verum_ast::ItemKind::Function(func) = &item.kind {
                             if !checker.is_function_preregistered(func.name.name.as_str()) {
@@ -5847,7 +5927,8 @@ impl<'s> CompilationPipeline<'s> {
                 }
 
                 // Pass S2: Register stdlib protocols
-                for stdlib_mod in &stdlib_modules {
+                for (module_path, stdlib_mod) in &stdlib_entries {
+                    checker.set_current_module_path(module_path.clone());
                     for item in &stdlib_mod.items {
                         if let verum_ast::ItemKind::Protocol(protocol_decl) = &item.kind {
                             let _ = checker.register_protocol(protocol_decl);
@@ -5856,9 +5937,10 @@ impl<'s> CompilationPipeline<'s> {
                 }
             }
 
-            // Pass S3: ALWAYS register stdlib impl blocks
-            debug!("Registering stdlib impl blocks ({} modules)", stdlib_modules.len());
-            for stdlib_mod in &stdlib_modules {
+            // Pass S3: ALWAYS register stdlib impl blocks (module-scoped).
+            debug!("Registering stdlib impl blocks ({} modules)", stdlib_entries.len());
+            for (module_path, stdlib_mod) in &stdlib_entries {
+                checker.set_current_module_path(module_path.clone());
                 for item in &stdlib_mod.items {
                     if let verum_ast::ItemKind::Impl(impl_decl) = &item.kind {
                         let _ = checker.register_impl_block(impl_decl);
@@ -5875,6 +5957,10 @@ impl<'s> CompilationPipeline<'s> {
 
             debug!("Stdlib registration complete");
         }
+
+        // Restore the user-file module path so subsequent passes run in
+        // the right resolution scope.
+        checker.set_current_module_path(saved_module_path);
 
         // Signal transition to user code phase: variant short-name protection is relaxed
         // so user-defined types can shadow stdlib unit variants (e.g., Status.Pending).
