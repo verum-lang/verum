@@ -38221,20 +38221,35 @@ impl TypeChecker {
                 // `file.read_to_string()` would incorrectly try to look up methods on a type named "file".
                 let is_type_name = type_name.chars().next().map(|c| c.is_uppercase()).unwrap_or(false);
                 // NAME-COLLISION GUARD: if the user has a same-named type
-                // with inherent methods, skip the protocol-method static
-                // lookup and let the downstream inherent-methods path
-                // handle `X.method(...)`. Without this, a stdlib context
-                // `context X { fn new(...) -> Y; ... }` would hijack
-                // `X.new(...)` calls in user files even when user has
-                // `type X is { ... }` + `implement X { fn new(...) -> X }`.
-                let user_has_inherent = {
-                    let methods_guard = self.inherent_methods.read();
-                    methods_guard
-                        .get(&verum_common::Text::from(type_name))
-                        .map(|m| !m.is_empty())
-                        .unwrap_or(false)
+                // whose inherent methods already define THIS specific
+                // method, skip the protocol-method static lookup and
+                // let the downstream inherent-methods path resolve it.
+                //
+                // Key invariant: the guard only fires when BOTH
+                // (a) a local `type X` exists AND (b) inherent_methods
+                // registers the *specific* method name being called.
+                // Otherwise we fall through to protocol lookup — this
+                // preserves context-method dispatch (e.g., Logger.info)
+                // where the user's file has no same-named local type
+                // OR the user-local type has no method with that name.
+                let user_type_shadows_this_method = {
+                    let ctn: verum_common::Text = type_name.into();
+                    let has_local_type = matches!(
+                        self.ctx.lookup_type(type_name),
+                        Option::Some(Type::Named { .. })
+                        | Option::Some(Type::Record(_))
+                        | Option::Some(Type::Variant(_))
+                        | Option::Some(Type::Placeholder { .. })
+                    );
+                    let has_this_inherent = self
+                        .inherent_methods
+                        .read()
+                        .get(&ctn)
+                        .map(|m| m.contains_key(&verum_common::Text::from(method_name)))
+                        .unwrap_or(false);
+                    has_local_type && has_this_inherent
                 };
-                if is_type_name && !user_has_inherent {
+                if is_type_name && !user_type_shadows_this_method {
                     // Build the lookup type from the type name.
                     // For generic types like Wrapper, this creates Wrapper with no args, and
                     // lookup_protocol_method will match it against Wrapper<T> implementations.
