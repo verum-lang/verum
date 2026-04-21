@@ -1,0 +1,224 @@
+// =============================================================================
+// core/net/weft/tls.vr — TLS termination + ALPN dispatch
+// =============================================================================
+// Layer: 6 (Weft)
+// Spec:  internal/specs/net-framework.md §6.7 / §6.11 / §6.13
+// =============================================================================
+//
+// Plugs `core.net.tls.TlsStream` into Weft through two small pieces:
+//
+//   * `TlsTransport` — `WeftTransport` adapter (converts between
+//     `List<Byte>`-based TlsStream and the `List<Int>`-based
+//     transport ABI used by the HTTP/1.1 pipeline).
+//
+//   * `TlsHttp1Runner<H>` — `ConnectionRunner` implementor; runs the
+//     async handshake, then drives `serve_http1` over the
+//     `TlsTransport`. Used by `Server<H>.with_tls(tls_config)`; there
+//     is no separate `TlsServer` — the same unified `Server<H>` runs
+//     both plaintext and TLS lifecycles, the runner switch happens
+//     at `.serve()` time.
+//
+// No crypto logic lives here — all handshake / cipher / ALPN work is
+// done by `core/net/tls.vr` (1043 LOC of intrinsic-backed TLS 1.3
+// implementation). This file is pure glue.
+//
+// Out of scope for phase 3 (deferred to §6.13 / §6.17 / §8.13):
+//
+//   * HACL*-verified crypto FFI boundary.
+//   * KTLS sendfile offload (needs io_uring hooks from phase 5).
+//   * Client-cert → WeftRequest header projection (phase 6 SPIFFE).
+//
+// =============================================================================
+
+module core.net.weft.tls;
+
+mount core.*;
+mount core.collections.list.{List};
+mount core.net.tcp.{TcpStream};
+mount core.net.tls.{TlsStream, TlsConfig, TlsError};
+mount core.net.addr.{SocketAddr};
+mount core.async.cancellation.{CancellationToken, CancellationError};
+mount core.sync.atomic.{AtomicBool};
+mount core.io.protocols.{IoError};
+mount core.net.weft.transport.{WeftTransport};
+mount core.net.weft.handler.{Handler};
+mount core.net.weft.connection.{serve_http1, ConnectionConfig};
+mount core.net.weft.listener.{ConnectionRunner, Server, ListenerConfig, accept_loop};
+
+// =============================================================================
+// TlsTransport — WeftTransport adapter over TlsStream
+// =============================================================================
+
+/// Owns a single `TlsStream` and exposes it through the `WeftTransport`
+/// byte-duplex protocol. Created per connection by `TlsHttp1Runner`
+/// after a successful handshake.
+public type TlsTransport is {
+    inner: TlsStream,
+    peer: SocketAddr,
+};
+
+implement TlsTransport {
+    pub fn new(inner: TlsStream, peer: SocketAddr) -> TlsTransport {
+        TlsTransport { inner: inner, peer: peer }
+    }
+
+    /// Negotiated ALPN protocol (post-handshake).
+    pub fn alpn_protocol(&self) -> Maybe<&Text> {
+        self.inner.alpn_protocol()
+    }
+
+    async fn tls_read(&mut self, int_buf: &mut List<Int>) -> Result<Int, IoError> {
+        let mut byte_buf: List<Byte> = List.with_capacity(16 * 1024);
+        match self.inner.read(&mut byte_buf).await {
+            Err(e) => Err(IoError.Other { reason: f"tls read: {e}" }),
+            Ok(n)  => {
+                for i in 0..n {
+                    int_buf.push(byte_buf[i] as Int);
+                }
+                Ok(n)
+            }
+        }
+    }
+}
+
+implement WeftTransport for TlsTransport {
+    fn peer_addr(&self) -> Result<SocketAddr, IoError> {
+        Ok(self.peer)
+    }
+
+    async fn read_cancellable(
+        &mut self,
+        buf: &mut List<Int>,
+        token: &CancellationToken,
+    ) -> Result<Result<Int, IoError>, CancellationError> {
+        select {
+            r = self.tls_read(buf).await => Ok(r),
+            reason = token.cancelled().await => Err(CancellationError.new(reason)),
+        }
+    }
+
+    async fn write_async(&mut self, buf: &List<Int>) -> Result<Int, IoError> {
+        let mut bytes: List<Byte> = List.with_capacity(buf.len());
+        for i in 0..buf.len() {
+            bytes.push((buf[i] & 0xFF) as Byte);
+        }
+        match self.inner.write(&bytes).await {
+            Ok(n)  => Ok(n),
+            Err(e) => Err(IoError.Other { reason: f"tls write: {e}" }),
+        }
+    }
+
+    async fn shutdown_write(&mut self) -> Result<(), IoError> {
+        match self.inner.shutdown().await {
+            Ok(())  => Ok(()),
+            Err(e)  => Err(IoError.Other { reason: f"tls shutdown: {e}" }),
+        }
+    }
+}
+
+// =============================================================================
+// TlsHttp1Runner — ConnectionRunner for TLS-terminated HTTP/1.1
+// =============================================================================
+
+/// Per-connection strategy: accept raw TCP, run the TLS handshake,
+/// wrap the result in `TlsTransport`, then drive `serve_http1`.
+///
+/// Cloned once per spawned connection (everything inside is
+/// Shared/Heap, so clone is cheap pointer copies).
+public type TlsHttp1Runner<H> is {
+    app: Heap<H>,
+    token: CancellationToken,
+    draining: Shared<AtomicBool>,
+    connection_cfg: ConnectionConfig,
+    tls: TlsConfig,
+};
+
+implement<H: Handler + Send + Sync + 'static> TlsHttp1Runner<H> {
+    pub fn new(
+        app: Heap<H>,
+        token: CancellationToken,
+        draining: Shared<AtomicBool>,
+        connection_cfg: ConnectionConfig,
+        tls: TlsConfig,
+    ) -> TlsHttp1Runner<H> {
+        TlsHttp1Runner {
+            app: app,
+            token: token,
+            draining: draining,
+            connection_cfg: connection_cfg,
+            tls: tls,
+        }
+    }
+}
+
+implement<H: Handler + Send + Sync + 'static> Clone for TlsHttp1Runner<H> {
+    fn clone(&self) -> TlsHttp1Runner<H> {
+        TlsHttp1Runner {
+            app: self.app.clone(),
+            token: self.token.clone(),
+            draining: self.draining.clone(),
+            connection_cfg: self.connection_cfg.clone(),
+            tls: self.tls.clone(),
+        }
+    }
+}
+
+implement<H: Handler + Send + Sync + 'static> ConnectionRunner for TlsHttp1Runner<H> {
+    async fn run(&self, stream: TcpStream, peer: SocketAddr) {
+        match TlsStream.accept(stream, &self.tls).await {
+            Err(_handshake_error) => {
+                // Log hook goes here once tracing context lands in the
+                // runner (§8.13). For now we just close the TCP
+                // connection — the TLS layer already freed the socket.
+            }
+            Ok(tls_stream) => {
+                let transport = TlsTransport.new(tls_stream, peer);
+                let _ = serve_http1(
+                    transport, peer,
+                    self.app.clone(),
+                    self.token.clone(),
+                    self.draining.clone(),
+                    self.connection_cfg.clone(),
+                ).await;
+            }
+        }
+    }
+
+    async fn refuse_overloaded(&self, stream: TcpStream) {
+        // Cannot speak plaintext past the socket; just close.
+        drop(stream);
+    }
+}
+
+// =============================================================================
+// Server<H>.serve_tls — unified server, TLS lifecycle
+// =============================================================================
+
+implement<H: Handler + Send + Sync + 'static> Server<H> {
+    /// Serve this server's handler over TLS instead of plain TCP.
+    /// Consumes `self` and the supplied `TlsConfig`; returns on clean
+    /// shutdown identical to `.serve()`.
+    ///
+    /// Example:
+    /// ```verum
+    /// let cfg = TlsConfig.server()
+    ///     .with_identity(cert, key)
+    ///     .with_alpn(List.from(["h2", "http/1.1"]));
+    /// Server.bind(addr, router, ListenerConfig.default())?
+    ///     .serve_tls(cfg).await
+    /// ```
+    pub async fn serve_tls(self, tls: TlsConfig) -> Result<(), Text> {
+        if !tls.is_server {
+            return Err("serve_tls requires a server TlsConfig".into());
+        }
+        let Server { listener, app, config, token, draining } = self;
+        let runner = TlsHttp1Runner.new(
+            app,
+            token.clone(),
+            draining.clone(),
+            config.connection.clone(),
+            tls,
+        );
+        accept_loop(listener, config, token, draining, runner).await
+    }
+}

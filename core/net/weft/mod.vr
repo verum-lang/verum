@@ -7,6 +7,7 @@
 
 module core.net.weft;
 
+public mount super.net.weft.transport.*;
 public mount super.net.weft.response_ext.*;
 public mount super.net.weft.service.*;
 public mount super.net.weft.error.*;
@@ -14,6 +15,7 @@ public mount super.net.weft.handler.*;
 public mount super.net.weft.router.*;
 public mount super.net.weft.connection.*;
 public mount super.net.weft.listener.*;
+public mount super.net.weft.tls.*;
 public mount super.net.weft.app.*;
 public mount super.net.weft.backpressure.*;
 public mount super.net.weft.adaptive.*;

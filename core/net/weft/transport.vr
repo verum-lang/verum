@@ -1,0 +1,90 @@
+// =============================================================================
+// core/net/weft/transport.vr — byte-duplex transport protocol
+// =============================================================================
+// Layer: 6 (Weft)
+// Spec:  internal/specs/net-framework.md §2 "Transport"
+// =============================================================================
+//
+// Plumbing that lets the HTTP/1.1 connection pipeline in `connection.vr`
+// work uniformly over plain TCP, TLS-wrapped TCP, Unix-domain sockets,
+// and (eventually) QUIC bidirectional streams.
+//
+// The core.net.tcp.TcpStream type already exposes the methods expected
+// here — defining the protocol separately lets us add a blanket impl
+// without touching tcp.vr, and gives us a single binding point for
+// TLS / UDS / vsock adaptors.
+//
+// Why `List<Int>` buffers? The existing stdlib socket layer marshals
+// bytes through `List<Int>` (see tcp.vr). We preserve that shape here
+// to avoid a disruptive stdlib-wide rewrite; a future `List<Byte>`
+// migration (Phase 5) changes this single file.
+//
+// =============================================================================
+
+module core.net.weft.transport;
+
+mount core.*;
+mount core.collections.list.{List};
+mount core.net.addr.{SocketAddr};
+mount core.async.cancellation.{CancellationToken, CancellationError};
+mount core.io.protocols.{IoError};
+
+/// Transport protocol — a byte duplex that the HTTP/1.1 pipeline can
+/// drive without knowing whether it sits above TCP, TLS, UDS, or
+/// another carrier.
+///
+/// Implementors MUST be cancellation-aware on `read_cancellable` —
+/// this is what lets the listener's shutdown token reach in-flight
+/// reads in bounded time. `write_async` MAY ignore cancellation
+/// (responses should always finish writing once started — see §7.8
+/// phase-5 hard-stop rationale).
+public type WeftTransport is protocol {
+    /// Peek peer address (for logging, tracing, access lists).
+    fn peer_addr(&self) -> Result<SocketAddr, IoError>;
+
+    /// Cancellable read. Outer Result is the cancellation channel;
+    /// inner Result the normal read outcome.
+    async fn read_cancellable(
+        &mut self,
+        buf: &mut List<Int>,
+        token: &CancellationToken,
+    ) -> Result<Result<Int, IoError>, CancellationError>;
+
+    /// Write — may be partial; the connection pipeline is responsible
+    /// for retrying until `buf` is fully drained (see `write_response`
+    /// in connection.vr).
+    async fn write_async(&mut self, buf: &List<Int>) -> Result<Int, IoError>;
+
+    /// Half-close write direction (HTTP/1.1 `Connection: close` path
+    /// closes here). No-op permitted for transports without a
+    /// meaningful shutdown (vsock loopback, in-memory mocks, ...).
+    async fn shutdown_write(&mut self) -> Result<(), IoError>;
+};
+
+// =============================================================================
+// TcpStream → WeftTransport blanket impl
+// =============================================================================
+
+mount core.net.tcp.{TcpStream, Shutdown};
+
+implement WeftTransport for TcpStream {
+    fn peer_addr(&self) -> Result<SocketAddr, IoError> {
+        TcpStream.peer_addr(self)
+    }
+
+    async fn read_cancellable(
+        &mut self,
+        buf: &mut List<Int>,
+        token: &CancellationToken,
+    ) -> Result<Result<Int, IoError>, CancellationError> {
+        TcpStream.read_cancellable(self, buf, token).await
+    }
+
+    async fn write_async(&mut self, buf: &List<Int>) -> Result<Int, IoError> {
+        TcpStream.write_async(self, buf).await
+    }
+
+    async fn shutdown_write(&mut self) -> Result<(), IoError> {
+        TcpStream.shutdown(self, Shutdown.Write)
+    }
+}

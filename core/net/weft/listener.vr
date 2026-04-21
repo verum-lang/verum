@@ -1,39 +1,33 @@
 // =============================================================================
-// core/net/weft/listener.vr — TCP listener + accept loop
+// core/net/weft/listener.vr — TCP listener + shared accept loop
 // =============================================================================
 // Layer: 6 (Weft)
-// Spec:  internal/specs/net-framework.md §4.2, §4.4, §7.5
+// Spec:  internal/specs/net-framework.md §4.2, §4.4, §7.8
 // =============================================================================
 //
-// Turns a bound `TcpListener` into a serving server: loops on accept,
-// spawns a per-connection task, feeds each connection through
-// `serve_http1` from `connection.vr`.
+// Owns the bind + accept lifecycle. The per-connection behaviour is
+// pluggable through the `ConnectionRunner` protocol, so the same loop
+// drives plain-TCP (`Server<H>`) and TLS-terminating (`TlsServer<H>`,
+// see `tls.vr`) variants without duplicated code.
 //
-// Responsibilities kept HERE (not in connection.vr):
+// Responsibilities:
 //
-//   * Lifecycle. Own the cancellation token that drives graceful
-//     shutdown. A single `.shutdown()` on the listener flips the token,
-//     `accept_cancellable` returns, and every in-flight connection's
-//     next awaitable I/O call returns `CancellationError`.
+//   * Lifecycle. Own the cancellation token + draining flag. One
+//     `.shutdown()` triggers graceful drain; `.begin_drain()` stops
+//     accepting while letting in-flight requests finish.
 //
 //   * Concurrency budget. `max_concurrent_connections` bounds total
-//     in-flight connections; excess accept()-ed sockets are closed
-//     immediately with a 503 "connection throttled" log. Back-pressure
-//     on TCP accept is the cleanest way to deal with runaway load —
-//     do not buffer sockets we cannot serve.
+//     in-flight connections; excess sockets are closed immediately via
+//     the runner's `refuse_overloaded` hook — TCP runners emit a 503
+//     HTTP reply, TLS runners just drop (can't speak plaintext).
 //
-//   * Per-connection task isolation. Each connection runs in its own
-//     spawned task. If one panics, the supervisor (configured by
-//     WeftApp) restarts the listener; but adjacent connections keep
-//     running until their handlers return.
+//   * Per-connection task isolation. Each connection is spawned into
+//     its own task; the runner owns the lifecycle until return.
 //
-// Not here (kept elsewhere):
+// Out of scope (phase 5):
 //
-//   * io_uring registered buffers / multi-shot accept (§4.2.1/4.2.2) —
-//     phase 5, goes through `core/io/engine.vr` extensions.
-//
-//   * TLS termination — a `TlsListener` wrapper lives in `tls.vr`; this
-//     module deals with plain TCP only.
+//   * io_uring multi-shot accept / registered buffers (§4.2.1–2).
+//   * Kernel-bypass reactor (§6.8).
 //
 // =============================================================================
 
@@ -44,26 +38,27 @@ mount core.net.tcp.{TcpListener, TcpStream};
 mount core.net.addr.{SocketAddr};
 mount core.async.cancellation.{CancellationToken};
 mount core.async.task;
+mount core.async.timer;
+mount core.sync.atomic.{AtomicBool, AtomicInt, MemoryOrdering};
 mount core.net.weft.handler.{Handler};
-mount core.net.weft.connection.{serve_http1, ConnectionConfig, ConnError};
+mount core.net.weft.connection.{serve_http1, ConnectionConfig};
 
 // =============================================================================
 // Config
 // =============================================================================
 
 public type ListenerConfig is {
-    /// Soft cap on in-flight connections. Sockets accepted while at the
-    /// cap are closed immediately (best-effort 503 write).
+    /// Soft cap on in-flight connections. Sockets accepted while at
+    /// the cap are refused via the runner's overload hook.
     max_concurrent_connections: Int,
     /// Per-connection config handed to `serve_http1`.
     connection: ConnectionConfig,
     /// Maximum milliseconds `shutdown()` will wait for in-flight
-    /// connections to finish before forcibly dropping them (§7.8 phase 5
-    /// "Hard stop"). 30s matches the Kubernetes default.
+    /// connections to finish before forcibly dropping them (§7.8
+    /// phase-5 "Hard stop"). 30s matches the K8s default.
     drain_grace_ms: Int,
-    /// Bind with SO_REUSEPORT — enables seamless blue/green handoff at
-    /// the OS level (§7.8 phase 4). When true, `TcpListener.bind_reuseport`
-    /// is used so sibling processes on the same port share accept queues.
+    /// Bind with SO_REUSEPORT — enables seamless blue/green handoff
+    /// at the OS level (§7.8 phase 4).
     reuseport: Bool,
 };
 
@@ -87,32 +82,176 @@ implement ListenerConfig {
 }
 
 // =============================================================================
-// Server
+// ConnectionRunner — per-connection lifecycle strategy
 // =============================================================================
 
-/// Server: bound listener + shared `Handler`. Call `.serve().await` to
-/// run until cancellation. `.shutdown()` triggers graceful drain.
+/// The pluggable piece that turns a freshly-accepted TCP socket into a
+/// served HTTP/* connection. Implementations decide:
 ///
-/// Two-phase shutdown (§7.8):
+///   * Whether to wrap the socket in TLS (or any other transport).
+///   * Which protocol to speak (HTTP/1.1, HTTP/2 via ALPN, WebSocket).
+///   * What to say to a client refused for overload.
+///
+/// The two phase-3 implementors are `PlainHttp1Runner<H>` (defined
+/// below) and `TlsHttp1Runner<H>` (`tls.vr`). Both ultimately drive
+/// `serve_http1` but differ in the transport adapter.
+public type ConnectionRunner is protocol {
+    /// Drive one accepted connection to completion. Owns the stream.
+    async fn run(&self, stream: TcpStream, peer: SocketAddr);
+
+    /// Refuse a connection because the listener-level budget is
+    /// exhausted. Invoked synchronously inside the accept loop; runs
+    /// on the accept task, not a spawned one.
+    async fn refuse_overloaded(&self, stream: TcpStream);
+};
+
+// =============================================================================
+// PlainHttp1Runner — runner for plaintext HTTP/1.1
+// =============================================================================
+
+public type PlainHttp1Runner<H> is {
+    app: Heap<H>,
+    token: CancellationToken,
+    draining: Shared<AtomicBool>,
+    connection_cfg: ConnectionConfig,
+};
+
+implement<H: Handler + Send + Sync + 'static> PlainHttp1Runner<H> {
+    pub fn new(
+        app: Heap<H>,
+        token: CancellationToken,
+        draining: Shared<AtomicBool>,
+        connection_cfg: ConnectionConfig,
+    ) -> PlainHttp1Runner<H> {
+        PlainHttp1Runner {
+            app: app,
+            token: token,
+            draining: draining,
+            connection_cfg: connection_cfg,
+        }
+    }
+}
+
+implement<H: Handler + Send + Sync + 'static> Clone for PlainHttp1Runner<H> {
+    fn clone(&self) -> PlainHttp1Runner<H> {
+        PlainHttp1Runner {
+            app: self.app.clone(),
+            token: self.token.clone(),
+            draining: self.draining.clone(),
+            connection_cfg: self.connection_cfg.clone(),
+        }
+    }
+}
+
+implement<H: Handler + Send + Sync + 'static> ConnectionRunner for PlainHttp1Runner<H> {
+    async fn run(&self, stream: TcpStream, peer: SocketAddr) {
+        let _ = serve_http1(
+            stream, peer,
+            self.app.clone(),
+            self.token.clone(),
+            self.draining.clone(),
+            self.connection_cfg.clone(),
+        ).await;
+    }
+
+    async fn refuse_overloaded(&self, mut stream: TcpStream) {
+        // Best-effort minimal 503 before drop. We do not go through
+        // the full response pipeline — the peer didn't yet finish a
+        // request that Weft could parse.
+        let msg = "HTTP/1.1 503 Service Unavailable\r\nconnection: close\r\ncontent-length: 11\r\n\r\noverloaded\n";
+        let mut buf: List<Int> = List.with_capacity(msg.len());
+        for b in msg.as_bytes().iter() {
+            buf.push(*b as Int);
+        }
+        let _ = stream.write_async(&buf).await;
+    }
+}
+
+// =============================================================================
+// accept_loop — shared core for every Weft server variant
+// =============================================================================
+
+/// The heart of every Weft server. Consumes ownership of the listener,
+/// runs until cancelled or drained, returns on clean shutdown.
+///
+/// Typed parameters:
+///
+///   * `R` — the connection runner (zero-cost polymorphism via
+///     monomorphisation; no `Box<dyn>` on the hot path).
+public async fn accept_loop<R: ConnectionRunner + Clone + Send + Sync + 'static>(
+    listener: TcpListener,
+    config: ListenerConfig,
+    token: CancellationToken,
+    draining: Shared<AtomicBool>,
+    runner: R,
+) -> Result<(), Text> {
+    let in_flight: Shared<AtomicInt> = Shared.new(AtomicInt.new(0));
+    let max = config.max_concurrent_connections;
+
+    loop {
+        if token.is_cancelled() { break; }
+        if draining.load(MemoryOrdering.Acquire) { break; }
+
+        match listener.accept_cancellable(&token).await {
+            Err(_cancelled) => break,
+            Ok(Err(_e)) => {
+                // Back off briefly on listener-level errors (EMFILE
+                // etc.) so we don't spin-burn the runtime.
+                timer.sleep_ms(10).await;
+                continue;
+            }
+            Ok(Ok((stream, peer))) => {
+                let cur = in_flight.fetch_add(1, MemoryOrdering.AcqRel) + 1;
+                if cur > max {
+                    in_flight.fetch_sub(1, MemoryOrdering.AcqRel);
+                    runner.refuse_overloaded(stream).await;
+                    continue;
+                }
+
+                let runner_c = runner.clone();
+                let counter  = in_flight.clone();
+                let _ = task.spawn(async move {
+                    runner_c.run(stream, peer).await;
+                    counter.fetch_sub(1, MemoryOrdering.AcqRel);
+                });
+            }
+        }
+    }
+
+    // Graceful drain: wait for in-flight connections to complete up to
+    // `drain_grace_ms`. Poll-based — fine for 10k connections (~200
+    // ticks/sec shared across one small wait).
+    let mut elapsed: Int = 0;
+    while in_flight.load(MemoryOrdering.Acquire) > 0 && elapsed < config.drain_grace_ms {
+        timer.sleep_ms(50).await;
+        elapsed = elapsed + 50;
+    }
+    Ok(())
+}
+
+// =============================================================================
+// Server<H> — plain TCP HTTP/1.1 server
+// =============================================================================
+
+/// Bound listener + shared `Handler`. Call `.serve().await` to run
+/// until cancellation. Two-phase shutdown (§7.8):
+///
 ///   1. `begin_drain()` — stop accepting new connections, mark the
-///      `draining` flag so existing keep-alive connections add
-///      `Connection: close` to their next response and close cleanly.
-///   2. `shutdown()`    — both `begin_drain()` and cancel-token fire;
+///      draining flag so existing keep-alive connections stamp
+///      `Connection: close` on their next response.
+///   2. `shutdown()`    — both `begin_drain()` and token cancel;
 ///      after `drain_grace_ms` any still-running handler is dropped.
 public type Server<H> is {
     listener: TcpListener,
     app: Heap<H>,
     config: ListenerConfig,
     token: CancellationToken,
-    /// Phase-1 drain signal — soft shutdown without cancellation.
-    /// Read by connection.vr between HTTP/1.1 messages.
-    draining: Shared<sync.atomic.AtomicBool>,
+    draining: Shared<AtomicBool>,
 };
 
 implement<H: Handler + Send + Sync + 'static> Server<H> {
-    /// Bind a TCP listener and wrap it with the given handler (commonly
-    /// a `Router`). Honours `config.reuseport` to pick between
-    /// `TcpListener.bind` and `TcpListener.bind_reuseport`.
+    /// Bind a TCP listener and wrap it with the given handler
+    /// (typically a `Router`). Honours `config.reuseport`.
     public fn bind(addr: Text, app: H, config: ListenerConfig) -> Result<Server<H>, Text> {
         let listener_res = if config.reuseport {
             TcpListener.bind_reuseport(addr)
@@ -126,134 +265,45 @@ implement<H: Handler + Send + Sync + 'static> Server<H> {
                 app: Heap.new(app),
                 config: config,
                 token: CancellationToken.new(),
-                draining: Shared.new(sync.atomic.AtomicBool.new(false)),
+                draining: Shared.new(AtomicBool.new(false)),
             }),
         }
     }
 
-    /// Expose the local bound address — useful for tests that bind to
-    /// port 0 and then need to know which port the OS assigned.
     public fn local_addr(&self) -> Result<SocketAddr, Text> {
         self.listener.local_addr().map_err(|e| f"{e}")
     }
 
-    /// Expose the cancellation token. Wiring it to a signal handler or a
-    /// supervisor restart callback turns graceful shutdown on.
     public fn shutdown_token(&self) -> CancellationToken {
         self.token.clone()
     }
 
-    /// Flip the cancellation token; equivalent to
-    /// `begin_drain()` followed by `shutdown_token().cancel()`.
-    /// Existing handlers see cancellation immediately on their next
-    /// await point; listener stops accepting new connections.
+    public fn drain_handle(&self) -> Shared<AtomicBool> {
+        self.draining.clone()
+    }
+
+    /// Phase-1 shutdown: stop accepting new connections, signal
+    /// keep-alive connections to stamp `Connection: close` next.
+    public fn begin_drain(&self) {
+        self.draining.store(true, MemoryOrdering.Release);
+    }
+
+    /// Full shutdown: drain + token cancel. Running handlers see
+    /// cancellation on their next await point.
     public fn shutdown(&self) {
         self.begin_drain();
         self.token.cancel();
     }
 
-    /// Phase-1 shutdown: stop accepting new connections and flip the
-    /// `draining` flag so keep-alive connections stamp their next
-    /// response with `Connection: close` and exit the loop. Does NOT
-    /// cancel in-flight handlers — those get to finish cleanly.
-    public fn begin_drain(&self) {
-        self.draining.store(true, sync.atomic.MemoryOrdering.Release);
-    }
-
-    /// Read the drain flag — connection.vr uses this as the "should I
-    /// keep this connection alive?" signal between messages.
-    public fn drain_handle(&self) -> Shared<sync.atomic.AtomicBool> {
-        self.draining.clone()
-    }
-
-    /// Run the accept loop until the token fires. Returns `Ok(())` on
-    /// clean shutdown, `Err(...)` on unrecoverable listener-level I/O.
+    /// Run until the token fires or the listener drains.
     public async fn serve(self) -> Result<(), Text> {
         let Server { listener, app, config, token, draining } = self;
-
-        // In-flight counter. Signed `Int` is fine — we never go negative
-        // in normal operation, and a runaway decrement is loud enough to
-        // show up in monitoring.
-        let in_flight: Shared<sync.atomic.AtomicInt> =
-            Shared.new(sync.atomic.AtomicInt.new(0));
-        let max = config.max_concurrent_connections;
-
-        loop {
-            if token.is_cancelled() {
-                break;
-            }
-            // Drain-phase: stop accepting new connections but let
-            // in-flight ones finish.
-            if draining.load(sync.atomic.MemoryOrdering.Acquire) {
-                break;
-            }
-
-            // Cancellable accept. Cancelling the token wakes us out of
-            // the kernel wait.
-            let accept_res = listener.accept_cancellable(&token).await;
-            match accept_res {
-                Err(_cancelled) => break,
-                Ok(Err(e)) => {
-                    // Accept failed but the listener is still alive (e.g.
-                    // EMFILE). Back off briefly to give the OS / kernel
-                    // time to recover file-descriptor limits.
-                    core.async.timer.sleep_ms(10).await;
-                    continue;
-                }
-                Ok(Ok((stream, peer))) => {
-                    // Enforce the concurrency budget BEFORE spawning.
-                    let current = in_flight.fetch_add(1, sync.atomic.MemoryOrdering.AcqRel) + 1;
-                    if current > max {
-                        in_flight.fetch_sub(1, sync.atomic.MemoryOrdering.AcqRel);
-                        drop_overloaded(stream).await;
-                        continue;
-                    }
-
-                    let app_clone = app.clone();
-                    let tok_clone = token.clone();
-                    let conn_cfg = config.connection.clone();
-                    let counter = in_flight.clone();
-                    let drain_clone = draining.clone();
-
-                    let _ = task.spawn(async move {
-                        let _ = serve_http1(
-                            stream, peer, app_clone, tok_clone,
-                            drain_clone, conn_cfg,
-                        ).await;
-                        counter.fetch_sub(1, sync.atomic.MemoryOrdering.AcqRel);
-                    });
-                }
-            }
-        }
-
-        // Graceful drain: wait for in-flight connections to clear, with
-        // the configured grace period (§7.8).
-        drain(&in_flight, config.drain_grace_ms).await;
-        Ok(())
-    }
-}
-
-/// Write a tiny 503 "overloaded" response and drop the socket. We do not
-/// go through the full response pipeline here — the socket's peer did
-/// not even finish the handshake we want to speak, so best-effort is
-/// appropriate.
-async fn drop_overloaded(mut stream: TcpStream) {
-    let msg = "HTTP/1.1 503 Service Unavailable\r\nconnection: close\r\ncontent-length: 13\r\n\r\noverloaded\r\n\r\n";
-    let mut buf: List<Int> = List.with_capacity(msg.len());
-    for b in msg.as_bytes().iter() {
-        buf.push(*b as Int);
-    }
-    let _ = stream.write_async(&buf).await;
-}
-
-/// Poll the in-flight counter every 50ms until it hits zero or the
-/// deadline elapses. Does NOT interrupt in-flight handlers — the token
-/// they received already signals cancellation; this function just
-/// bounds the wait.
-async fn drain(counter: &Shared<sync.atomic.AtomicInt>, max_ms: Int) {
-    let mut elapsed: Int = 0;
-    while counter.load(sync.atomic.MemoryOrdering.Acquire) > 0 && elapsed < max_ms {
-        core.async.timer.sleep_ms(50).await;
-        elapsed = elapsed + 50;
+        let runner = PlainHttp1Runner.new(
+            app,
+            token.clone(),
+            draining.clone(),
+            config.connection.clone(),
+        );
+        accept_loop(listener, config, token, draining, runner).await
     }
 }

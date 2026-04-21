@@ -9,8 +9,8 @@ module core.net.weft.connection;
 
 mount core.*;
 mount core.collections.list.{List};
-mount core.net.tcp.{TcpStream};
 mount core.net.addr.{SocketAddr};
+mount core.net.weft.transport.{WeftTransport};
 mount core.net.http.{Method, StatusCode, Version, Headers, Response};
 mount core.net.http_parser.{
     HttpParser, ParseProgress, HeaderView, ParseError,
@@ -62,12 +62,15 @@ type KeepAlive is
     | Continue
     | Close;
 
-/// Serve one TCP connection using HTTP/1.1 keep-alive. Accepts an
-/// optional `draining` flag from the owning listener — when raised,
-/// the next response is stamped `Connection: close` and the loop exits
-/// after that message (§7.8 phase 2 "Listener closure" in §7.8).
-public async fn serve_http1<S: Handler>(
-    mut stream: TcpStream,
+/// Serve one transport-bound connection using HTTP/1.1 keep-alive.
+/// Generic over any `WeftTransport` — plain TCP, TLS-wrapped TCP, or
+/// future UDS / vsock carriers all share one pipeline.
+///
+/// Accepts an optional `draining` flag from the owning listener — when
+/// raised, the next response is stamped `Connection: close` and the
+/// loop exits after that message (§7.8 phase-2 "Listener closure").
+public async fn serve_http1<T: WeftTransport, S: Handler>(
+    mut stream: T,
     peer_addr: SocketAddr,
     app: Heap<S>,
     token: CancellationToken,
@@ -94,8 +97,8 @@ public async fn serve_http1<S: Handler>(
     }
 }
 
-async fn serve_one_message<S: Handler>(
-    stream: &mut TcpStream,
+async fn serve_one_message<T: WeftTransport, S: Handler>(
+    stream: &mut T,
     peer_addr: &SocketAddr,
     app: &S,
     token: &CancellationToken,
@@ -272,8 +275,8 @@ fn decide_keep_alive(
     }
 }
 
-async fn write_response(
-    stream: &mut TcpStream,
+async fn write_response<T: WeftTransport>(
+    stream: &mut T,
     resp: &Response,
 ) -> Result<(), core.io.protocols.IoError> {
     let mut out: List<Int> = List.with_capacity(512 + resp.body.len());
@@ -336,8 +339,8 @@ fn mk_400_chunk() -> Response {
 /// Decode the chunked body starting at `body_start` into a fresh
 /// `List<Byte>`. Reads more bytes from the stream as needed; caps the
 /// total decoded size at `config.max_request_size`.
-async fn read_chunked_body(
-    stream: &mut TcpStream,
+async fn read_chunked_body<T: WeftTransport>(
+    stream: &mut T,
     accum: &mut List<Int>,
     body_start: Int,
     token: &CancellationToken,
