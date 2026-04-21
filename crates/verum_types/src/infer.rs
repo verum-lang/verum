@@ -41956,6 +41956,65 @@ impl TypeChecker {
                 return Ok(InferResult::new(Type::Unknown));
             }
 
+            // Smart-pointer auto-deref hint: if the receiver is a
+            // type with a Deref::Target (e.g. `Heap<T>`,
+            // `Shared<T>`, `MutexGuard<T>`) and the method exists
+            // on any type in the deref chain, suggest going through
+            // the target. Full auto-deref method dispatch through
+            // `Heap<dyn Protocol>` needs a dedicated vtable codegen
+            // path (tracked as task #35); in the meantime this hint
+            // helps the user find the right shape without hunting.
+            {
+                let method_name_for_hint: Text = method.name.as_str().into();
+                let mut target_ty_opt = {
+                    let checker = self.protocol_checker.read();
+                    checker.try_find_associated_type(
+                        &recv_ty,
+                        &verum_common::Text::from("Target"),
+                    )
+                };
+                let mut hop = 0;
+                while let Some(target) = target_ty_opt.take() {
+                    if hop >= 4 { break; }
+                    let normalised = self.normalize_type(self.unwrap_reference_type(&target));
+                    // Walk one level at a time — short-circuit if
+                    // the target is a dyn-protocol whose protocol
+                    // itself defines the method.
+                    if let Type::DynProtocol { bounds, .. } = &normalised {
+                        let checker = self.protocol_checker.read();
+                        for proto_name in bounds.iter() {
+                            if let Maybe::Some(proto) = checker.get_protocol(proto_name) {
+                                if proto.methods.contains_key(&method_name_for_hint) {
+                                    return Err(TypeError::MethodNotFound {
+                                        ty: recv_ty.to_text(),
+                                        method: method.name.as_str().to_text(),
+                                        span,
+                                        did_you_mean: verum_common::Maybe::Some(
+                                            verum_common::Text::from(format!(
+                                                "deref to access `{}` on `dyn {}` — \
+                                                 `Heap<dyn Protocol>.method()` dispatch \
+                                                 requires vtable codegen (tracked)",
+                                                method.name.as_str(), proto_name
+                                            )),
+                                        ),
+                                    });
+                                }
+                            }
+                        }
+                    }
+                    // Continue walking — e.g. Shared<Mutex<T>> unwrapping.
+                    let next = {
+                        let checker = self.protocol_checker.read();
+                        checker.try_find_associated_type(
+                            &normalised,
+                            &verum_common::Text::from("Target"),
+                        )
+                    };
+                    target_ty_opt = next;
+                    hop += 1;
+                }
+            }
+
             // "Did you mean ...?" — gather method names registered for
             // any type that matches the receiver's name, then suggest
             // the closest Levenshtein match. Tolerant matching handles
