@@ -410,15 +410,16 @@ public context Metrics {
 // =============================================================================
 // Tracer Context
 // =============================================================================
-
-/// A span representing a unit of work in distributed tracing.
-public type Span is {
-    trace_id: Text,
-    span_id: Text,
-    parent_id: Maybe<Text>,
-    name: Text,
-    start_time: Instant,
-};
+//
+// DI interface for distributed tracing. The concrete implementation
+// lives in `core.tracing` (OpenTelemetry-compatible: SpanContext +
+// Sampler + SpanProcessor + SpanExporter + W3C Trace Context
+// propagation). This context is the test-time seam — tests provide a
+// mock `Tracer`; production code installs a provider that delegates
+// to `core.tracing::get_tracer(...)`.
+//
+// The `Span` type is the one from `core.tracing.span`; there is no
+// parallel definition here.
 
 /// Distributed tracing context.
 ///
@@ -433,11 +434,11 @@ public type Span is {
 /// }
 /// ```
 public context Tracer {
-    /// Start a new span.
-    fn start_span(name: Text) -> Span;
+    /// Start a new span. Returns a `core.tracing.span.Span` handle.
+    fn start_span(name: Text) -> core.tracing.span.Span;
 
     /// End a span.
-    fn end_span(span: Span);
+    fn end_span(span: core.tracing.span.Span);
 
     /// Add an attribute to the current span.
     fn add_attribute(key: Text, value: Text);
@@ -445,7 +446,8 @@ public context Tracer {
     /// Add an event to the current span.
     fn add_event(name: Text);
 
-    /// Get the current trace ID (for propagation).
+    /// Get the current trace ID (for propagation) as a 32-char hex
+    /// string per W3C Trace Context §2.2.2.
     fn current_trace_id() -> Maybe<Text>;
 }
 
@@ -621,17 +623,8 @@ implement Display for AuthUser {
     }
 }
 
-implement Debug for Span {
-    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
-        f.write_str(f"Span {{ trace_id: \"{self.trace_id}\", span_id: \"{self.span_id}\", name: \"{self.name}\" }}")
-    }
-}
-
-implement Display for Span {
-    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
-        f.write_str(f"[{self.trace_id}:{self.span_id}] {self.name}")
-    }
-}
+// Span Debug/Display implementations live in `core.tracing.span` —
+// there is no parallel definition here.
 
 // =============================================================================
 // Context Groups (Convenience)

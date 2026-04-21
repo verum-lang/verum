@@ -28,14 +28,17 @@ use std::time::{Duration, Instant};
 
 use verum_ast::decl::{
     CalcRelation, CalculationChain, ProofBody, ProofCase, ProofMethod,
-    ProofStep, ProofStepKind, ProofStructure, TacticExpr, TheoremDecl,
+    ProofStep, ProofStepKind, ProofStructure, TacticExpr, TacticMatchArm, TheoremDecl,
 };
 use verum_ast::expr::ExprKind;
+use verum_ast::literal::LiteralKind;
 use verum_ast::pretty::format_expr;
 use verum_ast::{Expr, Ident};
 use verum_common::{Heap, List, Maybe, Text};
 use verum_smt::context::Context;
-use verum_smt::proof_search::{ProofError, ProofGoal, ProofSearchEngine, ProofTactic};
+use verum_smt::proof_search::{
+    MatchArm, ProofError, ProofGoal, ProofSearchEngine, ProofTactic,
+};
 use verum_smt::verify::VerificationError;
 
 // ---------------------------------------------------------------------------
@@ -255,11 +258,7 @@ pub fn convert_tactic(tactic: &TacticExpr) -> ProofTactic {
 
         TacticExpr::Repeat(inner) => ProofTactic::Repeat(Heap::new(convert_tactic(inner))),
 
-        TacticExpr::Seq(tactics) => {
-            let converted: List<ProofTactic> =
-                tactics.iter().map(|t| convert_tactic(t)).collect();
-            build_seq(converted)
-        }
+        TacticExpr::Seq(tactics) => convert_tactic_sequence(tactics),
 
         TacticExpr::Alt(tactics) => {
             let converted: List<ProofTactic> =
@@ -283,17 +282,99 @@ pub fn convert_tactic(tactic: &TacticExpr) -> ProofTactic {
         TacticExpr::Sorry => ProofTactic::Sorry,
         TacticExpr::Contradiction => ProofTactic::Contradiction,
 
-        // Tactic-DSL control-flow forms are not yet lowered to the SMT-facing
-        // `ProofTactic` IR. For now they collapse to `Admit` so the rest of
-        // the proof pipeline continues — the tactic-evaluator's richer path
-        // will pick them up once the dedicated codegen lands. This preserves
-        // full parser/AST fidelity without blocking verification of files
-        // that declare (but do not yet use) Let/Match/Fail/If tactics.
-        TacticExpr::Let { .. }
-        | TacticExpr::Match { .. }
-        | TacticExpr::Fail { .. }
-        | TacticExpr::If { .. } => ProofTactic::Admit,
+        // Tactic-DSL control-flow forms lower to the matching `ProofTactic`
+        // IR variants introduced in verum_smt. A bare `let` appearing outside
+        // a sequence (which the grammar technically permits) lowers with an
+        // empty body; inside a `Seq` it is desugared by
+        // `convert_tactic_sequence` so that the trailing tactics become its
+        // body.
+        TacticExpr::Let { name, value, .. } => ProofTactic::Let {
+            name: name.name.clone(),
+            value: Heap::new((**value).clone()),
+            body: Heap::new(ProofTactic::Done),
+        },
+
+        TacticExpr::Match { scrutinee, arms } => ProofTactic::Match {
+            scrutinee: Heap::new((**scrutinee).clone()),
+            arms: arms.iter().map(convert_match_arm).collect(),
+        },
+
+        TacticExpr::Fail { message } => ProofTactic::Fail {
+            message: extract_fail_message(message),
+        },
+
+        TacticExpr::If {
+            cond,
+            then_branch,
+            else_branch,
+        } => ProofTactic::If {
+            cond: Heap::new((**cond).clone()),
+            then_branch: Heap::new(convert_tactic(then_branch)),
+            else_branch: match else_branch {
+                Maybe::Some(eb) => Maybe::Some(Heap::new(convert_tactic(eb))),
+                Maybe::None => Maybe::None,
+            },
+        },
     }
+}
+
+/// Lower a `Seq(...)` tactic body while desugaring any `let` bindings it
+/// contains. A sequence `[pre…, let x = v, post…]` becomes
+/// `Seq(build_seq(pre…), Let { x, v, body: convert_tactic_sequence(post…) })`
+/// so the let's binding scope is exactly the trailing tactics — which
+/// mirrors Ltac2's substitution semantics and Lean 4's monadic `let ← …`.
+fn convert_tactic_sequence(tactics: &List<TacticExpr>) -> ProofTactic {
+    for (i, t) in tactics.iter().enumerate() {
+        if let TacticExpr::Let { name, value, .. } = t {
+            let rest: List<TacticExpr> = tactics.iter().skip(i + 1).cloned().collect();
+            let body = if rest.is_empty() {
+                ProofTactic::Done
+            } else {
+                convert_tactic_sequence(&rest)
+            };
+            let let_node = ProofTactic::Let {
+                name: name.name.clone(),
+                value: Heap::new((**value).clone()),
+                body: Heap::new(body),
+            };
+            if i == 0 {
+                return let_node;
+            }
+            let prefix: List<ProofTactic> = tactics
+                .iter()
+                .take(i)
+                .map(convert_tactic)
+                .collect();
+            return ProofTactic::Seq(Heap::new(build_seq(prefix)), Heap::new(let_node));
+        }
+    }
+    let converted: List<ProofTactic> = tactics.iter().map(convert_tactic).collect();
+    build_seq(converted)
+}
+
+/// Lower a single tactic-level match arm.
+fn convert_match_arm(arm: &TacticMatchArm) -> MatchArm {
+    MatchArm {
+        pattern: arm.pattern.clone(),
+        guard: match &arm.guard {
+            Maybe::Some(g) => Maybe::Some(Heap::new((**g).clone())),
+            Maybe::None => Maybe::None,
+        },
+        body: convert_tactic(&arm.body),
+    }
+}
+
+/// Render a `fail(...)` message. Plain string literals are emitted raw
+/// (without the surrounding quotes that `format_expr` would add) so the
+/// diagnostic matches what the user typed; any other expression is
+/// pretty-printed verbatim.
+fn extract_fail_message(message: &Expr) -> Text {
+    if let ExprKind::Literal(lit) = &message.kind {
+        if let LiteralKind::Text(string_lit) = &lit.kind {
+            return string_lit.clone().into_string();
+        }
+    }
+    format_expr(message)
 }
 
 /// Build a sequential composition from a list of tactics.

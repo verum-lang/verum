@@ -29,7 +29,8 @@
 
 use std::time::{Duration, Instant};
 
-use verum_ast::{BinOp, Expr, ExprKind, Path, UnOp};
+use verum_ast::{BinOp, Expr, ExprKind, Ident, Path, UnOp};
+use verum_ast::pattern::{Pattern, PatternKind};
 use verum_common::{Heap, List, Map, Maybe, Text};
 use verum_common::ToText;
 
@@ -1996,6 +1997,60 @@ pub enum ProofTactic {
 
     /// Custom named tactic
     Named { name: Text, args: List<Text> },
+
+    // ==================== Tactic-DSL control flow ====================
+    /// Local let-binding inside a tactic script. The bound `value` is
+    /// simplified in the current goal context and pushed onto the hypothesis
+    /// list as the equation `name = value`; `body` then runs against the
+    /// extended goal. Follows Ltac2's substitution semantics while letting
+    /// the SMT backend see the binding as an ordinary equality.
+    Let {
+        name: Text,
+        value: Heap<Expr>,
+        body: Heap<ProofTactic>,
+    },
+
+    /// Committed pattern-match on a meta-level expression. Each arm carries
+    /// a pattern, an optional guard, and a tactic body. The first arm whose
+    /// pattern (and guard) matches the simplified scrutinee runs; if its
+    /// body fails the whole match fails. This matches Rocq's default
+    /// `match goal` and mirrors Eisbach's `match_concl` — cross-arm
+    /// back-tracking is opt-in via `first { … }`.
+    Match {
+        scrutinee: Heap<Expr>,
+        arms: List<MatchArm>,
+    },
+
+    /// Explicit tactic failure. The rendered message flows into surrounding
+    /// `try` / `alt` / `first` combinators just like any other
+    /// `ProofError::TacticFailed`. Analogue of Lean 4's `throwError` and
+    /// Ltac2's `Control.throw`.
+    Fail { message: Text },
+
+    /// Runtime conditional. The engine first folds `cond` via
+    /// `simplify_expr`; if that yields `Bool(true/false)` the matching
+    /// branch runs. Otherwise the engine asks the SMT backend whether the
+    /// current hypotheses entail `cond` (or `¬cond`) and dispatches on the
+    /// verdict. An undecidable condition raises `TacticFailed`.
+    If {
+        cond: Heap<Expr>,
+        then_branch: Heap<ProofTactic>,
+        else_branch: Maybe<Heap<ProofTactic>>,
+    },
+}
+
+/// An arm of a [`ProofTactic::Match`].
+///
+/// Mirrors `verum_ast::decl::TacticMatchArm` but with its body already
+/// lowered into the SMT-facing IR.
+#[derive(Debug, Clone)]
+pub struct MatchArm {
+    /// Pattern tested against the scrutinee.
+    pub pattern: Pattern,
+    /// Optional guard evaluated after a successful pattern match.
+    pub guard: Maybe<Heap<Expr>>,
+    /// Tactic body executed when pattern (and guard) match.
+    pub body: ProofTactic,
 }
 
 impl ProofTactic {
@@ -2817,6 +2872,16 @@ impl ProofSearchEngine {
             }
 
             ProofTactic::Named { name, args } => self.try_named_tactic(name, args, goal),
+
+            // Tactic-DSL control flow
+            ProofTactic::Let { name, value, body } => self.try_let(name, value, body, goal),
+            ProofTactic::Match { scrutinee, arms } => self.try_match_tactic(scrutinee, arms, goal),
+            ProofTactic::Fail { message } => Err(ProofError::TacticFailed(message.clone())),
+            ProofTactic::If {
+                cond,
+                then_branch,
+                else_branch,
+            } => self.try_if(cond, then_branch, else_branch, goal),
         }
     }
 
@@ -3955,6 +4020,171 @@ impl ProofSearchEngine {
             ExprKind::Literal(Literal::new(LiteralKind::Bool(value), Span::dummy())),
             Span::dummy(),
         )
+    }
+
+    // ==================== Tactic-DSL control flow ====================
+
+    /// Execute a `ProofTactic::Let`: simplify the bound value, push
+    /// `name = value` onto the goal's hypothesis list (so SMT sees the
+    /// binding as an ordinary equation), then run `body` against the
+    /// extended goal.
+    fn try_let(
+        &mut self,
+        name: &Text,
+        value: &Expr,
+        body: &ProofTactic,
+        goal: &ProofGoal,
+    ) -> Result<List<ProofGoal>, ProofError> {
+        let simplified = Self::simplify_expr(value);
+        let span = value.span;
+        let var_expr = Expr::new(
+            ExprKind::Path(Path::from_ident(Ident::new(name.clone(), span))),
+            span,
+        );
+        let eq_expr = Expr::new(
+            ExprKind::Binary {
+                op: BinOp::Eq,
+                left: Heap::new(var_expr),
+                right: Heap::new(simplified),
+            },
+            span,
+        );
+        let mut extended = goal.clone();
+        extended.hypotheses.push(eq_expr);
+        self.execute_tactic(body, &extended)
+    }
+
+    /// Execute a `ProofTactic::Match`: simplify the scrutinee, try arms
+    /// left-to-right with committed semantics. The first arm whose pattern
+    /// matches and whose guard (if any) simplifies to `true` wins; its
+    /// pattern bindings are pushed as equation hypotheses and its body is
+    /// executed. Body failure is a match failure — cross-arm back-tracking
+    /// is opt-in via `first { … }`.
+    fn try_match_tactic(
+        &mut self,
+        scrutinee: &Expr,
+        arms: &List<MatchArm>,
+        goal: &ProofGoal,
+    ) -> Result<List<ProofGoal>, ProofError> {
+        let simplified = Self::simplify_expr(scrutinee);
+        for arm in arms.iter() {
+            let bindings = match Self::match_pattern(&arm.pattern, &simplified) {
+                Some(b) => b,
+                None => continue,
+            };
+            if let Maybe::Some(guard) = &arm.guard {
+                let guard_val = Self::simplify_expr(guard);
+                if !Self::is_true(&guard_val) {
+                    continue;
+                }
+            }
+            let mut extended = goal.clone();
+            for (ident, bound) in bindings {
+                let span = bound.span;
+                let var_expr = Expr::new(
+                    ExprKind::Path(Path::from_ident(ident)),
+                    span,
+                );
+                extended.hypotheses.push(Expr::new(
+                    ExprKind::Binary {
+                        op: BinOp::Eq,
+                        left: Heap::new(var_expr),
+                        right: Heap::new(bound),
+                    },
+                    span,
+                ));
+            }
+            return self.execute_tactic(&arm.body, &extended);
+        }
+        Err(ProofError::TacticFailed(
+            "match: no arm matched the scrutinee".to_text(),
+        ))
+    }
+
+    /// Execute a `ProofTactic::If`: decide `cond` via simplification; if
+    /// that is inconclusive, ask the SMT backend whether the current
+    /// hypotheses entail `cond` (or `¬cond`). Dispatches to the matching
+    /// branch; an undecidable condition is a tactic failure.
+    fn try_if(
+        &mut self,
+        cond: &Expr,
+        then_branch: &ProofTactic,
+        else_branch: &Maybe<Heap<ProofTactic>>,
+        goal: &ProofGoal,
+    ) -> Result<List<ProofGoal>, ProofError> {
+        let simplified = Self::simplify_expr(cond);
+        if Self::is_true(&simplified) {
+            return self.execute_tactic(then_branch, goal);
+        }
+        if Self::is_false(&simplified) {
+            return match else_branch {
+                Maybe::Some(b) => self.execute_tactic(b, goal),
+                Maybe::None => Ok(List::new()),
+            };
+        }
+        let no_solver: Maybe<Text> = Maybe::None;
+        let probe_timeout: Maybe<u64> = Maybe::Some(2000);
+        let cond_probe = ProofGoal {
+            goal: cond.clone(),
+            hypotheses: goal.hypotheses.clone(),
+            label: Maybe::Some("if-cond-probe".to_text()),
+        };
+        if self.try_smt(&no_solver, &probe_timeout, &cond_probe).is_ok() {
+            return self.execute_tactic(then_branch, goal);
+        }
+        let neg_cond = Expr::new(
+            ExprKind::Unary {
+                op: UnOp::Not,
+                expr: Heap::new(cond.clone()),
+            },
+            cond.span,
+        );
+        let neg_probe = ProofGoal {
+            goal: neg_cond,
+            hypotheses: goal.hypotheses.clone(),
+            label: Maybe::Some("if-neg-probe".to_text()),
+        };
+        if self.try_smt(&no_solver, &probe_timeout, &neg_probe).is_ok() {
+            return match else_branch {
+                Maybe::Some(b) => self.execute_tactic(b, goal),
+                Maybe::None => Ok(List::new()),
+            };
+        }
+        Err(ProofError::TacticFailed(
+            "if: condition is not decidable by simplification or SMT".to_text(),
+        ))
+    }
+
+    /// Structural pattern match used by the tactic-level `match`.
+    ///
+    /// Handles the pattern kinds that have a meaningful structural
+    /// meaning on a simplified expression: wildcard, rest, identifier
+    /// (with optional `@` subpattern), and literal. Richer pattern kinds
+    /// (Tuple, Record, Variant, …) require an evaluator for constructor
+    /// applications and are conservatively declined so the engine tries
+    /// the next arm.
+    fn match_pattern(pattern: &Pattern, value: &Expr) -> Option<Vec<(Ident, Expr)>> {
+        match &pattern.kind {
+            PatternKind::Wildcard | PatternKind::Rest => Some(Vec::new()),
+            PatternKind::Ident {
+                name, subpattern, ..
+            } => {
+                let mut bindings = Vec::new();
+                bindings.push((name.clone(), value.clone()));
+                if let Maybe::Some(sub) = subpattern {
+                    let sub_bindings = Self::match_pattern(sub, value)?;
+                    bindings.extend(sub_bindings);
+                }
+                Some(bindings)
+            }
+            PatternKind::Literal(lit_pat) => match &value.kind {
+                ExprKind::Literal(lit_val) if lit_pat.kind == lit_val.kind => {
+                    Some(Vec::new())
+                }
+                _ => None,
+            },
+            _ => None,
+        }
     }
 
     /// Try auto tactic

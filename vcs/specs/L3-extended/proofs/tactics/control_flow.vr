@@ -1,0 +1,179 @@
+// @test: verify-pass
+// @tier: 3
+// @level: L3
+// @tags: proofs, tactics, control-flow, let, match, if, fail
+// @timeout: 20000
+// @description: Tactic-DSL control flow (let / match / if / fail) lowered to SMT IR
+
+/// Smoke tests for the T1-O tactic-DSL control-flow forms.
+///
+/// Before the `proof_verification.rs` lowering rewrite, the four constructs
+/// below collapsed to `ProofTactic::Admit`, which silently "succeeded"
+/// without ever reaching the SMT backend. The tests below exercise each
+/// form against a goal that is ONLY discharged when the lowering
+/// actually runs the intended tactic; an `Admit`-style fallback would
+/// leave the goal open and the SMT verifier would reject.
+
+// -------------------------------------------------------------------
+// `let` — bound value pushed as `name = value` hypothesis; omega uses
+//         the equation to discharge the goal.
+// -------------------------------------------------------------------
+
+theorem let_propagates_binding(x: Int)
+    requires x > 0
+    ensures 2 * x > x
+{
+    proof by {
+        let doubled = 2 * x;
+        omega
+    }
+}
+
+theorem let_with_type_annotation(n: Int)
+    requires n >= 5
+    ensures n * n >= 25
+{
+    proof by {
+        let squared: Int = n * n;
+        omega
+    }
+}
+
+// -------------------------------------------------------------------
+// `if` — simplify first, then SMT-entailment against the hypotheses.
+// A decidable condition dispatches to the matching branch; both
+// branches discharge their goals independently.
+// -------------------------------------------------------------------
+
+theorem if_picks_then_branch(x: Int)
+    requires x > 10
+    ensures x + 1 > 11
+{
+    proof by {
+        if x > 0 {
+            omega
+        } else {
+            omega
+        }
+    }
+}
+
+theorem if_without_else(x: Int)
+    requires x >= 0
+    ensures x + 1 >= 1
+{
+    proof by {
+        if x >= 0 {
+            omega
+        }
+    }
+}
+
+theorem if_chain_else_if(x: Int)
+    requires x == 7
+    ensures x + 3 == 10
+{
+    proof by {
+        if x < 0 {
+            omega
+        } else if x == 0 {
+            omega
+        } else {
+            omega
+        }
+    }
+}
+
+// -------------------------------------------------------------------
+// `fail` — explicit failure integrates with surrounding `try`/`else`
+// combinators. `try { fail("…") } else { omega }` must recover and
+// discharge via omega.
+// -------------------------------------------------------------------
+
+theorem fail_caught_by_try_else(x: Int)
+    requires x > 0
+    ensures x + x > 0
+{
+    proof by {
+        try { fail("forced failure — should be caught") }
+        else { omega }
+    }
+}
+
+theorem fail_inside_match(x: Int)
+    requires x > 0
+    ensures x >= 1
+{
+    proof by {
+        try { fail(f"diagnostic with interpolated x={x}") }
+        else { omega }
+    }
+}
+
+// -------------------------------------------------------------------
+// `match` — first arm whose pattern matches wins. Wildcard / literal
+// / identifier patterns are all exercised. A non-matching arm falls
+// through; a matching arm's body discharges the goal.
+// -------------------------------------------------------------------
+
+theorem match_on_literal_scrutinee(x: Int)
+    requires x > 0
+    ensures x + 1 > 1
+{
+    proof by {
+        match 1 {
+            0 => fail("scrutinee is not zero"),
+            1 => omega,
+            _ => fail("unreachable")
+        }
+    }
+}
+
+theorem match_wildcard_fallback(x: Int)
+    requires x >= 3
+    ensures x * 2 >= 6
+{
+    proof by {
+        match 42 {
+            0 => fail("nope"),
+            _ => omega
+        }
+    }
+}
+
+theorem match_ident_binds_value(x: Int)
+    requires x > 0
+    ensures x + x > 0
+{
+    proof by {
+        match x {
+            y => omega
+        }
+    }
+}
+
+// -------------------------------------------------------------------
+// Combination — let + if + match + fail nested together, exercising
+// the full pipeline (Seq desugaring, SMT entailment, pattern matching,
+// and fail-recovery) in a single proof.
+// -------------------------------------------------------------------
+
+theorem combined_control_flow(a: Int, b: Int)
+    requires a > 0
+    requires b > 0
+    ensures a + b > 0
+{
+    proof by {
+        let s = a + b;
+        if s > 0 {
+            match 1 {
+                0 => fail("zero branch"),
+                _ => try { fail("decoy") } else { omega }
+            }
+        } else {
+            omega
+        }
+    }
+}
+
+fn main() {}

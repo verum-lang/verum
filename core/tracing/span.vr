@@ -305,6 +305,31 @@ implement Span {
     }
 }
 
+// Formatting — matches the pre-refactor core.context.standard Span
+// output so existing logs keep the same shape.
+
+implement Debug for Span {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        let ctx = self.context();
+        let tid = ctx.trace_id().to_hex();
+        let sid = ctx.span_id().to_hex();
+        let guard = (&*self.inner).lock().unwrap();
+        let inner: &SpanInner = &*guard;
+        f.write_str(f"Span {{ trace_id: \"{tid}\", span_id: \"{sid}\", name: \"{inner.name}\" }}")
+    }
+}
+
+implement Display for Span {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        let ctx = self.context();
+        let tid = ctx.trace_id().to_hex();
+        let sid = ctx.span_id().to_hex();
+        let guard = (&*self.inner).lock().unwrap();
+        let inner: &SpanInner = &*guard;
+        f.write_str(f"[{tid}:{sid}] {inner.name}")
+    }
+}
+
 fn span_status_code(inner: &SpanInner) -> StatusCode {
     inner.status.code()
 }
