@@ -134,7 +134,7 @@ public type EarlyDataIndication is
 // =============================================================================
 
 public type Extension is
-      ServerNameExt { names: List<ServerName> }
+    | ServerNameExt { names: List<ServerName> }
     | SupportedGroupsExt { groups: List<NamedGroup> }
     | SignatureAlgorithmsExt { schemes: List<SignatureScheme> }
     | SignatureAlgorithmsCertExt { schemes: List<SignatureScheme> }
