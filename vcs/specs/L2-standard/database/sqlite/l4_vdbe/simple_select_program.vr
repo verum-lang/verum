@@ -1,0 +1,30 @@
+// @test: wip
+// @tier: 0 | 3
+// @level: L2
+// @tags: sqlite, native, vdbe, bytecode, opcodes, exec
+// @timeout: 5000
+// @expected-exit: 0
+// @description: VDBE hand-assembled program — mimics SQL
+//               "SELECT 42, 'hello'". Executes Init → Integer →
+//               String8 → ResultRow → Halt; verifies R = (Int, Text)
+//               row-shape inference.
+
+mount core.database.sqlite.native.l4_vdbe.{VdbeProgram, Opcode, RegisterType};
+
+@main
+public async fn main() -> Result<(), Error> {
+    let prog: VdbeProgram<(Int64, Text)> = VdbeProgram::assemble(list![
+        Opcode::Init        { target: 1 },
+        Opcode::Integer     { val: 42, dest: 0 },
+        Opcode::String8     { s: "hello", dest: 1 },
+        Opcode::ResultRow   { start: 0, n: 2 },
+        Opcode::Halt        { errcode: 0, p2: 0, p4: empty() },
+    ])?;
+
+    let mut tx = mock_transaction();
+    let rows: List<(Int64, Text)> = prog.exec(&mut tx, empty_params()).collect().await?;
+
+    assert_eq(rows.len(), 1);
+    assert_eq(rows[0], (42, "hello"));
+    Ok(())
+}

@@ -1,0 +1,187 @@
+// =============================================================================
+// l0_vfs/memdb_vfs.vr — In-memory VFS backing for `:memory:` databases
+// =============================================================================
+// Layer: 0
+// Dependencies: core, collections, vfs_protocol
+// Spec: sqlite-native.md §7.5
+// =============================================================================
+//
+// Self-contained in-memory file implementation. Used for:
+//
+//   1. `:memory:` URI databases (no persistence).
+//   2. Deterministic simulation testing — tests that would otherwise touch
+//      the filesystem run against MemDbVfs under `core/context` injection.
+//      Latency, crashes, concurrency races are reproducible bit-for-bit.
+//   3. Bootstrapping — lets L1 / L2 / L3 / L4 development proceed before
+//      PosixVfs / Win32Vfs are merged.
+//
+// API note: v0.1 exposes free functions rather than methods because cross-
+// module method dispatch currently has an outstanding VBC interpreter issue
+// (see project_sqlite_native_spec.md). The signature shape mirrors what a
+// protocol-based version will look like once dispatch is fixed — callers
+// can migrate by replacing `memdb_read(&f, ...)` with `f.read(...)`.
+//
+// =============================================================================
+
+module core.database.sqlite.native.l0_vfs.memdb_vfs;
+
+mount core.*;
+mount collections.List;
+mount base.{Result, Ok, Err, Text};
+mount core.database.sqlite.native.l0_vfs.vfs_protocol.{
+    OpenFlags, SyncFlags, LockKind, VfsError, VfsErrorKind
+};
+
+// =============================================================================
+// Types
+// =============================================================================
+
+public type MemDbVfs is {
+    // Module-level instance has no state — each `open_memory` returns a
+    // fresh MemDbFile. A future SharedMemDbVfs will hold a path → blob
+    // registry here to let multiple connections see the same
+    // :memory:?cache=shared URI.
+};
+
+public type MemDbFile is {
+    name: Text,
+    bytes: List<Byte>,
+    lock_state: LockKind,
+    closed: Bool,
+};
+
+// =============================================================================
+// Open
+// =============================================================================
+
+/// Open (or create) an in-memory file. `flags.create` is accepted for API
+/// parity but always honoured since in-memory files cannot pre-exist.
+/// `flags.read_only` is respected on write attempts.
+public fn open_memory(name: &Text, flags: OpenFlags) -> Result<MemDbFile, VfsError> {
+    if !flags.read_only && !flags.read_write {
+        return Err(VfsError {
+            kind: InvalidArgument,
+            message: "open_memory: neither read_only nor read_write set",
+        });
+    }
+    Ok(MemDbFile {
+        name: name.clone(),
+        bytes: List.new(),
+        lock_state: Unlocked,
+        closed: false,
+    })
+}
+
+// Method-based surface — kept in parallel with the free-function surface
+// for now. Tracks Issue #1 investigation in core/database/sqlite/native/README.md.
+implement MemDbFile {
+    /// Current byte-length of the file.
+    public fn size(&self) -> Result<Int, VfsError> {
+        if self.closed {
+            return Err(VfsError { kind: Closed, message: "size on closed file" });
+        }
+        Ok(self.bytes.len())
+    }
+}
+
+// =============================================================================
+// File operations (free functions — see module note on dispatch)
+// =============================================================================
+
+/// Current byte-length of the file.
+public fn memdb_size(f: &MemDbFile) -> Result<Int, VfsError> {
+    if f.closed {
+        return Err(VfsError { kind: Closed, message: "size on closed file" });
+    }
+    Ok(f.bytes.len())
+}
+
+/// Read exactly `buf.len()` bytes from `f` starting at `offset`.
+/// `buf` must be pre-sized by the caller; this function fills it.
+public fn memdb_read(f: &MemDbFile, buf: &mut List<Byte>, offset: Int) -> Result<(), VfsError> {
+    if f.closed {
+        return Err(VfsError { kind: Closed, message: "read on closed file" });
+    }
+    if offset < 0 {
+        return Err(VfsError { kind: InvalidArgument, message: "negative offset" });
+    }
+    let want = buf.len();
+    if offset + want > f.bytes.len() {
+        return Err(VfsError { kind: ShortRead, message: "read past EOF" });
+    }
+    let mut i: Int = 0;
+    while i < want {
+        buf[i] = f.bytes[offset + i];
+        i = i + 1;
+    }
+    Ok(())
+}
+
+/// Write every byte of `src` into `f` starting at `offset`, extending the
+/// file with zero-filled bytes if `offset > size`. Sparse-write semantics
+/// match what SQLite's PosixVfs does on hole-containing files.
+public fn memdb_write(f: &mut MemDbFile, src: &[Byte], offset: Int) -> Result<(), VfsError> {
+    if f.closed {
+        return Err(VfsError { kind: Closed, message: "write on closed file" });
+    }
+    if offset < 0 {
+        return Err(VfsError { kind: InvalidArgument, message: "negative offset" });
+    }
+    while f.bytes.len() < offset {
+        f.bytes.push(0 as Byte);
+    }
+    let mut i: Int = 0;
+    while i < src.len() {
+        let pos: Int = offset + i;
+        if pos < f.bytes.len() {
+            f.bytes[pos] = src[i];
+        } else {
+            f.bytes.push(src[i]);
+        }
+        i = i + 1;
+    }
+    Ok(())
+}
+
+/// Truncate `f` to exactly `size` bytes; grow with zeros if `size` exceeds
+/// current length.
+public fn memdb_truncate(f: &mut MemDbFile, size: Int) -> Result<(), VfsError> {
+    if f.closed {
+        return Err(VfsError { kind: Closed, message: "truncate on closed file" });
+    }
+    if size < 0 {
+        return Err(VfsError { kind: InvalidArgument, message: "negative size" });
+    }
+    while f.bytes.len() > size {
+        let _ = f.bytes.pop();
+    }
+    while f.bytes.len() < size {
+        f.bytes.push(0 as Byte);
+    }
+    Ok(())
+}
+
+/// No-op for in-memory files — durable for the process lifetime only.
+public fn memdb_sync(f: &MemDbFile, _flags: SyncFlags) -> Result<(), VfsError> {
+    if f.closed {
+        return Err(VfsError { kind: Closed, message: "sync on closed file" });
+    }
+    Ok(())
+}
+
+public fn memdb_lock(f: &mut MemDbFile, kind: LockKind) -> Result<(), VfsError> {
+    f.lock_state = kind;
+    Ok(())
+}
+
+public fn memdb_unlock(f: &mut MemDbFile, kind: LockKind) -> Result<(), VfsError> {
+    f.lock_state = kind;
+    Ok(())
+}
+
+/// Final close — releases the backing bytes logically; the struct itself
+/// will be reclaimed by CBGR when the caller's handle goes out of scope.
+public fn memdb_close(f: &mut MemDbFile) -> Result<(), VfsError> {
+    f.closed = true;
+    Ok(())
+}

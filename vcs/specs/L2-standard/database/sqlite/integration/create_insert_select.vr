@@ -1,0 +1,43 @@
+// @test: wip
+// @tier: 0 | 3
+// @level: L2
+// @tags: sqlite, native, integration, ddl, dml, query
+// @timeout: 10000
+// @expected-exit: 0
+// @description: Full CRUD smoke — CREATE table, INSERT rows, SELECT back,
+//               verify shape + contents. Exercises L5 parser + L5 planner
+//               + L4 VDBE + L3 btree + L1 pager + L0 vfs end-to-end.
+
+mount core.database.sqlite.native.{Connection};
+mount core.collections.List;
+
+@main
+public async fn main() -> Result<(), Error> {
+    let conn = Connection::open_memory().await?;
+
+    conn.execute(sql#"
+        CREATE TABLE users (
+            id   INTEGER PRIMARY KEY,
+            name TEXT NOT NULL,
+            age  INTEGER CHECK (age >= 0)
+        ) STRICT
+    "#).await?;
+
+    conn.execute(sql#"INSERT INTO users (id, name, age) VALUES (1, 'Alice', 30)"#).await?;
+    conn.execute(sql#"INSERT INTO users (id, name, age) VALUES (2, 'Bob', 25)"#).await?;
+    conn.execute(sql#"INSERT INTO users (id, name, age) VALUES (3, 'Carol', 40)"#).await?;
+
+    // Compile-time row-shape inference: sql#"..." binds R = (Int, Text, Int).
+    let rows: List<(Int, Text, Int)> = conn
+        .query(sql#"SELECT id, name, age FROM users ORDER BY id"#)
+        .collect()
+        .await?;
+
+    assert_eq(rows.len(), 3);
+    assert_eq(rows[0], (1, "Alice", 30));
+    assert_eq(rows[1], (2, "Bob", 25));
+    assert_eq(rows[2], (3, "Carol", 40));
+
+    conn.close().await?;
+    Ok(())
+}

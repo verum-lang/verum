@@ -1,0 +1,46 @@
+// @test: wip
+// @tier: 0 | 3
+// @level: L2
+// @tags: sqlite, native, btree, insert, seek, invariants
+// @timeout: 10000
+// @expected-exit: 0
+// @description: B-tree black-box property — for any insert sequence, a
+//               cursor traversal returns keys in sorted order. SMT-proved
+//               invariant (sqlite-native.md §10.3) observed at runtime.
+
+mount core.database.sqlite.native.l3_btree.{Btree, BtreeKind, BtreeCursor};
+mount core.database.sqlite.native.l1_pager.{PagerHandle, Pager};
+mount core.database.sqlite.native.l0_vfs.{MemDbVfs};
+
+@main
+public async fn main() -> Result<(), Error> {
+    let vfs = MemDbVfs::new();
+    let pager = Pager::open_memory(vfs).await?;
+    let mut tree: Btree<Int64, List<Byte>> = Btree::create(
+        &pager,
+        BtreeKind::TableBtree,
+        Int64::compare,
+    ).await?;
+
+    // Scrambled insert order:
+    let keys: List<Int64> = list![42, 7, 99, 1, 23, 56, 11, 3, 88, 64, 77, 12];
+    for k in keys.iter() {
+        tree.insert(*k, list![0xAB; 16]).await?;
+    }
+
+    // Cursor scan — should see sorted keys.
+    let mut cursor = tree.seek_first().await?;
+    let mut seen: List<Int64> = list![];
+    while !cursor.is_at_end() {
+        seen.push(cursor.current_key().await?);
+        cursor.next().await?;
+    }
+
+    let mut expected = keys.clone();
+    expected.sort();
+    assert_eq(seen, expected);
+
+    // Invariant check — integrity_check should report no issues.
+    assert!(tree.integrity_check().await?.is_ok());
+    Ok(())
+}

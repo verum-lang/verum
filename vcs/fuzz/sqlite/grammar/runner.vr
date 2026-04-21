@@ -1,0 +1,55 @@
+// @test: wip
+// @tier: 3
+// @level: L2
+// @tags: sqlite, native, fuzz, grammar, sqlancer-like
+// @timeout: 1800000  // 30 minutes
+// @expected-exit: 0
+// @description: Grammar-guided SQL fuzzer — generate random-but-valid
+//               SQLite SQL, execute against loom, assert no panic. Any
+//               DbError is OK (malformed input caught cleanly). Any
+//               panic/deadlock is a bug.
+
+mount core.database.sqlite.native.{Connection, DbError};
+mount core.async.timer.sleep;
+mount core.time.Duration;
+
+@main
+public async fn main(seed: Int, duration_secs: Int) -> Result<(), Error> {
+    let conn = Connection::open_memory().await?;
+
+    // Baseline schema for the fuzzer to work against.
+    conn.execute(sql#"
+        CREATE TABLE t1 (a INT, b TEXT, c REAL);
+        CREATE TABLE t2 (x INT, y BLOB);
+        CREATE INDEX idx_t1_a ON t1(a);
+    "#).await?;
+
+    let start = monotonic_now();
+    let mut rng = GrammarRng::new(seed);
+    let mut stmt_count = 0;
+    let mut ok_count = 0;
+    let mut err_count = 0;
+
+    while (monotonic_now() - start).as_secs() < duration_secs {
+        let sql_str = rng.generate_statement();
+        stmt_count += 1;
+
+        match conn.execute_raw(&sql_str).await {
+            Ok(_) => ok_count += 1,
+            Err(DbError::ParseError { .. }) => err_count += 1,
+            Err(DbError::Generic { .. }) => err_count += 1,
+            // Only real panics/infinite-loops escape — runner detects via timeout.
+            Err(e) => err_count += 1,
+        }
+
+        if stmt_count % 1000 == 0 {
+            print(f"progress: stmt={stmt_count} ok={ok_count} err={err_count}");
+        }
+    }
+
+    print(f"done: total={stmt_count} ok={ok_count} err={err_count}");
+    Ok(())
+}
+
+// GrammarRng is implemented in core/fuzz/grammar_rng.vr (wip).
+// It walks a PEG grammar, emitting syntactically valid productions.

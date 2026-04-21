@@ -1,0 +1,48 @@
+// @test: wip
+// @tier: 0 | 3
+// @level: L2
+// @tags: sqlite, native, integration, transaction, affine, commit, rollback
+// @timeout: 10000
+// @expected-exit: 0
+// @description: Affine Tx guarantees — Tx must be consumed via .commit() or
+//               .rollback(). Double-commit is a compile-error by type. Test
+//               verifies transactional atomicity at runtime.
+
+mount core.database.sqlite.native.{Connection, Transaction};
+
+@main
+public async fn main() -> Result<(), Error> {
+    let conn = Connection::open_memory().await?;
+    conn.execute(sql#"CREATE TABLE t (x INT)"#).await?;
+
+    // Committed transaction:
+    {
+        let tx: Transaction = conn.begin().await?;
+        tx.execute(sql#"INSERT INTO t VALUES (1)"#).await?;
+        tx.execute(sql#"INSERT INTO t VALUES (2)"#).await?;
+        tx.commit().await?;   // tx consumed — compile-error to use after this
+    }
+
+    let count_after_commit: Int = conn
+        .query(sql#"SELECT COUNT(*) FROM t"#)
+        .first()
+        .await?;
+    assert_eq(count_after_commit, 2);
+
+    // Rolled-back transaction:
+    {
+        let tx: Transaction = conn.begin().await?;
+        tx.execute(sql#"INSERT INTO t VALUES (3)"#).await?;
+        tx.execute(sql#"INSERT INTO t VALUES (4)"#).await?;
+        tx.rollback().await?; // tx consumed
+    }
+
+    let count_after_rollback: Int = conn
+        .query(sql#"SELECT COUNT(*) FROM t"#)
+        .first()
+        .await?;
+    assert_eq(count_after_rollback, 2);  // rollback discarded 3, 4
+
+    conn.close().await?;
+    Ok(())
+}

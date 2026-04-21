@@ -1,0 +1,41 @@
+// @test: wip
+// @tier: 0 | 3
+// @level: L2
+// @tags: sqlite, native, vfs, posix, pwrite, pread, fsync, durability
+// @timeout: 5000
+// @expected-exit: 0
+// @description: PosixVfs smoke — open file, pwrite at offset 0, fsync,
+//               pread back, verify byte-exact match. Covers Gap 2 (fsync),
+//               Gap 3 (Linux pread/pwrite) from sqlite-native.md §3.2.
+
+mount core.database.sqlite.native.l0_vfs.{PosixVfs, OpenFlags, SyncFlags, VfsProtocol, File};
+
+@main
+public async fn main() -> Result<(), Error> {
+    let vfs = PosixVfs {};
+    let flags = OpenFlags {
+        read_write: true,
+        create: true,
+        main_db: true,
+        delete_on_close: true,  // auto-cleanup
+        ..OpenFlags::default()
+    };
+
+    let mut file = vfs.open(&path("/tmp/loom-vfs-smoke.db"), flags).await?;
+
+    let page: [Byte; 4096] = fill_page(0xAB);
+    file.write(&page, 0).await?;
+    file.sync(SyncFlags::full()).await?;
+
+    let mut read_buf: [Byte; 4096] = [0; 4096];
+    file.read(&mut read_buf, 0).await?;
+
+    assert_eq(&read_buf[..], &page[..]);
+    Ok(())
+}
+
+fn fill_page(byte: Byte) -> [Byte; 4096] {
+    let mut b: [Byte; 4096] = [0; 4096];
+    for i in 0..4096 { b[i] = byte; }
+    b
+}

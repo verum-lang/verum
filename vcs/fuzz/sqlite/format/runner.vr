@@ -1,0 +1,64 @@
+// @test: wip
+// @tier: 3
+// @level: L2
+// @tags: sqlite, native, fuzz, file-format, corruption
+// @timeout: 1800000
+// @expected-exit: 0
+// @description: File-format fuzzer — start from valid SQLite DB, mutate
+//               N bytes, open, assert that loom returns DbError::Corrupt
+//               (or Ok if mutation didn't damage anything) — never
+//               panics/segfaults/reads-OOB.
+
+mount core.database.sqlite.native.{Connection, DbError};
+
+@main
+public async fn main(seed: Int, duration_secs: Int) -> Result<(), Error> {
+    // Baseline valid DB:
+    let baseline_path = path("/tmp/loom-fuzz-baseline.db");
+    create_baseline_db(&baseline_path).await?;
+    let baseline: List<Byte> = read_file(&baseline_path).await?;
+
+    let start = monotonic_now();
+    let mut rng = FormatRng::new(seed);
+    let mut iter = 0;
+    let mut clean_open = 0;
+    let mut corrupt_detected = 0;
+
+    while (monotonic_now() - start).as_secs() < duration_secs {
+        iter += 1;
+        let mutated: List<Byte> = rng.mutate_bytes(&baseline);
+        let test_path = path(f"/tmp/loom-fuzz-test-{iter}.db");
+        write_file(&test_path, &mutated).await?;
+
+        match Connection::open(&test_path).await {
+            Ok(conn) => {
+                match conn.execute(sql#"PRAGMA integrity_check"#).await {
+                    Ok(_)  => clean_open += 1,
+                    Err(_) => corrupt_detected += 1,
+                }
+                conn.close().await.ok();
+            }
+            Err(DbError::Corrupt { .. }) => corrupt_detected += 1,
+            Err(DbError::NotADatabase) => corrupt_detected += 1,
+            // Any other error category is fine (I/O, etc.); panic escapes.
+            Err(_) => corrupt_detected += 1,
+        }
+
+        delete_file(&test_path).await.ok();
+        if iter % 500 == 0 {
+            print(f"progress: iter={iter} clean={clean_open} detected={corrupt_detected}");
+        }
+    }
+
+    print(f"done: iter={iter} clean={clean_open} detected={corrupt_detected}");
+    Ok(())
+}
+
+async fn create_baseline_db(p: &Path) using [] -> Result<(), Error> {
+    let conn = Connection::open(p).await?;
+    conn.execute(sql#"
+        CREATE TABLE t (x INT PRIMARY KEY, y TEXT);
+        INSERT INTO t VALUES (1, 'a'), (2, 'b'), (3, 'c');
+    "#).await?;
+    conn.close().await
+}

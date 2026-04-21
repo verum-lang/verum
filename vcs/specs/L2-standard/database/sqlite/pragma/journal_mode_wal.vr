@@ -1,0 +1,36 @@
+// @test: wip
+// @tier: 0 | 3
+// @level: L2
+// @tags: sqlite, native, pragma, journal_mode, wal
+// @timeout: 5000
+// @expected-exit: 0
+// @description: PRAGMA journal_mode = WAL — switches a DB to WAL journal
+//               mode; subsequent writes go to <db>-wal + <db>-shm; checkpoint
+//               flushes to main DB.
+
+mount core.database.sqlite.native.{Connection};
+
+@main
+public async fn main() -> Result<(), Error> {
+    let conn = Connection::open("/tmp/loom-wal-test.db").await?;
+    let mode: Text = conn.query_scalar(sql#"PRAGMA journal_mode = WAL"#).await?;
+    assert_eq(mode, "wal");
+
+    // Sanity: subsequent writes succeed.
+    conn.execute(sql#"CREATE TABLE t (x INT)"#).await?;
+    conn.execute(sql#"INSERT INTO t VALUES (1)"#).await?;
+
+    let cnt: Int = conn.query_scalar(sql#"SELECT COUNT(*) FROM t"#).await?;
+    assert_eq(cnt, 1);
+
+    // Manual checkpoint:
+    let stats: Text = conn.query_scalar(sql#"PRAGMA wal_checkpoint(FULL)"#).await?;
+    // Expected format: "0|N|M" (busy|log_size|checkpointed)
+    assert!(stats.starts_with("0|"));
+
+    conn.close().await?;
+    delete_file("/tmp/loom-wal-test.db").await?;
+    delete_file("/tmp/loom-wal-test.db-wal").await?;
+    delete_file("/tmp/loom-wal-test.db-shm").await?;
+    Ok(())
+}

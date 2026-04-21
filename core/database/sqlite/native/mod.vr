@@ -1,0 +1,55 @@
+// =============================================================================
+// core/database/sqlite/native/mod.vr
+// =============================================================================
+// Layer: 3 (Database — native SQLite implementation)
+// Dependencies: core, collections, encoding, security, async, sync, mem, runtime
+// Spec: internal/specs/sqlite-native.md
+// Codename: loom
+// =============================================================================
+//
+// Pure-Verum reimplementation of SQLite 3.x, layer-structured per
+// sqlite-native.md §4:
+//
+//   L7  API           — Database, Statement, Transaction, Row (public surface)
+//   L6  Session       — Connection<Mode>, schema cache, function registry
+//   L5  SQL compiler  — lexer, parser, resolver, planner, codegen
+//   L4  VDBE          — register-SSA bytecode virtual machine
+//   L3  B-tree        — cursors, pages, balance, integrity
+//   L2  Record        — varint/serial types/affinity/collation (uses stdlib)
+//   L1  Pager         — actor-based, WAL + rollback journal, checkpointer
+//   L0  VFS           — VfsProtocol abstraction, MemDbVfs, PosixVfs, Win32Vfs
+//
+// Orthogonal axes:
+//
+//   S   Supervision   — supervisor-tree over pager + checkpointer
+//   O   Observability — core/tracing spans around every layer
+//   V   Verification  — @verify contracts, SMT-discharged B-tree/WAL invariants
+//   T   Testing       — DST, differential vs C-SQLite, fuzz (vcs/fuzz/sqlite/)
+//
+// # Stdlib reuse
+//
+// loom does NOT duplicate stdlib primitives. Specifically:
+//
+//   * `core.encoding.varint`         — SQLite varint encoding (Gap 4)
+//   * `core.security.hash.crc32`     — WAL frame checksum (Gap 5)
+//   * `core.collections.{btree,map}` — in-memory ordered maps for temp tables
+//   * `core.mem.arena`               — CBGR arena for page cache
+//   * `core.async.{nursery,channel}` — background tasks + actor mailboxes
+//   * `core.runtime.supervisor`      — pager + checkpointer supervision
+//   * `core.tracing`, `core.metrics` — observability
+//   * `core.sys.*`                   — platform I/O, locking, durability
+//
+// # Status — v0.1 (2026-04-21)
+//
+// Scaffolded: L0 VfsProtocol, MemDbVfs; L2 Record header parse; L1 Pager
+// skeleton. See README.md in this directory for detailed status table.
+//
+// =============================================================================
+
+module core.database.sqlite.native;
+
+// Layer 0: Virtual File System
+public module l0_vfs;
+
+// Layer 2: record / type affinity / collation
+public module l2_record;

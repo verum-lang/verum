@@ -1,0 +1,48 @@
+// =============================================================================
+// core/database/sqlite/native/l0_vfs/mod.vr — Virtual File System layer
+// =============================================================================
+// Layer: 0 in the loom architecture (sqlite-native.md §4.2)
+// Dependencies: core, sys, sync, mem
+// =============================================================================
+//
+// Abstraction between the pager (L1) and the underlying storage. Mirrors
+// SQLite's `sqlite3_vfs` / `sqlite3_file` interfaces but expressed as native
+// Verum protocols (type-safe, no C FFI).
+//
+// Implementations shipped with the stdlib:
+//
+//   * `VfsProtocol`    — the trait any backend must satisfy
+//   * `MemDbVfs`       — pure in-memory (`:memory:` databases + DST)
+//   * `PosixVfs`       — pending; blocked on locking / durability gaps
+//   * `Win32Vfs`       — pending
+//
+// See `vfs_protocol.vr` for the contract and `memdb_vfs.vr` for the
+// reference in-memory implementation.
+// =============================================================================
+
+module core.database.sqlite.native.l0_vfs;
+
+public module vfs_protocol;
+public module memdb_vfs;
+
+public mount .vfs_protocol.OpenFlags;
+public mount .vfs_protocol.SyncFlags;
+public mount .vfs_protocol.LockKind;
+public mount .vfs_protocol.VfsError;
+public mount .vfs_protocol.VfsErrorKind;
+public mount .vfs_protocol.flags_default;
+public mount .vfs_protocol.flags_rwc;
+public mount .vfs_protocol.flags_ro;
+public mount .vfs_protocol.sync_default;
+public mount .vfs_protocol.sync_full;
+public mount .memdb_vfs.MemDbVfs;
+public mount .memdb_vfs.MemDbFile;
+public mount .memdb_vfs.open_memory;
+public mount .memdb_vfs.memdb_size;
+public mount .memdb_vfs.memdb_read;
+public mount .memdb_vfs.memdb_write;
+public mount .memdb_vfs.memdb_truncate;
+public mount .memdb_vfs.memdb_sync;
+public mount .memdb_vfs.memdb_lock;
+public mount .memdb_vfs.memdb_unlock;
+public mount .memdb_vfs.memdb_close;

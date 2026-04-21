@@ -1,0 +1,22 @@
+// @test: wip
+// @tier: 0 | 3
+// @level: L2
+// @tags: sqlite, native, integration, vfs, memdb, open
+// @timeout: 5000
+// @expected-exit: 0
+// @description: Smoke test — open in-memory database, close, verify no
+//               leaked resources. Baseline for every subsequent test;
+//               if this fails nothing else works.
+//
+// WIP: blocks on landing of core.database.sqlite.native.l0_vfs.memdb_vfs
+// and core.database.sqlite.native.l7_api.database.
+
+mount core.database.sqlite.native.{Connection, ConnectionMode};
+
+@main
+public async fn main() -> Result<(), Error> {
+    let conn = Connection::open_memory().await?;
+    // Connection is affine — must be closed explicitly or dropped by scope.
+    conn.close().await?;
+    Ok(())
+}

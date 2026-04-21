@@ -1,0 +1,167 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L2
+// @tags: sqlite, varint, encoding, stdlib, property
+// @timeout: 5000
+// @expected-exit: 0
+//
+// SQLite varint round-trip property test — for every interesting i64,
+// encode then decode produces the original value, and the length reported
+// by sqlite_encoded_len matches the actual bytes produced.
+//
+// Covers Gap 4 from internal/specs/sqlite-native.md §3.2 and the canonical
+// test vectors in Appendix E.1.
+
+mount core.encoding.varint.{sqlite_encode, sqlite_encoded_len, sqlite_decode};
+
+// -----------------------------------------------------------------------------
+// Canonical test vectors from sqlite-native.md §E.1
+// -----------------------------------------------------------------------------
+
+fn test_sqlite_varint_vector_zero() {
+    let bytes = sqlite_encode(0);
+    assert_eq(bytes.len(), 1);
+    assert_eq(bytes[0], 0x00 as Byte);
+    let (v, n) = sqlite_decode(&bytes, 0).unwrap();
+    assert_eq(v, 0);
+    assert_eq(n, 1);
+}
+
+fn test_sqlite_varint_vector_one() {
+    let bytes = sqlite_encode(1);
+    assert_eq(bytes.len(), 1);
+    assert_eq(bytes[0], 0x01 as Byte);
+    let (v, n) = sqlite_decode(&bytes, 0).unwrap();
+    assert_eq(v, 1);
+    assert_eq(n, 1);
+}
+
+fn test_sqlite_varint_vector_127() {
+    let bytes = sqlite_encode(127);
+    assert_eq(bytes.len(), 1);
+    assert_eq(bytes[0], 0x7F as Byte);
+}
+
+fn test_sqlite_varint_vector_128() {
+    let bytes = sqlite_encode(128);
+    assert_eq(bytes.len(), 2);
+    assert_eq(bytes[0], 0x81 as Byte);
+    assert_eq(bytes[1], 0x00 as Byte);
+    let (v, n) = sqlite_decode(&bytes, 0).unwrap();
+    assert_eq(v, 128);
+    assert_eq(n, 2);
+}
+
+fn test_sqlite_varint_vector_16383() {
+    let bytes = sqlite_encode(16383);
+    assert_eq(bytes.len(), 2);
+    assert_eq(bytes[0], 0xFF as Byte);
+    assert_eq(bytes[1], 0x7F as Byte);
+}
+
+fn test_sqlite_varint_vector_16384() {
+    let bytes = sqlite_encode(16384);
+    assert_eq(bytes.len(), 3);
+    assert_eq(bytes[0], 0x81 as Byte);
+    assert_eq(bytes[1], 0x80 as Byte);
+    assert_eq(bytes[2], 0x00 as Byte);
+}
+
+// -----------------------------------------------------------------------------
+// Encoded-length classifier — ensures every length bucket is reachable
+// -----------------------------------------------------------------------------
+
+fn test_encoded_len_classifier() {
+    assert_eq(sqlite_encoded_len(0), 1);
+    assert_eq(sqlite_encoded_len(127), 1);
+    assert_eq(sqlite_encoded_len(128), 2);
+    assert_eq(sqlite_encoded_len(16383), 2);
+    assert_eq(sqlite_encoded_len(16384), 3);
+    assert_eq(sqlite_encoded_len(2097151), 3);
+    assert_eq(sqlite_encoded_len(2097152), 4);
+    assert_eq(sqlite_encoded_len(268435455), 4);
+    assert_eq(sqlite_encoded_len(268435456), 5);
+    // Large values land in 9-byte form.
+    assert_eq(sqlite_encoded_len(-1), 9);
+}
+
+// -----------------------------------------------------------------------------
+// Round-trip property over a scattered sample
+// -----------------------------------------------------------------------------
+
+fn assert_round_trip(v: Int64) {
+    let bytes = sqlite_encode(v);
+    let (decoded, consumed) = sqlite_decode(&bytes, 0).unwrap();
+    assert_eq(decoded, v);
+    assert_eq(consumed, bytes.len());
+    assert_eq(consumed, sqlite_encoded_len(v));
+}
+
+fn test_round_trip_small() {
+    assert_round_trip(0);
+    assert_round_trip(1);
+    assert_round_trip(42);
+    assert_round_trip(127);
+    assert_round_trip(128);
+    assert_round_trip(255);
+    assert_round_trip(1024);
+    assert_round_trip(65535);
+    assert_round_trip(16777216);
+}
+
+fn test_round_trip_pseudo_random() {
+    // Deterministic LCG. Native i64 arithmetic wraps in two's complement,
+    // which is what we want — covers the full 64-bit space including
+    // negative values (they take the 9-byte form).
+    let mut x: Int64 = 0x12345678;
+    let mut i = 0;
+    while i < 200 {
+        x = x * 6364136223846793005 + 1442695040888963407;
+        assert_round_trip(x);
+        i = i + 1;
+    }
+}
+
+fn test_round_trip_negative_is_9_bytes() {
+    // Every negative i64 has its top bit set; SQLite encodes it as a
+    // full 9-byte form because the unsigned interpretation exceeds the
+    // 8-byte ceiling.
+    let bytes = sqlite_encode(-1);
+    assert_eq(bytes.len(), 9);
+    let (decoded, _) = sqlite_decode(&bytes, 0).unwrap();
+    assert_eq(decoded, -1);
+}
+
+// -----------------------------------------------------------------------------
+// Truncated-input detection
+// -----------------------------------------------------------------------------
+
+fn test_truncated_decode() {
+    // A 2-byte varint: (0x81, 0x00) → 128. Feeding only the first byte
+    // should surface a Truncated error.
+    let mut partial: List<Byte> = [];
+    partial.push(0x81 as Byte);
+    let result = sqlite_decode(&partial, 0);
+    assert(result.is_err());
+}
+
+// -----------------------------------------------------------------------------
+// Entry point — interpreter driver invokes every test.
+// -----------------------------------------------------------------------------
+
+fn main() {
+    test_sqlite_varint_vector_zero();
+    test_sqlite_varint_vector_one();
+    test_sqlite_varint_vector_127();
+    test_sqlite_varint_vector_128();
+    test_sqlite_varint_vector_16383();
+    test_sqlite_varint_vector_16384();
+
+    test_encoded_len_classifier();
+
+    test_round_trip_small();
+    test_round_trip_pseudo_random();
+    test_round_trip_negative_is_9_bytes();
+
+    test_truncated_decode();
+}

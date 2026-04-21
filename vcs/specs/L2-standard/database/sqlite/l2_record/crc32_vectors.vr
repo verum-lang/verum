@@ -1,0 +1,132 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L2
+// @tags: sqlite, crc32, checksum, stdlib, vectors
+// @timeout: 5000
+// @expected-exit: 0
+//
+// CRC-32 / IEEE 802.3 test vectors. Cross-validated against zlib's
+// reference `crc32` implementation. Covers Gap 5 in
+// `internal/specs/sqlite-native.md` §3.2.
+
+mount core.security.hash.crc32.{crc32, crc32_continue, Crc32};
+mount collections.List;
+
+// -----------------------------------------------------------------------------
+// Canonical vectors
+// -----------------------------------------------------------------------------
+
+fn test_crc32_empty() {
+    let empty: List<Byte> = [];
+    assert_eq(crc32(&empty), 0x00000000_u32);
+}
+
+fn test_crc32_check_value() {
+    // "123456789" — the classic CRC-32 check value.
+    // Bytes: 0x31 0x32 0x33 0x34 0x35 0x36 0x37 0x38 0x39
+    let mut input: List<Byte> = [];
+    input.push(0x31 as Byte);
+    input.push(0x32 as Byte);
+    input.push(0x33 as Byte);
+    input.push(0x34 as Byte);
+    input.push(0x35 as Byte);
+    input.push(0x36 as Byte);
+    input.push(0x37 as Byte);
+    input.push(0x38 as Byte);
+    input.push(0x39 as Byte);
+    assert_eq(crc32(&input), 0xCBF43926_u32);
+}
+
+fn test_crc32_single_byte() {
+    // CRC32("a") = 0xE8B7BE43
+    let mut input: List<Byte> = [];
+    input.push(0x61 as Byte);  // 'a'
+    assert_eq(crc32(&input), 0xE8B7BE43_u32);
+}
+
+fn test_crc32_ascii_string() {
+    // CRC32("The quick brown fox jumps over the lazy dog") = 0x414FA339
+    let text = "The quick brown fox jumps over the lazy dog";
+    assert_eq(crc32(text.as_bytes()), 0x414FA339_u32);
+}
+
+// -----------------------------------------------------------------------------
+// Streaming equivalence: update(a++b) ≡ update(a); update(b)
+// -----------------------------------------------------------------------------
+
+fn test_streaming_equivalence() {
+    let a = "Hello, ".as_bytes();
+    let b = "World!".as_bytes();
+
+    let mut both: List<Byte> = [];
+    let mut i = 0;
+    while i < a.len() { both.push(a[i]); i = i + 1; }
+    i = 0;
+    while i < b.len() { both.push(b[i]); i = i + 1; }
+
+    let one_shot = crc32(&both);
+
+    let mut h = Crc32.new();
+    h.update(a);
+    h.update(b);
+    let streamed = h.finalize();
+
+    assert_eq(one_shot, streamed);
+}
+
+// -----------------------------------------------------------------------------
+// crc32_continue equivalence
+// -----------------------------------------------------------------------------
+
+fn test_continue_equivalence() {
+    let a = "abc".as_bytes();
+    let b = "def".as_bytes();
+
+    let mut both: List<Byte> = [];
+    let mut i = 0;
+    while i < a.len() { both.push(a[i]); i = i + 1; }
+    i = 0;
+    while i < b.len() { both.push(b[i]); i = i + 1; }
+
+    let one_shot = crc32(&both);
+    let two_step = crc32_continue(crc32(a), b);
+
+    assert_eq(one_shot, two_step);
+}
+
+// -----------------------------------------------------------------------------
+// Byte-pattern vectors
+// -----------------------------------------------------------------------------
+
+fn test_zero_byte_stream() {
+    // 32 zero bytes — stable value, cross-checked.
+    let mut input: List<Byte> = [];
+    let mut i = 0;
+    while i < 32 {
+        input.push(0 as Byte);
+        i = i + 1;
+    }
+    assert_eq(crc32(&input), 0x190A55AD_u32);
+}
+
+fn test_ff_byte_stream() {
+    // 32 0xFF bytes.
+    let mut input: List<Byte> = [];
+    let mut i = 0;
+    while i < 32 {
+        input.push(0xFF as Byte);
+        i = i + 1;
+    }
+    assert_eq(crc32(&input), 0xFF6CAB0B_u32);
+}
+
+fn main() {
+    test_crc32_empty();                 print("ok: empty");
+    test_crc32_check_value();           print("ok: check_value");
+    test_crc32_single_byte();           print("ok: single_byte");
+    test_crc32_ascii_string();          print("ok: ascii_string");
+    test_streaming_equivalence();       print("ok: streaming_equivalence");
+    test_continue_equivalence();        print("ok: continue_equivalence");
+    test_zero_byte_stream();            print("ok: zero_byte_stream");
+    test_ff_byte_stream();              print("ok: ff_byte_stream");
+}

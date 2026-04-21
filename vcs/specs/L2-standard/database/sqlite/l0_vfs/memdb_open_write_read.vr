@@ -1,0 +1,88 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L2
+// @tags: sqlite, native, vfs, memdb, in-memory, stdlib
+// @timeout: 5000
+// @expected-exit: 0
+//
+// MemDbVfs smoke — open in-memory file, write two byte-patterns at
+// different offsets, read them back, verify byte-exact. Exercises the
+// l0_vfs layer that will eventually back every loom Connection.
+//
+// Covers sqlite-native.md §7.5 (MemDbVfs).
+
+mount core.database.sqlite.native.l0_vfs.memdb_vfs.{
+    open_memory, memdb_size, memdb_read, memdb_write, memdb_close
+};
+mount core.database.sqlite.native.l0_vfs.vfs_protocol.{flags_rwc};
+mount collections.List;
+
+fn main() {
+    let flags = flags_rwc();
+    let name: Text = ":memory:";
+    let mut file = match open_memory(&name, flags) {
+        Ok(f) => f,
+        Err(_) => { panic("open_memory failed"); return; }
+    };
+
+    // Scattered writes on page boundaries.
+    let mut chunk_a: List<Byte> = List.new();
+    let mut chunk_b: List<Byte> = List.new();
+    let mut i = 0;
+    while i < 128 {
+        chunk_a.push(0xAA as Byte);
+        chunk_b.push(0xBB as Byte);
+        i = i + 1;
+    }
+
+    match memdb_write(&mut file, &chunk_a, 0) {
+        Ok(_) => {},
+        Err(e) => { print(f"write#1: {e.message}"); panic("write #1 failed"); return; }
+    };
+    match memdb_write(&mut file, &chunk_b, 4096) {
+        Ok(_) => {},
+        Err(e) => { print(f"write#2: {e.message}"); panic("write #2 failed"); return; }
+    };
+
+    // Prepare destination buffers at desired length.
+    let mut buf_a: List<Byte> = List.new();
+    let mut buf_b: List<Byte> = List.new();
+    let mut k = 0;
+    while k < 128 {
+        buf_a.push(0 as Byte);
+        buf_b.push(0 as Byte);
+        k = k + 1;
+    }
+    match memdb_read(&file, &mut buf_a, 0) {
+        Ok(_) => {},
+        Err(_) => { panic("read #1 failed"); return; }
+    };
+    match memdb_read(&file, &mut buf_b, 4096) {
+        Ok(_) => {},
+        Err(_) => { panic("read #2 failed"); return; }
+    };
+
+    // Full 128-byte pattern match.
+    let mut j = 0;
+    while j < 128 {
+        assert_eq(buf_a[j], 0xAA as Byte);
+        assert_eq(buf_b[j], 0xBB as Byte);
+        j = j + 1;
+    }
+
+    // File extends past the last write.
+    {
+        let sz_result = memdb_size(&file);
+        match sz_result {
+            Ok(n)  => assert_eq(n, 4096 + 128),
+            Err(_) => panic("size failed"),
+        }
+    }
+
+    // Cleanup is handled by scope-drop — MemDbFile holds no OS resources;
+    // explicit memdb_close exists for API parity with PosixVfs but isn't
+    // required here. (The NLL borrow-checker analysis currently flags an
+    // explicit close on the same binding as a mutable re-borrow — tracked
+    // as a stdlib-integration issue.)
+    print("memdb_vfs ok");
+}

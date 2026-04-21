@@ -1,0 +1,39 @@
+// @test: wip
+// @tier: 0 | 3
+// @level: L2
+// @tags: sqlite, native, vfs, locking, 5-state, concurrency
+// @timeout: 5000
+// @expected-exit: 0
+// @description: Five-state SQLite locking protocol — Unlocked → Shared →
+//               Reserved → Pending → Exclusive. Two connections compete;
+//               verify that a second Shared lock can coexist with an
+//               existing Shared, but Reserved blocks new Shared acquires.
+//               Covers Gap 1 (byte-range locking) from sqlite-native.md.
+
+mount core.database.sqlite.native.l0_vfs.{PosixVfs, OpenFlags, LockKind, VfsProtocol, File};
+
+@main
+public async fn main() -> Result<(), Error> {
+    let vfs = PosixVfs {};
+    let flags = OpenFlags { read_write: true, create: true, main_db: true, ..OpenFlags::default() };
+    let path = path("/tmp/loom-locking.db");
+
+    let mut file_a = vfs.open(&path, flags).await?;
+    let mut file_b = vfs.open(&path, flags).await?;
+
+    // Both acquire SHARED — OK.
+    file_a.lock(LockKind::Shared).await?;
+    file_b.lock(LockKind::Shared).await?;
+
+    // file_a escalates to RESERVED — OK (only one writer attempt).
+    file_a.lock(LockKind::Reserved).await?;
+
+    // file_b tries to escalate to RESERVED — blocked (EBUSY).
+    let err = file_b.lock(LockKind::Reserved).await;
+    assert!(err.is_err());
+
+    // Release everything.
+    file_a.unlock(LockKind::Unlocked).await?;
+    file_b.unlock(LockKind::Unlocked).await?;
+    Ok(())
+}

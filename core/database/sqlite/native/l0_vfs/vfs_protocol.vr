@@ -1,0 +1,135 @@
+// =============================================================================
+// l0_vfs/vfs_protocol.vr — VFS protocol and shared types
+// =============================================================================
+// Layer: 0
+// Dependencies: core, collections
+// Spec: sqlite-native.md §7
+// =============================================================================
+//
+// The protocol every loom VFS must implement. Modelled on SQLite's
+// `sqlite3_vfs`/`sqlite3_file` but expressed as a native Verum protocol
+// with capability-typed handles and structured errors — no opaque C
+// pointers, no error codes.
+//
+// # Mandatory operations
+//
+//   * `open / delete / access / full_pathname / current_time / random_bytes`
+//     on the VFS itself
+//   * `read / write / truncate / sync / file_size / lock / unlock`
+//     on the file handle
+//
+// # Optional capabilities
+//
+//   * `fetch / unfetch`              — memory-mapped I/O
+//   * `shm_map / shm_lock / ...`     — shared memory for WAL-index
+//
+// Implementations unable to service a given optional capability return
+// `VfsError { kind: Unsupported, ... }` — callers must handle gracefully.
+// =============================================================================
+
+module core.database.sqlite.native.l0_vfs.vfs_protocol;
+
+mount core.*;
+mount collections.List;
+mount base.{Result, Ok, Err, Text};
+
+// =============================================================================
+// Shared flag / enum types
+// =============================================================================
+
+/// Open-time flags. Combinations are validated at open(); not every backend
+/// supports every combination (e.g., MemDbVfs ignores `create`).
+public type OpenFlags is {
+    read_only: Bool,
+    read_write: Bool,
+    create: Bool,
+    exclusive: Bool,
+    main_db: Bool,
+    temp_db: Bool,
+    main_journal: Bool,
+    wal: Bool,
+    memory: Bool,
+    delete_on_close: Bool,
+    no_mutex: Bool,
+    full_mutex: Bool,
+    uri: Bool,
+    no_follow: Bool,
+};
+
+/// Construct a zero-initialised `OpenFlags`.
+public fn flags_default() -> OpenFlags {
+    OpenFlags {
+        read_only: false, read_write: false, create: false,
+        exclusive: false, main_db: false, temp_db: false,
+        main_journal: false, wal: false, memory: false,
+        delete_on_close: false, no_mutex: false, full_mutex: false,
+        uri: false, no_follow: false,
+    }
+}
+
+/// Read-write + create + main DB — the default for user databases.
+public fn flags_rwc() -> OpenFlags {
+    let mut f = flags_default();
+    f.read_write = true;
+    f.create = true;
+    f.main_db = true;
+    f
+}
+
+/// Read-only open of an existing main database.
+public fn flags_ro() -> OpenFlags {
+    let mut f = flags_default();
+    f.read_only = true;
+    f.main_db = true;
+    f
+}
+
+/// Flags for the `sync` call. `full` maps to `F_FULLFSYNC` on Darwin and
+/// `fdatasync` on Linux/Windows. `data_only` skips metadata sync where the
+/// platform lets us (faster, SQLite's default for WAL frame appends).
+public type SyncFlags is {
+    full: Bool,
+    data_only: Bool,
+};
+
+/// Default sync — data only, no metadata flush.
+public fn sync_default() -> SyncFlags {
+    SyncFlags { full: false, data_only: true }
+}
+
+/// Full sync — matches `F_FULLFSYNC` / full `fsync` semantics.
+public fn sync_full() -> SyncFlags {
+    SyncFlags { full: true, data_only: false }
+}
+
+/// Five-state SQLite locking protocol (sqlite-native.md §7.4).
+public type LockKind is
+      Unlocked
+    | Shared
+    | Reserved
+    | Pending
+    | Exclusive;
+
+// =============================================================================
+// Error type
+// =============================================================================
+
+public type VfsError is {
+    kind: VfsErrorKind,
+    message: Text,
+};
+
+public type VfsErrorKind is
+      NotFound
+    | PermissionDenied
+    | AlreadyExists
+    | InvalidArgument
+    | Interrupted
+    | IoError
+    | ShortRead
+    | WriteFault
+    | LockConflict
+    | Unsupported
+    | DiskFull
+    | Corrupt
+    | Closed;
