@@ -1145,19 +1145,30 @@ impl Visitor for ContextUsageValidator {
 
             // Context field access: ContextName.field
             ExprKind::Field { expr: object, .. } => {
-                // Check if the object is a context path
-                if let ExprKind::Path(path) = &object.kind {
-                    if let Some(ident) = path.as_ident() {
-                        let name = ident.name.as_str();
-                        // Check if this looks like a context (starts with uppercase)
-                        if name
-                            .chars()
-                            .next()
-                            .map(|c| c.is_uppercase())
-                            .unwrap_or(false)
-                        {
-                            self.check_context_access(name, expr.span);
-                        }
+                // Only dispatch to `check_context_access` when the receiver
+                // is a name that has actually been declared as a context in
+                // this function's `using [...]` clause. Root fix for
+                // Issue #3: without this guard we emitted spurious
+                // "Context 'T' used ... but not declared" warnings for any
+                // uppercase `T.field` access (types, enum variants,
+                // static-data accessors), flooding stdlib builds with
+                // false positives. The downstream typechecker still
+                // catches references to names that are neither types nor
+                // contexts with a precise diagnostic — we need not raise a
+                // context-system warning on every `T.x` syntactic shape.
+                // Mirrors the policy already in place for bare `Path`
+                // expressions below (line 1188-1202).
+                if let ExprKind::Path(path) = &object.kind
+                    && let Some(ident) = path.as_ident()
+                {
+                    let name = ident.name.as_str();
+                    let starts_upper = name
+                        .chars()
+                        .next()
+                        .map(|c| c.is_uppercase())
+                        .unwrap_or(false);
+                    if starts_upper && self.declared_contexts.contains(name) {
+                        self.check_context_access(name, expr.span);
                     }
                 }
                 // Continue walking
@@ -1166,18 +1177,21 @@ impl Visitor for ContextUsageValidator {
 
             // Context method call: ContextName.method(args)
             ExprKind::MethodCall { receiver, .. } => {
-                // Check if receiver is a context path
-                if let ExprKind::Path(path) = &receiver.kind {
-                    if let Some(ident) = path.as_ident() {
-                        let name = ident.name.as_str();
-                        if name
-                            .chars()
-                            .next()
-                            .map(|c| c.is_uppercase())
-                            .unwrap_or(false)
-                        {
-                            self.check_context_access(name, expr.span);
-                        }
+                // See the `Field` arm above for rationale — this is the
+                // method-call twin and follows the same declared-context
+                // guard to avoid flagging `SomeType.static_method()` as a
+                // context access.
+                if let ExprKind::Path(path) = &receiver.kind
+                    && let Some(ident) = path.as_ident()
+                {
+                    let name = ident.name.as_str();
+                    let starts_upper = name
+                        .chars()
+                        .next()
+                        .map(|c| c.is_uppercase())
+                        .unwrap_or(false);
+                    if starts_upper && self.declared_contexts.contains(name) {
+                        self.check_context_access(name, expr.span);
                     }
                 }
                 // Continue walking

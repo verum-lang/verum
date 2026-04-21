@@ -1,0 +1,44 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L2
+// @tags: context, static-method, disambiguation, regression
+// @timeout: 5000
+// @expected-exit: 0
+//
+// Regression for Issue #3 (root fix in
+// crates/verum_compiler/src/phases/context_validation.rs).
+//
+// A user type with a static constructor method (`Type.new()`) must NOT be
+// flagged as a "context used but not declared in 'using' clause" warning.
+// Previously, the Field and MethodCall walk arms unconditionally pushed
+// any UpperCase receiver into `check_context_access`, producing spurious
+// warnings for every `Type.method(...)` call-site (Sha256.new(), Crc32.new(),
+// Heap.new(), etc.). The fix narrows the trigger to names that are
+// actually declared in the enclosing function's `using [...]` clause,
+// mirroring the already-correct policy in the bare `Path` arm.
+
+public type Counter is { n: Int };
+
+implement Counter {
+    public fn new() -> Counter {
+        Counter { n: 0 }
+    }
+
+    public fn incr(&mut self) {
+        self.n = self.n + 1;
+    }
+
+    public fn get(&self) -> Int {
+        self.n
+    }
+}
+
+fn main() {
+    // Static-method call — must not trigger context-validation warning.
+    let mut c = Counter.new();
+    c.incr();
+    c.incr();
+    c.incr();
+    assert_eq(c.get(), 3);
+    print("static_method_not_context ok");
+}
