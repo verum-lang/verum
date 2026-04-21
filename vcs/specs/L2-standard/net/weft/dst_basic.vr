@@ -1,0 +1,58 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: net, weft, dst, tigerbeetle, simulation, phase6
+// @timeout: 10000
+// @expect: pass
+
+// §8.15 — Deterministic Simulation Testing primitives: seeded clock,
+// RNG, simulated network with chaos injection, task scheduler,
+// WeftSimulator entry point.
+
+mount core.time.{Duration};
+mount core.net.weft.dst.{
+    TestClock, SeededRng,
+    NetworkEvent, SimNetworkConfig, NetworkEventStream,
+    TaskSchedule, RoundRobinSchedule, RandomSchedule,
+    SimConfig, WeftSimulator,
+    PROPERTY_NO_TASK_LEAK, PROPERTY_BACKPRESSURE_NEVER_OOM,
+};
+
+fn typecheck_clock() -> (TestClock, Int) {
+    let clk = TestClock.seeded(0x1234_abcd);
+    clk.advance(Duration.from_millis(250));
+    (clk.clone(), clk.now_ns())
+}
+
+fn typecheck_rng() -> (UInt64, UInt32, Int, Bool) {
+    let rng = SeededRng.new(42);
+    (rng.next_u64(), rng.next_u32(), rng.next_bounded(100), rng.flip())
+}
+
+fn typecheck_network() -> NetworkEvent {
+    let rng = SeededRng.new(7);
+    let stream = NetworkEventStream.new(rng, SimNetworkConfig.chaos());
+    stream.next_event()
+}
+
+fn typecheck_schedulers() -> (Int, Int) {
+    let rr = RoundRobinSchedule.new();
+    let rand = RandomSchedule.new(SeededRng.new(99));
+    (rr.pick_next(8), rand.pick_next(8))
+}
+
+fn typecheck_simulator() -> Bool {
+    let cfg = SimConfig.chaos_from_seed(0xdeadbeef);
+    let sim = WeftSimulator.new(cfg);
+    sim.advance(Duration.from_millis(10));
+    sim.check(|| true);
+    sim.invariants_ok()
+}
+
+fn typecheck_property_names() -> (Text, Text) {
+    (PROPERTY_NO_TASK_LEAK.into(), PROPERTY_BACKPRESSURE_NEVER_OOM.into())
+}
+
+fn main() {
+    let _ = typecheck_simulator();
+}

@@ -1,0 +1,56 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: net, weft, wasm, wasi, proxy-wasm, sandbox, phase6
+// @timeout: 10000
+// @expect: pass
+
+// §8.14 — WasmFilterConfig + WasmFilter + WasmFilterLayer shape.
+
+mount core.collections.list.{List};
+mount core.net.http.{Response};
+mount core.net.weft.service.{ServiceBuilder};
+mount core.net.weft.handler.{WeftRequest, Handler};
+mount core.net.weft.error.{WeftError};
+mount core.net.weft.response_ext.{resp_ok};
+mount core.net.weft.wasm_filter.{
+    WasmFilter, WasmFilterConfig, WasmCapabilities,
+    WasmFilterLayer, WasmFilterError,
+};
+
+type Noop is {};
+implement Handler for Noop {
+    async fn handle(&self, _req: WeftRequest) -> Result<Response, WeftError> {
+        Ok(resp_ok())
+    }
+}
+
+fn typecheck_config() -> WasmFilterConfig {
+    WasmFilterConfig.default()
+        .with_cpu_quota_ms(25)
+        .with_memory_bytes(16 * 1024 * 1024)
+        .with_instruction_limit(50_000_000)
+        .with_capabilities(WasmCapabilities.default())
+}
+
+fn typecheck_load() -> Result<WasmFilter, WasmFilterError> {
+    // Minimal valid wasm header: \0asm version 1.
+    let mut bytes: List<Byte> = List.new();
+    bytes.push(0x00); bytes.push(0x61); bytes.push(0x73); bytes.push(0x6D);
+    bytes.push(0x01); bytes.push(0x00); bytes.push(0x00); bytes.push(0x00);
+    WasmFilter.load_from_bytes(bytes, typecheck_config())
+}
+
+fn typecheck_layer(f: WasmFilter) -> impl Handler {
+    ServiceBuilder.new(Noop {})
+        .layer(WasmFilterLayer.new(f))
+        .build()
+}
+
+fn typecheck_metrics(f: &WasmFilter) -> (Int, Int, Int) {
+    (f.invocations(), f.caps_exceeded(), f.skipped_no_runtime())
+}
+
+fn main() {
+    let _ = typecheck_config();
+}

@@ -24,6 +24,8 @@ public mount super.net.weft.arena_pool.*;
 public mount super.net.weft.bufpool.*;
 public mount super.net.weft.refined_routes.*;
 public mount super.net.weft.spiffe.*;
+public mount super.net.weft.dst.*;
+public mount super.net.weft.wasm_filter.*;
 public mount super.net.weft.app.*;
 public mount super.net.weft.backpressure.*;
 public mount super.net.weft.adaptive.*;

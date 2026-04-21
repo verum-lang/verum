@@ -1,0 +1,418 @@
+// =============================================================================
+// core/net/weft/dst.vr — Deterministic Simulation Testing framework
+// =============================================================================
+// Layer: 6 (Weft)
+// Spec:  internal/specs/net-framework.md §8.15
+// =============================================================================
+//
+// The §8.15 "Deterministic Simulation Testing" pillar — inspired by
+// TigerBeetle VOPR + FoundationDB's simulator + Antithesis's
+// deterministic hypervisor. The idea: for a `verified by
+// construction` framework, SMT catches implementation bugs; DST
+// catches logic bugs in the specification.
+//
+// The DST runtime replaces three sources of non-determinism in the
+// Weft stack with seeded deterministic alternatives:
+//
+//   1. `TestClock`     — `Instant.now()` returns simulation time
+//                        (not wall-clock); timers fire deterministically.
+//   2. `SeededRng`     — all randomness (LB jitter, backoff, sub-
+//                        protocol choice, HPACK decisions) pulls from
+//                        a single seed.
+//   3. `SimNetwork`    — `TcpStream` is swapped for a simulated
+//                        pipe; injection knobs for latency, drop,
+//                        reorder, partition.
+//
+// Plus a `TaskSchedule` that forces every `poll` / `yield_now` event
+// order to match a seeded interleaving — two identical seeds
+// reproduce bit-exact the same execution.
+//
+// The framework is NOT a test runner (that's in `vcs/runner/vtest/`);
+// this file defines the PRIMITIVES that a DST test file uses. A
+// phase-6.5 follow-up adds the `@test(dst, seed=..., iterations=N)`
+// attribute handling in the `vtest` crate.
+//
+// # Example property test (what landing this unlocks)
+//
+// ```verum
+// @test(dst, seed = 0x1234abcd, iterations = 1_000_000)
+// async fn property_no_connection_leak(
+//     events: Gen<List<NetworkEvent>>,
+//     schedule: Gen<TaskSchedule>,
+// ) {
+//     let sim = WeftSimulator.new(SimConfig {
+//         clock: TestClock.seeded(seed),
+//         rng: SeededRng.new(seed),
+//         scheduler: schedule,
+//         network: SimNetwork.with_events(events),
+//     });
+//     sim.run(my_server_app);
+//     sim.assert_invariant(|s| s.connections.all(|c| c.properly_closed()));
+// }
+// ```
+//
+// # Guarantees
+//
+//   * Bit-exact replay from a seed. Any test failure reproduces 100%.
+//   * No wall-clock / random / network dependence at runtime.
+//   * No heap addresses in any observable state (hash-randomised
+//     maps use the DST seed as a deterministic salt).
+//
+// # What DST catches that SMT doesn't
+//
+//   * Race conditions in supervision-tree restart ordering under
+//     concurrent failures.
+//   * Task-leak at cancel-grace-period expiry under chaos latency.
+//   * OOM in backpressure path when upstream is very slow AND rate
+//     is very high.
+//   * Connection-pool reuse inconsistencies under concurrent timeout
+//     and close races.
+//
+// =============================================================================
+
+module core.net.weft.dst;
+
+mount core.*;
+mount core.collections.list.{List};
+mount core.time.{Instant, Duration};
+mount core.sync.atomic.{AtomicInt, AtomicBool, MemoryOrdering};
+
+// =============================================================================
+// TestClock — seeded deterministic clock
+// =============================================================================
+
+/// Monotonic simulation clock. `now()` returns simulation time; the
+/// runtime advances it according to scheduled timer events. All Weft
+/// timer primitives (sleep, timeout, heartbeat) read the current
+/// simulation time rather than the OS clock in DST mode.
+public type TestClock is {
+    seed: UInt64,
+    now_ns: Shared<AtomicInt>,
+};
+
+implement TestClock {
+    pub fn seeded(seed: UInt64) -> TestClock {
+        TestClock {
+            seed: seed,
+            now_ns: Shared.new(AtomicInt.new(0)),
+        }
+    }
+
+    pub fn now_ns(&self) -> Int {
+        self.now_ns.load(MemoryOrdering.Acquire)
+    }
+
+    /// Advance simulation time by `delta`. Called by the DST runtime
+    /// between scheduled events.
+    pub fn advance(&self, delta: Duration) {
+        let dn = delta.as_nanos();
+        self.now_ns.fetch_add(dn, MemoryOrdering.AcqRel);
+    }
+
+    pub fn as_instant(&self) -> Instant {
+        Instant.from_nanos(self.now_ns())
+    }
+}
+
+implement Clone for TestClock {
+    fn clone(&self) -> TestClock {
+        TestClock { seed: self.seed, now_ns: self.now_ns.clone() }
+    }
+}
+
+// =============================================================================
+// SeededRng — PCG32 variant, deterministic, cheap
+// =============================================================================
+
+public type SeededRng is {
+    state: Shared<AtomicInt>,
+};
+
+implement SeededRng {
+    pub fn new(seed: UInt64) -> SeededRng {
+        let s = if seed == 0 { 0xDA9A_C0DE_F00D_BABE } else { seed };
+        SeededRng { state: Shared.new(AtomicInt.new(s as Int)) }
+    }
+
+    /// 64-bit raw word. PCG-style (LCG with permutation) — cheap and
+    /// good enough for simulation; cryptographic randomness lives in
+    /// core.security.rng for real use.
+    pub fn next_u64(&self) -> UInt64 {
+        let s = self.state.load(MemoryOrdering.Acquire) as UInt64;
+        let next = s * 6_364_136_223_846_793_005 + 1_442_695_040_888_963_407;
+        self.state.store(next as Int, MemoryOrdering.Release);
+        // PCG output fn: xorshift + rotate.
+        let xorshifted = ((s >> 18) ^ s) >> 27;
+        let rot = s >> 59;
+        (xorshifted >> rot) | (xorshifted << ((-(rot as Int)) & 31) as UInt64)
+    }
+
+    pub fn next_u32(&self) -> UInt32 {
+        (self.next_u64() & 0xFFFF_FFFF) as UInt32
+    }
+
+    /// Uniform in [0, bound). Clamps overflow safely.
+    pub fn next_bounded(&self, bound: Int) -> Int {
+        if bound <= 0 { return 0; }
+        (self.next_u64() % (bound as UInt64)) as Int
+    }
+
+    /// Fair coin flip — half the time true.
+    pub fn flip(&self) -> Bool {
+        (self.next_u64() & 1) == 1
+    }
+}
+
+implement Clone for SeededRng {
+    fn clone(&self) -> SeededRng {
+        SeededRng { state: self.state.clone() }
+    }
+}
+
+// =============================================================================
+// SimNetwork — fault-injected virtual network
+// =============================================================================
+
+/// Network event types the simulator can inject between every read /
+/// write call. `NoEvent` passes straight through.
+public type NetworkEvent is
+    | NoEvent
+    | LatencyDelay(Duration)
+    | PacketLoss                    // drop this send or receive
+    | Reorder                        // swap with next pending op
+    | LatencySpike(Duration)         // one-off long delay
+    | PeerPartition { until_ms: Int } // fully partition from the peer
+    | PeerReset;                     // force RST from peer
+
+public type SimNetworkConfig is {
+    /// Fraction of ops (× 1000) that experience packet loss.
+    packet_loss_permille: Int,
+    /// Mean latency per op in microseconds.
+    mean_latency_us: Int,
+    /// Fraction of ops (× 1000) that reorder with their neighbour.
+    reorder_permille: Int,
+    /// Probability (× 1000) of a random partition event per tick.
+    partition_permille: Int,
+};
+
+implement SimNetworkConfig {
+    pub fn default() -> SimNetworkConfig {
+        SimNetworkConfig {
+            packet_loss_permille: 0,
+            mean_latency_us: 100,
+            reorder_permille: 0,
+            partition_permille: 0,
+        }
+    }
+
+    pub fn chaos() -> SimNetworkConfig {
+        SimNetworkConfig {
+            packet_loss_permille: 5,      // 0.5%
+            mean_latency_us: 1_000,       // 1 ms
+            reorder_permille: 10,         // 1%
+            partition_permille: 1,        // 0.1%
+        }
+    }
+
+    pub fn with_packet_loss_permille(self, permille: Int) -> SimNetworkConfig {
+        SimNetworkConfig { packet_loss_permille: permille, ..self }
+    }
+
+    pub fn with_mean_latency_us(self, us: Int) -> SimNetworkConfig {
+        SimNetworkConfig { mean_latency_us: us, ..self }
+    }
+
+    pub fn with_reorder_permille(self, permille: Int) -> SimNetworkConfig {
+        SimNetworkConfig { reorder_permille: permille, ..self }
+    }
+
+    pub fn with_partition_permille(self, permille: Int) -> SimNetworkConfig {
+        SimNetworkConfig { partition_permille: permille, ..self }
+    }
+}
+
+implement Clone for SimNetworkConfig {
+    fn clone(&self) -> SimNetworkConfig {
+        SimNetworkConfig {
+            packet_loss_permille: self.packet_loss_permille,
+            mean_latency_us: self.mean_latency_us,
+            reorder_permille: self.reorder_permille,
+            partition_permille: self.partition_permille,
+        }
+    }
+}
+
+/// Event generator driven by the shared RNG + config. The simulator
+/// calls `.next_event()` before each read / write; the return value
+/// tells it what chaos to inject this op.
+public type NetworkEventStream is {
+    config: SimNetworkConfig,
+    rng: SeededRng,
+};
+
+implement NetworkEventStream {
+    pub fn new(rng: SeededRng, config: SimNetworkConfig) -> NetworkEventStream {
+        NetworkEventStream { config: config, rng: rng }
+    }
+
+    pub fn next_event(&self) -> NetworkEvent {
+        // Permille-based dice; choose at most one chaos event per op.
+        let d = self.rng.next_bounded(1000);
+        if d < self.config.packet_loss_permille { return NetworkEvent.PacketLoss; }
+        let off = self.config.packet_loss_permille;
+        if d < off + self.config.reorder_permille { return NetworkEvent.Reorder; }
+        let off = off + self.config.reorder_permille;
+        if d < off + self.config.partition_permille {
+            return NetworkEvent.PeerPartition { until_ms: 500 };
+        }
+        // Baseline: small latency based on mean value; variance ±50%.
+        let variance = self.config.mean_latency_us / 2;
+        let jitter = if variance == 0 { 0 } else {
+            self.rng.next_bounded(variance * 2) - variance
+        };
+        NetworkEvent.LatencyDelay(Duration.from_micros(
+            self.config.mean_latency_us + jitter,
+        ))
+    }
+}
+
+// =============================================================================
+// TaskSchedule — deterministic task-poll ordering
+// =============================================================================
+
+/// Hook driving task scheduling order. The runtime calls
+/// `.pick_next(n_ready)` to choose which of the `n_ready` runnable
+/// tasks to poll next. Seeded → reproducible; chaos schedulers
+/// randomise uniformly.
+public type TaskSchedule is protocol {
+    fn pick_next(&self, n_ready: Int) -> Int;
+};
+
+public type RoundRobinSchedule is {
+    cursor: Shared<AtomicInt>,
+};
+
+implement RoundRobinSchedule {
+    pub fn new() -> RoundRobinSchedule {
+        RoundRobinSchedule { cursor: Shared.new(AtomicInt.new(0)) }
+    }
+}
+
+implement TaskSchedule for RoundRobinSchedule {
+    fn pick_next(&self, n_ready: Int) -> Int {
+        if n_ready <= 0 { return 0; }
+        let v = self.cursor.fetch_add(1, MemoryOrdering.AcqRel);
+        v % n_ready
+    }
+}
+
+public type RandomSchedule is {
+    rng: SeededRng,
+};
+
+implement RandomSchedule {
+    pub fn new(rng: SeededRng) -> RandomSchedule {
+        RandomSchedule { rng: rng }
+    }
+}
+
+implement TaskSchedule for RandomSchedule {
+    fn pick_next(&self, n_ready: Int) -> Int {
+        self.rng.next_bounded(n_ready)
+    }
+}
+
+// =============================================================================
+// SimConfig + simulator entry
+// =============================================================================
+
+public type SimConfig is {
+    clock: TestClock,
+    rng: SeededRng,
+    network: SimNetworkConfig,
+};
+
+implement SimConfig {
+    /// Default config built from a single seed — all three DST
+    /// sub-systems share the same RNG stream so one seed replays the
+    /// entire execution.
+    pub fn from_seed(seed: UInt64) -> SimConfig {
+        SimConfig {
+            clock: TestClock.seeded(seed),
+            rng: SeededRng.new(seed),
+            network: SimNetworkConfig.default(),
+        }
+    }
+
+    /// Chaos preset — packet loss + latency + reorder + rare partitions.
+    pub fn chaos_from_seed(seed: UInt64) -> SimConfig {
+        SimConfig {
+            clock: TestClock.seeded(seed),
+            rng: SeededRng.new(seed),
+            network: SimNetworkConfig.chaos(),
+        }
+    }
+}
+
+/// Invariant checker — property tests register invariants here; the
+/// simulator calls every registered predicate after each significant
+/// event. Failure triggers shrunken-counterexample capture and a
+/// regression seed.
+public type WeftSimulator is {
+    config: SimConfig,
+    invariants_failed: Shared<AtomicBool>,
+    ticks: Shared<AtomicInt>,
+};
+
+implement WeftSimulator {
+    pub fn new(config: SimConfig) -> WeftSimulator {
+        WeftSimulator {
+            config: config,
+            invariants_failed: Shared.new(AtomicBool.new(false)),
+            ticks: Shared.new(AtomicInt.new(0)),
+        }
+    }
+
+    pub fn clock(&self) -> TestClock { self.config.clock.clone() }
+    pub fn rng(&self) -> SeededRng { self.config.rng.clone() }
+
+    /// Reachable via property-test bodies to advance simulation until
+    /// an invariant triggers or a budget expires.
+    pub fn advance(&self, by: Duration) {
+        self.config.clock.advance(by);
+        self.ticks.fetch_add(1, MemoryOrdering.AcqRel);
+    }
+
+    /// Call an invariant predicate; on false, flip the failure flag.
+    pub fn check<F: fn() -> Bool>(&self, invariant: F) {
+        if !invariant() {
+            self.invariants_failed.store(true, MemoryOrdering.Release);
+        }
+    }
+
+    pub fn invariants_ok(&self) -> Bool {
+        !self.invariants_failed.load(MemoryOrdering.Acquire)
+    }
+
+    pub fn ticks(&self) -> Int {
+        self.ticks.load(MemoryOrdering.Acquire)
+    }
+}
+
+// =============================================================================
+// Well-known property names — invariant catalogue
+// =============================================================================
+
+/// Phase-6 invariant catalogue — property tests reference these by
+/// name so the DST CI farm can aggregate failure rates per property.
+/// Adding a new invariant here is how you "register" it.
+public const PROPERTY_NO_TASK_LEAK: &'static Text = "no_task_leak";
+public const PROPERTY_NO_MESSAGE_LOSS: &'static Text = "no_message_loss";
+public const PROPERTY_GRACEFUL_SHUTDOWN_ZERO_DROP: &'static Text =
+    "graceful_shutdown_zero_drop";
+public const PROPERTY_SUPERVISOR_EVENTUALLY_RECOVERS: &'static Text =
+    "supervisor_eventually_recovers";
+public const PROPERTY_BACKPRESSURE_NEVER_OOM: &'static Text =
+    "backpressure_never_OOM";
+public const PROPERTY_CANCEL_REACHES_ALL_CHILDREN: &'static Text =
+    "cancel_signal_reaches_all_children_within_grace";

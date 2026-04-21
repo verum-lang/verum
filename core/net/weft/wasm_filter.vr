@@ -1,0 +1,293 @@
+// =============================================================================
+// core/net/weft/wasm_filter.vr — WASI / Proxy-Wasm filter sandbox
+// =============================================================================
+// Layer: 6 (Weft)
+// Spec:  internal/specs/net-framework.md §8.14
+// =============================================================================
+//
+// Standard Layer for running third-party filters (WAF rules, A/B
+// tests, custom metrics, auth plugins) as WebAssembly modules. The
+// module is loaded once at start, instantiated per worker, and
+// invoked on every request via the Proxy-Wasm 0.2.1 ABI — the same
+// ABI used by Envoy, so existing filters drop in unchanged.
+//
+// Three orthogonal guarantees:
+//
+//   1. **Capability sandbox.** WASI linker grants only the
+//      capabilities the filter asked for in its manifest (read
+//      headers + call `log`; NOT `open_file`). Mirrors §5.8 capability
+//      discipline at the filter boundary.
+//
+//   2. **Resource caps.** Per-invocation CPU-quota (10 ms default),
+//      memory-cap (8 MiB), instruction-limit. A misbehaving filter
+//      gets dropped for that request only; the Weft pipeline keeps
+//      running.
+//
+//   3. **Determinism in DST.** In simulation mode the filter's
+//      randomness and clock are rerouted to the DST subsystem
+//      (§8.15), keeping the filter's behaviour reproducible.
+//
+// Phase-6 skeleton status:
+//
+//   * API shape (config, layer, handler) is stable — future
+//     changes only flesh out internals.
+//   * Actual WASM instantiation lives in the runtime behind the
+//     `verum.wasm.*` intrinsic family. Until that lands the layer
+//     short-circuits by letting the request through unchanged +
+//     incrementing a "wasm-skipped" counter so deployments know.
+//
+// Usage:
+//
+// ```verum
+// let waf = WasmFilter.load_from_bytes(waf_bytes,
+//              WasmFilterConfig.default()
+//                  .with_cpu_quota_ms(20)
+//                  .with_memory_bytes(16 * 1024 * 1024))?;
+//
+// let app = Router.new()
+//     .route("/api/...", Method.Get, handler)
+//     .layer(WasmFilterLayer.new(waf));
+// ```
+//
+// =============================================================================
+
+module core.net.weft.wasm_filter;
+
+mount core.*;
+mount core.collections.list.{List};
+mount core.time.{Duration};
+mount core.sync.atomic.{AtomicInt, MemoryOrdering};
+mount core.net.http.{Response};
+mount core.net.weft.service.{Layer};
+mount core.net.weft.handler.{WeftRequest, Handler};
+mount core.net.weft.error.{WeftError};
+
+// =============================================================================
+// Config
+// =============================================================================
+
+public type WasmFilterConfig is {
+    /// Max CPU time the filter may consume per request.
+    cpu_quota_ms: Int,
+    /// Max linear memory the filter may allocate per instance.
+    memory_bytes: Int,
+    /// Max WASM instructions per request. Protects against infinite
+    /// loops even under pathological inputs.
+    instruction_limit: Int,
+    /// Capabilities granted to the filter — narrows the WASI linker's
+    /// surface area.
+    capabilities: WasmCapabilities,
+};
+
+public type WasmCapabilities is {
+    /// Allow reading request headers (name + value).
+    read_request_headers: Bool,
+    /// Allow reading the request body.
+    read_request_body: Bool,
+    /// Allow modifying response headers.
+    modify_response_headers: Bool,
+    /// Allow emitting log lines via `proxy_log`.
+    log: Bool,
+    /// Allow recording custom metrics.
+    metrics: Bool,
+};
+
+implement WasmCapabilities {
+    pub fn deny_all() -> WasmCapabilities {
+        WasmCapabilities {
+            read_request_headers: false,
+            read_request_body: false,
+            modify_response_headers: false,
+            log: false,
+            metrics: false,
+        }
+    }
+
+    pub fn default() -> WasmCapabilities {
+        WasmCapabilities {
+            read_request_headers: true,
+            read_request_body: false,
+            modify_response_headers: false,
+            log: true,
+            metrics: true,
+        }
+    }
+}
+
+implement Clone for WasmCapabilities {
+    fn clone(&self) -> WasmCapabilities {
+        WasmCapabilities {
+            read_request_headers: self.read_request_headers,
+            read_request_body: self.read_request_body,
+            modify_response_headers: self.modify_response_headers,
+            log: self.log,
+            metrics: self.metrics,
+        }
+    }
+}
+
+implement WasmFilterConfig {
+    pub fn default() -> WasmFilterConfig {
+        WasmFilterConfig {
+            cpu_quota_ms: 10,
+            memory_bytes: 8 * 1024 * 1024,
+            instruction_limit: 10_000_000,
+            capabilities: WasmCapabilities.default(),
+        }
+    }
+
+    pub fn with_cpu_quota_ms(self, ms: Int) -> WasmFilterConfig {
+        WasmFilterConfig { cpu_quota_ms: ms, ..self }
+    }
+
+    pub fn with_memory_bytes(self, n: Int) -> WasmFilterConfig {
+        WasmFilterConfig { memory_bytes: n, ..self }
+    }
+
+    pub fn with_instruction_limit(self, n: Int) -> WasmFilterConfig {
+        WasmFilterConfig { instruction_limit: n, ..self }
+    }
+
+    pub fn with_capabilities(self, caps: WasmCapabilities) -> WasmFilterConfig {
+        WasmFilterConfig { capabilities: caps, ..self }
+    }
+}
+
+implement Clone for WasmFilterConfig {
+    fn clone(&self) -> WasmFilterConfig {
+        WasmFilterConfig {
+            cpu_quota_ms: self.cpu_quota_ms,
+            memory_bytes: self.memory_bytes,
+            instruction_limit: self.instruction_limit,
+            capabilities: self.capabilities.clone(),
+        }
+    }
+}
+
+// =============================================================================
+// WasmFilter — opaque loaded module handle
+// =============================================================================
+
+/// Loaded Wasm module. Handle is opaque; real instance management
+/// lives in the runtime. Cheap to clone — it's a handle, not the
+/// module bytes.
+public type WasmFilter is {
+    /// Runtime-assigned module identifier. 0 means "not actually
+    /// loaded" (phase-6 skel); non-zero after the intrinsic wiring
+    /// lands.
+    handle: Int,
+    config: WasmFilterConfig,
+    /// Cumulative invocation counter — filter-performance metric.
+    invocations: Shared<AtomicInt>,
+    /// Invocations that tripped a resource cap.
+    caps_exceeded: Shared<AtomicInt>,
+    /// Invocations that were skipped because the runtime isn't ready
+    /// to host WASM yet (skeleton phase).
+    skipped_no_runtime: Shared<AtomicInt>,
+};
+
+public type WasmFilterError is
+    | ModuleInvalid(Text)
+    | LimitsExceeded { kind: Text }
+    | RuntimeNotReady
+    | CapabilityDenied(Text);
+
+implement WasmFilter {
+    /// Load a Wasm module from its raw bytes. Parses + validates
+    /// (basic wasm-header / import-surface check); actual
+    /// instantiation is deferred until first invocation.
+    pub fn load_from_bytes(bytes: List<Byte>, config: WasmFilterConfig)
+        -> Result<WasmFilter, WasmFilterError>
+    {
+        // Surface-level sanity check: Wasm magic \0asm + version 1.
+        if bytes.len() < 8 {
+            return Err(WasmFilterError.ModuleInvalid("too short".into()));
+        }
+        if bytes[0] != 0x00 || bytes[1] != 0x61 || bytes[2] != 0x73 || bytes[3] != 0x6D {
+            return Err(WasmFilterError.ModuleInvalid("not wasm magic".into()));
+        }
+        // Runtime-side load happens via `verum.wasm.load` intrinsic.
+        // Phase-6 skeleton: returns a zero handle so invocation will
+        // fall through the RuntimeNotReady path.
+        Ok(WasmFilter {
+            handle: 0,
+            config: config,
+            invocations: Shared.new(AtomicInt.new(0)),
+            caps_exceeded: Shared.new(AtomicInt.new(0)),
+            skipped_no_runtime: Shared.new(AtomicInt.new(0)),
+        })
+    }
+
+    pub fn invocations(&self) -> Int {
+        self.invocations.load(MemoryOrdering.Acquire)
+    }
+
+    pub fn caps_exceeded(&self) -> Int {
+        self.caps_exceeded.load(MemoryOrdering.Acquire)
+    }
+
+    pub fn skipped_no_runtime(&self) -> Int {
+        self.skipped_no_runtime.load(MemoryOrdering.Acquire)
+    }
+}
+
+implement Clone for WasmFilter {
+    fn clone(&self) -> WasmFilter {
+        WasmFilter {
+            handle: self.handle,
+            config: self.config.clone(),
+            invocations: self.invocations.clone(),
+            caps_exceeded: self.caps_exceeded.clone(),
+            skipped_no_runtime: self.skipped_no_runtime.clone(),
+        }
+    }
+}
+
+// =============================================================================
+// WasmFilterLayer
+// =============================================================================
+
+public type WasmFilterLayer is {
+    filter: WasmFilter,
+};
+
+implement WasmFilterLayer {
+    pub fn new(filter: WasmFilter) -> WasmFilterLayer {
+        WasmFilterLayer { filter: filter }
+    }
+}
+
+implement<H: Handler> Layer<H> for WasmFilterLayer {
+    type Wrapped = WasmFilterHandler<H>;
+    fn wrap(&self, inner: H) -> WasmFilterHandler<H> {
+        WasmFilterHandler {
+            inner: inner,
+            filter: self.filter.clone(),
+        }
+    }
+}
+
+public type WasmFilterHandler<H> is {
+    inner: H,
+    filter: WasmFilter,
+};
+
+implement<H: Handler> Handler for WasmFilterHandler<H> {
+    async fn handle(&self, req: WeftRequest) -> Result<Response, WeftError> {
+        self.filter.invocations.fetch_add(1, MemoryOrdering.AcqRel);
+
+        if self.filter.handle == 0 {
+            // Runtime not yet hosting WASM — pass through and count
+            // the miss so deployments notice.
+            self.filter.skipped_no_runtime.fetch_add(1, MemoryOrdering.AcqRel);
+            return self.inner.handle(req).await;
+        }
+
+        // Phase-6.5: call `verum.wasm.invoke_on_http_request_headers`
+        // with the bounded resource limits; on AbortedByLimit
+        // increment `caps_exceeded` and treat as a filter-deny
+        // (return 403). For now mirror the skel path.
+        self.filter.skipped_no_runtime.fetch_add(1, MemoryOrdering.AcqRel);
+        self.inner.handle(req).await
+    }
+}
