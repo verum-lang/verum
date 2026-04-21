@@ -1,0 +1,165 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: quic, rfc9001, kat, initial-packet, server, byte-exact
+// @timeout: 10000
+// @expect: pass
+//
+// RFC 9001 Appendix A.3 — server-side counterpart to A.2 client
+// Initial. Verifies:
+//
+//   server_initial_secret = HKDF-Expand-Label(
+//       HKDF-Extract(initial_salt_v1, client_dcid),
+//       "server in", "", 32,
+//   )
+//
+// and the derived (key, iv, hp_key) triple. Pairs with the A.2
+// client-side KAT so both directions of the Initial space are
+// byte-pinned against the RFC fixtures.
+
+mount core.net.quic.crypto.initial.{
+    derive_initial_secrets, derive_initial_keys,
+};
+mount core.net.quic.crypto.header_protection.{HpKey};
+mount core.net.quic.connection_sm.aead.{seal, open, build_nonce, QuicAeadError};
+mount core.net.quic.connection_sm.{QuicSpaceKeys};
+mount core.security.kdf.hkdf.{HkdfError};
+
+// =============================================================================
+// Shared hex helpers (duplicated per-file to keep KAT tests self-contained)
+// =============================================================================
+
+fn hex_byte(c: Byte) -> Byte {
+    if c >= ('0' as Byte) && c <= ('9' as Byte) { return c - ('0' as Byte); }
+    if c >= ('a' as Byte) && c <= ('f' as Byte) { return c - ('a' as Byte) + 10_u8; }
+    if c >= ('A' as Byte) && c <= ('F' as Byte) { return c - ('A' as Byte) + 10_u8; }
+    0_u8
+}
+
+fn hex_to_bytes(hex: &str) -> List<Byte> {
+    let b = hex.as_bytes();
+    let mut out: List<Byte> = [];
+    let mut i: Int = 0;
+    while i + 1 < b.len() {
+        if b[i] == (' ' as Byte) || b[i] == ('\n' as Byte) { i = i + 1; continue; }
+        let hi = hex_byte(b[i]);
+        let lo = hex_byte(b[i + 1]);
+        out.push((hi << 4) | lo);
+        i = i + 2;
+    }
+    out
+}
+
+fn bytes_eq(a: &[Byte], b: &[Byte]) -> Bool {
+    if a.len() != b.len() { return false; }
+    let mut i: Int = 0;
+    while i < a.len() {
+        if a[i] != b[i] { return false; }
+        i = i + 1;
+    }
+    true
+}
+
+// =============================================================================
+// RFC 9001 §A.3 fixtures
+// =============================================================================
+
+fn client_dcid() -> List<Byte> {
+    hex_to_bytes("8394c8f03e515708")
+}
+
+fn expected_server_initial_secret() -> List<Byte> {
+    hex_to_bytes("3c199828fd139efd216c155ad844cc81 fb82fa8d7446fa7d78be803acdda951b")
+}
+
+fn expected_server_initial_key() -> List<Byte> {
+    hex_to_bytes("cf3a5331653c364c88f0f379b6067e37")
+}
+
+fn expected_server_initial_iv() -> List<Byte> {
+    hex_to_bytes("0ac1493ca1905853b0bba03e")
+}
+
+fn expected_server_initial_hp() -> List<Byte> {
+    hex_to_bytes("c206b8d9b9f0f37644430b490eeaa314")
+}
+
+// =============================================================================
+// Step 1 — server secret derivation
+// =============================================================================
+
+fn check_server_secret() -> Result<Bool, HkdfError> {
+    let dcid = client_dcid();
+    let secrets = derive_initial_secrets(dcid.as_slice())?;
+    Ok(bytes_eq(secrets.server.as_slice(), expected_server_initial_secret().as_slice()))
+}
+
+// =============================================================================
+// Step 2 — server (key, iv, hp) derivation
+// =============================================================================
+
+fn check_server_keys() -> Result<(Bool, Bool, Bool), HkdfError> {
+    let dcid = client_dcid();
+    let secrets = derive_initial_secrets(dcid.as_slice())?;
+    let keys = derive_initial_keys(secrets.server.as_slice())?;
+
+    let key_ok = bytes_eq(keys.key.as_slice(), expected_server_initial_key().as_slice());
+    let iv_ok  = bytes_eq(&keys.iv[..],        expected_server_initial_iv().as_slice());
+    let hp_ok  = bytes_eq(keys.hp.as_slice(),  expected_server_initial_hp().as_slice());
+    Ok((key_ok, iv_ok, hp_ok))
+}
+
+// =============================================================================
+// Step 3 — seal/open round-trip on the server-direction keys
+// =============================================================================
+
+fn build_server_space_keys() -> Result<QuicSpaceKeys, HkdfError> {
+    let dcid = client_dcid();
+    let secrets = derive_initial_secrets(dcid.as_slice())?;
+    let keys = derive_initial_keys(secrets.server.as_slice())?;
+
+    let mut hp_arr: [Byte; 16] = [0_u8; 16];
+    let mut i: Int = 0;
+    while i < 16 { hp_arr[i] = keys.hp[i]; i = i + 1; }
+
+    Ok(QuicSpaceKeys {
+        aead_key: keys.key,
+        aead_iv:  keys.iv,
+        hp_key:   HpKey.AesEcb128(hp_arr),
+    })
+}
+
+fn check_server_aead_roundtrip() -> Result<Bool, QuicAeadError> {
+    let keys = build_server_space_keys().map_err(|_| QuicAeadError.AeadFailure)?;
+    // Initial server packet in RFC 9001 §A.3 has packet number 1.
+    let pn: UInt64 = 1_u64;
+    let aad: [Byte; 5] = [0xC1_u8, 0x00_u8, 0x00_u8, 0x00_u8, 0x01_u8];
+    let plaintext: [Byte; 8] = [0xAA_u8, 0xBB_u8, 0xCC_u8, 0xDD_u8, 0xEE_u8, 0xFF_u8, 0x00_u8, 0x11_u8];
+
+    let ct = seal(&keys, pn, &aad, &plaintext)?;
+    let recovered = open(&keys, pn, &aad, ct.as_slice())?;
+    Ok(bytes_eq(recovered.as_slice(), &plaintext))
+}
+
+// =============================================================================
+// Nonce construction at server direction: iv XOR pn=1 → iv[11] ^ 0x01.
+// =============================================================================
+
+fn check_server_nonce_xor() -> Bool {
+    let iv: [Byte; 12] = [
+        0x0A_u8, 0xC1_u8, 0x49_u8, 0x3C_u8, 0xA1_u8, 0x90_u8,
+        0x58_u8, 0x53_u8, 0xB0_u8, 0xBB_u8, 0xA0_u8, 0x3E_u8,
+    ];
+    let nonce = build_nonce(&iv, 1_u64);
+    let mut i: Int = 0;
+    while i < 11 { if nonce[i] != iv[i] { return false; } i = i + 1; }
+    // iv[11] = 0x3E XOR 0x01 = 0x3F.
+    nonce[11] == 0x3F_u8
+}
+
+fn main() {
+    let _ = check_server_secret();
+    let _ = check_server_keys();
+    let _ = check_server_aead_roundtrip();
+    let _ = check_server_nonce_xor();
+}

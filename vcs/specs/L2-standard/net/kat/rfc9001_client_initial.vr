@@ -27,6 +27,7 @@ mount core.net.quic.crypto.header_protection.{
 };
 mount core.net.quic.connection_sm.aead.{seal, open, build_nonce, QuicAeadError};
 mount core.net.quic.connection_sm.{QuicSpaceKeys};
+mount core.security.kdf.hkdf.{HkdfError};
 
 // =============================================================================
 // Hex helpers
@@ -92,15 +93,14 @@ fn expected_client_initial_hp() -> List<Byte> {
 // full 1162-byte payload lives in a fixture file for the execution
 // harness.
 fn crypto_frame_prefix() -> List<Byte> {
-    hex_to_bytes("060040f10100008"
-                "0030398aecde99")
+    hex_to_bytes("060040f101000080030398aecde99")
 }
 
 // =============================================================================
 // Step 1: initial-secret derivation
 // =============================================================================
 
-fn check_initial_secrets() -> Result<Bool, core.security.kdf.hkdf.HkdfError> {
+fn check_initial_secrets() -> Result<Bool, HkdfError> {
     let dcid = client_dcid();
     let secrets = derive_initial_secrets(dcid.as_slice())?;
     let expected = expected_client_initial_secret();
@@ -111,7 +111,7 @@ fn check_initial_secrets() -> Result<Bool, core.security.kdf.hkdf.HkdfError> {
 // Step 2: key derivation
 // =============================================================================
 
-fn check_initial_keys() -> Result<(Bool, Bool, Bool), core.security.kdf.hkdf.HkdfError> {
+fn check_initial_keys() -> Result<(Bool, Bool, Bool), HkdfError> {
     let dcid = client_dcid();
     let secrets = derive_initial_secrets(dcid.as_slice())?;
     let keys = derive_initial_keys(secrets.client.as_slice())?;
@@ -126,7 +126,7 @@ fn check_initial_keys() -> Result<(Bool, Bool, Bool), core.security.kdf.hkdf.Hkd
 // Step 3: seal/open round-trip using derived keys
 // =============================================================================
 
-fn build_space_keys_from_initial() -> Result<QuicSpaceKeys, core.security.kdf.hkdf.HkdfError> {
+fn build_space_keys_from_initial() -> Result<QuicSpaceKeys, HkdfError> {
     let dcid = client_dcid();
     let secrets = derive_initial_secrets(dcid.as_slice())?;
     let keys = derive_initial_keys(secrets.client.as_slice())?;
