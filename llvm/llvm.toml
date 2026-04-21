@@ -52,7 +52,7 @@ LLVM_ENABLE_LLD = "ON"
 # Prebuilt release configuration
 [prebuilt]
 # GitHub repository for prebuilt releases
-repo = "luxquant/axiom"
+repo = "verum-lang/verum"
 
 # Release tag pattern (will be formatted with llvm.tag)
 tag_pattern = "llvm-{tag}"

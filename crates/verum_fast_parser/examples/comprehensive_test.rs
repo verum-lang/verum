@@ -96,8 +96,10 @@ fn test_directory(dir: &str, expect_success: bool) -> (usize, usize, Vec<String>
             Ok(_) => passed += 1,
             Err(e) => {
                 failed += 1;
-                // Include relative path from vcs/specs/parser
-                let rel_path = file_path.strip_prefix("/Users/taaliman/projects/luxquant/axiom/vcs/specs/parser")
+                // Include relative path from vcs/specs/parser; fall back to
+                // the full path if the example is run from a different checkout.
+                let rel_path = file_path
+                    .strip_prefix(concat!(env!("CARGO_MANIFEST_DIR"), "/../../vcs/specs/parser"))
                     .unwrap_or(file_path);
                 failures.push(format!("{}: {}", rel_path.display(), e.split(": ").skip(1).collect::<Vec<_>>().join(": ")));
             }
@@ -113,7 +115,7 @@ fn main() {
     // Test success directory
     println!("--- SUCCESS TESTS (should parse without errors) ---");
     let (s_passed, s_failed, s_failures) = test_directory(
-        "/Users/taaliman/projects/luxquant/axiom/vcs/specs/parser/success",
+        concat!(env!("CARGO_MANIFEST_DIR"), "/../../vcs/specs/parser/success"),
         true
     );
     let s_total = s_passed + s_failed;
@@ -130,7 +132,7 @@ fn main() {
     // Test fail directory
     println!("\n--- FAIL TESTS (should produce specific errors) ---");
     let (f_passed, f_failed, f_failures) = test_directory(
-        "/Users/taaliman/projects/luxquant/axiom/vcs/specs/parser/fail",
+        concat!(env!("CARGO_MANIFEST_DIR"), "/../../vcs/specs/parser/fail"),
         false
     );
     let f_total = f_passed + f_failed;

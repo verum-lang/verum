@@ -323,7 +323,7 @@ done
 
 ### Original Request
 > Create a comprehensive test suite of .vr files to test ALL Verum language features.
-> Create files in /Users/taaliman/projects/luxquant/axiom/tests/language_features/
+> Create files in `<repo-root>/tests/language_features/`
 >
 > Create the following test files:
 > 1. test_protocols.vr - Protocol definitions and implementations

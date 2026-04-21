@@ -359,7 +359,7 @@ jobs:
 
 ## Contact
 
-For questions or contributions, see the main [INTEGRATION_TESTING_REPORT.md](/Users/taaliman/projects/luxquant/axiom/INTEGRATION_TESTING_REPORT.md).
+For questions or contributions, see the main [INTEGRATION_TESTING_REPORT.md](../../INTEGRATION_TESTING_REPORT.md).
 
 ---
 

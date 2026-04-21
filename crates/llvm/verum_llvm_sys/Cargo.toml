@@ -4,7 +4,7 @@ version = "21.0.0"
 edition = "2024"
 description = "Low-level FFI bindings for LLVM and LLD, built from local sources"
 license = "MIT OR Apache-2.0"
-repository = "https://github.com/luxquant/axiom"
+repository = "https://github.com/verum-lang/verum"
 readme = "README.md"
 
 # Tells cargo this crate links to native LLVM/LLD libraries

@@ -4,7 +4,7 @@ version = "21.0.0"
 edition = "2024"
 description = "Safe Rust bindings for MLIR, built from local LLVM sources"
 license = "MIT OR Apache-2.0"
-repository = "https://github.com/luxquant/axiom"
+repository = "https://github.com/verum-lang/verum"
 categories = ["api-bindings"]
 
 [dependencies]

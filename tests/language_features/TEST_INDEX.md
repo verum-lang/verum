@@ -363,7 +363,7 @@ type CCallback is extern "C" fn(data: *mut void) -> i32;
 
 ### Run all core feature tests
 ```bash
-cd /Users/taaliman/projects/luxquant/axiom
+cd path/to/verum-repo
 verum run tests/language_features/test_protocols.vr
 verum run tests/language_features/test_gats.vr
 verum run tests/language_features/test_hkt.vr

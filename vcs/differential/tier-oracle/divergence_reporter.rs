@@ -417,7 +417,7 @@ impl DivergenceReporter {
                 "driver": {
                     "name": "vcs-differential",
                     "version": "0.1.0",
-                    "informationUri": "https://github.com/luxquant/axiom/vcs"
+                    "informationUri": "https://github.com/verum-lang/verum/tree/main/vcs"
                 }
             },
             "results": self.divergences.iter().map(|d| {
