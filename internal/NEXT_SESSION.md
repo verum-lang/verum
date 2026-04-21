@@ -16,16 +16,18 @@
 - `882b7bf` feat(types): `*result` auto-unwraps Result<T,E> → T at typecheck (#55 tail)
 - `e0b8781` fix(types): tighten name-collision guard — check specific method name
 - `fe13cae` fix(L2/tests): align test code with current stdlib channel/int APIs
-- `65d0728` fix(types): alias lowercase int widths to per-width Named types (pending llvm rebuild)
+- `65d0728` fix(types): alias lowercase int widths to per-width Named types
+- `45dbcae` fix(vbc/codegen): accept lowercase FFI int/float names as type path bases
+- `9aae696` fix(stdlib): `impl` → `implement` across tls13/quic/x509 (6 files)
+- `9548275` fix(stdlib/quic): `impl` → `implement` in three more QUIC modules (3 files)
+- `d33990a3` **Revert** 882b7bf (*result auto-unwrap) — hardcoded Result type, violates
+  "no stdlib knowledge in compiler" rule. Proper path: stdlib adds
+  `implement<T, E: Debug> Deref for Result<T, E>` IF the design accepts
+  panic-on-Err (это decision, не бесспорно — Rust не делает Result: Deref).
 
-## ⚠️ LLVM build state
-`llvm/install/` отсутствует в working tree (snapshot этой сессии). Compilation crates
-`verum_llvm_sys` / `verum_mlir_sys` / `verum_tblgen` требуют локально собранную
-LLVM 21.1.8. Для восстановления build:
-```bash
-cd llvm && ./build.sh
-```
-Занимает ~2–3ч. Существующие `target/release/verum` и `target/release/vtest`
+## ⚠️ LLVM build state — **RESTORED**
+`llvm/install/` пересобран параллельным агентом. Verum compile работает.
+Все commits применяются к binaries.
 бинарники остаются функциональны для тестирования (L0 8/8 держится) — новые
 infer.rs изменения (65d0728) не применяются до rebuild.
 
