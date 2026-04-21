@@ -2313,8 +2313,15 @@ impl VbcCodegen {
             ItemKind::Function(func) => {
                 self.ctx.generic_type_params.clear();
                 self.ctx.const_generic_params.clear();
-                if let Err(_e) = self.compile_function(func, None) {
-                    // Skip - function has unresolvable dependencies
+                if let Err(e) = self.compile_function(func, None) {
+                    // Symmetric with the impl-item branch below: log at
+                    // `debug` so the drop is diagnosable. Without this the
+                    // body silently disappears, the signature stays in the
+                    // function table, and callers hit
+                    // `FunctionNotFound(FunctionId(N))` at runtime with no
+                    // hint as to why.
+                    let fname = func.name.name.as_str();
+                    tracing::debug!("[lenient] SKIP top-level fn {}: {}", fname, e);
                 }
                 // Compile nested functions even if parent failed
                 if let verum_common::Maybe::Some(ref body) = func.body {
@@ -5426,8 +5433,13 @@ impl VbcCodegen {
                     // program that redeclared `type Maybe is Nothing |
                     // Just(Int)` and they would coexist in the function
                     // table, producing nondeterministic dispatch.
+                    tracing::debug!(
+                        "[variant] first-wins SKIP for type {} — variants already registered",
+                        type_name
+                    );
                     return Ok(());
                 }
+                tracing::debug!("[variant] register_type_constructors entering for {}", type_name);
 
                 for (variant_index, variant) in variants.iter().enumerate() {
                     let variant_name = variant.name.name.to_string();
@@ -5493,6 +5505,10 @@ impl VbcCodegen {
                     };
 
                     // 1. Always register with qualified name (TypeName::VariantName)
+                    tracing::debug!(
+                        "[variant] registering qualified {}.{} tag={} params={}",
+                        type_name, variant_name, tag, param_count
+                    );
                     self.ctx.register_function(qualified_name, info.clone());
 
                     // 2. Handle simple name registration with collision detection

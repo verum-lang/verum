@@ -1728,7 +1728,24 @@ impl<'s> CompilationPipeline<'s> {
             eprintln!("  Pass 2: Registering type bodies from all modules...");
         }
         for (module_name, ast_modules) in all_modules {
-            for (_file_path, ast_module) in ast_modules {
+            for (file_path, ast_module) in ast_modules {
+                // Architectural: set the checker's current module so that
+                // `define_type_in_current_module` can publish each type
+                // under its fully-qualified key (`{module}.{name}`). Without
+                // this the qualified-name layer stays empty and same-named
+                // stdlib types (e.g. `RecvError` in broadcast/channel/quic)
+                // silently collide on the flat lookup table.
+                let per_file_module_path = if let Some(file_stem) = file_path.file_stem().and_then(|s| s.to_str()) {
+                    if file_stem == "mod" {
+                        module_name.clone()
+                    } else {
+                        format!("{}.{}", module_name, file_stem)
+                    }
+                } else {
+                    module_name.clone()
+                };
+                type_checker.set_current_module_path(per_file_module_path);
+
                 for item in &ast_module.items {
                     if let verum_ast::ItemKind::Type(type_decl) = &item.kind {
                         let filtered_decl = module_utils::filter_type_decl_for_target(type_decl, &target);
@@ -10655,6 +10672,93 @@ impl<'s> CompilationPipeline<'s> {
                         break;
                     }
                 }
+            }
+        }
+
+        // ------------------------------------------------------------------
+        // Transitive mount closure over already-collected stdlib modules.
+        //
+        // Root fix for the class of failure where stdlib module A mounts
+        // stdlib module B, the user imports A directly, and B's type /
+        // variant declarations never reach VBC codegen:
+        //
+        //   * `core.database.sqlite.native.l0_vfs.memdb_vfs` mounts
+        //     `core.database.sqlite.native.l0_vfs.vfs_protocol`.
+        //   * A user script that does
+        //     `mount …memdb_vfs.{open_memory_rwc}` pulls memdb_vfs into
+        //     `imported` via the loop above, but NOT vfs_protocol.
+        //   * vfs_protocol's `type LockKind is Unlocked | Shared | …;`
+        //     never flows through `register_type_constructors`, so
+        //     variants like `Unlocked` are absent from the VBC function
+        //     table. Any stdlib body that writes `lock_state: Unlocked`
+        //     is then silently dropped by the lenient top-level-fn SKIP
+        //     path and callers hit `FunctionNotFound(FunctionId(N))` at
+        //     runtime with no diagnostic.
+        //
+        // This pass walks each already-imported module's own `mount`
+        // statements and adds any matched modules not yet present,
+        // iterating to a fixed point. Purely structural — no compiler
+        // code hardcodes a module name; the closure is driven entirely by
+        // each module's own `mount` statements against the pre-parsed
+        // `self.modules` registry. The `ALWAYS_INCLUDE` list above stays
+        // untouched (it is a separate AOT-runtime concern).
+        loop {
+            let before_len = imported.len();
+            let pending_modules: Vec<Module> = imported.clone();
+            for src_mod in &pending_modules {
+                for item in src_mod.items.iter() {
+                    let ItemKind::Mount(mount_decl) = &item.kind else { continue };
+                    use verum_ast::MountTreeKind;
+                    let path = match &mount_decl.tree.kind {
+                        MountTreeKind::Path(p) => p,
+                        MountTreeKind::Glob(p) => p,
+                        MountTreeKind::Nested { prefix, .. } => prefix,
+                    };
+                    let full_path: String = path
+                        .segments
+                        .iter()
+                        .filter_map(|seg| match seg {
+                            verum_ast::ty::PathSegment::Name(ident) => {
+                                Some(ident.name.as_str().to_string())
+                            }
+                            _ => None,
+                        })
+                        .collect::<Vec<String>>()
+                        .join(".");
+                    if full_path.is_empty() {
+                        continue;
+                    }
+                    // Walk progressive prefixes so a mount whose full path
+                    // is `core.x.y.z.{...}` matches the leaf module or any
+                    // ancestor that happens to be indexed directly.
+                    let segs: Vec<&str> = full_path.split('.').collect();
+                    for cut in (1..=segs.len()).rev() {
+                        let candidate = segs[..cut].join(".");
+                        if seen_paths.contains(&candidate) {
+                            continue;
+                        }
+                        if !is_linux
+                            && (candidate.contains("sys.linux")
+                                || candidate.contains("sys/linux"))
+                        {
+                            continue;
+                        }
+                        if !is_macos
+                            && (candidate.contains("sys.darwin")
+                                || candidate.contains("sys/darwin"))
+                        {
+                            continue;
+                        }
+                        let key = Text::from(candidate.as_str());
+                        if let Some(module_rc) = self.modules.get(&key) {
+                            seen_paths.insert(candidate.clone());
+                            imported.push((**module_rc).clone());
+                        }
+                    }
+                }
+            }
+            if imported.len() == before_len {
+                break;
             }
         }
 
