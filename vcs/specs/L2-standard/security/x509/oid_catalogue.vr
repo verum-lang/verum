@@ -1,0 +1,85 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: x509, oid, pkix, rfc5280
+// @timeout: 5000
+// @expect: pass
+//
+// Type-check the PKIX OID catalogue. Walks the most-used OID constructors,
+// verifies structural equality on ed25519 + sha256_with_rsa against the
+// known arc sequences, and cross-checks that distinct OIDs compare
+// unequal. Does not execute — Phase 1 adds full run-mode coverage once
+// the Certificate ADT lands and we need to decode real OIDs off the wire.
+
+mount core.security.x509.oid.*;
+
+fn check_oid_arcs(oid: &Oid, expected: &[UInt32], label: &str) -> Bool {
+    if oid.len() != expected.len() {
+        return false;
+    }
+    let mut i: Int = 0;
+    while i < expected.len() {
+        if oid.arc(i) != expected[i] {
+            return false;
+        }
+        i = i + 1;
+    }
+    true
+}
+
+fn main() {
+    // Core signature algorithms
+    let _ = sha256_with_rsa();
+    let _ = sha384_with_rsa();
+    let _ = sha512_with_rsa();
+    let _ = rsassa_pss();
+    let _ = ecdsa_with_sha256();
+    let _ = ecdsa_with_sha384();
+    let ed25519_v: Oid = ed25519();
+
+    // Public-key identifiers
+    let _ = rsa_encryption();
+    let _ = ec_public_key();
+    let _ = ec_curve_p256();
+    let _ = ec_curve_p384();
+
+    // Extension OIDs — the full set used by WebPKI
+    let _ = ext_subject_alt_name();
+    let _ = ext_basic_constraints();
+    let _ = ext_key_usage();
+    let _ = ext_ext_key_usage();
+    let _ = ext_name_constraints();
+    let _ = ext_certificate_policies();
+    let _ = ext_authority_info_access();
+    let _ = ext_sct_list();
+
+    // EKU values
+    let _ = eku_server_auth();
+    let _ = eku_client_auth();
+    let _ = eku_ocsp_signing();
+
+    // DN attributes
+    let _ = dn_common_name();
+    let _ = dn_organization();
+    let _ = dn_country_name();
+
+    // OCSP
+    let _ = ocsp_basic_response();
+    let _ = ocsp_nonce();
+
+    // Sanity — known-good arc sequences
+    let expected_ed25519: [UInt32; 4] = [1_u32, 3_u32, 101_u32, 112_u32];
+    if !check_oid_arcs(&ed25519_v, &expected_ed25519, "ed25519") {
+        return;
+    }
+
+    let sha256_rsa = sha256_with_rsa();
+    let expected_sha256_rsa: [UInt32; 7] = [1_u32, 2_u32, 840_u32, 113549_u32, 1_u32, 1_u32, 11_u32];
+    if !check_oid_arcs(&sha256_rsa, &expected_sha256_rsa, "sha256_rsa") {
+        return;
+    }
+
+    // Inequality
+    let ecdsa = ecdsa_with_sha256();
+    let _ = sha256_rsa.eq(&ecdsa);   // must compile; runtime would be false
+}

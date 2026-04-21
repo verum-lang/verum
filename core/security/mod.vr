@@ -59,6 +59,10 @@ public module secrets;
 // Post-quantum cryptography — FIPS 203 ML-KEM + FIPS 204 ML-DSA.
 public module pq;
 
+// X.509 certificate subsystem (RFC 5280) — DER parser + chain validation +
+// trust store. Ships as a subtree; see x509/mod.vr for internals.
+public module x509;
+
 // Legacy capability / region modules (pre-crypto).
 public module labels;
 public module regions;

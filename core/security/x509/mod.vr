@@ -1,0 +1,62 @@
+// =============================================================================
+// security/x509/mod.vr — X.509 certificate subsystem (RFC 5280)
+// =============================================================================
+// Layer: 3 (Certificate layer — sits above encoding.der + security.sig)
+// Dependencies: core, collections, encoding.der, security.{sig, hash, ecc}
+// Spec: internal/specs/tls-quic.md §6.5, §12 Phase 1
+// =============================================================================
+//
+// Pure-Verum X.509 certificate parser + chain validator, built on top of
+// `core.encoding.der` for wire parsing and `core.security.{sig,hash,ecc}`
+// for signature verification.
+//
+// # Layout
+//
+// ```
+// core.security.x509
+// ├── mod.vr           ← this file (re-exports + facade)
+// ├── oid.vr           — PKIX OID constants
+// ├── certificate.vr   — Certificate / TBSCertificate ADT (Phase 1 step 2)
+// ├── name.vr          — RDNSequence, DistinguishedName (Phase 1 step 3)
+// ├── spki.vr          — SubjectPublicKeyInfo (Phase 1 step 4)
+// ├── algorithm.vr     — AlgorithmIdentifier (Phase 1 step 4)
+// ├── ext/             — Extensions subtree (Phase 1 step 5)
+// │   ├── mod.vr
+// │   ├── basic_constraints.vr
+// │   ├── key_usage.vr
+// │   ├── ext_key_usage.vr
+// │   ├── subject_alt_name.vr
+// │   └── name_constraints.vr
+// ├── chain.vr         — Path building + RFC 5280 §6 validation (Phase 1 step 6)
+// ├── trust_store.vr   — System + bundled Mozilla NSS roots (Phase 1 step 7)
+// └── ocsp.vr          — OCSP client + stapling verify (Phase 1 step 8)
+// ```
+//
+// # Minimal usage (target for Phase 1 completion)
+//
+// ```verum
+// mount core.security.x509.*;
+//
+// fn verify_server(chain: &[List<Byte>], hostname: &str) -> Result<(), X509Error> {
+//     let trust = TrustStore.system()?;
+//     let certs = parse_chain(chain)?;
+//     let verified = validate_chain(&certs, &trust, hostname, Time.now())?;
+//     Ok(())
+// }
+// ```
+//
+// # v0.1 status
+//
+// This landing skeleton ships with `oid.vr` only; the remaining files
+// land in Phase 1 follow-up commits. The test infrastructure at
+// `vcs/specs/L2-standard/security/x509/` is wired up so each step can
+// ship with its own KAT / run test.
+//
+// =============================================================================
+
+module core.security.x509;
+
+public module oid;
+
+// Re-exports — OID
+public mount .oid.Oid;

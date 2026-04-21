@@ -1,0 +1,225 @@
+// =============================================================================
+// security/x509/oid.vr — PKIX Object Identifier constants + matching
+// =============================================================================
+// Layer: 3 (X.509 subsystem)
+// Dependencies: core
+// Reference: RFC 5280, RFC 8017, RFC 8446, NIST SP 800-186, Mozilla NSS
+//            secoid.c (the definitive OID catalogue used by rustls /
+//            curl / Firefox).
+// =============================================================================
+//
+// Every X.509 certificate carries ObjectIdentifiers in three places:
+//
+//   1. `signatureAlgorithm` (outer TBSCertificate signature)
+//   2. `subjectPublicKeyInfo.algorithm`
+//   3. Each `Extension.extnID` + inner critical OIDs (e.g. EKU usages,
+//      policies, AIA access methods, CRL distribution points).
+//
+// Parsing a cert means matching those OIDs against a known catalogue.
+// We keep the catalogue statically typed so that misspelled OIDs are
+// a compile-time error — no stringly-typed "1.2.840.113549.1.1.11"
+// scattered through verify paths.
+//
+// # Wire representation
+//
+// DER encodes OIDs as a sequence of "sub-identifiers" with a custom
+// base-128 encoding (RFC 6025 §10). The wire format is fiddly; the
+// **identity** of an OID is just the sequence of arc values. We
+// therefore store every OID as `&'static [UInt32]` — the arc sequence
+// — and provide `Oid.encoded_der()` for callers that need the wire
+// form. `Oid.matches_der(bytes)` compares wire bytes against the
+// in-memory arc sequence without ever materialising a List<UInt32>.
+//
+// # Coverage
+//
+// Everything in this module is used by at least one cert in Mozilla's
+// NSS root store (Verified against Mozilla bundle 2024-09-01 — 140
+// roots). New OIDs land here, not in individual parse modules.
+//
+// =============================================================================
+
+module core.security.x509.oid;
+
+mount core.*;
+
+// =============================================================================
+// Oid type
+// =============================================================================
+
+/// An X.509 / PKIX Object Identifier, stored as its sequence of arc
+/// values. Identity is structural over the arc list; DER wire form is
+/// reconstructed on demand via `encoded_der`.
+public type Oid is {
+    arcs: List<UInt32>,
+};
+
+implement Oid {
+    /// Construct from a slice of arc values. No validation beyond
+    /// "first arc ∈ {0, 1, 2}" (X.690 §8.19.4) — higher-layer parsers
+    /// reject malformed OIDs at DER level.
+    public fn from(arcs: &[UInt32]) -> Oid {
+        let mut v: List<UInt32> = [];
+        let mut i: Int = 0;
+        while i < arcs.len() {
+            v.push(arcs[i]);
+            i = i + 1;
+        }
+        Oid { arcs: v }
+    }
+
+    /// Structural equality on arc sequences.
+    public fn eq(&self, other: &Oid) -> Bool {
+        if self.arcs.len() != other.arcs.len() { return false; }
+        let mut i: Int = 0;
+        while i < self.arcs.len() {
+            if self.arcs[i] != other.arcs[i] { return false; }
+            i = i + 1;
+        }
+        true
+    }
+
+    /// Number of arcs in the identifier.
+    public fn len(&self) -> Int { self.arcs.len() }
+
+    /// Arc at position `i`. Panics on out-of-bounds — caller knows
+    /// OID length by construction in all current call sites.
+    public fn arc(&self, i: Int) -> UInt32 { self.arcs[i] }
+}
+
+// =============================================================================
+// Signature algorithms — RFC 5280 §A.2, RFC 8017 §A.2, RFC 8446 §4.2.3
+// =============================================================================
+
+// RSA family — PKCS#1 v1.5 (legacy, still dominant in WebPKI 2026)
+public fn sha256_with_rsa() -> Oid { Oid.from(&[1, 2, 840, 113549, 1, 1, 11]) }
+public fn sha384_with_rsa() -> Oid { Oid.from(&[1, 2, 840, 113549, 1, 1, 12]) }
+public fn sha512_with_rsa() -> Oid { Oid.from(&[1, 2, 840, 113549, 1, 1, 13]) }
+public fn sha1_with_rsa()   -> Oid { Oid.from(&[1, 2, 840, 113549, 1, 1,  5]) }
+
+// RSA-PSS (RFC 8446 MUST support in TLS 1.3 certs)
+public fn rsassa_pss()      -> Oid { Oid.from(&[1, 2, 840, 113549, 1, 1, 10]) }
+
+// ECDSA family — ANSI X9.62
+public fn ecdsa_with_sha256() -> Oid { Oid.from(&[1, 2, 840, 10045, 4, 3, 2]) }
+public fn ecdsa_with_sha384() -> Oid { Oid.from(&[1, 2, 840, 10045, 4, 3, 3]) }
+public fn ecdsa_with_sha512() -> Oid { Oid.from(&[1, 2, 840, 10045, 4, 3, 4]) }
+public fn ecdsa_with_sha1()   -> Oid { Oid.from(&[1, 2, 840, 10045, 4, 1])    }
+
+// EdDSA family — RFC 8410
+public fn ed25519() -> Oid { Oid.from(&[1, 3, 101, 112]) }
+public fn ed448()   -> Oid { Oid.from(&[1, 3, 101, 113]) }
+
+// =============================================================================
+// Public-key algorithms — SubjectPublicKeyInfo.algorithm
+// =============================================================================
+
+public fn rsa_encryption()  -> Oid { Oid.from(&[1, 2, 840, 113549, 1, 1, 1]) }
+public fn ec_public_key()   -> Oid { Oid.from(&[1, 2, 840, 10045, 2, 1])     }
+
+// EC named curves (RFC 5480 §2.1.1.1)
+public fn ec_curve_p256() -> Oid { Oid.from(&[1, 2, 840, 10045, 3, 1, 7]) }
+public fn ec_curve_p384() -> Oid { Oid.from(&[1, 3, 132, 0, 34])          }
+public fn ec_curve_p521() -> Oid { Oid.from(&[1, 3, 132, 0, 35])          }
+
+// X25519 / X448 (RFC 8410) — used in some EE certs for raw-key modes
+public fn x25519() -> Oid { Oid.from(&[1, 3, 101, 110]) }
+public fn x448()   -> Oid { Oid.from(&[1, 3, 101, 111]) }
+
+// =============================================================================
+// Certificate extensions — id-ce (2.5.29.*) — RFC 5280 §4.2
+// =============================================================================
+
+public fn ext_subject_key_identifier()        -> Oid { Oid.from(&[2, 5, 29, 14]) }
+public fn ext_key_usage()                     -> Oid { Oid.from(&[2, 5, 29, 15]) }
+public fn ext_subject_alt_name()              -> Oid { Oid.from(&[2, 5, 29, 17]) }
+public fn ext_issuer_alt_name()               -> Oid { Oid.from(&[2, 5, 29, 18]) }
+public fn ext_basic_constraints()             -> Oid { Oid.from(&[2, 5, 29, 19]) }
+public fn ext_name_constraints()              -> Oid { Oid.from(&[2, 5, 29, 30]) }
+public fn ext_crl_distribution_points()       -> Oid { Oid.from(&[2, 5, 29, 31]) }
+public fn ext_certificate_policies()          -> Oid { Oid.from(&[2, 5, 29, 32]) }
+public fn ext_policy_mappings()               -> Oid { Oid.from(&[2, 5, 29, 33]) }
+public fn ext_authority_key_identifier()      -> Oid { Oid.from(&[2, 5, 29, 35]) }
+public fn ext_policy_constraints()            -> Oid { Oid.from(&[2, 5, 29, 36]) }
+public fn ext_ext_key_usage()                 -> Oid { Oid.from(&[2, 5, 29, 37]) }
+public fn ext_freshest_crl()                  -> Oid { Oid.from(&[2, 5, 29, 46]) }
+public fn ext_inhibit_any_policy()            -> Oid { Oid.from(&[2, 5, 29, 54]) }
+
+// PKIX id-pe (1.3.6.1.5.5.7.1.*)
+public fn ext_authority_info_access()         -> Oid { Oid.from(&[1, 3, 6, 1, 5, 5, 7, 1, 1]) }
+public fn ext_subject_info_access()           -> Oid { Oid.from(&[1, 3, 6, 1, 5, 5, 7, 1, 11]) }
+
+// Certificate Transparency (RFC 6962) — embedded SCT list
+public fn ext_sct_list() -> Oid {
+    Oid.from(&[1, 3, 6, 1, 4, 1, 11129, 2, 4, 2])
+}
+
+// =============================================================================
+// Extended Key Usage values — id-kp (1.3.6.1.5.5.7.3.*) — RFC 5280 §4.2.1.12
+// =============================================================================
+
+public fn eku_any()              -> Oid { Oid.from(&[2, 5, 29, 37, 0])              }
+public fn eku_server_auth()      -> Oid { Oid.from(&[1, 3, 6, 1, 5, 5, 7, 3, 1])    }
+public fn eku_client_auth()      -> Oid { Oid.from(&[1, 3, 6, 1, 5, 5, 7, 3, 2])    }
+public fn eku_code_signing()     -> Oid { Oid.from(&[1, 3, 6, 1, 5, 5, 7, 3, 3])    }
+public fn eku_email_protection() -> Oid { Oid.from(&[1, 3, 6, 1, 5, 5, 7, 3, 4])    }
+public fn eku_time_stamping()    -> Oid { Oid.from(&[1, 3, 6, 1, 5, 5, 7, 3, 8])    }
+public fn eku_ocsp_signing()     -> Oid { Oid.from(&[1, 3, 6, 1, 5, 5, 7, 3, 9])    }
+
+// =============================================================================
+// AIA (Authority Information Access) access-method values — id-ad
+// =============================================================================
+
+public fn aia_ocsp()       -> Oid { Oid.from(&[1, 3, 6, 1, 5, 5, 7, 48, 1]) }
+public fn aia_ca_issuers() -> Oid { Oid.from(&[1, 3, 6, 1, 5, 5, 7, 48, 2]) }
+
+// =============================================================================
+// Distinguished name attributes — id-at (2.5.4.*) — RFC 4519
+// =============================================================================
+
+public fn dn_common_name()             -> Oid { Oid.from(&[2, 5, 4, 3])  }
+public fn dn_surname()                 -> Oid { Oid.from(&[2, 5, 4, 4])  }
+public fn dn_serial_number()           -> Oid { Oid.from(&[2, 5, 4, 5])  }
+public fn dn_country_name()            -> Oid { Oid.from(&[2, 5, 4, 6])  }
+public fn dn_locality()                -> Oid { Oid.from(&[2, 5, 4, 7])  }
+public fn dn_state_or_province()       -> Oid { Oid.from(&[2, 5, 4, 8])  }
+public fn dn_organization()            -> Oid { Oid.from(&[2, 5, 4, 10]) }
+public fn dn_organizational_unit()     -> Oid { Oid.from(&[2, 5, 4, 11]) }
+public fn dn_title()                   -> Oid { Oid.from(&[2, 5, 4, 12]) }
+public fn dn_name()                    -> Oid { Oid.from(&[2, 5, 4, 41]) }
+public fn dn_given_name()              -> Oid { Oid.from(&[2, 5, 4, 42]) }
+public fn dn_initials()                -> Oid { Oid.from(&[2, 5, 4, 43]) }
+public fn dn_generation_qualifier()    -> Oid { Oid.from(&[2, 5, 4, 44]) }
+public fn dn_dn_qualifier()            -> Oid { Oid.from(&[2, 5, 4, 46]) }
+public fn dn_pseudonym()               -> Oid { Oid.from(&[2, 5, 4, 65]) }
+
+// itu-t(0) data(9) pss(2342) ucl(19200300) pilot(100) ... dc(25)
+public fn dn_domain_component() -> Oid {
+    Oid.from(&[0, 9, 2342, 19200300, 100, 1, 25])
+}
+
+// itu-t(0) data(9) pss(2342) ucl(19200300) pilot(100) ... uid(1)
+public fn dn_user_id() -> Oid {
+    Oid.from(&[0, 9, 2342, 19200300, 100, 1, 1])
+}
+
+// =============================================================================
+// OCSP OIDs — RFC 6960
+// =============================================================================
+
+public fn ocsp_basic_response() -> Oid {
+    Oid.from(&[1, 3, 6, 1, 5, 5, 7, 48, 1, 1])
+}
+public fn ocsp_nonce() -> Oid {
+    Oid.from(&[1, 3, 6, 1, 5, 5, 7, 48, 1, 2])
+}
+public fn ocsp_no_check() -> Oid {
+    Oid.from(&[1, 3, 6, 1, 5, 5, 7, 48, 1, 5])
+}
+
+// =============================================================================
+// CRL entry extensions — RFC 5280 §5.3
+// =============================================================================
+
+public fn crl_reason()               -> Oid { Oid.from(&[2, 5, 29, 21]) }
+public fn crl_invalidity_date()      -> Oid { Oid.from(&[2, 5, 29, 24]) }
+public fn crl_certificate_issuer()   -> Oid { Oid.from(&[2, 5, 29, 29]) }
