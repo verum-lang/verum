@@ -34128,6 +34128,37 @@ impl TypeChecker {
         if let Some(ref req) = context_requirement {
             for context_ref in req.iter() {
                 let context_name = &context_ref.name;
+                // NAME-COLLISION GUARD (mirrors the one in
+                // infer_method_call_inner_impl): if the user defined
+                // `type X` or `implement X { ... }` with the same
+                // spelling as the context, do NOT shadow the user's
+                // type binding in env with the synthetic context
+                // Record. Otherwise `let b = X.method(...)` resolves
+                // against the context's method signatures instead of
+                // the user's impl, producing bogus downstream types.
+                let user_type_shadows_context = {
+                    let has_inherent = self
+                        .inherent_methods
+                        .read()
+                        .get(context_name)
+                        .map(|m| !m.is_empty())
+                        .unwrap_or(false);
+                    let has_type_params = matches!(
+                        self.ctx.lookup_type(format!("__type_params_{}", context_name).as_str()),
+                        Option::Some(_)
+                    );
+                    let has_type = matches!(
+                        self.ctx.lookup_type(context_name.as_str()),
+                        Option::Some(Type::Named { .. })
+                        | Option::Some(Type::Record(_))
+                        | Option::Some(Type::Variant(_))
+                        | Option::Some(Type::Placeholder { .. })
+                    );
+                    has_inherent || has_type_params || has_type
+                };
+                if user_type_shadows_context {
+                    continue;
+                }
                 if let Maybe::Some(context_type) =
                     self.context_resolver.get_context_type(context_name)
                 {
@@ -38295,8 +38326,62 @@ impl TypeChecker {
             let context_name = ident.name.as_str();
             let context_name_text = verum_common::Text::from(context_name);
 
+            // NAME-COLLISION GUARD: if the user has a local `type X` (or
+            // similar) with inherent methods under the same name, that
+            // definitely takes precedence over any stdlib context with
+            // the same spelling. Only enter the context-typed receiver
+            // branch when there is NO user type for this name registered.
+            //
+            // This fixes a subtle cross-file shadow where `public context
+            // Benchmark { fn new(name: Text) -> Bencher; ... }` in
+            // `core/runtime/mod.vr` was quietly hijacking
+            // `Benchmark.new(...)` calls in user files that happened to
+            // have `using [Benchmark]` (even though those files declared
+            // their own `type Benchmark`). The receiver type came out as
+            // `{ new: fn(Unknown) -> Unknown, ... }`, `.new` resolved to
+            // the stdlib Bencher shape, and the next method in the chain
+            // failed with "no method `foo` found for type `Bencher`".
+            //
+            // The guard checks three places in priority order:
+            //   1. `inherent_methods` — the scheme map populated by
+            //      `implement X { ... }`. Definitive "user has impls".
+            //   2. `__type_params_X` / type registration — record types
+            //      registered via `type X is { ... }`.
+            //   3. Plain `ctx.lookup_type(X)` — covers aliases / forward
+            //      refs.
+            //
+            // Any of those indicate the user intends `X` as a type, not
+            // as context-record dispatch, so we bypass the synthetic
+            // context Record lookup.
+            let user_type_shadows_context = {
+                let has_inherent = self
+                    .inherent_methods
+                    .read()
+                    .get(&context_name_text)
+                    .map(|m| !m.is_empty())
+                    .unwrap_or(false);
+                let has_type_params = matches!(
+                    self.ctx.lookup_type(format!("__type_params_{}", context_name).as_str()),
+                    Option::Some(_)
+                );
+                // `type X is ...` pass-1 registers as Placeholder; pass-2
+                // resolves to Named / Record / Variant. Anything other than
+                // absence (None) means the user has some concrete shape for
+                // this name and expects `X.method(...)` to dispatch on it.
+                let has_type = matches!(
+                    self.ctx.lookup_type(context_name),
+                    Option::Some(Type::Named { .. })
+                    | Option::Some(Type::Record(_))
+                    | Option::Some(Type::Variant(_))
+                    | Option::Some(Type::Placeholder { .. })
+                );
+                has_inherent || has_type_params || has_type
+            };
+
             // Check if this is a declared context (whether or not it's available)
-            if self.context_declarations.contains_key(&context_name_text) {
+            if !user_type_shadows_context
+                && self.context_declarations.contains_key(&context_name_text)
+            {
                 // This IS a context - check if it's available
                 if !self.context_checker.is_available(context_name)
                     && !self.context_resolver.is_lenient_contexts()
