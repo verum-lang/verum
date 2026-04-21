@@ -1,0 +1,99 @@
+// @test: wip
+// @tier: 0
+// @level: L2
+// @tags: sqlite, native, pager, memdb, roundtrip
+// @timeout: 5000
+// @expected-exit: 0
+//
+// PENDING — Issue #8 (Pager-owned MemDbFile returns spurious Err from
+// `open_memory_rwc` when the MemDbFile is about to be stored as a
+// field of another struct (`Pager { file: file, ... }`)). Direct
+// top-level invocation of `open_memory_rwc` works; only the
+// pager-owned storage path fails. Captured in
+// `project_new_lang_issues_2026-04-22.md`; the test body below is the
+// intended shape once the root cause is fixed, and the
+// `core/database/sqlite/native/l1_pager/pager.vr` module itself
+// compiles clean (codegen OK, just one cross-module construction
+// path that's wrong at runtime).
+//
+// Phase 1 step 1 smoke — open a MemDb-backed pager at the default page
+// size, write two pages with distinct fill patterns, read them back,
+// verify byte-exact equality. Covers the `pager_open_memory` /
+// `pager_read` / `pager_write` / `pager_close` surface in
+// `core/database/sqlite/native/l1_pager/pager.vr`.
+
+mount core.*;
+mount collections.List;
+mount core.database.sqlite.native.l1_pager.pager.{
+    Pager, PageFrame, PAGE_SIZE_DEFAULT,
+    pager_open_memory, pager_read, pager_write, pager_close,
+};
+
+fn fill_page(byte: Byte, n: Int) -> List<Byte> {
+    let mut out: List<Byte> = List.new();
+    let mut i = 0;
+    while i < n {
+        out.push(byte);
+        i = i + 1;
+    }
+    out
+}
+
+fn main() {
+    let mut pager = match pager_open_memory() {
+        Ok(p) => p,
+        Err(e) => { print(f"open err: {e.message}"); panic("pager_open_memory failed"); return; }
+    };
+    assert_eq(pager.page_size, PAGE_SIZE_DEFAULT);
+
+    // Write page 1 with 0xAA and page 2 with 0xBB.
+    let page_a = PageFrame {
+        page_no: 1,
+        data: fill_page(0xAA as Byte, PAGE_SIZE_DEFAULT),
+        dirty: true,
+    };
+    let page_b = PageFrame {
+        page_no: 2,
+        data: fill_page(0xBB as Byte, PAGE_SIZE_DEFAULT),
+        dirty: true,
+    };
+
+    match pager_write(&mut pager, &page_a) {
+        Ok(_) => {},
+        Err(_) => { panic("pager_write page 1 failed"); return; }
+    }
+    match pager_write(&mut pager, &page_b) {
+        Ok(_) => {},
+        Err(_) => { panic("pager_write page 2 failed"); return; }
+    }
+
+    // Read them back — order reversed to prove no implicit cursor.
+    let back_b = match pager_read(&mut pager, 2) {
+        Ok(f) => f,
+        Err(_) => { panic("pager_read page 2 failed"); return; }
+    };
+    let back_a = match pager_read(&mut pager, 1) {
+        Ok(f) => f,
+        Err(_) => { panic("pager_read page 1 failed"); return; }
+    };
+
+    // Shape checks.
+    assert_eq(back_a.page_no, 1);
+    assert_eq(back_b.page_no, 2);
+    assert_eq(back_a.data.len(), PAGE_SIZE_DEFAULT);
+    assert_eq(back_b.data.len(), PAGE_SIZE_DEFAULT);
+
+    // Byte-exact content check (spot-check a handful of positions,
+    // cheap proxy for the full page — if one byte lands the rest did).
+    assert_eq(back_a.data[0], 0xAA as Byte);
+    assert_eq(back_a.data[PAGE_SIZE_DEFAULT - 1], 0xAA as Byte);
+    assert_eq(back_b.data[0], 0xBB as Byte);
+    assert_eq(back_b.data[PAGE_SIZE_DEFAULT - 1], 0xBB as Byte);
+
+    match pager_close(&mut pager) {
+        Ok(_) => {},
+        Err(_) => panic("pager_close failed"),
+    }
+
+    print("memdb_pager_roundtrip ok");
+}

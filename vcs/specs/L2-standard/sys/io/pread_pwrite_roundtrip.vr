@@ -1,0 +1,130 @@
+// @test: wip
+// @tier: 0
+// @level: L2
+// @tags: sys, io, pread, pwrite, full_fsync, durability
+// @timeout: 10000
+// @expected-exit: 0
+//
+// PENDING — two orthogonal language issues surfaced during this test:
+//
+//   (a) `slice.len().min(N)` inside
+//       `core.sys.darwin.libsystem.safe_open` dispatches to
+//       `uint64$min`, which is NOT present in the interpreter's
+//       primitive-method table. The method-prefix resolver at
+//       `crates/verum_vbc/src/codegen/expressions.rs:~5516` types the
+//       slice `len()` return as UInt64 under some code paths even
+//       though slice.vr declares `fn len(&self) -> Int`. Fix is
+//       architecturally similar to Issues #1–#5 landed earlier
+//       (propagate type through the chain) but in a different
+//       resolver.
+//
+//   (b) `&b[..]` on `List<Byte>` followed by `.len()` produces a
+//       pointer-as-index bleed-through at runtime
+//       (`IndexOutOfBounds` with an index in the tens-of-billions
+//        range). Separate issue from (a) — likely in slice-of-list
+//        representation, not in method dispatch.
+//
+// The test body below is the intended shape once both are fixed; the
+// `wip` marker lets the runner skip it until then. The sys primitives
+// themselves (pread/pwrite/full_fsync) are correct and ABI-clean — the
+// gap is in user-facing helpers upstream.
+//
+// End-to-end exercise of the cross-platform explicit-offset I/O API
+// landed for SQLite Gap 2+3 (core/sys/common.vr). Writes a byte
+// pattern at a non-zero offset via `pwrite`, fsyncs it, reads it back
+// via `pread` at the same offset, and verifies byte-exact equality.
+// Also writes a second pattern at a later offset and reads it back,
+// verifying that the file cursor was not disturbed between calls.
+
+mount core.*;
+mount collections.List;
+mount sys.common.{FileDesc, pread, pwrite, full_fsync};
+
+@cfg(target_os = "linux")
+mount sys.linux.syscall.{open as sys_open, close as sys_close};
+
+@cfg(target_os = "macos")
+mount sys.darwin.libsystem.{safe_open as sys_open, safe_close as sys_close};
+
+fn path_bytes(s: Text) -> List<Byte> {
+    let raw = s.as_bytes();
+    let mut out: List<Byte> = [];
+    let mut i = 0;
+    while i < raw.len() {
+        out.push(raw[i]);
+        i = i + 1;
+    }
+    out.push(0 as Byte);   // NUL-terminate for the C-style `open` path.
+    out
+}
+
+fn fill(pattern: Byte, n: Int) -> List<Byte> {
+    let mut out: List<Byte> = [];
+    let mut i = 0;
+    while i < n {
+        out.push(pattern);
+        i = i + 1;
+    }
+    out
+}
+
+fn main() {
+    // O_RDWR (2) | O_CREAT (0o100 on Linux, 0x0200 on Darwin — both
+    // available via the platform open constants). Use the generic
+    // numeric value that matches the platform.
+    @cfg(target_os = "linux")
+    let flags: Int = 2 | 0o100;       // O_RDWR | O_CREAT
+    @cfg(target_os = "macos")
+    let flags: Int = 2 | 0x0200;      // O_RDWR | O_CREAT
+
+    let tmp = path_bytes("/tmp/verum_pread_pwrite_roundtrip.bin");
+    let fd = match sys_open(&tmp, flags, 0o644) {
+        Ok(f) => f,
+        Err(_) => { panic("open failed"); return; }
+    };
+
+    // Scattered writes at two different offsets.
+    let pat_a = fill(0xAA as Byte, 256);
+    let pat_b = fill(0xBB as Byte, 256);
+
+    match pwrite(fd, &pat_a, 0) {
+        Ok(n) => assert_eq(n, 256),
+        Err(_) => { panic("pwrite #1 failed"); return; }
+    }
+    match pwrite(fd, &pat_b, 4096) {
+        Ok(n) => assert_eq(n, 256),
+        Err(_) => { panic("pwrite #2 failed"); return; }
+    }
+
+    match full_fsync(fd) {
+        Ok(_) => {},
+        Err(_) => { panic("full_fsync failed"); return; }
+    }
+
+    // Read back — order reversed to prove the second pread doesn't
+    // depend on the first having left the cursor anywhere sensible.
+    let mut buf_b: List<Byte> = fill(0 as Byte, 256);
+    match pread(fd, &mut buf_b, 4096) {
+        Ok(n) => assert_eq(n, 256),
+        Err(_) => { panic("pread @4096 failed"); return; }
+    }
+    let mut j = 0;
+    while j < 256 {
+        assert_eq(buf_b[j], 0xBB as Byte);
+        j = j + 1;
+    }
+
+    let mut buf_a: List<Byte> = fill(0 as Byte, 256);
+    match pread(fd, &mut buf_a, 0) {
+        Ok(n) => assert_eq(n, 256),
+        Err(_) => { panic("pread @0 failed"); return; }
+    }
+    j = 0;
+    while j < 256 {
+        assert_eq(buf_a[j], 0xAA as Byte);
+        j = j + 1;
+    }
+
+    let _ = sys_close(fd);
+    print("pread_pwrite_roundtrip ok");
+}

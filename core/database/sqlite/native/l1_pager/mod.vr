@@ -1,0 +1,57 @@
+// =============================================================================
+// core/database/sqlite/native/l1_pager/mod.vr — Pager layer (Layer 1)
+// =============================================================================
+// Layer: 1 of the loom architecture (sqlite-native.md §4.2)
+// Dependencies: l0_vfs, core/mem/arena (CBGR), core/sync/atomic
+// =============================================================================
+//
+// The pager sits between the VFS (L0 — raw byte-addressable storage) and
+// the B-tree (L3 — structured key/value storage). It owns the **page
+// cache**, the **write-ahead log**, and the **rollback journal**; it is
+// the sole component that turns on-disk byte patterns into in-memory
+// page frames and back.
+//
+// Architecture (sqlite-native.md §4.3, §8):
+//
+//   * Single-writer actor — one task owns the pager mutably. Writes flow
+//     through `PagerRequest` messages on a bounded `Mailbox`. Readers
+//     use snapshot views over the WAL frame watermark and never take
+//     mutable references.
+//
+//   * CBGR-arena page cache — pages are `ThinRef<PageFrame>` into an
+//     `Arena`. A checkpoint bumps the arena generation, invalidating
+//     every live reader in O(1) — no ref-counting, no GC sweep.
+//
+//   * Epoch-reclaimed frame recycling — freed frames are parked on an
+//     epoch list and returned to the arena once the last reader who
+//     could possibly still hold a reference has retired.
+//
+// This v0.1 module ships:
+//
+//   * `PageNo` refinement type (positive, < 2^31)
+//   * `PageFrame` (byte-addressable page buffer with dirty flag)
+//   * `Pager` — in-memory pager running on top of a MemDbFile. Actor
+//     harness + checkpointer are Phase 1 step 2 deliverables.
+//   * `PageCacheMap` — a thin LRU over PageNo → PageFrame for the
+//     in-memory pager. The CBGR-backed arena cache lands with the
+//     actor harness.
+//
+// Deliberately NOT shipped in v0.1 (per spec §25.2):
+//
+//   * WAL / rollback journal — Phase 1 step 3
+//   * Checkpointer — Phase 1 step 3
+//   * Supervisor integration — Phase 1 step 4
+//   * PosixVfs-backed Pager — blocked on stdlib Windows-parity sweep
+//     and the two language issues logged as #6 / #7.
+//
+// =============================================================================
+
+module core.database.sqlite.native.l1_pager;
+
+public module pager;
+
+public mount .pager.{
+    PageNo, PageFrame, Pager, PagerError, PagerErrorKind,
+    PAGE_SIZE_MIN, PAGE_SIZE_MAX, PAGE_SIZE_DEFAULT,
+    pager_open_memory, pager_read, pager_write, pager_close,
+};

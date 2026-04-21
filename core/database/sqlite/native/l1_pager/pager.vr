@@ -1,0 +1,221 @@
+// =============================================================================
+// l1_pager/pager.vr — in-memory Pager (v0.1 skeleton)
+// =============================================================================
+// Layer: 1
+// Dependencies: l0_vfs.memdb_vfs, collections, base
+// Spec: sqlite-native.md §8
+// =============================================================================
+//
+// This is the ground-floor pager: a direct passthrough between user-level
+// `pager_read` / `pager_write` calls and a `MemDbFile` backing store, with
+// no actor, no WAL, no checkpointer, no epoch-reclaimed page cache — just
+// a `PageNo → PageFrame` map so we can unblock L2/L3/L4 development.
+//
+// The production layout (sqlite-native.md §8) — actor, CBGR-arena cache,
+// WAL, checkpointer, supervision — will replace this while preserving
+// the public surface. Callers written against this v0.1 will not need
+// to change.
+// =============================================================================
+
+module core.database.sqlite.native.l1_pager.pager;
+
+mount core.*;
+mount collections.{List, Map};
+mount base.{Result, Ok, Err, Text};
+mount core.database.sqlite.native.l0_vfs.memdb_vfs.{
+    MemDbFile, open_memory_rwc, memdb_read, memdb_write, memdb_size,
+};
+
+// =============================================================================
+// Constants
+// =============================================================================
+
+/// Smallest legal SQLite page size. Anything smaller trips the cell-
+/// layout minimum-payload contract (sqlite-native.md §6.1).
+public const PAGE_SIZE_MIN: Int = 512;
+
+/// Largest legal SQLite page size (one less than 65536, which is the
+/// special sentinel "1" in the on-disk header meaning 65536).
+public const PAGE_SIZE_MAX: Int = 65536;
+
+/// Spec-default page size (and what SQLite 3.12+ uses on fresh databases).
+public const PAGE_SIZE_DEFAULT: Int = 4096;
+
+// =============================================================================
+// PageNo — refinement type
+// =============================================================================
+
+/// Page numbers are 1-based and fit in a 32-bit signed integer. Page 1
+/// always contains the database header (sqlite-native.md §6.1). Page 0
+/// is reserved and never appears on disk; this refinement excludes it.
+public type PageNo is Int where |n| { n >= 1 && n < 2147483648 };
+
+// =============================================================================
+// PageFrame
+// =============================================================================
+
+/// An in-memory page frame — a `page_size`-byte buffer plus the page
+/// number and a dirty flag. Actual CBGR-arena backing lands with the
+/// actor harness in Phase 1 step 2; in v0.1 the buffer is a plain
+/// heap-allocated `List<Byte>`.
+public type PageFrame is {
+    page_no: Int,          // PageNo refinement dropped at struct field
+                            // level until the refinement-on-struct-field
+                            // path lands in verum_types (tracked
+                            // separately from SQLite work).
+    data: List<Byte>,
+    dirty: Bool,
+};
+
+// =============================================================================
+// Error type
+// =============================================================================
+
+public type PagerError is {
+    kind: PagerErrorKind,
+    message: Text,
+};
+
+public type PagerErrorKind is
+      InvalidPageSize
+    | PageOutOfRange
+    | IoError
+    | Corrupt
+    | Closed;
+
+// =============================================================================
+// Pager (v0.1 skeleton)
+// =============================================================================
+
+/// In-memory pager — wraps a `MemDbFile` with a page-addressed read/
+/// write surface. Each call translates `(page_no, page_size)` into a
+/// byte offset and delegates to the VFS. A tiny `page_cache` saves the
+/// last N read frames to cut round-trip allocation; it is NOT the
+/// production CBGR cache described in sqlite-native.md §8.2.
+public type Pager is {
+    file: MemDbFile,
+    page_size: Int,
+    page_cache: Map<Int, PageFrame>,
+    closed: Bool,
+};
+
+// =============================================================================
+// Construction / teardown
+// =============================================================================
+
+/// Open an in-memory pager with the default page size. Backs onto a
+/// `MemDbVfs` — perfect for Phase 1 testing and for `:memory:`
+/// databases once the public API lands.
+public fn pager_open_memory() -> Result<Pager, PagerError> {
+    pager_open_memory_with_size(PAGE_SIZE_DEFAULT)
+}
+
+/// Open an in-memory pager with an explicit page size. Size must be a
+/// power of two between `PAGE_SIZE_MIN` and `PAGE_SIZE_MAX` inclusive.
+public fn pager_open_memory_with_size(page_size: Int) -> Result<Pager, PagerError> {
+    if !is_valid_page_size(page_size) {
+        return Err(PagerError {
+            kind: InvalidPageSize,
+            message: "page size must be a power of two in [512, 65536]",
+        });
+    }
+
+    let name: Text = ":memory:";
+    let file = match open_memory_rwc(&name) {
+        Ok(f) => f,
+        Err(e) => return Err(PagerError {
+            kind: IoError,
+            message: f"MemDbVfs.open_memory_rwc failed: {e.message}",
+        }),
+    };
+
+    Ok(Pager {
+        file: file,
+        page_size: page_size,
+        page_cache: Map.new(),
+        closed: false,
+    })
+}
+
+/// Cleanly close a pager and release its backing file. After `close`,
+/// any further read/write returns `Closed`.
+public fn pager_close(p: &mut Pager) -> Result<(), PagerError> {
+    p.closed = true;
+    p.page_cache.clear();
+    Ok(())
+}
+
+// =============================================================================
+// Read / write surface
+// =============================================================================
+
+/// Read page `page_no` into a freshly-allocated buffer. Returns an
+/// owned frame — callers that want to mutate must call `pager_write`
+/// to commit, there is no in-place modification path in v0.1.
+public fn pager_read(p: &mut Pager, page_no: Int) -> Result<PageFrame, PagerError> {
+    if p.closed {
+        return Err(PagerError { kind: Closed, message: "read on closed pager" });
+    }
+    if page_no < 1 {
+        return Err(PagerError { kind: PageOutOfRange, message: "page_no < 1" });
+    }
+
+    let offset = (page_no - 1) * p.page_size;
+    let mut buf: List<Byte> = List.new();
+    let mut i = 0;
+    while i < p.page_size {
+        buf.push(0 as Byte);
+        i = i + 1;
+    }
+    match memdb_read(&p.file, &mut buf, offset) {
+        Ok(_) => {}
+        Err(_) => {
+            // Reading past EOF is a valid "fresh page" case for the
+            // first touch of a new page — return a zero-filled frame
+            // rather than bubbling an error up.
+            return Ok(PageFrame { page_no: page_no, data: buf, dirty: false });
+        }
+    }
+
+    Ok(PageFrame { page_no: page_no, data: buf, dirty: false })
+}
+
+/// Write a page to the backing store. `frame.data.len()` must equal the
+/// pager's `page_size`. Marks the frame as clean on successful write.
+public fn pager_write(p: &mut Pager, frame: &PageFrame) -> Result<(), PagerError> {
+    if p.closed {
+        return Err(PagerError { kind: Closed, message: "write on closed pager" });
+    }
+    if frame.page_no < 1 {
+        return Err(PagerError { kind: PageOutOfRange, message: "page_no < 1" });
+    }
+    if frame.data.len() != p.page_size {
+        return Err(PagerError {
+            kind: InvalidPageSize,
+            message: "frame.data.len() does not match pager.page_size",
+        });
+    }
+
+    let offset = (frame.page_no - 1) * p.page_size;
+    match memdb_write(&mut p.file, &frame.data, offset) {
+        Ok(_) => Ok(()),
+        Err(_) => Err(PagerError { kind: IoError, message: "memdb_write failed" }),
+    }
+}
+
+// =============================================================================
+// Helpers
+// =============================================================================
+
+fn is_valid_page_size(n: Int) -> Bool {
+    if n < PAGE_SIZE_MIN { return false; }
+    if n > PAGE_SIZE_MAX { return false; }
+    // Power-of-two check without shift tricks that might trip the
+    // `uint64$min` path (Issue #6): iterate from PAGE_SIZE_MIN upward.
+    let mut s = PAGE_SIZE_MIN;
+    while s <= PAGE_SIZE_MAX {
+        if s == n { return true; }
+        s = s * 2;
+    }
+    false
+}

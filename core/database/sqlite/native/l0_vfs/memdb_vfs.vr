@@ -72,6 +72,19 @@ public fn open_memory(name: &Text, flags: OpenFlags) -> Result<MemDbFile, VfsErr
     })
 }
 
+/// Shorthand: open an in-memory file in read-write + create mode.
+/// Equivalent to `open_memory(name, flags_rwc())` but skips the
+/// intermediate `OpenFlags` struct — useful for callers that don't
+/// care about the flag matrix (e.g. the in-memory Pager skeleton).
+public fn open_memory_rwc(name: &Text) -> Result<MemDbFile, VfsError> {
+    Ok(MemDbFile {
+        name: name.clone(),
+        bytes: List.new(),
+        lock_state: Unlocked,
+        closed: false,
+    })
+}
+
 // Method-based surface — kept in parallel with the free-function surface
 // for now. Tracks Issue #1 investigation in core/database/sqlite/native/README.md.
 implement MemDbFile {

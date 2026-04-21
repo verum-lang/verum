@@ -51,5 +51,8 @@ module core.database.sqlite.native;
 // Layer 0: Virtual File System
 public module l0_vfs;
 
+// Layer 1: Pager (actor-based, CBGR page cache, WAL + rollback journal)
+public module l1_pager;
+
 // Layer 2: record / type affinity / collation
 public module l2_record;
