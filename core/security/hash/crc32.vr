@@ -1,0 +1,177 @@
+// =============================================================================
+// security/hash/crc32.vr — CRC-32 / IEEE 802.3
+// =============================================================================
+// Layer: 1 (checksum primitive — not a cryptographic hash)
+// Dependencies: core
+// Reference: IEEE 802.3 §3.2.9, RFC 1952 §8 (gzip, same polynomial)
+// =============================================================================
+//
+// The classic 32-bit cyclic redundancy check used by Ethernet, gzip, PNG,
+// zlib, and — crucially for us — SQLite's WAL frame headers (see
+// `internal/specs/sqlite-native.md` §6.5 and Gap 5 in §3.2).
+//
+// This is NOT a cryptographic hash. It catches transmission errors cleanly
+// but adversarial tampering can reproduce any target checksum trivially.
+// Use SHA-256 or HMAC for security-sensitive integrity checks.
+//
+// # Semantics
+//
+//   * Polynomial: 0xEDB88320 (reflected form of 0x04C11DB7)
+//   * Initial value: 0xFFFFFFFF
+//   * Final XOR: 0xFFFFFFFF
+//   * Reflected input, reflected output
+//
+// These conventions match zlib's `crc32`, the `crc32c` CLI, Python's
+// `binascii.crc32`, and Rust's `crc32fast::hash`. Test vectors in
+// `vcs/specs/L2-standard/database/sqlite/l2_record/crc32_vectors.vr`
+// cross-validate against the "123456789" vector (0xCBF43926) and the
+// empty input vector (0x00000000).
+//
+// # API
+//
+// ```verum
+// // one-shot
+// let digest: UInt32 = crc32(b"hello world");
+//
+// // streaming
+// let mut h = Crc32.new();
+// h.update(chunk1);
+// h.update(chunk2);
+// let digest: UInt32 = h.finalize();
+// ```
+//
+// # Performance
+//
+// The reference implementation uses a 256-entry 32-bit table (1 KB), giving
+// the classic byte-at-a-time inner loop at ~400 MB/s on modern x86_64. For
+// bulk hashing, an accelerated backend can swap in SSE4.2 `_mm_crc32_u64`
+// (CRC32C, different polynomial) or PCLMULQDQ-based folding (same polynomial,
+// 10+ GB/s). Neither is wired up in v1.
+//
+// # Thread safety
+//
+// `Crc32` is a plain value type — clone freely. The precomputed table is a
+// module-level constant; readers are lock-free.
+//
+// =============================================================================
+
+module core.security.hash.crc32;
+
+mount core.*;
+mount collections.List;
+
+// =============================================================================
+// Constants
+// =============================================================================
+
+/// Reflected polynomial matching IEEE 802.3 / zlib / SQLite.
+/// 0x04C11DB7 reflected gives 0xEDB88320.
+public const POLY: UInt32 = 0xEDB88320;
+
+/// Per-byte lookup table — row `i` is the CRC of single byte `i`.
+const TABLE: [UInt32; 256] = build_table();
+
+fn build_table() -> [UInt32; 256] {
+    let mut t: [UInt32; 256] = [0; 256];
+    let mut i: Int = 0;
+    while i < 256 {
+        let mut c: UInt32 = i as UInt32;
+        let mut k: Int = 0;
+        while k < 8 {
+            if (c & 1_u32) != 0 {
+                c = (c >> 1) ^ POLY;
+            } else {
+                c = c >> 1;
+            }
+            k = k + 1;
+        }
+        t[i] = c;
+        i = i + 1;
+    }
+    t
+}
+
+// =============================================================================
+// Streaming API
+// =============================================================================
+
+/// Incremental CRC32 state. Fresh instances start at `0xFFFFFFFF` (pre-XOR).
+/// Feed bytes with `update`, extract the final digest with `finalize`.
+public type Crc32 is {
+    state: UInt32,
+};
+
+implement Crc32 {
+    /// Create a fresh CRC32 accumulator in the pre-XOR state.
+    public fn new() -> Crc32 {
+        Crc32 { state: 0xFFFFFFFF_u32 }
+    }
+
+    /// Re-seed an existing state (rare — mostly for resuming from a
+    /// previously-finalized digest via `crc32_continue`).
+    public fn from_state(s: UInt32) -> Crc32 {
+        Crc32 { state: s }
+    }
+
+    /// Feed `chunk` into the CRC. Safe to call repeatedly; the internal
+    /// state carries across calls.
+    public fn update(&mut self, chunk: &[Byte]) {
+        // NB: the explicit `& 0xFFFFFFFF_u32` masks in the shift step are
+        // required to keep the running state in exactly 32 bits — some
+        // Verum back-ends sign-extend UInt32 values whose bit 31 is set
+        // when they flow through an XOR with a table entry, which then
+        // corrupts the next `>> 8` step. The masks are no-ops on a true
+        // u32 and cheap on 64-bit backends.
+        let mut s: UInt32 = self.state;
+        let mut i: Int = 0;
+        while i < chunk.len() {
+            let b: UInt32 = chunk[i] as UInt32;
+            let idx: Int = ((s ^ b) & 0xFF_u32) as Int;
+            s = ((s >> 8) ^ TABLE[idx]) & 0xFFFFFFFF_u32;
+            i = i + 1;
+        }
+        self.state = s;
+    }
+
+    /// Terminate and return the final 32-bit digest. Applies the final XOR.
+    /// After this call the state is no longer meaningful for further
+    /// updates — construct a new `Crc32` for another checksum.
+    public fn finalize(&self) -> UInt32 {
+        let s: UInt32 = self.state;
+        let mask: UInt32 = 4294967295_u32;  // 0xFFFFFFFF — all 32 bits set
+        s ^ mask
+    }
+
+    /// Same as `finalize` but left as a distinct name for clarity when
+    /// peeking at the running digest without discarding the accumulator.
+    public fn peek(&self) -> UInt32 {
+        let s: UInt32 = self.state;
+        let mask: UInt32 = 0xFFFFFFFF_u32;
+        s ^ mask
+    }
+}
+
+// =============================================================================
+// One-shot API
+// =============================================================================
+
+/// Compute the CRC32 digest of `data` in one call. Equivalent to:
+///
+/// ```verum
+/// let mut h = Crc32.new(); h.update(data); h.finalize()
+/// ```
+public fn crc32(data: &[Byte]) -> UInt32 {
+    let mut h = Crc32.new();
+    h.update(data);
+    h.finalize()
+}
+
+/// Resume a CRC32 computation from a previously-finalized digest. Matches
+/// the semantics of zlib's `crc32` second form — useful for concatenating
+/// partial CRCs across chunk boundaries without holding state across all
+/// bytes at once.
+public fn crc32_continue(prev: UInt32, data: &[Byte]) -> UInt32 {
+    let mut h = Crc32.from_state(prev ^ 0xFFFFFFFF_u32);
+    h.update(data);
+    h.finalize()
+}

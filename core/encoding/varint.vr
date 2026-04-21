@@ -1,0 +1,208 @@
+// =============================================================================
+// encoding/varint.vr — Variable-length integer encodings
+// =============================================================================
+// Layer: 2 (Encoding)
+// Dependencies: core, collections, base
+// =============================================================================
+//
+// Unified home for variable-length integer codings used across the stdlib.
+// Right now this module ships SQLite-style varints only (the one needed by
+// `core.database.sqlite.native`, spec `internal/specs/sqlite-native.md`
+// §6.4 and Gap 4 in §3.2).
+//
+// Two sibling encodings live in the stdlib today and are intentionally NOT
+// duplicated here — they are wire-protocol-specific and embedded in their
+// own modules:
+//
+//   * LEB128 (little-endian, Protocol Buffers style):
+//     `core.protobuf.wire.{read_varint, write_varint}`
+//
+//   * QUIC varint (1/2/4/8-byte length prefixed, RFC 9000 §16):
+//     `core.net.http3.frame`
+//
+// If future work needs a common abstraction, we'll promote one encoding here
+// and have the others re-export. Today each keeps its call-site-specific API.
+//
+// ## SQLite varint (this file)
+//
+// SQLite stores every integer in its file format as a big-endian variable-
+// length integer of 1–9 bytes. Bytes 1–8 hold 7 data bits + a continuation
+// bit in the MSB. Byte 9 (if present) holds the remaining 8 bits with no
+// continuation bit. The encoding is defined in
+// https://www.sqlite.org/fileformat2.html under "Varint".
+//
+// Value range: full signed 64-bit (i64). Note that signed bits are encoded
+// exactly — negative values use the full 9-byte form (their top bit is
+// always set), unlike LEB128 which zig-zags first.
+//
+// Examples (hex bytes → decoded):
+//   `00`                             → 0
+//   `7F`                             → 127
+//   `81 00`                          → 128
+//   `FF 7F`                          → 16383
+//   `81 80 00`                       → 16384
+//   `FF FF FF FF 7F`                 → 2^35 − 1
+//   `FF FF FF FF FF FF FF FF FF`     → -1  (full 9-byte form)
+//
+// See `internal/specs/sqlite-native.md` Appendix E.1 for canonical test
+// vectors reproduced (and exhaustively tested) in
+// `vcs/specs/L2-standard/database/sqlite/l2_record/varint_roundtrip.vr`.
+//
+// =============================================================================
+
+module core.encoding.varint;
+
+mount core.*;
+mount collections.List;
+mount base.{Result, Ok, Err};
+
+// =============================================================================
+// Error type
+// =============================================================================
+
+public type VarintError is {
+    kind: VarintErrorKind,
+    position: Int,
+    message: Text,
+};
+
+public type VarintErrorKind is
+      Truncated            // buffer ran out before the varint did
+    | Overflow;            // value would not fit in an Int64
+
+// =============================================================================
+// SQLite varint — encoding
+// =============================================================================
+
+/// Return the exact number of bytes the SQLite varint form of `value` will
+/// occupy. Branchless-friendly — O(1), no allocations, useful for precomputing
+/// a buffer size before calling `sqlite_encode_into`.
+public fn sqlite_encoded_len(value: Int64) -> Int {
+    // Treat the value as 64 unsigned bits for length classification.
+    let u: UInt64 = value as UInt64;
+    if u <= 0x7F_u64                      { return 1; }
+    if u <= 0x3FFF_u64                    { return 2; }
+    if u <= 0x1FFFFF_u64                  { return 3; }
+    if u <= 0x0FFFFFFF_u64                { return 4; }
+    if u <= 0x07FFFFFFFF_u64              { return 5; }
+    if u <= 0x03FFFFFFFFFF_u64            { return 6; }
+    if u <= 0x01FFFFFFFFFFFF_u64          { return 7; }
+    if u <= 0x00FFFFFFFFFFFFFF_u64        { return 8; }
+    9
+}
+
+/// Encode `value` into the tail of `out`, appending 1..9 bytes. Returns the
+/// number of bytes written. Never fails (every i64 fits in 9 bytes).
+public fn sqlite_encode_into(out: &mut List<Byte>, value: Int64) -> Int {
+    let len = sqlite_encoded_len(value);
+    let u: UInt64 = value as UInt64;
+
+    if len == 9 {
+        // 9-byte form: bytes 0..7 carry 7 data bits each (plus continuation
+        // bit); byte 8 carries the remaining 8 data bits, no continuation.
+        // Data bits assigned to each byte (bit 63 is the top bit of u):
+        //   byte 0 → bits 57..63     byte 4 → bits 29..35
+        //   byte 1 → bits 50..56     byte 5 → bits 22..28
+        //   byte 2 → bits 43..49     byte 6 → bits 15..21
+        //   byte 3 → bits 36..42     byte 7 → bits  8..14
+        //   byte 8 → bits  0.. 7
+        out.push((((u >> 57) & 0x7F_u64) | 0x80_u64) as Byte);
+        out.push((((u >> 50) & 0x7F_u64) | 0x80_u64) as Byte);
+        out.push((((u >> 43) & 0x7F_u64) | 0x80_u64) as Byte);
+        out.push((((u >> 36) & 0x7F_u64) | 0x80_u64) as Byte);
+        out.push((((u >> 29) & 0x7F_u64) | 0x80_u64) as Byte);
+        out.push((((u >> 22) & 0x7F_u64) | 0x80_u64) as Byte);
+        out.push((((u >> 15) & 0x7F_u64) | 0x80_u64) as Byte);
+        out.push((((u >>  8) & 0x7F_u64) | 0x80_u64) as Byte);
+        out.push((u & 0xFF_u64) as Byte);
+        return 9;
+    }
+
+    // Short form (1..8 bytes): `len - 1` bytes carry 7 data bits + continuation
+    // bit each (high to low), then a terminator byte with MSB clear.
+    let mut i: Int = len - 1;
+    while i > 0 {
+        let shift: UInt64 = (i as UInt64) * 7_u64;
+        let b = (((u >> shift) & 0x7F_u64) | 0x80_u64) as Byte;
+        out.push(b);
+        i = i - 1;
+    }
+    out.push((u & 0x7F_u64) as Byte);
+    len
+}
+
+/// Allocate a fresh `List<Byte>` holding the SQLite varint form of `value`.
+/// Call-site convenience — prefer `sqlite_encode_into` when you already have
+/// a buffer to avoid the extra allocation.
+public fn sqlite_encode(value: Int64) -> List<Byte> {
+    let mut out: List<Byte> = [];
+    sqlite_encode_into(&mut out, value);
+    out
+}
+
+// =============================================================================
+// SQLite varint — decoding
+// =============================================================================
+
+/// Decode the SQLite varint starting at `buf[start]`. Returns the decoded
+/// value and the number of bytes consumed (1..9). Errors on short input.
+///
+/// Note: a buffer that ends exactly at 9 data bytes with all continuation
+/// bits set decodes a full 64-bit value — this is `-1` if interpreted as
+/// i64. There is no "overflow" from the wire form itself; the return type
+/// just reinterprets the 64 unsigned bits as signed.
+public fn sqlite_decode(buf: &[Byte], start: Int) -> Result<(Int64, Int), VarintError> {
+    if start >= buf.len() {
+        return Err(VarintError {
+            kind: Truncated,
+            position: start,
+            message: "buffer empty",
+        });
+    }
+
+    let mut result: UInt64 = 0;
+    let mut i: Int = 0;
+
+    // First 8 bytes: 7 data bits each.
+    while i < 8 {
+        let pos = start + i;
+        if pos >= buf.len() {
+            return Err(VarintError {
+                kind: Truncated,
+                position: pos,
+                message: "varint ended mid-byte",
+            });
+        }
+        let b = buf[pos] as UInt64;
+        result = (result << 7) | (b & 0x7F_u64);
+        if (b & 0x80_u64) == 0 {
+            return Ok((result as Int64, i + 1));
+        }
+        i = i + 1;
+    }
+
+    // Byte 9: full 8 data bits, no continuation.
+    let pos = start + 8;
+    if pos >= buf.len() {
+        return Err(VarintError {
+            kind: Truncated,
+            position: pos,
+            message: "varint ended before 9th byte",
+        });
+    }
+    result = (result << 8) | (buf[pos] as UInt64);
+    Ok((result as Int64, 9))
+}
+
+/// Convenience wrapper for decoding from offset 0.
+public fn sqlite_decode_first(buf: &[Byte]) -> Result<(Int64, Int), VarintError> {
+    sqlite_decode(buf, 0)
+}
+
+/// Skip a SQLite varint at `buf[start]` without materialising the value.
+/// Returns the new cursor position. Useful when walking a record header
+/// where only lengths matter.
+public fn sqlite_skip(buf: &[Byte], start: Int) -> Result<Int, VarintError> {
+    let (_, n) = sqlite_decode(buf, start)?;
+    Ok(start + n)
+}
