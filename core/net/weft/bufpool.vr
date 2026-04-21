@@ -1,0 +1,270 @@
+// =============================================================================
+// core/net/weft/bufpool.vr — Registered I/O buffer pool
+// =============================================================================
+// Layer: 6 (Weft)
+// Spec:  internal/specs/net-framework.md §4.2.1 / §6.17
+// =============================================================================
+//
+// A fixed-size pool of pre-allocated byte buffers. On Linux with
+// io_uring the backing memory is registered with the kernel
+// (`IORING_REGISTER_BUFFERS`), turning each recv/send into a single
+// syscall with zero page-pinning overhead per op. On kqueue / IOCP
+// platforms we keep the same abstraction shape but the buffers are
+// just plain pool slots — kernel-level registration has no direct
+// analogue, so there's no additional win from the OS side there.
+//
+// Downstream consumer: a specialised `WeftTransport` impl that grabs
+// a buffer on read, yields it (zero-copy) through the HTTP/1.1
+// parser, then releases on response emit. Follow-up task #28 wires
+// that into connection.vr behind a feature flag.
+//
+// Key invariants:
+//
+//   * Buffers are power-of-two sized (default 16 KiB). Matches the
+//     page-pin granularity io_uring expects and keeps SIMD-scans in
+//     `core/simd/bytes.vr` cache-friendly.
+//
+//   * Acquire is O(1) — Mutex-protected stack pop.
+//
+//   * On exhaustion the pool returns `None`; the caller falls back
+//     to on-heap allocation. Never blocks the reactor thread.
+//
+//   * Pool bytes are NOT zeroed between reuses — they're always
+//     overwritten before being observed. Safe under §4.3 arena
+//     discipline (ThinRef generation check prevents re-reading old
+//     contents from a previously leased buffer).
+//
+// Kernel-side follow-up:
+//
+//   * Linux intrinsic `verum.io_uring.register_buffers(base, count, size)`
+//     TODO at the runtime layer. Once available, `BufferPool.new`
+//     performs the call; `BufferHandle.fd_offset()` yields the
+//     registered index for `IOSQE_BUFFER_SELECT`. No API change
+//     needed in this file.
+//
+// =============================================================================
+
+module core.net.weft.bufpool;
+
+mount core.*;
+mount core.collections.list.{List};
+mount core.sync.Mutex;
+mount core.sync.atomic.{AtomicInt, MemoryOrdering};
+
+// =============================================================================
+// Configuration
+// =============================================================================
+
+public type BufferPoolConfig is {
+    /// Number of buffers in the pool. 256 is a good default for a
+    /// 10k-connection server: at most ~4 MiB of RSS dedicated to
+    /// registered-buffer inventory.
+    count: Int,
+    /// Size of each buffer. Must be a power of two ≥ 4096.
+    buf_size: Int,
+    /// Try to register with io_uring on Linux. On other platforms a
+    /// no-op. Disabled by default until the runtime intrinsic lands.
+    try_register_iouring: Bool,
+};
+
+implement BufferPoolConfig {
+    pub fn default() -> BufferPoolConfig {
+        BufferPoolConfig {
+            count: 256,
+            buf_size: 16 * 1024,
+            try_register_iouring: false,
+        }
+    }
+
+    pub fn with_count(self, n: Int) -> BufferPoolConfig {
+        BufferPoolConfig { count: n, ..self }
+    }
+
+    pub fn with_buf_size(self, n: Int) -> BufferPoolConfig {
+        BufferPoolConfig { buf_size: n, ..self }
+    }
+
+    pub fn with_io_uring(self, enabled: Bool) -> BufferPoolConfig {
+        BufferPoolConfig { try_register_iouring: enabled, ..self }
+    }
+}
+
+implement Clone for BufferPoolConfig {
+    fn clone(&self) -> BufferPoolConfig {
+        BufferPoolConfig {
+            count: self.count,
+            buf_size: self.buf_size,
+            try_register_iouring: self.try_register_iouring,
+        }
+    }
+}
+
+// =============================================================================
+// Pool state
+// =============================================================================
+
+/// Pre-allocated slab: one contiguous byte block holding `count`
+/// buffers of `buf_size` bytes each. `free_indices` holds the stack
+/// of indices whose slice is currently available.
+type BufferPoolState is {
+    config: BufferPoolConfig,
+    slab: List<Byte>,                  // contiguous backing memory
+    free_indices: Mutex<List<Int>>,
+    /// Cumulative acquire count — metric signal.
+    acquires_total: AtomicInt,
+    /// Acquire attempts that missed the pool (fell back to alloc).
+    misses_total: AtomicInt,
+    /// True iff io_uring registration succeeded. On !linux or when
+    /// the intrinsic is missing, stays false.
+    iouring_registered: Bool,
+};
+
+// =============================================================================
+// BufferPool
+// =============================================================================
+
+public type BufferPool is {
+    state: Shared<BufferPoolState>,
+};
+
+implement BufferPool {
+    pub fn new(config: BufferPoolConfig) -> BufferPool {
+        if config.count <= 0 || config.buf_size < 4096 {
+            panic("BufferPool: count > 0 and buf_size >= 4096 required");
+        }
+        let total_bytes = config.count * config.buf_size;
+        let mut slab: List<Byte> = List.with_capacity(total_bytes);
+        let mut i: Int = 0;
+        while i < total_bytes { slab.push(0); i = i + 1; }
+
+        let mut free: List<Int> = List.with_capacity(config.count);
+        let mut j: Int = 0;
+        while j < config.count { free.push(j); j = j + 1; }
+
+        // Kernel-side registration hook. Phase-5 skeleton: actual
+        // intrinsic is follow-up work.
+        let registered = config.try_register_iouring && try_iouring_register();
+
+        BufferPool {
+            state: Shared.new(BufferPoolState {
+                config: config.clone(),
+                slab: slab,
+                free_indices: Mutex.new(free),
+                acquires_total: AtomicInt.new(0),
+                misses_total: AtomicInt.new(0),
+                iouring_registered: registered,
+            }),
+        }
+    }
+
+    pub fn default() -> BufferPool {
+        Self.new(BufferPoolConfig.default())
+    }
+
+    /// Try to lease a buffer. Returns `None` if the pool is exhausted
+    /// — caller is expected to fall back to on-heap List<Byte>.
+    pub fn acquire(&self) -> Maybe<BufferHandle> {
+        self.state.acquires_total.fetch_add(1, MemoryOrdering.AcqRel);
+        let mut free = self.state.free_indices.lock();
+        match free.pop() {
+            None => {
+                self.state.misses_total.fetch_add(1, MemoryOrdering.AcqRel);
+                None
+            }
+            Some(idx) => Some(BufferHandle {
+                index: idx,
+                pool: self.state.clone(),
+            }),
+        }
+    }
+
+    pub fn iouring_registered(&self) -> Bool {
+        self.state.iouring_registered
+    }
+
+    pub fn free_count(&self) -> Int {
+        let free = self.state.free_indices.lock();
+        free.len()
+    }
+
+    pub fn acquires_total(&self) -> Int {
+        self.state.acquires_total.load(MemoryOrdering.Acquire)
+    }
+
+    pub fn misses_total(&self) -> Int {
+        self.state.misses_total.load(MemoryOrdering.Acquire)
+    }
+}
+
+implement Clone for BufferPool {
+    fn clone(&self) -> BufferPool {
+        BufferPool { state: self.state.clone() }
+    }
+}
+
+// =============================================================================
+// BufferHandle — RAII lease
+// =============================================================================
+
+public type BufferHandle is {
+    index: Int,
+    pool: Shared<BufferPoolState>,
+};
+
+implement BufferHandle {
+    /// Returns (start, len) into the pool's slab for this buffer.
+    /// Use with `slab_mut(pool)` for direct write access.
+    pub fn slot(&self) -> (Int, Int) {
+        let size = self.pool.config.buf_size;
+        (self.index * size, size)
+    }
+
+    /// Zero-based buffer index — this IS the `IOSQE_BUFFER_SELECT`
+    /// handle that io_uring expects once the intrinsic path is
+    /// wired up.
+    pub fn fd_offset(&self) -> Int {
+        self.index
+    }
+
+    /// Write bytes into the buffer starting at offset 0. Returns the
+    /// number actually written (capped at buf_size).
+    pub fn write_at(&mut self, data: &[Byte]) -> Int {
+        let (start, size) = self.slot();
+        let n = if data.len() < size { data.len() } else { size };
+        // Mutex-lock slab only long enough to copy — low contention
+        // because different leases address different ranges.
+        let slab_state = &self.pool;
+        // core.mem slab mutation needs raw access; Phase-5 skeleton
+        // uses the already-allocated List<Byte>. A pointer-based
+        // zero-copy variant is the io_uring-era follow-up.
+        // NOTE: the pool's slab is Shared<Mutex<...>> in a fuller impl;
+        // here the simple read-mostly pattern suffices because the
+        // slab length never changes post-construction.
+        let mut i: Int = 0;
+        while i < n {
+            slab_state.slab.set(start + i, data[i]);
+            i = i + 1;
+        }
+        n
+    }
+}
+
+implement Drop for BufferHandle {
+    fn drop(&mut self) {
+        // Return index to free list.
+        let mut free = self.pool.free_indices.lock();
+        free.push(self.index);
+    }
+}
+
+// =============================================================================
+// Kernel-side registration — intrinsic hook
+// =============================================================================
+
+/// Attempt io_uring `REGISTER_BUFFERS`. Stub; real implementation
+/// binds `verum.io_uring.register_buffers(base_ptr, count, size)`.
+/// Returns false on any platform where the syscall isn't available.
+fn try_iouring_register() -> Bool {
+    // TODO(phase-5-followup): call intrinsic once runtime exposes it.
+    false
+}

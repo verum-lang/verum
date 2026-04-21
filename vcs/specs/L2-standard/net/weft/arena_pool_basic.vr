@@ -1,0 +1,43 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: net, weft, arena, cbgr, generational, phase5
+// @timeout: 10000
+// @expect: pass
+
+// §4.3 — ArenaPool + ArenaLease shape. RAII contract verified at
+// type level: lease owns the arena exclusively, drop returns + resets.
+
+mount core.net.weft.arena_pool.{ArenaPool, ArenaPoolConfig, ArenaLease};
+mount core.mem.arena.{GenerationalArena};
+
+fn typecheck_pool_build() -> ArenaPool {
+    ArenaPool.new(
+        ArenaPoolConfig.default()
+            .with_warm_count(128)
+            .with_per_arena_bytes(128 * 1024)
+            .with_max_total(2048),
+    )
+}
+
+fn typecheck_pool_metrics(p: &ArenaPool) -> (Int, Int, Int, Int) {
+    (p.total(), p.warm_count(), p.leases_total(), p.bursts_total())
+}
+
+fn typecheck_lease_shape(p: &ArenaPool) -> Int {
+    let mut lease = p.acquire();
+    let _arena: &mut GenerationalArena = lease.arena_mut();
+    let g = lease.generation();
+    let _used = lease.used();
+    let _cap  = lease.capacity();
+    g
+}
+
+fn typecheck_default_pool() -> ArenaPool {
+    ArenaPool.default()
+}
+
+fn main() {
+    let p = typecheck_default_pool();
+    let _ = typecheck_pool_metrics(&p);
+}

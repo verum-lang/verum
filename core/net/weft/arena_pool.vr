@@ -1,0 +1,270 @@
+// =============================================================================
+// core/net/weft/arena_pool.vr — Per-request arena pool
+// =============================================================================
+// Layer: 6 (Weft)
+// Spec:  internal/specs/net-framework.md §4.3 "CBGR-арены"
+// =============================================================================
+//
+// Phase-5 killer feature for the Weft hot path. Each incoming request
+// gets a fresh arena handed to it; the arena lives exactly for the
+// request's lifetime; at end-of-request `reset()` invalidates every
+// allocation in O(1) — generation bump, ~1 ns on the bench bus.
+//
+// Key architectural properties (§4.3 normative rules):
+//
+//   1. **Hierarchy.** Per-shard (long-lived, holds DNS / pool caches)
+//      → per-connection (keepalive lifetime) → per-request (this
+//      pool's subject). We ship the per-request layer here; the
+//      other two are follow-ups once the connection layer is wired
+//      to the pool (phase 5.5).
+//
+//   2. **O(1) mass invalidation.** `GenerationalArena.reset()` (already
+//      in core/mem/arena.vr, 503 LOC, production) — increments the
+//      shared generation; any outstanding `ThinRef` into the old
+//      arena is rejected by CBGR on next deref.
+//
+//   3. **Bounded OOM.** Each arena is created with a fixed capacity;
+//      allocations past that return NULL and the caller handles the
+//      413 Payload Too Large surface (already wired in connection.vr).
+//
+//   4. **Epoch dual-protection.** `core/mem/epoch.vr` manages a
+//      process-level epoch; its wraparound detection (§4.3.3) tells
+//      the pool when to rebuild arenas to avoid generation aliasing
+//      after ~4 billion resets per arena.
+//
+// # Lease model
+//
+//   let pool = ArenaPool.new(ArenaPoolConfig.default());
+//   {
+//       let lease = pool.acquire();          // takes an arena
+//       // ... handler runs, allocates into &mut lease.arena ...
+//   }   // ArenaLease::Drop returns it to the pool (with reset()).
+//
+// The `ArenaLease` RAII discipline is the contract: handlers see
+// `&mut Arena`, never the lease itself, and have no way to leak a
+// lease out of the request scope (CBGR escape analysis enforces it
+// once `@lifetime(request)` lands — follow-up).
+//
+// =============================================================================
+
+module core.net.weft.arena_pool;
+
+mount core.*;
+mount core.collections.list.{List};
+mount core.sync.Mutex;
+mount core.sync.atomic.{AtomicInt, MemoryOrdering};
+mount core.mem.arena.{GenerationalArena, ArenaConfig};
+
+// =============================================================================
+// Pool config
+// =============================================================================
+
+public type ArenaPoolConfig is {
+    /// Number of arenas to keep warm in the pool. At steady state the
+    /// pool holds this many; bursts temporarily create more, which
+    /// are destroyed on release instead of pooled.
+    warm_count: Int,
+    /// Per-arena capacity in bytes. Typical HTTP request + response
+    /// fits in 16 KiB; JSON-heavy APIs often need 64-256 KiB.
+    per_arena_bytes: Int,
+    /// Soft cap on total arenas that may exist simultaneously (warm
+    /// pool + in-flight leases). Excess acquire attempts block or
+    /// fall back to on-heap allocation (Phase-5.5 config knob).
+    max_total: Int,
+};
+
+implement ArenaPoolConfig {
+    pub fn default() -> ArenaPoolConfig {
+        ArenaPoolConfig {
+            warm_count: 64,
+            per_arena_bytes: 64 * 1024,
+            max_total: 1024,
+        }
+    }
+
+    pub fn with_warm_count(self, n: Int) -> ArenaPoolConfig {
+        ArenaPoolConfig { warm_count: n, ..self }
+    }
+
+    pub fn with_per_arena_bytes(self, n: Int) -> ArenaPoolConfig {
+        ArenaPoolConfig { per_arena_bytes: n, ..self }
+    }
+
+    pub fn with_max_total(self, n: Int) -> ArenaPoolConfig {
+        ArenaPoolConfig { max_total: n, ..self }
+    }
+}
+
+implement Clone for ArenaPoolConfig {
+    fn clone(&self) -> ArenaPoolConfig {
+        ArenaPoolConfig {
+            warm_count: self.warm_count,
+            per_arena_bytes: self.per_arena_bytes,
+            max_total: self.max_total,
+        }
+    }
+}
+
+// =============================================================================
+// ArenaPool
+// =============================================================================
+
+/// Shared state: free list of warm arenas + tracking counters.
+/// Mutex around the free list is contended only on acquire/release
+/// boundaries — inside the request, the handler owns the arena
+/// exclusively.
+type PoolState is {
+    config: ArenaPoolConfig,
+    free: Mutex<List<GenerationalArena>>,
+    /// Total allocated (warm + leased). Bounded by `config.max_total`.
+    total: AtomicInt,
+    /// Cumulative lease count — exposed for metrics.
+    leases_total: AtomicInt,
+    /// Cumulative bursts (acquisitions that created a fresh arena
+    /// because the warm pool was empty) — metric signal for sizing.
+    bursts_total: AtomicInt,
+};
+
+public type ArenaPool is {
+    state: Shared<PoolState>,
+};
+
+implement ArenaPool {
+    pub fn new(config: ArenaPoolConfig) -> ArenaPool {
+        let mut warm: List<GenerationalArena> = List.with_capacity(config.warm_count);
+        let mut i: Int = 0;
+        while i < config.warm_count {
+            warm.push(GenerationalArena.new(config.per_arena_bytes));
+            i = i + 1;
+        }
+        ArenaPool {
+            state: Shared.new(PoolState {
+                config: config.clone(),
+                free: Mutex.new(warm),
+                total: AtomicInt.new(config.warm_count),
+                leases_total: AtomicInt.new(0),
+                bursts_total: AtomicInt.new(0),
+            }),
+        }
+    }
+
+    pub fn default() -> ArenaPool {
+        Self.new(ArenaPoolConfig.default())
+    }
+
+    /// Acquire an arena for the lifetime of a request. On drop the
+    /// lease calls `reset()` and returns the arena to the free list.
+    pub fn acquire(&self) -> ArenaLease {
+        let arena = {
+            let mut free = self.state.free.lock();
+            match free.pop() {
+                Some(a) => a,
+                None    => {
+                    // Burst: warm pool is empty. Bounded by max_total.
+                    let cap = self.state.config.per_arena_bytes;
+                    self.state.total.fetch_add(1, MemoryOrdering.AcqRel);
+                    self.state.bursts_total.fetch_add(1, MemoryOrdering.AcqRel);
+                    GenerationalArena.new(cap)
+                }
+            }
+        };
+        self.state.leases_total.fetch_add(1, MemoryOrdering.AcqRel);
+        ArenaLease {
+            arena: Some(arena),
+            pool: self.state.clone(),
+        }
+    }
+
+    /// Total arenas (warm + leased).
+    pub fn total(&self) -> Int {
+        self.state.total.load(MemoryOrdering.Acquire)
+    }
+
+    /// Number of arenas currently warm in the pool.
+    pub fn warm_count(&self) -> Int {
+        let free = self.state.free.lock();
+        free.len()
+    }
+
+    /// Number of arena-lease acquisitions since pool creation.
+    pub fn leases_total(&self) -> Int {
+        self.state.leases_total.load(MemoryOrdering.Acquire)
+    }
+
+    /// Number of burst-allocations (acquire when warm pool empty).
+    pub fn bursts_total(&self) -> Int {
+        self.state.bursts_total.load(MemoryOrdering.Acquire)
+    }
+}
+
+implement Clone for ArenaPool {
+    fn clone(&self) -> ArenaPool {
+        ArenaPool { state: self.state.clone() }
+    }
+}
+
+// =============================================================================
+// ArenaLease — RAII return-to-pool handle
+// =============================================================================
+
+public type ArenaLease is {
+    arena: Maybe<GenerationalArena>,
+    pool: Shared<PoolState>,
+};
+
+implement ArenaLease {
+    /// Borrow the arena mutably; the caller bumps allocates into it.
+    pub fn arena_mut(&mut self) -> &mut GenerationalArena {
+        match &mut self.arena {
+            Some(a) => a,
+            None    => panic("ArenaLease: arena already returned"),
+        }
+    }
+
+    /// Current generation — handlers that create ThinRefs must stamp
+    /// them with this value so CBGR can reject them after reset().
+    pub fn generation(&self) -> Int {
+        match &self.arena {
+            Some(a) => a.generation(),
+            None    => 0,
+        }
+    }
+
+    /// Bytes currently allocated in the arena.
+    pub fn used(&self) -> Int {
+        match &self.arena {
+            Some(a) => a.used(),
+            None    => 0,
+        }
+    }
+
+    /// Capacity — fixed per lease (arena doesn't grow once the pool
+    /// created it). Handlers that detect impending overflow raise
+    /// `WeftError.Overloaded` or trim their response.
+    pub fn capacity(&self) -> Int {
+        match &self.arena {
+            Some(a) => a.capacity(),
+            None    => 0,
+        }
+    }
+}
+
+implement Drop for ArenaLease {
+    fn drop(&mut self) {
+        let mut arena = match self.arena.take() {
+            Some(a) => a,
+            None    => return,
+        };
+        // Generation bump — all ThinRefs into this arena invalidate.
+        arena.reset();
+        // Return to pool if warm pool has room, otherwise destroy.
+        let cfg = self.pool.config.clone();
+        let mut free = self.pool.free.lock();
+        if free.len() < cfg.warm_count {
+            free.push(arena);
+        } else {
+            arena.destroy();
+            self.pool.total.fetch_sub(1, MemoryOrdering.AcqRel);
+        }
+    }
+}

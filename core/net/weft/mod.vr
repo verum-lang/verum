@@ -20,6 +20,8 @@ public mount super.net.weft.http2.*;
 public mount super.net.weft.websocket.*;
 public mount super.net.weft.rpc.*;
 public mount super.net.weft.http3.*;
+public mount super.net.weft.arena_pool.*;
+public mount super.net.weft.bufpool.*;
 public mount super.net.weft.app.*;
 public mount super.net.weft.backpressure.*;
 public mount super.net.weft.adaptive.*;

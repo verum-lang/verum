@@ -1,0 +1,41 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: net, weft, bufpool, io-uring, phase5, zero-copy
+// @timeout: 10000
+// @expect: pass
+
+// §4.2.1 / §6.17 — Registered buffer pool shape. Kernel-side
+// io_uring registration is a runtime-intrinsic follow-up; this
+// verifies the Verum-level API surface.
+
+mount core.net.weft.bufpool.{BufferPool, BufferPoolConfig, BufferHandle};
+
+fn typecheck_cfg() -> BufferPoolConfig {
+    BufferPoolConfig.default()
+        .with_count(512)
+        .with_buf_size(32 * 1024)
+        .with_io_uring(true)
+}
+
+fn typecheck_pool() -> BufferPool {
+    BufferPool.new(typecheck_cfg())
+}
+
+fn typecheck_lease(pool: &BufferPool) -> Maybe<(Int, Int)> {
+    match pool.acquire() {
+        None    => None,
+        Some(h) => Some((h.fd_offset(), h.slot().1)),
+    }
+}
+
+fn typecheck_metrics(pool: &BufferPool) -> (Bool, Int, Int, Int) {
+    (pool.iouring_registered(),
+     pool.free_count(),
+     pool.acquires_total(),
+     pool.misses_total())
+}
+
+fn main() {
+    let _ = typecheck_cfg();
+}
