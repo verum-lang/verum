@@ -1,0 +1,252 @@
+// =============================================================================
+// net/h3/request.vr — HTTP/3 Request / Response types (RFC 9114 §4.3)
+// =============================================================================
+// Layer: 5 (Network — HTTP/3)
+// =============================================================================
+//
+// RFC 9114 §4.3: An HTTP/3 request is a QUIC bidirectional stream
+// carrying:
+//
+//   HEADERS frame (request pseudo-headers + regular headers)
+//   [zero or more DATA frames]
+//   [optional trailers HEADERS frame]
+//   stream FIN marker
+//
+// and a response with the same shape. Pseudo-headers (":method",
+// ":scheme", ":authority", ":path" for request; ":status" for
+// response) MUST come first per §4.3.1; regular headers follow.
+//
+// We keep name+value pairs in order — HTTP specifies case-
+// insensitive names but QPACK emission preserves case, so
+// normalise only during comparison. Helper accessors (`method()`,
+// `path()`, `status()`) do case-insensitive lookup.
+//
+// =============================================================================
+
+module core.net.h3.request;
+
+mount core.*;
+mount core.collections.List;
+mount core.net.h3.qpack.decoder.{HeaderField};
+
+public type H3Method is Get | Post | Put | Delete | Head | Options | Patch | Connect | Other(Text);
+
+impl H3Method {
+    pub fn as_text(&self) -> Text {
+        match self {
+            H3Method.Get     => Text.from_str("GET"),
+            H3Method.Post    => Text.from_str("POST"),
+            H3Method.Put     => Text.from_str("PUT"),
+            H3Method.Delete  => Text.from_str("DELETE"),
+            H3Method.Head    => Text.from_str("HEAD"),
+            H3Method.Options => Text.from_str("OPTIONS"),
+            H3Method.Patch   => Text.from_str("PATCH"),
+            H3Method.Connect => Text.from_str("CONNECT"),
+            H3Method.Other(t) => t.clone(),
+        }
+    }
+
+    pub fn from_text(s: &Text) -> H3Method {
+        match s.as_bytes() {
+            b"GET"     => H3Method.Get,
+            b"POST"    => H3Method.Post,
+            b"PUT"     => H3Method.Put,
+            b"DELETE"  => H3Method.Delete,
+            b"HEAD"    => H3Method.Head,
+            b"OPTIONS" => H3Method.Options,
+            b"PATCH"   => H3Method.Patch,
+            b"CONNECT" => H3Method.Connect,
+            _          => H3Method.Other(s.clone()),
+        }
+    }
+}
+
+public type H3Request is {
+    method:    H3Method,
+    scheme:    Text,        // "http" | "https"
+    authority: Text,        // host[:port]
+    path:      Text,        // absolute path + ?query
+    headers:   List<HeaderField>,   // excluding pseudo-headers
+    body:      List<Byte>,
+};
+
+public type H3Response is {
+    status:    UInt16,
+    headers:   List<HeaderField>,
+    body:      List<Byte>,
+    /// Trailing headers section (sent as a second HEADERS frame
+    /// after DATA). Empty when peer didn't send trailers.
+    trailers:  List<HeaderField>,
+};
+
+impl H3Request {
+    pub fn get(authority: Text, path: Text) -> H3Request {
+        H3Request {
+            method: H3Method.Get,
+            scheme: Text.from_str("https"),
+            authority: authority,
+            path: path,
+            headers: [],
+            body: [],
+        }
+    }
+
+    pub fn post(authority: Text, path: Text, body: List<Byte>) -> H3Request {
+        H3Request {
+            method: H3Method.Post,
+            scheme: Text.from_str("https"),
+            authority: authority,
+            path: path,
+            headers: [],
+            body: body,
+        }
+    }
+
+    pub fn with_header(mut self, name: Text, value: Text) -> H3Request {
+        self.headers.push(HeaderField { name: name, value: value });
+        self
+    }
+
+    /// Materialise the full header field list including pseudo-
+    /// headers, ready for QPACK encoding. Per RFC 9114 §4.3.1,
+    /// pseudo-headers MUST appear in the field section before any
+    /// regular headers.
+    pub fn to_field_list(&self) -> List<HeaderField> {
+        let mut out: List<HeaderField> = [];
+        out.push(HeaderField { name: Text.from_str(":method"),    value: self.method.as_text() });
+        out.push(HeaderField { name: Text.from_str(":scheme"),    value: self.scheme.clone() });
+        out.push(HeaderField { name: Text.from_str(":authority"), value: self.authority.clone() });
+        out.push(HeaderField { name: Text.from_str(":path"),      value: self.path.clone() });
+        let mut i: Int = 0;
+        while i < self.headers.len() {
+            out.push(self.headers[i].clone());
+            i = i + 1;
+        }
+        out
+    }
+}
+
+impl H3Response {
+    pub fn ok(body: List<Byte>) -> H3Response {
+        H3Response {
+            status: 200_u16,
+            headers: [],
+            body: body,
+            trailers: [],
+        }
+    }
+
+    pub fn status(code: UInt16) -> H3Response {
+        H3Response {
+            status: code,
+            headers: [],
+            body: [],
+            trailers: [],
+        }
+    }
+
+    pub fn with_header(mut self, name: Text, value: Text) -> H3Response {
+        self.headers.push(HeaderField { name: name, value: value });
+        self
+    }
+
+    pub fn to_field_list(&self) -> List<HeaderField> {
+        let mut out: List<HeaderField> = [];
+        let s = format_status(self.status);
+        out.push(HeaderField { name: Text.from_str(":status"), value: s });
+        let mut i: Int = 0;
+        while i < self.headers.len() {
+            out.push(self.headers[i].clone());
+            i = i + 1;
+        }
+        out
+    }
+}
+
+fn format_status(code: UInt16) -> Text {
+    // Simple 3-digit decimal formatter — avoids pulling in full
+    // UInt16 formatter plumbing when the status is always 100..999.
+    let h = (code / 100_u16) as Byte + ('0' as Byte);
+    let t = ((code / 10_u16) % 10_u16) as Byte + ('0' as Byte);
+    let u = (code % 10_u16) as Byte + ('0' as Byte);
+    let bytes: [Byte; 3] = [h, t, u];
+    Text.from_utf8_lossy(&bytes)
+}
+
+// =============================================================================
+// Field-list → structured parsers
+// =============================================================================
+
+pub fn parse_request_from_fields(fields: &List<HeaderField>, body: List<Byte>) -> Maybe<H3Request> {
+    let mut method:    Maybe<Text> = None;
+    let mut scheme:    Maybe<Text> = None;
+    let mut authority: Maybe<Text> = None;
+    let mut path:      Maybe<Text> = None;
+    let mut headers:   List<HeaderField> = [];
+
+    let mut i: Int = 0;
+    while i < fields.len() {
+        let f = &fields[i];
+        let n = f.name.as_bytes();
+        if n == b":method"    { method    = Some(f.value.clone()); }
+        else if n == b":scheme"    { scheme    = Some(f.value.clone()); }
+        else if n == b":authority" { authority = Some(f.value.clone()); }
+        else if n == b":path"      { path      = Some(f.value.clone()); }
+        else if n.len() > 0 && n[0] == (':' as Byte) {
+            // Unknown pseudo-header — silently skip (would be
+            // HTTP_MESSAGE_ERROR in a strict validator).
+        } else {
+            headers.push(f.clone());
+        }
+        i = i + 1;
+    }
+
+    match (method, scheme, authority, path) {
+        (Some(m), Some(s), Some(a), Some(p)) => Some(H3Request {
+            method: H3Method.from_text(&m),
+            scheme: s, authority: a, path: p,
+            headers: headers, body: body,
+        }),
+        _ => None,
+    }
+}
+
+pub fn parse_response_from_fields(fields: &List<HeaderField>, body: List<Byte>) -> Maybe<H3Response> {
+    let mut status_text: Maybe<Text> = None;
+    let mut headers:     List<HeaderField> = [];
+    let mut i: Int = 0;
+    while i < fields.len() {
+        let f = &fields[i];
+        let n = f.name.as_bytes();
+        if n == b":status" {
+            status_text = Some(f.value.clone());
+        } else if n.len() > 0 && n[0] == (':' as Byte) {
+            // Unknown response pseudo-header.
+        } else {
+            headers.push(f.clone());
+        }
+        i = i + 1;
+    }
+    match status_text {
+        Some(t) => {
+            let code = parse_status_code(&t)?;
+            Some(H3Response {
+                status: code, headers: headers, body: body, trailers: [],
+            })
+        },
+        None => None,
+    }
+}
+
+fn parse_status_code(t: &Text) -> Maybe<UInt16> {
+    let b = t.as_bytes();
+    if b.len() != 3 { return None; }
+    let mut v: UInt16 = 0_u16;
+    let mut i: Int = 0;
+    while i < 3 {
+        if b[i] < ('0' as Byte) || b[i] > ('9' as Byte) { return None; }
+        v = v * 10_u16 + ((b[i] - ('0' as Byte)) as UInt16);
+        i = i + 1;
+    }
+    Some(v)
+}

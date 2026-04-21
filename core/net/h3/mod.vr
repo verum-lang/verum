@@ -35,6 +35,9 @@ module core.net.h3;
 public module frame;
 public module error;
 public module qpack;
+public module settings;
+public module request;
+public module connection;
 
 // Re-exports — frame layer
 public mount .frame.{
@@ -57,4 +60,18 @@ public mount .error.{H3Error, H3ErrorCode};
 public mount .qpack.{
     HeaderField, QpackDecodeError,
     encode_field_section, decode_field_section,
+};
+
+// Re-exports — settings
+public mount .settings.{H3Settings};
+
+// Re-exports — request / response
+public mount .request.{
+    H3Request, H3Response, H3Method,
+    parse_request_from_fields, parse_response_from_fields,
+};
+
+// Re-exports — connection driver
+public mount .connection.{
+    H3Connection, H3Role, H3Phase, StreamWrite,
 };

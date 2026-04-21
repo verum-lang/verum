@@ -1,0 +1,58 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: h3, rfc9114, connection, driver, typecheck
+// @timeout: 10000
+// @expect: pass
+
+mount core.net.h3.*;
+mount core.net.h3.settings.{H3Settings};
+mount core.net.h3.request.{H3Request, H3Response, H3Method};
+
+fn check_client_flow() -> Result<(), core.net.h3.error.H3Error> {
+    let mut conn = H3Connection.new_client(H3Settings.defaults());
+    // Initial unistreams queued on construction.
+    let _initial = conn.drain_outbound();
+
+    let req = H3Request.get(Text.from_str("example.com"), Text.from_str("/"))
+        .with_header(Text.from_str("user-agent"), Text.from_str("verum-h3/0.1"));
+    let sid = conn.send_request(&req)?;
+    let _ = sid;
+    let _ = conn.drain_outbound();
+    Ok(())
+}
+
+fn check_server_flow() -> Result<(), core.net.h3.error.H3Error> {
+    let mut conn = H3Connection.new_server(H3Settings.defaults());
+    let _ = conn.drain_outbound();
+    let _ = conn.take_request();
+
+    // Construct a canned response for send_response typecheck coverage.
+    let resp = H3Response.ok(b"Hello".to_vec())
+        .with_header(Text.from_str("content-type"), Text.from_str("text/plain"));
+    let _ = conn.send_response(0_u64, &resp);
+    Ok(())
+}
+
+fn check_settings_roundtrip() {
+    let s = H3Settings.defaults();
+    let entries = s.to_entries();
+    let _ = H3Settings.from_entries(&entries);
+}
+
+fn check_request_parse() {
+    let fields = [
+        core.net.h3.qpack.HeaderField { name: Text.from_str(":method"), value: Text.from_str("GET") },
+        core.net.h3.qpack.HeaderField { name: Text.from_str(":scheme"), value: Text.from_str("https") },
+        core.net.h3.qpack.HeaderField { name: Text.from_str(":authority"), value: Text.from_str("x.test") },
+        core.net.h3.qpack.HeaderField { name: Text.from_str(":path"),   value: Text.from_str("/") },
+    ];
+    let _ = parse_request_from_fields(&fields, []);
+}
+
+fn main() {
+    let _ = check_client_flow();
+    let _ = check_server_flow();
+    check_settings_roundtrip();
+    check_request_parse();
+}

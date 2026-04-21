@@ -1,0 +1,86 @@
+// =============================================================================
+// net/h3/settings.vr — HTTP/3 SETTINGS negotiated parameters (RFC 9114 §7.2.4)
+// =============================================================================
+// Layer: 5 (Network — HTTP/3)
+// =============================================================================
+//
+// Typed view of the SETTINGS frame content. HTTP/3 peers MUST emit
+// SETTINGS as the first frame on their control streams and MUST NOT
+// emit it more than once (§7.2.4 "A SETTINGS frame MUST be sent as
+// the first frame of each control stream (see Section 6.2.1)").
+//
+// Unknown setting IDs are ignored — preserved via `extras` so
+// diagnostic tooling sees them.
+//
+// =============================================================================
+
+module core.net.h3.settings;
+
+mount core.*;
+mount core.collections.List;
+
+public type H3Settings is {
+    /// RFC 9204 §5 QPACK maximum dynamic-table capacity.
+    qpack_max_table_capacity:  UInt64,
+    /// RFC 9114 §7.2.4.1 max encoded field-section size — bound on
+    /// total header bytes a peer may send on any request.
+    max_field_section_size:    UInt64,
+    /// RFC 9204 §2.1.2 max blocked streams our decoder will tolerate.
+    qpack_blocked_streams:     UInt64,
+    /// RFC 9220 — enable CONNECT-based UDP/IP proxying.
+    enable_connect_protocol:   Bool,
+    /// RFC 9297 — accept HTTP/3 DATAGRAMs.
+    h3_datagram:               Bool,
+
+    /// Unknown / reserved setting IDs for diagnostic pass-through.
+    extras:                    List<(UInt64, UInt64)>,
+}
+
+implement H3Settings {
+    pub fn defaults() -> H3Settings {
+        H3Settings {
+            qpack_max_table_capacity: 0_u64,
+            max_field_section_size:   0xFFFFFFFFFFFFFFFF_u64,    // unlimited
+            qpack_blocked_streams:    0_u64,
+            enable_connect_protocol:  false,
+            h3_datagram:              false,
+            extras:                   [],
+        }
+    }
+
+    /// Collect a SETTINGS frame's (id, value) pairs into the typed
+    /// struct. Unknown IDs accumulate in `extras`.
+    pub fn from_entries(entries: &List<(UInt64, UInt64)>) -> H3Settings {
+        let mut out = H3Settings.defaults();
+        let mut i: Int = 0;
+        while i < entries.len() {
+            let (id, value) = &entries[i];
+            match *id {
+                0x01_u64 => { out.qpack_max_table_capacity = *value; },
+                0x06_u64 => { out.max_field_section_size   = *value; },
+                0x07_u64 => { out.qpack_blocked_streams    = *value; },
+                0x08_u64 => { out.enable_connect_protocol  = *value != 0_u64; },
+                0x33_u64 => { out.h3_datagram              = *value != 0_u64; },
+                _        => { out.extras.push((*id, *value)); },
+            }
+            i = i + 1;
+        }
+        out
+    }
+
+    /// Re-serialise to `(id, value)` pairs for encoding.
+    pub fn to_entries(&self) -> List<(UInt64, UInt64)> {
+        let mut out: List<(UInt64, UInt64)> = [];
+        out.push((0x01_u64, self.qpack_max_table_capacity));
+        out.push((0x06_u64, self.max_field_section_size));
+        out.push((0x07_u64, self.qpack_blocked_streams));
+        if self.enable_connect_protocol { out.push((0x08_u64, 1_u64)); }
+        if self.h3_datagram             { out.push((0x33_u64, 1_u64)); }
+        let mut i: Int = 0;
+        while i < self.extras.len() {
+            out.push(self.extras[i].clone());
+            i = i + 1;
+        }
+        out
+    }
+}

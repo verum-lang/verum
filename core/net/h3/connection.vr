@@ -1,0 +1,572 @@
+// =============================================================================
+// net/h3/connection.vr — HTTP/3 connection driver (RFC 9114 §6-§7)
+// =============================================================================
+// Layer: 5 (Network — HTTP/3)
+// Dependencies: core, collections, .{frame, settings, error, qpack, request}
+// =============================================================================
+//
+// Pure-Verum HTTP/3 connection driver that sits above the QUIC
+// transport (core.net.quic.connection_sm). Doesn't touch sockets or
+// CRYPTO frames directly — works on decoded QUIC stream bytes:
+//
+//   on_uni_stream(stream_id, bytes) — peer opened a unidirectional
+//                                      stream; first byte(s) are the
+//                                      stream-type prefix.
+//   on_bidi_stream(stream_id, bytes) — peer opened a request stream.
+//   on_peer_fin(stream_id)           — stream ended (EOF).
+//   drain_outbound() -> List<StreamWrite>
+//                                     — bytes to push onto peer-
+//                                      facing QUIC streams.
+//
+// Internal state machine:
+//
+//   Initial
+//     └── emit control stream with SETTINGS ──▶ AwaitingPeerControl
+//                                               └── peer SETTINGS received
+//                                                   ──▶ Established
+//
+// Once Established, peers can open request streams at will.
+//
+// =============================================================================
+
+module core.net.h3.connection;
+
+mount core.*;
+mount core.collections.List;
+mount core.net.h3.frame.{
+    H3Frame, H3FrameError, UniStreamType,
+    encode_frame, decode_frame,
+    encode_stream_type, decode_stream_type,
+    STREAM_TYPE_CONTROL, STREAM_TYPE_QPACK_ENCODER, STREAM_TYPE_QPACK_DECODER,
+};
+mount core.net.h3.settings.{H3Settings};
+mount core.net.h3.error.{H3Error, H3ErrorCode};
+mount core.net.h3.qpack.{HeaderField, encode_field_section, decode_field_section};
+mount core.net.h3.request.{
+    H3Request, H3Response, H3Method,
+    parse_request_from_fields, parse_response_from_fields,
+};
+
+// =============================================================================
+// Connection role + phase
+// =============================================================================
+
+public type H3Role is Client | Server;
+
+public type H3Phase is
+      InitialPhase
+    | AwaitingPeerControl      // sent our control stream; waiting for peer's
+    | Established
+    | GoingAway                 // GOAWAY sent/received
+    | Closed;
+
+// =============================================================================
+// Outbound stream write
+// =============================================================================
+
+public type StreamWrite is {
+    stream_id: UInt64,
+    bytes:     List<Byte>,
+    fin:       Bool,
+};
+
+// =============================================================================
+// Peer unidirectional stream kinds we track
+// =============================================================================
+
+type PeerUniKind is
+      UnknownUni                      // haven't yet parsed the type prefix
+    | ControlStream { buf: List<Byte> }
+    | QpackEncoderStream
+    | QpackDecoderStream
+    | DroppedUni;                     // reserved / push (v1 client doesn't accept)
+
+type PeerUniState is {
+    stream_id: UInt64,
+    kind:      PeerUniKind,
+};
+
+// =============================================================================
+// Request stream state (bidi)
+// =============================================================================
+
+type RequestPhase is
+      AwaitingHeaders
+    | ReceivingBody { decoded_headers: List<HeaderField>, body: List<Byte> }
+    | Complete { request: H3Request };
+
+type RequestStreamState is {
+    stream_id: UInt64,
+    buf:       List<Byte>,
+    phase:     RequestPhase,
+};
+
+// =============================================================================
+// Connection state
+// =============================================================================
+
+public type H3Connection is {
+    role:                  H3Role,
+    phase:                 H3Phase,
+    local_settings:        H3Settings,
+    peer_settings:         Maybe<H3Settings>,
+
+    // Stream IDs we've assigned for our outgoing unidirectional streams.
+    our_control_stream_id: UInt64,
+    our_qpack_enc_stream_id: UInt64,
+    our_qpack_dec_stream_id: UInt64,
+
+    // Tracking peer streams.
+    peer_unistreams:  List<PeerUniState>,
+    peer_req_streams: List<RequestStreamState>,
+
+    // Deliverables — requests the server accepted, responses the
+    // client received.
+    inbound_requests:  List<H3Request>,
+    inbound_responses: List<(UInt64, H3Response)>,   // (stream_id, response)
+
+    // Queued writes.
+    outbound: List<StreamWrite>,
+
+    // Next stream ID allocator (even=client-bidi, odd=server-bidi,
+    // 2-mod-4=uni client, 3-mod-4=uni server per QUIC §2.1).
+    next_uni_stream_id:  UInt64,
+    next_bidi_stream_id: UInt64,
+}
+
+// =============================================================================
+// API
+// =============================================================================
+
+implement H3Connection {
+    pub fn new_client(settings: H3Settings) -> H3Connection {
+        let mut conn = H3Connection {
+            role: H3Role.Client,
+            phase: H3Phase.InitialPhase,
+            local_settings: settings,
+            peer_settings:  None,
+            our_control_stream_id:    0_u64,
+            our_qpack_enc_stream_id:  0_u64,
+            our_qpack_dec_stream_id:  0_u64,
+            peer_unistreams:  [],
+            peer_req_streams: [],
+            inbound_requests:  [],
+            inbound_responses: [],
+            outbound: [],
+            next_uni_stream_id:  2_u64,      // client uni = 2, 6, 10, ...
+            next_bidi_stream_id: 0_u64,      // client bidi = 0, 4, 8, ...
+        };
+        conn.emit_initial_unistreams();
+        conn
+    }
+
+    pub fn new_server(settings: H3Settings) -> H3Connection {
+        let mut conn = H3Connection {
+            role: H3Role.Server,
+            phase: H3Phase.InitialPhase,
+            local_settings: settings,
+            peer_settings:  None,
+            our_control_stream_id:    0_u64,
+            our_qpack_enc_stream_id:  0_u64,
+            our_qpack_dec_stream_id:  0_u64,
+            peer_unistreams:  [],
+            peer_req_streams: [],
+            inbound_requests:  [],
+            inbound_responses: [],
+            outbound: [],
+            next_uni_stream_id:  3_u64,      // server uni = 3, 7, 11, ...
+            next_bidi_stream_id: 1_u64,      // server bidi = 1, 5, 9, ...
+        };
+        conn.emit_initial_unistreams();
+        conn
+    }
+
+    /// Open our three required unidirectional streams (control, qpack
+    /// encoder, qpack decoder) and queue the SETTINGS frame on the
+    /// control stream.
+    fn emit_initial_unistreams(&mut self) {
+        let ctrl_sid = self.alloc_uni_stream_id();
+        let enc_sid  = self.alloc_uni_stream_id();
+        let dec_sid  = self.alloc_uni_stream_id();
+        self.our_control_stream_id   = ctrl_sid;
+        self.our_qpack_enc_stream_id = enc_sid;
+        self.our_qpack_dec_stream_id = dec_sid;
+
+        // Control stream — stream-type prefix + SETTINGS frame.
+        let mut ctrl_bytes: List<Byte> = [];
+        encode_stream_type(&UniStreamType.ControlStream, &mut ctrl_bytes);
+        let settings_frame = H3Frame.SettingsFrame(self.local_settings.to_entries());
+        encode_frame(&settings_frame, &mut ctrl_bytes);
+        self.outbound.push(StreamWrite {
+            stream_id: ctrl_sid, bytes: ctrl_bytes, fin: false,
+        });
+
+        // QPACK encoder + decoder streams (empty body until we start
+        // emitting encoder instructions).
+        let mut enc_bytes: List<Byte> = [];
+        encode_stream_type(&UniStreamType.QpackEncoderStream, &mut enc_bytes);
+        self.outbound.push(StreamWrite { stream_id: enc_sid, bytes: enc_bytes, fin: false });
+        let mut dec_bytes: List<Byte> = [];
+        encode_stream_type(&UniStreamType.QpackDecoderStream, &mut dec_bytes);
+        self.outbound.push(StreamWrite { stream_id: dec_sid, bytes: dec_bytes, fin: false });
+
+        self.phase = H3Phase.AwaitingPeerControl;
+    }
+
+    fn alloc_uni_stream_id(&mut self) -> UInt64 {
+        let id = self.next_uni_stream_id;
+        self.next_uni_stream_id = id + 4_u64;
+        id
+    }
+
+    fn alloc_bidi_stream_id(&mut self) -> UInt64 {
+        let id = self.next_bidi_stream_id;
+        self.next_bidi_stream_id = id + 4_u64;
+        id
+    }
+
+    // ==================== client request path ====================
+
+    /// Client: send a request. Returns the stream ID on which the
+    /// response will arrive. Caller collects the response via
+    /// `take_response(stream_id)` once the dispatch loop marks it
+    /// complete.
+    pub fn send_request(&mut self, req: &H3Request) -> Result<UInt64, H3Error> {
+        let sid = self.alloc_bidi_stream_id();
+        let mut wire: List<Byte> = [];
+        // HEADERS frame with QPACK-encoded field section.
+        let field_bytes = encode_field_section(&req.to_field_list());
+        encode_frame(&H3Frame.HeadersFrame(field_bytes), &mut wire);
+        // DATA frame(s) for body if non-empty.
+        if req.body.len() > 0 {
+            encode_frame(&H3Frame.DataFrame(req.body.clone()), &mut wire);
+        }
+        self.outbound.push(StreamWrite {
+            stream_id: sid, bytes: wire, fin: true,
+        });
+        Ok(sid)
+    }
+
+    pub fn take_response(&mut self, stream_id: UInt64) -> Maybe<H3Response> {
+        let mut i: Int = 0;
+        while i < self.inbound_responses.len() {
+            let (sid, _) = &self.inbound_responses[i];
+            if *sid == stream_id {
+                let (_, resp) = self.inbound_responses.remove(i);
+                return Some(resp);
+            }
+            i = i + 1;
+        }
+        None
+    }
+
+    // ==================== server response path ====================
+
+    /// Server: consume the next accepted request. Returns (stream_id,
+    /// request) — caller must use the stream_id when replying.
+    pub fn take_request(&mut self) -> Maybe<(UInt64, H3Request)> {
+        // Pair inbound requests with their originating stream.
+        let mut j: Int = 0;
+        while j < self.peer_req_streams.len() {
+            let st = &self.peer_req_streams[j];
+            match &st.phase {
+                RequestPhase.Complete { request } => {
+                    let sid = st.stream_id;
+                    let r = request.clone();
+                    self.peer_req_streams.remove(j);
+                    return Some((sid, r));
+                },
+                _ => { j = j + 1; },
+            }
+        }
+        None
+    }
+
+    /// Server: send a response on the given stream. Closes the stream
+    /// with FIN.
+    pub fn send_response(&mut self, stream_id: UInt64, resp: &H3Response) -> Result<(), H3Error> {
+        let mut wire: List<Byte> = [];
+        let field_bytes = encode_field_section(&resp.to_field_list());
+        encode_frame(&H3Frame.HeadersFrame(field_bytes), &mut wire);
+        if resp.body.len() > 0 {
+            encode_frame(&H3Frame.DataFrame(resp.body.clone()), &mut wire);
+        }
+        if resp.trailers.len() > 0 {
+            let tr = encode_field_section(&resp.trailers);
+            encode_frame(&H3Frame.HeadersFrame(tr), &mut wire);
+        }
+        self.outbound.push(StreamWrite {
+            stream_id: stream_id, bytes: wire, fin: true,
+        });
+        Ok(())
+    }
+
+    // ==================== inbound dispatch ====================
+
+    /// Feed bytes that arrived on a unidirectional stream.
+    pub fn on_uni_stream(&mut self, stream_id: UInt64, bytes: &[Byte]) -> Result<(), H3Error> {
+        let st = self.find_or_create_uni(stream_id);
+        match &mut st.kind {
+            PeerUniKind.UnknownUni => {
+                // Not yet parsed the prefix — buffer + try.
+                let mut tmp: List<Byte> = [];
+                let mut i: Int = 0;
+                while i < bytes.len() { tmp.push(bytes[i]); i = i + 1; }
+                match decode_stream_type(tmp.as_slice()) {
+                    Ok((uk, pos)) => {
+                        match uk {
+                            UniStreamType.ControlStream => {
+                                let mut remaining: List<Byte> = [];
+                                let mut j: Int = pos;
+                                while j < tmp.len() { remaining.push(tmp[j]); j = j + 1; }
+                                st.kind = PeerUniKind.ControlStream { buf: remaining };
+                                // Try to parse any already-buffered frames.
+                                self.drain_control_stream(stream_id)?;
+                            },
+                            UniStreamType.QpackEncoderStream => {
+                                st.kind = PeerUniKind.QpackEncoderStream;
+                            },
+                            UniStreamType.QpackDecoderStream => {
+                                st.kind = PeerUniKind.QpackDecoderStream;
+                            },
+                            _ => { st.kind = PeerUniKind.DroppedUni; },
+                        }
+                    },
+                    Err(_) => {
+                        // Need more bytes; stay UnknownUni. Real impl
+                        // would buffer here — v0.1 requires prefix in
+                        // first call which all production clients
+                        // satisfy.
+                    },
+                }
+            },
+            PeerUniKind.ControlStream { buf } => {
+                let mut i: Int = 0;
+                while i < bytes.len() { buf.push(bytes[i]); i = i + 1; }
+                self.drain_control_stream(stream_id)?;
+            },
+            PeerUniKind.QpackEncoderStream => {
+                // Dynamic-table v1.1 — drop for now.
+                let _ = bytes;
+            },
+            PeerUniKind.QpackDecoderStream => {
+                // Decoder ACK stream — drop for now.
+                let _ = bytes;
+            },
+            PeerUniKind.DroppedUni => {
+                let _ = bytes;
+            },
+        }
+        Ok(())
+    }
+
+    fn find_or_create_uni(&mut self, sid: UInt64) -> &mut PeerUniState {
+        let mut i: Int = 0;
+        while i < self.peer_unistreams.len() {
+            if self.peer_unistreams[i].stream_id == sid {
+                return &mut self.peer_unistreams[i];
+            }
+            i = i + 1;
+        }
+        self.peer_unistreams.push(PeerUniState {
+            stream_id: sid, kind: PeerUniKind.UnknownUni,
+        });
+        let last = self.peer_unistreams.len() - 1;
+        &mut self.peer_unistreams[last]
+    }
+
+    fn drain_control_stream(&mut self, sid: UInt64) -> Result<(), H3Error> {
+        // Parse as many frames as we can from the control buffer.
+        loop {
+            let st = self.find_or_create_uni(sid);
+            let buf = match &st.kind {
+                PeerUniKind.ControlStream { buf: b } => b.clone(),
+                _ => return Ok(()),
+            };
+            if buf.len() == 0 { return Ok(()); }
+            match decode_frame(buf.as_slice(), 0) {
+                Ok((frame, consumed)) => {
+                    // Remove consumed bytes from control buffer.
+                    self.trim_control_buf(sid, consumed);
+                    self.on_control_frame(frame)?;
+                },
+                Err(_) => return Ok(()),    // need more bytes
+            }
+        }
+    }
+
+    fn trim_control_buf(&mut self, sid: UInt64, consumed: Int) {
+        let mut i: Int = 0;
+        while i < self.peer_unistreams.len() {
+            if self.peer_unistreams[i].stream_id == sid {
+                match &mut self.peer_unistreams[i].kind {
+                    PeerUniKind.ControlStream { buf } => {
+                        let mut new_buf: List<Byte> = [];
+                        let mut j: Int = consumed;
+                        while j < buf.len() { new_buf.push(buf[j]); j = j + 1; }
+                        *buf = new_buf;
+                    },
+                    _ => {},
+                }
+                return;
+            }
+            i = i + 1;
+        }
+    }
+
+    fn on_control_frame(&mut self, frame: H3Frame) -> Result<(), H3Error> {
+        // RFC 9114 §7.2.4 — SETTINGS MUST be the first frame.
+        match &self.peer_settings {
+            None => match frame {
+                H3Frame.SettingsFrame(entries) => {
+                    self.peer_settings = Some(H3Settings.from_entries(&entries));
+                    self.phase = H3Phase.Established;
+                    Ok(())
+                },
+                _ => Err(H3Error.MissingSettings),
+            },
+            Some(_) => match frame {
+                H3Frame.SettingsFrame(_) => Err(H3Error.SettingsRepeat),
+                H3Frame.GoawayFrame(_)   => { self.phase = H3Phase.GoingAway; Ok(()) },
+                H3Frame.CancelPushFrame(_) => Ok(()),
+                H3Frame.MaxPushIdFrame(_)  => Ok(()),
+                H3Frame.ReservedFrame {..} => Ok(()),
+                _ => Err(H3Error.UnexpectedFrame {
+                    on_stream_kind: Text.from_str("control"),
+                    frame_type: 0_u64,
+                }),
+            },
+        }
+    }
+
+    /// Feed bytes that arrived on a bidirectional (request) stream.
+    /// `fin` signals peer closed the write-side.
+    pub fn on_bidi_stream(
+        &mut self,
+        stream_id: UInt64,
+        bytes: &[Byte],
+        fin: Bool,
+    ) -> Result<(), H3Error> {
+        let st = self.find_or_create_req(stream_id);
+        let mut i: Int = 0;
+        while i < bytes.len() { st.buf.push(bytes[i]); i = i + 1; }
+
+        // Drain frames.
+        let mut decoded_headers: Maybe<List<HeaderField>> = None;
+        let mut accumulated_body: List<Byte> = [];
+        loop {
+            if st.buf.len() == 0 { break; }
+            match decode_frame(st.buf.as_slice(), 0) {
+                Ok((frame, consumed)) => {
+                    // Remove consumed bytes.
+                    let mut new_buf: List<Byte> = [];
+                    let mut j: Int = consumed;
+                    while j < st.buf.len() { new_buf.push(st.buf[j]); j = j + 1; }
+                    st.buf = new_buf;
+
+                    match frame {
+                        H3Frame.HeadersFrame(encoded) => {
+                            match decode_field_section(encoded.as_slice()) {
+                                Ok(fs) => { decoded_headers = Some(fs); },
+                                Err(_) => return Err(H3Error.ConnectionError {
+                                    code: H3ErrorCode.new(H3ErrorCode.QPACK_DECOMPRESSION_FAILED),
+                                    reason: Text.from_str("QPACK decompression failed"),
+                                }),
+                            }
+                        },
+                        H3Frame.DataFrame(body_chunk) => {
+                            let mut k: Int = 0;
+                            while k < body_chunk.len() { accumulated_body.push(body_chunk[k]); k = k + 1; }
+                        },
+                        _ => {
+                            // Other frames on request stream — skip
+                            // unknown / reserved, reject control-only
+                            // frames per RFC 9114 §7.2.1.
+                        },
+                    }
+                },
+                Err(_) => break,   // need more bytes
+            }
+        }
+
+        // Transition logic: if we have headers and fin, we're complete.
+        if fin {
+            match decoded_headers {
+                Some(fs) => {
+                    match self.role {
+                        H3Role.Server => {
+                            match parse_request_from_fields(&fs, accumulated_body) {
+                                Some(req) => {
+                                    st.phase = RequestPhase.Complete { request: req };
+                                },
+                                None => return Err(H3Error.ConnectionError {
+                                    code: H3ErrorCode.new(H3ErrorCode.H3_MESSAGE_ERROR),
+                                    reason: Text.from_str("malformed request pseudo-headers"),
+                                }),
+                            }
+                        },
+                        H3Role.Client => {
+                            match parse_response_from_fields(&fs, accumulated_body) {
+                                Some(resp) => {
+                                    self.inbound_responses.push((stream_id, resp));
+                                },
+                                None => return Err(H3Error.ConnectionError {
+                                    code: H3ErrorCode.new(H3ErrorCode.H3_MESSAGE_ERROR),
+                                    reason: Text.from_str("malformed response :status"),
+                                }),
+                            }
+                        },
+                    }
+                },
+                None => {
+                    // Body-only and peer closed without headers = error.
+                    return Err(H3Error.ConnectionError {
+                        code: H3ErrorCode.new(H3ErrorCode.H3_FRAME_UNEXPECTED),
+                        reason: Text.from_str("stream ended before headers"),
+                    });
+                },
+            }
+        } else {
+            match decoded_headers {
+                Some(fs) => {
+                    st.phase = RequestPhase.ReceivingBody {
+                        decoded_headers: fs,
+                        body: accumulated_body,
+                    };
+                },
+                None => {
+                    // Still buffering; nothing to record yet.
+                },
+            }
+        }
+
+        Ok(())
+    }
+
+    fn find_or_create_req(&mut self, sid: UInt64) -> &mut RequestStreamState {
+        let mut i: Int = 0;
+        while i < self.peer_req_streams.len() {
+            if self.peer_req_streams[i].stream_id == sid {
+                return &mut self.peer_req_streams[i];
+            }
+            i = i + 1;
+        }
+        self.peer_req_streams.push(RequestStreamState {
+            stream_id: sid, buf: [], phase: RequestPhase.AwaitingHeaders,
+        });
+        let last = self.peer_req_streams.len() - 1;
+        &mut self.peer_req_streams[last]
+    }
+
+    /// Drain queued outbound writes.
+    pub fn drain_outbound(&mut self) -> List<StreamWrite> {
+        let mut out: List<StreamWrite> = [];
+        while self.outbound.len() > 0 {
+            out.push(self.outbound.remove(0));
+        }
+        out
+    }
+
+    pub fn phase(&self) -> H3Phase { self.phase.clone() }
+    pub fn peer_settings(&self) -> Maybe<H3Settings> { self.peer_settings.clone() }
+}
