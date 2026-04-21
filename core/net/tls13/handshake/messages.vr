@@ -1,0 +1,420 @@
+// =============================================================================
+// net/tls13/handshake/messages.vr — TLS 1.3 handshake messages (RFC 8446 §4)
+// =============================================================================
+// Layer: 5 (Network — TLS 1.3 core)
+// =============================================================================
+//
+// RFC 8446 §4 defines the handshake message ADT:
+//
+//   struct {
+//       HandshakeType msg_type;
+//       uint24 length;
+//       select (msg_type) {
+//           case client_hello:          ClientHello;
+//           case server_hello:          ServerHello;
+//           case new_session_ticket:    NewSessionTicket;
+//           case end_of_early_data:     EndOfEarlyData;
+//           case encrypted_extensions:  EncryptedExtensions;
+//           case certificate_request:   CertificateRequest;
+//           case certificate:           Certificate;
+//           case certificate_verify:    CertificateVerify;
+//           case finished:              Finished;
+//           case key_update:            KeyUpdate;
+//       };
+//   } Handshake;
+//
+// This module carries the full message ADT + wire-level encode/decode.
+// The transcript-hash machinery (RFC 8446 §4.4.1) sits in `transcript.vr`;
+// the typed state machine that drives these messages lives in
+// `client_sm.vr` / `server_sm.vr`.
+//
+// =============================================================================
+
+module core.net.tls13.handshake.messages;
+
+mount core.*;
+mount core.collections.List;
+mount core.net.tls13.handshake.codec.{
+    Reader, CodecError,
+    put_u8, put_u16, put_u24, put_u32, put_bytes,
+    vec_u8, vec_u16, vec_u24,
+};
+mount core.net.tls13.handshake.extension.{
+    Extension, ExtensionContext,
+    encode_extensions_block, decode_extensions_block,
+};
+mount core.net.tls13.version.{ProtocolVersion, LEGACY_VERSION_TLS_1_2};
+mount core.net.tls13.cipher_suite.{CipherSuite};
+mount core.net.tls13.sig_scheme.{SignatureScheme};
+
+// =============================================================================
+// HandshakeType — RFC 8446 §4
+// =============================================================================
+
+public const HST_CLIENT_HELLO:        UInt8 = 1_u8;
+public const HST_SERVER_HELLO:        UInt8 = 2_u8;
+public const HST_NEW_SESSION_TICKET:  UInt8 = 4_u8;
+public const HST_END_OF_EARLY_DATA:   UInt8 = 5_u8;
+public const HST_ENCRYPTED_EXTENSIONS: UInt8 = 8_u8;
+public const HST_CERTIFICATE:         UInt8 = 11_u8;
+public const HST_CERTIFICATE_REQUEST: UInt8 = 13_u8;
+public const HST_CERTIFICATE_VERIFY:  UInt8 = 15_u8;
+public const HST_FINISHED:            UInt8 = 20_u8;
+public const HST_KEY_UPDATE:          UInt8 = 24_u8;
+public const HST_MESSAGE_HASH:        UInt8 = 254_u8;  // synthetic HRR transcript
+
+// =============================================================================
+// Messages
+// =============================================================================
+
+public type ClientHello is {
+    legacy_version:      ProtocolVersion,  // always 0x0303
+    random:              [Byte; 32],
+    legacy_session_id:   List<Byte>,        // 0..=32 bytes; empty for brand-new 1.3
+    cipher_suites:       List<CipherSuite>,
+    legacy_compression_methods: List<Byte>, // always [0x00]
+    extensions:          List<Extension>,
+};
+
+public type ServerHello is {
+    legacy_version:      ProtocolVersion,  // always 0x0303
+    random:              [Byte; 32],       // check DOWNGRADE_SENTINEL tail
+    legacy_session_id_echo: List<Byte>,     // echoes ClientHello session_id
+    cipher_suite:        CipherSuite,
+    legacy_compression_method: UInt8,      // always 0
+    extensions:          List<Extension>,
+};
+
+/// HRR is structurally a ServerHello with a specific `random` value
+/// (RFC 8446 §4.1.3). Caller detects via `is_hello_retry_request`.
+pub const HRR_RANDOM: [Byte; 32] = [
+    0xCF_u8, 0x21_u8, 0xAD_u8, 0x74_u8, 0xE5_u8, 0x9A_u8, 0x61_u8, 0x11_u8,
+    0xBE_u8, 0x1D_u8, 0x8C_u8, 0x02_u8, 0x1E_u8, 0x65_u8, 0xB8_u8, 0x91_u8,
+    0xC2_u8, 0xA2_u8, 0x11_u8, 0x16_u8, 0x7A_u8, 0xBB_u8, 0x8C_u8, 0x5E_u8,
+    0x07_u8, 0x9E_u8, 0x09_u8, 0xE2_u8, 0xC8_u8, 0xA8_u8, 0x33_u8, 0x9C_u8,
+];
+
+public type EncryptedExtensions is {
+    extensions: List<Extension>,
+};
+
+public type CertificateEntry is {
+    /// DER-encoded certificate.
+    cert_data:  List<Byte>,
+    /// Per-entry extensions (SCT, status_request).
+    extensions: List<Extension>,
+};
+
+public type CertificateMessage is {
+    /// Certificate request context (empty for TLS 1.3 server auth).
+    certificate_request_context: List<Byte>,
+    certificate_list:            List<CertificateEntry>,
+};
+
+public type CertificateRequest is {
+    certificate_request_context: List<Byte>,
+    extensions:                  List<Extension>,  // MUST include signature_algorithms
+};
+
+public type CertificateVerify is {
+    algorithm: SignatureScheme,
+    signature: List<Byte>,
+};
+
+public type Finished is {
+    verify_data: List<Byte>,    // HMAC-Hash-length bytes (32 for SHA-256, 48 for SHA-384)
+};
+
+public type NewSessionTicket is {
+    ticket_lifetime:    UInt32,
+    ticket_age_add:     UInt32,
+    ticket_nonce:       List<Byte>,
+    ticket:             List<Byte>,
+    extensions:         List<Extension>,
+};
+
+public type KeyUpdate is {
+    request_update: KeyUpdateRequest,
+};
+
+public type KeyUpdateRequest is UpdateNotRequested | UpdateRequested;
+
+implement KeyUpdateRequest {
+    pub fn to_u8(&self) -> UInt8 {
+        match self {
+            KeyUpdateRequest.UpdateNotRequested => 0_u8,
+            KeyUpdateRequest.UpdateRequested    => 1_u8,
+        }
+    }
+    pub fn from_u8(v: UInt8) -> KeyUpdateRequest {
+        match v {
+            1_u8 => KeyUpdateRequest.UpdateRequested,
+            _    => KeyUpdateRequest.UpdateNotRequested,
+        }
+    }
+}
+
+public type EndOfEarlyData is ();
+
+public type HandshakeMessage is
+      ClientHelloMsg(ClientHello)
+    | ServerHelloMsg(ServerHello)
+    | HelloRetryRequestMsg(ServerHello)     // structural view; random = HRR_RANDOM
+    | EncryptedExtensionsMsg(EncryptedExtensions)
+    | CertificateMsg(CertificateMessage)
+    | CertificateRequestMsg(CertificateRequest)
+    | CertificateVerifyMsg(CertificateVerify)
+    | FinishedMsg(Finished)
+    | NewSessionTicketMsg(NewSessionTicket)
+    | KeyUpdateMsg(KeyUpdate)
+    | EndOfEarlyDataMsg;
+
+// =============================================================================
+// Encoders — produce the full 4-byte header (type + uint24 length) wrapper.
+// =============================================================================
+
+public fn encode_handshake(msg: &HandshakeMessage, out: &mut List<Byte>) -> Result<(), CodecError> {
+    match msg {
+        HandshakeMessage.ClientHelloMsg(ch)  => encode_wrapped(HST_CLIENT_HELLO, out, |b| encode_client_hello(ch, b)),
+        HandshakeMessage.ServerHelloMsg(sh) | HandshakeMessage.HelloRetryRequestMsg(sh) =>
+            encode_wrapped(HST_SERVER_HELLO, out, |b| encode_server_hello(sh, b)),
+        HandshakeMessage.EncryptedExtensionsMsg(ee) =>
+            encode_wrapped(HST_ENCRYPTED_EXTENSIONS, out, |b| encode_extensions_block(&ee.extensions, b)),
+        HandshakeMessage.CertificateMsg(cm) =>
+            encode_wrapped(HST_CERTIFICATE, out, |b| encode_certificate(cm, b)),
+        HandshakeMessage.CertificateRequestMsg(cr) =>
+            encode_wrapped(HST_CERTIFICATE_REQUEST, out, |b| encode_certificate_request(cr, b)),
+        HandshakeMessage.CertificateVerifyMsg(cv) =>
+            encode_wrapped(HST_CERTIFICATE_VERIFY, out, |b| encode_certificate_verify(cv, b)),
+        HandshakeMessage.FinishedMsg(fin) =>
+            encode_wrapped(HST_FINISHED, out, |b| { put_bytes(b, fin.verify_data.as_slice()); Ok(()) }),
+        HandshakeMessage.NewSessionTicketMsg(nst) =>
+            encode_wrapped(HST_NEW_SESSION_TICKET, out, |b| encode_new_session_ticket(nst, b)),
+        HandshakeMessage.KeyUpdateMsg(ku) =>
+            encode_wrapped(HST_KEY_UPDATE, out, |b| { put_u8(b, ku.request_update.to_u8()); Ok(()) }),
+        HandshakeMessage.EndOfEarlyDataMsg =>
+            encode_wrapped(HST_END_OF_EARLY_DATA, out, |b| { let _ = b; Ok(()) }),
+    }
+}
+
+fn encode_wrapped<F>(
+    msg_type: UInt8,
+    out: &mut List<Byte>,
+    body: F,
+) -> Result<(), CodecError>
+where F: fn(&mut List<Byte>) -> Result<(), CodecError>,
+{
+    put_u8(out, msg_type);
+    vec_u24(out, body)
+}
+
+fn encode_client_hello(ch: &ClientHello, out: &mut List<Byte>) -> Result<(), CodecError> {
+    put_u16(out, ch.legacy_version.to_u16());
+    let mut i: Int = 0;
+    while i < 32 { out.push(ch.random[i]); i = i + 1; }
+    vec_u8(out, |b| { put_bytes(b, ch.legacy_session_id.as_slice()); Ok(()) })?;
+    vec_u16(out, |b| {
+        let mut j: Int = 0;
+        while j < ch.cipher_suites.len() {
+            put_u16(b, ch.cipher_suites[j].to_u16());
+            j = j + 1;
+        }
+        Ok(())
+    })?;
+    vec_u8(out, |b| { put_bytes(b, ch.legacy_compression_methods.as_slice()); Ok(()) })?;
+    encode_extensions_block(&ch.extensions, out)
+}
+
+fn encode_server_hello(sh: &ServerHello, out: &mut List<Byte>) -> Result<(), CodecError> {
+    put_u16(out, sh.legacy_version.to_u16());
+    let mut i: Int = 0;
+    while i < 32 { out.push(sh.random[i]); i = i + 1; }
+    vec_u8(out, |b| { put_bytes(b, sh.legacy_session_id_echo.as_slice()); Ok(()) })?;
+    put_u16(out, sh.cipher_suite.to_u16());
+    put_u8(out, sh.legacy_compression_method);
+    encode_extensions_block(&sh.extensions, out)
+}
+
+fn encode_certificate(cm: &CertificateMessage, out: &mut List<Byte>) -> Result<(), CodecError> {
+    vec_u8(out, |b| { put_bytes(b, cm.certificate_request_context.as_slice()); Ok(()) })?;
+    vec_u24(out, |b| {
+        let mut i: Int = 0;
+        while i < cm.certificate_list.len() {
+            let e = &cm.certificate_list[i];
+            vec_u24(b, |b2| { put_bytes(b2, e.cert_data.as_slice()); Ok(()) })?;
+            encode_extensions_block(&e.extensions, b)?;
+            i = i + 1;
+        }
+        Ok(())
+    })
+}
+
+fn encode_certificate_request(cr: &CertificateRequest, out: &mut List<Byte>) -> Result<(), CodecError> {
+    vec_u8(out, |b| { put_bytes(b, cr.certificate_request_context.as_slice()); Ok(()) })?;
+    encode_extensions_block(&cr.extensions, out)
+}
+
+fn encode_certificate_verify(cv: &CertificateVerify, out: &mut List<Byte>) -> Result<(), CodecError> {
+    put_u16(out, cv.algorithm.to_u16());
+    vec_u16(out, |b| { put_bytes(b, cv.signature.as_slice()); Ok(()) })
+}
+
+fn encode_new_session_ticket(nst: &NewSessionTicket, out: &mut List<Byte>) -> Result<(), CodecError> {
+    put_u32(out, nst.ticket_lifetime);
+    put_u32(out, nst.ticket_age_add);
+    vec_u8(out, |b| { put_bytes(b, nst.ticket_nonce.as_slice()); Ok(()) })?;
+    vec_u16(out, |b| { put_bytes(b, nst.ticket.as_slice()); Ok(()) })?;
+    encode_extensions_block(&nst.extensions, out)
+}
+
+// =============================================================================
+// Decoder — parses type + u24 length then the body.
+// =============================================================================
+
+public fn decode_handshake(r: &mut Reader) -> Result<HandshakeMessage, CodecError> {
+    let msg_type = r.take_u8()?;
+    let mut body = r.sub_u24()?;
+    let msg = match msg_type {
+        1_u8  /* HST_CLIENT_HELLO */       => HandshakeMessage.ClientHelloMsg(decode_client_hello(&mut body)?),
+        2_u8  /* HST_SERVER_HELLO */       => {
+            let sh = decode_server_hello(&mut body)?;
+            if is_hello_retry_request(&sh) {
+                HandshakeMessage.HelloRetryRequestMsg(sh)
+            } else {
+                HandshakeMessage.ServerHelloMsg(sh)
+            }
+        },
+        8_u8  /* HST_ENCRYPTED_EXTENSIONS */ => {
+            let exts = decode_extensions_block(&mut body, ExtensionContext.EncryptedExtensionsCtx)?;
+            HandshakeMessage.EncryptedExtensionsMsg(EncryptedExtensions { extensions: exts })
+        },
+        11_u8 /* HST_CERTIFICATE */         => HandshakeMessage.CertificateMsg(decode_certificate(&mut body)?),
+        13_u8 /* HST_CERTIFICATE_REQUEST */ => HandshakeMessage.CertificateRequestMsg(decode_certificate_request(&mut body)?),
+        15_u8 /* HST_CERTIFICATE_VERIFY */  => HandshakeMessage.CertificateVerifyMsg(decode_certificate_verify(&mut body)?),
+        20_u8 /* HST_FINISHED */            => {
+            let v = body.take_bytes(body.remaining())?;
+            HandshakeMessage.FinishedMsg(Finished { verify_data: v })
+        },
+        4_u8  /* HST_NEW_SESSION_TICKET */  => HandshakeMessage.NewSessionTicketMsg(decode_new_session_ticket(&mut body)?),
+        24_u8 /* HST_KEY_UPDATE */          => {
+            let v = body.take_u8()?;
+            HandshakeMessage.KeyUpdateMsg(KeyUpdate { request_update: KeyUpdateRequest.from_u8(v) })
+        },
+        5_u8  /* HST_END_OF_EARLY_DATA */   => HandshakeMessage.EndOfEarlyDataMsg,
+        _ => return Err(CodecError.InvalidValue(Text.from_str("unknown HandshakeType"))),
+    };
+    Ok(msg)
+}
+
+fn decode_client_hello(r: &mut Reader) -> Result<ClientHello, CodecError> {
+    let legacy_version = ProtocolVersion.from_u16(r.take_u16()?);
+    let rbytes = r.take_bytes(32)?;
+    let mut random: [Byte; 32] = [0_u8; 32];
+    let mut i: Int = 0;
+    while i < 32 { random[i] = rbytes[i]; i = i + 1; }
+    let legacy_session_id = r.take_vec_u8()?;
+
+    let mut cipher_suites: List<CipherSuite> = [];
+    let mut cs_list = r.sub_u16()?;
+    while !cs_list.is_at_end() {
+        cipher_suites.push(CipherSuite.from_u16(cs_list.take_u16()?));
+    }
+
+    let legacy_compression_methods = r.take_vec_u8()?;
+
+    let extensions = decode_extensions_block(r, ExtensionContext.ClientHelloCtx)?;
+
+    Ok(ClientHello {
+        legacy_version: legacy_version,
+        random: random,
+        legacy_session_id: legacy_session_id,
+        cipher_suites: cipher_suites,
+        legacy_compression_methods: legacy_compression_methods,
+        extensions: extensions,
+    })
+}
+
+fn decode_server_hello(r: &mut Reader) -> Result<ServerHello, CodecError> {
+    let legacy_version = ProtocolVersion.from_u16(r.take_u16()?);
+    let rbytes = r.take_bytes(32)?;
+    let mut random: [Byte; 32] = [0_u8; 32];
+    let mut i: Int = 0;
+    while i < 32 { random[i] = rbytes[i]; i = i + 1; }
+    let legacy_session_id_echo = r.take_vec_u8()?;
+    let cipher_suite = CipherSuite.from_u16(r.take_u16()?);
+    let legacy_compression_method = r.take_u8()?;
+    // Disambiguation between SH / HRR happens on the random field — we
+    // emit HelloRetryRequestCtx for the extensions parser so it picks
+    // the key_share [HRR selected_group] variant.
+    let ctx = if is_hrr_random(&random) {
+        ExtensionContext.HelloRetryRequestCtx
+    } else {
+        ExtensionContext.ServerHelloCtx
+    };
+    let extensions = decode_extensions_block(r, ctx)?;
+
+    Ok(ServerHello {
+        legacy_version: legacy_version,
+        random: random,
+        legacy_session_id_echo: legacy_session_id_echo,
+        cipher_suite: cipher_suite,
+        legacy_compression_method: legacy_compression_method,
+        extensions: extensions,
+    })
+}
+
+fn decode_certificate(r: &mut Reader) -> Result<CertificateMessage, CodecError> {
+    let context = r.take_vec_u8()?;
+    let mut list: List<CertificateEntry> = [];
+    let mut sub = r.sub_u24()?;
+    while !sub.is_at_end() {
+        let cert_data = sub.take_vec_u24()?;
+        let exts = decode_extensions_block(&mut sub, ExtensionContext.CertificateCtx)?;
+        list.push(CertificateEntry { cert_data: cert_data, extensions: exts });
+    }
+    Ok(CertificateMessage { certificate_request_context: context, certificate_list: list })
+}
+
+fn decode_certificate_request(r: &mut Reader) -> Result<CertificateRequest, CodecError> {
+    let context = r.take_vec_u8()?;
+    let exts = decode_extensions_block(r, ExtensionContext.CertificateRequestCtx)?;
+    Ok(CertificateRequest { certificate_request_context: context, extensions: exts })
+}
+
+fn decode_certificate_verify(r: &mut Reader) -> Result<CertificateVerify, CodecError> {
+    let alg = SignatureScheme.from_u16(r.take_u16()?);
+    let sig = r.take_vec_u16()?;
+    Ok(CertificateVerify { algorithm: alg, signature: sig })
+}
+
+fn decode_new_session_ticket(r: &mut Reader) -> Result<NewSessionTicket, CodecError> {
+    let lifetime = r.take_u32()?;
+    let age_add = r.take_u32()?;
+    let nonce = r.take_vec_u8()?;
+    let ticket = r.take_vec_u16()?;
+    let exts = decode_extensions_block(r, ExtensionContext.NewSessionTicketCtx)?;
+    Ok(NewSessionTicket {
+        ticket_lifetime: lifetime,
+        ticket_age_add:  age_add,
+        ticket_nonce:    nonce,
+        ticket:          ticket,
+        extensions:      exts,
+    })
+}
+
+// =============================================================================
+// Helpers
+// =============================================================================
+
+fn is_hrr_random(random: &[Byte; 32]) -> Bool {
+    let mut i: Int = 0;
+    while i < 32 {
+        if random[i] != HRR_RANDOM[i] { return false; }
+        i = i + 1;
+    }
+    true
+}
+
+public fn is_hello_retry_request(sh: &ServerHello) -> Bool {
+    is_hrr_random(&sh.random)
+}

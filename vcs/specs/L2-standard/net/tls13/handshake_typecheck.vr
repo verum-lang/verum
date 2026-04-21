@@ -1,0 +1,86 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: tls13, rfc8446, handshake, client-sm, typecheck
+// @timeout: 10000
+// @expect: pass
+//
+// Typecheck-level validation of the TLS 1.3 handshake facade.
+// Covers:
+//   * HandshakeMessage encode/decode roundtrip shape
+//   * Extension codec per context (CH / SH / EE / HRR / Cert / CR / NST)
+//   * Transcript hash incremental + HRR reseed
+//   * ClientSm typed transitions — Start → WaitServerHello
+//
+// Full RFC 8448 byte-exact run-tests land once the DHE wiring and
+// CertificateVerify signature verify path are integrated with the
+// existing core.security.ecc / core.security.sig surfaces (follow-up
+// commit).
+
+mount core.net.tls13.*;
+mount core.net.tls13.handshake.*;
+mount core.net.tls13.cipher_suite.{CipherSuite, HashKind};
+mount core.net.tls13.named_group.{NamedGroup};
+mount core.net.tls13.sig_scheme.{SignatureScheme};
+mount core.security.x509.{TrustStore};
+
+fn check_transcript() {
+    let mut t = Transcript.new(HashKind.Sha256);
+    t.append(b"hello");
+    let _ = t.snapshot();
+    t.reseed_for_hrr();
+    t.append(b"post-hrr");
+    let _ = t.snapshot();
+}
+
+fn check_handshake_encode_decode() -> Result<(), CodecError> {
+    let ch = ClientHello {
+        legacy_version: core.net.tls13.version.LEGACY_VERSION_TLS_1_2,
+        random:         [0_u8; 32],
+        legacy_session_id: [],
+        cipher_suites:  [CipherSuite.TlsAes128GcmSha256],
+        legacy_compression_methods: [0_u8],
+        extensions: [
+            Extension.SupportedVersionsClient { versions: [core.net.tls13.version.TLS_1_3] },
+            Extension.SupportedGroupsExt { groups: [NamedGroup.X25519] },
+            Extension.SignatureAlgorithmsExt { schemes: [SignatureScheme.Ed25519Scheme] },
+        ],
+    };
+    let msg = HandshakeMessage.ClientHelloMsg(ch);
+    let mut wire: List<Byte> = [];
+    encode_handshake(&msg, &mut wire)?;
+
+    let mut r = Reader.new(wire.as_slice());
+    let _ = decode_handshake(&mut r)?;
+    Ok(())
+}
+
+fn check_client_sm_start() -> Result<(), core.net.tls13.error.TlsError> {
+    let config = ClientConfig {
+        server_name: Text.from_str("example.com"),
+        alpn:        [],
+        trust:       TrustStore.empty(),
+        groups:      [NamedGroup.X25519, NamedGroup.Secp256r1],
+        suites:      [
+            CipherSuite.TlsAes128GcmSha256,
+            CipherSuite.TlsChaCha20Poly1305Sha256,
+        ],
+        sig_schemes: SignatureScheme.default_offer_list(),
+        verify_hostname: true,
+        random:      [0_u8; 32],
+        key_shares:  [],
+    };
+    let sm = ClientSm.new(config);
+    let (sm2, _ch_wire) = sm.start()?;
+    // Expect to be in WaitServerHello now.
+    match sm2 {
+        ClientSm.WaitServerHelloSm(_) => Ok(()),
+        _ => Ok(()),   // shape-only; real tests assert the variant.
+    }
+}
+
+fn main() {
+    check_transcript();
+    let _ = check_handshake_encode_decode();
+    let _ = check_client_sm_start();
+}

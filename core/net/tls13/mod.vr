@@ -68,6 +68,7 @@ public module alert;
 public module error;
 public module keyschedule;
 public module record;
+public module handshake;
 
 // Re-exports
 public mount .version.{ProtocolVersion, TLS_1_3, LEGACY_VERSION_TLS_1_2,
@@ -83,3 +84,14 @@ public mount .keyschedule.{
 };
 public mount .record.{ContentType, AeadState, RecordError,
                       MAX_PLAINTEXT_SIZE, MAX_CIPHERTEXT_SIZE};
+public mount .handshake.{
+    HandshakeMessage, ClientHello, ServerHello, EncryptedExtensions,
+    CertificateMessage, CertificateEntry, CertificateRequest,
+    CertificateVerify, Finished, NewSessionTicket, KeyUpdate, KeyUpdateRequest,
+    Extension, ExtensionContext, KeyShareEntry, ServerName,
+    Transcript,
+    ClientConfig, ClientSm, StepOutput,
+    encode_handshake, decode_handshake,
+    encode_extensions_block, decode_extensions_block,
+    is_hello_retry_request,
+};

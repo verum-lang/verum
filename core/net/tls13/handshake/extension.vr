@@ -1,0 +1,535 @@
+// =============================================================================
+// net/tls13/handshake/extension.vr — TLS 1.3 Extension ADT (RFC 8446 §4.2)
+// =============================================================================
+// Layer: 5 (Network — TLS 1.3 core)
+// =============================================================================
+//
+// RFC 8446 §4.2:
+//
+//   Extension ::= struct {
+//       ExtensionType extension_type;
+//       opaque extension_data<0..2^16-1>;
+//   }
+//
+// Warp supports the TLS 1.3 MUST / SHOULD extensions plus the most
+// common optional ones seen in the WebPKI ecosystem:
+//
+//   * server_name                   (0, RFC 6066)
+//   * supported_groups              (10)
+//   * signature_algorithms          (13)
+//   * application_layer_protocol_negotiation (16, RFC 7301)
+//   * supported_versions            (43)
+//   * key_share                     (51)
+//   * pre_shared_key                (41)     — resumption (v1.1)
+//   * psk_key_exchange_modes        (45)     — resumption (v1.1)
+//   * early_data                    (42)     — 0-RTT (v1.1)
+//   * signature_algorithms_cert     (50)
+//   * quic_transport_parameters     (57, RFC 9001)
+//   * cookie                        (44, RFC 8446 §4.2.2)
+//   * status_request                (5, RFC 6066 OCSP)
+//   * record_size_limit             (28, RFC 8449)
+//   * certificate_authorities       (47)
+//
+// Unknown extensions preserved as `Unknown(type, data)` for pass-
+// through (grease, future) — RFC 8446 §4.2 requires parsers to ignore
+// unknown extensions but not fail the handshake.
+//
+// =============================================================================
+
+module core.net.tls13.handshake.extension;
+
+mount core.*;
+mount core.collections.List;
+mount core.net.tls13.handshake.codec.{
+    Reader, CodecError,
+    put_u8, put_u16, put_u24, put_u32, put_bytes,
+    vec_u8, vec_u16, vec_u24,
+};
+mount core.net.tls13.version.{ProtocolVersion, TLS_1_3};
+mount core.net.tls13.named_group.{NamedGroup};
+mount core.net.tls13.sig_scheme.{SignatureScheme};
+
+// =============================================================================
+// ExtensionType (RFC 8446 §4.2 + extensions registry)
+// =============================================================================
+
+public const EXT_SERVER_NAME:              UInt16 = 0_u16;
+public const EXT_MAX_FRAGMENT_LENGTH:      UInt16 = 1_u16;
+public const EXT_STATUS_REQUEST:           UInt16 = 5_u16;
+public const EXT_SUPPORTED_GROUPS:         UInt16 = 10_u16;
+public const EXT_SIGNATURE_ALGORITHMS:     UInt16 = 13_u16;
+public const EXT_USE_SRTP:                 UInt16 = 14_u16;
+public const EXT_HEARTBEAT:                UInt16 = 15_u16;
+public const EXT_ALPN:                     UInt16 = 16_u16;
+public const EXT_SIGNED_CERTIFICATE_TIMESTAMP: UInt16 = 18_u16;
+public const EXT_CLIENT_CERTIFICATE_TYPE:  UInt16 = 19_u16;
+public const EXT_SERVER_CERTIFICATE_TYPE:  UInt16 = 20_u16;
+public const EXT_PADDING:                  UInt16 = 21_u16;
+public const EXT_RECORD_SIZE_LIMIT:        UInt16 = 28_u16;
+public const EXT_COMPRESS_CERTIFICATE:     UInt16 = 27_u16;
+public const EXT_PRE_SHARED_KEY:           UInt16 = 41_u16;
+public const EXT_EARLY_DATA:               UInt16 = 42_u16;
+public const EXT_SUPPORTED_VERSIONS:       UInt16 = 43_u16;
+public const EXT_COOKIE:                   UInt16 = 44_u16;
+public const EXT_PSK_KEY_EXCHANGE_MODES:   UInt16 = 45_u16;
+public const EXT_CERTIFICATE_AUTHORITIES:  UInt16 = 47_u16;
+public const EXT_OID_FILTERS:              UInt16 = 48_u16;
+public const EXT_POST_HANDSHAKE_AUTH:      UInt16 = 49_u16;
+public const EXT_SIGNATURE_ALGORITHMS_CERT: UInt16 = 50_u16;
+public const EXT_KEY_SHARE:                UInt16 = 51_u16;
+public const EXT_QUIC_TRANSPORT_PARAMETERS: UInt16 = 57_u16;
+
+// =============================================================================
+// Key share entry
+// =============================================================================
+
+public type KeyShareEntry is {
+    group:    NamedGroup,
+    /// Raw public-key bytes (uncompressed EC point or X25519 key).
+    key_exchange: List<Byte>,
+};
+
+// =============================================================================
+// Server name
+// =============================================================================
+
+public type ServerName is {
+    /// name_type = 0 (host_name); we reject other types.
+    host_name: Text,
+};
+
+// =============================================================================
+// PSK key-exchange modes (RFC 8446 §4.2.9)
+// =============================================================================
+
+public type PskKeMode is PskKe | PskDheKe | UnknownMode(UInt8);
+
+implement PskKeMode {
+    pub fn to_u8(&self) -> UInt8 {
+        match self {
+            PskKeMode.PskKe         => 0_u8,
+            PskKeMode.PskDheKe      => 1_u8,
+            PskKeMode.UnknownMode(v) => *v,
+        }
+    }
+    pub fn from_u8(v: UInt8) -> PskKeMode {
+        match v {
+            0_u8 => PskKeMode.PskKe,
+            1_u8 => PskKeMode.PskDheKe,
+            _    => PskKeMode.UnknownMode(v),
+        }
+    }
+}
+
+// =============================================================================
+// Early-data indication
+// =============================================================================
+
+public type EarlyDataIndication is
+      EarlyDataClient                                 // no payload (CH + EE)
+    | EarlyDataTicket { max_early_data_size: UInt32 }; // server ticket
+
+// =============================================================================
+// Extension ADT
+// =============================================================================
+
+public type Extension is
+      ServerNameExt { names: List<ServerName> }
+    | SupportedGroupsExt { groups: List<NamedGroup> }
+    | SignatureAlgorithmsExt { schemes: List<SignatureScheme> }
+    | SignatureAlgorithmsCertExt { schemes: List<SignatureScheme> }
+    | AlpnExt { protocols: List<List<Byte>> }
+    | SupportedVersionsClient { versions: List<ProtocolVersion> }
+    | SupportedVersionsServer { selected: ProtocolVersion }
+    | KeyShareClient { shares: List<KeyShareEntry> }
+    | KeyShareServer { share: KeyShareEntry }
+    | KeyShareHelloRetryRequest { selected_group: NamedGroup }
+    | PskKeyExchangeModesExt { modes: List<PskKeMode> }
+    | EarlyDataExt(EarlyDataIndication)
+    | CookieExt { cookie: List<Byte> }
+    | StatusRequestExt                     // content opaque — we don't act on OCSP v1
+    | QuicTransportParametersExt { params: List<Byte> }
+    | RecordSizeLimitExt { limit: UInt16 }
+    | Unknown { ext_type: UInt16, data: List<Byte> };
+
+// =============================================================================
+// Encode — writes extension list surrounded by u16 length prefix
+// =============================================================================
+
+/// Encode a list of extensions into the outer block. TLS 1.3 places
+/// extensions inside ClientHello / ServerHello / EncryptedExtensions /
+/// CertificateRequest / Certificate.certificate_entry surrounded by
+/// a u16 length prefix.
+public fn encode_extensions_block(exts: &List<Extension>, out: &mut List<Byte>) -> Result<(), CodecError> {
+    vec_u16(out, |b| {
+        let mut i: Int = 0;
+        while i < exts.len() {
+            encode_extension(&exts[i], b)?;
+            i = i + 1;
+        }
+        Ok(())
+    })
+}
+
+public fn encode_extension(ext: &Extension, out: &mut List<Byte>) -> Result<(), CodecError> {
+    match ext {
+        Extension.ServerNameExt { names } => {
+            put_u16(out, EXT_SERVER_NAME);
+            vec_u16(out, |b| {
+                // ServerNameList ::= ServerName server_name_list<1..2^16-1>
+                vec_u16(b, |b2| {
+                    let mut i: Int = 0;
+                    while i < names.len() {
+                        put_u8(b2, 0_u8);           // name_type = host_name
+                        let name_bytes = names[i].host_name.as_bytes();
+                        vec_u16(b2, |b3| {
+                            put_bytes(b3, name_bytes);
+                            Ok(())
+                        })?;
+                        i = i + 1;
+                    }
+                    Ok(())
+                })
+            })
+        },
+
+        Extension.SupportedGroupsExt { groups } => {
+            put_u16(out, EXT_SUPPORTED_GROUPS);
+            vec_u16(out, |b| {
+                vec_u16(b, |b2| {
+                    let mut i: Int = 0;
+                    while i < groups.len() {
+                        put_u16(b2, groups[i].to_u16());
+                        i = i + 1;
+                    }
+                    Ok(())
+                })
+            })
+        },
+
+        Extension.SignatureAlgorithmsExt { schemes } => encode_sig_schemes_ext(
+            EXT_SIGNATURE_ALGORITHMS, schemes, out),
+
+        Extension.SignatureAlgorithmsCertExt { schemes } => encode_sig_schemes_ext(
+            EXT_SIGNATURE_ALGORITHMS_CERT, schemes, out),
+
+        Extension.AlpnExt { protocols } => {
+            put_u16(out, EXT_ALPN);
+            vec_u16(out, |b| {
+                vec_u16(b, |b2| {
+                    let mut i: Int = 0;
+                    while i < protocols.len() {
+                        vec_u8(b2, |b3| { put_bytes(b3, protocols[i].as_slice()); Ok(()) })?;
+                        i = i + 1;
+                    }
+                    Ok(())
+                })
+            })
+        },
+
+        Extension.SupportedVersionsClient { versions } => {
+            put_u16(out, EXT_SUPPORTED_VERSIONS);
+            vec_u16(out, |b| {
+                vec_u8(b, |b2| {
+                    let mut i: Int = 0;
+                    while i < versions.len() {
+                        put_u16(b2, versions[i].to_u16());
+                        i = i + 1;
+                    }
+                    Ok(())
+                })
+            })
+        },
+
+        Extension.SupportedVersionsServer { selected } => {
+            put_u16(out, EXT_SUPPORTED_VERSIONS);
+            vec_u16(out, |b| {
+                put_u16(b, selected.to_u16());
+                Ok(())
+            })
+        },
+
+        Extension.KeyShareClient { shares } => {
+            put_u16(out, EXT_KEY_SHARE);
+            vec_u16(out, |b| {
+                vec_u16(b, |b2| {
+                    let mut i: Int = 0;
+                    while i < shares.len() {
+                        put_u16(b2, shares[i].group.to_u16());
+                        vec_u16(b2, |b3| { put_bytes(b3, shares[i].key_exchange.as_slice()); Ok(()) })?;
+                        i = i + 1;
+                    }
+                    Ok(())
+                })
+            })
+        },
+
+        Extension.KeyShareServer { share } => {
+            put_u16(out, EXT_KEY_SHARE);
+            vec_u16(out, |b| {
+                put_u16(b, share.group.to_u16());
+                vec_u16(b, |b2| { put_bytes(b2, share.key_exchange.as_slice()); Ok(()) })
+            })
+        },
+
+        Extension.KeyShareHelloRetryRequest { selected_group } => {
+            put_u16(out, EXT_KEY_SHARE);
+            vec_u16(out, |b| {
+                put_u16(b, selected_group.to_u16());
+                Ok(())
+            })
+        },
+
+        Extension.PskKeyExchangeModesExt { modes } => {
+            put_u16(out, EXT_PSK_KEY_EXCHANGE_MODES);
+            vec_u16(out, |b| {
+                vec_u8(b, |b2| {
+                    let mut i: Int = 0;
+                    while i < modes.len() { put_u8(b2, modes[i].to_u8()); i = i + 1; }
+                    Ok(())
+                })
+            })
+        },
+
+        Extension.EarlyDataExt(ind) => {
+            put_u16(out, EXT_EARLY_DATA);
+            match ind {
+                EarlyDataIndication.EarlyDataClient => {
+                    put_u16(out, 0_u16);   // empty
+                },
+                EarlyDataIndication.EarlyDataTicket { max_early_data_size } => {
+                    put_u16(out, 4_u16);
+                    put_u32(out, *max_early_data_size);
+                },
+            }
+            Ok(())
+        },
+
+        Extension.CookieExt { cookie } => {
+            put_u16(out, EXT_COOKIE);
+            vec_u16(out, |b| {
+                vec_u16(b, |b2| { put_bytes(b2, cookie.as_slice()); Ok(()) })
+            })
+        },
+
+        Extension.StatusRequestExt => {
+            put_u16(out, EXT_STATUS_REQUEST);
+            // Minimal CertificateStatusRequest per RFC 6066 §8:
+            //   status_type = ocsp(1); responder_id_list<0..2^16-1>=[];
+            //   request_extensions<0..2^16-1>=[]
+            vec_u16(out, |b| {
+                put_u8(b, 1_u8);
+                put_u16(b, 0_u16);
+                put_u16(b, 0_u16);
+                Ok(())
+            })
+        },
+
+        Extension.QuicTransportParametersExt { params } => {
+            put_u16(out, EXT_QUIC_TRANSPORT_PARAMETERS);
+            vec_u16(out, |b| { put_bytes(b, params.as_slice()); Ok(()) })
+        },
+
+        Extension.RecordSizeLimitExt { limit } => {
+            put_u16(out, EXT_RECORD_SIZE_LIMIT);
+            vec_u16(out, |b| { put_u16(b, *limit); Ok(()) })
+        },
+
+        Extension.Unknown { ext_type, data } => {
+            put_u16(out, *ext_type);
+            vec_u16(out, |b| { put_bytes(b, data.as_slice()); Ok(()) })
+        },
+    }
+}
+
+fn encode_sig_schemes_ext(
+    ext_type: UInt16,
+    schemes: &List<SignatureScheme>,
+    out: &mut List<Byte>,
+) -> Result<(), CodecError> {
+    put_u16(out, ext_type);
+    vec_u16(out, |b| {
+        vec_u16(b, |b2| {
+            let mut i: Int = 0;
+            while i < schemes.len() {
+                put_u16(b2, schemes[i].to_u16());
+                i = i + 1;
+            }
+            Ok(())
+        })
+    })
+}
+
+// =============================================================================
+// Decode — called per source: parsing context determines key_share /
+// supported_versions / early_data variant selection.
+// =============================================================================
+
+public type ExtensionContext is
+      ClientHelloCtx
+    | ServerHelloCtx
+    | HelloRetryRequestCtx
+    | EncryptedExtensionsCtx
+    | CertificateCtx
+    | CertificateRequestCtx
+    | NewSessionTicketCtx;
+
+public fn decode_extensions_block(
+    r: &mut Reader,
+    ctx: ExtensionContext,
+) -> Result<List<Extension>, CodecError> {
+    let mut sub = r.sub_u16()?;
+    let mut out: List<Extension> = [];
+    while !sub.is_at_end() {
+        let ext = decode_extension(&mut sub, ctx.clone())?;
+        out.push(ext);
+    }
+    Ok(out)
+}
+
+public fn decode_extension(r: &mut Reader, ctx: ExtensionContext) -> Result<Extension, CodecError> {
+    let ext_type = r.take_u16()?;
+    let mut body = r.sub_u16()?;
+    let result = match ext_type {
+        0_u16 /* server_name */ => {
+            let mut names: List<ServerName> = [];
+            let mut list = body.sub_u16()?;
+            while !list.is_at_end() {
+                let nt = list.take_u8()?;
+                let bytes = list.take_vec_u16()?;
+                if nt == 0_u8 {
+                    names.push(ServerName { host_name: Text.from_utf8_lossy(bytes.as_slice()) });
+                }
+                // Unknown name_type silently ignored (RFC 6066 §3 last paragraph).
+            }
+            Extension.ServerNameExt { names: names }
+        },
+
+        10_u16 /* supported_groups */ => {
+            let mut groups: List<NamedGroup> = [];
+            let mut list = body.sub_u16()?;
+            while !list.is_at_end() {
+                groups.push(NamedGroup.from_u16(list.take_u16()?));
+            }
+            Extension.SupportedGroupsExt { groups: groups }
+        },
+
+        13_u16 /* signature_algorithms */ => Extension.SignatureAlgorithmsExt {
+            schemes: take_sig_scheme_list(&mut body)?,
+        },
+
+        50_u16 /* signature_algorithms_cert */ => Extension.SignatureAlgorithmsCertExt {
+            schemes: take_sig_scheme_list(&mut body)?,
+        },
+
+        16_u16 /* alpn */ => {
+            let mut protos: List<List<Byte>> = [];
+            let mut list = body.sub_u16()?;
+            while !list.is_at_end() {
+                let p = list.take_vec_u8()?;
+                protos.push(p);
+            }
+            Extension.AlpnExt { protocols: protos }
+        },
+
+        43_u16 /* supported_versions */ => {
+            match ctx {
+                ExtensionContext.ClientHelloCtx => {
+                    let mut versions: List<ProtocolVersion> = [];
+                    let mut list = body.sub_u8()?;
+                    while !list.is_at_end() {
+                        versions.push(ProtocolVersion.from_u16(list.take_u16()?));
+                    }
+                    Extension.SupportedVersionsClient { versions: versions }
+                },
+                _ => {
+                    let v = ProtocolVersion.from_u16(body.take_u16()?);
+                    Extension.SupportedVersionsServer { selected: v }
+                },
+            }
+        },
+
+        51_u16 /* key_share */ => {
+            match ctx {
+                ExtensionContext.ClientHelloCtx => {
+                    let mut shares: List<KeyShareEntry> = [];
+                    let mut list = body.sub_u16()?;
+                    while !list.is_at_end() {
+                        let g = NamedGroup.from_u16(list.take_u16()?);
+                        let kx = list.take_vec_u16()?;
+                        shares.push(KeyShareEntry { group: g, key_exchange: kx });
+                    }
+                    Extension.KeyShareClient { shares: shares }
+                },
+                ExtensionContext.HelloRetryRequestCtx => {
+                    let g = NamedGroup.from_u16(body.take_u16()?);
+                    Extension.KeyShareHelloRetryRequest { selected_group: g }
+                },
+                _ => {
+                    let g = NamedGroup.from_u16(body.take_u16()?);
+                    let kx = body.take_vec_u16()?;
+                    Extension.KeyShareServer {
+                        share: KeyShareEntry { group: g, key_exchange: kx },
+                    }
+                },
+            }
+        },
+
+        45_u16 /* psk_key_exchange_modes */ => {
+            let mut modes: List<PskKeMode> = [];
+            let mut list = body.sub_u8()?;
+            while !list.is_at_end() {
+                modes.push(PskKeMode.from_u8(list.take_u8()?));
+            }
+            Extension.PskKeyExchangeModesExt { modes: modes }
+        },
+
+        42_u16 /* early_data */ => {
+            match ctx {
+                ExtensionContext.NewSessionTicketCtx => {
+                    let sz = body.take_u32()?;
+                    Extension.EarlyDataExt(EarlyDataIndication.EarlyDataTicket {
+                        max_early_data_size: sz,
+                    })
+                },
+                _ => Extension.EarlyDataExt(EarlyDataIndication.EarlyDataClient),
+            }
+        },
+
+        44_u16 /* cookie */ => {
+            let c = body.take_vec_u16()?;
+            Extension.CookieExt { cookie: c }
+        },
+
+        5_u16 /* status_request */ => {
+            // Don't parse OCSP response; drain.
+            let _ = body.take_bytes(body.remaining())?;
+            Extension.StatusRequestExt
+        },
+
+        57_u16 /* quic_transport_parameters */ => {
+            let p = body.take_bytes(body.remaining())?;
+            Extension.QuicTransportParametersExt { params: p }
+        },
+
+        28_u16 /* record_size_limit */ => {
+            let lim = body.take_u16()?;
+            Extension.RecordSizeLimitExt { limit: lim }
+        },
+
+        _ => {
+            let data = body.take_bytes(body.remaining())?;
+            Extension.Unknown { ext_type: ext_type, data: data }
+        },
+    };
+    Ok(result)
+}
+
+fn take_sig_scheme_list(r: &mut Reader) -> Result<List<SignatureScheme>, CodecError> {
+    let mut out: List<SignatureScheme> = [];
+    let mut list = r.sub_u16()?;
+    while !list.is_at_end() {
+        out.push(SignatureScheme.from_u16(list.take_u16()?));
+    }
+    Ok(out)
+}

@@ -1,0 +1,65 @@
+// =============================================================================
+// net/tls13/handshake/mod.vr — TLS 1.3 handshake layer (RFC 8446 §4)
+// =============================================================================
+// Layer: 5 (Network — TLS 1.3 core)
+// Spec: internal/specs/tls-quic.md §6.2, §12 Phase 2 step 2
+// =============================================================================
+//
+// Phase 2 step 2: wire-format handshake messages + extension ADT +
+// transcript hash + typed client state machine. The server SM
+// mirrors the client with roles swapped and lands in Phase 2 step 3.
+//
+// # Module layout
+//
+// ```
+// core.net.tls13.handshake
+// ├── mod.vr           ← this file (re-exports)
+// ├── codec.vr         — big-endian u8/u16/u24/u32 + length-prefix helpers
+// ├── extension.vr     — Extension ADT + per-context decode (RFC 8446 §4.2)
+// ├── messages.vr      — ClientHello / ServerHello / EE / Cert / CV /
+// │                      Finished / NST / KU / EndOfEarlyData / HRR
+// ├── transcript.vr    — Transcript-Hash (RFC 8446 §4.4.1) with HRR reseed
+// └── client_sm.vr     — Typed client state machine (Start → … → Connected)
+// ```
+//
+// =============================================================================
+
+module core.net.tls13.handshake;
+
+public module codec;
+public module extension;
+public module messages;
+public module transcript;
+public module client_sm;
+
+// Re-exports — codec
+public mount .codec.{Reader, CodecError};
+
+// Re-exports — extensions
+public mount .extension.{
+    Extension, ExtensionContext,
+    KeyShareEntry, ServerName,
+    PskKeMode, EarlyDataIndication,
+    encode_extensions_block, decode_extensions_block,
+    encode_extension, decode_extension,
+};
+
+// Re-exports — messages
+public mount .messages.{
+    HandshakeMessage,
+    ClientHello, ServerHello, EncryptedExtensions,
+    CertificateMessage, CertificateEntry, CertificateRequest,
+    CertificateVerify, Finished, NewSessionTicket,
+    KeyUpdate, KeyUpdateRequest,
+    encode_handshake, decode_handshake,
+    is_hello_retry_request,
+};
+
+// Re-exports — transcript
+public mount .transcript.{Transcript};
+
+// Re-exports — client state machine
+public mount .client_sm.{
+    ClientConfig, ClientSm, StepOutput,
+    WaitServerHello, WaitEncryptedExtensions, Connected,
+};

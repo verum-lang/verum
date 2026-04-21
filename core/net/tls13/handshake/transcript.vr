@@ -1,0 +1,112 @@
+// =============================================================================
+// net/tls13/handshake/transcript.vr — Transcript hash (RFC 8446 §4.4.1)
+// =============================================================================
+// Layer: 5 (Network — TLS 1.3 core)
+// Dependencies: core.security.hash.{sha256, sha384}
+// =============================================================================
+//
+// RFC 8446 §4.4.1:
+//
+//   Transcript-Hash(M1, M2, ... Mn) = Hash(M1 || M2 || ... || Mn)
+//
+// except for the post-HelloRetryRequest transcript which prepends a
+// synthetic `message_hash` record:
+//
+//   Transcript-Hash(ClientHello1, HelloRetryRequest, ... Mn) =
+//       Hash(message_hash ||           /* Handshake type */
+//            00 00 Hash.length ||      /* Handshake length */
+//            Hash(ClientHello1) ||     /* Hash of ClientHello1 */
+//            HelloRetryRequest || ... || Mn)
+//
+// This module maintains an incremental hasher so every message that
+// flows through the handshake SM mutates the transcript in O(bytes).
+// Snapshots (`Transcript.snapshot`) finalise a clone — cheap because
+// the SHA compression state is a fixed-size struct.
+//
+// =============================================================================
+
+module core.net.tls13.handshake.transcript;
+
+mount core.*;
+mount core.collections.List;
+mount core.security.hash.sha256.{Sha256};
+mount core.security.hash.sha384.{Sha384};
+mount core.net.tls13.cipher_suite.{HashKind};
+
+// =============================================================================
+// Internal hasher union
+// =============================================================================
+
+public type Transcript is
+      Sha256Tr(Sha256)
+    | Sha384Tr(Sha384);
+
+implement Transcript {
+    public fn new(hash: HashKind) -> Transcript {
+        match hash {
+            HashKind.Sha256 => Transcript.Sha256Tr(Sha256.new()),
+            HashKind.Sha384 => Transcript.Sha384Tr(Sha384.new()),
+        }
+    }
+
+    /// Feed a full handshake message body (the concatenation of header
+    /// + body produced by `encode_handshake`, not a plain ContentType
+    /// fragment). Caller is responsible for using the right wire form.
+    public fn append(&mut self, msg: &[Byte]) {
+        match self {
+            Transcript.Sha256Tr(h) => h.update(msg),
+            Transcript.Sha384Tr(h) => h.update(msg),
+        }
+    }
+
+    /// Produce a hash snapshot of the transcript so far, without
+    /// consuming the hasher. Returned as a byte vector so both hash
+    /// sizes (32 / 48) fit behind a uniform type.
+    public fn snapshot(&self) -> List<Byte> {
+        match self {
+            Transcript.Sha256Tr(h) => h.clone().finalize().to_vec(),
+            Transcript.Sha384Tr(h) => h.clone().finalize().to_vec(),
+        }
+    }
+
+    /// Re-seed for post-HelloRetryRequest transcript (RFC 8446 §4.4.1):
+    ///
+    ///   Reset the transcript to:
+    ///     message_hash (254) ||
+    ///     uint24(Hash.length) ||
+    ///     Hash(ClientHello1)
+    ///
+    /// This lets the state machine carry a single incremental hash
+    /// across the HRR boundary without re-hashing ClientHello1.
+    public fn reseed_for_hrr(&mut self) {
+        let ch1_hash = self.snapshot();
+        let hash_kind = match self {
+            Transcript.Sha256Tr(_) => HashKind.Sha256,
+            Transcript.Sha384Tr(_) => HashKind.Sha384,
+        };
+        let new_hasher = match hash_kind {
+            HashKind.Sha256 => Transcript.Sha256Tr(Sha256.new()),
+            HashKind.Sha384 => Transcript.Sha384Tr(Sha384.new()),
+        };
+        *self = new_hasher;
+
+        // Prepend the synthetic message_hash record:
+        //   type = 254, length = Hash.length, value = Hash(CH1)
+        let mut prefix: List<Byte> = [];
+        prefix.push(254_u8);
+        let len = ch1_hash.len() as UInt32;
+        prefix.push(((len >> 16) & 0xFF) as Byte);
+        prefix.push(((len >>  8) & 0xFF) as Byte);
+        prefix.push((len & 0xFF) as Byte);
+        let mut i: Int = 0;
+        while i < ch1_hash.len() { prefix.push(ch1_hash[i]); i = i + 1; }
+        self.append(prefix.as_slice());
+    }
+
+    pub fn hash_kind(&self) -> HashKind {
+        match self {
+            Transcript.Sha256Tr(_) => HashKind.Sha256,
+            Transcript.Sha384Tr(_) => HashKind.Sha384,
+        }
+    }
+}

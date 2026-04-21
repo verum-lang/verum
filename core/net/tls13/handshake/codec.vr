@@ -1,0 +1,215 @@
+// =============================================================================
+// net/tls13/handshake/codec.vr — TLS wire-format byte codec primitives
+// =============================================================================
+// Layer: 5 (Network — TLS 1.3 core)
+// =============================================================================
+//
+// TLS 1.3 uses big-endian u16 + u24 length prefixes and fixed-
+// size byte arrays throughout RFC 8446 §3 structural notation.
+// This module concentrates the raw cursor ops so downstream
+// message encoders/decoders stay declarative.
+//
+// # Wire conventions (RFC 8446 §3)
+//
+//   * All integers big-endian.
+//   * Variable-length vectors prefixed with a fixed-width length
+//     field whose size is determined by the field's maximum: u8 for
+//     ≤ 255, u16 for ≤ 65535, u24 for ≤ 16 777 215.
+//   * Enumerated types are fixed-width integers.
+//
+// =============================================================================
+
+module core.net.tls13.handshake.codec;
+
+mount core.*;
+mount core.collections.List;
+
+// =============================================================================
+// CodecError — structural errors raised by parsers
+// =============================================================================
+
+public type CodecError is
+      Truncated
+    | Overflow
+    | InvalidValue(Text);
+
+// =============================================================================
+// Writer helpers — all append to a List<Byte>
+// =============================================================================
+
+public fn put_u8(out: &mut List<Byte>, v: UInt8)  { out.push(v); }
+
+public fn put_u16(out: &mut List<Byte>, v: UInt16) {
+    out.push(((v >> 8) & 0xFF_u16) as Byte);
+    out.push((v & 0xFF_u16) as Byte);
+}
+
+public fn put_u24(out: &mut List<Byte>, v: UInt32) {
+    out.push(((v >> 16) & 0xFF_u32) as Byte);
+    out.push(((v >>  8) & 0xFF_u32) as Byte);
+    out.push((v & 0xFF_u32) as Byte);
+}
+
+public fn put_u32(out: &mut List<Byte>, v: UInt32) {
+    out.push(((v >> 24) & 0xFF_u32) as Byte);
+    out.push(((v >> 16) & 0xFF_u32) as Byte);
+    out.push(((v >>  8) & 0xFF_u32) as Byte);
+    out.push((v & 0xFF_u32) as Byte);
+}
+
+public fn put_bytes(out: &mut List<Byte>, bytes: &[Byte]) {
+    let mut i: Int = 0;
+    while i < bytes.len() { out.push(bytes[i]); i = i + 1; }
+}
+
+/// Reserve a u8 length prefix, call `f` to emit the variable-length
+/// body, then back-patch the length. Fails if body > 255 bytes.
+public fn vec_u8<F>(out: &mut List<Byte>, f: F) -> Result<(), CodecError>
+where F: fn(&mut List<Byte>) -> Result<(), CodecError>,
+{
+    let pos = out.len();
+    out.push(0_u8);
+    f(out)?;
+    let len = out.len() - pos - 1;
+    if len > 255 { return Err(CodecError.Overflow); }
+    out[pos] = len as Byte;
+    Ok(())
+}
+
+public fn vec_u16<F>(out: &mut List<Byte>, f: F) -> Result<(), CodecError>
+where F: fn(&mut List<Byte>) -> Result<(), CodecError>,
+{
+    let pos = out.len();
+    out.push(0_u8); out.push(0_u8);
+    f(out)?;
+    let len = out.len() - pos - 2;
+    if len > 65535 { return Err(CodecError.Overflow); }
+    out[pos] = ((len >> 8) & 0xFF) as Byte;
+    out[pos + 1] = (len & 0xFF) as Byte;
+    Ok(())
+}
+
+public fn vec_u24<F>(out: &mut List<Byte>, f: F) -> Result<(), CodecError>
+where F: fn(&mut List<Byte>) -> Result<(), CodecError>,
+{
+    let pos = out.len();
+    out.push(0_u8); out.push(0_u8); out.push(0_u8);
+    f(out)?;
+    let len = out.len() - pos - 3;
+    if len > 16_777_215 { return Err(CodecError.Overflow); }
+    out[pos]     = ((len >> 16) & 0xFF) as Byte;
+    out[pos + 1] = ((len >>  8) & 0xFF) as Byte;
+    out[pos + 2] = (len & 0xFF) as Byte;
+    Ok(())
+}
+
+// =============================================================================
+// Reader — a cursor over a byte slice
+// =============================================================================
+
+public type Reader is {
+    buf: List<Byte>,   // owned copy (cheap — backing arena)
+    pos: Int,
+    end: Int,
+};
+
+implement Reader {
+    public fn new(input: &[Byte]) -> Reader {
+        let mut b: List<Byte> = [];
+        let mut i: Int = 0;
+        while i < input.len() { b.push(input[i]); i = i + 1; }
+        let n = b.len();
+        Reader { buf: b, pos: 0, end: n }
+    }
+
+    public fn remaining(&self) -> Int { self.end - self.pos }
+    public fn is_at_end(&self) -> Bool { self.pos >= self.end }
+    public fn position(&self) -> Int { self.pos }
+
+    pub fn take_u8(&mut self) -> Result<UInt8, CodecError> {
+        if self.pos >= self.end { return Err(CodecError.Truncated); }
+        let v = self.buf[self.pos];
+        self.pos = self.pos + 1;
+        Ok(v)
+    }
+
+    pub fn take_u16(&mut self) -> Result<UInt16, CodecError> {
+        if self.pos + 2 > self.end { return Err(CodecError.Truncated); }
+        let v: UInt16 = ((self.buf[self.pos] as UInt16) << 8)
+                      | (self.buf[self.pos + 1] as UInt16);
+        self.pos = self.pos + 2;
+        Ok(v)
+    }
+
+    pub fn take_u24(&mut self) -> Result<UInt32, CodecError> {
+        if self.pos + 3 > self.end { return Err(CodecError.Truncated); }
+        let v: UInt32 =
+              ((self.buf[self.pos] as UInt32) << 16)
+            | ((self.buf[self.pos + 1] as UInt32) << 8)
+            |  (self.buf[self.pos + 2] as UInt32);
+        self.pos = self.pos + 3;
+        Ok(v)
+    }
+
+    pub fn take_u32(&mut self) -> Result<UInt32, CodecError> {
+        if self.pos + 4 > self.end { return Err(CodecError.Truncated); }
+        let v: UInt32 =
+              ((self.buf[self.pos] as UInt32) << 24)
+            | ((self.buf[self.pos + 1] as UInt32) << 16)
+            | ((self.buf[self.pos + 2] as UInt32) << 8)
+            |  (self.buf[self.pos + 3] as UInt32);
+        self.pos = self.pos + 4;
+        Ok(v)
+    }
+
+    pub fn take_bytes(&mut self, n: Int) -> Result<List<Byte>, CodecError> {
+        if n < 0 || self.pos + n > self.end { return Err(CodecError.Truncated); }
+        let mut out: List<Byte> = [];
+        let mut i: Int = 0;
+        while i < n { out.push(self.buf[self.pos + i]); i = i + 1; }
+        self.pos = self.pos + n;
+        Ok(out)
+    }
+
+    /// Read a u8-length-prefixed byte vector.
+    pub fn take_vec_u8(&mut self) -> Result<List<Byte>, CodecError> {
+        let len = self.take_u8()?;
+        self.take_bytes(len as Int)
+    }
+
+    pub fn take_vec_u16(&mut self) -> Result<List<Byte>, CodecError> {
+        let len = self.take_u16()?;
+        self.take_bytes(len as Int)
+    }
+
+    pub fn take_vec_u24(&mut self) -> Result<List<Byte>, CodecError> {
+        let len = self.take_u24()?;
+        self.take_bytes(len as Int)
+    }
+
+    /// Enter a length-prefixed sub-region; returns a sub-reader bounded
+    /// to that region's contents. Parent advances past it.
+    pub fn sub_u16(&mut self) -> Result<Reader, CodecError> {
+        let len = self.take_u16()? as Int;
+        if self.pos + len > self.end { return Err(CodecError.Truncated); }
+        let start = self.pos;
+        self.pos = self.pos + len;
+        Ok(Reader { buf: self.buf.clone(), pos: start, end: start + len })
+    }
+
+    pub fn sub_u8(&mut self) -> Result<Reader, CodecError> {
+        let len = self.take_u8()? as Int;
+        if self.pos + len > self.end { return Err(CodecError.Truncated); }
+        let start = self.pos;
+        self.pos = self.pos + len;
+        Ok(Reader { buf: self.buf.clone(), pos: start, end: start + len })
+    }
+
+    pub fn sub_u24(&mut self) -> Result<Reader, CodecError> {
+        let len = self.take_u24()? as Int;
+        if self.pos + len > self.end { return Err(CodecError.Truncated); }
+        let start = self.pos;
+        self.pos = self.pos + len;
+        Ok(Reader { buf: self.buf.clone(), pos: start, end: start + len })
+    }
+}
