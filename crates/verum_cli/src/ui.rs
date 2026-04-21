@@ -47,6 +47,36 @@ pub fn init(verbose: bool, quiet: bool, color: &str) -> crate::error::Result<()>
 
     colored::control::set_override(colors_enabled);
 
+    // Initialise the tracing subscriber so that compiler-emitted
+    // `tracing::warn!` / `error!` lines are actually shown to the
+    // user. Prior behaviour: warn! calls were no-ops unless the user
+    // set VERUM_LOG=warn manually — real problems like the
+    // "Conflicting export" phantom duplicates silently vanished.
+    //
+    // Level selection:
+    //   * quiet   → error only
+    //   * verbose → debug (everything except trace)
+    //   * default → warn  (errors + warnings; no info chatter)
+    //
+    // VERUM_LOG env var overrides if set — same semantics as
+    // RUST_LOG, forwarded through EnvFilter.
+    let default_level = if quiet {
+        "error"
+    } else if verbose {
+        "debug"
+    } else {
+        "warn"
+    };
+    let filter = std::env::var("VERUM_LOG").unwrap_or_else(|_| default_level.to_string());
+    // Best-effort — if the subscriber is already installed (e.g. by
+    // the LSP startup path, tests, or a host embedding us), silently
+    // ignore.
+    let _ = tracing_subscriber::fmt()
+        .with_env_filter(filter)
+        .with_writer(std::io::stderr)
+        .with_target(false)
+        .try_init();
+
     let mut state = UI_STATE.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
     *state = Some(UiState {
         verbose,

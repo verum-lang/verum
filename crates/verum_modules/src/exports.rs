@@ -301,11 +301,51 @@ impl ExportTable {
                 return Ok(());
             }
 
-            // Real conflict: same kind, different source
+            // Diagnose the common domain-specific case first: a
+            // variant constructor (registered as Function) clashes
+            // with a Type declared in the same module. Variants
+            // flatten into the parent module's namespace, so this
+            // is a name-space collision, not a ModuleId bug.
+            let same_module = existing.source_module == item.source_module;
+            if same_module
+                && existing.kind == ExportKind::Type
+                && item.kind == ExportKind::Function
+            {
+                return Err(ModuleError::Other {
+                    message: Text::from(format!(
+                        "variant constructor `{name}` clashes with the `type {name}` \
+                         declared in the same module — variants flatten into the \
+                         parent module's namespace; rename the variant or the type"
+                    )),
+                    span: Some(item.span),
+                });
+            }
+            if same_module
+                && existing.kind == ExportKind::Function
+                && item.kind == ExportKind::Type
+            {
+                return Err(ModuleError::Other {
+                    message: Text::from(format!(
+                        "type `{name}` clashes with the variant constructor `{name}` \
+                         declared in the same module — variants flatten into the \
+                         parent module's namespace; rename the variant or the type"
+                    )),
+                    span: Some(item.span),
+                });
+            }
+
+            // Real conflict: same kind, different source.
+            // At this point ModuleId dedupe (see ModuleRegistry::
+            // register) guarantees `existing.source_module` is a
+            // stable identifier for the original definition site.
             return Err(ModuleError::Other {
                 message: Text::from(format!(
-                    "Conflicting export: '{}' already exported as {} from {:?}",
-                    name, existing.kind, existing.source_module
+                    "conflicting export: `{name}` already exported as {kind} from {source:?}; \
+                     both sides resolve to the same name in the importing scope — \
+                     rename one or scope one behind a non-public re-export",
+                    name = name,
+                    kind = existing.kind,
+                    source = existing.source_module,
                 )),
                 span: Some(item.span),
             });

@@ -16,6 +16,103 @@ use verum_lexer::{Token, TokenKind};
 use crate::error::ParseError;
 use crate::parser::{ParseResult, RecursiveParser};
 
+/// Is this TokenKind a reserved keyword that cannot appear where an
+/// identifier is expected? Covers the keywords the grammar reserves
+/// — users who accidentally shadow one of these (e.g. naming a
+/// parameter `mount` or `type`) get a dedicated diagnostic instead
+/// of a generic "expected pattern" error.
+fn is_reserved_keyword_token(kind: &TokenKind) -> bool {
+    matches!(
+        kind,
+        TokenKind::Let
+            | TokenKind::Fn
+            | TokenKind::Is
+            | TokenKind::Type
+            | TokenKind::Match
+            | TokenKind::Mount
+            | TokenKind::Link
+            | TokenKind::Where
+            | TokenKind::If
+            | TokenKind::Else
+            | TokenKind::While
+            | TokenKind::For
+            | TokenKind::Loop
+            | TokenKind::Break
+            | TokenKind::Continue
+            | TokenKind::Return
+            | TokenKind::Yield
+            | TokenKind::Mut
+            | TokenKind::Const
+            | TokenKind::Volatile
+            | TokenKind::Static
+            | TokenKind::Pure
+            | TokenKind::Meta
+            | TokenKind::Stage
+            | TokenKind::Lift
+            | TokenKind::Implement
+            | TokenKind::Protocol
+            | TokenKind::Extends
+            | TokenKind::Module
+            | TokenKind::Async
+            | TokenKind::Await
+            | TokenKind::Spawn
+            | TokenKind::Select
+            | TokenKind::Nursery
+            | TokenKind::Unsafe
+            | TokenKind::Ref
+            | TokenKind::Move
+            | TokenKind::As
+            | TokenKind::In
+            | TokenKind::Public
+    )
+}
+
+fn reserved_keyword_name(kind: &TokenKind) -> &'static str {
+    match kind {
+        TokenKind::Let => "let",
+        TokenKind::Fn => "fn",
+        TokenKind::Is => "is",
+        TokenKind::Type => "type",
+        TokenKind::Match => "match",
+        TokenKind::Mount => "mount",
+        TokenKind::Link => "link",
+        TokenKind::Where => "where",
+        TokenKind::If => "if",
+        TokenKind::Else => "else",
+        TokenKind::While => "while",
+        TokenKind::For => "for",
+        TokenKind::Loop => "loop",
+        TokenKind::Break => "break",
+        TokenKind::Continue => "continue",
+        TokenKind::Return => "return",
+        TokenKind::Yield => "yield",
+        TokenKind::Mut => "mut",
+        TokenKind::Const => "const",
+        TokenKind::Volatile => "volatile",
+        TokenKind::Static => "static",
+        TokenKind::Pure => "pure",
+        TokenKind::Meta => "meta",
+        TokenKind::Stage => "stage",
+        TokenKind::Lift => "lift",
+        TokenKind::Implement => "implement",
+        TokenKind::Protocol => "protocol",
+        TokenKind::Extends => "extends",
+        TokenKind::Module => "module",
+        TokenKind::Async => "async",
+        TokenKind::Await => "await",
+        TokenKind::Spawn => "spawn",
+        TokenKind::Select => "select",
+        TokenKind::Nursery => "nursery",
+        TokenKind::Unsafe => "unsafe",
+        TokenKind::Ref => "ref",
+        TokenKind::Move => "move",
+        TokenKind::As => "as",
+        TokenKind::In => "in",
+        TokenKind::Public => "public",
+        _ => "<reserved>",
+    }
+}
+
 impl<'a> RecursiveParser<'a> {
     /// Parse a pattern with full support for @ bindings and OR patterns.
     ///
@@ -522,6 +619,11 @@ impl<'a> RecursiveParser<'a> {
                 ..
             })
             | Some(Token {
+                kind: TokenKind::ByteString(_),
+                span,
+                ..
+            })
+            | Some(Token {
                 kind: TokenKind::True,
                 span,
                 ..
@@ -857,33 +959,16 @@ impl<'a> RecursiveParser<'a> {
             }
 
             // E071: Reserved keywords used as pattern identifiers
-            Some(Token {
-                kind: TokenKind::Let,
-                span,
-            }) => {
+            Some(Token { kind, span })
+                if is_reserved_keyword_token(kind) =>
+            {
+                let keyword = reserved_keyword_name(kind);
                 let span = *span;
                 Err(ParseError::pattern_invalid_identifier(
-                    "'let' is a reserved keyword and cannot be used as a pattern identifier",
-                    span,
-                ))
-            }
-            Some(Token {
-                kind: TokenKind::Fn,
-                span,
-            }) => {
-                let span = *span;
-                Err(ParseError::pattern_invalid_identifier(
-                    "'fn' is a reserved keyword and cannot be used as a pattern identifier",
-                    span,
-                ))
-            }
-            Some(Token {
-                kind: TokenKind::Is,
-                span,
-            }) => {
-                let span = *span;
-                Err(ParseError::pattern_invalid_identifier(
-                    "'is' is a reserved keyword and cannot be used as a pattern identifier",
+                    format!(
+                        "'{keyword}' is a reserved keyword and cannot be used as an \
+                         identifier here — rename to `{keyword}_` or similar"
+                    ),
                     span,
                 ))
             }
@@ -1325,6 +1410,16 @@ impl<'a> RecursiveParser<'a> {
             }
             TokenKind::ByteChar(val) => {
                 let lit = Literal::byte_char(*val, token.span);
+                self.stream.advance();
+                lit
+            }
+            TokenKind::ByteString(val) => {
+                // Byte-string literal in pattern position, e.g.
+                //     match buf { b"GET" => ..., b"POST" => ... }
+                // Matches an exact byte sequence — indispensable for
+                // HTTP / binary-protocol parsers without forcing the
+                // author to lift the literal into a named constant.
+                let lit = Literal::byte_string(val.clone(), token.span);
                 self.stream.advance();
                 lit
             }

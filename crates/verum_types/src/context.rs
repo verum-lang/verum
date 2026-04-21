@@ -1943,6 +1943,15 @@ impl TypeContext {
         // CRITICAL: Include ALL ordered params, even if they don't appear in free_vars.
         // This maintains positional alignment for method call binding where
         // receiver_type_args[i] must bind to scheme.vars[i].
+        //
+        // BEWARE: this variant resolves TypeVars by *name*. If the
+        // calling context has shadowed one of `ordered_param_names`
+        // with a later `define_type` (e.g. method-level params
+        // shadowing impl-level params with the same spelling), the
+        // shadowed var is picked up instead of the intended impl-level
+        // one and positional binding breaks. Prefer
+        // `generalize_with_vars` below when both impl-level and
+        // method-level params are in play.
         let mut quantified = List::new();
         for name in ordered_param_names {
             if let Option::Some(param_ty) = self.lookup_type(name.as_str()) {
@@ -1955,6 +1964,47 @@ impl TypeContext {
         }
 
         // Add any remaining free vars not in the ordered list (should be rare)
+        for v in ty_vars.iter() {
+            if !quantified.contains(v) {
+                quantified.push(*v);
+            }
+        }
+
+        if quantified.is_empty() {
+            TypeScheme::mono(ty)
+        } else {
+            TypeScheme::poly(quantified, ty)
+        }
+    }
+
+    /// Generalize with an explicitly-ordered list of TypeVars — no
+    /// name lookup, no possibility of shadow collision. Use this
+    /// when impl-level and method-level type parameters might share
+    /// a name (e.g. `impl<T, F: fn()->T> …` and
+    /// `fn map<B, F: fn(Self.Item)->B>`): the caller already holds
+    /// the impl and method TypeVars separately, so pass them in the
+    /// correct order directly.
+    ///
+    /// `ordered_vars` should list impl-level TypeVars first, in
+    /// declaration order, followed by method-level TypeVars in
+    /// declaration order. Any additional free_vars not already in
+    /// the list are appended, matching `generalize_ordered`'s
+    /// fallback behaviour.
+    pub fn generalize_with_vars(
+        &self,
+        ty: Type,
+        ordered_vars: &[crate::ty::TypeVar],
+    ) -> TypeScheme {
+        let ty_vars = ty.free_vars();
+
+        let mut quantified = List::new();
+        for v in ordered_vars {
+            // Preserve positional alignment: duplicates (same name at
+            // both impl and method level but we've been handed both
+            // TypeVars) are kept distinct.
+            quantified.push(*v);
+        }
+
         for v in ty_vars.iter() {
             if !quantified.contains(v) {
                 quantified.push(*v);

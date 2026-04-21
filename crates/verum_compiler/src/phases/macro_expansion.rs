@@ -565,13 +565,25 @@ impl MacroExpansionPhase {
 
             ExprKind::Call { func, args, .. } => {
                 let processed_func = self.process_expr(func)?;
-                let processed_args: Result<List<Expr>, Diagnostic> =
-                    args.iter().map(|a| self.process_expr(a)).collect();
+                let processed_args: List<Expr> =
+                    args.iter().map(|a| self.process_expr(a)).collect::<Result<_, _>>()?;
+
+                // Try to desugar `format("fmt", args...)` into an f-string
+                // InterpolatedString expression so runtime/codegen can share the
+                // same lowering path as literal `f"..."`. Handles the common
+                // non-nullary case — nullary `format("literal")` falls through
+                // to the normal call path where it will fail (no stdlib fn).
+                if let Some(desugared) =
+                    self.try_desugar_format_call(&processed_func, &processed_args, expr.span)
+                {
+                    return desugared;
+                }
+
                 Ok(Expr {
                     kind: ExprKind::Call {
                         func: Heap::new(processed_func),
                         type_args: List::new(),
-                        args: processed_args?,
+                        args: processed_args,
                     },
                     span: expr.span,
                     ref_kind: None,
@@ -1037,6 +1049,138 @@ impl MacroExpansionPhase {
             ref_kind: None,
             check_eliminated: false,
         })
+    }
+
+    /// Recognise `format("fmt", args...)` calls and rewrite them into an
+    /// `ExprKind::InterpolatedString` (handler = "f"), reusing the exact same
+    /// lowering pipeline as literal `f"..."` strings. Returns `Some(...)` only
+    /// when the call matches the expected shape (single-segment `format` path
+    /// with a string literal as first argument); any other call falls through
+    /// to ordinary call processing.
+    ///
+    /// Supported format syntax:
+    ///   - `{}`          anonymous placeholder
+    ///   - `{:spec}`     anonymous with spec (spec is discarded in the parts
+    ///                   array — matches `strip_format_spec` behaviour of
+    ///                   literal f-strings for now)
+    ///   - `{{` / `}}`   escaped braces
+    /// Positional (`{0}`) and named (`{x}`) placeholders are deliberately
+    /// unsupported in this MVP — they'd require either wiring a dedicated
+    /// format-string AST or an auxiliary binding step, and the call sites in
+    /// the stdlib/L2 test suite only use the anonymous form.
+    ///
+    /// On malformed format strings or a mismatch between `{}` count and
+    /// supplied arg count, returns `None` so the typechecker can surface the
+    /// usual "unknown function `format`" diagnostic instead of us inventing
+    /// a new one.
+    fn try_desugar_format_call(
+        &mut self,
+        func: &Expr,
+        args: &List<Expr>,
+        span: Span,
+    ) -> Option<Result<Expr, Diagnostic>> {
+        // 1. func must be a single-segment path named "format"
+        let is_format = if let ExprKind::Path(path) = &func.kind {
+            path.segments.len() == 1
+                && matches!(
+                    path.segments.first(),
+                    Some(verum_ast::ty::PathSegment::Name(id)) if id.name.as_str() == "format"
+                )
+        } else {
+            false
+        };
+        if !is_format {
+            return None;
+        }
+
+        // 2. Need at least one arg; first arg must be a string literal
+        if args.is_empty() {
+            return None;
+        }
+        let fmt_str = match &args[0].kind {
+            ExprKind::Literal(lit) => match &lit.kind {
+                LiteralKind::Text(s) => s.as_str().to_string(),
+                _ => return None,
+            },
+            _ => return None,
+        };
+
+        // 3. Parse the format string into parts + expected placeholder count.
+        // `parts` ends up with exactly `exprs.len() + 1` entries
+        // (same invariant as the lexer uses for f-string literals).
+        let mut parts: Vec<String> = Vec::new();
+        let mut current = String::new();
+        let mut chars = fmt_str.chars().peekable();
+        let mut placeholder_count: usize = 0;
+
+        while let Some(ch) = chars.next() {
+            match ch {
+                '{' => {
+                    if chars.peek() == Some(&'{') {
+                        chars.next();
+                        current.push('{');
+                        continue;
+                    }
+                    // Consume placeholder up to `}`
+                    let mut depth = 0i32;
+                    let mut consumed_close = false;
+                    while let Some(inner) = chars.next() {
+                        match inner {
+                            '{' => depth += 1,
+                            '}' if depth == 0 => {
+                                consumed_close = true;
+                                break;
+                            }
+                            '}' => depth -= 1,
+                            _ => {}
+                        }
+                    }
+                    if !consumed_close {
+                        // Unterminated placeholder — bail to normal call path
+                        return None;
+                    }
+                    // Spec content discarded (matches current f-string behaviour).
+                    parts.push(std::mem::take(&mut current));
+                    placeholder_count += 1;
+                }
+                '}' => {
+                    if chars.peek() == Some(&'}') {
+                        chars.next();
+                        current.push('}');
+                    } else {
+                        // Lone `}` is ill-formed — fall through
+                        return None;
+                    }
+                }
+                _ => current.push(ch),
+            }
+        }
+        parts.push(current);
+
+        // 4. Arity check: placeholders must match supplied args (excluding fmt)
+        let provided_args = args.len() - 1;
+        if placeholder_count != provided_args {
+            return None;
+        }
+
+        // 5. Build InterpolatedString
+        let parts_list: List<Text> = parts.into_iter().map(Text::from).collect();
+        let exprs_list: List<Expr> = args.iter().skip(1).cloned().collect();
+
+        let result = Expr {
+            kind: ExprKind::InterpolatedString {
+                handler: Text::from("f"),
+                parts: parts_list,
+                exprs: exprs_list,
+            },
+            span,
+            ref_kind: None,
+            check_eliminated: false,
+        };
+
+        // Re-enter literal processing so the resulting InterpolatedString
+        // takes the same lowering path as `f"..."` source literals.
+        Some(self.process_expr(&result))
     }
 
     /// DEPRECATED: Old format desugaring (kept for reference)

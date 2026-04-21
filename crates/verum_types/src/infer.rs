@@ -50295,35 +50295,68 @@ impl TypeChecker {
                             // Only register methods with default implementation that
                             // weren't overridden in the impl
                             if proto_method.has_default && !defined_methods.contains(method_name) {
+                                // Capture impl-level TypeVars BEFORE entering the
+                                // method scope. Once we register method params
+                                // (next few lines) any name that matches an
+                                // impl-level param will shadow it in type_defs,
+                                // and a later name-based lookup would pick up the
+                                // method-level var. We therefore resolve impl
+                                // param names to their TypeVars here, while the
+                                // scope still contains only impl-level bindings.
+                                let impl_type_vars: List<TypeVar> = type_param_names
+                                    .iter()
+                                    .filter_map(|name| {
+                                        match self.ctx.lookup_type(name.as_str()) {
+                                            Option::Some(Type::Var(v)) => Some(*v),
+                                            _ => None,
+                                        }
+                                    })
+                                    .collect();
+
                                 // CRITICAL: Enter a scope to register method-level type params
                                 // Methods like `fn map<B, F: fn(Self.Item) -> B>` have their own type params
                                 self.ctx.enter_scope();
 
                                 // Register fresh TypeVars for method type param names and build name->TypeVar map
                                 let mut method_param_type_vars: Map<Text, TypeVar> = Map::new();
+                                let mut method_type_vars: List<TypeVar> = List::new();
                                 for param_name in &proto_method.type_param_names {
                                     let type_var = TypeVar::fresh();
                                     self.ctx.define_type(param_name.clone(), Type::Var(type_var));
                                     method_param_type_vars.insert(param_name.clone(), type_var);
+                                    method_type_vars.push(type_var);
                                 }
 
                                 // The method type from the protocol needs Self substituted with the implementing type
                                 let method_ty = self.substitute_self_type(&proto_method.ty, &impl_self_type);
 
-                                // Combine impl type params with method type params for generalization
-                                let mut all_param_names: List<Text> = type_param_names.clone();
-                                for param_name in &proto_method.type_param_names {
-                                    all_param_names.push(param_name.clone());
+                                // Build ordered TypeVar list: impl params first,
+                                // then method params. Pass the TypeVars directly
+                                // (not names) so that shared spellings between
+                                // impl and method cannot collide through
+                                // name-based lookup in `generalize_ordered`.
+                                // Example that would previously break:
+                                //   impl<T, F: fn()->T> Iterator for OnceWith<T,F>
+                                //   fn map<B, F: fn(Self.Item)->B>(...)
+                                // Here both impl and method declare `F`, and the
+                                // name-lookup resolver would pin both positions
+                                // to method_F, losing impl_F entirely.
+                                let mut ordered_vars: List<TypeVar> = impl_type_vars.clone();
+                                for v in method_type_vars.iter() {
+                                    ordered_vars.push(*v);
                                 }
 
                                 // Create a TypeScheme with all type parameters
-                                let mut method_scheme = self.ctx.generalize_ordered(method_ty.clone(), &all_param_names);
+                                let mut method_scheme = self.ctx.generalize_with_vars(
+                                    method_ty.clone(),
+                                    &ordered_vars,
+                                );
                                 // Record impl-level vs method-level split. For `impl Iterator for Range<Int>`
                                 // type_param_names is empty, so impl_var_count = 0 — method-level params
                                 // like U in chain<U: Iterator<Item = Self.Item>> must NOT be bound to
                                 // receiver type args (Range's Int). Without this, bind_limit falls back
                                 // to fresh_vars.len() and pins U := Int (see #57).
-                                method_scheme.impl_var_count = type_param_names.len();
+                                method_scheme.impl_var_count = impl_type_vars.len();
 
                                 // CRITICAL: Transfer type param bounds from the protocol method
                                 // The bounds are keyed by param NAME, so we can look up the corresponding TypeVar
