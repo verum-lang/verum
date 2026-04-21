@@ -276,6 +276,27 @@ fn resolve_stdlib_constant_value(name: &str) -> i64 {
     }
 }
 
+/// Return true if `name` names an unsigned integer type for which the
+/// C / Rust contract is that `>>` performs a logical (zero-filling) shift,
+/// not an arithmetic one. Used by the `BinOp::Shr` compile path to pick
+/// `BitwiseOp::Ushr` over `BitwiseOp::Shr` so the interpreter's shift
+/// handler doesn't sign-extend a high bit that was intentionally unsigned.
+///
+/// The canonical set covers Verum's semantic primitive names, the
+/// Rust-style aliases, and `Byte` (which is u8). A generic type like
+/// `UInt32` that appears as a base in `UInt32<...>` (rare) is still
+/// matched via the `split('<')` at call sites — the base is what counts.
+fn is_unsigned_int_type_name(name: &str) -> bool {
+    matches!(
+        name,
+        "UInt8" | "u8" | "Byte"
+            | "UInt16" | "u16"
+            | "UInt32" | "u32"
+            | "UInt64" | "u64"
+            | "USize" | "usize"
+    )
+}
+
 /// Check if a name is a known type name (primitive or semantic numeric type).
 ///
 /// This is used to distinguish type names from variable names when compiling paths.
@@ -1600,12 +1621,37 @@ impl VbcCodegen {
                 a: left_reg,
                 b: right_reg,
             }),
-            BinOp::Shr => self.ctx.emit(Instruction::Bitwise {
-                op: BitwiseOp::Shr,
-                dst: dest,
-                a: left_reg,
-                b: right_reg,
-            }),
+            BinOp::Shr => {
+                // Root fix for Issue #2:
+                //
+                // `>>` was hard-wired to `BitwiseOp::Shr`, which the interpreter
+                // dispatches to `handle_shr` — an *arithmetic* (sign-preserving)
+                // 64-bit shift. For any unsigned type whose representation has
+                // the high 32-bit sign bit set (e.g. a `UInt32` value loaded
+                // from a table whose entry is `0xEDB88320`), arithmetic right
+                // shift fills the top bits with ones and subsequent XORs then
+                // propagate sign-extended garbage. This shows up as a silent
+                // correctness bug (CRC32 test vectors diverge from zlib).
+                //
+                // The architecturally-correct behaviour is: `>>` on an unsigned
+                // operand is the C / Rust `>>` on the unsigned type — i.e. a
+                // logical shift. We detect the unsigned case from the left
+                // operand's inferred type name and emit `BitwiseOp::Ushr`
+                // (which the interpreter lowers to `handle_ushr`, the u64
+                // zero-filling shift).
+                let use_logical = self
+                    .infer_expr_type_name(left)
+                    .as_deref()
+                    .map(is_unsigned_int_type_name)
+                    .unwrap_or(false);
+                let op = if use_logical { BitwiseOp::Ushr } else { BitwiseOp::Shr };
+                self.ctx.emit(Instruction::Bitwise {
+                    op,
+                    dst: dest,
+                    a: left_reg,
+                    b: right_reg,
+                })
+            },
 
             // Power operator
             BinOp::Pow => self.ctx.emit(Instruction::BinaryI {
@@ -10135,8 +10181,15 @@ impl VbcCodegen {
             && path.segments.len() == 1
                 && let PathSegment::Name(ref type_ident) = path.segments[0] {
                     let type_name = type_ident.name.as_str();
-                    // If both base and field start with uppercase, this is likely a variant constructor
-                    if type_name.chars().next().map(|c| c.is_uppercase()).unwrap_or(false)
+                    // Lowercase FFI-compat integer/float aliases (`i64`, `u32`,
+                    // `f64`, …) are legitimate type names that carry associated
+                    // constants like `MAX` / `MIN` / `BITS`. The `TypeName.field`
+                    // disambiguation below only considers uppercase type names
+                    // (to avoid mistaking variable.field for variant dispatch);
+                    // accept lowercase names when they're primitive numeric types.
+                    let base_is_type = type_name.chars().next().map(|c| c.is_uppercase()).unwrap_or(false)
+                        || is_type_name(type_name);
+                    if base_is_type
                         && field.chars().next().map(|c| c.is_uppercase()).unwrap_or(false)
                     {
                         // Try to look up the variant constructor as a registered function.
