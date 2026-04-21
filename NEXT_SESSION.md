@@ -5,13 +5,16 @@
 **Test status:**
 - L0 stdlib-runtime: **100%** (8/8, regression-free)
 - L0 full: `cbgr_latency.vr` fixed (removed spurious `using [Benchmark]`)
-- L1-core: **99.8%** (520/521) — 1 self-hosting flake
-- L2-standard: **70%** (294/420) — 126 failures (параллельный агент активно закрывает)
+- L1-core: **99.6%** (524/526) — 2 self-hosting flakes
+- L2-standard: **70.3%** (315/448) — 133 failures (параллельный агент активно растит + закрывает)
 - L3-extended: **93.1%** (297/319) — 22 failures
 
 ## Дополнительные закрытия этой подсессии
 - `7e659d8` fix(L0): cbgr_latency — remove spurious `using [Benchmark]` (L0 regression)
-- `64ed232` fix(types): user type/impl shadows same-named stdlib context (partial — L1 +1)
+- `64ed232` fix(types): user type/impl shadows same-named stdlib context (2 guards)
+- `82ce88d` fix(types): prioritise user inherent methods over protocol-method static lookup (third guard)
+- `882b7bf` feat(types): `*result` auto-unwraps Result<T,E> → T at typecheck (#55 tail)
+- `e0b8781` fix(types): tighten name-collision guard — check specific method name
 
 ## Known-unfixed
 - **context/type name collision для SYNTH path**: `Benchmark.new(x)` в файле с `type Benchmark` + `using [Benchmark]` всё ещё может дать неверный тип через какой-то непокрытый путь (мой minimal repro `/tmp/test_min_using.vr` всё ещё падает). Guard в register_function + method_call_inner_impl не ловит все места. Есть какой-то третий путь env.insert("Benchmark", Record) который я не нашёл без глубокого трассирования. Требует дальнейшего исследования.
