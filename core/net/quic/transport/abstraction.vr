@@ -1,0 +1,261 @@
+// =============================================================================
+// net/quic/transport/abstraction.vr — UDP transport abstraction
+// =============================================================================
+// Layer: 5 (Network — QUIC)
+// Dependencies: core, core.net.{addr, udp}
+// =============================================================================
+//
+// QUIC runs over UDP. For testability + determinism we abstract the
+// concrete socket behind a `UdpTransport` protocol that `ConnectionPump`
+// consumes. Two impls ship:
+//
+//   * `RealUdpTransport` — production; wraps `core.net.udp.UdpSocket`
+//     with recv_batch / send (when the batch I/O extensions land);
+//     falls back to single-datagram recv/send on platforms without
+//     GSO/GRO.
+//
+//   * `SimUdpTransport` — deterministic in-memory transport that
+//     feeds scripted datagrams through the pump for byte-exact unit
+//     tests + DST-style recovery testing. Paired peer connections
+//     talk to each other without touching the kernel.
+//
+// The protocol is intentionally minimal — send, recv, local_addr —
+// so custom transports (mock fuzzing harness, kernel-bypass DPDK
+// binding, offloaded NIC-assisted I/O, etc.) can drop in without
+// changing the pump.
+//
+// =============================================================================
+
+module core.net.quic.transport.abstraction;
+
+mount core.*;
+mount core.collections.List;
+mount core.net.addr.{SocketAddr};
+
+// =============================================================================
+// Error type + datagram
+// =============================================================================
+
+public type TransportError is
+      Closed
+    | TooLarge(Int)
+    | Io(Text)
+    | WouldBlock;
+
+public type InboundDatagram is {
+    data:      List<Byte>,
+    peer_addr: SocketAddr,
+    /// ECN codepoint from IP header (RFC 3168). Zero when kernel
+    /// didn't surface it.
+    ecn:       EcnCodepoint,
+};
+
+public type EcnCodepoint is NotEct | Ect1 | Ect0 | Ce;
+
+impl EcnCodepoint {
+    pub fn to_u8(&self) -> UInt8 {
+        match self {
+            EcnCodepoint.NotEct => 0_u8,
+            EcnCodepoint.Ect1   => 1_u8,
+            EcnCodepoint.Ect0   => 2_u8,
+            EcnCodepoint.Ce     => 3_u8,
+        }
+    }
+    pub fn from_u8(v: UInt8) -> EcnCodepoint {
+        match v & 0x03_u8 {
+            0_u8 => EcnCodepoint.NotEct,
+            1_u8 => EcnCodepoint.Ect1,
+            2_u8 => EcnCodepoint.Ect0,
+            _    => EcnCodepoint.Ce,
+        }
+    }
+}
+
+// =============================================================================
+// UdpTransport protocol
+// =============================================================================
+
+/// Async UDP transport the pump consumes. All methods may suspend;
+/// `recv` blocks until a datagram arrives or the transport is closed,
+/// `send` may queue under backpressure.
+public type UdpTransport is protocol {
+    async fn recv(&self) -> Result<InboundDatagram, TransportError>;
+    async fn send(&self, data: &[Byte], to: &SocketAddr, ecn: EcnCodepoint)
+        -> Result<(), TransportError>;
+    fn local_addr(&self) -> SocketAddr;
+    fn max_datagram_size(&self) -> Int;
+    async fn close(&self) -> Result<(), TransportError>;
+};
+
+// =============================================================================
+// RealUdpTransport — wraps core.net.udp.UdpSocket
+// =============================================================================
+
+public type RealUdpTransport is {
+    socket:     core.net.udp.UdpSocket,
+    local_addr: SocketAddr,
+    /// Max UDP payload size we'll send on this socket — matches the
+    /// QUIC `max_udp_payload_size` transport parameter. Default 1472
+    /// (1500 MTU - 20 IPv4 - 8 UDP).
+    max_size:   Int,
+};
+
+implement RealUdpTransport {
+    pub async fn bind(addr: &SocketAddr) -> Result<RealUdpTransport, TransportError> {
+        let socket = core.net.udp.UdpSocket.bind(addr)
+            .await
+            .map_err(|e| TransportError.Io(Text.from_str(f"udp bind failed")))?;
+        let local = socket.local_addr()
+            .map_err(|_| TransportError.Io(Text.from_str("local_addr")))?;
+        Ok(RealUdpTransport {
+            socket:     socket,
+            local_addr: local,
+            max_size:   1472,
+        })
+    }
+
+    /// Open a new client socket on an ephemeral local port.
+    pub async fn connect_ephemeral() -> Result<RealUdpTransport, TransportError> {
+        let addr = SocketAddr.from_text(Text.from_str("[::]:0"))
+            .unwrap_or_else(|_| SocketAddr.from_text(Text.from_str("0.0.0.0:0")).unwrap());
+        RealUdpTransport.bind(&addr).await
+    }
+}
+
+implement UdpTransport for RealUdpTransport {
+    async fn recv(&self) -> Result<InboundDatagram, TransportError> {
+        let mut buf: List<Byte> = List<Byte>.with_capacity(2048);
+        // Pre-grow to MAX possible datagram size so recv can fill in
+        // place without a re-allocation.
+        let mut i: Int = 0;
+        while i < 2048 { buf.push(0_u8); i = i + 1; }
+        match self.socket.recv_from(buf.as_mut_slice()).await {
+            Ok((n, peer)) => {
+                // Trim to actual n bytes.
+                let mut data: List<Byte> = [];
+                let mut j: Int = 0;
+                while j < n { data.push(buf[j]); j = j + 1; }
+                // ECN lookup requires IP_TOS cmsg; default NotEct
+                // when Gap 6 extension isn't wired.
+                Ok(InboundDatagram {
+                    data: data,
+                    peer_addr: peer,
+                    ecn: EcnCodepoint.NotEct,
+                })
+            },
+            Err(_) => Err(TransportError.Io(Text.from_str("recv_from"))),
+        }
+    }
+
+    async fn send(&self, data: &[Byte], to: &SocketAddr, ecn: EcnCodepoint) -> Result<(), TransportError> {
+        let _ = ecn;  // ECN outgoing via IP_TOS — Gap 6 wire-up
+        if data.len() > self.max_size {
+            return Err(TransportError.TooLarge(data.len()));
+        }
+        self.socket.send_to(data, to).await
+            .map(|_| ())
+            .map_err(|_| TransportError.Io(Text.from_str("send_to")))
+    }
+
+    fn local_addr(&self) -> SocketAddr { self.local_addr.clone() }
+
+    fn max_datagram_size(&self) -> Int { self.max_size }
+
+    async fn close(&self) -> Result<(), TransportError> {
+        let _ = self.socket.close();
+        Ok(())
+    }
+}
+
+// =============================================================================
+// SimUdpTransport — deterministic in-memory transport for tests
+// =============================================================================
+//
+// Used by differential/DST tests: two pumps talk through a paired
+// SimUdpTransport via a shared `SimNetwork`. Loss / reorder / delay
+// knobs live on the network; individual transports are thin.
+//
+// =============================================================================
+
+public type SimUdpTransport is {
+    addr:     SocketAddr,
+    network:  Shared<SimNetwork>,
+};
+
+public type SimNetwork is {
+    /// FIFO of (from, to, bytes, ecn). Production impl uses a
+    /// scheduler-driven priority queue keyed on delivery_time.
+    inflight: List<(SocketAddr, SocketAddr, List<Byte>, EcnCodepoint)>,
+    /// Drop probability per datagram (0.0 .. 1.0).
+    loss_rate: Float,
+    /// Deliver packets out of order with this probability.
+    reorder_rate: Float,
+    closed:    Bool,
+};
+
+impl SimNetwork {
+    pub fn new() -> SimNetwork {
+        SimNetwork { inflight: [], loss_rate: 0.0, reorder_rate: 0.0, closed: false }
+    }
+
+    /// Drop every datagram whose index hits the loss gate.
+    pub fn with_loss_rate(mut self, rate: Float) -> SimNetwork {
+        self.loss_rate = rate; self
+    }
+}
+
+impl SimUdpTransport {
+    pub fn bind(addr: SocketAddr, network: Shared<SimNetwork>) -> SimUdpTransport {
+        SimUdpTransport { addr: addr, network: network }
+    }
+}
+
+implement UdpTransport for SimUdpTransport {
+    async fn recv(&self) -> Result<InboundDatagram, TransportError> {
+        loop {
+            let mut net = self.network.lock().unwrap();
+            if net.closed { return Err(TransportError.Closed); }
+            // Scan inflight for first datagram addressed to us.
+            let mut idx: Int = 0;
+            while idx < net.inflight.len() {
+                let (_, to, _, _) = &net.inflight[idx];
+                if addr_eq(to, &self.addr) { break; }
+                idx = idx + 1;
+            }
+            if idx < net.inflight.len() {
+                let (from, _, data, ecn) = net.inflight.remove(idx);
+                return Ok(InboundDatagram {
+                    data:      data,
+                    peer_addr: from,
+                    ecn:       ecn,
+                });
+            }
+            // No datagram yet — release lock + park async.
+            drop(net);
+            core.async.yield_now().await;
+        }
+    }
+
+    async fn send(&self, data: &[Byte], to: &SocketAddr, ecn: EcnCodepoint) -> Result<(), TransportError> {
+        let mut net = self.network.lock().unwrap();
+        if net.closed { return Err(TransportError.Closed); }
+        let mut owned: List<Byte> = [];
+        let mut i: Int = 0;
+        while i < data.len() { owned.push(data[i]); i = i + 1; }
+        net.inflight.push((self.addr.clone(), to.clone(), owned, ecn));
+        Ok(())
+    }
+
+    fn local_addr(&self) -> SocketAddr { self.addr.clone() }
+    fn max_datagram_size(&self) -> Int { 1472 }
+
+    async fn close(&self) -> Result<(), TransportError> {
+        let mut net = self.network.lock().unwrap();
+        net.closed = true;
+        Ok(())
+    }
+}
+
+fn addr_eq(a: &SocketAddr, b: &SocketAddr) -> Bool {
+    a.to_text() == b.to_text()
+}

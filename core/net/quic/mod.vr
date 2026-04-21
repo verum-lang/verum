@@ -66,6 +66,7 @@ public module stream_sm;               // RFC 9000 §3/§4 stream state machines
 public module connection_sm;           // Typed connection SM (Initial → ... → OneRtt)
 public module path;                    // RFC 9000 §8 path validation + migration
 public module api;                     // High-level QuicClient / QuicServer facade
+public module transport;               // UDP abstraction + ConnectionPump (end-to-end I/O)
 
 mount core.*;
 mount core.time.duration.{Duration};

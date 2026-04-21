@@ -1,0 +1,36 @@
+// =============================================================================
+// net/quic/transport/mod.vr — UDP transport abstraction + connection pump
+// =============================================================================
+// Layer: 5 (Network — QUIC)
+// Spec: internal/specs/tls-quic.md §1.1 Phase 7, §12 end-to-end wire-up
+// =============================================================================
+//
+// The integration layer that binds the QUIC state machine to real
+// (or simulated) UDP I/O. Three concrete pieces:
+//
+//   * `UdpTransport` protocol — abstract send/recv shim so the pump
+//     works identically against production UDP, simulated networks,
+//     fuzz harnesses, and mock transports.
+//   * `RealUdpTransport` + `SimUdpTransport` — two reference impls.
+//   * `ConnectionPump` — the async loop driving inbound parse +
+//     handshake dispatch + recovery timer + outbound packet
+//     assembly for one connection.
+//
+// This module is where every Phase 2-6 primitive actually starts
+// talking to the wire. Application code never instantiates these
+// directly — the `QuicClient` / `QuicServer` / `H3Client` / `H3Server`
+// facades wrap them behind `connect` / `bind` / `accept` constructors.
+//
+// =============================================================================
+
+module core.net.quic.transport;
+
+public module abstraction;
+public module pump;
+
+// Re-exports
+public mount .abstraction.{
+    UdpTransport, RealUdpTransport, SimUdpTransport, SimNetwork,
+    InboundDatagram, EcnCodepoint, TransportError,
+};
+public mount .pump.{ConnectionPump, PumpPhase, PumpError};

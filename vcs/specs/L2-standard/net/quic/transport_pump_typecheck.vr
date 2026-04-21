@@ -1,0 +1,45 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: quic, transport, pump, udp, integration, typecheck
+// @timeout: 10000
+// @expect: pass
+
+mount core.net.quic.transport.{
+    UdpTransport, SimUdpTransport, SimNetwork,
+    InboundDatagram, EcnCodepoint, TransportError,
+    ConnectionPump, PumpPhase, PumpError,
+};
+mount core.net.addr.{SocketAddr};
+
+fn check_sim_network() {
+    let _ = SimNetwork.new();
+    let net = SimNetwork.new().with_loss_rate(0.05);
+    let _ = net;
+}
+
+fn check_ecn_codepoint() {
+    let _ = EcnCodepoint.NotEct;
+    let _ = EcnCodepoint.Ce;
+    let _ = EcnCodepoint.from_u8(0_u8);
+    let _ = EcnCodepoint.NotEct.to_u8();
+}
+
+async fn check_sim_transport() -> Result<(), TransportError> {
+    let net = core.sync.Shared.new(SimNetwork.new());
+    let addr_a = SocketAddr.from_text(Text.from_str("127.0.0.1:11001")).unwrap();
+    let addr_b = SocketAddr.from_text(Text.from_str("127.0.0.1:11002")).unwrap();
+    let t_a = SimUdpTransport.bind(addr_a, net.clone());
+    let t_b = SimUdpTransport.bind(addr_b, net.clone());
+
+    // Send from a to b, then receive on b.
+    t_a.send(b"ping", &t_b.local_addr(), EcnCodepoint.NotEct).await?;
+    let _ = t_b.recv().await?;
+    Ok(())
+}
+
+fn main() {
+    check_sim_network();
+    check_ecn_codepoint();
+    let _ = check_sim_transport;
+}
