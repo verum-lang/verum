@@ -1,0 +1,60 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: net, weft, spiffe, mtls, zero-trust, phase6
+// @timeout: 10000
+// @expect: pass
+
+// §8.13 — Principal / SpiffeAuthLayer / TrustBundleProvider shape.
+
+mount core.collections.map.{Map};
+mount core.time.{Instant};
+mount core.net.http.{Response};
+mount core.security.spiffe.id.{SpiffeId};
+mount core.security.spiffe.svid.{X509Bundle, JwtBundle};
+mount core.net.weft.service.{ServiceBuilder};
+mount core.net.weft.handler.{WeftRequest, Handler};
+mount core.net.weft.error.{WeftError};
+mount core.net.weft.response_ext.{resp_ok};
+mount core.net.weft.spiffe.{
+    Principal, AuthMode, AuthRejection, TrustBundleProvider,
+    SpiffeAuthLayer, SpiffeAuthHandler,
+};
+
+// A fixed-bundle provider for tests / single-process deployments.
+type StaticBundles is {
+    x509: Maybe<X509Bundle>,
+    jwt: Maybe<JwtBundle>,
+};
+
+implement TrustBundleProvider for StaticBundles {
+    fn x509_bundle(&self) -> Maybe<X509Bundle> { self.x509.clone() }
+    fn jwt_bundle(&self) -> Maybe<JwtBundle>  { self.jwt.clone() }
+    fn reload(&self) -> Result<(), Text> { Ok(()) }
+}
+
+type Noop is {};
+implement Handler for Noop {
+    async fn handle(&self, _req: WeftRequest) -> Result<Response, WeftError> {
+        Ok(resp_ok())
+    }
+}
+
+fn typecheck_layer_shape(b: StaticBundles) -> impl Handler {
+    ServiceBuilder.new(Noop {})
+        .layer(SpiffeAuthLayer.jwt(b))
+        .build()
+}
+
+fn typecheck_principal_match(p: &Principal) -> Bool {
+    p.matches(&"spiffe://prod/*/sa/admin".into())
+}
+
+fn typecheck_rejection_shapes() -> (Int, Text) {
+    let r = AuthRejection.Expired;
+    (r.http_status(), r.public_message())
+}
+
+fn main() {
+    let _ = typecheck_rejection_shapes();
+}

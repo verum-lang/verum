@@ -1,0 +1,281 @@
+// =============================================================================
+// core/net/weft/spiffe.vr — SPIFFE workload identity middleware
+// =============================================================================
+// Layer: 6 (Weft)
+// Spec:  internal/specs/net-framework.md §8.13
+// =============================================================================
+//
+// Plugs `core/security/spiffe/*` (SpiffeId, X509Svid, JwtSvid, bundles,
+// workload-API client) into Weft as a standard `Layer`. Two modes:
+//
+//   * `SpiffeAuthLayer.jwt(trust_bundle)` — validates `Authorization:
+//     Bearer <JWT-SVID>` against the bundle; rejects unsigned /
+//     expired / trust-domain-mismatched tokens with 401.
+//
+//   * `SpiffeAuthLayer.mtls(trust_bundle)` — validates the client
+//     certificate presented during the TLS handshake (extracted via
+//     the TlsTransport peer-certificate hook); rejects with 401 on
+//     any validation failure.
+//
+// Both modes yield a `Principal` value carried on the request — the
+// handler reads `req.headers().get(&"x-weft-spiffe-id")` (phase-6
+// plumbing) or the context-system `Ctx<Principal>` extractor (once
+// the context bridge §5.8 is finalised).
+//
+// Rotation (§8.13 "certificate rotation") — consumers of this layer
+// pass a `TrustBundleProvider` that updates itself in the background
+// via the SPIRE Workload API (`core.security.spiffe.workload_api`).
+// When the provider refreshes, new requests pick up the new bundle on
+// their next validate call — no server restart required.
+//
+// Out of scope for this phase (deferred):
+//
+//   * HBONE-aware mode for Istio ambient (§8.13 "HBONE-aware mode").
+//   * SVID → request-header projection for downstream services.
+//   * Full crypto path-chain verification — Phase-6 skeleton calls
+//     out to the runtime intrinsic `verum.spiffe.validate_jwt_svid`
+//     and `verum.spiffe.validate_x509_svid` which the runtime wires
+//     up to the crate-level implementation.
+//
+// =============================================================================
+
+module core.net.weft.spiffe;
+
+mount core.*;
+mount core.collections.map.{Map};
+mount core.time.{Instant};
+mount core.net.http.{Response};
+mount core.security.spiffe.id.{SpiffeId};
+mount core.security.spiffe.svid.{X509Bundle, JwtBundle};
+mount core.net.weft.service.{Layer};
+mount core.net.weft.handler.{WeftRequest, Handler};
+mount core.net.weft.error.{WeftError, IntoResponse};
+mount core.net.weft.response_ext.{resp_status};
+
+// =============================================================================
+// Principal — validated authenticated identity
+// =============================================================================
+
+public type Principal is {
+    spiffe_id: SpiffeId,
+    expires_at: Instant,
+    /// Claims surfaced from JWT-SVID or cert extensions.
+    /// Key case-preserved; first wins on duplicates.
+    claims: Map<Text, Text>,
+};
+
+implement Principal {
+    /// Does this principal's SPIFFE ID match a prefix pattern like
+    /// "spiffe://prod/*/sa/admin"? Implements §8.13 example.
+    pub fn matches(&self, pattern: &Text) -> Bool {
+        spiffe_pattern_matches(&self.spiffe_id.to_uri(), pattern)
+    }
+
+    pub fn spiffe_id(&self) -> &SpiffeId { &self.spiffe_id }
+    pub fn expires_at(&self) -> Instant { self.expires_at }
+    pub fn claims(&self) -> &Map<Text, Text> { &self.claims }
+}
+
+/// Match `id` against a SPIFFE URI with `*` segment wildcards. `*` is
+/// per-segment (never crosses `/`), matching the k8s-style glob.
+fn spiffe_pattern_matches(id: &Text, pattern: &Text) -> Bool {
+    let id_parts: List<Text> = id.split("/").collect();
+    let pat_parts: List<Text> = pattern.split("/").collect();
+    if id_parts.len() != pat_parts.len() { return false; }
+    let mut i: Int = 0;
+    while i < pat_parts.len() {
+        let p = &pat_parts[i];
+        if p != "*" && p != &id_parts[i] { return false; }
+        i = i + 1;
+    }
+    true
+}
+
+// =============================================================================
+// Trust bundle provider
+// =============================================================================
+
+/// Abstraction over a refreshable trust bundle source. Implementors:
+/// static test bundle, on-disk PEM watcher, SPIRE workload-API client.
+public type TrustBundleProvider is protocol {
+    fn x509_bundle(&self) -> Maybe<X509Bundle>;
+    fn jwt_bundle(&self) -> Maybe<JwtBundle>;
+    /// Optional — called by the runtime whenever SPIRE rotates the
+    /// bundle. Implementations that auto-refresh via the workload API
+    /// can ignore this.
+    fn reload(&self) -> Result<(), Text>;
+};
+
+// =============================================================================
+// SpiffeAuthLayer
+// =============================================================================
+
+public type AuthMode is
+    /// Validate JWT-SVID in `Authorization: Bearer`.
+    | Jwt
+    /// Validate X.509-SVID from the TLS peer certificate.
+    | Mtls;
+
+implement Copy for AuthMode {}
+implement Clone for AuthMode {
+    fn clone(&self) -> AuthMode { *self }
+}
+
+public type SpiffeAuthLayer<P> is {
+    mode: AuthMode,
+    bundles: Heap<P>,
+};
+
+implement<P: TrustBundleProvider + Send + Sync + 'static> SpiffeAuthLayer<P> {
+    pub fn jwt(bundles: P) -> SpiffeAuthLayer<P> {
+        SpiffeAuthLayer { mode: AuthMode.Jwt, bundles: Heap.new(bundles) }
+    }
+
+    pub fn mtls(bundles: P) -> SpiffeAuthLayer<P> {
+        SpiffeAuthLayer { mode: AuthMode.Mtls, bundles: Heap.new(bundles) }
+    }
+}
+
+implement<P: TrustBundleProvider + Send + Sync + 'static, H: Handler> Layer<H>
+    for SpiffeAuthLayer<P>
+{
+    type Wrapped = SpiffeAuthHandler<P, H>;
+    fn wrap(&self, inner: H) -> SpiffeAuthHandler<P, H> {
+        SpiffeAuthHandler {
+            inner: inner,
+            mode: self.mode,
+            bundles: self.bundles.clone(),
+        }
+    }
+}
+
+public type SpiffeAuthHandler<P, H> is {
+    inner: H,
+    mode: AuthMode,
+    bundles: Heap<P>,
+};
+
+implement<P: TrustBundleProvider + Send + Sync + 'static, H: Handler> Handler
+    for SpiffeAuthHandler<P, H>
+{
+    async fn handle(&self, req: WeftRequest) -> Result<Response, WeftError> {
+        let validation = match self.mode {
+            AuthMode.Jwt  => validate_jwt(&req, &*self.bundles),
+            AuthMode.Mtls => validate_mtls(&req, &*self.bundles),
+        };
+        match validation {
+            Err(e) => Ok(e.into_response()),
+            Ok(principal) => {
+                // Principal-attached request lands via a stamped
+                // header (phase-6 scaffold). Handlers read this via
+                // `req.header(&"x-weft-spiffe-id")`; full
+                // Ctx<Principal> extractor plugs in once the §5.8
+                // context bridge stabilises.
+                let mut attributed = req;
+                let id = principal.spiffe_id.to_uri();
+                attributed.headers.set(&"x-weft-spiffe-id", &id);
+                self.inner.handle(attributed).await
+            }
+        }
+    }
+}
+
+// =============================================================================
+// Validation — phase-6 skeleton
+// =============================================================================
+
+public type AuthRejection is
+    | MissingCredential
+    | InvalidCredential(Text)
+    | Expired
+    | UntrustedSource;
+
+implement AuthRejection {
+    pub fn http_status(&self) -> Int {
+        match self {
+            MissingCredential   => 401,
+            InvalidCredential(_) => 401,
+            Expired             => 401,
+            UntrustedSource     => 403,
+        }
+    }
+
+    pub fn public_message(&self) -> Text {
+        match self {
+            MissingCredential   => "missing credential",
+            InvalidCredential(_) => "invalid credential",
+            Expired             => "credential expired",
+            UntrustedSource     => "untrusted issuer",
+        }
+    }
+}
+
+implement IntoResponse for AuthRejection {
+    fn into_response(self) -> Response {
+        let status = core.net.http.StatusCode.new(self.http_status());
+        let body = self.public_message();
+        core.net.weft.response_ext.resp_with_body_text(resp_status(status), body)
+    }
+}
+
+fn validate_jwt<P: TrustBundleProvider>(req: &WeftRequest, provider: &P)
+    -> Result<Principal, AuthRejection>
+{
+    let auth = match req.headers.get(&"authorization") {
+        None    => return Err(AuthRejection.MissingCredential),
+        Some(v) => v.clone(),
+    };
+    if !auth.starts_with("Bearer ") {
+        return Err(AuthRejection.InvalidCredential("not a Bearer token".into()));
+    }
+    let token = auth.slice(7, auth.len());
+    let bundle = match provider.jwt_bundle() {
+        None    => return Err(AuthRejection.UntrustedSource),
+        Some(b) => b,
+    };
+    // Runtime-level crypto check — implemented in the runtime crate
+    // via `verum_security::spiffe::validate_jwt_svid`. Phase-6 skel:
+    // returns InvalidCredential until the intrinsic hookup is done.
+    match runtime_validate_jwt_svid(&token, &bundle) {
+        Err(e)        => Err(AuthRejection.InvalidCredential(e)),
+        Ok(principal) => Ok(principal),
+    }
+}
+
+fn validate_mtls<P: TrustBundleProvider>(req: &WeftRequest, provider: &P)
+    -> Result<Principal, AuthRejection>
+{
+    // The client cert was extracted during TLS handshake and stamped
+    // onto the request by the TlsHttp1Runner (phase-3.5 follow-up).
+    // For phase-6 skeleton we read a placeholder header.
+    let cert_pem = match req.headers.get(&"x-weft-client-cert") {
+        None    => return Err(AuthRejection.MissingCredential),
+        Some(v) => v.clone(),
+    };
+    let bundle = match provider.x509_bundle() {
+        None    => return Err(AuthRejection.UntrustedSource),
+        Some(b) => b,
+    };
+    match runtime_validate_x509_svid(&cert_pem, &bundle) {
+        Err(e)        => Err(AuthRejection.InvalidCredential(e)),
+        Ok(principal) => Ok(principal),
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Runtime bindings — intrinsic hookup. Today return a clear "not
+// wired yet" error so the build is clean; runtime side implements the
+// actual signature check + claims extraction.
+// -----------------------------------------------------------------------------
+
+fn runtime_validate_jwt_svid(_token: &Text, _bundle: &JwtBundle)
+    -> Result<Principal, Text>
+{
+    Err("SPIFFE JWT validation intrinsic not yet wired".into())
+}
+
+fn runtime_validate_x509_svid(_cert: &Text, _bundle: &X509Bundle)
+    -> Result<Principal, Text>
+{
+    Err("SPIFFE X.509 validation intrinsic not yet wired".into())
+}
