@@ -1,0 +1,491 @@
+// =============================================================================
+// net/quic/packet.vr — QUIC packet headers + formats (RFC 9000 §17)
+// =============================================================================
+// Layer: 5 (Network — QUIC)
+// Dependencies: core, encoding.varint, quic.{version, connection_id, frame}
+// =============================================================================
+//
+// RFC 9000 §17 defines six packet formats, distinguished by the header-
+// form bit (the top bit of the first byte):
+//
+//   Long header (bit 7 = 1):
+//     0x00  Initial                  (has Token + Length + PN)
+//     0x01  0-RTT                    (no Token)
+//     0x02  Handshake                (no Token)
+//     0x03  Retry                    (no PN; has Token + Retry Integrity Tag)
+//
+//   Short header (bit 7 = 0):
+//     1-RTT                          (carries Application Data)
+//
+//   Two special packet types live outside the type-bit table:
+//     Version Negotiation            (long, version = 0x00000000)
+//     Stateless Reset                (short-looking, fixed bit pattern
+//                                     in last 20 bytes)
+//
+// Packet Number (PN) encoding is covered by `pn.rs`: the wire PN is
+// truncated to 1..4 bytes and reconstructed via RFC 9000 §A.3 using
+// the known `largest_pn` for the PN space.
+//
+// # Structures
+//
+//   LongHeader { type_byte, version, dcid, scid, <type-specific fields> }
+//   ShortHeader { type_byte, dcid, packet_number, payload }
+//
+// Packet numbers are header-protected and AEAD-sealed (RFC 9001 §5).
+// This module handles only the plaintext framing; crypto sealing +
+// header protection live in `core.net.quic.crypto.*` (already landed).
+//
+// =============================================================================
+
+module core.net.quic.packet;
+
+mount core.*;
+mount core.collections.List;
+mount core.encoding.varint.{quic_encode_into, quic_decode, VarintError};
+mount core.net.quic.version as qv;
+mount core.net.quic.connection_id.{ConnectionId, CidError, MAX_CID_LEN};
+
+// =============================================================================
+// Error
+// =============================================================================
+
+public type PacketError is
+      Truncated
+    | InvalidHeaderForm
+    | UnsupportedVersion(UInt32)
+    | VarintFailure
+    | CidTooLong(Int)
+    | InvalidPacketNumberLength(Int)
+    | TokenTooLong(Int);
+
+// =============================================================================
+// Packet-type discriminant for long headers
+// =============================================================================
+
+public type LongPacketType is Initial | ZeroRtt | Handshake | Retry;
+
+implement LongPacketType {
+    pub fn to_bits(&self) -> UInt8 {
+        match self {
+            LongPacketType.Initial   => 0b00_u8,
+            LongPacketType.ZeroRtt   => 0b01_u8,
+            LongPacketType.Handshake => 0b10_u8,
+            LongPacketType.Retry     => 0b11_u8,
+        }
+    }
+
+    pub fn from_bits(b: UInt8) -> LongPacketType {
+        match b & 0x03_u8 {
+            0_u8 => LongPacketType.Initial,
+            1_u8 => LongPacketType.ZeroRtt,
+            2_u8 => LongPacketType.Handshake,
+            _    => LongPacketType.Retry,
+        }
+    }
+}
+
+// =============================================================================
+// LongHeader — shared scaffolding for Initial / 0-RTT / Handshake / Retry
+// =============================================================================
+
+public type LongHeader is {
+    /// Raw first byte (after header protection has been removed; still
+    /// includes the type bits and — for Initial/Handshake/0-RTT — the
+    /// reserved + PN-length bits in the lower nibble).
+    first_byte: UInt8,
+    version:    UInt32,
+    dcid:       ConnectionId,
+    scid:       ConnectionId,
+}
+
+/// Long packet body variants (after shared LongHeader fields).
+public type LongBody is
+      InitialBody { token: List<Byte>, length: UInt64, packet_number: UInt32,
+                    pn_len: UInt8, payload: List<Byte> }
+    | ZeroRttBody { length: UInt64, packet_number: UInt32, pn_len: UInt8, payload: List<Byte> }
+    | HandshakeBody { length: UInt64, packet_number: UInt32, pn_len: UInt8, payload: List<Byte> }
+    | RetryBody { token: List<Byte>, integrity_tag: [Byte; 16] };
+
+public type LongPacket is {
+    header: LongHeader,
+    body:   LongBody,
+};
+
+// =============================================================================
+// ShortHeader — 1-RTT packets
+// =============================================================================
+
+public type ShortHeader is {
+    first_byte:    UInt8,   // includes spin + KP + PN-length bits
+    dcid:          ConnectionId,
+    packet_number: UInt32,
+    pn_len:        UInt8,
+    payload:       List<Byte>,
+};
+
+// =============================================================================
+// Packet enum — parsed form
+// =============================================================================
+
+public type Packet is
+      Long(LongPacket)
+    | Short(ShortHeader)
+    | VersionNegotiation { dcid: ConnectionId, scid: ConnectionId, versions: List<UInt32> };
+
+// =============================================================================
+// Parse the common Long-header prefix — shared by §17.2 long-format
+// packets (Initial, Handshake, 0-RTT, Retry, VersionNegotiation).
+// Returns (first_byte, version, dcid, scid, cursor_after_scid).
+// =============================================================================
+
+fn parse_long_prefix(buf: &[Byte]) -> Result<(UInt8, UInt32, ConnectionId, ConnectionId, Int), PacketError> {
+    if buf.len() < 7 { return Err(PacketError.Truncated); }
+    let first = buf[0];
+    if (first & 0x80_u8) == 0_u8 { return Err(PacketError.InvalidHeaderForm); }
+
+    let version: UInt32 =
+          ((buf[1] as UInt32) << 24)
+        | ((buf[2] as UInt32) << 16)
+        | ((buf[3] as UInt32) <<  8)
+        |  (buf[4] as UInt32);
+
+    // DCID length
+    let dcid_len = buf[5] as Int;
+    if dcid_len > MAX_CID_LEN { return Err(PacketError.CidTooLong(dcid_len)); }
+    let dcid_end = 6 + dcid_len;
+    if dcid_end + 1 > buf.len() { return Err(PacketError.Truncated); }
+    let mut dcid_bytes: List<Byte> = [];
+    let mut i: Int = 6;
+    while i < dcid_end { dcid_bytes.push(buf[i]); i = i + 1; }
+
+    // SCID length
+    let scid_len = buf[dcid_end] as Int;
+    if scid_len > MAX_CID_LEN { return Err(PacketError.CidTooLong(scid_len)); }
+    let scid_end = dcid_end + 1 + scid_len;
+    if scid_end > buf.len() { return Err(PacketError.Truncated); }
+    let mut scid_bytes: List<Byte> = [];
+    let mut j: Int = dcid_end + 1;
+    while j < scid_end { scid_bytes.push(buf[j]); j = j + 1; }
+
+    let dcid = ConnectionId.from_bytes(dcid_bytes.as_slice())
+        .map_err(|_| PacketError.CidTooLong(dcid_len))?;
+    let scid = ConnectionId.from_bytes(scid_bytes.as_slice())
+        .map_err(|_| PacketError.CidTooLong(scid_len))?;
+
+    Ok((first, version, dcid, scid, scid_end))
+}
+
+// =============================================================================
+// Version Negotiation (§17.2.1)
+// =============================================================================
+
+fn parse_version_negotiation(buf: &[Byte]) -> Result<Packet, PacketError> {
+    let (_, version, dcid, scid, pos) = parse_long_prefix(buf)?;
+    if version != qv.VERSION_NEGOTIATION {
+        return Err(PacketError.InvalidHeaderForm);
+    }
+    // Remaining bytes are an array of 32-bit versions.
+    let remaining = buf.len() - pos;
+    if remaining == 0 || remaining % 4 != 0 { return Err(PacketError.Truncated); }
+    let mut versions: List<UInt32> = [];
+    let mut i: Int = pos;
+    while i < buf.len() {
+        let v: UInt32 =
+              ((buf[i + 0] as UInt32) << 24)
+            | ((buf[i + 1] as UInt32) << 16)
+            | ((buf[i + 2] as UInt32) <<  8)
+            |  (buf[i + 3] as UInt32);
+        versions.push(v);
+        i = i + 4;
+    }
+    Ok(Packet.VersionNegotiation { dcid: dcid, scid: scid, versions: versions })
+}
+
+// =============================================================================
+// Retry (§17.2.5)
+// =============================================================================
+
+fn parse_retry(first: UInt8, version: UInt32, dcid: ConnectionId, scid: ConnectionId,
+               buf: &[Byte], pos: Int) -> Result<Packet, PacketError> {
+    // Remainder = token (variable) || integrity tag (16 bytes)
+    if buf.len() < pos + 16 { return Err(PacketError.Truncated); }
+    let tag_start = buf.len() - 16;
+    let mut token: List<Byte> = [];
+    let mut i: Int = pos;
+    while i < tag_start { token.push(buf[i]); i = i + 1; }
+    let mut tag: [Byte; 16] = [0_u8; 16];
+    let mut j: Int = 0;
+    while j < 16 { tag[j] = buf[tag_start + j]; j = j + 1; }
+    Ok(Packet.Long(LongPacket {
+        header: LongHeader { first_byte: first, version: version, dcid: dcid, scid: scid },
+        body:   LongBody.RetryBody { token: token, integrity_tag: tag },
+    }))
+}
+
+// =============================================================================
+// Initial (§17.2.2), Handshake (§17.2.4), 0-RTT (§17.2.3)
+// =============================================================================
+//
+// Initial adds a `Token Length + Token` before Length/PN/Payload.
+// Handshake and 0-RTT skip the token; the rest of the layout is identical.
+//
+// Wire format after DCID/SCID:
+//   [Initial only]  Token Length (varint)
+//                   Token (bytes)
+//   Length (varint)   — covers PN + payload length
+//   Packet Number (1..4 bytes, length = (first_byte & 0x03) + 1)
+//   Payload (remaining bytes up to `Length - pn_len`)
+//
+// Caller passes header-protection-cleared `first_byte` so the PN
+// length bits are reliable. Prior to HP removal, the lower 5 bits
+// are masked/XORed per RFC 9001 §5.4.
+//
+// =============================================================================
+
+fn parse_initial(first: UInt8, version: UInt32, dcid: ConnectionId, scid: ConnectionId,
+                 buf: &[Byte], pos: Int) -> Result<Packet, PacketError> {
+    let (token_len, p1) = quic_decode(buf, pos).map_err(|_| PacketError.VarintFailure)?;
+    let token_end = p1 + (token_len as Int);
+    if token_end > buf.len() { return Err(PacketError.Truncated); }
+    let mut token: List<Byte> = [];
+    let mut i: Int = p1;
+    while i < token_end { token.push(buf[i]); i = i + 1; }
+
+    let (length, p2) = quic_decode(buf, token_end).map_err(|_| PacketError.VarintFailure)?;
+    let (pn, pn_len, payload, end) = parse_pn_and_payload(first, buf, p2, length)?;
+    let _ = end;
+
+    Ok(Packet.Long(LongPacket {
+        header: LongHeader { first_byte: first, version: version, dcid: dcid, scid: scid },
+        body:   LongBody.InitialBody {
+            token:         token,
+            length:        length,
+            packet_number: pn,
+            pn_len:        pn_len,
+            payload:       payload,
+        },
+    }))
+}
+
+fn parse_handshake(first: UInt8, version: UInt32, dcid: ConnectionId, scid: ConnectionId,
+                   buf: &[Byte], pos: Int) -> Result<Packet, PacketError> {
+    let (length, p1) = quic_decode(buf, pos).map_err(|_| PacketError.VarintFailure)?;
+    let (pn, pn_len, payload, _) = parse_pn_and_payload(first, buf, p1, length)?;
+    Ok(Packet.Long(LongPacket {
+        header: LongHeader { first_byte: first, version: version, dcid: dcid, scid: scid },
+        body:   LongBody.HandshakeBody {
+            length:        length,
+            packet_number: pn,
+            pn_len:        pn_len,
+            payload:       payload,
+        },
+    }))
+}
+
+fn parse_zero_rtt(first: UInt8, version: UInt32, dcid: ConnectionId, scid: ConnectionId,
+                  buf: &[Byte], pos: Int) -> Result<Packet, PacketError> {
+    let (length, p1) = quic_decode(buf, pos).map_err(|_| PacketError.VarintFailure)?;
+    let (pn, pn_len, payload, _) = parse_pn_and_payload(first, buf, p1, length)?;
+    Ok(Packet.Long(LongPacket {
+        header: LongHeader { first_byte: first, version: version, dcid: dcid, scid: scid },
+        body:   LongBody.ZeroRttBody {
+            length:        length,
+            packet_number: pn,
+            pn_len:        pn_len,
+            payload:       payload,
+        },
+    }))
+}
+
+// Helper — given HP-cleared first byte, payload-length varint, and cursor
+// positioned at the packet-number, extract (truncated PN, pn_len, payload).
+fn parse_pn_and_payload(
+    first: UInt8,
+    buf: &[Byte],
+    pn_start: Int,
+    length: UInt64,
+) -> Result<(UInt32, UInt8, List<Byte>, Int), PacketError> {
+    let pn_len: UInt8 = (first & 0x03_u8) + 1_u8;
+    if pn_len < 1_u8 || pn_len > 4_u8 {
+        return Err(PacketError.InvalidPacketNumberLength(pn_len as Int));
+    }
+    let payload_end = pn_start + (length as Int);
+    if payload_end > buf.len() || pn_start + (pn_len as Int) > payload_end {
+        return Err(PacketError.Truncated);
+    }
+    // Assemble truncated PN big-endian.
+    let mut pn: UInt32 = 0_u32;
+    let mut k: UInt8 = 0_u8;
+    while k < pn_len {
+        pn = (pn << 8) | (buf[pn_start + (k as Int)] as UInt32);
+        k = k + 1_u8;
+    }
+    // Payload bytes — from after PN to payload_end.
+    let mut payload: List<Byte> = [];
+    let mut i: Int = pn_start + (pn_len as Int);
+    while i < payload_end { payload.push(buf[i]); i = i + 1; }
+    Ok((pn, pn_len, payload, payload_end))
+}
+
+// =============================================================================
+// Short header (1-RTT) parsing
+// =============================================================================
+//
+// 1-RTT header:
+//   First byte:   0|1|K|... (header form = 0, fixed bit = 1, spin bit,
+//                 reserved, key-phase, PN length minus 1 in low 2 bits)
+//   Destination CID (length known per connection — caller passes dcid_len)
+//   Packet Number (1..4 bytes)
+//   Payload
+//
+// The DCID length is NOT on the wire — the peer tracks which CIDs it
+// issued and their lengths.
+// =============================================================================
+
+pub fn parse_short(buf: &[Byte], dcid_len: Int) -> Result<Packet, PacketError> {
+    if buf.len() < 1 + dcid_len + 1 { return Err(PacketError.Truncated); }
+    let first = buf[0];
+    if (first & 0x80_u8) != 0_u8 { return Err(PacketError.InvalidHeaderForm); }
+
+    let dcid_end = 1 + dcid_len;
+    let mut dcid_bytes: List<Byte> = [];
+    let mut i: Int = 1;
+    while i < dcid_end { dcid_bytes.push(buf[i]); i = i + 1; }
+    let dcid = ConnectionId.from_bytes(dcid_bytes.as_slice())
+        .map_err(|_| PacketError.CidTooLong(dcid_len))?;
+
+    // PN is protected by HP — this parser assumes `first` has already
+    // had HP removed by the caller. pn_len = (first & 0x03) + 1.
+    let pn_len: UInt8 = (first & 0x03_u8) + 1_u8;
+    if dcid_end + (pn_len as Int) > buf.len() { return Err(PacketError.Truncated); }
+    let mut pn: UInt32 = 0_u32;
+    let mut k: Int = 0;
+    while k < (pn_len as Int) {
+        pn = (pn << 8) | (buf[dcid_end + k] as UInt32);
+        k = k + 1;
+    }
+    let payload_start = dcid_end + (pn_len as Int);
+    let mut payload: List<Byte> = [];
+    let mut j: Int = payload_start;
+    while j < buf.len() { payload.push(buf[j]); j = j + 1; }
+
+    Ok(Packet.Short(ShortHeader {
+        first_byte:    first,
+        dcid:          dcid,
+        packet_number: pn,
+        pn_len:        pn_len,
+        payload:       payload,
+    }))
+}
+
+// =============================================================================
+// Top-level Long-header dispatch
+// =============================================================================
+
+public fn parse_long(buf: &[Byte]) -> Result<Packet, PacketError> {
+    let (first, version, dcid, scid, pos) = parse_long_prefix(buf)?;
+
+    // Version Negotiation is the special version=0 form — any type bits
+    // are allowed in that case.
+    if version == qv.VERSION_NEGOTIATION {
+        return parse_version_negotiation(buf);
+    }
+    if !qv.is_supported(version) {
+        return Err(PacketError.UnsupportedVersion(version));
+    }
+
+    let type_bits = (first >> 4) & 0x03_u8;
+    let ptype = LongPacketType.from_bits(type_bits);
+    match ptype {
+        LongPacketType.Initial   => parse_initial(first, version, dcid, scid, buf, pos),
+        LongPacketType.ZeroRtt   => parse_zero_rtt(first, version, dcid, scid, buf, pos),
+        LongPacketType.Handshake => parse_handshake(first, version, dcid, scid, buf, pos),
+        LongPacketType.Retry     => parse_retry(first, version, dcid, scid, buf, pos),
+    }
+}
+
+// =============================================================================
+// Packet number decoding — RFC 9000 §A.3
+// =============================================================================
+//
+// Wire PN is truncated; receiver reconstructs using:
+//
+//   let expected = largest_pn + 1
+//   let pn_win = 1 << (pn_nbits)
+//   let pn_hwin = pn_win / 2
+//   let pn_mask = pn_win - 1
+//
+//   let candidate = (expected & ~pn_mask) | truncated_pn
+//
+//   if candidate <= expected - pn_hwin && candidate < (1<<62) - pn_win:
+//       pn = candidate + pn_win
+//   else if candidate > expected + pn_hwin && candidate >= pn_win:
+//       pn = candidate - pn_win
+//   else:
+//       pn = candidate
+//
+// =============================================================================
+
+public fn decode_packet_number(
+    largest_pn: UInt64,
+    truncated_pn: UInt32,
+    pn_nbits: UInt32,
+) -> UInt64 {
+    let expected = largest_pn + 1_u64;
+    let pn_win: UInt64 = 1_u64 << pn_nbits;
+    let pn_hwin: UInt64 = pn_win >> 1;
+    let pn_mask: UInt64 = pn_win - 1_u64;
+
+    let tr64: UInt64 = truncated_pn as UInt64;
+    let candidate = (expected & (!pn_mask)) | tr64;
+
+    // wraparound corrections
+    let max_62: UInt64 = 1_u64 << 62_u64;
+    let upper = if candidate >= pn_hwin { candidate - pn_hwin } else { 0_u64 };
+    if candidate + pn_hwin <= expected && candidate + pn_win < max_62 {
+        return candidate + pn_win;
+    }
+    if candidate > expected + pn_hwin && candidate >= pn_win {
+        return candidate - pn_win;
+    }
+    let _ = upper;
+    candidate
+}
+
+/// Truncate a full packet number to the minimum number of bytes
+/// needed given the largest-acked PN in the same PN space, per
+/// RFC 9000 §17.1 "Packet Number Encoding".
+///
+/// Returns (truncated_pn, byte_length).
+public fn encode_packet_number_len(pn: UInt64, largest_acked: Maybe<UInt64>) -> (UInt32, UInt8) {
+    let num_unacked: UInt64 = match largest_acked {
+        Some(la) => {
+            if pn > la { pn - la } else { 1_u64 }
+        },
+        None => pn + 1_u64,
+    };
+    let min_bits: Int = 64 - leading_zeros_u64(num_unacked * 2_u64);
+    let nbytes: UInt8 =
+        if min_bits <= 8  { 1_u8 }
+        else if min_bits <= 16 { 2_u8 }
+        else if min_bits <= 24 { 3_u8 }
+        else { 4_u8 };
+    let mask: UInt64 = match nbytes {
+        1_u8 => 0xFF_u64,
+        2_u8 => 0xFFFF_u64,
+        3_u8 => 0xFFFFFF_u64,
+        _    => 0xFFFFFFFF_u64,
+    };
+    ((pn & mask) as UInt32, nbytes)
+}
+
+fn leading_zeros_u64(v: UInt64) -> Int {
+    if v == 0_u64 { return 64; }
+    let mut n: Int = 0;
+    let mut x: UInt64 = v;
+    while (x & 0x8000000000000000_u64) == 0_u64 {
+        n = n + 1;
+        x = x << 1;
+    }
+    n
+}

@@ -1,0 +1,73 @@
+// =============================================================================
+// net/quic/connection_id.vr — QUIC Connection ID (RFC 9000 §5.1)
+// =============================================================================
+// Layer: 5 (Network — QUIC)
+// =============================================================================
+//
+// RFC 9000 §5.1: A Connection ID (CID) is an opaque sequence of
+// 0..=20 bytes. Length-0 CIDs appear in Short-header packets when the
+// peer knows which connection the packet belongs to by other means
+// (typically 4-tuple for a short-lived client).
+//
+// CIDs act as opaque routing tags for middleboxes; peers MAY issue
+// multiple CIDs per connection via NEW_CONNECTION_ID frames for
+// migration resilience (§5.1.1), and MUST retire previous CIDs via
+// RETIRE_CONNECTION_ID (§19.16).
+//
+// # Refinement — length bound
+//
+// All CID constructors check len ≤ 20 at entry; the typed
+// ConnectionId value is then never out of bounds.
+//
+// =============================================================================
+
+module core.net.quic.connection_id;
+
+mount core.*;
+mount core.collections.List;
+
+public const MAX_CID_LEN: Int = 20;
+
+public type CidError is
+      TooLong(Int);
+
+public type ConnectionId is {
+    bytes: List<Byte>,
+};
+
+implement ConnectionId {
+    /// Construct from raw bytes. `TooLong` for len > 20.
+    public fn from_bytes(src: &[Byte]) -> Result<ConnectionId, CidError> {
+        if src.len() > MAX_CID_LEN {
+            return Err(CidError.TooLong(src.len()));
+        }
+        let mut b: List<Byte> = [];
+        let mut i: Int = 0;
+        while i < src.len() {
+            b.push(src[i]);
+            i = i + 1;
+        }
+        Ok(ConnectionId { bytes: b })
+    }
+
+    /// Zero-length CID — "omitted" in Short headers when the peer
+    /// can route by 4-tuple alone. Always valid.
+    public fn empty() -> ConnectionId {
+        ConnectionId { bytes: [] }
+    }
+
+    public fn len(&self) -> Int { self.bytes.len() }
+
+    public fn as_slice(&self) -> &[Byte] { self.bytes.as_slice() }
+
+    /// Byte-exact equality.
+    public fn eq(&self, other: &ConnectionId) -> Bool {
+        if self.bytes.len() != other.bytes.len() { return false; }
+        let mut i: Int = 0;
+        while i < self.bytes.len() {
+            if self.bytes[i] != other.bytes[i] { return false; }
+            i = i + 1;
+        }
+        true
+    }
+}

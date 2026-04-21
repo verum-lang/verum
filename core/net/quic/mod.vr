@@ -50,10 +50,17 @@ public module error;
 public module connection;
 public module stream;
 
-// Pure-Verum QUIC-TLS crypto layer (RFC 9001) — sits under the
-// intrinsic-backed connection surface; takes over in Phase 3+ as the
-// pure-Verum transport lands alongside.
-public module crypto;
+// Pure-Verum QUIC core (RFC 9000 + 9001) — sits under the intrinsic-
+// backed connection surface; takes over fully once the connection SM
+// lands (Phase 4). Until then, these modules ship as self-contained
+// wire parsers + crypto primitives that the surrounding FFI shells
+// and future pure-Verum transport both consume.
+public module version;                 // RFC 9000 §15 version constants
+public module connection_id;           // RFC 9000 §5.1 ConnectionId<0..=20>
+public module crypto;                  // RFC 9001 crypto layer (landed)
+public module frame;                   // RFC 9000 §19 frame codec
+public module packet;                  // RFC 9000 §17 packet headers
+public module transport_params;        // RFC 9000 §18 transport parameters
 
 mount core.*;
 mount core.time.duration.{Duration};

@@ -1,0 +1,376 @@
+// =============================================================================
+// net/quic/transport_params.vr — Transport Parameters (RFC 9000 §18)
+// =============================================================================
+// Layer: 5 (Network — QUIC)
+// Dependencies: core, encoding.varint, quic.connection_id
+// =============================================================================
+//
+// Transport Parameters ride inside the TLS 1.3 `quic_transport_parameters`
+// extension (RFC 9001 §8.2). Each parameter is:
+//
+//   Transport Parameter {
+//       Parameter ID (i),
+//       Parameter Length (i),
+//       Parameter Value (..),
+//   }
+//
+// Both ID and Length are QUIC varints. Values are either varints, raw
+// byte sequences, or a zero-length presence flag. Unknown parameter
+// IDs MUST be silently ignored (§18 paragraph 4) — that's what
+// forward-compat greasing relies on.
+//
+// =============================================================================
+
+module core.net.quic.transport_params;
+
+mount core.*;
+mount core.time.duration.{Duration};
+mount core.collections.List;
+mount core.encoding.varint.{quic_encode_into, quic_decode, VarintError};
+mount core.net.quic.connection_id.{ConnectionId, MAX_CID_LEN};
+
+// =============================================================================
+// Typed parameter catalogue
+// =============================================================================
+
+public type TransportParams is {
+    original_destination_connection_id:  Maybe<ConnectionId>,  // 0x00 (server only)
+    max_idle_timeout_ms:                  UInt64,               // 0x01 (default 0 = disabled)
+    stateless_reset_token:                Maybe<[Byte; 16]>,    // 0x02 (server only)
+    max_udp_payload_size:                 UInt64,               // 0x03 (default 65527, min 1200)
+    initial_max_data:                     UInt64,               // 0x04
+    initial_max_stream_data_bidi_local:   UInt64,               // 0x05
+    initial_max_stream_data_bidi_remote:  UInt64,               // 0x06
+    initial_max_stream_data_uni:          UInt64,               // 0x07
+    initial_max_streams_bidi:             UInt64,               // 0x08
+    initial_max_streams_uni:              UInt64,               // 0x09
+    ack_delay_exponent:                   UInt8,                // 0x0a (default 3)
+    max_ack_delay_ms:                     UInt64,               // 0x0b (default 25)
+    disable_active_migration:             Bool,                 // 0x0c
+    preferred_address:                    Maybe<PreferredAddress>, // 0x0d (server only)
+    active_connection_id_limit:           UInt64,               // 0x0e (default 2)
+    initial_source_connection_id:         Maybe<ConnectionId>,  // 0x0f
+    retry_source_connection_id:           Maybe<ConnectionId>,  // 0x10 (server only)
+    max_datagram_frame_size:              Maybe<UInt64>,        // 0x20 (RFC 9221)
+    grease_quic_bit:                      Bool,                 // 0x2ab2 (RFC 9287)
+}
+
+/// Preferred address (server only) — alternate address the client
+/// MAY migrate to post-handshake, with its own CID + stateless reset
+/// token.
+public type PreferredAddress is {
+    ipv4_addr: [Byte; 4],
+    ipv4_port: UInt16,
+    ipv6_addr: [Byte; 16],
+    ipv6_port: UInt16,
+    connection_id:         ConnectionId,
+    stateless_reset_token: [Byte; 16],
+};
+
+implement TransportParams {
+    /// Default values per RFC 9000 §18.2.
+    public fn defaults() -> TransportParams {
+        TransportParams {
+            original_destination_connection_id:  None,
+            max_idle_timeout_ms:                  0_u64,
+            stateless_reset_token:                None,
+            max_udp_payload_size:                 65527_u64,
+            initial_max_data:                     0_u64,
+            initial_max_stream_data_bidi_local:   0_u64,
+            initial_max_stream_data_bidi_remote:  0_u64,
+            initial_max_stream_data_uni:          0_u64,
+            initial_max_streams_bidi:             0_u64,
+            initial_max_streams_uni:              0_u64,
+            ack_delay_exponent:                   3_u8,
+            max_ack_delay_ms:                     25_u64,
+            disable_active_migration:             false,
+            preferred_address:                    None,
+            active_connection_id_limit:           2_u64,
+            initial_source_connection_id:         None,
+            retry_source_connection_id:           None,
+            max_datagram_frame_size:              None,
+            grease_quic_bit:                      false,
+        }
+    }
+}
+
+// =============================================================================
+// Parameter ID constants
+// =============================================================================
+
+const PARAM_ORIGINAL_DCID:                 UInt64 = 0x00;
+const PARAM_MAX_IDLE_TIMEOUT:              UInt64 = 0x01;
+const PARAM_STATELESS_RESET_TOKEN:         UInt64 = 0x02;
+const PARAM_MAX_UDP_PAYLOAD_SIZE:          UInt64 = 0x03;
+const PARAM_INITIAL_MAX_DATA:              UInt64 = 0x04;
+const PARAM_INITIAL_MAX_STREAM_DATA_BIDI_LOCAL:  UInt64 = 0x05;
+const PARAM_INITIAL_MAX_STREAM_DATA_BIDI_REMOTE: UInt64 = 0x06;
+const PARAM_INITIAL_MAX_STREAM_DATA_UNI:   UInt64 = 0x07;
+const PARAM_INITIAL_MAX_STREAMS_BIDI:      UInt64 = 0x08;
+const PARAM_INITIAL_MAX_STREAMS_UNI:       UInt64 = 0x09;
+const PARAM_ACK_DELAY_EXPONENT:            UInt64 = 0x0a;
+const PARAM_MAX_ACK_DELAY:                 UInt64 = 0x0b;
+const PARAM_DISABLE_ACTIVE_MIGRATION:      UInt64 = 0x0c;
+const PARAM_PREFERRED_ADDRESS:             UInt64 = 0x0d;
+const PARAM_ACTIVE_CONNECTION_ID_LIMIT:    UInt64 = 0x0e;
+const PARAM_INITIAL_SOURCE_CONNECTION_ID:  UInt64 = 0x0f;
+const PARAM_RETRY_SOURCE_CONNECTION_ID:    UInt64 = 0x10;
+const PARAM_MAX_DATAGRAM_FRAME_SIZE:       UInt64 = 0x20;
+const PARAM_GREASE_QUIC_BIT:               UInt64 = 0x2ab2;
+
+// =============================================================================
+// Error
+// =============================================================================
+
+public type TpError is
+      Truncated
+    | VarintFailure
+    | InvalidLength(Text)
+    | InvalidValue(Text);
+
+fn vfail<T>(_: VarintError) -> Result<T, TpError> { Err(TpError.VarintFailure) }
+
+// =============================================================================
+// Encode
+// =============================================================================
+
+public fn encode(params: &TransportParams, out: &mut List<Byte>) {
+    encode_u64_param(out, PARAM_MAX_IDLE_TIMEOUT, params.max_idle_timeout_ms);
+    encode_u64_param(out, PARAM_MAX_UDP_PAYLOAD_SIZE, params.max_udp_payload_size);
+    encode_u64_param(out, PARAM_INITIAL_MAX_DATA, params.initial_max_data);
+    encode_u64_param(out, PARAM_INITIAL_MAX_STREAM_DATA_BIDI_LOCAL, params.initial_max_stream_data_bidi_local);
+    encode_u64_param(out, PARAM_INITIAL_MAX_STREAM_DATA_BIDI_REMOTE, params.initial_max_stream_data_bidi_remote);
+    encode_u64_param(out, PARAM_INITIAL_MAX_STREAM_DATA_UNI, params.initial_max_stream_data_uni);
+    encode_u64_param(out, PARAM_INITIAL_MAX_STREAMS_BIDI, params.initial_max_streams_bidi);
+    encode_u64_param(out, PARAM_INITIAL_MAX_STREAMS_UNI, params.initial_max_streams_uni);
+    encode_u64_param(out, PARAM_ACK_DELAY_EXPONENT, params.ack_delay_exponent as UInt64);
+    encode_u64_param(out, PARAM_MAX_ACK_DELAY, params.max_ack_delay_ms);
+    encode_u64_param(out, PARAM_ACTIVE_CONNECTION_ID_LIMIT, params.active_connection_id_limit);
+
+    if params.disable_active_migration {
+        encode_empty_param(out, PARAM_DISABLE_ACTIVE_MIGRATION);
+    }
+    if params.grease_quic_bit {
+        encode_empty_param(out, PARAM_GREASE_QUIC_BIT);
+    }
+
+    match &params.original_destination_connection_id {
+        Some(cid) => encode_cid_param(out, PARAM_ORIGINAL_DCID, cid),
+        None => {},
+    }
+    match &params.stateless_reset_token {
+        Some(token) => encode_fixed16_param(out, PARAM_STATELESS_RESET_TOKEN, token),
+        None => {},
+    }
+    match &params.initial_source_connection_id {
+        Some(cid) => encode_cid_param(out, PARAM_INITIAL_SOURCE_CONNECTION_ID, cid),
+        None => {},
+    }
+    match &params.retry_source_connection_id {
+        Some(cid) => encode_cid_param(out, PARAM_RETRY_SOURCE_CONNECTION_ID, cid),
+        None => {},
+    }
+    match &params.max_datagram_frame_size {
+        Some(size) => encode_u64_param(out, PARAM_MAX_DATAGRAM_FRAME_SIZE, *size),
+        None => {},
+    }
+    // Preferred address — serialised in full per RFC 9000 §18.2
+    match &params.preferred_address {
+        Some(pa) => encode_preferred_address(out, pa),
+        None => {},
+    }
+}
+
+fn encode_u64_param(out: &mut List<Byte>, id: UInt64, value: UInt64) {
+    let _ = quic_encode_into(out, id);
+    // Inner value is itself a varint; length of that varint is known.
+    let mut inner: List<Byte> = [];
+    let _ = quic_encode_into(&mut inner, value);
+    let _ = quic_encode_into(out, inner.len() as UInt64);
+    let mut i: Int = 0;
+    while i < inner.len() { out.push(inner[i]); i = i + 1; }
+}
+
+fn encode_empty_param(out: &mut List<Byte>, id: UInt64) {
+    let _ = quic_encode_into(out, id);
+    let _ = quic_encode_into(out, 0_u64);
+}
+
+fn encode_cid_param(out: &mut List<Byte>, id: UInt64, cid: &ConnectionId) {
+    let _ = quic_encode_into(out, id);
+    let _ = quic_encode_into(out, cid.len() as UInt64);
+    let mut i: Int = 0;
+    let s = cid.as_slice();
+    while i < s.len() { out.push(s[i]); i = i + 1; }
+}
+
+fn encode_fixed16_param(out: &mut List<Byte>, id: UInt64, tok: &[Byte; 16]) {
+    let _ = quic_encode_into(out, id);
+    let _ = quic_encode_into(out, 16_u64);
+    let mut i: Int = 0;
+    while i < 16 { out.push(tok[i]); i = i + 1; }
+}
+
+fn encode_preferred_address(out: &mut List<Byte>, pa: &PreferredAddress) {
+    // Inner body layout: ipv4 (4) | port (2) | ipv6 (16) | port (2)
+    //                  | cid_len (1) | cid | reset_token (16)
+    let mut body: List<Byte> = [];
+    let mut i: Int = 0;
+    while i < 4 { body.push(pa.ipv4_addr[i]); i = i + 1; }
+    body.push(((pa.ipv4_port >> 8) & 0xFF_u16) as Byte);
+    body.push((pa.ipv4_port & 0xFF_u16) as Byte);
+    i = 0;
+    while i < 16 { body.push(pa.ipv6_addr[i]); i = i + 1; }
+    body.push(((pa.ipv6_port >> 8) & 0xFF_u16) as Byte);
+    body.push((pa.ipv6_port & 0xFF_u16) as Byte);
+    body.push(pa.connection_id.len() as Byte);
+    let cid_s = pa.connection_id.as_slice();
+    i = 0;
+    while i < cid_s.len() { body.push(cid_s[i]); i = i + 1; }
+    i = 0;
+    while i < 16 { body.push(pa.stateless_reset_token[i]); i = i + 1; }
+
+    let _ = quic_encode_into(out, PARAM_PREFERRED_ADDRESS);
+    let _ = quic_encode_into(out, body.len() as UInt64);
+    let mut j: Int = 0;
+    while j < body.len() { out.push(body[j]); j = j + 1; }
+}
+
+// =============================================================================
+// Decode
+// =============================================================================
+
+public fn decode(buf: &[Byte]) -> Result<TransportParams, TpError> {
+    let mut out = TransportParams.defaults();
+    let mut pos: Int = 0;
+    while pos < buf.len() {
+        let (id,  p1) = quic_decode(buf, pos).or_else(vfail)?;
+        let (len, p2) = quic_decode(buf, p1).or_else(vfail)?;
+        let value_end = p2 + (len as Int);
+        if value_end > buf.len() { return Err(TpError.Truncated); }
+        // Slice containing just this parameter's value.
+        let value = slice_of(buf, p2, value_end);
+        apply_param(&mut out, id, value.as_slice())?;
+        pos = value_end;
+    }
+    Ok(out)
+}
+
+fn apply_param(p: &mut TransportParams, id: UInt64, value: &[Byte]) -> Result<(), TpError> {
+    match id {
+        PARAM_MAX_IDLE_TIMEOUT                    => { p.max_idle_timeout_ms = read_varint_all(value)?; },
+        PARAM_MAX_UDP_PAYLOAD_SIZE                => { p.max_udp_payload_size = read_varint_all(value)?; },
+        PARAM_INITIAL_MAX_DATA                    => { p.initial_max_data = read_varint_all(value)?; },
+        PARAM_INITIAL_MAX_STREAM_DATA_BIDI_LOCAL  => { p.initial_max_stream_data_bidi_local = read_varint_all(value)?; },
+        PARAM_INITIAL_MAX_STREAM_DATA_BIDI_REMOTE => { p.initial_max_stream_data_bidi_remote = read_varint_all(value)?; },
+        PARAM_INITIAL_MAX_STREAM_DATA_UNI         => { p.initial_max_stream_data_uni = read_varint_all(value)?; },
+        PARAM_INITIAL_MAX_STREAMS_BIDI            => { p.initial_max_streams_bidi = read_varint_all(value)?; },
+        PARAM_INITIAL_MAX_STREAMS_UNI             => { p.initial_max_streams_uni = read_varint_all(value)?; },
+        PARAM_ACK_DELAY_EXPONENT                  => { p.ack_delay_exponent = read_varint_all(value)? as UInt8; },
+        PARAM_MAX_ACK_DELAY                       => { p.max_ack_delay_ms = read_varint_all(value)?; },
+        PARAM_ACTIVE_CONNECTION_ID_LIMIT          => { p.active_connection_id_limit = read_varint_all(value)?; },
+
+        PARAM_DISABLE_ACTIVE_MIGRATION            => {
+            if value.len() != 0 {
+                return Err(TpError.InvalidLength(Text.from_str("disable_active_migration expects zero length")));
+            }
+            p.disable_active_migration = true;
+        },
+        PARAM_GREASE_QUIC_BIT                     => {
+            if value.len() != 0 {
+                return Err(TpError.InvalidLength(Text.from_str("grease_quic_bit expects zero length")));
+            }
+            p.grease_quic_bit = true;
+        },
+
+        PARAM_ORIGINAL_DCID => {
+            p.original_destination_connection_id = Some(cid_from(value)?);
+        },
+        PARAM_INITIAL_SOURCE_CONNECTION_ID => {
+            p.initial_source_connection_id = Some(cid_from(value)?);
+        },
+        PARAM_RETRY_SOURCE_CONNECTION_ID => {
+            p.retry_source_connection_id = Some(cid_from(value)?);
+        },
+        PARAM_STATELESS_RESET_TOKEN => {
+            if value.len() != 16 {
+                return Err(TpError.InvalidLength(Text.from_str("stateless_reset_token must be 16 bytes")));
+            }
+            let mut tok: [Byte; 16] = [0_u8; 16];
+            let mut i: Int = 0;
+            while i < 16 { tok[i] = value[i]; i = i + 1; }
+            p.stateless_reset_token = Some(tok);
+        },
+        PARAM_MAX_DATAGRAM_FRAME_SIZE => {
+            p.max_datagram_frame_size = Some(read_varint_all(value)?);
+        },
+        PARAM_PREFERRED_ADDRESS => {
+            // For full fidelity see RFC 9000 §18.2. We parse into a
+            // PreferredAddress struct below; malformed ⇒ error.
+            p.preferred_address = Some(decode_preferred_address(value)?);
+        },
+
+        // Unknown (including all 0x1f * 31 + 27 greasing slots) — ignore.
+        _ => {},
+    }
+    Ok(())
+}
+
+fn read_varint_all(buf: &[Byte]) -> Result<UInt64, TpError> {
+    let (v, next) = quic_decode(buf, 0).or_else(vfail)?;
+    if next != buf.len() {
+        return Err(TpError.InvalidLength(Text.from_str("varint param has trailing bytes")));
+    }
+    Ok(v)
+}
+
+fn cid_from(value: &[Byte]) -> Result<ConnectionId, TpError> {
+    if value.len() > MAX_CID_LEN {
+        return Err(TpError.InvalidLength(Text.from_str("CID param exceeds 20 bytes")));
+    }
+    match ConnectionId.from_bytes(value) {
+        Ok(c)  => Ok(c),
+        Err(_) => Err(TpError.InvalidValue(Text.from_str("CID construction failed"))),
+    }
+}
+
+fn slice_of(buf: &[Byte], start: Int, end: Int) -> List<Byte> {
+    let mut out: List<Byte> = [];
+    let mut i: Int = start;
+    while i < end { out.push(buf[i]); i = i + 1; }
+    out
+}
+
+fn decode_preferred_address(buf: &[Byte]) -> Result<PreferredAddress, TpError> {
+    if buf.len() < 4 + 2 + 16 + 2 + 1 + 16 {
+        return Err(TpError.Truncated);
+    }
+    let mut ipv4: [Byte; 4] = [0_u8; 4];
+    let mut i: Int = 0;
+    while i < 4 { ipv4[i] = buf[i]; i = i + 1; }
+    let ipv4_port: UInt16 = ((buf[4] as UInt16) << 8) | (buf[5] as UInt16);
+    let mut ipv6: [Byte; 16] = [0_u8; 16];
+    let mut j: Int = 0;
+    while j < 16 { ipv6[j] = buf[6 + j]; j = j + 1; }
+    let ipv6_port: UInt16 = ((buf[22] as UInt16) << 8) | (buf[23] as UInt16);
+    let cid_len = buf[24] as Int;
+    if cid_len > MAX_CID_LEN {
+        return Err(TpError.InvalidLength(Text.from_str("PA cid length > 20")));
+    }
+    let cid_end = 25 + cid_len;
+    let token_end = cid_end + 16;
+    if token_end > buf.len() { return Err(TpError.Truncated); }
+    let mut cid_bytes: List<Byte> = [];
+    let mut k: Int = 25;
+    while k < cid_end { cid_bytes.push(buf[k]); k = k + 1; }
+    let cid = cid_from(cid_bytes.as_slice())?;
+    let mut token: [Byte; 16] = [0_u8; 16];
+    let mut m: Int = 0;
+    while m < 16 { token[m] = buf[cid_end + m]; m = m + 1; }
+    Ok(PreferredAddress {
+        ipv4_addr: ipv4, ipv4_port: ipv4_port,
+        ipv6_addr: ipv6, ipv6_port: ipv6_port,
+        connection_id: cid,
+        stateless_reset_token: token,
+    })
+}

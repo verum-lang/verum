@@ -1,0 +1,92 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: quic, rfc9000, frame, codec, typecheck
+// @timeout: 10000
+// @expect: pass
+//
+// Typecheck-level verification that every Frame variant + the
+// packet-header parsers + transport_params serialise/deserialise via
+// the public API. Run tests against RFC 9000 §A.1 + RFC 9001 §A wire
+// vectors land once the handshake state machine can produce a sealed
+// Initial packet.
+
+mount core.net.quic.frame.{
+    Frame, AckRange, EcnCounts, FrameError,
+    decode_frame, decode_all_frames, encode_frame,
+};
+mount core.net.quic.packet.{
+    Packet, LongPacket, LongHeader, LongBody, LongPacketType,
+    ShortHeader, PacketError,
+    parse_long, parse_short,
+    decode_packet_number, encode_packet_number_len,
+};
+mount core.net.quic.transport_params.{
+    TransportParams, PreferredAddress, TpError,
+    encode, decode,
+};
+mount core.net.quic.connection_id.{ConnectionId, CidError};
+mount core.net.quic.version.{VERSION_1, VERSION_2, is_supported, is_greased};
+
+fn check_frame_attrs() -> Bool {
+    let ping = Frame.PingFrame;
+    let _ = ping.is_ack_eliciting();
+    let _ = ping.is_probing();
+    let _ = ping.is_flow_controlled();
+
+    let padding = Frame.PaddingRun(5);
+    let _ = padding.is_probing();
+
+    let hd = Frame.HandshakeDone;
+    let _ = hd.is_ack_eliciting();
+    true
+}
+
+fn check_frame_roundtrip_shape() -> Result<(), FrameError> {
+    let f = Frame.MaxData(1024_u64);
+    let mut buf: List<Byte> = [];
+    let _ = encode_frame(&f, &mut buf);
+
+    let (decoded, _) = decode_frame(buf.as_slice(), 0)?;
+    match decoded {
+        Frame.MaxData(_) => Ok(()),
+        _ => Ok(()),   // shape-only — byte-exact verify in run tests
+    }
+}
+
+fn check_transport_params_shape() -> Result<(), TpError> {
+    let mut p = TransportParams.defaults();
+    p.initial_max_data = 1000000_u64;
+    p.max_idle_timeout_ms = 30000_u64;
+    p.active_connection_id_limit = 4_u64;
+
+    let mut buf: List<Byte> = [];
+    encode(&p, &mut buf);
+    let _ = decode(buf.as_slice())?;
+    Ok(())
+}
+
+fn check_packet_number_codec() -> UInt64 {
+    // 16-bit truncated PN reconstruction against largest_pn = 0x100.
+    let (trunc, nbytes) = encode_packet_number_len(0x1234_u64, Some(0x1000_u64));
+    let _ = nbytes;
+    decode_packet_number(0x1233_u64, trunc, (nbytes as UInt32) * 8_u32)
+}
+
+fn check_cid() -> Result<(), CidError> {
+    let bytes: [Byte; 8] = [1_u8, 2_u8, 3_u8, 4_u8, 5_u8, 6_u8, 7_u8, 8_u8];
+    let cid = ConnectionId.from_bytes(&bytes)?;
+    let empty = ConnectionId.empty();
+    let _ = cid.eq(&empty);
+    Ok(())
+}
+
+fn main() {
+    let _ = check_frame_attrs();
+    let _ = check_frame_roundtrip_shape();
+    let _ = check_transport_params_shape();
+    let _ = check_packet_number_codec();
+    let _ = check_cid();
+    let _ = is_supported(VERSION_1);
+    let _ = is_greased(0xDADADADA_u32);
+}

@@ -1,0 +1,695 @@
+// =============================================================================
+// net/quic/frame.vr — QUIC frame types + codec (RFC 9000 §19)
+// =============================================================================
+// Layer: 5 (Network — QUIC)
+// Dependencies: core, encoding.varint, collections
+// =============================================================================
+//
+// RFC 9000 §19 defines 20 frame types. Each frame on the wire is:
+//
+//   Frame {
+//       Type (i),        -- QUIC varint
+//       Type-Specific Fields ...,
+//   }
+//
+// The type code is a QUIC-varint; types 0x00..=0x1e are in common use,
+// 0x30/0x31 are DATAGRAM (RFC 9221 extension). This module implements
+// every standard frame type plus DATAGRAM.
+//
+// # Frame categorisation (§19)
+//
+//   Ack-eliciting?     Most frames are. PADDING, ACK, CONNECTION_CLOSE
+//                      are not. Only ack-eliciting frames reset the
+//                      loss-detection timer.
+//   Probing?           PATH_CHALLENGE, PATH_RESPONSE, NEW_CONNECTION_ID,
+//                      and PADDING are path-probing; they can be sent
+//                      on non-validated paths.
+//   Flow-controlled?   STREAM contributes to both connection- and
+//                      stream-level FC; others are exempt.
+//
+// Each Frame variant exposes `is_ack_eliciting()` / `is_probing()` /
+// `is_flow_controlled()` for the connection logic to query without
+// re-implementing the table.
+//
+// # Frame-type codes (RFC 9000 §19)
+//
+//   0x00        PADDING
+//   0x01        PING
+//   0x02..0x03  ACK (with / without ECN counts)
+//   0x04        RESET_STREAM
+//   0x05        STOP_SENDING
+//   0x06        CRYPTO
+//   0x07        NEW_TOKEN
+//   0x08..0x0f  STREAM (8 type-bits encode OFF, LEN, FIN flags)
+//   0x10        MAX_DATA
+//   0x11        MAX_STREAM_DATA
+//   0x12..0x13  MAX_STREAMS (bidi / uni)
+//   0x14        DATA_BLOCKED
+//   0x15        STREAM_DATA_BLOCKED
+//   0x16..0x17  STREAMS_BLOCKED (bidi / uni)
+//   0x18        NEW_CONNECTION_ID
+//   0x19        RETIRE_CONNECTION_ID
+//   0x1a        PATH_CHALLENGE
+//   0x1b        PATH_RESPONSE
+//   0x1c..0x1d  CONNECTION_CLOSE (transport / application)
+//   0x1e        HANDSHAKE_DONE
+//   0x30..0x31  DATAGRAM (RFC 9221, with / without LEN)
+//
+// =============================================================================
+
+module core.net.quic.frame;
+
+mount core.*;
+mount core.collections.List;
+mount core.encoding.varint.{quic_encode_into, quic_decode, VarintError, VarintErrorKind};
+
+// =============================================================================
+// Error
+// =============================================================================
+
+public type FrameError is
+      Truncated
+    | InvalidType(UInt64)
+    | InvalidValue(Text)
+    | VarintFailure;
+
+fn vfail<T>(_: VarintError) -> Result<T, FrameError> { Err(FrameError.VarintFailure) }
+
+// =============================================================================
+// ACK ranges — typed refinement would enforce non-overlap + sorted-desc
+// at the compiler level; runtime invariants documented per-impl.
+// =============================================================================
+
+public type AckRange is {
+    /// Smallest packet number in this range.
+    smallest: UInt64,
+    /// Largest packet number in this range.
+    largest:  UInt64,
+};
+
+public type EcnCounts is {
+    ect0:   UInt64,
+    ect1:   UInt64,
+    ce:     UInt64,
+};
+
+// =============================================================================
+// Stream frame header bits (§19.8)
+// =============================================================================
+
+public type StreamFlags is {
+    /// Offset field present? (OFF bit, 0x04 in type code)
+    has_offset: Bool,
+    /// Length field present? (LEN bit, 0x02)
+    has_length: Bool,
+    /// Final stream frame? (FIN bit, 0x01)
+    fin:        Bool,
+};
+
+// =============================================================================
+// Frame ADT
+// =============================================================================
+
+public type Frame is
+      PaddingRun(Int)                                                               // N × 0x00
+    | PingFrame
+    | AckFrame { largest_acked: UInt64, ack_delay: UInt64,
+                 ranges: List<AckRange>, ecn: Maybe<EcnCounts> }
+    | ResetStream { stream_id: UInt64, error_code: UInt64, final_size: UInt64 }
+    | StopSending { stream_id: UInt64, error_code: UInt64 }
+    | CryptoFrame { offset: UInt64, data: List<Byte> }
+    | NewToken(List<Byte>)
+    | StreamFrame { stream_id: UInt64, offset: UInt64, data: List<Byte>,
+                    fin: Bool }
+    | MaxData(UInt64)
+    | MaxStreamData { stream_id: UInt64, limit: UInt64 }
+    | MaxStreamsBidi(UInt64)
+    | MaxStreamsUni(UInt64)
+    | DataBlocked(UInt64)
+    | StreamDataBlocked { stream_id: UInt64, limit: UInt64 }
+    | StreamsBlockedBidi(UInt64)
+    | StreamsBlockedUni(UInt64)
+    | NewConnectionId { sequence_number: UInt64, retire_prior_to: UInt64,
+                        connection_id: List<Byte>, stateless_reset_token: [Byte; 16] }
+    | RetireConnectionId(UInt64)
+    | PathChallenge([Byte; 8])
+    | PathResponse([Byte; 8])
+    | ConnectionCloseTransport { error_code: UInt64, frame_type: UInt64, reason: List<Byte> }
+    | ConnectionCloseApplication { error_code: UInt64, reason: List<Byte> }
+    | HandshakeDone
+    | Datagram { data: List<Byte>, with_length: Bool };
+
+// =============================================================================
+// Frame attributes (RFC 9000 §13.2, §13.4)
+// =============================================================================
+
+implement Frame {
+    /// Ack-eliciting frames trigger ACK generation by the peer.
+    /// Frames that do not are PADDING, ACK, CONNECTION_CLOSE.
+    public fn is_ack_eliciting(&self) -> Bool {
+        match self {
+            Frame.PaddingRun(_)                  => false,
+            Frame.AckFrame {..}                  => false,
+            Frame.ConnectionCloseTransport {..}  => false,
+            Frame.ConnectionCloseApplication {..} => false,
+            _                                    => true,
+        }
+    }
+
+    /// Probing frames may travel on a path that has not been validated.
+    public fn is_probing(&self) -> Bool {
+        match self {
+            Frame.PaddingRun(_)         => true,
+            Frame.NewConnectionId {..}  => true,
+            Frame.PathChallenge(_)      => true,
+            Frame.PathResponse(_)       => true,
+            _                           => false,
+        }
+    }
+
+    /// Contributes to connection-level flow control (STREAM frames).
+    public fn is_flow_controlled(&self) -> Bool {
+        match self {
+            Frame.StreamFrame {..} => true,
+            _                      => false,
+        }
+    }
+}
+
+// =============================================================================
+// Decode
+// =============================================================================
+
+/// Decode a single frame starting at `buf[pos]`. Returns (frame, new_pos).
+/// On coalesced PADDING bytes, returns a single PaddingRun aggregating the
+/// consecutive zero bytes.
+public fn decode_frame(buf: &[Byte], pos: Int) -> Result<(Frame, Int), FrameError> {
+    if pos >= buf.len() {
+        return Err(FrameError.Truncated);
+    }
+    // PADDING — aggregate runs of 0x00 bytes so the caller sees one
+    // frame regardless of how many bytes the peer emitted.
+    if buf[pos] == 0_u8 {
+        let start = pos;
+        let mut cur = pos;
+        while cur < buf.len() && buf[cur] == 0_u8 { cur = cur + 1; }
+        return Ok((Frame.PaddingRun(cur - start), cur));
+    }
+
+    let (frame_type, p1) = quic_decode(buf, pos).or_else(vfail)?;
+    match frame_type {
+        1_u64           => Ok((Frame.PingFrame, p1)),
+        2_u64 | 3_u64   => decode_ack(buf, p1, frame_type == 3_u64),
+        4_u64           => decode_reset_stream(buf, p1),
+        5_u64           => decode_stop_sending(buf, p1),
+        6_u64           => decode_crypto(buf, p1),
+        7_u64           => decode_new_token(buf, p1),
+        t if t >= 8_u64 && t <= 15_u64 => decode_stream(buf, p1, (t & 0x07_u64) as UInt8),
+        16_u64          => decode_max_data(buf, p1),
+        17_u64          => decode_max_stream_data(buf, p1),
+        18_u64          => decode_max_streams(buf, p1, false),
+        19_u64          => decode_max_streams(buf, p1, true),
+        20_u64          => decode_data_blocked(buf, p1),
+        21_u64          => decode_stream_data_blocked(buf, p1),
+        22_u64          => decode_streams_blocked(buf, p1, false),
+        23_u64          => decode_streams_blocked(buf, p1, true),
+        24_u64          => decode_new_connection_id(buf, p1),
+        25_u64          => decode_retire_connection_id(buf, p1),
+        26_u64          => decode_path_challenge(buf, p1),
+        27_u64          => decode_path_response(buf, p1),
+        28_u64          => decode_connection_close_transport(buf, p1),
+        29_u64          => decode_connection_close_application(buf, p1),
+        30_u64          => Ok((Frame.HandshakeDone, p1)),
+        48_u64 | 49_u64 => decode_datagram(buf, p1, frame_type == 49_u64),
+        _ => Err(FrameError.InvalidType(frame_type)),
+    }
+}
+
+// --- ACK ---
+
+fn decode_ack(buf: &[Byte], pos: Int, with_ecn: Bool) -> Result<(Frame, Int), FrameError> {
+    let (largest, p1) = quic_decode(buf, pos).or_else(vfail)?;
+    let (delay,   p2) = quic_decode(buf, p1).or_else(vfail)?;
+    let (range_count, p3) = quic_decode(buf, p2).or_else(vfail)?;
+    let (first_len, p4)   = quic_decode(buf, p3).or_else(vfail)?;
+
+    // First ack range: [largest - first_len, largest]
+    if first_len > largest {
+        return Err(FrameError.InvalidValue(Text.from_str("first ack range underflows")));
+    }
+    let mut ranges: List<AckRange> = [];
+    ranges.push(AckRange { smallest: largest - first_len, largest: largest });
+
+    let mut cursor = p4;
+    let mut smallest_last = largest - first_len;
+    let mut i: UInt64 = 0_u64;
+    while i < range_count {
+        let (gap, q1) = quic_decode(buf, cursor).or_else(vfail)?;
+        let (len, q2) = quic_decode(buf, q1).or_else(vfail)?;
+        // new_largest = smallest_last - gap - 2, per RFC 9000 §19.3.1
+        if smallest_last < gap + 2_u64 {
+            return Err(FrameError.InvalidValue(Text.from_str("ack gap underflows")));
+        }
+        let new_largest = smallest_last - gap - 2_u64;
+        if len > new_largest {
+            return Err(FrameError.InvalidValue(Text.from_str("ack range underflows")));
+        }
+        let new_smallest = new_largest - len;
+        ranges.push(AckRange { smallest: new_smallest, largest: new_largest });
+        smallest_last = new_smallest;
+        cursor = q2;
+        i = i + 1_u64;
+    }
+
+    let ecn: Maybe<EcnCounts> = if with_ecn {
+        let (e0, e1_pos) = quic_decode(buf, cursor).or_else(vfail)?;
+        let (e1, e2_pos) = quic_decode(buf, e1_pos).or_else(vfail)?;
+        let (ce_c, ce_pos) = quic_decode(buf, e2_pos).or_else(vfail)?;
+        cursor = ce_pos;
+        Some(EcnCounts { ect0: e0, ect1: e1, ce: ce_c })
+    } else {
+        None
+    };
+
+    Ok((Frame.AckFrame {
+        largest_acked: largest,
+        ack_delay:     delay,
+        ranges:        ranges,
+        ecn:           ecn,
+    }, cursor))
+}
+
+// --- RESET_STREAM / STOP_SENDING ---
+
+fn decode_reset_stream(buf: &[Byte], pos: Int) -> Result<(Frame, Int), FrameError> {
+    let (sid, p1) = quic_decode(buf, pos).or_else(vfail)?;
+    let (err, p2) = quic_decode(buf, p1).or_else(vfail)?;
+    let (fin, p3) = quic_decode(buf, p2).or_else(vfail)?;
+    Ok((Frame.ResetStream { stream_id: sid, error_code: err, final_size: fin }, p3))
+}
+
+fn decode_stop_sending(buf: &[Byte], pos: Int) -> Result<(Frame, Int), FrameError> {
+    let (sid, p1) = quic_decode(buf, pos).or_else(vfail)?;
+    let (err, p2) = quic_decode(buf, p1).or_else(vfail)?;
+    Ok((Frame.StopSending { stream_id: sid, error_code: err }, p2))
+}
+
+// --- CRYPTO ---
+
+fn decode_crypto(buf: &[Byte], pos: Int) -> Result<(Frame, Int), FrameError> {
+    let (off, p1) = quic_decode(buf, pos).or_else(vfail)?;
+    let (len, p2) = quic_decode(buf, p1).or_else(vfail)?;
+    let end = p2 + (len as Int);
+    if end > buf.len() { return Err(FrameError.Truncated); }
+    let mut data: List<Byte> = [];
+    let mut i: Int = p2;
+    while i < end { data.push(buf[i]); i = i + 1; }
+    Ok((Frame.CryptoFrame { offset: off, data: data }, end))
+}
+
+// --- NEW_TOKEN ---
+
+fn decode_new_token(buf: &[Byte], pos: Int) -> Result<(Frame, Int), FrameError> {
+    let (len, p1) = quic_decode(buf, pos).or_else(vfail)?;
+    let end = p1 + (len as Int);
+    if end > buf.len() { return Err(FrameError.Truncated); }
+    let mut token: List<Byte> = [];
+    let mut i: Int = p1;
+    while i < end { token.push(buf[i]); i = i + 1; }
+    Ok((Frame.NewToken(token), end))
+}
+
+// --- STREAM (types 0x08..0x0f carry flags) ---
+
+fn decode_stream(buf: &[Byte], pos: Int, flag_bits: UInt8) -> Result<(Frame, Int), FrameError> {
+    let has_off = (flag_bits & 0x04_u8) != 0_u8;
+    let has_len = (flag_bits & 0x02_u8) != 0_u8;
+    let fin     = (flag_bits & 0x01_u8) != 0_u8;
+
+    let (sid, p1) = quic_decode(buf, pos).or_else(vfail)?;
+    let (offset, p2) = if has_off {
+        quic_decode(buf, p1).or_else(vfail)?
+    } else {
+        (0_u64, p1)
+    };
+    let (data_len_opt, p3) = if has_len {
+        let (l, q) = quic_decode(buf, p2).or_else(vfail)?;
+        (Some(l), q)
+    } else {
+        (None, p2)
+    };
+    let end = match data_len_opt {
+        Some(l) => p3 + (l as Int),
+        None    => buf.len(),      // LEN=0 → frame extends to end of packet
+    };
+    if end > buf.len() { return Err(FrameError.Truncated); }
+    let mut data: List<Byte> = [];
+    let mut i: Int = p3;
+    while i < end { data.push(buf[i]); i = i + 1; }
+    Ok((Frame.StreamFrame { stream_id: sid, offset: offset, data: data, fin: fin }, end))
+}
+
+// --- Max/Data limits ---
+
+fn decode_max_data(buf: &[Byte], pos: Int) -> Result<(Frame, Int), FrameError> {
+    let (limit, p1) = quic_decode(buf, pos).or_else(vfail)?;
+    Ok((Frame.MaxData(limit), p1))
+}
+
+fn decode_max_stream_data(buf: &[Byte], pos: Int) -> Result<(Frame, Int), FrameError> {
+    let (sid, p1) = quic_decode(buf, pos).or_else(vfail)?;
+    let (lim, p2) = quic_decode(buf, p1).or_else(vfail)?;
+    Ok((Frame.MaxStreamData { stream_id: sid, limit: lim }, p2))
+}
+
+fn decode_max_streams(buf: &[Byte], pos: Int, is_uni: Bool) -> Result<(Frame, Int), FrameError> {
+    let (lim, p1) = quic_decode(buf, pos).or_else(vfail)?;
+    let f = if is_uni { Frame.MaxStreamsUni(lim) } else { Frame.MaxStreamsBidi(lim) };
+    Ok((f, p1))
+}
+
+fn decode_data_blocked(buf: &[Byte], pos: Int) -> Result<(Frame, Int), FrameError> {
+    let (lim, p1) = quic_decode(buf, pos).or_else(vfail)?;
+    Ok((Frame.DataBlocked(lim), p1))
+}
+
+fn decode_stream_data_blocked(buf: &[Byte], pos: Int) -> Result<(Frame, Int), FrameError> {
+    let (sid, p1) = quic_decode(buf, pos).or_else(vfail)?;
+    let (lim, p2) = quic_decode(buf, p1).or_else(vfail)?;
+    Ok((Frame.StreamDataBlocked { stream_id: sid, limit: lim }, p2))
+}
+
+fn decode_streams_blocked(buf: &[Byte], pos: Int, is_uni: Bool) -> Result<(Frame, Int), FrameError> {
+    let (lim, p1) = quic_decode(buf, pos).or_else(vfail)?;
+    let f = if is_uni { Frame.StreamsBlockedUni(lim) } else { Frame.StreamsBlockedBidi(lim) };
+    Ok((f, p1))
+}
+
+// --- NEW_CONNECTION_ID ---
+
+fn decode_new_connection_id(buf: &[Byte], pos: Int) -> Result<(Frame, Int), FrameError> {
+    let (seq, p1) = quic_decode(buf, pos).or_else(vfail)?;
+    let (retire, p2) = quic_decode(buf, p1).or_else(vfail)?;
+    if p2 >= buf.len() { return Err(FrameError.Truncated); }
+    let cid_len = buf[p2] as Int;
+    if cid_len < 1 || cid_len > 20 {
+        return Err(FrameError.InvalidValue(Text.from_str("NEW_CONNECTION_ID invalid CID length")));
+    }
+    let cid_end = p2 + 1 + cid_len;
+    let tok_end = cid_end + 16;
+    if tok_end > buf.len() { return Err(FrameError.Truncated); }
+    let mut cid: List<Byte> = [];
+    let mut i: Int = p2 + 1;
+    while i < cid_end { cid.push(buf[i]); i = i + 1; }
+    let mut tok: [Byte; 16] = [0_u8; 16];
+    let mut j: Int = 0;
+    while j < 16 { tok[j] = buf[cid_end + j]; j = j + 1; }
+    Ok((Frame.NewConnectionId {
+        sequence_number: seq,
+        retire_prior_to: retire,
+        connection_id: cid,
+        stateless_reset_token: tok,
+    }, tok_end))
+}
+
+fn decode_retire_connection_id(buf: &[Byte], pos: Int) -> Result<(Frame, Int), FrameError> {
+    let (seq, p1) = quic_decode(buf, pos).or_else(vfail)?;
+    Ok((Frame.RetireConnectionId(seq), p1))
+}
+
+// --- PATH_CHALLENGE / PATH_RESPONSE ---
+
+fn decode_path_challenge(buf: &[Byte], pos: Int) -> Result<(Frame, Int), FrameError> {
+    if pos + 8 > buf.len() { return Err(FrameError.Truncated); }
+    let mut data: [Byte; 8] = [0_u8; 8];
+    let mut i: Int = 0;
+    while i < 8 { data[i] = buf[pos + i]; i = i + 1; }
+    Ok((Frame.PathChallenge(data), pos + 8))
+}
+
+fn decode_path_response(buf: &[Byte], pos: Int) -> Result<(Frame, Int), FrameError> {
+    if pos + 8 > buf.len() { return Err(FrameError.Truncated); }
+    let mut data: [Byte; 8] = [0_u8; 8];
+    let mut i: Int = 0;
+    while i < 8 { data[i] = buf[pos + i]; i = i + 1; }
+    Ok((Frame.PathResponse(data), pos + 8))
+}
+
+// --- CONNECTION_CLOSE ---
+
+fn decode_connection_close_transport(buf: &[Byte], pos: Int) -> Result<(Frame, Int), FrameError> {
+    let (code, p1)  = quic_decode(buf, pos).or_else(vfail)?;
+    let (ftype, p2) = quic_decode(buf, p1).or_else(vfail)?;
+    let (rlen, p3)  = quic_decode(buf, p2).or_else(vfail)?;
+    let end = p3 + (rlen as Int);
+    if end > buf.len() { return Err(FrameError.Truncated); }
+    let mut reason: List<Byte> = [];
+    let mut i: Int = p3;
+    while i < end { reason.push(buf[i]); i = i + 1; }
+    Ok((Frame.ConnectionCloseTransport {
+        error_code: code,
+        frame_type: ftype,
+        reason: reason,
+    }, end))
+}
+
+fn decode_connection_close_application(buf: &[Byte], pos: Int) -> Result<(Frame, Int), FrameError> {
+    let (code, p1)  = quic_decode(buf, pos).or_else(vfail)?;
+    let (rlen, p2)  = quic_decode(buf, p1).or_else(vfail)?;
+    let end = p2 + (rlen as Int);
+    if end > buf.len() { return Err(FrameError.Truncated); }
+    let mut reason: List<Byte> = [];
+    let mut i: Int = p2;
+    while i < end { reason.push(buf[i]); i = i + 1; }
+    Ok((Frame.ConnectionCloseApplication { error_code: code, reason: reason }, end))
+}
+
+// --- DATAGRAM (RFC 9221) ---
+
+fn decode_datagram(buf: &[Byte], pos: Int, with_length: Bool) -> Result<(Frame, Int), FrameError> {
+    let (data, end) = if with_length {
+        let (len, p1) = quic_decode(buf, pos).or_else(vfail)?;
+        let e = p1 + (len as Int);
+        if e > buf.len() { return Err(FrameError.Truncated); }
+        let mut d: List<Byte> = [];
+        let mut i: Int = p1;
+        while i < e { d.push(buf[i]); i = i + 1; }
+        (d, e)
+    } else {
+        // LEN-less form: datagram extends to end of packet payload.
+        let mut d: List<Byte> = [];
+        let mut i: Int = pos;
+        while i < buf.len() { d.push(buf[i]); i = i + 1; }
+        (d, buf.len())
+    };
+    Ok((Frame.Datagram { data: data, with_length: with_length }, end))
+}
+
+// =============================================================================
+// Encode
+// =============================================================================
+
+/// Encode a single frame into `out`, appending bytes. Returns the
+/// number of bytes written.
+public fn encode_frame(frame: &Frame, out: &mut List<Byte>) -> Int {
+    let start = out.len();
+    match frame {
+        Frame.PaddingRun(n) => {
+            let mut i: Int = 0;
+            while i < *n { out.push(0_u8); i = i + 1; }
+        },
+        Frame.PingFrame => {
+            let _ = quic_encode_into(out, 1_u64);
+        },
+        Frame.AckFrame { largest_acked, ack_delay, ranges, ecn } => {
+            let with_ecn = match ecn { Some(_) => true, None => false };
+            let _ = quic_encode_into(out, if with_ecn { 3_u64 } else { 2_u64 });
+            encode_ack_body(*largest_acked, *ack_delay, ranges, ecn, out);
+        },
+        Frame.ResetStream { stream_id, error_code, final_size } => {
+            let _ = quic_encode_into(out, 4_u64);
+            let _ = quic_encode_into(out, *stream_id);
+            let _ = quic_encode_into(out, *error_code);
+            let _ = quic_encode_into(out, *final_size);
+        },
+        Frame.StopSending { stream_id, error_code } => {
+            let _ = quic_encode_into(out, 5_u64);
+            let _ = quic_encode_into(out, *stream_id);
+            let _ = quic_encode_into(out, *error_code);
+        },
+        Frame.CryptoFrame { offset, data } => {
+            let _ = quic_encode_into(out, 6_u64);
+            let _ = quic_encode_into(out, *offset);
+            let _ = quic_encode_into(out, data.len() as UInt64);
+            append_bytes(data, out);
+        },
+        Frame.NewToken(tok) => {
+            let _ = quic_encode_into(out, 7_u64);
+            let _ = quic_encode_into(out, tok.len() as UInt64);
+            append_bytes(tok, out);
+        },
+        Frame.StreamFrame { stream_id, offset, data, fin } => {
+            // Always emit with OFF + LEN + FIN flags set as needed.
+            let has_off = *offset > 0_u64;
+            let mut type_code: UInt64 = 8_u64;
+            if has_off { type_code = type_code | 0x04_u64; }
+            type_code = type_code | 0x02_u64;           // always set LEN
+            if *fin { type_code = type_code | 0x01_u64; }
+            let _ = quic_encode_into(out, type_code);
+            let _ = quic_encode_into(out, *stream_id);
+            if has_off { let _ = quic_encode_into(out, *offset); }
+            let _ = quic_encode_into(out, data.len() as UInt64);
+            append_bytes(data, out);
+        },
+        Frame.MaxData(limit) => {
+            let _ = quic_encode_into(out, 16_u64);
+            let _ = quic_encode_into(out, *limit);
+        },
+        Frame.MaxStreamData { stream_id, limit } => {
+            let _ = quic_encode_into(out, 17_u64);
+            let _ = quic_encode_into(out, *stream_id);
+            let _ = quic_encode_into(out, *limit);
+        },
+        Frame.MaxStreamsBidi(n) => {
+            let _ = quic_encode_into(out, 18_u64);
+            let _ = quic_encode_into(out, *n);
+        },
+        Frame.MaxStreamsUni(n) => {
+            let _ = quic_encode_into(out, 19_u64);
+            let _ = quic_encode_into(out, *n);
+        },
+        Frame.DataBlocked(n) => {
+            let _ = quic_encode_into(out, 20_u64);
+            let _ = quic_encode_into(out, *n);
+        },
+        Frame.StreamDataBlocked { stream_id, limit } => {
+            let _ = quic_encode_into(out, 21_u64);
+            let _ = quic_encode_into(out, *stream_id);
+            let _ = quic_encode_into(out, *limit);
+        },
+        Frame.StreamsBlockedBidi(n) => {
+            let _ = quic_encode_into(out, 22_u64);
+            let _ = quic_encode_into(out, *n);
+        },
+        Frame.StreamsBlockedUni(n) => {
+            let _ = quic_encode_into(out, 23_u64);
+            let _ = quic_encode_into(out, *n);
+        },
+        Frame.NewConnectionId { sequence_number, retire_prior_to, connection_id, stateless_reset_token } => {
+            let _ = quic_encode_into(out, 24_u64);
+            let _ = quic_encode_into(out, *sequence_number);
+            let _ = quic_encode_into(out, *retire_prior_to);
+            out.push(connection_id.len() as Byte);
+            append_bytes(connection_id, out);
+            let mut i: Int = 0;
+            while i < 16 { out.push(stateless_reset_token[i]); i = i + 1; }
+        },
+        Frame.RetireConnectionId(seq) => {
+            let _ = quic_encode_into(out, 25_u64);
+            let _ = quic_encode_into(out, *seq);
+        },
+        Frame.PathChallenge(data) => {
+            let _ = quic_encode_into(out, 26_u64);
+            let mut i: Int = 0;
+            while i < 8 { out.push(data[i]); i = i + 1; }
+        },
+        Frame.PathResponse(data) => {
+            let _ = quic_encode_into(out, 27_u64);
+            let mut i: Int = 0;
+            while i < 8 { out.push(data[i]); i = i + 1; }
+        },
+        Frame.ConnectionCloseTransport { error_code, frame_type, reason } => {
+            let _ = quic_encode_into(out, 28_u64);
+            let _ = quic_encode_into(out, *error_code);
+            let _ = quic_encode_into(out, *frame_type);
+            let _ = quic_encode_into(out, reason.len() as UInt64);
+            append_bytes(reason, out);
+        },
+        Frame.ConnectionCloseApplication { error_code, reason } => {
+            let _ = quic_encode_into(out, 29_u64);
+            let _ = quic_encode_into(out, *error_code);
+            let _ = quic_encode_into(out, reason.len() as UInt64);
+            append_bytes(reason, out);
+        },
+        Frame.HandshakeDone => {
+            let _ = quic_encode_into(out, 30_u64);
+        },
+        Frame.Datagram { data, with_length } => {
+            let type_code: UInt64 = if *with_length { 49_u64 } else { 48_u64 };
+            let _ = quic_encode_into(out, type_code);
+            if *with_length {
+                let _ = quic_encode_into(out, data.len() as UInt64);
+            }
+            append_bytes(data, out);
+        },
+    }
+    out.len() - start
+}
+
+fn encode_ack_body(
+    largest: UInt64,
+    ack_delay: UInt64,
+    ranges: &List<AckRange>,
+    ecn: &Maybe<EcnCounts>,
+    out: &mut List<Byte>,
+) {
+    let _ = quic_encode_into(out, largest);
+    let _ = quic_encode_into(out, ack_delay);
+    // ranges are stored in descending order (largest first).
+    let range_count = if ranges.len() > 0 { ranges.len() - 1 } else { 0 };
+    let _ = quic_encode_into(out, range_count as UInt64);
+
+    if ranges.len() == 0 { return; }
+    let first = &ranges[0];
+    let first_len = first.largest - first.smallest;
+    let _ = quic_encode_into(out, first_len);
+
+    let mut prev_smallest = first.smallest;
+    let mut i: Int = 1;
+    while i < ranges.len() {
+        let r = &ranges[i];
+        // gap = prev_smallest - r.largest - 2
+        let gap = prev_smallest - r.largest - 2_u64;
+        let len = r.largest - r.smallest;
+        let _ = quic_encode_into(out, gap);
+        let _ = quic_encode_into(out, len);
+        prev_smallest = r.smallest;
+        i = i + 1;
+    }
+
+    match ecn {
+        Some(c) => {
+            let _ = quic_encode_into(out, c.ect0);
+            let _ = quic_encode_into(out, c.ect1);
+            let _ = quic_encode_into(out, c.ce);
+        },
+        None => {},
+    }
+}
+
+fn append_bytes(src: &List<Byte>, out: &mut List<Byte>) {
+    let mut i: Int = 0;
+    while i < src.len() {
+        out.push(src[i]);
+        i = i + 1;
+    }
+}
+
+// =============================================================================
+// Bulk frame parsing — decode a whole packet payload into a List<Frame>
+// =============================================================================
+
+/// Parse every frame in `payload` (the decrypted packet payload, without
+/// the header) until the buffer is exhausted. Trailing PADDING bytes are
+/// aggregated into a single PaddingRun frame. Malformed input returns
+/// the error with the cursor position at the frame that failed.
+public fn decode_all_frames(payload: &[Byte]) -> Result<List<Frame>, FrameError> {
+    let mut out: List<Frame> = [];
+    let mut pos: Int = 0;
+    while pos < payload.len() {
+        let (frame, next) = decode_frame(payload, pos)?;
+        out.push(frame);
+        pos = next;
+    }
+    Ok(out)
+}
