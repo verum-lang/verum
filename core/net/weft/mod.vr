@@ -18,6 +18,7 @@ public mount super.net.weft.listener.*;
 public mount super.net.weft.tls.*;
 public mount super.net.weft.http2.*;
 public mount super.net.weft.websocket.*;
+public mount super.net.weft.rpc.*;
 public mount super.net.weft.app.*;
 public mount super.net.weft.backpressure.*;
 public mount super.net.weft.adaptive.*;

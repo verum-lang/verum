@@ -1,0 +1,56 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: net, weft, rpc, connect, grpc-compat, unary
+// @timeout: 10000
+// @expect: pass
+
+// §6.14 — UnaryRpcHandler + RpcAdapter + Router.rpc_unary + RpcStatus
+// surface (gRPC-canonical codes + HTTP mapping + Connect JSON envelope).
+
+mount core.collections.list.{List};
+mount core.net.http.{Response, StatusCode};
+mount core.net.weft.handler.{WeftRequest, Handler};
+mount core.net.weft.router.{Router};
+mount core.net.weft.error.{WeftError, IntoResponse};
+mount core.net.weft.rpc.{
+    RpcStatus, RpcError, RpcMeta, UnaryRpcHandler, RpcAdapter,
+};
+
+type EchoRpc is {};
+
+implement UnaryRpcHandler for EchoRpc {
+    async fn invoke(
+        &self,
+        body: List<Byte>,
+        _meta: RpcMeta,
+    ) -> Result<List<Byte>, RpcError> {
+        Ok(body)
+    }
+}
+
+fn typecheck_router_rpc_registration() -> Router {
+    Router.new()
+        .rpc_unary("/echo.v1.EchoService/Echo", EchoRpc {})
+        .rpc_unary_with_ct(
+            "/echo.v1.EchoService/EchoProto",
+            EchoRpc {},
+            "application/proto".into(),
+        )
+}
+
+fn typecheck_rpc_error() -> Response {
+    let e = RpcError.new(RpcStatus.InvalidArgument, "missing field: name".into())
+        .with_details_json("{\"field\":\"name\"}".into());
+    e.into_response()
+}
+
+fn typecheck_status_mapping() -> (Int, Int, Text) {
+    let s = RpcStatus.DeadlineExceeded;
+    (s.to_code(), s.to_http_status(), s.name())
+}
+
+fn main() {
+    let _ = typecheck_router_rpc_registration();
+    let _ = typecheck_status_mapping();
+}

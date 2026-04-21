@@ -1,0 +1,331 @@
+// =============================================================================
+// core/net/weft/rpc.vr — Connect-compatible RPC skeleton
+// =============================================================================
+// Layer: 6 (Weft)
+// Spec:  internal/specs/net-framework.md §6.5 / §6.14
+// =============================================================================
+//
+// Wire-compatible server-side Connect RPC skeleton (buf.build's
+// gRPC-over-HTTP protocol): `POST /package.Service/Method` with a
+// request body, response body, and a status surface that coalesces
+// into `HTTP status + error JSON` for failure.
+//
+// Connect is deliberately the first-class dialect rather than classic
+// gRPC — it works over HTTP/1.1 and HTTP/2 without sidecar proxies and
+// is wire-compatible with gRPC+gRPC-Web so existing clients work.
+//
+// Scope — Phase 3 skeleton:
+//
+//   * Unary (POST/response) only. Server-streaming / client-streaming
+//     / bidi require HTTP/2 stream multiplexing hooks (phase 4).
+//
+//   * Codec-agnostic. Handlers see raw `List<Byte>` in and out; users
+//     pick proto/json/etc. inside their implementation. A typed
+//     `Codec<T>` abstraction comes with the serde subsystem
+//     (follow-up).
+//
+//   * Trailers are emitted in the body envelope (Connect format)
+//     rather than HTTP/2 trailers; this makes the skeleton portable
+//     across HTTP/1.1 and HTTP/2 transports.
+//
+// Architectural invariants:
+//
+//   * Every RPC endpoint registers as a plain `Handler` on the
+//     existing `Router`. No parallel router / service registry.
+//     `Router.rpc_unary(path, handler)` is a thin facade.
+//
+//   * `RpcError` maps to gRPC status codes (RFC-equivalent) AND to
+//     HTTP status codes (Connect §Status). Both are surfaced on the
+//     response so gRPC-Web and Connect clients read coherently.
+//
+// =============================================================================
+
+module core.net.weft.rpc;
+
+mount core.*;
+mount core.collections.list.{List};
+mount core.collections.map.{Map};
+mount core.net.http.{Method, Headers, Response};
+mount core.net.weft.handler.{WeftRequest, Handler};
+mount core.net.weft.router.{Router};
+mount core.net.weft.error.{WeftError, IntoResponse};
+mount core.net.weft.response_ext.{
+    resp_status, resp_with_header, resp_with_body_text, resp_with_body_bytes,
+};
+
+// =============================================================================
+// RpcStatus — gRPC canonical status codes (RFC-equivalent)
+// =============================================================================
+
+public type RpcStatus is
+    | Ok
+    | Cancelled
+    | Unknown
+    | InvalidArgument
+    | DeadlineExceeded
+    | NotFound
+    | AlreadyExists
+    | PermissionDenied
+    | ResourceExhausted
+    | FailedPrecondition
+    | Aborted
+    | OutOfRange
+    | Unimplemented
+    | Internal
+    | Unavailable
+    | DataLoss
+    | Unauthenticated;
+
+implement RpcStatus {
+    pub fn to_code(&self) -> Int {
+        match self {
+            Ok                  => 0,
+            Cancelled           => 1,
+            Unknown             => 2,
+            InvalidArgument     => 3,
+            DeadlineExceeded    => 4,
+            NotFound            => 5,
+            AlreadyExists       => 6,
+            PermissionDenied    => 7,
+            ResourceExhausted   => 8,
+            FailedPrecondition  => 9,
+            Aborted             => 10,
+            OutOfRange          => 11,
+            Unimplemented       => 12,
+            Internal            => 13,
+            Unavailable         => 14,
+            DataLoss            => 15,
+            Unauthenticated     => 16,
+        }
+    }
+
+    /// Per the Connect protocol status table: each gRPC status has a
+    /// canonical HTTP code. Used when the transport is HTTP/1.1.
+    pub fn to_http_status(&self) -> Int {
+        match self {
+            Ok                  => 200,
+            Cancelled           => 408,
+            Unknown             => 500,
+            InvalidArgument     => 400,
+            DeadlineExceeded    => 504,
+            NotFound            => 404,
+            AlreadyExists       => 409,
+            PermissionDenied    => 403,
+            ResourceExhausted   => 429,
+            FailedPrecondition  => 400,
+            Aborted             => 409,
+            OutOfRange          => 400,
+            Unimplemented       => 501,
+            Internal            => 500,
+            Unavailable         => 503,
+            DataLoss            => 500,
+            Unauthenticated     => 401,
+        }
+    }
+
+    /// Short, lowercase identifier used on the wire ("Cancelled" →
+    /// "cancelled"). Matches Connect JSON error encoding.
+    pub fn name(&self) -> Text {
+        match self {
+            Ok                  => "ok",
+            Cancelled           => "canceled",
+            Unknown             => "unknown",
+            InvalidArgument     => "invalid_argument",
+            DeadlineExceeded    => "deadline_exceeded",
+            NotFound            => "not_found",
+            AlreadyExists       => "already_exists",
+            PermissionDenied    => "permission_denied",
+            ResourceExhausted   => "resource_exhausted",
+            FailedPrecondition  => "failed_precondition",
+            Aborted             => "aborted",
+            OutOfRange          => "out_of_range",
+            Unimplemented       => "unimplemented",
+            Internal            => "internal",
+            Unavailable         => "unavailable",
+            DataLoss            => "data_loss",
+            Unauthenticated     => "unauthenticated",
+        }
+    }
+}
+
+implement Clone for RpcStatus {
+    fn clone(&self) -> RpcStatus { *self }
+}
+
+implement Copy for RpcStatus {}
+
+// =============================================================================
+// RpcError
+// =============================================================================
+
+public type RpcError is {
+    status: RpcStatus,
+    message: Text,
+    /// Optional error details block (Connect §Status.details). Phase-3
+    /// carries it as raw JSON-encoded bytes to avoid pulling in any
+    /// particular serde layer here.
+    details_json: Maybe<Text>,
+};
+
+implement RpcError {
+    pub fn new(status: RpcStatus, message: Text) -> RpcError {
+        RpcError { status: status, message: message, details_json: None }
+    }
+
+    pub fn with_details_json(self, details: Text) -> RpcError {
+        RpcError { details_json: Some(details), ..self }
+    }
+
+    /// Render as the Connect error envelope:
+    ///     { "code": "<status.name>", "message": "<text>", "details": [...] }
+    pub fn to_json_envelope(&self) -> Text {
+        let details = match &self.details_json {
+            Some(d) => f",\"details\":{d}",
+            None    => "",
+        };
+        // Escape the message — minimal (no U+0000..U+001F other than \n/\t).
+        let msg = json_escape(&self.message);
+        f"{{\"code\":\"{self.status.name()}\",\"message\":\"{msg}\"{details}}}"
+    }
+}
+
+implement IntoResponse for RpcError {
+    fn into_response(self) -> Response {
+        let http = self.status.to_http_status();
+        let body = self.to_json_envelope();
+        resp_with_header(
+            resp_with_body_text(
+                resp_status(core.net.http.StatusCode.new(http)),
+                body,
+            ),
+            &"content-type", &"application/json",
+        )
+    }
+}
+
+/// Minimal JSON-string escape: `"` → `\"`, `\\` → `\\\\`, control
+/// chars as `\uXXXX`. Full RFC 8259 coverage lives in core.encoding.json.
+fn json_escape(s: &Text) -> Text {
+    let bytes = s.as_bytes();
+    let mut out = Text.builder();
+    let mut i: Int = 0;
+    while i < bytes.len() {
+        let b = bytes[i];
+        if b == 0x22 { out.push_str("\\\""); }
+        else if b == 0x5C { out.push_str("\\\\"); }
+        else if b == 0x0A { out.push_str("\\n"); }
+        else if b == 0x0D { out.push_str("\\r"); }
+        else if b == 0x09 { out.push_str("\\t"); }
+        else if b < 0x20 { out.push_str(f"\\u{b:04x}"); }
+        else { out.push_byte(b); }
+        i = i + 1;
+    }
+    out.finish()
+}
+
+// =============================================================================
+// Unary RPC protocol
+// =============================================================================
+
+/// Minimal request/metadata carrier. Full Connect `RpcContext` (headers,
+/// deadline, trace-id, binary metadata) is a follow-up once the context
+/// system integration lands.
+public type RpcMeta is {
+    path: Text,
+    content_type: Maybe<Text>,
+    deadline_ms: Maybe<Int>,
+};
+
+/// User-implemented unary RPC endpoint. One instance per route; the
+/// Router wraps it to produce a standard `Handler`.
+///
+/// Codec choice lives inside the handler: inspect `meta.content_type`
+/// (`application/proto` / `application/json` / `application/connect+json`)
+/// and pick the matching decoder.
+public type UnaryRpcHandler is protocol {
+    async fn invoke(
+        &self,
+        body: List<Byte>,
+        meta: RpcMeta,
+    ) -> Result<List<Byte>, RpcError>;
+};
+
+// =============================================================================
+// Adapter: UnaryRpcHandler → Handler
+// =============================================================================
+
+/// Wrap an `UnaryRpcHandler` to satisfy the standard `Handler`
+/// protocol so it plugs into `Router.route(...)` unchanged.
+public type RpcAdapter<R> is {
+    inner: R,
+    response_content_type: Text,
+};
+
+implement<R: UnaryRpcHandler> RpcAdapter<R> {
+    pub fn new(inner: R, response_content_type: Text) -> RpcAdapter<R> {
+        RpcAdapter { inner: inner, response_content_type: response_content_type }
+    }
+}
+
+implement<R: UnaryRpcHandler> Handler for RpcAdapter<R> {
+    async fn handle(&self, req: WeftRequest) -> Result<Response, WeftError> {
+        // Connect requires POST for unary. RFC-compatible check.
+        match req.method {
+            Method.Post => {}
+            _ => return Err(WeftError.BadRequest("RPC requires POST".into())),
+        }
+        let meta = RpcMeta {
+            path: req.path.clone(),
+            content_type: req.content_type().map(|t| t.clone()),
+            deadline_ms: parse_connect_timeout(&req.headers),
+        };
+        let body_bytes: List<Byte> = req.body.clone();
+        match self.inner.invoke(body_bytes, meta).await {
+            Ok(out_bytes) => {
+                let mut r = resp_with_body_bytes(
+                    resp_status(core.net.http.StatusCode.ok()),
+                    out_bytes,
+                );
+                r = resp_with_header(r, &"content-type", &self.response_content_type);
+                Ok(r)
+            }
+            Err(e) => Ok(e.into_response()),
+        }
+    }
+}
+
+/// Parse the Connect deadline header (`connect-timeout-ms`, RFC-safe
+/// ASCII integer). Absent or malformed → None.
+fn parse_connect_timeout(headers: &Headers) -> Maybe<Int> {
+    match headers.get(&"connect-timeout-ms") {
+        None    => None,
+        Some(v) => v.parse_int().ok(),
+    }
+}
+
+// =============================================================================
+// Router convenience — .rpc_unary(path, handler)
+// =============================================================================
+
+implement Router {
+    /// Register a unary RPC endpoint at `path`. Path SHOULD follow the
+    /// Connect convention `/package.Service/Method`. The response
+    /// content-type defaults to `application/json`; override via
+    /// `rpc_unary_with_ct` when the handler emits proto / connect+proto.
+    pub fn rpc_unary<R: UnaryRpcHandler + Send + Sync + 'static>(
+        self,
+        path: Text,
+        handler: R,
+    ) -> Router {
+        self.rpc_unary_with_ct(path, handler, "application/json".into())
+    }
+
+    pub fn rpc_unary_with_ct<R: UnaryRpcHandler + Send + Sync + 'static>(
+        self,
+        path: Text,
+        handler: R,
+        response_ct: Text,
+    ) -> Router {
+        self.route(path, Method.Post, RpcAdapter.new(handler, response_ct))
+    }
+}
