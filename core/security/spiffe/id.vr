@@ -1,0 +1,166 @@
+// =============================================================================
+// security/spiffe/id.vr — SPIFFE ID parsing + validation
+// =============================================================================
+// Spec: https://github.com/spiffe/spiffe/blob/main/standards/SPIFFE-ID.md
+//
+// A SPIFFE ID has the form:
+//   spiffe://<trust-domain>/<path>
+//
+//   trust-domain : lowercase DNS-like label set, no trailing dot
+//   path         : URL-safe path, '/'-separated segments, empty is
+//                  allowed (trust-domain only)
+// =============================================================================
+
+module core.security.spiffe.id;
+
+mount core.*;
+
+public type SpiffeId is {
+    trust_domain: Text,
+    path: Text,
+}
+
+public type SpiffeIdError is
+    | Empty
+    | MissingScheme
+    | InvalidScheme(Text)
+    | EmptyTrustDomain
+    | InvalidTrustDomain { reason: Text }
+    | PathTooLong { len: Int }
+    | InvalidCharacters { at: Int, character: Byte };
+
+pub const MAX_SPIFFE_ID_LENGTH: Int = 2048;
+pub const SPIFFE_SCHEME: &'static Text = "spiffe://";
+
+implement SpiffeId {
+    pub fn new(trust_domain: Text, path: Text) -> Result<SpiffeId, SpiffeIdError> {
+        validate_trust_domain(&trust_domain)?;
+        validate_path(&path)?;
+        Ok(SpiffeId { trust_domain: trust_domain, path: path })
+    }
+
+    /// Trust-domain-only SPIFFE ID (e.g. "spiffe://example.org").
+    pub fn from_trust_domain(trust_domain: Text) -> Result<SpiffeId, SpiffeIdError> {
+        validate_trust_domain(&trust_domain)?;
+        Ok(SpiffeId { trust_domain: trust_domain, path: "".into() })
+    }
+
+    /// Parse from canonical URI form.
+    pub fn parse(input: &Text) -> Result<SpiffeId, SpiffeIdError> {
+        if input.is_empty() { return Err(SpiffeIdError.Empty); }
+        if input.len() > MAX_SPIFFE_ID_LENGTH {
+            return Err(SpiffeIdError.PathTooLong { len: input.len() });
+        }
+        let bytes = input.as_bytes();
+        // Require "spiffe://" prefix.
+        if !starts_with_ci(bytes, SPIFFE_SCHEME.as_bytes()) {
+            return Err(SpiffeIdError.MissingScheme);
+        }
+        let rest = &bytes[9..];  // "spiffe://".len()
+        // Split at first '/'.
+        let mut slash: Int = -1;
+        let mut i = 0;
+        while i < rest.len() {
+            if rest[i] == 0x2F { slash = i; break; }
+            i = i + 1;
+        }
+        let (td_bytes, path_bytes) = if slash < 0 {
+            (rest, &rest[rest.len()..])   // no path
+        } else {
+            (&rest[..slash], &rest[slash..])
+        };
+        if td_bytes.len() == 0 { return Err(SpiffeIdError.EmptyTrustDomain); }
+        let trust_domain = Text.from_utf8(td_bytes).map_err(|_| SpiffeIdError.InvalidTrustDomain {
+            reason: "non-utf8".into(),
+        })?;
+        let path = Text.from_utf8(path_bytes).map_err(|_| SpiffeIdError.InvalidTrustDomain {
+            reason: "non-utf8".into(),
+        })?;
+        SpiffeId.new(trust_domain, path)
+    }
+
+    pub fn trust_domain(&self) -> &Text { &self.trust_domain }
+    pub fn path(&self) -> &Text { &self.path }
+
+    /// True if this is a trust-domain-only ID (no path component).
+    pub fn is_trust_domain_id(&self) -> Bool { self.path.is_empty() }
+
+    /// Return "spiffe://td/path" canonical form.
+    pub fn to_uri(&self) -> Text {
+        let mut out = Text.with_capacity(SPIFFE_SCHEME.len() + self.trust_domain.len() + self.path.len());
+        out.push_str(SPIFFE_SCHEME);
+        out.push_str(&self.trust_domain);
+        out.push_str(&self.path);
+        out
+    }
+
+    /// Does this ID belong to the given trust domain?
+    pub fn is_member_of(&self, trust_domain: &Text) -> Bool {
+        self.trust_domain == *trust_domain
+    }
+}
+
+// =============================================================================
+// Validation helpers
+// =============================================================================
+
+fn validate_trust_domain(td: &Text) -> Result<(), SpiffeIdError> {
+    if td.is_empty() { return Err(SpiffeIdError.EmptyTrustDomain); }
+    if td.len() > 255 {
+        return Err(SpiffeIdError.InvalidTrustDomain { reason: "exceeds 255 chars".into() });
+    }
+    let bytes = td.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        let b = bytes[i];
+        // Allowed: a-z, 0-9, '-', '.', '_'
+        let ok = (b >= 0x61 && b <= 0x7A)   // a-z
+            || (b >= 0x30 && b <= 0x39)     // 0-9
+            || b == 0x2D || b == 0x2E || b == 0x5F;  // - . _
+        if !ok {
+            return Err(SpiffeIdError.InvalidCharacters { at: i, character: b });
+        }
+        i = i + 1;
+    }
+    Ok(())
+}
+
+fn validate_path(path: &Text) -> Result<(), SpiffeIdError> {
+    if path.is_empty() { return Ok(()); }
+    if path.len() > MAX_SPIFFE_ID_LENGTH {
+        return Err(SpiffeIdError.PathTooLong { len: path.len() });
+    }
+    let bytes = path.as_bytes();
+    if bytes[0] != 0x2F {
+        return Err(SpiffeIdError.InvalidCharacters { at: 0, character: bytes[0] });
+    }
+    // Permitted: alpha, digits, `-`, `.`, `_`, `~`, sub-delims, `:`, `@`.
+    let mut i = 1;
+    while i < bytes.len() {
+        let b = bytes[i];
+        let ok = (b >= 0x61 && b <= 0x7A)
+            || (b >= 0x41 && b <= 0x5A)
+            || (b >= 0x30 && b <= 0x39)
+            || b == 0x2D || b == 0x2E || b == 0x5F || b == 0x7E
+            || b == 0x2F
+            || b == 0x3A || b == 0x40
+            || b == 0x25 /* % */;
+        if !ok {
+            return Err(SpiffeIdError.InvalidCharacters { at: i, character: b });
+        }
+        i = i + 1;
+    }
+    Ok(())
+}
+
+fn starts_with_ci(haystack: &[Byte], needle: &[Byte]) -> Bool {
+    if haystack.len() < needle.len() { return false; }
+    let mut i = 0;
+    while i < needle.len() {
+        let h = haystack[i] | 0x20;
+        let n = needle[i] | 0x20;
+        if h != n { return false; }
+        i = i + 1;
+    }
+    true
+}

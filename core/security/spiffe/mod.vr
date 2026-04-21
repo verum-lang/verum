@@ -1,0 +1,42 @@
+// =============================================================================
+// security/spiffe/mod.vr — SPIFFE workload identity
+// =============================================================================
+// Layer: 4.8 (Security; alongside hash / mac / kdf / util)
+// Spec: https://github.com/spiffe/spiffe/blob/main/standards/SPIFFE.md
+//
+// Implements:
+// - SPIFFE ID parsing + validation (spiffe://td/path)
+// - X.509-SVID + JWT-SVID value types + trust bundles
+// - SPIFFE Workload API client over UDS (talks to spire-agent /
+//   spire-server; gRPC over HTTP/2 + Protobuf).
+//
+// Integrates with:
+// - core.net.tls — X509Svid certificates feed TlsConfig directly.
+// - core.net.unix — the Workload API endpoint is a Unix socket.
+// - core.net.http2 + core.protobuf — gRPC transport (intrinsic-backed).
+// =============================================================================
+
+module core.security.spiffe;
+
+public module id;
+public module svid;
+public module workload_api;
+
+public mount .id.SpiffeId;
+public mount .id.SpiffeIdError;
+
+public mount .svid.X509Svid;
+public mount .svid.JwtSvid;
+public mount .svid.X509Bundle;
+public mount .svid.JwtBundle;
+public mount .svid.X509BundleSet;
+public mount .svid.JwtBundleSet;
+public mount .svid.X509SvidResponse;
+public mount .svid.JwtSvidResponse;
+public mount .svid.JwtBundlesResponse;
+
+public mount .workload_api.WorkloadApiClient;
+public mount .workload_api.WorkloadApiError;
+public mount .workload_api.X509SvidStream;
+public mount .workload_api.JwtBundlesStream;
+public mount .workload_api.endpoint_socket;

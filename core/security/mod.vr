@@ -49,6 +49,9 @@ public module util {
     public module constant_time;
 }
 
+// SPIFFE workload identity (SVID + Workload API client).
+public module spiffe;
+
 // Legacy capability / region modules (pre-crypto).
 public module labels;
 public module regions;

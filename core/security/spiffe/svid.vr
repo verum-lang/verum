@@ -1,0 +1,210 @@
+// =============================================================================
+// security/spiffe/svid.vr — X.509-SVID + JWT-SVID + trust bundles
+// =============================================================================
+// An SVID (SPIFFE Verifiable Identity Document) binds a SPIFFE ID to a
+// cryptographic identity: either an X.509 certificate chain or a signed
+// JWT token.
+// Spec: https://github.com/spiffe/spiffe/blob/main/standards/SPIFFE.md
+// =============================================================================
+
+module core.security.spiffe.svid;
+
+mount core.*;
+mount core.time.instant.{Instant};
+mount core.net.tls.{Certificate, PrivateKey};
+mount core.security.spiffe.id.{SpiffeId};
+
+// =============================================================================
+// X509-SVID — one SpiffeId + cert chain + private key
+// =============================================================================
+
+public type X509Svid is {
+    /// SPIFFE ID bound in the leaf cert's URI SAN.
+    id: SpiffeId,
+    /// Leaf cert first, followed by intermediate chain.
+    cert_chain: List<Certificate>,
+    /// Private key for the leaf cert (usually ECDSA-P256 or Ed25519).
+    private_key: PrivateKey,
+    /// When the leaf cert's NotAfter kicks in.
+    expires_at: Instant,
+}
+
+implement X509Svid {
+    pub fn new(
+        id: SpiffeId,
+        cert_chain: List<Certificate>,
+        private_key: PrivateKey,
+        expires_at: Instant,
+    ) -> X509Svid {
+        X509Svid {
+            id: id,
+            cert_chain: cert_chain,
+            private_key: private_key,
+            expires_at: expires_at,
+        }
+    }
+
+    pub fn id(&self) -> &SpiffeId { &self.id }
+    pub fn cert_chain(&self) -> &List<Certificate> { &self.cert_chain }
+    pub fn private_key(&self) -> &PrivateKey { &self.private_key }
+    pub fn expires_at(&self) -> Instant { self.expires_at }
+
+    /// Convenience — is the SVID expired relative to `now`?
+    pub fn is_expired(&self, now: Instant) -> Bool {
+        now >= self.expires_at
+    }
+}
+
+// =============================================================================
+// JWT-SVID — JSON Web Token bearing a SPIFFE ID
+// =============================================================================
+
+public type JwtSvid is {
+    /// Subject SPIFFE ID (copy of the "sub" claim).
+    id: SpiffeId,
+    /// Audience(s) — the "aud" claim.
+    audiences: List<Text>,
+    /// Compact-serialised JWT string.
+    token: Text,
+    /// Parsed "exp" claim.
+    expires_at: Instant,
+    /// "iat" claim, if present.
+    issued_at: Maybe<Instant>,
+    /// Parsed claims other than sub/aud/exp/iat (opaque JSON passthrough).
+    extra_claims: Text,
+}
+
+implement JwtSvid {
+    pub fn id(&self) -> &SpiffeId { &self.id }
+    pub fn token(&self) -> &Text { &self.token }
+    pub fn audiences(&self) -> &List<Text> { &self.audiences }
+    pub fn expires_at(&self) -> Instant { self.expires_at }
+    pub fn issued_at(&self) -> &Maybe<Instant> { &self.issued_at }
+
+    pub fn is_expired(&self, now: Instant) -> Bool {
+        now >= self.expires_at
+    }
+}
+
+// =============================================================================
+// Trust bundles
+// =============================================================================
+
+/// X.509 trust bundle — the set of CA certs authorised to sign peer
+/// SVIDs for a given trust domain.
+public type X509Bundle is {
+    trust_domain: Text,
+    cas: List<Certificate>,
+}
+
+implement X509Bundle {
+    pub fn new(trust_domain: Text, cas: List<Certificate>) -> X509Bundle {
+        X509Bundle { trust_domain: trust_domain, cas: cas }
+    }
+
+    pub fn trust_domain(&self) -> &Text { &self.trust_domain }
+    pub fn cas(&self) -> &List<Certificate> { &self.cas }
+}
+
+/// JWT trust bundle — the set of JWKs authorised to sign peer JWT-SVIDs
+/// for a given trust domain. Serialised in JWKS (RFC 7517) form.
+public type JwtBundle is {
+    trust_domain: Text,
+    jwks: Text,
+}
+
+implement JwtBundle {
+    pub fn new(trust_domain: Text, jwks: Text) -> JwtBundle {
+        JwtBundle { trust_domain: trust_domain, jwks: jwks }
+    }
+
+    pub fn trust_domain(&self) -> &Text { &self.trust_domain }
+    pub fn jwks(&self) -> &Text { &self.jwks }
+}
+
+// =============================================================================
+// BundleSet — trust-domain-indexed bundle map
+// =============================================================================
+
+public type X509BundleSet is {
+    bundles: List<X509Bundle>,
+}
+
+implement X509BundleSet {
+    pub fn empty() -> X509BundleSet { X509BundleSet { bundles: List.new() } }
+
+    pub fn insert(&mut self, b: X509Bundle) {
+        let mut i = 0;
+        while i < self.bundles.len() {
+            if self.bundles[i].trust_domain() == b.trust_domain() {
+                self.bundles[i] = b;
+                return;
+            }
+            i = i + 1;
+        }
+        self.bundles.push(b);
+    }
+
+    pub fn get(&self, trust_domain: &Text) -> Maybe<&X509Bundle> {
+        let mut i = 0;
+        while i < self.bundles.len() {
+            if self.bundles[i].trust_domain() == *trust_domain {
+                return Some(&self.bundles[i]);
+            }
+            i = i + 1;
+        }
+        None
+    }
+
+    pub fn all(&self) -> &List<X509Bundle> { &self.bundles }
+}
+
+public type JwtBundleSet is {
+    bundles: List<JwtBundle>,
+}
+
+implement JwtBundleSet {
+    pub fn empty() -> JwtBundleSet { JwtBundleSet { bundles: List.new() } }
+
+    pub fn insert(&mut self, b: JwtBundle) {
+        let mut i = 0;
+        while i < self.bundles.len() {
+            if self.bundles[i].trust_domain() == b.trust_domain() {
+                self.bundles[i] = b;
+                return;
+            }
+            i = i + 1;
+        }
+        self.bundles.push(b);
+    }
+
+    pub fn get(&self, trust_domain: &Text) -> Maybe<&JwtBundle> {
+        let mut i = 0;
+        while i < self.bundles.len() {
+            if self.bundles[i].trust_domain() == *trust_domain {
+                return Some(&self.bundles[i]);
+            }
+            i = i + 1;
+        }
+        None
+    }
+
+    pub fn all(&self) -> &List<JwtBundle> { &self.bundles }
+}
+
+// =============================================================================
+// WorkloadResponse — what the Workload API returns per fetch
+// =============================================================================
+
+public type X509SvidResponse is {
+    svids: List<X509Svid>,
+    bundles: X509BundleSet,
+}
+
+public type JwtSvidResponse is {
+    svids: List<JwtSvid>,
+}
+
+public type JwtBundlesResponse is {
+    bundles: JwtBundleSet,
+}

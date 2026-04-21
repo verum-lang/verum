@@ -1,0 +1,201 @@
+// =============================================================================
+// security/spiffe/workload_api.vr — SPIFFE Workload API client
+// =============================================================================
+// Talks to spire-agent / spire-server over the local Unix-domain socket
+// specified by SPIFFE_ENDPOINT_SOCKET (or the SPIFFE default path).
+// Transport is gRPC over HTTP/2 — we use core.net.http2 + core.protobuf
+// under the hood. Request/response messages follow the SPIFFE Workload
+// API proto3 definitions (SpiffeWorkloadAPI service).
+//
+// Protocol:
+//   UDS path  : env SPIFFE_ENDPOINT_SOCKET, or /tmp/spire-agent/public/api.sock
+//   Scheme    : gRPC (HTTP/2)
+//   Required  : "workload.spiffe.io: true" header on every request
+//
+// Methods:
+//   /SpiffeWorkloadAPI/FetchX509SVID    — streaming X.509-SVID updates
+//   /SpiffeWorkloadAPI/FetchJWTSVID     — unary signed JWT
+//   /SpiffeWorkloadAPI/FetchJWTBundles  — streaming JWKS updates
+//   /SpiffeWorkloadAPI/ValidateJWTSVID  — unary JWT verification
+// =============================================================================
+
+module core.security.spiffe.workload_api;
+
+mount core.*;
+mount core.net.unix.{UnixStream, UnixError};
+mount core.async.cancellation.{CancellationToken, CancellationError};
+mount core.async.stream.{Stream};
+mount core.async.async_iterator.{AsyncIterator};
+mount core.async.poll.{Poll};
+mount core.async.waker.{Context};
+mount core.base.env;
+mount core.security.spiffe.id.{SpiffeId, SpiffeIdError};
+mount core.security.spiffe.svid.{
+    X509Svid, JwtSvid, X509Bundle, JwtBundle,
+    X509BundleSet, JwtBundleSet,
+    X509SvidResponse, JwtSvidResponse, JwtBundlesResponse,
+};
+
+// =============================================================================
+// Errors
+// =============================================================================
+
+public type WorkloadApiError is
+    | NoEndpointConfigured
+    | ConnectFailed(UnixError)
+    | HandshakeFailed(Text)
+    | RpcError { code: Int, message: Text }
+    | ResponseMalformed(Text)
+    | SvidParseError(SpiffeIdError)
+    | NoIdentityAvailable
+    | Cancelled
+    | Closed;
+
+// =============================================================================
+// Endpoint discovery
+// =============================================================================
+
+pub const DEFAULT_SOCKET: &'static Text = "/tmp/spire-agent/public/api.sock";
+pub const SOCKET_ENV: &'static Text = "SPIFFE_ENDPOINT_SOCKET";
+
+/// Resolve the Workload API socket path from the environment, falling
+/// back to the default. Strips the "unix://" prefix if present.
+public fn endpoint_socket() -> Result<Text, WorkloadApiError> {
+    match env.var(&SOCKET_ENV.into()) {
+        Some(raw) => {
+            let trimmed = strip_unix_scheme(&raw);
+            if trimmed.is_empty() { return Err(WorkloadApiError.NoEndpointConfigured); }
+            Ok(trimmed)
+        }
+        None => Ok(DEFAULT_SOCKET.into()),
+    }
+}
+
+fn strip_unix_scheme(s: &Text) -> Text {
+    let prefix: &'static Text = "unix://";
+    if s.len() >= prefix.len() {
+        let head = s.as_bytes();
+        let pb = prefix.as_bytes();
+        let mut i = 0;
+        let mut ok = true;
+        while i < pb.len() {
+            if head[i] != pb[i] { ok = false; break; }
+            i = i + 1;
+        }
+        if ok {
+            let tail = &head[pb.len()..];
+            match Text.from_utf8(tail) {
+                Ok(t) => return t,
+                Err(_) => return s.clone(),
+            }
+        }
+    }
+    s.clone()
+}
+
+// =============================================================================
+// WorkloadApiClient
+// =============================================================================
+
+public type WorkloadApiClient is {
+    socket_path: Text,
+    handle: UInt64,
+}
+
+implement WorkloadApiClient {
+    /// Connect to the Workload API over the local UDS endpoint.
+    pub async fn connect() -> Result<WorkloadApiClient, WorkloadApiError> {
+        let path = endpoint_socket()?;
+        WorkloadApiClient.connect_to(&path).await
+    }
+
+    pub async fn connect_to(socket_path: &Text) -> Result<WorkloadApiClient, WorkloadApiError> {
+        @intrinsic("verum.spiffe.workload_api_connect", socket_path).await
+    }
+
+    pub fn socket_path(&self) -> &Text { &self.socket_path }
+
+    /// One-shot X.509-SVID fetch. For rotation-aware apps use
+    /// `x509_svid_stream` which yields updates on rotation.
+    pub async fn fetch_x509_svid(&self) -> Result<X509SvidResponse, WorkloadApiError> {
+        @intrinsic("verum.spiffe.fetch_x509_svid", self.handle).await
+    }
+
+    /// Streaming X.509-SVID updates. Yields on every rotation or when
+    /// the trust bundle changes. Honour `token` for cancellation.
+    pub fn x509_svid_stream(&self, token: &CancellationToken) -> X509SvidStream {
+        @intrinsic("verum.spiffe.x509_svid_stream", self.handle, token)
+    }
+
+    /// Fetch a signed JWT-SVID for the given audiences.
+    pub async fn fetch_jwt_svid(
+        &self,
+        audiences: &[Text],
+        subject: Maybe<&SpiffeId>,
+    ) -> Result<JwtSvidResponse, WorkloadApiError> {
+        @intrinsic("verum.spiffe.fetch_jwt_svid", self.handle, audiences, subject).await
+    }
+
+    /// Stream JWT trust-bundle updates.
+    pub fn jwt_bundles_stream(&self, token: &CancellationToken) -> JwtBundlesStream {
+        @intrinsic("verum.spiffe.jwt_bundles_stream", self.handle, token)
+    }
+
+    /// Validate a JWT-SVID against the given audience. Returns the
+    /// parsed subject on success.
+    pub async fn validate_jwt_svid(
+        &self,
+        audience: &Text,
+        token: &Text,
+    ) -> Result<JwtSvid, WorkloadApiError> {
+        @intrinsic("verum.spiffe.validate_jwt_svid", self.handle, audience, token).await
+    }
+
+    pub async fn close(&self) -> Result<(), WorkloadApiError> {
+        @intrinsic("verum.spiffe.workload_api_close", self.handle).await
+    }
+}
+
+// =============================================================================
+// Streams — X509-SVID + JWT-bundle rotation updates
+// =============================================================================
+
+public type X509SvidStream is {
+    handle: UInt64,
+}
+
+implement Stream for X509SvidStream {
+    type Item = Result<X509SvidResponse, WorkloadApiError>;
+
+    fn poll_next(&mut self, cx: &mut Context) -> Poll<Maybe<Self.Item>> {
+        @intrinsic("verum.spiffe.x509_svid_stream_poll", self.handle, cx)
+    }
+}
+
+implement AsyncIterator for X509SvidStream {
+    type Item = Result<X509SvidResponse, WorkloadApiError>;
+
+    async fn next(&mut self) -> Maybe<Self.Item> {
+        @intrinsic("verum.spiffe.x509_svid_stream_next", self.handle).await
+    }
+}
+
+public type JwtBundlesStream is {
+    handle: UInt64,
+}
+
+implement Stream for JwtBundlesStream {
+    type Item = Result<JwtBundlesResponse, WorkloadApiError>;
+
+    fn poll_next(&mut self, cx: &mut Context) -> Poll<Maybe<Self.Item>> {
+        @intrinsic("verum.spiffe.jwt_bundles_stream_poll", self.handle, cx)
+    }
+}
+
+implement AsyncIterator for JwtBundlesStream {
+    type Item = Result<JwtBundlesResponse, WorkloadApiError>;
+
+    async fn next(&mut self) -> Maybe<Self.Item> {
+        @intrinsic("verum.spiffe.jwt_bundles_stream_next", self.handle).await
+    }
+}

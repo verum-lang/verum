@@ -1,0 +1,123 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: security, spiffe, svid, workload-api, zero-trust
+// @timeout: 10000
+// @expect: pass
+
+// SPIFFE workload identity API surface.
+
+mount core.security.spiffe.{
+    SpiffeId, SpiffeIdError,
+    X509Svid, JwtSvid,
+    X509Bundle, JwtBundle, X509BundleSet, JwtBundleSet,
+    X509SvidResponse, JwtSvidResponse, JwtBundlesResponse,
+    WorkloadApiClient, WorkloadApiError,
+    X509SvidStream, JwtBundlesStream,
+    endpoint_socket,
+};
+mount core.async.cancellation.{CancellationToken};
+mount core.async.async_iterator.{AsyncIterator};
+mount core.time.instant.{Instant};
+
+// SPIFFE ID parse + roundtrip.
+fn typecheck_parse() -> Result<SpiffeId, SpiffeIdError> {
+    SpiffeId.parse(&"spiffe://example.org/prod/api-gateway".into())
+}
+
+fn typecheck_id_constructors() -> Result<(SpiffeId, SpiffeId), SpiffeIdError> {
+    let td_only = SpiffeId.from_trust_domain("example.org".into())?;
+    let with_path = SpiffeId.new("example.org".into(), "/prod/worker/42".into())?;
+    Ok((td_only, with_path))
+}
+
+fn typecheck_id_accessors(id: &SpiffeId) -> (Text, Bool) {
+    (id.to_uri(), id.is_trust_domain_id())
+}
+
+// ID error variants.
+fn typecheck_id_errors() -> List<SpiffeIdError> {
+    let mut xs: List<SpiffeIdError> = List.new();
+    xs.push(SpiffeIdError.Empty);
+    xs.push(SpiffeIdError.MissingScheme);
+    xs.push(SpiffeIdError.InvalidScheme("https".into()));
+    xs.push(SpiffeIdError.EmptyTrustDomain);
+    xs.push(SpiffeIdError.InvalidTrustDomain { reason: "bad".into() });
+    xs.push(SpiffeIdError.PathTooLong { len: 99999 });
+    xs.push(SpiffeIdError.InvalidCharacters { at: 3, character: 0x40 });
+    xs
+}
+
+// Bundle-set insert + lookup.
+fn typecheck_bundle_set() -> X509BundleSet {
+    let mut set = X509BundleSet.empty();
+    set.insert(X509Bundle.new("example.org".into(), List.new()));
+    set
+}
+
+fn typecheck_jwt_bundle_set() -> JwtBundleSet {
+    let mut set = JwtBundleSet.empty();
+    set.insert(JwtBundle.new("example.org".into(), "{\"keys\":[]}".into()));
+    set
+}
+
+// Endpoint discovery.
+fn typecheck_endpoint() -> Result<Text, WorkloadApiError> {
+    endpoint_socket()
+}
+
+// Workload API client.
+async fn typecheck_connect() -> Result<WorkloadApiClient, WorkloadApiError> {
+    WorkloadApiClient.connect().await
+}
+
+async fn typecheck_fetch_x509(c: &WorkloadApiClient)
+    -> Result<X509SvidResponse, WorkloadApiError>
+{
+    c.fetch_x509_svid().await
+}
+
+fn typecheck_stream_x509(c: &WorkloadApiClient, t: &CancellationToken) -> X509SvidStream {
+    c.x509_svid_stream(t)
+}
+
+async fn typecheck_fetch_jwt(c: &WorkloadApiClient, audiences: &[Text])
+    -> Result<JwtSvidResponse, WorkloadApiError>
+{
+    c.fetch_jwt_svid(audiences, None).await
+}
+
+async fn typecheck_fetch_jwt_with_sub(
+    c: &WorkloadApiClient, audiences: &[Text], sub: &SpiffeId,
+) -> Result<JwtSvidResponse, WorkloadApiError> {
+    c.fetch_jwt_svid(audiences, Some(sub)).await
+}
+
+async fn typecheck_validate(c: &WorkloadApiClient, aud: &Text, tok: &Text)
+    -> Result<JwtSvid, WorkloadApiError>
+{
+    c.validate_jwt_svid(aud, tok).await
+}
+
+// Streaming iteration.
+async fn typecheck_stream_iter(s: &mut X509SvidStream)
+    -> Maybe<Result<X509SvidResponse, WorkloadApiError>>
+{
+    s.next().await
+}
+
+// Workload API errors.
+fn typecheck_errors() -> List<WorkloadApiError> {
+    let mut xs: List<WorkloadApiError> = List.new();
+    xs.push(WorkloadApiError.NoEndpointConfigured);
+    xs.push(WorkloadApiError.RpcError { code: 7, message: "permission denied".into() });
+    xs.push(WorkloadApiError.ResponseMalformed("missing spiffe_id".into()));
+    xs.push(WorkloadApiError.NoIdentityAvailable);
+    xs.push(WorkloadApiError.Cancelled);
+    xs.push(WorkloadApiError.Closed);
+    xs
+}
+
+fn main() {
+    // Shape-only.
+}
