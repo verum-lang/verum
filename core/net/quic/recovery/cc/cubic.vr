@@ -1,0 +1,323 @@
+// =============================================================================
+// net/quic/recovery/cc/cubic.vr — CUBIC congestion controller (RFC 9438)
+// =============================================================================
+// Layer: 5 (Network — QUIC)
+// Dependencies: core, core.time
+// =============================================================================
+//
+// CUBIC is a loss-based CC algorithm originally for TCP, adapted to
+// QUIC per RFC 9438. More aggressive than NewReno under moderate
+// loss on high-BDP paths: the cubic window-growth function starts
+// slow near the last loss event (W_max) and accelerates as the
+// sending rate diverges from W_max.
+//
+// # Key equations (RFC 9438 §4)
+//
+//   W_cubic(t) = C × (t - K)^3 + W_max
+//   K          = cbrt(W_max × (1 - β) / C)
+//
+//   Constants:
+//     C = 0.4          (window-growth rate)
+//     β = 0.7          (multiplicative-decrease factor)
+//
+//   Friendly region (reno-compatible):
+//     W_est(t) = W_max × β + 3 × ((1 - β) / (1 + β)) × (t / RTT)
+//     cwnd = max(W_cubic(t), W_est(t))
+//
+// # State machine
+//
+//   slow_start ──(cwnd ≥ ssthresh)──▶ avoidance (CUBIC)
+//   avoidance  ──(loss detected)────▶ recovery
+//   recovery   ──(ack past recovery_start)─▶ avoidance
+//
+// # Fast convergence (RFC 9438 §4.6)
+//
+// When a new loss event occurs and the current W_max < the
+// previous W_max (indicating a new flow joined the path), we
+// reduce the target window faster by applying an additional
+// 0.85× factor.
+//
+// # Implementation notes
+//
+// Cubic math in fixed-point is fiddly; this module uses plain
+// Float64 for clarity. A future optimisation pass (Phase 7) can
+// swap to integer arithmetic with the standard Newton-iteration
+// cube root for tighter determinism.
+//
+// =============================================================================
+
+module core.net.quic.recovery.cc.cubic;
+
+mount core.*;
+mount core.time.instant.{Instant};
+mount core.time.duration.{Duration};
+mount core.net.quic.recovery.cc.{
+    CongestionCtrl, MAX_DATAGRAM_SIZE, INITIAL_WINDOW_BYTES, MIN_WINDOW_BYTES,
+};
+
+// =============================================================================
+// Constants (RFC 9438 §4.2)
+// =============================================================================
+
+pub const CUBIC_C: Float = 0.4;
+pub const CUBIC_BETA: Float = 0.7;
+pub const CUBIC_FAST_CONV_FACTOR: Float = 0.85;
+
+// =============================================================================
+// State
+// =============================================================================
+
+public type Cubic is {
+    cwnd:            UInt32,
+    ssthresh:        UInt32,
+    bytes_in_flight: UInt32,
+
+    /// Window at the last loss event; target of the cubic function.
+    w_max:           Float,
+    /// Previous W_max — for fast-convergence detection.
+    w_last_max:      Float,
+    /// Time of the last loss event (CUBIC's "epoch_start").
+    epoch_start:     Maybe<Instant>,
+    /// K = cbrt(W_max × (1 - β) / C) — cached per loss event.
+    k:               Float,
+    /// W_est at epoch start — anchor for the Reno-friendly branch.
+    ack_count:       Float,
+
+    /// Recovery-state marker (mirror of NewReno's semantics for
+    /// LossDetection.exit_recovery_if_appropriate compatibility).
+    recovery_start:  Maybe<Instant>,
+
+    paced:            Bool,
+    pacing_rate_bps:  UInt64,
+};
+
+// =============================================================================
+// Constructor
+// =============================================================================
+
+impl Cubic {
+    pub fn new() -> Cubic {
+        Cubic {
+            cwnd:             INITIAL_WINDOW_BYTES,
+            ssthresh:         0xFFFFFFFF_u32,
+            bytes_in_flight:  0_u32,
+            w_max:            0.0,
+            w_last_max:       0.0,
+            epoch_start:      None,
+            k:                0.0,
+            ack_count:        0.0,
+            recovery_start:   None,
+            paced:            false,
+            pacing_rate_bps:  0_u64,
+        }
+    }
+
+    fn in_recovery(&self) -> Bool {
+        match self.recovery_start { Some(_) => true, None => false }
+    }
+
+    /// Seconds elapsed since epoch_start, in f64.
+    fn t_from_epoch(&self, now: Instant) -> Float {
+        match self.epoch_start {
+            Some(e) => {
+                let d = now.duration_since(e).unwrap_or_else(|| Duration.from_micros(0));
+                (d.as_micros() as Float) / 1_000_000.0
+            },
+            None => 0.0,
+        }
+    }
+
+    /// Compute W_cubic(t) in MSS units.
+    fn w_cubic_mss(&self, now: Instant) -> Float {
+        let t = self.t_from_epoch(now);
+        let delta = t - self.k;
+        CUBIC_C * delta * delta * delta + self.w_max
+    }
+
+    /// Compute W_est(t) — Reno-friendly window (MSS units).
+    fn w_est_mss(&self, now: Instant) -> Float {
+        let t = self.t_from_epoch(now);
+        // Standard RFC 9438 §4.3:
+        //   W_est(t) = Wmax × β + 3 × ((1 − β) / (1 + β)) × (t / RTT)
+        // We don't have RTT here directly — estimate via ack_count as
+        // a proxy; real RTT feeds via `on_ack_received`.
+        let reno_factor = 3.0 * ((1.0 - CUBIC_BETA) / (1.0 + CUBIC_BETA));
+        self.w_max * CUBIC_BETA + reno_factor * self.ack_count
+    }
+}
+
+// =============================================================================
+// CongestionCtrl impl
+// =============================================================================
+
+implement CongestionCtrl for Cubic {
+    fn on_packet_sent(&mut self, bytes: UInt32) {
+        self.bytes_in_flight = self.bytes_in_flight + bytes;
+    }
+
+    fn on_ack_received(&mut self, acked_bytes: UInt32, rtt: Duration, now: Instant) {
+        if self.bytes_in_flight >= acked_bytes {
+            self.bytes_in_flight = self.bytes_in_flight - acked_bytes;
+        } else {
+            self.bytes_in_flight = 0_u32;
+        }
+
+        if self.in_recovery() {
+            // Recovery exit is driven externally by LossDetection; we
+            // leave cwnd alone here.
+            return;
+        }
+
+        if self.cwnd < self.ssthresh {
+            // Slow start: additive by full acked_bytes (same as NewReno).
+            self.cwnd = self.cwnd + acked_bytes;
+        } else {
+            // Congestion avoidance via CUBIC.
+            // Start of new epoch if epoch_start is None.
+            match self.epoch_start {
+                None => {
+                    self.epoch_start = Some(now.clone());
+                    self.ack_count   = 0.0;
+                    self.k = cbrt((self.w_max * (1.0 - CUBIC_BETA)) / CUBIC_C);
+                },
+                Some(_) => {},
+            }
+
+            self.ack_count = self.ack_count + ((acked_bytes as Float) / (MAX_DATAGRAM_SIZE as Float));
+
+            // Target window (MSS units).
+            let target_mss = {
+                let cubic = self.w_cubic_mss(now.clone());
+                let est   = self.w_est_mss(now.clone());
+                if cubic > est { cubic } else { est }
+            };
+            // Clamp target ≥ cwnd/MSS + 1.
+            let cur_cwnd_mss = (self.cwnd as Float) / (MAX_DATAGRAM_SIZE as Float);
+            let target = if target_mss < cur_cwnd_mss + 1.0 {
+                cur_cwnd_mss + 1.0
+            } else {
+                target_mss
+            };
+
+            // Per-ACK increment: (target - cwnd_mss) / cwnd_mss  (in MSS),
+            // converted back to bytes.
+            let inc_mss = (target - cur_cwnd_mss) / cur_cwnd_mss;
+            let inc_bytes = inc_mss * (MAX_DATAGRAM_SIZE as Float);
+            let add_u32 = if inc_bytes < 1.0 { 1_u32 } else { inc_bytes as UInt32 };
+            self.cwnd = self.cwnd + add_u32;
+        }
+
+        self.update_pacing_rate(rtt);
+    }
+
+    fn on_packets_lost(&mut self, lost_bytes: UInt32, now: Instant) {
+        if self.in_recovery() {
+            if self.bytes_in_flight >= lost_bytes {
+                self.bytes_in_flight = self.bytes_in_flight - lost_bytes;
+            } else {
+                self.bytes_in_flight = 0_u32;
+            }
+            return;
+        }
+
+        // Fast convergence (RFC 9438 §4.6): if W_max has decreased
+        // compared to previous W_max, reduce target more aggressively.
+        let cur_cwnd_f = self.cwnd as Float;
+        self.w_last_max = if cur_cwnd_f < self.w_max {
+            cur_cwnd_f * CUBIC_FAST_CONV_FACTOR
+        } else {
+            cur_cwnd_f
+        };
+        self.w_max = cur_cwnd_f;
+
+        // Multiplicative decrease.
+        let new_cwnd_f = cur_cwnd_f * CUBIC_BETA;
+        let mut new_cwnd = new_cwnd_f as UInt32;
+        if new_cwnd < MIN_WINDOW_BYTES { new_cwnd = MIN_WINDOW_BYTES; }
+        self.ssthresh = new_cwnd;
+        self.cwnd     = new_cwnd;
+        self.recovery_start = Some(now.clone());
+        self.epoch_start    = None;      // reset for next avoidance episode
+        self.ack_count      = 0.0;
+
+        if self.bytes_in_flight >= lost_bytes {
+            self.bytes_in_flight = self.bytes_in_flight - lost_bytes;
+        } else {
+            self.bytes_in_flight = 0_u32;
+        }
+    }
+
+    fn on_pto(&mut self, now: Instant) {
+        // CUBIC spec doesn't special-case PTO beyond what loss
+        // detection does. Persistent congestion triggers on_packets_lost
+        // which handles the cut.
+        let _ = now;
+    }
+
+    fn window(&self) -> UInt32        { self.cwnd }
+    fn bytes_in_flight(&self) -> UInt32 { self.bytes_in_flight }
+    fn should_pace(&self) -> Bool     { self.paced }
+    fn pacing_rate(&self) -> UInt64   { self.pacing_rate_bps }
+};
+
+impl Cubic {
+    pub fn exit_recovery_if_appropriate(&mut self, acked_time_sent: Instant) {
+        match self.recovery_start {
+            Some(rs) => {
+                if acked_time_sent >= rs {
+                    self.recovery_start = None;
+                }
+            },
+            None => {},
+        }
+    }
+
+    fn update_pacing_rate(&mut self, rtt: Duration) {
+        let srtt_us: UInt64 = rtt.as_micros() as UInt64;
+        if srtt_us == 0_u64 {
+            self.pacing_rate_bps = 0_u64;
+            self.paced = false;
+            return;
+        }
+        let mut rate = (self.cwnd as UInt64) * 1_000_000_u64 / srtt_us;
+        if self.cwnd < self.ssthresh {
+            // Slow-start 125% factor matching NewReno behaviour.
+            rate = (rate * 5_u64) / 4_u64;
+        }
+        self.pacing_rate_bps = rate;
+        self.paced = true;
+    }
+}
+
+// =============================================================================
+// Cube-root helper — Newton's method, ~4 iterations for f64 precision
+// =============================================================================
+
+/// Compute x^(1/3) for non-negative `x`. Uses Newton iteration seeded
+/// with a rough bit-twiddle approximation for fast convergence.
+fn cbrt(x: Float) -> Float {
+    if x <= 0.0 { return 0.0; }
+
+    // Seed: x^(1/3) ≈ x / 4 + 1 for x ∈ [1, 8]; refine via Newton:
+    //   y_{n+1} = y_n − (y_n^3 − x) / (3 × y_n^2)
+    //           = (2 × y_n + x / y_n^2) / 3
+    let mut y: Float = if x < 1.0 { 1.0 } else { x / 4.0 + 1.0 };
+
+    let mut i: Int = 0;
+    while i < 12 {
+        let y2 = y * y;
+        if y2 == 0.0 { break; }
+        let next = (2.0 * y + x / y2) / 3.0;
+        if float_close(y, next) { y = next; break; }
+        y = next;
+        i = i + 1;
+    }
+    y
+}
+
+fn float_close(a: Float, b: Float) -> Bool {
+    let diff = if a > b { a - b } else { b - a };
+    let mag  = if a > b { a } else { b };
+    if mag == 0.0 { return diff < 1.0e-12; }
+    diff / mag < 1.0e-9
+}

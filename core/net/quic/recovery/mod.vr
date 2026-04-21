@@ -36,7 +36,7 @@ public module loss_detection;
 // Re-exports
 public mount .rtt.{RttEstimator};
 public mount .pn_space.{PnSpace, PnSpaceKind, SentPacketInfo, ranges_contain};
-public mount .cc.{CongestionCtrl, NewReno, MAX_DATAGRAM_SIZE, INITIAL_WINDOW_BYTES, MIN_WINDOW_BYTES};
+public mount .cc.{CongestionCtrl, NewReno, Cubic, MAX_DATAGRAM_SIZE, INITIAL_WINDOW_BYTES, MIN_WINDOW_BYTES};
 public mount .loss_detection.{
     LossDetection,
     K_PACKET_THRESHOLD, K_GRANULARITY_US,

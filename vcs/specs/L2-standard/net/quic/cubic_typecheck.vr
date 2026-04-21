@@ -1,0 +1,42 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: quic, rfc9438, cubic, cc, typecheck
+// @timeout: 10000
+// @expect: pass
+
+mount core.net.quic.recovery.cc.cubic.{
+    Cubic, CUBIC_C, CUBIC_BETA, CUBIC_FAST_CONV_FACTOR,
+};
+mount core.net.quic.recovery.{MAX_DATAGRAM_SIZE};
+mount core.time.instant.{Instant};
+mount core.time.duration.{Duration};
+
+fn check_cubic_cycle() {
+    let mut cc = Cubic.new();
+    // Slow-start growth.
+    cc.on_packet_sent(1500_u32);
+    cc.on_ack_received(1500_u32, Duration.from_millis(20), Instant.now());
+    let _ = cc.window();
+
+    // Loss event: enters recovery, halves cwnd.
+    cc.on_packets_lost(1500_u32, Instant.now());
+    let _ = cc.window();
+    let _ = cc.bytes_in_flight();
+
+    // Exit recovery manually per LossDetection hook.
+    cc.exit_recovery_if_appropriate(Instant.now());
+
+    // Avoidance ACKs drive CUBIC growth.
+    cc.on_packet_sent(1500_u32);
+    cc.on_ack_received(1500_u32, Duration.from_millis(20), Instant.now());
+
+    // PTO hook — no-op on CUBIC.
+    cc.on_pto(Instant.now());
+    let _ = cc.should_pace();
+    let _ = cc.pacing_rate();
+}
+
+fn main() {
+    check_cubic_cycle();
+}

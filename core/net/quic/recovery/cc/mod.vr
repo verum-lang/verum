@@ -32,6 +32,7 @@
 module core.net.quic.recovery.cc;
 
 public module new_reno;
+public module cubic;
 
 mount core.*;
 mount core.time.instant.{Instant};
@@ -39,6 +40,7 @@ mount core.time.duration.{Duration};
 
 // Re-exports
 public mount .new_reno.{NewReno};
+public mount .cubic.{Cubic, CUBIC_C, CUBIC_BETA, CUBIC_FAST_CONV_FACTOR};
 
 // =============================================================================
 // CongestionCtrl protocol
