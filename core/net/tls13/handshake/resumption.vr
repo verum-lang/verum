@@ -59,6 +59,8 @@ mount core.net.tls13.cipher_suite.{CipherSuite, HashKind};
 mount core.net.tls13.keyschedule.hkdf_label.{hkdf_expand_label};
 mount core.net.tls13.keyschedule.derive_secret.{LABEL_RESUMPTION};
 mount core.net.tls13.keyschedule.schedule.{MasterSecret, SecretBytes};
+mount core.net.tls13.handshake.messages.{NewSessionTicket};
+mount core.net.tls13.handshake.extension.{Extension, EarlyDataIndication};
 
 // =============================================================================
 // ClientSession — what the client stores after receiving NewSessionTicket
@@ -421,3 +423,47 @@ implement ClientSessionStore {
 }
 
 fn text_eq(a: &Text, b: &Text) -> Bool { a.as_bytes() == b.as_bytes() }
+
+// =============================================================================
+// NewSessionTicket → ClientSession helper
+// =============================================================================
+
+/// Build a `ClientSession` from a freshly-arrived `NewSessionTicket`
+/// and the handshake's derived `resumption_master_secret`. The caller
+/// is responsible for associating the session with its authority
+/// (`ClientSessionStore.insert(authority, session)`).
+///
+/// The `resumption_master` is the 32- or 48-byte secret produced at
+/// the end of the key schedule
+/// (`MasterSecret.resumption_master(transcript_hash_at_client_finished)`).
+/// `max_early_data_size` is sourced from `nst.extensions` if present
+/// (else zero disables 0-RTT).
+public fn client_session_from_nst(
+    nst:                &NewSessionTicket,
+    suite:              CipherSuite,
+    resumption_master:  List<Byte>,
+    now:                Instant,
+) -> ClientSession {
+    let mut max_early: UInt32 = 0_u32;
+    let mut i: Int = 0;
+    while i < nst.extensions.len() {
+        match &nst.extensions[i] {
+            Extension.EarlyDataExt(EarlyDataIndication.EarlyDataTicket { max_size }) => {
+                max_early = *max_size;
+            },
+            _ => {},
+        }
+        i = i + 1;
+    }
+
+    ClientSession {
+        ticket:              nst.ticket.clone(),
+        ticket_age_add:      nst.ticket_age_add,
+        ticket_lifetime_sec: nst.ticket_lifetime,
+        cipher_suite:        suite,
+        resumption_secret:   resumption_master,
+        max_early_data_size: max_early,
+        created_at:          now,
+        ticket_nonce:        nst.ticket_nonce.clone(),
+    }
+}

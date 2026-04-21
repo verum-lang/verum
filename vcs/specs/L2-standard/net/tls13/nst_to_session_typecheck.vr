@@ -1,0 +1,41 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: tls13, rfc8446, resumption, nst, typecheck
+// @timeout: 10000
+// @expect: pass
+
+mount core.net.tls13.handshake.{
+    ClientSession, ClientSessionStore,
+    client_session_from_nst,
+    NewSessionTicket,
+};
+mount core.net.tls13.cipher_suite.{CipherSuite};
+mount core.time.instant.{Instant};
+mount core.collections.List;
+
+fn exercise_session_from_nst() {
+    let nst = NewSessionTicket {
+        ticket_lifetime: 604_800_u32,       // 7 days
+        ticket_age_add:  0xC0DEC0DE_u32,
+        ticket_nonce:    [0_u8; 8].to_vec(),
+        ticket:          [0_u8; 32].to_vec(),
+        extensions:      [],
+    };
+    let resumption_master: List<Byte> = [0_u8; 32].to_vec();
+    let session: ClientSession = client_session_from_nst(
+        &nst,
+        CipherSuite.TlsAes128GcmSha256,
+        resumption_master,
+        Instant.now(),
+    );
+
+    let mut store = ClientSessionStore.new(64);
+    store.insert(Text.from("example.com:443"), session);
+    let _ = store.len();
+    let _ = store.take(&Text.from("example.com:443"), Instant.now());
+}
+
+fn main() {
+    exercise_session_from_nst();
+}

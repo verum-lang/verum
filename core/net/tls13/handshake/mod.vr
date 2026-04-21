@@ -95,6 +95,7 @@ public mount .resumption.{
     ClientSession, SessionTicketKey, ServerTicketPlaintext,
     ClientSessionStore, TicketError,
     issue_ticket, decrypt_ticket, session_from_new_ticket,
+    client_session_from_nst,
 };
 
 // Re-exports — 0-RTT early data
