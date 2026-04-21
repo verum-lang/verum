@@ -374,6 +374,28 @@ implement<T> Sender<T> {
     public fn capacity(&self) -> Maybe<Int> {
         self.inner.capacity
     }
+
+    // Returns true iff the channel is bounded AND currently at capacity.
+    // Unbounded channels always return false. Used by backpressure probes
+    // and L2 rendezvous/bounded test scenarios that gate `send` on space.
+    public fn is_full(&self) -> Bool {
+        match self.inner.capacity {
+            Some(cap) => self.inner.queue.lock().unwrap().len() >= cap,
+            None => false,
+        }
+    }
+
+    // Send every item in `items` in order. Returns `Err(SendError(item))`
+    // on the FIRST item that fails (closed channel or bounded-full after
+    // blocking give-up); items already queued stay queued. This is the
+    // natural counterpart to `Receiver.recv_many` on the send side —
+    // useful for batched producers that want a single call-site.
+    public fn send_all(&self, items: List<T>) -> Result<(), SendError<T>> {
+        for item in items {
+            self.send(item)?;
+        }
+        Ok(())
+    }
 }
 
 implement<T> Clone for Sender<T> {
@@ -534,6 +556,44 @@ implement<T> Receiver<T> {
             }
         }
         n
+    }
+
+    // Async batch-receive: blocks until at least one item is available (via
+    // the same futex as `recv`), then drains up to `max` under the same
+    // queue lock and returns them as a fresh List. Returns an empty list
+    // iff the channel closed with no items left.
+    //
+    // Use this over `recv_many` when you want to BLOCK rather than
+    // best-effort drain — it wakes exactly once per batch rather than
+    // spinning on an empty queue.
+    public fn recv_batch(&mut self, max: Int) -> List<T> {
+        let mut out: List<T> = List.new();
+        if max <= 0 { return out; }
+        loop {
+            let seq = self.inner.notify_seq.load(MemoryOrdering.Acquire);
+            let mut guard = self.inner.queue.lock().unwrap();
+            if guard.len() > 0 {
+                let mut n = 0;
+                while n < max {
+                    match guard.pop_front() {
+                        Some(value) => { out.push(value); n = n + 1; }
+                        None => break,
+                    }
+                }
+                // Wake one waiting sender per popped item-class — same
+                // policy as recv(): a single wake is sufficient because
+                // futex_wake with count=1 is coalesced; the sender loop
+                // re-snapshots on wake.
+                let mut wakers = self.inner.sender_wakers.lock().unwrap();
+                if let Some(waker) = wakers.pop() { waker.wake(); }
+                return out;
+            }
+            if self.inner.closed.load(MemoryOrdering.Acquire) {
+                return out;
+            }
+            drop(guard);
+            let _ = sys_futex_wait(&self.inner.notify_seq.value, seq, None);
+        }
     }
 
     // Explicit awaitable recv future (same semantics as using Receiver as
