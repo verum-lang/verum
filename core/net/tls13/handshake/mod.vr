@@ -31,6 +31,7 @@ public module extension;
 public module messages;
 public module transcript;
 public module client_sm;
+public module server_sm;
 
 // Re-exports — codec
 public mount .codec.{Reader, CodecError};
@@ -62,4 +63,11 @@ public mount .transcript.{Transcript};
 public mount .client_sm.{
     ClientConfig, ClientSm, StepOutput,
     WaitServerHello, WaitEncryptedExtensions, Connected,
+};
+
+// Re-exports — server state machine
+public mount .server_sm.{
+    ServerConfig, ServerSm, ServerStepOutput, ServerConnected,
+    CertSigner,
+    WaitClientHello, WaitClientFinished,
 };
