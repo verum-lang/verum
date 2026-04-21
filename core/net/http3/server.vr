@@ -1,0 +1,66 @@
+// =============================================================================
+// net/http3/server.vr — High-level HTTP/3 server (RFC 9114)
+// =============================================================================
+
+module core.net.http3.server;
+
+mount core.*;
+mount core.net.addr.{SocketAddr};
+mount core.net.http.{Method, StatusCode};
+mount core.net.http2.hpack.{HeaderField};
+mount core.net.quic.{QuicListener, Connection, QuicConfig};
+mount core.net.http3.error.{Http3Error};
+
+public type Http3Request is {
+    method: Method,
+    path: Text,
+    headers: List<HeaderField>,
+    stream_id: UInt64,
+}
+
+public type Http3Server is {
+    listener: QuicListener,
+    handle: UInt64,
+}
+
+public type Http3RequestHandle is {
+    handle: UInt64,
+}
+
+implement Http3Server {
+    pub async fn bind(local: &SocketAddr, config: QuicConfig)
+        -> Result<Http3Server, Http3Error>
+    {
+        @intrinsic("verum.h3.server_bind", local, &config).await
+    }
+
+    /// Accept the next request. Returns the parsed request + a handle
+    /// for streaming back the response body.
+    pub async fn accept(&self)
+        -> Result<(Http3Request, Http3RequestHandle), Http3Error>
+    {
+        @intrinsic("verum.h3.server_accept", self.handle).await
+    }
+}
+
+implement Http3RequestHandle {
+    pub async fn send_response_headers(
+        &self,
+        status: StatusCode,
+        headers: &List<HeaderField>,
+    ) -> Result<(), Http3Error> {
+        @intrinsic("verum.h3.server_send_headers", self.handle, status, headers).await
+    }
+
+    pub async fn write_body(&self, data: &[Byte]) -> Result<(), Http3Error> {
+        @intrinsic("verum.h3.server_write_body", self.handle, data).await
+    }
+
+    pub async fn finish(&self) -> Result<(), Http3Error> {
+        @intrinsic("verum.h3.server_finish", self.handle).await
+    }
+
+    pub async fn reset(&self, code: UInt64) -> Result<(), Http3Error> {
+        @intrinsic("verum.h3.server_reset", self.handle, code).await
+    }
+}

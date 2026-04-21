@@ -71,6 +71,8 @@ public module http_parser;
 public module shutdown;
 public module websocket;
 public module http2;
+public module quic;
+public module http3;
 
 // =============================================================================
 // Re-exports

@@ -1,0 +1,117 @@
+// =============================================================================
+// net/http3/qpack.vr — RFC 9204 QPACK
+// =============================================================================
+// QPACK is HPACK's QUIC-friendly successor: it keeps the same static +
+// dynamic table model but routes the dynamic-table mutations through
+// two dedicated unidirectional streams (encoder-stream, decoder-stream)
+// so header blocks on bidirectional streams can be decoded in any
+// order without head-of-line blocking.
+//
+// This module provides the Verum-level API; the encode / decode
+// operations call into `verum.qpack.*` intrinsics that wrap a
+// canonical QPACK implementation (typically the same quiche / lsquic
+// that backs core.net.quic).
+// =============================================================================
+
+module core.net.http3.qpack;
+
+mount core.*;
+mount core.net.http2.hpack.{HeaderField};
+
+// =============================================================================
+// Errors
+// =============================================================================
+
+public type QpackError is
+    | EncodeError(Text)
+    | DecodeError(Text)
+    | TableSizeError
+    | EncoderStreamError(Text)
+    | DecoderStreamError(Text)
+    | BlockedStreamLimitExceeded;
+
+// =============================================================================
+// QpackEncoder
+// =============================================================================
+
+public type QpackEncoder is {
+    handle: UInt64,
+}
+
+implement QpackEncoder {
+    pub fn new(max_table_capacity: UInt64, max_blocked_streams: UInt64) -> QpackEncoder {
+        @intrinsic("verum.qpack.encoder_new", max_table_capacity, max_blocked_streams)
+    }
+
+    /// Encode a header block for `stream_id`. Writes the block body to
+    /// `block_out` and any required encoder-stream updates to
+    /// `encoder_stream_out`.
+    pub fn encode(
+        &self,
+        stream_id: UInt64,
+        headers: &List<HeaderField>,
+        block_out: &mut List<Byte>,
+        encoder_stream_out: &mut List<Byte>,
+    ) -> Result<(), QpackError> {
+        @intrinsic("verum.qpack.encoder_encode",
+            self.handle, stream_id, headers, block_out, encoder_stream_out)
+    }
+
+    /// Feed an incoming decoder-stream update (peer's acks /
+    /// insert-count-increments / stream-cancellations).
+    pub fn feed_decoder_stream(&self, data: &[Byte]) -> Result<(), QpackError> {
+        @intrinsic("verum.qpack.encoder_feed_decoder_stream", self.handle, data)
+    }
+}
+
+implement Drop for QpackEncoder {
+    fn drop(&mut self) {
+        let _ = @intrinsic("verum.qpack.encoder_drop", self.handle);
+    }
+}
+
+// =============================================================================
+// QpackDecoder
+// =============================================================================
+
+public type QpackDecoder is {
+    handle: UInt64,
+}
+
+implement QpackDecoder {
+    pub fn new(max_table_capacity: UInt64, max_blocked_streams: UInt64) -> QpackDecoder {
+        @intrinsic("verum.qpack.decoder_new", max_table_capacity, max_blocked_streams)
+    }
+
+    /// Decode a single header block. May return `Blocked` if the block
+    /// references dynamic-table entries that have not yet arrived over
+    /// the encoder stream.
+    pub fn decode(
+        &self,
+        stream_id: UInt64,
+        block: &[Byte],
+    ) -> Result<DecodeOutput, QpackError> {
+        @intrinsic("verum.qpack.decoder_decode", self.handle, stream_id, block)
+    }
+
+    /// Feed an incoming encoder-stream update.
+    pub fn feed_encoder_stream(&self, data: &[Byte]) -> Result<(), QpackError> {
+        @intrinsic("verum.qpack.decoder_feed_encoder_stream", self.handle, data)
+    }
+
+    /// Produce pending decoder-stream bytes for transmission (acks /
+    /// stream-cancellations / insert-count-increments).
+    pub fn take_decoder_stream(&self, out: &mut List<Byte>) -> Int {
+        @intrinsic("verum.qpack.decoder_take_decoder_stream", self.handle, out) as Int
+    }
+}
+
+implement Drop for QpackDecoder {
+    fn drop(&mut self) {
+        let _ = @intrinsic("verum.qpack.decoder_drop", self.handle);
+    }
+}
+
+public type DecodeOutput is
+    | Ready(List<HeaderField>)
+    | Blocked;

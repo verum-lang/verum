@@ -1,0 +1,71 @@
+// =============================================================================
+// net/quic/stream.vr — QUIC streams (RFC 9000 §2, §3)
+// =============================================================================
+// Bidirectional and unidirectional byte streams. Each stream has
+// independent flow control windows for both directions.
+// =============================================================================
+
+module core.net.quic.stream;
+
+mount core.*;
+mount core.net.quic.error.{QuicError, ApplicationErrorCode};
+
+type StreamHandle is UInt64;
+
+public type StreamDirection is
+    | Bidirectional
+    | Unidirectional;
+
+public type QuicStream is {
+    handle: StreamHandle,
+    connection_id: UInt64,
+    stream_id: UInt64,
+    direction: StreamDirection,
+}
+
+implement QuicStream {
+    pub fn stream_id(&self) -> UInt64 { self.stream_id }
+    pub fn direction(&self) -> StreamDirection { self.direction }
+
+    /// Write payload; returns bytes accepted (may be less than
+    /// `buf.len()` under flow-control pressure).
+    pub async fn write(&self, buf: &[Byte]) -> Result<Int, QuicError> {
+        @intrinsic("verum.quic.stream_write", self.handle, buf).await
+    }
+
+    /// Write-all: loops until all bytes are accepted or an error.
+    pub async fn write_all(&self, buf: &[Byte]) -> Result<(), QuicError> {
+        let mut written = 0;
+        while written < buf.len() {
+            let n = self.write(&buf[written..]).await?;
+            written = written + n;
+        }
+        Ok(())
+    }
+
+    /// Read up to `buf.len()` bytes; returns 0 on FIN.
+    pub async fn read(&self, buf: &mut [Byte]) -> Result<Int, QuicError> {
+        @intrinsic("verum.quic.stream_read", self.handle, buf).await
+    }
+
+    /// Send-side FIN — no further writes permitted.
+    pub async fn finish(&self) -> Result<(), QuicError> {
+        @intrinsic("verum.quic.stream_finish", self.handle).await
+    }
+
+    /// Abort the send side (RESET_STREAM, §19.4).
+    pub async fn reset(&self, code: ApplicationErrorCode) -> Result<(), QuicError> {
+        @intrinsic("verum.quic.stream_reset", self.handle, &code).await
+    }
+
+    /// Abort the receive side (STOP_SENDING, §19.5).
+    pub async fn stop_sending(&self, code: ApplicationErrorCode) -> Result<(), QuicError> {
+        @intrinsic("verum.quic.stream_stop_sending", self.handle, &code).await
+    }
+}
+
+implement Drop for QuicStream {
+    fn drop(&mut self) {
+        let _ = @intrinsic("verum.quic.stream_drop", self.handle);
+    }
+}

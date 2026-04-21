@@ -1,0 +1,122 @@
+// =============================================================================
+// net/quic/connection.vr — QUIC Connection + QuicListener
+// =============================================================================
+// Handle types over the runtime-level quiche (or equivalent) bindings.
+// Actual packet processing — endpoint + send/recv — is driven by the
+// verum.quic.* intrinsic family which invokes the C implementation.
+// =============================================================================
+
+module core.net.quic.connection;
+
+mount core.*;
+mount core.net.addr.{SocketAddr};
+mount core.net.quic.error.{QuicError, ApplicationErrorCode};
+mount core.net.quic.stream.{QuicStream, StreamDirection};
+mount core.sys.common.{FileDesc};
+
+// =============================================================================
+// Opaque handle (runtime-owned)
+// =============================================================================
+
+type ConnectionHandle is UInt64;
+type ListenerHandle is UInt64;
+
+// =============================================================================
+// Connection — one QUIC session
+// =============================================================================
+
+public type Connection is {
+    handle: ConnectionHandle,
+    peer: SocketAddr,
+    local: SocketAddr,
+}
+
+/// Event emitted by the receive pump — application waits on these.
+public type ConnectionEvent is
+    | IncomingStream(QuicStream)
+    | DatagramReceived(List<Byte>)
+    | HandshakeCompleted
+    | PeerClosed { code: ApplicationErrorCode, reason: Text }
+    | Closed;
+
+implement Connection {
+    /// Initiate a client-side connection. Performs handshake before returning.
+    pub async fn connect(
+        peer: &SocketAddr,
+        config: core.net.quic.QuicConfig,
+    ) -> Result<Connection, QuicError> {
+        @intrinsic("verum.quic.connect", peer, &config).await
+    }
+
+    pub fn peer_addr(&self) -> &SocketAddr { &self.peer }
+    pub fn local_addr(&self) -> &SocketAddr { &self.local }
+
+    /// Open a new outgoing bidirectional stream (§2.1).
+    pub async fn open_bidi_stream(&self) -> Result<QuicStream, QuicError> {
+        @intrinsic("verum.quic.open_bidi_stream", self.handle).await
+    }
+
+    /// Open a new outgoing unidirectional stream (§2.1).
+    pub async fn open_uni_stream(&self) -> Result<QuicStream, QuicError> {
+        @intrinsic("verum.quic.open_uni_stream", self.handle).await
+    }
+
+    /// Receive the next connection-level event.
+    pub async fn next_event(&self) -> Result<ConnectionEvent, QuicError> {
+        @intrinsic("verum.quic.next_event", self.handle).await
+    }
+
+    /// Send an unreliable datagram (RFC 9221). Fails if datagrams
+    /// were not negotiated during the handshake.
+    pub async fn send_datagram(&self, data: &[Byte]) -> Result<(), QuicError> {
+        @intrinsic("verum.quic.send_datagram", self.handle, data).await
+    }
+
+    /// Close the connection with an application-level error code.
+    pub async fn close(&self, code: ApplicationErrorCode, reason: &Text) -> Result<(), QuicError> {
+        @intrinsic("verum.quic.close", self.handle, &code, reason).await
+    }
+
+    /// Whether the handshake has fully completed. 0-RTT streams may
+    /// already be usable earlier if early_data was negotiated.
+    pub fn is_established(&self) -> Bool {
+        @intrinsic("verum.quic.is_established", self.handle)
+    }
+}
+
+implement Drop for Connection {
+    fn drop(&mut self) {
+        let _ = @intrinsic("verum.quic.drop", self.handle);
+    }
+}
+
+// =============================================================================
+// QuicListener — server-side accept loop
+// =============================================================================
+
+public type QuicListener is {
+    handle: ListenerHandle,
+    local: SocketAddr,
+}
+
+implement QuicListener {
+    /// Bind a UDP socket and start accepting QUIC connections.
+    pub async fn bind(
+        local: &SocketAddr,
+        config: core.net.quic.QuicConfig,
+    ) -> Result<QuicListener, QuicError> {
+        @intrinsic("verum.quic.listen", local, &config).await
+    }
+
+    pub fn local_addr(&self) -> &SocketAddr { &self.local }
+
+    pub async fn accept(&self) -> Result<(Connection, SocketAddr), QuicError> {
+        @intrinsic("verum.quic.accept", self.handle).await
+    }
+}
+
+implement Drop for QuicListener {
+    fn drop(&mut self) {
+        let _ = @intrinsic("verum.quic.listener_drop", self.handle);
+    }
+}

@@ -1,0 +1,92 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: net, http3, rfc9114, rfc9204, qpack
+// @timeout: 10000
+// @expect: pass
+
+// HTTP/3 + QPACK API surface.
+
+mount core.net.http3.{
+    Http3Error, Http3ErrorCode,
+    H3FrameType, H3Frame,
+    QpackEncoder, QpackDecoder, QpackError,
+    Http3Client, Http3Server,
+    ALPN,
+};
+mount core.net.http3.client.{Http3Response};
+mount core.net.http3.server.{Http3Request, Http3RequestHandle};
+mount core.net.http3.qpack.{DecodeOutput};
+mount core.net.http3.frame.{write_varint, read_varint};
+mount core.net.addr.{SocketAddr};
+mount core.net.http.{Method, StatusCode};
+mount core.net.http2.hpack.{HeaderField};
+mount core.net.quic.{QuicConfig};
+
+// ALPN constant.
+fn typecheck_alpn() -> &'static Text { ALPN }
+
+// Frame type round-trip.
+fn typecheck_frame_type() -> H3FrameType {
+    let t = H3FrameType.Headers;
+    H3FrameType.from_u64(t.to_u64())
+}
+
+// Varint codec.
+fn typecheck_varint() -> Result<UInt64, Http3Error> {
+    let mut buf: List<Byte> = List.new();
+    write_varint(&mut buf, 16384);
+    write_varint(&mut buf, 1073741824);
+    let (v1, _) = read_varint(&buf, 0)?;
+    Ok(v1)
+}
+
+// Error codes.
+fn typecheck_error_code() -> Http3ErrorCode {
+    Http3ErrorCode.new(Http3ErrorCode.H3_REQUEST_CANCELLED)
+}
+
+// QPACK encoder.
+fn typecheck_qpack_encoder() -> QpackEncoder {
+    QpackEncoder.new(4096, 100)
+}
+
+fn typecheck_qpack_decoder() -> QpackDecoder {
+    QpackDecoder.new(4096, 100)
+}
+
+// QPACK decode output.
+fn typecheck_qpack_decode_output(r: DecodeOutput) -> Int {
+    match r {
+        DecodeOutput.Ready(_) => 1,
+        DecodeOutput.Blocked => 0,
+    }
+}
+
+// Client request.
+async fn typecheck_client(peer: &SocketAddr, config: QuicConfig)
+    -> Result<Http3Response, Http3Error>
+{
+    let client = Http3Client.connect(peer, config).await?;
+    let headers: List<HeaderField> = List.new();
+    client.request(Method.Get, &"/api".into(), &headers, b"").await
+}
+
+// Server bind + accept.
+async fn typecheck_server(local: &SocketAddr, config: QuicConfig)
+    -> Result<(Http3Request, Http3RequestHandle), Http3Error>
+{
+    let server = Http3Server.bind(local, config).await?;
+    server.accept().await
+}
+
+async fn typecheck_send_response(handle: &Http3RequestHandle) -> Result<(), Http3Error> {
+    let headers: List<HeaderField> = List.new();
+    handle.send_response_headers(StatusCode.new(200), &headers).await?;
+    handle.write_body(b"{}").await?;
+    handle.finish().await
+}
+
+fn main() {
+    // Shape-only.
+}

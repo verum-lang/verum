@@ -1,0 +1,114 @@
+// =============================================================================
+// net/http3/frame.vr — HTTP/3 frame types (RFC 9114 §7)
+// =============================================================================
+// Each frame = varint(type) + varint(length) + payload. Unlike HTTP/2
+// there is no fixed 9-byte header — length is a QUIC-style variable-
+// length integer.
+// =============================================================================
+
+module core.net.http3.frame;
+
+mount core.*;
+mount core.net.http3.error.{Http3Error, Http3ErrorCode};
+
+public type H3FrameType is
+    | Data            // 0x0
+    | Headers         // 0x1
+    | CancelPush      // 0x3
+    | Settings        // 0x4
+    | PushPromise     // 0x5
+    | GoAway          // 0x7
+    | MaxPushId       // 0xD
+    | Reserved(UInt64);
+
+implement H3FrameType {
+    pub fn to_u64(&self) -> UInt64 {
+        match self {
+            H3FrameType.Data         => 0x0,
+            H3FrameType.Headers      => 0x1,
+            H3FrameType.CancelPush   => 0x3,
+            H3FrameType.Settings     => 0x4,
+            H3FrameType.PushPromise  => 0x5,
+            H3FrameType.GoAway       => 0x7,
+            H3FrameType.MaxPushId    => 0xD,
+            H3FrameType.Reserved(v)  => *v,
+        }
+    }
+
+    pub fn from_u64(v: UInt64) -> H3FrameType {
+        match v {
+            0x0 => H3FrameType.Data,
+            0x1 => H3FrameType.Headers,
+            0x3 => H3FrameType.CancelPush,
+            0x4 => H3FrameType.Settings,
+            0x5 => H3FrameType.PushPromise,
+            0x7 => H3FrameType.GoAway,
+            0xD => H3FrameType.MaxPushId,
+            _   => H3FrameType.Reserved(v),
+        }
+    }
+}
+
+// SETTINGS identifiers (RFC 9114 §7.2.4.1)
+public const H3_SETTINGS_QPACK_MAX_TABLE_CAPACITY: UInt64 = 0x01;
+public const H3_SETTINGS_MAX_FIELD_SECTION_SIZE: UInt64   = 0x06;
+public const H3_SETTINGS_QPACK_BLOCKED_STREAMS: UInt64    = 0x07;
+
+public type H3Frame is
+    | DataFrame { stream_id: UInt64, data: List<Byte> }
+    | HeadersFrame { stream_id: UInt64, encoded_headers: List<Byte> }
+    | SettingsFrame { params: List<(UInt64, UInt64)> }
+    | CancelPushFrame { push_id: UInt64 }
+    | PushPromiseFrame { push_id: UInt64, encoded_headers: List<Byte> }
+    | GoAwayFrame { stream_id: UInt64 }
+    | MaxPushIdFrame { push_id: UInt64 }
+    | UnknownFrame { type_: UInt64, payload: List<Byte> };
+
+// =============================================================================
+// Varint codec (RFC 9000 §16 — same as QUIC)
+// =============================================================================
+
+/// Encode `value` as a QUIC varint (1, 2, 4, or 8 bytes).
+pub fn write_varint(out: &mut List<Byte>, value: UInt64) {
+    if value < 64 {
+        out.push(value as Byte);
+    } else if value < 16384 {
+        out.push(((value >> 8) as Byte) | 0x40);
+        out.push((value & 0xFF) as Byte);
+    } else if value < 1073741824 {
+        out.push(((value >> 24) as Byte) | 0x80);
+        out.push(((value >> 16) & 0xFF) as Byte);
+        out.push(((value >> 8) & 0xFF) as Byte);
+        out.push((value & 0xFF) as Byte);
+    } else {
+        out.push(((value >> 56) as Byte) | 0xC0);
+        out.push(((value >> 48) & 0xFF) as Byte);
+        out.push(((value >> 40) & 0xFF) as Byte);
+        out.push(((value >> 32) & 0xFF) as Byte);
+        out.push(((value >> 24) & 0xFF) as Byte);
+        out.push(((value >> 16) & 0xFF) as Byte);
+        out.push(((value >> 8) & 0xFF) as Byte);
+        out.push((value & 0xFF) as Byte);
+    }
+}
+
+pub fn read_varint(buf: &[Byte], pos: Int) -> Result<(UInt64, Int), Http3Error> {
+    if pos >= buf.len() { return Err(Http3Error.NeedMore); }
+    let first = buf[pos];
+    let prefix = first >> 6;
+    let len: Int = match prefix {
+        0 => 1,
+        1 => 2,
+        2 => 4,
+        3 => 8,
+        _ => 1,
+    };
+    if pos + len > buf.len() { return Err(Http3Error.NeedMore); }
+    let mut v: UInt64 = (first & 0x3F) as UInt64;
+    let mut i = 1;
+    while i < len {
+        v = (v << 8) | (buf[pos + i] as UInt64);
+        i = i + 1;
+    }
+    Ok((v, pos + len))
+}

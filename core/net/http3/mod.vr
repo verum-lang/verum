@@ -1,0 +1,49 @@
+// =============================================================================
+// net/http3/mod.vr — HTTP/3 over QUIC (RFC 9114 + RFC 9204 QPACK)
+// =============================================================================
+// Layer: 5 (Network)
+// Dependencies: core.net.quic, core.net.http
+// Spec: https://datatracker.ietf.org/doc/html/rfc9114 (HTTP/3)
+//       https://datatracker.ietf.org/doc/html/rfc9204 (QPACK)
+//
+// HTTP/3 maps HTTP semantics onto QUIC. Each request/response uses a
+// bidirectional QUIC stream. Headers are compressed with QPACK (the
+// QUIC-friendly successor to HPACK) over two dedicated unidirectional
+// streams for encoder and decoder state exchange.
+//
+// # Module layout
+//
+// ```
+// core.net.http3
+// ├── mod.vr          — this file
+// ├── error.vr        — Http3Error + error codes (§8)
+// ├── frame.vr        — HTTP/3 frame types (DATA, HEADERS, SETTINGS, ...)
+// ├── qpack.vr        — QPACK encoder/decoder (intrinsic-backed)
+// └── client.vr       — Client high-level API
+// └── server.vr       — Server high-level API
+// ```
+// =============================================================================
+
+module core.net.http3;
+
+public module error;
+public module frame;
+public module qpack;
+public module client;
+public module server;
+
+// ALPN identifier per RFC 9114 §3.1.
+public const ALPN: &'static Text = "h3";
+
+public mount .error.Http3Error;
+public mount .error.Http3ErrorCode;
+
+public mount .frame.H3FrameType;
+public mount .frame.H3Frame;
+
+public mount .qpack.QpackEncoder;
+public mount .qpack.QpackDecoder;
+public mount .qpack.QpackError;
+
+public mount .client.Http3Client;
+public mount .server.Http3Server;

@@ -1,0 +1,194 @@
+// =============================================================================
+// net/quic/mod.vr — QUIC transport (RFC 9000 / RFC 9001 / RFC 9002)
+// =============================================================================
+// Layer: 5 (Network)
+// Dependencies: core, core.time, core.net.addr, core.net.tls
+// Spec: https://datatracker.ietf.org/doc/html/rfc9000
+//
+// QUIC is a UDP-based, multiplexed, secure transport. This module
+// provides the Verum-level surface; the actual packet-processing
+// pipeline is implemented in the runtime via the `verum.quic.*`
+// intrinsic family (typically binding to a C implementation such as
+// quiche, msquic, or lsquic).
+//
+// # Module layout
+//
+// ```
+// core.net.quic
+// ├── mod.vr          — this file (re-exports, Config types)
+// ├── error.vr        — QuicError (transport + app error codes)
+// ├── connection.vr   — Connection handle, send/recv/close
+// └── stream.vr       — QuicStream (send, recv, shutdown)
+// ```
+//
+// # Minimal usage
+//
+// ```verum
+// mount core.net.quic.*;
+//
+// // Client
+// let config = QuicConfig.client(&"example.com".into())
+//     .with_alpn(&["h3".into()])
+//     .with_initial_max_data(1 << 20)
+//     .with_initial_max_stream_data_bidi_local(1 << 16);
+// let conn = Connection.connect(&peer_addr, config).await?;
+//
+// // Server
+// let listener = QuicListener.bind(&local_addr, server_config).await?;
+// let (conn, peer) = listener.accept().await?;
+//
+// // Streams
+// let stream = conn.open_bidi_stream().await?;
+// stream.write_all(&request_bytes).await?;
+// let n = stream.read(&mut buf).await?;
+// ```
+// =============================================================================
+
+module core.net.quic;
+
+public module error;
+public module connection;
+public module stream;
+
+mount core.*;
+mount core.time.duration.{Duration};
+mount core.net.addr.{SocketAddr};
+mount core.net.tls.{Certificate, PrivateKey, TlsVersion};
+
+// =============================================================================
+// Re-exports
+// =============================================================================
+
+public mount .error.QuicError;
+public mount .error.TransportErrorCode;
+public mount .error.ApplicationErrorCode;
+
+public mount .connection.Connection;
+public mount .connection.QuicListener;
+public mount .connection.ConnectionEvent;
+
+public mount .stream.QuicStream;
+public mount .stream.StreamDirection;
+
+// =============================================================================
+// QuicConfig
+// =============================================================================
+
+public type QuicConfig is {
+    // TLS
+    is_client: Bool,
+    server_name: Maybe<Text>,
+    alpn: List<Text>,
+    certificates: List<Certificate>,
+    private_key: Maybe<PrivateKey>,
+    verify_peer: Bool,
+
+    // Flow-control + stream limits (RFC 9000 §4, §18.2)
+    initial_max_data: UInt64,
+    initial_max_stream_data_bidi_local: UInt64,
+    initial_max_stream_data_bidi_remote: UInt64,
+    initial_max_stream_data_uni: UInt64,
+    initial_max_streams_bidi: UInt64,
+    initial_max_streams_uni: UInt64,
+
+    // Timers
+    max_idle_timeout: Duration,
+    max_recv_udp_payload_size: UInt64,
+    max_send_udp_payload_size: UInt64,
+
+    // Congestion
+    initial_congestion_window_packets: UInt64,
+
+    // Feature flags
+    enable_early_data: Bool,       // 0-RTT
+    enable_datagrams: Bool,        // RFC 9221 unreliable datagrams
+    enable_hystart: Bool,          // HyStart++ (RFC 9406)
+}
+
+implement QuicConfig {
+    pub fn client(server_name: &Text) -> QuicConfig {
+        let mut c = QuicConfig.defaults();
+        c.is_client = true;
+        c.server_name = Some(server_name.clone());
+        c.verify_peer = true;
+        c
+    }
+
+    pub fn server() -> QuicConfig {
+        let mut c = QuicConfig.defaults();
+        c.is_client = false;
+        c.verify_peer = false;
+        c
+    }
+
+    fn defaults() -> QuicConfig {
+        QuicConfig {
+            is_client: false,
+            server_name: None,
+            alpn: List.new(),
+            certificates: List.new(),
+            private_key: None,
+            verify_peer: false,
+
+            // Conservative defaults — tune per deployment.
+            initial_max_data: 16 * 1024 * 1024,                       // 16 MiB conn window
+            initial_max_stream_data_bidi_local: 1 * 1024 * 1024,
+            initial_max_stream_data_bidi_remote: 1 * 1024 * 1024,
+            initial_max_stream_data_uni: 1 * 1024 * 1024,
+            initial_max_streams_bidi: 100,
+            initial_max_streams_uni: 100,
+
+            max_idle_timeout: Duration.from_secs(30),
+            max_recv_udp_payload_size: 1350,  // conservative PMTU-friendly default
+            max_send_udp_payload_size: 1350,
+
+            initial_congestion_window_packets: 10,
+
+            enable_early_data: false,
+            enable_datagrams: false,
+            enable_hystart: true,
+        }
+    }
+
+    pub fn with_alpn(mut self, alpn: &[Text]) -> QuicConfig {
+        let mut i = 0;
+        while i < alpn.len() { self.alpn.push(alpn[i].clone()); i = i + 1; }
+        self
+    }
+
+    pub fn with_certificate(mut self, cert: Certificate) -> QuicConfig {
+        self.certificates.push(cert); self
+    }
+
+    pub fn with_private_key(mut self, key: PrivateKey) -> QuicConfig {
+        self.private_key = Some(key); self
+    }
+
+    pub fn with_verify_peer(mut self, verify: Bool) -> QuicConfig {
+        self.verify_peer = verify; self
+    }
+
+    pub fn with_initial_max_data(mut self, n: UInt64) -> QuicConfig {
+        self.initial_max_data = n; self
+    }
+
+    pub fn with_initial_max_stream_data_bidi_local(mut self, n: UInt64) -> QuicConfig {
+        self.initial_max_stream_data_bidi_local = n; self
+    }
+
+    pub fn with_initial_max_streams_bidi(mut self, n: UInt64) -> QuicConfig {
+        self.initial_max_streams_bidi = n; self
+    }
+
+    pub fn with_max_idle_timeout(mut self, t: Duration) -> QuicConfig {
+        self.max_idle_timeout = t; self
+    }
+
+    pub fn with_early_data(mut self, enable: Bool) -> QuicConfig {
+        self.enable_early_data = enable; self
+    }
+
+    pub fn with_datagrams(mut self, enable: Bool) -> QuicConfig {
+        self.enable_datagrams = enable; self
+    }
+}

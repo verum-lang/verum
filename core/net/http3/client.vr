@@ -1,0 +1,54 @@
+// =============================================================================
+// net/http3/client.vr — High-level HTTP/3 client (RFC 9114)
+// =============================================================================
+// Wraps a QUIC Connection with the HTTP/3 framing layer: opens the
+// control + QPACK streams during the initial handshake, then serves
+// a request/response API.
+// =============================================================================
+
+module core.net.http3.client;
+
+mount core.*;
+mount core.net.addr.{SocketAddr};
+mount core.net.http.{Method, StatusCode, Version};
+mount core.net.http2.hpack.{HeaderField};
+mount core.net.quic.{Connection, QuicConfig};
+mount core.net.quic.error.{QuicError};
+mount core.net.http3.error.{Http3Error};
+
+public type Http3Client is {
+    connection: Connection,
+    handle: UInt64,
+}
+
+public type Http3Response is {
+    status: StatusCode,
+    headers: List<HeaderField>,
+    body: List<Byte>,
+    trailers: List<HeaderField>,
+}
+
+implement Http3Client {
+    /// Establish a QUIC connection + HTTP/3 handshake to `peer`.
+    pub async fn connect(peer: &SocketAddr, config: QuicConfig)
+        -> Result<Http3Client, Http3Error>
+    {
+        @intrinsic("verum.h3.client_connect", peer, &config).await
+    }
+
+    /// Issue a single request and await the full response (headers + body).
+    pub async fn request(
+        &self,
+        method: Method,
+        path: &Text,
+        headers: &List<HeaderField>,
+        body: &[Byte],
+    ) -> Result<Http3Response, Http3Error> {
+        @intrinsic("verum.h3.client_request",
+            self.handle, method, path, headers, body).await
+    }
+
+    pub async fn close(&self) -> Result<(), Http3Error> {
+        @intrinsic("verum.h3.client_close", self.handle).await
+    }
+}

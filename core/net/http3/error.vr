@@ -1,0 +1,47 @@
+// =============================================================================
+// net/http3/error.vr — HTTP/3 error codes (RFC 9114 §8.1)
+// =============================================================================
+
+module core.net.http3.error;
+
+mount core.*;
+
+public type Http3ErrorCode is {
+    code: UInt64,
+}
+
+implement Http3ErrorCode {
+    pub const H3_NO_ERROR: UInt64                  = 0x100;
+    pub const H3_GENERAL_PROTOCOL_ERROR: UInt64    = 0x101;
+    pub const H3_INTERNAL_ERROR: UInt64            = 0x102;
+    pub const H3_STREAM_CREATION_ERROR: UInt64     = 0x103;
+    pub const H3_CLOSED_CRITICAL_STREAM: UInt64    = 0x104;
+    pub const H3_FRAME_UNEXPECTED: UInt64          = 0x105;
+    pub const H3_FRAME_ERROR: UInt64               = 0x106;
+    pub const H3_EXCESSIVE_LOAD: UInt64            = 0x107;
+    pub const H3_ID_ERROR: UInt64                  = 0x108;
+    pub const H3_SETTINGS_ERROR: UInt64            = 0x109;
+    pub const H3_MISSING_SETTINGS: UInt64          = 0x10A;
+    pub const H3_REQUEST_REJECTED: UInt64          = 0x10B;
+    pub const H3_REQUEST_CANCELLED: UInt64         = 0x10C;
+    pub const H3_REQUEST_INCOMPLETE: UInt64        = 0x10D;
+    pub const H3_MESSAGE_ERROR: UInt64             = 0x10E;
+    pub const H3_CONNECT_ERROR: UInt64             = 0x10F;
+    pub const H3_VERSION_FALLBACK: UInt64          = 0x110;
+
+    // QPACK errors (RFC 9204 §6)
+    pub const QPACK_DECOMPRESSION_FAILED: UInt64   = 0x200;
+    pub const QPACK_ENCODER_STREAM_ERROR: UInt64   = 0x201;
+    pub const QPACK_DECODER_STREAM_ERROR: UInt64   = 0x202;
+
+    pub fn new(code: UInt64) -> Http3ErrorCode { Http3ErrorCode { code: code } }
+    pub fn value(&self) -> UInt64 { self.code }
+}
+
+public type Http3Error is
+    | ConnectionError { code: Http3ErrorCode, reason: Text }
+    | StreamError { stream_id: UInt64, code: Http3ErrorCode, reason: Text }
+    | FrameError(Text)
+    | QpackError(Text)
+    | NeedMore
+    | Closed;

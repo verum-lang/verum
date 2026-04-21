@@ -1,0 +1,94 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: net, quic, rfc9000, rfc9001, transport
+// @timeout: 10000
+// @expect: pass
+
+// QUIC transport API surface.
+
+mount core.net.quic.{
+    QuicConfig, QuicError, TransportErrorCode, ApplicationErrorCode,
+    Connection, QuicListener, ConnectionEvent,
+    QuicStream, StreamDirection,
+};
+mount core.net.addr.{SocketAddr};
+mount core.time.duration.{Duration};
+
+// Config builder.
+fn typecheck_client_config() -> QuicConfig {
+    QuicConfig.client(&"example.com".into())
+        .with_alpn(&["h3".into()])
+        .with_initial_max_data(16 * 1024 * 1024)
+        .with_initial_max_streams_bidi(500)
+        .with_max_idle_timeout(Duration.from_secs(30))
+        .with_early_data(true)
+        .with_datagrams(true)
+}
+
+fn typecheck_server_config() -> QuicConfig {
+    QuicConfig.server()
+        .with_alpn(&["h3".into()])
+        .with_verify_peer(false)
+}
+
+// Connect / accept shape (async).
+async fn typecheck_connect(peer: &SocketAddr, config: QuicConfig)
+    -> Result<Connection, QuicError>
+{
+    Connection.connect(peer, config).await
+}
+
+async fn typecheck_listen(local: &SocketAddr, config: QuicConfig)
+    -> Result<QuicListener, QuicError>
+{
+    QuicListener.bind(local, config).await
+}
+
+async fn typecheck_accept(listener: &QuicListener)
+    -> Result<(Connection, SocketAddr), QuicError>
+{
+    listener.accept().await
+}
+
+// Stream open / write / read / close.
+async fn typecheck_stream_flow(conn: &Connection) -> Result<Int, QuicError> {
+    let stream = conn.open_bidi_stream().await?;
+    stream.write_all(b"hello").await?;
+    let mut buf: [Byte; 1024] = [0; 1024];
+    let n = stream.read(&mut buf).await?;
+    stream.finish().await?;
+    Ok(n)
+}
+
+// Connection events.
+async fn typecheck_events(conn: &Connection) -> Result<Int, QuicError> {
+    match conn.next_event().await? {
+        ConnectionEvent.IncomingStream(_) => Ok(1),
+        ConnectionEvent.DatagramReceived(_) => Ok(2),
+        ConnectionEvent.HandshakeCompleted => Ok(3),
+        ConnectionEvent.PeerClosed { .. } => Ok(4),
+        ConnectionEvent.Closed => Ok(5),
+    }
+}
+
+// Datagram round-trip.
+async fn typecheck_datagram(conn: &Connection) -> Result<(), QuicError> {
+    conn.send_datagram(b"d").await
+}
+
+// Stream reset / stop_sending.
+async fn typecheck_stream_abort(stream: &QuicStream) -> Result<(), QuicError> {
+    stream.reset(ApplicationErrorCode.new(0)).await?;
+    stream.stop_sending(ApplicationErrorCode.new(0)).await
+}
+
+// Transport error code accessors.
+fn typecheck_error_codes() -> (TransportErrorCode, ApplicationErrorCode) {
+    (TransportErrorCode.new(TransportErrorCode.FLOW_CONTROL_ERROR),
+     ApplicationErrorCode.new(0x100))
+}
+
+fn main() {
+    // Shape-only.
+}
