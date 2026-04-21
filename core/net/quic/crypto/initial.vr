@@ -1,0 +1,99 @@
+// =============================================================================
+// net/quic/crypto/initial.vr — Initial secret derivation (RFC 9001 §5.2)
+// =============================================================================
+// Layer: 5 (Network — QUIC)
+// =============================================================================
+//
+// RFC 9001 §5.2:
+//
+//   initial_secret = HKDF-Extract(initial_salt, client_dst_connection_id)
+//   client_initial_secret = HKDF-Expand-Label(initial_secret,
+//       "client in", "", Hash.length)
+//   server_initial_secret = HKDF-Expand-Label(initial_secret,
+//       "server in", "", Hash.length)
+//
+// Per-direction key material (RFC 9001 §5.1 + §5.4):
+//
+//   key = HKDF-Expand-Label(role_secret, "quic key", "", 16)
+//   iv  = HKDF-Expand-Label(role_secret, "quic iv",  "", 12)
+//   hp  = HKDF-Expand-Label(role_secret, "quic hp",  "", 16)
+//
+// Initial packets always use AES-128-GCM regardless of the suite
+// negotiated later. The hash stays SHA-256 throughout the initial
+// phase.
+//
+// =============================================================================
+
+module core.net.quic.crypto.initial;
+
+mount core.*;
+mount core.collections.List;
+mount core.security.kdf.hkdf.{hkdf_extract_sha256, HkdfError};
+mount core.net.tls13.cipher_suite.{HashKind};
+mount core.net.tls13.keyschedule.hkdf_label.{hkdf_expand_label};
+mount core.net.quic.crypto.labels.{
+    QUIC_INITIAL_SALT_V1,
+    LABEL_CLIENT_IN, LABEL_SERVER_IN,
+    LABEL_QUIC_KEY, LABEL_QUIC_IV, LABEL_QUIC_HP,
+    INITIAL_KEY_LEN, INITIAL_IV_LEN, INITIAL_HP_LEN,
+};
+
+// =============================================================================
+// Types
+// =============================================================================
+
+/// A pair of per-role initial secrets. Each is the input to
+/// `derive_initial_keys` which produces the AEAD (key, iv) +
+/// header-protection key for that direction.
+public type InitialSecrets is {
+    client: List<Byte>,
+    server: List<Byte>,
+};
+
+public type InitialKeys is {
+    key: List<Byte>,
+    iv:  [Byte; 12],
+    hp:  List<Byte>,
+};
+
+// =============================================================================
+// Derivation
+// =============================================================================
+
+/// RFC 9001 §5.2 — derive (client, server) initial secrets from the
+/// client's Destination Connection ID. `dcid` is the exact bytes the
+/// client used in its first Initial packet's Destination CID field.
+public fn derive_initial_secrets(dcid: &[Byte]) -> Result<InitialSecrets, HkdfError> {
+    // initial_secret = HKDF-Extract(salt, DCID)
+    let prk = hkdf_extract_sha256(&QUIC_INITIAL_SALT_V1, dcid).to_vec();
+
+    // Per-role secrets via HKDF-Expand-Label with SHA-256.
+    let client = hkdf_expand_label(
+        HashKind.Sha256, prk.as_slice(), &LABEL_CLIENT_IN, &[], 32,
+    )?;
+    let server = hkdf_expand_label(
+        HashKind.Sha256, prk.as_slice(), &LABEL_SERVER_IN, &[], 32,
+    )?;
+    Ok(InitialSecrets { client: client, server: server })
+}
+
+/// Derive (key, iv, hp) for one direction from that direction's
+/// role-specific initial secret. Initial packets always use
+/// AES-128-GCM (16-byte key, 12-byte IV, 16-byte HP key).
+public fn derive_initial_keys(role_secret: &[Byte]) -> Result<InitialKeys, HkdfError> {
+    let key = hkdf_expand_label(
+        HashKind.Sha256, role_secret, &LABEL_QUIC_KEY, &[], INITIAL_KEY_LEN,
+    )?;
+    let iv_vec = hkdf_expand_label(
+        HashKind.Sha256, role_secret, &LABEL_QUIC_IV,  &[], INITIAL_IV_LEN,
+    )?;
+    let hp = hkdf_expand_label(
+        HashKind.Sha256, role_secret, &LABEL_QUIC_HP,  &[], INITIAL_HP_LEN,
+    )?;
+
+    let mut iv: [Byte; 12] = [0_u8; 12];
+    let mut i: Int = 0;
+    while i < 12 { iv[i] = iv_vec[i]; i = i + 1; }
+
+    Ok(InitialKeys { key: key, iv: iv, hp: hp })
+}

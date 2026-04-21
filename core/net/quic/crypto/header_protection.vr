@@ -1,0 +1,109 @@
+// =============================================================================
+// net/quic/crypto/header_protection.vr — HP mask computation (RFC 9001 §5.4)
+// =============================================================================
+// Layer: 5 (Network — QUIC)
+// =============================================================================
+//
+// RFC 9001 §5.4:
+//
+//   sample = ciphertext[4..20]              (16 bytes from the PN + payload)
+//   mask   = AES-ECB(hp_key, sample)        when AEAD = AES-128/256-GCM
+//         or ChaCha20(hp_key, counter = sample[0..4]_le, nonce = sample[4..16],
+//                     0)                    when AEAD = ChaCha20-Poly1305
+//
+//   // Apply to packet header:
+//   if long_header:
+//       header[0] ^= mask[0] & 0x0F       // lowest 4 bits (reserved + PN-len)
+//   else:
+//       header[0] ^= mask[0] & 0x1F       // lowest 5 bits (reserved + spin + KP + PN-len)
+//   header[pn_offset .. pn_offset + pn_len] XOR mask[1..pn_len+1]
+//
+// The HP key length matches the AEAD key length:
+//   AES-128-GCM → 16-byte HP key, AES-ECB over 16-byte sample.
+//   AES-256-GCM → 32-byte HP key, AES-ECB over 16-byte sample.
+//   ChaCha20-Poly1305 → 32-byte HP key, ChaCha20 block produces 64
+//     bytes of which the first 5 are the mask.
+//
+// =============================================================================
+
+module core.net.quic.crypto.header_protection;
+
+mount core.*;
+mount core.collections.List;
+mount core.security.cipher.aes.{
+    AesKey128, AesKey256, RoundKeys128, RoundKeys256,
+    aes128_encrypt_block, aes256_encrypt_block,
+};
+mount core.security.cipher.chacha20.{chacha20_block, ChaChaKey, ChaChaNonce};
+
+// =============================================================================
+// HpKey + mask
+// =============================================================================
+
+public type HpKey is
+      AesEcb128([Byte; 16])
+    | AesEcb256([Byte; 32])
+    | ChaCha20Block([Byte; 32]);
+
+public type HpMask is [Byte; 5];
+
+// =============================================================================
+// Mask computation
+// =============================================================================
+
+/// Compute the 5-byte HP mask from a sample of ciphertext. The caller
+/// picks the sample as `ciphertext[4..20]` (16 bytes starting 4 bytes
+/// after the encrypted packet number's start) per RFC 9001 §5.4.2.
+public fn compute_hp_mask(hp: &HpKey, sample: &[Byte; 16]) -> HpMask {
+    match hp {
+        HpKey.AesEcb128(key) => {
+            let rk = RoundKeys128.expand(key);
+            let mut block: [Byte; 16] = sample.clone();
+            aes128_encrypt_block(&rk, &mut block);
+            [block[0], block[1], block[2], block[3], block[4]]
+        },
+        HpKey.AesEcb256(key) => {
+            let rk = RoundKeys256.expand(key);
+            let mut block: [Byte; 16] = sample.clone();
+            aes256_encrypt_block(&rk, &mut block);
+            [block[0], block[1], block[2], block[3], block[4]]
+        },
+        HpKey.ChaCha20Block(key) => {
+            // counter = sample[0..4] little-endian
+            let counter: UInt32 =
+                  (sample[0] as UInt32)
+                | ((sample[1] as UInt32) <<  8)
+                | ((sample[2] as UInt32) << 16)
+                | ((sample[3] as UInt32) << 24);
+            let mut nonce: [Byte; 12] = [0_u8; 12];
+            let mut i: Int = 0;
+            while i < 12 { nonce[i] = sample[4 + i]; i = i + 1; }
+            let ks = chacha20_block(key, counter, &nonce);
+            [ks[0], ks[1], ks[2], ks[3], ks[4]]
+        },
+    }
+}
+
+/// Apply a mask to a packet header. `is_long` distinguishes long
+/// (Initial / Handshake / 0-RTT / Retry / Version Negotiation) from
+/// short (1-RTT) headers; the mask for the first byte clamps to 4
+/// vs 5 low bits respectively.
+///
+/// `header` points at the outgoing packet header bytes in place;
+/// `pn_offset` is the offset of the first packet-number byte;
+/// `pn_len` is the packet-number length in bytes (1..=4).
+public fn apply_hp_mask(
+    header: &mut [Byte],
+    is_long: Bool,
+    pn_offset: Int,
+    pn_len: Int,
+    mask: &HpMask,
+) {
+    let first_mask: Byte = if is_long { mask[0] & 0x0F_u8 } else { mask[0] & 0x1F_u8 };
+    header[0] = header[0] ^ first_mask;
+    let mut i: Int = 0;
+    while i < pn_len {
+        header[pn_offset + i] = header[pn_offset + i] ^ mask[1 + i];
+        i = i + 1;
+    }
+}

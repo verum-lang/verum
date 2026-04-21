@@ -50,6 +50,11 @@ public module error;
 public module connection;
 public module stream;
 
+// Pure-Verum QUIC-TLS crypto layer (RFC 9001) — sits under the
+// intrinsic-backed connection surface; takes over in Phase 3+ as the
+// pure-Verum transport lands alongside.
+public module crypto;
+
 mount core.*;
 mount core.time.duration.{Duration};
 mount core.net.addr.{SocketAddr};
