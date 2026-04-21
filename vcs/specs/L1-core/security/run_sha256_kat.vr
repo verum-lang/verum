@@ -1,0 +1,84 @@
+// @test: run
+// @tier: 0
+// @level: L1
+// @tags: security, crypto, hash, sha256, nist-kat, fips180-4, run
+// @timeout: 10000
+// @expected-stdout: OK
+// @expected-exit: 0
+
+// FIPS 180-4 Appendix B.1 example vectors for SHA-256 — byte-exact
+// discharge against the reference implementation.
+//
+// Input   | Expected digest (hex)
+// --------|---------------------------
+// ""      | e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+// "abc"   | ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad
+// long 1M | cdc76e5c9914fb9281a1c7e284d73e67f1809a48a497200e046d39ccc7112cd0
+
+mount core.security.hash.sha256.{Sha256};
+
+const EXPECTED_EMPTY: [Byte; 32] = [
+    0xe3, 0xb0, 0xc4, 0x42, 0x98, 0xfc, 0x1c, 0x14,
+    0x9a, 0xfb, 0xf4, 0xc8, 0x99, 0x6f, 0xb9, 0x24,
+    0x27, 0xae, 0x41, 0xe4, 0x64, 0x9b, 0x93, 0x4c,
+    0xa4, 0x95, 0x99, 0x1b, 0x78, 0x52, 0xb8, 0x55,
+];
+
+const EXPECTED_ABC: [Byte; 32] = [
+    0xba, 0x78, 0x16, 0xbf, 0x8f, 0x01, 0xcf, 0xea,
+    0x41, 0x41, 0x40, 0xde, 0x5d, 0xae, 0x22, 0x23,
+    0xb0, 0x03, 0x61, 0xa3, 0x96, 0x17, 0x7a, 0x9c,
+    0xb4, 0x10, 0xff, 0x61, 0xf2, 0x00, 0x15, 0xad,
+];
+
+// FIPS 180-4 §B.3: message = 1,000,000 × 'a'.
+const EXPECTED_MILLION_A: [Byte; 32] = [
+    0xcd, 0xc7, 0x6e, 0x5c, 0x99, 0x14, 0xfb, 0x92,
+    0x81, 0xa1, 0xc7, 0xe2, 0x84, 0xd7, 0x3e, 0x67,
+    0xf1, 0x80, 0x9a, 0x48, 0xa4, 0x97, 0x20, 0x0e,
+    0x04, 0x6d, 0x39, 0xcc, 0xc7, 0x11, 0x2c, 0xd0,
+];
+
+fn bytes_eq(a: &[Byte; 32], b: &[Byte; 32]) -> Bool {
+    let mut i = 0;
+    while i < 32 {
+        if a[i] != b[i] { return false; }
+        i = i + 1;
+    }
+    true
+}
+
+fn main() {
+    // Vector 1 — empty.
+    let d1 = Sha256.digest(b"");
+    if !bytes_eq(&d1, &EXPECTED_EMPTY) {
+        print("FAIL: empty");
+        return;
+    }
+
+    // Vector 2 — "abc".
+    let d2 = Sha256.digest(b"abc");
+    if !bytes_eq(&d2, &EXPECTED_ABC) {
+        print("FAIL: abc");
+        return;
+    }
+
+    // Vector 3 — 1M × 'a' (streaming, small block).
+    let mut s = Sha256.new();
+    let chunk: [Byte; 256] = [0x61; 256];   // 'a'
+    let mut i = 0;
+    while i < 1_000_000 / 256 {
+        s.update(&chunk);
+        i = i + 1;
+    }
+    // 1_000_000 mod 256 = 64 trailing 'a's
+    let tail: [Byte; 64] = [0x61; 64];
+    s.update(&tail);
+    let d3 = s.finalize();
+    if !bytes_eq(&d3, &EXPECTED_MILLION_A) {
+        print("FAIL: million-a");
+        return;
+    }
+
+    print("OK");
+}
