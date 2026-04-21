@@ -10,7 +10,7 @@
 
 
 
-fn main() using [Benchmark] {
+fn main() {
     let bench = Benchmark.new("CBGR Latency");
 
     bench.run("managed_ref_access", benchmark_managed_ref_access);
