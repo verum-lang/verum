@@ -1,0 +1,51 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: tls13, rfc8446, psk, server-resume, typecheck
+// @timeout: 10000
+// @expect: pass
+
+mount core.net.tls13.handshake.{
+    ResumedSession, ResumeVerifyError,
+    PskIdentity, OfferedPsks,
+    SessionTicketKey, ServerTicketPlaintext,
+    IssueOptions, issue_post_handshake_ticket,
+    verify_offered_psks, DEFAULT_FRESHNESS_WINDOW_MS,
+};
+mount core.net.tls13.cipher_suite.{CipherSuite};
+mount core.net.tls13.keyschedule.schedule.{SecretBytes};
+mount core.time.instant.{Instant};
+
+fn check_server_resume_flow() -> Result<(), ResumeVerifyError> {
+    let stek = SessionTicketKey.generate();
+    let rm = SecretBytes.from([0_u8; 32].to_vec());
+
+    // Simulate the server end-to-end: issue ticket, parse it back out of
+    // a client OfferedPsks, attempt verify.
+    let opts = IssueOptions.default().with_0rtt_budget(16384_u32);
+    let _ticket_msg = issue_post_handshake_ticket(
+        &stek, CipherSuite.TlsAes128GcmSha256, &rm, &opts, Instant.now(),
+    );
+
+    // Build a synthetic OfferedPsks for verify. Real flow parses this
+    // off the wire from ClientHello's pre_shared_key extension.
+    let offered = OfferedPsks {
+        identities: [PskIdentity {
+            identity:       [0_u8; 32].to_vec(),       // opaque ticket bytes
+            obfuscated_age: 0_u32,
+        }],
+        binders:    [[0_u8; 32].to_vec()],
+    };
+
+    let truncated_ch_hash: [Byte; 32] = [0_u8; 32];
+    let _ = verify_offered_psks(
+        &stek, &offered, CipherSuite.TlsAes128GcmSha256,
+        &truncated_ch_hash, 1_700_000_000_u64, Instant.now(),
+    );
+    Ok(())
+}
+
+fn main() {
+    let _ = check_server_resume_flow();
+    let _ = DEFAULT_FRESHNESS_WINDOW_MS;
+}
