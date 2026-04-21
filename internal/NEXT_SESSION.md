@@ -1,13 +1,40 @@
 # Next Session — Production-Ready Push
 
-## Snapshot (2026-04-21 late, после ~50+ коммитов этой сессии)
+## Snapshot (2026-04-22, после module-aware types landing)
 
 **Test status:**
 - L0 stdlib-runtime: **100%** (8/8, regression-free)
-- L0 full: `cbgr_latency.vr` fixed (removed spurious `using [Benchmark]`)
+- L0 baseline (lexer + parser + builtin-syntax): **324/324** (100%)
 - L1-core: **99.6%** (524/526) — 2 self-hosting flakes
-- L2-standard: **70.3%** (315/448) — 133 failures (параллельный агент активно растит + закрывает)
+- L2-standard: **70.3%** (315/448) — 133 failures
 - L3-extended: **93.1%** (297/319) — 22 failures
+
+## New in this session
+
+- `1ee51053` feat(types): **module-scoped type resolution for same-named
+  stdlib types**. `define_type_in_current_module` now publishes every
+  type under both unqualified and fully-qualified
+  (`{module_path}.{name}`) keys. `resolve_type_name` prefers the
+  qualified-name hit. All 4 stdlib-registration call-sites in
+  `pipeline.rs` (bootstrap + user paths × analyze/phase_type_check)
+  set `current_module_path` per module before the inner loops.
+  `resolve_type_body` for aliases, empty/non-empty records, and
+  variants (placeholder + final) goes through the module-aware helper.
+  Closes the architectural root cause for the flat-map
+  "last-registered wins" collision between same-named stdlib types
+  (`RecvError` in broadcast/channel/quic, `LockKind` in sys/sqlite,
+  etc.). L0 stdlib-runtime 8/8 + L0 baseline 324/324, zero regression.
+
+  **Residual:** `broadcast_stream.vr` still fails — but it's a
+  DIFFERENT bug in protocol-dispatch associated-type substitution, not
+  a type-registration issue. The stored `BroadcastReceiver.poll_next`
+  method correctly has broadcast's `RecvError` in its return type
+  (verified via debug trace), yet `lookup_method_with_args` returns
+  QUIC's `RecvError` at the call site. Investigation points:
+  `protocol.rs::lookup_protocol_method_for_type_with_args` (line ~3744)
+  and how `impl_.associated_types["Item"]` is keyed / selected when
+  multiple Stream impls share a base type name. Not a module-scope bug
+  — skip for now.
 
 ## Дополнительные закрытия этой подсессии
 - `7e659d8` fix(L0): cbgr_latency — remove spurious `using [Benchmark]` (L0 regression)
