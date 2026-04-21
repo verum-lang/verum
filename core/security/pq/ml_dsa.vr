@@ -1,0 +1,116 @@
+// =============================================================================
+// security/pq/ml_dsa.vr — FIPS 204 ML-DSA (Dilithium)
+// =============================================================================
+// Module-lattice digital-signature scheme. Three parameter sets; the
+// stdlib exposes all three. ML-DSA-65 is the recommended default
+// (NIST category 3).
+//
+// Wire sizes (FIPS 204 §3.6):
+//
+// | Variant    | Public key | Secret key | Signature |
+// |------------|-----------|-----------|-----------|
+// | ML-DSA-44  |      1312 |      2560 |      2420 |
+// | ML-DSA-65  |      1952 |      4032 |      3309 |
+// | ML-DSA-87  |      2592 |      4896 |      4627 |
+// =============================================================================
+
+module core.security.pq.ml_dsa;
+
+mount core.*;
+mount core.security.pq.ml_kem.{PqError};
+
+// =============================================================================
+// Constants
+// =============================================================================
+
+pub const ML_DSA_44_PK_LEN: Int = 1312;
+pub const ML_DSA_44_SK_LEN: Int = 2560;
+pub const ML_DSA_44_SIG_LEN: Int = 2420;
+
+pub const ML_DSA_65_PK_LEN: Int = 1952;
+pub const ML_DSA_65_SK_LEN: Int = 4032;
+pub const ML_DSA_65_SIG_LEN: Int = 3309;
+
+pub const ML_DSA_87_PK_LEN: Int = 2592;
+pub const ML_DSA_87_SK_LEN: Int = 4896;
+pub const ML_DSA_87_SIG_LEN: Int = 4627;
+
+// =============================================================================
+// Variants
+// =============================================================================
+
+public type MlDsaVariant is
+    | MlDsa44
+    | MlDsa65
+    | MlDsa87;
+
+implement MlDsaVariant {
+    pub fn public_key_len(&self) -> Int {
+        match self {
+            MlDsaVariant.MlDsa44 => ML_DSA_44_PK_LEN,
+            MlDsaVariant.MlDsa65 => ML_DSA_65_PK_LEN,
+            MlDsaVariant.MlDsa87 => ML_DSA_87_PK_LEN,
+        }
+    }
+
+    pub fn secret_key_len(&self) -> Int {
+        match self {
+            MlDsaVariant.MlDsa44 => ML_DSA_44_SK_LEN,
+            MlDsaVariant.MlDsa65 => ML_DSA_65_SK_LEN,
+            MlDsaVariant.MlDsa87 => ML_DSA_87_SK_LEN,
+        }
+    }
+
+    pub fn signature_len(&self) -> Int {
+        match self {
+            MlDsaVariant.MlDsa44 => ML_DSA_44_SIG_LEN,
+            MlDsaVariant.MlDsa65 => ML_DSA_65_SIG_LEN,
+            MlDsaVariant.MlDsa87 => ML_DSA_87_SIG_LEN,
+        }
+    }
+}
+
+// =============================================================================
+// Types
+// =============================================================================
+
+public type MlDsaKeyPair is {
+    variant: MlDsaVariant,
+    public_key: List<Byte>,
+    secret_key: List<Byte>,
+}
+
+public type MlDsaSignature is {
+    variant: MlDsaVariant,
+    bytes: List<Byte>,
+}
+
+// =============================================================================
+// API
+// =============================================================================
+
+pub fn ml_dsa_keygen(variant: MlDsaVariant) -> Result<MlDsaKeyPair, PqError> {
+    @intrinsic("verum.pq.ml_dsa_keygen", variant)
+}
+
+/// Sign `message` with `secret_key`. Fresh per-signature randomness is
+/// sampled from the runtime RNG (FIPS 204 §6 hedged signing).
+pub fn ml_dsa_sign(
+    variant: MlDsaVariant,
+    secret_key: &[Byte],
+    message: &[Byte],
+) -> Result<MlDsaSignature, PqError> {
+    @intrinsic("verum.pq.ml_dsa_sign", variant, secret_key, message)
+}
+
+/// Verify `signature` against `message` under `public_key`. Returns
+/// Ok(true) on valid, Ok(false) on clean-reject, or Err(…) on malformed
+/// inputs.
+pub fn ml_dsa_verify(
+    variant: MlDsaVariant,
+    public_key: &[Byte],
+    message: &[Byte],
+    signature: &[Byte],
+) -> Result<Bool, PqError> {
+    @intrinsic("verum.pq.ml_dsa_verify", variant, public_key, message, signature)
+}

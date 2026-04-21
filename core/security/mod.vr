@@ -56,6 +56,9 @@ public module spiffe;
 // + the shared SecretStore protocol.
 public module secrets;
 
+// Post-quantum cryptography — FIPS 203 ML-KEM + FIPS 204 ML-DSA.
+public module pq;
+
 // Legacy capability / region modules (pre-crypto).
 public module labels;
 public module regions;

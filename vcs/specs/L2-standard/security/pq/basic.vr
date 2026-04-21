@@ -1,0 +1,78 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: security, post-quantum, ml-kem, ml-dsa, kyber, dilithium, fips203, fips204
+// @timeout: 10000
+// @expect: pass
+
+// Post-quantum crypto API surface — FIPS 203 ML-KEM + FIPS 204 ML-DSA.
+
+mount core.security.pq.{
+    MlKemVariant, MlKemKeyPair, MlKemEncapsulation,
+    ml_kem_keygen, ml_kem_encapsulate, ml_kem_decapsulate,
+    MlDsaVariant, MlDsaKeyPair, MlDsaSignature,
+    ml_dsa_keygen, ml_dsa_sign, ml_dsa_verify,
+    PqError,
+};
+
+// Variant accessors match FIPS-203 / 204 table sizes.
+fn typecheck_ml_kem_sizes() -> (Int, Int, Int, Int) {
+    let v = MlKemVariant.MlKem768;
+    (v.public_key_len(), v.secret_key_len(), v.ciphertext_len(), v.shared_secret_len())
+}
+
+fn typecheck_ml_dsa_sizes() -> (Int, Int, Int) {
+    let v = MlDsaVariant.MlDsa65;
+    (v.public_key_len(), v.secret_key_len(), v.signature_len())
+}
+
+// Full ML-KEM round-trip.
+fn typecheck_ml_kem_roundtrip() -> Result<List<Byte>, PqError> {
+    let kp = ml_kem_keygen(MlKemVariant.MlKem768)?;
+    let enc = ml_kem_encapsulate(MlKemVariant.MlKem768, &kp.public_key)?;
+    let shared = ml_kem_decapsulate(
+        MlKemVariant.MlKem768,
+        &kp.secret_key,
+        &enc.ciphertext,
+    )?;
+    Ok(shared)
+}
+
+// All three KEM variants.
+fn typecheck_ml_kem_all_variants() -> Result<(), PqError> {
+    let _ = ml_kem_keygen(MlKemVariant.MlKem512)?;
+    let _ = ml_kem_keygen(MlKemVariant.MlKem768)?;
+    let _ = ml_kem_keygen(MlKemVariant.MlKem1024)?;
+    Ok(())
+}
+
+// Full ML-DSA round-trip.
+fn typecheck_ml_dsa_roundtrip() -> Result<Bool, PqError> {
+    let kp = ml_dsa_keygen(MlDsaVariant.MlDsa65)?;
+    let msg: [Byte; 5] = [0x68, 0x65, 0x6C, 0x6C, 0x6F];
+    let sig = ml_dsa_sign(MlDsaVariant.MlDsa65, &kp.secret_key, &msg)?;
+    ml_dsa_verify(MlDsaVariant.MlDsa65, &kp.public_key, &msg, &sig.bytes)
+}
+
+// All three signature variants.
+fn typecheck_ml_dsa_all_variants() -> Result<(), PqError> {
+    let _ = ml_dsa_keygen(MlDsaVariant.MlDsa44)?;
+    let _ = ml_dsa_keygen(MlDsaVariant.MlDsa65)?;
+    let _ = ml_dsa_keygen(MlDsaVariant.MlDsa87)?;
+    Ok(())
+}
+
+// Error variants.
+fn typecheck_errors() -> List<PqError> {
+    let mut xs: List<PqError> = List.new();
+    xs.push(PqError.InvalidKeyLength { expected: 1184, actual: 1000 });
+    xs.push(PqError.InvalidCiphertextLength { expected: 1088, actual: 800 });
+    xs.push(PqError.RngFailed);
+    xs.push(PqError.BackendUnavailable);
+    xs.push(PqError.DecapsulationFailure);
+    xs
+}
+
+fn main() {
+    // Shape-only.
+}

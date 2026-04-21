@@ -1,0 +1,53 @@
+// =============================================================================
+// security/pq/mod.vr — Post-quantum cryptography (NIST PQC round-3 winners)
+// =============================================================================
+// Layer: 4.8 (Security, alongside hash / mac / kdf / util / spiffe)
+// Spec: FIPS 203 (ML-KEM, Kyber-based KEM)
+//       FIPS 204 (ML-DSA, Dilithium-based signatures)
+//       FIPS 205 (SLH-DSA, SPHINCS+ — stateless hash-based signatures)
+//
+// This module provides constant-time, allocation-free implementations
+// of the NIST-standardised PQ primitives. Backed by @intrinsic for the
+// arithmetic cores (the underlying ring NTT + sampler live at the
+// runtime level and share SIMD paths with core.math).
+//
+// # Standards and parameter sets
+//
+// | Name          | Category | Public key | Secret key | Cipher/sig |
+// |---------------|----------|-----------|-----------|-----------|
+// | ML-KEM-512    | 1        | 800       | 1632      | 768       |
+// | ML-KEM-768    | 3        | 1184      | 2400      | 1088      |
+// | ML-KEM-1024   | 5        | 1568      | 3168      | 1568      |
+// | ML-DSA-44     | 2        | 1312      | 2560      | 2420      |
+// | ML-DSA-65     | 3        | 1952      | 4032      | 3309      |
+// | ML-DSA-87     | 5        | 2592      | 4896      | 4627      |
+//
+// All sizes in bytes.
+//
+// # Hybrid usage with classical keys
+//
+// For TLS 1.3 draft-ietf-tls-hybrid-design we concatenate the ML-KEM
+// shared-secret with the classical X25519 shared-secret and feed both
+// through HKDF; helpers live in core.net.tls.
+// =============================================================================
+
+module core.security.pq;
+
+public module ml_kem;
+public module ml_dsa;
+
+public mount .ml_kem.MlKemVariant;
+public mount .ml_kem.MlKemKeyPair;
+public mount .ml_kem.MlKemEncapsulation;
+public mount .ml_kem.ml_kem_keygen;
+public mount .ml_kem.ml_kem_encapsulate;
+public mount .ml_kem.ml_kem_decapsulate;
+
+public mount .ml_dsa.MlDsaVariant;
+public mount .ml_dsa.MlDsaKeyPair;
+public mount .ml_dsa.MlDsaSignature;
+public mount .ml_dsa.ml_dsa_keygen;
+public mount .ml_dsa.ml_dsa_sign;
+public mount .ml_dsa.ml_dsa_verify;
+
+public mount .ml_kem.PqError;

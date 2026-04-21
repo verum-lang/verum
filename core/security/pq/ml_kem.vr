@@ -1,0 +1,131 @@
+// =============================================================================
+// security/pq/ml_kem.vr — FIPS 203 ML-KEM (Kyber)
+// =============================================================================
+// Module-lattice key encapsulation mechanism. Three parameter sets are
+// defined; the stdlib exposes all three and consumers pick based on the
+// security target. ML-KEM-768 is the recommended default (category 3,
+// ~192-bit classical security).
+//
+// Wire sizes (FIPS 203 §8):
+//
+// | Variant    | Public key | Secret key | Ciphertext | Shared secret |
+// |------------|-----------|-----------|-----------|---------------|
+// | ML-KEM-512 |       800 |      1632 |       768 |            32 |
+// | ML-KEM-768 |      1184 |      2400 |      1088 |            32 |
+// | ML-KEM-1024|      1568 |      3168 |      1568 |            32 |
+// =============================================================================
+
+module core.security.pq.ml_kem;
+
+mount core.*;
+
+// =============================================================================
+// Constants
+// =============================================================================
+
+pub const ML_KEM_SHARED_SECRET_LEN: Int = 32;
+pub const ML_KEM_512_PK_LEN: Int = 800;
+pub const ML_KEM_512_SK_LEN: Int = 1632;
+pub const ML_KEM_512_CT_LEN: Int = 768;
+
+pub const ML_KEM_768_PK_LEN: Int = 1184;
+pub const ML_KEM_768_SK_LEN: Int = 2400;
+pub const ML_KEM_768_CT_LEN: Int = 1088;
+
+pub const ML_KEM_1024_PK_LEN: Int = 1568;
+pub const ML_KEM_1024_SK_LEN: Int = 3168;
+pub const ML_KEM_1024_CT_LEN: Int = 1568;
+
+// =============================================================================
+// Variants
+// =============================================================================
+
+public type MlKemVariant is
+    | MlKem512
+    | MlKem768
+    | MlKem1024;
+
+implement MlKemVariant {
+    pub fn public_key_len(&self) -> Int {
+        match self {
+            MlKemVariant.MlKem512 => ML_KEM_512_PK_LEN,
+            MlKemVariant.MlKem768 => ML_KEM_768_PK_LEN,
+            MlKemVariant.MlKem1024 => ML_KEM_1024_PK_LEN,
+        }
+    }
+
+    pub fn secret_key_len(&self) -> Int {
+        match self {
+            MlKemVariant.MlKem512 => ML_KEM_512_SK_LEN,
+            MlKemVariant.MlKem768 => ML_KEM_768_SK_LEN,
+            MlKemVariant.MlKem1024 => ML_KEM_1024_SK_LEN,
+        }
+    }
+
+    pub fn ciphertext_len(&self) -> Int {
+        match self {
+            MlKemVariant.MlKem512 => ML_KEM_512_CT_LEN,
+            MlKemVariant.MlKem768 => ML_KEM_768_CT_LEN,
+            MlKemVariant.MlKem1024 => ML_KEM_1024_CT_LEN,
+        }
+    }
+
+    pub fn shared_secret_len(&self) -> Int { ML_KEM_SHARED_SECRET_LEN }
+}
+
+// =============================================================================
+// Errors
+// =============================================================================
+
+public type PqError is
+    | InvalidKeyLength { expected: Int, actual: Int }
+    | InvalidCiphertextLength { expected: Int, actual: Int }
+    | RngFailed
+    | BackendUnavailable
+    | DecapsulationFailure;
+
+// =============================================================================
+// Key material + encapsulation
+// =============================================================================
+
+public type MlKemKeyPair is {
+    variant: MlKemVariant,
+    public_key: List<Byte>,
+    secret_key: List<Byte>,
+}
+
+public type MlKemEncapsulation is {
+    variant: MlKemVariant,
+    ciphertext: List<Byte>,
+    shared_secret: List<Byte>,
+}
+
+// =============================================================================
+// API
+// =============================================================================
+
+/// Generate a fresh keypair. Calls the runtime RNG; fails only if
+/// entropy is unavailable (PqError.RngFailed).
+public fn ml_kem_keygen(variant: MlKemVariant) -> Result<MlKemKeyPair, PqError> {
+    @intrinsic("verum.pq.ml_kem_keygen", variant)
+}
+
+/// Encapsulate a shared secret to the peer's public key. Returns the
+/// ciphertext to send + the shared secret for local KDF derivation.
+public fn ml_kem_encapsulate(variant: MlKemVariant, public_key: &[Byte])
+    -> Result<MlKemEncapsulation, PqError>
+{
+    @intrinsic("verum.pq.ml_kem_encapsulate", variant, public_key)
+}
+
+/// Decapsulate — recover the shared secret from a received ciphertext.
+/// Implementation is IND-CCA2 (Fujisaki-Okamoto transform); invalid
+/// ciphertexts produce a deterministic implicit-rejection shared secret
+/// rather than an error, protecting against chosen-ciphertext oracles.
+public fn ml_kem_decapsulate(
+    variant: MlKemVariant,
+    secret_key: &[Byte],
+    ciphertext: &[Byte],
+) -> Result<List<Byte>, PqError> {
+    @intrinsic("verum.pq.ml_kem_decapsulate", variant, secret_key, ciphertext)
+}
