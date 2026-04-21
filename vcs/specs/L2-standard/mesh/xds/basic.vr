@@ -1,0 +1,171 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: mesh, xds, envoy, ads, discovery, grpc
+// @timeout: 10000
+// @expect: pass
+
+// Envoy xDS v3 (ADS) client API surface.
+
+mount core.mesh.xds.{
+    XdsError,
+    TypeUrl, ResourceName, Node, AdsConfig,
+    Listener, Cluster, RouteConfiguration, ClusterLoadAssignment, Resource,
+    AdsClient, Subscription, DiscoveryResponse, DiscoveryDelta,
+};
+mount core.mesh.xds.types.{AdsAuth};
+mount core.mesh.xds.client.{DiscoveryEvent};
+mount core.mesh.xds.resources.{
+    FilterChain, NetworkFilter, DownstreamTlsContext,
+    ClusterDiscoveryType, LbPolicy, UpstreamTlsContext, Http2Options,
+    VirtualHost, Route, RouteMatch, RouteAction, WeightedCluster,
+    LocalityLbEndpoints, LbEndpoint, HealthStatus, ParsedResource,
+};
+mount core.time.duration.{Duration};
+
+// TypeUrl constants.
+fn typecheck_type_urls() -> (TypeUrl, TypeUrl, TypeUrl, TypeUrl) {
+    (
+        TypeUrl.new(TypeUrl.LISTENER.into()),
+        TypeUrl.new(TypeUrl.CLUSTER.into()),
+        TypeUrl.new(TypeUrl.ROUTE_CONFIGURATION.into()),
+        TypeUrl.new(TypeUrl.CLUSTER_LOAD_ASSIGNMENT.into()),
+    )
+}
+
+// xdstp:// resource naming.
+fn typecheck_xdstp_name() -> ResourceName {
+    ResourceName.xdstp(
+        &"istiod.example.com".into(),
+        &"envoy.config.listener.v3.Listener".into(),
+        &"my-vhost".into(),
+    )
+}
+
+// Node builder.
+fn typecheck_node() -> Node {
+    Node.new("sidecar-0".into(), "my-cluster".into())
+        .with_locality("us-east".into(), "us-east-1a".into(), None)
+        .with_user_agent("verum-envoy".into(), "0.1".into())
+}
+
+// AdsConfig + auth variants.
+fn typecheck_ads_config() -> AdsConfig {
+    let node = Node.new("id".into(), "c".into());
+    AdsConfig.new("istiod:15010".into(), node)
+        .with_auth(AdsAuth.Bearer("token".into()))
+        .with_use_delta(true)
+        .with_keepalive(Duration.from_secs(10))
+}
+
+fn typecheck_mtls_auth() -> AdsAuth {
+    AdsAuth.MutualTls {
+        cert_chain_pem: "-----BEGIN CERTIFICATE-----".into(),
+        private_key_pem: "-----BEGIN PRIVATE KEY-----".into(),
+        ca_bundle_pem: "-----BEGIN CERTIFICATE-----".into(),
+    }
+}
+
+// Client connect + subscribe.
+async fn typecheck_connect(config: AdsConfig) -> Result<AdsClient, XdsError> {
+    AdsClient.connect(config).await
+}
+
+async fn typecheck_subscribe(c: &AdsClient) -> Result<Subscription, XdsError> {
+    let t = TypeUrl.new(TypeUrl.LISTENER.into());
+    let names: [ResourceName; 1] = [ResourceName.new("listener_0".into())];
+    c.subscribe(t, &names).await
+}
+
+async fn typecheck_update_watch(c: &AdsClient, s: &Subscription)
+    -> Result<(), XdsError>
+{
+    let names: [ResourceName; 0] = [];
+    c.update_watch(s, &names).await
+}
+
+async fn typecheck_unsubscribe(c: &AdsClient, s: Subscription) -> Result<(), XdsError> {
+    c.unsubscribe(s).await
+}
+
+async fn typecheck_next(c: &AdsClient) -> Result<DiscoveryEvent, XdsError> {
+    c.next_response().await
+}
+
+async fn typecheck_ack(c: &AdsClient, t: TypeUrl) -> Result<(), XdsError> {
+    c.ack(t, &"v42".into(), &"n7".into()).await
+}
+
+async fn typecheck_nack(c: &AdsClient, t: TypeUrl) -> Result<(), XdsError> {
+    c.nack(t, &"v42".into(), &"n7".into(), &"bad config".into()).await
+}
+
+// DiscoveryEvent pattern-match.
+fn typecheck_event_dispatch(e: DiscoveryEvent) -> Int {
+    match e {
+        DiscoveryEvent.Sotw(_) => 1,
+        DiscoveryEvent.Delta(_) => 2,
+        DiscoveryEvent.Reconnected { .. } => 3,
+        DiscoveryEvent.Disconnected(_) => -1,
+    }
+}
+
+// Resource pattern-match.
+fn typecheck_resource_dispatch(r: Resource) -> Int {
+    match r.parsed {
+        ParsedResource.L(_) => 1,
+        ParsedResource.C(_) => 2,
+        ParsedResource.R(_) => 3,
+        ParsedResource.E(_) => 4,
+        ParsedResource.Opaque => 0,
+    }
+}
+
+// Cluster types + LB policies.
+fn typecheck_cluster_enums() -> (ClusterDiscoveryType, LbPolicy, HealthStatus) {
+    (ClusterDiscoveryType.Eds, LbPolicy.LeastRequest, HealthStatus.Healthy)
+}
+
+// Route actions.
+fn typecheck_route_actions() -> List<RouteAction> {
+    let mut xs: List<RouteAction> = List.new();
+    xs.push(RouteAction.Cluster("backend".into()));
+    let mut w: List<WeightedCluster> = List.new();
+    w.push(WeightedCluster { cluster_name: "a".into(), weight: 70 });
+    w.push(WeightedCluster { cluster_name: "b".into(), weight: 30 });
+    xs.push(RouteAction.WeightedClusters(w));
+    xs.push(RouteAction.Redirect("https://example.com".into()));
+    xs.push(RouteAction.DirectResponse { code: 503, body: "retry".into() });
+    xs
+}
+
+// Route matchers.
+fn typecheck_route_matches() -> List<RouteMatch> {
+    let mut xs: List<RouteMatch> = List.new();
+    xs.push(RouteMatch.Prefix("/api".into()));
+    xs.push(RouteMatch.Path("/healthz".into()));
+    xs.push(RouteMatch.Regex("^/v[0-9]+".into()));
+    xs.push(RouteMatch.Connect);
+    xs
+}
+
+// Error variants.
+fn typecheck_errors() -> List<XdsError> {
+    let mut xs: List<XdsError> = List.new();
+    xs.push(XdsError.ConnectionLost("eof".into()));
+    xs.push(XdsError.AuthFailed("token expired".into()));
+    xs.push(XdsError.InvalidResource {
+        type_url: "x".into(),
+        reason: "bad pb".into(),
+    });
+    xs.push(XdsError.Nack { message: "n".into(), detail: "d".into() });
+    xs.push(XdsError.OverLimit { limit: 1024 });
+    xs.push(XdsError.UnsupportedType("future".into()));
+    xs.push(XdsError.Cancelled);
+    xs.push(XdsError.Closed);
+    xs
+}
+
+fn main() {
+    // Shape-only.
+}

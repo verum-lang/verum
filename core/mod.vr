@@ -242,6 +242,14 @@ public module metrics;
 public module net;
 
 // =============================================================================
+// Layer 5.5: Service mesh (Depends on: core.net.http2, core.protobuf, core.net.tls)
+// =============================================================================
+
+// Service-mesh integration — Envoy xDS v3 (ADS) client plus future
+// Istio / Consul / Linkerd / OSM backends.
+public module mesh;
+
+// =============================================================================
 // Layer 6: Cognitive (Depends on: all previous + MLIR GPU backend)
 // =============================================================================
 

@@ -1,0 +1,142 @@
+// =============================================================================
+// mesh/xds/client.vr — ADS gRPC bi-directional stream client
+// =============================================================================
+// The AggregatedDiscoveryService multiplexes multiple xDS resource
+// subscriptions (LDS/CDS/RDS/EDS/SDS) over a single bidirectional gRPC
+// stream. We offer two modes:
+//
+//   - sotw (State-of-the-World) via StreamAggregatedResources — legacy,
+//     every response contains the full resource set per type.
+//   - delta via DeltaAggregatedResources — only resources that changed.
+//     Preferred (Envoy 1.15+ / Istio 1.8+).
+// =============================================================================
+
+module core.mesh.xds.client;
+
+mount core.*;
+mount core.async.stream.{Stream};
+mount core.async.async_iterator.{AsyncIterator};
+mount core.async.cancellation.{CancellationToken};
+mount core.async.poll.{Poll};
+mount core.async.waker.{Context};
+mount core.mesh.xds.error.{XdsError};
+mount core.mesh.xds.types.{AdsConfig, TypeUrl, ResourceName};
+mount core.mesh.xds.resources.{Resource};
+
+// =============================================================================
+// Subscription — a per-TypeUrl resource-set interest
+// =============================================================================
+
+public type Subscription is {
+    handle: UInt64,
+    type_url: TypeUrl,
+}
+
+// =============================================================================
+// Discovery events — pushed by the control plane
+// =============================================================================
+
+public type DiscoveryResponse is {
+    version: Text,
+    nonce: Text,
+    type_url: TypeUrl,
+    resources: List<Resource>,
+    /// For state-of-the-world mode: the response is authoritative,
+    /// anything missing should be removed from the local cache.
+    is_sotw_full: Bool,
+}
+
+public type DiscoveryDelta is {
+    nonce: Text,
+    type_url: TypeUrl,
+    resources_added_or_updated: List<Resource>,
+    resources_removed: List<ResourceName>,
+    system_version_info: Text,
+}
+
+// =============================================================================
+// AdsClient
+// =============================================================================
+
+public type AdsClient is {
+    handle: UInt64,
+    config: AdsConfig,
+}
+
+implement AdsClient {
+    /// Dial the control plane + send the first DiscoveryRequest per
+    /// `initial_resources`. The stream stays open; callers drive
+    /// resource updates via subscribe / unsubscribe / ack / nack and
+    /// consume responses through .next_response().
+    pub async fn connect(config: AdsConfig) -> Result<AdsClient, XdsError> {
+        @intrinsic("verum.xds.connect", &config).await
+    }
+
+    /// Subscribe to a resource type. `resource_names` is the initial
+    /// watch set; pass `[]` for "all".
+    pub async fn subscribe(
+        &self,
+        type_url: TypeUrl,
+        resource_names: &[ResourceName],
+    ) -> Result<Subscription, XdsError> {
+        @intrinsic("verum.xds.subscribe", self.handle, &type_url, resource_names).await
+    }
+
+    /// Update the watch set for an existing subscription.
+    pub async fn update_watch(
+        &self,
+        subscription: &Subscription,
+        resource_names: &[ResourceName],
+    ) -> Result<(), XdsError> {
+        @intrinsic("verum.xds.update_watch",
+            self.handle, subscription.handle, resource_names).await
+    }
+
+    pub async fn unsubscribe(&self, subscription: Subscription) -> Result<(), XdsError> {
+        @intrinsic("verum.xds.unsubscribe", self.handle, subscription.handle).await
+    }
+
+    /// Receive the next event on the stream. Yields on every ACK-worthy
+    /// DiscoveryResponse / DiscoveryDelta.
+    pub async fn next_response(&self) -> Result<DiscoveryEvent, XdsError> {
+        @intrinsic("verum.xds.next_response", self.handle).await
+    }
+
+    /// ACK the given response. The client library typically does this
+    /// automatically; callers invoke it manually only when they want to
+    /// defer ACK (e.g. until config validation passes).
+    pub async fn ack(
+        &self,
+        type_url: TypeUrl,
+        version: &Text,
+        nonce: &Text,
+    ) -> Result<(), XdsError> {
+        @intrinsic("verum.xds.ack", self.handle, &type_url, version, nonce).await
+    }
+
+    /// NACK with a human-readable reason (surfaced in the control-
+    /// plane's error_detail field).
+    pub async fn nack(
+        &self,
+        type_url: TypeUrl,
+        version: &Text,
+        nonce: &Text,
+        reason: &Text,
+    ) -> Result<(), XdsError> {
+        @intrinsic("verum.xds.nack", self.handle, &type_url, version, nonce, reason).await
+    }
+
+    pub async fn close(&self) -> Result<(), XdsError> {
+        @intrinsic("verum.xds.close", self.handle).await
+    }
+}
+
+// =============================================================================
+// DiscoveryEvent — unified stream event
+// =============================================================================
+
+public type DiscoveryEvent is
+    | Sotw(DiscoveryResponse)
+    | Delta(DiscoveryDelta)
+    | Reconnected { at: core.time.instant.Instant }
+    | Disconnected(Text);

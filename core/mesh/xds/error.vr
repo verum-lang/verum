@@ -1,0 +1,25 @@
+// =============================================================================
+// mesh/xds/error.vr — XdsError
+// =============================================================================
+
+module core.mesh.xds.error;
+
+mount core.*;
+
+public type XdsError is
+    /// Control-plane refused or lost connection.
+    | ConnectionLost(Text)
+    /// Authentication / channel binding failed.
+    | AuthFailed(Text)
+    /// Protobuf decode failed or type_url mismatched.
+    | InvalidResource { type_url: Text, reason: Text }
+    /// NACK from control plane (we sent bad config back).
+    | Nack { message: Text, detail: Text }
+    /// Too many resources for one response.
+    | OverLimit { limit: Int }
+    /// Control plane returned a resource type we don't handle.
+    | UnsupportedType(Text)
+    /// Stream cancelled by caller.
+    | Cancelled
+    /// Stream closed normally by peer.
+    | Closed;

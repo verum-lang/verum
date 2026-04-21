@@ -1,0 +1,176 @@
+// =============================================================================
+// mesh/xds/resources.vr — Typed xDS resource views
+// =============================================================================
+// High-level parsed forms of the most common xDS v3 resources. Full
+// protobuf messages are opaque behind `raw_bytes` for callers that
+// want to re-parse extensions.
+// =============================================================================
+
+module core.mesh.xds.resources;
+
+mount core.*;
+mount core.time.duration.{Duration};
+
+// =============================================================================
+// Resource — any xDS payload (with raw bytes for opaque passthrough)
+// =============================================================================
+
+public type Resource is {
+    type_url: Text,
+    name: Text,
+    version: Text,
+    raw_bytes: List<Byte>,
+    parsed: ParsedResource,
+}
+
+public type ParsedResource is
+    | L(Listener)
+    | C(Cluster)
+    | R(RouteConfiguration)
+    | E(ClusterLoadAssignment)
+    | Opaque;
+
+// =============================================================================
+// Listener (LDS)
+// =============================================================================
+
+public type Listener is {
+    name: Text,
+    address: Text,
+    port: UInt16,
+    filter_chains: List<FilterChain>,
+    use_original_dst: Bool,
+    transparent: Bool,
+}
+
+public type FilterChain is {
+    name: Text,
+    server_names: List<Text>,           // SNI matches
+    transport_protocol: Maybe<Text>,    // "raw_buffer" / "tls"
+    filters: List<NetworkFilter>,
+    tls_context: Maybe<DownstreamTlsContext>,
+}
+
+public type NetworkFilter is {
+    name: Text,
+    type_url: Text,
+    config_bytes: List<Byte>,           // raw any.value
+}
+
+public type DownstreamTlsContext is {
+    sds_cert_name: Maybe<Text>,
+    sds_validation_name: Maybe<Text>,
+    require_client_certificate: Bool,
+}
+
+// =============================================================================
+// Cluster (CDS)
+// =============================================================================
+
+public type Cluster is {
+    name: Text,
+    type_: ClusterDiscoveryType,
+    lb_policy: LbPolicy,
+    connect_timeout: Duration,
+    tls_context: Maybe<UpstreamTlsContext>,
+    http2_options: Maybe<Http2Options>,
+}
+
+public type ClusterDiscoveryType is
+    | Static
+    | StrictDns
+    | LogicalDns
+    | Eds
+    | OriginalDst;
+
+public type LbPolicy is
+    | RoundRobin
+    | LeastRequest
+    | Random
+    | Maglev
+    | RingHash
+    | ClusterProvided;
+
+public type UpstreamTlsContext is {
+    sni: Maybe<Text>,
+    sds_cert_name: Maybe<Text>,
+    sds_validation_name: Maybe<Text>,
+    alpn: List<Text>,
+}
+
+public type Http2Options is {
+    max_concurrent_streams: UInt32,
+    initial_stream_window_size: UInt32,
+    initial_connection_window_size: UInt32,
+}
+
+// =============================================================================
+// RouteConfiguration (RDS)
+// =============================================================================
+
+public type RouteConfiguration is {
+    name: Text,
+    virtual_hosts: List<VirtualHost>,
+}
+
+public type VirtualHost is {
+    name: Text,
+    domains: List<Text>,
+    routes: List<Route>,
+    require_tls: Maybe<Text>,
+}
+
+public type Route is {
+    match_: RouteMatch,
+    action: RouteAction,
+    metadata_json: Text,
+}
+
+public type RouteMatch is
+    | Prefix(Text)
+    | Path(Text)
+    | Regex(Text)
+    | Connect;
+
+public type RouteAction is
+    | Cluster(Text)
+    | WeightedClusters(List<WeightedCluster>)
+    | Redirect(Text)
+    | DirectResponse { code: UInt16, body: Text };
+
+public type WeightedCluster is {
+    cluster_name: Text,
+    weight: UInt32,
+}
+
+// =============================================================================
+// ClusterLoadAssignment (EDS)
+// =============================================================================
+
+public type ClusterLoadAssignment is {
+    cluster_name: Text,
+    endpoints: List<LocalityLbEndpoints>,
+}
+
+public type LocalityLbEndpoints is {
+    region: Text,
+    zone: Text,
+    sub_zone: Text,
+    priority: UInt32,
+    lb_weight: UInt32,
+    endpoints: List<LbEndpoint>,
+}
+
+public type LbEndpoint is {
+    address: Text,
+    port: UInt16,
+    weight: UInt32,
+    health_status: HealthStatus,
+}
+
+public type HealthStatus is
+    | Unknown
+    | Healthy
+    | Unhealthy
+    | Draining
+    | Degraded;

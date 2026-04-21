@@ -1,0 +1,167 @@
+// =============================================================================
+// mesh/xds/types.vr — xDS v3 canonical TypeUrls + Node + config
+// =============================================================================
+
+module core.mesh.xds.types;
+
+mount core.*;
+mount core.time.duration.{Duration};
+
+// =============================================================================
+// Canonical type URLs (RFC-style, matching protobuf Any)
+// =============================================================================
+
+public type TypeUrl is {
+    url: Text,
+}
+
+implement TypeUrl {
+    pub const LISTENER: &'static Text =
+        "type.googleapis.com/envoy.config.listener.v3.Listener";
+    pub const CLUSTER: &'static Text =
+        "type.googleapis.com/envoy.config.cluster.v3.Cluster";
+    pub const ROUTE_CONFIGURATION: &'static Text =
+        "type.googleapis.com/envoy.config.route.v3.RouteConfiguration";
+    pub const CLUSTER_LOAD_ASSIGNMENT: &'static Text =
+        "type.googleapis.com/envoy.config.endpoint.v3.ClusterLoadAssignment";
+    pub const SECRET: &'static Text =
+        "type.googleapis.com/envoy.extensions.transport_sockets.tls.v3.Secret";
+    pub const SCOPED_ROUTE_CONFIGURATION: &'static Text =
+        "type.googleapis.com/envoy.config.route.v3.ScopedRouteConfiguration";
+    pub const VIRTUAL_HOST: &'static Text =
+        "type.googleapis.com/envoy.config.route.v3.VirtualHost";
+    pub const RUNTIME: &'static Text =
+        "type.googleapis.com/envoy.service.runtime.v3.Runtime";
+
+    pub fn new(url: Text) -> TypeUrl { TypeUrl { url: url } }
+    pub fn value(&self) -> &Text { &self.url }
+}
+
+// =============================================================================
+// Resource naming
+// =============================================================================
+
+public type ResourceName is {
+    name: Text,
+}
+
+implement ResourceName {
+    pub fn new(name: Text) -> ResourceName { ResourceName { name: name } }
+    pub fn value(&self) -> &Text { &self.name }
+
+    /// "xdstp://authority/type/path?context" resource names per
+    /// https://github.com/cncf/xds/blob/main/proposals/TP1-xds-transport-next.md
+    pub fn xdstp(authority: &Text, type_: &Text, path: &Text) -> ResourceName {
+        let mut s = Text.with_capacity(9 + authority.len() + 1 + type_.len() + 1 + path.len());
+        s.push_str("xdstp://");
+        s.push_str(authority);
+        s.push('/');
+        s.push_str(type_);
+        s.push('/');
+        s.push_str(path);
+        ResourceName { name: s }
+    }
+}
+
+// =============================================================================
+// Node identity (sent in every DiscoveryRequest)
+// =============================================================================
+
+public type Node is {
+    id: Text,
+    cluster: Text,
+    locality_region: Maybe<Text>,
+    locality_zone: Maybe<Text>,
+    locality_subzone: Maybe<Text>,
+    user_agent_name: Text,
+    user_agent_version: Text,
+    metadata_json: Text,
+}
+
+implement Node {
+    pub fn new(id: Text, cluster: Text) -> Node {
+        Node {
+            id: id,
+            cluster: cluster,
+            locality_region: None,
+            locality_zone: None,
+            locality_subzone: None,
+            user_agent_name: "verum-xds".into(),
+            user_agent_version: "0.1".into(),
+            metadata_json: "{}".into(),
+        }
+    }
+
+    pub fn with_locality(
+        mut self,
+        region: Text,
+        zone: Text,
+        subzone: Maybe<Text>,
+    ) -> Node {
+        self.locality_region = Some(region);
+        self.locality_zone = Some(zone);
+        self.locality_subzone = subzone;
+        self
+    }
+
+    pub fn with_user_agent(mut self, name: Text, version: Text) -> Node {
+        self.user_agent_name = name;
+        self.user_agent_version = version;
+        self
+    }
+
+    pub fn with_metadata_json(mut self, json: Text) -> Node {
+        self.metadata_json = json; self
+    }
+}
+
+// =============================================================================
+// AdsConfig — control-plane connection + backoff + auth
+// =============================================================================
+
+public type AdsAuth is
+    /// Raw gRPC, no auth (test / local).
+    | None
+    /// mTLS — cert chain + private key. Compatible with SPIFFE SVIDs.
+    | MutualTls { cert_chain_pem: Text, private_key_pem: Text, ca_bundle_pem: Text }
+    /// JWT bearer token (Istio JWT-SVIDs, Asset-Credentials).
+    | Bearer(Text);
+
+public type AdsConfig is {
+    address: Text,                       // e.g. "istiod.istio-system:15010"
+    node: Node,
+    auth: AdsAuth,
+    /// Use DeltaAggregatedResources stream instead of legacy ADS.
+    use_delta: Bool,
+    initial_reconnect_backoff: Duration,
+    max_reconnect_backoff: Duration,
+    keepalive_interval: Duration,
+    initial_request_timeout: Duration,
+}
+
+implement AdsConfig {
+    pub fn new(address: Text, node: Node) -> AdsConfig {
+        AdsConfig {
+            address: address,
+            node: node,
+            auth: AdsAuth.None,
+            use_delta: true,   // prefer delta-xDS since Envoy 1.15 / Istio 1.8
+            initial_reconnect_backoff: Duration.from_millis(500),
+            max_reconnect_backoff: Duration.from_secs(30),
+            keepalive_interval: Duration.from_secs(15),
+            initial_request_timeout: Duration.from_secs(30),
+        }
+    }
+
+    pub fn with_auth(mut self, auth: AdsAuth) -> AdsConfig {
+        self.auth = auth; self
+    }
+
+    pub fn with_use_delta(mut self, delta: Bool) -> AdsConfig {
+        self.use_delta = delta; self
+    }
+
+    pub fn with_keepalive(mut self, interval: Duration) -> AdsConfig {
+        self.keepalive_interval = interval; self
+    }
+}
