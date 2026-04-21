@@ -1,0 +1,67 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: quic, rfc9000, stream, state-machine, flow-control, typecheck
+// @timeout: 10000
+// @expect: pass
+
+mount core.net.quic.stream_sm.*;
+
+fn check_send() {
+    let mut s = SendStream.new(0_u64, 16384_u64);
+    let data: [Byte; 5] = [1_u8, 2_u8, 3_u8, 4_u8, 5_u8];
+    let _ = s.write(&data, 65536_u64);
+    s.on_bytes_sent(5_u64);
+    s.on_bytes_acked(5_u64);
+    let _ = s.close();
+    let _ = s.state();
+    let _ = s.is_finished();
+}
+
+fn check_recv() {
+    let mut r = RecvStream.new(0_u64, 16384_u64);
+    let data: [Byte; 3] = [0x61_u8, 0x62_u8, 0x63_u8];   // "abc"
+    let _ = r.on_stream_frame(0_u64, &data, false);
+    let _ = r.on_stream_frame(3_u64, &data, true);
+    let (_, is_fin) = r.read();
+    let _ = is_fin;
+    r.close_read();
+    let _ = r.state();
+    let _ = r.is_finished();
+}
+
+fn check_reset_path() {
+    let mut s = SendStream.new(4_u64, 1024_u64);
+    let _ = s.reset(0x42_u64);
+    s.on_bytes_acked(0_u64);
+    let _ = s.is_finished();
+
+    let mut r = RecvStream.new(4_u64, 1024_u64);
+    let _ = r.on_reset(0x42_u64, 0_u64);
+    r.close_read();
+}
+
+fn check_flow_control() {
+    let mut fc = ConnFlowControl.new(
+        1_000_000_u64,  // max_data_remote
+        1_000_000_u64,  // max_data_local
+        100_u64, 100_u64,
+        100_u64, 100_u64,
+    );
+    let budget = fc.send_budget();
+    let _ = budget;
+    fc.on_bytes_sent(1000_u64);
+    let _ = fc.on_bytes_recv(500_u64);
+    fc.on_peer_max_data(2_000_000_u64);
+    fc.on_peer_max_streams_bidi(200_u64);
+    let _ = fc.can_open_bidi();
+    let _ = fc.alloc_stream_bidi(false);
+    let _ = fc.alloc_stream_uni(false);
+}
+
+fn main() {
+    check_send();
+    check_recv();
+    check_reset_path();
+    check_flow_control();
+}

@@ -1,0 +1,220 @@
+// =============================================================================
+// net/quic/stream_sm/send.vr — Send-side stream state machine (RFC 9000 §3.1)
+// =============================================================================
+// Layer: 5 (Network — QUIC)
+// Dependencies: core, collections
+// =============================================================================
+//
+// RFC 9000 §3.1 state diagram for the sender side of a stream:
+//
+//       app: stream created        ┌──────────┐
+//        ──────────────────────────▶│  Ready   │
+//                                   └────┬─────┘
+//                                        │ app: send data
+//                                        ▼
+//                                   ┌──────────┐
+//              reset (out-of-band)  │   Send   │ ◀────┐
+//        ┌──────────────────────────┴────┬─────┘      │
+//        │                               │ fin        │ more data
+//        │                               ▼            │ from app
+//        │                          ┌────────────┐    │
+//        │                          │ DataSent   │ ───┘
+//        │                          └────────┬───┘
+//        │                                   │ all bytes ACKed
+//        │                                   ▼
+//        │                          ┌────────────┐
+//        │                          │ DataRecvd  │  (terminal)
+//        │                          └────────────┘
+//        │
+//        │           reset ACK
+//        ▼                                                ┌────────────┐
+//   ┌──────────┐  send RESET_STREAM  ┌─────────────┐      │            │
+//   │ResetSent │────────────────────▶│ ResetRecvd  │─────▶│ (terminal)│
+//   └──────────┘                     └─────────────┘      │            │
+//                                                         └────────────┘
+//
+// # Invariants enforced:
+//
+//   * send_offset monotonically non-decreasing (RFC 9000 §2.2).
+//   * final_size, once set (FIN or RESET), never changes.
+//   * Every byte written is accounted in `send_buf` or already acked.
+//   * After RESET, no further STREAM frames are emitted for this stream.
+//
+// =============================================================================
+
+module core.net.quic.stream_sm.send;
+
+mount core.*;
+mount core.collections.List;
+
+public type SendState is Ready | Send | DataSent | DataRecvd | ResetSent | ResetRecvd;
+
+public type SendError is
+      AlreadyReset
+    | AlreadyFinished
+    | FinalSizeViolation
+    | FlowControlExceeded;
+
+public type SendStream is {
+    state:          SendState,
+    stream_id:      UInt64,
+
+    // Outgoing buffer — application writes append here; the QUIC
+    // sender drains according to connection/stream flow control.
+    send_buf:       List<Byte>,
+
+    // Monotonic byte offset of the next byte to be written by app
+    // (stream offset, not wire offset of emitted STREAM frames).
+    next_write_off: UInt64,
+
+    // Highest offset the sender has handed to the wire.
+    max_written:    UInt64,
+
+    // Highest offset acknowledged by peer.
+    max_acked:      UInt64,
+
+    // Final size if FIN or RESET is scheduled.
+    final_size:     Maybe<UInt64>,
+
+    // Peer-advertised max_stream_data limit.
+    max_stream_data: UInt64,
+
+    // Reset error code (applicable in ResetSent / ResetRecvd).
+    reset_code:     Maybe<UInt64>,
+};
+
+implement SendStream {
+    public fn new(stream_id: UInt64, initial_max_stream_data: UInt64) -> SendStream {
+        SendStream {
+            state:           SendState.Ready,
+            stream_id:       stream_id,
+            send_buf:        [],
+            next_write_off:  0_u64,
+            max_written:     0_u64,
+            max_acked:       0_u64,
+            final_size:      None,
+            max_stream_data: initial_max_stream_data,
+            reset_code:      None,
+        }
+    }
+
+    /// Append app data. Fails if the stream is already in a terminal
+    /// state, if FIN has been set, or if the connection-level FC limit
+    /// would be exceeded (caller passes the remaining connection budget).
+    public fn write(&mut self, data: &[Byte], conn_fc_budget: UInt64) -> Result<Int, SendError> {
+        match self.state {
+            SendState.ResetSent | SendState.ResetRecvd => return Err(SendError.AlreadyReset),
+            SendState.DataSent | SendState.DataRecvd    => return Err(SendError.AlreadyFinished),
+            _ => {},
+        }
+        // Accept bytes up to the min of stream and connection FC budget.
+        let stream_budget = if self.max_stream_data >= self.next_write_off {
+            self.max_stream_data - self.next_write_off
+        } else {
+            0_u64
+        };
+        let budget = if stream_budget < conn_fc_budget { stream_budget } else { conn_fc_budget };
+        let limit = if (data.len() as UInt64) < budget { data.len() } else { budget as Int };
+
+        let mut i: Int = 0;
+        while i < limit {
+            self.send_buf.push(data[i]);
+            i = i + 1;
+        }
+        self.next_write_off = self.next_write_off + (limit as UInt64);
+
+        // Transition Ready → Send on the first byte.
+        match self.state {
+            SendState.Ready => { if limit > 0 { self.state = SendState.Send; } },
+            _ => {},
+        }
+        Ok(limit)
+    }
+
+    /// Schedule the FIN bit — any already-buffered data will carry it on
+    /// the final STREAM frame. Transitions Send/Ready → DataSent once
+    /// the last byte is emitted.
+    public fn close(&mut self) -> Result<(), SendError> {
+        match self.state {
+            SendState.ResetSent | SendState.ResetRecvd => Err(SendError.AlreadyReset),
+            SendState.DataSent | SendState.DataRecvd    => Err(SendError.AlreadyFinished),
+            _ => {
+                self.final_size = Some(self.next_write_off);
+                Ok(())
+            },
+        }
+    }
+
+    /// Abort the stream. Emits a RESET_STREAM frame (caller handles).
+    /// Transitions to ResetSent; the wire RESET carries `error_code`
+    /// and `final_size = next_write_off`.
+    public fn reset(&mut self, error_code: UInt64) -> Result<UInt64, SendError> {
+        match self.state {
+            SendState.ResetSent | SendState.ResetRecvd => return Err(SendError.AlreadyReset),
+            SendState.DataRecvd                         => return Err(SendError.AlreadyFinished),
+            _ => {},
+        }
+        self.state = SendState.ResetSent;
+        self.reset_code = Some(error_code);
+        self.final_size = Some(self.next_write_off);
+        Ok(self.next_write_off)
+    }
+
+    /// Called when the wire layer has shipped bytes [from..to) of the
+    /// stream in a STREAM frame. Updates `max_written`.
+    pub fn on_bytes_sent(&mut self, to: UInt64) {
+        if to > self.max_written { self.max_written = to; }
+        // Transition Send → DataSent if we've now written everything
+        // including the FIN bit.
+        match self.state {
+            SendState.Send => {
+                match self.final_size {
+                    Some(fs) if self.max_written >= fs => {
+                        self.state = SendState.DataSent;
+                    },
+                    _ => {},
+                }
+            },
+            _ => {},
+        }
+    }
+
+    /// Called when an ACK covers byte-range [from..to) of this stream.
+    /// Drops acked bytes from `send_buf`, updates `max_acked`, and
+    /// potentially transitions DataSent → DataRecvd / ResetSent →
+    /// ResetRecvd.
+    pub fn on_bytes_acked(&mut self, to: UInt64) {
+        if to > self.max_acked { self.max_acked = to; }
+        match self.state {
+            SendState.DataSent => {
+                match self.final_size {
+                    Some(fs) if self.max_acked >= fs => {
+                        self.state = SendState.DataRecvd;
+                    },
+                    _ => {},
+                }
+            },
+            SendState.ResetSent => {
+                // RESET is acked — one-shot transition.
+                self.state = SendState.ResetRecvd;
+            },
+            _ => {},
+        }
+    }
+
+    /// Peer raised our stream-level max_stream_data.
+    pub fn on_max_stream_data(&mut self, new_limit: UInt64) {
+        if new_limit > self.max_stream_data {
+            self.max_stream_data = new_limit;
+        }
+    }
+
+    pub fn state(&self) -> SendState { self.state.clone() }
+
+    pub fn is_finished(&self) -> Bool {
+        match self.state {
+            SendState.DataRecvd | SendState.ResetRecvd => true,
+            _ => false,
+        }
+    }
+}

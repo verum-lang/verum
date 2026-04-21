@@ -1,0 +1,290 @@
+// =============================================================================
+// net/quic/stream_sm/recv.vr — Receive-side stream state machine (RFC 9000 §3.2)
+// =============================================================================
+// Layer: 5 (Network — QUIC)
+// Dependencies: core, collections
+// =============================================================================
+//
+// RFC 9000 §3.2 state diagram for the receiver side of a stream:
+//
+//       peer: first STREAM frame       ┌──────────┐
+//        ────────────────────────────▶ │   Recv   │
+//                                      └────┬─────┘
+//                                           │ all bytes ≤ final_size received
+//                                           ▼
+//                                      ┌────────────┐
+//                   peer: RESET_STREAM │ SizeKnown  │
+//                            ┌─────────┴────┬───────┘
+//                            ▼              │
+//                     ┌─────────────┐       │ app: read until fin
+//                     │ResetRecvd   │       ▼
+//                     └──────┬──────┘  ┌────────────┐
+//                            │         │  DataRecvd │
+//                            ▼         └─────┬──────┘
+//                     ┌─────────────┐         │ app: stream.close()
+//                     │ ResetRead   │         ▼
+//                     └─────────────┘  ┌────────────┐
+//                                      │  DataRead  │
+//                                      └────────────┘
+//
+// # Out-of-order reassembly
+//
+// STREAM frames arrive out of order. The receive buffer is a sorted
+// list of non-overlapping byte ranges; `deliver_ready()` returns the
+// contiguous prefix starting at `bytes_read`.
+//
+// # Flow control
+//
+// `max_data_recv` is the highest offset we have authorised the peer
+// to send via MAX_STREAM_DATA. The sender MUST NOT exceed it; we
+// issue increments as `bytes_read` advances to keep pipeline full.
+//
+// =============================================================================
+
+module core.net.quic.stream_sm.recv;
+
+mount core.*;
+mount core.collections.List;
+
+public type RecvState is Recv | SizeKnown | DataRecvd | DataRead | ResetRecvd | ResetRead;
+
+public type RecvError is
+      FinalSizeChanged        // peer sent FIN twice with different offsets, or
+                              // sent data past final_size
+    | ResetAfterFin
+    | FlowControlViolation
+    | ReceiveAfterReset;
+
+/// A contiguous run of received bytes at offset `start`.
+type Run is { start: UInt64, bytes: List<Byte> };
+
+public type RecvStream is {
+    state:      RecvState,
+    stream_id:  UInt64,
+
+    /// Sorted non-overlapping runs of received bytes.
+    runs:       List<Run>,
+
+    /// Next offset app is allowed to read.
+    bytes_read: UInt64,
+
+    /// Our stream-level flow-control credit published to peer.
+    max_data_recv: UInt64,
+
+    /// Set once peer signals FIN or RESET_STREAM.
+    final_size: Maybe<UInt64>,
+
+    /// Peer-reported error code on RESET.
+    reset_code: Maybe<UInt64>,
+};
+
+implement RecvStream {
+    public fn new(stream_id: UInt64, initial_max_stream_data: UInt64) -> RecvStream {
+        RecvStream {
+            state:         RecvState.Recv,
+            stream_id:     stream_id,
+            runs:          [],
+            bytes_read:    0_u64,
+            max_data_recv: initial_max_stream_data,
+            final_size:    None,
+            reset_code:    None,
+        }
+    }
+
+    /// Ingest an incoming STREAM frame chunk at `offset` carrying
+    /// `data`. `is_fin` signals the final byte.
+    pub fn on_stream_frame(
+        &mut self,
+        offset: UInt64,
+        data: &[Byte],
+        is_fin: Bool,
+    ) -> Result<(), RecvError> {
+        match self.state {
+            RecvState.ResetRecvd | RecvState.ResetRead => return Err(RecvError.ReceiveAfterReset),
+            _ => {},
+        }
+        // Flow control violation if the highest byte offset is past
+        // our advertised limit.
+        let high = offset + (data.len() as UInt64);
+        if high > self.max_data_recv {
+            return Err(RecvError.FlowControlViolation);
+        }
+
+        // Final-size consistency if FIN.
+        if is_fin {
+            match self.final_size {
+                Some(existing) => {
+                    if existing != high { return Err(RecvError.FinalSizeChanged); }
+                },
+                None => { self.final_size = Some(high); },
+            }
+        }
+        // Also: no byte may land past final_size.
+        match self.final_size {
+            Some(fs) => {
+                if high > fs { return Err(RecvError.FinalSizeChanged); }
+            },
+            None => {},
+        }
+
+        self.insert_run(offset, data);
+        self.maybe_transition_size_known();
+        Ok(())
+    }
+
+    /// Peer RESET_STREAM — transitions to ResetRecvd.
+    pub fn on_reset(&mut self, error_code: UInt64, final_size: UInt64) -> Result<(), RecvError> {
+        match self.state {
+            RecvState.DataRead => return Err(RecvError.ResetAfterFin),
+            RecvState.ResetRecvd | RecvState.ResetRead => {
+                // Idempotent if arriving twice with same code — just ignore.
+                return Ok(());
+            },
+            _ => {},
+        }
+        // Reset's final_size must be >= everything observed so far.
+        let mut max_obs: UInt64 = 0_u64;
+        let mut i: Int = 0;
+        while i < self.runs.len() {
+            let r = &self.runs[i];
+            let h = r.start + (r.bytes.len() as UInt64);
+            if h > max_obs { max_obs = h; }
+            i = i + 1;
+        }
+        if final_size < max_obs {
+            return Err(RecvError.FinalSizeChanged);
+        }
+        self.state = RecvState.ResetRecvd;
+        self.reset_code = Some(error_code);
+        self.final_size = Some(final_size);
+        Ok(())
+    }
+
+    /// Read the next contiguous chunk of received bytes. Returns
+    /// `(bytes, is_fin)` — bytes is ordered from `bytes_read` onwards.
+    pub fn read(&mut self) -> (List<Byte>, Bool) {
+        let mut out: List<Byte> = [];
+        // Consume the first run if it aligns with bytes_read.
+        while self.runs.len() > 0 && self.runs[0].start == self.bytes_read {
+            let head = &self.runs[0];
+            let n = head.bytes.len();
+            let mut i: Int = 0;
+            while i < n {
+                out.push(head.bytes[i]);
+                i = i + 1;
+            }
+            self.bytes_read = self.bytes_read + (n as UInt64);
+            let _ = self.runs.remove(0);
+        }
+        let is_fin = match self.final_size {
+            Some(fs) => self.bytes_read >= fs,
+            None     => false,
+        };
+        if is_fin {
+            match self.state {
+                RecvState.SizeKnown | RecvState.Recv => { self.state = RecvState.DataRecvd; },
+                _ => {},
+            }
+        }
+        (out, is_fin)
+    }
+
+    /// App finished reading — marks stream as terminal DataRead.
+    pub fn close_read(&mut self) {
+        match self.state {
+            RecvState.DataRecvd => self.state = RecvState.DataRead,
+            RecvState.ResetRecvd => self.state = RecvState.ResetRead,
+            _ => {},
+        }
+    }
+
+    /// Raise our advertised max_stream_data limit. Typically called
+    /// after `read` consumes bytes: caller sends MAX_STREAM_DATA frame.
+    pub fn update_flow_control(&mut self, new_limit: UInt64) {
+        if new_limit > self.max_data_recv {
+            self.max_data_recv = new_limit;
+        }
+    }
+
+    /// Suggested MAX_STREAM_DATA value: 2 × buffer pane above current
+    /// delivered, clamped to (bytes_read + window). Caller decides
+    /// when to actually emit the frame.
+    pub fn suggested_max_stream_data(&self, window: UInt64) -> UInt64 {
+        self.bytes_read + window
+    }
+
+    pub fn state(&self) -> RecvState { self.state.clone() }
+    pub fn is_finished(&self) -> Bool {
+        match self.state {
+            RecvState.DataRead | RecvState.ResetRead => true,
+            _ => false,
+        }
+    }
+
+    // ==================== private ====================
+
+    fn maybe_transition_size_known(&mut self) {
+        match self.final_size {
+            Some(_) => {
+                match self.state {
+                    RecvState.Recv => { self.state = RecvState.SizeKnown; },
+                    _ => {},
+                }
+            },
+            None => {},
+        }
+    }
+
+    /// Insert a new run into `runs` preserving the sorted non-overlap
+    /// invariant. Overlapping bytes must be byte-identical (QUIC
+    /// guarantees this if no reset has occurred).
+    fn insert_run(&mut self, offset: UInt64, data: &[Byte]) {
+        if data.len() == 0 { return; }
+        // Skip any bytes already below `bytes_read`.
+        let (eff_offset, eff_data) = if offset < self.bytes_read {
+            let skip = (self.bytes_read - offset) as Int;
+            if skip >= data.len() { return; }
+            // Produce a fresh copy starting from `skip`
+            let mut d: List<Byte> = [];
+            let mut i: Int = skip;
+            while i < data.len() { d.push(data[i]); i = i + 1; }
+            (self.bytes_read, d)
+        } else {
+            let mut d: List<Byte> = [];
+            let mut i: Int = 0;
+            while i < data.len() { d.push(data[i]); i = i + 1; }
+            (offset, d)
+        };
+        if eff_data.len() == 0 { return; }
+
+        // Find insertion point.
+        let end = eff_offset + (eff_data.len() as UInt64);
+        let mut i: Int = 0;
+        while i < self.runs.len() && self.runs[i].start < eff_offset {
+            i = i + 1;
+        }
+        // Insert at i, then walk forward merging overlaps/adjacencies.
+        self.runs.insert(i, Run { start: eff_offset, bytes: eff_data });
+        // Merge with next-right runs if they overlap or abut.
+        let mut j: Int = i;
+        while j + 1 < self.runs.len() {
+            let cur_end = self.runs[j].start + (self.runs[j].bytes.len() as UInt64);
+            let next = &self.runs[j + 1];
+            if cur_end >= next.start {
+                // Merge: extend cur with the suffix of next past cur_end.
+                if next.start + (next.bytes.len() as UInt64) > cur_end {
+                    let gap = (cur_end - next.start) as Int;
+                    let mut k: Int = gap;
+                    while k < next.bytes.len() {
+                        self.runs[j].bytes.push(next.bytes[k]);
+                        k = k + 1;
+                    }
+                }
+                let _ = self.runs.remove(j + 1);
+            } else {
+                break;
+            }
+        }
+        let _ = end;
+    }
+}

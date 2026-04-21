@@ -62,6 +62,7 @@ public module frame;                   // RFC 9000 §19 frame codec
 public module packet;                  // RFC 9000 §17 packet headers
 public module transport_params;        // RFC 9000 §18 transport parameters
 public module recovery;                // RFC 9002 loss detection + NewReno
+public module stream_sm;               // RFC 9000 §3/§4 stream state machines + FC
 
 mount core.*;
 mount core.time.duration.{Duration};
