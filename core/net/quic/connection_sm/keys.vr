@@ -1,0 +1,108 @@
+// =============================================================================
+// net/quic/connection_sm/keys.vr — Traffic-secret → QuicSpaceKeys derivation
+// =============================================================================
+// Layer: 5 (Network — QUIC)
+// Dependencies: core.net.tls13.keyschedule, core.net.quic.crypto.labels
+// =============================================================================
+//
+// Bridge between TLS 1.3 traffic secrets (from the handshake SM) and
+// QUIC's per-space key sets. RFC 9001 §5.1 mandates the labels are
+// "quic key" / "quic iv" / "quic hp" rather than the "key" / "iv"
+// used by the TLS record layer — everything else (HKDF-Expand-Label
+// with the "tls13 " prefix + the same hash) is identical.
+//
+// =============================================================================
+
+module core.net.quic.connection_sm.keys;
+
+mount core.*;
+mount core.collections.List;
+mount core.security.kdf.hkdf.{HkdfError};
+mount core.net.tls13.keyschedule.hkdf_label.{hkdf_expand_label};
+mount core.net.tls13.keyschedule.schedule.{TrafficSecret};
+mount core.net.tls13.cipher_suite.{HashKind, AeadKind};
+mount core.net.quic.crypto.labels.{
+    LABEL_QUIC_KEY, LABEL_QUIC_IV, LABEL_QUIC_HP,
+};
+mount core.net.quic.crypto.header_protection.{HpKey};
+mount core.net.quic.connection_sm.{QuicSpaceKeys};
+
+public type QuicKeyError is
+      HkdfFailure
+    | BadKeyLength(Int);
+
+/// Derive `QuicSpaceKeys` (AEAD key + IV + HP key) from a TLS traffic
+/// secret per RFC 9001 §5.1. `aead_key_len` is determined by the
+/// negotiated cipher suite (16 for AES-128-GCM, 32 for AES-256-GCM or
+/// ChaCha20-Poly1305); `use_chacha` picks the HP key flavour when the
+/// key is 32 bytes.
+public fn derive_space_keys(
+    secret: &TrafficSecret,
+    aead_key_len: Int,
+    use_chacha: Bool,
+) -> Result<QuicSpaceKeys, QuicKeyError> {
+    let hash = secret.hash.clone();
+    let secret_bytes = secret.secret.as_slice();
+
+    let aead_key = hkdf_expand_label(hash.clone(), secret_bytes, &LABEL_QUIC_KEY, &[], aead_key_len)
+        .map_err(|_| QuicKeyError.HkdfFailure)?;
+    let iv_vec = hkdf_expand_label(hash.clone(), secret_bytes, &LABEL_QUIC_IV, &[], 12)
+        .map_err(|_| QuicKeyError.HkdfFailure)?;
+    let hp_vec = hkdf_expand_label(hash.clone(), secret_bytes, &LABEL_QUIC_HP, &[], aead_key_len)
+        .map_err(|_| QuicKeyError.HkdfFailure)?;
+
+    let mut iv: [Byte; 12] = [0_u8; 12];
+    let mut i: Int = 0;
+    while i < 12 { iv[i] = iv_vec[i]; i = i + 1; }
+
+    let hp_key: HpKey = if aead_key_len == 16 {
+        let mut k: [Byte; 16] = [0_u8; 16];
+        let mut j: Int = 0;
+        while j < 16 { k[j] = hp_vec[j]; j = j + 1; }
+        HpKey.AesEcb128(k)
+    } else if aead_key_len == 32 {
+        let mut k: [Byte; 32] = [0_u8; 32];
+        let mut j: Int = 0;
+        while j < 32 { k[j] = hp_vec[j]; j = j + 1; }
+        if use_chacha { HpKey.ChaCha20Block(k) } else { HpKey.AesEcb256(k) }
+    } else {
+        return Err(QuicKeyError.BadKeyLength(aead_key_len));
+    };
+
+    Ok(QuicSpaceKeys {
+        aead_key: aead_key,
+        aead_iv:  iv,
+        hp_key:   hp_key,
+    })
+}
+
+/// RFC 9001 §6.1 key update: next-generation traffic secret + keys.
+/// Returns the new `QuicSpaceKeys` derived from next traffic secret.
+public fn rotate_space_keys(
+    secret: &TrafficSecret,
+    aead_key_len: Int,
+    use_chacha: Bool,
+) -> Result<(TrafficSecret, QuicSpaceKeys), QuicKeyError> {
+    let next = secret.next_generation().map_err(|_| QuicKeyError.HkdfFailure)?;
+    let keys = derive_space_keys(&next, aead_key_len, use_chacha)?;
+    Ok((next, keys))
+}
+
+/// Pick the AEAD key length given a negotiated AeadKind.
+public fn aead_key_len_for(kind: &AeadKind) -> Int {
+    match kind {
+        AeadKind.Aes128Gcm        => 16,
+        AeadKind.Aes256Gcm        => 32,
+        AeadKind.ChaCha20Poly1305 => 32,
+        AeadKind.Aes128Ccm        => 16,
+        AeadKind.Aes128Ccm8       => 16,
+        AeadKind.Unknown          => 0,
+    }
+}
+
+public fn is_chacha_aead(kind: &AeadKind) -> Bool {
+    match kind {
+        AeadKind.ChaCha20Poly1305 => true,
+        _ => false,
+    }
+}

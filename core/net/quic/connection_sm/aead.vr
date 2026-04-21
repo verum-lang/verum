@@ -1,0 +1,143 @@
+// =============================================================================
+// net/quic/connection_sm/aead.vr — QUIC AEAD seal/open + HP helpers
+// =============================================================================
+// Layer: 5 (Network — QUIC)
+// Dependencies: core, core.security.aead.{aes_gcm, chacha20_poly1305},
+//               core.net.quic.crypto.header_protection
+// =============================================================================
+//
+// QUIC AEAD differs from TLS 1.3's only in the nonce derivation:
+// RFC 9001 §5.3 says
+//
+//   nonce = iv XOR pad_left(big_endian(packet_number), iv.len)
+//
+// where the packet number is the FULL reconstructed PN, not the
+// wire-truncated form. AAD is the packet header including HP-cleared
+// first byte and the wire-truncated PN bytes.
+//
+// This module gives seal/open helpers that take `QuicSpaceKeys` (the
+// typed per-space key pair from connection_sm) and produce / consume
+// the encrypted payload. Header protection is applied / removed
+// outside of this module — see `packet_tx` / `packet_rx`.
+//
+// =============================================================================
+
+module core.net.quic.connection_sm.aead;
+
+mount core.*;
+mount core.collections.List;
+mount core.security.aead.aes_gcm.{
+    aes128_gcm_seal, aes128_gcm_open,
+    aes256_gcm_seal, aes256_gcm_open,
+};
+mount core.security.aead.chacha20_poly1305.{
+    chacha20_poly1305_seal, chacha20_poly1305_open,
+};
+mount core.net.quic.connection_sm.{QuicSpaceKeys};
+mount core.net.quic.crypto.header_protection.{HpKey};
+
+public type QuicAeadError is
+      BadKeyLength(Int)
+    | AeadFailure;
+
+// =============================================================================
+// Nonce construction — RFC 9001 §5.3
+// =============================================================================
+
+/// Build the per-packet nonce: `iv XOR pad_left(big-endian pn, 12)`.
+/// Result is 12 bytes.
+public fn build_nonce(iv: &[Byte; 12], packet_number: UInt64) -> [Byte; 12] {
+    let mut nonce: [Byte; 12] = iv.clone();
+    nonce[ 4] = nonce[ 4] ^ ((packet_number >> 56) & 0xFF_u64) as Byte;
+    nonce[ 5] = nonce[ 5] ^ ((packet_number >> 48) & 0xFF_u64) as Byte;
+    nonce[ 6] = nonce[ 6] ^ ((packet_number >> 40) & 0xFF_u64) as Byte;
+    nonce[ 7] = nonce[ 7] ^ ((packet_number >> 32) & 0xFF_u64) as Byte;
+    nonce[ 8] = nonce[ 8] ^ ((packet_number >> 24) & 0xFF_u64) as Byte;
+    nonce[ 9] = nonce[ 9] ^ ((packet_number >> 16) & 0xFF_u64) as Byte;
+    nonce[10] = nonce[10] ^ ((packet_number >>  8) & 0xFF_u64) as Byte;
+    nonce[11] = nonce[11] ^ ((packet_number      ) & 0xFF_u64) as Byte;
+    nonce
+}
+
+// =============================================================================
+// AEAD discriminant — keyed by key length (initial = 16, 1-RTT may be 16/32)
+// =============================================================================
+
+/// Classify the AEAD algorithm from the key length and HpKey variant.
+/// TLS 1.3 negotiates the suite; QUIC uses the same AEAD end-to-end.
+///
+/// Rules:
+///   * 16-byte aead_key + HpKey.AesEcb128 → AES-128-GCM
+///   * 32-byte aead_key + HpKey.AesEcb256 → AES-256-GCM
+///   * 32-byte aead_key + HpKey.ChaCha20Block → ChaCha20-Poly1305
+///   * anything else → BadKeyLength
+///
+/// Disambiguates the two 32-byte cases via the HpKey form: the
+/// connection_sm guarantees they line up (see QuicSpaceKeys).
+fn classify(keys: &QuicSpaceKeys) -> Result<AeadKind, QuicAeadError> {
+    match &keys.hp_key {
+        HpKey.AesEcb128(_) => {
+            if keys.aead_key.len() != 16 { return Err(QuicAeadError.BadKeyLength(keys.aead_key.len())); }
+            Ok(AeadKind.Aes128Gcm)
+        },
+        HpKey.AesEcb256(_) => {
+            if keys.aead_key.len() != 32 { return Err(QuicAeadError.BadKeyLength(keys.aead_key.len())); }
+            Ok(AeadKind.Aes256Gcm)
+        },
+        HpKey.ChaCha20Block(_) => {
+            if keys.aead_key.len() != 32 { return Err(QuicAeadError.BadKeyLength(keys.aead_key.len())); }
+            Ok(AeadKind.ChaCha20Poly1305)
+        },
+    }
+}
+
+type AeadKind is Aes128Gcm | Aes256Gcm | ChaCha20Poly1305;
+
+// =============================================================================
+// seal / open
+// =============================================================================
+
+/// AEAD-seal `plaintext` under `keys` at the given packet number.
+/// Returns ciphertext||tag concatenated.
+public fn seal(
+    keys: &QuicSpaceKeys,
+    packet_number: UInt64,
+    aad: &[Byte],
+    plaintext: &[Byte],
+) -> Result<List<Byte>, QuicAeadError> {
+    let kind = classify(keys)?;
+    let nonce = build_nonce(&keys.aead_iv, packet_number);
+    let mut out: List<Byte> = [];
+    let result = match kind {
+        AeadKind.Aes128Gcm => aes128_gcm_seal(keys.aead_key.as_slice(), &nonce, aad, plaintext, &mut out),
+        AeadKind.Aes256Gcm => aes256_gcm_seal(keys.aead_key.as_slice(), &nonce, aad, plaintext, &mut out),
+        AeadKind.ChaCha20Poly1305 => chacha20_poly1305_seal(keys.aead_key.as_slice(), &nonce, aad, plaintext, &mut out),
+    };
+    match result {
+        Ok(()) => Ok(out),
+        Err(_) => Err(QuicAeadError.AeadFailure),
+    }
+}
+
+/// AEAD-open; on success returns plaintext bytes. On tag-mismatch or
+/// any other failure returns AeadFailure — no distinguisher on
+/// purpose (constant-time discipline).
+public fn open(
+    keys: &QuicSpaceKeys,
+    packet_number: UInt64,
+    aad: &[Byte],
+    ciphertext: &[Byte],
+) -> Result<List<Byte>, QuicAeadError> {
+    let kind = classify(keys)?;
+    let nonce = build_nonce(&keys.aead_iv, packet_number);
+    let mut out: List<Byte> = [];
+    let result = match kind {
+        AeadKind.Aes128Gcm => aes128_gcm_open(keys.aead_key.as_slice(), &nonce, aad, ciphertext, &mut out),
+        AeadKind.Aes256Gcm => aes256_gcm_open(keys.aead_key.as_slice(), &nonce, aad, ciphertext, &mut out),
+        AeadKind.ChaCha20Poly1305 => chacha20_poly1305_open(keys.aead_key.as_slice(), &nonce, aad, ciphertext, &mut out),
+    };
+    match result {
+        Ok(()) => Ok(out),
+        Err(_) => Err(QuicAeadError.AeadFailure),
+    }
+}

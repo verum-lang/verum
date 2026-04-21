@@ -1,0 +1,348 @@
+// =============================================================================
+// net/quic/connection_sm/dispatch.vr — Inbound frame dispatch
+// =============================================================================
+// Layer: 5 (Network — QUIC)
+// Dependencies: core, collections, core.net.quic.{frame, recovery, stream_sm, error}
+// =============================================================================
+//
+// Walks decoded frames from a decrypted packet payload and routes each
+// to the correct subsystem handler:
+//
+//   PADDING                    — no-op
+//   PING                       — sets ack_eliciting flag, no further action
+//   ACK                        — recovery.on_ack_received + CC feedback + RTT sample
+//   RESET_STREAM               — recv-side stream → ResetRecvd
+//   STOP_SENDING               — send-side stream → should send RESET
+//   CRYPTO                     — forwarded to TLS handshake buffer
+//   NEW_TOKEN                  — stored (client only)
+//   STREAM                     — recv-side stream ingestion
+//   MAX_DATA / MAX_STREAM_DATA — flow-control updates
+//   MAX_STREAMS_*              — stream-count FC updates
+//   DATA_BLOCKED / …_BLOCKED   — diagnostic; may trigger our MAX_* send
+//   NEW_CONNECTION_ID          — add to CID pool
+//   RETIRE_CONNECTION_ID       — retire + potentially issue replacement
+//   PATH_CHALLENGE             — echo back as PATH_RESPONSE
+//   PATH_RESPONSE              — path validation complete
+//   CONNECTION_CLOSE_{tpt,app} — transition to Draining
+//   HANDSHAKE_DONE             — drop handshake keys, confirm handshake
+//   DATAGRAM                   — surface to app via app datagram queue
+//
+// Returns a structured `DispatchOutcome` carrying any resulting
+// outbound frames the connection should emit in response (ACKs,
+// PATH_RESPONSE echoes, RESET_STREAM from stop_sending).
+//
+// =============================================================================
+
+module core.net.quic.connection_sm.dispatch;
+
+mount core.*;
+mount core.collections.List;
+mount core.time.instant.{Instant};
+mount core.net.quic.frame.{Frame, AckRange, EcnCounts};
+mount core.net.quic.recovery.{LossDetection, PnSpaceKind, CongestionCtrl};
+mount core.net.quic.stream_sm.{
+    SendStream, RecvStream, ConnFlowControl,
+    SendError, RecvError,
+};
+mount core.net.quic.connection_id.{ConnectionId};
+mount core.net.quic.error.{QuicError, TransportErrorCode};
+
+// =============================================================================
+// Dispatch outcome — frames the caller emits in response + control signals
+// =============================================================================
+
+public type DispatchOutcome is {
+    /// Frames to emit in the next outbound packet (ACK-eliciting ones
+    /// go through the normal send pipeline; PATH_RESPONSE may be
+    /// sent on a probing packet).
+    outbound_frames:       List<Frame>,
+
+    /// CRYPTO bytes received, keyed by PN space + offset within that
+    /// space's CRYPTO stream. Caller feeds these into the TLS handshake
+    /// buffer.
+    crypto_chunks:         List<CryptoChunk>,
+
+    /// Application datagrams (RFC 9221) delivered to the app layer.
+    datagrams:             List<List<Byte>>,
+
+    /// Set when the peer sent HANDSHAKE_DONE (client only, RFC 9001 §4.9.2)
+    /// — caller must drop Handshake keys.
+    handshake_done:        Bool,
+
+    /// Set when the peer sent CONNECTION_CLOSE — caller transitions
+    /// to Draining. `(error_code, reason, is_application_close)`.
+    close_signal:          Maybe<(UInt64, List<Byte>, Bool)>,
+
+    /// Frames that need to be retransmitted (collected from lost
+    /// packets detected during ACK processing).
+    to_retransmit:         List<Frame>,
+
+    /// New connection IDs the peer issued. Caller integrates into its
+    /// CID pool.
+    new_cids:              List<NewCid>,
+
+    /// Peer-retired CID sequence numbers.
+    retired_cid_seqs:      List<UInt64>,
+};
+
+public type CryptoChunk is {
+    space:  PnSpaceKind,
+    offset: UInt64,
+    data:   List<Byte>,
+};
+
+public type NewCid is {
+    sequence_number: UInt64,
+    retire_prior_to: UInt64,
+    connection_id:   ConnectionId,
+    stateless_reset_token: [Byte; 16],
+};
+
+impl DispatchOutcome {
+    pub fn empty() -> DispatchOutcome {
+        DispatchOutcome {
+            outbound_frames: [],
+            crypto_chunks:   [],
+            datagrams:       [],
+            handshake_done:  false,
+            close_signal:    None,
+            to_retransmit:   [],
+            new_cids:        [],
+            retired_cid_seqs:[],
+        }
+    }
+}
+
+// =============================================================================
+// Main dispatch entry point
+// =============================================================================
+
+/// Walk `frames` (decoded via decode_all_frames) and route each to the
+/// appropriate subsystem. `space` is the PN space the frames came
+/// from (governs which recovery spaces get updated on ACK).
+public fn dispatch_frames(
+    frames: &List<Frame>,
+    space: PnSpaceKind,
+    now: Instant,
+    loss:          &mut LossDetection,
+    cc:            &mut dyn CongestionCtrl,
+    flow:          &mut ConnFlowControl,
+    send_streams:  &mut List<(UInt64, SendStream)>,
+    recv_streams:  &mut List<(UInt64, RecvStream)>,
+) -> Result<DispatchOutcome, QuicError> {
+    let mut out = DispatchOutcome.empty();
+
+    let mut i: Int = 0;
+    while i < frames.len() {
+        let f = &frames[i];
+        dispatch_one(f, space.clone(), now.clone(),
+                     loss, cc, flow, send_streams, recv_streams, &mut out)?;
+        i = i + 1;
+    }
+
+    Ok(out)
+}
+
+fn dispatch_one(
+    frame: &Frame,
+    space: PnSpaceKind,
+    now: Instant,
+    loss:          &mut LossDetection,
+    cc:            &mut dyn CongestionCtrl,
+    flow:          &mut ConnFlowControl,
+    send_streams:  &mut List<(UInt64, SendStream)>,
+    recv_streams:  &mut List<(UInt64, RecvStream)>,
+    out:           &mut DispatchOutcome,
+) -> Result<(), QuicError> {
+    match frame {
+        Frame.PaddingRun(_) => Ok(()),
+        Frame.PingFrame     => Ok(()),
+
+        Frame.AckFrame { largest_acked, ack_delay, ranges, ecn } => {
+            let retransmit = loss.on_ack_received(
+                space, *largest_acked, ranges, *ack_delay, now, cc,
+            );
+            let _ = ecn;   // ECN count validation done in recovery
+            let mut j: Int = 0;
+            while j < retransmit.len() {
+                out.to_retransmit.push(retransmit[j].clone());
+                j = j + 1;
+            }
+            Ok(())
+        },
+
+        Frame.CryptoFrame { offset, data } => {
+            out.crypto_chunks.push(CryptoChunk {
+                space: space.clone(),
+                offset: *offset,
+                data: data.clone(),
+            });
+            Ok(())
+        },
+
+        Frame.StreamFrame { stream_id, offset, data, fin } => {
+            // Find or lazily create the recv-side stream.
+            let stream = find_or_create_recv(recv_streams, *stream_id, flow);
+            match stream.on_stream_frame(*offset, data.as_slice(), *fin) {
+                Ok(()) => {
+                    // Accept into connection-level FC too.
+                    let delta = data.len() as UInt64;
+                    flow.on_bytes_recv(delta)
+                        .map_err(|_| QuicError.TransportError {
+                            code: TransportErrorCode.new(TransportErrorCode.FLOW_CONTROL_ERROR),
+                            frame_type: 8_u64,
+                            reason: Text.from_str("STREAM frame exceeds conn FC"),
+                        })?;
+                    Ok(())
+                },
+                Err(RecvError.FlowControlViolation) => Err(QuicError.TransportError {
+                    code: TransportErrorCode.new(TransportErrorCode.FLOW_CONTROL_ERROR),
+                    frame_type: 8_u64,
+                    reason: Text.from_str("STREAM exceeds stream FC"),
+                }),
+                Err(RecvError.FinalSizeChanged) | Err(RecvError.ResetAfterFin) =>
+                    Err(QuicError.TransportError {
+                        code: TransportErrorCode.new(TransportErrorCode.FINAL_SIZE_ERROR),
+                        frame_type: 8_u64,
+                        reason: Text.from_str("final size changed"),
+                    }),
+                Err(RecvError.ReceiveAfterReset) => Err(QuicError.TransportError {
+                    code: TransportErrorCode.new(TransportErrorCode.STREAM_STATE_ERROR),
+                    frame_type: 8_u64,
+                    reason: Text.from_str("STREAM after RESET"),
+                }),
+            }
+        },
+
+        Frame.ResetStream { stream_id, error_code, final_size } => {
+            let stream = find_or_create_recv(recv_streams, *stream_id, flow);
+            stream.on_reset(*error_code, *final_size)
+                .map_err(|_| QuicError.TransportError {
+                    code: TransportErrorCode.new(TransportErrorCode.FINAL_SIZE_ERROR),
+                    frame_type: 4_u64,
+                    reason: Text.from_str("RESET_STREAM final_size mismatch"),
+                })
+        },
+
+        Frame.StopSending { stream_id, error_code } => {
+            // Peer asked us to stop sending on this stream → emit
+            // RESET_STREAM in response with their error_code.
+            if let Some(ss) = find_send(send_streams, *stream_id) {
+                match ss.reset(*error_code) {
+                    Ok(final_size) => {
+                        out.outbound_frames.push(Frame.ResetStream {
+                            stream_id: *stream_id,
+                            error_code: *error_code,
+                            final_size: final_size,
+                        });
+                        Ok(())
+                    },
+                    Err(_) => Ok(()),   // already reset/finished
+                }
+            } else { Ok(()) }
+        },
+
+        Frame.MaxData(limit) => {
+            flow.on_peer_max_data(*limit);
+            Ok(())
+        },
+        Frame.MaxStreamData { stream_id, limit } => {
+            if let Some(ss) = find_send(send_streams, *stream_id) {
+                ss.on_max_stream_data(*limit);
+            }
+            Ok(())
+        },
+        Frame.MaxStreamsBidi(n) => { flow.on_peer_max_streams_bidi(*n); Ok(()) },
+        Frame.MaxStreamsUni(n)  => { flow.on_peer_max_streams_uni(*n); Ok(()) },
+
+        Frame.DataBlocked(_)         => Ok(()),   // diagnostic; could trigger MAX_DATA
+        Frame.StreamDataBlocked {..} => Ok(()),
+        Frame.StreamsBlockedBidi(_)  => Ok(()),
+        Frame.StreamsBlockedUni(_)   => Ok(()),
+
+        Frame.NewConnectionId { sequence_number, retire_prior_to, connection_id, stateless_reset_token } => {
+            let cid = ConnectionId.from_bytes(connection_id.as_slice())
+                .map_err(|_| QuicError.TransportError {
+                    code: TransportErrorCode.new(TransportErrorCode.PROTOCOL_VIOLATION),
+                    frame_type: 24_u64,
+                    reason: Text.from_str("NEW_CONNECTION_ID bad length"),
+                })?;
+            out.new_cids.push(NewCid {
+                sequence_number: *sequence_number,
+                retire_prior_to: *retire_prior_to,
+                connection_id:   cid,
+                stateless_reset_token: stateless_reset_token.clone(),
+            });
+            Ok(())
+        },
+        Frame.RetireConnectionId(seq) => {
+            out.retired_cid_seqs.push(*seq);
+            Ok(())
+        },
+
+        Frame.PathChallenge(data) => {
+            // Echo back as PATH_RESPONSE for path validation.
+            out.outbound_frames.push(Frame.PathResponse(data.clone()));
+            Ok(())
+        },
+        Frame.PathResponse(_) => Ok(()),   // recorded by path validator externally
+
+        Frame.ConnectionCloseTransport { error_code, frame_type: _, reason } => {
+            out.close_signal = Some((*error_code, reason.clone(), false));
+            Ok(())
+        },
+        Frame.ConnectionCloseApplication { error_code, reason } => {
+            out.close_signal = Some((*error_code, reason.clone(), true));
+            Ok(())
+        },
+
+        Frame.HandshakeDone => {
+            out.handshake_done = true;
+            Ok(())
+        },
+
+        Frame.NewToken(_) => Ok(()),   // caller stores externally (client-only frame)
+
+        Frame.Datagram { data, with_length: _ } => {
+            out.datagrams.push(data.clone());
+            Ok(())
+        },
+    }
+}
+
+// =============================================================================
+// Stream lookup helpers
+// =============================================================================
+
+fn find_or_create_recv<'a>(
+    list: &'a mut List<(UInt64, RecvStream)>,
+    sid:  UInt64,
+    flow: &ConnFlowControl,
+) -> &'a mut RecvStream {
+    let mut i: Int = 0;
+    while i < list.len() {
+        if list[i].0 == sid { return &mut list[i].1; }
+        i = i + 1;
+    }
+    // Lazy-open — bidirectional peer-initiated → use bidi-local limit,
+    // uni → uni limit. Caller validates the stream-id kind against
+    // transport params elsewhere.
+    let initial = flow.max_data_local;   // conservative bound
+    let _ = initial;
+    let stream = RecvStream.new(sid, 65536_u64);    // placeholder bound — integration-layer refines
+    list.push((sid, stream));
+    let last = list.len() - 1;
+    &mut list[last].1
+}
+
+fn find_send<'a>(
+    list: &'a mut List<(UInt64, SendStream)>,
+    sid:  UInt64,
+) -> Maybe<&'a mut SendStream> {
+    let mut i: Int = 0;
+    while i < list.len() {
+        if list[i].0 == sid { return Some(&mut list[i].1); }
+        i = i + 1;
+    }
+    None
+}

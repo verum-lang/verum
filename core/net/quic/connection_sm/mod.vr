@@ -71,6 +71,11 @@
 module core.net.quic.connection_sm;
 
 public module state;
+public module aead;
+public module keys;
+public module tx;
+public module rx;
+public module dispatch;
 
 mount core.*;
 mount core.collections.List;

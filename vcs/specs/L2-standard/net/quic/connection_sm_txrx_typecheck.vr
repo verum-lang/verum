@@ -1,0 +1,92 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: quic, rfc9000, tx, rx, dispatch, typecheck
+// @timeout: 10000
+// @expect: pass
+
+mount core.net.quic.connection_sm.{QuicSpaceKeys};
+mount core.net.quic.connection_sm.aead.{seal, open, build_nonce, QuicAeadError};
+mount core.net.quic.connection_sm.keys.{
+    derive_space_keys, rotate_space_keys,
+    aead_key_len_for, is_chacha_aead,
+};
+mount core.net.quic.connection_sm.tx.{
+    build_long_packet, build_short_packet,
+    LongPacketInput, ShortPacketInput, TxError,
+};
+mount core.net.quic.connection_sm.rx.{
+    parse_long_packet, parse_short_packet,
+    InboundPacket, InboundLongPacket, InboundShortPacket, RxError,
+};
+mount core.net.quic.connection_sm.dispatch.{
+    dispatch_frames, DispatchOutcome, CryptoChunk, NewCid,
+};
+mount core.net.quic.frame.{Frame};
+mount core.net.quic.packet.{LongPacketType};
+mount core.net.quic.connection_id.{ConnectionId};
+mount core.net.quic.recovery.{LossDetection, NewReno, PnSpaceKind};
+mount core.net.quic.stream_sm.{SendStream, RecvStream, ConnFlowControl};
+mount core.net.quic.crypto.header_protection.{HpKey};
+mount core.time.instant.{Instant};
+
+fn make_keys() -> QuicSpaceKeys {
+    QuicSpaceKeys {
+        aead_key: [0_u8; 16].to_vec(),
+        aead_iv:  [0_u8; 12],
+        hp_key:   HpKey.AesEcb128([0_u8; 16]),
+    }
+}
+
+fn check_nonce() {
+    let iv: [Byte; 12] = [0_u8; 12];
+    let _ = build_nonce(&iv, 42_u64);
+}
+
+fn check_tx_shape() -> Result<(), TxError> {
+    let dcid = ConnectionId.empty();
+    let scid = ConnectionId.empty();
+    let keys = make_keys();
+    let frames: List<Frame> = [Frame.PingFrame];
+
+    let _ = build_long_packet(LongPacketInput {
+        ptype: LongPacketType.Initial,
+        version: 0x00000001_u32,
+        dcid: &dcid, scid: &scid,
+        token: &[],
+        packet_number: 0_u64,
+        largest_acked: None,
+        frames: &frames,
+        keys: &keys,
+    })?;
+
+    let _ = build_short_packet(ShortPacketInput {
+        dcid: &dcid,
+        spin_bit: false,
+        key_phase: false,
+        packet_number: 0_u64,
+        largest_acked: None,
+        frames: &frames,
+        keys: &keys,
+    })?;
+    Ok(())
+}
+
+fn check_dispatch() {
+    let frames: List<Frame> = [Frame.PingFrame, Frame.PaddingRun(4)];
+    let mut loss = LossDetection.new();
+    let mut cc = NewReno.new();
+    let mut flow = ConnFlowControl.new(1_000_000_u64, 1_000_000_u64, 100_u64, 100_u64, 100_u64, 100_u64);
+    let mut ss: List<(UInt64, SendStream)> = [];
+    let mut rs: List<(UInt64, RecvStream)> = [];
+    let _ = dispatch_frames(
+        &frames, PnSpaceKind.Application, Instant.now(),
+        &mut loss, &mut cc, &mut flow, &mut ss, &mut rs,
+    );
+}
+
+fn main() {
+    check_nonce();
+    let _ = check_tx_shape();
+    check_dispatch();
+}

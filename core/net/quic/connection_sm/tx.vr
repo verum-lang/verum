@@ -1,0 +1,233 @@
+// =============================================================================
+// net/quic/connection_sm/tx.vr — Packet assembly + seal + HP (RFC 9000 §17 + 9001 §5)
+// =============================================================================
+// Layer: 5 (Network — QUIC)
+// Dependencies: core, collections, core.encoding.varint,
+//               core.net.quic.{frame, connection_id, version},
+//               core.net.quic.crypto.header_protection
+// =============================================================================
+//
+// Build a wire datagram carrying one QUIC packet:
+//
+//   1. Compose frames (payload).
+//   2. Allocate packet number from PnSpace.
+//   3. Build header bytes:
+//        - Long: 1 byte first | 4 byte version | dcid_len | dcid | scid_len | scid
+//                + [Initial only: token_len + token] + length (varint, includes PN + payload + tag)
+//                + truncated PN bytes (1..=4)
+//        - Short: 1 byte first | dcid | truncated PN bytes
+//   4. AEAD-seal payload with AAD = full header bytes up to and including
+//      the truncated PN field (RFC 9001 §5.3).
+//   5. Compute HP mask from `sample = ciphertext[4..20]` (counting from
+//      the start of PN bytes, padded with AEAD tag bytes if payload <
+//      16 bytes).
+//   6. Apply HP mask to first byte's low 4/5 bits + truncated PN bytes.
+//
+// Output: full datagram bytes ready for UDP send.
+//
+// =============================================================================
+
+module core.net.quic.connection_sm.tx;
+
+mount core.*;
+mount core.collections.List;
+mount core.encoding.varint.{quic_encode_into};
+mount core.net.quic.connection_id.{ConnectionId};
+mount core.net.quic.frame.{Frame, encode_frame};
+mount core.net.quic.packet.{LongPacketType, encode_packet_number_len};
+mount core.net.quic.version as qv;
+mount core.net.quic.crypto.header_protection.{HpKey, compute_hp_mask, apply_hp_mask};
+mount core.net.quic.connection_sm.{QuicSpaceKeys};
+mount core.net.quic.connection_sm.aead.{seal, QuicAeadError};
+
+// =============================================================================
+// Error
+// =============================================================================
+
+public type TxError is
+      FrameEncodeFailed
+    | AeadFailed
+    | BufferTooLarge
+    | SampleUnavailable;
+
+// =============================================================================
+// Build Long-header packet (Initial / Handshake / 0-RTT)
+// =============================================================================
+
+public type LongPacketInput<'a> is {
+    ptype:       LongPacketType,
+    version:     UInt32,
+    dcid:        &'a ConnectionId,
+    scid:        &'a ConnectionId,
+    /// Token — Initial packets only; empty list for Handshake / 0-RTT.
+    token:       &'a [Byte],
+    packet_number: UInt64,
+    largest_acked: Maybe<UInt64>,
+    frames:      &'a List<Frame>,
+    keys:        &'a QuicSpaceKeys,
+};
+
+public fn build_long_packet(input: LongPacketInput) -> Result<List<Byte>, TxError> {
+    // Serialise frames into a scratch buffer.
+    let payload = encode_frames(input.frames)?;
+
+    let (truncated_pn, pn_len) = encode_packet_number_len(input.packet_number, input.largest_acked);
+
+    // AEAD tag length — 16 for GCM / ChaCha20-Poly1305 (warp's supported suites).
+    let tag_len: Int = 16;
+
+    // Length field = pn_len + payload.len() + tag_len (RFC 9000 §17.2).
+    let length_field: UInt64 = (pn_len as UInt64) + (payload.len() as UInt64) + (tag_len as UInt64);
+
+    // Assemble header bytes up through the length field (no PN yet).
+    let mut header: List<Byte> = [];
+    // First byte: header form (1) | fixed (1) | type (2 bits) | reserved (2) | pn_len bits (2)
+    let first: Byte = 0xC0_u8
+        | (input.ptype.to_bits() << 4)
+        | ((pn_len - 1_u8) & 0x03_u8);
+    header.push(first);
+    // Version
+    header.push(((input.version >> 24) & 0xFF_u32) as Byte);
+    header.push(((input.version >> 16) & 0xFF_u32) as Byte);
+    header.push(((input.version >>  8) & 0xFF_u32) as Byte);
+    header.push((input.version         & 0xFF_u32) as Byte);
+    // DCID
+    header.push(input.dcid.len() as Byte);
+    let d_slice = input.dcid.as_slice();
+    let mut i: Int = 0;
+    while i < d_slice.len() { header.push(d_slice[i]); i = i + 1; }
+    // SCID
+    header.push(input.scid.len() as Byte);
+    let s_slice = input.scid.as_slice();
+    let mut j: Int = 0;
+    while j < s_slice.len() { header.push(s_slice[j]); j = j + 1; }
+    // Initial-only: Token
+    match input.ptype {
+        LongPacketType.Initial => {
+            let _ = quic_encode_into(&mut header, input.token.len() as UInt64);
+            let mut k: Int = 0;
+            while k < input.token.len() { header.push(input.token[k]); k = k + 1; }
+        },
+        _ => {},
+    }
+    // Length field (varint)
+    let _ = quic_encode_into(&mut header, length_field);
+    // Truncated PN bytes
+    let pn_field_offset = header.len();
+    append_truncated_pn(&mut header, truncated_pn, pn_len);
+
+    // AEAD-seal payload with AAD = full header (including PN bytes).
+    let ciphertext = seal(input.keys, input.packet_number, header.as_slice(), payload.as_slice())
+        .map_err(|_| TxError.AeadFailed)?;
+
+    // Assemble full datagram = header || ciphertext.
+    let mut wire: List<Byte> = [];
+    let mut i2: Int = 0;
+    while i2 < header.len() { wire.push(header[i2]); i2 = i2 + 1; }
+    let mut j2: Int = 0;
+    while j2 < ciphertext.len() { wire.push(ciphertext[j2]); j2 = j2 + 1; }
+
+    // Header protection.
+    apply_hp(&mut wire, pn_field_offset, pn_len, &input.keys.hp_key, /* is_long */ true)?;
+
+    Ok(wire)
+}
+
+// =============================================================================
+// Build Short-header (1-RTT) packet
+// =============================================================================
+
+public type ShortPacketInput<'a> is {
+    dcid:          &'a ConnectionId,
+    spin_bit:      Bool,
+    key_phase:     Bool,
+    packet_number: UInt64,
+    largest_acked: Maybe<UInt64>,
+    frames:        &'a List<Frame>,
+    keys:          &'a QuicSpaceKeys,
+};
+
+public fn build_short_packet(input: ShortPacketInput) -> Result<List<Byte>, TxError> {
+    let payload = encode_frames(input.frames)?;
+    let (truncated_pn, pn_len) = encode_packet_number_len(input.packet_number, input.largest_acked);
+
+    // First byte: 0 (header form) | 1 (fixed) | S (spin) | 0 0 (reserved) | K (key phase) | PP (pn_len-1)
+    let mut first: Byte = 0x40_u8
+        | ((pn_len - 1_u8) & 0x03_u8);
+    if input.spin_bit  { first = first | 0x20_u8; }
+    if input.key_phase { first = first | 0x04_u8; }
+
+    let mut header: List<Byte> = [];
+    header.push(first);
+    let d_slice = input.dcid.as_slice();
+    let mut i: Int = 0;
+    while i < d_slice.len() { header.push(d_slice[i]); i = i + 1; }
+    let pn_field_offset = header.len();
+    append_truncated_pn(&mut header, truncated_pn, pn_len);
+
+    let ciphertext = seal(input.keys, input.packet_number, header.as_slice(), payload.as_slice())
+        .map_err(|_| TxError.AeadFailed)?;
+
+    let mut wire: List<Byte> = [];
+    let mut i2: Int = 0;
+    while i2 < header.len() { wire.push(header[i2]); i2 = i2 + 1; }
+    let mut j2: Int = 0;
+    while j2 < ciphertext.len() { wire.push(ciphertext[j2]); j2 = j2 + 1; }
+
+    apply_hp(&mut wire, pn_field_offset, pn_len, &input.keys.hp_key, /* is_long */ false)?;
+
+    Ok(wire)
+}
+
+// =============================================================================
+// Helpers
+// =============================================================================
+
+fn encode_frames(frames: &List<Frame>) -> Result<List<Byte>, TxError> {
+    let mut out: List<Byte> = [];
+    let mut i: Int = 0;
+    while i < frames.len() {
+        let _ = encode_frame(&frames[i], &mut out);
+        i = i + 1;
+    }
+    Ok(out)
+}
+
+fn append_truncated_pn(out: &mut List<Byte>, pn: UInt32, pn_len: UInt8) {
+    let n = pn_len as Int;
+    let mut i: Int = n - 1;
+    while i >= 0 {
+        out.push(((pn >> (i * 8)) & 0xFF_u32) as Byte);
+        i = i - 1;
+    }
+}
+
+/// Apply HP: sample = wire[pn_offset+4..pn_offset+20]; XOR first byte
+/// low 4/5 bits and truncated PN bytes.
+fn apply_hp(
+    wire: &mut List<Byte>,
+    pn_offset: Int,
+    pn_len: UInt8,
+    hp: &HpKey,
+    is_long: Bool,
+) -> Result<(), TxError> {
+    let sample_start = pn_offset + 4;
+    if sample_start + 16 > wire.len() {
+        return Err(TxError.SampleUnavailable);
+    }
+    let mut sample: [Byte; 16] = [0_u8; 16];
+    let mut i: Int = 0;
+    while i < 16 { sample[i] = wire[sample_start + i]; i = i + 1; }
+    let mask = compute_hp_mask(hp, &sample);
+
+    // Build a temporary view over wire's prefix (first byte + PN bytes)
+    // and apply the mask in-place.
+    let first_mask: Byte = if is_long { mask[0] & 0x0F_u8 } else { mask[0] & 0x1F_u8 };
+    wire[0] = wire[0] ^ first_mask;
+    let mut j: Int = 0;
+    while j < (pn_len as Int) {
+        wire[pn_offset + j] = wire[pn_offset + j] ^ mask[1 + j];
+        j = j + 1;
+    }
+    Ok(())
+}

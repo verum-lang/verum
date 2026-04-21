@@ -1,0 +1,385 @@
+// =============================================================================
+// net/quic/connection_sm/rx.vr — Incoming packet parsing + HP + AEAD + dispatch
+// =============================================================================
+// Layer: 5 (Network — QUIC)
+// Dependencies: core, collections, core.encoding.varint,
+//               core.net.quic.{frame, packet, connection_id, version},
+//               core.net.quic.crypto.header_protection
+// =============================================================================
+//
+// Incoming UDP datagram → one or more QUIC packets (coalesced). For
+// each packet:
+//
+//   1. Peek the first byte → long vs short form.
+//   2. For long: parse version, dcid_len + dcid, scid_len + scid, then
+//      per-type fields up to the truncated PN bytes. Determine pn_len
+//      via HP removal.
+//   3. For short: parse dcid (caller-known length) then truncated PN.
+//   4. HP unmask: sample = wire[pn_offset + 4 .. +20].
+//      mask[0] XOR first byte low nibble; mask[1..=pn_len] XOR pn bytes.
+//   5. Reconstruct full PN via RFC 9000 §A.3 given largest_acked_received.
+//   6. AEAD open (key, nonce = iv XOR pn, AAD = header bytes with HP
+//      removed).
+//   7. Return decrypted payload + header metadata.
+//
+// Further steps (frame parsing + dispatch to recovery / streams / TLS)
+// are driven by the caller — this module's job is the crypto + parse
+// boundary.
+//
+// =============================================================================
+
+module core.net.quic.connection_sm.rx;
+
+mount core.*;
+mount core.collections.List;
+mount core.encoding.varint.{quic_decode};
+mount core.net.quic.connection_id.{ConnectionId, MAX_CID_LEN};
+mount core.net.quic.packet.{LongPacketType, decode_packet_number};
+mount core.net.quic.version as qv;
+mount core.net.quic.crypto.header_protection.{HpKey, compute_hp_mask};
+mount core.net.quic.connection_sm.{QuicSpaceKeys};
+mount core.net.quic.connection_sm.aead.{open, QuicAeadError};
+
+// =============================================================================
+// Error
+// =============================================================================
+
+public type RxError is
+      Truncated
+    | InvalidHeaderForm
+    | UnsupportedVersion(UInt32)
+    | InvalidCidLength(Int)
+    | VarintFailure
+    | SampleUnavailable
+    | AeadFailure
+    | UnknownPacketType;
+
+// =============================================================================
+// Parsed inbound packet (decrypted)
+// =============================================================================
+
+public type InboundLongPacket is {
+    ptype:         LongPacketType,
+    version:       UInt32,
+    dcid:          ConnectionId,
+    scid:          ConnectionId,
+    token:         List<Byte>,    // Initial only; empty otherwise
+    packet_number: UInt64,
+    payload:       List<Byte>,    // decrypted frames payload
+    consumed:      Int,           // wire bytes consumed by this packet
+};
+
+public type InboundShortPacket is {
+    dcid:          ConnectionId,
+    spin_bit:      Bool,
+    key_phase:     Bool,
+    packet_number: UInt64,
+    payload:       List<Byte>,
+    consumed:      Int,
+};
+
+public type InboundPacket is
+      Long(InboundLongPacket)
+    | Short(InboundShortPacket)
+    | VersionNegotiation { dcid: ConnectionId, scid: ConnectionId, versions: List<UInt32>, consumed: Int };
+
+// =============================================================================
+// Entry points
+// =============================================================================
+
+/// Parse one QUIC packet from `datagram[offset..]`. Caller looks up
+/// keys by header form + DCID match then passes them in. `dcid_len`
+/// is the caller's advertised DCID length (relevant only for Short
+/// headers — Long headers embed DCID length on the wire).
+///
+/// Returns either the decrypted InboundPacket + bytes consumed, or
+/// an error. Callers iterate over coalesced packets by threading
+/// `consumed` through subsequent calls.
+public fn parse_long_packet(
+    wire: &[Byte],
+    keys: &QuicSpaceKeys,
+    largest_acked_received: Maybe<UInt64>,
+) -> Result<InboundPacket, RxError> {
+    if wire.len() < 7 { return Err(RxError.Truncated); }
+    let first_raw = wire[0];
+    if (first_raw & 0x80_u8) == 0_u8 { return Err(RxError.InvalidHeaderForm); }
+
+    let version: UInt32 =
+          ((wire[1] as UInt32) << 24)
+        | ((wire[2] as UInt32) << 16)
+        | ((wire[3] as UInt32) <<  8)
+        |  (wire[4] as UInt32);
+
+    // Version Negotiation? Special form with version=0 and no
+    // encryption — no HP, no AEAD.
+    if version == qv.VERSION_NEGOTIATION {
+        return parse_version_negotiation(wire);
+    }
+    if !qv.is_supported(version) {
+        return Err(RxError.UnsupportedVersion(version));
+    }
+
+    // DCID
+    let dcid_len = wire[5] as Int;
+    if dcid_len > MAX_CID_LEN { return Err(RxError.InvalidCidLength(dcid_len)); }
+    let dcid_end = 6 + dcid_len;
+    if dcid_end + 1 > wire.len() { return Err(RxError.Truncated); }
+    // SCID
+    let scid_len = wire[dcid_end] as Int;
+    if scid_len > MAX_CID_LEN { return Err(RxError.InvalidCidLength(scid_len)); }
+    let scid_end = dcid_end + 1 + scid_len;
+    if scid_end > wire.len() { return Err(RxError.Truncated); }
+
+    // Type bits
+    let ptype = LongPacketType.from_bits((first_raw >> 4) & 0x03_u8);
+
+    // Token (Initial only)
+    let (token, after_token) = match ptype {
+        LongPacketType.Initial => {
+            let (tl, p1) = quic_decode(wire, scid_end).map_err(|_| RxError.VarintFailure)?;
+            let token_end = p1 + (tl as Int);
+            if token_end > wire.len() { return Err(RxError.Truncated); }
+            let mut t: List<Byte> = [];
+            let mut i: Int = p1;
+            while i < token_end { t.push(wire[i]); i = i + 1; }
+            (t, token_end)
+        },
+        LongPacketType.Retry => {
+            // Retry has no PN / length / payload to decrypt. Caller
+            // handles via the retry-integrity path; we return an error
+            // from this entry point so the caller routes there.
+            return Err(RxError.UnknownPacketType);
+        },
+        _ => ([], scid_end),
+    };
+
+    // Length varint
+    let (length_field, after_length) = quic_decode(wire, after_token)
+        .map_err(|_| RxError.VarintFailure)?;
+    let packet_end = after_length + (length_field as Int);
+    if packet_end > wire.len() { return Err(RxError.Truncated); }
+
+    // HP-protected region starts at `after_length` (PN bytes).
+    let pn_offset = after_length;
+    let (full_pn, pn_len, first_byte_clear) = unprotect_header(
+        wire, pn_offset, packet_end, &keys.hp_key, largest_acked_received, /* is_long */ true,
+    )?;
+
+    // Assemble the AAD = header with HP-cleared first byte + cleared PN bytes.
+    let mut aad: List<Byte> = [];
+    aad.push(first_byte_clear);
+    let mut i: Int = 1;
+    while i < pn_offset { aad.push(wire[i]); i = i + 1; }
+    // PN bytes, unmasked
+    let mut pn_buf: List<Byte> = [];
+    let mut p: Int = 0;
+    while p < (pn_len as Int) {
+        let b = wire[pn_offset + p] ^ hp_mask_byte_at(wire, pn_offset, &keys.hp_key, p + 1)?;
+        pn_buf.push(b);
+        aad.push(b);
+        p = p + 1;
+    }
+
+    let ct_start = pn_offset + (pn_len as Int);
+    let ciphertext = slice_of(wire, ct_start, packet_end);
+
+    let plaintext = open(keys, full_pn, aad.as_slice(), ciphertext.as_slice())
+        .map_err(|_| RxError.AeadFailure)?;
+
+    let consumed = packet_end;
+    let dcid = ConnectionId.from_bytes(slice_of(wire, 6, dcid_end).as_slice())
+        .map_err(|_| RxError.InvalidCidLength(dcid_len))?;
+    let scid = ConnectionId.from_bytes(slice_of(wire, dcid_end + 1, scid_end).as_slice())
+        .map_err(|_| RxError.InvalidCidLength(scid_len))?;
+
+    Ok(InboundPacket.Long(InboundLongPacket {
+        ptype:         ptype,
+        version:       version,
+        dcid:          dcid,
+        scid:          scid,
+        token:         token,
+        packet_number: full_pn,
+        payload:       plaintext,
+        consumed:      consumed,
+    }))
+}
+
+/// Parse a Short-header (1-RTT) packet. `dcid_len` MUST match the DCID
+/// length this connection advertised via NEW_CONNECTION_ID.
+public fn parse_short_packet(
+    wire: &[Byte],
+    dcid_len: Int,
+    keys: &QuicSpaceKeys,
+    largest_acked_received: Maybe<UInt64>,
+) -> Result<InboundPacket, RxError> {
+    if wire.len() < 1 + dcid_len + 1 { return Err(RxError.Truncated); }
+    let first_raw = wire[0];
+    if (first_raw & 0x80_u8) != 0_u8 { return Err(RxError.InvalidHeaderForm); }
+
+    let dcid_end = 1 + dcid_len;
+    let pn_offset = dcid_end;
+    // For short-header the packet extends to the end of the datagram
+    // (caller sliced to a single packet already).
+    let packet_end = wire.len();
+
+    let (full_pn, pn_len, first_byte_clear) = unprotect_header(
+        wire, pn_offset, packet_end, &keys.hp_key, largest_acked_received, /* is_long */ false,
+    )?;
+
+    let mut aad: List<Byte> = [];
+    aad.push(first_byte_clear);
+    let mut i: Int = 1;
+    while i < pn_offset { aad.push(wire[i]); i = i + 1; }
+    let mut pn_buf: List<Byte> = [];
+    let mut p: Int = 0;
+    while p < (pn_len as Int) {
+        let b = wire[pn_offset + p] ^ hp_mask_byte_at(wire, pn_offset, &keys.hp_key, p + 1)?;
+        pn_buf.push(b);
+        aad.push(b);
+        p = p + 1;
+    }
+
+    let ct_start = pn_offset + (pn_len as Int);
+    let ciphertext = slice_of(wire, ct_start, packet_end);
+
+    let plaintext = open(keys, full_pn, aad.as_slice(), ciphertext.as_slice())
+        .map_err(|_| RxError.AeadFailure)?;
+
+    let dcid_bytes = slice_of(wire, 1, dcid_end);
+    let dcid = ConnectionId.from_bytes(dcid_bytes.as_slice())
+        .map_err(|_| RxError.InvalidCidLength(dcid_len))?;
+
+    let spin_bit  = (first_byte_clear & 0x20_u8) != 0_u8;
+    let key_phase = (first_byte_clear & 0x04_u8) != 0_u8;
+
+    Ok(InboundPacket.Short(InboundShortPacket {
+        dcid:          dcid,
+        spin_bit:      spin_bit,
+        key_phase:     key_phase,
+        packet_number: full_pn,
+        payload:       plaintext,
+        consumed:      packet_end,
+    }))
+}
+
+// =============================================================================
+// HP unmask helper — returns (full_pn, pn_len, first_byte_clear)
+// =============================================================================
+
+fn unprotect_header(
+    wire: &[Byte],
+    pn_offset: Int,
+    packet_end: Int,
+    hp: &HpKey,
+    largest_acked: Maybe<UInt64>,
+    is_long: Bool,
+) -> Result<(UInt64, UInt8, Byte), RxError> {
+    let sample_start = pn_offset + 4;
+    if sample_start + 16 > packet_end {
+        return Err(RxError.SampleUnavailable);
+    }
+    let mut sample: [Byte; 16] = [0_u8; 16];
+    let mut i: Int = 0;
+    while i < 16 { sample[i] = wire[sample_start + i]; i = i + 1; }
+    let mask = compute_hp_mask(hp, &sample);
+
+    // Unmask first byte (low 4 bits for long, 5 for short).
+    let first_mask: Byte = if is_long { mask[0] & 0x0F_u8 } else { mask[0] & 0x1F_u8 };
+    let first_clear: Byte = wire[0] ^ first_mask;
+
+    let pn_len: UInt8 = (first_clear & 0x03_u8) + 1_u8;
+    if (pn_len as Int) < 1 || (pn_len as Int) > 4 {
+        return Err(RxError.Truncated);
+    }
+    if pn_offset + (pn_len as Int) > packet_end {
+        return Err(RxError.Truncated);
+    }
+
+    // Reconstruct truncated PN.
+    let mut truncated: UInt32 = 0_u32;
+    let mut p: Int = 0;
+    while p < (pn_len as Int) {
+        let b = wire[pn_offset + p] ^ mask[1 + p];
+        truncated = (truncated << 8) | (b as UInt32);
+        p = p + 1;
+    }
+
+    let largest = match largest_acked { Some(v) => v, None => 0_u64 };
+    let pn_nbits: UInt32 = (pn_len as UInt32) * 8_u32;
+    let full_pn = decode_packet_number(largest, truncated, pn_nbits);
+
+    Ok((full_pn, pn_len, first_clear))
+}
+
+fn hp_mask_byte_at(
+    wire: &[Byte],
+    pn_offset: Int,
+    hp: &HpKey,
+    byte_index: Int,
+) -> Result<Byte, RxError> {
+    // Re-derive the mask for byte `byte_index` of the 5-byte mask.
+    // Caller computes mask once; this is the per-byte fallback when we
+    // didn't cache. For simplicity + locality, just recompute — cheap
+    // vs AEAD open.
+    let sample_start = pn_offset + 4;
+    if sample_start + 16 > wire.len() {
+        return Err(RxError.SampleUnavailable);
+    }
+    let mut sample: [Byte; 16] = [0_u8; 16];
+    let mut i: Int = 0;
+    while i < 16 { sample[i] = wire[sample_start + i]; i = i + 1; }
+    let mask = compute_hp_mask(hp, &sample);
+    Ok(mask[byte_index])
+}
+
+// =============================================================================
+// Version Negotiation (no encryption, fixed layout)
+// =============================================================================
+
+fn parse_version_negotiation(wire: &[Byte]) -> Result<InboundPacket, RxError> {
+    let dcid_len = wire[5] as Int;
+    if dcid_len > MAX_CID_LEN { return Err(RxError.InvalidCidLength(dcid_len)); }
+    let dcid_end = 6 + dcid_len;
+    if dcid_end + 1 > wire.len() { return Err(RxError.Truncated); }
+    let scid_len = wire[dcid_end] as Int;
+    if scid_len > MAX_CID_LEN { return Err(RxError.InvalidCidLength(scid_len)); }
+    let scid_end = dcid_end + 1 + scid_len;
+    if scid_end > wire.len() { return Err(RxError.Truncated); }
+
+    let remaining = wire.len() - scid_end;
+    if remaining == 0 || remaining % 4 != 0 { return Err(RxError.Truncated); }
+
+    let mut versions: List<UInt32> = [];
+    let mut i: Int = scid_end;
+    while i < wire.len() {
+        let v: UInt32 =
+              ((wire[i + 0] as UInt32) << 24)
+            | ((wire[i + 1] as UInt32) << 16)
+            | ((wire[i + 2] as UInt32) <<  8)
+            |  (wire[i + 3] as UInt32);
+        versions.push(v);
+        i = i + 4;
+    }
+
+    let dcid_bytes = slice_of(wire, 6, dcid_end);
+    let scid_bytes = slice_of(wire, dcid_end + 1, scid_end);
+    let dcid = ConnectionId.from_bytes(dcid_bytes.as_slice())
+        .map_err(|_| RxError.InvalidCidLength(dcid_len))?;
+    let scid = ConnectionId.from_bytes(scid_bytes.as_slice())
+        .map_err(|_| RxError.InvalidCidLength(scid_len))?;
+
+    Ok(InboundPacket.VersionNegotiation {
+        dcid: dcid, scid: scid, versions: versions, consumed: wire.len(),
+    })
+}
+
+// =============================================================================
+// Helpers
+// =============================================================================
+
+fn slice_of(buf: &[Byte], start: Int, end: Int) -> List<Byte> {
+    let mut out: List<Byte> = [];
+    let mut i: Int = start;
+    while i < end { out.push(buf[i]); i = i + 1; }
+    out
+}
