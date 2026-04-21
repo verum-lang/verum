@@ -1,0 +1,319 @@
+// =============================================================================
+// net/quic/recovery/loss_detection.vr — RFC 9002 §6 loss detection + timers
+// =============================================================================
+// Layer: 5 (Network — QUIC)
+// Dependencies: core, core.time, quic.{frame, recovery.{rtt, pn_space}}
+// =============================================================================
+//
+// RFC 9002 §6 loss detection runs two detection mechanisms in parallel:
+//
+//   (1) Threshold-based (§6.1):
+//       A packet is declared lost if a later packet (by PN) has been
+//       acknowledged AND either:
+//         - the packet is more than `kPacketThreshold = 3` PNs behind
+//           the largest acked, OR
+//         - the packet's time_sent is more than `max(kTimeThreshold *
+//           max(smoothed_rtt, latest_rtt), kGranularity)` before the
+//           ack arrival (§6.1.2; kTimeThreshold = 9/8).
+//
+//   (2) Probe timeout (§6.2):
+//       If no ACK arrives for max_ack_delay + PTO = max_ack_delay +
+//       smoothed_rtt + max(4 * rttvar, kGranularity), the timer fires
+//       and the sender MUST emit a probe packet. PTO back-off
+//       doubles (pto_count++) on each fire, reset on any valid ACK.
+//
+// Per-space state lives in `PnSpace.sent_packets` / `largest_acked_sent`.
+// This module ties those fields together with the RttEstimator and
+// a CongestionCtrl impl.
+//
+// =============================================================================
+
+module core.net.quic.recovery.loss_detection;
+
+mount core.*;
+mount core.collections.List;
+mount core.time.instant.{Instant};
+mount core.time.duration.{Duration};
+mount core.net.quic.frame.{Frame, AckRange};
+mount core.net.quic.recovery.pn_space.{PnSpace, PnSpaceKind, SentPacketInfo, ranges_contain};
+mount core.net.quic.recovery.rtt.{RttEstimator};
+mount core.net.quic.recovery.cc.{CongestionCtrl};
+
+// =============================================================================
+// Constants (RFC 9002 §6.1.1 / §6.2.1)
+// =============================================================================
+
+pub const K_PACKET_THRESHOLD: UInt64 = 3_u64;
+pub const K_GRANULARITY_US:   UInt64 = 1_000_u64;    // 1 ms
+pub const K_TIME_THRESHOLD_NUM: UInt64 = 9_u64;       // 9/8 scale
+pub const K_TIME_THRESHOLD_DEN: UInt64 = 8_u64;
+pub const MAX_PTO_BACKOFF:    UInt32 = 8_u32;
+
+// =============================================================================
+// LossDetection state
+// =============================================================================
+
+public type LossDetection is {
+    rtt:  RttEstimator,
+    // Per-space state
+    spaces: List<PnSpace>,     // [Initial, Handshake, Application]
+
+    // Timer bookkeeping
+    loss_detection_timer:       Maybe<Instant>,
+    pto_count:                  UInt32,
+    time_of_last_ack_eliciting_packet: [Maybe<Instant>; 3],
+
+    // Mutable runtime knobs
+    max_ack_delay:              Duration,    // peer-advertised max_ack_delay
+    pto_armed_for_space:        Maybe<PnSpaceKind>,
+};
+
+impl LossDetection {
+    pub fn new() -> LossDetection {
+        LossDetection {
+            rtt:    RttEstimator.new(),
+            spaces: [
+                PnSpace.new(PnSpaceKind.Initial),
+                PnSpace.new(PnSpaceKind.Handshake),
+                PnSpace.new(PnSpaceKind.Application),
+            ],
+            loss_detection_timer: None,
+            pto_count: 0_u32,
+            time_of_last_ack_eliciting_packet: [None, None, None],
+            max_ack_delay: Duration.from_millis(25),
+            pto_armed_for_space: None,
+        }
+    }
+
+    fn space_mut(&mut self, kind: PnSpaceKind) -> &mut PnSpace {
+        &mut self.spaces[kind.as_index()]
+    }
+
+    fn space(&self, kind: PnSpaceKind) -> &PnSpace {
+        &self.spaces[kind.as_index()]
+    }
+
+    /// Register a freshly-sent packet.
+    pub fn on_packet_sent(
+        &mut self,
+        kind: PnSpaceKind,
+        info: SentPacketInfo,
+        cc: &mut dyn CongestionCtrl,
+    ) {
+        if info.ack_eliciting {
+            self.time_of_last_ack_eliciting_packet[kind.as_index()] = Some(info.time_sent);
+        }
+        if info.in_flight {
+            cc.on_packet_sent(info.size_bytes);
+        }
+        self.space_mut(kind).record_sent(info);
+        self.set_loss_detection_timer();
+    }
+
+    /// Process an incoming ACK frame for a given PN space.
+    /// Returns the list of frames the caller must retransmit (from
+    /// lost packets detected in the same pass).
+    pub fn on_ack_received(
+        &mut self,
+        kind: PnSpaceKind,
+        largest_acked: UInt64,
+        ranges: &List<AckRange>,
+        ack_delay_us: UInt64,
+        now: Instant,
+        cc: &mut dyn CongestionCtrl,
+    ) -> List<Frame> {
+        let acked = self.space_mut(kind).on_ack_received(largest_acked, ranges);
+
+        // Feed RTT estimator: if any newly acked packet is the largest
+        // in this call's `largest_acked`, sample its RTT.
+        let mut maybe_latest_rtt_us: Maybe<UInt64> = None;
+        let mut acked_bytes: UInt32 = 0_u32;
+        let mut j: Int = 0;
+        while j < acked.len() {
+            let info = &acked[j];
+            if info.in_flight { acked_bytes = acked_bytes + info.size_bytes; }
+            if info.packet_number == largest_acked {
+                let rtt_us = now.duration_since(info.time_sent)
+                    .unwrap_or_else(|| Duration.from_micros(0))
+                    .as_micros() as UInt64;
+                maybe_latest_rtt_us = Some(rtt_us);
+            }
+            j = j + 1;
+        }
+        match maybe_latest_rtt_us {
+            Some(us) => self.rtt.on_rtt_sample(us, ack_delay_us),
+            None => {},
+        }
+
+        // Threshold-based loss detection on remaining in-flight packets.
+        let lost = self.detect_lost_packets(kind, largest_acked, now);
+        let mut lost_bytes: UInt32 = 0_u32;
+        let mut to_retransmit: List<Frame> = [];
+        let mut i: Int = 0;
+        while i < lost.len() {
+            let li = &lost[i];
+            if li.in_flight { lost_bytes = lost_bytes + li.size_bytes; }
+            let mut f: Int = 0;
+            while f < li.frames.len() {
+                to_retransmit.push(li.frames[f].clone());
+                f = f + 1;
+            }
+            i = i + 1;
+        }
+
+        if acked_bytes > 0_u32 {
+            cc.on_ack_received(acked_bytes, self.rtt.smoothed(), now);
+        }
+        if lost_bytes > 0_u32 {
+            cc.on_packets_lost(lost_bytes, now);
+        }
+
+        // Reset PTO back-off on any ACK that newly-acknowledges
+        // ack-eliciting packets.
+        let mut any_ack_eliciting = false;
+        let mut k: Int = 0;
+        while k < acked.len() {
+            if acked[k].ack_eliciting { any_ack_eliciting = true; break; }
+            k = k + 1;
+        }
+        if any_ack_eliciting { self.pto_count = 0_u32; }
+
+        self.set_loss_detection_timer();
+        to_retransmit
+    }
+
+    /// RFC 9002 §6.1 — Find sent packets that are now lost based on
+    /// the threshold rule. Remove them from sent_packets.
+    fn detect_lost_packets(
+        &mut self,
+        kind: PnSpaceKind,
+        largest_acked: UInt64,
+        now: Instant,
+    ) -> List<SentPacketInfo> {
+        let loss_delay_us = self.compute_loss_delay_us();
+
+        // Partition sent_packets into retained vs lost.
+        let sp = self.space_mut(kind);
+        let mut retained: List<SentPacketInfo> = [];
+        let mut lost:     List<SentPacketInfo> = [];
+        let mut i: Int = 0;
+        while i < sp.sent_packets.len() {
+            let info = &sp.sent_packets[i];
+            let is_pn_thresh_lost =
+                largest_acked >= info.packet_number + K_PACKET_THRESHOLD;
+            let elapsed_us = now.duration_since(info.time_sent)
+                .unwrap_or_else(|| Duration.from_micros(0))
+                .as_micros() as UInt64;
+            let is_time_thresh_lost = elapsed_us > loss_delay_us;
+
+            if is_pn_thresh_lost || is_time_thresh_lost {
+                lost.push(sp.sent_packets[i].clone());
+            } else {
+                retained.push(sp.sent_packets[i].clone());
+            }
+            i = i + 1;
+        }
+        sp.sent_packets = retained;
+        lost
+    }
+
+    fn compute_loss_delay_us(&self) -> UInt64 {
+        let srtt_us = self.rtt.smoothed().as_micros() as UInt64;
+        let latest_us = self.rtt.latest().as_micros() as UInt64;
+        let max_rtt = if srtt_us > latest_us { srtt_us } else { latest_us };
+        let scaled = (max_rtt * K_TIME_THRESHOLD_NUM) / K_TIME_THRESHOLD_DEN;
+        if scaled > K_GRANULARITY_US { scaled } else { K_GRANULARITY_US }
+    }
+
+    /// RFC 9002 §6.2 — arm the loss/PTO timer.
+    fn set_loss_detection_timer(&mut self) {
+        // Simplified: pick the earliest outstanding ack-eliciting packet
+        // time across non-discarded spaces, add PTO, use as timer.
+        let pto_us = self.compute_pto_us();
+
+        let mut earliest: Maybe<(Instant, PnSpaceKind)> = None;
+        let mut idx: Int = 0;
+        while idx < 3 {
+            let t_opt = self.time_of_last_ack_eliciting_packet[idx];
+            let has_inflight = {
+                let mut any_flight = false;
+                let mut k: Int = 0;
+                let sp = &self.spaces[idx];
+                if sp.discarded { any_flight = false; } else {
+                    while k < sp.sent_packets.len() {
+                        if sp.sent_packets[k].in_flight { any_flight = true; break; }
+                        k = k + 1;
+                    }
+                }
+                any_flight
+            };
+            if has_inflight {
+                match t_opt {
+                    Some(t) => {
+                        let fire = t.checked_add(Duration.from_micros(pto_us as Int))
+                            .unwrap_or_else(|| t);
+                        let kind = match idx {
+                            0 => PnSpaceKind.Initial,
+                            1 => PnSpaceKind.Handshake,
+                            _ => PnSpaceKind.Application,
+                        };
+                        match earliest {
+                            Some((existing, _)) => {
+                                if fire < existing { earliest = Some((fire, kind)); }
+                            },
+                            None => { earliest = Some((fire, kind)); }
+                        }
+                    },
+                    None => {},
+                }
+            }
+            idx = idx + 1;
+        }
+
+        match earliest {
+            Some((fire, kind)) => {
+                self.loss_detection_timer = Some(fire);
+                self.pto_armed_for_space = Some(kind);
+            },
+            None => {
+                self.loss_detection_timer = None;
+                self.pto_armed_for_space = None;
+            },
+        }
+    }
+
+    /// Return the current PTO in microseconds, with back-off applied.
+    fn compute_pto_us(&self) -> UInt64 {
+        let srtt_us = self.rtt.smoothed().as_micros() as UInt64;
+        let rttvar_us = self.rtt.rttvar().as_micros() as UInt64;
+        let four_var = 4_u64 * rttvar_us;
+        let granular = if four_var > K_GRANULARITY_US { four_var } else { K_GRANULARITY_US };
+        let max_ack_delay_us = self.max_ack_delay.as_micros() as UInt64;
+        let base = srtt_us + granular + max_ack_delay_us;
+        base * ((1_u64) << (self.pto_count as UInt64))
+    }
+
+    /// Timer fire hook. Returns `Some(kind)` indicating the PN space
+    /// that must emit a PROBE packet. `None` if the timer was armed for
+    /// loss-only detection and lost packets have already been handled.
+    pub fn on_timer(&mut self, now: Instant, cc: &mut dyn CongestionCtrl) -> Maybe<PnSpaceKind> {
+        // If we have in-flight packets in any space, a timer fire is
+        // always a PTO (not pure loss): RFC 9002 §6.2.4.
+        self.pto_count = self.pto_count + 1_u32;
+        if self.pto_count > MAX_PTO_BACKOFF { self.pto_count = MAX_PTO_BACKOFF; }
+        cc.on_pto(now);
+        let kind = self.pto_armed_for_space;
+        self.set_loss_detection_timer();
+        kind
+    }
+
+    /// Hook called when Initial or Handshake keys are discarded.
+    pub fn on_keys_discarded(&mut self, kind: PnSpaceKind) {
+        self.space_mut(kind).discard();
+        self.time_of_last_ack_eliciting_packet[kind.as_index()] = None;
+        self.set_loss_detection_timer();
+    }
+
+    pub fn timer_fires_at(&self) -> Maybe<Instant> { self.loss_detection_timer }
+    pub fn pto_count(&self) -> UInt32 { self.pto_count }
+}

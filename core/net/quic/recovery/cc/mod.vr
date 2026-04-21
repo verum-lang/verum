@@ -1,0 +1,88 @@
+// =============================================================================
+// net/quic/recovery/cc/mod.vr — Congestion control protocol + default backends
+// =============================================================================
+// Layer: 5 (Network — QUIC)
+// Dependencies: core.time.{instant, duration}
+// =============================================================================
+//
+// Every QUIC connection runs a congestion-control algorithm that
+// governs the in-flight byte limit (cwnd) and the pacing rate.
+// RFC 9002 mandates NewReno compliance for v1; CUBIC (RFC 9438) and
+// BBRv2 are optional advanced choices available behind the same
+// CongestionCtrl protocol.
+//
+// Protocol shape:
+//
+//   trait CongestionCtrl {
+//       fn on_packet_sent(bytes)                          — +bytes_in_flight
+//       fn on_ack_received(acked_bytes, rtt, now)         — +cwnd, exit slow-start
+//       fn on_packets_lost(lost_bytes, now)               — cut cwnd
+//       fn on_pto(now)                                    — PTO fire, no state change
+//       fn window()                                       — current cwnd (bytes)
+//       fn bytes_in_flight()                              — current in-flight
+//       fn should_pace()                                  — always true for NewReno
+//       fn pacing_rate()                                  — bytes/sec
+//   }
+//
+// The top-level connection holds one `CongestionCtrl` impl and calls
+// the ack/loss hooks from the recovery loop.
+//
+// =============================================================================
+
+module core.net.quic.recovery.cc;
+
+public module new_reno;
+
+mount core.*;
+mount core.time.instant.{Instant};
+mount core.time.duration.{Duration};
+
+// Re-exports
+public mount .new_reno.{NewReno};
+
+// =============================================================================
+// CongestionCtrl protocol
+// =============================================================================
+
+public type CongestionCtrl is protocol {
+    /// Callback when a new packet is sent. `bytes` is the UDP payload
+    /// size for the datagram containing the packet.
+    fn on_packet_sent(&mut self, bytes: UInt32);
+
+    /// Callback when an ACK is processed. `acked_bytes` is the total
+    /// in-flight bytes of packets newly acked; `rtt` is the current
+    /// smoothed RTT; `now` is a monotonic timestamp.
+    fn on_ack_received(&mut self, acked_bytes: UInt32, rtt: Duration, now: Instant);
+
+    /// Callback when loss detection marks one or more packets lost.
+    /// `lost_bytes` is their total in-flight size; `now` is monotonic.
+    fn on_packets_lost(&mut self, lost_bytes: UInt32, now: Instant);
+
+    /// PTO fire — RFC 9002 §6.2.4. The CC MAY drop cwnd here; NewReno
+    /// does not (persistent congestion detection is a separate step).
+    fn on_pto(&mut self, now: Instant);
+
+    /// Current congestion window in bytes.
+    fn window(&self) -> UInt32;
+
+    /// Current in-flight bytes estimate — used by the sender to gate
+    /// emission.
+    fn bytes_in_flight(&self) -> UInt32;
+
+    /// Always pace after handshake; NewReno returns true past the
+    /// initial RTT.
+    fn should_pace(&self) -> Bool;
+
+    /// Pacing rate in bytes/sec. `0` = unlimited.
+    fn pacing_rate(&self) -> UInt64;
+};
+
+// =============================================================================
+// Constants (RFC 9002 §7.2)
+// =============================================================================
+
+public const MAX_DATAGRAM_SIZE: UInt32 = 1200_u32;        // conservative IPv6 MTU
+public const INITIAL_WINDOW_BYTES: UInt32 = 10_u32 * MAX_DATAGRAM_SIZE;  // 12000
+public const MIN_WINDOW_BYTES:     UInt32 = 2_u32  * MAX_DATAGRAM_SIZE;  // 2400
+public const LOSS_REDUCTION_FACTOR_NUM: UInt32 = 1_u32;
+public const LOSS_REDUCTION_FACTOR_DEN: UInt32 = 2_u32;

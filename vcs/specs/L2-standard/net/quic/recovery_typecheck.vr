@@ -1,0 +1,92 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: quic, rfc9002, recovery, loss-detection, cc, newreno, typecheck
+// @timeout: 10000
+// @expect: pass
+//
+// Typecheck-level validation of the QUIC recovery facade: RTT
+// estimator, PnSpace bookkeeping, NewReno congestion controller, and
+// LossDetection integration all compose. RFC 9002 Appendix A trace
+// vectors land as run-tests once the connection SM can inject timed
+// packet events.
+
+mount core.net.quic.recovery.*;
+mount core.net.quic.frame.{Frame, AckRange};
+mount core.time.instant.{Instant};
+mount core.time.duration.{Duration};
+
+fn check_rtt() {
+    let mut est = RttEstimator.new();
+    est.on_rtt_sample(10_000_u64, 0_u64);     // 10 ms
+    est.on_rtt_sample(15_000_u64, 500_u64);   // 15 ms with 0.5ms ack delay
+    let _ = est.smoothed();
+    let _ = est.rttvar();
+    let _ = est.min_rtt();
+    let _ = est.latest();
+    let _ = est.has_first_sample();
+}
+
+fn check_pn_space() {
+    let mut sp = PnSpace.new(PnSpaceKind.Application);
+    let _ = sp.next_packet_number();
+    let _ = sp.next_packet_number();
+    sp.on_packet_received(5_u64);
+    sp.on_packet_received(6_u64);
+    sp.on_packet_received(4_u64);   // adjacent-merge path
+    let _ = sp.build_ack_frame(0_u64);
+    sp.discard();
+}
+
+fn check_newreno() {
+    let mut cc = NewReno.new();
+    cc.on_packet_sent(1200_u32);
+    cc.on_ack_received(1200_u32, Duration.from_millis(10), Instant.now());
+    cc.on_packets_lost(1200_u32, Instant.now());
+    let _ = cc.window();
+    let _ = cc.bytes_in_flight();
+    let _ = cc.should_pace();
+    let _ = cc.pacing_rate();
+    cc.exit_recovery_if_appropriate(Instant.now());
+}
+
+fn check_loss_detection() {
+    let mut ld = LossDetection.new();
+    let mut cc = NewReno.new();
+
+    // Simulate a single sent packet in the Application space.
+    let now = Instant.now();
+    let info = SentPacketInfo {
+        packet_number: 0_u64,
+        time_sent:     now,
+        size_bytes:    1200_u32,
+        in_flight:     true,
+        ack_eliciting: true,
+        frames:        [],
+    };
+    ld.on_packet_sent(PnSpaceKind.Application, info, &mut cc);
+
+    // Peer ACKs.
+    let ranges: List<AckRange> = [AckRange { smallest: 0_u64, largest: 0_u64 }];
+    let _ = ld.on_ack_received(
+        PnSpaceKind.Application,
+        0_u64, &ranges, 0_u64,
+        Instant.now(), &mut cc,
+    );
+
+    // Timer hook
+    let _ = ld.on_timer(Instant.now(), &mut cc);
+
+    // Discard Initial keys
+    ld.on_keys_discarded(PnSpaceKind.Initial);
+
+    let _ = ld.timer_fires_at();
+    let _ = ld.pto_count();
+}
+
+fn main() {
+    check_rtt();
+    check_pn_space();
+    check_newreno();
+    check_loss_detection();
+}

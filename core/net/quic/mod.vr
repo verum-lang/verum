@@ -61,6 +61,7 @@ public module crypto;                  // RFC 9001 crypto layer (landed)
 public module frame;                   // RFC 9000 §19 frame codec
 public module packet;                  // RFC 9000 §17 packet headers
 public module transport_params;        // RFC 9000 §18 transport parameters
+public module recovery;                // RFC 9002 loss detection + NewReno
 
 mount core.*;
 mount core.time.duration.{Duration};

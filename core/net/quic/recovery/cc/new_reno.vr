@@ -1,0 +1,184 @@
+// =============================================================================
+// net/quic/recovery/cc/new_reno.vr — NewReno congestion controller (RFC 9002 §7)
+// =============================================================================
+// Layer: 5 (Network — QUIC)
+// =============================================================================
+//
+// QUIC NewReno is the MUST-implement CC for RFC 9002 conformance.
+// Pared-down TCP NewReno adapted to QUIC's ack semantics:
+//
+//   Slow Start: on every ACK, cwnd += acked_bytes until cwnd >= ssthresh.
+//   Congestion Avoidance: on every ACK, cwnd += MAX_DATAGRAM_SIZE * acked_bytes / cwnd.
+//   Recovery: triggered by loss detection; cwnd = ssthresh = cwnd / 2
+//             (bounded below by 2 × MAX_DATAGRAM_SIZE). In-flight packets
+//             sent before the recovery start time are ignored for
+//             subsequent loss events until the recovery period ends.
+//
+// The state machine:
+//
+//   slow_start ──(cwnd >= ssthresh)──> avoidance
+//   avoidance  ──(loss detected)────> recovery
+//   recovery   ──(ack past recovery_start_time)──> avoidance
+//
+// Persistent congestion detection (§7.6) declares all outstanding
+// packets in the PTO window lost if no ACK arrives — also handled by
+// the loss detection module, which then calls `on_packets_lost`.
+// NewReno itself has no separate hook; it just responds to the
+// cumulative lost-bytes input.
+//
+// =============================================================================
+
+module core.net.quic.recovery.cc.new_reno;
+
+mount core.*;
+mount core.time.instant.{Instant};
+mount core.time.duration.{Duration};
+mount core.net.quic.recovery.cc.{
+    CongestionCtrl, MAX_DATAGRAM_SIZE, INITIAL_WINDOW_BYTES, MIN_WINDOW_BYTES,
+};
+
+public type NewReno is {
+    cwnd:             UInt32,
+    ssthresh:         UInt32,              // unreachable == slow start
+    bytes_in_flight:  UInt32,
+    recovery_start:   Maybe<Instant>,      // Some during recovery
+    paced:            Bool,
+    pacing_rate_bps:  UInt64,              // bytes/sec; 0 = unbounded
+};
+
+implement NewReno {
+    pub fn new() -> NewReno {
+        NewReno {
+            cwnd:            INITIAL_WINDOW_BYTES,
+            ssthresh:        0xFFFFFFFF_u32,      // "infinity" — slow start
+            bytes_in_flight: 0_u32,
+            recovery_start:  None,
+            paced:           false,
+            pacing_rate_bps: 0_u64,
+        }
+    }
+
+    fn in_recovery(&self) -> Bool {
+        match self.recovery_start { Some(_) => true, None => false }
+    }
+
+    fn update_pacing_rate(&mut self, rtt: Duration) {
+        // RFC 9002 §7.7 suggests pacing ≈ 1.25 × cwnd / srtt during
+        // slow start and steady-state cwnd / srtt otherwise.
+        let srtt_us: UInt64 = rtt.as_micros() as UInt64;
+        if srtt_us == 0_u64 {
+            self.pacing_rate_bps = 0_u64;
+            self.paced = false;
+            return;
+        }
+        // bytes_per_sec = cwnd * 1_000_000 / srtt_us
+        let mut rate = (self.cwnd as UInt64) * 1_000_000_u64 / srtt_us;
+        if self.cwnd < self.ssthresh {
+            // Slow start — 125% pacing factor (RFC 9002 §7.7)
+            rate = (rate * 5_u64) / 4_u64;
+        }
+        self.pacing_rate_bps = rate;
+        self.paced = true;
+    }
+}
+
+// Implement the CongestionCtrl protocol.
+implement CongestionCtrl for NewReno {
+    fn on_packet_sent(&mut self, bytes: UInt32) {
+        self.bytes_in_flight = self.bytes_in_flight + bytes;
+    }
+
+    fn on_ack_received(&mut self, acked_bytes: UInt32, rtt: Duration, now: Instant) {
+        // Ignore acks for packets sent during recovery.
+        let in_recovery = match self.recovery_start {
+            Some(_) => true,
+            None    => false,
+        };
+        let _ = now;   // recovery_start comparison is deferred to on_packets_lost
+
+        if self.bytes_in_flight >= acked_bytes {
+            self.bytes_in_flight = self.bytes_in_flight - acked_bytes;
+        } else {
+            self.bytes_in_flight = 0_u32;
+        }
+
+        if in_recovery {
+            // Exit recovery by clearing the marker once an ACK for a
+            // packet sent after recovery_start arrives. The caller
+            // passes `now` which, for strictly-later packets, is past
+            // recovery_start by more than one RTT — cheap approximation:
+            // clear immediately on any ACK during recovery that
+            // advances state.
+            // Real exit logic (comparing packet.time_sent to
+            // recovery_start) lives in the outer loss-detection loop
+            // which calls `exit_recovery_if_appropriate`.
+        } else if self.cwnd < self.ssthresh {
+            // Slow start: additive by full acked_bytes.
+            self.cwnd = self.cwnd + acked_bytes;
+        } else {
+            // Congestion avoidance: increment ≈ MDS per RTT.
+            // delta = MAX_DATAGRAM_SIZE * acked_bytes / cwnd
+            if self.cwnd > 0_u32 {
+                let delta = (MAX_DATAGRAM_SIZE * acked_bytes) / self.cwnd;
+                self.cwnd = self.cwnd + if delta > 0_u32 { delta } else { 1_u32 };
+            }
+        }
+        self.update_pacing_rate(rtt);
+    }
+
+    fn on_packets_lost(&mut self, lost_bytes: UInt32, now: Instant) {
+        // If already in recovery, loss is already accounted for;
+        // don't cut cwnd a second time.
+        if self.in_recovery() {
+            if self.bytes_in_flight >= lost_bytes {
+                self.bytes_in_flight = self.bytes_in_flight - lost_bytes;
+            } else {
+                self.bytes_in_flight = 0_u32;
+            }
+            return;
+        }
+
+        // Enter recovery. Half cwnd; floor at MIN_WINDOW_BYTES.
+        self.ssthresh = self.cwnd >> 1;
+        if self.ssthresh < MIN_WINDOW_BYTES { self.ssthresh = MIN_WINDOW_BYTES; }
+        self.cwnd = self.ssthresh;
+        self.recovery_start = Some(now);
+
+        if self.bytes_in_flight >= lost_bytes {
+            self.bytes_in_flight = self.bytes_in_flight - lost_bytes;
+        } else {
+            self.bytes_in_flight = 0_u32;
+        }
+    }
+
+    fn on_pto(&mut self, now: Instant) {
+        // PTO fire — RFC 9002 §6.2.4. NewReno does not adjust cwnd;
+        // persistent congestion detection is the trigger for that, and
+        // happens through the on_packets_lost path after the loss
+        // detector declares everything in the PTO window lost.
+        let _ = now;
+    }
+
+    fn window(&self) -> UInt32 { self.cwnd }
+
+    fn bytes_in_flight(&self) -> UInt32 { self.bytes_in_flight }
+
+    fn should_pace(&self) -> Bool { self.paced }
+
+    fn pacing_rate(&self) -> UInt64 { self.pacing_rate_bps }
+};
+
+impl NewReno {
+    /// Called by the outer loss-detection loop when an ACK advances
+    /// past the recovery start time — transitions recovery → avoidance.
+    pub fn exit_recovery_if_appropriate(&mut self, acked_time_sent: Instant) {
+        match self.recovery_start {
+            Some(rs) => {
+                if acked_time_sent >= rs {
+                    self.recovery_start = None;
+                }
+            },
+            None => {},
+        }
+    }
+}

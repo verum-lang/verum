@@ -1,0 +1,267 @@
+// =============================================================================
+// net/quic/recovery/pn_space.vr — Per-space packet-number bookkeeping
+// =============================================================================
+// Layer: 5 (Network — QUIC)
+// Dependencies: core, collections, core.time.instant, quic.frame.AckRange
+// =============================================================================
+//
+// RFC 9000 §12.3 defines three independent packet-number spaces
+// (Initial, Handshake, Application Data). Each has its own:
+//
+//   * Monotonic next-PN-to-send counter.
+//   * Largest ACK-received tracking + time-of-arrival.
+//   * In-flight packet table for retransmission + loss detection.
+//   * Outgoing ACK range list.
+//
+// The ACK ranges are stored in descending order with no overlaps and
+// gap > 1 between consecutive ranges (RFC 9000 §19.3.1 wire format
+// requires this). `insert_ack_range` merges adjacent ranges to
+// preserve the invariant.
+//
+// =============================================================================
+
+module core.net.quic.recovery.pn_space;
+
+mount core.*;
+mount core.collections.List;
+mount core.time.instant.{Instant};
+mount core.time.duration.{Duration};
+mount core.net.quic.frame.{AckRange, Frame};
+
+// =============================================================================
+// Sent packet metadata — tracked for loss detection + retransmission
+// =============================================================================
+
+/// Metadata about a sent packet for loss-detection purposes.
+public type SentPacketInfo is {
+    packet_number:      UInt64,
+    time_sent:          Instant,
+    size_bytes:         UInt32,
+    in_flight:          Bool,     // counts against CC window
+    ack_eliciting:      Bool,     // triggers ACK by peer
+    frames:             List<Frame>,   // frames to retransmit on loss
+};
+
+// =============================================================================
+// PnSpaceKind
+// =============================================================================
+
+public type PnSpaceKind is Initial | Handshake | Application;
+
+impl PnSpaceKind {
+    pub fn as_index(&self) -> Int {
+        match self {
+            PnSpaceKind.Initial     => 0,
+            PnSpaceKind.Handshake   => 1,
+            PnSpaceKind.Application => 2,
+        }
+    }
+}
+
+// =============================================================================
+// PnSpace state
+// =============================================================================
+
+public type PnSpace is {
+    kind:          PnSpaceKind,
+
+    // Outbound
+    next_pn:       UInt64,
+
+    // Inbound — received packets
+    largest_acked_received: Maybe<UInt64>,     // largest PN we have ACKed from peer
+    ack_ranges:    List<AckRange>,              // outgoing ack set (desc-sorted, non-overlapping)
+    ecn_ect0:      UInt64,
+    ecn_ect1:      UInt64,
+    ecn_ce:        UInt64,
+
+    // Loss detection
+    largest_acked_sent:     Maybe<UInt64>,      // largest PN peer has ACKed for us
+    sent_packets:  List<SentPacketInfo>,         // outstanding in-flight packets
+
+    discarded:     Bool,
+};
+
+implement PnSpace {
+    pub fn new(kind: PnSpaceKind) -> PnSpace {
+        PnSpace {
+            kind: kind,
+            next_pn: 0_u64,
+            largest_acked_received: None,
+            ack_ranges: [],
+            ecn_ect0: 0_u64, ecn_ect1: 0_u64, ecn_ce: 0_u64,
+            largest_acked_sent: None,
+            sent_packets: [],
+            discarded: false,
+        }
+    }
+
+    /// Allocate the next packet number. Monotonically increasing per
+    /// RFC 9000 §12.3 ("Packet numbers in each packet-number space
+    /// start at packet number 0. Subsequent packets sent in the same
+    /// packet-number space MUST increase the packet number by at
+    /// least one.").
+    pub fn next_packet_number(&mut self) -> UInt64 {
+        let pn = self.next_pn;
+        self.next_pn = pn + 1_u64;
+        pn
+    }
+
+    /// Record a freshly sent packet for loss tracking.
+    pub fn record_sent(&mut self, info: SentPacketInfo) {
+        self.sent_packets.push(info);
+    }
+
+    /// Mark the space as discarded (RFC 9001 §4.9 — Initial / Handshake
+    /// keys dropped). After this, no further sends or acks are accepted.
+    pub fn discard(&mut self) {
+        self.discarded = true;
+        self.sent_packets = [];
+        self.ack_ranges = [];
+    }
+
+    /// Incorporate an incoming packet's PN into our outgoing ACK set.
+    /// Ensures descending order with no overlapping ranges; merges
+    /// adjacent values into the same range.
+    pub fn on_packet_received(&mut self, pn: UInt64) {
+        // Update peer-PN high-watermark.
+        let should_update = match self.largest_acked_received {
+            Some(v) => pn > v,
+            None    => true,
+        };
+        if should_update { self.largest_acked_received = Some(pn); }
+
+        insert_pn_into_ack_ranges(&mut self.ack_ranges, pn);
+    }
+
+    /// Incorporate an ACK received from the peer. Returns freshly-acked
+    /// packet metadata so the caller can feed CC + RTT.
+    pub fn on_ack_received(
+        &mut self,
+        largest_acked: UInt64,
+        ranges: &List<AckRange>,
+    ) -> List<SentPacketInfo> {
+        // Track highest PN the peer has ever ACKed for us.
+        let prev = match self.largest_acked_sent { Some(v) => v, None => 0_u64 };
+        if largest_acked > prev || self.largest_acked_sent.is_none() {
+            self.largest_acked_sent = Some(largest_acked);
+        }
+
+        // Linear scan: retain not-acked, collect acked.
+        let mut retained: List<SentPacketInfo> = [];
+        let mut acked:    List<SentPacketInfo> = [];
+        let mut i: Int = 0;
+        while i < self.sent_packets.len() {
+            let p = &self.sent_packets[i];
+            let is_acked = ranges_contain(ranges, p.packet_number);
+            if is_acked {
+                acked.push(self.sent_packets[i].clone());
+            } else {
+                retained.push(self.sent_packets[i].clone());
+            }
+            i = i + 1;
+        }
+        self.sent_packets = retained;
+        acked
+    }
+
+    /// Build an ACK frame ready to ship, or None if we have no
+    /// outstanding received packets to acknowledge.
+    pub fn build_ack_frame(&self, ack_delay_us: UInt64) -> Maybe<Frame> {
+        let largest = match self.largest_acked_received { Some(v) => v, None => return None };
+        // Emit ECN counts only if any counter is non-zero. Some peers
+        // require explicit ECN counts to be absent when none are seen.
+        let ecn = if self.ecn_ect0 == 0_u64 && self.ecn_ect1 == 0_u64 && self.ecn_ce == 0_u64 {
+            None
+        } else {
+            Some(crate_ecn_snapshot(self))
+        };
+        Some(Frame.AckFrame {
+            largest_acked: largest,
+            ack_delay:     ack_delay_us,
+            ranges:        self.ack_ranges.clone(),
+            ecn:           ecn,
+        })
+    }
+}
+
+fn crate_ecn_snapshot(s: &PnSpace) -> core.net.quic.frame.EcnCounts {
+    core.net.quic.frame.EcnCounts {
+        ect0: s.ecn_ect0, ect1: s.ecn_ect1, ce: s.ecn_ce,
+    }
+}
+
+// =============================================================================
+// Helpers
+// =============================================================================
+
+/// Maintain the RFC 9000 §19.3.1 invariant:
+///   ranges are in descending order,
+///   non-overlapping, with a gap of at least 2 between successive ranges.
+///
+/// We do a linear scan because real QUIC workloads keep ack_ranges
+/// short (≤ 20 in practice; the recommended cap is 255 ranges per
+/// ACK frame).
+fn insert_pn_into_ack_ranges(ranges: &mut List<AckRange>, pn: UInt64) {
+    // Find insertion point.
+    let mut i: Int = 0;
+    while i < ranges.len() && ranges[i].smallest > pn {
+        i = i + 1;
+    }
+
+    // Case: already inside an existing range.
+    if i > 0 {
+        let prev = &ranges[i - 1];
+        if pn >= prev.smallest && pn <= prev.largest { return; }
+    }
+    if i < ranges.len() {
+        let cur = &ranges[i];
+        if pn >= cur.smallest && pn <= cur.largest { return; }
+    }
+
+    // Try to extend the preceding range (if adjacent on the low side).
+    if i > 0 && ranges[i - 1].smallest == pn + 1_u64 {
+        ranges[i - 1] = AckRange { smallest: pn, largest: ranges[i - 1].largest };
+        // After extending, may now be adjacent to `cur` from above.
+        if i < ranges.len() && ranges[i - 1].smallest <= ranges[i].largest + 1_u64 {
+            // Merge i-1 and i.
+            let merged = AckRange {
+                smallest: ranges[i].smallest,
+                largest:  ranges[i - 1].largest,
+            };
+            ranges[i - 1] = merged;
+            let _ = ranges.remove(i);
+        }
+        return;
+    }
+
+    // Try to extend the following range from above.
+    if i < ranges.len() && ranges[i].largest + 1_u64 == pn {
+        ranges[i] = AckRange { smallest: ranges[i].smallest, largest: pn };
+        // After extending, may now be adjacent to `i-1` from below.
+        if i > 0 && ranges[i].largest + 1_u64 == ranges[i - 1].smallest {
+            let merged = AckRange {
+                smallest: ranges[i].smallest,
+                largest:  ranges[i - 1].largest,
+            };
+            ranges[i - 1] = merged;
+            let _ = ranges.remove(i);
+        }
+        return;
+    }
+
+    // Fresh single-PN range — insert at position i.
+    let new_range = AckRange { smallest: pn, largest: pn };
+    ranges.insert(i, new_range);
+}
+
+/// Does the list of ACK ranges contain `pn`?
+pub fn ranges_contain(ranges: &List<AckRange>, pn: UInt64) -> Bool {
+    let mut i: Int = 0;
+    while i < ranges.len() {
+        let r = &ranges[i];
+        if pn >= r.smallest && pn <= r.largest { return true; }
+        i = i + 1;
+    }
+    false
+}

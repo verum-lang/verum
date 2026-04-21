@@ -1,0 +1,44 @@
+// =============================================================================
+// net/quic/recovery/mod.vr — QUIC loss detection + congestion control
+// =============================================================================
+// Layer: 5 (Network — QUIC)
+// Dependencies: core, core.time, quic.{frame, recovery}
+// Spec: internal/specs/tls-quic.md §7.2, §7.3, §12 Phase 4
+// =============================================================================
+//
+// Phase 4 step 1: per-space PN bookkeeping + RTT estimator + loss
+// detection + NewReno congestion controller. Assembles into
+// `core.net.quic.recovery.LossDetection` as the one-stop integration
+// point for the connection state machine.
+//
+// # Module layout
+//
+// ```
+// core.net.quic.recovery
+// ├── mod.vr                   ← this file (re-exports)
+// ├── rtt.vr                   — RttEstimator (RFC 9002 §5)
+// ├── pn_space.vr              — PnSpace bookkeeping + ACK ranges
+// ├── loss_detection.vr        — RFC 9002 §6 threshold + PTO
+// └── cc/
+//     ├── mod.vr               — CongestionCtrl protocol + constants
+//     └── new_reno.vr          — RFC 9002 §7 NewReno
+// ```
+//
+// =============================================================================
+
+module core.net.quic.recovery;
+
+public module rtt;
+public module pn_space;
+public module cc;
+public module loss_detection;
+
+// Re-exports
+public mount .rtt.{RttEstimator};
+public mount .pn_space.{PnSpace, PnSpaceKind, SentPacketInfo, ranges_contain};
+public mount .cc.{CongestionCtrl, NewReno, MAX_DATAGRAM_SIZE, INITIAL_WINDOW_BYTES, MIN_WINDOW_BYTES};
+public mount .loss_detection.{
+    LossDetection,
+    K_PACKET_THRESHOLD, K_GRANULARITY_US,
+    K_TIME_THRESHOLD_NUM, K_TIME_THRESHOLD_DEN, MAX_PTO_BACKOFF,
+};

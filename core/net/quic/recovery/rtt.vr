@@ -1,0 +1,127 @@
+// =============================================================================
+// net/quic/recovery/rtt.vr — RTT estimator (RFC 9002 §5)
+// =============================================================================
+// Layer: 5 (Network — QUIC)
+// Dependencies: core, core.time.duration
+// =============================================================================
+//
+// RFC 9002 §5.3 — per-connection RTT estimator:
+//
+//   latest_rtt       — freshest sample from the most recent ack.
+//   smoothed_rtt     — EWMA, α = 1/8
+//   rttvar           — mean deviation, β = 1/4
+//   min_rtt          — unadjusted minimum ever observed
+//   first_rtt_sample — was any sample taken yet?
+//
+// Update algorithm (§5.3):
+//
+//   if first sample:
+//       smoothed_rtt = latest_rtt
+//       rttvar       = latest_rtt / 2
+//       min_rtt      = latest_rtt
+//   else:
+//       // Adjust latest_rtt by ack_delay when that keeps the result
+//       // ≥ min_rtt; otherwise use raw.
+//       min_rtt = min(min_rtt, latest_rtt)
+//       ack_delay = min(ack_delay, max_ack_delay)  // after handshake
+//       adjusted_rtt = if latest_rtt - min_rtt >= ack_delay
+//                         then latest_rtt - ack_delay
+//                         else latest_rtt
+//       rttvar = (3/4)*rttvar + (1/4)*|smoothed_rtt - adjusted_rtt|
+//       smoothed_rtt = (7/8)*smoothed_rtt + (1/8)*adjusted_rtt
+//
+// All durations are tracked as microseconds in the fields so the
+// EWMA math doesn't lose resolution to millisecond rounding; public
+// getters convert to Duration.
+//
+// =============================================================================
+
+module core.net.quic.recovery.rtt;
+
+mount core.*;
+mount core.time.duration.{Duration};
+
+public type RttEstimator is {
+    /// Most recent raw RTT sample (microseconds). Zero before any
+    /// sample has landed.
+    latest_us:        UInt64,
+    /// Exponential weighted moving average (microseconds).
+    smoothed_us:      UInt64,
+    /// Mean RTT deviation (microseconds).
+    rttvar_us:        UInt64,
+    /// Smallest RTT ever observed (microseconds).
+    min_rtt_us:       UInt64,
+    /// True once at least one sample has been recorded.
+    has_sample:       Bool,
+};
+
+implement RttEstimator {
+    /// Fresh estimator — RFC 9002 §5.3 defaults:
+    ///   smoothed_rtt = 333 ms (kInitialRtt)
+    ///   rttvar       = smoothed_rtt / 2
+    pub fn new() -> RttEstimator {
+        let initial_us: UInt64 = 333_000_u64;
+        RttEstimator {
+            latest_us:   0_u64,
+            smoothed_us: initial_us,
+            rttvar_us:   initial_us >> 1,
+            min_rtt_us:  0_u64,
+            has_sample:  false,
+        }
+    }
+
+    /// Record a new RTT sample. `ack_delay_us` is the peer-reported
+    /// ACK delay (already unscaled and capped by max_ack_delay).
+    pub fn on_rtt_sample(&mut self, latest_us: UInt64, ack_delay_us: UInt64) {
+        self.latest_us = latest_us;
+
+        if !self.has_sample {
+            self.smoothed_us = latest_us;
+            self.rttvar_us   = latest_us >> 1;
+            self.min_rtt_us  = latest_us;
+            self.has_sample  = true;
+            return;
+        }
+
+        // Update min_rtt unconditionally.
+        if latest_us < self.min_rtt_us {
+            self.min_rtt_us = latest_us;
+        }
+
+        // Adjust by ack_delay when that keeps the sample ≥ min_rtt.
+        let adjusted_us: UInt64 = if latest_us >= self.min_rtt_us + ack_delay_us {
+            latest_us - ack_delay_us
+        } else {
+            latest_us
+        };
+
+        // rttvar = (3/4)*rttvar + (1/4)*|smoothed - adjusted|
+        let diff: UInt64 = if self.smoothed_us > adjusted_us {
+            self.smoothed_us - adjusted_us
+        } else {
+            adjusted_us - self.smoothed_us
+        };
+        self.rttvar_us = ((self.rttvar_us * 3_u64) + diff) >> 2;
+
+        // smoothed = (7/8)*smoothed + (1/8)*adjusted
+        self.smoothed_us = ((self.smoothed_us * 7_u64) + adjusted_us) >> 3;
+    }
+
+    pub fn smoothed(&self) -> Duration {
+        Duration.from_micros(self.smoothed_us as Int)
+    }
+
+    pub fn rttvar(&self) -> Duration {
+        Duration.from_micros(self.rttvar_us as Int)
+    }
+
+    pub fn min_rtt(&self) -> Duration {
+        Duration.from_micros(self.min_rtt_us as Int)
+    }
+
+    pub fn latest(&self) -> Duration {
+        Duration.from_micros(self.latest_us as Int)
+    }
+
+    pub fn has_first_sample(&self) -> Bool { self.has_sample }
+}
