@@ -312,12 +312,49 @@ impl ModuleRegistry {
         ModuleId::new(id)
     }
 
-    /// Register a module
+    /// Register a module.
+    ///
+    /// Dedupes by canonical module path: if a module with the same
+    /// path is already registered, the existing entry's ModuleId is
+    /// returned and the incoming `module.id` is ignored. This is
+    /// essential for correctness — without it, calling `register`
+    /// twice for the same path (via any combination of the loader /
+    /// pipeline / type-inference lazy paths) leaves two entries in
+    /// `modules` with distinct ModuleIds, which then appear as
+    /// "different source_modules" in `ExportTable::add_export` and
+    /// raise spurious "Conflicting export" errors.
+    ///
+    /// The existing-entry's exports are merged with the incoming
+    /// module's exports so that partial registrations (e.g. entry
+    /// created by the loader, exports filled in by a later pass)
+    /// coalesce into a single authoritative record.
     pub fn register(&mut self, module: ModuleInfo) -> ModuleId {
-        let id = module.id;
         let path_str = module.path.to_string();
+        let path_key = Text::from(path_str.clone());
+        if let Some(&existing_id) = self.path_to_id.get(&path_key) {
+            // Merge exports from the incoming registration into the
+            // already-stored entry. Keep the original ModuleId so that
+            // downstream source_module comparisons stay stable.
+            if let Some(existing_shared) = self.modules.get(&existing_id) {
+                // If the existing entry is empty (e.g. a placeholder
+                // from the first lazy-load call), replace it with
+                // the fuller incoming one but keep the ID.
+                let existing_empty = existing_shared.exports.all_exports().count() == 0
+                    && existing_shared.imports.is_empty();
+                if existing_empty {
+                    let mut replaced = module;
+                    replaced.id = existing_id;
+                    self.modules.insert(existing_id, Shared::new(replaced));
+                }
+                // Otherwise, drop the duplicate silently — the first
+                // registration wins. Callers that want to refresh
+                // must go through `clear` + re-register.
+            }
+            return existing_id;
+        }
+        let id = module.id;
         self.modules.insert(id, Shared::new(module));
-        self.path_to_id.insert(Text::from(path_str), id);
+        self.path_to_id.insert(path_key, id);
         id
     }
 

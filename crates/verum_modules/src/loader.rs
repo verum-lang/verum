@@ -61,10 +61,24 @@ impl ModuleSource {
 pub struct ModuleLoader {
     /// Root directory for module search
     root_path: PathBuf,
-    /// File ID allocator
+    /// File ID / ModuleId allocator — monotonic counter shared by both
     next_file_id: u32,
-    /// Cache of loaded files
+    /// Cache of loaded files (by absolute path)
     loaded_files: Map<PathBuf, FileId>,
+    /// Canonical ModulePath → stable ModuleId map.
+    ///
+    /// Without this, every call to `resolve_module(...)` would allocate
+    /// a fresh ModuleId for the same canonical module path. Downstream,
+    /// `ExportTable::add_export` checks `source_module` equality to
+    /// deduplicate re-exports — and if the same type is re-exported
+    /// via two `resolve_module` calls, each one carries a distinct
+    /// `ModuleId`, so the table sees the export as "same name,
+    /// different source" and raises a spurious conflict.
+    /// Keyed by the canonical dotted form (e.g. "core.mesh.xds.resources").
+    module_path_to_id: Map<String, ModuleId>,
+    /// Fully parsed `ModuleInfo` keyed by canonical module path. Served
+    /// on repeat `resolve_module` calls so the AST is not re-parsed.
+    module_info_cache: Map<String, ModuleInfo>,
     /// Cfg evaluator for conditional compilation
     cfg_evaluator: CfgEvaluator,
     /// External cog resolver for cross-cog imports.
@@ -82,6 +96,8 @@ impl ModuleLoader {
             root_path: root_path.into(),
             next_file_id: 0,
             loaded_files: Map::new(),
+            module_path_to_id: Map::new(),
+            module_info_cache: Map::new(),
             cfg_evaluator: CfgEvaluator::new(),
             cog_resolver: None,
         }
@@ -112,6 +128,8 @@ impl ModuleLoader {
             root_path: root_path.into(),
             next_file_id: 0,
             loaded_files: Map::new(),
+            module_path_to_id: Map::new(),
+            module_info_cache: Map::new(),
             cfg_evaluator: CfgEvaluator::for_target(target_triple),
             cog_resolver: None,
         }
@@ -128,6 +146,8 @@ impl ModuleLoader {
             root_path: root_path.into(),
             next_file_id: 0,
             loaded_files: Map::new(),
+            module_path_to_id: Map::new(),
+            module_info_cache: Map::new(),
             cfg_evaluator: CfgEvaluator::with_config(config),
             cog_resolver: None,
         }
@@ -559,9 +579,14 @@ impl ModuleLoader {
         self.loaded_files.contains_key(&file_path.to_path_buf())
     }
 
-    /// Clear the loaded files cache.
+    /// Clear all caches — file contents, path→id, and parsed ModuleInfo.
+    /// Called between independent compilation sessions (REPL re-runs,
+    /// VCS harness between test files) to avoid leaking state across
+    /// sessions.
     pub fn clear_cache(&mut self) {
         self.loaded_files.clear();
+        self.module_path_to_id.clear();
+        self.module_info_cache.clear();
     }
 }
 
@@ -640,9 +665,22 @@ pub trait LazyModuleResolver: Send + Sync {
 
 impl LazyModuleResolver for ModuleLoader {
     fn resolve_module(&mut self, module_path: &str) -> ModuleResult<ModuleInfo> {
+        // Canonical-path dedupe — see field docs on `module_path_to_id`.
+        let key = module_path.to_string();
+        if let Some(cached) = self.module_info_cache.get(&key) {
+            return Ok(cached.clone());
+        }
         let path = ModulePath::from_str(module_path);
-        let id = self.allocate_module_id();
-        self.load_and_parse(&path, id)
+        let id = if let Some(&existing) = self.module_path_to_id.get(&key) {
+            existing
+        } else {
+            let fresh = self.allocate_module_id();
+            self.module_path_to_id.insert(key.clone(), fresh);
+            fresh
+        };
+        let info = self.load_and_parse(&path, id)?;
+        self.module_info_cache.insert(key, info.clone());
+        Ok(info)
     }
 
     fn can_resolve(&self, module_path: &str) -> bool {
