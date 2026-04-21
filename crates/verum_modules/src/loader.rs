@@ -13,9 +13,10 @@ use crate::ModuleInfo;
 use crate::error::{ModuleError, ModuleResult};
 use crate::path::{ModuleId, ModulePath};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU32, Ordering};
 use verum_ast::{FileId, Module as AstModule};
 use verum_ast::cfg::{CfgEvaluator, TargetConfig};
-use verum_common::{List, Map, Maybe, Text};
+use verum_common::{List, Map, Maybe, Shared, Text};
 use verum_lexer::Lexer;
 use verum_parser::VerumParser;
 
@@ -72,8 +73,20 @@ pub struct ModuleLoader {
     /// (`mesh.xds.resources`, since the loader's root is `core/`).
     /// Both forms now canonicalise to the same key.
     cog_name: Option<String>,
-    /// File ID / ModuleId allocator — monotonic counter shared by both
+    /// FileId allocator. If a shared counter is attached via
+    /// `set_file_id_allocator`, it is used so all loaders sharing the
+    /// same compilation session agree on FileId values; otherwise the
+    /// local `next_file_id` counter is used (legacy / test mode).
     next_file_id: u32,
+    shared_file_id: Option<Shared<AtomicU32>>,
+    /// ModuleId allocator. Same shared/local pattern as FileId — but
+    /// kept in a *separate* counter because FileId and ModuleId are
+    /// different value spaces that were accidentally conflated in
+    /// the original impl. Sharing with `ModuleRegistry::next_id`
+    /// through `set_module_id_allocator` is how the loader, registry,
+    /// and pipeline agree on a single monotonic ModuleId sequence.
+    next_module_id: u32,
+    shared_module_id: Option<Shared<AtomicU32>>,
     /// Cache of loaded files (by absolute path)
     loaded_files: Map<PathBuf, FileId>,
     /// Canonical ModulePath → stable ModuleId map.
@@ -107,12 +120,40 @@ impl ModuleLoader {
             root_path: root_path.into(),
             cog_name: None,
             next_file_id: 0,
+            shared_file_id: None,
+            next_module_id: 0,
+            shared_module_id: None,
             loaded_files: Map::new(),
             module_path_to_id: Map::new(),
             module_info_cache: Map::new(),
             cfg_evaluator: CfgEvaluator::new(),
             cog_resolver: None,
         }
+    }
+
+    /// Attach a shared FileId allocator. All loaders / sessions that
+    /// share this counter will hand out a strictly monotonic FileId
+    /// sequence. Without this, each loader owns its own counter and
+    /// FileIds from different loaders can collide.
+    pub fn set_file_id_allocator(&mut self, allocator: Shared<AtomicU32>) {
+        self.shared_file_id = Some(allocator);
+    }
+
+    /// Attach a shared ModuleId allocator. Must be the same handle held
+    /// by the `ModuleRegistry` and the compiler `Session` — that is
+    /// what keeps the three subsystems' ModuleId values in lockstep.
+    pub fn set_module_id_allocator(&mut self, allocator: Shared<AtomicU32>) {
+        self.shared_module_id = Some(allocator);
+    }
+
+    /// Raw allocator handles for callers that want to construct
+    /// downstream components (secondary loaders, parallel workers).
+    pub fn file_id_allocator(&self) -> Option<Shared<AtomicU32>> {
+        self.shared_file_id.clone()
+    }
+
+    pub fn module_id_allocator(&self) -> Option<Shared<AtomicU32>> {
+        self.shared_module_id.clone()
     }
 
     /// Set the cog name for this loader's root. When a module path
@@ -180,6 +221,9 @@ impl ModuleLoader {
             root_path: root_path.into(),
             cog_name: None,
             next_file_id: 0,
+            shared_file_id: None,
+            next_module_id: 0,
+            shared_module_id: None,
             loaded_files: Map::new(),
             module_path_to_id: Map::new(),
             module_info_cache: Map::new(),
@@ -199,6 +243,9 @@ impl ModuleLoader {
             root_path: root_path.into(),
             cog_name: None,
             next_file_id: 0,
+            shared_file_id: None,
+            next_module_id: 0,
+            shared_module_id: None,
             loaded_files: Map::new(),
             module_path_to_id: Map::new(),
             module_info_cache: Map::new(),
@@ -468,9 +515,14 @@ impl ModuleLoader {
             span: None,
         })?;
 
-        // Allocate FileId
-        let file_id = FileId::new(self.next_file_id);
-        self.next_file_id += 1;
+        // Allocate FileId — prefer shared counter when attached.
+        let file_id = if let Some(allocator) = &self.shared_file_id {
+            FileId::new(allocator.fetch_add(1, Ordering::Relaxed))
+        } else {
+            let id = FileId::new(self.next_file_id);
+            self.next_file_id += 1;
+            id
+        };
         self.loaded_files.insert(file_path.to_path_buf(), file_id);
 
         Ok(ModuleSource::new(
@@ -774,11 +826,17 @@ impl LazyModuleResolver for ModuleLoader {
 }
 
 impl ModuleLoader {
-    /// Allocate a new module ID for lazy loading.
+    /// Allocate a new ModuleId. Prefers the shared allocator when
+    /// attached (the norm during pipeline compilation); falls back to
+    /// the loader-local counter otherwise (standalone / test use).
     fn allocate_module_id(&mut self) -> ModuleId {
-        let id = self.next_file_id;
-        self.next_file_id += 1;
-        ModuleId::new(id)
+        if let Some(allocator) = &self.shared_module_id {
+            ModuleId::new(allocator.fetch_add(1, Ordering::Relaxed))
+        } else {
+            let id = self.next_module_id;
+            self.next_module_id += 1;
+            ModuleId::new(id)
+        }
     }
 }
 

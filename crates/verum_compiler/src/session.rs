@@ -48,8 +48,14 @@ pub struct Session {
     /// Diagnostics accumulated during compilation
     diagnostics: Shared<RwLock<List<Diagnostic>>>,
 
-    /// Next available FileId (atomic for lock-free allocation)
-    next_file_id: AtomicU32,
+    /// Next available FileId (atomic for lock-free allocation).
+    ///
+    /// Wrapped in `Shared` so that ModuleLoaders created via
+    /// `create_module_loader` hand out a single monotonic FileId
+    /// sequence consistent with `Session::next_file_id()`. Without
+    /// this, the session and its loaders would own *independent*
+    /// counters that could collide on the same FileId value.
+    next_file_id: Shared<AtomicU32>,
 
     /// Has any error been emitted? (atomic for lock-free access)
     has_errors: AtomicBool,
@@ -117,7 +123,7 @@ impl Session {
             modules: Shared::new(RwLock::new(Map::new())),
             module_registry: Shared::new(RwLock::new(ModuleRegistry::new())),
             diagnostics: Shared::new(RwLock::new(List::new())),
-            next_file_id: AtomicU32::new(0),
+            next_file_id: Shared::new(AtomicU32::new(0)),
             has_errors: AtomicBool::new(false),
             metrics: Shared::new(RwLock::new(CompilationProfileReport::new())),
             compilation_start: Instant::now(),
@@ -239,7 +245,7 @@ impl Session {
             modules: Shared::new(RwLock::new(Map::new())),
             module_registry: Shared::new(RwLock::new(registry)),
             diagnostics: Shared::new(RwLock::new(List::new())),
-            next_file_id: AtomicU32::new(0),
+            next_file_id: Shared::new(AtomicU32::new(0)),
             has_errors: AtomicBool::new(false),
             metrics: Shared::new(RwLock::new(CompilationProfileReport::new())),
             compilation_start: Instant::now(),
@@ -555,11 +561,30 @@ impl Session {
             PathBuf::from(".")
         };
         let mut loader = ModuleLoader::new(root_path);
+        // Wire loader to the session's unified FileId and ModuleId
+        // allocators. Without this, each loader owns its own counters
+        // and IDs from independent loaders collide.
+        loader.set_file_id_allocator(self.next_file_id.clone());
+        loader.set_module_id_allocator(
+            self.module_registry.read().id_allocator(),
+        );
         // Attach cross-cog resolver if available (from Verum.lock)
         if let Some(ref resolver) = self.cog_resolver {
             loader.set_cog_resolver(resolver.clone());
         }
         loader
+    }
+
+    /// Hand out the Session's ModuleId allocator handle so secondary
+    /// loaders (e.g. pipeline-side lazy_resolver) can join the same
+    /// monotonic sequence.
+    pub fn module_id_allocator(&self) -> Shared<AtomicU32> {
+        self.module_registry.read().id_allocator()
+    }
+
+    /// Hand out the Session's FileId allocator handle.
+    pub fn file_id_allocator(&self) -> Shared<AtomicU32> {
+        self.next_file_id.clone()
     }
 
     /// Get access to the module registry.

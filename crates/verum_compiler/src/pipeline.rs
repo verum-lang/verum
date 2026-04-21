@@ -776,10 +776,17 @@ impl<'s> CompilationPipeline<'s> {
         // duplicate exports. Pin cog_name="core" on the lazy
         // resolver; the primary module_loader keeps its inherited
         // setting (user-code imports never use "core." as cog alias).
+        let file_id_alloc = session.file_id_allocator();
+        let module_id_alloc = session.module_id_allocator();
+        let mut lazy_loader = ModuleLoader::new(module_loader.root_path());
+        lazy_loader.set_cog_name("core");
+        // Wire the same allocator handles the primary loader uses so
+        // lazy-resolved modules can never clash with eagerly-loaded
+        // ones on FileId or ModuleId.
+        lazy_loader.set_file_id_allocator(file_id_alloc);
+        lazy_loader.set_module_id_allocator(module_id_alloc);
         let lazy_resolver: SharedModuleResolver = std::sync::Arc::new(
-            std::sync::Mutex::new(
-                ModuleLoader::new(module_loader.root_path()).with_cog_name("core")
-            )
+            std::sync::Mutex::new(lazy_loader),
         );
         // Registry also canonicalises by "core" so its dedupe logic
         // matches the lazy resolver's key.
@@ -856,10 +863,16 @@ impl<'s> CompilationPipeline<'s> {
         let resolver = StdlibModuleResolver::new(&config.stdlib_path);
         // Create a shared lazy resolver for on-demand module loading.
         // For stdlib bootstrap, uses the stdlib path as the root.
+        // Wire FileId + ModuleId allocators to the session so the
+        // lazy resolver joins the same monotonic sequence.
+        let file_id_alloc = session.file_id_allocator();
+        let module_id_alloc = session.module_id_allocator();
+        let mut lazy_loader = ModuleLoader::new(&config.stdlib_path);
+        lazy_loader.set_cog_name("core");
+        lazy_loader.set_file_id_allocator(file_id_alloc);
+        lazy_loader.set_module_id_allocator(module_id_alloc);
         let lazy_resolver: SharedModuleResolver = std::sync::Arc::new(
-            std::sync::Mutex::new(
-                ModuleLoader::new(&config.stdlib_path).with_cog_name("core")
-            )
+            std::sync::Mutex::new(lazy_loader),
         );
 
         Self {

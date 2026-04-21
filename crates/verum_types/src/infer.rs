@@ -383,7 +383,15 @@ pub struct TypeChecker {
     pub(crate) module_resolver: NameResolver,
     /// Module registry for type lookup
     /// Import and re-export system: "mount module.{item1, item2}" for imports, pub use for re-exports, glob imports — Module-qualified type access
-    pub(crate) module_registry: Shared<ModuleRegistry>,
+    /// THE authoritative module registry — same Shared<RwLock<...>>
+    /// handle the compiler Session owns. Prior design had a
+    /// `Shared<ModuleRegistry>` here (no RwLock) and a separate
+    /// `session_registry: Shared<RwLock<ModuleRegistry>>` alongside,
+    /// populated by clone-on-set. That bifurcation meant the two
+    /// copies drifted in state — lazy-loaded modules landed in
+    /// session_registry but module_registry kept its stale snapshot.
+    /// This field now unifies both roles: one handle, one state.
+    pub(crate) module_registry: Shared<parking_lot::RwLock<ModuleRegistry>>,
     /// Current module path for import resolution
     /// Name resolution across modules: qualified paths, import disambiguation, re-exports, path resolution in imports — Path resolution in imports
     pub(crate) current_module_path: Text,
@@ -960,7 +968,7 @@ impl TypeChecker {
             instance_search_enabled: true,
             coherence_check_depth: 16,
             module_resolver: NameResolver::new(),
-            module_registry: Shared::new(ModuleRegistry::new()),
+            module_registry: Shared::new(parking_lot::RwLock::new(ModuleRegistry::new())),
             current_module_path: verum_common::Text::from("cog"),
             inline_modules: Map::new(),
             preregistered_modules: std::collections::HashSet::new(),
@@ -1138,7 +1146,7 @@ impl TypeChecker {
             instance_search_enabled: true,
             coherence_check_depth: 16,
             module_resolver: NameResolver::new(),
-            module_registry: Shared::new(ModuleRegistry::new()),
+            module_registry: Shared::new(parking_lot::RwLock::new(ModuleRegistry::new())),
             current_module_path: verum_common::Text::from("cog"),
             inline_modules: Map::new(),
             preregistered_modules: std::collections::HashSet::new(),
@@ -1690,7 +1698,7 @@ impl TypeChecker {
 
     /// Create a new type checker with a shared module registry
     /// Import and re-export system: "mount module.{item1, item2}" for imports, pub use for re-exports, glob imports — Shared module state
-    pub fn with_registry(registry: Shared<ModuleRegistry>) -> Self {
+    pub fn with_registry(registry: Shared<parking_lot::RwLock<ModuleRegistry>>) -> Self {
         Self {
             ctx: TypeContext::new(),
             unifier: Unifier::new(),
@@ -1820,7 +1828,7 @@ impl TypeChecker {
             instance_search_enabled: true,
             coherence_check_depth: 16,
             module_resolver: NameResolver::new(),
-            module_registry: Shared::new(ModuleRegistry::new()),
+            module_registry: Shared::new(parking_lot::RwLock::new(ModuleRegistry::new())),
             current_module_path: verum_common::Text::from("cog"),
             inline_modules: Map::new(),
             preregistered_modules: std::collections::HashSet::new(),
@@ -1930,7 +1938,7 @@ impl TypeChecker {
             instance_search_enabled: true,
             coherence_check_depth: 16,
             module_resolver: NameResolver::new(),
-            module_registry: Shared::new(ModuleRegistry::new()),
+            module_registry: Shared::new(parking_lot::RwLock::new(ModuleRegistry::new())),
             current_module_path: verum_common::Text::from("cog"),
             inline_modules: Map::new(),
             preregistered_modules: std::collections::HashSet::new(),
@@ -7129,16 +7137,21 @@ impl TypeChecker {
         &mut self,
         registry: Shared<parking_lot::RwLock<ModuleRegistry>>,
     ) {
-        // Clone the registry contents to avoid lifetime issues
-        let registry_clone = registry.read().clone();
-        self.module_registry = Shared::new(registry_clone);
-        // Also store the session registry reference for lazy loading
+        // Share the SAME handle — both module_registry and
+        // session_registry now point at the one authoritative
+        // registry owned by the session/pipeline. This used to
+        // deep-clone the registry's contents into a second Shared,
+        // causing the two copies to drift as lazy-loaded modules
+        // were registered into one but not the other.
+        self.module_registry = registry.clone();
         self.session_registry = Some(registry);
     }
 
-    /// Set the module registry directly (for testing or when you have an owned registry)
+    /// Set the module registry directly (for testing or when you have
+    /// an owned registry).
     pub fn set_module_registry_direct(&mut self, registry: ModuleRegistry) {
-        self.module_registry = Shared::new(registry);
+        self.module_registry =
+            Shared::new(parking_lot::RwLock::new(registry));
     }
 
     /// Signal that stdlib registration is complete and user code is being processed.
@@ -7148,8 +7161,8 @@ impl TypeChecker {
         self.user_code_phase = true;
     }
 
-    /// Get the module registry
-    pub fn module_registry(&self) -> &Shared<ModuleRegistry> {
+    /// Get the module registry (same handle the session owns).
+    pub fn module_registry(&self) -> &Shared<parking_lot::RwLock<ModuleRegistry>> {
         &self.module_registry
     }
 
@@ -27547,7 +27560,7 @@ impl TypeChecker {
         // This handles imports like: import super.v1.Type, import crate.module.func, etc.
         // Clone the values we need before the mutable borrow
         let current_path = self.current_module_path.clone();
-        let registry = (*self.module_registry).clone();
+        let registry = self.module_registry.read().clone();
 
         // Only process if registry has modules
         if !registry.is_empty() {
@@ -32539,7 +32552,7 @@ impl TypeChecker {
 
         // Try to get the module from the registry
         let module_ast_opt = {
-            let registry = self.module_registry.clone();
+            let registry = self.module_registry.read();
             registry.get_by_path(module_path).map(|m| m.ast.clone())
         };
 

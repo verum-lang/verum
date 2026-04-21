@@ -16,7 +16,7 @@ use verum_mlir::{
     ir::operation::OperationLike,
     dialect::DialectRegistry,
     pass::PassManager,
-    utility::{register_all_dialects, register_all_llvm_translations},
+    utility::{register_all_llvm_translations, register_used_dialects},
 };
 use verum_common::{List, Map, Text};
 use verum_types::TypeRegistry;
@@ -142,10 +142,12 @@ impl MlirContext {
     pub fn new() -> Result<Self> {
         let context = Context::new();
 
-        // Create a dialect registry and register ALL dialects
-        // This is required for type inference in arith::constant and other ops
+        // Create a dialect registry and register only the dialects Verum
+        // actually targets. The explicit list lets link-time DCE drop
+        // unused dialects (OpenMP, SparseTensor, Async, Shape, Quant,
+        // PDL/IRDL, EmitC, …) — see `register_used_dialects` docstring.
         let registry = DialectRegistry::new();
-        register_all_dialects(&registry);
+        register_used_dialects(&registry);
         context.append_dialect_registry(&registry);
 
         // Now load all available dialects

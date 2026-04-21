@@ -73,10 +73,18 @@ impl TypeChecker {
                         return Ok(ty.clone());
                     }
 
-                    // Try loading from module registry directly
-                    if let Some(module_info) = self.module_registry.get(module_id) {
+                    // Try loading from module registry directly.
+                    // Snapshot items outside the read-guard: later
+                    // calls like `register_type_declaration` take
+                    // &mut self and would alias the registry borrow.
+                    let items_snapshot: Option<Vec<_>> = {
+                        let reg = self.module_registry.read();
+                        reg.get(module_id)
+                            .map(|m| m.ast.items.iter().cloned().collect())
+                    };
+                    if let Some(items) = items_snapshot {
                         // Search for type definition in module AST
-                        for item in &module_info.ast.items {
+                        for item in &items {
                             if let verum_ast::ItemKind::Type(type_decl) = &item.kind
                                 && type_decl.name.name.as_str() == name
                             {
@@ -921,10 +929,17 @@ impl TypeChecker {
                             {
                                 return Ok(InferResult::new(ty.clone()));
                             }
-                            // Function not yet loaded - try module registry
-                            if let Some(module_info) = self.module_registry.get(resolved.module_id)
-                            {
-                                for item in &module_info.ast.items {
+                            // Function not yet loaded - try module registry.
+                            // Snapshot the AST outside the read-guard so that
+                            // infer_function_type below (which takes &mut self)
+                            // doesn't alias the registry borrow.
+                            let items_snapshot: Option<Vec<_>> = {
+                                let reg = self.module_registry.read();
+                                reg.get(resolved.module_id)
+                                    .map(|m| m.ast.items.iter().cloned().collect())
+                            };
+                            if let Some(items) = items_snapshot {
+                                for item in &items {
                                     if let verum_ast::ItemKind::Function(func_decl) = &item.kind
                                         && func_decl.name.name.as_str() == local_name
                                     {

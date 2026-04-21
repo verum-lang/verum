@@ -5,8 +5,15 @@ use crate::{
     pass, string_ref::StringRef,
 };
 use verum_mlir_sys::{
-    MlirStringRef, mlirLoadIRDLDialects, mlirParsePassPipeline, mlirRegisterAllDialects,
-    mlirRegisterAllLLVMTranslations, mlirRegisterAllPasses,
+    MlirStringRef, mlirDialectHandleInsertDialect, mlirGetDialectHandle__amdgpu__,
+    mlirGetDialectHandle__arith__, mlirGetDialectHandle__cf__, mlirGetDialectHandle__func__,
+    mlirGetDialectHandle__gpu__, mlirGetDialectHandle__linalg__, mlirGetDialectHandle__llvm__,
+    mlirGetDialectHandle__math__, mlirGetDialectHandle__memref__,
+    mlirGetDialectHandle__nvvm__, mlirGetDialectHandle__rocdl__, mlirGetDialectHandle__scf__,
+    mlirGetDialectHandle__spirv__, mlirGetDialectHandle__tensor__,
+    mlirGetDialectHandle__transform__, mlirGetDialectHandle__vector__, mlirLoadIRDLDialects,
+    mlirParsePassPipeline, mlirRegisterAllDialects, mlirRegisterAllLLVMTranslations,
+    mlirRegisterAllPasses,
 };
 use std::{
     ffi::c_void,
@@ -17,6 +24,50 @@ use std::{
 /// Registers all dialects to a dialect registry.
 pub fn register_all_dialects(registry: &DialectRegistry) {
     unsafe { mlirRegisterAllDialects(registry.to_raw()) }
+}
+
+/// Register only the MLIR dialects Verum actually targets.
+///
+/// Calling `mlirRegisterAllDialects` marks every dialect's `initialize()`
+/// method as reachable, which in turn pulls in every op, type, attribute
+/// and interface implementation in that dialect — including OpenMP,
+/// SparseTensor, Async, Shape, Quant, PDL/IRDL and other dialects Verum
+/// never emits. This explicit list lets static-linker dead-code
+/// elimination drop the unreachable dialects at link time.
+///
+/// Verum's pipeline needs:
+/// - Core lowering: arith, func, scf, cf, memref, llvm, math
+/// - Linear algebra / tensor: linalg, tensor, vector
+/// - Pass scheduling: transform
+/// - GPU targets: gpu, nvvm, rocdl, spirv, amdgpu
+///
+/// If a new codegen path introduces `convert-X-to-Y` passes where `X` or
+/// `Y` is not on this list, MLIR pass parsing will fail at runtime with
+/// a "Dialect not registered" error — that is the signal to add it here.
+pub fn register_used_dialects(registry: &DialectRegistry) {
+    let raw = registry.to_raw();
+    unsafe {
+        for handle in [
+            mlirGetDialectHandle__arith__(),
+            mlirGetDialectHandle__func__(),
+            mlirGetDialectHandle__scf__(),
+            mlirGetDialectHandle__cf__(),
+            mlirGetDialectHandle__memref__(),
+            mlirGetDialectHandle__llvm__(),
+            mlirGetDialectHandle__math__(),
+            mlirGetDialectHandle__linalg__(),
+            mlirGetDialectHandle__tensor__(),
+            mlirGetDialectHandle__vector__(),
+            mlirGetDialectHandle__transform__(),
+            mlirGetDialectHandle__gpu__(),
+            mlirGetDialectHandle__nvvm__(),
+            mlirGetDialectHandle__rocdl__(),
+            mlirGetDialectHandle__spirv__(),
+            mlirGetDialectHandle__amdgpu__(),
+        ] {
+            mlirDialectHandleInsertDialect(handle, raw);
+        }
+    }
 }
 
 /// Register all translations from other dialects to the `llvm` dialect.

@@ -346,6 +346,17 @@ impl ModuleRegistry {
         ModuleId::new(id)
     }
 
+    /// Hand out the underlying Arc for the ModuleId allocator so other
+    /// subsystems (ModuleLoader, Session, infer) can share the same
+    /// monotonic counter. Without this, each subsystem's own
+    /// `allocate_id()` / `allocate_module_id()` runs on a *separate*
+    /// counter, and two modules can end up with the same numeric ID
+    /// — which is the root of a whole class of "phantom duplicate"
+    /// bugs the registry has no chance of detecting.
+    pub fn id_allocator(&self) -> Shared<std::sync::atomic::AtomicU32> {
+        self.next_id.clone()
+    }
+
     /// Register a module.
     ///
     /// Dedupes by canonical module path: if a module with the same
