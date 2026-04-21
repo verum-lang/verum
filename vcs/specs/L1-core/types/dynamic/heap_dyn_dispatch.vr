@@ -1,0 +1,48 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L1
+// @tags: dyn-protocol, smart-pointer, auto-deref
+
+// Regression for task #35 (F) — `Heap<dyn P>.method()` and
+// `Shared<dyn P>.method()` must reach the protocol's declared
+// method through the auto-deref cascade.
+//
+// Baseline before fix:
+//   "no method named `start_span` found for type `&dyn Tracer`"
+//
+// The auto-deref cascade unwraps `Heap<dyn Tracer>` to `&dyn Tracer`
+// (DynProtocol is unsized, so the cascade wraps the target in `&`).
+// The post-cascade DynProtocol resolution then matches `&dyn Tracer`
+// to the protocol's method set via protocol_checker.
+
+type Tracer is protocol {
+    fn start_span(&self, name: &Text) -> Int;
+};
+
+type NoopTracer is { scope: Text };
+
+implement NoopTracer {
+    fn new(scope: Text) -> NoopTracer {
+        NoopTracer { scope: scope }
+    }
+}
+
+implement Tracer for NoopTracer {
+    fn start_span(&self, _name: &Text) -> Int { 0 }
+}
+
+fn via_heap() {
+    let h: Heap<dyn Tracer> = Heap.new(NoopTracer.new("x".into())) as Heap<dyn Tracer>;
+    let _ = h.start_span(&"hello".into());
+}
+
+fn via_shared() {
+    let s: Shared<dyn Tracer> = Shared.new(NoopTracer.new("x".into())) as Shared<dyn Tracer>;
+    let _ = s.start_span(&"hello".into());
+}
+
+fn via_ref(t: &dyn Tracer) {
+    let _ = t.start_span(&"x".into());
+}
+
+fn main() {}

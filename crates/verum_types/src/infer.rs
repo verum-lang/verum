@@ -2863,8 +2863,20 @@ impl TypeChecker {
     /// actually called `mutex.lock()`, so we stop the chain as soon
     /// as `ty` itself owns the method.
     fn type_or_dyn_has_method(&self, ty: &Type, method_name: &Text) -> bool {
+        // Peel a single reference layer so `&dyn Tracer` and `&T` are
+        // treated as their underlying type for the purposes of method
+        // lookup. This keeps the auto-deref cascade halt-condition in
+        // sync with the resolver below: if the underlying type owns
+        // the method, we must stop walking Deref::Target.
+        let inner_ty: &Type = match ty {
+            Type::Reference { inner, .. }
+            | Type::CheckedReference { inner, .. }
+            | Type::UnsafeReference { inner, .. }
+            | Type::Ownership { inner, .. } => inner.as_ref(),
+            _ => ty,
+        };
         // Inherent method on the exact type name.
-        let type_name: Text = self.type_to_name(ty).to_string().into();
+        let type_name: Text = self.type_to_name(inner_ty).to_string().into();
         {
             let inherents = self.inherent_methods.read();
             if let Some(methods) = inherents.get(&type_name) {
@@ -2879,7 +2891,7 @@ impl TypeChecker {
             }
         }
         // Dyn-protocol direct method check.
-        if let Type::DynProtocol { bounds, .. } = ty {
+        if let Type::DynProtocol { bounds, .. } = inner_ty {
             let checker = self.protocol_checker.read();
             for proto_name in bounds.iter() {
                 if let Maybe::Some(proto) = checker.get_protocol(proto_name) {
@@ -2892,7 +2904,7 @@ impl TypeChecker {
         }
         // Protocol-impl lookup for the concrete type.
         let checker = self.protocol_checker.read();
-        match checker.lookup_all_protocol_methods(ty, method_name) {
+        match checker.lookup_all_protocol_methods(inner_ty, method_name) {
             Ok(candidates) => !candidates.is_empty(),
             Err(_) => false,
         }
@@ -39223,6 +39235,46 @@ impl TypeChecker {
             }
             current
         };
+
+        // Post-cascade DynProtocol resolution.
+        //
+        // The original DynProtocol path (above) runs *before* the
+        // smart-pointer auto-deref cascade, so it only catches the
+        // case where `receiver : &dyn P` arrives at that point
+        // directly. After the cascade, `Heap<dyn P>` has been
+        // unwrapped to `&dyn P`, and `Shared<dyn P>` → `&dyn P`
+        // similarly. Those receivers need the same protocol-method
+        // lookup, but we've now consumed the early branch.
+        //
+        // Peel one reference layer (and Ownership/CheckedRef/UnsafeRef
+        // for completeness) and, if the inner type is DynProtocol,
+        // resolve via the protocol's declared methods exactly as the
+        // early path does. No hardcoded types — everything reads
+        // from `protocol_checker` and from the DynProtocol's own
+        // `bounds` list.
+        {
+            let peeled: &Type = match &recv_ty {
+                Type::Reference { inner, .. }
+                | Type::CheckedReference { inner, .. }
+                | Type::UnsafeReference { inner, .. }
+                | Type::Ownership { inner, .. } => inner.as_ref(),
+                other => other,
+            };
+            if let Type::DynProtocol { bounds, .. } = peeled {
+                for bound_name in bounds {
+                    let pc = self.protocol_checker.read();
+                    if let Some(method_ty) =
+                        pc.get_method_type(bound_name.as_str(), method.name.as_str())
+                    {
+                        drop(pc);
+                        for arg in args.iter() {
+                            let _ = self.infer_expr(arg, InferMode::Synth)?;
+                        }
+                        return Ok(InferResult::new(method_ty));
+                    }
+                }
+            }
+        }
 
         // Check if this is a context method call - verify capabilities.
         //
