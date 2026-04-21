@@ -24,6 +24,21 @@
   "no stdlib knowledge in compiler" rule. Proper path: stdlib adds
   `implement<T, E: Debug> Deref for Result<T, E>` IF the design accepts
   panic-on-Err (это decision, не бесспорно — Rust не делает Result: Deref).
+- `e85223f8` fix(tls13): leading `|` for Extension variant list (parser compat)
+- `4084e4dd` fix(L2/tests): drop `&self` from context method signatures (1 file)
+- `8822e569` fix(L2/tests): drop `&self` / `&mut self` from all context method sigs (17 files)
+- `4cf7bad9` fix(specs): drop `&self` from context method sigs across L0/L1/L3/L4/parser (22 files)
+- **`1dae2c94`** fix(stdlib): `pub` → `public` across 143 files — massive Rust→Verum
+  keyword fix. Resolved every stdlib parse warning (`pub fn`, `pub type`, `pub const`,
+  `pub module`, `pub mount`), unlocking core.net.h3, core.net.quic.api/transport,
+  core.mesh.*, core.metrics.*, core.tracing.* that were partially broken.
+
+## L2 context tests progress
+After 4084e4dd + 8822e569 + 4cf7bad9 + 1dae2c94, L2 context runtime tests advanced
+from universal typecheck fail to partial pass:
+- `context_basic_provide.vr`, `context_method_call.vr`, `context_typecheck.vr`: ✓
+- `context_multiple.vr`, `context_shadowing.vr`: stdout mismatch (async ordering,
+  separate issue)
 
 ## ⚠️ LLVM build state — **RESTORED**
 `llvm/install/` пересобран параллельным агентом. Verum compile работает.
