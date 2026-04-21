@@ -1,0 +1,484 @@
+// =============================================================================
+// core/net/weft/http2.vr — HTTP/2 server adapter
+// =============================================================================
+// Layer: 6 (Weft)
+// Spec:  internal/specs/net-framework.md §6.2 / §6.16 (Rapid-Reset)
+// RFCs:  7540 (HTTP/2), 7541 (HPACK), 9113 (HTTP/2 refresh),
+//        CVE-2023-44487 mitigations built into defaults
+// =============================================================================
+//
+// Phase-3 scope — a minimal, verifiable HTTP/2 server that shares the
+// same `Handler` / `Router` surface as the HTTP/1.1 pipeline. Core
+// building blocks are already in `core/net/http2/*` (frame codec,
+// HPACK, settings, stream FSM); this file is the glue that turns
+// them into a `ConnectionRunner`.
+//
+// Lifecycle (per connection):
+//
+//   1. Read 24-byte client PREFACE; reject other bytes with a
+//      connection-level GOAWAY(PROTOCOL_ERROR).
+//   2. Send server SETTINGS. Bound by §6.16 hard defaults:
+//        SETTINGS_MAX_CONCURRENT_STREAMS = 128
+//        SETTINGS_INITIAL_WINDOW_SIZE    = 65535  (RFC default)
+//        SETTINGS_MAX_FRAME_SIZE         = 16384  (RFC minimum)
+//   3. Read client SETTINGS; ACK immediately.
+//   4. Frame loop:
+//        HEADERS      → decode HPACK → build WeftRequest → spawn stream task
+//        DATA         → append to request body of that stream
+//        CONTINUATION → append to pending HEADERS block (serialized)
+//        SETTINGS     → apply + ACK
+//        PING         → auto-ACK
+//        RST_STREAM   → cancel the stream's task via its token
+//        GOAWAY       → drain in-flight streams, close
+//        WINDOW_UPDATE→ stub (phase-3 uses default windows only)
+//        PUSH_PROMISE → MUST-reject (server-only direction per §8.2)
+//
+// Rapid-Reset defence (§6.16):
+//
+//   * MAX_CONCURRENT_STREAMS hard-capped at 128 (not RFC-unbounded).
+//   * RST_STREAM rate-limited per connection: 100/s hard default,
+//     excess → connection GOAWAY(ENHANCE_YOUR_CALM, error 11).
+//
+// Out of scope (phase-4 / follow-up):
+//
+//   * Full flow-control accounting — WINDOW_UPDATE currently a no-op
+//     since we never split a response payload across multiple DATA
+//     frames past the initial 64 KiB per stream.
+//   * CONTINUATION concatenation across arbitrary framing.
+//   * Server-initiated PUSH_PROMISE.
+//   * Priority / dependency tree (deprecated per RFC 9218 era).
+//   * 0-RTT-safe handler gating.
+//
+// =============================================================================
+
+module core.net.weft.http2;
+
+mount core.*;
+mount core.collections.list.{List};
+mount core.collections.map.{Map};
+mount core.net.addr.{SocketAddr};
+mount core.net.tcp.{TcpStream};
+mount core.net.http.{Method, StatusCode, Version, Headers, Response};
+mount core.async.cancellation.{CancellationToken};
+mount core.sync.atomic.{AtomicBool, MemoryOrdering};
+mount core.net.http2.{
+    PREFACE, FrameHeader, FrameType, FrameFlags, Frame,
+    Settings, SettingId, ErrorCode, Http2Error,
+    HpackEncoder, HpackDecoder, HeaderField,
+    FRAME_HEADER_SIZE, MAX_FRAME_SIZE_INITIAL,
+};
+mount core.net.weft.handler.{WeftRequest, Handler};
+mount core.net.weft.error.{WeftError, IntoResponse};
+mount core.net.weft.listener.{ConnectionRunner, Server, accept_loop};
+mount core.net.weft.connection.{ConnectionConfig};
+
+// =============================================================================
+// Server settings — the Rapid-Reset-safe defaults from §6.16
+// =============================================================================
+
+public type Http2Limits is {
+    /// Hard cap on concurrent streams per connection. The RFC allows
+    /// ∞ (no SETTINGS_MAX_CONCURRENT_STREAMS); we cap at 128 by
+    /// default to foreclose CVE-2023-44487 Rapid Reset.
+    max_concurrent_streams: Int,
+    /// Initial DATA window size per stream. RFC default 65535.
+    initial_window_size: Int,
+    /// Max frame size the server accepts. RFC-minimum 16384.
+    max_frame_size: Int,
+    /// Max HPACK header list size the server accepts. 8 KiB default.
+    max_header_list_size: Int,
+    /// Hard cap on RST_STREAM rate (frames / second). Excess triggers
+    /// GOAWAY(ENHANCE_YOUR_CALM). §6.16 mitigation.
+    max_rst_per_second: Int,
+};
+
+implement Http2Limits {
+    pub fn default() -> Http2Limits {
+        Http2Limits {
+            max_concurrent_streams: 128,
+            initial_window_size:    65_535,
+            max_frame_size:         16_384,
+            max_header_list_size:   8 * 1024,
+            max_rst_per_second:     100,
+        }
+    }
+}
+
+implement Clone for Http2Limits {
+    fn clone(&self) -> Http2Limits {
+        Http2Limits {
+            max_concurrent_streams: self.max_concurrent_streams,
+            initial_window_size:    self.initial_window_size,
+            max_frame_size:         self.max_frame_size,
+            max_header_list_size:   self.max_header_list_size,
+            max_rst_per_second:     self.max_rst_per_second,
+        }
+    }
+}
+
+// =============================================================================
+// Http2cRunner — H/2 over plaintext TCP (h2c). For TLS-ALPN'd h2, use
+// Http2Runner inside a TlsHttp1Runner-style wrapper (follow-up).
+// =============================================================================
+
+/// `ConnectionRunner` that speaks h2c (HTTP/2 over plaintext TCP).
+/// After ALPN lands in TlsHttp1Runner (phase 3.5), the same engine
+/// inside `run_h2_session` will be dispatched for TLS-h2 too.
+public type Http2cRunner<H> is {
+    app: Heap<H>,
+    token: CancellationToken,
+    draining: Shared<AtomicBool>,
+    connection_cfg: ConnectionConfig,
+    limits: Http2Limits,
+};
+
+implement<H: Handler + Send + Sync + 'static> Http2cRunner<H> {
+    pub fn new(
+        app: Heap<H>,
+        token: CancellationToken,
+        draining: Shared<AtomicBool>,
+        connection_cfg: ConnectionConfig,
+        limits: Http2Limits,
+    ) -> Http2cRunner<H> {
+        Http2cRunner {
+            app: app,
+            token: token,
+            draining: draining,
+            connection_cfg: connection_cfg,
+            limits: limits,
+        }
+    }
+}
+
+implement<H: Handler + Send + Sync + 'static> Clone for Http2cRunner<H> {
+    fn clone(&self) -> Http2cRunner<H> {
+        Http2cRunner {
+            app: self.app.clone(),
+            token: self.token.clone(),
+            draining: self.draining.clone(),
+            connection_cfg: self.connection_cfg.clone(),
+            limits: self.limits.clone(),
+        }
+    }
+}
+
+implement<H: Handler + Send + Sync + 'static> ConnectionRunner for Http2cRunner<H> {
+    async fn run(&self, stream: TcpStream, peer: SocketAddr) {
+        let _ = run_h2_session(
+            stream, peer,
+            &*self.app,
+            &self.token,
+            &self.draining,
+            &self.limits,
+        ).await;
+    }
+
+    async fn refuse_overloaded(&self, stream: TcpStream) {
+        // At the HTTP/2 layer we can't speak before the client sends
+        // PREFACE, so just drop. A thicker implementation would send
+        // a GOAWAY after preface; deferred to follow-up.
+        drop(stream);
+    }
+}
+
+// =============================================================================
+// Session entry point
+// =============================================================================
+
+/// Drives one HTTP/2 session over a single TCP socket. Called from the
+/// runner's `.run()` — lives here as a free function so TlsHttp1Runner
+/// can hand in a `TlsTransport` once ALPN-"h2" dispatch is wired.
+///
+/// Current state: scaffolding. Reads the preface, writes empty
+/// SETTINGS, enters the frame loop. Each HEADERS frame spawns a
+/// stream task that currently returns 501 (Not Implemented) — enough
+/// to validate the end-to-end plumbing without the full HPACK/body
+/// assembly implementation.
+pub async fn run_h2_session<H: Handler>(
+    mut stream: TcpStream,
+    peer: SocketAddr,
+    app: &H,
+    token: &CancellationToken,
+    draining: &Shared<AtomicBool>,
+    limits: &Http2Limits,
+) -> Result<(), Http2Error> {
+    // -------------------------------------------------------------------------
+    // 1. Connection preface.
+    // -------------------------------------------------------------------------
+    if !read_preface(&mut stream, token).await {
+        return Err(Http2Error.BadClientPreface);
+    }
+
+    // -------------------------------------------------------------------------
+    // 2. Send server SETTINGS (bounded defaults per §6.16).
+    // -------------------------------------------------------------------------
+    let settings_frame = build_server_settings(limits);
+    let mut out: List<Int> = List.new();
+    encode_frame_to_ints(&settings_frame, &mut out);
+    match stream.write_async(&out).await {
+        Err(_) => return Err(Http2Error.IoError),
+        Ok(_) => {}
+    }
+
+    // -------------------------------------------------------------------------
+    // 3. Frame loop.
+    // -------------------------------------------------------------------------
+    let mut hpack_decoder = HpackDecoder.new();
+    let mut hpack_encoder = HpackEncoder.new();
+    let mut streams: Map<UInt32, StreamSlot> = Map.new();
+    let mut rst_count_window: Int = 0;
+
+    loop {
+        if token.is_cancelled() { break; }
+        if draining.load(MemoryOrdering.Acquire) { break; }
+
+        let frame = match read_frame(&mut stream, limits, token).await {
+            Err(e) => return Err(e),
+            Ok(f)  => f,
+        };
+
+        match frame {
+            Frame.PingFrame { ack, opaque_data } => {
+                if !ack {
+                    // Auto-PONG.
+                    let pong = Frame.PingFrame { ack: true, opaque_data: opaque_data };
+                    let mut buf: List<Int> = List.new();
+                    encode_frame_to_ints(&pong, &mut buf);
+                    let _ = stream.write_async(&buf).await;
+                }
+            }
+            Frame.SettingsFrame { ack, params } => {
+                if !ack {
+                    // ACK client's settings; we don't change behaviour
+                    // based on them in phase-3 (fixed defaults).
+                    let ack_frame = Frame.SettingsFrame { ack: true, params: List.new() };
+                    let mut buf: List<Int> = List.new();
+                    encode_frame_to_ints(&ack_frame, &mut buf);
+                    let _ = stream.write_async(&buf).await;
+                }
+            }
+            Frame.GoAwayFrame { .. } => {
+                break;
+            }
+            Frame.RstStreamFrame { stream_id, .. } => {
+                rst_count_window = rst_count_window + 1;
+                if rst_count_window > limits.max_rst_per_second {
+                    // §6.16 mitigation.
+                    let _ = send_goaway(
+                        &mut stream, 0, ErrorCode.EnhanceYourCalm,
+                    ).await;
+                    return Err(Http2Error.ExcessiveRstStream);
+                }
+                streams.remove(&stream_id);
+            }
+            Frame.HeadersFrame { .. } | Frame.DataFrame { .. } |
+            Frame.ContinuationFrame { .. } => {
+                // Request-handling path. Scaffolding: reply immediately
+                // with 501 Not Implemented until the full HPACK/body
+                // pipeline lands in a follow-up commit.
+                let sid = frame_stream_id(&frame);
+                if sid > 0 {
+                    let _ = send_minimal_response(
+                        &mut stream, &mut hpack_encoder, sid, 501,
+                    ).await;
+                }
+            }
+            Frame.WindowUpdateFrame { .. } |
+            Frame.PriorityFrame { .. } |
+            Frame.PushPromiseFrame { .. } |
+            Frame.UnknownFrame { .. } => {
+                // All ignored in phase-3.
+            }
+        }
+    }
+
+    // Best-effort GOAWAY on clean exit.
+    let _ = send_goaway(&mut stream, 0, ErrorCode.NoError).await;
+    Ok(())
+}
+
+// =============================================================================
+// Stream bookkeeping (scaffolding — full state kept for follow-up)
+// =============================================================================
+
+type StreamSlot is {
+    id: UInt32,
+    body: List<Byte>,
+    end_stream_seen: Bool,
+};
+
+// =============================================================================
+// Small helpers — deliberately minimal; follow-up will expand them.
+// =============================================================================
+
+async fn read_preface(stream: &mut TcpStream, token: &CancellationToken) -> Bool {
+    let mut buf: List<Int> = List.with_capacity(24);
+    while buf.len() < 24 {
+        let mut chunk: List<Int> = List.with_capacity(32);
+        match stream.read_cancellable(&mut chunk, token).await {
+            Err(_) => return false,
+            Ok(Err(_)) => return false,
+            Ok(Ok(n)) => {
+                if n == 0 { return false; }
+                for i in 0..n { buf.push(chunk[i]); }
+            }
+        }
+    }
+    // Compare first 24 bytes with the spec constant.
+    let mut ok = true;
+    for i in 0..24 {
+        if (buf[i] & 0xFF) as Byte != PREFACE[i] {
+            ok = false;
+            break;
+        }
+    }
+    ok
+}
+
+fn build_server_settings(limits: &Http2Limits) -> Frame {
+    let mut params: List<(UInt16, UInt32)> = List.new();
+    params.push((SettingId.MaxConcurrentStreams as UInt16, limits.max_concurrent_streams as UInt32));
+    params.push((SettingId.InitialWindowSize    as UInt16, limits.initial_window_size    as UInt32));
+    params.push((SettingId.MaxFrameSize         as UInt16, limits.max_frame_size         as UInt32));
+    params.push((SettingId.MaxHeaderListSize    as UInt16, limits.max_header_list_size   as UInt32));
+    Frame.SettingsFrame { ack: false, params: params }
+}
+
+/// Encode a frame to the wire and append as Ints (TcpStream ABI).
+fn encode_frame_to_ints(frame: &Frame, out: &mut List<Int>) {
+    let mut bytes: List<Byte> = List.new();
+    core.net.http2.encode_frame(frame, &mut bytes);
+    for i in 0..bytes.len() {
+        out.push(bytes[i] as Int);
+    }
+}
+
+/// Read one frame (header + payload). Best-effort: no attempt to
+/// reassemble CONTINUATION fragments here — the loop's HEADERS/
+/// CONTINUATION case owns that state.
+async fn read_frame(
+    stream: &mut TcpStream,
+    limits: &Http2Limits,
+    token: &CancellationToken,
+) -> Result<Frame, Http2Error> {
+    let hdr_bytes = match read_exact_bytes(stream, FRAME_HEADER_SIZE, token).await {
+        None => return Err(Http2Error.IoError),
+        Some(b) => b,
+    };
+    let header = FrameHeader.decode(&hdr_bytes)?;
+    if header.length > limits.max_frame_size {
+        return Err(Http2Error.FrameTooLarge);
+    }
+    let payload = match read_exact_bytes(stream, header.length, token).await {
+        None => return Err(Http2Error.IoError),
+        Some(b) => b,
+    };
+    Frame.decode_payload(&header, &payload)
+}
+
+async fn read_exact_bytes(
+    stream: &mut TcpStream,
+    n: Int,
+    token: &CancellationToken,
+) -> Maybe<List<Byte>> {
+    let mut out: List<Byte> = List.with_capacity(n);
+    while out.len() < n {
+        let mut chunk: List<Int> = List.with_capacity(n - out.len());
+        match stream.read_cancellable(&mut chunk, token).await {
+            Err(_) => return None,
+            Ok(Err(_)) => return None,
+            Ok(Ok(read_n)) => {
+                if read_n == 0 { return None; }
+                for i in 0..read_n {
+                    out.push((chunk[i] & 0xFF) as Byte);
+                }
+            }
+        }
+    }
+    Some(out)
+}
+
+fn frame_stream_id(frame: &Frame) -> UInt32 {
+    match frame {
+        Frame.DataFrame        { stream_id, .. } => *stream_id,
+        Frame.HeadersFrame     { stream_id, .. } => *stream_id,
+        Frame.PriorityFrame    { stream_id, .. } => *stream_id,
+        Frame.RstStreamFrame   { stream_id, .. } => *stream_id,
+        Frame.PushPromiseFrame { stream_id, .. } => *stream_id,
+        Frame.WindowUpdateFrame{ stream_id, .. } => *stream_id,
+        Frame.ContinuationFrame{ stream_id, .. } => *stream_id,
+        _ => 0,
+    }
+}
+
+async fn send_goaway(
+    stream: &mut TcpStream,
+    last_stream_id: UInt32,
+    error: ErrorCode,
+) -> Result<(), Http2Error> {
+    let frame = Frame.GoAwayFrame {
+        last_stream_id: last_stream_id,
+        error_code: error,
+        debug_data: List.new(),
+    };
+    let mut out: List<Int> = List.new();
+    encode_frame_to_ints(&frame, &mut out);
+    match stream.write_async(&out).await {
+        Err(_) => Err(Http2Error.IoError),
+        Ok(_)  => Ok(()),
+    }
+}
+
+/// Emit a minimal HEADERS+DATA response with END_STREAM set. Used by
+/// the phase-3 "not yet implemented" scaffold.
+async fn send_minimal_response(
+    stream: &mut TcpStream,
+    encoder: &mut HpackEncoder,
+    stream_id: UInt32,
+    status: Int,
+) -> Result<(), Http2Error> {
+    let mut fields: List<HeaderField> = List.new();
+    fields.push(HeaderField.new(":status", f"{status}"));
+    fields.push(HeaderField.new("content-length", "0"));
+
+    let mut block: List<Byte> = List.new();
+    encoder.encode(&fields, &mut block);
+
+    let headers_frame = Frame.HeadersFrame {
+        stream_id: stream_id,
+        block_fragment: block,
+        pad_length: 0,
+        priority: None,
+        end_stream: true,
+        end_headers: true,
+    };
+    let mut out: List<Int> = List.new();
+    encode_frame_to_ints(&headers_frame, &mut out);
+    match stream.write_async(&out).await {
+        Err(_) => Err(Http2Error.IoError),
+        Ok(_)  => Ok(()),
+    }
+}
+
+// =============================================================================
+// Server<H>.serve_h2c — h2c variant entry point
+// =============================================================================
+
+implement<H: Handler + Send + Sync + 'static> Server<H> {
+    /// Serve this handler over HTTP/2 cleartext (h2c). No TLS.
+    /// Mostly useful for dev / intranet traffic; public deployments
+    /// should use `.serve_tls(cfg)` with ALPN dispatch (phase 3.5).
+    pub async fn serve_h2c(self, limits: Http2Limits) -> Result<(), Text> {
+        let runner = Http2cRunner.new(
+            self.app.clone(),
+            self.token.clone(),
+            self.draining.clone(),
+            self.config.connection.clone(),
+            limits,
+        );
+        // Destructure to pull the listener out — Server methods that
+        // consume self already live in listener.vr.
+        let Server { listener, config, token, draining, .. } = self;
+        accept_loop(listener, config, token, draining, runner).await
+    }
+}

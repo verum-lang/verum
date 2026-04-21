@@ -1,0 +1,39 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: net, weft, http2, h2c, rapid-reset, runner
+// @timeout: 10000
+// @expect: pass
+
+// §6.2 + §6.16 — Http2cRunner + Http2Limits; Server<H>.serve_h2c()
+// dispatch through the unified ConnectionRunner/accept_loop.
+
+mount core.net.http.{Response};
+mount core.net.weft.handler.{WeftRequest, Handler};
+mount core.net.weft.router.{Router};
+mount core.net.weft.listener.{Server, ListenerConfig, ConnectionRunner};
+mount core.net.weft.http2.{Http2Limits, Http2cRunner};
+mount core.net.weft.error.{WeftError};
+mount core.net.weft.response_ext.{resp_ok};
+
+type Noop is {};
+implement Handler for Noop {
+    async fn handle(&self, _req: WeftRequest) -> Result<Response, WeftError> {
+        Ok(resp_ok())
+    }
+}
+
+fn typecheck_h2_limits() -> Http2Limits {
+    Http2Limits.default()
+}
+
+// Server<H>.serve_h2c must compile with the unified Server<H> type.
+async fn typecheck_serve_h2c() -> Result<(), Text> {
+    let router = Router.new().get("/", Noop {});
+    let server = Server.bind("127.0.0.1:0", router, ListenerConfig.default())?;
+    server.serve_h2c(Http2Limits.default()).await
+}
+
+fn main() {
+    let _ = typecheck_h2_limits();
+}

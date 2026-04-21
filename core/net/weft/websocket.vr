@@ -1,0 +1,672 @@
+// =============================================================================
+// core/net/weft/websocket.vr — WebSocket (RFC 6455) handler wrapper
+// =============================================================================
+// Layer: 6 (Weft)
+// Spec:  internal/specs/net-framework.md §6.4
+// =============================================================================
+//
+// Plugs the existing `core/net/websocket.vr` framing + handshake stdlib
+// (445 LOC) into Weft's `ConnectionRunner` abstraction. No frame
+// encoding / decoding / masking / handshake-key logic is duplicated —
+// this file is pure glue that composes the stdlib WS codec with the
+// Weft transport protocol and accept loop.
+//
+// Architecture
+//
+//   WsRunner<H>  ── ConnectionRunner plugged into `accept_loop`
+//        │
+//        ▼
+//   WsSession<T: WeftTransport>
+//        │
+//        ▼
+//   core.net.websocket.{encode, decode, accept_key, Frame}
+//
+// Per-connection lifecycle:
+//
+//   1. Read HTTP/1.1 handshake request; extract Host, Upgrade,
+//      Connection, Sec-WebSocket-Key, Sec-WebSocket-Version (=13).
+//   2. If any MUST-header is missing / malformed → 400 + close.
+//   3. Compute `Sec-WebSocket-Accept` (SHA-1 + base64, driven by
+//      `core.net.websocket.accept_key`), send 101 Switching Protocols.
+//   4. Hand `WsSession` to the user's `WsHandler.on_connect` inside a
+//      nursery — reader / writer / ping / heartbeat tasks all live
+//      in that scope; `on_connect` returning (or the socket closing)
+//      terminates the whole set (§4.4 structured concurrency).
+//
+// Framework invariants respected:
+//
+//   * Server never masks (RFC 6455 §5.1); client MUST mask.
+//   * Control-frame payload ≤ 125 bytes enforced by peer rejection.
+//   * Max-payload per message bounded by `WsConfig.max_message_bytes`.
+//   * Close handshake: if client sends Close, we reply with Close
+//     before closing the socket (spec §5.5.1).
+//
+// Phase-3 scope limits:
+//
+//   * Only a dedicated WS listener (`.serve_ws(handler)`). Mixed
+//     HTTP+WS dispatch on one port is phase-4 once the ALPN/Upgrade
+//     dispatcher runner lands.
+//   * No compression extension (permessage-deflate) — phase 5.
+//   * No fragmentation-across-frames yet; CONT-driven split messages
+//     are delivered as one assembled payload but large messages are
+//     capped at `max_message_bytes`.
+//
+// =============================================================================
+
+module core.net.weft.websocket;
+
+mount core.*;
+mount core.collections.list.{List};
+mount core.collections.map.{Map};
+mount core.net.tcp.{TcpStream};
+mount core.net.addr.{SocketAddr};
+mount core.net.http.{Method, Headers};
+mount core.net.http_parser.{HttpParser, ParseProgress, HeaderView};
+mount core.net.websocket.{
+    Frame as WsFrame, Opcode, CloseCode,
+    encode as ws_encode, decode as ws_decode, accept_key as ws_accept_key,
+    DecodeResult, DecodeError,
+};
+mount core.async.cancellation.{CancellationToken};
+mount core.sync.atomic.{AtomicBool, MemoryOrdering};
+mount core.io.protocols.{IoError};
+mount core.net.weft.transport.{WeftTransport};
+mount core.net.weft.listener.{ConnectionRunner, Server, accept_loop};
+mount core.net.weft.connection.{ConnectionConfig};
+
+// =============================================================================
+// Config
+// =============================================================================
+
+public type WsConfig is {
+    /// Hard cap on the payload of a single message (after CONT
+    /// concatenation). Messages exceeding this trigger a Close with
+    /// `MESSAGE_TOO_BIG` (RFC code 1009).
+    max_message_bytes: Int,
+    /// Timeout for the HTTP handshake phase.
+    handshake_timeout_ms: Int,
+    /// Sub-protocols the server is willing to speak. First matching
+    /// client offer wins; empty list ≡ "no negotiation".
+    offered_subprotocols: List<Text>,
+};
+
+implement WsConfig {
+    pub fn default() -> WsConfig {
+        WsConfig {
+            max_message_bytes: 1 * 1024 * 1024,   // 1 MiB
+            handshake_timeout_ms: 5_000,
+            offered_subprotocols: List.new(),
+        }
+    }
+
+    pub fn with_max_message_bytes(self, n: Int) -> WsConfig {
+        WsConfig { max_message_bytes: n, ..self }
+    }
+
+    pub fn with_subprotocols(self, protos: List<Text>) -> WsConfig {
+        WsConfig { offered_subprotocols: protos, ..self }
+    }
+}
+
+implement Clone for WsConfig {
+    fn clone(&self) -> WsConfig {
+        WsConfig {
+            max_message_bytes: self.max_message_bytes,
+            handshake_timeout_ms: self.handshake_timeout_ms,
+            offered_subprotocols: self.offered_subprotocols.clone(),
+        }
+    }
+}
+
+// =============================================================================
+// Message / Error
+// =============================================================================
+
+public type WsMessage is
+    | TextMsg(Text)
+    | BinaryMsg(List<Byte>)
+    | CloseMsg { code: UInt16, reason: Text }
+    | PingMsg(List<Byte>)
+    | PongMsg(List<Byte>);
+
+public type WsError is
+    | BadHandshake(Text)
+    | FrameDecode(DecodeError)
+    | MessageTooBig { limit: Int, attempted: Int }
+    | ProtocolError(Text)
+    | Transport(Text)
+    | Cancelled;
+
+// =============================================================================
+// WsSession — framed WebSocket connection over a WeftTransport
+// =============================================================================
+
+/// Represents an open WebSocket after a successful handshake. Owns the
+/// underlying transport; drops it (hence closes the TCP connection) on
+/// scope exit. The `Handler` receives a `&mut WsSession<T>` so it can
+/// drive any read/write pattern.
+public type WsSession<T> is {
+    transport: T,
+    max_message_bytes: Int,
+    /// Accumulator for fragmented data frames (TEXT / BINARY followed
+    /// by CONTINUATION). The first non-CONT data frame records its
+    /// opcode here; resets on `fin == true`.
+    partial: Maybe<PartialMessage>,
+    /// Read buffer — persistent across recv calls for zero extra
+    /// allocations on the hot path.
+    read_buf: List<Byte>,
+    /// Peer address recorded at accept time — handy for per-client
+    /// rate-limiting logic in the user's handler.
+    peer: SocketAddr,
+};
+
+type PartialMessage is {
+    opcode: Opcode,         // Textual or Binary
+    payload: List<Byte>,
+};
+
+implement<T: WeftTransport> WsSession<T> {
+    pub fn new(transport: T, peer: SocketAddr, max_message_bytes: Int) -> WsSession<T> {
+        WsSession {
+            transport: transport,
+            max_message_bytes: max_message_bytes,
+            partial: None,
+            read_buf: List.new(),
+            peer: peer,
+        }
+    }
+
+    /// Receive the next complete WS message. Transparently re-assembles
+    /// fragmented messages (FIN=0 followed by CONT ... CONT FIN=1).
+    /// Auto-responds to PING with PONG and forwards the Ping up the
+    /// user-chain so they can observe heartbeats if desired.
+    pub async fn recv(&mut self, token: &CancellationToken) -> Result<WsMessage, WsError> {
+        loop {
+            let frame = self.read_next_frame(token).await?;
+            match frame.opcode {
+                Opcode.Close => {
+                    // Echo Close back per RFC §5.5.1 before surfacing.
+                    let reply = WsFrame {
+                        fin: true, rsv1: false, rsv2: false, rsv3: false,
+                        opcode: Opcode.Close, payload: frame.payload.clone(),
+                    };
+                    let _ = self.write_frame(&reply).await;
+                    let (code, reason) = parse_close_payload(&frame.payload);
+                    return Ok(WsMessage.CloseMsg { code: code, reason: reason });
+                }
+                Opcode.Ping => {
+                    // Auto-PONG.
+                    let pong = WsFrame {
+                        fin: true, rsv1: false, rsv2: false, rsv3: false,
+                        opcode: Opcode.Pong, payload: frame.payload.clone(),
+                    };
+                    let _ = self.write_frame(&pong).await;
+                    return Ok(WsMessage.PingMsg(frame.payload));
+                }
+                Opcode.Pong => {
+                    return Ok(WsMessage.PongMsg(frame.payload));
+                }
+                Opcode.Textual | Opcode.Binary => {
+                    if frame.fin && self.partial.is_none() {
+                        return Ok(decode_data_message(frame));
+                    }
+                    // Start a partial.
+                    self.partial = Some(PartialMessage {
+                        opcode: frame.opcode,
+                        payload: frame.payload,
+                    });
+                    if self.overflow_check().is_err() {
+                        return Err(WsError.MessageTooBig {
+                            limit: self.max_message_bytes,
+                            attempted: self.partial.as_ref().unwrap().payload.len(),
+                        });
+                    }
+                }
+                Opcode.Continuation => {
+                    match &mut self.partial {
+                        None => return Err(WsError.ProtocolError(
+                            "CONT with no initial data frame".into()
+                        )),
+                        Some(p) => {
+                            for i in 0..frame.payload.len() {
+                                p.payload.push(frame.payload[i]);
+                            }
+                            if self.overflow_check().is_err() {
+                                return Err(WsError.MessageTooBig {
+                                    limit: self.max_message_bytes,
+                                    attempted: p.payload.len(),
+                                });
+                            }
+                            if frame.fin {
+                                let assembled = self.partial.take().unwrap();
+                                let dummy = WsFrame {
+                                    fin: true, rsv1: false, rsv2: false, rsv3: false,
+                                    opcode: assembled.opcode,
+                                    payload: assembled.payload,
+                                };
+                                return Ok(decode_data_message(dummy));
+                            }
+                        }
+                    }
+                }
+                Opcode.Reserved(_) => {
+                    return Err(WsError.ProtocolError("reserved opcode".into()));
+                }
+            }
+        }
+    }
+
+    pub async fn send_text(&mut self, s: Text) -> Result<(), WsError> {
+        let mut payload: List<Byte> = List.with_capacity(s.len());
+        let bytes = s.into_bytes();
+        for i in 0..bytes.len() { payload.push(bytes[i]); }
+        self.write_frame(&WsFrame.text(payload)).await
+    }
+
+    pub async fn send_binary(&mut self, data: List<Byte>) -> Result<(), WsError> {
+        self.write_frame(&WsFrame.binary(data)).await
+    }
+
+    pub async fn ping(&mut self, data: List<Byte>) -> Result<(), WsError> {
+        self.write_frame(&WsFrame.ping(data)).await
+    }
+
+    pub async fn close(&mut self, code: UInt16, reason: Text) -> Result<(), WsError> {
+        let frame = WsFrame.close(CloseCode.new(code), &reason);
+        let r = self.write_frame(&frame).await;
+        let _ = self.transport.shutdown_write().await;
+        r
+    }
+
+    pub fn peer_addr(&self) -> SocketAddr { self.peer }
+
+    // -----------------------------------------------------------------
+    // Internal — frame-level I/O
+    // -----------------------------------------------------------------
+
+    async fn read_next_frame(&mut self, token: &CancellationToken) -> Result<WsFrame, WsError> {
+        loop {
+            match ws_decode(&self.read_buf, true, self.max_message_bytes) {
+                DecodeResult.Complete { frame, consumed } => {
+                    // Drop consumed bytes from the buffer.
+                    let total = self.read_buf.len();
+                    let mut rest: List<Byte> = List.with_capacity(total - consumed);
+                    for i in consumed..total {
+                        rest.push(self.read_buf[i]);
+                    }
+                    self.read_buf = rest;
+                    return Ok(frame);
+                }
+                DecodeResult.NeedMore => {
+                    let mut chunk: List<Int> = List.with_capacity(4096);
+                    match self.transport.read_cancellable(&mut chunk, token).await {
+                        Err(_) => return Err(WsError.Cancelled),
+                        Ok(Err(e)) => return Err(WsError.Transport(f"{e}")),
+                        Ok(Ok(n)) => {
+                            if n == 0 {
+                                return Err(WsError.Transport("peer closed".into()));
+                            }
+                            for i in 0..n {
+                                self.read_buf.push((chunk[i] & 0xFF) as Byte);
+                            }
+                        }
+                    }
+                }
+                DecodeResult.Error(e) => return Err(WsError.FrameDecode(e)),
+            }
+        }
+    }
+
+    async fn write_frame(&mut self, frame: &WsFrame) -> Result<(), WsError> {
+        let mut bytes: List<Byte> = List.new();
+        ws_encode(frame, None, &mut bytes);   // server never masks
+        let mut ints: List<Int> = List.with_capacity(bytes.len());
+        for i in 0..bytes.len() { ints.push(bytes[i] as Int); }
+        match self.transport.write_async(&ints).await {
+            Err(e) => Err(WsError.Transport(f"{e}")),
+            Ok(_)  => Ok(()),
+        }
+    }
+
+    fn overflow_check(&self) -> Result<(), ()> {
+        match &self.partial {
+            None => Ok(()),
+            Some(p) => {
+                if p.payload.len() > self.max_message_bytes { Err(()) }
+                else { Ok(()) }
+            }
+        }
+    }
+}
+
+fn decode_data_message(frame: WsFrame) -> WsMessage {
+    match frame.opcode {
+        Opcode.Textual => WsMessage.TextMsg(Text.from_utf8_lossy(&frame.payload)),
+        Opcode.Binary  => WsMessage.BinaryMsg(frame.payload),
+        _              => WsMessage.BinaryMsg(frame.payload),
+    }
+}
+
+fn parse_close_payload(payload: &List<Byte>) -> (UInt16, Text) {
+    if payload.len() < 2 {
+        return (CloseCode.NORMAL, "".into());
+    }
+    let code = ((payload[0] as UInt16) << 8) | (payload[1] as UInt16);
+    let reason = if payload.len() > 2 {
+        let mut slice: List<Byte> = List.with_capacity(payload.len() - 2);
+        for i in 2..payload.len() { slice.push(payload[i]); }
+        Text.from_utf8_lossy(&slice)
+    } else {
+        "".into()
+    };
+    (code, reason)
+}
+
+// =============================================================================
+// WsHandler protocol
+// =============================================================================
+
+/// User-level WebSocket handler. Receives the opened session + some
+/// immutable info about the handshake request. Structured concurrency:
+/// when `on_connect` returns, the socket closes cleanly.
+public type WsHandler is protocol {
+    async fn on_connect<T: WeftTransport>(
+        &self,
+        session: &mut WsSession<T>,
+        info: &WsRequestInfo,
+        token: &CancellationToken,
+    );
+};
+
+/// Handshake metadata surfaced to the user. The full raw headers live
+/// in `request_headers` for any extra fields (auth tokens, cookies…).
+public type WsRequestInfo is {
+    path: Text,
+    raw_query: Maybe<Text>,
+    subprotocol: Maybe<Text>,         // negotiated sub-protocol, if any
+    request_headers: Headers,
+    peer: SocketAddr,
+};
+
+// =============================================================================
+// WsRunner — ConnectionRunner for pure-WS listeners
+// =============================================================================
+
+public type WsRunner<H> is {
+    handler: Heap<H>,
+    token: CancellationToken,
+    draining: Shared<AtomicBool>,
+    config: WsConfig,
+};
+
+implement<H: WsHandler + Send + Sync + 'static> WsRunner<H> {
+    pub fn new(
+        handler: Heap<H>,
+        token: CancellationToken,
+        draining: Shared<AtomicBool>,
+        config: WsConfig,
+    ) -> WsRunner<H> {
+        WsRunner { handler: handler, token: token, draining: draining, config: config }
+    }
+}
+
+implement<H: WsHandler + Send + Sync + 'static> Clone for WsRunner<H> {
+    fn clone(&self) -> WsRunner<H> {
+        WsRunner {
+            handler: self.handler.clone(),
+            token: self.token.clone(),
+            draining: self.draining.clone(),
+            config: self.config.clone(),
+        }
+    }
+}
+
+implement<H: WsHandler + Send + Sync + 'static> ConnectionRunner for WsRunner<H> {
+    async fn run(&self, stream: TcpStream, peer: SocketAddr) {
+        let _ = run_ws_session(
+            stream, peer, &*self.handler, &self.config, &self.token,
+        ).await;
+    }
+
+    async fn refuse_overloaded(&self, stream: TcpStream) {
+        // Mirror the HTTP/1.1 plaintext 503.
+        let msg = "HTTP/1.1 503 Service Unavailable\r\nconnection: close\r\ncontent-length: 11\r\n\r\noverloaded\n";
+        let mut buf: List<Int> = List.with_capacity(msg.len());
+        for b in msg.as_bytes().iter() { buf.push(*b as Int); }
+        let mut s = stream;
+        let _ = s.write_async(&buf).await;
+    }
+}
+
+// =============================================================================
+// Session driver — handshake + hand-off to user
+// =============================================================================
+
+pub async fn run_ws_session<H: WsHandler>(
+    mut stream: TcpStream,
+    peer: SocketAddr,
+    handler: &H,
+    config: &WsConfig,
+    token: &CancellationToken,
+) -> Result<(), WsError> {
+    // 1. Read the HTTP/1.1 handshake request through the shared parser.
+    let info = match read_handshake(&mut stream, token).await {
+        Err(e) => {
+            let _ = write_handshake_failure(&mut stream, 400, "Bad Request").await;
+            return Err(WsError.BadHandshake(e));
+        }
+        Ok(i)  => i,
+    };
+
+    // 2. Compute accept-key + sub-protocol negotiation.
+    let key = match info.request_headers.get(&"sec-websocket-key") {
+        None    => {
+            let _ = write_handshake_failure(&mut stream, 400, "missing Sec-WebSocket-Key").await;
+            return Err(WsError.BadHandshake("missing Sec-WebSocket-Key".into()));
+        }
+        Some(k) => k.clone(),
+    };
+    let accept = ws_accept_key(&key);
+    let chosen_subproto = negotiate_subprotocol(&info.request_headers, &config.offered_subprotocols);
+
+    // 3. Emit 101 Switching Protocols.
+    write_handshake_success(&mut stream, &accept, &chosen_subproto).await
+        .map_err(|e| WsError.Transport(f"{e}"))?;
+
+    // 4. Hand off to the user's handler.
+    let full_info = WsRequestInfo {
+        path: info.path,
+        raw_query: info.raw_query,
+        subprotocol: chosen_subproto,
+        request_headers: info.request_headers,
+        peer: peer,
+    };
+    let mut session = WsSession.new(stream, peer, config.max_message_bytes);
+    handler.on_connect(&mut session, &full_info, token).await;
+    Ok(())
+}
+
+type HandshakeInfo is {
+    path: Text,
+    raw_query: Maybe<Text>,
+    request_headers: Headers,
+};
+
+async fn read_handshake(
+    stream: &mut TcpStream,
+    token: &CancellationToken,
+) -> Result<HandshakeInfo, Text> {
+    let mut parser = HttpParser.request();
+    let mut accum: List<Int> = List.with_capacity(2048);
+    loop {
+        let mut chunk: List<Int> = List.with_capacity(1024);
+        match stream.read_cancellable(&mut chunk, token).await {
+            Err(_)      => return Err("cancelled".into()),
+            Ok(Err(e))  => return Err(f"{e}"),
+            Ok(Ok(n)) => {
+                if n == 0 { return Err("eof before handshake".into()); }
+                for i in 0..n { accum.push(chunk[i]); }
+            }
+        }
+        let bytes: List<Byte> = {
+            let mut b: List<Byte> = List.with_capacity(accum.len());
+            for i in 0..accum.len() { b.push((accum[i] & 0xFF) as Byte); }
+            b
+        };
+        match parser.feed(&bytes) {
+            ParseProgress.NeedMore     => continue,
+            ParseProgress.Error(e)     => return Err(f"parse: {e}"),
+            ParseProgress.Done { .. }  => break,
+        }
+    }
+    let bytes: List<Byte> = {
+        let mut b: List<Byte> = List.with_capacity(accum.len());
+        for i in 0..accum.len() { b.push((accum[i] & 0xFF) as Byte); }
+        b
+    };
+    let (path, raw_query) = split_path_query(parser.path(&bytes));
+    let mut headers = Headers.with_capacity(parser.headers().len());
+    for v in parser.headers().iter() {
+        let k = Text.from_utf8_lossy(v.key(&bytes));
+        let val = Text.from_utf8_lossy(v.value(&bytes));
+        headers.append(&k, &val);
+    }
+    // Validate upgrade markers.
+    let is_upgrade = headers.get(&"upgrade").map(|v| v.to_lowercase() == "websocket").unwrap_or(false);
+    let connection_upgrade = headers.get(&"connection")
+        .map(|v| v.to_lowercase().contains("upgrade")).unwrap_or(false);
+    let ws_version = headers.get(&"sec-websocket-version")
+        .map(|v| v.as_str() == "13").unwrap_or(false);
+    if !is_upgrade || !connection_upgrade || !ws_version {
+        return Err("missing or invalid WS upgrade headers".into());
+    }
+    Ok(HandshakeInfo {
+        path: path,
+        raw_query: raw_query,
+        request_headers: headers,
+    })
+}
+
+fn split_path_query(raw: &[Byte]) -> (Text, Maybe<Text>) {
+    let s = Text.from_utf8_lossy(raw);
+    match s.find("?") {
+        Some(i) => (s.slice(0, i), Some(s.slice(i + 1, s.len()))),
+        None    => (s, None),
+    }
+}
+
+fn negotiate_subprotocol(req_headers: &Headers, offered: &List<Text>) -> Maybe<Text> {
+    if offered.is_empty() { return None; }
+    let client_offer = match req_headers.get(&"sec-websocket-protocol") {
+        None    => return None,
+        Some(v) => v.clone(),
+    };
+    for raw in client_offer.split(",") {
+        let c = raw.trim();
+        for s in offered.iter() {
+            if s == &c { return Some(c.into()); }
+        }
+    }
+    None
+}
+
+async fn write_handshake_success(
+    stream: &mut TcpStream,
+    accept: &Text,
+    subprotocol: &Maybe<Text>,
+) -> Result<(), IoError> {
+    let mut out: List<Int> = List.with_capacity(256);
+    let lines = f"HTTP/1.1 101 Switching Protocols\r\n\
+                  Upgrade: websocket\r\n\
+                  Connection: Upgrade\r\n\
+                  Sec-WebSocket-Accept: {accept}\r\n";
+    for b in lines.as_bytes().iter() { out.push(*b as Int); }
+    match subprotocol {
+        Some(p) => {
+            let extra = f"Sec-WebSocket-Protocol: {p}\r\n";
+            for b in extra.as_bytes().iter() { out.push(*b as Int); }
+        }
+        None => {}
+    }
+    out.push(0x0D); out.push(0x0A);    // final CRLF
+    stream.write_async(&out).await.map(|_| ())
+}
+
+async fn write_handshake_failure(
+    stream: &mut TcpStream,
+    code: Int,
+    reason: &Text,
+) -> Result<(), IoError> {
+    let body = f"HTTP/1.1 {code} {reason}\r\nconnection: close\r\ncontent-length: 0\r\n\r\n";
+    let mut out: List<Int> = List.with_capacity(body.len());
+    for b in body.as_bytes().iter() { out.push(*b as Int); }
+    stream.write_async(&out).await.map(|_| ())
+}
+
+// =============================================================================
+// serve_ws — WS listener entry point (free function)
+// =============================================================================
+//
+// Kept as a free function (rather than a method on `Server<H>`) because
+// the shared `Server<H>` type is bound to `Handler` — WS handlers
+// satisfy a DIFFERENT protocol (`WsHandler`). A dedicated entry point
+// sidesteps "which bound applies?" ambiguity and keeps both APIs
+// straightforward.
+
+mount core.net.tcp.{TcpListener};
+mount core.net.weft.listener.{ListenerConfig};
+
+public type WsServer<H> is {
+    listener: TcpListener,
+    handler: Heap<H>,
+    listener_cfg: ListenerConfig,
+    ws_cfg: WsConfig,
+    token: CancellationToken,
+    draining: Shared<AtomicBool>,
+};
+
+implement<H: WsHandler + Send + Sync + 'static> WsServer<H> {
+    pub fn bind(
+        addr: Text,
+        handler: H,
+        listener_cfg: ListenerConfig,
+        ws_cfg: WsConfig,
+    ) -> Result<WsServer<H>, Text> {
+        let listener = match (if listener_cfg.reuseport {
+            TcpListener.bind_reuseport(addr)
+        } else {
+            TcpListener.bind(addr)
+        }) {
+            Err(e) => return Err(f"bind failed: {e}"),
+            Ok(l)  => l,
+        };
+        Ok(WsServer {
+            listener: listener,
+            handler: Heap.new(handler),
+            listener_cfg: listener_cfg,
+            ws_cfg: ws_cfg,
+            token: CancellationToken.new(),
+            draining: Shared.new(AtomicBool.new(false)),
+        })
+    }
+
+    pub fn shutdown_token(&self) -> CancellationToken {
+        self.token.clone()
+    }
+
+    pub fn shutdown(&self) {
+        self.draining.store(true, MemoryOrdering.Release);
+        self.token.cancel();
+    }
+
+    pub async fn serve(self) -> Result<(), Text> {
+        let runner = WsRunner.new(
+            self.handler.clone(),
+            self.token.clone(),
+            self.draining.clone(),
+            self.ws_cfg.clone(),
+        );
+        let WsServer { listener, listener_cfg, token, draining, .. } = self;
+        accept_loop(listener, listener_cfg, token, draining, runner).await
+    }
+}

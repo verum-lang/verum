@@ -1,0 +1,58 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: net, weft, websocket, handshake, rfc6455, runner
+// @timeout: 10000
+// @expect: pass
+
+// §6.4 — WsHandler + WsServer surface, plus the WsMessage / WsError
+// shape. No actual handshake at typecheck time.
+
+mount core.collections.list.{List};
+mount core.net.addr.{SocketAddr};
+mount core.async.cancellation.{CancellationToken};
+mount core.net.weft.transport.{WeftTransport};
+mount core.net.weft.listener.{ListenerConfig, ConnectionRunner};
+mount core.net.weft.websocket.{
+    WsHandler, WsConfig, WsServer, WsSession, WsMessage, WsError,
+    WsRequestInfo, WsRunner,
+};
+
+type EchoHandler is {};
+
+implement WsHandler for EchoHandler {
+    async fn on_connect<T: WeftTransport>(
+        &self,
+        session: &mut WsSession<T>,
+        _info: &WsRequestInfo,
+        token: &CancellationToken,
+    ) {
+        loop {
+            match session.recv(token).await {
+                Err(_) => break,
+                Ok(WsMessage.TextMsg(s))    => { let _ = session.send_text(s).await; }
+                Ok(WsMessage.BinaryMsg(b))  => { let _ = session.send_binary(b).await; }
+                Ok(WsMessage.CloseMsg {..}) => break,
+                Ok(_) => {}
+            }
+        }
+    }
+}
+
+fn typecheck_ws_config() -> WsConfig {
+    WsConfig.default().with_max_message_bytes(2 * 1024 * 1024)
+}
+
+async fn typecheck_serve() -> Result<(), Text> {
+    let server = WsServer.bind(
+        "127.0.0.1:0",
+        EchoHandler {},
+        ListenerConfig.default(),
+        WsConfig.default(),
+    )?;
+    server.serve().await
+}
+
+fn main() {
+    let _ = typecheck_ws_config();
+}
