@@ -1,0 +1,124 @@
+// =============================================================================
+// net/tls13/alert.vr — TLS 1.3 alerts (RFC 8446 §6)
+// =============================================================================
+// Layer: 5 (Network)
+// =============================================================================
+//
+// TLS 1.3 reduces AlertLevel to two values: `warning` and `fatal`.
+// Warning alerts are mostly obsolete (RFC 8446 §6.2 "alerts that SHOULD
+// be treated as fatal MUST be treated as such; all other alerts in
+// TLS 1.3 are fatal by default"). We emit only fatal alerts.
+//
+// AlertDescription is a u8; the catalogue below names every value
+// a TLS 1.3 implementation might send/receive. Codes marked "(tls12)"
+// are legal only from a peer that downgrades — we parse but never emit.
+//
+// =============================================================================
+
+module core.net.tls13.alert;
+
+mount core.*;
+
+public type AlertLevel is Warning | Fatal;
+
+impl AlertLevel {
+    pub fn to_u8(&self) -> UInt8 {
+        match self {
+            AlertLevel.Warning => 1_u8,
+            AlertLevel.Fatal   => 2_u8,
+        }
+    }
+    pub fn from_u8(v: UInt8) -> AlertLevel {
+        match v {
+            1_u8 => AlertLevel.Warning,
+            _    => AlertLevel.Fatal,
+        }
+    }
+}
+
+public type AlertDescription is
+      CloseNotify                 // 0
+    | UnexpectedMessage            // 10
+    | BadRecordMac                 // 20
+    | DecryptionFailed             // 21 (tls12)
+    | RecordOverflow               // 22
+    | HandshakeFailure             // 40
+    | BadCertificate               // 42
+    | UnsupportedCertificate       // 43
+    | CertificateRevoked           // 44
+    | CertificateExpired           // 45
+    | CertificateUnknown           // 46
+    | IllegalParameter             // 47
+    | UnknownCa                    // 48
+    | AccessDenied                 // 49
+    | DecodeError                  // 50
+    | DecryptError                 // 51
+    | ProtocolVersion              // 70
+    | InsufficientSecurity         // 71
+    | InternalError                // 80
+    | InappropriateFallback        // 86
+    | UserCanceled                 // 90
+    | MissingExtension             // 109
+    | UnsupportedExtension         // 110
+    | UnrecognizedName             // 112
+    | BadCertificateStatusResponse // 113
+    | UnknownPskIdentity           // 115
+    | CertificateRequired          // 116
+    | NoApplicationProtocol        // 120
+    | Unknown(UInt8);
+
+implement AlertDescription {
+    public fn to_u8(&self) -> UInt8 {
+        match self {
+            AlertDescription.CloseNotify                 => 0_u8,
+            AlertDescription.UnexpectedMessage           => 10_u8,
+            AlertDescription.BadRecordMac                => 20_u8,
+            AlertDescription.DecryptionFailed            => 21_u8,
+            AlertDescription.RecordOverflow              => 22_u8,
+            AlertDescription.HandshakeFailure            => 40_u8,
+            AlertDescription.BadCertificate              => 42_u8,
+            AlertDescription.UnsupportedCertificate      => 43_u8,
+            AlertDescription.CertificateRevoked          => 44_u8,
+            AlertDescription.CertificateExpired          => 45_u8,
+            AlertDescription.CertificateUnknown          => 46_u8,
+            AlertDescription.IllegalParameter            => 47_u8,
+            AlertDescription.UnknownCa                   => 48_u8,
+            AlertDescription.AccessDenied                => 49_u8,
+            AlertDescription.DecodeError                 => 50_u8,
+            AlertDescription.DecryptError                => 51_u8,
+            AlertDescription.ProtocolVersion             => 70_u8,
+            AlertDescription.InsufficientSecurity        => 71_u8,
+            AlertDescription.InternalError               => 80_u8,
+            AlertDescription.InappropriateFallback       => 86_u8,
+            AlertDescription.UserCanceled                => 90_u8,
+            AlertDescription.MissingExtension            => 109_u8,
+            AlertDescription.UnsupportedExtension        => 110_u8,
+            AlertDescription.UnrecognizedName            => 112_u8,
+            AlertDescription.BadCertificateStatusResponse => 113_u8,
+            AlertDescription.UnknownPskIdentity          => 115_u8,
+            AlertDescription.CertificateRequired         => 116_u8,
+            AlertDescription.NoApplicationProtocol       => 120_u8,
+            AlertDescription.Unknown(v)                  => *v,
+        }
+    }
+}
+
+/// Wire form of an Alert record: two bytes (level, description).
+public type AlertRecord is {
+    level:       AlertLevel,
+    description: AlertDescription,
+};
+
+implement AlertRecord {
+    public fn encode(&self) -> [Byte; 2] {
+        [self.level.to_u8(), self.description.to_u8()]
+    }
+
+    public fn fatal(desc: AlertDescription) -> AlertRecord {
+        AlertRecord { level: AlertLevel.Fatal, description: desc }
+    }
+
+    public fn close_notify() -> AlertRecord {
+        AlertRecord { level: AlertLevel.Warning, description: AlertDescription.CloseNotify }
+    }
+}

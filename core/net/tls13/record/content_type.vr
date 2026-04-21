@@ -1,0 +1,39 @@
+// =============================================================================
+// net/tls13/record/content_type.vr — ContentType (RFC 8446 §5.1)
+// =============================================================================
+
+module core.net.tls13.record.content_type;
+
+mount core.*;
+
+public type ContentType is
+      Invalid           // 0  — never written; received = fatal alert
+    | ChangeCipherSpec  // 20 — legacy, emitted only for middlebox compat
+    | Alert             // 21
+    | Handshake         // 22
+    | ApplicationData   // 23
+    | Unknown(UInt8);
+
+implement ContentType {
+    public fn to_u8(&self) -> UInt8 {
+        match self {
+            ContentType.Invalid          => 0_u8,
+            ContentType.ChangeCipherSpec => 20_u8,
+            ContentType.Alert            => 21_u8,
+            ContentType.Handshake        => 22_u8,
+            ContentType.ApplicationData  => 23_u8,
+            ContentType.Unknown(v)       => *v,
+        }
+    }
+
+    public fn from_u8(v: UInt8) -> ContentType {
+        match v {
+            0_u8  => ContentType.Invalid,
+            20_u8 => ContentType.ChangeCipherSpec,
+            21_u8 => ContentType.Alert,
+            22_u8 => ContentType.Handshake,
+            23_u8 => ContentType.ApplicationData,
+            _     => ContentType.Unknown(v),
+        }
+    }
+}

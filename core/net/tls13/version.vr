@@ -1,0 +1,64 @@
+// =============================================================================
+// net/tls13/version.vr — TLS 1.3 protocol version constants (RFC 8446 §4.1.2)
+// =============================================================================
+// Layer: 5 (Network)
+// =============================================================================
+//
+// RFC 8446 §4.1.2.1: The TLS 1.3 handshake uses the legacy
+// `ClientHello.legacy_version` field as 0x0303 ("TLS 1.2") for
+// middlebox compatibility, and signals real version support via the
+// `supported_versions` extension.
+//
+// Downgrade sentinels (RFC 8446 §4.1.3):
+//
+//   * Server negotiating TLS 1.2 with a TLS 1.3-capable client MUST
+//     set the last 8 bytes of ServerHello.random to
+//     "DOWNGRD\x01".
+//   * Server negotiating TLS 1.1 or below with a TLS 1.3-capable
+//     client MUST set the last 8 bytes to "DOWNGRD\x00".
+//
+// A TLS 1.3-aware client MUST detect this sentinel and abort, which
+// is what our handshake state machine does before deriving any
+// handshake secrets.
+// =============================================================================
+
+module core.net.tls13.version;
+
+mount core.*;
+
+/// Protocol version ID as it appears on the wire.
+/// Encoded big-endian — 0x03_04 for TLS 1.3.
+public type ProtocolVersion is { major: UInt8, minor: UInt8 };
+
+public const TLS_1_3: ProtocolVersion = ProtocolVersion { major: 0x03_u8, minor: 0x04_u8 };
+
+/// Legacy field in ClientHello/ServerHello. Always TLS 1.2 on the wire
+/// for TLS 1.3 handshakes (RFC 8446 §4.1.2 "middlebox compatibility").
+public const LEGACY_VERSION_TLS_1_2: ProtocolVersion = ProtocolVersion { major: 0x03_u8, minor: 0x03_u8 };
+
+/// Downgrade sentinel for a 1.3-capable server forced to speak 1.2.
+/// Last 8 bytes of ServerHello.random; detection triggers abort.
+public const DOWNGRADE_SENTINEL_TLS12: [Byte; 8] = [
+    0x44_u8, 0x4F_u8, 0x57_u8, 0x4E_u8, 0x47_u8, 0x52_u8, 0x44_u8, 0x01_u8,  // "DOWNGRD\x01"
+];
+
+public const DOWNGRADE_SENTINEL_TLS11: [Byte; 8] = [
+    0x44_u8, 0x4F_u8, 0x57_u8, 0x4E_u8, 0x47_u8, 0x52_u8, 0x44_u8, 0x00_u8,  // "DOWNGRD\x00"
+];
+
+implement ProtocolVersion {
+    public fn to_u16(&self) -> UInt16 {
+        ((self.major as UInt16) << 8) | (self.minor as UInt16)
+    }
+
+    public fn from_u16(v: UInt16) -> ProtocolVersion {
+        ProtocolVersion {
+            major: ((v >> 8) & 0xFF_u16) as UInt8,
+            minor: (v & 0xFF_u16) as UInt8,
+        }
+    }
+
+    public fn eq(&self, other: &ProtocolVersion) -> Bool {
+        self.major == other.major && self.minor == other.minor
+    }
+}

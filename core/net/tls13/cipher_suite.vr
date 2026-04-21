@@ -1,0 +1,135 @@
+// =============================================================================
+// net/tls13/cipher_suite.vr — TLS 1.3 cipher suites (RFC 8446 §B.4)
+// =============================================================================
+// Layer: 5 (Network)
+// =============================================================================
+//
+// TLS 1.3 radically shrinks the cipher-suite space: only AEAD +
+// hash families; key-exchange and signature schemes are negotiated
+// separately. RFC 8446 §B.4 defines five IANA-allocated values:
+//
+//   TLS_AES_128_GCM_SHA256        {0x13,0x01}   -- mandatory
+//   TLS_AES_256_GCM_SHA384        {0x13,0x02}   -- recommended
+//   TLS_CHACHA20_POLY1305_SHA256  {0x13,0x03}   -- mandatory
+//   TLS_AES_128_CCM_SHA256        {0x13,0x04}   -- optional
+//   TLS_AES_128_CCM_8_SHA256      {0x13,0x05}   -- optional
+//
+// Warp ships the three MUST-support suites (GCM-SHA256, GCM-SHA384,
+// ChaCha-SHA256). AES-CCM suites are embedded-specific and not used
+// in the WebPKI ecosystem; we decline to negotiate them but parse
+// their IDs for diagnostic compatibility.
+//
+// =============================================================================
+
+module core.net.tls13.cipher_suite;
+
+mount core.*;
+
+public type CipherSuite is
+      TlsAes128GcmSha256
+    | TlsAes256GcmSha384
+    | TlsChaCha20Poly1305Sha256
+    | TlsAes128CcmSha256
+    | TlsAes128Ccm8Sha256
+    | Unknown(UInt16);
+
+/// IANA u16 ID per RFC 8446 §B.4.
+implement CipherSuite {
+    public fn to_u16(&self) -> UInt16 {
+        match self {
+            CipherSuite.TlsAes128GcmSha256         => 0x1301_u16,
+            CipherSuite.TlsAes256GcmSha384         => 0x1302_u16,
+            CipherSuite.TlsChaCha20Poly1305Sha256  => 0x1303_u16,
+            CipherSuite.TlsAes128CcmSha256         => 0x1304_u16,
+            CipherSuite.TlsAes128Ccm8Sha256        => 0x1305_u16,
+            CipherSuite.Unknown(v)                 => *v,
+        }
+    }
+
+    public fn from_u16(v: UInt16) -> CipherSuite {
+        match v {
+            0x1301_u16 => CipherSuite.TlsAes128GcmSha256,
+            0x1302_u16 => CipherSuite.TlsAes256GcmSha384,
+            0x1303_u16 => CipherSuite.TlsChaCha20Poly1305Sha256,
+            0x1304_u16 => CipherSuite.TlsAes128CcmSha256,
+            0x1305_u16 => CipherSuite.TlsAes128Ccm8Sha256,
+            _          => CipherSuite.Unknown(v),
+        }
+    }
+
+    /// Is this suite one warp actively negotiates (supported + not
+    /// deprecated)? AES-CCM suites parse but never negotiate.
+    public fn is_supported(&self) -> Bool {
+        match self {
+            CipherSuite.TlsAes128GcmSha256        => true,
+            CipherSuite.TlsAes256GcmSha384        => true,
+            CipherSuite.TlsChaCha20Poly1305Sha256 => true,
+            _                                     => false,
+        }
+    }
+
+    /// Hash family — determines key-schedule hash + output length.
+    public fn hash_kind(&self) -> HashKind {
+        match self {
+            CipherSuite.TlsAes256GcmSha384 => HashKind.Sha384,
+            _                              => HashKind.Sha256,
+        }
+    }
+
+    /// AEAD selector — determines key + nonce + tag sizes.
+    public fn aead_kind(&self) -> AeadKind {
+        match self {
+            CipherSuite.TlsAes128GcmSha256         => AeadKind.Aes128Gcm,
+            CipherSuite.TlsAes256GcmSha384         => AeadKind.Aes256Gcm,
+            CipherSuite.TlsChaCha20Poly1305Sha256  => AeadKind.ChaCha20Poly1305,
+            CipherSuite.TlsAes128CcmSha256         => AeadKind.Aes128Ccm,
+            CipherSuite.TlsAes128Ccm8Sha256        => AeadKind.Aes128Ccm8,
+            CipherSuite.Unknown(_)                 => AeadKind.Unknown,
+        }
+    }
+}
+
+public type HashKind is Sha256 | Sha384;
+
+implement HashKind {
+    /// Output length of the hash in bytes.
+    public fn output_len(&self) -> Int {
+        match self {
+            HashKind.Sha256 => 32,
+            HashKind.Sha384 => 48,
+        }
+    }
+}
+
+public type AeadKind is
+      Aes128Gcm
+    | Aes256Gcm
+    | ChaCha20Poly1305
+    | Aes128Ccm
+    | Aes128Ccm8
+    | Unknown;
+
+implement AeadKind {
+    /// AEAD key length in bytes.
+    public fn key_len(&self) -> Int {
+        match self {
+            AeadKind.Aes128Gcm        => 16,
+            AeadKind.Aes256Gcm        => 32,
+            AeadKind.ChaCha20Poly1305 => 32,
+            AeadKind.Aes128Ccm        => 16,
+            AeadKind.Aes128Ccm8       => 16,
+            AeadKind.Unknown          => 0,
+        }
+    }
+
+    /// AEAD IV length — always 12 bytes for TLS 1.3 AEADs.
+    public fn iv_len(&self) -> Int { 12 }
+
+    /// AEAD auth tag length.
+    public fn tag_len(&self) -> Int {
+        match self {
+            AeadKind.Aes128Ccm8 => 8,
+            _                   => 16,
+        }
+    }
+}

@@ -1,0 +1,57 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: tls13, rfc8446, keyschedule, typecheck
+// @timeout: 10000
+// @expect: pass
+//
+// Typecheck-level validation of the TLS 1.3 key-schedule facade: every
+// stage transition compiles and every derived secret type composes
+// into the next. Full RFC 8448 Appendix A byte-exact vectors land in
+// a run-test once the handshake state machine can feed transcript
+// hashes (Phase 2 step 2).
+
+mount core.net.tls13.*;
+mount core.net.tls13.keyschedule.*;
+
+fn check_sha256_schedule() -> Result<(), HkdfError> {
+    let hash = HashKind.Sha256;
+
+    // Early → Handshake → Master chain with dummy DHE bytes.
+    let es = EarlySecret.derive_no_psk(hash)?;
+    let d0 = es.to_handshake_input()?;
+
+    let dhe: [Byte; 32] = [0_u8; 32];
+    let hs = HandshakeSecret.derive(hash, d0.as_slice(), &dhe)?;
+
+    let empty_transcript: [Byte; 32] = [0_u8; 32];
+    let chs_traffic = hs.client_traffic(&empty_transcript)?;
+    let shs_traffic = hs.server_traffic(&empty_transcript)?;
+
+    let d1 = hs.to_master_input()?;
+    let ms = MasterSecret.derive(hash, d1.as_slice())?;
+
+    let cap_traffic = ms.client_traffic(&empty_transcript)?;
+    let sap_traffic = ms.server_traffic(&empty_transcript)?;
+
+    // Derive per-record keys
+    let _ = cap_traffic.derive_keys(16, 12)?;    // AES-128-GCM
+    let _ = sap_traffic.derive_keys(32, 12)?;    // ChaCha20-Poly1305
+
+    // Key update rotation
+    let _ = cap_traffic.next_generation()?;
+
+    // Finished-MAC derivation
+    let _ = chs_traffic.finished_key()?;
+    let _ = shs_traffic.finished_key()?;
+
+    // Exporter + resumption master secrets
+    let _ = ms.exporter_master(&empty_transcript)?;
+    let _ = ms.resumption_master(&empty_transcript)?;
+
+    Ok(())
+}
+
+fn main() {
+    let _ = check_sha256_schedule();
+}

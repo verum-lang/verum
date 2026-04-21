@@ -1,0 +1,77 @@
+// =============================================================================
+// net/tls13/error.vr — TlsError ADT (RFC 8446 alert categories)
+// =============================================================================
+
+module core.net.tls13.error;
+
+mount core.*;
+mount core.net.tls13.alert.{AlertDescription};
+
+public type TlsError is
+      // Handshake-level failures
+      ProtocolVersion           // peer insists on TLS ≠ 1.3
+    | HandshakeFailure          // generic no-acceptable-parameters
+    | UnexpectedMessage
+    | IllegalParameter
+    | MissingExtension
+    | UnsupportedExtension
+    | UnrecognizedName
+    | NoApplicationProtocol
+    | InappropriateFallback
+    | InsufficientSecurity
+    // Certificate failures
+    | BadCertificate
+    | UnsupportedCertificate
+    | CertificateRevoked
+    | CertificateExpired
+    | CertificateUnknown
+    | UnknownCa
+    | BadCertificateStatusResponse
+    // Cryptography failures
+    | BadRecordMac
+    | DecryptError
+    | RecordOverflow
+    | DecodeError
+    // PSK
+    | UnknownPskIdentity
+    // Internal / resource
+    | InternalError(Text)
+    // Peer abort
+    | RemoteAlert(AlertDescription)
+    // IO
+    | IoError(Text);
+
+impl TlsError {
+    /// Translate this error into the AlertDescription we'd send to
+    /// the peer. `None` for errors that don't yield an outgoing alert
+    /// (e.g. we already received `close_notify`).
+    public fn to_alert(&self) -> Maybe<AlertDescription> {
+        match self {
+            TlsError.ProtocolVersion         => Some(AlertDescription.ProtocolVersion),
+            TlsError.HandshakeFailure        => Some(AlertDescription.HandshakeFailure),
+            TlsError.UnexpectedMessage       => Some(AlertDescription.UnexpectedMessage),
+            TlsError.IllegalParameter        => Some(AlertDescription.IllegalParameter),
+            TlsError.MissingExtension        => Some(AlertDescription.MissingExtension),
+            TlsError.UnsupportedExtension    => Some(AlertDescription.UnsupportedExtension),
+            TlsError.UnrecognizedName        => Some(AlertDescription.UnrecognizedName),
+            TlsError.NoApplicationProtocol   => Some(AlertDescription.NoApplicationProtocol),
+            TlsError.InappropriateFallback   => Some(AlertDescription.InappropriateFallback),
+            TlsError.InsufficientSecurity    => Some(AlertDescription.InsufficientSecurity),
+            TlsError.BadCertificate          => Some(AlertDescription.BadCertificate),
+            TlsError.UnsupportedCertificate  => Some(AlertDescription.UnsupportedCertificate),
+            TlsError.CertificateRevoked      => Some(AlertDescription.CertificateRevoked),
+            TlsError.CertificateExpired      => Some(AlertDescription.CertificateExpired),
+            TlsError.CertificateUnknown      => Some(AlertDescription.CertificateUnknown),
+            TlsError.UnknownCa               => Some(AlertDescription.UnknownCa),
+            TlsError.BadCertificateStatusResponse => Some(AlertDescription.BadCertificateStatusResponse),
+            TlsError.BadRecordMac            => Some(AlertDescription.BadRecordMac),
+            TlsError.DecryptError            => Some(AlertDescription.DecryptError),
+            TlsError.RecordOverflow          => Some(AlertDescription.RecordOverflow),
+            TlsError.DecodeError             => Some(AlertDescription.DecodeError),
+            TlsError.UnknownPskIdentity      => Some(AlertDescription.UnknownPskIdentity),
+            TlsError.InternalError(_)        => Some(AlertDescription.InternalError),
+            TlsError.RemoteAlert(_)          => None,
+            TlsError.IoError(_)              => None,
+        }
+    }
+}

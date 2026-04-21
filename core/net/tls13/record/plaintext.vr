@@ -1,0 +1,126 @@
+// =============================================================================
+// net/tls13/record/plaintext.vr — TLSPlaintext + inner-plaintext framing
+// =============================================================================
+// Layer: 5 (Network — TLS 1.3 core)
+// =============================================================================
+//
+// Pre-encryption record assembly + post-decryption record parsing.
+// Never carries an AEAD key — see record.aead for the sealed form.
+//
+// =============================================================================
+
+module core.net.tls13.record.plaintext;
+
+mount core.*;
+mount core.collections.List;
+mount core.net.tls13.record.content_type.{ContentType};
+
+/// RFC 8446 §5.1 — maximum plaintext fragment length (2^14 bytes).
+public const MAX_PLAINTEXT_SIZE: Int = 16384;
+
+/// RFC 8446 §5.2 — maximum ciphertext record length (2^14 + 256).
+/// The extra 256 bytes cover AEAD tag + inner-plaintext ContentType +
+/// padding headroom; real implementations usually cap much lower.
+public const MAX_CIPHERTEXT_SIZE: Int = 16640;
+
+public type TlsPlaintext is {
+    content_type: ContentType,
+    fragment:     List<Byte>,
+};
+
+implement TlsPlaintext {
+    /// Encode the 5-byte outer header followed by the fragment.
+    /// Used ONLY for TLS 1.3 pre-encryption serialisation (the
+    /// Handshake / Alert messages exchanged in the clear, plus the
+    /// legacy ChangeCipherSpec records during middlebox compatibility).
+    ///
+    /// Post-encryption records use the ciphertext wrapper — see
+    /// `record.aead.AeadState.seal`.
+    public fn encode(&self, out: &mut List<Byte>) -> Result<(), RecordEncodeError> {
+        if self.fragment.len() > MAX_PLAINTEXT_SIZE {
+            return Err(RecordEncodeError.FragmentTooLarge(self.fragment.len()));
+        }
+        out.push(self.content_type.to_u8());
+        out.push(0x03_u8);   // legacy_record_version = 0x0303 (TLS 1.2)
+        out.push(0x03_u8);
+        let len = self.fragment.len() as UInt16;
+        out.push(((len >> 8) & 0xFF_u16) as Byte);
+        out.push((len & 0xFF_u16) as Byte);
+        let mut i: Int = 0;
+        while i < self.fragment.len() {
+            out.push(self.fragment[i]);
+            i = i + 1;
+        }
+        Ok(())
+    }
+}
+
+public type RecordEncodeError is
+      FragmentTooLarge(Int);
+
+// =============================================================================
+// TLSInnerPlaintext — the encrypted payload structure
+// =============================================================================
+//
+// TLSInnerPlaintext ::= struct {
+//     opaque     content[TLSPlaintext.length];
+//     ContentType type;
+//     uint8      zeros[length_of_padding];
+// };
+//
+// Padding is zero bytes appended after the ContentType marker. On
+// receipt, the decoder strips trailing zeros to find the ContentType
+// at the tail.
+//
+// =============================================================================
+
+/// Build the inner-plaintext blob from a content payload + type +
+/// desired padding amount. Caller enforces total length ≤ 2^14.
+public fn build_inner_plaintext(
+    content: &[Byte],
+    content_type: ContentType,
+    padding_len: Int,
+) -> List<Byte> {
+    let mut out: List<Byte> = [];
+    let mut i: Int = 0;
+    while i < content.len() {
+        out.push(content[i]);
+        i = i + 1;
+    }
+    out.push(content_type.to_u8());
+    let mut p: Int = 0;
+    while p < padding_len {
+        out.push(0_u8);
+        p = p + 1;
+    }
+    out
+}
+
+/// Parse a decrypted inner-plaintext — strip trailing zero-padding,
+/// then extract the trailing ContentType byte. Returns (type, content)
+/// where content is the plaintext fragment (excl. type + padding).
+pub fn parse_inner_plaintext(inner: &[Byte]) -> Result<(ContentType, List<Byte>), RecordDecodeError> {
+    // Scan from the end to find the first non-zero byte (= ContentType).
+    let mut end: Int = inner.len() - 1;
+    while end >= 0 && inner[end] == 0_u8 { end = end - 1; }
+    if end < 0 {
+        return Err(RecordDecodeError.NoContentType);
+    }
+    let ct = ContentType.from_u8(inner[end]);
+    // Reject Invalid (0) — RFC 8446 §5.1 last paragraph.
+    match ct {
+        ContentType.Invalid => return Err(RecordDecodeError.InvalidInnerType),
+        _ => {},
+    }
+    let mut content: List<Byte> = [];
+    let mut i: Int = 0;
+    while i < end {
+        content.push(inner[i]);
+        i = i + 1;
+    }
+    Ok((ct, content))
+}
+
+public type RecordDecodeError is
+      NoContentType
+    | InvalidInnerType;

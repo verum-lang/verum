@@ -1,0 +1,85 @@
+// =============================================================================
+// net/tls13/mod.vr — Pure-Verum TLS 1.3 (RFC 8446)
+// =============================================================================
+// Layer: 5 (Network)
+// Dependencies: core.security.{x509, hash, mac, kdf, aead, ecc, sig},
+//               core.encoding.der
+// Spec: internal/specs/tls-quic.md §6, §12 Phase 2
+// =============================================================================
+//
+// Pure-Verum implementation of TLS 1.3 (RFC 8446), replacing the
+// intrinsic-backed `core.net.tls` surface over multiple phases.
+//
+// # Module layout
+//
+// ```
+// core.net.tls13
+// ├── mod.vr              ← this file (facade)
+// ├── version.vr          — ProtocolVersion + legacy + downgrade sentinels
+// ├── cipher_suite.vr     — CipherSuite + HashKind + AeadKind
+// ├── named_group.vr      — X25519 / P-256 / P-384 named groups
+// ├── sig_scheme.vr       — SignatureScheme catalogue + offer list
+// ├── alert.vr            — AlertLevel + AlertDescription + wire form
+// ├── error.vr            — TlsError ADT + alert mapping
+// ├── keyschedule/        — RFC 8446 §7.1 key schedule
+// │   ├── mod.vr
+// │   ├── hkdf_label.vr   — HKDF-Expand-Label primitive
+// │   ├── derive_secret.vr — Derive-Secret + label constants
+// │   └── schedule.vr     — Early/Handshake/Master/Traffic typed driver
+// └── record/             — RFC 8446 §5 record layer
+//     ├── mod.vr
+//     ├── content_type.vr — ContentType discriminant
+//     ├── plaintext.vr    — TLSPlaintext + inner-plaintext framing
+//     └── aead.vr         — AeadState seal/open (per-direction)
+// ```
+//
+// # Status — v0.1
+//
+// Phase 2 step 1: key schedule + record layer + wire constants.
+// Handshake state machine (ClientHello / ServerHello / EE / Cert /
+// CertVerify / Finished / NST / KU) lands in Phase 2 step 2.
+//
+// # Minimal usage — record-layer roundtrip
+//
+// ```verum
+// mount core.net.tls13.*;
+// mount core.net.tls13.keyschedule.*;
+//
+// // After the handshake, each direction holds a TrafficSecret.
+// // Derive per-direction AEAD keys:
+// let cap_keys = cap_traffic.derive_keys(16, 12)?;      // AES-128-GCM
+// let sap_keys = sap_traffic.derive_keys(16, 12)?;
+//
+// let mut outbound = AeadState.new(
+//     AeadKind.Aes128Gcm, cap_keys.key, cap_keys.iv,
+// );
+// let wire = outbound.seal(b"hello world", ContentType.ApplicationData, 0)?;
+// ```
+//
+// =============================================================================
+
+module core.net.tls13;
+
+public module version;
+public module cipher_suite;
+public module named_group;
+public module sig_scheme;
+public module alert;
+public module error;
+public module keyschedule;
+public module record;
+
+// Re-exports
+public mount .version.{ProtocolVersion, TLS_1_3, LEGACY_VERSION_TLS_1_2,
+                        DOWNGRADE_SENTINEL_TLS12, DOWNGRADE_SENTINEL_TLS11};
+public mount .cipher_suite.{CipherSuite, HashKind, AeadKind};
+public mount .named_group.{NamedGroup};
+public mount .sig_scheme.{SignatureScheme};
+public mount .alert.{AlertLevel, AlertDescription, AlertRecord};
+public mount .error.{TlsError};
+public mount .keyschedule.{
+    SecretBytes, EarlySecret, HandshakeSecret, MasterSecret,
+    TrafficSecret, TrafficKeys, TrafficPhase, TrafficDirection,
+};
+public mount .record.{ContentType, AeadState, RecordError,
+                      MAX_PLAINTEXT_SIZE, MAX_CIPHERTEXT_SIZE};

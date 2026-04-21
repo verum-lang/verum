@@ -1,0 +1,141 @@
+// =============================================================================
+// net/tls13/sig_scheme.vr — TLS 1.3 SignatureScheme (RFC 8446 §4.2.3)
+// =============================================================================
+// Layer: 5 (Network)
+// =============================================================================
+//
+// RFC 8446 §4.2.3: the `signature_algorithms` / `signature_algorithms_cert`
+// extensions carry a SignatureScheme vector. Distinct from TLS 1.2
+// SignatureAndHashAlgorithm — for TLS 1.3 hash + algorithm are encoded
+// as a single 16-bit identifier.
+//
+// Warp supports:
+//
+//   WebPKI mainstream:
+//   * ecdsa_secp256r1_sha256        (0x0403)
+//   * ecdsa_secp384r1_sha384        (0x0503)
+//   * rsa_pss_rsae_sha256           (0x0804)
+//   * rsa_pss_rsae_sha384           (0x0805)
+//   * rsa_pss_rsae_sha512           (0x0806)
+//   * ed25519                       (0x0807)
+//
+//   For certificate verification only (NOT CertificateVerify):
+//   * rsa_pkcs1_sha256              (0x0401)
+//   * rsa_pkcs1_sha384              (0x0501)
+//   * rsa_pkcs1_sha512              (0x0601)
+//
+//   PSS with an rsa_pss_pss_* keypair (generated for PSS specifically):
+//   * rsa_pss_pss_sha256            (0x0809)
+//   * rsa_pss_pss_sha384            (0x080A)
+//   * rsa_pss_pss_sha512            (0x080B)
+//
+// =============================================================================
+
+module core.net.tls13.sig_scheme;
+
+mount core.*;
+
+public type SignatureScheme is
+    // ECDSA
+      EcdsaSecp256r1Sha256
+    | EcdsaSecp384r1Sha384
+    | EcdsaSecp521r1Sha512
+    // RSASSA-PSS (RSAE key) — CertificateVerify path
+    | RsaPssRsaeSha256
+    | RsaPssRsaeSha384
+    | RsaPssRsaeSha512
+    // RSASSA-PSS (PSS key) — CertificateVerify path
+    | RsaPssPssSha256
+    | RsaPssPssSha384
+    | RsaPssPssSha512
+    // EdDSA
+    | Ed25519Scheme
+    | Ed448Scheme
+    // RSA-PKCS#1-v1.5 — certificate signature only (NOT CertificateVerify)
+    | RsaPkcs1Sha256
+    | RsaPkcs1Sha384
+    | RsaPkcs1Sha512
+    | RsaPkcs1Sha1            // legacy only
+    | EcdsaSha1               // legacy only
+    | Unknown(UInt16);
+
+implement SignatureScheme {
+    public fn to_u16(&self) -> UInt16 {
+        match self {
+            SignatureScheme.RsaPkcs1Sha256       => 0x0401_u16,
+            SignatureScheme.EcdsaSecp256r1Sha256 => 0x0403_u16,
+            SignatureScheme.RsaPkcs1Sha384       => 0x0501_u16,
+            SignatureScheme.EcdsaSecp384r1Sha384 => 0x0503_u16,
+            SignatureScheme.RsaPkcs1Sha512       => 0x0601_u16,
+            SignatureScheme.EcdsaSecp521r1Sha512 => 0x0603_u16,
+            SignatureScheme.RsaPssRsaeSha256     => 0x0804_u16,
+            SignatureScheme.RsaPssRsaeSha384     => 0x0805_u16,
+            SignatureScheme.RsaPssRsaeSha512     => 0x0806_u16,
+            SignatureScheme.Ed25519Scheme        => 0x0807_u16,
+            SignatureScheme.Ed448Scheme          => 0x0808_u16,
+            SignatureScheme.RsaPssPssSha256      => 0x0809_u16,
+            SignatureScheme.RsaPssPssSha384      => 0x080A_u16,
+            SignatureScheme.RsaPssPssSha512      => 0x080B_u16,
+            SignatureScheme.RsaPkcs1Sha1         => 0x0201_u16,
+            SignatureScheme.EcdsaSha1            => 0x0203_u16,
+            SignatureScheme.Unknown(v)           => *v,
+        }
+    }
+
+    public fn from_u16(v: UInt16) -> SignatureScheme {
+        match v {
+            0x0401_u16 => SignatureScheme.RsaPkcs1Sha256,
+            0x0403_u16 => SignatureScheme.EcdsaSecp256r1Sha256,
+            0x0501_u16 => SignatureScheme.RsaPkcs1Sha384,
+            0x0503_u16 => SignatureScheme.EcdsaSecp384r1Sha384,
+            0x0601_u16 => SignatureScheme.RsaPkcs1Sha512,
+            0x0603_u16 => SignatureScheme.EcdsaSecp521r1Sha512,
+            0x0804_u16 => SignatureScheme.RsaPssRsaeSha256,
+            0x0805_u16 => SignatureScheme.RsaPssRsaeSha384,
+            0x0806_u16 => SignatureScheme.RsaPssRsaeSha512,
+            0x0807_u16 => SignatureScheme.Ed25519Scheme,
+            0x0808_u16 => SignatureScheme.Ed448Scheme,
+            0x0809_u16 => SignatureScheme.RsaPssPssSha256,
+            0x080A_u16 => SignatureScheme.RsaPssPssSha384,
+            0x080B_u16 => SignatureScheme.RsaPssPssSha512,
+            0x0201_u16 => SignatureScheme.RsaPkcs1Sha1,
+            0x0203_u16 => SignatureScheme.EcdsaSha1,
+            _          => SignatureScheme.Unknown(v),
+        }
+    }
+
+    /// RFC 8446 §4.4.3: SHA-1 + RSA-PKCS1-v1.5 are valid in
+    /// `signature_algorithms_cert` (to accept legacy cert chains) but
+    /// MUST NOT appear in `signature_algorithms` for CertificateVerify.
+    public fn is_valid_for_certificate_verify(&self) -> Bool {
+        match self {
+            SignatureScheme.RsaPkcs1Sha1  => false,
+            SignatureScheme.RsaPkcs1Sha256 => false,
+            SignatureScheme.RsaPkcs1Sha384 => false,
+            SignatureScheme.RsaPkcs1Sha512 => false,
+            SignatureScheme.EcdsaSha1     => false,
+            SignatureScheme.Unknown(_)    => false,
+            _                             => true,
+        }
+    }
+
+    /// Default warp negotiation set — highest-priority-first for the
+    /// `signature_algorithms` extension. See RFC 8446 §4.2.3 for the
+    /// recommended ordering.
+    public fn default_offer_list() -> List<SignatureScheme> {
+        let mut out: List<SignatureScheme> = [];
+        // Ed25519 first — constant-time, small keys
+        out.push(SignatureScheme.Ed25519Scheme);
+        // EC-DSA
+        out.push(SignatureScheme.EcdsaSecp256r1Sha256);
+        out.push(SignatureScheme.EcdsaSecp384r1Sha384);
+        // RSA-PSS (RSAE keys dominate WebPKI in 2026)
+        out.push(SignatureScheme.RsaPssRsaeSha256);
+        out.push(SignatureScheme.RsaPssRsaeSha384);
+        out.push(SignatureScheme.RsaPssRsaeSha512);
+        out.push(SignatureScheme.RsaPssPssSha256);
+        out.push(SignatureScheme.RsaPssPssSha384);
+        out.push(SignatureScheme.RsaPssPssSha512);
+        out
+    }
+}

@@ -66,6 +66,7 @@ public module unix;
 public module dns;
 public module http;
 public module tls;
+public module tls13;    // Pure-Verum TLS 1.3 (RFC 8446) — will replace .tls after Phase 2+
 public module url;
 public module http_parser;
 public module shutdown;

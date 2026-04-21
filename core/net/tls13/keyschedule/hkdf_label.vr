@@ -1,0 +1,106 @@
+// =============================================================================
+// net/tls13/keyschedule/hkdf_label.vr — HKDF-Expand-Label (RFC 8446 §7.1)
+// =============================================================================
+// Layer: 5 (Network — TLS 1.3 core)
+// =============================================================================
+//
+// HkdfLabel ::= struct {
+//     uint16 length = Length;
+//     opaque label<7..255> = "tls13 " + Label;
+//     opaque context<0..255> = Context;
+// }
+//
+// HKDF-Expand-Label(Secret, Label, Context, Length) =
+//     HKDF-Expand(Secret, HkdfLabel, Length)
+//
+// The explicit "tls13 " prefix binds the label to TLS 1.3 (vs QUIC,
+// which uses "tls13 quic" for the initial-key schedule and then its
+// own labels, RFC 9001 §5.1).
+//
+// =============================================================================
+
+module core.net.tls13.keyschedule.hkdf_label;
+
+mount core.*;
+mount core.collections.List;
+mount core.security.kdf.hkdf.{
+    hkdf_expand_sha256, hkdf_expand_sha384, HkdfError,
+};
+mount core.net.tls13.cipher_suite.{HashKind};
+
+/// Maximum HkdfLabel size per RFC 8446 §7.1 (length-prefix bounds).
+/// label ≤ 255 bytes incl. "tls13 " prefix; context ≤ 255 bytes.
+/// Sanity upper bound on decoded HkdfLabel wire form.
+pub const TLS13_LABEL_PREFIX: [Byte; 6] = [
+    0x74_u8, 0x6C_u8, 0x73_u8, 0x31_u8, 0x33_u8, 0x20_u8,  // "tls13 "
+];
+
+/// Compact struct kept around only for tests/diagnostics — the
+/// normal encoder path writes directly into a List<Byte>.
+public type HkdfLabel is {
+    length:  Int,
+    label:   List<Byte>,
+    context: List<Byte>,
+};
+
+/// Encode an HkdfLabel per RFC 8446 §7.1 into a fresh byte vector.
+///
+/// Precondition: `label` is pre-sanitised to ≤ 249 bytes (so
+/// `"tls13 " + label` fits in the opaque<7..255> constraint);
+/// `context` ≤ 255 bytes.
+public fn encode_hkdf_label(length: Int, label: &[Byte], context: &[Byte]) -> List<Byte> {
+    let mut out: List<Byte> = [];
+
+    // uint16 length
+    out.push(((length >> 8) & 0xFF) as Byte);
+    out.push((length & 0xFF) as Byte);
+
+    // opaque label<7..255> — length prefix is one byte
+    let label_total_len = 6 + label.len();   // 6 = "tls13 "
+    out.push(label_total_len as Byte);
+    let mut i: Int = 0;
+    while i < TLS13_LABEL_PREFIX.len() {
+        out.push(TLS13_LABEL_PREFIX[i]);
+        i = i + 1;
+    }
+    let mut j: Int = 0;
+    while j < label.len() {
+        out.push(label[j]);
+        j = j + 1;
+    }
+
+    // opaque context<0..255>
+    out.push(context.len() as Byte);
+    let mut k: Int = 0;
+    while k < context.len() {
+        out.push(context[k]);
+        k = k + 1;
+    }
+
+    out
+}
+
+// =============================================================================
+// HKDF-Expand-Label wrapper (hash-generic via HashKind)
+// =============================================================================
+
+/// Run HKDF-Expand-Label for the given hash kind. `secret` is a PRK
+/// the caller has already extracted via HKDF-Extract (or received
+/// from a parent Derive-Secret).
+public fn hkdf_expand_label(
+    hash: HashKind,
+    secret: &[Byte],
+    label: &[Byte],
+    context: &[Byte],
+    length: Int,
+) -> Result<List<Byte>, HkdfError> {
+    // Build the structured `info` blob.
+    let info = encode_hkdf_label(length, label, context);
+
+    let mut out: List<Byte> = [];
+    match hash {
+        HashKind.Sha256 => hkdf_expand_sha256(secret, info.as_slice(), length, &mut out)?,
+        HashKind.Sha384 => hkdf_expand_sha384(secret, info.as_slice(), length, &mut out)?,
+    }
+    Ok(out)
+}
