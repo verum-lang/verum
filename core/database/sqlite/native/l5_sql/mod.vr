@@ -25,6 +25,7 @@ module core.database.sqlite.native.l5_sql;
 
 public module lexer;
 public module ast;
+public module parser;
 
 public mount .lexer.{
     Token, Keyword, Operator, Punct, VariableKind, LexError, LexerState,
@@ -33,7 +34,8 @@ public mount .lexer.{
 
 public mount .ast.{
     Statement, Expr, Literal, BinOp, UnOp,
-    SelectStmt, SelectKind, ResultColumnItem, FromItem, JoinClause, JoinKind,
+    SelectStmt, SelectKind, SimpleSelect, ResultColumnItem,
+    FromItem, JoinClause, JoinKind, CompoundOp,
     OrderTerm, OrderDirection, LimitClause,
     InsertStmt, InsertSource, OnConflict,
     UpdateStmt, UpdateAssignment,
@@ -41,4 +43,11 @@ public mount .ast.{
     CreateTableStmt, ColumnDef, TableConstraint,
     DropTargetKind,
     TableRef,
+};
+
+public mount .parser.{
+    TokenStream, ParseError,
+    stream_new, parse_error,
+    parse_expr, parse_select,
+    parse_insert, parse_update, parse_delete,
 };

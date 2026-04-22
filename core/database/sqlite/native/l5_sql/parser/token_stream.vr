@@ -1,0 +1,380 @@
+module core.database.sqlite.native.l5_sql.parser.token_stream;
+
+// =============================================================================
+// l5_sql/parser/token_stream.vr — shared parser cursor + error type
+// =============================================================================
+// Layer: 5
+// Spec: sqlite-native.md §12.2
+//
+// Thin wrapper around a List<Token> that every parser module (select,
+// insert, ddl, expr, ...) consumes. Keeps the parser machinery
+// lock-step: peek / advance / expect / expect_keyword / accept_*.
+//
+// Error construction is centralised so every parser emits the same
+// `ParseError` shape for the diagnostic layer to render.
+// =============================================================================
+
+mount core.*;
+mount collections.List;
+mount base.{Result, Ok, Err, Text, Maybe};
+mount core.database.sqlite.native.l5_sql.lexer.{
+    Token, Keyword, Operator, Punct, VariableKind,
+};
+
+// -----------------------------------------------------------------------------
+// Error type
+// -----------------------------------------------------------------------------
+
+public type ParseError is {
+    message: Text,
+    position: Int,
+};
+
+public fn parse_error(msg: Text, position: Int) -> ParseError {
+    ParseError { message: msg, position: position }
+}
+
+// -----------------------------------------------------------------------------
+// TokenStream
+// -----------------------------------------------------------------------------
+
+public type TokenStream is {
+    tokens: List<Token>,
+    pos: Int,
+};
+
+public fn stream_new(tokens: List<Token>) -> TokenStream {
+    TokenStream { tokens: tokens, pos: 0 }
+}
+
+implement TokenStream {
+    public fn position(&self) -> Int { self.pos }
+    public fn len(&self) -> Int { self.tokens.len() }
+
+    /// Peek at the current token without advancing. Returns `TEof` if
+    /// the cursor is past the end (defensive — lex() always terminates
+    /// with TEof, so this is mostly a belt-and-braces guard).
+    public fn peek(&self) -> Token {
+        if self.pos >= self.tokens.len() { return TEof; }
+        clone_token(&self.tokens[self.pos])
+    }
+
+    /// Peek `n` tokens ahead (0 = current).
+    public fn peek_n(&self, n: Int) -> Token {
+        let idx = self.pos + n;
+        if idx >= self.tokens.len() { return TEof; }
+        clone_token(&self.tokens[idx])
+    }
+
+    /// Consume and return the current token.
+    public fn advance(&mut self) -> Token {
+        let t = self.peek();
+        self.pos = self.pos + 1;
+        t
+    }
+
+    /// Is the cursor at TEof?
+    public fn at_eof(&self) -> Bool {
+        match self.peek() { TEof => true, _ => false }
+    }
+
+    // -------------------------------------------------------------------------
+    // Predicate helpers
+    // -------------------------------------------------------------------------
+
+    /// True if the current token is `kw`. Does NOT advance.
+    public fn check_keyword(&self, kw: Keyword) -> Bool {
+        match self.peek() {
+            TKeyword(k) => keyword_eq(k, kw),
+            _ => false,
+        }
+    }
+
+    /// Advance iff the current token is `kw`.
+    public fn accept_keyword(&mut self, kw: Keyword) -> Bool {
+        if self.check_keyword(kw) {
+            let _ = self.advance();
+            return true;
+        }
+        false
+    }
+
+    /// Consume a specific keyword or raise a ParseError.
+    public fn expect_keyword(&mut self, kw: Keyword) -> Result<(), ParseError> {
+        if self.accept_keyword(kw) { return Ok(()); }
+        Err(parse_error("expected keyword".clone(), self.pos))
+    }
+
+    /// True if the current token is `p` punctuation.
+    public fn check_punct(&self, p: Punct) -> Bool {
+        match self.peek() {
+            TPunct(x) => punct_eq(x, p),
+            _ => false,
+        }
+    }
+
+    public fn accept_punct(&mut self, p: Punct) -> Bool {
+        if self.check_punct(p) {
+            let _ = self.advance();
+            return true;
+        }
+        false
+    }
+
+    public fn expect_punct(&mut self, p: Punct) -> Result<(), ParseError> {
+        if self.accept_punct(p) { return Ok(()); }
+        Err(parse_error("expected punct".clone(), self.pos))
+    }
+
+    public fn check_op(&self, op: Operator) -> Bool {
+        match self.peek() {
+            TOp(x) => op_eq(x, op),
+            _ => false,
+        }
+    }
+
+    public fn accept_op(&mut self, op: Operator) -> Bool {
+        if self.check_op(op) {
+            let _ = self.advance();
+            return true;
+        }
+        false
+    }
+
+    /// Expect an identifier. Returns the identifier text on success.
+    public fn expect_ident(&mut self) -> Result<Text, ParseError> {
+        match self.peek() {
+            TIdent(s) => {
+                let _ = self.advance();
+                Ok(s)
+            }
+            _ => Err(parse_error("expected identifier".clone(), self.pos)),
+        }
+    }
+
+    /// Optionally consume an identifier (e.g., for optional AS-aliases).
+    public fn accept_ident(&mut self) -> Maybe<Text> {
+        match self.peek() {
+            TIdent(s) => {
+                let _ = self.advance();
+                Some(s)
+            }
+            _ => None,
+        }
+    }
+
+    /// Fork the stream at the current position — useful for lookahead
+    /// that may need to be rewound. The original stream is unaffected.
+    public fn fork(&self) -> TokenStream {
+        TokenStream {
+            tokens: clone_token_list(&self.tokens),
+            pos: self.pos,
+        }
+    }
+
+    /// Rewind to a previously-saved position.
+    public fn rewind_to(&mut self, position: Int) {
+        self.pos = position;
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Token cloning (no derive(Clone) in Verum v1)
+// -----------------------------------------------------------------------------
+
+fn clone_token_list(xs: &List<Token>) -> List<Token> {
+    let mut out: List<Token> = List.new();
+    let mut i: Int = 0;
+    while i < xs.len() {
+        out.push(clone_token(&xs[i]));
+        i = i + 1;
+    }
+    out
+}
+
+fn clone_token(t: &Token) -> Token {
+    match t {
+        TKeyword(k)     => TKeyword(k),
+        TIdent(s)       => TIdent(s.clone()),
+        TStringLit(s)   => TStringLit(s.clone()),
+        TBlobLit(b)     => TBlobLit(clone_bytes(&b)),
+        TIntLit(i)      => TIntLit(i),
+        TFloatLit(x)    => TFloatLit(x),
+        TPunct(p)       => TPunct(p),
+        TOp(o)          => TOp(o),
+        TVariable(v)    => TVariable(clone_var(&v)),
+        TComment(s)     => TComment(s.clone()),
+        TEof            => TEof,
+    }
+}
+
+fn clone_bytes(b: &List<Byte>) -> List<Byte> {
+    let mut out: List<Byte> = List.new();
+    let mut i: Int = 0;
+    while i < b.len() { out.push(b[i]); i = i + 1; }
+    out
+}
+
+fn clone_var(v: &VariableKind) -> VariableKind {
+    match v {
+        VAnon           => VAnon,
+        VIndexed(n)     => VIndexed(n),
+        VNamedColon(s)  => VNamedColon(s.clone()),
+        VNamedAt(s)     => VNamedAt(s.clone()),
+        VNamedDollar(s) => VNamedDollar(s.clone()),
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Variant equality helpers (no derive(PartialEq) in Verum v1 for these enums)
+// -----------------------------------------------------------------------------
+
+fn keyword_eq(a: Keyword, b: Keyword) -> Bool {
+    // Hacky but effective: match on one, test the other branch.
+    // Each keyword variant is its own discriminant; a == b iff their
+    // pair matches.
+    match (a, b) {
+        (KwSelect, KwSelect) => true,
+        (KwFrom, KwFrom) => true,
+        (KwWhere, KwWhere) => true,
+        (KwGroup, KwGroup) => true,
+        (KwBy, KwBy) => true,
+        (KwHaving, KwHaving) => true,
+        (KwOrder, KwOrder) => true,
+        (KwAsc, KwAsc) => true,
+        (KwDesc, KwDesc) => true,
+        (KwLimit, KwLimit) => true,
+        (KwOffset, KwOffset) => true,
+        (KwInsert, KwInsert) => true,
+        (KwInto, KwInto) => true,
+        (KwValues, KwValues) => true,
+        (KwReplace, KwReplace) => true,
+        (KwUpdate, KwUpdate) => true,
+        (KwSet, KwSet) => true,
+        (KwDelete, KwDelete) => true,
+        (KwCreate, KwCreate) => true,
+        (KwTable, KwTable) => true,
+        (KwIndex, KwIndex) => true,
+        (KwView, KwView) => true,
+        (KwTrigger, KwTrigger) => true,
+        (KwDrop, KwDrop) => true,
+        (KwAlter, KwAlter) => true,
+        (KwIf, KwIf) => true,
+        (KwExists, KwExists) => true,
+        (KwTemp, KwTemp) => true,
+        (KwTemporary, KwTemporary) => true,
+        (KwPrimary, KwPrimary) => true,
+        (KwKey, KwKey) => true,
+        (KwForeign, KwForeign) => true,
+        (KwReferences, KwReferences) => true,
+        (KwUnique, KwUnique) => true,
+        (KwCheck, KwCheck) => true,
+        (KwDefault, KwDefault) => true,
+        (KwCollate, KwCollate) => true,
+        (KwNot, KwNot) => true,
+        (KwNull, KwNull) => true,
+        (KwTrue, KwTrue) => true,
+        (KwFalse, KwFalse) => true,
+        (KwAnd, KwAnd) => true,
+        (KwOr, KwOr) => true,
+        (KwIn, KwIn) => true,
+        (KwBetween, KwBetween) => true,
+        (KwLike, KwLike) => true,
+        (KwGlob, KwGlob) => true,
+        (KwMatch, KwMatch) => true,
+        (KwRegexp, KwRegexp) => true,
+        (KwIs, KwIs) => true,
+        (KwAs, KwAs) => true,
+        (KwCase, KwCase) => true,
+        (KwWhen, KwWhen) => true,
+        (KwThen, KwThen) => true,
+        (KwElse, KwElse) => true,
+        (KwEnd, KwEnd) => true,
+        (KwDistinct, KwDistinct) => true,
+        (KwAll, KwAll) => true,
+        (KwUnion, KwUnion) => true,
+        (KwIntersect, KwIntersect) => true,
+        (KwExcept, KwExcept) => true,
+        (KwJoin, KwJoin) => true,
+        (KwLeft, KwLeft) => true,
+        (KwRight, KwRight) => true,
+        (KwFull, KwFull) => true,
+        (KwOuter, KwOuter) => true,
+        (KwInner, KwInner) => true,
+        (KwCross, KwCross) => true,
+        (KwNatural, KwNatural) => true,
+        (KwOn, KwOn) => true,
+        (KwUsing, KwUsing) => true,
+        (KwBegin, KwBegin) => true,
+        (KwCommit, KwCommit) => true,
+        (KwRollback, KwRollback) => true,
+        (KwTransaction, KwTransaction) => true,
+        (KwSavepoint, KwSavepoint) => true,
+        (KwRelease, KwRelease) => true,
+        (KwTo, KwTo) => true,
+        (KwWith, KwWith) => true,
+        (KwRecursive, KwRecursive) => true,
+        (KwPragma, KwPragma) => true,
+        (KwExplain, KwExplain) => true,
+        (KwQuery, KwQuery) => true,
+        (KwPlan, KwPlan) => true,
+        (KwVacuum, KwVacuum) => true,
+        (KwReindex, KwReindex) => true,
+        (KwAttach, KwAttach) => true,
+        (KwDetach, KwDetach) => true,
+        (KwAnalyze, KwAnalyze) => true,
+        (KwDatabase, KwDatabase) => true,
+        (KwCascade, KwCascade) => true,
+        (KwRestrict, KwRestrict) => true,
+        (KwReturning, KwReturning) => true,
+        (KwAutoincrement, KwAutoincrement) => true,
+        (KwWithout, KwWithout) => true,
+        (KwRowid, KwRowid) => true,
+        (KwConflict, KwConflict) => true,
+        (KwAbort, KwAbort) => true,
+        (KwFail, KwFail) => true,
+        (KwIgnore, KwIgnore) => true,
+        (KwCast, KwCast) => true,
+        (KwFilter, KwFilter) => true,
+        _ => false,
+    }
+}
+
+fn punct_eq(a: Punct, b: Punct) -> Bool {
+    match (a, b) {
+        (PLParen, PLParen)       => true,
+        (PRParen, PRParen)       => true,
+        (PComma, PComma)         => true,
+        (PSemicolon, PSemicolon) => true,
+        (PDot, PDot)             => true,
+        (PColon, PColon)         => true,
+        (PColonColon, PColonColon) => true,
+        (PStar, PStar)           => true,
+        _ => false,
+    }
+}
+
+fn op_eq(a: Operator, b: Operator) -> Bool {
+    match (a, b) {
+        (OpEq, OpEq) => true,
+        (OpNotEq, OpNotEq) => true,
+        (OpLt, OpLt) => true,
+        (OpLe, OpLe) => true,
+        (OpGt, OpGt) => true,
+        (OpGe, OpGe) => true,
+        (OpPlus, OpPlus) => true,
+        (OpMinus, OpMinus) => true,
+        (OpStar, OpStar) => true,
+        (OpSlash, OpSlash) => true,
+        (OpPercent, OpPercent) => true,
+        (OpConcat, OpConcat) => true,
+        (OpBitAnd, OpBitAnd) => true,
+        (OpBitOr, OpBitOr) => true,
+        (OpBitNot, OpBitNot) => true,
+        (OpShl, OpShl) => true,
+        (OpShr, OpShr) => true,
+        (OpArrow, OpArrow) => true,
+        (OpArrowArrow, OpArrowArrow) => true,
+        _ => false,
+    }
+}

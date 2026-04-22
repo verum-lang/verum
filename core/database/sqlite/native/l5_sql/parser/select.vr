@@ -1,0 +1,432 @@
+module core.database.sqlite.native.l5_sql.parser.select;
+
+// =============================================================================
+// l5_sql/parser/select.vr — SELECT statement parser
+// =============================================================================
+// Layer: 5
+// Spec: sqlite.org/lang_select.html, sqlite-native.md §12.2
+//
+// Grammar implemented:
+//
+//   select-stmt   = simple-select { compound-op simple-select }
+//                    [ ORDER BY order-term {, order-term} ]
+//                    [ LIMIT expr [OFFSET expr] ]
+//
+//   simple-select = SELECT [DISTINCT|ALL] result-cols
+//                    [ FROM from-clause ]
+//                    [ WHERE expr ]
+//                    [ GROUP BY expr {, expr} ]
+//                    [ HAVING expr ]
+//
+//   compound-op   = UNION | UNION ALL | INTERSECT | EXCEPT
+//
+//   result-cols   = result-col {, result-col}
+//   result-col    = `*` | ident `.` `*` | expr [AS ident]
+//
+//   from-clause   = from-item { join-clause }
+//   from-item     = table-ref [AS? alias]
+//   join-clause   = join-op from-item [ON expr | USING (cols)]
+//   join-op       = [NATURAL] [LEFT|RIGHT|FULL [OUTER]| INNER| CROSS] JOIN
+//
+//   order-term    = expr [COLLATE ident] [ASC|DESC] [NULLS FIRST|LAST]
+// =============================================================================
+
+mount core.*;
+mount collections.List;
+mount base.{Result, Ok, Err, Text, Maybe};
+mount core.database.sqlite.native.l5_sql.lexer.{
+    Token, Keyword, Operator, Punct,
+};
+mount core.database.sqlite.native.l5_sql.ast.{
+    Statement, Expr, SelectStmt, SelectKind, SimpleSelect,
+    ResultColumnItem, FromItem, JoinClause, JoinKind,
+    OrderTerm, OrderDirection, LimitClause,
+    TableRef, CompoundOp,
+};
+mount core.database.sqlite.native.l5_sql.parser.token_stream.{
+    TokenStream, ParseError, parse_error,
+};
+mount core.database.sqlite.native.l5_sql.parser.expr.parse_expr;
+
+// -----------------------------------------------------------------------------
+// Entry point
+// -----------------------------------------------------------------------------
+
+public fn parse_select(ts: &mut TokenStream) -> Result<SelectStmt, ParseError> {
+    let first = match parse_simple(ts) {
+        Ok(s)  => s, Err(e) => { return Err(e); }
+    };
+
+    // Compound chains: left-associative.
+    let mut kind: SelectKind = SkSimple(first);
+    loop {
+        let op_opt = detect_compound_op(ts);
+        match op_opt {
+            Some(op) => {
+                let rhs = match parse_simple(ts) {
+                    Ok(s)  => s, Err(e) => { return Err(e); }
+                };
+                let lhs_wrapped = SelectStmt { kind: kind, order_by: List.new(), limit: None };
+                let rhs_wrapped = SelectStmt { kind: SkSimple(rhs), order_by: List.new(), limit: None };
+                kind = SkCompound(op, Heap(lhs_wrapped), Heap(rhs_wrapped));
+            }
+            None => break,
+        }
+    }
+
+    // ORDER BY.
+    let mut order_by: List<OrderTerm> = List.new();
+    if ts.accept_keyword(KwOrder) {
+        match ts.expect_keyword(KwBy) { Ok(_) => {}, Err(e) => { return Err(e); } }
+        loop {
+            let term = match parse_order_term(ts) {
+                Ok(t)  => t, Err(e) => { return Err(e); }
+            };
+            order_by.push(term);
+            if !ts.accept_punct(PComma) { break; }
+        }
+    }
+
+    // LIMIT.
+    let mut limit: Maybe<LimitClause> = None;
+    if ts.accept_keyword(KwLimit) {
+        let lim = match parse_expr(ts) {
+            Ok(e)  => e, Err(e) => { return Err(e); }
+        };
+        let off: Maybe<Expr> = if ts.accept_keyword(KwOffset) {
+            let o = match parse_expr(ts) {
+                Ok(e)  => e, Err(e) => { return Err(e); }
+            };
+            Some(o)
+        } else {
+            None
+        };
+        limit = Some(LimitClause { limit: lim, offset: off });
+    }
+
+    Ok(SelectStmt { kind: kind, order_by: order_by, limit: limit })
+}
+
+// -----------------------------------------------------------------------------
+// Simple SELECT
+// -----------------------------------------------------------------------------
+
+fn parse_simple(ts: &mut TokenStream) -> Result<SimpleSelect, ParseError> {
+    match ts.expect_keyword(KwSelect) { Ok(_) => {}, Err(e) => { return Err(e); } }
+
+    let mut distinct = false;
+    if ts.accept_keyword(KwDistinct) {
+        distinct = true;
+    } else {
+        let _ = ts.accept_keyword(KwAll);
+    }
+
+    let result_columns = match parse_result_columns(ts) {
+        Ok(v)  => v, Err(e) => { return Err(e); }
+    };
+
+    let mut from: Maybe<FromItem> = None;
+    if ts.accept_keyword(KwFrom) {
+        let fi = match parse_from_clause(ts) {
+            Ok(f)  => f, Err(e) => { return Err(e); }
+        };
+        from = Some(fi);
+    }
+
+    let mut where_clause: Maybe<Expr> = None;
+    if ts.accept_keyword(KwWhere) {
+        let e = match parse_expr(ts) {
+            Ok(x)  => x, Err(err) => { return Err(err); }
+        };
+        where_clause = Some(e);
+    }
+
+    let mut group_by: List<Expr> = List.new();
+    if ts.accept_keyword(KwGroup) {
+        match ts.expect_keyword(KwBy) { Ok(_) => {}, Err(e) => { return Err(e); } }
+        loop {
+            let e = match parse_expr(ts) {
+                Ok(x)  => x, Err(err) => { return Err(err); }
+            };
+            group_by.push(e);
+            if !ts.accept_punct(PComma) { break; }
+        }
+    }
+
+    let mut having: Maybe<Expr> = None;
+    if ts.accept_keyword(KwHaving) {
+        let e = match parse_expr(ts) {
+            Ok(x)  => x, Err(err) => { return Err(err); }
+        };
+        having = Some(e);
+    }
+
+    Ok(SimpleSelect {
+        distinct: distinct,
+        result_columns: result_columns,
+        from: from,
+        where_clause: where_clause,
+        group_by: group_by,
+        having: having,
+    })
+}
+
+// -----------------------------------------------------------------------------
+// Result columns
+// -----------------------------------------------------------------------------
+
+fn parse_result_columns(ts: &mut TokenStream) -> Result<List<ResultColumnItem>, ParseError> {
+    let mut out: List<ResultColumnItem> = List.new();
+    loop {
+        let item = match parse_result_column(ts) {
+            Ok(r)  => r, Err(e) => { return Err(e); }
+        };
+        out.push(item);
+        if !ts.accept_punct(PComma) { break; }
+    }
+    Ok(out)
+}
+
+fn parse_result_column(ts: &mut TokenStream) -> Result<ResultColumnItem, ParseError> {
+    // `*`
+    if ts.accept_punct(PStar) {
+        return Ok(RcStar);
+    }
+
+    // `ident.*` lookahead — needs fork because the `ident` might be
+    // part of a larger expression.
+    let start = ts.position();
+    match ts.peek() {
+        TIdent(s) => {
+            // Peek ahead for `. *`.
+            match ts.peek_n(1) {
+                TPunct(PDot) => {
+                    match ts.peek_n(2) {
+                        TPunct(PStar) => {
+                            let _ = ts.advance();  // ident
+                            let _ = ts.advance();  // .
+                            let _ = ts.advance();  // *
+                            return Ok(RcTableStar(TableRef {
+                                schema: "".clone(),
+                                name: s,
+                                alias: "".clone(),
+                            }));
+                        }
+                        _ => {}
+                    }
+                }
+                _ => {}
+            }
+            let _ = start;
+        }
+        _ => {}
+    }
+
+    // General expression with optional alias.
+    let e = match parse_expr(ts) {
+        Ok(x)  => x, Err(err) => { return Err(err); }
+    };
+    let alias = parse_alias(ts);
+    Ok(RcExpr(e, alias))
+}
+
+/// Parse `AS ident` or a bare identifier as an alias. Returns "" for
+/// none.
+fn parse_alias(ts: &mut TokenStream) -> Text {
+    if ts.accept_keyword(KwAs) {
+        match ts.expect_ident() {
+            Ok(s)  => s,
+            Err(_) => "".clone(),
+        }
+    } else {
+        // Bare identifier only if the next token isn't a punct/keyword
+        // that could continue the query (`,`, `FROM`, `WHERE`, etc.).
+        // For safety we only take a bare ident as an alias if the
+        // preceding expression parsed without consuming trailing
+        // ambiguity. Conservatively: accept ident but back off if it's
+        // one of the common continuation keywords.
+        match ts.peek() {
+            TIdent(_) => {
+                let s = ts.accept_ident();
+                match s { Some(name) => name, None => "".clone() }
+            }
+            _ => "".clone(),
+        }
+    }
+}
+
+// -----------------------------------------------------------------------------
+// FROM clause
+// -----------------------------------------------------------------------------
+
+fn parse_from_clause(ts: &mut TokenStream) -> Result<FromItem, ParseError> {
+    let mut left = match parse_from_item(ts) {
+        Ok(fi) => fi, Err(e) => { return Err(e); }
+    };
+
+    loop {
+        let join_opt = match try_parse_join_kind(ts) {
+            Ok(o)  => o, Err(e) => { return Err(e); }
+        };
+        match join_opt {
+            Some(jk) => {
+                let right = match parse_from_item(ts) {
+                    Ok(fi) => fi, Err(e) => { return Err(e); }
+                };
+                let mut on: Maybe<Expr> = None;
+                let mut using_cols: List<Text> = List.new();
+                if ts.accept_keyword(KwOn) {
+                    let e = match parse_expr(ts) {
+                        Ok(x)  => x, Err(err) => { return Err(err); }
+                    };
+                    on = Some(e);
+                } else if ts.accept_keyword(KwUsing) {
+                    match ts.expect_punct(PLParen) { Ok(_) => {}, Err(err) => { return Err(err); } }
+                    loop {
+                        let col = match ts.expect_ident() {
+                            Ok(s)  => s, Err(err) => { return Err(err); }
+                        };
+                        using_cols.push(col);
+                        if !ts.accept_punct(PComma) { break; }
+                    }
+                    match ts.expect_punct(PRParen) { Ok(_) => {}, Err(err) => { return Err(err); } }
+                }
+                let jc = JoinClause {
+                    kind: jk,
+                    right: Heap(right),
+                    on: on,
+                    using_cols: using_cols,
+                };
+                left = FiJoin(Heap(left), jc);
+            }
+            None => {
+                // A comma-separated FROM list is parsed as a chain of
+                // CROSS JOINs (SQLite behaviour).
+                if ts.accept_punct(PComma) {
+                    let right = match parse_from_item(ts) {
+                        Ok(fi) => fi, Err(e) => { return Err(e); }
+                    };
+                    let jc = JoinClause {
+                        kind: JCross,
+                        right: Heap(right),
+                        on: None,
+                        using_cols: List.new(),
+                    };
+                    left = FiJoin(Heap(left), jc);
+                    continue;
+                }
+                break;
+            }
+        }
+    }
+    Ok(left)
+}
+
+fn parse_from_item(ts: &mut TokenStream) -> Result<FromItem, ParseError> {
+    // `(subquery) alias` not yet supported at L5.3 initial cut.
+    let name = match ts.peek() {
+        TIdent(_) => match ts.expect_ident() {
+            Ok(s)  => s, Err(e) => { return Err(e); }
+        },
+        _ => { return Err(parse_error("expected table name".clone(), ts.position())); }
+    };
+
+    // Qualified table name: `schema.name`.
+    let (schema, table_name) = if ts.accept_punct(PDot) {
+        let second = match ts.expect_ident() {
+            Ok(s)  => s, Err(e) => { return Err(e); }
+        };
+        (name, second)
+    } else {
+        ("".clone(), name)
+    };
+
+    // Optional alias.
+    let alias = parse_alias(ts);
+
+    Ok(FiTable(TableRef {
+        schema: schema,
+        name: table_name,
+        alias: alias,
+    }))
+}
+
+fn try_parse_join_kind(ts: &mut TokenStream) -> Result<Maybe<JoinKind>, ParseError> {
+    let natural = ts.accept_keyword(KwNatural);
+    let _ = natural;
+
+    // LEFT / RIGHT / FULL / INNER / CROSS before JOIN.
+    let kind = if ts.accept_keyword(KwLeft) {
+        let _ = ts.accept_keyword(KwOuter);
+        Some(JLeftOuter)
+    } else if ts.accept_keyword(KwRight) {
+        let _ = ts.accept_keyword(KwOuter);
+        Some(JRightOuter)
+    } else if ts.accept_keyword(KwFull) {
+        let _ = ts.accept_keyword(KwOuter);
+        Some(JFullOuter)
+    } else if ts.accept_keyword(KwInner) {
+        Some(JInner)
+    } else if ts.accept_keyword(KwCross) {
+        Some(JCross)
+    } else {
+        None
+    };
+
+    match kind {
+        Some(jk) => {
+            match ts.expect_keyword(KwJoin) { Ok(_) => {}, Err(e) => { return Err(e); } }
+            Ok(Some(jk))
+        }
+        None => {
+            // Bare JOIN without prefix = INNER.
+            if ts.accept_keyword(KwJoin) {
+                Ok(Some(JInner))
+            } else {
+                Ok(None)
+            }
+        }
+    }
+}
+
+// -----------------------------------------------------------------------------
+// ORDER BY terms
+// -----------------------------------------------------------------------------
+
+fn parse_order_term(ts: &mut TokenStream) -> Result<OrderTerm, ParseError> {
+    let e = match parse_expr(ts) {
+        Ok(x)  => x, Err(err) => { return Err(err); }
+    };
+    let dir = if ts.accept_keyword(KwAsc) {
+        OdAsc
+    } else if ts.accept_keyword(KwDesc) {
+        OdDesc
+    } else {
+        OdAsc
+    };
+    Ok(OrderTerm {
+        expr: e,
+        direction: dir,
+        nulls_first: None,
+    })
+}
+
+// -----------------------------------------------------------------------------
+// Compound detection
+// -----------------------------------------------------------------------------
+
+fn detect_compound_op(ts: &mut TokenStream) -> Maybe<CompoundOp> {
+    if ts.accept_keyword(KwUnion) {
+        if ts.accept_keyword(KwAll) {
+            return Some(CoUnionAll);
+        }
+        return Some(CoUnion);
+    }
+    if ts.accept_keyword(KwIntersect) {
+        return Some(CoIntersect);
+    }
+    if ts.accept_keyword(KwExcept) {
+        return Some(CoExcept);
+    }
+    None
+}

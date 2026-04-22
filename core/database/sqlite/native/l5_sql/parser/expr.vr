@@ -1,0 +1,564 @@
+module core.database.sqlite.native.l5_sql.parser.expr;
+
+// =============================================================================
+// l5_sql/parser/expr.vr — SQL expression parser (Pratt / precedence climbing)
+// =============================================================================
+// Layer: 5
+// Spec: sqlite.org/lang_expr.html, sqlite-native.md §12.2
+//
+// SQLite operator precedence (tightest → loosest):
+//
+//   16  collate
+//   15  unary `-` `+` `~` `NOT`
+//   14  `||`
+//   13  `*` `/` `%`
+//   12  `+` `-`
+//   11  `<<` `>>` `&` `|`
+//   10  `<` `<=` `>` `>=`
+//    9  `=` `==` `!=` `<>` `IS` `IS NOT` `IN` `LIKE` `GLOB` `MATCH` `REGEXP`
+//    8  `NOT`
+//    7  `AND`
+//    6  `OR`
+//
+// We implement precedence climbing rather than a full Pratt table —
+// each precedence level corresponds to one `parse_expr_level_N`
+// function. Right-associative operators (`||`, `COLLATE`) are handled
+// by parsing the right side at the same level.
+// =============================================================================
+
+mount core.*;
+mount collections.List;
+mount base.{Result, Ok, Err, Text, Maybe};
+mount core.database.sqlite.native.l5_sql.lexer.{
+    Token, Keyword, Operator, Punct, VariableKind,
+};
+mount core.database.sqlite.native.l5_sql.ast.{
+    Expr, Literal, BinOp, UnOp, TableRef,
+};
+mount core.database.sqlite.native.l5_sql.parser.token_stream.{
+    TokenStream, ParseError, parse_error,
+};
+
+// -----------------------------------------------------------------------------
+// Entry points
+// -----------------------------------------------------------------------------
+
+/// Parse a single expression. Entry point for WHERE / HAVING / column
+/// lists / RETURNING.
+public fn parse_expr(ts: &mut TokenStream) -> Result<Expr, ParseError> {
+    parse_or(ts)
+}
+
+// -----------------------------------------------------------------------------
+// Level 6 — OR
+// -----------------------------------------------------------------------------
+
+fn parse_or(ts: &mut TokenStream) -> Result<Expr, ParseError> {
+    let mut left = match parse_and(ts) {
+        Ok(e)  => e,
+        Err(e) => { return Err(e); }
+    };
+    while ts.accept_keyword(KwOr) {
+        let right = match parse_and(ts) {
+            Ok(e)  => e,
+            Err(e) => { return Err(e); }
+        };
+        left = EBinary(BOr, Heap(left), Heap(right));
+    }
+    Ok(left)
+}
+
+// -----------------------------------------------------------------------------
+// Level 7 — AND
+// -----------------------------------------------------------------------------
+
+fn parse_and(ts: &mut TokenStream) -> Result<Expr, ParseError> {
+    let mut left = match parse_not(ts) {
+        Ok(e)  => e,
+        Err(e) => { return Err(e); }
+    };
+    while ts.accept_keyword(KwAnd) {
+        let right = match parse_not(ts) {
+            Ok(e)  => e,
+            Err(e) => { return Err(e); }
+        };
+        left = EBinary(BAnd, Heap(left), Heap(right));
+    }
+    Ok(left)
+}
+
+// -----------------------------------------------------------------------------
+// Level 8 — NOT
+// -----------------------------------------------------------------------------
+
+fn parse_not(ts: &mut TokenStream) -> Result<Expr, ParseError> {
+    if ts.accept_keyword(KwNot) {
+        let inner = match parse_not(ts) {
+            Ok(e)  => e,
+            Err(e) => { return Err(e); }
+        };
+        return Ok(EUnary(UNot, Heap(inner)));
+    }
+    parse_equality(ts)
+}
+
+// -----------------------------------------------------------------------------
+// Level 9 — equality / IS / IN / LIKE / BETWEEN
+// -----------------------------------------------------------------------------
+
+fn parse_equality(ts: &mut TokenStream) -> Result<Expr, ParseError> {
+    let mut left = match parse_comparison(ts) {
+        Ok(e)  => e,
+        Err(e) => { return Err(e); }
+    };
+
+    loop {
+        let op_opt = detect_equality_op(ts);
+        match op_opt {
+            Some(op) => {
+                let right = match parse_comparison(ts) {
+                    Ok(e)  => e,
+                    Err(e) => { return Err(e); }
+                };
+                left = EBinary(op, Heap(left), Heap(right));
+            }
+            None => {
+                // Check for NOT-prefixed forms (NOT IN, NOT LIKE, etc.).
+                let negated = ts.accept_keyword(KwNot);
+
+                if ts.accept_keyword(KwBetween) {
+                    let lo = match parse_comparison(ts) {
+                        Ok(e)  => e, Err(e) => { return Err(e); }
+                    };
+                    match ts.expect_keyword(KwAnd) { Ok(_) => {}, Err(e) => { return Err(e); } }
+                    let hi = match parse_comparison(ts) {
+                        Ok(e)  => e, Err(e) => { return Err(e); }
+                    };
+                    left = EBetween(Heap(left), Heap(lo), Heap(hi), negated);
+                    continue;
+                }
+
+                if ts.accept_keyword(KwLike) {
+                    let pattern = match parse_comparison(ts) {
+                        Ok(e)  => e, Err(e) => { return Err(e); }
+                    };
+                    let escape: Maybe<Heap<Expr>> = if ts.accept_keyword(KwCollate) {
+                        // SQLite: no "ESCAPE" kw in our set; treat as absent.
+                        None
+                    } else {
+                        None
+                    };
+                    left = ELike(Heap(left), Heap(pattern), escape, negated);
+                    continue;
+                }
+
+                if ts.accept_keyword(KwIn) {
+                    left = match parse_in_rhs(ts, left, negated) {
+                        Ok(e)  => e, Err(e) => { return Err(e); }
+                    };
+                    continue;
+                }
+
+                if negated {
+                    return Err(parse_error("expected BETWEEN/IN/LIKE after NOT".clone(), ts.position()));
+                }
+
+                // IS / IS NOT
+                if ts.accept_keyword(KwIs) {
+                    let is_not = ts.accept_keyword(KwNot);
+                    let right = match parse_comparison(ts) {
+                        Ok(e)  => e, Err(e) => { return Err(e); }
+                    };
+                    let op: BinOp = if is_not { BIsNot } else { BIs };
+                    left = EBinary(op, Heap(left), Heap(right));
+                    continue;
+                }
+
+                break;
+            }
+        }
+    }
+    Ok(left)
+}
+
+fn detect_equality_op(ts: &mut TokenStream) -> Maybe<BinOp> {
+    if ts.accept_op(OpEq)    { return Some(BEq); }
+    if ts.accept_op(OpNotEq) { return Some(BNeq); }
+    None
+}
+
+fn parse_in_rhs(
+    ts: &mut TokenStream,
+    left: Expr,
+    negated: Bool,
+) -> Result<Expr, ParseError> {
+    match ts.expect_punct(PLParen) { Ok(_) => {}, Err(e) => { return Err(e); } }
+    let mut items: List<Expr> = List.new();
+    if !ts.check_punct(PRParen) {
+        loop {
+            let e = match parse_expr(ts) {
+                Ok(x)  => x, Err(err) => { return Err(err); }
+            };
+            items.push(e);
+            if !ts.accept_punct(PComma) { break; }
+        }
+    }
+    match ts.expect_punct(PRParen) { Ok(_) => {}, Err(e) => { return Err(e); } }
+    Ok(EIn(Heap(left), items, negated))
+}
+
+// -----------------------------------------------------------------------------
+// Level 10 — < <= > >=
+// -----------------------------------------------------------------------------
+
+fn parse_comparison(ts: &mut TokenStream) -> Result<Expr, ParseError> {
+    let mut left = match parse_bit(ts) {
+        Ok(e)  => e, Err(e) => { return Err(e); }
+    };
+    loop {
+        let op_opt = if ts.accept_op(OpLt)      { Some(BLt) }
+                     else if ts.accept_op(OpLe) { Some(BLe) }
+                     else if ts.accept_op(OpGt) { Some(BGt) }
+                     else if ts.accept_op(OpGe) { Some(BGe) }
+                     else                       { None };
+        match op_opt {
+            Some(op) => {
+                let right = match parse_bit(ts) {
+                    Ok(e)  => e, Err(e) => { return Err(e); }
+                };
+                left = EBinary(op, Heap(left), Heap(right));
+            }
+            None => break,
+        }
+    }
+    Ok(left)
+}
+
+// -----------------------------------------------------------------------------
+// Level 11 — << >> & |
+// -----------------------------------------------------------------------------
+
+fn parse_bit(ts: &mut TokenStream) -> Result<Expr, ParseError> {
+    let mut left = match parse_add(ts) {
+        Ok(e)  => e, Err(e) => { return Err(e); }
+    };
+    loop {
+        let op_opt = if ts.accept_op(OpShl)         { Some(BShl) }
+                     else if ts.accept_op(OpShr)    { Some(BShr) }
+                     else if ts.accept_op(OpBitAnd) { Some(BBitAnd) }
+                     else if ts.accept_op(OpBitOr)  { Some(BBitOr) }
+                     else                           { None };
+        match op_opt {
+            Some(op) => {
+                let right = match parse_add(ts) {
+                    Ok(e)  => e, Err(e) => { return Err(e); }
+                };
+                left = EBinary(op, Heap(left), Heap(right));
+            }
+            None => break,
+        }
+    }
+    Ok(left)
+}
+
+// -----------------------------------------------------------------------------
+// Level 12 — + -
+// -----------------------------------------------------------------------------
+
+fn parse_add(ts: &mut TokenStream) -> Result<Expr, ParseError> {
+    let mut left = match parse_mul(ts) {
+        Ok(e)  => e, Err(e) => { return Err(e); }
+    };
+    loop {
+        let op_opt = if ts.accept_op(OpPlus)       { Some(BAdd) }
+                     else if ts.accept_op(OpMinus) { Some(BSub) }
+                     else                          { None };
+        match op_opt {
+            Some(op) => {
+                let right = match parse_mul(ts) {
+                    Ok(e)  => e, Err(e) => { return Err(e); }
+                };
+                left = EBinary(op, Heap(left), Heap(right));
+            }
+            None => break,
+        }
+    }
+    Ok(left)
+}
+
+// -----------------------------------------------------------------------------
+// Level 13 — * / %
+// -----------------------------------------------------------------------------
+
+fn parse_mul(ts: &mut TokenStream) -> Result<Expr, ParseError> {
+    let mut left = match parse_concat(ts) {
+        Ok(e)  => e, Err(e) => { return Err(e); }
+    };
+    loop {
+        // `*` in expression context is multiply; `SELECT *` is handled
+        // in the select parser before expression parsing begins.
+        let op_opt = if ts.check_punct(PStar) {
+                         let _ = ts.advance();
+                         Some(BMul)
+                     }
+                     else if ts.accept_op(OpStar)      { Some(BMul) }
+                     else if ts.accept_op(OpSlash)     { Some(BDiv) }
+                     else if ts.accept_op(OpPercent)   { Some(BMod) }
+                     else                              { None };
+        match op_opt {
+            Some(op) => {
+                let right = match parse_concat(ts) {
+                    Ok(e)  => e, Err(e) => { return Err(e); }
+                };
+                left = EBinary(op, Heap(left), Heap(right));
+            }
+            None => break,
+        }
+    }
+    Ok(left)
+}
+
+// -----------------------------------------------------------------------------
+// Level 14 — ||
+// -----------------------------------------------------------------------------
+
+fn parse_concat(ts: &mut TokenStream) -> Result<Expr, ParseError> {
+    let mut left = match parse_unary(ts) {
+        Ok(e)  => e, Err(e) => { return Err(e); }
+    };
+    while ts.accept_op(OpConcat) {
+        let right = match parse_unary(ts) {
+            Ok(e)  => e, Err(e) => { return Err(e); }
+        };
+        left = EBinary(BConcat, Heap(left), Heap(right));
+    }
+    Ok(left)
+}
+
+// -----------------------------------------------------------------------------
+// Level 15 — unary - + ~
+// -----------------------------------------------------------------------------
+
+fn parse_unary(ts: &mut TokenStream) -> Result<Expr, ParseError> {
+    if ts.accept_op(OpMinus) {
+        let inner = match parse_unary(ts) {
+            Ok(e)  => e, Err(e) => { return Err(e); }
+        };
+        return Ok(EUnary(UNeg, Heap(inner)));
+    }
+    if ts.accept_op(OpPlus) {
+        let inner = match parse_unary(ts) {
+            Ok(e)  => e, Err(e) => { return Err(e); }
+        };
+        return Ok(EUnary(UPlus, Heap(inner)));
+    }
+    if ts.accept_op(OpBitNot) {
+        let inner = match parse_unary(ts) {
+            Ok(e)  => e, Err(e) => { return Err(e); }
+        };
+        return Ok(EUnary(UBitNot, Heap(inner)));
+    }
+    parse_collate(ts)
+}
+
+// -----------------------------------------------------------------------------
+// Level 16 — COLLATE
+// -----------------------------------------------------------------------------
+
+fn parse_collate(ts: &mut TokenStream) -> Result<Expr, ParseError> {
+    let mut e = match parse_primary(ts) {
+        Ok(x)  => x, Err(err) => { return Err(err); }
+    };
+    while ts.accept_keyword(KwCollate) {
+        let coll = match ts.expect_ident() {
+            Ok(s)  => s, Err(err) => { return Err(err); }
+        };
+        e = ECollate(Heap(e), coll);
+    }
+    Ok(e)
+}
+
+// -----------------------------------------------------------------------------
+// Primary: literal / variable / column / fn-call / parenthesised
+// -----------------------------------------------------------------------------
+
+fn parse_primary(ts: &mut TokenStream) -> Result<Expr, ParseError> {
+    let tok = ts.peek();
+    match tok {
+        TKeyword(KwNull)  => { let _ = ts.advance(); Ok(ELit(LNull)) }
+        TKeyword(KwTrue)  => { let _ = ts.advance(); Ok(ELit(LTrue)) }
+        TKeyword(KwFalse) => { let _ = ts.advance(); Ok(ELit(LFalse)) }
+        TKeyword(KwCase)  => parse_case(ts),
+        TKeyword(KwCast)  => parse_cast(ts),
+        TKeyword(KwExists) => parse_exists(ts, false),
+        TKeyword(KwNot) => {
+            // `NOT EXISTS (...)` is a primary.
+            let _ = ts.advance();
+            match ts.expect_keyword(KwExists) { Ok(_) => {}, Err(e) => { return Err(e); } }
+            parse_exists_body(ts, true)
+        }
+
+        TIntLit(i)   => { let _ = ts.advance(); Ok(ELit(LInt(i))) }
+        TFloatLit(x) => { let _ = ts.advance(); Ok(ELit(LReal(x))) }
+        TStringLit(s) => { let _ = ts.advance(); Ok(ELit(LText(s))) }
+        TBlobLit(b)   => { let _ = ts.advance(); Ok(ELit(LBlob(b))) }
+
+        TVariable(v) => { let _ = ts.advance(); Ok(variable_to_expr(v)) }
+
+        TPunct(PLParen) => {
+            let _ = ts.advance();
+            // Could be a parenthesised expression or a subquery.
+            // Lookahead for SELECT keyword.
+            if ts.check_keyword(KwSelect) || ts.check_keyword(KwWith) {
+                // Subquery parsing is owned by the select module; we
+                // return a placeholder ESubquery that the select
+                // parser fills once it lands. For now, reject cleanly.
+                return Err(parse_error(
+                    "subquery expression not yet supported in L5.3 initial cut".clone(),
+                    ts.position(),
+                ));
+            }
+            let e = match parse_expr(ts) {
+                Ok(x)  => x, Err(err) => { return Err(err); }
+            };
+            match ts.expect_punct(PRParen) { Ok(_) => {}, Err(err) => { return Err(err); } }
+            Ok(e)
+        }
+
+        TIdent(_) => parse_ident_or_call(ts),
+
+        _ => Err(parse_error("expected expression".clone(), ts.position())),
+    }
+}
+
+fn variable_to_expr(v: VariableKind) -> Expr {
+    match v {
+        VAnon           => EPositional(0),   // 0 = next positional
+        VIndexed(n)     => EPositional(n),
+        VNamedColon(s)  => EVar(s),
+        VNamedAt(s)     => EVar(s),
+        VNamedDollar(s) => EVar(s),
+    }
+}
+
+fn parse_ident_or_call(ts: &mut TokenStream) -> Result<Expr, ParseError> {
+    let name = match ts.expect_ident() {
+        Ok(n)  => n, Err(e) => { return Err(e); }
+    };
+
+    // `name.col` or `schema.name.col`.
+    if ts.accept_punct(PDot) {
+        let second = match ts.expect_ident() {
+            Ok(n)  => n, Err(e) => { return Err(e); }
+        };
+        if ts.accept_punct(PDot) {
+            // schema.table.column.
+            let third = match ts.expect_ident() {
+                Ok(n)  => n, Err(e) => { return Err(e); }
+            };
+            return Ok(EColumn(
+                TableRef { schema: name, name: second, alias: "".clone() },
+                third,
+            ));
+        }
+        return Ok(EColumn(
+            TableRef { schema: "".clone(), name: name, alias: "".clone() },
+            second,
+        ));
+    }
+
+    // Function call: `name(args)`.
+    if ts.accept_punct(PLParen) {
+        let distinct = ts.accept_keyword(KwDistinct);
+        let mut args: List<Expr> = List.new();
+        // `name(*)` — treated as EFunc with an empty arg list + a
+        // magic count(*) marker. For our v1 we just accept the `*` by
+        // popping it and leaving args empty.
+        if ts.accept_punct(PStar) {
+            // no args.
+        } else if !ts.check_punct(PRParen) {
+            loop {
+                let e = match parse_expr(ts) {
+                    Ok(x)  => x, Err(err) => { return Err(err); }
+                };
+                args.push(e);
+                if !ts.accept_punct(PComma) { break; }
+            }
+        }
+        match ts.expect_punct(PRParen) { Ok(_) => {}, Err(e) => { return Err(e); } }
+        return Ok(EFunc(name, args, distinct));
+    }
+
+    // Bare column.
+    Ok(EColumn(
+        TableRef { schema: "".clone(), name: "".clone(), alias: "".clone() },
+        name,
+    ))
+}
+
+fn parse_case(ts: &mut TokenStream) -> Result<Expr, ParseError> {
+    let _ = ts.advance();   // CASE
+
+    // Optional scrutinee: `CASE expr WHEN ...`
+    let scrutinee: Maybe<Heap<Expr>> = if ts.check_keyword(KwWhen) {
+        None
+    } else {
+        let e = match parse_expr(ts) {
+            Ok(x)  => x, Err(err) => { return Err(err); }
+        };
+        Some(Heap(e))
+    };
+
+    let mut arms: List<(Expr, Expr)> = List.new();
+    while ts.accept_keyword(KwWhen) {
+        let cond = match parse_expr(ts) {
+            Ok(x)  => x, Err(err) => { return Err(err); }
+        };
+        match ts.expect_keyword(KwThen) { Ok(_) => {}, Err(err) => { return Err(err); } }
+        let body = match parse_expr(ts) {
+            Ok(x)  => x, Err(err) => { return Err(err); }
+        };
+        arms.push((cond, body));
+    }
+
+    let else_: Maybe<Heap<Expr>> = if ts.accept_keyword(KwElse) {
+        let e = match parse_expr(ts) {
+            Ok(x)  => x, Err(err) => { return Err(err); }
+        };
+        Some(Heap(e))
+    } else {
+        None
+    };
+
+    match ts.expect_keyword(KwEnd) { Ok(_) => {}, Err(err) => { return Err(err); } }
+
+    Ok(ECase(scrutinee, arms, else_))
+}
+
+fn parse_cast(ts: &mut TokenStream) -> Result<Expr, ParseError> {
+    let _ = ts.advance();   // CAST
+    match ts.expect_punct(PLParen) { Ok(_) => {}, Err(e) => { return Err(e); } }
+    let inner = match parse_expr(ts) {
+        Ok(x)  => x, Err(err) => { return Err(err); }
+    };
+    match ts.expect_keyword(KwAs) { Ok(_) => {}, Err(e) => { return Err(e); } }
+    let ty = match ts.expect_ident() {
+        Ok(s)  => s, Err(err) => { return Err(err); }
+    };
+    match ts.expect_punct(PRParen) { Ok(_) => {}, Err(e) => { return Err(e); } }
+    Ok(ECast(Heap(inner), ty))
+}
+
+fn parse_exists(ts: &mut TokenStream, negated: Bool) -> Result<Expr, ParseError> {
+    let _ = ts.advance();   // EXISTS
+    parse_exists_body(ts, negated)
+}
+
+fn parse_exists_body(ts: &mut TokenStream, negated: Bool) -> Result<Expr, ParseError> {
+    // `EXISTS (SELECT ...)` — subquery not yet landed; surface the gap.
+    let _ = negated;
+    Err(parse_error(
+        "EXISTS subquery not yet supported in L5.3 initial cut".clone(),
+        ts.position(),
+    ))
+}

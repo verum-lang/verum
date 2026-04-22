@@ -1,0 +1,33 @@
+module core.database.sqlite.native.l5_sql.parser;
+
+// =============================================================================
+// core/database/sqlite/native/l5_sql/parser/mod.vr — SQL parser subtree
+// =============================================================================
+// Layer: 5
+// Dependencies: l5_sql.lexer, l5_sql.ast
+// =============================================================================
+//
+// Hand-written recursive-descent parser, split by statement kind so
+// each grammar production lives in its own file:
+//
+//   * token_stream — shared TokenStream + ParseError
+//   * expr         — operator-precedence expression parser
+//   * select       — SELECT with compound, ORDER BY, LIMIT, FROM+JOIN
+//   * insert/update/delete (upcoming)
+//   * ddl          (upcoming)
+//   * pragma       (upcoming)
+// =============================================================================
+
+public module token_stream;
+public module expr;
+public module select;
+public module dml;
+
+public mount .token_stream.{
+    TokenStream, ParseError,
+    stream_new, parse_error,
+};
+
+public mount .expr.parse_expr;
+public mount .select.parse_select;
+public mount .dml.{parse_insert, parse_update, parse_delete};
