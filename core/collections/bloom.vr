@@ -1,0 +1,211 @@
+// =============================================================================
+// collections/bloom.vr — probabilistic set (Bloom filter)
+// =============================================================================
+// Layer: 2 (Collections)
+// Dependencies: core, core.security.mac.hmac, core.security.util.rng
+// =============================================================================
+//
+// Classic Bloom filter with HMAC-SHA256-keyed Kirsch-Mitzenmacher
+// double hashing (one HMAC gives two 64-bit halves → `k` probe
+// offsets). Covers the general-purpose user-facing case: cache-key
+// dedup, URL-seen tracking, log-line dedup, etc.
+//
+// The TLS 0-RTT anti-replay module ships its own specialised two-
+// bucket rotating Bloom (it needs time-based eviction the general
+// case doesn't); that module and this one intentionally don't share
+// implementation so each can evolve independently.
+//
+// # Sizing
+//
+// `BloomFilter.with_target(capacity, fp_rate_ppm)` picks
+//
+//   m = -n·ln(p) / ln(2)^2        // bits
+//   k = m/n · ln(2)                // hash count
+//
+// approximated from a small table (no floats). For `fp_rate_ppm =
+// 1000` (0.1% = 2^-10), m ≈ 14.4 n and k ≈ 10.
+//
+// # Performance
+//
+// `insert` / `contains` = O(k) — typically 7–10 probe operations.
+// One HMAC-SHA256 call per op, split into k offsets by the
+// Kirsch-Mitzenmacher trick. At ~100 ns per HMAC, a single Bloom
+// op is under 150 ns on a modern CPU.
+//
+// =============================================================================
+
+module core.collections.bloom;
+
+mount core.*;
+mount core.collections.List;
+mount core.security.mac.hmac.{hmac_sha256};
+mount core.security.util.rng.{fill_secure};
+
+// =============================================================================
+// Config
+// =============================================================================
+
+public type BloomConfig is {
+    /// Expected number of items.
+    capacity:      Int,
+    /// Target false-positive rate × 1_000_000.
+    fp_rate_ppm:   Int,
+};
+
+implement BloomConfig {
+    public fn defaults() -> BloomConfig {
+        BloomConfig { capacity: 1_048_576, fp_rate_ppm: 1000 }   // 2^20, 0.1%
+    }
+}
+
+// =============================================================================
+// Filter
+// =============================================================================
+
+public type BloomFilter is {
+    bits:     List<UInt64>,
+    bit_len:  Int,
+    k:        Int,
+    /// Keyed so collision probing against a known filter is hard.
+    key:      [Byte; 32],
+    admitted: UInt64,
+};
+
+implement BloomFilter {
+    /// Build a filter sized for a target capacity and FP rate.
+    public fn with_target(capacity: Int, fp_rate_ppm: Int) -> BloomFilter {
+        BloomFilter.new(BloomConfig { capacity: capacity, fp_rate_ppm: fp_rate_ppm })
+    }
+
+    public fn new(cfg: BloomConfig) -> BloomFilter {
+        let bit_len = compute_bit_len(cfg.capacity, cfg.fp_rate_ppm);
+        let word_count = bit_len / 64;
+        let mut bits: List<UInt64> = [];
+        let mut i: Int = 0;
+        while i < word_count { bits.push(0_u64); i = i + 1; }
+        let mut key: [Byte; 32] = [0_u8; 32];
+        fill_secure(&mut key);
+        BloomFilter {
+            bits:     bits,
+            bit_len:  bit_len,
+            k:        compute_k(bit_len, cfg.capacity),
+            key:      key,
+            admitted: 0_u64,
+        }
+    }
+
+    public fn with_defaults() -> BloomFilter {
+        BloomFilter.new(BloomConfig.defaults())
+    }
+
+    /// Insert a key. Idempotent — repeated inserts don't bloat.
+    public fn insert(&mut self, item: &[Byte]) {
+        let offsets = self.probe_offsets(item);
+        let mut i: Int = 0;
+        while i < offsets.len() {
+            self.set_bit(offsets[i]);
+            i = i + 1;
+        }
+        self.admitted = self.admitted + 1_u64;
+    }
+
+    /// May-contain check. Returns `true` if every probe bit is set
+    /// (definite contain OR false positive), `false` if any bit
+    /// is unset (definite absent).
+    public fn contains(&self, item: &[Byte]) -> Bool {
+        let offsets = self.probe_offsets(item);
+        let mut i: Int = 0;
+        while i < offsets.len() {
+            if !self.test_bit(offsets[i]) { return false; }
+            i = i + 1;
+        }
+        true
+    }
+
+    /// Insert + return the pre-insert contains result. Useful for
+    /// the common "seen it? if not, record it." pattern.
+    public fn check_and_set(&mut self, item: &[Byte]) -> Bool {
+        let was_present = self.contains(item);
+        if !was_present { self.insert(item); }
+        was_present
+    }
+
+    /// Drop all bits. Counter + key reset; fresh-probe semantics
+    /// on next insert.
+    public fn clear(&mut self) {
+        let mut i: Int = 0;
+        while i < self.bits.len() { self.bits[i] = 0_u64; i = i + 1; }
+        self.admitted = 0_u64;
+        let mut new_key: [Byte; 32] = [0_u8; 32];
+        fill_secure(&mut new_key);
+        self.key = new_key;
+    }
+
+    public fn admitted(&self) -> UInt64 { self.admitted }
+    public fn bits_len(&self) -> Int { self.bit_len }
+    public fn hash_count(&self) -> Int { self.k }
+
+    // -----------------------------------------------------------------
+    // Internals
+    // -----------------------------------------------------------------
+
+    fn probe_offsets(&self, item: &[Byte]) -> List<Int> {
+        let digest = hmac_sha256(&self.key[..], item);
+        let h1 = bytes_to_u64_le(&digest[..], 0);
+        let h2 = bytes_to_u64_le(&digest[..], 8);
+        let mut out: List<Int> = [];
+        let m = self.bit_len as UInt64;
+        let mut i: Int = 0;
+        while i < self.k {
+            let g = (h1 + (i as UInt64) * h2) % m;
+            out.push(g as Int);
+            i = i + 1;
+        }
+        out
+    }
+
+    fn set_bit(&mut self, idx: Int) {
+        let word = idx / 64;
+        let bit = idx % 64;
+        self.bits[word] = self.bits[word] | (1_u64 << (bit as UInt64));
+    }
+
+    fn test_bit(&self, idx: Int) -> Bool {
+        let word = idx / 64;
+        let bit = idx % 64;
+        (self.bits[word] >> (bit as UInt64)) & 1_u64 == 1_u64
+    }
+}
+
+// =============================================================================
+// Sizing helpers
+// =============================================================================
+
+fn compute_bit_len(capacity: Int, fp_ppm: Int) -> Int {
+    let bits_per_entry = match fp_ppm {
+        0 | 1 | 10      => 24,   // ~2^-20
+        100             => 19,   // ~2^-15
+        1_000           => 15,   // ~2^-10 (0.1%)
+        10_000          => 10,   // ~2^-7
+        _               => 15,
+    };
+    let m = capacity * bits_per_entry;
+    let rem = m % 64;
+    if rem == 0 { m } else { m + (64 - rem) }
+}
+
+fn compute_k(bit_len: Int, capacity: Int) -> Int {
+    let bits_per_entry = bit_len / capacity;
+    let k = (bits_per_entry * 7) / 10;   // ln(2) ≈ 0.693
+    if k < 2 { 2 } else if k > 16 { 16 } else { k }
+}
+
+fn bytes_to_u64_le(b: &[Byte], off: Int) -> UInt64 {
+    let mut r: UInt64 = 0_u64;
+    let mut i: Int = 0;
+    while i < 8 {
+        r = r | ((b[off + i] as UInt64) << ((i * 8) as UInt64));
+        i = i + 1;
+    }
+    r
+}

@@ -1,0 +1,43 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: collections, bloom, probabilistic, typecheck
+// @timeout: 10000
+// @expect: pass
+
+mount core.collections.{BloomFilter, BloomConfig};
+
+fn exercise_bloom() {
+    let mut bf = BloomFilter.with_target(100_000, 1000);   // 2^-10 FP
+
+    let key_a: [Byte; 5] = [1_u8, 2_u8, 3_u8, 4_u8, 5_u8];
+    let key_b: [Byte; 5] = [9_u8, 8_u8, 7_u8, 6_u8, 5_u8];
+
+    // Insert a, then a.contains → true; b.contains → (probably) false.
+    bf.insert(&key_a[..]);
+    assert(bf.contains(&key_a[..]));
+
+    // check_and_set: first call inserts + returns false (not previously present);
+    // second returns true.
+    let first = bf.check_and_set(&key_b[..]);
+    assert(!first);
+    let second = bf.check_and_set(&key_b[..]);
+    assert(second);
+
+    // Introspection + reset.
+    let _: UInt64 = bf.admitted();
+    let _: Int = bf.bits_len();
+    let _: Int = bf.hash_count();
+    bf.clear();
+
+    // Defaults constructor.
+    let bf2 = BloomFilter.with_defaults();
+    let _ = bf2;
+
+    // Explicit config.
+    let cfg = BloomConfig.defaults();
+    let bf3 = BloomFilter.new(cfg);
+    let _ = bf3;
+}
+
+fn main() { exercise_bloom(); }

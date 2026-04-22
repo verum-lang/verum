@@ -32,6 +32,7 @@ public module heap;
 public module btree;
 public module adjacency_list;
 public module ttl_cache;
+public module bloom;
 
 // =============================================================================
 // Re-exports
@@ -112,6 +113,9 @@ public mount .btree.RangeBounds;
 public mount .ttl_cache.{
     TtlCache, TtlCacheConfig, TtlCacheStats,
 };
+
+// From bloom
+public mount .bloom.{BloomFilter, BloomConfig};
 
 // =============================================================================
 // Prelude exports
