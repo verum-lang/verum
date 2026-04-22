@@ -1,0 +1,64 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: quic, rfc9000, address-validation, retry, new-token, typecheck
+// @timeout: 10000
+// @expect: pass
+
+mount core.net.quic.address_token.{
+    AddressTokenKey, TokenKind, TokenPlaintext, TokenError,
+    VerifyOptions,
+    issue, verify, ip_bytes_from,
+};
+mount core.net.addr.{IpAddr, Ipv4Addr};
+mount core.collections.List;
+
+fn exercise_retry_token() -> Result<(), TokenError> {
+    let key = AddressTokenKey.generate();
+
+    let client_ip_bytes = ip_bytes_from(&IpAddr.V4(Ipv4Addr.new(192_u8, 0_u8, 2_u8, 1_u8)));
+    let orig_dcid: [Byte; 8] = [0x11_u8, 0x22_u8, 0x33_u8, 0x44_u8,
+                                 0x55_u8, 0x66_u8, 0x77_u8, 0x88_u8];
+    let mut dcid_vec: List<Byte> = [];
+    let mut i: Int = 0;
+    while i < 8 { dcid_vec.push(orig_dcid[i]); i = i + 1; }
+
+    let plain = TokenPlaintext {
+        kind:         TokenKind.Retry,
+        issued_unix:  1_700_000_000_u64,
+        client_ip:    client_ip_bytes.clone(),
+        orig_dcid:    dcid_vec,
+    };
+    let wire = issue(&key, &plain)?;
+
+    // Verify with the matching key + client IP.
+    let opts = VerifyOptions {
+        max_age_sec:        30_u64,          // Retry tokens are short-lived
+        expected_client_ip: Some(client_ip_bytes),
+        required_kind:      Some(TokenKind.Retry),
+    };
+    let _decoded = verify(&key, wire.as_slice(), 1_700_000_010_u64, &opts)?;
+    Ok(())
+}
+
+fn exercise_new_token() -> Result<(), TokenError> {
+    let key = AddressTokenKey.generate();
+    let client_ip = ip_bytes_from(&IpAddr.V4(Ipv4Addr.new(10_u8, 0_u8, 0_u8, 1_u8)));
+
+    let plain = TokenPlaintext {
+        kind:         TokenKind.NewToken,
+        issued_unix:  1_700_000_000_u64,
+        client_ip:    client_ip.clone(),
+        orig_dcid:    [],
+    };
+    let wire = issue(&key, &plain)?;
+
+    let opts = VerifyOptions.defaults();
+    let _ = verify(&key, wire.as_slice(), 1_700_000_010_u64, &opts)?;
+    Ok(())
+}
+
+fn main() {
+    let _ = exercise_retry_token();
+    let _ = exercise_new_token();
+}

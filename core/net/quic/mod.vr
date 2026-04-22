@@ -73,6 +73,7 @@ public module key_update;              // RFC 9001 §6 key update state machine
 public module stats;                   // Per-connection + endpoint observability
 public module pacer;                   // RFC 9002 §7.7 token-bucket send pacer
 public module stats_prometheus;        // Prometheus-format metrics exporter
+public module address_token;           // RFC 9000 §8.1.3 address-validation tokens
 
 mount core.*;
 mount core.time.duration.{Duration};
@@ -122,6 +123,13 @@ public mount .pacer.{Pacer, PacerDecision};
 // or use the short re-export names below)
 public mount .stats_prometheus.{
     render_connection, render_endpoint,
+};
+
+// Re-exports — address-validation tokens
+public mount .address_token.{
+    AddressTokenKey, TokenKind, TokenPlaintext, TokenError,
+    VerifyOptions,
+    issue, verify, ip_bytes_from,
 };
 
 // =============================================================================

@@ -1,0 +1,359 @@
+// =============================================================================
+// net/quic/address_token.vr — Address-validation tokens (RFC 9000 §8.1.3)
+// =============================================================================
+// Layer: 5 (Network — QUIC)
+// Dependencies: core, core.time, core.net.addr,
+//               core.security.aead.aes_gcm, core.security.util.rng
+// =============================================================================
+//
+// RFC 9000 §8.1.3 — a server-issued opaque cookie that lets a client
+// skip address validation on future handshakes. The server hands one
+// out in two cases:
+//
+//   * Retry — included in the Retry packet's `retry_token` field
+//     to mitigate amplification attacks (§8.1.2). Token is short-
+//     lived (seconds) and bound to the client's original DCID so
+//     a replay from a different CID is detectable.
+//
+//   * NEW_TOKEN frame — post-handshake, the server hands out a
+//     longer-lived token. A subsequent connection from the same
+//     peer prepends this token to its first Initial packet, letting
+//     the server grant the peer a pre-validated-address amplification
+//     budget.
+//
+// Wire format (implementation-private — the RFC says tokens are
+// opaque to the client, so we pick a format that:
+//
+//   key_id (8)  || version (1) || kind (1) || issued_unix (8)
+//   || client_ip_len (1) || client_ip (≤16) || orig_dcid_len (1)
+//   || orig_dcid (≤20) || AEAD_AES_128_GCM ciphertext+tag
+//
+// AAD = key_id || version || kind so ciphertext is bound to the
+// envelope. Fresh 12-byte nonce per token.
+//
+// # Security properties
+//
+//   * Unforgeable — AES-128-GCM over a 128-bit secret key.
+//   * Client-IP bound — validation fails if the client presents
+//     the token from a different source address.
+//   * Lifetime bound — issued_unix + max_age checked on verify.
+//   * Key-rotatable — 8-byte key_id prefix enables multiple
+//     active STEK-style keys during rotation windows.
+//
+// =============================================================================
+
+module core.net.quic.address_token;
+
+mount core.*;
+mount core.collections.List;
+mount core.net.addr.{IpAddr, Ipv4Addr, Ipv6Addr};
+mount core.security.aead.aes_gcm.{aes128_gcm_seal, aes128_gcm_open, AesGcmError};
+mount core.security.util.rng.{fill_secure};
+
+// =============================================================================
+// Types
+// =============================================================================
+
+public const WIRE_VERSION: UInt8 = 1_u8;
+
+public type TokenKind is
+      Retry              // short-lived; issued in Retry packet
+    | NewToken;          // longer-lived; issued via NEW_TOKEN frame
+
+public type AddressTokenKey is {
+    key:    [Byte; 16],
+    key_id: [Byte; 8],
+};
+
+implement AddressTokenKey {
+    public fn generate() -> AddressTokenKey {
+        let mut k: [Byte; 16] = [0_u8; 16];
+        let mut kid: [Byte; 8] = [0_u8; 8];
+        fill_secure(&mut k);
+        fill_secure(&mut kid);
+        AddressTokenKey { key: k, key_id: kid }
+    }
+
+    public fn key_id(&self) -> [Byte; 8] { self.key_id }
+}
+
+public type TokenError is
+      SealFailure
+    | OpenFailure
+    | WrongKeyId
+    | Malformed
+    | Expired
+    | WrongKind
+    | ClientIpMismatch;
+
+public type TokenPlaintext is {
+    kind:         TokenKind,
+    issued_unix:  UInt64,
+    /// Client address bytes (4 for IPv4, 16 for IPv6) that validates
+    /// the token. On replay from a different client IP, verification
+    /// returns `ClientIpMismatch`.
+    client_ip:    List<Byte>,
+    /// Original Destination Connection ID the client used in its
+    /// first Initial that triggered this token's issuance. Only
+    /// populated for `Retry` tokens; empty for `NewToken`.
+    orig_dcid:    List<Byte>,
+};
+
+// =============================================================================
+// Issue
+// =============================================================================
+
+public fn issue(
+    key:       &AddressTokenKey,
+    plain:     &TokenPlaintext,
+) -> Result<List<Byte>, TokenError> {
+    // Fresh nonce.
+    let mut nonce: [Byte; 12] = [0_u8; 12];
+    fill_secure(&mut nonce);
+
+    // Encode plaintext.
+    let pt = encode_plaintext(plain);
+
+    // AAD = key_id || version || kind.
+    let mut aad: List<Byte> = [];
+    let mut i: Int = 0;
+    while i < 8 { aad.push(key.key_id[i]); i = i + 1; }
+    aad.push(WIRE_VERSION);
+    aad.push(kind_byte(&plain.kind));
+
+    // Encrypt.
+    let mut sealed: List<Byte> = [];
+    aes128_gcm_seal(&key.key, &nonce, aad.as_slice(), pt.as_slice(), &mut sealed)
+        .map_err(|_| TokenError.SealFailure)?;
+
+    // Wire = key_id || version || kind || nonce || sealed.
+    let mut out: List<Byte> = [];
+    let mut j: Int = 0;
+    while j < 8 { out.push(key.key_id[j]); j = j + 1; }
+    out.push(WIRE_VERSION);
+    out.push(kind_byte(&plain.kind));
+    let mut n: Int = 0;
+    while n < 12 { out.push(nonce[n]); n = n + 1; }
+    let mut s: Int = 0;
+    while s < sealed.len() { out.push(sealed[s]); s = s + 1; }
+    Ok(out)
+}
+
+// =============================================================================
+// Verify
+// =============================================================================
+
+public type VerifyOptions is {
+    /// Maximum acceptable age in seconds. Tokens issued earlier than
+    /// (now_unix - max_age_sec) are rejected with `Expired`.
+    max_age_sec:      UInt64,
+    /// Require the client IP to match `expected_client_ip`. When
+    /// None, the IP check is skipped (useful when NAT rebinding
+    /// makes strict binding counter-productive; not recommended for
+    /// Retry tokens).
+    expected_client_ip: Maybe<List<Byte>>,
+    /// If provided, the token MUST be of this kind. Mixing Retry
+    /// and NewToken semantics is a protocol error caught here.
+    required_kind:    Maybe<TokenKind>,
+};
+
+implement VerifyOptions {
+    public fn defaults() -> VerifyOptions {
+        VerifyOptions {
+            max_age_sec:        86_400_u64,           // 24 h
+            expected_client_ip: None,
+            required_kind:      None,
+        }
+    }
+}
+
+public fn verify(
+    key:        &AddressTokenKey,
+    wire:       &[Byte],
+    now_unix:   UInt64,
+    opts:       &VerifyOptions,
+) -> Result<TokenPlaintext, TokenError> {
+    if wire.len() < 8 + 1 + 1 + 12 + 16 {
+        return Err(TokenError.Malformed);
+    }
+    // Key ID match.
+    let mut i: Int = 0;
+    while i < 8 {
+        if wire[i] != key.key_id[i] {
+            return Err(TokenError.WrongKeyId);
+        }
+        i = i + 1;
+    }
+    if wire[8] != WIRE_VERSION { return Err(TokenError.Malformed); }
+    let kind = match wire[9] {
+        0_u8 => TokenKind.Retry,
+        1_u8 => TokenKind.NewToken,
+        _    => return Err(TokenError.Malformed),
+    };
+    match &opts.required_kind {
+        Some(required) => {
+            if !kind_eq(&kind, required) {
+                return Err(TokenError.WrongKind);
+            }
+        },
+        None => {},
+    }
+
+    let mut nonce: [Byte; 12] = [0_u8; 12];
+    let mut j: Int = 0;
+    while j < 12 { nonce[j] = wire[10 + j]; j = j + 1; }
+
+    let aad = {
+        let mut a: List<Byte> = [];
+        let mut k: Int = 0;
+        while k < 8 { a.push(wire[k]); k = k + 1; }
+        a.push(WIRE_VERSION);
+        a.push(wire[9]);
+        a
+    };
+
+    let ct_start: Int = 22;
+    let mut ct: List<Byte> = [];
+    let mut c: Int = ct_start;
+    while c < wire.len() { ct.push(wire[c]); c = c + 1; }
+
+    let mut pt: List<Byte> = [];
+    aes128_gcm_open(&key.key, &nonce, aad.as_slice(), ct.as_slice(), &mut pt)
+        .map_err(|_| TokenError.OpenFailure)?;
+
+    let decoded = decode_plaintext(pt.as_slice(), kind)?;
+
+    // Age check.
+    if now_unix > decoded.issued_unix + opts.max_age_sec {
+        return Err(TokenError.Expired);
+    }
+    // Client-IP bind check.
+    match &opts.expected_client_ip {
+        Some(expected) => {
+            if !ip_eq(&decoded.client_ip, expected) {
+                return Err(TokenError.ClientIpMismatch);
+            }
+        },
+        None => {},
+    }
+    Ok(decoded)
+}
+
+// =============================================================================
+// Wire encoding of plaintext (post-AEAD)
+// =============================================================================
+//
+//   kind(1) || issued_unix(8 BE) || ip_len(1) || ip_bytes
+//   || dcid_len(1) || dcid_bytes
+//
+// `kind` is duplicated here so a plaintext parsed from a corrupt
+// key_id still carries the kind — defense-in-depth.
+//
+// =============================================================================
+
+fn encode_plaintext(p: &TokenPlaintext) -> List<Byte> {
+    let mut out: List<Byte> = [];
+    out.push(kind_byte(&p.kind));
+    let t = p.issued_unix;
+    out.push(((t >> 56) & 0xFF_u64) as Byte);
+    out.push(((t >> 48) & 0xFF_u64) as Byte);
+    out.push(((t >> 40) & 0xFF_u64) as Byte);
+    out.push(((t >> 32) & 0xFF_u64) as Byte);
+    out.push(((t >> 24) & 0xFF_u64) as Byte);
+    out.push(((t >> 16) & 0xFF_u64) as Byte);
+    out.push(((t >>  8) & 0xFF_u64) as Byte);
+    out.push((t & 0xFF_u64) as Byte);
+
+    out.push(p.client_ip.len() as Byte);
+    let mut i: Int = 0;
+    while i < p.client_ip.len() { out.push(p.client_ip[i]); i = i + 1; }
+
+    out.push(p.orig_dcid.len() as Byte);
+    let mut j: Int = 0;
+    while j < p.orig_dcid.len() { out.push(p.orig_dcid[j]); j = j + 1; }
+    out
+}
+
+fn decode_plaintext(buf: &[Byte], kind_hint: TokenKind) -> Result<TokenPlaintext, TokenError> {
+    if buf.len() < 1 + 8 + 1 { return Err(TokenError.Malformed); }
+    let kind = match buf[0] {
+        0_u8 => TokenKind.Retry,
+        1_u8 => TokenKind.NewToken,
+        _    => return Err(TokenError.Malformed),
+    };
+    if !kind_eq(&kind, &kind_hint) { return Err(TokenError.Malformed); }
+    let t: UInt64 =
+          ((buf[1] as UInt64) << 56)
+        | ((buf[2] as UInt64) << 48)
+        | ((buf[3] as UInt64) << 40)
+        | ((buf[4] as UInt64) << 32)
+        | ((buf[5] as UInt64) << 24)
+        | ((buf[6] as UInt64) << 16)
+        | ((buf[7] as UInt64) <<  8)
+        |  (buf[8] as UInt64);
+    let ip_len = buf[9] as Int;
+    if ip_len > 16 || 10 + ip_len + 1 > buf.len() {
+        return Err(TokenError.Malformed);
+    }
+    let mut ip: List<Byte> = [];
+    let mut i: Int = 10;
+    while i < 10 + ip_len { ip.push(buf[i]); i = i + 1; }
+    let dcid_off = 10 + ip_len;
+    let dcid_len = buf[dcid_off] as Int;
+    if dcid_off + 1 + dcid_len > buf.len() {
+        return Err(TokenError.Malformed);
+    }
+    let mut dcid: List<Byte> = [];
+    let mut j: Int = dcid_off + 1;
+    while j < dcid_off + 1 + dcid_len { dcid.push(buf[j]); j = j + 1; }
+    Ok(TokenPlaintext {
+        kind: kind, issued_unix: t, client_ip: ip, orig_dcid: dcid,
+    })
+}
+
+// =============================================================================
+// Convenience: build IP bytes from an IpAddr value
+// =============================================================================
+
+public fn ip_bytes_from(addr: &IpAddr) -> List<Byte> {
+    match addr {
+        IpAddr.V4(v4) => {
+            let (a, b, c, d) = v4.octets();
+            let mut out: List<Byte> = [];
+            out.push(a); out.push(b); out.push(c); out.push(d);
+            out
+        },
+        IpAddr.V6(v6) => {
+            let arr: [Byte; 16] = v6.octets();
+            let mut out: List<Byte> = [];
+            let mut i: Int = 0;
+            while i < 16 { out.push(arr[i]); i = i + 1; }
+            out
+        },
+    }
+}
+
+// =============================================================================
+// Helpers
+// =============================================================================
+
+fn kind_byte(k: &TokenKind) -> Byte {
+    match k {
+        TokenKind.Retry    => 0_u8,
+        TokenKind.NewToken => 1_u8,
+    }
+}
+
+fn kind_eq(a: &TokenKind, b: &TokenKind) -> Bool {
+    kind_byte(a) == kind_byte(b)
+}
+
+fn ip_eq(a: &List<Byte>, b: &List<Byte>) -> Bool {
+    if a.len() != b.len() { return false; }
+    let mut i: Int = 0;
+    while i < a.len() {
+        if a[i] != b[i] { return false; }
+        i = i + 1;
+    }
+    true
+}
