@@ -1,0 +1,52 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L1
+// @tags: for-loop, type-inference, field-access, regression
+// @timeout: 5000
+// @expected-exit: 0
+//
+// Regression for `for x in coll` not propagating the iterator's
+// element type to the binding `x`. Without the propagation, field
+// accesses on `x` inside the body fall through `resolve_field_index`'s
+// "scan all types, pick most fields" tiebreaker (because `base_type`
+// is `None`) and silently route to a wrong type's field at a wrong
+// offset, panicking downstream with `field access out of bounds:
+// field index 5 (offset 40+8 = 48) exceeds object data size 8` on a
+// perfectly normal `u.name` access.
+//
+// Repro pattern from `vcs/specs/L2-standard/contexts/composition/
+// context_propagation.vr` line 73-74:
+//
+//     let users: List<User> = rows.iter()
+//         .map(|row| User { name: row.get("name").unwrap_or("Unknown") })
+//         .collect();
+//     for u in users {
+//         print(f"user: {u.name}");   // panic
+//     }
+//
+// Mirrors the let-RHS type propagation that already exists; the for-
+// loop binder just gets the iterator's first generic argument as its
+// element type when the iterator is one of the standard collections.
+
+mount collections.List;
+
+type User is { name: Text };
+
+fn main() {
+    let mut names: List<Text> = List.new();
+    names.push("Alice");
+    names.push("Bob");
+    let users: List<User> = names.iter()
+        .map(|n| User { name: n.clone() })
+        .collect();
+
+    let mut got: List<Text> = List.new();
+    for u in users {
+        got.push(u.name.clone());
+    }
+    assert_eq(got.len(), 2);
+    assert_eq(got[0], "Alice");
+    assert_eq(got[1], "Bob");
+
+    print("for_loop_elem_type ok");
+}

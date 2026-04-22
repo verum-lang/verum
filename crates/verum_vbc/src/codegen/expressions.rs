@@ -7150,6 +7150,36 @@ impl VbcCodegen {
         self.ctx.enter_scope();
         self.compile_pattern_bind(pattern, elem_reg)?;
 
+        // Propagate the iterator's element type to the for-loop binding so
+        // field accesses inside the body (`u.name`) resolve against the
+        // right type instead of falling through `resolve_field_index`'s
+        // "scan all types, pick most fields" tiebreaker, which silently
+        // picks a wrong layout and panics downstream with
+        // `field access out of bounds`. Mirrors let-RHS type propagation.
+        if let verum_ast::PatternKind::Ident { name, .. } = &pattern.kind
+            && let Some(iter_ty) = self.extract_expr_type_name(iter)
+        {
+            let first_inner = self.extract_inner_types(&iter_ty);
+            let elem_ty = if iter_ty.starts_with("List<")
+                || iter_ty.starts_with("Set<")
+                || iter_ty.starts_with("Deque<")
+                || iter_ty.starts_with("BinaryHeap<")
+                || iter_ty.starts_with("BTreeSet<")
+                || iter_ty.starts_with("Range<")
+                || iter_ty.starts_with("RangeInclusive<")
+            {
+                first_inner.first().cloned()
+            } else {
+                None
+            };
+            if let Some(t) = elem_ty {
+                let binder = name.name.to_string();
+                self.ctx.variable_type_names.insert(binder.clone(), t.clone());
+                let var_type = self.type_name_to_var_type(&t);
+                self.ctx.register_variable_type(&binder, var_type);
+            }
+        }
+
         // Compile body
         self.compile_block(body)?;
 
