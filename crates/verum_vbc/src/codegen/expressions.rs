@@ -2443,6 +2443,88 @@ impl VbcCodegen {
 
     /// Compiles a unary operation.
     fn compile_unary(&mut self, op: UnOp, inner: &Expr) -> CodegenResult<Option<Reg>> {
+        // `&arr[range]` / `&mut arr[range]` — slice-borrow.
+        //
+        // Without this special case the generic path falls through to
+        // `compile_index` which emits `GetE { arr, idx: range_value }`,
+        // and the runtime then interprets the heap pointer to the Range
+        // object as an integer index — producing
+        // `IndexOutOfBounds { index: 49843290736, length: 2 }` style
+        // panics on perfectly normal `&b[..]` usage. Detect it here and
+        // lower to `CbgrSubOpcode::RefSlice` instead, which knows how
+        // to walk a List's `backing_ptr` and produce a proper FatRef.
+        if matches!(op, UnOp::Ref | UnOp::RefMut)
+            && let ExprKind::Index { expr: arr_expr, index: idx_expr } = &inner.kind
+            && let ExprKind::Range { start, end, inclusive } = &idx_expr.kind
+        {
+            let arr_reg = self
+                .compile_expr(arr_expr)?
+                .ok_or_else(|| CodegenError::internal("slice base has no value"))?;
+
+            // start defaults to 0 when omitted (`&b[..end]`, `&b[..]`).
+            let start_reg = self.ctx.alloc_temp();
+            if let verum_common::Maybe::Some(s) = start {
+                let s_reg = self
+                    .compile_expr(s)?
+                    .ok_or_else(|| CodegenError::internal("slice start has no value"))?;
+                self.ctx.emit(Instruction::Mov { dst: start_reg, src: s_reg });
+                self.ctx.free_temp(s_reg);
+            } else {
+                self.ctx.emit(Instruction::LoadSmallI { dst: start_reg, value: 0 });
+            }
+
+            // len = (end_or_arr_len + (inclusive ? 1 : 0)) - start.
+            let len_reg = self.ctx.alloc_temp();
+            let end_reg = self.ctx.alloc_temp();
+            if let verum_common::Maybe::Some(e) = end {
+                let e_reg = self
+                    .compile_expr(e)?
+                    .ok_or_else(|| CodegenError::internal("slice end has no value"))?;
+                self.ctx.emit(Instruction::Mov { dst: end_reg, src: e_reg });
+                self.ctx.free_temp(e_reg);
+                if *inclusive {
+                    let one_reg = self.ctx.alloc_temp();
+                    self.ctx.emit(Instruction::LoadSmallI { dst: one_reg, value: 1 });
+                    self.ctx.emit(Instruction::BinaryI {
+                        op: BinaryIntOp::Add,
+                        dst: end_reg,
+                        a: end_reg,
+                        b: one_reg,
+                    });
+                    self.ctx.free_temp(one_reg);
+                }
+            } else {
+                self.ctx.emit(Instruction::Len {
+                    dst: end_reg,
+                    arr: arr_reg,
+                    type_hint: 0,
+                });
+            }
+            self.ctx.emit(Instruction::BinaryI {
+                op: BinaryIntOp::Sub,
+                dst: len_reg,
+                a: end_reg,
+                b: start_reg,
+            });
+            self.ctx.free_temp(end_reg);
+
+            let dest = self.ctx.alloc_temp();
+            let mut operands = Vec::<u8>::with_capacity(8);
+            Self::write_reg(&mut operands, dest.0);
+            Self::write_reg(&mut operands, arr_reg.0);
+            Self::write_reg(&mut operands, start_reg.0);
+            Self::write_reg(&mut operands, len_reg.0);
+            self.ctx.emit(Instruction::CbgrExtended {
+                sub_op: crate::instruction::CbgrSubOpcode::RefSlice as u8,
+                operands,
+            });
+
+            self.ctx.free_temp(arr_reg);
+            self.ctx.free_temp(start_reg);
+            self.ctx.free_temp(len_reg);
+            return Ok(Some(dest));
+        }
+
         // `&mut arr[i]` / `&arr[i]`: the generic path (below) would
         // compile `arr[i]` to a register holding a *copy* of the
         // element value and then wrap it in a CBGR register-ref,
