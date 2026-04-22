@@ -1,0 +1,42 @@
+// @test: integration
+// @tier: 0
+// @level: L1
+// @tags: proof, structured, have, show, implicit-closer
+// @expect: pass
+//
+// Structured proof bodies (`proof { have …; show …; … }`) must:
+//   (1) verify each `have`/`show` step against its justification, and
+//   (2) close the theorem's overall goal with an implicit Auto-powered
+//       closer when no explicit conclusion tactic is written, using
+//       the hypothesis set *extended by every intermediate step*.
+//
+// Both legs were previously broken: the implicit closer routed through
+// the hint-only `auto_prove`, and it also discarded the accumulated
+// `have` / `show` propositions. The fix switches to `Auto` via
+// `execute_tactic` and threads the enriched hypothesis list through.
+
+@verify(formal)
+theorem have_chain_closes_trivial_goal(n: Int)
+    requires n == 7
+    ensures (n * (n - 1)) / 2 == 21
+{
+    proof {
+        have step1: n * 6 == 42 by auto
+        have step2: n * (n - 1) == 42 by auto
+        have step3: (n * (n - 1)) / 2 == 21 by auto
+    }
+}
+
+@verify(formal)
+theorem have_chain_discharges_residual_via_auto(n: Int)
+    requires n == 7
+    ensures n == 7 && n * 6 == 42
+{
+    proof {
+        have tmp: n * 6 == 42 by auto
+    }
+}
+
+fn main() {
+    print("L1-core: proof/tactics/structured_have_chain");
+}

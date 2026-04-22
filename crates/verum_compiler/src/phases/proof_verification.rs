@@ -854,8 +854,24 @@ fn verify_proof_steps(
     steps: &List<ProofStep>,
     initial_hypotheses: &List<Expr>,
 ) -> Result<List<VerifiedStep>, ProofVerificationError> {
+    let mut accumulated = initial_hypotheses.clone();
+    verify_proof_steps_accumulating(engine, smt_ctx, steps, &mut accumulated)
+}
+
+/// Inner worker for [`verify_proof_steps`]. Accumulates intermediate
+/// `have` / `show` / `let` / `suffices` / `obtain` propositions into
+/// the caller's hypothesis list so the outer closer tactic can see
+/// them. The outer wrapper drops the mutated list; structured-proof
+/// verification in `verify_structured_proof` calls this worker
+/// directly to reuse the extended context when discharging the final
+/// goal.
+fn verify_proof_steps_accumulating(
+    engine: &mut ProofSearchEngine,
+    smt_ctx: &Context,
+    steps: &List<ProofStep>,
+    hypotheses: &mut List<Expr>,
+) -> Result<List<VerifiedStep>, ProofVerificationError> {
     let mut verified = List::new();
-    let mut hypotheses = initial_hypotheses.clone();
 
     for step in steps {
         let step_start = Instant::now();
@@ -1403,12 +1419,20 @@ fn verify_structured_proof(
     theorem_name: &Text,
     proof_start: Instant,
 ) -> ProofVerificationResult {
-    let hypotheses = primary_goal.hypotheses.clone();
     let proposition = primary_goal.goal.clone();
+    let mut accumulated_hypotheses = primary_goal.hypotheses.clone();
 
-    // Verify each step
-    match verify_proof_steps(engine, smt_ctx, &structure.steps, &hypotheses) {
+    // Verify each step, accumulating every intermediate proposition
+    // (`have`, `show`, `suffices`, `let`, `obtain`) into the hypothesis
+    // list so the implicit closer below can cite them.
+    match verify_proof_steps_accumulating(
+        engine,
+        smt_ctx,
+        &structure.steps,
+        &mut accumulated_hypotheses,
+    ) {
         Ok(mut verified_steps) => {
+            let hypotheses = accumulated_hypotheses.clone();
             // Apply conclusion tactic if present
             if let Maybe::Some(conclusion) = &structure.conclusion {
                 let conclusion_start = Instant::now();
@@ -1464,9 +1488,29 @@ fn verify_structured_proof(
                     }
                 }
             } else {
-                // No explicit conclusion — try auto_prove to close the goal
-                // with all accumulated hypotheses
-                if let Err(e) = engine.auto_prove(smt_ctx, &proposition) {
+                // No explicit conclusion — close the goal with `Auto`
+                // applied to an enriched `ProofGoal` that carries every
+                // hypothesis accumulated by the `have` / `show` steps
+                // plus the theorem's own `requires`.
+                let closer_goal = ProofGoal::with_hypotheses(
+                    proposition.clone(),
+                    hypotheses.clone(),
+                );
+                let closer_result = engine
+                    .execute_tactic(&ProofTactic::Auto, &closer_goal)
+                    .and_then(|sub_goals| {
+                        if sub_goals.is_empty() {
+                            Ok(())
+                        } else {
+                            // Auto opened further subgoals (nested
+                            // conjunction split, etc.). Recurse.
+                            discharge_subgoals(engine, smt_ctx, &sub_goals, "closer")
+                                .map_err(|pe| ProofError::TacticFailed(
+                                    format!("closer: {:?}", pe).into(),
+                                ))
+                        }
+                    });
+                if let Err(e) = closer_result {
                     let mut unproved = List::new();
                     unproved.push(UnprovedSubgoal {
                         goal: format_expr(&proposition),
@@ -1474,7 +1518,7 @@ fn verify_structured_proof(
                             .iter()
                             .map(|h| format_expr(h))
                             .collect(),
-                        suggestions: build_suggestions_from_error(&e),
+                        suggestions: build_suggestions_from_proof_error(&e),
                     });
                     return ProofVerificationResult::Failed {
                         verified_steps,
@@ -1498,7 +1542,7 @@ fn verify_structured_proof(
             let mut unproved = List::new();
             unproved.push(UnprovedSubgoal {
                 goal: format_expr(&proposition),
-                hypotheses: hypotheses
+                hypotheses: accumulated_hypotheses
                     .iter()
                     .map(|h| format_expr(h))
                     .collect(),

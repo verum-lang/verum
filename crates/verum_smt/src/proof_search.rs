@@ -2765,6 +2765,38 @@ impl ProofSearchEngine {
         tactic: &ProofTactic,
         goal: &ProofGoal,
     ) -> Result<List<ProofGoal>, ProofError> {
+        // Universal trivially-closable fast path. Two shapes count as
+        // "already proved" for the purposes of tactic dispatch:
+        //
+        //   (1) The goal is the boolean literal `true`. This matches the
+        //       mathematical fact that an already-true proposition doesn't
+        //       need a proof step, and it prevents an otherwise-valid
+        //       theorem from failing just because e.g. `by ring` can't
+        //       handle a bare boolean goal.
+        //
+        //   (2) The goal is a structural reflexivity `E == E` — both
+        //       sides are structurally equal modulo spans. Any tactic
+        //       that reaches a `refl`-shaped goal should close it
+        //       regardless of whether the tactic itself specialises in
+        //       equality reasoning.
+        //
+        // Explicit failure tactics (`admit`, `sorry`, `fail`) are kept
+        // outside the fast path so they don't silently discharge trivial
+        // goals that the author intended to flag.
+        let trivial_close = match &goal.goal.kind {
+            ExprKind::Literal(lit) => matches!(lit.kind, verum_ast::LiteralKind::Bool(true)),
+            ExprKind::Binary { op: BinOp::Eq, left, right } => Self::expr_eq(left, right),
+            _ => false,
+        };
+        if trivial_close
+            && !matches!(
+                tactic,
+                ProofTactic::Admit | ProofTactic::Sorry | ProofTactic::Fail { .. }
+            )
+        {
+            return Ok(List::new());
+        }
+
         match tactic {
             ProofTactic::Reflexivity => self.try_reflexivity(goal),
             ProofTactic::Assumption => self.try_assumption(goal),
