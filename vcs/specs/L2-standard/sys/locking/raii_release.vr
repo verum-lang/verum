@@ -1,0 +1,54 @@
+// @test: typecheck-pass
+// @level: L2
+// @tier: 0
+// @tags: sys, locking, byte-range, sqlite-gap-1, affine
+// @timeout: 5000
+// @description: LockHandle RAII — try_lock returns affine handle, unlock consumes it
+//
+// Spec: internal/specs/sqlite-native.md §3.2 Gap 1 + §B.1
+//
+// Typecheck-only for now: exercising the signatures + affine discipline
+// on LockHandle is the main value at this layer. End-to-end acquire/
+// release on a real fd is covered once core/sys/posix/file_ops.vr
+// exposes a stable `open` wrapper from the VCS surface — the platform
+// open API is wip (see sys/io/pread_pwrite_roundtrip.vr header).
+
+mount core.*;
+mount sys.common.FileDesc;
+mount sys.locking.{try_lock, unlock, LockRegion, LockKind, LockHandle, LockError};
+mount base.result.Result;
+
+fn try_acquire(fd: FileDesc) -> Result<LockHandle, LockError> {
+    try_lock(fd, LockRegion.byte(0x40000000), Exclusive)
+}
+
+fn release(handle: LockHandle) -> Result<(), LockError> {
+    unlock(handle)
+}
+
+fn region_helpers_typecheck() {
+    let r1 = LockRegion.new(0, 1024);
+    let r2 = LockRegion.to_eof(1073741824);
+    let r3 = LockRegion.byte(0x40000001);
+    assert(r1.start() == 0);
+    assert(r1.length() == 1024);
+    assert(r2.length() == -1);
+    assert(r3.start() == 0x40000001);
+    assert(r3.length() == 1);
+}
+
+fn overlap_logic() {
+    let a = LockRegion.new(0, 100);
+    let b = LockRegion.new(50, 100);
+    let c = LockRegion.new(200, 50);
+    assert(a.overlaps(&b));
+    assert(!a.overlaps(&c));
+    let to_eof = LockRegion.to_eof(10);
+    assert(to_eof.overlaps(&c));
+}
+
+fn main() {
+    region_helpers_typecheck();
+    overlap_logic();
+    print("locking_raii_release typecheck ok");
+}
