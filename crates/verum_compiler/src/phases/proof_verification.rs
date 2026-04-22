@@ -631,10 +631,55 @@ fn verify_proof_method(
             let mut steps = List::new();
             let step_start = Instant::now();
 
-            // Apply case split tactic on the scrutinee
-            let tactic = ProofTactic::CasesOn {
-                hypothesis: format_expr(on),
+            // When the `by cases` method has no explicit scrutinee (the
+            // parser leaves an empty tuple placeholder) we fall back to
+            // the goal's disjunction structure: split `A || B || …` into
+            // one subgoal per disjunct. This matches the idiomatic usage
+            //     proof by cases {
+            //         case x >= 0 => { … }
+            //         case x < 0  => { … }
+            //     }
+            // on a theorem like `ensures x >= 0 || x < 0`, where there
+            // *is* no hypothesis to case-analyse — the user is partitioning
+            // the disjunctive goal itself.
+            let is_empty_scrutinee = matches!(
+                &on.kind,
+                ExprKind::Tuple(items) if items.is_empty()
+            );
+
+            // For the empty-scrutinee surface, try closing the whole
+            // goal outright with `Auto` first. A classical disjunctive
+            // tautology like `x >= 0 || x < 0` needs no real case
+            // analysis — the SMT decides it directly. This lets users
+            // write `proof by cases { case … => … }` as documentation
+            // of the intended case shape even when the ambient goal is
+            // decidable on its own.
+            if is_empty_scrutinee {
+                if let Ok(auto_sub) = engine.execute_tactic(&ProofTactic::Auto, goal) {
+                    if auto_sub.is_empty() {
+                        steps.push(VerifiedStep {
+                            description: Text::from(
+                                "cases (goal closed by auto)",
+                            ),
+                            tactic_used: Text::from("cases→auto"),
+                            duration: step_start.elapsed(),
+                        });
+                        return Ok(steps);
+                    }
+                }
+            }
+
+            let (tactic, tactic_label) = if is_empty_scrutinee {
+                (ProofTactic::Split, "cases (split goal)")
+            } else {
+                (
+                    ProofTactic::CasesOn {
+                        hypothesis: format_expr(on),
+                    },
+                    "cases (on scrutinee)",
+                )
             };
+
             let sub_goals = engine.execute_tactic(&tactic, goal).map_err(|e| {
                 ProofVerificationError::MethodFailed {
                     method: "cases".into(),
@@ -643,8 +688,16 @@ fn verify_proof_method(
             })?;
 
             steps.push(VerifiedStep {
-                description: Text::from(format!("case split on {}", format_expr(on))),
-                tactic_used: Text::from("cases"),
+                description: Text::from(format!(
+                    "{} on {}",
+                    tactic_label,
+                    if is_empty_scrutinee {
+                        Text::from("goal disjunction")
+                    } else {
+                        format_expr(on)
+                    }
+                )),
+                tactic_used: Text::from(tactic_label),
                 duration: step_start.elapsed(),
             });
 

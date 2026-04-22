@@ -4484,7 +4484,7 @@ impl ProofSearchEngine {
                     right,
                 } => {
                     // Add premise as named hypothesis
-                    let mut hyp = (**left).clone();
+                    let hyp = (**left).clone();
                     // Tag the hypothesis with the name (in a full implementation)
                     current_goal.hypotheses.push(hyp);
                     current_goal.goal = (**right).clone();
@@ -4494,10 +4494,28 @@ impl ProofSearchEngine {
                     // In a full implementation, would add the binding
                     current_goal.goal = (**body).clone();
                 }
+                ExprKind::Unary {
+                    op: UnOp::Not,
+                    expr: inner,
+                } => {
+                    // Proof-by-contradiction surface: to prove `!P`, the
+                    // contradiction method assumes `P` as a named
+                    // hypothesis and the residual goal becomes `False`.
+                    // Without this arm the whole method fails on the
+                    // very first `assume h: P` step.
+                    current_goal.hypotheses.push((**inner).clone());
+                    current_goal.goal = Expr::new(
+                        ExprKind::Literal(verum_ast::literal::Literal::new(
+                            verum_ast::LiteralKind::Bool(false),
+                            current_goal.goal.span,
+                        )),
+                        current_goal.goal.span,
+                    );
+                }
                 _ => {
                     return Err(ProofError::TacticFailed(
                         format!(
-                            "Cannot intro '{}': goal is not an implication or forall",
+                            "Cannot intro '{}': goal is not an implication, forall, or negation",
                             name
                         )
                         .into(),
