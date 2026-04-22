@@ -1,0 +1,38 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: quic, rfc9002, pacing, typecheck
+// @timeout: 10000
+// @expect: pass
+
+mount core.net.quic.{Pacer, PacerDecision};
+mount core.time.instant.{Instant};
+mount core.time.duration.{Duration};
+
+fn exercise_pacer() {
+    // 2400-byte bucket capacity (~2 MSS).
+    let mut p = Pacer.new(2400_u64);
+
+    // Unbounded mode (no CC rate set yet) — every send is admitted.
+    let d0: PacerDecision = p.check(1200_u64, Instant.now());
+    let _ = d0;
+
+    // Set a 1 Gbps rate.
+    p.set_rate(1_000_000_000_u64 / 8_u64);
+    let now = Instant.now();
+    let _ = p.check(1200_u64, now.clone());
+    p.on_packet_sent(1200_u64, now.clone());
+
+    // Immediately ask again — bucket should be partially drained.
+    let decision = p.check(1200_u64, now.clone());
+    match decision {
+        PacerDecision.Send => {},
+        PacerDecision.NotYet(_d) => {},
+    }
+
+    // Introspection.
+    let _: UInt64 = p.tokens();
+    let _: UInt64 = p.rate_bps();
+}
+
+fn main() { exercise_pacer(); }

@@ -71,6 +71,7 @@ public module stateless_reset;         // RFC 9000 §10.3 Stateless Reset tokens
 public module cid_pool;                // RFC 9000 §5.1 per-connection CID manager
 public module key_update;              // RFC 9001 §6 key update state machine
 public module stats;                   // Per-connection + endpoint observability
+public module pacer;                   // RFC 9002 §7.7 token-bucket send pacer
 
 mount core.*;
 mount core.time.duration.{Duration};
@@ -112,6 +113,9 @@ public mount .key_update.{
 
 // Re-exports — observability
 public mount .stats.{QuicStats, EndpointStats};
+
+// Re-exports — send pacer
+public mount .pacer.{Pacer, PacerDecision};
 
 // =============================================================================
 // QuicConfig

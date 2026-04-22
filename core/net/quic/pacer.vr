@@ -1,0 +1,146 @@
+// =============================================================================
+// net/quic/pacer.vr — Token-bucket send pacer (RFC 9002 §7.7)
+// =============================================================================
+// Layer: 5 (Network — QUIC)
+// Dependencies: core, core.time
+// =============================================================================
+//
+// RFC 9002 §7.7 — "A sender SHOULD pace sending of all in-flight
+// packets based on input from the congestion controller." The CC
+// publishes a target rate (bytes/sec); the pacer converts that into
+// a per-packet admission decision so the sender doesn't burst an
+// entire cwnd in one sendmmsg call.
+//
+// # Design
+//
+//   Token-bucket with bucket capacity = ~2 × MTU and refill rate =
+//   `pacing_rate_bps`. Every successful send consumes `bytes_sent`
+//   tokens; a drained bucket returns `NotYet(delay)` telling the
+//   caller how long to wait until a single MSS has refilled.
+//
+//   Zero-rate (cwnd = ∞) is treated as "send as much as you like";
+//   the bucket never empties in that mode.
+//
+// # Why token bucket and not deadline scheduling
+//
+//   A deadline scheduler locks the sender into a fixed inter-packet
+//   delay, which interacts poorly with bursts from the kernel (GSO
+//   batches, coalesced packets). Token buckets accept bursts up to
+//   the bucket capacity — we pick 2 MSS to allow a tiny burst while
+//   still forcing the long-run rate to match `pacing_rate_bps`.
+//
+// # Accuracy
+//
+//   All arithmetic is integer over microseconds and bytes. No
+//   floating point; no division by RTT. Worst-case drift is one
+//   bucket-refill granularity per second ≈ 1e-6 relative error.
+//
+// =============================================================================
+
+module core.net.quic.pacer;
+
+mount core.*;
+mount core.time.instant.{Instant};
+mount core.time.duration.{Duration};
+
+// =============================================================================
+// Admission decision
+// =============================================================================
+
+public type PacerDecision is
+      Send                          // bucket has ≥ `bytes_requested` tokens — go
+    | NotYet(Duration);             // insufficient; caller waits this long
+
+// =============================================================================
+// Pacer state
+// =============================================================================
+
+public type Pacer is {
+    /// Target rate from CC. 0 = unbounded (never wait).
+    rate_bps:          UInt64,
+    /// Current token reserve, in bytes.
+    tokens:            UInt64,
+    /// Max tokens the bucket holds. Typically 2 × MSS.
+    capacity:          UInt64,
+    /// Last time we refilled.
+    last_refill:       Instant,
+};
+
+implement Pacer {
+    /// Construct a pacer with bucket capacity `capacity_bytes`. Start
+    /// with a full bucket so the first send doesn't wait on CC ramp-up.
+    public fn new(capacity_bytes: UInt64) -> Pacer {
+        Pacer {
+            rate_bps:    0_u64,
+            tokens:      capacity_bytes,
+            capacity:    capacity_bytes,
+            last_refill: Instant.now(),
+        }
+    }
+
+    /// Recommended default: two MSSs of burst tolerance.
+    public fn with_mss(mss_bytes: UInt64) -> Pacer {
+        Pacer.new(mss_bytes * 2_u64)
+    }
+
+    /// Update the pacer's target rate — called by the recovery loop
+    /// whenever the CC's cwnd/RTT re-estimate changes. 0 disables
+    /// pacing (CC has cwnd > pipe).
+    public fn set_rate(&mut self, rate_bps: UInt64) {
+        self.rate_bps = rate_bps;
+    }
+
+    /// Refill tokens based on elapsed wall-clock. Internal helper
+    /// called on every admit/check.
+    fn refill(&mut self, now: Instant) {
+        if self.rate_bps == 0_u64 {
+            // Unbounded mode — keep bucket full.
+            self.tokens = self.capacity;
+            self.last_refill = now;
+            return;
+        }
+        let elapsed = now.duration_since(self.last_refill.clone())
+            .unwrap_or_else(|| Duration.from_secs(0));
+        let elapsed_us = elapsed.as_micros() as UInt64;
+        if elapsed_us == 0_u64 { return; }
+
+        // tokens += rate_bps × elapsed_us / 1_000_000
+        // Careful with overflow: rate_bps up to 100 Gbps ≈ 1.25e10,
+        // elapsed_us clamped to ≤ 1 second (1e6) → product ≤ 1.25e16,
+        // well within UInt64 (1.8e19).
+        let us_clamped: UInt64 = if elapsed_us > 1_000_000_u64 { 1_000_000_u64 } else { elapsed_us };
+        let add = (self.rate_bps * us_clamped) / 1_000_000_u64;
+        self.tokens = self.tokens + add;
+        if self.tokens > self.capacity { self.tokens = self.capacity; }
+        self.last_refill = now;
+    }
+
+    /// Check whether sending `bytes_requested` is allowed right now.
+    /// Does NOT consume tokens — that's `on_packet_sent`.
+    public fn check(&mut self, bytes_requested: UInt64, now: Instant) -> PacerDecision {
+        self.refill(now);
+        if self.rate_bps == 0_u64 { return PacerDecision.Send; }
+        if self.tokens >= bytes_requested { return PacerDecision.Send; }
+        // Compute how long until `bytes_requested - tokens` bytes accrue.
+        let deficit = bytes_requested - self.tokens;
+        // wait_us = deficit × 1e6 / rate_bps
+        let wait_us = (deficit * 1_000_000_u64) / self.rate_bps;
+        PacerDecision.NotYet(Duration.from_micros(wait_us as Int))
+    }
+
+    /// Caller invokes this after a successful send of `bytes_sent`
+    /// bytes. Drains the bucket. Idempotent with respect to elapsed
+    /// time (the next `check` re-refills).
+    public fn on_packet_sent(&mut self, bytes_sent: UInt64, now: Instant) {
+        self.refill(now);
+        if self.tokens >= bytes_sent {
+            self.tokens = self.tokens - bytes_sent;
+        } else {
+            self.tokens = 0_u64;
+        }
+    }
+
+    /// Current token reserve (for tests + metrics).
+    public fn tokens(&self) -> UInt64 { self.tokens }
+    public fn rate_bps(&self) -> UInt64 { self.rate_bps }
+}
