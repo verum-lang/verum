@@ -1530,11 +1530,79 @@ impl std::error::Error for ProofVerificationError {}
 
 impl From<ProofError> for ProofVerificationError {
     fn from(e: ProofError) -> Self {
-        Self::TacticFailed {
-            tactic: Text::from("(unknown)"),
-            reason: format!("{}", e).into(),
+        // Map each `ProofError` variant to the strongest structured
+        // `ProofVerificationError` we can — in particular, extract
+        // the tactic name from `TacticFailed(Text)` rather than
+        // collapsing everything to a "(unknown)" string. This keeps
+        // user-facing diagnostics actionable ("tactic 'auto' failed
+        // on goal …") instead of opaque.
+        match e {
+            ProofError::TacticFailed(reason) => {
+                // The reason often encodes the tactic name as
+                // "tactic_name: message" or "'tactic_name' failed:
+                // message". Parse heuristically so the downstream
+                // diagnostic names the right tactic.
+                let reason_str = reason.as_str();
+                let (tactic, rest) = split_tactic_reason(reason_str);
+                Self::TacticFailed {
+                    tactic,
+                    reason: rest,
+                }
+            }
+            ProofError::SmtTimeout => Self::TacticFailed {
+                tactic: Text::from("smt"),
+                reason: Text::from("SMT solver timed out"),
+            },
+            ProofError::UnificationFailed(detail) => Self::TacticFailed {
+                tactic: Text::from("apply"),
+                reason: detail,
+            },
+            ProofError::NotInContext(name) => Self::TacticFailed {
+                tactic: Text::from("assumption"),
+                reason: Text::from(format!(
+                    "hypothesis `{}` is not in scope",
+                    name.as_str()
+                )),
+            },
+            ProofError::NotEquality(detail) => Self::TacticFailed {
+                tactic: Text::from("rewrite"),
+                reason: Text::from(format!(
+                    "target is not an equality: {}",
+                    detail.as_str()
+                )),
+            },
+            ProofError::InvalidProof(detail) => Self::TacticFailed {
+                tactic: Text::from("proof"),
+                reason: detail,
+            },
         }
     }
+}
+
+/// Split a "'tactic': reason" or "tactic_name failed: reason"
+/// formatted string into (tactic, rest). Falls back to a reasonable
+/// default when the shape doesn't match.
+fn split_tactic_reason(input: &str) -> (Text, Text) {
+    // Pattern 1: 'name' - strip leading apostrophe-quoted token.
+    if let Some(rest) = input.strip_prefix('\'') {
+        if let Some((name, tail)) = rest.split_once('\'') {
+            let tail = tail.trim_start_matches(|c: char| c == ':' || c.is_whitespace());
+            return (Text::from(name), Text::from(tail));
+        }
+    }
+    // Pattern 2: bare leading identifier token up to the first space.
+    if let Some((first, rest)) = input.split_once(char::is_whitespace) {
+        if !first.is_empty()
+            && first.chars().all(|c| c.is_alphanumeric() || c == '_')
+        {
+            let rest = rest.trim_start_matches(|c: char| c == ':' || c.is_whitespace());
+            return (Text::from(first), Text::from(rest));
+        }
+    }
+    // Fall-through: we couldn't identify the tactic name. Surface
+    // the full message as the reason and a neutral marker as the
+    // tactic so the diagnostic still carries useful content.
+    (Text::from("tactic"), Text::from(input))
 }
 
 // ---------------------------------------------------------------------------
