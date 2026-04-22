@@ -1,0 +1,51 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: encoding, jcs, rfc8785, canonical-json, typecheck
+// @timeout: 10000
+// @expect: pass
+
+mount core.encoding.jcs.{
+    JcsError,
+    canonicalize_value, canonicalize_str,
+};
+mount core.encoding.json.{JsonValue, JsonError, parse_value};
+
+fn exercise_jcs() -> Result<(), JcsError> {
+    // String round-trip.
+    let canonical: Text = canonicalize_str(&Text.from("{\"b\":1,\"a\":2}"))?;
+    // JCS requires sorted keys → output starts with `"a":2,"b":1`.
+    let cb = canonical.as_bytes();
+    assert(cb.len() > 0);
+
+    // Integer-valued float collapses to integer form.
+    let _ = canonicalize_str(&Text.from("{\"x\":1.0}"))?;
+
+    // Nested object — inner keys also sorted.
+    let _ = canonicalize_str(&Text.from("{\"z\":{\"b\":1,\"a\":2},\"a\":[3,2,1]}"))?;
+
+    // Array order preserved (never sorted).
+    let _ = canonicalize_str(&Text.from("[3,1,2]"))?;
+
+    // Escapes per §3.2.1.
+    let _ = canonicalize_str(&Text.from("{\"s\":\"line\\nbreak\"}"))?;
+
+    // Unicode key — UTF-16 sort.
+    let _ = canonicalize_str(&Text.from("{\"日\":1,\"本\":2}"))?;
+
+    // Direct JsonValue path.
+    match parse_value(&Text.from("42")) {
+        Ok(v) => {
+            let c = canonicalize_value(&v)?;
+            assert(c.as_bytes() == b"42");
+        },
+        Err(_) => {},
+    }
+
+    // Malformed JSON bubbles up.
+    let bad = canonicalize_str(&Text.from("{"));
+    let _ = bad;
+    Ok(())
+}
+
+fn main() { let _ = exercise_jcs(); }

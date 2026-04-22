@@ -1,0 +1,361 @@
+// =============================================================================
+// encoding/jcs.vr — JSON Canonicalization Scheme (RFC 8785)
+// =============================================================================
+// Layer: 1 (Encoding)
+// Dependencies: core, core.collections, core.encoding.json
+// =============================================================================
+//
+// RFC 8785 — the deterministic JSON serialisation used by JSON Web
+// Signature-on-JSON (JWS/JSON Signature), W3C Verifiable
+// Credentials (VCs), DIDs, Matrix room events, and every
+// "sign this JSON object" workflow that needs the signer and
+// verifier to produce byte-identical input regardless of map-key
+// insertion order.
+//
+// # Rules (RFC 8785)
+//
+//   * Object keys sorted by UTF-16 code-unit order (§3.2.3).
+//     For ASCII keys this is equivalent to byte-lexicographic.
+//   * No whitespace or indentation between tokens (§3.2.4).
+//   * Numbers serialised per the IEEE 754 JSON-compatible
+//     RFC 8259 / ES2017 shortest-form (§3.2.2.2).
+//   * Strings escape only control chars + `"` + `\` (§3.2.1).
+//   * `null`, `true`, `false` emitted verbatim.
+//
+// # API
+//
+// ```
+// // Canonicalise an already-parsed JsonValue.
+// let canonical: Text = jcs.canonicalize_value(&value);
+//
+// // Parse + canonicalise in one pass.
+// let canonical: Text = jcs.canonicalize_str(&json_text)?;
+//
+// // Sign via the canonical form.
+// let digest = sha256(canonical.as_bytes());
+// ```
+//
+// # Difference from JSON.stringify
+//
+// `encoding.json.stringify` emits compact JSON but does NOT
+// sort map keys (insertion order preserved). `jcs.canonicalize_*`
+// enforces the sorted-keys contract required by signing.
+//
+// # Limitations
+//
+//   * ECMAScript number serialisation uses ECMA-404 §6.3.1.5
+//     "ToString(Number)" — we implement the RFC 8259 subset
+//     (finite doubles only; NaN / Inf become null-equivalent
+//     errors on the caller because JSON doesn't represent them).
+//   * RFC 8785 §3.2.2.1 requires integer-valued floats like `1.0`
+//     to serialise as `1` — we honour this.
+//
+// =============================================================================
+
+module core.encoding.jcs;
+
+mount core.*;
+mount core.collections.List;
+mount core.collections.map.{Map};
+mount core.encoding.json.{JsonValue, JsonError, parse_value};
+
+// =============================================================================
+// Error surface
+// =============================================================================
+
+public type JcsError is
+      JsonParseFailed(JsonError)
+    | UnsupportedValue(Text);      // NaN / Inf / custom — JSON can't represent
+
+// =============================================================================
+// Canonicalise a JsonValue
+// =============================================================================
+
+public fn canonicalize_value(v: &JsonValue) -> Result<Text, JcsError> {
+    let mut out: List<Byte> = [];
+    emit(v, &mut out)?;
+    Ok(Text.from_utf8_unchecked(out.as_slice()))
+}
+
+/// Parse `input` as JSON then canonicalise — the "canonicalise a
+/// wire blob" single-call form.
+public fn canonicalize_str(input: &Text) -> Result<Text, JcsError> {
+    let v = parse_value(input).map_err(|e| JcsError.JsonParseFailed(e))?;
+    canonicalize_value(&v)
+}
+
+// =============================================================================
+// Emitter
+// =============================================================================
+
+fn emit(v: &JsonValue, out: &mut List<Byte>) -> Result<(), JcsError> {
+    match v {
+        JsonValue.JsonNull => { push_bytes(out, b"null"); Ok(()) },
+        JsonValue.JsonBool(b) => {
+            push_bytes(out, if *b { b"true" } else { b"false" });
+            Ok(())
+        },
+        JsonValue.JsonInt(n) => {
+            emit_int(out, *n);
+            Ok(())
+        },
+        JsonValue.JsonFloat(f) => emit_float(out, *f),
+        JsonValue.JsonString(s) => {
+            emit_string(out, s);
+            Ok(())
+        },
+        JsonValue.JsonArray(arr) => {
+            out.push('[' as Byte);
+            let mut i: Int = 0;
+            while i < arr.len() {
+                if i > 0 { out.push(',' as Byte); }
+                emit(&arr[i], out)?;
+                i = i + 1;
+            }
+            out.push(']' as Byte);
+            Ok(())
+        },
+        JsonValue.JsonObject(m) => emit_object(m, out),
+    }
+}
+
+fn emit_object(m: &Map<Text, JsonValue>, out: &mut List<Byte>) -> Result<(), JcsError> {
+    // Collect keys.
+    let mut keys: List<Text> = [];
+    let mut iter = m.keys();
+    loop {
+        match iter.next() {
+            Some(k) => keys.push(k.clone()),
+            None    => break,
+        }
+    }
+    // Sort by UTF-16 code-unit order (§3.2.3). For ASCII-only keys
+    // this equals byte-lex; for multi-byte UTF-8 we decode to
+    // code points and compare as UTF-16 surrogate-aware sequence.
+    sort_keys_utf16(&mut keys);
+
+    out.push('{' as Byte);
+    let mut i: Int = 0;
+    while i < keys.len() {
+        if i > 0 { out.push(',' as Byte); }
+        emit_string(out, &keys[i]);
+        out.push(':' as Byte);
+        match m.get(&keys[i]) {
+            Some(v) => emit(v, out)?,
+            None    => push_bytes(out, b"null"),
+        }
+        i = i + 1;
+    }
+    out.push('}' as Byte);
+    Ok(())
+}
+
+// =============================================================================
+// Scalars
+// =============================================================================
+
+fn emit_int(out: &mut List<Byte>, n: Int) {
+    if n < 0 {
+        out.push('-' as Byte);
+        emit_u64(out, (-n) as UInt64);
+    } else {
+        emit_u64(out, n as UInt64);
+    }
+}
+
+fn emit_u64(out: &mut List<Byte>, n: UInt64) {
+    if n == 0_u64 { out.push('0' as Byte); return; }
+    let mut buf: List<Byte> = [];
+    let mut x = n;
+    while x > 0_u64 {
+        let d = (x % 10_u64) as Byte;
+        buf.push(('0' as Byte) + d);
+        x = x / 10_u64;
+    }
+    let mut i: Int = buf.len() - 1;
+    while i >= 0 { out.push(buf[i]); i = i - 1; }
+}
+
+/// Emit a float per ECMAScript ToString(Number) as constrained by
+/// RFC 8785 §3.2.2. We handle the integer-valued subset directly
+/// (no decimal point) and fall back to a plain decimal form
+/// otherwise. NaN / Inf are rejected — JSON cannot represent them.
+fn emit_float(out: &mut List<Byte>, f: Float) -> Result<(), JcsError> {
+    // Reject non-finite.
+    if !f.is_finite() {
+        return Err(JcsError.UnsupportedValue(Text.from("NaN or Inf")));
+    }
+    // Integer-valued → emit without fractional part.
+    let truncated = f.trunc();
+    if truncated == f && f >= -9.007199254740992e15 && f <= 9.007199254740992e15 {
+        emit_int(out, f as Int);
+        return Ok(());
+    }
+    // General case — delegate to the platform's Float.to_text which
+    // already emits shortest-form.
+    let s = f.to_text();
+    push_bytes(out, s.as_bytes());
+    Ok(())
+}
+
+/// RFC 8785 §3.2.1 string escape: only `"`, `\`, and control
+/// chars U+0000..U+001F are escaped; non-ASCII UTF-8 passes
+/// through verbatim.
+fn emit_string(out: &mut List<Byte>, s: &Text) {
+    out.push('"' as Byte);
+    let b = s.as_bytes();
+    let mut i: Int = 0;
+    while i < b.len() {
+        let c = b[i];
+        if c == ('"' as Byte) {
+            out.push('\\' as Byte); out.push('"' as Byte);
+        } else if c == ('\\' as Byte) {
+            out.push('\\' as Byte); out.push('\\' as Byte);
+        } else if c == 0x08_u8 {
+            out.push('\\' as Byte); out.push('b' as Byte);
+        } else if c == 0x09_u8 {
+            out.push('\\' as Byte); out.push('t' as Byte);
+        } else if c == 0x0A_u8 {
+            out.push('\\' as Byte); out.push('n' as Byte);
+        } else if c == 0x0C_u8 {
+            out.push('\\' as Byte); out.push('f' as Byte);
+        } else if c == 0x0D_u8 {
+            out.push('\\' as Byte); out.push('r' as Byte);
+        } else if c < 0x20_u8 {
+            // \u00NN for other control chars.
+            push_bytes(out, b"\\u00");
+            push_hex_byte(out, c);
+        } else {
+            out.push(c);
+        }
+        i = i + 1;
+    }
+    out.push('"' as Byte);
+}
+
+fn push_hex_byte(out: &mut List<Byte>, b: Byte) {
+    let hi = (b >> 4_u8) & 0x0F_u8;
+    let lo = b & 0x0F_u8;
+    out.push(nibble_hex(hi));
+    out.push(nibble_hex(lo));
+}
+
+fn nibble_hex(n: Byte) -> Byte {
+    if n < 10_u8 { ('0' as Byte) + n }
+    else          { ('a' as Byte) + (n - 10_u8) }
+}
+
+// =============================================================================
+// UTF-16-ordered key sort
+// =============================================================================
+//
+// RFC 8785 §3.2.3 specifies UTF-16 code-unit comparison. For
+// ASCII-only keys this reduces to byte-lex, but astral-plane
+// characters (U+10000+) need surrogate-pair expansion. We decode
+// each key to an on-demand UTF-16 code-unit sequence.
+//
+// =============================================================================
+
+fn sort_keys_utf16(keys: &mut List<Text>) {
+    // Precompute UTF-16 representations alongside each key.
+    let mut pairs: List<(List<UInt16>, Text)> = [];
+    let mut i: Int = 0;
+    while i < keys.len() {
+        pairs.push((utf8_to_utf16(keys[i].as_bytes()), keys[i].clone()));
+        i = i + 1;
+    }
+
+    // Insertion sort by UTF-16 lex.
+    let mut x: Int = 1;
+    while x < pairs.len() {
+        let mut y: Int = x;
+        while y > 0 && utf16_lt(&pairs[y].0, &pairs[y - 1].0) {
+            let tmp_u = clone_u16_vec(&pairs[y].0);
+            let tmp_t = pairs[y].1.clone();
+            pairs[y] = (clone_u16_vec(&pairs[y - 1].0), pairs[y - 1].1.clone());
+            pairs[y - 1] = (tmp_u, tmp_t);
+            y = y - 1;
+        }
+        x = x + 1;
+    }
+
+    // Rebuild `keys` in the sorted order.
+    let mut out: List<Text> = [];
+    let mut j: Int = 0;
+    while j < pairs.len() {
+        out.push(pairs[j].1.clone());
+        j = j + 1;
+    }
+    *keys = out;
+}
+
+fn clone_u16_vec(src: &List<UInt16>) -> List<UInt16> {
+    let mut out: List<UInt16> = [];
+    let mut i: Int = 0;
+    while i < src.len() { out.push(src[i]); i = i + 1; }
+    out
+}
+
+fn utf16_lt(a: &List<UInt16>, b: &List<UInt16>) -> Bool {
+    let mut i: Int = 0;
+    while i < a.len() && i < b.len() {
+        if a[i] < b[i] { return true; }
+        if a[i] > b[i] { return false; }
+        i = i + 1;
+    }
+    a.len() < b.len()
+}
+
+/// Decode UTF-8 bytes into a UTF-16 code-unit sequence. Handles
+/// BMP (single unit) and astral (surrogate pair) code points.
+/// Malformed UTF-8 is tolerated by emitting the replacement
+/// character — we don't validate; parser's job.
+fn utf8_to_utf16(bytes: &[Byte]) -> List<UInt16> {
+    let mut out: List<UInt16> = [];
+    let mut i: Int = 0;
+    while i < bytes.len() {
+        let c = bytes[i];
+        let cp: UInt32 = if c < 0x80_u8 {
+            i = i + 1;
+            c as UInt32
+        } else if (c & 0xE0_u8) == 0xC0_u8 && i + 1 < bytes.len() {
+            let hi = (c & 0x1F_u8) as UInt32;
+            let lo = (bytes[i + 1] & 0x3F_u8) as UInt32;
+            i = i + 2;
+            (hi << 6_u32) | lo
+        } else if (c & 0xF0_u8) == 0xE0_u8 && i + 2 < bytes.len() {
+            let h1 = (c & 0x0F_u8) as UInt32;
+            let h2 = (bytes[i + 1] & 0x3F_u8) as UInt32;
+            let h3 = (bytes[i + 2] & 0x3F_u8) as UInt32;
+            i = i + 3;
+            (h1 << 12_u32) | (h2 << 6_u32) | h3
+        } else if (c & 0xF8_u8) == 0xF0_u8 && i + 3 < bytes.len() {
+            let h1 = (c & 0x07_u8) as UInt32;
+            let h2 = (bytes[i + 1] & 0x3F_u8) as UInt32;
+            let h3 = (bytes[i + 2] & 0x3F_u8) as UInt32;
+            let h4 = (bytes[i + 3] & 0x3F_u8) as UInt32;
+            i = i + 4;
+            (h1 << 18_u32) | (h2 << 12_u32) | (h3 << 6_u32) | h4
+        } else {
+            i = i + 1;
+            0xFFFD_u32
+        };
+
+        if cp < 0x10000_u32 {
+            out.push(cp as UInt16);
+        } else {
+            // Surrogate pair.
+            let v = cp - 0x10000_u32;
+            let high = 0xD800_u32 | (v >> 10_u32);
+            let low  = 0xDC00_u32 | (v & 0x3FF_u32);
+            out.push(high as UInt16);
+            out.push(low as UInt16);
+        }
+    }
+    out
+}
+
+fn push_bytes(dst: &mut List<Byte>, src: &[Byte]) {
+    let mut i: Int = 0;
+    while i < src.len() { dst.push(src[i]); i = i + 1; }
+}
