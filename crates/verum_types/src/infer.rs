@@ -38398,7 +38398,6 @@ impl TypeChecker {
                             let resolved_param = self.unifier.apply(param_ty);
                             if let Ok(arg_result) = self.infer_expr(arg, InferMode::Synth) {
                                 if !self.types_compatible(&arg_result.ty, &resolved_param) {
-                                    eprintln!("[DBG variant-ctor arg-pre-check] qualified={} arg_ty={:?} param_ty={:?}", qualified_name, arg_result.ty, resolved_param);
                                     args_pre_compatible = false;
                                     break;
                                 }
