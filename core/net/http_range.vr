@@ -1,0 +1,363 @@
+// =============================================================================
+// net/http_range.vr — HTTP Range + Content-Range (RFC 9110 §14)
+// =============================================================================
+// Layer: 5 (Network — HTTP common)
+// Dependencies: core, core.collections
+// =============================================================================
+//
+// RFC 9110 §14 — byte-range requests + responses. Every HTTP server
+// that serves video, resumable downloads, PDF streaming, or large
+// file deltas needs this.
+//
+// # Request side
+//
+// Wire:
+//   Range: bytes=0-499, 600-899, 1000-
+//
+// Parses into a typed `RangeSet` of (start, end) pairs plus
+// open-ended suffixes (`-500` = last 500 bytes) and prefixes
+// (`1000-` = from byte 1000 to end).
+//
+// # Response side
+//
+//   Content-Range: bytes 0-499/1234
+//   Content-Range: bytes */1234         (416 Unsatisfiable)
+//
+// `encode_content_range` emits the canonical form; parsers accept
+// RFC 9110-conformant inputs with the usual whitespace tolerance.
+//
+// # Semantics (RFC 9110 §14.1.2)
+//
+//   * Ranges MUST resolve against a known resource length.
+//   * Invalid starts (> length - 1) fail the whole request with
+//     416 Range Not Satisfiable.
+//   * Each sub-range clamps `end` to `length - 1`.
+//   * Suffix ranges (`-N`) clamp at 0 when N > length.
+//   * Multiple overlapping ranges are coalesced in
+//     `resolve_and_merge` — the server emits the coalesced list
+//     via `multipart/byteranges` or returns 200 with the whole
+//     representation when the overhead of multipart dominates.
+//
+// =============================================================================
+
+module core.net.http_range;
+
+mount core.*;
+mount core.collections.List;
+
+// =============================================================================
+// Types
+// =============================================================================
+
+public type RangeSpec is
+      Closed { start: UInt64, end: UInt64 }    // "a-b" — both endpoints known
+    | Prefix { start: UInt64 }                  // "a-"  — from a to EOF
+    | Suffix { length: UInt64 };                // "-b"  — last b bytes
+
+public type RangeSet is {
+    specs: List<RangeSpec>,
+};
+
+public type ResolvedRange is {
+    start: UInt64,   // inclusive
+    end:   UInt64,   // inclusive
+};
+
+public type RangeError is
+      Malformed(Text)
+    | UnsatisfiableRange;
+
+// =============================================================================
+// Request parser
+// =============================================================================
+
+/// Parse a `Range:` header value (without the `Range:` prefix).
+///
+/// Accepts the canonical form `bytes=a-b, c-d, e-`. Returns
+/// `Malformed` on syntactically invalid input. Callers then
+/// call `resolve_and_merge` with the resource length to produce
+/// the final (start, end) list to serve.
+public fn parse_range_header(value: &Text) -> Result<RangeSet, RangeError> {
+    let b = value.as_bytes();
+    let (unit, rest) = split_equals(b);
+    if !bytes_eq_ci(unit.as_slice(), b"bytes") {
+        return Err(RangeError.Malformed(
+            Text.from_utf8_unchecked(unit.as_slice())));
+    }
+    let mut specs: List<RangeSpec> = [];
+    let parts = split_commas(rest.as_slice());
+    let mut i: Int = 0;
+    while i < parts.len() {
+        let trimmed = trim_ws(parts[i].as_slice());
+        if trimmed.len() == 0 { i = i + 1; continue; }
+        specs.push(parse_one(&trimmed)?);
+        i = i + 1;
+    }
+    if specs.len() == 0 {
+        return Err(RangeError.Malformed(Text.from("no ranges")));
+    }
+    Ok(RangeSet { specs: specs })
+}
+
+fn parse_one(seg: &List<Byte>) -> Result<RangeSpec, RangeError> {
+    // Find the '-' delimiter. Suffix form "-N" starts with '-';
+    // Prefix form "N-" ends with '-'; Closed form "a-b" has both.
+    let mut dash_pos: Int = -1;
+    let mut i: Int = 0;
+    while i < seg.len() {
+        if seg[i] == ('-' as Byte) { dash_pos = i; break; }
+        i = i + 1;
+    }
+    if dash_pos < 0 {
+        return Err(RangeError.Malformed(
+            Text.from_utf8_unchecked(seg.as_slice())));
+    }
+    let lhs = slice_range(seg.as_slice(), 0, dash_pos);
+    let rhs = slice_range(seg.as_slice(), dash_pos + 1, seg.len());
+
+    if lhs.len() == 0 && rhs.len() == 0 {
+        return Err(RangeError.Malformed(Text.from("empty")));
+    }
+    if lhs.len() == 0 {
+        // Suffix "-N"
+        let n = parse_u64(&rhs)?;
+        return Ok(RangeSpec.Suffix { length: n });
+    }
+    if rhs.len() == 0 {
+        // Prefix "N-"
+        let n = parse_u64(&lhs)?;
+        return Ok(RangeSpec.Prefix { start: n });
+    }
+    // Closed "a-b"
+    let a = parse_u64(&lhs)?;
+    let bv = parse_u64(&rhs)?;
+    if a > bv {
+        return Err(RangeError.Malformed(Text.from("start > end")));
+    }
+    Ok(RangeSpec.Closed { start: a, end: bv })
+}
+
+// =============================================================================
+// Resolution + coalescing
+// =============================================================================
+
+/// Materialise each spec against `total_length` to produce concrete
+/// (start, end) pairs. Overlapping or adjacent ranges are merged.
+/// Returns `UnsatisfiableRange` when *every* spec is invalid — when
+/// the caller should respond 416 Range Not Satisfiable with a
+/// `Content-Range: bytes */<total>` header.
+public fn resolve_and_merge(
+    rs:           &RangeSet,
+    total_length: UInt64,
+) -> Result<List<ResolvedRange>, RangeError> {
+    if total_length == 0_u64 {
+        return Err(RangeError.UnsatisfiableRange);
+    }
+    let mut resolved: List<ResolvedRange> = [];
+    let mut i: Int = 0;
+    while i < rs.specs.len() {
+        match resolve_one(&rs.specs[i], total_length) {
+            Some(r) => resolved.push(r),
+            None    => {},
+        }
+        i = i + 1;
+    }
+    if resolved.len() == 0 {
+        return Err(RangeError.UnsatisfiableRange);
+    }
+
+    // Sort by start ascending (insertion sort — N is small in practice).
+    sort_resolved(&mut resolved);
+
+    // Merge adjacent/overlapping.
+    let mut merged: List<ResolvedRange> = [];
+    merged.push(clone_resolved(&resolved[0]));
+    let mut j: Int = 1;
+    while j < resolved.len() {
+        let last_idx = merged.len() - 1;
+        let cur = &resolved[j];
+        if cur.start <= merged[last_idx].end + 1_u64 {
+            if cur.end > merged[last_idx].end {
+                merged[last_idx] = ResolvedRange {
+                    start: merged[last_idx].start,
+                    end:   cur.end,
+                };
+            }
+        } else {
+            merged.push(clone_resolved(cur));
+        }
+        j = j + 1;
+    }
+    Ok(merged)
+}
+
+fn resolve_one(spec: &RangeSpec, total: UInt64) -> Maybe<ResolvedRange> {
+    match spec {
+        RangeSpec.Closed { start, end } => {
+            if *start >= total { return None; }
+            let clamped_end = if *end >= total { total - 1_u64 } else { *end };
+            Some(ResolvedRange { start: *start, end: clamped_end })
+        },
+        RangeSpec.Prefix { start } => {
+            if *start >= total { return None; }
+            Some(ResolvedRange { start: *start, end: total - 1_u64 })
+        },
+        RangeSpec.Suffix { length } => {
+            if *length == 0_u64 { return None; }
+            let take = if *length >= total { total } else { *length };
+            Some(ResolvedRange { start: total - take, end: total - 1_u64 })
+        },
+    }
+}
+
+// =============================================================================
+// Content-Range builder + parser
+// =============================================================================
+
+/// Build a `Content-Range:` header value for a resolved sub-range.
+/// Emits `bytes <start>-<end>/<total>`.
+public fn encode_content_range(r: &ResolvedRange, total: UInt64) -> Text {
+    let mut out: List<Byte> = [];
+    push_bytes(&mut out, b"bytes ");
+    push_u64(&mut out, r.start);
+    out.push('-' as Byte);
+    push_u64(&mut out, r.end);
+    out.push('/' as Byte);
+    push_u64(&mut out, total);
+    Text.from_utf8_unchecked(out.as_slice())
+}
+
+/// Emit the 416-response form: `bytes */<total>`.
+public fn encode_unsatisfiable(total: UInt64) -> Text {
+    let mut out: List<Byte> = [];
+    push_bytes(&mut out, b"bytes */");
+    push_u64(&mut out, total);
+    Text.from_utf8_unchecked(out.as_slice())
+}
+
+// =============================================================================
+// Helpers
+// =============================================================================
+
+fn split_equals(src: &[Byte]) -> (List<Byte>, List<Byte>) {
+    let mut pre: List<Byte> = [];
+    let mut post: List<Byte> = [];
+    let mut seen: Bool = false;
+    let mut i: Int = 0;
+    while i < src.len() {
+        if !seen && src[i] == ('=' as Byte) { seen = true; }
+        else if seen { post.push(src[i]); }
+        else if !is_ws(src[i]) { pre.push(src[i]); }
+        i = i + 1;
+    }
+    (pre, post)
+}
+
+fn split_commas(src: &[Byte]) -> List<List<Byte>> {
+    let mut out: List<List<Byte>> = [];
+    let mut cur: List<Byte> = [];
+    let mut i: Int = 0;
+    while i < src.len() {
+        if src[i] == (',' as Byte) { out.push(cur); cur = []; }
+        else { cur.push(src[i]); }
+        i = i + 1;
+    }
+    out.push(cur);
+    out
+}
+
+fn trim_ws(src: &[Byte]) -> List<Byte> {
+    let mut l: Int = 0;
+    while l < src.len() && is_ws(src[l]) { l = l + 1; }
+    let mut r: Int = src.len();
+    while r > l && is_ws(src[r - 1]) { r = r - 1; }
+    slice_range(src, l, r)
+}
+
+fn slice_range(src: &[Byte], start: Int, end: Int) -> List<Byte> {
+    let mut out: List<Byte> = [];
+    let mut i: Int = start;
+    while i < end { out.push(src[i]); i = i + 1; }
+    out
+}
+
+fn is_ws(b: Byte) -> Bool {
+    b == (' ' as Byte) || b == ('\t' as Byte)
+}
+
+fn bytes_eq_ci(a: &[Byte], b: &[Byte]) -> Bool {
+    if a.len() != b.len() { return false; }
+    let mut i: Int = 0;
+    while i < a.len() {
+        let ca = to_lower(a[i]);
+        let cb = to_lower(b[i]);
+        if ca != cb { return false; }
+        i = i + 1;
+    }
+    true
+}
+
+fn to_lower(b: Byte) -> Byte {
+    if b >= ('A' as Byte) && b <= ('Z' as Byte) {
+        b + (('a' as Byte) - ('A' as Byte))
+    } else { b }
+}
+
+fn parse_u64(src: &List<Byte>) -> Result<UInt64, RangeError> {
+    if src.len() == 0 {
+        return Err(RangeError.Malformed(Text.from("empty number")));
+    }
+    let mut v: UInt64 = 0_u64;
+    let mut i: Int = 0;
+    while i < src.len() {
+        let c = src[i];
+        if c < ('0' as Byte) || c > ('9' as Byte) {
+            return Err(RangeError.Malformed(
+                Text.from_utf8_unchecked(src.as_slice())));
+        }
+        v = v * 10_u64 + ((c - ('0' as Byte)) as UInt64);
+        i = i + 1;
+    }
+    Ok(v)
+}
+
+fn push_bytes(dst: &mut List<Byte>, src: &[Byte]) {
+    let mut i: Int = 0;
+    while i < src.len() { dst.push(src[i]); i = i + 1; }
+}
+
+fn push_u64(dst: &mut List<Byte>, n: UInt64) {
+    if n == 0_u64 { dst.push('0' as Byte); return; }
+    let mut buf: List<Byte> = [];
+    let mut x = n;
+    while x > 0_u64 {
+        let d = (x % 10_u64) as Byte;
+        buf.push(('0' as Byte) + d);
+        x = x / 10_u64;
+    }
+    let mut i: Int = buf.len() - 1;
+    while i >= 0 { dst.push(buf[i]); i = i - 1; }
+}
+
+fn sort_resolved(list: &mut List<ResolvedRange>) {
+    // Insertion sort — typical request carries ≤ 4 ranges.
+    let n = list.len();
+    let mut i: Int = 1;
+    while i < n {
+        let mut j: Int = i;
+        while j > 0 && list[j].start < list[j - 1].start {
+            let tmp_s = list[j].start;
+            let tmp_e = list[j].end;
+            list[j] = ResolvedRange {
+                start: list[j - 1].start, end: list[j - 1].end,
+            };
+            list[j - 1] = ResolvedRange { start: tmp_s, end: tmp_e };
+            j = j - 1;
+        }
+        i = i + 1;
+    }
+}
+
+fn clone_resolved(r: &ResolvedRange) -> ResolvedRange {
+    ResolvedRange { start: r.start, end: r.end }
+}
