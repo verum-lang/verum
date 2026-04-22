@@ -146,6 +146,25 @@ Three sequential architectural commits closed the class of
     call sites left alone — only the reported panic path is
     changed.
 
+15. **`dcf48ac9` fix(stdlib): impl → implement across 15 net modules
+    + demethod H3Client.*** — batch-fix for the "'impl' is not a
+    Verum keyword" stdlib parse warning that appeared at every
+    check/run. Fifteen `core.net.*` modules (H3 server + request +
+    qpack, QUIC transport/connection_sm/recovery, TLS 1.3 psk +
+    early_data) had lingering Rust-style `impl` keyword instead of
+    Verum's `implement`. Every leading `^impl [</blank>]` occurrence
+    flipped via a Python regex pass.
+    Plus demethoded two H3Client static functions that used a
+    non-grammatical `public async fn H3Client.connect(...)` form at
+    module level. Grammar requires `fn <identifier>`, not
+    `fn Type.method`. Renamed to `h3client_connect`/
+    `h3client_connect_resumed`; real H3Client methods
+    (get/post/send) remain in their existing
+    `implement H3Client { ... }` block.
+    Net effect: parse-error warnings during stdlib load now silent;
+    the warnings were masking real diagnostics for every user
+    check.
+
 **L1 impact:** 533/535 → 534/537 (same 3 known residuals:
 higher_kinded HKT infer, sha256 stdlib, AOT field-offset panic in
 vtest harness). **L3 dependent impact:** 48/52 → 50/52 — closes
