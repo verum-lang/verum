@@ -375,8 +375,8 @@ impl<'ctx> Translator<'ctx> {
                         }
                     }
                     match name {
-                        "true" => return Ok(Bool::from_bool(true)),
-                        "false" => return Ok(Bool::from_bool(false)),
+                        "true" | "True" => return Ok(Bool::from_bool(true)),
+                        "false" | "False" => return Ok(Bool::from_bool(false)),
                         _ => {}
                     }
                     return Ok(Bool::new_const(name));
@@ -419,13 +419,19 @@ impl<'ctx> Translator<'ctx> {
                         return Ok(var.clone());
                     }
 
-                    // Check for boolean constants
+                    // Check for boolean constants. Both casings are
+                    // accepted: `true`/`false` is the Verum keyword form,
+                    // `True`/`False` appears in prop-logic contexts mirrored
+                    // from mainstream proof assistants and in imported
+                    // stdlib names; the translator treats them as
+                    // interchangeable Z3 Bool literals rather than fresh
+                    // uninterpreted Int constants.
                     match name {
-                        "true" => {
+                        "true" | "True" => {
                             let bool_val = Bool::from_bool(true);
                             return Ok(Dynamic::from_ast(&bool_val));
                         }
-                        "false" => {
+                        "false" | "False" => {
                             let bool_val = Bool::from_bool(false);
                             return Ok(Dynamic::from_ast(&bool_val));
                         }
