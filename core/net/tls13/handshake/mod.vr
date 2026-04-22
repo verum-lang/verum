@@ -121,4 +121,5 @@ public mount .resume_verify.{
 // Re-exports — 0-RTT replay cache (RFC 8446 §8)
 public mount .zero_rtt_antireplay.{
     ReplayCache, ReplayConfig, ReplayStats,
+    ReplayGuard, NoReplayGuard,
 };

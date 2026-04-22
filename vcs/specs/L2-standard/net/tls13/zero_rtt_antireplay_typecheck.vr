@@ -7,8 +7,19 @@
 
 mount core.net.tls13.handshake.{
     ReplayCache, ReplayConfig, ReplayStats,
+    ReplayGuard, NoReplayGuard,
 };
 mount core.time.instant.{Instant};
+
+// Polymorphic admit — works for any ReplayGuard impl.
+fn admit_via_guard<G: ReplayGuard>(
+    g:       &mut G,
+    psk_id:  &[Byte],
+    ch_hash: &[Byte],
+    now:     Instant,
+) -> Bool {
+    g.try_admit(psk_id, ch_hash, now)
+}
 
 fn exercise_replay_cache() {
     // Default config: 2^20 expected entries, 0.1% FP, 10 s window.
@@ -42,6 +53,21 @@ fn exercise_replay_cache() {
     let _ = small.stats();
 }
 
+fn exercise_guard_protocol() {
+    let psk_id:  [Byte; 4]  = [1_u8, 2_u8, 3_u8, 4_u8];
+    let ch_hash: [Byte; 32] = [0_u8; 32];
+    let now = Instant.now();
+
+    // Real guard — first admit accepted.
+    let mut real = ReplayCache.with_defaults();
+    let _ = admit_via_guard(&mut real, &psk_id[..], &ch_hash[..], now.clone());
+
+    // Stub guard — always admits.
+    let mut stub = NoReplayGuard.new();
+    let _ = admit_via_guard(&mut stub, &psk_id[..], &ch_hash[..], now);
+}
+
 fn main() {
     exercise_replay_cache();
+    exercise_guard_protocol();
 }

@@ -316,3 +316,53 @@ public type ReplayStats is {
     bits_per_bucket:  Int,
     k_hashes:         Int,
 };
+
+// =============================================================================
+// ReplayGuard protocol — pluggable abstraction over replay caches
+// =============================================================================
+//
+// Multi-terminator deployments need a shared replay cache — the local
+// in-memory `ReplayCache` above only catches replays that hit the
+// same process. The `ReplayGuard` protocol lets callers swap in a
+// Redis- or memcached-backed cache without touching ServerSm code.
+//
+// Implementers include:
+//
+//   * `ReplayCache` (this module) — single-process Bloom filter.
+//   * `NoReplayGuard` (this module) — stub that always admits; useful
+//     in tests where 0-RTT replay is out of scope.
+//   * User-supplied distributed impls (Redis / memcached / etcd) —
+//     the external crate plugs behind the same `try_admit` signature.
+//
+// =============================================================================
+
+/// Pluggable guard protocol over a 0-RTT replay cache. One method
+/// by design so adapters (distributed caches, test stubs) stay thin.
+public type ReplayGuard is protocol {
+    /// Attempt to admit a (psk_id, ch_hash) pair. Return true on
+    /// admission (caller may accept the 0-RTT flight); false on
+    /// suspected replay (caller MUST reject 0-RTT but may still
+    /// complete 1-RTT).
+    fn try_admit(&mut self, psk_id: &[Byte], ch_hash: &[Byte], now: Instant) -> Bool;
+};
+
+implement ReplayGuard for ReplayCache {
+    fn try_admit(&mut self, psk_id: &[Byte], ch_hash: &[Byte], now: Instant) -> Bool {
+        ReplayCache.try_admit(self, psk_id, ch_hash, now)
+    }
+}
+
+/// Always-admits stub. Safe to use in test harnesses where 0-RTT
+/// replay is explicitly out of scope. **NEVER** ship this in
+/// production — it nullifies 0-RTT replay protection.
+public type NoReplayGuard is ();
+
+implement NoReplayGuard {
+    public fn new() -> NoReplayGuard { () }
+}
+
+implement ReplayGuard for NoReplayGuard {
+    fn try_admit(&mut self, _psk_id: &[Byte], _ch_hash: &[Byte], _now: Instant) -> Bool {
+        true
+    }
+}
