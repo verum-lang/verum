@@ -1,0 +1,62 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: hpke, rfc9180, ech, typecheck
+// @timeout: 10000
+// @expect: pass
+
+mount core.security.hpke.{
+    setup_base_s, setup_base_r,
+    Encapsulation, SenderContext, ReceiverContext, HpkeError,
+    HPKE_KEM_X25519_SHA256, HPKE_KDF_HKDF_SHA256, HPKE_AEAD_CHACHA_POLY,
+    NK, NN, NH, NPK,
+};
+mount core.security.ecc.x25519.{X25519, X25519SecretKey, X25519PublicKey};
+mount core.collections.List;
+
+fn exercise_hpke_roundtrip() -> Result<(), HpkeError> {
+    // Receiver's static key-pair.
+    let sk_r = X25519.generate_secret_key();
+    let pk_r = X25519.public_key(&sk_r);
+
+    let info: List<Byte> = {
+        let mut b: List<Byte> = [];
+        b.push('e' as Byte); b.push('c' as Byte); b.push('h' as Byte);
+        b
+    };
+
+    // Sender side.
+    let (enc, mut sender) = setup_base_s(&pk_r, info.as_slice())?;
+
+    // Seal two messages.
+    let msg1: [Byte; 5] = [1_u8, 2_u8, 3_u8, 4_u8, 5_u8];
+    let aad: [Byte; 3] = [0xAA_u8, 0xBB_u8, 0xCC_u8];
+    let ct1 = sender.seal(&aad[..], &msg1[..])?;
+
+    let msg2: [Byte; 7] = [0x10_u8, 0x20_u8, 0x30_u8, 0x40_u8, 0x50_u8, 0x60_u8, 0x70_u8];
+    let ct2 = sender.seal(&aad[..], &msg2[..])?;
+
+    // Receiver side.
+    let mut receiver = setup_base_r(&enc, &sk_r, info.as_slice())?;
+    let pt1 = receiver.open(&aad[..], ct1.as_slice())?;
+    let pt2 = receiver.open(&aad[..], ct2.as_slice())?;
+    let _ = pt1;
+    let _ = pt2;
+
+    // Exporter interface (RFC 9180 §5.3) — derives additional keys.
+    let ctx: [Byte; 4] = [0_u8, 1_u8, 2_u8, 3_u8];
+    let _exp1: List<Byte> = sender.export(&ctx[..], 32)?;
+    let _exp2: List<Byte> = receiver.export(&ctx[..], 32)?;
+
+    // Suite ID constants.
+    let _: UInt16 = HPKE_KEM_X25519_SHA256;
+    let _: UInt16 = HPKE_KDF_HKDF_SHA256;
+    let _: UInt16 = HPKE_AEAD_CHACHA_POLY;
+    let _: Int = NK;
+    let _: Int = NN;
+    let _: Int = NH;
+    let _: Int = NPK;
+    Ok(())
+}
+
+fn main() { let _ = exercise_hpke_roundtrip(); }

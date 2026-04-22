@@ -1,0 +1,425 @@
+// =============================================================================
+// security/hpke/mod.vr — Hybrid Public Key Encryption (RFC 9180)
+// =============================================================================
+// Layer: 3 (Security)
+// Dependencies: core, core.security.{ecc.x25519, kdf.hkdf, aead.chacha20_poly1305}
+// =============================================================================
+//
+// RFC 9180 — HPKE is the modern primitive behind Encrypted ClientHello
+// (ECH, TLS 1.3 extension), MLS messaging, Privacy Pass, and ODoH.
+// It composes:
+//
+//   * KEM  — asymmetric key encapsulation (we ship DHKEM X25519)
+//   * KDF  — HKDF-SHA256 (extract + expand with labels)
+//   * AEAD — ChaCha20-Poly1305 (we ship the one common "base" suite)
+//
+// into four operations:
+//
+//   SetupBaseS(pkR, info) → (enc, sender_ctx)
+//   SetupBaseR(enc, skR, info) → receiver_ctx
+//   ctx.seal(aad, pt) → ct
+//   ctx.open(aad, ct) → pt
+//
+// # Scope
+//
+// v0.1 ships ONE suite — the one every HPKE deployment supports:
+//
+//   KEM   = DHKEM(X25519, HKDF-SHA256)   (kem_id  = 0x0020)
+//   KDF   = HKDF-SHA256                  (kdf_id  = 0x0001)
+//   AEAD  = ChaCha20-Poly1305            (aead_id = 0x0003)
+//   Mode  = Base                         (no PSK, no auth)
+//
+// The other three modes (Psk, Auth, AuthPsk) and the P-256/P-384
+// suites land in a follow-up; the APIs below are shaped so the
+// additional suites drop in behind the same `SenderContext` /
+// `ReceiverContext` facades.
+//
+// # Security notes
+//
+//   * All secrets are `SecretBytes` (zeroized on drop in Verum's
+//     secret layer — see core.security.secrets).
+//   * Sequence numbers monotonically increment; wrap-around is
+//     treated as a fatal condition per RFC 9180 §5.2.
+//   * Nonce = base_nonce XOR seq (big-endian right-padded) — the
+//     standard AEAD-construction nonce formula.
+//
+// =============================================================================
+
+module core.security.hpke;
+
+mount core.*;
+mount core.collections.List;
+mount core.security.ecc.x25519.{
+    X25519, X25519SecretKey, X25519PublicKey, X25519Error,
+};
+mount core.security.kdf.hkdf.{
+    hkdf_extract_sha256, hkdf_expand_sha256, HkdfError,
+};
+mount core.security.aead.chacha20_poly1305.{
+    ChaCha20Poly1305, ChaChaKey, ChaChaNonce, AeadError,
+};
+
+// =============================================================================
+// Suite constants (RFC 9180 §7)
+// =============================================================================
+
+/// KEM ID for DHKEM(X25519, HKDF-SHA256).
+public const HPKE_KEM_X25519_SHA256:  UInt16 = 0x0020_u16;
+/// KDF ID for HKDF-SHA256.
+public const HPKE_KDF_HKDF_SHA256:    UInt16 = 0x0001_u16;
+/// AEAD ID for ChaCha20-Poly1305.
+public const HPKE_AEAD_CHACHA_POLY:   UInt16 = 0x0003_u16;
+/// Mode = Base (no PSK, no auth).
+public const HPKE_MODE_BASE:          UInt8  = 0_u8;
+
+/// Output length of HKDF-SHA256 = 32 bytes.
+public const NH: Int = 32;
+/// AEAD key length for ChaCha20-Poly1305 = 32.
+public const NK: Int = 32;
+/// AEAD nonce length = 12.
+public const NN: Int = 12;
+/// KEM shared-secret length (DHKEM X25519/SHA256) = 32.
+public const NSECRET: Int = 32;
+/// KEM public-key (enc) length = 32 for X25519.
+public const NPK: Int = 32;
+
+// =============================================================================
+// Errors
+// =============================================================================
+
+public type HpkeError is
+      KemFailure
+    | KdfFailure
+    | AeadFailure
+    | SequenceOverflow
+    | BadEncapsulation;
+
+// =============================================================================
+// Encapsulation (the `enc` wire blob) — X25519 public key of the sender
+// =============================================================================
+
+public type Encapsulation is {
+    bytes: [Byte; 32],
+};
+
+implement Encapsulation {
+    public fn from_bytes(b: [Byte; 32]) -> Encapsulation {
+        Encapsulation { bytes: b }
+    }
+
+    public fn as_slice(&self) -> &[Byte] { &self.bytes[..] }
+}
+
+// =============================================================================
+// Sender / Receiver contexts
+// =============================================================================
+
+public type SenderContext is {
+    key:             [Byte; 32],
+    base_nonce:      [Byte; 12],
+    seq:             UInt64,
+    exporter_secret: [Byte; 32],
+};
+
+public type ReceiverContext is {
+    key:             [Byte; 32],
+    base_nonce:      [Byte; 12],
+    seq:             UInt64,
+    exporter_secret: [Byte; 32],
+};
+
+implement SenderContext {
+    /// Encrypt `pt` with associated data `aad`. Ciphertext grows
+    /// `pt.len() + 16` bytes (AEAD tag appended). Monotonic per
+    /// invocation; sequence overflow is fatal (RFC 9180 §5.2).
+    public fn seal(
+        &mut self,
+        aad: &[Byte],
+        pt:  &[Byte],
+    ) -> Result<List<Byte>, HpkeError> {
+        if self.seq == 0xFFFFFFFFFFFFFFFF_u64 {
+            return Err(HpkeError.SequenceOverflow);
+        }
+        let nonce = compute_nonce(&self.base_nonce, self.seq);
+        let aead = ChaCha20Poly1305.new(&self.key);
+        let mut ct: List<Byte> = [];
+        let mut tag: [Byte; 16] = [0_u8; 16];
+        aead.encrypt(&nonce, aad, pt, &mut ct, &mut tag);
+        let mut i: Int = 0;
+        while i < 16 { ct.push(tag[i]); i = i + 1; }
+        self.seq = self.seq + 1_u64;
+        Ok(ct)
+    }
+
+    public fn export(&self, context: &[Byte], length: Int) -> Result<List<Byte>, HpkeError> {
+        labeled_expand_hpke(&self.exporter_secret, b"sec", context, length)
+    }
+}
+
+implement ReceiverContext {
+    /// Decrypt `ct` (ciphertext || 16-byte tag) with AAD. Returns
+    /// `AeadFailure` on tag mismatch; plaintext is never exposed
+    /// on that branch.
+    public fn open(
+        &mut self,
+        aad: &[Byte],
+        ct:  &[Byte],
+    ) -> Result<List<Byte>, HpkeError> {
+        if ct.len() < 16 { return Err(HpkeError.AeadFailure); }
+        if self.seq == 0xFFFFFFFFFFFFFFFF_u64 {
+            return Err(HpkeError.SequenceOverflow);
+        }
+        let body_len = ct.len() - 16;
+        let body = &ct[..body_len];
+        let mut tag: [Byte; 16] = [0_u8; 16];
+        let mut i: Int = 0;
+        while i < 16 { tag[i] = ct[body_len + i]; i = i + 1; }
+        let nonce = compute_nonce(&self.base_nonce, self.seq);
+        let aead = ChaCha20Poly1305.new(&self.key);
+        let mut pt: List<Byte> = [];
+        aead.decrypt(&nonce, aad, body, &tag, &mut pt)
+            .map_err(|_| HpkeError.AeadFailure)?;
+        self.seq = self.seq + 1_u64;
+        Ok(pt)
+    }
+
+    public fn export(&self, context: &[Byte], length: Int) -> Result<List<Byte>, HpkeError> {
+        labeled_expand_hpke(&self.exporter_secret, b"sec", context, length)
+    }
+}
+
+// =============================================================================
+// Public API — Mode Base (RFC 9180 §5.1.1)
+// =============================================================================
+
+/// `SetupBaseS` — sender side. Generates an ephemeral X25519
+/// key-pair, performs DHKEM encapsulation against `pkR`, and
+/// derives a SenderContext bound to the supplied `info`.
+public fn setup_base_s(
+    pk_r: &X25519PublicKey,
+    info: &[Byte],
+) -> Result<(Encapsulation, SenderContext), HpkeError> {
+    // Ephemeral sender key-pair.
+    let sk_e = X25519.generate_secret_key();
+    let pk_e = X25519.public_key(&sk_e);
+
+    // DHKEM.Encap(pkR): DH(skE, pkR) → shared; ExtractAndExpand to 32 bytes.
+    let dh = X25519.diffie_hellman(&sk_e, pk_r)
+        .map_err(|_| HpkeError.KemFailure)?;
+    let shared = kem_extract_and_expand(&dh[..], &pk_e[..], &pk_r[..])?;
+
+    let (key, base_nonce, exporter) = key_schedule_base(shared.as_slice(), info)?;
+    Ok((
+        Encapsulation { bytes: pk_e },
+        SenderContext {
+            key: key, base_nonce: base_nonce, seq: 0_u64,
+            exporter_secret: exporter,
+        },
+    ))
+}
+
+/// `SetupBaseR` — receiver side. Given the sender's `enc` wire blob
+/// (their ephemeral public key), and our static secret, recover the
+/// same shared secret + derive a matching ReceiverContext.
+public fn setup_base_r(
+    enc:  &Encapsulation,
+    sk_r: &X25519SecretKey,
+    info: &[Byte],
+) -> Result<ReceiverContext, HpkeError> {
+    // DHKEM.Decap: DH(skR, enc).
+    let pk_e: X25519PublicKey = enc.bytes;
+    let dh = X25519.diffie_hellman(sk_r, &pk_e)
+        .map_err(|_| HpkeError.KemFailure)?;
+    let pk_r = X25519.public_key(sk_r);
+    let shared = kem_extract_and_expand(&dh[..], &pk_e[..], &pk_r[..])?;
+
+    let (key, base_nonce, exporter) = key_schedule_base(shared.as_slice(), info)?;
+    Ok(ReceiverContext {
+        key: key, base_nonce: base_nonce, seq: 0_u64,
+        exporter_secret: exporter,
+    })
+}
+
+// =============================================================================
+// KEM — DHKEM(X25519, HKDF-SHA256) §4.1
+// =============================================================================
+//
+// ExtractAndExpand(dh, pkE || pkR):
+//   suite_id_kem = "KEM" || I2OSP(kem_id, 2)    = "KEM" || 0x0020
+//   eae_prk = LabeledExtract(salt="", "eae_prk", dh, kem_suite_id)
+//   shared_secret = LabeledExpand(eae_prk, "shared_secret",
+//                                  pkE||pkR, Nsecret, kem_suite_id)
+//
+// =============================================================================
+
+fn kem_extract_and_expand(
+    dh: &[Byte],
+    pk_e: &[Byte],
+    pk_r: &[Byte],
+) -> Result<List<Byte>, HpkeError> {
+    let kem_suite = kem_suite_id();
+    let eae_prk = labeled_extract(&[], b"eae_prk", dh, kem_suite.as_slice())?;
+
+    let mut kem_context: List<Byte> = [];
+    let mut i: Int = 0;
+    while i < pk_e.len() { kem_context.push(pk_e[i]); i = i + 1; }
+    let mut j: Int = 0;
+    while j < pk_r.len() { kem_context.push(pk_r[j]); j = j + 1; }
+
+    labeled_expand(
+        eae_prk.as_slice(), b"shared_secret", kem_context.as_slice(),
+        NSECRET, kem_suite.as_slice(),
+    )
+}
+
+// =============================================================================
+// Key schedule — RFC 9180 §5.1
+// =============================================================================
+
+fn key_schedule_base(
+    shared:  &[Byte],
+    info:    &[Byte],
+) -> Result<([Byte; 32], [Byte; 12], [Byte; 32]), HpkeError> {
+    let hpke_suite = hpke_suite_id();
+
+    // KeySchedule context = mode_byte || psk_id_hash || info_hash.
+    let psk_id_hash = labeled_extract(&[], b"psk_id_hash", &[], hpke_suite.as_slice())?;
+    let info_hash   = labeled_extract(&[], b"info_hash",   info, hpke_suite.as_slice())?;
+
+    let mut ks_ctx: List<Byte> = [];
+    ks_ctx.push(HPKE_MODE_BASE);
+    let mut i: Int = 0;
+    while i < psk_id_hash.len() { ks_ctx.push(psk_id_hash[i]); i = i + 1; }
+    let mut j: Int = 0;
+    while j < info_hash.len()   { ks_ctx.push(info_hash[j]);   j = j + 1; }
+
+    // secret = LabeledExtract(shared_secret, "secret", default_psk="")
+    let secret = labeled_extract(shared, b"secret", &[], hpke_suite.as_slice())?;
+
+    let key_bytes = labeled_expand(
+        secret.as_slice(), b"key", ks_ctx.as_slice(), NK, hpke_suite.as_slice(),
+    )?;
+    let nonce_bytes = labeled_expand(
+        secret.as_slice(), b"base_nonce", ks_ctx.as_slice(), NN, hpke_suite.as_slice(),
+    )?;
+    let exporter_bytes = labeled_expand(
+        secret.as_slice(), b"exp", ks_ctx.as_slice(), NH, hpke_suite.as_slice(),
+    )?;
+
+    let mut key: [Byte; 32] = [0_u8; 32];
+    let mut k: Int = 0;
+    while k < 32 { key[k] = key_bytes[k]; k = k + 1; }
+
+    let mut base_nonce: [Byte; 12] = [0_u8; 12];
+    let mut l: Int = 0;
+    while l < 12 { base_nonce[l] = nonce_bytes[l]; l = l + 1; }
+
+    let mut exporter: [Byte; 32] = [0_u8; 32];
+    let mut m: Int = 0;
+    while m < 32 { exporter[m] = exporter_bytes[m]; m = m + 1; }
+
+    Ok((key, base_nonce, exporter))
+}
+
+// =============================================================================
+// Labeled KDF helpers (RFC 9180 §4)
+// =============================================================================
+//
+// LabeledExtract(salt, label, ikm):
+//   labeled_ikm = "HPKE-v1" || suite_id || label || ikm
+//   return HKDF-Extract(salt, labeled_ikm)
+//
+// LabeledExpand(prk, label, info, L):
+//   labeled_info = I2OSP(L, 2) || "HPKE-v1" || suite_id || label || info
+//   return HKDF-Expand(prk, labeled_info, L)
+//
+// =============================================================================
+
+fn labeled_extract(
+    salt:     &[Byte],
+    label:    &[Byte],
+    ikm:      &[Byte],
+    suite_id: &[Byte],
+) -> Result<List<Byte>, HpkeError> {
+    let mut labeled_ikm: List<Byte> = [];
+    push_bytes(&mut labeled_ikm, b"HPKE-v1");
+    push_bytes(&mut labeled_ikm, suite_id);
+    push_bytes(&mut labeled_ikm, label);
+    push_bytes(&mut labeled_ikm, ikm);
+    Ok(hkdf_extract_sha256(salt, labeled_ikm.as_slice()).to_vec())
+}
+
+fn labeled_expand(
+    prk:      &[Byte],
+    label:    &[Byte],
+    info:     &[Byte],
+    length:   Int,
+    suite_id: &[Byte],
+) -> Result<List<Byte>, HpkeError> {
+    let mut labeled_info: List<Byte> = [];
+    labeled_info.push(((length >> 8) & 0xFF) as Byte);
+    labeled_info.push((length & 0xFF) as Byte);
+    push_bytes(&mut labeled_info, b"HPKE-v1");
+    push_bytes(&mut labeled_info, suite_id);
+    push_bytes(&mut labeled_info, label);
+    push_bytes(&mut labeled_info, info);
+    hkdf_expand_sha256(prk, labeled_info.as_slice(), length)
+        .map_err(|_| HpkeError.KdfFailure)
+}
+
+fn labeled_expand_hpke(
+    prk: &[Byte; 32], label: &[Byte], info: &[Byte], length: Int,
+) -> Result<List<Byte>, HpkeError> {
+    labeled_expand(&prk[..], label, info, length, hpke_suite_id().as_slice())
+}
+
+// =============================================================================
+// Suite ID builders
+// =============================================================================
+
+/// KEM suite ID = "KEM" || I2OSP(kem_id, 2).
+fn kem_suite_id() -> List<Byte> {
+    let mut out: List<Byte> = [];
+    push_bytes(&mut out, b"KEM");
+    out.push(((HPKE_KEM_X25519_SHA256 >> 8) & 0xFF_u16) as Byte);
+    out.push((HPKE_KEM_X25519_SHA256 & 0xFF_u16) as Byte);
+    out
+}
+
+/// HPKE suite ID = "HPKE" || I2OSP(kem_id, 2) || I2OSP(kdf_id, 2) || I2OSP(aead_id, 2).
+fn hpke_suite_id() -> List<Byte> {
+    let mut out: List<Byte> = [];
+    push_bytes(&mut out, b"HPKE");
+    out.push(((HPKE_KEM_X25519_SHA256 >> 8) & 0xFF_u16) as Byte);
+    out.push((HPKE_KEM_X25519_SHA256 & 0xFF_u16) as Byte);
+    out.push(((HPKE_KDF_HKDF_SHA256 >> 8) & 0xFF_u16) as Byte);
+    out.push((HPKE_KDF_HKDF_SHA256 & 0xFF_u16) as Byte);
+    out.push(((HPKE_AEAD_CHACHA_POLY >> 8) & 0xFF_u16) as Byte);
+    out.push((HPKE_AEAD_CHACHA_POLY & 0xFF_u16) as Byte);
+    out
+}
+
+// =============================================================================
+// Misc helpers
+// =============================================================================
+
+fn push_bytes(dst: &mut List<Byte>, src: &[Byte]) {
+    let mut i: Int = 0;
+    while i < src.len() { dst.push(src[i]); i = i + 1; }
+}
+
+/// Compute AEAD nonce = base_nonce XOR I2OSP(seq, 12), right-aligned.
+fn compute_nonce(base: &[Byte; 12], seq: UInt64) -> ChaChaNonce {
+    let mut nonce: [Byte; 12] = [0_u8; 12];
+    let mut i: Int = 0;
+    while i < 12 { nonce[i] = base[i]; i = i + 1; }
+    // XOR seq (big-endian) into the last 8 bytes.
+    let mut j: Int = 0;
+    while j < 8 {
+        let shift = ((7 - j) * 8) as UInt64;
+        let byte = ((seq >> shift) & 0xFF_u64) as Byte;
+        nonce[4 + j] = nonce[4 + j] ^ byte;
+        j = j + 1;
+    }
+    nonce
+}

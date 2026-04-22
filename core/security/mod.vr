@@ -63,6 +63,10 @@ public module pq;
 // trust store. Ships as a subtree; see x509/mod.vr for internals.
 public module x509;
 
+// Hybrid Public Key Encryption (RFC 9180) — one-suite reference impl
+// behind ECH, MLS, Privacy Pass.
+public module hpke;
+
 // Legacy capability / region modules (pre-crypto).
 public module labels;
 public module regions;
