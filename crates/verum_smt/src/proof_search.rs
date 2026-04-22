@@ -4959,16 +4959,21 @@ impl ProofSearchEngine {
     /// Omega: decides linear integer arithmetic (Presburger arithmetic) via Cooper's algorithm.
     /// Only applies to goals in the decidable QF_LIA fragment.
     fn try_omega(&mut self, goal: &ProofGoal) -> Result<List<ProofGoal>, ProofError> {
-        // Omega decides linear integer arithmetic (Presburger arithmetic)
-        // Check if goal is in the decidable fragment
-
+        // The Omega decision procedure is textbook-classically LIA (Presburger
+        // arithmetic). In practice, Verum users write `proof by omega` as a
+        // generic "arithmetic integer closure" marker, and rejecting anything
+        // non-linear means a trivially-decidable nonlinear fact like
+        //   n >= 5  ⇒  n * n >= 25
+        // fails the tactic with a confusing "not in LIA" message.
+        //
+        // Policy: try LIA first (fast), then fall through to full SMT for
+        // anything else. Z3 handles a large nonlinear fragment via its NLSAT
+        // / NRA solvers, so the SMT fallback absorbs the usual cases. This
+        // remains sound: the decision is still the SMT's, not ours.
         if self.is_linear_integer_formula(&goal.goal) {
-            // Use SMT solver with QF_LIA theory
             self.try_smt(&Maybe::Some("z3".into()), &Maybe::Some(5000), goal)
         } else {
-            Err(ProofError::TacticFailed(
-                "Omega tactic: goal is not in linear integer arithmetic".into(),
-            ))
+            self.try_smt(&Maybe::Some("z3".into()), &Maybe::Some(5000), goal)
         }
     }
 
