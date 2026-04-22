@@ -13,7 +13,8 @@ mount core.net.quic.api.{
 
 async fn check_client_api() -> Result<(), QuicClientError> {
     let opts = QuicClientOptions.default();
-    let mut client = QuicClient.connect(&Text.from_str("example.com:443"), opts).await?;
+    let authority: Text = "example.com:443";
+    let mut client = QuicClient.connect(&authority, opts).await?;
     let _ = client.authority();
     let _ = client.peer_addr();
     let _ = client.open_bidi_stream().await;

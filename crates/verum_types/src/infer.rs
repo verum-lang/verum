@@ -38360,42 +38360,33 @@ impl TypeChecker {
                         return Ok(InferResult::new(resolved_return));
                     }
 
-                    // Pre-check argument type compatibility before committing.
-                    // If args don't match, skip this env entry and try protocol_checker.
-                    let mut args_pre_compatible = true;
-                    if args.len() == params.len() {
-                        for (arg, param_ty) in args.iter().zip(params.iter()) {
-                            let resolved_param = self.unifier.apply(param_ty);
-                            if let Ok(arg_result) = self.infer_expr(arg, InferMode::Synth) {
-                                if !self.types_compatible(&arg_result.ty, &resolved_param) {
-                                    args_pre_compatible = false;
-                                    break;
-                                }
-                            }
-                        }
+                    // Commit to this qualified-name resolution. The
+                    // earlier `args_pre_compatible` heuristic (raw-string
+                    // type name equality before real check_expr) was a
+                    // silent masker: any spurious mismatch would fall
+                    // through to a hardcoded-method-name fallback, or
+                    // (after that was removed) to MethodNotFound — even
+                    // when the env entry is the one true resolution.
+                    // Real type-checking runs here via check_expr below;
+                    // unification + coercion handle refinement, numeric
+                    // canonicalization, and reference auto-borrow.
+                    // Allow ±1 tolerance for self-param counting.
+                    if params.len().abs_diff(args.len()) > 1 {
+                        return Err(TypeError::WrongArgCount {
+                            method: method_name.to_text(),
+                            expected: params.len(),
+                            actual: args.len(),
+                            span,
+                        });
                     }
 
-                    if args_pre_compatible {
-                        // Allow ±1 tolerance for self-param counting
-                        if params.len().abs_diff(args.len()) > 1 {
-                            return Err(TypeError::WrongArgCount {
-                                method: method_name.to_text(),
-                                expected: params.len(),
-                                actual: args.len(),
-                                span,
-                            });
-                        }
-
-                        for (arg, param_ty) in args.iter().zip(params.iter()) {
-                            let resolved_param = self.unifier.apply(param_ty);
-                            self.check_expr(arg, &resolved_param)?;
-                        }
-
-                        let resolved_return = self.unifier.apply(return_type);
-                        return Ok(InferResult::new(resolved_return));
+                    for (arg, param_ty) in args.iter().zip(params.iter()) {
+                        let resolved_param = self.unifier.apply(param_ty);
+                        self.check_expr(arg, &resolved_param)?;
                     }
-                    // Args not compatible — fall through to protocol_checker
-                    env_resolved = false;
+
+                    let resolved_return = self.unifier.apply(return_type);
+                    return Ok(InferResult::new(resolved_return));
                 } else {
                     env_resolved = true; // Non-function type, treat as resolved
                 }

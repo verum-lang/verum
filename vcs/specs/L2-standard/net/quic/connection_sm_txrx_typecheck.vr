@@ -31,8 +31,9 @@ mount core.net.quic.crypto.header_protection.{HpKey};
 mount core.time.instant.{Instant};
 
 fn make_keys() -> QuicSpaceKeys {
+    let key_arr: [Byte; 16] = [0_u8; 16];
     QuicSpaceKeys {
-        aead_key: [0_u8; 16].to_vec(),
+        aead_key: List.from_slice(&key_arr[..]),
         aead_iv:  [0_u8; 12],
         hp_key:   HpKey.AesEcb128([0_u8; 16]),
     }

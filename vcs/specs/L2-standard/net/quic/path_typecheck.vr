@@ -13,8 +13,10 @@ mount core.net.addr.{SocketAddr};
 mount core.time.instant.{Instant};
 
 fn dummy_addr() -> SocketAddr {
-    SocketAddr.from_text(Text.from_str("127.0.0.1:443"))
-        .unwrap_or_else(|_| SocketAddr.from_text(Text.from_str("[::]:0")).unwrap())
+    let primary: Text = "127.0.0.1:443";
+    let fallback: Text = "[::]:0";
+    SocketAddr.from_text(&primary)
+        .unwrap_or_else(|_| SocketAddr.from_text(&fallback).unwrap())
 }
 
 fn check_validation_flow() {

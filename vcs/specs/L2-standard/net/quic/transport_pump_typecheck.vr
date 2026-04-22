@@ -28,8 +28,10 @@ fn check_ecn_codepoint() {
 
 async fn check_sim_transport() -> Result<(), TransportError> {
     let net = Shared.new(SimNetwork.new());
-    let addr_a = SocketAddr.from_text("127.0.0.1:11001").unwrap();
-    let addr_b = SocketAddr.from_text("127.0.0.1:11002").unwrap();
+    let a: Text = "127.0.0.1:11001";
+    let b: Text = "127.0.0.1:11002";
+    let addr_a = SocketAddr.from_text(&a).unwrap();
+    let addr_b = SocketAddr.from_text(&b).unwrap();
     let t_a = SimUdpTransport.bind(addr_a, net.clone());
     let t_b = SimUdpTransport.bind(addr_b, net.clone());
 

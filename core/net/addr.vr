@@ -687,6 +687,13 @@ implement SocketAddr {
         !self.is_ipv4()
     }
 
+    /// Semantic alias for `parse`. Callers that prefer the "from
+    /// textual representation" phrasing can use this without
+    /// reaching for the implementation-flavoured `parse` name.
+    public fn from_text(s: &Text) -> Result<SocketAddr, AddrParseError> {
+        SocketAddr.parse(s)
+    }
+
     /// Parse from "host:port" string.
     public fn parse(s: &Text) -> Result<SocketAddr, AddrParseError> {
         let parts = s.rsplit_once(':');

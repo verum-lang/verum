@@ -33,13 +33,13 @@ fn typecheck_server_config() -> QuicConfig {
 }
 
 // Connect / accept shape (async).
-async fn typecheck_connect(peer: &SocketAddr, config: QuicConfig)
+async fn typecheck_connect(peer: &SocketAddr, config: core.net.quic.QuicConfig)
     -> Result<Connection, QuicError>
 {
     Connection.connect(peer, config).await
 }
 
-async fn typecheck_listen(local: &SocketAddr, config: QuicConfig)
+async fn typecheck_listen(local: &SocketAddr, config: core.net.quic.QuicConfig)
     -> Result<QuicListener, QuicError>
 {
     QuicListener.bind(local, config).await
