@@ -1,0 +1,57 @@
+module core.database.sqlite.native.l4_vdbe;
+
+// =============================================================================
+// core/database/sqlite/native/l4_vdbe/mod.vr — VDBE layer (L4)
+// =============================================================================
+// Layer: 4
+// Dependencies: l1_pager, l2_record, l3_btree
+// =============================================================================
+//
+// The VDBE is SQLite's bytecode virtual machine: the SQL planner emits
+// a program of ~180 opcodes, the interpreter runs them against a
+// register file + cursor table, and results flow out through the
+// `ResultRow` opcode.
+//
+// Shipped modules:
+//
+//   * `opcode`      — ~70-variant sum type covering the v1 subset
+//   * `register`    — Register value type + RegisterFile container
+//   * `program`     — VdbeProgram + ConstantPool + builder methods
+//   * `interpreter` — step-based executor for the I/O-free opcodes
+//   * `optimizer`   — Noop-elim + jump-threading peephole passes
+//
+// Not yet shipped: cursor-bound opcode execution (pending pager IPC),
+// sub-program / trigger support, EXPLAIN output, advanced optimizer
+// passes (constant folding, dead-code elim).
+// =============================================================================
+
+public module opcode;
+public module register;
+public module program;
+public module interpreter;
+public module optimizer;
+
+public mount .opcode.{
+    Opcode,
+    opcode_name, falls_through, is_branch, has_external_effect,
+};
+
+public mount .register.{
+    Register, RegisterKind, RegisterFile,
+    register_file_new, register_kind, register_is_truthy, register_clone,
+};
+
+public mount .program.{
+    VdbeProgram, ConstantEntry, ConstantPool,
+    ResultColumn, CursorKind, CursorDecl,
+    constant_pool_new, program_new,
+};
+
+public mount .interpreter.{
+    StepResult, VdbeState,
+    vdbe_state_new, step, run_until_row,
+};
+
+public mount .optimizer.{
+    eliminate_noops, thread_jumps, optimize,
+};

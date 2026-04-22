@@ -1,0 +1,255 @@
+module core.database.sqlite.native.l4_vdbe.opcode;
+
+// =============================================================================
+// l4_vdbe/opcode.vr — VDBE opcode catalog
+// =============================================================================
+// Layer: 4
+// Spec: sqlite-native.md §11.2
+//
+// SQLite's VDBE has ~180 opcodes; we enumerate the v1 subset sufficient
+// to execute simple SELECT / INSERT / UPDATE / DELETE + transactions.
+// Each variant carries its operand-shape as a record; the interpreter
+// dispatches on the tag.
+//
+// Operand naming conventions (mirrors SQLite's p1..p5):
+//
+//   * `reg_*`       — register index (0-based, not 1-based like SQLite)
+//   * `jump_target` — instruction index to jump to
+//   * `cursor_id`   — slot in the VdbeProgram's cursor table
+//   * `const_idx`   — index into the program's constant pool
+//
+// Not a full bijection with C-SQLite opcodes; missing ones are
+// tracked in internal/specs/sqlite-opcodes.md as they land.
+// =============================================================================
+
+mount core.*;
+mount base.Text;
+
+// -----------------------------------------------------------------------------
+// Opcode sum type
+// -----------------------------------------------------------------------------
+
+public type Opcode is
+    // Program control ---------------------------------------------------------
+      Init(jump_target: Int)
+    | Halt(errcode: Int, msg_const: Int)
+    | Goto(jump_target: Int)
+    | Gosub(return_reg: Int, jump_target: Int)
+    | Return(return_reg: Int)
+    | Once(jump_if_done: Int)
+    | Noop
+
+    // Register moves ----------------------------------------------------------
+    | Integer(value: Int, reg_dst: Int)
+    | Int64(value_const_idx: Int, reg_dst: Int)
+    | Real(value_const_idx: Int, reg_dst: Int)
+    | String8(s_const_idx: Int, reg_dst: Int)
+    | BlobLit(b_const_idx: Int, reg_dst: Int)
+    | Null(reg_start: Int, reg_end: Int)
+    | SoftNull(reg_dst: Int)
+    | Move(reg_src: Int, reg_dst: Int, count: Int)
+    | Copy(reg_src: Int, reg_dst: Int, count: Int)
+    | SCopy(reg_src: Int, reg_dst: Int)
+
+    // Arithmetic / bitwise ----------------------------------------------------
+    | Add(reg_a: Int, reg_b: Int, reg_dst: Int)
+    | Subtract(reg_a: Int, reg_b: Int, reg_dst: Int)
+    | Multiply(reg_a: Int, reg_b: Int, reg_dst: Int)
+    | Divide(reg_a: Int, reg_b: Int, reg_dst: Int)
+    | Remainder(reg_a: Int, reg_b: Int, reg_dst: Int)
+    | BitAnd(reg_a: Int, reg_b: Int, reg_dst: Int)
+    | BitOr(reg_a: Int, reg_b: Int, reg_dst: Int)
+    | ShiftLeft(reg_a: Int, reg_b: Int, reg_dst: Int)
+    | ShiftRight(reg_a: Int, reg_b: Int, reg_dst: Int)
+    | BitNot(reg_src: Int, reg_dst: Int)
+
+    // Comparisons + conditional jumps ----------------------------------------
+    | Eq(reg_a: Int, reg_b: Int, jump_target: Int)
+    | Ne(reg_a: Int, reg_b: Int, jump_target: Int)
+    | Lt(reg_a: Int, reg_b: Int, jump_target: Int)
+    | Le(reg_a: Int, reg_b: Int, jump_target: Int)
+    | Gt(reg_a: Int, reg_b: Int, jump_target: Int)
+    | Ge(reg_a: Int, reg_b: Int, jump_target: Int)
+    | If(reg_src: Int, jump_target: Int)
+    | IfNot(reg_src: Int, jump_target: Int)
+    | IfNull(reg_src: Int, jump_target: Int)
+    | NotNull(reg_src: Int, jump_target: Int)
+
+    // Cursor operations -------------------------------------------------------
+    | OpenRead(cursor_id: Int, root_page: Int, n_cols: Int)
+    | OpenWrite(cursor_id: Int, root_page: Int, n_cols: Int)
+    | Close(cursor_id: Int)
+    | Rewind(cursor_id: Int, jump_if_empty: Int)
+    | Last(cursor_id: Int, jump_if_empty: Int)
+    | Next(cursor_id: Int, jump_if_more: Int)
+    | Prev(cursor_id: Int, jump_if_more: Int)
+    | Column(cursor_id: Int, col_idx: Int, reg_dst: Int)
+    | RowIdOp(cursor_id: Int, reg_dst: Int)
+    | SeekGE(cursor_id: Int, key_reg: Int, n_keys: Int, jump_if_miss: Int)
+    | SeekGT(cursor_id: Int, key_reg: Int, n_keys: Int, jump_if_miss: Int)
+    | SeekLE(cursor_id: Int, key_reg: Int, n_keys: Int, jump_if_miss: Int)
+    | SeekLT(cursor_id: Int, key_reg: Int, n_keys: Int, jump_if_miss: Int)
+    | Found(cursor_id: Int, jump_target: Int, key_reg: Int, n_keys: Int)
+    | NotFound(cursor_id: Int, jump_target: Int, key_reg: Int, n_keys: Int)
+
+    // Mutation ---------------------------------------------------------------
+    | Insert(cursor_id: Int, data_reg: Int, key_reg: Int, flags: Int)
+    | Delete(cursor_id: Int)
+    | NewRowid(cursor_id: Int, reg_dst: Int)
+    | MakeRecord(reg_start: Int, n_cols: Int, reg_dst: Int, affinity_const_idx: Int)
+
+    // Ephemeral tables / sorting ---------------------------------------------
+    | OpenEphemeral(cursor_id: Int, n_cols: Int)
+    | OpenAutoindex(cursor_id: Int, n_cols: Int)
+    | SorterOpen(cursor_id: Int)
+    | SorterInsert(cursor_id: Int, reg_record: Int)
+    | SorterSort(cursor_id: Int)
+    | SorterData(cursor_id: Int, reg_dst: Int)
+    | SorterNext(cursor_id: Int, jump_if_more: Int)
+
+    // Transactions -----------------------------------------------------------
+    | Transaction(write: Int)
+    | Commit
+    | RollbackOp(savepoint_const_idx: Int)
+    | SavepointOp(name_const_idx: Int)
+    | AutoCommit(desired: Int, rollback: Int)
+
+    // Schema / cookie access -------------------------------------------------
+    | ReadCookie(cookie_idx: Int, reg_dst: Int)
+    | WriteCookie(cookie_idx: Int, reg_src: Int)
+
+    // Function dispatch ------------------------------------------------------
+    | Function(n_args: Int, reg_first_arg: Int, reg_dst: Int, func_const_idx: Int)
+    | AggStep(agg_const_idx: Int, n_args: Int, reg_first_arg: Int, reg_acc: Int)
+    | AggFinal(agg_const_idx: Int, reg_acc: Int)
+
+    // Result emission ---------------------------------------------------------
+    | ResultRow(reg_start: Int, n_cols: Int);
+
+// -----------------------------------------------------------------------------
+// Metadata helpers
+// -----------------------------------------------------------------------------
+
+/// Human-readable mnemonic for an opcode — used by EXPLAIN and trace.
+/// Doesn't include operand values; callers format those separately.
+public fn opcode_name(op: &Opcode) -> Text {
+    match op {
+        Init(_)        => "Init".clone(),
+        Halt(_, _)     => "Halt".clone(),
+        Goto(_)        => "Goto".clone(),
+        Gosub(_, _)    => "Gosub".clone(),
+        Return(_)      => "Return".clone(),
+        Once(_)        => "Once".clone(),
+        Noop           => "Noop".clone(),
+        Integer(_, _)  => "Integer".clone(),
+        Int64(_, _)    => "Int64".clone(),
+        Real(_, _)     => "Real".clone(),
+        String8(_, _)  => "String8".clone(),
+        BlobLit(_, _)  => "Blob".clone(),
+        Null(_, _)     => "Null".clone(),
+        SoftNull(_)    => "SoftNull".clone(),
+        Move(_, _, _)  => "Move".clone(),
+        Copy(_, _, _)  => "Copy".clone(),
+        SCopy(_, _)    => "SCopy".clone(),
+        Add(_, _, _)       => "Add".clone(),
+        Subtract(_, _, _)  => "Subtract".clone(),
+        Multiply(_, _, _)  => "Multiply".clone(),
+        Divide(_, _, _)    => "Divide".clone(),
+        Remainder(_, _, _) => "Remainder".clone(),
+        BitAnd(_, _, _)    => "BitAnd".clone(),
+        BitOr(_, _, _)     => "BitOr".clone(),
+        ShiftLeft(_, _, _) => "ShiftLeft".clone(),
+        ShiftRight(_, _, _)=> "ShiftRight".clone(),
+        BitNot(_, _)       => "BitNot".clone(),
+        Eq(_, _, _) => "Eq".clone(),
+        Ne(_, _, _) => "Ne".clone(),
+        Lt(_, _, _) => "Lt".clone(),
+        Le(_, _, _) => "Le".clone(),
+        Gt(_, _, _) => "Gt".clone(),
+        Ge(_, _, _) => "Ge".clone(),
+        If(_, _)       => "If".clone(),
+        IfNot(_, _)    => "IfNot".clone(),
+        IfNull(_, _)   => "IfNull".clone(),
+        NotNull(_, _)  => "NotNull".clone(),
+        OpenRead(_, _, _)  => "OpenRead".clone(),
+        OpenWrite(_, _, _) => "OpenWrite".clone(),
+        Close(_)           => "Close".clone(),
+        Rewind(_, _)       => "Rewind".clone(),
+        Last(_, _)         => "Last".clone(),
+        Next(_, _)         => "Next".clone(),
+        Prev(_, _)         => "Prev".clone(),
+        Column(_, _, _)    => "Column".clone(),
+        RowIdOp(_, _)      => "RowId".clone(),
+        SeekGE(_, _, _, _) => "SeekGE".clone(),
+        SeekGT(_, _, _, _) => "SeekGT".clone(),
+        SeekLE(_, _, _, _) => "SeekLE".clone(),
+        SeekLT(_, _, _, _) => "SeekLT".clone(),
+        Found(_, _, _, _)    => "Found".clone(),
+        NotFound(_, _, _, _) => "NotFound".clone(),
+        Insert(_, _, _, _) => "Insert".clone(),
+        Delete(_)          => "Delete".clone(),
+        NewRowid(_, _)     => "NewRowid".clone(),
+        MakeRecord(_, _, _, _) => "MakeRecord".clone(),
+        OpenEphemeral(_, _) => "OpenEphemeral".clone(),
+        OpenAutoindex(_, _) => "OpenAutoindex".clone(),
+        SorterOpen(_)       => "SorterOpen".clone(),
+        SorterInsert(_, _)  => "SorterInsert".clone(),
+        SorterSort(_)       => "SorterSort".clone(),
+        SorterData(_, _)    => "SorterData".clone(),
+        SorterNext(_, _)    => "SorterNext".clone(),
+        Transaction(_) => "Transaction".clone(),
+        Commit         => "Commit".clone(),
+        RollbackOp(_)  => "Rollback".clone(),
+        SavepointOp(_) => "Savepoint".clone(),
+        AutoCommit(_, _) => "AutoCommit".clone(),
+        ReadCookie(_, _)  => "ReadCookie".clone(),
+        WriteCookie(_, _) => "WriteCookie".clone(),
+        Function(_, _, _, _) => "Function".clone(),
+        AggStep(_, _, _, _)  => "AggStep".clone(),
+        AggFinal(_, _)       => "AggFinal".clone(),
+        ResultRow(_, _) => "ResultRow".clone(),
+    }
+}
+
+/// Does this opcode read the current PC + 1, or jump elsewhere?
+/// `true` if control may proceed to the next instruction.
+public fn falls_through(op: &Opcode) -> Bool {
+    match op {
+        Halt(_, _) => false,
+        Goto(_)    => false,
+        Return(_)  => false,
+        _          => true,
+    }
+}
+
+/// Does this opcode branch conditionally or unconditionally?
+public fn is_branch(op: &Opcode) -> Bool {
+    match op {
+        Goto(_) | Gosub(_, _) | Return(_) | Once(_)
+        | Eq(_, _, _) | Ne(_, _, _) | Lt(_, _, _) | Le(_, _, _)
+        | Gt(_, _, _) | Ge(_, _, _)
+        | If(_, _) | IfNot(_, _) | IfNull(_, _) | NotNull(_, _)
+        | Rewind(_, _) | Last(_, _) | Next(_, _) | Prev(_, _)
+        | SeekGE(_, _, _, _) | SeekGT(_, _, _, _)
+        | SeekLE(_, _, _, _) | SeekLT(_, _, _, _)
+        | Found(_, _, _, _) | NotFound(_, _, _, _)
+        | SorterNext(_, _) => true,
+        _ => false,
+    }
+}
+
+/// Does this opcode have a side effect visible outside the VM?
+public fn has_external_effect(op: &Opcode) -> Bool {
+    match op {
+        ResultRow(_, _)
+        | Insert(_, _, _, _)
+        | Delete(_)
+        | OpenWrite(_, _, _)
+        | Transaction(_)
+        | Commit | RollbackOp(_) | SavepointOp(_)
+        | AutoCommit(_, _)
+        | WriteCookie(_, _)
+        | Halt(_, _) => true,
+        _ => false,
+    }
+}

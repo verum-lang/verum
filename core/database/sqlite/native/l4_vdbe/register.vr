@@ -1,0 +1,178 @@
+module core.database.sqlite.native.l4_vdbe.register;
+
+// =============================================================================
+// l4_vdbe/register.vr — VDBE register + register file
+// =============================================================================
+// Layer: 4
+// Spec: sqlite-native.md §11.1
+//
+// A VDBE register holds one SQLite value. The tag is observable at
+// runtime via `register_kind` (used by the `Column` opcode for dynamic
+// `sqlite3_column_type` queries). The value tags are identical to
+// `l2_record.SqliteValue` — once the static-SSA-register patch lands,
+// the two types will merge; for now they're separate because the VDBE
+// register also carries an optional `sub_type` byte used by JSONB
+// and a few extension hooks.
+// =============================================================================
+
+mount core.*;
+mount collections.List;
+mount base.{Text, Maybe};
+
+// -----------------------------------------------------------------------------
+// Register
+// -----------------------------------------------------------------------------
+
+/// SQLite register value. `RRowId` is a distinct variant from `RInt`
+/// even though both wrap an `Int64` — some opcodes treat rowids and
+/// integers differently (e.g. `Column` on INTEGER PRIMARY KEY).
+public type Register is
+      RNull
+    | RInt(Int64)
+    | RReal(Float64)
+    | RText(Text)
+    | RBlob(List<Byte>)
+    | RRowId(Int64);
+
+public type RegisterKind is KNull | KInt | KReal | KText | KBlob | KRowId;
+
+public fn register_kind(r: &Register) -> RegisterKind {
+    match r {
+        RNull     => KNull,
+        RInt(_)   => KInt,
+        RReal(_)  => KReal,
+        RText(_)  => KText,
+        RBlob(_)  => KBlob,
+        RRowId(_) => KRowId,
+    }
+}
+
+/// "Truthy" test — mirrors SQLite's `sqlite3VdbeIntValue`-style check
+/// used by the `If`/`IfNot` opcodes. Matches:
+///
+///   * RNull       → false
+///   * RInt(0) / RReal(0.0) → false, otherwise true
+///   * RText("")   → false, otherwise true
+///   * RBlob(b)    → b.len() > 0
+///   * RRowId(0)   → false, else true (rowids are always valid positive)
+public fn register_is_truthy(r: &Register) -> Bool {
+    match r {
+        RNull     => false,
+        RInt(i)   => i != (0 as Int64),
+        RReal(x)  => x != 0.0,
+        RText(s)  => s.len() > 0,
+        RBlob(b)  => b.len() > 0,
+        RRowId(i) => i != (0 as Int64),
+    }
+}
+
+/// Clone a register by deep-copy on the text/blob branches.
+public fn register_clone(r: &Register) -> Register {
+    match r {
+        RNull    => RNull,
+        RInt(i)  => RInt(i),
+        RReal(x) => RReal(x),
+        RText(s) => RText(s.clone()),
+        RBlob(b) => {
+            let mut out: List<Byte> = List.new();
+            let mut i: Int = 0;
+            while i < b.len() {
+                out.push(b[i]);
+                i = i + 1;
+            }
+            RBlob(out)
+        }
+        RRowId(i) => RRowId(i),
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Register file
+// -----------------------------------------------------------------------------
+
+/// A fixed-capacity array of registers. Sized at program-build time;
+/// index is 0-based (unlike SQLite's 1-based convention — we
+/// canonicalise to 0 here).
+public type RegisterFile is {
+    cells: List<Register>,
+};
+
+/// Build a register file with `size` null slots.
+public fn register_file_new(size: Int) -> RegisterFile {
+    let mut cells: List<Register> = List.new();
+    let mut i: Int = 0;
+    while i < size {
+        cells.push(RNull);
+        i = i + 1;
+    }
+    RegisterFile { cells: cells }
+}
+
+implement RegisterFile {
+    public fn size(&self) -> Int { self.cells.len() }
+
+    /// Read register `idx`. Returns `RNull` on out-of-bounds rather
+    /// than panicking — matches the interpreter's defensive behaviour
+    /// for corrupted programs (the fuzz corpus hits this).
+    public fn get(&self, idx: Int) -> Register {
+        if idx < 0 || idx >= self.cells.len() {
+            return RNull;
+        }
+        register_clone(&self.cells[idx])
+    }
+
+    /// Write register `idx`. Silently drops on out-of-bounds.
+    public fn set(&mut self, idx: Int, value: Register) {
+        if idx < 0 || idx >= self.cells.len() {
+            return;
+        }
+        self.cells[idx] = value;
+    }
+
+    /// Move `count` registers from `[src..src+count)` to `[dst..dst+count)`.
+    /// Source cells are cleared to RNull after the move. Matches the
+    /// SQLite Move opcode semantics.
+    public fn move_range(&mut self, src: Int, dst: Int, count: Int) {
+        if count <= 0 { return; }
+        // Copy-forward or copy-backward depending on direction.
+        if dst < src {
+            let mut i: Int = 0;
+            while i < count {
+                let v = register_clone(&self.cells[src + i]);
+                self.cells[dst + i] = v;
+                self.cells[src + i] = RNull;
+                i = i + 1;
+            }
+        } else if dst > src {
+            let mut i: Int = count - 1;
+            while i >= 0 {
+                let v = register_clone(&self.cells[src + i]);
+                self.cells[dst + i] = v;
+                self.cells[src + i] = RNull;
+                i = i - 1;
+            }
+        }
+        // dst == src → no-op.
+    }
+
+    /// Copy (not move) `count` registers.
+    public fn copy_range(&mut self, src: Int, dst: Int, count: Int) {
+        if count <= 0 { return; }
+        if dst == src { return; }
+        let mut i: Int = 0;
+        while i < count {
+            let v = register_clone(&self.cells[src + i]);
+            self.cells[dst + i] = v;
+            i = i + 1;
+        }
+    }
+
+    /// Clear a range to RNull (used by the `Null` opcode).
+    public fn clear_range(&mut self, start: Int, end_inclusive: Int) {
+        let mut i: Int = start;
+        while i <= end_inclusive && i < self.cells.len() {
+            self.cells[i] = RNull;
+            i = i + 1;
+        }
+    }
+}

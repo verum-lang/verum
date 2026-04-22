@@ -1,0 +1,420 @@
+module core.database.sqlite.native.l4_vdbe.interpreter;
+
+// =============================================================================
+// l4_vdbe/interpreter.vr — VDBE interpreter (step-based)
+// =============================================================================
+// Layer: 4
+// Spec: sqlite-native.md §11.3
+//
+// The interpreter is deliberately *step-based* rather than batched —
+// SQLite's sqlite3_step() returns one row at a time and the caller
+// controls iteration. Our `step(&mut VdbeState)` returns a `StepResult`:
+//
+//   * `Row(reg_start, n_cols)` — caller should emit a result row
+//   * `Done`                    — Halt(0) reached, program complete
+//   * `Error(code, msg)`        — Halt(nonzero) or runtime error
+//   * `Yield`                   — no visible effect; call step() again
+//
+// This module implements the subset of opcodes that don't require
+// cursor I/O (arithmetic, control flow, register moves, comparisons).
+// Cursor-touching opcodes — Column, Next, SeekGE, Insert — are stubbed
+// to `Yield` until the actor IPC integration lands.
+// =============================================================================
+
+mount core.*;
+mount collections.List;
+mount base.{Result, Ok, Err, Text, Maybe};
+mount core.database.sqlite.native.l4_vdbe.opcode.Opcode;
+mount core.database.sqlite.native.l4_vdbe.register.{
+    Register, RegisterFile, register_file_new, register_is_truthy, register_clone,
+};
+mount core.database.sqlite.native.l4_vdbe.program.{
+    VdbeProgram, ConstantEntry, ConstantPool,
+};
+
+// -----------------------------------------------------------------------------
+// State / result
+// -----------------------------------------------------------------------------
+
+public type StepResult is
+      Row(reg_start: Int, n_cols: Int)
+    | Done
+    | Yield
+    | ExecError(code: Int, msg: Text);
+
+/// Mutable interpreter state held across calls to `step`.
+public type affine VdbeState is {
+    pc: Int,
+    regs: RegisterFile,
+    return_stack: List<Int>,     // for Gosub/Return
+    once_fired: List<Int>,       // instruction indices of Once ops that fired
+    halted: Bool,
+};
+
+public fn vdbe_state_new(program: &VdbeProgram) -> VdbeState {
+    VdbeState {
+        pc: 0,
+        regs: register_file_new(program.register_count()),
+        return_stack: List.new(),
+        once_fired: List.new(),
+        halted: false,
+    }
+}
+
+implement VdbeState {
+    public fn program_counter(&self) -> Int { self.pc }
+    public fn is_halted(&self) -> Bool { self.halted }
+    public fn reg(&self, i: Int) -> Register { self.regs.get(i) }
+    public fn set_reg(&mut self, i: Int, v: Register) { self.regs.set(i, v); }
+}
+
+// -----------------------------------------------------------------------------
+// Helpers — arithmetic + comparison lowering
+// -----------------------------------------------------------------------------
+
+fn to_int64(r: &Register) -> Int64 {
+    match r {
+        RInt(i)   => i,
+        RRowId(i) => i,
+        RReal(x)  => x as Int64,
+        _         => 0 as Int64,
+    }
+}
+
+fn to_real(r: &Register) -> Float64 {
+    match r {
+        RInt(i)   => i as Float64,
+        RRowId(i) => i as Float64,
+        RReal(x)  => x,
+        _         => 0.0,
+    }
+}
+
+fn arith_add(a: &Register, b: &Register) -> Register {
+    match (a, b) {
+        (RReal(_), _) | (_, RReal(_)) => RReal(to_real(a) + to_real(b)),
+        _                             => RInt(to_int64(a) + to_int64(b)),
+    }
+}
+
+fn arith_sub(a: &Register, b: &Register) -> Register {
+    match (a, b) {
+        (RReal(_), _) | (_, RReal(_)) => RReal(to_real(a) - to_real(b)),
+        _                             => RInt(to_int64(a) - to_int64(b)),
+    }
+}
+
+fn arith_mul(a: &Register, b: &Register) -> Register {
+    match (a, b) {
+        (RReal(_), _) | (_, RReal(_)) => RReal(to_real(a) * to_real(b)),
+        _                             => RInt(to_int64(a) * to_int64(b)),
+    }
+}
+
+fn arith_div(a: &Register, b: &Register) -> Register {
+    // SQLite divides as REAL for REAL operands, INT otherwise with 0
+    // protection (0 / 0 = NULL).
+    match (a, b) {
+        (RReal(_), _) | (_, RReal(_)) => {
+            let bx = to_real(b);
+            if bx == 0.0 { RNull } else { RReal(to_real(a) / bx) }
+        }
+        _ => {
+            let bi = to_int64(b);
+            if bi == (0 as Int64) { RNull } else { RInt(to_int64(a) / bi) }
+        }
+    }
+}
+
+fn cmp_lt(a: &Register, b: &Register) -> Bool {
+    match (a, b) {
+        (RReal(_), _) | (_, RReal(_)) => to_real(a) < to_real(b),
+        (RText(x), RText(y)) => x < y,
+        _ => to_int64(a) < to_int64(b),
+    }
+}
+
+fn cmp_eq(a: &Register, b: &Register) -> Bool {
+    match (a, b) {
+        (RNull, RNull) => false,     // SQLite NULL != NULL in comparisons
+        (RReal(_), _) | (_, RReal(_)) => to_real(a) == to_real(b),
+        (RText(x), RText(y)) => x == y,
+        _ => to_int64(a) == to_int64(b),
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Step
+// -----------------------------------------------------------------------------
+
+/// Execute one opcode. Advances `pc` to the next instruction unless the
+/// opcode jumps. Returns the step outcome for the caller to dispatch on.
+///
+/// Cursor-bound opcodes return `Yield` (still a no-op) until the pager
+/// actor IPC is wired; callers can special-case by inspecting the
+/// current opcode via `program.get_opcode(state.pc)`.
+public fn step(state: &mut VdbeState, program: &VdbeProgram) -> StepResult {
+    if state.halted {
+        return Done;
+    }
+    let op_maybe = program.get_opcode(state.pc);
+    let op = match op_maybe {
+        Some(o) => o,
+        None    => { state.halted = true; return Done; }
+    };
+
+    match op {
+        Init(t) => { state.pc = t; Yield }
+
+        Halt(code, _msg_idx) => {
+            state.halted = true;
+            if code == 0 { Done } else { ExecError(code, "Halt with error".clone()) }
+        }
+
+        Goto(t) => { state.pc = t; Yield }
+
+        Gosub(r, t) => {
+            state.return_stack.push(state.pc + 1);
+            state.regs.set(r, RInt(state.pc as Int64));
+            state.pc = t;
+            Yield
+        }
+
+        Return(r) => {
+            let v = state.regs.get(r);
+            let _ = v;
+            if state.return_stack.len() > 0 {
+                let ret = state.return_stack.pop();
+                state.pc = ret;
+            } else {
+                state.halted = true;
+                return ExecError(1, "Return with empty stack".clone());
+            }
+            Yield
+        }
+
+        Once(jump_if_done) => {
+            let fired = state.once_fired;
+            let idx = state.pc;
+            let mut already = false;
+            let mut k: Int = 0;
+            while k < fired.len() {
+                if fired[k] == idx { already = true; break; }
+                k = k + 1;
+            }
+            if already {
+                state.pc = jump_if_done;
+            } else {
+                state.once_fired.push(idx);
+                state.pc = state.pc + 1;
+            }
+            Yield
+        }
+
+        Noop => { state.pc = state.pc + 1; Yield }
+
+        Integer(v, d) => {
+            state.regs.set(d, RInt(v as Int64));
+            state.pc = state.pc + 1;
+            Yield
+        }
+
+        Int64(const_idx, d) => {
+            match program.constants.get(const_idx) {
+                KInt(i) => state.regs.set(d, RInt(i)),
+                _       => state.regs.set(d, RNull),
+            }
+            state.pc = state.pc + 1;
+            Yield
+        }
+
+        Real(const_idx, d) => {
+            match program.constants.get(const_idx) {
+                KReal(x) => state.regs.set(d, RReal(x)),
+                _        => state.regs.set(d, RNull),
+            }
+            state.pc = state.pc + 1;
+            Yield
+        }
+
+        String8(const_idx, d) => {
+            match program.constants.get(const_idx) {
+                KText(s) => state.regs.set(d, RText(s)),
+                _        => state.regs.set(d, RNull),
+            }
+            state.pc = state.pc + 1;
+            Yield
+        }
+
+        Null(start, end_inclusive) => {
+            state.regs.clear_range(start, end_inclusive);
+            state.pc = state.pc + 1;
+            Yield
+        }
+
+        SoftNull(d) => {
+            state.regs.set(d, RNull);
+            state.pc = state.pc + 1;
+            Yield
+        }
+
+        Move(src, dst, count) => {
+            state.regs.move_range(src, dst, count);
+            state.pc = state.pc + 1;
+            Yield
+        }
+
+        Copy(src, dst, count) => {
+            state.regs.copy_range(src, dst, count);
+            state.pc = state.pc + 1;
+            Yield
+        }
+
+        SCopy(src, dst) => {
+            let v = state.regs.get(src);
+            state.regs.set(dst, v);
+            state.pc = state.pc + 1;
+            Yield
+        }
+
+        Add(a, b, d) => {
+            let va = state.regs.get(a);
+            let vb = state.regs.get(b);
+            state.regs.set(d, arith_add(&va, &vb));
+            state.pc = state.pc + 1;
+            Yield
+        }
+
+        Subtract(a, b, d) => {
+            let va = state.regs.get(a);
+            let vb = state.regs.get(b);
+            state.regs.set(d, arith_sub(&va, &vb));
+            state.pc = state.pc + 1;
+            Yield
+        }
+
+        Multiply(a, b, d) => {
+            let va = state.regs.get(a);
+            let vb = state.regs.get(b);
+            state.regs.set(d, arith_mul(&va, &vb));
+            state.pc = state.pc + 1;
+            Yield
+        }
+
+        Divide(a, b, d) => {
+            let va = state.regs.get(a);
+            let vb = state.regs.get(b);
+            state.regs.set(d, arith_div(&va, &vb));
+            state.pc = state.pc + 1;
+            Yield
+        }
+
+        Eq(a, b, t) => {
+            let va = state.regs.get(a);
+            let vb = state.regs.get(b);
+            if cmp_eq(&va, &vb) { state.pc = t; } else { state.pc = state.pc + 1; }
+            Yield
+        }
+
+        Ne(a, b, t) => {
+            let va = state.regs.get(a);
+            let vb = state.regs.get(b);
+            if !cmp_eq(&va, &vb) { state.pc = t; } else { state.pc = state.pc + 1; }
+            Yield
+        }
+
+        Lt(a, b, t) => {
+            let va = state.regs.get(a);
+            let vb = state.regs.get(b);
+            if cmp_lt(&va, &vb) { state.pc = t; } else { state.pc = state.pc + 1; }
+            Yield
+        }
+
+        Le(a, b, t) => {
+            let va = state.regs.get(a);
+            let vb = state.regs.get(b);
+            if cmp_lt(&va, &vb) || cmp_eq(&va, &vb) { state.pc = t; } else { state.pc = state.pc + 1; }
+            Yield
+        }
+
+        Gt(a, b, t) => {
+            let va = state.regs.get(a);
+            let vb = state.regs.get(b);
+            if cmp_lt(&vb, &va) { state.pc = t; } else { state.pc = state.pc + 1; }
+            Yield
+        }
+
+        Ge(a, b, t) => {
+            let va = state.regs.get(a);
+            let vb = state.regs.get(b);
+            if cmp_lt(&vb, &va) || cmp_eq(&va, &vb) { state.pc = t; } else { state.pc = state.pc + 1; }
+            Yield
+        }
+
+        If(r, t) => {
+            let v = state.regs.get(r);
+            if register_is_truthy(&v) { state.pc = t; } else { state.pc = state.pc + 1; }
+            Yield
+        }
+
+        IfNot(r, t) => {
+            let v = state.regs.get(r);
+            if !register_is_truthy(&v) { state.pc = t; } else { state.pc = state.pc + 1; }
+            Yield
+        }
+
+        IfNull(r, t) => {
+            let v = state.regs.get(r);
+            match v {
+                RNull => { state.pc = t; },
+                _     => { state.pc = state.pc + 1; }
+            }
+            Yield
+        }
+
+        NotNull(r, t) => {
+            let v = state.regs.get(r);
+            match v {
+                RNull => { state.pc = state.pc + 1; },
+                _     => { state.pc = t; }
+            }
+            Yield
+        }
+
+        ResultRow(start, n) => {
+            // Row emission — interpreter yields a row; caller re-enters
+            // step() on the same pc → but ResultRow advances so the
+            // next call moves past it.
+            state.pc = state.pc + 1;
+            Row(start, n)
+        }
+
+        // Cursor-bound opcodes — pager IPC pending. Yield to caller so
+        // they can intercept via `program.get_opcode(state.pc)` and
+        // drive the pager manually.
+        _ => {
+            state.pc = state.pc + 1;
+            Yield
+        }
+    }
+}
+
+/// Run the program until it yields a row, reports Done, or errors out.
+/// Returns after at most `budget` steps to give the caller back
+/// control. `-1` disables the limit.
+public fn run_until_row(
+    state: &mut VdbeState,
+    program: &VdbeProgram,
+    budget: Int,
+) -> StepResult {
+    let mut steps: Int = 0;
+    while budget < 0 || steps < budget {
+        match step(state, program) {
+            Row(s, n)        => { return Row(s, n); }
+            Done             => { return Done; }
+            ExecError(c, m)  => { return ExecError(c, m); }
+            Yield            => { steps = steps + 1; }
+        }
+    }
+    Yield
+}

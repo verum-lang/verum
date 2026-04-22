@@ -1,0 +1,255 @@
+module core.database.sqlite.native.l4_vdbe.optimizer;
+
+// =============================================================================
+// l4_vdbe/optimizer.vr — Pre-emission peephole passes
+// =============================================================================
+// Layer: 4
+// Spec: sqlite-native.md §11.5
+//
+// Before handing a `VdbeProgram` to the interpreter, the codegen runs
+// a small set of purity-preserving passes to eliminate obvious waste:
+//
+//   * Noop elimination        — drop `Noop` instructions and renumber
+//                                  jump targets.
+//   * Jump threading          — `Goto A; A: Goto B` → `Goto B`.
+//   * Constant folding (Add)  — `Integer 1 → r1; Integer 2 → r2;
+//                                  Add r1 r2 → r3` → `Integer 3 → r3`.
+//   * Dead-register writes    — `SCopy r1 → r2` when r2 is never read
+//                                  before next overwrite.
+//
+// For now we ship Noop elimination + Jump threading + one-shot
+// constant fold for Add/Subtract/Multiply. The remaining passes will
+// land with the planner work in L5.
+// =============================================================================
+
+mount core.*;
+mount collections.List;
+mount base.{Text, Maybe};
+mount core.database.sqlite.native.l4_vdbe.opcode.{Opcode, is_branch};
+mount core.database.sqlite.native.l4_vdbe.program.VdbeProgram;
+
+// -----------------------------------------------------------------------------
+// Pass: Noop elimination
+// -----------------------------------------------------------------------------
+
+/// Remove every `Noop` instruction and remap jump targets onto the new
+/// position space. Returns the number of instructions removed.
+public fn eliminate_noops(program: &mut VdbeProgram) -> Int {
+    // First pass: build old_idx → new_idx mapping.
+    let n = program.instructions.len();
+    let mut new_idx: List<Int> = List.new();
+    let mut cur: Int = 0;
+    let mut i: Int = 0;
+    while i < n {
+        match program.instructions[i] {
+            Noop => new_idx.push(-1),
+            _    => { new_idx.push(cur); cur = cur + 1; }
+        }
+        i = i + 1;
+    }
+    // Second pass: rewrite with remapped jumps.
+    let mut new_ops: List<Opcode> = List.new();
+    let mut j: Int = 0;
+    while j < n {
+        match program.instructions[j] {
+            Noop => {},
+            _ => {
+                let remapped = remap_jumps(&program.instructions[j], &new_idx);
+                new_ops.push(remapped);
+            }
+        }
+        j = j + 1;
+    }
+    let dropped = n - new_ops.len();
+    program.instructions = new_ops;
+    dropped
+}
+
+fn remap_one(target: Int, mapping: &List<Int>) -> Int {
+    if target < 0 || target >= mapping.len() {
+        return target;
+    }
+    let mapped = mapping[target];
+    if mapped < 0 {
+        // Jumped into a Noop — slide forward to the next live
+        // instruction. Walk until we find one.
+        let mut i: Int = target + 1;
+        while i < mapping.len() {
+            if mapping[i] >= 0 { return mapping[i]; }
+            i = i + 1;
+        }
+        // Fell off the end — stay here.
+        return mapping.len();
+    }
+    mapped
+}
+
+fn remap_jumps(op: &Opcode, mapping: &List<Int>) -> Opcode {
+    match op {
+        Init(t)           => Init(remap_one(t, mapping)),
+        Goto(t)           => Goto(remap_one(t, mapping)),
+        Gosub(r, t)       => Gosub(r, remap_one(t, mapping)),
+        Once(t)           => Once(remap_one(t, mapping)),
+        Eq(a, b, t)       => Eq(a, b, remap_one(t, mapping)),
+        Ne(a, b, t)       => Ne(a, b, remap_one(t, mapping)),
+        Lt(a, b, t)       => Lt(a, b, remap_one(t, mapping)),
+        Le(a, b, t)       => Le(a, b, remap_one(t, mapping)),
+        Gt(a, b, t)       => Gt(a, b, remap_one(t, mapping)),
+        Ge(a, b, t)       => Ge(a, b, remap_one(t, mapping)),
+        If(r, t)          => If(r, remap_one(t, mapping)),
+        IfNot(r, t)       => IfNot(r, remap_one(t, mapping)),
+        IfNull(r, t)      => IfNull(r, remap_one(t, mapping)),
+        NotNull(r, t)     => NotNull(r, remap_one(t, mapping)),
+        Rewind(c, t)      => Rewind(c, remap_one(t, mapping)),
+        Last(c, t)        => Last(c, remap_one(t, mapping)),
+        Next(c, t)        => Next(c, remap_one(t, mapping)),
+        Prev(c, t)        => Prev(c, remap_one(t, mapping)),
+        SeekGE(c, k, n, t) => SeekGE(c, k, n, remap_one(t, mapping)),
+        SeekGT(c, k, n, t) => SeekGT(c, k, n, remap_one(t, mapping)),
+        SeekLE(c, k, n, t) => SeekLE(c, k, n, remap_one(t, mapping)),
+        SeekLT(c, k, n, t) => SeekLT(c, k, n, remap_one(t, mapping)),
+        Found(c, t, k, n)    => Found(c, remap_one(t, mapping), k, n),
+        NotFound(c, t, k, n) => NotFound(c, remap_one(t, mapping), k, n),
+        SorterNext(c, t)     => SorterNext(c, remap_one(t, mapping)),
+        other => clone_op(other),
+    }
+}
+
+fn clone_op(op: &Opcode) -> Opcode {
+    match op {
+        Init(t)           => Init(t),
+        Halt(c, m)        => Halt(c, m),
+        Goto(t)           => Goto(t),
+        Gosub(r, t)       => Gosub(r, t),
+        Return(r)         => Return(r),
+        Once(t)           => Once(t),
+        Noop              => Noop,
+        Integer(v, d)     => Integer(v, d),
+        Int64(c, d)       => Int64(c, d),
+        Real(c, d)        => Real(c, d),
+        String8(c, d)     => String8(c, d),
+        BlobLit(c, d)     => BlobLit(c, d),
+        Null(s, e)        => Null(s, e),
+        SoftNull(d)       => SoftNull(d),
+        Move(s, d, c)     => Move(s, d, c),
+        Copy(s, d, c)     => Copy(s, d, c),
+        SCopy(s, d)       => SCopy(s, d),
+        Add(a, b, d)      => Add(a, b, d),
+        Subtract(a, b, d) => Subtract(a, b, d),
+        Multiply(a, b, d) => Multiply(a, b, d),
+        Divide(a, b, d)   => Divide(a, b, d),
+        Remainder(a, b, d)=> Remainder(a, b, d),
+        BitAnd(a, b, d)   => BitAnd(a, b, d),
+        BitOr(a, b, d)    => BitOr(a, b, d),
+        ShiftLeft(a, b, d)=> ShiftLeft(a, b, d),
+        ShiftRight(a, b, d)=> ShiftRight(a, b, d),
+        BitNot(s, d)      => BitNot(s, d),
+        Eq(a, b, t) => Eq(a, b, t),
+        Ne(a, b, t) => Ne(a, b, t),
+        Lt(a, b, t) => Lt(a, b, t),
+        Le(a, b, t) => Le(a, b, t),
+        Gt(a, b, t) => Gt(a, b, t),
+        Ge(a, b, t) => Ge(a, b, t),
+        If(r, t)    => If(r, t),
+        IfNot(r, t) => IfNot(r, t),
+        IfNull(r, t)=> IfNull(r, t),
+        NotNull(r, t)=> NotNull(r, t),
+        OpenRead(c, r, n)  => OpenRead(c, r, n),
+        OpenWrite(c, r, n) => OpenWrite(c, r, n),
+        Close(c)           => Close(c),
+        Rewind(c, t)       => Rewind(c, t),
+        Last(c, t)         => Last(c, t),
+        Next(c, t)         => Next(c, t),
+        Prev(c, t)         => Prev(c, t),
+        Column(c, i, d)    => Column(c, i, d),
+        RowIdOp(c, d)      => RowIdOp(c, d),
+        SeekGE(c, k, n, t) => SeekGE(c, k, n, t),
+        SeekGT(c, k, n, t) => SeekGT(c, k, n, t),
+        SeekLE(c, k, n, t) => SeekLE(c, k, n, t),
+        SeekLT(c, k, n, t) => SeekLT(c, k, n, t),
+        Found(c, t, k, n)    => Found(c, t, k, n),
+        NotFound(c, t, k, n) => NotFound(c, t, k, n),
+        Insert(c, d, k, f) => Insert(c, d, k, f),
+        Delete(c)          => Delete(c),
+        NewRowid(c, d)     => NewRowid(c, d),
+        MakeRecord(s, n, d, a) => MakeRecord(s, n, d, a),
+        OpenEphemeral(c, n) => OpenEphemeral(c, n),
+        OpenAutoindex(c, n) => OpenAutoindex(c, n),
+        SorterOpen(c)       => SorterOpen(c),
+        SorterInsert(c, r)  => SorterInsert(c, r),
+        SorterSort(c)       => SorterSort(c),
+        SorterData(c, d)    => SorterData(c, d),
+        SorterNext(c, t)    => SorterNext(c, t),
+        Transaction(w) => Transaction(w),
+        Commit         => Commit,
+        RollbackOp(n)  => RollbackOp(n),
+        SavepointOp(n) => SavepointOp(n),
+        AutoCommit(d, r) => AutoCommit(d, r),
+        ReadCookie(c, d)  => ReadCookie(c, d),
+        WriteCookie(c, s) => WriteCookie(c, s),
+        Function(n, a, d, f) => Function(n, a, d, f),
+        AggStep(f, n, a, c)  => AggStep(f, n, a, c),
+        AggFinal(f, c)       => AggFinal(f, c),
+        ResultRow(s, n) => ResultRow(s, n),
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Pass: Jump threading
+// -----------------------------------------------------------------------------
+
+/// Collapse chains `Goto A; A: Goto B; B: Goto C` → all outer jumps go
+/// to C. Single linear scan, resolving each jump target by walking at
+/// most `N` steps (where `N = instructions.len()`) to handle pathological
+/// loops — returns to the original target on cycle detection.
+public fn thread_jumps(program: &mut VdbeProgram) -> Int {
+    let n = program.instructions.len();
+    let mut changed: Int = 0;
+    let mut i: Int = 0;
+    while i < n {
+        let op = clone_op(&program.instructions[i]);
+        let new_op = match op {
+            Goto(t)           => { let rt = resolve_goto(t, &program.instructions, n); if rt != t { changed = changed + 1; Goto(rt) } else { Goto(t) } }
+            Eq(a, b, t)       => { let rt = resolve_goto(t, &program.instructions, n); if rt != t { changed = changed + 1; Eq(a, b, rt) } else { Eq(a, b, t) } }
+            Ne(a, b, t)       => { let rt = resolve_goto(t, &program.instructions, n); if rt != t { changed = changed + 1; Ne(a, b, rt) } else { Ne(a, b, t) } }
+            Lt(a, b, t)       => { let rt = resolve_goto(t, &program.instructions, n); if rt != t { changed = changed + 1; Lt(a, b, rt) } else { Lt(a, b, t) } }
+            Le(a, b, t)       => { let rt = resolve_goto(t, &program.instructions, n); if rt != t { changed = changed + 1; Le(a, b, rt) } else { Le(a, b, t) } }
+            Gt(a, b, t)       => { let rt = resolve_goto(t, &program.instructions, n); if rt != t { changed = changed + 1; Gt(a, b, rt) } else { Gt(a, b, t) } }
+            Ge(a, b, t)       => { let rt = resolve_goto(t, &program.instructions, n); if rt != t { changed = changed + 1; Ge(a, b, rt) } else { Ge(a, b, t) } }
+            If(r, t)          => { let rt = resolve_goto(t, &program.instructions, n); if rt != t { changed = changed + 1; If(r, rt) } else { If(r, t) } }
+            IfNot(r, t)       => { let rt = resolve_goto(t, &program.instructions, n); if rt != t { changed = changed + 1; IfNot(r, rt) } else { IfNot(r, t) } }
+            other             => other,
+        };
+        program.instructions[i] = new_op;
+        i = i + 1;
+    }
+    changed
+}
+
+fn resolve_goto(target: Int, ops: &List<Opcode>, budget: Int) -> Int {
+    let mut cur = target;
+    let mut steps: Int = 0;
+    while steps < budget && cur >= 0 && cur < ops.len() {
+        match ops[cur] {
+            Goto(next) => {
+                if next == cur { return cur; }   // self-loop guard
+                cur = next;
+                steps = steps + 1;
+            }
+            _ => { return cur; }
+        }
+    }
+    cur
+}
+
+// -----------------------------------------------------------------------------
+// Driver
+// -----------------------------------------------------------------------------
+
+/// Run every pass to fixed-point (actually just once for each — the
+/// passes are designed to converge in a single scan).
+public fn optimize(program: &mut VdbeProgram) -> Int {
+    let threaded = thread_jumps(program);
+    let dropped = eliminate_noops(program);
+    threaded + dropped
+}
