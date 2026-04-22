@@ -587,6 +587,16 @@ implement<T> List<T> {
         copy
     }
 
+    /// Return a new sorted list (ascending) using `T`'s `Ord` implementation,
+    /// leaving the original unchanged. Parallel to `sorted_by`.
+    public fn sorted(&self) -> List<T>
+    where T: Ord + Clone
+    {
+        let mut copy = self.clone();
+        copy.sort();
+        copy
+    }
+
     // =========================================================================
     // Unstable Sort (introsort — typically faster than stable mergesort)
     // =========================================================================
