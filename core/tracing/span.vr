@@ -25,15 +25,15 @@ mount core.tracing.resource.{Resource};
 
 public type SpanKind is
     /// Default — no specific role.
-    | Internal
+    | KindInternal
     /// Outgoing synchronous or async request.
-    | Client
+    | KindClient
     /// Handling of an incoming request.
-    | Server
+    | KindServer
     /// Producing a message for asynchronous delivery.
-    | Producer
+    | KindProducer
     /// Consuming a message from asynchronous delivery.
-    | Consumer;
+    | KindConsumer;
 
 // =============================================================================
 // SpanStatus — final status
@@ -193,7 +193,7 @@ implement Span {
             name: "".into(),
             context: SpanContext.invalid(),
             parent_span_id: None,
-            kind: SpanKind.Internal,
+            kind: SpanKind.KindInternal,
             start_time: Instant.now(),
             end_time: None,
             attributes: AttributeSet.new(),

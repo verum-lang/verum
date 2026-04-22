@@ -39,27 +39,27 @@ implement IntoResponse for () {
 /// High-level classification used by retry / circuit-breaker middleware
 /// to decide whether to retry an error (§5.6).
 public type ErrorCategory is
-    | Transient
-    | Permanent
-    | Security
-    | Client
-    | Upstream;
+    | ErrTransient
+    | ErrPermanent
+    | ErrSecurity
+    | ErrClient
+    | ErrUpstream;
 
 implement ErrorCategory {
     public fn default_status(&self) -> StatusCode {
         match self {
-            Transient => StatusCode.new(503),
-            Permanent => StatusCode.new(500),
-            Security  => StatusCode.new(403),
-            Client    => StatusCode.new(400),
-            Upstream  => StatusCode.new(502),
+            ErrTransient => StatusCode.new(503),
+            ErrPermanent => StatusCode.new(500),
+            ErrSecurity  => StatusCode.new(403),
+            ErrClient    => StatusCode.new(400),
+            ErrUpstream  => StatusCode.new(502),
         }
     }
 
     public fn is_retryable(&self) -> Bool {
         match self {
-            Transient => true,
-            Upstream  => true,
+            ErrTransient => true,
+            ErrUpstream  => true,
             _         => false,
         }
     }
@@ -68,11 +68,11 @@ implement ErrorCategory {
 implement Eq for ErrorCategory {
     fn eq(&self, other: &ErrorCategory) -> Bool {
         match (self, other) {
-            (Transient, Transient) => true,
-            (Permanent, Permanent) => true,
-            (Security,  Security)  => true,
-            (Client,    Client)    => true,
-            (Upstream,  Upstream)  => true,
+            (ErrTransient, ErrTransient) => true,
+            (ErrPermanent, ErrPermanent) => true,
+            (ErrSecurity,  ErrSecurity)  => true,
+            (ErrClient,    ErrClient)    => true,
+            (ErrUpstream,  ErrUpstream)  => true,
             _                      => false,
         }
     }
@@ -97,14 +97,14 @@ public type WeftError is
 implement WeftError {
     public fn category(&self) -> ErrorCategory {
         match self {
-            BadRequest(_)         => ErrorCategory.Client,
-            RouteNotFound         => ErrorCategory.Client,
-            MethodNotAllowed      => ErrorCategory.Client,
-            ExtractionRejected(_) => ErrorCategory.Client,
-            Timeout               => ErrorCategory.Transient,
-            Overloaded            => ErrorCategory.Transient,
-            UpstreamIo(_)         => ErrorCategory.Upstream,
-            Internal(_)           => ErrorCategory.Permanent,
+            BadRequest(_)         => ErrorCategory.ErrClient,
+            RouteNotFound         => ErrorCategory.ErrClient,
+            MethodNotAllowed      => ErrorCategory.ErrClient,
+            ExtractionRejected(_) => ErrorCategory.ErrClient,
+            Timeout               => ErrorCategory.ErrTransient,
+            Overloaded            => ErrorCategory.ErrTransient,
+            UpstreamIo(_)         => ErrorCategory.ErrUpstream,
+            Internal(_)           => ErrorCategory.ErrPermanent,
         }
     }
 

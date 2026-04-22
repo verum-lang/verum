@@ -116,11 +116,11 @@ fn format_span_line(s: &SpanData) -> Text {
 
 fn kind_name(k: core.tracing.span.SpanKind) -> &'static Text {
     match k {
-        core.tracing.span.SpanKind.Internal => "INTERNAL",
-        core.tracing.span.SpanKind.Client => "CLIENT",
-        core.tracing.span.SpanKind.Server => "SERVER",
-        core.tracing.span.SpanKind.Producer => "PRODUCER",
-        core.tracing.span.SpanKind.Consumer => "CONSUMER",
+        core.tracing.span.SpanKind.KindInternal => "INTERNAL",
+        core.tracing.span.SpanKind.KindClient => "CLIENT",
+        core.tracing.span.SpanKind.KindServer => "SERVER",
+        core.tracing.span.SpanKind.KindProducer => "PRODUCER",
+        core.tracing.span.SpanKind.KindConsumer => "CONSUMER",
     }
 }
 

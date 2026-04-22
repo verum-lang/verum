@@ -72,10 +72,10 @@ fn typecheck_samplers(parent: &SpanContext, trace_id: &TraceId, attrs: &Attribut
     let off = AlwaysOff.new();
     let ratio = TraceIdRatio.new(0.1);
     let pb = ParentBased.new(Heap.new(AlwaysOn.new()) as Heap<dyn Sampler>);
-    let _a = on.should_sample(parent, trace_id, &"n".into(), SpanKind.Internal, attrs);
-    let _b = off.should_sample(parent, trace_id, &"n".into(), SpanKind.Internal, attrs);
-    let _c = ratio.should_sample(parent, trace_id, &"n".into(), SpanKind.Internal, attrs);
-    let _d = pb.should_sample(parent, trace_id, &"n".into(), SpanKind.Internal, attrs);
+    let _a = on.should_sample(parent, trace_id, &"n".into(), SpanKind.KindInternal, attrs);
+    let _b = off.should_sample(parent, trace_id, &"n".into(), SpanKind.KindInternal, attrs);
+    let _c = ratio.should_sample(parent, trace_id, &"n".into(), SpanKind.KindInternal, attrs);
+    let _d = pb.should_sample(parent, trace_id, &"n".into(), SpanKind.KindInternal, attrs);
 }
 
 // Exporters.
@@ -127,7 +127,7 @@ fn typecheck_span_flow() {
     let parent = SpanContext.invalid();
     let attrs = AttributeSet.new();
     let links: List<SpanLink> = List.new();
-    let span = tracer.start_span(&"handle".into(), SpanKind.Server, attrs, links, &parent);
+    let span = tracer.start_span(&"handle".into(), SpanKind.KindServer, attrs, links, &parent);
     span.set_attribute("http.method".into(), AttributeValue.Text("GET".into()));
     span.add_event_now("request.received".into());
     span.set_status(SpanStatus.ok());

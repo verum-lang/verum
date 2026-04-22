@@ -148,7 +148,7 @@ implement CryptoStream {
 // HandshakeDriver — role-specific TLS SM wrapper
 // =============================================================================
 
-public type HandshakeRole is Client(ClientSm) | Server(ServerSm);
+public type HandshakeRole is AsClient(ClientSm) | AsServer(ServerSm);
 
 public type HandshakeDriver is {
     role:       HandshakeRole,
@@ -170,7 +170,7 @@ public type HandshakeOutput is
 implement HandshakeDriver {
     public fn client(sm: ClientSm) -> HandshakeDriver {
         HandshakeDriver {
-            role:       HandshakeRole.Client(sm),
+            role:       HandshakeRole.AsClient(sm),
             initial:    CryptoStream.new(),
             handshake:  CryptoStream.new(),
             application: CryptoStream.new(),
@@ -181,7 +181,7 @@ implement HandshakeDriver {
 
     public fn server(sm: ServerSm) -> HandshakeDriver {
         HandshakeDriver {
-            role:       HandshakeRole.Server(sm),
+            role:       HandshakeRole.AsServer(sm),
             initial:    CryptoStream.new(),
             handshake:  CryptoStream.new(),
             application: CryptoStream.new(),
@@ -194,13 +194,13 @@ implement HandshakeDriver {
     /// pumps `on_crypto_chunk` with peer responses.
     public fn start_client(&mut self) -> Result<(), TlsError> {
         match self.role.clone() {
-            HandshakeRole.Client(sm) => {
+            HandshakeRole.AsClient(sm) => {
                 let (sm2, wire) = sm.start()?;
-                self.role = HandshakeRole.Client(sm2);
+                self.role = HandshakeRole.AsClient(sm2);
                 self.enqueue_outbound(PnSpaceKind.Initial, wire);
                 Ok(())
             },
-            HandshakeRole.Server(_) => Err(TlsError.UnexpectedMessage),
+            HandshakeRole.AsServer(_) => Err(TlsError.UnexpectedMessage),
         }
     }
 
@@ -244,9 +244,9 @@ implement HandshakeDriver {
         Result<(Int, PnSpaceKind, List<Byte>, Maybe<HandshakeOutput>), TlsError>
     {
         match self.role.clone() {
-            HandshakeRole.Client(sm) => {
+            HandshakeRole.AsClient(sm) => {
                 let (sm2, step) = sm.on_handshake(wire)?;
-                self.role = HandshakeRole.Client(sm2);
+                self.role = HandshakeRole.AsClient(sm2);
                 // Outbound flows into the next PN space by phase:
                 //   * Pre-ServerHello → we're in Initial (shouldn't emit
                 //     past CH; first on_handshake call receives SH).
@@ -259,9 +259,9 @@ implement HandshakeDriver {
                 };
                 Ok((wire.len(), target_space, step.outbound_handshake, connected))
             },
-            HandshakeRole.Server(sm) => {
+            HandshakeRole.AsServer(sm) => {
                 let (sm2, step) = sm.on_handshake(wire)?;
-                self.role = HandshakeRole.Server(sm2);
+                self.role = HandshakeRole.AsServer(sm2);
                 let target_space = self.server_out_space();
                 let connected: Maybe<HandshakeOutput> = match step.connected {
                     Some(c) => Some(HandshakeOutput.ServerHandshakeOutput(c)),
@@ -274,7 +274,7 @@ implement HandshakeDriver {
 
     fn client_out_space(&self) -> PnSpaceKind {
         match &self.role {
-            HandshakeRole.Client(sm) => match sm {
+            HandshakeRole.AsClient(sm) => match sm {
                 ClientSm.StartSm {..} => PnSpaceKind.Initial,
                 ClientSm.WaitServerHelloSm(_) => PnSpaceKind.Initial,
                 _ => PnSpaceKind.Handshake,
@@ -285,7 +285,7 @@ implement HandshakeDriver {
 
     fn server_out_space(&self) -> PnSpaceKind {
         match &self.role {
-            HandshakeRole.Server(sm) => match sm {
+            HandshakeRole.AsServer(sm) => match sm {
                 ServerSm.WaitClientHelloSm(_) => PnSpaceKind.Initial,
                 _ => PnSpaceKind.Handshake,
             },

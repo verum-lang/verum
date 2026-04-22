@@ -51,7 +51,7 @@ mount core.net.h3.request.{
 // Connection role + phase
 // =============================================================================
 
-public type H3Role is Client | Server;
+public type H3Role is ClientEnd | ServerEnd;
 
 public type H3Phase is
       InitialPhase
@@ -141,7 +141,7 @@ public type H3Connection is {
 implement H3Connection {
     public fn new_client(settings: H3Settings) -> H3Connection {
         let mut conn = H3Connection {
-            role: H3Role.Client,
+            role: H3Role.ClientEnd,
             phase: H3Phase.InitialPhase,
             local_settings: settings,
             peer_settings:  None,
@@ -162,7 +162,7 @@ implement H3Connection {
 
     public fn new_server(settings: H3Settings) -> H3Connection {
         let mut conn = H3Connection {
-            role: H3Role.Server,
+            role: H3Role.ServerEnd,
             phase: H3Phase.InitialPhase,
             local_settings: settings,
             peer_settings:  None,
@@ -494,7 +494,7 @@ implement H3Connection {
             match decoded_headers {
                 Some(fs) => {
                     match self.role {
-                        H3Role.Server => {
+                        H3Role.ServerEnd => {
                             match parse_request_from_fields(&fs, accumulated_body) {
                                 Some(req) => {
                                     st.phase = RequestPhase.Complete { request: req };
@@ -505,7 +505,7 @@ implement H3Connection {
                                 }),
                             }
                         },
-                        H3Role.Client => {
+                        H3Role.ClientEnd => {
                             match parse_response_from_fields(&fs, accumulated_body) {
                                 Some(resp) => {
                                     self.inbound_responses.push((stream_id, resp));
