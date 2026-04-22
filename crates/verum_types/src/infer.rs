@@ -29035,8 +29035,22 @@ impl TypeChecker {
                                 );
                             }
 
-                            // Found a context protocol - build Record type with methods
-                            match self.build_context_type_from_protocol(&proto_decl) {
+                            // Found a context protocol - build Record type with methods.
+                            // Module-aware: pin the checker's module path to the SOURCE
+                            // module while resolving the protocol body so that bare type
+                            // references inside method signatures (e.g. `LogLevel` in
+                            // `fn log(level: LogLevel, msg: Text)` inside
+                            // `core.context.standard.Logger`) resolve against the source
+                            // module's qualified-name layer first — not the flat map
+                            // which may surface a same-named stranger from another
+                            // module (`core.base.log.LogLevel` vs
+                            // `core.context.standard.LogLevel`).
+                            let saved_ctx_path = self.current_module_path().clone();
+                            self.set_current_module_path(source_module_path.clone());
+                            let ctx_type_result = self.build_context_type_from_protocol(&proto_decl);
+                            self.set_current_module_path(saved_ctx_path);
+
+                            match ctx_type_result {
                                 Ok(record_type) => record_type,
                                 Err(e) => {
                                     tracing::warn!(
@@ -29060,8 +29074,21 @@ impl TypeChecker {
                             &resolved_module_path,
                             registry,
                         ) {
-                            // Found a context declaration - build Record type with methods
-                            match self.build_context_type_from_decl(&ctx_decl) {
+                            // Found a context declaration - build Record type with methods.
+                            // Module-aware: pin the checker's module path to the SOURCE
+                            // module while resolving the context body so that bare type
+                            // references inside method signatures (e.g. `LogLevel` in
+                            // `fn log(level: LogLevel, msg: Text)` inside
+                            // `core.context.standard.Logger`) resolve against the
+                            // source module's qualified-name layer first — not the
+                            // flat map which may surface a same-named stranger from
+                            // another module.
+                            let saved_ctx_path = self.current_module_path().clone();
+                            self.set_current_module_path(resolved_module_path.clone());
+                            let ctx_type_result = self.build_context_type_from_decl(&ctx_decl);
+                            self.set_current_module_path(saved_ctx_path);
+
+                            match ctx_type_result {
                                 Ok(record_type) => {
                                     // Store the context declaration for method-level capability extraction
                                     let context_name: Text = item_name.into();
@@ -31116,23 +31143,32 @@ impl TypeChecker {
                 }
             }
 
-            // Build parameter types, skipping `self` parameters
-            let param_types: Result<List<_>> = method
+            // Build parameter types, skipping `self` parameters.
+            // Use lenient resolution so that a sibling stdlib type declared in
+            // the same module (but not yet registered at context pre-registration
+            // time — the archive scan that populates `context_declarations` runs
+            // before Pass S0b for stdlib types) falls back to Type::Unknown
+            // instead of propagating a hard `TypeNotFound` error. The caller
+            // (`register_stdlib_context_full`) already has a record-level
+            // fallback, but that fires *only* when the outer call returns Err
+            // — which wipes the entire method set. Field-level fallback
+            // preserves the known-good method signatures around the one
+            // placeholder.
+            let param_types: List<Type> = method
                 .params
                 .iter()
                 .filter(|p| !p.is_self())
                 .map(|p| match &p.kind {
                     verum_ast::decl::FunctionParamKind::Regular { pattern: _, ty, .. } => {
-                        self.ast_to_type(ty)
+                        self.ast_to_type_lenient(ty)
                     }
-                    _ => Ok(Type::unit()),
+                    _ => Type::unit(),
                 })
                 .collect();
-            let param_types = param_types?;
 
             // Build return type
             let return_type = if let Some(ref ret_ty) = method.return_type {
-                self.ast_to_type(ret_ty)?
+                self.ast_to_type_lenient(ret_ty)
             } else {
                 Type::unit()
             };
@@ -34273,7 +34309,18 @@ impl TypeChecker {
                 // Record. Otherwise `let b = X.method(...)` resolves
                 // against the context's method signatures instead of
                 // the user's impl, producing bogus downstream types.
-                let user_type_shadows_context = {
+                // Guard: skip the synthetic context binding only if a USER
+                // type (not the context's own placeholder) claims the same
+                // name. If `context_name` appears in `context_declarations`
+                // it is the context itself — never a user type shadow. This
+                // prevents the placeholder `Named { path: Logger }` that
+                // `register_stdlib_context_full` leaves in `type_defs` from
+                // being mistaken for a user-declared `type Logger`.
+                let is_registered_context =
+                    self.context_declarations.contains_key(context_name);
+                let user_type_shadows_context = if is_registered_context {
+                    false
+                } else {
                     let has_inherent = self
                         .inherent_methods
                         .read()

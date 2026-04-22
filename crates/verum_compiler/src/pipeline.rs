@@ -5665,6 +5665,8 @@ impl<'s> CompilationPipeline<'s> {
                     // defers method validation to call sites.
                     checker.set_lenient_context_checking(true);
                     let mut found_count = 0usize;
+                    // Preserve the user-file module path so we can restore after.
+                    let saved_ctx_path = checker.current_module_path().clone();
                     for path in archive.file_paths() {
                         if !path.ends_with(".vr") {
                             continue;
@@ -5677,6 +5679,34 @@ impl<'s> CompilationPipeline<'s> {
                         if !content.contains("public context ") {
                             continue;
                         }
+                        // Compute the module path for this stdlib file so that
+                        // bare type references inside the context body (e.g.
+                        // `LogLevel` in `fn log(level: LogLevel, msg: Text)`
+                        // inside `core.context.standard.Logger`) resolve
+                        // against this file's qualified-name layer first.
+                        // Without this, `ast_to_type` falls back to the flat
+                        // `ctx.type_defs` map where a same-named stranger
+                        // (`core.base.log.LogLevel`) may be registered last
+                        // and silently overwrite the expected type.
+                        let mod_path = {
+                            let trimmed = path.trim_end_matches(".vr");
+                            // Archive paths are relative to core/, e.g.
+                            // "context/standard" -> "core.context.standard".
+                            let dotted = trimmed.replace('/', ".");
+                            let without_core = dotted
+                                .strip_prefix("core.")
+                                .map(|s| s.to_string())
+                                .unwrap_or_else(|| dotted.clone());
+                            let absolute = format!("core.{}", without_core);
+                            // Handle `mod.vr` files (represent the parent dir).
+                            if let Some(stripped) = absolute.strip_suffix(".mod") {
+                                stripped.to_string()
+                            } else {
+                                absolute
+                            }
+                        };
+                        checker.set_current_module_path(verum_common::Text::from(mod_path));
+
                         // Parse the file with the actual parser to get
                         // full ContextDecl AST nodes with method signatures.
                         let mut parser = verum_fast_parser::Parser::new(content);
@@ -5711,6 +5741,7 @@ impl<'s> CompilationPipeline<'s> {
                             }
                         }
                     }
+                    checker.set_current_module_path(saved_ctx_path);
                     // Restore strict context checking for user code.
                     checker.set_lenient_context_checking(false);
                     if found_count > 0 {
