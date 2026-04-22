@@ -1,0 +1,52 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: collections, union-find, dsu, typecheck
+// @timeout: 10000
+// @expect: pass
+
+mount core.collections.union_find.{UnionFindInt, UnionFind};
+
+fn exercise_int_variant() {
+    let mut uf = UnionFindInt.new(10);
+    assert(uf.component_count() == 10);
+    assert(uf.len() == 10);
+
+    // Merge (0..5) into one component.
+    let mut i: Int = 0;
+    while i < 4 {
+        assert(uf.union(i, i + 1));
+        i = i + 1;
+    }
+    assert(uf.component_count() == 6);
+    assert(uf.same_set(0, 4));
+    assert(!uf.same_set(0, 5));
+    assert(uf.component_size(0) == 5);
+
+    // Re-union within the same component returns false.
+    assert(!uf.union(0, 3));
+
+    // Reset.
+    uf.clear();
+    assert(uf.component_count() == 10);
+    assert(!uf.same_set(0, 1));
+}
+
+fn exercise_generic_variant() {
+    let mut uf: UnionFind<Text> = UnionFind.new();
+    uf.make(Text.from("a"));
+    uf.make(Text.from("b"));
+    uf.make(Text.from("c"));
+    assert(uf.component_count() == 3);
+
+    let _merged = uf.union(Text.from("a"), Text.from("b"));
+    assert(uf.component_count() == 2);
+    assert(uf.same_set(&Text.from("a"), &Text.from("b")));
+    assert(!uf.same_set(&Text.from("a"), &Text.from("c")));
+    assert(uf.component_size(&Text.from("a")) == 2);
+}
+
+fn main() {
+    exercise_int_variant();
+    exercise_generic_variant();
+}

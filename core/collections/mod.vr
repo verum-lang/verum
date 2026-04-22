@@ -40,6 +40,7 @@ public module reservoir;
 public module lru;
 public module toposort;
 public module alias_sampler;
+public module union_find;
 
 // =============================================================================
 // Re-exports

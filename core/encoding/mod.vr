@@ -18,6 +18,7 @@ public module json_pointer;
 public module msgpack;
 public module pem;
 public module jcs;
+public module json_patch;
 
 // Re-exports — JSON
 public mount .json.Json;

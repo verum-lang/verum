@@ -1,0 +1,55 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: encoding, json-patch, rfc6902, typecheck
+// @timeout: 10000
+// @expect: pass
+
+mount core.encoding.json_patch.{
+    JsonPatch, JsonPatchOp, JsonPatchError,
+    parse, apply,
+};
+mount core.encoding.json.{JsonValue, parse_value};
+
+fn exercise_patch() -> Result<(), JsonPatchError> {
+    // Parse a 3-op patch.
+    let patch_text = Text.from(
+        "[{\"op\":\"add\",\"path\":\"/name\",\"value\":\"alice\"},"
+      ++ "{\"op\":\"test\",\"path\":\"/name\",\"value\":\"alice\"},"
+      ++ "{\"op\":\"remove\",\"path\":\"/name\"}]"
+    );
+    let patch: JsonPatch = parse(&patch_text)?;
+    assert(patch.ops.len() == 3);
+
+    // Apply to a document.
+    let mut doc = match parse_value(&Text.from("{\"id\":1}")) {
+        Ok(v)  => v,
+        Err(_) => panic("json parse"),
+    };
+    apply(&mut doc, &patch)?;
+
+    // Atomic rollback on failing test op.
+    let bad_patch = parse(&Text.from(
+        "[{\"op\":\"add\",\"path\":\"/x\",\"value\":1},"
+      ++ "{\"op\":\"test\",\"path\":\"/x\",\"value\":999}]"
+    ))?;
+    let mut snapshot = match parse_value(&Text.from("{}")) {
+        Ok(v)  => v,
+        Err(_) => panic("json parse"),
+    };
+    let result = apply(&mut snapshot, &bad_patch);
+    let _ = result;   // Err — original should survive
+
+    // Unknown op → InvalidOp.
+    let unrecognised = parse(&Text.from("[{\"op\":\"bogus\",\"path\":\"/\"}]"));
+    let _ = unrecognised;
+
+    // Missing required `path` field.
+    let missing = parse(&Text.from("[{\"op\":\"add\"}]"));
+    let _ = missing;
+    Ok(())
+}
+
+fn main() {
+    let _ = exercise_patch();
+}

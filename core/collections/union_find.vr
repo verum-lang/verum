@@ -1,0 +1,220 @@
+// =============================================================================
+// collections/union_find.vr — Disjoint Set Union (Tarjan 1975)
+// =============================================================================
+// Layer: 2 (Collections)
+// Dependencies: core, core.collections.map
+// =============================================================================
+//
+// Union-Find / DSU — the "track connected components as edges
+// arrive" primitive. Textbook inverse-Ackermann amortised cost
+// per operation with both path compression and union by rank.
+//
+// Used by:
+//
+//   * Kruskal's MST algorithm.
+//   * CRDT causal-set reconciliation (per-key Add-Wins sets).
+//   * Static analyser equivalence classes.
+//   * Network flow graph compression.
+//   * Compile-time type-variable unification (including Verum's
+//     own type inference — for *incremental* unification at
+//     higher levels, where eager fallbacks are too eager).
+//
+// Two APIs: a `UnionFindInt` keyed by `Int` (array-backed, fastest)
+// and a generic `UnionFind<T>` keyed by any `Hash + Eq` type (map-
+// backed, slightly higher constant factor). Use the Int variant
+// when keys can be densely indexed; use the generic one for string
+// / UUID / arbitrary keys.
+//
+// # Complexity
+//
+//   `find`:   amortised O(α(n)) ≈ O(1)
+//   `union`:  amortised O(α(n))
+//   `count`:  O(n) once
+//
+// α is the inverse Ackermann function — bounded by 4 for any
+// conceivable input size.
+//
+// # API
+//
+// ```
+// let mut uf = UnionFindInt.new(n);
+// uf.union(a, b);
+// if uf.same_set(a, c) { ... }
+// let components = uf.component_count();
+// ```
+//
+// =============================================================================
+
+module core.collections.union_find;
+
+mount core.*;
+mount core.collections.List;
+mount core.collections.map.{Map};
+
+// =============================================================================
+// Int-keyed (dense array)
+// =============================================================================
+
+public type UnionFindInt is {
+    parent:           List<Int>,
+    rank:             List<Int>,
+    /// Cached component count — updated by every successful union.
+    components:       Int,
+    /// Cached size of each root's component.
+    size:             List<Int>,
+};
+
+implement UnionFindInt {
+    public fn new(n: Int) -> UnionFindInt {
+        let count = if n < 0 { 0 } else { n };
+        let mut parent: List<Int> = [];
+        let mut rank:   List<Int> = [];
+        let mut size:   List<Int> = [];
+        let mut i: Int = 0;
+        while i < count {
+            parent.push(i);
+            rank.push(0);
+            size.push(1);
+            i = i + 1;
+        }
+        UnionFindInt {
+            parent: parent, rank: rank, size: size,
+            components: count,
+        }
+    }
+
+    /// Find the representative of `x`'s set, applying path
+    /// compression on the way.
+    public fn find(&mut self, x: Int) -> Int {
+        if self.parent[x] == x { return x; }
+        let root = self.find(self.parent[x]);
+        self.parent[x] = root;
+        root
+    }
+
+    /// Union the sets containing `a` and `b`. Returns `true` when
+    /// they were previously disjoint (i.e. this call merged
+    /// something), `false` when they already shared a root.
+    public fn union(&mut self, a: Int, b: Int) -> Bool {
+        let ra = self.find(a);
+        let rb = self.find(b);
+        if ra == rb { return false; }
+        // Union by rank.
+        let (big, small) = if self.rank[ra] < self.rank[rb] {
+            (rb, ra)
+        } else { (ra, rb) };
+        self.parent[small] = big;
+        self.size[big] = self.size[big] + self.size[small];
+        if self.rank[ra] == self.rank[rb] {
+            self.rank[big] = self.rank[big] + 1;
+        }
+        self.components = self.components - 1;
+        true
+    }
+
+    public fn same_set(&mut self, a: Int, b: Int) -> Bool {
+        self.find(a) == self.find(b)
+    }
+
+    /// Size of the component containing `x`.
+    public fn component_size(&mut self, x: Int) -> Int {
+        let r = self.find(x);
+        self.size[r]
+    }
+
+    /// Number of distinct components currently in the structure.
+    public fn component_count(&self) -> Int { self.components }
+
+    public fn len(&self) -> Int { self.parent.len() }
+
+    /// Reset to the initial "every element its own set" state.
+    public fn clear(&mut self) {
+        let n = self.parent.len();
+        let mut i: Int = 0;
+        while i < n {
+            self.parent[i] = i;
+            self.rank[i]   = 0;
+            self.size[i]   = 1;
+            i = i + 1;
+        }
+        self.components = n;
+    }
+}
+
+// =============================================================================
+// Generic (map-backed)
+// =============================================================================
+
+public type UnionFind<T: Hash + Eq> is {
+    parent:     Map<T, T>,
+    rank:       Map<T, Int>,
+    size:       Map<T, Int>,
+    components: Int,
+};
+
+implement<T: Hash + Eq> UnionFind<T> {
+    public fn new() -> UnionFind<T> {
+        UnionFind {
+            parent:     Map.new(),
+            rank:       Map.new(),
+            size:       Map.new(),
+            components: 0,
+        }
+    }
+
+    /// Ensure `x` is known to the structure. New elements start as
+    /// their own singleton component.
+    public fn make(&mut self, x: T) {
+        if self.parent.contains_key(&x) { return; }
+        self.parent.insert(x.clone(), x.clone());
+        self.rank.insert(x.clone(), 0);
+        self.size.insert(x, 1);
+        self.components = self.components + 1;
+    }
+
+    public fn find(&mut self, x: &T) -> T {
+        let parent = match self.parent.get(x) {
+            Some(p) => p.clone(),
+            None    => return x.clone(),   // unregistered = own root
+        };
+        if parent == *x { return parent; }
+        let root = self.find(&parent);
+        self.parent.insert(x.clone(), root.clone());
+        root
+    }
+
+    public fn union(&mut self, a: T, b: T) -> Bool {
+        self.make(a.clone());
+        self.make(b.clone());
+        let ra = self.find(&a);
+        let rb = self.find(&b);
+        if ra == rb { return false; }
+        let ra_rank = match self.rank.get(&ra) { Some(n) => *n, None => 0 };
+        let rb_rank = match self.rank.get(&rb) { Some(n) => *n, None => 0 };
+        let (big, small) = if ra_rank < rb_rank { (rb, ra) } else { (ra, rb) };
+        self.parent.insert(small.clone(), big.clone());
+
+        let big_size = match self.size.get(&big) { Some(n) => *n, None => 1 };
+        let small_size = match self.size.get(&small) { Some(n) => *n, None => 1 };
+        self.size.insert(big.clone(), big_size + small_size);
+
+        if ra_rank == rb_rank {
+            let br = match self.rank.get(&big) { Some(n) => *n, None => 0 };
+            self.rank.insert(big, br + 1);
+        }
+        self.components = self.components - 1;
+        true
+    }
+
+    public fn same_set(&mut self, a: &T, b: &T) -> Bool {
+        self.find(a) == self.find(b)
+    }
+
+    public fn component_size(&mut self, x: &T) -> Int {
+        let r = self.find(x);
+        match self.size.get(&r) { Some(n) => *n, None => 1 }
+    }
+
+    public fn component_count(&self) -> Int { self.components }
+    public fn len(&self) -> Int { self.parent.len() }
+}
