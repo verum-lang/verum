@@ -1,0 +1,436 @@
+// =============================================================================
+// security/cose.vr — CBOR Object Signing and Encryption (RFC 9052)
+// =============================================================================
+// Layer: 3 (Security)
+// Dependencies: core, core.encoding.cbor,
+//               core.security.ecc.ed25519, core.security.mac.hmac,
+//               core.security.util.constant_time
+// =============================================================================
+//
+// RFC 9052 — the CBOR-based signing/MAC/encryption format behind
+// WebAuthn passkeys, CWT (CBOR Web Token, RFC 8392), mDoc mobile
+// driving licenses (ISO 18013-5), and COSE-backed ATs (OAuth
+// DPoP-bound tokens).
+//
+// # Scope (v0.1)
+//
+//   * COSE_Sign1 — single-signer signed message. The 80% of
+//     production COSE traffic is this.
+//   * COSE_Mac0  — single-recipient MAC'd message.
+//
+// # Supported algorithms
+//
+//   Alg  | ID    | Behaviour
+//   -----|-------|-----------
+//   ES256|  -7   | ECDSA-P256-SHA256  (not yet wired — leaves a clean slot)
+//   EdDSA|  -8   | Ed25519
+//   HS256|   5   | HMAC-SHA256 (COSE_Mac0)
+//   HS384|   6   | HMAC-SHA384 (COSE_Mac0)
+//   HS512|   7   | HMAC-SHA512 (COSE_Mac0)
+//
+// # Structure of COSE_Sign1
+//
+//   COSE_Sign1 = [
+//       protected:   bstr,          // serialised map of protected headers
+//       unprotected: map,           // unserialised map
+//       payload:     bstr / nil,    // raw bytes (or nil = detached)
+//       signature:   bstr,          // signature over Sig_structure
+//   ]
+//
+//   Sig_structure = [
+//       "Signature1",                // context string
+//       body_protected: bstr,        // = protected header bstr
+//       external_aad:   bstr,        // caller-supplied AAD (may be empty)
+//       payload:        bstr,        // = payload bstr
+//   ]
+//
+// # Security notes
+//
+//   * The signing input is the CBOR-encoded `Sig_structure`; we
+//     always emit it canonically (encode_canonical) so the
+//     verifier can reproduce byte-exact.
+//   * Algorithm confusion prevented by the typed `CoseAlg` enum
+//     + protocol-driven signer/verifier.
+//   * HMAC compare in `Mac0` is constant-time.
+//
+// =============================================================================
+
+module core.security.cose;
+
+mount core.*;
+mount core.collections.List;
+mount core.encoding.cbor.{CborValue, CborError, encode, decode, encode_canonical};
+mount core.security.ecc.ed25519.{
+    Ed25519, Ed25519Seed, Ed25519PublicKey, Ed25519Signature,
+};
+mount core.security.mac.hmac.{hmac_sha256, hmac_sha384, hmac_sha512};
+mount core.security.util.constant_time.{constant_time_eq};
+
+// =============================================================================
+// Algorithms
+// =============================================================================
+
+public type CoseAlg is
+      EdDSA         // -8
+    | HS256         //  5
+    | HS384         //  6
+    | HS512;        //  7
+
+fn alg_id(a: &CoseAlg) -> Int {
+    match a {
+        CoseAlg.EdDSA => -8,
+        CoseAlg.HS256 =>  5,
+        CoseAlg.HS384 =>  6,
+        CoseAlg.HS512 =>  7,
+    }
+}
+
+fn alg_from_id(id: Int) -> Maybe<CoseAlg> {
+    match id {
+        -8 => Some(CoseAlg.EdDSA),
+         5 => Some(CoseAlg.HS256),
+         6 => Some(CoseAlg.HS384),
+         7 => Some(CoseAlg.HS512),
+         _ => None,
+    }
+}
+
+// =============================================================================
+// Errors
+// =============================================================================
+
+public type CoseError is
+      MalformedStructure
+    | CborDecode
+    | UnsupportedAlgorithm(Int)
+    | AlgorithmMismatch
+    | WrongKeyKind
+    | SignatureMismatch;
+
+// =============================================================================
+// Key types
+// =============================================================================
+
+public type CoseKey is
+      HmacSecret(List<Byte>)
+    | Ed25519Seeded(Ed25519Seed)
+    | Ed25519Verify(Ed25519PublicKey);
+
+fn key_matches_alg(alg: &CoseAlg, key: &CoseKey) -> Bool {
+    match (alg, key) {
+        (CoseAlg.HS256, CoseKey.HmacSecret(_)) => true,
+        (CoseAlg.HS384, CoseKey.HmacSecret(_)) => true,
+        (CoseAlg.HS512, CoseKey.HmacSecret(_)) => true,
+        (CoseAlg.EdDSA, CoseKey.Ed25519Seeded(_)) => true,
+        (CoseAlg.EdDSA, CoseKey.Ed25519Verify(_)) => true,
+        _ => false,
+    }
+}
+
+// =============================================================================
+// Headers
+// =============================================================================
+//
+// COSE reuses RFC 8152 header parameter IDs. The two we handle:
+//
+//   1  — alg (int)
+//   4  — kid (bstr)
+//
+// Other headers pass through unchanged in `unprotected`.
+//
+// =============================================================================
+
+public type CoseHeaders is {
+    alg: CoseAlg,
+    kid: Maybe<List<Byte>>,
+};
+
+fn protected_header_bstr(h: &CoseHeaders) -> List<Byte> {
+    // {1: <alg_id>, [4: <kid>]} as CBOR, then serialised to bstr.
+    let mut entries: List<(CborValue, CborValue)> = [];
+    entries.push((CborValue.CborUint(1_u64), alg_cbor(&h.alg)));
+    match &h.kid {
+        Some(k) => {
+            entries.push((CborValue.CborUint(4_u64), CborValue.CborBytes(k.clone())));
+        },
+        None => {},
+    }
+    encode_canonical(&CborValue.CborMap(entries))
+}
+
+fn alg_cbor(a: &CoseAlg) -> CborValue {
+    let id = alg_id(a);
+    if id >= 0 {
+        CborValue.CborUint(id as UInt64)
+    } else {
+        // CBOR negative int: encoded_value = -1 - stored
+        CborValue.CborNint(((-1 - id) as UInt64))
+    }
+}
+
+// =============================================================================
+// Signed messages (COSE_Sign1)
+// =============================================================================
+
+/// Sign a `payload` into a compact COSE_Sign1 CBOR blob. `external_aad`
+/// is any additional bytes the verifier must already have (empty for
+/// the common case).
+public fn sign1(
+    headers:      &CoseHeaders,
+    payload:      &[Byte],
+    external_aad: &[Byte],
+    key:          &CoseKey,
+) -> Result<List<Byte>, CoseError> {
+    if !key_matches_alg(&headers.alg, key) {
+        return Err(CoseError.WrongKeyKind);
+    }
+    let body_protected = protected_header_bstr(headers);
+    let to_sign = sig_structure(&body_protected, external_aad, payload);
+
+    let signature = match (&headers.alg, key) {
+        (CoseAlg.EdDSA, CoseKey.Ed25519Seeded(sk)) => {
+            let sig: Ed25519Signature = Ed25519.sign(sk, to_sign.as_slice());
+            slice_to_vec(&sig[..])
+        },
+        _ => return Err(CoseError.WrongKeyKind),
+    };
+
+    // [protected, {}, payload, signature]
+    let mut msg: List<CborValue> = [];
+    msg.push(CborValue.CborBytes(body_protected));
+    msg.push(CborValue.CborMap([]));     // empty unprotected
+    msg.push(CborValue.CborBytes(slice_to_vec(payload)));
+    msg.push(CborValue.CborBytes(signature));
+    Ok(encode(&CborValue.CborArray(msg)))
+}
+
+/// Verify a COSE_Sign1 blob. On success, returns the payload bytes.
+/// `external_aad` MUST match what the signer used (empty if the
+/// signer also used empty).
+public fn verify_sign1(
+    wire:         &[Byte],
+    external_aad: &[Byte],
+    key:          &CoseKey,
+) -> Result<List<Byte>, CoseError> {
+    let v = decode(wire).map_err(|_| CoseError.CborDecode)?;
+    let arr = match v {
+        CborValue.CborArray(a) => a,
+        _                      => return Err(CoseError.MalformedStructure),
+    };
+    if arr.len() != 4 { return Err(CoseError.MalformedStructure); }
+    let protected = match &arr[0] {
+        CborValue.CborBytes(b) => b.clone(),
+        _                      => return Err(CoseError.MalformedStructure),
+    };
+    let payload = match &arr[2] {
+        CborValue.CborBytes(b) => b.clone(),
+        _                      => return Err(CoseError.MalformedStructure),
+    };
+    let signature = match &arr[3] {
+        CborValue.CborBytes(b) => b.clone(),
+        _                      => return Err(CoseError.MalformedStructure),
+    };
+
+    let headers = parse_protected(protected.as_slice())?;
+    if !key_matches_alg(&headers.alg, key) {
+        return Err(CoseError.WrongKeyKind);
+    }
+
+    let to_verify = sig_structure(&protected, external_aad, payload.as_slice());
+    match (&headers.alg, key) {
+        (CoseAlg.EdDSA, CoseKey.Ed25519Verify(pk)) => {
+            if signature.len() != 64 { return Err(CoseError.SignatureMismatch); }
+            let mut sig: [Byte; 64] = [0_u8; 64];
+            let mut i: Int = 0;
+            while i < 64 { sig[i] = signature[i]; i = i + 1; }
+            if Ed25519.verify(pk, to_verify.as_slice(), &sig) {
+                Ok(payload)
+            } else {
+                Err(CoseError.SignatureMismatch)
+            }
+        },
+        (CoseAlg.EdDSA, CoseKey.Ed25519Seeded(sk)) => {
+            // Signer self-verify path.
+            let pk = Ed25519.public_key(sk);
+            if signature.len() != 64 { return Err(CoseError.SignatureMismatch); }
+            let mut sig: [Byte; 64] = [0_u8; 64];
+            let mut i: Int = 0;
+            while i < 64 { sig[i] = signature[i]; i = i + 1; }
+            if Ed25519.verify(&pk, to_verify.as_slice(), &sig) {
+                Ok(payload)
+            } else {
+                Err(CoseError.SignatureMismatch)
+            }
+        },
+        _ => Err(CoseError.WrongKeyKind),
+    }
+}
+
+// =============================================================================
+// MAC'd messages (COSE_Mac0)
+// =============================================================================
+//
+// COSE_Mac0 = [
+//     protected:   bstr,
+//     unprotected: map,
+//     payload:     bstr,
+//     tag:         bstr,
+// ]
+//
+// MAC_structure = [
+//     "MAC0",
+//     body_protected: bstr,
+//     external_aad:   bstr,
+//     payload:        bstr,
+// ]
+//
+// =============================================================================
+
+public fn mac0(
+    headers:      &CoseHeaders,
+    payload:      &[Byte],
+    external_aad: &[Byte],
+    key:          &CoseKey,
+) -> Result<List<Byte>, CoseError> {
+    if !key_matches_alg(&headers.alg, key) {
+        return Err(CoseError.WrongKeyKind);
+    }
+    let body_protected = protected_header_bstr(headers);
+    let to_mac = mac_structure(&body_protected, external_aad, payload);
+
+    let tag = match (&headers.alg, key) {
+        (CoseAlg.HS256, CoseKey.HmacSecret(s)) => slice_to_vec(&hmac_sha256(s.as_slice(), to_mac.as_slice())[..]),
+        (CoseAlg.HS384, CoseKey.HmacSecret(s)) => slice_to_vec(&hmac_sha384(s.as_slice(), to_mac.as_slice())[..]),
+        (CoseAlg.HS512, CoseKey.HmacSecret(s)) => slice_to_vec(&hmac_sha512(s.as_slice(), to_mac.as_slice())[..]),
+        _ => return Err(CoseError.WrongKeyKind),
+    };
+
+    let mut msg: List<CborValue> = [];
+    msg.push(CborValue.CborBytes(body_protected));
+    msg.push(CborValue.CborMap([]));
+    msg.push(CborValue.CborBytes(slice_to_vec(payload)));
+    msg.push(CborValue.CborBytes(tag));
+    Ok(encode(&CborValue.CborArray(msg)))
+}
+
+public fn verify_mac0(
+    wire:         &[Byte],
+    external_aad: &[Byte],
+    key:          &CoseKey,
+) -> Result<List<Byte>, CoseError> {
+    let v = decode(wire).map_err(|_| CoseError.CborDecode)?;
+    let arr = match v {
+        CborValue.CborArray(a) => a,
+        _                      => return Err(CoseError.MalformedStructure),
+    };
+    if arr.len() != 4 { return Err(CoseError.MalformedStructure); }
+    let protected = match &arr[0] {
+        CborValue.CborBytes(b) => b.clone(),
+        _                      => return Err(CoseError.MalformedStructure),
+    };
+    let payload = match &arr[2] {
+        CborValue.CborBytes(b) => b.clone(),
+        _                      => return Err(CoseError.MalformedStructure),
+    };
+    let tag = match &arr[3] {
+        CborValue.CborBytes(b) => b.clone(),
+        _                      => return Err(CoseError.MalformedStructure),
+    };
+
+    let headers = parse_protected(protected.as_slice())?;
+    if !key_matches_alg(&headers.alg, key) {
+        return Err(CoseError.WrongKeyKind);
+    }
+    let to_mac = mac_structure(&protected, external_aad, payload.as_slice());
+    let expected = match (&headers.alg, key) {
+        (CoseAlg.HS256, CoseKey.HmacSecret(s)) => slice_to_vec(&hmac_sha256(s.as_slice(), to_mac.as_slice())[..]),
+        (CoseAlg.HS384, CoseKey.HmacSecret(s)) => slice_to_vec(&hmac_sha384(s.as_slice(), to_mac.as_slice())[..]),
+        (CoseAlg.HS512, CoseKey.HmacSecret(s)) => slice_to_vec(&hmac_sha512(s.as_slice(), to_mac.as_slice())[..]),
+        _ => return Err(CoseError.WrongKeyKind),
+    };
+    if constant_time_eq(expected.as_slice(), tag.as_slice()) {
+        Ok(payload)
+    } else {
+        Err(CoseError.SignatureMismatch)
+    }
+}
+
+// =============================================================================
+// Sig_structure + MAC_structure builders
+// =============================================================================
+
+fn sig_structure(body_protected: &List<Byte>, external_aad: &[Byte], payload: &[Byte]) -> List<Byte> {
+    let mut arr: List<CborValue> = [];
+    arr.push(CborValue.CborText(Text.from("Signature1")));
+    arr.push(CborValue.CborBytes(body_protected.clone()));
+    arr.push(CborValue.CborBytes(slice_to_vec(external_aad)));
+    arr.push(CborValue.CborBytes(slice_to_vec(payload)));
+    encode_canonical(&CborValue.CborArray(arr))
+}
+
+fn mac_structure(body_protected: &List<Byte>, external_aad: &[Byte], payload: &[Byte]) -> List<Byte> {
+    let mut arr: List<CborValue> = [];
+    arr.push(CborValue.CborText(Text.from("MAC0")));
+    arr.push(CborValue.CborBytes(body_protected.clone()));
+    arr.push(CborValue.CborBytes(slice_to_vec(external_aad)));
+    arr.push(CborValue.CborBytes(slice_to_vec(payload)));
+    encode_canonical(&CborValue.CborArray(arr))
+}
+
+// =============================================================================
+// Protected-header parser
+// =============================================================================
+
+fn parse_protected(bstr: &[Byte]) -> Result<CoseHeaders, CoseError> {
+    if bstr.len() == 0 {
+        // Empty bstr = empty map by convention.
+        return Err(CoseError.MalformedStructure);
+    }
+    let v = decode(bstr).map_err(|_| CoseError.CborDecode)?;
+    let entries = match v {
+        CborValue.CborMap(m) => m,
+        _                    => return Err(CoseError.MalformedStructure),
+    };
+    let mut alg_id: Maybe<Int> = None;
+    let mut kid: Maybe<List<Byte>> = None;
+    let mut i: Int = 0;
+    while i < entries.len() {
+        let (k, val) = &entries[i];
+        let key = match k {
+            CborValue.CborUint(u) => *u as Int,
+            _                     => { i = i + 1; continue; },
+        };
+        if key == 1 {
+            match val {
+                CborValue.CborUint(u) => alg_id = Some(*u as Int),
+                CborValue.CborNint(n) => alg_id = Some(-1 - (*n as Int)),
+                _                      => return Err(CoseError.MalformedStructure),
+            }
+        } else if key == 4 {
+            match val {
+                CborValue.CborBytes(b) => kid = Some(b.clone()),
+                _                      => return Err(CoseError.MalformedStructure),
+            }
+        }
+        i = i + 1;
+    }
+    let alg = match alg_id {
+        Some(id) => match alg_from_id(id) {
+            Some(a) => a,
+            None    => return Err(CoseError.UnsupportedAlgorithm(id)),
+        },
+        None => return Err(CoseError.MalformedStructure),
+    };
+    Ok(CoseHeaders { alg: alg, kid: kid })
+}
+
+// =============================================================================
+// Helpers
+// =============================================================================
+
+fn slice_to_vec(src: &[Byte]) -> List<Byte> {
+    let mut out: List<Byte> = [];
+    let mut i: Int = 0;
+    while i < src.len() { out.push(src[i]); i = i + 1; }
+    out
+}

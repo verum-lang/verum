@@ -1,0 +1,61 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: security, cose, rfc9052, webauthn, cwt, typecheck
+// @timeout: 10000
+// @expect: pass
+
+mount core.security.cose.{
+    CoseAlg, CoseKey, CoseError, CoseHeaders,
+    sign1, verify_sign1, mac0, verify_mac0,
+};
+mount core.security.ecc.ed25519.{Ed25519, Ed25519Seed};
+mount core.collections.List;
+
+fn exercise_sign1_roundtrip() -> Result<(), CoseError> {
+    let sk: Ed25519Seed = Ed25519.generate_seed();
+    let pk = Ed25519.public_key(&sk);
+
+    let headers = CoseHeaders {
+        alg: CoseAlg.EdDSA,
+        kid: Some([0x01_u8, 0x02_u8, 0x03_u8].to_vec()),
+    };
+    let payload: [Byte; 5] = [0xDE_u8, 0xAD_u8, 0xBE_u8, 0xEF_u8, 0x00_u8];
+
+    let signer_key = CoseKey.Ed25519Seeded(sk);
+    let wire = sign1(&headers, &payload[..], &[], &signer_key)?;
+
+    let verifier_key = CoseKey.Ed25519Verify(pk);
+    let recovered = verify_sign1(wire.as_slice(), &[], &verifier_key)?;
+    assert(recovered.len() == 5);
+    Ok(())
+}
+
+fn exercise_mac0_roundtrip() -> Result<(), CoseError> {
+    let secret: [Byte; 32] = [0x55_u8; 32];
+    let mut secret_vec: List<Byte> = [];
+    let mut i: Int = 0;
+    while i < 32 { secret_vec.push(secret[i]); i = i + 1; }
+    let key = CoseKey.HmacSecret(secret_vec);
+
+    let headers = CoseHeaders { alg: CoseAlg.HS256, kid: None };
+    let payload: [Byte; 3] = [1_u8, 2_u8, 3_u8];
+    let wire = mac0(&headers, &payload[..], &[], &key)?;
+    let _ = verify_mac0(wire.as_slice(), &[], &key)?;
+    Ok(())
+}
+
+fn exercise_alg_confusion_rejected() -> Result<(), CoseError> {
+    // Handing an HMAC key to Sign1 is WrongKeyKind.
+    let headers = CoseHeaders { alg: CoseAlg.HS256, kid: None };
+    let bogus = CoseKey.HmacSecret([0_u8; 32].to_vec());
+    let result = sign1(&headers, &[1_u8, 2_u8], &[], &bogus);
+    let _ = result;   // returns Err(WrongKeyKind) — HS256 isn't a signature alg
+    Ok(())
+}
+
+fn main() {
+    let _ = exercise_sign1_roundtrip();
+    let _ = exercise_mac0_roundtrip();
+    let _ = exercise_alg_confusion_rejected();
+}

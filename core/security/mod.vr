@@ -73,6 +73,9 @@ public module otp;
 // JSON Web Tokens (RFC 7519 + RFC 7515).
 public module jwt;
 
+// CBOR Object Signing and Encryption (RFC 9052) — WebAuthn, CWT, mDoc.
+public module cose;
+
 // Legacy capability / region modules (pre-crypto).
 public module labels;
 public module regions;
