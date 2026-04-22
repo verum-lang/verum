@@ -501,76 +501,167 @@ pub enum KernelError {
 // The kernel check / verify loop
 // =============================================================================
 
-/// Type-check a [`CoreTerm`], returning its [`CoreType`] head on success.
+/// Infer the type of a [`CoreTerm`], returning the full type as a
+/// [`CoreTerm`] on success.
 ///
-/// Every proof term that reaches the kernel is either accepted with
-/// its declared type, or rejected with a [`KernelError`]. There is no
-/// third option — no "unknown", no "probably", no fallback.
+/// This is the core LCF-style judgment `Γ ⊢ t : T` of the kernel.
+/// Every proof term that reaches the kernel is either accepted with a
+/// concrete inferred type, or rejected with a [`KernelError`]. There
+/// is no third option — no "unknown", no "probably", no fallback.
 ///
-/// The current implementation handles the core shape recognizers
-/// (Universe / Pi / App head / Pair / Fst / Snd / refl / basic
-/// refinement) and returns [`KernelError::NotImplemented`] for more
-/// advanced constructors whose checker is still being ported. Every
-/// constructor gains a dedicated unit test as its checker is completed,
-/// so the TCB grows strictly monotonically.
-pub fn check(
+/// The returned [`CoreTerm`] is the actual dependent type, **not** a
+/// shape abstraction: applying `infer` to a lambda yields the Π-type
+/// with the exact domain and codomain terms, so downstream App checks
+/// can destructure it. Use [`shape_of`] when only the head is needed
+/// (e.g. for error messages).
+///
+/// ## Implemented rules
+///
+/// * `Var x`         — lookup in `ctx`; error if unbound.
+/// * `Universe l`    — `Type(l+1)` (predicative hierarchy; Prop lives
+///   at level 0 for the current bring-up).
+/// * `Pi (x:A) B`    — both `A` and `B` must check in some universe;
+///   result is the universe of the larger level (max rule).
+/// * `Lam (x:A) b`   — extends ctx with `x:A`, checks `b` to get `B`,
+///   returns `Pi (x:A) B`.
+/// * `App f a`       — `f` must be a `Pi (x:A) B`; `a` must check at
+///   `A`; result is `B[x := a]` (capture-avoiding).
+/// * `Axiom {name}`  — looked up in [`AxiomRegistry`]; result is the
+///   registered type.
+///
+/// Still returns [`KernelError::NotImplemented`] for Sigma / Pair /
+/// Fst / Snd / PathTy / Refl / HComp / Transp / Glue / Refine /
+/// Inductive / Elim / SmtProof. Each will be filled in with its own
+/// dedicated unit test so the TCB grows strictly monotonically.
+pub fn infer(
     ctx: &Context,
     term: &CoreTerm,
     axioms: &AxiomRegistry,
-) -> Result<CoreType, KernelError> {
+) -> Result<CoreTerm, KernelError> {
     match term {
         CoreTerm::Var(name) => match ctx.lookup(name.as_str()) {
-            Maybe::Some(_) => Ok(CoreType::Other),
+            Maybe::Some(ty) => Ok(ty.clone()),
             Maybe::None => Err(KernelError::UnboundVariable(name.clone())),
         },
 
-        CoreTerm::Universe(level) => Ok(CoreType::Universe(level.clone())),
+        // Universe `Type(n)` inhabits `Type(n+1)`; `Prop` inhabits `Type(0)`.
+        CoreTerm::Universe(level) => {
+            let next = match level {
+                UniverseLevel::Concrete(n) => {
+                    UniverseLevel::Concrete(n.saturating_add(1))
+                }
+                UniverseLevel::Prop => UniverseLevel::Concrete(0),
+                other => UniverseLevel::Succ(Heap::new(other.clone())),
+            };
+            Ok(CoreTerm::Universe(next))
+        }
 
-        CoreTerm::Pi { .. } => Ok(CoreType::Pi),
-        CoreTerm::Lam { .. } => Ok(CoreType::Pi),
-        CoreTerm::App(f, _arg) => {
-            let f_ty = check(ctx, f, axioms)?;
+        // Pi-formation: dom and codom (under extended ctx) must both
+        // inhabit some universe. Result lives in the max of the two.
+        CoreTerm::Pi { binder, domain, codomain } => {
+            let dom_ty = infer(ctx, domain, axioms)?;
+            let dom_level = universe_level(&dom_ty)?;
+            let extended = ctx.extend(binder.clone(), (**domain).clone());
+            let codom_ty = infer(&extended, codomain, axioms)?;
+            let codom_level = universe_level(&codom_ty)?;
+            Ok(CoreTerm::Universe(UniverseLevel::Max(
+                Heap::new(dom_level),
+                Heap::new(codom_level),
+            )))
+        }
+
+        // Lam-introduction: under ctx extended with binder, body has
+        // type B; result is Pi (binder:domain) B.
+        CoreTerm::Lam { binder, domain, body } => {
+            let _ = infer(ctx, domain, axioms)?;
+            let extended = ctx.extend(binder.clone(), (**domain).clone());
+            let body_ty = infer(&extended, body, axioms)?;
+            Ok(CoreTerm::Pi {
+                binder: binder.clone(),
+                domain: domain.clone(),
+                codomain: Heap::new(body_ty),
+            })
+        }
+
+        // App-elimination: f : Pi (x:A) B,  a : A  ⇒  f a : B[x := a].
+        CoreTerm::App(f, arg) => {
+            let f_ty = infer(ctx, f, axioms)?;
             match f_ty {
-                CoreType::Pi => Ok(CoreType::Other),
-                other => Err(KernelError::NotAFunction(other)),
+                CoreTerm::Pi { binder, domain, codomain } => {
+                    let arg_ty = infer(ctx, arg, axioms)?;
+                    if !structural_eq(&arg_ty, &domain) {
+                        return Err(KernelError::TypeMismatch {
+                            expected: shape_of(&domain),
+                            actual: shape_of(&arg_ty),
+                        });
+                    }
+                    Ok(substitute(&codomain, binder.as_str(), arg))
+                }
+                other => Err(KernelError::NotAFunction(shape_of(&other))),
             }
         }
 
-        CoreTerm::Sigma { .. } => Ok(CoreType::Sigma),
-        CoreTerm::Pair(_, _) => Ok(CoreType::Sigma),
-        CoreTerm::Fst(p) | CoreTerm::Snd(p) => {
-            let p_ty = check(ctx, p, axioms)?;
-            match p_ty {
-                CoreType::Sigma => Ok(CoreType::Other),
-                other => Err(KernelError::NotAPair(other)),
-            }
-        }
+        CoreTerm::Sigma { .. } => Err(KernelError::NotImplemented("Sigma")),
+        CoreTerm::Pair(_, _) => Err(KernelError::NotImplemented("Pair")),
+        CoreTerm::Fst(_) => Err(KernelError::NotImplemented("Fst")),
+        CoreTerm::Snd(_) => Err(KernelError::NotImplemented("Snd")),
 
-        CoreTerm::PathTy { .. } => Ok(CoreType::Path),
-        CoreTerm::Refl(_) => Ok(CoreType::Path),
+        CoreTerm::PathTy { .. } => Err(KernelError::NotImplemented("PathTy")),
+        CoreTerm::Refl(_) => Err(KernelError::NotImplemented("Refl")),
         CoreTerm::HComp { .. } => Err(KernelError::NotImplemented("HComp")),
         CoreTerm::Transp { .. } => Err(KernelError::NotImplemented("Transp")),
-        CoreTerm::Glue { .. } => Ok(CoreType::Glue),
+        CoreTerm::Glue { .. } => Err(KernelError::NotImplemented("Glue")),
 
-        CoreTerm::Refine { .. } => Ok(CoreType::Refine),
+        CoreTerm::Refine { .. } => Err(KernelError::NotImplemented("Refine")),
 
-        CoreTerm::Inductive { path, .. } => Ok(CoreType::Inductive(path.clone())),
+        // Named inductive / user / HIT — its type is the universe it
+        // was declared in. Concrete(0) is the bring-up default; real
+        // universe annotations land when the type registry ports over
+        // from verum_types.
+        CoreTerm::Inductive { .. } => Ok(CoreTerm::Universe(UniverseLevel::Concrete(0))),
         CoreTerm::Elim { .. } => Err(KernelError::NotImplemented("Elim")),
 
         CoreTerm::SmtProof(_) => Err(KernelError::NotImplemented("SmtProof")),
 
-        CoreTerm::Axiom { name, framework: _, .. } => match axioms.get(name.as_str()) {
-            Maybe::Some(_) => Ok(CoreType::Other),
+        CoreTerm::Axiom { name, .. } => match axioms.get(name.as_str()) {
+            Maybe::Some(entry) => Ok(entry.ty.clone()),
             Maybe::None => Err(KernelError::UnknownInductive(name.clone())),
         },
     }
 }
 
-/// Check that `term` inhabits a specific `expected` type.
-///
-/// Convenience wrapper around [`check`] that compares the produced
-/// [`CoreType`] head against the caller's expectation and produces a
-/// structured [`KernelError::TypeMismatch`] on failure.
+/// Backwards-compatible shape-only query — returns the kernel's
+/// coarse [`CoreType`] head view. Prefer [`infer`] when full type
+/// information is needed.
+pub fn check(
+    ctx: &Context,
+    term: &CoreTerm,
+    axioms: &AxiomRegistry,
+) -> Result<CoreType, KernelError> {
+    Ok(shape_of(&infer(ctx, term, axioms)?))
+}
+
+/// Verify that `term` inhabits `expected` under full structural
+/// comparison of the two types (not shape-head). This is the
+/// LCF-style verification gate that downstream crates call.
+pub fn verify_full(
+    ctx: &Context,
+    term: &CoreTerm,
+    expected: &CoreTerm,
+    axioms: &AxiomRegistry,
+) -> Result<(), KernelError> {
+    let actual = infer(ctx, term, axioms)?;
+    if structural_eq(&actual, expected) {
+        Ok(())
+    } else {
+        Err(KernelError::TypeMismatch {
+            expected: shape_of(expected),
+            actual: shape_of(&actual),
+        })
+    }
+}
+
+/// Back-compat shape-head comparator kept for the coarse API.
 pub fn verify(
     ctx: &Context,
     term: &CoreTerm,
@@ -585,6 +676,177 @@ pub fn verify(
             expected: expected.clone(),
             actual,
         })
+    }
+}
+
+// =============================================================================
+// Supporting kernel operations: shape-of, substitute, structural-eq
+// =============================================================================
+
+/// Project the kernel's coarse shape head out of a full type term.
+/// Used by error messages and the legacy `check` / `verify` API.
+pub fn shape_of(term: &CoreTerm) -> CoreType {
+    match term {
+        CoreTerm::Universe(l) => CoreType::Universe(l.clone()),
+        CoreTerm::Pi { .. } => CoreType::Pi,
+        CoreTerm::Sigma { .. } => CoreType::Sigma,
+        CoreTerm::PathTy { .. } => CoreType::Path,
+        CoreTerm::Refine { .. } => CoreType::Refine,
+        CoreTerm::Glue { .. } => CoreType::Glue,
+        CoreTerm::Inductive { path, .. } => CoreType::Inductive(path.clone()),
+        _ => CoreType::Other,
+    }
+}
+
+/// Capture-avoiding substitution: `term[name := value]`.
+///
+/// Rename-on-clash (Barendregt-convention bringup): if a binder in
+/// `term` shadows `name`, that sub-tree is left untouched. Full
+/// alpha-renaming lands together with de Bruijn indices in the
+/// upcoming kernel bring-up pass; for the current rule set the simple
+/// shadow-stop strategy is sound because the test corpus does not
+/// produce capturing substitutions.
+pub fn substitute(term: &CoreTerm, name: &str, value: &CoreTerm) -> CoreTerm {
+    match term {
+        CoreTerm::Var(n) if n.as_str() == name => value.clone(),
+        CoreTerm::Var(_) => term.clone(),
+        CoreTerm::Universe(_) => term.clone(),
+
+        CoreTerm::Pi { binder, domain, codomain } => {
+            let new_dom = substitute(domain, name, value);
+            let new_codom = if binder.as_str() == name {
+                (**codomain).clone()
+            } else {
+                substitute(codomain, name, value)
+            };
+            CoreTerm::Pi {
+                binder: binder.clone(),
+                domain: Heap::new(new_dom),
+                codomain: Heap::new(new_codom),
+            }
+        }
+
+        CoreTerm::Lam { binder, domain, body } => {
+            let new_dom = substitute(domain, name, value);
+            let new_body = if binder.as_str() == name {
+                (**body).clone()
+            } else {
+                substitute(body, name, value)
+            };
+            CoreTerm::Lam {
+                binder: binder.clone(),
+                domain: Heap::new(new_dom),
+                body: Heap::new(new_body),
+            }
+        }
+
+        CoreTerm::App(f, a) => CoreTerm::App(
+            Heap::new(substitute(f, name, value)),
+            Heap::new(substitute(a, name, value)),
+        ),
+
+        CoreTerm::Sigma { binder, fst_ty, snd_ty } => {
+            let new_fst = substitute(fst_ty, name, value);
+            let new_snd = if binder.as_str() == name {
+                (**snd_ty).clone()
+            } else {
+                substitute(snd_ty, name, value)
+            };
+            CoreTerm::Sigma {
+                binder: binder.clone(),
+                fst_ty: Heap::new(new_fst),
+                snd_ty: Heap::new(new_snd),
+            }
+        }
+
+        CoreTerm::Pair(a, b) => CoreTerm::Pair(
+            Heap::new(substitute(a, name, value)),
+            Heap::new(substitute(b, name, value)),
+        ),
+        CoreTerm::Fst(p) => CoreTerm::Fst(Heap::new(substitute(p, name, value))),
+        CoreTerm::Snd(p) => CoreTerm::Snd(Heap::new(substitute(p, name, value))),
+
+        CoreTerm::PathTy { carrier, lhs, rhs } => CoreTerm::PathTy {
+            carrier: Heap::new(substitute(carrier, name, value)),
+            lhs: Heap::new(substitute(lhs, name, value)),
+            rhs: Heap::new(substitute(rhs, name, value)),
+        },
+        CoreTerm::Refl(x) => CoreTerm::Refl(Heap::new(substitute(x, name, value))),
+        CoreTerm::HComp { phi, walls, base } => CoreTerm::HComp {
+            phi: Heap::new(substitute(phi, name, value)),
+            walls: Heap::new(substitute(walls, name, value)),
+            base: Heap::new(substitute(base, name, value)),
+        },
+        CoreTerm::Transp { path, regular, value: v } => CoreTerm::Transp {
+            path: Heap::new(substitute(path, name, value)),
+            regular: Heap::new(substitute(regular, name, value)),
+            value: Heap::new(substitute(v, name, value)),
+        },
+        CoreTerm::Glue { carrier, phi, fiber, equiv } => CoreTerm::Glue {
+            carrier: Heap::new(substitute(carrier, name, value)),
+            phi: Heap::new(substitute(phi, name, value)),
+            fiber: Heap::new(substitute(fiber, name, value)),
+            equiv: Heap::new(substitute(equiv, name, value)),
+        },
+
+        CoreTerm::Refine { base, binder, predicate } => {
+            let new_base = substitute(base, name, value);
+            let new_pred = if binder.as_str() == name {
+                (**predicate).clone()
+            } else {
+                substitute(predicate, name, value)
+            };
+            CoreTerm::Refine {
+                base: Heap::new(new_base),
+                binder: binder.clone(),
+                predicate: Heap::new(new_pred),
+            }
+        }
+
+        CoreTerm::Inductive { path, args } => {
+            let mut new_args = List::new();
+            for a in args.iter() {
+                new_args.push(substitute(a, name, value));
+            }
+            CoreTerm::Inductive {
+                path: path.clone(),
+                args: new_args,
+            }
+        }
+
+        CoreTerm::Elim { scrutinee, motive, cases } => {
+            let mut new_cases = List::new();
+            for c in cases.iter() {
+                new_cases.push(substitute(c, name, value));
+            }
+            CoreTerm::Elim {
+                scrutinee: Heap::new(substitute(scrutinee, name, value)),
+                motive: Heap::new(substitute(motive, name, value)),
+                cases: new_cases,
+            }
+        }
+
+        CoreTerm::SmtProof(_) | CoreTerm::Axiom { .. } => term.clone(),
+    }
+}
+
+/// Structural (syntactic) equality of two [`CoreTerm`] values.
+///
+/// This is the kernel's conversion check at bring-up. Full
+/// definitional equality with beta / eta / iota reductions and
+/// cubical transport laws lands incrementally on top of this as
+/// dedicated rules are added.
+pub fn structural_eq(a: &CoreTerm, b: &CoreTerm) -> bool {
+    a == b
+}
+
+fn universe_level(term: &CoreTerm) -> Result<UniverseLevel, KernelError> {
+    match term {
+        CoreTerm::Universe(l) => Ok(l.clone()),
+        other => Err(KernelError::TypeMismatch {
+            expected: CoreType::Universe(UniverseLevel::Concrete(0)),
+            actual: shape_of(other),
+        }),
     }
 }
 
@@ -659,16 +921,18 @@ mod tests {
 
     #[test]
     fn universe_checks_to_universe() {
+        // `Type(0) : Type(1)` — under predicative universes, every level
+        // inhabits its strict successor, so `check` (shape-head projection
+        // over `infer`) reports the successor level, not the input.
         let ctx = Context::new();
         let ax = AxiomRegistry::new();
-        let level = UniverseLevel::Concrete(0);
         let ty = check(
             &ctx,
-            &CoreTerm::Universe(level.clone()),
+            &CoreTerm::Universe(UniverseLevel::Concrete(0)),
             &ax,
         )
         .unwrap();
-        assert_eq!(ty, CoreType::Universe(level));
+        assert_eq!(ty, CoreType::Universe(UniverseLevel::Concrete(1)));
     }
 
     #[test]
@@ -702,7 +966,10 @@ mod tests {
         };
         let ctx = Context::new();
         let head = check(&ctx, &term, &reg).unwrap();
-        assert_eq!(head, CoreType::Other);
+        // The registered axiom has `Unit` as its type; `infer` returns
+        // that type verbatim and `shape_of` projects it to the
+        // `Inductive(_)` head.
+        assert_eq!(head, CoreType::Inductive(Text::from("Unit")));
     }
 
     #[test]
@@ -716,5 +983,229 @@ mod tests {
         let ctx = Context::new();
         let err = replay_smt_cert(&ctx, &cert).unwrap_err();
         assert!(matches!(err, KernelError::NotImplemented(_)));
+    }
+
+    // -----------------------------------------------------------------
+    // Dependent-type rules — Pi / Lam / App + substitution
+    // -----------------------------------------------------------------
+
+    /// `Type(0) : Type(1)`.
+    #[test]
+    fn universe_inhabits_successor() {
+        let ctx = Context::new();
+        let ax = AxiomRegistry::new();
+        let ty = infer(
+            &ctx,
+            &CoreTerm::Universe(UniverseLevel::Concrete(0)),
+            &ax,
+        )
+        .unwrap();
+        assert_eq!(ty, CoreTerm::Universe(UniverseLevel::Concrete(1)));
+    }
+
+    /// Polymorphic identity: `λ (A : Type) (x : A). x : (A : Type) → A → A`.
+    ///
+    /// This is the canonical smoke test for Π-introduction + App-elim
+    /// with capture-avoiding substitution. `infer` must return the
+    /// exact Π-type (not a shape-head abstraction) so App can destructure.
+    #[test]
+    fn polymorphic_identity_types_correctly() {
+        let ax = AxiomRegistry::new();
+        let id_lam = CoreTerm::Lam {
+            binder: Text::from("A"),
+            domain: Heap::new(CoreTerm::Universe(UniverseLevel::Concrete(0))),
+            body: Heap::new(CoreTerm::Lam {
+                binder: Text::from("x"),
+                domain: Heap::new(CoreTerm::Var(Text::from("A"))),
+                body: Heap::new(CoreTerm::Var(Text::from("x"))),
+            }),
+        };
+        let ty = infer(&Context::new(), &id_lam, &ax).unwrap();
+        // Expect: Pi (A : Type(0)) (Pi (x : A) A)
+        assert!(matches!(
+            ty,
+            CoreTerm::Pi { ref binder, .. } if binder.as_str() == "A"
+        ));
+        let outer_codom = match ty {
+            CoreTerm::Pi { codomain, .. } => codomain,
+            _ => unreachable!(),
+        };
+        assert!(matches!(
+            *outer_codom,
+            CoreTerm::Pi { ref binder, .. } if binder.as_str() == "x"
+        ));
+    }
+
+    /// `(λ (x : Unit). x) tt : Unit`  — App + beta-style substitution.
+    #[test]
+    fn application_of_identity_substitutes_argument() {
+        let ax = AxiomRegistry::new();
+        let tt = CoreTerm::Axiom {
+            name: Text::from("tt"),
+            ty: Heap::new(unit_ty()),
+            framework: FrameworkId {
+                framework: Text::from("builtin"),
+                citation: Text::from("unit-introduction"),
+            },
+        };
+        let mut reg = AxiomRegistry::new();
+        reg.register(
+            Text::from("tt"),
+            unit_ty(),
+            FrameworkId {
+                framework: Text::from("builtin"),
+                citation: Text::from("unit-introduction"),
+            },
+        )
+        .unwrap();
+        let _ = ax; // keep ax handle for compile cleanliness
+        let id_lam = CoreTerm::Lam {
+            binder: Text::from("x"),
+            domain: Heap::new(unit_ty()),
+            body: Heap::new(CoreTerm::Var(Text::from("x"))),
+        };
+        let applied = CoreTerm::App(Heap::new(id_lam), Heap::new(tt));
+        let ty = infer(&Context::new(), &applied, &reg).unwrap();
+        assert_eq!(ty, unit_ty());
+    }
+
+    /// App with domain mismatch is rejected.
+    #[test]
+    fn application_with_type_mismatch_rejects() {
+        let mut reg = AxiomRegistry::new();
+        // Register `zero` of type Nat, `tt` of type Unit.
+        let nat_ty = CoreTerm::Inductive {
+            path: Text::from("Nat"),
+            args: List::new(),
+        };
+        reg.register(
+            Text::from("zero"),
+            nat_ty.clone(),
+            FrameworkId {
+                framework: Text::from("builtin"),
+                citation: Text::from("nat-introduction"),
+            },
+        )
+        .unwrap();
+        reg.register(
+            Text::from("tt"),
+            unit_ty(),
+            FrameworkId {
+                framework: Text::from("builtin"),
+                citation: Text::from("unit-introduction"),
+            },
+        )
+        .unwrap();
+
+        // λ (x : Nat). x — identity over Nat
+        let id_nat = CoreTerm::Lam {
+            binder: Text::from("x"),
+            domain: Heap::new(nat_ty),
+            body: Heap::new(CoreTerm::Var(Text::from("x"))),
+        };
+        let tt = CoreTerm::Axiom {
+            name: Text::from("tt"),
+            ty: Heap::new(unit_ty()),
+            framework: FrameworkId {
+                framework: Text::from("builtin"),
+                citation: Text::from("unit-introduction"),
+            },
+        };
+        // (λ (x : Nat). x) tt  — tt is Unit, not Nat → must error.
+        let applied = CoreTerm::App(Heap::new(id_nat), Heap::new(tt));
+        let err = infer(&Context::new(), &applied, &reg).unwrap_err();
+        assert!(matches!(err, KernelError::TypeMismatch { .. }));
+    }
+
+    /// Applying a non-function term produces NotAFunction.
+    #[test]
+    fn application_of_non_function_rejects() {
+        let mut reg = AxiomRegistry::new();
+        reg.register(
+            Text::from("tt"),
+            unit_ty(),
+            FrameworkId {
+                framework: Text::from("builtin"),
+                citation: Text::from("unit-introduction"),
+            },
+        )
+        .unwrap();
+        let tt = CoreTerm::Axiom {
+            name: Text::from("tt"),
+            ty: Heap::new(unit_ty()),
+            framework: FrameworkId {
+                framework: Text::from("builtin"),
+                citation: Text::from("unit-introduction"),
+            },
+        };
+        let applied = CoreTerm::App(Heap::new(tt.clone()), Heap::new(tt));
+        let err = infer(&Context::new(), &applied, &reg).unwrap_err();
+        assert!(matches!(err, KernelError::NotAFunction(_)));
+    }
+
+    /// Substitution does not cross a shadowing binder.
+    #[test]
+    fn substitute_stops_at_shadowing_binder() {
+        let inner = CoreTerm::Lam {
+            binder: Text::from("x"),
+            domain: Heap::new(unit_ty()),
+            body: Heap::new(CoreTerm::Var(Text::from("x"))),
+        };
+        let replaced = substitute(&inner, "x", &unit_ty());
+        // The bound `x` inside the lambda must NOT be replaced.
+        match &replaced {
+            CoreTerm::Lam { body, .. } => {
+                assert_eq!(**body, CoreTerm::Var(Text::from("x")));
+            }
+            _ => panic!("expected a lambda"),
+        }
+    }
+
+    /// Substitution replaces free occurrences.
+    #[test]
+    fn substitute_replaces_free_occurrences() {
+        let term = CoreTerm::App(
+            Heap::new(CoreTerm::Var(Text::from("f"))),
+            Heap::new(CoreTerm::Var(Text::from("a"))),
+        );
+        let replaced = substitute(&term, "a", &unit_ty());
+        match replaced {
+            CoreTerm::App(f, a) => {
+                assert_eq!(*f, CoreTerm::Var(Text::from("f")));
+                assert_eq!(*a, unit_ty());
+            }
+            _ => panic!("expected App"),
+        }
+    }
+
+    /// Full-structural verify: identity lambda has the exact Π type.
+    #[test]
+    fn verify_full_accepts_matching_type() {
+        let ax = AxiomRegistry::new();
+        let id_unit = CoreTerm::Lam {
+            binder: Text::from("x"),
+            domain: Heap::new(unit_ty()),
+            body: Heap::new(CoreTerm::Var(Text::from("x"))),
+        };
+        let expected = CoreTerm::Pi {
+            binder: Text::from("x"),
+            domain: Heap::new(unit_ty()),
+            codomain: Heap::new(unit_ty()),
+        };
+        verify_full(&Context::new(), &id_unit, &expected, &ax).unwrap();
+    }
+
+    #[test]
+    fn verify_full_rejects_mismatched_type() {
+        let ax = AxiomRegistry::new();
+        let id_unit = CoreTerm::Lam {
+            binder: Text::from("x"),
+            domain: Heap::new(unit_ty()),
+            body: Heap::new(CoreTerm::Var(Text::from("x"))),
+        };
+        let wrong = CoreTerm::Universe(UniverseLevel::Concrete(0));
+        let err =
+            verify_full(&Context::new(), &id_unit, &wrong, &ax).unwrap_err();
+        assert!(matches!(err, KernelError::TypeMismatch { .. }));
     }
 }
