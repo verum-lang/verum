@@ -29028,7 +29028,11 @@ impl TypeChecker {
                             if let Some(source_module) =
                                 self.get_module_with_path_aliases(source_module_path.as_str(), registry)
                             {
-                                self.import_types_from_module_ast(&source_module.ast);
+                                let src_path = source_module_path.as_str().to_string();
+                                self.import_types_from_module_ast_in_module(
+                                    &source_module.ast,
+                                    Some(&src_path),
+                                );
                             }
 
                             // Found a context protocol - build Record type with methods
@@ -29183,7 +29187,11 @@ impl TypeChecker {
                     // Import all types from the type's source module first
                     // Use path aliases since "core.io.path" may be stored as "std.io.path"
                     if let Some(source_module) = self.get_module_with_path_aliases(source_module_path.as_str(), registry) {
-                        self.import_types_from_module_ast(&source_module.ast);
+                        let src_path = source_module_path.as_str().to_string();
+                        self.import_types_from_module_ast_in_module(
+                            &source_module.ast,
+                            Some(&src_path),
+                        );
                     }
 
                     // Register the type declaration
@@ -29756,8 +29764,26 @@ impl TypeChecker {
     ///
     /// Context type system integration: context requirements tracked in function types, checked at call sites — Cross-file contexts
     fn import_types_from_module_ast(&mut self, ast: &verum_ast::Module) {
+        self.import_types_from_module_ast_in_module(ast, None);
+    }
+
+    /// Same as [`import_types_from_module_ast`], but pins the type checker's
+    /// `current_module_path` to `source_module_path` for the duration of the
+    /// import so that cross-referencing types in the module (e.g. record
+    /// fields whose types are also declared in the same module) land under
+    /// the correct qualified-name key — not the caller's module.
+    fn import_types_from_module_ast_in_module(
+        &mut self,
+        ast: &verum_ast::Module,
+        source_module_path: Option<&str>,
+    ) {
         use verum_ast::ItemKind;
         use verum_ast::decl::Visibility as AstVisibility;
+
+        let saved_module_path = self.current_module_path.clone();
+        if let Some(path) = source_module_path {
+            self.set_current_module_path(verum_common::Text::from(path));
+        }
 
         for item in &ast.items {
             if let ItemKind::Type(type_decl) = &item.kind {
@@ -29776,6 +29802,8 @@ impl TypeChecker {
                 }
             }
         }
+
+        self.set_current_module_path(saved_module_path);
     }
 
     /// Find all inherent implement blocks for a type in a module's AST.
