@@ -1286,6 +1286,16 @@ impl TypeEnv {
         self.insert(name, TypeScheme::mono(ty));
     }
 
+    /// Remove a binding from the current scope (only).
+    ///
+    /// Does NOT reach into parent scopes — caller discipline: only use
+    /// this to evict a binding owned by the current scope (e.g. a stdlib
+    /// variant-constructor that a user type declaration should shadow).
+    /// Returns `true` if a binding with `name` was present and removed.
+    pub fn remove(&mut self, name: &str) -> bool {
+        self.bindings.shift_remove(&Text::from(name)).is_some()
+    }
+
     /// Look up a variable, searching parent scopes if needed
     pub fn lookup(&self, name: &str) -> Option<&TypeScheme> {
         self.bindings

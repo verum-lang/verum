@@ -47835,6 +47835,32 @@ impl TypeChecker {
             }
         }
 
+        // Architectural: during user-code phase, evict any stdlib variant-
+        // constructor binding sitting on this simple name. Variant
+        // constructors landed in `env` via `env.insert_mono(variant_name,
+        // fn(...) -> ParentType)` (see `resolve_type_body::Variant`).
+        // If a stdlib type like `HandshakeRole is Client(ClientSm) | ...`
+        // pre-registered `Client` as a function, and the user then
+        // declares `type Client is { ... }`, every `Client.new(...)` call
+        // resolves through the stdlib function — user's static method
+        // lookup never runs. The user's declaration is always authoritative
+        // in their own module, so wipe the bare-name binding here.
+        //
+        // Qualified bindings like `HandshakeRole.Client` stay intact, so
+        // stdlib callers that use the qualified form keep working.
+        if self.user_code_phase && self.ctx.env.lookup(type_name.as_str()).is_some() {
+            let should_evict = {
+                use crate::ty::Type as T;
+                matches!(
+                    self.ctx.env.lookup(type_name.as_str()).map(|s| &s.ty),
+                    Some(T::Function { .. }) | Some(T::Variant(_))
+                )
+            };
+            if should_evict {
+                let _ = self.ctx.env.remove(type_name.as_str());
+            }
+        }
+
         // Register as placeholder - will be resolved in pass 2
         let placeholder = Type::Placeholder {
             name: type_name.clone(),
