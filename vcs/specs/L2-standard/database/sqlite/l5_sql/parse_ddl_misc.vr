@@ -1,0 +1,198 @@
+// @test: typecheck-pass
+// @level: L2
+// @tier: 0
+// @tags: sqlite, native, sql, parser, ddl, pragma, transaction
+// @timeout: 15000
+// @description: DDL + PRAGMA + transaction parsers end-to-end
+//
+// Spec: internal/specs/sqlite-native.md §12.2
+
+mount core.*;
+mount collections.List;
+mount core.database.sqlite.native.l5_sql.{
+    Statement, CreateTableStmt, ColumnDef, ColumnConstraint, TableConstraint,
+    OnConflict, TableRef,
+    ParseError, parse_one, parse_batch,
+};
+
+fn parse(src: &Text) -> Result<Statement, ParseError> {
+    parse_one(src)
+}
+
+fn create_table_minimal() {
+    match parse(&"CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT NOT NULL)".clone()) {
+        Ok(SCreateTable(ct)) => {
+            assert_eq(ct.table.name, "users".clone());
+            assert_eq(ct.columns.len(), 2);
+            assert(!ct.if_not_exists);
+            assert(!ct.temporary);
+            assert(!ct.strict);
+            assert(!ct.without_rowid);
+        }
+        _ => panic("CREATE TABLE users"),
+    }
+}
+
+fn create_table_if_not_exists_strict_without_rowid() {
+    match parse(&"CREATE TABLE IF NOT EXISTS t (x INT, y REAL) WITHOUT ROWID, STRICT".clone()) {
+        Ok(SCreateTable(ct)) => {
+            assert(ct.if_not_exists);
+            assert(ct.strict);
+            assert(ct.without_rowid);
+        }
+        _ => panic("CREATE IF NOT EXISTS ..."),
+    }
+}
+
+fn create_table_with_table_constraints() {
+    match parse(&"CREATE TABLE kv (k TEXT, v TEXT, PRIMARY KEY (k), CHECK (length(v) < 1000))".clone()) {
+        Ok(SCreateTable(ct)) => {
+            assert_eq(ct.columns.len(), 2);
+            assert_eq(ct.constraints.len(), 2);
+        }
+        _ => panic("table constraints"),
+    }
+}
+
+fn create_temp_table() {
+    match parse(&"CREATE TEMP TABLE t (x INT)".clone()) {
+        Ok(SCreateTable(ct)) => { assert(ct.temporary); }
+        _ => panic("TEMP"),
+    }
+}
+
+fn column_default_and_collate() {
+    match parse(&"CREATE TABLE t (name TEXT DEFAULT 'anon' COLLATE NOCASE)".clone()) {
+        Ok(SCreateTable(ct)) => {
+            assert_eq(ct.columns.len(), 1);
+            assert_eq(ct.columns[0].constraints.len(), 2);
+        }
+        _ => panic("DEFAULT + COLLATE"),
+    }
+}
+
+fn drop_table_if_exists() {
+    match parse(&"DROP TABLE IF EXISTS main.t".clone()) {
+        Ok(SDropTable(if_exists, tref)) => {
+            assert(if_exists);
+            assert_eq(tref.schema, "main".clone());
+            assert_eq(tref.name, "t".clone());
+        }
+        _ => panic("DROP TABLE"),
+    }
+}
+
+fn drop_index_view_trigger() {
+    match parse(&"DROP INDEX idx".clone()) {
+        Ok(SDropIndex(_, _)) => {}, _ => panic("DROP INDEX"),
+    }
+    match parse(&"DROP VIEW IF EXISTS v".clone()) {
+        Ok(SDropView(true, _)) => {}, _ => panic("DROP VIEW"),
+    }
+    match parse(&"DROP TRIGGER tr".clone()) {
+        Ok(SDropTrigger(_, _)) => {}, _ => panic("DROP TRIGGER"),
+    }
+}
+
+fn pragma_get_and_set() {
+    match parse(&"PRAGMA journal_mode".clone()) {
+        Ok(SPragma(name, _)) => { assert_eq(name, "journal_mode".clone()); }
+        _ => panic("PRAGMA read"),
+    }
+    match parse(&"PRAGMA synchronous = NORMAL".clone()) {
+        Ok(SPragma(_, Some(_))) => {},
+        _ => panic("PRAGMA set"),
+    }
+    match parse(&"PRAGMA cache_size(2000)".clone()) {
+        Ok(SPragma(_, Some(_))) => {},
+        _ => panic("PRAGMA call form"),
+    }
+}
+
+fn transactions() {
+    match parse(&"BEGIN".clone()) {
+        Ok(SBeginTransaction) => {}, _ => panic("BEGIN"),
+    }
+    match parse(&"BEGIN DEFERRED TRANSACTION".clone()) {
+        Ok(SBeginTransaction) => {}, _ => panic("BEGIN DEFERRED"),
+    }
+    match parse(&"COMMIT".clone()) {
+        Ok(SCommit) => {}, _ => panic("COMMIT"),
+    }
+    match parse(&"END TRANSACTION".clone()) {
+        Ok(SCommit) => {}, _ => panic("END"),
+    }
+    match parse(&"ROLLBACK".clone()) {
+        Ok(SRollback(None)) => {}, _ => panic("ROLLBACK"),
+    }
+    match parse(&"ROLLBACK TO SAVEPOINT s1".clone()) {
+        Ok(SRollback(Some(_))) => {}, _ => panic("ROLLBACK TO"),
+    }
+    match parse(&"SAVEPOINT sp".clone()) {
+        Ok(SSavepoint(_)) => {}, _ => panic("SAVEPOINT"),
+    }
+    match parse(&"RELEASE sp".clone()) {
+        Ok(SRelease(_)) => {}, _ => panic("RELEASE"),
+    }
+}
+
+fn explain_wraps_select() {
+    match parse(&"EXPLAIN QUERY PLAN SELECT 1".clone()) {
+        Ok(SExplain(_, true)) => {},
+        _ => panic("EXPLAIN QUERY PLAN"),
+    }
+    match parse(&"EXPLAIN SELECT 1".clone()) {
+        Ok(SExplain(_, false)) => {},
+        _ => panic("EXPLAIN"),
+    }
+}
+
+fn vacuum_reindex_analyze() {
+    match parse(&"VACUUM".clone()) {
+        Ok(SVacuum(None)) => {}, _ => panic("VACUUM"),
+    }
+    match parse(&"VACUUM INTO 'backup.db'".clone()) {
+        Ok(SVacuum(Some(_))) => {}, _ => panic("VACUUM INTO"),
+    }
+    match parse(&"REINDEX".clone()) {
+        Ok(SReindex(None)) => {}, _ => panic("REINDEX"),
+    }
+    match parse(&"REINDEX main.t".clone()) {
+        Ok(SReindex(Some(_))) => {}, _ => panic("REINDEX main.t"),
+    }
+    match parse(&"ANALYZE".clone()) {
+        Ok(SAnalyze(None)) => {}, _ => panic("ANALYZE"),
+    }
+}
+
+fn batch_multi_statement() {
+    let src = "BEGIN; INSERT INTO t VALUES (1); COMMIT;".clone();
+    match parse_batch(&src) {
+        Ok(stmts) => { assert_eq(stmts.len(), 3); }
+        Err(_) => panic("batch"),
+    }
+}
+
+fn batch_skips_empty() {
+    match parse_batch(&";;; SELECT 1 ;;".clone()) {
+        Ok(stmts) => { assert_eq(stmts.len(), 1); }
+        Err(_) => panic("batch empty skips"),
+    }
+}
+
+fn main() {
+    create_table_minimal();
+    create_table_if_not_exists_strict_without_rowid();
+    create_table_with_table_constraints();
+    create_temp_table();
+    column_default_and_collate();
+    drop_table_if_exists();
+    drop_index_view_trigger();
+    pragma_get_and_set();
+    transactions();
+    explain_wraps_select();
+    vacuum_reindex_analyze();
+    batch_multi_statement();
+    batch_skips_empty();
+    print("parse_ddl_misc typecheck ok");
+}
