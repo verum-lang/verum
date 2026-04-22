@@ -6610,7 +6610,8 @@ impl<'s> CompilationPipeline<'s> {
     /// - Method proofs → Induction/cases via WP engine
     fn verify_theorem_proofs(&mut self, module: &Module) -> Result<()> {
         use crate::phases::proof_verification::{
-            build_refinement_alias_map, verify_proof_body_with_aliases, ProofVerificationResult,
+            build_refinement_alias_map, register_module_lemmas,
+            verify_proof_body_with_aliases, ProofVerificationResult,
         };
         use verum_smt::proof_search::{ProofSearchEngine, HintsDatabase};
 
@@ -6627,7 +6628,12 @@ impl<'s> CompilationPipeline<'s> {
         let timeout_ms = self.session.options().smt_timeout_secs * 1000;
         let timeout = std::time::Duration::from_millis(timeout_ms);
 
-        let hints_db = HintsDatabase::with_core();
+        // Seed the hints DB with stdlib core lemmas *and* every sibling
+        // theorem/axiom/lemma in this module, so `apply <name>` can
+        // dispatch to local declarations in the same file — the idiom
+        // used by the UHM bridge / corollary structure.
+        let mut hints_db = HintsDatabase::with_core();
+        register_module_lemmas(module, &mut hints_db);
         let mut proof_engine = ProofSearchEngine::with_hints(hints_db);
 
         // Refinement reflection: scan the module for pure,

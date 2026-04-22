@@ -1,0 +1,48 @@
+// @test: integration
+// @tier: 0
+// @level: L1
+// @tags: proof, tactic, apply, lemma, module
+// @expect: pass
+//
+// `apply <name>` must dispatch to sibling theorems / lemmas / corollaries
+// / axioms declared in the same module. Without module-scoped registration
+// into the hints database, the engine reports `Lemma '<name>' not found`
+// and the whole proof body fails even when the cited lemma is literally
+// in the same file.
+//
+// Locks in `register_module_lemmas` + the `Clone` derive on
+// `HintsDatabase` + per-theorem hints cloning in both verify paths.
+
+@verify(formal)
+theorem positivity_axiom(x: Int)
+    requires x > 0
+    ensures x > 0
+    proof by auto;
+
+@verify(formal)
+theorem apply_to_sibling(y: Int)
+    requires y > 0
+    ensures y > 0
+{
+    // Cites the `positivity_axiom` above via named apply — the fact that
+    // this parses, elaborates, *and* verifies is the regression.
+    proof by apply positivity_axiom
+}
+
+@verify(formal)
+theorem nonneg_reflexive(x: Int)
+    requires x >= 0
+    ensures x >= 0
+    proof by auto;
+
+@verify(formal)
+theorem apply_another_sibling(z: Int)
+    requires z >= 0
+    ensures z >= 0
+{
+    proof by apply nonneg_reflexive
+}
+
+fn main() {
+    print("L1-core: proof/tactics/apply_dispatch_to_siblings");
+}

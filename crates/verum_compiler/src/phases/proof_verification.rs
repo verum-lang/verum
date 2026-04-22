@@ -1879,6 +1879,55 @@ fn collect_refinements(
 }
 
 // ---------------------------------------------------------------------------
+// Module-scoped lemma / axiom registration
+// ---------------------------------------------------------------------------
+
+/// Walk all `theorem`, `lemma`, `corollary`, and `axiom` declarations in the
+/// module and register each as a `LemmaHint` in the `HintsDatabase` keyed by
+/// its unqualified name. This is what gives `apply <name>` in one theorem's
+/// proof body access to every sibling declaration in the same file.
+///
+/// The lemma expression is the theorem's `proposition`, which the parser
+/// already synthesises from the requires/ensures clauses as
+/// `(req_conj) ⇒ (ens_conj)`. `try_apply` then peels the implication chain
+/// into premises + conclusion and unifies the conclusion with the current
+/// goal, exactly the usual natural-deduction `apply` semantics.
+///
+/// Priority is fixed at a neutral mid-value so user declarations sit between
+/// core stdlib hints (highest) and speculative auto-hints (lowest). No
+/// heuristic ranking: the caller supplies the lemma name explicitly, so
+/// priority only matters when pattern-matching auto chooses among multiple
+/// candidates, not for direct-lookup apply.
+pub fn register_module_lemmas(
+    module: &verum_ast::Module,
+    hints: &mut verum_smt::proof_search::HintsDatabase,
+) {
+    use verum_ast::ItemKind;
+    use verum_smt::proof_search::LemmaHint;
+
+    for item in &module.items {
+        let (name, proposition) = match &item.kind {
+            ItemKind::Theorem(t) | ItemKind::Lemma(t) | ItemKind::Corollary(t) => (
+                t.name.name.clone(),
+                t.proposition.as_ref().clone(),
+            ),
+            ItemKind::Axiom(a) => (
+                a.name.name.clone(),
+                a.proposition.as_ref().clone(),
+            ),
+            _ => continue,
+        };
+
+        let hint = LemmaHint {
+            name: name.clone(),
+            priority: 500,
+            lemma: Heap::new(proposition),
+        };
+        hints.register_lemma(name, hint);
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Alias-map construction (nominal refinement chain flattener)
 // ---------------------------------------------------------------------------
 

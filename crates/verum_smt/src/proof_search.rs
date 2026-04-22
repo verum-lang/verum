@@ -78,7 +78,7 @@ pub enum SignatureType {
 /// tactic hints keyed by goal pattern, and decision procedures for decidable fragments.
 /// Lemmas can be registered with `@hint(priority = N)` or `@hint(pattern = "...")`.
 /// The search engine queries hints by matching goal structure against stored patterns.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct HintsDatabase {
     /// Lemma hints indexed by pattern
     lemmas: Map<Text, List<LemmaHint>>,

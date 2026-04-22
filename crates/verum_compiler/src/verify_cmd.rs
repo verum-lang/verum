@@ -160,6 +160,12 @@ impl<'s> VerifyCommand<'s> {
         let alias_map =
             crate::phases::proof_verification::build_refinement_alias_map(module);
 
+        // Pre-populate a hints database with every sibling theorem / lemma /
+        // corollary / axiom in this module so `apply <name>` can find them.
+        // Cloned per theorem below — cheap because `LemmaHint` is small.
+        let mut module_hints = verum_smt::proof_search::HintsDatabase::new();
+        crate::phases::proof_verification::register_module_lemmas(module, &mut module_hints);
+
         for item in &module.items {
             if let ItemKind::Function(func) = &item.kind {
                 // Skip if filter doesn't match
@@ -267,7 +273,7 @@ impl<'s> VerifyCommand<'s> {
                 continue;
             }
 
-            let result = self.verify_theorem(thm, kind_name, timeout, &alias_map);
+            let result = self.verify_theorem(thm, kind_name, timeout, &alias_map, &module_hints);
 
             // Note: Profiler is not used for theorem verification (different result type)
 
@@ -306,6 +312,7 @@ impl<'s> VerifyCommand<'s> {
         kind_name: &str,
         timeout: Duration,
         alias_map: &std::collections::HashMap<Text, Vec<Expr>>,
+        module_hints: &verum_smt::proof_search::HintsDatabase,
     ) -> VerificationResult {
         let start = Instant::now();
 
@@ -324,9 +331,9 @@ impl<'s> VerifyCommand<'s> {
         };
         let smt_ctx = SmtContext::with_config(smt_config);
 
-        // Create proof search engine
-        let hints_db = verum_smt::proof_search::HintsDatabase::new();
-        let mut proof_engine = ProofSearchEngine::with_hints(hints_db);
+        // Create proof search engine seeded with this module's lemmas so
+        // `apply <name>` dispatches to siblings declared in the same file.
+        let mut proof_engine = ProofSearchEngine::with_hints(module_hints.clone());
 
         // Run the full proof verification pipeline
         match crate::phases::proof_verification::verify_proof_body_with_aliases(
