@@ -63,4 +63,5 @@ public mount .header_protection.{
 };
 public mount .retry.{
     compute_retry_integrity_tag, verify_retry_integrity_tag,
+    RETRY_INTEGRITY_KEY_V1, RETRY_INTEGRITY_NONCE_V1,
 };
