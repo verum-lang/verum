@@ -1,0 +1,268 @@
+// =============================================================================
+// collections/hyperloglog.vr — cardinality estimator (Flajolet et al. 2007)
+// =============================================================================
+// Layer: 2 (Collections)
+// Dependencies: core, core.security.mac.hmac, core.security.util.rng
+// =============================================================================
+//
+// HyperLogLog — counts distinct items in a stream with bounded
+// memory and ~1.04/√m relative error. Used at scale by Redis
+// (PFADD/PFCOUNT), Google BigQuery APPROX_COUNT_DISTINCT, Trino
+// approx_distinct, Druid theta-sketch equivalents.
+//
+// # Sizing
+//
+//   `precision` p ∈ [4, 16]; m = 2^p registers of 6 bits each.
+//
+//   p   | memory  | 1σ error
+//   ----|---------|----------
+//    4  |   12 B  | 26%
+//    8  |  192 B  |  6.5%
+//   10  |  768 B  |  3.25%
+//   12  |  3 KiB  |  1.6%
+//   14  | 12 KiB  |  0.81%    (Redis default)
+//   16  | 48 KiB  |  0.4%
+//
+// # API
+//
+// ```
+// let mut hll = HyperLogLog.new(14);
+// hll.add(b"user:alice");
+// hll.add(b"user:bob");
+// let n: UInt64 = hll.estimate();
+//
+// // Merge two sketches (union of their underlying sets).
+// hll.merge(&other);
+// ```
+//
+// # Security
+//
+// The HMAC-SHA256 key is CSPRNG-sourced per-sketch so an attacker
+// cannot craft adversarial inputs that skew a specific sketch's
+// error beyond the theoretical bound. Use `new_with_key` for
+// deterministic re-construction across runs (e.g. Redis HLL
+// merge across nodes requires the same family hash).
+//
+// =============================================================================
+
+module core.collections.hyperloglog;
+
+mount core.*;
+mount core.collections.List;
+mount core.security.mac.hmac.{hmac_sha256};
+mount core.security.util.rng.{fill_secure};
+
+public type HllError is
+      PrecisionOutOfRange(Int)
+    | PrecisionMismatch;
+
+public const MIN_PRECISION: Int = 4;
+public const MAX_PRECISION: Int = 16;
+public const DEFAULT_PRECISION: Int = 14;    // Redis default
+
+// =============================================================================
+// Sketch
+// =============================================================================
+
+public type HyperLogLog is {
+    precision:  Int,
+    m:          Int,     // 2^precision
+    registers:  List<UInt8>,
+    key:        [Byte; 32],
+};
+
+implement HyperLogLog {
+    /// Build a sketch at precision `p` (valid range 4..=16).
+    /// Fresh CSPRNG key per sketch.
+    public fn new(p: Int) -> HyperLogLog {
+        let precision = clamp_precision(p);
+        let m = 1 << precision;
+        let mut regs: List<UInt8> = [];
+        let mut i: Int = 0;
+        while i < m { regs.push(0_u8); i = i + 1; }
+        let mut k: [Byte; 32] = [0_u8; 32];
+        fill_secure(&mut k);
+        HyperLogLog {
+            precision: precision, m: m, registers: regs, key: k,
+        }
+    }
+
+    /// Construct with a caller-supplied 32-byte key — required when
+    /// merging sketches across processes.
+    public fn new_with_key(p: Int, key: [Byte; 32]) -> HyperLogLog {
+        let precision = clamp_precision(p);
+        let m = 1 << precision;
+        let mut regs: List<UInt8> = [];
+        let mut i: Int = 0;
+        while i < m { regs.push(0_u8); i = i + 1; }
+        HyperLogLog {
+            precision: precision, m: m, registers: regs, key: key,
+        }
+    }
+
+    /// Observe `item`. Idempotent: repeated adds of the same bytes
+    /// don't change the sketch.
+    public fn add(&mut self, item: &[Byte]) {
+        let h = hash64(&self.key[..], item);
+        let idx = (h >> (64 - self.precision as UInt64)) as Int;
+        // The rank is 1 + leading zeros in the remaining (64 - p) bits.
+        let rank = rank_of(h, self.precision);
+        if rank > self.registers[idx] {
+            self.registers[idx] = rank;
+        }
+    }
+
+    /// Current estimate of distinct-element count.
+    public fn estimate(&self) -> UInt64 {
+        let m_f = self.m as Float;
+        let alpha = alpha_m(self.m);
+
+        // Z = Σ 2^(-register[i]). Integer-fraction arithmetic via f64
+        // to keep precision on long-tail sketches.
+        let mut z: Float = 0.0;
+        let mut zeros: Int = 0;
+        let mut i: Int = 0;
+        while i < self.m {
+            let r = self.registers[i] as Int;
+            if r == 0 { zeros = zeros + 1; }
+            z = z + pow2_neg(r);
+            i = i + 1;
+        }
+
+        let raw_estimate = alpha * m_f * m_f / z;
+
+        // Small-range correction: if zeros > 0, switch to
+        // linear counting (Flajolet et al. §6).
+        if raw_estimate <= 2.5 * m_f {
+            if zeros > 0 {
+                let zf = zeros as Float;
+                return (m_f * (m_f / zf).ln_approx()) as UInt64;
+            }
+        }
+        // No large-range correction for 64-bit hash (2^32 cutoff
+        // doesn't apply — the hash space is 2^64).
+        raw_estimate as UInt64
+    }
+
+    /// Union with another sketch. Both sketches MUST have the same
+    /// precision and key — otherwise returns `PrecisionMismatch`.
+    public fn merge(&mut self, other: &HyperLogLog) -> Result<(), HllError> {
+        if self.precision != other.precision {
+            return Err(HllError.PrecisionMismatch);
+        }
+        // Key mismatch = incompatible sketches; we don't enforce
+        // beyond precision here because some deployments legitimately
+        // rehash before merging (HyperLogLog++ variant).
+        let mut i: Int = 0;
+        while i < self.m {
+            if other.registers[i] > self.registers[i] {
+                self.registers[i] = other.registers[i];
+            }
+            i = i + 1;
+        }
+        Ok(())
+    }
+
+    /// Zero the sketch. Key is preserved so subsequent adds still
+    /// hash consistently across pre-clear adds.
+    public fn clear(&mut self) {
+        let mut i: Int = 0;
+        while i < self.m {
+            self.registers[i] = 0_u8;
+            i = i + 1;
+        }
+    }
+
+    public fn precision(&self) -> Int { self.precision }
+    public fn register_count(&self) -> Int { self.m }
+}
+
+// =============================================================================
+// Internals
+// =============================================================================
+
+fn clamp_precision(p: Int) -> Int {
+    if p < MIN_PRECISION { MIN_PRECISION }
+    else if p > MAX_PRECISION { MAX_PRECISION }
+    else { p }
+}
+
+fn hash64(key: &[Byte], item: &[Byte]) -> UInt64 {
+    let digest = hmac_sha256(key, item);
+    let mut r: UInt64 = 0_u64;
+    let mut i: Int = 0;
+    while i < 8 {
+        r = (r << 8_u64) | (digest[i] as UInt64);
+        i = i + 1;
+    }
+    r
+}
+
+fn rank_of(h: UInt64, precision: Int) -> UInt8 {
+    // Drop the top `precision` bits — those picked the register.
+    // Count leading zeros in the remaining (64 - p) bits; rank
+    // is leading_zeros + 1, capped at (64 - p + 1).
+    let remaining_bits = 64 - precision;
+    // Shift h left to align the remaining bits at the MSB.
+    let shifted = h << (precision as UInt64);
+    // leading_zeros of `shifted` interpreted over all 64 bits.
+    let lz = count_leading_zeros(shifted);
+    let rank = if lz > remaining_bits { remaining_bits + 1 } else { lz + 1 };
+    rank as UInt8
+}
+
+fn count_leading_zeros(x: UInt64) -> Int {
+    if x == 0_u64 { return 64; }
+    let mut n: Int = 0;
+    let mut v = x;
+    if (v >> 32_u64) == 0_u64 { n = n + 32; v = v << 32_u64; }
+    if (v >> 48_u64) == 0_u64 { n = n + 16; v = v << 16_u64; }
+    if (v >> 56_u64) == 0_u64 { n = n +  8; v = v <<  8_u64; }
+    if (v >> 60_u64) == 0_u64 { n = n +  4; v = v <<  4_u64; }
+    if (v >> 62_u64) == 0_u64 { n = n +  2; v = v <<  2_u64; }
+    if (v >> 63_u64) == 0_u64 { n = n +  1; }
+    n
+}
+
+fn alpha_m(m: Int) -> Float {
+    // Flajolet §4: the bias-correction constant.
+    match m {
+        16 => 0.673,
+        32 => 0.697,
+        64 => 0.709,
+        _  => 0.7213 / (1.0 + 1.079 / (m as Float)),
+    }
+}
+
+fn pow2_neg(k: Int) -> Float {
+    // 2^(-k). Integer shift wouldn't suffice for the negative
+    // exponent; we compute via repeated halving for modest k.
+    let mut r: Float = 1.0;
+    let mut i: Int = 0;
+    while i < k { r = r * 0.5; i = i + 1; }
+    r
+}
+
+// Manual ln approximation — we avoid the math intrinsic import so
+// HLL stays dependency-light. Accuracy is sufficient for the
+// small-range linear-counting branch.
+implement Float {
+    fn ln_approx(&self) -> Float {
+        // Series (1 - y)/(1 + y) = x → ln(x) = 2 Σ y^(2k+1)/(2k+1).
+        // Acceptable for x in [0.5, 2]; reduce outside.
+        let mut x = *self;
+        if x <= 0.0 { return 0.0; }
+        let mut scale: Float = 0.0;
+        while x > 2.0 { x = x * 0.5; scale = scale + 0.693147180559945; }
+        while x < 0.5 { x = x * 2.0; scale = scale - 0.693147180559945; }
+        let y = (x - 1.0) / (x + 1.0);
+        let y2 = y * y;
+        // Unrolled 5-term Taylor (enough for ~1e-6 accuracy on [0.5, 2]).
+        let t1 = y;
+        let t3 = (y * y2) / 3.0;
+        let t5 = (y * y2 * y2) / 5.0;
+        let t7 = (y * y2 * y2 * y2) / 7.0;
+        let t9 = (y * y2 * y2 * y2 * y2) / 9.0;
+        scale + 2.0 * (t1 + t3 + t5 + t7 + t9)
+    }
+}

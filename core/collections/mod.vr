@@ -34,6 +34,7 @@ public module adjacency_list;
 public module ttl_cache;
 public module bloom;
 public module consistent_hash;
+public module hyperloglog;
 
 // =============================================================================
 // Re-exports
@@ -120,6 +121,12 @@ public mount .bloom.{BloomFilter, BloomConfig};
 
 // From consistent_hash
 public mount .consistent_hash.{ConsistentHashRing, DEFAULT_VIRTUAL_NODES};
+
+// From hyperloglog
+public mount .hyperloglog.{
+    HyperLogLog, HllError,
+    MIN_PRECISION, MAX_PRECISION, DEFAULT_PRECISION,
+};
 
 // =============================================================================
 // Prelude exports

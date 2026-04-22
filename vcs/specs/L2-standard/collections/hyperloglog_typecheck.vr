@@ -1,0 +1,53 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: collections, hyperloglog, cardinality, probabilistic, typecheck
+// @timeout: 10000
+// @expect: pass
+
+mount core.collections.{
+    HyperLogLog, HllError,
+    MIN_PRECISION, MAX_PRECISION, DEFAULT_PRECISION,
+};
+
+fn exercise_hll() -> Result<(), HllError> {
+    let mut hll = HyperLogLog.new(DEFAULT_PRECISION);
+
+    // Feed some synthetic keys.
+    let mut i: Int = 0;
+    let mut buf: [Byte; 4] = [0_u8; 4];
+    while i < 1000 {
+        buf[0] = (i & 0xFF) as Byte;
+        buf[1] = ((i >> 8) & 0xFF) as Byte;
+        buf[2] = ((i >> 16) & 0xFF) as Byte;
+        buf[3] = ((i >> 24) & 0xFF) as Byte;
+        hll.add(&buf[..]);
+        i = i + 1;
+    }
+
+    // Estimate — should be close to 1000.
+    let n: UInt64 = hll.estimate();
+    let _ = n;
+
+    // Merge with an independent sketch that shares the same key.
+    let key: [Byte; 32] = [0_u8; 32];
+    let mut a = HyperLogLog.new_with_key(14, key);
+    let mut b = HyperLogLog.new_with_key(14, key);
+    a.add(b"x");
+    a.add(b"y");
+    b.add(b"y");
+    b.add(b"z");
+    a.merge(&b)?;
+    let _ = a.estimate();      // ~3
+
+    // Introspection.
+    let _: Int = hll.precision();
+    let _: Int = hll.register_count();
+    hll.clear();
+
+    let _: Int = MIN_PRECISION;
+    let _: Int = MAX_PRECISION;
+    Ok(())
+}
+
+fn main() { let _ = exercise_hll(); }
