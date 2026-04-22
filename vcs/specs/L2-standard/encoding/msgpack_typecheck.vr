@@ -1,0 +1,69 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: encoding, msgpack, messagepack, binary, typecheck
+// @timeout: 10000
+// @expect: pass
+
+mount core.encoding.msgpack.{
+    MsgPackValue, MsgPackError,
+    encode, decode, MAX_MSGPACK_NESTING,
+};
+mount core.collections.List;
+
+fn exercise_msgpack() -> Result<(), MsgPackError> {
+    // Decode canonical wire vectors (one of each major type).
+    let wire_nil: [Byte; 1] = [0xC0_u8];
+    let _ = decode(&wire_nil[..])?;
+
+    let wire_true: [Byte; 1] = [0xC3_u8];
+    let _ = decode(&wire_true[..])?;
+
+    // positive fixint 42 = 0x2A
+    let wire_u42: [Byte; 1] = [0x2A_u8];
+    let _ = decode(&wire_u42[..])?;
+
+    // fixstr "hi" = 0xA2 'h' 'i'
+    let wire_hi: [Byte; 3] = [0xA2_u8, 0x68_u8, 0x69_u8];
+    let _ = decode(&wire_hi[..])?;
+
+    // fixarray [1, 2] = 0x92 0x01 0x02
+    let wire_arr: [Byte; 3] = [0x92_u8, 0x01_u8, 0x02_u8];
+    let _ = decode(&wire_arr[..])?;
+
+    // fixmap {1: 2} = 0x81 0x01 0x02
+    let wire_map: [Byte; 3] = [0x81_u8, 0x01_u8, 0x02_u8];
+    let _ = decode(&wire_map[..])?;
+
+    // uint64 max = 0xCF 0xFF×8
+    let wire_u64: [Byte; 9] = [0xCF_u8, 0xFF_u8, 0xFF_u8, 0xFF_u8,
+                                0xFF_u8, 0xFF_u8, 0xFF_u8, 0xFF_u8, 0xFF_u8];
+    let _ = decode(&wire_u64[..])?;
+
+    // float64 = 0xCB + 8 bytes
+    let wire_f64: [Byte; 9] = [0xCB_u8, 0x40_u8, 0x09_u8, 0x21_u8,
+                                0xFB_u8, 0x54_u8, 0x44_u8, 0x2D_u8, 0x18_u8];
+    let _ = decode(&wire_f64[..])?;
+
+    // bin 8 "\x00\x01\x02" = 0xC4 0x03 0x00 0x01 0x02
+    let wire_bin: [Byte; 5] = [0xC4_u8, 0x03_u8, 0x00_u8, 0x01_u8, 0x02_u8];
+    let _ = decode(&wire_bin[..])?;
+
+    // fixext 1, type 7, data 0xFF = 0xD4 0x07 0xFF
+    let wire_ext: [Byte; 3] = [0xD4_u8, 0x07_u8, 0xFF_u8];
+    let _ = decode(&wire_ext[..])?;
+
+    // Decode → re-encode round-trip.
+    match decode(&wire_hi[..]) {
+        Ok(v) => {
+            let re: List<Byte> = encode(&v);
+            assert(re.len() == 3);
+        },
+        Err(_) => {},
+    }
+
+    let _: Int = MAX_MSGPACK_NESTING;
+    Ok(())
+}
+
+fn main() { let _ = exercise_msgpack(); }

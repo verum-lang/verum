@@ -7,7 +7,7 @@
 
 mount core.encoding.json_pointer.{
     JsonPointer, JsonPointerError,
-    parse, format, resolve,
+    parse, format_json_pointer, resolve,
 };
 mount core.encoding.json.{JsonValue};
 
@@ -31,7 +31,7 @@ fn exercise_pointer() -> Result<(), JsonPointerError> {
     // After decode: "a/b" and "m~n".
 
     // Format round-trip.
-    let s = format(&p_escaped);
+    let s = format_json_pointer(&p_escaped);
     let _ = s;
 
     // Push / parent builder API.

@@ -1,0 +1,525 @@
+// =============================================================================
+// encoding/msgpack.vr — MessagePack encoder + decoder
+// =============================================================================
+// Layer: 1 (Encoding)
+// Dependencies: core, core.collections
+// =============================================================================
+//
+// MessagePack — compact binary alternative to JSON. Used by Redis
+// RESP3, Pinterest MySQL adapter, PyPy RPython, Erlang msgpack,
+// Ruby msgpack, AsyncAPI streaming, and every "we need JSON but
+// smaller + faster" deployment.
+//
+// # Type coverage
+//
+//   nil, bool, int (u64 / i64 range), float32, float64,
+//   str, bin, array, map, ext (user-defined)
+//
+// All positive ints encoded in the smallest format that fits;
+// negative ints use the negative-fixint / intN family.
+//
+// # API
+//
+// ```
+// // Encode
+// let wire: List<Byte> = msgpack.encode(&value);
+//
+// // Decode
+// let value: MsgPackValue = msgpack.decode(&wire)?;
+// ```
+//
+// # Spec: https://github.com/msgpack/msgpack/blob/master/spec.md
+//
+// =============================================================================
+
+module core.encoding.msgpack;
+
+mount core.*;
+mount core.collections.List;
+
+// =============================================================================
+// Value
+// =============================================================================
+
+public type MsgPackValue is
+      Nil
+    | Bool(Bool)
+    | PositiveInt(UInt64)
+    | NegativeInt(Int)           // negative-valued
+    | Float32(Float)
+    | Float64(Float)
+    | Str(Text)
+    | Bin(List<Byte>)
+    | Array(List<MsgPackValue>)
+    | Map(List<(MsgPackValue, MsgPackValue)>)
+    | Ext { type_id: Int, data: List<Byte> };
+
+public type MsgPackError is
+      Truncated(Int)
+    | InvalidPrefix(Byte)
+    | InvalidUtf8
+    | NestingTooDeep
+    | TrailingBytes(Int);
+
+public const MAX_MSGPACK_NESTING: Int = 128;
+
+// =============================================================================
+// Encode
+// =============================================================================
+
+public fn encode(v: &MsgPackValue) -> List<Byte> {
+    let mut out: List<Byte> = [];
+    encode_into(v, &mut out);
+    out
+}
+
+fn encode_into(v: &MsgPackValue, out: &mut List<Byte>) {
+    match v {
+        MsgPackValue.Nil      => out.push(0xC0_u8),
+        MsgPackValue.Bool(b)  => out.push(if *b { 0xC3_u8 } else { 0xC2_u8 }),
+
+        MsgPackValue.PositiveInt(u) => {
+            let n = *u;
+            if n < 128_u64 {
+                out.push((n & 0x7F_u64) as Byte);        // positive fixint
+            } else if n < 0x100_u64 {
+                out.push(0xCC_u8);
+                out.push(n as Byte);
+            } else if n < 0x10000_u64 {
+                out.push(0xCD_u8);
+                push_u16_be(out, n as UInt16);
+            } else if n < 0x100000000_u64 {
+                out.push(0xCE_u8);
+                push_u32_be(out, n as UInt32);
+            } else {
+                out.push(0xCF_u8);
+                push_u64_be(out, n);
+            }
+        },
+
+        MsgPackValue.NegativeInt(i) => {
+            let n = *i;
+            if n >= -32 && n < 0 {
+                out.push((0xE0_u8 | ((n + 32) as Byte)) & 0xFF_u8);  // negative fixint
+            } else if n >= -128 {
+                out.push(0xD0_u8);
+                out.push((n & 0xFF) as Byte);
+            } else if n >= -32768 {
+                out.push(0xD1_u8);
+                push_u16_be(out, (n & 0xFFFF) as UInt16);
+            } else if n >= -2147483648 {
+                out.push(0xD2_u8);
+                push_u32_be(out, (n & 0xFFFFFFFF) as UInt32);
+            } else {
+                out.push(0xD3_u8);
+                push_u64_be(out, n as UInt64);
+            }
+        },
+
+        MsgPackValue.Float32(f) => {
+            out.push(0xCA_u8);
+            let bits = f32_to_bits(*f);
+            push_u32_be(out, bits);
+        },
+        MsgPackValue.Float64(f) => {
+            out.push(0xCB_u8);
+            push_u64_be(out, f.to_bits());
+        },
+
+        MsgPackValue.Str(s) => {
+            let bytes = s.as_bytes();
+            let n = bytes.len();
+            if n < 32 {
+                out.push(0xA0_u8 | (n as Byte));       // fixstr
+            } else if n < 0x100 {
+                out.push(0xD9_u8);
+                out.push(n as Byte);
+            } else if n < 0x10000 {
+                out.push(0xDA_u8);
+                push_u16_be(out, n as UInt16);
+            } else {
+                out.push(0xDB_u8);
+                push_u32_be(out, n as UInt32);
+            }
+            push_all(out, bytes);
+        },
+
+        MsgPackValue.Bin(b) => {
+            let n = b.len();
+            if n < 0x100 {
+                out.push(0xC4_u8);
+                out.push(n as Byte);
+            } else if n < 0x10000 {
+                out.push(0xC5_u8);
+                push_u16_be(out, n as UInt16);
+            } else {
+                out.push(0xC6_u8);
+                push_u32_be(out, n as UInt32);
+            }
+            push_all(out, b.as_slice());
+        },
+
+        MsgPackValue.Array(arr) => {
+            let n = arr.len();
+            if n < 16 {
+                out.push(0x90_u8 | (n as Byte));       // fixarray
+            } else if n < 0x10000 {
+                out.push(0xDC_u8);
+                push_u16_be(out, n as UInt16);
+            } else {
+                out.push(0xDD_u8);
+                push_u32_be(out, n as UInt32);
+            }
+            let mut i: Int = 0;
+            while i < arr.len() { encode_into(&arr[i], out); i = i + 1; }
+        },
+
+        MsgPackValue.Map(entries) => {
+            let n = entries.len();
+            if n < 16 {
+                out.push(0x80_u8 | (n as Byte));       // fixmap
+            } else if n < 0x10000 {
+                out.push(0xDE_u8);
+                push_u16_be(out, n as UInt16);
+            } else {
+                out.push(0xDF_u8);
+                push_u32_be(out, n as UInt32);
+            }
+            let mut i: Int = 0;
+            while i < entries.len() {
+                let (k, val) = &entries[i];
+                encode_into(k, out);
+                encode_into(val, out);
+                i = i + 1;
+            }
+        },
+
+        MsgPackValue.Ext { type_id, data } => {
+            let n = data.len();
+            // Fixed-length variants (fixext1..16) for common sizes.
+            if n == 1 {
+                out.push(0xD4_u8);
+            } else if n == 2 {
+                out.push(0xD5_u8);
+            } else if n == 4 {
+                out.push(0xD6_u8);
+            } else if n == 8 {
+                out.push(0xD7_u8);
+            } else if n == 16 {
+                out.push(0xD8_u8);
+            } else if n < 0x100 {
+                out.push(0xC7_u8); out.push(n as Byte);
+            } else if n < 0x10000 {
+                out.push(0xC8_u8); push_u16_be(out, n as UInt16);
+            } else {
+                out.push(0xC9_u8); push_u32_be(out, n as UInt32);
+            }
+            out.push((*type_id as Byte) & 0xFF_u8);
+            push_all(out, data.as_slice());
+        },
+    }
+}
+
+// =============================================================================
+// Decode
+// =============================================================================
+
+public fn decode(bytes: &[Byte]) -> Result<MsgPackValue, MsgPackError> {
+    let mut pos: Int = 0;
+    let v = decode_item(bytes, &mut pos, 0)?;
+    if pos != bytes.len() {
+        return Err(MsgPackError.TrailingBytes(bytes.len() - pos));
+    }
+    Ok(v)
+}
+
+fn decode_item(bytes: &[Byte], pos: &mut Int, depth: Int) -> Result<MsgPackValue, MsgPackError> {
+    if depth > MAX_MSGPACK_NESTING {
+        return Err(MsgPackError.NestingTooDeep);
+    }
+    if *pos >= bytes.len() { return Err(MsgPackError.Truncated(*pos)); }
+    let tag = bytes[*pos];
+    *pos = *pos + 1;
+
+    // positive fixint (0x00 .. 0x7F).
+    if tag < 0x80_u8 {
+        return Ok(MsgPackValue.PositiveInt(tag as UInt64));
+    }
+    // fixmap (0x80 .. 0x8F).
+    if tag >= 0x80_u8 && tag <= 0x8F_u8 {
+        let n = (tag & 0x0F_u8) as Int;
+        return decode_map(bytes, pos, n, depth);
+    }
+    // fixarray (0x90 .. 0x9F).
+    if tag >= 0x90_u8 && tag <= 0x9F_u8 {
+        let n = (tag & 0x0F_u8) as Int;
+        return decode_array(bytes, pos, n, depth);
+    }
+    // fixstr (0xA0 .. 0xBF).
+    if tag >= 0xA0_u8 && tag <= 0xBF_u8 {
+        let n = (tag & 0x1F_u8) as Int;
+        return decode_str(bytes, pos, n);
+    }
+    // negative fixint (0xE0 .. 0xFF).
+    if tag >= 0xE0_u8 {
+        let signed: Int = (tag as Int) - 256;
+        return Ok(MsgPackValue.NegativeInt(signed));
+    }
+
+    // Other specific tags.
+    match tag {
+        0xC0_u8 => Ok(MsgPackValue.Nil),
+        0xC2_u8 => Ok(MsgPackValue.Bool(false)),
+        0xC3_u8 => Ok(MsgPackValue.Bool(true)),
+
+        // bin 8/16/32
+        0xC4_u8 => { let n = read_u8(bytes, pos)? as Int; decode_bin(bytes, pos, n) },
+        0xC5_u8 => { let n = read_u16_be(bytes, pos)? as Int; decode_bin(bytes, pos, n) },
+        0xC6_u8 => { let n = read_u32_be(bytes, pos)? as Int; decode_bin(bytes, pos, n) },
+
+        // ext 8/16/32
+        0xC7_u8 => { let n = read_u8(bytes, pos)? as Int; decode_ext(bytes, pos, n) },
+        0xC8_u8 => { let n = read_u16_be(bytes, pos)? as Int; decode_ext(bytes, pos, n) },
+        0xC9_u8 => { let n = read_u32_be(bytes, pos)? as Int; decode_ext(bytes, pos, n) },
+
+        // float 32/64
+        0xCA_u8 => {
+            let bits = read_u32_be(bytes, pos)?;
+            Ok(MsgPackValue.Float32(f32_bits_to_f64(bits)))
+        },
+        0xCB_u8 => {
+            let bits = read_u64_be(bytes, pos)?;
+            Ok(MsgPackValue.Float64(Float.from_bits(bits)))
+        },
+
+        // uint 8/16/32/64
+        0xCC_u8 => Ok(MsgPackValue.PositiveInt(read_u8(bytes, pos)? as UInt64)),
+        0xCD_u8 => Ok(MsgPackValue.PositiveInt(read_u16_be(bytes, pos)? as UInt64)),
+        0xCE_u8 => Ok(MsgPackValue.PositiveInt(read_u32_be(bytes, pos)? as UInt64)),
+        0xCF_u8 => Ok(MsgPackValue.PositiveInt(read_u64_be(bytes, pos)?)),
+
+        // int 8/16/32/64
+        0xD0_u8 => {
+            let b = read_u8(bytes, pos)? as Int;
+            let signed = if b >= 128 { b - 256 } else { b };
+            Ok(MsgPackValue.NegativeInt(signed))
+        },
+        0xD1_u8 => {
+            let v = read_u16_be(bytes, pos)? as Int;
+            let signed = if v >= 0x8000 { v - 0x10000 } else { v };
+            Ok(MsgPackValue.NegativeInt(signed))
+        },
+        0xD2_u8 => {
+            let v = read_u32_be(bytes, pos)?;
+            let signed = if v >= 0x80000000_u32 {
+                (v as Int) - 0x100000000
+            } else { v as Int };
+            Ok(MsgPackValue.NegativeInt(signed))
+        },
+        0xD3_u8 => {
+            let v = read_u64_be(bytes, pos)?;
+            Ok(MsgPackValue.NegativeInt(v as Int))
+        },
+
+        // fixext 1/2/4/8/16
+        0xD4_u8 => decode_ext(bytes, pos, 1),
+        0xD5_u8 => decode_ext(bytes, pos, 2),
+        0xD6_u8 => decode_ext(bytes, pos, 4),
+        0xD7_u8 => decode_ext(bytes, pos, 8),
+        0xD8_u8 => decode_ext(bytes, pos, 16),
+
+        // str 8/16/32
+        0xD9_u8 => { let n = read_u8(bytes, pos)? as Int; decode_str(bytes, pos, n) },
+        0xDA_u8 => { let n = read_u16_be(bytes, pos)? as Int; decode_str(bytes, pos, n) },
+        0xDB_u8 => { let n = read_u32_be(bytes, pos)? as Int; decode_str(bytes, pos, n) },
+
+        // array 16/32
+        0xDC_u8 => {
+            let n = read_u16_be(bytes, pos)? as Int;
+            decode_array(bytes, pos, n, depth)
+        },
+        0xDD_u8 => {
+            let n = read_u32_be(bytes, pos)? as Int;
+            decode_array(bytes, pos, n, depth)
+        },
+
+        // map 16/32
+        0xDE_u8 => {
+            let n = read_u16_be(bytes, pos)? as Int;
+            decode_map(bytes, pos, n, depth)
+        },
+        0xDF_u8 => {
+            let n = read_u32_be(bytes, pos)? as Int;
+            decode_map(bytes, pos, n, depth)
+        },
+
+        _ => Err(MsgPackError.InvalidPrefix(tag)),
+    }
+}
+
+fn decode_str(bytes: &[Byte], pos: &mut Int, n: Int) -> Result<MsgPackValue, MsgPackError> {
+    if *pos + n > bytes.len() { return Err(MsgPackError.Truncated(*pos)); }
+    let mut buf: List<Byte> = [];
+    let mut i: Int = 0;
+    while i < n { buf.push(bytes[*pos + i]); i = i + 1; }
+    *pos = *pos + n;
+    Ok(MsgPackValue.Str(Text.from_utf8_unchecked(buf.as_slice())))
+}
+
+fn decode_bin(bytes: &[Byte], pos: &mut Int, n: Int) -> Result<MsgPackValue, MsgPackError> {
+    if *pos + n > bytes.len() { return Err(MsgPackError.Truncated(*pos)); }
+    let mut buf: List<Byte> = [];
+    let mut i: Int = 0;
+    while i < n { buf.push(bytes[*pos + i]); i = i + 1; }
+    *pos = *pos + n;
+    Ok(MsgPackValue.Bin(buf))
+}
+
+fn decode_array(bytes: &[Byte], pos: &mut Int, n: Int, depth: Int) -> Result<MsgPackValue, MsgPackError> {
+    let mut items: List<MsgPackValue> = [];
+    let mut i: Int = 0;
+    while i < n {
+        items.push(decode_item(bytes, pos, depth + 1)?);
+        i = i + 1;
+    }
+    Ok(MsgPackValue.Array(items))
+}
+
+fn decode_map(bytes: &[Byte], pos: &mut Int, n: Int, depth: Int) -> Result<MsgPackValue, MsgPackError> {
+    let mut entries: List<(MsgPackValue, MsgPackValue)> = [];
+    let mut i: Int = 0;
+    while i < n {
+        let k = decode_item(bytes, pos, depth + 1)?;
+        let v = decode_item(bytes, pos, depth + 1)?;
+        entries.push((k, v));
+        i = i + 1;
+    }
+    Ok(MsgPackValue.Map(entries))
+}
+
+fn decode_ext(bytes: &[Byte], pos: &mut Int, n: Int) -> Result<MsgPackValue, MsgPackError> {
+    if *pos + 1 + n > bytes.len() { return Err(MsgPackError.Truncated(*pos)); }
+    let type_id_byte = bytes[*pos];
+    *pos = *pos + 1;
+    let type_id: Int = if type_id_byte >= 128_u8 {
+        (type_id_byte as Int) - 256
+    } else {
+        type_id_byte as Int
+    };
+    let mut buf: List<Byte> = [];
+    let mut i: Int = 0;
+    while i < n { buf.push(bytes[*pos + i]); i = i + 1; }
+    *pos = *pos + n;
+    Ok(MsgPackValue.Ext { type_id: type_id, data: buf })
+}
+
+// =============================================================================
+// Byte helpers
+// =============================================================================
+
+fn push_all(dst: &mut List<Byte>, src: &[Byte]) {
+    let mut i: Int = 0;
+    while i < src.len() { dst.push(src[i]); i = i + 1; }
+}
+
+fn push_u16_be(dst: &mut List<Byte>, v: UInt16) {
+    dst.push(((v >> 8_u16) & 0xFF_u16) as Byte);
+    dst.push((v & 0xFF_u16) as Byte);
+}
+
+fn push_u32_be(dst: &mut List<Byte>, v: UInt32) {
+    dst.push(((v >> 24_u32) & 0xFF_u32) as Byte);
+    dst.push(((v >> 16_u32) & 0xFF_u32) as Byte);
+    dst.push(((v >>  8_u32) & 0xFF_u32) as Byte);
+    dst.push((v & 0xFF_u32) as Byte);
+}
+
+fn push_u64_be(dst: &mut List<Byte>, v: UInt64) {
+    let mut i: Int = 0;
+    while i < 8 {
+        let shift = ((7 - i) * 8) as UInt64;
+        dst.push(((v >> shift) & 0xFF_u64) as Byte);
+        i = i + 1;
+    }
+}
+
+fn read_u8(bytes: &[Byte], pos: &mut Int) -> Result<UInt8, MsgPackError> {
+    if *pos >= bytes.len() { return Err(MsgPackError.Truncated(*pos)); }
+    let v = bytes[*pos];
+    *pos = *pos + 1;
+    Ok(v)
+}
+
+fn read_u16_be(bytes: &[Byte], pos: &mut Int) -> Result<UInt16, MsgPackError> {
+    if *pos + 2 > bytes.len() { return Err(MsgPackError.Truncated(*pos)); }
+    let v = ((bytes[*pos] as UInt16) << 8_u16) | (bytes[*pos + 1] as UInt16);
+    *pos = *pos + 2;
+    Ok(v)
+}
+
+fn read_u32_be(bytes: &[Byte], pos: &mut Int) -> Result<UInt32, MsgPackError> {
+    if *pos + 4 > bytes.len() { return Err(MsgPackError.Truncated(*pos)); }
+    let mut v: UInt32 = 0_u32;
+    let mut i: Int = 0;
+    while i < 4 {
+        v = (v << 8_u32) | (bytes[*pos + i] as UInt32);
+        i = i + 1;
+    }
+    *pos = *pos + 4;
+    Ok(v)
+}
+
+fn read_u64_be(bytes: &[Byte], pos: &mut Int) -> Result<UInt64, MsgPackError> {
+    if *pos + 8 > bytes.len() { return Err(MsgPackError.Truncated(*pos)); }
+    let mut v: UInt64 = 0_u64;
+    let mut i: Int = 0;
+    while i < 8 {
+        v = (v << 8_u64) | (bytes[*pos + i] as UInt64);
+        i = i + 1;
+    }
+    *pos = *pos + 8;
+    Ok(v)
+}
+
+// =============================================================================
+// Float widening
+// =============================================================================
+
+fn f32_to_bits(f: Float) -> UInt32 {
+    // Narrow: truncate the f64 to f32 via bit manipulation.
+    let bits = f.to_bits();
+    let sign = ((bits >> 63_u64) & 0x1_u64) as UInt32;
+    let exp = (((bits >> 52_u64) & 0x7FF_u64) as Int32) - 1023_i32;
+    let frac = (bits & 0xFFFFFFFFFFFFF_u64) >> 29_u64;
+    if exp <= -127_i32 {
+        // subnormal or zero → flush to ±0 for simplicity.
+        return sign << 31_u32;
+    }
+    if exp >= 128_i32 {
+        // overflow → ±Inf
+        return (sign << 31_u32) | (0xFF_u32 << 23_u32);
+    }
+    let new_exp: UInt32 = ((exp + 127_i32) as UInt32) & 0xFF_u32;
+    (sign << 31_u32) | (new_exp << 23_u32) | (frac as UInt32)
+}
+
+fn f32_bits_to_f64(bits: UInt32) -> Float {
+    let sign: UInt64 = ((bits >> 31_u32) & 0x1_u32) as UInt64;
+    let exp: Int32 = (((bits >> 23_u32) & 0xFF_u32) as Int32) - 127_i32;
+    let frac: UInt64 = (bits & 0x7FFFFF_u32) as UInt64;
+    if exp == -127_i32 {
+        if frac == 0_u64 { return Float.from_bits(sign << 63_u64); }
+        let mut f = frac; let mut e = -126_i32;
+        while (f & 0x800000_u64) == 0_u64 { f = f << 1_u64; e = e - 1_i32; }
+        let new_exp: UInt64 = ((e + 1023_i32) as UInt64) & 0x7FF_u64;
+        let new_frac: UInt64 = (f & 0x7FFFFF_u64) << 29_u64;
+        return Float.from_bits((sign << 63_u64) | (new_exp << 52_u64) | new_frac);
+    }
+    if exp == 128_i32 {
+        let new_frac: UInt64 = frac << 29_u64;
+        return Float.from_bits((sign << 63_u64) | (0x7FF_u64 << 52_u64) | new_frac);
+    }
+    let new_exp: UInt64 = ((exp + 1023_i32) as UInt64) & 0x7FF_u64;
+    let new_frac: UInt64 = frac << 29_u64;
+    Float.from_bits((sign << 63_u64) | (new_exp << 52_u64) | new_frac)
+}

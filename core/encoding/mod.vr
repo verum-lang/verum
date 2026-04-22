@@ -14,6 +14,8 @@ public module hex;
 public module varint;
 public module der;
 public module cbor;
+public module json_pointer;
+public module msgpack;
 
 // Re-exports — JSON
 public mount .json.Json;
