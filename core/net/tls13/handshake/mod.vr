@@ -39,6 +39,7 @@ public module early_data;
 public module ticket_issuer;
 public module resume_verify;
 public module zero_rtt_antireplay;
+public module sni_resolver;
 
 // Re-exports — codec
 public mount .codec.{Reader, CodecError};
@@ -122,4 +123,10 @@ public mount .resume_verify.{
 public mount .zero_rtt_antireplay.{
     ReplayCache, ReplayConfig, ReplayStats,
     ReplayGuard, NoReplayGuard,
+};
+
+// Re-exports — SNI-driven cert/signer resolver (RFC 6066)
+public mount .sni_resolver.{
+    ServerNameResolver, ServerIdentity, SniResolveError,
+    ExactMatchResolver,
 };

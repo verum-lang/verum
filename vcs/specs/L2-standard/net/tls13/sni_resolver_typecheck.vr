@@ -1,0 +1,62 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: tls13, rfc6066, sni, resolver, typecheck
+// @timeout: 10000
+// @expect: pass
+
+mount core.net.tls13.handshake.{
+    ServerNameResolver, ServerIdentity, SniResolveError,
+    ExactMatchResolver, CertSigner,
+};
+mount core.net.tls13.sig_scheme.{SignatureScheme};
+mount core.net.tls13.error.{TlsError};
+mount core.collections.List;
+
+// Simple always-Ed25519 signer stub — exercises the protocol.
+type StubSigner is ();
+
+implement StubSigner {
+    public fn new() -> StubSigner { () }
+}
+
+implement CertSigner for StubSigner {
+    fn sign(&self, _scheme: SignatureScheme, _signed_input: &[Byte]) -> Result<List<Byte>, TlsError> {
+        Ok([])
+    }
+    fn scheme(&self) -> SignatureScheme { SignatureScheme.Ed25519 }
+}
+
+fn build_identity() -> ServerIdentity {
+    ServerIdentity {
+        cert_chain: [],
+        signer:     Heap(StubSigner.new()),
+    }
+}
+
+fn exercise_resolver() -> Result<(), SniResolveError> {
+    let mut r = ExactMatchResolver.new();
+    r.add(Text.from("api.example.com"), build_identity());
+    r.add_wildcard(Text.from("*.example.com"), build_identity());
+    r.set_default(build_identity());
+
+    // Exact match wins.
+    let sni_a = Text.from("api.example.com");
+    let _ = r.resolve(Some(&sni_a))?;
+
+    // Wildcard match: subdomain not in exact table.
+    let sni_b = Text.from("www.example.com");
+    let _ = r.resolve(Some(&sni_b))?;
+
+    // Unmatched SNI → falls through to default.
+    let sni_c = Text.from("elsewhere.test");
+    let _ = r.resolve(Some(&sni_c))?;
+
+    // No SNI offered → default.
+    let _ = r.resolve(None)?;
+    Ok(())
+}
+
+fn main() {
+    let _ = exercise_resolver();
+}

@@ -1,0 +1,175 @@
+// =============================================================================
+// net/tls13/handshake/sni_resolver.vr — SNI-driven cert + signer dispatch
+// =============================================================================
+// Layer: 5 (Network — TLS 1.3 core)
+// Dependencies: core, core.collections, core.net.tls13.handshake.extension,
+//               core.net.tls13.handshake.server_sm (CertSigner, protocol-only)
+// =============================================================================
+//
+// RFC 6066 §3 — Server Name Indication. Shared-host deployments
+// terminate TLS for many authorities on one socket; SNI is the
+// client hint that tells the server which identity to present.
+//
+// This module ships two pieces:
+//
+//   * `ServerNameResolver` protocol — the extension point the
+//     server SM calls when it parses the `server_name` extension
+//     off an incoming ClientHello. Returns the (cert_chain, signer)
+//     pair the handshake should continue with.
+//
+//   * `ExactMatchResolver` — a reference impl backed by a Map from
+//     hostname to (chain, signer). Supports one leftmost wildcard
+//     per RFC 6125 §6.4.3 (e.g. `*.example.com`) so a `*.example.com`
+//     entry matches `api.example.com` without a separate entry per
+//     subdomain.
+//
+// # Design
+//
+//   * Resolver is pure — no I/O. Caller preloads the Map at
+//     startup; dynamic cert reload rebuilds the Map and swaps it.
+//   * Signer is carried as `Heap<dyn CertSigner>` so each identity
+//     can use a different signing backend (HSM, workload identity,
+//     in-process key, etc.).
+//   * Resolution order: exact match first, then wildcard. A
+//     `*.example.com` entry never matches `example.com` itself.
+//
+// =============================================================================
+
+module core.net.tls13.handshake.sni_resolver;
+
+mount core.*;
+mount core.collections.List;
+mount core.collections.map.{Map};
+mount core.net.tls13.handshake.server_sm.{CertSigner};
+
+// =============================================================================
+// Error surface
+// =============================================================================
+
+public type SniResolveError is
+      NoMatch(Text)                 // SNI present but no identity configured for it
+    | NoSniProvided;                // client offered no server_name — caller may pick a default
+
+// =============================================================================
+// Resolved identity
+// =============================================================================
+
+public type ServerIdentity is {
+    /// Leaf-first DER certificate chain.
+    cert_chain: List<List<Byte>>,
+    /// Signing backend for CertificateVerify over the chosen scheme.
+    signer:     Heap<dyn CertSigner>,
+};
+
+// =============================================================================
+// Resolver protocol
+// =============================================================================
+
+/// Pluggable SNI → identity dispatch. Impls include the built-in
+/// `ExactMatchResolver` below plus any user-supplied implementation
+/// (e.g. ACME-backed dynamic cert rotation).
+public type ServerNameResolver is protocol {
+    /// `sni_hostname` is `Some(name)` when the client sent server_name,
+    /// `None` when it omitted the extension (legacy clients).
+    fn resolve(&self, sni_hostname: Maybe<&Text>) -> Result<ServerIdentity, SniResolveError>;
+};
+
+// =============================================================================
+// ExactMatchResolver — Map-backed reference impl
+// =============================================================================
+
+public type ExactMatchResolver is {
+    exact:    Map<Text, ServerIdentity>,
+    /// Wildcard entries: pattern stored WITHOUT the leading `*.`.
+    /// `*.example.com` → key `example.com`, matches any single-label
+    /// leftmost prefix.
+    wildcard: Map<Text, ServerIdentity>,
+    /// Fallback identity served when the client sends no SNI OR
+    /// the SNI doesn't match any exact / wildcard entry and the
+    /// deployment chose permissive mode. None = strict: unmatched
+    /// SNI aborts.
+    default:  Maybe<ServerIdentity>,
+};
+
+implement ExactMatchResolver {
+    public fn new() -> ExactMatchResolver {
+        ExactMatchResolver {
+            exact:    Map.new(),
+            wildcard: Map.new(),
+            default:  None,
+        }
+    }
+
+    /// Add an exact-match hostname → identity binding.
+    /// `example.com` matches only "example.com".
+    public fn add(&mut self, hostname: Text, ident: ServerIdentity) {
+        self.exact.insert(hostname, ident);
+    }
+
+    /// Add a wildcard pattern. `*.example.com` is stored under the
+    /// key "example.com" and matches any single-label prefix.
+    /// Input MUST start with "*." or the call is a no-op.
+    public fn add_wildcard(&mut self, pattern: Text, ident: ServerIdentity) {
+        let b = pattern.as_bytes();
+        if b.len() < 3 || b[0] != ('*' as Byte) || b[1] != ('.' as Byte) { return; }
+        let tail = Text.from_utf8_unchecked(&b[2..]);
+        self.wildcard.insert(tail, ident);
+    }
+
+    /// Set the fallback identity served when SNI is absent or
+    /// unmatched and the deployment is running in permissive mode.
+    public fn set_default(&mut self, ident: ServerIdentity) {
+        self.default = Some(ident);
+    }
+
+    fn lookup_wildcard(&self, hostname: &Text) -> Maybe<ServerIdentity> {
+        // Strip the leftmost label, look up the remainder.
+        let b = hostname.as_bytes();
+        let mut dot_at: Int = -1;
+        let mut i: Int = 0;
+        while i < b.len() {
+            if b[i] == ('.' as Byte) { dot_at = i; break; }
+            i = i + 1;
+        }
+        if dot_at < 0 || dot_at + 1 >= b.len() { return None; }
+        let tail = Text.from_utf8_unchecked(&b[(dot_at + 1)..]);
+        match self.wildcard.get(&tail) {
+            Some(ident) => Some(clone_identity(ident)),
+            None        => None,
+        }
+    }
+}
+
+fn clone_identity(ident: &ServerIdentity) -> ServerIdentity {
+    ServerIdentity {
+        cert_chain: ident.cert_chain.clone(),
+        signer:     ident.signer.clone(),
+    }
+}
+
+implement ServerNameResolver for ExactMatchResolver {
+    fn resolve(&self, sni_hostname: Maybe<&Text>) -> Result<ServerIdentity, SniResolveError> {
+        match sni_hostname {
+            Some(name) => {
+                match self.exact.get(name) {
+                    Some(i) => return Ok(clone_identity(i)),
+                    None => {},
+                }
+                match self.lookup_wildcard(name) {
+                    Some(i) => return Ok(i),
+                    None => {},
+                }
+                match &self.default {
+                    Some(d) => Ok(clone_identity(d)),
+                    None    => Err(SniResolveError.NoMatch(name.clone())),
+                }
+            },
+            None => {
+                match &self.default {
+                    Some(d) => Ok(clone_identity(d)),
+                    None    => Err(SniResolveError.NoSniProvided),
+                }
+            },
+        }
+    }
+}
