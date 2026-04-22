@@ -36,6 +36,7 @@ public module hash {
     public module sha256;
     public module sha1;
     public module crc32c;
+    public module xxhash;
 }
 
 public module mac {

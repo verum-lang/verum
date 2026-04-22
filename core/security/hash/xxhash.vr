@@ -1,0 +1,245 @@
+// =============================================================================
+// security/hash/xxhash.vr — XXH64 (Yann Collet 2012)
+// =============================================================================
+// Layer: 1 (fast non-cryptographic hash)
+// Dependencies: core
+// Reference: https://github.com/Cyan4973/xxHash/blob/dev/doc/xxhash_spec.md
+// =============================================================================
+//
+// XXH64 — the fastest 64-bit non-cryptographic hash in widespread
+// production use. Orders-of-magnitude faster than SHA-256 for
+// non-adversarial workloads. Used by:
+//
+//   * Facebook RocksDB blob-file integrity
+//   * LZ4 frame-format content checksums
+//   * ClickHouse analytics column hashing
+//   * Redis rax radix tree per-key fingerprints
+//   * Ceph object store integrity
+//
+// NOT cryptographic — adversarial inputs can trivially produce
+// collisions. Use `Sha256` / `Blake2b` (when the latter ships)
+// for integrity checks against untrusted peers.
+//
+// # Expected performance
+//
+// Pure-Verum reference: ~3 GB/s on a modern core (4 lanes × 3
+// GHz × 8 B/cycle). SSE2 / AVX2 vectorisation arrives via
+// `@intrinsic("verum.hash.xxh64_fast", ...)` in a follow-up for
+// the hot path.
+//
+// =============================================================================
+
+module core.security.hash.xxhash;
+
+mount core.*;
+
+// =============================================================================
+// Primes (XXH64 spec §3)
+// =============================================================================
+
+const PRIME64_1: UInt64 = 0x9E3779B185EBCA87_u64;
+const PRIME64_2: UInt64 = 0xC2B2AE3D27D4EB4F_u64;
+const PRIME64_3: UInt64 = 0x165667B19E3779F9_u64;
+const PRIME64_4: UInt64 = 0x85EBCA77C2B2AE63_u64;
+const PRIME64_5: UInt64 = 0x27D4EB2F165667C5_u64;
+
+// =============================================================================
+// One-shot
+// =============================================================================
+
+public fn xxh64(data: &[Byte], seed: UInt64) -> UInt64 {
+    let len = data.len() as UInt64;
+    let mut h64: UInt64 = 0_u64;
+
+    if len >= 32_u64 {
+        let mut v1 = seed + PRIME64_1 + PRIME64_2;
+        let mut v2 = seed + PRIME64_2;
+        let mut v3 = seed + 0_u64;
+        let mut v4 = seed - PRIME64_1;
+
+        let mut i: Int = 0;
+        let end_of_lanes = (data.len() / 32) * 32;
+        while i < end_of_lanes {
+            v1 = round(v1, read_u64_le(data, i));
+            v2 = round(v2, read_u64_le(data, i + 8));
+            v3 = round(v3, read_u64_le(data, i + 16));
+            v4 = round(v4, read_u64_le(data, i + 24));
+            i = i + 32;
+        }
+        h64 = rotl64(v1, 1) + rotl64(v2, 7) + rotl64(v3, 12) + rotl64(v4, 18);
+        h64 = merge_round(h64, v1);
+        h64 = merge_round(h64, v2);
+        h64 = merge_round(h64, v3);
+        h64 = merge_round(h64, v4);
+    } else {
+        h64 = seed + PRIME64_5;
+    }
+
+    h64 = h64 + len;
+
+    let tail_start = ((data.len() / 32) * 32);
+    h64 = finalize_tail(h64, data, tail_start);
+    avalanche(h64)
+}
+
+// =============================================================================
+// Streaming
+// =============================================================================
+
+public type XxHash64 is {
+    seed:        UInt64,
+    total_len:   UInt64,
+    v1:          UInt64,
+    v2:          UInt64,
+    v3:          UInt64,
+    v4:          UInt64,
+    /// 32-byte buffer for partial block.
+    buf:         [Byte; 32],
+    buf_len:     Int,
+};
+
+implement XxHash64 {
+    public fn new(seed: UInt64) -> XxHash64 {
+        XxHash64 {
+            seed:      seed,
+            total_len: 0_u64,
+            v1:        seed + PRIME64_1 + PRIME64_2,
+            v2:        seed + PRIME64_2,
+            v3:        seed + 0_u64,
+            v4:        seed - PRIME64_1,
+            buf:       [0_u8; 32],
+            buf_len:   0,
+        }
+    }
+
+    public fn update(&mut self, data: &[Byte]) {
+        self.total_len = self.total_len + (data.len() as UInt64);
+        let mut cursor: Int = 0;
+
+        // Top off the internal buffer if it holds a partial block.
+        if self.buf_len > 0 {
+            let want = 32 - self.buf_len;
+            let take = if data.len() < want { data.len() } else { want };
+            let mut i: Int = 0;
+            while i < take { self.buf[self.buf_len + i] = data[i]; i = i + 1; }
+            self.buf_len = self.buf_len + take;
+            cursor = take;
+            if self.buf_len == 32 {
+                let buf_slice = &self.buf[..];
+                self.v1 = round(self.v1, read_u64_le(buf_slice, 0));
+                self.v2 = round(self.v2, read_u64_le(buf_slice, 8));
+                self.v3 = round(self.v3, read_u64_le(buf_slice, 16));
+                self.v4 = round(self.v4, read_u64_le(buf_slice, 24));
+                self.buf_len = 0;
+            }
+        }
+
+        // Consume full 32-byte blocks from `data`.
+        while cursor + 32 <= data.len() {
+            self.v1 = round(self.v1, read_u64_le(data, cursor));
+            self.v2 = round(self.v2, read_u64_le(data, cursor + 8));
+            self.v3 = round(self.v3, read_u64_le(data, cursor + 16));
+            self.v4 = round(self.v4, read_u64_le(data, cursor + 24));
+            cursor = cursor + 32;
+        }
+
+        // Stash the tail.
+        while cursor < data.len() {
+            self.buf[self.buf_len] = data[cursor];
+            self.buf_len = self.buf_len + 1;
+            cursor = cursor + 1;
+        }
+    }
+
+    public fn finalize(&self) -> UInt64 {
+        let mut h64: UInt64 = if self.total_len >= 32_u64 {
+            let mut h = rotl64(self.v1, 1) + rotl64(self.v2, 7)
+                       + rotl64(self.v3, 12) + rotl64(self.v4, 18);
+            h = merge_round(h, self.v1);
+            h = merge_round(h, self.v2);
+            h = merge_round(h, self.v3);
+            h = merge_round(h, self.v4);
+            h
+        } else {
+            self.seed + PRIME64_5
+        };
+        h64 = h64 + self.total_len;
+        // Consume only the first `buf_len` bytes of the internal
+        // buffer (rest is stale from earlier blocks).
+        h64 = finalize_tail(h64, &self.buf[0..self.buf_len], 0);
+        avalanche(h64)
+    }
+}
+
+// =============================================================================
+// Mix primitives
+// =============================================================================
+
+fn round(acc: UInt64, x: UInt64) -> UInt64 {
+    let a = acc + x * PRIME64_2;
+    rotl64(a, 31) * PRIME64_1
+}
+
+fn merge_round(acc: UInt64, v: UInt64) -> UInt64 {
+    let v2 = round(0_u64, v);
+    let h = (acc ^ v2) * PRIME64_1;
+    h + PRIME64_4
+}
+
+fn avalanche(h0: UInt64) -> UInt64 {
+    let mut h = h0;
+    h = h ^ (h >> 33_u64);
+    h = h * PRIME64_2;
+    h = h ^ (h >> 29_u64);
+    h = h * PRIME64_3;
+    h = h ^ (h >> 32_u64);
+    h
+}
+
+fn finalize_tail(h0: UInt64, data: &[Byte], start: Int) -> UInt64 {
+    let mut h = h0;
+    let mut i = start;
+    while i + 8 <= data.len() {
+        let k = round(0_u64, read_u64_le(data, i));
+        h = h ^ k;
+        h = rotl64(h, 27) * PRIME64_1 + PRIME64_4;
+        i = i + 8;
+    }
+    if i + 4 <= data.len() {
+        h = h ^ ((read_u32_le(data, i) as UInt64) * PRIME64_1);
+        h = rotl64(h, 23) * PRIME64_2 + PRIME64_3;
+        i = i + 4;
+    }
+    while i < data.len() {
+        h = h ^ ((data[i] as UInt64) * PRIME64_5);
+        h = rotl64(h, 11) * PRIME64_1;
+        i = i + 1;
+    }
+    h
+}
+
+fn read_u64_le(src: &[Byte], off: Int) -> UInt64 {
+    let mut r: UInt64 = 0_u64;
+    let mut i: Int = 0;
+    while i < 8 {
+        r = r | ((src[off + i] as UInt64) << ((i * 8) as UInt64));
+        i = i + 1;
+    }
+    r
+}
+
+fn read_u32_le(src: &[Byte], off: Int) -> UInt32 {
+    let mut r: UInt32 = 0_u32;
+    let mut i: Int = 0;
+    while i < 4 {
+        r = r | ((src[off + i] as UInt32) << ((i * 8) as UInt32));
+        i = i + 1;
+    }
+    r
+}
+
+fn rotl64(x: UInt64, r: Int) -> UInt64 {
+    let shift = r as UInt64;
+    let inv = (64 - r) as UInt64;
+    (x << shift) | (x >> inv)
+}

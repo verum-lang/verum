@@ -1,0 +1,33 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: security, hash, xxhash, non-crypto, typecheck
+// @timeout: 10000
+// @expect: pass
+
+mount core.security.hash.xxhash.{XxHash64, xxh64};
+
+fn exercise_xxh64() {
+    // One-shot.
+    let digest: UInt64 = xxh64(b"hello world", 0_u64);
+    let _ = digest;
+
+    // Seeded variant.
+    let _: UInt64 = xxh64(b"hello world", 0xDEADBEEFCAFEBABE_u64);
+
+    // Streaming.
+    let mut h = XxHash64.new(0_u64);
+    h.update(b"hello");
+    h.update(b" ");
+    h.update(b"world");
+    let streamed: UInt64 = h.finalize();
+    assert(streamed == digest);     // streaming must equal one-shot
+
+    // Large block coverage (>32 bytes = lane-parallel path).
+    let mut big: [Byte; 100] = [0_u8; 100];
+    let mut i: Int = 0;
+    while i < 100 { big[i] = (i as Byte); i = i + 1; }
+    let _: UInt64 = xxh64(&big[..], 0_u64);
+}
+
+fn main() { exercise_xxh64(); }
