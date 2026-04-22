@@ -1,0 +1,174 @@
+// =============================================================================
+// net/quic/idle_timeout.vr — RFC 9000 §10.1 idle-timeout tracker
+// =============================================================================
+// Layer: 5 (Network — QUIC)
+// Dependencies: core, core.time
+// =============================================================================
+//
+// RFC 9000 §10.1 — each endpoint advertises `max_idle_timeout`
+// (transport parameter 0x0001). The effective connection-wide
+// idle timeout is:
+//
+//     effective = min(local_max_idle_timeout, peer_max_idle_timeout)
+//
+// with the further rule that **both zeros = no idle timeout** (the
+// connection stays alive until explicitly closed). A one-sided
+// zero means the non-zero value wins — the idle limit is the peer's.
+//
+// # When the timer resets
+//
+//   * RFC 9000 §10.1.1 — on every ack-eliciting packet the endpoint
+//     successfully processes *or sends* while it has nothing else
+//     to send. "Nothing else" prevents keep-alive spam when the
+//     connection is already busy.
+//   * §10.1.2 — the timer is armed once `max_idle_timeout` is
+//     known (after transport-parameter exchange completes).
+//
+// # Firing
+//
+// On `expired(now)`, the connection MUST emit CONNECTION_CLOSE
+// with IDLE_TIMEOUT or silently close (RFC 9000 §10.1 allows both
+// — silent close is friendlier to NATs). This module exposes the
+// firing signal; the connection state machine decides which close
+// path to take.
+//
+// # Three-PTO buffer
+//
+// Per §10.1 NOTE: "endpoints MAY use longer timeouts to allow for
+// reordering in the network." In practice every production stack
+// waits an extra `3 × PTO` beyond the advertised limit to absorb
+// out-of-order ACKs. Use `set_pto_buffer(Duration)` to apply this.
+//
+// =============================================================================
+
+module core.net.quic.idle_timeout;
+
+mount core.*;
+mount core.time.instant.{Instant};
+mount core.time.duration.{Duration};
+
+// =============================================================================
+// Tracker
+// =============================================================================
+
+public type IdleTimeoutTracker is {
+    /// Effective timeout — min of local and peer advertisements.
+    /// `None` means "idle timeout disabled" (both sides set 0).
+    effective:        Maybe<Duration>,
+    /// Extra reordering buffer (typically 3 × PTO). Added to
+    /// `effective` before firing.
+    pto_buffer:       Duration,
+    /// Last time we saw *any* ack-eliciting traffic (TX or RX).
+    last_activity:    Instant,
+    /// Have we sent / received something since the last dormant
+    /// period? §10.1.1 — keep-alive suppression when busy.
+    since_last_send:  Bool,
+};
+
+public type IdleTimeoutError is
+      AlreadyExpired;
+
+public type TickResult is
+      Active(Duration)        // milliseconds remaining until expiry
+    | Expired;                 // caller MUST close the connection
+
+implement IdleTimeoutTracker {
+    /// Construct with the two advertised values (peer's comes off
+    /// the wire in its transport parameters). Caller passes the
+    /// current instant as the initial activity reference.
+    public fn new(
+        local_max_idle_ms: UInt64,
+        peer_max_idle_ms:  UInt64,
+        start:             Instant,
+    ) -> IdleTimeoutTracker {
+        let eff = effective_timeout(local_max_idle_ms, peer_max_idle_ms);
+        IdleTimeoutTracker {
+            effective:       eff,
+            pto_buffer:      Duration.from_millis(0),
+            last_activity:   start,
+            since_last_send: false,
+        }
+    }
+
+    /// Set the 3×PTO reordering buffer. Recommended pattern:
+    /// call once per RTT update.
+    public fn set_pto_buffer(&mut self, buf: Duration) {
+        self.pto_buffer = buf;
+    }
+
+    /// RFC 9000 §10.1.1 — reset on every ack-eliciting packet
+    /// *received*. Unconditional.
+    public fn on_packet_received(&mut self, now: Instant, ack_eliciting: Bool) {
+        if ack_eliciting {
+            self.last_activity = now;
+            self.since_last_send = false;
+        }
+    }
+
+    /// §10.1.1 — reset on every ack-eliciting packet *sent*
+    /// ONLY when nothing else has gone out since the last reset.
+    /// This prevents sender-side timer drift under sustained load.
+    public fn on_packet_sent(&mut self, now: Instant, ack_eliciting: Bool) {
+        if !ack_eliciting { return; }
+        if !self.since_last_send {
+            self.last_activity = now;
+            self.since_last_send = true;
+        }
+    }
+
+    /// Query at the next tick.
+    public fn tick(&self, now: Instant) -> TickResult {
+        match &self.effective {
+            None => TickResult.Active(Duration.from_secs(3600)),
+            Some(limit) => {
+                let deadline_duration = limit.saturating_add(self.pto_buffer.clone());
+                let elapsed = now.duration_since(self.last_activity.clone())
+                    .unwrap_or_else(|| Duration.from_millis(0));
+                if elapsed >= deadline_duration {
+                    TickResult.Expired
+                } else {
+                    TickResult.Active(deadline_duration.saturating_sub(elapsed))
+                }
+            },
+        }
+    }
+
+    /// Absolute deadline — caller registers this with a timer wheel.
+    /// Returns `None` both when the timeout is disabled AND when
+    /// the deadline would overflow the Instant representation.
+    public fn deadline(&self) -> Maybe<Instant> {
+        match &self.effective {
+            None => None,
+            Some(limit) => {
+                let total = limit.saturating_add(self.pto_buffer.clone());
+                self.last_activity.checked_add(total)
+            },
+        }
+    }
+
+    /// Effective timeout value (for introspection / stats).
+    public fn effective_ms(&self) -> Maybe<UInt64> {
+        match &self.effective {
+            Some(d) => Some(d.as_millis() as UInt64),
+            None    => None,
+        }
+    }
+}
+
+// =============================================================================
+// Spec: "min, with zero-means-disabled" rule (§10.1)
+// =============================================================================
+
+fn effective_timeout(local_ms: UInt64, peer_ms: UInt64) -> Maybe<Duration> {
+    if local_ms == 0_u64 && peer_ms == 0_u64 { return None; }
+    let eff = if local_ms == 0_u64 {
+        peer_ms
+    } else if peer_ms == 0_u64 {
+        local_ms
+    } else if local_ms < peer_ms {
+        local_ms
+    } else {
+        peer_ms
+    };
+    Some(Duration.from_millis(eff as Int))
+}

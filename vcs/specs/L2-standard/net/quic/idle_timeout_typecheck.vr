@@ -1,0 +1,67 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: quic, rfc9000, idle-timeout, typecheck
+// @timeout: 10000
+// @expect: pass
+
+mount core.net.quic.idle_timeout.{
+    IdleTimeoutTracker, TickResult, IdleTimeoutError,
+};
+mount core.time.instant.{Instant};
+mount core.time.duration.{Duration};
+
+fn exercise_idle_timeout() {
+    let t0 = Instant.now();
+
+    // Both sides: 30-second idle timeout.
+    let mut tracker = IdleTimeoutTracker.new(30_000_u64, 30_000_u64, t0.clone());
+    assert(tracker.effective_ms().is_some());
+    assert(tracker.deadline().is_some());
+
+    // Tick at the start — plenty of time.
+    match tracker.tick(t0.clone()) {
+        TickResult.Active(_) => {},
+        TickResult.Expired   => panic("fresh tracker shouldn't expire"),
+    }
+
+    // Receiving an ack-eliciting packet resets the timer.
+    tracker.on_packet_received(t0.clone(), true);
+    match tracker.tick(t0.clone()) {
+        TickResult.Active(_) => {},
+        TickResult.Expired   => panic("post-reset shouldn't expire"),
+    }
+
+    // Sending is more subtle — §10.1.1 suppresses keep-alive
+    // under sustained load. First ack-eliciting send after a
+    // reset DOES advance the timer; subsequent sends before a
+    // reset do NOT.
+    tracker.on_packet_sent(t0.clone(), true);
+    tracker.on_packet_sent(t0.clone(), true);     // no-op (same window)
+
+    // §10.1 zero-means-disabled rule.
+    let disabled = IdleTimeoutTracker.new(0_u64, 0_u64, t0.clone());
+    match disabled.tick(t0.clone()) {
+        TickResult.Active(_) => {},
+        TickResult.Expired   => panic("disabled tracker never expires"),
+    }
+    assert(disabled.effective_ms().is_none());
+
+    // One-sided zero → other side wins.
+    let one_sided = IdleTimeoutTracker.new(0_u64, 15_000_u64, t0.clone());
+    match one_sided.effective_ms() {
+        Some(ms) => assert(ms == 15_000_u64),
+        None     => panic("should inherit peer's non-zero"),
+    }
+
+    // Asymmetric — the smaller wins per §10.1.
+    let asym = IdleTimeoutTracker.new(60_000_u64, 10_000_u64, t0);
+    match asym.effective_ms() {
+        Some(ms) => assert(ms == 10_000_u64),
+        None     => panic("should pick min"),
+    }
+}
+
+fn main() {
+    exercise_idle_timeout();
+}

@@ -78,6 +78,7 @@ mount core.net.quic.connection_sm.keys.{
     derive_space_keys, aead_key_len_for, is_chacha_aead,
 };
 mount core.net.quic.connection_sm.path_control;
+mount core.net.quic.pacer.{Pacer, PacerDecision};
 
 mount core.net.quic.transport.abstraction.{
     UdpTransport, InboundDatagram, TransportError, EcnCodepoint,
@@ -122,6 +123,14 @@ public type ConnectionPump is {
     /// phase via `QuicConnection::promote_to_app`. Pump keeps a
     /// phase tag to gate app-level stream operations.
     phase_tag:        PumpPhase,
+    /// RFC 9002 §7.7 token-bucket send pacer. Its rate is refreshed
+    /// from `connection.cc.pacing_rate()` on every outbound drain,
+    /// and `on_packet_sent` charges actual datagram bytes.
+    pacer:            Pacer,
+    /// When the pacer signals `NotYet(delay)` on a space, the pump
+    /// records the earliest instant it's allowed to send again and
+    /// skips emission until wall-clock catches up.
+    pacing_next_ok:   Maybe<Instant>,
 };
 
 public type PumpPhase is PumpInitial | PumpHandshake | PumpOneRtt | PumpClosing | PumpDraining;
@@ -144,6 +153,8 @@ implement ConnectionPump {
             negotiated_hash: None,
             negotiated_aead: None,
             phase_tag:       PumpPhase.PumpInitial,
+            pacer:           Pacer.new(2400_u64),
+            pacing_next_ok:  None,
         }
     }
 
@@ -166,6 +177,8 @@ implement ConnectionPump {
             negotiated_hash: None,
             negotiated_aead: None,
             phase_tag:       PumpPhase.PumpInitial,
+            pacer:           Pacer.new(2400_u64),
+            pacing_next_ok:  None,
         }
     }
 
@@ -390,6 +403,11 @@ implement ConnectionPump {
     // ==================== step 3: outbound ====================
 
     async fn drain_outbound(&mut self, now: Instant) -> Result<(), PumpError> {
+        // RFC 9002 §7.7 — pacer's target rate tracks the CC's current
+        // pacing estimate. Refresh once per drain; the bucket refill
+        // inside `Pacer.check/on_packet_sent` handles sub-tick accuracy.
+        self.pacer.set_rate(self.connection.cc.pacing_rate());
+
         // Pull any CRYPTO frames the handshake driver produced.
         let hs_out = self.handshake.take_outbound();
 
@@ -429,12 +447,28 @@ implement ConnectionPump {
             s = s + 1;
         }
 
+        // If a prior tick hit `NotYet` and the deadline hasn't elapsed,
+        // skip emission entirely — RFC 9002 §7.7 mandates the sender
+        // respect the pacing delay before the next packet goes out.
+        match &self.pacing_next_ok {
+            Some(deadline) => if now < *deadline { return Ok(()); },
+            None => {},
+        }
+
         // Build + send per space (skip spaces with discarded keys).
         let mut j: Int = 0;
         while j < 3 {
             let (kind, frames) = &by_space[j];
             if frames.len() == 0 { j = j + 1; continue; }
             self.send_packet_in_space(kind.clone(), frames.clone(), now.clone()).await?;
+            // A pacer stall raised mid-drain blocks the remaining spaces
+            // this tick; the loop resumes next tick once the deadline
+            // elapses. Coalescing (§12.2) will collapse these back to
+            // one datagram in the optimisation commit.
+            match &self.pacing_next_ok {
+                Some(deadline) => if now < *deadline { break; },
+                None => {},
+            }
             j = j + 1;
         }
         Ok(())
@@ -528,6 +562,24 @@ implement ConnectionPump {
         let gated = path_control.gate_outbound(active_path, wire.len() as UInt64);
         if gated == 0_u64 { return Ok(()); }
 
+        // RFC 9002 §7.7 pacing admission. The Initial PN space is
+        // exempted so the first handshake packet isn't held up by an
+        // empty bucket before cwnd/rate has been measured.
+        let bytes_u64 = wire.len() as UInt64;
+        let allow = match space {
+            PnSpaceKind.Initial => true,
+            _ => match self.pacer.check(bytes_u64, now.clone()) {
+                PacerDecision.Send => true,
+                PacerDecision.NotYet(delay) => {
+                    let next = now.clone().checked_add(delay).unwrap_or_else(|| now.clone());
+                    self.pacing_next_ok = Some(next);
+                    false
+                },
+            },
+        };
+        if !allow { return Ok(()); }
+        self.pacing_next_ok = None;
+
         // Track as in-flight for the recovery loop.
         let info = SentPacketInfo {
             packet_number: pn,
@@ -539,6 +591,8 @@ implement ConnectionPump {
         };
         self.connection.loss.on_packet_sent(space.clone(), info, &mut self.connection.cc);
         path_control.on_outbound_bytes(&mut self.paths, wire.len() as UInt64);
+        // Drain the token bucket by the actual datagram size.
+        self.pacer.on_packet_sent(bytes_u64, now.clone());
 
         // Finally — ship it.
         self.transport.send(wire.as_slice(), &self.peer_addr, EcnCodepoint.NotEct)

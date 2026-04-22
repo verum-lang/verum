@@ -1,0 +1,38 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: quic, pacer, pump, rfc9002, typecheck
+// @timeout: 10000
+// @expect: pass
+
+mount core.net.quic.{Pacer, PacerDecision};
+mount core.time.instant.{Instant};
+mount core.time.duration.{Duration};
+
+fn exercise_pacer() {
+    let now = Instant.now();
+    let mut pacer = Pacer.new(2400_u64);
+
+    // Unbounded mode — `Send` regardless of byte count.
+    match pacer.check(1500_u64, now.clone()) {
+        PacerDecision.Send => {},
+        PacerDecision.NotYet(_) => panic("unbounded must Send"),
+    }
+
+    pacer.on_packet_sent(1500_u64, now.clone());
+    // Still unbounded — bucket re-filled on next `check`.
+    match pacer.check(1500_u64, now.clone()) {
+        PacerDecision.Send => {},
+        PacerDecision.NotYet(_) => panic("unbounded must Send"),
+    }
+
+    // Bounded: low rate drains bucket quickly.
+    pacer.set_rate(1_000_u64);     // 1 KB/s
+    pacer.on_packet_sent(1200_u64 * 3_u64, now.clone());  // drain
+    match pacer.check(1500_u64, now.clone()) {
+        PacerDecision.Send => {},   // Still OK — first check refills from now
+        PacerDecision.NotYet(_d) => {},
+    }
+}
+
+fn main() { exercise_pacer(); }
