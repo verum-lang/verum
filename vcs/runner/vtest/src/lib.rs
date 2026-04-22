@@ -385,6 +385,15 @@ impl VTestRunner {
                             continue;
                         }
 
+                        // Surface parse warnings (unknown `@foo:` directives,
+                        // malformed @expected-error specs, etc.) so test-file
+                        // bugs don't hide behind silent acceptance.
+                        if self.config.verbose && !directives.parse_warnings.is_empty() {
+                            for w in directives.parse_warnings.iter() {
+                                eprintln!("{}: directive warning — {}", path, w);
+                            }
+                        }
+
                         all_tests.push(directives);
                     }
                     Err(DirectiveError::MissingTestDirective) => {
