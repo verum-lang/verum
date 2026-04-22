@@ -605,7 +605,25 @@ impl VbcCodegen {
                 return Ok(None);
             }
 
-        // Compile initializer if present
+        // Compile initializer if present.
+        //
+        // Variant-name disambiguation: push the let-binding's type
+        // annotation as `current_return_type_name` for the duration of the
+        // initializer compile so that bare variant constructors in the RHS
+        // (e.g. `let x: Maybe<Int> = None;`) resolve to the annotation's
+        // type — without this, `find_function_by_suffix(".None")` sees
+        // multiple registered variants named `None` across stdlib
+        // (`Maybe`, `core.net.tls`, `core.term.widget.block`,
+        // `core.mesh.xds.types`, ...) and returns nondeterministically.
+        let saved_return_type = if let Some(ty) = ty {
+            self.extract_base_type_name(ty).map(|base| {
+                let saved = self.ctx.current_return_type_name.clone();
+                self.ctx.current_return_type_name = Some(base);
+                saved
+            })
+        } else {
+            None
+        };
         let init_reg = if let Some(expr) = value {
             self.compile_expr(expr)?
         } else {
@@ -614,6 +632,9 @@ impl VbcCodegen {
             self.ctx.emit(Instruction::LoadUnit { dst: reg });
             Some(reg)
         };
+        if let Some(saved) = saved_return_type {
+            self.ctx.current_return_type_name = saved;
+        }
 
         // Bind pattern
         if let Some(reg) = init_reg {
