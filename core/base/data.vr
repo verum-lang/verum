@@ -1114,35 +1114,35 @@ public fn parse_json(input: Text) -> Result<Data, DataError> {
 // =============================================================================
 
 /// Builder for constructing Data objects incrementally
-type DataBuilder is {
+public type DataBuilder is {
     data: Data,
 };
 
 implement DataBuilder {
     /// Create a new builder starting with empty object
-    fn new() -> DataBuilder {
+    public fn new() -> DataBuilder {
         DataBuilder { data: Data.empty_object() }
     }
 
     /// Create builder starting with empty array
-    fn new_array() -> DataBuilder {
+    public fn new_array() -> DataBuilder {
         DataBuilder { data: Data.empty_array() }
     }
 
     /// Set field (for objects)
-    fn set(mut self, key: Text, value: Data) -> Self {
+    public fn set(mut self, key: Text, value: Data) -> Self {
         let _ = self.data.set(key, value);
         self
     }
 
     /// Push element (for arrays)
-    fn push(mut self, value: Data) -> Self {
+    public fn push(mut self, value: Data) -> Self {
         let _ = self.data.push(value);
         self
     }
 
     /// Build the final Data value
-    fn build(self) -> Data {
+    public fn build(self) -> Data {
         self.data
     }
 }
