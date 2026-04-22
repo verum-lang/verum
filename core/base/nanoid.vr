@@ -1,0 +1,140 @@
+// =============================================================================
+// base/nanoid.vr — URL-safe short-ID generator (nanoid)
+// =============================================================================
+// Layer: 0 (Base)
+// Dependencies: core, core.base.random
+// =============================================================================
+//
+// URL-safe short IDs — the modern alternative to UUIDs for
+// database keys / URL slugs / share tokens where a compact form is
+// worth the drop from 128 bits to ~126 bits of entropy. Matches
+// the `nanoid` JS / Go / Rust / Python libraries byte-exactly:
+//
+//   21-char alphabet-subset default ≈ 126 bits of entropy.
+//   ID-birthday collision ≈ 1 per 2.4 × 10^18 IDs.
+//
+// Alphabet (URL-safe):
+//
+//   A-Z a-z 0-9 _ -     (64 characters)
+//
+// # API
+//
+// ```
+// // Default 21-char ID, URL-safe alphabet.
+// let id: Text = nanoid.generate();
+//
+// // Custom length.
+// let short: Text = nanoid.generate_len(10);
+//
+// // Custom alphabet (must be ≤ 256 distinct bytes; each output
+// // character is a uniformly-sampled element).
+// let hex_id: Text = nanoid.generate_with_alphabet(
+//     b"0123456789abcdef", 16,
+// );
+// ```
+//
+// # Uniformity
+//
+// Rejection sampling over the power-of-two mask ≥ alphabet size.
+// Eliminates the modulo-bias that naive `rand % N` would produce
+// for non-power-of-two alphabet lengths.
+//
+// # Why this exists alongside uuid / snowflake
+//
+//   * UUID v4 / v7 — 36-character canonical form, 128 bits.
+//   * Snowflake   — 64-bit time-ordered, requires worker ID.
+//   * nanoid      — compact URL slug, 21 chars, URL-safe.
+//
+// Pick per-deployment: nanoid for public URLs, snowflake for DB
+// primary keys, UUID for cross-system interop.
+//
+// =============================================================================
+
+module core.base.nanoid;
+
+mount core.*;
+mount core.collections.List;
+mount core.base.random;
+
+// =============================================================================
+// Defaults
+// =============================================================================
+
+/// URL-safe alphabet: A-Z a-z 0-9 _ - (64 chars).
+public const NANOID_ALPHABET: [Byte; 64] = [
+    0x41_u8, 0x42_u8, 0x43_u8, 0x44_u8, 0x45_u8, 0x46_u8, 0x47_u8, 0x48_u8,  // A-H
+    0x49_u8, 0x4A_u8, 0x4B_u8, 0x4C_u8, 0x4D_u8, 0x4E_u8, 0x4F_u8, 0x50_u8,  // I-P
+    0x51_u8, 0x52_u8, 0x53_u8, 0x54_u8, 0x55_u8, 0x56_u8, 0x57_u8, 0x58_u8,  // Q-X
+    0x59_u8, 0x5A_u8,                                                         // Y-Z
+    0x61_u8, 0x62_u8, 0x63_u8, 0x64_u8, 0x65_u8, 0x66_u8, 0x67_u8, 0x68_u8,  // a-h
+    0x69_u8, 0x6A_u8, 0x6B_u8, 0x6C_u8, 0x6D_u8, 0x6E_u8, 0x6F_u8, 0x70_u8,  // i-p
+    0x71_u8, 0x72_u8, 0x73_u8, 0x74_u8, 0x75_u8, 0x76_u8, 0x77_u8, 0x78_u8,  // q-x
+    0x79_u8, 0x7A_u8,                                                         // y-z
+    0x30_u8, 0x31_u8, 0x32_u8, 0x33_u8, 0x34_u8, 0x35_u8, 0x36_u8, 0x37_u8,  // 0-7
+    0x38_u8, 0x39_u8,                                                         // 8-9
+    0x5F_u8, 0x2D_u8,                                                         // _ -
+];
+
+public const DEFAULT_LEN: Int = 21;
+
+// =============================================================================
+// Public constructors
+// =============================================================================
+
+public fn generate() -> Text {
+    generate_len(DEFAULT_LEN)
+}
+
+public fn generate_len(n: Int) -> Text {
+    generate_with_alphabet(&NANOID_ALPHABET[..], n)
+}
+
+public fn generate_with_alphabet(alphabet: &[Byte], n: Int) -> Text {
+    let alpha_size = alphabet.len();
+    if alpha_size == 0 || n <= 0 { return Text.from(""); }
+
+    // Pick smallest mask that covers alpha_size — power-of-two
+    // boundary for rejection sampling.
+    let mask = smallest_covering_mask(alpha_size);
+
+    let mut out: List<Byte> = [];
+    // Over-sample 1.6× to absorb typical rejection rate.
+    let step = ((1.6 * (mask as Float) * (n as Float)) / (alpha_size as Float)) as Int;
+    let chunk_size = if step < 16 { 16 } else { step };
+
+    while out.len() < n {
+        let mut buf: List<Byte> = [];
+        let mut b: [Byte; 32] = [0_u8; 32];
+        let mut produced: Int = 0;
+        while produced < chunk_size {
+            random.fill(&mut b);
+            let take = if (chunk_size - produced) >= 32 { 32 } else { chunk_size - produced };
+            let mut i: Int = 0;
+            while i < take { buf.push(b[i]); i = i + 1; }
+            produced = produced + take;
+        }
+        // Accept any byte & mask ≤ alpha_size - 1.
+        let mut j: Int = 0;
+        while j < buf.len() && out.len() < n {
+            let idx = (buf[j] as Int) & mask;
+            if idx < alpha_size {
+                out.push(alphabet[idx]);
+            }
+            j = j + 1;
+        }
+    }
+    Text.from_utf8_unchecked(out.as_slice())
+}
+
+// =============================================================================
+// Helpers
+// =============================================================================
+
+fn smallest_covering_mask(alpha_size: Int) -> Int {
+    // Round up to (2^k - 1).
+    let mut mask: Int = 1;
+    while mask + 1 < alpha_size { mask = (mask << 1) | 1; }
+    // For alphabets that are exactly a power of two, the mask is
+    // alpha_size - 1.
+    if alpha_size <= mask + 1 { mask } else { (mask << 1) | 1 }
+}

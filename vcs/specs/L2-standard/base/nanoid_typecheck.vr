@@ -1,0 +1,39 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: base, nanoid, id, typecheck
+// @timeout: 10000
+// @expect: pass
+
+mount core.base.nanoid.{
+    generate, generate_len, generate_with_alphabet,
+    NANOID_ALPHABET, DEFAULT_LEN,
+};
+
+fn exercise_nanoid() {
+    // Default 21-char ID.
+    let id: Text = generate();
+    assert(id.len() == DEFAULT_LEN);
+
+    // Custom length.
+    let short: Text = generate_len(10);
+    assert(short.len() == 10);
+
+    // Custom alphabet — 16-char hex.
+    let hex_id: Text = generate_with_alphabet(b"0123456789abcdef", 16);
+    assert(hex_id.len() == 16);
+
+    // Zero-length input → empty.
+    let empty: Text = generate_len(0);
+    assert(empty.len() == 0);
+
+    // Non-power-of-two alphabet (20 chars) exercises the rejection-
+    // sampling path.
+    let pronounceable = generate_with_alphabet(b"bcdfghjklmnpqrstvwxz", 12);
+    assert(pronounceable.len() == 12);
+
+    // URL-safe alphabet exported.
+    let _: Int = NANOID_ALPHABET.len();
+}
+
+fn main() { exercise_nanoid(); }

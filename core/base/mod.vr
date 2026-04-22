@@ -50,6 +50,7 @@ public module data;  // Structured dynamic data
 public module cell;  // Interior mutability (Cell, RefCell)
 public module uuid;  // RFC 4122/9562 UUIDs (v4 random, v7 time-ordered)
 public module snowflake;  // Twitter-style 64-bit time-ordered IDs
+public module nanoid;     // URL-safe short-ID generator (21 chars ≈ 126 bits)
 
 // =============================================================================
 // Prelude re-exports (commonly used items)
