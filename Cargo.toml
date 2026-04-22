@@ -20,6 +20,8 @@ members = [
     "crates/verum_smt",
     "crates/verum_modules",
     "crates/verum_verification",
+    # LCF-style trusted kernel — the sole proof-term checker in the TCB.
+    "crates/verum_kernel",
     "crates/verum_integration_tests",
     "crates/verum_lsp",
     "crates/verum_interactive",
@@ -71,6 +73,7 @@ verum_lsp = { path = "crates/verum_lsp" }
 verum_interactive = { path = "crates/verum_interactive" }
 verum_modules = { path = "crates/verum_modules" }
 verum_verification = { path = "crates/verum_verification" }
+verum_kernel = { path = "crates/verum_kernel" }
 verum_dap = { path = "crates/verum_dap" }
 verum_vbc = { path = "crates/verum_vbc" }
 # LLVM/MLIR infrastructure

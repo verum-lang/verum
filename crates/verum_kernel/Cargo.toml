@@ -1,0 +1,27 @@
+[package]
+name = "verum_kernel"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Verum LCF-style trusted kernel — minimal proof-term checker"
+keywords = ["verum", "kernel", "proof-checker", "lcf", "verification"]
+categories = ["development-tools", "mathematics"]
+
+[lints]
+workspace = true
+
+[lib]
+name = "verum_kernel"
+path = "src/lib.rs"
+
+[dependencies]
+verum_common = { workspace = true }
+verum_ast = { workspace = true }
+thiserror = { workspace = true }
+serde = { workspace = true }
+
+[dev-dependencies]
+proptest = { workspace = true }
