@@ -1135,6 +1135,24 @@ pub fn verify_proof_body(
     smt_ctx: &Context,
     theorem: &TheoremDecl,
 ) -> ProofVerificationResult {
+    verify_proof_body_with_aliases(engine, smt_ctx, theorem, &std::collections::HashMap::new())
+}
+
+/// Same as [`verify_proof_body`] but takes a precomputed alias map so nominal
+/// refinement-type aliases (e.g. `type FanoDim is Dimension { self == 7 }`)
+/// can contribute predicates to the hypothesis list. The map is keyed by the
+/// alias's unqualified name and stores the already-composed chain of
+/// refinement predicates rooted in an implicit `self` binder.
+///
+/// Callers that don't care about nominal resolution use [`verify_proof_body`]
+/// above; it passes an empty map and the behaviour degrades to "inline
+/// refinements only", which is the pre-existing contract.
+pub fn verify_proof_body_with_aliases(
+    engine: &mut ProofSearchEngine,
+    smt_ctx: &Context,
+    theorem: &TheoremDecl,
+    alias_map: &std::collections::HashMap<Text, Vec<Expr>>,
+) -> ProofVerificationResult {
     let proof_start = Instant::now();
     let theorem_name = theorem.name.name.clone();
 
@@ -1189,7 +1207,7 @@ pub fn verify_proof_body(
     // type registry and is tracked as a separate follow-up. The conservative
     // behaviour (omit the nominal refinement) is sound: the proof obligation
     // is merely harder, not wrong.
-    for hyp in refinement_hypotheses_from_params(&theorem.params) {
+    for hyp in refinement_hypotheses_from_params(&theorem.params, alias_map) {
         hypotheses.push(hyp);
     }
 
@@ -1759,6 +1777,7 @@ fn build_suggestions_from_proof_error(err: &ProofError) -> List<Text> {
 /// through the verification layer where the goal solver lives.
 fn refinement_hypotheses_from_params(
     params: &List<verum_ast::decl::FunctionParam>,
+    alias_map: &std::collections::HashMap<Text, Vec<Expr>>,
 ) -> Vec<Expr> {
     use verum_ast::decl::FunctionParamKind;
     use verum_ast::pattern::PatternKind;
@@ -1782,7 +1801,7 @@ fn refinement_hypotheses_from_params(
         // Accumulate refinement predicates along the type structure. The
         // outermost peel is done here; nested refinements on the base type
         // descend recursively and contribute additional conjuncts.
-        collect_refinements(ty, &param_ident, &mut out);
+        collect_refinements(ty, &param_ident, &mut out, alias_map);
     }
 
     out
@@ -1792,7 +1811,17 @@ fn refinement_hypotheses_from_params(
 /// one, substitute the binder with `param_ident` and emit the rewritten
 /// predicate into `out`. Stops when a non-refinement, non-delegating
 /// TypeKind is reached.
-fn collect_refinements(ty: &verum_ast::ty::Type, param_ident: &Ident, out: &mut Vec<Expr>) {
+///
+/// Nominal types are looked up in `alias_map`; each stored predicate is
+/// assumed to use `self` as its binder (matching the convention of
+/// `build_refinement_alias_map`), and is rewritten to the parameter
+/// identifier before being pushed.
+fn collect_refinements(
+    ty: &verum_ast::ty::Type,
+    param_ident: &Ident,
+    out: &mut Vec<Expr>,
+    alias_map: &std::collections::HashMap<Text, Vec<Expr>>,
+) {
     use verum_ast::ty::TypeKind;
 
     match &ty.kind {
@@ -1814,7 +1843,7 @@ fn collect_refinements(ty: &verum_ast::ty::Type, param_ident: &Ident, out: &mut 
                 rewritten
             };
             out.push(rewritten);
-            collect_refinements(base, param_ident, out);
+            collect_refinements(base, param_ident, out, alias_map);
         }
         TypeKind::Sigma { name, base, predicate } => {
             let rewritten = substitute_ident(
@@ -1822,9 +1851,136 @@ fn collect_refinements(ty: &verum_ast::ty::Type, param_ident: &Ident, out: &mut 
                 &[(name.name.clone(), param_ident.clone())],
             );
             out.push(rewritten);
-            collect_refinements(base, param_ident, out);
+            collect_refinements(base, param_ident, out, alias_map);
         }
-        TypeKind::Bounded { base, .. } => collect_refinements(base, param_ident, out),
+        TypeKind::Bounded { base, .. } => {
+            collect_refinements(base, param_ident, out, alias_map)
+        }
+        // Nominal type reference (`n: FanoDim`). If the name resolves to an
+        // entry in the precomputed alias map, contribute every stored
+        // predicate with `self` rewritten to the parameter name. The map is
+        // already flattened: nested alias chains have been walked once at
+        // module load time, so we don't need to recurse further here.
+        TypeKind::Path(path) if path.segments.len() == 1 => {
+            if let verum_ast::PathSegment::Name(id) = &path.segments[0] {
+                if let Some(preds) = alias_map.get(&id.name) {
+                    for pred in preds {
+                        let rewritten = substitute_ident(
+                            pred,
+                            &[(Text::from("self"), param_ident.clone())],
+                        );
+                        out.push(rewritten);
+                    }
+                }
+            }
+        }
+        _ => {}
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Alias-map construction (nominal refinement chain flattener)
+// ---------------------------------------------------------------------------
+
+/// Walk all `TypeDecl`s in a module and produce a map
+/// `AliasName → [refinement-predicate rooted at `self`]` by flattening every
+/// `type X is T1 { self op K1 }` / `type X is T2 where …` chain, resolving
+/// intermediate named types by re-entering the map recursively.
+///
+/// This is the data source that turns `n: FanoDim` into the implicit
+/// hypothesis `n == 7` at verification time, eliminating the need for
+/// authors to restate the refinement as an explicit `requires` clause.
+pub fn build_refinement_alias_map(
+    module: &verum_ast::Module,
+) -> std::collections::HashMap<Text, Vec<Expr>> {
+    use std::collections::HashMap;
+    use verum_ast::decl::TypeDeclBody;
+    use verum_ast::ItemKind;
+
+    // First pass: collect `name → body_type` for every alias/newtype
+    // declaration in the module.
+    let mut raw_aliases: HashMap<Text, verum_ast::ty::Type> = HashMap::new();
+    for item in &module.items {
+        if let ItemKind::Type(td) = &item.kind {
+            match &td.body {
+                TypeDeclBody::Alias(t) | TypeDeclBody::Newtype(t) => {
+                    raw_aliases.insert(td.name.name.clone(), t.clone());
+                }
+                _ => {}
+            }
+        }
+    }
+
+    // Second pass: for each alias, flatten its refinement chain, following
+    // nominal references into sibling aliases. We guard against cycles with
+    // a visited set scoped per-alias.
+    let mut flattened: HashMap<Text, Vec<Expr>> = HashMap::new();
+    for name in raw_aliases.keys().cloned().collect::<Vec<_>>() {
+        let mut visited = std::collections::HashSet::new();
+        let mut preds = Vec::new();
+        if let Some(ty) = raw_aliases.get(&name) {
+            flatten_chain(ty, &raw_aliases, &mut visited, &mut preds);
+        }
+        if !preds.is_empty() {
+            flattened.insert(name, preds);
+        }
+    }
+    flattened
+}
+
+/// Inner recursive flattener.
+fn flatten_chain(
+    ty: &verum_ast::ty::Type,
+    raw_aliases: &std::collections::HashMap<Text, verum_ast::ty::Type>,
+    visited: &mut std::collections::HashSet<Text>,
+    out: &mut Vec<Expr>,
+) {
+    use verum_ast::ty::TypeKind;
+
+    match &ty.kind {
+        TypeKind::Refined { base, predicate } => {
+            // Normalise the refinement predicate to use `self` as the
+            // binder — that's the convention `collect_refinements`
+            // expects for alias-map entries.
+            let mut pred_expr = predicate.expr.clone();
+            if let Maybe::Some(binder) = &predicate.binding {
+                pred_expr = substitute_ident(
+                    &pred_expr,
+                    &[(
+                        binder.name.clone(),
+                        Ident::new("self", predicate.span),
+                    )],
+                );
+            }
+            // `it` → `self` normalisation (Rule 1 convention).
+            pred_expr = substitute_ident(
+                &pred_expr,
+                &[(Text::from("it"), Ident::new("self", predicate.span))],
+            );
+            out.push(pred_expr);
+            flatten_chain(base, raw_aliases, visited, out);
+        }
+        TypeKind::Sigma { name, base, predicate } => {
+            let pred_expr = substitute_ident(
+                predicate,
+                &[(name.name.clone(), Ident::new("self", predicate.span))],
+            );
+            out.push(pred_expr);
+            flatten_chain(base, raw_aliases, visited, out);
+        }
+        TypeKind::Path(path) if path.segments.len() == 1 => {
+            if let verum_ast::PathSegment::Name(id) = &path.segments[0] {
+                if visited.insert(id.name.clone()) {
+                    if let Some(next_ty) = raw_aliases.get(&id.name) {
+                        flatten_chain(next_ty, raw_aliases, visited, out);
+                    }
+                }
+            }
+        }
+        // `(T)` parenthesised / single-element tuple form (e.g. the
+        // `type Dimension is (Int) { self > 0 };` shape). The outer
+        // refinement is already captured by the `Refined` arm above;
+        // nothing more to recurse into for the element.
         _ => {}
     }
 }

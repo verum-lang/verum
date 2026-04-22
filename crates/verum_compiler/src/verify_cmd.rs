@@ -35,7 +35,7 @@ use verum_smt::{
 
 use verum_common::{List, Map, Text, ToText};
 
-use crate::phases::proof_verification::{verify_proof_body, ProofVerificationResult};
+use crate::phases::proof_verification::ProofVerificationResult;
 use crate::pipeline::CompilationPipeline;
 use crate::session::Session;
 use crate::verification_profiler::{FileLocation, VerificationProfiler};
@@ -152,6 +152,14 @@ impl<'s> VerifyCommand<'s> {
         let mut report = VerificationReport::new();
         let timeout = Duration::from_secs(self.session.options().smt_timeout_secs);
 
+        // Pre-compute the nominal refinement chain for every type alias
+        // declared in this module. `verify_theorem` threads the resulting
+        // map through to `verify_proof_body_with_aliases`, which uses it to
+        // turn `n: FanoDim` into the implicit hypothesis `n == 7` without
+        // forcing the author to repeat the refinement via `requires`.
+        let alias_map =
+            crate::phases::proof_verification::build_refinement_alias_map(module);
+
         for item in &module.items {
             if let ItemKind::Function(func) = &item.kind {
                 // Skip if filter doesn't match
@@ -259,7 +267,7 @@ impl<'s> VerifyCommand<'s> {
                 continue;
             }
 
-            let result = self.verify_theorem(thm, kind_name, timeout);
+            let result = self.verify_theorem(thm, kind_name, timeout, &alias_map);
 
             // Note: Profiler is not used for theorem verification (different result type)
 
@@ -297,6 +305,7 @@ impl<'s> VerifyCommand<'s> {
         theorem: &TheoremDecl,
         kind_name: &str,
         timeout: Duration,
+        alias_map: &std::collections::HashMap<Text, Vec<Expr>>,
     ) -> VerificationResult {
         let start = Instant::now();
 
@@ -320,7 +329,12 @@ impl<'s> VerifyCommand<'s> {
         let mut proof_engine = ProofSearchEngine::with_hints(hints_db);
 
         // Run the full proof verification pipeline
-        match verify_proof_body(&mut proof_engine, &smt_ctx, theorem) {
+        match crate::phases::proof_verification::verify_proof_body_with_aliases(
+            &mut proof_engine,
+            &smt_ctx,
+            theorem,
+            alias_map,
+        ) {
             ProofVerificationResult::Verified(cert) => {
                 let has_incomplete = cert.has_incomplete_steps;
                 info!(

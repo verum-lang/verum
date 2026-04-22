@@ -6609,8 +6609,15 @@ impl<'s> CompilationPipeline<'s> {
     /// - Structured proofs → Weakest precondition calculus
     /// - Method proofs → Induction/cases via WP engine
     fn verify_theorem_proofs(&mut self, module: &Module) -> Result<()> {
-        use crate::phases::proof_verification::{verify_proof_body, ProofVerificationResult};
+        use crate::phases::proof_verification::{
+            build_refinement_alias_map, verify_proof_body_with_aliases, ProofVerificationResult,
+        };
         use verum_smt::proof_search::{ProofSearchEngine, HintsDatabase};
+
+        // Flatten every nominal refinement alias in this module so downstream
+        // `verify_proof_body_with_aliases` can materialise hypotheses for
+        // parameters typed as aliases (e.g. `n: FanoDim` → `n == 7`).
+        let alias_map = build_refinement_alias_map(module);
 
         let mut theorem_count = 0u32;
         let mut verified_count = 0u32;
@@ -6679,7 +6686,7 @@ impl<'s> CompilationPipeline<'s> {
                 kind_name, thm.name.name, thm.requires.len(), thm.ensures.len());
 
             // Verify the proof body using the full proof verification engine
-            match verify_proof_body(&mut proof_engine, &smt_ctx, thm) {
+            match verify_proof_body_with_aliases(&mut proof_engine, &smt_ctx, thm, &alias_map) {
                 ProofVerificationResult::Verified(cert) => {
                     verified_count += 1;
                     info!("✓ {} '{}' verified ({} steps, {:.1}ms)",

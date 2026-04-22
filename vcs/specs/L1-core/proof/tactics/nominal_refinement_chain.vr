@@ -1,0 +1,53 @@
+// @test: integration
+// @tier: 0
+// @level: L1
+// @tags: proof, refinement, nominal-type, alias-chain, auto
+// @expect: pass
+//
+// Nominal refinement-type aliases — `type X is Y { self op K }` — must
+// flow their flattened predicate chain into the proof goal as
+// hypotheses. This closes the last leg of the "`n: FanoDim` ≡
+// `requires n == 7`" property; authors no longer need to restate
+// refinements via explicit `requires` when using a type alias.
+//
+// Locks in `build_refinement_alias_map` +
+// `verify_proof_body_with_aliases` + the `TypeKind::Path` arm of
+// `collect_refinements`.
+
+// Single-level alias.
+public type PositiveInt is (Int) { self > 0 };
+
+// Two-level chain: `PosSeven` → `PositiveInt` → `Int { self > 0 }`,
+// adds its own `self == 7` on top.
+public type PosSeven is PositiveInt { self == 7 };
+
+@verify(formal)
+theorem positive_int_direct(n: PositiveInt)
+    ensures n > 0
+    proof by auto;
+
+@verify(formal)
+theorem positive_int_nonzero(n: PositiveInt)
+    ensures n != 0
+    proof by auto;
+
+@verify(formal)
+theorem pos_seven_resolves_chain(n: PosSeven)
+    // `PosSeven` implies `n == 7 AND n > 0` via the alias chain; no
+    // explicit `requires` needed.
+    ensures n == 7
+    proof by auto;
+
+@verify(formal)
+theorem pos_seven_derives_arithmetic(n: PosSeven)
+    ensures n * 6 == 42
+    proof by auto;
+
+@verify(formal)
+theorem pos_seven_fano_identity(n: PosSeven)
+    ensures (n * (n - 1)) / 2 == 21
+    proof by auto;
+
+fn main() {
+    print("L1-core: proof/tactics/nominal_refinement_chain");
+}
