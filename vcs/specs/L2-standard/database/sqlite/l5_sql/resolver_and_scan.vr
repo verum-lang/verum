@@ -1,0 +1,153 @@
+// @test: typecheck-pass
+// @level: L2
+// @tier: 0
+// @tags: sqlite, native, sql, resolver, codegen, table-scan
+// @timeout: 15000
+// @description: Resolver rewrites EColumn → EColumnRef; codegen emits TableScan
+//
+// Spec: internal/specs/sqlite-native.md §13.1 + §14
+
+mount core.*;
+mount collections.List;
+mount core.database.sqlite.native.l5_sql.{
+    Expr, Literal, TableRef, PlanNode, PlanColumn,
+    CodegenError, codegen, compile,
+    ColumnScope, resolve_expr, scope_from_table_meta,
+    build_single_table_scope,
+};
+mount core.database.sqlite.native.l2_record.Affinity;
+mount core.database.sqlite.native.l6_session.{
+    SchemaCache, schema_cache_new,
+    ColumnMeta, TableMeta, TableKind,
+};
+
+fn meta_users() -> TableMeta {
+    let cols: List<ColumnMeta> = [
+        ColumnMeta {
+            name: "id".clone(), declared_type: "INTEGER".clone(),
+            affinity: Integer, not_null: true, primary_key: true, collation: "".clone(),
+        },
+        ColumnMeta {
+            name: "name".clone(), declared_type: "TEXT".clone(),
+            affinity: Text, not_null: false, primary_key: false, collation: "".clone(),
+        },
+    ];
+    TableMeta {
+        schema: "".clone(),
+        name: "users".clone(),
+        kind: TkTable,
+        root_page: 2,
+        columns: cols,
+        primary_key_cols: ["id".clone()],
+        strict: false,
+        without_rowid: false,
+        created_sql: "".clone(),
+    }
+}
+
+fn resolve_unqualified_id() {
+    let meta = meta_users();
+    let scope = scope_from_table_meta(0, "".clone(), &meta);
+    let mut scopes: List<ColumnScope> = List.new();
+    scopes.push(scope);
+
+    let e = EColumn(TableRef { schema: "".clone(), name: "".clone(), alias: "".clone() }, "id".clone());
+    match resolve_expr(&e, &scopes) {
+        Ok(EColumnRef(cid, idx)) => {
+            assert_eq(cid, 0);
+            assert_eq(idx, 0);
+        }
+        _ => panic("id should resolve to (0,0)"),
+    }
+}
+
+fn resolve_unqualified_name() {
+    let meta = meta_users();
+    let scope = scope_from_table_meta(0, "".clone(), &meta);
+    let mut scopes: List<ColumnScope> = List.new();
+    scopes.push(scope);
+
+    let e = EColumn(TableRef { schema: "".clone(), name: "".clone(), alias: "".clone() }, "name".clone());
+    match resolve_expr(&e, &scopes) {
+        Ok(EColumnRef(cid, idx)) => {
+            assert_eq(cid, 0);
+            assert_eq(idx, 1);
+        }
+        _ => panic("name should resolve to (0,1)"),
+    }
+}
+
+fn resolve_unknown_column_errors() {
+    let meta = meta_users();
+    let scope = scope_from_table_meta(0, "".clone(), &meta);
+    let mut scopes: List<ColumnScope> = List.new();
+    scopes.push(scope);
+
+    let e = EColumn(TableRef { schema: "".clone(), name: "".clone(), alias: "".clone() }, "email".clone());
+    match resolve_expr(&e, &scopes) {
+        Ok(_) => panic("unknown column should error"),
+        Err(_) => {},
+    }
+}
+
+fn resolve_qualified_table_ref() {
+    let meta = meta_users();
+    let scope = scope_from_table_meta(0, "".clone(), &meta);
+    let mut scopes: List<ColumnScope> = List.new();
+    scopes.push(scope);
+
+    let e = EColumn(TableRef { schema: "".clone(), name: "users".clone(), alias: "".clone() }, "id".clone());
+    match resolve_expr(&e, &scopes) {
+        Ok(EColumnRef(cid, idx)) => { assert_eq(cid, 0); assert_eq(idx, 0); }
+        _ => panic("users.id"),
+    }
+}
+
+fn build_scope_from_cache() {
+    let mut sc = schema_cache_new();
+    let _ = sc.register_table(meta_users());
+    let tref = TableRef { schema: "".clone(), name: "users".clone(), alias: "".clone() };
+    match build_single_table_scope(&sc, &tref, 0) {
+        Ok(sl) => { assert_eq(sl.len(), 1); }
+        Err(_) => panic("build_single_table_scope"),
+    }
+}
+
+fn build_scope_unknown_table() {
+    let sc = schema_cache_new();
+    let tref = TableRef { schema: "".clone(), name: "ghost".clone(), alias: "".clone() };
+    match build_single_table_scope(&sc, &tref, 0) {
+        Ok(_) => panic("ghost table must reject"),
+        Err(_) => {},
+    }
+}
+
+fn resolve_recurses_binary_op() {
+    let meta = meta_users();
+    let scope = scope_from_table_meta(0, "".clone(), &meta);
+    let mut scopes: List<ColumnScope> = List.new();
+    scopes.push(scope);
+
+    // id = 1
+    let e = EBinary(BEq,
+        Heap(EColumn(TableRef { schema: "".clone(), name: "".clone(), alias: "".clone() }, "id".clone())),
+        Heap(ELit(LInt(1 as Int64))),
+    );
+    match resolve_expr(&e, &scopes) {
+        Ok(EBinary(_, ref lhs, _)) => {
+            match lhs { Heap(EColumnRef(_, _)) => {}, _ => panic("lhs should be EColumnRef"), }
+        }
+        _ => panic("resolve binary"),
+    }
+}
+
+fn main() {
+    resolve_unqualified_id();
+    resolve_unqualified_name();
+    resolve_unknown_column_errors();
+    resolve_qualified_table_ref();
+    build_scope_from_cache();
+    build_scope_unknown_table();
+    resolve_recurses_binary_op();
+    print("resolver_and_scan typecheck ok");
+}

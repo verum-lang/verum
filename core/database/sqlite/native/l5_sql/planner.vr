@@ -378,6 +378,7 @@ public fn clone_expr(e: &Expr) -> Expr {
         ESubquery(_)          => ELit(LNull),
         ENullIf(ref a, ref b) => ENullIf(Heap(clone_expr(a)), Heap(clone_expr(b))),
         ECoalesce(ref xs)     => ECoalesce(clone_expr_list(xs)),
+        EColumnRef(cid, idx)  => EColumnRef(cid, idx),
     }
 }
 

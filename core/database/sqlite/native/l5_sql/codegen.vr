@@ -147,7 +147,7 @@ fn emit_plan(st: &mut CgState, plan: &PlanNode) -> Result<(), CodegenError> {
         PnFilter(ref child, ref pred)  => emit_filter(st, child, pred),
         PnLimit(ref child, ref lim, ref off) => emit_limit(st, child, lim, off),
         PnSort(_, _) => Err(unsupported("ORDER BY codegen pending".clone())),
-        PnTableScan(_, _, _) => Err(unsupported("TableScan codegen pending L3 cursor I/O".clone())),
+        PnTableScan(ref t, cid, n_cols) => emit_table_scan(st, t, cid, n_cols),
         PnInsert(ref t, ref cols, ref src, ref oc) => emit_insert(st, t, cols, src, oc),
         PnDelete(ref t, cid, ref pred) => emit_delete(st, t, cid, pred),
         PnUpdate(_, _, _, _) => Err(unsupported("UPDATE codegen pending L3 cursor I/O".clone())),
@@ -195,18 +195,150 @@ fn emit_project(
     child: &PlanNode,
     cols: &List<PlanColumn>,
 ) -> Result<(), CodegenError> {
-    // For Values children we simply let the child emit its row — the
-    // projection is a no-op because SELECT expressions were already
-    // flattened into row exprs at plan time.
+    // For Values children — projection is a no-op, child emitted the
+    // row shape already at plan time.
     match child {
         PnValues(_, _) => { return emit_plan(st, child); }
         _ => {}
     }
-    // Other sources: emit the source first (TODO once cursors are
-    // wired), then transform each row through the projection
-    // registers + ResultRow.
+    // TableScan source: emit OpenRead + Rewind + body + Next loop.
+    match child {
+        PnTableScan(ref t, cid, n_cols) => {
+            return emit_scan_with_project(st, t, cid, n_cols, cols);
+        }
+        _ => {}
+    }
+    // Filter-over-TableScan: emit scan + filter-skip + project inside.
+    match child {
+        PnFilter(ref grandchild, ref pred) => {
+            match grandchild {
+                PnTableScan(ref t, cid, n_cols) => {
+                    return emit_scan_with_filter_project(st, t, cid, n_cols, pred, cols);
+                }
+                _ => {}
+            }
+        }
+        _ => {}
+    }
     let _ = cols;
-    Err(unsupported("Project over non-Values child pending L3 cursor I/O".clone()))
+    Err(unsupported("Project over this plan-node is pending".clone()))
+}
+
+// -----------------------------------------------------------------------------
+// TableScan (bare — no projection) — emits OpenRead + Rewind + Next loop.
+// Used by PnTableScan appearing on its own (rare — usually wrapped).
+// -----------------------------------------------------------------------------
+
+fn emit_table_scan(
+    st: &mut CgState,
+    table: &TableRef,
+    cursor_id: Int,
+    n_cols: Int,
+) -> Result<(), CodegenError> {
+    let _ = table;
+    // Declare the cursor if the program doesn't have it yet.
+    if cursor_id >= st.program.cursor_count() {
+        let _ = st.program.declare_cursor(CkTable, 0, n_cols);
+    }
+    let _ = st.program.emit(OpenRead(cursor_id, 0, n_cols));
+    let rewind_idx = st.program.emit(Rewind(cursor_id, 0));
+    let loop_top = st.program.instruction_count();
+    // No body — bare scan just iterates. (Used mostly for tests.)
+    let _ = st.program.emit(Next(cursor_id, loop_top));
+    let after = st.program.instruction_count();
+    st.program.replace(rewind_idx, Rewind(cursor_id, after));
+    let _ = st.program.emit(Close(cursor_id));
+    Ok(())
+}
+
+// -----------------------------------------------------------------------------
+// TableScan + Project — the common SELECT ... FROM t path.
+// Emits:
+//     OpenRead(cid, ?, n_cols)
+//     Rewind(cid, end)
+//   loop_top:
+//     <for each projected column: emit_expr into reg>
+//     ResultRow(start, n_project_cols)
+//     Next(cid, loop_top)
+//   end:
+//     Close(cid)
+// -----------------------------------------------------------------------------
+
+fn emit_scan_with_project(
+    st: &mut CgState,
+    table: &TableRef,
+    cursor_id: Int,
+    n_cols: Int,
+    project_cols: &List<PlanColumn>,
+) -> Result<(), CodegenError> {
+    let _ = table;
+    if cursor_id >= st.program.cursor_count() {
+        let _ = st.program.declare_cursor(CkTable, 0, n_cols);
+    }
+    let _ = st.program.emit(OpenRead(cursor_id, 0, n_cols));
+    let rewind_idx = st.program.emit(Rewind(cursor_id, 0));
+    let loop_top = st.program.instruction_count();
+
+    // Allocate register window for the projected row.
+    let proj_start = st.regs.alloc_n(project_cols.len());
+    let mut i: Int = 0;
+    while i < project_cols.len() {
+        match emit_expr(st, &project_cols[i].expr, proj_start + i) {
+            Ok(_)  => {}, Err(e) => { return Err(e); }
+        }
+        i = i + 1;
+    }
+    let _ = st.program.emit(ResultRow(proj_start, project_cols.len()));
+    let _ = st.program.emit(Next(cursor_id, loop_top));
+
+    let after = st.program.instruction_count();
+    st.program.replace(rewind_idx, Rewind(cursor_id, after));
+    let _ = st.program.emit(Close(cursor_id));
+    Ok(())
+}
+
+fn emit_scan_with_filter_project(
+    st: &mut CgState,
+    table: &TableRef,
+    cursor_id: Int,
+    n_cols: Int,
+    predicate: &Expr,
+    project_cols: &List<PlanColumn>,
+) -> Result<(), CodegenError> {
+    let _ = table;
+    if cursor_id >= st.program.cursor_count() {
+        let _ = st.program.declare_cursor(CkTable, 0, n_cols);
+    }
+    let _ = st.program.emit(OpenRead(cursor_id, 0, n_cols));
+    let rewind_idx = st.program.emit(Rewind(cursor_id, 0));
+    let loop_top = st.program.instruction_count();
+
+    // Evaluate predicate.
+    let pred_reg = st.regs.alloc();
+    match emit_expr(st, predicate, pred_reg) {
+        Ok(_)  => {}, Err(e) => { return Err(e); }
+    }
+    let skip_idx = st.program.emit(IfNot(pred_reg, 0));
+
+    // Projection body.
+    let proj_start = st.regs.alloc_n(project_cols.len());
+    let mut i: Int = 0;
+    while i < project_cols.len() {
+        match emit_expr(st, &project_cols[i].expr, proj_start + i) {
+            Ok(_)  => {}, Err(e) => { return Err(e); }
+        }
+        i = i + 1;
+    }
+    let _ = st.program.emit(ResultRow(proj_start, project_cols.len()));
+
+    let after_body = st.program.instruction_count();
+    st.program.replace(skip_idx, IfNot(pred_reg, after_body));
+
+    let _ = st.program.emit(Next(cursor_id, loop_top));
+    let after = st.program.instruction_count();
+    st.program.replace(rewind_idx, Rewind(cursor_id, after));
+    let _ = st.program.emit(Close(cursor_id));
+    Ok(())
 }
 
 // -----------------------------------------------------------------------------
@@ -418,7 +550,11 @@ public fn emit_expr(st: &mut CgState, e: &Expr, dst: Int) -> Result<(), CodegenE
         EBinary(op, ref a, ref b) => emit_binary(st, op, a, b, dst),
         EVar(_)        => Err(unsupported("named variable lowering pending".clone())),
         EPositional(_) => Err(unsupported("positional variable lowering pending".clone())),
-        EColumn(_, _)  => Err(unsupported("column reference lowering pending L3".clone())),
+        EColumn(_, _)  => Err(unsupported("EColumn reached codegen — run the resolver first".clone())),
+        EColumnRef(cid, idx) => {
+            let _ = st.program.emit(Column(cid, idx, dst));
+            Ok(())
+        }
         EFunc(_, _, _) => Err(unsupported("function-call lowering pending builtin registry".clone())),
         _ => Err(unsupported("expression kind not supported by v1 codegen".clone())),
     }

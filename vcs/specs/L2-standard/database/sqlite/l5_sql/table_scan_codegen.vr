@@ -1,0 +1,86 @@
+// @test: typecheck-pass
+// @level: L2
+// @tier: 0
+// @tags: sqlite, native, sql, codegen, table-scan, end-to-end
+// @timeout: 15000
+// @description: PnTableScan + Project emits OpenRead/Rewind/Column/Next loop
+//
+// Spec: internal/specs/sqlite-native.md §14.2
+
+mount core.*;
+mount collections.List;
+mount core.database.sqlite.native.l5_sql.{
+    Expr, Literal, TableRef, PlanNode, PlanColumn,
+    CodegenError, codegen,
+};
+mount core.database.sqlite.native.l4_vdbe.VdbeProgram;
+
+fn bare_table_scan_emits_open_rewind_next_close() {
+    let tref = TableRef { schema: "".clone(), name: "t".clone(), alias: "".clone() };
+    let plan: PlanNode = PnTableScan(tref, 0, 2);
+    match codegen(&plan, "SELECT FROM t".clone()) {
+        Ok(prog) => { assert(prog.instruction_count() >= 4); }
+        Err(_) => panic("bare TableScan codegen"),
+    }
+}
+
+fn scan_with_project_column_ref() {
+    // Project: [EColumnRef(0, 0)] → emit Column(0,0,dst) + ResultRow(dst,1)
+    let tref = TableRef { schema: "".clone(), name: "t".clone(), alias: "".clone() };
+    let scan: PlanNode = PnTableScan(tref, 0, 2);
+    let cols: List<PlanColumn> = [PlanColumn { alias: "id".clone(), expr: EColumnRef(0, 0) }];
+    let plan: PlanNode = PnProject(Heap(scan), cols);
+    match codegen(&plan, "SELECT id FROM t".clone()) {
+        Ok(prog) => { assert(prog.instruction_count() >= 6); }
+        Err(_) => panic("scan+project"),
+    }
+}
+
+fn scan_with_filter_project() {
+    // SELECT id FROM t WHERE id = 1
+    let tref = TableRef { schema: "".clone(), name: "t".clone(), alias: "".clone() };
+    let scan: PlanNode = PnTableScan(tref, 0, 2);
+    let pred: Expr = EBinary(BEq, Heap(EColumnRef(0, 0)), Heap(ELit(LInt(1 as Int64))));
+    let filter: PlanNode = PnFilter(Heap(scan), pred);
+    let cols: List<PlanColumn> = [PlanColumn { alias: "id".clone(), expr: EColumnRef(0, 0) }];
+    let plan: PlanNode = PnProject(Heap(filter), cols);
+    match codegen(&plan, "SELECT id FROM t WHERE id = 1".clone()) {
+        Ok(prog) => { assert(prog.instruction_count() >= 8); }
+        Err(_) => panic("scan+filter+project"),
+    }
+}
+
+fn columnref_in_arithmetic() {
+    // SELECT id + 1 FROM t
+    let tref = TableRef { schema: "".clone(), name: "t".clone(), alias: "".clone() };
+    let scan: PlanNode = PnTableScan(tref, 0, 1);
+    let expr: Expr = EBinary(BAdd, Heap(EColumnRef(0, 0)), Heap(ELit(LInt(1 as Int64))));
+    let cols: List<PlanColumn> = [PlanColumn { alias: "".clone(), expr: expr }];
+    let plan: PlanNode = PnProject(Heap(scan), cols);
+    match codegen(&plan, "SELECT id+1 FROM t".clone()) {
+        Ok(prog) => { assert(prog.instruction_count() >= 7); }
+        Err(_) => panic("scan arith"),
+    }
+}
+
+fn raw_ecolumn_still_errors() {
+    // If a planner forgot to run the resolver, EColumn should surface as a codegen error.
+    let tref = TableRef { schema: "".clone(), name: "t".clone(), alias: "".clone() };
+    let scan: PlanNode = PnTableScan(tref, 0, 1);
+    let unresolved: Expr = EColumn(TableRef { schema: "".clone(), name: "".clone(), alias: "".clone() }, "id".clone());
+    let cols: List<PlanColumn> = [PlanColumn { alias: "".clone(), expr: unresolved }];
+    let plan: PlanNode = PnProject(Heap(scan), cols);
+    match codegen(&plan, "".clone()) {
+        Ok(_) => panic("unresolved EColumn must fail"),
+        Err(_) => {},
+    }
+}
+
+fn main() {
+    bare_table_scan_emits_open_rewind_next_close();
+    scan_with_project_column_ref();
+    scan_with_filter_project();
+    columnref_in_arithmetic();
+    raw_ecolumn_still_errors();
+    print("table_scan_codegen typecheck ok");
+}

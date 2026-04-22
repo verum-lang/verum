@@ -72,7 +72,11 @@ public type Expr is
     | EExists(Heap<SelectStmt>, Bool /* negated */)
     | ESubquery(Heap<SelectStmt>)
     | ENullIf(Heap<Expr>, Heap<Expr>)
-    | ECoalesce(List<Expr>);
+    | ECoalesce(List<Expr>)
+    // Resolved column reference — produced by the resolver from
+    // EColumn(_, name) once the table metadata is known. Codegen
+    // lowers it to a `Column(cursor_id, col_idx, dst)` opcode.
+    | EColumnRef(Int /* cursor_id */, Int /* col_idx */);
 
 // -----------------------------------------------------------------------------
 // SELECT

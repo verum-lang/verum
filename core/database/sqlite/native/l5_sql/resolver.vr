@@ -1,0 +1,320 @@
+module core.database.sqlite.native.l5_sql.resolver;
+
+// =============================================================================
+// l5_sql/resolver.vr — name resolution for SELECT / DML expressions
+// =============================================================================
+// Layer: 5
+// Spec: sqlite-native.md §13.1
+//
+// The resolver rewrites `EColumn(_, name)` AST nodes into
+// `EColumnRef(cursor_id, col_idx)` using a ColumnScope built from the
+// SchemaCache entry for the source table. Downstream codegen lowers
+// `EColumnRef` into a `Column(cursor_id, col_idx, dst)` opcode.
+//
+// For v1 the resolver handles:
+//
+//   * SELECT from a single FROM table
+//   * INSERT / UPDATE / DELETE targeting a single table
+//   * Bare `SELECT expr` (no FROM) — nothing to resolve, passthrough
+//
+// Multi-table SELECT, subqueries, CTEs, and JOIN column resolution
+// land with the planner enhancement; the resolver signature accepts
+// a `Vec<ColumnScope>` for that forward-compatibility.
+// =============================================================================
+
+mount core.*;
+mount collections.{List, Map};
+mount base.{Result, Ok, Err, Text, Maybe};
+mount core.database.sqlite.native.l5_sql.ast.{
+    Statement, Expr, Literal, UnOp, BinOp, TableRef,
+    SelectStmt, SelectKind, SimpleSelect, ResultColumnItem,
+    FromItem, OrderTerm, LimitClause,
+    InsertStmt, InsertSource, UpdateStmt, UpdateAssignment, DeleteStmt,
+};
+mount core.database.sqlite.native.l6_session.schema_cache.{
+    TableMeta, SchemaCache,
+};
+
+// -----------------------------------------------------------------------------
+// Errors
+// -----------------------------------------------------------------------------
+
+public type ResolveError is
+      UnknownTable(name: Text)
+    | UnknownColumn(column: Text)
+    | AmbiguousColumn(column: Text)
+    | TooComplex(what: Text);
+
+public fn resolve_error_unknown_table(name: Text) -> ResolveError { UnknownTable(name) }
+public fn resolve_error_unknown_column(col: Text) -> ResolveError { UnknownColumn(col) }
+
+// -----------------------------------------------------------------------------
+// ColumnScope
+// -----------------------------------------------------------------------------
+
+/// One cursor's column name → col_idx map. SELECT chains multiple
+/// scopes for JOIN disambiguation; v1 single-table path uses one.
+public type ColumnScope is {
+    cursor_id: Int,
+    table: Text,                 // unqualified table name (for `t.col`)
+    alias: Text,                 // user alias if any
+    name_to_idx: Map<Text, Int>,
+    n_cols: Int,
+};
+
+public fn scope_from_table_meta(
+    cursor_id: Int,
+    alias: Text,
+    meta: &TableMeta,
+) -> ColumnScope {
+    let mut m: Map<Text, Int> = Map.new();
+    let mut i: Int = 0;
+    while i < meta.columns.len() {
+        let _ = m.insert(meta.columns[i].name.clone(), i);
+        i = i + 1;
+    }
+    ColumnScope {
+        cursor_id: cursor_id,
+        table: meta.name.clone(),
+        alias: alias,
+        name_to_idx: m,
+        n_cols: meta.columns.len(),
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Column lookup over a list of scopes
+// -----------------------------------------------------------------------------
+
+fn lookup_unqualified(
+    scopes: &List<ColumnScope>,
+    name: &Text,
+) -> Result<(Int, Int), ResolveError> {
+    let mut found_cursor: Int = -1;
+    let mut found_idx: Int = -1;
+    let mut hits: Int = 0;
+    let mut i: Int = 0;
+    while i < scopes.len() {
+        if scopes[i].name_to_idx.contains_key(name.clone()) {
+            found_cursor = scopes[i].cursor_id;
+            found_idx = scopes[i].name_to_idx.get(name.clone());
+            hits = hits + 1;
+        }
+        i = i + 1;
+    }
+    if hits == 0 { return Err(UnknownColumn(name.clone())); }
+    if hits > 1  { return Err(AmbiguousColumn(name.clone())); }
+    Ok((found_cursor, found_idx))
+}
+
+fn lookup_qualified(
+    scopes: &List<ColumnScope>,
+    table: &Text,
+    name: &Text,
+) -> Result<(Int, Int), ResolveError> {
+    let mut i: Int = 0;
+    while i < scopes.len() {
+        let s = &scopes[i];
+        let match_name = s.table == table.clone();
+        let match_alias = s.alias.len() > 0 && s.alias == table.clone();
+        if match_name || match_alias {
+            if s.name_to_idx.contains_key(name.clone()) {
+                return Ok((s.cursor_id, s.name_to_idx.get(name.clone())));
+            }
+            return Err(UnknownColumn(name.clone()));
+        }
+        i = i + 1;
+    }
+    Err(UnknownTable(table.clone()))
+}
+
+// -----------------------------------------------------------------------------
+// Expression rewrite
+// -----------------------------------------------------------------------------
+
+public fn resolve_expr(
+    e: &Expr,
+    scopes: &List<ColumnScope>,
+) -> Result<Expr, ResolveError> {
+    match e {
+        EColumn(ref tref, ref name) => {
+            let (cid, idx) = if tref.name.len() == 0 {
+                match lookup_unqualified(scopes, name) {
+                    Ok(p)  => p, Err(err) => { return Err(err); }
+                }
+            } else {
+                match lookup_qualified(scopes, &tref.name, name) {
+                    Ok(p)  => p, Err(err) => { return Err(err); }
+                }
+            };
+            Ok(EColumnRef(cid, idx))
+        }
+
+        // Structural recursion — rebuild with resolved children.
+        EUnary(op, ref inner) => {
+            let r = match resolve_expr(inner, scopes) {
+                Ok(x)  => x, Err(err) => { return Err(err); }
+            };
+            Ok(EUnary(op, Heap(r)))
+        }
+        EBinary(op, ref a, ref b) => {
+            let ra = match resolve_expr(a, scopes) {
+                Ok(x)  => x, Err(err) => { return Err(err); }
+            };
+            let rb = match resolve_expr(b, scopes) {
+                Ok(x)  => x, Err(err) => { return Err(err); }
+            };
+            Ok(EBinary(op, Heap(ra), Heap(rb)))
+        }
+        EFunc(ref n, ref args, d) => {
+            let mut out: List<Expr> = List.new();
+            let mut i: Int = 0;
+            while i < args.len() {
+                let r = match resolve_expr(&args[i], scopes) {
+                    Ok(x)  => x, Err(err) => { return Err(err); }
+                };
+                out.push(r);
+                i = i + 1;
+            }
+            Ok(EFunc(n.clone(), out, d))
+        }
+        EBetween(ref x, ref lo, ref hi, neg) => {
+            let rx  = match resolve_expr(x, scopes)  { Ok(r) => r, Err(e) => { return Err(e); } };
+            let rlo = match resolve_expr(lo, scopes) { Ok(r) => r, Err(e) => { return Err(e); } };
+            let rhi = match resolve_expr(hi, scopes) { Ok(r) => r, Err(e) => { return Err(e); } };
+            Ok(EBetween(Heap(rx), Heap(rlo), Heap(rhi), neg))
+        }
+        ELike(ref s, ref p, ref esc, neg) => {
+            let rs = match resolve_expr(s, scopes) { Ok(r) => r, Err(e) => { return Err(e); } };
+            let rp = match resolve_expr(p, scopes) { Ok(r) => r, Err(e) => { return Err(e); } };
+            let resc: Maybe<Heap<Expr>> = match esc {
+                Some(ref x) => {
+                    let r = match resolve_expr(x, scopes) { Ok(r) => r, Err(e) => { return Err(e); } };
+                    Some(Heap(r))
+                }
+                None => None,
+            };
+            Ok(ELike(Heap(rs), Heap(rp), resc, neg))
+        }
+        ECast(ref x, ref t) => {
+            let r = match resolve_expr(x, scopes) { Ok(r) => r, Err(e) => { return Err(e); } };
+            Ok(ECast(Heap(r), t.clone()))
+        }
+        ECollate(ref x, ref n) => {
+            let r = match resolve_expr(x, scopes) { Ok(r) => r, Err(e) => { return Err(e); } };
+            Ok(ECollate(Heap(r), n.clone()))
+        }
+        EIn(ref x, ref xs, neg) => {
+            let rx = match resolve_expr(x, scopes) { Ok(r) => r, Err(e) => { return Err(e); } };
+            let mut rxs: List<Expr> = List.new();
+            let mut i: Int = 0;
+            while i < xs.len() {
+                let r = match resolve_expr(&xs[i], scopes) { Ok(r) => r, Err(e) => { return Err(e); } };
+                rxs.push(r);
+                i = i + 1;
+            }
+            Ok(EIn(Heap(rx), rxs, neg))
+        }
+        ENullIf(ref a, ref b) => {
+            let ra = match resolve_expr(a, scopes) { Ok(r) => r, Err(e) => { return Err(e); } };
+            let rb = match resolve_expr(b, scopes) { Ok(r) => r, Err(e) => { return Err(e); } };
+            Ok(ENullIf(Heap(ra), Heap(rb)))
+        }
+        ECoalesce(ref xs) => {
+            let mut rxs: List<Expr> = List.new();
+            let mut i: Int = 0;
+            while i < xs.len() {
+                let r = match resolve_expr(&xs[i], scopes) { Ok(r) => r, Err(e) => { return Err(e); } };
+                rxs.push(r);
+                i = i + 1;
+            }
+            Ok(ECoalesce(rxs))
+        }
+        // Subquery shapes remain unsupported at this v1 cut.
+        EInSubquery(_, _, _) | EExists(_, _) | ESubquery(_) => {
+            Err(TooComplex("subquery in expression".clone()))
+        }
+        // ECase — its arms are (cond, body) pairs; recurse through.
+        ECase(ref scrut, ref arms, ref else_) => {
+            let rscrut: Maybe<Heap<Expr>> = match scrut {
+                Some(ref x) => {
+                    let r = match resolve_expr(x, scopes) { Ok(r) => r, Err(e) => { return Err(e); } };
+                    Some(Heap(r))
+                }
+                None => None,
+            };
+            let mut rarms: List<(Expr, Expr)> = List.new();
+            let mut i: Int = 0;
+            while i < arms.len() {
+                let ra = match resolve_expr(&arms[i].0, scopes) { Ok(r) => r, Err(e) => { return Err(e); } };
+                let rb = match resolve_expr(&arms[i].1, scopes) { Ok(r) => r, Err(e) => { return Err(e); } };
+                rarms.push((ra, rb));
+                i = i + 1;
+            }
+            let relse: Maybe<Heap<Expr>> = match else_ {
+                Some(ref x) => {
+                    let r = match resolve_expr(x, scopes) { Ok(r) => r, Err(e) => { return Err(e); } };
+                    Some(Heap(r))
+                }
+                None => None,
+            };
+            Ok(ECase(rscrut, rarms, relse))
+        }
+
+        // Everything else is already resolved or doesn't bind a column.
+        _ => Ok(clone_leaf(e)),
+    }
+}
+
+fn clone_leaf(e: &Expr) -> Expr {
+    // Shallow clone for leaf variants that don't need recursion.
+    match e {
+        ELit(ref l)       => ELit(clone_literal(l)),
+        EVar(ref s)       => EVar(s.clone()),
+        EPositional(n)    => EPositional(n),
+        EColumnRef(c, i)  => EColumnRef(c, i),
+        _                 => ELit(LNull),  // defensive — should be unreachable
+    }
+}
+
+fn clone_literal(l: &Literal) -> Literal {
+    match l {
+        LNull  => LNull,
+        LInt(i) => LInt(i),
+        LReal(x) => LReal(x),
+        LText(ref s) => LText(s.clone()),
+        LBlob(ref b) => {
+            let mut out: List<Byte> = List.new();
+            let mut i: Int = 0;
+            while i < b.len() { out.push(b[i]); i = i + 1; }
+            LBlob(out)
+        }
+        LTrue => LTrue,
+        LFalse => LFalse,
+        LCurrentDate => LCurrentDate,
+        LCurrentTime => LCurrentTime,
+        LCurrentTimestamp => LCurrentTimestamp,
+        LStar => LStar,
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Scope-building helpers — caller uses these to prep `scopes` for resolve_expr.
+// -----------------------------------------------------------------------------
+
+/// Build a one-cursor scope list for SELECT over a single table.
+/// Returns the scope list plus the scalar cursor_id for convenience.
+public fn build_single_table_scope(
+    schema: &SchemaCache,
+    tref: &TableRef,
+    cursor_id: Int,
+) -> Result<List<ColumnScope>, ResolveError> {
+    let meta = match schema.lookup_table(&tref.schema, &tref.name) {
+        Ok(m)  => m,
+        Err(_) => { return Err(UnknownTable(tref.name.clone())); }
+    };
+    let scope = scope_from_table_meta(cursor_id, tref.alias.clone(), &meta);
+    let mut list: List<ColumnScope> = List.new();
+    list.push(scope);
+    Ok(list)
+}

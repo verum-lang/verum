@@ -27,6 +27,7 @@ public module lexer;
 public module ast;
 public module parser;
 public module planner;
+public module resolver;
 public module codegen;
 public module compile;
 
@@ -72,6 +73,11 @@ public mount .planner.{
 public mount .codegen.{
     CodegenError, CgState,
     codegen, emit_expr,
+};
+
+public mount .resolver.{
+    ResolveError, ColumnScope,
+    resolve_expr, build_single_table_scope, scope_from_table_meta,
 };
 
 public mount .compile.{
