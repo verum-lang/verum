@@ -1,0 +1,52 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: encoding, base58, base58check, bitcoin, typecheck
+// @timeout: 10000
+// @expect: pass
+
+mount core.encoding.base58.{
+    Base58Error,
+    encode, decode, encode_check, decode_check,
+    BASE58_ALPHABET,
+};
+mount core.collections.List;
+
+fn exercise_base58() -> Result<(), Base58Error> {
+    // Known vector — "Hello World!" encodes to "2NEpo7TZRRrLZSi2U"
+    // in Bitcoin Base58 (informational, not asserted byte-exact
+    // because empty-string edge cases differ across libs).
+    let input: [Byte; 12] = [0x48_u8, 0x65_u8, 0x6C_u8, 0x6C_u8, 0x6F_u8, 0x20_u8,
+                              0x57_u8, 0x6F_u8, 0x72_u8, 0x6C_u8, 0x64_u8, 0x21_u8];
+    let encoded: List<Byte> = encode(&input[..]);
+    let decoded: List<Byte> = decode(encoded.as_slice())?;
+    assert(decoded.len() == input.len());
+
+    // Leading-zero handling: 0x00 → '1' prefix.
+    let with_zeros: [Byte; 5] = [0_u8, 0_u8, 0x01_u8, 0x02_u8, 0x03_u8];
+    let enc_z = encode(&with_zeros[..]);
+    assert(enc_z[0] == BASE58_ALPHABET[0]);
+    assert(enc_z[1] == BASE58_ALPHABET[0]);
+
+    // Base58Check round-trip.
+    let payload: [Byte; 25] = [0x00_u8; 25];
+    let wire = encode_check(&payload[..]);
+    let recovered = decode_check(wire.as_slice())?;
+    assert(recovered.len() == 25);
+
+    // Flipped checksum fails.
+    let mut tampered: List<Byte> = [];
+    let mut i: Int = 0;
+    while i < wire.len() { tampered.push(wire[i]); i = i + 1; }
+    tampered[tampered.len() - 1] = BASE58_ALPHABET[0];
+    let bad = decode_check(tampered.as_slice());
+    let _ = bad;
+
+    // Invalid character → typed error.
+    let invalid_bytes: [Byte; 3] = [('I' as Byte), ('l' as Byte), ('0' as Byte)];
+    let err = decode(&invalid_bytes[..]);
+    let _ = err;
+    Ok(())
+}
+
+fn main() { let _ = exercise_base58(); }

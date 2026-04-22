@@ -1,0 +1,220 @@
+// =============================================================================
+// encoding/base58.vr — Base58 + Base58Check (Bitcoin-style encoding)
+// =============================================================================
+// Layer: 1 (Encoding)
+// Dependencies: core, core.security.hash.sha256
+// =============================================================================
+//
+// Base58 is a binary-to-text encoding designed to produce IDs and
+// addresses that humans copy-paste without confusion: it omits the
+// four visually-similar glyphs (0, O, I, l) from the Base64 set.
+//
+// Used by:
+//
+//   * Bitcoin legacy addresses (P2PKH, P2SH).
+//   * Solana public keys.
+//   * Stellar account IDs (StrKey).
+//   * IPFS v0 CIDs (Base58btc).
+//   * Monero subaddresses (via base58 variant).
+//
+// # Two variants here
+//
+//   * `encode` / `decode`          — raw Base58 (no checksum).
+//   * `encode_check` / `decode_check` — Base58Check: appends the
+//     first 4 bytes of double-SHA256 as a tail checksum so
+//     transcription errors get caught on decode.
+//
+// # Alphabet
+//
+// ```
+//   123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz
+// ```
+//
+// # Encoding properties
+//
+//   * Zero-prefix bytes map to leading '1' characters — the
+//     classic Bitcoin "every 0x00 byte becomes a '1'" rule.
+//   * Encoding/decoding is variable-width: log58(256) ≈ 1.366
+//     characters per input byte.
+//
+// # Performance note
+//
+// Pure big-integer division per character; ~1 MB/s for megabyte-
+// sized inputs. That's fine for addresses (≤ 50 bytes) but not
+// for bulk data — reach for Base64 there.
+//
+// =============================================================================
+
+module core.encoding.base58;
+
+mount core.*;
+mount core.collections.List;
+mount core.security.hash.sha256.{Sha256};
+
+// =============================================================================
+// Alphabet
+// =============================================================================
+
+public const BASE58_ALPHABET: [Byte; 58] = [
+    0x31_u8, 0x32_u8, 0x33_u8, 0x34_u8, 0x35_u8, 0x36_u8, 0x37_u8, 0x38_u8,  // 1-8
+    0x39_u8,                                                                   // 9
+    0x41_u8, 0x42_u8, 0x43_u8, 0x44_u8, 0x45_u8, 0x46_u8, 0x47_u8, 0x48_u8,  // A-H
+    0x4A_u8, 0x4B_u8, 0x4C_u8, 0x4D_u8, 0x4E_u8,                              // J-N
+    0x50_u8, 0x51_u8, 0x52_u8, 0x53_u8, 0x54_u8, 0x55_u8, 0x56_u8, 0x57_u8,  // P-W
+    0x58_u8, 0x59_u8, 0x5A_u8,                                                 // X-Z
+    0x61_u8, 0x62_u8, 0x63_u8, 0x64_u8, 0x65_u8, 0x66_u8, 0x67_u8, 0x68_u8,  // a-h
+    0x69_u8, 0x6A_u8, 0x6B_u8, 0x6D_u8, 0x6E_u8,                              // i-n (no l)
+    0x6F_u8, 0x70_u8, 0x71_u8, 0x72_u8, 0x73_u8, 0x74_u8, 0x75_u8, 0x76_u8,  // o-v
+    0x77_u8, 0x78_u8, 0x79_u8, 0x7A_u8,                                        // w-z
+];
+
+public type Base58Error is
+      InvalidCharacter(Byte)
+    | ChecksumMismatch
+    | TruncatedChecksum;
+
+// =============================================================================
+// Encode
+// =============================================================================
+
+public fn encode(input: &[Byte]) -> List<Byte> {
+    let mut out: List<Byte> = [];
+    if input.len() == 0 { return out; }
+
+    // Count leading zero bytes.
+    let mut zeros: Int = 0;
+    while zeros < input.len() && input[zeros] == 0_u8 { zeros = zeros + 1; }
+
+    // Copy input into a mutable buffer we can divide in place.
+    let mut buf: List<Byte> = [];
+    let mut i: Int = 0;
+    while i < input.len() { buf.push(input[i]); i = i + 1; }
+
+    // Repeatedly divide by 58 and collect remainders.
+    let mut digits_rev: List<Byte> = [];
+    let mut start: Int = 0;
+    while start < buf.len() {
+        let mut remainder: UInt32 = 0_u32;
+        let mut j: Int = start;
+        while j < buf.len() {
+            let acc = ((remainder as UInt32) << 8_u32) | (buf[j] as UInt32);
+            buf[j] = (acc / 58_u32) as Byte;
+            remainder = acc % 58_u32;
+            j = j + 1;
+        }
+        digits_rev.push(BASE58_ALPHABET[remainder as Int]);
+        // Advance `start` past any leading zero bytes.
+        while start < buf.len() && buf[start] == 0_u8 { start = start + 1; }
+    }
+
+    // Leading '1's for original leading zeros.
+    let mut z: Int = 0;
+    while z < zeros { out.push(BASE58_ALPHABET[0]); z = z + 1; }
+    // Append reversed digits.
+    let mut k: Int = digits_rev.len() - 1;
+    while k >= 0 { out.push(digits_rev[k]); k = k - 1; }
+    out
+}
+
+// =============================================================================
+// Decode
+// =============================================================================
+
+public fn decode(input: &[Byte]) -> Result<List<Byte>, Base58Error> {
+    if input.len() == 0 { return Ok([]); }
+
+    // Count leading '1's → leading zero bytes in output.
+    let mut ones: Int = 0;
+    while ones < input.len() && input[ones] == BASE58_ALPHABET[0] {
+        ones = ones + 1;
+    }
+
+    // Accumulate big integer via repeated *58 + digit.
+    let mut out_rev: List<Byte> = [];
+    let mut i: Int = 0;
+    while i < input.len() {
+        let d = decode_digit(input[i])?;
+        let mut carry: UInt32 = d as UInt32;
+        let mut j: Int = 0;
+        while j < out_rev.len() {
+            let acc = (out_rev[j] as UInt32) * 58_u32 + carry;
+            out_rev[j] = (acc & 0xFF_u32) as Byte;
+            carry = acc >> 8_u32;
+            j = j + 1;
+        }
+        while carry > 0_u32 {
+            out_rev.push((carry & 0xFF_u32) as Byte);
+            carry = carry >> 8_u32;
+        }
+        i = i + 1;
+    }
+
+    let mut out: List<Byte> = [];
+    // Prepend leading zeros.
+    let mut z: Int = 0;
+    while z < ones { out.push(0_u8); z = z + 1; }
+    // Reverse the accumulated bytes.
+    let mut k: Int = out_rev.len() - 1;
+    while k >= 0 { out.push(out_rev[k]); k = k - 1; }
+    Ok(out)
+}
+
+fn decode_digit(b: Byte) -> Result<Int, Base58Error> {
+    let mut i: Int = 0;
+    while i < 58 {
+        if BASE58_ALPHABET[i] == b { return Ok(i); }
+        i = i + 1;
+    }
+    Err(Base58Error.InvalidCharacter(b))
+}
+
+// =============================================================================
+// Base58Check
+// =============================================================================
+//
+// Appends the first 4 bytes of double-SHA256(payload) as a checksum:
+//
+//   output = base58( payload || SHA256(SHA256(payload))[0..4] )
+//
+// Guards against transcription errors — a one-character flip has
+// probability 2^-32 of passing the checksum.
+//
+// =============================================================================
+
+public fn encode_check(payload: &[Byte]) -> List<Byte> {
+    let checksum = compute_checksum(payload);
+    let mut wire: List<Byte> = [];
+    let mut i: Int = 0;
+    while i < payload.len() { wire.push(payload[i]); i = i + 1; }
+    let mut j: Int = 0;
+    while j < 4 { wire.push(checksum[j]); j = j + 1; }
+    encode(wire.as_slice())
+}
+
+public fn decode_check(input: &[Byte]) -> Result<List<Byte>, Base58Error> {
+    let decoded = decode(input)?;
+    if decoded.len() < 4 {
+        return Err(Base58Error.TruncatedChecksum);
+    }
+    let payload_len = decoded.len() - 4;
+    let mut payload: List<Byte> = [];
+    let mut i: Int = 0;
+    while i < payload_len { payload.push(decoded[i]); i = i + 1; }
+    let expected = compute_checksum(payload.as_slice());
+    let mut j: Int = 0;
+    while j < 4 {
+        if decoded[payload_len + j] != expected[j] {
+            return Err(Base58Error.ChecksumMismatch);
+        }
+        j = j + 1;
+    }
+    Ok(payload)
+}
+
+fn compute_checksum(payload: &[Byte]) -> [Byte; 4] {
+    let first = Sha256.digest(payload);
+    let second = Sha256.digest(&first[..]);
+    let mut out: [Byte; 4] = [0_u8; 4];
+    out[0] = second[0]; out[1] = second[1]; out[2] = second[2]; out[3] = second[3];
+    out
+}

@@ -9,6 +9,7 @@ module core.encoding;
 public module json;
 public module base64;
 public module base32;
+public module base58;
 public module hex;
 public module varint;
 public module der;
@@ -30,6 +31,9 @@ public mount .base64.Base64ErrorKind;
 
 // Re-exports — Base32
 public mount .base32.Base32Error;
+
+// Re-exports — Base58
+public mount .base58.Base58Error;
 
 // Re-exports — CBOR (RFC 8949)
 public mount .cbor.{CborValue, CborError, MAX_CBOR_NESTING};
