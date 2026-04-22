@@ -1,0 +1,178 @@
+// =============================================================================
+// security/kdf/pbkdf2.vr — PBKDF2 (RFC 2898 / RFC 8018)
+// =============================================================================
+// Layer: 3 (Security — key derivation)
+// Dependencies: core, core.collections, core.security.mac.hmac
+// =============================================================================
+//
+// RFC 8018 §5.2 — Password-Based Key Derivation Function 2. The
+// FIPS-approved baseline KDF; still dominant for WPA2, WebCrypto,
+// and in-database password stretching (SCRAM family).
+//
+// Memory-hard alternatives (Argon2id, scrypt) are stronger against
+// GPU/ASIC attacks and are what new deployments should reach for —
+// but PBKDF2 remains the required fallback under FIPS 140.
+//
+// # API
+//
+//   pbkdf2_hmac_sha256(password, salt, iterations, out_len) -> List<Byte>
+//   pbkdf2_hmac_sha384(password, salt, iterations, out_len) -> List<Byte>
+//   pbkdf2_hmac_sha512(password, salt, iterations, out_len) -> List<Byte>
+//
+// # Recommended parameters (NIST SP 800-63B, as of 2026)
+//
+//   HMAC-SHA256 — ≥ 600_000 iterations for interactive auth.
+//   HMAC-SHA512 — ≥ 210_000 iterations (one hash block larger).
+//
+// =============================================================================
+
+module core.security.kdf.pbkdf2;
+
+mount core.*;
+mount core.collections.List;
+mount core.security.mac.hmac.{hmac_sha256, hmac_sha384, hmac_sha512};
+
+public type Pbkdf2Error is
+      OutputTooLong
+    | BadIterations
+    | BadOutputLength;
+
+/// Max output length per RFC 8018 §5.2: (2^32 - 1) × hLen bytes.
+/// For HMAC-SHA256 (hLen = 32) this is ~137 GiB — we cap at
+/// 1 MiB in this API to keep List<Byte> allocation sane.
+const MAX_OUT_LEN: Int = 1_048_576;
+
+// =============================================================================
+// HMAC-SHA256
+// =============================================================================
+
+public fn pbkdf2_hmac_sha256(
+    password:   &[Byte],
+    salt:       &[Byte],
+    iterations: UInt32,
+    out_len:    Int,
+) -> Result<List<Byte>, Pbkdf2Error> {
+    if out_len <= 0 || out_len > MAX_OUT_LEN { return Err(Pbkdf2Error.BadOutputLength); }
+    if iterations == 0_u32 { return Err(Pbkdf2Error.BadIterations); }
+    pbkdf2_inner(password, salt, iterations, out_len, PRF.Sha256)
+}
+
+public fn pbkdf2_hmac_sha384(
+    password:   &[Byte],
+    salt:       &[Byte],
+    iterations: UInt32,
+    out_len:    Int,
+) -> Result<List<Byte>, Pbkdf2Error> {
+    if out_len <= 0 || out_len > MAX_OUT_LEN { return Err(Pbkdf2Error.BadOutputLength); }
+    if iterations == 0_u32 { return Err(Pbkdf2Error.BadIterations); }
+    pbkdf2_inner(password, salt, iterations, out_len, PRF.Sha384)
+}
+
+public fn pbkdf2_hmac_sha512(
+    password:   &[Byte],
+    salt:       &[Byte],
+    iterations: UInt32,
+    out_len:    Int,
+) -> Result<List<Byte>, Pbkdf2Error> {
+    if out_len <= 0 || out_len > MAX_OUT_LEN { return Err(Pbkdf2Error.BadOutputLength); }
+    if iterations == 0_u32 { return Err(Pbkdf2Error.BadIterations); }
+    pbkdf2_inner(password, salt, iterations, out_len, PRF.Sha512)
+}
+
+// =============================================================================
+// Core engine
+// =============================================================================
+
+type PRF is Sha256 | Sha384 | Sha512;
+
+fn hlen(prf: &PRF) -> Int {
+    match prf {
+        PRF.Sha256 => 32,
+        PRF.Sha384 => 48,
+        PRF.Sha512 => 64,
+    }
+}
+
+fn prf_eval(prf: &PRF, key: &[Byte], msg: &[Byte]) -> List<Byte> {
+    match prf {
+        PRF.Sha256 => {
+            let d = hmac_sha256(key, msg);
+            bytes_of(&d[..])
+        },
+        PRF.Sha384 => {
+            let d = hmac_sha384(key, msg);
+            bytes_of(&d[..])
+        },
+        PRF.Sha512 => {
+            let d = hmac_sha512(key, msg);
+            bytes_of(&d[..])
+        },
+    }
+}
+
+fn pbkdf2_inner(
+    password:   &[Byte],
+    salt:       &[Byte],
+    iterations: UInt32,
+    out_len:    Int,
+    prf:        PRF,
+) -> Result<List<Byte>, Pbkdf2Error> {
+    let h_len = hlen(&prf);
+    // Number of blocks required.
+    let num_blocks = (out_len + h_len - 1) / h_len;
+
+    let mut out: List<Byte> = [];
+    let mut block_idx: UInt32 = 1_u32;
+    while (block_idx as Int) <= num_blocks {
+        // U_1 = PRF(password, salt || INT(block_idx))
+        let mut salt_with_idx: List<Byte> = [];
+        let mut k: Int = 0;
+        while k < salt.len() { salt_with_idx.push(salt[k]); k = k + 1; }
+        salt_with_idx.push(((block_idx >> 24_u32) & 0xFF_u32) as Byte);
+        salt_with_idx.push(((block_idx >> 16_u32) & 0xFF_u32) as Byte);
+        salt_with_idx.push(((block_idx >>  8_u32) & 0xFF_u32) as Byte);
+        salt_with_idx.push((block_idx & 0xFF_u32) as Byte);
+
+        let mut u = prf_eval(&prf, password, salt_with_idx.as_slice());
+        let mut t_block = clone_bytes(u.as_slice());
+
+        // U_i = PRF(password, U_{i-1}); T_j = U_1 XOR U_2 XOR ... XOR U_c.
+        let mut i: UInt32 = 1_u32;
+        while i < iterations {
+            u = prf_eval(&prf, password, u.as_slice());
+            xor_into(&mut t_block, u.as_slice());
+            i = i + 1_u32;
+        }
+
+        // Append up to hLen bytes (last block may truncate).
+        let start = out.len();
+        let remaining = out_len - start;
+        let take = if remaining < h_len { remaining } else { h_len };
+        let mut j: Int = 0;
+        while j < take { out.push(t_block[j]); j = j + 1; }
+
+        block_idx = block_idx + 1_u32;
+    }
+    Ok(out)
+}
+
+// =============================================================================
+// Helpers
+// =============================================================================
+
+fn bytes_of(src: &[Byte]) -> List<Byte> {
+    let mut out: List<Byte> = [];
+    let mut i: Int = 0;
+    while i < src.len() { out.push(src[i]); i = i + 1; }
+    out
+}
+
+fn clone_bytes(src: &[Byte]) -> List<Byte> { bytes_of(src) }
+
+fn xor_into(dst: &mut List<Byte>, src: &[Byte]) {
+    let mut i: Int = 0;
+    while i < dst.len() && i < src.len() {
+        dst[i] = dst[i] ^ src[i];
+        i = i + 1;
+    }
+}

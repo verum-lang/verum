@@ -43,6 +43,7 @@ public module mac {
 
 public module kdf {
     public module hkdf;
+    public module pbkdf2;
 }
 
 public module util {
@@ -75,6 +76,9 @@ public module jwt;
 
 // CBOR Object Signing and Encryption (RFC 9052) — WebAuthn, CWT, mDoc.
 public module cose;
+
+// Password hashing (PHC modular format) — PBKDF2-HMAC-SHA256 backend.
+public module password_hash;
 
 // Legacy capability / region modules (pre-crypto).
 public module labels;
