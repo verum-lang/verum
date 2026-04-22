@@ -1,0 +1,117 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: quic, rfc9001, chacha20, header-protection, kat, crypto
+// @timeout: 10000
+// @expect: pass
+//
+// RFC 9001 Appendix A.5 — ChaCha20-Poly1305 short-header packet.
+//
+// Exercises the header-protection pipeline for the ChaCha20-based
+// cipher suite:
+//
+//   hp  = 25a282b9e82f06f21f488917a4fc8f1b
+//         73573685608597d0efcb076b0ab7a7a4
+//
+//   sample (ciphertext[4..20])
+//       = 5e5cd55c41f69080575d7999c25a5bfb
+//
+//   HP mask = ChaCha20(hp, counter=sample[0..4] LE,
+//                          nonce  =sample[4..16], 0)[0..5]
+//           = aefefe7d03
+//
+// Pinning `HpKey.ChaCha20Block` + `compute_hp_mask` guards the 1-RTT
+// send/recv path against unnoticed drift in ChaCha20 or in the HP
+// sample-splitting convention.
+
+mount core.net.quic.crypto.header_protection.{
+    HpKey, HpMask, compute_hp_mask, apply_hp_mask,
+};
+
+fn hex_to_bytes(hex: &str) -> List<Byte> {
+    let b = hex.as_bytes();
+    let mut out: List<Byte> = [];
+    let mut i: Int = 0;
+    while i + 1 < b.len() {
+        let hi = hex_digit(b[i]);
+        let lo = hex_digit(b[i + 1]);
+        out.push((hi << 4) | lo);
+        i = i + 2;
+    }
+    out
+}
+
+fn hex_digit(c: Byte) -> Byte {
+    if c >= ('0' as Byte) && c <= ('9' as Byte) {
+        c - ('0' as Byte)
+    } else if c >= ('a' as Byte) && c <= ('f' as Byte) {
+        c - ('a' as Byte) + 10_u8
+    } else if c >= ('A' as Byte) && c <= ('F' as Byte) {
+        c - ('A' as Byte) + 10_u8
+    } else {
+        0_u8
+    }
+}
+
+fn check_chacha20_hp() {
+    // RFC 9001 §A.5 HP key (32 bytes).
+    let hp_key_bytes = hex_to_bytes(
+        "25a282b9e82f06f21f488917a4fc8f1b73573685608597d0efcb076b0ab7a7a4"
+    );
+    let mut hp_key: [Byte; 32] = [0_u8; 32];
+    let mut i: Int = 0;
+    while i < 32 { hp_key[i] = hp_key_bytes[i]; i = i + 1; }
+    let hp = HpKey.ChaCha20Block(hp_key);
+
+    // Sample lifted from the encrypted PN field onward.
+    let sample_bytes = hex_to_bytes("5e5cd55c41f69080575d7999c25a5bfb");
+    let mut sample: [Byte; 16] = [0_u8; 16];
+    let mut j: Int = 0;
+    while j < 16 { sample[j] = sample_bytes[j]; j = j + 1; }
+
+    // Expected first 5 bytes of ChaCha20 keystream block.
+    let expected_mask = hex_to_bytes("aefefe7d03");
+
+    let mask: HpMask = compute_hp_mask(&hp, &sample);
+    let mut k: Int = 0;
+    while k < 5 {
+        assert(mask[k] == expected_mask[k]);
+        k = k + 1;
+    }
+}
+
+fn check_apply_roundtrip() {
+    // Applying the same mask twice cancels — demonstrates XOR
+    // symmetry + pn_len/is_long handling without needing a full
+    // packet wire-format harness.
+    let hp_key_bytes = hex_to_bytes(
+        "25a282b9e82f06f21f488917a4fc8f1b73573685608597d0efcb076b0ab7a7a4"
+    );
+    let mut hp_key: [Byte; 32] = [0_u8; 32];
+    let mut i: Int = 0;
+    while i < 32 { hp_key[i] = hp_key_bytes[i]; i = i + 1; }
+    let hp = HpKey.ChaCha20Block(hp_key);
+
+    let sample_bytes = hex_to_bytes("5e5cd55c41f69080575d7999c25a5bfb");
+    let mut sample: [Byte; 16] = [0_u8; 16];
+    let mut j: Int = 0;
+    while j < 16 { sample[j] = sample_bytes[j]; j = j + 1; }
+
+    let mask: HpMask = compute_hp_mask(&hp, &sample);
+
+    // Synthetic short-header prefix: first byte + 3 PN bytes.
+    let original: [Byte; 4] = [0x42_u8, 0x01_u8, 0x02_u8, 0x03_u8];
+    let mut header: [Byte; 4] = original;
+    apply_hp_mask(&mut header[..], /* is_long */ false, /* pn_offset */ 1, /* pn_len */ 3, &mask);
+    apply_hp_mask(&mut header[..], /* is_long */ false, /* pn_offset */ 1, /* pn_len */ 3, &mask);
+    let mut r: Int = 0;
+    while r < 4 {
+        assert(header[r] == original[r]);
+        r = r + 1;
+    }
+}
+
+fn main() {
+    check_chacha20_hp();
+    check_apply_roundtrip();
+}
