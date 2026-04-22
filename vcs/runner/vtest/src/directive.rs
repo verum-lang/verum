@@ -1067,6 +1067,27 @@ impl TestDirectives {
                         directives.requires.insert(feature.to_string().into());
                     }
                 }
+            } else if comment.starts_with('@')
+                && let Some(directive_name) = comment.split(':').next()
+                && !directive_name.is_empty()
+            {
+                // Unknown `@foo:` directive — surface as a parse warning
+                // so test-file bugs (e.g. `@expect: error(...)` instead of
+                // `@expected-error: ...`) don't silently get ignored.
+                //
+                // Allow `@spec:` / `@description:` / `@author:` style
+                // documentation-only directives to pass without warning.
+                const DOC_ONLY: &[&str] = &["@spec", "@author", "@note", "@reference", "@see"];
+                if !DOC_ONLY.contains(&directive_name) {
+                    directives.parse_warnings.push(
+                        format!(
+                            "Line {}: unknown directive `{}:` — did you mean `@expected-error:`? Unknown directives are ignored; rename or remove to silence this warning.",
+                            line_num + 1,
+                            directive_name
+                        )
+                        .into(),
+                    );
+                }
             }
         }
 
