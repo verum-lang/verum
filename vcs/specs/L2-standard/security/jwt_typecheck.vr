@@ -1,0 +1,59 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: jwt, rfc7519, rfc7515, auth, hs256, eddsa, typecheck
+// @timeout: 10000
+// @expect: pass
+
+mount core.security.jwt.{
+    JwtAlgorithm, JwtKey, JwtError, JwtHeader, VerifyOptions, JwtPayload,
+    sign_compact, verify_compact,
+};
+mount core.collections.List;
+
+fn exercise_hs256_roundtrip() -> Result<(), JwtError> {
+    let secret: [Byte; 32] = [0x2A_u8; 32];
+    let mut secret_vec: List<Byte> = [];
+    let mut i: Int = 0;
+    while i < 32 { secret_vec.push(secret[i]); i = i + 1; }
+
+    let key = JwtKey.HmacSecret(secret_vec);
+    let header = JwtHeader.new(JwtAlgorithm.HS256)
+        .with_kid(Text.from("k1"));
+
+    let payload = Text.from("{\"sub\":\"alice\",\"iss\":\"acme\",\"exp\":2000000000}");
+    let token = sign_compact(&header, &payload, &key)?;
+
+    // Verify with matching key, allowed algorithm, matching issuer.
+    let allowed: List<JwtAlgorithm> = {
+        let mut l: List<JwtAlgorithm> = [];
+        l.push(JwtAlgorithm.HS256);
+        l
+    };
+    let opts = VerifyOptions {
+        allowed_algorithms: allowed,
+        expected_iss:       Some(Text.from("acme")),
+        expected_aud:       None,
+        now_unix:           1_700_000_000,
+        clock_skew_sec:     5,
+    };
+    let parsed: JwtPayload = verify_compact(&token, &key, &opts)?;
+    let _ = parsed;
+    Ok(())
+}
+
+fn exercise_alg_confusion_is_rejected() {
+    // Handing an HMAC key + HS256 algorithm is fine; handing an
+    // HMAC key with an EdDSA algorithm must reject.
+    let secret_vec: List<Byte> = [0_u8; 32].to_vec();
+    let key = JwtKey.HmacSecret(secret_vec);
+    let hdr = JwtHeader.new(JwtAlgorithm.EdDSA);
+    let payload = Text.from("{}");
+    let result = sign_compact(&hdr, &payload, &key);
+    let _ = result; // WrongKeyKind expected.
+}
+
+fn main() {
+    let _ = exercise_hs256_roundtrip();
+    exercise_alg_confusion_is_rejected();
+}

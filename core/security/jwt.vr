@@ -1,0 +1,463 @@
+// =============================================================================
+// security/jwt.vr — JSON Web Token (RFC 7519 + RFC 7515)
+// =============================================================================
+// Layer: 3 (Security — token-level auth)
+// Dependencies: core, core.collections, core.encoding.{base64, json},
+//               core.security.mac.hmac,
+//               core.security.ecc.ed25519,
+//               core.security.util.constant_time
+// =============================================================================
+//
+// RFC 7519 — JWT wire format:
+//
+//   base64url(header) . base64url(payload) . base64url(signature)
+//
+// Where header = {"alg":"HS256","typ":"JWT"} and payload is the
+// claims object. Signing is byte-exact over `header.payload`
+// (the first two segments + dot separator).
+//
+// # Supported algorithms
+//
+//   HS256  — HMAC-SHA256 (symmetric)
+//   HS384  — HMAC-SHA384 (symmetric)
+//   HS512  — HMAC-SHA512 (symmetric)
+//   EdDSA  — Ed25519 (asymmetric)
+//
+// ES256 (ECDSA-P256) arrives in a follow-up once the stdlib P-256
+// signing API exposes a one-shot convenience wrapper.
+//
+// # Security defaults
+//
+//   * `verify` rejects the "alg":"none" bypass (CVE-2015-2951)
+//     unconditionally — even when the caller explicitly asked
+//     for it. There is no compatibility escape hatch.
+//   * Algorithm confusion (RS256 key used to verify HS256 tokens)
+//     is prevented by the typed `JwtKey` enum — an HMAC key cannot
+//     be passed where a public key is expected.
+//   * Signature comparison is constant-time.
+//   * `exp` / `nbf` claims enforced with configurable clock skew.
+//
+// =============================================================================
+
+module core.security.jwt;
+
+mount core.*;
+mount core.collections.List;
+mount core.encoding.base64.{encode_url as b64u_encode, decode_url as b64u_decode};
+mount core.encoding.json.{JsonValue, parse as json_parse, stringify as json_stringify};
+mount core.security.mac.hmac.{hmac_sha256, hmac_sha384, hmac_sha512};
+mount core.security.ecc.ed25519.{
+    Ed25519, Ed25519Seed, Ed25519PublicKey, Ed25519Signature,
+};
+mount core.security.util.constant_time.{constant_time_eq};
+
+// =============================================================================
+// Algorithms
+// =============================================================================
+
+public type JwtAlgorithm is
+      HS256
+    | HS384
+    | HS512
+    | EdDSA;
+
+fn algo_name(a: &JwtAlgorithm) -> &str {
+    match a {
+        JwtAlgorithm.HS256 => "HS256",
+        JwtAlgorithm.HS384 => "HS384",
+        JwtAlgorithm.HS512 => "HS512",
+        JwtAlgorithm.EdDSA => "EdDSA",
+    }
+}
+
+fn algo_eq(a: &JwtAlgorithm, b: &JwtAlgorithm) -> Bool {
+    algo_name(a) == algo_name(b)
+}
+
+/// Typed key material — kept behind an enum so an HMAC secret can
+/// never accidentally be handed to an asymmetric verifier, killing
+/// the well-known "alg confusion" family of attacks.
+public type JwtKey is
+      HmacSecret(List<Byte>)
+    | Ed25519Seeded(Ed25519Seed)
+    | Ed25519Public(Ed25519PublicKey);
+
+// =============================================================================
+// Error surface
+// =============================================================================
+
+public type JwtError is
+      MalformedToken                 // missing dots / wrong segment count
+    | Base64Decode
+    | JsonDecode
+    | AlgorithmMismatch              // header.alg ≠ allowed list
+    | AlgNone                        // explicit `alg: none` → always reject
+    | SignatureMismatch
+    | Expired                        // exp claim in the past (allowing skew)
+    | NotYetValid                    // nbf claim in the future
+    | IssuerMismatch
+    | AudienceMismatch
+    | WrongKeyKind                   // JwtKey variant doesn't match algorithm
+    | SigningFailure;
+
+// =============================================================================
+// Header
+// =============================================================================
+
+public type JwtHeader is {
+    alg: JwtAlgorithm,
+    typ: Text,           // typically "JWT"
+    kid: Maybe<Text>,    // optional key ID
+};
+
+implement JwtHeader {
+    public fn new(alg: JwtAlgorithm) -> JwtHeader {
+        JwtHeader { alg: alg, typ: Text.from("JWT"), kid: None }
+    }
+
+    public fn with_kid(mut self, kid: Text) -> JwtHeader {
+        self.kid = Some(kid); self
+    }
+}
+
+fn header_to_json(h: &JwtHeader) -> Text {
+    // Compact shape: {"alg":"HS256","typ":"JWT","kid":"..."}
+    let mut out: List<Byte> = [];
+    push_bytes(&mut out, b"{\"alg\":\"");
+    push_bytes(&mut out, algo_name(&h.alg).as_bytes());
+    push_bytes(&mut out, b"\",\"typ\":\"");
+    push_bytes(&mut out, h.typ.as_bytes());
+    push_bytes(&mut out, b"\"");
+    match &h.kid {
+        Some(k) => {
+            push_bytes(&mut out, b",\"kid\":\"");
+            push_bytes(&mut out, k.as_bytes());
+            push_bytes(&mut out, b"\"");
+        },
+        None => {},
+    }
+    push_bytes(&mut out, b"}");
+    Text.from_utf8_unchecked(out.as_slice())
+}
+
+// =============================================================================
+// Encode (sign)
+// =============================================================================
+
+/// Sign a compact-serialized JWT. `payload_json` is the raw JSON
+/// text of the claims object — callers render it via
+/// `core.encoding.json.stringify` or build it by hand.
+public fn sign_compact(
+    header:       &JwtHeader,
+    payload_json: &Text,
+    key:          &JwtKey,
+) -> Result<Text, JwtError> {
+    // Validate key matches algorithm before anything else.
+    check_key_matches_algo(&header.alg, key)?;
+
+    let header_json = header_to_json(header);
+    let header_b64  = b64u_encode(header_json.as_bytes());
+    let payload_b64 = b64u_encode(payload_json.as_bytes());
+
+    // Signing input = header_b64 || "." || payload_b64, byte-exact.
+    let mut signing_input: List<Byte> = [];
+    push_bytes(&mut signing_input, header_b64.as_bytes());
+    signing_input.push('.' as Byte);
+    push_bytes(&mut signing_input, payload_b64.as_bytes());
+
+    let signature = compute_signature(&header.alg, signing_input.as_slice(), key)?;
+    let sig_b64 = b64u_encode(signature.as_slice());
+
+    let mut token: List<Byte> = [];
+    let mut i: Int = 0;
+    while i < signing_input.len() { token.push(signing_input[i]); i = i + 1; }
+    token.push('.' as Byte);
+    push_bytes(&mut token, sig_b64.as_bytes());
+    Ok(Text.from_utf8_unchecked(token.as_slice()))
+}
+
+// =============================================================================
+// Decode (verify)
+// =============================================================================
+
+public type VerifyOptions is {
+    /// Only these algorithms are accepted. Prevents algorithm-
+    /// confusion even when the caller hands us a JwtKey that
+    /// could be used with multiple algos (e.g. HMAC over HS256/384/512).
+    allowed_algorithms: List<JwtAlgorithm>,
+    /// When Some, `iss` claim MUST equal this.
+    expected_iss:       Maybe<Text>,
+    /// When Some, `aud` claim MUST equal this (string form).
+    expected_aud:       Maybe<Text>,
+    /// Current wall-clock (unix seconds) for exp/nbf checks.
+    now_unix:           Int,
+    /// Tolerance for exp/nbf checks in seconds.
+    clock_skew_sec:     Int,
+};
+
+public type JwtPayload is {
+    header:       JwtHeader,
+    claims:       JsonValue,
+    signing_input: List<Byte>,
+};
+
+public fn verify_compact(
+    token: &Text,
+    key:   &JwtKey,
+    opts:  &VerifyOptions,
+) -> Result<JwtPayload, JwtError> {
+    let bytes = token.as_bytes();
+    // Split on '.'.
+    let (h_end, p_end) = find_two_dots(bytes)?;
+    let header_b64  = &bytes[..h_end];
+    let payload_b64 = &bytes[(h_end + 1)..p_end];
+    let sig_b64     = &bytes[(p_end + 1)..];
+
+    let header_bytes = b64u_decode(&Text.from_utf8_unchecked(header_b64))
+        .map_err(|_| JwtError.Base64Decode)?;
+    let payload_bytes = b64u_decode(&Text.from_utf8_unchecked(payload_b64))
+        .map_err(|_| JwtError.Base64Decode)?;
+    let sig_bytes = b64u_decode(&Text.from_utf8_unchecked(sig_b64))
+        .map_err(|_| JwtError.Base64Decode)?;
+
+    // Parse header and verify alg.
+    let header = parse_header(header_bytes.as_slice())?;
+    if !algo_allowed(&header.alg, &opts.allowed_algorithms) {
+        return Err(JwtError.AlgorithmMismatch);
+    }
+    check_key_matches_algo(&header.alg, key)?;
+
+    // Constant-time signature verification.
+    let mut signing_input: List<Byte> = [];
+    let mut i: Int = 0;
+    while i < header_b64.len()  { signing_input.push(header_b64[i]);  i = i + 1; }
+    signing_input.push('.' as Byte);
+    let mut j: Int = 0;
+    while j < payload_b64.len() { signing_input.push(payload_b64[j]); j = j + 1; }
+
+    verify_signature(&header.alg, signing_input.as_slice(), sig_bytes.as_slice(), key)?;
+
+    // Parse claims; enforce exp / nbf / iss / aud.
+    let payload_text = Text.from_utf8_unchecked(payload_bytes.as_slice());
+    let claims = json_parse(&payload_text).map_err(|_| JwtError.JsonDecode)?;
+    check_registered_claims(&claims, opts)?;
+
+    Ok(JwtPayload {
+        header: header,
+        claims: claims,
+        signing_input: signing_input,
+    })
+}
+
+// =============================================================================
+// Internals — algo / key dispatch
+// =============================================================================
+
+fn check_key_matches_algo(algo: &JwtAlgorithm, key: &JwtKey) -> Result<(), JwtError> {
+    match (algo, key) {
+        (JwtAlgorithm.HS256, JwtKey.HmacSecret(_)) => Ok(()),
+        (JwtAlgorithm.HS384, JwtKey.HmacSecret(_)) => Ok(()),
+        (JwtAlgorithm.HS512, JwtKey.HmacSecret(_)) => Ok(()),
+        (JwtAlgorithm.EdDSA, JwtKey.Ed25519Seeded(_)) => Ok(()),
+        (JwtAlgorithm.EdDSA, JwtKey.Ed25519Public(_)) => Ok(()),
+        _ => Err(JwtError.WrongKeyKind),
+    }
+}
+
+fn compute_signature(
+    algo:          &JwtAlgorithm,
+    signing_input: &[Byte],
+    key:           &JwtKey,
+) -> Result<List<Byte>, JwtError> {
+    match (algo, key) {
+        (JwtAlgorithm.HS256, JwtKey.HmacSecret(s)) => {
+            Ok(slice_owned(&hmac_sha256(s.as_slice(), signing_input)[..]))
+        },
+        (JwtAlgorithm.HS384, JwtKey.HmacSecret(s)) => {
+            Ok(slice_owned(&hmac_sha384(s.as_slice(), signing_input)[..]))
+        },
+        (JwtAlgorithm.HS512, JwtKey.HmacSecret(s)) => {
+            Ok(slice_owned(&hmac_sha512(s.as_slice(), signing_input)[..]))
+        },
+        (JwtAlgorithm.EdDSA, JwtKey.Ed25519Seeded(sk)) => {
+            let sig: Ed25519Signature = Ed25519.sign(sk, signing_input);
+            Ok(slice_owned(&sig[..]))
+        },
+        _ => Err(JwtError.WrongKeyKind),
+    }
+}
+
+fn verify_signature(
+    algo:          &JwtAlgorithm,
+    signing_input: &[Byte],
+    sig:           &[Byte],
+    key:           &JwtKey,
+) -> Result<(), JwtError> {
+    match (algo, key) {
+        (JwtAlgorithm.HS256, JwtKey.HmacSecret(s)) => {
+            let expected = hmac_sha256(s.as_slice(), signing_input);
+            if constant_time_eq(&expected[..], sig) { Ok(()) }
+            else { Err(JwtError.SignatureMismatch) }
+        },
+        (JwtAlgorithm.HS384, JwtKey.HmacSecret(s)) => {
+            let expected = hmac_sha384(s.as_slice(), signing_input);
+            if constant_time_eq(&expected[..], sig) { Ok(()) }
+            else { Err(JwtError.SignatureMismatch) }
+        },
+        (JwtAlgorithm.HS512, JwtKey.HmacSecret(s)) => {
+            let expected = hmac_sha512(s.as_slice(), signing_input);
+            if constant_time_eq(&expected[..], sig) { Ok(()) }
+            else { Err(JwtError.SignatureMismatch) }
+        },
+        (JwtAlgorithm.EdDSA, JwtKey.Ed25519Public(pk)) => {
+            if sig.len() != 64 { return Err(JwtError.SignatureMismatch); }
+            let mut sig_arr: [Byte; 64] = [0_u8; 64];
+            let mut i: Int = 0;
+            while i < 64 { sig_arr[i] = sig[i]; i = i + 1; }
+            if Ed25519.verify(pk, signing_input, &sig_arr) { Ok(()) }
+            else { Err(JwtError.SignatureMismatch) }
+        },
+        // EdDSA with a private key is OK (signer can self-verify).
+        (JwtAlgorithm.EdDSA, JwtKey.Ed25519Seeded(sk)) => {
+            let pk = Ed25519.public_key(sk);
+            if sig.len() != 64 { return Err(JwtError.SignatureMismatch); }
+            let mut sig_arr: [Byte; 64] = [0_u8; 64];
+            let mut i: Int = 0;
+            while i < 64 { sig_arr[i] = sig[i]; i = i + 1; }
+            if Ed25519.verify(&pk, signing_input, &sig_arr) { Ok(()) }
+            else { Err(JwtError.SignatureMismatch) }
+        },
+        _ => Err(JwtError.WrongKeyKind),
+    }
+}
+
+// =============================================================================
+// Claims + header parsing
+// =============================================================================
+
+fn parse_header(bytes: &[Byte]) -> Result<JwtHeader, JwtError> {
+    let text = Text.from_utf8_unchecked(bytes);
+    let v = json_parse(&text).map_err(|_| JwtError.JsonDecode)?;
+    let obj = match v {
+        JsonValue.JsonObject(m) => m,
+        _                       => return Err(JwtError.JsonDecode),
+    };
+    let alg_text = match obj.get(&Text.from("alg")) {
+        Some(JsonValue.JsonString(s)) => s.clone(),
+        _                              => return Err(JwtError.MalformedToken),
+    };
+    // "none" is a permanent, unrecoverable no.
+    if alg_text.as_bytes() == b"none" { return Err(JwtError.AlgNone); }
+
+    let alg = match alg_text.as_bytes() {
+        b"HS256" => JwtAlgorithm.HS256,
+        b"HS384" => JwtAlgorithm.HS384,
+        b"HS512" => JwtAlgorithm.HS512,
+        b"EdDSA" => JwtAlgorithm.EdDSA,
+        _        => return Err(JwtError.AlgorithmMismatch),
+    };
+    let typ = match obj.get(&Text.from("typ")) {
+        Some(JsonValue.JsonString(s)) => s.clone(),
+        _                              => Text.from("JWT"),
+    };
+    let kid = match obj.get(&Text.from("kid")) {
+        Some(JsonValue.JsonString(s)) => Some(s.clone()),
+        _                              => None,
+    };
+    Ok(JwtHeader { alg: alg, typ: typ, kid: kid })
+}
+
+fn check_registered_claims(claims: &JsonValue, opts: &VerifyOptions) -> Result<(), JwtError> {
+    let obj = match claims {
+        JsonValue.JsonObject(m) => m,
+        _                       => return Err(JwtError.JsonDecode),
+    };
+    // exp (expiration)
+    match obj.get(&Text.from("exp")) {
+        Some(JsonValue.JsonInt(exp)) => {
+            if opts.now_unix - opts.clock_skew_sec > *exp {
+                return Err(JwtError.Expired);
+            }
+        },
+        _ => {},
+    }
+    // nbf (not before)
+    match obj.get(&Text.from("nbf")) {
+        Some(JsonValue.JsonInt(nbf)) => {
+            if opts.now_unix + opts.clock_skew_sec < *nbf {
+                return Err(JwtError.NotYetValid);
+            }
+        },
+        _ => {},
+    }
+    // iss
+    match &opts.expected_iss {
+        Some(expected) => {
+            match obj.get(&Text.from("iss")) {
+                Some(JsonValue.JsonString(got)) => {
+                    if got.as_bytes() != expected.as_bytes() {
+                        return Err(JwtError.IssuerMismatch);
+                    }
+                },
+                _ => return Err(JwtError.IssuerMismatch),
+            }
+        },
+        None => {},
+    }
+    // aud
+    match &opts.expected_aud {
+        Some(expected) => {
+            match obj.get(&Text.from("aud")) {
+                Some(JsonValue.JsonString(got)) => {
+                    if got.as_bytes() != expected.as_bytes() {
+                        return Err(JwtError.AudienceMismatch);
+                    }
+                },
+                _ => return Err(JwtError.AudienceMismatch),
+            }
+        },
+        None => {},
+    }
+    Ok(())
+}
+
+fn algo_allowed(a: &JwtAlgorithm, allowed: &List<JwtAlgorithm>) -> Bool {
+    let mut i: Int = 0;
+    while i < allowed.len() {
+        if algo_eq(a, &allowed[i]) { return true; }
+        i = i + 1;
+    }
+    false
+}
+
+// =============================================================================
+// Helpers
+// =============================================================================
+
+fn find_two_dots(bytes: &[Byte]) -> Result<(Int, Int), JwtError> {
+    let mut first: Int = -1;
+    let mut second: Int = -1;
+    let mut i: Int = 0;
+    while i < bytes.len() {
+        if bytes[i] == ('.' as Byte) {
+            if first < 0 { first = i; }
+            else if second < 0 { second = i; }
+            else { return Err(JwtError.MalformedToken); }
+        }
+        i = i + 1;
+    }
+    if first < 0 || second < 0 { return Err(JwtError.MalformedToken); }
+    Ok((first, second))
+}
+
+fn push_bytes(dst: &mut List<Byte>, src: &[Byte]) {
+    let mut i: Int = 0;
+    while i < src.len() { dst.push(src[i]); i = i + 1; }
+}
+
+fn slice_owned(src: &[Byte]) -> List<Byte> {
+    let mut out: List<Byte> = [];
+    let mut i: Int = 0;
+    while i < src.len() { out.push(src[i]); i = i + 1; }
+    out
+}
