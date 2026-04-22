@@ -21013,6 +21013,20 @@ impl TypeChecker {
     /// Relies on RUST_MIN_STACK=16MB for stack safety on deep recursion.
     /// Tracks recursion depth to detect infinite recursion early.
     pub fn ast_to_type(&mut self, ast_ty: &verum_ast::ty::Type) -> Result<Type> {
+        // SPECIAL CASE: stdlib core/math/hott.vr uses `type I is @builtin_interval;`
+        // — a top-level alias whose *body* is the meta-type marker. Intercept it
+        // before the depth guard so recursive ast_to_type on the outer alias
+        // doesn't try to resolve `@builtin_*` as a user-defined type via the
+        // generic path below.
+        if let verum_ast::ty::TypeKind::Path(path) = &ast_ty.kind {
+            if path.segments.len() == 1 {
+                if let Some(verum_ast::ty::PathSegment::Name(ident)) = path.segments.first() {
+                    if let Some(builtin) = resolve_builtin_meta_type(ident.name.as_str()) {
+                        return Ok(builtin);
+                    }
+                }
+            }
+        }
         // RAII depth guard — decrements on drop even if we panic or return early
         const MAX_AST_TO_TYPE_DEPTH: usize = 128;
         let _guard = match ThreadLocalDepthGuard::new(&AST_TO_TYPE_DEPTH, MAX_AST_TO_TYPE_DEPTH) {
@@ -21364,6 +21378,21 @@ impl TypeChecker {
             }
 
             TypeKind::Path(path) => {
+                // `@builtin_*` meta-type markers are language-level primitives
+                // referenced from stdlib (e.g. `type I is @builtin_interval;`,
+                // `type Path<A>(a, b) is @builtin_path;` in core/math/hott.vr).
+                // They are not looked up in the user type environment — they
+                // name compiler intrinsics directly and resolve here.
+                if path.segments.len() == 1 {
+                    if let Some(verum_ast::ty::PathSegment::Name(ident)) =
+                        path.segments.first()
+                    {
+                        let name = ident.name.as_str();
+                        if let Some(builtin) = resolve_builtin_meta_type(name) {
+                            return Ok(builtin);
+                        }
+                    }
+                }
                 // Named type (user-defined type or type alias)
                 // Name resolution across modules: qualified paths, import disambiguation, re-exports, path resolution in imports — Cross-module type resolution
                 // Use the new resolver for qualified paths
@@ -46119,6 +46148,39 @@ impl ConditionExt for verum_ast::expr::ConditionKind {
 
 /// Helper to check a condition and optionally bind patterns to scope
 ///
+/// Map `@builtin_*` meta-type markers that appear on the RHS of stdlib
+/// type aliases (e.g. `type I is @builtin_interval;`) to the internal
+/// `Type` primitive they stand for. Returns `None` for names that are
+/// not cubical / HoTT language primitives — those fall through to the
+/// regular qualified-path resolution so that user-defined `@` meta
+/// types continue to work.
+fn resolve_builtin_meta_type(name: &str) -> Option<Type> {
+    match name {
+        "@builtin_interval" => Some(Type::Interval),
+        // Path / Glue are type *constructors* that already have their own
+        // AST sugaring (`TypeKind::PathType`, `TypeKind::DependentApp`) at
+        // use sites. The bare marker on the alias RHS is an opaque primitive
+        // stand-in — the declared carrier (`Path`, `Glue`) becomes a named
+        // type pointing at this opaque marker, and real uses `Path<A>(a, b)`
+        // take the sugared AST path and lower to `Type::Eq` / dependent app.
+        "@builtin_path" => Some(Type::Named {
+            path: verum_ast::ty::Path::single(verum_ast::Ident::new(
+                verum_common::Text::from("Path"),
+                verum_ast::span::Span::dummy(),
+            )),
+            args: List::new(),
+        }),
+        "@builtin_glue" => Some(Type::Named {
+            path: verum_ast::ty::Path::single(verum_ast::Ident::new(
+                verum_common::Text::from("Glue"),
+                verum_ast::span::Span::dummy(),
+            )),
+            args: List::new(),
+        }),
+        _ => None,
+    }
+}
+
 /// This handles both expression conditions and let conditions:
 /// - `if x > 0` - Expression condition (must evaluate to Bool)
 /// - `if let Some(v) = opt` - Let condition (pattern must match value)

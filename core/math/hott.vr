@@ -41,7 +41,7 @@ module core.math.hott;
 ///   i0, i1            — endpoints
 ///   1 - i             — reversal
 ///   i ∧ j, i ∨ j      — meet and join
-type I is builtin_interval;
+public type I is @builtin_interval;
 
 /// Left endpoint of the interval.
 public let i0: I = @builtin_i0;

@@ -78,7 +78,7 @@ verum_parser = { workspace = true }
 verum_types = { workspace = true }
 verum_codegen = { workspace = true }
 verum_cbgr = { workspace = true }
-verum_smt = { workspace = true, optional = true }
+verum_smt = { workspace = true }
 verum_lexer = { workspace = true }
 verum_ast = { workspace = true }
 verum_common = { workspace = true }
@@ -110,9 +110,27 @@ tempfile = "3.14"
 serial_test = "3.2.0"
 
 [features]
-default = ["parallel-compilation", "incremental"]
+# All capability features are ON by default. `cargo install --path crates/verum_cli`
+# must produce a fully-featured binary — no opt-in for verification, distributed
+# cache, profiling, or any user-visible functionality.
+default = [
+    "parallel-compilation",
+    "incremental",
+    "profiling",
+    "verification",
+    "distributed-cache",
+    "redis-cache",
+    "ipfs",
+]
 parallel-compilation = []
 incremental = []
 profiling = []
-verification = ["verum_smt"]
-ipfs = []  # Enable IPFS support (tokio is now always included)
+# `verification` is kept as a feature name only for historical config reasons —
+# verum_smt is now an unconditional dependency (always compiled). The feature
+# flag still exists so `#[cfg(feature = "verification")]` sites keep compiling
+# and so downstream tooling scripts that reference it don't break. It is ON by
+# default and should not be disabled in production builds.
+verification = []
+distributed-cache = ["verum_smt/distributed-cache"]
+redis-cache = ["verum_smt/redis-cache"]
+ipfs = []
