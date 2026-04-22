@@ -158,7 +158,7 @@ implement ConnectionPump {
             negotiated_hash: None,
             negotiated_aead: None,
             phase_tag:       PumpPhase.PumpInitial,
-            pacer:           Pacer.new(2400_u64),
+            pacer:           Pacer.with_mss(1200_u64),
             pacing_next_ok:  None,
             idle:            None,
         }
@@ -183,7 +183,7 @@ implement ConnectionPump {
             negotiated_hash: None,
             negotiated_aead: None,
             phase_tag:       PumpPhase.PumpInitial,
-            pacer:           Pacer.new(2400_u64),
+            pacer:           Pacer.with_mss(1200_u64),
             pacing_next_ok:  None,
             idle:            None,
         }

@@ -13,6 +13,18 @@ fn exercise_ecn_codepoints() {
     assert(EcnCodepoint.Ect1.to_u8()   == 1_u8);
     assert(EcnCodepoint.Ect0.to_u8()   == 2_u8);
     assert(EcnCodepoint.Ce.to_u8()     == 3_u8);
+
+    // Round-trip byte → codepoint → byte.
+    let mut v: UInt8 = 0_u8;
+    while v < 4_u8 {
+        let cp = EcnCodepoint.from_u8(v);
+        assert(cp.to_u8() == v);
+        v = v + 1_u8;
+    }
+
+    // Upper bits ignored (RFC 3168 §5 — DSCP lives in the top 6 bits).
+    let masked = EcnCodepoint.from_u8(0xFE_u8);     // 0xFE & 0x03 = 2
+    assert(masked.to_u8() == 2_u8);
 }
 
 fn main() { exercise_ecn_codepoints(); }

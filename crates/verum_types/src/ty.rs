@@ -2257,133 +2257,36 @@ impl Type {
     // Integer type hierarchy: all fixed-size integers (i8..i128, u8..u128) are refinement types of Int with range predicates — .2 lines 143-162
     // These create refined types with exact value constraints for literals
 
-    /// Create an i8 type with refinement for the specific value
-    pub fn i8_refined(_value: i8) -> Self {
-        let ident = verum_ast::ty::Ident::new("i8", Span::dummy());
-        Type::Named {
-            path: Path::single(ident),
-            args: List::new(),
-        }
+    // Literal-synthesis helpers emit the canonical UpperCamel type name
+    // (`UInt64`, `Int32`, `Float64`, ...) so downstream comparison,
+    // unification, and codegen never have to reconcile lowercase
+    // Rust-style aliases (`u64`, `i32`, `f64`) with their canonical
+    // forms. The grammar still accepts both spellings at parse time —
+    // they converge here before any type-level reasoning runs.
+    fn primitive_named(canonical: &str) -> Self {
+        let ident = verum_ast::ty::Ident::new(canonical, Span::dummy());
+        Type::Named { path: Path::single(ident), args: List::new() }
     }
 
-    /// Create an i16 type with refinement for the specific value
-    pub fn i16_refined(_value: i16) -> Self {
-        let ident = verum_ast::ty::Ident::new("i16", Span::dummy());
-        Type::Named {
-            path: Path::single(ident),
-            args: List::new(),
-        }
-    }
+    pub fn i8_refined(_value: i8) -> Self      { Self::primitive_named("Int8") }
+    pub fn i16_refined(_value: i16) -> Self    { Self::primitive_named("Int16") }
+    pub fn i32_refined(_value: i32) -> Self    { Self::primitive_named("Int32") }
+    pub fn i64_refined(_value: i64) -> Self    { Self::primitive_named("Int64") }
+    pub fn i128_refined(_value: i128) -> Self  { Self::primitive_named("Int128") }
+    pub fn isize_refined(_value: isize) -> Self { Self::primitive_named("IntSize") }
 
-    /// Create an i32 type with refinement for the specific value
-    pub fn i32_refined(_value: i32) -> Self {
-        let ident = verum_ast::ty::Ident::new("i32", Span::dummy());
-        Type::Named {
-            path: Path::single(ident),
-            args: List::new(),
-        }
-    }
+    /// `Byte` is the canonical 8-bit unsigned type in Verum; `UInt8`
+    /// is a synonym but `Byte` is preferred in semantic-typing
+    /// contexts, so the literal synthesizer keeps emitting it.
+    pub fn u8_refined(_value: u8) -> Self      { Self::primitive_named("Byte") }
+    pub fn u16_refined(_value: u16) -> Self    { Self::primitive_named("UInt16") }
+    pub fn u32_refined(_value: u32) -> Self    { Self::primitive_named("UInt32") }
+    pub fn u64_refined(_value: u64) -> Self    { Self::primitive_named("UInt64") }
+    pub fn u128_refined(_value: u128) -> Self  { Self::primitive_named("UInt128") }
+    pub fn usize_refined(_value: usize) -> Self { Self::primitive_named("UIntSize") }
 
-    /// Create an i64 type with refinement for the specific value
-    pub fn i64_refined(_value: i64) -> Self {
-        let ident = verum_ast::ty::Ident::new("i64", Span::dummy());
-        Type::Named {
-            path: Path::single(ident),
-            args: List::new(),
-        }
-    }
-
-    /// Create an i128 type with refinement for the specific value
-    pub fn i128_refined(_value: i128) -> Self {
-        let ident = verum_ast::ty::Ident::new("i128", Span::dummy());
-        Type::Named {
-            path: Path::single(ident),
-            args: List::new(),
-        }
-    }
-
-    /// Create an isize type with refinement for the specific value
-    pub fn isize_refined(_value: isize) -> Self {
-        let ident = verum_ast::ty::Ident::new("isize", Span::dummy());
-        Type::Named {
-            path: Path::single(ident),
-            args: List::new(),
-        }
-    }
-
-    /// Create a u8 type with refinement for the specific value
-    /// Note: Uses semantic name "Byte" rather than machine name "u8"
-    /// Verum philosophy: Byte is the canonical 8-bit unsigned type
-    pub fn u8_refined(_value: u8) -> Self {
-        let ident = verum_ast::ty::Ident::new("Byte", Span::dummy());
-        Type::Named {
-            path: Path::single(ident),
-            args: List::new(),
-        }
-    }
-
-    /// Create a u16 type with refinement for the specific value
-    pub fn u16_refined(_value: u16) -> Self {
-        let ident = verum_ast::ty::Ident::new("u16", Span::dummy());
-        Type::Named {
-            path: Path::single(ident),
-            args: List::new(),
-        }
-    }
-
-    /// Create a u32 type with refinement for the specific value
-    pub fn u32_refined(_value: u32) -> Self {
-        let ident = verum_ast::ty::Ident::new("u32", Span::dummy());
-        Type::Named {
-            path: Path::single(ident),
-            args: List::new(),
-        }
-    }
-
-    /// Create a u64 type with refinement for the specific value
-    pub fn u64_refined(_value: u64) -> Self {
-        let ident = verum_ast::ty::Ident::new("u64", Span::dummy());
-        Type::Named {
-            path: Path::single(ident),
-            args: List::new(),
-        }
-    }
-
-    /// Create a u128 type with refinement for the specific value
-    pub fn u128_refined(_value: u128) -> Self {
-        let ident = verum_ast::ty::Ident::new("u128", Span::dummy());
-        Type::Named {
-            path: Path::single(ident),
-            args: List::new(),
-        }
-    }
-
-    /// Create a usize type with refinement for the specific value
-    pub fn usize_refined(_value: usize) -> Self {
-        let ident = verum_ast::ty::Ident::new("usize", Span::dummy());
-        Type::Named {
-            path: Path::single(ident),
-            args: List::new(),
-        }
-    }
-
-    /// Create an f32 type with refinement for the specific value
-    pub fn f32_refined(_value: f32) -> Self {
-        let ident = verum_ast::ty::Ident::new("f32", Span::dummy());
-        Type::Named {
-            path: Path::single(ident),
-            args: List::new(),
-        }
-    }
-
-    /// Create an f64 type with refinement for the specific value
-    pub fn f64_refined(_value: f64) -> Self {
-        let ident = verum_ast::ty::Ident::new("f64", Span::dummy());
-        Type::Named {
-            path: Path::single(ident),
-            args: List::new(),
-        }
-    }
+    pub fn f32_refined(_value: f32) -> Self    { Self::primitive_named("Float32") }
+    pub fn f64_refined(_value: f64) -> Self    { Self::primitive_named("Float64") }
 
     /// Get the free type variables in this type
     pub fn free_vars(&self) -> Set<TypeVar> {
