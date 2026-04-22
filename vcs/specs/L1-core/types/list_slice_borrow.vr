@@ -51,5 +51,12 @@ fn main() {
     let mid = &b[1..3];
     assert_eq(mid.len(), 2);
 
+    // Bare list-index form (without `&`). Previously silently returned
+    // an empty value via the same buggy `GetE { idx: range_value }` path
+    // — `compile_index` shares the slice-creation lowering with
+    // `compile_unary`'s `&arr[range]` special case.
+    let bare = b[..];
+    assert_eq(bare.len(), 4);
+
     print("list_slice_borrow ok");
 }
