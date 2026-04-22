@@ -1,0 +1,72 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: quic, rfc9000, packet-number, encoding, kat
+// @timeout: 10000
+// @expect: pass
+//
+// RFC 9000 §17.1 — Packet number encoding / decoding.
+//
+//   Truncation: encode_packet_number_len(pn, largest_acked) returns
+//   (truncated_pn, nbytes) where nbytes is the minimum byte-count
+//   such that the decoder unambiguously reconstructs `pn` given
+//   `largest_acked`.
+//
+//   Recovery: decode_packet_number(largest_pn, truncated, nbits)
+//   returns the full `pn` that the decoder picks as the closest
+//   candidate to `expected = largest_pn + 1` modulo 2^nbits.
+//
+// The property `decode(encode(pn, la), la) == pn` for reasonable
+// distances `pn - la` is the defining contract — a QUIC peer can't
+// decrypt packets if the PN recovered by the stack doesn't match
+// the PN the AEAD nonce was built from.
+
+mount core.net.quic.packet.{encode_packet_number_len, decode_packet_number};
+
+fn roundtrip_case(pn: UInt64, largest_acked: UInt64) {
+    let (truncated, nbytes) = encode_packet_number_len(pn, Some(largest_acked));
+    let nbits: UInt32 = (nbytes as UInt32) * 8_u32;
+    let recovered = decode_packet_number(largest_acked, truncated, nbits);
+    assert(recovered == pn);
+}
+
+fn check_roundtrips() {
+    // Small gaps — 1-byte PN encoding is enough.
+    roundtrip_case(1_u64, 0_u64);
+    roundtrip_case(100_u64, 99_u64);
+    roundtrip_case(127_u64, 0_u64);
+
+    // Mid-range — 2-byte.
+    roundtrip_case(10_000_u64, 9_500_u64);
+    roundtrip_case(0x1_0000_u64, 0x0_ffff_u64);
+
+    // 3-byte regime.
+    roundtrip_case(0x100_0000_u64, 0x0ff_0000_u64);
+
+    // 4-byte regime.
+    roundtrip_case(0x1_0000_0000_u64, 0xffff_fff0_u64);
+}
+
+fn check_min_nbytes() {
+    // RFC 9000 §17.1 example: pn = 0xac5c02, largest_acked = 0xabe8b3.
+    // Unacked range size = 0xac5c02 - 0xabe8b3 = 0xd34f. Require
+    // at least ceil(log2(2 * 0xd34f)) = ceil(log2(0x1a69e)) = 17 bits
+    // → 3 bytes of truncation.
+    let pn: UInt64 = 0xac5c02_u64;
+    let la: UInt64 = 0xabe8b3_u64;
+    let (_truncated, nbytes) = encode_packet_number_len(pn, Some(la));
+    assert(nbytes == 3_u8);
+}
+
+fn check_no_history() {
+    // When `largest_acked` is None (no ACK yet received) the encoder
+    // picks based on `pn + 1` — for pn=0 that's 1, which fits in 1 byte.
+    let (_truncated, nbytes) = encode_packet_number_len(0_u64, None);
+    assert(nbytes == 1_u8);
+}
+
+fn main() {
+    check_roundtrips();
+    check_min_nbytes();
+    check_no_history();
+}
