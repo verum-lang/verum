@@ -1,11 +1,12 @@
 // @test: typecheck-pass
 // @tier: 0
 // @level: L2
-// @tags: quic, pacer, pump, rfc9002, typecheck
+// @tags: quic, pacer, pump, idle-timeout, rfc9000, rfc9002, typecheck
 // @timeout: 10000
 // @expect: pass
 
 mount core.net.quic.{Pacer, PacerDecision};
+mount core.net.quic.idle_timeout.{IdleTimeoutTracker, TickResult as IdleTickResult};
 mount core.time.instant.{Instant};
 mount core.time.duration.{Duration};
 
@@ -20,19 +21,45 @@ fn exercise_pacer() {
     }
 
     pacer.on_packet_sent(1500_u64, now.clone());
-    // Still unbounded — bucket re-filled on next `check`.
     match pacer.check(1500_u64, now.clone()) {
         PacerDecision.Send => {},
         PacerDecision.NotYet(_) => panic("unbounded must Send"),
     }
 
-    // Bounded: low rate drains bucket quickly.
-    pacer.set_rate(1_000_u64);     // 1 KB/s
-    pacer.on_packet_sent(1200_u64 * 3_u64, now.clone());  // drain
+    pacer.set_rate(1_000_u64);     // 1 KB/s, very low
+    pacer.on_packet_sent(1200_u64 * 3_u64, now.clone());
     match pacer.check(1500_u64, now.clone()) {
-        PacerDecision.Send => {},   // Still OK — first check refills from now
+        PacerDecision.Send => {},
         PacerDecision.NotYet(_d) => {},
     }
 }
 
-fn main() { exercise_pacer(); }
+fn exercise_idle_pump_wiring() {
+    // The pump assembles an IdleTimeoutTracker via arm_idle_timer;
+    // here we exercise the tracker the same way the pump does.
+    let t0 = Instant.now();
+    let mut tracker = IdleTimeoutTracker.new(30_000_u64, 30_000_u64, t0.clone());
+
+    // Fresh tracker — not expired.
+    match tracker.tick(t0.clone()) {
+        IdleTickResult.Active(_) => {},
+        IdleTickResult.Expired => panic("fresh tracker must not expire"),
+    }
+
+    // Simulate RX ack-eliciting packet → timer resets.
+    tracker.on_packet_received(t0.clone(), true);
+    match tracker.tick(t0.clone()) {
+        IdleTickResult.Active(_) => {},
+        IdleTickResult.Expired => panic("post-reset must not expire"),
+    }
+
+    // Simulate TX ack-eliciting packet.
+    tracker.on_packet_sent(t0.clone(), true);
+    // Subsequent sends before a reset should NOT re-arm the timer.
+    tracker.on_packet_sent(t0.clone(), true);
+}
+
+fn main() {
+    exercise_pacer();
+    exercise_idle_pump_wiring();
+}

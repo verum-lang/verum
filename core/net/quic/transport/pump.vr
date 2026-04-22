@@ -79,6 +79,7 @@ mount core.net.quic.connection_sm.keys.{
 };
 mount core.net.quic.connection_sm.path_control;
 mount core.net.quic.pacer.{Pacer, PacerDecision};
+mount core.net.quic.idle_timeout.{IdleTimeoutTracker, TickResult as IdleTickResult};
 
 mount core.net.quic.transport.abstraction.{
     UdpTransport, InboundDatagram, TransportError, EcnCodepoint,
@@ -131,6 +132,10 @@ public type ConnectionPump is {
     /// records the earliest instant it's allowed to send again and
     /// skips emission until wall-clock catches up.
     pacing_next_ok:   Maybe<Instant>,
+    /// RFC 9000 §10.1 idle-timeout tracker. `None` until the peer's
+    /// `max_idle_timeout` transport parameter arrives; callers invoke
+    /// `arm_idle_timer` once the local+peer values are known.
+    idle:             Maybe<IdleTimeoutTracker>,
 };
 
 public type PumpPhase is PumpInitial | PumpHandshake | PumpOneRtt | PumpClosing | PumpDraining;
@@ -155,6 +160,7 @@ implement ConnectionPump {
             phase_tag:       PumpPhase.PumpInitial,
             pacer:           Pacer.new(2400_u64),
             pacing_next_ok:  None,
+            idle:            None,
         }
     }
 
@@ -179,10 +185,20 @@ implement ConnectionPump {
             phase_tag:       PumpPhase.PumpInitial,
             pacer:           Pacer.new(2400_u64),
             pacing_next_ok:  None,
+            idle:            None,
         }
     }
 
     // ==================== top-level loop ====================
+
+    /// Arm the RFC 9000 §10.1 idle timer. Caller invokes once both
+    /// local and peer `max_idle_timeout` transport parameters are
+    /// known — typically immediately after the handshake driver
+    /// decodes the peer's transport-params extension. `now` is the
+    /// initial activity reference (pump construction time is fine).
+    public fn arm_idle_timer(&mut self, local_max_ms: UInt64, peer_max_ms: UInt64, now: Instant) {
+        self.idle = Some(IdleTimeoutTracker.new(local_max_ms, peer_max_ms, now));
+    }
 
     /// Run the pump until the connection closes or the cancellation
     /// token fires. Server + client use the same loop; role-specific
@@ -197,6 +213,21 @@ implement ConnectionPump {
             // 2. Timer check.
             let now = Instant.now();
             self.check_timers(now.clone())?;
+
+            // 2b. RFC 9000 §10.1 idle-timeout tick. When the tracker
+            // expires, the spec (§10.2) allows silent close — we
+            // move to Draining with a zero-duration drain expiry so
+            // the outer loop terminates on the next iteration.
+            match &self.idle {
+                Some(tracker) => match tracker.tick(now.clone()) {
+                    IdleTickResult.Expired => {
+                        self.phase_tag = PumpPhase.PumpDraining;
+                        self.connection.drain_expiry = Some(now.clone());
+                    },
+                    IdleTickResult.Active(_) => {},
+                },
+                None => {},
+            }
 
             // 3. Drain outbound (accumulate + send).
             self.drain_outbound(now).await?;
@@ -345,12 +376,19 @@ implement ConnectionPump {
         // Parse frames + dispatch.
         let frames = decode_all_frames(lp.payload.as_slice())
             .map_err(|_| PumpError.Frame(Text.from_str("decode frames (long)")))?;
+        // §10.1.1 — idle timer resets on *any* ack-eliciting packet
+        // successfully processed.
+        let rx_ack_eliciting = any_ack_eliciting(&frames);
         let outcome = dispatch_frames(
             &frames, space, Instant.now(),
             &mut self.connection.loss, &mut self.connection.cc, &mut self.connection.flow,
             &mut self.connection.send_streams, &mut self.connection.recv_streams,
         ).map_err(|e| PumpError.Quic(e))?;
         self.absorb_dispatch(outcome)?;
+        match &mut self.idle {
+            Some(t) => t.on_packet_received(Instant.now(), rx_ack_eliciting),
+            None => {},
+        }
         Ok(lp.consumed)
     }
 
@@ -359,12 +397,17 @@ implement ConnectionPump {
             .on_packet_received(sp.packet_number);
         let frames = decode_all_frames(sp.payload.as_slice())
             .map_err(|_| PumpError.Frame(Text.from_str("decode frames (short)")))?;
+        let rx_ack_eliciting = any_ack_eliciting(&frames);
         let outcome = dispatch_frames(
             &frames, PnSpaceKind.Application, Instant.now(),
             &mut self.connection.loss, &mut self.connection.cc, &mut self.connection.flow,
             &mut self.connection.send_streams, &mut self.connection.recv_streams,
         ).map_err(|e| PumpError.Quic(e))?;
         self.absorb_dispatch(outcome)?;
+        match &mut self.idle {
+            Some(t) => t.on_packet_received(Instant.now(), rx_ack_eliciting),
+            None => {},
+        }
         Ok(sp.consumed)
     }
 
@@ -589,10 +632,18 @@ implement ConnectionPump {
             ack_eliciting: any_ack_eliciting(&frames),
             frames:        frames.clone(),
         };
+        let tx_ack_eliciting = any_ack_eliciting(&frames);
         self.connection.loss.on_packet_sent(space.clone(), info, &mut self.connection.cc);
         path_control.on_outbound_bytes(&mut self.paths, wire.len() as UInt64);
         // Drain the token bucket by the actual datagram size.
         self.pacer.on_packet_sent(bytes_u64, now.clone());
+        // §10.1.1 — outbound reset only on the first ack-eliciting
+        // send since the last activity; `on_packet_sent` on the
+        // tracker enforces this with its `since_last_send` gate.
+        match &mut self.idle {
+            Some(t) => t.on_packet_sent(now.clone(), tx_ack_eliciting),
+            None => {},
+        }
 
         // Finally — ship it.
         self.transport.send(wire.as_slice(), &self.peer_addr, EcnCodepoint.NotEct)
