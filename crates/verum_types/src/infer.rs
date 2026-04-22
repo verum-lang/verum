@@ -28788,13 +28788,18 @@ impl TypeChecker {
                                         registry,
                                     )
                                 {
-                                    // Get the source module and import its implement blocks
-                                    // Use path aliases since "core.io.path" may be stored as "std.io.path"
+                                    // Get the source module and import its implement blocks.
+                                    // Pin the checker's module path to the resolved source
+                                    // module so bare type references inside impl blocks
+                                    // resolve against that module's qualified-name layer
+                                    // first (avoids same-name collisions via the flat map).
+                                    let src_path = source_path.as_str().to_string();
                                     if let Some(source_module) =
                                         self.get_module_with_path_aliases(source_path.as_str(), registry)
-                                        && let Err(e) = self.import_impl_blocks_for_type(
+                                        && let Err(e) = self.import_impl_blocks_for_type_in_module(
                                             &source_module.ast,
                                             item_name,
+                                            Some(&src_path),
                                         )
                                     {
                                         tracing::debug!(
@@ -28805,10 +28810,13 @@ impl TypeChecker {
                                         );
                                     }
                                 } else {
-                                    // Fallback: try to import from the direct module
-                                    if let Err(e) = self
-                                        .import_impl_blocks_for_type(&module_info.ast, item_name)
-                                    {
+                                    // Fallback: try to import from the direct module.
+                                    let direct_path = resolved_module_path.as_str().to_string();
+                                    if let Err(e) = self.import_impl_blocks_for_type_in_module(
+                                        &module_info.ast,
+                                        item_name,
+                                        Some(&direct_path),
+                                    ) {
                                         tracing::debug!(
                                             "Failed to import implement blocks for '{}' from '{}': {}",
                                             item_name,
@@ -29189,10 +29197,19 @@ impl TypeChecker {
                     } else {
                         // Also import implement blocks for the type
                         // Use path aliases since "core.io.path" may be stored as "std.io.path"
+                        // Pin the checker's module path to the SOURCE module so
+                        // bare type references inside impl blocks
+                        // (e.g. `-> Result<T, RecvError>`) resolve against the
+                        // source module's qualified-name layer first and don't
+                        // get a same-named stranger from the flat map.
+                        let src_path = source_module_path.as_str().to_string();
                         if let Some(source_module) =
                             self.get_module_with_path_aliases(source_module_path.as_str(), registry)
-                            && let Err(e) =
-                                self.import_impl_blocks_for_type(&source_module.ast, item_name)
+                            && let Err(e) = self.import_impl_blocks_for_type_in_module(
+                                &source_module.ast,
+                                item_name,
+                                Some(&src_path),
+                            )
                         {
                             tracing::debug!(
                                 "Failed to import implement blocks for '{}' from '{}': {}",
@@ -29840,6 +29857,25 @@ impl TypeChecker {
         ast: &verum_ast::Module,
         type_name: &str,
     ) -> Result<()> {
+        self.import_impl_blocks_for_type_in_module(ast, type_name, None)
+    }
+
+    /// Same as [`import_impl_blocks_for_type`], but pins the type checker's
+    /// `current_module_path` to `source_module_path` for the duration of the
+    /// import so that type references inside the impl block (e.g. a bare
+    /// `RecvError` return type) resolve against the *source* module's
+    /// qualified-name layer first.
+    ///
+    /// Without this, `ast_to_type` / `ast_to_type_lenient` fall back to the
+    /// flat `ctx.type_defs` map where whichever same-named type was
+    /// registered last wins — so imported broadcast's `poll_next` ends up
+    /// with QUIC's `RecvError` in its stored return type.
+    fn import_impl_blocks_for_type_in_module(
+        &mut self,
+        ast: &verum_ast::Module,
+        type_name: &str,
+        source_module_path: Option<&str>,
+    ) -> Result<()> {
         use verum_ast::decl::{FunctionParamKind, ImplItemKind, Visibility as AstVisibility};
 
         // #[cfg(debug_assertions)]
@@ -29847,6 +29883,11 @@ impl TypeChecker {
             // "[DEBUG import_impl_blocks_for_type] Called for type '{}'",
             // type_name
         // );
+
+        let saved_module_path = self.current_module_path.clone();
+        if let Some(path) = source_module_path {
+            self.set_current_module_path(verum_common::Text::from(path));
+        }
 
         let impl_blocks = self.find_impl_blocks_for_type(ast, type_name);
 
@@ -30365,6 +30406,9 @@ impl TypeChecker {
             }
         }
 
+        // Restore the checker's module path so imports don't leak
+        // the source module into surrounding scope.
+        self.set_current_module_path(saved_module_path);
         Ok(())
     }
 
