@@ -1,0 +1,38 @@
+// @test: integration
+// @tier: 0
+// @level: L1
+// @tags: proof, refinement, hypothesis, sigma, auto
+// @expect: pass
+//
+// Inline refinement-type predicates on theorem parameters must flow into
+// the SMT goal as hypotheses, with the implicit `self` / `it` binder (or
+// the explicit Sigma/Rule-2 binder) rewritten to the actual parameter
+// identifier.
+//
+// This locks in the `refinement_hypotheses_from_params` elaboration in
+// `phases/proof_verification.rs` and the `SelfValue` segment handling
+// in `substitute_ident`.
+
+@verify(formal)
+theorem rule1_self_binder(n: Int { self > 0 })
+    ensures n > 0
+    proof by auto;
+
+@verify(formal)
+theorem rule1_arithmetic(n: Int { self > 0 })
+    ensures n * n > 0
+    proof by auto;
+
+@verify(formal)
+theorem rule3_sigma_binder(x: Int where x > 0)
+    ensures x + 1 > 1
+    proof by auto;
+
+@verify(formal)
+theorem multi_param_refinements(a: Int { self >= 0 }, b: Int { self >= 0 })
+    ensures a + b >= 0
+    proof by auto;
+
+fn main() {
+    print("L1-core: proof/tactics/inline_refinement_hypotheses");
+}

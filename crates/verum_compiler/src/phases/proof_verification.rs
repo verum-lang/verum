@@ -1152,9 +1152,47 @@ pub fn verify_proof_body(
         }
     };
 
-    // Build the primary goal from the theorem's proposition and requires clauses
-    let proposition = theorem.proposition.as_ref().clone();
-    let hypotheses: List<Expr> = theorem.requires.clone();
+    // Build the primary goal from the theorem's proposition and requires clauses.
+    //
+    // Proof-body semantics for `theorem t(..) -> Bool ensures E proof by …`:
+    // the proof body is evidence for `E`, not for the shape of the returned
+    // `Bool`. Concretely the declaration means "there exists a proof of `E`,
+    // and the theorem's returned `Bool` is a witness of that proof — so
+    // `result = true`". Elaboration bakes this convention in by substituting
+    // every free occurrence of the reserved `result` identifier with the
+    // boolean literal `true` before the VC reaches SMT. Without this step,
+    // ensures like `result == (n == 7)` contain an unbound `result` and the
+    // translator just encodes it as a fresh uninterpreted integer, making
+    // every `-> Bool` theorem with a `proof by …` body unprovable for
+    // reasons entirely unrelated to the mathematical content of the claim.
+    let raw_proposition = theorem.proposition.as_ref().clone();
+    let proposition = substitute_result_with_true(&raw_proposition);
+    let mut hypotheses: List<Expr> = theorem
+        .requires
+        .iter()
+        .map(|e| substitute_result_with_true(e))
+        .collect();
+
+    // Inline refinement hypotheses.
+    //
+    // For every theorem parameter whose *inline* type is a refinement — i.e.
+    // `n: Int { self == 7 }` (Rule 1) or `n: Int where |x| x > 0` (Rule 2) or
+    // `x: Int where x > 0` (Rule 3, Sigma) — the predicate is a fact about
+    // that parameter that the proof body is allowed to rely on. We rewrite
+    // the predicate by substituting the binder (`self` / `it` / the explicit
+    // name) with the actual parameter identifier and push it into the
+    // hypothesis set so the SMT sees the same constraint the type system is
+    // enforcing at call sites.
+    //
+    // Nominal refinements (`n: FanoDim` where `FanoDim is Dimension { self == 7 }`)
+    // are *not* resolved here — that requires the type-alias chain from the
+    // type registry and is tracked as a separate follow-up. The conservative
+    // behaviour (omit the nominal refinement) is sound: the proof obligation
+    // is merely harder, not wrong.
+    for hyp in refinement_hypotheses_from_params(&theorem.params) {
+        hypotheses.push(hyp);
+    }
+
     let primary_goal = ProofGoal::with_hypotheses(proposition.clone(), hypotheses.clone());
 
     match proof_body {
@@ -1702,6 +1740,327 @@ fn build_suggestions_from_proof_error(err: &ProofError) -> List<Text> {
         err
     )));
     suggestions
+}
+
+// ---------------------------------------------------------------------------
+// Refinement-type → hypothesis elaboration
+// ---------------------------------------------------------------------------
+
+/// For every parameter whose type is an inline refinement (`Refined` with the
+/// implicit `self` / `it` binder, `Sigma` with an explicit binder), produce
+/// the corresponding predicate with the binder substituted by the actual
+/// parameter identifier. The resulting expressions are ready to be threaded
+/// as hypotheses into the proof goal.
+///
+/// This is what lets the proof engine "see" the refinement: a theorem
+/// `theorem t(n: Int { self >= 0 }) ensures ...` must carry `n >= 0` as a
+/// hypothesis, not just as a refinement on the type. Type-checking still
+/// enforces the refinement at call sites; this function merely threads it
+/// through the verification layer where the goal solver lives.
+fn refinement_hypotheses_from_params(
+    params: &List<verum_ast::decl::FunctionParam>,
+) -> Vec<Expr> {
+    use verum_ast::decl::FunctionParamKind;
+    use verum_ast::pattern::PatternKind;
+
+    let mut out = Vec::new();
+
+    for param in params {
+        let (pat, ty) = match &param.kind {
+            FunctionParamKind::Regular { pattern, ty, .. } => (pattern, ty),
+            _ => continue,
+        };
+
+        // Pull the binder identifier out of the pattern — only single-name
+        // patterns get refinement hypothesis treatment here; destructuring
+        // patterns have their own VC path.
+        let param_ident = match &pat.kind {
+            PatternKind::Ident { name, .. } => name.clone(),
+            _ => continue,
+        };
+
+        // Accumulate refinement predicates along the type structure. The
+        // outermost peel is done here; nested refinements on the base type
+        // descend recursively and contribute additional conjuncts.
+        collect_refinements(ty, &param_ident, &mut out);
+    }
+
+    out
+}
+
+/// Descend into a type looking for inline refinement predicates. For each
+/// one, substitute the binder with `param_ident` and emit the rewritten
+/// predicate into `out`. Stops when a non-refinement, non-delegating
+/// TypeKind is reached.
+fn collect_refinements(ty: &verum_ast::ty::Type, param_ident: &Ident, out: &mut Vec<Expr>) {
+    use verum_ast::ty::TypeKind;
+
+    match &ty.kind {
+        TypeKind::Refined { base, predicate } => {
+            // Implicit `self` / `it` binder by convention. Substitute every
+            // free reference to those names with the parameter identifier.
+            let rewritten = substitute_ident(
+                &predicate.expr,
+                &[
+                    (Text::from("self"), param_ident.clone()),
+                    (Text::from("it"), param_ident.clone()),
+                ],
+            );
+            // Also honour an explicit binder if the refinement carries one
+            // (Rule 2: `T where |x| expr`).
+            let rewritten = if let Maybe::Some(binder) = &predicate.binding {
+                substitute_ident(&rewritten, &[(binder.name.clone(), param_ident.clone())])
+            } else {
+                rewritten
+            };
+            out.push(rewritten);
+            collect_refinements(base, param_ident, out);
+        }
+        TypeKind::Sigma { name, base, predicate } => {
+            let rewritten = substitute_ident(
+                predicate,
+                &[(name.name.clone(), param_ident.clone())],
+            );
+            out.push(rewritten);
+            collect_refinements(base, param_ident, out);
+        }
+        TypeKind::Bounded { base, .. } => collect_refinements(base, param_ident, out),
+        _ => {}
+    }
+}
+
+/// Substitute every free `Path` consisting of a single ident in `from_to`
+/// with the corresponding target ident, returning a new `Expr`.
+///
+/// Two path shapes are recognised at the single-segment head:
+///
+/// * `PathSegment::Name(id)` — the normal identifier case, substituted when
+///   `id.name` matches one of the `from` entries.
+/// * `PathSegment::SelfValue` — the `self` keyword used in refinement
+///   predicates (Rule 1, `T { self > 0 }`). The AST stores `self` as a
+///   dedicated segment kind rather than an identifier, so we match it
+///   explicitly against a `from` entry of the literal text `"self"`.
+fn substitute_ident(expr: &Expr, from_to: &[(Text, Ident)]) -> Expr {
+    match &expr.kind {
+        ExprKind::Path(p) => {
+            if p.segments.len() == 1 {
+                match &p.segments[0] {
+                    verum_ast::PathSegment::Name(id) => {
+                        for (from, to) in from_to {
+                            if id.name == *from {
+                                let mut new_path = p.clone();
+                                new_path.segments =
+                                    smallvec::smallvec![verum_ast::PathSegment::Name(to.clone())];
+                                return Expr::new(ExprKind::Path(new_path), expr.span);
+                            }
+                        }
+                    }
+                    verum_ast::PathSegment::SelfValue => {
+                        for (from, to) in from_to {
+                            if from.as_str() == "self" {
+                                let mut new_path = p.clone();
+                                new_path.segments =
+                                    smallvec::smallvec![verum_ast::PathSegment::Name(to.clone())];
+                                return Expr::new(ExprKind::Path(new_path), expr.span);
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            expr.clone()
+        }
+        ExprKind::Binary { op, left, right } => Expr::new(
+            ExprKind::Binary {
+                op: *op,
+                left: Heap::new(substitute_ident(left, from_to)),
+                right: Heap::new(substitute_ident(right, from_to)),
+            },
+            expr.span,
+        ),
+        ExprKind::Unary { op, expr: inner } => Expr::new(
+            ExprKind::Unary {
+                op: *op,
+                expr: Heap::new(substitute_ident(inner, from_to)),
+            },
+            expr.span,
+        ),
+        ExprKind::Paren(inner) => Expr::new(
+            ExprKind::Paren(Heap::new(substitute_ident(inner, from_to))),
+            expr.span,
+        ),
+        ExprKind::Call { func, type_args, args } => {
+            let new_args: List<Expr> = args
+                .iter()
+                .map(|a| substitute_ident(a, from_to))
+                .collect();
+            Expr::new(
+                ExprKind::Call {
+                    func: Heap::new(substitute_ident(func, from_to)),
+                    type_args: type_args.clone(),
+                    args: new_args,
+                },
+                expr.span,
+            )
+        }
+        ExprKind::MethodCall {
+            receiver,
+            method,
+            type_args,
+            args,
+        } => {
+            let new_args: List<Expr> = args
+                .iter()
+                .map(|a| substitute_ident(a, from_to))
+                .collect();
+            Expr::new(
+                ExprKind::MethodCall {
+                    receiver: Heap::new(substitute_ident(receiver, from_to)),
+                    method: method.clone(),
+                    type_args: type_args.clone(),
+                    args: new_args,
+                },
+                expr.span,
+            )
+        }
+        ExprKind::Field { expr: inner, field } => Expr::new(
+            ExprKind::Field {
+                expr: Heap::new(substitute_ident(inner, from_to)),
+                field: field.clone(),
+            },
+            expr.span,
+        ),
+        ExprKind::Index { expr: inner, index } => Expr::new(
+            ExprKind::Index {
+                expr: Heap::new(substitute_ident(inner, from_to)),
+                index: Heap::new(substitute_ident(index, from_to)),
+            },
+            expr.span,
+        ),
+        _ => expr.clone(),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// `result` → `true` elaboration for `-> Bool` theorems
+// ---------------------------------------------------------------------------
+
+/// Substitute every free reference to the reserved name `result` with the
+/// boolean literal `true` in `expr`.
+///
+/// Rationale (see the call site in `verify_proof_body` for the wider
+/// discussion): a theorem of shape
+///
+/// ```verum
+/// theorem t(..) -> Bool
+///     ensures <predicate involving result>
+///     proof by <tactic>
+/// ```
+///
+/// declares that the proof body is evidence for the predicate; the `-> Bool`
+/// return is a syntactic convenience whose witness is, by the convention
+/// of our proof system, fixed to `true`. The SMT translator is independent
+/// of this convention — by default it binds `result` to a fresh
+/// uninterpreted integer, which makes even obviously-true obligations
+/// (`ensures result == (n == 7)` under `requires n == 7`) unprovable. This
+/// helper closes that gap before the goal is handed to the engine.
+///
+/// The walker is intentionally limited to the expression shapes that appear
+/// in specification predicates (logical connectives, equalities and
+/// inequalities, arithmetic, field / method / index access, literal
+/// introductions). Anything else is reproduced unchanged — safe since
+/// `result` only carries the "proof-body output" meaning inside predicate
+/// contexts; it is not a language-wide keyword.
+fn substitute_result_with_true(expr: &Expr) -> Expr {
+    const RESULT_NAME: &str = "result";
+    match &expr.kind {
+        ExprKind::Path(p) => {
+            if p.segments.len() == 1 {
+                if let verum_ast::PathSegment::Name(id) = &p.segments[0] {
+                    if id.name.as_str() == RESULT_NAME {
+                        return Expr::new(
+                            ExprKind::Literal(verum_ast::literal::Literal::new(
+                                LiteralKind::Bool(true),
+                                expr.span,
+                            )),
+                            expr.span,
+                        );
+                    }
+                }
+            }
+            expr.clone()
+        }
+        ExprKind::Binary { op, left, right } => Expr::new(
+            ExprKind::Binary {
+                op: *op,
+                left: Heap::new(substitute_result_with_true(left)),
+                right: Heap::new(substitute_result_with_true(right)),
+            },
+            expr.span,
+        ),
+        ExprKind::Unary { op, expr: inner } => Expr::new(
+            ExprKind::Unary {
+                op: *op,
+                expr: Heap::new(substitute_result_with_true(inner)),
+            },
+            expr.span,
+        ),
+        ExprKind::Paren(inner) => Expr::new(
+            ExprKind::Paren(Heap::new(substitute_result_with_true(inner))),
+            expr.span,
+        ),
+        ExprKind::Call { func, type_args, args } => {
+            let new_args: List<Expr> = args
+                .iter()
+                .map(|a| substitute_result_with_true(a))
+                .collect();
+            Expr::new(
+                ExprKind::Call {
+                    func: Heap::new(substitute_result_with_true(func)),
+                    type_args: type_args.clone(),
+                    args: new_args,
+                },
+                expr.span,
+            )
+        }
+        ExprKind::MethodCall {
+            receiver,
+            method,
+            type_args,
+            args,
+        } => {
+            let new_args: List<Expr> = args
+                .iter()
+                .map(|a| substitute_result_with_true(a))
+                .collect();
+            Expr::new(
+                ExprKind::MethodCall {
+                    receiver: Heap::new(substitute_result_with_true(receiver)),
+                    method: method.clone(),
+                    type_args: type_args.clone(),
+                    args: new_args,
+                },
+                expr.span,
+            )
+        }
+        ExprKind::Field { expr: inner, field } => Expr::new(
+            ExprKind::Field {
+                expr: Heap::new(substitute_result_with_true(inner)),
+                field: field.clone(),
+            },
+            expr.span,
+        ),
+        ExprKind::Index { expr: inner, index } => Expr::new(
+            ExprKind::Index {
+                expr: Heap::new(substitute_result_with_true(inner)),
+                index: Heap::new(substitute_result_with_true(index)),
+            },
+            expr.span,
+        ),
+        // Everything else (Literal, Try, Match, If, Let, …) either can't
+        // contain `result` or already has the right shape; pass through.
+        _ => expr.clone(),
+    }
 }
 
 // ============================================================================

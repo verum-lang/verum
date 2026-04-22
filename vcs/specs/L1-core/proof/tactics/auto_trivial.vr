@@ -1,0 +1,48 @@
+// @test: integration
+// @tier: 0
+// @level: L1
+// @tags: proof, tactic, auto, smt
+// @expect: pass
+//
+// Auto tactic must discharge trivially-true goals and decidable
+// arithmetic / boolean obligations without explicit user steps.
+// Regression coverage for the three closed bugs:
+//
+//   (1) `ensures true` — literal true fast-path.
+//   (2) `n == 7 → n == 7` — span-insensitive hypothesis matching.
+//   (3) Arithmetic like `n * 6 == 42 under n == 7` — SMT fallback after
+//       structural tactics fail (requires BinOp::Imply translation).
+
+@verify(formal)
+theorem trivially_true_literal()
+    ensures true
+    proof by auto;
+
+@verify(formal)
+theorem reflexivity_from_requires(n: Int)
+    requires n == 7
+    ensures n == 7
+    proof by auto;
+
+@verify(formal)
+theorem arithmetic_smt_fallback(n: Int)
+    requires n == 7
+    ensures n * 6 == 42
+    proof by auto;
+
+@verify(formal)
+theorem division_fallback(n: Int)
+    requires n == 7
+    ensures (n * (n - 1)) / 2 == 21
+    proof by auto;
+
+@verify(formal)
+theorem result_substitution_bool_return() -> Bool
+    ensures result == (14 + 7 == 21)
+{
+    proof by auto
+}
+
+fn main() {
+    print("L1-core: proof/tactics/auto_trivial — regression for auto dispatch");
+}

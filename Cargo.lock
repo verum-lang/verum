@@ -5304,6 +5304,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "verum_kernel"
+version = "0.1.0"
+dependencies = [
+ "proptest",
+ "serde",
+ "thiserror 2.0.18",
+ "verum_ast",
+ "verum_common",
+]
+
+[[package]]
 name = "verum_lexer"
 version = "0.1.0"
 dependencies = [

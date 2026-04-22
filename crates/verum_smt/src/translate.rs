@@ -1172,6 +1172,13 @@ impl<'ctx> Translator<'ctx> {
                 let result = left.eq(right).not();
                 Ok(Dynamic::from_ast(&result))
             }
+            // Logical implication and bi-implication. Essential for
+            // VC-building: proof-search wraps `hypothesis ⇒ goal` into a
+            // `Binary { op: Imply, .. }` tree before handing the whole
+            // formula to the translator, so without these arms the
+            // solver never sees a translated validity obligation.
+            BinOp::Imply => Ok(Dynamic::from_ast(&left.implies(right))),
+            BinOp::Iff => Ok(Dynamic::from_ast(&left.iff(right))),
             _ => Err(TranslationError::UnsupportedOp(op.as_str().to_text())),
         }
     }

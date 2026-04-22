@@ -4191,32 +4191,54 @@ impl ProofSearchEngine {
     ///
     /// Automatic proof search
     fn try_auto(&mut self, goal: &ProofGoal) -> Result<List<ProofGoal>, ProofError> {
-        // Try tactics in order
-        let tactics = vec![
+        // Fast path: trivially-true literal goals (e.g. `ensures true`).
+        if matches!(
+            &goal.goal.kind,
+            ExprKind::Literal(lit) if matches!(lit.kind, verum_ast::LiteralKind::Bool(true))
+        ) {
+            return Ok(List::new());
+        }
+
+        // Try cheap structural tactics first.
+        let structural = [
             ProofTactic::Assumption,
             ProofTactic::Reflexivity,
             ProofTactic::Split,
             ProofTactic::Intro,
         ];
 
-        for tactic in tactics {
-            if let Ok(subgoals) = self.execute_tactic(&tactic, goal) {
+        for tactic in &structural {
+            if let Ok(subgoals) = self.execute_tactic(tactic, goal) {
                 return Ok(subgoals);
             }
         }
 
-        Err(ProofError::TacticFailed(
-            "Auto tactic found no applicable tactics".into(),
-        ))
+        // Fall back to SMT: Auto's purpose is to discharge decidable goals,
+        // so after the structural pass we hand the goal to Z3. This is what
+        // users expect when they write `proof by auto` for arithmetic /
+        // boolean obligations.
+        match self.try_smt(&Maybe::None, &Maybe::None, goal) {
+            Ok(subgoals) => Ok(subgoals),
+            Err(smt_err) => Err(ProofError::TacticFailed(
+                format!("'auto': no structural tactic applies and SMT fallback: {smt_err:?}").into(),
+            )),
+        }
     }
 
-    /// Check if two expressions are syntactically equal
+    /// Check if two expressions are structurally equal, ignoring spans.
+    ///
+    /// The AST carries byte-offset spans on every `Ident`, `Path`, and `Literal`,
+    /// and the derived `PartialEq` is span-sensitive. That is exactly wrong for
+    /// proof-search equality: the hypothesis `n == 7` from the `requires` clause
+    /// and the goal `n == 7` from the `ensures` clause always have different
+    /// source spans, so `==` on `Path` / `Ident` / `Literal` would never match.
+    /// This recursive walker compares the semantic shape only.
     fn expr_eq(e1: &Expr, e2: &Expr) -> bool {
         use ExprKind::*;
 
         match (&e1.kind, &e2.kind) {
-            (Literal(l1), Literal(l2)) => l1.kind == l2.kind,
-            (Path(p1), Path(p2)) => p1 == p2,
+            (Literal(l1), Literal(l2)) => Self::literal_kind_eq(&l1.kind, &l2.kind),
+            (Path(p1), Path(p2)) => Self::path_eq(p1, p2),
             (
                 Binary {
                     op: op1,
@@ -4233,8 +4255,41 @@ impl ProofSearchEngine {
                 op1 == op2 && Self::expr_eq(e1, e2)
             }
             (Paren(e1), Paren(e2)) => Self::expr_eq(e1, e2),
+            (Paren(e1), _) => Self::expr_eq(e1, e2),
+            (_, Paren(e2)) => Self::expr_eq(e1, e2),
             _ => false,
         }
+    }
+
+    /// Compare two `Path`s segment-by-segment ignoring span metadata.
+    fn path_eq(p1: &Path, p2: &Path) -> bool {
+        use verum_ast::PathSegment;
+
+        if p1.segments.len() != p2.segments.len() {
+            return false;
+        }
+        p1.segments
+            .iter()
+            .zip(p2.segments.iter())
+            .all(|(a, b)| match (a, b) {
+                (PathSegment::Name(i1), PathSegment::Name(i2)) => i1.name == i2.name,
+                (PathSegment::SelfValue, PathSegment::SelfValue)
+                | (PathSegment::Super, PathSegment::Super)
+                | (PathSegment::Cog, PathSegment::Cog)
+                | (PathSegment::Relative, PathSegment::Relative) => true,
+                _ => false,
+            })
+    }
+
+    /// Compare two literal kinds semantically (spans inside literal metadata
+    /// are not observed because `LiteralKind::PartialEq` already delegates
+    /// to the value fields, but we centralise it here for clarity and to
+    /// shield from future additions of span-bearing variants).
+    fn literal_kind_eq(
+        k1: &verum_ast::LiteralKind,
+        k2: &verum_ast::LiteralKind,
+    ) -> bool {
+        k1 == k2
     }
 
     /// Use Z3 to discharge proof goal
@@ -4270,7 +4325,11 @@ impl ProofSearchEngine {
         // Translate to Z3
         let z3_formula = match translator.translate_expr(&formula) {
             Ok(f) => f,
-            Err(_) => return Err(ProofError::TacticFailed("Failed to translate to Z3".into())),
+            Err(e) => {
+                return Err(ProofError::TacticFailed(
+                    format!("failed to translate to Z3: {e:?}").into(),
+                ));
+            }
         };
 
         let z3_bool = match option_to_maybe(z3_formula.as_bool()) {
