@@ -1,0 +1,78 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: http, uri-template, rfc6570, openapi, typecheck
+// @timeout: 10000
+// @expect: pass
+
+mount core.net.uri_template.{
+    UriTemplate, UriTemplateError, TemplateValue,
+};
+mount core.collections.map.{Map};
+
+fn mk_vars_single(name: &str, value: &str) -> Map<Text, TemplateValue> {
+    let mut m: Map<Text, TemplateValue> = Map.new();
+    m.insert(Text.from(name), TemplateValue.Str(Text.from(value)));
+    m
+}
+
+fn exercise_levels() -> Result<(), UriTemplateError> {
+    // Level 1 — simple substitution.
+    let t1 = UriTemplate.parse(&Text.from("/users/{user}"))?;
+    let u1 = t1.expand(&mk_vars_single("user", "alice"));
+    // → "/users/alice"
+    let _ = u1;
+
+    // Level 2 — reserved operator keeps / : ? unencoded.
+    let t2 = UriTemplate.parse(&Text.from("/files/{+path}"))?;
+    let u2 = t2.expand(&mk_vars_single("path", "a/b/c"));
+    let _ = u2;
+
+    // Level 2 — fragment.
+    let t3 = UriTemplate.parse(&Text.from("/page{#anchor}"))?;
+    let u3 = t3.expand(&mk_vars_single("anchor", "intro"));
+    let _ = u3;
+
+    // Level 3 — form-style query with multiple vars.
+    let t4 = UriTemplate.parse(&Text.from("/repos{?type,sort}"))?;
+    let mut vars4: Map<Text, TemplateValue> = Map.new();
+    vars4.insert(Text.from("type"), TemplateValue.Str(Text.from("public")));
+    vars4.insert(Text.from("sort"), TemplateValue.Str(Text.from("updated")));
+    let _ = t4.expand(&vars4);
+
+    // Level 3 — path-style.
+    let t5 = UriTemplate.parse(&Text.from("{/year,month,day}"))?;
+    let mut vars5: Map<Text, TemplateValue> = Map.new();
+    vars5.insert(Text.from("year"),  TemplateValue.Str(Text.from("2026")));
+    vars5.insert(Text.from("month"), TemplateValue.Str(Text.from("04")));
+    vars5.insert(Text.from("day"),   TemplateValue.Str(Text.from("22")));
+    let _ = t5.expand(&vars5);
+
+    // Level 4 — prefix modifier {var:N}.
+    let t6 = UriTemplate.parse(&Text.from("/u/{hash:7}"))?;
+    let u6 = t6.expand(&mk_vars_single("hash", "5114f85a3c2de"));
+    let _ = u6;
+
+    // Undefined variable → omitted per §3.2.
+    let t7 = UriTemplate.parse(&Text.from("/x{?missing}"))?;
+    let vars7: Map<Text, TemplateValue> = Map.new();
+    let _ = t7.expand(&vars7);
+
+    // List value joined by comma (default).
+    let t8 = UriTemplate.parse(&Text.from("/search{?tags}"))?;
+    let mut vars8: Map<Text, TemplateValue> = Map.new();
+    vars8.insert(Text.from("tags"), TemplateValue.List_({
+        let mut l: List<Text> = [];
+        l.push(Text.from("verum"));
+        l.push(Text.from("rust"));
+        l
+    }));
+    let _ = t8.expand(&vars8);
+
+    // Malformed: unbalanced brace.
+    let bad = UriTemplate.parse(&Text.from("/oops/{broken"));
+    let _ = bad;
+    Ok(())
+}
+
+fn main() { let _ = exercise_levels(); }

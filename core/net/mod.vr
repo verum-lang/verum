@@ -79,6 +79,7 @@ public module content_negotiation;
 public module http_range;
 public module link_header;
 public module http_cache;
+public module uri_template;
 
 // =============================================================================
 // Re-exports

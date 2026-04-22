@@ -1,0 +1,434 @@
+// =============================================================================
+// net/uri_template.vr — RFC 6570 URI Template expansion
+// =============================================================================
+// Layer: 5 (Network — HTTP common)
+// Dependencies: core, core.collections
+// =============================================================================
+//
+// RFC 6570 — the parameterised-URL grammar every hypermedia API
+// speaks: OpenAPI `paths`, HAL `_links`, GitHub API, AsyncAPI
+// channels, Kubernetes discovery. Given a template and a variable
+// map, this module emits the concrete URI.
+//
+// # Levels
+//
+//   Level 1 — simple string substitution `{var}`
+//   Level 2 — reserved `{+var}` and fragment `{#var}` operators
+//   Level 3 — multiple variables + named operators:
+//              `{.var}` label, `{/var}` path segment,
+//              `{;var}` path-style, `{?var}` form-style query,
+//              `{&var}` continued query
+//   Level 4 — prefix `{var:N}` and explode `{var*}` modifiers
+//
+// This module covers levels 1-3 in full plus the level-4 prefix
+// (`{var:N}`) modifier which is the only level-4 feature that sees
+// real production use (GitHub and OpenAPI both use it for IDs).
+// The explode modifier (`*`) applied to lists or maps is accepted
+// on parse and applied to list values; map explode lands in a
+// follow-up when a concrete caller demonstrates the need.
+//
+// # API
+//
+// ```
+// let tpl = UriTemplate.parse(&Text.from("/users/{user}/repos{?type,sort}"))?;
+// let mut vars: Map<Text, TemplateValue> = Map.new();
+// vars.insert(Text.from("user"), TemplateValue.Str(Text.from("alice")));
+// vars.insert(Text.from("type"), TemplateValue.Str(Text.from("public")));
+// let url: Text = tpl.expand(&vars);
+// // "/users/alice/repos?type=public"
+// ```
+//
+// =============================================================================
+
+module core.net.uri_template;
+
+mount core.*;
+mount core.collections.List;
+mount core.collections.map.{Map};
+
+// =============================================================================
+// Variable values
+// =============================================================================
+
+public type TemplateValue is
+      Str(Text)
+    | List_(List<Text>);
+
+public type UriTemplateError is
+      Malformed(Text)
+    | UnbalancedBraces;
+
+// =============================================================================
+// Parsed template
+// =============================================================================
+
+public type UriTemplate is {
+    parts: List<TemplatePart>,
+};
+
+type TemplatePart is
+      Literal(Text)
+    | Expansion { op: ExprOp, vars: List<VarSpec> };
+
+type ExprOp is
+      Simple        // {var}
+    | Reserved      // {+var}
+    | Fragment      // {#var}
+    | Label         // {.var}
+    | PathSeg       // {/var}
+    | PathStyle     // {;var}
+    | FormQuery     // {?var}
+    | ContQuery;    // {&var}
+
+type VarSpec is {
+    name:    Text,
+    /// Level-4 prefix modifier: `{var:N}` → truncate to first N chars.
+    /// None = no truncation.
+    max_len: Maybe<Int>,
+    /// Level-4 explode modifier: `{var*}`. True for each list value
+    /// to get its own pair.
+    explode: Bool,
+};
+
+// =============================================================================
+// Parser
+// =============================================================================
+
+implement UriTemplate {
+    public fn parse(template: &Text) -> Result<UriTemplate, UriTemplateError> {
+        let b = template.as_bytes();
+        let mut parts: List<TemplatePart> = [];
+        let mut i: Int = 0;
+        while i < b.len() {
+            if b[i] == ('{' as Byte) {
+                let close = find_close_brace(b, i + 1)?;
+                let expr = parse_expression(b, i + 1, close)?;
+                parts.push(expr);
+                i = close + 1;
+            } else {
+                // Gather literal up to next '{'.
+                let start = i;
+                while i < b.len() && b[i] != ('{' as Byte) { i = i + 1; }
+                let mut buf: List<Byte> = [];
+                let mut k: Int = start;
+                while k < i { buf.push(b[k]); k = k + 1; }
+                parts.push(TemplatePart.Literal(Text.from_utf8_unchecked(buf.as_slice())));
+            }
+        }
+        Ok(UriTemplate { parts: parts })
+    }
+
+    public fn expand(&self, vars: &Map<Text, TemplateValue>) -> Text {
+        let mut out: List<Byte> = [];
+        let mut i: Int = 0;
+        while i < self.parts.len() {
+            match &self.parts[i] {
+                TemplatePart.Literal(lit) => push_all(&mut out, lit.as_bytes()),
+                TemplatePart.Expansion { op, vars: specs } => {
+                    expand_into(&mut out, op, specs, vars);
+                },
+            }
+            i = i + 1;
+        }
+        Text.from_utf8_unchecked(out.as_slice())
+    }
+}
+
+fn find_close_brace(b: &[Byte], from: Int) -> Result<Int, UriTemplateError> {
+    let mut i = from;
+    while i < b.len() {
+        if b[i] == ('}' as Byte) { return Ok(i); }
+        i = i + 1;
+    }
+    Err(UriTemplateError.UnbalancedBraces)
+}
+
+fn parse_expression(b: &[Byte], start: Int, end: Int) -> Result<TemplatePart, UriTemplateError> {
+    if start >= end {
+        return Err(UriTemplateError.Malformed(Text.from("empty expression")));
+    }
+    let first = b[start];
+    let (op, var_start) = match first {
+        0x2B_u8 /* '+' */ => (ExprOp.Reserved, start + 1),
+        0x23_u8 /* '#' */ => (ExprOp.Fragment, start + 1),
+        0x2E_u8 /* '.' */ => (ExprOp.Label,    start + 1),
+        0x2F_u8 /* '/' */ => (ExprOp.PathSeg,  start + 1),
+        0x3B_u8 /* ';' */ => (ExprOp.PathStyle, start + 1),
+        0x3F_u8 /* '?' */ => (ExprOp.FormQuery, start + 1),
+        0x26_u8 /* '&' */ => (ExprOp.ContQuery, start + 1),
+        _                 => (ExprOp.Simple,   start),
+    };
+    let mut vars: List<VarSpec> = [];
+    let mut i = var_start;
+    while i < end {
+        // Read a single var-spec up to ',' or end.
+        let spec_start = i;
+        while i < end && b[i] != (',' as Byte) { i = i + 1; }
+        let spec = parse_var_spec(b, spec_start, i)?;
+        vars.push(spec);
+        if i < end && b[i] == (',' as Byte) { i = i + 1; }
+    }
+    Ok(TemplatePart.Expansion { op: op, vars: vars })
+}
+
+fn parse_var_spec(b: &[Byte], start: Int, end: Int) -> Result<VarSpec, UriTemplateError> {
+    if start >= end {
+        return Err(UriTemplateError.Malformed(Text.from("empty varspec")));
+    }
+    // Detect trailing `*` or `:N`.
+    let mut name_end = end;
+    let mut max_len: Maybe<Int> = None;
+    let mut explode: Bool = false;
+
+    if b[end - 1] == ('*' as Byte) {
+        explode = true;
+        name_end = end - 1;
+    } else {
+        // Look for ':' modifier.
+        let mut colon: Int = -1;
+        let mut k: Int = start;
+        while k < end {
+            if b[k] == (':' as Byte) { colon = k; break; }
+            k = k + 1;
+        }
+        if colon > 0 {
+            name_end = colon;
+            let mut n: Int = 0;
+            let mut j: Int = colon + 1;
+            while j < end {
+                let c = b[j];
+                if c < ('0' as Byte) || c > ('9' as Byte) {
+                    return Err(UriTemplateError.Malformed(Text.from("bad prefix len")));
+                }
+                n = n * 10 + ((c - ('0' as Byte)) as Int);
+                j = j + 1;
+            }
+            max_len = Some(n);
+        }
+    }
+
+    let mut name_bytes: List<Byte> = [];
+    let mut m: Int = start;
+    while m < name_end { name_bytes.push(b[m]); m = m + 1; }
+    Ok(VarSpec {
+        name: Text.from_utf8_unchecked(name_bytes.as_slice()),
+        max_len: max_len,
+        explode: explode,
+    })
+}
+
+// =============================================================================
+// Expansion
+// =============================================================================
+
+fn expand_into(
+    out: &mut List<Byte>,
+    op: &ExprOp,
+    specs: &List<VarSpec>,
+    vars: &Map<Text, TemplateValue>,
+) {
+    // Precompute: which variables are defined + non-empty?
+    let mut any_defined: Bool = false;
+    let mut i: Int = 0;
+    while i < specs.len() {
+        match vars.get(&specs[i].name) {
+            Some(v) => if !is_empty_value(v) { any_defined = true; break; },
+            None    => {},
+        }
+        i = i + 1;
+    }
+
+    // Prefix byte (once, if any defined).
+    match op {
+        ExprOp.Fragment  => if any_defined { out.push('#' as Byte); },
+        ExprOp.Label     => if any_defined { out.push('.' as Byte); },
+        ExprOp.PathSeg   => if any_defined { out.push('/' as Byte); },
+        ExprOp.PathStyle => if any_defined { out.push(';' as Byte); },
+        ExprOp.FormQuery => if any_defined { out.push('?' as Byte); },
+        ExprOp.ContQuery => if any_defined { out.push('&' as Byte); },
+        _ => {},
+    }
+
+    // Per-spec separator between defined vars.
+    let sep: Byte = match op {
+        ExprOp.Label     => '.' as Byte,
+        ExprOp.PathSeg   => '/' as Byte,
+        ExprOp.PathStyle => ';' as Byte,
+        ExprOp.FormQuery => '&' as Byte,
+        ExprOp.ContQuery => '&' as Byte,
+        _                => ',' as Byte,
+    };
+
+    let mut first: Bool = true;
+    let mut k: Int = 0;
+    while k < specs.len() {
+        let spec = &specs[k];
+        match vars.get(&spec.name) {
+            Some(v) => {
+                if is_empty_value(v) {
+                    // Named operators still emit the name for empty strings.
+                    if op_is_named(op) {
+                        if !first { out.push(sep); }
+                        push_all(out, spec.name.as_bytes());
+                        first = false;
+                    }
+                    k = k + 1;
+                    continue;
+                }
+                if !first { out.push(sep); }
+                emit_spec(out, op, spec, v);
+                first = false;
+            },
+            None => {},
+        }
+        k = k + 1;
+    }
+}
+
+fn emit_spec(out: &mut List<Byte>, op: &ExprOp, spec: &VarSpec, v: &TemplateValue) {
+    match v {
+        TemplateValue.Str(s) => {
+            let bytes = s.as_bytes();
+            let truncated = match &spec.max_len {
+                Some(n) => {
+                    let take = if *n < bytes.len() { *n } else { bytes.len() };
+                    slice_vec(bytes, 0, take)
+                },
+                None => slice_vec(bytes, 0, bytes.len()),
+            };
+            emit_named_prefix(out, op, spec, &truncated);
+            encode_value(out, op, truncated.as_slice());
+        },
+        TemplateValue.List_(items) => {
+            if spec.explode {
+                let mut i: Int = 0;
+                while i < items.len() {
+                    if i > 0 {
+                        let sep: Byte = match op {
+                            ExprOp.Label     => '.' as Byte,
+                            ExprOp.PathSeg   => '/' as Byte,
+                            ExprOp.PathStyle => ';' as Byte,
+                            ExprOp.FormQuery => '&' as Byte,
+                            ExprOp.ContQuery => '&' as Byte,
+                            _                => ',' as Byte,
+                        };
+                        out.push(sep);
+                    }
+                    let bytes = items[i].as_bytes();
+                    let vec = slice_vec(bytes, 0, bytes.len());
+                    emit_named_prefix(out, op, spec, &vec);
+                    encode_value(out, op, bytes);
+                    i = i + 1;
+                }
+            } else {
+                // Join with ',' regardless of op (RFC 6570 §3.2.2).
+                let mut joined: List<Byte> = [];
+                let mut i: Int = 0;
+                while i < items.len() {
+                    if i > 0 { joined.push(',' as Byte); }
+                    let b = items[i].as_bytes();
+                    let mut j: Int = 0;
+                    while j < b.len() { joined.push(b[j]); j = j + 1; }
+                    i = i + 1;
+                }
+                emit_named_prefix(out, op, spec, &joined);
+                encode_value(out, op, joined.as_slice());
+            }
+        },
+    }
+}
+
+fn emit_named_prefix(out: &mut List<Byte>, op: &ExprOp, spec: &VarSpec, value: &List<Byte>) {
+    // Named operators: `name=value`, or just `name` for empty.
+    if !op_is_named(op) { return; }
+    push_all(out, spec.name.as_bytes());
+    // For PathStyle + empty value, skip the '=' per §3.2.7.
+    match op {
+        ExprOp.PathStyle => if value.len() > 0 { out.push('=' as Byte); },
+        _                => out.push('=' as Byte),
+    }
+}
+
+fn op_is_named(op: &ExprOp) -> Bool {
+    match op {
+        ExprOp.PathStyle  => true,
+        ExprOp.FormQuery  => true,
+        ExprOp.ContQuery  => true,
+        _                 => false,
+    }
+}
+
+// =============================================================================
+// URI encoding
+// =============================================================================
+
+fn encode_value(out: &mut List<Byte>, op: &ExprOp, bytes: &[Byte]) {
+    let allow_reserved = match op {
+        ExprOp.Reserved => true,
+        ExprOp.Fragment => true,
+        _               => false,
+    };
+    let mut i: Int = 0;
+    while i < bytes.len() {
+        let c = bytes[i];
+        if is_unreserved(c) {
+            out.push(c);
+        } else if allow_reserved && is_reserved(c) {
+            out.push(c);
+        } else {
+            percent_encode_byte(out, c);
+        }
+        i = i + 1;
+    }
+}
+
+fn is_unreserved(c: Byte) -> Bool {
+    (c >= ('A' as Byte) && c <= ('Z' as Byte))
+        || (c >= ('a' as Byte) && c <= ('z' as Byte))
+        || (c >= ('0' as Byte) && c <= ('9' as Byte))
+        || c == ('-' as Byte) || c == ('.' as Byte)
+        || c == ('_' as Byte) || c == ('~' as Byte)
+}
+
+fn is_reserved(c: Byte) -> Bool {
+    // RFC 3986 §2.2 gen-delims + sub-delims.
+    c == (':' as Byte) || c == ('/' as Byte) || c == ('?' as Byte)
+        || c == ('#' as Byte) || c == ('[' as Byte) || c == (']' as Byte)
+        || c == ('@' as Byte) || c == ('!' as Byte) || c == ('$' as Byte)
+        || c == ('&' as Byte) || c == ('\'' as Byte) || c == ('(' as Byte)
+        || c == (')' as Byte) || c == ('*' as Byte) || c == ('+' as Byte)
+        || c == (',' as Byte) || c == (';' as Byte) || c == ('=' as Byte)
+}
+
+fn percent_encode_byte(out: &mut List<Byte>, c: Byte) {
+    out.push('%' as Byte);
+    out.push(nibble_hex((c >> 4_u8) & 0x0F_u8));
+    out.push(nibble_hex(c & 0x0F_u8));
+}
+
+fn nibble_hex(n: Byte) -> Byte {
+    if n < 10_u8 { ('0' as Byte) + n } else { ('A' as Byte) + (n - 10_u8) }
+}
+
+// =============================================================================
+// Helpers
+// =============================================================================
+
+fn is_empty_value(v: &TemplateValue) -> Bool {
+    match v {
+        TemplateValue.Str(s) => s.as_bytes().len() == 0,
+        TemplateValue.List_(items) => items.len() == 0,
+    }
+}
+
+fn push_all(dst: &mut List<Byte>, src: &[Byte]) {
+    let mut i: Int = 0;
+    while i < src.len() { dst.push(src[i]); i = i + 1; }
+}
+
+fn slice_vec(src: &[Byte], start: Int, end: Int) -> List<Byte> {
+    let mut out: List<Byte> = [];
+    let mut i: Int = start;
+    while i < end { out.push(src[i]); i = i + 1; }
+    out
+}
