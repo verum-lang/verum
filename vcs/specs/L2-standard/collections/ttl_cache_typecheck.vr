@@ -1,0 +1,50 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: collections, cache, ttl, lru, typecheck
+// @timeout: 10000
+// @expect: pass
+
+mount core.collections.{TtlCache, TtlCacheConfig, TtlCacheStats};
+mount core.time.duration.{Duration};
+
+fn exercise_cache() {
+    let cfg = TtlCacheConfig {
+        capacity:    4,
+        default_ttl: Duration.from_secs(60),
+    };
+    let mut cache: TtlCache<Text, Int> = TtlCache.new(cfg);
+
+    cache.insert(Text.from("a"), 1);
+    cache.insert(Text.from("b"), 2);
+    cache.insert(Text.from("c"), 3);
+    cache.insert(Text.from("d"), 4);
+
+    // Per-entry TTL override.
+    cache.insert_with_ttl(Text.from("e"), 5, Duration.from_millis(10));
+
+    // Reads should succeed while in-TTL.
+    let _ = cache.get(&Text.from("a"));
+    let _ = cache.get(&Text.from("e"));
+
+    // Purge is the explicit sweep (usually scheduled).
+    let _n: Int = cache.purge_expired();
+
+    // Introspection.
+    let _size: Int = cache.len();
+    let _stats: TtlCacheStats = cache.stats();
+    let _removed: Bool = cache.remove(&Text.from("b"));
+    cache.clear();
+    let _ = cache.is_empty();
+}
+
+fn exercise_defaults() {
+    let mut cache: TtlCache<Int, Text> = TtlCache.with_defaults();
+    cache.insert(42, Text.from("hello"));
+    let _ = cache.get(&42);
+}
+
+fn main() {
+    exercise_cache();
+    exercise_defaults();
+}

@@ -31,6 +31,7 @@ public module deque;
 public module heap;
 public module btree;
 public module adjacency_list;
+public module ttl_cache;
 
 // =============================================================================
 // Re-exports
@@ -106,6 +107,11 @@ public mount .btree.BTreeEntry;
 public mount .btree.BTreeOccupiedEntry;
 public mount .btree.BTreeVacantEntry;
 public mount .btree.RangeBounds;
+
+// From ttl_cache
+public mount .ttl_cache.{
+    TtlCache, TtlCacheConfig, TtlCacheStats,
+};
 
 // =============================================================================
 // Prelude exports

@@ -1,0 +1,221 @@
+// =============================================================================
+// collections/ttl_cache.vr — TTL + LRU hybrid cache
+// =============================================================================
+// Layer: 2 (Collections)
+// Dependencies: core, core.collections.map, core.time
+// =============================================================================
+//
+// The user-level cache every service needs: bounded capacity, per-
+// entry expiration, LRU eviction when full. Designed as:
+//
+//   * O(1) amortised `insert` / `get` / `remove`
+//   * Lazy expiration — entries are checked on read and periodically
+//     by `purge_expired`, never eagerly. Hot paths don't scan.
+//   * Bounded by `capacity` — insert on full evicts the LRU entry,
+//     not the nearest-to-expiry one. (LRU fits most caches; workloads
+//     where age matters more should use a different store.)
+//
+// # Shape
+//
+// Backed by `Map<K, Entry>` for O(1) value lookup. LRU order is
+// maintained by a separate `List<K>` — O(n) worst-case on each
+// touch but constant-factor small for typical cache sizes (≤ 10k
+// entries). A doubly-linked list upgrade arrives in a follow-up
+// when a concrete workload demonstrates the need.
+//
+// =============================================================================
+
+module core.collections.ttl_cache;
+
+mount core.*;
+mount core.collections.List;
+mount core.collections.map.{Map};
+mount core.time.instant.{Instant};
+mount core.time.duration.{Duration};
+
+// =============================================================================
+// Config + entry shape
+// =============================================================================
+
+public type TtlCacheConfig is {
+    /// Max live entries. Insert on full evicts the LRU.
+    capacity:      Int,
+    /// Default TTL for entries that don't override on insert.
+    default_ttl:   Duration,
+};
+
+implement TtlCacheConfig {
+    public fn defaults() -> TtlCacheConfig {
+        TtlCacheConfig {
+            capacity:    1024,
+            default_ttl: Duration.from_secs(300),
+        }
+    }
+}
+
+type Entry<V> is {
+    value:     V,
+    expires_at: Instant,
+};
+
+// =============================================================================
+// TtlCache
+// =============================================================================
+
+public type TtlCache<K: Hash + Eq, V> is {
+    store:   Map<K, Entry<V>>,
+    order:   List<K>,
+    config:  TtlCacheConfig,
+    hits:    UInt64,
+    misses:  UInt64,
+    evicted: UInt64,
+    expired: UInt64,
+};
+
+implement<K: Hash + Eq, V> TtlCache<K, V> {
+    public fn new(cfg: TtlCacheConfig) -> TtlCache<K, V> {
+        TtlCache {
+            store:   Map.new(),
+            order:   [],
+            config:  cfg,
+            hits:    0_u64, misses: 0_u64,
+            evicted: 0_u64, expired: 0_u64,
+        }
+    }
+
+    public fn with_defaults() -> TtlCache<K, V> {
+        TtlCache.new(TtlCacheConfig.defaults())
+    }
+
+    /// Insert or overwrite `key → value` with the config's default TTL.
+    public fn insert(&mut self, key: K, value: V) {
+        let ttl = self.config.default_ttl.clone();
+        self.insert_with_ttl(key, value, ttl);
+    }
+
+    /// Insert with a per-entry TTL override.
+    public fn insert_with_ttl(&mut self, key: K, value: V, ttl: Duration) {
+        let now = Instant.now();
+        let exp = now.add_duration(ttl);
+
+        // Evict LRU if full (unless overwriting an existing key).
+        let already_present = self.store.contains_key(&key);
+        if !already_present && self.store.len() >= self.config.capacity {
+            self.evict_lru();
+        }
+
+        self.store.insert(key.clone(), Entry { value: value, expires_at: exp });
+        self.touch(&key);
+    }
+
+    /// Look up by key. Returns `None` if absent or expired. On
+    /// expiry, removes the entry as a side-effect.
+    public fn get(&mut self, key: &K) -> Maybe<&V> {
+        let now = Instant.now();
+        let hit_and_live = match self.store.get(key) {
+            Some(entry) => now < entry.expires_at.clone(),
+            None        => return { self.misses = self.misses + 1_u64; None },
+        };
+        if !hit_and_live {
+            self.remove(key);
+            self.expired = self.expired + 1_u64;
+            return None;
+        }
+        self.hits = self.hits + 1_u64;
+        self.touch(key);
+        match self.store.get(key) {
+            Some(entry) => Some(&entry.value),
+            None        => None,
+        }
+    }
+
+    public fn remove(&mut self, key: &K) -> Bool {
+        let removed = self.store.remove(key).is_some();
+        if removed { self.remove_from_order(key); }
+        removed
+    }
+
+    /// Evict every expired entry in one O(n) pass. Call periodically
+    /// when the cache is idle to reclaim memory. Hot-path `get`
+    /// already handles expiry lazily.
+    public fn purge_expired(&mut self) -> Int {
+        let now = Instant.now();
+        let mut removed: Int = 0;
+        let mut i: Int = 0;
+        while i < self.order.len() {
+            let key = self.order[i].clone();
+            let expired = match self.store.get(&key) {
+                Some(entry) => now >= entry.expires_at.clone(),
+                None        => true,
+            };
+            if expired {
+                let _ = self.store.remove(&key);
+                let _ = self.order.remove(i);
+                removed = removed + 1;
+            } else {
+                i = i + 1;
+            }
+        }
+        self.expired = self.expired + (removed as UInt64);
+        removed
+    }
+
+    /// Drop every entry.
+    public fn clear(&mut self) {
+        self.store = Map.new();
+        self.order = [];
+    }
+
+    pub fn len(&self) -> Int { self.store.len() }
+    pub fn is_empty(&self) -> Bool { self.store.len() == 0 }
+
+    public fn stats(&self) -> TtlCacheStats {
+        TtlCacheStats {
+            size:     self.store.len(),
+            hits:     self.hits,
+            misses:   self.misses,
+            evicted:  self.evicted,
+            expired:  self.expired,
+        }
+    }
+
+    // -----------------------------------------------------------------
+    // Internal LRU ordering
+    // -----------------------------------------------------------------
+
+    fn touch(&mut self, key: &K) {
+        self.remove_from_order(key);
+        self.order.push(key.clone());
+    }
+
+    fn remove_from_order(&mut self, key: &K) {
+        let mut i: Int = 0;
+        while i < self.order.len() {
+            if self.order[i] == *key {
+                let _ = self.order.remove(i);
+                return;
+            }
+            i = i + 1;
+        }
+    }
+
+    fn evict_lru(&mut self) {
+        if self.order.len() == 0 { return; }
+        let victim = self.order[0].clone();
+        let _ = self.order.remove(0);
+        let _ = self.store.remove(&victim);
+        self.evicted = self.evicted + 1_u64;
+    }
+}
+
+// =============================================================================
+// Stats
+// =============================================================================
+
+public type TtlCacheStats is {
+    size:    Int,
+    hits:    UInt64,
+    misses:  UInt64,
+    evicted: UInt64,  // capacity pressure
+    expired: UInt64,  // TTL expiry
+};
