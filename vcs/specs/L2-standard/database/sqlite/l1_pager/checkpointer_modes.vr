@@ -1,0 +1,100 @@
+// @test: typecheck-pass
+// @level: L2
+// @tier: 0
+// @tags: sqlite, native, pager, wal, checkpointer
+// @timeout: 10000
+// @description: Checkpointer mode predicates + run_checkpoint policy
+//
+// Spec: internal/specs/sqlite-native.md §8.4
+
+mount core.*;
+mount core.database.sqlite.native.l1_pager.{
+    CheckpointMode, CheckpointConfig, CheckpointStats,
+    checkpoint_config_default, checkpoint_stats_empty,
+    should_trigger, mode_resets_wal, mode_truncates_file, mode_blocks_writers,
+    run_checkpoint,
+};
+
+fn config_defaults() {
+    let cfg = checkpoint_config_default();
+    assert_eq(cfg.auto_frames_threshold, 1000);
+    assert_eq(cfg.idle_interval_ms, 500);
+    match cfg.default_mode {
+        Passive => {}, _ => panic("default_mode must be Passive"),
+    }
+}
+
+fn threshold_trigger() {
+    let cfg = checkpoint_config_default();
+    assert(!should_trigger(&cfg, 0));
+    assert(!should_trigger(&cfg, 999));
+    assert(should_trigger(&cfg, 1000));
+    assert(should_trigger(&cfg, 10000));
+
+    let mut cfg2 = checkpoint_config_default();
+    cfg2.auto_frames_threshold = -1;
+    assert(!should_trigger(&cfg2, 100000));
+}
+
+fn mode_predicates() {
+    assert(!mode_resets_wal(Passive));
+    assert(!mode_resets_wal(Full));
+    assert(mode_resets_wal(Restart));
+    assert(mode_resets_wal(Truncate));
+
+    assert(!mode_truncates_file(Passive));
+    assert(!mode_truncates_file(Full));
+    assert(!mode_truncates_file(Restart));
+    assert(mode_truncates_file(Truncate));
+
+    assert(!mode_blocks_writers(Passive));
+    assert(mode_blocks_writers(Full));
+    assert(mode_blocks_writers(Restart));
+    assert(mode_blocks_writers(Truncate));
+}
+
+fn passive_yields_on_writer() {
+    match run_checkpoint(Passive, 100, true, 0) {
+        Ok(stats) => {
+            assert_eq(stats.frames_applied, 0);
+            assert(!stats.wal_reset);
+        }
+        Err(_) => panic("passive yield"),
+    }
+    match run_checkpoint(Passive, 100, false, 0) {
+        Ok(stats) => { assert_eq(stats.frames_applied, 100); }
+        Err(_) => panic("passive no-writer"),
+    }
+}
+
+fn restart_sets_wal_reset() {
+    match run_checkpoint(Restart, 50, false, 0) {
+        Ok(stats) => {
+            assert_eq(stats.frames_applied, 50);
+            assert(stats.wal_reset);
+            assert_eq(stats.bytes_truncated, 0);
+        }
+        Err(_) => panic("restart"),
+    }
+}
+
+fn truncate_truncates_bytes() {
+    match run_checkpoint(Truncate, 12, false, 4096 * 100) {
+        Ok(stats) => {
+            assert_eq(stats.frames_applied, 12);
+            assert(stats.wal_reset);
+            assert_eq(stats.bytes_truncated, 409600);
+        }
+        Err(_) => panic("truncate"),
+    }
+}
+
+fn main() {
+    config_defaults();
+    threshold_trigger();
+    mode_predicates();
+    passive_yields_on_writer();
+    restart_sets_wal_reset();
+    truncate_truncates_bytes();
+    print("checkpointer_modes typecheck ok");
+}

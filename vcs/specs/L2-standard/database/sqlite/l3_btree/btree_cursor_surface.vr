@@ -1,0 +1,129 @@
+// @test: typecheck-pass
+// @level: L2
+// @tier: 0
+// @tags: sqlite, native, btree, cursor, surface
+// @timeout: 10000
+// @description: Btree constructor + cursor path manipulation surface
+//
+// Spec: internal/specs/sqlite-native.md §10.2 + §10.3
+
+mount core.*;
+mount core.database.sqlite.native.l3_btree.{
+    Btree, BtreeKind, BtreeError,
+    BtreeCursor,
+    btree_new, btree_root_page,
+    cursor_new, cursor_root,
+    cursor_is_valid, cursor_is_at_end,
+    cursor_depth, cursor_current_page, cursor_current_cell,
+};
+
+fn btree_construction() {
+    match btree_new(TableBtree, 1, 4096, 0) {
+        Ok(t) => {
+            assert_eq(btree_root_page(&t), 1);
+            assert_eq(t.page_size(), 4096);
+        }
+        Err(_) => panic("btree_new failed"),
+    }
+}
+
+fn btree_rejects_bad_root_and_size() {
+    match btree_new(TableBtree, 0, 4096, 0) {
+        Ok(_)  => panic("root=0 must reject"),
+        Err(_) => {},
+    }
+    match btree_new(IndexBtree, 1, 513, 0) {
+        Ok(_)  => panic("page_size=513 must reject"),
+        Err(_) => {},
+    }
+}
+
+fn cursor_lifecycle() {
+    let t = match btree_new(TableBtree, 7, 4096, 0) {
+        Ok(b)  => b,
+        Err(_) => { panic("btree"); return; }
+    };
+    let mut c = cursor_new(&t);
+    assert(!cursor_is_valid(&c));
+    assert_eq(cursor_depth(&c), 0);
+
+    match cursor_root(&mut c) {
+        Ok(_) => {}, Err(_) => panic("cursor_root"),
+    }
+    assert(cursor_is_valid(&c));
+    assert_eq(cursor_depth(&c), 1);
+    assert_eq(cursor_current_page(&c), 7);
+    assert_eq(cursor_current_cell(&c), 0);
+}
+
+fn cursor_descend_ascend() {
+    let t = match btree_new(TableBtree, 1, 4096, 0) {
+        Ok(b)  => b,
+        Err(_) => { panic("btree"); return; }
+    };
+    let mut c = cursor_new(&t);
+    let _ = cursor_root(&mut c);
+    c.descend(5);
+    assert_eq(cursor_depth(&c), 2);
+    assert_eq(cursor_current_page(&c), 5);
+    c.descend(9);
+    assert_eq(cursor_depth(&c), 3);
+    assert_eq(cursor_current_page(&c), 9);
+    c.ascend();
+    assert_eq(cursor_depth(&c), 2);
+    assert_eq(cursor_current_page(&c), 5);
+}
+
+fn cursor_bump_cell() {
+    let t = match btree_new(IndexBtree, 1, 4096, 0) {
+        Ok(b)  => b,
+        Err(_) => { panic("btree"); return; }
+    };
+    let mut c = cursor_new(&t);
+    let _ = cursor_root(&mut c);
+    assert_eq(cursor_current_cell(&c), 0);
+    c.bump_cell(1);
+    assert_eq(cursor_current_cell(&c), 1);
+    c.bump_cell(3);
+    assert_eq(cursor_current_cell(&c), 4);
+    c.bump_cell(-2);
+    assert_eq(cursor_current_cell(&c), 2);
+}
+
+fn cursor_mark_at_end() {
+    let t = match btree_new(TableBtree, 1, 4096, 0) {
+        Ok(b)  => b,
+        Err(_) => { panic("btree"); return; }
+    };
+    let mut c = cursor_new(&t);
+    let _ = cursor_root(&mut c);
+    c.mark_at_end();
+    assert(cursor_is_at_end(&c));
+    assert(!cursor_is_valid(&c));
+}
+
+fn cursor_invalidate_resets_path() {
+    let t = match btree_new(TableBtree, 1, 4096, 0) {
+        Ok(b)  => b,
+        Err(_) => { panic("btree"); return; }
+    };
+    let mut c = cursor_new(&t);
+    let _ = cursor_root(&mut c);
+    c.descend(2);
+    c.descend(3);
+    c.invalidate();
+    assert_eq(cursor_depth(&c), 0);
+    assert(!cursor_is_valid(&c));
+    assert(!cursor_is_at_end(&c));
+}
+
+fn main() {
+    btree_construction();
+    btree_rejects_bad_root_and_size();
+    cursor_lifecycle();
+    cursor_descend_ascend();
+    cursor_bump_cell();
+    cursor_mark_at_end();
+    cursor_invalidate_resets_path();
+    print("btree_cursor_surface typecheck ok");
+}

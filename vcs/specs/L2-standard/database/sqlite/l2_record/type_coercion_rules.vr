@@ -1,0 +1,121 @@
+// @test: typecheck-pass
+// @level: L2
+// @tier: 0
+// @tags: sqlite, native, record, coercion, affinity
+// @timeout: 10000
+// @description: looks_int / looks_real classifiers + affinity coercion matrix
+//
+// Spec: internal/specs/sqlite-native.md §9.3
+
+mount core.*;
+mount collections.List;
+mount core.database.sqlite.native.l2_record.{
+    SqliteValue, ValueClass, Affinity,
+    classify, looks_int, looks_real,
+    coerce, parse_int64,
+};
+
+fn looks_int_positive_and_negative() {
+    assert(looks_int(&"0".clone()));
+    assert(looks_int(&"123".clone()));
+    assert(looks_int(&"-456".clone()));
+    assert(looks_int(&"+789".clone()));
+    assert(!looks_int(&"".clone()));
+    assert(!looks_int(&"12a".clone()));
+    assert(!looks_int(&"1.5".clone()));
+    assert(!looks_int(&"--7".clone()));
+}
+
+fn looks_real_accepts_dot_and_exp() {
+    assert(looks_real(&"1.5".clone()));
+    assert(looks_real(&"-0.5".clone()));
+    assert(looks_real(&"1e10".clone()));
+    assert(looks_real(&"1.5e-3".clone()));
+    assert(looks_real(&"123".clone()));     // ints are also reals
+    assert(!looks_real(&"1.2.3".clone()));
+    assert(!looks_real(&"1e".clone()));
+    assert(!looks_real(&"".clone()));
+}
+
+fn parse_int_roundtrip() {
+    assert_eq(parse_int64(&"0".clone()) as Int, 0);
+    assert_eq(parse_int64(&"42".clone()) as Int, 42);
+    assert_eq(parse_int64(&"-42".clone()) as Int, -42);
+    assert_eq(parse_int64(&"123456".clone()) as Int, 123456);
+}
+
+fn classify_each_class() {
+    match classify(&VNull) { Null => {}, _ => panic("NULL"), }
+    match classify(&VInt(7 as Int64)) { Int64Class => {}, _ => panic("int"), }
+    match classify(&VReal(1.5)) { RealClass => {}, _ => panic("real"), }
+    match classify(&VText("hi".clone())) { TextClass => {}, _ => panic("text"), }
+    let mut b: List<Byte> = List.new();
+    b.push(0 as Byte);
+    match classify(&VBlob(b)) { BlobClass => {}, _ => panic("blob"), }
+}
+
+fn null_passes_through() {
+    match coerce(VNull, Integer) {
+        VNull => {}, _ => panic("NULL stays NULL"),
+    }
+    match coerce(VNull, Text) {
+        VNull => {}, _ => panic("NULL stays NULL"),
+    }
+}
+
+fn integer_affinity_coerces_text() {
+    match coerce(VText("123".clone()), Integer) {
+        VInt(i) => { assert_eq(i as Int, 123); }
+        _ => panic("text '123' → Int"),
+    }
+    match coerce(VText("1.5".clone()), Integer) {
+        VReal(_) => {},      // falls through to Real
+        _ => panic("text '1.5' → Real"),
+    }
+    match coerce(VText("abc".clone()), Integer) {
+        VText(_) => {},       // non-numeric stays text
+        _ => panic("text 'abc' stays text"),
+    }
+}
+
+fn real_affinity_accepts_int() {
+    match coerce(VInt(42 as Int64), Real) {
+        VReal(x) => { assert(x == 42.0); }
+        _ => panic("int → real"),
+    }
+}
+
+fn numeric_affinity_prefers_int() {
+    match coerce(VText("123".clone()), Numeric) {
+        VInt(_) => {},
+        _ => panic("numeric text '123' → Int"),
+    }
+    match coerce(VText("1.5".clone()), Numeric) {
+        VReal(_) => {},
+        _ => panic("numeric text '1.5' → Real"),
+    }
+}
+
+fn blob_affinity_never_coerces() {
+    match coerce(VInt(42 as Int64), Blob) {
+        VInt(_) => {},   // unchanged
+        _ => panic("blob-affinity does not coerce"),
+    }
+    match coerce(VText("hi".clone()), Blob) {
+        VText(_) => {},
+        _ => panic("blob-affinity keeps text"),
+    }
+}
+
+fn main() {
+    looks_int_positive_and_negative();
+    looks_real_accepts_dot_and_exp();
+    parse_int_roundtrip();
+    classify_each_class();
+    null_passes_through();
+    integer_affinity_coerces_text();
+    real_affinity_accepts_int();
+    numeric_affinity_prefers_int();
+    blob_affinity_never_coerces();
+    print("type_coercion_rules typecheck ok");
+}

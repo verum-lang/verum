@@ -1,0 +1,48 @@
+// @test: typecheck-pass
+// @level: L2
+// @tier: 0
+// @tags: sqlite, native, vfs, registry, uri
+// @timeout: 10000
+// @description: VFS registry + URI parser surface exercise
+//
+// Spec: internal/specs/sqlite-native.md §7.7 (VFS registry)
+//       + sqlite.org/uri.html (URI path rules)
+
+mount core.*;
+mount core.database.sqlite.native.l0_vfs.{
+    VfsKind, ParsedUri, VfsRegistry,
+    parse_uri, default_registry, platform_default,
+    vfs_kind_name, vfs_kind_from_name,
+};
+
+fn surface_exercise() {
+    let reg = default_registry();
+    let _ = reg.find_default();
+    let _ = reg.find(&"memdb".clone());
+    let _ = vfs_kind_name(Memory);
+    let _ = vfs_kind_name(Posix);
+    let _ = vfs_kind_name(Win32);
+    let _ = vfs_kind_from_name(&"posix".clone());
+    let _ = platform_default();
+
+    // Exercise the parser against every URI form the spec mentions.
+    let _ = parse_uri(&":memory:".clone());
+    let _ = parse_uri(&"/abs/path".clone());
+    let _ = parse_uri(&"file:/tmp/a.db".clone());
+    let _ = parse_uri(&"file:/tmp/a.db?mode=ro".clone());
+    let _ = parse_uri(&"file::memory:".clone());
+    let _ = parse_uri(&"file::memory:?cache=shared".clone());
+    let _ = parse_uri(&"file:/p?vfs=unix".clone());
+}
+
+fn mutate_registry() {
+    let mut reg = default_registry();
+    reg.register("alt".clone(), Memory, false);
+    let _ = reg.find(&"alt".clone());
+}
+
+fn main() {
+    surface_exercise();
+    mutate_registry();
+    print("registry_uri_parse typecheck ok");
+}

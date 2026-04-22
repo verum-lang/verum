@@ -1,0 +1,93 @@
+// @test: typecheck-pass
+// @level: L2
+// @tier: 0
+// @tags: sqlite, native, pager, wal, journal
+// @timeout: 10000
+// @description: WAL header + frame header serialize/parse roundtrip + checksum
+//
+// Spec: internal/specs/sqlite-native.md §6.5
+
+mount core.*;
+mount collections.List;
+mount core.database.sqlite.native.l1_pager.{
+    WalHeader, WalFrameHeader, Wal,
+    WAL_MAGIC_LE, WAL_MAGIC_BE,
+    WAL_HEADER_SIZE, WAL_FRAME_HEADER_SIZE,
+    WAL_FORMAT_VERSION,
+    wal_new,
+    wal_header_serialize, wal_header_parse,
+    wal_frame_header_serialize, wal_frame_header_parse,
+    wal_running_checksum,
+};
+
+fn check_constants() {
+    assert_eq(WAL_HEADER_SIZE, 32);
+    assert_eq(WAL_FRAME_HEADER_SIZE, 24);
+    assert_eq(WAL_MAGIC_LE as Int, 0x377F0682);
+    assert_eq(WAL_MAGIC_BE as Int, 0x377F0683);
+    assert_eq(WAL_FORMAT_VERSION as Int, 3007000);
+}
+
+fn wal_header_roundtrip() {
+    let w = wal_new(4096 as UInt32, 0xCAFEBABE as UInt32, 0xDEADBEEF as UInt32, 7 as UInt32);
+    let bytes = wal_header_serialize(&w.header);
+    assert_eq(bytes.len(), WAL_HEADER_SIZE);
+    match wal_header_parse(&bytes) {
+        Ok(parsed) => {
+            assert_eq(parsed.magic as Int, WAL_MAGIC_LE as Int);
+            assert_eq(parsed.format_version as Int, WAL_FORMAT_VERSION as Int);
+            assert_eq(parsed.page_size as Int, 4096);
+            assert_eq(parsed.checkpoint_seq as Int, 7);
+            assert_eq(parsed.salt_1 as Int, 0xCAFEBABE);
+            assert_eq(parsed.salt_2 as Int, 0xDEADBEEF);
+            assert_eq(parsed.checksum_1 as Int, w.header.checksum_1 as Int);
+            assert_eq(parsed.checksum_2 as Int, w.header.checksum_2 as Int);
+        },
+        Err(_) => panic("parse failed"),
+    }
+}
+
+fn frame_header_roundtrip() {
+    let fh = WalFrameHeader {
+        page_number: 42 as UInt32,
+        db_size_after_commit: 100 as UInt32,
+        salt_1: 1 as UInt32,
+        salt_2: 2 as UInt32,
+        checksum_1: 0x11111111 as UInt32,
+        checksum_2: 0x22222222 as UInt32,
+    };
+    let bytes = wal_frame_header_serialize(&fh);
+    assert_eq(bytes.len(), WAL_FRAME_HEADER_SIZE);
+    match wal_frame_header_parse(&bytes) {
+        Ok(parsed) => {
+            assert_eq(parsed.page_number as Int, 42);
+            assert_eq(parsed.db_size_after_commit as Int, 100);
+            assert_eq(parsed.salt_1 as Int, 1);
+            assert_eq(parsed.salt_2 as Int, 2);
+            assert_eq(parsed.checksum_1 as Int, 0x11111111);
+            assert_eq(parsed.checksum_2 as Int, 0x22222222);
+        },
+        Err(_) => panic("parse failed"),
+    }
+}
+
+fn bad_magic_rejected() {
+    let mut bad: List<Byte> = List.new();
+    let mut i: Int = 0;
+    while i < WAL_HEADER_SIZE {
+        bad.push(0 as Byte);
+        i = i + 1;
+    }
+    match wal_header_parse(&bad) {
+        Ok(_) => panic("expected Err on zero-magic"),
+        Err(_) => {},
+    }
+}
+
+fn main() {
+    check_constants();
+    wal_header_roundtrip();
+    frame_header_roundtrip();
+    bad_magic_rejected();
+    print("wal_header_roundtrip typecheck ok");
+}

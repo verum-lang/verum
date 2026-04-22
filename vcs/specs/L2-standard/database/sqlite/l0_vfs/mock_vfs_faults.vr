@@ -1,0 +1,80 @@
+// @test: typecheck-pass
+// @level: L2
+// @tier: 0
+// @tags: sqlite, native, vfs, mock, dst, crash-injection
+// @timeout: 10000
+// @description: MockVfs fault-injection surface — crash/partial-write/disk-full
+//
+// Spec: internal/specs/sqlite-native.md §7.6 + §22.5
+
+mount core.*;
+mount collections.List;
+mount core.database.sqlite.native.l0_vfs.{
+    MockVfs, MockFile, mock_vfs_new, mock_open, mock_read, mock_write,
+    mock_sync, mock_close, mock_size, mock_truncate,
+    OpenFlags, SyncFlags, VfsError, flags_rwc, sync_default,
+};
+
+fn happy_path() {
+    let mut vfs = mock_vfs_new();
+    let mut file = match mock_open(&mut vfs, &"t".clone(), flags_rwc()) {
+        Ok(f) => f,
+        Err(_) => { panic("open failed"); return; }
+    };
+    let data: List<Byte> = [0xAA as Byte, 0xBB as Byte, 0xCC as Byte];
+    let _ = mock_write(&mut vfs, &file, &data, 0);
+    let _ = mock_sync(&mut vfs, &file, sync_default());
+    let _ = mock_close(&mut file);
+}
+
+fn crash_injection() {
+    let mut vfs = mock_vfs_new();
+    vfs.inject_crash_after_fsync(0);
+    let mut file = match mock_open(&mut vfs, &"db".clone(), flags_rwc()) {
+        Ok(f) => f,
+        Err(_) => { panic("open failed"); return; }
+    };
+    // First sync after count-0 → crash.
+    let res = mock_sync(&mut vfs, &file, sync_default());
+    let _ = res;
+    let _ = mock_close(&mut file);
+}
+
+fn partial_write_injection() {
+    let mut vfs = mock_vfs_new();
+    vfs.inject_partial_write(0, 1);
+    let mut file = match mock_open(&mut vfs, &"db".clone(), flags_rwc()) {
+        Ok(f) => f,
+        Err(_) => { panic("open failed"); return; }
+    };
+    let src: List<Byte> = [0x11 as Byte, 0x22 as Byte, 0x33 as Byte];
+    let _ = mock_write(&mut vfs, &file, &src, 0);
+    let _ = mock_close(&mut file);
+}
+
+fn disk_full_injection() {
+    let mut vfs = mock_vfs_new();
+    vfs.set_disk_full_after(2);
+    let mut file = match mock_open(&mut vfs, &"db".clone(), flags_rwc()) {
+        Ok(f) => f,
+        Err(_) => { panic("open failed"); return; }
+    };
+    let src: List<Byte> = [0x01 as Byte, 0x02 as Byte, 0x03 as Byte];
+    let _ = mock_write(&mut vfs, &file, &src, 0);
+    let _ = mock_close(&mut file);
+}
+
+fn power_cycle_reset() {
+    let mut vfs = mock_vfs_new();
+    vfs.inject_crash_after_fsync(5);
+    vfs.power_cycle();
+}
+
+fn main() {
+    happy_path();
+    crash_injection();
+    partial_write_injection();
+    disk_full_injection();
+    power_cycle_reset();
+    print("mock_vfs_faults typecheck ok");
+}

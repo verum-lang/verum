@@ -1,0 +1,113 @@
+// @test: typecheck-pass
+// @level: L2
+// @tier: 0
+// @tags: sqlite, native, btree, overflow, chain
+// @timeout: 10000
+// @description: Overflow chain layout math + write-plan validation
+//
+// Spec: internal/specs/sqlite-native.md §10.6
+
+mount core.*;
+mount collections.List;
+mount core.database.sqlite.native.l3_btree.{
+    ChainLayout, ChainWritePlan, OverflowError,
+    compute_chain_layout, split_payload, make_write_plan,
+};
+
+fn fits_inline() {
+    match compute_chain_layout(100, 200, 4096) {
+        Ok(l) => {
+            assert_eq(l.local_bytes, 100);
+            assert_eq(l.overflow_page_count, 0);
+            assert_eq(l.tail_bytes, 0);
+        }
+        Err(_) => panic("expected Ok"),
+    }
+}
+
+fn single_overflow_page() {
+    // 500 bytes payload, 200 local ⇒ 300 remainder; per_page = 4092.
+    // 300 < 4092 ⇒ 1 overflow page, tail = 300.
+    match compute_chain_layout(500, 200, 4096) {
+        Ok(l) => {
+            assert_eq(l.local_bytes, 200);
+            assert_eq(l.overflow_page_count, 1);
+            assert_eq(l.tail_bytes, 300);
+            assert_eq(l.per_page_bytes, 4092);
+        }
+        Err(_) => panic("expected Ok"),
+    }
+}
+
+fn exact_page_boundary() {
+    // local=100, remainder=4092 ⇒ exactly 1 page, tail = 4092.
+    match compute_chain_layout(4192, 100, 4096) {
+        Ok(l) => {
+            assert_eq(l.overflow_page_count, 1);
+            assert_eq(l.tail_bytes, 4092);
+        }
+        Err(_) => panic("expected Ok"),
+    }
+}
+
+fn multi_page_chain() {
+    // local=100, remainder=9000 ⇒ 3 pages (4092+4092+816), tail = 816.
+    match compute_chain_layout(9100, 100, 4096) {
+        Ok(l) => {
+            assert_eq(l.overflow_page_count, 3);
+            assert_eq(l.tail_bytes, 816);
+        }
+        Err(_) => panic("expected Ok"),
+    }
+}
+
+fn invalid_inputs_reject() {
+    match compute_chain_layout(-1, 100, 4096) {
+        Ok(_)  => panic("negative payload"),
+        Err(_) => {},
+    }
+    match compute_chain_layout(100, 0, 4096) {
+        Ok(_)  => panic("zero local_max"),
+        Err(_) => {},
+    }
+    match compute_chain_layout(100, 100, 3) {
+        Ok(_)  => panic("tiny usable size"),
+        Err(_) => {},
+    }
+}
+
+fn write_plan_validates_page_count() {
+    let layout = match compute_chain_layout(9100, 100, 4096) {
+        Ok(l)  => l,
+        Err(_) => { panic("layout"); return; }
+    };
+    let mut good: List<Int> = List.new();
+    good.push(10);
+    good.push(11);
+    good.push(12);
+    match make_write_plan(layout, good) {
+        Ok(_) => {},
+        Err(_) => panic("plan for exact count"),
+    }
+
+    let layout2 = match compute_chain_layout(9100, 100, 4096) {
+        Ok(l)  => l,
+        Err(_) => { panic("layout2"); return; }
+    };
+    let mut wrong: List<Int> = List.new();
+    wrong.push(10);
+    match make_write_plan(layout2, wrong) {
+        Ok(_)  => panic("short pages must reject"),
+        Err(_) => {},
+    }
+}
+
+fn main() {
+    fits_inline();
+    single_overflow_page();
+    exact_page_boundary();
+    multi_page_chain();
+    invalid_inputs_reject();
+    write_plan_validates_page_count();
+    print("overflow_chain_layout typecheck ok");
+}

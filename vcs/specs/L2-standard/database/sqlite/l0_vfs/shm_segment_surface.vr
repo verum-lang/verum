@@ -1,0 +1,58 @@
+// @test: typecheck-pass
+// @level: L2
+// @tier: 0
+// @tags: sqlite, native, vfs, shm, wal-index
+// @timeout: 10000
+// @description: ShmSegment protocol — InMemoryShm surface
+//
+// Spec: internal/specs/sqlite-native.md §6.6 + §7.2
+
+mount core.*;
+mount collections.List;
+mount core.database.sqlite.native.l0_vfs.{
+    ShmSegment, InMemoryShm, MappedFileShm,
+    in_memory_shm, mapped_file_shm,
+    SHM_REGION_SIZE, SHM_NLOCK,
+    ShmLockFlags, VfsError,
+};
+
+fn constants() {
+    assert_eq(SHM_REGION_SIZE, 32768);
+    assert_eq(SHM_NLOCK, 8);
+}
+
+fn exercise_in_memory() {
+    let mut shm = in_memory_shm();
+    let _ = shm.map(0, SHM_REGION_SIZE, true);
+
+    // Shared lock on slot 0.
+    let flags_shared = ShmLockFlags { lock: true, exclusive: false };
+    let _ = shm.lock(0, 1, flags_shared);
+
+    // Release.
+    let flags_unshared = ShmLockFlags { lock: false, exclusive: false };
+    let _ = shm.lock(0, 1, flags_unshared);
+
+    // Exclusive lock on slot 1.
+    let flags_excl = ShmLockFlags { lock: true, exclusive: true };
+    let _ = shm.lock(1, 1, flags_excl);
+
+    shm.barrier();
+    shm.unmap(false);
+}
+
+fn exercise_mapped_placeholder() {
+    let mut shm = mapped_file_shm(&"/tmp/x.db-shm".clone());
+    let _ = shm.map(0, SHM_REGION_SIZE, true);
+    let flags = ShmLockFlags { lock: true, exclusive: false };
+    let _ = shm.lock(0, 1, flags);
+    shm.barrier();
+    shm.unmap(false);
+}
+
+fn main() {
+    constants();
+    exercise_in_memory();
+    exercise_mapped_placeholder();
+    print("shm_segment_surface typecheck ok");
+}

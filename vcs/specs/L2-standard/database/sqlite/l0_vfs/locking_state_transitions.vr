@@ -1,0 +1,59 @@
+// @test: typecheck-pass
+// @level: L2
+// @tier: 0
+// @tags: sqlite, native, vfs, locking, 5-state
+// @timeout: 10000
+// @description: 5-state SQLite locking — state-machine typecheck surface.
+//
+// Spec: internal/specs/sqlite-native.md §7.4 (5-state locking protocol)
+//
+// Runtime exercise of the state machine requires a real fd, which in
+// turn needs the PosixVfs (L0.6). This test pins the public API + byte
+// constants + transition function shape so they can't regress.
+
+mount core.*;
+mount sys.common.FileDesc;
+mount core.database.sqlite.native.l0_vfs.{
+    SqliteLockManager,
+    lock_manager_new,
+    acquire_shared,
+    acquire_reserved,
+    acquire_pending,
+    acquire_exclusive,
+    release_all,
+    check_reserved,
+    transition,
+    PENDING_BYTE,
+    RESERVED_BYTE,
+    SHARED_FIRST,
+    SHARED_SIZE,
+    LockKind,
+    VfsError,
+};
+
+fn constants_are_sqlite_canonical() {
+    assert_eq(PENDING_BYTE,  0x40000000);
+    assert_eq(RESERVED_BYTE, 0x40000001);
+    assert_eq(SHARED_FIRST,  0x40000002);
+    assert_eq(SHARED_SIZE,   510);
+}
+
+fn typecheck_api(fd: FileDesc) {
+    let mut mgr = lock_manager_new(fd);
+    let _ = acquire_shared(&mut mgr);
+    let _ = acquire_reserved(&mut mgr);
+    let _ = acquire_pending(&mut mgr);
+    let _ = acquire_exclusive(&mut mgr);
+    let _ = release_all(&mut mgr);
+    let _ = check_reserved(&mgr);
+    let _ = transition(&mut mgr, Shared);
+    let _ = transition(&mut mgr, Reserved);
+    let _ = transition(&mut mgr, Pending);
+    let _ = transition(&mut mgr, Exclusive);
+    let _ = transition(&mut mgr, Unlocked);
+}
+
+fn main() {
+    constants_are_sqlite_canonical();
+    print("locking_state_transitions typecheck ok");
+}

@@ -1,0 +1,109 @@
+// @test: typecheck-pass
+// @level: L2
+// @tier: 0
+// @tags: sqlite, native, record, strict, type-system
+// @timeout: 10000
+// @description: STRICT table type parsing + compatibility
+//
+// Spec: internal/specs/sqlite-native.md §9.4
+
+mount core.*;
+mount core.database.sqlite.native.l2_record.{
+    StrictType, StrictConstraintError, SerialType,
+    strict_type_from_text, strict_type_matches_serial,
+};
+
+fn parse_each_strict_type() {
+    match strict_type_from_text(&"INT".clone()) {
+        Ok(Integer) => {}, _ => panic("INT"),
+    }
+    match strict_type_from_text(&"INTEGER".clone()) {
+        Ok(Integer) => {}, _ => panic("INTEGER"),
+    }
+    match strict_type_from_text(&"  integer  ".clone()) {
+        Ok(Integer) => {}, _ => panic("integer w/ whitespace"),
+    }
+    match strict_type_from_text(&"ANY".clone()) {
+        Ok(Any) => {}, _ => panic("ANY"),
+    }
+    match strict_type_from_text(&"REAL".clone()) {
+        Ok(Real) => {}, _ => panic("REAL"),
+    }
+    match strict_type_from_text(&"text".clone()) {
+        Ok(Text) => {}, _ => panic("text"),
+    }
+    match strict_type_from_text(&"BLOB".clone()) {
+        Ok(Blob) => {}, _ => panic("BLOB"),
+    }
+}
+
+fn parse_unknown_rejected() {
+    match strict_type_from_text(&"VARCHAR(10)".clone()) {
+        Ok(_) => panic("VARCHAR must reject under STRICT"),
+        Err(_) => {},
+    }
+    match strict_type_from_text(&"DECIMAL".clone()) {
+        Ok(_) => panic("DECIMAL must reject under STRICT"),
+        Err(_) => {},
+    }
+}
+
+fn integer_column_accepts_integer_serial() {
+    match strict_type_matches_serial(&"age".clone(), Integer, StInt32) {
+        Ok(_) => {}, Err(_) => panic("Integer ← StInt32"),
+    }
+    match strict_type_matches_serial(&"age".clone(), Integer, StInt64) {
+        Ok(_) => {}, Err(_) => panic("Integer ← StInt64"),
+    }
+    match strict_type_matches_serial(&"age".clone(), Integer, StText(3)) {
+        Ok(_) => panic("Integer ← StText must reject"),
+        Err(_) => {},
+    }
+}
+
+fn real_column_accepts_int_and_real() {
+    match strict_type_matches_serial(&"x".clone(), Real, StReal) {
+        Ok(_) => {}, Err(_) => panic("Real ← StReal"),
+    }
+    match strict_type_matches_serial(&"x".clone(), Real, StInt32) {
+        Ok(_) => {}, Err(_) => panic("Real ← StInt32"),
+    }
+    match strict_type_matches_serial(&"x".clone(), Real, StText(3)) {
+        Ok(_) => panic("Real ← StText must reject"),
+        Err(_) => {},
+    }
+}
+
+fn any_accepts_everything() {
+    match strict_type_matches_serial(&"col".clone(), Any, StText(1)) {
+        Ok(_) => {}, Err(_) => panic("Any ← StText"),
+    }
+    match strict_type_matches_serial(&"col".clone(), Any, StBlob(1)) {
+        Ok(_) => {}, Err(_) => panic("Any ← StBlob"),
+    }
+    match strict_type_matches_serial(&"col".clone(), Any, StReal) {
+        Ok(_) => {}, Err(_) => panic("Any ← StReal"),
+    }
+}
+
+fn null_always_accepted() {
+    match strict_type_matches_serial(&"col".clone(), Integer, StNull) {
+        Ok(_) => {}, Err(_) => panic("Integer ← NULL"),
+    }
+    match strict_type_matches_serial(&"col".clone(), Text, StNull) {
+        Ok(_) => {}, Err(_) => panic("Text ← NULL"),
+    }
+    match strict_type_matches_serial(&"col".clone(), Blob, StNull) {
+        Ok(_) => {}, Err(_) => panic("Blob ← NULL"),
+    }
+}
+
+fn main() {
+    parse_each_strict_type();
+    parse_unknown_rejected();
+    integer_column_accepts_integer_serial();
+    real_column_accepts_int_and_real();
+    any_accepts_everything();
+    null_always_accepted();
+    print("strict_tables typecheck ok");
+}

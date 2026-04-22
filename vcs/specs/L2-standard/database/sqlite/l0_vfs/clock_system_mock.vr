@@ -1,0 +1,55 @@
+// @test: typecheck-pass
+// @level: L2
+// @tier: 0
+// @tags: sqlite, native, vfs, clock, dst
+// @timeout: 10000
+// @description: Clock protocol — SystemClock + MockClock conformance, Timestamp helpers
+//
+// Spec: internal/specs/sqlite-native.md §7.1 + §4.10 DST harness
+
+mount core.*;
+mount core.database.sqlite.native.l0_vfs.{
+    Clock, SystemClock, MockClock, Timestamp,
+    system_clock, mock_clock, mock_clock_at,
+    timestamp_monotonic, timestamp_wall,
+    timestamp_monotonic_mock, timestamp_wall_mock,
+};
+
+fn use_system_clock() {
+    let sc = system_clock();
+    let _ = sc.monotonic_nanos();
+    let _ = sc.wall_nanos();
+    let _ = timestamp_monotonic(&sc);
+    let _ = timestamp_wall(&sc);
+}
+
+fn drive_mock() {
+    let mut mc = mock_clock();
+    mc.advance(1_000_000 as Int64);
+    assert_eq(mc.peek_mono(), 1_000_000 as Int64);
+    assert_eq(mc.peek_wall(), 1_000_000 as Int64);
+
+    mc.advance_mono(500 as Int64);
+    assert_eq(mc.peek_mono(), 1_000_500 as Int64);
+    assert_eq(mc.peek_wall(), 1_000_000 as Int64);
+
+    // Wall may jump backwards (NTP step) — advance_wall accepts negative.
+    mc.advance_wall(-999 as Int64);
+    assert_eq(mc.peek_wall(), 999_001 as Int64);
+
+    let _ = timestamp_monotonic_mock(&mc);
+    let _ = timestamp_wall_mock(&mc);
+}
+
+fn seeded_mock() {
+    let mc = mock_clock_at(0 as Int64, 1_735_689_600_000_000_000 as Int64);
+    assert_eq(mc.peek_mono(), 0 as Int64);
+    assert_eq(mc.peek_wall(), 1_735_689_600_000_000_000 as Int64);
+}
+
+fn main() {
+    use_system_clock();
+    drive_mock();
+    seeded_mock();
+    print("clock_system_mock typecheck ok");
+}

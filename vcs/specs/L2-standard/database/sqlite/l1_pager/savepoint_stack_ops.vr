@@ -1,0 +1,98 @@
+// @test: typecheck-pass
+// @level: L2
+// @tier: 0
+// @tags: sqlite, native, pager, savepoint, transaction
+// @timeout: 10000
+// @description: Savepoint stack — push / release / rollback_to / clear
+//
+// Spec: internal/specs/sqlite-native.md §8.6
+
+mount core.*;
+mount core.database.sqlite.native.l1_pager.{
+    Savepoint, SavepointStack, SavepointError,
+    savepoint_stack_new,
+};
+
+fn push_pop_basic() {
+    let mut st = savepoint_stack_new();
+    assert_eq(st.depth(), 0);
+    let _ = st.push(&"s1".clone(), 10);
+    let _ = st.push(&"s2".clone(), 20);
+    let _ = st.push(&"s3".clone(), 30);
+    assert_eq(st.depth(), 3);
+}
+
+fn release_pops_from_named() {
+    let mut st = savepoint_stack_new();
+    let _ = st.push(&"s1".clone(), 10);
+    let _ = st.push(&"s2".clone(), 20);
+    let _ = st.push(&"s3".clone(), 30);
+    match st.release(&"s2".clone()) {
+        Ok(n) => { assert_eq(n, 2); },  // s2 + s3
+        Err(_) => panic("release failed"),
+    }
+    assert_eq(st.depth(), 1);
+}
+
+fn rollback_to_keeps_named() {
+    let mut st = savepoint_stack_new();
+    let _ = st.push(&"s1".clone(), 10);
+    let _ = st.push(&"s2".clone(), 20);
+    let _ = st.push(&"s3".clone(), 30);
+    match st.rollback_to(&"s1".clone()) {
+        Ok(idx) => { assert_eq(idx, 10); },
+        Err(_) => panic("rollback failed"),
+    }
+    // s1 still present; s2 and s3 dropped.
+    assert_eq(st.depth(), 1);
+}
+
+fn unknown_name_is_error() {
+    let mut st = savepoint_stack_new();
+    let _ = st.push(&"alpha".clone(), 0);
+    match st.release(&"beta".clone()) {
+        Ok(_) => panic("expected NotFound"),
+        Err(_) => {},
+    }
+}
+
+fn empty_name_rejected() {
+    let mut st = savepoint_stack_new();
+    match st.push(&"".clone(), 0) {
+        Ok(_) => panic("expected BadName"),
+        Err(_) => {},
+    }
+}
+
+fn clear_resets_stack() {
+    let mut st = savepoint_stack_new();
+    let _ = st.push(&"s1".clone(), 10);
+    let _ = st.push(&"s2".clone(), 20);
+    st.clear();
+    assert_eq(st.depth(), 0);
+}
+
+fn shadowing_innermost_wins() {
+    let mut st = savepoint_stack_new();
+    let _ = st.push(&"x".clone(), 10);
+    let _ = st.push(&"y".clone(), 20);
+    let _ = st.push(&"x".clone(), 30);   // inner shadow
+    // rollback_to "x" targets the innermost one.
+    match st.rollback_to(&"x".clone()) {
+        Ok(idx) => { assert_eq(idx, 30); },
+        Err(_) => panic("rollback"),
+    }
+    // inner "x" still on stack; "y" popped.
+    assert_eq(st.depth(), 2);
+}
+
+fn main() {
+    push_pop_basic();
+    release_pops_from_named();
+    rollback_to_keeps_named();
+    unknown_name_is_error();
+    empty_name_rejected();
+    clear_resets_stack();
+    shadowing_innermost_wins();
+    print("savepoint_stack_ops typecheck ok");
+}

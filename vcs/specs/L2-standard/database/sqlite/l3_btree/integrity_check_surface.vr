@@ -1,0 +1,73 @@
+// @test: typecheck-pass
+// @level: L2
+// @tier: 0
+// @tags: sqlite, native, btree, integrity, pragma
+// @timeout: 10000
+// @description: integrity_check surface — check_page, check_tree, check_freelist
+//
+// Spec: internal/specs/sqlite-native.md §10.7
+
+mount core.*;
+mount collections.List;
+mount collections.map.Map;
+mount core.database.sqlite.native.l3_btree.{
+    Violation, IntegrityReport,
+    integrity_report_new, integrity_is_ok,
+    check_page, check_tree, check_freelist,
+};
+
+fn empty_report_is_ok() {
+    let r = integrity_report_new();
+    assert(integrity_is_ok(&r));
+    assert_eq(r.pages_visited, 0);
+    assert_eq(r.max_depth_seen, 0);
+}
+
+fn check_page_rejects_short_buffer() {
+    let short: List<Byte> = List.new();
+    let violations = check_page(1, &short, 0);
+    assert(violations.len() > 0);
+}
+
+fn check_page_reports_unknown_kind() {
+    let mut bad: List<Byte> = List.new();
+    // 8 bytes but flag byte = 0xFF (invalid)
+    bad.push(0xFF as Byte);
+    let mut i: Int = 0;
+    while i < 7 {
+        bad.push(0 as Byte);
+        i = i + 1;
+    }
+    let violations = check_page(5, &bad, 0);
+    assert(violations.len() > 0);
+}
+
+fn walk_missing_root_flags_short_page() {
+    let pages: Map<Int, List<Byte>> = Map.new();
+    let report = check_tree(1, &pages);
+    assert(!integrity_is_ok(&report));
+}
+
+fn freelist_empty_ok() {
+    let mut report = integrity_report_new();
+    let pages: Map<Int, List<Byte>> = Map.new();
+    check_freelist(0, 0, &pages, &mut report);
+    assert(integrity_is_ok(&report));
+}
+
+fn freelist_count_mismatch() {
+    let mut report = integrity_report_new();
+    let pages: Map<Int, List<Byte>> = Map.new();
+    check_freelist(0, 5, &pages, &mut report);
+    assert(!integrity_is_ok(&report));
+}
+
+fn main() {
+    empty_report_is_ok();
+    check_page_rejects_short_buffer();
+    check_page_reports_unknown_kind();
+    walk_missing_root_flags_short_page();
+    freelist_empty_ok();
+    freelist_count_mismatch();
+    print("integrity_check_surface typecheck ok");
+}

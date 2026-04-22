@@ -1,0 +1,104 @@
+// @test: typecheck-pass
+// @level: L2
+// @tier: 0
+// @tags: sqlite, native, pager, actor, single-writer
+// @timeout: 10000
+// @description: Pager actor surface — Read/Write/Commit/Checkpoint requests
+//
+// Spec: internal/specs/sqlite-native.md §4.3 + §8.1
+
+mount core.*;
+mount collections.List;
+mount core.database.sqlite.native.l1_pager.{
+    PageFrame, Pager, PagerError,
+    pager_open_memory, PAGE_SIZE_DEFAULT,
+    PagerActor, PagerRequest, PagerReply, CheckpointMode,
+    actor_new, pager_apply, pager_apply_batch,
+};
+
+fn fill(byte: Byte, n: Int) -> List<Byte> {
+    let mut out: List<Byte> = List.new();
+    let mut i: Int = 0;
+    while i < n {
+        out.push(byte);
+        i = i + 1;
+    }
+    out
+}
+
+fn read_returns_readok() {
+    let p = match pager_open_memory() {
+        Ok(pp) => pp,
+        Err(_) => { panic("open"); return; }
+    };
+    let mut actor = actor_new(p, 16);
+    let reply = pager_apply(&mut actor, Read(1, 42));
+    match reply {
+        ReadOk(_, tok) => { assert_eq(tok, 42); },
+        _ => panic("expected ReadOk"),
+    }
+}
+
+fn write_then_read_is_cached() {
+    let p = match pager_open_memory() {
+        Ok(pp) => pp,
+        Err(_) => { panic("open"); return; }
+    };
+    let mut actor = actor_new(p, 16);
+    let frame = PageFrame {
+        page_no: 3,
+        data: fill(0xAB as Byte, PAGE_SIZE_DEFAULT),
+        dirty: true,
+    };
+    let w = pager_apply(&mut actor, Write(frame, 1));
+    match w {
+        WriteOk(_) => {},
+        _ => panic("expected WriteOk"),
+    }
+    assert_eq(actor.pending(), 1);
+    let r = pager_apply(&mut actor, Read(3, 2));
+    match r {
+        ReadOk(_, _) => {},
+        _ => panic("expected ReadOk"),
+    }
+}
+
+fn commit_clears_pending() {
+    let p = match pager_open_memory() {
+        Ok(pp) => pp,
+        Err(_) => { panic("open"); return; }
+    };
+    let mut actor = actor_new(p, 16);
+    let frame = PageFrame {
+        page_no: 2,
+        data: fill(0 as Byte, PAGE_SIZE_DEFAULT),
+        dirty: true,
+    };
+    let _ = pager_apply(&mut actor, Write(frame, 1));
+    let c = pager_apply(&mut actor, Commit(9));
+    match c {
+        CommitOk(tok) => { assert_eq(tok, 9); },
+        _ => panic("expected CommitOk"),
+    }
+    assert_eq(actor.pending(), 0);
+}
+
+fn checkpoint_is_accepted_in_all_modes() {
+    let p = match pager_open_memory() {
+        Ok(pp) => pp,
+        Err(_) => { panic("open"); return; }
+    };
+    let mut actor = actor_new(p, 16);
+    let _ = pager_apply(&mut actor, Checkpoint(Passive, 1));
+    let _ = pager_apply(&mut actor, Checkpoint(Full, 2));
+    let _ = pager_apply(&mut actor, Checkpoint(Restart, 3));
+    let _ = pager_apply(&mut actor, Checkpoint(Truncate, 4));
+}
+
+fn main() {
+    read_returns_readok();
+    write_then_read_is_cached();
+    commit_clears_pending();
+    checkpoint_is_accepted_in_all_modes();
+    print("actor_request_surface typecheck ok");
+}

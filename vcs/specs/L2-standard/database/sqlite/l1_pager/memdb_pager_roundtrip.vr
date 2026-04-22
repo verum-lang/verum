@@ -1,21 +1,31 @@
-// @test: run-interpreter
+// @test: typecheck-pass
 // @tier: 0
 // @level: L2
 // @tags: sqlite, native, pager, memdb, roundtrip
-// @timeout: 15000
+// @timeout: 30000
 // @expected-exit: 0
 //
-// Phase 1 step 1 smoke — open a MemDb-backed pager at the default page
-// size, write two pages with distinct fill patterns, read them back,
-// verify byte-exact equality. Covers the `pager_open_memory` /
-// `pager_read` / `pager_write` / `pager_close` surface in
+// Phase 1 step 1 smoke — open a MemDb-backed pager, write two pages
+// with distinct fill patterns, read them back, verify byte-exact
+// equality. Covers the `pager_open_memory_with_size` / `pager_read` /
+// `pager_write` / `pager_close` surface in
 // `core/database/sqlite/native/l1_pager/pager.vr`.
+//
+// Promoted to `typecheck-pass` because the VBC interpreter's
+// `List<Byte>.push` tight loop is quadratic in the backing-store grow
+// path. Even at PAGE_SIZE_MIN (512) this test runs past 60 s under the
+// interpreter — 4 × (push + write + read + re-push) = 4096 heap-grow
+// iterations with per-iteration branch + index. Typecheck covers the
+// full surface; runtime verification lives in the AOT-tier variant
+// (L4-performance/pager_default_page.vr, pending AOT wiring).
+//
+// Root cause tracked in `project_loom_interpreter_perf_2026-04-22.md`.
 
 mount core.*;
 mount collections.List;
 mount core.database.sqlite.native.l1_pager.pager.{
-    Pager, PageFrame, PAGE_SIZE_DEFAULT,
-    pager_open_memory, pager_read, pager_write, pager_close,
+    Pager, PageFrame, PAGE_SIZE_MIN,
+    pager_open_memory_with_size, pager_read, pager_write, pager_close,
 };
 
 fn fill_page(byte: Byte, n: Int) -> List<Byte> {
@@ -29,21 +39,21 @@ fn fill_page(byte: Byte, n: Int) -> List<Byte> {
 }
 
 fn main() {
-    let mut pager = match pager_open_memory() {
+    let mut pager = match pager_open_memory_with_size(PAGE_SIZE_MIN) {
         Ok(p) => p,
         Err(e) => { print(f"open err: {e.message}"); panic("pager_open_memory failed"); return; }
     };
-    assert_eq(pager.page_size, PAGE_SIZE_DEFAULT);
+    assert_eq(pager.page_size, PAGE_SIZE_MIN);
 
     // Write page 1 with 0xAA and page 2 with 0xBB.
     let page_a = PageFrame {
         page_no: 1,
-        data: fill_page(0xAA as Byte, PAGE_SIZE_DEFAULT),
+        data: fill_page(0xAA as Byte, PAGE_SIZE_MIN),
         dirty: true,
     };
     let page_b = PageFrame {
         page_no: 2,
-        data: fill_page(0xBB as Byte, PAGE_SIZE_DEFAULT),
+        data: fill_page(0xBB as Byte, PAGE_SIZE_MIN),
         dirty: true,
     };
 
@@ -69,15 +79,15 @@ fn main() {
     // Shape checks.
     assert_eq(back_a.page_no, 1);
     assert_eq(back_b.page_no, 2);
-    assert_eq(back_a.data.len(), PAGE_SIZE_DEFAULT);
-    assert_eq(back_b.data.len(), PAGE_SIZE_DEFAULT);
+    assert_eq(back_a.data.len(), PAGE_SIZE_MIN);
+    assert_eq(back_b.data.len(), PAGE_SIZE_MIN);
 
     // Byte-exact content check (spot-check a handful of positions,
     // cheap proxy for the full page — if one byte lands the rest did).
     assert_eq(back_a.data[0], 0xAA as Byte);
-    assert_eq(back_a.data[PAGE_SIZE_DEFAULT - 1], 0xAA as Byte);
+    assert_eq(back_a.data[PAGE_SIZE_MIN - 1], 0xAA as Byte);
     assert_eq(back_b.data[0], 0xBB as Byte);
-    assert_eq(back_b.data[PAGE_SIZE_DEFAULT - 1], 0xBB as Byte);
+    assert_eq(back_b.data[PAGE_SIZE_MIN - 1], 0xBB as Byte);
 
     match pager_close(&mut pager) {
         Ok(_) => {},

@@ -1,0 +1,39 @@
+// @test: typecheck-pass
+// @level: L2
+// @tier: 0
+// @tags: sqlite, native, vfs, posix, l0
+// @timeout: 10000
+// @description: PosixVfs + PosixFile implement VfsProtocol + SqliteFile.
+//
+// Spec: internal/specs/sqlite-native.md §7.3 (PosixVfs)
+//
+// Typecheck-only at L2 because actually opening a real file in the
+// interpreter hits the pre-existing platform-open slow path (see
+// sys/io/pread_pwrite_roundtrip.vr). The protocol surface is what this
+// test pins — that PosixVfs really implements VfsProtocol, PosixFile
+// really implements SqliteFile, and the `open → lock → read → sync →
+// close` pipeline type-checks end-to-end.
+
+mount core.*;
+mount core.database.sqlite.native.l0_vfs.{
+    PosixVfs, PosixFile, VfsProtocol, SqliteFile,
+    OpenFlags, SyncFlags, LockKind, VfsError,
+    flags_rwc, sync_full,
+};
+
+fn open_read_close_shape(path: &Text) -> Result<Int, VfsError> {
+    let vfs = PosixVfs {};
+    let mut file = vfs.open(path, flags_rwc())?;
+    file.lock(Shared)?;
+    file.sync(sync_full())?;
+    let _ = file.check_reserved_lock()?;
+    let _ = file.sector_size();
+    let _ = file.device_characteristics();
+    file.unlock(Unlocked)?;
+    file.close()?;
+    Ok(0)
+}
+
+fn main() {
+    print("posix_vfs_surface typecheck ok");
+}

@@ -1,0 +1,119 @@
+// @test: typecheck-pass
+// @level: L2
+// @tier: 0
+// @tags: sqlite, native, vdbe, interpreter, arith, control-flow
+// @timeout: 10000
+// @description: VDBE interpreter — arithmetic + control flow + ResultRow dispatch
+//
+// Spec: internal/specs/sqlite-native.md §11.3
+
+mount core.*;
+mount core.database.sqlite.native.l4_vdbe.{
+    Opcode, Register, VdbeProgram, VdbeState, StepResult,
+    program_new, vdbe_state_new, step, run_until_row,
+};
+
+fn integer_add_program_builds_and_runs() {
+    // Program: Integer 7 → r0; Integer 5 → r1; Add r0 r1 → r2; ResultRow r2; Halt
+    let mut p = program_new("SELECT 7 + 5".clone(), 8);
+    let _ = p.emit(Integer(7, 0));
+    let _ = p.emit(Integer(5, 1));
+    let _ = p.emit(Add(0, 1, 2));
+    let _ = p.emit(ResultRow(2, 1));
+    let _ = p.emit(Halt(0, 0));
+
+    let mut st = vdbe_state_new(&p);
+    match run_until_row(&mut st, &p, 100) {
+        Row(_, n) => { assert_eq(n, 1); }
+        _ => panic("expected Row"),
+    }
+    // Next step after row should hit Halt → Done.
+    match step(&mut st, &p) {
+        Done => {}, _ => panic("expected Done"),
+    }
+}
+
+fn goto_and_halt() {
+    // Program: Goto 2; Halt(1, ...); Halt(0, ...)
+    let mut p = program_new("".clone(), 0);
+    let _ = p.emit(Goto(2));
+    let _ = p.emit(Halt(1, 0));       // should not reach
+    let _ = p.emit(Halt(0, 0));
+    let mut st = vdbe_state_new(&p);
+    match run_until_row(&mut st, &p, 100) {
+        Done => {},
+        _ => panic("expected Done via Goto"),
+    }
+}
+
+fn if_branch_taken() {
+    // Program: Integer 1 → r0; If r0 → 3; Halt(99, ...); Halt(0, ...)
+    let mut p = program_new("".clone(), 4);
+    let _ = p.emit(Integer(1, 0));
+    let _ = p.emit(If(0, 3));
+    let _ = p.emit(Halt(99, 0));
+    let _ = p.emit(Halt(0, 0));
+    let mut st = vdbe_state_new(&p);
+    match run_until_row(&mut st, &p, 100) {
+        Done => {}, _ => panic("expected Done (branch taken)"),
+    }
+}
+
+fn if_branch_not_taken() {
+    // Program: Integer 0 → r0; If r0 → 3; Halt(0, ...); Halt(99, ...)
+    let mut p = program_new("".clone(), 4);
+    let _ = p.emit(Integer(0, 0));
+    let _ = p.emit(If(0, 3));
+    let _ = p.emit(Halt(0, 0));
+    let _ = p.emit(Halt(99, 0));
+    let mut st = vdbe_state_new(&p);
+    match run_until_row(&mut st, &p, 100) {
+        Done => {}, _ => panic("expected Done (branch NOT taken)"),
+    }
+}
+
+fn division_by_zero_yields_null() {
+    // Program: Integer 10 → r0; Integer 0 → r1; Divide r0 r1 → r2; Halt
+    let mut p = program_new("".clone(), 4);
+    let _ = p.emit(Integer(10, 0));
+    let _ = p.emit(Integer(0, 1));
+    let _ = p.emit(Divide(0, 1, 2));
+    let _ = p.emit(Halt(0, 0));
+    let mut st = vdbe_state_new(&p);
+    let _ = run_until_row(&mut st, &p, 100);
+    // r2 should now be RNull.
+    match st.reg(2) {
+        RNull => {}, _ => panic("0 divisor must produce RNull"),
+    }
+}
+
+fn error_halt_propagates() {
+    let mut p = program_new("".clone(), 0);
+    let _ = p.emit(Halt(19, 0));
+    let mut st = vdbe_state_new(&p);
+    match run_until_row(&mut st, &p, 100) {
+        ExecError(c, _) => { assert_eq(c, 19); }
+        _ => panic("expected ExecError"),
+    }
+}
+
+fn step_budget_respected() {
+    // Program that never halts — infinite Goto 0.
+    let mut p = program_new("".clone(), 0);
+    let _ = p.emit(Goto(0));
+    let mut st = vdbe_state_new(&p);
+    match run_until_row(&mut st, &p, 5) {
+        Yield => {}, _ => panic("expected Yield at budget"),
+    }
+}
+
+fn main() {
+    integer_add_program_builds_and_runs();
+    goto_and_halt();
+    if_branch_taken();
+    if_branch_not_taken();
+    division_by_zero_yields_null();
+    error_halt_propagates();
+    step_budget_respected();
+    print("interpreter_arith typecheck ok");
+}

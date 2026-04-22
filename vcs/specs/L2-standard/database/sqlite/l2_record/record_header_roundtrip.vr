@@ -1,0 +1,93 @@
+// @test: typecheck-pass
+// @level: L2
+// @tier: 0
+// @tags: sqlite, native, record, serial-type, header
+// @timeout: 10000
+// @description: Record header encode/decode roundtrip per spec §6.3
+//
+// Spec: internal/specs/sqlite-native.md §6.3
+
+mount core.*;
+mount collections.List;
+mount core.database.sqlite.native.l2_record.{
+    SerialType, RecordError,
+    serial_type_encode, serial_type_decode,
+    serial_type_payload_size, serial_type_is_variable,
+    encode_record_header, decode_record_header,
+};
+
+fn serial_type_basic_codes() {
+    assert_eq(serial_type_encode(StNull) as Int, 0);
+    assert_eq(serial_type_encode(StInt8) as Int, 1);
+    assert_eq(serial_type_encode(StInt16) as Int, 2);
+    assert_eq(serial_type_encode(StInt24) as Int, 3);
+    assert_eq(serial_type_encode(StInt32) as Int, 4);
+    assert_eq(serial_type_encode(StInt48) as Int, 5);
+    assert_eq(serial_type_encode(StInt64) as Int, 6);
+    assert_eq(serial_type_encode(StReal) as Int, 7);
+    assert_eq(serial_type_encode(StZero) as Int, 8);
+    assert_eq(serial_type_encode(StOne) as Int, 9);
+    assert_eq(serial_type_encode(StBlob(0)) as Int, 12);
+    assert_eq(serial_type_encode(StBlob(4)) as Int, 20);
+    assert_eq(serial_type_encode(StText(0)) as Int, 13);
+    assert_eq(serial_type_encode(StText(5)) as Int, 23);
+}
+
+fn payload_sizes() {
+    assert_eq(serial_type_payload_size(StNull), 0);
+    assert_eq(serial_type_payload_size(StInt8), 1);
+    assert_eq(serial_type_payload_size(StInt16), 2);
+    assert_eq(serial_type_payload_size(StInt24), 3);
+    assert_eq(serial_type_payload_size(StInt32), 4);
+    assert_eq(serial_type_payload_size(StInt48), 6);
+    assert_eq(serial_type_payload_size(StInt64), 8);
+    assert_eq(serial_type_payload_size(StReal), 8);
+    assert_eq(serial_type_payload_size(StZero), 0);
+    assert_eq(serial_type_payload_size(StOne), 0);
+    assert_eq(serial_type_payload_size(StBlob(16)), 16);
+    assert_eq(serial_type_payload_size(StText(7)), 7);
+}
+
+fn variable_flag() {
+    assert(!serial_type_is_variable(StNull));
+    assert(!serial_type_is_variable(StInt64));
+    assert(!serial_type_is_variable(StReal));
+    assert(serial_type_is_variable(StBlob(0)));
+    assert(serial_type_is_variable(StText(42)));
+}
+
+fn reserved_codes_rejected() {
+    match serial_type_decode(10 as Int64) {
+        Ok(_) => panic("expected ReservedCode for 10"),
+        Err(_) => {},
+    }
+    match serial_type_decode(11 as Int64) {
+        Ok(_) => panic("expected ReservedCode for 11"),
+        Err(_) => {},
+    }
+}
+
+fn header_roundtrip() {
+    let mut types: List<SerialType> = List.new();
+    types.push(StInt64);
+    types.push(StText(12));
+    types.push(StNull);
+    types.push(StReal);
+    let bytes = encode_record_header(&types);
+    match decode_record_header(&bytes, 0) {
+        Ok((decoded, consumed)) => {
+            assert_eq(consumed, bytes.len());
+            assert_eq(decoded.len(), 4);
+        },
+        Err(_) => panic("decode_record_header failed"),
+    }
+}
+
+fn main() {
+    serial_type_basic_codes();
+    payload_sizes();
+    variable_flag();
+    reserved_codes_rejected();
+    header_roundtrip();
+    print("record_header_roundtrip typecheck ok");
+}

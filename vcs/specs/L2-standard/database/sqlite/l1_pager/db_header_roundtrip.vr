@@ -1,0 +1,90 @@
+// @test: typecheck-pass
+// @level: L2
+// @tier: 0
+// @tags: sqlite, native, pager, file-format, db-header, refinement
+// @timeout: 10000
+// @description: DB header parse/serialize roundtrip + validation rejects
+//
+// Spec: internal/specs/sqlite-native.md §6.1
+
+mount core.*;
+mount collections.List;
+mount core.database.sqlite.native.l1_pager.{
+    DatabaseHeader, FileFormat, TextEncoding,
+    DB_HEADER_SIZE, DB_PAGE_SIZE_SENTINEL,
+    parse_header, serialize_header, default_header,
+};
+
+fn roundtrip_default() {
+    let h = default_header(4096);
+    let bytes = match serialize_header(&h) {
+        Ok(b)  => b,
+        Err(_) => { panic("serialize"); return; }
+    };
+    assert_eq(bytes.len(), DB_HEADER_SIZE);
+    match parse_header(&bytes) {
+        Ok(p) => {
+            assert_eq(p.page_size, 4096);
+            assert_eq(p.schema_format as Int, 4);
+            assert_eq(p.sqlite_version_number as Int, 3046000);
+        }
+        Err(_) => panic("parse"),
+    }
+}
+
+fn page_size_65536_sentinel() {
+    let h = default_header(DB_PAGE_SIZE_SENTINEL);
+    let bytes = match serialize_header(&h) {
+        Ok(b)  => b,
+        Err(_) => { panic("serialize 65536"); return; }
+    };
+    // bytes[16..18] must be 0x00 0x01 — the 65536 sentinel.
+    assert_eq(bytes[16] as Int, 0);
+    assert_eq(bytes[17] as Int, 1);
+    match parse_header(&bytes) {
+        Ok(p) => { assert_eq(p.page_size, DB_PAGE_SIZE_SENTINEL); }
+        Err(_) => panic("parse 65536"),
+    }
+}
+
+fn bad_magic_rejected() {
+    let mut bad: List<Byte> = List.new();
+    let mut i: Int = 0;
+    while i < DB_HEADER_SIZE {
+        bad.push(0 as Byte);
+        i = i + 1;
+    }
+    match parse_header(&bad) {
+        Ok(_) => panic("expected bad magic to reject"),
+        Err(_) => {},
+    }
+}
+
+fn bad_page_size_rejected() {
+    let h = default_header(4096);
+    let bytes_ok = match serialize_header(&h) {
+        Ok(b)  => b,
+        Err(_) => { panic("serialize"); return; }
+    };
+    // Corrupt the page_size field to 513 — not a power of 2.
+    let mut broken: List<Byte> = List.new();
+    let mut i: Int = 0;
+    while i < DB_HEADER_SIZE {
+        broken.push(bytes_ok[i]);
+        i = i + 1;
+    }
+    broken[16] = 0x02 as Byte;
+    broken[17] = 0x01 as Byte;
+    match parse_header(&broken) {
+        Ok(_)  => panic("expected bad page size"),
+        Err(_) => {},
+    }
+}
+
+fn main() {
+    roundtrip_default();
+    page_size_65536_sentinel();
+    bad_magic_rejected();
+    bad_page_size_rejected();
+    print("db_header_roundtrip typecheck ok");
+}

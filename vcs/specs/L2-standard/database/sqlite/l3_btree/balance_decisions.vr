@@ -1,0 +1,126 @@
+// @test: typecheck-pass
+// @level: L2
+// @tier: 0
+// @tags: sqlite, native, btree, balance, split, merge
+// @timeout: 10000
+// @description: Balance planner — rotate / split / merge / grow-root / shrink-root
+//
+// Spec: internal/specs/sqlite-native.md §10.5
+
+mount core.*;
+mount core.database.sqlite.native.l3_btree.{
+    BalanceDecision, BalanceError, BalanceContext, PageStats,
+    balance_context_new, plan_overflow, plan_underflow,
+    usable_bytes_per_page, has_room_for,
+    PageKind,
+};
+
+fn ctx_and_stats(page_no: Int, cell_count: Int, is_root: Bool) -> (BalanceContext, PageStats) {
+    let ctx = balance_context_new(4096, 0);
+    let p = PageStats {
+        page_no: page_no,
+        cell_count: cell_count,
+        used_bytes: 3000,
+        is_root: is_root,
+        parent_cell_idx: 0,
+    };
+    (ctx, p)
+}
+
+fn overflow_rotates_right_when_possible() {
+    let (ctx, page) = ctx_and_stats(10, 20, false);
+    match plan_overflow(&ctx, &page, -1, 0, 11, 1024, 64) {
+        Ok(Rotate(d, r, _, _)) => { assert_eq(d, 10); assert_eq(r, 11); }
+        _ => panic("expected Rotate right"),
+    }
+}
+
+fn overflow_splits_when_no_sibling_room() {
+    let (ctx, page) = ctx_and_stats(10, 20, false);
+    match plan_overflow(&ctx, &page, -1, 0, -1, 0, 64) {
+        Ok(Split(p, l, r, _, _)) => {
+            assert_eq(p, 10);
+            assert_eq(l + r, 21);   // 20 + 1 overflow
+        }
+        _ => panic("expected Split"),
+    }
+}
+
+fn overflow_grows_root() {
+    let (ctx, page) = ctx_and_stats(1, 20, true);
+    match plan_overflow(&ctx, &page, -1, 0, -1, 0, 64) {
+        Ok(GrowRoot(old_root, _)) => { assert_eq(old_root, 1); }
+        _ => panic("expected GrowRoot"),
+    }
+}
+
+fn overflow_rejects_bad_input() {
+    let (ctx, page) = ctx_and_stats(10, 20, false);
+    match plan_overflow(&ctx, &page, -1, 0, -1, 0, 0) {
+        Ok(_) => panic("zero overflow size must reject"),
+        Err(_) => {},
+    }
+}
+
+fn underflow_no_change_when_above_min() {
+    let (ctx, page) = ctx_and_stats(10, 5, false);
+    match plan_underflow(&ctx, &page, -1, 0, -1, 0) {
+        Ok(NoChange) => {},
+        _ => panic("expected NoChange"),
+    }
+}
+
+fn underflow_shrinks_empty_root() {
+    let (ctx, page) = ctx_and_stats(1, 0, true);
+    match plan_underflow(&ctx, &page, -1, 0, -1, 0) {
+        Ok(ShrinkRoot(r, _)) => { assert_eq(r, 1); }
+        _ => panic("expected ShrinkRoot"),
+    }
+}
+
+fn underflow_rotates_from_fat_sibling() {
+    let (ctx, page) = ctx_and_stats(10, 1, false);
+    match plan_underflow(&ctx, &page, 9, 2, 11, 10) {
+        // Implementation picks right sibling first since it's also fat.
+        Ok(Rotate(d, r, _, _)) => {
+            assert_eq(d, 11); assert_eq(r, 10);
+        }
+        _ => panic("expected Rotate from right"),
+    }
+}
+
+fn underflow_merges_when_siblings_tight() {
+    let (ctx, page) = ctx_and_stats(10, 1, false);
+    match plan_underflow(&ctx, &page, 9, 2, 11, 2) {
+        Ok(Merge(left, right, _)) => {
+            assert_eq(left, 10); assert_eq(right, 11);
+        }
+        _ => panic("expected Merge with right"),
+    }
+}
+
+fn usable_bytes_matches_headers() {
+    let ctx = balance_context_new(4096, 0);
+    assert_eq(usable_bytes_per_page(&ctx, TableLeaf), 4096 - 8);
+    assert_eq(usable_bytes_per_page(&ctx, IndexInterior), 4096 - 12);
+}
+
+fn room_predicate() {
+    let ctx = balance_context_new(4096, 0);
+    assert(has_room_for(&ctx, TableLeaf, 100, 64));
+    assert(!has_room_for(&ctx, TableLeaf, 4080, 64));
+}
+
+fn main() {
+    overflow_rotates_right_when_possible();
+    overflow_splits_when_no_sibling_room();
+    overflow_grows_root();
+    overflow_rejects_bad_input();
+    underflow_no_change_when_above_min();
+    underflow_shrinks_empty_root();
+    underflow_rotates_from_fat_sibling();
+    underflow_merges_when_siblings_tight();
+    usable_bytes_matches_headers();
+    room_predicate();
+    print("balance_decisions typecheck ok");
+}

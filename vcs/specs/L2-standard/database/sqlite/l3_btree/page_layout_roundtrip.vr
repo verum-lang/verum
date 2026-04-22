@@ -1,0 +1,144 @@
+// @test: typecheck-pass
+// @level: L2
+// @tier: 0
+// @tags: sqlite, native, btree, page, cell, layout
+// @timeout: 10000
+// @description: B-tree page header roundtrip + page-kind taxonomy + local-payload math
+//
+// Spec: internal/specs/sqlite-native.md §6.2 + §10.1
+
+mount core.*;
+mount collections.List;
+mount core.database.sqlite.native.l3_btree.{
+    PageKind, PageHeader, PageLayoutError,
+    PAGE_TYPE_TABLE_LEAF, PAGE_TYPE_TABLE_INTERIOR,
+    PAGE_TYPE_INDEX_LEAF, PAGE_TYPE_INDEX_INTERIOR,
+    PAGE_HEADER_SIZE_LEAF, PAGE_HEADER_SIZE_INTERIOR,
+    page_kind_from_byte, page_kind_to_byte,
+    page_kind_is_interior, page_kind_is_table, page_kind_header_size,
+    parse_page_header, serialize_page_header,
+    max_cells_per_page, compute_local_payload_budget,
+};
+
+fn kind_taxonomy() {
+    match page_kind_from_byte(PAGE_TYPE_TABLE_LEAF) {
+        Ok(TableLeaf) => {}, _ => panic("TableLeaf"),
+    }
+    match page_kind_from_byte(PAGE_TYPE_TABLE_INTERIOR) {
+        Ok(TableInterior) => {}, _ => panic("TableInterior"),
+    }
+    match page_kind_from_byte(PAGE_TYPE_INDEX_LEAF) {
+        Ok(IndexLeaf) => {}, _ => panic("IndexLeaf"),
+    }
+    match page_kind_from_byte(PAGE_TYPE_INDEX_INTERIOR) {
+        Ok(IndexInterior) => {}, _ => panic("IndexInterior"),
+    }
+    match page_kind_from_byte(0xFF as Byte) {
+        Ok(_)  => panic("0xFF should reject"),
+        Err(_) => {},
+    }
+}
+
+fn interior_vs_leaf_predicates() {
+    assert(page_kind_is_interior(TableInterior));
+    assert(page_kind_is_interior(IndexInterior));
+    assert(!page_kind_is_interior(TableLeaf));
+    assert(!page_kind_is_interior(IndexLeaf));
+    assert(page_kind_is_table(TableLeaf));
+    assert(page_kind_is_table(TableInterior));
+    assert(!page_kind_is_table(IndexLeaf));
+}
+
+fn header_sizes() {
+    assert_eq(page_kind_header_size(TableLeaf), PAGE_HEADER_SIZE_LEAF);
+    assert_eq(page_kind_header_size(TableInterior), PAGE_HEADER_SIZE_INTERIOR);
+    assert_eq(page_kind_header_size(IndexLeaf), PAGE_HEADER_SIZE_LEAF);
+    assert_eq(page_kind_header_size(IndexInterior), PAGE_HEADER_SIZE_INTERIOR);
+}
+
+fn leaf_header_roundtrip() {
+    let h = PageHeader {
+        kind: TableLeaf,
+        first_freeblock: 0 as UInt16,
+        cell_count: 3 as UInt16,
+        cell_content_start: 4000,
+        fragmented_free_bytes: 0 as Byte,
+        right_ptr: 0 as UInt32,
+    };
+    let bytes = serialize_page_header(&h);
+    assert_eq(bytes.len(), PAGE_HEADER_SIZE_LEAF);
+    match parse_page_header(&bytes, 0) {
+        Ok(p) => {
+            assert_eq(p.cell_count as Int, 3);
+            assert_eq(p.cell_content_start, 4000);
+            assert_eq(p.right_ptr as Int, 0);
+        }
+        Err(_) => panic("leaf parse"),
+    }
+}
+
+fn interior_header_roundtrip() {
+    let h = PageHeader {
+        kind: TableInterior,
+        first_freeblock: 0 as UInt16,
+        cell_count: 5 as UInt16,
+        cell_content_start: 2048,
+        fragmented_free_bytes: 2 as Byte,
+        right_ptr: 42 as UInt32,
+    };
+    let bytes = serialize_page_header(&h);
+    assert_eq(bytes.len(), PAGE_HEADER_SIZE_INTERIOR);
+    match parse_page_header(&bytes, 0) {
+        Ok(p) => {
+            assert_eq(p.cell_count as Int, 5);
+            assert_eq(p.right_ptr as Int, 42);
+        }
+        Err(_) => panic("interior parse"),
+    }
+}
+
+fn cell_content_sentinel_65536() {
+    // cell_content_start == 65536 encodes as 0 on disk.
+    let h = PageHeader {
+        kind: IndexLeaf,
+        first_freeblock: 0 as UInt16,
+        cell_count: 0 as UInt16,
+        cell_content_start: 65536,
+        fragmented_free_bytes: 0 as Byte,
+        right_ptr: 0 as UInt32,
+    };
+    let bytes = serialize_page_header(&h);
+    assert_eq(bytes[5] as Int, 0);
+    assert_eq(bytes[6] as Int, 0);
+    match parse_page_header(&bytes, 0) {
+        Ok(p) => { assert_eq(p.cell_content_start, 65536); }
+        Err(_) => panic("sentinel parse"),
+    }
+}
+
+fn local_payload_math() {
+    let b = compute_local_payload_budget(4096, 0);
+    assert_eq(b.usable_size, 4096);
+    // Sanity — budgets are positive and bounded by usable size.
+    assert(b.min_local > 0);
+    assert(b.index_max > 0);
+    assert(b.table_leaf_max < b.usable_size);
+}
+
+fn max_cells_reasonable() {
+    let n = max_cells_per_page(4096, TableLeaf);
+    assert(n > 0);
+    assert(n < 4096);
+}
+
+fn main() {
+    kind_taxonomy();
+    interior_vs_leaf_predicates();
+    header_sizes();
+    leaf_header_roundtrip();
+    interior_header_roundtrip();
+    cell_content_sentinel_65536();
+    local_payload_math();
+    max_cells_reasonable();
+    print("page_layout_roundtrip typecheck ok");
+}

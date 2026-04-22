@@ -1,0 +1,93 @@
+// @test: typecheck-pass
+// @level: L2
+// @tier: 0
+// @tags: sqlite, native, vdbe, program, builder, constants
+// @timeout: 10000
+// @description: VdbeProgram builder + ConstantPool + cursor declarations
+//
+// Spec: internal/specs/sqlite-native.md §11.1
+
+mount core.*;
+mount core.database.sqlite.native.l4_vdbe.{
+    Opcode, VdbeProgram, ConstantEntry, ConstantPool, ResultColumn,
+    CursorKind, CursorDecl,
+    program_new, constant_pool_new,
+};
+
+fn empty_program() {
+    let p = program_new("SELECT 1".clone(), 4);
+    assert_eq(p.instruction_count(), 0);
+    assert_eq(p.register_count(), 4);
+    assert_eq(p.cursor_count(), 0);
+    assert_eq(p.result_column_count(), 0);
+}
+
+fn emit_appends_in_order() {
+    let mut p = program_new("".clone(), 0);
+    let i0 = p.emit(Integer(1, 0));
+    let i1 = p.emit(Integer(2, 1));
+    let i2 = p.emit(Add(0, 1, 2));
+    assert_eq(i0, 0);
+    assert_eq(i1, 1);
+    assert_eq(i2, 2);
+    assert_eq(p.instruction_count(), 3);
+}
+
+fn replace_rewrites_one() {
+    let mut p = program_new("".clone(), 0);
+    let _ = p.emit(Noop);
+    p.replace(0, Halt(0, 0));
+    match p.get_opcode(0) {
+        Some(Halt(_, _)) => {},
+        _ => panic("expected Halt after replace"),
+    }
+}
+
+fn declare_cursor_assigns_ids() {
+    let mut p = program_new("".clone(), 0);
+    let a = p.declare_cursor(CkTable, 1, 3);
+    let b = p.declare_cursor(CkIndex, 2, 1);
+    assert_eq(a, 0);
+    assert_eq(b, 1);
+    assert_eq(p.cursor_count(), 2);
+}
+
+fn declare_result_column() {
+    let mut p = program_new("SELECT id, name FROM t".clone(), 2);
+    p.declare_result_column("id".clone(), "INTEGER".clone());
+    p.declare_result_column("name".clone(), "TEXT".clone());
+    assert_eq(p.result_column_count(), 2);
+}
+
+fn constant_pool_add_get() {
+    let mut pool = constant_pool_new();
+    let a = pool.add(KInt(42 as Int64));
+    let b = pool.add(KText("hello".clone()));
+    assert_eq(pool.len(), 2);
+    match pool.get(a) {
+        KInt(i) => { assert_eq(i as Int, 42); }
+        _ => panic("KInt round-trip"),
+    }
+    match pool.get(b) {
+        KText(_) => {},
+        _ => panic("KText round-trip"),
+    }
+}
+
+fn attach_subprogram() {
+    let mut outer = program_new("CREATE TRIGGER ...".clone(), 0);
+    let inner = program_new("UPDATE ...".clone(), 0);
+    let id = outer.attach_subprogram(inner);
+    assert_eq(id, 0);
+}
+
+fn main() {
+    empty_program();
+    emit_appends_in_order();
+    replace_rewrites_one();
+    declare_cursor_assigns_ids();
+    declare_result_column();
+    constant_pool_add_get();
+    attach_subprogram();
+    print("program_builder typecheck ok");
+}

@@ -1,0 +1,64 @@
+// @test: typecheck-pass
+// @level: L2
+// @tier: 0
+// @tags: sqlite, native, record, collation, nocase, rtrim, binary
+// @timeout: 10000
+// @description: Built-in collations + registry surface
+//
+// Spec: internal/specs/sqlite-native.md §9.5
+
+mount core.*;
+mount core.base.ordering.Ordering;
+mount core.database.sqlite.native.l2_record.{
+    Collation, CollationKind, CollationRegistry,
+    binary_cmp, nocase_cmp, rtrim_cmp, collation_registry_new,
+};
+
+fn binary_is_byte_order() {
+    match binary_cmp(&"abc".clone(), &"abd".clone()) {
+        Less => {}, _ => panic("abc < abd"),
+    }
+    match binary_cmp(&"abc".clone(), &"abc".clone()) {
+        Equal => {}, _ => panic("abc == abc"),
+    }
+    match binary_cmp(&"ab".clone(), &"abc".clone()) {
+        Less => {}, _ => panic("shorter prefix is less"),
+    }
+}
+
+fn rtrim_strips_trailing_spaces() {
+    match rtrim_cmp(&"foo".clone(), &"foo   ".clone()) {
+        Equal => {}, _ => panic("rtrim drops trailing spaces"),
+    }
+    match rtrim_cmp(&"foo ".clone(), &"bar  ".clone()) {
+        Greater => {}, _ => panic("rtrim stripped then compared"),
+    }
+}
+
+fn registry_seeded_with_three() {
+    let reg = collation_registry_new();
+    assert_eq(reg.len(), 3);
+    assert(reg.find(&"BINARY".clone()));
+    assert(reg.find(&"NOCASE".clone()));
+    assert(reg.find(&"RTRIM".clone()));
+    assert(!reg.find(&"FOO".clone()));
+}
+
+fn registry_accepts_user_collation() {
+    let mut reg = collation_registry_new();
+    let c = Collation {
+        name: "MY_UTF8_CI".clone(),
+        kind: UserDefined("MY_UTF8_CI".clone()),
+    };
+    reg.register(c);
+    assert_eq(reg.len(), 4);
+    assert(reg.find(&"MY_UTF8_CI".clone()));
+}
+
+fn main() {
+    binary_is_byte_order();
+    rtrim_strips_trailing_spaces();
+    registry_seeded_with_three();
+    registry_accepts_user_collation();
+    print("collation_builtins typecheck ok");
+}

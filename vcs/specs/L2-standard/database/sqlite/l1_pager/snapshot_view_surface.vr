@@ -1,0 +1,63 @@
+// @test: typecheck-pass
+// @level: L2
+// @tier: 0
+// @tags: sqlite, native, pager, snapshot, wal
+// @timeout: 10000
+// @description: SnapshotView — watermark / generation / lookup / staleness
+//
+// Spec: internal/specs/sqlite-native.md §4.3 + §20.6
+
+mount core.*;
+mount collections.Map;
+mount core.database.sqlite.native.l1_pager.{
+    SnapshotView, SnapshotError,
+    snapshot_new, snapshot_with_overlay,
+    snapshot_sees_at_least, ensure_fresh,
+};
+
+fn basic_construction() {
+    let s = snapshot_new(100, 1, 0);
+    assert_eq(s.watermark(), 100);
+    assert_eq(s.generation(), 1);
+    assert_eq(s.epoch_id(), 0);
+    assert_eq(s.overlay_size(), 0);
+    assert_eq(s.lookup(42), -1);
+}
+
+fn with_overlay() {
+    let mut map: Map<Int, Int> = Map.new();
+    let _ = map.insert(1, 32);
+    let _ = map.insert(2, 4128);
+    let s = snapshot_with_overlay(100, 1, 0, map);
+    assert_eq(s.overlay_size(), 2);
+    assert_eq(s.lookup(1), 32);
+    assert_eq(s.lookup(2), 4128);
+    assert_eq(s.lookup(3), -1);
+}
+
+fn staleness_ordering() {
+    let a = snapshot_new(100, 1, 0);
+    let b = snapshot_new(50, 1, 0);
+    assert(snapshot_sees_at_least(&a, &b));
+    assert(!snapshot_sees_at_least(&b, &a));
+}
+
+fn ensure_fresh_happy_and_stale() {
+    let s = snapshot_new(100, 1, 0);
+    match ensure_fresh(&s, 100) {
+        Ok(_) => {},
+        Err(_) => panic("expected Ok when watermark matches"),
+    }
+    match ensure_fresh(&s, 105) {
+        Ok(_) => panic("expected Stale when watermark moved"),
+        Err(_) => {},
+    }
+}
+
+fn main() {
+    basic_construction();
+    with_overlay();
+    staleness_ordering();
+    ensure_fresh_happy_and_stale();
+    print("snapshot_view_surface typecheck ok");
+}

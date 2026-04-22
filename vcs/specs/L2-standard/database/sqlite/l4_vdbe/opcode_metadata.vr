@@ -1,0 +1,67 @@
+// @test: typecheck-pass
+// @level: L2
+// @tier: 0
+// @tags: sqlite, native, vdbe, opcode
+// @timeout: 10000
+// @description: Opcode metadata — name, falls_through, is_branch, has_external_effect
+//
+// Spec: internal/specs/sqlite-native.md §11.2
+
+mount core.*;
+mount core.database.sqlite.native.l4_vdbe.{
+    Opcode, opcode_name, falls_through, is_branch, has_external_effect,
+};
+
+fn name_fixtures() {
+    assert_eq(opcode_name(&Init(0)), "Init");
+    assert_eq(opcode_name(&Halt(0, 0)), "Halt");
+    assert_eq(opcode_name(&Goto(5)), "Goto");
+    assert_eq(opcode_name(&Integer(42, 0)), "Integer");
+    assert_eq(opcode_name(&Add(0, 1, 2)), "Add");
+    assert_eq(opcode_name(&ResultRow(0, 3)), "ResultRow");
+    assert_eq(opcode_name(&Transaction(1)), "Transaction");
+    assert_eq(opcode_name(&Commit), "Commit");
+    assert_eq(opcode_name(&Column(0, 0, 1)), "Column");
+    assert_eq(opcode_name(&Noop), "Noop");
+}
+
+fn falls_through_behaviour() {
+    assert(falls_through(&Integer(0, 0)));
+    assert(falls_through(&Add(0, 1, 2)));
+    assert(falls_through(&ResultRow(0, 1)));
+    assert(!falls_through(&Halt(0, 0)));
+    assert(!falls_through(&Goto(5)));
+    assert(!falls_through(&Return(0)));
+}
+
+fn branch_classification() {
+    assert(is_branch(&Goto(5)));
+    assert(is_branch(&Gosub(0, 5)));
+    assert(is_branch(&Eq(0, 1, 5)));
+    assert(is_branch(&If(0, 5)));
+    assert(is_branch(&Rewind(0, 5)));
+    assert(is_branch(&SeekGE(0, 0, 1, 5)));
+    assert(!is_branch(&Integer(0, 0)));
+    assert(!is_branch(&Add(0, 1, 2)));
+    assert(!is_branch(&Halt(0, 0)));
+}
+
+fn external_effect_classification() {
+    assert(has_external_effect(&ResultRow(0, 1)));
+    assert(has_external_effect(&Insert(0, 1, 2, 0)));
+    assert(has_external_effect(&Delete(0)));
+    assert(has_external_effect(&Transaction(1)));
+    assert(has_external_effect(&Commit));
+    assert(has_external_effect(&Halt(0, 0)));
+    assert(!has_external_effect(&Add(0, 1, 2)));
+    assert(!has_external_effect(&Move(0, 1, 1)));
+    assert(!has_external_effect(&Goto(5)));
+}
+
+fn main() {
+    name_fixtures();
+    falls_through_behaviour();
+    branch_classification();
+    external_effect_classification();
+    print("opcode_metadata typecheck ok");
+}

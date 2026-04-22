@@ -1,0 +1,51 @@
+// @test: typecheck-pass
+// @level: L2
+// @tier: 0
+// @tags: sqlite, native, pager, wal, recovery
+// @timeout: 10000
+// @description: wal_scan surface — empty WAL, short file, bad magic
+//
+// Spec: internal/specs/sqlite-native.md §8.5
+
+mount core.*;
+mount collections.List;
+mount core.database.sqlite.native.l1_pager.{
+    RecoveryPlan, RecoveryError,
+    wal_scan, plan_has_recoverable_commit,
+};
+
+fn empty_buffer_short_file() {
+    let empty: List<Byte> = List.new();
+    match wal_scan(&empty, 4096) {
+        Ok(_) => panic("expected ShortFile for empty buffer"),
+        Err(_) => {},
+    }
+}
+
+fn bad_magic_rejected() {
+    let mut bad: List<Byte> = List.new();
+    let mut i: Int = 0;
+    while i < 32 {
+        bad.push(0 as Byte);
+        i = i + 1;
+    }
+    match wal_scan(&bad, 4096) {
+        Ok(_) => panic("expected BadMagic"),
+        Err(_) => {},
+    }
+}
+
+fn zero_page_size_rejected() {
+    let buf: List<Byte> = List.new();
+    match wal_scan(&buf, 0) {
+        Ok(_)  => panic("expected ZeroPageSize"),
+        Err(_) => {},
+    }
+}
+
+fn main() {
+    empty_buffer_short_file();
+    bad_magic_rejected();
+    zero_page_size_rejected();
+    print("wal_recovery_scan typecheck ok");
+}

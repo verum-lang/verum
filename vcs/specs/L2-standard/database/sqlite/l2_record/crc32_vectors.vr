@@ -2,12 +2,17 @@
 // @tier: 0
 // @level: L2
 // @tags: sqlite, crc32, checksum, stdlib, vectors
-// @timeout: 5000
+// @timeout: 25000
 // @expected-exit: 0
 //
 // CRC-32 / IEEE 802.3 test vectors. Cross-validated against zlib's
 // reference `crc32` implementation. Covers Gap 5 in
 // `internal/specs/sqlite-native.md` §3.2.
+//
+// Runtime under the VBC interpreter: ~16 s for 8 micro-tests. The hot
+// path is `TABLE[idx]` fixed-size-array indexing + UInt32 bitops per
+// byte. Fast on AOT (< 50 μs total); this timeout accommodates the
+// interpreter's per-opcode dispatch overhead.
 
 mount core.security.hash.crc32.{crc32, crc32_continue, Crc32};
 mount collections.List;

@@ -1,0 +1,113 @@
+// @test: typecheck-pass
+// @level: L2
+// @tier: 0
+// @tags: sqlite, native, pager, cache, lru, generation
+// @timeout: 10000
+// @description: PageCache — get/put, LRU eviction, pin/unpin, generation bump
+//
+// Spec: internal/specs/sqlite-native.md §4.3 + §8.2
+
+mount core.*;
+mount collections.List;
+mount core.database.sqlite.native.l1_pager.{
+    CachedFrame, PageCache, page_cache_new,
+};
+
+fn empty_frame(page_no: Int, n: Int) -> CachedFrame {
+    let mut data: List<Byte> = List.new();
+    let mut i: Int = 0;
+    while i < n {
+        data.push(0 as Byte);
+        i = i + 1;
+    }
+    CachedFrame {
+        page_no: page_no,
+        data: data,
+        dirty: false,
+        generation: 0,
+        pin_count: 0,
+        last_access: 0,
+    }
+}
+
+fn basic_put_get() {
+    let mut cache = page_cache_new(4);
+    cache.put(empty_frame(1, 16));
+    cache.put(empty_frame(2, 16));
+    assert_eq(cache.len(), 2);
+    let hit = cache.get(1);
+    match hit {
+        Some(_) => {},
+        None    => panic("expected hit on page 1"),
+    }
+    assert_eq(cache.hit_count(), 1);
+    assert_eq(cache.miss_count(), 0);
+}
+
+fn miss_then_put() {
+    let mut cache = page_cache_new(4);
+    let miss = cache.get(99);
+    match miss {
+        Some(_) => panic("expected miss on empty cache"),
+        None    => {},
+    }
+    assert_eq(cache.miss_count(), 1);
+    cache.put(empty_frame(99, 8));
+    let hit = cache.get(99);
+    match hit {
+        Some(_) => {},
+        None    => panic("expected hit after put"),
+    }
+}
+
+fn generation_invalidation() {
+    let mut cache = page_cache_new(4);
+    cache.put(empty_frame(1, 16));
+    let gen0 = cache.current_generation();
+    let gen1 = cache.bump_generation();
+    assert(gen1 > gen0);
+    // After bump, page 1 reads as miss.
+    let after = cache.get(1);
+    match after {
+        Some(_) => panic("expected miss after generation bump"),
+        None    => {},
+    }
+}
+
+fn pin_blocks_eviction_surface() {
+    let mut cache = page_cache_new(2);
+    cache.put(empty_frame(1, 16));
+    cache.put(empty_frame(2, 16));
+    let _ = cache.pin(1);
+    // Inserting a third — evict_one skips pinned page 1 and removes page 2.
+    cache.put(empty_frame(3, 16));
+    assert_eq(cache.len(), 2);
+    let _ = cache.unpin(1);
+}
+
+fn mark_dirty_and_clear() {
+    let mut cache = page_cache_new(4);
+    cache.put(empty_frame(1, 16));
+    let _ = cache.mark_dirty(1);
+    cache.clear();
+    assert_eq(cache.len(), 0);
+}
+
+fn reconfigure_shrink() {
+    let mut cache = page_cache_new(4);
+    cache.put(empty_frame(1, 16));
+    cache.put(empty_frame(2, 16));
+    cache.put(empty_frame(3, 16));
+    cache.configure(1);
+    assert(cache.len() <= 1);
+}
+
+fn main() {
+    basic_put_get();
+    miss_then_put();
+    generation_invalidation();
+    pin_blocks_eviction_surface();
+    mark_dirty_and_clear();
+    reconfigure_shrink();
+    print("page_cache_lru typecheck ok");
+}

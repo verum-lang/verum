@@ -1,0 +1,113 @@
+// @test: typecheck-pass
+// @level: L2
+// @tier: 0
+// @tags: sqlite, native, pager, journal, rollback, legacy
+// @timeout: 10000
+// @description: Rollback journal header + record serialise/parse + replay
+//
+// Spec: internal/specs/sqlite-native.md §8.7
+
+mount core.*;
+mount collections.List;
+mount core.database.sqlite.native.l1_pager.{
+    RollbackHeader, RollbackError,
+    ROLLBACK_HEADER_SIZE, rollback_magic,
+    rollback_serialize_header, rollback_parse_header,
+    rollback_record_checksum,
+    rollback_serialize_record, rollback_parse_record,
+    rollback_replay,
+};
+
+fn header_roundtrip() {
+    let h = RollbackHeader {
+        n_rec: 3 as UInt32,
+        checksum_nonce: 0xCAFEBABE as UInt32,
+        initial_db_size_pages: 10 as UInt32,
+        sector_size: 4096 as UInt32,
+        page_size: 4096 as UInt32,
+    };
+    let bytes = rollback_serialize_header(&h);
+    assert_eq(bytes.len(), ROLLBACK_HEADER_SIZE);
+    match rollback_parse_header(&bytes) {
+        Ok(p) => {
+            assert_eq(p.n_rec as Int, 3);
+            assert_eq(p.page_size as Int, 4096);
+            assert_eq(p.checksum_nonce as Int, 0xCAFEBABE);
+        }
+        Err(_) => panic("parse"),
+    }
+}
+
+fn bad_magic_rejected() {
+    let mut bad: List<Byte> = List.new();
+    let mut i: Int = 0;
+    while i < ROLLBACK_HEADER_SIZE {
+        bad.push(0 as Byte);
+        i = i + 1;
+    }
+    match rollback_parse_header(&bad) {
+        Ok(_)  => panic("zero bytes have no magic"),
+        Err(_) => {},
+    }
+}
+
+fn magic_length_is_eight() {
+    let m = rollback_magic();
+    assert_eq(m.len(), 8);
+    assert_eq(m[0] as Int, 0xD9);
+    assert_eq(m[7] as Int, 0xD7);
+}
+
+fn record_checksum_deterministic() {
+    let mut page: List<Byte> = List.new();
+    let mut i: Int = 0;
+    while i < 4096 {
+        page.push((i & 0xFF) as Byte);
+        i = i + 1;
+    }
+    let c1 = rollback_record_checksum(0xCAFEBABE as UInt32, &page);
+    let c2 = rollback_record_checksum(0xCAFEBABE as UInt32, &page);
+    assert_eq(c1 as Int, c2 as Int);
+}
+
+fn record_roundtrip() {
+    let mut page: List<Byte> = List.new();
+    let mut i: Int = 0;
+    while i < 512 {
+        page.push((i & 0xFF) as Byte);
+        i = i + 1;
+    }
+    let record = rollback_serialize_record(42 as UInt32, 0xBEEF as UInt32, &page);
+    // 4 (page_no) + 512 (payload) + 4 (checksum) = 520
+    assert_eq(record.len(), 520);
+    match rollback_parse_record(&record, 0, 512, 0xBEEF as UInt32) {
+        Ok((pn, _)) => { assert_eq(pn as Int, 42); }
+        Err(_) => panic("record parse"),
+    }
+}
+
+fn bad_checksum_rejected() {
+    let mut page: List<Byte> = List.new();
+    let mut i: Int = 0;
+    while i < 256 {
+        page.push((i & 0xFF) as Byte);
+        i = i + 1;
+    }
+    let mut record = rollback_serialize_record(1 as UInt32, 0xBEEF as UInt32, &page);
+    // Corrupt the last byte (checksum tail).
+    record[record.len() - 1] = 0xFF as Byte;
+    match rollback_parse_record(&record, 0, 256, 0xBEEF as UInt32) {
+        Ok(_)  => panic("corrupted checksum must reject"),
+        Err(_) => {},
+    }
+}
+
+fn main() {
+    header_roundtrip();
+    bad_magic_rejected();
+    magic_length_is_eight();
+    record_checksum_deterministic();
+    record_roundtrip();
+    bad_checksum_rejected();
+    print("rollback_journal_roundtrip typecheck ok");
+}

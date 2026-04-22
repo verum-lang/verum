@@ -1,0 +1,96 @@
+// @test: typecheck-pass
+// @level: L2
+// @tier: 0
+// @tags: sqlite, native, record, affinity, type-system
+// @timeout: 10000
+// @description: Affinity inference rules per SQLite §9.2
+//
+// Spec: internal/specs/sqlite-native.md §9.2
+
+mount core.*;
+mount core.database.sqlite.native.l2_record.{Affinity, infer_affinity};
+
+fn match_integer_like() {
+    match infer_affinity(&"INT".clone()) {
+        Integer => {}, _ => panic("INT → Integer"),
+    }
+    match infer_affinity(&"INTEGER".clone()) {
+        Integer => {}, _ => panic("INTEGER → Integer"),
+    }
+    match infer_affinity(&"TINYINT".clone()) {
+        Integer => {}, _ => panic("TINYINT → Integer"),
+    }
+    match infer_affinity(&"BIGINT".clone()) {
+        Integer => {}, _ => panic("BIGINT → Integer"),
+    }
+}
+
+fn match_text_like() {
+    match infer_affinity(&"TEXT".clone()) {
+        Text => {}, _ => panic("TEXT → Text"),
+    }
+    match infer_affinity(&"VARCHAR(255)".clone()) {
+        Text => {}, _ => panic("VARCHAR → Text"),
+    }
+    match infer_affinity(&"CLOB".clone()) {
+        Text => {}, _ => panic("CLOB → Text"),
+    }
+    match infer_affinity(&"NVARCHAR".clone()) {
+        Text => {}, _ => panic("NVARCHAR → Text"),
+    }
+}
+
+fn match_blob_like() {
+    match infer_affinity(&"BLOB".clone()) {
+        Blob => {}, _ => panic("BLOB → Blob"),
+    }
+    match infer_affinity(&"".clone()) {
+        Blob => {}, _ => panic("empty → Blob"),
+    }
+}
+
+fn match_real_like() {
+    match infer_affinity(&"REAL".clone()) {
+        Real => {}, _ => panic("REAL → Real"),
+    }
+    match infer_affinity(&"FLOAT".clone()) {
+        Real => {}, _ => panic("FLOAT → Real"),
+    }
+    match infer_affinity(&"DOUBLE PRECISION".clone()) {
+        Real => {}, _ => panic("DOUBLE → Real"),
+    }
+}
+
+fn match_numeric_fallback() {
+    match infer_affinity(&"NUMERIC".clone()) {
+        Numeric => {}, _ => panic("NUMERIC → Numeric"),
+    }
+    match infer_affinity(&"DECIMAL(5,2)".clone()) {
+        Numeric => {}, _ => panic("DECIMAL → Numeric"),
+    }
+    match infer_affinity(&"BOOLEAN".clone()) {
+        Numeric => {}, _ => panic("BOOLEAN → Numeric"),
+    }
+    match infer_affinity(&"DATE".clone()) {
+        Numeric => {}, _ => panic("DATE → Numeric"),
+    }
+}
+
+fn case_insensitive() {
+    match infer_affinity(&"varchar(10)".clone()) {
+        Text => {}, _ => panic("varchar lowercase"),
+    }
+    match infer_affinity(&"Integer".clone()) {
+        Integer => {}, _ => panic("Integer mixed"),
+    }
+}
+
+fn main() {
+    match_integer_like();
+    match_text_like();
+    match_blob_like();
+    match_real_like();
+    match_numeric_fallback();
+    case_insensitive();
+    print("affinity_inference typecheck ok");
+}

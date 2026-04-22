@@ -1,0 +1,95 @@
+// @test: typecheck-pass
+// @level: L2
+// @tier: 0
+// @tags: sqlite, native, vdbe, optimizer, peephole
+// @timeout: 10000
+// @description: Peephole passes — eliminate_noops, thread_jumps, optimize driver
+//
+// Spec: internal/specs/sqlite-native.md §11.5
+
+mount core.*;
+mount core.database.sqlite.native.l4_vdbe.{
+    Opcode, VdbeProgram, program_new,
+    eliminate_noops, thread_jumps, optimize,
+};
+
+fn noops_are_removed_and_jumps_remapped() {
+    // Integer 1 → r0; Noop; Goto 3 (points at Halt after Noop removed);
+    // Halt(0)
+    let mut p = program_new("".clone(), 1);
+    let _ = p.emit(Integer(1, 0));
+    let _ = p.emit(Noop);
+    let _ = p.emit(Goto(3));
+    let _ = p.emit(Halt(0, 0));
+    assert_eq(p.instruction_count(), 4);
+    let dropped = eliminate_noops(&mut p);
+    assert_eq(dropped, 1);
+    assert_eq(p.instruction_count(), 3);
+    // Goto now targets the Halt at index 2 (was 3).
+    match p.get_opcode(1) {
+        Some(Goto(t)) => { assert_eq(t, 2); }
+        _ => panic("expected Goto pointing at remapped Halt"),
+    }
+}
+
+fn thread_jumps_collapses_chain() {
+    // Goto 1; Goto 2; Goto 3; Halt
+    let mut p = program_new("".clone(), 0);
+    let _ = p.emit(Goto(1));
+    let _ = p.emit(Goto(2));
+    let _ = p.emit(Goto(3));
+    let _ = p.emit(Halt(0, 0));
+    let changed = thread_jumps(&mut p);
+    assert(changed >= 2);
+    // Every Goto now points at 3.
+    match p.get_opcode(0) {
+        Some(Goto(t)) => { assert_eq(t, 3); }
+        _ => panic("index 0 Goto → 3"),
+    }
+    match p.get_opcode(1) {
+        Some(Goto(t)) => { assert_eq(t, 3); }
+        _ => panic("index 1 Goto → 3"),
+    }
+}
+
+fn optimize_runs_both_passes() {
+    // Goto 2; Noop; Goto 4; Noop; Halt
+    let mut p = program_new("".clone(), 0);
+    let _ = p.emit(Goto(2));
+    let _ = p.emit(Noop);
+    let _ = p.emit(Goto(4));
+    let _ = p.emit(Noop);
+    let _ = p.emit(Halt(0, 0));
+    assert_eq(p.instruction_count(), 5);
+    let _ = optimize(&mut p);
+    // Two Noops dropped → 3 instructions.
+    assert_eq(p.instruction_count(), 3);
+}
+
+fn self_loop_not_collapsed() {
+    // Goto 0  (self-loop — resolver must not spin)
+    let mut p = program_new("".clone(), 0);
+    let _ = p.emit(Goto(0));
+    let _ = thread_jumps(&mut p);
+    match p.get_opcode(0) {
+        Some(Goto(t)) => { assert_eq(t, 0); }
+        _ => panic("self-loop preserved"),
+    }
+}
+
+fn empty_program_ok() {
+    let mut p = program_new("".clone(), 0);
+    let _ = eliminate_noops(&mut p);
+    let _ = thread_jumps(&mut p);
+    let _ = optimize(&mut p);
+    assert_eq(p.instruction_count(), 0);
+}
+
+fn main() {
+    noops_are_removed_and_jumps_remapped();
+    thread_jumps_collapses_chain();
+    optimize_runs_both_passes();
+    self_loop_not_collapsed();
+    empty_program_ok();
+    print("optimizer_passes typecheck ok");
+}
