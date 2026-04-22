@@ -1,0 +1,52 @@
+// @test: parse
+// @level: L1
+// @tags: types, cubical, hott, builtin, meta-function, expression
+// @timeout: 5000
+
+/// Expression-position `@builtin_*` intrinsics bind the cubical calculus
+/// primitives (`core/math/hott.vr`, `core/math/cubical.vr`). The
+/// compiler's type-checker must accept them in every position where the
+/// declared return type is already known from the surrounding
+/// let-annotation / fn-signature — without carrying a per-intrinsic
+/// name table in `verum_types`.
+///
+/// The generic rule in `infer.rs` MetaFunction branch: any meta-name
+/// beginning with `builtin_` synthesises to a fresh type variable, and
+/// bidirectional checking unifies it against the declared type. This
+/// test pins the behaviour by using every cubical intrinsic whose type
+/// is fully determined by its surrounding signature.
+
+public type I is @builtin_interval;
+
+/// Interval endpoints: value-level references to the cubical primitives.
+public let i0: I = @builtin_i0;
+public let i1: I = @builtin_i1;
+
+/// Path type constructor (elaborated to `Type::Eq` at use sites).
+public type Path<A>(a: A, b: A) is @builtin_path;
+
+/// Reflexivity: `refl(x) : Path<A>(x, x)`. The signature carries the
+/// intended return type; `@builtin_refl(x)` is accepted in the body
+/// because the generic intrinsic rule returns a fresh TypeVar that
+/// unifies against the declared `Path<A>(x, x)`.
+public fn refl<A>(x: A) -> Path<A>(x, x) {
+    @builtin_refl(x)
+}
+
+/// Interval algebra — every operation returns `I` per the declared
+/// signature. Compiler accepts the body without a specialised rule.
+public fn meet(i: I, j: I) -> I { @builtin_interval_meet(i, j) }
+public fn join(i: I, j: I) -> I { @builtin_interval_join(i, j) }
+public fn rev(i: I) -> I         { @builtin_interval_rev(i) }
+
+/// Interval-equality predicate — returns Bool.
+public fn interval_eq(i: I, j: I) -> Bool { @builtin_interval_eq(i, j) }
+
+/// Glue-type constructor — type-level intrinsic declared via
+/// `@builtin_glue` meta-type (resolved by `resolve_builtin_meta_type`
+/// in `verum_types::infer`).
+public type Glue<A>(phi: I, T: fn(I) -> Type, e: fn(i: I) -> Path<A>(T(i), A)) is @builtin_glue;
+
+fn main() {
+    print("cubical builtin expressions parsed");
+}

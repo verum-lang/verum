@@ -16455,6 +16455,45 @@ impl TypeChecker {
                             Type::Var(TypeVar::fresh())
                         }
 
+                        // -----------------------------------------------------------------
+                        // Generic opaque-intrinsic rule for `@builtin_*`.
+                        //
+                        // Any meta-function whose name begins with `builtin_` is a
+                        // compiler-level intrinsic whose semantics — and whose
+                        // return type — are attached to the *declaration site* in
+                        // stdlib code, not embedded in a table inside the
+                        // compiler. Examples (see core/math/hott.vr,
+                        // core/math/cubical.vr, core/math/epistemic.vr):
+                        //
+                        //   public let i0: I                = @builtin_i0;
+                        //   public let i1: I                = @builtin_i1;
+                        //   public fn refl<A>(x: A) -> Path<A>(x, x) { @builtin_refl(x) }
+                        //   public fn hcomp<A>(phi, walls, base) -> A { @builtin_hcomp(...) }
+                        //   public fn join(i: I, j: I) -> I          { @builtin_interval_join(i, j) }
+                        //
+                        // The use-site already carries the intended return type
+                        // via the surrounding let-annotation / fn-signature. We
+                        // therefore return a fresh type variable; bidirectional
+                        // checking unifies it against the declared type via
+                        // `synth_and_check`, and synthesis-mode callers receive a
+                        // generalizable variable instead of a wrong concrete
+                        // Unit.
+                        //
+                        // This keeps the compiler free of per-intrinsic name
+                        // tables — the only special-casing is the `builtin_`
+                        // prefix, which is the declared namespace for
+                        // compiler-bound meta-symbols (mirrored on the codegen
+                        // side in verum_vbc/src/codegen/expressions.rs §4077+).
+                        // Argument expressions are still synthesised for their
+                        // side-effects on the checker state (diagnostic
+                        // accumulation, constraint generation).
+                        n if n.starts_with("builtin_") => {
+                            for arg in args.iter() {
+                                let _ = self.synth_expr(arg);
+                            }
+                            Type::Var(TypeVar::fresh())
+                        }
+
                         // Unknown meta-function - default to unit
                         _ => Type::unit(),
                     };
