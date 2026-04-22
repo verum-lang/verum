@@ -1,40 +1,74 @@
 # Next Session — Production-Ready Push
 
-## Snapshot (2026-04-22, после module-aware types landing)
+## Snapshot (2026-04-22, после module-aware types chain)
 
 **Test status:**
 - L0 stdlib-runtime: **100%** (8/8, regression-free)
-- L0 baseline (lexer + parser + builtin-syntax): **324/324** (100%)
-- L1-core: **99.6%** (524/526) — 2 self-hosting flakes
-- L2-standard: **70.3%** (315/448) — 133 failures
-- L3-extended: **93.1%** (297/319) — 22 failures
+- L0 baseline (lexer + parser + builtin-syntax): **332/332** (100%)
+- L1-core: **98.9%** (529/535)
+- L2-standard/async/channels: **100%** (8/8) — broadcast_stream.vr closed
+- L3-extended: **90.0%** (287/319) — 32 residuals (mostly FFI/WASM/timeouts)
 
-## New in this session
+## New in this session — module-aware type resolution chain
 
-- `1ee51053` feat(types): **module-scoped type resolution for same-named
-  stdlib types**. `define_type_in_current_module` now publishes every
-  type under both unqualified and fully-qualified
-  (`{module_path}.{name}`) keys. `resolve_type_name` prefers the
-  qualified-name hit. All 4 stdlib-registration call-sites in
-  `pipeline.rs` (bootstrap + user paths × analyze/phase_type_check)
-  set `current_module_path` per module before the inner loops.
-  `resolve_type_body` for aliases, empty/non-empty records, and
-  variants (placeholder + final) goes through the module-aware helper.
-  Closes the architectural root cause for the flat-map
-  "last-registered wins" collision between same-named stdlib types
-  (`RecvError` in broadcast/channel/quic, `LockKind` in sys/sqlite,
-  etc.). L0 stdlib-runtime 8/8 + L0 baseline 324/324, zero regression.
+Three sequential architectural commits closed the class of
+"same-named stdlib type" collision bugs at its root:
 
-  **Residual:** `broadcast_stream.vr` still fails — but it's a
-  DIFFERENT bug in protocol-dispatch associated-type substitution, not
-  a type-registration issue. The stored `BroadcastReceiver.poll_next`
-  method correctly has broadcast's `RecvError` in its return type
-  (verified via debug trace), yet `lookup_method_with_args` returns
-  QUIC's `RecvError` at the call site. Investigation points:
-  `protocol.rs::lookup_protocol_method_for_type_with_args` (line ~3744)
-  and how `impl_.associated_types["Item"]` is keyed / selected when
-  multiple Stream impls share a base type name. Not a module-scope bug
-  — skip for now.
+1. **`1ee51053` feat(types): module-scoped type resolution for
+   same-named stdlib types** — `define_type_in_current_module` now
+   publishes every type under both unqualified and fully-qualified
+   (`{module_path}.{name}`) keys. `resolve_type_name` prefers the
+   qualified-name hit. All 4 stdlib-registration call-sites in
+   `pipeline.rs` (bootstrap + user paths × `compile_core_module_from_ast`
+   / `analyze_module` / `phase_type_check`) set `current_module_path`
+   per module before the inner loops. `resolve_type_body` for aliases,
+   empty/non-empty records, and variants (placeholder + final) routes
+   through the module-aware helper. Types now resolve correctly inside
+   their declaring module regardless of registration order.
+
+2. **`339abe69` fix(types): pin source module path during cross-file
+   impl block import** — the residual dispatch bug from commit 1
+   turned out to be in `import_impl_blocks_for_type`. That function
+   re-parses each impl block's method signatures via
+   `ast_to_type_lenient` and writes the resolved `TypeScheme` into
+   `inherent_methods[(TypeName, MethodName)]`. Before this commit it
+   left `self.current_module_path` untouched — so bare type
+   references inside the *source* module's impl bodies
+   (e.g. `fn poll_next(...) -> Poll<Maybe<Result<T, RecvError>>>`
+   inside `core.async.broadcast`) fell back to the flat
+   `ctx.type_defs` lookup, where whichever same-named type was
+   registered last (QUIC's `RecvError`) silently won — overwriting
+   the correct method scheme written by the direct
+   `register_impl_block` pass. New
+   `import_impl_blocks_for_type_in_module(ast, type_name,
+   source_module_path)` pins `current_module_path` to the source for
+   the duration of the import and restores at exit. Two callers
+   (hit + fallback) forward the resolved source path. `broadcast_stream.vr`
+   now passes.
+
+3. **`8a076ccf` fix(types): pin source module path during cross-file
+   type import too** — mirror of #2 for `import_types_from_module_ast`
+   which processes record-field / variant-payload types in the source
+   module's scope. New
+   `import_types_from_module_ast_in_module(ast, source_module_path)`.
+   Closes the same architectural hole on the type-side.
+
+## Investigation trace for commit 2 (worth preserving)
+
+The debug trace at registration/lookup time showed three writes to
+`BroadcastReceiver.poll_next`:
+```
+WRITE@import_impl_blocks ty=fn(&mut Context) -> Poll<Maybe<Result<_, RecvError>>>   # unresolved
+WRITE  module=core.async.broadcast ty=fn(&mut Context) -> Ready(None | Some(Ok | Err(Closed(Unit) | Lagged(Int)))) | Pending(Unit)   # correct
+WRITE@import_impl_blocks ty=fn(&mut Context) -> Poll<Maybe<Result<_, FinalSizeChanged | ResetAfterFin | ...>>>   # WRONG — QUIC
+```
+
+After commit 2, the third write lands with the correct broadcast
+variants (`Closed(Unit) | Lagged(Int)`). Key lesson: any path that
+walks a foreign module's AST and resolves bare type references MUST
+pin `current_module_path` to that foreign module first. Otherwise
+the flat `ctx.type_defs` "last-registered wins" semantics silently
+crosswire the type.
 
 ## Дополнительные закрытия этой подсессии
 - `7e659d8` fix(L0): cbgr_latency — remove spurious `using [Benchmark]` (L0 regression)
