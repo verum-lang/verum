@@ -191,6 +191,37 @@ Three sequential architectural commits closed the class of
     + VCS use qualified `EnumName.Variant` so the rename is
     binary-compatible. L2 modules: 37/41 → 39/41 (+2).
 
+18. **`933071b4` feat(types): user-declared types evict stdlib
+    variant-constructor shadow** — architectural general fix
+    replacing commit 17's manual renames. In
+    `register_type_name_only` (user-code phase only), when a user
+    declares a type, evict any existing Function / Variant binding
+    from `ctx.env` on the same simple name. Qualified bindings
+    (`HandshakeRole.Client`) stay intact. Future stdlib additions
+    with Client/Server/Internal-style variants won't re-break user
+    code.
+    New API: `TypeEnv::remove(&str) -> bool`.
+
+19. **`bb00164a` fix(stdlib): rename link_header `format` →
+    `format_link_header`** — third stdlib shadow of the built-in
+    `format(...)` formatter, surfaced by the eviction fix exposing
+    a new test's `format(...)` routing through
+    `List<LinkEntry> -> Text`.
+
+**L2 impact across this turn:**
+- L1-core: 534/537 (99.4%) stable
+- L2 modules: 31/41 → 39/41 (+8 total)
+- L2 contexts: 27/45 → 30/45 (+3 from variant eviction)
+- L0 stdlib-runtime: 8/8 stable throughout
+
+**Architectural rule** formalized from commits 16+17+18+19: stdlib
+PUBLIC symbols (functions AND variant constructors) MUST NOT
+shadow user-type names. Layered defense:
+  * Commit 18: compiler evicts stdlib variant constructors when
+    user type shadows them (zero-cost general fix).
+  * Commits 16/17/19: stdlib hygiene — no Client/Server/Internal
+    variants, no `format`/`print` function names. Defense-in-depth.
+
 **Architectural rule** formalized from commits 16+17: stdlib PUBLIC
 symbols (functions AND variant constructors) MUST NOT shadow:
   * language built-ins (`format`, `print`, `panic`, `assert`, …)
