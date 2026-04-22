@@ -1,0 +1,54 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L1
+// @tags: method-dispatch, inline-cache, protocol, empty-record, regression
+// @timeout: 5000
+// @expected-exit: 0
+//
+// Regression for the VBC interpreter's method dispatch inline cache
+// keying by method_name_id alone instead of (method_name_id,
+// receiver_type_id). When two types implement the same method name
+// (common for protocols: `MockDatabase.name` and
+// `InMemoryDatabase.name` both satisfying `Named`), the first
+// caller's resolution was silently pinned to every subsequent
+// receiver of any type.
+//
+// Before the fix, calling `a.name()` then `b.name()` where `a: A`
+// and `b: B` both implement the same-named method, produced
+// `"A"` twice. With the cache keyed by (method_id, receiver_type_id),
+// each concrete type preserves its distinct resolution.
+//
+// Root fix: `method_cache: HashMap<(u32, u32), FunctionId>` in
+// `crates/verum_vbc/src/interpreter/state.rs`, with the key computed
+// from the heap object's `type_id` (0 sentinel for non-pointer /
+// headerless receivers). Mirrors standard inline-cache discipline
+// where the cache key always includes the receiver's shape.
+
+type A is {};
+type B is {};
+
+implement A {
+    fn name(&self) -> Text { "A" }
+}
+
+implement B {
+    fn name(&self) -> Text { "B" }
+}
+
+fn main() {
+    let a = A {};
+    let b = B {};
+
+    // First call warms the cache under (method_id="name", type_id=A).
+    assert_eq(a.name(), "A");
+    // Second call must NOT hit the A-keyed cache entry — the key
+    // differs in type_id, so resolution re-runs and picks B.name.
+    assert_eq(b.name(), "B");
+
+    // Interleave to exercise the cache under both keys.
+    assert_eq(a.name(), "A");
+    assert_eq(b.name(), "B");
+    assert_eq(a.name(), "A");
+
+    print("method_cache_type_key ok");
+}

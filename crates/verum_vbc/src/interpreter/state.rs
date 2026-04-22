@@ -428,10 +428,16 @@ pub struct InterpreterState {
     /// Shared memory allocation offset (bump allocator within the block).
     pub gpu_shared_mem_offset: usize,
 
-    /// Method dispatch inline cache: (method_name_id) -> FunctionId
-    /// Caches the last resolved function for each method_id to avoid linear search
-    /// through all module functions on repeated calls to the same method.
-    pub method_cache: HashMap<u32, crate::FunctionId>,
+    /// Method dispatch inline cache: (method_name_id, receiver_type_id) -> FunctionId.
+    /// Caches the last resolved function for each (method, receiver type) pair.
+    /// Keying by method_id alone is unsound: two types implementing the same
+    /// protocol method (e.g., `MockDatabase.name` and `InMemoryDatabase.name`
+    /// both satisfying `Named`) would collide, and the first-caller's resolution
+    /// would silently apply to every subsequent receiver of either type.
+    /// type_id == 0 is the sentinel for non-pointer / headerless receivers
+    /// (primitives, nil); those retain the old by-method-name behavior since
+    /// they have no concrete receiver type anyway.
+    pub method_cache: HashMap<(u32, u32), crate::FunctionId>,
 
     /// Captured stdout output (for test execution).
     pub stdout_buffer: String,

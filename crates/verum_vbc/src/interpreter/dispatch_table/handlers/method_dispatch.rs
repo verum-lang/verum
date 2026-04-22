@@ -69,8 +69,6 @@ pub(in super::super) fn handle_call_method(state: &mut InterpreterState) -> Inte
         method_name.clone()
     };
 
-    // (removed debug print)
-
     // Try generator methods (next, has_next, collect) first
     // These are dispatched to the corresponding GenNext/GenHasNext handlers
     if receiver.is_generator() {
@@ -865,12 +863,31 @@ pub(in super::super) fn handle_call_method(state: &mut InterpreterState) -> Inte
     };
     let mut found_func_id: Option<FunctionId> = None;
 
-    // Method dispatch cache: check if we've resolved this method_id before.
-    // For builtin collections (List/Map/Set/Deque/Channel), NEVER use compiled functions
-    // because the interpreter has its own optimized handlers with correct memory layout.
-    // The is_already_qualified flag is irrelevant for builtin collections.
+    // Method dispatch cache: check if we've resolved this (method, receiver-type)
+    // pair before. The cache key includes the receiver's `type_id` so two
+    // different types implementing the same method name (e.g.,
+    // `MockDatabase.name` and `InMemoryDatabase.name`, both implementing
+    // `protocol Named`) don't collide — keying by method_id alone silently
+    // pinned the first resolution to every later receiver of any type.
+    // For non-pointer receivers (primitives, nil), the type_id slot is 0.
+    let receiver_type_id_for_cache: u32 = if receiver.is_ptr() && !receiver.is_nil() {
+        let ptr = receiver.as_ptr::<u8>();
+        if !ptr.is_null()
+            && (ptr as usize).is_multiple_of(std::mem::align_of::<heap::ObjectHeader>())
+        {
+            // SAFETY: pointer alignment verified; every heap object begins with
+            // an ObjectHeader, read-only.
+            unsafe { (*(ptr as *const heap::ObjectHeader)).type_id.0 }
+        } else { 0 }
+    } else { 0 };
+    let cache_key = (method_id, receiver_type_id_for_cache);
+
+    // For builtin collections (List/Map/Set/Deque/Channel), NEVER use compiled
+    // functions because the interpreter has its own optimized handlers with
+    // correct memory layout. The is_already_qualified flag is irrelevant for
+    // builtin collections.
     if !is_builtin_collection
-        && let Some(&cached_fid) = state.method_cache.get(&method_id) {
+        && let Some(&cached_fid) = state.method_cache.get(&cache_key) {
             // Verify the cached function still exists (should always be true within a module)
             if state.module.get_function(cached_fid).is_some() {
                 found_func_id = Some(cached_fid);
@@ -986,8 +1003,9 @@ pub(in super::super) fn handle_call_method(state: &mut InterpreterState) -> Inte
     }
 
     if let Some(target_func_id) = found_func_id {
-        // Store in method dispatch cache for future lookups
-        state.method_cache.insert(method_id, target_func_id);
+        // Store in method dispatch cache keyed by (method_id, receiver_type_id)
+        // so distinct receiver types preserve distinct resolutions.
+        state.method_cache.insert(cache_key, target_func_id);
 
         if let Some(func) = state.module.get_function(target_func_id) {
             let reg_count = func.register_count;
