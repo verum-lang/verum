@@ -6034,6 +6034,40 @@ impl ProofSearchEngine {
                 try_oracle_tactic(goal, confidence, self)
             }
 
+            // Commonly-used justification names that appear in calc
+            // chains and structured proofs but map to SMT-decidable
+            // reasoning rather than any one specialised tactic. Route
+            // them all through the `Auto` ladder so the
+            // trivial-close → structural → SMT fallback pipeline fires:
+            //
+            //   * distributivity / commutativity / associativity — ring
+            //     axioms, closed by `Ring` / `Auto` on the equation.
+            //   * arithmetic — generic LIA / nonlinear integer closure.
+            //   * reflexivity — handled by the trivial-close fast path
+            //     if sides match, SMT otherwise.
+            //   * congruence — functional congruence `f(x) == f(y)`
+            //     under `x == y`; Z3's congruence closure discharges it.
+            //   * assumption — look up goal in hypotheses (structural).
+            //   * calc — composite calc-chain justification.
+            //
+            // None of these are *meaningfully* specialised in the current
+            // engine; the appropriate behaviour is "dispatch to the full
+            // automated prover and let it decide". Promoting them to
+            // dedicated tactics would just fragment the code without
+            // changing what the SMT ends up seeing.
+            "distributivity"
+            | "commutativity"
+            | "associativity"
+            | "arithmetic"
+            | "reflexivity"
+            | "refl"
+            | "congruence"
+            | "assumption"
+            | "calc"
+            | "induction_hypothesis"
+            | "IH"
+            | "by_IH" => self.try_auto(goal),
+
             _ => Err(ProofError::TacticFailed(
                 format!("Unknown tactic: {}", name).into(),
             )),

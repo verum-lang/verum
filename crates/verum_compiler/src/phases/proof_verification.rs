@@ -476,15 +476,11 @@ fn verify_calc_chain(
             }
         })?;
 
-        // All subgoals produced by the tactic must be dischargeable
-        for sub in &sub_goals {
-            engine
-                .auto_prove(smt_ctx, &sub.goal)
-                .map_err(|e| ProofVerificationError::SubgoalFailed {
-                    goal: format!("{:?}", sub.goal).into(),
-                    reason: format!("{}", e).into(),
-                })?;
-        }
+        // All subgoals produced by the tactic must be dischargeable.
+        // Route through the `Auto` pipeline (trivial-close → structural
+        // → SMT fallback) so calc-step residuals see the full automated
+        // proof ladder, not just hint-based search.
+        discharge_subgoals(engine, smt_ctx, &sub_goals, "calc")?;
 
         verified_steps.push(VerifiedStep {
             description: Text::from(format!(
@@ -2162,7 +2158,7 @@ fn flatten_chain(
 ///   predicates (Rule 1, `T { self > 0 }`). The AST stores `self` as a
 ///   dedicated segment kind rather than an identifier, so we match it
 ///   explicitly against a `from` entry of the literal text `"self"`.
-fn substitute_ident(expr: &Expr, from_to: &[(Text, Ident)]) -> Expr {
+pub fn substitute_ident(expr: &Expr, from_to: &[(Text, Ident)]) -> Expr {
     match &expr.kind {
         ExprKind::Path(p) => {
             if p.segments.len() == 1 {
