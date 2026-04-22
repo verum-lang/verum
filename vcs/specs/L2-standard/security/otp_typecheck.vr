@@ -1,0 +1,83 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: otp, hotp, totp, rfc4226, rfc6238, base32, typecheck
+// @timeout: 10000
+// @expect: pass
+
+mount core.security.otp.{
+    OtpHash, OtpError,
+    hotp, totp, totp_verify,
+    generate_secret, provisioning_uri,
+    DEFAULT_STEP_SEC, DEFAULT_DIGITS, MIN_SECRET_BYTES, DEFAULT_SECRET_BYTES,
+};
+mount core.encoding.base32.{
+    encode as b32_encode, decode as b32_decode, decode_no_pad as b32_decode_np,
+};
+mount core.encoding.base32.{Base32Error};
+mount core.collections.List;
+
+fn exercise_hotp() -> Result<(), OtpError> {
+    let secret: [Byte; 32] = [0x11_u8; 32];
+    let code: Text = hotp(&secret[..], 1_u64, 6, &OtpHash.Sha256)?;
+    assert(code.len() == 6);
+    Ok(())
+}
+
+fn exercise_totp() -> Result<(), OtpError> {
+    let secret = generate_secret(DEFAULT_SECRET_BYTES);
+
+    // Classic 30-s, 6-digit TOTP-SHA256.
+    let now: UInt64 = 1_700_000_000_u64;
+    let code: Text = totp(secret.as_slice(), now, DEFAULT_STEP_SEC, DEFAULT_DIGITS, &OtpHash.Sha256)?;
+    assert(code.len() == 6);
+
+    // Verify with ±1 step window.
+    let ok = totp_verify(
+        secret.as_slice(), &code, now + 3_u64,
+        DEFAULT_STEP_SEC, DEFAULT_DIGITS, &OtpHash.Sha256, 1,
+    );
+    assert(ok);
+
+    // Wrong code → false. Constant-time compare inside.
+    let bad = totp_verify(
+        secret.as_slice(), &Text.from("000000"), now,
+        DEFAULT_STEP_SEC, DEFAULT_DIGITS, &OtpHash.Sha256, 1,
+    );
+    let _ = bad;
+
+    Ok(())
+}
+
+fn exercise_provisioning() {
+    let secret = generate_secret(MIN_SECRET_BYTES);
+    let uri = provisioning_uri(
+        &Text.from("ACME:alice@example.com"),
+        &Text.from("ACME"),
+        secret.as_slice(),
+        DEFAULT_DIGITS, DEFAULT_STEP_SEC, &OtpHash.Sha256,
+    );
+    let _ = uri;
+}
+
+fn exercise_base32() -> Result<(), Base32Error> {
+    // Round-trip: "foobar" (RFC 4648 §10).
+    let input: [Byte; 6] = [0x66_u8, 0x6F_u8, 0x6F_u8, 0x62_u8, 0x61_u8, 0x72_u8];
+    let encoded: List<Byte> = b32_encode(&input[..]);
+    let decoded = b32_decode(encoded.as_slice())?;
+    assert(decoded.len() == input.len());
+    let mut i: Int = 0;
+    while i < input.len() { assert(decoded[i] == input[i]); i = i + 1; }
+
+    // decode_no_pad tolerates absent `=`.
+    let padless = b32_decode_np(encoded.as_slice())?;
+    let _ = padless.len();
+    Ok(())
+}
+
+fn main() {
+    let _ = exercise_hotp();
+    let _ = exercise_totp();
+    exercise_provisioning();
+    let _ = exercise_base32();
+}

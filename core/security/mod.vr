@@ -67,6 +67,9 @@ public module x509;
 // behind ECH, MLS, Privacy Pass.
 public module hpke;
 
+// HOTP (RFC 4226) + TOTP (RFC 6238) one-time passwords.
+public module otp;
+
 // Legacy capability / region modules (pre-crypto).
 public module labels;
 public module regions;

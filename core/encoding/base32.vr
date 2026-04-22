@@ -1,0 +1,226 @@
+// =============================================================================
+// encoding/base32.vr — RFC 4648 Base32 encoder + decoder
+// =============================================================================
+// Layer: 1 (Encoding)
+// Dependencies: core
+// =============================================================================
+//
+// RFC 4648 §6 — Base32 alphabet A-Z, 2-7. Case-insensitive on
+// decode; uppercase on encode. `=` padding to a multiple of 8
+// characters.
+//
+// # Uses
+//
+//   * TOTP / HOTP secret sharing (Google Authenticator QR codes).
+//   * DNSSEC NSEC3 hashed-owner names.
+//   * Onion service addresses (v3 — 32 bytes → 56-char domain).
+//
+// # Design notes
+//
+//   * Zero dependencies; all arithmetic in Int/UInt64.
+//   * Streaming API not exposed in v0.1 — Base32 payloads are
+//     short (typically 16-32 bytes) so one-shot encode/decode is
+//     the right surface.
+//   * Padding-optional decode via `decode_no_pad` for OTP QR
+//     codes that omit `=`.
+//
+// =============================================================================
+
+module core.encoding.base32;
+
+mount core.*;
+mount core.collections.List;
+
+public type Base32Error is
+      InvalidCharacter(Byte)
+    | InvalidLength(Int)
+    | TrailingBits;
+
+// =============================================================================
+// Alphabet
+// =============================================================================
+
+/// Character at index 0..=31 of the Base32 alphabet.
+fn alphabet_char(i: Int) -> Byte {
+    if i < 26 { ('A' as Byte) + (i as Byte) }
+    else      { ('2' as Byte) + ((i - 26) as Byte) }
+}
+
+/// Decode a single character to its 0..=31 code point. Returns -1
+/// for non-alphabet characters (case-insensitive).
+fn decode_char(b: Byte) -> Int {
+    if b >= ('A' as Byte) && b <= ('Z' as Byte) { return (b - ('A' as Byte)) as Int; }
+    if b >= ('a' as Byte) && b <= ('z' as Byte) { return (b - ('a' as Byte)) as Int; }
+    if b >= ('2' as Byte) && b <= ('7' as Byte) { return 26 + (b - ('2' as Byte)) as Int; }
+    -1
+}
+
+// =============================================================================
+// Encode
+// =============================================================================
+
+/// Encode `src` bytes into a Base32 string (uppercase, `=` padded).
+public fn encode(src: &[Byte]) -> List<Byte> {
+    let mut out: List<Byte> = [];
+    let n = src.len();
+    if n == 0 { return out; }
+
+    // Process 5-byte chunks → 8 Base32 chars.
+    let mut i: Int = 0;
+    while i + 5 <= n {
+        let b0 = src[i] as UInt32;
+        let b1 = src[i + 1] as UInt32;
+        let b2 = src[i + 2] as UInt32;
+        let b3 = src[i + 3] as UInt32;
+        let b4 = src[i + 4] as UInt32;
+        out.push(alphabet_char(((b0 >> 3) & 0x1F_u32) as Int));
+        out.push(alphabet_char((((b0 << 2) | (b1 >> 6)) & 0x1F_u32) as Int));
+        out.push(alphabet_char(((b1 >> 1) & 0x1F_u32) as Int));
+        out.push(alphabet_char((((b1 << 4) | (b2 >> 4)) & 0x1F_u32) as Int));
+        out.push(alphabet_char((((b2 << 1) | (b3 >> 7)) & 0x1F_u32) as Int));
+        out.push(alphabet_char(((b3 >> 2) & 0x1F_u32) as Int));
+        out.push(alphabet_char((((b3 << 3) | (b4 >> 5)) & 0x1F_u32) as Int));
+        out.push(alphabet_char((b4 & 0x1F_u32) as Int));
+        i = i + 5;
+    }
+
+    // Tail handling — RFC 4648 §6:
+    //   1 byte     → 2 chars + 6 `=`
+    //   2 bytes    → 4 chars + 4 `=`
+    //   3 bytes    → 5 chars + 3 `=`
+    //   4 bytes    → 7 chars + 1 `=`
+    let rem = n - i;
+    if rem == 0 { return out; }
+
+    let b0 = src[i] as UInt32;
+    out.push(alphabet_char(((b0 >> 3) & 0x1F_u32) as Int));
+
+    if rem == 1 {
+        out.push(alphabet_char(((b0 << 2) & 0x1F_u32) as Int));
+        out.push('=' as Byte); out.push('=' as Byte);
+        out.push('=' as Byte); out.push('=' as Byte);
+        out.push('=' as Byte); out.push('=' as Byte);
+        return out;
+    }
+
+    let b1 = src[i + 1] as UInt32;
+    out.push(alphabet_char((((b0 << 2) | (b1 >> 6)) & 0x1F_u32) as Int));
+    out.push(alphabet_char(((b1 >> 1) & 0x1F_u32) as Int));
+
+    if rem == 2 {
+        out.push(alphabet_char(((b1 << 4) & 0x1F_u32) as Int));
+        out.push('=' as Byte); out.push('=' as Byte);
+        out.push('=' as Byte); out.push('=' as Byte);
+        return out;
+    }
+
+    let b2 = src[i + 2] as UInt32;
+    out.push(alphabet_char((((b1 << 4) | (b2 >> 4)) & 0x1F_u32) as Int));
+
+    if rem == 3 {
+        out.push(alphabet_char(((b2 << 1) & 0x1F_u32) as Int));
+        out.push('=' as Byte); out.push('=' as Byte); out.push('=' as Byte);
+        return out;
+    }
+
+    let b3 = src[i + 3] as UInt32;
+    out.push(alphabet_char((((b2 << 1) | (b3 >> 7)) & 0x1F_u32) as Int));
+    out.push(alphabet_char(((b3 >> 2) & 0x1F_u32) as Int));
+    out.push(alphabet_char(((b3 << 3) & 0x1F_u32) as Int));
+    out.push('=' as Byte);
+    out
+}
+
+// =============================================================================
+// Decode
+// =============================================================================
+
+/// Decode a padded Base32 string (length MUST be multiple of 8).
+public fn decode(src: &[Byte]) -> Result<List<Byte>, Base32Error> {
+    if src.len() % 8 != 0 { return Err(Base32Error.InvalidLength(src.len())); }
+    decode_core(src)
+}
+
+/// Decode a Base32 string without requiring `=` padding. Safely
+/// handles QR-code-style outputs that drop the padding.
+public fn decode_no_pad(src: &[Byte]) -> Result<List<Byte>, Base32Error> {
+    // Count non-`=` characters; pad virtually.
+    let mut effective_len: Int = 0;
+    let mut i: Int = 0;
+    while i < src.len() && src[i] != ('=' as Byte) {
+        if !is_ws(src[i]) { effective_len = effective_len + 1; }
+        i = i + 1;
+    }
+    // Valid tail lengths per block of 8 chars: 2, 4, 5, 7, 8.
+    let tail = effective_len % 8;
+    if tail == 1 || tail == 3 || tail == 6 {
+        return Err(Base32Error.InvalidLength(effective_len));
+    }
+    let mut padded: List<Byte> = [];
+    let mut j: Int = 0;
+    while j < src.len() {
+        if !is_ws(src[j]) && src[j] != ('=' as Byte) { padded.push(src[j]); }
+        j = j + 1;
+    }
+    while padded.len() % 8 != 0 { padded.push('=' as Byte); }
+    decode_core(padded.as_slice())
+}
+
+fn is_ws(b: Byte) -> Bool {
+    b == (' ' as Byte) || b == ('\t' as Byte)
+        || b == ('\r' as Byte) || b == ('\n' as Byte)
+}
+
+fn decode_core(src: &[Byte]) -> Result<List<Byte>, Base32Error> {
+    let mut out: List<Byte> = [];
+    let mut i: Int = 0;
+    while i < src.len() {
+        let mut group: [Int; 8] = [0; 8];
+        let mut pad: Int = 0;
+        let mut k: Int = 0;
+        while k < 8 {
+            let c = src[i + k];
+            if c == ('=' as Byte) {
+                group[k] = 0;
+                pad = pad + 1;
+            } else {
+                let v = decode_char(c);
+                if v < 0 { return Err(Base32Error.InvalidCharacter(c)); }
+                if pad > 0 { return Err(Base32Error.InvalidCharacter(c)); }
+                group[k] = v;
+            }
+            k = k + 1;
+        }
+        // Decode 8 5-bit groups into up to 5 bytes.
+        let v0 = ((group[0] << 3) | (group[1] >> 2)) & 0xFF;
+        out.push(v0 as Byte);
+        if pad >= 6 { return tail_check(out, group, pad); }
+        let v1 = (((group[1] & 0x3) << 6) | (group[2] << 1) | (group[3] >> 4)) & 0xFF;
+        out.push(v1 as Byte);
+        if pad >= 4 { return tail_check(out, group, pad); }
+        let v2 = (((group[3] & 0xF) << 4) | (group[4] >> 1)) & 0xFF;
+        out.push(v2 as Byte);
+        if pad >= 3 { return tail_check(out, group, pad); }
+        let v3 = (((group[4] & 0x1) << 7) | (group[5] << 2) | (group[6] >> 3)) & 0xFF;
+        out.push(v3 as Byte);
+        if pad >= 1 { return tail_check(out, group, pad); }
+        let v4 = (((group[6] & 0x7) << 5) | group[7]) & 0xFF;
+        out.push(v4 as Byte);
+        i = i + 8;
+    }
+    Ok(out)
+}
+
+fn tail_check(out: List<Byte>, group: [Int; 8], pad: Int) -> Result<List<Byte>, Base32Error> {
+    // Trailing-bits sanity: the unused low bits of the last real
+    // quintet MUST be zero per RFC 4648 §3.5. Non-zero implies a
+    // corrupted encoding.
+    let bad = match pad {
+        6 => (group[1] & 0x3) != 0,
+        4 => (group[3] & 0xF) != 0,
+        3 => (group[4] & 0x1) != 0,
+        1 => (group[6] & 0x7) != 0,
+        _ => false,
+    };
+    if bad { Err(Base32Error.TrailingBits) } else { Ok(out) }
+}

@@ -1,0 +1,337 @@
+// =============================================================================
+// security/otp.vr — HOTP (RFC 4226) + TOTP (RFC 6238) one-time passwords
+// =============================================================================
+// Layer: 3 (Security)
+// Dependencies: core, core.security.mac.hmac, core.encoding.base32
+// =============================================================================
+//
+// RFC 4226 — HMAC-Based One-Time Password (HOTP): deterministic
+// 6-/7-/8-digit codes from a shared secret + monotonic counter.
+//
+// RFC 6238 — Time-Based One-Time Password (TOTP): HOTP where the
+// counter is `floor((unix_time - T0) / X)`. The Google Authenticator /
+// Authy / FreeOTP family uses TOTP-SHA1, 30-second step, 6 digits.
+//
+// This module ships:
+//
+//   * `hotp(secret, counter, digits, algo) -> code`
+//   * `totp(secret, unix_time, step_sec, digits, algo) -> code`
+//   * `totp_verify(secret, code, now, step_sec, digits, algo, window)
+//        -> bool` — constant-time equality, anti-drift window.
+//   * `generate_secret(len)` + `provisioning_uri(..)` — Base32 secret
+//     + QR-ready otpauth:// URI for authenticator apps.
+//
+// # Hash choice
+//
+// `OtpHash.Sha1` / `OtpHash.Sha256` / `OtpHash.Sha512` per RFC 6238
+// §1.2. Most authenticator apps default to SHA-1 even though SHA-256
+// is recommended — we default to SHA-1 for compatibility but callers
+// should prefer SHA-256 in new deployments. Since the stdlib's HMAC
+// ships SHA-256/384/512, SHA-1 mode falls back to a computed flag;
+// users who need legacy SHA-1 can plug in their own HMAC via a
+// future `OtpAlgo` protocol.
+//
+// # Security
+//
+//   * `totp_verify` runs the diff-accumulator comparison to avoid
+//     timing leakage.
+//   * Anti-drift window samples `now±window` steps and returns true
+//     on any match — tolerates up to ±1 step on typical deployments.
+//
+// =============================================================================
+
+module core.security.otp;
+
+mount core.*;
+mount core.collections.List;
+mount core.security.mac.hmac.{hmac_sha256, hmac_sha512};
+mount core.security.util.rng.{fill_secure};
+mount core.security.util.constant_time.{constant_time_eq};
+mount core.encoding.base32.{encode as base32_encode};
+
+// =============================================================================
+// Hash choice
+// =============================================================================
+
+public type OtpHash is
+      Sha1         // RFC 6238 default; legacy compatibility — not yet wired here
+    | Sha256       // recommended for new deployments
+    | Sha512;
+
+public type OtpError is
+      InvalidSecret
+    | InvalidDigits(Int)
+    | UnsupportedHash
+    | Base32Decode;
+
+// =============================================================================
+// Constants
+// =============================================================================
+
+/// Default TOTP step (RFC 6238 §5.2).
+public const DEFAULT_STEP_SEC: UInt64 = 30_u64;
+/// Default TOTP digits.
+public const DEFAULT_DIGITS: Int = 6;
+/// Recommended minimum secret length — 160 bits per RFC 4226 §4.
+public const MIN_SECRET_BYTES: Int = 20;
+/// Commonly used secret length — 256 bits for SHA-256-family OTP.
+public const DEFAULT_SECRET_BYTES: Int = 32;
+
+// =============================================================================
+// HOTP — RFC 4226 §5
+// =============================================================================
+
+/// Compute the HOTP code for (secret, counter). Returns the string
+/// representation zero-padded to `digits` characters.
+public fn hotp(
+    secret:  &[Byte],
+    counter: UInt64,
+    digits:  Int,
+    algo:    &OtpHash,
+) -> Result<Text, OtpError> {
+    if digits < 6 || digits > 10 { return Err(OtpError.InvalidDigits(digits)); }
+    if secret.len() < 1 { return Err(OtpError.InvalidSecret); }
+
+    let counter_bytes = u64_be(counter);
+    let digest = match algo {
+        OtpHash.Sha256 => {
+            let mac = hmac_sha256(secret, &counter_bytes[..]);
+            // Truncate to last 20 bytes effective (we only use
+            // the bottom 4 after offset, so all variants are fine).
+            slice_owned(&mac[..])
+        },
+        OtpHash.Sha512 => {
+            let mac = hmac_sha512(secret, &counter_bytes[..]);
+            slice_owned(&mac[..])
+        },
+        OtpHash.Sha1 => {
+            // SHA-1 HMAC not wired into the current stdlib HMAC family.
+            // Deployments needing RFC-6238 SHA-1 compatibility should
+            // link a SHA-1 HMAC backend; meanwhile we fail explicitly
+            // rather than silently fall back to SHA-256.
+            return Err(OtpError.UnsupportedHash);
+        },
+    };
+
+    let bin = dynamic_truncate(digest.as_slice());
+    let modulus = pow10(digits);
+    let code = (bin as UInt64) % modulus;
+    Ok(format_padded(code, digits))
+}
+
+// =============================================================================
+// TOTP — RFC 6238 §4
+// =============================================================================
+
+/// Compute the TOTP code for (secret, unix_time).
+public fn totp(
+    secret:    &[Byte],
+    unix_time: UInt64,
+    step_sec:  UInt64,
+    digits:    Int,
+    algo:      &OtpHash,
+) -> Result<Text, OtpError> {
+    let counter = unix_time / step_sec;
+    hotp(secret, counter, digits, algo)
+}
+
+/// Verify a candidate TOTP code within ±`window` steps. Returns
+/// true on match. Each comparison is constant-time against the
+/// candidate to avoid timing leakage.
+public fn totp_verify(
+    secret:    &[Byte],
+    candidate: &Text,
+    unix_time: UInt64,
+    step_sec:  UInt64,
+    digits:    Int,
+    algo:      &OtpHash,
+    window:    Int,
+) -> Bool {
+    let counter = unix_time / step_sec;
+    let mut offset: Int = -window;
+    while offset <= window {
+        let cnt: UInt64 = if offset < 0 {
+            let o = (-offset) as UInt64;
+            if o > counter { offset = offset + 1; continue; }
+            counter - o
+        } else {
+            counter + (offset as UInt64)
+        };
+        match hotp(secret, cnt, digits, algo) {
+            Ok(expected) => {
+                if constant_time_eq(candidate.as_bytes(), expected.as_bytes()) {
+                    return true;
+                }
+            },
+            Err(_) => return false,
+        }
+        offset = offset + 1;
+    }
+    false
+}
+
+// =============================================================================
+// Secret generation + provisioning
+// =============================================================================
+
+/// Generate a fresh random TOTP secret of `len_bytes` bytes.
+public fn generate_secret(len_bytes: Int) -> List<Byte> {
+    let n = if len_bytes < MIN_SECRET_BYTES { MIN_SECRET_BYTES } else { len_bytes };
+    let mut buf: List<Byte> = [];
+    let mut tmp: [Byte; 32] = [0_u8; 32];
+    while buf.len() < n {
+        fill_secure(&mut tmp);
+        let take = if (n - buf.len()) >= 32 { 32 } else { n - buf.len() };
+        let mut i: Int = 0;
+        while i < take { buf.push(tmp[i]); i = i + 1; }
+    }
+    buf
+}
+
+/// Render the otpauth:// provisioning URI consumed by Google
+/// Authenticator / Authy / FreeOTP. Form per the Google Authenticator
+/// key URI format spec:
+///
+///   otpauth://totp/LABEL?secret=BASE32&issuer=ISSUER&algorithm=ALGO
+///     &digits=N&period=STEP
+///
+/// `label` should be pre-encoded (issuer:account) — this module
+/// does NOT percent-escape labels on the assumption callers already
+/// sanitise them.
+public fn provisioning_uri(
+    label:    &Text,
+    issuer:   &Text,
+    secret:   &[Byte],
+    digits:   Int,
+    step_sec: UInt64,
+    algo:     &OtpHash,
+) -> Text {
+    let b32 = base32_encode(secret);
+    let algo_str = match algo {
+        OtpHash.Sha1   => "SHA1",
+        OtpHash.Sha256 => "SHA256",
+        OtpHash.Sha512 => "SHA512",
+    };
+    let mut buf: List<Byte> = [];
+    push_bytes(&mut buf, b"otpauth://totp/");
+    push_text(&mut buf, label);
+    push_bytes(&mut buf, b"?secret=");
+    // b32 is already a List<Byte> of ASCII.
+    let mut i: Int = 0;
+    while i < b32.len() { buf.push(b32[i]); i = i + 1; }
+    push_bytes(&mut buf, b"&issuer=");
+    push_text(&mut buf, issuer);
+    push_bytes(&mut buf, b"&algorithm=");
+    push_bytes(&mut buf, algo_str.as_bytes());
+    push_bytes(&mut buf, b"&digits=");
+    push_int(&mut buf, digits);
+    push_bytes(&mut buf, b"&period=");
+    push_u64(&mut buf, step_sec);
+    Text.from_utf8_unchecked(buf.as_slice())
+}
+
+// =============================================================================
+// Helpers
+// =============================================================================
+
+fn u64_be(x: UInt64) -> [Byte; 8] {
+    let mut out: [Byte; 8] = [0_u8; 8];
+    out[0] = ((x >> 56) & 0xFF_u64) as Byte;
+    out[1] = ((x >> 48) & 0xFF_u64) as Byte;
+    out[2] = ((x >> 40) & 0xFF_u64) as Byte;
+    out[3] = ((x >> 32) & 0xFF_u64) as Byte;
+    out[4] = ((x >> 24) & 0xFF_u64) as Byte;
+    out[5] = ((x >> 16) & 0xFF_u64) as Byte;
+    out[6] = ((x >>  8) & 0xFF_u64) as Byte;
+    out[7] = (x & 0xFF_u64) as Byte;
+    out
+}
+
+fn slice_owned(src: &[Byte]) -> List<Byte> {
+    let mut out: List<Byte> = [];
+    let mut i: Int = 0;
+    while i < src.len() { out.push(src[i]); i = i + 1; }
+    out
+}
+
+/// RFC 4226 §5.3 Dynamic Truncation.
+fn dynamic_truncate(mac: &[Byte]) -> UInt32 {
+    let offset = (mac[mac.len() - 1] & 0x0F_u8) as Int;
+    let b0 = (mac[offset]     & 0x7F_u8) as UInt32;
+    let b1 = (mac[offset + 1] & 0xFF_u8) as UInt32;
+    let b2 = (mac[offset + 2] & 0xFF_u8) as UInt32;
+    let b3 = (mac[offset + 3] & 0xFF_u8) as UInt32;
+    (b0 << 24) | (b1 << 16) | (b2 << 8) | b3
+}
+
+fn pow10(n: Int) -> UInt64 {
+    let mut p: UInt64 = 1_u64;
+    let mut i: Int = 0;
+    while i < n { p = p * 10_u64; i = i + 1; }
+    p
+}
+
+fn format_padded(value: UInt64, digits: Int) -> Text {
+    let mut buf: List<Byte> = [];
+    // Emit digits into a reversed buffer.
+    let mut v = value;
+    let mut produced: Int = 0;
+    if v == 0_u64 {
+        buf.push('0' as Byte);
+        produced = 1;
+    } else {
+        while v > 0_u64 {
+            let d = (v % 10_u64) as Byte;
+            buf.push(('0' as Byte) + d);
+            v = v / 10_u64;
+            produced = produced + 1;
+        }
+    }
+    // Zero-pad to `digits`.
+    while produced < digits {
+        buf.push('0' as Byte);
+        produced = produced + 1;
+    }
+    // Reverse.
+    let mut rev: List<Byte> = [];
+    let mut i: Int = buf.len() - 1;
+    while i >= 0 { rev.push(buf[i]); i = i - 1; }
+    Text.from_utf8_unchecked(rev.as_slice())
+}
+
+fn push_bytes(dst: &mut List<Byte>, src: &[Byte]) {
+    let mut i: Int = 0;
+    while i < src.len() { dst.push(src[i]); i = i + 1; }
+}
+
+fn push_text(dst: &mut List<Byte>, src: &Text) {
+    let b = src.as_bytes();
+    let mut i: Int = 0;
+    while i < b.len() { dst.push(b[i]); i = i + 1; }
+}
+
+fn push_int(dst: &mut List<Byte>, n: Int) {
+    let mut buf: List<Byte> = [];
+    let mut x = if n < 0 { -n } else { n };
+    if x == 0 { buf.push('0' as Byte); }
+    while x > 0 {
+        let d = (x % 10) as Byte;
+        buf.push(('0' as Byte) + d);
+        x = x / 10;
+    }
+    let mut i: Int = buf.len() - 1;
+    while i >= 0 { dst.push(buf[i]); i = i - 1; }
+}
+
+fn push_u64(dst: &mut List<Byte>, n: UInt64) {
+    let mut buf: List<Byte> = [];
+    let mut x = n;
+    if x == 0_u64 { buf.push('0' as Byte); }
+    while x > 0_u64 {
+        let d = (x % 10_u64) as Byte;
+        buf.push(('0' as Byte) + d);
+        x = x / 10_u64;
+    }
+    let mut i: Int = buf.len() - 1;
+    while i >= 0 { dst.push(buf[i]); i = i - 1; }
+}

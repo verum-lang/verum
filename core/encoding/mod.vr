@@ -8,6 +8,7 @@ module core.encoding;
 
 public module json;
 public module base64;
+public module base32;
 public module hex;
 public module varint;
 public module der;
@@ -25,6 +26,9 @@ public mount .json.stringify_pretty;
 // Re-exports — Base64
 public mount .base64.Base64Error;
 public mount .base64.Base64ErrorKind;
+
+// Re-exports — Base32
+public mount .base32.Base32Error;
 
 // Re-exports — Hex
 public mount .hex.HexError;
