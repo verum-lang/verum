@@ -103,18 +103,29 @@ Three sequential architectural commits closed the class of
 
 10. **`d63c12eb` fix(vbc/codegen): pin closure return type for
     variant disambiguation** — closes `|| -> Maybe<Int> { None }`.
-    The enclosing function's return type MUST NOT leak into the
-    closure body (a closure returning `-> Bar` inside a function
-    returning `-> Foo` must disambiguate against Bar, not Foo). So
-    we unconditionally override `current_return_type_name` when
-    entering a closure body — either to the closure's own annotated
-    return (present) or to `None` (absent), restoring after.
+    Initial version unconditionally overrode on closure entry.
 
-**Not yet covered:** `let f: fn() -> Maybe<Int> = || None;` — the
-let annotation is a function type, and `extract_base_type_name`
-doesn't descend into `fn() -> ...` to pull out the return. Narrow
-follow-up. Also variant-in-collection-literal: `[None, Some(1)]`
-needs similar handling at `compile_array_literal`.
+11. **`c18b014e` fix(vbc/codegen): let(fn-type) + preserve-on-no-
+    annotation in closures** — revises 10: (a) `compile_let`
+    descends into `TypeKind::Function` return type when picking the
+    hint, so `let f: fn() -> Maybe<Int> = || None;` routes the
+    closure body correctly; (b) `compile_closure_body_*` now
+    preserves the caller's hint when the closure has no inline
+    annotation — the let-binding / param / assignment push IS
+    exactly what a bare-body closure should inherit. Still saves
+    and restores around sibling closures.
+
+12. **`24b3fad7` fix(vbc/codegen): descend into collection wrappers
+    for variant hint** — `let xs: List<Maybe<Int>> = [None, Some(1)];`
+    used "List" as the hint; the elements need "Maybe". Single-arg
+    container wrappers (`List`, `Array`, `Vec`, `Slice`, `Set`,
+    `HashSet`, `Heap`, `Shared`, `Weak`) now descend into element
+    type. `Maybe` is explicitly NOT in the list — that must yield
+    "Maybe" as hint.
+
+**L1 impact:** 533/535 → 534/537 (same 3 known residuals:
+higher_kinded HKT infer, sha256 stdlib, AOT field-offset panic in
+vtest harness). L0 stdlib-runtime 8/8 throughout.
 
 5. **`d25585cb` fix(types/context): named context bindings + lenient
    method type build** — closes `log.info("x")` typecheck failure on
