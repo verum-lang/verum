@@ -1850,10 +1850,47 @@ impl VbcCodegen {
 
     /// Compiles simple assignment.
     fn compile_assignment(&mut self, target: &Expr, value: &Expr) -> CodegenResult<Option<Reg>> {
+        // Before compiling the value, push the target's nominal type as
+        // `current_return_type_name` so that a bare variant constructor in
+        // the RHS (e.g. `f.value = None;` where `f.value: Maybe<Int>`)
+        // routes through the same cross-type disambiguation path as
+        // let-binding annotations. Mirrors the let-annotation discipline in
+        // `compile_let`. Covers three target shapes: variable (uses
+        // `variable_type_names`), field on a named base (uses
+        // `field_type_name`), and self-field (uses
+        // `self_type_name` through `field_type_name`).
+        let target_type_hint: Option<String> = match &target.kind {
+            ExprKind::Path(path) if path.segments.len() == 1 => {
+                if let PathSegment::Name(ident) = &path.segments[0] {
+                    self.ctx
+                        .variable_type_names
+                        .get(ident.name.as_str())
+                        .cloned()
+                } else {
+                    None
+                }
+            }
+            ExprKind::Field { expr: base, field } => {
+                let base_type = self.infer_expr_type_name(base);
+                base_type.and_then(|bt| {
+                    self.field_type_name(&bt, field.name.as_str()).map(|s| s.to_string())
+                })
+            }
+            _ => None,
+        };
+        let saved_assign_rt = target_type_hint.map(|hint| {
+            let base = hint.split('<').next().unwrap_or(&hint).to_string();
+            let prev = self.ctx.current_return_type_name.clone();
+            self.ctx.current_return_type_name = Some(base);
+            prev
+        });
         // Evaluate value first
         let value_reg = self
             .compile_expr(value)?
             .ok_or_else(|| CodegenError::internal("assignment value has no value"))?;
+        if let Some(prev) = saved_assign_rt {
+            self.ctx.current_return_type_name = prev;
+        }
 
         // Handle different assignment targets
         match &target.kind {
