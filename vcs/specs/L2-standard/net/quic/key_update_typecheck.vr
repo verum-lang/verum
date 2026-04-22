@@ -1,0 +1,65 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: quic, rfc9001, key-update, phase, typecheck
+// @timeout: 10000
+// @expect: pass
+
+mount core.net.quic.{
+    KeyUpdateSm, KeyUpdateError, KeyPhaseUsage, InboundPhaseAction,
+    confidentiality_limit, integrity_limit,
+};
+mount core.net.tls13.cipher_suite.{AeadKind, HashKind};
+mount core.net.tls13.keyschedule.schedule.{TrafficSecret, SecretBytes};
+
+fn make_dummy_secret() -> TrafficSecret {
+    let raw = [0_u8; 32].to_vec();
+    TrafficSecret {
+        hash:   HashKind.Sha256,
+        secret: SecretBytes.from(raw),
+    }
+}
+
+fn exercise_key_update() -> Result<(), KeyUpdateError> {
+    let rx = make_dummy_secret();
+    let tx = make_dummy_secret();
+
+    let mut sm = KeyUpdateSm.new(AeadKind.Aes128Gcm, rx, tx)?;
+    let _phase0: UInt8 = sm.current_phase();
+
+    // Phase 0: encrypt some packets, decrypt some, see an ACK.
+    let _ = sm.note_outbound_encrypted()?;
+    sm.note_inbound_decrypted();
+    sm.note_ack_current_phase();
+
+    // Still in phase 0 until we initiate.
+    let _ = sm.can_initiate();
+    let _ = sm.should_initiate_update();
+    sm.initiate_update()?;
+    let _phase1 = sm.current_phase();
+
+    // Inbound packet with peer still in OLD phase → NoChange.
+    let _action1 = sm.on_inbound_phase(sm.current_phase());
+
+    // Inbound packet with flipped phase → TryDecryptWithNextKeys.
+    let other_phase: UInt8 = if sm.current_phase() == 0_u8 { 1_u8 } else { 0_u8 };
+    let action2 = sm.on_inbound_phase(other_phase);
+    let _ = action2;
+    sm.commit_inbound_phase_flip()?;
+
+    let usage: KeyPhaseUsage = sm.usage_snapshot();
+    let _ = usage.encrypted;
+    let _ = sm.exceeded_integrity_limit();
+    let _ = sm.exceeded_confidentiality_limit();
+    Ok(())
+}
+
+fn check_limits() {
+    let _: UInt64 = confidentiality_limit(&AeadKind.Aes128Gcm);
+    let _: UInt64 = integrity_limit(&AeadKind.ChaCha20Poly1305);
+}
+
+fn main() {
+    let _ = exercise_key_update();
+    check_limits();
+}

@@ -1,0 +1,318 @@
+// =============================================================================
+// net/quic/key_update.vr — RFC 9001 §6 key update state machine
+// =============================================================================
+// Layer: 5 (Network — QUIC)
+// Dependencies: core, core.net.quic.connection_sm.{QuicSpaceKeys, keys},
+//               core.net.tls13.keyschedule, core.net.tls13.cipher_suite
+// =============================================================================
+//
+// RFC 9001 §6 — once the 1-RTT keys are installed, both endpoints can
+// rotate to the next generation independently. The protocol uses a
+// single `Key Phase` bit in the 1-RTT short-header first-byte:
+//
+//     bit 2 (0x04) = current key phase  (toggles on each rotation)
+//
+// Correctness rules enforced by this module:
+//
+//   * § 6.1  — "An endpoint MUST NOT initiate a subsequent key update
+//     unless it has received an acknowledgment for a packet that was
+//     sent protected with keys from the current key phase."
+//
+//     We expose `note_ack_received(pn)` to track which phase the most
+//     recent ack belongs to. `can_initiate()` returns true only when
+//     the most recent ack is from the *current* phase.
+//
+//   * § 6.2  — On receiving a packet whose key_phase bit differs from
+//     the current phase, the receiver attempts decrypt with the NEXT
+//     generation keys. On success, it:
+//         (a) commits to the new phase,
+//         (b) discards the previous (now-retired) keys,
+//         (c) prepares next-next generation keys for the subsequent
+//             rotation.
+//
+//     We expose `on_inbound_phase(observed_phase)` → `Action`.
+//
+//   * § 6.3  — "Endpoints MUST count the number of encrypted packets
+//     for each set of keys. If the total … exceeds a cipher-specific
+//     confidentiality limit, the endpoint MUST stop using those keys."
+//
+//     We ship `KeyPhaseUsage` + a per-cipher hard limit table (RFC
+//     9001 §6.6). Callers drive `note_outbound_encrypted()` /
+//     `note_inbound_decrypted()` from their tx/rx paths and check
+//     `should_initiate_update()` / `exceeded_integrity_limit()`.
+//
+// =============================================================================
+
+module core.net.quic.key_update;
+
+mount core.*;
+mount core.net.tls13.cipher_suite.{AeadKind};
+mount core.net.tls13.keyschedule.schedule.{TrafficSecret};
+mount core.net.quic.connection_sm.{QuicSpaceKeys};
+mount core.net.quic.connection_sm.keys.{derive_space_keys, aead_key_len_for, is_chacha_aead, QuicKeyError};
+
+// =============================================================================
+// Per-phase counters — drive key-update cadence + enforce RFC 9001 §6.6
+// =============================================================================
+
+public type KeyPhaseUsage is {
+    /// Number of successfully encrypted packets in this phase.
+    encrypted: UInt64,
+    /// Number of successfully decrypted packets in this phase.
+    decrypted: UInt64,
+    /// Integrity failures observed on the inbound path (drops).
+    integrity_failures: UInt64,
+};
+
+implement KeyPhaseUsage {
+    public fn new() -> KeyPhaseUsage {
+        KeyPhaseUsage {
+            encrypted: 0_u64, decrypted: 0_u64, integrity_failures: 0_u64,
+        }
+    }
+}
+
+// =============================================================================
+// Cipher-specific confidentiality + integrity limits (RFC 9001 §6.6)
+// =============================================================================
+
+/// Maximum encrypted-packet count before keys MUST be retired
+/// (confidentiality limit, RFC 9001 §6.6 Table 2).
+public fn confidentiality_limit(aead: &AeadKind) -> UInt64 {
+    match aead {
+        AeadKind.Aes128Gcm        => (1_u64 << 23_u64),           // 2^23
+        AeadKind.Aes256Gcm        => (1_u64 << 23_u64),
+        AeadKind.ChaCha20Poly1305 => 18_446_744_073_709_551_615_u64, // 2^64-1 (effectively unlimited)
+        AeadKind.Aes128Ccm        => (1_u64 << 23_u64),
+        AeadKind.Aes128Ccm8       => (1_u64 << 21_u64),
+        AeadKind.Unknown          => 1_u64,
+    }
+}
+
+/// Maximum permitted integrity-failure count before keys MUST be
+/// discarded (RFC 9001 §6.6 Table 3).
+public fn integrity_limit(aead: &AeadKind) -> UInt64 {
+    match aead {
+        AeadKind.Aes128Gcm        => (1_u64 << 52_u64),
+        AeadKind.Aes256Gcm        => (1_u64 << 52_u64),
+        AeadKind.ChaCha20Poly1305 => (1_u64 << 36_u64),
+        AeadKind.Aes128Ccm        => (1_u64 << 21_u64),           // conservative; spec Table 3
+        AeadKind.Aes128Ccm8       => (1_u64 << 21_u64),
+        AeadKind.Unknown          => 1_u64,
+    }
+}
+
+// =============================================================================
+// The state machine
+// =============================================================================
+
+public type KeyUpdateError is
+      PendingRotationInProgress
+    | PeerInitiatedTooEarly
+    | DeriveFailed
+    | IntegrityLimitExceeded
+    | ConfidentialityLimitExceeded;
+
+/// Outcome of an inbound phase observation.
+public type InboundPhaseAction is
+      NoChange                      // peer is still in our current phase
+    | TryDecryptWithNextKeys        // peer has flipped; attempt with prepared next keys
+    | MustDiscardKeys;              // confidentiality/integrity limit hit — fatal
+
+public type KeyUpdateSm is {
+    aead:                 AeadKind,
+    key_len:              Int,
+    use_chacha:           Bool,
+
+    /// Current bit — flips 0 → 1 → 0 on each rotation.
+    phase:                UInt8,
+
+    /// Current-phase secrets + AEAD keys (tx/rx same after negotiation).
+    current_rx_secret:    TrafficSecret,
+    current_tx_secret:    TrafficSecret,
+    current_rx_keys:      QuicSpaceKeys,
+    current_tx_keys:      QuicSpaceKeys,
+
+    /// Next-phase secrets + keys, pre-computed so the decrypt-then-
+    /// commit path in §6.2 is zero-allocation.
+    next_rx_secret:       TrafficSecret,
+    next_tx_secret:       TrafficSecret,
+    next_rx_keys:         QuicSpaceKeys,
+    next_tx_keys:         QuicSpaceKeys,
+
+    /// Per-phase counters.
+    usage:                KeyPhaseUsage,
+
+    /// True once we've observed at least one encrypted packet ACKed
+    /// under the current keys — §6.1 prohibits initiating again
+    /// otherwise.
+    current_phase_ack:    Bool,
+};
+
+implement KeyUpdateSm {
+    /// Construct from the initial 1-RTT traffic secrets produced by
+    /// the TLS handshake. Pre-computes next-phase material so the
+    /// first rotation has no latency penalty.
+    public fn new(
+        aead:    AeadKind,
+        rx_secret: TrafficSecret,
+        tx_secret: TrafficSecret,
+    ) -> Result<KeyUpdateSm, KeyUpdateError> {
+        let key_len = aead_key_len_for(&aead);
+        let chacha  = is_chacha_aead(&aead);
+
+        let current_rx_keys = derive_space_keys(&rx_secret, key_len, chacha)
+            .map_err(|_| KeyUpdateError.DeriveFailed)?;
+        let current_tx_keys = derive_space_keys(&tx_secret, key_len, chacha)
+            .map_err(|_| KeyUpdateError.DeriveFailed)?;
+
+        let next_rx_secret = rx_secret.next_generation()
+            .map_err(|_| KeyUpdateError.DeriveFailed)?;
+        let next_tx_secret = tx_secret.next_generation()
+            .map_err(|_| KeyUpdateError.DeriveFailed)?;
+
+        let next_rx_keys = derive_space_keys(&next_rx_secret, key_len, chacha)
+            .map_err(|_| KeyUpdateError.DeriveFailed)?;
+        let next_tx_keys = derive_space_keys(&next_tx_secret, key_len, chacha)
+            .map_err(|_| KeyUpdateError.DeriveFailed)?;
+
+        Ok(KeyUpdateSm {
+            aead: aead, key_len: key_len, use_chacha: chacha,
+            phase: 0_u8,
+            current_rx_secret: rx_secret, current_tx_secret: tx_secret,
+            current_rx_keys: current_rx_keys, current_tx_keys: current_tx_keys,
+            next_rx_secret: next_rx_secret, next_tx_secret: next_tx_secret,
+            next_rx_keys: next_rx_keys, next_tx_keys: next_tx_keys,
+            usage: KeyPhaseUsage.new(),
+            current_phase_ack: false,
+        })
+    }
+
+    /// Inspect the current `Key Phase` bit value to set in outbound
+    /// short-header first-byte.
+    public fn current_phase(&self) -> UInt8 { self.phase }
+
+    /// §6.1 — ok to start a self-initiated rotation?
+    public fn can_initiate(&self) -> Bool { self.current_phase_ack }
+
+    /// Should we initiate a rotation because we're approaching the
+    /// confidentiality limit? Callers may also initiate for other
+    /// reasons (time-based rotation, peer pressure).
+    public fn should_initiate_update(&self) -> Bool {
+        self.current_phase_ack
+            && self.usage.encrypted * 2_u64 >= confidentiality_limit(&self.aead)
+    }
+
+    /// §6.6 — have we hit the hard encrypt limit?
+    public fn exceeded_confidentiality_limit(&self) -> Bool {
+        self.usage.encrypted >= confidentiality_limit(&self.aead)
+    }
+
+    /// §6.6 — hard integrity-failure limit.
+    public fn exceeded_integrity_limit(&self) -> Bool {
+        self.usage.integrity_failures >= integrity_limit(&self.aead)
+    }
+
+    /// Drive from tx path on each successful encrypt.
+    public fn note_outbound_encrypted(&mut self) -> Result<(), KeyUpdateError> {
+        self.usage.encrypted = self.usage.encrypted + 1_u64;
+        if self.exceeded_confidentiality_limit() {
+            return Err(KeyUpdateError.ConfidentialityLimitExceeded);
+        }
+        Ok(())
+    }
+
+    /// Drive from rx path on each successful decrypt.
+    public fn note_inbound_decrypted(&mut self) {
+        self.usage.decrypted = self.usage.decrypted + 1_u64;
+    }
+
+    /// Drive from rx path on a failed AEAD open (tag mismatch or
+    /// unrecognised key phase).
+    public fn note_integrity_failure(&mut self) -> Result<(), KeyUpdateError> {
+        self.usage.integrity_failures = self.usage.integrity_failures + 1_u64;
+        if self.exceeded_integrity_limit() {
+            return Err(KeyUpdateError.IntegrityLimitExceeded);
+        }
+        Ok(())
+    }
+
+    /// §6.1 — an ACK we received was protected with the current
+    /// phase keys, so we're unblocked to initiate the next rotation.
+    public fn note_ack_current_phase(&mut self) {
+        self.current_phase_ack = true;
+    }
+
+    /// Self-initiated rotation: commit the prepared next-phase tx
+    /// keys and start encrypting with the flipped phase bit. The
+    /// rx side still decrypts with the old keys until the peer also
+    /// flips (handled by `on_inbound_phase`).
+    public fn initiate_update(&mut self) -> Result<(), KeyUpdateError> {
+        if !self.current_phase_ack {
+            return Err(KeyUpdateError.PendingRotationInProgress);
+        }
+        // Swap current ← next for tx side immediately.
+        self.current_tx_secret = core.mem.replace(
+            &mut self.next_tx_secret,
+            self.current_tx_secret.clone(),
+        );
+        self.current_tx_keys = core.mem.replace(
+            &mut self.next_tx_keys,
+            self.current_tx_keys.clone(),
+        );
+        // Flip phase, reset counters, block further initiation until
+        // we see an ACK protected under the new phase.
+        self.phase = if self.phase == 0_u8 { 1_u8 } else { 0_u8 };
+        self.usage = KeyPhaseUsage.new();
+        self.current_phase_ack = false;
+
+        // Prepare next-next-phase tx secret/keys.
+        let nn_secret = self.current_tx_secret.next_generation()
+            .map_err(|_| KeyUpdateError.DeriveFailed)?;
+        let nn_keys = derive_space_keys(&nn_secret, self.key_len, self.use_chacha)
+            .map_err(|_| KeyUpdateError.DeriveFailed)?;
+        self.next_tx_secret = nn_secret;
+        self.next_tx_keys = nn_keys;
+        Ok(())
+    }
+
+    /// Inspect the phase bit from an inbound 1-RTT short-header. If
+    /// the peer has flipped, the caller should attempt decrypt with
+    /// `next_rx_keys`; on success, call `commit_inbound_phase_flip()`
+    /// to rotate the rx side.
+    public fn on_inbound_phase(&self, observed_phase: UInt8) -> InboundPhaseAction {
+        if observed_phase == self.phase { return InboundPhaseAction.NoChange; }
+        if self.exceeded_integrity_limit() { return InboundPhaseAction.MustDiscardKeys; }
+        InboundPhaseAction.TryDecryptWithNextKeys
+    }
+
+    /// Commit the rx-side flip after the caller successfully decrypts
+    /// an inbound packet under `next_rx_keys`.
+    public fn commit_inbound_phase_flip(&mut self) -> Result<(), KeyUpdateError> {
+        // Swap current ← next for rx side.
+        self.current_rx_secret = core.mem.replace(
+            &mut self.next_rx_secret,
+            self.current_rx_secret.clone(),
+        );
+        self.current_rx_keys = core.mem.replace(
+            &mut self.next_rx_keys,
+            self.current_rx_keys.clone(),
+        );
+        // Prepare next-next rx secret/keys.
+        let nn_secret = self.current_rx_secret.next_generation()
+            .map_err(|_| KeyUpdateError.DeriveFailed)?;
+        let nn_keys = derive_space_keys(&nn_secret, self.key_len, self.use_chacha)
+            .map_err(|_| KeyUpdateError.DeriveFailed)?;
+        self.next_rx_secret = nn_secret;
+        self.next_rx_keys = nn_keys;
+        Ok(())
+    }
+
+    public fn usage_snapshot(&self) -> KeyPhaseUsage {
+        KeyPhaseUsage {
+            encrypted:          self.usage.encrypted,
+            decrypted:          self.usage.decrypted,
+            integrity_failures: self.usage.integrity_failures,
+        }
+    }
+}
