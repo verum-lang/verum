@@ -1,0 +1,285 @@
+// =============================================================================
+// net/quic/stats_prometheus.vr — Prometheus text-format exporter
+// =============================================================================
+// Layer: 5 (Network — QUIC)
+// Dependencies: core, core.collections, core.net.quic.stats
+// =============================================================================
+//
+// Render `QuicStats` / `EndpointStats` as Prometheus text-exposition
+// format (OpenMetrics §3, backward-compat with classic Prom /metrics).
+//
+// # Output shape
+//
+//   # HELP verum_quic_datagrams_sent_total ...
+//   # TYPE verum_quic_datagrams_sent_total counter
+//   verum_quic_datagrams_sent_total{conn="42"} 1739
+//   verum_quic_datagrams_recv_total{conn="42"} 1654
+//   ...
+//
+// Callers pipe the resulting Text into the HTTP /metrics endpoint
+// handler. No allocation inside the hot path — one final `Text.from`
+// concatenation builds the full payload.
+//
+// # Design
+//
+//   * One stable label (`conn`) identifies the owning connection.
+//   * `counter` for monotonic totals; `gauge` for cwnd/RTT/etc.
+//   * Endpoint-level metrics use the `verum_quic_endpoint_*` prefix
+//     without the conn label — they aggregate across connections.
+//
+// =============================================================================
+
+module core.net.quic.stats_prometheus;
+
+mount core.*;
+mount core.collections.List;
+mount core.net.quic.stats.{QuicStats, EndpointStats};
+
+// =============================================================================
+// Public API
+// =============================================================================
+
+/// Render a single connection's stats as Prometheus text. `conn_label`
+/// is the free-form label value identifying the owner (typically the
+/// CID hex or a user-chosen connection tag).
+public fn render_connection(stats: &QuicStats, conn_label: &Text) -> Text {
+    let mut out = TextBuilder.new();
+    emit_connection(&mut out, stats, conn_label);
+    out.finish()
+}
+
+/// Render endpoint-level + aggregate stats. The aggregate appears
+/// with the label `conn="aggregate"`.
+public fn render_endpoint(stats: &EndpointStats) -> Text {
+    let mut out = TextBuilder.new();
+
+    emit_counter(&mut out,
+        "verum_quic_endpoint_connections_opened_total",
+        "Connections opened since process start",
+        stats.connections_opened_total, &[]);
+    emit_counter(&mut out,
+        "verum_quic_endpoint_connections_closed_total",
+        "Connections closed since process start",
+        stats.connections_closed_total, &[]);
+    emit_gauge(&mut out,
+        "verum_quic_endpoint_connections_active",
+        "Currently active QUIC connections",
+        stats.connections_active, &[]);
+    emit_counter(&mut out,
+        "verum_quic_endpoint_stateless_resets_emitted_total",
+        "Stateless reset packets emitted (RFC 9000 §10.3)",
+        stats.stateless_resets_emitted, &[]);
+    emit_counter(&mut out,
+        "verum_quic_endpoint_version_negotiations_sent_total",
+        "Version negotiation packets emitted",
+        stats.version_negotiations_sent, &[]);
+    emit_counter(&mut out,
+        "verum_quic_endpoint_retries_emitted_total",
+        "Retry packets emitted (server address-validation)",
+        stats.retries_emitted, &[]);
+    emit_counter(&mut out,
+        "verum_quic_endpoint_amplification_limit_hits_total",
+        "Amplification-limit drops (sending < 3x inbound)",
+        stats.amplification_limit_hits, &[]);
+    emit_counter(&mut out,
+        "verum_quic_endpoint_datagrams_dropped_untracked_total",
+        "Inbound datagrams dropped before matching a connection",
+        stats.datagrams_dropped_untracked, &[]);
+
+    // Embed the aggregate view labelled conn=aggregate.
+    emit_connection(&mut out, &stats.aggregate, &Text.from("aggregate"));
+    out.finish()
+}
+
+// =============================================================================
+// Per-connection emission — both for one connection and for the aggregate
+// =============================================================================
+
+fn emit_connection(out: &mut TextBuilder, s: &QuicStats, conn_label: &Text) {
+    let labels = build_conn_labels(conn_label);
+
+    emit_counter(out, "verum_quic_datagrams_sent_total", "Datagrams sent", s.datagrams_sent, labels.as_slice());
+    emit_counter(out, "verum_quic_datagrams_recv_total", "Datagrams received", s.datagrams_recv, labels.as_slice());
+    emit_counter(out, "verum_quic_datagrams_dropped_total", "Inbound datagrams dropped (parse/AEAD failure)", s.datagrams_dropped, labels.as_slice());
+    emit_counter(out, "verum_quic_bytes_sent_total", "QUIC-payload bytes sent", s.bytes_sent, labels.as_slice());
+    emit_counter(out, "verum_quic_bytes_recv_total", "QUIC-payload bytes received", s.bytes_recv, labels.as_slice());
+
+    emit_counter(out, "verum_quic_packets_initial_sent_total", "Initial packets sent", s.initial_packets_sent, labels.as_slice());
+    emit_counter(out, "verum_quic_packets_initial_recv_total", "Initial packets received", s.initial_packets_recv, labels.as_slice());
+    emit_counter(out, "verum_quic_packets_handshake_sent_total", "Handshake packets sent", s.handshake_packets_sent, labels.as_slice());
+    emit_counter(out, "verum_quic_packets_handshake_recv_total", "Handshake packets received", s.handshake_packets_recv, labels.as_slice());
+    emit_counter(out, "verum_quic_packets_onertt_sent_total", "1-RTT packets sent", s.onertt_packets_sent, labels.as_slice());
+    emit_counter(out, "verum_quic_packets_onertt_recv_total", "1-RTT packets received", s.onertt_packets_recv, labels.as_slice());
+
+    emit_counter(out, "verum_quic_packets_lost_total", "Packets declared lost (RFC 9002)", s.packets_lost, labels.as_slice());
+    emit_counter(out, "verum_quic_packets_spuriously_lost_total", "Packets declared lost then later ACKed", s.packets_spuriously_lost, labels.as_slice());
+    emit_counter(out, "verum_quic_retransmitted_packets_total", "Retransmitted packets", s.retransmitted_packets, labels.as_slice());
+    emit_counter(out, "verum_quic_timeouts_fired_total", "Timeout events (PTO + idle)", s.timeouts_fired, labels.as_slice());
+
+    emit_gauge(out, "verum_quic_congestion_window_bytes", "Congestion window", s.congestion_window_bytes, labels.as_slice());
+    emit_gauge(out, "verum_quic_bytes_in_flight", "Bytes in flight", s.bytes_in_flight, labels.as_slice());
+    emit_gauge(out, "verum_quic_rtt_smoothed_microseconds", "Smoothed RTT (μs)", s.rtt_smoothed_us, labels.as_slice());
+    emit_gauge(out, "verum_quic_rtt_min_microseconds", "Min RTT observed (μs)", s.rtt_min_us, labels.as_slice());
+    emit_gauge(out, "verum_quic_rtt_var_microseconds", "RTT variance (μs)", s.rtt_var_us, labels.as_slice());
+
+    emit_counter(out, "verum_quic_streams_opened_bidi_total", "Bidirectional streams opened", s.streams_opened_bidi, labels.as_slice());
+    emit_counter(out, "verum_quic_streams_opened_uni_total", "Unidirectional streams opened", s.streams_opened_uni, labels.as_slice());
+    emit_counter(out, "verum_quic_streams_closed_total", "Streams closed", s.streams_closed, labels.as_slice());
+    emit_counter(out, "verum_quic_stream_bytes_sent_total", "Bytes written on streams", s.stream_bytes_sent, labels.as_slice());
+    emit_counter(out, "verum_quic_stream_bytes_recv_total", "Bytes read from streams", s.stream_bytes_recv, labels.as_slice());
+
+    emit_counter(out, "verum_quic_zero_rtt_offered_total", "0-RTT flights the client offered", s.zero_rtt_offered, labels.as_slice());
+    emit_counter(out, "verum_quic_zero_rtt_accepted_total", "0-RTT flights the peer accepted", s.zero_rtt_accepted, labels.as_slice());
+    emit_counter(out, "verum_quic_zero_rtt_rejected_total", "0-RTT flights the peer rejected", s.zero_rtt_rejected, labels.as_slice());
+
+    emit_counter(out, "verum_quic_key_updates_initiated_total", "Self-initiated 1-RTT key updates", s.key_updates_initiated, labels.as_slice());
+    emit_counter(out, "verum_quic_key_updates_received_total", "Peer-initiated 1-RTT key updates", s.key_updates_received, labels.as_slice());
+    emit_counter(out, "verum_quic_integrity_failures_total", "AEAD integrity failures", s.integrity_failures, labels.as_slice());
+
+    emit_counter(out, "verum_quic_paths_validated_total", "Paths validated (RFC 9000 §8)", s.paths_validated, labels.as_slice());
+    emit_counter(out, "verum_quic_migrations_completed_total", "Connection migrations completed", s.migrations_completed, labels.as_slice());
+
+    emit_counter(out, "verum_quic_cids_issued_total", "Connection IDs issued", s.cids_issued, labels.as_slice());
+    emit_counter(out, "verum_quic_cids_retired_total", "Connection IDs retired", s.cids_retired, labels.as_slice());
+}
+
+fn build_conn_labels(conn_label: &Text) -> List<(Text, Text)> {
+    let mut labels: List<(Text, Text)> = [];
+    labels.push((Text.from("conn"), conn_label.clone()));
+    labels
+}
+
+// =============================================================================
+// Lowest-level emission helpers
+// =============================================================================
+
+fn emit_counter(
+    out: &mut TextBuilder,
+    name: &str,
+    help: &str,
+    value: UInt64,
+    labels: &[(Text, Text)],
+) {
+    emit_help_type(out, name, help, "counter");
+    emit_sample(out, name, labels, value);
+}
+
+fn emit_gauge(
+    out: &mut TextBuilder,
+    name: &str,
+    help: &str,
+    value: UInt64,
+    labels: &[(Text, Text)],
+) {
+    emit_help_type(out, name, help, "gauge");
+    emit_sample(out, name, labels, value);
+}
+
+fn emit_help_type(out: &mut TextBuilder, name: &str, help: &str, ty: &str) {
+    out.push_str("# HELP ");
+    out.push_str(name);
+    out.push_str(" ");
+    out.push_str(help);
+    out.push_str("\n# TYPE ");
+    out.push_str(name);
+    out.push_str(" ");
+    out.push_str(ty);
+    out.push_str("\n");
+}
+
+fn emit_sample(
+    out: &mut TextBuilder,
+    name: &str,
+    labels: &[(Text, Text)],
+    value: UInt64,
+) {
+    out.push_str(name);
+    if labels.len() > 0 {
+        out.push_str("{");
+        let mut i: Int = 0;
+        while i < labels.len() {
+            let (k, v) = &labels[i];
+            if i > 0 { out.push_str(","); }
+            out.push_text(k);
+            out.push_str("=\"");
+            out.push_text_escaped(v);
+            out.push_str("\"");
+            i = i + 1;
+        }
+        out.push_str("}");
+    }
+    out.push_str(" ");
+    out.push_u64(value);
+    out.push_str("\n");
+}
+
+// =============================================================================
+// TextBuilder — Text accumulator
+// =============================================================================
+
+type TextBuilder is {
+    parts: List<Text>,
+};
+
+implement TextBuilder {
+    fn new() -> TextBuilder { TextBuilder { parts: [] } }
+
+    fn push_str(&mut self, s: &str) {
+        self.parts.push(Text.from(s));
+    }
+
+    fn push_text(&mut self, t: &Text) {
+        self.parts.push(t.clone());
+    }
+
+    /// Escape `"` and `\` per Prometheus text format label-value rules.
+    fn push_text_escaped(&mut self, t: &Text) {
+        let raw = t.as_bytes();
+        let mut esc: List<Byte> = [];
+        let mut i: Int = 0;
+        while i < raw.len() {
+            let c = raw[i];
+            if c == ('\\' as Byte) {
+                esc.push('\\' as Byte); esc.push('\\' as Byte);
+            } else if c == ('"' as Byte) {
+                esc.push('\\' as Byte); esc.push('"' as Byte);
+            } else if c == ('\n' as Byte) {
+                esc.push('\\' as Byte); esc.push('n' as Byte);
+            } else {
+                esc.push(c);
+            }
+            i = i + 1;
+        }
+        self.parts.push(Text.from_utf8_unchecked(esc.as_slice()));
+    }
+
+    fn push_u64(&mut self, v: UInt64) {
+        if v == 0_u64 { self.parts.push(Text.from("0")); return; }
+        let mut digits: List<Byte> = [];
+        let mut x = v;
+        while x > 0_u64 {
+            let d = (x % 10_u64) as Byte;
+            digits.push(('0' as Byte) + d);
+            x = x / 10_u64;
+        }
+        // Reverse.
+        let mut rev: List<Byte> = [];
+        let mut i: Int = digits.len() - 1;
+        while i >= 0 { rev.push(digits[i]); i = i - 1; }
+        self.parts.push(Text.from_utf8_unchecked(rev.as_slice()));
+    }
+
+    fn finish(self) -> Text {
+        let mut all: List<Byte> = [];
+        let mut i: Int = 0;
+        while i < self.parts.len() {
+            let part_bytes = self.parts[i].as_bytes();
+            let mut j: Int = 0;
+            while j < part_bytes.len() {
+                all.push(part_bytes[j]); j = j + 1;
+            }
+            i = i + 1;
+        }
+        Text.from_utf8_unchecked(all.as_slice())
+    }
+}

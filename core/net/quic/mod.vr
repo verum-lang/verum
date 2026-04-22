@@ -72,6 +72,7 @@ public module cid_pool;                // RFC 9000 §5.1 per-connection CID mana
 public module key_update;              // RFC 9001 §6 key update state machine
 public module stats;                   // Per-connection + endpoint observability
 public module pacer;                   // RFC 9002 §7.7 token-bucket send pacer
+public module stats_prometheus;        // Prometheus-format metrics exporter
 
 mount core.*;
 mount core.time.duration.{Duration};
@@ -116,6 +117,12 @@ public mount .stats.{QuicStats, EndpointStats};
 
 // Re-exports — send pacer
 public mount .pacer.{Pacer, PacerDecision};
+
+// Re-exports — Prometheus exporter (callers: `mount core.net.quic.stats_prometheus.{...}`
+// or use the short re-export names below)
+public mount .stats_prometheus.{
+    render_connection, render_endpoint,
+};
 
 // =============================================================================
 // QuicConfig

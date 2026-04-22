@@ -1,0 +1,28 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: quic, observability, prometheus, typecheck
+// @timeout: 10000
+// @expect: pass
+
+mount core.net.quic.{QuicStats, EndpointStats};
+mount core.net.quic.stats_prometheus.{render_connection, render_endpoint};
+
+fn exercise_prometheus() {
+    let mut conn = QuicStats.new();
+    conn.datagrams_sent  = 42_u64;
+    conn.rtt_smoothed_us = 1_250_u64;
+
+    let text_conn: Text = render_connection(&conn, &Text.from("abc-connection"));
+    let _ = text_conn;
+
+    let mut ep = EndpointStats.new();
+    ep.connections_active = 2_u64;
+    ep.stateless_resets_emitted = 0_u64;
+    ep.aggregate.merge(&conn);
+
+    let text_ep: Text = render_endpoint(&ep);
+    let _ = text_ep;
+}
+
+fn main() { exercise_prometheus(); }
