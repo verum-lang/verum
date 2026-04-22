@@ -13,6 +13,7 @@ mount core.net.tls13.handshake.{
 mount core.net.tls13.cipher_suite.{CipherSuite};
 mount core.net.tls13.keyschedule.schedule.{SecretBytes};
 mount core.time.instant.{Instant};
+mount core.net.h3.client.{H3Client};
 
 fn check_issue() -> Result<(), IssueError> {
     let stek = SessionTicketKey.generate();
@@ -35,7 +36,7 @@ fn check_h3_resumed_connect_shape() {
     // H3Client.connect_resumed is an async fn taking a ClientSession +
     // an early_data byte slice. Typecheck shape only; real connect
     // requires live transport.
-    let _ = core.net.h3.client.H3Client.connect_resumed;
+    let _ = H3Client.connect_resumed;
 }
 
 fn main() {

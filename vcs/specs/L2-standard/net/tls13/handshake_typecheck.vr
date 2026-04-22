@@ -22,6 +22,8 @@ mount core.net.tls13.handshake.*;
 mount core.net.tls13.cipher_suite.{CipherSuite, HashKind};
 mount core.net.tls13.named_group.{NamedGroup};
 mount core.net.tls13.sig_scheme.{SignatureScheme};
+mount core.net.tls13.version.{LEGACY_VERSION_TLS_1_2, TLS_1_3};
+mount core.net.tls13.error.{TlsError};
 mount core.security.x509.{TrustStore};
 
 fn check_transcript() {
@@ -35,13 +37,13 @@ fn check_transcript() {
 
 fn check_handshake_encode_decode() -> Result<(), CodecError> {
     let ch = ClientHello {
-        legacy_version: core.net.tls13.version.LEGACY_VERSION_TLS_1_2,
+        legacy_version: LEGACY_VERSION_TLS_1_2,
         random:         [0_u8; 32],
         legacy_session_id: [],
         cipher_suites:  [CipherSuite.TlsAes128GcmSha256],
         legacy_compression_methods: [0_u8],
         extensions: [
-            Extension.SupportedVersionsClient { versions: [core.net.tls13.version.TLS_1_3] },
+            Extension.SupportedVersionsClient { versions: [TLS_1_3] },
             Extension.SupportedGroupsExt { groups: [NamedGroup.X25519] },
             Extension.SignatureAlgorithmsExt { schemes: [SignatureScheme.Ed25519Scheme] },
         ],
@@ -55,9 +57,10 @@ fn check_handshake_encode_decode() -> Result<(), CodecError> {
     Ok(())
 }
 
-fn check_client_sm_start() -> Result<(), core.net.tls13.error.TlsError> {
+fn check_client_sm_start() -> Result<(), TlsError> {
+    let server_name: Text = "example.com";
     let config = ClientConfig {
-        server_name: Text.from_str("example.com"),
+        server_name: server_name,
         alpn:        [],
         trust:       TrustStore.empty(),
         groups:      [NamedGroup.X25519, NamedGroup.Secp256r1],
