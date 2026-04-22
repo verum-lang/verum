@@ -1,0 +1,37 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: tls13, rfc8446, client-sm, post-handshake, nst, resumption, typecheck
+// @timeout: 10000
+// @expect: pass
+//
+// Smoke test that pins the existence of the RFC 8446 §4.6.1
+// session-resumption surface added on the client side:
+//
+//   * ClientSm gained `on_post_handshake(&self, wire: &[Byte],
+//     now: Instant) -> Result<Maybe<ClientSession>, TlsError>`.
+//     Caller routes server-sent NewSessionTicket records through
+//     this function and stores the returned sessions.
+//
+//   * The existing `resumption_typecheck.vr` covers the rest of
+//     the plumbing (ticket encrypt/decrypt, ClientSessionStore,
+//     binder math, early-data budget). This harness extends that
+//     surface by the one new entry point.
+
+mount core.net.tls13.handshake.client_sm.{ClientSm};
+mount core.net.tls13.handshake.resumption.{ClientSession, ClientSessionStore};
+
+fn check_store_plumbing(store: &mut ClientSessionStore, authority: Text, sess: ClientSession) {
+    store.insert(authority, sess);
+}
+
+fn check_sm_surface(sm: &ClientSm) {
+    // Pin the method reference; full invocation requires a configured
+    // ClientSm which the richer resumption_typecheck.vr already exercises.
+    let _ = sm.on_post_handshake;
+}
+
+fn main() {
+    let _ = check_store_plumbing;
+    let _ = check_sm_surface;
+}

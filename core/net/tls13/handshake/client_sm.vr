@@ -31,6 +31,7 @@ module core.net.tls13.handshake.client_sm;
 
 mount core.*;
 mount core.collections.List;
+mount core.time.instant.{Instant};
 mount core.security.hash.sha256.{Sha256};
 mount core.security.hash.sha384.{Sha384};
 mount core.security.hash.sha512.{Sha512};
@@ -61,9 +62,13 @@ mount core.net.tls13.handshake.extension.{
 mount core.net.tls13.handshake.messages.{
     ClientHello, ServerHello, EncryptedExtensions, CertificateMessage,
     CertificateEntry, CertificateRequest, CertificateVerify, Finished, KeyUpdate,
+    NewSessionTicket,
     HandshakeMessage,
     encode_handshake, decode_handshake, is_hello_retry_request,
     HST_CERTIFICATE_VERIFY, HST_FINISHED,
+};
+mount core.net.tls13.handshake.resumption.{
+    ClientSession, client_session_from_nst,
 };
 mount core.net.tls13.handshake.transcript.{Transcript};
 mount core.net.tls13.handshake.codec.{Reader};
@@ -223,6 +228,54 @@ implement ClientSm {
             ClientSm.WaitCertSm(inner) => on_certificate(inner, msg, wire),
             ClientSm.WaitCertVerifySm(inner) => on_certificate_verify(inner, msg, wire),
             ClientSm.WaitFinishedSm(inner) => on_finished(inner, msg, wire),
+            _ => Err(TlsError.UnexpectedMessage),
+        }
+    }
+
+    /// Feed a post-handshake message (RFC 8446 §4.6). Today this
+    /// exclusively handles `NewSessionTicket` — the server sends
+    /// zero or more after its Finished, and we convert each into a
+    /// `ClientSession` the caller stores against this connection's
+    /// authority. Other post-handshake messages (KeyUpdate, Certificate
+    /// Request from §4.6.2 post-handshake auth) are parsed and passed
+    /// through as `None` so the caller can choose to ignore them
+    /// without breaking the SM.
+    ///
+    /// Precondition: ClientSm is in `ConnectedSm`. Any other state
+    /// is a protocol violation.
+    public fn on_post_handshake(
+        &self,
+        wire: &[Byte],
+        now: Instant,
+    ) -> Result<Maybe<ClientSession>, TlsError> {
+        match self {
+            ClientSm.ConnectedSm(c) => {
+                let mut r = Reader.new(wire);
+                let msg = decode_handshake(&mut r)
+                    .map_err(|_| TlsError.DecodeError)?;
+                match msg {
+                    HandshakeMessage.NewSessionTicketMsg(nst) => {
+                        // Copy resumption_master bytes; the helper
+                        // takes ownership so the connection keeps
+                        // its own copy intact for subsequent tickets.
+                        let slice = c.resumption_master.as_slice();
+                        let mut rm_bytes: List<Byte> = [];
+                        let mut i: Int = 0;
+                        while i < slice.len() {
+                            rm_bytes.push(slice[i]);
+                            i = i + 1;
+                        }
+                        let session = client_session_from_nst(
+                            &nst,
+                            c.suite.clone(),
+                            rm_bytes,
+                            now,
+                        );
+                        Ok(Some(session))
+                    },
+                    _ => Ok(None),
+                }
+            },
             _ => Err(TlsError.UnexpectedMessage),
         }
     }

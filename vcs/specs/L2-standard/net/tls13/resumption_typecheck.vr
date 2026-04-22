@@ -14,19 +14,24 @@ mount core.net.tls13.handshake.{
     issue_ticket, decrypt_ticket, session_from_new_ticket,
     early_secret_from_psk,
 };
-mount core.net.tls13.handshake.early_data as early;
+mount core.net.tls13.handshake.early_data.{
+    derive as early_derive,
+    to_traffic_keys as early_to_traffic_keys,
+};
 mount core.net.tls13.cipher_suite.{CipherSuite, HashKind};
 mount core.net.tls13.keyschedule.schedule.{EarlySecret, SecretBytes};
 mount core.time.instant.{Instant};
 
 fn check_ticket_roundtrip() -> Result<(), TicketError> {
     let stek = SessionTicketKey.generate();
+    let rs_arr: [Byte; 32] = [0_u8; 32];
+    let alpn_bytes: &[Byte] = b"h3";
     let pt = ServerTicketPlaintext {
         cipher_suite:        CipherSuite.TlsAes128GcmSha256,
-        resumption_secret:   [0_u8; 32].to_vec(),
+        resumption_secret:   List.from_slice(&rs_arr[..]),
         max_early_data_size: 16384_u32,
         issued_at_unix:      1_700_000_000_u64,
-        alpn:                b"h3".to_vec(),
+        alpn:                List.from_slice(alpn_bytes),
     };
     let wire = issue_ticket(&stek, &pt)?;
     let recovered = decrypt_ticket(&stek, wire.as_slice())?;
@@ -37,25 +42,29 @@ fn check_ticket_roundtrip() -> Result<(), TicketError> {
 fn check_client_store() {
     let mut store = ClientSessionStore.new(16);
     let now = Instant.now();
+    let ticket_bytes: &[Byte] = b"opaque-ticket";
+    let nonce_bytes: &[Byte] = b"\x00\x01";
+    let rm_arr: [Byte; 32] = [0_u8; 32];
+    let authority: Text = "api.example.com";
     let sess = session_from_new_ticket(
-        /* ticket */      b"opaque-ticket".to_vec(),
-        /* nonce */       b"\x00\x01".to_vec(),
+        /* ticket */      List.from_slice(ticket_bytes),
+        /* nonce */       List.from_slice(nonce_bytes),
         /* age_add */     12345_u32,
         /* lifetime */    604_800_u32,
         /* suite */       CipherSuite.TlsAes128GcmSha256,
-        /* resumption */  [0_u8; 32].to_vec(),
+        /* resumption */  List.from_slice(&rm_arr[..]),
         /* max_early */   16384_u32,
         /* now */         now.clone(),
     );
-    store.insert(Text.from_str("api.example.com"), sess);
-    let _ = store.take(&Text.from_str("api.example.com"), now);
+    store.insert(authority.clone(), sess);
+    let _ = store.take(&authority, now);
     let _ = store.len();
 }
 
 fn check_binder() -> Result<(), core.security.kdf.hkdf.HkdfError> {
     let hash = HashKind.Sha256;
-    let early = EarlySecret.derive_with_psk(hash.clone(), &[0_u8; 32])?;
-    let bk = early.binder_key(false)?;    // "res binder"
+    let early_secret = EarlySecret.derive_with_psk(hash.clone(), &[0_u8; 32])?;
+    let bk = early_secret.binder_key(false)?;    // "res binder"
     let transcript_hash: [Byte; 32] = [0_u8; 32];
     let _ = compute_binder(hash.clone(), &bk, &transcript_hash)?;
     let _ = verify_binder(hash, &bk, &transcript_hash, &[0_u8; 32])?;
@@ -70,10 +79,10 @@ fn check_early_data_budget() {
 }
 
 fn check_early_keys() -> Result<(), core.security.kdf.hkdf.HkdfError> {
-    let early = early_secret_from_psk(CipherSuite.TlsAes128GcmSha256, &[0_u8; 32])?;
+    let early_secret = early_secret_from_psk(CipherSuite.TlsAes128GcmSha256, &[0_u8; 32])?;
     let transcript: [Byte; 32] = [0_u8; 32];
-    let early_keys = early::derive(&early, CipherSuite.TlsAes128GcmSha256, &transcript)?;
-    let _ = early::to_traffic_keys(&early_keys)?;
+    let early_keys = early_derive(&early_secret, CipherSuite.TlsAes128GcmSha256, &transcript)?;
+    let _ = early_to_traffic_keys(&early_keys)?;
     Ok(())
 }
 
