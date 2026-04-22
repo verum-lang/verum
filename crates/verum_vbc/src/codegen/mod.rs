@@ -7869,6 +7869,20 @@ impl VbcCodegen {
                 .copied()
                 .unwrap_or(StringId::EMPTY);
 
+            // Remap each parameter name through the same string_id_map so
+            // runtime lookups (`state.module.strings.get(param.name)`)
+            // recover the actual identifier rather than reading byte-offset
+            // garbage. Used by the CallM dispatch's "first param == self"
+            // detection to skip prepending the receiver for context methods
+            // declared without `self`.
+            for param in descriptor.params.iter_mut() {
+                let codegen_idx = param.name.0 as usize;
+                param.name = string_id_map
+                    .get(codegen_idx)
+                    .copied()
+                    .unwrap_or(StringId::EMPTY);
+            }
+
             // Store decoded instructions for LLVM lowering (AOT path).
             // The LLVM lowering reads from descriptor.instructions rather than
             // decoding from raw bytecode.

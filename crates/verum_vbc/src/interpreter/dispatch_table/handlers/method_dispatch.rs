@@ -1012,15 +1012,37 @@ pub(in super::super) fn handle_call_method(state: &mut InterpreterState) -> Inte
             let return_pc = state.pc();
             let caller_base = state.reg_base();
 
+            // Some method-shaped calls dispatch to functions that DON'T take
+            // self — most commonly context methods declared without `&self`
+            // (`context Logger { fn log(tag: Text, message: Text); }`). For
+            // those, prepending the receiver as r0 shifts every real arg one
+            // slot too far and produces "tag={empty record}" / "message=<the
+            // intended tag>" symptoms. Detect by inspecting the callee's
+            // first param name: if it's not `self`, copy args directly into
+            // r0+ without prepending the receiver.
+            let takes_self = func.params.first()
+                .and_then(|p| state.module.strings.get(p.name))
+                .map(|n| n == "self")
+                .unwrap_or(true);
+
             let new_base = state.call_stack.push_frame(target_func_id, reg_count, return_pc, dst)?;
             state.registers.push_frame(reg_count);
 
-            // First arg is receiver (self)
-            state.registers.set(new_base, Reg(0), receiver);
-            // Copy remaining arguments
-            for i in 0..args.count {
-                let arg_value = state.registers.get(caller_base, Reg(args.start.0 + i as u16));
-                state.registers.set(new_base, Reg(i as u16 + 1), arg_value);
+            if takes_self {
+                // First arg is receiver (self)
+                state.registers.set(new_base, Reg(0), receiver);
+                // Copy remaining arguments
+                for i in 0..args.count {
+                    let arg_value = state.registers.get(caller_base, Reg(args.start.0 + i as u16));
+                    state.registers.set(new_base, Reg(i as u16 + 1), arg_value);
+                }
+            } else {
+                // Static method dispatched via CallM (e.g., context method
+                // with no `self`). Skip the receiver and copy args into r0+.
+                for i in 0..args.count {
+                    let arg_value = state.registers.get(caller_base, Reg(args.start.0 + i as u16));
+                    state.registers.set(new_base, Reg(i as u16), arg_value);
+                }
             }
 
             state.set_pc(0);

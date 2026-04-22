@@ -1,0 +1,245 @@
+// =============================================================================
+// base/string_distance.vr — Levenshtein + Jaro-Winkler string distance
+// =============================================================================
+// Layer: 0 (Base)
+// Dependencies: core, core.collections
+// =============================================================================
+//
+// String-distance helpers for "did you mean X?" suggestions, typo
+// correction, record-linkage dedup, fuzzy search, and command-line
+// nearest-match hints (Git / Cargo / rustup all ship one).
+//
+// # Algorithms
+//
+//   * Levenshtein — edit distance (insert / delete / substitute);
+//     O(m·n) time, O(min(m,n)) space via rolling window.
+//   * Levenshtein bounded — early-terminating variant that aborts
+//     when distance exceeds a threshold; O(threshold · min(m,n))
+//     average.
+//   * Jaro — position-and-match similarity in [0, 1].
+//   * Jaro-Winkler — Jaro with a common-prefix boost; the
+//     record-linkage default (U.S. Census Bureau dedup).
+//
+// All operate on byte slices (UTF-8 bytes) for simplicity.
+// Grapheme-cluster-aware versions can layer on top once the
+// stdlib exposes a `Text.graphemes()` iterator.
+//
+// # API
+//
+// ```
+// let d: Int = string_distance.levenshtein(b"kitten", b"sitting");           // 3
+// let sim: Float = string_distance.jaro_winkler(b"martha", b"marhta");       // ~0.961
+//
+// // "did you mean" with a distance cap.
+// match string_distance.closest(b"cmmit", &[b"commit", b"branch", b"checkout"], 2) {
+//     Some((hint, d)) => print(f"did you mean '{hint}'? ({d} edits)"),
+//     None            => print("no close match"),
+// }
+// ```
+//
+// =============================================================================
+
+module core.base.string_distance;
+
+mount core.*;
+mount core.collections.List;
+
+// =============================================================================
+// Levenshtein
+// =============================================================================
+
+/// Full Levenshtein distance. Returns the minimum number of
+/// single-character edits (insert / delete / substitute) to
+/// transform `a` into `b`.
+public fn levenshtein(a: &[Byte], b: &[Byte]) -> Int {
+    let m = a.len();
+    let n = b.len();
+    if m == 0 { return n; }
+    if n == 0 { return m; }
+
+    // Ensure the shorter string is `b` for smaller rolling window.
+    let (short, long_) = if m < n { (a, b) } else { (b, a) };
+    let sl = short.len();
+    let ll = long_.len();
+
+    let mut prev: List<Int> = [];
+    let mut curr: List<Int> = [];
+    let mut i: Int = 0;
+    while i <= sl { prev.push(i); curr.push(0); i = i + 1; }
+
+    let mut r: Int = 1;
+    while r <= ll {
+        curr[0] = r;
+        let mut c: Int = 1;
+        while c <= sl {
+            let cost = if long_[r - 1] == short[c - 1] { 0 } else { 1 };
+            let del = prev[c] + 1;
+            let ins = curr[c - 1] + 1;
+            let sub = prev[c - 1] + cost;
+            curr[c] = min3(del, ins, sub);
+            c = c + 1;
+        }
+        // Swap prev ↔ curr without reallocating.
+        let mut k: Int = 0;
+        while k <= sl { prev[k] = curr[k]; k = k + 1; }
+        r = r + 1;
+    }
+    prev[sl]
+}
+
+/// Bounded Levenshtein — returns `None` the moment distance
+/// exceeds `max`, else `Some(distance)`. Useful for "did you
+/// mean" where we only care about near matches.
+public fn levenshtein_bounded(a: &[Byte], b: &[Byte], max: Int) -> Maybe<Int> {
+    let m = a.len();
+    let n = b.len();
+    if abs_diff(m, n) > max { return None; }
+    if m == 0 { return if n <= max { Some(n) } else { None }; }
+    if n == 0 { return if m <= max { Some(m) } else { None }; }
+
+    let (short, long_) = if m < n { (a, b) } else { (b, a) };
+    let sl = short.len();
+    let ll = long_.len();
+
+    let mut prev: List<Int> = [];
+    let mut curr: List<Int> = [];
+    let mut i: Int = 0;
+    while i <= sl { prev.push(i); curr.push(0); i = i + 1; }
+
+    let mut r: Int = 1;
+    while r <= ll {
+        curr[0] = r;
+        let mut min_in_row: Int = r;
+        let mut c: Int = 1;
+        while c <= sl {
+            let cost = if long_[r - 1] == short[c - 1] { 0 } else { 1 };
+            let del = prev[c] + 1;
+            let ins = curr[c - 1] + 1;
+            let sub = prev[c - 1] + cost;
+            let v = min3(del, ins, sub);
+            curr[c] = v;
+            if v < min_in_row { min_in_row = v; }
+            c = c + 1;
+        }
+        if min_in_row > max { return None; }
+        let mut k: Int = 0;
+        while k <= sl { prev[k] = curr[k]; k = k + 1; }
+        r = r + 1;
+    }
+    if prev[sl] <= max { Some(prev[sl]) } else { None }
+}
+
+// =============================================================================
+// Jaro + Jaro-Winkler
+// =============================================================================
+
+/// Jaro similarity in [0, 1]. 1.0 = identical, 0.0 = nothing in common.
+public fn jaro(a: &[Byte], b: &[Byte]) -> Float {
+    let m_len = a.len();
+    let n_len = b.len();
+    if m_len == 0 && n_len == 0 { return 1.0; }
+    if m_len == 0 || n_len == 0 { return 0.0; }
+
+    // Match window size.
+    let max_dim = if m_len >= n_len { m_len } else { n_len };
+    let window = max_dim / 2 - 1;
+    let search_window = if window < 0 { 0 } else { window };
+
+    let mut a_matches: List<Bool> = [];
+    let mut b_matches: List<Bool> = [];
+    let mut i: Int = 0;
+    while i < m_len { a_matches.push(false); i = i + 1; }
+    let mut j: Int = 0;
+    while j < n_len { b_matches.push(false); j = j + 1; }
+
+    // Count matches.
+    let mut matches: Int = 0;
+    let mut x: Int = 0;
+    while x < m_len {
+        let start = if x - search_window > 0 { x - search_window } else { 0 };
+        let end   = if x + search_window + 1 < n_len { x + search_window + 1 } else { n_len };
+        let mut y: Int = start;
+        while y < end {
+            if !b_matches[y] && a[x] == b[y] {
+                a_matches[x] = true;
+                b_matches[y] = true;
+                matches = matches + 1;
+                break;
+            }
+            y = y + 1;
+        }
+        x = x + 1;
+    }
+    if matches == 0 { return 0.0; }
+
+    // Count transpositions.
+    let mut transpositions: Int = 0;
+    let mut k: Int = 0;
+    let mut p: Int = 0;
+    while k < m_len {
+        if a_matches[k] {
+            while p < n_len && !b_matches[p] { p = p + 1; }
+            if p < n_len && a[k] != b[p] { transpositions = transpositions + 1; }
+            p = p + 1;
+        }
+        k = k + 1;
+    }
+
+    let m_f = matches as Float;
+    let a_f = m_len as Float;
+    let b_f = n_len as Float;
+    let t_f = (transpositions as Float) / 2.0;
+    (m_f / a_f + m_f / b_f + (m_f - t_f) / m_f) / 3.0
+}
+
+/// Jaro-Winkler similarity — Jaro plus a boost for identical
+/// leading characters (up to 4), capped at 0.1 × prefix_len
+/// × (1 - jaro). The record-linkage standard.
+public fn jaro_winkler(a: &[Byte], b: &[Byte]) -> Float {
+    let base = jaro(a, b);
+    if base < 0.7 { return base; }   // below threshold, no boost
+    let mut prefix: Int = 0;
+    let max_prefix = 4;
+    let common = if a.len() < b.len() { a.len() } else { b.len() };
+    while prefix < common && prefix < max_prefix && a[prefix] == b[prefix] {
+        prefix = prefix + 1;
+    }
+    base + (prefix as Float) * 0.1 * (1.0 - base)
+}
+
+// =============================================================================
+// "did you mean" helper
+// =============================================================================
+
+/// Find the closest candidate to `query` within `max_distance`.
+/// Returns `(best_match_index, distance)` on success.
+public fn closest<'a>(
+    query:        &[Byte],
+    candidates:   &[&'a [Byte]],
+    max_distance: Int,
+) -> Maybe<(Int, Int)> {
+    let mut best_idx: Int = -1;
+    let mut best_d: Int = max_distance + 1;
+    let mut i: Int = 0;
+    while i < candidates.len() {
+        match levenshtein_bounded(query, candidates[i], max_distance) {
+            Some(d) => if d < best_d { best_idx = i; best_d = d; },
+            None    => {},
+        }
+        i = i + 1;
+    }
+    if best_idx < 0 { None } else { Some((best_idx, best_d)) }
+}
+
+// =============================================================================
+// Helpers
+// =============================================================================
+
+fn min3(a: Int, b: Int, c: Int) -> Int {
+    let ab = if a < b { a } else { b };
+    if ab < c { ab } else { c }
+}
+
+fn abs_diff(a: Int, b: Int) -> Int {
+    if a > b { a - b } else { b - a }
+}

@@ -1,0 +1,51 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: net, cidr, rfc4632, firewall, typecheck
+// @timeout: 10000
+// @expect: pass
+
+mount core.net.cidr.{Cidr, CidrSet, CidrError, parse};
+mount core.net.addr.{IpAddr, Ipv4Addr, Ipv6Addr};
+
+fn exercise_cidr() -> Result<(), CidrError> {
+    // IPv4 /24.
+    let net: Cidr = parse(&Text.from("192.168.1.0/24"))?;
+    let probe = IpAddr.V4(Ipv4Addr.new(192_u8, 168_u8, 1_u8, 42_u8));
+    assert(net.contains(&probe));
+
+    // Outside.
+    let outside = IpAddr.V4(Ipv4Addr.new(10_u8, 0_u8, 0_u8, 1_u8));
+    assert(!net.contains(&outside));
+
+    // Prefix length introspection.
+    assert(net.prefix_len() == 24);
+    assert(net.num_addresses() == 256_u64);
+
+    // IPv6.
+    let v6 = parse(&Text.from("2001:db8::/32"))?;
+    let _ = v6.prefix_len();
+
+    // Multi-block set.
+    let mut set = CidrSet.new();
+    set.add_text(&Text.from("10.0.0.0/8"))?;
+    set.add_text(&Text.from("172.16.0.0/12"))?;
+    set.add_text(&Text.from("192.168.0.0/16"))?;
+    set.add(net);
+
+    let private_ip = IpAddr.V4(Ipv4Addr.new(10_u8, 42_u8, 7_u8, 1_u8));
+    assert(set.contains(&private_ip));
+
+    let public_ip = IpAddr.V4(Ipv4Addr.new(8_u8, 8_u8, 8_u8, 8_u8));
+    assert(!set.contains(&public_ip));
+
+    // Malformed.
+    let bad = parse(&Text.from("not a cidr"));
+    let _ = bad;
+
+    let bad2 = parse(&Text.from("10.0.0.0/99"));
+    let _ = bad2;
+    Ok(())
+}
+
+fn main() { let _ = exercise_cidr(); }

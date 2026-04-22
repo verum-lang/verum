@@ -54,6 +54,7 @@ public module nanoid;     // URL-safe short-ID generator (21 chars ≈ 126 bits)
 public module semver;     // Semantic Versioning 2.0.0 parser + comparator
 public module glob;       // Shell-style glob pattern matching (* ** ? [...])
 public module ulid;       // 128-bit time-ordered IDs (26-char Crockford Base32)
+public module string_distance;  // Levenshtein + Jaro-Winkler for fuzzy matching
 
 // =============================================================================
 // Prelude re-exports (commonly used items)

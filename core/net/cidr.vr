@@ -1,0 +1,255 @@
+// =============================================================================
+// net/cidr.vr — CIDR notation + IP-range matcher (RFC 4632 / 4291)
+// =============================================================================
+// Layer: 5 (Network)
+// Dependencies: core, core.collections, core.net.addr
+// =============================================================================
+//
+// CIDR (Classless Inter-Domain Routing) notation — the `prefix/len`
+// syntax every firewall rule, BGP route, ACL, allowlist, and
+// container-network spec uses:
+//
+//   10.0.0.0/8              — IPv4 /8
+//   192.168.1.0/24          — IPv4 /24
+//   2001:db8::/32           — IPv6 /32
+//   ::ffff:10.0.0.0/104     — IPv4-mapped v6
+//
+// This module ships:
+//
+//   * `Cidr` — one typed prefix with an IP + mask width.
+//   * `Cidr.contains(&ip)` — O(1) membership test.
+//   * `CidrSet` — collection of prefixes with O(log N) or O(N)
+//     lookup depending on configuration.
+//
+// # Design
+//
+// Byte-wise mask comparison — portable across v4 and v6 without
+// platform-specific bit intrinsics. The common cases (4-byte v4,
+// 16-byte v6) unroll at the compiler's discretion.
+//
+// # API
+//
+// ```
+// let net: Cidr = cidr.parse(&Text.from("10.0.0.0/8"))?;
+// let ip = IpAddr.V4(Ipv4Addr.parse(&Text.from("10.42.7.1"))?);
+// assert(net.contains(&ip));
+// ```
+//
+// =============================================================================
+
+module core.net.cidr;
+
+mount core.*;
+mount core.collections.List;
+mount core.net.addr.{IpAddr, Ipv4Addr, Ipv6Addr, AddrParseError};
+
+// =============================================================================
+// Typed CIDR
+// =============================================================================
+
+public type Cidr is
+      V4 { addr: Ipv4Addr, prefix_len: Int }     // 0..=32
+    | V6 { addr: Ipv6Addr, prefix_len: Int };    // 0..=128
+
+public type CidrError is
+      Malformed(Text)
+    | InvalidPrefixLen(Int)
+    | AddrParseFailed(AddrParseError);
+
+// =============================================================================
+// Parser
+// =============================================================================
+
+public fn parse(text: &Text) -> Result<Cidr, CidrError> {
+    let b = text.as_bytes();
+    // Find '/' separator.
+    let mut slash: Int = -1;
+    let mut i: Int = 0;
+    while i < b.len() {
+        if b[i] == ('/' as Byte) { slash = i; break; }
+        i = i + 1;
+    }
+    if slash < 0 {
+        return Err(CidrError.Malformed(Text.from("no '/' in CIDR")));
+    }
+    let addr_text = slice_text(b, 0, slash);
+    let len_text = slice_text(b, slash + 1, b.len());
+
+    // Parse prefix length.
+    let prefix_len = parse_int(len_text.as_bytes())
+        .ok_or_else(|| CidrError.Malformed(Text.from("bad prefix len")))?;
+
+    // Try IPv4, then IPv6.
+    match Ipv4Addr.parse(&addr_text) {
+        Ok(v4) => {
+            if prefix_len < 0 || prefix_len > 32 {
+                return Err(CidrError.InvalidPrefixLen(prefix_len));
+            }
+            return Ok(Cidr.V4 { addr: v4, prefix_len: prefix_len });
+        },
+        Err(_) => {},
+    }
+    match Ipv6Addr.parse(&addr_text) {
+        Ok(v6) => {
+            if prefix_len < 0 || prefix_len > 128 {
+                return Err(CidrError.InvalidPrefixLen(prefix_len));
+            }
+            return Ok(Cidr.V6 { addr: v6, prefix_len: prefix_len });
+        },
+        Err(e) => Err(CidrError.AddrParseFailed(e)),
+    }
+}
+
+// =============================================================================
+// Matcher
+// =============================================================================
+
+implement Cidr {
+    /// Does `ip` fall within this CIDR block?
+    public fn contains(&self, ip: &IpAddr) -> Bool {
+        match (self, ip) {
+            (Cidr.V4 { addr, prefix_len }, IpAddr.V4(probe)) => {
+                let (a1, a2, a3, a4) = addr.octets();
+                let (b1, b2, b3, b4) = probe.octets();
+                let a: [Byte; 4] = [a1, a2, a3, a4];
+                let b: [Byte; 4] = [b1, b2, b3, b4];
+                mask_equal(&a[..], &b[..], *prefix_len)
+            },
+            (Cidr.V6 { addr, prefix_len }, IpAddr.V6(probe)) => {
+                let a: [Byte; 16] = addr.octets();
+                let b: [Byte; 16] = probe.octets();
+                mask_equal(&a[..], &b[..], *prefix_len)
+            },
+            _ => false,
+        }
+    }
+
+    public fn prefix_len(&self) -> Int {
+        match self {
+            Cidr.V4 { addr: _, prefix_len } => *prefix_len,
+            Cidr.V6 { addr: _, prefix_len } => *prefix_len,
+        }
+    }
+
+    /// Number of distinct addresses the CIDR covers. Returns
+    /// UInt64 (saturates for v6 blocks larger than /64).
+    public fn num_addresses(&self) -> UInt64 {
+        let host_bits = match self {
+            Cidr.V4 { addr: _, prefix_len } => 32 - *prefix_len,
+            Cidr.V6 { addr: _, prefix_len } => {
+                let n = 128 - *prefix_len;
+                if n > 63 { return 0xFFFFFFFFFFFFFFFF_u64; }
+                n
+            },
+        };
+        if host_bits >= 64 { 0xFFFFFFFFFFFFFFFF_u64 }
+        else               { 1_u64 << (host_bits as UInt64) }
+    }
+}
+
+// =============================================================================
+// CidrSet — collection lookup
+// =============================================================================
+
+public type CidrSet is {
+    blocks: List<Cidr>,
+};
+
+implement CidrSet {
+    public fn new() -> CidrSet { CidrSet { blocks: [] } }
+
+    public fn add(&mut self, cidr: Cidr) {
+        self.blocks.push(cidr);
+    }
+
+    public fn add_text(&mut self, text: &Text) -> Result<(), CidrError> {
+        let c = parse(text)?;
+        self.add(c);
+        Ok(())
+    }
+
+    /// Does ANY block in the set contain `ip`? O(N) over the blocks.
+    public fn contains(&self, ip: &IpAddr) -> Bool {
+        let mut i: Int = 0;
+        while i < self.blocks.len() {
+            if self.blocks[i].contains(ip) { return true; }
+            i = i + 1;
+        }
+        false
+    }
+
+    /// First block that contains `ip`, if any. Useful when
+    /// multiple blocks match and the caller wants the most-
+    /// specific (caller orders the set by prefix length desc).
+    public fn matching(&self, ip: &IpAddr) -> Maybe<Cidr> {
+        let mut i: Int = 0;
+        while i < self.blocks.len() {
+            if self.blocks[i].contains(ip) {
+                return Some(clone_cidr(&self.blocks[i]));
+            }
+            i = i + 1;
+        }
+        None
+    }
+
+    public fn len(&self) -> Int { self.blocks.len() }
+    public fn is_empty(&self) -> Bool { self.blocks.len() == 0 }
+}
+
+fn clone_cidr(c: &Cidr) -> Cidr {
+    match c {
+        Cidr.V4 { addr, prefix_len } =>
+            Cidr.V4 { addr: (*addr).clone(), prefix_len: *prefix_len },
+        Cidr.V6 { addr, prefix_len } =>
+            Cidr.V6 { addr: (*addr).clone(), prefix_len: *prefix_len },
+    }
+}
+
+// =============================================================================
+// Bitwise mask comparison
+// =============================================================================
+//
+// `a` and `b` are the raw byte representations (big-endian network
+// order). Compares the first `prefix_len` bits; anything past is
+// host-bits and must be ignored.
+//
+// =============================================================================
+
+fn mask_equal(a: &[Byte], b: &[Byte], prefix_len: Int) -> Bool {
+    let full_bytes = prefix_len / 8;
+    let residual_bits = prefix_len % 8;
+    let mut i: Int = 0;
+    while i < full_bytes {
+        if a[i] != b[i] { return false; }
+        i = i + 1;
+    }
+    if residual_bits > 0 {
+        let mask = (0xFF_u8 << ((8 - residual_bits) as UInt8)) & 0xFF_u8;
+        if (a[full_bytes] & mask) != (b[full_bytes] & mask) { return false; }
+    }
+    true
+}
+
+// =============================================================================
+// Helpers
+// =============================================================================
+
+fn slice_text(src: &[Byte], start: Int, end: Int) -> Text {
+    let mut out: List<Byte> = [];
+    let mut i: Int = start;
+    while i < end { out.push(src[i]); i = i + 1; }
+    Text.from_utf8_unchecked(out.as_slice())
+}
+
+fn parse_int(src: &[Byte]) -> Maybe<Int> {
+    if src.len() == 0 { return None; }
+    let mut v: Int = 0;
+    let mut i: Int = 0;
+    while i < src.len() {
+        let c = src[i];
+        if c < ('0' as Byte) || c > ('9' as Byte) { return None; }
+        v = v * 10 + ((c - ('0' as Byte)) as Int);
+        i = i + 1;
+    }
+    Some(v)
+}

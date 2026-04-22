@@ -1,0 +1,71 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: base, string, distance, levenshtein, jaro, typecheck
+// @timeout: 10000
+// @expect: pass
+
+mount core.base.string_distance.{
+    levenshtein, levenshtein_bounded,
+    jaro, jaro_winkler,
+    closest,
+};
+
+fn exercise_levenshtein() {
+    // Classic textbook example.
+    assert(levenshtein(b"kitten", b"sitting") == 3);
+    assert(levenshtein(b"", b"") == 0);
+    assert(levenshtein(b"hello", b"hello") == 0);
+    assert(levenshtein(b"", b"abc") == 3);
+
+    // Bounded.
+    match levenshtein_bounded(b"kitten", b"sitting", 2) {
+        Some(_) => panic("should exceed max"),
+        None    => {},
+    }
+    match levenshtein_bounded(b"kitten", b"sitting", 5) {
+        Some(d) => assert(d == 3),
+        None    => panic("should fit"),
+    }
+}
+
+fn exercise_jaro() {
+    // Identical → 1.0.
+    assert(jaro(b"", b"") == 1.0);
+    assert(jaro(b"abc", b"abc") == 1.0);
+
+    // Disjoint → 0.0.
+    assert(jaro(b"abc", b"xyz") == 0.0);
+
+    // Classic example: "martha" vs "marhta" → 0.9444.
+    let s = jaro(b"martha", b"marhta");
+    assert(s > 0.9);
+
+    // Jaro-Winkler gives extra boost for common prefix.
+    let jw = jaro_winkler(b"martha", b"marhta");
+    assert(jw >= s);
+}
+
+fn exercise_closest() {
+    // "did you mean" surface.
+    let cmds: [&[Byte]; 3] = [b"commit", b"branch", b"checkout"];
+    match closest(b"cmmit", &cmds[..], 2) {
+        Some((idx, d)) => {
+            assert(idx == 0);   // "commit"
+            assert(d == 1);
+        },
+        None => panic("should find commit"),
+    }
+
+    // No close match.
+    match closest(b"xyzzy", &cmds[..], 2) {
+        Some(_) => panic("should be None"),
+        None    => {},
+    }
+}
+
+fn main() {
+    exercise_levenshtein();
+    exercise_jaro();
+    exercise_closest();
+}
