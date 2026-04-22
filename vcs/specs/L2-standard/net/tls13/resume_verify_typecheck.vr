@@ -18,7 +18,7 @@ mount core.time.instant.{Instant};
 
 fn check_server_resume_flow() -> Result<(), ResumeVerifyError> {
     let stek = SessionTicketKey.generate();
-    let rm = SecretBytes.from([0_u8; 32].to_vec());
+    let rm = SecretBytes.from([0_u8; 32].to_list());
 
     // Simulate the server end-to-end: issue ticket, parse it back out of
     // a client OfferedPsks, attempt verify.
@@ -31,10 +31,10 @@ fn check_server_resume_flow() -> Result<(), ResumeVerifyError> {
     // off the wire from ClientHello's pre_shared_key extension.
     let offered = OfferedPsks {
         identities: [PskIdentity {
-            identity:       [0_u8; 32].to_vec(),       // opaque ticket bytes
+            identity:       [0_u8; 32].to_list(),       // opaque ticket bytes
             obfuscated_age: 0_u32,
         }],
-        binders:    [[0_u8; 32].to_vec()],
+        binders:    [[0_u8; 32].to_list()],
     };
 
     let truncated_ch_hash: [Byte; 32] = [0_u8; 32];

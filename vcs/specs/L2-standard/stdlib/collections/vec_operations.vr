@@ -49,7 +49,7 @@ fn test_vec_creation() {
 
     // Vec from slice
     let arr: [Int; 3] = [10, 20, 30];
-    let from_slice: List<Int> = arr.to_vec();
+    let from_slice: List<Int> = arr.to_list();
     assert(from_slice == [10, 20, 30]);
 
     // Clone a vec

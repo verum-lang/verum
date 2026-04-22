@@ -20,7 +20,7 @@ using [Benchmark, Compression]
 // Test data generators
 fn generate_text_data(size: Int) -> List<u8> {
     let text = "Lorem ipsum dolor sit amet, consectetur adipiscing elit. ".repeat(size / 50);
-    text.as_bytes().to_vec()
+    text.as_bytes().to_list()
 }
 
 fn generate_binary_data(size: Int) -> List<u8> {

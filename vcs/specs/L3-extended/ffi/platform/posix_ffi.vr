@@ -585,7 +585,7 @@ implement CStr {
 type CString is { data: List<u8> };
 implement CString {
     fn new(s: &str) -> Result<CString, PosixError> {
-        let mut data = s.as_bytes().to_vec();
+        let mut data = s.as_bytes().to_list();
         data.push(0);
         Ok(CString { data })
     }

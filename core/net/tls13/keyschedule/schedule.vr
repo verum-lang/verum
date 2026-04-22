@@ -99,8 +99,8 @@ implement EarlySecret {
     public fn derive_with_psk(hash: HashKind, psk: &[Byte]) -> Result<EarlySecret, HkdfError> {
         let zero_salt: List<Byte> = [];
         let prk = match hash {
-            HashKind.Sha256 => hkdf_extract_sha256(zero_salt.as_slice(), psk).to_vec(),
-            HashKind.Sha384 => hkdf_extract_sha384(zero_salt.as_slice(), psk).to_vec(),
+            HashKind.Sha256 => hkdf_extract_sha256(zero_salt.as_slice(), psk).to_list(),
+            HashKind.Sha384 => hkdf_extract_sha384(zero_salt.as_slice(), psk).to_list(),
         };
         Ok(EarlySecret { secret: SecretBytes.from(prk), hash: hash })
     }
@@ -160,8 +160,8 @@ implement HandshakeSecret {
         dhe: &[Byte],
     ) -> Result<HandshakeSecret, HkdfError> {
         let prk = match hash {
-            HashKind.Sha256 => hkdf_extract_sha256(derived_from_early, dhe).to_vec(),
-            HashKind.Sha384 => hkdf_extract_sha384(derived_from_early, dhe).to_vec(),
+            HashKind.Sha256 => hkdf_extract_sha256(derived_from_early, dhe).to_list(),
+            HashKind.Sha384 => hkdf_extract_sha384(derived_from_early, dhe).to_list(),
         };
         Ok(HandshakeSecret { secret: SecretBytes.from(prk), hash: hash })
     }
@@ -220,8 +220,8 @@ implement MasterSecret {
         let out_len = match hash { HashKind.Sha256 => 32, HashKind.Sha384 => 48 };
         let zeros = make_zeros(out_len);
         let prk = match hash {
-            HashKind.Sha256 => hkdf_extract_sha256(derived_from_handshake, zeros.as_slice()).to_vec(),
-            HashKind.Sha384 => hkdf_extract_sha384(derived_from_handshake, zeros.as_slice()).to_vec(),
+            HashKind.Sha256 => hkdf_extract_sha256(derived_from_handshake, zeros.as_slice()).to_list(),
+            HashKind.Sha384 => hkdf_extract_sha384(derived_from_handshake, zeros.as_slice()).to_list(),
         };
         Ok(MasterSecret { secret: SecretBytes.from(prk), hash: hash })
     }

@@ -346,7 +346,7 @@ fn labeled_extract(
     push_bytes(&mut labeled_ikm, suite_id);
     push_bytes(&mut labeled_ikm, label);
     push_bytes(&mut labeled_ikm, ikm);
-    Ok(hkdf_extract_sha256(salt, labeled_ikm.as_slice()).to_vec())
+    Ok(hkdf_extract_sha256(salt, labeled_ikm.as_slice()).to_list())
 }
 
 fn labeled_expand(

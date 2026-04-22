@@ -608,7 +608,7 @@ fn benchmark_quicksort() -> BenchmarkResult {
         .collect();
 
     // Warmup
-    let mut small = data[..100_000].to_vec();
+    let mut small = data[..100_000].to_list();
     quicksort(&mut small);
     black_box(small);
 

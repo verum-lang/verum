@@ -21,7 +21,7 @@ async fn check_client_api() -> Result<(), H3ClientError> {
     let _ = client.post(
         &Text.from_str("/api/v1/users"),
         &Text.from_str("application/json"),
-        b"{}".to_vec(),
+        b"{}".to_list(),
     ).await;
     Ok(())
 }

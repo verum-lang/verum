@@ -206,7 +206,7 @@ fn benchmark_sorting() -> BenchmarkResult {
     let data: List<Int> = (0..size).map(|_| rng.gen()).collect();
 
     // Warmup
-    let mut small = data[0..10_000].to_vec();
+    let mut small = data[0..10_000].to_list();
     small.sort();
     black_box(small);
 

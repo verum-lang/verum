@@ -262,7 +262,7 @@ fn test_cursor() using [FileSystem] {
 
     // Get inner data
     let data: List<u8> = cursor.into_inner();
-    assert(data == b"Hello, World!".to_vec());
+    assert(data == b"Hello, World!".to_list());
 
     // Cursor over slice (read-only)
     let slice: &[u8] = b"Read only data";
@@ -357,7 +357,7 @@ fn test_copy_operations() using [FileSystem] {
     let mut dst_vec: List<u8> = List.new();
     // Commented out: io unbound variable
     // io.copy(&mut src_cursor, &mut dst_vec)?;
-    // assert(dst_vec == src_data.to_vec());
+    // assert(dst_vec == src_data.to_list());
 
     // Tee - copy while reading
     type TeeReader<R, W> is {
@@ -412,7 +412,7 @@ fn test_split_and_bytes() using [FileSystem] {
     // split() by delimiter
     let data: &[u8] = b"a,b,c,d";
     let parts: List<List<u8>> = data.split(|b| *b == b',')
-        .map(|s| s.to_vec())
+        .map(|s| s.to_list())
         .collect();
     assert(parts.len() == 4);
 

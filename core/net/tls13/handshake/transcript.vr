@@ -64,8 +64,8 @@ implement Transcript {
     /// sizes (32 / 48) fit behind a uniform type.
     public fn snapshot(&self) -> List<Byte> {
         match self {
-            Transcript.Sha256Tr(h) => h.clone().finalize().to_vec(),
-            Transcript.Sha384Tr(h) => h.clone().finalize().to_vec(),
+            Transcript.Sha256Tr(h) => h.clone().finalize().to_list(),
+            Transcript.Sha384Tr(h) => h.clone().finalize().to_list(),
         }
     }
 

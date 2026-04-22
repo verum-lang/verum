@@ -28,7 +28,7 @@ fn check_server_flow() -> Result<(), core.net.h3.error.H3Error> {
     let _ = conn.take_request();
 
     // Construct a canned response for send_response typecheck coverage.
-    let resp = H3Response.ok(b"Hello".to_vec())
+    let resp = H3Response.ok(b"Hello".to_list())
         .with_header(Text.from_str("content-type"), Text.from_str("text/plain"));
     let _ = conn.send_response(0_u64, &resp);
     Ok(())

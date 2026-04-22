@@ -116,7 +116,7 @@ public fn issue_post_handshake_ticket(
 
     let pt = ServerTicketPlaintext {
         cipher_suite:        suite.clone(),
-        resumption_secret:   resumption_master.as_slice().to_vec(),
+        resumption_secret:   List.from_slice(resumption_master.as_slice()),
         max_early_data_size: options.max_early_data_size,
         issued_at_unix:      issued_unix,
         alpn:                options.alpn.clone(),

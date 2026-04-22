@@ -16,11 +16,11 @@ mount core.time.instant.{Instant};
 
 fn check_issue() -> Result<(), IssueError> {
     let stek = SessionTicketKey.generate();
-    let rm = SecretBytes.from([0_u8; 32].to_vec());
+    let rm = SecretBytes.from([0_u8; 32].to_list());
     let opts = IssueOptions.default()
         .with_lifetime(3600_u32)
         .with_0rtt_budget(16384_u32)
-        .with_alpn(b"h3".to_vec());
+        .with_alpn(b"h3".to_list());
 
     let _ = issue_post_handshake_ticket(
         &stek, CipherSuite.TlsAes128GcmSha256, &rm, &opts, Instant.now(),

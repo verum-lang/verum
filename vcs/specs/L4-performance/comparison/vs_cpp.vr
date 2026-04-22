@@ -204,7 +204,7 @@ fn benchmark_quicksort() -> ComparisonResult {
     let data: List<Int> = (0..size).map(|_| rng.gen()).collect();
 
     // Warmup
-    let mut small = data[0..10_000].to_vec();
+    let mut small = data[0..10_000].to_list();
     quicksort(&mut small);
     black_box(small);
 

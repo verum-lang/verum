@@ -65,7 +65,7 @@ public type InitialKeys is {
 /// client used in its first Initial packet's Destination CID field.
 public fn derive_initial_secrets(dcid: &[Byte]) -> Result<InitialSecrets, HkdfError> {
     // initial_secret = HKDF-Extract(salt, DCID)
-    let prk = hkdf_extract_sha256(&QUIC_INITIAL_SALT_V1, dcid).to_vec();
+    let prk = hkdf_extract_sha256(&QUIC_INITIAL_SALT_V1, dcid).to_list();
 
     // Per-role secrets via HKDF-Expand-Label with SHA-256.
     let client = hkdf_expand_label(

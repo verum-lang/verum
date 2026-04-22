@@ -581,12 +581,12 @@ fn hmac_for_hash(hash: HashKind, key: &[Byte], msg: &[Byte]) -> List<Byte> {
         HashKind.Sha256 => {
             let mut mac = HmacSha256.new(key);
             mac.update(msg);
-            mac.finalize().to_vec()
+            mac.finalize().to_list()
         },
         HashKind.Sha384 => {
             let mut mac = HmacSha384.new(key);
             mac.update(msg);
-            mac.finalize().to_vec()
+            mac.finalize().to_list()
         },
     }
 }

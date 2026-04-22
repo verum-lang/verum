@@ -146,7 +146,7 @@ fn benchmark_quicksort() -> ComparisonResult {
 
     // Warmup
     for _ in 0..3 {
-        let mut data = original[0..SMALL_SIZE].to_vec();
+        let mut data = original[0..SMALL_SIZE].to_list();
         quicksort(&mut data);
         black_box(data);
     }
@@ -182,8 +182,8 @@ fn mergesort<T: Ord + Clone>(arr: &mut [T]) {
     mergesort(&mut arr[0..mid]);
     mergesort(&mut arr[mid..]);
 
-    let left: List<T> = arr[0..mid].to_vec();
-    let right: List<T> = arr[mid..].to_vec();
+    let left: List<T> = arr[0..mid].to_list();
+    let right: List<T> = arr[mid..].to_list();
 
     merge(arr, &left, &right);
 }
@@ -223,7 +223,7 @@ fn benchmark_mergesort() -> ComparisonResult {
 
     // Warmup
     for _ in 0..3 {
-        let mut data = original[0..SMALL_SIZE].to_vec();
+        let mut data = original[0..SMALL_SIZE].to_list();
         mergesort(&mut data);
         black_box(data);
     }
@@ -291,7 +291,7 @@ fn benchmark_heapsort() -> ComparisonResult {
 
     // Warmup
     for _ in 0..3 {
-        let mut data = original[0..SMALL_SIZE].to_vec();
+        let mut data = original[0..SMALL_SIZE].to_list();
         heapsort(&mut data);
         black_box(data);
     }
@@ -324,7 +324,7 @@ fn benchmark_std_sort() -> ComparisonResult {
 
     // Warmup
     for _ in 0..3 {
-        let mut data = original[0..SMALL_SIZE].to_vec();
+        let mut data = original[0..SMALL_SIZE].to_list();
         data.sort();
         black_box(data);
     }
@@ -394,7 +394,7 @@ fn benchmark_radix_sort() -> ComparisonResult {
 
     // Warmup
     for _ in 0..3 {
-        let mut data = original[0..SMALL_SIZE].to_vec();
+        let mut data = original[0..SMALL_SIZE].to_list();
         radix_sort(&mut data);
         black_box(data);
     }

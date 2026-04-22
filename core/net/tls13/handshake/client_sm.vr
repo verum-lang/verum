@@ -839,9 +839,9 @@ fn verify_rsa_pss_cv(
             let vk = RsaVerifyKey.new(rsa.modulus.clone(), rsa.exponent.clone());
             // Pre-hash the signed input.
             let digest = match hash {
-                RsaHash.Sha256_ => Sha256.digest(signed).to_vec(),
-                RsaHash.Sha384_ => Sha384.digest(signed).to_vec(),
-                RsaHash.Sha512_ => Sha512.digest(signed).to_vec(),
+                RsaHash.Sha256_ => Sha256.digest(signed).to_list(),
+                RsaHash.Sha384_ => Sha384.digest(signed).to_list(),
+                RsaHash.Sha512_ => Sha512.digest(signed).to_list(),
             };
             match verify_pss_prehashed(&vk, hash, digest.as_slice(), cv.signature.as_slice()) {
                 Ok(()) => Ok(()),
@@ -891,12 +891,12 @@ fn hmac_for_hash(hash: HashKind, key: &[Byte], msg: &[Byte]) -> List<Byte> {
         HashKind.Sha256 => {
             let mut mac = HmacSha256.new(key);
             mac.update(msg);
-            mac.finalize().to_vec()
+            mac.finalize().to_list()
         },
         HashKind.Sha384 => {
             let mut mac = HmacSha384.new(key);
             mac.update(msg);
-            mac.finalize().to_vec()
+            mac.finalize().to_list()
         },
     }
 }

@@ -545,7 +545,7 @@ type ToCString is protocol {
 
 implement ToCString for str {
     fn to_cstring(&self) -> CString {
-        let mut data = self.as_bytes().to_vec();
+        let mut data = self.as_bytes().to_list();
         data.push(0);
         CString { data }
     }

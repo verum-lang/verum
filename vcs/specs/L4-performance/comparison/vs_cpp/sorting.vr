@@ -94,7 +94,7 @@ fn benchmark_std_sort() -> ComparisonResult {
 
     // Warmup
     for _ in 0..3 {
-        let mut data = original[0..SMALL_SIZE].to_vec();
+        let mut data = original[0..SMALL_SIZE].to_list();
         data.sort();
         black_box(data);
     }
@@ -127,7 +127,7 @@ fn benchmark_stable_sort() -> ComparisonResult {
 
     // Warmup
     for _ in 0..3 {
-        let mut data = original[0..SMALL_SIZE].to_vec();
+        let mut data = original[0..SMALL_SIZE].to_list();
         data.sort_stable();
         black_box(data);
     }
@@ -161,7 +161,7 @@ fn benchmark_partial_sort() -> ComparisonResult {
 
     // Warmup
     for _ in 0..3 {
-        let mut data = original[0..SMALL_SIZE].to_vec();
+        let mut data = original[0..SMALL_SIZE].to_list();
         data.partial_sort(100);
         black_box(data);
     }
@@ -195,7 +195,7 @@ fn benchmark_nth_element() -> ComparisonResult {
 
     // Warmup
     for _ in 0..3 {
-        let mut data = original[0..SMALL_SIZE].to_vec();
+        let mut data = original[0..SMALL_SIZE].to_list();
         data.select_nth(SMALL_SIZE / 2);
         black_box(data);
     }
@@ -228,7 +228,7 @@ fn benchmark_custom_comparator() -> ComparisonResult {
 
     // Warmup
     for _ in 0..3 {
-        let mut data = original[0..SMALL_SIZE].to_vec();
+        let mut data = original[0..SMALL_SIZE].to_list();
         data.sort_by(|a, b| b.cmp(a)); // Reverse order
         black_box(data);
     }
@@ -265,7 +265,7 @@ fn benchmark_sort_strings() -> ComparisonResult {
 
     // Warmup
     for _ in 0..3 {
-        let mut data = original[0..SMALL_SIZE].to_vec();
+        let mut data = original[0..SMALL_SIZE].to_list();
         data.sort();
         black_box(data);
     }
@@ -311,7 +311,7 @@ fn benchmark_sort_structs() -> ComparisonResult {
 
     // Warmup
     for _ in 0..3 {
-        let mut data = original[0..SMALL_SIZE].to_vec();
+        let mut data = original[0..SMALL_SIZE].to_list();
         data.sort_by_key(|p| p.age);
         black_box(data);
     }
@@ -344,7 +344,7 @@ fn benchmark_parallel_sort() -> ComparisonResult {
 
     // Warmup
     for _ in 0..3 {
-        let mut data = original[0..SMALL_SIZE].to_vec();
+        let mut data = original[0..SMALL_SIZE].to_list();
         data.par_sort();
         black_box(data);
     }

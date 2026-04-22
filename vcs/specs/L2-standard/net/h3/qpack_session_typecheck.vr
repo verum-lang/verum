@@ -30,11 +30,11 @@ fn check_instructions_roundtrip() -> Result<(), InstrError> {
     let instrs: List<EncoderInstruction> = [
         EncoderInstruction.SetCapacity(4096_u64),
         EncoderInstruction.InsertWithNameRef {
-            is_static: true, name_index: 17_u64, value: b"GET".to_vec(),
+            is_static: true, name_index: 17_u64, value: b"GET".to_list(),
         },
         EncoderInstruction.InsertWithLiteralName {
-            name:  b"x-custom".to_vec(),
-            value: b"yes".to_vec(),
+            name:  b"x-custom".to_list(),
+            value: b"yes".to_list(),
         },
         EncoderInstruction.Duplicate(0_u64),
     ];

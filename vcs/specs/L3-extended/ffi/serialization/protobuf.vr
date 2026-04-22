@@ -302,7 +302,7 @@ implement ProtoReader {
 
     fn read_string(&mut self) -> Result<Text, ProtoError> {
         let bytes = self.read_bytes()?;
-        Text.from_utf8(bytes.to_vec())
+        Text.from_utf8(bytes.to_list())
             .map_err(|_| InvalidUtf8)
     }
 

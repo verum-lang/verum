@@ -182,12 +182,12 @@ public fn compute_binder(
         HashKind.Sha256 => {
             let mut h = HmacSha256.new(finished_key.as_slice());
             h.update(truncated_ch_hash);
-            h.finalize().to_vec()
+            h.finalize().to_list()
         },
         HashKind.Sha384 => {
             let mut h = HmacSha384.new(finished_key.as_slice());
             h.update(truncated_ch_hash);
-            h.finalize().to_vec()
+            h.finalize().to_list()
         },
     };
     Ok(mac)

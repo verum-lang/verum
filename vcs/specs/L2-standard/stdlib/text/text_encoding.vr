@@ -68,7 +68,7 @@ fn test_utf8_encoding() {
     // fn char_to_utf8(c: char) -> List<u8> {
     //     let mut buf: [u8; 4] = [0; 4];
     //     let s: &str = c.encode_utf8(&mut buf);
-    //     s.as_bytes().to_vec()
+    //     s.as_bytes().to_list()
     // }
     // assert(char_to_utf8('A') == [65]);
     // assert(char_to_utf8('\u{00E9}') == [0xC3, 0xA9]);
@@ -236,7 +236,7 @@ fn test_char_encoding() {
     fn char_to_utf16(c: char) -> List<u16> {
         let mut buf: [u16; 2] = [0; 2];
         let len: usize = c.encode_utf16(&mut buf).len();
-        buf[..len].to_vec()
+        buf[..len].to_list()
     }
 
     assert(char_to_utf16('A') == [65]);

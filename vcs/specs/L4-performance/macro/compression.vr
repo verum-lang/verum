@@ -491,7 +491,7 @@ module zstd {
     pub type Encoder is { level: Int };
     implement Encoder {
         pub fn new(level: Int) -> Self { Self { level } }
-        pub fn compress_chunk(&mut self, chunk: &[u8]) -> List<u8> { chunk.to_vec() }
+        pub fn compress_chunk(&mut self, chunk: &[u8]) -> List<u8> { chunk.to_list() }
         pub fn finish(&mut self) -> List<u8> { List.new() }
     }
 }

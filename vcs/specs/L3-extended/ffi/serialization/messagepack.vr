@@ -476,14 +476,14 @@ implement MsgPackReader {
 
     fn read_string(&mut self, len: usize) -> Result<MsgPackValue, MsgPackError> {
         let bytes = self.read_bytes(len)?;
-        let s = Text.from_utf8(bytes.to_vec())
+        let s = Text.from_utf8(bytes.to_list())
             .map_err(|_| InvalidUtf8)?;
         Ok(Text(s))
     }
 
     fn read_binary(&mut self, len: usize) -> Result<MsgPackValue, MsgPackError> {
         let bytes = self.read_bytes(len)?;
-        Ok(Binary(bytes.to_vec()))
+        Ok(Binary(bytes.to_list()))
     }
 
     fn read_array(&mut self, len: usize) -> Result<MsgPackValue, MsgPackError> {

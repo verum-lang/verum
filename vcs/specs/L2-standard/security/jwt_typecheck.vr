@@ -45,7 +45,7 @@ fn exercise_hs256_roundtrip() -> Result<(), JwtError> {
 fn exercise_alg_confusion_is_rejected() {
     // Handing an HMAC key + HS256 algorithm is fine; handing an
     // HMAC key with an EdDSA algorithm must reject.
-    let secret_vec: List<Byte> = [0_u8; 32].to_vec();
+    let secret_vec: List<Byte> = [0_u8; 32].to_list();
     let key = JwtKey.HmacSecret(secret_vec);
     let hdr = JwtHeader.new(JwtAlgorithm.EdDSA);
     let payload = Text.from("{}");

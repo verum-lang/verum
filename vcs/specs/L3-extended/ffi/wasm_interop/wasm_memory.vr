@@ -335,7 +335,7 @@ fn read_string(mem: &WasmMemory, ptr: usize) -> Result<Text, WasmError> {
     }
 
     let slice = mem.slice(ptr, len)?;
-    Text.from_utf8(slice.to_vec())
+    Text.from_utf8(slice.to_list())
         .map_err(|_| WasmError.InvalidUtf8)
 }
 
@@ -361,7 +361,7 @@ fn read_length_prefixed_string(mem: &WasmMemory, ptr: usize) -> Result<Text, Was
     let data_ptr = ptr + 4;
 
     let slice = mem.slice(data_ptr, len as usize)?;
-    Text.from_utf8(slice.to_vec())
+    Text.from_utf8(slice.to_list())
         .map_err(|_| WasmError.InvalidUtf8)
 }
 

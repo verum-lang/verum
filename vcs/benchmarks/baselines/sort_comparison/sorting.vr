@@ -124,8 +124,8 @@ fn mergesort<T: Ord + Clone>(arr: &mut [T]) {
     }
 
     let mid = arr.len() / 2;
-    let left = arr[..mid].to_vec();
-    let right = arr[mid..].to_vec();
+    let left = arr[..mid].to_list();
+    let right = arr[mid..].to_list();
 
     mergesort(&mut left);
     mergesort(&mut right);

@@ -326,9 +326,9 @@ fn verify_rsa_pss(
         SubjectPublicKey.Rsa(rsa) => {
             let vk = RsaVerifyKey { n: rsa.modulus.clone(), e: rsa.exponent.clone() };
             let (rsa_hash, digest) = match hash {
-                RsaPssHash.Sha256Hash => (RsaHash.Sha256_, Sha256.digest(message.as_slice()).to_vec()),
-                RsaPssHash.Sha384Hash => (RsaHash.Sha384_, Sha384.digest(message.as_slice()).to_vec()),
-                RsaPssHash.Sha512Hash => (RsaHash.Sha512_, Sha512.digest(message.as_slice()).to_vec()),
+                RsaPssHash.Sha256Hash => (RsaHash.Sha256_, Sha256.digest(message.as_slice()).to_list()),
+                RsaPssHash.Sha384Hash => (RsaHash.Sha384_, Sha384.digest(message.as_slice()).to_list()),
+                RsaPssHash.Sha512Hash => (RsaHash.Sha512_, Sha512.digest(message.as_slice()).to_list()),
             };
             let _ = salt_len;  // verify_pss_prehashed picks salt_len from signature
             match verify_pss_prehashed(&vk, rsa_hash, &digest, signature.as_slice()) {
@@ -388,8 +388,8 @@ fn verify_ed25519_cert(
 
 fn hash_message(hash: RsaHash, msg: &[Byte]) -> List<Byte> {
     match hash {
-        RsaHash.Sha256_ => Sha256.digest(msg).to_vec(),
-        RsaHash.Sha384_ => Sha384.digest(msg).to_vec(),
-        RsaHash.Sha512_ => Sha512.digest(msg).to_vec(),
+        RsaHash.Sha256_ => Sha256.digest(msg).to_list(),
+        RsaHash.Sha384_ => Sha384.digest(msg).to_list(),
+        RsaHash.Sha512_ => Sha512.digest(msg).to_list(),
     }
 }

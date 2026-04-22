@@ -14,10 +14,10 @@ mount core.collections.List;
 fn exercise_merkle() -> Result<(), MerkleError> {
     // Four leaves.
     let mut leaves: List<List<Byte>> = [];
-    leaves.push([1_u8, 2_u8, 3_u8].to_vec());
-    leaves.push([4_u8, 5_u8, 6_u8].to_vec());
-    leaves.push([7_u8, 8_u8, 9_u8].to_vec());
-    leaves.push([10_u8, 11_u8, 12_u8].to_vec());
+    leaves.push([1_u8, 2_u8, 3_u8].to_list());
+    leaves.push([4_u8, 5_u8, 6_u8].to_list());
+    leaves.push([7_u8, 8_u8, 9_u8].to_list());
+    leaves.push([10_u8, 11_u8, 12_u8].to_list());
 
     let tree = MerkleTree.from_leaves(&leaves);
     let root: [Byte; 32] = tree.root();
@@ -36,7 +36,7 @@ fn exercise_merkle() -> Result<(), MerkleError> {
     let mut odd: List<List<Byte>> = [];
     let mut i: Int = 0;
     while i < 5 {
-        odd.push([i as Byte].to_vec());
+        odd.push([i as Byte].to_list());
         i = i + 1;
     }
     let odd_tree = MerkleTree.from_leaves(&odd);
