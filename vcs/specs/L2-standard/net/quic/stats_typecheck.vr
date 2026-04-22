@@ -1,0 +1,42 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: quic, observability, stats, typecheck
+// @timeout: 10000
+// @expect: pass
+
+mount core.net.quic.{QuicStats, EndpointStats};
+
+fn exercise_stats() {
+    let mut conn_a = QuicStats.new();
+    let mut conn_b = QuicStats.new();
+
+    // Simulate some tx / rx activity on connection A.
+    conn_a.datagrams_sent    = 42_u64;
+    conn_a.datagrams_recv    = 37_u64;
+    conn_a.bytes_sent        = 1_200_u64 * 42_u64;
+    conn_a.streams_opened_bidi = 4_u64;
+    conn_a.rtt_smoothed_us   = 1_250_u64;
+
+    // And on connection B.
+    conn_b.datagrams_sent = 7_u64;
+    conn_b.bytes_sent     = 1_200_u64 * 7_u64;
+    conn_b.zero_rtt_accepted = 1_u64;
+
+    // Endpoint aggregate.
+    let mut ep = EndpointStats.new();
+    ep.connections_active = 2_u64;
+    ep.aggregate.merge(&conn_a);
+    ep.aggregate.merge(&conn_b);
+
+    // We expect 49 total datagrams_sent.
+    assert(ep.aggregate.datagrams_sent == 49_u64);
+    assert(ep.aggregate.streams_opened_bidi == 4_u64);
+    // rtt_smoothed_us is a gauge → takes on last non-zero value;
+    // here only conn_a set it.
+    assert(ep.aggregate.rtt_smoothed_us == 1_250_u64);
+}
+
+fn main() {
+    exercise_stats();
+}

@@ -70,6 +70,7 @@ public module transport;               // UDP abstraction + ConnectionPump (end-
 public module stateless_reset;         // RFC 9000 §10.3 Stateless Reset tokens + detection
 public module cid_pool;                // RFC 9000 §5.1 per-connection CID manager
 public module key_update;              // RFC 9001 §6 key update state machine
+public module stats;                   // Per-connection + endpoint observability
 
 mount core.*;
 mount core.time.duration.{Duration};
@@ -108,6 +109,9 @@ public mount .key_update.{
     KeyUpdateSm, KeyUpdateError, KeyPhaseUsage, InboundPhaseAction,
     confidentiality_limit, integrity_limit,
 };
+
+// Re-exports — observability
+public mount .stats.{QuicStats, EndpointStats};
 
 // =============================================================================
 // QuicConfig
