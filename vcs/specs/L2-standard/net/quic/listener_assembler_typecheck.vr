@@ -31,8 +31,12 @@ fn check_stream_assembly() {
     let _ = s.write(&data, 65536_u64);
     streams.push((4_u64, s));
 
-    let budget = AssemblyBudget.from_caps(1200, &cc, &flow);
-    let (_frames, _cursor) = assemble_stream_frames(&mut streams, &mut flow, budget, 0_u64);
+    let (_frames, _cursor) = assemble_stream_frames(
+        &mut streams,
+        &mut flow,
+        AssemblyBudget.from_caps(1200, &cc, &flow),
+        0_u64,
+    );
 }
 
 fn check_fc_updates() {

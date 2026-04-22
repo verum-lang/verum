@@ -46,7 +46,7 @@ module core.net.quic.connection_sm.stream_assembler;
 mount core.*;
 mount core.collections.List;
 mount core.net.quic.frame.{Frame};
-mount core.net.quic.stream_sm.{SendStream, SendState, ConnFlowControl};
+mount core.net.quic.stream_sm.{SendStream, RecvStream, SendState, ConnFlowControl};
 mount core.net.quic.recovery.{CongestionCtrl};
 
 // =============================================================================
@@ -200,7 +200,7 @@ fn emit_one_stream_frame(
 /// consumed enough that our advertised limits are close to being
 /// hit — preemptive window growth.
 public fn maybe_emit_flow_control_updates(
-    recv_streams: &mut List<(UInt64, core.net.quic.stream_sm.RecvStream)>,
+    recv_streams: &mut List<(UInt64, RecvStream)>,
     flow:         &mut ConnFlowControl,
     window:       UInt64,
 ) -> List<Frame> {

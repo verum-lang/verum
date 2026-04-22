@@ -11,6 +11,7 @@ mount core.net.quic.transport.{
     ConnectionPump, PumpPhase, PumpError,
 };
 mount core.net.addr.{SocketAddr};
+mount core.base.memory.{Shared};
 
 fn check_sim_network() {
     let _ = SimNetwork.new();
@@ -26,9 +27,9 @@ fn check_ecn_codepoint() {
 }
 
 async fn check_sim_transport() -> Result<(), TransportError> {
-    let net = core.sync.Shared.new(SimNetwork.new());
-    let addr_a = SocketAddr.from_text(Text.from_str("127.0.0.1:11001")).unwrap();
-    let addr_b = SocketAddr.from_text(Text.from_str("127.0.0.1:11002")).unwrap();
+    let net = Shared.new(SimNetwork.new());
+    let addr_a = SocketAddr.from_text("127.0.0.1:11001").unwrap();
+    let addr_b = SocketAddr.from_text("127.0.0.1:11002").unwrap();
     let t_a = SimUdpTransport.bind(addr_a, net.clone());
     let t_b = SimUdpTransport.bind(addr_b, net.clone());
 

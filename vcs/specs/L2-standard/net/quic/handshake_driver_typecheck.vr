@@ -29,7 +29,7 @@ fn check_crypto_stream_reassembly() {
 
 fn check_driver_construction() {
     let config = ClientConfig {
-        server_name: Text.from_str("example.com"),
+        server_name: "example.com",
         alpn:        [],
         trust:       TrustStore.empty(),
         groups:      [NamedGroup.X25519],
