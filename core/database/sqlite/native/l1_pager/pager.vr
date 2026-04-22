@@ -123,10 +123,12 @@ public fn pager_open_memory_with_size(page_size: Int) -> Result<Pager, PagerErro
     let name: Text = ":memory:";
     let file = match open_memory_rwc(&name) {
         Ok(f) => f,
-        Err(e) => return Err(PagerError {
-            kind: IoError,
-            message: f"MemDbVfs.open_memory_rwc failed: {e.message}",
-        }),
+        Err(e) => {
+            return Err(PagerError {
+                kind: IoError,
+                message: f"MemDbVfs.open_memory_rwc failed: {e.message}",
+            });
+        }
     };
 
     Ok(Pager {

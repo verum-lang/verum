@@ -1,20 +1,9 @@
-// @test: wip
+// @test: run-interpreter
 // @tier: 0
 // @level: L2
 // @tags: sqlite, native, pager, memdb, roundtrip
-// @timeout: 5000
+// @timeout: 15000
 // @expected-exit: 0
-//
-// PENDING — Issue #8 (Pager-owned MemDbFile returns spurious Err from
-// `open_memory_rwc` when the MemDbFile is about to be stored as a
-// field of another struct (`Pager { file: file, ... }`)). Direct
-// top-level invocation of `open_memory_rwc` works; only the
-// pager-owned storage path fails. Captured in
-// `project_new_lang_issues_2026-04-22.md`; the test body below is the
-// intended shape once the root cause is fixed, and the
-// `core/database/sqlite/native/l1_pager/pager.vr` module itself
-// compiles clean (codegen OK, just one cross-module construction
-// path that's wrong at runtime).
 //
 // Phase 1 step 1 smoke — open a MemDb-backed pager at the default page
 // size, write two pages with distinct fill patterns, read them back,
