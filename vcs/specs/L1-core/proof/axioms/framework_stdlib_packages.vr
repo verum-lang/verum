@@ -1,0 +1,47 @@
+// @test: parse
+// @level: L1
+// @tags: proofs, verification, axiom, framework, stdlib, coverage
+// @timeout: 10000
+
+/// Stdlib framework-axiom packages at `core/math/frameworks/` must
+/// parse and each `@framework(...)` marker must expose the canonical
+/// citation. This spec pins coverage of the six canonical frameworks
+/// that the stdlib ships (Lurie HTT, Schreiber DCCT, Connes
+/// reconstruction, Petz classification, Arnold–Mather catastrophe,
+/// Baez–Dolan coherence) by *mounting* the packages and re-exposing
+/// one axiom from each.
+///
+/// If the stdlib packages drift (axiom renamed, file moved, framework
+/// identifier spelled differently), this spec fails at parse — the
+/// trusted-boundary enumeration surface stays in lock-step with the
+/// files the stdlib actually ships.
+
+mount core.math.frameworks.lurie_htt.{
+    Site,
+    InfinityTopos,
+    sheafification_is_infinity_topos,
+};
+mount core.math.frameworks.schreiber_dcct.{
+    CohesiveInfinityTopos,
+    cohesive_hexagon,
+};
+mount core.math.frameworks.connes_reconstruction.{
+    SpectralTriple,
+    ax_first_order,
+};
+mount core.math.frameworks.petz_classification.{
+    OperatorMonotoneFunction,
+    petz_classification_theorem,
+};
+mount core.math.frameworks.arnold_catastrophe.{
+    FunctionGerm,
+    codim_le_4_classification,
+};
+mount core.math.frameworks.baez_dolan.{
+    Tricategory,
+    gps_coherence,
+};
+
+fn main() {
+    print("framework stdlib packages mounted");
+}

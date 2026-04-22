@@ -1,0 +1,66 @@
+// =============================================================================
+// Petz classification of monotone quantum metrics — framework axiom package
+// =============================================================================
+//
+// Source: D. Petz, "Monotone metrics on matrix spaces", Linear Algebra
+// and its Applications 244 (1996), 81–96. Extended by Petz and
+// Sudar, "Geometries of quantum states" (1996).
+//
+// Classifies the monotone Riemannian metrics on the interior of the
+// state space D(H) of a finite-dimensional Hilbert space H by
+// operator-monotone functions f : (0, ∞) → (0, ∞) satisfying
+//   f(1) = 1,  f(t) = t · f(1/t).
+// The Bures, Wigner–Yanase, Kubo–Mori, and Bogoliubov metrics are
+// particular choices of f.
+// =============================================================================
+
+/// An operator-monotone function f : (0, ∞) → (0, ∞) in the sense of
+/// Löwner, normalised so that f(1) = 1 and satisfying the symmetry
+/// f(t) = t · f(1/t).
+public type OperatorMonotoneFunction is protocol {
+    fn evaluate(self, t: Float) -> Float;
+    fn is_normalised(self) -> Bool;
+    fn is_symmetric(self) -> Bool;
+};
+
+/// A monotone (contractive under CPTP maps) Riemannian metric on the
+/// interior of the quantum state space.
+public type MonotoneQuantumMetric is protocol {
+    fn is_riemannian(self) -> Bool;
+    fn is_monotone_under_cptp(self) -> Bool;
+};
+
+
+// =============================================================================
+// The Petz classification theorem
+// =============================================================================
+
+/// Petz 1996 Theorem 3 — every monotone Riemannian metric on the
+/// interior of D(H) is determined by an operator-monotone function f
+/// via the Petz formula `Tr(Γ · A · c_f(Γ, · ) · B)` where c_f is the
+/// associated Morozova-Chentsov correspondence.
+@framework(petz_classification, "Petz 1996 Theorem 3 (classification)")
+public axiom petz_classification_theorem<F: OperatorMonotoneFunction>(f: F) -> Bool
+    requires f.is_normalised(), f.is_symmetric()
+    ensures  true;
+
+/// Petz–Sudar 1996 — the Bures metric is the *smallest* member of the
+/// Petz family; equivalently, its f is f_Bures(t) = (1 + t) / 2.
+@framework(petz_classification, "Petz–Sudar 1996 (Bures minimality)")
+public axiom bures_minimality<F: OperatorMonotoneFunction>(f: F) -> Bool
+    requires f.is_normalised(), f.is_symmetric()
+    ensures  true;
+
+/// Petz–Sudar 1996 — the Kubo–Mori metric is the *largest* member of
+/// the Petz family; equivalently, f_KM(t) = (t - 1) / ln(t).
+@framework(petz_classification, "Petz–Sudar 1996 (Kubo–Mori maximality)")
+public axiom kubo_mori_maximality<F: OperatorMonotoneFunction>(f: F) -> Bool
+    requires f.is_normalised(), f.is_symmetric()
+    ensures  true;
+
+/// Petz–Uhlmann 1986 — the Bures distance coincides with the Fubini–
+/// Study distance on pure states.
+@framework(petz_classification, "Petz–Uhlmann 1986 (pure-state reduction)")
+public axiom uhlmann_fidelity<M: MonotoneQuantumMetric>(m: M) -> Bool
+    requires m.is_monotone_under_cptp()
+    ensures  m.is_riemannian();

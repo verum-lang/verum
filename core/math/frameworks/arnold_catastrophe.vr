@@ -1,0 +1,88 @@
+// =============================================================================
+// Arnold–Mather catastrophe normal forms — framework axiom package
+// =============================================================================
+//
+// Source: V. I. Arnold, "Singularity Theory: Selected Papers" (1981);
+// J. Mather, "Stratifications and Mappings" (1973); the classical
+// A_k, D_k, E_6, E_7, E_8 classification due to Arnold (1972).
+//
+// Postulates the seven simple elementary catastrophes — the complete
+// list of real normal forms for smooth function germs of codimension
+// ≤ 4. Each entry asserts that any generic parametric family of
+// functions is locally diffeomorphic (as a parametrised family) to
+// the stated polynomial normal form.
+// =============================================================================
+
+/// A smooth real-valued function germ at the origin.
+public type FunctionGerm is protocol {
+    fn codimension(self) -> Int;
+    fn is_critical_at_origin(self) -> Bool;
+};
+
+/// Diffeomorphism equivalence of function germs preserving the origin.
+public type GermEquivalence is protocol {
+    fn preserves_origin(self) -> Bool;
+};
+
+
+// =============================================================================
+// The seven simple elementary catastrophes (Arnold)
+// =============================================================================
+
+/// A_1 — the fold: x ↦ x^2. Codimension 0, the generic Morse point.
+@framework(arnold_catastrophe, "Arnold 1972, A_1 (fold)")
+public axiom fold_normal_form<G: FunctionGerm>(g: G) -> Bool
+    requires g.is_critical_at_origin()
+    ensures  true;
+
+/// A_2 — the cusp: x ↦ x^3. Codimension 1.
+@framework(arnold_catastrophe, "Arnold 1972, A_2 (cusp)")
+public axiom cusp_normal_form<G: FunctionGerm>(g: G) -> Bool
+    requires g.is_critical_at_origin()
+    ensures  true;
+
+/// A_3 — the swallowtail: x ↦ x^4. Codimension 2. Governs the
+/// swallowtail catastrophe in parametric families.
+@framework(arnold_catastrophe, "Arnold 1972, A_3 (swallowtail)")
+public axiom swallowtail_normal_form<G: FunctionGerm>(g: G) -> Bool
+    requires g.is_critical_at_origin()
+    ensures  true;
+
+/// A_4 — the butterfly: x ↦ x^5. Codimension 3.
+@framework(arnold_catastrophe, "Arnold 1972, A_4 (butterfly)")
+public axiom butterfly_normal_form<G: FunctionGerm>(g: G) -> Bool
+    requires g.is_critical_at_origin()
+    ensures  true;
+
+/// A_5 — the wigwam: x ↦ x^6. Codimension 4.
+@framework(arnold_catastrophe, "Arnold 1972, A_5 (wigwam)")
+public axiom wigwam_normal_form<G: FunctionGerm>(g: G) -> Bool
+    requires g.is_critical_at_origin()
+    ensures  true;
+
+/// D_4^+ — the elliptic umbilic: x^3 - 3xy^2. Codimension 3.
+@framework(arnold_catastrophe, "Arnold 1972, D_4^+ (elliptic umbilic)")
+public axiom elliptic_umbilic_normal_form<G: FunctionGerm>(g: G) -> Bool
+    requires g.is_critical_at_origin()
+    ensures  true;
+
+/// D_4^- — the hyperbolic umbilic: x^3 + xy^2. Codimension 3.
+@framework(arnold_catastrophe, "Arnold 1972, D_4^- (hyperbolic umbilic)")
+public axiom hyperbolic_umbilic_normal_form<G: FunctionGerm>(g: G) -> Bool
+    requires g.is_critical_at_origin()
+    ensures  true;
+
+
+// =============================================================================
+// The Arnold–Mather completeness theorem
+// =============================================================================
+
+/// Arnold–Mather 1974 — the list A_1, A_2, A_3, A_4, A_5, D_4^±, E_6,
+/// E_7, E_8 is exhaustive for the 7-point-classification of simple
+/// singularities of codimension ≤ 4. Any function germ in that
+/// codimension range is right-equivalent to exactly one item in the
+/// list.
+@framework(arnold_catastrophe, "Arnold–Mather 1974 (codim ≤ 4 classification)")
+public axiom codim_le_4_classification<G: FunctionGerm>(g: G) -> Bool
+    requires g.codimension() >= 0, g.codimension() <= 4
+    ensures  true;

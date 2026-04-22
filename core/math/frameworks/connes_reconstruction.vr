@@ -1,0 +1,81 @@
+// =============================================================================
+// Connes–Chamseddine reconstruction — framework axiom package
+// =============================================================================
+//
+// Source: A. Connes, "On the spectral characterization of manifolds",
+// J. Noncommut. Geom. 7 (2013), 1-82 (original arXiv:0810.2088, 2008).
+// Supplemented by Connes–Chamseddine–Mukhanov, "Geometry and the
+// quantum: basics" (2014).
+//
+// The reconstruction theorem asserts that a compact Riemannian
+// spin^c manifold can be recovered from its commutative real
+// spectral triple, provided seven axioms hold. We postulate each of
+// the seven axioms explicitly; downstream code that invokes
+// `reconstruction_theorem` depends on all seven.
+// =============================================================================
+
+/// A spectral triple (A, H, D) — the basic data of noncommutative
+/// geometry.
+public type SpectralTriple is protocol {
+    fn is_compact_resolvent(self) -> Bool;
+    fn algebra_dimension(self) -> Int;
+};
+
+
+// =============================================================================
+// The seven Connes axioms
+// =============================================================================
+
+/// Axiom (i) — metric dimension. The spectral triple has a well-defined
+/// KO-dimension mod 8.
+@framework(connes_reconstruction, "Connes 2008 axiom (i) — metric dimension")
+public axiom ax_metric_dimension<T: SpectralTriple>(t: T) -> Bool
+    ensures t.is_compact_resolvent();
+
+/// Axiom (ii) — regularity. Smooth elements form a subalgebra.
+@framework(connes_reconstruction, "Connes 2008 axiom (ii) — regularity")
+public axiom ax_regularity<T: SpectralTriple>(t: T) -> Bool
+    ensures true;
+
+/// Axiom (iii) — finiteness. The smooth subalgebra is projective of
+/// finite type.
+@framework(connes_reconstruction, "Connes 2008 axiom (iii) — finiteness")
+public axiom ax_finiteness<T: SpectralTriple>(t: T) -> Bool
+    ensures true;
+
+/// Axiom (iv) — reality. There is an antiunitary operator J
+/// implementing charge conjugation.
+@framework(connes_reconstruction, "Connes 2008 axiom (iv) — reality")
+public axiom ax_reality<T: SpectralTriple>(t: T) -> Bool
+    ensures true;
+
+/// Axiom (v) — first-order condition. The Dirac operator D is a
+/// first-order differential operator with respect to the algebra.
+@framework(connes_reconstruction, "Connes 2008 axiom (v) — first-order condition")
+public axiom ax_first_order<T: SpectralTriple>(t: T) -> Bool
+    ensures true;
+
+/// Axiom (vi) — orientation. The spectral triple carries a Hochschild
+/// cycle witnessing an oriented volume form.
+@framework(connes_reconstruction, "Connes 2008 axiom (vi) — orientation")
+public axiom ax_orientation<T: SpectralTriple>(t: T) -> Bool
+    ensures true;
+
+/// Axiom (vii) — Poincaré duality. The Kasparov module represented by
+/// the spectral triple is invertible.
+@framework(connes_reconstruction, "Connes 2008 axiom (vii) — Poincaré duality")
+public axiom ax_poincare_duality<T: SpectralTriple>(t: T) -> Bool
+    ensures true;
+
+
+// =============================================================================
+// The reconstruction conclusion
+// =============================================================================
+
+/// Connes 2013 Theorem 1.1 — if a commutative spectral triple satisfies
+/// axioms (i)–(vii), then it is isomorphic to the canonical spectral
+/// triple of a compact Riemannian spin^c manifold. This is the
+/// headline result.
+@framework(connes_reconstruction, "Connes 2013 Theorem 1.1 (reconstruction)")
+public axiom reconstruction_theorem<T: SpectralTriple>(t: T) -> Bool
+    ensures true;

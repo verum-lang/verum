@@ -1,0 +1,83 @@
+// =============================================================================
+// Schreiber, Differential Cohomology in a Cohesive ∞-Topos — framework axioms
+// =============================================================================
+//
+// Source: Urs Schreiber, "Differential cohomology in a cohesive
+// ∞-topos", arXiv:1310.7930 (DCCT).
+//
+// Postulates the cohesive-modality apparatus (§3.9–§3.12 of DCCT) and
+// the full differential-cohesive hexagon (§4.1). Mechanising DCCT end
+// to end would require first mechanising HTT, so we treat its headline
+// results as trusted citations, tagged for audit.
+// =============================================================================
+
+/// An ∞-topos carrying a cohesive structure. The three cohesive
+/// modalities Π, ♭, ♯ act on its objects.
+public type CohesiveInfinityTopos is protocol {
+    /// The shape (Π) modality — geometric realisation.
+    fn shape(self) -> Self;
+    /// The flat (♭) modality — constant sheaves.
+    fn flat(self) -> Self;
+    /// The sharp (♯) modality — codiscrete sheaves.
+    fn sharp(self) -> Self;
+};
+
+/// A super-cohesive ∞-topos — adds the rheonomy modality on top.
+public type SuperCohesiveInfinityTopos is protocol {
+    /// Reduced (ℜ) modality.
+    fn reduced(self) -> Self;
+    /// Infinitesimal (ℑ) modality.
+    fn infinitesimal(self) -> Self;
+    /// Étale (&) modality.
+    fn etale(self) -> Self;
+};
+
+
+// =============================================================================
+// §3.9 — The cohesive hexagon
+// =============================================================================
+
+/// DCCT §3.9 — the cohesive hexagon relates the six cohesive modalities
+/// Π ⊣ ♭ ⊣ ♯ in a closed configuration that every cohesive ∞-topos
+/// satisfies.
+@framework(schreiber_dcct, "DCCT §3.9 (cohesive hexagon)")
+public axiom cohesive_hexagon<E: CohesiveInfinityTopos>(e: E) -> Bool
+    ensures true;
+
+/// DCCT §3.9 — the adjunction triple Π ⊣ ♭ ⊣ ♯.
+@framework(schreiber_dcct, "DCCT §3.9 (Π ⊣ ♭ ⊣ ♯)")
+public axiom cohesive_adjoint_triple<E: CohesiveInfinityTopos>(e: E) -> Bool
+    ensures true;
+
+
+// =============================================================================
+// §3.10 — Super-cohesion
+// =============================================================================
+
+/// DCCT §3.10 — super-cohesion extends the cohesive hexagon with the
+/// additional modalities ℜ ⊣ ℑ ⊣ &.
+@framework(schreiber_dcct, "DCCT §3.10 (super-cohesion)")
+public axiom super_cohesion<E: SuperCohesiveInfinityTopos>(e: E) -> Bool
+    ensures true;
+
+
+// =============================================================================
+// §3.12 — Rheonomy
+// =============================================================================
+
+/// DCCT §3.12 — the rheonomy adjunction ♭_bos ⊣ Rh connecting bosonic
+/// and fermionic content in the super-cohesive setting.
+@framework(schreiber_dcct, "DCCT §3.12 (rheonomy)")
+public axiom rheonomy_modality<E: SuperCohesiveInfinityTopos>(e: E) -> Bool
+    ensures true;
+
+
+// =============================================================================
+// §4.1 — Differential cohesion
+// =============================================================================
+
+/// DCCT §4.1 — the differential-cohesive refinement. Adds a fourth
+/// adjunction to the hexagon that tracks infinitesimal extensions.
+@framework(schreiber_dcct, "DCCT §4.1 (differential cohesion)")
+public axiom differential_cohesion<E: SuperCohesiveInfinityTopos>(e: E) -> Bool
+    ensures true;

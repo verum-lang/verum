@@ -1,0 +1,50 @@
+// =============================================================================
+// core.math.frameworks — trusted-axiom packages for external mathematical frameworks
+// =============================================================================
+//
+// This module postulates key results from external formal-mathematics
+// frameworks as @framework-tagged axioms. Every axiom carries an explicit
+// citation so `verum audit --framework-axioms` can enumerate the trusted
+// boundary of any proof that depends on them.
+//
+// The six packaged frameworks are:
+//
+//   lurie_htt               — Lurie, "Higher Topos Theory" (2009).
+//                             Presentability, ∞-topos formation, adjoint
+//                             functor theorem in the ∞-categorical setting,
+//                             accessible categories, Kan extensions.
+//
+//   schreiber_dcct          — Schreiber, "Differential cohomology in a
+//                             cohesive ∞-topos" (arXiv:1310.7930).
+//                             Cohesive modalities, super-cohesion,
+//                             rheonomy, the differential-cohesive hexagon.
+//
+//   connes_reconstruction   — Connes–Chamseddine (2008). Spectral
+//                             reconstruction of smooth Riemannian manifolds
+//                             from real spectral triples.
+//
+//   petz_classification     — Petz, "Monotone metrics on matrix spaces"
+//                             (1996). Classification of quantum Fisher
+//                             information metrics by operator-monotone
+//                             functions.
+//
+//   arnold_catastrophe      — Arnold–Mather, catastrophe normal forms
+//                             for codimension ≤ 4 (A_k, D_k, E_6/7/8).
+//
+//   baez_dolan              — Gordon–Power–Street (1995) / Baez–Dolan
+//                             coherence for tricategories and higher
+//                             n-category theories.
+//
+// Every use of one of these axioms in downstream code surfaces as an
+// entry in `verum audit --framework-axioms`. The kernel's AxiomRegistry
+// stores each axiom's FrameworkId (framework, citation), and any
+// .verum-cert export carries the dependency list along.
+//
+// See docs/verification/framework-axioms for the full story.
+
+public mount core.math.frameworks.lurie_htt;
+public mount core.math.frameworks.schreiber_dcct;
+public mount core.math.frameworks.connes_reconstruction;
+public mount core.math.frameworks.petz_classification;
+public mount core.math.frameworks.arnold_catastrophe;
+public mount core.math.frameworks.baez_dolan;
