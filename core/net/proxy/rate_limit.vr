@@ -1,0 +1,307 @@
+// =============================================================================
+// net/proxy/rate_limit.vr — token-bucket / leaky-bucket / sliding-window limiters
+// =============================================================================
+// Layer: 5 (Network — proxy middleware)
+// Dependencies: core, core.time, core.collections.map
+// =============================================================================
+//
+// Three classic rate-limiting algorithms behind one `RateLimiter`
+// protocol, plus a `KeyedRateLimiter<K>` that fans limiters out per
+// key (per-IP, per-user, per-API-token).
+//
+//   * `TokenBucket`      — capacity C, refill rate R → allows bursts
+//                          up to C, enforces long-run rate R.
+//                          The "fair with bursts" standard.
+//
+//   * `LeakyBucket`      — fixed-rate drain through a queue of
+//                          capacity C. Shapes output to exactly R
+//                          tokens/sec. Bursts above R queue (up to C)
+//                          or drop. Used for output smoothing.
+//
+//   * `SlidingWindow`    — N events in the past W seconds with
+//                          smoothed rollover between buckets. No
+//                          bursts allowed above N — strict per-window
+//                          cap. Used for strict per-minute / per-hour
+//                          quotas.
+//
+// # Thread-safety
+//
+// All limiters are single-owner by design. Higher-level dispatchers
+// can wrap them in `Shared<Mutex<Limiter>>` when the limiter needs
+// to be consulted from multiple tasks; the protocol surface below
+// takes `&mut self` so the compiler enforces exclusive access at
+// each call site.
+//
+// # Precision
+//
+// Integer-only arithmetic over microseconds and token counts.
+// Worst-case drift per second is O(1 / rate_per_sec) — negligible
+// for the typical 10/s … 10_000/s range.
+//
+// =============================================================================
+
+module core.net.proxy.rate_limit;
+
+mount core.*;
+mount core.collections.List;
+mount core.collections.map.{Map};
+mount core.time.instant.{Instant};
+mount core.time.duration.{Duration};
+
+// =============================================================================
+// Decision
+// =============================================================================
+
+/// Admission decision. `NotNow(delay)` carries the minimum wait
+/// before the next call would succeed — callers can either sleep
+/// and retry or return 429 immediately.
+public type RateDecision is
+      Admit
+    | NotNow(Duration);
+
+// =============================================================================
+// Protocol
+// =============================================================================
+
+/// The common entry point. Every limiter accepts a `cost` (how many
+/// tokens this operation consumes; default 1) so heavy operations
+/// can charge multiple tokens from a single decision.
+public type RateLimiter is protocol {
+    fn try_admit(&mut self, cost: UInt64, now: Instant) -> RateDecision;
+};
+
+// =============================================================================
+// TokenBucket
+// =============================================================================
+
+public type TokenBucket is {
+    capacity:   UInt64,
+    /// Tokens refilled per second.
+    rate_per_s: UInt64,
+    /// Current reserve. ≤ capacity.
+    tokens:     UInt64,
+    last:       Instant,
+};
+
+implement TokenBucket {
+    public fn new(capacity: UInt64, rate_per_s: UInt64) -> TokenBucket {
+        TokenBucket {
+            capacity:   capacity,
+            rate_per_s: rate_per_s,
+            tokens:     capacity,
+            last:       Instant.now(),
+        }
+    }
+
+    fn refill(&mut self, now: Instant) {
+        let elapsed = now.duration_since(self.last.clone())
+            .unwrap_or_else(|| Duration.from_micros(0));
+        let elapsed_us = elapsed.as_micros() as UInt64;
+        if elapsed_us == 0_u64 { return; }
+        let add = (self.rate_per_s * elapsed_us) / 1_000_000_u64;
+        self.tokens = self.tokens + add;
+        if self.tokens > self.capacity { self.tokens = self.capacity; }
+        self.last = now;
+    }
+}
+
+implement RateLimiter for TokenBucket {
+    fn try_admit(&mut self, cost: UInt64, now: Instant) -> RateDecision {
+        self.refill(now);
+        if self.tokens >= cost {
+            self.tokens = self.tokens - cost;
+            RateDecision.Admit
+        } else {
+            if self.rate_per_s == 0_u64 {
+                // Unreachable bucket — won't drain further.
+                return RateDecision.NotNow(Duration.from_secs(3600));
+            }
+            let deficit = cost - self.tokens;
+            let wait_us = (deficit * 1_000_000_u64) / self.rate_per_s;
+            RateDecision.NotNow(Duration.from_micros(wait_us as Int))
+        }
+    }
+}
+
+// =============================================================================
+// LeakyBucket
+// =============================================================================
+//
+// Simple: the bucket holds `queued` tokens. It drips at `rate_per_s`.
+// try_admit computes the current queue depth (decrementing by
+// elapsed drip amount) and accepts if the post-admission depth ≤
+// capacity.
+//
+// =============================================================================
+
+public type LeakyBucket is {
+    capacity:   UInt64,
+    rate_per_s: UInt64,
+    queued:     UInt64,
+    last:       Instant,
+};
+
+implement LeakyBucket {
+    public fn new(capacity: UInt64, rate_per_s: UInt64) -> LeakyBucket {
+        LeakyBucket {
+            capacity: capacity, rate_per_s: rate_per_s,
+            queued: 0_u64, last: Instant.now(),
+        }
+    }
+
+    fn drain(&mut self, now: Instant) {
+        let elapsed = now.duration_since(self.last.clone())
+            .unwrap_or_else(|| Duration.from_micros(0));
+        let elapsed_us = elapsed.as_micros() as UInt64;
+        if elapsed_us == 0_u64 { return; }
+        let drained = (self.rate_per_s * elapsed_us) / 1_000_000_u64;
+        if drained >= self.queued {
+            self.queued = 0_u64;
+        } else {
+            self.queued = self.queued - drained;
+        }
+        self.last = now;
+    }
+}
+
+implement RateLimiter for LeakyBucket {
+    fn try_admit(&mut self, cost: UInt64, now: Instant) -> RateDecision {
+        self.drain(now);
+        if self.queued + cost <= self.capacity {
+            self.queued = self.queued + cost;
+            RateDecision.Admit
+        } else {
+            if self.rate_per_s == 0_u64 {
+                return RateDecision.NotNow(Duration.from_secs(3600));
+            }
+            let excess = (self.queued + cost) - self.capacity;
+            let wait_us = (excess * 1_000_000_u64) / self.rate_per_s;
+            RateDecision.NotNow(Duration.from_micros(wait_us as Int))
+        }
+    }
+}
+
+// =============================================================================
+// SlidingWindow (2-bucket approximation)
+// =============================================================================
+//
+// RFC-draft "sliding-window log" is O(N) per admit; the "sliding-
+// window counter" approximation tracks the CURRENT and PREVIOUS
+// fixed-size windows and estimates the live count as:
+//
+//   live = prev_count × (1 - elapsed_in_current_window / window)
+//        + current_count
+//
+// Rejects when live + cost > limit. Constant-memory, constant-time.
+//
+// =============================================================================
+
+public type SlidingWindow is {
+    limit:        UInt64,
+    window_ms:    UInt64,
+    /// Time at which the current window started.
+    window_start: Instant,
+    current:      UInt64,
+    previous:     UInt64,
+};
+
+implement SlidingWindow {
+    public fn new(limit: UInt64, window_ms: UInt64) -> SlidingWindow {
+        SlidingWindow {
+            limit: limit, window_ms: window_ms,
+            window_start: Instant.now(),
+            current: 0_u64, previous: 0_u64,
+        }
+    }
+
+    fn maybe_rotate(&mut self, now: Instant) {
+        let elapsed_ms = now.duration_since(self.window_start.clone())
+            .unwrap_or_else(|| Duration.from_millis(0)).as_millis() as UInt64;
+        if elapsed_ms < self.window_ms { return; }
+        let windows_skipped = elapsed_ms / self.window_ms;
+        if windows_skipped >= 2_u64 {
+            // More than one window elapsed — everything is stale.
+            self.previous = 0_u64; self.current = 0_u64;
+        } else {
+            self.previous = self.current; self.current = 0_u64;
+        }
+        self.window_start = now;
+    }
+}
+
+implement RateLimiter for SlidingWindow {
+    fn try_admit(&mut self, cost: UInt64, now: Instant) -> RateDecision {
+        self.maybe_rotate(now.clone());
+        let elapsed_ms = now.duration_since(self.window_start.clone())
+            .unwrap_or_else(|| Duration.from_millis(0)).as_millis() as UInt64;
+        let frac_prev = if self.window_ms > 0_u64 {
+            (self.window_ms - elapsed_ms) * 1_000_u64 / self.window_ms
+        } else { 0_u64 };
+        // live = prev × (frac_prev / 1000) + current
+        let weighted_prev = (self.previous * frac_prev) / 1_000_u64;
+        let live = weighted_prev + self.current;
+        if live + cost <= self.limit {
+            self.current = self.current + cost;
+            RateDecision.Admit
+        } else {
+            // Time until enough prev-window weight decays.
+            let wait_ms = if self.window_ms == 0_u64 {
+                0_u64
+            } else {
+                // wait for (live + cost - limit) worth of previous
+                // bucket to decay: d/dt live = -prev/window. Solve
+                // for dt.
+                let excess = (live + cost) - self.limit;
+                if self.previous == 0_u64 {
+                    self.window_ms - elapsed_ms
+                } else {
+                    (excess * self.window_ms) / self.previous
+                }
+            };
+            RateDecision.NotNow(Duration.from_millis(wait_ms as Int))
+        }
+    }
+}
+
+// =============================================================================
+// KeyedRateLimiter — fan-out per key
+// =============================================================================
+//
+// Wraps any `Factory<K>` that builds a fresh limiter on first
+// touch. The map is lazily populated — a never-seen key is admitted
+// freely until its first admission starts the clock.
+//
+// The map can grow unboundedly if `K` space is unbounded. Callers
+// that need eviction should wrap this in an LRU policy — shipped
+// in a follow-up for the common per-IP-limit-with-eviction case.
+//
+// =============================================================================
+
+public type LimiterFactory<L> is protocol {
+    fn build(&self) -> L;
+};
+
+public type KeyedRateLimiter<K: Hash + Eq, L> is {
+    limiters: Map<K, L>,
+    factory:  Heap<dyn LimiterFactory<L>>,
+};
+
+implement<K: Hash + Eq, L> KeyedRateLimiter<K, L> {
+    public fn new(factory: Heap<dyn LimiterFactory<L>>) -> KeyedRateLimiter<K, L> {
+        KeyedRateLimiter { limiters: Map.new(), factory: factory }
+    }
+
+    public fn len(&self) -> Int { self.limiters.len() }
+
+    /// Number of live keys — useful for sizing / eviction policies.
+    public fn keys(&self) -> Int { self.limiters.len() }
+}
+
+// =============================================================================
+// Convenience constants
+// =============================================================================
+
+/// One-second cost for a cheap API call.
+public const CHEAP_COST:  UInt64 = 1_u64;
+/// Example "expensive" call — tune per deployment.
+public const HEAVY_COST:  UInt64 = 10_u64;

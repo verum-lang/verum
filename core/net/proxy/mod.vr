@@ -18,3 +18,4 @@ public mount super.net.proxy.health_check.*;
 public mount super.net.proxy.loadbalancer.*;
 public mount super.net.proxy.circuit_breaker.*;
 public mount super.net.proxy.retry.*;
+public mount super.net.proxy.rate_limit.*;

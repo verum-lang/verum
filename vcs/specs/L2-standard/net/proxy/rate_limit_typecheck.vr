@@ -1,0 +1,43 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: proxy, rate-limit, token-bucket, leaky-bucket, sliding-window, typecheck
+// @timeout: 10000
+// @expect: pass
+
+mount core.net.proxy.rate_limit.{
+    RateLimiter, RateDecision,
+    TokenBucket, LeakyBucket, SlidingWindow,
+    CHEAP_COST, HEAVY_COST,
+};
+mount core.time.instant.{Instant};
+
+// Polymorphic admit — works for any limiter.
+fn admit<L: RateLimiter>(l: &mut L, cost: UInt64, now: Instant) -> RateDecision {
+    l.try_admit(cost, now)
+}
+
+fn exercise_token_bucket() {
+    let mut tb = TokenBucket.new(100_u64, 10_u64);    // 100-burst, 10 tok/s
+    let now = Instant.now();
+    let _ = admit(&mut tb, CHEAP_COST, now.clone());
+    let _ = admit(&mut tb, HEAVY_COST, now.clone());
+}
+
+fn exercise_leaky_bucket() {
+    let mut lb = LeakyBucket.new(50_u64, 5_u64);      // 50-queue, 5 tok/s
+    let now = Instant.now();
+    let _ = admit(&mut lb, CHEAP_COST, now);
+}
+
+fn exercise_sliding_window() {
+    let mut sw = SlidingWindow.new(60_u64, 60_000_u64); // 60 req / minute
+    let now = Instant.now();
+    let _ = admit(&mut sw, CHEAP_COST, now);
+}
+
+fn main() {
+    exercise_token_bucket();
+    exercise_leaky_bucket();
+    exercise_sliding_window();
+}
