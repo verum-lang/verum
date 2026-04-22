@@ -129,7 +129,7 @@ public type H3ClientError is
 /// This v1.0 shape exposes the architecture; the hot path (UDP socket
 /// plumbing + retry/version-negotiation handling) drops in once
 /// `core.net.udp` batch I/O lands alongside connection_sm integration.
-public async fn H3Client.connect(url_text: &Text, opts: ClientOptions) -> Result<H3Client, H3ClientError> {
+public async fn h3client_connect(url_text: &Text, opts: ClientOptions) -> Result<H3Client, H3ClientError> {
     let url = Url.parse(url_text.as_slice())
         .map_err(|e| H3ClientError.UrlParse(e))?;
     if url.scheme() != Text.from_str("https") {
@@ -185,7 +185,7 @@ async fn resolve_host(url: &Url) -> Result<SocketAddr, H3ClientError> {
 ///
 /// Requires the ticket's `max_early_data_size` ≥ `early_data.len()`
 /// — otherwise returns `EarlyDataTooLarge` before the socket opens.
-pub async fn H3Client.connect_resumed(
+pub async fn h3client_connect_resumed(
     url_text: &Text,
     opts: ClientOptions,
     session: core.net.tls13.handshake.ClientSession,

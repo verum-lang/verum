@@ -126,7 +126,7 @@ public fn encode_offered_psks(o: &OfferedPsks, out: &mut List<Byte>) -> Result<(
 
 public type BinderFlavor is ResumptionBinder | ExternalBinder;
 
-impl BinderFlavor {
+implement BinderFlavor {
     public fn label(&self) -> &[Byte] {
         match self {
             BinderFlavor.ResumptionBinder => &LABEL_RES_BINDER,

@@ -52,7 +52,7 @@ public type InboundDatagram is {
 
 public type EcnCodepoint is NotEct | Ect1 | Ect0 | Ce;
 
-impl EcnCodepoint {
+implement EcnCodepoint {
     public fn to_u8(&self) -> UInt8 {
         match self {
             EcnCodepoint.NotEct => 0_u8,
@@ -193,7 +193,7 @@ public type SimNetwork is {
     closed:    Bool,
 };
 
-impl SimNetwork {
+implement SimNetwork {
     public fn new() -> SimNetwork {
         SimNetwork { inflight: [], loss_rate: 0.0, reorder_rate: 0.0, closed: false }
     }
@@ -204,7 +204,7 @@ impl SimNetwork {
     }
 }
 
-impl SimUdpTransport {
+implement SimUdpTransport {
     public fn bind(addr: SocketAddr, network: Shared<SimNetwork>) -> SimUdpTransport {
         SimUdpTransport { addr: addr, network: network }
     }

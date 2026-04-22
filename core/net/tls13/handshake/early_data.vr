@@ -150,7 +150,7 @@ public type EarlyDataBudget is {
     consumed:  UInt32,
 }
 
-impl EarlyDataBudget {
+implement EarlyDataBudget {
     public fn new(limit: UInt32) -> EarlyDataBudget {
         EarlyDataBudget { limit: limit, consumed: 0_u32 }
     }

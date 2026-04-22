@@ -68,7 +68,7 @@ public type ServerOptions is {
     max_field_section_size:  UInt64,
 };
 
-impl ServerOptions {
+implement ServerOptions {
     /// Canonical constructor — caller provides a pre-loaded cert
     /// chain and signer; the rest falls back to industrial defaults.
     public fn from_cert(
@@ -137,7 +137,7 @@ public type H3ServerError is
     | H3Layer(H3Error)
     | Closed;
 
-impl H3Server {
+implement H3Server {
     /// Bind a UDP socket + prepare the accept loop. The returned
     /// server is idle until `run` / `run_with` drives it.
     pub async fn bind(addr_text: &Text, opts: ServerOptions) -> Result<H3Server, H3ServerError> {

@@ -84,7 +84,7 @@ public type QpackSession is {
     peer_insert_count: UInt64,
 };
 
-impl QpackSession {
+implement QpackSession {
     public fn new(max_table_cap: UInt64, peer_max_table_cap: UInt64) -> QpackSession {
         let mut encoder_table = DynamicTable.new(max_table_cap);
         let decoder_table     = DynamicTable.new(peer_max_table_cap);

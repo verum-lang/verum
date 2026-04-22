@@ -123,7 +123,7 @@ public type ServerListener is {
     cid_seed:        Shared<UInt64>,
 };
 
-impl ServerListener {
+implement ServerListener {
     pub async fn bind(
         addr: &SocketAddr,
         tls_config: ServerConfig,

@@ -31,7 +31,7 @@ mount core.net.h3.qpack.decoder.{HeaderField};
 
 public type H3Method is Get | Post | Put | Delete | Head | Options | Patch | Connect | Other(Text);
 
-impl H3Method {
+implement H3Method {
     public fn as_text(&self) -> Text {
         match self {
             H3Method.Get     => Text.from_str("GET"),
@@ -79,7 +79,7 @@ public type H3Response is {
     trailers:  List<HeaderField>,
 };
 
-impl H3Request {
+implement H3Request {
     public fn get(authority: Text, path: Text) -> H3Request {
         H3Request {
             method: H3Method.Get,
@@ -126,7 +126,7 @@ impl H3Request {
     }
 }
 
-impl H3Response {
+implement H3Response {
     public fn ok(body: List<Byte>) -> H3Response {
         H3Response {
             status: 200_u16,

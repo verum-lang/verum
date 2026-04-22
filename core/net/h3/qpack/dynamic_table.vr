@@ -52,7 +52,7 @@ public type DynEntry is {
     refs:  UInt64,
 };
 
-impl DynEntry {
+implement DynEntry {
     public fn new(name: Text, value: Text) -> DynEntry {
         let size = (name.as_bytes().len() as UInt64) + (value.as_bytes().len() as UInt64) + 32_u64;
         DynEntry { name: name, value: value, size: size, refs: 0_u64 }
@@ -77,7 +77,7 @@ public type DynamicTable is {
     dropped_count:    UInt64,
 }
 
-impl DynamicTable {
+implement DynamicTable {
     public fn new(max_capacity: UInt64) -> DynamicTable {
         DynamicTable {
             entries:       [],

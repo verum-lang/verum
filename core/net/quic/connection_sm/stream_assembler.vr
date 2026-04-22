@@ -59,7 +59,7 @@ public type AssemblyBudget is {
     packet_bytes: Int,
 };
 
-impl AssemblyBudget {
+implement AssemblyBudget {
     public fn from_caps(
         packet_room: Int,
         cc: &dyn CongestionCtrl,

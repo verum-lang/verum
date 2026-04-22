@@ -126,7 +126,7 @@ public type ConnectionPump is {
 
 public type PumpPhase is PumpInitial | PumpHandshake | PumpOneRtt | PumpClosing | PumpDraining;
 
-impl ConnectionPump {
+implement ConnectionPump {
     public fn new_client(
         transport: Heap<dyn UdpTransport>,
         peer_addr: SocketAddr,

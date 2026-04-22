@@ -52,7 +52,7 @@ public type QuicServerOptions is {
     max_connections:         UInt64,
 };
 
-impl QuicServerOptions {
+implement QuicServerOptions {
     public fn from_cert(cert_chain: List<List<Byte>>, signer: Heap<dyn CertSigner>) -> QuicServerOptions {
         let mut params = TransportParams.defaults();
         params.initial_max_data                    = 10_485_760_u64;    // 10 MiB
@@ -104,7 +104,7 @@ public type QuicAccepted is {
     connection_id: core.net.quic.connection_id.ConnectionId,
 };
 
-impl QuicAccepted {
+implement QuicAccepted {
     /// Await the next peer-initiated bidirectional stream.
     pub async fn next_bidi_stream(&mut self) -> Result<QuicStream, QuicServerError> {
         // Integration layer wires this into the connection's RecvStream
@@ -143,7 +143,7 @@ public type QuicServer is {
     opts:       QuicServerOptions,
 };
 
-impl QuicServer {
+implement QuicServer {
     /// Bind a UDP socket and prepare to accept QUIC connections.
     /// The server is idle until `accept()` / `accept_loop()` drive it.
     pub async fn bind(addr_text: &Text, opts: QuicServerOptions) -> Result<QuicServer, QuicServerError> {

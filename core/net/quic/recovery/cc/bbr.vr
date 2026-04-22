@@ -128,7 +128,7 @@ type BandwidthFilter is {
     window_rtts: UInt32,
 };
 
-impl BandwidthFilter {
+implement BandwidthFilter {
     pub fn new() -> BandwidthFilter {
         BandwidthFilter { samples: [], window_rtts: 10_u32 }
     }
@@ -171,7 +171,7 @@ type RttFilter is {
     min_rtt_valid:    Bool,
 };
 
-impl RttFilter {
+implement RttFilter {
     pub fn new() -> RttFilter {
         RttFilter {
             min_rtt:        Duration.from_secs(0),
@@ -234,7 +234,7 @@ public type Bbr is {
     recovery_start:   Maybe<Instant>,
 };
 
-impl Bbr {
+implement Bbr {
     pub fn new() -> Bbr {
         Bbr {
             phase:            BbrPhase.Startup,
@@ -475,7 +475,7 @@ implement CongestionCtrl for Bbr {
     fn pacing_rate(&self) -> UInt64   { self.pacing_rate_bps }
 };
 
-impl Bbr {
+implement Bbr {
     pub fn exit_recovery_if_appropriate(&mut self, acked_time_sent: Instant) {
         match self.recovery_start {
             Some(rs) => {

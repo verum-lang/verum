@@ -95,7 +95,7 @@ public type Cubic is {
 // Constructor
 // =============================================================================
 
-impl Cubic {
+implement Cubic {
     public fn new() -> Cubic {
         Cubic {
             cwnd:             INITIAL_WINDOW_BYTES,
@@ -260,7 +260,7 @@ implement CongestionCtrl for Cubic {
     fn pacing_rate(&self) -> UInt64   { self.pacing_rate_bps }
 };
 
-impl Cubic {
+implement Cubic {
     public fn exit_recovery_if_appropriate(&mut self, acked_time_sent: Instant) {
         match self.recovery_start {
             Some(rs) => {

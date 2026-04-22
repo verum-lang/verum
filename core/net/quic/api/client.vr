@@ -54,7 +54,7 @@ public type QuicClientOptions is {
     verify_hostname:           Bool,
 };
 
-impl QuicClientOptions {
+implement QuicClientOptions {
     public fn default() -> QuicClientOptions {
         let mut params = TransportParams.defaults();
         params.initial_max_data              = 1024_u64 * 1024_u64;
@@ -121,7 +121,7 @@ public type QuicClient is {
     opened_uni:     UInt64,
 };
 
-impl QuicClient {
+implement QuicClient {
     /// Dial a QUIC server. `authority` is `host[:port]` — port
     /// defaults to 443 when absent. The returned client is ready
     /// for stream + datagram traffic.
