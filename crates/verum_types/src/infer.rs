@@ -41921,18 +41921,35 @@ impl TypeChecker {
                 }
             }
 
-            // CONSTRUCTOR METHOD FALLBACK: `TypeName.new(args)` or `TypeName.of(args)`
-            // Returns the receiver type with args synth'd
+            // CONSTRUCTOR METHOD FALLBACK: `TypeName.new(args)` etc.
+            //
+            // Historically an unconditional `return recv_ty.clone()` for any
+            // receiver whose method-name matched this short list. That
+            // bypassed argument-type checking and silently masked real bugs
+            // whenever the receiver *was* properly registered but the
+            // pre-flight compat check had tripped on a numeric-alias
+            // spelling mismatch (see commit d866281e for the full story).
+            //
+            // Narrowed here to fire only when the receiver type isn't in
+            // `ctx.type_defs` — i.e. it's an opaque nominal we haven't
+            // fully resolved yet. For known types we fall through to
+            // MethodNotFound below, which is the correct diagnostic and
+            // gives a "did-you-mean" suggestion from the registered
+            // methods.
             {
                 let method_name_str = method.name.as_str();
-                if matches!(method_name_str, "new" | "of" | "default" | "create" | "from_errno" | "from_bytes" | "from_utf8_lossy" | "from_cstr" | "get_or_init" | "into_raw") {
+                if matches!(method_name_str,
+                    "new" | "of" | "default" | "create"
+                    | "from_errno" | "from_bytes" | "from_utf8_lossy"
+                    | "from_cstr" | "get_or_init" | "into_raw")
+                {
+                    let recv_name_text = self.type_to_name(&recv_ty);
+                    let is_registered = self.ctx.lookup_type(recv_name_text.as_str()).is_some();
                     match &recv_ty {
-                        Type::Named { .. } | Type::Generic { .. } => {
+                        Type::Named { .. } | Type::Generic { .. } if !is_registered => {
                             for arg in args.iter() {
                                 let _ = self.synth_expr(arg)?;
                             }
-                            // For 'default' with no args, return the type itself
-                            // For 'new', 'of', 'create' - return the type
                             return Ok(InferResult::new(recv_ty.clone()));
                         }
                         _ => {}
