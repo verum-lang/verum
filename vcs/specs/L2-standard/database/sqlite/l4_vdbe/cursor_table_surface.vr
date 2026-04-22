@@ -1,0 +1,104 @@
+// @test: typecheck-pass
+// @level: L2
+// @tier: 0
+// @tags: sqlite, native, vdbe, cursor, table
+// @timeout: 10000
+// @description: Cursor table — OpenRead/OpenWrite/Close + ephemeral/sorter + rewind
+//
+// Spec: internal/specs/sqlite-native.md §11.3
+
+mount core.*;
+mount core.database.sqlite.native.l4_vdbe.{
+    CursorSlot, CursorSlotKind, CursorTable, CursorTableError,
+    cursor_table_new,
+};
+mount core.database.sqlite.native.l3_btree.BtreeKind;
+
+fn allocates_slots_closed() {
+    let tbl = cursor_table_new(4, 4096, 0);
+    assert_eq(tbl.size(), 4);
+    let mut i: Int = 0;
+    while i < 4 {
+        match tbl.kind(i) {
+            CskClosed => {}, _ => panic("slot should be closed"),
+        }
+        i = i + 1;
+    }
+}
+
+fn open_read_then_close() {
+    let mut tbl = cursor_table_new(2, 4096, 0);
+    match tbl.open_read(0, 1, 3, TableBtree) {
+        Ok(_) => {},
+        Err(_) => panic("open_read"),
+    }
+    match tbl.kind(0) {
+        CskBtree => {},
+        _ => panic("should be CskBtree"),
+    }
+    assert(!tbl.is_writable(0));
+    let _ = tbl.close(0);
+    match tbl.kind(0) { CskClosed => {}, _ => panic("closed"), }
+}
+
+fn open_write_is_writable() {
+    let mut tbl = cursor_table_new(1, 4096, 0);
+    let _ = tbl.open_write(0, 5, 2, IndexBtree);
+    assert(tbl.is_writable(0));
+    let _ = tbl.ensure_writable(0);
+}
+
+fn ensure_writable_rejects_readonly() {
+    let mut tbl = cursor_table_new(1, 4096, 0);
+    let _ = tbl.open_read(0, 1, 1, TableBtree);
+    match tbl.ensure_writable(0) {
+        Ok(_) => panic("read-only must reject"),
+        Err(_) => {},
+    }
+}
+
+fn reopen_without_close_errors() {
+    let mut tbl = cursor_table_new(1, 4096, 0);
+    let _ = tbl.open_read(0, 1, 1, TableBtree);
+    match tbl.open_read(0, 2, 1, TableBtree) {
+        Ok(_) => panic("reopen must reject"),
+        Err(_) => {},
+    }
+}
+
+fn open_ephemeral_and_sorter() {
+    let mut tbl = cursor_table_new(2, 4096, 0);
+    let _ = tbl.open_ephemeral(0, 3);
+    match tbl.kind(0) { CskEphemeral => {}, _ => panic("ephemeral"), }
+    let _ = tbl.open_sorter(1);
+    match tbl.kind(1) { CskSorter => {}, _ => panic("sorter"), }
+}
+
+fn rewind_on_btree_positions_at_root() {
+    let mut tbl = cursor_table_new(1, 4096, 0);
+    let _ = tbl.open_read(0, 7, 1, TableBtree);
+    match tbl.rewind(0) {
+        Ok(_) => {},
+        Err(_) => panic("rewind"),
+    }
+}
+
+fn out_of_range_slot_rejected() {
+    let mut tbl = cursor_table_new(1, 4096, 0);
+    match tbl.open_read(5, 1, 1, TableBtree) {
+        Ok(_) => panic("OOB slot"),
+        Err(_) => {},
+    }
+}
+
+fn main() {
+    allocates_slots_closed();
+    open_read_then_close();
+    open_write_is_writable();
+    ensure_writable_rejects_readonly();
+    reopen_without_close_errors();
+    open_ephemeral_and_sorter();
+    rewind_on_btree_positions_at_root();
+    out_of_range_slot_rejected();
+    print("cursor_table_surface typecheck ok");
+}

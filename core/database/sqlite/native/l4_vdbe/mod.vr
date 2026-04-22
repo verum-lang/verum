@@ -30,6 +30,7 @@ public module register;
 public module program;
 public module interpreter;
 public module optimizer;
+public module cursor_table;
 
 public mount .opcode.{
     Opcode,
@@ -54,4 +55,9 @@ public mount .interpreter.{
 
 public mount .optimizer.{
     eliminate_noops, thread_jumps, optimize,
+};
+
+public mount .cursor_table.{
+    CursorSlot, CursorSlotKind, CursorTable, CursorTableError,
+    cursor_table_new,
 };

@@ -1,0 +1,275 @@
+module core.database.sqlite.native.l4_vdbe.cursor_table;
+
+// =============================================================================
+// l4_vdbe/cursor_table.vr — per-program cursor registry
+// =============================================================================
+// Layer: 4
+// Spec: sqlite-native.md §11.3
+//
+// Each VDBE program declares its cursors at build time (via
+// `VdbeProgram.declare_cursor`) and the interpreter opens real
+// L3 BtreeCursors lazily when it encounters an `OpenRead` / `OpenWrite`
+// / `OpenEphemeral` / `SorterOpen` opcode. The `CursorTable` is the
+// slot array the interpreter consults on every cursor-bound opcode
+// (`Column`, `Next`, `SeekGE`, …).
+//
+// Ownership:
+//
+//   * The program owns the cursor *declarations* (metadata — root
+//     page, n_cols, kind).
+//   * The interpreter owns the cursor *instances* — live L3
+//     BtreeCursors, ephemeral in-memory B-trees, sorter state.
+//
+// Cursor slots are typed via a small sum so the interpreter can
+// dispatch without looking up the declaration again. Ephemeral and
+// sorter slots lazily construct their backing store on first use.
+// =============================================================================
+
+mount core.*;
+mount collections.{List, Map};
+mount base.{Result, Ok, Err, Text, Maybe};
+mount core.database.sqlite.native.l3_btree.{
+    Btree, BtreeCursor, BtreeKind,
+    btree_new, cursor_new, cursor_root,
+};
+
+// -----------------------------------------------------------------------------
+// Types
+// -----------------------------------------------------------------------------
+
+public type CursorSlotKind is
+      CskClosed
+    | CskBtree                      // real B-tree cursor backed by the pager
+    | CskEphemeral                  // in-memory temp B-tree (OpenEphemeral)
+    | CskSorter;                    // sort-only ephemeral
+
+public type CursorSlot is {
+    kind: CursorSlotKind,
+    cursor_id: Int,
+    root_page: Int,
+    n_cols: Int,
+    // Backing tree — only set when kind is CskBtree / CskEphemeral.
+    // Sorter stores nothing here; its state lives in SorterTable below.
+    btree: Maybe<Btree>,
+    // Active cursor position. None until the cursor is Rewound / Seek'd.
+    position: Maybe<BtreeCursor>,
+    // Whether this cursor was opened for writing. OpenWrite sets this;
+    // OpenRead leaves it false. Used to reject Insert/Delete on
+    // read-only cursors.
+    writable: Bool,
+};
+
+fn cursor_slot_empty(cursor_id: Int) -> CursorSlot {
+    CursorSlot {
+        kind: CskClosed,
+        cursor_id: cursor_id,
+        root_page: 0,
+        n_cols: 0,
+        btree: None,
+        position: None,
+        writable: false,
+    }
+}
+
+public type CursorTableError is
+      NoSuchSlot(cursor_id: Int)
+    | AlreadyOpen(cursor_id: Int)
+    | WrongKind(cursor_id: Int, expected: Text)
+    | WriteOnReadOnly(cursor_id: Int);
+
+// -----------------------------------------------------------------------------
+// Cursor table
+// -----------------------------------------------------------------------------
+
+public type CursorTable is {
+    slots: List<CursorSlot>,
+    page_size: Int,
+    reserved_bytes: Int,
+};
+
+/// Build a fresh table sized for `n` cursors; each slot is CskClosed.
+public fn cursor_table_new(n: Int, page_size: Int, reserved_bytes: Int) -> CursorTable {
+    let mut slots: List<CursorSlot> = List.new();
+    let mut i: Int = 0;
+    while i < n {
+        slots.push(cursor_slot_empty(i));
+        i = i + 1;
+    }
+    CursorTable {
+        slots: slots,
+        page_size: page_size,
+        reserved_bytes: reserved_bytes,
+    }
+}
+
+implement CursorTable {
+    public fn size(&self) -> Int { self.slots.len() }
+
+    // -------------------------------------------------------------------------
+    // OpenRead / OpenWrite
+    // -------------------------------------------------------------------------
+
+    public fn open_read(
+        &mut self,
+        cursor_id: Int,
+        root_page: Int,
+        n_cols: Int,
+        kind: BtreeKind,
+    ) -> Result<(), CursorTableError> {
+        self.open_btree(cursor_id, root_page, n_cols, kind, false)
+    }
+
+    public fn open_write(
+        &mut self,
+        cursor_id: Int,
+        root_page: Int,
+        n_cols: Int,
+        kind: BtreeKind,
+    ) -> Result<(), CursorTableError> {
+        self.open_btree(cursor_id, root_page, n_cols, kind, true)
+    }
+
+    fn open_btree(
+        &mut self,
+        cursor_id: Int,
+        root_page: Int,
+        n_cols: Int,
+        kind: BtreeKind,
+        writable: Bool,
+    ) -> Result<(), CursorTableError> {
+        if cursor_id < 0 || cursor_id >= self.slots.len() {
+            return Err(NoSuchSlot(cursor_id));
+        }
+        let existing = self.slots[cursor_id].kind;
+        match existing {
+            CskClosed => {}
+            _         => { return Err(AlreadyOpen(cursor_id)); }
+        }
+        let tree = match btree_new(kind, root_page, self.page_size, self.reserved_bytes) {
+            Ok(t)  => t,
+            Err(_) => { return Err(WrongKind(cursor_id, "btree_new".clone())); }
+        };
+        self.slots[cursor_id] = CursorSlot {
+            kind: CskBtree,
+            cursor_id: cursor_id,
+            root_page: root_page,
+            n_cols: n_cols,
+            btree: Some(tree),
+            position: None,
+            writable: writable,
+        };
+        Ok(())
+    }
+
+    // -------------------------------------------------------------------------
+    // OpenEphemeral / SorterOpen
+    // -------------------------------------------------------------------------
+
+    public fn open_ephemeral(&mut self, cursor_id: Int, n_cols: Int) -> Result<(), CursorTableError> {
+        if cursor_id < 0 || cursor_id >= self.slots.len() {
+            return Err(NoSuchSlot(cursor_id));
+        }
+        // Ephemeral tables are backed by a fresh in-memory btree at
+        // synthetic root_page 0 (the cursor table notes the
+        // specialness via CskEphemeral; a real allocator lives in
+        // L1 pager's temp-store path).
+        self.slots[cursor_id] = CursorSlot {
+            kind: CskEphemeral,
+            cursor_id: cursor_id,
+            root_page: 0,
+            n_cols: n_cols,
+            btree: None,
+            position: None,
+            writable: true,
+        };
+        Ok(())
+    }
+
+    public fn open_sorter(&mut self, cursor_id: Int) -> Result<(), CursorTableError> {
+        if cursor_id < 0 || cursor_id >= self.slots.len() {
+            return Err(NoSuchSlot(cursor_id));
+        }
+        self.slots[cursor_id] = CursorSlot {
+            kind: CskSorter,
+            cursor_id: cursor_id,
+            root_page: 0,
+            n_cols: 0,
+            btree: None,
+            position: None,
+            writable: true,
+        };
+        Ok(())
+    }
+
+    // -------------------------------------------------------------------------
+    // Close / inspect
+    // -------------------------------------------------------------------------
+
+    public fn close(&mut self, cursor_id: Int) -> Result<(), CursorTableError> {
+        if cursor_id < 0 || cursor_id >= self.slots.len() {
+            return Err(NoSuchSlot(cursor_id));
+        }
+        self.slots[cursor_id] = cursor_slot_empty(cursor_id);
+        Ok(())
+    }
+
+    public fn kind(&self, cursor_id: Int) -> CursorSlotKind {
+        if cursor_id < 0 || cursor_id >= self.slots.len() {
+            return CskClosed;
+        }
+        self.slots[cursor_id].kind
+    }
+
+    public fn is_writable(&self, cursor_id: Int) -> Bool {
+        if cursor_id < 0 || cursor_id >= self.slots.len() {
+            return false;
+        }
+        self.slots[cursor_id].writable
+    }
+
+    // -------------------------------------------------------------------------
+    // Positioning
+    // -------------------------------------------------------------------------
+
+    public fn rewind(&mut self, cursor_id: Int) -> Result<(), CursorTableError> {
+        if cursor_id < 0 || cursor_id >= self.slots.len() {
+            return Err(NoSuchSlot(cursor_id));
+        }
+        let slot = &self.slots[cursor_id];
+        match slot.kind {
+            CskBtree => {
+                match slot.btree {
+                    Some(ref tree) => {
+                        let mut cur = cursor_new(tree);
+                        let _ = cursor_root(&mut cur);
+                        let updated = CursorSlot {
+                            kind: slot.kind,
+                            cursor_id: slot.cursor_id,
+                            root_page: slot.root_page,
+                            n_cols: slot.n_cols,
+                            btree: slot.btree,
+                            position: Some(cur),
+                            writable: slot.writable,
+                        };
+                        self.slots[cursor_id] = updated;
+                        Ok(())
+                    }
+                    None => Err(WrongKind(cursor_id, "no btree".clone())),
+                }
+            }
+            _ => Err(WrongKind(cursor_id, "rewind on non-btree".clone())),
+        }
+    }
+
+    /// Reject a write attempt on a read-only cursor. The interpreter
+    /// calls this before any Insert / Delete opcode.
+    public fn ensure_writable(&self, cursor_id: Int) -> Result<(), CursorTableError> {
+        if cursor_id < 0 || cursor_id >= self.slots.len() {
+            return Err(NoSuchSlot(cursor_id));
+        }
+        if !self.slots[cursor_id].writable {
+            return Err(WriteOnReadOnly(cursor_id));
+        }
+        Ok(())
+    }
+}

@@ -1,0 +1,149 @@
+// @test: typecheck-pass
+// @level: L2
+// @tier: 0
+// @tags: sqlite, native, sql, ast
+// @timeout: 10000
+// @description: SQL AST — construct Statement / SelectStmt / Expr / DML nodes
+//
+// Spec: internal/specs/sqlite-native.md §12.3
+
+mount core.*;
+mount collections.List;
+mount base.{Maybe};
+mount core.database.sqlite.native.l5_sql.{
+    Statement, Expr, Literal, BinOp, UnOp,
+    SelectStmt, SelectKind, SimpleSelect, ResultColumnItem,
+    FromItem, OrderTerm, OrderDirection, LimitClause,
+    TableRef,
+    InsertStmt, InsertSource, OnConflict,
+    UpdateStmt, UpdateAssignment,
+    DeleteStmt,
+    CreateTableStmt, ColumnDef, TableConstraint, ColumnConstraint,
+};
+
+fn build_select_one() {
+    // SELECT 1
+    let simple = SimpleSelect {
+        distinct: false,
+        result_columns: [RcExpr(ELit(LInt(1 as Int64)), "".clone())],
+        from: None,
+        where_clause: None,
+        group_by: [],
+        having: None,
+    };
+    let sel = SelectStmt {
+        kind: SkSimple(simple),
+        order_by: [],
+        limit: None,
+    };
+    let stmt = SSelect(sel);
+    match stmt {
+        SSelect(_) => {}, _ => panic("SSelect"),
+    }
+}
+
+fn build_insert_values() {
+    let t = TableRef { schema: "".clone(), name: "users".clone(), alias: "".clone() };
+    let row: List<Expr> = [ELit(LInt(1 as Int64)), ELit(LText("Alice".clone()))];
+    let ins = InsertStmt {
+        table: t,
+        columns: ["id".clone(), "name".clone()],
+        source: IsValues([row]),
+        on_conflict: None,
+        returning: [],
+    };
+    let stmt = SInsert(ins);
+    match stmt {
+        SInsert(_) => {}, _ => panic("SInsert"),
+    }
+}
+
+fn build_update_basic() {
+    let t = TableRef { schema: "".clone(), name: "users".clone(), alias: "".clone() };
+    let asg = UpdateAssignment { column: "name".clone(), value: ELit(LText("Bob".clone())) };
+    let upd = UpdateStmt {
+        table: t,
+        assignments: [asg],
+        from: None,
+        where_clause: Some(EBinary(BEq, Heap(EColumn(TableRef { schema: "".clone(), name: "".clone(), alias: "".clone() }, "id".clone())), Heap(ELit(LInt(1 as Int64))))),
+        on_conflict: None,
+        returning: [],
+    };
+    let stmt = SUpdate(upd);
+    match stmt {
+        SUpdate(_) => {}, _ => panic("SUpdate"),
+    }
+}
+
+fn build_delete() {
+    let t = TableRef { schema: "".clone(), name: "t".clone(), alias: "".clone() };
+    let d = DeleteStmt {
+        table: t,
+        where_clause: None,
+        returning: [],
+    };
+    let stmt = SDelete(d);
+    match stmt {
+        SDelete(_) => {}, _ => panic("SDelete"),
+    }
+}
+
+fn build_create_table() {
+    let t = TableRef { schema: "".clone(), name: "users".clone(), alias: "".clone() };
+    let col_id = ColumnDef {
+        name: "id".clone(),
+        declared_type: "INTEGER".clone(),
+        constraints: [CcPrimaryKey(None, false)],
+    };
+    let col_name = ColumnDef {
+        name: "name".clone(),
+        declared_type: "TEXT".clone(),
+        constraints: [CcNotNull(None)],
+    };
+    let ct = CreateTableStmt {
+        if_not_exists: true,
+        temporary: false,
+        table: t,
+        columns: [col_id, col_name],
+        constraints: [],
+        strict: true,
+        without_rowid: false,
+    };
+    let stmt = SCreateTable(ct);
+    match stmt {
+        SCreateTable(_) => {}, _ => panic("SCreateTable"),
+    }
+}
+
+fn build_expression_variety() {
+    let _ = ELit(LNull);
+    let _ = ELit(LTrue);
+    let _ = ELit(LCurrentTimestamp);
+    let a = ELit(LInt(1 as Int64));
+    let b = ELit(LInt(2 as Int64));
+    let _ = EBinary(BAdd, Heap(a), Heap(b));
+    let _ = EUnary(UNeg, Heap(ELit(LInt(5 as Int64))));
+    let _ = EFunc("abs".clone(), [ELit(LInt(10 as Int64))], false);
+    let _ = ECoalesce([ELit(LNull), ELit(LInt(1 as Int64))]);
+    let _ = ECast(Heap(ELit(LInt(1 as Int64))), "REAL".clone());
+}
+
+fn build_transaction_statements() {
+    let _ = SBeginTransaction;
+    let _ = SCommit;
+    let _ = SRollback(None);
+    let _ = SRollback(Some("sp1".clone()));
+    let _ = SSavepoint("outer".clone());
+    let _ = SRelease("outer".clone());
+}
+
+fn main() {
+    build_select_one();
+    build_insert_values();
+    build_update_basic();
+    build_delete();
+    build_create_table();
+    build_expression_variety();
+    build_transaction_statements();
+    print("ast_construction typecheck ok");
+}
