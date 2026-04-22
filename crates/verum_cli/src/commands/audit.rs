@@ -490,3 +490,274 @@ fn update_manifest_dependency(manifest: &mut Manifest, package: &str, new_versio
 
     false
 }
+
+// =============================================================================
+// Framework-axiom audit
+//
+// `verum audit --framework-axioms` enumerates every `@framework(name, "cite")`
+// marker attached to axiom / theorem / lemma / corollary declarations in the
+// current project. The report groups citations by framework name and prints
+// a structured trusted-boundary view so external reviewers see exactly which
+// external results (Lurie HTT, Schreiber DCCT, Connes reconstruction, Petz
+// classification, Arnold-Mather catastrophe, Baez-Dolan, …) a proof relies
+// on before they inspect the proofs themselves.
+// =============================================================================
+
+use std::collections::BTreeMap;
+use std::path::{Path, PathBuf};
+
+use verum_ast::attr::FrameworkAttr;
+use verum_ast::decl::ItemKind;
+use verum_ast::Item;
+use verum_common::Maybe;
+use verum_compiler::pipeline::CompilationPipeline;
+use verum_compiler::session::Session;
+use verum_compiler::CompilerOptions;
+
+/// One framework-axiom usage point.
+#[derive(Debug, Clone)]
+struct FrameworkUsage {
+    /// Item name (theorem / axiom / lemma).
+    item_name: Text,
+    /// Kind of item the marker was attached to.
+    item_kind: &'static str,
+    /// File path relative to project root.
+    file: PathBuf,
+    /// Citation string from the second argument.
+    citation: Text,
+}
+
+/// Entry point for `verum audit --framework-axioms`.
+pub fn audit_framework_axioms() -> Result<()> {
+    ui::step("Enumerating framework-axiom trusted boundary");
+
+    let manifest_dir = Manifest::find_manifest_dir()?;
+    let vr_files = discover_vr_files(&manifest_dir);
+
+    if vr_files.is_empty() {
+        ui::warn("No .vr files found under the current project.");
+        return Ok(());
+    }
+
+    let mut by_framework: BTreeMap<Text, Vec<FrameworkUsage>> = BTreeMap::new();
+    let mut malformed: Vec<(PathBuf, Text)> = Vec::new();
+    let mut parsed_files = 0usize;
+    let mut skipped_files = 0usize;
+
+    for abs_path in &vr_files {
+        let rel_path = abs_path
+            .strip_prefix(&manifest_dir)
+            .unwrap_or(abs_path)
+            .to_path_buf();
+        let module = match parse_file_for_audit(abs_path) {
+            Ok(m) => m,
+            Err(_) => {
+                skipped_files += 1;
+                continue;
+            }
+        };
+        parsed_files += 1;
+
+        for item in &module.items {
+            // The parser can place `@framework(...)` either on the outer
+            // Item.attributes or on the inner decl.attributes list (both
+            // storage sites exist across TheoremDecl / AxiomDecl / …), so
+            // we walk both.
+            let (kind_label, item_name, decl_attrs): (
+                &'static str,
+                Text,
+                &verum_common::List<verum_ast::attr::Attribute>,
+            ) = match &item.kind {
+                ItemKind::Theorem(decl) => {
+                    ("theorem", decl.name.name.clone(), &decl.attributes)
+                }
+                ItemKind::Lemma(decl) => {
+                    ("lemma", decl.name.name.clone(), &decl.attributes)
+                }
+                ItemKind::Corollary(decl) => {
+                    ("corollary", decl.name.name.clone(), &decl.attributes)
+                }
+                ItemKind::Axiom(decl) => {
+                    ("axiom", decl.name.name.clone(), &decl.attributes)
+                }
+                _ => continue,
+            };
+            collect_framework_markers_from(
+                &item.attributes,
+                kind_label,
+                &item_name,
+                &rel_path,
+                &mut by_framework,
+                &mut malformed,
+            );
+            collect_framework_markers_from(
+                decl_attrs,
+                kind_label,
+                &item_name,
+                &rel_path,
+                &mut by_framework,
+                &mut malformed,
+            );
+        }
+    }
+
+    print_framework_report(
+        parsed_files,
+        skipped_files,
+        &by_framework,
+        &malformed,
+    );
+
+    if !malformed.is_empty() {
+        return Err(crate::error::CliError::Custom(
+            format!(
+                "{} malformed @framework(...) attribute(s) — expected \
+                 @framework(<ident>, \"<citation>\")",
+                malformed.len()
+            )
+            .into(),
+        ));
+    }
+
+    Ok(())
+}
+
+/// Walk every `.vr` file under `root`, skipping target/ and hidden dirs.
+fn discover_vr_files(root: &Path) -> Vec<PathBuf> {
+    let mut out = Vec::new();
+    for entry in walkdir::WalkDir::new(root)
+        .follow_links(false)
+        .into_iter()
+        .filter_entry(|e| {
+            let name = e.file_name().to_string_lossy();
+            !name.starts_with('.') && name != "target" && name != "node_modules"
+        })
+    {
+        let entry = match entry {
+            Ok(e) => e,
+            Err(_) => continue,
+        };
+        if entry.file_type().is_file()
+            && entry.path().extension().map_or(false, |e| e == "vr")
+        {
+            out.push(entry.into_path());
+        }
+    }
+    out
+}
+
+/// Parse a single `.vr` file without running semantic analysis. We only need
+/// the top-level item list + attributes.
+fn parse_file_for_audit(path: &Path) -> std::result::Result<verum_ast::Module, String> {
+    let mut options = CompilerOptions::default();
+    options.input = path.to_path_buf();
+    let mut session = Session::new(options);
+    let file_id = session
+        .load_file(path)
+        .map_err(|e| format!("load: {}", e))?;
+    let mut pipeline = CompilationPipeline::new_check(&mut session);
+    pipeline
+        .phase_parse(file_id)
+        .map_err(|e| format!("parse: {}", e))
+}
+
+fn collect_framework_markers_from(
+    attrs: &verum_common::List<verum_ast::attr::Attribute>,
+    kind_label: &'static str,
+    item_name: &Text,
+    rel_path: &Path,
+    by_framework: &mut BTreeMap<Text, Vec<FrameworkUsage>>,
+    malformed: &mut Vec<(PathBuf, Text)>,
+) {
+    for attr in attrs.iter() {
+        if !attr.is_named("framework") {
+            continue;
+        }
+        match FrameworkAttr::from_attribute(attr) {
+            Maybe::Some(fw) => {
+                by_framework
+                    .entry(fw.name)
+                    .or_default()
+                    .push(FrameworkUsage {
+                        item_name: item_name.clone(),
+                        item_kind: kind_label,
+                        file: rel_path.to_path_buf(),
+                        citation: fw.citation,
+                    });
+            }
+            Maybe::None => {
+                malformed.push((rel_path.to_path_buf(), item_name.clone()));
+            }
+        }
+    }
+}
+
+fn print_framework_report(
+    parsed_files: usize,
+    skipped_files: usize,
+    by_framework: &BTreeMap<Text, Vec<FrameworkUsage>>,
+    malformed: &[(PathBuf, Text)],
+) {
+    println!();
+    println!("{}", "Framework-axiom trusted boundary".bold());
+    println!("{}", "─".repeat(40).dimmed());
+    println!(
+        "  Parsed {} .vr file(s), skipped {} unparseable file(s).",
+        parsed_files, skipped_files
+    );
+    println!();
+
+    if by_framework.is_empty() {
+        println!("  {} no @framework(...) markers found.", "·".dimmed());
+        println!(
+            "  {} the proof corpus declares no dependency on external",
+            "·".dimmed()
+        );
+        println!("    mathematical frameworks.");
+        println!();
+    } else {
+        let total_markers: usize = by_framework.values().map(|v| v.len()).sum();
+        println!(
+            "  Found {} marker(s) across {} framework(s):",
+            total_markers.to_string().bold(),
+            by_framework.len().to_string().bold()
+        );
+        println!();
+
+        for (framework, uses) in by_framework {
+            println!(
+                "  {} {} ({} marker{})",
+                "▸".blue(),
+                framework.as_str().bold(),
+                uses.len(),
+                if uses.len() == 1 { "" } else { "s" }
+            );
+            for u in uses {
+                println!(
+                    "    {} {} {}  —  {}  ({})",
+                    "·".dimmed(),
+                    u.item_kind,
+                    u.item_name.as_str().cyan(),
+                    u.citation.as_str(),
+                    u.file.display()
+                );
+            }
+            println!();
+        }
+    }
+
+    if !malformed.is_empty() {
+        ui::warn(&format!(
+            "{} malformed @framework(...) marker(s) found:",
+            malformed.len()
+        ));
+        for (file, item_name) in malformed {
+            println!(
+                "  · {} on {}  —  expected @framework(<ident>, \"<citation>\")",
+                file.display(),
+                item_name.as_str()
+            );
+        }
+        println!();
+    }
+}

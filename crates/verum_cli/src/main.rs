@@ -588,6 +588,15 @@ enum Commands {
     },
 
     /// Security audit of dependencies
+    ///
+    /// Default mode: supply-chain audit (vulns, checksums, signatures).
+    ///
+    /// With `--framework-axioms`: enumerate the trusted-framework boundary
+    /// of the current project — every `@framework(name, "citation")` marker
+    /// on an axiom / theorem / lemma is collected, grouped by framework,
+    /// and printed as a structured report so external reviewers see the
+    /// exact set of Lurie HTT / Schreiber DCCT / Connes / Petz / Arnold /
+    /// Baez-Dolan results the proofs rely on.
     Audit {
         /// Show vulnerability details
         #[clap(long)]
@@ -595,6 +604,12 @@ enum Commands {
         /// Only check direct dependencies
         #[clap(long)]
         direct_only: bool,
+        /// Enumerate the trusted-framework-axiom boundary of this project.
+        /// Prints every `@framework(name, "citation")` marker found in
+        /// .vr sources, grouped by framework. Exits non-zero if any
+        /// malformed `@framework(...)` attribute is found.
+        #[clap(long)]
+        framework_axioms: bool,
     },
 
     /// Display dependency tree
@@ -1454,16 +1469,21 @@ fn run_command(cli: Cli) -> Result<()> {
         Commands::Audit {
             details,
             direct_only,
+            framework_axioms,
         } => {
-            let options = commands::audit::AuditOptions {
-                verify_checksums: true,
-                verify_signatures: details,
-                verify_proofs: false,
-                cbgr_profiles: false,
-                fix: false,
-                direct_only,
-            };
-            commands::audit::audit(options)
+            if framework_axioms {
+                commands::audit::audit_framework_axioms()
+            } else {
+                let options = commands::audit::AuditOptions {
+                    verify_checksums: true,
+                    verify_signatures: details,
+                    verify_proofs: false,
+                    cbgr_profiles: false,
+                    fix: false,
+                    direct_only,
+                };
+                commands::audit::audit(options)
+            }
         }
         Commands::Tree { duplicates, depth } => {
             let options = commands::tree::TreeOptions {
