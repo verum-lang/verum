@@ -1721,7 +1721,34 @@ impl CodegenContext {
             return Some(matches[0].0);
         }
         if matches.len() > 1 {
-            // Ambiguous: prefer user-defined types over stdlib types.
+            // Disambiguate using the enclosing function's declared return type.
+            // Constructing `Ok(x)` inside `fn f() -> Result<T, E>` must resolve
+            // to `Result.Ok`, not some unrelated `Foo.Ok` that happens to share
+            // the simple name (which the collision logic stripped from the
+            // direct lookup table). Mirrors find_function_by_suffix's logic so
+            // both call sites converge on the same disambiguation discipline.
+            if let Some(ref ret_type) = self.current_return_type_name {
+                let base = ret_type.split('<').next().unwrap_or(ret_type.as_str());
+                for (tag, parent) in &matches {
+                    if parent.as_deref() == Some(base) {
+                        return Some(*tag);
+                    }
+                }
+            }
+            // Then the match scrutinee type (covers `match x { Ok(_) => ... }`
+            // when the constructor pattern itself produces a value, e.g. via
+            // a guard expression that re-constructs).
+            if let Some(ref scrutinee_type) = self.match_scrutinee_type {
+                let base = scrutinee_type.split('<').next().unwrap_or(scrutinee_type.as_str());
+                for (tag, parent) in &matches {
+                    if parent.as_deref() == Some(base) {
+                        return Some(*tag);
+                    }
+                }
+            }
+            // Last: prefer user-defined types over stdlib types — kept as a
+            // weak final fallback so user code still wins when both contexts
+            // above are absent.
             let user_matches: Vec<u32> = matches.iter()
                 .filter(|(_, parent)| parent.as_ref()
                     .map(|p| self.user_defined_types.contains(p))

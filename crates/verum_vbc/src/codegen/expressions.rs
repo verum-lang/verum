@@ -4225,8 +4225,10 @@ impl VbcCodegen {
                 self.ctx.find_variant_by_suffix_and_args(name, args.len())
             })
             .unwrap_or_else(|| {
-                // Fallback for variants not yet registered (e.g., forward references):
-                // use a hash-based tag for consistency
+                // Final fallback for variants we still cannot resolve — most
+                // commonly forward references mid-pass-1. Hash the name so two
+                // call sites at least agree on the same wrong tag rather than
+                // diverging silently.
                 name.as_bytes().iter().fold(0u32, |acc, &b| acc.wrapping_add(b as u32)) % 256
             });
 
@@ -8556,9 +8558,17 @@ impl VbcCodegen {
                                                         self.ctx.lookup_function(&format!("{}::{}", base, variant_name))
                                                     })
                                                 {
-                                                    if let Some(payload_types) = &info.variant_payload_types {
-                                                        // Use declared payload types if available
-                                                        payload_types.get(i).cloned()
+                                                    // Pick the declared payload type if it's concrete;
+                                                    // otherwise fall through to the same generic-substitution
+                                                    // path used when no payload-types are declared at all.
+                                                    // This is what makes `Ok(f)` from
+                                                    // `Result<MemDbFile, VfsError>` bind `f: MemDbFile`
+                                                    // instead of leaking the unsubstituted `T`.
+                                                    let declared = info.variant_payload_types.as_ref()
+                                                        .and_then(|pt| pt.get(i).cloned())
+                                                        .filter(|t| !is_generic_param(t));
+                                                    if let Some(t) = declared {
+                                                        Some(t)
                                                     } else {
                                                         // Infer from variant tag: tag 0 variants get first
                                                         // inner type, tag 1 get second, etc.
@@ -11297,6 +11307,80 @@ impl VbcCodegen {
     ///
     /// Detects struct constructors (`OSError { ... }`), static method calls
     /// (`OSError.new(...)`), tuple-style constructors (`SomeType(...)`), and
+    /// Compute the type a match-arm body would have when the body is just
+    /// the binder introduced by a single-tuple variant pattern (the common
+    /// `Ok(p) => p` shape). Used from the let-RHS inference path because at
+    /// that point the pattern hasn't been compiled yet, so `variable_type_names`
+    /// doesn't yet contain the binder.
+    fn extract_arm_body_type_via_pattern(
+        &self,
+        pattern: &verum_ast::Pattern,
+        body: &Expr,
+        scrutinee_type: Option<&str>,
+    ) -> Option<String> {
+        use verum_ast::expr::ExprKind;
+        use verum_ast::ty::PathSegment;
+        use verum_ast::PatternKind;
+        use verum_ast::VariantPatternData;
+
+        let scrutinee_type = scrutinee_type?;
+        // Body must be a single-binder reference (e.g. `p`).
+        let binder = match &body.kind {
+            ExprKind::Path(path) if path.segments.len() == 1 => match &path.segments[0] {
+                PathSegment::Name(id) => id.name.to_string(),
+                _ => return None,
+            },
+            _ => return None,
+        };
+        // Pattern must be `Variant(binder)` — a single-binder tuple variant.
+        let (variant_name, position) = match &pattern.kind {
+            PatternKind::Variant { path, data: Some(VariantPatternData::Tuple(pats)) } => {
+                let mut found_pos = None;
+                for (i, p) in pats.iter().enumerate() {
+                    if let PatternKind::Ident { name, subpattern, .. } = &p.kind
+                        && subpattern.is_none()
+                        && name.name.as_str() == binder.as_str()
+                    {
+                        if found_pos.is_some() { return None; }
+                        found_pos = Some(i);
+                    }
+                }
+                (format!("{}", path), found_pos?)
+            }
+            _ => return None,
+        };
+        // Resolve variant tag + payload-type substitution against the
+        // scrutinee type, mirroring the discipline used by
+        // `compile_pattern_bind`'s tuple arm.
+        let inner_types = self.extract_inner_types(scrutinee_type);
+        let info = self.ctx.lookup_function(&variant_name)
+            .or_else(|| {
+                let base = crate::codegen::VbcCodegen::strip_generic_args(scrutinee_type);
+                self.ctx.lookup_function(&format!("{}::{}", base, variant_name))
+            })
+            .or_else(|| {
+                // Simple-name lookup may have been purged by collision
+                // detection — fall back to qualified by scrutinee base.
+                let base = crate::codegen::VbcCodegen::strip_generic_args(scrutinee_type);
+                self.ctx.lookup_function(&format!("{}.{}", base, variant_name))
+            })?;
+        let is_generic_param = |s: &str| -> bool {
+            s.len() <= 2 && s.chars().all(|c| c.is_uppercase() || c.is_numeric())
+        };
+        let declared = info.variant_payload_types.as_ref()
+            .and_then(|pt| pt.get(position).cloned())
+            .filter(|t| !is_generic_param(t));
+        if let Some(t) = declared {
+            return Some(t);
+        }
+        let tag = info.variant_tag? as usize;
+        if info.param_count <= 1 && tag < inner_types.len() {
+            inner_types.get(tag).cloned()
+        } else {
+            inner_types.get(position).cloned()
+        }
+    }
+
     /// associated constant access (`MapFlags.PRIVATE_ANON`).
     /// Used by `compile_let` to populate `variable_type_names` for Eq protocol dispatch.
     pub fn extract_expr_type_name(&self, expr: &Expr) -> Option<String> {
@@ -11712,10 +11796,28 @@ impl VbcCodegen {
             ExprKind::If { then_branch, .. } => {
                 self.extract_type_from_block(then_branch)
             }
-            // Match expression: infer type from first arm body with a known type
-            ExprKind::Match { arms, .. } => {
+            // Match expression: infer type from first arm body with a known
+            // type. Pattern-introduced bindings (e.g. `Ok(p) => p`) are not
+            // yet in `variable_type_names` when we run from the let-RHS
+            // inference path, so a body of `Path(binder)` falls back to the
+            // scrutinee's variant payload — substituting the generic param
+            // out of the scrutinee type when the variant declares a
+            // generic-named payload (`Result<T, E>` → `Ok(T)` → `T` →
+            // first inner type of the scrutinee). Without this, the let-bound
+            // variable inherits no type and downstream `.field` accesses fall
+            // through `resolve_field_index`'s "scan all types, pick most
+            // fields" tiebreaker, which silently picks the wrong layout.
+            ExprKind::Match { expr: scrutinee, arms } => {
+                let scrutinee_type = self.extract_expr_type_name(scrutinee);
                 for arm in arms.iter() {
                     if let Some(t) = self.extract_expr_type_name(&arm.body) {
+                        return Some(t);
+                    }
+                    // Body has no directly-derivable type — try to derive
+                    // from the pattern binding using the scrutinee type.
+                    if let Some(t) = self.extract_arm_body_type_via_pattern(
+                        &arm.pattern, &arm.body, scrutinee_type.as_deref(),
+                    ) {
                         return Some(t);
                     }
                 }

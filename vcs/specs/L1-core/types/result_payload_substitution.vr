@@ -1,0 +1,93 @@
+// @test: run-interpreter
+// @tier: 0
+// @level: L1
+// @tags: variant, dispatch, generic-substitution, collision, regression
+// @timeout: 5000
+// @expected-exit: 0
+//
+// Regression for the three-layer Result<T, E> dispatch bug uncovered by
+// the SQLite native Pager exercise.
+//
+// In stdlib code, the simple variant names `Ok`/`Err` are evicted from
+// the codegen function table by collision detection (multiple types
+// happen to define `Ok`/`Err` in the project's accumulated stdlib
+// surface). Without proper disambiguation, three independent codegen
+// paths silently went wrong, all on the same Result<T, E>:
+//
+//   1. compile_pattern_bind tuple arm: `Ok(p)` recorded `p` as type "T"
+//      (the unsubstituted generic param) instead of "MemDbFile"
+//   2. find_variant_by_suffix_and_args: constructing `Ok(x)` /
+//      `Err(e)` returned None → fell through to a name-hash that
+//      produced wildly wrong tags (Ok→186, Err→41) → match took the
+//      wrong branch silently
+//   3. extract_expr_type_name Match arm: `let x = match … { Ok(p) =>
+//      p, _ }` recorded no type for `x` (binder not yet in
+//      variable_type_names at let-RHS inference time) → field accesses
+//      on `x` fell through resolve_field_index's "scan all types, pick
+//      most fields" tiebreaker and read the wrong layout
+//
+// All three are fixed by the same discipline: substitute the generic
+// param against the scrutinee/return-type's inner types whenever a
+// generic param leaks through. Mirrors find_function_by_suffix's
+// existing context-driven disambiguation.
+//
+// This test triggers all three paths in user code.
+
+mount base.{Result, Ok, Err, Text};
+mount collections.List;
+
+type Holder is {
+    name: Text,
+    items: List<Int>,
+    closed: Bool,
+};
+
+type HolderError is {
+    code: Int,
+    message: Text,
+};
+
+fn make_holder(n: Int) -> Result<Holder, HolderError> {
+    if n < 0 {
+        return Err(HolderError { code: 1, message: "negative" });
+    }
+    let mut items: List<Int> = List.new();
+    let mut i = 0;
+    while i < n {
+        items.push(i);
+        i = i + 1;
+    }
+    Ok(Holder {
+        name: "demo",
+        items: items,
+        closed: false,
+    })
+}
+
+fn main() {
+    // Layer 1+2: variant tag + payload binding through stdlib-like
+    // helpers (Ok constructor, Ok pattern, payload field access).
+    let h = match make_holder(3) {
+        Ok(p) => p,
+        Err(_) => { panic("unexpected err"); return; }
+    };
+
+    // Layer 3: field access on the let-bound variable. If the let-RHS
+    // arm-type inference doesn't run, `h.closed` falls through the
+    // type=None scan and may pick a wrong layout.
+    assert_eq(h.name, "demo");
+    assert_eq(h.items.len(), 3);
+    assert_eq(h.closed, false);
+
+    // Err branch: payload field access uses the same substitution
+    // discipline against E.
+    match make_holder(-1) {
+        Ok(_) => panic("should have been Err"),
+        Err(e) => {
+            assert_eq(e.code, 1);
+            assert_eq(e.message, "negative");
+        }
+    }
+
+    print("result_payload_substitution ok");
+}
