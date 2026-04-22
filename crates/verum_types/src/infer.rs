@@ -48138,15 +48138,33 @@ impl TypeChecker {
                 // resolve their own types first, regardless of load order.
                 self.define_type_in_current_module(type_name.clone(), named_type);
 
-                // CRITICAL FIX: Register type parameters for generic type aliases
-                // This enables proper substitution when the alias is instantiated
+                // CRITICAL FIX: Register type parameters for generic type aliases.
+                // Include EVERY positional parameter (Type, HigherKinded, Const,
+                // Meta, Context, Level) — not just `Type` — because the arity
+                // check in `compile_type_path` reads `param_record.len()` to
+                // validate `expected_count == provided_count`. A declaration
+                // like `type SquareMatrix<T, N: meta Int> is Matrix<T, N, N>`
+                // otherwise registers arity=1 and `SquareMatrix<Float, 3>`
+                // fails "expects 1 type argument(s), but 2 were provided".
+                // Keep in sync with the matching loop in
+                // `register_type_declaration_inner` (line ~46540).
                 if !type_decl.generics.is_empty() {
                     use verum_ast::ty::GenericParamKind;
                     let mut param_record: indexmap::IndexMap<verum_common::Text, Type> =
                         indexmap::IndexMap::new();
                     for param in type_decl.generics.iter() {
-                        if let GenericParamKind::Type { name, .. } = &param.kind {
-                            param_record.insert(name.name.clone(), Type::Int);
+                        let name_opt = match &param.kind {
+                            GenericParamKind::Type { name, .. } => Some(name.name.clone()),
+                            GenericParamKind::HigherKinded { name, .. } => Some(name.name.clone()),
+                            GenericParamKind::KindAnnotated { name, .. } => Some(name.name.clone()),
+                            GenericParamKind::Const { name, .. } => Some(name.name.clone()),
+                            GenericParamKind::Meta { name, .. } => Some(name.name.clone()),
+                            GenericParamKind::Context { name } => Some(name.name.clone()),
+                            GenericParamKind::Lifetime { .. } => None,
+                            _ => None,
+                        };
+                        if let Some(n) = name_opt {
+                            param_record.insert(n, Type::Int);
                         }
                     }
                     let type_params_key: Text = format!("__type_params_{}", type_name).into();
