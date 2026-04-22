@@ -31,7 +31,11 @@ public type Literal is
     | LFalse
     | LCurrentDate
     | LCurrentTime
-    | LCurrentTimestamp;
+    | LCurrentTimestamp
+    | LStar;                   // internal marker — materialised by codegen from
+                                // cursor's declared column count. Never produced
+                                // by the parser; only the planner sets this when
+                                // translating RcStar / RcTableStar.
 
 public type BinOp is
       BAnd | BOr

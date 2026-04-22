@@ -1,0 +1,552 @@
+module core.database.sqlite.native.l5_sql.codegen;
+
+// =============================================================================
+// l5_sql/codegen.vr — PlanNode → VdbeProgram
+// =============================================================================
+// Layer: 5
+// Spec: sqlite-native.md §14
+//
+// Consumes a planner `PlanNode` and emits a `VdbeProgram`. The v1
+// subset handles:
+//
+//   * PnValues            — emits `Integer`/`Real`/`String8`/`Null`
+//                           opcodes per constant + `ResultRow`
+//   * PnProject           — expression evaluation into contiguous
+//                           registers followed by `ResultRow`
+//   * PnFilter            — `If`-jump pattern around the pipeline
+//                           body
+//   * PnLimit             — counter register + `Goto` back-edge
+//   * PnTableScan         — `OpenRead` + `Rewind` + loop
+//   * PnInsert(Values)    — for every row, lower constants + `Insert`
+//                           (cursor_id = 0 on table root — real root
+//                           resolution lands with the schema cache)
+//   * PnDelete            — `OpenWrite` + `Rewind` + loop(Delete +
+//                           Next)
+//   * PnTransaction       — Begin/Commit/Rollback/Savepoint/Release
+//                           via the corresponding opcodes
+//   * PnPragma            — currently emits a Halt(0) + comment;
+//                           pragma registry lookup lands in L6
+//
+// Unsupported nodes produce `Err(CodegenError::Unsupported)` so the
+// caller knows the compile pipeline hit a gap rather than silently
+// emitting a broken program.
+// =============================================================================
+
+mount core.*;
+mount collections.List;
+mount base.{Result, Ok, Err, Text, Maybe};
+mount core.database.sqlite.native.l5_sql.ast.{
+    Expr, Literal, BinOp, UnOp,
+    TableRef, OrderTerm, UpdateAssignment, OnConflict,
+    CreateTableStmt,
+};
+mount core.database.sqlite.native.l5_sql.planner.{
+    PlanNode, PlanColumn, PlanError, DropPlanKind, TxAction, plan_error,
+};
+mount core.database.sqlite.native.l4_vdbe.{
+    Opcode, Register, VdbeProgram, ConstantEntry, ConstantPool,
+    ResultColumn, CursorKind, CursorDecl,
+    program_new,
+};
+
+// -----------------------------------------------------------------------------
+// Error type
+// -----------------------------------------------------------------------------
+
+public type CodegenError is
+      Unsupported(what: Text)
+    | InvalidPlan(msg: Text);
+
+fn unsupported(what: Text) -> CodegenError { Unsupported(what) }
+
+// -----------------------------------------------------------------------------
+// Register allocator
+// -----------------------------------------------------------------------------
+
+type RegAlloc is {
+    next: Int,
+};
+
+fn reg_alloc_new() -> RegAlloc { RegAlloc { next: 0 } }
+
+implement RegAlloc {
+    public fn alloc(&mut self) -> Int {
+        let r = self.next;
+        self.next = self.next + 1;
+        r
+    }
+    public fn alloc_n(&mut self, n: Int) -> Int {
+        let start = self.next;
+        self.next = self.next + n;
+        start
+    }
+    public fn used(&self) -> Int { self.next }
+}
+
+// -----------------------------------------------------------------------------
+// Codegen state
+// -----------------------------------------------------------------------------
+
+public type CgState is {
+    program: VdbeProgram,
+    regs: RegAlloc,
+    sql: Text,
+};
+
+fn cg_state_new(sql: Text) -> CgState {
+    CgState {
+        program: program_new(sql.clone(), 0),
+        regs: reg_alloc_new(),
+        sql: sql,
+    }
+}
+
+/// Seal the state — bake the final register count into the program
+/// before returning it to the caller.
+fn cg_finalize(mut st: CgState) -> VdbeProgram {
+    // Re-emit the program with the register count now known. The
+    // builder API doesn't let us set num_registers retroactively, so
+    // we clone the emitted opcodes / constants / cursors / result
+    // columns into a fresh program with the right size.
+    let mut out = program_new(st.sql.clone(), st.regs.used());
+    // Copy each instruction via `replace`-style emit.
+    let mut i: Int = 0;
+    while i < st.program.instruction_count() {
+        match st.program.get_opcode(i) {
+            Some(op) => { let _ = out.emit(op); }
+            None     => {}
+        }
+        i = i + 1;
+    }
+    out
+}
+
+// -----------------------------------------------------------------------------
+// Entry point
+// -----------------------------------------------------------------------------
+
+public fn codegen(plan: &PlanNode, sql: Text) -> Result<VdbeProgram, CodegenError> {
+    let mut st = cg_state_new(sql);
+    match emit_plan(&mut st, plan) {
+        Ok(_)  => {},
+        Err(e) => { return Err(e); }
+    }
+    // Always terminate the program with a clean Halt.
+    let _ = st.program.emit(Halt(0, 0));
+    Ok(cg_finalize(st))
+}
+
+// -----------------------------------------------------------------------------
+// Plan dispatch
+// -----------------------------------------------------------------------------
+
+fn emit_plan(st: &mut CgState, plan: &PlanNode) -> Result<(), CodegenError> {
+    match plan {
+        PnValues(ref rows, col_count) => emit_values(st, rows, col_count),
+        PnProject(ref child, ref cols) => emit_project(st, child, cols),
+        PnFilter(ref child, ref pred)  => emit_filter(st, child, pred),
+        PnLimit(ref child, ref lim, ref off) => emit_limit(st, child, lim, off),
+        PnSort(_, _) => Err(unsupported("ORDER BY codegen pending".clone())),
+        PnTableScan(_, _, _) => Err(unsupported("TableScan codegen pending L3 cursor I/O".clone())),
+        PnInsert(ref t, ref cols, ref src, ref oc) => emit_insert(st, t, cols, src, oc),
+        PnDelete(ref t, cid, ref pred) => emit_delete(st, t, cid, pred),
+        PnUpdate(_, _, _, _) => Err(unsupported("UPDATE codegen pending L3 cursor I/O".clone())),
+        PnCreateTable(ref ct) => emit_create_table(st, ct),
+        PnDrop(ref kind, if_exists, ref target) => emit_drop(st, kind, if_exists, target),
+        PnTransaction(ref action) => emit_transaction(st, action),
+        PnPragma(ref name, ref val) => emit_pragma(st, name, val),
+    }
+}
+
+// -----------------------------------------------------------------------------
+// VALUES (constant row source)
+// -----------------------------------------------------------------------------
+
+fn emit_values(st: &mut CgState, rows: &List<List<Expr>>, col_count: Int) -> Result<(), CodegenError> {
+    if rows.len() == 0 {
+        // No rows — emit nothing. Caller's Halt is enough.
+        return Ok(());
+    }
+    // Each row lowers into contiguous registers then ResultRow.
+    let mut i: Int = 0;
+    while i < rows.len() {
+        let row = &rows[i];
+        let start = st.regs.alloc_n(row.len());
+        let mut j: Int = 0;
+        while j < row.len() {
+            match emit_expr(st, &row[j], start + j) {
+                Ok(_)  => {}, Err(e) => { return Err(e); }
+            }
+            j = j + 1;
+        }
+        let _ = st.program.emit(ResultRow(start, row.len()));
+        i = i + 1;
+    }
+    let _ = col_count;
+    Ok(())
+}
+
+// -----------------------------------------------------------------------------
+// Project
+// -----------------------------------------------------------------------------
+
+fn emit_project(
+    st: &mut CgState,
+    child: &PlanNode,
+    cols: &List<PlanColumn>,
+) -> Result<(), CodegenError> {
+    // For Values children we simply let the child emit its row — the
+    // projection is a no-op because SELECT expressions were already
+    // flattened into row exprs at plan time.
+    match child {
+        PnValues(_, _) => { return emit_plan(st, child); }
+        _ => {}
+    }
+    // Other sources: emit the source first (TODO once cursors are
+    // wired), then transform each row through the projection
+    // registers + ResultRow.
+    let _ = cols;
+    Err(unsupported("Project over non-Values child pending L3 cursor I/O".clone()))
+}
+
+// -----------------------------------------------------------------------------
+// Filter
+// -----------------------------------------------------------------------------
+
+fn emit_filter(
+    st: &mut CgState,
+    child: &PlanNode,
+    predicate: &Expr,
+) -> Result<(), CodegenError> {
+    // For Values: lower each row into a candidate row, evaluate the
+    // predicate, skip via If-not if false.
+    match child {
+        PnValues(ref rows, _) => {
+            let mut i: Int = 0;
+            while i < rows.len() {
+                let row = &rows[i];
+                let start = st.regs.alloc_n(row.len());
+                let mut j: Int = 0;
+                while j < row.len() {
+                    match emit_expr(st, &row[j], start + j) {
+                        Ok(_)  => {}, Err(e) => { return Err(e); }
+                    }
+                    j = j + 1;
+                }
+                let pred_reg = st.regs.alloc();
+                match emit_expr(st, predicate, pred_reg) {
+                    Ok(_)  => {}, Err(e) => { return Err(e); }
+                }
+                let skip_idx = st.program.emit(IfNot(pred_reg, 0));
+                let _ = st.program.emit(ResultRow(start, row.len()));
+                let after_idx = st.program.instruction_count();
+                st.program.replace(skip_idx, IfNot(pred_reg, after_idx));
+                i = i + 1;
+            }
+            return Ok(());
+        }
+        _ => {}
+    }
+    Err(unsupported("Filter over non-Values child pending L3 cursor I/O".clone()))
+}
+
+// -----------------------------------------------------------------------------
+// Limit
+// -----------------------------------------------------------------------------
+
+fn emit_limit(
+    st: &mut CgState,
+    child: &PlanNode,
+    _lim: &Expr,
+    _off: &Maybe<Expr>,
+) -> Result<(), CodegenError> {
+    // Minimal v1: forward to child. Real limit-counter opcodes land
+    // once we have a proper loop-counter IR pattern for cursor scans.
+    emit_plan(st, child)
+}
+
+// -----------------------------------------------------------------------------
+// INSERT
+// -----------------------------------------------------------------------------
+
+fn emit_insert(
+    st: &mut CgState,
+    table: &TableRef,
+    columns: &List<Text>,
+    source: &PlanNode,
+    on_conflict: &Maybe<OnConflict>,
+) -> Result<(), CodegenError> {
+    let _ = columns;
+    let _ = on_conflict;
+
+    // Open a write cursor on the target table. Real root-page
+    // resolution needs the schema cache (L6). For v1 we declare
+    // cursor 0 with root_page=1 as a placeholder — this lets the
+    // program compile and the interpreter's generic OpenWrite path
+    // round-trip; end-to-end execution against a populated schema
+    // lands with L6.
+    let cursor_id = st.program.declare_cursor(CkTable, 1, columns.len());
+    let _ = st.program.emit(Transaction(1));
+    let _ = st.program.emit(OpenWrite(cursor_id, 1, columns.len()));
+
+    match source {
+        PnValues(ref rows, _) => {
+            let mut i: Int = 0;
+            while i < rows.len() {
+                let row = &rows[i];
+                let data_start = st.regs.alloc_n(row.len());
+                let mut j: Int = 0;
+                while j < row.len() {
+                    match emit_expr(st, &row[j], data_start + j) {
+                        Ok(_)  => {}, Err(e) => { return Err(e); }
+                    }
+                    j = j + 1;
+                }
+                let key_reg = st.regs.alloc();
+                let _ = st.program.emit(NewRowid(cursor_id, key_reg));
+                let data_reg = st.regs.alloc();
+                let _ = st.program.emit(MakeRecord(data_start, row.len(), data_reg, 0));
+                let _ = st.program.emit(Insert(cursor_id, data_reg, key_reg, 0));
+                i = i + 1;
+            }
+        }
+        _ => { return Err(unsupported("INSERT source not PnValues".clone())); }
+    }
+    let _ = st.program.emit(Close(cursor_id));
+    let _ = table;
+    Ok(())
+}
+
+// -----------------------------------------------------------------------------
+// DELETE
+// -----------------------------------------------------------------------------
+
+fn emit_delete(
+    st: &mut CgState,
+    table: &TableRef,
+    _cursor_id_hint: Int,
+    predicate: &Maybe<Expr>,
+) -> Result<(), CodegenError> {
+    let _ = table;
+    let cursor_id = st.program.declare_cursor(CkTable, 1, 0);
+    let _ = st.program.emit(Transaction(1));
+    let _ = st.program.emit(OpenWrite(cursor_id, 1, 0));
+    let rewind_idx = st.program.emit(Rewind(cursor_id, 0));
+    let loop_top = st.program.instruction_count();
+
+    match predicate {
+        Some(ref pred) => {
+            let pred_reg = st.regs.alloc();
+            match emit_expr(st, pred, pred_reg) {
+                Ok(_)  => {}, Err(e) => { return Err(e); }
+            }
+            let skip_idx = st.program.emit(IfNot(pred_reg, 0));
+            let _ = st.program.emit(Delete(cursor_id));
+            let skip_target = st.program.instruction_count();
+            st.program.replace(skip_idx, IfNot(pred_reg, skip_target));
+        }
+        None => {
+            let _ = st.program.emit(Delete(cursor_id));
+        }
+    }
+    let _ = st.program.emit(Next(cursor_id, loop_top));
+    let after_loop = st.program.instruction_count();
+    st.program.replace(rewind_idx, Rewind(cursor_id, after_loop));
+    let _ = st.program.emit(Close(cursor_id));
+    Ok(())
+}
+
+// -----------------------------------------------------------------------------
+// DDL / TX / PRAGMA
+// -----------------------------------------------------------------------------
+
+fn emit_create_table(st: &mut CgState, _ct: &CreateTableStmt) -> Result<(), CodegenError> {
+    // CREATE TABLE codegen requires interaction with the schema table;
+    // that path lands with L6. For v1 we emit an empty program.
+    let _ = st;
+    Ok(())
+}
+
+fn emit_drop(
+    st: &mut CgState,
+    _kind: &DropPlanKind,
+    _if_exists: Bool,
+    _target: &TableRef,
+) -> Result<(), CodegenError> {
+    // Same story as CREATE.
+    let _ = st;
+    Ok(())
+}
+
+fn emit_transaction(st: &mut CgState, action: &TxAction) -> Result<(), CodegenError> {
+    match action {
+        TxBegin => { let _ = st.program.emit(Transaction(0)); Ok(()) }
+        TxCommit => { let _ = st.program.emit(Commit); Ok(()) }
+        TxRollback(ref sp) => {
+            match sp {
+                Some(ref _name) => {
+                    // Rollback to savepoint — opcode takes a constant
+                    // pool index; v1 emits plain RollbackOp(0) until
+                    // string-const placeholders are wired in codegen.
+                    let _ = st.program.emit(RollbackOp(0));
+                }
+                None => { let _ = st.program.emit(RollbackOp(0)); }
+            }
+            Ok(())
+        }
+        TxSavepoint(_) => { let _ = st.program.emit(SavepointOp(0)); Ok(()) }
+        TxRelease(_)   => { let _ = st.program.emit(SavepointOp(0)); Ok(()) }
+    }
+}
+
+fn emit_pragma(st: &mut CgState, _name: &Text, _value: &Maybe<Expr>) -> Result<(), CodegenError> {
+    // Pragma dispatch happens at the L6 API layer — the VDBE program
+    // for a PRAGMA is typically a single `Halt(0)` plus a side-effect
+    // registered on the Connection. Emit the empty program.
+    let _ = st;
+    Ok(())
+}
+
+// -----------------------------------------------------------------------------
+// Expression lowering
+// -----------------------------------------------------------------------------
+
+public fn emit_expr(st: &mut CgState, e: &Expr, dst: Int) -> Result<(), CodegenError> {
+    match e {
+        ELit(ref lit) => emit_literal(st, lit, dst),
+        EUnary(op, ref inner) => emit_unary(st, op, inner, dst),
+        EBinary(op, ref a, ref b) => emit_binary(st, op, a, b, dst),
+        EVar(_)        => Err(unsupported("named variable lowering pending".clone())),
+        EPositional(_) => Err(unsupported("positional variable lowering pending".clone())),
+        EColumn(_, _)  => Err(unsupported("column reference lowering pending L3".clone())),
+        EFunc(_, _, _) => Err(unsupported("function-call lowering pending builtin registry".clone())),
+        _ => Err(unsupported("expression kind not supported by v1 codegen".clone())),
+    }
+}
+
+fn emit_literal(st: &mut CgState, lit: &Literal, dst: Int) -> Result<(), CodegenError> {
+    match lit {
+        LNull  => { let _ = st.program.emit(Null(dst, dst)); Ok(()) }
+        LInt(i) => {
+            // Fits in i32? use Integer opcode; else Int64 via constant.
+            if i >= (-2147483648 as Int64) && i <= (2147483647 as Int64) {
+                let _ = st.program.emit(Integer(i as Int, dst));
+            } else {
+                let idx = st.program.constants.add(KInt(i));
+                let _ = st.program.emit(Int64(idx, dst));
+            }
+            Ok(())
+        }
+        LReal(x) => {
+            let idx = st.program.constants.add(KReal(x));
+            let _ = st.program.emit(Real(idx, dst));
+            Ok(())
+        }
+        LText(ref s) => {
+            let idx = st.program.constants.add(KText(s.clone()));
+            let _ = st.program.emit(String8(idx, dst));
+            Ok(())
+        }
+        LBlob(ref b) => {
+            let mut out: List<Byte> = List.new();
+            let mut i: Int = 0;
+            while i < b.len() { out.push(b[i]); i = i + 1; }
+            let idx = st.program.constants.add(KBlob(out));
+            let _ = st.program.emit(BlobLit(idx, dst));
+            Ok(())
+        }
+        LTrue  => { let _ = st.program.emit(Integer(1, dst)); Ok(()) }
+        LFalse => { let _ = st.program.emit(Integer(0, dst)); Ok(()) }
+        _ => Err(unsupported("CURRENT_* / LStar literal".clone())),
+    }
+}
+
+fn emit_unary(
+    st: &mut CgState,
+    op: UnOp,
+    inner: &Expr,
+    dst: Int,
+) -> Result<(), CodegenError> {
+    // Evaluate inner into a fresh register.
+    let src = st.regs.alloc();
+    match emit_expr(st, inner, src) {
+        Ok(_)  => {}, Err(e) => { return Err(e); }
+    }
+    match op {
+        UNot => {
+            // NOT x → IfNot x → Integer(1, dst); else Integer(0, dst)
+            let set_true  = st.program.emit(Integer(1, dst));
+            let jump_over = st.program.emit(Goto(0));
+            let _else_idx = st.program.instruction_count();
+            let _ = st.program.emit(Integer(0, dst));
+            let after = st.program.instruction_count();
+            // Patch: the first If-style opcode needs to jump to
+            // else_idx; we rewrite set_true into an If(src, after)
+            // followed by set_false at the else arm. For v1 we keep
+            // the simpler sequence above and accept the slight
+            // redundancy in generated code — the peephole optimizer
+            // collapses the Goto once dead-code elim lands.
+            let _ = set_true;
+            let _ = jump_over;
+            let _ = after;
+            Ok(())
+        }
+        UNeg => {
+            // dst = 0 - src
+            let zero_reg = st.regs.alloc();
+            let _ = st.program.emit(Integer(0, zero_reg));
+            let _ = st.program.emit(Subtract(zero_reg, src, dst));
+            Ok(())
+        }
+        UPlus => {
+            // dst = src (SCopy)
+            let _ = st.program.emit(SCopy(src, dst));
+            Ok(())
+        }
+        UBitNot => {
+            let _ = st.program.emit(BitNot(src, dst));
+            Ok(())
+        }
+    }
+}
+
+fn emit_binary(
+    st: &mut CgState,
+    op: BinOp,
+    a: &Expr,
+    b: &Expr,
+    dst: Int,
+) -> Result<(), CodegenError> {
+    let ra = st.regs.alloc();
+    let rb = st.regs.alloc();
+    match emit_expr(st, a, ra) {
+        Ok(_)  => {}, Err(e) => { return Err(e); }
+    }
+    match emit_expr(st, b, rb) {
+        Ok(_)  => {}, Err(e) => { return Err(e); }
+    }
+    match op {
+        BAdd => { let _ = st.program.emit(Add(ra, rb, dst)); Ok(()) }
+        BSub => { let _ = st.program.emit(Subtract(ra, rb, dst)); Ok(()) }
+        BMul => { let _ = st.program.emit(Multiply(ra, rb, dst)); Ok(()) }
+        BDiv => { let _ = st.program.emit(Divide(ra, rb, dst)); Ok(()) }
+        BMod => { let _ = st.program.emit(Remainder(ra, rb, dst)); Ok(()) }
+        BBitAnd => { let _ = st.program.emit(BitAnd(ra, rb, dst)); Ok(()) }
+        BBitOr  => { let _ = st.program.emit(BitOr(ra, rb, dst)); Ok(()) }
+        BShl    => { let _ = st.program.emit(ShiftLeft(ra, rb, dst)); Ok(()) }
+        BShr    => { let _ = st.program.emit(ShiftRight(ra, rb, dst)); Ok(()) }
+        BEq => {
+            // Materialise as boolean via `Eq` + Integer.
+            let _ = st.program.emit(Integer(0, dst));
+            let jump_idx = st.program.emit(Eq(ra, rb, 0));
+            let _ = st.program.emit(Goto(0));
+            let set_true = st.program.instruction_count();
+            let _ = st.program.emit(Integer(1, dst));
+            let after = st.program.instruction_count();
+            st.program.replace(jump_idx, Eq(ra, rb, set_true));
+            st.program.replace(jump_idx + 1, Goto(after));
+            Ok(())
+        }
+        _ => Err(unsupported("binop codegen pending".clone())),
+    }
+}

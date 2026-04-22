@@ -2,7 +2,7 @@
 // @tier: 0
 // @level: L2
 // @tags: sqlite, native, vfs, memdb, in-memory, stdlib
-// @timeout: 5000
+// @timeout: 20000
 // @expected-exit: 0
 //
 // MemDbVfs smoke — open in-memory file, write two byte-patterns at

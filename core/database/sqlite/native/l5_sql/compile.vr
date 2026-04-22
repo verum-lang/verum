@@ -1,0 +1,96 @@
+module core.database.sqlite.native.l5_sql.compile;
+
+// =============================================================================
+// l5_sql/compile.vr — end-to-end compile pipeline
+// =============================================================================
+// Layer: 5
+// Spec: sqlite-native.md §12 (overview)
+//
+// The entry point the L6 Connection.prepare() eventually calls:
+//
+//     compile(sql: &Text) -> Result<VdbeProgram, CompileError>
+//
+// Stages:
+//     1. lex       (core.database.sqlite.native.l5_sql.lexer.lex)
+//     2. parse     (parser.parse_one)
+//     3. plan      (planner.plan_statement)
+//     4. codegen   (codegen.codegen)
+//     5. optimize  (l4_vdbe.optimizer.optimize) — optional, on by default
+//
+// Any error in stages 1-4 surfaces as a tagged `CompileError` so the
+// caller can tell syntax errors from plan limitations from codegen
+// gaps.
+// =============================================================================
+
+mount core.*;
+mount base.{Result, Ok, Err, Text};
+mount core.database.sqlite.native.l5_sql.lexer.{lex, LexError};
+mount core.database.sqlite.native.l5_sql.ast.Statement;
+mount core.database.sqlite.native.l5_sql.parser.{
+    stream_new, parse_one, ParseError,
+};
+mount core.database.sqlite.native.l5_sql.planner.{
+    plan_statement, PlanError,
+};
+mount core.database.sqlite.native.l5_sql.codegen.{
+    codegen, CodegenError,
+};
+mount core.database.sqlite.native.l4_vdbe.{
+    VdbeProgram, optimize,
+};
+
+// -----------------------------------------------------------------------------
+// Error type
+// -----------------------------------------------------------------------------
+
+public type CompileError is
+      CeLex(LexError)
+    | CeParse(ParseError)
+    | CePlan(PlanError)
+    | CeCodegen(CodegenError);
+
+// -----------------------------------------------------------------------------
+// Entry point
+// -----------------------------------------------------------------------------
+
+public fn compile(sql: &Text) -> Result<VdbeProgram, CompileError> {
+    // Parse (which internally lexes).
+    let stmt = match parse_one(sql) {
+        Ok(s)  => s,
+        Err(e) => { return Err(CeParse(e)); }
+    };
+
+    // Plan.
+    let plan = match plan_statement(&stmt) {
+        Ok(p)  => p,
+        Err(e) => { return Err(CePlan(e)); }
+    };
+
+    // Codegen.
+    let mut program = match codegen(&plan, sql.clone()) {
+        Ok(p)  => p,
+        Err(e) => { return Err(CeCodegen(e)); }
+    };
+
+    // Optimise in-place.
+    let _ = optimize(&mut program);
+
+    Ok(program)
+}
+
+/// Same as `compile` but skips the optimiser pass — useful for
+/// EXPLAIN output that wants to show the raw codegen.
+public fn compile_raw(sql: &Text) -> Result<VdbeProgram, CompileError> {
+    let stmt = match parse_one(sql) {
+        Ok(s)  => s,
+        Err(e) => { return Err(CeParse(e)); }
+    };
+    let plan = match plan_statement(&stmt) {
+        Ok(p)  => p,
+        Err(e) => { return Err(CePlan(e)); }
+    };
+    match codegen(&plan, sql.clone()) {
+        Ok(p)  => Ok(p),
+        Err(e) => Err(CeCodegen(e)),
+    }
+}

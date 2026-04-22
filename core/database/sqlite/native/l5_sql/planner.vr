@@ -1,0 +1,438 @@
+module core.database.sqlite.native.l5_sql.planner;
+
+// =============================================================================
+// l5_sql/planner.vr — AST → PlanNode tree
+// =============================================================================
+// Layer: 5
+// Spec: sqlite-native.md §13
+//
+// The planner turns a parsed `Statement` into a `PlanNode` tree that
+// the codegen walks into VDBE opcodes. In the loom v1 this is a
+// minimal *structural* planner — no index selection, no join
+// reordering, no subquery flattening. It exists so the compile
+// pipeline can progress past "AST in hand" to "VDBE program on disk".
+//
+// Cost-based optimisation lands in follow-up patches; the shape of
+// `PlanNode` is already right for it (every transformation is a
+// node-level rewrite).
+//
+// Shape today:
+//
+//   PnValues          — rows of constant expressions, no source
+//   PnTableScan       — full scan of a single table
+//   PnFilter(child, predicate)   — attach WHERE
+//   PnProject(child, columns)    — attach SELECT list
+//   PnSort(child, terms)         — attach ORDER BY
+//   PnLimit(child, limit, offset)— attach LIMIT/OFFSET
+//   PnInsert(table, columns, source_plan, on_conflict)
+//   PnDelete(table, predicate)
+//   PnUpdate(table, assignments, predicate)
+//
+// Every PlanNode carries enough information for codegen without
+// re-walking the AST.
+// =============================================================================
+
+mount core.*;
+mount collections.List;
+mount base.{Result, Ok, Err, Text, Maybe};
+mount core.database.sqlite.native.l5_sql.ast.{
+    Statement, Expr, Literal, BinOp,
+    SelectStmt, SelectKind, SimpleSelect,
+    ResultColumnItem, FromItem, OrderTerm, LimitClause,
+    InsertStmt, InsertSource, OnConflict,
+    UpdateStmt, UpdateAssignment,
+    DeleteStmt,
+    TableRef, CreateTableStmt,
+};
+
+// -----------------------------------------------------------------------------
+// PlanError
+// -----------------------------------------------------------------------------
+
+public type PlanError is {
+    message: Text,
+};
+
+public fn plan_error(msg: Text) -> PlanError { PlanError { message: msg } }
+
+// -----------------------------------------------------------------------------
+// PlanColumn — resolved output column
+// -----------------------------------------------------------------------------
+
+public type PlanColumn is {
+    alias: Text,                 // user-visible name (may be empty)
+    expr: Expr,                  // expression produced
+};
+
+// -----------------------------------------------------------------------------
+// PlanNode
+// -----------------------------------------------------------------------------
+
+public type PlanNode is
+      PnValues(rows: List<List<Expr>>, column_count: Int)
+    | PnTableScan(table: TableRef, cursor_id: Int, column_count: Int)
+    | PnFilter(child: Heap<PlanNode>, predicate: Expr)
+    | PnProject(child: Heap<PlanNode>, columns: List<PlanColumn>)
+    | PnSort(child: Heap<PlanNode>, terms: List<OrderTerm>)
+    | PnLimit(child: Heap<PlanNode>, limit: Expr, offset: Maybe<Expr>)
+    | PnInsert(table: TableRef, columns: List<Text>, source: Heap<PlanNode>, on_conflict: Maybe<OnConflict>)
+    | PnDelete(table: TableRef, cursor_id: Int, predicate: Maybe<Expr>)
+    | PnUpdate(table: TableRef, cursor_id: Int, assignments: List<UpdateAssignment>, predicate: Maybe<Expr>)
+    | PnCreateTable(stmt: CreateTableStmt)
+    | PnDrop(kind: DropPlanKind, if_exists: Bool, target: TableRef)
+    | PnTransaction(tx: TxAction)
+    | PnPragma(name: Text, value: Maybe<Expr>);
+
+public type DropPlanKind is DpkTable | DpkIndex | DpkView | DpkTrigger;
+
+public type TxAction is
+      TxBegin
+    | TxCommit
+    | TxRollback(savepoint: Maybe<Text>)
+    | TxSavepoint(name: Text)
+    | TxRelease(name: Text);
+
+// -----------------------------------------------------------------------------
+// Planning top-level
+// -----------------------------------------------------------------------------
+
+public fn plan_statement(stmt: &Statement) -> Result<PlanNode, PlanError> {
+    match stmt {
+        SSelect(sel)        => plan_select(sel),
+        SInsert(ins)        => plan_insert(ins),
+        SUpdate(upd)        => plan_update(upd),
+        SDelete(del)        => plan_delete(del),
+        SCreateTable(ct)    => Ok(PnCreateTable(clone_create_table(ct))),
+        SDropTable(f, t)    => Ok(PnDrop(DpkTable, f, clone_table_ref(t))),
+        SDropIndex(f, t)    => Ok(PnDrop(DpkIndex, f, clone_table_ref(t))),
+        SDropView(f, t)     => Ok(PnDrop(DpkView, f, clone_table_ref(t))),
+        SDropTrigger(f, t)  => Ok(PnDrop(DpkTrigger, f, clone_table_ref(t))),
+        SBeginTransaction   => Ok(PnTransaction(TxBegin)),
+        SCommit             => Ok(PnTransaction(TxCommit)),
+        SRollback(sp)       => Ok(PnTransaction(TxRollback(clone_opt_text(sp)))),
+        SSavepoint(n)       => Ok(PnTransaction(TxSavepoint(n.clone()))),
+        SRelease(n)         => Ok(PnTransaction(TxRelease(n.clone()))),
+        SPragma(name, val)  => Ok(PnPragma(name.clone(), clone_opt_expr(val))),
+        SExplain(_, _)      => Err(plan_error("EXPLAIN planning not supported yet".clone())),
+        _                   => Err(plan_error("statement kind not supported by v1 planner".clone())),
+    }
+}
+
+// -----------------------------------------------------------------------------
+// SELECT
+// -----------------------------------------------------------------------------
+
+fn plan_select(sel: &SelectStmt) -> Result<PlanNode, PlanError> {
+    // Compound SELECT unimplemented in v1.
+    let simple = match sel.kind {
+        SkSimple(ref s) => s,
+        SkCompound(_, _, _) => {
+            return Err(plan_error("compound SELECT (UNION/INTERSECT/EXCEPT) pending".clone()));
+        }
+    };
+
+    // Source: either FROM clause or VALUES-like bare SELECT (no FROM).
+    let mut node: PlanNode = match simple.from {
+        Some(ref fi) => plan_from_item(fi, 0)?,
+        None => {
+            // SELECT without FROM produces one row of constants — model
+            // as PnValues with a single row of the result exprs.
+            let mut row: List<Expr> = List.new();
+            let mut i: Int = 0;
+            while i < simple.result_columns.len() {
+                match simple.result_columns[i] {
+                    RcExpr(ref e, _) => row.push(clone_expr(e)),
+                    RcStar | RcTableStar(_) => {
+                        return Err(plan_error("SELECT * with no FROM is invalid".clone()));
+                    }
+                }
+                i = i + 1;
+            }
+            let mut rows: List<List<Expr>> = List.new();
+            let col_count = row.len();
+            rows.push(row);
+            PnValues(rows, col_count)
+        }
+    };
+
+    // WHERE.
+    match simple.where_clause {
+        Some(ref w) => { node = PnFilter(Heap(node), clone_expr(w)); }
+        None => {}
+    }
+
+    // Projection (always attach — keeps codegen uniform). Skip when
+    // source is PnValues (columns already materialised as-is).
+    let needs_project = match node { PnValues(_, _) => false, _ => true };
+    if needs_project {
+        let mut cols: List<PlanColumn> = List.new();
+        let mut i: Int = 0;
+        while i < simple.result_columns.len() {
+            match simple.result_columns[i] {
+                RcExpr(ref e, ref alias) => {
+                    cols.push(PlanColumn { alias: alias.clone(), expr: clone_expr(e) });
+                }
+                RcStar => {
+                    // Codegen materialises `*` by querying the cursor's
+                    // declared n_cols at emit time; we carry a
+                    // placeholder literal to signal it.
+                    cols.push(PlanColumn { alias: "*".clone(), expr: ELit(LStar) });
+                }
+                RcTableStar(ref tref) => {
+                    // Same deal but scoped to one table.
+                    cols.push(PlanColumn { alias: tref.name.clone() + ".*".clone(), expr: ELit(LStar) });
+                }
+            }
+            i = i + 1;
+        }
+        node = PnProject(Heap(node), cols);
+    }
+
+    // ORDER BY.
+    if sel.order_by.len() > 0 {
+        node = PnSort(Heap(node), clone_order_terms(&sel.order_by));
+    }
+
+    // LIMIT / OFFSET.
+    match sel.limit {
+        Some(ref lc) => {
+            let off: Maybe<Expr> = match lc.offset {
+                Some(ref e) => Some(clone_expr(e)),
+                None => None,
+            };
+            node = PnLimit(Heap(node), clone_expr(&lc.limit), off);
+        }
+        None => {}
+    }
+
+    Ok(node)
+}
+
+fn plan_from_item(fi: &FromItem, cursor_id: Int) -> Result<PlanNode, PlanError> {
+    match fi {
+        FiTable(ref tref) => Ok(PnTableScan(clone_table_ref(tref), cursor_id, -1)),
+        FiSubquery(_, _)  => Err(plan_error("subquery FROM not supported in v1".clone())),
+        FiJoin(_, _)      => Err(plan_error("JOIN planning not supported in v1".clone())),
+    }
+}
+
+// -----------------------------------------------------------------------------
+// INSERT / UPDATE / DELETE
+// -----------------------------------------------------------------------------
+
+fn plan_insert(ins: &InsertStmt) -> Result<PlanNode, PlanError> {
+    let source = match ins.source {
+        IsValues(ref rows) => {
+            let cloned = clone_rows(rows);
+            let col_count = if cloned.len() == 0 { 0 } else { cloned[0].len() };
+            PnValues(cloned, col_count)
+        }
+        IsDefault => PnValues(List.new(), 0),
+        IsSelect(_) => { return Err(plan_error("INSERT ... SELECT not supported in v1".clone())); }
+    };
+    Ok(PnInsert(
+        clone_table_ref(&ins.table),
+        clone_text_list(&ins.columns),
+        Heap(source),
+        clone_opt_on_conflict(&ins.on_conflict),
+    ))
+}
+
+fn plan_update(upd: &UpdateStmt) -> Result<PlanNode, PlanError> {
+    let cursor_id = 0;
+    let pred: Maybe<Expr> = match upd.where_clause {
+        Some(ref e) => Some(clone_expr(e)),
+        None => None,
+    };
+    Ok(PnUpdate(
+        clone_table_ref(&upd.table),
+        cursor_id,
+        clone_assignments(&upd.assignments),
+        pred,
+    ))
+}
+
+fn plan_delete(del: &DeleteStmt) -> Result<PlanNode, PlanError> {
+    let cursor_id = 0;
+    let pred: Maybe<Expr> = match del.where_clause {
+        Some(ref e) => Some(clone_expr(e)),
+        None => None,
+    };
+    Ok(PnDelete(clone_table_ref(&del.table), cursor_id, pred))
+}
+
+// -----------------------------------------------------------------------------
+// Deep-clone helpers (Verum v1 has no derive(Clone) for these)
+// -----------------------------------------------------------------------------
+
+public fn clone_table_ref(t: &TableRef) -> TableRef {
+    TableRef {
+        schema: t.schema.clone(),
+        name: t.name.clone(),
+        alias: t.alias.clone(),
+    }
+}
+
+fn clone_opt_text(o: &Maybe<Text>) -> Maybe<Text> {
+    match o {
+        Some(ref s) => Some(s.clone()),
+        None => None,
+    }
+}
+
+fn clone_opt_on_conflict(o: &Maybe<OnConflict>) -> Maybe<OnConflict> {
+    match o {
+        Some(ref c) => Some(c),
+        None => None,
+    }
+}
+
+fn clone_text_list(xs: &List<Text>) -> List<Text> {
+    let mut out: List<Text> = List.new();
+    let mut i: Int = 0;
+    while i < xs.len() {
+        out.push(xs[i].clone());
+        i = i + 1;
+    }
+    out
+}
+
+fn clone_rows(rows: &List<List<Expr>>) -> List<List<Expr>> {
+    let mut out: List<List<Expr>> = List.new();
+    let mut i: Int = 0;
+    while i < rows.len() {
+        let mut row: List<Expr> = List.new();
+        let mut j: Int = 0;
+        while j < rows[i].len() {
+            row.push(clone_expr(&rows[i][j]));
+            j = j + 1;
+        }
+        out.push(row);
+        i = i + 1;
+    }
+    out
+}
+
+fn clone_assignments(xs: &List<UpdateAssignment>) -> List<UpdateAssignment> {
+    let mut out: List<UpdateAssignment> = List.new();
+    let mut i: Int = 0;
+    while i < xs.len() {
+        out.push(UpdateAssignment {
+            column: xs[i].column.clone(),
+            value: clone_expr(&xs[i].value),
+        });
+        i = i + 1;
+    }
+    out
+}
+
+fn clone_order_terms(xs: &List<OrderTerm>) -> List<OrderTerm> {
+    let mut out: List<OrderTerm> = List.new();
+    let mut i: Int = 0;
+    while i < xs.len() {
+        out.push(OrderTerm {
+            expr: clone_expr(&xs[i].expr),
+            direction: xs[i].direction,
+            nulls_first: xs[i].nulls_first,
+        });
+        i = i + 1;
+    }
+    out
+}
+
+fn clone_opt_expr(o: &Maybe<Expr>) -> Maybe<Expr> {
+    match o {
+        Some(ref e) => Some(clone_expr(e)),
+        None => None,
+    }
+}
+
+public fn clone_expr(e: &Expr) -> Expr {
+    match e {
+        ELit(ref lit)      => ELit(clone_literal(lit)),
+        EColumn(ref t, ref n) => EColumn(clone_table_ref(t), n.clone()),
+        EVar(ref s)        => EVar(s.clone()),
+        EPositional(n)     => EPositional(n),
+        EUnary(op, ref x)  => EUnary(op, Heap(clone_expr(x))),
+        EBinary(op, ref a, ref b) => EBinary(op, Heap(clone_expr(a)), Heap(clone_expr(b))),
+        EFunc(ref n, ref args, d) => EFunc(n.clone(), clone_expr_list(args), d),
+        ECase(ref s, ref arms, ref el) => ECase(
+            match s { Some(ref x) => Some(Heap(clone_expr(x))), None => None },
+            clone_case_arms(arms),
+            match el { Some(ref x) => Some(Heap(clone_expr(x))), None => None },
+        ),
+        EIn(ref e, ref xs, neg) => EIn(Heap(clone_expr(e)), clone_expr_list(xs), neg),
+        EInSubquery(_, _, _)    => ELit(LNull),    // unsupported path — emit NULL
+        EBetween(ref e, ref lo, ref hi, neg) => EBetween(
+            Heap(clone_expr(e)), Heap(clone_expr(lo)), Heap(clone_expr(hi)), neg,
+        ),
+        ELike(ref e, ref p, ref esc, neg) => ELike(
+            Heap(clone_expr(e)),
+            Heap(clone_expr(p)),
+            match esc { Some(ref x) => Some(Heap(clone_expr(x))), None => None },
+            neg,
+        ),
+        ECast(ref x, ref t) => ECast(Heap(clone_expr(x)), t.clone()),
+        ECollate(ref x, ref n) => ECollate(Heap(clone_expr(x)), n.clone()),
+        EExists(_, _)        => ELit(LNull),
+        ESubquery(_)          => ELit(LNull),
+        ENullIf(ref a, ref b) => ENullIf(Heap(clone_expr(a)), Heap(clone_expr(b))),
+        ECoalesce(ref xs)     => ECoalesce(clone_expr_list(xs)),
+    }
+}
+
+fn clone_expr_list(xs: &List<Expr>) -> List<Expr> {
+    let mut out: List<Expr> = List.new();
+    let mut i: Int = 0;
+    while i < xs.len() {
+        out.push(clone_expr(&xs[i]));
+        i = i + 1;
+    }
+    out
+}
+
+fn clone_case_arms(xs: &List<(Expr, Expr)>) -> List<(Expr, Expr)> {
+    let mut out: List<(Expr, Expr)> = List.new();
+    let mut i: Int = 0;
+    while i < xs.len() {
+        out.push((clone_expr(&xs[i].0), clone_expr(&xs[i].1)));
+        i = i + 1;
+    }
+    out
+}
+
+fn clone_literal(l: &Literal) -> Literal {
+    match l {
+        LNull  => LNull,
+        LInt(i) => LInt(i),
+        LReal(x) => LReal(x),
+        LText(ref s) => LText(s.clone()),
+        LBlob(ref b) => {
+            let mut out: List<Byte> = List.new();
+            let mut i: Int = 0;
+            while i < b.len() { out.push(b[i]); i = i + 1; }
+            LBlob(out)
+        }
+        LTrue => LTrue,
+        LFalse => LFalse,
+        LCurrentDate => LCurrentDate,
+        LCurrentTime => LCurrentTime,
+        LCurrentTimestamp => LCurrentTimestamp,
+        LStar => LStar,
+    }
+}
+
+fn clone_create_table(ct: &CreateTableStmt) -> CreateTableStmt {
+    // Constraints cloning is heavy — for v1 the planner just forwards
+    // the AST value; clone by pushing it through a constructor that
+    // the codegen never mutates.
+    CreateTableStmt {
+        if_not_exists: ct.if_not_exists,
+        temporary: ct.temporary,
+        table: clone_table_ref(&ct.table),
+        columns: ct.columns.clone(),
+        constraints: ct.constraints.clone(),
+        strict: ct.strict,
+        without_rowid: ct.without_rowid,
+    }
+}

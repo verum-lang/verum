@@ -1,0 +1,135 @@
+// @test: typecheck-pass
+// @level: L2
+// @tier: 0
+// @tags: sqlite, native, sql, planner, codegen, compile, end-to-end
+// @timeout: 15000
+// @description: End-to-end compile pipeline — SQL → VdbeProgram
+//
+// Spec: internal/specs/sqlite-native.md §12–§14
+
+mount core.*;
+mount collections.List;
+mount core.database.sqlite.native.l5_sql.{
+    Statement, PlanNode, plan_statement,
+    CodegenError, codegen,
+    CompileError, compile, compile_raw,
+    parse_one,
+};
+mount core.database.sqlite.native.l4_vdbe.VdbeProgram;
+
+fn compile_select_literal() {
+    match compile(&"SELECT 1".clone()) {
+        Ok(prog) => {
+            assert(prog.instruction_count() > 0);
+            assert(prog.register_count() > 0);
+        }
+        Err(_) => panic("SELECT 1 must compile"),
+    }
+}
+
+fn compile_select_multiple_literals() {
+    match compile(&"SELECT 1, 'hi', 3.14, NULL".clone()) {
+        Ok(prog) => {
+            assert(prog.instruction_count() > 0);
+        }
+        Err(_) => panic("SELECT 1, 'hi', ..."),
+    }
+}
+
+fn compile_select_arithmetic() {
+    match compile(&"SELECT 1 + 2 * 3".clone()) {
+        Ok(prog) => { assert(prog.instruction_count() > 0); }
+        Err(_) => panic("arith compile"),
+    }
+}
+
+fn compile_insert_values() {
+    match compile(&"INSERT INTO t VALUES (1, 'a')".clone()) {
+        Ok(prog) => {
+            assert(prog.instruction_count() > 0);
+            assert(prog.cursor_count() >= 1);
+        }
+        Err(_) => panic("INSERT VALUES compile"),
+    }
+}
+
+fn compile_delete_all() {
+    match compile(&"DELETE FROM t".clone()) {
+        Ok(prog) => { assert(prog.instruction_count() > 0); }
+        Err(_) => panic("DELETE ALL compile"),
+    }
+}
+
+fn compile_transactions() {
+    match compile(&"BEGIN".clone()) {
+        Ok(_) => {}, Err(_) => panic("BEGIN"),
+    }
+    match compile(&"COMMIT".clone()) {
+        Ok(_) => {}, Err(_) => panic("COMMIT"),
+    }
+    match compile(&"ROLLBACK".clone()) {
+        Ok(_) => {}, Err(_) => panic("ROLLBACK"),
+    }
+    match compile(&"SAVEPOINT sp".clone()) {
+        Ok(_) => {}, Err(_) => panic("SAVEPOINT"),
+    }
+}
+
+fn compile_create_table() {
+    match compile(&"CREATE TABLE t (id INTEGER PRIMARY KEY)".clone()) {
+        Ok(_) => {}, Err(_) => panic("CREATE TABLE"),
+    }
+}
+
+fn compile_drop_table() {
+    match compile(&"DROP TABLE IF EXISTS t".clone()) {
+        Ok(_) => {}, Err(_) => panic("DROP TABLE"),
+    }
+}
+
+fn compile_pragma() {
+    match compile(&"PRAGMA journal_mode = WAL".clone()) {
+        Ok(_) => {}, Err(_) => panic("PRAGMA"),
+    }
+}
+
+fn compile_unsupported_emits_error() {
+    // SELECT * FROM table — cursor I/O not yet wired.
+    match compile(&"SELECT * FROM t".clone()) {
+        Ok(_) => panic("SELECT * FROM t should not yet compile"),
+        Err(CeCodegen(_)) => {},
+        Err(_) => panic("expected CeCodegen"),
+    }
+}
+
+fn plan_statement_surface() {
+    let stmt = match parse_one(&"INSERT INTO t VALUES (1)".clone()) {
+        Ok(s)  => s,
+        Err(_) => { panic("parse"); return; }
+    };
+    match plan_statement(&stmt) {
+        Ok(_) => {}, Err(_) => panic("plan"),
+    }
+}
+
+fn compile_raw_skips_optimizer() {
+    match compile_raw(&"SELECT 1".clone()) {
+        Ok(_) => {}, Err(_) => panic("compile_raw"),
+    }
+}
+
+fn main() {
+    compile_select_literal();
+    compile_select_multiple_literals();
+    compile_select_arithmetic();
+    compile_insert_values();
+    compile_delete_all();
+    compile_transactions();
+    compile_create_table();
+    compile_drop_table();
+    compile_pragma();
+    compile_unsupported_emits_error();
+    plan_statement_surface();
+    compile_raw_skips_optimizer();
+    print("compile_pipeline typecheck ok");
+}
