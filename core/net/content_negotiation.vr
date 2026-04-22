@@ -1,0 +1,350 @@
+// =============================================================================
+// net/content_negotiation.vr — Accept / Accept-Encoding / Accept-Language
+// =============================================================================
+// Layer: 5 (Network — HTTP common)
+// Dependencies: core, core.collections
+// =============================================================================
+//
+// RFC 9110 §12 — HTTP content negotiation. Every HTTP server needs
+// to parse the `Accept` family of request headers with their
+// q-factor preferences and pick the single best response variant.
+//
+// # Parse surface
+//
+// ```
+// // "text/html;q=0.9, application/json, */*;q=0.1"
+// let prefs: List<MediaRangeSpec> = parse_accept(&header_value);
+// ```
+//
+// Each `MediaRangeSpec` carries `(type, subtype, params, q)`. We
+// cap q at [0, 1]; missing q-values default to 1.0 per §12.4.1.
+//
+// # Select surface
+//
+// ```
+// let offers: List<Text> = ["application/json", "text/html"];
+// match select_best_media(&prefs, &offers) {
+//     Some(pick) => respond_with(pick),
+//     None       => respond_406_not_acceptable(),
+// }
+// ```
+//
+// Selection ranks first by q-factor (descending), then by
+// specificity (exact > wildcard-subtype > */*) per RFC 9110
+// §12.5.1.
+//
+// =============================================================================
+
+module core.net.content_negotiation;
+
+mount core.*;
+mount core.collections.List;
+
+// =============================================================================
+// Typed preferences
+// =============================================================================
+
+public type MediaRangeSpec is {
+    type_main: Text,    // "text", "application", or "*"
+    subtype:   Text,    // "html", "json", or "*"
+    /// Quality factor ∈ [0, 1].
+    q:         Float,
+};
+
+/// Accept-Encoding / Accept-Language entries share the same shape —
+/// just one coded value rather than type/subtype. `value` is the
+/// coding name ("gzip", "br", "identity", "*") or language tag
+/// ("en-US", "fr", "*").
+public type CodedPreference is {
+    value: Text,
+    q:     Float,
+};
+
+// =============================================================================
+// Parsers
+// =============================================================================
+
+public fn parse_accept(header: &Text) -> List<MediaRangeSpec> {
+    let mut out: List<MediaRangeSpec> = [];
+    let segs = split_commas(header.as_bytes());
+    let mut i: Int = 0;
+    while i < segs.len() {
+        let seg = trim_ws(segs[i].as_slice());
+        if seg.len() == 0 { i = i + 1; continue; }
+        match parse_media_range(&seg) {
+            Some(m) => out.push(m),
+            None    => {},
+        }
+        i = i + 1;
+    }
+    out
+}
+
+public fn parse_accept_encoding(header: &Text) -> List<CodedPreference> {
+    parse_coded(header)
+}
+
+public fn parse_accept_language(header: &Text) -> List<CodedPreference> {
+    parse_coded(header)
+}
+
+fn parse_coded(header: &Text) -> List<CodedPreference> {
+    let mut out: List<CodedPreference> = [];
+    let segs = split_commas(header.as_bytes());
+    let mut i: Int = 0;
+    while i < segs.len() {
+        let seg = trim_ws(segs[i].as_slice());
+        if seg.len() == 0 { i = i + 1; continue; }
+        // Split on ';' — first part is the value, rest are params.
+        let parts = split_semicolons(seg.as_slice());
+        if parts.len() == 0 { i = i + 1; continue; }
+        let value = Text.from_utf8_unchecked(trim_ws(parts[0].as_slice()).as_slice());
+        let q = q_from_params(&parts, 1);
+        out.push(CodedPreference { value: value, q: q });
+        i = i + 1;
+    }
+    out
+}
+
+fn parse_media_range(seg: &List<Byte>) -> Maybe<MediaRangeSpec> {
+    // "type/subtype" followed by optional ";" params.
+    let parts = split_semicolons(seg.as_slice());
+    if parts.len() == 0 { return None; }
+    let (t, s) = split_slash(trim_ws(parts[0].as_slice()).as_slice());
+    if t.len() == 0 || s.len() == 0 { return None; }
+    let q = q_from_params(&parts, 1);
+    Some(MediaRangeSpec {
+        type_main: Text.from_utf8_unchecked(t.as_slice()),
+        subtype:   Text.from_utf8_unchecked(s.as_slice()),
+        q:         q,
+    })
+}
+
+fn q_from_params(parts: &List<List<Byte>>, start: Int) -> Float {
+    let mut i: Int = start;
+    while i < parts.len() {
+        let p = trim_ws(parts[i].as_slice());
+        if p.len() >= 2 && p[0] == ('q' as Byte) && p[1] == ('=' as Byte) {
+            return parse_q_value(&p, 2);
+        }
+        i = i + 1;
+    }
+    1.0
+}
+
+fn parse_q_value(buf: &List<Byte>, offset: Int) -> Float {
+    // "0", "0.123", "1", "1.0" — cap at [0,1].
+    let mut int_part: Float = 0.0;
+    let mut i: Int = offset;
+    while i < buf.len() && buf[i] >= ('0' as Byte) && buf[i] <= ('9' as Byte) {
+        int_part = int_part * 10.0 + ((buf[i] - ('0' as Byte)) as Float);
+        i = i + 1;
+    }
+    let mut frac: Float = 0.0;
+    if i < buf.len() && buf[i] == ('.' as Byte) {
+        i = i + 1;
+        let mut denom: Float = 10.0;
+        while i < buf.len() && buf[i] >= ('0' as Byte) && buf[i] <= ('9' as Byte) {
+            frac = frac + ((buf[i] - ('0' as Byte)) as Float) / denom;
+            denom = denom * 10.0;
+            i = i + 1;
+        }
+    }
+    let q = int_part + frac;
+    if q < 0.0 { 0.0 } else if q > 1.0 { 1.0 } else { q }
+}
+
+// =============================================================================
+// Selectors
+// =============================================================================
+
+/// Pick the best of `offers` given the client's parsed `Accept`
+/// preferences. Returns the chosen offer or `None` when none match
+/// (caller responds with 406 Not Acceptable).
+///
+/// Tie-breaking:
+///   1. Higher q wins.
+///   2. At equal q, more specific wildcard wins (exact > type/* > */*).
+///   3. At equal q + specificity, the caller's offer order wins.
+public fn select_best_media(
+    prefs:  &List<MediaRangeSpec>,
+    offers: &List<Text>,
+) -> Maybe<Text> {
+    let mut best_idx: Int = -1;
+    let mut best_q: Float = -1.0;
+    let mut best_spec: Int = -1;
+
+    let mut i: Int = 0;
+    while i < offers.len() {
+        let (t, s) = split_media_type(&offers[i]);
+        let (q, spec) = score_media(&t, &s, prefs);
+        // q = 0 → explicitly rejected.
+        if q > 0.0 && (q > best_q || (q == best_q && spec > best_spec)) {
+            best_idx = i;
+            best_q = q;
+            best_spec = spec;
+        }
+        i = i + 1;
+    }
+    if best_idx < 0 { None } else { Some(offers[best_idx].clone()) }
+}
+
+/// Best coded variant (encoding / language). Identity / "*"
+/// handling per RFC 9110 §12.5.3 — "identity" is always acceptable
+/// unless explicitly forbidden with q=0.
+public fn select_best_coding(
+    prefs:  &List<CodedPreference>,
+    offers: &List<Text>,
+) -> Maybe<Text> {
+    let mut best_idx: Int = -1;
+    let mut best_q: Float = -1.0;
+
+    let mut i: Int = 0;
+    while i < offers.len() {
+        let q = score_coded(&offers[i], prefs);
+        if q > 0.0 && q > best_q {
+            best_idx = i;
+            best_q = q;
+        }
+        i = i + 1;
+    }
+    if best_idx < 0 { None } else { Some(offers[best_idx].clone()) }
+}
+
+// =============================================================================
+// Scoring
+// =============================================================================
+
+fn score_media(
+    offer_type:    &Text,
+    offer_subtype: &Text,
+    prefs:         &List<MediaRangeSpec>,
+) -> (Float, Int) {
+    // Specificity: exact = 3, type/* = 2, */* = 1, else 0.
+    let mut best_q: Float = 0.0;
+    let mut best_spec: Int = 0;
+    let mut i: Int = 0;
+    while i < prefs.len() {
+        let p = &prefs[i];
+        let spec = if text_eq(&p.type_main, offer_type) && text_eq(&p.subtype, offer_subtype) {
+            3
+        } else if text_eq(&p.type_main, offer_type) && p.subtype.as_bytes() == b"*" {
+            2
+        } else if p.type_main.as_bytes() == b"*" && p.subtype.as_bytes() == b"*" {
+            1
+        } else {
+            0
+        };
+        if spec > best_spec || (spec == best_spec && spec > 0 && p.q > best_q) {
+            best_spec = spec;
+            best_q = p.q;
+        }
+        i = i + 1;
+    }
+    if best_spec == 0 { return (0.0, 0); }
+    (best_q, best_spec)
+}
+
+fn score_coded(offer: &Text, prefs: &List<CodedPreference>) -> Float {
+    let mut best_q: Float = -1.0;
+    let mut best_spec: Int = 0;
+    let mut saw_wildcard: Bool = false;
+    let mut wildcard_q: Float = 0.0;
+    let mut i: Int = 0;
+    while i < prefs.len() {
+        let p = &prefs[i];
+        if text_eq(&p.value, offer) {
+            if 2 > best_spec || (best_spec == 2 && p.q > best_q) {
+                best_spec = 2;
+                best_q = p.q;
+            }
+        } else if p.value.as_bytes() == b"*" {
+            saw_wildcard = true;
+            wildcard_q = p.q;
+        }
+        i = i + 1;
+    }
+    if best_spec > 0 { return best_q; }
+    // No exact match — fall back to wildcard if any.
+    if saw_wildcard { return wildcard_q; }
+    // "identity" is implicitly acceptable with q=1 unless rejected.
+    if offer.as_bytes() == b"identity" { 1.0 } else { 0.0 }
+}
+
+// =============================================================================
+// Helpers
+// =============================================================================
+
+fn split_commas(src: &[Byte]) -> List<List<Byte>> {
+    let mut out: List<List<Byte>> = [];
+    let mut cur: List<Byte> = [];
+    let mut i: Int = 0;
+    while i < src.len() {
+        if src[i] == (',' as Byte) {
+            out.push(cur);
+            cur = [];
+        } else {
+            cur.push(src[i]);
+        }
+        i = i + 1;
+    }
+    out.push(cur);
+    out
+}
+
+fn split_semicolons(src: &[Byte]) -> List<List<Byte>> {
+    let mut out: List<List<Byte>> = [];
+    let mut cur: List<Byte> = [];
+    let mut i: Int = 0;
+    while i < src.len() {
+        if src[i] == (';' as Byte) {
+            out.push(cur);
+            cur = [];
+        } else {
+            cur.push(src[i]);
+        }
+        i = i + 1;
+    }
+    out.push(cur);
+    out
+}
+
+fn split_slash(src: &[Byte]) -> (List<Byte>, List<Byte>) {
+    let mut pre: List<Byte> = [];
+    let mut post: List<Byte> = [];
+    let mut found: Bool = false;
+    let mut i: Int = 0;
+    while i < src.len() {
+        if !found && src[i] == ('/' as Byte) { found = true; }
+        else if found { post.push(src[i]); }
+        else { pre.push(src[i]); }
+        i = i + 1;
+    }
+    (pre, post)
+}
+
+fn trim_ws(src: &[Byte]) -> List<Byte> {
+    let mut l: Int = 0;
+    while l < src.len() && is_ws(src[l]) { l = l + 1; }
+    let mut r: Int = src.len();
+    while r > l && is_ws(src[r - 1]) { r = r - 1; }
+    let mut out: List<Byte> = [];
+    let mut i: Int = l;
+    while i < r { out.push(src[i]); i = i + 1; }
+    out
+}
+
+fn is_ws(b: Byte) -> Bool {
+    b == (' ' as Byte) || b == ('\t' as Byte)
+        || b == ('\r' as Byte) || b == ('\n' as Byte)
+}
+
+fn split_media_type(s: &Text) -> (Text, Text) {
+    let (t, st) = split_slash(s.as_bytes());
+    (Text.from_utf8_unchecked(t.as_slice()),
+     Text.from_utf8_unchecked(st.as_slice()))
+}
+
+fn text_eq(a: &Text, b: &Text) -> Bool {
+    a.as_bytes() == b.as_bytes()
+}

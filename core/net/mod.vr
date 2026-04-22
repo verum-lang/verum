@@ -75,6 +75,7 @@ public module websocket;
 public module http2;
 public module quic;
 public module http3;
+public module content_negotiation;
 
 // =============================================================================
 // Re-exports

@@ -1,0 +1,52 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: http, content-negotiation, accept, rfc9110, typecheck
+// @timeout: 10000
+// @expect: pass
+
+mount core.net.content_negotiation.{
+    MediaRangeSpec, CodedPreference,
+    parse_accept, parse_accept_encoding, parse_accept_language,
+    select_best_media, select_best_coding,
+};
+mount core.collections.List;
+
+fn exercise_accept() {
+    let header = Text.from("text/html;q=0.9, application/json, */*;q=0.1");
+    let prefs: List<MediaRangeSpec> = parse_accept(&header);
+
+    let mut offers: List<Text> = [];
+    offers.push(Text.from("application/json"));
+    offers.push(Text.from("text/html"));
+
+    let pick = select_best_media(&prefs, &offers);
+    let _ = pick;      // Expect Some("application/json") — q=1 > q=0.9.
+}
+
+fn exercise_accept_encoding() {
+    let header = Text.from("gzip, br;q=0.9, identity;q=0.5");
+    let prefs: List<CodedPreference> = parse_accept_encoding(&header);
+
+    let mut offers: List<Text> = [];
+    offers.push(Text.from("br"));
+    offers.push(Text.from("gzip"));
+    offers.push(Text.from("identity"));
+
+    let _ = select_best_coding(&prefs, &offers);
+}
+
+fn exercise_accept_language() {
+    let header = Text.from("fr-FR, fr;q=0.9, en;q=0.8, *;q=0.1");
+    let prefs = parse_accept_language(&header);
+    let mut offers: List<Text> = [];
+    offers.push(Text.from("en"));
+    offers.push(Text.from("fr"));
+    let _ = select_best_coding(&prefs, &offers);
+}
+
+fn main() {
+    exercise_accept();
+    exercise_accept_encoding();
+    exercise_accept_language();
+}
