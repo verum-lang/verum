@@ -360,6 +360,51 @@ impl<'ctx> Translator<'ctx> {
     ///
     /// This is the main entry point for expression translation.
     /// It recursively translates the expression tree into Z3 AST nodes.
+    /// Translate an expression but force identifier-heads to the Bool
+    /// sort. Used by propositional operator translation so that a bare
+    /// `P && Q` with no inferred types encodes as two fresh Bool
+    /// constants rather than running aground on the Int-default.
+    fn translate_expr_as_bool(&self, expr: &Expr) -> Result<Bool, TranslationError> {
+        match &expr.kind {
+            ExprKind::Path(path) => {
+                if let Some(ident) = path.as_ident() {
+                    let name = ident.as_str();
+                    if let Maybe::Some(var) = self.bindings.get(&name.to_text()) {
+                        if let Some(b) = var.as_bool() {
+                            return Ok(b);
+                        }
+                    }
+                    match name {
+                        "true" => return Ok(Bool::from_bool(true)),
+                        "false" => return Ok(Bool::from_bool(false)),
+                        _ => {}
+                    }
+                    return Ok(Bool::new_const(name));
+                }
+                // Fall through for non-ident paths — let the regular
+                // translator try (e.g. qualified paths), then cast.
+                let d = self.translate_expr(expr)?;
+                d.as_bool().ok_or_else(|| {
+                    TranslationError::TypeMismatch(Text::from(format!(
+                        "expected Bool but got non-boolean path: {:?}",
+                        path
+                    )))
+                })
+            }
+            ExprKind::Paren(inner) => self.translate_expr_as_bool(inner),
+            _ => {
+                // For everything else, go through the normal translator
+                // and demand the result be Bool.
+                let d = self.translate_expr(expr)?;
+                d.as_bool().ok_or_else(|| {
+                    TranslationError::TypeMismatch(Text::from(
+                        "expected boolean expression",
+                    ))
+                })
+            }
+        }
+    }
+
     pub fn translate_expr(&self, expr: &Expr) -> Result<Dynamic, TranslationError> {
         match &expr.kind {
             ExprKind::Literal(lit) => self.translate_literal(lit),
@@ -999,6 +1044,20 @@ impl<'ctx> Translator<'ctx> {
         left: &Expr,
         right: &Expr,
     ) -> Result<Dynamic, TranslationError> {
+        // Propositional operators ({&&, ||, ->, <->, !}) require boolean
+        // operands. If either sub-expression is a bare identifier with no
+        // inferred type — the translator's default is `Int::new_const` —
+        // we'd get a spurious TypeMismatch on `P && Q` even though P/Q
+        // are clearly propositions. Resolve the impedance mismatch by
+        // re-translating both sides as fresh Bool constants for those
+        // four operators, mirroring the convention in any predicative
+        // type theory.
+        if matches!(op, BinOp::And | BinOp::Or | BinOp::Imply | BinOp::Iff) {
+            let left_bool = self.translate_expr_as_bool(left)?;
+            let right_bool = self.translate_expr_as_bool(right)?;
+            return self.translate_bool_binop(op, &left_bool, &right_bool);
+        }
+
         let left_z3 = self.translate_expr(left)?;
         let right_z3 = self.translate_expr(right)?;
 
@@ -1306,9 +1365,13 @@ impl<'ctx> Translator<'ctx> {
                     let result = bool_val.not();
                     Ok(Dynamic::from_ast(&result))
                 } else {
-                    Err(TranslationError::TypeMismatch(
-                        "logical not requires boolean type".to_text(),
-                    ))
+                    // Same reasoning as the propositional-operator arm in
+                    // `translate_binary_op`: if the operand came in as a
+                    // bare identifier the Int-default kicked in, but `!`
+                    // clearly wants a Bool. Re-translate as Bool and
+                    // retry before giving up.
+                    let bool_operand = self.translate_expr_as_bool(expr)?;
+                    Ok(Dynamic::from_ast(&bool_operand.not()))
                 }
             }
 

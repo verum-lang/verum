@@ -1,0 +1,45 @@
+// @test: integration
+// @tier: 0
+// @level: L1
+// @tags: proof, prop, quantified, tautology
+// @expect: pass
+//
+// Propositional operators with type-variable operands (`P && Q` where
+// P and Q are `: Prop`) must translate to Z3 as Bool-kinded constants,
+// not as the default Int that bare-identifier translation otherwise
+// produces. The guard lives in `translate_binary_op` + the new
+// `translate_expr_as_bool` helper: any identifier operand of `&&`, `||`,
+// `->`, or `<->` is routed through the Bool path, yielding genuine
+// propositional tautologies that Z3 discharges as expected.
+//
+// Regression for the bug where `requires P && Q ensures Q && P` with
+// `<P: Prop, Q: Prop>` failed the SMT with "operator && requires
+// boolean operands, got integers".
+
+@verify(formal)
+theorem conjunction_commutes<P: Prop, Q: Prop>()
+    requires P && Q
+    ensures Q && P
+    proof by auto;
+
+@verify(formal)
+theorem conjunction_left_proj<P: Prop, Q: Prop>()
+    requires P && Q
+    ensures P
+    proof by auto;
+
+@verify(formal)
+theorem implication_transitivity<P: Prop, Q: Prop, R: Prop>()
+    requires P -> Q
+    requires Q -> R
+    ensures P -> R
+    proof by auto;
+
+@verify(formal)
+theorem tautology_excluded_middle<P: Prop>()
+    ensures P || !P
+    proof by auto;
+
+fn main() {
+    print("L1-core: proof/tactics/propositional_quantification");
+}
