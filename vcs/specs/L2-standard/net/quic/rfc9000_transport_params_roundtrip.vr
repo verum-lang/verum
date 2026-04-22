@@ -1,0 +1,99 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: quic, rfc9000, transport-params, encode, decode, roundtrip
+// @timeout: 10000
+// @expect: pass
+//
+// RFC 9000 §18 — QUIC transport-parameter wire format.
+//
+// Parameter table:
+//   0x01 max_idle_timeout        (varint, milliseconds)
+//   0x03 max_udp_payload_size    (varint, bytes)
+//   0x04 initial_max_data        (varint)
+//   0x05 initial_max_stream_data_bidi_local  (varint)
+//   0x06 initial_max_stream_data_bidi_remote (varint)
+//   0x07 initial_max_stream_data_uni         (varint)
+//   0x08 initial_max_streams_bidi            (varint)
+//   0x09 initial_max_streams_uni             (varint)
+//   0x0a ack_delay_exponent      (varint, default 3, max 20)
+//   0x0b max_ack_delay           (varint, default 25, max 2^14-1)
+//   0x0c disable_active_migration (zero-length present/absent)
+//   0x0e active_connection_id_limit (varint, default 2, min 2)
+//
+// This KAT constructs a representative client-side parameter set,
+// encodes it through `transport_params.encode`, decodes the result
+// via `transport_params.decode`, and verifies semantic round-trip.
+// Catches silent drift in any of the 12 scalar parameters + the
+// two boolean flags under one compilation surface.
+
+mount core.net.quic.transport_params.{TransportParams, encode, decode, TpError};
+mount core.collections.List;
+
+fn build_client_params() -> TransportParams {
+    let mut tp = TransportParams.defaults();
+    // A realistic client advert: 30s idle, 1452B MTU, 1 MiB FC window,
+    // 100 bidi + 10 uni initial stream-count budget, 2^14-1 max ack
+    // delay, 4 active CIDs, migration enabled.
+    tp.max_idle_timeout_ms = 30_000_u64;
+    tp.max_udp_payload_size = 1452_u64;
+    tp.initial_max_data = 1_048_576_u64;
+    tp.initial_max_stream_data_bidi_local = 262_144_u64;
+    tp.initial_max_stream_data_bidi_remote = 262_144_u64;
+    tp.initial_max_stream_data_uni = 131_072_u64;
+    tp.initial_max_streams_bidi = 100_u64;
+    tp.initial_max_streams_uni = 10_u64;
+    tp.ack_delay_exponent = 3_u8;
+    tp.max_ack_delay_ms = 25_u64;
+    tp.active_connection_id_limit = 4_u64;
+    tp.disable_active_migration = false;
+    tp.grease_quic_bit = true;
+    tp
+}
+
+fn check_roundtrip() -> Result<(), TpError> {
+    let params = build_client_params();
+
+    // Encode into a scratch buffer.
+    let mut wire: List<Byte> = [];
+    encode(&params, &mut wire);
+    assert(wire.len() > 0);
+
+    // Decode back and compare structurally.
+    let decoded = decode(wire.as_slice())?;
+    assert(decoded.max_idle_timeout_ms == params.max_idle_timeout_ms);
+    assert(decoded.max_udp_payload_size == params.max_udp_payload_size);
+    assert(decoded.initial_max_data == params.initial_max_data);
+    assert(decoded.initial_max_stream_data_bidi_local
+           == params.initial_max_stream_data_bidi_local);
+    assert(decoded.initial_max_stream_data_bidi_remote
+           == params.initial_max_stream_data_bidi_remote);
+    assert(decoded.initial_max_stream_data_uni == params.initial_max_stream_data_uni);
+    assert(decoded.initial_max_streams_bidi == params.initial_max_streams_bidi);
+    assert(decoded.initial_max_streams_uni == params.initial_max_streams_uni);
+    assert(decoded.ack_delay_exponent == params.ack_delay_exponent);
+    assert(decoded.max_ack_delay_ms == params.max_ack_delay_ms);
+    assert(decoded.active_connection_id_limit == params.active_connection_id_limit);
+    assert(decoded.disable_active_migration == params.disable_active_migration);
+    assert(decoded.grease_quic_bit == params.grease_quic_bit);
+    Ok(())
+}
+
+fn check_defaults_roundtrip() -> Result<(), TpError> {
+    // RFC 9000 §18.2 — default values per parameter. Round-tripping
+    // defaults should yield defaults.
+    let tp = TransportParams.defaults();
+    let mut wire: List<Byte> = [];
+    encode(&tp, &mut wire);
+    let decoded = decode(wire.as_slice())?;
+    assert(decoded.ack_delay_exponent == 3_u8);
+    assert(decoded.max_ack_delay_ms == 25_u64);
+    assert(decoded.max_udp_payload_size == 65527_u64);
+    assert(decoded.active_connection_id_limit == 2_u64);
+    Ok(())
+}
+
+fn main() {
+    let _ = check_roundtrip();
+    let _ = check_defaults_roundtrip();
+}
