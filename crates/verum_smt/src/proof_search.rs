@@ -3674,22 +3674,35 @@ impl ProofSearchEngine {
 
         // Check if the simplified goal is trivially true
         if Self::is_trivial(&simplified) {
-            // Goal is proven by simplification
             return Ok(List::new());
         }
 
-        // Check if simplification made progress
-        if Self::expr_eq(&goal.goal, &simplified) {
-            // No simplification possible
-            return Err(ProofError::TacticFailed("Simplify made no progress".into()));
+        // The simplifier may have rewritten the goal but not all the way
+        // to `true`. In that case we hand the simplified form to the SMT
+        // solver and keep the outcome that closes the goal outright —
+        // callers expect `simp` to *finish* decidable obligations like
+        // propositional identity laws (`p && true == p`) and the
+        // hand-rolled simplifier doesn't implement every such rewrite.
+        // Only if SMT also can't close do we fall back to "progress was
+        // made, here's the residual subgoal".
+        let simplified_goal = {
+            let mut g = goal.clone();
+            g.goal = simplified.clone();
+            g.label = Maybe::Some("simplified".into());
+            g
+        };
+
+        if let Ok(sub) = self.try_smt(&Maybe::None, &Maybe::None, &simplified_goal) {
+            return Ok(sub);
         }
 
-        // Return a new goal with simplified expression
-        let mut new_goal = goal.clone();
-        new_goal.goal = simplified;
-        new_goal.label = Maybe::Some("simplified".into());
+        if Self::expr_eq(&goal.goal, &simplified) {
+            return Err(ProofError::TacticFailed(
+                "Simplify made no progress and SMT fallback failed".into(),
+            ));
+        }
 
-        Ok(List::from_iter(vec![new_goal]))
+        Ok(List::from_iter(vec![simplified_goal]))
     }
 
     /// Simplify an expression using algebraic rules

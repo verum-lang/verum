@@ -1067,6 +1067,22 @@ impl<'ctx> Translator<'ctx> {
         let left_z3 = self.translate_expr(left)?;
         let right_z3 = self.translate_expr(right)?;
 
+        // Equality / disequality between Bool-ish terms. The default
+        // translate-then-unify flow sends bare identifiers through the
+        // Int-default path, so `p == p` where `p : Bool` and `p &&
+        // true == p` get caught in a Bool-vs-Int mismatch. Short-circuit
+        // those cases: if either side already translated as Bool, force
+        // both sides to Bool and dispatch through `translate_bool_binop`
+        // so propositional identity-laws (`p && true == p`,
+        // `p || false == p`) close cleanly.
+        if matches!(op, BinOp::Eq | BinOp::Ne)
+            && (left_z3.as_bool().is_some() || right_z3.as_bool().is_some())
+        {
+            let left_bool = self.translate_expr_as_bool(left)?;
+            let right_bool = self.translate_expr_as_bool(right)?;
+            return self.translate_bool_binop(op, &left_bool, &right_bool);
+        }
+
         // Try to cast to integers first
         if let (Some(left_int), Some(right_int)) = (left_z3.as_int(), right_z3.as_int()) {
             match op {
