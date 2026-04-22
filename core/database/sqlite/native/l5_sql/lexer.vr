@@ -1,0 +1,758 @@
+module core.database.sqlite.native.l5_sql.lexer;
+
+// =============================================================================
+// l5_sql/lexer.vr — SQL tokenizer
+// =============================================================================
+// Layer: 5
+// Spec: sqlite-native.md §12.1, sqlite.org/lang.html
+//
+// Breaks an input `Text` into a stream of `Token` values ready for the
+// recursive-descent parser in `parser/`. SQLite's SQL dialect is
+// case-insensitive for keywords, allows `--` line comments and
+// `/* ... */` block comments, double-quoted identifiers, single-quoted
+// string literals with embedded `''` escapes, blob literals `X'...'`,
+// hex integer literals, float literals with exponent, and three
+// parameter syntaxes (`?`, `?N`, `:name`, `@name`, `$name`).
+//
+// This module intentionally NOT built on top of `core/text/regex` —
+// it's a hand-rolled scanner because SQL's lexing rules are small
+// enough that a single-pass byte-switch is both faster and easier to
+// audit than a regex-driven lexer.
+// =============================================================================
+
+mount core.*;
+mount collections.List;
+mount base.{Result, Ok, Err, Text, Maybe};
+mount core.text.case_fold.fold_byte_ascii;
+
+// -----------------------------------------------------------------------------
+// Keyword catalog — SQLite reserves ~160 tokens.
+// -----------------------------------------------------------------------------
+
+public type Keyword is
+      KwSelect | KwFrom | KwWhere | KwGroup | KwBy | KwHaving
+    | KwOrder | KwAsc | KwDesc | KwLimit | KwOffset
+    | KwInsert | KwInto | KwValues | KwReplace
+    | KwUpdate | KwSet | KwDelete
+    | KwCreate | KwTable | KwIndex | KwView | KwTrigger | KwVirtual
+    | KwDrop | KwAlter | KwRename | KwAdd | KwColumn
+    | KwIf | KwExists | KwTemp | KwTemporary
+    | KwPrimary | KwKey | KwForeign | KwReferences
+    | KwUnique | KwCheck | KwDefault | KwCollate
+    | KwNot | KwNull | KwTrue | KwFalse
+    | KwAnd | KwOr | KwIn | KwBetween | KwLike | KwGlob | KwMatch | KwRegexp
+    | KwIs | KwAs | KwCase | KwWhen | KwThen | KwElse | KwEnd
+    | KwDistinct | KwAll | KwUnion | KwIntersect | KwExcept
+    | KwJoin | KwLeft | KwRight | KwFull | KwOuter | KwInner | KwCross | KwNatural | KwOn | KwUsing
+    | KwBegin | KwCommit | KwRollback | KwTransaction | KwSavepoint | KwRelease | KwTo
+    | KwWith | KwRecursive | KwWindow | KwOver | KwPartition | KwRange | KwRows | KwGroups
+    | KwUnbounded | KwPreceding | KwFollowing | KwCurrent | KwRow
+    | KwExclude | KwTies | KwOthers | KwNo
+    | KwPragma | KwExplain | KwQuery | KwPlan | KwVacuum | KwReindex
+    | KwAttach | KwDetach | KwAnalyze | KwDatabase
+    | KwCascade | KwRestrict | KwDeferrable | KwDeferred | KwImmediate | KwInitially
+    | KwReturning | KwAutoincrement | KwWithout | KwRowid
+    | KwGenerated | KwAlways | KwStored | KwConflict
+    | KwAbort | KwFail | KwIgnore
+    | KwBefore | KwAfter | KwInstead | KwOf | KwEach | KwFor
+    | KwIndexed
+    | KwCast | KwFilter;
+
+/// Operator tokens that aren't single punctuation.
+public type Operator is
+      OpEq | OpNotEq | OpLt | OpLe | OpGt | OpGe
+    | OpPlus | OpMinus | OpStar | OpSlash | OpPercent
+    | OpConcat | OpBitAnd | OpBitOr | OpBitNot | OpShl | OpShr
+    | OpArrow | OpArrowArrow;     // JSON ops -> and ->>
+
+public type Punct is
+      PLParen | PRParen | PComma | PSemicolon | PDot | PColon | PColonColon
+    | PStar;                       // `*` inside result columns treated as punct
+
+/// Parameter-binding variants — SQLite supports:
+///   `?`      → indexed by sequential position
+///   `?N`     → indexed by explicit number
+///   `:name`  → named
+///   `@name`  → named (alternative)
+///   `$name`  → named (Tcl-style, same behavior as @name)
+public type VariableKind is
+      VAnon
+    | VIndexed(Int)
+    | VNamedColon(Text)
+    | VNamedAt(Text)
+    | VNamedDollar(Text);
+
+public type Token is
+      TKeyword(Keyword)
+    | TIdent(Text)
+    | TStringLit(Text)
+    | TBlobLit(List<Byte>)
+    | TIntLit(Int64)
+    | TFloatLit(Float64)
+    | TPunct(Punct)
+    | TOp(Operator)
+    | TVariable(VariableKind)
+    | TComment(Text)
+    | TEof;
+
+public type LexError is {
+    message: Text,
+    position: Int,
+};
+
+// -----------------------------------------------------------------------------
+// Keyword lookup
+// -----------------------------------------------------------------------------
+
+/// Case-insensitive keyword table. Returns `None` for identifiers.
+public fn lookup_keyword(s: &Text) -> Maybe<Keyword> {
+    let raw = s.as_bytes();
+    let mut folded: List<Byte> = List.new();
+    let mut i: Int = 0;
+    while i < raw.len() {
+        folded.push(fold_byte_ascii(raw[i]));
+        i = i + 1;
+    }
+    lookup_folded(&folded)
+}
+
+fn eq_literal(buf: &List<Byte>, lit: &str) -> Bool {
+    let lb = lit.as_bytes();
+    if buf.len() != lb.len() { return false; }
+    let mut i: Int = 0;
+    while i < lb.len() {
+        if buf[i] != lb[i] { return false; }
+        i = i + 1;
+    }
+    true
+}
+
+fn lookup_folded(b: &List<Byte>) -> Maybe<Keyword> {
+    // A hand table works at this scale — under 200 entries.
+    if eq_literal(b, "select")     { return Some(KwSelect); }
+    if eq_literal(b, "from")       { return Some(KwFrom); }
+    if eq_literal(b, "where")      { return Some(KwWhere); }
+    if eq_literal(b, "group")      { return Some(KwGroup); }
+    if eq_literal(b, "by")         { return Some(KwBy); }
+    if eq_literal(b, "having")     { return Some(KwHaving); }
+    if eq_literal(b, "order")      { return Some(KwOrder); }
+    if eq_literal(b, "asc")        { return Some(KwAsc); }
+    if eq_literal(b, "desc")       { return Some(KwDesc); }
+    if eq_literal(b, "limit")      { return Some(KwLimit); }
+    if eq_literal(b, "offset")     { return Some(KwOffset); }
+    if eq_literal(b, "insert")     { return Some(KwInsert); }
+    if eq_literal(b, "into")       { return Some(KwInto); }
+    if eq_literal(b, "values")     { return Some(KwValues); }
+    if eq_literal(b, "replace")    { return Some(KwReplace); }
+    if eq_literal(b, "update")     { return Some(KwUpdate); }
+    if eq_literal(b, "set")        { return Some(KwSet); }
+    if eq_literal(b, "delete")     { return Some(KwDelete); }
+    if eq_literal(b, "create")     { return Some(KwCreate); }
+    if eq_literal(b, "table")      { return Some(KwTable); }
+    if eq_literal(b, "index")      { return Some(KwIndex); }
+    if eq_literal(b, "view")       { return Some(KwView); }
+    if eq_literal(b, "trigger")    { return Some(KwTrigger); }
+    if eq_literal(b, "virtual")    { return Some(KwVirtual); }
+    if eq_literal(b, "drop")       { return Some(KwDrop); }
+    if eq_literal(b, "alter")      { return Some(KwAlter); }
+    if eq_literal(b, "rename")     { return Some(KwRename); }
+    if eq_literal(b, "add")        { return Some(KwAdd); }
+    if eq_literal(b, "column")     { return Some(KwColumn); }
+    if eq_literal(b, "if")         { return Some(KwIf); }
+    if eq_literal(b, "exists")     { return Some(KwExists); }
+    if eq_literal(b, "temp")       { return Some(KwTemp); }
+    if eq_literal(b, "temporary")  { return Some(KwTemporary); }
+    if eq_literal(b, "primary")    { return Some(KwPrimary); }
+    if eq_literal(b, "key")        { return Some(KwKey); }
+    if eq_literal(b, "foreign")    { return Some(KwForeign); }
+    if eq_literal(b, "references") { return Some(KwReferences); }
+    if eq_literal(b, "unique")     { return Some(KwUnique); }
+    if eq_literal(b, "check")      { return Some(KwCheck); }
+    if eq_literal(b, "default")    { return Some(KwDefault); }
+    if eq_literal(b, "collate")    { return Some(KwCollate); }
+    if eq_literal(b, "not")        { return Some(KwNot); }
+    if eq_literal(b, "null")       { return Some(KwNull); }
+    if eq_literal(b, "true")       { return Some(KwTrue); }
+    if eq_literal(b, "false")      { return Some(KwFalse); }
+    if eq_literal(b, "and")        { return Some(KwAnd); }
+    if eq_literal(b, "or")         { return Some(KwOr); }
+    if eq_literal(b, "in")         { return Some(KwIn); }
+    if eq_literal(b, "between")    { return Some(KwBetween); }
+    if eq_literal(b, "like")       { return Some(KwLike); }
+    if eq_literal(b, "glob")       { return Some(KwGlob); }
+    if eq_literal(b, "match")      { return Some(KwMatch); }
+    if eq_literal(b, "regexp")     { return Some(KwRegexp); }
+    if eq_literal(b, "is")         { return Some(KwIs); }
+    if eq_literal(b, "as")         { return Some(KwAs); }
+    if eq_literal(b, "case")       { return Some(KwCase); }
+    if eq_literal(b, "when")       { return Some(KwWhen); }
+    if eq_literal(b, "then")       { return Some(KwThen); }
+    if eq_literal(b, "else")       { return Some(KwElse); }
+    if eq_literal(b, "end")        { return Some(KwEnd); }
+    if eq_literal(b, "distinct")   { return Some(KwDistinct); }
+    if eq_literal(b, "all")        { return Some(KwAll); }
+    if eq_literal(b, "union")      { return Some(KwUnion); }
+    if eq_literal(b, "intersect")  { return Some(KwIntersect); }
+    if eq_literal(b, "except")     { return Some(KwExcept); }
+    if eq_literal(b, "join")       { return Some(KwJoin); }
+    if eq_literal(b, "left")       { return Some(KwLeft); }
+    if eq_literal(b, "right")      { return Some(KwRight); }
+    if eq_literal(b, "full")       { return Some(KwFull); }
+    if eq_literal(b, "outer")      { return Some(KwOuter); }
+    if eq_literal(b, "inner")      { return Some(KwInner); }
+    if eq_literal(b, "cross")      { return Some(KwCross); }
+    if eq_literal(b, "natural")    { return Some(KwNatural); }
+    if eq_literal(b, "on")         { return Some(KwOn); }
+    if eq_literal(b, "using")      { return Some(KwUsing); }
+    if eq_literal(b, "begin")      { return Some(KwBegin); }
+    if eq_literal(b, "commit")     { return Some(KwCommit); }
+    if eq_literal(b, "rollback")   { return Some(KwRollback); }
+    if eq_literal(b, "transaction"){ return Some(KwTransaction); }
+    if eq_literal(b, "savepoint")  { return Some(KwSavepoint); }
+    if eq_literal(b, "release")    { return Some(KwRelease); }
+    if eq_literal(b, "to")         { return Some(KwTo); }
+    if eq_literal(b, "with")       { return Some(KwWith); }
+    if eq_literal(b, "recursive")  { return Some(KwRecursive); }
+    if eq_literal(b, "window")     { return Some(KwWindow); }
+    if eq_literal(b, "over")       { return Some(KwOver); }
+    if eq_literal(b, "partition")  { return Some(KwPartition); }
+    if eq_literal(b, "range")      { return Some(KwRange); }
+    if eq_literal(b, "rows")       { return Some(KwRows); }
+    if eq_literal(b, "groups")     { return Some(KwGroups); }
+    if eq_literal(b, "unbounded")  { return Some(KwUnbounded); }
+    if eq_literal(b, "preceding")  { return Some(KwPreceding); }
+    if eq_literal(b, "following")  { return Some(KwFollowing); }
+    if eq_literal(b, "current")    { return Some(KwCurrent); }
+    if eq_literal(b, "row")        { return Some(KwRow); }
+    if eq_literal(b, "exclude")    { return Some(KwExclude); }
+    if eq_literal(b, "ties")       { return Some(KwTies); }
+    if eq_literal(b, "others")     { return Some(KwOthers); }
+    if eq_literal(b, "no")         { return Some(KwNo); }
+    if eq_literal(b, "pragma")     { return Some(KwPragma); }
+    if eq_literal(b, "explain")    { return Some(KwExplain); }
+    if eq_literal(b, "query")      { return Some(KwQuery); }
+    if eq_literal(b, "plan")       { return Some(KwPlan); }
+    if eq_literal(b, "vacuum")     { return Some(KwVacuum); }
+    if eq_literal(b, "reindex")    { return Some(KwReindex); }
+    if eq_literal(b, "attach")     { return Some(KwAttach); }
+    if eq_literal(b, "detach")     { return Some(KwDetach); }
+    if eq_literal(b, "analyze")    { return Some(KwAnalyze); }
+    if eq_literal(b, "database")   { return Some(KwDatabase); }
+    if eq_literal(b, "cascade")    { return Some(KwCascade); }
+    if eq_literal(b, "restrict")   { return Some(KwRestrict); }
+    if eq_literal(b, "deferrable") { return Some(KwDeferrable); }
+    if eq_literal(b, "deferred")   { return Some(KwDeferred); }
+    if eq_literal(b, "immediate")  { return Some(KwImmediate); }
+    if eq_literal(b, "initially")  { return Some(KwInitially); }
+    if eq_literal(b, "returning")  { return Some(KwReturning); }
+    if eq_literal(b, "autoincrement") { return Some(KwAutoincrement); }
+    if eq_literal(b, "without")    { return Some(KwWithout); }
+    if eq_literal(b, "rowid")      { return Some(KwRowid); }
+    if eq_literal(b, "generated")  { return Some(KwGenerated); }
+    if eq_literal(b, "always")     { return Some(KwAlways); }
+    if eq_literal(b, "stored")     { return Some(KwStored); }
+    if eq_literal(b, "conflict")   { return Some(KwConflict); }
+    if eq_literal(b, "abort")      { return Some(KwAbort); }
+    if eq_literal(b, "fail")       { return Some(KwFail); }
+    if eq_literal(b, "ignore")     { return Some(KwIgnore); }
+    if eq_literal(b, "before")     { return Some(KwBefore); }
+    if eq_literal(b, "after")      { return Some(KwAfter); }
+    if eq_literal(b, "instead")    { return Some(KwInstead); }
+    if eq_literal(b, "of")         { return Some(KwOf); }
+    if eq_literal(b, "each")       { return Some(KwEach); }
+    if eq_literal(b, "for")        { return Some(KwFor); }
+    if eq_literal(b, "indexed")    { return Some(KwIndexed); }
+    if eq_literal(b, "cast")       { return Some(KwCast); }
+    if eq_literal(b, "filter")     { return Some(KwFilter); }
+    None
+}
+
+// -----------------------------------------------------------------------------
+// Byte-class helpers
+// -----------------------------------------------------------------------------
+
+fn is_ws(b: Byte) -> Bool {
+    b == (0x20 as Byte) || b == (0x09 as Byte)
+    || b == (0x0A as Byte) || b == (0x0D as Byte)
+    || b == (0x0B as Byte) || b == (0x0C as Byte)
+}
+
+fn is_digit(b: Byte) -> Bool {
+    b >= (0x30 as Byte) && b <= (0x39 as Byte)
+}
+
+fn is_hex(b: Byte) -> Bool {
+    is_digit(b)
+    || (b >= (0x41 as Byte) && b <= (0x46 as Byte))
+    || (b >= (0x61 as Byte) && b <= (0x66 as Byte))
+}
+
+fn is_alpha(b: Byte) -> Bool {
+    (b >= (0x41 as Byte) && b <= (0x5A as Byte))
+    || (b >= (0x61 as Byte) && b <= (0x7A as Byte))
+    || b == (0x5F as Byte)    // '_'
+}
+
+fn is_ident_cont(b: Byte) -> Bool {
+    is_alpha(b) || is_digit(b) || b == (0x24 as Byte)   // '$' allowed in SQLite idents
+}
+
+fn hex_digit_value(b: Byte) -> Int64 {
+    if is_digit(b) { return (b - (0x30 as Byte)) as Int64; }
+    if b >= (0x41 as Byte) && b <= (0x46 as Byte) {
+        return ((b - (0x41 as Byte)) as Int64) + (10 as Int64);
+    }
+    ((b - (0x61 as Byte)) as Int64) + (10 as Int64)
+}
+
+// -----------------------------------------------------------------------------
+// Lexer state
+// -----------------------------------------------------------------------------
+
+public type LexerState is {
+    input: List<Byte>,
+    pos: Int,
+    tokens: List<Token>,
+};
+
+fn lexer_new(input: &Text) -> LexerState {
+    let raw = input.as_bytes();
+    let mut buf: List<Byte> = List.new();
+    let mut i: Int = 0;
+    while i < raw.len() {
+        buf.push(raw[i]);
+        i = i + 1;
+    }
+    LexerState { input: buf, pos: 0, tokens: List.new() }
+}
+
+fn peek(st: &LexerState, offset: Int) -> Byte {
+    let idx = st.pos + offset;
+    if idx >= st.input.len() { return 0 as Byte; }
+    st.input[idx]
+}
+
+fn at_eof(st: &LexerState) -> Bool {
+    st.pos >= st.input.len()
+}
+
+fn push_tok(st: &mut LexerState, t: Token) {
+    st.tokens.push(t);
+}
+
+// -----------------------------------------------------------------------------
+// Main tokenizer
+// -----------------------------------------------------------------------------
+
+public fn lex(input: &Text) -> Result<List<Token>, LexError> {
+    let mut st = lexer_new(input);
+
+    while !at_eof(&st) {
+        let b = peek(&st, 0);
+
+        // Whitespace.
+        if is_ws(b) { st.pos = st.pos + 1; continue; }
+
+        // Line comment `-- ... \n`.
+        if b == (0x2D as Byte) && peek(&st, 1) == (0x2D as Byte) {
+            st.pos = st.pos + 2;
+            while !at_eof(&st) && peek(&st, 0) != (0x0A as Byte) {
+                st.pos = st.pos + 1;
+            }
+            continue;
+        }
+
+        // Block comment `/* ... */`.
+        if b == (0x2F as Byte) && peek(&st, 1) == (0x2A as Byte) {
+            st.pos = st.pos + 2;
+            while !at_eof(&st) {
+                if peek(&st, 0) == (0x2A as Byte) && peek(&st, 1) == (0x2F as Byte) {
+                    st.pos = st.pos + 2;
+                    break;
+                }
+                st.pos = st.pos + 1;
+            }
+            continue;
+        }
+
+        // String literal `'...''...'`.
+        if b == (0x27 as Byte) {
+            match lex_string(&mut st) {
+                Ok(tok) => { push_tok(&mut st, tok); continue; }
+                Err(e)  => return Err(e),
+            }
+        }
+
+        // Double-quoted identifier.
+        if b == (0x22 as Byte) {
+            match lex_quoted_ident(&mut st) {
+                Ok(tok) => { push_tok(&mut st, tok); continue; }
+                Err(e)  => return Err(e),
+            }
+        }
+
+        // Backtick identifier (MySQL-compat SQLite supports).
+        if b == (0x60 as Byte) {
+            match lex_quoted_ident_with_delim(&mut st, 0x60 as Byte) {
+                Ok(tok) => { push_tok(&mut st, tok); continue; }
+                Err(e)  => return Err(e),
+            }
+        }
+
+        // Blob literal `X'...hex...'` or `x'...'`.
+        if (b == (0x58 as Byte) || b == (0x78 as Byte)) && peek(&st, 1) == (0x27 as Byte) {
+            match lex_blob(&mut st) {
+                Ok(tok) => { push_tok(&mut st, tok); continue; }
+                Err(e)  => return Err(e),
+            }
+        }
+
+        // Number.
+        if is_digit(b) {
+            match lex_number(&mut st) {
+                Ok(tok) => { push_tok(&mut st, tok); continue; }
+                Err(e)  => return Err(e),
+            }
+        }
+
+        // Leading-dot float: `.5`.
+        if b == (0x2E as Byte) && is_digit(peek(&st, 1)) {
+            match lex_number(&mut st) {
+                Ok(tok) => { push_tok(&mut st, tok); continue; }
+                Err(e)  => return Err(e),
+            }
+        }
+
+        // Identifier / keyword.
+        if is_alpha(b) {
+            push_tok(&mut st, lex_identifier(&mut st));
+            continue;
+        }
+
+        // Parameter bindings.
+        if b == (0x3F as Byte) {       // '?'
+            push_tok(&mut st, lex_anon_or_indexed(&mut st));
+            continue;
+        }
+        if b == (0x3A as Byte) && is_alpha(peek(&st, 1)) {   // ':name'
+            push_tok(&mut st, lex_named_variable(&mut st, 0x3A as Byte, VNamedColon));
+            continue;
+        }
+        if b == (0x40 as Byte) && is_alpha(peek(&st, 1)) {   // '@name'
+            push_tok(&mut st, lex_named_variable(&mut st, 0x40 as Byte, VNamedAt));
+            continue;
+        }
+        if b == (0x24 as Byte) && is_alpha(peek(&st, 1)) {   // '$name'
+            push_tok(&mut st, lex_named_variable(&mut st, 0x24 as Byte, VNamedDollar));
+            continue;
+        }
+
+        // Punctuation / operators.
+        match lex_punct_or_op(&mut st) {
+            Ok(tok) => { push_tok(&mut st, tok); continue; }
+            Err(e)  => return Err(e),
+        }
+    }
+
+    st.tokens.push(TEof);
+    Ok(st.tokens)
+}
+
+// -----------------------------------------------------------------------------
+// Sub-lexers
+// -----------------------------------------------------------------------------
+
+fn lex_string(st: &mut LexerState) -> Result<Token, LexError> {
+    // Consume opening quote.
+    st.pos = st.pos + 1;
+    let mut out: List<Byte> = List.new();
+    while !at_eof(st) {
+        let b = peek(st, 0);
+        if b == (0x27 as Byte) {
+            if peek(st, 1) == (0x27 as Byte) {
+                // Escaped quote `''`.
+                out.push(0x27 as Byte);
+                st.pos = st.pos + 2;
+                continue;
+            }
+            st.pos = st.pos + 1;
+            return Ok(TStringLit(Text.from_bytes(&out).unwrap_or("".clone())));
+        }
+        out.push(b);
+        st.pos = st.pos + 1;
+    }
+    Err(LexError { message: "unterminated string literal".clone(), position: st.pos })
+}
+
+fn lex_quoted_ident(st: &mut LexerState) -> Result<Token, LexError> {
+    lex_quoted_ident_with_delim(st, 0x22 as Byte)
+}
+
+fn lex_quoted_ident_with_delim(st: &mut LexerState, delim: Byte) -> Result<Token, LexError> {
+    st.pos = st.pos + 1;
+    let mut out: List<Byte> = List.new();
+    while !at_eof(st) {
+        let b = peek(st, 0);
+        if b == delim {
+            if peek(st, 1) == delim {
+                out.push(delim);
+                st.pos = st.pos + 2;
+                continue;
+            }
+            st.pos = st.pos + 1;
+            return Ok(TIdent(Text.from_bytes(&out).unwrap_or("".clone())));
+        }
+        out.push(b);
+        st.pos = st.pos + 1;
+    }
+    Err(LexError { message: "unterminated quoted identifier".clone(), position: st.pos })
+}
+
+fn lex_blob(st: &mut LexerState) -> Result<Token, LexError> {
+    // Skip 'X' / 'x'.
+    st.pos = st.pos + 1;
+    // Opening quote.
+    st.pos = st.pos + 1;
+    let mut out: List<Byte> = List.new();
+    while !at_eof(st) {
+        let b = peek(st, 0);
+        if b == (0x27 as Byte) {
+            st.pos = st.pos + 1;
+            if (out.len() & 1) != 0 {
+                return Err(LexError { message: "odd hex digit count in blob literal".clone(), position: st.pos });
+            }
+            let mut bytes: List<Byte> = List.new();
+            let mut i: Int = 0;
+            while i + 1 < out.len() {
+                let hi = hex_digit_value(out[i]);
+                let lo = hex_digit_value(out[i + 1]);
+                bytes.push((((hi as Int) << 4) | (lo as Int)) as Byte);
+                i = i + 2;
+            }
+            return Ok(TBlobLit(bytes));
+        }
+        if !is_hex(b) {
+            return Err(LexError { message: "non-hex digit in blob literal".clone(), position: st.pos });
+        }
+        out.push(b);
+        st.pos = st.pos + 1;
+    }
+    Err(LexError { message: "unterminated blob literal".clone(), position: st.pos })
+}
+
+fn lex_number(st: &mut LexerState) -> Result<Token, LexError> {
+    // Hex literal `0x...`.
+    if peek(st, 0) == (0x30 as Byte) && (peek(st, 1) == (0x78 as Byte) || peek(st, 1) == (0x58 as Byte)) {
+        st.pos = st.pos + 2;
+        let mut v: Int64 = 0 as Int64;
+        let mut saw: Bool = false;
+        while !at_eof(st) && is_hex(peek(st, 0)) {
+            v = (v << 4) | hex_digit_value(peek(st, 0));
+            st.pos = st.pos + 1;
+            saw = true;
+        }
+        if !saw {
+            return Err(LexError { message: "hex literal needs at least one digit".clone(), position: st.pos });
+        }
+        return Ok(TIntLit(v));
+    }
+
+    let start = st.pos;
+    // Integer part.
+    while !at_eof(st) && is_digit(peek(st, 0)) { st.pos = st.pos + 1; }
+    let mut is_float = false;
+    if !at_eof(st) && peek(st, 0) == (0x2E as Byte) {
+        is_float = true;
+        st.pos = st.pos + 1;
+        while !at_eof(st) && is_digit(peek(st, 0)) { st.pos = st.pos + 1; }
+    }
+    if !at_eof(st) && (peek(st, 0) == (0x65 as Byte) || peek(st, 0) == (0x45 as Byte)) {
+        is_float = true;
+        st.pos = st.pos + 1;
+        if !at_eof(st) && (peek(st, 0) == (0x2B as Byte) || peek(st, 0) == (0x2D as Byte)) {
+            st.pos = st.pos + 1;
+        }
+        while !at_eof(st) && is_digit(peek(st, 0)) { st.pos = st.pos + 1; }
+    }
+
+    // Extract substring.
+    let mut digits: List<Byte> = List.new();
+    let mut i: Int = start;
+    while i < st.pos {
+        digits.push(st.input[i]);
+        i = i + 1;
+    }
+    if is_float {
+        let x = parse_float_from_bytes(&digits);
+        Ok(TFloatLit(x))
+    } else {
+        let n = parse_int_from_bytes(&digits);
+        Ok(TIntLit(n))
+    }
+}
+
+fn parse_int_from_bytes(b: &List<Byte>) -> Int64 {
+    let mut v: Int64 = 0 as Int64;
+    let mut i: Int = 0;
+    while i < b.len() {
+        let d = (b[i] - (0x30 as Byte)) as Int64;
+        v = v * (10 as Int64) + d;
+        i = i + 1;
+    }
+    v
+}
+
+fn parse_float_from_bytes(b: &List<Byte>) -> Float64 {
+    let mut int_part: Float64 = 0.0;
+    let mut i: Int = 0;
+    while i < b.len() && b[i] >= (0x30 as Byte) && b[i] <= (0x39 as Byte) {
+        int_part = int_part * 10.0 + ((b[i] - (0x30 as Byte)) as Float64);
+        i = i + 1;
+    }
+    let mut frac: Float64 = 0.0;
+    let mut div: Float64 = 1.0;
+    if i < b.len() && b[i] == (0x2E as Byte) {
+        i = i + 1;
+        while i < b.len() && b[i] >= (0x30 as Byte) && b[i] <= (0x39 as Byte) {
+            frac = frac * 10.0 + ((b[i] - (0x30 as Byte)) as Float64);
+            div = div * 10.0;
+            i = i + 1;
+        }
+    }
+    let mut value = int_part + frac / div;
+    if i < b.len() && (b[i] == (0x65 as Byte) || b[i] == (0x45 as Byte)) {
+        i = i + 1;
+        let mut neg = false;
+        if i < b.len() && b[i] == (0x2D as Byte) { neg = true; i = i + 1; }
+        else if i < b.len() && b[i] == (0x2B as Byte) { i = i + 1; }
+        let mut e: Int = 0;
+        while i < b.len() {
+            e = e * 10 + ((b[i] - (0x30 as Byte)) as Int);
+            i = i + 1;
+        }
+        let mut factor: Float64 = 1.0;
+        let mut k: Int = 0;
+        while k < e {
+            factor = factor * 10.0;
+            k = k + 1;
+        }
+        if neg { value = value / factor; } else { value = value * factor; }
+    }
+    value
+}
+
+fn lex_identifier(st: &mut LexerState) -> Token {
+    let start = st.pos;
+    while !at_eof(st) && is_ident_cont(peek(st, 0)) {
+        st.pos = st.pos + 1;
+    }
+    let mut raw: List<Byte> = List.new();
+    let mut i: Int = start;
+    while i < st.pos {
+        raw.push(st.input[i]);
+        i = i + 1;
+    }
+    let t = Text.from_bytes(&raw).unwrap_or("".clone());
+    match lookup_keyword(&t) {
+        Some(kw) => TKeyword(kw),
+        None     => TIdent(t),
+    }
+}
+
+fn lex_anon_or_indexed(st: &mut LexerState) -> Token {
+    st.pos = st.pos + 1;
+    if at_eof(st) || !is_digit(peek(st, 0)) {
+        return TVariable(VAnon);
+    }
+    let mut n: Int = 0;
+    while !at_eof(st) && is_digit(peek(st, 0)) {
+        n = n * 10 + ((peek(st, 0) - (0x30 as Byte)) as Int);
+        st.pos = st.pos + 1;
+    }
+    TVariable(VIndexed(n))
+}
+
+fn lex_named_variable(st: &mut LexerState, sigil: Byte, wrapper: fn(Text) -> VariableKind) -> Token {
+    let _ = sigil;
+    st.pos = st.pos + 1;
+    let start = st.pos;
+    while !at_eof(st) && is_ident_cont(peek(st, 0)) {
+        st.pos = st.pos + 1;
+    }
+    let mut raw: List<Byte> = List.new();
+    let mut i: Int = start;
+    while i < st.pos {
+        raw.push(st.input[i]);
+        i = i + 1;
+    }
+    TVariable(wrapper(Text.from_bytes(&raw).unwrap_or("".clone())))
+}
+
+fn lex_punct_or_op(st: &mut LexerState) -> Result<Token, LexError> {
+    let b = peek(st, 0);
+    match b {
+        0x28 => { st.pos = st.pos + 1; Ok(TPunct(PLParen)) },
+        0x29 => { st.pos = st.pos + 1; Ok(TPunct(PRParen)) },
+        0x2C => { st.pos = st.pos + 1; Ok(TPunct(PComma)) },
+        0x3B => { st.pos = st.pos + 1; Ok(TPunct(PSemicolon)) },
+        0x2E => { st.pos = st.pos + 1; Ok(TPunct(PDot)) },
+        0x2A => { st.pos = st.pos + 1; Ok(TPunct(PStar)) },
+        0x2B => { st.pos = st.pos + 1; Ok(TOp(OpPlus)) },
+        0x2D => { st.pos = st.pos + 1; Ok(TOp(OpMinus)) },
+        0x2F => { st.pos = st.pos + 1; Ok(TOp(OpSlash)) },
+        0x25 => { st.pos = st.pos + 1; Ok(TOp(OpPercent)) },
+        0x3D => {
+            st.pos = st.pos + 1;
+            if !at_eof(st) && peek(st, 0) == (0x3D as Byte) { st.pos = st.pos + 1; }
+            Ok(TOp(OpEq))
+        }
+        0x21 => {
+            if peek(st, 1) == (0x3D as Byte) {
+                st.pos = st.pos + 2;
+                Ok(TOp(OpNotEq))
+            } else {
+                Err(LexError { message: "unexpected '!'".clone(), position: st.pos })
+            }
+        }
+        0x3C => {
+            st.pos = st.pos + 1;
+            if !at_eof(st) && peek(st, 0) == (0x3D as Byte) {
+                st.pos = st.pos + 1; Ok(TOp(OpLe))
+            } else if !at_eof(st) && peek(st, 0) == (0x3E as Byte) {
+                st.pos = st.pos + 1; Ok(TOp(OpNotEq))   // `<>` alt spelling
+            } else if !at_eof(st) && peek(st, 0) == (0x3C as Byte) {
+                st.pos = st.pos + 1; Ok(TOp(OpShl))
+            } else {
+                Ok(TOp(OpLt))
+            }
+        }
+        0x3E => {
+            st.pos = st.pos + 1;
+            if !at_eof(st) && peek(st, 0) == (0x3D as Byte) {
+                st.pos = st.pos + 1; Ok(TOp(OpGe))
+            } else if !at_eof(st) && peek(st, 0) == (0x3E as Byte) {
+                st.pos = st.pos + 1; Ok(TOp(OpShr))
+            } else {
+                Ok(TOp(OpGt))
+            }
+        }
+        0x7C => {
+            if peek(st, 1) == (0x7C as Byte) {
+                st.pos = st.pos + 2; Ok(TOp(OpConcat))
+            } else {
+                st.pos = st.pos + 1; Ok(TOp(OpBitOr))
+            }
+        }
+        0x26 => { st.pos = st.pos + 1; Ok(TOp(OpBitAnd)) }
+        0x7E => { st.pos = st.pos + 1; Ok(TOp(OpBitNot)) }
+        0x3A => {
+            // Bare ':' punct or '::' operator.
+            if peek(st, 1) == (0x3A as Byte) {
+                st.pos = st.pos + 2; Ok(TPunct(PColonColon))
+            } else {
+                st.pos = st.pos + 1; Ok(TPunct(PColon))
+            }
+        }
+        _ => Err(LexError { message: "unexpected character".clone(), position: st.pos }),
+    }
+}

@@ -62,3 +62,6 @@ public module l3_btree;
 
 // Layer 4: VDBE (opcodes, register file, interpreter)
 public module l4_vdbe;
+
+// Layer 5: SQL (lexer, AST, parser, planner, codegen)
+public module l5_sql;

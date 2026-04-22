@@ -1,0 +1,232 @@
+module core.database.sqlite.native.l5_sql.ast;
+
+// =============================================================================
+// l5_sql/ast.vr — SQL AST node types
+// =============================================================================
+// Layer: 5
+// Spec: sqlite-native.md §12.3
+//
+// Abstract syntax tree the parser produces and the planner consumes.
+// Intentionally conservative — we model the SQL subset we actually
+// implement, not every SQLite-specific flavour nook (FILTER clauses on
+// window fns, IIF(), LIKELY() planner hints, etc.) — those land once
+// the planner needs them.
+// =============================================================================
+
+mount core.*;
+mount collections.List;
+mount base.{Text, Maybe};
+
+// -----------------------------------------------------------------------------
+// Literals + expressions
+// -----------------------------------------------------------------------------
+
+public type Literal is
+      LNull
+    | LInt(Int64)
+    | LReal(Float64)
+    | LText(Text)
+    | LBlob(List<Byte>)
+    | LTrue
+    | LFalse
+    | LCurrentDate
+    | LCurrentTime
+    | LCurrentTimestamp;
+
+public type BinOp is
+      BAnd | BOr
+    | BEq | BNeq | BLt | BLe | BGt | BGe
+    | BAdd | BSub | BMul | BDiv | BMod
+    | BConcat
+    | BBitAnd | BBitOr | BShl | BShr
+    | BIs | BIsNot;
+
+public type UnOp is
+      UNot | UNeg | UPlus | UBitNot;
+
+public type TableRef is {
+    schema: Text,    // may be empty
+    name: Text,
+    alias: Text,     // may be empty
+};
+
+public type Expr is
+      ELit(Literal)
+    | EColumn(TableRef, Text)                   // `t.name` or `name` (if schema/table empty)
+    | EVar(Text)                                // named parameter ':x'
+    | EPositional(Int)                          // '?' or '?N'
+    | EUnary(UnOp, Heap<Expr>)
+    | EBinary(BinOp, Heap<Expr>, Heap<Expr>)
+    | EFunc(Text, List<Expr>, Bool /* distinct */)
+    | ECase(Maybe<Heap<Expr>>, List<(Expr, Expr)>, Maybe<Heap<Expr>>)
+    | EIn(Heap<Expr>, List<Expr>, Bool /* negated */)
+    | EInSubquery(Heap<Expr>, Heap<SelectStmt>, Bool /* negated */)
+    | EBetween(Heap<Expr>, Heap<Expr>, Heap<Expr>, Bool /* negated */)
+    | ELike(Heap<Expr>, Heap<Expr>, Maybe<Heap<Expr>>, Bool /* negated */)
+    | ECast(Heap<Expr>, Text)
+    | ECollate(Heap<Expr>, Text)
+    | EExists(Heap<SelectStmt>, Bool /* negated */)
+    | ESubquery(Heap<SelectStmt>)
+    | ENullIf(Heap<Expr>, Heap<Expr>)
+    | ECoalesce(List<Expr>);
+
+// -----------------------------------------------------------------------------
+// SELECT
+// -----------------------------------------------------------------------------
+
+public type ResultColumnItem is
+      RcStar                                       // `SELECT *`
+    | RcTableStar(TableRef)                        // `SELECT t.*`
+    | RcExpr(Expr, Text);                          // `expr AS alias` (alias "" if absent)
+
+public type JoinKind is
+      JInner | JLeftOuter | JRightOuter | JFullOuter | JCross;
+
+public type JoinClause is {
+    kind: JoinKind,
+    right: Heap<FromItem>,
+    on: Maybe<Expr>,
+    using_cols: List<Text>,
+};
+
+public type FromItem is
+      FiTable(TableRef)
+    | FiSubquery(Heap<SelectStmt>, Text /* alias */)
+    | FiJoin(Heap<FromItem>, JoinClause);
+
+public type OrderDirection is OdAsc | OdDesc;
+
+public type OrderTerm is {
+    expr: Expr,
+    direction: OrderDirection,
+    nulls_first: Maybe<Bool>,
+};
+
+public type LimitClause is {
+    limit: Expr,
+    offset: Maybe<Expr>,
+};
+
+public type SelectKind is
+      SkSimple(SimpleSelect)
+    | SkCompound(CompoundOp, Heap<SelectStmt>, Heap<SelectStmt>);
+
+public type CompoundOp is CoUnion | CoUnionAll | CoIntersect | CoExcept;
+
+public type SimpleSelect is {
+    distinct: Bool,
+    result_columns: List<ResultColumnItem>,
+    from: Maybe<FromItem>,
+    where_clause: Maybe<Expr>,
+    group_by: List<Expr>,
+    having: Maybe<Expr>,
+};
+
+public type SelectStmt is {
+    kind: SelectKind,
+    order_by: List<OrderTerm>,
+    limit: Maybe<LimitClause>,
+};
+
+// -----------------------------------------------------------------------------
+// DML — INSERT / UPDATE / DELETE
+// -----------------------------------------------------------------------------
+
+public type OnConflict is OcAbort | OcFail | OcIgnore | OcReplace | OcRollback;
+
+public type InsertSource is
+      IsValues(List<List<Expr>>)                   // VALUES (...), (...)
+    | IsSelect(Heap<SelectStmt>)
+    | IsDefault;                                   // `DEFAULT VALUES`
+
+public type InsertStmt is {
+    table: TableRef,
+    columns: List<Text>,                           // empty → all columns
+    source: InsertSource,
+    on_conflict: Maybe<OnConflict>,
+    returning: List<ResultColumnItem>,
+};
+
+public type UpdateAssignment is {
+    column: Text,
+    value: Expr,
+};
+
+public type UpdateStmt is {
+    table: TableRef,
+    assignments: List<UpdateAssignment>,
+    from: Maybe<FromItem>,
+    where_clause: Maybe<Expr>,
+    on_conflict: Maybe<OnConflict>,
+    returning: List<ResultColumnItem>,
+};
+
+public type DeleteStmt is {
+    table: TableRef,
+    where_clause: Maybe<Expr>,
+    returning: List<ResultColumnItem>,
+};
+
+// -----------------------------------------------------------------------------
+// DDL — CREATE / DROP / ALTER
+// -----------------------------------------------------------------------------
+
+public type TableConstraint is
+      TcPrimaryKey(List<Text> /* columns */, Maybe<OnConflict>, Bool /* autoincrement */)
+    | TcUnique(List<Text>, Maybe<OnConflict>)
+    | TcCheck(Expr)
+    | TcForeignKey(List<Text>, TableRef, List<Text>);
+
+public type ColumnDef is {
+    name: Text,
+    declared_type: Text,        // empty if untyped
+    constraints: List<ColumnConstraint>,
+};
+
+public type ColumnConstraint is
+      CcPrimaryKey(Maybe<OnConflict>, Bool /* autoincrement */)
+    | CcNotNull(Maybe<OnConflict>)
+    | CcUnique(Maybe<OnConflict>)
+    | CcCheck(Expr)
+    | CcDefault(Expr)
+    | CcCollate(Text)
+    | CcForeignKey(TableRef, List<Text>);
+
+public type CreateTableStmt is {
+    if_not_exists: Bool,
+    temporary: Bool,
+    table: TableRef,
+    columns: List<ColumnDef>,
+    constraints: List<TableConstraint>,
+    strict: Bool,
+    without_rowid: Bool,
+};
+
+public type DropTargetKind is DtkTable | DtkIndex | DtkView | DtkTrigger;
+
+// -----------------------------------------------------------------------------
+// Top-level Statement
+// -----------------------------------------------------------------------------
+
+public type Statement is
+      SSelect(SelectStmt)
+    | SInsert(InsertStmt)
+    | SUpdate(UpdateStmt)
+    | SDelete(DeleteStmt)
+    | SCreateTable(CreateTableStmt)
+    | SDropTable(Bool /* if exists */, TableRef)
+    | SDropIndex(Bool, TableRef)
+    | SDropView(Bool, TableRef)
+    | SDropTrigger(Bool, TableRef)
+    | SBeginTransaction                                   // BEGIN [DEFERRED|IMMEDIATE|EXCLUSIVE]
+    | SCommit
+    | SRollback(Maybe<Text>)                              // ROLLBACK [TO savepoint]
+    | SSavepoint(Text)
+    | SRelease(Text)
+    | SPragma(Text /* name */, Maybe<Expr> /* value */)
+    | SExplain(Heap<Statement>, Bool /* query_plan */)
+    | SVacuum(Maybe<Text> /* into */)
+    | SReindex(Maybe<TableRef>)
+    | SAttach(Expr /* path */, Expr /* name */)
+    | SDetach(Text)
+    | SAnalyze(Maybe<TableRef>);
