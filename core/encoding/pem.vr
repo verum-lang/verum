@@ -1,0 +1,272 @@
+// =============================================================================
+// encoding/pem.vr — PEM (RFC 7468) encoder + decoder
+// =============================================================================
+// Layer: 1 (Encoding)
+// Dependencies: core, core.collections, core.encoding.base64
+// =============================================================================
+//
+// RFC 7468 — textual encoding for DER blobs used by X.509
+// certificates, PKCS#8 private keys, PKCS#1 RSA keys, SSH public
+// keys (in the PEM variant), TLS certificate bundles, and every
+// other cryptographic object that ships as a file.
+//
+// # Block shape
+//
+// ```
+// -----BEGIN <LABEL>-----
+// <base64 body, wrapped at 64 chars>
+// -----END <LABEL>-----
+// ```
+//
+// Multiple blocks concatenate. Text between blocks is the
+// "preamble" (RFC 7468 §2) and MUST be ignored on decode —
+// common labels have preambles like `Subject: ...` / `Issuer: ...`
+// from `openssl x509 -text` style dumps.
+//
+// # API
+//
+// ```
+// // Encode one block.
+// let pem: Text = pem.encode_block("CERTIFICATE", cert_der.as_slice());
+//
+// // Decode one or many concatenated blocks.
+// let blocks: List<PemBlock> = pem.decode_all(&pem_text)?;
+// for b in blocks {
+//     match b.label.as_bytes() {
+//         b"CERTIFICATE"     => feed_to_x509_parser(&b.contents),
+//         b"PRIVATE KEY"     => load_pkcs8_key(&b.contents),
+//         b"RSA PRIVATE KEY" => load_pkcs1_rsa_key(&b.contents),
+//         _                  => /* unknown label; skip */,
+//     }
+// }
+//
+// // Single-block convenience.
+// let block: PemBlock = pem.decode_one(&pem_text)?;
+// ```
+//
+// # Labels (§4)
+//
+// Callers are the authority on which labels they accept. Common ones:
+//
+//   "CERTIFICATE"         — X.509 cert (leaf / CA)
+//   "X509 CRL"            — CRL
+//   "CERTIFICATE REQUEST" — PKCS#10 CSR
+//   "PUBLIC KEY"          — SPKI
+//   "PRIVATE KEY"         — PKCS#8 unencrypted
+//   "ENCRYPTED PRIVATE KEY" — PKCS#8 encrypted
+//   "RSA PRIVATE KEY"     — PKCS#1 (legacy)
+//   "EC PRIVATE KEY"      — RFC 5915 (legacy)
+//   "DH PARAMETERS"       — DH group (legacy OpenSSL)
+//
+// This module is label-agnostic — it parses / emits without
+// interpreting them.
+//
+// =============================================================================
+
+module core.encoding.pem;
+
+mount core.*;
+mount core.collections.List;
+mount core.encoding.base64.{encode as b64_encode, decode as b64_decode};
+
+// =============================================================================
+// Types
+// =============================================================================
+
+public type PemBlock is {
+    label:    Text,
+    contents: List<Byte>,
+};
+
+public type PemError is
+      NoBlockFound
+    | MismatchedLabels(Text)
+    | Base64Failed
+    | Malformed(Text);
+
+// =============================================================================
+// Encode
+// =============================================================================
+
+/// Build a single PEM block with the RFC 7468 canonical form:
+///
+///   -----BEGIN <label>-----\n
+///   <base64>                \n      (line-wrapped at 64 chars)
+///   -----END <label>-----\n
+public fn encode_block(label: &str, contents: &[Byte]) -> Text {
+    let mut out: List<Byte> = [];
+    push_bytes(&mut out, b"-----BEGIN ");
+    push_bytes(&mut out, label.as_bytes());
+    push_bytes(&mut out, b"-----\n");
+
+    let b64 = b64_encode(contents);
+    let b64b = b64.as_bytes();
+
+    // RFC 7468 §2: lines MUST wrap at 64 base64 chars.
+    let mut i: Int = 0;
+    while i < b64b.len() {
+        let take = if (b64b.len() - i) >= 64 { 64 } else { b64b.len() - i };
+        let mut j: Int = 0;
+        while j < take { out.push(b64b[i + j]); j = j + 1; }
+        out.push('\n' as Byte);
+        i = i + take;
+    }
+
+    push_bytes(&mut out, b"-----END ");
+    push_bytes(&mut out, label.as_bytes());
+    push_bytes(&mut out, b"-----\n");
+    Text.from_utf8_unchecked(out.as_slice())
+}
+
+/// Emit multiple blocks back-to-back (the typical certificate-
+/// chain / keystore file format).
+public fn encode_bundle(blocks: &List<PemBlock>) -> Text {
+    let mut out: List<Byte> = [];
+    let mut i: Int = 0;
+    while i < blocks.len() {
+        let block_text = encode_block(text_as_str(&blocks[i].label), blocks[i].contents.as_slice());
+        push_bytes(&mut out, block_text.as_bytes());
+        i = i + 1;
+    }
+    Text.from_utf8_unchecked(out.as_slice())
+}
+
+// =============================================================================
+// Decode
+// =============================================================================
+
+/// Parse the first complete PEM block in the input. Preamble text
+/// and blank lines before `-----BEGIN` are ignored.
+public fn decode_one(input: &Text) -> Result<PemBlock, PemError> {
+    let blocks = decode_all(input)?;
+    if blocks.len() == 0 { return Err(PemError.NoBlockFound); }
+    let mut out = PemBlock {
+        label: blocks[0].label.clone(),
+        contents: blocks[0].contents.clone(),
+    };
+    let _ = out;
+    Ok(PemBlock {
+        label: blocks[0].label.clone(),
+        contents: blocks[0].contents.clone(),
+    })
+}
+
+/// Parse every PEM block in the input in order. Preamble text
+/// between blocks is ignored per RFC 7468 §2. Returns an empty
+/// list when no `-----BEGIN` marker is found (no error — caller
+/// decides whether that's empty-bundle-is-ok).
+public fn decode_all(input: &Text) -> Result<List<PemBlock>, PemError> {
+    let bytes = input.as_bytes();
+    let begin_marker = b"-----BEGIN ";
+    let end_marker   = b"-----END ";
+    let dashes       = b"-----";
+
+    let mut out: List<PemBlock> = [];
+    let mut pos: Int = 0;
+    while pos < bytes.len() {
+        let begin_at = find_sub(bytes, begin_marker, pos);
+        match begin_at {
+            None => break,
+            Some(s) => {
+                let label_start = s + begin_marker.len();
+                let label_end = find_sub(bytes, dashes, label_start);
+                let label_end_pos = match label_end {
+                    Some(p) => p,
+                    None    => return Err(PemError.Malformed(
+                        Text.from("missing closing dashes in BEGIN"))),
+                };
+                let label_begin = slice_text(bytes, label_start, label_end_pos);
+                let body_start = label_end_pos + dashes.len();
+
+                // Find -----END <label>-----
+                let end_at = find_sub(bytes, end_marker, body_start);
+                let end_pos = match end_at {
+                    Some(p) => p,
+                    None    => return Err(PemError.Malformed(
+                        Text.from("missing -----END marker"))),
+                };
+                let end_label_start = end_pos + end_marker.len();
+                let end_label_end = find_sub(bytes, dashes, end_label_start);
+                let end_label_end_pos = match end_label_end {
+                    Some(p) => p,
+                    None    => return Err(PemError.Malformed(
+                        Text.from("missing closing dashes in END"))),
+                };
+                let end_label = slice_text(bytes, end_label_start, end_label_end_pos);
+
+                if !text_eq(&label_begin, &end_label) {
+                    return Err(PemError.MismatchedLabels(label_begin));
+                }
+
+                // Extract base64 body between `body_start` and `end_pos`.
+                let body_slice = trim_base64_bytes(bytes, body_start, end_pos);
+                let body_text = Text.from_utf8_unchecked(body_slice.as_slice());
+                let decoded = b64_decode(&body_text)
+                    .map_err(|_| PemError.Base64Failed)?;
+
+                out.push(PemBlock { label: label_begin, contents: decoded });
+                pos = end_label_end_pos + dashes.len();
+            },
+        }
+    }
+    Ok(out)
+}
+
+// =============================================================================
+// Byte helpers
+// =============================================================================
+
+fn find_sub(haystack: &[Byte], needle: &[Byte], from: Int) -> Maybe<Int> {
+    if needle.len() == 0 { return Some(from); }
+    if haystack.len() < needle.len() { return None; }
+    let mut i: Int = from;
+    while i + needle.len() <= haystack.len() {
+        let mut j: Int = 0;
+        let mut matched: Bool = true;
+        while j < needle.len() {
+            if haystack[i + j] != needle[j] { matched = false; break; }
+            j = j + 1;
+        }
+        if matched { return Some(i); }
+        i = i + 1;
+    }
+    None
+}
+
+fn slice_text(bytes: &[Byte], start: Int, end: Int) -> Text {
+    let mut out: List<Byte> = [];
+    let mut i: Int = start;
+    while i < end { out.push(bytes[i]); i = i + 1; }
+    Text.from_utf8_unchecked(out.as_slice())
+}
+
+fn trim_base64_bytes(bytes: &[Byte], start: Int, end: Int) -> List<Byte> {
+    let mut out: List<Byte> = [];
+    let mut i: Int = start;
+    while i < end {
+        let c = bytes[i];
+        if c != (' ' as Byte) && c != ('\t' as Byte)
+            && c != ('\r' as Byte) && c != ('\n' as Byte) {
+            out.push(c);
+        }
+        i = i + 1;
+    }
+    out
+}
+
+fn push_bytes(dst: &mut List<Byte>, src: &[Byte]) {
+    let mut i: Int = 0;
+    while i < src.len() { dst.push(src[i]); i = i + 1; }
+}
+
+fn text_eq(a: &Text, b: &Text) -> Bool {
+    a.as_bytes() == b.as_bytes()
+}
+
+fn text_as_str(t: &Text) -> &str {
+    // Zero-cost — Verum's `Text` wraps a UTF-8 slice and exposes
+    // a borrow to the underlying `&str` via `as_str()`. Wrapped
+    // here so callers don't have to import `Text` API alongside
+    // `pem::encode_block`.
+    t.as_str()
+}

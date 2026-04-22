@@ -16,6 +16,7 @@ public module der;
 public module cbor;
 public module json_pointer;
 public module msgpack;
+public module pem;
 
 // Re-exports — JSON
 public mount .json.Json;

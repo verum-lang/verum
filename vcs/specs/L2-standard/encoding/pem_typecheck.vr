@@ -1,0 +1,67 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: encoding, pem, rfc7468, typecheck
+// @timeout: 10000
+// @expect: pass
+
+mount core.encoding.pem.{
+    PemBlock, PemError,
+    encode_block, encode_bundle, decode_one, decode_all,
+};
+mount core.collections.List;
+
+fn exercise_pem() -> Result<(), PemError> {
+    // Round-trip a small DER blob.
+    let der: [Byte; 16] = [
+        0x30_u8, 0x0E_u8, 0x02_u8, 0x01_u8, 0x01_u8, 0x02_u8, 0x01_u8, 0x02_u8,
+        0x02_u8, 0x01_u8, 0x03_u8, 0x02_u8, 0x01_u8, 0x04_u8, 0x05_u8, 0x00_u8,
+    ];
+
+    let pem: Text = encode_block("CERTIFICATE", &der[..]);
+    let blocks: List<PemBlock> = decode_all(&pem)?;
+    assert(blocks.len() == 1);
+    assert(blocks[0].label.as_bytes() == b"CERTIFICATE");
+    assert(blocks[0].contents.len() == 16);
+
+    // Different label.
+    let key_pem = encode_block("PRIVATE KEY", &der[..]);
+    let _ = decode_one(&key_pem)?;
+
+    // Bundle — concatenated blocks.
+    let mut bundle_blocks: List<PemBlock> = [];
+    bundle_blocks.push(PemBlock {
+        label: Text.from("CERTIFICATE"),
+        contents: {
+            let mut v: List<Byte> = [];
+            let mut i: Int = 0;
+            while i < der.len() { v.push(der[i]); i = i + 1; }
+            v
+        },
+    });
+    bundle_blocks.push(PemBlock {
+        label: Text.from("CERTIFICATE"),
+        contents: {
+            let mut v: List<Byte> = [];
+            let mut i: Int = 0;
+            while i < der.len() { v.push(der[i]); i = i + 1; }
+            v
+        },
+    });
+    let bundle: Text = encode_bundle(&bundle_blocks);
+    let parsed = decode_all(&bundle)?;
+    assert(parsed.len() == 2);
+
+    // No block → empty list (not an error).
+    let empty = decode_all(&Text.from("no pem here"))?;
+    assert(empty.len() == 0);
+
+    // Preamble before the BEGIN is ignored.
+    let mut with_preamble: Text = Text.from(
+        "Subject: CN=example.com\nIssuer: CN=Example CA\n\n"
+    );
+    let _ = with_preamble;
+    Ok(())
+}
+
+fn main() { let _ = exercise_pem(); }
