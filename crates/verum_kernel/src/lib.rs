@@ -601,13 +601,94 @@ pub fn infer(
             }
         }
 
-        CoreTerm::Sigma { .. } => Err(KernelError::NotImplemented("Sigma")),
-        CoreTerm::Pair(_, _) => Err(KernelError::NotImplemented("Pair")),
-        CoreTerm::Fst(_) => Err(KernelError::NotImplemented("Fst")),
-        CoreTerm::Snd(_) => Err(KernelError::NotImplemented("Snd")),
+        // Σ-formation: fst_ty and snd_ty (under extended ctx with the
+        // binder) must each live in some universe. The Σ-type lives in
+        // the max of the two, mirroring the Π-formation rule.
+        CoreTerm::Sigma { binder, fst_ty, snd_ty } => {
+            let fst_univ = infer(ctx, fst_ty, axioms)?;
+            let fst_level = universe_level(&fst_univ)?;
+            let extended = ctx.extend(binder.clone(), (**fst_ty).clone());
+            let snd_univ = infer(&extended, snd_ty, axioms)?;
+            let snd_level = universe_level(&snd_univ)?;
+            Ok(CoreTerm::Universe(UniverseLevel::Max(
+                Heap::new(fst_level),
+                Heap::new(snd_level),
+            )))
+        }
 
-        CoreTerm::PathTy { .. } => Err(KernelError::NotImplemented("PathTy")),
-        CoreTerm::Refl(_) => Err(KernelError::NotImplemented("Refl")),
+        // Σ-introduction: for now, Pair is introduced in a
+        // non-dependent position — we look up the expected Σ-type at
+        // the pair's syntactic position via App/Lam/assignment (not
+        // yet wired through), so at bring-up we conservatively require
+        // both components check in some type and synthesize a
+        // non-dependent Σ with binder `_`.
+        //
+        // A fully dependent `Pair (a, b) : Sigma (x : A) B` rule needs
+        // an expected-type channel (`check` mode), which lands with
+        // bidirectional elaboration.  Until then we keep the simpler
+        // rule here and tag the restriction.
+        CoreTerm::Pair(fst, snd) => {
+            let fst_ty = infer(ctx, fst, axioms)?;
+            let snd_ty = infer(ctx, snd, axioms)?;
+            Ok(CoreTerm::Sigma {
+                binder: Text::from("_"),
+                fst_ty: Heap::new(fst_ty),
+                snd_ty: Heap::new(snd_ty),
+            })
+        }
+
+        CoreTerm::Fst(pair) => {
+            let pair_ty = infer(ctx, pair, axioms)?;
+            match pair_ty {
+                CoreTerm::Sigma { fst_ty, .. } => Ok((*fst_ty).clone()),
+                other => Err(KernelError::NotAPair(shape_of(&other))),
+            }
+        }
+
+        CoreTerm::Snd(pair) => {
+            let pair_ty = infer(ctx, pair, axioms)?;
+            match pair_ty {
+                CoreTerm::Sigma { binder, snd_ty, .. } => {
+                    // snd : snd_ty[binder := fst(pair)]
+                    let projected = CoreTerm::Fst(pair.clone());
+                    Ok(substitute(&snd_ty, binder.as_str(), &projected))
+                }
+                other => Err(KernelError::NotAPair(shape_of(&other))),
+            }
+        }
+
+        // Path-formation: Path<A>(lhs, rhs) is a type when A is a type
+        // (i.e. inhabits some universe) and lhs, rhs both check at A.
+        // Result lives in A's universe, same as carrier.
+        CoreTerm::PathTy { carrier, lhs, rhs } => {
+            let carrier_univ = infer(ctx, carrier, axioms)?;
+            let carrier_level = universe_level(&carrier_univ)?;
+            let lhs_ty = infer(ctx, lhs, axioms)?;
+            if !structural_eq(&lhs_ty, carrier) {
+                return Err(KernelError::TypeMismatch {
+                    expected: shape_of(carrier),
+                    actual: shape_of(&lhs_ty),
+                });
+            }
+            let rhs_ty = infer(ctx, rhs, axioms)?;
+            if !structural_eq(&rhs_ty, carrier) {
+                return Err(KernelError::TypeMismatch {
+                    expected: shape_of(carrier),
+                    actual: shape_of(&rhs_ty),
+                });
+            }
+            Ok(CoreTerm::Universe(carrier_level))
+        }
+
+        // Reflexivity: refl(x) : Path<A>(x, x) where x : A.
+        CoreTerm::Refl(x) => {
+            let x_ty = infer(ctx, x, axioms)?;
+            Ok(CoreTerm::PathTy {
+                carrier: Heap::new(x_ty),
+                lhs: x.clone(),
+                rhs: x.clone(),
+            })
+        }
         CoreTerm::HComp { .. } => Err(KernelError::NotImplemented("HComp")),
         CoreTerm::Transp { .. } => Err(KernelError::NotImplemented("Transp")),
         CoreTerm::Glue { .. } => Err(KernelError::NotImplemented("Glue")),
@@ -1206,6 +1287,158 @@ mod tests {
         let wrong = CoreTerm::Universe(UniverseLevel::Concrete(0));
         let err =
             verify_full(&Context::new(), &id_unit, &wrong, &ax).unwrap_err();
+        assert!(matches!(err, KernelError::TypeMismatch { .. }));
+    }
+
+    // -----------------------------------------------------------------
+    // Σ-type rules — Sigma / Pair / Fst / Snd
+    // -----------------------------------------------------------------
+
+    fn tt_axiom(reg: &mut AxiomRegistry) -> CoreTerm {
+        let fw = FrameworkId {
+            framework: Text::from("builtin"),
+            citation: Text::from("unit-introduction"),
+        };
+        let _ = reg.register(Text::from("tt"), unit_ty(), fw.clone());
+        CoreTerm::Axiom {
+            name: Text::from("tt"),
+            ty: Heap::new(unit_ty()),
+            framework: fw,
+        }
+    }
+
+    /// Σ-formation: `Sigma (x : Unit) Unit` is a type.
+    #[test]
+    fn sigma_formation_returns_universe() {
+        let ax = AxiomRegistry::new();
+        let sigma = CoreTerm::Sigma {
+            binder: Text::from("x"),
+            fst_ty: Heap::new(unit_ty()),
+            snd_ty: Heap::new(unit_ty()),
+        };
+        let ty = infer(&Context::new(), &sigma, &ax).unwrap();
+        assert!(matches!(ty, CoreTerm::Universe(_)));
+    }
+
+    /// Non-dependent Pair: (tt, tt) : Sigma (_:Unit) Unit.
+    #[test]
+    fn pair_introduction_builds_sigma() {
+        let mut reg = AxiomRegistry::new();
+        let tt = tt_axiom(&mut reg);
+        let pair = CoreTerm::Pair(Heap::new(tt.clone()), Heap::new(tt));
+        let ty = infer(&Context::new(), &pair, &reg).unwrap();
+        match ty {
+            CoreTerm::Sigma { fst_ty, snd_ty, .. } => {
+                assert_eq!(*fst_ty, unit_ty());
+                assert_eq!(*snd_ty, unit_ty());
+            }
+            _ => panic!("expected Sigma"),
+        }
+    }
+
+    /// `fst((tt, tt)) : Unit`.
+    #[test]
+    fn fst_projection_types_to_first_component() {
+        let mut reg = AxiomRegistry::new();
+        let tt = tt_axiom(&mut reg);
+        let pair = CoreTerm::Pair(Heap::new(tt.clone()), Heap::new(tt));
+        let fst = CoreTerm::Fst(Heap::new(pair));
+        let ty = infer(&Context::new(), &fst, &reg).unwrap();
+        assert_eq!(ty, unit_ty());
+    }
+
+    /// `snd((tt, tt)) : Unit` — since the Σ-type is non-dependent,
+    /// substitution doesn't change anything and we still get Unit.
+    #[test]
+    fn snd_projection_types_to_second_component() {
+        let mut reg = AxiomRegistry::new();
+        let tt = tt_axiom(&mut reg);
+        let pair = CoreTerm::Pair(Heap::new(tt.clone()), Heap::new(tt));
+        let snd = CoreTerm::Snd(Heap::new(pair));
+        let ty = infer(&Context::new(), &snd, &reg).unwrap();
+        assert_eq!(ty, unit_ty());
+    }
+
+    /// `fst(tt)` — tt : Unit is not a pair — rejected.
+    #[test]
+    fn fst_of_non_pair_rejects() {
+        let mut reg = AxiomRegistry::new();
+        let tt = tt_axiom(&mut reg);
+        let wrong = CoreTerm::Fst(Heap::new(tt));
+        let err = infer(&Context::new(), &wrong, &reg).unwrap_err();
+        assert!(matches!(err, KernelError::NotAPair(_)));
+    }
+
+    // -----------------------------------------------------------------
+    // Cubical Path-type rules — PathTy / Refl
+    // -----------------------------------------------------------------
+
+    /// `Path<Unit>(tt, tt) : Type(0)`.
+    #[test]
+    fn path_formation_returns_carrier_universe() {
+        let mut reg = AxiomRegistry::new();
+        let tt = tt_axiom(&mut reg);
+        let path = CoreTerm::PathTy {
+            carrier: Heap::new(unit_ty()),
+            lhs: Heap::new(tt.clone()),
+            rhs: Heap::new(tt),
+        };
+        let ty = infer(&Context::new(), &path, &reg).unwrap();
+        assert_eq!(ty, CoreTerm::Universe(UniverseLevel::Concrete(0)));
+    }
+
+    /// `refl(tt) : Path<Unit>(tt, tt)`.
+    #[test]
+    fn refl_produces_path_type_with_identical_endpoints() {
+        let mut reg = AxiomRegistry::new();
+        let tt = tt_axiom(&mut reg);
+        let refl = CoreTerm::Refl(Heap::new(tt.clone()));
+        let ty = infer(&Context::new(), &refl, &reg).unwrap();
+        match ty {
+            CoreTerm::PathTy { carrier, lhs, rhs } => {
+                assert_eq!(*carrier, unit_ty());
+                assert_eq!(*lhs, tt);
+                assert_eq!(*rhs, tt);
+            }
+            _ => panic!("expected PathTy"),
+        }
+    }
+
+    /// `Path<Unit>(tt, someBool)` — endpoint type mismatch — rejected.
+    /// Demonstrates that the kernel checks endpoint types against the
+    /// declared carrier, not just shape.
+    #[test]
+    fn path_rejects_endpoint_type_mismatch() {
+        let mut reg = AxiomRegistry::new();
+        let tt = tt_axiom(&mut reg);
+        // Register an axiom of a *different* type.
+        let bool_ty = CoreTerm::Inductive {
+            path: Text::from("Bool"),
+            args: List::new(),
+        };
+        reg.register(
+            Text::from("true_val"),
+            bool_ty.clone(),
+            FrameworkId {
+                framework: Text::from("builtin"),
+                citation: Text::from("bool-introduction"),
+            },
+        )
+        .unwrap();
+        let true_val = CoreTerm::Axiom {
+            name: Text::from("true_val"),
+            ty: Heap::new(bool_ty),
+            framework: FrameworkId {
+                framework: Text::from("builtin"),
+                citation: Text::from("bool-introduction"),
+            },
+        };
+        let bogus = CoreTerm::PathTy {
+            carrier: Heap::new(unit_ty()),
+            lhs: Heap::new(tt),
+            rhs: Heap::new(true_val),
+        };
+        let err = infer(&Context::new(), &bogus, &reg).unwrap_err();
         assert!(matches!(err, KernelError::TypeMismatch { .. }));
     }
 }
