@@ -1,0 +1,252 @@
+// =============================================================================
+// async/backoff.vr — retry delay policies (exponential / fibonacci / jittered)
+// =============================================================================
+// Layer: 4 (Async infrastructure)
+// Dependencies: core, core.time, core.base.random
+// =============================================================================
+//
+// Pure-computation backoff helpers for use outside the Weft service
+// graph: raw HTTP client loops, database reconnect, async-task
+// retries, distributed-lock acquire, etc.
+//
+// # Strategies
+//
+//   * `ExponentialNoJitter`   — base × 2^attempt, capped at max.
+//   * `ExponentialFullJitter` — uniform random in [0, base × 2^attempt].
+//                               AWS Architecture Blog recommendation.
+//   * `ExponentialDecorrelated` — uniform random in [base, prev × 3].
+//                               Smooths adjacent retry clusters best
+//                               for large fleets — see AWS Exponential
+//                               Backoff and Jitter whitepaper.
+//   * `FibonacciFullJitter`  — Fibonacci sequence × base, jittered.
+//                               Gentler ramp than exponential.
+//
+// # Usage
+//
+// ```
+// let mut bo = Backoff.exponential_full_jitter(
+//     Duration.from_millis(100),    // base
+//     Duration.from_secs(30),        // cap
+// );
+// loop {
+//     match try_operation() {
+//         Ok(r)  => return r,
+//         Err(e) if !retryable(&e) => return Err(e),
+//         Err(_) => {
+//             match bo.next_delay() {
+//                 Some(d) => async_sleep(d).await,
+//                 None    => return Err(LastError),
+//             }
+//         }
+//     }
+// }
+// ```
+//
+// # Precision + safety
+//
+// All internal arithmetic is integer over microseconds. Overflow is
+// guarded: once `base × 2^attempt` would overflow UInt64 we saturate
+// to `cap_us`, so pathological `max_attempts` values simply plateau
+// at the configured ceiling.
+//
+// =============================================================================
+
+module core.async.backoff;
+
+mount core.*;
+mount core.time.duration.{Duration};
+mount core.base.random;
+
+// =============================================================================
+// Policy selector
+// =============================================================================
+
+public type BackoffStrategy is
+      ExponentialNoJitter
+    | ExponentialFullJitter
+    | ExponentialDecorrelated
+    | FibonacciFullJitter;
+
+// =============================================================================
+// Backoff — one call returns the next delay, advancing internal state
+// =============================================================================
+
+public type Backoff is {
+    strategy:      BackoffStrategy,
+    /// First-attempt delay in microseconds.
+    base_us:       UInt64,
+    /// Hard ceiling in microseconds. 0 = no ceiling.
+    cap_us:        UInt64,
+    /// Maximum attempts. None = unbounded.
+    max_attempts:  Maybe<Int>,
+    /// Current attempt count (0 before the first `next_delay`).
+    attempt:       Int,
+    /// Previous raw delay — used by `ExponentialDecorrelated`.
+    prev_raw_us:   UInt64,
+};
+
+implement Backoff {
+    fn mk(strat: BackoffStrategy, base: Duration, cap: Duration) -> Backoff {
+        Backoff {
+            strategy:     strat,
+            base_us:      base.as_micros() as UInt64,
+            cap_us:       cap.as_micros() as UInt64,
+            max_attempts: None,
+            attempt:      0,
+            prev_raw_us:  0_u64,
+        }
+    }
+
+    public fn exponential_no_jitter(base: Duration, cap: Duration) -> Backoff {
+        Backoff.mk(BackoffStrategy.ExponentialNoJitter, base, cap)
+    }
+
+    public fn exponential_full_jitter(base: Duration, cap: Duration) -> Backoff {
+        Backoff.mk(BackoffStrategy.ExponentialFullJitter, base, cap)
+    }
+
+    public fn exponential_decorrelated(base: Duration, cap: Duration) -> Backoff {
+        Backoff.mk(BackoffStrategy.ExponentialDecorrelated, base, cap)
+    }
+
+    public fn fibonacci_full_jitter(base: Duration, cap: Duration) -> Backoff {
+        Backoff.mk(BackoffStrategy.FibonacciFullJitter, base, cap)
+    }
+
+    /// Cap total attempts. Returns `self` for builder chaining.
+    public fn with_max_attempts(mut self, n: Int) -> Backoff {
+        self.max_attempts = Some(n); self
+    }
+
+    /// Reset the counter (e.g. on successful operation inside a long-
+    /// running loop that may retry again later).
+    public fn reset(&mut self) {
+        self.attempt = 0;
+        self.prev_raw_us = 0_u64;
+    }
+
+    /// Return the next delay, advancing internal state. `None` once
+    /// `max_attempts` has been reached.
+    public fn next_delay(&mut self) -> Maybe<Duration> {
+        match &self.max_attempts {
+            Some(n) => if self.attempt >= *n { return None; },
+            None    => {},
+        }
+        let raw = self.compute_raw();
+        let capped = self.apply_cap(raw);
+        let final_us = self.apply_jitter(capped);
+        self.attempt = self.attempt + 1;
+        self.prev_raw_us = capped;
+        Some(Duration.from_micros(final_us as Int))
+    }
+
+    fn compute_raw(&self) -> UInt64 {
+        match &self.strategy {
+            BackoffStrategy.FibonacciFullJitter => {
+                fibonacci_us(self.base_us, self.attempt)
+            },
+            _ => {
+                // base × 2^attempt with overflow guard.
+                let shift = self.attempt;
+                if shift >= 63 { return self.cap_us; }
+                let mult: UInt64 = 1_u64 << (shift as UInt64);
+                // Overflow check: base × mult stays ≤ UInt64.MAX
+                if self.base_us > 0_u64 && mult > 0_u64 {
+                    let cap_for_overflow = 0xFFFFFFFFFFFFFFFF_u64 / self.base_us;
+                    if mult > cap_for_overflow { return self.cap_us; }
+                }
+                self.base_us * mult
+            },
+        }
+    }
+
+    fn apply_cap(&self, raw: UInt64) -> UInt64 {
+        if self.cap_us == 0_u64 { raw }
+        else if raw > self.cap_us { self.cap_us }
+        else { raw }
+    }
+
+    fn apply_jitter(&self, capped: UInt64) -> UInt64 {
+        match &self.strategy {
+            BackoffStrategy.ExponentialNoJitter => capped,
+
+            BackoffStrategy.ExponentialFullJitter => {
+                random_u64_in(0_u64, capped)
+            },
+
+            BackoffStrategy.ExponentialDecorrelated => {
+                // AWS formula: random(base, prev × 3), capped.
+                let upper = if self.prev_raw_us == 0_u64 {
+                    capped
+                } else {
+                    let triple = self.prev_raw_us.saturating_mul_3();
+                    if triple > self.cap_us && self.cap_us > 0_u64 { self.cap_us }
+                    else { triple }
+                };
+                let lower = if self.base_us < upper { self.base_us } else { upper };
+                random_u64_in(lower, upper)
+            },
+
+            BackoffStrategy.FibonacciFullJitter => {
+                random_u64_in(0_u64, capped)
+            },
+        }
+    }
+
+    public fn attempt(&self) -> Int { self.attempt }
+}
+
+// =============================================================================
+// Helpers
+// =============================================================================
+
+fn fibonacci_us(base_us: UInt64, n: Int) -> UInt64 {
+    // F(0) = 1, F(1) = 1, F(n) = F(n-1) + F(n-2).
+    // Return base_us × F(n+1) so the first retry is already `base_us × 1`.
+    let mut a: UInt64 = 1_u64;
+    let mut b: UInt64 = 1_u64;
+    let mut i: Int = 0;
+    while i < n {
+        let sum = a.saturating_add(b);
+        a = b;
+        b = sum;
+        i = i + 1;
+    }
+    // Saturate base × b.
+    if base_us == 0_u64 || b == 0_u64 { return 0_u64; }
+    let cap_for_overflow = 0xFFFFFFFFFFFFFFFF_u64 / base_us;
+    if b > cap_for_overflow { return 0xFFFFFFFFFFFFFFFF_u64; }
+    base_us * b
+}
+
+fn random_u64_in(lo: UInt64, hi: UInt64) -> UInt64 {
+    if hi <= lo { return lo; }
+    let span = hi - lo;
+    let r = random_u64();
+    lo + (r % (span + 1_u64))
+}
+
+fn random_u64() -> UInt64 {
+    let mut buf: [Byte; 8] = [0_u8; 8];
+    random.fill(&mut buf);
+    let mut r: UInt64 = 0_u64;
+    let mut i: Int = 0;
+    while i < 8 {
+        r = (r << 8_u64) | (buf[i] as UInt64);
+        i = i + 1;
+    }
+    r
+}
+
+// Saturating helpers live here until UInt64 gets them via core.
+implement UInt64 {
+    fn saturating_add(&self, other: UInt64) -> UInt64 {
+        let max: UInt64 = 0xFFFFFFFFFFFFFFFF_u64;
+        if *self > max - other { max } else { *self + other }
+    }
+
+    fn saturating_mul_3(&self) -> UInt64 {
+        let max: UInt64 = 0xFFFFFFFFFFFFFFFF_u64;
+        if *self > max / 3_u64 { max } else { *self * 3_u64 }
+    }
+}

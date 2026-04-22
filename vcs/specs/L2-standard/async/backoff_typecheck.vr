@@ -1,0 +1,60 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: async, backoff, retry, jitter, typecheck
+// @timeout: 10000
+// @expect: pass
+
+mount core.async.backoff.{Backoff, BackoffStrategy};
+mount core.time.duration.{Duration};
+
+fn exercise_exponential_no_jitter() {
+    let mut bo = Backoff.exponential_no_jitter(
+        Duration.from_millis(100),
+        Duration.from_secs(30),
+    );
+    // First delay = 100 ms, second = 200 ms, third = 400 ms ...
+    let _d1 = bo.next_delay();
+    let _d2 = bo.next_delay();
+    let _a: Int = bo.attempt();
+}
+
+fn exercise_exponential_full_jitter() {
+    let mut bo = Backoff.exponential_full_jitter(
+        Duration.from_millis(50),
+        Duration.from_secs(10),
+    ).with_max_attempts(5);
+    let mut i: Int = 0;
+    while i < 6 {
+        let _ = bo.next_delay();    // 6th call returns None (max 5).
+        i = i + 1;
+    }
+}
+
+fn exercise_decorrelated() {
+    let mut bo = Backoff.exponential_decorrelated(
+        Duration.from_millis(20),
+        Duration.from_secs(5),
+    );
+    let _ = bo.next_delay();
+    let _ = bo.next_delay();
+    let _ = bo.next_delay();
+    bo.reset();
+    let _ = bo.next_delay();
+}
+
+fn exercise_fibonacci() {
+    let mut bo = Backoff.fibonacci_full_jitter(
+        Duration.from_millis(10),
+        Duration.from_secs(5),
+    );
+    let _ = bo.next_delay();
+    let _ = bo.next_delay();
+}
+
+fn main() {
+    exercise_exponential_no_jitter();
+    exercise_exponential_full_jitter();
+    exercise_decorrelated();
+    exercise_fibonacci();
+}
