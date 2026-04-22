@@ -199,9 +199,16 @@ impl<'s> VerifyCommand<'s> {
                     Err(VerificationError::CannotProve {
                         counterexample,
                         cost,
+                        constraint,
                         ..
                     }) => VerificationResult::Failed {
-                        counterexample: counterexample.map(|ce| format!("{:?}", ce).to_text()),
+                        // Prefer the structured counterexample's human-
+                        // readable summary over the Debug form. Falls
+                        // back to the constraint description when no
+                        // model was extracted.
+                        counterexample: counterexample
+                            .map(|ce| ce.format_with_suggestions(&[]))
+                            .or(Some(constraint)),
                         elapsed: cost.duration,
                     },
                     Err(e) => VerificationResult::Failed {
@@ -450,10 +457,10 @@ impl<'s> VerifyCommand<'s> {
                         .with_timeout(),
                     });
                 }
-                Err(VerifyError::Failed(ce)) => {
+                Err(VerifyError::Failed(desc, ce)) => {
                     return Err(VerificationError::CannotProve {
-                        constraint: ce,
-                        counterexample: None,
+                        constraint: desc,
+                        counterexample: ce,
                         cost: verum_smt::VerificationCost::new(
                             func.name.as_str().into(),
                             start.elapsed(),
@@ -669,14 +676,30 @@ impl<'s> VerifyCommand<'s> {
 
                         match solver.check() {
                             z3::SatResult::Sat => {
-                                // Found counterexample - postcondition can be violated
-                                let model = solver.get_model();
-                                let ce = model
-                                    .map(|m| format!("model: {:?}", m))
-                                    .unwrap_or_else(|| "counterexample exists".to_string());
+                                // Found counterexample — postcondition can
+                                // be violated. Extract a structured
+                                // CounterExample from the model so the CLI
+                                // shows the witnessing variable assignment
+                                // rather than Debug-formatted Z3 output.
+                                let (ce_opt, ce_summary) = match solver.get_model() {
+                                    Some(m) => {
+                                        let ce = build_counterexample_from_model(&m);
+                                        let summary = ce.format_with_suggestions(&[]);
+                                        (Some(ce), summary)
+                                    }
+                                    None => (
+                                        None,
+                                        Text::from("counterexample exists (model unavailable)"),
+                                    ),
+                                };
                                 solver.pop(1);
                                 return Err(VerifyError::Failed(
-                                    format!("Postcondition violation: {}", ce).to_text(),
+                                    format!(
+                                        "Postcondition violation\n{}",
+                                        ce_summary.as_str()
+                                    )
+                                    .to_text(),
+                                    ce_opt,
                                 ));
                             }
                             z3::SatResult::Unsat => {
@@ -693,6 +716,7 @@ impl<'s> VerifyCommand<'s> {
                 Err(e) => {
                     return Err(VerifyError::Failed(
                         format!("Failed to translate postcondition: {}", e).to_text(),
+                        None,
                     ));
                 }
             }
@@ -990,12 +1014,77 @@ impl VerificationReport {
     }
 }
 
-/// Internal error type for verification
+/// Internal error type for verification.
+///
+/// `Failed` carries both a human-readable description and an
+/// optional structured [`CounterExample`]. The structured form
+/// lets the outer `VerificationError::CannotProve` thread the
+/// counterexample through to the CLI's display path rather than
+/// burying it inside a Debug-formatted string.
 enum VerifyError {
-    /// Verification timed out
+    /// Verification timed out.
     Timeout,
-    /// Verification failed with counterexample
-    Failed(Text),
+    /// Verification failed; the optional counterexample carries the
+    /// SMT model that witnessed the failure.
+    Failed(Text, Option<verum_smt::CounterExample>),
+}
+
+/// Extract a structured [`verum_smt::CounterExample`] from a Z3
+/// model. Iterates every 0-arity declaration in the model and
+/// records its value as a [`CounterExampleValue`]. Complex values
+/// (records, arrays, non-finite bitvectors) fall through to
+/// `Unknown(text)` with the Z3 display form so users still see
+/// something actionable.
+fn build_counterexample_from_model(model: &z3::Model) -> verum_smt::CounterExample {
+    use verum_common::{Map, Text};
+    use verum_smt::{CounterExample, CounterExampleValue};
+
+    let mut assignments: Map<Text, CounterExampleValue> = Map::new();
+
+    for decl in model.iter() {
+        // Only 0-ary constants carry a concrete value; functions are
+        // handled separately via `advanced_model::CompleteFunctionModel`
+        // when refinements need them.
+        if decl.arity() != 0 {
+            continue;
+        }
+        let name = decl.name().to_string();
+        let applied = decl.apply(&[]);
+        let evaluated = match model.eval(&applied, true) {
+            Some(v) => v,
+            None => continue,
+        };
+        let as_text = evaluated.to_string();
+
+        // Try to narrow the Z3 AST into a typed counterexample value.
+        // The Z3 bindings don't expose a stable "AST kind" API, so we
+        // fall back on parsing the display form — reliable for the
+        // primitive sorts verification actually hits (Int, Bool, Real,
+        // BitVector-as-hex, String).
+        let value = if let Ok(i) = as_text.parse::<i64>() {
+            CounterExampleValue::Int(i)
+        } else if as_text == "true" {
+            CounterExampleValue::Bool(true)
+        } else if as_text == "false" {
+            CounterExampleValue::Bool(false)
+        } else if let Ok(f) = as_text.parse::<f64>() {
+            CounterExampleValue::Float(f)
+        } else if as_text.starts_with('"')
+            && as_text.ends_with('"')
+            && as_text.len() >= 2
+        {
+            CounterExampleValue::Text(Text::from(&as_text[1..as_text.len() - 1]))
+        } else {
+            CounterExampleValue::Unknown(Text::from(as_text.clone()))
+        };
+
+        assignments.insert(Text::from(name.as_str()), value);
+    }
+
+    CounterExample::new(
+        assignments,
+        Text::from("postcondition violation"),
+    )
 }
 
 // ==================== JSON Export Structures ====================
