@@ -13044,6 +13044,24 @@ impl VbcCodegen {
             let _ = i;
         }
 
+        // Pin `current_return_type_name` to the closure's declared
+        // return type (if any) so that a bare variant constructor in the
+        // body (e.g. `|| None` with a `-> Maybe<Int>` annotation)
+        // resolves through the cross-type-collision disambiguation path.
+        // The enclosing function's return type MUST NOT leak into the
+        // closure body, hence we override unconditionally.
+        let saved_closure_rtn_wp = {
+            let prev = self.ctx.current_return_type_name.clone();
+            let rt_name_opt: Option<String> =
+                return_type_ast.map(|ty| self.type_to_simple_name(ty));
+            if let Some(ref rtn_name) = rt_name_opt {
+                let base = rtn_name.split('<').next().unwrap_or(rtn_name).to_string();
+                self.ctx.current_return_type_name = Some(base);
+            } else {
+                self.ctx.current_return_type_name = None;
+            }
+            prev
+        };
         // Bind complex patterns to extract variables
         // For each complex pattern, get the register for the synthetic param and bind
         for (idx, pattern) in complex_patterns {
@@ -13061,6 +13079,7 @@ impl VbcCodegen {
 
         // Compile the body expression
         let result = self.compile_expr(body)?;
+        self.ctx.current_return_type_name = saved_closure_rtn_wp;
 
         // Emit return
         if let Some(reg) = result {
