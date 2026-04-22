@@ -1,0 +1,36 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: async, semaphore, concurrency-limit, typecheck
+// @timeout: 10000
+// @expect: pass
+
+mount core.async.semaphore.{
+    AsyncSemaphore, SemaphorePermit, SemaphoreFuture, SemaphoreError,
+};
+
+async fn exercise_sem() -> Result<(), SemaphoreError> {
+    let sem = AsyncSemaphore.new(3);
+
+    // Synchronous fast-path.
+    match sem.try_acquire() {
+        Some(p) => { let _ = p; },
+        None    => {},
+    }
+
+    // Async acquire.
+    let permit: SemaphorePermit = sem.acquire().await?;
+    let _ = permit;
+
+    // Runtime resize.
+    sem.add_permits(5);
+    let _: Int = sem.available_permits();
+
+    // Close.
+    sem.close();
+    Ok(())
+}
+
+fn main() {
+    let _ = exercise_sem;
+}

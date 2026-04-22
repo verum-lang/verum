@@ -1,0 +1,209 @@
+// =============================================================================
+// async/semaphore.vr — async-task concurrency limiter
+// =============================================================================
+// Layer: 4 (Async infrastructure)
+// Dependencies: core, core.sync, core.async.waker
+// =============================================================================
+//
+// An async-task counting semaphore — the "at most N concurrent
+// operations" primitive. Different from `core.sync.semaphore` in
+// three key ways:
+//
+//   * Waiters are awoken by Futures / Wakers (no thread blocking).
+//   * `acquire()` returns `SemaphoreFuture` that completes when a
+//     permit frees up.
+//   * The returned `SemaphorePermit` releases on drop (RAII —
+//     no manual `release` calls, no leaks on panic).
+//
+// # Why not wrap the sync version
+//
+// `core.sync.semaphore.Semaphore` does a futex wait — parks the
+// OS thread. That defeats the whole point of async: the executor
+// needs every task to yield cooperatively so it can multiplex
+// thousands of connections onto a handful of OS threads.
+//
+// # Use cases
+//
+//   * Cap outbound HTTP fan-out at N concurrent requests.
+//   * DB connection-pool checkout.
+//   * Rate-limit CPU-bound async work (N parallel ML inferences).
+//   * Producer/consumer backpressure without a channel.
+//
+// # API
+//
+// ```
+// let sem = AsyncSemaphore.new(10);   // 10 permits
+//
+// // Bounded fan-out:
+// for url in urls {
+//     let permit = sem.acquire().await;
+//     spawn(async move {
+//         let _p = permit;          // held for the lifetime of the task
+//         fetch(url).await;
+//     });
+// }
+// ```
+//
+// =============================================================================
+
+module core.async.semaphore;
+
+mount core.*;
+mount core.collections.List;
+mount core.collections.deque.{Deque};
+mount core.sync.{Shared, Mutex};
+mount core.async.waker.{Waker};
+mount core.async.poll.{Poll};
+
+// =============================================================================
+// Internal state
+// =============================================================================
+
+type SemaphoreInner is {
+    /// Remaining permits. `0` = fully saturated.
+    permits: Int,
+    /// Parked wakers, FIFO — the first waiter to arrive is the
+    /// first to wake when a permit frees.
+    waiters: Deque<Waker>,
+    closed:  Bool,
+};
+
+// =============================================================================
+// Semaphore
+// =============================================================================
+
+public type AsyncSemaphore is {
+    inner: Shared<Mutex<SemaphoreInner>>,
+};
+
+implement AsyncSemaphore {
+    /// Construct with `permits` initial permits. `permits = 0` is
+    /// valid — all acquirers wait until someone grants permits via
+    /// `add_permits`.
+    public fn new(permits: Int) -> AsyncSemaphore {
+        let p = if permits < 0 { 0 } else { permits };
+        AsyncSemaphore {
+            inner: Shared.new(Mutex.new(SemaphoreInner {
+                permits: p,
+                waiters: Deque.new(),
+                closed:  false,
+            })),
+        }
+    }
+
+    /// Await until a permit is available; return a guard that
+    /// releases on drop. Errors with `SemaphoreError.Closed` if
+    /// `close()` was called before a permit was granted.
+    public async fn acquire(&self) -> Result<SemaphorePermit, SemaphoreError> {
+        let fut = SemaphoreFuture { sem: self.inner.clone() };
+        fut.await
+    }
+
+    /// Non-blocking try-acquire. Returns `None` when no permits
+    /// are available.
+    public fn try_acquire(&self) -> Maybe<SemaphorePermit> {
+        let shared = self.inner.clone();
+        let mut inner = (*shared).lock().unwrap();
+        if inner.closed || inner.permits <= 0 { return None; }
+        inner.permits = inner.permits - 1;
+        Some(SemaphorePermit { sem: shared.clone() })
+    }
+
+    /// Grant additional permits at runtime — useful for dynamic
+    /// resize (e.g. pool warm-up, admission-control widening).
+    public fn add_permits(&self, n: Int) {
+        if n <= 0 { return; }
+        let shared = self.inner.clone();
+        let mut inner = (*shared).lock().unwrap();
+        inner.permits = inner.permits + n;
+        // Wake up to n waiters.
+        let mut i: Int = 0;
+        while i < n && inner.waiters.len() > 0 {
+            match inner.waiters.pop_front() {
+                Some(w) => w.wake(),
+                None    => break,
+            }
+            i = i + 1;
+        }
+    }
+
+    /// Close the semaphore — every pending + future `acquire` fails
+    /// with `Closed`. Already-issued permits continue to hold until
+    /// their drop.
+    public fn close(&self) {
+        let shared = self.inner.clone();
+        let mut inner = (*shared).lock().unwrap();
+        inner.closed = true;
+        // Wake every waiter so they observe the closed state.
+        while inner.waiters.len() > 0 {
+            match inner.waiters.pop_front() {
+                Some(w) => w.wake(),
+                None    => break,
+            }
+        }
+    }
+
+    /// Current permit count (approximate — may change by the time
+    /// the caller acts on it). For metrics only.
+    public fn available_permits(&self) -> Int {
+        let shared = self.inner.clone();
+        let inner = (*shared).lock().unwrap();
+        inner.permits
+    }
+}
+
+// =============================================================================
+// Permit guard — releases on drop
+// =============================================================================
+
+public type SemaphorePermit is {
+    sem: Shared<Mutex<SemaphoreInner>>,
+};
+
+implement SemaphorePermit {
+    /// Release the permit eagerly (before drop). Rarely useful —
+    /// prefer letting the guard drop naturally at scope end.
+    public fn release(self) { /* drop runs below */ }
+}
+
+// Drop hook — returns the permit to the pool and wakes one waiter.
+implement Drop for SemaphorePermit {
+    fn drop(&mut self) {
+        let mut inner = (*self.sem).lock().unwrap();
+        inner.permits = inner.permits + 1;
+        match inner.waiters.pop_front() {
+            Some(w) => w.wake(),
+            None    => {},
+        }
+    }
+}
+
+// =============================================================================
+// Future for acquire()
+// =============================================================================
+
+public type SemaphoreFuture is {
+    sem: Shared<Mutex<SemaphoreInner>>,
+};
+
+public type SemaphoreError is
+      Closed;
+
+// The Future impl: on first poll, try to grab a permit; if not
+// available, register the waker and return Pending.
+implement Future for SemaphoreFuture {
+    type Output = Result<SemaphorePermit, SemaphoreError>;
+
+    fn poll(&mut self, cx: &mut Context) -> Poll<Self.Output> {
+        let mut inner = (*self.sem).lock().unwrap();
+        if inner.closed {
+            return Poll.Ready(Err(SemaphoreError.Closed));
+        }
+        if inner.permits > 0 {
+            inner.permits = inner.permits - 1;
+            return Poll.Ready(Ok(SemaphorePermit { sem: self.sem.clone() }));
+        }
+        inner.waiters.push_back(cx.waker().clone());
+        Poll.Pending
+    }
+}

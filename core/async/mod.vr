@@ -56,6 +56,9 @@ public module async_iterator;
 // Retry backoff policies (exponential / fibonacci / jittered).
 public module backoff;
 
+// Async concurrency-limiter semaphore — cooperative (task-based).
+public module semaphore;
+
 // =============================================================================
 // Re-exports
 // =============================================================================
