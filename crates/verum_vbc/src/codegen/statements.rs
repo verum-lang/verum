@@ -1046,6 +1046,16 @@ impl VbcCodegen {
             body_offset: 0, // No scoped body - context provided for rest of function
         });
 
+        // Pair the unscoped CtxProvide with a deferred CtxEnd so that
+        // when the enclosing block exits, the context-stack push is
+        // popped in matching order. Without this, a `provide Ctx = v;`
+        // inside a `{ … }` block would leak its push past the block's
+        // scope and shadow the enclosing `provide` for the rest of the
+        // function. For function-body-level provides this still does
+        // the right thing — the function body is itself a block, and
+        // its exit_scope picks up the defer the same way.
+        self.ctx.add_defer(vec![Instruction::CtxEnd], false);
+
         // Don't free value_reg - context owns it now
 
         Ok(None)
