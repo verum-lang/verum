@@ -54,6 +54,7 @@ public module histogram;
 public module registry;
 public module exporter;
 public module prometheus;
+public module ewma;
 
 // Re-exports — flat public API
 public mount .label.LabelSet;

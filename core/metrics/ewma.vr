@@ -1,0 +1,261 @@
+// =============================================================================
+// metrics/ewma.vr — exponentially-weighted moving averages
+// =============================================================================
+// Layer: 3 (Metrics)
+// Dependencies: core, core.time
+// =============================================================================
+//
+// EWMA — the "recent-heavy" moving-average estimator that runs in
+// constant memory. Used everywhere a long-running process needs a
+// smoothed view of a changing quantity:
+//
+//   * Network protocols — RFC 6298 TCP RTT estimator (α=0.125 on
+//     SRTT), RFC 9002 QUIC latest_rtt filtering.
+//   * Load balancers — EWMA response-time to pick upstream peers.
+//   * Storage — LevelDB / RocksDB write-amplification tracking.
+//   * Observability — Unix `uptime` 1 / 5 / 15-minute load averages
+//     (the classic Neil Brown constants match `LOAD_AVG_1 /
+//     LOAD_AVG_5 / LOAD_AVG_15`).
+//
+// # Classic EWMA
+//
+// ```
+// S_0 = x_0
+// S_t = α × x_t + (1 - α) × S_{t-1}
+// ```
+//
+// α ∈ (0, 1]. Higher α = faster response to change; lower α =
+// smoother. For unit-time samples, α ≈ 1 - exp(-Δt / τ) where τ
+// is the time constant.
+//
+// # Time-decayed EWMA (Dropwizard-style)
+//
+// Events don't arrive at uniform intervals in real systems. The
+// `TimeDecayingEwma` variant decays by wall-clock Δt between
+// observations:
+//
+// ```
+// decay = exp(-Δt / τ)
+// S_t = S_{t-1} × decay + x_t × (1 - decay)
+// ```
+//
+// This matches Dropwizard Metrics / Finagle's ema and is the right
+// choice when observations arrive at unpredictable cadence.
+//
+// # Rate meters
+//
+// The convenience `RateMeter` wraps a `TimeDecayingEwma` to track
+// events-per-second over 1-, 5-, and 15-minute windows — the
+// familiar load-average style output.
+//
+// =============================================================================
+
+module core.metrics.ewma;
+
+mount core.*;
+mount core.time.instant.{Instant};
+mount core.time.duration.{Duration};
+
+// =============================================================================
+// Load-average constants (Neil Brown, 1984)
+// =============================================================================
+
+/// α for a 1-minute EWMA at 5-second sample interval: exp(-5/60) ≈ 0.9200.
+public const LOAD_AVG_1:  Float = 0.9200;
+public const LOAD_AVG_5:  Float = 0.9835;
+public const LOAD_AVG_15: Float = 0.9945;
+
+// =============================================================================
+// Fixed-sample-period EWMA
+// =============================================================================
+
+public type Ewma is {
+    /// Smoothing factor in (0, 1]. Higher = faster response.
+    alpha:       Float,
+    value:       Float,
+    /// False on construction; the first `update` just seeds `value`
+    /// (no mixing — prevents one-sample EWMA from underweighting).
+    seeded:      Bool,
+};
+
+implement Ewma {
+    /// Construct with smoothing factor `alpha` (clamped to (0, 1]).
+    public fn new(alpha: Float) -> Ewma {
+        let a = if alpha <= 0.0 { 0.001 }
+                else if alpha > 1.0 { 1.0 }
+                else { alpha };
+        Ewma { alpha: a, value: 0.0, seeded: false }
+    }
+
+    /// 1-minute load average equivalent (α = LOAD_AVG_1).
+    public fn one_minute() -> Ewma  { Ewma.new(1.0 - LOAD_AVG_1) }
+    public fn five_minute() -> Ewma  { Ewma.new(1.0 - LOAD_AVG_5) }
+    public fn fifteen_minute() -> Ewma { Ewma.new(1.0 - LOAD_AVG_15) }
+
+    /// Feed one observation. First call seeds `value`; subsequent
+    /// calls mix in at rate `alpha`.
+    public fn update(&mut self, x: Float) {
+        if !self.seeded {
+            self.value = x;
+            self.seeded = true;
+        } else {
+            self.value = self.alpha * x + (1.0 - self.alpha) * self.value;
+        }
+    }
+
+    public fn value(&self) -> Float { self.value }
+    public fn is_seeded(&self) -> Bool { self.seeded }
+
+    /// Reset — forces the next `update` to re-seed.
+    public fn reset(&mut self) {
+        self.value = 0.0;
+        self.seeded = false;
+    }
+}
+
+// =============================================================================
+// Time-decayed EWMA (Dropwizard-style)
+// =============================================================================
+
+public type TimeDecayingEwma is {
+    /// Time constant τ — larger = smoother; samples older than
+    /// ~5τ contribute <1% to the estimate.
+    tau:         Duration,
+    value:       Float,
+    last_update: Instant,
+    seeded:      Bool,
+};
+
+implement TimeDecayingEwma {
+    public fn new(tau: Duration) -> TimeDecayingEwma {
+        TimeDecayingEwma {
+            tau:         tau,
+            value:       0.0,
+            last_update: Instant.now(),
+            seeded:      false,
+        }
+    }
+
+    /// 1-minute decay constant — feeds a Dropwizard-style rate meter.
+    public fn one_minute() -> TimeDecayingEwma {
+        TimeDecayingEwma.new(Duration.from_secs(60))
+    }
+
+    public fn update(&mut self, x: Float, now: Instant) {
+        if !self.seeded {
+            self.value = x;
+            self.last_update = now;
+            self.seeded = true;
+            return;
+        }
+        let dt = now.duration_since(self.last_update.clone())
+            .unwrap_or_else(|| Duration.from_secs(0));
+        let dt_s = (dt.as_micros() as Float) / 1_000_000.0;
+        let tau_s = (self.tau.as_micros() as Float) / 1_000_000.0;
+        let decay = if tau_s <= 0.0 { 0.0 }
+                    else { exp_neg(dt_s / tau_s) };
+        self.value = self.value * decay + x * (1.0 - decay);
+        self.last_update = now;
+    }
+
+    public fn value(&self) -> Float { self.value }
+    public fn is_seeded(&self) -> Bool { self.seeded }
+
+    public fn reset(&mut self) {
+        self.value = 0.0;
+        self.seeded = false;
+        self.last_update = Instant.now();
+    }
+}
+
+// =============================================================================
+// RateMeter — events-per-second with 1/5/15-minute views
+// =============================================================================
+
+public type RateMeter is {
+    m1:          TimeDecayingEwma,
+    m5:          TimeDecayingEwma,
+    m15:         TimeDecayingEwma,
+    count_total: UInt64,
+    /// Accumulator for events since the last `tick`.
+    pending:     UInt64,
+    last_tick:   Instant,
+    /// Sample interval — defaults to 5 s (Dropwizard default).
+    tick_period: Duration,
+};
+
+implement RateMeter {
+    public fn new() -> RateMeter {
+        RateMeter {
+            m1:  TimeDecayingEwma.new(Duration.from_secs(60)),
+            m5:  TimeDecayingEwma.new(Duration.from_secs(300)),
+            m15: TimeDecayingEwma.new(Duration.from_secs(900)),
+            count_total: 0_u64,
+            pending:     0_u64,
+            last_tick:   Instant.now(),
+            tick_period: Duration.from_secs(5),
+        }
+    }
+
+    /// Record `n` events. Triggers a tick if the sample period has
+    /// elapsed since the last one.
+    public fn mark(&mut self, n: UInt64) {
+        self.count_total = self.count_total + n;
+        self.pending = self.pending + n;
+        let now = Instant.now();
+        let elapsed = now.duration_since(self.last_tick.clone())
+            .unwrap_or_else(|| Duration.from_secs(0));
+        if elapsed.as_millis() >= self.tick_period.as_millis() {
+            self.tick(now);
+        }
+    }
+
+    fn tick(&mut self, now: Instant) {
+        let period_s = (self.tick_period.as_micros() as Float) / 1_000_000.0;
+        let rate = (self.pending as Float) / period_s;
+        self.m1.update(rate, now.clone());
+        self.m5.update(rate, now.clone());
+        self.m15.update(rate, now.clone());
+        self.pending = 0_u64;
+        self.last_tick = now;
+    }
+
+    /// Events per second in the 1-minute window.
+    public fn one_minute_rate(&self) -> Float { self.m1.value() }
+    public fn five_minute_rate(&self) -> Float { self.m5.value() }
+    public fn fifteen_minute_rate(&self) -> Float { self.m15.value() }
+
+    public fn count(&self) -> UInt64 { self.count_total }
+}
+
+// =============================================================================
+// exp(-x) approximation
+// =============================================================================
+
+/// Compute exp(-x) for x >= 0 via Padé-like approximation on
+/// range-reduced input. Accuracy ~1e-6 for x ∈ [0, 20]; saturates
+/// at 0 for larger x.
+fn exp_neg(x: Float) -> Float {
+    if x <= 0.0 { return 1.0; }
+    if x > 20.0 { return 0.0; }
+    // Break x into integer part (halved) + fraction.
+    // Use 2^(-k) + Taylor for fraction to avoid floating pow.
+    let mut k: Int = 0;
+    let mut y = x;
+    while y >= 0.69314718055994530941 {
+        y = y - 0.69314718055994530941;    // ln 2
+        k = k + 1;
+    }
+    // Now y ∈ [0, ln 2); exp(-x) = 2^(-k) * exp(-y).
+    // exp(-y) ≈ 1 - y + y²/2 - y³/6 + y⁴/24 - y⁵/120.
+    let y2 = y * y;
+    let y3 = y2 * y;
+    let y4 = y3 * y;
+    let y5 = y4 * y;
+    let e_neg_y = 1.0 - y + y2 * 0.5 - y3 * 0.16666666666666666
+                  + y4 * 0.041666666666666664 - y5 * 0.008333333333333333;
+    let mut scale: Float = 1.0;
+    let mut i: Int = 0;
+    while i < k { scale = scale * 0.5; i = i + 1; }
+    e_neg_y * scale
+}

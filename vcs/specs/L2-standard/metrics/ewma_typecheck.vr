@@ -1,0 +1,68 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: metrics, ewma, rate, load-average, typecheck
+// @timeout: 10000
+// @expect: pass
+
+mount core.metrics.ewma.{
+    Ewma, TimeDecayingEwma, RateMeter,
+    LOAD_AVG_1, LOAD_AVG_5, LOAD_AVG_15,
+};
+mount core.time.instant.{Instant};
+mount core.time.duration.{Duration};
+
+fn exercise_fixed_ewma() {
+    let mut ewma = Ewma.new(0.125);    // TCP SRTT α=1/8
+
+    // First update seeds; subsequent ones mix.
+    ewma.update(10.0);
+    assert(ewma.is_seeded());
+    assert(ewma.value() == 10.0);
+
+    ewma.update(20.0);
+    let v = ewma.value();
+    let _ = v;   // expected 11.25 = 0.125*20 + 0.875*10
+
+    // Clamped α.
+    let _ = Ewma.new(0.0);
+    let _ = Ewma.new(2.0);
+
+    // Presets.
+    let _ = Ewma.one_minute();
+    let _ = Ewma.five_minute();
+    let _ = Ewma.fifteen_minute();
+
+    ewma.reset();
+    assert(!ewma.is_seeded());
+
+    let _: Float = LOAD_AVG_1;
+    let _: Float = LOAD_AVG_5;
+    let _: Float = LOAD_AVG_15;
+}
+
+fn exercise_time_decaying() {
+    let mut ewma = TimeDecayingEwma.one_minute();
+    let t0 = Instant.now();
+    ewma.update(1.0, t0.clone());
+    ewma.update(5.0, t0);
+    let _ = ewma.value();
+    ewma.reset();
+}
+
+fn exercise_rate_meter() {
+    let mut meter = RateMeter.new();
+    meter.mark(100_u64);
+    meter.mark(50_u64);
+
+    let _: Float = meter.one_minute_rate();
+    let _: Float = meter.five_minute_rate();
+    let _: Float = meter.fifteen_minute_rate();
+    let _: UInt64 = meter.count();
+}
+
+fn main() {
+    exercise_fixed_ewma();
+    exercise_time_decaying();
+    exercise_rate_meter();
+}
