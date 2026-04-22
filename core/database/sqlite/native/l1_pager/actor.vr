@@ -1,0 +1,217 @@
+module core.database.sqlite.native.l1_pager.actor;
+
+// =============================================================================
+// l1_pager/actor.vr — Single-writer pager actor
+// =============================================================================
+// Layer: 1
+// Spec: sqlite-native.md §4.3 + §8.1
+//
+// Split design:
+//
+//   * `PagerActor` — the private state owned by exactly one task.
+//                    Never shared mutably; readers go through
+//                    SnapshotView instead (§4.3).
+//
+//   * `PagerRequest` / `PagerReply` — the typed request surface. Every
+//                                      mutation and every read travels
+//                                      across the mailbox as a value
+//                                      of one of these variants.
+//
+//   * `pager_apply(actor, req) → reply` — the pure request processor.
+//                                          Synchronous; stateless with
+//                                          respect to the mailbox
+//                                          plumbing. The async harness
+//                                          wraps this.
+//
+// The async harness (spawn + loop on bounded Mailbox) will land once
+// `core.async.channel.Sender/Receiver<PagerRequest>` Send/Sync bounds
+// through `core.database.sqlite.native.l1_pager.actor` reliably in
+// the interpreter. The synchronous processor below is already the
+// canonical behaviour and callable directly for tests.
+// =============================================================================
+
+mount core.*;
+mount collections.{List, Map};
+mount base.{Result, Ok, Err, Text, Maybe};
+mount core.database.sqlite.native.l1_pager.pager.{
+    Pager, PageFrame, PagerError, PagerErrorKind,
+    pager_read, pager_write,
+};
+mount core.database.sqlite.native.l1_pager.page_cache.{
+    CachedFrame, PageCache, page_cache_new,
+};
+
+// -----------------------------------------------------------------------------
+// Checkpoint modes (mirrors SQLite)
+// -----------------------------------------------------------------------------
+
+public type CheckpointMode is
+      Passive      // checkpoint until first blocked write
+    | Full         // drain WAL fully; blocks new writers
+    | Restart      // Full + reset WAL file to empty
+    | Truncate;    // Restart + truncate WAL file to 0 bytes
+
+// -----------------------------------------------------------------------------
+// Requests / replies
+// -----------------------------------------------------------------------------
+
+/// Every operation the pager understands. Readers send `Read`, writers
+/// `Write` / `Commit`; the checkpointer task sends `Checkpoint`. The
+/// `reply_token` field is an opaque correlation ID used by the async
+/// harness to pair reply → waiter; tests pass `0` and read the return
+/// value directly from `pager_apply`.
+public type PagerRequest is
+      Read(page: Int, reply_token: Int)
+    | Write(frame: PageFrame, reply_token: Int)
+    | Commit(reply_token: Int)
+    | Checkpoint(mode: CheckpointMode, reply_token: Int);
+
+/// The three reply shapes. Matched against in the test harness and,
+/// once the async harness lands, by the request originator.
+public type PagerReply is
+      ReadOk(frame: PageFrame, reply_token: Int)
+    | WriteOk(reply_token: Int)
+    | CommitOk(reply_token: Int)
+    | CheckpointOk(frames_applied: Int, reply_token: Int)
+    | Failed(err: PagerError, reply_token: Int);
+
+// -----------------------------------------------------------------------------
+// Actor state
+// -----------------------------------------------------------------------------
+
+/// Private state of the single-writer pager actor. Affine so it cannot
+/// be aliased — the compiler enforces "only one live PagerActor
+/// reference per instance" regardless of whether the async harness is
+/// wired.
+public type affine PagerActor is {
+    pager: Pager,
+    cache: PageCache,
+    // Pending commit counter — incremented by Write, reset by Commit.
+    pending_writes: Int,
+};
+
+/// Construct an actor around an existing Pager. `cache_pages` seeds the
+/// LRU cache size; later, `PRAGMA cache_size` will reconfigure.
+public fn actor_new(pager: Pager, cache_pages: Int) -> PagerActor {
+    PagerActor {
+        pager: pager,
+        cache: page_cache_new(cache_pages),
+        pending_writes: 0,
+    }
+}
+
+implement PagerActor {
+    public fn pending(&self) -> Int { self.pending_writes }
+    public fn cache_hits(&self) -> Int { self.cache.hit_count() }
+    public fn cache_misses(&self) -> Int { self.cache.miss_count() }
+}
+
+// -----------------------------------------------------------------------------
+// Request processor
+// -----------------------------------------------------------------------------
+
+/// Execute a single request. Synchronous; the async harness will wrap
+/// this in `while let Some(req) = mailbox.recv().await { ... }`.
+///
+/// Routing:
+///   Read       → cache.get then pager_read; stamp cache on miss.
+///   Write      → cache.put (dirty=true), pager_write (passthrough).
+///   Commit     → bump cache generation; reset pending counter.
+///   Checkpoint → mode-specific; all modes bump generation and clear
+///                cache (for :memory: Pager there's no WAL to drain).
+public fn pager_apply(actor: &mut PagerActor, req: PagerRequest) -> PagerReply {
+    match req {
+        Read(page, tok) => {
+            // Fast path: cache hit.
+            let cached = actor.cache.get(page);
+            match cached {
+                Some(f) => {
+                    let frame = PageFrame {
+                        page_no: f.page_no,
+                        data: f.data.clone(),
+                        dirty: f.dirty,
+                    };
+                    return ReadOk(frame, tok);
+                },
+                None => {},
+            }
+            // Slow path: pull from the pager.
+            match pager_read(&mut actor.pager, page) {
+                Ok(frame) => {
+                    let cached_new = CachedFrame {
+                        page_no: frame.page_no,
+                        data: frame.data.clone(),
+                        dirty: false,
+                        generation: actor.cache.current_generation(),
+                        pin_count: 0,
+                        last_access: 0,
+                    };
+                    actor.cache.put(cached_new);
+                    ReadOk(frame, tok)
+                }
+                Err(e) => Failed(e, tok),
+            }
+        }
+        Write(frame, tok) => {
+            // Buffer in cache as dirty.
+            let cached_new = CachedFrame {
+                page_no: frame.page_no,
+                data: frame.data.clone(),
+                dirty: true,
+                generation: actor.cache.current_generation(),
+                pin_count: 0,
+                last_access: 0,
+            };
+            actor.cache.put(cached_new);
+            // Passthrough to the pager (the :memory: backend writes
+            // immediately; the WAL backend buffers — abstraction is the
+            // pager's responsibility, not ours).
+            match pager_write(&mut actor.pager, &frame) {
+                Ok(_) => {
+                    actor.pending_writes = actor.pending_writes + 1;
+                    WriteOk(tok)
+                }
+                Err(e) => Failed(e, tok),
+            }
+        }
+        Commit(tok) => {
+            // Bump generation → every stale cache line snapshotted
+            // before this commit is now invisible to new reads.
+            let _ = actor.cache.bump_generation();
+            actor.pending_writes = 0;
+            CommitOk(tok)
+        }
+        Checkpoint(mode, tok) => {
+            // v0.1 :memory: pager has no WAL, so Checkpoint is a no-op
+            // modulo a cache-generation bump to make the Passive / Full
+            // / Restart / Truncate distinction observable in stats.
+            let frames_applied = actor.pending_writes;
+            actor.pending_writes = 0;
+            let _ = actor.cache.bump_generation();
+            let _ = mode;   // mode variants are functionally identical
+                            // until WAL lands in §8.3.
+            CheckpointOk(frames_applied, tok)
+        }
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Test helpers
+// -----------------------------------------------------------------------------
+
+/// Convenience for tests — dispatch a batch of requests and collect
+/// replies. The actor stays borrowed mutably for the duration, keeping
+/// single-writer semantics in-process.
+public fn pager_apply_batch(
+    actor: &mut PagerActor,
+    reqs: List<PagerRequest>,
+) -> List<PagerReply> {
+    let mut out: List<PagerReply> = List.new();
+    let mut i: Int = 0;
+    while i < reqs.len() {
+        let req = reqs[i].clone();
+        out.push(pager_apply(actor, req));
+        i = i + 1;
+    }
+    out
+}

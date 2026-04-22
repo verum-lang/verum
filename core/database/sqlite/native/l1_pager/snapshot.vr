@@ -1,0 +1,136 @@
+module core.database.sqlite.native.l1_pager.snapshot;
+
+// =============================================================================
+// l1_pager/snapshot.vr — Reader snapshot view on a WAL watermark
+// =============================================================================
+// Layer: 1
+// Spec: sqlite-native.md §4.3 + §20.6
+//
+// A reader snapshot pins the set of WAL frames visible to a reader at
+// the moment the snapshot was taken. Concretely, a snapshot holds:
+//
+//   * wal_watermark  — highest WAL frame index this reader may see
+//   * generation     — cache generation at snapshot time; bumping
+//                       generation makes stale cache entries invisible
+//                       but committed frames with lower index remain
+//                       visible to this snapshot.
+//   * epoch          — monotone reader epoch for `core.mem.epoch`
+//                       reclamation once the arena wiring lands (v2)
+//
+// Readers reach pages in this order:
+//
+//   1. Check the reader's private snapshot cache of (page_no → frame).
+//   2. Query the pager's WAL-index for a frame ≤ watermark. Present?
+//      read that frame's payload.
+//   3. Otherwise fall through to the main DB file.
+//
+// The pager actor creates snapshots on request; once created, a
+// snapshot is immutable and can be held across cooperative yield
+// points without needing a lock on the pager.
+// =============================================================================
+
+mount core.*;
+mount collections.Map;
+mount base.{Result, Ok, Err, Text};
+
+// -----------------------------------------------------------------------------
+// Types
+// -----------------------------------------------------------------------------
+
+/// Immutable view onto a consistent point in the WAL history.
+public type SnapshotView is {
+    wal_watermark: Int,
+    generation: Int,
+    epoch: Int,
+    // Optional lightweight overlay: `page_no → wal_frame_offset`. If
+    // the pager already has this map for the current watermark, it is
+    // cloned into the snapshot so readers can skip the WAL-index hop.
+    page_map: Map<Int, Int>,
+};
+
+public type SnapshotError is
+      Closed
+    | Stale(latest_wm: Int, our_wm: Int);
+
+// -----------------------------------------------------------------------------
+// Constructors
+// -----------------------------------------------------------------------------
+
+/// Fresh snapshot at `(watermark, generation, epoch)` with an empty
+/// overlay. The pager fills in the overlay after construction when it
+/// has the WAL-index readily available.
+public fn snapshot_new(watermark: Int, generation: Int, epoch: Int) -> SnapshotView {
+    SnapshotView {
+        wal_watermark: watermark,
+        generation: generation,
+        epoch: epoch,
+        page_map: Map.new(),
+    }
+}
+
+/// Snapshot carrying a pre-computed overlay — used by the pager's
+/// fast-path when it already owns the `(page_no → offset)` map.
+public fn snapshot_with_overlay(
+    watermark: Int,
+    generation: Int,
+    epoch: Int,
+    overlay: Map<Int, Int>,
+) -> SnapshotView {
+    SnapshotView {
+        wal_watermark: watermark,
+        generation: generation,
+        epoch: epoch,
+        page_map: overlay,
+    }
+}
+
+// -----------------------------------------------------------------------------
+// API
+// -----------------------------------------------------------------------------
+
+implement SnapshotView {
+    public fn watermark(&self) -> Int { self.wal_watermark }
+    public fn generation(&self) -> Int { self.generation }
+    public fn epoch_id(&self) -> Int { self.epoch }
+
+    /// Look up `page_no` in the snapshot's WAL overlay. Returns the
+    /// byte offset of the latest WAL frame ≤ watermark carrying this
+    /// page, or `-1` if none.
+    public fn lookup(&self, page_no: Int) -> Int {
+        if !self.page_map.contains_key(page_no) {
+            return -1;
+        }
+        self.page_map.get(page_no)
+    }
+
+    /// Is this snapshot's watermark still the live one? `current_wm`
+    /// is the pager's most recent committed watermark.
+    public fn is_fresh(&self, current_wm: Int) -> Bool {
+        self.wal_watermark == current_wm
+    }
+
+    /// Number of frames indexed by this snapshot's overlay.
+    public fn overlay_size(&self) -> Int {
+        self.page_map.len()
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Watermark arithmetic helpers
+// -----------------------------------------------------------------------------
+
+/// Snapshot A "sees" at least as much as snapshot B iff A's watermark
+/// is ≥ B's. Monotone by construction — WAL watermarks never decrease.
+public fn snapshot_sees_at_least(a: &SnapshotView, b: &SnapshotView) -> Bool {
+    a.wal_watermark >= b.wal_watermark
+}
+
+/// Stale-check: an attempted upgrade fails if the caller's snapshot
+/// has fallen behind the current watermark.
+public fn ensure_fresh(snap: &SnapshotView, current_wm: Int) -> Result<(), SnapshotError> {
+    if snap.wal_watermark == current_wm {
+        Ok(())
+    } else {
+        Err(Stale(current_wm, snap.wal_watermark))
+    }
+}

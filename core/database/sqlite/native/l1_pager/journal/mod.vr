@@ -1,0 +1,42 @@
+module core.database.sqlite.native.l1_pager.journal;
+
+// =============================================================================
+// l1_pager/journal/mod.vr — Journal submodule (WAL + rollback)
+// =============================================================================
+// Layer: 1
+// Spec: sqlite-native.md §6.5 + §8
+//
+// SQLite supports two journalling modes:
+//
+//   * **WAL (write-ahead log)** — modern default; concurrent readers,
+//     single writer, background checkpointer. Frame-based append to a
+//     side file `<db>-wal`. See `wal.vr`.
+//
+//   * **Rollback journal** — legacy; writer dumps pre-images of pages
+//     it's about to modify to `<db>-journal`, then overwrites in place.
+//     Readers block for the duration of the write. `rollback.vr`.
+//
+// Both share the "frame accounting + fsync barrier" shape implemented
+// here; per-mode logic is in the child modules.
+// =============================================================================
+
+public module wal;
+public module rollback;
+
+public mount .wal.{
+    WalHeader, WalFrameHeader, Wal,
+    WAL_MAGIC_LE, WAL_MAGIC_BE,
+    WAL_HEADER_SIZE, WAL_FRAME_HEADER_SIZE,
+    WAL_FORMAT_VERSION,
+    wal_new, wal_header_serialize, wal_header_parse,
+    wal_frame_header_serialize, wal_frame_header_parse,
+    wal_running_checksum,
+};
+
+public mount .rollback.{
+    RollbackHeader, RollbackError,
+    ROLLBACK_HEADER_SIZE, rollback_magic,
+    rollback_serialize_header, rollback_parse_header,
+    rollback_record_checksum, rollback_serialize_record,
+    rollback_parse_record, rollback_replay,
+};

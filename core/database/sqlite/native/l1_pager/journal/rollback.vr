@@ -1,0 +1,243 @@
+module core.database.sqlite.native.l1_pager.journal.rollback;
+
+// =============================================================================
+// l1_pager/journal/rollback.vr — Legacy rollback journal mode
+// =============================================================================
+// Layer: 1
+// Spec: sqlite-native.md §8.7, sqlite.org/lockingv3.html #rollback
+//
+// Pre-WAL SQLite writes used a rollback journal file `<db>-journal`.
+// Writers copied each page's pre-image to the journal BEFORE overwriting
+// it in the main DB file; on abort or crash, recovery replays the
+// journal entries back onto the main DB.
+//
+// File format (big-endian, matching C-SQLite):
+//
+//     byte 0..7     magic      = 0xd9 0xd5 0x05 0xf9 0x20 0xa1 0x63 0xd7
+//     byte 8..11    nRec       (u32) — number of page records that follow,
+//                                      or 0xFFFFFFFF meaning "use size
+//                                      field" for mid-fsync recovery
+//     byte 12..15   checksum_nonce (u32) — included in per-record cksum
+//     byte 16..19   initial_db_size_pages (u32)
+//     byte 20..23   sector_size (u32)
+//     byte 24..27   page_size   (u32)
+//
+//     -- then `nRec` records of:
+//     byte 0..3     page_number (u32)
+//     byte 4..page_size+3   pre-image bytes
+//     byte page_size+4..+7  checksum (u32; simple accumulator)
+//
+// This module implements the *pure* serialise / parse side; durability
+// (fsync barriers before any DB overwrite) is driven by the pager actor
+// via `JournalCommand::AppendPreimage` requests.
+// =============================================================================
+
+mount core.*;
+mount collections.List;
+mount base.{Result, Ok, Err, Text};
+
+// -----------------------------------------------------------------------------
+// Constants
+// -----------------------------------------------------------------------------
+
+public const ROLLBACK_HEADER_SIZE: Int = 28;
+
+/// The SQLite journal magic string (8 bytes).
+public fn rollback_magic() -> List<Byte> {
+    let mut out: List<Byte> = List.new();
+    out.push(0xD9 as Byte);
+    out.push(0xD5 as Byte);
+    out.push(0x05 as Byte);
+    out.push(0xF9 as Byte);
+    out.push(0x20 as Byte);
+    out.push(0xA1 as Byte);
+    out.push(0x63 as Byte);
+    out.push(0xD7 as Byte);
+    out
+}
+
+// -----------------------------------------------------------------------------
+// Types
+// -----------------------------------------------------------------------------
+
+public type RollbackHeader is {
+    n_rec: UInt32,                       // 0xFFFFFFFF = "use size field"
+    checksum_nonce: UInt32,
+    initial_db_size_pages: UInt32,
+    sector_size: UInt32,
+    page_size: UInt32,
+};
+
+public type RollbackError is
+      BadMagic
+    | ShortBuffer
+    | BadChecksum(page_no: UInt32, expected: UInt32, actual: UInt32)
+    | PageSizeMismatch(expected: UInt32, got: UInt32);
+
+// -----------------------------------------------------------------------------
+// Header serialise / parse
+// -----------------------------------------------------------------------------
+
+fn write_u32_be(buf: &mut List<Byte>, v: UInt32) {
+    buf.push(((v >> 24) & 0xFF) as Byte);
+    buf.push(((v >> 16) & 0xFF) as Byte);
+    buf.push(((v >> 8)  & 0xFF) as Byte);
+    buf.push((v & 0xFF) as Byte);
+}
+
+fn read_u32_be(buf: &[Byte], off: Int) -> UInt32 {
+    ((buf[off]     as UInt32) << 24)
+    | ((buf[off + 1] as UInt32) << 16)
+    | ((buf[off + 2] as UInt32) << 8)
+    |  (buf[off + 3] as UInt32)
+}
+
+public fn rollback_serialize_header(h: &RollbackHeader) -> List<Byte> {
+    let mut out = rollback_magic();
+    write_u32_be(&mut out, h.n_rec);
+    write_u32_be(&mut out, h.checksum_nonce);
+    write_u32_be(&mut out, h.initial_db_size_pages);
+    write_u32_be(&mut out, h.sector_size);
+    write_u32_be(&mut out, h.page_size);
+    out
+}
+
+public fn rollback_parse_header(buf: &[Byte]) -> Result<RollbackHeader, RollbackError> {
+    if buf.len() < ROLLBACK_HEADER_SIZE {
+        return Err(ShortBuffer);
+    }
+    let expected_magic = rollback_magic();
+    let mut i: Int = 0;
+    while i < 8 {
+        if buf[i] != expected_magic[i] {
+            return Err(BadMagic);
+        }
+        i = i + 1;
+    }
+    Ok(RollbackHeader {
+        n_rec: read_u32_be(buf, 8),
+        checksum_nonce: read_u32_be(buf, 12),
+        initial_db_size_pages: read_u32_be(buf, 16),
+        sector_size: read_u32_be(buf, 20),
+        page_size: read_u32_be(buf, 24),
+    })
+}
+
+// -----------------------------------------------------------------------------
+// Per-record checksum
+// -----------------------------------------------------------------------------
+
+/// SQLite's rollback-journal record checksum — nonce + sum over every
+/// 200th byte of the page image (this is what pager.c::cksum() computes).
+/// The nonce is the header's `checksum_nonce`.
+public fn rollback_record_checksum(nonce: UInt32, page_bytes: &[Byte]) -> UInt32 {
+    let mut s = nonce;
+    let mut i: Int = page_bytes.len() - 200;
+    while i > 0 {
+        s = s + (page_bytes[i] as UInt32);
+        i = i - 200;
+    }
+    s
+}
+
+// -----------------------------------------------------------------------------
+// Record serialise / parse
+// -----------------------------------------------------------------------------
+
+/// Serialise one page record (4 bytes page_no + page_size bytes +
+/// 4 bytes checksum).
+public fn rollback_serialize_record(
+    page_no: UInt32,
+    nonce: UInt32,
+    page_bytes: &[Byte],
+) -> List<Byte> {
+    let mut out: List<Byte> = List.new();
+    write_u32_be(&mut out, page_no);
+    let mut i: Int = 0;
+    while i < page_bytes.len() {
+        out.push(page_bytes[i]);
+        i = i + 1;
+    }
+    let cksum = record_checksum(nonce, page_bytes);
+    write_u32_be(&mut out, cksum);
+    out
+}
+
+/// Parse one page record. Validates the trailing checksum against the
+/// header's nonce and the computed running sum. `page_size` tells us
+/// how many bytes belong to the page image.
+public fn rollback_parse_record(
+    buf: &[Byte],
+    start: Int,
+    page_size: Int,
+    nonce: UInt32,
+) -> Result<(UInt32, List<Byte>), RollbackError> {
+    let record_size = 4 + page_size + 4;
+    if start + record_size > buf.len() {
+        return Err(ShortBuffer);
+    }
+    let page_no = read_u32_be(buf, start);
+    let mut page_bytes: List<Byte> = List.new();
+    let mut i: Int = 0;
+    while i < page_size {
+        page_bytes.push(buf[start + 4 + i]);
+        i = i + 1;
+    }
+    let stored_cksum = read_u32_be(buf, start + 4 + page_size);
+    let computed = record_checksum(nonce, &page_bytes);
+    if stored_cksum != computed {
+        return Err(BadChecksum(page_no, computed, stored_cksum));
+    }
+    Ok((page_no, page_bytes))
+}
+
+// -----------------------------------------------------------------------------
+// Recovery
+// -----------------------------------------------------------------------------
+
+/// Reverse-chronological replay is not required — rollback journal
+/// recovery applies pre-images in *journal order*, and since each
+/// record is a page's pre-image, the final state is correct regardless
+/// of order (idempotent writes). Returns the list of (page_no, bytes)
+/// pairs the pager should write back to the main DB.
+public fn rollback_replay(
+    journal_bytes: &[Byte],
+) -> Result<List<(UInt32, List<Byte>)>, RollbackError> {
+    let header = match rollback_parse_header(journal_bytes) {
+        Ok(h)  => h,
+        Err(e) => { return Err(e); }
+    };
+    let mut out: List<(UInt32, List<Byte>)> = List.new();
+    let page_size = header.page_size as Int;
+    let record_size = 4 + page_size + 4;
+    let mut pos: Int = ROLLBACK_HEADER_SIZE;
+    // If n_rec is 0xFFFFFFFF we scan until EOF; otherwise we scan for
+    // exactly n_rec records.
+    let expected_records: Int = if header.n_rec == (0xFFFFFFFF as UInt32) {
+        -1
+    } else {
+        header.n_rec as Int
+    };
+    let mut seen: Int = 0;
+    while pos + record_size <= journal_bytes.len() {
+        match parse_record(journal_bytes, pos, page_size, header.checksum_nonce) {
+            Ok((pn, bytes)) => {
+                out.push((pn, bytes));
+                seen = seen + 1;
+                pos = pos + record_size;
+                if expected_records > 0 && seen >= expected_records {
+                    break;
+                }
+            }
+            Err(e) => {
+                // Under 0xFFFFFFFF recovery we stop at the first bad
+                // record — it marks the mid-fsync boundary.
+                if expected_records < 0 {
+                    break;
+                }
+                return Err(e);
+            }
+        }
+    }
+    Ok(out)
+}

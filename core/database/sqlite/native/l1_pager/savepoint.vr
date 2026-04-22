@@ -1,0 +1,149 @@
+module core.database.sqlite.native.l1_pager.savepoint;
+
+// =============================================================================
+// l1_pager/savepoint.vr — Nested-savepoint stack
+// =============================================================================
+// Layer: 1
+// Spec: sqlite-native.md §8.6, sqlite.org/lang_savepoint.html
+//
+// SQLite's SAVEPOINT / RELEASE / ROLLBACK TO is a named-marker
+// sub-transaction primitive. Implemented here as a stack of
+// `Savepoint` entries; each one records:
+//
+//   * name          — user-supplied identifier
+//   * wal_frame_idx — WAL frame count at savepoint creation
+//                     (the pager rolls back by truncating WAL to this
+//                     frame on ROLLBACK TO)
+//   * depth         — 0-based depth in the current transaction
+//
+// RELEASE "name"     → pop every entry from the top down until "name"
+//                       is popped too. If "name" isn't on the stack,
+//                       error.
+//
+// ROLLBACK TO "name" → pop every entry **above** "name" (leave "name"
+//                       itself in place); signal the pager to drop
+//                       WAL frames above `wal_frame_idx`.
+//
+// SQLite allows the same name twice — the inner shadows the outer.
+// RELEASE / ROLLBACK TO target the *innermost* occurrence; our stack
+// scan searches top-down and enforces the same semantics.
+// =============================================================================
+
+mount core.*;
+mount collections.List;
+mount base.{Result, Ok, Err, Text};
+
+// -----------------------------------------------------------------------------
+// Types
+// -----------------------------------------------------------------------------
+
+public type Savepoint is {
+    name: Text,
+    wal_frame_idx: Int,
+    depth: Int,
+};
+
+public type SavepointError is
+      NotFound(name: Text)
+    | Empty
+    | BadName(reason: Text);
+
+/// LIFO savepoint stack. Call `push`, `release`, `rollback_to`.
+public type SavepointStack is {
+    entries: List<Savepoint>,
+};
+
+public fn savepoint_stack_new() -> SavepointStack {
+    SavepointStack { entries: List.new() }
+}
+
+// -----------------------------------------------------------------------------
+// API
+// -----------------------------------------------------------------------------
+
+implement SavepointStack {
+    /// Number of live savepoints.
+    public fn depth(&self) -> Int { self.entries.len() }
+
+    /// Push a fresh savepoint. Name cannot be empty.
+    public fn push(&mut self, name: &Text, wal_frame_idx: Int)
+        -> Result<(), SavepointError>
+    {
+        if name.len() == 0 {
+            return Err(BadName("empty savepoint name".clone()));
+        }
+        let sp = Savepoint {
+            name: name.clone(),
+            wal_frame_idx: wal_frame_idx,
+            depth: self.entries.len(),
+        };
+        self.entries.push(sp);
+        Ok(())
+    }
+
+    /// Find the innermost savepoint matching `name`. Returns its index
+    /// into `entries` (0-based from the bottom), or None.
+    public fn find(&self, name: &Text) -> Int {
+        let n = self.entries.len();
+        let mut i: Int = n - 1;
+        while i >= 0 {
+            if self.entries[i].name == name.clone() {
+                return i;
+            }
+            i = i - 1;
+        }
+        -1
+    }
+
+    /// RELEASE "name" — pop the named savepoint and everything above it.
+    /// Returns the number of savepoints popped (including "name").
+    public fn release(&mut self, name: &Text) -> Result<Int, SavepointError> {
+        let idx = self.find(name);
+        if idx < 0 {
+            return Err(NotFound(name.clone()));
+        }
+        let mut popped: Int = 0;
+        while self.entries.len() > idx {
+            let _ = self.entries.pop();
+            popped = popped + 1;
+        }
+        Ok(popped)
+    }
+
+    /// ROLLBACK TO "name" — remove everything above "name" but keep
+    /// "name" itself. Returns the `wal_frame_idx` the pager should
+    /// truncate WAL to (i.e., the named savepoint's recorded frame).
+    public fn rollback_to(&mut self, name: &Text) -> Result<Int, SavepointError> {
+        let idx = self.find(name);
+        if idx < 0 {
+            return Err(NotFound(name.clone()));
+        }
+        while self.entries.len() > idx + 1 {
+            let _ = self.entries.pop();
+        }
+        Ok(self.entries[idx].wal_frame_idx)
+    }
+
+    /// Drop every savepoint. Called on COMMIT / ROLLBACK of the outer tx.
+    public fn clear(&mut self) {
+        self.entries = List.new();
+    }
+
+    /// Peek at the top savepoint without popping.
+    public fn top(&self) -> Result<Savepoint, SavepointError> {
+        if self.entries.len() == 0 {
+            return Err(Empty);
+        }
+        Ok(self.entries[self.entries.len() - 1].clone())
+    }
+}
+
+implement Savepoint {
+    public fn clone(&self) -> Savepoint {
+        Savepoint {
+            name: self.name.clone(),
+            wal_frame_idx: self.wal_frame_idx,
+            depth: self.depth,
+        }
+    }
+}

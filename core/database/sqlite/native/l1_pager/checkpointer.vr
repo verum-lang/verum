@@ -1,0 +1,160 @@
+module core.database.sqlite.native.l1_pager.checkpointer;
+
+// =============================================================================
+// l1_pager/checkpointer.vr — Background WAL checkpointer
+// =============================================================================
+// Layer: 1
+// Spec: sqlite-native.md §8.4
+//
+// The checkpointer drains WAL frames back into the main database file
+// and truncates / resets the WAL file depending on the requested mode.
+// Four modes (mirrors SQLite):
+//
+//   * PASSIVE  — checkpoint frames as long as no writer is waiting;
+//                 quit on the first conflict.  Default for the
+//                 `auto-checkpoint` hook.
+//   * FULL     — block new writers until the WAL is fully drained.
+//   * RESTART  — FULL + reset the WAL file to an empty state (allows
+//                 salt rotation, detaches readers holding the old WAL).
+//   * TRUNCATE — RESTART + truncate the WAL file to 0 bytes.
+//
+// This module owns the *policy* — it computes how many frames to drain,
+// tracks the resulting statistics (frames applied, bytes truncated),
+// and decides whether the mode's side-effects apply. The actual WAL
+// I/O flows through the pager actor (see `pager_apply` in actor.vr);
+// the checkpointer issues `Checkpoint(mode)` requests to it.
+//
+// Auto-checkpoint is governed by a configurable frames-threshold
+// (`PRAGMA wal_autocheckpoint`, default 1000). When the WAL frame
+// count exceeds the threshold, the pager actor emits an internal
+// `Checkpoint(Passive)` request. The checkpointer's `should_trigger`
+// helper below is the policy function.
+// =============================================================================
+
+mount core.*;
+mount base.{Result, Ok, Err, Text};
+mount core.database.sqlite.native.l1_pager.actor.CheckpointMode;
+
+// -----------------------------------------------------------------------------
+// Configuration
+// -----------------------------------------------------------------------------
+
+/// Knobs that control when and how the checkpointer runs.
+public type CheckpointConfig is {
+    auto_frames_threshold: Int,   // -1 = auto-checkpoint off
+    default_mode: CheckpointMode, // mode for auto-triggered runs
+    idle_interval_ms: Int,        // wake the background task at least this often
+};
+
+public fn checkpoint_config_default() -> CheckpointConfig {
+    CheckpointConfig {
+        auto_frames_threshold: 1000,   // SQLite's default
+        default_mode: Passive,
+        idle_interval_ms: 500,
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Statistics
+// -----------------------------------------------------------------------------
+
+public type CheckpointStats is {
+    mode: CheckpointMode,
+    frames_applied: Int,
+    bytes_truncated: Int,   // > 0 only when mode == Truncate
+    wal_reset: Bool,        // true for Restart / Truncate
+};
+
+public fn checkpoint_stats_empty(mode: CheckpointMode) -> CheckpointStats {
+    CheckpointStats {
+        mode: mode,
+        frames_applied: 0,
+        bytes_truncated: 0,
+        wal_reset: false,
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Policy helpers
+// -----------------------------------------------------------------------------
+
+/// Decide whether the WAL has grown large enough to trigger an
+/// automatic checkpoint. Returns false when `auto_frames_threshold < 0`
+/// (feature off) or the count hasn't crossed the threshold yet.
+public fn should_trigger(cfg: &CheckpointConfig, wal_frame_count: Int) -> Bool {
+    if cfg.auto_frames_threshold < 0 { return false; }
+    wal_frame_count >= cfg.auto_frames_threshold
+}
+
+/// Does this mode reset the WAL file (drop the salts, rewind the
+/// frame counter)? True for Restart and Truncate.
+public fn mode_resets_wal(mode: CheckpointMode) -> Bool {
+    match mode {
+        Restart | Truncate => true,
+        Passive | Full     => false,
+    }
+}
+
+/// Does this mode truncate the underlying WAL file to zero bytes?
+/// Only Truncate.
+public fn mode_truncates_file(mode: CheckpointMode) -> Bool {
+    match mode {
+        Truncate => true,
+        _        => false,
+    }
+}
+
+/// Does this mode block new writers for the duration? Full, Restart,
+/// and Truncate all do; Passive alone yields to writers.
+public fn mode_blocks_writers(mode: CheckpointMode) -> Bool {
+    match mode {
+        Passive => false,
+        _       => true,
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Driver
+// -----------------------------------------------------------------------------
+
+/// Run a checkpoint pass synchronously: apply `available_frames` WAL
+/// frames (bounded by the mode's tolerance for writer conflicts) and
+/// return the resulting statistics.
+///
+/// `writer_waiting`   — true if a writer is currently blocked on the
+///                       pager; Passive yields when this is true.
+/// `wal_file_bytes`   — size of the WAL file; used only in Truncate.
+public fn run_checkpoint(
+    mode: CheckpointMode,
+    available_frames: Int,
+    writer_waiting: Bool,
+    wal_file_bytes: Int,
+) -> Result<CheckpointStats, Text> {
+    let mut stats = checkpoint_stats_empty(mode);
+
+    match mode {
+        Passive => {
+            if writer_waiting {
+                // Yield immediately — passive mode never blocks.
+                return Ok(stats);
+            }
+            stats.frames_applied = available_frames;
+            Ok(stats)
+        }
+        Full => {
+            stats.frames_applied = available_frames;
+            Ok(stats)
+        }
+        Restart => {
+            stats.frames_applied = available_frames;
+            stats.wal_reset = true;
+            Ok(stats)
+        }
+        Truncate => {
+            stats.frames_applied = available_frames;
+            stats.wal_reset = true;
+            stats.bytes_truncated = wal_file_bytes;
+            Ok(stats)
+        }
+    }
+}

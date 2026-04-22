@@ -1,0 +1,371 @@
+module core.database.sqlite.native.l1_pager.db_header;
+
+// =============================================================================
+// l1_pager/db_header.vr — Database header parse / serialize
+// =============================================================================
+// Layer: 1
+// Spec: sqlite-native.md §6.1, sqlite.org/fileformat2.html §1.3
+//
+// The first 100 bytes of every SQLite database file encode a fixed
+// header. This module parses and serialises it bit-exactly, validating
+// the constrained fields with refinement-style checks:
+//
+//   byte 0..15    magic      = "SQLite format 3\0"           (constant)
+//   byte 16..17   page_size  = 1 | power-of-2 ∈ [512, 32768] (1 ≡ 65536)
+//   byte 18       f_write    ∈ {1, 2}   1=legacy, 2=WAL
+//   byte 19       f_read     ∈ {1, 2}
+//   byte 20       reserved   (default 0)
+//   byte 21       max_embed  = 64                             (spec-fixed)
+//   byte 22       min_embed  = 32                             (spec-fixed)
+//   byte 23       leaf_payload = 32                           (spec-fixed)
+//   byte 24..27   change_counter (u32 BE)
+//   byte 28..31   db_size_pages   (u32 BE)
+//   byte 32..35   first_freelist  (u32 BE)
+//   byte 36..39   freelist_count  (u32 BE)
+//   byte 40..43   schema_cookie   (u32 BE)
+//   byte 44..47   schema_format   ∈ {1..4}
+//   byte 48..51   default_cache_size
+//   byte 52..55   largest_root_btree
+//   byte 56..59   text_encoding   ∈ {1, 2, 3}   1=UTF-8, 2/3=UTF-16 LE/BE
+//   byte 60..63   user_version
+//   byte 64..67   incremental_vacuum
+//   byte 68..71   application_id
+//   byte 72..91   reserved_for_expansion (20 B, zeros)
+//   byte 92..95   version_valid_for
+//   byte 96..99   sqlite_version_number
+//
+// All multi-byte integers on disk are big-endian, matching SQLite.
+// =============================================================================
+
+mount core.*;
+mount collections.List;
+mount base.{Result, Ok, Err, Text};
+
+// -----------------------------------------------------------------------------
+// Constants
+// -----------------------------------------------------------------------------
+
+public const DB_HEADER_SIZE: Int = 100;
+
+/// "SQLite format 3\0" — the 16-byte magic preamble.
+public const DB_MAGIC_0: Byte = 0x53 as Byte;   // 'S'
+public const DB_MAGIC_15: Byte = 0x00 as Byte;  // NUL terminator
+
+/// Power-of-two floor/ceiling for page sizes; the special sentinel `1`
+/// in the header encodes `65536`.
+public const DB_PAGE_SIZE_MIN: Int = 512;
+public const DB_PAGE_SIZE_MAX: Int = 32768;
+public const DB_PAGE_SIZE_SENTINEL: Int = 65536;
+
+/// Text-encoding identifiers. §6.1 and §18 (encoding PRAGMA).
+public const DB_ENCODING_UTF8:     UInt32 = 1 as UInt32;
+public const DB_ENCODING_UTF16_LE: UInt32 = 2 as UInt32;
+public const DB_ENCODING_UTF16_BE: UInt32 = 3 as UInt32;
+
+// -----------------------------------------------------------------------------
+// Types
+// -----------------------------------------------------------------------------
+
+public type FileFormat is LegacyJournal | Wal;
+
+public fn file_format_to_u8(f: FileFormat) -> Byte {
+    match f {
+        LegacyJournal => 1 as Byte,
+        Wal           => 2 as Byte,
+    }
+}
+
+public fn file_format_from_u8(b: Byte) -> Result<FileFormat, Text> {
+    if b == (1 as Byte) {
+        Ok(LegacyJournal)
+    } else if b == (2 as Byte) {
+        Ok(Wal)
+    } else {
+        Err("file format must be 1 (legacy) or 2 (WAL)".clone())
+    }
+}
+
+public type TextEncoding is Utf8 | Utf16Le | Utf16Be;
+
+public fn encoding_to_u32(e: TextEncoding) -> UInt32 {
+    match e {
+        Utf8    => DB_ENCODING_UTF8,
+        Utf16Le => DB_ENCODING_UTF16_LE,
+        Utf16Be => DB_ENCODING_UTF16_BE,
+    }
+}
+
+public fn encoding_from_u32(v: UInt32) -> Result<TextEncoding, Text> {
+    if v == DB_ENCODING_UTF8 {
+        Ok(Utf8)
+    } else if v == DB_ENCODING_UTF16_LE {
+        Ok(Utf16Le)
+    } else if v == DB_ENCODING_UTF16_BE {
+        Ok(Utf16Be)
+    } else {
+        Err("text encoding must be 1, 2, or 3".clone())
+    }
+}
+
+/// Parsed, validated header. All fields are ready for consumption by
+/// the pager without further range-checking.
+public type DatabaseHeader is {
+    page_size: Int,              // canonicalised — 65536 instead of the header's `1`
+    file_format_write: FileFormat,
+    file_format_read: FileFormat,
+    reserved_space: Byte,
+    file_change_counter: UInt32,
+    db_size_pages: UInt32,
+    first_freelist_page: UInt32,
+    freelist_pages_count: UInt32,
+    schema_cookie: UInt32,
+    schema_format: UInt32,       // 1..4; 4 = STRICT tables
+    default_cache_size: UInt32,
+    largest_root_btree_page: UInt32,
+    text_encoding: TextEncoding,
+    user_version: UInt32,
+    incremental_vacuum: UInt32,
+    application_id: UInt32,
+    version_valid_for: UInt32,
+    sqlite_version_number: UInt32,
+};
+
+// -----------------------------------------------------------------------------
+// Helpers
+// -----------------------------------------------------------------------------
+
+fn read_u16_be(buf: &[Byte], off: Int) -> UInt16 {
+    ((buf[off] as UInt16) << 8) | (buf[off + 1] as UInt16)
+}
+
+fn read_u32_be(buf: &[Byte], off: Int) -> UInt32 {
+    ((buf[off]     as UInt32) << 24)
+    | ((buf[off + 1] as UInt32) << 16)
+    | ((buf[off + 2] as UInt32) << 8)
+    |  (buf[off + 3] as UInt32)
+}
+
+fn write_u16_be(buf: &mut List<Byte>, v: UInt16) {
+    buf.push(((v >> 8) & 0xFF) as Byte);
+    buf.push((v & 0xFF) as Byte);
+}
+
+fn write_u32_be(buf: &mut List<Byte>, v: UInt32) {
+    buf.push(((v >> 24) & 0xFF) as Byte);
+    buf.push(((v >> 16) & 0xFF) as Byte);
+    buf.push(((v >> 8)  & 0xFF) as Byte);
+    buf.push((v & 0xFF) as Byte);
+}
+
+/// Validate a page_size byte pair, returning the canonical Int size.
+fn canon_page_size(raw: UInt16) -> Result<Int, Text> {
+    if raw == (1 as UInt16) {
+        return Ok(DB_PAGE_SIZE_SENTINEL);
+    }
+    let v = raw as Int;
+    if v < DB_PAGE_SIZE_MIN || v > DB_PAGE_SIZE_MAX {
+        return Err("page size out of range".clone());
+    }
+    // Power-of-two check without bit tricks (interpreter-friendly).
+    let mut s = DB_PAGE_SIZE_MIN;
+    while s <= DB_PAGE_SIZE_MAX {
+        if s == v { return Ok(v); }
+        s = s * 2;
+    }
+    Err("page size must be power of two in [512, 32768]".clone())
+}
+
+fn encode_page_size(n: Int) -> Result<UInt16, Text> {
+    if n == DB_PAGE_SIZE_SENTINEL { return Ok(1 as UInt16); }
+    if n < DB_PAGE_SIZE_MIN || n > DB_PAGE_SIZE_MAX {
+        return Err("page size out of range for header".clone());
+    }
+    let mut s = DB_PAGE_SIZE_MIN;
+    while s <= DB_PAGE_SIZE_MAX {
+        if s == n { return Ok(n as UInt16); }
+        s = s * 2;
+    }
+    Err("page size must be power of two in [512, 32768]".clone())
+}
+
+// -----------------------------------------------------------------------------
+// Parse / serialize
+// -----------------------------------------------------------------------------
+
+/// Parse a 100-byte SQLite header. Rejects malformed magic, invalid
+/// page_size, unknown file_format, unknown text_encoding. Every field
+/// on the returned `DatabaseHeader` is known-valid.
+public fn parse_header(buf: &[Byte]) -> Result<DatabaseHeader, Text> {
+    if buf.len() < DB_HEADER_SIZE {
+        return Err("db_header: short buffer".clone());
+    }
+    // Magic check — bytes 0..15 must match exactly.
+    let expected = "SQLite format 3\0";
+    let magic_bytes = expected.as_bytes();
+    let mut i: Int = 0;
+    while i < 16 {
+        if buf[i] != magic_bytes[i] {
+            return Err("db_header: bad magic".clone());
+        }
+        i = i + 1;
+    }
+
+    let ps_raw = read_u16_be(buf, 16);
+    let page_size = match canon_page_size(ps_raw) {
+        Ok(n)  => n,
+        Err(e) => { return Err(e); }
+    };
+
+    let fw = match file_format_from_u8(buf[18]) {
+        Ok(f)  => f,
+        Err(e) => { return Err(e); }
+    };
+    let fr = match file_format_from_u8(buf[19]) {
+        Ok(f)  => f,
+        Err(e) => { return Err(e); }
+    };
+
+    let reserved = buf[20];
+
+    // Bytes 21/22/23 must match the spec-fixed constants.
+    if buf[21] != (64 as Byte) {
+        return Err("db_header: max_embedded_payload must be 64".clone());
+    }
+    if buf[22] != (32 as Byte) {
+        return Err("db_header: min_embedded_payload must be 32".clone());
+    }
+    if buf[23] != (32 as Byte) {
+        return Err("db_header: leaf_payload must be 32".clone());
+    }
+
+    let change_counter = read_u32_be(buf, 24);
+    let size_pages     = read_u32_be(buf, 28);
+    let first_free     = read_u32_be(buf, 32);
+    let freelist_count = read_u32_be(buf, 36);
+    let cookie         = read_u32_be(buf, 40);
+    let schema_fmt     = read_u32_be(buf, 44);
+    if schema_fmt < (1 as UInt32) || schema_fmt > (4 as UInt32) {
+        return Err("db_header: schema_format must be in [1, 4]".clone());
+    }
+    let default_cache  = read_u32_be(buf, 48);
+    let largest_root   = read_u32_be(buf, 52);
+    let enc_u32        = read_u32_be(buf, 56);
+    let enc = match encoding_from_u32(enc_u32) {
+        Ok(e)  => e,
+        Err(m) => { return Err(m); }
+    };
+    let user_ver       = read_u32_be(buf, 60);
+    let incr_vacuum    = read_u32_be(buf, 64);
+    let app_id         = read_u32_be(buf, 68);
+
+    // Bytes 72..91 reserved_for_expansion — must be zero.
+    let mut j: Int = 72;
+    while j < 92 {
+        if buf[j] != (0 as Byte) {
+            return Err("db_header: reserved_for_expansion must be zero".clone());
+        }
+        j = j + 1;
+    }
+
+    let valid_for = read_u32_be(buf, 92);
+    let version   = read_u32_be(buf, 96);
+
+    Ok(DatabaseHeader {
+        page_size: page_size,
+        file_format_write: fw,
+        file_format_read: fr,
+        reserved_space: reserved,
+        file_change_counter: change_counter,
+        db_size_pages: size_pages,
+        first_freelist_page: first_free,
+        freelist_pages_count: freelist_count,
+        schema_cookie: cookie,
+        schema_format: schema_fmt,
+        default_cache_size: default_cache,
+        largest_root_btree_page: largest_root,
+        text_encoding: enc,
+        user_version: user_ver,
+        incremental_vacuum: incr_vacuum,
+        application_id: app_id,
+        version_valid_for: valid_for,
+        sqlite_version_number: version,
+    })
+}
+
+/// Serialize a header to its canonical 100-byte on-disk form.
+public fn serialize_header(h: &DatabaseHeader) -> Result<List<Byte>, Text> {
+    let mut out: List<Byte> = List.new();
+
+    // Magic — emit "SQLite format 3\0" as the first 16 bytes.
+    let expected = "SQLite format 3\0";
+    let magic_bytes = expected.as_bytes();
+    let mut i: Int = 0;
+    while i < 16 {
+        out.push(magic_bytes[i]);
+        i = i + 1;
+    }
+
+    let ps_raw = match encode_page_size(h.page_size) {
+        Ok(v)  => v,
+        Err(m) => { return Err(m); }
+    };
+    write_u16_be(&mut out, ps_raw);
+
+    out.push(file_format_to_u8(h.file_format_write));
+    out.push(file_format_to_u8(h.file_format_read));
+    out.push(h.reserved_space);
+    out.push(64 as Byte);   // max_embedded_payload
+    out.push(32 as Byte);   // min_embedded_payload
+    out.push(32 as Byte);   // leaf_payload
+
+    write_u32_be(&mut out, h.file_change_counter);
+    write_u32_be(&mut out, h.db_size_pages);
+    write_u32_be(&mut out, h.first_freelist_page);
+    write_u32_be(&mut out, h.freelist_pages_count);
+    write_u32_be(&mut out, h.schema_cookie);
+    write_u32_be(&mut out, h.schema_format);
+    write_u32_be(&mut out, h.default_cache_size);
+    write_u32_be(&mut out, h.largest_root_btree_page);
+    write_u32_be(&mut out, encoding_to_u32(h.text_encoding));
+    write_u32_be(&mut out, h.user_version);
+    write_u32_be(&mut out, h.incremental_vacuum);
+    write_u32_be(&mut out, h.application_id);
+
+    // reserved_for_expansion — 20 zero bytes.
+    let mut k: Int = 0;
+    while k < 20 {
+        out.push(0 as Byte);
+        k = k + 1;
+    }
+
+    write_u32_be(&mut out, h.version_valid_for);
+    write_u32_be(&mut out, h.sqlite_version_number);
+
+    Ok(out)
+}
+
+/// Build a sensible default header for a fresh WAL-mode DB at the
+/// given page size. Callers flip `file_format_*` to `LegacyJournal` for
+/// rollback-journal mode.
+public fn default_header(page_size: Int) -> DatabaseHeader {
+    DatabaseHeader {
+        page_size: page_size,
+        file_format_write: Wal,
+        file_format_read: Wal,
+        reserved_space: 0 as Byte,
+        file_change_counter: 0 as UInt32,
+        db_size_pages: 0 as UInt32,
+        first_freelist_page: 0 as UInt32,
+        freelist_pages_count: 0 as UInt32,
+        schema_cookie: 0 as UInt32,
+        schema_format: 4 as UInt32,      // 4 = STRICT-capable; 1 = legacy
+        default_cache_size: 0 as UInt32,
+        largest_root_btree_page: 0 as UInt32,
+        text_encoding: Utf8,
+        user_version: 0 as UInt32,
+        incremental_vacuum: 0 as UInt32,
+        application_id: 0 as UInt32,
+        version_valid_for: 0 as UInt32,
+        sqlite_version_number: 3046000 as UInt32,  // 3.46.0 — target reference
+    }
+}

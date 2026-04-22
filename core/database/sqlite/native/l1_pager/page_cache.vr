@@ -1,0 +1,280 @@
+module core.database.sqlite.native.l1_pager.page_cache;
+
+// =============================================================================
+// l1_pager/page_cache.vr — LRU + generation-tagged page cache
+// =============================================================================
+// Layer: 1
+// Spec: sqlite-native.md §4.3 + §8.2
+//
+// The pager's hot path passes through this cache. Design principles:
+//
+//   1. **Generation bumps for O(1) mass invalidation**. At checkpoint
+//      time the cache owner calls `bump_generation()`; every frame
+//      carrying a stale generation is logically invalidated without
+//      touching individual entries. Matches SQLite's per-txn cache
+//      sweeping but without the O(N) iteration.
+//
+//   2. **LRU eviction**. Frames are evicted in least-recently-used
+//      order, but only if `pin_count == 0`. A pinned frame cannot be
+//      evicted (would break pager correctness if its bytes are about
+//      to be written to WAL).
+//
+//   3. **Cap by count, not bytes**. The pager calls `configure(max)`
+//      with a count derived from `PRAGMA cache_size`; the cache
+//      enforces it. Byte accounting adds no safety and costs on the
+//      hot path.
+//
+//   4. **Pluggable arena**. The current body uses a plain `Map` backing
+//      store. The production CBGR-arena version (§8.2) drops in
+//      behind the same API once `core.mem.arena.bump_generation` is
+//      exposed as a first-class method; callers don't change.
+//
+// Invariants (enforced by tests):
+//
+//   * A frame returned by `get` is either freshly loaded (miss) or
+//     was in the cache at cache generation ≥ `current_gen` (hit).
+//   * After `bump_generation`, a subsequent `get(page_no)` misses on
+//     entries whose last-touch gen was below the new gen.
+//   * `unpin` after `pin` decrements by 1 and never goes negative.
+// =============================================================================
+
+mount core.*;
+mount collections.{List, Map};
+mount base.{Result, Ok, Err, Text, Maybe};
+
+// -----------------------------------------------------------------------------
+// Frame model
+// -----------------------------------------------------------------------------
+
+/// A cached page. `generation` stamps the frame with the cache's
+/// generation counter at last touch; bumping the counter makes every
+/// older frame a conceptual miss without walking the map.
+public type CachedFrame is {
+    page_no: Int,
+    data: List<Byte>,
+    dirty: Bool,
+    generation: Int,
+    pin_count: Int,
+    last_access: Int,      // monotone tick for LRU eviction
+};
+
+// -----------------------------------------------------------------------------
+// Cache
+// -----------------------------------------------------------------------------
+
+/// Bounded LRU cache. Caller invariant: `max_frames > 0`.
+public type PageCache is {
+    frames: Map<Int, CachedFrame>,
+    max_frames: Int,
+    current_gen: Int,
+    next_tick: Int,
+    // Running stats — useful in EXPLAIN / PRAGMA cache_stats.
+    hits: Int,
+    misses: Int,
+    evictions: Int,
+};
+
+/// Construct a fresh cache that tolerates up to `max_frames` entries.
+public fn page_cache_new(max_frames: Int) -> PageCache {
+    let m: Int = if max_frames <= 0 { 1 } else { max_frames };
+    PageCache {
+        frames: Map.new(),
+        max_frames: m,
+        current_gen: 0,
+        next_tick: 0,
+        hits: 0,
+        misses: 0,
+        evictions: 0,
+    }
+}
+
+implement PageCache {
+    // =========================================================================
+    // Generation management
+    // =========================================================================
+
+    /// Bump the cache generation. Any frame last touched before this
+    /// point is logically invalid until a fresh `put` refreshes it.
+    /// Call after checkpoint / rollback / schema change.
+    public fn bump_generation(&mut self) -> Int {
+        self.current_gen = self.current_gen + 1;
+        self.current_gen
+    }
+
+    /// Current generation — mostly for test assertions.
+    public fn current_generation(&self) -> Int { self.current_gen }
+
+    // =========================================================================
+    // Lookup / insert
+    // =========================================================================
+
+    /// Probe the cache. Returns `Some(frame_clone)` on a hit at the
+    /// current generation. Misses — either "not present" or "present
+    /// but stale" — both return `None` so the caller can fetch from
+    /// the backing store. `Some`-return increments the hit counter.
+    public fn get(&mut self, page_no: Int) -> Maybe<CachedFrame> {
+        if !self.frames.contains_key(page_no) {
+            self.misses = self.misses + 1;
+            return None;
+        }
+        let existing = self.frames.get(page_no);
+        if existing.generation != self.current_gen {
+            // Stale. Evict and report miss — caller will re-load.
+            let _ = self.frames.remove(page_no);
+            self.misses = self.misses + 1;
+            return None;
+        }
+        // Refresh access-tick so the LRU view stays accurate.
+        let updated = CachedFrame {
+            page_no: existing.page_no,
+            data: existing.data.clone(),
+            dirty: existing.dirty,
+            generation: existing.generation,
+            pin_count: existing.pin_count,
+            last_access: self.next_tick,
+        };
+        self.next_tick = self.next_tick + 1;
+        let _ = self.frames.insert(page_no, updated);
+        self.hits = self.hits + 1;
+        Some(self.frames.get(page_no))
+    }
+
+    /// Insert / replace a frame at `page_no`. Tags with current
+    /// generation and a fresh access-tick. If the cache is full, an
+    /// unpinned LRU entry is evicted first.
+    public fn put(&mut self, frame: CachedFrame) {
+        // Replace directly if the page is already present (doesn't count
+        // against the cap).
+        if self.frames.contains_key(frame.page_no) {
+            let mut f = frame;
+            f.generation = self.current_gen;
+            f.last_access = self.next_tick;
+            self.next_tick = self.next_tick + 1;
+            let _ = self.frames.insert(f.page_no, f);
+            return;
+        }
+
+        // Evict if we're at capacity.
+        if self.frames.len() >= self.max_frames {
+            self.evict_one();
+        }
+
+        let mut f = frame;
+        f.generation = self.current_gen;
+        f.last_access = self.next_tick;
+        self.next_tick = self.next_tick + 1;
+        let _ = self.frames.insert(f.page_no, f);
+    }
+
+    // =========================================================================
+    // Pinning
+    // =========================================================================
+
+    /// Pin a frame so LRU eviction skips it. Returns false if not
+    /// present.
+    public fn pin(&mut self, page_no: Int) -> Bool {
+        if !self.frames.contains_key(page_no) { return false; }
+        let existing = self.frames.get(page_no);
+        let updated = CachedFrame {
+            page_no: existing.page_no,
+            data: existing.data.clone(),
+            dirty: existing.dirty,
+            generation: existing.generation,
+            pin_count: existing.pin_count + 1,
+            last_access: existing.last_access,
+        };
+        let _ = self.frames.insert(page_no, updated);
+        true
+    }
+
+    /// Release one pin reference. Returns false if not present or
+    /// already at zero (caller bug).
+    public fn unpin(&mut self, page_no: Int) -> Bool {
+        if !self.frames.contains_key(page_no) { return false; }
+        let existing = self.frames.get(page_no);
+        if existing.pin_count <= 0 { return false; }
+        let updated = CachedFrame {
+            page_no: existing.page_no,
+            data: existing.data.clone(),
+            dirty: existing.dirty,
+            generation: existing.generation,
+            pin_count: existing.pin_count - 1,
+            last_access: existing.last_access,
+        };
+        let _ = self.frames.insert(page_no, updated);
+        true
+    }
+
+    /// Mark a present frame as dirty (pager writes flip this before
+    /// checkpoint).
+    public fn mark_dirty(&mut self, page_no: Int) -> Bool {
+        if !self.frames.contains_key(page_no) { return false; }
+        let existing = self.frames.get(page_no);
+        let updated = CachedFrame {
+            page_no: existing.page_no,
+            data: existing.data.clone(),
+            dirty: true,
+            generation: existing.generation,
+            pin_count: existing.pin_count,
+            last_access: existing.last_access,
+        };
+        let _ = self.frames.insert(page_no, updated);
+        true
+    }
+
+    // =========================================================================
+    // Capacity / eviction
+    // =========================================================================
+
+    /// Retarget the cache size. If shrinking, evicts LRU-first until we
+    /// fit, skipping pinned frames.
+    public fn configure(&mut self, new_max: Int) {
+        let m = if new_max <= 0 { 1 } else { new_max };
+        self.max_frames = m;
+        while self.frames.len() > self.max_frames {
+            if !self.evict_one() { break; }
+        }
+    }
+
+    /// Evict the LRU unpinned frame. Returns true on success.
+    /// Used by `configure` and `put`; tests may call it directly.
+    public fn evict_one(&mut self) -> Bool {
+        // Scan entries for the lowest last_access with pin_count == 0.
+        // `Map` doesn't expose a direct iterator over (K, V) in the
+        // style we need, so pull keys via `keys()` and probe.
+        let keys = self.frames.keys_list();
+        let mut victim: Int = -1;
+        let mut victim_access: Int = 0x7FFFFFFFFFFFFFFF;
+        let mut i: Int = 0;
+        while i < keys.len() {
+            let k = keys[i];
+            let f = self.frames.get(k);
+            if f.pin_count == 0 && f.last_access < victim_access {
+                victim = k;
+                victim_access = f.last_access;
+            }
+            i = i + 1;
+        }
+        if victim < 0 { return false; }
+        let _ = self.frames.remove(victim);
+        self.evictions = self.evictions + 1;
+        true
+    }
+
+    /// Drop every frame regardless of pin count. Caller is responsible
+    /// for having flushed dirty frames first.
+    public fn clear(&mut self) {
+        self.frames = Map.new();
+        self.current_gen = self.current_gen + 1;
+    }
+
+    // =========================================================================
+    // Stats
+    // =========================================================================
+
+    public fn len(&self) -> Int { self.frames.len() }
+    public fn max_size(&self) -> Int { self.max_frames }
+    public fn hit_count(&self) -> Int { self.hits }
+    public fn miss_count(&self) -> Int { self.misses }
+    public fn eviction_count(&self) -> Int { self.evictions }
+}

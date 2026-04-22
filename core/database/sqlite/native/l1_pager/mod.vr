@@ -49,9 +49,73 @@
 module core.database.sqlite.native.l1_pager;
 
 public module pager;
+public module page_cache;
+public module journal;
+public module recovery;
+public module actor;
+public module db_header;
+public module savepoint;
+public module snapshot;
+public module checkpointer;
 
 public mount .pager.{
     PageNo, PageFrame, Pager, PagerError, PagerErrorKind,
     PAGE_SIZE_MIN, PAGE_SIZE_MAX, PAGE_SIZE_DEFAULT,
     pager_open_memory, pager_read, pager_write, pager_close,
+};
+
+public mount .page_cache.{
+    CachedFrame, PageCache, page_cache_new,
+};
+
+public mount .journal.{
+    WalHeader, WalFrameHeader, Wal,
+    WAL_MAGIC_LE, WAL_MAGIC_BE,
+    WAL_HEADER_SIZE, WAL_FRAME_HEADER_SIZE,
+    WAL_FORMAT_VERSION,
+    wal_new, wal_header_serialize, wal_header_parse,
+    wal_frame_header_serialize, wal_frame_header_parse,
+    wal_running_checksum,
+    RollbackHeader, RollbackError,
+    ROLLBACK_HEADER_SIZE, rollback_magic,
+    rollback_serialize_header, rollback_parse_header,
+    rollback_record_checksum, rollback_serialize_record,
+    rollback_parse_record, rollback_replay,
+};
+
+public mount .recovery.{
+    RecoveryPlan, RecoveryError,
+    wal_scan, plan_has_recoverable_commit,
+};
+
+public mount .actor.{
+    PagerActor, PagerRequest, PagerReply, CheckpointMode,
+    actor_new, pager_apply, pager_apply_batch,
+};
+
+public mount .db_header.{
+    DatabaseHeader, FileFormat, TextEncoding,
+    DB_HEADER_SIZE, DB_PAGE_SIZE_MIN, DB_PAGE_SIZE_MAX, DB_PAGE_SIZE_SENTINEL,
+    DB_ENCODING_UTF8, DB_ENCODING_UTF16_LE, DB_ENCODING_UTF16_BE,
+    parse_header, serialize_header, default_header,
+    file_format_to_u8, file_format_from_u8,
+    encoding_to_u32, encoding_from_u32,
+};
+
+public mount .savepoint.{
+    Savepoint, SavepointStack, SavepointError,
+    savepoint_stack_new,
+};
+
+public mount .snapshot.{
+    SnapshotView, SnapshotError,
+    snapshot_new, snapshot_with_overlay,
+    snapshot_sees_at_least, ensure_fresh,
+};
+
+public mount .checkpointer.{
+    CheckpointConfig, CheckpointStats,
+    checkpoint_config_default, checkpoint_stats_empty,
+    should_trigger, mode_resets_wal, mode_truncates_file, mode_blocks_writers,
+    run_checkpoint,
 };

@@ -1,0 +1,281 @@
+module core.database.sqlite.native.l1_pager.journal.wal;
+
+// =============================================================================
+// l1_pager/journal/wal.vr — Write-Ahead Log writer + frame format
+// =============================================================================
+// Layer: 1
+// Spec: sqlite-native.md §6.5, sqlite.org/walformat.html
+//
+// Wire layout:
+//
+//     +---------------- WAL header (32 B) ----------------+
+//     | 0  4 magic           (0x377f0682 LE / 0x377f0683 BE)
+//     | 4  4 format_version  (3007000)
+//     | 8  4 page_size
+//     |12  4 checkpoint_seq
+//     |16  4 salt_1
+//     |20  4 salt_2
+//     |24  4 checksum_1
+//     |28  4 checksum_2
+//     +--------------- frame i (header 24 B) -------------+
+//     | 0  4 page_number
+//     | 4  4 db_size_after_commit  (0 unless commit marker)
+//     | 8  4 salt_1                (copied from header; invalidates the
+//     |                            frame if they ever disagree)
+//     |12  4 salt_2
+//     |16  4 checksum_1
+//     |20  4 checksum_2
+//     +--------------- frame i payload (page_size bytes) -+
+//
+// Checksums are computed by a **Fibonacci-based running 64-bit state**
+// (not CRC32 — CRC32 is for IEEE 802.3 links only, and CRC32C has a
+// different polynomial). The algorithm is simple, position-dependent,
+// and two-word; it matches the SQLite walformat.html spec §3.1.
+//
+// This module covers the *serialisation* surface only. The actor that
+// actually appends frames, drives fsync, and coordinates checkpoints
+// lives in `l1_pager/pager.vr`. Recovery (replay on open) lives in
+// `l1_pager/recovery.vr`.
+// =============================================================================
+
+mount core.*;
+mount collections.List;
+mount base.{Result, Ok, Err, Text};
+
+// -----------------------------------------------------------------------------
+// Constants
+// -----------------------------------------------------------------------------
+
+/// Magic bytes for a little-endian WAL. File header byte 0..3.
+public const WAL_MAGIC_LE: UInt32 = 0x377F0682;
+
+/// Magic bytes for a big-endian WAL — swapped layout requested by the
+/// database header's `file_format_write == 2` bit in the corresponding
+/// main DB file.
+public const WAL_MAGIC_BE: UInt32 = 0x377F0683;
+
+/// WAL format version — SQLite 3.7.0 onwards.
+public const WAL_FORMAT_VERSION: UInt32 = 3007000;
+
+public const WAL_HEADER_SIZE: Int = 32;
+public const WAL_FRAME_HEADER_SIZE: Int = 24;
+
+// -----------------------------------------------------------------------------
+// Types
+// -----------------------------------------------------------------------------
+
+/// Parsed WAL header.
+public type WalHeader is {
+    magic: UInt32,
+    format_version: UInt32,
+    page_size: UInt32,
+    checkpoint_seq: UInt32,
+    salt_1: UInt32,
+    salt_2: UInt32,
+    checksum_1: UInt32,
+    checksum_2: UInt32,
+};
+
+/// Parsed WAL frame header. `db_size_after_commit == 0` marks an
+/// intermediate frame; `> 0` marks a commit marker and records the
+/// resulting DB size in pages.
+public type WalFrameHeader is {
+    page_number: UInt32,
+    db_size_after_commit: UInt32,
+    salt_1: UInt32,
+    salt_2: UInt32,
+    checksum_1: UInt32,
+    checksum_2: UInt32,
+};
+
+/// Running-checksum state. Position-dependent: feeding the frame
+/// header and payload through `wal_running_checksum` yields the pair
+/// that must be written into the frame header.
+public type WalChecksum is {
+    s1: UInt32,
+    s2: UInt32,
+};
+
+/// Live WAL state — runtime accumulator used by the pager actor.
+public type Wal is {
+    header: WalHeader,
+    running: WalChecksum,
+    next_frame_index: Int,
+    next_frame_offset: Int,
+};
+
+// -----------------------------------------------------------------------------
+// Construction
+// -----------------------------------------------------------------------------
+
+/// Fresh WAL state at the start of a journal. `salt_1` and `salt_2`
+/// are fed from `core.sys.common.get_random_bytes` (or equivalent) so
+/// that post-checkpoint truncation-recoveries see a fresh generation.
+public fn wal_new(
+    page_size: UInt32,
+    salt_1: UInt32,
+    salt_2: UInt32,
+    checkpoint_seq: UInt32,
+) -> Wal {
+    let header = WalHeader {
+        magic: WAL_MAGIC_LE,
+        format_version: WAL_FORMAT_VERSION,
+        page_size: page_size,
+        checkpoint_seq: checkpoint_seq,
+        salt_1: salt_1,
+        salt_2: salt_2,
+        checksum_1: 0 as UInt32,
+        checksum_2: 0 as UInt32,
+    };
+    // Seed the running checksum from the header's first 24 bytes
+    // (everything up to the checksum_1 field).
+    let seed_bytes = wal_header_serialize_seed(&header);
+    let running = wal_running_checksum(
+        WalChecksum { s1: 0 as UInt32, s2: 0 as UInt32 },
+        &seed_bytes,
+    );
+
+    // Patch the header to carry the computed checksum.
+    let hdr_final = WalHeader {
+        magic: header.magic,
+        format_version: header.format_version,
+        page_size: header.page_size,
+        checkpoint_seq: header.checkpoint_seq,
+        salt_1: header.salt_1,
+        salt_2: header.salt_2,
+        checksum_1: running.s1,
+        checksum_2: running.s2,
+    };
+    Wal {
+        header: hdr_final,
+        running: running,
+        next_frame_index: 0,
+        next_frame_offset: WAL_HEADER_SIZE,
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Serialisation helpers
+// -----------------------------------------------------------------------------
+
+fn u32_be(buf: &mut List<Byte>, v: UInt32) {
+    buf.push(((v >> 24) & 0xFF) as Byte);
+    buf.push(((v >> 16) & 0xFF) as Byte);
+    buf.push(((v >> 8)  & 0xFF) as Byte);
+    buf.push((v & 0xFF) as Byte);
+}
+
+fn read_u32_be(buf: &[Byte], offset: Int) -> UInt32 {
+    let b0 = buf[offset] as UInt32;
+    let b1 = buf[offset + 1] as UInt32;
+    let b2 = buf[offset + 2] as UInt32;
+    let b3 = buf[offset + 3] as UInt32;
+    (b0 << 24) | (b1 << 16) | (b2 << 8) | b3
+}
+
+/// Serialise just the 24-byte header seed (fields before the checksums).
+/// Fed to `wal_running_checksum` during `wal_new`.
+fn wal_header_serialize_seed(h: &WalHeader) -> List<Byte> {
+    let mut out: List<Byte> = List.new();
+    u32_be(&mut out, h.magic);
+    u32_be(&mut out, h.format_version);
+    u32_be(&mut out, h.page_size);
+    u32_be(&mut out, h.checkpoint_seq);
+    u32_be(&mut out, h.salt_1);
+    u32_be(&mut out, h.salt_2);
+    out
+}
+
+/// Serialise the whole 32-byte WAL header in on-disk form.
+public fn wal_header_serialize(h: &WalHeader) -> List<Byte> {
+    let mut out: List<Byte> = List.new();
+    u32_be(&mut out, h.magic);
+    u32_be(&mut out, h.format_version);
+    u32_be(&mut out, h.page_size);
+    u32_be(&mut out, h.checkpoint_seq);
+    u32_be(&mut out, h.salt_1);
+    u32_be(&mut out, h.salt_2);
+    u32_be(&mut out, h.checksum_1);
+    u32_be(&mut out, h.checksum_2);
+    out
+}
+
+/// Parse a 32-byte WAL header slice. Returns Err on short buffer or
+/// magic-byte mismatch.
+public fn wal_header_parse(buf: &[Byte]) -> Result<WalHeader, Text> {
+    if buf.len() < WAL_HEADER_SIZE {
+        return Err("wal_header_parse: short buffer".clone());
+    }
+    let magic = read_u32_be(buf, 0);
+    if magic != WAL_MAGIC_LE && magic != WAL_MAGIC_BE {
+        return Err("wal_header_parse: bad magic".clone());
+    }
+    Ok(WalHeader {
+        magic: magic,
+        format_version: read_u32_be(buf, 4),
+        page_size: read_u32_be(buf, 8),
+        checkpoint_seq: read_u32_be(buf, 12),
+        salt_1: read_u32_be(buf, 16),
+        salt_2: read_u32_be(buf, 20),
+        checksum_1: read_u32_be(buf, 24),
+        checksum_2: read_u32_be(buf, 28),
+    })
+}
+
+/// Serialise a 24-byte frame header.
+public fn wal_frame_header_serialize(h: &WalFrameHeader) -> List<Byte> {
+    let mut out: List<Byte> = List.new();
+    u32_be(&mut out, h.page_number);
+    u32_be(&mut out, h.db_size_after_commit);
+    u32_be(&mut out, h.salt_1);
+    u32_be(&mut out, h.salt_2);
+    u32_be(&mut out, h.checksum_1);
+    u32_be(&mut out, h.checksum_2);
+    out
+}
+
+/// Parse a frame header from a 24-byte slice.
+public fn wal_frame_header_parse(buf: &[Byte]) -> Result<WalFrameHeader, Text> {
+    if buf.len() < WAL_FRAME_HEADER_SIZE {
+        return Err("wal_frame_header_parse: short buffer".clone());
+    }
+    Ok(WalFrameHeader {
+        page_number: read_u32_be(buf, 0),
+        db_size_after_commit: read_u32_be(buf, 4),
+        salt_1: read_u32_be(buf, 8),
+        salt_2: read_u32_be(buf, 12),
+        checksum_1: read_u32_be(buf, 16),
+        checksum_2: read_u32_be(buf, 20),
+    })
+}
+
+// -----------------------------------------------------------------------------
+// Running checksum (walformat.html §3.1)
+// -----------------------------------------------------------------------------
+
+/// Advance the running checksum over `data`. Data length must be a
+/// multiple of 8 bytes — WAL buffers always are (page_size is a
+/// power-of-two ≥ 512, and headers are 24/32 bytes both multiples of 8).
+///
+/// Per spec §3.1:
+///
+///     s1 = s1 + (x[i] ^ s2)
+///     s2 = s2 + (x[i+1] ^ s1)
+///
+/// where x[] is big-endian u32 from the input buffer. All arithmetic
+/// is wrapping 32-bit.
+public fn wal_running_checksum(seed: WalChecksum, data: &[Byte]) -> WalChecksum {
+    let mut s1 = seed.s1;
+    let mut s2 = seed.s2;
+    let n = data.len();
+    let mut i: Int = 0;
+    // Consume two u32 words per iteration.
+    while i + 8 <= n {
+        let a = read_u32_be(data, i);
+        let b = read_u32_be(data, i + 4);
+        s1 = s1 + (a ^ s2);
+        s2 = s2 + (b ^ s1);
+        i = i + 8;
+    }
+    WalChecksum { s1: s1, s2: s2 }
+}
