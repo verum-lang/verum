@@ -1,0 +1,276 @@
+module core.database.sqlite.native.l5_sql.parser.misc;
+
+// =============================================================================
+// l5_sql/parser/misc.vr — PRAGMA / EXPLAIN / transaction / VACUUM / misc
+// =============================================================================
+// Layer: 5
+// Spec: sqlite.org/pragma.html, lang_transaction.html, lang_explain.html
+//
+// Short, self-contained statements that don't deserve their own
+// parser file:
+//
+//   pragma-stmt       = PRAGMA [schema.] name [ '=' expr | '(' expr ')' ]
+//   explain-stmt      = EXPLAIN [QUERY PLAN] stmt
+//   begin-stmt        = BEGIN [DEFERRED|IMMEDIATE|EXCLUSIVE] [TRANSACTION]
+//   commit-stmt       = (COMMIT|END) [TRANSACTION]
+//   rollback-stmt     = ROLLBACK [TRANSACTION] [TO [SAVEPOINT] name]
+//   savepoint-stmt    = SAVEPOINT name
+//   release-stmt      = RELEASE [SAVEPOINT] name
+//   vacuum-stmt       = VACUUM [schema] [INTO string-lit]
+//   reindex-stmt      = REINDEX [collation | [schema.]name]
+//   attach-stmt       = ATTACH [DATABASE] expr AS expr
+//   detach-stmt       = DETACH [DATABASE] name
+//   analyze-stmt      = ANALYZE [schema[.name]]
+// =============================================================================
+
+mount core.*;
+mount collections.List;
+mount base.{Result, Ok, Err, Text, Maybe};
+mount core.database.sqlite.native.l5_sql.lexer.{
+    Token, Keyword, Operator, Punct,
+};
+mount core.database.sqlite.native.l5_sql.ast.{
+    Statement, Expr, TableRef,
+};
+mount core.database.sqlite.native.l5_sql.parser.token_stream.{
+    TokenStream, ParseError, parse_error,
+};
+mount core.database.sqlite.native.l5_sql.parser.expr.parse_expr;
+
+// -----------------------------------------------------------------------------
+// PRAGMA
+// -----------------------------------------------------------------------------
+
+public fn parse_pragma(ts: &mut TokenStream) -> Result<Statement, ParseError> {
+    match ts.expect_keyword(KwPragma) { Ok(_) => {}, Err(e) => { return Err(e); } }
+    let name = match ts.expect_ident() {
+        Ok(s)  => s, Err(e) => { return Err(e); }
+    };
+    // Optional schema-qualified form: `PRAGMA main.user_version`.
+    let _qualified_name = if ts.accept_punct(PDot) {
+        let second = match ts.expect_ident() {
+            Ok(s)  => s, Err(e) => { return Err(e); }
+        };
+        // We fold schema.name into the pragma-name field as
+        // "schema.name" until the full PRAGMA AST variant accepts a
+        // TableRef — matches how SQLite stores it internally.
+        name + ".".clone() + second
+    } else {
+        name
+    };
+
+    let mut value: Maybe<Expr> = None;
+    if ts.accept_op(OpEq) {
+        let e = match parse_expr(ts) {
+            Ok(x)  => x, Err(err) => { return Err(err); }
+        };
+        value = Some(e);
+    } else if ts.accept_punct(PLParen) {
+        let e = match parse_expr(ts) {
+            Ok(x)  => x, Err(err) => { return Err(err); }
+        };
+        match ts.expect_punct(PRParen) { Ok(_) => {}, Err(e) => { return Err(e); } }
+        value = Some(e);
+    }
+
+    Ok(SPragma(_qualified_name, value))
+}
+
+// -----------------------------------------------------------------------------
+// EXPLAIN
+// -----------------------------------------------------------------------------
+
+public fn parse_explain(
+    ts: &mut TokenStream,
+    inner: fn(&mut TokenStream) -> Result<Statement, ParseError>,
+) -> Result<Statement, ParseError> {
+    match ts.expect_keyword(KwExplain) { Ok(_) => {}, Err(e) => { return Err(e); } }
+    let query_plan = if ts.accept_keyword(KwQuery) {
+        match ts.expect_keyword(KwPlan) { Ok(_) => {}, Err(e) => { return Err(e); } }
+        true
+    } else {
+        false
+    };
+    let body = match inner(ts) {
+        Ok(s)  => s, Err(e) => { return Err(e); }
+    };
+    Ok(SExplain(Heap(body), query_plan))
+}
+
+// -----------------------------------------------------------------------------
+// Transactions
+// -----------------------------------------------------------------------------
+
+public fn parse_begin(ts: &mut TokenStream) -> Result<Statement, ParseError> {
+    match ts.expect_keyword(KwBegin) { Ok(_) => {}, Err(e) => { return Err(e); } }
+    // Optional transaction mode: DEFERRED / IMMEDIATE / EXCLUSIVE.
+    let _ = ts.accept_keyword(KwDeferred);
+    let _ = ts.accept_keyword(KwImmediate);
+    // EXCLUSIVE isn't in our Keyword set; accept as ident.
+    match ts.peek() {
+        TIdent(s) => {
+            let lower = fold_text_ascii(&s);
+            if lower == "exclusive".clone() {
+                let _ = ts.advance();
+            }
+        }
+        _ => {}
+    }
+    let _ = ts.accept_keyword(KwTransaction);
+    Ok(SBeginTransaction)
+}
+
+public fn parse_commit(ts: &mut TokenStream) -> Result<Statement, ParseError> {
+    // `COMMIT [TRANSACTION]` or `END [TRANSACTION]`.
+    if ts.accept_keyword(KwCommit) {
+        let _ = ts.accept_keyword(KwTransaction);
+        return Ok(SCommit);
+    }
+    if ts.accept_keyword(KwEnd) {
+        let _ = ts.accept_keyword(KwTransaction);
+        return Ok(SCommit);
+    }
+    Err(parse_error("expected COMMIT / END".clone(), ts.position()))
+}
+
+public fn parse_rollback(ts: &mut TokenStream) -> Result<Statement, ParseError> {
+    match ts.expect_keyword(KwRollback) { Ok(_) => {}, Err(e) => { return Err(e); } }
+    let _ = ts.accept_keyword(KwTransaction);
+    if ts.accept_keyword(KwTo) {
+        let _ = ts.accept_keyword(KwSavepoint);
+        let name = match ts.expect_ident() {
+            Ok(s)  => s, Err(e) => { return Err(e); }
+        };
+        return Ok(SRollback(Some(name)));
+    }
+    Ok(SRollback(None))
+}
+
+public fn parse_savepoint(ts: &mut TokenStream) -> Result<Statement, ParseError> {
+    match ts.expect_keyword(KwSavepoint) { Ok(_) => {}, Err(e) => { return Err(e); } }
+    let name = match ts.expect_ident() {
+        Ok(s)  => s, Err(e) => { return Err(e); }
+    };
+    Ok(SSavepoint(name))
+}
+
+public fn parse_release(ts: &mut TokenStream) -> Result<Statement, ParseError> {
+    match ts.expect_keyword(KwRelease) { Ok(_) => {}, Err(e) => { return Err(e); } }
+    let _ = ts.accept_keyword(KwSavepoint);
+    let name = match ts.expect_ident() {
+        Ok(s)  => s, Err(e) => { return Err(e); }
+    };
+    Ok(SRelease(name))
+}
+
+// -----------------------------------------------------------------------------
+// VACUUM / REINDEX / ATTACH / DETACH / ANALYZE
+// -----------------------------------------------------------------------------
+
+public fn parse_vacuum(ts: &mut TokenStream) -> Result<Statement, ParseError> {
+    match ts.expect_keyword(KwVacuum) { Ok(_) => {}, Err(e) => { return Err(e); } }
+    // Optional schema name.
+    let _schema: Maybe<Text> = match ts.peek() {
+        TIdent(_) => {
+            let s = match ts.expect_ident() {
+                Ok(s)  => s, Err(_) => { return Err(parse_error("ident".clone(), ts.position())); }
+            };
+            Some(s)
+        }
+        _ => None,
+    };
+    // Optional `INTO 'path'`.
+    let into: Maybe<Text> = if ts.accept_keyword(KwInto) {
+        match ts.peek() {
+            TStringLit(s) => { let _ = ts.advance(); Some(s) }
+            _ => { return Err(parse_error("expected string after INTO".clone(), ts.position())); }
+        }
+    } else {
+        None
+    };
+    Ok(SVacuum(into))
+}
+
+public fn parse_reindex(ts: &mut TokenStream) -> Result<Statement, ParseError> {
+    match ts.expect_keyword(KwReindex) { Ok(_) => {}, Err(e) => { return Err(e); } }
+    let target: Maybe<TableRef> = match ts.peek() {
+        TIdent(_) => {
+            let first = match ts.expect_ident() {
+                Ok(s)  => s, Err(e) => { return Err(e); }
+            };
+            if ts.accept_punct(PDot) {
+                let second = match ts.expect_ident() {
+                    Ok(s)  => s, Err(e) => { return Err(e); }
+                };
+                Some(TableRef { schema: first, name: second, alias: "".clone() })
+            } else {
+                Some(TableRef { schema: "".clone(), name: first, alias: "".clone() })
+            }
+        }
+        _ => None,
+    };
+    Ok(SReindex(target))
+}
+
+public fn parse_attach(ts: &mut TokenStream) -> Result<Statement, ParseError> {
+    match ts.expect_keyword(KwAttach) { Ok(_) => {}, Err(e) => { return Err(e); } }
+    let _ = ts.accept_keyword(KwDatabase);
+    let path = match parse_expr(ts) {
+        Ok(x)  => x, Err(err) => { return Err(err); }
+    };
+    match ts.expect_keyword(KwAs) { Ok(_) => {}, Err(e) => { return Err(e); } }
+    let name = match parse_expr(ts) {
+        Ok(x)  => x, Err(err) => { return Err(err); }
+    };
+    Ok(SAttach(path, name))
+}
+
+public fn parse_detach(ts: &mut TokenStream) -> Result<Statement, ParseError> {
+    match ts.expect_keyword(KwDetach) { Ok(_) => {}, Err(e) => { return Err(e); } }
+    let _ = ts.accept_keyword(KwDatabase);
+    let name = match ts.expect_ident() {
+        Ok(s)  => s, Err(e) => { return Err(e); }
+    };
+    Ok(SDetach(name))
+}
+
+public fn parse_analyze(ts: &mut TokenStream) -> Result<Statement, ParseError> {
+    match ts.expect_keyword(KwAnalyze) { Ok(_) => {}, Err(e) => { return Err(e); } }
+    let target: Maybe<TableRef> = match ts.peek() {
+        TIdent(_) => {
+            let first = match ts.expect_ident() {
+                Ok(s)  => s, Err(e) => { return Err(e); }
+            };
+            if ts.accept_punct(PDot) {
+                let second = match ts.expect_ident() {
+                    Ok(s)  => s, Err(e) => { return Err(e); }
+                };
+                Some(TableRef { schema: first, name: second, alias: "".clone() })
+            } else {
+                Some(TableRef { schema: "".clone(), name: first, alias: "".clone() })
+            }
+        }
+        _ => None,
+    };
+    Ok(SAnalyze(target))
+}
+
+// -----------------------------------------------------------------------------
+// Local case-fold helper (avoids pulling `core.text.case_fold` which
+// brings a larger dependency surface into the parser)
+// -----------------------------------------------------------------------------
+
+fn fold_text_ascii(t: &Text) -> Text {
+    let raw = t.as_bytes();
+    let mut out: List<Byte> = List.new();
+    let mut i: Int = 0;
+    while i < raw.len() {
+        let mut b = raw[i];
+        if b >= (0x41 as Byte) && b <= (0x5A as Byte) {
+            b = b + (0x20 as Byte);
+        }
+        out.push(b);
+        i = i + 1;
+    }
+    Text.from_bytes(&out).unwrap_or("".clone())
+}

@@ -50,4 +50,13 @@ public mount .parser.{
     stream_new, parse_error,
     parse_expr, parse_select,
     parse_insert, parse_update, parse_delete,
+    parse_create, parse_drop,
+    parse_pragma, parse_begin, parse_commit, parse_rollback,
+    parse_savepoint, parse_release, parse_vacuum, parse_reindex,
+    parse_attach, parse_detach, parse_analyze,
+    parse_statement, parse_batch, parse_one,
+};
+
+public mount .ast.{
+    ColumnConstraint,
 };

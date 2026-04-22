@@ -22,6 +22,9 @@ public module token_stream;
 public module expr;
 public module select;
 public module dml;
+public module ddl;
+public module misc;
+public module stmt;
 
 public mount .token_stream.{
     TokenStream, ParseError,
@@ -31,3 +34,10 @@ public mount .token_stream.{
 public mount .expr.parse_expr;
 public mount .select.parse_select;
 public mount .dml.{parse_insert, parse_update, parse_delete};
+public mount .ddl.{parse_create, parse_drop};
+public mount .misc.{
+    parse_pragma, parse_begin, parse_commit, parse_rollback,
+    parse_savepoint, parse_release, parse_vacuum, parse_reindex,
+    parse_attach, parse_detach, parse_analyze,
+};
+public mount .stmt.{parse_statement, parse_batch, parse_one};

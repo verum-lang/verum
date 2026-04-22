@@ -1,0 +1,156 @@
+module core.database.sqlite.native.l5_sql.parser.stmt;
+
+// =============================================================================
+// l5_sql/parser/stmt.vr — top-level statement dispatcher
+// =============================================================================
+// Layer: 5
+// Spec: sqlite-native.md §12.2, sqlite.org/syntax/sql-stmt.html
+//
+// The parser's public entry points:
+//
+//   parse_statement(ts) -> Result<Statement, ParseError>
+//       Parses one statement (no leading/trailing ';'). Dispatches on
+//       the leading keyword.
+//
+//   parse_batch(src) -> Result<List<Statement>, ParseError>
+//       Tokenises `src` and parses until EOF, consuming ';' between
+//       statements. Empty statements (';;') are silently skipped.
+// =============================================================================
+
+mount core.*;
+mount collections.List;
+mount base.{Result, Ok, Err, Text};
+mount core.database.sqlite.native.l5_sql.lexer.{
+    Token, Keyword, Operator, Punct, lex,
+};
+mount core.database.sqlite.native.l5_sql.ast.Statement;
+mount core.database.sqlite.native.l5_sql.parser.token_stream.{
+    TokenStream, ParseError, parse_error, stream_new,
+};
+mount core.database.sqlite.native.l5_sql.parser.select.parse_select;
+mount core.database.sqlite.native.l5_sql.parser.dml.{
+    parse_insert, parse_update, parse_delete,
+};
+mount core.database.sqlite.native.l5_sql.parser.ddl.{
+    parse_create, parse_drop,
+};
+mount core.database.sqlite.native.l5_sql.parser.misc.{
+    parse_pragma, parse_begin, parse_commit, parse_rollback,
+    parse_savepoint, parse_release,
+    parse_vacuum, parse_reindex, parse_attach, parse_detach, parse_analyze,
+};
+
+// -----------------------------------------------------------------------------
+// Single-statement dispatch
+// -----------------------------------------------------------------------------
+
+public fn parse_statement(ts: &mut TokenStream) -> Result<Statement, ParseError> {
+    // Leading `WITH` — counts as SELECT for the v1 since we haven't
+    // wired CTE storage yet; fall through.
+    match ts.peek() {
+        TKeyword(KwSelect) | TKeyword(KwWith) => {
+            let sel = match parse_select(ts) {
+                Ok(s)  => s, Err(e) => { return Err(e); }
+            };
+            return Ok(SSelect(sel));
+        }
+        TKeyword(KwInsert) | TKeyword(KwReplace) => {
+            let ins = match parse_insert(ts) {
+                Ok(s)  => s, Err(e) => { return Err(e); }
+            };
+            return Ok(SInsert(ins));
+        }
+        TKeyword(KwUpdate) => {
+            let upd = match parse_update(ts) {
+                Ok(s)  => s, Err(e) => { return Err(e); }
+            };
+            return Ok(SUpdate(upd));
+        }
+        TKeyword(KwDelete) => {
+            let del = match parse_delete(ts) {
+                Ok(s)  => s, Err(e) => { return Err(e); }
+            };
+            return Ok(SDelete(del));
+        }
+        TKeyword(KwCreate) => parse_create(ts),
+        TKeyword(KwDrop)   => parse_drop(ts),
+        TKeyword(KwBegin)  => parse_begin(ts),
+        TKeyword(KwCommit) | TKeyword(KwEnd) => parse_commit(ts),
+        TKeyword(KwRollback) => parse_rollback(ts),
+        TKeyword(KwSavepoint) => parse_savepoint(ts),
+        TKeyword(KwRelease)   => parse_release(ts),
+        TKeyword(KwPragma)    => parse_pragma(ts),
+        TKeyword(KwVacuum)    => parse_vacuum(ts),
+        TKeyword(KwReindex)   => parse_reindex(ts),
+        TKeyword(KwAttach)    => parse_attach(ts),
+        TKeyword(KwDetach)    => parse_detach(ts),
+        TKeyword(KwAnalyze)   => parse_analyze(ts),
+        TKeyword(KwExplain) => {
+            // EXPLAIN wraps another statement — forward to inner
+            // `parse_statement` after consuming EXPLAIN [QUERY PLAN].
+            let _ = ts.advance();
+            let query_plan = if ts.accept_keyword(KwQuery) {
+                match ts.expect_keyword(KwPlan) { Ok(_) => {}, Err(e) => { return Err(e); } }
+                true
+            } else {
+                false
+            };
+            let inner = match parse_statement(ts) {
+                Ok(s)  => s, Err(e) => { return Err(e); }
+            };
+            Ok(SExplain(Heap(inner), query_plan))
+        }
+        _ => Err(parse_error("expected statement".clone(), ts.position())),
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Batch
+// -----------------------------------------------------------------------------
+
+/// Parse every statement in `src`, separated by `;`. Trailing
+/// semicolons are optional; empty statements (double `;`) are
+/// tolerated.
+public fn parse_batch(src: &Text) -> Result<List<Statement>, ParseError> {
+    let toks = match lex(src) {
+        Ok(t)  => t,
+        Err(e) => { return Err(ParseError { message: e.message, position: e.position }); }
+    };
+    let mut ts = stream_new(toks);
+    let mut out: List<Statement> = List.new();
+    loop {
+        // Skip leading semicolons (empty statements).
+        while ts.accept_punct(PSemicolon) {}
+        if ts.at_eof() { break; }
+
+        let s = match parse_statement(&mut ts) {
+            Ok(stmt) => stmt,
+            Err(e)   => { return Err(e); }
+        };
+        out.push(s);
+
+        // Require ';' or EOF between statements.
+        if ts.at_eof() { break; }
+        if !ts.accept_punct(PSemicolon) {
+            return Err(parse_error("expected ';' between statements".clone(), ts.position()));
+        }
+    }
+    Ok(out)
+}
+
+/// Single-statement convenience — parse exactly one statement from
+/// the string; ignore a trailing `;` if present. Fails if the input
+/// contains more than one statement.
+public fn parse_one(src: &Text) -> Result<Statement, ParseError> {
+    let batch = match parse_batch(src) {
+        Ok(v)  => v,
+        Err(e) => { return Err(e); }
+    };
+    if batch.len() == 0 {
+        return Err(ParseError { message: "no statement".clone(), position: 0 });
+    }
+    if batch.len() > 1 {
+        return Err(ParseError { message: "expected exactly one statement".clone(), position: 0 });
+    }
+    Ok(batch[0])
+}

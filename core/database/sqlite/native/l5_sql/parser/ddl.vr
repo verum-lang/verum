@@ -1,0 +1,516 @@
+module core.database.sqlite.native.l5_sql.parser.ddl;
+
+// =============================================================================
+// l5_sql/parser/ddl.vr — CREATE / DROP / ALTER
+// =============================================================================
+// Layer: 5
+// Spec: sqlite.org/lang_{createtable,createindex,droptable,altertable}.html
+//
+// Grammar (subset — the v1 we can actually codegen):
+//
+//   create-table-stmt = CREATE [TEMP|TEMPORARY] TABLE [IF NOT EXISTS]
+//                        qname '(' column-def {, column-def | table-constraint} ')'
+//                        [WITHOUT ROWID] [STRICT]
+//
+//   column-def = ident [type-name] { column-constraint }
+//   type-name  = ident { ident | '(' INT [, INT] ')' }
+//
+//   column-constraint = PRIMARY KEY [ASC|DESC] [on-conflict] [AUTOINCREMENT]
+//                     | NOT NULL [on-conflict]
+//                     | UNIQUE [on-conflict]
+//                     | CHECK '(' expr ')'
+//                     | DEFAULT ( expr | signed-number | literal )
+//                     | COLLATE ident
+//                     | REFERENCES qname [ '(' ident {, ident} ')' ]
+//
+//   table-constraint  = PRIMARY KEY '(' ident {, ident} ')' [on-conflict]
+//                     | UNIQUE '(' ident {, ident} ')' [on-conflict]
+//                     | CHECK '(' expr ')'
+//                     | FOREIGN KEY '(' ident {, ident} ')' REFERENCES ...
+//
+//   drop-stmt  = DROP (TABLE|INDEX|VIEW|TRIGGER) [IF EXISTS] qname
+//   create-index-stmt = CREATE [UNIQUE] INDEX [IF NOT EXISTS] qname ON
+//                        qname '(' ident {, ident} ')'   -- stashed as
+//                        expression; v1 parses but discards the expr
+//                        detail until the planner consumes it.
+// =============================================================================
+
+mount core.*;
+mount collections.List;
+mount base.{Result, Ok, Err, Text, Maybe};
+mount core.database.sqlite.native.l5_sql.lexer.{
+    Token, Keyword, Operator, Punct,
+};
+mount core.database.sqlite.native.l5_sql.ast.{
+    Statement, Expr, TableRef,
+    CreateTableStmt, ColumnDef, ColumnConstraint, TableConstraint,
+    OnConflict,
+};
+mount core.database.sqlite.native.l5_sql.parser.token_stream.{
+    TokenStream, ParseError, parse_error,
+};
+mount core.database.sqlite.native.l5_sql.parser.expr.parse_expr;
+
+// -----------------------------------------------------------------------------
+// CREATE
+// -----------------------------------------------------------------------------
+
+public fn parse_create(ts: &mut TokenStream) -> Result<Statement, ParseError> {
+    match ts.expect_keyword(KwCreate) { Ok(_) => {}, Err(e) => { return Err(e); } }
+
+    let temporary = ts.accept_keyword(KwTemp) || ts.accept_keyword(KwTemporary);
+    let unique = ts.accept_keyword(KwUnique);
+    let _ = unique;     // recorded only for INDEX form; TABLE doesn't take UNIQUE.
+
+    if ts.accept_keyword(KwTable) {
+        let stmt = match parse_create_table_rest(ts, temporary) {
+            Ok(s)  => s, Err(e) => { return Err(e); }
+        };
+        return Ok(SCreateTable(stmt));
+    }
+
+    if ts.accept_keyword(KwIndex) {
+        // CREATE [UNIQUE] INDEX [IF NOT EXISTS] qname ON qname '(' col-list ')'
+        // For v1 we parse through and discard — the planner consumes
+        // the AST once it's available. Surface as parse error so
+        // callers notice the gap instead of silently succeeding with a
+        // broken AST node.
+        return Err(parse_error(
+            "CREATE INDEX parsed but not yet modelled in AST v1".clone(),
+            ts.position(),
+        ));
+    }
+
+    if ts.accept_keyword(KwView) {
+        return Err(parse_error(
+            "CREATE VIEW not yet supported in L5.5 initial cut".clone(),
+            ts.position(),
+        ));
+    }
+
+    if ts.accept_keyword(KwTrigger) {
+        return Err(parse_error(
+            "CREATE TRIGGER not yet supported in L5.5 initial cut".clone(),
+            ts.position(),
+        ));
+    }
+
+    Err(parse_error("expected TABLE / INDEX / VIEW / TRIGGER after CREATE".clone(), ts.position()))
+}
+
+fn parse_create_table_rest(
+    ts: &mut TokenStream,
+    temporary: Bool,
+) -> Result<CreateTableStmt, ParseError> {
+    let if_not_exists = if ts.accept_keyword(KwIf) {
+        match ts.expect_keyword(KwNot) { Ok(_) => {}, Err(e) => { return Err(e); } }
+        match ts.expect_keyword(KwExists) { Ok(_) => {}, Err(e) => { return Err(e); } }
+        true
+    } else {
+        false
+    };
+
+    let table = match parse_qualified_name(ts) {
+        Ok(t)  => t, Err(e) => { return Err(e); }
+    };
+
+    match ts.expect_punct(PLParen) { Ok(_) => {}, Err(e) => { return Err(e); } }
+
+    let mut columns: List<ColumnDef> = List.new();
+    let mut constraints: List<TableConstraint> = List.new();
+    let mut first = true;
+
+    loop {
+        if !first {
+            if !ts.accept_punct(PComma) { break; }
+        }
+        first = false;
+
+        // Table constraint vs column def — check the leading keyword.
+        if is_table_constraint_start(ts) {
+            let tc = match parse_table_constraint(ts) {
+                Ok(t)  => t, Err(e) => { return Err(e); }
+            };
+            constraints.push(tc);
+        } else {
+            let col = match parse_column_def(ts) {
+                Ok(c)  => c, Err(e) => { return Err(e); }
+            };
+            columns.push(col);
+        }
+    }
+
+    match ts.expect_punct(PRParen) { Ok(_) => {}, Err(e) => { return Err(e); } }
+
+    // Table options: WITHOUT ROWID, STRICT.
+    let mut without_rowid = false;
+    let mut strict = false;
+    loop {
+        if ts.accept_keyword(KwWithout) {
+            match ts.expect_keyword(KwRowid) { Ok(_) => {}, Err(e) => { return Err(e); } }
+            without_rowid = true;
+            // Comma-separated table options.
+            if ts.accept_punct(PComma) { continue; }
+            break;
+        }
+        // STRICT is not a full keyword in our lexer set — it falls
+        // through as an identifier. Match on TIdent("strict"/"STRICT").
+        match ts.peek() {
+            TIdent(s) => {
+                // ASCII-case-insensitive compare against "strict".
+                if text_eq_ci(&s, "strict") {
+                    let _ = ts.advance();
+                    strict = true;
+                    if ts.accept_punct(PComma) { continue; }
+                    break;
+                }
+                break;
+            }
+            _ => break,
+        }
+    }
+
+    Ok(CreateTableStmt {
+        if_not_exists: if_not_exists,
+        temporary: temporary,
+        table: table,
+        columns: columns,
+        constraints: constraints,
+        strict: strict,
+        without_rowid: without_rowid,
+    })
+}
+
+// -----------------------------------------------------------------------------
+// Column definition
+// -----------------------------------------------------------------------------
+
+fn parse_column_def(ts: &mut TokenStream) -> Result<ColumnDef, ParseError> {
+    let name = match ts.expect_ident() {
+        Ok(s)  => s, Err(e) => { return Err(e); }
+    };
+
+    let declared_type = parse_type_name(ts);
+
+    let mut constraints: List<ColumnConstraint> = List.new();
+    loop {
+        let cc_opt = match try_parse_column_constraint(ts) {
+            Ok(o)  => o, Err(e) => { return Err(e); }
+        };
+        match cc_opt {
+            Some(cc) => constraints.push(cc),
+            None     => break,
+        }
+    }
+
+    Ok(ColumnDef {
+        name: name,
+        declared_type: declared_type,
+        constraints: constraints,
+    })
+}
+
+/// Parse an optional type name after a column name. The grammar is
+/// lax: `VARCHAR(255)`, `INTEGER`, `DOUBLE PRECISION`, etc. We absorb
+/// any identifier(s) followed by an optional `(N [, M])` size spec.
+fn parse_type_name(ts: &mut TokenStream) -> Text {
+    match ts.peek() {
+        TIdent(_) => {},
+        _ => return "".clone(),
+    }
+
+    let mut out: Text = "".clone();
+    let mut first = true;
+
+    loop {
+        match ts.peek() {
+            TIdent(s) => {
+                if !first { out = out + " ".clone(); }
+                first = false;
+                out = out + s;
+                let _ = ts.advance();
+            }
+            _ => break,
+        }
+    }
+
+    // Optional size suffix — we skip through `(...)` without
+    // recording it on the AST for v1.
+    if ts.accept_punct(PLParen) {
+        let _ = consume_through_rparen(ts);
+    }
+
+    out
+}
+
+fn consume_through_rparen(ts: &mut TokenStream) -> Bool {
+    let mut depth: Int = 1;
+    while !ts.at_eof() {
+        if ts.accept_punct(PLParen) { depth = depth + 1; continue; }
+        if ts.accept_punct(PRParen) {
+            depth = depth - 1;
+            if depth == 0 { return true; }
+            continue;
+        }
+        let _ = ts.advance();
+    }
+    false
+}
+
+// -----------------------------------------------------------------------------
+// Column constraints
+// -----------------------------------------------------------------------------
+
+fn try_parse_column_constraint(ts: &mut TokenStream) -> Result<Maybe<ColumnConstraint>, ParseError> {
+    if ts.accept_keyword(KwPrimary) {
+        match ts.expect_keyword(KwKey) { Ok(_) => {}, Err(e) => { return Err(e); } }
+        // Optional ASC / DESC — ignored for v1.
+        let _ = ts.accept_keyword(KwAsc);
+        let _ = ts.accept_keyword(KwDesc);
+        let on_conflict = match parse_optional_on_conflict(ts) {
+            Ok(o)  => o, Err(e) => { return Err(e); }
+        };
+        let autoincrement = ts.accept_keyword(KwAutoincrement);
+        return Ok(Some(CcPrimaryKey(on_conflict, autoincrement)));
+    }
+
+    if ts.accept_keyword(KwNot) {
+        match ts.expect_keyword(KwNull) { Ok(_) => {}, Err(e) => { return Err(e); } }
+        let on_conflict = match parse_optional_on_conflict(ts) {
+            Ok(o)  => o, Err(e) => { return Err(e); }
+        };
+        return Ok(Some(CcNotNull(on_conflict)));
+    }
+
+    if ts.accept_keyword(KwUnique) {
+        let on_conflict = match parse_optional_on_conflict(ts) {
+            Ok(o)  => o, Err(e) => { return Err(e); }
+        };
+        return Ok(Some(CcUnique(on_conflict)));
+    }
+
+    if ts.accept_keyword(KwCheck) {
+        match ts.expect_punct(PLParen) { Ok(_) => {}, Err(e) => { return Err(e); } }
+        let e = match parse_expr(ts) {
+            Ok(x)  => x, Err(err) => { return Err(err); }
+        };
+        match ts.expect_punct(PRParen) { Ok(_) => {}, Err(e) => { return Err(e); } }
+        return Ok(Some(CcCheck(e)));
+    }
+
+    if ts.accept_keyword(KwDefault) {
+        // DEFAULT can be an expression (parenthesised), a signed
+        // number, or a simple literal. parse_expr handles all three.
+        if ts.check_punct(PLParen) {
+            let _ = ts.advance();
+            let e = match parse_expr(ts) {
+                Ok(x)  => x, Err(err) => { return Err(err); }
+            };
+            match ts.expect_punct(PRParen) { Ok(_) => {}, Err(err) => { return Err(err); } }
+            return Ok(Some(CcDefault(e)));
+        }
+        let e = match parse_expr(ts) {
+            Ok(x)  => x, Err(err) => { return Err(err); }
+        };
+        return Ok(Some(CcDefault(e)));
+    }
+
+    if ts.accept_keyword(KwCollate) {
+        let n = match ts.expect_ident() {
+            Ok(s)  => s, Err(e) => { return Err(e); }
+        };
+        return Ok(Some(CcCollate(n)));
+    }
+
+    if ts.accept_keyword(KwReferences) {
+        let qn = match parse_qualified_name(ts) {
+            Ok(t)  => t, Err(e) => { return Err(e); }
+        };
+        let mut cols: List<Text> = List.new();
+        if ts.accept_punct(PLParen) {
+            loop {
+                let col = match ts.expect_ident() {
+                    Ok(s)  => s, Err(e) => { return Err(e); }
+                };
+                cols.push(col);
+                if !ts.accept_punct(PComma) { break; }
+            }
+            match ts.expect_punct(PRParen) { Ok(_) => {}, Err(e) => { return Err(e); } }
+        }
+        return Ok(Some(CcForeignKey(qn, cols)));
+    }
+
+    Ok(None)
+}
+
+// -----------------------------------------------------------------------------
+// Table constraints
+// -----------------------------------------------------------------------------
+
+fn is_table_constraint_start(ts: &TokenStream) -> Bool {
+    match ts.peek() {
+        TKeyword(KwPrimary) => true,
+        TKeyword(KwUnique)  => true,
+        TKeyword(KwCheck)   => true,
+        TKeyword(KwForeign) => true,
+        _ => false,
+    }
+}
+
+fn parse_table_constraint(ts: &mut TokenStream) -> Result<TableConstraint, ParseError> {
+    if ts.accept_keyword(KwPrimary) {
+        match ts.expect_keyword(KwKey) { Ok(_) => {}, Err(e) => { return Err(e); } }
+        match ts.expect_punct(PLParen) { Ok(_) => {}, Err(e) => { return Err(e); } }
+        let mut cols: List<Text> = List.new();
+        loop {
+            let c = match ts.expect_ident() {
+                Ok(s)  => s, Err(e) => { return Err(e); }
+            };
+            cols.push(c);
+            if !ts.accept_punct(PComma) { break; }
+        }
+        match ts.expect_punct(PRParen) { Ok(_) => {}, Err(e) => { return Err(e); } }
+        let on_conflict = match parse_optional_on_conflict(ts) {
+            Ok(o)  => o, Err(e) => { return Err(e); }
+        };
+        let autoincrement = ts.accept_keyword(KwAutoincrement);
+        return Ok(TcPrimaryKey(cols, on_conflict, autoincrement));
+    }
+
+    if ts.accept_keyword(KwUnique) {
+        match ts.expect_punct(PLParen) { Ok(_) => {}, Err(e) => { return Err(e); } }
+        let mut cols: List<Text> = List.new();
+        loop {
+            let c = match ts.expect_ident() {
+                Ok(s)  => s, Err(e) => { return Err(e); }
+            };
+            cols.push(c);
+            if !ts.accept_punct(PComma) { break; }
+        }
+        match ts.expect_punct(PRParen) { Ok(_) => {}, Err(e) => { return Err(e); } }
+        let on_conflict = match parse_optional_on_conflict(ts) {
+            Ok(o)  => o, Err(e) => { return Err(e); }
+        };
+        return Ok(TcUnique(cols, on_conflict));
+    }
+
+    if ts.accept_keyword(KwCheck) {
+        match ts.expect_punct(PLParen) { Ok(_) => {}, Err(e) => { return Err(e); } }
+        let e = match parse_expr(ts) {
+            Ok(x)  => x, Err(err) => { return Err(err); }
+        };
+        match ts.expect_punct(PRParen) { Ok(_) => {}, Err(e) => { return Err(e); } }
+        return Ok(TcCheck(e));
+    }
+
+    if ts.accept_keyword(KwForeign) {
+        match ts.expect_keyword(KwKey) { Ok(_) => {}, Err(e) => { return Err(e); } }
+        match ts.expect_punct(PLParen) { Ok(_) => {}, Err(e) => { return Err(e); } }
+        let mut local_cols: List<Text> = List.new();
+        loop {
+            let c = match ts.expect_ident() {
+                Ok(s)  => s, Err(e) => { return Err(e); }
+            };
+            local_cols.push(c);
+            if !ts.accept_punct(PComma) { break; }
+        }
+        match ts.expect_punct(PRParen) { Ok(_) => {}, Err(e) => { return Err(e); } }
+        match ts.expect_keyword(KwReferences) { Ok(_) => {}, Err(e) => { return Err(e); } }
+        let target = match parse_qualified_name(ts) {
+            Ok(t)  => t, Err(e) => { return Err(e); }
+        };
+        let mut fk_cols: List<Text> = List.new();
+        if ts.accept_punct(PLParen) {
+            loop {
+                let c = match ts.expect_ident() {
+                    Ok(s)  => s, Err(e) => { return Err(e); }
+                };
+                fk_cols.push(c);
+                if !ts.accept_punct(PComma) { break; }
+            }
+            match ts.expect_punct(PRParen) { Ok(_) => {}, Err(e) => { return Err(e); } }
+        }
+        return Ok(TcForeignKey(local_cols, target, fk_cols));
+    }
+
+    Err(parse_error("expected table constraint".clone(), ts.position()))
+}
+
+fn parse_optional_on_conflict(ts: &mut TokenStream) -> Result<Maybe<OnConflict>, ParseError> {
+    if !ts.accept_keyword(KwOn) { return Ok(None); }
+    match ts.expect_keyword(KwConflict) { Ok(_) => {}, Err(e) => { return Err(e); } }
+    if ts.accept_keyword(KwAbort)    { return Ok(Some(OcAbort)); }
+    if ts.accept_keyword(KwFail)     { return Ok(Some(OcFail)); }
+    if ts.accept_keyword(KwIgnore)   { return Ok(Some(OcIgnore)); }
+    if ts.accept_keyword(KwReplace)  { return Ok(Some(OcReplace)); }
+    if ts.accept_keyword(KwRollback) { return Ok(Some(OcRollback)); }
+    Err(parse_error("expected conflict action after ON CONFLICT".clone(), ts.position()))
+}
+
+// -----------------------------------------------------------------------------
+// DROP
+// -----------------------------------------------------------------------------
+
+public fn parse_drop(ts: &mut TokenStream) -> Result<Statement, ParseError> {
+    match ts.expect_keyword(KwDrop) { Ok(_) => {}, Err(e) => { return Err(e); } }
+
+    let kind_tag = if ts.accept_keyword(KwTable)   { 0 }
+                   else if ts.accept_keyword(KwIndex)   { 1 }
+                   else if ts.accept_keyword(KwView)    { 2 }
+                   else if ts.accept_keyword(KwTrigger) { 3 }
+                   else { -1 };
+    if kind_tag < 0 {
+        return Err(parse_error("expected TABLE / INDEX / VIEW / TRIGGER".clone(), ts.position()));
+    }
+
+    let if_exists = if ts.accept_keyword(KwIf) {
+        match ts.expect_keyword(KwExists) { Ok(_) => {}, Err(e) => { return Err(e); } }
+        true
+    } else {
+        false
+    };
+
+    let qn = match parse_qualified_name(ts) {
+        Ok(t)  => t, Err(e) => { return Err(e); }
+    };
+
+    match kind_tag {
+        0 => Ok(SDropTable(if_exists, qn)),
+        1 => Ok(SDropIndex(if_exists, qn)),
+        2 => Ok(SDropView(if_exists, qn)),
+        _ => Ok(SDropTrigger(if_exists, qn)),
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Helpers
+// -----------------------------------------------------------------------------
+
+fn parse_qualified_name(ts: &mut TokenStream) -> Result<TableRef, ParseError> {
+    let first = match ts.expect_ident() {
+        Ok(s)  => s, Err(e) => { return Err(e); }
+    };
+    if ts.accept_punct(PDot) {
+        let second = match ts.expect_ident() {
+            Ok(s)  => s, Err(e) => { return Err(e); }
+        };
+        return Ok(TableRef { schema: first, name: second, alias: "".clone() });
+    }
+    Ok(TableRef { schema: "".clone(), name: first, alias: "".clone() })
+}
+
+fn text_eq_ci(a: &Text, lit: &str) -> Bool {
+    let ab = a.as_bytes();
+    let lb = lit.as_bytes();
+    if ab.len() != lb.len() { return false; }
+    let mut i: Int = 0;
+    while i < ab.len() {
+        let mut x = ab[i];
+        if x >= (0x41 as Byte) && x <= (0x5A as Byte) {
+            x = x + (0x20 as Byte);
+        }
+        if x != lb[i] { return false; }
+        i = i + 1;
+    }
+    true
+}
