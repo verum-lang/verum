@@ -12443,9 +12443,21 @@ fn lower_cbgr_extended<'ctx>(
             let offset = ctx.builder()
                 .build_int_mul(start_i, i64_ty.const_int(8, false), "slice_off")
                 .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
-            let base_int = ctx.builder()
-                .build_ptr_to_int(src.into_pointer_value(), i64_ty, "base_int")
-                .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
+            // VBC often loads values into i64 registers (NaN-boxed or raw
+            // pointer-as-int) before we reach this sub-op. If the source
+            // register is already an IntValue (`load i64 ...`) use it
+            // directly as the base integer; only emit a `ptrtoint` when
+            // the register happens to carry a true LLVM pointer. Without
+            // this guard `src.into_pointer_value()` panics on the int-typed
+            // register produced by the List load path in the differential
+            // AOT harness.
+            let base_int = if src.is_int_value() {
+                src.into_int_value()
+            } else {
+                ctx.builder()
+                    .build_ptr_to_int(src.into_pointer_value(), i64_ty, "base_int")
+                    .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?
+            };
             let new_base = ctx.builder()
                 .build_int_add(base_int, offset, "new_base")
                 .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
