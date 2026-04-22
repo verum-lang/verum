@@ -5940,6 +5940,24 @@ impl ProofSearchEngine {
             "blast" => self.try_blast(goal),
             "auto" => self.try_auto(goal),
 
+            // `definition` / `by_def` / `unfold`: the surface syntax
+            // `proof by definition` used to unfold a recursive type's
+            // defining equations (e.g. `n + 0 == n` follows from the
+            // Nat addition definition). A full unfold-and-normalise
+            // tactic requires a definitional-equation registry; pending
+            // that, we route to `auto`, which handles both the trivial
+            // arithmetic identities and the reflexivity closer. This is
+            // sound: the claims tagged `by definition` in Verum user
+            // code are expected to be decidable, so the SMT fallback
+            // closes them correctly.
+            "definition" | "def" | "by_def" | "unfold" => self.try_auto(goal),
+
+            // `trivial` / `done`: variants a structured-proof leaf
+            // uses to close a goal that the ambient hypotheses already
+            // make true. Delegates to the full `auto` ladder so the
+            // trivial-close fast path + SMT fallback both fire.
+            "trivial" | "done" => self.try_auto(goal),
+
             // === Cubical HoTT tactics ===
             //
             // `cubical` / `homotopy` — first tries to close the goal by
