@@ -7357,6 +7357,43 @@ impl TypeChecker {
             let qualified: Text = format!("{}.{}", mod_path, name).into();
             self.ctx.define_type(qualified, ty);
         }
+
+        // Architectural: evict stale variant-constructor shadow on this
+        // same simple name. A previously-loaded stdlib enum may have
+        // registered `Frame: fn(Text) -> PumpError` in `env` because
+        // one of its variants happens to be named `Frame`. Now that the
+        // actual type `Frame` is being registered, `Frame.MaxData(...)`
+        // (the canonical variant-constructor spelling) must see `Frame`
+        // as a type — not as the parent enum's variant-ctor function.
+        //
+        // Only evict when the env binding is a function returning a
+        // DIFFERENT Variant/Generic/Named type: that is the signature
+        // of a variant-ctor shadow. Plain user functions or functions
+        // returning the same-named type are left alone.
+        //
+        // Qualified bindings (`PumpError.Frame`) stay intact so code
+        // that explicitly spells out the parent enum keeps working.
+        if let Some(existing) = self.ctx.env.lookup(name.as_str()) {
+            let short_name_str = name.as_str();
+            let is_variant_ctor_shadow = match &existing.ty {
+                Type::Function { return_type, .. } => {
+                    match return_type.as_ref() {
+                        Type::Variant(_) => true,
+                        Type::Generic { name: ret_name, .. } => {
+                            ret_name.as_str() != short_name_str
+                        }
+                        Type::Named { path, .. } => {
+                            path.last_segment_name() != short_name_str
+                        }
+                        _ => false,
+                    }
+                }
+                _ => false,
+            };
+            if is_variant_ctor_shadow {
+                let _ = self.ctx.env.remove(short_name_str);
+            }
+        }
     }
 
     /// Get the current module path
@@ -19182,19 +19219,58 @@ impl TypeChecker {
             // Primitive vs non-primitive → certainly incompatible
             (Type::Bool | Type::Text | Type::Char | Type::Unit, _) => false,
             (_, Type::Bool | Type::Text | Type::Char | Type::Unit) => false,
-            // Named/Generic comparisons — compare type names
-            (Type::Generic { name: n1, .. }, Type::Generic { name: n2, .. }) => n1 == n2,
-            (Type::Named { path: p1, .. }, Type::Named { path: p2, .. }) => {
-                Self::get_protocol_name_str(p1) == Self::get_protocol_name_str(p2)
+            // Named/Generic comparisons — compare type names, normalizing
+            // numeric aliases (`u64` ↔ `UInt64`, `i32` ↔ `Int32`, etc.) so
+            // that literal-synthesized types match user-declared parameter
+            // types regardless of spelling. Without this the pre-check at
+            // static-method lookup sites spuriously rejects perfectly
+            // legitimate calls and method resolution falls through to the
+            // generic "no method found" fallback.
+            (Type::Generic { name: n1, .. }, Type::Generic { name: n2, .. }) => {
+                Self::canonical_primitive(n1.as_str()) == Self::canonical_primitive(n2.as_str())
             }
-            // Cross-representation: Generic and Named with same name
+            (Type::Named { path: p1, .. }, Type::Named { path: p2, .. }) => {
+                Self::canonical_primitive(Self::get_protocol_name_str(p1))
+                    == Self::canonical_primitive(Self::get_protocol_name_str(p2))
+            }
             (Type::Generic { name, .. }, Type::Named { path, .. })
             | (Type::Named { path, .. }, Type::Generic { name, .. }) => {
-                name.as_str() == Self::get_protocol_name_str(path)
+                Self::canonical_primitive(name.as_str())
+                    == Self::canonical_primitive(Self::get_protocol_name_str(path))
             }
             // For types we can't structurally compare (Array, Tuple, Function, Reference, etc.),
             // assume compatible and let the actual type checker decide.
             _ => true,
+        }
+    }
+
+    /// Collapse Rust-style lowercase primitive aliases (`u64`, `i32`,
+    /// `f64`, `u8`) onto their canonical UpperCamel names
+    /// (`UInt64`, `Int32`, `Float64`, `Byte`). For any non-primitive
+    /// name the input is returned unchanged so nominal types keep
+    /// their exact spelling.
+    ///
+    /// Placed here (not in `ty.rs`) so the set of canonical names is
+    /// owned by the same module that defines `is_sized_integer_type`
+    /// / `is_float_like_type` — every extension of the numeric set
+    /// must keep all three tables coherent.
+    fn canonical_primitive(name: &str) -> &str {
+        match name {
+            "i8"    => "Int8",
+            "i16"   => "Int16",
+            "i32"   => "Int32",
+            "i64"   => "Int64",
+            "i128"  => "Int128",
+            "isize" => "IntSize",
+            "u8" | "UInt8" => "Byte",
+            "u16"   => "UInt16",
+            "u32"   => "UInt32",
+            "u64"   => "UInt64",
+            "u128"  => "UInt128",
+            "usize" => "UIntSize",
+            "f32"   => "Float32",
+            "f64"   => "Float64",
+            other   => other,
         }
     }
 
