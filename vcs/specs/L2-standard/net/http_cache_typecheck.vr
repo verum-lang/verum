@@ -1,0 +1,85 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: http, cache, rfc9111, typecheck
+// @timeout: 10000
+// @expect: pass
+
+mount core.net.http_cache.{
+    CacheControl, CacheDecision, AgeInputs, DecisionInputs,
+    parse, current_age, freshness_lifetime_sec, decide,
+};
+
+fn exercise_parse() {
+    let cc = parse(&Text.from("public, max-age=3600, s-maxage=7200, immutable"));
+    assert(cc.public_);
+    assert(cc.immutable);
+    assert(!cc.no_store);
+
+    // no-store forbids caching.
+    let ns = parse(&Text.from("no-store"));
+    assert(ns.no_store);
+
+    // Quoted string values + whitespace tolerated.
+    let q = parse(&Text.from("max-age=\"600\", no-transform"));
+    let _ = q.max_age;
+
+    // Unknown directives ignored.
+    let weird = parse(&Text.from("spam, max-age=100, ham=yes"));
+    let _ = weird.max_age;
+}
+
+fn exercise_decide() {
+    let cc = parse(&Text.from("public, max-age=3600, stale-while-revalidate=60"));
+    let age = AgeInputs {
+        now_unix: 1_000_000,
+        date_header_unix: 999_000,
+        response_received_unix: 999_500,
+        request_unix: 1_000_000,
+        age_header_sec: 0_u64,
+    };
+    let age_now = current_age(&age);
+    let _ = age_now;
+
+    let life = freshness_lifetime_sec(&cc, None, 999_000, true);
+    let _ = life;
+
+    let d = decide(&DecisionInputs {
+        resp_cc: cc,
+        age: age,
+        expires_unix: None,
+        shared_cache: true,
+        upstream_error: false,
+    });
+    match d {
+        CacheDecision.Fresh(_)          => {},
+        CacheDecision.StaleServable(_)  => {},
+        CacheDecision.MustRevalidate    => {},
+        CacheDecision.MustNotCache      => {},
+    }
+}
+
+fn exercise_no_store() {
+    let cc = parse(&Text.from("no-store"));
+    let d = decide(&DecisionInputs {
+        resp_cc: cc,
+        age: AgeInputs {
+            now_unix: 0, date_header_unix: 0,
+            response_received_unix: 0, request_unix: 0,
+            age_header_sec: 0,
+        },
+        expires_unix: None,
+        shared_cache: true,
+        upstream_error: false,
+    });
+    match d {
+        CacheDecision.MustNotCache => {},
+        _                            => panic("expected MustNotCache"),
+    }
+}
+
+fn main() {
+    exercise_parse();
+    exercise_decide();
+    exercise_no_store();
+}

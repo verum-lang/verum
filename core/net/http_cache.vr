@@ -1,0 +1,378 @@
+// =============================================================================
+// net/http_cache.vr — HTTP caching semantics (RFC 9111)
+// =============================================================================
+// Layer: 5 (Network — HTTP common)
+// Dependencies: core, core.collections, core.time
+// =============================================================================
+//
+// RFC 9111 — the correctness layer every HTTP cache / proxy / CDN /
+// browser implements. Without a shared helper, every codebase
+// reinvents Cache-Control parsing with subtly different semantics
+// around `s-maxage`, `stale-while-revalidate`, `must-revalidate`,
+// `no-cache` vs `no-store`, etc.
+//
+// This module covers the request-side + response-side parsing, age
+// calculation, and the freshness / staleness decision tree (§4).
+//
+// # Scope
+//
+//   * Parse `Cache-Control` into typed `CacheControl` directives.
+//   * Compute response age from `Date` / `Age` headers (§4.2.3).
+//   * Compute freshness lifetime from `s-maxage` / `max-age` /
+//     `Expires` (§4.2.1).
+//   * `CacheDecision` — the cacheability + freshness judgement
+//     (fresh / stale / must-revalidate / must-not-cache).
+//
+// # Out of scope
+//
+//   * Varying-cache-key calculation (`Vary` header) — the caller's
+//     storage layer decides which fields go into the cache key.
+//   * Conditional revalidation (If-None-Match / If-Modified-Since
+//     exchange) — this is transport, handled by the HTTP client.
+//
+// =============================================================================
+
+module core.net.http_cache;
+
+mount core.*;
+mount core.collections.List;
+mount core.time.duration.{Duration};
+
+// =============================================================================
+// Typed Cache-Control directives
+// =============================================================================
+
+public type CacheControl is {
+    // Request + response directives.
+    no_cache:       Bool,
+    no_store:       Bool,
+    no_transform:   Bool,
+
+    // Response-only.
+    public_:        Bool,
+    private_:       Bool,
+    immutable:      Bool,
+    must_revalidate:        Bool,
+    proxy_revalidate:       Bool,
+    must_understand:        Bool,
+
+    // Numeric directives (seconds). `None` = directive absent.
+    max_age:                Maybe<UInt64>,
+    s_maxage:               Maybe<UInt64>,
+    stale_while_revalidate: Maybe<UInt64>,
+    stale_if_error:         Maybe<UInt64>,
+
+    // Request-only.
+    max_stale:      Maybe<UInt64>,
+    min_fresh:      Maybe<UInt64>,
+    only_if_cached: Bool,
+};
+
+public type CacheControlError is
+      Malformed(Text);
+
+// =============================================================================
+// Parser
+// =============================================================================
+
+/// Parse a `Cache-Control:` header value (sans the `Cache-Control:`
+/// prefix). Unknown directives are ignored per RFC 9111 §5.2.
+public fn parse(value: &Text) -> CacheControl {
+    let mut cc = empty_cache_control();
+    let b = value.as_bytes();
+    let segs = split_commas(b);
+    let mut i: Int = 0;
+    while i < segs.len() {
+        let seg = trim_ws(segs[i].as_slice());
+        if seg.len() == 0 { i = i + 1; continue; }
+        apply_directive(&seg, &mut cc);
+        i = i + 1;
+    }
+    cc
+}
+
+fn apply_directive(seg: &List<Byte>, cc: &mut CacheControl) {
+    // Split at '=' if present.
+    let mut eq_at: Int = -1;
+    let mut k: Int = 0;
+    while k < seg.len() {
+        if seg[k] == ('=' as Byte) { eq_at = k; break; }
+        k = k + 1;
+    }
+    let (name_bytes, value_bytes) = if eq_at < 0 {
+        (slice_vec(seg.as_slice(), 0, seg.len()), List<Byte>.new())
+    } else {
+        (slice_vec(seg.as_slice(), 0, eq_at),
+         trim_quotes(slice_vec(seg.as_slice(), eq_at + 1, seg.len())))
+    };
+
+    let name_lower = to_lower_bytes(name_bytes.as_slice());
+    let n = name_lower.as_slice();
+
+    if bytes_eq(n, b"no-cache") { cc.no_cache = true; return; }
+    if bytes_eq(n, b"no-store") { cc.no_store = true; return; }
+    if bytes_eq(n, b"no-transform") { cc.no_transform = true; return; }
+    if bytes_eq(n, b"public")   { cc.public_ = true; return; }
+    if bytes_eq(n, b"private")  { cc.private_ = true; return; }
+    if bytes_eq(n, b"immutable"){ cc.immutable = true; return; }
+    if bytes_eq(n, b"must-revalidate")  { cc.must_revalidate = true; return; }
+    if bytes_eq(n, b"proxy-revalidate") { cc.proxy_revalidate = true; return; }
+    if bytes_eq(n, b"must-understand")  { cc.must_understand = true; return; }
+    if bytes_eq(n, b"only-if-cached")   { cc.only_if_cached = true; return; }
+
+    if bytes_eq(n, b"max-age")  { cc.max_age = parse_u64_opt(&value_bytes); return; }
+    if bytes_eq(n, b"s-maxage") { cc.s_maxage = parse_u64_opt(&value_bytes); return; }
+    if bytes_eq(n, b"stale-while-revalidate") {
+        cc.stale_while_revalidate = parse_u64_opt(&value_bytes); return;
+    }
+    if bytes_eq(n, b"stale-if-error") {
+        cc.stale_if_error = parse_u64_opt(&value_bytes); return;
+    }
+    if bytes_eq(n, b"max-stale") { cc.max_stale = parse_u64_opt(&value_bytes); return; }
+    if bytes_eq(n, b"min-fresh") { cc.min_fresh = parse_u64_opt(&value_bytes); return; }
+    // Unknown → ignore.
+}
+
+fn empty_cache_control() -> CacheControl {
+    CacheControl {
+        no_cache: false, no_store: false, no_transform: false,
+        public_: false, private_: false, immutable: false,
+        must_revalidate: false, proxy_revalidate: false, must_understand: false,
+        max_age: None, s_maxage: None,
+        stale_while_revalidate: None, stale_if_error: None,
+        max_stale: None, min_fresh: None, only_if_cached: false,
+    }
+}
+
+// =============================================================================
+// Age + freshness (RFC 9111 §4.2)
+// =============================================================================
+
+public type AgeInputs is {
+    /// Unix-seconds of response arrival at the cache (the "now" when
+    /// the cache stored the response).
+    now_unix:           UInt64,
+    /// Unix-seconds of `Date:` header on the original response, or
+    /// `response_received_unix` if the origin didn't send one.
+    date_header_unix:   UInt64,
+    /// Unix-seconds the cache received the response.
+    response_received_unix: UInt64,
+    /// Unix-seconds a downstream request is being evaluated against
+    /// the cached entry.
+    request_unix:       UInt64,
+    /// Value of the `Age:` header from upstream (or 0 if absent).
+    age_header_sec:     UInt64,
+};
+
+/// Effective age of a cached response per RFC 9111 §4.2.3 formula.
+/// Returns seconds.
+public fn current_age(ai: &AgeInputs) -> UInt64 {
+    // apparent_age = max(0, now - date)
+    let apparent_age: UInt64 = if ai.response_received_unix >= ai.date_header_unix {
+        ai.response_received_unix - ai.date_header_unix
+    } else { 0_u64 };
+
+    // corrected_age_value = age_value + response_delay
+    // response_delay = response_time - request_time; here
+    // request_time = response_received_unix (single-hop).
+    let corrected_age: UInt64 = ai.age_header_sec;
+
+    let corrected_initial_age: UInt64 = if apparent_age > corrected_age {
+        apparent_age
+    } else { corrected_age };
+
+    // resident_time = now - response_time
+    let resident_time: UInt64 = if ai.request_unix >= ai.response_received_unix {
+        ai.request_unix - ai.response_received_unix
+    } else { 0_u64 };
+
+    corrected_initial_age + resident_time
+}
+
+/// Freshness lifetime (§4.2.1). s-maxage takes precedence over
+/// max-age for shared caches; max-age wins over Expires.
+///
+/// `shared_cache = true` for a proxy/CDN, false for a browser.
+public fn freshness_lifetime_sec(
+    resp_cc:       &CacheControl,
+    expires_unix:  Maybe<UInt64>,
+    date_unix:     UInt64,
+    shared_cache:  Bool,
+) -> Maybe<UInt64> {
+    if shared_cache {
+        match &resp_cc.s_maxage { Some(n) => return Some(*n), None => {} }
+    }
+    match &resp_cc.max_age { Some(n) => return Some(*n), None => {} }
+    match expires_unix {
+        Some(exp) => {
+            if exp > date_unix { return Some(exp - date_unix); }
+            return Some(0_u64);
+        },
+        None => {},
+    }
+    None
+}
+
+// =============================================================================
+// Cache decision
+// =============================================================================
+
+public type CacheDecision is
+      Fresh(UInt64)               // seconds of remaining freshness
+    | StaleServable(UInt64)       // served stale-while-revalidate / stale-if-error
+    | MustRevalidate
+    | MustNotCache;               // no-store / private in shared cache / similar
+
+public type DecisionInputs is {
+    resp_cc:       CacheControl,
+    age:           AgeInputs,
+    expires_unix:  Maybe<UInt64>,
+    shared_cache:  Bool,
+    /// Caller already decided an origin error is happening (5xx);
+    /// lets `stale-if-error` win.
+    upstream_error: Bool,
+};
+
+public fn decide(di: &DecisionInputs) -> CacheDecision {
+    // Absolute no-store stops here.
+    if di.resp_cc.no_store { return CacheDecision.MustNotCache; }
+    // private in a shared cache → never store at the shared hop.
+    if di.shared_cache && di.resp_cc.private_ { return CacheDecision.MustNotCache; }
+    // no-cache → cached but MUST revalidate before each use.
+    if di.resp_cc.no_cache { return CacheDecision.MustRevalidate; }
+    // immutable never-revalidate optimisation (RFC 8246).
+    if di.resp_cc.immutable {
+        match &di.resp_cc.max_age {
+            Some(n) => return CacheDecision.Fresh(*n),
+            None    => {},
+        }
+    }
+
+    let lifetime = freshness_lifetime_sec(
+        &di.resp_cc, di.expires_unix, di.age.date_header_unix, di.shared_cache,
+    );
+    match lifetime {
+        Some(limit) => {
+            let age = current_age(&di.age);
+            if age < limit {
+                return CacheDecision.Fresh(limit - age);
+            }
+            // Stale — consider grace-period directives.
+            if di.upstream_error {
+                match &di.resp_cc.stale_if_error {
+                    Some(grace) => {
+                        if age < limit + *grace {
+                            return CacheDecision.StaleServable(limit + *grace - age);
+                        }
+                    },
+                    None => {},
+                }
+            }
+            match &di.resp_cc.stale_while_revalidate {
+                Some(grace) => {
+                    if age < limit + *grace {
+                        return CacheDecision.StaleServable(limit + *grace - age);
+                    }
+                },
+                None => {},
+            }
+            if di.resp_cc.must_revalidate
+                || (di.shared_cache && di.resp_cc.proxy_revalidate)
+            {
+                return CacheDecision.MustRevalidate;
+            }
+            CacheDecision.MustRevalidate
+        },
+        None => {
+            // No explicit lifetime — caller applies heuristic freshness
+            // (§4.2.2) externally; we conservatively say revalidate.
+            CacheDecision.MustRevalidate
+        },
+    }
+}
+
+// =============================================================================
+// Byte helpers
+// =============================================================================
+
+fn split_commas(src: &[Byte]) -> List<List<Byte>> {
+    let mut out: List<List<Byte>> = [];
+    let mut cur: List<Byte> = [];
+    let mut i: Int = 0;
+    let mut in_quotes: Bool = false;
+    while i < src.len() {
+        let c = src[i];
+        if c == ('"' as Byte) { in_quotes = !in_quotes; cur.push(c); }
+        else if c == (',' as Byte) && !in_quotes { out.push(cur); cur = []; }
+        else { cur.push(c); }
+        i = i + 1;
+    }
+    out.push(cur);
+    out
+}
+
+fn trim_ws(src: &[Byte]) -> List<Byte> {
+    let mut l: Int = 0;
+    while l < src.len() && is_ws(src[l]) { l = l + 1; }
+    let mut r: Int = src.len();
+    while r > l && is_ws(src[r - 1]) { r = r - 1; }
+    slice_vec(src, l, r)
+}
+
+fn is_ws(b: Byte) -> Bool {
+    b == (' ' as Byte) || b == ('\t' as Byte)
+        || b == ('\r' as Byte) || b == ('\n' as Byte)
+}
+
+fn slice_vec(src: &[Byte], start: Int, end: Int) -> List<Byte> {
+    let mut out: List<Byte> = [];
+    let mut i: Int = start;
+    while i < end { out.push(src[i]); i = i + 1; }
+    out
+}
+
+fn to_lower_bytes(src: &[Byte]) -> List<Byte> {
+    let mut out: List<Byte> = [];
+    let mut i: Int = 0;
+    while i < src.len() {
+        let c = src[i];
+        if c >= ('A' as Byte) && c <= ('Z' as Byte) {
+            out.push(c + (('a' as Byte) - ('A' as Byte)));
+        } else { out.push(c); }
+        i = i + 1;
+    }
+    out
+}
+
+fn bytes_eq(a: &[Byte], b: &[Byte]) -> Bool {
+    if a.len() != b.len() { return false; }
+    let mut i: Int = 0;
+    while i < a.len() {
+        if a[i] != b[i] { return false; }
+        i = i + 1;
+    }
+    true
+}
+
+fn trim_quotes(src: List<Byte>) -> List<Byte> {
+    if src.len() >= 2 && src[0] == ('"' as Byte) && src[src.len() - 1] == ('"' as Byte) {
+        let mut out: List<Byte> = [];
+        let mut i: Int = 1;
+        while i < src.len() - 1 { out.push(src[i]); i = i + 1; }
+        return out;
+    }
+    src
+}
+
+fn parse_u64_opt(src: &List<Byte>) -> Maybe<UInt64> {
+    if src.len() == 0 { return None; }
+    let mut v: UInt64 = 0_u64;
+    let mut i: Int = 0;
+    while i < src.len() {
+        let c = src[i];
+        if c < ('0' as Byte) || c > ('9' as Byte) { return None; }
+        v = v * 10_u64 + ((c - ('0' as Byte)) as UInt64);
+        i = i + 1;
+    }
+    Some(v)
+}

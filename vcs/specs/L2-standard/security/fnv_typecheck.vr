@@ -1,0 +1,45 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: security, hash, fnv, non-crypto, typecheck
+// @timeout: 10000
+// @expect: pass
+
+mount core.security.hash.fnv.{
+    fnv1_32, fnv1a_32, fnv1_64, fnv1a_64,
+    Fnv1a32, Fnv1a64,
+    FNV_OFFSET_32, FNV_PRIME_32, FNV_OFFSET_64, FNV_PRIME_64,
+};
+
+fn exercise_fnv() {
+    // FNV-1a 32 of the empty string = FNV_OFFSET_32.
+    let empty: [Byte; 0] = [];
+    assert(fnv1a_32(&empty[..]) == FNV_OFFSET_32);
+
+    // One-shot, fixed size.
+    let _: UInt32 = fnv1_32(b"foo");
+    let _: UInt32 = fnv1a_32(b"foo");
+    let _: UInt64 = fnv1_64(b"hello world");
+    let _: UInt64 = fnv1a_64(b"hello world");
+
+    // Streaming must equal one-shot.
+    let mut h = Fnv1a32.new();
+    h.update(b"hello ");
+    h.update(b"world");
+    let streamed: UInt32 = h.finalize();
+    let oneshot: UInt32 = fnv1a_32(b"hello world");
+    assert(streamed == oneshot);
+
+    // 64-bit streaming.
+    let mut h64 = Fnv1a64.new();
+    h64.update(b"a");
+    h64.update(b"b");
+    h64.update(b"c");
+    assert(h64.finalize() == fnv1a_64(b"abc"));
+
+    // Constants visible.
+    let _: UInt32 = FNV_PRIME_32;
+    let _: UInt64 = FNV_PRIME_64;
+}
+
+fn main() { exercise_fnv(); }

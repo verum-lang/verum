@@ -1,0 +1,144 @@
+// =============================================================================
+// security/hash/fnv.vr — FNV-1 and FNV-1a (Fowler–Noll–Vo)
+// =============================================================================
+// Layer: 1 (fast non-cryptographic hash)
+// Dependencies: core
+// Reference: http://www.isthe.com/chongo/tech/comp/fnv/
+// =============================================================================
+//
+// FNV — the tiniest useful non-crypto hash. Single multiply-XOR loop,
+// no tables, no vectorisation, no startup cost. Popular for:
+//
+//   * HashMap internals where cache-friendliness beats avalanche
+//     quality (Python's dict used FNV through 3.3).
+//   * Fast fingerprints for short strings (DNS labels, log tags).
+//   * Tiny embedded targets where even XXH64's tables are too much.
+//
+// # Variants
+//
+//   FNV-1    — hash = hash × prime; hash = hash ^ byte
+//   FNV-1a   — hash = hash ^ byte; hash = hash × prime     (preferred)
+//
+// FNV-1a has marginally better avalanche than FNV-1; modern code
+// universally uses it. We expose both for byte-exact compatibility
+// with legacy artefacts (e.g. DNSSEC NSEC3 historical records).
+//
+// # Widths
+//
+//   32-bit: FNV_OFFSET_32  = 0x811C9DC5;   FNV_PRIME_32 = 0x01000193
+//   64-bit: FNV_OFFSET_64  = 0xCBF29CE484222325; FNV_PRIME_64 = 0x100000001B3
+//
+// # NOT cryptographic
+//
+// Same caveat as XXH64 / MurmurHash3 — adversarial inputs trivially
+// collide. Use Sha256 / Blake2b for integrity against untrusted
+// peers.
+//
+// =============================================================================
+
+module core.security.hash.fnv;
+
+mount core.*;
+
+// =============================================================================
+// Constants (FNV reference spec)
+// =============================================================================
+
+public const FNV_OFFSET_32: UInt32 = 0x811C9DC5_u32;
+public const FNV_PRIME_32:  UInt32 = 0x01000193_u32;
+
+public const FNV_OFFSET_64: UInt64 = 0xCBF29CE484222325_u64;
+public const FNV_PRIME_64:  UInt64 = 0x100000001B3_u64;
+
+// =============================================================================
+// 32-bit variants
+// =============================================================================
+
+public fn fnv1_32(data: &[Byte]) -> UInt32 {
+    let mut h = FNV_OFFSET_32;
+    let mut i: Int = 0;
+    while i < data.len() {
+        h = h * FNV_PRIME_32;
+        h = h ^ (data[i] as UInt32);
+        i = i + 1;
+    }
+    h
+}
+
+public fn fnv1a_32(data: &[Byte]) -> UInt32 {
+    let mut h = FNV_OFFSET_32;
+    let mut i: Int = 0;
+    while i < data.len() {
+        h = h ^ (data[i] as UInt32);
+        h = h * FNV_PRIME_32;
+        i = i + 1;
+    }
+    h
+}
+
+// =============================================================================
+// 64-bit variants
+// =============================================================================
+
+public fn fnv1_64(data: &[Byte]) -> UInt64 {
+    let mut h = FNV_OFFSET_64;
+    let mut i: Int = 0;
+    while i < data.len() {
+        h = h * FNV_PRIME_64;
+        h = h ^ (data[i] as UInt64);
+        i = i + 1;
+    }
+    h
+}
+
+public fn fnv1a_64(data: &[Byte]) -> UInt64 {
+    let mut h = FNV_OFFSET_64;
+    let mut i: Int = 0;
+    while i < data.len() {
+        h = h ^ (data[i] as UInt64);
+        h = h * FNV_PRIME_64;
+        i = i + 1;
+    }
+    h
+}
+
+// =============================================================================
+// Streaming wrappers — for multi-chunk consumers
+// =============================================================================
+
+public type Fnv1a32 is { state: UInt32 };
+public type Fnv1a64 is { state: UInt64 };
+
+implement Fnv1a32 {
+    public fn new() -> Fnv1a32 { Fnv1a32 { state: FNV_OFFSET_32 } }
+
+    public fn update(&mut self, data: &[Byte]) {
+        let mut h = self.state;
+        let mut i: Int = 0;
+        while i < data.len() {
+            h = h ^ (data[i] as UInt32);
+            h = h * FNV_PRIME_32;
+            i = i + 1;
+        }
+        self.state = h;
+    }
+
+    public fn finalize(&self) -> UInt32 { self.state }
+}
+
+implement Fnv1a64 {
+    public fn new() -> Fnv1a64 { Fnv1a64 { state: FNV_OFFSET_64 } }
+
+    public fn update(&mut self, data: &[Byte]) {
+        let mut h = self.state;
+        let mut i: Int = 0;
+        while i < data.len() {
+            h = h ^ (data[i] as UInt64);
+            h = h * FNV_PRIME_64;
+            i = i + 1;
+        }
+        self.state = h;
+    }
+
+    public fn finalize(&self) -> UInt64 { self.state }
+}
