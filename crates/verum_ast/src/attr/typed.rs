@@ -4790,3 +4790,114 @@ impl std::fmt::Display for CriticalSectionAttr {
         }
     }
 }
+
+// =============================================================================
+// FRAMEWORK-AXIOM ATTRIBUTION
+//
+// `@framework(name, "citation")` marks an axiom or theorem as a trusted
+// postulate coming from an external formal-mathematics framework (Lurie's
+// Higher Topos Theory, Schreiber's Differential Cohesion, Connes's
+// reconstruction theorem, Petz classification, Arnold–Mather catastrophe
+// normal forms, Baez–Dolan tricategory coherence, etc.).
+//
+// Every `@framework` marker produces a typed entry in the compiler's
+// framework-axiom registry (`verum_smt::framework_registry`). The registry
+// drives two downstream features:
+//   * `verum audit --framework-axioms` — enumerates the trusted boundary
+//     of any proof, so external reviewers see exactly which external
+//     results are relied on.
+//   * `.verum-cert` export — certificates carry their framework-axiom
+//     dependency list, allowing Coq / Lean / Isabelle / Dedukti / Metamath
+//     consumers to replay the proof under their own axioms.
+//
+// Grammar: the existing generic attribute production
+//   attribute = identifier , [ '(' , attribute_args , ')' ]
+// already accepts `@framework(lurie_htt, "HTT 6.2.2.7")`. This typed
+// extractor pulls a structured pair out of the generic `Attribute`.
+// =============================================================================
+
+/// Typed form of `@framework(name, "citation")`.
+///
+/// `name` is the framework identifier (e.g. `lurie_htt`, `schreiber_dcct`,
+/// `connes_reconstruction`, `petz_classification`, `arnold_catastrophe`,
+/// `baez_dolan`). `citation` is a free-form string literal pointing at the
+/// specific theorem / section / page in the cited work.
+///
+/// Attached to `axiom` or `theorem` declarations — or to a user-defined
+/// lemma that depends transitively on one of these external results and
+/// wants to make the dependency explicit.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct FrameworkAttr {
+    /// Framework identifier — short, stable, machine-readable.
+    /// Convention: `snake_case` matching the file under
+    /// `core/math/frameworks/<name>.vr`.
+    pub name: Text,
+    /// Citation string — human-readable reference to the specific result,
+    /// e.g. `"HTT 6.2.2.7"`, `"DCCT §3.9"`, `"Connes 2008 axiom (vii)"`.
+    pub citation: Text,
+    /// Source span of the `@framework(...)` form.
+    pub span: Span,
+}
+
+impl FrameworkAttr {
+    /// Construct directly. Prefer `from_attribute` at parse time.
+    pub fn new(name: Text, citation: Text, span: Span) -> Self {
+        Self { name, citation, span }
+    }
+
+    /// Try to extract a `FrameworkAttr` from a generic `Attribute`.
+    ///
+    /// Returns `None` when the attribute name is not `"framework"` or the
+    /// argument shape does not match `(identifier, string_literal)`. A
+    /// shape mismatch on a `@framework(...)` is a user error — the caller
+    /// (elaboration / diagnostic pass) should emit a diagnostic in that
+    /// case rather than silently discarding the attribution.
+    pub fn from_attribute(attr: &Attribute) -> Maybe<Self> {
+        if !attr.is_named("framework") {
+            return Maybe::None;
+        }
+        let args = match &attr.args {
+            Maybe::Some(a) => a,
+            Maybe::None => return Maybe::None,
+        };
+        // Expect exactly two args: an identifier and a string literal.
+        if args.len() != 2 {
+            return Maybe::None;
+        }
+        use crate::expr::{Expr, ExprKind};
+        use crate::literal::{LiteralKind, StringLit};
+        let name: Option<Text> = match args.get(0) {
+            Some(Expr { kind: ExprKind::Path(path), .. }) => {
+                path.segments.last().and_then(|seg| match seg {
+                    crate::ty::PathSegment::Name(ident) => Some(ident.name.clone()),
+                    _ => None,
+                })
+            }
+            _ => None,
+        };
+        let citation: Option<Text> = match args.get(1) {
+            Some(Expr { kind: ExprKind::Literal(lit), .. }) => match &lit.kind {
+                LiteralKind::Text(StringLit::Regular(s))
+                | LiteralKind::Text(StringLit::MultiLine(s)) => Some(s.clone()),
+                _ => None,
+            },
+            _ => None,
+        };
+        match (name, citation) {
+            (Some(n), Some(c)) => Maybe::Some(FrameworkAttr::new(n, c, attr.span)),
+            _ => Maybe::None,
+        }
+    }
+}
+
+impl Spanned for FrameworkAttr {
+    fn span(&self) -> Span {
+        self.span
+    }
+}
+
+impl std::fmt::Display for FrameworkAttr {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "@framework({}, \"{}\")", self.name, self.citation)
+    }
+}

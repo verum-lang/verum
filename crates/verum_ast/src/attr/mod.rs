@@ -154,6 +154,7 @@ pub use typed::{
     DeadlockDetectionAttr,
     DifferentiableAttr,
     FeatureAttr,
+    FrameworkAttr,
     HotAttr,
     InlineAttr,
     InlineMode,

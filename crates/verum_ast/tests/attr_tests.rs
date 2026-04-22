@@ -654,3 +654,79 @@ fn test_tagged_literal_attr_clone_eq() {
 
     assert_eq!(attr, cloned);
 }
+
+// ============================================================================
+// FrameworkAttr Tests — `@framework(name, "citation")`
+// ============================================================================
+
+use verum_ast::expr::Expr;
+use verum_ast::literal::{Literal, LiteralKind, StringLit};
+use verum_ast::Ident;
+
+/// Build `@framework(<name_ident>, "<citation>")` as a generic `Attribute`.
+fn build_framework_attr(name: &str, citation: &str) -> Attribute {
+    let span = Span::default();
+    let name_expr = Expr::ident(Ident::new(Text::from(name), span));
+    let citation_lit = Literal::new(
+        LiteralKind::Text(StringLit::Regular(Text::from(citation))),
+        span,
+    );
+    let citation_expr = Expr::literal(citation_lit);
+    let mut args = List::new();
+    args.push(name_expr);
+    args.push(citation_expr);
+    Attribute::new(Text::from("framework"), Maybe::Some(args), span)
+}
+
+#[test]
+fn test_framework_attr_extracts_from_generic_attribute() {
+    let raw = build_framework_attr("lurie_htt", "HTT 6.2.2.7");
+    let typed = FrameworkAttr::from_attribute(&raw);
+    match typed {
+        Maybe::Some(fw) => {
+            assert_eq!(fw.name.as_str(), "lurie_htt");
+            assert_eq!(fw.citation.as_str(), "HTT 6.2.2.7");
+        }
+        Maybe::None => panic!("FrameworkAttr::from_attribute returned None on valid input"),
+    }
+}
+
+#[test]
+fn test_framework_attr_rejects_wrong_name() {
+    let raw = Attribute::new(
+        Text::from("inline"),
+        Maybe::None,
+        Span::default(),
+    );
+    assert!(matches!(
+        FrameworkAttr::from_attribute(&raw),
+        Maybe::None
+    ));
+}
+
+#[test]
+fn test_framework_attr_rejects_missing_args() {
+    let raw = Attribute::new(
+        Text::from("framework"),
+        Maybe::None,
+        Span::default(),
+    );
+    assert!(matches!(
+        FrameworkAttr::from_attribute(&raw),
+        Maybe::None
+    ));
+}
+
+#[test]
+fn test_framework_attr_display_roundtrip() {
+    let raw = build_framework_attr("schreiber_dcct", "DCCT §3.9");
+    let typed = FrameworkAttr::from_attribute(&raw);
+    let fw = match typed {
+        Maybe::Some(fw) => fw,
+        Maybe::None => panic!("extraction failed"),
+    };
+    assert_eq!(
+        format!("{}", fw),
+        r#"@framework(schreiber_dcct, "DCCT §3.9")"#
+    );
+}
