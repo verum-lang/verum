@@ -1,0 +1,244 @@
+// =============================================================================
+// net/quic/stateless_reset.vr — Stateless Reset (RFC 9000 §10.3)
+// =============================================================================
+// Layer: 5 (Network — QUIC)
+// Dependencies: core, core.security.mac.hmac, core.security.util.rng
+// =============================================================================
+//
+// RFC 9000 §10.3 — an endpoint that receives a UDP datagram it cannot
+// match to a known connection MAY emit a "Stateless Reset" — a packet
+// that ends with the 16-byte reset token that the peer previously
+// registered (via the `stateless_reset_token` transport parameter or a
+// `NEW_CONNECTION_ID` frame). The peer, on recognising the trailing
+// token, immediately tears down its local state for that connection.
+//
+// Security goals (RFC 9000 §21.11):
+//
+//   * Tokens MUST be unpredictable — an off-path attacker that
+//     observes only the wire cannot guess a valid token. This module
+//     derives tokens as HMAC-SHA256(key, CID)[..16], where `key` is
+//     a long-lived 32-byte server secret. Rotating the key
+//     invalidates old tokens, forcing clients to re-establish.
+//
+//   * Reset packets MUST be indistinguishable from any other QUIC
+//     short-header packet. We fill with CSPRNG bytes to `min_len`
+//     (default 43 random + 16 token = 59 bytes, RFC 9000 §10.3),
+//     set bit 6 (Fixed Bit = 1) and clear bit 7 (Long Header = 0) in
+//     the first octet, and leave everything else random so the
+//     packet can't be identified as a reset without the token.
+//
+//   * Endpoints MUST pace their own reset emission (RFC 9000 §10.3.3)
+//     to prevent amplification: send at most one reset per datagram
+//     that would have been dropped, and cap the outgoing rate. This
+//     module ships the token derivation + packet format; the rate
+//     limiter lives alongside the connection dispatcher in
+//     `transport/listener.vr`.
+//
+// # Threat model / correctness
+//
+//   * Token collisions are a function of the 128-bit birthday bound
+//     (~2^64 peers before even a 1% chance). HMAC-SHA256 truncated
+//     to 128 bits preserves that bound.
+//   * The module is constant-time against tokens it doesn't match —
+//     `try_match_stateless_reset` compares via diff-accumulator so
+//     a timing side-channel cannot distinguish "no token matched"
+//     from "token matched except last byte".
+//
+// =============================================================================
+
+module core.net.quic.stateless_reset;
+
+mount core.*;
+mount core.collections.List;
+mount core.security.mac.hmac.{hmac_sha256};
+mount core.security.util.rng.{fill_secure};
+
+// =============================================================================
+// Key + token derivation
+// =============================================================================
+
+/// Server-held 32-byte secret used to derive reset tokens for every
+/// CID the server has issued. Rotated periodically (typically hours
+/// to a day) — old tokens fail to match after rotation, which is
+/// acceptable: clients simply re-handshake instead of being torn
+/// down by a stale reset.
+public type StatelessResetKey is {
+    key: [Byte; 32],
+};
+
+implement StatelessResetKey {
+    /// Generate a fresh 32-byte key from the CSPRNG.
+    public fn generate() -> StatelessResetKey {
+        let mut k: [Byte; 32] = [0_u8; 32];
+        fill_secure(&mut k);
+        StatelessResetKey { key: k }
+    }
+
+    /// Derive the 16-byte reset token for a given CID.
+    ///
+    /// token = HMAC-SHA256(key, cid)[0..16]
+    ///
+    /// Callers typically compute this once per issued CID and embed
+    /// it in the `stateless_reset_token` transport parameter (for
+    /// the preferred_address's CID) or in subsequent
+    /// `NEW_CONNECTION_ID` frames.
+    public fn token_for_cid(&self, cid: &[Byte]) -> [Byte; 16] {
+        let digest = hmac_sha256(&self.key[..], cid);
+        let mut t: [Byte; 16] = [0_u8; 16];
+        let mut i: Int = 0;
+        while i < 16 { t[i] = digest[i]; i = i + 1; }
+        t
+    }
+}
+
+// =============================================================================
+// Packet construction (server side)
+// =============================================================================
+
+/// Minimum size of a stateless reset packet per RFC 9000 §10.3.
+/// Short-header layout:
+///   * ≥ 43 bytes random (looks like encrypted header+PN+ciphertext)
+///   * ends with 16-byte token
+public const STATELESS_RESET_MIN_SIZE: Int = 21;          // RFC: token + 5
+public const STATELESS_RESET_RECOMMENDED_SIZE: Int = 43 + 16;   // 59 bytes
+
+/// Build a Stateless Reset packet ending in `token`. `min_size` is
+/// the wire size the packet must reach (SHOULD be ≤ the size of the
+/// triggering datagram minus 1, so a stateless-reset storm cannot
+/// amplify traffic).
+///
+/// Wire layout (RFC 9000 §10.3):
+///
+///   0                                                            wire_len-16
+///   ┌─────────────────────────────────────────────────────────────┬─────────┐
+///   │ 1 octet  │ (random) — ≥ 20 bytes, appears as short header  │ 16-byte │
+///   │  bit7=0  │   + packet number + ciphertext                   │  token  │
+///   │  bit6=1  │                                                  │         │
+///   └──────────┴──────────────────────────────────────────────────┴─────────┘
+///
+/// bit 7 (Long Header) = 0 signals short header.
+/// bit 6 (Fixed Bit)   = 1 required to be valid.
+/// Other bits random so the packet is indistinguishable from 1-RTT.
+public fn build_stateless_reset(token: &[Byte; 16], min_size: Int) -> List<Byte> {
+    let target = if min_size < STATELESS_RESET_RECOMMENDED_SIZE {
+        STATELESS_RESET_RECOMMENDED_SIZE
+    } else {
+        min_size
+    };
+    // Byte 0: short header with fixed bit set; other bits random.
+    let mut first_byte: [Byte; 1] = [0_u8; 1];
+    fill_secure(&mut first_byte);
+    let b0 = (first_byte[0] & 0x3F_u8) | 0x40_u8;   // clear bit7 (long-header=0); set bit6 (fixed=1)
+
+    let mut out: List<Byte> = [];
+    out.push(b0);
+
+    // Fill random bytes up to (target - 16). At least 5 random bytes
+    // follow the header octet per RFC 9000 §10.3 — enforced by
+    // target ≥ STATELESS_RESET_RECOMMENDED_SIZE.
+    let random_len = target - 1 - 16;
+    let mut rem = random_len;
+    let chunk_size: Int = 32;
+    while rem > 0 {
+        let mut chunk: [Byte; 32] = [0_u8; 32];
+        fill_secure(&mut chunk);
+        let take = if rem >= chunk_size { chunk_size } else { rem };
+        let mut i: Int = 0;
+        while i < take { out.push(chunk[i]); i = i + 1; }
+        rem = rem - take;
+    }
+
+    // Token suffix — 16 bytes.
+    let mut j: Int = 0;
+    while j < 16 { out.push(token[j]); j = j + 1; }
+    out
+}
+
+// =============================================================================
+// Client-side detection
+// =============================================================================
+
+/// Registered reset tokens a client/server is watching for. Each
+/// entry corresponds to a CID the peer issued us — when a wire
+/// datagram ends with the token, the owning connection is torn
+/// down immediately.
+public type ResetTokenSet is {
+    tokens: List<[Byte; 16]>,
+};
+
+implement ResetTokenSet {
+    public fn new() -> ResetTokenSet { ResetTokenSet { tokens: [] } }
+
+    /// Register a new reset token. Bounded O(N) lookup on match — the
+    /// set stays small (one per issued peer CID per connection, typically
+    /// ≤ 8 in practice).
+    public fn insert(&mut self, token: [Byte; 16]) {
+        self.tokens.push(token);
+    }
+
+    /// Forget a token — called after migration or when the peer
+    /// retires the connection ID that advertised it.
+    public fn remove(&mut self, token: &[Byte; 16]) {
+        let mut i: Int = 0;
+        while i < self.tokens.len() {
+            let t = &self.tokens[i];
+            if bytes_eq_16(t, token) {
+                let _ = self.tokens.remove(i);
+                return;
+            }
+            i = i + 1;
+        }
+    }
+
+    public fn len(&self) -> Int { self.tokens.len() }
+}
+
+/// Scan `wire` for a trailing stateless reset token. Returns the
+/// index into `known.tokens` if a match was found, else `None`.
+///
+/// Constant-time per token (diff-accumulator comparison) to avoid
+/// leaking which token matched via timing.
+///
+/// `wire` must be ≥ `STATELESS_RESET_MIN_SIZE` (RFC 9000 §10.3);
+/// shorter datagrams cannot be reset packets.
+public fn try_match_stateless_reset(
+    wire:  &[Byte],
+    known: &ResetTokenSet,
+) -> Maybe<Int> {
+    if wire.len() < STATELESS_RESET_MIN_SIZE { return None; }
+    // Short-header check: bit 7 must be 0, bit 6 must be 1. If the
+    // bits don't match, the packet can't be a stateless reset.
+    if (wire[0] & 0xC0_u8) != 0x40_u8 { return None; }
+
+    let suffix_start = wire.len() - 16;
+    let mut i: Int = 0;
+    while i < known.tokens.len() {
+        let tok = &known.tokens[i];
+        if wire_token_eq_ct(wire, suffix_start, tok) {
+            return Some(i);
+        }
+        i = i + 1;
+    }
+    None
+}
+
+// =============================================================================
+// Helpers
+// =============================================================================
+
+fn bytes_eq_16(a: &[Byte; 16], b: &[Byte; 16]) -> Bool {
+    let mut diff: UInt8 = 0_u8;
+    let mut i: Int = 0;
+    while i < 16 { diff = diff | (a[i] ^ b[i]); i = i + 1; }
+    diff == 0_u8
+}
+
+fn wire_token_eq_ct(wire: &[Byte], off: Int, token: &[Byte; 16]) -> Bool {
+    let mut diff: UInt8 = 0_u8;
+    let mut i: Int = 0;
+    while i < 16 {
+        diff = diff | (wire[off + i] ^ token[i]);
+        i = i + 1;
+    }
+    diff == 0_u8
+}

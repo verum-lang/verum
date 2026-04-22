@@ -1,0 +1,46 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: quic, rfc9000, stateless-reset, typecheck
+// @timeout: 10000
+// @expect: pass
+
+mount core.net.quic.{
+    StatelessResetKey, ResetTokenSet,
+    build_stateless_reset, try_match_stateless_reset,
+    STATELESS_RESET_MIN_SIZE, STATELESS_RESET_RECOMMENDED_SIZE,
+};
+mount core.collections.List;
+
+fn exercise_reset_token_flow() {
+    // Server side: key, derive tokens per CID.
+    let key = StatelessResetKey.generate();
+
+    let cid_a: [Byte; 8] = [0xA1_u8, 0xA2_u8, 0xA3_u8, 0xA4_u8,
+                             0xA5_u8, 0xA6_u8, 0xA7_u8, 0xA8_u8];
+    let cid_b: [Byte; 8] = [0xB1_u8, 0xB2_u8, 0xB3_u8, 0xB4_u8,
+                             0xB5_u8, 0xB6_u8, 0xB7_u8, 0xB8_u8];
+
+    let token_a: [Byte; 16] = key.token_for_cid(&cid_a[..]);
+    let token_b: [Byte; 16] = key.token_for_cid(&cid_b[..]);
+
+    // Server: build a reset packet for a received-but-unrecognised datagram.
+    let reset_pkt: List<Byte> = build_stateless_reset(&token_a, 200);
+    let _ = reset_pkt.len();
+
+    // Client side: register tokens for known peer CIDs, then scan incoming
+    // datagrams for a trailing match.
+    let mut known = ResetTokenSet.new();
+    known.insert(token_a);
+    known.insert(token_b);
+    let _len = known.len();
+
+    let _hit = try_match_stateless_reset(reset_pkt.as_slice(), &known);
+    known.remove(&token_a);
+
+    // Both constants ship as Int.
+    let _c1: Int = STATELESS_RESET_MIN_SIZE;
+    let _c2: Int = STATELESS_RESET_RECOMMENDED_SIZE;
+}
+
+fn main() { exercise_reset_token_flow(); }

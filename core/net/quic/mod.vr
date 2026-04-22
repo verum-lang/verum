@@ -67,6 +67,7 @@ public module connection_sm;           // Typed connection SM (Initial → ... �
 public module path;                    // RFC 9000 §8 path validation + migration
 public module api;                     // High-level QuicClient / QuicServer facade
 public module transport;               // UDP abstraction + ConnectionPump (end-to-end I/O)
+public module stateless_reset;         // RFC 9000 §10.3 Stateless Reset tokens + detection
 
 mount core.*;
 mount core.time.duration.{Duration};
@@ -87,6 +88,13 @@ public mount .connection.ConnectionEvent;
 
 public mount .stream.QuicStream;
 public mount .stream.StreamDirection;
+
+// Re-exports — stateless reset
+public mount .stateless_reset.{
+    StatelessResetKey, ResetTokenSet,
+    build_stateless_reset, try_match_stateless_reset,
+    STATELESS_RESET_MIN_SIZE, STATELESS_RESET_RECOMMENDED_SIZE,
+};
 
 // =============================================================================
 // QuicConfig
