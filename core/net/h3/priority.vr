@@ -1,0 +1,224 @@
+// =============================================================================
+// net/h3/priority.vr — HTTP priority (RFC 9218)
+// =============================================================================
+// Layer: 6 (Application — HTTP/3)
+// Dependencies: core, core.collections
+// =============================================================================
+//
+// RFC 9218 — a small, cross-version HTTP priority scheme:
+//
+//   * Every request carries an optional `priority` header field whose
+//     value is a Structured Field dictionary:
+//
+//         priority: u=3, i
+//
+//     where
+//       u = urgency (0 .. 7; 0 = highest). Default 3.
+//       i = incremental flag (true/false). Default false.
+//
+//   * PRIORITY_UPDATE frame (type 0xF0700 for request streams,
+//     0xF0701 for push IDs) lets a client or server re-prioritise a
+//     stream after sending the initial headers.
+//
+//   * Applies identically to HTTP/2 (RFC 9113 §5.3.2), HTTP/3
+//     (this module), and SETTINGS advertisement via
+//     SETTINGS_NO_RFC7540_PRIORITIES (0x09).
+//
+// # Scope of this module
+//
+// Priority *semantics* — parsing the header / frame bodies and
+// exposing a typed `Priority` value the scheduler consumes. Actual
+// send ordering lives in `core.net.h3.server` / `client`; this
+// module is the wire parser + builder only.
+//
+// =============================================================================
+
+module core.net.h3.priority;
+
+mount core.*;
+mount core.collections.List;
+
+// =============================================================================
+// Typed priority
+// =============================================================================
+
+/// Default urgency per RFC 9218 §4.1. Lower numbers = higher
+/// priority. 0 is reserved for "most urgent", 7 for background.
+public const DEFAULT_URGENCY: UInt8 = 3_u8;
+public const MAX_URGENCY:     UInt8 = 7_u8;
+
+public type H3Priority is {
+    /// 0..=7. Clamped on construction.
+    urgency:     UInt8,
+    /// `i` flag. When true, the client can make progressive use of
+    /// the response as bytes arrive; server may interleave this
+    /// response with others at the same urgency. When false, server
+    /// SHOULD deliver this response contiguously.
+    incremental: Bool,
+};
+
+implement H3Priority {
+    /// RFC 9218 defaults (urgency 3, incremental false).
+    public fn default() -> H3Priority {
+        H3Priority { urgency: DEFAULT_URGENCY, incremental: false }
+    }
+
+    /// Construct with clamped urgency. Values > 7 collapse to 7
+    /// (background) — caller bugs don't break the scheduler.
+    public fn new(urgency: UInt8, incremental: Bool) -> H3Priority {
+        let u = if urgency > MAX_URGENCY { MAX_URGENCY } else { urgency };
+        H3Priority { urgency: u, incremental: incremental }
+    }
+
+    /// Total order: lower urgency wins; same urgency with `i=false`
+    /// wins over `i=true` (we prefer contiguous-delivery streams
+    /// when equally urgent).
+    public fn beats(&self, other: &H3Priority) -> Bool {
+        if self.urgency < other.urgency { return true; }
+        if self.urgency > other.urgency { return false; }
+        !self.incremental && other.incremental
+    }
+}
+
+// =============================================================================
+// Structured-field parser — RFC 8941 minimal subset needed by RFC 9218
+// =============================================================================
+//
+// We only parse the two fields `u=<digit>` and `i` (bare token,
+// optionally `i=?1` / `i=?0`). No full RFC 8941 machinery; a
+// conforming sender always produces the compact form.
+//
+// =============================================================================
+
+public type PriorityParseError is
+      Malformed
+    | UrgencyOutOfRange(Int);
+
+public fn parse_header(value: &[Byte]) -> Result<H3Priority, PriorityParseError> {
+    let mut pr = H3Priority.default();
+    // Split on ',' — each segment is either `u=<digit>` or
+    // `i[=?0|?1]` or whitespace.
+    let mut i: Int = 0;
+    let mut start: Int = 0;
+    while i <= value.len() {
+        if i == value.len() || value[i] == (',' as Byte) {
+            let seg = slice(value, start, i);
+            parse_member(seg.as_slice(), &mut pr)?;
+            start = i + 1;
+        }
+        i = i + 1;
+    }
+    Ok(pr)
+}
+
+fn parse_member(seg: &[Byte], out: &mut H3Priority) -> Result<(), PriorityParseError> {
+    let trimmed = trim_ws(seg);
+    if trimmed.len() == 0 { return Ok(()); }
+    // `u=<digit>` — single digit.
+    if trimmed.len() >= 2 && trimmed[0] == ('u' as Byte) && trimmed[1] == ('=' as Byte) {
+        if trimmed.len() != 3 { return Err(PriorityParseError.Malformed); }
+        let c = trimmed[2];
+        if c < ('0' as Byte) || c > ('9' as Byte) {
+            return Err(PriorityParseError.Malformed);
+        }
+        let v = (c - ('0' as Byte)) as Int;
+        if v > (MAX_URGENCY as Int) {
+            return Err(PriorityParseError.UrgencyOutOfRange(v));
+        }
+        out.urgency = v as UInt8;
+        return Ok(());
+    }
+    // `i`, `i=?1`, `i=?0`.
+    if trimmed.len() == 1 && trimmed[0] == ('i' as Byte) {
+        out.incremental = true;
+        return Ok(());
+    }
+    if trimmed.len() == 4 && trimmed[0] == ('i' as Byte)
+        && trimmed[1] == ('=' as Byte) && trimmed[2] == ('?' as Byte)
+    {
+        if trimmed[3] == ('1' as Byte) { out.incremental = true; return Ok(()); }
+        if trimmed[3] == ('0' as Byte) { out.incremental = false; return Ok(()); }
+        return Err(PriorityParseError.Malformed);
+    }
+    Err(PriorityParseError.Malformed)
+}
+
+fn slice(src: &[Byte], start: Int, end: Int) -> List<Byte> {
+    let mut out: List<Byte> = [];
+    let mut i: Int = start;
+    while i < end { out.push(src[i]); i = i + 1; }
+    out
+}
+
+fn trim_ws(s: &[Byte]) -> List<Byte> {
+    let mut l: Int = 0;
+    while l < s.len() && is_ws(s[l]) { l = l + 1; }
+    let mut r: Int = s.len();
+    while r > l && is_ws(s[r - 1]) { r = r - 1; }
+    slice(s, l, r)
+}
+
+fn is_ws(b: Byte) -> Bool {
+    b == (' ' as Byte) || b == ('\t' as Byte) || b == ('\r' as Byte) || b == ('\n' as Byte)
+}
+
+// =============================================================================
+// Serialiser — builds the compact-form wire bytes
+// =============================================================================
+
+/// Emit the `priority:` header value bytes (no trailing CRLF).
+/// Shapes:
+///   Priority { urgency: 3, incremental: false } → "u=3"
+///   Priority { urgency: 0, incremental: true }  → "u=0, i"
+///   Default priority                              → "u=3"
+public fn encode_header(p: &H3Priority) -> List<Byte> {
+    let mut out: List<Byte> = [];
+    out.push('u' as Byte);
+    out.push('=' as Byte);
+    out.push(('0' as Byte) + p.urgency);
+    if p.incremental {
+        out.push(',' as Byte);
+        out.push(' ' as Byte);
+        out.push('i' as Byte);
+    }
+    out
+}
+
+// =============================================================================
+// PRIORITY_UPDATE frame (RFC 9218 §7.2)
+// =============================================================================
+//
+//   PRIORITY_UPDATE Frame {
+//     Type (i),
+//     Length (i),
+//     Prioritized Element ID (i),
+//     Priority Field Value (..),
+//   }
+//
+// Frame types (RFC 9218 §7.2.1):
+//   0xF0700  PRIORITY_UPDATE referencing a request stream
+//   0xF0701  PRIORITY_UPDATE referencing a pushed response
+// =============================================================================
+
+public const PRIORITY_UPDATE_REQUEST: UInt64 = 0xF0700_u64;
+public const PRIORITY_UPDATE_PUSH:    UInt64 = 0xF0701_u64;
+
+public type PriorityUpdateTarget is
+      RequestStream(UInt64)
+    | PushId(UInt64);
+
+public type PriorityUpdate is {
+    target:  PriorityUpdateTarget,
+    /// Raw field-value bytes. Parse to a `Priority` via `parse_header`.
+    field_value: List<Byte>,
+};
+
+implement PriorityUpdate {
+    public fn priority(&self) -> Result<H3Priority, PriorityParseError> {
+        parse_header(self.field_value.as_slice())
+    }
+
+    public fn with_priority(target: PriorityUpdateTarget, p: &H3Priority) -> PriorityUpdate {
+        PriorityUpdate { target: target, field_value: encode_header(p) }
+    }
+}

@@ -40,6 +40,7 @@ public module request;
 public module connection;
 public module client;
 public module server;
+public module priority;
 
 // Re-exports — frame layer
 public mount .frame.{
@@ -83,3 +84,12 @@ public mount .client.{H3Client, ClientOptions, H3ClientError};
 
 // Re-exports — high-level server
 public mount .server.{H3Server, ServerOptions, H3Handler, H3ServerError};
+
+// Re-exports — RFC 9218 priority (functions keep their original names;
+// callers can qualify when ambiguous)
+public mount .priority.{
+    H3Priority, PriorityParseError,
+    PriorityUpdate, PriorityUpdateTarget,
+    DEFAULT_URGENCY, MAX_URGENCY,
+    PRIORITY_UPDATE_REQUEST, PRIORITY_UPDATE_PUSH,
+};

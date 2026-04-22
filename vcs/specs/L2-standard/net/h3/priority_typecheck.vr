@@ -1,0 +1,73 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: h3, rfc9218, priority, typecheck
+// @timeout: 10000
+// @expect: pass
+
+mount core.net.h3.priority.{
+    H3Priority, PriorityParseError,
+    PriorityUpdate, PriorityUpdateTarget,
+    parse_header, encode_header,
+    DEFAULT_URGENCY, MAX_URGENCY,
+    PRIORITY_UPDATE_REQUEST, PRIORITY_UPDATE_PUSH,
+};
+mount core.collections.List;
+
+fn exercise_priority() -> Result<(), PriorityParseError> {
+    // Typed construction + ordering.
+    let hi = H3Priority.new(0_u8, false);
+    let lo = H3Priority.default();
+    assert(hi.beats(&lo));
+
+    // Clamp: urgency > 7 collapses to 7.
+    let bg = H3Priority.new(11_u8, true);
+    assert(bg.urgency == MAX_URGENCY);
+    assert(bg.incremental);
+
+    // Round-trip encode → parse.
+    let encoded: List<Byte> = encode_header(&hi);
+    let decoded = parse_header(encoded.as_slice())?;
+    assert(decoded.urgency == 0_u8);
+    assert(!decoded.incremental);
+
+    // Parse the full `u=3, i` form.
+    let input: List<Byte> = {
+        let mut b: List<Byte> = [];
+        b.push('u' as Byte); b.push('=' as Byte); b.push('3' as Byte);
+        b.push(',' as Byte); b.push(' ' as Byte); b.push('i' as Byte);
+        b
+    };
+    let p = parse_header(input.as_slice())?;
+    assert(p.urgency == DEFAULT_URGENCY);
+    assert(p.incremental);
+
+    // Explicit bool form: `u=5, i=?0`.
+    let input2: List<Byte> = {
+        let mut b: List<Byte> = [];
+        b.push('u' as Byte); b.push('=' as Byte); b.push('5' as Byte);
+        b.push(',' as Byte); b.push(' ' as Byte);
+        b.push('i' as Byte); b.push('=' as Byte);
+        b.push('?' as Byte); b.push('0' as Byte);
+        b
+    };
+    let p2 = parse_header(input2.as_slice())?;
+    assert(p2.urgency == 5_u8);
+    assert(!p2.incremental);
+    Ok(())
+}
+
+fn exercise_priority_update() -> Result<(), PriorityParseError> {
+    // Constant-ID lookups.
+    let _: UInt64 = PRIORITY_UPDATE_REQUEST;
+    let _: UInt64 = PRIORITY_UPDATE_PUSH;
+    let _ = PriorityUpdateTarget.RequestStream;
+    let _ = PriorityUpdateTarget.PushId;
+    let _ = PriorityUpdate;
+    Ok(())
+}
+
+fn main() {
+    let _ = exercise_priority();
+    let _ = exercise_priority_update();
+}
