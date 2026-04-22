@@ -1,0 +1,249 @@
+// =============================================================================
+// base/ulid.vr — Universally Unique Lexicographically Sortable Identifier
+// =============================================================================
+// Layer: 0 (Base)
+// Dependencies: core, core.base.random, core.time.instant
+// Reference: https://github.com/ulid/spec
+// =============================================================================
+//
+// ULID — 128-bit identifier that sorts lexicographically by time.
+// Canonical form is 26 characters of Crockford Base32. Used by:
+//
+//   * CockroachDB row IDs (when users opt out of UUIDv4).
+//   * SurrealDB primary keys.
+//   * Several popular ORMs (Prisma ULID, Ent, TypeORM ulid column).
+//   * Log-ingestion pipelines that need monotone IDs without a
+//     coordinator.
+//
+// Layout (128 bits total):
+//
+//   ┌───────────────────────────────┬──────────────────────────────┐
+//   │      48-bit unix-ms timestamp │    80-bit CSPRNG randomness  │
+//   └───────────────────────────────┴──────────────────────────────┘
+//
+// Canonical encoding:
+//
+//   ┌──────────────┬──────────────────────┐
+//   │  10 chars    │       16 chars       │
+//   │ time-part    │   randomness-part    │
+//   └──────────────┴──────────────────────┘
+//
+// Both halves encoded in Crockford Base32 (0-9, A-Z minus I, L, O, U)
+// so there's no human-confusion on copy-paste (same rationale as
+// Base58 but fits power-of-two alignment).
+//
+// # Comparison with UUID v7 and Snowflake
+//
+// | Primitive | Bits | Canonical form    | Time resolution | Ordered |
+// | --------- | ---- | ----------------- | --------------- | ------- |
+// | UUID v4   | 128  | 36 chars dashed   | —               | no      |
+// | UUID v7   | 128  | 36 chars dashed   | ms              | yes     |
+// | ULID      | 128  | 26 chars Crockford| ms              | yes     |
+// | Snowflake |  64  | decimal / hex     | ms              | yes     |
+//
+// ULID trades the cross-system canonicalism of UUID for a tighter
+// 26-char string that's both URL-safe and copy-paste-friendly.
+//
+// =============================================================================
+
+module core.base.ulid;
+
+mount core.*;
+mount core.collections.List;
+mount core.base.random;
+mount core.time.instant;
+
+// =============================================================================
+// Crockford Base32 alphabet (spec §4)
+// =============================================================================
+
+public const ULID_ALPHABET: [Byte; 32] = [
+    0x30_u8, 0x31_u8, 0x32_u8, 0x33_u8, 0x34_u8, 0x35_u8, 0x36_u8, 0x37_u8,  // 0-7
+    0x38_u8, 0x39_u8,                                                         // 8-9
+    0x41_u8, 0x42_u8, 0x43_u8, 0x44_u8, 0x45_u8, 0x46_u8, 0x47_u8, 0x48_u8,  // A-H
+    0x4A_u8, 0x4B_u8, 0x4D_u8, 0x4E_u8,                                       // J,K,M,N (no I, no L)
+    0x50_u8, 0x51_u8, 0x52_u8, 0x53_u8, 0x54_u8, 0x56_u8, 0x57_u8, 0x58_u8,  // P-T,V,W,X (no O, no U)
+    0x59_u8, 0x5A_u8,                                                         // Y,Z
+];
+
+public type UlidError is
+      InvalidLength(Int)
+    | InvalidCharacter(Byte);
+
+// =============================================================================
+// Typed ULID
+// =============================================================================
+
+public type Ulid is {
+    /// 128-bit payload as two 64-bit halves (big-endian view).
+    high: UInt64,   // top 64 bits (timestamp[47:0] || rand[79:32])
+    low:  UInt64,   // bottom 64 bits
+};
+
+implement Ulid {
+    /// Generate a fresh ULID — 48-bit unix-ms + 80-bit CSPRNG.
+    public fn new() -> Ulid {
+        let ts = instant.unix_millis() as UInt64;
+        let mut buf: [Byte; 10] = [0_u8; 10];
+        random.fill(&mut buf);
+        pack(ts, &buf)
+    }
+
+    /// Construct from an explicit timestamp + 10-byte random payload.
+    /// Useful for reproducible tests and batch generation where the
+    /// caller wants a monotone seed.
+    public fn from_parts(timestamp_ms: UInt64, rand: &[Byte; 10]) -> Ulid {
+        pack(timestamp_ms, rand)
+    }
+
+    /// Extract the 48-bit unix-ms timestamp.
+    public fn timestamp_ms(&self) -> UInt64 {
+        self.high >> 16_u64
+    }
+
+    /// 26-char Crockford Base32 canonical form.
+    public fn to_text(&self) -> Text {
+        let mut out: List<Byte> = [];
+        // 10 chars for timestamp, 16 for randomness.
+        // Timestamp = high >> 16, 48 bits.
+        let ts = self.timestamp_ms();
+        // Emit 10 base32 chars (50 bits; top two bits are 0).
+        let mut i: Int = 0;
+        while i < 10 {
+            let shift = (45 - i * 5) as UInt64;
+            let idx = ((ts >> shift) & 0x1F_u64) as Int;
+            out.push(ULID_ALPHABET[idx]);
+            i = i + 1;
+        }
+        // Randomness = low-16-of-high ++ low = 80 bits; emit 16
+        // base32 chars.
+        // Pack the 80 bits into a 128-bit combined value for easy
+        // shifting: rand128 = ((high & 0xFFFF) << 64) | low.
+        let rand_hi: UInt64 = self.high & 0xFFFF_u64;
+        let rand_lo: UInt64 = self.low;
+        let mut j: Int = 0;
+        while j < 16 {
+            let bit_off = 75 - j * 5;   // bit offset from MSB of 80-bit value
+            let idx = extract_5(rand_hi, rand_lo, bit_off);
+            out.push(ULID_ALPHABET[idx as Int]);
+            j = j + 1;
+        }
+        Text.from_utf8_unchecked(out.as_slice())
+    }
+}
+
+/// Parse a 26-char Crockford-Base32 ULID.
+public fn parse(s: &Text) -> Result<Ulid, UlidError> {
+    let b = s.as_bytes();
+    if b.len() != 26 {
+        return Err(UlidError.InvalidLength(b.len()));
+    }
+    // Timestamp = first 10 chars → 48-bit (top two bits of 50 must be 0).
+    let mut ts: UInt64 = 0_u64;
+    let mut i: Int = 0;
+    while i < 10 {
+        let v = decode_char(b[i])? as UInt64;
+        ts = (ts << 5_u64) | v;
+        i = i + 1;
+    }
+    // ts now holds 50 bits; the top 2 MUST be zero (RFC: timestamp
+    // is 48-bit). We accept but mask.
+    ts = ts & 0xFFFFFFFFFFFF_u64;
+
+    // Randomness = next 16 chars → 80 bits.
+    let mut rand_hi: UInt64 = 0_u64;
+    let mut rand_lo: UInt64 = 0_u64;
+    let mut j: Int = 0;
+    while j < 16 {
+        let v = decode_char(b[10 + j])? as UInt64;
+        // Insert 5 bits at bit position (75 - j*5) of the 80-bit field.
+        let bit_off = 75 - j * 5;
+        insert_5(&mut rand_hi, &mut rand_lo, bit_off, v as UInt8);
+        j = j + 1;
+    }
+
+    let high: UInt64 = (ts << 16_u64) | (rand_hi & 0xFFFF_u64);
+    let low:  UInt64 = rand_lo;
+    Ok(Ulid { high: high, low: low })
+}
+
+// =============================================================================
+// Packing helpers
+// =============================================================================
+
+fn pack(ts: UInt64, rand: &[Byte; 10]) -> Ulid {
+    let ts48 = ts & 0xFFFFFFFFFFFF_u64;
+    // rand[0..2] go into the low 16 bits of `high`.
+    let rand_hi_16: UInt64 =
+          ((rand[0] as UInt64) << 8_u64)
+        |  (rand[1] as UInt64);
+    // rand[2..10] → `low` (8 bytes big-endian).
+    let mut rand_lo: UInt64 = 0_u64;
+    let mut i: Int = 0;
+    while i < 8 {
+        rand_lo = (rand_lo << 8_u64) | (rand[2 + i] as UInt64);
+        i = i + 1;
+    }
+    Ulid { high: (ts48 << 16_u64) | rand_hi_16, low: rand_lo }
+}
+
+fn extract_5(hi: UInt64, lo: UInt64, bit_off: Int) -> UInt8 {
+    // Treat (hi, lo) as one 80-bit value with hi being the top 16 bits.
+    // bit_off counts from the top (MSB = 79 = position 0).
+    // Equivalent shift from the low end: (79 - bit_off - 4) → (75 - bit_off).
+    let from_low: Int = 75 - bit_off;
+    let v: UInt64 = if from_low >= 64 {
+        let shift = (from_low - 64) as UInt64;
+        (hi >> shift) & 0x1F_u64
+    } else if from_low + 5 <= 64 {
+        let shift = from_low as UInt64;
+        (lo >> shift) & 0x1F_u64
+    } else {
+        // Straddles the hi/lo boundary.
+        let lo_bits = 64 - from_low;
+        let hi_bits = 5 - lo_bits;
+        let low_part = lo >> (from_low as UInt64);
+        let high_part = (hi & ((1_u64 << (hi_bits as UInt64)) - 1_u64)) << (lo_bits as UInt64);
+        (high_part | low_part) & 0x1F_u64
+    };
+    v as UInt8
+}
+
+fn insert_5(hi: &mut UInt64, lo: &mut UInt64, bit_off: Int, value: UInt8) {
+    let v = (value as UInt64) & 0x1F_u64;
+    let from_low: Int = 75 - bit_off;
+    if from_low >= 64 {
+        let shift = (from_low - 64) as UInt64;
+        *hi = *hi | (v << shift);
+    } else if from_low + 5 <= 64 {
+        let shift = from_low as UInt64;
+        *lo = *lo | (v << shift);
+    } else {
+        let lo_bits = 64 - from_low;
+        let hi_bits = 5 - lo_bits;
+        let low_mask = (1_u64 << (lo_bits as UInt64)) - 1_u64;
+        *lo = *lo | ((v & low_mask) << (from_low as UInt64));
+        *hi = *hi | (v >> (lo_bits as UInt64));
+    }
+}
+
+fn decode_char(c: Byte) -> Result<UInt8, UlidError> {
+    // Crockford decoding — case-insensitive with I/L/O→1/1/0 aliases
+    // (common extension even though the ULID spec is strict).
+    if c >= ('0' as Byte) && c <= ('9' as Byte) {
+        return Ok(c - ('0' as Byte));
+    }
+    let uc = if c >= ('a' as Byte) && c <= ('z' as Byte) {
+        c - (('a' as Byte) - ('A' as Byte))
+    } else { c };
+    // Walk the alphabet — 32 entries; constant time.
+    let mut i: Int = 0;
+    while i < 32 {
+        if ULID_ALPHABET[i] == uc { return Ok(i as UInt8); }
+        i = i + 1;
+    }
+    // Common Crockford aliases.
+    if uc == ('I' as Byte) || uc == ('L' as Byte) { return Ok(1_u8); }
+    if uc == ('O' as Byte) { return Ok(0_u8); }
+    Err(UlidError.InvalidCharacter(c))
+}

@@ -1,0 +1,62 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: collections, toposort, dag, dependency, typecheck
+// @timeout: 10000
+// @expect: pass
+
+mount core.collections.toposort.{TopoGraph, TopoError};
+mount core.collections.List;
+
+fn exercise_toposort() -> Result<(), TopoError> {
+    // a → b → c linear chain.
+    let mut g: TopoGraph<Text> = TopoGraph.new();
+    g.add_node(Text.from("a"));
+    g.add_node(Text.from("b"));
+    g.add_node(Text.from("c"));
+    g.add_edge(Text.from("a"), Text.from("b"));   // b depends on a
+    g.add_edge(Text.from("b"), Text.from("c"));
+
+    let order: List<Text> = g.toposort()?;
+    assert(order.len() == 3);
+    // Stable output: ["a", "b", "c"].
+    assert(order[0].as_bytes() == b"a");
+    assert(order[1].as_bytes() == b"b");
+    assert(order[2].as_bytes() == b"c");
+
+    // Diamond: a → b, a → c, b → d, c → d.
+    let mut dia: TopoGraph<Text> = TopoGraph.new();
+    dia.add_node(Text.from("a"));
+    dia.add_node(Text.from("b"));
+    dia.add_node(Text.from("c"));
+    dia.add_node(Text.from("d"));
+    dia.add_edge(Text.from("a"), Text.from("b"));
+    dia.add_edge(Text.from("a"), Text.from("c"));
+    dia.add_edge(Text.from("b"), Text.from("d"));
+    dia.add_edge(Text.from("c"), Text.from("d"));
+    let dia_order = dia.toposort()?;
+    assert(dia_order.len() == 4);
+
+    // Cycle detection: a → b → a.
+    let mut cyc: TopoGraph<Text> = TopoGraph.new();
+    cyc.add_edge(Text.from("a"), Text.from("b"));
+    cyc.add_edge(Text.from("b"), Text.from("a"));
+    let cyc_result = cyc.toposort();
+    let _ = cyc_result;
+    // Expect Err(Cycle(_)).
+
+    // Idempotent add_node + add_edge.
+    let mut idem: TopoGraph<Int> = TopoGraph.new();
+    idem.add_node(1);
+    idem.add_node(1);    // no-op
+    idem.add_edge(1, 2);
+    idem.add_edge(1, 2); // no-op (dup edge)
+    let _ = idem.node_count();
+    assert(idem.contains(&2));
+
+    Ok(())
+}
+
+fn main() {
+    let _ = exercise_toposort();
+}

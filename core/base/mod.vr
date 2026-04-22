@@ -53,6 +53,7 @@ public module snowflake;  // Twitter-style 64-bit time-ordered IDs
 public module nanoid;     // URL-safe short-ID generator (21 chars ≈ 126 bits)
 public module semver;     // Semantic Versioning 2.0.0 parser + comparator
 public module glob;       // Shell-style glob pattern matching (* ** ? [...])
+public module ulid;       // 128-bit time-ordered IDs (26-char Crockford Base32)
 
 // =============================================================================
 // Prelude re-exports (commonly used items)

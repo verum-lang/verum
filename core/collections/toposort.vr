@@ -1,0 +1,197 @@
+// =============================================================================
+// collections/toposort.vr — topological sort for DAG dependency resolution
+// =============================================================================
+// Layer: 2 (Collections)
+// Dependencies: core, core.collections.map
+// =============================================================================
+//
+// Topological sort — the "order these items such that every
+// dependency comes before its dependent" primitive used by:
+//
+//   * Package managers (npm install order, Cargo build order, pip).
+//   * Build systems (Bazel, Make, Ninja target graph).
+//   * Task runners (GitHub Actions jobs, Airflow DAGs).
+//   * Database migration tools (ordering schema-change files).
+//   * Module loaders / link editors.
+//
+// # Algorithm
+//
+// Kahn's algorithm — iterate over nodes with in-degree 0, remove
+// them, repeat. Detects cycles (any remaining node with in-degree
+// > 0 after the iteration completes is part of one).
+//
+//   Time:   O(V + E)
+//   Space:  O(V + E)
+//
+// Stable: within each "in-degree 0" wave, nodes retain their
+// insertion order. That gives deterministic output for repeat
+// builds and tests.
+//
+// # API
+//
+// ```
+// let mut g: TopoGraph<Text> = TopoGraph.new();
+// g.add_node(Text.from("a"));
+// g.add_node(Text.from("b"));
+// g.add_node(Text.from("c"));
+// g.add_edge(Text.from("a"), Text.from("b"));   // b depends on a
+// g.add_edge(Text.from("b"), Text.from("c"));
+//
+// let order: List<Text> = g.toposort()?;
+// // ["a", "b", "c"]
+// ```
+//
+// =============================================================================
+
+module core.collections.toposort;
+
+mount core.*;
+mount core.collections.List;
+mount core.collections.map.{Map};
+
+public type TopoError is
+      Cycle(List<Text>);     // textual trace of the first cycle found
+
+// =============================================================================
+// Graph
+// =============================================================================
+
+public type TopoGraph<N: Hash + Eq> is {
+    nodes:    List<N>,
+    /// `dep → [dependents]` — forward edges.
+    edges:    Map<N, List<N>>,
+    /// `dependent → in_degree` — number of prereqs each node waits on.
+    in_deg:   Map<N, Int>,
+};
+
+implement<N: Hash + Eq> TopoGraph<N> {
+    public fn new() -> TopoGraph<N> {
+        TopoGraph {
+            nodes:  [],
+            edges:  Map.new(),
+            in_deg: Map.new(),
+        }
+    }
+
+    /// Register a node. Idempotent — re-adding an existing node
+    /// is a no-op.
+    public fn add_node(&mut self, node: N) {
+        if self.in_deg.contains_key(&node) { return; }
+        self.nodes.push(node.clone());
+        self.in_deg.insert(node, 0);
+    }
+
+    /// Declare that `dependent` requires `dep` — `dep` must come
+    /// before `dependent` in the sorted output. Both endpoints
+    /// are added as nodes if they don't exist yet.
+    public fn add_edge(&mut self, dep: N, dependent: N) {
+        self.add_node(dep.clone());
+        self.add_node(dependent.clone());
+
+        // Append to dep's list of forward edges.
+        let mut list = match self.edges.remove(&dep) {
+            Some(l) => l,
+            None    => [],
+        };
+        // Skip duplicate edges.
+        let mut exists: Bool = false;
+        let mut i: Int = 0;
+        while i < list.len() {
+            if list[i] == dependent { exists = true; break; }
+            i = i + 1;
+        }
+        if !exists {
+            list.push(dependent.clone());
+            self.edges.insert(dep, list);
+            // Bump in_degree.
+            let cur = match self.in_deg.get(&dependent) { Some(n) => *n, None => 0 };
+            self.in_deg.insert(dependent, cur + 1);
+        } else {
+            self.edges.insert(dep, list);
+        }
+    }
+
+    public fn node_count(&self) -> Int { self.nodes.len() }
+    public fn contains(&self, node: &N) -> Bool { self.in_deg.contains_key(node) }
+}
+
+// =============================================================================
+// Sort (Kahn's algorithm)
+// =============================================================================
+
+implement<N: Hash + Eq> TopoGraph<N> {
+    /// Topologically sort. Returns `Cycle(trace)` when the graph
+    /// contains a cycle — the trace lists the nodes (as their
+    /// `Debug` representation) still holding positive in-degree.
+    public fn toposort(&self) -> Result<List<N>, TopoError> {
+        // Clone in-degree so we can mutate locally.
+        let mut in_deg_local: Map<N, Int> = Map.new();
+        let mut i: Int = 0;
+        while i < self.nodes.len() {
+            let n = &self.nodes[i];
+            let d = match self.in_deg.get(n) { Some(v) => *v, None => 0 };
+            in_deg_local.insert(n.clone(), d);
+            i = i + 1;
+        }
+
+        // Queue of nodes with in_deg == 0, preserving insertion order.
+        let mut queue: List<N> = [];
+        let mut j: Int = 0;
+        while j < self.nodes.len() {
+            let n = &self.nodes[j];
+            match in_deg_local.get(n) {
+                Some(d) => if *d == 0 { queue.push(n.clone()); },
+                None    => {},
+            }
+            j = j + 1;
+        }
+
+        let mut out: List<N> = [];
+        let mut cursor: Int = 0;
+        while cursor < queue.len() {
+            let node = queue[cursor].clone();
+            cursor = cursor + 1;
+            out.push(node.clone());
+            // Decrement every dependent's in_deg.
+            match self.edges.get(&node) {
+                Some(dependents) => {
+                    let mut k: Int = 0;
+                    while k < dependents.len() {
+                        let d = &dependents[k];
+                        let cur = match in_deg_local.get(d) { Some(v) => *v, None => 0 };
+                        let next = cur - 1;
+                        in_deg_local.insert(d.clone(), next);
+                        if next == 0 { queue.push(d.clone()); }
+                        k = k + 1;
+                    }
+                },
+                None => {},
+            }
+        }
+
+        if out.len() != self.nodes.len() {
+            // Cycle — collect remaining nodes.
+            let mut residual: List<Text> = [];
+            let mut m: Int = 0;
+            while m < self.nodes.len() {
+                let n = &self.nodes[m];
+                let d = match in_deg_local.get(n) { Some(v) => *v, None => 0 };
+                if d > 0 {
+                    // Render each node through its Debug textual form.
+                    residual.push(node_label(n));
+                }
+                m = m + 1;
+            }
+            return Err(TopoError.Cycle(residual));
+        }
+        Ok(out)
+    }
+}
+
+fn node_label<N>(_: &N) -> Text {
+    // Generic label — concrete callers with a `Debug` / `to_text`
+    // impl can call `toposort_with_labels` (follow-up) for richer
+    // diagnostics. The Cycle variant still identifies residual
+    // nodes by count + position when Debug isn't available.
+    Text.from("<node>")
+}

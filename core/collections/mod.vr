@@ -38,6 +38,7 @@ public module hyperloglog;
 public module count_min;
 public module reservoir;
 public module lru;
+public module toposort;
 
 // =============================================================================
 // Re-exports

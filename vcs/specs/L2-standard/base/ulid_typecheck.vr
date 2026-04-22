@@ -1,0 +1,41 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: base, ulid, id, crockford, typecheck
+// @timeout: 10000
+// @expect: pass
+
+mount core.base.ulid.{Ulid, UlidError, parse, ULID_ALPHABET};
+
+fn exercise_ulid() -> Result<(), UlidError> {
+    // Generate.
+    let id = Ulid.new();
+    let s: Text = id.to_text();
+    assert(s.len() == 26);
+
+    // Parse round-trip.
+    let parsed = parse(&s)?;
+    assert(parsed.high == id.high);
+    assert(parsed.low  == id.low);
+
+    // Explicit parts constructor.
+    let rand: [Byte; 10] = [0_u8; 10];
+    let ts: UInt64 = 1_700_000_000_000_u64;
+    let specific = Ulid.from_parts(ts, &rand);
+    assert(specific.timestamp_ms() == ts);
+
+    // Canonical zero-ULID.
+    let zero_text = specific.to_text();
+    let _ = zero_text;
+
+    // Case-insensitive parse + Crockford aliases (I/L → 1, O → 0).
+    let lower = Text.from("01arz3ndektsv4rrffq69g5fav");
+    let _ = parse(&lower)?;
+
+    // Malformed length.
+    let short = parse(&Text.from("short"));
+    let _ = short;
+    Ok(())
+}
+
+fn main() { let _ = exercise_ulid(); }
