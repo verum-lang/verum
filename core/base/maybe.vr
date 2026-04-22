@@ -132,6 +132,15 @@ implement<T> Maybe<T> {
         }
     }
 
+    /// Monadic bind — alias for `and_then`. `flat_map` is the
+    /// conventional name in functional/HKT contexts (it's what the
+    /// `Monad` protocol's bind operation is typically called); Verum
+    /// Maybe supports both spellings so HKT-generic code written
+    /// against a `Monad`-bounded type parameter Just Works on Maybe.
+    public fn flat_map<U, F: fn(T) -> Maybe<U>>(self, f: F) -> Maybe<U> {
+        self.and_then(f)
+    }
+
     /// Apply a default-returning function if None.
     public fn or_else<F: fn() -> Maybe<T>>(self, f: F) -> Maybe<T> {
         match self {

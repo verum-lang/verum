@@ -190,6 +190,13 @@ implement<T, E> Result<T, E> {
         }
     }
 
+    /// Monadic bind — alias for `and_then`. Mirrors `Maybe.flat_map`
+    /// so HKT-generic Monad-bounded code works identically for
+    /// Result and Maybe without spelling adjustments.
+    public fn flat_map<U, F: fn(T) -> Result<U, E>>(self, f: F) -> Result<U, E> {
+        self.and_then(f)
+    }
+
     /// Chain with error recovery.
     public fn or_else<F, O: fn(E) -> Result<T, F>>(self, f: O) -> Result<T, F> {
         match self {

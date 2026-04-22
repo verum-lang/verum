@@ -33,7 +33,9 @@ type LoadError is { message: Text };
 
 // Test 1: Basic existential return type
 fn make_iterator(n: Int) -> some I: Iterator<Item = Int> {
-    (0..n).iter()
+    // A Range<Int> IS an Iterator, so no `.iter()` wrapping needed —
+    // it satisfies the existential directly.
+    0..n
 }
 
 // Test 2: Named existential type
