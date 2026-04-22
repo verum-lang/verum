@@ -612,6 +612,27 @@ enum Commands {
         framework_axioms: bool,
     },
 
+    /// Export the project's theorems / lemmas / axioms to an external
+    /// proof assistant's certificate format.
+    ///
+    /// Walks every .vr file in the project, collects every top-level
+    /// axiom / theorem / lemma / corollary declaration, and emits a
+    /// per-format file containing statement-only entries (proofs are
+    /// admitted). `@framework(name, "citation")` markers ride along
+    /// so the trusted boundary is visible in the exported artefact.
+    ///
+    /// Full proof-term export through verum_kernel is a follow-up
+    /// — it requires SMT proof-replay, which lands per-backend.
+    Export {
+        /// Target format: `dedukti`, `coq`, or `lean`.
+        #[clap(long, value_name = "FORMAT")]
+        to: String,
+        /// Output file path (defaults to
+        /// `certificates/<format>/export.<ext>`).
+        #[clap(long, short, value_name = "PATH")]
+        output: Option<std::path::PathBuf>,
+    },
+
     /// Display dependency tree
     Tree {
         /// Show duplicate dependencies
@@ -1484,6 +1505,17 @@ fn run_command(cli: Cli) -> Result<()> {
                 };
                 commands::audit::audit(options)
             }
+        }
+        Commands::Export { to, output } => {
+            let format = commands::export::ExportFormat::parse(&to)?;
+            let options = commands::export::ExportOptions {
+                format,
+                output: match output {
+                    Some(p) => verum_common::Maybe::Some(p),
+                    None => verum_common::Maybe::None,
+                },
+            };
+            commands::export::run(options)
         }
         Commands::Tree { duplicates, depth } => {
             let options = commands::tree::TreeOptions {

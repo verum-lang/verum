@@ -1,0 +1,48 @@
+// @test: parse
+// @level: L1
+// @tags: proofs, axiom, framework, export, dedukti, coq, lean, certificate
+// @timeout: 5000
+
+/// `verum export --to {dedukti,coq,lean}` walks axiom / theorem /
+/// lemma / corollary declarations and emits per-format certificate
+/// files. This spec pins the input shape that the exporter consumes:
+/// a mix of framework-attributed axioms (which must carry their
+/// citation into the certificate) and bare theorems / lemmas
+/// (which go in as statement-only admitted entries).
+///
+/// The exporter is covered end-to-end via integration in
+/// crates/verum_cli/src/commands/export.rs; this spec guarantees
+/// the surface input it expects stays grammar-legal and type-checks.
+
+/// Framework-attributed axiom — must surface in every target format
+/// with its citation.
+@framework(lurie_htt, "HTT 6.2.2.7")
+axiom sheafification_is_infinity_topos(c: Int) -> Bool
+    ensures c >= 0;
+
+/// Another framework from a different package — ensures the
+/// grouping-by-framework path in the exporter fires.
+@framework(connes_reconstruction, "Connes 2008 axiom (vii)")
+axiom first_order_condition(m: Int) -> Bool
+    ensures m >= 0;
+
+/// Plain axiom with no framework attribution — goes into the
+/// "no framework attribution" group.
+axiom plain_postulate(n: Int) -> Bool
+    ensures n == n;
+
+/// Bare theorem — emits as `Theorem … Admitted.` / `theorem … := sorry`.
+theorem identity_commutes(a: Int, b: Int) -> Bool
+    ensures a == a, b == b;
+
+/// Bare lemma — same treatment as theorem in every target.
+lemma helper_trivial(x: Int) -> Bool
+    ensures true;
+
+/// Corollary — fourth declaration kind the exporter recognises.
+corollary from_identity(y: Int) -> Bool
+    from identity_commutes;
+
+fn main() {
+    print("framework export targets parsed");
+}

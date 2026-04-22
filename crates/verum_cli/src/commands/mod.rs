@@ -34,6 +34,7 @@ pub mod workspace;
 // Cog management commands
 pub mod add;
 pub mod audit;
+pub mod export;
 pub mod publish;
 pub mod remove;
 pub mod search;
