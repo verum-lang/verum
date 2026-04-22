@@ -1,0 +1,190 @@
+// @test: typecheck-pass
+// @level: L2
+// @tier: 0
+// @tags: sqlite, native, sql, parser, select
+// @timeout: 15000
+// @description: SELECT parser — minimal shape exercise
+//
+// Spec: internal/specs/sqlite-native.md §12.2
+
+mount core.*;
+mount collections.List;
+mount core.database.sqlite.native.l5_sql.{
+    Token, lex,
+    Statement, SelectStmt, SelectKind, SimpleSelect,
+    Expr, ResultColumnItem, FromItem, OrderTerm, LimitClause,
+    TokenStream, ParseError, stream_new, parse_select, parse_expr,
+};
+
+fn parse_via_stream(src: &Text) -> Result<SelectStmt, ParseError> {
+    let toks = match lex(src) {
+        Ok(t)  => t,
+        Err(_) => { return parse_select_fallback(); }
+    };
+    let mut ts = stream_new(toks);
+    parse_select(&mut ts)
+}
+
+fn parse_select_fallback() -> Result<SelectStmt, ParseError> {
+    // Returns a generic error to satisfy the signature; only called on
+    // lex failure which none of our fixtures trigger.
+    Err(ParseError { message: "lex failed".clone(), position: 0 })
+}
+
+fn select_one_literal() {
+    match parse_via_stream(&"SELECT 1".clone()) {
+        Ok(sel) => {
+            match sel.kind {
+                SkSimple(s) => {
+                    assert_eq(s.result_columns.len(), 1);
+                    assert(!s.distinct);
+                }
+                _ => panic("expected simple select"),
+            }
+        }
+        Err(_) => panic("parse_select"),
+    }
+}
+
+fn select_star_from_table() {
+    match parse_via_stream(&"SELECT * FROM users".clone()) {
+        Ok(sel) => {
+            match sel.kind {
+                SkSimple(s) => {
+                    assert_eq(s.result_columns.len(), 1);
+                    match s.result_columns[0] {
+                        RcStar => {},
+                        _ => panic("expected RcStar"),
+                    }
+                    match s.from {
+                        Some(_) => {},
+                        None => panic("expected FROM"),
+                    }
+                }
+                _ => panic("expected simple"),
+            }
+        }
+        Err(_) => panic("parse_select star"),
+    }
+}
+
+fn select_columns_with_alias() {
+    match parse_via_stream(&"SELECT id, name AS n FROM t".clone()) {
+        Ok(sel) => {
+            match sel.kind {
+                SkSimple(s) => {
+                    assert_eq(s.result_columns.len(), 2);
+                }
+                _ => panic("simple"),
+            }
+        }
+        Err(_) => panic("parse alias"),
+    }
+}
+
+fn select_where_clause() {
+    match parse_via_stream(&"SELECT id FROM t WHERE id = 1".clone()) {
+        Ok(sel) => {
+            match sel.kind {
+                SkSimple(s) => {
+                    match s.where_clause {
+                        Some(_) => {},
+                        None => panic("expected WHERE"),
+                    }
+                }
+                _ => panic("simple"),
+            }
+        }
+        Err(_) => panic("parse where"),
+    }
+}
+
+fn select_order_limit() {
+    match parse_via_stream(&"SELECT id FROM t ORDER BY id DESC LIMIT 10 OFFSET 5".clone()) {
+        Ok(sel) => {
+            assert_eq(sel.order_by.len(), 1);
+            match sel.limit {
+                Some(l) => {
+                    match l.offset {
+                        Some(_) => {},
+                        None => panic("expected OFFSET"),
+                    }
+                }
+                None => panic("expected LIMIT"),
+            }
+        }
+        Err(_) => panic("parse order/limit"),
+    }
+}
+
+fn select_group_having() {
+    match parse_via_stream(&"SELECT count(id) FROM t GROUP BY name HAVING count(id) > 1".clone()) {
+        Ok(sel) => {
+            match sel.kind {
+                SkSimple(s) => {
+                    assert_eq(s.group_by.len(), 1);
+                    match s.having {
+                        Some(_) => {},
+                        None => panic("HAVING"),
+                    }
+                }
+                _ => panic("simple"),
+            }
+        }
+        Err(_) => panic("parse group/having"),
+    }
+}
+
+fn select_inner_join() {
+    match parse_via_stream(&"SELECT a.id FROM a JOIN b ON a.id = b.id".clone()) {
+        Ok(sel) => {
+            match sel.kind {
+                SkSimple(s) => {
+                    match s.from {
+                        Some(_) => {},
+                        None => panic("FROM"),
+                    }
+                }
+                _ => panic("simple"),
+            }
+        }
+        Err(_) => panic("parse join"),
+    }
+}
+
+fn select_compound_union() {
+    match parse_via_stream(&"SELECT 1 UNION ALL SELECT 2".clone()) {
+        Ok(sel) => {
+            match sel.kind {
+                SkCompound(_, _, _) => {},
+                _ => panic("expected compound"),
+            }
+        }
+        Err(_) => panic("parse union"),
+    }
+}
+
+fn expression_precedence() {
+    // `1 + 2 * 3` — multiply binds tighter.
+    let toks = match lex(&"1 + 2 * 3".clone()) {
+        Ok(t) => t,
+        Err(_) => { panic("lex"); return; }
+    };
+    let mut ts = stream_new(toks);
+    match parse_expr(&mut ts) {
+        Ok(_) => {}, Err(_) => panic("parse_expr"),
+    }
+}
+
+fn main() {
+    select_one_literal();
+    select_star_from_table();
+    select_columns_with_alias();
+    select_where_clause();
+    select_order_limit();
+    select_group_having();
+    select_inner_join();
+    select_compound_union();
+    expression_precedence();
+    print("parse_select_minimal typecheck ok");
+}

@@ -1,0 +1,183 @@
+// @test: typecheck-pass
+// @level: L2
+// @tier: 0
+// @tags: sqlite, native, sql, parser, dml, insert, update, delete
+// @timeout: 15000
+// @description: DML parsers — INSERT / UPDATE / DELETE minimal shapes
+//
+// Spec: internal/specs/sqlite-native.md §12.2 + sqlite.org/lang_*.html
+
+mount core.*;
+mount collections.List;
+mount core.database.sqlite.native.l5_sql.{
+    Token, lex,
+    Expr, InsertStmt, InsertSource, OnConflict,
+    UpdateStmt, UpdateAssignment,
+    DeleteStmt,
+    TokenStream, ParseError, stream_new,
+    parse_insert, parse_update, parse_delete,
+};
+
+fn parse_insert_via(src: &Text) -> Result<InsertStmt, ParseError> {
+    let toks = match lex(src) {
+        Ok(t)  => t,
+        Err(_) => { return Err(ParseError { message: "lex".clone(), position: 0 }); }
+    };
+    let mut ts = stream_new(toks);
+    parse_insert(&mut ts)
+}
+
+fn parse_update_via(src: &Text) -> Result<UpdateStmt, ParseError> {
+    let toks = match lex(src) {
+        Ok(t)  => t,
+        Err(_) => { return Err(ParseError { message: "lex".clone(), position: 0 }); }
+    };
+    let mut ts = stream_new(toks);
+    parse_update(&mut ts)
+}
+
+fn parse_delete_via(src: &Text) -> Result<DeleteStmt, ParseError> {
+    let toks = match lex(src) {
+        Ok(t)  => t,
+        Err(_) => { return Err(ParseError { message: "lex".clone(), position: 0 }); }
+    };
+    let mut ts = stream_new(toks);
+    parse_delete(&mut ts)
+}
+
+fn insert_values_row() {
+    match parse_insert_via(&"INSERT INTO t VALUES (1, 'a')".clone()) {
+        Ok(ins) => {
+            assert_eq(ins.table.name, "t".clone());
+            assert_eq(ins.columns.len(), 0);
+            match ins.source {
+                IsValues(rows) => { assert_eq(rows.len(), 1); }
+                _ => panic("expected IsValues"),
+            }
+        }
+        Err(_) => panic("parse_insert values"),
+    }
+}
+
+fn insert_with_columns() {
+    match parse_insert_via(&"INSERT INTO users (id, name) VALUES (7, 'Alice'), (8, 'Bob')".clone()) {
+        Ok(ins) => {
+            assert_eq(ins.columns.len(), 2);
+            assert_eq(ins.columns[0], "id".clone());
+            match ins.source {
+                IsValues(rows) => { assert_eq(rows.len(), 2); }
+                _ => panic("IsValues 2 rows"),
+            }
+        }
+        Err(_) => panic("insert with cols"),
+    }
+}
+
+fn insert_or_replace() {
+    match parse_insert_via(&"INSERT OR REPLACE INTO t (x) VALUES (1)".clone()) {
+        Ok(ins) => {
+            match ins.on_conflict {
+                Some(OcReplace) => {},
+                _ => panic("expected OcReplace"),
+            }
+        }
+        Err(_) => panic("or replace"),
+    }
+}
+
+fn insert_default_values() {
+    match parse_insert_via(&"INSERT INTO t DEFAULT VALUES".clone()) {
+        Ok(ins) => {
+            match ins.source {
+                IsDefault => {},
+                _ => panic("IsDefault"),
+            }
+        }
+        Err(_) => panic("default values"),
+    }
+}
+
+fn insert_returning() {
+    match parse_insert_via(&"INSERT INTO t (x) VALUES (1) RETURNING id".clone()) {
+        Ok(ins) => { assert_eq(ins.returning.len(), 1); }
+        Err(_) => panic("returning"),
+    }
+}
+
+fn update_basic() {
+    match parse_update_via(&"UPDATE t SET x = 5 WHERE id = 1".clone()) {
+        Ok(upd) => {
+            assert_eq(upd.table.name, "t".clone());
+            assert_eq(upd.assignments.len(), 1);
+            match upd.where_clause {
+                Some(_) => {}, None => panic("WHERE"),
+            }
+        }
+        Err(_) => panic("update basic"),
+    }
+}
+
+fn update_multi_set() {
+    match parse_update_via(&"UPDATE t SET a = 1, b = 'x', c = 3.14".clone()) {
+        Ok(upd) => { assert_eq(upd.assignments.len(), 3); }
+        Err(_) => panic("update multi set"),
+    }
+}
+
+fn update_or_rollback_returning() {
+    match parse_update_via(&"UPDATE OR ROLLBACK t SET x = 0 RETURNING *".clone()) {
+        Ok(upd) => {
+            match upd.on_conflict {
+                Some(OcRollback) => {},
+                _ => panic("OcRollback"),
+            }
+            assert_eq(upd.returning.len(), 1);
+        }
+        Err(_) => panic("update rollback returning"),
+    }
+}
+
+fn delete_basic() {
+    match parse_delete_via(&"DELETE FROM t WHERE id > 10".clone()) {
+        Ok(d) => {
+            assert_eq(d.table.name, "t".clone());
+            match d.where_clause { Some(_) => {}, None => panic("WHERE"), }
+        }
+        Err(_) => panic("delete basic"),
+    }
+}
+
+fn delete_all_returning() {
+    match parse_delete_via(&"DELETE FROM t RETURNING id".clone()) {
+        Ok(d) => {
+            match d.where_clause { None => {}, Some(_) => panic("no WHERE"), }
+            assert_eq(d.returning.len(), 1);
+        }
+        Err(_) => panic("delete returning"),
+    }
+}
+
+fn qualified_table() {
+    match parse_delete_via(&"DELETE FROM main.t WHERE 1".clone()) {
+        Ok(d) => {
+            assert_eq(d.table.schema, "main".clone());
+            assert_eq(d.table.name, "t".clone());
+        }
+        Err(_) => panic("qualified"),
+    }
+}
+
+fn main() {
+    insert_values_row();
+    insert_with_columns();
+    insert_or_replace();
+    insert_default_values();
+    insert_returning();
+    update_basic();
+    update_multi_set();
+    update_or_rollback_returning();
+    delete_basic();
+    delete_all_returning();
+    qualified_table();
+    print("parse_dml_minimal typecheck ok");
+}
