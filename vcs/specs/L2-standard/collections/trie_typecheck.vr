@@ -1,0 +1,53 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: collections, trie, prefix-tree, router, typecheck
+// @timeout: 10000
+// @expect: pass
+
+mount core.collections.trie.{Trie};
+mount core.collections.List;
+
+fn exercise_trie() {
+    let mut t: Trie<Int> = Trie.new();
+    assert(t.is_empty());
+
+    // Insert some routes.
+    let _ = t.insert(b"/users/alice", 1);
+    let _ = t.insert(b"/users/bob",   2);
+    let _ = t.insert(b"/users",       3);
+    let _ = t.insert(b"/",            0);
+
+    assert(t.len() == 4);
+
+    // Exact match.
+    match t.get(b"/users/alice") {
+        Some(v) => assert(v == 1),
+        None    => panic("expected hit"),
+    }
+    match t.get(b"/unknown") {
+        Some(_) => panic("should miss"),
+        None    => {},
+    }
+
+    // contains() helper.
+    assert(t.contains(b"/users/bob"));
+    assert(!t.contains(b"/nope"));
+
+    // Longest-prefix — for `/users/alice/profile`, the best match is
+    // `/users/alice`.
+    let lp = t.longest_prefix(b"/users/alice/profile");
+    let _ = lp;
+
+    // All entries under `/users/`.
+    let hits: List<(List<Byte>, Int)> = t.entries_with_prefix(b"/users/");
+    assert(hits.len() == 2);
+
+    // Remove.
+    let prior = t.remove(b"/users/alice");
+    match prior { Some(v) => assert(v == 1), None => panic("") }
+    assert(t.len() == 3);
+    assert(!t.contains(b"/users/alice"));
+}
+
+fn main() { exercise_trie(); }

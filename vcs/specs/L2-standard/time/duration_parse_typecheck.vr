@@ -1,0 +1,60 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: time, duration-parser, iso8601, typecheck
+// @timeout: 10000
+// @expect: pass
+
+mount core.time.duration_parse.{DurationParseError, parse};
+mount core.time.duration.{Duration};
+
+fn exercise_compact() -> Result<(), DurationParseError> {
+    // Go-style compact.
+    let _: Duration = parse(&Text.from("5m30s"))?;
+    let _: Duration = parse(&Text.from("1h15m"))?;
+    let _: Duration = parse(&Text.from("500ms"))?;
+    let _: Duration = parse(&Text.from("2d"))?;
+    let _: Duration = parse(&Text.from("100ns"))?;
+    let _: Duration = parse(&Text.from("1w"))?;
+
+    // Whitespace tolerated.
+    let _: Duration = parse(&Text.from("1h 30m"))?;
+    let _: Duration = parse(&Text.from("  5m  "))?;
+
+    // Fractional.
+    let _: Duration = parse(&Text.from("1.5s"))?;
+    let _: Duration = parse(&Text.from("0.25m"))?;
+
+    // Negative.
+    let _: Duration = parse(&Text.from("-15m"))?;
+    Ok(())
+}
+
+fn exercise_iso8601() -> Result<(), DurationParseError> {
+    let _ = parse(&Text.from("PT5M"))?;
+    let _ = parse(&Text.from("PT1H30M"))?;
+    let _ = parse(&Text.from("PT0.5S"))?;
+    let _ = parse(&Text.from("P1D"))?;
+    let _ = parse(&Text.from("P1W"))?;
+    Ok(())
+}
+
+fn exercise_errors() {
+    // Empty.
+    let empty = parse(&Text.from(""));
+    let _ = empty;
+
+    // Unknown unit.
+    let bad_unit = parse(&Text.from("5x"));
+    let _ = bad_unit;
+
+    // No digits.
+    let no_digits = parse(&Text.from("ms"));
+    let _ = no_digits;
+}
+
+fn main() {
+    let _ = exercise_compact();
+    let _ = exercise_iso8601();
+    exercise_errors();
+}

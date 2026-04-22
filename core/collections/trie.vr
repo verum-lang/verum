@@ -1,0 +1,249 @@
+// =============================================================================
+// collections/trie.vr — prefix tree (trie)
+// =============================================================================
+// Layer: 2 (Collections)
+// Dependencies: core, core.collections.map
+// =============================================================================
+//
+// Byte-keyed trie — prefix tree for exact-match, prefix-match,
+// and longest-match lookups. Used by:
+//
+//   * URL routers (path dispatch: `/users/:id` under an exact-
+//     segment tree).
+//   * DNS suffix matching (`*.example.com`).
+//   * IP-address longest-prefix match (FIB-style).
+//   * Autocomplete / typeahead search.
+//   * CLI subcommand dispatch.
+//   * Dictionary / spell-check lookups.
+//
+// Keys are byte slices so the trie works equally well for ASCII
+// URL paths, UTF-8 text, and arbitrary binary data.
+//
+// # API
+//
+// ```
+// let mut t: Trie<UserId> = Trie.new();
+// t.insert(b"/users/alice", user_a);
+// t.insert(b"/users/bob",   user_b);
+//
+// // Exact match.
+// match t.get(b"/users/alice") { Some(u) => ..., None => ... }
+//
+// // Longest prefix — useful for wildcard dispatch.
+// match t.longest_prefix(b"/users/alice/profile") {
+//     Some((matched_prefix_bytes, user)) => ...,
+//     None => ...,
+// }
+//
+// // Enumerate everything under a prefix.
+// let hits: List<(List<Byte>, UserId)> = t.entries_with_prefix(b"/users/");
+// ```
+//
+// # Internals
+//
+// Children keyed by `Map<Byte, Box>` — simple, O(1) per-level
+// lookup with ~16 B per branch, works at any character-set size.
+// A follow-up "radix" variant that collapses single-child chains
+// will cut the memory footprint further for sparse inputs
+// (DNS suffix / URL-path workloads).
+//
+// =============================================================================
+
+module core.collections.trie;
+
+mount core.*;
+mount core.collections.List;
+mount core.collections.map.{Map};
+
+// =============================================================================
+// Node
+// =============================================================================
+
+type TrieNode<V> is {
+    /// Value stored at this node (end-of-key marker when `Some`).
+    value:    Maybe<V>,
+    /// Byte → child node.
+    children: Map<Byte, Heap<TrieNode<V>>>,
+};
+
+fn empty_node<V>() -> TrieNode<V> {
+    TrieNode { value: None, children: Map.new() }
+}
+
+// =============================================================================
+// Trie
+// =============================================================================
+
+public type Trie<V> is {
+    root: TrieNode<V>,
+    /// Count of entries (sum of `value.is_some()` over all nodes).
+    size: Int,
+};
+
+implement<V: Clone> Trie<V> {
+    public fn new() -> Trie<V> {
+        Trie { root: empty_node::<V>(), size: 0 }
+    }
+
+    /// Insert `value` at `key`. Returns the prior value when the
+    /// key already existed (useful for refcount bookkeeping).
+    public fn insert(&mut self, key: &[Byte], value: V) -> Maybe<V> {
+        let mut node: &mut TrieNode<V> = &mut self.root;
+        let mut i: Int = 0;
+        while i < key.len() {
+            let b = key[i];
+            if !node.children.contains_key(&b) {
+                node.children.insert(b, Heap(empty_node::<V>()));
+            }
+            // Descend — we need the &mut inside the Heap.
+            match node.children.get_mut(&b) {
+                Some(child) => { node = &mut **child; },
+                None        => break,
+            }
+            i = i + 1;
+        }
+        let prior = node.value.clone();
+        node.value = Some(value);
+        if prior.is_none() { self.size = self.size + 1; }
+        prior
+    }
+
+    /// Exact match.
+    public fn get(&self, key: &[Byte]) -> Maybe<V> {
+        match self.walk_to(key) {
+            Some(node) => node.value.clone(),
+            None       => None,
+        }
+    }
+
+    public fn contains(&self, key: &[Byte]) -> Bool {
+        match self.get(key) {
+            Some(_) => true,
+            None    => false,
+        }
+    }
+
+    /// Remove the exact key. Returns the prior value. Internal
+    /// node-pruning is optional — we only clear the `value`
+    /// marker; dead branches are left in place for a follow-up
+    /// compaction pass if memory matters.
+    public fn remove(&mut self, key: &[Byte]) -> Maybe<V> {
+        let mut node: &mut TrieNode<V> = &mut self.root;
+        let mut i: Int = 0;
+        while i < key.len() {
+            let b = key[i];
+            match node.children.get_mut(&b) {
+                Some(child) => { node = &mut **child; },
+                None        => return None,
+            }
+            i = i + 1;
+        }
+        let prior = node.value.clone();
+        node.value = None;
+        if prior.is_some() { self.size = self.size - 1; }
+        prior
+    }
+
+    /// Longest prefix of `key` that exists as a stored entry.
+    /// Returns the matched prefix bytes + its stored value.
+    ///
+    /// Canonical use case: IP FIB / URL-router default-route
+    /// dispatch.
+    public fn longest_prefix(&self, key: &[Byte]) -> Maybe<(List<Byte>, V)> {
+        let mut node = &self.root;
+        let mut best: Maybe<(Int, V)> = None;
+        if node.value.is_some() {
+            match &node.value { Some(v) => { best = Some((0, v.clone())); }, None => {} }
+        }
+        let mut i: Int = 0;
+        while i < key.len() {
+            let b = key[i];
+            match node.children.get(&b) {
+                Some(child) => {
+                    node = &**child;
+                    match &node.value {
+                        Some(v) => { best = Some((i + 1, v.clone())); },
+                        None    => {},
+                    }
+                },
+                None => break,
+            }
+            i = i + 1;
+        }
+        match best {
+            Some((len, v)) => {
+                let mut prefix: List<Byte> = [];
+                let mut k: Int = 0;
+                while k < len { prefix.push(key[k]); k = k + 1; }
+                Some((prefix, v))
+            },
+            None => None,
+        }
+    }
+
+    /// All entries whose key begins with `prefix`. Returns a list
+    /// of (full_key, value) pairs in arbitrary (deterministic)
+    /// order determined by the underlying Map's byte-key iteration.
+    public fn entries_with_prefix(&self, prefix: &[Byte]) -> List<(List<Byte>, V)> {
+        let mut out: List<(List<Byte>, V)> = [];
+        match self.walk_to(prefix) {
+            Some(sub) => {
+                let mut base: List<Byte> = [];
+                let mut i: Int = 0;
+                while i < prefix.len() { base.push(prefix[i]); i = i + 1; }
+                collect_entries(sub, &base, &mut out);
+            },
+            None => {},
+        }
+        out
+    }
+
+    public fn len(&self) -> Int { self.size }
+    public fn is_empty(&self) -> Bool { self.size == 0 }
+
+    // -----------------------------------------------------------------
+    // Internals
+    // -----------------------------------------------------------------
+
+    fn walk_to(&self, key: &[Byte]) -> Maybe<&TrieNode<V>> {
+        let mut node = &self.root;
+        let mut i: Int = 0;
+        while i < key.len() {
+            let b = key[i];
+            match node.children.get(&b) {
+                Some(child) => { node = &**child; },
+                None        => return None,
+            }
+            i = i + 1;
+        }
+        Some(node)
+    }
+}
+
+fn collect_entries<V: Clone>(
+    node:  &TrieNode<V>,
+    prefix: &List<Byte>,
+    out:    &mut List<(List<Byte>, V)>,
+) {
+    match &node.value {
+        Some(v) => { out.push((prefix.clone(), v.clone())); },
+        None    => {},
+    }
+    let iter = node.children.keys();
+    let mut it = iter;
+    loop {
+        match it.next() {
+            Some(k) => {
+                match node.children.get(k) {
+                    Some(child) => {
+                        let mut extended: List<Byte> = prefix.clone();
+                        extended.push(*k);
+                        collect_entries(&**child, &extended, out);
+                    },
+                    None => {},
+                }
+            },
+            None => break,
+        }
+    }
+}

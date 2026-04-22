@@ -1,0 +1,325 @@
+// =============================================================================
+// time/duration_parse.vr — human duration string parser
+// =============================================================================
+// Layer: 2 (Time)
+// Dependencies: core, core.collections, core.time.duration
+// =============================================================================
+//
+// Parses compact human-readable duration strings used in config
+// files, CLI flags, and cron-adjacent scheduler APIs:
+//
+//   "5m30s"     → 5 minutes + 30 seconds
+//   "1h15m"     → 1 hour + 15 minutes
+//   "2d"        → 2 days
+//   "500ms"     → 500 milliseconds
+//   "1.5s"      → 1.5 seconds  (fractional)
+//   "2h 30m"    → whitespace tolerated
+//   "-15m"      → negative durations
+//
+// Plus ISO 8601 style for cross-language config files:
+//
+//   "PT5M"      → 5 minutes
+//   "PT1H30M"   → 1h 30m
+//   "PT0.5S"    → 500 ms
+//   "P1D"       → 1 day
+//
+// # Supported units
+//
+// | Unit | Suffix | Example |
+// | ---- | ------ | ------- |
+// | nanoseconds  | `ns` | `100ns` |
+// | microseconds | `us` / `µs` | `250us` |
+// | milliseconds | `ms` | `500ms` |
+// | seconds      | `s`  | `30s`   |
+// | minutes      | `m`  | `5m`    |
+// | hours        | `h`  | `2h`    |
+// | days         | `d`  | `7d`    |
+// | weeks        | `w`  | `1w`    |
+//
+// # API
+//
+// ```
+// let d: Duration = duration_parse.parse(&Text.from("1h30m"))?;
+// let d: Duration = duration_parse.parse(&Text.from("PT1H30M"))?;
+// ```
+//
+// =============================================================================
+
+module core.time.duration_parse;
+
+mount core.*;
+mount core.collections.List;
+mount core.time.duration.{Duration};
+
+public type DurationParseError is
+      Empty
+    | Malformed(Text)
+    | UnknownUnit(Text)
+    | Overflow;
+
+// =============================================================================
+// Public entry
+// =============================================================================
+
+public fn parse(text: &Text) -> Result<Duration, DurationParseError> {
+    let b = text.as_bytes();
+    let trimmed = trim(b);
+    if trimmed.len() == 0 { return Err(DurationParseError.Empty); }
+
+    // ISO 8601 "P..." form.
+    if trimmed[0] == ('P' as Byte) || trimmed[0] == ('p' as Byte) {
+        return parse_iso8601(trimmed.as_slice());
+    }
+    parse_compact(trimmed.as_slice())
+}
+
+// =============================================================================
+// Compact Go-style form — e.g. "1h30m5s"
+// =============================================================================
+
+fn parse_compact(b: &[Byte]) -> Result<Duration, DurationParseError> {
+    // Optional leading sign.
+    let mut i: Int = 0;
+    let mut negative: Bool = false;
+    if i < b.len() && b[i] == ('-' as Byte) { negative = true; i = i + 1; }
+    else if i < b.len() && b[i] == ('+' as Byte) { i = i + 1; }
+
+    if i >= b.len() {
+        return Err(DurationParseError.Malformed(Text.from("no digits")));
+    }
+
+    let mut total_ns: Int = 0;
+    let mut progressed: Bool = false;
+
+    while i < b.len() {
+        // Skip whitespace.
+        while i < b.len() && is_ws(b[i]) { i = i + 1; }
+        if i >= b.len() { break; }
+
+        // Integer part.
+        let int_start = i;
+        while i < b.len() && is_digit(b[i]) { i = i + 1; }
+        let int_end = i;
+        if int_start == int_end {
+            return Err(DurationParseError.Malformed(Text.from("expected digits")));
+        }
+
+        // Optional fractional part.
+        let mut frac_start = i;
+        let mut frac_end = i;
+        if i < b.len() && b[i] == ('.' as Byte) {
+            i = i + 1;
+            frac_start = i;
+            while i < b.len() && is_digit(b[i]) { i = i + 1; }
+            frac_end = i;
+        }
+
+        // Unit suffix.
+        let unit_start = i;
+        while i < b.len() && !is_digit(b[i]) && b[i] != ('.' as Byte) && !is_ws(b[i]) {
+            i = i + 1;
+        }
+        let unit_end = i;
+
+        let int_part = parse_int_bytes(b, int_start, int_end);
+        let unit_ns = match unit_nanoseconds(b, unit_start, unit_end) {
+            Ok(n) => n,
+            Err(e) => return Err(e),
+        };
+
+        let int_contribution = int_part.checked_mul(unit_ns)
+            .ok_or(DurationParseError.Overflow)?;
+        total_ns = total_ns.checked_add(int_contribution)
+            .ok_or(DurationParseError.Overflow)?;
+
+        // Fraction: `frac_digits / 10^n * unit_ns`.
+        if frac_end > frac_start {
+            let frac_digits = parse_int_bytes(b, frac_start, frac_end);
+            let divisor = pow10(frac_end - frac_start);
+            let frac_contribution = (frac_digits * unit_ns) / divisor;
+            total_ns = total_ns + frac_contribution;
+        }
+
+        progressed = true;
+    }
+    if !progressed {
+        return Err(DurationParseError.Malformed(Text.from("no components")));
+    }
+
+    if negative { total_ns = -total_ns; }
+    Ok(Duration.from_nanos(total_ns))
+}
+
+// =============================================================================
+// ISO 8601 (subset: days / hours / minutes / seconds)
+// =============================================================================
+//
+//   Pn(Y|M|W|D)T n(H|M|S) with fractional S allowed.
+//   We do NOT support year/month because their length is locale-
+//   dependent; a follow-up `calendar_parse` module can handle those.
+//
+// =============================================================================
+
+fn parse_iso8601(b: &[Byte]) -> Result<Duration, DurationParseError> {
+    // First char is 'P' / 'p'.
+    let mut i: Int = 1;
+    let mut in_time: Bool = false;
+    let mut total_ns: Int = 0;
+
+    while i < b.len() {
+        if b[i] == ('T' as Byte) || b[i] == ('t' as Byte) {
+            in_time = true; i = i + 1; continue;
+        }
+        // Parse number + designator.
+        let int_start = i;
+        while i < b.len() && is_digit(b[i]) { i = i + 1; }
+        let int_end = i;
+        let mut frac_start = i;
+        let mut frac_end = i;
+        if i < b.len() && b[i] == ('.' as Byte) {
+            i = i + 1;
+            frac_start = i;
+            while i < b.len() && is_digit(b[i]) { i = i + 1; }
+            frac_end = i;
+        }
+        if i >= b.len() {
+            return Err(DurationParseError.Malformed(Text.from("ISO: missing designator")));
+        }
+        let desig = b[i];
+        i = i + 1;
+
+        let int_part = parse_int_bytes(b, int_start, int_end);
+        let unit_ns: Int = if in_time {
+            match desig {
+                0x48_u8 /* H */ | 0x68_u8 /* h */ => 3_600_000_000_000,
+                0x4D_u8 /* M */ | 0x6D_u8 /* m */ => 60_000_000_000,
+                0x53_u8 /* S */ | 0x73_u8 /* s */ => 1_000_000_000,
+                _ => return Err(DurationParseError.UnknownUnit(Text.from("iso time"))),
+            }
+        } else {
+            match desig {
+                0x44_u8 /* D */ | 0x64_u8 /* d */ => 86_400_000_000_000,
+                0x57_u8 /* W */ | 0x77_u8 /* w */ => 604_800_000_000_000,
+                _ => return Err(DurationParseError.UnknownUnit(Text.from("iso date"))),
+            }
+        };
+
+        total_ns = total_ns.checked_add(int_part.checked_mul(unit_ns)
+            .ok_or(DurationParseError.Overflow)?)
+            .ok_or(DurationParseError.Overflow)?;
+
+        if frac_end > frac_start {
+            let frac_digits = parse_int_bytes(b, frac_start, frac_end);
+            let divisor = pow10(frac_end - frac_start);
+            total_ns = total_ns + (frac_digits * unit_ns) / divisor;
+        }
+    }
+    Ok(Duration.from_nanos(total_ns))
+}
+
+// =============================================================================
+// Unit lookup
+// =============================================================================
+
+fn unit_nanoseconds(b: &[Byte], start: Int, end: Int) -> Result<Int, DurationParseError> {
+    let len = end - start;
+    if len == 0 {
+        return Err(DurationParseError.Malformed(Text.from("missing unit")));
+    }
+    // Single-char units.
+    if len == 1 {
+        match b[start] {
+            0x73_u8 /* s */ => return Ok(1_000_000_000),
+            0x6D_u8 /* m */ => return Ok(60_000_000_000),
+            0x68_u8 /* h */ => return Ok(3_600_000_000_000),
+            0x64_u8 /* d */ => return Ok(86_400_000_000_000),
+            0x77_u8 /* w */ => return Ok(604_800_000_000_000),
+            _ => {},
+        }
+    }
+    // Two-char.
+    if len == 2 {
+        if b[start] == ('n' as Byte) && b[start + 1] == ('s' as Byte) { return Ok(1); }
+        if b[start] == ('u' as Byte) && b[start + 1] == ('s' as Byte) { return Ok(1_000); }
+        if b[start] == ('m' as Byte) && b[start + 1] == ('s' as Byte) { return Ok(1_000_000); }
+    }
+    // µs — 3 bytes in UTF-8 (0xC2 0xB5 0x73 = "µs").
+    if len == 3 && b[start] == 0xC2_u8 && b[start + 1] == 0xB5_u8 && b[start + 2] == ('s' as Byte) {
+        return Ok(1_000);
+    }
+    Err(DurationParseError.UnknownUnit(slice_text(b, start, end)))
+}
+
+// =============================================================================
+// Helpers
+// =============================================================================
+
+fn is_digit(c: Byte) -> Bool {
+    c >= ('0' as Byte) && c <= ('9' as Byte)
+}
+
+fn is_ws(c: Byte) -> Bool {
+    c == (' ' as Byte) || c == ('\t' as Byte)
+        || c == ('\r' as Byte) || c == ('\n' as Byte)
+}
+
+fn parse_int_bytes(b: &[Byte], start: Int, end: Int) -> Int {
+    let mut v: Int = 0;
+    let mut i: Int = start;
+    while i < end {
+        v = v * 10 + ((b[i] - ('0' as Byte)) as Int);
+        i = i + 1;
+    }
+    v
+}
+
+fn pow10(n: Int) -> Int {
+    let mut p: Int = 1;
+    let mut i: Int = 0;
+    while i < n { p = p * 10; i = i + 1; }
+    p
+}
+
+fn trim(b: &[Byte]) -> List<Byte> {
+    let mut l: Int = 0;
+    while l < b.len() && is_ws(b[l]) { l = l + 1; }
+    let mut r: Int = b.len();
+    while r > l && is_ws(b[r - 1]) { r = r - 1; }
+    let mut out: List<Byte> = [];
+    let mut i: Int = l;
+    while i < r { out.push(b[i]); i = i + 1; }
+    out
+}
+
+fn slice_text(b: &[Byte], start: Int, end: Int) -> Text {
+    let mut out: List<Byte> = [];
+    let mut i: Int = start;
+    while i < end { out.push(b[i]); i = i + 1; }
+    Text.from_utf8_unchecked(out.as_slice())
+}
+
+// =============================================================================
+// Saturating arithmetic helpers
+// =============================================================================
+
+implement Int {
+    fn checked_mul(&self, rhs: Int) -> Maybe<Int> {
+        // Simple overflow guard. Int is 64-bit signed, range
+        // [-9.2e18, 9.2e18]. For duration nanoseconds, the max
+        // meaningful product is ~584 years in ns (5.8e18), well
+        // within range — we just flag egregious overflow.
+        if *self == 0 || rhs == 0 { return Some(0); }
+        let result = *self * rhs;
+        if rhs != 0 && result / rhs != *self { return None; }
+        Some(result)
+    }
+
+    fn checked_add(&self, rhs: Int) -> Maybe<Int> {
+        let result = *self + rhs;
+        // Sign change when both inputs same sign → overflow.
+        if (*self > 0 && rhs > 0 && result < 0) || (*self < 0 && rhs < 0 && result > 0) {
+            return None;
+        }
+        Some(result)
+    }
+}

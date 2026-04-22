@@ -47,6 +47,7 @@ public mount .system_time.{SystemTime, SystemTimeError};
 public mount .interval.{Interval, AsyncInterval, interval, interval_ms};
 public mount .cron.{CronExpr, CronError};
 public mount .rfc3339.{Rfc3339Time, Rfc3339Error};
+public mount .duration_parse.{DurationParseError};
 
 // =============================================================================
 // Time Intrinsics Import
