@@ -51,6 +51,7 @@ public module ext;
 public module certificate;
 public module chain;
 public module trust_store;
+public module server_identity;
 
 // Re-exports — OID
 public mount .oid.Oid;
@@ -92,3 +93,6 @@ public mount .chain.{ChainError, VerifiedChain, validate_chain};
 
 // Re-exports — trust store
 public mount .trust_store.{TrustStore, TrustError};
+
+// Re-exports — server-identity verification (RFC 6125)
+public mount .server_identity.{ServerIdentityError, verify_server_identity};

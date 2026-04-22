@@ -1,0 +1,31 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: x509, rfc6125, hostname, ip-literal, typecheck
+// @timeout: 10000
+// @expect: pass
+
+mount core.security.x509.{
+    Certificate, ServerIdentityError, verify_server_identity,
+    parse_certificate,
+};
+mount core.collections.List;
+
+fn exercise_identity_check(cert_der: &[Byte]) -> Result<(), ServerIdentityError> {
+    let cert = parse_certificate(cert_der)
+        .map_err(|_| ServerIdentityError.NoSubjectAltName)?;
+    // DNS reference.
+    let _ = verify_server_identity(&cert, &Text.from("example.com"));
+    // IPv4 literal reference.
+    let _ = verify_server_identity(&cert, &Text.from("192.0.2.1"));
+    // IPv6 literal reference.
+    let _ = verify_server_identity(&cert, &Text.from("2001:db8::1"));
+    // Empty reference → EmptyReference error branch.
+    let _ = verify_server_identity(&cert, &Text.from(""));
+    Ok(())
+}
+
+fn main() {
+    let der: List<Byte> = [];
+    let _ = exercise_identity_check(der.as_slice());
+}

@@ -1,0 +1,178 @@
+// =============================================================================
+// security/x509/server_identity.vr — RFC 6125 server-identity verifier
+// =============================================================================
+// Layer: 3 (Security — X.509)
+// Dependencies: core, core.net.addr, core.security.x509.certificate,
+//               core.security.x509.ext.subject_alt_name
+// =============================================================================
+//
+// RFC 6125 §6 — "Verification of server identity." Given a certificate
+// and the name the caller tried to reach (the "reference identifier",
+// typically the hostname passed to `TlsConfig.server_name` or
+// `QuicConfig.client(..)`), this module returns a typed Ok / Err.
+//
+// The check walks:
+//
+//   1. Is the reference an IP address (IPv4 dotted-decimal or IPv6
+//      RFC 4291 text)? If yes, the certificate MUST carry a SAN
+//      iPAddress entry whose bytes match — Common Name fallback is
+//      invalid per RFC 6125 §1.7 / §7.1.
+//
+//   2. Otherwise the reference is a DNS name (LDH labels only):
+//      * If the cert has a SubjectAltName dNSName extension,
+//        exactly one entry MUST match (with at-most-one leftmost
+//        wildcard per RFC 6125 §6.4.3).
+//      * If no SAN is present, the check fails. RFC 6125 §6.4.4
+//        and CA/Browser Forum Baseline Requirements §7.1.4.2.2
+//        both deprecate Common-Name-only identity; this module
+//        does NOT fall back to CN.
+//
+// # Design
+//
+//   * Re-uses `SubjectAltName.matches_dns` / `matches_ip` — the
+//     wildcard + label-level matching logic already lives there.
+//   * Tags errors so callers can surface "no SAN present" vs
+//     "hostname didn't match any SAN entry" vs "IP literal +
+//     DNS-only cert" distinctly — production operators diagnose
+//     these cases differently.
+//
+// =============================================================================
+
+module core.security.x509.server_identity;
+
+mount core.*;
+mount core.collections.List;
+mount core.net.addr.{Ipv4Addr, Ipv6Addr};
+mount core.security.x509.certificate.{Certificate};
+mount core.security.x509.ext.subject_alt_name.{SubjectAltName};
+
+// =============================================================================
+// Error surface
+// =============================================================================
+
+public type ServerIdentityError is
+      NoSubjectAltName                // cert lacks a SAN extension; DNS/IP ref invalid
+    | DnsNameMismatch(Text)           // the reference DNS name didn't match any SAN DNS entry
+    | IpAddressMismatch(List<Byte>)   // the reference IP didn't match any SAN iPAddress entry
+    | IpLiteralRequiresIpSan          // reference is an IP literal but cert only has dNSName entries
+    | EmptyReference;                 // caller passed ""
+
+// =============================================================================
+// Public API
+// =============================================================================
+
+/// Verify that `cert` identifies `reference_name` per RFC 6125. The
+/// reference may be a DNS name (e.g. "example.com") or an IP literal
+/// (e.g. "192.0.2.1" or "2001:db8::1").
+///
+/// ```
+/// match verify_server_identity(&peer_cert, &server_name) {
+///     Ok(())                                      => proceed,
+///     Err(ServerIdentityError.DnsNameMismatch(_)) => log + abort,
+///     ...
+/// }
+/// ```
+public fn verify_server_identity(
+    cert: &Certificate,
+    reference_name: &Text,
+) -> Result<(), ServerIdentityError> {
+    if reference_name.is_empty() {
+        return Err(ServerIdentityError.EmptyReference);
+    }
+
+    // Detect IP-literal references first so "192.0.2.1" never gets
+    // matched against a dNSName SAN entry.
+    match parse_ip_literal(reference_name) {
+        Some(ip_bytes) => verify_ip_identity(cert, ip_bytes),
+        None           => verify_dns_identity(cert, reference_name),
+    }
+}
+
+// =============================================================================
+// IP-literal dispatch (v4 + v6)
+// =============================================================================
+
+fn parse_ip_literal(s: &Text) -> Maybe<List<Byte>> {
+    // IPv4: four dot-separated LDH-decimal octets. Parse into 4 bytes.
+    match Ipv4Addr.parse(s) {
+        Ok(addr) => {
+            let (a, b, c, d) = addr.octets();
+            let mut bytes: List<Byte> = [];
+            bytes.push(a); bytes.push(b); bytes.push(c); bytes.push(d);
+            return Some(bytes);
+        },
+        Err(_) => {},
+    }
+    // IPv6 (textual form per RFC 4291 §2.2).
+    match Ipv6Addr.parse(s) {
+        Ok(addr) => {
+            let arr: [Byte; 16] = addr.octets();
+            let mut bytes: List<Byte> = [];
+            let mut i: Int = 0;
+            while i < 16 { bytes.push(arr[i]); i = i + 1; }
+            Some(bytes)
+        },
+        Err(_) => None,
+    }
+}
+
+// =============================================================================
+// Inner checks
+// =============================================================================
+
+fn verify_ip_identity(
+    cert: &Certificate,
+    ip_bytes: List<Byte>,
+) -> Result<(), ServerIdentityError> {
+    match &cert.tbs.extensions.subject_alt_name {
+        Some((_critical, san)) => {
+            if san_has_ip_entries(san) {
+                if san.matches_ip(ip_bytes.as_slice()) {
+                    Ok(())
+                } else {
+                    Err(ServerIdentityError.IpAddressMismatch(ip_bytes))
+                }
+            } else {
+                // All entries were dNSName / rfc822Name / etc — the
+                // cert doesn't assert any IP identity and an IP
+                // literal MUST match an iPAddress SAN entry.
+                Err(ServerIdentityError.IpLiteralRequiresIpSan)
+            }
+        },
+        None => Err(ServerIdentityError.NoSubjectAltName),
+    }
+}
+
+fn verify_dns_identity(
+    cert: &Certificate,
+    hostname: &Text,
+) -> Result<(), ServerIdentityError> {
+    match &cert.tbs.extensions.subject_alt_name {
+        Some((_critical, san)) => {
+            if san.matches_dns(hostname) {
+                Ok(())
+            } else {
+                Err(ServerIdentityError.DnsNameMismatch(hostname.clone()))
+            }
+        },
+        None => Err(ServerIdentityError.NoSubjectAltName),
+    }
+}
+
+// =============================================================================
+// Helpers
+// =============================================================================
+
+fn san_has_ip_entries(san: &SubjectAltName) -> Bool {
+    let mut i: Int = 0;
+    while i < san.names.len() {
+        match &san.names[i] {
+            core.security.x509.ext.subject_alt_name.GeneralName.IpAddress(_) => {
+                return true;
+            },
+            _ => {},
+        }
+        i = i + 1;
+    }
+    false
+}
