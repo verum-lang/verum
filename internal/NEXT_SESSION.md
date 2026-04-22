@@ -123,9 +123,22 @@ Three sequential architectural commits closed the class of
     type. `Maybe` is explicitly NOT in the list — that must yield
     "Maybe" as hint.
 
+13. **`5f51b62f` fix(types): meta/const/HKT generic params counted in
+    alias arity** — `type SquareMatrix<T, N: meta Int> is Matrix<T,
+    N, N>;` + `SquareMatrix<Float, 3>` failed with "expects 1 type
+    argument(s), but 2 were provided". The alias-path
+    `__type_params_{name}` registration in
+    `resolve_type_body` filtered by `GenericParamKind::Type` only,
+    dropping the `N: meta Int`. Fix: include every positional-name
+    kind (Type, HigherKinded, KindAnnotated, Const, Meta, Context)
+    so the arity check sees all of them. Lifetimes stay excluded.
+    Matches the sibling fix in `register_type_declaration_inner`.
+
 **L1 impact:** 533/535 → 534/537 (same 3 known residuals:
 higher_kinded HKT infer, sha256 stdlib, AOT field-offset panic in
-vtest harness). L0 stdlib-runtime 8/8 throughout.
+vtest harness). **L3 dependent impact:** 48/52 → 50/52 — closes
+`refinement_desugaring.vr` and `type_level_arithmetic.vr`. L0
+stdlib-runtime 8/8 throughout.
 
 5. **`d25585cb` fix(types/context): named context bindings + lenient
    method type build** — closes `log.info("x")` typecheck failure on
