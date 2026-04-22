@@ -1,0 +1,58 @@
+// @test: parse
+// @level: L1
+// @tags: proofs, verification, axiom, framework, attribute
+// @timeout: 5000
+
+/// `@framework(name, "citation")` marks an axiom / theorem as a trusted
+/// postulate coming from an external formal-mathematics framework
+/// (Lurie Higher Topos Theory, Schreiber Differential Cohesion, Connes
+/// reconstruction, Petz classification, Arnold–Mather catastrophe,
+/// Baez–Dolan coherence, …).
+///
+/// Grammar: the generic `attribute = identifier , [ '(' , attribute_args , ')' ]`
+/// production (grammar/verum.ebnf §2) accepts this shape. `FrameworkAttr`
+/// in `verum_ast::attr` extracts `(name, citation)` as a typed pair.
+///
+/// `verum audit --framework-axioms` enumerates the trusted boundary
+/// using these markers.
+
+// Framework-axiom from Lurie's Higher Topos Theory.
+@framework(lurie_htt, "HTT 6.2.2.7")
+axiom sheafification_is_topos(c: Int) -> Bool
+    ensures c >= 0;
+
+// Framework-axiom from Schreiber's Differential Cohomology in a Cohesive
+// ∞-Topos — the cohesive hexagon.
+@framework(schreiber_dcct, "DCCT §3.9")
+axiom cohesive_hexagon(k: Int) -> Bool
+    ensures k >= 0;
+
+// Second Lurie HTT citation — the same framework can be cited multiple
+// times; the audit report groups them.
+@framework(lurie_htt, "HTT 5.5.4.15")
+axiom presentable_localization(x: Int) -> Bool
+    ensures x >= 0;
+
+// Connes reconstruction axiom (vii) — first-order condition.
+@framework(connes_reconstruction, "Connes 2008 axiom (vii)")
+axiom first_order_condition(m: Int) -> Bool
+    ensures m >= 0;
+
+// Petz classification of monotone metrics (used in UHM Layer 4).
+@framework(petz_classification, "Petz 1996 monotone metrics")
+axiom petz_monotone(rho: Int) -> Bool
+    ensures rho >= 0;
+
+// Arnold–Mather catastrophe normal forms (UHM Layer 3 T-161).
+@framework(arnold_catastrophe, "Arnold–Mather 1974, codim ≤ 4")
+axiom swallowtail_normal_form(x: Int, y: Int) -> Bool
+    ensures x >= 0;
+
+// Baez–Dolan tricategory coherence (UHM Layer 5 T-217 infrastructure).
+@framework(baez_dolan, "GPS 1995 coherence for tricategories")
+axiom gps_coherence(n: Int) -> Bool
+    ensures n >= 0;
+
+fn main() {
+    print("framework-attribute axioms parsed");
+}

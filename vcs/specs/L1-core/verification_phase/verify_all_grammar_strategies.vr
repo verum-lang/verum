@@ -1,0 +1,53 @@
+// @test: parse
+// @level: L1
+// @tags: verification, verify_strategy, attribute, grammar-coverage
+// @timeout: 5000
+
+/// Every `verify_strategy` name enumerated by grammar/verum.ebnf §2
+/// must be accepted at the `@verify(...)` attribute site.
+///
+/// Grammar production:
+///     verify_strategy = ( 'runtime' | 'static' | 'formal' | 'proof'
+///                       | 'fast' | 'thorough' | 'reliable'
+///                       | 'certified' | 'synthesize' ) ;
+///
+/// Two independent surfaces must agree on this list:
+///   1. `VerificationLevel::from_annotation` in `verum_verification::level`
+///      — the coarse compile-time gradient (projects every name onto
+///      Runtime / Static / Proof).
+///   2. `VerifyStrategy::from_attribute_value` in `verum_smt::verify_strategy`
+///      — the fine-grained operational strategy driving the
+///      `BackendSwitcher::solve_with_strategy` dispatch (Formal=Capability,
+///      Fast=Capability+tight-timeout, Thorough=Portfolio,
+///      Certified=cross-validate, Synthesize=SyGuS-route).
+
+@verify(runtime)
+fn f_runtime(n: Int) -> Int { n + 1 }
+
+@verify(static)
+fn f_static(n: Int) -> Int { n + 1 }
+
+@verify(formal)
+fn f_formal(n: Int) -> Int { n + 1 }
+
+@verify(proof)
+fn f_proof(n: Int) -> Int { n + 1 }
+
+@verify(fast)
+fn f_fast(n: Int) -> Int { n + 1 }
+
+@verify(thorough)
+fn f_thorough(n: Int) -> Int { n + 1 }
+
+@verify(reliable)
+fn f_reliable(n: Int) -> Int { n + 1 }
+
+@verify(certified)
+fn f_certified(n: Int) -> Int { n + 1 }
+
+@verify(synthesize)
+fn f_synthesize(n: Int) -> Int { n + 1 }
+
+fn main() {
+    print("all 9 verify strategies parsed");
+}
