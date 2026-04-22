@@ -45,6 +45,7 @@ public mount .duration.{Duration};
 public mount .instant.{Instant};
 public mount .system_time.{SystemTime, SystemTimeError};
 public mount .interval.{Interval, AsyncInterval, interval, interval_ms};
+public mount .cron.{CronExpr, CronError};
 
 // =============================================================================
 // Time Intrinsics Import

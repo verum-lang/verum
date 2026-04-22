@@ -1,0 +1,27 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: security, hash, crc32c, castagnoli, typecheck
+// @timeout: 10000
+// @expect: pass
+
+mount core.security.hash.crc32c.{Crc32c, crc32c, CRC32C_POLYNOMIAL};
+
+fn exercise_crc32c() {
+    // One-shot.
+    let digest: UInt32 = crc32c(b"123456789");
+    let _ = digest;    // Test vector: expected 0xE3069283 (RFC 3720).
+
+    // Streaming.
+    let mut h = Crc32c.new();
+    h.update(b"hello");
+    h.update(b" ");
+    h.update(b"world");
+    let _: UInt32 = h.finalize();
+
+    // One-shot convenience.
+    let _ = Crc32c.new().finalize();
+    let _: UInt32 = CRC32C_POLYNOMIAL;
+}
+
+fn main() { exercise_crc32c(); }

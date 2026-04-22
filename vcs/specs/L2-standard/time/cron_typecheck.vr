@@ -1,0 +1,38 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: time, cron, scheduling, typecheck
+// @timeout: 10000
+// @expect: pass
+
+mount core.time.{CronExpr, CronError};
+
+fn exercise_cron() -> Result<(), CronError> {
+    // Classic: every 5 minutes between 8am-6pm Mon-Fri.
+    let cron = CronExpr.parse(&Text.from("*/5 8-18 * * MON-FRI"))?;
+
+    // Next firing after a pinned unix time (2026-04-22 12:00:00 UTC).
+    let now_unix: Int = 1777204800;
+    let next: Int = cron.next_after_unix(now_unix)?;
+    assert(next > now_unix);
+
+    // Wildcard / literal / list / range / step combo.
+    let _ = CronExpr.parse(&Text.from("0 0 1,15 * *"))?;           // 1st and 15th at midnight
+    let _ = CronExpr.parse(&Text.from("30 9-17/2 * * *"))?;        // every other hour at :30
+    let _ = CronExpr.parse(&Text.from("0 12 * JAN,JUL *"))?;       // noon in Jan and Jul
+    let _ = CronExpr.parse(&Text.from("*/15 * * * SUN"))?;         // every 15 min on Sundays
+
+    // DOM+DOW OR semantics: fires on the 13th OR Friday.
+    let either = CronExpr.parse(&Text.from("0 0 13 * FRI"))?;
+    let _ = either.next_after_unix(now_unix)?;
+
+    // Malformed inputs propagate typed errors.
+    let bad = CronExpr.parse(&Text.from("bogus"));
+    let _ = bad;      // Err(WrongFieldCount)
+
+    let out_of_range = CronExpr.parse(&Text.from("* * 99 * *"));
+    let _ = out_of_range;   // Err(ValueOutOfRange)
+    Ok(())
+}
+
+fn main() { let _ = exercise_cron(); }

@@ -1,0 +1,482 @@
+// =============================================================================
+// time/cron.vr — Cron expression parser + next-fire-time evaluator
+// =============================================================================
+// Layer: 2 (Time)
+// Dependencies: core, core.time
+// =============================================================================
+//
+// Parses the 5-field crontab spec that every POSIX + Unix-like
+// system has consumed verbatim since 1978:
+//
+//   ┌───── minute        (0 - 59)
+//   │ ┌───── hour        (0 - 23)
+//   │ │ ┌───── day-of-month (1 - 31)
+//   │ │ │ ┌───── month       (1 - 12)
+//   │ │ │ │ ┌───── day-of-week (0 - 6; 0 = Sunday)
+//   │ │ │ │ │
+//   * * * * *
+//
+// Field syntax:
+//
+//   *           wildcard — every valid value
+//   n           literal
+//   a-b         inclusive range
+//   a-b/s       range with step
+//   */s         wildcard with step
+//   a,b,c       comma list (compose with ranges: "1,5-9")
+//
+// Month + day-of-week accept textual aliases:
+//   JAN..DEC    (case-insensitive, month fields only)
+//   SUN, MON .. SAT  (dow field only)
+//
+// The module does NOT accept vixie-cron extensions (`@hourly`,
+// `W`, `L`, `#n`) in v0.1. Those land in a follow-up behind an
+// `extensions: bool` constructor flag.
+//
+// # API
+//
+// ```
+// let cron = CronExpr.parse(&Text.from("*/5 8-18 * * MON-FRI"))?;
+// let next: Instant = cron.next_after(now)?;
+// ```
+//
+// # Schedule semantics
+//
+// `next_after(t)` returns the earliest instant `t' > t` at which
+// every field constraint is satisfied. When both DOM and DOW are
+// explicitly constrained, the classic vixie-cron rule applies: a
+// firing matches if **either** constraint matches (logical OR).
+// That's the behaviour every widely-deployed cron implementation
+// has used since Paul Vixie's 1987 rewrite.
+//
+// =============================================================================
+
+module core.time.cron;
+
+mount core.*;
+mount core.collections.List;
+mount core.time.instant.{Instant};
+mount core.time.duration.{Duration};
+
+// =============================================================================
+// Parsed expression
+// =============================================================================
+
+public type CronExpr is {
+    /// Bit set over minute positions 0..=59.
+    minute_mask: UInt64,
+    /// Bit set over hour positions 0..=23.
+    hour_mask:   UInt64,
+    /// Bit set over day-of-month positions 1..=31 (bit 0 unused).
+    dom_mask:    UInt64,
+    /// Bit set over month positions 1..=12 (bit 0 unused).
+    month_mask:  UInt64,
+    /// Bit set over day-of-week 0..=6 (0 = Sunday).
+    dow_mask:    UInt64,
+    /// True when both DOM and DOW are explicitly constrained;
+    /// vixie-cron's OR-semantics applies.
+    dom_constrained: Bool,
+    dow_constrained: Bool,
+};
+
+// =============================================================================
+// Errors
+// =============================================================================
+
+public type CronError is
+      WrongFieldCount(Int)
+    | InvalidField(Text)
+    | ValueOutOfRange(Text);
+
+// =============================================================================
+// Parser
+// =============================================================================
+
+implement CronExpr {
+    public fn parse(spec: &Text) -> Result<CronExpr, CronError> {
+        let fields = split_whitespace(spec.as_bytes());
+        if fields.len() != 5 {
+            return Err(CronError.WrongFieldCount(fields.len()));
+        }
+        let minute_mask = parse_field(&fields[0], 0, 59, &[])?;
+        let hour_mask   = parse_field(&fields[1], 0, 23, &[])?;
+        let dom_field   = &fields[2];
+        let dom_mask    = parse_field(dom_field, 1, 31, &[])?;
+        let month_field = &fields[3];
+        let month_mask  = parse_field(month_field, 1, 12, MONTH_ALIASES)?;
+        let dow_field   = &fields[4];
+        let dow_mask    = parse_field(dow_field, 0, 6, DOW_ALIASES)?;
+        let dom_constrained = !is_full_wildcard(dom_field);
+        let dow_constrained = !is_full_wildcard(dow_field);
+        Ok(CronExpr {
+            minute_mask: minute_mask,
+            hour_mask:   hour_mask,
+            dom_mask:    dom_mask,
+            month_mask:  month_mask,
+            dow_mask:    dow_mask,
+            dom_constrained: dom_constrained,
+            dow_constrained: dow_constrained,
+        })
+    }
+
+    /// Earliest fire time strictly after `after_unix` (wall-clock
+    /// seconds since epoch). Returns `Err(ValueOutOfRange)` only
+    /// for pathological inputs that admit no firing within the
+    /// next ~8 years (beyond which the brute-force search gives up).
+    public fn next_after_unix(&self, after_unix: Int) -> Result<Int, CronError> {
+        // Start at the next minute boundary after `after_unix`.
+        let mut t = ((after_unix / 60) + 1) * 60;
+        let max_iters = 60 * 24 * 366 * 8;   // 8 years of minutes
+        let mut guard: Int = 0;
+        while guard < max_iters {
+            let parts = decompose(t);
+            if self.matches_parts(&parts) {
+                return Ok(t);
+            }
+            // Jump to the next minute that could possibly match —
+            // skip forward at increasing granularity when the
+            // coarser field fails.
+            let jump = self.smallest_invalid_jump(&parts);
+            t = t + jump;
+            guard = guard + 1;
+        }
+        Err(CronError.ValueOutOfRange(Text.from("no match within 8 years")))
+    }
+
+    fn matches_parts(&self, p: &CronParts) -> Bool {
+        if !bit_set(self.minute_mask, p.minute) { return false; }
+        if !bit_set(self.hour_mask,   p.hour)   { return false; }
+        if !bit_set(self.month_mask,  p.month)  { return false; }
+        let dom_ok = bit_set(self.dom_mask, p.dom);
+        let dow_ok = bit_set(self.dow_mask, p.dow);
+        // Vixie-cron OR-semantics when both are explicit.
+        if self.dom_constrained && self.dow_constrained {
+            if !(dom_ok || dow_ok) { return false; }
+        } else {
+            if !dom_ok { return false; }
+            if !dow_ok { return false; }
+        }
+        true
+    }
+
+    /// Pick the coarsest field that doesn't match and skip forward
+    /// by its unit — reduces the worst-case linear scan from
+    /// minute-by-minute to month-by-month when we're far from a match.
+    fn smallest_invalid_jump(&self, p: &CronParts) -> Int {
+        if !bit_set(self.month_mask, p.month) { return days_in_month(p.year, p.month) * 86400 - seconds_into_month(p); }
+        if !bit_set(self.dom_mask, p.dom) && !(self.dow_constrained && self.dom_constrained && bit_set(self.dow_mask, p.dow)) {
+            return 86400 - (p.hour * 3600 + p.minute * 60);
+        }
+        if !bit_set(self.hour_mask, p.hour) { return 3600 - p.minute * 60; }
+        60
+    }
+}
+
+// =============================================================================
+// Field parser
+// =============================================================================
+
+fn parse_field(
+    field:   &List<Byte>,
+    min_val: Int,
+    max_val: Int,
+    aliases: &[AliasEntry],
+) -> Result<UInt64, CronError> {
+    // Split on comma, parse each part.
+    let parts = split_commas(field.as_slice());
+    let mut mask: UInt64 = 0_u64;
+    let mut i: Int = 0;
+    while i < parts.len() {
+        let m = parse_part(&parts[i], min_val, max_val, aliases)?;
+        mask = mask | m;
+        i = i + 1;
+    }
+    if mask == 0_u64 {
+        return Err(CronError.InvalidField(Text.from_utf8_unchecked(field.as_slice())));
+    }
+    Ok(mask)
+}
+
+fn parse_part(
+    part:    &List<Byte>,
+    min_val: Int,
+    max_val: Int,
+    aliases: &[AliasEntry],
+) -> Result<UInt64, CronError> {
+    // Step detection: "a/s" or "a-b/s" or "*/s".
+    let (range_text, step_text) = split_slash_once(part.as_slice());
+    let step: Int = if step_text.len() > 0 {
+        parse_int(&step_text)?
+    } else { 1 };
+    if step < 1 {
+        return Err(CronError.InvalidField(Text.from_utf8_unchecked(part.as_slice())));
+    }
+
+    let (start, end) = if range_text.len() == 1 && range_text[0] == ('*' as Byte) {
+        (min_val, max_val)
+    } else {
+        // "a" or "a-b"
+        let halves = split_dash_once(range_text.as_slice());
+        if halves.1.len() == 0 {
+            let v = resolve_value(&halves.0, min_val, max_val, aliases)?;
+            if step_text.len() == 0 {
+                // Bare single value.
+                return Ok(1_u64 << (v as UInt64));
+            }
+            // "n/s" → n, n+s, n+2s, ..., max
+            (v, max_val)
+        } else {
+            let a = resolve_value(&halves.0, min_val, max_val, aliases)?;
+            let b = resolve_value(&halves.1, min_val, max_val, aliases)?;
+            if a > b {
+                return Err(CronError.InvalidField(
+                    Text.from_utf8_unchecked(part.as_slice())));
+            }
+            (a, b)
+        }
+    };
+
+    let mut mask: UInt64 = 0_u64;
+    let mut v = start;
+    while v <= end {
+        mask = mask | (1_u64 << (v as UInt64));
+        v = v + step;
+    }
+    Ok(mask)
+}
+
+fn resolve_value(
+    text:    &List<Byte>,
+    min_val: Int,
+    max_val: Int,
+    aliases: &[AliasEntry],
+) -> Result<Int, CronError> {
+    // Try alias first — case-insensitive.
+    let mut i: Int = 0;
+    while i < aliases.len() {
+        if bytes_eq_ci(text.as_slice(), aliases[i].name.as_bytes()) {
+            return Ok(aliases[i].value);
+        }
+        i = i + 1;
+    }
+    let n = parse_int(text)?;
+    if n < min_val || n > max_val {
+        return Err(CronError.ValueOutOfRange(
+            Text.from_utf8_unchecked(text.as_slice())));
+    }
+    Ok(n)
+}
+
+// =============================================================================
+// Aliases
+// =============================================================================
+
+type AliasEntry is {
+    name:  &'static str,
+    value: Int,
+};
+
+const MONTH_ALIASES: [AliasEntry; 12] = [
+    AliasEntry { name: "JAN", value: 1 },
+    AliasEntry { name: "FEB", value: 2 },
+    AliasEntry { name: "MAR", value: 3 },
+    AliasEntry { name: "APR", value: 4 },
+    AliasEntry { name: "MAY", value: 5 },
+    AliasEntry { name: "JUN", value: 6 },
+    AliasEntry { name: "JUL", value: 7 },
+    AliasEntry { name: "AUG", value: 8 },
+    AliasEntry { name: "SEP", value: 9 },
+    AliasEntry { name: "OCT", value: 10 },
+    AliasEntry { name: "NOV", value: 11 },
+    AliasEntry { name: "DEC", value: 12 },
+];
+
+const DOW_ALIASES: [AliasEntry; 7] = [
+    AliasEntry { name: "SUN", value: 0 },
+    AliasEntry { name: "MON", value: 1 },
+    AliasEntry { name: "TUE", value: 2 },
+    AliasEntry { name: "WED", value: 3 },
+    AliasEntry { name: "THU", value: 4 },
+    AliasEntry { name: "FRI", value: 5 },
+    AliasEntry { name: "SAT", value: 6 },
+];
+
+// =============================================================================
+// Time decomposition
+// =============================================================================
+
+type CronParts is {
+    year:   Int,
+    month:  Int,  // 1..=12
+    dom:    Int,  // 1..=31
+    dow:    Int,  // 0..=6 (0=Sun)
+    hour:   Int,  // 0..=23
+    minute: Int,  // 0..=59
+};
+
+/// Convert unix-seconds → gregorian parts. Pure Verum; no tz
+/// handling (cron specs are deployment-local so callers shift
+/// `after_unix` into local-time before calling).
+fn decompose(unix: Int) -> CronParts {
+    let total_days = unix / 86400;
+    let time_of_day = unix - total_days * 86400;
+    let hour = time_of_day / 3600;
+    let minute = (time_of_day % 3600) / 60;
+
+    // Day of week: 1970-01-01 was a Thursday (dow=4).
+    let dow = ((total_days + 4) % 7 + 7) % 7;
+
+    // Julian day → (year, month, day) via Howard Hinnant's civil_from_days.
+    let z = total_days + 719468;
+    let era = if z >= 0 { z / 146097 } else { (z - 146096) / 146097 };
+    let doe = z - era * 146097;
+    let yoe = (doe - doe/1460 + doe/36524 - doe/146096) / 365;
+    let y = yoe + era * 400;
+    let doy = doe - (365*yoe + yoe/4 - yoe/100);
+    let mp = (5*doy + 2) / 153;
+    let d = doy - (153*mp + 2)/5 + 1;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 };
+    let year = if m <= 2 { y + 1 } else { y };
+
+    CronParts {
+        year:   year,
+        month:  m,
+        dom:    d,
+        dow:    dow,
+        hour:   hour,
+        minute: minute,
+    }
+}
+
+fn days_in_month(year: Int, month: Int) -> Int {
+    if month == 2 {
+        if is_leap(year) { 29 } else { 28 }
+    } else if month == 4 || month == 6 || month == 9 || month == 11 {
+        30
+    } else { 31 }
+}
+
+fn is_leap(y: Int) -> Bool {
+    (y % 4 == 0 && y % 100 != 0) || (y % 400 == 0)
+}
+
+fn seconds_into_month(p: &CronParts) -> Int {
+    (p.dom - 1) * 86400 + p.hour * 3600 + p.minute * 60
+}
+
+// =============================================================================
+// Byte helpers
+// =============================================================================
+
+fn split_whitespace(src: &[Byte]) -> List<List<Byte>> {
+    let mut out: List<List<Byte>> = [];
+    let mut cur: List<Byte> = [];
+    let mut i: Int = 0;
+    while i < src.len() {
+        if is_ws(src[i]) {
+            if cur.len() > 0 { out.push(cur); cur = []; }
+        } else {
+            cur.push(src[i]);
+        }
+        i = i + 1;
+    }
+    if cur.len() > 0 { out.push(cur); }
+    out
+}
+
+fn split_commas(src: &[Byte]) -> List<List<Byte>> {
+    let mut out: List<List<Byte>> = [];
+    let mut cur: List<Byte> = [];
+    let mut i: Int = 0;
+    while i < src.len() {
+        if src[i] == (',' as Byte) {
+            out.push(cur); cur = [];
+        } else {
+            cur.push(src[i]);
+        }
+        i = i + 1;
+    }
+    out.push(cur);
+    out
+}
+
+fn split_slash_once(src: &[Byte]) -> (List<Byte>, List<Byte>) {
+    let mut pre: List<Byte> = [];
+    let mut post: List<Byte> = [];
+    let mut seen: Bool = false;
+    let mut i: Int = 0;
+    while i < src.len() {
+        if !seen && src[i] == ('/' as Byte) { seen = true; }
+        else if seen { post.push(src[i]); }
+        else { pre.push(src[i]); }
+        i = i + 1;
+    }
+    (pre, post)
+}
+
+fn split_dash_once(src: &[Byte]) -> (List<Byte>, List<Byte>) {
+    let mut pre: List<Byte> = [];
+    let mut post: List<Byte> = [];
+    let mut seen: Bool = false;
+    let mut i: Int = 0;
+    while i < src.len() {
+        if !seen && i > 0 && src[i] == ('-' as Byte) { seen = true; }
+        else if seen { post.push(src[i]); }
+        else { pre.push(src[i]); }
+        i = i + 1;
+    }
+    (pre, post)
+}
+
+fn parse_int(src: &List<Byte>) -> Result<Int, CronError> {
+    if src.len() == 0 {
+        return Err(CronError.InvalidField(Text.from("")));
+    }
+    let mut i: Int = 0;
+    let mut negative = false;
+    if src[0] == ('-' as Byte) { negative = true; i = 1; }
+    if i >= src.len() {
+        return Err(CronError.InvalidField(Text.from_utf8_unchecked(src.as_slice())));
+    }
+    let mut v: Int = 0;
+    while i < src.len() {
+        let c = src[i];
+        if c < ('0' as Byte) || c > ('9' as Byte) {
+            return Err(CronError.InvalidField(Text.from_utf8_unchecked(src.as_slice())));
+        }
+        v = v * 10 + ((c - ('0' as Byte)) as Int);
+        i = i + 1;
+    }
+    if negative { Ok(-v) } else { Ok(v) }
+}
+
+fn is_ws(b: Byte) -> Bool {
+    b == (' ' as Byte) || b == ('\t' as Byte)
+}
+
+fn is_full_wildcard(field: &List<Byte>) -> Bool {
+    field.len() == 1 && field[0] == ('*' as Byte)
+}
+
+fn bit_set(mask: UInt64, idx: Int) -> Bool {
+    if idx < 0 || idx > 63 { return false; }
+    ((mask >> (idx as UInt64)) & 1_u64) == 1_u64
+}
+
+fn bytes_eq_ci(a: &[Byte], b: &[Byte]) -> Bool {
+    if a.len() != b.len() { return false; }
+    let mut i: Int = 0;
+    while i < a.len() {
+        let ca = to_upper(a[i]);
+        let cb = to_upper(b[i]);
+        if ca != cb { return false; }
+        i = i + 1;
+    }
+    true
+}
+
+fn to_upper(b: Byte) -> Byte {
+    if b >= ('a' as Byte) && b <= ('z' as Byte) {
+        b - (('a' as Byte) - ('A' as Byte))
+    } else { b }
+}
