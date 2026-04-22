@@ -232,22 +232,26 @@ implement ClientSm {
         }
     }
 
-    /// Feed a post-handshake message (RFC 8446 §4.6). Today this
-    /// exclusively handles `NewSessionTicket` — the server sends
-    /// zero or more after its Finished, and we convert each into a
-    /// `ClientSession` the caller stores against this connection's
-    /// authority. Other post-handshake messages (KeyUpdate, Certificate
-    /// Request from §4.6.2 post-handshake auth) are parsed and passed
-    /// through as `None` so the caller can choose to ignore them
-    /// without breaking the SM.
+    /// Feed a post-handshake message (RFC 8446 §4.6). Returns a
+    /// `PostHandshakeOutcome` telling the caller what happened:
+    ///   * `NewSession(session)` — store against the connection's
+    ///     authority so the next connect can resume.
+    ///   * `CertificateRequestReceived(cr)` — server asked the
+    ///     client to authenticate (§4.6.2). Caller must build a
+    ///     Certificate+CertificateVerify+Finished triplet if it
+    ///     advertised `post_handshake_auth` in its ClientHello,
+    ///     else it MUST abort with unexpected_message.
+    ///   * `Ignored` — KeyUpdate / unknown post-handshake messages
+    ///     are decoded but handled elsewhere (KeyUpdate is driven
+    ///     by `keyschedule::rotate`, not this SM).
     ///
     /// Precondition: ClientSm is in `ConnectedSm`. Any other state
-    /// is a protocol violation.
+    /// is a protocol violation → returns UnexpectedMessage.
     public fn on_post_handshake(
         &self,
         wire: &[Byte],
         now: Instant,
-    ) -> Result<Maybe<ClientSession>, TlsError> {
+    ) -> Result<PostHandshakeOutcome, TlsError> {
         match self {
             ClientSm.ConnectedSm(c) => {
                 let mut r = Reader.new(wire);
@@ -271,15 +275,35 @@ implement ClientSm {
                             rm_bytes,
                             now,
                         );
-                        Ok(Some(session))
+                        Ok(PostHandshakeOutcome.NewSession(session))
                     },
-                    _ => Ok(None),
+                    HandshakeMessage.CertificateRequestMsg(cr) => {
+                        // §4.6.2 — the caller MUST have advertised
+                        // `post_handshake_auth` in its ClientHello to
+                        // legitimately receive this message. This SM
+                        // surfaces the CR and lets the caller assemble
+                        // the response; producing the cert-chain + sig
+                        // lives in the application layer (it needs a
+                        // client-certificate identity this library
+                        // doesn't otherwise know about).
+                        Ok(PostHandshakeOutcome.CertificateRequestReceived(cr))
+                    },
+                    _ => Ok(PostHandshakeOutcome.Ignored),
                 }
             },
             _ => Err(TlsError.UnexpectedMessage),
         }
     }
 }
+
+// =============================================================================
+// PostHandshakeOutcome — what the SM extracted from one post-handshake record
+// =============================================================================
+
+public type PostHandshakeOutcome is
+      NewSession(ClientSession)
+    | CertificateRequestReceived(CertificateRequest)
+    | Ignored;
 
 // =============================================================================
 // Transition handlers

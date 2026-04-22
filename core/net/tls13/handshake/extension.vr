@@ -150,6 +150,10 @@ public type Extension is
     | StatusRequestExt                     // content opaque — we don't act on OCSP v1
     | QuicTransportParametersExt { params: List<Byte> }
     | RecordSizeLimitExt { limit: UInt16 }
+    /// RFC 8446 §4.6.2 — client declares willingness to answer
+    /// post-handshake `CertificateRequest` messages. Zero-length
+    /// extension body.
+    | PostHandshakeAuthExt
     | Unknown { ext_type: UInt16, data: List<Byte> };
 
 // =============================================================================
@@ -335,6 +339,13 @@ public fn encode_extension(ext: &Extension, out: &mut List<Byte>) -> Result<(), 
             vec_u16(out, |b| { put_u16(b, *limit); Ok(()) })
         },
 
+        Extension.PostHandshakeAuthExt => {
+            // RFC 8446 §4.6.2 — zero-length body.
+            put_u16(out, EXT_POST_HANDSHAKE_AUTH);
+            put_u16(out, 0_u16);
+            Ok(())
+        },
+
         Extension.Unknown { ext_type, data } => {
             put_u16(out, *ext_type);
             vec_u16(out, |b| { put_bytes(b, data.as_slice()); Ok(()) })
@@ -515,6 +526,16 @@ public fn decode_extension(r: &mut Reader, ctx: ExtensionContext) -> Result<Exte
         28_u16 /* record_size_limit */ => {
             let lim = body.take_u16()?;
             Extension.RecordSizeLimitExt { limit: lim }
+        },
+
+        49_u16 /* post_handshake_auth */ => {
+            // RFC 8446 §4.6.2 — body MUST be empty; anything else is
+            // an illegal_parameter alert, but the decoder is permissive
+            // (drains remaining body) to match the convention used for
+            // status_request above; the caller can reject on length
+            // if it wants strict behaviour.
+            let _ = body.take_bytes(body.remaining())?;
+            Extension.PostHandshakeAuthExt
         },
 
         _ => {
