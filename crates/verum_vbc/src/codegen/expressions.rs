@@ -13044,21 +13044,30 @@ impl VbcCodegen {
             let _ = i;
         }
 
-        // Pin `current_return_type_name` to the closure's declared
-        // return type (if any) so that a bare variant constructor in the
-        // body (e.g. `|| None` with a `-> Maybe<Int>` annotation)
-        // resolves through the cross-type-collision disambiguation path.
-        // The enclosing function's return type MUST NOT leak into the
-        // closure body, hence we override unconditionally.
+        // Pin `current_return_type_name` to the closure's declared return
+        // type (if present) so that a bare variant constructor in the body
+        // (`|| -> Maybe<Int> { None }`) resolves through the cross-type-
+        // collision disambiguation path. If the closure has no explicit
+        // annotation, *preserve* the caller's pushed context (let-binding
+        // function-type annotation, param-type, assignment-target, etc.)
+        // because that IS what the closure is being shaped to return.
+        //
+        // Rationale: previously we cleared on absent-annotation "to avoid
+        // the enclosing function's return leaking into the body", but the
+        // two valid incoming values of `current_return_type_name` at this
+        // point are:
+        //   (a) the let-binding's `fn() -> Maybe<T>` return — correct,
+        //   (b) a param-type for a callback — correct,
+        //   (c) the enclosing function's own return type (if the closure
+        //       happens to be at a return-position) — still correct.
+        // Clearing threw all three away. Restoring on exit retains
+        // isolation between sibling closures.
         let saved_closure_rtn_wp = {
             let prev = self.ctx.current_return_type_name.clone();
-            let rt_name_opt: Option<String> =
-                return_type_ast.map(|ty| self.type_to_simple_name(ty));
-            if let Some(ref rtn_name) = rt_name_opt {
-                let base = rtn_name.split('<').next().unwrap_or(rtn_name).to_string();
+            if let Some(ty) = return_type_ast {
+                let rt_name = self.type_to_simple_name(ty);
+                let base = rt_name.split('<').next().unwrap_or(&rt_name).to_string();
                 self.ctx.current_return_type_name = Some(base);
-            } else {
-                self.ctx.current_return_type_name = None;
             }
             prev
         };

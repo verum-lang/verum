@@ -615,8 +615,23 @@ impl VbcCodegen {
         // multiple registered variants named `None` across stdlib
         // (`Maybe`, `core.net.tls`, `core.term.widget.block`,
         // `core.mesh.xds.types`, ...) and returns nondeterministically.
+        // Pick the target base-type name for variant disambiguation. For a
+        // `fn(...) -> T` annotation (a closure/function value literal is
+        // about to be compiled), descend into the return type — the
+        // function type itself has no useful "base" and the closure body
+        // is what needs the hint. For everything else use the usual
+        // `extract_base_type_name`.
+        fn extract_let_variant_hint(
+            this: &crate::codegen::VbcCodegen,
+            ty: &verum_ast::ty::Type,
+        ) -> Option<String> {
+            if let verum_ast::ty::TypeKind::Function { return_type, .. } = &ty.kind {
+                return extract_let_variant_hint(this, return_type.as_ref());
+            }
+            this.extract_base_type_name(ty)
+        }
         let saved_return_type = if let Some(ty) = ty {
-            self.extract_base_type_name(ty).map(|base| {
+            extract_let_variant_hint(self, ty).map(|base| {
                 let saved = self.ctx.current_return_type_name.clone();
                 self.ctx.current_return_type_name = Some(base);
                 saved
