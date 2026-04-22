@@ -696,6 +696,15 @@ implement<T> [T] {
         }
     }
 
+    /// Alias for `copy_from_slice` — matches the short spelling that
+    /// code generic over "copyable container" tends to use. Both are
+    /// provided so call sites can pick the more readable one.
+    fn copy_from(&mut self, src: &[T])
+    where T: Copy
+    {
+        self.copy_from_slice(src);
+    }
+
     /// Clone from another slice.
     fn clone_from_slice(&mut self, src: &[T])
     where T: Clone
