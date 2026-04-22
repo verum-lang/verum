@@ -1,0 +1,109 @@
+module core.database.sqlite.native.l3_btree.btree;
+
+// =============================================================================
+// l3_btree/btree.vr — Generic B-tree handle
+// =============================================================================
+// Layer: 3
+// Spec: sqlite-native.md §10.2
+//
+// A `Btree<K, V>` is a thin handle carrying:
+//
+//   * `kind`           — table or index (different cell flavours)
+//   * `root_page`      — page number of the root page (1-based, > 0)
+//   * `page_size`      — bytes per page, carried for layout math
+//   * `reserved_bytes` — trailer reserved by PRAGMA reserve_size
+//
+// Concrete operations (seek, insert, delete, balance) bind `K` and `V`
+// on the cursor — the handle itself stays light so multiple cursors
+// can share it. A cursor, on the other hand, is `affine` (§10.3)
+// because it names a unique traversal position.
+// =============================================================================
+
+mount core.*;
+mount base.{Result, Ok, Err, Text};
+mount core.database.sqlite.native.l3_btree.page_layout.{PageKind};
+
+// -----------------------------------------------------------------------------
+// Types
+// -----------------------------------------------------------------------------
+
+/// Which B-tree flavour this handle represents. Determines the cell
+/// layout used for reads/writes through associated cursors.
+public type BtreeKind is TableBtree | IndexBtree;
+
+public fn btree_kind_root_page_kind_leaf(kind: BtreeKind) -> PageKind {
+    match kind {
+        TableBtree => TableLeaf,
+        IndexBtree => IndexLeaf,
+    }
+}
+
+public fn btree_kind_root_page_kind_interior(kind: BtreeKind) -> PageKind {
+    match kind {
+        TableBtree => TableInterior,
+        IndexBtree => IndexInterior,
+    }
+}
+
+public type BtreeError is
+      InvalidRootPage(pn: Int)
+    | InvalidPageSize(ps: Int)
+    | IoError(msg: Text)
+    | Corrupt(msg: Text);
+
+public type Btree is {
+    kind: BtreeKind,
+    root_page: Int,
+    page_size: Int,
+    reserved_bytes: Int,
+};
+
+// -----------------------------------------------------------------------------
+// Constructors
+// -----------------------------------------------------------------------------
+
+/// Build a fresh B-tree handle. `root_page` must be ≥ 1 (page 0 is
+/// reserved); `page_size` must be a supported value (512, 1024, ...,
+/// 65536).
+public fn btree_new(
+    kind: BtreeKind,
+    root_page: Int,
+    page_size: Int,
+    reserved_bytes: Int,
+) -> Result<Btree, BtreeError> {
+    if root_page < 1 {
+        return Err(InvalidRootPage(root_page));
+    }
+    if page_size < 512 || page_size > 65536 {
+        return Err(InvalidPageSize(page_size));
+    }
+    // Power-of-two check (cheap iterative variant).
+    let mut s = 512;
+    let mut ok = false;
+    while s <= 65536 {
+        if s == page_size { ok = true; break; }
+        s = s * 2;
+    }
+    if !ok {
+        return Err(InvalidPageSize(page_size));
+    }
+    if reserved_bytes < 0 || reserved_bytes > 255 {
+        return Err(InvalidPageSize(page_size));
+    }
+    Ok(Btree {
+        kind: kind,
+        root_page: root_page,
+        page_size: page_size,
+        reserved_bytes: reserved_bytes,
+    })
+}
+
+/// Accessor — used by tests and by the cursor layer.
+public fn btree_root_page(t: &Btree) -> Int { t.root_page }
+
+implement Btree {
+    public fn kind(&self) -> BtreeKind { self.kind }
+    public fn page_size(&self) -> Int { self.page_size }
+    public fn reserved_bytes(&self) -> Int { self.reserved_bytes }
+    public fn root(&self) -> Int { self.root_page }
+}

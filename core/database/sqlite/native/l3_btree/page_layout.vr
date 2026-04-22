@@ -1,0 +1,409 @@
+module core.database.sqlite.native.l3_btree.page_layout;
+
+// =============================================================================
+// l3_btree/page_layout.vr — B-tree page headers, cell pointer array, cells
+// =============================================================================
+// Layer: 3
+// Spec: sqlite-native.md §6.2, §10.1
+//
+// SQLite encodes every B-tree page (except page 1, which additionally
+// carries the 100-byte DB header) with the same outer shape:
+//
+//     +-------------------------------------------------+
+//     | Page header (8 or 12 bytes)                     |
+//     +-------------------------------------------------+
+//     | Cell pointer array (2 bytes per cell, N cells)  |
+//     +-------------------------------------------------+
+//     |                                                 |
+//     |           UNALLOCATED SPACE                     |
+//     |                                                 |
+//     +-------------------------------------------------+
+//     | Cell content area (grows downward)              |
+//     +-------------------------------------------------+
+//     | Reserved region (0..255 bytes, usually 0)       |
+//     +-------------------------------------------------+
+//
+// Page-header layout:
+//
+//     byte 0        flags = 0x02 | 0x05 | 0x0A | 0x0D
+//     byte 1..2     first-freeblock offset (u16 BE, 0 = none)
+//     byte 3..4     cell count (u16 BE)
+//     byte 5..6     cell-content-area offset (u16 BE; 0 means 65536)
+//     byte 7        # fragmented free bytes
+//     byte 8..11    right-most pointer (interior pages only, u32 BE)
+//
+// Cell layouts (§10.1 + §6.3):
+//
+//     0x0D (table-leaf):
+//         varint: payload_len
+//         varint: rowid
+//         payload
+//         [overflow: u32 first_overflow_page if payload spills]
+//
+//     0x05 (table-interior):
+//         u32: left_child_page
+//         varint: rowid
+//
+//     0x0A (index-leaf):
+//         varint: payload_len
+//         payload
+//         [u32 first_overflow_page]
+//
+//     0x02 (index-interior):
+//         u32: left_child_page
+//         varint: payload_len
+//         payload
+//         [u32 first_overflow_page]
+//
+// All the varints and u16/u32 multi-byte integers are big-endian.
+// =============================================================================
+
+mount core.*;
+mount collections.List;
+mount base.{Result, Ok, Err, Text};
+mount core.database.sqlite.native.l2_record.varint;
+
+// -----------------------------------------------------------------------------
+// Constants
+// -----------------------------------------------------------------------------
+
+public const PAGE_TYPE_INDEX_INTERIOR: Byte = 0x02 as Byte;
+public const PAGE_TYPE_TABLE_INTERIOR: Byte = 0x05 as Byte;
+public const PAGE_TYPE_INDEX_LEAF:     Byte = 0x0A as Byte;
+public const PAGE_TYPE_TABLE_LEAF:     Byte = 0x0D as Byte;
+
+public const PAGE_HEADER_SIZE_LEAF:     Int = 8;
+public const PAGE_HEADER_SIZE_INTERIOR: Int = 12;
+
+// -----------------------------------------------------------------------------
+// Types
+// -----------------------------------------------------------------------------
+
+/// Which of the four SQLite page flavours this is.
+public type PageKind is TableLeaf | TableInterior | IndexLeaf | IndexInterior;
+
+public fn page_kind_from_byte(b: Byte) -> Result<PageKind, Text> {
+    if b == PAGE_TYPE_TABLE_LEAF       { Ok(TableLeaf) }
+    else if b == PAGE_TYPE_TABLE_INTERIOR { Ok(TableInterior) }
+    else if b == PAGE_TYPE_INDEX_LEAF     { Ok(IndexLeaf) }
+    else if b == PAGE_TYPE_INDEX_INTERIOR { Ok(IndexInterior) }
+    else { Err("page_layout: unknown page flag".clone()) }
+}
+
+public fn page_kind_to_byte(k: PageKind) -> Byte {
+    match k {
+        TableLeaf     => PAGE_TYPE_TABLE_LEAF,
+        TableInterior => PAGE_TYPE_TABLE_INTERIOR,
+        IndexLeaf     => PAGE_TYPE_INDEX_LEAF,
+        IndexInterior => PAGE_TYPE_INDEX_INTERIOR,
+    }
+}
+
+public fn page_kind_is_interior(k: PageKind) -> Bool {
+    match k {
+        TableInterior | IndexInterior => true,
+        _ => false,
+    }
+}
+
+public fn page_kind_is_table(k: PageKind) -> Bool {
+    match k {
+        TableLeaf | TableInterior => true,
+        _ => false,
+    }
+}
+
+public fn page_kind_header_size(k: PageKind) -> Int {
+    if page_kind_is_interior(k) { PAGE_HEADER_SIZE_INTERIOR }
+    else                        { PAGE_HEADER_SIZE_LEAF }
+}
+
+/// Parsed page header. `right_ptr` is 0 for leaf pages.
+public type PageHeader is {
+    kind: PageKind,
+    first_freeblock: UInt16,
+    cell_count: UInt16,
+    cell_content_start: Int,     // canonicalised — 65536 instead of the
+                                  // 0-sentinel on-disk value.
+    fragmented_free_bytes: Byte,
+    right_ptr: UInt32,            // 0 if leaf
+};
+
+public type PageLayoutError is
+      ShortBuffer
+    | BadKind(raw: Byte)
+    | BadCellCount(count: UInt16, max_cells: Int);
+
+// -----------------------------------------------------------------------------
+// Big-endian helpers
+// -----------------------------------------------------------------------------
+
+fn read_u16_be(buf: &[Byte], off: Int) -> UInt16 {
+    ((buf[off] as UInt16) << 8) | (buf[off + 1] as UInt16)
+}
+
+fn read_u32_be(buf: &[Byte], off: Int) -> UInt32 {
+    ((buf[off]     as UInt32) << 24)
+    | ((buf[off + 1] as UInt32) << 16)
+    | ((buf[off + 2] as UInt32) << 8)
+    |  (buf[off + 3] as UInt32)
+}
+
+fn write_u16_be(buf: &mut List<Byte>, v: UInt16) {
+    buf.push(((v >> 8) & 0xFF) as Byte);
+    buf.push((v & 0xFF) as Byte);
+}
+
+fn write_u32_be(buf: &mut List<Byte>, v: UInt32) {
+    buf.push(((v >> 24) & 0xFF) as Byte);
+    buf.push(((v >> 16) & 0xFF) as Byte);
+    buf.push(((v >> 8)  & 0xFF) as Byte);
+    buf.push((v & 0xFF) as Byte);
+}
+
+// -----------------------------------------------------------------------------
+// Parse / serialize page header
+// -----------------------------------------------------------------------------
+
+/// Parse the page header at `buf[start..]`. On a success, the returned
+/// `PageHeader` reports the canonical cell_content_start (0 → 65536).
+public fn parse_page_header(buf: &[Byte], start: Int)
+    -> Result<PageHeader, PageLayoutError>
+{
+    if buf.len() - start < PAGE_HEADER_SIZE_LEAF {
+        return Err(ShortBuffer);
+    }
+    let kind = match page_kind_from_byte(buf[start]) {
+        Ok(k)  => k,
+        Err(_) => { return Err(BadKind(buf[start])); }
+    };
+    let interior = page_kind_is_interior(kind);
+    if interior && (buf.len() - start < PAGE_HEADER_SIZE_INTERIOR) {
+        return Err(ShortBuffer);
+    }
+
+    let first_fb   = read_u16_be(buf, start + 1);
+    let cell_cnt   = read_u16_be(buf, start + 3);
+    let ccs_raw    = read_u16_be(buf, start + 5);
+    let frag       = buf[start + 7];
+    let right_ptr: UInt32 = if interior {
+        read_u32_be(buf, start + 8)
+    } else {
+        0 as UInt32
+    };
+
+    // SQLite: a cell_content_start of 0 is interpreted as 65536.
+    let ccs_canon: Int = if ccs_raw == (0 as UInt16) { 65536 } else { ccs_raw as Int };
+
+    Ok(PageHeader {
+        kind: kind,
+        first_freeblock: first_fb,
+        cell_count: cell_cnt,
+        cell_content_start: ccs_canon,
+        fragmented_free_bytes: frag,
+        right_ptr: right_ptr,
+    })
+}
+
+/// Serialize the header. Writes `PAGE_HEADER_SIZE_INTERIOR` bytes for
+/// interior kinds, `PAGE_HEADER_SIZE_LEAF` for leaves.
+public fn serialize_page_header(h: &PageHeader) -> List<Byte> {
+    let mut out: List<Byte> = List.new();
+    out.push(page_kind_to_byte(h.kind));
+    write_u16_be(&mut out, h.first_freeblock);
+    write_u16_be(&mut out, h.cell_count);
+    let ccs_raw: UInt16 = if h.cell_content_start == 65536 { 0 as UInt16 } else { h.cell_content_start as UInt16 };
+    write_u16_be(&mut out, ccs_raw);
+    out.push(h.fragmented_free_bytes);
+    if page_kind_is_interior(h.kind) {
+        write_u32_be(&mut out, h.right_ptr);
+    }
+    out
+}
+
+/// Maximum number of cells that can fit on a page of `page_size` bytes
+/// given a cell of minimum size (header + 2B pointer). Used by parser
+/// sanity-checks and refinement-style proofs.
+public fn max_cells_per_page(page_size: Int, kind: PageKind) -> Int {
+    // Each cell costs at least 2 (pointer) + 1 (body marker varint)
+    // in the best case. Real minimum depends on cell kind but 4B is a
+    // defensible floor that only over-counts slightly.
+    let hdr = page_kind_header_size(kind);
+    let usable = page_size - hdr;
+    if usable <= 0 { return 0; }
+    usable / 4
+}
+
+// -----------------------------------------------------------------------------
+// Cell pointer array
+// -----------------------------------------------------------------------------
+
+/// Read the cell-pointer array: `count` consecutive u16 BE entries
+/// starting right after the page header.
+public fn parse_cell_pointer_array(
+    buf: &[Byte],
+    page_start: Int,
+    header: &PageHeader,
+) -> Result<List<Int>, PageLayoutError> {
+    let hdr_size = page_kind_header_size(header.kind);
+    let arr_start = page_start + hdr_size;
+    let n = header.cell_count as Int;
+    if arr_start + n * 2 > buf.len() {
+        return Err(ShortBuffer);
+    }
+    let mut out: List<Int> = List.new();
+    let mut i: Int = 0;
+    while i < n {
+        let off_in_page = read_u16_be(buf, arr_start + i * 2) as Int;
+        out.push(off_in_page);
+        i = i + 1;
+    }
+    Ok(out)
+}
+
+// -----------------------------------------------------------------------------
+// Cell shape (kind-tagged)
+// -----------------------------------------------------------------------------
+
+public type CellParts is
+      TableLeafCell(payload_len: Int64, rowid: Int64, local_payload_end: Int, overflow_page: UInt32)
+    | TableInteriorCell(left_child: UInt32, rowid: Int64)
+    | IndexLeafCell(payload_len: Int64, local_payload_end: Int, overflow_page: UInt32)
+    | IndexInteriorCell(left_child: UInt32, payload_len: Int64, local_payload_end: Int, overflow_page: UInt32);
+
+/// Parse the cell starting at absolute offset `cell_off`. `local_max`
+/// is the maximum inline payload size for this page layout (SQLite
+/// calls this `localPayload` in §10.6); `payload_len` greater than
+/// `local_max` triggers overflow-chain reading. `page_size` is the
+/// enclosing page size.
+///
+/// For v1 we don't resolve the overflow pages themselves — we just
+/// report the first overflow page number so the caller can chase the
+/// chain via the pager.
+public fn parse_cell(
+    buf: &[Byte],
+    cell_off: Int,
+    kind: PageKind,
+    local_max: Int,
+) -> Result<CellParts, PageLayoutError> {
+    if cell_off >= buf.len() {
+        return Err(ShortBuffer);
+    }
+
+    match kind {
+        TableLeaf => {
+            let (payload_len, a) = match varint.decode(buf, cell_off) {
+                Ok(r)  => r, Err(_) => { return Err(ShortBuffer); }
+            };
+            let (rowid, b) = match varint.decode(buf, cell_off + a) {
+                Ok(r)  => r, Err(_) => { return Err(ShortBuffer); }
+            };
+            let local_bytes: Int = if (payload_len as Int) <= local_max {
+                payload_len as Int
+            } else {
+                local_max
+            };
+            let payload_start = cell_off + a + b;
+            let local_end = payload_start + local_bytes;
+            let overflow: UInt32 = if (payload_len as Int) > local_max {
+                if local_end + 4 > buf.len() {
+                    return Err(ShortBuffer);
+                }
+                read_u32_be(buf, local_end)
+            } else {
+                0 as UInt32
+            };
+            Ok(TableLeafCell(payload_len, rowid, local_end, overflow))
+        }
+        TableInterior => {
+            if cell_off + 4 > buf.len() {
+                return Err(ShortBuffer);
+            }
+            let left_child = read_u32_be(buf, cell_off);
+            let (rowid, _) = match varint.decode(buf, cell_off + 4) {
+                Ok(r)  => r, Err(_) => { return Err(ShortBuffer); }
+            };
+            Ok(TableInteriorCell(left_child, rowid))
+        }
+        IndexLeaf => {
+            let (payload_len, a) = match varint.decode(buf, cell_off) {
+                Ok(r)  => r, Err(_) => { return Err(ShortBuffer); }
+            };
+            let local_bytes: Int = if (payload_len as Int) <= local_max {
+                payload_len as Int
+            } else {
+                local_max
+            };
+            let payload_start = cell_off + a;
+            let local_end = payload_start + local_bytes;
+            let overflow: UInt32 = if (payload_len as Int) > local_max {
+                if local_end + 4 > buf.len() {
+                    return Err(ShortBuffer);
+                }
+                read_u32_be(buf, local_end)
+            } else {
+                0 as UInt32
+            };
+            Ok(IndexLeafCell(payload_len, local_end, overflow))
+        }
+        IndexInterior => {
+            if cell_off + 4 > buf.len() {
+                return Err(ShortBuffer);
+            }
+            let left_child = read_u32_be(buf, cell_off);
+            let (payload_len, a) = match varint.decode(buf, cell_off + 4) {
+                Ok(r)  => r, Err(_) => { return Err(ShortBuffer); }
+            };
+            let local_bytes: Int = if (payload_len as Int) <= local_max {
+                payload_len as Int
+            } else {
+                local_max
+            };
+            let payload_start = cell_off + 4 + a;
+            let local_end = payload_start + local_bytes;
+            let overflow: UInt32 = if (payload_len as Int) > local_max {
+                if local_end + 4 > buf.len() {
+                    return Err(ShortBuffer);
+                }
+                read_u32_be(buf, local_end)
+            } else {
+                0 as UInt32
+            };
+            Ok(IndexInteriorCell(left_child, payload_len, local_end, overflow))
+        }
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Local-payload budget (§10.6)
+// -----------------------------------------------------------------------------
+
+/// Compute the `local_payload` budget for a cell given `page_size` and
+/// `reserved_bytes`. Matches SQLite's formula from §10.6:
+///
+///     M = ((page_size - reserved) - 12) * 32 / 255   // minimum local
+///     U = page_size - reserved                       // usable page
+///     X = (U - 12) * 64 / 255 + 23                   // table-leaf max
+///                                                      table-interior doesn't spill
+///     Index-leaf / index-interior max = (U - 12) * 64 / 255 - 23
+///
+/// Returned values for each of the variable-length cell kinds.
+public type LocalPayloadBudget is {
+    min_local: Int,
+    table_leaf_max: Int,
+    index_max: Int,
+    usable_size: Int,
+};
+
+public fn compute_local_payload_budget(page_size: Int, reserved: Int) -> LocalPayloadBudget {
+    let usable = page_size - reserved;
+    let min_local = ((usable - 12) * 32) / 255;
+    let table_leaf_max = usable - 35;
+    let index_max = ((usable - 12) * 64) / 255 - 23;
+    LocalPayloadBudget {
+        min_local: min_local,
+        table_leaf_max: table_leaf_max,
+        index_max: index_max,
+        usable_size: usable,
+    }
+}

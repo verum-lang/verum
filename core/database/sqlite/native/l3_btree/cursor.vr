@@ -1,0 +1,156 @@
+module core.database.sqlite.native.l3_btree.cursor;
+
+// =============================================================================
+// l3_btree/cursor.vr — B-tree cursor (traversal position)
+// =============================================================================
+// Layer: 3
+// Spec: sqlite-native.md §10.3
+//
+// A `BtreeCursor` names a unique position in a B-tree: the root-to-leaf
+// path of `(page_no, cell_index)` pairs ending at the currently-
+// referenced cell. Marked `affine` so the type system rejects
+// aliasing — two cursors into the same tree is fine (they're separate
+// values); two references to the same cursor is not (it represents a
+// stateful iterator whose step semantics require ownership).
+//
+// Operations:
+//
+//   * `cursor_new`     — fresh cursor, not yet positioned (`is_valid` = false).
+//   * `cursor_root`    — seat the cursor at the root page, cell 0.
+//                         Invalidates when the root is empty.
+//   * `cursor_is_valid` — does the cursor currently point at a real cell?
+//   * `cursor_is_at_end` — cursor exhausted past the last leaf.
+//   * `cursor_depth`    — length of the root-to-leaf path (1 = root is leaf).
+//
+// Seek / next / prev drive the actual traversal. Their implementations
+// require page I/O through the pager, which we wire once the actor
+// loop is async-native (§8.1). For now the cursor holds structural
+// state; I/O-driving methods will be added in L3.3 phase 2.
+// =============================================================================
+
+mount core.*;
+mount collections.List;
+mount base.{Result, Ok, Err, Text};
+mount core.database.sqlite.native.l3_btree.btree.{Btree, BtreeError};
+
+// -----------------------------------------------------------------------------
+// Types
+// -----------------------------------------------------------------------------
+
+public type PathStep is {
+    page_no: Int,
+    cell_index: Int,
+};
+
+public type affine BtreeCursor is {
+    root_page: Int,
+    page_size: Int,
+    path: List<PathStep>,
+    valid: Bool,
+    at_end: Bool,
+};
+
+// -----------------------------------------------------------------------------
+// Constructors
+// -----------------------------------------------------------------------------
+
+/// Fresh cursor on `tree`'s root, not yet positioned.
+public fn cursor_new(tree: &Btree) -> BtreeCursor {
+    BtreeCursor {
+        root_page: tree.root(),
+        page_size: tree.page_size(),
+        path: List.new(),
+        valid: false,
+        at_end: false,
+    }
+}
+
+/// Seat the cursor at `(root, 0)`. Returns `Err` if the root page
+/// number is invalid (should never happen — btree_new validates it);
+/// returns `Ok` with `valid=true` otherwise. Caller is responsible for
+/// later calling cursor_is_at_end() if the root page is empty.
+public fn cursor_root(cursor: &mut BtreeCursor) -> Result<(), BtreeError> {
+    if cursor.root_page < 1 {
+        return Err(InvalidRootPage(cursor.root_page));
+    }
+    cursor.path = List.new();
+    cursor.path.push(PathStep { page_no: cursor.root_page, cell_index: 0 });
+    cursor.valid = true;
+    cursor.at_end = false;
+    Ok(())
+}
+
+// -----------------------------------------------------------------------------
+// Accessors
+// -----------------------------------------------------------------------------
+
+public fn cursor_is_valid(c: &BtreeCursor) -> Bool { c.valid }
+
+public fn cursor_is_at_end(c: &BtreeCursor) -> Bool { c.at_end }
+
+public fn cursor_depth(c: &BtreeCursor) -> Int { c.path.len() }
+
+/// The page currently at the bottom of the root-to-leaf path, or -1 if
+/// not positioned.
+public fn cursor_current_page(c: &BtreeCursor) -> Int {
+    if c.path.len() == 0 {
+        return -1;
+    }
+    c.path[c.path.len() - 1].page_no
+}
+
+public fn cursor_current_cell(c: &BtreeCursor) -> Int {
+    if c.path.len() == 0 {
+        return -1;
+    }
+    c.path[c.path.len() - 1].cell_index
+}
+
+// -----------------------------------------------------------------------------
+// Path manipulation helpers (used by seek once wired)
+// -----------------------------------------------------------------------------
+
+implement BtreeCursor {
+    /// Push one step onto the path — a descent into a child page.
+    public fn descend(&mut self, child_page: Int) {
+        self.path.push(PathStep { page_no: child_page, cell_index: 0 });
+    }
+
+    /// Pop one step — back to the parent page.
+    public fn ascend(&mut self) {
+        if self.path.len() > 0 {
+            let _ = self.path.pop();
+        }
+        if self.path.len() == 0 {
+            self.valid = false;
+        }
+    }
+
+    /// Move the cell index at the current level by `delta` (+1 for next,
+    /// -1 for prev). Does not cross page boundaries — caller must
+    /// detect overflow and call `ascend`+`descend` as needed.
+    public fn bump_cell(&mut self, delta: Int) {
+        if self.path.len() == 0 { return; }
+        let idx = self.path.len() - 1;
+        let cur = self.path[idx].cell_index;
+        let new_idx = cur + delta;
+        self.path[idx] = PathStep {
+            page_no: self.path[idx].page_no,
+            cell_index: new_idx,
+        };
+    }
+
+    /// Mark the cursor as exhausted (past the last leaf).
+    public fn mark_at_end(&mut self) {
+        self.at_end = true;
+        self.valid = false;
+    }
+
+    /// Reset to unpositioned (used after tree mutations invalidate the
+    /// path). Caller must re-seek.
+    public fn invalidate(&mut self) {
+        self.valid = false;
+        self.at_end = false;
+        self.path = List.new();
+    }
+}

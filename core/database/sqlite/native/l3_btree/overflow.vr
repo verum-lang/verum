@@ -1,0 +1,213 @@
+module core.database.sqlite.native.l3_btree.overflow;
+
+// =============================================================================
+// l3_btree/overflow.vr — Overflow page chain planning + I/O
+// =============================================================================
+// Layer: 3
+// Spec: sqlite-native.md §10.6
+//
+// A cell whose payload exceeds `local_max` bytes (computed by the
+// local-payload budget in `page_layout`) stores the first `local_max`
+// bytes inline and chains the remainder through a linked list of
+// `overflow pages`:
+//
+//     Cell:       [varint payload_len][first_bytes][u32 first_overflow]
+//     Overflow 1: [u32 next_overflow][usable_size - 4 bytes of data]
+//     Overflow 2: [u32 next_overflow][usable_size - 4 bytes of data]
+//     ...
+//     Overflow N: [0x00000000]          [remaining data]
+//
+// This module does the layout math and produces a `ChainPlan` that the
+// pager can apply. Actual page allocations flow through the pager's
+// Write request path.
+//
+// For reads, `compute_chain_layout` tells the caller how many pages
+// the payload occupies and how many bytes sit on each; `split_payload`
+// partitions a contiguous `List<Byte>` into per-page slices.
+// =============================================================================
+
+mount core.*;
+mount collections.List;
+mount base.{Result, Ok, Err, Text};
+
+// -----------------------------------------------------------------------------
+// Types
+// -----------------------------------------------------------------------------
+
+/// Per-page breakdown of a payload that spills into overflow.
+public type ChainLayout is {
+    local_bytes: Int,           // bytes stored in the enclosing cell
+    per_page_bytes: Int,        // bytes per overflow page (usable_size - 4)
+    overflow_page_count: Int,   // number of overflow pages used
+    tail_bytes: Int,            // bytes on the final overflow page (0..per_page_bytes)
+};
+
+/// Plan for writing a payload chain. Caller allocates `overflow_page_count`
+/// pages from the freelist and passes their numbers back to the
+/// `write_chain` driver (see `ChainWritePlan.pages`).
+public type ChainWritePlan is {
+    layout: ChainLayout,
+    pages: List<Int>,            // overflow page numbers, in chain order
+};
+
+public type OverflowError is
+      InvalidBudget
+    | InvalidPayload
+    | TooManyPages(count: Int);
+
+// -----------------------------------------------------------------------------
+// Layout math
+// -----------------------------------------------------------------------------
+
+/// For `payload_len` bytes and a cell-local maximum of `local_max`,
+/// compute how the payload is distributed:
+///
+///   * `local_bytes`         = min(payload_len, local_max)
+///   * `remainder`           = payload_len - local_bytes
+///   * `per_page_bytes`      = usable_size - 4
+///   * `overflow_page_count` = ceil(remainder / per_page_bytes)
+///   * `tail_bytes`          = remainder - (overflow_page_count - 1) * per_page_bytes
+///
+/// Errors on invalid inputs — `local_max` < 1, `usable_size` ≤ 4, or
+/// `payload_len` < 0.
+public fn compute_chain_layout(
+    payload_len: Int,
+    local_max: Int,
+    usable_size: Int,
+) -> Result<ChainLayout, OverflowError> {
+    if payload_len < 0 || local_max < 1 || usable_size <= 4 {
+        return Err(InvalidBudget);
+    }
+    let local_bytes: Int = if payload_len <= local_max { payload_len } else { local_max };
+    let remainder: Int = payload_len - local_bytes;
+    let per_page: Int = usable_size - 4;
+
+    if remainder == 0 {
+        return Ok(ChainLayout {
+            local_bytes: local_bytes,
+            per_page_bytes: per_page,
+            overflow_page_count: 0,
+            tail_bytes: 0,
+        });
+    }
+
+    // Ceiling division without risky overflow tricks.
+    let mut page_count = remainder / per_page;
+    if page_count * per_page < remainder {
+        page_count = page_count + 1;
+    }
+    let tail = remainder - (page_count - 1) * per_page;
+    Ok(ChainLayout {
+        local_bytes: local_bytes,
+        per_page_bytes: per_page,
+        overflow_page_count: page_count,
+        tail_bytes: tail,
+    })
+}
+
+// -----------------------------------------------------------------------------
+// Payload splitting (for writes)
+// -----------------------------------------------------------------------------
+
+/// Partition `payload` per the given layout. Returns:
+///   (local_slice, overflow_slices)
+/// where `overflow_slices[i].len() == per_page_bytes` for i < last, and
+/// `overflow_slices[last].len() == tail_bytes`.
+public fn split_payload(
+    payload: &[Byte],
+    layout: &ChainLayout,
+) -> Result<(List<Byte>, List<List<Byte>>), OverflowError> {
+    if payload.len() != (layout.local_bytes + remainder_of(layout)) {
+        return Err(InvalidPayload);
+    }
+
+    // Local slice.
+    let mut local: List<Byte> = List.new();
+    let mut i: Int = 0;
+    while i < layout.local_bytes {
+        local.push(payload[i]);
+        i = i + 1;
+    }
+
+    // Overflow slices.
+    let mut out: List<List<Byte>> = List.new();
+    let mut pos: Int = layout.local_bytes;
+    let mut page_idx: Int = 0;
+    while page_idx < layout.overflow_page_count {
+        let take: Int = if page_idx + 1 == layout.overflow_page_count {
+            layout.tail_bytes
+        } else {
+            layout.per_page_bytes
+        };
+        let mut slice: List<Byte> = List.new();
+        let mut j: Int = 0;
+        while j < take {
+            slice.push(payload[pos + j]);
+            j = j + 1;
+        }
+        out.push(slice);
+        pos = pos + take;
+        page_idx = page_idx + 1;
+    }
+    Ok((local, out))
+}
+
+fn remainder_of(layout: &ChainLayout) -> Int {
+    if layout.overflow_page_count == 0 { return 0; }
+    (layout.overflow_page_count - 1) * layout.per_page_bytes + layout.tail_bytes
+}
+
+// -----------------------------------------------------------------------------
+// Write plan
+// -----------------------------------------------------------------------------
+
+/// Build a write plan given a layout + a freshly-allocated sequence of
+/// overflow page numbers.
+public fn make_write_plan(
+    layout: ChainLayout,
+    pages: List<Int>,
+) -> Result<ChainWritePlan, OverflowError> {
+    if pages.len() != layout.overflow_page_count {
+        return Err(TooManyPages(pages.len()));
+    }
+    Ok(ChainWritePlan { layout: layout, pages: pages })
+}
+
+/// Follow the `next_page` links in an already-written chain, returning
+/// the reconstructed payload. `page_data[i]` must be the full content of
+/// overflow page i (including the 4-byte next-pointer prefix).
+public fn read_chain(
+    first_overflow: Int,
+    local: &[Byte],
+    pages: &List<Int>,
+    page_data: &List<List<Byte>>,
+    layout: &ChainLayout,
+) -> Result<List<Byte>, OverflowError> {
+    let _ = first_overflow;
+    if pages.len() != layout.overflow_page_count {
+        return Err(TooManyPages(pages.len()));
+    }
+    let mut out: List<Byte> = List.new();
+    let mut i: Int = 0;
+    while i < local.len() {
+        out.push(local[i]);
+        i = i + 1;
+    }
+    let mut p: Int = 0;
+    while p < layout.overflow_page_count {
+        let buf = &page_data[p];
+        // First 4 bytes are the next-pointer; skip them.
+        let take: Int = if p + 1 == layout.overflow_page_count {
+            layout.tail_bytes
+        } else {
+            layout.per_page_bytes
+        };
+        let mut j: Int = 0;
+        while j < take {
+            out.push(buf[4 + j]);
+            j = j + 1;
+        }
+        p = p + 1;
+    }
+    Ok(out)
+}

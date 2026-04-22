@@ -1,0 +1,245 @@
+module core.database.sqlite.native.l3_btree.integrity;
+
+// =============================================================================
+// l3_btree/integrity.vr — Tree-wide integrity check
+// =============================================================================
+// Layer: 3
+// Spec: sqlite-native.md §10.7, sqlite.org/pragma.html#pragma_integrity_check
+//
+// `PRAGMA integrity_check[(N)]` walks every page in every B-tree in
+// the database and reports structural violations. The spec invariants:
+//
+//   I1. Every page of a B-tree has flags from the known set
+//       (0x02, 0x05, 0x0A, 0x0D).
+//   I2. Cell keys are in sorted order within each page.
+//   I3. All leaves are at the same depth (height-balanced).
+//   I4. The free-list is self-consistent — every freelist page is
+//       reachable exactly once, no loops, no dangling pointers.
+//   I5. Every overflow chain is self-consistent: finite length, no
+//       cycles, tail page carries the trailing payload length.
+//   I6. `db_size_pages` (DB header) matches the actual file length.
+//   I7. Each page appears in exactly ONE btree or the freelist —
+//       no shared pages, no orphans.
+//
+// This module runs the checks *given* a page-fetcher. The pager
+// supplies the fetcher; the integrity code is pure over it.
+// =============================================================================
+
+mount core.*;
+mount collections.{List, Map};
+mount base.{Result, Ok, Err, Text};
+mount core.database.sqlite.native.l3_btree.page_layout.{
+    PageKind, PageHeader, parse_page_header, parse_cell_pointer_array,
+    page_kind_is_interior,
+};
+
+// -----------------------------------------------------------------------------
+// Report
+// -----------------------------------------------------------------------------
+
+/// Kinds of violations the checker reports. The list is normative —
+/// callers (e.g. PRAGMA integrity_check) render these into strings.
+public type Violation is
+      UnknownPageKind(page_no: Int, raw: Byte)
+    | ShortPage(page_no: Int)
+    | CellsOutOfOrder(page_no: Int)
+    | PagesAtDifferentDepth(a: Int, b: Int)
+    | OverflowCycle(page_no: Int)
+    | OverflowOrphan(page_no: Int)
+    | DbSizeMismatch(declared: Int, actual: Int)
+    | PageReachedTwice(page_no: Int);
+
+public type IntegrityReport is {
+    violations: List<Violation>,
+    pages_visited: Int,
+    max_depth_seen: Int,
+};
+
+public fn integrity_report_new() -> IntegrityReport {
+    IntegrityReport {
+        violations: List.new(),
+        pages_visited: 0,
+        max_depth_seen: 0,
+    }
+}
+
+/// Has the checker found any problems? Callers rendering PRAGMA
+/// integrity_check output report "ok" iff `len(violations) == 0`.
+public fn integrity_is_ok(report: &IntegrityReport) -> Bool {
+    report.violations.len() == 0
+}
+
+// -----------------------------------------------------------------------------
+// Single-page check
+// -----------------------------------------------------------------------------
+
+/// Check a single page in isolation (no tree-wide invariants). Returns
+/// the list of violations found on this page alone.
+public fn check_page(
+    page_no: Int,
+    page_bytes: &[Byte],
+    page_start: Int,
+) -> List<Violation> {
+    let mut out: List<Violation> = List.new();
+
+    let header = match parse_page_header(page_bytes, page_start) {
+        Ok(h) => h,
+        Err(e) => {
+            // Translate the layout error into a violation tag.
+            match e {
+                ShortBuffer => out.push(ShortPage(page_no)),
+                BadKind(raw) => out.push(UnknownPageKind(page_no, raw)),
+                BadCellCount(_, _) => out.push(ShortPage(page_no)),
+            }
+            return out;
+        }
+    };
+
+    // Cell-pointer sanity — pointers must fit in the page.
+    match parse_cell_pointer_array(page_bytes, page_start, &header) {
+        Ok(arr) => {
+            // Array entries should be strictly decreasing (SQLite lays
+            // cell content from the page bottom upward; the pointer
+            // array mirrors this). This is not strictly required by
+            // the file format spec but is the canonical ordering.
+            let mut last: Int = 2147483647;
+            let mut i: Int = 0;
+            while i < arr.len() {
+                let off = arr[i];
+                if off >= last {
+                    // Not a hard invariant — SQLite does permit
+                    // reordered cells post-insertion. We skip flagging
+                    // it here to avoid false positives; tools like
+                    // `dbstat` should drive the stricter check.
+                    let _ = off;
+                }
+                last = off;
+                i = i + 1;
+            }
+        }
+        Err(_) => out.push(ShortPage(page_no)),
+    }
+
+    out
+}
+
+// -----------------------------------------------------------------------------
+// Tree-wide check
+// -----------------------------------------------------------------------------
+
+/// Walk the B-tree whose root is `root_page` in depth-first order.
+/// Caller supplies a `fetch(page_no) → &[Byte]` closure. For v1 we
+/// accept the page bytes lazily via a `Map<Int, List<Byte>>` so the
+/// checker stays pure.
+public fn check_tree(
+    root_page: Int,
+    pages: &Map<Int, List<Byte>>,
+) -> IntegrityReport {
+    let mut report = integrity_report_new();
+    let mut seen: Map<Int, Bool> = Map.new();
+    walk(root_page, pages, &mut report, &mut seen, 0);
+    report
+}
+
+fn walk(
+    page_no: Int,
+    pages: &Map<Int, List<Byte>>,
+    report: &mut IntegrityReport,
+    seen: &mut Map<Int, Bool>,
+    depth: Int,
+) {
+    if seen.contains_key(page_no) {
+        report.violations.push(PageReachedTwice(page_no));
+        return;
+    }
+    let _ = seen.insert(page_no, true);
+
+    if !pages.contains_key(page_no) {
+        report.violations.push(ShortPage(page_no));
+        return;
+    }
+    let buf = pages.get(page_no);
+    let per_page = check_page(page_no, &buf, 0);
+    let mut i: Int = 0;
+    while i < per_page.len() {
+        report.violations.push(per_page[i]);
+        i = i + 1;
+    }
+    report.pages_visited = report.pages_visited + 1;
+    if depth > report.max_depth_seen {
+        report.max_depth_seen = depth;
+    }
+
+    // Interior-page recursion is left for the v2 pass — it requires
+    // parsing each cell and chasing `left_child` pointers, which in
+    // turn requires knowing the local-payload budget (derived from
+    // the DB header's reserved-space field). That plumbing lands once
+    // the Pager actor's `Read` path drops bytes into this module's
+    // fetcher closure. For now `check_tree` covers:
+    //
+    //   * per-page structural checks (kinds, header, pointer array)
+    //   * "page reached twice" detection via `seen`
+    //
+    // Tree-depth balance and sibling-ordering checks will come with
+    // the L3.6 phase-2 patch.
+}
+
+// -----------------------------------------------------------------------------
+// Free-list check
+// -----------------------------------------------------------------------------
+
+/// Walk the free-list chain starting at `first_freelist_page` with
+/// declared length `freelist_pages_count`. Verifies the chain is finite
+/// and the count matches.
+public fn check_freelist(
+    first_freelist_page: Int,
+    freelist_pages_count: Int,
+    pages: &Map<Int, List<Byte>>,
+    report: &mut IntegrityReport,
+) {
+    if first_freelist_page == 0 {
+        // Empty free-list — verify count == 0.
+        if freelist_pages_count != 0 {
+            report.violations.push(DbSizeMismatch(freelist_pages_count, 0));
+        }
+        return;
+    }
+
+    let mut visited: Map<Int, Bool> = Map.new();
+    let mut current = first_freelist_page;
+    let mut counted: Int = 0;
+    while current != 0 {
+        if visited.contains_key(current) {
+            report.violations.push(OverflowCycle(current));
+            return;
+        }
+        let _ = visited.insert(current, true);
+        if !pages.contains_key(current) {
+            report.violations.push(OverflowOrphan(current));
+            return;
+        }
+        // The free-list trunk page lays out:
+        //   bytes 0..4   — next trunk page (0 = end)
+        //   bytes 4..8   — number of leaf page numbers that follow
+        //   bytes 8..    — leaf page numbers (u32 each)
+        let buf = pages.get(current);
+        if buf.len() < 8 {
+            report.violations.push(ShortPage(current));
+            return;
+        }
+        let next = read_u32_be_list(&buf, 0) as Int;
+        let leaves = read_u32_be_list(&buf, 4) as Int;
+        counted = counted + 1 + leaves;
+        current = next;
+    }
+    if counted != freelist_pages_count {
+        report.violations.push(DbSizeMismatch(freelist_pages_count, counted));
+    }
+}
+
+fn read_u32_be_list(buf: &List<Byte>, off: Int) -> UInt32 {
+    ((buf[off]     as UInt32) << 24)
+    | ((buf[off + 1] as UInt32) << 16)
+    | ((buf[off + 2] as UInt32) << 8)
+    |  (buf[off + 3] as UInt32)
+}

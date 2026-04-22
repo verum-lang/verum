@@ -1,0 +1,215 @@
+module core.database.sqlite.native.l3_btree.balance;
+
+// =============================================================================
+// l3_btree/balance.vr — Split / merge / rotate (invariant-preserving)
+// =============================================================================
+// Layer: 3
+// Spec: sqlite-native.md §10.5
+//
+// Balance is the hardest part of a B-tree. Every insert that overflows
+// a leaf, and every delete that under-fills a leaf, may ripple upward
+// through the tree; the balance code decides whether to:
+//
+//   * split       — one page → two, distribute cells, promote a
+//                    separator to the parent
+//   * redistribute — borrow cells from a sibling
+//   * merge       — two underfull pages → one
+//   * grow root   — the root itself is overfull
+//   * shrink root — the root has a single child and we can collapse
+//
+// Invariants (SMT-checkable in v2):
+//
+//   I1. Every internal cell's key is ≥ every key in its left subtree
+//       AND ≤ every key in its right subtree (sorted order preserved).
+//   I2. Every leaf has depth `root_depth` (balanced heights).
+//   I3. Every non-root page has cell_count ≥ min_cells_per_page.
+//   I4. Every page has cell_count ≤ max_cells_per_page(page_size).
+//
+// The concrete I/O (page reads, writes, allocations) is delegated to
+// the pager via the `BalanceContext` struct the caller passes in.
+// This module is pure — it plans the shape changes and returns the
+// list of page-mutations to apply. The pager performs them inside the
+// actor's Write request.
+// =============================================================================
+
+mount core.*;
+mount collections.List;
+mount base.{Result, Ok, Err, Text};
+mount core.database.sqlite.native.l3_btree.page_layout.{
+    PageKind, LocalPayloadBudget, compute_local_payload_budget,
+};
+
+// -----------------------------------------------------------------------------
+// Decisions
+// -----------------------------------------------------------------------------
+
+/// The balance planner emits one of these decisions per level of the
+/// ripple. The pager then applies them.
+public type BalanceDecision is
+      NoChange
+    // Split `page` into `left_cells` and `right_cells`; insert a new
+    // internal cell `separator` into the parent at `parent_cell_idx`.
+    | Split(page: Int, left_cells: Int, right_cells: Int, separator_cell: Int, parent_cell_idx: Int)
+    // Merge `left_page` + `right_page` into `left_page`, and drop the
+    // now-dangling internal cell at `parent_cell_idx`.
+    | Merge(left_page: Int, right_page: Int, parent_cell_idx: Int)
+    // Rotate `count` cells from `donor_page` to `recipient_page` (positive
+    // count ⇒ rotate right; negative ⇒ rotate left).
+    | Rotate(donor_page: Int, recipient_page: Int, count: Int, parent_cell_idx: Int)
+    // Grow tree height — the old root `old_root` becomes a new child
+    // of a fresh root `new_root`; subsequent split happens there.
+    | GrowRoot(old_root: Int, new_root: Int)
+    // Collapse single-child root.
+    | ShrinkRoot(old_root: Int, new_root: Int);
+
+public type BalanceError is
+      InvalidInput(reason: Text)
+    | OverCapacity
+    | UnderCapacity;
+
+// -----------------------------------------------------------------------------
+// Context (pure — no pager reference)
+// -----------------------------------------------------------------------------
+
+/// Information the balance planner needs about the page in question.
+/// Caller fills this from the pager before asking for a decision.
+public type PageStats is {
+    page_no: Int,
+    cell_count: Int,
+    used_bytes: Int,      // header + cell-pointer array + cell content
+    is_root: Bool,
+    parent_cell_idx: Int, // -1 for root
+};
+
+public type BalanceContext is {
+    page_size: Int,
+    reserved: Int,
+    min_cells_per_page: Int,   // conservative floor; SQLite uses 2
+    budget: LocalPayloadBudget,
+};
+
+public fn balance_context_new(page_size: Int, reserved: Int) -> BalanceContext {
+    BalanceContext {
+        page_size: page_size,
+        reserved: reserved,
+        min_cells_per_page: 2,
+        budget: compute_local_payload_budget(page_size, reserved),
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Planners
+// -----------------------------------------------------------------------------
+
+/// Decide how to handle overflow on `page` after an insert made it too
+/// full. Returns a `BalanceDecision` describing the topology change.
+///
+/// Strategy (matches SQLite `balance_nonroot`):
+///
+///   1. If there's a left or right sibling with headroom, rotate into
+///      it (cheapest: no allocation, no separator churn).
+///   2. Otherwise split — distribute cells across two pages, promote
+///      the median as a separator.
+///   3. If `page` is the root and no sibling exists, grow the tree.
+public fn plan_overflow(
+    ctx: &BalanceContext,
+    page: &PageStats,
+    left_sibling: Int,      // -1 if no left sibling
+    left_free_bytes: Int,
+    right_sibling: Int,     // -1 if no right sibling
+    right_free_bytes: Int,
+    overflow_cell_size: Int,
+) -> Result<BalanceDecision, BalanceError> {
+    if overflow_cell_size <= 0 {
+        return Err(InvalidInput("overflow_cell_size must be positive".clone()));
+    }
+    if page.cell_count < 0 {
+        return Err(InvalidInput("cell_count < 0".clone()));
+    }
+
+    // Try rotate-right first (cheaper than split).
+    if right_sibling > 0 && right_free_bytes >= overflow_cell_size {
+        return Ok(Rotate(page.page_no, right_sibling, 1, page.parent_cell_idx));
+    }
+    // Rotate-left.
+    if left_sibling > 0 && left_free_bytes >= overflow_cell_size {
+        return Ok(Rotate(page.page_no, left_sibling, -1, page.parent_cell_idx));
+    }
+
+    // Split. Root with no sibling grows the tree; otherwise insert a
+    // new sibling next to `page`.
+    if page.is_root {
+        // Grow — allocate a new child, demote the old root into it,
+        // leave the separator to be filled on the recursive balance.
+        return Ok(GrowRoot(page.page_no, -1));
+    }
+
+    // Standard split — distribute cells roughly in half.
+    let total = page.cell_count + 1;   // +1 for the incoming overflow cell
+    let left_cells = total / 2;
+    let right_cells = total - left_cells;
+    let separator_cell = left_cells;   // the median becomes the parent key
+    Ok(Split(
+        page.page_no,
+        left_cells, right_cells, separator_cell,
+        page.parent_cell_idx,
+    ))
+}
+
+/// Decide how to handle under-fill on `page` after a delete. Returns a
+/// merge or rotate plan, or `NoChange` if the page is still above the
+/// minimum.
+public fn plan_underflow(
+    ctx: &BalanceContext,
+    page: &PageStats,
+    left_sibling: Int,
+    left_cell_count: Int,
+    right_sibling: Int,
+    right_cell_count: Int,
+) -> Result<BalanceDecision, BalanceError> {
+    if page.cell_count >= ctx.min_cells_per_page {
+        return Ok(NoChange);
+    }
+    if page.is_root {
+        // Root with exactly one child — collapse.
+        if page.cell_count == 0 {
+            return Ok(ShrinkRoot(page.page_no, -1));
+        }
+        // Single cell is allowed for the root; no-op.
+        return Ok(NoChange);
+    }
+
+    // Prefer rotating from a sibling that has slack.
+    if right_sibling > 0 && right_cell_count > ctx.min_cells_per_page {
+        return Ok(Rotate(right_sibling, page.page_no, -1, page.parent_cell_idx));
+    }
+    if left_sibling > 0 && left_cell_count > ctx.min_cells_per_page {
+        return Ok(Rotate(left_sibling, page.page_no, 1, page.parent_cell_idx));
+    }
+
+    // No slack anywhere — merge with a neighbour.
+    if right_sibling > 0 {
+        return Ok(Merge(page.page_no, right_sibling, page.parent_cell_idx));
+    }
+    if left_sibling > 0 {
+        return Ok(Merge(left_sibling, page.page_no, page.parent_cell_idx - 1));
+    }
+
+    Err(UnderCapacity)
+}
+
+// -----------------------------------------------------------------------------
+// Utilities — used by the pager when applying the decision
+// -----------------------------------------------------------------------------
+
+/// Compute the cell-content size budget per page for the given layout.
+public fn usable_bytes_per_page(ctx: &BalanceContext, kind: PageKind) -> Int {
+    let hdr = if kind == TableInterior || kind == IndexInterior { 12 } else { 8 };
+    ctx.page_size - ctx.reserved - hdr
+}
+
+/// Does `page` currently leave room for a cell of `needed` bytes?
+public fn has_room_for(ctx: &BalanceContext, kind: PageKind, used_bytes: Int, needed: Int) -> Bool {
+    let usable = usable_bytes_per_page(ctx, kind);
+    usable - used_bytes >= needed + 2 /* pointer-array entry */
+}

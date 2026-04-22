@@ -1,0 +1,74 @@
+module core.database.sqlite.native.l3_btree;
+
+// =============================================================================
+// core/database/sqlite/native/l3_btree/mod.vr — B-tree layer (L3)
+// =============================================================================
+// Layer: 3
+// Dependencies: l1_pager, l2_record, core/collections
+// =============================================================================
+//
+// The B-tree layer turns byte-addressable pages into structured
+// ordered key/value storage. SQLite uses separate trees for tables
+// (rowid → payload) and indexes (key → rowid), each with its own cell
+// encoding; page_layout.vr handles the shared outer shape.
+//
+// Shipped modules:
+//
+//   * `page_layout` — page header (leaf 8B / interior 12B), cell-pointer
+//                      array, cell parsing for all 4 kinds, overflow
+//                      page pointers, local-payload budget math.
+//   * `btree`        — `Btree<K, V>`, construction, generic search.
+//   * `cursor`       — `affine BtreeCursor` with seek/next/prev.
+//
+// Not yet shipped (tracked in separate tasks):
+//   * balance.vr (split / merge / rotate) — L3.4
+//   * overflow.vr (chain I/O) — L3.5
+//   * integrity.vr (PRAGMA integrity_check) — L3.6
+//   * without_rowid.vr specialisation — L3.7
+// =============================================================================
+
+public module page_layout;
+public module btree;
+public module cursor;
+public module balance;
+public module overflow;
+public module integrity;
+
+public mount .page_layout.{
+    PageKind, PageHeader, PageLayoutError, CellParts, LocalPayloadBudget,
+    PAGE_TYPE_INDEX_INTERIOR, PAGE_TYPE_TABLE_INTERIOR,
+    PAGE_TYPE_INDEX_LEAF, PAGE_TYPE_TABLE_LEAF,
+    PAGE_HEADER_SIZE_LEAF, PAGE_HEADER_SIZE_INTERIOR,
+    page_kind_from_byte, page_kind_to_byte, page_kind_is_interior,
+    page_kind_is_table, page_kind_header_size, max_cells_per_page,
+    parse_page_header, serialize_page_header,
+    parse_cell_pointer_array, parse_cell,
+    compute_local_payload_budget,
+};
+
+public mount .btree.{
+    Btree, BtreeKind, BtreeError,
+    btree_new, btree_root_page,
+};
+
+public mount .cursor.{
+    BtreeCursor, cursor_new, cursor_root, cursor_is_valid,
+    cursor_is_at_end, cursor_depth, cursor_current_page,
+};
+
+public mount .balance.{
+    BalanceDecision, BalanceError, BalanceContext, PageStats,
+    balance_context_new, plan_overflow, plan_underflow,
+    usable_bytes_per_page, has_room_for,
+};
+
+public mount .overflow.{
+    ChainLayout, ChainWritePlan, OverflowError,
+    compute_chain_layout, split_payload, make_write_plan, read_chain,
+};
+
+public mount .integrity.{
+    Violation, IntegrityReport,
+    integrity_report_new, integrity_is_ok,
+    check_page, check_tree, check_freelist,
+};
