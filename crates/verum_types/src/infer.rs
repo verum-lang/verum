@@ -37833,6 +37833,29 @@ impl TypeChecker {
 
             if let Some(first_name) = first_segment_name {
                 if self.inline_modules.contains_key(&verum_common::Text::from(first_name)) {
+                    // Name collision: a single identifier (e.g. `Validated`)
+                    // can refer to BOTH a type and a same-named module
+                    // (`type Validated<E, A> is …;` plus
+                    // `public module Validated { fn validate_all<…>(…) … }`).
+                    // The inline-module branch below assumes module-style
+                    // dispatch and silently swallows static-method calls
+                    // on the type. Before committing to module dispatch,
+                    // check whether the type has a static method by this
+                    // name; if so, fall through to the static-method path
+                    // so `Validated.valid(42)` resolves against
+                    // `implement<E, A> Validated<E, A> { fn valid(…) }`
+                    // rather than failing with `unbound variable: valid`.
+                    let static_key = verum_common::Text::from(format!("$static${}", method.name.as_str()));
+                    let has_static_method = {
+                        let methods_guard = self.inherent_methods.read();
+                        methods_guard
+                            .get(&verum_common::Text::from(first_name))
+                            .is_some_and(|methods| methods.contains_key(&static_key))
+                    };
+                    if has_static_method {
+                        // Skip the inline-module branch and let the
+                        // static-method dispatch below handle it.
+                    } else {
                     // Build the full path including the method as the last segment
                     let mut segments: Vec<verum_ast::ty::PathSegment> = path.segments.iter().cloned().collect();
                     segments.push(verum_ast::ty::PathSegment::Name(method.clone()));
@@ -37883,6 +37906,7 @@ impl TypeChecker {
                             span,
                         });
                     }
+                    } // end of `else` for has_static_method check
                 }
             }
         }

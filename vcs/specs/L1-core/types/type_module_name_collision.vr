@@ -1,0 +1,51 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L1
+// @tags: name-resolution, static-method, module, collision, regression
+// @timeout: 5000
+//
+// Regression for the type-vs-module name collision in
+// `crates/verum_types/src/infer.rs::infer_method_call_inner_impl`.
+//
+// A single identifier can refer to BOTH a type and a same-named
+// module. Stdlib `core/base/result.vr` declares
+// `public type Validated<E, A> is …;` AND
+// `public module Validated { fn validate_all<…>(…) … }`. Without the
+// fix, the inline-module branch in method-call resolution silently
+// shadowed the type, so `Validated.valid(42)` (a static constructor
+// declared in `implement<E, A> Validated<E, A> { fn valid(…) }`)
+// resolved as a module-style function lookup against the
+// helper module, found nothing called `valid`, and emitted
+// `unbound variable: valid`. The fix preserves the inline-module
+// dispatch but checks first whether the type has a static method
+// by the requested name; if so, it falls through to the static-
+// method path so type-static dispatch wins on collision.
+
+type Mixed is { value: Int };
+
+implement Mixed {
+    public fn create(v: Int) -> Mixed {
+        Mixed { value: v }
+    }
+}
+
+module Mixed {
+    public fn helper() -> Int {
+        99
+    }
+}
+
+fn main() {
+    // Type's static method — must resolve via implement block, not
+    // module-style function lookup.
+    let m: Mixed = Mixed.create(42);
+    assert_eq(m.value, 42);
+
+    // Module function — still reachable via the same Type.foo() syntax;
+    // dispatch falls through to module path when no type-static
+    // method matches.
+    let h: Int = Mixed.helper();
+    assert_eq(h, 99);
+
+    print("type_module_name_collision ok");
+}
