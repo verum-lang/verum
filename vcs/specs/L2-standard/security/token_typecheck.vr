@@ -1,0 +1,45 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: security, token, csrf, session, typecheck
+// @timeout: 10000
+// @expect: pass
+
+mount core.security.token.{
+    generate_bytes, generate_urlsafe, generate_hex, generate_numeric,
+    compare_tokens, compare_token_bytes,
+    MIN_TOKEN_BYTES, DEFAULT_TOKEN_BYTES,
+};
+mount core.collections.List;
+
+fn exercise_tokens() {
+    // Raw bytes — auto-clamps below MIN_TOKEN_BYTES.
+    let raw: List<Byte> = generate_bytes(DEFAULT_TOKEN_BYTES);
+    assert(raw.len() == DEFAULT_TOKEN_BYTES);
+
+    let short = generate_bytes(4);       // clamped to MIN_TOKEN_BYTES
+    assert(short.len() >= MIN_TOKEN_BYTES);
+
+    // URL-safe session token (OWASP default).
+    let sess: Text = generate_urlsafe(DEFAULT_TOKEN_BYTES);
+    let _ = sess;
+
+    // Hex — user-friendly in logs.
+    let hex_tok: Text = generate_hex(16);
+    let _ = hex_tok;
+
+    // Numeric OTP.
+    let otp: Text = generate_numeric(6);
+    assert(otp.len() == 6);
+
+    // Constant-time compare.
+    let a = generate_urlsafe(16);
+    let b = generate_urlsafe(16);
+    let _: Bool = compare_tokens(&a, &b);
+    let _: Bool = compare_token_bytes(a.as_bytes(), b.as_bytes());
+
+    // Self-compare is always true.
+    assert(compare_tokens(&a, &a));
+}
+
+fn main() { exercise_tokens(); }

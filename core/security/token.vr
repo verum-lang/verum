@@ -1,0 +1,144 @@
+// =============================================================================
+// security/token.vr — cryptographic random token generator
+// =============================================================================
+// Layer: 3 (Security)
+// Dependencies: core, core.encoding.{base64, hex},
+//               core.security.util.{rng, constant_time}
+// =============================================================================
+//
+// The user-level "generate a random session / CSRF / password-reset
+// / API key / share-link token" primitive. Every web application
+// needs it; without a shared helper every codebase reinvents
+// OWASP's guidance (usually incorrectly — truncating too short, or
+// using `rand.Intn` on the wrong distribution).
+//
+// # Forms
+//
+//   * URL-safe base64 (RFC 4648 §5) — the OWASP-recommended
+//     default. 22 chars ≈ 128 bits of entropy.
+//   * Hex — double the length but friendlier in logs.
+//   * Numeric — digit-only, for OTP-style challenges.
+//   * Raw bytes — caller encodes however they need.
+//
+// # Security posture
+//
+//   * Every constructor funnels through `fill_secure` (CSPRNG).
+//     No weak-PRNG fallback; callers that want deterministic
+//     testing should inject their own bytes and treat the
+//     generator as opaque.
+//   * `constant_time_compare` matches stored tokens without
+//     timing leakage.
+//   * Minimum entropy guard — `MIN_TOKEN_BYTES = 16` (128 bits,
+//     the NIST SP 800-63B Level 1 baseline). Smaller values are
+//     clamped up; callers that explicitly want a shorter token
+//     (e.g. 6-digit OTP) use `generate_numeric` which doesn't
+//     promise 128-bit entropy.
+//
+// =============================================================================
+
+module core.security.token;
+
+mount core.*;
+mount core.collections.List;
+mount core.encoding.base64.{encode_url as b64u_encode};
+mount core.encoding.hex.{encode as hex_encode};
+mount core.security.util.rng.{fill_secure};
+mount core.security.util.constant_time.{constant_time_eq};
+
+// =============================================================================
+// Recommended lengths
+// =============================================================================
+
+public const MIN_TOKEN_BYTES:       Int = 16;    // 128 bits
+public const DEFAULT_TOKEN_BYTES:   Int = 32;    // 256 bits — over-budget safe
+
+// =============================================================================
+// Raw-byte generator
+// =============================================================================
+
+public fn generate_bytes(len_bytes: Int) -> List<Byte> {
+    let n = if len_bytes < MIN_TOKEN_BYTES { MIN_TOKEN_BYTES } else { len_bytes };
+    let mut out: List<Byte> = [];
+    let mut tmp: [Byte; 32] = [0_u8; 32];
+    while out.len() < n {
+        fill_secure(&mut tmp);
+        let take = if (n - out.len()) >= 32 { 32 } else { n - out.len() };
+        let mut i: Int = 0;
+        while i < take { out.push(tmp[i]); i = i + 1; }
+    }
+    out
+}
+
+// =============================================================================
+// Encoded token forms
+// =============================================================================
+
+/// URL-safe base64 token (RFC 4648 §5, no padding — matches `openssl
+/// rand -base64` with url-safe + trim). Default 32 bytes ≈ 43 chars
+/// ≈ 256-bit entropy.
+public fn generate_urlsafe(len_bytes: Int) -> Text {
+    let raw = generate_bytes(len_bytes);
+    b64u_encode(raw.as_slice())
+}
+
+/// Lowercase hex-encoded token. `2 × len_bytes` characters.
+public fn generate_hex(len_bytes: Int) -> Text {
+    let raw = generate_bytes(len_bytes);
+    hex_encode(raw.as_slice())
+}
+
+/// Numeric token — `digits` decimal characters, uniformly sampled.
+/// No entropy floor applied (caller explicitly chose a short
+/// alphabet). Commonly used for email/SMS verification codes —
+/// typical lengths are 6–10 digits.
+///
+/// Uniformly distributed via rejection sampling over a 32-bit
+/// range so there's no modulo-bias.
+public fn generate_numeric(digits: Int) -> Text {
+    let n = if digits < 1 { 1 } else { digits };
+    let mut out: List<Byte> = [];
+    let mut i: Int = 0;
+    while i < n {
+        out.push(('0' as Byte) + uniform_digit());
+        i = i + 1;
+    }
+    Text.from_utf8_unchecked(out.as_slice())
+}
+
+// =============================================================================
+// Constant-time comparison
+// =============================================================================
+
+/// Equality check that runs in time independent of how many leading
+/// bytes match. Use this whenever comparing an incoming token
+/// against the server's stored form.
+public fn compare_tokens(a: &Text, b: &Text) -> Bool {
+    constant_time_eq(a.as_bytes(), b.as_bytes())
+}
+
+/// Compare two byte forms in constant time.
+public fn compare_token_bytes(a: &[Byte], b: &[Byte]) -> Bool {
+    constant_time_eq(a, b)
+}
+
+// =============================================================================
+// Internals
+// =============================================================================
+
+fn uniform_digit() -> Byte {
+    // Rejection sample: draw 32 random bits, keep values < 10 * (2^32 / 10).
+    let cutoff: UInt32 = 0xFFFFFFFF_u32 - (0xFFFFFFFF_u32 % 10_u32);
+    loop {
+        let r = random_u32();
+        if r < cutoff { return (r % 10_u32) as Byte; }
+    }
+}
+
+fn random_u32() -> UInt32 {
+    let mut buf: [Byte; 4] = [0_u8; 4];
+    fill_secure(&mut buf);
+    ((buf[0] as UInt32) << 24_u32)
+  | ((buf[1] as UInt32) << 16_u32)
+  | ((buf[2] as UInt32) << 8_u32)
+  |  (buf[3] as UInt32)
+}
