@@ -1,12 +1,16 @@
 # Next Session — Production-Ready Push
 
-## Snapshot (2026-04-22, после module-aware types chain)
+## Snapshot (2026-04-22, module-aware types chain + context bindings)
 
 **Test status:**
 - L0 stdlib-runtime: **100%** (8/8, regression-free)
 - L0 baseline (lexer + parser + builtin-syntax): **332/332** (100%)
-- L1-core: **98.9%** (529/535)
+- L1-core: **99.6%** (533/535) — +4 from DataBuilder export
+- L1-core/types: **100%** (172/172) — clean after data_type.vr fix
 - L2-standard/async/channels: **100%** (8/8) — broadcast_stream.vr closed
+- L2-standard/iterator: **100%** (1/1) passes
+- L2-standard/contexts: **60%** (27/45) — +1 from named-binding fix,
+  residuals are DI-runtime / closure-capture not type-system
 - L3-extended: **90.0%** (287/319) — 32 residuals (mostly FFI/WASM/timeouts)
 
 ## New in this session — module-aware type resolution chain
@@ -52,6 +56,39 @@ Three sequential architectural commits closed the class of
    module's scope. New
    `import_types_from_module_ast_in_module(ast, source_module_path)`.
    Closes the same architectural hole on the type-side.
+
+4. **`4f23dfe6` fix(stdlib/base): expose DataBuilder as public API**
+   — `type DataBuilder` + all 5 methods (new / new_array / set / push /
+   build) were missing the `public` modifier, so user code importing
+   `core.base.data.{Data, DataBuilder}` got E401 "cannot find". Small
+   fix; closes L1 `data_type.vr` and exposes the builder for users.
+
+5. **`d25585cb` fix(types/context): named context bindings + lenient
+   method type build** — closes `log.info("x")` typecheck failure on
+   `using [log: Logger]` patterns. Three cooperating parts:
+   * Stdlib context pre-registration pipeline path now pins
+     `current_module_path` to each file's module path before the
+     archive scan. Without this, `build_context_type_from_decl`
+     resolved bare type references under `cog` (user default) where
+     qualified names aren't populated — so `LogLevel` inside
+     Logger's methods was never found.
+   * `build_context_type_from_decl` uses `ast_to_type_lenient` for
+     method parameter/return types so missing-sibling types fall
+     back to `Type::Unknown` per-field instead of wiping the whole
+     method set via the outer record fallback.
+   * The shadow-guard in the named-context binding loop
+     (`infer.rs:~34327`) now treats
+     `self.context_declarations.contains_key(context_name)` as
+     "this is a context, not a user type shadow" — previously the
+     guard mistook the context's own `Named { path: Logger }`
+     placeholder for a user type and skipped the alias binding.
+   * Cross-file import paths at `compile_core_module_from_ast` +
+     `analyze_module` + `phase_type_check` pin `source_module_path`
+     around `build_context_type_from_{protocol,decl}` calls.
+
+   Residual context-test failures are all **runtime/DI** (null
+   pointer in `@injectable`), **closure-capture lifetime**, or
+   expected-error tests — not type-system bugs.
 
 ## Investigation trace for commit 2 (worth preserving)
 
