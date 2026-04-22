@@ -80,6 +80,7 @@ public module http_range;
 public module link_header;
 public module http_cache;
 public module uri_template;
+public module ipv6_canonical;
 
 // =============================================================================
 // Re-exports

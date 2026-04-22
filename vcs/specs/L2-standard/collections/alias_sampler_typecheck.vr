@@ -1,0 +1,48 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: collections, sampler, walker, weighted, typecheck
+// @timeout: 10000
+// @expect: pass
+
+mount core.collections.alias_sampler.{AliasSampler, AliasError};
+
+fn exercise_sampler() -> Result<(), AliasError> {
+    // Build — unnormalised weights OK.
+    let weights: [Float; 4] = [1.0, 3.0, 2.0, 4.0];
+    let sampler = AliasSampler.from_weights(&weights[..])?;
+    assert(sampler.len() == 4);
+
+    // Draw a few samples — all in [0, 4).
+    let mut i: Int = 0;
+    while i < 100 {
+        let idx = sampler.sample();
+        assert(idx >= 0 && idx < 4);
+        i = i + 1;
+    }
+
+    // Convenience `sample_from`.
+    let items: [Text; 4] = [
+        Text.from("a"), Text.from("b"), Text.from("c"), Text.from("d"),
+    ];
+    let chosen: Text = sampler.sample_from(&items[..]);
+    let _ = chosen;
+
+    // Zero weights allowed (index never sampled).
+    let zero_mix: [Float; 3] = [0.0, 1.0, 0.0];
+    let zs = AliasSampler.from_weights(&zero_mix[..])?;
+    let _ = zs.sample();       // always returns 1.
+
+    // Empty → error.
+    let empty: [Float; 0] = [];
+    let bad = AliasSampler.from_weights(&empty[..]);
+    let _ = bad;
+
+    // Negative weight → typed error.
+    let neg: [Float; 2] = [1.0, -1.0];
+    let bad2 = AliasSampler.from_weights(&neg[..]);
+    let _ = bad2;
+    Ok(())
+}
+
+fn main() { let _ = exercise_sampler(); }

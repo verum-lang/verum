@@ -1,0 +1,191 @@
+// =============================================================================
+// collections/alias_sampler.vr — Walker's alias method (O(1) weighted sampling)
+// =============================================================================
+// Layer: 2 (Collections)
+// Dependencies: core, core.base.random
+// Reference: Walker, "An Efficient Method for Generating Discrete Random
+//            Variables with General Distributions" (1977)
+// =============================================================================
+//
+// Walker's alias method — draws from a discrete distribution with
+// non-uniform weights in O(1) per sample after O(N) build. The
+// standard production choice for weighted random selection:
+//
+//   * Weighted round-robin load balancers (Envoy WRR, HAProxy).
+//   * A/B test bucket assignment.
+//   * Monte Carlo sampling in ML training pipelines.
+//   * Kafka partitioners with non-uniform weights.
+//   * Weighted retry-target selection in service meshes.
+//
+// # Algorithm
+//
+// Given weights `w_1..w_N`, build two tables (`probability`,
+// `alias`) such that `draw()`:
+//
+//   1. Picks a column uniformly at random: `i ~ Uniform(0..N-1)`.
+//   2. Flips a biased coin with P(heads) = `probability[i]`.
+//   3. Returns `i` on heads, `alias[i]` on tails.
+//
+// Each draw costs one uniform-int draw + one uniform-float draw +
+// one table lookup. Build is O(N) via Vose's improved algorithm.
+//
+// # Usage
+//
+// ```
+// let weights: [Float; 4] = [1.0, 3.0, 2.0, 4.0];
+// let sampler = AliasSampler.from_weights(&weights[..])?;
+//
+// let idx: Int = sampler.sample();            // 0..3, weighted
+// let choice = &items[sampler.sample()];
+// ```
+//
+// =============================================================================
+
+module core.collections.alias_sampler;
+
+mount core.*;
+mount core.collections.List;
+mount core.base.random;
+
+public type AliasError is
+      EmptyWeights
+    | NonFiniteWeight(Int)
+    | NegativeWeight(Int);
+
+// =============================================================================
+// Sampler
+// =============================================================================
+
+public type AliasSampler is {
+    n:           Int,
+    probability: List<Float>,
+    alias:       List<Int>,
+};
+
+implement AliasSampler {
+    /// Build from a weight vector. Weights may be unnormalised —
+    /// we normalise internally. All weights must be finite and
+    /// non-negative; a zero weight just means that index never
+    /// samples.
+    public fn from_weights(weights: &[Float]) -> Result<AliasSampler, AliasError> {
+        if weights.len() == 0 { return Err(AliasError.EmptyWeights); }
+        let n = weights.len();
+
+        // Validate + sum.
+        let mut total: Float = 0.0;
+        let mut i: Int = 0;
+        while i < n {
+            let w = weights[i];
+            if !w.is_finite() { return Err(AliasError.NonFiniteWeight(i)); }
+            if w < 0.0       { return Err(AliasError.NegativeWeight(i)); }
+            total = total + w;
+            i = i + 1;
+        }
+        if total <= 0.0 { return Err(AliasError.EmptyWeights); }
+
+        // Scaled probabilities: p_i × n.
+        let n_f = n as Float;
+        let mut scaled: List<Float> = [];
+        let mut k: Int = 0;
+        while k < n {
+            scaled.push(weights[k] * n_f / total);
+            k = k + 1;
+        }
+
+        // Two-queue partition: "small" = scaled < 1, "large" = scaled ≥ 1.
+        let mut small: List<Int> = [];
+        let mut large: List<Int> = [];
+        let mut j: Int = 0;
+        while j < n {
+            if scaled[j] < 1.0 { small.push(j); } else { large.push(j); }
+            j = j + 1;
+        }
+
+        let mut probability: List<Float> = [];
+        let mut alias: List<Int> = [];
+        let mut f: Int = 0;
+        while f < n { probability.push(0.0); alias.push(0); f = f + 1; }
+
+        // Vose's algorithm — marry pairs.
+        while small.len() > 0 && large.len() > 0 {
+            let l = small.remove(small.len() - 1);
+            let g = large.remove(large.len() - 1);
+
+            probability[l] = scaled[l];
+            alias[l]       = g;
+
+            scaled[g] = scaled[g] + scaled[l] - 1.0;
+            if scaled[g] < 1.0 {
+                small.push(g);
+            } else {
+                large.push(g);
+            }
+        }
+        // Residual (floating-point drift) — flush remaining to p=1.
+        while large.len() > 0 {
+            let g = large.remove(large.len() - 1);
+            probability[g] = 1.0;
+            alias[g] = g;
+        }
+        while small.len() > 0 {
+            let l = small.remove(small.len() - 1);
+            probability[l] = 1.0;
+            alias[l] = l;
+        }
+
+        Ok(AliasSampler {
+            n: n, probability: probability, alias: alias,
+        })
+    }
+
+    /// Draw one sample. Returns an index in [0, n).
+    public fn sample(&self) -> Int {
+        let i = random_index(self.n);
+        let u = random_unit_interval();
+        if u < self.probability[i] { i } else { self.alias[i] }
+    }
+
+    /// Convenience — sample and return a clone of the corresponding
+    /// item in parallel lists.
+    public fn sample_from<T: Clone>(&self, items: &[T]) -> T {
+        let idx = self.sample();
+        items[idx].clone()
+    }
+
+    public fn len(&self) -> Int { self.n }
+}
+
+// =============================================================================
+// Randomness
+// =============================================================================
+
+fn random_index(n: Int) -> Int {
+    // Rejection-sample a 32-bit draw to avoid modulo-bias.
+    let cutoff: UInt32 = 0xFFFFFFFF_u32 - (0xFFFFFFFF_u32 % (n as UInt32));
+    loop {
+        let r = random_u32();
+        if r < cutoff { return (r % (n as UInt32)) as Int; }
+    }
+}
+
+fn random_u32() -> UInt32 {
+    let mut buf: [Byte; 4] = [0_u8; 4];
+    random.fill(&mut buf);
+    ((buf[0] as UInt32) << 24_u32)
+  | ((buf[1] as UInt32) << 16_u32)
+  | ((buf[2] as UInt32) <<  8_u32)
+  |  (buf[3] as UInt32)
+}
+
+fn random_unit_interval() -> Float {
+    // 53-bit mantissa, Uniform(0, 1].
+    let mut buf: [Byte; 8] = [0_u8; 8];
+    random.fill(&mut buf);
+    let mut r: UInt64 = 0_u64;
+    let mut i: Int = 0;
+    while i < 8 { r = (r << 8_u64) | (buf[i] as UInt64); i = i + 1; }
+    let mantissa = (r >> 11_u64) as Float;
+    let two_pow_53: Float = 9007199254740992.0;
+    let u = mantissa / two_pow_53;
+    if u <= 0.0 { 1e-300 } else { u }
+}

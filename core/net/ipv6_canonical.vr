@@ -1,0 +1,203 @@
+// =============================================================================
+// net/ipv6_canonical.vr — RFC 5952 canonical IPv6 text representation
+// =============================================================================
+// Layer: 5 (Network)
+// Dependencies: core, core.collections, core.net.addr
+// =============================================================================
+//
+// RFC 5952 — the one-true-spelling for IPv6 addresses. Without a
+// shared canonicaliser, the same address surfaces under a dozen
+// equivalent strings (`2001:0db8::1` / `2001:DB8::1` /
+// `2001:db8:0:0:0:0:0:1` / `2001:0:0:0:db8::1` / …) and every
+// log-dedup, firewall-rule, and allowlist implementation ends up
+// with a pile of near-duplicates.
+//
+// # Canonical form (§4)
+//
+//   * Leading zeros suppressed in each group (`0001` → `1`).
+//   * The longest run of consecutive all-zero groups is compressed
+//     with `::`. Ties → leftmost run wins (§4.2.3).
+//   * Runs of a single zero group are NOT compressed (§4.2.2).
+//   * All hex digits in lowercase (§4.3).
+//   * IPv4-mapped form (`::ffff:a.b.c.d`, §5) preserved on input,
+//     emitted with dotted-quad tail.
+//
+// # API
+//
+// ```
+// let canon: Text = ipv6_canonical.format(&ipv6_addr);
+//
+// let parsed: Ipv6Addr = ipv6_canonical.parse(&Text.from("2001:0DB8:0:0:0:0:0:1"))?;
+// let canon = ipv6_canonical.format(&parsed);   // "2001:db8::1"
+// ```
+//
+// `parse` is a thin wrapper over `Ipv6Addr.parse` — the only
+// value-add is returning the caller's input in canonical form via
+// `canonicalize(text)`.
+//
+// =============================================================================
+
+module core.net.ipv6_canonical;
+
+mount core.*;
+mount core.collections.List;
+mount core.net.addr.{Ipv6Addr, AddrParseError};
+
+public type Ipv6CanonicalError is
+      ParseFailed(AddrParseError);
+
+// =============================================================================
+// Public API
+// =============================================================================
+
+/// Format an already-parsed `Ipv6Addr` in RFC 5952 canonical form.
+public fn format(addr: &Ipv6Addr) -> Text {
+    let octets: [Byte; 16] = addr.octets();
+    let mut groups: [UInt16; 8] = [0_u16; 8];
+    let mut i: Int = 0;
+    while i < 8 {
+        groups[i] = ((octets[i * 2] as UInt16) << 8_u16) | (octets[i * 2 + 1] as UInt16);
+        i = i + 1;
+    }
+
+    // IPv4-mapped form: ::ffff:a.b.c.d — §5 recommends keeping
+    // the dotted-quad tail for v4-mapped and v4-compatible
+    // addresses.
+    if is_ipv4_mapped(&groups) {
+        return format_v4_mapped(&groups, &octets);
+    }
+
+    // Find longest zero-run (§4.2.3 — leftmost on ties).
+    let (zr_start, zr_len) = longest_zero_run(&groups);
+
+    let mut out: List<Byte> = [];
+    let mut g: Int = 0;
+    while g < 8 {
+        // Emit `::` when we reach the start of the compressed run.
+        if zr_len >= 2 && g == zr_start {
+            out.push(':' as Byte);
+            out.push(':' as Byte);
+            g = g + zr_len;
+            continue;
+        }
+        if g > 0 && (zr_len < 2 || g != zr_start + zr_len || zr_start == 0) {
+            // Insert separator between groups (but not after `::`).
+            if !(zr_len >= 2 && g == zr_start + zr_len) {
+                out.push(':' as Byte);
+            }
+        }
+        push_hex_group(&mut out, groups[g]);
+        g = g + 1;
+    }
+    Text.from_utf8_unchecked(out.as_slice())
+}
+
+/// Parse `text` into an Ipv6Addr. Shorthand alias over
+/// `Ipv6Addr.parse`.
+public fn parse(text: &Text) -> Result<Ipv6Addr, Ipv6CanonicalError> {
+    Ipv6Addr.parse(text).map_err(|e| Ipv6CanonicalError.ParseFailed(e))
+}
+
+/// Parse + re-emit — the "normalise this text" one-call form.
+public fn canonicalize(text: &Text) -> Result<Text, Ipv6CanonicalError> {
+    let addr = parse(text)?;
+    Ok(format(&addr))
+}
+
+/// Equality check modulo spelling — "are these two strings the
+/// same address?".
+public fn equal_addresses(a: &Text, b: &Text) -> Bool {
+    let canon_a = canonicalize(a);
+    let canon_b = canonicalize(b);
+    match (canon_a, canon_b) {
+        (Ok(ca), Ok(cb)) => ca.as_bytes() == cb.as_bytes(),
+        _                => false,
+    }
+}
+
+// =============================================================================
+// Internals
+// =============================================================================
+
+fn longest_zero_run(groups: &[UInt16; 8]) -> (Int, Int) {
+    let mut best_start: Int = -1;
+    let mut best_len:   Int = 0;
+    let mut cur_start:  Int = 0;
+    let mut cur_len:    Int = 0;
+    let mut i: Int = 0;
+    while i < 8 {
+        if groups[i] == 0_u16 {
+            if cur_len == 0 { cur_start = i; }
+            cur_len = cur_len + 1;
+            if cur_len > best_len {
+                best_start = cur_start;
+                best_len   = cur_len;
+            }
+        } else {
+            cur_len = 0;
+        }
+        i = i + 1;
+    }
+    // RFC 5952 §4.2.2 — do NOT shorten a single 16-bit zero field.
+    if best_len < 2 { return (-1, 0); }
+    (best_start, best_len)
+}
+
+fn is_ipv4_mapped(groups: &[UInt16; 8]) -> Bool {
+    // ::ffff:a.b.c.d  →  [0,0,0,0,0,0xFFFF,xxxx,yyyy]
+    if groups[0] != 0_u16 { return false; }
+    if groups[1] != 0_u16 { return false; }
+    if groups[2] != 0_u16 { return false; }
+    if groups[3] != 0_u16 { return false; }
+    if groups[4] != 0_u16 { return false; }
+    groups[5] == 0xFFFF_u16
+}
+
+fn format_v4_mapped(_: &[UInt16; 8], octets: &[Byte; 16]) -> Text {
+    let mut out: List<Byte> = [];
+    push_bytes(&mut out, b"::ffff:");
+    push_decimal_byte(&mut out, octets[12]);
+    out.push('.' as Byte);
+    push_decimal_byte(&mut out, octets[13]);
+    out.push('.' as Byte);
+    push_decimal_byte(&mut out, octets[14]);
+    out.push('.' as Byte);
+    push_decimal_byte(&mut out, octets[15]);
+    Text.from_utf8_unchecked(out.as_slice())
+}
+
+fn push_hex_group(out: &mut List<Byte>, g: UInt16) {
+    // Lowercase hex, no leading zeros.
+    if g == 0_u16 { out.push('0' as Byte); return; }
+    let mut buf: [Byte; 4] = [0_u8; 4];
+    let mut n: Int = 0;
+    let mut v = g;
+    while v > 0_u16 {
+        let nib = (v & 0x0F_u16) as Byte;
+        buf[n] = if nib < 10_u8 { ('0' as Byte) + nib } else { ('a' as Byte) + (nib - 10_u8) };
+        n = n + 1;
+        v = v >> 4_u16;
+    }
+    // Reverse.
+    let mut k: Int = n - 1;
+    while k >= 0 { out.push(buf[k]); k = k - 1; }
+}
+
+fn push_decimal_byte(out: &mut List<Byte>, b: Byte) {
+    let v = b as Int;
+    if v >= 100 {
+        out.push(('0' as Byte) + ((v / 100) as Byte));
+        out.push(('0' as Byte) + (((v / 10) % 10) as Byte));
+        out.push(('0' as Byte) + ((v % 10) as Byte));
+    } else if v >= 10 {
+        out.push(('0' as Byte) + ((v / 10) as Byte));
+        out.push(('0' as Byte) + ((v % 10) as Byte));
+    } else {
+        out.push(('0' as Byte) + (v as Byte));
+    }
+}
+
+fn push_bytes(dst: &mut List<Byte>, src: &[Byte]) {
+    let mut i: Int = 0;
+    while i < src.len() { dst.push(src[i]); i = i + 1; }
+}

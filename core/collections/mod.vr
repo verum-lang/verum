@@ -39,6 +39,7 @@ public module count_min;
 public module reservoir;
 public module lru;
 public module toposort;
+public module alias_sampler;
 
 // =============================================================================
 // Re-exports
