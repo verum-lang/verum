@@ -1,0 +1,396 @@
+// =============================================================================
+// base/semver.vr — Semantic Versioning 2.0.0 parser + comparator
+// =============================================================================
+// Layer: 0 (Base)
+// Dependencies: core
+// Reference: https://semver.org/spec/v2.0.0.html
+// =============================================================================
+//
+// Semver 2.0.0 — the package-version grammar used by npm, Cargo,
+// pip, Maven, RubyGems, Go modules, Helm charts, OCI images,
+// Kubernetes CRDs, and every modern language ecosystem.
+//
+// # Grammar (EBNF fragment)
+//
+// ```
+// version     = major "." minor "." patch [ "-" pre-release ] [ "+" build-meta ]
+// major       = <non-leading-zero digits>
+// pre-release = identifier *("." identifier)
+// build-meta  = alnum_id *("." alnum_id)
+// ```
+//
+// # Examples
+//
+//   1.2.3
+//   1.0.0-alpha
+//   1.0.0-alpha.1
+//   1.0.0-0.3.7
+//   1.0.0-x.7.z.92
+//   1.0.0+20130313144700
+//   1.0.0-beta+exp.sha.5114f85
+//
+// # Ordering (§11)
+//
+//   major → minor → patch (numeric comparison each)
+//     → pre-release: none > any prerelease
+//     → within prereleases, dot-separated identifiers compared
+//       left-to-right: numeric < alphanumeric by ASCII, fewer
+//       identifiers < more when common prefix equal.
+//   build-meta is IGNORED in precedence.
+//
+// # API
+//
+// ```
+// let v: SemVer = semver.parse(&Text.from("1.2.3-beta.1+build.5"))?;
+// assert(v.major == 1);
+// assert(v.pre_release.len() == 2);   // ["beta", "1"]
+//
+// // Total ordering.
+// let a = semver.parse(&Text.from("1.0.0-alpha"))?;
+// let b = semver.parse(&Text.from("1.0.0"))?;
+// assert(semver.cmp(&a, &b) < 0);     // prerelease < release
+// ```
+//
+// =============================================================================
+
+module core.base.semver;
+
+mount core.*;
+mount core.collections.List;
+
+// =============================================================================
+// Typed value
+// =============================================================================
+
+public type SemVer is {
+    major:       UInt64,
+    minor:       UInt64,
+    patch:       UInt64,
+    /// Dot-separated pre-release identifiers. Empty = release.
+    pre_release: List<Text>,
+    /// Dot-separated build metadata identifiers. Ignored by
+    /// `cmp` per §10.
+    build_meta:  List<Text>,
+};
+
+public type SemVerError is
+      Malformed(Text)
+    | LeadingZero(Text)
+    | InvalidIdentifier(Text);
+
+// =============================================================================
+// Parser
+// =============================================================================
+
+public fn parse(s: &Text) -> Result<SemVer, SemVerError> {
+    let b = s.as_bytes();
+    if b.len() == 0 {
+        return Err(SemVerError.Malformed(Text.from("empty")));
+    }
+
+    // Find separators.
+    let mut dash: Int = -1;
+    let mut plus: Int = -1;
+    let mut i: Int = 0;
+    while i < b.len() {
+        if dash < 0 && b[i] == ('-' as Byte) { dash = i; }
+        if plus < 0 && b[i] == ('+' as Byte) { plus = i; }
+        i = i + 1;
+    }
+    // If a `+` appears before `-`, the `-` is inside build-meta
+    // and not a prerelease separator.
+    if plus >= 0 && dash > plus { dash = -1; }
+
+    let core_end = if dash >= 0 { dash } else if plus >= 0 { plus } else { b.len() };
+
+    let (major, minor, patch) = parse_core(b, 0, core_end)?;
+
+    let mut pre_release: List<Text> = [];
+    if dash >= 0 {
+        let pre_end = if plus >= 0 { plus } else { b.len() };
+        pre_release = parse_prerelease(b, dash + 1, pre_end)?;
+    }
+
+    let mut build_meta: List<Text> = [];
+    if plus >= 0 {
+        build_meta = parse_build_meta(b, plus + 1, b.len())?;
+    }
+
+    Ok(SemVer {
+        major: major, minor: minor, patch: patch,
+        pre_release: pre_release, build_meta: build_meta,
+    })
+}
+
+fn parse_core(b: &[Byte], start: Int, end: Int) -> Result<(UInt64, UInt64, UInt64), SemVerError> {
+    // <major>.<minor>.<patch>
+    let mut dot_positions: [Int; 2] = [-1; 2];
+    let mut found: Int = 0;
+    let mut i: Int = start;
+    while i < end && found < 2 {
+        if b[i] == ('.' as Byte) {
+            dot_positions[found] = i;
+            found = found + 1;
+        }
+        i = i + 1;
+    }
+    if found != 2 {
+        return Err(SemVerError.Malformed(Text.from("need major.minor.patch")));
+    }
+    let major = parse_numeric(b, start, dot_positions[0])?;
+    let minor = parse_numeric(b, dot_positions[0] + 1, dot_positions[1])?;
+    let patch = parse_numeric(b, dot_positions[1] + 1, end)?;
+    Ok((major, minor, patch))
+}
+
+fn parse_numeric(b: &[Byte], start: Int, end: Int) -> Result<UInt64, SemVerError> {
+    if start >= end {
+        return Err(SemVerError.Malformed(Text.from("empty numeric")));
+    }
+    // §9: "numeric identifiers MUST NOT include leading zeroes."
+    if end - start > 1 && b[start] == ('0' as Byte) {
+        return Err(SemVerError.LeadingZero(slice_text(b, start, end)));
+    }
+    let mut v: UInt64 = 0_u64;
+    let mut i: Int = start;
+    while i < end {
+        let c = b[i];
+        if c < ('0' as Byte) || c > ('9' as Byte) {
+            return Err(SemVerError.InvalidIdentifier(slice_text(b, start, end)));
+        }
+        v = v * 10_u64 + ((c - ('0' as Byte)) as UInt64);
+        i = i + 1;
+    }
+    Ok(v)
+}
+
+fn parse_prerelease(b: &[Byte], start: Int, end: Int) -> Result<List<Text>, SemVerError> {
+    // Dot-separated identifiers; each must be non-empty, ASCII
+    // alphanumeric or hyphen. Numeric identifiers forbid leading zeros.
+    let parts = split_dots(b, start, end);
+    if parts.len() == 0 || (parts.len() == 1 && parts[0].0 == parts[0].1) {
+        return Err(SemVerError.Malformed(Text.from("empty prerelease")));
+    }
+    let mut out: List<Text> = [];
+    let mut i: Int = 0;
+    while i < parts.len() {
+        let (id_start, id_end) = parts[i];
+        if id_start == id_end {
+            return Err(SemVerError.Malformed(Text.from("empty identifier")));
+        }
+        validate_prerelease_id(b, id_start, id_end)?;
+        out.push(slice_text(b, id_start, id_end));
+        i = i + 1;
+    }
+    Ok(out)
+}
+
+fn validate_prerelease_id(b: &[Byte], start: Int, end: Int) -> Result<(), SemVerError> {
+    let mut is_numeric = true;
+    let mut j: Int = start;
+    while j < end {
+        let c = b[j];
+        if !is_prerelease_ch(c) {
+            return Err(SemVerError.InvalidIdentifier(slice_text(b, start, end)));
+        }
+        if !(c >= ('0' as Byte) && c <= ('9' as Byte)) { is_numeric = false; }
+        j = j + 1;
+    }
+    if is_numeric && (end - start) > 1 && b[start] == ('0' as Byte) {
+        return Err(SemVerError.LeadingZero(slice_text(b, start, end)));
+    }
+    Ok(())
+}
+
+fn parse_build_meta(b: &[Byte], start: Int, end: Int) -> Result<List<Text>, SemVerError> {
+    let parts = split_dots(b, start, end);
+    if parts.len() == 0 || (parts.len() == 1 && parts[0].0 == parts[0].1) {
+        return Err(SemVerError.Malformed(Text.from("empty build-meta")));
+    }
+    let mut out: List<Text> = [];
+    let mut i: Int = 0;
+    while i < parts.len() {
+        let (id_start, id_end) = parts[i];
+        if id_start == id_end {
+            return Err(SemVerError.Malformed(Text.from("empty build-meta identifier")));
+        }
+        let mut j: Int = id_start;
+        while j < id_end {
+            if !is_prerelease_ch(b[j]) {
+                return Err(SemVerError.InvalidIdentifier(slice_text(b, id_start, id_end)));
+            }
+            j = j + 1;
+        }
+        // Build-meta allows leading zeros (§10 — no numeric
+        // comparison inside).
+        out.push(slice_text(b, id_start, id_end));
+        i = i + 1;
+    }
+    Ok(out)
+}
+
+fn is_prerelease_ch(c: Byte) -> Bool {
+    (c >= ('0' as Byte) && c <= ('9' as Byte))
+        || (c >= ('A' as Byte) && c <= ('Z' as Byte))
+        || (c >= ('a' as Byte) && c <= ('z' as Byte))
+        || c == ('-' as Byte)
+}
+
+// =============================================================================
+// Ordering (§11)
+// =============================================================================
+
+/// Total order: negative, zero, or positive (like `memcmp`).
+public fn cmp(a: &SemVer, b: &SemVer) -> Int {
+    let c = cmp_u64(a.major, b.major);
+    if c != 0 { return c; }
+    let c = cmp_u64(a.minor, b.minor);
+    if c != 0 { return c; }
+    let c = cmp_u64(a.patch, b.patch);
+    if c != 0 { return c; }
+
+    // Pre-release: none > any prerelease (§11.3).
+    match (a.pre_release.len() == 0, b.pre_release.len() == 0) {
+        (true,  true)  => { return 0; },
+        (true,  false) => { return 1; },
+        (false, true)  => { return -1; },
+        _              => {},
+    }
+
+    // Compare identifier-by-identifier (§11.4).
+    let mut i: Int = 0;
+    while i < a.pre_release.len() && i < b.pre_release.len() {
+        let x = &a.pre_release[i];
+        let y = &b.pre_release[i];
+        let c = cmp_prerelease_id(x, y);
+        if c != 0 { return c; }
+        i = i + 1;
+    }
+    // §11.4.4: longer set > shorter when common prefix equal.
+    cmp_int(a.pre_release.len(), b.pre_release.len())
+}
+
+fn cmp_prerelease_id(a: &Text, b: &Text) -> Int {
+    let ab = a.as_bytes();
+    let bb = b.as_bytes();
+    let a_num = is_all_numeric(ab);
+    let b_num = is_all_numeric(bb);
+    // Numeric < alphanumeric (§11.4.3).
+    if a_num && !b_num { return -1; }
+    if !a_num && b_num { return 1; }
+    if a_num && b_num {
+        // Both numeric — compare as decimal (§11.4.1).
+        let av = parse_u64_unchecked(ab);
+        let bv = parse_u64_unchecked(bb);
+        return cmp_u64(av, bv);
+    }
+    // Both alphanumeric — ASCII lexicographic (§11.4.2).
+    let mut i: Int = 0;
+    while i < ab.len() && i < bb.len() {
+        if ab[i] < bb[i] { return -1; }
+        if ab[i] > bb[i] { return 1; }
+        i = i + 1;
+    }
+    cmp_int(ab.len(), bb.len())
+}
+
+fn is_all_numeric(b: &[Byte]) -> Bool {
+    if b.len() == 0 { return false; }
+    let mut i: Int = 0;
+    while i < b.len() {
+        if b[i] < ('0' as Byte) || b[i] > ('9' as Byte) { return false; }
+        i = i + 1;
+    }
+    true
+}
+
+fn parse_u64_unchecked(b: &[Byte]) -> UInt64 {
+    let mut v: UInt64 = 0_u64;
+    let mut i: Int = 0;
+    while i < b.len() {
+        v = v * 10_u64 + ((b[i] - ('0' as Byte)) as UInt64);
+        i = i + 1;
+    }
+    v
+}
+
+fn cmp_u64(a: UInt64, b: UInt64) -> Int {
+    if a < b { -1 } else if a > b { 1 } else { 0 }
+}
+
+fn cmp_int(a: Int, b: Int) -> Int {
+    if a < b { -1 } else if a > b { 1 } else { 0 }
+}
+
+// =============================================================================
+// Formatter
+// =============================================================================
+
+public fn format(v: &SemVer) -> Text {
+    let mut out: List<Byte> = [];
+    push_u64(&mut out, v.major);
+    out.push('.' as Byte);
+    push_u64(&mut out, v.minor);
+    out.push('.' as Byte);
+    push_u64(&mut out, v.patch);
+
+    if v.pre_release.len() > 0 {
+        out.push('-' as Byte);
+        join_into(&mut out, &v.pre_release, '.' as Byte);
+    }
+    if v.build_meta.len() > 0 {
+        out.push('+' as Byte);
+        join_into(&mut out, &v.build_meta, '.' as Byte);
+    }
+    Text.from_utf8_unchecked(out.as_slice())
+}
+
+// =============================================================================
+// Helpers
+// =============================================================================
+
+fn split_dots(b: &[Byte], start: Int, end: Int) -> List<(Int, Int)> {
+    let mut out: List<(Int, Int)> = [];
+    let mut cur_start: Int = start;
+    let mut i: Int = start;
+    while i < end {
+        if b[i] == ('.' as Byte) {
+            out.push((cur_start, i));
+            cur_start = i + 1;
+        }
+        i = i + 1;
+    }
+    out.push((cur_start, end));
+    out
+}
+
+fn slice_text(b: &[Byte], start: Int, end: Int) -> Text {
+    let mut out: List<Byte> = [];
+    let mut i: Int = start;
+    while i < end { out.push(b[i]); i = i + 1; }
+    Text.from_utf8_unchecked(out.as_slice())
+}
+
+fn push_u64(dst: &mut List<Byte>, n: UInt64) {
+    if n == 0_u64 { dst.push('0' as Byte); return; }
+    let mut buf: List<Byte> = [];
+    let mut x = n;
+    while x > 0_u64 {
+        let d = (x % 10_u64) as Byte;
+        buf.push(('0' as Byte) + d);
+        x = x / 10_u64;
+    }
+    let mut i: Int = buf.len() - 1;
+    while i >= 0 { dst.push(buf[i]); i = i - 1; }
+}
+
+fn join_into(dst: &mut List<Byte>, parts: &List<Text>, sep: Byte) {
+    let mut i: Int = 0;
+    while i < parts.len() {
+        if i > 0 { dst.push(sep); }
+        let pb = parts[i].as_bytes();
+        let mut j: Int = 0;
+        while j < pb.len() { dst.push(pb[j]); j = j + 1; }
+        i = i + 1;
+    }
+}

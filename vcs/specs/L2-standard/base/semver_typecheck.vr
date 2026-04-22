@@ -1,0 +1,84 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: base, semver, version, typecheck
+// @timeout: 10000
+// @expect: pass
+
+mount core.base.semver.{
+    SemVer, SemVerError,
+    parse, format, cmp,
+};
+
+fn exercise_parse() -> Result<(), SemVerError> {
+    // Basic.
+    let v: SemVer = parse(&Text.from("1.2.3"))?;
+    assert(v.major == 1_u64);
+    assert(v.minor == 2_u64);
+    assert(v.patch == 3_u64);
+    assert(v.pre_release.len() == 0);
+    assert(v.build_meta.len() == 0);
+
+    // Prerelease.
+    let v2 = parse(&Text.from("1.0.0-alpha.1"))?;
+    assert(v2.pre_release.len() == 2);
+
+    // Build metadata.
+    let v3 = parse(&Text.from("1.0.0+20130313144700"))?;
+    assert(v3.build_meta.len() == 1);
+
+    // Combined.
+    let v4 = parse(&Text.from("1.0.0-beta+exp.sha.5114f85"))?;
+    assert(v4.pre_release.len() == 1);
+    assert(v4.build_meta.len() == 3);
+
+    // Format round-trip.
+    let s: Text = format(&v4);
+    let _ = s;
+
+    // Leading-zero rejection (§9).
+    let leading = parse(&Text.from("01.2.3"));
+    let _ = leading;
+
+    // Missing patch.
+    let short = parse(&Text.from("1.0"));
+    let _ = short;
+    Ok(())
+}
+
+fn exercise_cmp() -> Result<(), SemVerError> {
+    let a = parse(&Text.from("1.0.0"))?;
+    let b = parse(&Text.from("1.0.1"))?;
+    let c = parse(&Text.from("1.0.0-alpha"))?;
+    let d = parse(&Text.from("1.0.0-beta"))?;
+    let e = parse(&Text.from("1.0.0-alpha.1"))?;
+    let f = parse(&Text.from("1.0.0-alpha.2"))?;
+    let g = parse(&Text.from("1.0.0+build.1"))?;
+
+    // Numeric cascade.
+    assert(cmp(&a, &b) < 0);
+    assert(cmp(&b, &a) > 0);
+
+    // Release > prerelease (§11.3).
+    assert(cmp(&c, &a) < 0);
+    assert(cmp(&a, &c) > 0);
+
+    // Alphabetical prerelease.
+    assert(cmp(&c, &d) < 0);
+
+    // More-specific prerelease > less (§11.4.4).
+    assert(cmp(&c, &e) < 0);
+
+    // Numeric identifier ordering.
+    assert(cmp(&e, &f) < 0);
+
+    // Build metadata doesn't affect precedence (§10).
+    assert(cmp(&a, &g) == 0);
+
+    Ok(())
+}
+
+fn main() {
+    let _ = exercise_parse();
+    let _ = exercise_cmp();
+}
