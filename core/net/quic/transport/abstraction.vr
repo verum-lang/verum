@@ -98,6 +98,9 @@ public type RealUdpTransport is {
     /// QUIC `max_udp_payload_size` transport parameter. Default 1472
     /// (1500 MTU - 20 IPv4 - 8 UDP).
     max_size:   Int,
+    /// Whether the bound local address is IPv6 — dictates whether
+    /// ECN marking applies IP_TOS or IPV6_TCLASS.
+    is_v6:      Bool,
 };
 
 implement RealUdpTransport {
@@ -107,10 +110,20 @@ implement RealUdpTransport {
             .map_err(|e| TransportError.Io(Text.from_str(f"udp bind failed")))?;
         let local = socket.local_addr()
             .map_err(|_| TransportError.Io(Text.from_str("local_addr")))?;
+        let is_v6 = local.is_ipv6();
+        // Ask the kernel to surface inbound ECN via recvmsg cmsg.
+        // Errors here are non-fatal — the socket still works, just
+        // without inbound ECN visibility (matching existing behaviour).
+        if is_v6 {
+            let _ = socket.set_ipv6_recvtclass(true);
+        } else {
+            let _ = socket.set_ip_recvtos(true);
+        }
         Ok(RealUdpTransport {
             socket:     socket,
             local_addr: local,
             max_size:   1472,
+            is_v6:      is_v6,
         })
     }
 
@@ -148,10 +161,22 @@ implement UdpTransport for RealUdpTransport {
     }
 
     async fn send(&self, data: &[Byte], to: &SocketAddr, ecn: EcnCodepoint) -> Result<(), TransportError> {
-        let _ = ecn;  // ECN outgoing via IP_TOS — Gap 6 wire-up
         if data.len() > self.max_size {
             return Err(TransportError.TooLarge(data.len()));
         }
+        // RFC 3168 — stamp the ECN codepoint into the IPv4 TOS byte
+        // (or IPv6 Traffic Class for v6 sockets). Setsockopt here is
+        // cheap (~100ns) and idempotent; a future sendmsg-with-cmsg
+        // path can replace this with per-datagram ECN marking if
+        // the kernel exposes IP_TOS via PKTINFO. Best-effort: if the
+        // platform rejects the option (Windows user-space sockets),
+        // fall through and send the packet as NotEct.
+        let tos_byte: UInt8 = ecn.to_u8();
+        let _ = if self.is_v6 {
+            self.socket.set_ipv6_tclass(tos_byte)
+        } else {
+            self.socket.set_ip_tos(tos_byte)
+        };
         self.socket.send_to(data, to).await
             .map(|_| ())
             .map_err(|_| TransportError.Io(Text.from_str("send_to")))

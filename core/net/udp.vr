@@ -72,6 +72,7 @@ mount sys.linux.syscall.{
     set_nonblocking, set_reuseaddr, set_broadcast,
     set_send_buffer_size, set_recv_buffer_size,
     set_socket_timeout,
+    set_ip_tos, set_ip_recvtos, set_ipv6_tclass, set_ipv6_recvtclass,
     // Multicast
     join_multicast_v4, leave_multicast_v4,
     set_multicast_ttl_v4, set_multicast_loop_v4,
@@ -97,6 +98,7 @@ mount sys.windows.winsock2.{
     set_nonblocking, set_reuseaddr, set_broadcast,
     set_send_buffer_size, set_recv_buffer_size,
     set_socket_timeout,
+    set_ip_tos, set_ip_recvtos, set_ipv6_tclass, set_ipv6_recvtclass,
     // Multicast
     join_multicast_v4, leave_multicast_v4,
     set_multicast_ttl_v4, set_multicast_loop_v4,
@@ -131,6 +133,10 @@ mount sys.darwin.libsystem.{
     safe_set_send_buffer_size,
     safe_set_recv_buffer_size,
     safe_set_socket_timeout,
+    safe_set_ip_tos,
+    safe_set_ip_recvtos,
+    safe_set_ipv6_tclass,
+    safe_set_ipv6_recvtclass,
     // Multicast
     safe_join_multicast_v4,
     safe_leave_multicast_v4,
@@ -161,6 +167,7 @@ mount sys.windows.winsock2.{
     set_nonblocking, set_reuseaddr, set_broadcast,
     set_send_buffer_size, set_recv_buffer_size,
     set_socket_timeout,
+    set_ip_tos, set_ip_recvtos, set_ipv6_tclass, set_ipv6_recvtclass,
     // Multicast
     join_multicast_v4, leave_multicast_v4,
     set_multicast_ttl_v4, set_multicast_loop_v4,
@@ -469,6 +476,53 @@ implement UdpSocket {
         }
         @cfg(target_os = "macos") {
             safe_set_broadcast(self.fd, broadcast).map_err(IoError.from_os_error)
+        }
+    }
+
+    /// Set the IPv4 TOS byte (RFC 3168) on every outbound datagram.
+    /// QUIC stamps the ECN codepoint in the low 2 bits; callers
+    /// computing DSCP must pass the combined byte.
+    public fn set_ip_tos(&self, tos: UInt8) -> Result<(), IoError> {
+        @cfg(any(target_os = "linux", target_os = "windows")) {
+            set_ip_tos(self.fd, tos as Int).map_err(IoError.from_os_error)
+        }
+        @cfg(target_os = "macos") {
+            safe_set_ip_tos(self.fd, tos as Int).map_err(IoError.from_os_error)
+        }
+    }
+
+    /// Enable IP_RECVTOS so the kernel surfaces the IPv4 TOS byte
+    /// on inbound datagrams via recvmsg cmsg. Required for ECN
+    /// ingress processing.
+    public fn set_ip_recvtos(&self, enable: Bool) -> Result<(), IoError> {
+        @cfg(any(target_os = "linux", target_os = "windows")) {
+            set_ip_recvtos(self.fd, enable).map_err(IoError.from_os_error)
+        }
+        @cfg(target_os = "macos") {
+            safe_set_ip_recvtos(self.fd, enable).map_err(IoError.from_os_error)
+        }
+    }
+
+    /// Set the IPv6 Traffic Class byte (RFC 3542) on every outbound
+    /// datagram. IPv6 analogue of set_ip_tos; caller picks one or the
+    /// other based on the socket family.
+    public fn set_ipv6_tclass(&self, tc: UInt8) -> Result<(), IoError> {
+        @cfg(any(target_os = "linux", target_os = "windows")) {
+            set_ipv6_tclass(self.fd, tc as Int).map_err(IoError.from_os_error)
+        }
+        @cfg(target_os = "macos") {
+            safe_set_ipv6_tclass(self.fd, tc as Int).map_err(IoError.from_os_error)
+        }
+    }
+
+    /// Enable IPV6_RECVTCLASS so the kernel surfaces the IPv6 TClass
+    /// on inbound datagrams via recvmsg cmsg.
+    public fn set_ipv6_recvtclass(&self, enable: Bool) -> Result<(), IoError> {
+        @cfg(any(target_os = "linux", target_os = "windows")) {
+            set_ipv6_recvtclass(self.fd, enable).map_err(IoError.from_os_error)
+        }
+        @cfg(target_os = "macos") {
+            safe_set_ipv6_recvtclass(self.fd, enable).map_err(IoError.from_os_error)
         }
     }
 

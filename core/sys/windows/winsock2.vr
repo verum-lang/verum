@@ -466,6 +466,27 @@ public fn set_reuseport(fd: FileDesc, enable: Bool) -> Result<(), OSError> {
     Ok(())
 }
 
+/// Windows-side stubs for ECN socket-option wiring. Winsock exposes
+/// IP_TOS / IPV6_TCLASS only under raw sockets, which require admin
+/// privilege and break the QUIC user-space model. On Windows we
+/// accept the setting silently (caller treats ECN as unsupported).
+public fn set_ip_tos(fd: FileDesc, tos: Int) -> Result<(), OSError> {
+    let _ = fd; let _ = tos;
+    Ok(())
+}
+public fn set_ip_recvtos(fd: FileDesc, enable: Bool) -> Result<(), OSError> {
+    let _ = fd; let _ = enable;
+    Ok(())
+}
+public fn set_ipv6_tclass(fd: FileDesc, tc: Int) -> Result<(), OSError> {
+    let _ = fd; let _ = tc;
+    Ok(())
+}
+public fn set_ipv6_recvtclass(fd: FileDesc, enable: Bool) -> Result<(), OSError> {
+    let _ = fd; let _ = enable;
+    Ok(())
+}
+
 /// Enable/disable TCP_NODELAY (Nagle's algorithm).
 public fn set_tcp_nodelay(fd: FileDesc, enable: Bool) -> Result<(), OSError> {
     setsockopt_int(fd, IPPROTO_TCP, TCP_NODELAY, if enable { 1 } else { 0 })

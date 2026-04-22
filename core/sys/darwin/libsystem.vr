@@ -815,6 +815,11 @@ public const IP_MULTICAST_LOOP: Int = 11;
 public const IP_ADD_MEMBERSHIP: Int = 12;
 public const IP_DROP_MEMBERSHIP: Int = 13;
 
+// IPv4 TOS / ECN (RFC 3168). Darwin keeps the BSD-numbered constants:
+// IP_TOS = 3 (Linux uses 1), IP_RECVTOS = 27.
+public const IP_TOS: Int = 3;
+public const IP_RECVTOS: Int = 27;
+
 // IPv6 options (IPPROTO_IPV6 = 41)
 public const IPPROTO_IPV6: Int = 41;
 public const IPV6_MULTICAST_IF: Int = 9;
@@ -822,6 +827,10 @@ public const IPV6_MULTICAST_HOPS: Int = 10;
 public const IPV6_MULTICAST_LOOP: Int = 11;
 public const IPV6_JOIN_GROUP: Int = 12;
 public const IPV6_LEAVE_GROUP: Int = 13;
+
+// IPv6 Traffic Class — BSD-numbered IPV6_TCLASS = 36, IPV6_RECVTCLASS = 35.
+public const IPV6_TCLASS: Int = 36;
+public const IPV6_RECVTCLASS: Int = 35;
 
 // MSG flags
 public const MSG_PEEK: Int = 0x2;
@@ -1923,6 +1932,29 @@ public fn safe_set_multicast_ttl_v4(fd: FileDesc, ttl: Int) -> Result<(), OSErro
 /// Set multicast loopback for IPv4
 public fn safe_set_multicast_loop_v4(fd: FileDesc, enabled: Bool) -> Result<(), OSError> {
     safe_setsockopt_int(fd, IPPROTO_IP, IP_MULTICAST_LOOP, if enabled { 1 } else { 0 })
+}
+
+/// Set the IPv4 TOS byte on outbound datagrams (RFC 3168). Low 2 bits
+/// are the ECN codepoint QUIC stamps in support of §13.4 / §A.7.
+public fn safe_set_ip_tos(fd: FileDesc, tos: Int) -> Result<(), OSError> {
+    safe_setsockopt_int(fd, IPPROTO_IP, IP_TOS, tos)
+}
+
+/// Ask the kernel to surface IPv4 TOS via recvmsg cmsg — required for
+/// inbound ECN processing.
+public fn safe_set_ip_recvtos(fd: FileDesc, enable: Bool) -> Result<(), OSError> {
+    safe_setsockopt_int(fd, IPPROTO_IP, IP_RECVTOS, if enable { 1 } else { 0 })
+}
+
+/// Set the IPv6 Traffic Class on outbound datagrams (RFC 3542).
+public fn safe_set_ipv6_tclass(fd: FileDesc, tc: Int) -> Result<(), OSError> {
+    safe_setsockopt_int(fd, IPPROTO_IPV6, IPV6_TCLASS, tc)
+}
+
+/// Ask the kernel to surface the IPv6 Traffic Class byte via recvmsg
+/// cmsg.
+public fn safe_set_ipv6_recvtclass(fd: FileDesc, enable: Bool) -> Result<(), OSError> {
+    safe_setsockopt_int(fd, IPPROTO_IPV6, IPV6_RECVTCLASS, if enable { 1 } else { 0 })
 }
 
 /// Peek at data without consuming it (MSG_PEEK)

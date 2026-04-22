@@ -995,6 +995,13 @@ public const IP_MULTICAST_LOOP: Int = 34;
 public const IP_ADD_MEMBERSHIP: Int = 35;
 public const IP_DROP_MEMBERSHIP: Int = 36;
 
+/// IPv4 TOS / DSCP / ECN (RFC 3168). Outgoing ECN is stamped into
+/// the low 2 bits of the IPv4 ToS byte via setsockopt(IPPROTO_IP,
+/// IP_TOS). IP_RECVTOS asks the kernel to surface the incoming TOS
+/// value via recvmsg/cmsg(IP_TOS).
+public const IP_TOS: Int = 1;
+public const IP_RECVTOS: Int = 13;
+
 /// IPv6 multicast options (IPPROTO_IPV6 = 41).
 public const IPPROTO_IPV6: Int = 41;
 public const IPV6_MULTICAST_IF: Int = 17;
@@ -1002,6 +1009,10 @@ public const IPV6_MULTICAST_HOPS: Int = 18;
 public const IPV6_MULTICAST_LOOP: Int = 19;
 public const IPV6_JOIN_GROUP: Int = 20;
 public const IPV6_LEAVE_GROUP: Int = 21;
+
+/// IPv6 Traffic Class (equivalent of IPv4 IP_TOS) — RFC 3542.
+public const IPV6_TCLASS: Int = 67;
+public const IPV6_RECVTCLASS: Int = 66;
 
 /// MSG flags for send/recv.
 public const MSG_PEEK: Int = 2;
@@ -1380,6 +1391,32 @@ public fn set_reuseaddr(fd: FileDesc, reuse: Bool) -> Result<(), OSError> {
 /// Set SO_REUSEPORT option.
 public fn set_reuseport(fd: FileDesc, reuse: Bool) -> Result<(), OSError> {
     setsockopt_int(fd, SOL_SOCKET, SO_REUSEPORT, if reuse { 1 } else { 0 })
+}
+
+/// Set the IPv4 TOS byte (RFC 3168) on every outbound datagram from
+/// this socket. QUIC uses this to stamp the ECN bits `ECT(0)` / `ECT(1)`
+/// in support of explicit congestion notification. Upper 6 bits are
+/// DSCP — caller-managed if they need QoS as well.
+public fn set_ip_tos(fd: FileDesc, tos: Int) -> Result<(), OSError> {
+    setsockopt_int(fd, IPPROTO_IP, IP_TOS, tos)
+}
+
+/// Enable IP_RECVTOS so incoming IPv4 datagrams surface their TOS
+/// byte via recvmsg cmsg. Required for inbound ECN processing.
+public fn set_ip_recvtos(fd: FileDesc, enable: Bool) -> Result<(), OSError> {
+    setsockopt_int(fd, IPPROTO_IP, IP_RECVTOS, if enable { 1 } else { 0 })
+}
+
+/// Set the IPv6 Traffic Class (RFC 3542) — IPv6 analogue of IP_TOS
+/// used for ECN marking on AF_INET6 sockets.
+public fn set_ipv6_tclass(fd: FileDesc, tc: Int) -> Result<(), OSError> {
+    setsockopt_int(fd, IPPROTO_IPV6, IPV6_TCLASS, tc)
+}
+
+/// Enable IPV6_RECVTCLASS so the kernel delivers the IPv6 TClass byte
+/// alongside each datagram (via recvmsg cmsg).
+public fn set_ipv6_recvtclass(fd: FileDesc, enable: Bool) -> Result<(), OSError> {
+    setsockopt_int(fd, IPPROTO_IPV6, IPV6_RECVTCLASS, if enable { 1 } else { 0 })
 }
 
 /// Set TCP_NODELAY option (disable Nagle's algorithm).
