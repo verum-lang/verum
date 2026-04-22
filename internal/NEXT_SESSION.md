@@ -63,6 +63,28 @@ Three sequential architectural commits closed the class of
    `core.base.data.{Data, DataBuilder}` got E401 "cannot find". Small
    fix; closes L1 `data_type.vr` and exposes the builder for users.
 
+6. **`bc15b674` fix(vbc/codegen): propagate let-annotation type name
+   for variant dispatch** — closes "undefined variable: None" VBC
+   codegen error on `let x: Maybe<Int> = None;` patterns. Multiple
+   stdlib types register variants named `None` (`Maybe`, `tls`,
+   `widget.block`, `mesh.xds`, ...). The cross-type collision set
+   strips the simple-name entry so both types must use qualified
+   forms. In a let-binding with an explicit annotation, the VBC
+   codegen now pushes the annotation's base type name as
+   `current_return_type_name` for the duration of the initializer
+   compile, so `find_function_by_suffix(".None")` picks
+   `Maybe.None` over the other stragglers. Mirrors
+   `push_field_type_context`.
+
+7. **`6ef11144` fix(vbc/codegen): propagate param-type + assert_eq
+   context for variants** — extends the same propagation to two more
+   sites: regular function call args (uses
+   `FunctionInfo.param_type_names[i]`), and `assert_eq(a, b)` (reads
+   the first arg's `variable_type_names` entry). Closes
+   `assert_eq(err_value, None)` where `err_value: Maybe<Int>`. This
+   unblocks multiple L2 error-combinator tests at codegen (some still
+   fail at runtime on unrelated method dispatch).
+
 5. **`d25585cb` fix(types/context): named context bindings + lenient
    method type build** — closes `log.info("x")` typecheck failure on
    `using [log: Logger]` patterns. Three cooperating parts:
