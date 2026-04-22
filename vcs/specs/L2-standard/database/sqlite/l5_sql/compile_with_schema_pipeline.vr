@@ -1,0 +1,126 @@
+// @test: typecheck-pass
+// @level: L2
+// @tier: 0
+// @tags: sqlite, native, sql, compile, schema-aware, end-to-end
+// @timeout: 15000
+// @description: Schema-aware compile — SELECT col FROM t works with pre-registered TableMeta
+//
+// Spec: internal/specs/sqlite-native.md §12–§14
+
+mount core.*;
+mount collections.List;
+mount core.database.sqlite.native.l5_sql.{
+    CompileError, compile, compile_with_schema,
+};
+mount core.database.sqlite.native.l2_record.Affinity;
+mount core.database.sqlite.native.l6_session.{
+    SchemaCache, schema_cache_new,
+    ColumnMeta, TableMeta, TableKind,
+};
+
+fn meta_users() -> TableMeta {
+    let cols: List<ColumnMeta> = [
+        ColumnMeta {
+            name: "id".clone(), declared_type: "INTEGER".clone(),
+            affinity: Integer, not_null: true, primary_key: true, collation: "".clone(),
+        },
+        ColumnMeta {
+            name: "name".clone(), declared_type: "TEXT".clone(),
+            affinity: Text, not_null: false, primary_key: false, collation: "".clone(),
+        },
+    ];
+    TableMeta {
+        schema: "".clone(),
+        name: "users".clone(),
+        kind: TkTable,
+        root_page: 2,
+        columns: cols,
+        primary_key_cols: ["id".clone()],
+        strict: false,
+        without_rowid: false,
+        created_sql: "".clone(),
+    }
+}
+
+fn compile_with_schema_known_table_select_star() {
+    let mut sc = schema_cache_new();
+    let _ = sc.register_table(meta_users());
+    match compile_with_schema(&"SELECT * FROM users".clone(), &sc) {
+        Ok(prog) => {
+            assert(prog.instruction_count() > 0);
+            assert(prog.cursor_count() >= 1);
+        }
+        Err(_) => panic("SELECT * FROM users should compile with schema"),
+    }
+}
+
+fn compile_with_schema_select_specific_column() {
+    let mut sc = schema_cache_new();
+    let _ = sc.register_table(meta_users());
+    match compile_with_schema(&"SELECT id FROM users".clone(), &sc) {
+        Ok(prog) => {
+            assert(prog.instruction_count() > 0);
+        }
+        Err(_) => panic("SELECT id FROM users"),
+    }
+}
+
+fn compile_with_schema_where_filter() {
+    let mut sc = schema_cache_new();
+    let _ = sc.register_table(meta_users());
+    match compile_with_schema(&"SELECT id FROM users WHERE id = 1".clone(), &sc) {
+        Ok(prog) => {
+            assert(prog.instruction_count() > 0);
+        }
+        Err(_) => panic("SELECT id FROM users WHERE"),
+    }
+}
+
+fn compile_with_schema_unknown_table_rejects() {
+    let sc = schema_cache_new();
+    match compile_with_schema(&"SELECT * FROM ghost".clone(), &sc) {
+        Ok(_) => panic("unknown table must reject"),
+        Err(_) => {},
+    }
+}
+
+fn compile_with_schema_unknown_column_rejects() {
+    let mut sc = schema_cache_new();
+    let _ = sc.register_table(meta_users());
+    match compile_with_schema(&"SELECT email FROM users".clone(), &sc) {
+        Ok(_) => panic("unknown column must reject"),
+        Err(_) => {},
+    }
+}
+
+fn compile_with_schema_non_select_falls_through() {
+    // Non-SELECT statements should take the schema-free path but
+    // still return a program.
+    let sc = schema_cache_new();
+    match compile_with_schema(&"BEGIN".clone(), &sc) {
+        Ok(_) => {}, Err(_) => panic("BEGIN"),
+    }
+    match compile_with_schema(&"CREATE TABLE x (y INT)".clone(), &sc) {
+        Ok(_) => {}, Err(_) => panic("CREATE TABLE"),
+    }
+}
+
+fn legacy_compile_still_rejects_bare_select_star_from() {
+    // Without schema, SELECT * FROM t must still fail with CeCodegen
+    // (our backwards-compat contract from session 11).
+    match compile(&"SELECT * FROM t".clone()) {
+        Ok(_) => panic("schema-free compile of SELECT * FROM t must fail"),
+        Err(_) => {},
+    }
+}
+
+fn main() {
+    compile_with_schema_known_table_select_star();
+    compile_with_schema_select_specific_column();
+    compile_with_schema_where_filter();
+    compile_with_schema_unknown_table_rejects();
+    compile_with_schema_unknown_column_rejects();
+    compile_with_schema_non_select_falls_through();
+    legacy_compile_still_rejects_bare_select_star_from();
+    print("compile_with_schema_pipeline typecheck ok");
+}

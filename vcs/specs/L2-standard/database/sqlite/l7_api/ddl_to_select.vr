@@ -1,0 +1,130 @@
+// @test: typecheck-pass
+// @level: L2
+// @tier: 0
+// @tags: sqlite, native, l7, ddl, select, end-to-end
+// @timeout: 15000
+// @description: CREATE TABLE auto-registers; subsequent SELECT compiles against schema
+//
+// Spec: internal/specs/sqlite-native.md §16.1
+
+mount core.*;
+mount collections.List;
+mount core.database.sqlite.native.l7_api.{
+    Database, DbError,
+    open_admin, open_readwrite,
+};
+
+fn create_table_registers_schema_then_select_compiles() {
+    let mut db = match open_admin() {
+        Ok(d)  => d,
+        Err(_) => { panic("open_admin"); return; }
+    };
+    // CREATE TABLE t (id INTEGER PRIMARY KEY, name TEXT) — should register.
+    match db.execute(&"CREATE TABLE t (id INTEGER PRIMARY KEY, name TEXT)".clone()) {
+        Ok(_)  => {},
+        Err(_) => { panic("CREATE TABLE"); return; }
+    }
+    // Subsequent SELECT * FROM t must now compile (previously CeCodegen).
+    match db.prepare(&"SELECT * FROM t".clone()) {
+        Ok(stmt) => {
+            assert(stmt.instruction_count() > 0);
+            assert(stmt.cursor_count() >= 1);
+        }
+        Err(_) => panic("SELECT * FROM t after CREATE"),
+    }
+}
+
+fn select_specific_column_and_where_compile() {
+    let mut db = match open_admin() {
+        Ok(d)  => d,
+        Err(_) => { panic("open_admin"); return; }
+    };
+    let _ = db.execute(&"CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT)".clone());
+    match db.prepare(&"SELECT name FROM users WHERE id = 1".clone()) {
+        Ok(stmt) => { assert(stmt.instruction_count() > 0); }
+        Err(_) => panic("SELECT name FROM users WHERE"),
+    }
+}
+
+fn readonly_cannot_create_table() {
+    let mut db = match open_readwrite() {
+        Ok(d)  => d,
+        Err(_) => { panic("open_readwrite"); return; }
+    };
+    match db.execute(&"CREATE TABLE t (x INT)".clone()) {
+        Ok(_)  => panic("rw should not DDL"),
+        Err(_) => {},
+    }
+}
+
+fn drop_table_also_unregisters() {
+    let mut db = match open_admin() {
+        Ok(d)  => d,
+        Err(_) => { panic("open_admin"); return; }
+    };
+    let _ = db.execute(&"CREATE TABLE t (x INT)".clone());
+    let _ = db.execute(&"DROP TABLE t".clone());
+    // After DROP, the table is gone → SELECT should fail at compile.
+    match db.prepare(&"SELECT * FROM t".clone()) {
+        Ok(_)  => panic("SELECT after DROP must fail"),
+        Err(_) => {},
+    }
+}
+
+fn drop_nonexistent_without_if_exists_errors() {
+    let mut db = match open_admin() {
+        Ok(d)  => d,
+        Err(_) => { panic("open_admin"); return; }
+    };
+    match db.execute(&"DROP TABLE ghost".clone()) {
+        Ok(_)  => panic("DROP nonexistent without IF EXISTS must fail"),
+        Err(_) => {},
+    }
+}
+
+fn drop_nonexistent_with_if_exists_ok() {
+    let mut db = match open_admin() {
+        Ok(d)  => d,
+        Err(_) => { panic("open_admin"); return; }
+    };
+    match db.execute(&"DROP TABLE IF EXISTS ghost".clone()) {
+        Ok(_)  => {},
+        Err(_) => panic("DROP IF EXISTS should be OK"),
+    }
+}
+
+fn create_twice_without_if_not_exists_errors() {
+    let mut db = match open_admin() {
+        Ok(d)  => d,
+        Err(_) => { panic("open_admin"); return; }
+    };
+    let _ = db.execute(&"CREATE TABLE t (x INT)".clone());
+    match db.execute(&"CREATE TABLE t (x INT)".clone()) {
+        Ok(_)  => panic("second CREATE must fail"),
+        Err(_) => {},
+    }
+}
+
+fn create_if_not_exists_idempotent() {
+    let mut db = match open_admin() {
+        Ok(d)  => d,
+        Err(_) => { panic("open_admin"); return; }
+    };
+    let _ = db.execute(&"CREATE TABLE t (x INT)".clone());
+    match db.execute(&"CREATE TABLE IF NOT EXISTS t (x INT)".clone()) {
+        Ok(_)  => {},
+        Err(_) => panic("IF NOT EXISTS second should be OK"),
+    }
+}
+
+fn main() {
+    create_table_registers_schema_then_select_compiles();
+    select_specific_column_and_where_compile();
+    readonly_cannot_create_table();
+    drop_table_also_unregisters();
+    drop_nonexistent_without_if_exists_errors();
+    drop_nonexistent_with_if_exists_ok();
+    create_twice_without_if_not_exists_errors();
+    create_if_not_exists_idempotent();
+    print("ddl_to_select typecheck ok");
+}

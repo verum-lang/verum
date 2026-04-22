@@ -32,12 +32,16 @@ mount core.*;
 mount collections.List;
 mount base.{Result, Ok, Err, Text};
 mount core.database.sqlite.native.l4_vdbe.{Register, StepResult, VdbeProgram};
-mount core.database.sqlite.native.l5_sql.{CompileError};
+mount core.database.sqlite.native.l5_sql.{
+    CompileError, Statement,
+    parse_one,
+};
 mount core.database.sqlite.native.l6_session.{
     Connection, ConnectionMode, ConnectionError, TxMode,
     PreparedStatement, StmtError,
-    open_memory, prepare,
+    open_memory, prepare, prepare_with_schema,
     mode_can_write, mode_can_ddl,
+    table_meta_from_create,
 };
 
 // -----------------------------------------------------------------------------
@@ -107,11 +111,11 @@ implement Database {
     // Prepare / execute / query
     // -------------------------------------------------------------------------
 
-    /// Compile `sql` into a PreparedStatement. No capability check is
-    /// done here — the statement is merely compiled; execution-time
-    /// capability gates happen in `step`.
+    /// Compile `sql` into a PreparedStatement. Routes through the
+    /// schema-aware pipeline so that `SELECT ... FROM t` resolves
+    /// column references against the live SchemaCache.
     public fn prepare(&self, sql: &Text) -> Result<PreparedStatement, DbError> {
-        match prepare(sql) {
+        match prepare_with_schema(sql, self.conn.schema()) {
             Ok(p)  => Ok(p),
             Err(e) => Err(DbStmtError(e)),
         }
@@ -119,9 +123,62 @@ implement Database {
 
     /// Compile + run-to-completion. Intended for statements that
     /// produce no rows (DDL, INSERT/UPDATE/DELETE, transaction
-    /// control). Returns `DbError::DbMisuse` if the statement yields
-    /// rows (caller should use `query` for that).
+    /// control). For CREATE TABLE / DROP TABLE we also apply the
+    /// schema side-effect so subsequent SELECTs can resolve.
     public fn execute(&mut self, sql: &Text) -> Result<(), DbError> {
+        // Parse once up front for the schema side-effect hook.
+        let stmt_ast = match parse_one(sql) {
+            Ok(s)  => s,
+            Err(e) => {
+                // Let the regular prepare path surface the parse error
+                // with the richer CompileError wrapping.
+                let _ = e;
+                let mut stmt = match self.prepare(sql) {
+                    Ok(s)  => s, Err(err) => { return Err(err); }
+                };
+                let _ = stmt;
+                return Err(DbMisuse("unreachable — parse failed after re-parse succeeded".clone()));
+            }
+        };
+
+        // Apply DDL side-effects BEFORE compiling so that a subsequent
+        // same-transaction SELECT sees the new table.
+        match stmt_ast {
+            SCreateTable(ref ct) => {
+                match self.conn.ensure_admin() {
+                    Ok(_)  => {},
+                    Err(e) => { return Err(db_error_from_conn(e)); }
+                }
+                let root = self.conn.allocate_root_page();
+                let meta = table_meta_from_create(ct, root, sql.clone());
+                let already = self.conn.schema().has_table(&ct.table.schema, &ct.table.name);
+                if already {
+                    if ct.if_not_exists {
+                        // IF NOT EXISTS is non-failure
+                    } else {
+                        return Err(DbConstraint("table already exists".clone()));
+                    }
+                } else {
+                    let _ = self.conn.schema_mut().register_table(meta);
+                }
+            }
+            SDropTable(if_exists, ref tref) => {
+                match self.conn.ensure_admin() {
+                    Ok(_)  => {},
+                    Err(e) => { return Err(db_error_from_conn(e)); }
+                }
+                let has = self.conn.schema().has_table(&tref.schema, &tref.name);
+                if !has {
+                    if !if_exists {
+                        return Err(DbGeneric("table does not exist".clone()));
+                    }
+                } else {
+                    let _ = self.conn.schema_mut().drop_table(&tref.schema, &tref.name);
+                }
+            }
+            _ => {}
+        }
+
         let mut stmt = match self.prepare(sql) {
             Ok(s)  => s, Err(e) => { return Err(e); }
         };

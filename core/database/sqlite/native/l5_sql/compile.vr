@@ -30,8 +30,9 @@ mount core.database.sqlite.native.l5_sql.parser.{
     stream_new, parse_one, ParseError,
 };
 mount core.database.sqlite.native.l5_sql.planner.{
-    plan_statement, PlanError,
+    plan_statement, plan_statement_with_schema, PlanError,
 };
+mount core.database.sqlite.native.l6_session.schema_cache.SchemaCache;
 mount core.database.sqlite.native.l5_sql.codegen.{
     codegen, CodegenError,
 };
@@ -93,4 +94,29 @@ public fn compile_raw(sql: &Text) -> Result<VdbeProgram, CompileError> {
         Ok(p)  => Ok(p),
         Err(e) => Err(CeCodegen(e)),
     }
+}
+
+/// Schema-aware compile. For SELECT over a known table, this path
+/// resolves column references (EColumn → EColumnRef) and emits a
+/// full TableScan loop with the table's real root_page + column
+/// count. Non-SELECT statements follow the same plan+codegen path
+/// as `compile`.
+public fn compile_with_schema(
+    sql: &Text,
+    schema: &SchemaCache,
+) -> Result<VdbeProgram, CompileError> {
+    let stmt = match parse_one(sql) {
+        Ok(s)  => s,
+        Err(e) => { return Err(CeParse(e)); }
+    };
+    let plan = match plan_statement_with_schema(&stmt, schema) {
+        Ok(p)  => p,
+        Err(e) => { return Err(CePlan(e)); }
+    };
+    let mut program = match codegen(&plan, sql.clone()) {
+        Ok(p)  => p,
+        Err(e) => { return Err(CeCodegen(e)); }
+    };
+    let _ = optimize(&mut program);
+    Ok(program)
 }

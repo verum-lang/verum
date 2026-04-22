@@ -437,3 +437,140 @@ fn clone_create_table(ct: &CreateTableStmt) -> CreateTableStmt {
         without_rowid: ct.without_rowid,
     }
 }
+
+// =============================================================================
+// Schema-aware planning — threads SchemaCache through for TableScan
+// =============================================================================
+
+mount core.database.sqlite.native.l6_session.schema_cache.{SchemaCache, TableMeta};
+mount core.database.sqlite.native.l5_sql.resolver.{
+    ColumnScope, resolve_expr, scope_from_table_meta,
+    ResolveError,
+};
+
+/// Plan a statement against a live SchemaCache. For SELECT over a
+/// single FROM table the planner:
+///
+///   1. Looks up the table's metadata (root_page, column list).
+///   2. Builds a ColumnScope and resolves EColumn → EColumnRef in
+///      every result-column expression + WHERE predicate.
+///   3. Emits PnTableScan with the real root_page + n_cols, wraps
+///      with PnFilter / PnProject / PnLimit.
+///
+/// For non-SELECT statements the schema cache is consulted only for
+/// validation hooks; the rest falls through to plain `plan_statement`.
+public fn plan_statement_with_schema(
+    stmt: &Statement,
+    schema: &SchemaCache,
+) -> Result<PlanNode, PlanError> {
+    match stmt {
+        SSelect(ref sel) => plan_select_with_schema(sel, schema),
+        _ => plan_statement(stmt),
+    }
+}
+
+fn plan_select_with_schema(
+    sel: &SelectStmt,
+    schema: &SchemaCache,
+) -> Result<PlanNode, PlanError> {
+    let simple = match sel.kind {
+        SkSimple(ref s) => s,
+        SkCompound(_, _, _) => {
+            return Err(plan_error("compound SELECT pending".clone()));
+        }
+    };
+
+    // No FROM → fall back to the schema-free planner.
+    match simple.from {
+        None => { return plan_select(sel); }
+        _ => {}
+    }
+
+    // Resolve single-table FROM.
+    let (tref, cursor_id) = match simple.from {
+        Some(ref fi) => {
+            match fi {
+                FiTable(ref t) => (clone_table_ref(t), 0),
+                _ => { return Err(plan_error("only FROM <table> supported with schema awareness in v1".clone())); }
+            }
+        }
+        None => { return Err(plan_error("unreachable".clone())); }
+    };
+
+    let meta = match schema.lookup_table(&tref.schema, &tref.name) {
+        Ok(m)  => m,
+        Err(_) => { return Err(plan_error("unknown table".clone())); }
+    };
+
+    // Build scope, resolve expressions.
+    let scope = scope_from_table_meta(cursor_id, tref.alias.clone(), &meta);
+    let mut scopes: List<ColumnScope> = List.new();
+    scopes.push(scope);
+
+    // Scan source with real root_page + n_cols.
+    let mut node: PlanNode = PnTableScan(clone_table_ref(&tref), cursor_id, meta.columns.len());
+
+    // WHERE.
+    match simple.where_clause {
+        Some(ref w) => {
+            let resolved = match resolve_expr(w, &scopes) {
+                Ok(e)  => e,
+                Err(_) => { return Err(plan_error("WHERE resolve failed".clone())); }
+            };
+            node = PnFilter(Heap(node), resolved);
+        }
+        None => {}
+    }
+
+    // Projection — resolve every result column expression.
+    let mut plan_cols: List<PlanColumn> = List.new();
+    let mut i: Int = 0;
+    while i < simple.result_columns.len() {
+        match simple.result_columns[i] {
+            RcExpr(ref e, ref alias) => {
+                let resolved = match resolve_expr(e, &scopes) {
+                    Ok(r)  => r,
+                    Err(_) => { return Err(plan_error("SELECT-list resolve failed".clone())); }
+                };
+                plan_cols.push(PlanColumn { alias: alias.clone(), expr: resolved });
+            }
+            RcStar => {
+                // Expand `*` into one EColumnRef per column.
+                let mut k: Int = 0;
+                while k < meta.columns.len() {
+                    plan_cols.push(PlanColumn {
+                        alias: meta.columns[k].name.clone(),
+                        expr: EColumnRef(cursor_id, k),
+                    });
+                    k = k + 1;
+                }
+            }
+            RcTableStar(_) => {
+                let mut k: Int = 0;
+                while k < meta.columns.len() {
+                    plan_cols.push(PlanColumn {
+                        alias: meta.columns[k].name.clone(),
+                        expr: EColumnRef(cursor_id, k),
+                    });
+                    k = k + 1;
+                }
+            }
+        }
+        i = i + 1;
+    }
+    node = PnProject(Heap(node), plan_cols);
+
+    // LIMIT (no ORDER BY yet — spec-rich sort planner pending).
+    match sel.limit {
+        Some(ref lc) => {
+            let off: Maybe<Expr> = match lc.offset {
+                Some(ref e) => Some(clone_expr(e)),
+                None => None,
+            };
+            node = PnLimit(Heap(node), clone_expr(&lc.limit), off);
+        }
+        None => {}
+    }
+
+    Ok(node)
+}

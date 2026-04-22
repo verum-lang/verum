@@ -67,7 +67,7 @@ public mount .ast.{
 
 public mount .planner.{
     PlanNode, PlanColumn, PlanError, DropPlanKind, TxAction,
-    plan_statement, plan_error,
+    plan_statement, plan_statement_with_schema, plan_error,
 };
 
 public mount .codegen.{
@@ -81,5 +81,5 @@ public mount .resolver.{
 };
 
 public mount .compile.{
-    CompileError, compile, compile_raw,
+    CompileError, compile, compile_raw, compile_with_schema,
 };

@@ -26,5 +26,5 @@ public mount .connection.{
 
 public mount .statement.{
     ParamBindings, PreparedStatement, StmtError,
-    param_bindings_new, prepare,
+    param_bindings_new, prepare, prepare_with_schema,
 };

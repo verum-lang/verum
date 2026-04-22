@@ -33,8 +33,9 @@ mount core.database.sqlite.native.l4_vdbe.{
     CursorSlotKind,
 };
 mount core.database.sqlite.native.l5_sql.{
-    compile, CompileError, VdbeProgram as _VdbeProgram,
+    compile, compile_with_schema, CompileError, VdbeProgram as _VdbeProgram,
 };
+mount core.database.sqlite.native.l6_session.schema_cache.SchemaCache;
 
 // -----------------------------------------------------------------------------
 // Binding table
@@ -110,6 +111,28 @@ public type PreparedStatement is {
 /// starts at pc=0 with all registers null.
 public fn prepare(sql: &Text) -> Result<PreparedStatement, StmtError> {
     let program = match compile(sql) {
+        Ok(p)  => p,
+        Err(e) => { return Err(StmtCompile(e)); }
+    };
+    let state = vdbe_state_new(&program);
+    let cursors = cursor_table_new(program.cursor_count(), 4096, 0);
+    Ok(PreparedStatement {
+        program: program,
+        state: state,
+        cursors: cursors,
+        bindings: param_bindings_new(),
+        sql: sql.clone(),
+        done: false,
+        last_row_start: 0,
+        last_row_cols: 0,
+    })
+}
+
+/// Schema-aware prepare. Resolves column references against the
+/// caller's SchemaCache so that SELECT ... FROM t works. Non-SELECT
+/// statements take the same code path as `prepare`.
+public fn prepare_with_schema(sql: &Text, schema: &SchemaCache) -> Result<PreparedStatement, StmtError> {
+    let program = match compile_with_schema(sql, schema) {
         Ok(p)  => p,
         Err(e) => { return Err(StmtCompile(e)); }
     };

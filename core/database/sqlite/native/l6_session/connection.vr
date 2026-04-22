@@ -100,6 +100,9 @@ public type Connection is {
     schema: SchemaCache,
     tx: TxState,
     path: Text,                  // ":memory:" / absolute path / URI
+    next_root_page: Int,         // bump-allocator for CREATE TABLE / CREATE INDEX
+                                  // (first user table starts at page 2; page 1 is
+                                  // the main DB header + sqlite_schema root).
 };
 
 /// Open an in-memory connection with the given mode. All three modes
@@ -115,6 +118,7 @@ public fn open_memory(mode: ConnectionMode) -> Result<Connection, ConnectionErro
         schema: schema_cache_new(),
         tx: tx_state_autocommit(),
         path: ":memory:".clone(),
+        next_root_page: 2,
     })
 }
 
@@ -198,6 +202,18 @@ implement Connection {
 
     public fn schema(&self) -> &SchemaCache { &self.schema }
     public fn schema_mut(&mut self) -> &mut SchemaCache { &mut self.schema }
+
+    /// Allocate a fresh root_page for a new B-tree (CREATE TABLE /
+    /// CREATE INDEX). Bumps the internal counter and returns the
+    /// assigned page number. v1 uses a simple bump; the real pager's
+    /// free-list allocator takes over in a follow-up.
+    public fn allocate_root_page(&mut self) -> Int {
+        let p = self.next_root_page;
+        self.next_root_page = self.next_root_page + 1;
+        p
+    }
+
+    public fn peek_next_root_page(&self) -> Int { self.next_root_page }
 
     // -------------------------------------------------------------------------
     // Pager access — internal, consumed by the statement executor
