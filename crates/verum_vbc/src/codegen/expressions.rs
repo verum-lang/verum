@@ -3067,9 +3067,36 @@ impl VbcCodegen {
                         .ok_or_else(|| CodegenError::internal("call arg has no value"))?;
                     arg_results.push(arg_val);
                 } else {
+                    // Propagate param-type context for variant-name
+                    // disambiguation. When `func(x: Maybe<Int>)` is called
+                    // with bare `None`, the param's base type name is
+                    // pushed as `current_return_type_name` for the
+                    // duration of the arg compile so that
+                    // `find_function_by_suffix(".None")` picks
+                    // `Maybe.None` out of the cross-type collision set.
+                    // Same pattern as `push_field_type_context` and
+                    // the let-binding annotation override in
+                    // `compile_let`.
+                    let saved = func_info
+                        .param_type_names
+                        .get(i)
+                        .filter(|s| !s.is_empty())
+                        .map(|type_name| {
+                            let base = type_name
+                                .split('<')
+                                .next()
+                                .unwrap_or(type_name.as_str())
+                                .to_string();
+                            let prev = self.ctx.current_return_type_name.clone();
+                            self.ctx.current_return_type_name = Some(base);
+                            prev
+                        });
                     let arg_val = self
                         .compile_expr(arg)?
                         .ok_or_else(|| CodegenError::internal("call arg has no value"))?;
+                    if let Some(saved) = saved {
+                        self.ctx.current_return_type_name = saved;
+                    }
                     arg_results.push(arg_val);
                 }
             }
@@ -3606,9 +3633,35 @@ impl VbcCodegen {
                 let left_reg = self
                     .compile_expr(&args[0])?
                     .ok_or_else(|| CodegenError::internal("assert_eq left has no value"))?;
+                // Propagate the first argument's variable type name (if it is
+                // a Path) as `current_return_type_name` so that a bare variant
+                // constructor in the second argument (e.g.
+                // `assert_eq(err_value, None)` where `err_value: Maybe<Int>`)
+                // resolves the ambiguous simple name against the first
+                // argument's nominal type. Unifies with the let-binding and
+                // param-type disambiguation paths.
+                let saved_assert_rt = if let ExprKind::Path(p) = &args[0].kind
+                    && p.segments.len() == 1
+                    && let Some(PathSegment::Name(id)) = p.segments.first()
+                    && let Some(type_name) = self.ctx.variable_type_names.get(id.name.as_str()).cloned()
+                {
+                    let base = type_name
+                        .split('<')
+                        .next()
+                        .unwrap_or(type_name.as_str())
+                        .to_string();
+                    let prev = self.ctx.current_return_type_name.clone();
+                    self.ctx.current_return_type_name = Some(base);
+                    Some(prev)
+                } else {
+                    None
+                };
                 let right_reg = self
                     .compile_expr(&args[1])?
                     .ok_or_else(|| CodegenError::internal("assert_eq right has no value"))?;
+                if let Some(prev) = saved_assert_rt {
+                    self.ctx.current_return_type_name = prev;
+                }
 
                 // Compare values using generic equality (works for all types)
                 let cmp_result = self.ctx.alloc_temp();
