@@ -971,7 +971,10 @@ impl SpecializationValidator {
                         .all(|(a1, a2)| self.types_compatible(a1, a2))
             }
 
-            // Generic types - name and args must be compatible
+            // Generic types - name and args must be compatible.
+            // Numeric aliases (`u64` ↔ `UInt64`, etc.) normalize via
+            // `Type::canonical_primitive` so literal-synthesized types
+            // match user-declared parameter types.
             (
                 Type::Generic {
                     name: n1,
@@ -982,7 +985,8 @@ impl SpecializationValidator {
                     args: args2,
                 },
             ) => {
-                n1 == n2
+                Type::canonical_primitive(n1.as_str())
+                    == Type::canonical_primitive(n2.as_str())
                     && args1.len() == args2.len()
                     && args1
                         .iter()

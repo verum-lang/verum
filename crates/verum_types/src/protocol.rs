@@ -10652,9 +10652,15 @@ impl ProtocolChecker {
             (Type::Char, Type::Char) => true,
             (Type::Text, Type::Text) => true,
 
-            // Named types: check path and args
+            // Named types: check path and args. Numeric aliases
+            // (`u64` ↔ `UInt64`, etc.) normalize via
+            // `Type::canonical_primitive` so literal-synthesized
+            // types match user-declared parameter types.
             (Type::Named { path: p1, args: a1 }, Type::Named { path: p2, args: a2 }) => {
-                self.make_protocol_key(p1) == self.make_protocol_key(p2)
+                let k1 = self.make_protocol_key(p1);
+                let k2 = self.make_protocol_key(p2);
+                Type::canonical_primitive(k1.as_str())
+                    == Type::canonical_primitive(k2.as_str())
                     && a1.len() == a2.len()
                     && a1
                         .iter()
@@ -10662,9 +10668,10 @@ impl ProtocolChecker {
                         .all(|(t1, t2)| self.types_compatible(t1, t2))
             }
 
-            // Generic types
+            // Generic types — same numeric-alias normalization.
             (Type::Generic { name: n1, args: a1 }, Type::Generic { name: n2, args: a2 }) => {
-                n1 == n2
+                Type::canonical_primitive(n1.as_str())
+                    == Type::canonical_primitive(n2.as_str())
                     && a1.len() == a2.len()
                     && a1
                         .iter()

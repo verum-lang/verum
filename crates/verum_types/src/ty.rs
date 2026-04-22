@@ -2268,6 +2268,40 @@ impl Type {
         Type::Named { path: Path::single(ident), args: List::new() }
     }
 
+    /// Collapse Rust-style lowercase numeric aliases (`u64`, `i32`,
+    /// `f64`, `u8`) onto their canonical UpperCamel spellings
+    /// (`UInt64`, `Int32`, `Float64`, `Byte`). Non-primitive names
+    /// pass through unchanged so nominal types keep their exact
+    /// identity.
+    ///
+    /// Used by every type-compatibility / dispatch path that
+    /// receives types spelled either way (the grammar accepts both,
+    /// but only canonical forms make it out of `*_refined` literal
+    /// synthesis — see `primitive_named`). Central here so all three
+    /// consumers (`infer::Checker::types_compatible`,
+    /// `protocol::types_compatible`,
+    /// `specialization::types_compatible`) stay coherent with any
+    /// future extension of the numeric set.
+    pub fn canonical_primitive(name: &str) -> &str {
+        match name {
+            "i8"    => "Int8",
+            "i16"   => "Int16",
+            "i32"   => "Int32",
+            "i64"   => "Int64",
+            "i128"  => "Int128",
+            "isize" => "IntSize",
+            "u8" | "UInt8" => "Byte",
+            "u16"   => "UInt16",
+            "u32"   => "UInt32",
+            "u64"   => "UInt64",
+            "u128"  => "UInt128",
+            "usize" => "UIntSize",
+            "f32"   => "Float32",
+            "f64"   => "Float64",
+            other   => other,
+        }
+    }
+
     pub fn i8_refined(_value: i8) -> Self      { Self::primitive_named("Int8") }
     pub fn i16_refined(_value: i16) -> Self    { Self::primitive_named("Int16") }
     pub fn i32_refined(_value: i32) -> Self    { Self::primitive_named("Int32") }

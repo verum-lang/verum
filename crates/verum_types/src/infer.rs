@@ -19227,50 +19227,20 @@ impl TypeChecker {
             // legitimate calls and method resolution falls through to the
             // generic "no method found" fallback.
             (Type::Generic { name: n1, .. }, Type::Generic { name: n2, .. }) => {
-                Self::canonical_primitive(n1.as_str()) == Self::canonical_primitive(n2.as_str())
+                Type::canonical_primitive(n1.as_str()) == Type::canonical_primitive(n2.as_str())
             }
             (Type::Named { path: p1, .. }, Type::Named { path: p2, .. }) => {
-                Self::canonical_primitive(Self::get_protocol_name_str(p1))
-                    == Self::canonical_primitive(Self::get_protocol_name_str(p2))
+                Type::canonical_primitive(Self::get_protocol_name_str(p1))
+                    == Type::canonical_primitive(Self::get_protocol_name_str(p2))
             }
             (Type::Generic { name, .. }, Type::Named { path, .. })
             | (Type::Named { path, .. }, Type::Generic { name, .. }) => {
-                Self::canonical_primitive(name.as_str())
-                    == Self::canonical_primitive(Self::get_protocol_name_str(path))
+                Type::canonical_primitive(name.as_str())
+                    == Type::canonical_primitive(Self::get_protocol_name_str(path))
             }
             // For types we can't structurally compare (Array, Tuple, Function, Reference, etc.),
             // assume compatible and let the actual type checker decide.
             _ => true,
-        }
-    }
-
-    /// Collapse Rust-style lowercase primitive aliases (`u64`, `i32`,
-    /// `f64`, `u8`) onto their canonical UpperCamel names
-    /// (`UInt64`, `Int32`, `Float64`, `Byte`). For any non-primitive
-    /// name the input is returned unchanged so nominal types keep
-    /// their exact spelling.
-    ///
-    /// Placed here (not in `ty.rs`) so the set of canonical names is
-    /// owned by the same module that defines `is_sized_integer_type`
-    /// / `is_float_like_type` — every extension of the numeric set
-    /// must keep all three tables coherent.
-    fn canonical_primitive(name: &str) -> &str {
-        match name {
-            "i8"    => "Int8",
-            "i16"   => "Int16",
-            "i32"   => "Int32",
-            "i64"   => "Int64",
-            "i128"  => "Int128",
-            "isize" => "IntSize",
-            "u8" | "UInt8" => "Byte",
-            "u16"   => "UInt16",
-            "u32"   => "UInt32",
-            "u64"   => "UInt64",
-            "u128"  => "UInt128",
-            "usize" => "UIntSize",
-            "f32"   => "Float32",
-            "f64"   => "Float64",
-            other   => other,
         }
     }
 
