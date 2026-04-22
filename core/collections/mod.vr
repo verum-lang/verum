@@ -33,6 +33,7 @@ public module btree;
 public module adjacency_list;
 public module ttl_cache;
 public module bloom;
+public module consistent_hash;
 
 // =============================================================================
 // Re-exports
@@ -116,6 +117,9 @@ public mount .ttl_cache.{
 
 // From bloom
 public mount .bloom.{BloomFilter, BloomConfig};
+
+// From consistent_hash
+public mount .consistent_hash.{ConsistentHashRing, DEFAULT_VIRTUAL_NODES};
 
 // =============================================================================
 // Prelude exports

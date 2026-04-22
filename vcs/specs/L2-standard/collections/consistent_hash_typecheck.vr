@@ -1,0 +1,42 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: collections, consistent-hash, ketama, ring, typecheck
+// @timeout: 10000
+// @expect: pass
+
+mount core.collections.{ConsistentHashRing, DEFAULT_VIRTUAL_NODES};
+
+fn exercise_ring() {
+    let mut ring = ConsistentHashRing.new();
+    ring.add_node(Text.from("cache-a"));
+    ring.add_node(Text.from("cache-b"));
+    ring.add_node(Text.from("cache-c"));
+
+    // Lookup
+    let key: [Byte; 11] = [0x73_u8, 0x65_u8, 0x73_u8, 0x73_u8, 0x69_u8,
+                           0x6F_u8, 0x6E_u8, 0x3A_u8, 0x34_u8, 0x32_u8, 0x00_u8];
+    let _primary = ring.node_for_key(&key[..]);
+
+    // N-way replication (3 replicas).
+    let replicas = ring.nodes_for_key(&key[..], 3);
+    assert(replicas.len() <= 3);
+
+    // Remove + idempotent add.
+    let _ = ring.remove_node(&Text.from("cache-b"));
+    ring.add_node(Text.from("cache-a"));   // idempotent; no duplicate
+
+    // Introspection.
+    let _: Int = ring.node_count();
+    let _: Int = ring.position_count();
+
+    // Tune virtual nodes.
+    let mut sparse = ConsistentHashRing.with_virtual_nodes(40);
+    sparse.add_node(Text.from("small-1"));
+    sparse.add_node(Text.from("small-2"));
+    let _ = sparse.node_for_key(b"foo");
+
+    let _: Int = DEFAULT_VIRTUAL_NODES;
+}
+
+fn main() { exercise_ring(); }
