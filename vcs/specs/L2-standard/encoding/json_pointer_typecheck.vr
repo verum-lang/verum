@@ -1,0 +1,62 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: encoding, json, json-pointer, rfc6901, typecheck
+// @timeout: 10000
+// @expect: pass
+
+mount core.encoding.json_pointer.{
+    JsonPointer, JsonPointerError,
+    parse, format, resolve,
+};
+mount core.encoding.json.{JsonValue};
+
+fn exercise_pointer() -> Result<(), JsonPointerError> {
+    // Root pointer.
+    let root = JsonPointer.root();
+    assert(root.is_root());
+    assert(root.depth() == 0);
+
+    // Parse.
+    let p1: JsonPointer = parse(&Text.from("/foo/0/name"))?;
+    assert(p1.depth() == 3);
+
+    // Empty pointer = root.
+    let p_empty = parse(&Text.from(""))?;
+    assert(p_empty.is_root());
+
+    // Escaped tokens.
+    let p_escaped = parse(&Text.from("/a~1b/m~0n"))?;
+    assert(p_escaped.tokens.len() == 2);
+    // After decode: "a/b" and "m~n".
+
+    // Format round-trip.
+    let s = format(&p_escaped);
+    let _ = s;
+
+    // Push / parent builder API.
+    let p_built = JsonPointer.root()
+        .push(Text.from("users"))
+        .push(Text.from("0"))
+        .push(Text.from("name"));
+    assert(p_built.depth() == 3);
+    let p_parent = p_built.parent();
+    assert(p_parent.depth() == 2);
+
+    // Resolve against a document.
+    let tokens: [Text; 3] = [Text.from("a"), Text.from("b"), Text.from("c")];
+    let p = JsonPointer.from_tokens(&tokens[..]);
+    let doc = JsonValue.JsonNull;
+    let _ = resolve(&p, &doc);
+
+    // Malformed — missing leading '/'.
+    let bad = parse(&Text.from("no/slash"));
+    let _ = bad;
+
+    // Invalid escape.
+    let bad2 = parse(&Text.from("/foo~z"));
+    let _ = bad2;
+    Ok(())
+}
+
+fn main() { let _ = exercise_pointer(); }

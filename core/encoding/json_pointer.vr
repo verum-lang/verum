@@ -1,0 +1,269 @@
+// =============================================================================
+// encoding/json_pointer.vr — JSON Pointer (RFC 6901)
+// =============================================================================
+// Layer: 1 (Encoding)
+// Dependencies: core, core.collections, core.encoding.json
+// =============================================================================
+//
+// RFC 6901 JSON Pointer — a string syntax for identifying a
+// specific sub-value within a JSON document. Used by JSON Patch
+// (RFC 6902), OpenAPI $ref, JSON Schema validators, and every
+// CRDT operational transform library.
+//
+// # Grammar (§3)
+//
+//   pointer      = *( "/" reference-token )
+//   reference-token = *( unescaped | escaped )
+//   unescaped    = %x00-2E | %x30-7D | %x7F-10FFFF
+//   escaped      = "~" ( "0" | "1" )       ; ~0 = "~", ~1 = "/"
+//
+// # Examples
+//
+//   ""             → root of the document
+//   "/foo"         → the value of property "foo"
+//   "/foo/0"       → first element of array "foo"
+//   "/a~1b"        → property "a/b"
+//   "/m~0n"        → property "m~n"
+//   "/-"           → one-past-last array element (RFC 6902 append)
+//
+// # API
+//
+// ```
+// // Parse.
+// let ptr: JsonPointer = parse(&Text.from("/users/0/name"))?;
+//
+// // Resolve — returns None if the path doesn't exist.
+// let v: Maybe<&JsonValue> = resolve(&ptr, &document);
+//
+// // Build from tokens directly.
+// let p = JsonPointer.from_tokens(&["users", "0", "name"]);
+// let s: Text = format(&p);      // "/users/0/name"
+// ```
+//
+// =============================================================================
+
+module core.encoding.json_pointer;
+
+mount core.*;
+mount core.collections.List;
+mount core.collections.map.{Map};
+mount core.encoding.json.{JsonValue};
+
+// =============================================================================
+// Typed pointer
+// =============================================================================
+
+public type JsonPointer is {
+    /// Unescaped tokens. Empty list = root pointer.
+    tokens: List<Text>,
+};
+
+public type JsonPointerError is
+      Malformed(Text)
+    | InvalidEscape(Text);
+
+// =============================================================================
+// Parser
+// =============================================================================
+
+public fn parse(s: &Text) -> Result<JsonPointer, JsonPointerError> {
+    let b = s.as_bytes();
+    if b.len() == 0 {
+        return Ok(JsonPointer { tokens: [] });
+    }
+    if b[0] != ('/' as Byte) {
+        return Err(JsonPointerError.Malformed(Text.from("missing leading '/'")));
+    }
+
+    let mut tokens: List<Text> = [];
+    let mut cur: List<Byte> = [];
+    let mut i: Int = 1;   // skip leading '/'
+    while i < b.len() {
+        let c = b[i];
+        if c == ('/' as Byte) {
+            tokens.push(Text.from_utf8_unchecked(cur.as_slice()));
+            cur = [];
+            i = i + 1;
+            continue;
+        }
+        if c == ('~' as Byte) {
+            if i + 1 >= b.len() {
+                return Err(JsonPointerError.InvalidEscape(Text.from("trailing ~")));
+            }
+            let next = b[i + 1];
+            if next == ('0' as Byte) {
+                cur.push('~' as Byte);
+            } else if next == ('1' as Byte) {
+                cur.push('/' as Byte);
+            } else {
+                return Err(JsonPointerError.InvalidEscape(
+                    Text.from("~ must be followed by 0 or 1")));
+            }
+            i = i + 2;
+            continue;
+        }
+        cur.push(c);
+        i = i + 1;
+    }
+    tokens.push(Text.from_utf8_unchecked(cur.as_slice()));
+    Ok(JsonPointer { tokens: tokens })
+}
+
+// =============================================================================
+// Formatter
+// =============================================================================
+
+public fn format(p: &JsonPointer) -> Text {
+    let mut out: List<Byte> = [];
+    let mut i: Int = 0;
+    while i < p.tokens.len() {
+        out.push('/' as Byte);
+        let tb = p.tokens[i].as_bytes();
+        let mut j: Int = 0;
+        while j < tb.len() {
+            let c = tb[j];
+            // Escape ~ and /.
+            if c == ('~' as Byte) {
+                out.push('~' as Byte);
+                out.push('0' as Byte);
+            } else if c == ('/' as Byte) {
+                out.push('~' as Byte);
+                out.push('1' as Byte);
+            } else {
+                out.push(c);
+            }
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+    Text.from_utf8_unchecked(out.as_slice())
+}
+
+// =============================================================================
+// Constructor from raw tokens
+// =============================================================================
+
+implement JsonPointer {
+    public fn root() -> JsonPointer {
+        JsonPointer { tokens: [] }
+    }
+
+    public fn from_tokens(toks: &[Text]) -> JsonPointer {
+        let mut out: List<Text> = [];
+        let mut i: Int = 0;
+        while i < toks.len() { out.push(toks[i].clone()); i = i + 1; }
+        JsonPointer { tokens: out }
+    }
+
+    public fn is_root(&self) -> Bool { self.tokens.len() == 0 }
+    public fn depth(&self) -> Int { self.tokens.len() }
+
+    /// Append a token. Returns a new pointer; the original is
+    /// unchanged (immutable-by-convention API).
+    public fn push(&self, token: Text) -> JsonPointer {
+        let mut t = self.tokens.clone();
+        t.push(token);
+        JsonPointer { tokens: t }
+    }
+
+    /// Drop the last token.
+    public fn parent(&self) -> JsonPointer {
+        if self.tokens.len() == 0 { return JsonPointer { tokens: [] }; }
+        let mut t: List<Text> = [];
+        let mut i: Int = 0;
+        while i + 1 < self.tokens.len() { t.push(self.tokens[i].clone()); i = i + 1; }
+        JsonPointer { tokens: t }
+    }
+}
+
+// =============================================================================
+// Resolver — walks a JsonValue
+// =============================================================================
+
+public fn resolve(p: &JsonPointer, doc: &JsonValue) -> Maybe<JsonValue> {
+    let mut cursor: JsonValue = clone_value(doc);
+    let mut i: Int = 0;
+    while i < p.tokens.len() {
+        let tok = &p.tokens[i];
+        cursor = match cursor {
+            JsonValue.JsonObject(m) => {
+                match m.get(tok) {
+                    Some(v) => clone_value(v),
+                    None    => return None,
+                }
+            },
+            JsonValue.JsonArray(arr) => {
+                // Token is either a decimal index or "-" (append
+                // marker — unresolvable for read).
+                if tok.as_bytes() == b"-" { return None; }
+                let idx = parse_array_index(tok);
+                match idx {
+                    Some(n) => {
+                        if n < 0 || n >= arr.len() { return None; }
+                        clone_value(&arr[n])
+                    },
+                    None => return None,
+                }
+            },
+            _ => return None,
+        };
+        i = i + 1;
+    }
+    Some(cursor)
+}
+
+fn parse_array_index(s: &Text) -> Maybe<Int> {
+    let b = s.as_bytes();
+    if b.len() == 0 { return None; }
+    // RFC 6901 §4: "leading zeros are not allowed" (except "0" itself).
+    if b.len() > 1 && b[0] == ('0' as Byte) { return None; }
+    let mut v: Int = 0;
+    let mut i: Int = 0;
+    while i < b.len() {
+        let c = b[i];
+        if c < ('0' as Byte) || c > ('9' as Byte) { return None; }
+        v = v * 10 + ((c - ('0' as Byte)) as Int);
+        i = i + 1;
+    }
+    Some(v)
+}
+
+// =============================================================================
+// JsonValue clone helper (manual; avoids Clone trait surface for
+// now — matches the pattern used in the CBOR canonicaliser)
+// =============================================================================
+
+fn clone_value(v: &JsonValue) -> JsonValue {
+    match v {
+        JsonValue.JsonNull        => JsonValue.JsonNull,
+        JsonValue.JsonBool(b)     => JsonValue.JsonBool(*b),
+        JsonValue.JsonInt(n)      => JsonValue.JsonInt(*n),
+        JsonValue.JsonFloat(f)    => JsonValue.JsonFloat(*f),
+        JsonValue.JsonString(s)   => JsonValue.JsonString(s.clone()),
+        JsonValue.JsonArray(arr)  => {
+            let mut out: List<JsonValue> = [];
+            let mut i: Int = 0;
+            while i < arr.len() { out.push(clone_value(&arr[i])); i = i + 1; }
+            JsonValue.JsonArray(out)
+        },
+        JsonValue.JsonObject(m)   => {
+            // Map lacks a deep-clone helper; we rebuild by iteration.
+            // Keys preserved in insertion order.
+            let mut out: Map<Text, JsonValue> = Map.new();
+            let iter = m.keys();
+            let mut keys = iter;
+            loop {
+                match keys.next() {
+                    Some(k) => {
+                        match m.get(k) {
+                            Some(val) => { out.insert(k.clone(), clone_value(val)); },
+                            None => {},
+                        }
+                    },
+                    None => break,
+                }
+            }
+            JsonValue.JsonObject(out)
+        },
+    }
+}
