@@ -1,0 +1,40 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: collections, reservoir, sampling, streaming, typecheck
+// @timeout: 10000
+// @expect: pass
+
+mount core.collections.reservoir.{Reservoir};
+mount core.collections.List;
+
+fn exercise_reservoir() {
+    let mut res: Reservoir<Int> = Reservoir.new(10);
+
+    // Feed a stream of 1000 items — random 10 survive.
+    let mut i: Int = 0;
+    while i < 1000 {
+        let _ = res.offer(i);
+        i = i + 1;
+    }
+    assert(res.len() == 10);
+    assert(res.seen() == 1000_u64);
+    assert(res.capacity() == 10);
+
+    // Reset clears samples but keeps capacity.
+    res.reset();
+    assert(res.len() == 0);
+    assert(res.seen() == 0_u64);
+    assert(res.capacity() == 10);
+
+    // Small stream: fewer items than capacity — all retained.
+    let mut small: Reservoir<Text> = Reservoir.new(5);
+    small.offer(Text.from("a"));
+    small.offer(Text.from("b"));
+    assert(small.len() == 2);
+
+    let sample: List<Text> = small.take();
+    let _ = sample.len();
+}
+
+fn main() { exercise_reservoir(); }

@@ -1,0 +1,128 @@
+// =============================================================================
+// collections/reservoir.vr — uniform reservoir sampling (Algorithm R)
+// =============================================================================
+// Layer: 2 (Collections)
+// Dependencies: core, core.base.random
+// =============================================================================
+//
+// Algorithm R (Vitter 1985) — uniform reservoir sampling. Given a
+// stream of items of unknown or unbounded length, retain a fixed-
+// size sample where every item has equal probability `k / n` of
+// surviving, where k is the reservoir capacity and n is the
+// total number of items observed.
+//
+// Used by:
+//
+//   * Trace-sampling (Datadog / Honeycomb / OpenTelemetry tail
+//     sampler) — keep N random traces per second.
+//   * Streaming analytics — pick N representative events from a
+//     kafka topic without buffering the whole stream.
+//   * ML training — shuffle training samples out-of-core.
+//   * Load testing — pick a representative subset of production
+//     traffic to replay.
+//
+// Weighted sampling (Algorithm A-Res, Efraimidis & Spirakis 2006)
+// lands in a follow-up once the stdlib's move-semantics surface
+// supports the heap-based priority-keyed eviction loop cleanly.
+//
+// # API
+//
+// ```
+// let mut res: Reservoir<TraceId> = Reservoir.new(1000);
+// while let Some(trace) = stream.next() {
+//     res.offer(trace);
+// }
+// let sample: List<TraceId> = res.take();
+// ```
+//
+// # Correctness
+//
+// Proof sketch (Vitter 1985):
+//
+//   * When `len < capacity`: every item is retained with p=1.
+//   * At item i > capacity: retain with probability `capacity/i`
+//     by replacing a uniformly-random slot. This is exactly the
+//     marginal probability that any item from 1..i survives to
+//     step i.
+//   * Induction closes: after n items, each has p = capacity/n.
+//
+// # Security
+//
+// Uses the process-wide CSPRNG via `core.base.random.fill`. For
+// adversarial inputs (an attacker picking item order to bias the
+// sample), CSPRNG-sourced randomness is the correct choice —
+// deterministic PRNGs would let the attacker predict which
+// items survive.
+//
+// =============================================================================
+
+module core.collections.reservoir;
+
+mount core.*;
+mount core.collections.List;
+mount core.base.random;
+
+// =============================================================================
+// Reservoir
+// =============================================================================
+
+public type Reservoir<T> is {
+    samples:  List<T>,
+    /// Max samples to retain.
+    capacity: Int,
+    /// How many items the stream has offered so far.
+    seen:     UInt64,
+};
+
+implement<T> Reservoir<T> {
+    public fn new(capacity: Int) -> Reservoir<T> {
+        let cap = if capacity < 1 { 1 } else { capacity };
+        Reservoir { samples: [], capacity: cap, seen: 0_u64 }
+    }
+
+    /// Offer one item from the stream. Returns true iff the item
+    /// was retained (useful for tracing which items got sampled).
+    public fn offer(&mut self, item: T) -> Bool {
+        self.seen = self.seen + 1_u64;
+        if self.samples.len() < self.capacity {
+            self.samples.push(item);
+            return true;
+        }
+        // Replace a uniformly-random slot with probability
+        // `capacity / seen`.
+        let r = random_u64();
+        let pick = (r % self.seen) as Int;
+        if pick < self.capacity {
+            self.samples[pick] = item;
+            return true;
+        }
+        false
+    }
+
+    /// Consume the reservoir, returning the retained samples.
+    public fn take(self) -> List<T> { self.samples }
+
+    public fn len(&self) -> Int { self.samples.len() }
+    public fn seen(&self) -> UInt64 { self.seen }
+    public fn capacity(&self) -> Int { self.capacity }
+
+    /// Reset the reservoir — drops samples, zeros the counter.
+    /// Capacity is preserved.
+    public fn reset(&mut self) {
+        self.samples = [];
+        self.seen = 0_u64;
+    }
+}
+
+// =============================================================================
+// Helpers
+// =============================================================================
+
+fn random_u64() -> UInt64 {
+    let mut buf: [Byte; 8] = [0_u8; 8];
+    random.fill(&mut buf);
+    let mut r: UInt64 = 0_u64;
+    let mut i: Int = 0;
+    while i < 8 { r = (r << 8_u64) | (buf[i] as UInt64); i = i + 1; }
+    r
+}

@@ -36,6 +36,7 @@ public module bloom;
 public module consistent_hash;
 public module hyperloglog;
 public module count_min;
+public module reservoir;
 
 // =============================================================================
 // Re-exports
