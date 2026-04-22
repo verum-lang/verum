@@ -1,0 +1,43 @@
+// @test: integration
+// @tier: 0
+// @level: L1
+// @tags: proof, tactic, auto, split, conjunction
+// @expect: pass
+//
+// `ensures A && B && C` with refinement / `requires` hypotheses must
+// be fully dischargeable via `proof by auto`. The Auto tactic's Split
+// step fans the conjunction out into subgoals; each subgoal inherits
+// the parent context, and the recursive discharge must re-enter Auto
+// (trivial-true → structural → SMT), not the hint-based `auto_prove`.
+//
+// Regression for the bug where split subgoals were routed through
+// hint-only `auto_prove` and systematically failed on arithmetic
+// obligations.
+
+@verify(formal)
+theorem conjunction_of_two(n: Int)
+    requires n == 7
+    ensures n == 7 && n * 6 == 42
+    proof by auto;
+
+@verify(formal)
+theorem conjunction_of_three(n: Int)
+    requires n == 7
+    ensures n == 7 && n * 6 == 42 && n - 1 == 6
+    proof by auto;
+
+@verify(formal)
+theorem conjunction_refined_param(n: Int { self == 7 })
+    ensures n == 7 && n * 6 == 42 && (n * (n - 1)) / 2 == 21
+    proof by auto;
+
+public type PosSeven is (Int) { self == 7 };
+
+@verify(formal)
+theorem conjunction_nominal_param(n: PosSeven)
+    ensures n == 7 && n * 6 == 42 && n - 1 == 6
+    proof by auto;
+
+fn main() {
+    print("L1-core: proof/tactics/conjunction_discharge");
+}

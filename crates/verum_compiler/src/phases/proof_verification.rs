@@ -1076,22 +1076,42 @@ fn verify_proof_steps(
 /// if any subgoal cannot be closed.
 fn discharge_subgoals(
     engine: &mut ProofSearchEngine,
-    smt_ctx: &Context,
+    _smt_ctx: &Context,
     sub_goals: &List<ProofGoal>,
     context_label: &str,
 ) -> Result<(), ProofVerificationError> {
+    // Recursively close each subgoal with the `Auto` tactic. Using
+    // `execute_tactic(Auto, ...)` — not the hint-based `auto_prove` — is
+    // load-bearing: `try_auto` has the trivial-true fast path, the
+    // structural pass, and the SMT fallback wired in, and it sees the
+    // subgoal's full hypothesis context (essential when the parent
+    // tactic was a conjunctive `Split` that copied the hypotheses into
+    // each conjunct). `auto_prove` by contrast runs hint-based
+    // iterative-deepening search with no SMT fallback, so it
+    // systematically failed on arithmetic subgoals produced by splits.
     for (i, sg) in sub_goals.iter().enumerate() {
-        engine.auto_prove(smt_ctx, &sg.goal).map_err(|e| {
-            ProofVerificationError::SubgoalFailed {
-                goal: Text::from(format!(
-                    "{} subgoal {}: {:?}",
-                    context_label,
-                    i + 1,
-                    sg.goal
-                )),
-                reason: format!("{}", e).into(),
+        let result = engine.execute_tactic(&ProofTactic::Auto, sg);
+        match result {
+            Ok(more) if more.is_empty() => {
+                // Closed outright.
             }
-        })?;
+            Ok(more) => {
+                // Auto produced further subgoals (e.g. a nested split
+                // on a conjunct). Recurse.
+                discharge_subgoals(engine, _smt_ctx, &more, context_label)?;
+            }
+            Err(e) => {
+                return Err(ProofVerificationError::SubgoalFailed {
+                    goal: Text::from(format!(
+                        "{} subgoal {}: {:?}",
+                        context_label,
+                        i + 1,
+                        sg.goal
+                    )),
+                    reason: format!("{}", e).into(),
+                });
+            }
+        }
     }
     Ok(())
 }

@@ -2326,6 +2326,26 @@ impl ProofSearchEngine {
     ///
     /// Returns Ok if a proof is found, Err otherwise.
     pub fn auto_prove(&mut self, context: &Context, goal: &Expr) -> VerificationResult {
+        // Convenience wrapper: builds a hypothesis-free `ProofGoal` and
+        // delegates to the full-featured entry point below. Callers that
+        // have already accumulated hypotheses for the goal (e.g. from
+        // `Split` on a conjunction, where each conjunct inherits the parent
+        // goal's context) should use [`auto_prove_goal`] directly so the
+        // hypotheses survive the recursion.
+        self.auto_prove_goal(context, &ProofGoal::new(goal.clone()))
+    }
+
+    /// Same as [`auto_prove`] but accepts a full [`ProofGoal`] so caller-
+    /// supplied hypotheses are propagated into the search frame. This is
+    /// the correct entry point for any discharge step that fans out
+    /// subgoals which must remain aware of the parent's context —
+    /// conjunctive splits, premise obligations after `apply`, case-
+    /// analysis branches, and so on.
+    pub fn auto_prove_goal(
+        &mut self,
+        context: &Context,
+        proof_goal: &ProofGoal,
+    ) -> VerificationResult {
         let start = Instant::now();
         self.stats.total_attempts += 1;
 
@@ -2336,9 +2356,7 @@ impl ProofSearchEngine {
         for depth_limit in 1..=self.max_depth {
             self.visited.clear(); // Reset visited for each depth iteration
 
-            let proof_goal = ProofGoal::new(goal.clone());
-
-            match self.prove_with_backtracking(context, &proof_goal, depth_limit, start) {
+            match self.prove_with_backtracking(context, proof_goal, depth_limit, start) {
                 Ok(result) => {
                     self.stats.successes += 1;
                     return Ok(result);
@@ -2346,7 +2364,7 @@ impl ProofSearchEngine {
                 Err(VerificationError::Timeout { .. }) => {
                     // Propagate timeout
                     return Err(VerificationError::Timeout {
-                        constraint: format!("{:?}", goal).into(),
+                        constraint: format!("{:?}", proof_goal.goal).into(),
                         timeout: self.timeout,
                         cost: VerificationCost::new("timeout".into(), start.elapsed(), false)
                             .with_timeout(),
