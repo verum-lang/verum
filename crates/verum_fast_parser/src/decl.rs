@@ -210,6 +210,18 @@ impl<'a> RecursiveParser<'a> {
                     self.parse_function(attrs, vis)
                 }
             }
+            Some(TokenKind::Cofix) => {
+                // `cofix fn name(...) -> Stream<T> { .obs => expr, ... }` is a
+                // coinductive fixpoint function. Grammar:
+                //   function_modifiers = [ 'pure' ] , [ meta_modifier ] ,
+                //                        [ 'async' ] , [ 'cofix' ] ,
+                //                        [ 'unsafe' ] | epsilon ;
+                // This dispatcher handles the plain `cofix fn ...` case when
+                // no earlier modifier (async, meta, pure) consumed it. The
+                // inner modifier-consumer in `parse_function` will accept the
+                // `cofix` token on its own.
+                self.parse_function(attrs, vis)
+            }
             Some(TokenKind::Async) => {
                 // Could be async fn, async unsafe fn, async context, etc.
                 // Grammar: function_modifiers = [ 'pure' ] , [ meta_modifier ] , [ 'async' ] , [ 'unsafe' ]
