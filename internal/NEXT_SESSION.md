@@ -134,6 +134,18 @@ Three sequential architectural commits closed the class of
     so the arity check sees all of them. Lifetimes stay excluded.
     Matches the sibling fix in `register_type_declaration_inner`.
 
+14. **`e67d3a1d` fix(codegen/llvm): guard RefSlice base-int
+    conversion against int-typed source** — the differential AOT
+    harness panicked in VBC sub-op 0x00 (RefSlice) because
+    `src.into_pointer_value()` asserted on an `IntValue` source
+    (the base register was loaded as `i64` from a List buffer).
+    Fix: check `is_int_value()` first, use the integer directly as
+    the base address, only round-trip through a pointer when the
+    register actually carries one. Unblocks L2 differential tests
+    that touch slice lowering. Other 52 `into_pointer_value()`
+    call sites left alone — only the reported panic path is
+    changed.
+
 **L1 impact:** 533/535 → 534/537 (same 3 known residuals:
 higher_kinded HKT infer, sha256 stdlib, AOT field-offset panic in
 vtest harness). **L3 dependent impact:** 48/52 → 50/52 — closes
