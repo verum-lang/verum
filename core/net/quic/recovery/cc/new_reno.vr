@@ -166,7 +166,7 @@ implement CongestionCtrl for NewReno {
     fn should_pace(&self) -> Bool { self.paced }
 
     fn pacing_rate(&self) -> UInt64 { self.pacing_rate_bps }
-};
+}
 
 implement NewReno {
     /// Called by the outer loss-detection loop when an ACK advances

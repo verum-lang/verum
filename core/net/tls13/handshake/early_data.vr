@@ -49,6 +49,9 @@ mount core.net.tls13.cipher_suite.{CipherSuite, HashKind};
 mount core.net.tls13.keyschedule.schedule.{
     EarlySecret, TrafficSecret, SecretBytes, TrafficKeys,
 };
+mount core.net.tls13.keyschedule.derive_secret.{
+    derive_secret, LABEL_EARLY_EXPORTER_MASTER,
+};
 
 // =============================================================================
 // Early-data state
@@ -95,9 +98,6 @@ fn derive_early_exporter(
     early: &EarlySecret,
     ch_transcript_hash: &[Byte],
 ) -> Result<SecretBytes, HkdfError> {
-    use core.net.tls13.keyschedule.derive_secret.{
-        derive_secret, LABEL_EARLY_EXPORTER_MASTER,
-    };
     let hash = early.hash.clone();
     let out = derive_secret(hash, early.secret.as_slice(),
                             &LABEL_EARLY_EXPORTER_MASTER, ch_transcript_hash)?;

@@ -258,7 +258,7 @@ implement CongestionCtrl for Cubic {
     fn bytes_in_flight(&self) -> UInt32 { self.bytes_in_flight }
     fn should_pace(&self) -> Bool     { self.paced }
     fn pacing_rate(&self) -> UInt64   { self.pacing_rate_bps }
-};
+}
 
 implement Cubic {
     public fn exit_recovery_if_appropriate(&mut self, acked_time_sent: Instant) {
