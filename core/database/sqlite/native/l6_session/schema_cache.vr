@@ -1,0 +1,328 @@
+module core.database.sqlite.native.l6_session.schema_cache;
+
+// =============================================================================
+// l6_session/schema_cache.vr — per-connection schema cache
+// =============================================================================
+// Layer: 6
+// Spec: sqlite-native.md §16.4
+//
+// The schema cache answers planner/codegen queries like "what is
+// table X's root page?" and "what columns does it have in what order?"
+// without a round-trip to the pager on every prepare() call.
+//
+// Built by scanning `sqlite_schema` on first open (or post-DDL). Our
+// v1 exposes:
+//
+//   * build_empty()            — no tables registered yet
+//   * register_table(meta)     — programmatic registration (test
+//                                harness + future sqlite_schema
+//                                replay)
+//   * lookup(name) -> Maybe<TableMeta>
+//   * invalidate(cookie)       — post-DDL refresh signal
+//
+// Every connection owns its own SchemaCache. Multi-process schema
+// coherency is re-checked via the schema_cookie in the DB header.
+// =============================================================================
+
+mount core.*;
+mount collections.{List, Map};
+mount base.{Result, Ok, Err, Text, Maybe};
+mount core.database.sqlite.native.l2_record.affinity.Affinity;
+
+// -----------------------------------------------------------------------------
+// TableMeta
+// -----------------------------------------------------------------------------
+
+public type ColumnMeta is {
+    name: Text,
+    declared_type: Text,
+    affinity: Affinity,
+    not_null: Bool,
+    primary_key: Bool,
+    collation: Text,               // "" = BINARY default
+};
+
+public type TableKind is TkTable | TkView | TkVirtual;
+
+public type TableMeta is {
+    schema: Text,                  // e.g. "main" / "temp"; "" = main
+    name: Text,
+    kind: TableKind,
+    root_page: Int,                // 1-based; 0 reserved/invalid
+    columns: List<ColumnMeta>,
+    primary_key_cols: List<Text>,  // ordered, empty → rowid table
+    strict: Bool,
+    without_rowid: Bool,
+    created_sql: Text,             // original CREATE TABLE text for sqlite_schema
+};
+
+public type IndexMeta is {
+    schema: Text,
+    name: Text,
+    table_name: Text,
+    root_page: Int,
+    columns: List<Text>,
+    unique: Bool,
+};
+
+public type SchemaError is
+      NotFound(name: Text)
+    | AlreadyExists(name: Text)
+    | InvalidMetadata(why: Text);
+
+// -----------------------------------------------------------------------------
+// SchemaCache
+// -----------------------------------------------------------------------------
+
+public type SchemaCache is {
+    tables: Map<Text, TableMeta>,  // keyed by `schema.name` (or just `name` for main)
+    indexes: Map<Text, IndexMeta>,
+    schema_cookie: Int,            // bumped post-DDL
+    generation: Int,               // bumped on invalidate
+};
+
+public fn schema_cache_new() -> SchemaCache {
+    SchemaCache {
+        tables: Map.new(),
+        indexes: Map.new(),
+        schema_cookie: 0,
+        generation: 0,
+    }
+}
+
+implement SchemaCache {
+    public fn cookie(&self) -> Int { self.schema_cookie }
+    public fn gen(&self) -> Int { self.generation }
+    public fn table_count(&self) -> Int { self.tables.len() }
+    public fn index_count(&self) -> Int { self.indexes.len() }
+
+    // -------------------------------------------------------------------------
+    // Registration
+    // -------------------------------------------------------------------------
+
+    /// Insert a new table metadata entry. Returns AlreadyExists if the
+    /// qualified name is already in the cache.
+    public fn register_table(&mut self, meta: TableMeta) -> Result<(), SchemaError> {
+        let key = qualify(&meta.schema, &meta.name);
+        if self.tables.contains_key(key.clone()) {
+            return Err(AlreadyExists(key));
+        }
+        let _ = self.tables.insert(key, meta);
+        Ok(())
+    }
+
+    /// Replace an existing table's metadata (ALTER TABLE path).
+    public fn replace_table(&mut self, meta: TableMeta) {
+        let key = qualify(&meta.schema, &meta.name);
+        let _ = self.tables.insert(key, meta);
+    }
+
+    public fn register_index(&mut self, idx: IndexMeta) -> Result<(), SchemaError> {
+        let key = qualify(&idx.schema, &idx.name);
+        if self.indexes.contains_key(key.clone()) {
+            return Err(AlreadyExists(key));
+        }
+        let _ = self.indexes.insert(key, idx);
+        Ok(())
+    }
+
+    // -------------------------------------------------------------------------
+    // Lookup
+    // -------------------------------------------------------------------------
+
+    public fn lookup_table(&self, schema: &Text, name: &Text) -> Result<TableMeta, SchemaError> {
+        let key = qualify(schema, name);
+        if !self.tables.contains_key(key.clone()) {
+            return Err(NotFound(key));
+        }
+        Ok(clone_table_meta(&self.tables.get(key)))
+    }
+
+    public fn lookup_index(&self, schema: &Text, name: &Text) -> Result<IndexMeta, SchemaError> {
+        let key = qualify(schema, name);
+        if !self.indexes.contains_key(key.clone()) {
+            return Err(NotFound(key));
+        }
+        Ok(clone_index_meta(&self.indexes.get(key)))
+    }
+
+    public fn has_table(&self, schema: &Text, name: &Text) -> Bool {
+        let key = qualify(schema, name);
+        self.tables.contains_key(key)
+    }
+
+    // -------------------------------------------------------------------------
+    // DDL hooks
+    // -------------------------------------------------------------------------
+
+    public fn drop_table(&mut self, schema: &Text, name: &Text) -> Result<(), SchemaError> {
+        let key = qualify(schema, name);
+        if !self.tables.contains_key(key.clone()) {
+            return Err(NotFound(key));
+        }
+        let _ = self.tables.remove(key);
+        self.schema_cookie = self.schema_cookie + 1;
+        Ok(())
+    }
+
+    public fn drop_index(&mut self, schema: &Text, name: &Text) -> Result<(), SchemaError> {
+        let key = qualify(schema, name);
+        if !self.indexes.contains_key(key.clone()) {
+            return Err(NotFound(key));
+        }
+        let _ = self.indexes.remove(key);
+        self.schema_cookie = self.schema_cookie + 1;
+        Ok(())
+    }
+
+    /// Post-DDL signal — bumps cookie + generation. Callers that
+    /// cache something (e.g. compiled statements) refresh when
+    /// `gen()` changes.
+    public fn invalidate(&mut self) {
+        self.schema_cookie = self.schema_cookie + 1;
+        self.generation = self.generation + 1;
+    }
+
+    /// External cookie sync — when the pager reports a new on-disk
+    /// schema_cookie, we bump to match and bump our generation so
+    /// stale prepared statements get reprepared.
+    public fn sync_cookie(&mut self, new_cookie: Int) -> Bool {
+        if self.schema_cookie == new_cookie { return false; }
+        self.schema_cookie = new_cookie;
+        self.generation = self.generation + 1;
+        true
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Helpers
+// -----------------------------------------------------------------------------
+
+fn qualify(schema: &Text, name: &Text) -> Text {
+    if schema.len() == 0 { return name.clone(); }
+    schema.clone() + ".".clone() + name.clone()
+}
+
+fn clone_column_meta(c: &ColumnMeta) -> ColumnMeta {
+    ColumnMeta {
+        name: c.name.clone(),
+        declared_type: c.declared_type.clone(),
+        affinity: c.affinity,
+        not_null: c.not_null,
+        primary_key: c.primary_key,
+        collation: c.collation.clone(),
+    }
+}
+
+fn clone_column_list(xs: &List<ColumnMeta>) -> List<ColumnMeta> {
+    let mut out: List<ColumnMeta> = List.new();
+    let mut i: Int = 0;
+    while i < xs.len() { out.push(clone_column_meta(&xs[i])); i = i + 1; }
+    out
+}
+
+fn clone_text_list(xs: &List<Text>) -> List<Text> {
+    let mut out: List<Text> = List.new();
+    let mut i: Int = 0;
+    while i < xs.len() { out.push(xs[i].clone()); i = i + 1; }
+    out
+}
+
+fn clone_table_meta(t: &TableMeta) -> TableMeta {
+    TableMeta {
+        schema: t.schema.clone(),
+        name: t.name.clone(),
+        kind: t.kind,
+        root_page: t.root_page,
+        columns: clone_column_list(&t.columns),
+        primary_key_cols: clone_text_list(&t.primary_key_cols),
+        strict: t.strict,
+        without_rowid: t.without_rowid,
+        created_sql: t.created_sql.clone(),
+    }
+}
+
+fn clone_index_meta(i: &IndexMeta) -> IndexMeta {
+    IndexMeta {
+        schema: i.schema.clone(),
+        name: i.name.clone(),
+        table_name: i.table_name.clone(),
+        root_page: i.root_page,
+        columns: clone_text_list(&i.columns),
+        unique: i.unique,
+    }
+}
+
+// -----------------------------------------------------------------------------
+// CREATE TABLE AST → TableMeta
+// -----------------------------------------------------------------------------
+
+/// Convert a parsed CreateTableStmt into a TableMeta for cache
+/// insertion. Caller supplies the allocated root_page (from the pager's
+/// free-list or a btree allocator). Pending constraint-rich attributes
+/// (ColumnConstraint sum matching) are resolved conservatively — any
+/// constraint that requires codegen interaction lives in L5 codegen,
+/// not here.
+public fn table_meta_from_create(
+    ct: &core.database.sqlite.native.l5_sql.ast.CreateTableStmt,
+    root_page: Int,
+    created_sql: Text,
+) -> TableMeta {
+    let mut cols: List<ColumnMeta> = List.new();
+    let mut pk_cols: List<Text> = List.new();
+    let mut i: Int = 0;
+    while i < ct.columns.len() {
+        let cd = &ct.columns[i];
+        let mut not_null = false;
+        let mut primary = false;
+        let mut collation: Text = "".clone();
+        // Scan column constraints for the flags we record in the
+        // cache. Anything requiring expression evaluation (CHECK,
+        // DEFAULT) is deferred — codegen consults the original AST.
+        let mut j: Int = 0;
+        while j < cd.constraints.len() {
+            match cd.constraints[j] {
+                CcNotNull(_)        => { not_null = true; }
+                CcPrimaryKey(_, _)  => { primary = true; pk_cols.push(cd.name.clone()); }
+                CcCollate(ref name) => { collation = name.clone(); }
+                _ => {}
+            }
+            j = j + 1;
+        }
+        cols.push(ColumnMeta {
+            name: cd.name.clone(),
+            declared_type: cd.declared_type.clone(),
+            affinity: core.database.sqlite.native.l2_record.affinity.infer_affinity(&cd.declared_type),
+            not_null: not_null,
+            primary_key: primary,
+            collation: collation,
+        });
+        i = i + 1;
+    }
+    // Table-level PRIMARY KEY constraint also contributes.
+    let mut k: Int = 0;
+    while k < ct.constraints.len() {
+        match ct.constraints[k] {
+            TcPrimaryKey(ref cols_list, _, _) => {
+                let mut m: Int = 0;
+                while m < cols_list.len() {
+                    pk_cols.push(cols_list[m].clone());
+                    m = m + 1;
+                }
+            }
+            _ => {}
+        }
+        k = k + 1;
+    }
+    TableMeta {
+        schema: ct.table.schema.clone(),
+        name: ct.table.name.clone(),
+        kind: TkTable,
+        root_page: root_page,
+        columns: cols,
+        primary_key_cols: pk_cols,
+        strict: ct.strict,
+        without_rowid: ct.without_rowid,
+        created_sql: created_sql,
+    }
+}

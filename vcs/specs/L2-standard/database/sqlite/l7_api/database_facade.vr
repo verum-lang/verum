@@ -1,0 +1,102 @@
+// @test: typecheck-pass
+// @level: L2
+// @tier: 0
+// @tags: sqlite, native, l7, database, facade
+// @timeout: 15000
+// @description: Database facade — open / prepare / execute / transaction sugar
+//
+// Spec: internal/specs/sqlite-native.md §16.1
+
+mount core.*;
+mount collections.List;
+mount core.database.sqlite.native.l7_api.{
+    Database, DbError,
+    open_memory_db, open_readonly, open_readwrite, open_admin,
+};
+mount core.database.sqlite.native.l6_session.ConnectionMode;
+
+fn open_each() {
+    match open_readonly() {
+        Ok(db) => { match db.mode() { CmRead => {}, _ => panic("read"), } }
+        Err(_) => panic("open_readonly"),
+    }
+    match open_readwrite() {
+        Ok(db) => { match db.mode() { CmWrite => {}, _ => panic("write"), } }
+        Err(_) => panic("open_readwrite"),
+    }
+    match open_admin() {
+        Ok(db) => { match db.mode() { CmAdmin => {}, _ => panic("admin"), } }
+        Err(_) => panic("open_admin"),
+    }
+}
+
+fn prepare_select_one() {
+    let db = match open_readwrite() {
+        Ok(d)  => d,
+        Err(_) => { panic("open"); return; }
+    };
+    match db.prepare(&"SELECT 1".clone()) {
+        Ok(stmt) => {
+            assert(stmt.instruction_count() > 0);
+            assert(!stmt.is_done());
+        }
+        Err(_) => panic("prepare SELECT 1"),
+    }
+}
+
+fn execute_begin_commit() {
+    let mut db = match open_readwrite() {
+        Ok(d)  => d,
+        Err(_) => { panic("open"); return; }
+    };
+    match db.begin() {
+        Ok(_) => {}, Err(_) => panic("begin"),
+    }
+    assert(db.is_in_tx());
+    match db.commit() {
+        Ok(_) => {}, Err(_) => panic("commit"),
+    }
+    assert(!db.is_in_tx());
+}
+
+fn execute_select_rejects() {
+    let mut db = match open_readwrite() {
+        Ok(d)  => d,
+        Err(_) => { panic("open"); return; }
+    };
+    // SELECT produces rows → execute should refuse
+    match db.execute(&"SELECT 1".clone()) {
+        Ok(_) => panic("execute must refuse row-producing query"),
+        Err(_) => {},
+    }
+}
+
+fn query_first_row_shape() {
+    let mut db = match open_readwrite() {
+        Ok(d)  => d,
+        Err(_) => { panic("open"); return; }
+    };
+    match db.query_first_row(&"SELECT 1".clone()) {
+        Ok(row) => { assert_eq(row.len(), 1); }
+        Err(_) => panic("query_first_row"),
+    }
+}
+
+fn close_consumes() {
+    let db = match open_readwrite() {
+        Ok(d)  => d,
+        Err(_) => { panic("open"); return; }
+    };
+    db.close();
+    // further use is a compile error (affine-ish). Tested implicitly.
+}
+
+fn main() {
+    open_each();
+    prepare_select_one();
+    execute_begin_commit();
+    execute_select_rejects();
+    query_first_row_shape();
+    close_consumes();
+    print("database_facade typecheck ok");
+}

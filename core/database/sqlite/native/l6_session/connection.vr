@@ -1,0 +1,208 @@
+module core.database.sqlite.native.l6_session.connection;
+
+// =============================================================================
+// l6_session/connection.vr — per-session handle
+// =============================================================================
+// Layer: 6
+// Spec: sqlite-native.md §4.8 + §16
+//
+// A `Connection` is what user code holds to talk to loom. It bundles:
+//
+//   * Mode               — Read / Write / Admin capability marker
+//   * Pager actor ref    — single-writer L1 pager (v1 keeps the Pager
+//                          by value; async actor IPC lands later)
+//   * Schema cache       — L6.4
+//   * Transaction state  — autocommit / nested-savepoint counter
+//
+// Capability types (spec §4.8):
+//
+//   * Read   — SELECT + PRAGMA query_only
+//   * Write  — Read + INSERT/UPDATE/DELETE (no DDL)
+//   * Admin  — Write + DDL + writable_schema + VACUUM
+//
+// Mode upgrades are disallowed — the type carries the capability, so
+// accidental `readonly.execute(INSERT...)` is a compile-time error at
+// the L7 facade, not a runtime SQLITE_READONLY.
+//
+// The v1 ships everything as a single sum type (ConnectionMode) because
+// Verum v1 doesn't yet wire phantom-type capabilities through generic
+// implements; the sum-type runtime check is the bridge. L7 will wrap
+// it behind a trait hierarchy once that lands.
+// =============================================================================
+
+mount core.*;
+mount collections.{List, Map};
+mount base.{Result, Ok, Err, Text, Maybe};
+mount core.database.sqlite.native.l0_vfs.OpenFlags;
+mount core.database.sqlite.native.l1_pager.{Pager, pager_open_memory};
+mount core.database.sqlite.native.l6_session.schema_cache.{
+    SchemaCache, schema_cache_new,
+};
+
+// -----------------------------------------------------------------------------
+// Mode
+// -----------------------------------------------------------------------------
+
+public type ConnectionMode is CmRead | CmWrite | CmAdmin;
+
+public fn mode_can_write(m: ConnectionMode) -> Bool {
+    match m {
+        CmRead  => false,
+        CmWrite | CmAdmin => true,
+    }
+}
+
+public fn mode_can_ddl(m: ConnectionMode) -> Bool {
+    match m {
+        CmAdmin => true,
+        _ => false,
+    }
+}
+
+public fn mode_name(m: ConnectionMode) -> Text {
+    match m {
+        CmRead  => "read".clone(),
+        CmWrite => "write".clone(),
+        CmAdmin => "admin".clone(),
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Transaction state
+// -----------------------------------------------------------------------------
+
+public type TxMode is TmAutocommit | TmDeferred | TmImmediate | TmExclusive;
+
+public type TxState is {
+    mode: TxMode,
+    depth: Int,                  // 0 = autocommit; 1+ = savepoint depth
+    active: Bool,                // true once an explicit BEGIN has fired
+};
+
+public fn tx_state_autocommit() -> TxState {
+    TxState { mode: TmAutocommit, depth: 0, active: false }
+}
+
+// -----------------------------------------------------------------------------
+// Connection
+// -----------------------------------------------------------------------------
+
+public type ConnectionError is
+      NotWritable
+    | NotAdmin
+    | TxAlreadyActive
+    | TxNotActive
+    | IoError(Text);
+
+public type Connection is {
+    mode: ConnectionMode,
+    pager: Pager,
+    schema: SchemaCache,
+    tx: TxState,
+    path: Text,                  // ":memory:" / absolute path / URI
+};
+
+/// Open an in-memory connection with the given mode. All three modes
+/// work on `:memory:` — there's no file-permission layer to honour.
+public fn open_memory(mode: ConnectionMode) -> Result<Connection, ConnectionError> {
+    let pager = match pager_open_memory() {
+        Ok(p)  => p,
+        Err(_) => { return Err(IoError("pager_open_memory failed".clone())); }
+    };
+    Ok(Connection {
+        mode: mode,
+        pager: pager,
+        schema: schema_cache_new(),
+        tx: tx_state_autocommit(),
+        path: ":memory:".clone(),
+    })
+}
+
+public fn open_readonly_memory() -> Result<Connection, ConnectionError> {
+    open_memory(CmRead)
+}
+
+public fn open_readwrite_memory() -> Result<Connection, ConnectionError> {
+    open_memory(CmWrite)
+}
+
+public fn open_admin_memory() -> Result<Connection, ConnectionError> {
+    open_memory(CmAdmin)
+}
+
+implement Connection {
+    public fn mode(&self) -> ConnectionMode { self.mode }
+    public fn path_text(&self) -> &Text { &self.path }
+    public fn schema_generation(&self) -> Int { self.schema.gen() }
+    public fn is_in_tx(&self) -> Bool { self.tx.active }
+    public fn tx_depth(&self) -> Int { self.tx.depth }
+
+    // -------------------------------------------------------------------------
+    // Capability guards — L7 facade calls these before dispatching
+    // -------------------------------------------------------------------------
+
+    public fn ensure_writable(&self) -> Result<(), ConnectionError> {
+        if mode_can_write(self.mode) { Ok(()) } else { Err(NotWritable) }
+    }
+
+    public fn ensure_admin(&self) -> Result<(), ConnectionError> {
+        if mode_can_ddl(self.mode) { Ok(()) } else { Err(NotAdmin) }
+    }
+
+    // -------------------------------------------------------------------------
+    // Transaction boundary
+    // -------------------------------------------------------------------------
+
+    public fn begin_tx(&mut self, mode: TxMode) -> Result<(), ConnectionError> {
+        match self.ensure_writable() { Ok(_) => {}, Err(e) => { return Err(e); } }
+        if self.tx.active { return Err(TxAlreadyActive); }
+        self.tx = TxState { mode: mode, depth: 1, active: true };
+        Ok(())
+    }
+
+    public fn commit_tx(&mut self) -> Result<(), ConnectionError> {
+        if !self.tx.active { return Err(TxNotActive); }
+        self.tx = tx_state_autocommit();
+        Ok(())
+    }
+
+    public fn rollback_tx(&mut self) -> Result<(), ConnectionError> {
+        if !self.tx.active { return Err(TxNotActive); }
+        self.tx = tx_state_autocommit();
+        Ok(())
+    }
+
+    /// Savepoint push — increments depth without replacing `tx.mode`.
+    /// Caller is responsible for issuing the SAVEPOINT VDBE opcode.
+    public fn savepoint_push(&mut self) {
+        if !self.tx.active {
+            self.tx = TxState { mode: TmDeferred, depth: 1, active: true };
+        }
+        self.tx.depth = self.tx.depth + 1;
+    }
+
+    public fn savepoint_pop(&mut self) -> Result<(), ConnectionError> {
+        if !self.tx.active || self.tx.depth <= 0 {
+            return Err(TxNotActive);
+        }
+        self.tx.depth = self.tx.depth - 1;
+        if self.tx.depth == 0 {
+            self.tx = tx_state_autocommit();
+        }
+        Ok(())
+    }
+
+    // -------------------------------------------------------------------------
+    // Schema access (exposed mutably for the Admin path)
+    // -------------------------------------------------------------------------
+
+    public fn schema(&self) -> &SchemaCache { &self.schema }
+    public fn schema_mut(&mut self) -> &mut SchemaCache { &mut self.schema }
+
+    // -------------------------------------------------------------------------
+    // Pager access — internal, consumed by the statement executor
+    // -------------------------------------------------------------------------
+
+    public fn pager(&self) -> &Pager { &self.pager }
+    public fn pager_mut(&mut self) -> &mut Pager { &mut self.pager }
+}

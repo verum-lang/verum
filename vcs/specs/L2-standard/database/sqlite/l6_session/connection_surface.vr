@@ -1,0 +1,141 @@
+// @test: typecheck-pass
+// @level: L2
+// @tier: 0
+// @tags: sqlite, native, session, connection, capability
+// @timeout: 15000
+// @description: Connection — open/mode/capability checks/transaction state
+//
+// Spec: internal/specs/sqlite-native.md §4.8 + §16
+
+mount core.*;
+mount core.database.sqlite.native.l6_session.{
+    Connection, ConnectionMode, ConnectionError, TxMode,
+    open_memory, open_readonly_memory, open_readwrite_memory, open_admin_memory,
+    mode_can_write, mode_can_ddl, mode_name,
+};
+
+fn open_each_mode() {
+    match open_readonly_memory() {
+        Ok(c) => {
+            match c.mode() {
+                CmRead => {}, _ => panic("readonly mode"),
+            }
+        }
+        Err(_) => panic("open readonly"),
+    }
+    match open_readwrite_memory() {
+        Ok(c) => match c.mode() { CmWrite => {}, _ => panic("rw mode"), },
+        Err(_) => panic("open rw"),
+    }
+    match open_admin_memory() {
+        Ok(c) => match c.mode() { CmAdmin => {}, _ => panic("admin mode"), },
+        Err(_) => panic("open admin"),
+    }
+}
+
+fn capability_predicates() {
+    assert(!mode_can_write(CmRead));
+    assert(mode_can_write(CmWrite));
+    assert(mode_can_write(CmAdmin));
+    assert(!mode_can_ddl(CmRead));
+    assert(!mode_can_ddl(CmWrite));
+    assert(mode_can_ddl(CmAdmin));
+    assert_eq(mode_name(CmRead),  "read".clone());
+    assert_eq(mode_name(CmWrite), "write".clone());
+    assert_eq(mode_name(CmAdmin), "admin".clone());
+}
+
+fn ensure_writable_rejects_read() {
+    let c = match open_readonly_memory() {
+        Ok(c)  => c,
+        Err(_) => { panic("open"); return; }
+    };
+    match c.ensure_writable() {
+        Ok(_) => panic("readonly ensure_writable must reject"),
+        Err(_) => {},
+    }
+    match c.ensure_admin() {
+        Ok(_) => panic("readonly ensure_admin must reject"),
+        Err(_) => {},
+    }
+}
+
+fn ensure_admin_requires_admin() {
+    let c = match open_readwrite_memory() {
+        Ok(c)  => c,
+        Err(_) => { panic("open"); return; }
+    };
+    match c.ensure_writable() {
+        Ok(_) => {}, Err(_) => panic("write mode should pass"),
+    }
+    match c.ensure_admin() {
+        Ok(_) => panic("write should not have admin"),
+        Err(_) => {},
+    }
+}
+
+fn tx_lifecycle() {
+    let mut c = match open_readwrite_memory() {
+        Ok(c)  => c,
+        Err(_) => { panic("open"); return; }
+    };
+    assert(!c.is_in_tx());
+    match c.begin_tx(TmDeferred) {
+        Ok(_) => {}, Err(_) => panic("begin"),
+    }
+    assert(c.is_in_tx());
+    assert_eq(c.tx_depth(), 1);
+
+    match c.begin_tx(TmDeferred) {
+        Ok(_) => panic("double begin must reject"),
+        Err(_) => {},
+    }
+
+    match c.commit_tx() {
+        Ok(_) => {}, Err(_) => panic("commit"),
+    }
+    assert(!c.is_in_tx());
+
+    match c.commit_tx() {
+        Ok(_) => panic("commit outside tx must reject"),
+        Err(_) => {},
+    }
+}
+
+fn savepoint_push_pop() {
+    let mut c = match open_readwrite_memory() {
+        Ok(c)  => c,
+        Err(_) => { panic("open"); return; }
+    };
+    c.savepoint_push();
+    assert(c.is_in_tx());
+    assert_eq(c.tx_depth(), 2);   // push initialised the outer tx then nested once
+    c.savepoint_push();
+    assert_eq(c.tx_depth(), 3);
+    let _ = c.savepoint_pop();
+    let _ = c.savepoint_pop();
+    let _ = c.savepoint_pop();
+    assert(!c.is_in_tx());
+}
+
+fn readonly_cannot_begin_tx() {
+    let mut c = match open_readonly_memory() {
+        Ok(c)  => c,
+        Err(_) => { panic("open"); return; }
+    };
+    match c.begin_tx(TmDeferred) {
+        Ok(_) => panic("readonly begin_tx must reject"),
+        Err(_) => {},
+    }
+}
+
+fn main() {
+    open_each_mode();
+    capability_predicates();
+    ensure_writable_rejects_read();
+    ensure_admin_requires_admin();
+    tx_lifecycle();
+    savepoint_push_pop();
+    readonly_cannot_begin_tx();
+    print("connection_surface typecheck ok");
+}

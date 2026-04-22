@@ -1,0 +1,16 @@
+module core.database.sqlite.native.l7_api;
+
+// =============================================================================
+// core/database/sqlite/native/l7_api/mod.vr — public API facade (L7)
+// =============================================================================
+// Layer: 7 — what user code imports.
+// Dependencies: l6_session
+// =============================================================================
+
+public module database;
+
+public mount .database.{
+    Database, DbError,
+    open_memory_db, open_readonly, open_readwrite, open_admin,
+    db_error_from_conn,
+};

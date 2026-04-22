@@ -1,0 +1,212 @@
+module core.database.sqlite.native.l6_session.statement;
+
+// =============================================================================
+// l6_session/statement.vr — prepared statement
+// =============================================================================
+// Layer: 6
+// Spec: sqlite-native.md §16.3
+//
+// `PreparedStatement` is the compiled VdbeProgram + its execution
+// state. SQLite's public API exposes it as `sqlite3_stmt`; in loom it
+// is an affine record owned by the caller.
+//
+// Lifecycle:
+//
+//     prepare(sql)    → PreparedStatement { program, state, ... }
+//     bind_int(n, v)  → patch a ?N parameter
+//     step()          → StepResult (Row | Done | ExecError)
+//     current_row()   → &RegisterFile view on the row registers
+//     reset()         → rewind pc to 0, clear bindings
+//     finalize()      → consume the statement
+//
+// A fresh `state` is built by `prepare`; `reset` replaces it with a
+// new one while preserving the compiled program.
+// =============================================================================
+
+mount core.*;
+mount collections.{List, Map};
+mount base.{Result, Ok, Err, Text, Maybe};
+mount core.database.sqlite.native.l4_vdbe.{
+    Register, RegisterFile, register_file_new,
+    Opcode, VdbeProgram, VdbeState, vdbe_state_new, step, StepResult,
+    run_until_row, CursorTable, cursor_table_new,
+    CursorSlotKind,
+};
+mount core.database.sqlite.native.l5_sql.{
+    compile, CompileError, VdbeProgram as _VdbeProgram,
+};
+
+// -----------------------------------------------------------------------------
+// Binding table
+// -----------------------------------------------------------------------------
+
+public type ParamBindings is {
+    // Indexed params: `?1` / `?`. Slot 0 holds `?1`; `?` auto-index.
+    positional: List<Register>,
+    // Named params: `:name` / `@name` / `$name`.
+    named: Map<Text, Register>,
+};
+
+public fn param_bindings_new() -> ParamBindings {
+    ParamBindings {
+        positional: List.new(),
+        named: Map.new(),
+    }
+}
+
+implement ParamBindings {
+    public fn clear(&mut self) {
+        self.positional = List.new();
+        self.named = Map.new();
+    }
+
+    /// Ensure the positional slot `idx` (1-based per SQLite convention)
+    /// exists, padding with RNull as needed.
+    public fn set_positional(&mut self, idx: Int, value: Register) {
+        if idx < 1 { return; }
+        while self.positional.len() < idx {
+            self.positional.push(RNull);
+        }
+        self.positional[idx - 1] = value;
+    }
+
+    public fn set_named(&mut self, name: Text, value: Register) {
+        let _ = self.named.insert(name, value);
+    }
+
+    public fn get_positional(&self, idx: Int) -> Register {
+        if idx < 1 || idx > self.positional.len() { return RNull; }
+        self.positional[idx - 1]
+    }
+
+    public fn get_named(&self, name: &Text) -> Register {
+        if !self.named.contains_key(name.clone()) { return RNull; }
+        self.named.get(name.clone())
+    }
+}
+
+// -----------------------------------------------------------------------------
+// PreparedStatement
+// -----------------------------------------------------------------------------
+
+public type StmtError is
+      StmtCompile(CompileError)
+    | StmtExec(Int /* code */, Text /* message */)
+    | StmtMisuse(Text)
+    | StmtBindOutOfRange(Int);
+
+public type PreparedStatement is {
+    program: VdbeProgram,
+    state: VdbeState,
+    cursors: CursorTable,
+    bindings: ParamBindings,
+    sql: Text,
+    done: Bool,
+    last_row_start: Int,
+    last_row_cols: Int,
+};
+
+/// Compile `sql` into a prepared statement. The freshly-made state
+/// starts at pc=0 with all registers null.
+public fn prepare(sql: &Text) -> Result<PreparedStatement, StmtError> {
+    let program = match compile(sql) {
+        Ok(p)  => p,
+        Err(e) => { return Err(StmtCompile(e)); }
+    };
+    let state = vdbe_state_new(&program);
+    let cursors = cursor_table_new(program.cursor_count(), 4096, 0);
+    Ok(PreparedStatement {
+        program: program,
+        state: state,
+        cursors: cursors,
+        bindings: param_bindings_new(),
+        sql: sql.clone(),
+        done: false,
+        last_row_start: 0,
+        last_row_cols: 0,
+    })
+}
+
+implement PreparedStatement {
+    public fn sql_text(&self) -> &Text { &self.sql }
+    public fn is_done(&self) -> Bool { self.done }
+    public fn result_column_count(&self) -> Int { self.program.result_column_count() }
+
+    // -------------------------------------------------------------------------
+    // Bindings
+    // -------------------------------------------------------------------------
+
+    public fn bind_null(&mut self, idx: Int) { self.bindings.set_positional(idx, RNull); }
+    public fn bind_int(&mut self, idx: Int, value: Int64) { self.bindings.set_positional(idx, RInt(value)); }
+    public fn bind_real(&mut self, idx: Int, value: Float64) { self.bindings.set_positional(idx, RReal(value)); }
+    public fn bind_text(&mut self, idx: Int, value: Text) { self.bindings.set_positional(idx, RText(value)); }
+    public fn bind_blob(&mut self, idx: Int, value: List<Byte>) { self.bindings.set_positional(idx, RBlob(value)); }
+
+    public fn bind_int_named(&mut self, name: Text, value: Int64) { self.bindings.set_named(name, RInt(value)); }
+    public fn bind_text_named(&mut self, name: Text, value: Text) { self.bindings.set_named(name, RText(value)); }
+
+    // -------------------------------------------------------------------------
+    // Step / row access
+    // -------------------------------------------------------------------------
+
+    /// Advance execution until a row, done, or error. Returns a tag
+    /// the caller pattern-matches to decide whether to read a row.
+    public fn step(&mut self) -> StepResult {
+        if self.done { return Done; }
+        let result = run_until_row(&mut self.state, &self.program, -1);
+        match result {
+            Row(start, cols) => {
+                self.last_row_start = start;
+                self.last_row_cols = cols;
+                Row(start, cols)
+            }
+            Done => {
+                self.done = true;
+                Done
+            }
+            ExecError(c, m) => {
+                self.done = true;
+                ExecError(c, m)
+            }
+            Yield => Yield,
+        }
+    }
+
+    /// Read the nth column of the current row. Returns RNull if no
+    /// row is currently emitted or `n` is out of range.
+    public fn column(&self, n: Int) -> Register {
+        if n < 0 || n >= self.last_row_cols { return RNull; }
+        self.state.reg(self.last_row_start + n)
+    }
+
+    // -------------------------------------------------------------------------
+    // Reset / finalize
+    // -------------------------------------------------------------------------
+
+    /// Rewind the statement to pc=0 without recompiling. Keeps the
+    /// binding table so the caller can re-run the same query with
+    /// different parameter values.
+    public fn reset(&mut self) {
+        self.state = vdbe_state_new(&self.program);
+        self.cursors = cursor_table_new(self.program.cursor_count(), 4096, 0);
+        self.done = false;
+        self.last_row_start = 0;
+        self.last_row_cols = 0;
+    }
+
+    /// Clear every binding back to RNull. `reset` does NOT do this —
+    /// SQLite's `sqlite3_clear_bindings` is a separate call for a
+    /// reason (the typical `reset + rebind + step` loop only changes
+    /// a subset of params).
+    public fn clear_bindings(&mut self) {
+        self.bindings.clear();
+    }
+
+    // -------------------------------------------------------------------------
+    // Introspection — useful for tests and EXPLAIN
+    // -------------------------------------------------------------------------
+
+    public fn instruction_count(&self) -> Int { self.program.instruction_count() }
+    public fn program_counter(&self) -> Int { self.state.program_counter() }
+    public fn cursor_count(&self) -> Int { self.program.cursor_count() }
+}

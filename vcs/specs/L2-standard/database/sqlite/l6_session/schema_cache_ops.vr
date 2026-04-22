@@ -1,0 +1,104 @@
+// @test: typecheck-pass
+// @level: L2
+// @tier: 0
+// @tags: sqlite, native, session, schema-cache
+// @timeout: 10000
+// @description: SchemaCache — register/lookup/drop/invalidate
+//
+// Spec: internal/specs/sqlite-native.md §16.4
+
+mount core.*;
+mount collections.List;
+mount core.database.sqlite.native.l6_session.{
+    ColumnMeta, TableKind, TableMeta, IndexMeta,
+    SchemaError, SchemaCache,
+    schema_cache_new,
+};
+mount core.database.sqlite.native.l2_record.Affinity;
+
+fn meta_users() -> TableMeta {
+    let cols: List<ColumnMeta> = [
+        ColumnMeta {
+            name: "id".clone(), declared_type: "INTEGER".clone(),
+            affinity: Integer, not_null: true, primary_key: true,
+            collation: "".clone(),
+        },
+        ColumnMeta {
+            name: "name".clone(), declared_type: "TEXT".clone(),
+            affinity: Text, not_null: false, primary_key: false,
+            collation: "".clone(),
+        },
+    ];
+    let pk_cols: List<Text> = ["id".clone()];
+    TableMeta {
+        schema: "".clone(),
+        name: "users".clone(),
+        kind: TkTable,
+        root_page: 2,
+        columns: cols,
+        primary_key_cols: pk_cols,
+        strict: false,
+        without_rowid: false,
+        created_sql: "CREATE TABLE users(id INTEGER PRIMARY KEY, name TEXT)".clone(),
+    }
+}
+
+fn register_lookup_cycle() {
+    let mut sc = schema_cache_new();
+    assert_eq(sc.table_count(), 0);
+    match sc.register_table(meta_users()) {
+        Ok(_) => {}, Err(_) => panic("register_table"),
+    }
+    assert_eq(sc.table_count(), 1);
+    match sc.lookup_table(&"".clone(), &"users".clone()) {
+        Ok(m) => {
+            assert_eq(m.name, "users".clone());
+            assert_eq(m.root_page, 2);
+            assert_eq(m.columns.len(), 2);
+        }
+        Err(_) => panic("lookup"),
+    }
+    assert(sc.has_table(&"".clone(), &"users".clone()));
+    assert(!sc.has_table(&"".clone(), &"missing".clone()));
+}
+
+fn duplicate_register_rejected() {
+    let mut sc = schema_cache_new();
+    let _ = sc.register_table(meta_users());
+    match sc.register_table(meta_users()) {
+        Ok(_) => panic("duplicate should reject"),
+        Err(_) => {},
+    }
+}
+
+fn drop_and_invalidate_bump_cookie() {
+    let mut sc = schema_cache_new();
+    let _ = sc.register_table(meta_users());
+    let c0 = sc.cookie();
+    match sc.drop_table(&"".clone(), &"users".clone()) {
+        Ok(_) => {}, Err(_) => panic("drop"),
+    }
+    assert(sc.cookie() > c0);
+    assert_eq(sc.table_count(), 0);
+}
+
+fn sync_cookie_bumps_generation() {
+    let mut sc = schema_cache_new();
+    let g0 = sc.gen();
+    let changed = sc.sync_cookie(42);
+    assert(changed);
+    assert(sc.gen() > g0);
+    // Same cookie → no change.
+    let g1 = sc.gen();
+    let again = sc.sync_cookie(42);
+    assert(!again);
+    assert_eq(sc.gen(), g1);
+}
+
+fn main() {
+    register_lookup_cycle();
+    duplicate_register_rejected();
+    drop_and_invalidate_bump_cookie();
+    sync_cookie_bumps_generation();
+    print("schema_cache_ops typecheck ok");
+}

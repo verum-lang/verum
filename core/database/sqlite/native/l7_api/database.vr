@@ -1,0 +1,205 @@
+module core.database.sqlite.native.l7_api.database;
+
+// =============================================================================
+// l7_api/database.vr — top-level Database facade
+// =============================================================================
+// Layer: 7 — user-visible handle.
+// Spec: sqlite-native.md §16.1 + §Appendix D (error-code map)
+//
+// `Database` is what end-user code holds. It wraps a Connection at L6,
+// translates L6's strongly-typed ConnectionError / StmtError into a
+// single `DbError` tagged with SQLSTATE-style codes, and exposes the
+// idiomatic open / prepare / execute / close API.
+//
+// For v1:
+//
+//   * open_memory(mode)     — in-memory DB
+//   * prepare(sql)          — compile SQL → PreparedStatement
+//   * execute(sql)          — compile + run-to-completion for
+//                             statements that produce no rows
+//                             (DDL / INSERT / DELETE / TX)
+//   * query(sql)            — compile + run returning first row;
+//                             callers needing more call step() on
+//                             the returned PreparedStatement
+//   * close(self)           — affine consume
+//
+// File-backed open (open_path / open_uri) lands once the PosixVfs
+// pager backend is integrated — pager_open_memory is the only route
+// until the actor IPC is wired.
+// =============================================================================
+
+mount core.*;
+mount collections.List;
+mount base.{Result, Ok, Err, Text};
+mount core.database.sqlite.native.l4_vdbe.{Register, StepResult, VdbeProgram};
+mount core.database.sqlite.native.l5_sql.{CompileError};
+mount core.database.sqlite.native.l6_session.{
+    Connection, ConnectionMode, ConnectionError, TxMode,
+    PreparedStatement, StmtError,
+    open_memory, prepare,
+    mode_can_write, mode_can_ddl,
+};
+
+// -----------------------------------------------------------------------------
+// DbError — SQLSTATE-style tagged sum
+// -----------------------------------------------------------------------------
+
+public type DbError is
+      DbOk
+    | DbGeneric(Text)
+    | DbBusy
+    | DbLocked
+    | DbOutOfMemory
+    | DbReadonly
+    | DbInterrupted
+    | DbIoError(Text)
+    | DbCorrupt(Text)
+    | DbFull
+    | DbCannotOpen(Text)
+    | DbConstraint(Text)
+    | DbDataTypeMismatch
+    | DbMisuse(Text)
+    | DbAuthDenied
+    | DbBindRange(Int)
+    | DbNotADatabase
+    | DbCompileError(CompileError)
+    | DbConnectionError(ConnectionError)
+    | DbStmtError(StmtError)
+    | DbUnsupported(Text);
+
+/// Map ConnectionError → DbError for the facade layer.
+public fn db_error_from_conn(e: ConnectionError) -> DbError {
+    match e {
+        NotWritable          => DbReadonly,
+        NotAdmin             => DbAuthDenied,
+        TxAlreadyActive      => DbMisuse("transaction already active".clone()),
+        TxNotActive          => DbMisuse("no active transaction".clone()),
+        IoError(ref msg)     => DbIoError(msg.clone()),
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Database
+// -----------------------------------------------------------------------------
+
+public type Database is {
+    conn: Connection,
+};
+
+/// Open an in-memory database with the given capability.
+public fn open_memory_db(mode: ConnectionMode) -> Result<Database, DbError> {
+    match open_memory(mode) {
+        Ok(c)  => Ok(Database { conn: c }),
+        Err(e) => Err(db_error_from_conn(e)),
+    }
+}
+
+public fn open_readonly() -> Result<Database, DbError> { open_memory_db(CmRead) }
+public fn open_readwrite() -> Result<Database, DbError> { open_memory_db(CmWrite) }
+public fn open_admin() -> Result<Database, DbError> { open_memory_db(CmAdmin) }
+
+implement Database {
+    public fn mode(&self) -> ConnectionMode { self.conn.mode() }
+    public fn is_in_tx(&self) -> Bool { self.conn.is_in_tx() }
+    public fn schema_generation(&self) -> Int { self.conn.schema_generation() }
+
+    // -------------------------------------------------------------------------
+    // Prepare / execute / query
+    // -------------------------------------------------------------------------
+
+    /// Compile `sql` into a PreparedStatement. No capability check is
+    /// done here — the statement is merely compiled; execution-time
+    /// capability gates happen in `step`.
+    public fn prepare(&self, sql: &Text) -> Result<PreparedStatement, DbError> {
+        match prepare(sql) {
+            Ok(p)  => Ok(p),
+            Err(e) => Err(DbStmtError(e)),
+        }
+    }
+
+    /// Compile + run-to-completion. Intended for statements that
+    /// produce no rows (DDL, INSERT/UPDATE/DELETE, transaction
+    /// control). Returns `DbError::DbMisuse` if the statement yields
+    /// rows (caller should use `query` for that).
+    public fn execute(&mut self, sql: &Text) -> Result<(), DbError> {
+        let mut stmt = match self.prepare(sql) {
+            Ok(s)  => s, Err(e) => { return Err(e); }
+        };
+        loop {
+            match stmt.step() {
+                Done => { break; }
+                Row(_, _) => {
+                    return Err(DbMisuse("execute() called on a row-producing query".clone()));
+                }
+                ExecError(c, m) => { return Err(DbStmtError(StmtExec(c, m))); }
+                Yield => {
+                    // Shouldn't happen — run_until_row already drains
+                    // Yields, but we guard.
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Compile + step once, returning the first row (if any) as a
+    /// list of Register values. Intended for single-row SELECTs;
+    /// multi-row consumers call `prepare` + loop directly.
+    public fn query_first_row(&mut self, sql: &Text) -> Result<List<Register>, DbError> {
+        let mut stmt = match self.prepare(sql) {
+            Ok(s)  => s, Err(e) => { return Err(e); }
+        };
+        match stmt.step() {
+            Row(start, cols) => {
+                let mut out: List<Register> = List.new();
+                let mut i: Int = 0;
+                while i < cols {
+                    out.push(stmt.column(i));
+                    i = i + 1;
+                }
+                Ok(out)
+            }
+            Done => Ok(List.new()),   // no rows
+            ExecError(c, m) => Err(DbStmtError(StmtExec(c, m))),
+            Yield => Err(DbMisuse("yield outside run_until_row".clone())),
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // Transaction sugar
+    // -------------------------------------------------------------------------
+
+    public fn begin(&mut self) -> Result<(), DbError> {
+        match self.conn.begin_tx(TmDeferred) {
+            Ok(_)  => Ok(()), Err(e) => Err(db_error_from_conn(e)),
+        }
+    }
+
+    public fn begin_immediate(&mut self) -> Result<(), DbError> {
+        match self.conn.begin_tx(TmImmediate) {
+            Ok(_)  => Ok(()), Err(e) => Err(db_error_from_conn(e)),
+        }
+    }
+
+    public fn commit(&mut self) -> Result<(), DbError> {
+        match self.conn.commit_tx() {
+            Ok(_)  => Ok(()), Err(e) => Err(db_error_from_conn(e)),
+        }
+    }
+
+    public fn rollback(&mut self) -> Result<(), DbError> {
+        match self.conn.rollback_tx() {
+            Ok(_)  => Ok(()), Err(e) => Err(db_error_from_conn(e)),
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // Close
+    // -------------------------------------------------------------------------
+
+    /// Consume the database. Further methods are unreachable because
+    /// `self` is moved. In the actor-backed version this also
+    /// forwards a Close request to the pager actor.
+    public fn close(self) {
+        let _ = self;
+    }
+}

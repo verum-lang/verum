@@ -65,3 +65,9 @@ public module l4_vdbe;
 
 // Layer 5: SQL (lexer, AST, parser, planner, codegen)
 public module l5_sql;
+
+// Layer 6: Session (Connection, SchemaCache, PreparedStatement)
+public module l6_session;
+
+// Layer 7: public API (Database facade, DbError)
+public module l7_api;
