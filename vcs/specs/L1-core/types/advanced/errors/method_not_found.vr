@@ -1,8 +1,8 @@
-// @test: unit
+// @test: typecheck-fail
 // @tier: 1
 // @level: L1
 // @tags: error, implement, method
-// @expect: error(MethodNotFound)
+// @expected-error: E400
 // @description: Error test for method not found on user type
 // @spec: 03-type-system.md Section 14 - Method resolution
 
