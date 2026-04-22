@@ -440,6 +440,130 @@ impl AxiomRegistry {
 }
 
 // =============================================================================
+// AST → AxiomRegistry loader
+// =============================================================================
+
+/// Scan a parsed Verum module and register every axiom that carries a
+/// `@framework(identifier, "citation")` attribute.
+///
+/// This closes the architectural loop for trusted-boundary declarations:
+///
+///   1. Source `.vr` file declares `@framework(lurie_htt, "HTT 6.2.2.7")
+///      axiom …;`.
+///   2. `verum_fast_parser` parses it into an `Item` whose decl carries
+///      the attribute in either `Item.attributes` or its
+///      `AxiomDecl.attributes` list.
+///   3. This loader extracts each `FrameworkAttr` and inserts a
+///      `RegisteredAxiom` into the `AxiomRegistry`.
+///   4. Any subsequent `infer` call on a `CoreTerm::Axiom { name, .. }`
+///      that names one of the loaded axioms succeeds against the
+///      registered type.
+///
+/// Two errors can surface:
+///
+/// - [`KernelError::DuplicateAxiom`] — two axioms with the same name
+///   carried a `@framework(...)` marker.
+/// - [`LoadAxiomsReport::malformed`] — a `@framework(...)` attribute
+///   was syntactically parsed but had the wrong argument shape
+///   (non-identifier first arg, non-string second arg, wrong arg
+///   count). This is surfaced in the report rather than aborting,
+///   so callers can aggregate all malformations before exiting.
+///
+/// The axiom type stored in the registry is a placeholder
+/// (`CoreTerm::Universe(Concrete(0))`) at this bring-up stage — the
+/// compiler's type elaborator is responsible for supplying the real
+/// declared type when it calls into the kernel. The registry's
+/// purpose here is TCB *attribution* (what framework, what citation),
+/// not type storage.
+pub fn load_framework_axioms(
+    module: &verum_ast::Module,
+    registry: &mut AxiomRegistry,
+) -> LoadAxiomsReport {
+    use verum_ast::attr::FrameworkAttr;
+    use verum_ast::decl::ItemKind;
+
+    let mut report = LoadAxiomsReport::default();
+
+    for item in module.items.iter() {
+        // Only axiom declarations get auto-registered. Theorems /
+        // lemmas / corollaries carry @framework markers too, but
+        // they are *consumers* of axioms, not postulates themselves —
+        // the elaborator handles their registration once its own
+        // proof-term is emitted.
+        let (name, decl_attrs) = match &item.kind {
+            ItemKind::Axiom(decl) => (decl.name.name.clone(), &decl.attributes),
+            _ => continue,
+        };
+
+        // Walk both the outer Item.attributes and the inner decl
+        // attributes — the parser can place the marker on either.
+        let mut found: Maybe<FrameworkAttr> = Maybe::None;
+        for attrs in [&item.attributes, decl_attrs] {
+            for attr in attrs.iter() {
+                if !attr.is_named("framework") {
+                    continue;
+                }
+                match FrameworkAttr::from_attribute(attr) {
+                    Maybe::Some(fw) => {
+                        if matches!(found, Maybe::None) {
+                            found = Maybe::Some(fw);
+                        }
+                    }
+                    Maybe::None => {
+                        report.malformed.push(name.clone());
+                    }
+                }
+            }
+        }
+
+        if let Maybe::Some(fw) = found {
+            let framework = FrameworkId {
+                framework: fw.name.clone(),
+                citation: fw.citation.clone(),
+            };
+            // Placeholder type at bring-up — the elaborator supplies
+            // the real declared type when it submits the proof term.
+            let placeholder_ty = CoreTerm::Universe(UniverseLevel::Concrete(0));
+            match registry.register(name.clone(), placeholder_ty, framework) {
+                Ok(()) => report.registered.push(name),
+                Err(KernelError::DuplicateAxiom(n)) => {
+                    report.duplicates.push(n);
+                }
+                Err(_) => {
+                    // Register only returns DuplicateAxiom today;
+                    // other error branches are defensive for when the
+                    // register API grows.
+                    report.malformed.push(name);
+                }
+            }
+        }
+    }
+
+    report
+}
+
+/// Outcome of [`load_framework_axioms`]. Returned by value so callers
+/// can aggregate across multiple modules before reporting.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct LoadAxiomsReport {
+    /// Axiom names successfully inserted into the registry.
+    pub registered: List<Text>,
+    /// Axiom names that were already in the registry.
+    pub duplicates: List<Text>,
+    /// Axiom names whose `@framework(...)` attribute had a
+    /// malformed argument shape (wrong arg count, non-identifier
+    /// first arg, non-string second arg).
+    pub malformed: List<Text>,
+}
+
+impl LoadAxiomsReport {
+    /// Did the load complete with no errors at all?
+    pub fn is_clean(&self) -> bool {
+        self.duplicates.is_empty() && self.malformed.is_empty()
+    }
+}
+
+// =============================================================================
 // Kernel errors
 // =============================================================================
 
@@ -1601,5 +1725,205 @@ mod tests {
         };
         let err = infer(&Context::new(), &bogus, &reg).unwrap_err();
         assert!(matches!(err, KernelError::TypeMismatch { .. }));
+    }
+
+    // -----------------------------------------------------------------
+    // FrameworkAttr → AxiomRegistry loader
+    // -----------------------------------------------------------------
+
+    /// Helper: build a parsed module with one `@framework(id, "cite")`
+    /// axiom declaration.
+    fn module_with_axiom(
+        framework_name: &str,
+        citation: &str,
+        axiom_name: &str,
+    ) -> verum_ast::Module {
+        use verum_ast::attr::Attribute;
+        use verum_ast::decl::{AxiomDecl, Visibility};
+        use verum_ast::expr::{Expr, ExprKind};
+        use verum_ast::literal::{Literal, LiteralKind, StringLit};
+        use verum_ast::span::Span;
+        use verum_ast::{Ident, Item, ItemKind};
+
+        let span = Span::default();
+        let name_expr = Expr::ident(Ident::new(Text::from(framework_name), span));
+        let cite_lit = Literal::new(
+            LiteralKind::Text(StringLit::Regular(Text::from(citation))),
+            span,
+        );
+        let cite_expr = Expr::literal(cite_lit);
+
+        let mut args: List<Expr> = List::new();
+        args.push(name_expr);
+        args.push(cite_expr);
+        let framework_attr =
+            Attribute::new(Text::from("framework"), Maybe::Some(args), span);
+
+        let mut attrs: List<Attribute> = List::new();
+        attrs.push(framework_attr);
+
+        // Minimal AxiomDecl — body and clauses stay empty; the
+        // loader only inspects name + attributes.
+        let axiom_ident = Ident::new(Text::from(axiom_name), span);
+        let proposition = Expr::literal(Literal::new(
+            LiteralKind::Bool(true),
+            span,
+        ));
+        let decl = AxiomDecl::new(axiom_ident, proposition, span);
+        let mut decl = decl;
+        decl.visibility = Visibility::Public;
+        decl.attributes = attrs.clone();
+
+        let item = Item {
+            kind: ItemKind::Axiom(decl),
+            attributes: List::new(),
+            span,
+        };
+
+        let mut items: List<Item> = List::new();
+        items.push(item);
+        verum_ast::Module {
+            items,
+            span,
+            file_id: verum_ast::span::FileId::new(0),
+            attributes: List::new(),
+        }
+    }
+
+    #[test]
+    fn load_framework_axioms_registers_single_marker() {
+        let module = module_with_axiom(
+            "lurie_htt",
+            "HTT 6.2.2.7",
+            "sheafification_is_topos",
+        );
+        let mut reg = AxiomRegistry::new();
+        let report = load_framework_axioms(&module, &mut reg);
+
+        assert!(report.is_clean(), "expected clean load, got {:?}", report);
+        assert_eq!(report.registered.len(), 1);
+        assert_eq!(
+            report.registered.get(0).map(|t| t.as_str()),
+            Some("sheafification_is_topos")
+        );
+
+        match reg.get("sheafification_is_topos") {
+            Maybe::Some(entry) => {
+                assert_eq!(entry.framework.framework.as_str(), "lurie_htt");
+                assert_eq!(entry.framework.citation.as_str(), "HTT 6.2.2.7");
+            }
+            Maybe::None => panic!("axiom not registered"),
+        }
+    }
+
+    #[test]
+    fn load_framework_axioms_detects_duplicate() {
+        let m1 = module_with_axiom(
+            "lurie_htt",
+            "HTT 6.2.2.7",
+            "sheafification_is_topos",
+        );
+        let m2 = module_with_axiom(
+            "schreiber_dcct",
+            "DCCT §3.9",
+            "sheafification_is_topos", // same name — collision
+        );
+        let mut reg = AxiomRegistry::new();
+        let r1 = load_framework_axioms(&m1, &mut reg);
+        assert!(r1.is_clean());
+
+        let r2 = load_framework_axioms(&m2, &mut reg);
+        assert_eq!(r2.duplicates.len(), 1);
+        assert_eq!(
+            r2.duplicates.get(0).map(|t| t.as_str()),
+            Some("sheafification_is_topos")
+        );
+        assert!(r2.registered.is_empty());
+    }
+
+    #[test]
+    fn load_framework_axioms_skips_non_axiom_items() {
+        // A theorem with @framework is NOT auto-registered — the
+        // loader only consumes axioms. (Theorems are consumers, not
+        // postulates, so their elaborator path handles registration
+        // when a proof term is submitted.)
+        use verum_ast::attr::Attribute;
+        use verum_ast::decl::{TheoremDecl, Visibility};
+        use verum_ast::expr::{Expr, ExprKind};
+        use verum_ast::literal::{Literal, LiteralKind, StringLit};
+        use verum_ast::span::Span;
+        use verum_ast::{Ident, Item, ItemKind};
+
+        let span = Span::default();
+
+        let framework_attr = {
+            let name_expr = Expr::ident(Ident::new(Text::from("lurie_htt"), span));
+            let cite_lit = Literal::new(
+                LiteralKind::Text(StringLit::Regular(Text::from("HTT 6.2.2.7"))),
+                span,
+            );
+            let cite_expr = Expr::literal(cite_lit);
+            let mut args: List<Expr> = List::new();
+            args.push(name_expr);
+            args.push(cite_expr);
+            Attribute::new(Text::from("framework"), Maybe::Some(args), span)
+        };
+        let mut attrs: List<Attribute> = List::new();
+        attrs.push(framework_attr);
+
+        let theorem_ident = Ident::new(Text::from("some_theorem"), span);
+        let mut thm = TheoremDecl::new(
+            theorem_ident,
+            Expr::literal(Literal::new(LiteralKind::Bool(true), span)),
+            span,
+        );
+        thm.visibility = Visibility::Public;
+        thm.attributes = attrs;
+
+        let item = Item {
+            kind: ItemKind::Theorem(thm),
+            attributes: List::new(),
+            span,
+        };
+
+        let mut items: List<Item> = List::new();
+        items.push(item);
+        let module = verum_ast::Module {
+            items,
+            span,
+            file_id: verum_ast::span::FileId::new(0),
+            attributes: List::new(),
+        };
+
+        let mut reg = AxiomRegistry::new();
+        let report = load_framework_axioms(&module, &mut reg);
+        assert!(report.is_clean());
+        assert!(report.registered.is_empty());
+        assert_eq!(reg.all().len(), 0);
+    }
+
+    #[test]
+    fn axiom_after_load_is_checkable_by_infer() {
+        // End-to-end: load a framework axiom, then successfully
+        // check a CoreTerm::Axiom that references it.
+        let module = module_with_axiom(
+            "connes_reconstruction",
+            "Connes 2008 axiom (vii)",
+            "first_order_condition",
+        );
+        let mut reg = AxiomRegistry::new();
+        let report = load_framework_axioms(&module, &mut reg);
+        assert!(report.is_clean());
+
+        let term = CoreTerm::Axiom {
+            name: Text::from("first_order_condition"),
+            ty: Heap::new(CoreTerm::Universe(UniverseLevel::Concrete(0))),
+            framework: FrameworkId {
+                framework: Text::from("connes_reconstruction"),
+                citation: Text::from("Connes 2008 axiom (vii)"),
+            },
+        };
+        let ty = infer(&Context::new(), &term, &reg).unwrap();
+        assert!(matches!(ty, CoreTerm::Universe(_)));
     }
 }
