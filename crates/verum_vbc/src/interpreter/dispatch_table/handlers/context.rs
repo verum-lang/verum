@@ -23,9 +23,14 @@ use verum_common::cbgr::caps;
 
 /// CtxGet (0xB0) - Retrieve a context value by type.
 ///
-/// If the context is not found, logs a warning with the context name
-/// and returns nil. This prevents silent failures when contexts are
-/// not provided before use.
+/// Panics with `Context X not provided` when the context is missing.
+/// Accessing a context that was never provided is a programming error —
+/// the caller's `using [X]` clause is a hard requirement, and the
+/// previous fallback to `nil` silently propagated a null through the
+/// next method call, producing a much less informative
+/// `NullPointerDereference` downstream. The panic carries the actual
+/// context name so `@expected-panic: Context X not provided` tests
+/// can match against it.
 pub(in super::super) fn handle_ctx_get(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
     let dst = read_reg(state)?;
     let ctx_type = read_varint(state)? as u32;
@@ -36,15 +41,11 @@ pub(in super::super) fn handle_ctx_get(state: &mut InterpreterState) -> Interpre
             state.set_reg(dst, value);
         }
         None => {
-            // Context not found — resolve name for diagnostic
             let ctx_name = state.module.strings.get(crate::types::StringId(ctx_type))
                 .unwrap_or("unknown");
-            eprintln!(
-                "warning: context '{}' (id={}) not provided — returning nil. \
-                 Ensure 'provide {}' is called before accessing this context.",
-                ctx_name, ctx_type, ctx_name
-            );
-            state.set_reg(dst, Value::nil());
+            return Err(InterpreterError::Panic {
+                message: format!("Context {} not provided", ctx_name),
+            });
         }
     }
 
