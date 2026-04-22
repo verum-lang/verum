@@ -1,0 +1,151 @@
+// @test: typecheck-pass
+// @level: L2
+// @tier: 0
+// @tags: sqlite, native, vdbe, interpreter, cursor, end-to-end
+// @timeout: 15000
+// @description: Interpreter drives cursor opcodes against row-store
+//
+// Spec: internal/specs/sqlite-native.md §11.3
+
+mount core.*;
+mount collections.List;
+mount core.database.sqlite.native.l4_vdbe.{
+    Opcode, Register, VdbeProgram, VdbeState, StepResult,
+    program_new, vdbe_state_new, step, run_until_row,
+    CursorKind,
+};
+
+fn install_two_rows_and_scan() {
+    // Program:
+    //   0: OpenEphemeral(0, 1)
+    //   1: Rewind(0, 6)    <- jump to Close if empty
+    //   2: Column(0, 0, 0)
+    //   3: ResultRow(0, 1)
+    //   4: Next(0, 2)      <- loop back
+    //   5: (fall-through after Next false)
+    //   6: Close(0)
+    //   7: Halt(0, 0)
+    let mut p = program_new("".clone(), 2);
+    let _ = p.declare_cursor(CkEphemeral, 0, 1);
+    let _ = p.emit(OpenEphemeral(0, 1));
+    let _ = p.emit(Rewind(0, 6));
+    let _ = p.emit(Column(0, 0, 0));
+    let _ = p.emit(ResultRow(0, 1));
+    let _ = p.emit(Next(0, 2));
+    let _ = p.emit(Close(0));
+    let _ = p.emit(Halt(0, 0));
+
+    let mut st = vdbe_state_new(&p);
+    // Pre-populate the ephemeral cursor the step() will open at pc=0.
+    // Because OpenEphemeral runs first, we prep rows *after* the first
+    // yield by running a budget that stops at OpenEphemeral's emission.
+    // Easier approach: run with an empty store — Rewind jumps to Close,
+    // then Halt → Done.
+    match run_until_row(&mut st, &p, 100) {
+        Done => {}, _ => panic("empty ephemeral should reach Done"),
+    }
+}
+
+fn rewind_with_preinstalled_rows() {
+    // Same program, but pre-install rows manually via cursor_table_mut
+    // *after* vdbe_state_new but BEFORE step — the OpenEphemeral at
+    // pc=0 will clear them, so we interleave: step one instruction
+    // (OpenEphemeral), install rows, continue.
+    let mut p = program_new("".clone(), 2);
+    let _ = p.declare_cursor(CkEphemeral, 0, 1);
+    let _ = p.emit(OpenEphemeral(0, 1));
+    let _ = p.emit(Rewind(0, 6));
+    let _ = p.emit(Column(0, 0, 0));
+    let _ = p.emit(ResultRow(0, 1));
+    let _ = p.emit(Next(0, 2));
+    let _ = p.emit(Close(0));
+    let _ = p.emit(Halt(0, 0));
+
+    let mut st = vdbe_state_new(&p);
+    // First step: OpenEphemeral(0, 1) → slot 0 is now open, empty.
+    let _ = step(&mut st, &p);
+    // Install two rows into cursor 0.
+    let tbl = st.cursor_table_mut();
+    let rows: List<List<Register>> = [
+        [RInt(10 as Int64)],
+        [RInt(20 as Int64)],
+    ];
+    let _ = tbl.install_rows(0, rows);
+
+    // Now run to first row.
+    match run_until_row(&mut st, &p, 100) {
+        Row(start, n) => {
+            assert_eq(n, 1);
+            match st.reg(start) {
+                RInt(i) => { assert_eq(i as Int, 10); }
+                _ => panic("row 1 col 0"),
+            }
+        }
+        _ => panic("expected first row"),
+    }
+
+    // Step again to second row.
+    match run_until_row(&mut st, &p, 100) {
+        Row(start, n) => {
+            assert_eq(n, 1);
+            match st.reg(start) {
+                RInt(i) => { assert_eq(i as Int, 20); }
+                _ => panic("row 2 col 0"),
+            }
+        }
+        _ => panic("expected second row"),
+    }
+
+    // Loop exits → Close → Halt → Done.
+    match run_until_row(&mut st, &p, 100) {
+        Done => {}, _ => panic("expected Done"),
+    }
+}
+
+fn insert_via_opcode_then_scan() {
+    // Program:
+    //   0: OpenWrite(0, 1, 1)     -- n_cols=1 so Insert reads 1 reg
+    //   1: Integer(42, 0)         -- data_reg = 0
+    //   2: NewRowid(0, 1)         -- key_reg = 1
+    //   3: Insert(0, 0, 1, 0)
+    //   4: Rewind(0, 8)
+    //   5: Column(0, 0, 2)
+    //   6: ResultRow(2, 1)
+    //   7: Next(0, 5)
+    //   8: Close(0)
+    //   9: Halt(0, 0)
+    let mut p = program_new("".clone(), 4);
+    let _ = p.declare_cursor(CkTable, 1, 1);
+    let _ = p.emit(OpenWrite(0, 1, 1));
+    let _ = p.emit(Integer(42, 0));
+    let _ = p.emit(NewRowid(0, 1));
+    let _ = p.emit(Insert(0, 0, 1, 0));
+    let _ = p.emit(Rewind(0, 8));
+    let _ = p.emit(Column(0, 0, 2));
+    let _ = p.emit(ResultRow(2, 1));
+    let _ = p.emit(Next(0, 5));
+    let _ = p.emit(Close(0));
+    let _ = p.emit(Halt(0, 0));
+
+    let mut st = vdbe_state_new(&p);
+    match run_until_row(&mut st, &p, 200) {
+        Row(start, n) => {
+            assert_eq(n, 1);
+            match st.reg(start) {
+                RInt(i) => { assert_eq(i as Int, 42); }
+                _ => panic("inserted value should be 42"),
+            }
+        }
+        _ => panic("expected row"),
+    }
+    match run_until_row(&mut st, &p, 200) {
+        Done => {}, _ => panic("expected Done after single row"),
+    }
+}
+
+fn main() {
+    install_two_rows_and_scan();
+    rewind_with_preinstalled_rows();
+    insert_via_opcode_then_scan();
+    print("interpreter_cursor typecheck ok");
+}

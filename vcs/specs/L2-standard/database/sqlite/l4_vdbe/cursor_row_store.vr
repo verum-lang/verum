@@ -1,0 +1,121 @@
+// @test: typecheck-pass
+// @level: L2
+// @tier: 0
+// @tags: sqlite, native, vdbe, cursor, row-store
+// @timeout: 10000
+// @description: Cursor slot row-store — append/install/has_more/advance/peek/delete
+//
+// Spec: internal/specs/sqlite-native.md §11.3 (cursor pipeline)
+
+mount core.*;
+mount collections.List;
+mount core.database.sqlite.native.l4_vdbe.{
+    CursorTable, cursor_table_new,
+    Register,
+};
+
+fn row_int(i: Int64) -> List<Register> { [RInt(i)] }
+fn row_two(a: Int64, b: Text) -> List<Register> { [RInt(a), RText(b)] }
+
+fn install_and_peek() {
+    let mut tbl = cursor_table_new(1, 4096, 0);
+    let _ = tbl.open_ephemeral(0, 2);
+    let rows: List<List<Register>> = [row_two(1 as Int64, "alpha".clone()), row_two(2 as Int64, "beta".clone())];
+    let _ = tbl.install_rows(0, rows);
+    assert_eq(tbl.row_count(0), 2);
+    assert(tbl.has_more(0));
+    match tbl.peek_cell(0, 0) {
+        RInt(i) => { assert_eq(i as Int, 1); }
+        _ => panic("peek first col 0"),
+    }
+    match tbl.peek_cell(0, 1) {
+        RText(_) => {}, _ => panic("peek first col 1"),
+    }
+}
+
+fn advance_walks_rows() {
+    let mut tbl = cursor_table_new(1, 4096, 0);
+    let _ = tbl.open_ephemeral(0, 1);
+    let rows: List<List<Register>> = [row_int(10 as Int64), row_int(20 as Int64), row_int(30 as Int64)];
+    let _ = tbl.install_rows(0, rows);
+    match tbl.peek_cell(0, 0) {
+        RInt(i) => { assert_eq(i as Int, 10); }, _ => panic("first"),
+    }
+    assert(tbl.advance(0));
+    match tbl.peek_cell(0, 0) {
+        RInt(i) => { assert_eq(i as Int, 20); }, _ => panic("second"),
+    }
+    assert(tbl.advance(0));
+    match tbl.peek_cell(0, 0) {
+        RInt(i) => { assert_eq(i as Int, 30); }, _ => panic("third"),
+    }
+    // past the end → advance returns false
+    assert(!tbl.advance(0));
+    assert(!tbl.has_more(0));
+}
+
+fn append_auto_rowid() {
+    let mut tbl = cursor_table_new(1, 4096, 0);
+    let _ = tbl.open_ephemeral(0, 1);
+    let r1 = match tbl.append_row(0, row_int(100 as Int64)) {
+        Ok(r)  => r, Err(_) => { panic("append1"); return; }
+    };
+    let r2 = match tbl.append_row(0, row_int(200 as Int64)) {
+        Ok(r)  => r, Err(_) => { panic("append2"); return; }
+    };
+    assert_eq(r1 as Int, 1);
+    assert_eq(r2 as Int, 2);
+    assert_eq(tbl.row_count(0), 2);
+    assert_eq(tbl.peek_next_rowid(0) as Int, 3);
+}
+
+fn rewind_resets_position() {
+    let mut tbl = cursor_table_new(1, 4096, 0);
+    let _ = tbl.open_ephemeral(0, 1);
+    let _ = tbl.install_rows(0, [row_int(1 as Int64), row_int(2 as Int64)]);
+    assert(tbl.advance(0));       // pos=1
+    assert_eq(tbl.current_position(0), 1);
+    let _ = tbl.rewind(0);
+    assert_eq(tbl.current_position(0), 0);
+}
+
+fn delete_current_row_shrinks() {
+    let mut tbl = cursor_table_new(1, 4096, 0);
+    let _ = tbl.open_ephemeral(0, 1);
+    let _ = tbl.install_rows(0, [row_int(1 as Int64), row_int(2 as Int64), row_int(3 as Int64)]);
+    assert(tbl.advance(0));       // now on row 2
+    assert(tbl.delete_current(0));
+    assert_eq(tbl.row_count(0), 2);
+    // pos unchanged — it now points at what used to be row 3
+    match tbl.peek_cell(0, 0) {
+        RInt(i) => { assert_eq(i as Int, 3); }, _ => panic("shrunk"),
+    }
+}
+
+fn peek_row_clones() {
+    let mut tbl = cursor_table_new(1, 4096, 0);
+    let _ = tbl.open_ephemeral(0, 2);
+    let _ = tbl.install_rows(0, [row_two(7 as Int64, "seven".clone())]);
+    let row = tbl.peek_row(0);
+    assert_eq(row.len(), 2);
+}
+
+fn current_rowid_matches_position() {
+    let mut tbl = cursor_table_new(1, 4096, 0);
+    let _ = tbl.open_ephemeral(0, 1);
+    let _ = tbl.install_rows(0, [row_int(100 as Int64), row_int(200 as Int64)]);
+    assert_eq(tbl.current_rowid(0) as Int, 1);
+    let _ = tbl.advance(0);
+    assert_eq(tbl.current_rowid(0) as Int, 2);
+}
+
+fn main() {
+    install_and_peek();
+    advance_walks_rows();
+    append_auto_rowid();
+    rewind_resets_position();
+    delete_current_row_shrinks();
+    peek_row_clones();
+    current_rowid_matches_position();
+    print("cursor_row_store typecheck ok");
+}

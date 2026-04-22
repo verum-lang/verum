@@ -32,6 +32,7 @@ mount core.database.sqlite.native.l3_btree.{
     Btree, BtreeCursor, BtreeKind,
     btree_new, cursor_new, cursor_root,
 };
+mount core.database.sqlite.native.l4_vdbe.register.Register;
 
 // -----------------------------------------------------------------------------
 // Types
@@ -57,6 +58,16 @@ public type CursorSlot is {
     // OpenRead leaves it false. Used to reject Insert/Delete on
     // read-only cursors.
     writable: Bool,
+    // In-memory row store — filled by OpenEphemeral / test harnesses
+    // or by cursor-backed reads from the pager once IPC is wired. The
+    // interpreter's Column / Next / Rewind opcodes consult `rows` +
+    // `pos` directly; for CskBtree slots the pager will drive these
+    // via a streaming adapter that materialises one row at a time.
+    rows: List<List<Register>>,
+    pos: Int,             // 0 ≤ pos ≤ rows.len(); pos == rows.len() → at end
+    // Next rowid to issue — used by NewRowid for INSERT paths. Starts
+    // at 1; bumps on every Insert.
+    next_rowid: Int64,
 };
 
 fn cursor_slot_empty(cursor_id: Int) -> CursorSlot {
@@ -68,6 +79,9 @@ fn cursor_slot_empty(cursor_id: Int) -> CursorSlot {
         btree: None,
         position: None,
         writable: false,
+        rows: List.new(),
+        pos: 0,
+        next_rowid: 1 as Int64,
     }
 }
 
@@ -157,6 +171,9 @@ implement CursorTable {
             btree: Some(tree),
             position: None,
             writable: writable,
+            rows: List.new(),
+            pos: 0,
+            next_rowid: 1 as Int64,
         };
         Ok(())
     }
@@ -181,6 +198,9 @@ implement CursorTable {
             btree: None,
             position: None,
             writable: true,
+            rows: List.new(),
+            pos: 0,
+            next_rowid: 1 as Int64,
         };
         Ok(())
     }
@@ -197,6 +217,9 @@ implement CursorTable {
             btree: None,
             position: None,
             writable: true,
+            rows: List.new(),
+            pos: 0,
+            next_rowid: 1 as Int64,
         };
         Ok(())
     }
@@ -235,30 +258,25 @@ implement CursorTable {
         if cursor_id < 0 || cursor_id >= self.slots.len() {
             return Err(NoSuchSlot(cursor_id));
         }
-        let slot = &self.slots[cursor_id];
-        match slot.kind {
+        self.slots[cursor_id].pos = 0;
+        // For CskBtree we *also* seat the B-tree cursor at the root
+        // so page-backed streams can begin iteration. The row-store
+        // path (CskEphemeral + v1 test harness) only needs pos=0.
+        match self.slots[cursor_id].kind {
             CskBtree => {
-                match slot.btree {
+                let btree_opt = self.slots[cursor_id].btree;
+                match btree_opt {
                     Some(ref tree) => {
                         let mut cur = cursor_new(tree);
                         let _ = cursor_root(&mut cur);
-                        let updated = CursorSlot {
-                            kind: slot.kind,
-                            cursor_id: slot.cursor_id,
-                            root_page: slot.root_page,
-                            n_cols: slot.n_cols,
-                            btree: slot.btree,
-                            position: Some(cur),
-                            writable: slot.writable,
-                        };
-                        self.slots[cursor_id] = updated;
-                        Ok(())
+                        self.slots[cursor_id].position = Some(cur);
                     }
-                    None => Err(WrongKind(cursor_id, "no btree".clone())),
+                    None => {}
                 }
             }
-            _ => Err(WrongKind(cursor_id, "rewind on non-btree".clone())),
+            _ => {}
         }
+        Ok(())
     }
 
     /// Reject a write attempt on a read-only cursor. The interpreter
@@ -271,5 +289,115 @@ implement CursorTable {
             return Err(WriteOnReadOnly(cursor_id));
         }
         Ok(())
+    }
+
+    // -------------------------------------------------------------------------
+    // Row-store operations (in-memory cursor pipeline)
+    // -------------------------------------------------------------------------
+
+    /// Append a row to the cursor's row store. Used by INSERT
+    /// opcodes AND by test harnesses that pre-populate ephemeral
+    /// tables. Auto-issues the next rowid and returns it.
+    public fn append_row(&mut self, cursor_id: Int, row: List<Register>) -> Result<Int64, CursorTableError> {
+        if cursor_id < 0 || cursor_id >= self.slots.len() {
+            return Err(NoSuchSlot(cursor_id));
+        }
+        self.slots[cursor_id].rows.push(row);
+        let rid = self.slots[cursor_id].next_rowid;
+        self.slots[cursor_id].next_rowid = rid + (1 as Int64);
+        Ok(rid)
+    }
+
+    /// Bulk-install a row list. Used by the test harness and by the
+    /// future pager streaming adapter.
+    public fn install_rows(&mut self, cursor_id: Int, rows: List<List<Register>>) -> Result<(), CursorTableError> {
+        if cursor_id < 0 || cursor_id >= self.slots.len() {
+            return Err(NoSuchSlot(cursor_id));
+        }
+        self.slots[cursor_id].rows = rows;
+        self.slots[cursor_id].pos = 0;
+        Ok(())
+    }
+
+    /// Has the cursor still got rows to emit? Used by the interpreter
+    /// to decide whether Rewind/Next should fall through or jump.
+    public fn has_more(&self, cursor_id: Int) -> Bool {
+        if cursor_id < 0 || cursor_id >= self.slots.len() { return false; }
+        let s = &self.slots[cursor_id];
+        s.pos < s.rows.len()
+    }
+
+    /// Advance the cursor. Returns true if a row is now current;
+    /// false if the cursor has exhausted the store.
+    public fn advance(&mut self, cursor_id: Int) -> Bool {
+        if cursor_id < 0 || cursor_id >= self.slots.len() { return false; }
+        let s = &mut self.slots[cursor_id];
+        s.pos = s.pos + 1;
+        s.pos < s.rows.len()
+    }
+
+    /// Read column `col` of the current row. Returns RNull if the
+    /// cursor is past the end or col is out of range.
+    public fn peek_cell(&self, cursor_id: Int, col: Int) -> Register {
+        if cursor_id < 0 || cursor_id >= self.slots.len() { return RNull; }
+        let s = &self.slots[cursor_id];
+        if s.pos >= s.rows.len() { return RNull; }
+        let row = &s.rows[s.pos];
+        if col < 0 || col >= row.len() { return RNull; }
+        row[col]
+    }
+
+    /// Clone the current row into a fresh List<Register>. Used by
+    /// the ResultRow emission path that wants to hand the caller an
+    /// owned row rather than a register-file slice.
+    public fn peek_row(&self, cursor_id: Int) -> List<Register> {
+        let mut out: List<Register> = List.new();
+        if cursor_id < 0 || cursor_id >= self.slots.len() { return out; }
+        let s = &self.slots[cursor_id];
+        if s.pos >= s.rows.len() { return out; }
+        let row = &s.rows[s.pos];
+        let mut i: Int = 0;
+        while i < row.len() {
+            out.push(row[i]);
+            i = i + 1;
+        }
+        out
+    }
+
+    /// The rowid that would be assigned to the next appended row.
+    /// NewRowid opcode reads this.
+    public fn peek_next_rowid(&self, cursor_id: Int) -> Int64 {
+        if cursor_id < 0 || cursor_id >= self.slots.len() { return 0 as Int64; }
+        self.slots[cursor_id].next_rowid
+    }
+
+    /// The rowid of the current row — pos is 1-based for rowid
+    /// assignment convention (pos == rowid - 1 after append_row).
+    public fn current_rowid(&self, cursor_id: Int) -> Int64 {
+        if cursor_id < 0 || cursor_id >= self.slots.len() { return 0 as Int64; }
+        let s = &self.slots[cursor_id];
+        if s.pos >= s.rows.len() { return 0 as Int64; }
+        (s.pos as Int64) + (1 as Int64)
+    }
+
+    /// Remove the current row. Used by Delete opcode. Leaves pos
+    /// unchanged so Next lands on the successor.
+    public fn delete_current(&mut self, cursor_id: Int) -> Bool {
+        if cursor_id < 0 || cursor_id >= self.slots.len() { return false; }
+        let s = &mut self.slots[cursor_id];
+        if s.pos >= s.rows.len() { return false; }
+        let _ = s.rows.remove(s.pos);
+        true
+    }
+
+    /// Total rows currently in the store.
+    public fn row_count(&self, cursor_id: Int) -> Int {
+        if cursor_id < 0 || cursor_id >= self.slots.len() { return 0; }
+        self.slots[cursor_id].rows.len()
+    }
+
+    public fn current_position(&self, cursor_id: Int) -> Int {
+        if cursor_id < 0 || cursor_id >= self.slots.len() { return -1; }
+        self.slots[cursor_id].pos
     }
 }

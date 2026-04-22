@@ -29,8 +29,12 @@ mount core.database.sqlite.native.l4_vdbe.register.{
     Register, RegisterFile, register_file_new, register_is_truthy, register_clone,
 };
 mount core.database.sqlite.native.l4_vdbe.program.{
-    VdbeProgram, ConstantEntry, ConstantPool,
+    VdbeProgram, ConstantEntry, ConstantPool, CursorKind,
 };
+mount core.database.sqlite.native.l4_vdbe.cursor_table.{
+    CursorTable, cursor_table_new,
+};
+mount core.database.sqlite.native.l3_btree.BtreeKind;
 
 // -----------------------------------------------------------------------------
 // State / result
@@ -49,6 +53,7 @@ public type affine VdbeState is {
     return_stack: List<Int>,     // for Gosub/Return
     once_fired: List<Int>,       // instruction indices of Once ops that fired
     halted: Bool,
+    cursors: CursorTable,        // live cursor pipeline (opened lazily)
 };
 
 public fn vdbe_state_new(program: &VdbeProgram) -> VdbeState {
@@ -58,6 +63,7 @@ public fn vdbe_state_new(program: &VdbeProgram) -> VdbeState {
         return_stack: List.new(),
         once_fired: List.new(),
         halted: false,
+        cursors: cursor_table_new(program.cursor_count(), 4096, 0),
     }
 }
 
@@ -66,6 +72,8 @@ implement VdbeState {
     public fn is_halted(&self) -> Bool { self.halted }
     public fn reg(&self, i: Int) -> Register { self.regs.get(i) }
     public fn set_reg(&mut self, i: Int, v: Register) { self.regs.set(i, v); }
+    public fn cursor_table_mut(&mut self) -> &mut CursorTable { &mut self.cursors }
+    public fn cursor_table_ref(&self) -> &CursorTable { &self.cursors }
 }
 
 // -----------------------------------------------------------------------------
@@ -389,15 +397,124 @@ public fn step(state: &mut VdbeState, program: &VdbeProgram) -> StepResult {
             Row(start, n)
         }
 
-        // Cursor-bound opcodes — pager IPC pending. Yield to caller so
-        // they can intercept via `program.get_opcode(state.pc)` and
-        // drive the pager manually.
+        // -------------------------------------------------------------
+        // Cursor pipeline — backed by CursorTable's in-memory row store.
+        // Real pager-backed cursors plug in transparently once the
+        // actor IPC adapter fills `rows` one at a time.
+        // -------------------------------------------------------------
+
+        OpenRead(cursor_id, root_page, n_cols) => {
+            let _ = state.cursors.open_read(cursor_id, root_page, n_cols, TableBtree);
+            state.pc = state.pc + 1;
+            Yield
+        }
+
+        OpenWrite(cursor_id, root_page, n_cols) => {
+            let _ = state.cursors.open_write(cursor_id, root_page, n_cols, TableBtree);
+            state.pc = state.pc + 1;
+            Yield
+        }
+
+        OpenEphemeral(cursor_id, n_cols) => {
+            let _ = state.cursors.open_ephemeral(cursor_id, n_cols);
+            state.pc = state.pc + 1;
+            Yield
+        }
+
+        Close(cursor_id) => {
+            let _ = state.cursors.close(cursor_id);
+            state.pc = state.pc + 1;
+            Yield
+        }
+
+        Rewind(cursor_id, jump_if_empty) => {
+            let _ = state.cursors.rewind(cursor_id);
+            if !state.cursors.has_more(cursor_id) {
+                state.pc = jump_if_empty;
+            } else {
+                state.pc = state.pc + 1;
+            }
+            Yield
+        }
+
+        Next(cursor_id, jump_if_more) => {
+            let still_has = state.cursors.advance(cursor_id);
+            if still_has {
+                state.pc = jump_if_more;
+            } else {
+                state.pc = state.pc + 1;
+            }
+            Yield
+        }
+
+        Column(cursor_id, col_idx, dst) => {
+            let v = state.cursors.peek_cell(cursor_id, col_idx);
+            state.regs.set(dst, v);
+            state.pc = state.pc + 1;
+            Yield
+        }
+
+        RowIdOp(cursor_id, dst) => {
+            let rid = state.cursors.current_rowid(cursor_id);
+            state.regs.set(dst, RRowId(rid));
+            state.pc = state.pc + 1;
+            Yield
+        }
+
+        NewRowid(cursor_id, dst) => {
+            let rid = state.cursors.peek_next_rowid(cursor_id);
+            state.regs.set(dst, RRowId(rid));
+            state.pc = state.pc + 1;
+            Yield
+        }
+
+        Insert(cursor_id, data_reg, key_reg, _flags) => {
+            // Data register holds a prepared MakeRecord result; for our
+            // v1 row-store path we reconstruct the row from the
+            // originating register range. Until MakeRecord lowering
+            // lands in the interpreter, the simpler path is: the
+            // preceding Column-like setup wrote n_cols registers
+            // starting at `data_reg`; we read them all. This matches
+            // what the current codegen emits for PnValues INSERT.
+            let _ = key_reg;
+            // Snapshot n_cols from the cursor metadata at open time.
+            let slot_kind = state.cursors.kind(cursor_id);
+            match slot_kind {
+                CskClosed => { state.pc = state.pc + 1; return Yield; }
+                _ => {}
+            }
+            // Pull n_cols from the slot.
+            let n_cols = state.cursors.n_cols_of(cursor_id);
+            let mut row: List<Register> = List.new();
+            let mut i: Int = 0;
+            while i < n_cols {
+                row.push(state.regs.get(data_reg + i));
+                i = i + 1;
+            }
+            let _ = state.cursors.append_row(cursor_id, row);
+            state.pc = state.pc + 1;
+            Yield
+        }
+
+        Delete(cursor_id) => {
+            let _ = state.cursors.delete_current(cursor_id);
+            state.pc = state.pc + 1;
+            Yield
+        }
+
+        Transaction(_) => { state.pc = state.pc + 1; Yield }
+        Commit         => { state.pc = state.pc + 1; Yield }
+        RollbackOp(_)  => { state.pc = state.pc + 1; Yield }
+        SavepointOp(_) => { state.pc = state.pc + 1; Yield }
+
+        // Anything else still a no-op.
         _ => {
             state.pc = state.pc + 1;
             Yield
         }
     }
 }
+
 
 /// Run the program until it yields a row, reports Done, or errors out.
 /// Returns after at most `budget` steps to give the caller back
