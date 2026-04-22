@@ -1,0 +1,58 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: http, link-header, rfc8288, pagination, typecheck
+// @timeout: 10000
+// @expect: pass
+
+mount core.net.link_header.{
+    LinkEntry, LinkHeaderError,
+    parse, format, find_rel,
+};
+mount core.collections.List;
+
+fn exercise_link_header() -> Result<(), LinkHeaderError> {
+    // GitHub-style pagination.
+    let header = Text.from(
+        "<https://api.example.com/users?page=2>; rel=\"next\", " ++
+        "<https://api.example.com/users?page=5>; rel=\"last\""
+    );
+    let entries: List<LinkEntry> = parse(&header)?;
+    assert(entries.len() == 2);
+
+    // Find by rel.
+    match find_rel(&entries, "next") {
+        Some(e) => { let _ = e.uri; },
+        None    => panic("expected next"),
+    }
+    match find_rel(&entries, "missing") {
+        Some(_) => panic("shouldn't match"),
+        None    => {},
+    }
+
+    // Case-insensitive rel lookup.
+    match find_rel(&entries, "NEXT") {
+        Some(_) => {},
+        None    => panic("case-insensitive match failed"),
+    }
+
+    // Preload hint style.
+    let preload = parse(&Text.from("</app.js>; rel=preload; as=script"))?;
+    assert(preload.len() == 1);
+
+    // Space-separated multi-rel.
+    let multi = parse(&Text.from("</a>; rel=\"first index\""))?;
+    match find_rel(&multi, "first") { Some(_) => {}, None => panic("") }
+    match find_rel(&multi, "index") { Some(_) => {}, None => panic("") }
+
+    // Round-trip via format.
+    let rebuilt: Text = format(&entries);
+    let _ = rebuilt;
+
+    // Malformed.
+    let bad = parse(&Text.from("no brackets"));
+    let _ = bad;
+    Ok(())
+}
+
+fn main() { let _ = exercise_link_header(); }

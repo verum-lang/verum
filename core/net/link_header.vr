@@ -1,0 +1,301 @@
+// =============================================================================
+// net/link_header.vr — HTTP Link header (RFC 8288)
+// =============================================================================
+// Layer: 5 (Network — HTTP common)
+// Dependencies: core, core.collections
+// =============================================================================
+//
+// RFC 8288 — the `Link:` header that encodes hypermedia relations,
+// pagination, preload hints, canonical URLs, alternate languages,
+// and preconnect directives. Used by GitHub API pagination,
+// ActivityPub/ActivityStreams, W3C Annotations, HAL alternative
+// form, AS2 payloads, etc.
+//
+// # Wire format
+//
+//   Link: <uri>; param1=value1; param2="value2"
+//   Link: <u1>; rel="next", <u2>; rel="prev"
+//
+// Comma separates entries; semicolon separates params within an
+// entry. Parameter values may be bare tokens or quoted strings.
+// RFC 5987 `param*=charset'lang'pct-encoded` extended form is
+// accepted on parse and emitted verbatim on build.
+//
+// # API
+//
+// ```
+// let links: List<LinkEntry> = link_header.parse(&header_value)?;
+//
+// // Look up canonical pagination links.
+// match find_rel(&links, "next") {
+//     Some(entry) => crawl(&entry.uri),
+//     None        => stop,
+// }
+//
+// // Build.
+// let header: Text = link_header.format(&list_of_entries);
+// ```
+//
+// =============================================================================
+
+module core.net.link_header;
+
+mount core.*;
+mount core.collections.List;
+
+// =============================================================================
+// Typed value
+// =============================================================================
+
+public type LinkEntry is {
+    uri:    Text,
+    params: List<(Text, Text)>,
+};
+
+public type LinkHeaderError is
+      Malformed(Text);
+
+// =============================================================================
+// Parse
+// =============================================================================
+
+public fn parse(value: &Text) -> Result<List<LinkEntry>, LinkHeaderError> {
+    let b = value.as_bytes();
+    let mut out: List<LinkEntry> = [];
+    let mut i: Int = 0;
+    while i < b.len() {
+        i = skip_ws(b, i);
+        if i >= b.len() { break; }
+        let (entry, next_i) = parse_entry(b, i)?;
+        out.push(entry);
+        i = next_i;
+        i = skip_ws(b, i);
+        if i < b.len() && b[i] == (',' as Byte) { i = i + 1; }
+    }
+    Ok(out)
+}
+
+fn parse_entry(b: &[Byte], from: Int) -> Result<(LinkEntry, Int), LinkHeaderError> {
+    let mut i = skip_ws(b, from);
+    if i >= b.len() || b[i] != ('<' as Byte) {
+        return Err(LinkHeaderError.Malformed(Text.from("expected '<'")));
+    }
+    i = i + 1;
+    let uri_start = i;
+    while i < b.len() && b[i] != ('>' as Byte) { i = i + 1; }
+    if i >= b.len() {
+        return Err(LinkHeaderError.Malformed(Text.from("missing '>'")));
+    }
+    let uri = slice_text(b, uri_start, i);
+    i = i + 1;  // skip '>'
+
+    let mut params: List<(Text, Text)> = [];
+    loop {
+        i = skip_ws(b, i);
+        if i >= b.len() { break; }
+        if b[i] == (',' as Byte) { break; }
+        if b[i] != (';' as Byte) {
+            return Err(LinkHeaderError.Malformed(Text.from("expected ';' or ','")));
+        }
+        i = i + 1;
+        i = skip_ws(b, i);
+        // Parse `name[=value]`.
+        let name_start = i;
+        while i < b.len() && !is_param_delim(b[i]) && b[i] != ('=' as Byte) {
+            i = i + 1;
+        }
+        let name = slice_text(b, name_start, i);
+        let value: Text = if i < b.len() && b[i] == ('=' as Byte) {
+            i = i + 1;
+            let (v, vi) = parse_param_value(b, i)?;
+            i = vi;
+            v
+        } else {
+            Text.from("")
+        };
+        params.push((name, value));
+    }
+
+    Ok((LinkEntry { uri: uri, params: params }, i))
+}
+
+fn parse_param_value(b: &[Byte], from: Int) -> Result<(Text, Int), LinkHeaderError> {
+    let mut i = from;
+    if i < b.len() && b[i] == ('"' as Byte) {
+        i = i + 1;
+        let mut out: List<Byte> = [];
+        while i < b.len() && b[i] != ('"' as Byte) {
+            if b[i] == ('\\' as Byte) && i + 1 < b.len() {
+                out.push(b[i + 1]);
+                i = i + 2;
+            } else {
+                out.push(b[i]);
+                i = i + 1;
+            }
+        }
+        if i >= b.len() {
+            return Err(LinkHeaderError.Malformed(Text.from("unclosed quote")));
+        }
+        i = i + 1;  // skip closing '"'
+        Ok((Text.from_utf8_unchecked(out.as_slice()), i))
+    } else {
+        let start = i;
+        while i < b.len() && !is_param_delim(b[i]) { i = i + 1; }
+        Ok((slice_text(b, start, i), i))
+    }
+}
+
+// =============================================================================
+// Lookup
+// =============================================================================
+
+/// Find the first entry whose `rel` parameter equals `rel` (case-
+/// insensitive per RFC 8288 §3.3). RFC allows space-separated
+/// multi-rel values; we split and check any token matches.
+public fn find_rel<'a>(list: &'a List<LinkEntry>, rel: &str) -> Maybe<&'a LinkEntry> {
+    let mut i: Int = 0;
+    while i < list.len() {
+        let entry = &list[i];
+        let mut j: Int = 0;
+        while j < entry.params.len() {
+            let (name, value) = &entry.params[j];
+            if bytes_eq_ci(name.as_bytes(), b"rel") {
+                if rel_matches(value.as_bytes(), rel.as_bytes()) {
+                    return Some(entry);
+                }
+            }
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+    None
+}
+
+fn rel_matches(value: &[Byte], needle: &[Byte]) -> Bool {
+    // Split on whitespace — any token equals `needle` (case-insensitive).
+    let mut start: Int = 0;
+    let mut i: Int = 0;
+    while i <= value.len() {
+        if i == value.len() || value[i] == (' ' as Byte) || value[i] == ('\t' as Byte) {
+            if start < i {
+                let mut eq = (i - start) == needle.len();
+                if eq {
+                    let mut k: Int = 0;
+                    while k < needle.len() {
+                        if to_lower(value[start + k]) != to_lower(needle[k]) {
+                            eq = false; break;
+                        }
+                        k = k + 1;
+                    }
+                }
+                if eq { return true; }
+            }
+            start = i + 1;
+        }
+        i = i + 1;
+    }
+    false
+}
+
+// =============================================================================
+// Format
+// =============================================================================
+
+public fn format(entries: &List<LinkEntry>) -> Text {
+    let mut out: List<Byte> = [];
+    let mut i: Int = 0;
+    while i < entries.len() {
+        if i > 0 { push_bytes(&mut out, b", "); }
+        out.push('<' as Byte);
+        push_bytes(&mut out, entries[i].uri.as_bytes());
+        out.push('>' as Byte);
+        let mut j: Int = 0;
+        while j < entries[i].params.len() {
+            let (name, value) = &entries[i].params[j];
+            push_bytes(&mut out, b"; ");
+            push_bytes(&mut out, name.as_bytes());
+            if value.as_bytes().len() > 0 {
+                out.push('=' as Byte);
+                write_param_value(&mut out, value);
+            }
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+    Text.from_utf8_unchecked(out.as_slice())
+}
+
+fn write_param_value(out: &mut List<Byte>, value: &Text) {
+    let b = value.as_bytes();
+    // Quote if value contains a delimiter or non-token char.
+    let mut need_quote: Bool = b.len() == 0;
+    let mut k: Int = 0;
+    while k < b.len() {
+        let c = b[k];
+        if c == (' ' as Byte) || c == (',' as Byte) || c == (';' as Byte)
+            || c == ('=' as Byte) || c == ('"' as Byte) || c == ('\\' as Byte) {
+            need_quote = true; break;
+        }
+        k = k + 1;
+    }
+    if !need_quote {
+        push_bytes(out, b);
+        return;
+    }
+    out.push('"' as Byte);
+    let mut i: Int = 0;
+    while i < b.len() {
+        if b[i] == ('"' as Byte) || b[i] == ('\\' as Byte) {
+            out.push('\\' as Byte);
+        }
+        out.push(b[i]);
+        i = i + 1;
+    }
+    out.push('"' as Byte);
+}
+
+// =============================================================================
+// Byte helpers
+// =============================================================================
+
+fn skip_ws(b: &[Byte], from: Int) -> Int {
+    let mut i = from;
+    while i < b.len() && (b[i] == (' ' as Byte) || b[i] == ('\t' as Byte)
+                           || b[i] == ('\r' as Byte) || b[i] == ('\n' as Byte)) {
+        i = i + 1;
+    }
+    i
+}
+
+fn is_param_delim(c: Byte) -> Bool {
+    c == (';' as Byte) || c == (',' as Byte) || c == (' ' as Byte)
+        || c == ('\t' as Byte) || c == ('\r' as Byte) || c == ('\n' as Byte)
+}
+
+fn slice_text(b: &[Byte], start: Int, end: Int) -> Text {
+    let mut out: List<Byte> = [];
+    let mut i: Int = start;
+    while i < end { out.push(b[i]); i = i + 1; }
+    Text.from_utf8_unchecked(out.as_slice())
+}
+
+fn bytes_eq_ci(a: &[Byte], b: &[Byte]) -> Bool {
+    if a.len() != b.len() { return false; }
+    let mut i: Int = 0;
+    while i < a.len() {
+        if to_lower(a[i]) != to_lower(b[i]) { return false; }
+        i = i + 1;
+    }
+    true
+}
+
+fn to_lower(c: Byte) -> Byte {
+    if c >= ('A' as Byte) && c <= ('Z' as Byte) {
+        c + (('a' as Byte) - ('A' as Byte))
+    } else { c }
+}
+
+fn push_bytes(dst: &mut List<Byte>, src: &[Byte]) {
+    let mut i: Int = 0;
+    while i < src.len() { dst.push(src[i]); i = i + 1; }
+}
