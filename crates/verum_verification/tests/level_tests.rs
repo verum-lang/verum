@@ -56,6 +56,53 @@ fn test_from_annotation() {
     assert_eq!(VerificationLevel::from_annotation("invalid"), None);
 }
 
+/// Every `verify_strategy` accepted by grammar/verum.ebnf §2 must
+/// project onto a `VerificationLevel` — never onto `None`. The fine-grained
+/// strategy (Fast vs Thorough vs Certified) is carried separately by
+/// `VerifyStrategy`; the level enum is the coarse compile-time gradient.
+#[test]
+fn test_from_annotation_covers_every_grammar_strategy() {
+    // Grammar production:  verify_strategy = ( 'runtime' | 'static' | 'formal'
+    //   | 'proof' | 'fast' | 'thorough' | 'reliable' | 'certified' | 'synthesize' ) ,
+    let grammar_names = [
+        "runtime", "static", "formal", "proof",
+        "fast", "thorough", "reliable", "certified", "synthesize",
+    ];
+    for name in grammar_names {
+        assert!(
+            VerificationLevel::from_annotation(name).is_some(),
+            "grammar-legal @verify({name}) must project to some VerificationLevel"
+        );
+    }
+
+    // Canonical collapse: everything beyond runtime/static is a proof-level
+    // discipline. Strategy-specific nuance is handled by VerifyStrategy.
+    assert_eq!(
+        VerificationLevel::from_annotation("formal"),
+        Some(VerificationLevel::Proof)
+    );
+    assert_eq!(
+        VerificationLevel::from_annotation("fast"),
+        Some(VerificationLevel::Proof)
+    );
+    assert_eq!(
+        VerificationLevel::from_annotation("thorough"),
+        Some(VerificationLevel::Proof)
+    );
+    assert_eq!(
+        VerificationLevel::from_annotation("reliable"),
+        Some(VerificationLevel::Proof)
+    );
+    assert_eq!(
+        VerificationLevel::from_annotation("certified"),
+        Some(VerificationLevel::Proof)
+    );
+    assert_eq!(
+        VerificationLevel::from_annotation("synthesize"),
+        Some(VerificationLevel::Proof)
+    );
+}
+
 #[test]
 fn test_verification_mode_defaults() {
     let runtime = VerificationMode::runtime();

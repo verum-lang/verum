@@ -88,17 +88,43 @@ impl VerificationLevel {
         }
     }
 
-    /// Parse from @verify annotation
+    /// Parse from `@verify(...)` annotation.
     ///
-    /// Examples:
-    /// - `@verify(runtime)` -> Runtime
-    /// - `@verify(static)` -> Static
-    /// - `@verify(proof)` -> Proof
+    /// Verum has **two layers** of verification intent:
+    ///
+    /// 1. `VerificationLevel` (this enum) — the coarse compile-time
+    ///    gradient: Runtime / Static / Proof. Drives pipeline-level
+    ///    decisions (SMT on? runtime checks emitted? proof-cert required?).
+    /// 2. `VerifyStrategy` in `verum_smt::verify_strategy` — the fine-grained
+    ///    operational strategy: Formal / Fast / Thorough / Certified /
+    ///    Synthesize. Drives per-obligation solver routing, cross-validation,
+    ///    timeout scaling, synthesis dispatch.
+    ///
+    /// `from_annotation` accepts every grammar-legal `verify_strategy` name
+    /// (grammar/verum.ebnf §2 `verify_strategy`) and projects it onto the
+    /// 3-level gradient. The finer strategy nuances (`fast`/`thorough`/
+    /// `certified`/`synthesize`) are handled by the SMT backend switcher
+    /// via `VerifyStrategy::from_attribute_value` — callers that need the
+    /// full operational strategy should use that directly.
+    ///
+    /// Returns `None` only for unknown names, so tooling can emit a
+    /// diagnostic on truly invalid annotations (never on valid grammar).
     pub fn from_annotation(annotation: &str) -> Option<Self> {
         match annotation {
             "runtime" => Some(VerificationLevel::Runtime),
             "static" => Some(VerificationLevel::Static),
-            "proof" => Some(VerificationLevel::Proof),
+            // `proof` / `formal` are the canonical formal-verification level.
+            "proof" | "formal" => Some(VerificationLevel::Proof),
+            // `fast`, `thorough` / `reliable`, `certified`, `synthesize` are
+            // all operational strategies that still run the full proof
+            // pipeline — they collapse to the `Proof` level. The fine-grained
+            // dispatch happens downstream via `VerifyStrategy`.
+            "fast" | "quick" | "rapid" => Some(VerificationLevel::Proof),
+            "thorough" | "reliable" | "robust" => Some(VerificationLevel::Proof),
+            "certified" | "cross_validate" | "cross-validate" | "crossvalidate" => {
+                Some(VerificationLevel::Proof)
+            }
+            "synthesize" | "synthesis" | "synth" => Some(VerificationLevel::Proof),
             _ => None,
         }
     }
