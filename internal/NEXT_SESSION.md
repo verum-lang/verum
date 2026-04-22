@@ -85,6 +85,37 @@ Three sequential architectural commits closed the class of
    unblocks multiple L2 error-combinator tests at codegen (some still
    fail at runtime on unrelated method dispatch).
 
+8. **`d322396a` parser: accept `cofix fn` as a top-level item** —
+   `parse_item` didn't dispatch `Cofix` as an item-starter, only as
+   a modifier after `async`/`pure`/etc. Adds a direct
+   `Cofix → parse_function` arm mirroring `Pure`/`Extern`. The
+   copattern L3 test now parses cleanly (inference still needs
+   separate work for copattern bodies — known coinductive limitation).
+
+9. **`40cdafc3` fix(vbc/codegen): extend variant disambiguation to
+   assignment targets** — closes `f.value = None;` and `x = None;`
+   for `Maybe`-typed targets. Extracts the target's nominal type
+   before compiling the RHS (from `variable_type_names` for path
+   targets, `field_type_name` for field targets), pins
+   `current_return_type_name` for the duration, restores after.
+   Same save/set/restore discipline as let-annotation and arg-type
+   overrides.
+
+10. **`d63c12eb` fix(vbc/codegen): pin closure return type for
+    variant disambiguation** — closes `|| -> Maybe<Int> { None }`.
+    The enclosing function's return type MUST NOT leak into the
+    closure body (a closure returning `-> Bar` inside a function
+    returning `-> Foo` must disambiguate against Bar, not Foo). So
+    we unconditionally override `current_return_type_name` when
+    entering a closure body — either to the closure's own annotated
+    return (present) or to `None` (absent), restoring after.
+
+**Not yet covered:** `let f: fn() -> Maybe<Int> = || None;` — the
+let annotation is a function type, and `extract_base_type_name`
+doesn't descend into `fn() -> ...` to pull out the return. Narrow
+follow-up. Also variant-in-collection-literal: `[None, Some(1)]`
+needs similar handling at `compile_array_literal`.
+
 5. **`d25585cb` fix(types/context): named context bindings + lenient
    method type build** — closes `log.info("x")` typecheck failure on
    `using [log: Logger]` patterns. Three cooperating parts:
