@@ -1,0 +1,186 @@
+// =============================================================================
+// collections/lru.vr — capacity-bounded LRU cache
+// =============================================================================
+// Layer: 2 (Collections)
+// Dependencies: core, core.collections.map
+// =============================================================================
+//
+// The simpler companion to `TtlCache`: pure capacity-bounded LRU
+// with no TTL. The workhorse cache every user-level codebase needs
+// for memoization, decoded-parse cache, request→response cache,
+// read-through DB cache, etc.
+//
+// Differences from `TtlCache`:
+//
+//   * No expiration — entries stay until evicted by capacity pressure.
+//   * Simpler API (no TTL override, no `purge_expired`).
+//   * Returns a previous-value-on-insert when a key replaces an
+//     existing entry — useful for refcount bookkeeping.
+//
+// If both capacity AND time-based eviction are needed, use
+// `TtlCache`. If only time-based expiration, `core.base.cell` +
+// `core.time` are usually enough.
+//
+// # API
+//
+// ```
+// let mut cache: LruCache<Text, User> = LruCache.new(1024);
+//
+// let prev = cache.insert(key.clone(), user);   // returns Maybe<User>
+// match cache.get(&key) { Some(u) => ..., None => ... }
+//
+// cache.remove(&key);
+// cache.clear();
+// let stats = cache.stats();       // hits / misses / evicted
+// ```
+//
+// # Cost
+//
+//   * Lookup + insert: O(1) amortised (hash map lookup) +
+//     O(n) worst-case on the order-tracking list.
+//   * Eviction: O(1) (pops from list front).
+//
+// A doubly-linked-list upgrade for truly O(1) insert/get
+// arrives in a follow-up when a concrete caller demonstrates
+// the >10k-entry working set where it matters.
+//
+// =============================================================================
+
+module core.collections.lru;
+
+mount core.*;
+mount core.collections.List;
+mount core.collections.map.{Map};
+
+// =============================================================================
+// Stats
+// =============================================================================
+
+public type LruStats is {
+    size:    Int,
+    hits:    UInt64,
+    misses:  UInt64,
+    evicted: UInt64,
+};
+
+// =============================================================================
+// Cache
+// =============================================================================
+
+public type LruCache<K: Hash + Eq, V> is {
+    store:    Map<K, V>,
+    order:    List<K>,
+    capacity: Int,
+    hits:     UInt64,
+    misses:   UInt64,
+    evicted:  UInt64,
+};
+
+implement<K: Hash + Eq, V> LruCache<K, V> {
+    public fn new(capacity: Int) -> LruCache<K, V> {
+        let cap = if capacity < 1 { 1 } else { capacity };
+        LruCache {
+            store:    Map.new(),
+            order:    [],
+            capacity: cap,
+            hits:     0_u64,
+            misses:   0_u64,
+            evicted:  0_u64,
+        }
+    }
+
+    /// Insert or overwrite. Returns the prior value if the key was
+    /// already present (useful for refcount bookkeeping).
+    public fn insert(&mut self, key: K, value: V) -> Maybe<V> {
+        let prior = self.store.remove(&key);
+        match &prior {
+            Some(_) => self.remove_from_order(&key),
+            None    => {},
+        }
+        // Evict LRU if we're at capacity and this is a net-new key.
+        let is_new = match &prior { Some(_) => false, None => true };
+        if is_new && self.store.len() >= self.capacity {
+            self.evict_one();
+        }
+        self.store.insert(key.clone(), value);
+        self.order.push(key);
+        prior
+    }
+
+    /// Read-through. Touches the order (LRU semantics). Returns
+    /// `None` on miss.
+    public fn get(&mut self, key: &K) -> Maybe<&V> {
+        let present = self.store.contains_key(key);
+        if !present {
+            self.misses = self.misses + 1_u64;
+            return None;
+        }
+        self.hits = self.hits + 1_u64;
+        self.touch(key);
+        self.store.get(key)
+    }
+
+    /// Peek without affecting LRU order. For debugging / metrics
+    /// flows that shouldn't skew eviction.
+    public fn peek(&self, key: &K) -> Maybe<&V> {
+        self.store.get(key)
+    }
+
+    /// Remove a specific key. Returns the value when it was present.
+    public fn remove(&mut self, key: &K) -> Maybe<V> {
+        let v = self.store.remove(key);
+        match &v {
+            Some(_) => self.remove_from_order(key),
+            None    => {},
+        }
+        v
+    }
+
+    /// Drop every entry. Capacity + stats preserved.
+    public fn clear(&mut self) {
+        self.store = Map.new();
+        self.order = [];
+    }
+
+    public fn len(&self) -> Int { self.store.len() }
+    public fn capacity(&self) -> Int { self.capacity }
+    public fn is_empty(&self) -> Bool { self.store.len() == 0 }
+    public fn contains(&self, key: &K) -> Bool { self.store.contains_key(key) }
+
+    public fn stats(&self) -> LruStats {
+        LruStats {
+            size:    self.store.len(),
+            hits:    self.hits,
+            misses:  self.misses,
+            evicted: self.evicted,
+        }
+    }
+
+    // -----------------------------------------------------------------
+    // LRU ordering helpers
+    // -----------------------------------------------------------------
+
+    fn touch(&mut self, key: &K) {
+        self.remove_from_order(key);
+        self.order.push(key.clone());
+    }
+
+    fn remove_from_order(&mut self, key: &K) {
+        let mut i: Int = 0;
+        while i < self.order.len() {
+            if self.order[i] == *key {
+                let _ = self.order.remove(i);
+                return;
+            }
+            i = i + 1;
+        }
+    }
+
+    fn evict_one(&mut self) {
+        if self.order.len() == 0 { return; }
+        let victim = self.order[0].clone();
+        let _ = self.order.remove(0);
+        let _ = self.store.remove(&victim);
+        self.evicted = self.evicted + 1_u64;
+    }
+}

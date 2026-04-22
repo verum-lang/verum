@@ -1,0 +1,47 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: collections, lru, cache, typecheck
+// @timeout: 10000
+// @expect: pass
+
+mount core.collections.lru.{LruCache, LruStats};
+
+fn exercise_lru() {
+    let mut cache: LruCache<Text, Int> = LruCache.new(3);
+
+    // Insert three — fits in capacity.
+    let _ = cache.insert(Text.from("a"), 1);
+    let _ = cache.insert(Text.from("b"), 2);
+    let _ = cache.insert(Text.from("c"), 3);
+    assert(cache.len() == 3);
+
+    // Overwriting returns the prior value.
+    let prev: Maybe<Int> = cache.insert(Text.from("a"), 10);
+    let _ = prev;
+
+    // Touch 'a' then add 'd' — 'b' (oldest) evicts.
+    let _ = cache.get(&Text.from("a"));
+    let _ = cache.insert(Text.from("d"), 4);
+    assert(cache.len() == 3);
+    assert(!cache.contains(&Text.from("b")));
+
+    // Peek doesn't affect order.
+    let _ = cache.peek(&Text.from("c"));
+
+    // Direct remove.
+    let _ = cache.remove(&Text.from("c"));
+
+    // Introspection.
+    let s: LruStats = cache.stats();
+    let _ = s.size;
+    let _ = s.hits;
+    let _ = s.misses;
+    let _ = s.evicted;
+
+    cache.clear();
+    assert(cache.is_empty());
+    assert(cache.capacity() == 3);
+}
+
+fn main() { exercise_lru(); }

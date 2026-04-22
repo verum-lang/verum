@@ -37,6 +37,7 @@ public module consistent_hash;
 public module hyperloglog;
 public module count_min;
 public module reservoir;
+public module lru;
 
 // =============================================================================
 // Re-exports
