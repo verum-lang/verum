@@ -201,7 +201,7 @@ fn rel_matches(value: &[Byte], needle: &[Byte]) -> Bool {
 // Format
 // =============================================================================
 
-public fn format(entries: &List<LinkEntry>) -> Text {
+public fn format_link_header(entries: &List<LinkEntry>) -> Text {
     let mut out: List<Byte> = [];
     let mut i: Int = 0;
     while i < entries.len() {
