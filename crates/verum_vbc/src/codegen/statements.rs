@@ -625,10 +625,45 @@ impl VbcCodegen {
             this: &crate::codegen::VbcCodegen,
             ty: &verum_ast::ty::Type,
         ) -> Option<String> {
-            if let verum_ast::ty::TypeKind::Function { return_type, .. } = &ty.kind {
-                return extract_let_variant_hint(this, return_type.as_ref());
+            use verum_ast::ty::TypeKind;
+            match &ty.kind {
+                // `fn(...) -> T` — descend into T. The closure body about to
+                // be compiled is what needs the hint; "fn" itself has no
+                // useful base for variant dispatch.
+                TypeKind::Function { return_type, .. } => {
+                    extract_let_variant_hint(this, return_type.as_ref())
+                }
+                // `Array<T>` / `List<T>` / similar single-arg wrappers —
+                // descend into the element type so array / list literals
+                // (`let xs: List<Maybe<Int>> = [None, Some(1)];`) see the
+                // element's base name. Arrays and Lists themselves don't
+                // have variant constructors users would write bare.
+                TypeKind::Generic { base, args } if args.len() == 1 => {
+                    // Single-arg wrappers: descend into the element type so
+                    // collection literals (`let xs: List<Maybe<Int>> = [None, ...]`)
+                    // see the ELEMENT's base name, not "List". Do NOT include
+                    // `Maybe` here — `let x: Maybe<Int> = None` must yield
+                    // "Maybe" so the `None` disambiguator lands on Maybe.None.
+                    let is_container = match &base.kind {
+                        TypeKind::Path(path) => {
+                            path.as_ident().map(|id| {
+                                matches!(id.name.as_str(),
+                                    "List" | "Array" | "Vec" | "Slice"
+                                    | "Set" | "HashSet" | "Heap" | "Shared"
+                                    | "Weak")
+                            }).unwrap_or(false)
+                        }
+                        _ => false,
+                    };
+                    if is_container {
+                        if let verum_ast::ty::GenericArg::Type(inner) = &args[0] {
+                            return extract_let_variant_hint(this, inner);
+                        }
+                    }
+                    this.extract_base_type_name(ty)
+                }
+                _ => this.extract_base_type_name(ty),
             }
-            this.extract_base_type_name(ty)
         }
         let saved_return_type = if let Some(ty) = ty {
             extract_let_variant_hint(self, ty).map(|base| {
