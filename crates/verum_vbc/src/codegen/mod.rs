@@ -7776,6 +7776,30 @@ impl VbcCodegen {
                             *message_id = mapped.0;
                         }
                     }
+                    // Context type identifiers carry interned names through the
+                    // codegen→runtime boundary the same way method/protocol names
+                    // do — without remapping, the runtime resolves the codegen-
+                    // local index against the byte-offset string table and prints
+                    // `Context unknown not provided` instead of the actual
+                    // context name (e.g. `Database`).
+                    Instruction::CtxGet { ctx_type, .. } => {
+                        if let Some(mapped) = string_id_map.get(*ctx_type as usize) {
+                            *ctx_type = mapped.0;
+                        }
+                    }
+                    Instruction::CtxProvide { ctx_type, .. } => {
+                        if let Some(mapped) = string_id_map.get(*ctx_type as usize) {
+                            *ctx_type = mapped.0;
+                        }
+                    }
+                    Instruction::CtxCheckNegative { ctx_type, func_name } => {
+                        if let Some(mapped) = string_id_map.get(*ctx_type as usize) {
+                            *ctx_type = mapped.0;
+                        }
+                        if let Some(mapped) = string_id_map.get(*func_name as usize) {
+                            *func_name = mapped.0;
+                        }
+                    }
                     // Remap func_id references to contiguous 0-based IDs
                     Instruction::Call { func_id, .. } => {
                         if let Some(&new_id) = func_id_remap.get(func_id) { *func_id = new_id; }
