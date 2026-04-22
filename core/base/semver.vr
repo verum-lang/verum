@@ -326,7 +326,7 @@ fn cmp_int(a: Int, b: Int) -> Int {
 // Formatter
 // =============================================================================
 
-public fn format(v: &SemVer) -> Text {
+public fn format_semver(v: &SemVer) -> Text {
     let mut out: List<Byte> = [];
     push_u64(&mut out, v.major);
     out.push('.' as Byte);

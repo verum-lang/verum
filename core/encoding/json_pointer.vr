@@ -113,7 +113,7 @@ public fn parse(s: &Text) -> Result<JsonPointer, JsonPointerError> {
 // Formatter
 // =============================================================================
 
-public fn format(p: &JsonPointer) -> Text {
+public fn format_json_pointer(p: &JsonPointer) -> Text {
     let mut out: List<Byte> = [];
     let mut i: Int = 0;
     while i < p.tokens.len() {
