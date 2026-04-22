@@ -80,6 +80,9 @@ public module cose;
 // Password hashing (PHC modular format) — PBKDF2-HMAC-SHA256 backend.
 public module password_hash;
 
+// Binary Merkle tree + inclusion proofs (RFC 6962 §2.1).
+public module merkle;
+
 // Legacy capability / region modules (pre-crypto).
 public module labels;
 public module regions;
