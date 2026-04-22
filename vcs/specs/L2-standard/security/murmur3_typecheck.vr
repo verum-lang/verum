@@ -1,0 +1,39 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: security, hash, murmur3, non-crypto, typecheck
+// @timeout: 10000
+// @expect: pass
+
+mount core.security.hash.murmur3.{
+    Murmur3Hash128, murmur3_32, murmur3_128,
+};
+
+fn exercise_murmur3() {
+    // Canonical test vector: "" with seed 0 → 0.
+    let empty: [Byte; 0] = [];
+    let h32 = murmur3_32(&empty[..], 0_u32);
+    assert(h32 == 0_u32);
+
+    // "hello world" with seed 0 (SMHasher-compatible output).
+    let h1: UInt32 = murmur3_32(b"hello world", 0_u32);
+    let _ = h1;
+
+    // Seeded variant.
+    let h2: UInt32 = murmur3_32(b"hello world", 0xDEADBEEF_u32);
+    let _ = h2;
+
+    // 128-bit output.
+    let h128: Murmur3Hash128 = murmur3_128(b"hello world", 0_u64);
+    let _ = h128.high;
+    let _ = h128.low;
+
+    // Large input exercises the 16-byte block path.
+    let mut big: [Byte; 128] = [0_u8; 128];
+    let mut i: Int = 0;
+    while i < 128 { big[i] = (i as Byte); i = i + 1; }
+    let _: UInt32 = murmur3_32(&big[..], 42_u32);
+    let _: Murmur3Hash128 = murmur3_128(&big[..], 42_u64);
+}
+
+fn main() { exercise_murmur3(); }

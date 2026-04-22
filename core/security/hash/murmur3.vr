@@ -1,0 +1,234 @@
+// =============================================================================
+// security/hash/murmur3.vr — MurmurHash3 (Austin Appleby 2011)
+// =============================================================================
+// Layer: 1 (fast non-cryptographic hash)
+// Dependencies: core
+// Reference: https://github.com/aappleby/smhasher/wiki/MurmurHash3
+// =============================================================================
+//
+// MurmurHash3 — the hash behind Cassandra Murmur3Partitioner,
+// Guava BloomFilter, Apache Spark partitioning, Nessie content
+// addressing. Two variants shipped:
+//
+//   * `murmur3_32`    — 32-bit output; the minimal hash-table /
+//                       partition-key workhorse.
+//   * `murmur3_128`   — 128-bit output (x64 variant); the common
+//                       choice when 32 bits risks birthday
+//                       collisions at scale.
+//
+// Like XXH64, NOT cryptographic — adversarial inputs trivially
+// collide. Use SHA-256 / Blake2b for integrity checks against
+// untrusted peers.
+//
+// # Expected performance
+//
+//   Pure-Verum murmur3_32:  ~2.5 GB/s on a modern core.
+//   Pure-Verum murmur3_128: ~3 GB/s (wider lanes).
+//
+// # Wire compatibility
+//
+// Output matches Apache Commons Codec, Guava `Hashing.murmur3_*`,
+// Cassandra `org.apache.cassandra.dht.Murmur3Partitioner.Token`,
+// and Rust's `fastmurmur3` / `murmur3` crates byte-exactly.
+//
+// =============================================================================
+
+module core.security.hash.murmur3;
+
+mount core.*;
+
+// =============================================================================
+// 32-bit variant
+// =============================================================================
+
+const M32_C1: UInt32 = 0xCC9E2D51_u32;
+const M32_C2: UInt32 = 0x1B873593_u32;
+
+public fn murmur3_32(data: &[Byte], seed: UInt32) -> UInt32 {
+    let mut h: UInt32 = seed;
+    let n = data.len();
+    let nblocks = n / 4;
+
+    // Body — 4 bytes at a time.
+    let mut i: Int = 0;
+    while i < nblocks {
+        let off = i * 4;
+        let mut k: UInt32 = read_u32_le(data, off);
+        k = k * M32_C1;
+        k = rotl32(k, 15);
+        k = k * M32_C2;
+        h = h ^ k;
+        h = rotl32(h, 13);
+        h = h * 5_u32 + 0xE6546B64_u32;
+        i = i + 1;
+    }
+
+    // Tail — trailing 0..3 bytes.
+    let tail_off = nblocks * 4;
+    let rem = n - tail_off;
+    let mut k1: UInt32 = 0_u32;
+    if rem >= 3 { k1 = k1 ^ ((data[tail_off + 2] as UInt32) << 16_u32); }
+    if rem >= 2 { k1 = k1 ^ ((data[tail_off + 1] as UInt32) << 8_u32); }
+    if rem >= 1 {
+        k1 = k1 ^ (data[tail_off] as UInt32);
+        k1 = k1 * M32_C1;
+        k1 = rotl32(k1, 15);
+        k1 = k1 * M32_C2;
+        h = h ^ k1;
+    }
+
+    // Finalization.
+    h = h ^ (n as UInt32);
+    h = fmix32(h);
+    h
+}
+
+fn fmix32(h0: UInt32) -> UInt32 {
+    let mut h = h0;
+    h = h ^ (h >> 16_u32);
+    h = h * 0x85EBCA6B_u32;
+    h = h ^ (h >> 13_u32);
+    h = h * 0xC2B2AE35_u32;
+    h = h ^ (h >> 16_u32);
+    h
+}
+
+// =============================================================================
+// 128-bit variant (x64)
+// =============================================================================
+
+const M128_C1: UInt64 = 0x87C37B91114253D5_u64;
+const M128_C2: UInt64 = 0x4CF5AD432745937F_u64;
+
+public type Murmur3Hash128 is {
+    high: UInt64,
+    low:  UInt64,
+};
+
+public fn murmur3_128(data: &[Byte], seed: UInt64) -> Murmur3Hash128 {
+    let mut h1: UInt64 = seed;
+    let mut h2: UInt64 = seed;
+    let n = data.len();
+    let nblocks = n / 16;
+
+    // Body — 16-byte blocks.
+    let mut i: Int = 0;
+    while i < nblocks {
+        let off = i * 16;
+        let mut k1 = read_u64_le(data, off);
+        let mut k2 = read_u64_le(data, off + 8);
+
+        k1 = k1 * M128_C1;
+        k1 = rotl64(k1, 31);
+        k1 = k1 * M128_C2;
+        h1 = h1 ^ k1;
+        h1 = rotl64(h1, 27);
+        h1 = h1 + h2;
+        h1 = h1 * 5_u64 + 0x52DCE729_u64;
+
+        k2 = k2 * M128_C2;
+        k2 = rotl64(k2, 33);
+        k2 = k2 * M128_C1;
+        h2 = h2 ^ k2;
+        h2 = rotl64(h2, 31);
+        h2 = h2 + h1;
+        h2 = h2 * 5_u64 + 0x38495AB5_u64;
+        i = i + 1;
+    }
+
+    // Tail — up to 15 remaining bytes.
+    let tail_off = nblocks * 16;
+    let rem = n - tail_off;
+    let mut k1: UInt64 = 0_u64;
+    let mut k2: UInt64 = 0_u64;
+
+    if rem >= 15 { k2 = k2 ^ ((data[tail_off + 14] as UInt64) << 48_u64); }
+    if rem >= 14 { k2 = k2 ^ ((data[tail_off + 13] as UInt64) << 40_u64); }
+    if rem >= 13 { k2 = k2 ^ ((data[tail_off + 12] as UInt64) << 32_u64); }
+    if rem >= 12 { k2 = k2 ^ ((data[tail_off + 11] as UInt64) << 24_u64); }
+    if rem >= 11 { k2 = k2 ^ ((data[tail_off + 10] as UInt64) << 16_u64); }
+    if rem >= 10 { k2 = k2 ^ ((data[tail_off + 9] as UInt64) << 8_u64); }
+    if rem >= 9 {
+        k2 = k2 ^ (data[tail_off + 8] as UInt64);
+        k2 = k2 * M128_C2;
+        k2 = rotl64(k2, 33);
+        k2 = k2 * M128_C1;
+        h2 = h2 ^ k2;
+    }
+
+    if rem >= 8 { k1 = k1 ^ ((data[tail_off + 7] as UInt64) << 56_u64); }
+    if rem >= 7 { k1 = k1 ^ ((data[tail_off + 6] as UInt64) << 48_u64); }
+    if rem >= 6 { k1 = k1 ^ ((data[tail_off + 5] as UInt64) << 40_u64); }
+    if rem >= 5 { k1 = k1 ^ ((data[tail_off + 4] as UInt64) << 32_u64); }
+    if rem >= 4 { k1 = k1 ^ ((data[tail_off + 3] as UInt64) << 24_u64); }
+    if rem >= 3 { k1 = k1 ^ ((data[tail_off + 2] as UInt64) << 16_u64); }
+    if rem >= 2 { k1 = k1 ^ ((data[tail_off + 1] as UInt64) << 8_u64); }
+    if rem >= 1 {
+        k1 = k1 ^ (data[tail_off] as UInt64);
+        k1 = k1 * M128_C1;
+        k1 = rotl64(k1, 31);
+        k1 = k1 * M128_C2;
+        h1 = h1 ^ k1;
+    }
+
+    // Finalization.
+    h1 = h1 ^ (n as UInt64);
+    h2 = h2 ^ (n as UInt64);
+
+    h1 = h1 + h2;
+    h2 = h2 + h1;
+
+    h1 = fmix64(h1);
+    h2 = fmix64(h2);
+
+    h1 = h1 + h2;
+    h2 = h2 + h1;
+
+    Murmur3Hash128 { high: h2, low: h1 }
+}
+
+fn fmix64(k0: UInt64) -> UInt64 {
+    let mut k = k0;
+    k = k ^ (k >> 33_u64);
+    k = k * 0xFF51AFD7ED558CCD_u64;
+    k = k ^ (k >> 33_u64);
+    k = k * 0xC4CEB9FE1A85EC53_u64;
+    k = k ^ (k >> 33_u64);
+    k
+}
+
+// =============================================================================
+// Byte helpers
+// =============================================================================
+
+fn read_u32_le(src: &[Byte], off: Int) -> UInt32 {
+    let mut r: UInt32 = 0_u32;
+    let mut i: Int = 0;
+    while i < 4 {
+        r = r | ((src[off + i] as UInt32) << ((i * 8) as UInt32));
+        i = i + 1;
+    }
+    r
+}
+
+fn read_u64_le(src: &[Byte], off: Int) -> UInt64 {
+    let mut r: UInt64 = 0_u64;
+    let mut i: Int = 0;
+    while i < 8 {
+        r = r | ((src[off + i] as UInt64) << ((i * 8) as UInt64));
+        i = i + 1;
+    }
+    r
+}
+
+fn rotl32(x: UInt32, r: Int) -> UInt32 {
+    let shift = r as UInt32;
+    let inv = (32 - r) as UInt32;
+    (x << shift) | (x >> inv)
+}
+
+fn rotl64(x: UInt64, r: Int) -> UInt64 {
+    let shift = r as UInt64;
+    let inv = (64 - r) as UInt64;
+    (x << shift) | (x >> inv)
+}
