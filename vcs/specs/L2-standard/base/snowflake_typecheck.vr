@@ -1,0 +1,52 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: base, snowflake, id, typecheck
+// @timeout: 10000
+// @expect: pass
+
+mount core.base.snowflake.{
+    Snowflake, SnowflakeError, SnowflakeParts,
+    parse,
+    WORKER_BITS, SEQUENCE_BITS, MAX_WORKER, MAX_SEQUENCE,
+    DEFAULT_EPOCH_MS,
+};
+
+fn exercise_snowflake() -> Result<(), SnowflakeError> {
+    // Build a generator pinned to worker 42.
+    let mut gen = Snowflake.new(DEFAULT_EPOCH_MS, 42_u64)?;
+    let id: UInt64 = gen.next_id()?;
+
+    // Generator introspection.
+    assert(gen.worker_id() == 42_u64);
+    let _: UInt64 = gen.epoch_ms();
+
+    // Parse back.
+    let parts: SnowflakeParts = parse(id, DEFAULT_EPOCH_MS);
+    assert(parts.worker_id == 42_u64);
+    let _: UInt64 = parts.timestamp_ms;
+    let _: UInt64 = parts.sequence;
+
+    // Subsequent IDs are strictly > previous (within the same ms
+    // the sequence bumps; across ms boundaries the timestamp does).
+    let id2 = gen.next_id()?;
+    assert(id2 > id);
+    Ok(())
+}
+
+fn exercise_worker_cap() {
+    // Worker ID > 1023 is rejected at construction.
+    let result = Snowflake.new(DEFAULT_EPOCH_MS, 5000_u64);
+    let _ = result;
+
+    // Constants visible.
+    let _: Int = WORKER_BITS;
+    let _: Int = SEQUENCE_BITS;
+    let _: UInt64 = MAX_WORKER;
+    let _: UInt64 = MAX_SEQUENCE;
+}
+
+fn main() {
+    let _ = exercise_snowflake();
+    exercise_worker_cap();
+}

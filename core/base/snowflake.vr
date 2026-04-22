@@ -1,0 +1,174 @@
+// =============================================================================
+// base/snowflake.vr — Twitter-style 64-bit time-ordered ID generator
+// =============================================================================
+// Layer: 0 (Base)
+// Dependencies: core, core.time
+// =============================================================================
+//
+// Snowflake ID — 64-bit integer packing:
+//
+//   bit 63      : always 0 (positive int)
+//   bits 62..22 : milliseconds since `epoch_ms` (41 bits)
+//   bits 21..12 : worker / machine ID (10 bits, 0..=1023)
+//   bits 11..0  : sequence within the same millisecond (12 bits, 0..=4095)
+//
+// Guarantees:
+//
+//   * Monotonically increasing within one worker while the clock
+//     moves forward. Sequence wraps to 0 each millisecond.
+//   * Distributed: different workers produce different IDs in the
+//     same millisecond via the worker-ID bits.
+//   * Sortable: byte-lexicographic order of big-endian encoding
+//     matches chronological order — ideal for DB primary keys and
+//     Kafka partition keys.
+//
+// # Why not UUID v7
+//
+// UUID v7 gives 128 bits of storage cost; Snowflake fits in 8 bytes
+// and leaves room in a typical 64-bit row-id column. For systems
+// that already have worker sharding, Snowflake is the tighter fit.
+// UUID v7 lives in `core.base.uuid` when 128-bit uniqueness is worth
+// paying for.
+//
+// # Clock drift
+//
+// If the wall clock goes backwards within a process, the generator
+// refuses to emit a new ID (`ClockRegressed(delta_ms)`) rather than
+// silently emit a non-monotone ID. Callers typically either sleep
+// until the clock recovers or shift to a backup ID source.
+//
+// =============================================================================
+
+module core.base.snowflake;
+
+mount core.*;
+mount core.time.instant;
+
+// =============================================================================
+// Layout constants
+// =============================================================================
+
+public const WORKER_BITS:   Int    = 10;
+public const SEQUENCE_BITS: Int    = 12;
+public const MAX_WORKER:    UInt64 = (1_u64 << 10_u64) - 1_u64;       // 1023
+public const MAX_SEQUENCE:  UInt64 = (1_u64 << 12_u64) - 1_u64;       // 4095
+public const WORKER_SHIFT:  UInt64 = 12_u64;
+public const TIMESTAMP_SHIFT: UInt64 = 22_u64;                         // worker + sequence
+
+/// Twitter's original epoch (2010-11-04 01:42:54.657 UTC) in unix-ms.
+/// Callers typically pick their deployment's own epoch so the
+/// timestamp bits last longer into the future.
+public const DEFAULT_EPOCH_MS: UInt64 = 1_288_834_974_657_u64;
+
+// =============================================================================
+// Errors
+// =============================================================================
+
+public type SnowflakeError is
+      WorkerIdOutOfRange(UInt64)
+    | ClockRegressed(UInt64);   // last_ts - now_ms (how far back)
+
+// =============================================================================
+// Generator
+// =============================================================================
+
+public type Snowflake is {
+    epoch_ms:      UInt64,
+    worker_id:     UInt64,
+    last_ts_ms:    UInt64,
+    sequence:      UInt64,
+};
+
+implement Snowflake {
+    /// Construct with a custom epoch (ms since unix epoch) and worker ID.
+    /// Returns `WorkerIdOutOfRange` for worker_id > 1023.
+    public fn new(epoch_ms: UInt64, worker_id: UInt64) -> Result<Snowflake, SnowflakeError> {
+        if worker_id > MAX_WORKER {
+            return Err(SnowflakeError.WorkerIdOutOfRange(worker_id));
+        }
+        Ok(Snowflake {
+            epoch_ms:   epoch_ms,
+            worker_id:  worker_id,
+            last_ts_ms: 0_u64,
+            sequence:   0_u64,
+        })
+    }
+
+    /// Use Twitter's default epoch (2010-11-04). Still ~35 years of
+    /// headroom on the 41-bit timestamp from 2026.
+    public fn using_default_epoch(worker_id: UInt64) -> Result<Snowflake, SnowflakeError> {
+        Snowflake.new(DEFAULT_EPOCH_MS, worker_id)
+    }
+
+    /// Emit the next ID. Busy-spins if the sequence saturates within
+    /// a single millisecond (awaits the next ms tick).
+    public fn next_id(&mut self) -> Result<UInt64, SnowflakeError> {
+        let mut now_ms = current_unix_ms();
+
+        if now_ms < self.last_ts_ms {
+            return Err(SnowflakeError.ClockRegressed(self.last_ts_ms - now_ms));
+        }
+
+        if now_ms == self.last_ts_ms {
+            self.sequence = (self.sequence + 1_u64) & MAX_SEQUENCE;
+            if self.sequence == 0_u64 {
+                // Sequence saturated; wait for next ms tick.
+                now_ms = wait_for_next_ms(self.last_ts_ms);
+            }
+        } else {
+            self.sequence = 0_u64;
+        }
+
+        self.last_ts_ms = now_ms;
+        let ts_offset = now_ms - self.epoch_ms;
+        let id = (ts_offset << TIMESTAMP_SHIFT)
+               | (self.worker_id << WORKER_SHIFT)
+               | self.sequence;
+        Ok(id)
+    }
+
+    /// Worker ID bound to this generator.
+    public fn worker_id(&self) -> UInt64 { self.worker_id }
+
+    /// Epoch used by this generator (unix ms).
+    public fn epoch_ms(&self) -> UInt64 { self.epoch_ms }
+}
+
+// =============================================================================
+// ID parser — decomposes a 64-bit ID back into its fields
+// =============================================================================
+
+public type SnowflakeParts is {
+    timestamp_ms:  UInt64,   // absolute unix ms = `epoch_ms + offset`
+    worker_id:     UInt64,
+    sequence:      UInt64,
+};
+
+public fn parse(id: UInt64, epoch_ms: UInt64) -> SnowflakeParts {
+    let ts_offset = id >> TIMESTAMP_SHIFT;
+    let worker    = (id >> WORKER_SHIFT) & MAX_WORKER;
+    let sequence  = id & MAX_SEQUENCE;
+    SnowflakeParts {
+        timestamp_ms: epoch_ms + ts_offset,
+        worker_id:    worker,
+        sequence:     sequence,
+    }
+}
+
+// =============================================================================
+// Clock helpers
+// =============================================================================
+
+fn current_unix_ms() -> UInt64 {
+    instant.unix_millis() as UInt64
+}
+
+fn wait_for_next_ms(last: UInt64) -> UInt64 {
+    let mut now = current_unix_ms();
+    while now <= last {
+        // busy-spin — typically one iteration since we already
+        // entered the saturation branch within a ms.
+        now = current_unix_ms();
+    }
+    now
+}
