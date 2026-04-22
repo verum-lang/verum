@@ -178,6 +178,29 @@ Three sequential architectural commits closed the class of
     built-ins (`format`, `print`, `panic`, `assert`, etc.). L2
     modules impact: 31/41 → 37/41 (+6).
 
+17. **`4d2a9f34` fix(stdlib): rename variants shadowing common
+    user-type names** — five stdlib types registered variants named
+    `Client`/`Server`/`Internal`/etc. in their flat env maps, so
+    every user-code `Client.new(...)` got mis-routed through the
+    stdlib variant constructor. Renamed:
+    `HandshakeRole.Client|Server` → `AsClient|AsServer`,
+    `ErrorCategory.{Transient|Permanent|Security|Client|Upstream}`
+    → `Err*` prefix, `H3Role|Role.{Client|Server}` →
+    `{ClientEnd|ServerEnd}`, `SpanKind.{Internal|Client|Server|
+    Producer|Consumer}` → `Kind*` prefix. All call sites in stdlib
+    + VCS use qualified `EnumName.Variant` so the rename is
+    binary-compatible. L2 modules: 37/41 → 39/41 (+2).
+
+**Architectural rule** formalized from commits 16+17: stdlib PUBLIC
+symbols (functions AND variant constructors) MUST NOT shadow:
+  * language built-ins (`format`, `print`, `panic`, `assert`, …)
+  * common user-code type names (`Client`, `Server`, `User`,
+    `Config`, `Request`, `Response`, `Data`, …)
+Any simple name that leaks through `env.insert_mono` becomes a
+footgun for every downstream user. Use type-specific prefixes
+(`Err*`, `Kind*`, `As*`) or disambiguating suffixes (`*End`,
+`*Side`).
+
 **L1 impact:** 533/535 → 534/537 (same 3 known residuals:
 higher_kinded HKT infer, sha256 stdlib, AOT field-offset panic in
 vtest harness). **L3 dependent impact:** 48/52 → 50/52 — closes
