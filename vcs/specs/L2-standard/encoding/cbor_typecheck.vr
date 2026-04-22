@@ -1,0 +1,51 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: encoding, cbor, rfc8949, typecheck
+// @timeout: 10000
+// @expect: pass
+
+mount core.encoding.cbor.{
+    CborValue, CborError,
+    encode, decode, encode_canonical,
+    MAX_CBOR_NESTING,
+};
+mount core.collections.List;
+
+fn decode_nested(wire: &[Byte]) -> Result<CborValue, CborError> {
+    decode(wire)
+}
+
+fn main() {
+    // Build wire via the surface: a single uint encoded then decoded.
+    let wire_uint: [Byte; 2] = [0x18_u8, 0x2A_u8];    // CBOR: uint 42
+    let _v = decode(&wire_uint[..]);
+    // Bool true = 0xF5.
+    let wire_true: [Byte; 1] = [0xF5_u8];
+    let _ = decode(&wire_true[..]);
+    // Null = 0xF6.
+    let wire_null: [Byte; 1] = [0xF6_u8];
+    let _ = decode(&wire_null[..]);
+    // Empty array = 0x80.
+    let wire_arr: [Byte; 1] = [0x80_u8];
+    let _ = decode(&wire_arr[..]);
+    // Empty map = 0xA0.
+    let wire_map: [Byte; 1] = [0xA0_u8];
+    let _ = decode(&wire_map[..]);
+    // Tag 0, text "x" = 0xC0 | 0x61 | 0x78.
+    let wire_tag: [Byte; 3] = [0xC0_u8, 0x61_u8, 0x78_u8];
+    let _ = decode(&wire_tag[..]);
+
+    // Exercise re-encode via decode → encode round-trip.
+    match decode(&wire_uint[..]) {
+        Ok(v)  => {
+            let re: List<Byte> = encode(&v);
+            let _: List<Byte> = encode_canonical(&v);
+            let _ = re.len();
+        },
+        Err(_) => {},
+    }
+
+    let _: Int = MAX_CBOR_NESTING;
+    let _ = decode_nested;
+}
