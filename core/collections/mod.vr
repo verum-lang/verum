@@ -35,6 +35,7 @@ public module ttl_cache;
 public module bloom;
 public module consistent_hash;
 public module hyperloglog;
+public module count_min;
 
 // =============================================================================
 // Re-exports
@@ -127,6 +128,9 @@ public mount .hyperloglog.{
     HyperLogLog, HllError,
     MIN_PRECISION, MAX_PRECISION, DEFAULT_PRECISION,
 };
+
+// From count_min
+public mount .count_min.{CountMinSketch, CountMinError};
 
 // =============================================================================
 // Prelude exports

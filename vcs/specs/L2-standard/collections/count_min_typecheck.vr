@@ -1,0 +1,47 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: collections, count-min, frequency, sketch, typecheck
+// @timeout: 10000
+// @expect: pass
+
+mount core.collections.count_min.{CountMinSketch, CountMinError};
+
+fn exercise_count_min() -> Result<(), CountMinError> {
+    // Size for ≤ 0.1% error with 99.9% confidence.
+    let mut cms = CountMinSketch.with_target(0.001, 0.001);
+
+    // Observe 100 × "a", 10 × "b", once "c".
+    let mut i: Int = 0;
+    while i < 100 { let _ = cms.add(b"a"); i = i + 1; }
+    let mut j: Int = 0;
+    while j < 10 { let _ = cms.add(b"b"); j = j + 1; }
+    let _ = cms.add(b"c");
+
+    // Estimates should reflect relative frequency.
+    let na = cms.estimate(b"a");
+    let nb = cms.estimate(b"b");
+    let nc = cms.estimate(b"c");
+    assert(na >= 100_u64);
+    assert(nb >= 10_u64);
+    assert(nc >= 1_u64);
+
+    // add_n bulk-observation.
+    let after = cms.add_n(b"bulk", 500_u64);
+    assert(after >= 500_u64);
+
+    // Introspection + merge.
+    let _: Int = cms.width();
+    let _: Int = cms.depth();
+    let _: UInt64 = cms.total();
+
+    let mut other = CountMinSketch.new(cms.width(), cms.depth());
+    other.add(b"z");
+    let result = cms.merge(&other);
+    let _ = result;  // Ok if shapes match; Err if widths differ.
+
+    cms.clear();
+    Ok(())
+}
+
+fn main() { let _ = exercise_count_min(); }

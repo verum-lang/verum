@@ -1,0 +1,230 @@
+// =============================================================================
+// collections/count_min.vr — frequency sketch (Cormode & Muthukrishnan 2005)
+// =============================================================================
+// Layer: 2 (Collections)
+// Dependencies: core, core.security.mac.hmac, core.security.util.rng
+// =============================================================================
+//
+// Count-Min sketch — estimates the frequency of items in a stream
+// with bounded memory and tunable accuracy. Used at scale by
+// Datadog heavy-hitter detection, Facebook's AdaptivePeeling,
+// Redis TopK modules, and OpenTelemetry aggregators.
+//
+// Completes the classic probabilistic trio shipped under
+// `core.collections`:
+//
+//   * BloomFilter   — "is X present?"          (false positives)
+//   * HyperLogLog   — "how many distinct?"     (count distinct)
+//   * CountMinSketch — "how often is X seen?"  (frequency)
+//
+// # Sizing
+//
+//   width  w = ⌈e / epsilon⌉       — columns (error within epsilon·N)
+//   depth  d = ⌈ln(1/delta)⌉       — rows    (probability 1-delta)
+//
+//   at epsilon=0.001, delta=0.001 → w=2719, d=7 → 76 KiB with u32.
+//
+// Each incoming item is hashed d times to pick a column per row;
+// the increment bumps all d cells. The frequency estimate is the
+// minimum of the d cells (the "min" in Count-Min), which removes
+// upward bias from hash collisions.
+//
+// # API
+//
+// ```
+// let mut cms = CountMinSketch.with_target(0.001, 0.001);
+// cms.add(b"foo");
+// cms.add(b"foo");
+// cms.add(b"bar");
+// let n: UInt64 = cms.estimate(b"foo");      // ≥ 2
+// ```
+//
+// # Security
+//
+// HMAC-SHA256-keyed hashing with a CSPRNG-sourced 32-byte key per
+// sketch. Attacker observing the sketch cannot craft
+// adversarial collisions that inflate the error past the
+// theoretical bound.
+//
+// =============================================================================
+
+module core.collections.count_min;
+
+mount core.*;
+mount core.collections.List;
+mount core.security.mac.hmac.{hmac_sha256};
+mount core.security.util.rng.{fill_secure};
+
+public type CountMinError is
+      BadParameters(Text);
+
+// =============================================================================
+// Sketch
+// =============================================================================
+
+public type CountMinSketch is {
+    width:      Int,       // columns
+    depth:      Int,       // rows
+    /// Flat `depth × width` matrix in row-major order.
+    cells:      List<UInt32>,
+    key:        [Byte; 32],
+    total:      UInt64,
+};
+
+implement CountMinSketch {
+    /// Raw constructor by explicit dimensions. Prefer `with_target`.
+    public fn new(width: Int, depth: Int) -> CountMinSketch {
+        let w = if width < 1 { 1 } else { width };
+        let d = if depth < 1 { 1 } else { depth };
+        let mut cells: List<UInt32> = [];
+        let mut i: Int = 0;
+        while i < w * d { cells.push(0_u32); i = i + 1; }
+        let mut key: [Byte; 32] = [0_u8; 32];
+        fill_secure(&mut key);
+        CountMinSketch {
+            width: w, depth: d, cells: cells, key: key, total: 0_u64,
+        }
+    }
+
+    /// Size the sketch for `epsilon` error (as fraction of total
+    /// observations) at probability `1 - delta`. Typical values
+    /// epsilon=1e-3, delta=1e-3.
+    public fn with_target(epsilon: Float, delta: Float) -> CountMinSketch {
+        // w = ⌈e / epsilon⌉, d = ⌈ln(1/delta)⌉.
+        let e: Float = 2.71828182845904;
+        let eps = if epsilon <= 0.0 { 0.001 } else { epsilon };
+        let del = if delta   <= 0.0 { 0.001 } else { delta   };
+        let w = (e / eps) as Int + 1;
+        let d = int_ceil_ln_inv(del);
+        CountMinSketch.new(w, d)
+    }
+
+    /// Observe one occurrence of `item`. Returns the post-increment
+    /// estimate so the caller can threshold without a separate
+    /// `estimate` call.
+    public fn add(&mut self, item: &[Byte]) -> UInt64 {
+        self.add_n(item, 1_u64)
+    }
+
+    /// Observe `count` occurrences in one call.
+    public fn add_n(&mut self, item: &[Byte], count: UInt64) -> UInt64 {
+        self.total = self.total + count;
+        let indices = self.column_indices(item);
+        // Bump all d cells, track the minimum post-value.
+        let mut min_after: UInt64 = 0xFFFFFFFF_u64;
+        let mut r: Int = 0;
+        while r < self.depth {
+            let idx = r * self.width + indices[r];
+            let pre = self.cells[idx] as UInt64;
+            let post = pre + count;
+            // Saturating add at UInt32 max.
+            let sat: UInt32 = if post > 0xFFFFFFFF_u64 { 0xFFFFFFFF_u32 } else { post as UInt32 };
+            self.cells[idx] = sat;
+            let post64 = sat as UInt64;
+            if post64 < min_after { min_after = post64; }
+            r = r + 1;
+        }
+        min_after
+    }
+
+    /// Upper-bound estimate of how often `item` was observed.
+    /// Guaranteed never to under-report; may over-report by up to
+    /// `epsilon × total` with probability 1 - delta.
+    public fn estimate(&self, item: &[Byte]) -> UInt64 {
+        let indices = self.column_indices(item);
+        let mut min_val: UInt64 = 0xFFFFFFFFFFFFFFFF_u64;
+        let mut r: Int = 0;
+        while r < self.depth {
+            let idx = r * self.width + indices[r];
+            let v = self.cells[idx] as UInt64;
+            if v < min_val { min_val = v; }
+            r = r + 1;
+        }
+        min_val
+    }
+
+    /// Zero the sketch. Key + dimensions preserved so subsequent
+    /// adds hash to the same positions.
+    public fn clear(&mut self) {
+        let mut i: Int = 0;
+        while i < self.cells.len() { self.cells[i] = 0_u32; i = i + 1; }
+        self.total = 0_u64;
+    }
+
+    /// Merge another sketch into this one — cells sum element-wise.
+    /// Both sketches MUST have the same (width, depth, key). We
+    /// enforce only the shape check; callers that merge across
+    /// processes must share the 32-byte key explicitly.
+    public fn merge(&mut self, other: &CountMinSketch) -> Result<(), CountMinError> {
+        if self.width != other.width || self.depth != other.depth {
+            return Err(CountMinError.BadParameters(
+                Text.from("dimensions differ")));
+        }
+        let mut i: Int = 0;
+        while i < self.cells.len() {
+            let sum: UInt64 = (self.cells[i] as UInt64) + (other.cells[i] as UInt64);
+            self.cells[i] = if sum > 0xFFFFFFFF_u64 { 0xFFFFFFFF_u32 } else { sum as UInt32 };
+            i = i + 1;
+        }
+        self.total = self.total + other.total;
+        Ok(())
+    }
+
+    public fn width(&self) -> Int { self.width }
+    public fn depth(&self) -> Int { self.depth }
+    public fn total(&self) -> UInt64 { self.total }
+
+    // -----------------------------------------------------------------
+    // Internal — compute d column indices for an item.
+    // -----------------------------------------------------------------
+
+    fn column_indices(&self, item: &[Byte]) -> List<Int> {
+        // One HMAC-SHA256 call → 32 bytes. That yields 4 × 64-bit
+        // halves; we need `depth` column indices, so split into
+        // ceil(depth/4) digests using a counter suffix.
+        let mut out: List<Int> = [];
+        let mut counter: UInt32 = 0_u32;
+        while out.len() < self.depth {
+            let mut input: List<Byte> = [];
+            let mut i: Int = 0;
+            while i < item.len() { input.push(item[i]); i = i + 1; }
+            input.push(((counter >> 24_u32) & 0xFF_u32) as Byte);
+            input.push(((counter >> 16_u32) & 0xFF_u32) as Byte);
+            input.push(((counter >>  8_u32) & 0xFF_u32) as Byte);
+            input.push((counter & 0xFF_u32) as Byte);
+            let digest = hmac_sha256(&self.key[..], input.as_slice());
+            // Four u64 halves out of the 32-byte digest.
+            let mut half: Int = 0;
+            while half < 4 && out.len() < self.depth {
+                let base = half * 8;
+                let mut u: UInt64 = 0_u64;
+                let mut j: Int = 0;
+                while j < 8 {
+                    u = (u << 8_u64) | (digest[base + j] as UInt64);
+                    j = j + 1;
+                }
+                out.push((u % (self.width as UInt64)) as Int);
+                half = half + 1;
+            }
+            counter = counter + 1_u32;
+        }
+        out
+    }
+}
+
+// =============================================================================
+// Sizing helpers
+// =============================================================================
+
+fn int_ceil_ln_inv(delta: Float) -> Int {
+    // d = ⌈ln(1/delta)⌉. We approximate with a small table for
+    // typical delta values to avoid pulling a math intrinsic.
+    if delta >= 0.5       { return 1; }
+    if delta >= 0.1       { return 3; }    // ln(10) ≈ 2.30
+    if delta >= 0.01      { return 5; }    // ln(100) ≈ 4.61
+    if delta >= 0.001     { return 7; }    // ln(1000) ≈ 6.91
+    if delta >= 0.0001    { return 10; }   // ln(10000) ≈ 9.21
+    if delta >= 0.00001   { return 12; }
+    if delta >= 0.000001  { return 14; }
+    16
+}
