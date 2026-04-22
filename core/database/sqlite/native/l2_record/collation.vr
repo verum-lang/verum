@@ -1,0 +1,132 @@
+module core.database.sqlite.native.l2_record.collation;
+
+// =============================================================================
+// l2_record/collation.vr — Collation functions + registry
+// =============================================================================
+// Layer: 2
+// Spec: sqlite-native.md §9.5
+//
+// A collation is a comparator `Text × Text → Ordering` used to break
+// ties when SQLite orders TEXT values. SQLite ships three built-ins:
+//
+//   * BINARY  — `memcmp` on UTF-8 bytes (the default for any TEXT
+//               column unless overridden).
+//   * NOCASE  — ASCII-case-insensitive; Unicode passes through. Reuses
+//               `core.text.case_fold.compare_ascii_nocase`.
+//   * RTRIM   — strip trailing spaces, then BINARY.
+//
+// User-defined collations land in the `CollationRegistry` exposed here
+// and are driven by `Connection.register_collation` at the API layer
+// once that lands.
+// =============================================================================
+
+mount core.*;
+mount collections.{List, Map};
+mount base.{Text};
+mount core.base.ordering.Ordering;
+mount core.text.case_fold.compare_ascii_nocase;
+
+// -----------------------------------------------------------------------------
+// Types
+// -----------------------------------------------------------------------------
+
+public type CollationKind is Binary | Nocase | Rtrim | UserDefined(name: Text);
+
+public type Collation is {
+    name: Text,
+    kind: CollationKind,
+};
+
+// -----------------------------------------------------------------------------
+// Built-in comparators
+// -----------------------------------------------------------------------------
+
+/// BINARY — byte-for-byte UTF-8 comparison. Equivalent to `memcmp`;
+/// does NOT treat byte strings as Unicode code points (SQLite matches
+/// this behaviour — collation is not Unicode-aware without ICU).
+public fn binary_cmp(a: &Text, b: &Text) -> Ordering {
+    let ab = a.as_bytes();
+    let bb = b.as_bytes();
+    let n = if ab.len() < bb.len() { ab.len() } else { bb.len() };
+    let mut i: Int = 0;
+    while i < n {
+        if ab[i] < bb[i] { return Less; }
+        if ab[i] > bb[i] { return Greater; }
+        i = i + 1;
+    }
+    if ab.len() < bb.len() { Less }
+    else if ab.len() > bb.len() { Greater }
+    else { Equal }
+}
+
+/// NOCASE — ASCII-case-insensitive. Non-ASCII bytes pass through.
+public fn nocase_cmp(a: &Text, b: &Text) -> Ordering {
+    compare_ascii_nocase(a, b)
+}
+
+/// RTRIM — compare after stripping trailing 0x20 (ASCII space). Used
+/// by CHAR(N) and VARCHAR(N) columns where trailing blanks are
+/// semantically insignificant.
+public fn rtrim_cmp(a: &Text, b: &Text) -> Ordering {
+    let stripped_a = rtrim_spaces(a);
+    let stripped_b = rtrim_spaces(b);
+    binary_cmp(&stripped_a, &stripped_b)
+}
+
+fn rtrim_spaces(t: &Text) -> Text {
+    let raw = t.as_bytes();
+    let mut end = raw.len();
+    while end > 0 && raw[end - 1] == (0x20 as Byte) {
+        end = end - 1;
+    }
+    let mut out: List<Byte> = List.new();
+    let mut i: Int = 0;
+    while i < end {
+        out.push(raw[i]);
+        i = i + 1;
+    }
+    Text.from_bytes(&out).unwrap_or("".clone())
+}
+
+// -----------------------------------------------------------------------------
+// Registry
+// -----------------------------------------------------------------------------
+
+/// Name → collation metadata. Seeded with BINARY / NOCASE / RTRIM;
+/// user code can register more via `register`.
+public type CollationRegistry is {
+    entries: Map<Text, Collation>,
+};
+
+public fn collation_registry_new() -> CollationRegistry {
+    let mut entries: Map<Text, Collation> = Map.new();
+    let _ = entries.insert(
+        "BINARY".clone(),
+        Collation { name: "BINARY".clone(), kind: Binary },
+    );
+    let _ = entries.insert(
+        "NOCASE".clone(),
+        Collation { name: "NOCASE".clone(), kind: Nocase },
+    );
+    let _ = entries.insert(
+        "RTRIM".clone(),
+        Collation { name: "RTRIM".clone(), kind: Rtrim },
+    );
+    CollationRegistry { entries: entries }
+}
+
+implement CollationRegistry {
+    /// Register (or replace) a named collation.
+    public fn register(&mut self, coll: Collation) {
+        let _ = self.entries.insert(coll.name.clone(), coll);
+    }
+
+    /// Look up by name. SQLite collations are case-insensitive; we
+    /// upper-case the key by convention — user registrations should
+    /// pass upper-case names.
+    public fn find(&self, name: &Text) -> Bool {
+        self.entries.contains_key(name.clone())
+    }
+
+    public fn len(&self) -> Int { self.entries.len() }
+}

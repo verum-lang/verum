@@ -1,0 +1,59 @@
+module core.database.sqlite.native.l2_record;
+
+// =============================================================================
+// core/database/sqlite/native/l2_record/mod.vr — Record layer (L2)
+// =============================================================================
+// Layer: 2 of the loom architecture (sqlite-native.md §4.2)
+// Dependencies: l0_vfs (indirect), core/encoding/varint, core/text/case_fold
+// =============================================================================
+//
+// The record layer owns the bytes-in-row representation. Above it the
+// B-tree and VDBE know nothing of how column values are encoded; they
+// just get decoded Values. Below it the pager knows nothing of SQL
+// types; it just gets byte ranges.
+//
+// Shipped modules:
+//
+//   * `varint`    — facade over `core.encoding.varint.sqlite_*`
+//   * `record`    — serial-type codes + header encode/decode
+//   * `affinity`  — TEXT / NUMERIC / INTEGER / REAL / BLOB affinity
+//                   inference from declared column type text
+//   * `collation` — BINARY / NOCASE / RTRIM built-ins + user registry
+//   * `strict`    — STRICT-table type check (rejects affinity coercion)
+//
+// =============================================================================
+
+public module varint;
+public module record;
+public module affinity;
+public module collation;
+public module strict;
+public module type_coercion;
+
+public mount .varint.{encode, decode, encoded_len, encode_into, VarintError};
+
+public mount .record.{
+    SerialType, RecordError,
+    serial_type_encode, serial_type_decode,
+    serial_type_payload_size, serial_type_is_variable,
+    encode_record_header, decode_record_header,
+};
+
+public mount .affinity.{Affinity, infer_affinity};
+
+public mount .collation.{
+    Collation, CollationKind,
+    binary_cmp, nocase_cmp, rtrim_cmp,
+    CollationRegistry, collation_registry_new,
+};
+
+public mount .strict.{
+    StrictType, StrictConstraintError,
+    strict_type_from_text, strict_type_matches_serial,
+};
+
+public mount .type_coercion.{
+    SqliteValue, ValueClass,
+    classify, looks_int, looks_real,
+    coerce, parse_int64, parse_float64,
+};

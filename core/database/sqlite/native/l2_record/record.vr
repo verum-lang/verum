@@ -1,0 +1,226 @@
+module core.database.sqlite.native.l2_record.record;
+
+// =============================================================================
+// l2_record/record.vr — SQLite record header + body encoding
+// =============================================================================
+// Layer: 2
+// Spec: sqlite-native.md §6.3, sqlite.org/fileformat2.html §2.1
+//
+// Every row in a SQLite table is stored on disk as a `record`: a
+// header listing per-column serial-type codes, followed by the
+// concatenated column payloads.
+//
+// Header:
+//
+//     varint: header_length (including the length byte(s) themselves)
+//     varint: serial_type_0
+//     varint: serial_type_1
+//     ...
+//     varint: serial_type_{N-1}
+//
+// Body:
+//
+//     payload_0 ++ payload_1 ++ ... ++ payload_{N-1}
+//
+// Serial-type codes (§6.3):
+//
+//     code | meaning                           | bytes
+//     -----+-----------------------------------+------
+//        0 | NULL                              | 0
+//        1 | i8                                | 1
+//        2 | i16 big-endian                    | 2
+//        3 | i24 big-endian                    | 3
+//        4 | i32 big-endian                    | 4
+//        5 | i48 big-endian                    | 6
+//        6 | i64 big-endian                    | 8
+//        7 | IEEE 754 double big-endian        | 8
+//        8 | INTEGER 0                         | 0
+//        9 | INTEGER 1                         | 0
+//     10,11| reserved                          | 0
+//       N≥12 even | BLOB, length=(N-12)/2      | variable
+//       N≥13 odd  | TEXT, length=(N-13)/2      | variable
+// =============================================================================
+
+mount core.*;
+mount collections.List;
+mount base.{Result, Ok, Err, Text, Maybe};
+mount core.database.sqlite.native.l2_record.varint;
+
+// -----------------------------------------------------------------------------
+// SerialType
+// -----------------------------------------------------------------------------
+
+public type SerialType is
+      StNull
+    | StInt8
+    | StInt16
+    | StInt24
+    | StInt32
+    | StInt48
+    | StInt64
+    | StReal
+    | StZero
+    | StOne
+    | StBlob(len: Int)
+    | StText(len: Int);
+
+public type RecordError is
+      ShortBuffer
+    | ReservedCode(code: Int64)
+    | InvalidLength(got: Int64);
+
+/// Encode a SerialType as its on-disk varint-able u64 code.
+public fn serial_type_encode(st: SerialType) -> Int64 {
+    match st {
+        StNull   => 0  as Int64,
+        StInt8   => 1  as Int64,
+        StInt16  => 2  as Int64,
+        StInt24  => 3  as Int64,
+        StInt32  => 4  as Int64,
+        StInt48  => 5  as Int64,
+        StInt64  => 6  as Int64,
+        StReal   => 7  as Int64,
+        StZero   => 8  as Int64,
+        StOne    => 9  as Int64,
+        StBlob(n) => ((12 as Int64) + (2 as Int64) * (n as Int64)),
+        StText(n) => ((13 as Int64) + (2 as Int64) * (n as Int64)),
+    }
+}
+
+/// Parse a u64 code back into a SerialType.
+public fn serial_type_decode(code: Int64) -> Result<SerialType, RecordError> {
+    if code == (0 as Int64)  { return Ok(StNull); }
+    if code == (1 as Int64)  { return Ok(StInt8); }
+    if code == (2 as Int64)  { return Ok(StInt16); }
+    if code == (3 as Int64)  { return Ok(StInt24); }
+    if code == (4 as Int64)  { return Ok(StInt32); }
+    if code == (5 as Int64)  { return Ok(StInt48); }
+    if code == (6 as Int64)  { return Ok(StInt64); }
+    if code == (7 as Int64)  { return Ok(StReal); }
+    if code == (8 as Int64)  { return Ok(StZero); }
+    if code == (9 as Int64)  { return Ok(StOne); }
+    if code == (10 as Int64) || code == (11 as Int64) {
+        return Err(ReservedCode(code));
+    }
+    // BLOB / TEXT branch.
+    if code < (12 as Int64) {
+        return Err(InvalidLength(code));
+    }
+    let even = (code - (12 as Int64)) / (2 as Int64) == (code - (13 as Int64)) / (2 as Int64) + (1 as Int64);
+    // Simpler: check parity via modulo.
+    let is_blob = (code & (1 as Int64)) == (0 as Int64);
+    let n: Int = if is_blob {
+        ((code - (12 as Int64)) / (2 as Int64)) as Int
+    } else {
+        ((code - (13 as Int64)) / (2 as Int64)) as Int
+    };
+    let _ = even;
+    if n < 0 {
+        return Err(InvalidLength(code));
+    }
+    if is_blob {
+        Ok(StBlob(n))
+    } else {
+        Ok(StText(n))
+    }
+}
+
+/// How many payload bytes does a SerialType consume on disk?
+public fn serial_type_payload_size(st: SerialType) -> Int {
+    match st {
+        StNull   => 0,
+        StInt8   => 1,
+        StInt16  => 2,
+        StInt24  => 3,
+        StInt32  => 4,
+        StInt48  => 6,
+        StInt64  => 8,
+        StReal   => 8,
+        StZero   => 0,
+        StOne    => 0,
+        StBlob(n) => n,
+        StText(n) => n,
+    }
+}
+
+/// Is this serial-type logically a text / blob with variable payload?
+public fn serial_type_is_variable(st: SerialType) -> Bool {
+    match st {
+        StBlob(_) => true,
+        StText(_) => true,
+        _         => false,
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Record header encoding
+// -----------------------------------------------------------------------------
+
+/// Encode a list of `SerialType`s as a record header.  Returns the
+/// serialised header (varint-length + varints). Matches §6.3 exactly.
+public fn encode_record_header(types: &List<SerialType>) -> List<Byte> {
+    // First pass — compute the total byte length of the varint payload,
+    // excluding the leading length varint.
+    let mut payload: List<Byte> = List.new();
+    let mut i: Int = 0;
+    while i < types.len() {
+        let code = serial_type_encode(types[i]);
+        let _ = varint.encode_into(&mut payload, code);
+        i = i + 1;
+    }
+
+    // The leading varint encodes header_length *including itself*.
+    // Compute header_length iteratively: L = encoded_len(L) + payload.len().
+    let pl = payload.len() as Int64;
+    // Two rounds is always enough: if L fits in 1 byte, one round is
+    // already exact; if L crosses a varint-boundary, the second round
+    // converges.
+    let mut header_len = pl + (varint.encoded_len(pl) as Int64);
+    let hlen1 = varint.encoded_len(header_len) as Int64;
+    header_len = pl + hlen1;
+
+    // Serialise.
+    let mut out: List<Byte> = List.new();
+    let _ = varint.encode_into(&mut out, header_len);
+    let mut k: Int = 0;
+    while k < payload.len() {
+        out.push(payload[k]);
+        k = k + 1;
+    }
+    out
+}
+
+/// Parse a record header from `buf` starting at `start`. Returns
+/// the list of serial types plus the consumed byte count.
+public fn decode_record_header(
+    buf: &[Byte],
+    start: Int,
+) -> Result<(List<SerialType>, Int), RecordError> {
+    if start >= buf.len() {
+        return Err(ShortBuffer);
+    }
+    let (header_len, hlen_bytes) = match varint.decode(buf, start) {
+        Ok(r)  => r,
+        Err(_) => { return Err(ShortBuffer); }
+    };
+    let header_end = start + (header_len as Int);
+    if header_end > buf.len() {
+        return Err(ShortBuffer);
+    }
+
+    let mut types: List<SerialType> = List.new();
+    let mut pos: Int = start + hlen_bytes;
+    while pos < header_end {
+        let (code, n) = match varint.decode(buf, pos) {
+            Ok(r)  => r,
+            Err(_) => { return Err(ShortBuffer); }
+        };
+        let st = match serial_type_decode(code) {
+            Ok(s)  => s,
+            Err(e) => { return Err(e); }
+        };
+        types.push(st);
+        pos = pos + n;
+    }
+    Ok((types, (header_end - start)))
+}

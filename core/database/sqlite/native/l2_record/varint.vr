@@ -1,0 +1,48 @@
+module core.database.sqlite.native.l2_record.varint;
+
+// =============================================================================
+// l2_record/varint.vr — SQLite varint facade
+// =============================================================================
+// Layer: 2
+// Spec: sqlite-native.md §6.4
+//
+// Thin re-export over the production-grade SQLite varint implementation
+// already living in `core.encoding.varint`. Keeps the L2 record layer
+// self-contained (callers import `core.database.sqlite.native.l2_record`
+// and never reach directly into `core.encoding.*`).
+//
+// No new logic; identical semantics, identical tests. If the encoding
+// implementation ever needs to diverge (e.g., a SQLite-specific fast
+// path for i32 values), this module is where that re-specialisation
+// would land.
+// =============================================================================
+
+mount core.*;
+mount core.encoding.varint;
+
+// Re-exports.
+public mount core.encoding.varint.sqlite_encoded_len;
+public mount core.encoding.varint.sqlite_encode;
+public mount core.encoding.varint.sqlite_encode_into;
+public mount core.encoding.varint.sqlite_decode;
+public mount core.encoding.varint.sqlite_decode_first;
+public mount core.encoding.varint.sqlite_skip;
+public mount core.encoding.varint.VarintError;
+
+// Convenience alias — callers in the record layer write `encode` /
+// `decode` more often than the `sqlite_*` qualified form.
+public fn encode(value: Int64) -> List<Byte> {
+    varint.sqlite_encode(value)
+}
+
+public fn encode_into(out: &mut List<Byte>, value: Int64) -> Int {
+    varint.sqlite_encode_into(out, value)
+}
+
+public fn decode(buf: &[Byte], start: Int) -> Result<(Int64, Int), varint.VarintError> {
+    varint.sqlite_decode(buf, start)
+}
+
+public fn encoded_len(value: Int64) -> Int {
+    varint.sqlite_encoded_len(value)
+}

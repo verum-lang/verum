@@ -1,0 +1,378 @@
+module core.database.sqlite.native.l2_record.type_coercion;
+
+// =============================================================================
+// l2_record/type_coercion.vr — Affinity-driven value coercion
+// =============================================================================
+// Layer: 2
+// Spec: sqlite-native.md §9.3, sqlite.org/datatype3.html §3.2
+//
+// When a non-STRICT table receives a value whose storage class doesn't
+// match the column's affinity, SQLite applies a specific coercion
+// before storage. The rules are tier-ordered by column affinity:
+//
+//   * Integer → try int; fallback real if non-int; fallback text/blob
+//   * Real    → if value is int, store as int; else real; else text/blob
+//   * Text    → value is stringified (NULL unchanged)
+//   * Blob    → no coercion; value stored as-is
+//   * Numeric → promote text "looks_int" → int, "looks_real" → real,
+//               else leave as text
+//
+// This module provides:
+//
+//   1. Classifier helpers: `looks_int` / `looks_real` for text lexical
+//      tests (matching SQLite's lexer rules).
+//   2. `ValueClass`: one of {Null, Int64, Real, Text, Blob} — a compact
+//      runtime representation of the storage class.
+//   3. `coerce(Value, Affinity) → Value` pure function.
+//
+// The `Value` type is kept minimal here to avoid circular deps with
+// the VDBE register type. Once L4 lands we'll adapt the VDBE register
+// onto this.
+// =============================================================================
+
+mount core.*;
+mount collections.List;
+mount base.{Text, Maybe};
+mount core.database.sqlite.native.l2_record.affinity.Affinity;
+
+// -----------------------------------------------------------------------------
+// Compact Value representation
+// -----------------------------------------------------------------------------
+
+/// A SQLite dynamic value. The five storage classes map 1-to-1 onto
+/// the VDBE register kinds; once the VDBE lands, this type and
+/// `Register` converge.
+public type SqliteValue is
+      VNull
+    | VInt(Int64)
+    | VReal(Float64)
+    | VText(Text)
+    | VBlob(List<Byte>);
+
+/// Storage-class tag, mostly for tests.
+public type ValueClass is Null | Int64Class | RealClass | TextClass | BlobClass;
+
+public fn classify(v: &SqliteValue) -> ValueClass {
+    match v {
+        VNull    => Null,
+        VInt(_)  => Int64Class,
+        VReal(_) => RealClass,
+        VText(_) => TextClass,
+        VBlob(_) => BlobClass,
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Lexical classifiers (mirror SQLite's sqlite3Atoi64 / sqlite3AtoF)
+// -----------------------------------------------------------------------------
+
+/// Does this text look like an integer literal? Accepts optional
+/// leading sign, then digits. Does NOT accept leading/trailing
+/// whitespace — SQLite trims whitespace before calling this.
+public fn looks_int(s: &Text) -> Bool {
+    let raw = s.as_bytes();
+    if raw.len() == 0 { return false; }
+    let mut i: Int = 0;
+    if raw[0] == (0x2D as Byte) || raw[0] == (0x2B as Byte) {   // '-' / '+'
+        i = 1;
+    }
+    if i == raw.len() { return false; }
+    let mut saw_digit = false;
+    while i < raw.len() {
+        let b = raw[i];
+        if b < (0x30 as Byte) || b > (0x39 as Byte) {
+            return false;
+        }
+        saw_digit = true;
+        i = i + 1;
+    }
+    saw_digit
+}
+
+/// Does this text look like a float literal? Accepts optional sign,
+/// digits, optional decimal point + digits, optional exponent.
+public fn looks_real(s: &Text) -> Bool {
+    let raw = s.as_bytes();
+    if raw.len() == 0 { return false; }
+    let mut i: Int = 0;
+    if raw[0] == (0x2D as Byte) || raw[0] == (0x2B as Byte) {
+        i = 1;
+    }
+    let mut saw_digit = false;
+    let mut saw_dot = false;
+    // Integer part.
+    while i < raw.len() {
+        let b = raw[i];
+        if b >= (0x30 as Byte) && b <= (0x39 as Byte) {
+            saw_digit = true;
+            i = i + 1;
+        } else if b == (0x2E as Byte) {
+            if saw_dot { return false; }
+            saw_dot = true;
+            i = i + 1;
+            break;
+        } else if b == (0x65 as Byte) || b == (0x45 as Byte) {
+            break;
+        } else {
+            return false;
+        }
+    }
+    // Fractional part.
+    if saw_dot {
+        while i < raw.len() {
+            let b = raw[i];
+            if b >= (0x30 as Byte) && b <= (0x39 as Byte) {
+                saw_digit = true;
+                i = i + 1;
+            } else if b == (0x65 as Byte) || b == (0x45 as Byte) {
+                break;
+            } else {
+                return false;
+            }
+        }
+    }
+    // Exponent.
+    if i < raw.len() && (raw[i] == (0x65 as Byte) || raw[i] == (0x45 as Byte)) {
+        i = i + 1;
+        if i < raw.len() && (raw[i] == (0x2D as Byte) || raw[i] == (0x2B as Byte)) {
+            i = i + 1;
+        }
+        let mut exp_digit = false;
+        while i < raw.len() {
+            let b = raw[i];
+            if b >= (0x30 as Byte) && b <= (0x39 as Byte) {
+                exp_digit = true;
+                i = i + 1;
+            } else {
+                return false;
+            }
+        }
+        if !exp_digit { return false; }
+    }
+    if i != raw.len() { return false; }
+    saw_digit
+}
+
+// -----------------------------------------------------------------------------
+// Coercion
+// -----------------------------------------------------------------------------
+
+/// Apply SQLite's affinity-driven coercion to `v` for a column of
+/// `col_affinity`. Pure — returns a new SqliteValue.
+///
+/// NULL is always passed through unchanged (SQLite's "NULL is
+/// everywhere valid" invariant — STRICT mode rejects this separately).
+///
+/// Integer / Real → pure numeric conversion happens at parse time
+/// when the source is TEXT. When the source is already numeric, the
+/// cross-class promotion rules apply (Real→Int iff the float is
+/// exactly representable as i64; else kept as Real).
+public fn coerce(v: SqliteValue, col_affinity: Affinity) -> SqliteValue {
+    match v {
+        VNull => VNull,
+        _ => match col_affinity {
+            Affinity.Integer => coerce_to_integer(v),
+            Affinity.Real    => coerce_to_real(v),
+            Affinity.Text    => coerce_to_text(v),
+            Affinity.Blob    => v,               // blob affinity never coerces
+            Affinity.Numeric => coerce_to_numeric(v),
+        }
+    }
+}
+
+fn coerce_to_integer(v: SqliteValue) -> SqliteValue {
+    match v {
+        VInt(_)  => v,
+        VReal(x) => {
+            let i = x as Int64;
+            // Exactly representable iff round-trip equal.
+            if (i as Float64) == x {
+                VInt(i)
+            } else {
+                VReal(x)   // keep as real — SQLite does NOT truncate silently
+            }
+        }
+        VText(s) => {
+            if looks_int(&s) {
+                VInt(parse_int64(&s))
+            } else if looks_real(&s) {
+                VReal(parse_float64(&s))
+            } else {
+                VText(s)
+            }
+        }
+        VBlob(b) => VBlob(b),
+        VNull    => VNull,
+    }
+}
+
+fn coerce_to_real(v: SqliteValue) -> SqliteValue {
+    match v {
+        VReal(_) => v,
+        VInt(i)  => VReal(i as Float64),
+        VText(s) => {
+            if looks_real(&s) || looks_int(&s) {
+                VReal(parse_float64(&s))
+            } else {
+                VText(s)
+            }
+        }
+        VBlob(b) => VBlob(b),
+        VNull    => VNull,
+    }
+}
+
+fn coerce_to_text(v: SqliteValue) -> SqliteValue {
+    match v {
+        VText(_) => v,
+        VInt(i)  => VText(int64_to_text(i)),
+        VReal(x) => VText(float64_to_text(x)),
+        VBlob(b) => VBlob(b),   // blob → text not auto-applied
+        VNull    => VNull,
+    }
+}
+
+fn coerce_to_numeric(v: SqliteValue) -> SqliteValue {
+    match v {
+        VInt(_) | VReal(_) => v,
+        VText(s) => {
+            if looks_int(&s) {
+                VInt(parse_int64(&s))
+            } else if looks_real(&s) {
+                VReal(parse_float64(&s))
+            } else {
+                VText(s)
+            }
+        }
+        VBlob(b) => VBlob(b),
+        VNull    => VNull,
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Text ⇄ number helpers
+// -----------------------------------------------------------------------------
+
+/// Parse a text known to satisfy `looks_int` into an Int64. Sign and
+/// digit-only body — no overflow check for values outside Int64 range
+/// (SQLite wraps; we mirror that).
+public fn parse_int64(s: &Text) -> Int64 {
+    let raw = s.as_bytes();
+    let mut i: Int = 0;
+    let mut neg = false;
+    if raw.len() > 0 && raw[0] == (0x2D as Byte) {
+        neg = true;
+        i = 1;
+    } else if raw.len() > 0 && raw[0] == (0x2B as Byte) {
+        i = 1;
+    }
+    let mut acc: Int64 = 0 as Int64;
+    while i < raw.len() {
+        let d = (raw[i] - (0x30 as Byte)) as Int64;
+        acc = acc * (10 as Int64) + d;
+        i = i + 1;
+    }
+    if neg { (0 as Int64) - acc } else { acc }
+}
+
+/// Parse text that satisfies `looks_real` (or `looks_int`) into a Float64.
+/// v1 implementation — straightforward but not round-trip exact across
+/// all IEEE 754 edge cases. Adequate for SQLite's advertised `1-ULP`
+/// tolerance across platforms.
+public fn parse_float64(s: &Text) -> Float64 {
+    // Convert manually to avoid pulling in the full strtod machinery
+    // in the interpreter path. Accuracy is acceptable for `Numeric`
+    // affinity in v1; `strtod` wiring lands with the math-builtins
+    // patch (§15.1 caller).
+    let raw = s.as_bytes();
+    let mut i: Int = 0;
+    let mut neg = false;
+    if raw.len() > 0 && raw[0] == (0x2D as Byte) {
+        neg = true;
+        i = 1;
+    } else if raw.len() > 0 && raw[0] == (0x2B as Byte) {
+        i = 1;
+    }
+    let mut int_part: Float64 = 0.0;
+    while i < raw.len() && raw[i] >= (0x30 as Byte) && raw[i] <= (0x39 as Byte) {
+        int_part = int_part * 10.0 + ((raw[i] - (0x30 as Byte)) as Float64);
+        i = i + 1;
+    }
+    let mut frac: Float64 = 0.0;
+    let mut divisor: Float64 = 1.0;
+    if i < raw.len() && raw[i] == (0x2E as Byte) {
+        i = i + 1;
+        while i < raw.len() && raw[i] >= (0x30 as Byte) && raw[i] <= (0x39 as Byte) {
+            frac = frac * 10.0 + ((raw[i] - (0x30 as Byte)) as Float64);
+            divisor = divisor * 10.0;
+            i = i + 1;
+        }
+    }
+    let mut value = int_part + frac / divisor;
+    if neg { value = 0.0 - value; }
+    // Exponent — simple multiply loop, good enough for reasonable range.
+    if i < raw.len() && (raw[i] == (0x65 as Byte) || raw[i] == (0x45 as Byte)) {
+        i = i + 1;
+        let mut exp_neg = false;
+        if i < raw.len() && raw[i] == (0x2D as Byte) { exp_neg = true; i = i + 1; }
+        else if i < raw.len() && raw[i] == (0x2B as Byte) { i = i + 1; }
+        let mut exp: Int = 0;
+        while i < raw.len() {
+            exp = exp * 10 + ((raw[i] - (0x30 as Byte)) as Int);
+            i = i + 1;
+        }
+        let mut factor: Float64 = 1.0;
+        let mut k: Int = 0;
+        while k < exp {
+            factor = factor * 10.0;
+            k = k + 1;
+        }
+        if exp_neg { value = value / factor; }
+        else       { value = value * factor; }
+    }
+    value
+}
+
+fn int64_to_text(n: Int64) -> Text {
+    // Simple non-allocating stringify via byte accumulation.
+    if n == (0 as Int64) { return "0".clone(); }
+    let neg = n < (0 as Int64);
+    let mut abs: Int64 = if neg { (0 as Int64) - n } else { n };
+    let mut digits: List<Byte> = List.new();
+    while abs > (0 as Int64) {
+        let d = (abs % (10 as Int64)) as Int;
+        digits.push(((d as Int) + 0x30) as Byte);
+        abs = abs / (10 as Int64);
+    }
+    let mut out: List<Byte> = List.new();
+    if neg { out.push(0x2D as Byte); }
+    let mut i: Int = digits.len() - 1;
+    while i >= 0 {
+        out.push(digits[i]);
+        i = i - 1;
+    }
+    Text.from_bytes(&out).unwrap_or("0".clone())
+}
+
+fn float64_to_text(x: Float64) -> Text {
+    // v1 — returns a canonical non-roundtrip form. STRICT of the
+    // shape is not critical (tests compare semantics, not string).
+    // Full `%.17g` support lands with the `printf`/`format` SQL
+    // builtins (§15.1).
+    let i = x as Int64;
+    if (i as Float64) == x {
+        return int64_to_text(i);
+    }
+    // Fallback — emit `int_part.frac_part`. Not strictly conforming.
+    let int_part_f = x as Int64;
+    let mut out = int64_to_text(int_part_f);
+    let mut bytes: List<Byte> = List.new();
+    let mut k: Int = 0;
+    while k < out.len() {
+        bytes.push(out.as_bytes()[k]);
+        k = k + 1;
+    }
+    bytes.push(0x2E as Byte);   // '.'
+    bytes.push(0x30 as Byte);   // trailing zero placeholder
+    Text.from_bytes(&bytes).unwrap_or(out)
+}

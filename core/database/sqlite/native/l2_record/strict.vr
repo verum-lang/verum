@@ -1,0 +1,133 @@
+module core.database.sqlite.native.l2_record.strict;
+
+// =============================================================================
+// l2_record/strict.vr — STRICT table type enforcement (SQLite 3.37+)
+// =============================================================================
+// Layer: 2
+// Spec: sqlite-native.md §9.4, sqlite.org/stricttables.html
+//
+// `CREATE TABLE t (...) STRICT` flips SQLite's weak-typing default:
+//
+//   * Each column MUST declare an explicit type from the strict set
+//     `ANY | INT | INTEGER | REAL | TEXT | BLOB`.
+//   * Inserts of values whose serial type doesn't match the column
+//     return `SQLITE_CONSTRAINT_DATATYPE`.
+//   * The usual affinity coercion does NOT apply.
+//
+// `ANY` is a pass-through — every value is accepted regardless of
+// serial type, matching SQLite's semantics (it's the explicit opt-out
+// of strict checking for a single column).
+// =============================================================================
+
+mount core.*;
+mount base.{Result, Ok, Err, Text};
+mount core.text.case_fold.fold_text_ascii;
+mount core.database.sqlite.native.l2_record.record.SerialType;
+
+public type StrictType is Any | Integer | Real | Text | Blob;
+
+public type StrictConstraintError is
+      DatatypeMismatch(column: Text, expected: StrictType)
+    | UnknownType(declared: Text);
+
+// -----------------------------------------------------------------------------
+// Parse a column's declared type into a StrictType
+// -----------------------------------------------------------------------------
+
+/// Parse the declared-type text of a STRICT column. Accepts
+/// `ANY | INT | INTEGER | REAL | TEXT | BLOB` case-insensitively.
+/// Rejects anything else — which is what the spec mandates.
+public fn strict_type_from_text(declared: &Text) -> Result<StrictType, StrictConstraintError> {
+    let folded = fold_text_ascii(declared);
+    let raw = folded.as_bytes();
+    // Strip optional leading/trailing whitespace so "  TEXT  " matches.
+    let mut start: Int = 0;
+    while start < raw.len() && (raw[start] == (0x20 as Byte) || raw[start] == (0x09 as Byte)) {
+        start = start + 1;
+    }
+    let mut end: Int = raw.len();
+    while end > start && (raw[end - 1] == (0x20 as Byte) || raw[end - 1] == (0x09 as Byte)) {
+        end = end - 1;
+    }
+    let n = end - start;
+    // Compare against the five accepted tokens.
+    if is_ascii_literal(raw, start, n, "any")     { return Ok(Any); }
+    if is_ascii_literal(raw, start, n, "int")     { return Ok(Integer); }
+    if is_ascii_literal(raw, start, n, "integer") { return Ok(Integer); }
+    if is_ascii_literal(raw, start, n, "real")    { return Ok(Real); }
+    if is_ascii_literal(raw, start, n, "text")    { return Ok(Text); }
+    if is_ascii_literal(raw, start, n, "blob")    { return Ok(Blob); }
+    Err(UnknownType(declared.clone()))
+}
+
+fn is_ascii_literal(raw: &[Byte], start: Int, n: Int, lit: &str) -> Bool {
+    let lb = lit.as_bytes();
+    if n != lb.len() { return false; }
+    let mut i: Int = 0;
+    while i < n {
+        if raw[start + i] != lb[i] { return false; }
+        i = i + 1;
+    }
+    true
+}
+
+// -----------------------------------------------------------------------------
+// Serial-type → strict-type compatibility
+// -----------------------------------------------------------------------------
+
+/// Decide whether a value's serial type is acceptable in a column
+/// declared with the given `StrictType`. Returns `Ok(())` if so;
+/// `Err(DatatypeMismatch)` otherwise.
+public fn strict_type_matches_serial(
+    column: &Text,
+    expected: StrictType,
+    serial: SerialType,
+) -> Result<(), StrictConstraintError> {
+    let compatible = match expected {
+        Any => true,
+        Integer => is_integer_serial(serial),
+        Real    => is_real_serial(serial),
+        Text    => is_text_serial(serial),
+        Blob    => is_blob_serial(serial),
+    };
+    if compatible {
+        Ok(())
+    } else {
+        Err(DatatypeMismatch(column.clone(), expected))
+    }
+}
+
+fn is_integer_serial(st: SerialType) -> Bool {
+    match st {
+        StNull => true,   // NULL always compatible (unless NOT NULL)
+        StInt8 | StInt16 | StInt24 | StInt32 | StInt48 | StInt64
+        | StZero | StOne => true,
+        _ => false,
+    }
+}
+
+fn is_real_serial(st: SerialType) -> Bool {
+    match st {
+        StNull => true,
+        // REAL column accepts both REAL and INTEGER (SQLite auto-promotes).
+        StReal | StInt8 | StInt16 | StInt24 | StInt32 | StInt48 | StInt64
+        | StZero | StOne => true,
+        _ => false,
+    }
+}
+
+fn is_text_serial(st: SerialType) -> Bool {
+    match st {
+        StNull    => true,
+        StText(_) => true,
+        _         => false,
+    }
+}
+
+fn is_blob_serial(st: SerialType) -> Bool {
+    match st {
+        StNull    => true,
+        StBlob(_) => true,
+        _         => false,
+    }
+}

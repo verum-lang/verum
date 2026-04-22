@@ -1,0 +1,84 @@
+module core.database.sqlite.native.l2_record.affinity;
+
+// =============================================================================
+// l2_record/affinity.vr — SQL type affinity inference
+// =============================================================================
+// Layer: 2
+// Spec: sqlite-native.md §9.2, sqlite.org/datatype3.html §3
+//
+// SQLite column types are weakly typed. At CREATE TABLE time the
+// declared type text is mapped to one of five "affinities". Values
+// inserted into a column are coerced toward its affinity (but only
+// STRICT tables actually reject mismatches — see `strict.vr`).
+//
+// Affinity inference rules (§9.2 — applied top-down):
+//
+//   1. If the declared type contains "INT"   → Integer
+//   2. Else if it contains "CHAR", "CLOB", or "TEXT" → Text
+//   3. Else if it contains "BLOB" or is empty        → Blob
+//   4. Else if it contains "REAL", "FLOA", or "DOUB" → Real
+//   5. Else                                          → Numeric
+//
+// Matching is case-insensitive ASCII per spec (SQLite compares upper-
+// cased declared text). We reuse `core.text.case_fold` for the ASCII
+// fold so the rule matches `Varchar`, `VARCHAR`, `varchar` identically.
+// =============================================================================
+
+mount core.*;
+mount base.{Text};
+mount core.text.case_fold.fold_text_ascii;
+
+public type Affinity is
+      Integer
+    | Text
+    | Blob
+    | Real
+    | Numeric;
+
+/// ASCII-case-insensitive substring search.
+fn contains_ascii_nocase(hay: &Text, needle: &str) -> Bool {
+    let folded = fold_text_ascii(hay);
+    let hb = folded.as_bytes();
+    let nb = needle.as_bytes();
+    if nb.len() == 0 { return true; }
+    if hb.len() < nb.len() { return false; }
+    let mut i: Int = 0;
+    let last = hb.len() - nb.len();
+    while i <= last {
+        let mut j: Int = 0;
+        let mut ok: Bool = true;
+        while j < nb.len() {
+            if hb[i + j] != nb[j] {
+                ok = false;
+                break;
+            }
+            j = j + 1;
+        }
+        if ok { return true; }
+        i = i + 1;
+    }
+    false
+}
+
+/// Infer the affinity of a column from its declared type text.
+public fn infer_affinity(declared_type: &Text) -> Affinity {
+    if contains_ascii_nocase(declared_type, "int") {
+        return Integer;
+    }
+    if contains_ascii_nocase(declared_type, "char")
+        || contains_ascii_nocase(declared_type, "clob")
+        || contains_ascii_nocase(declared_type, "text")
+    {
+        return Text;
+    }
+    if declared_type.len() == 0 || contains_ascii_nocase(declared_type, "blob") {
+        return Blob;
+    }
+    if contains_ascii_nocase(declared_type, "real")
+        || contains_ascii_nocase(declared_type, "floa")
+        || contains_ascii_nocase(declared_type, "doub")
+    {
+        return Real;
+    }
+    Numeric
+}
