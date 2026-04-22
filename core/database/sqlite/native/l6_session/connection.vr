@@ -35,6 +35,7 @@ mount collections.{List, Map};
 mount base.{Result, Ok, Err, Text, Maybe};
 mount core.database.sqlite.native.l0_vfs.OpenFlags;
 mount core.database.sqlite.native.l1_pager.{Pager, pager_open_memory};
+mount core.database.sqlite.native.l4_vdbe.Register;
 mount core.database.sqlite.native.l6_session.schema_cache.{
     SchemaCache, schema_cache_new,
 };
@@ -103,6 +104,15 @@ public type Connection is {
     next_root_page: Int,         // bump-allocator for CREATE TABLE / CREATE INDEX
                                   // (first user table starts at page 2; page 1 is
                                   // the main DB header + sqlite_schema root).
+    // Connection-scoped persistent row-store. Maps each table's
+    // `root_page` to its current row list. A prepared statement's
+    // CursorTable is per-statement (lives inside VdbeState), but
+    // OpenRead / OpenWrite seed the cursor slot from this map before
+    // execution and Insert / Delete writeback after. This is the
+    // bridge that makes INSERT-then-SELECT in the same connection
+    // actually see the inserted rows — real pager-backed row
+    // persistence plugs in here once the actor IPC lands.
+    table_store: Map<Int, List<List<Register>>>,
 };
 
 /// Open an in-memory connection with the given mode. All three modes
@@ -119,6 +129,7 @@ public fn open_memory(mode: ConnectionMode) -> Result<Connection, ConnectionErro
         tx: tx_state_autocommit(),
         path: ":memory:".clone(),
         next_root_page: 2,
+        table_store: Map.new(),
     })
 }
 
@@ -210,10 +221,47 @@ implement Connection {
     public fn allocate_root_page(&mut self) -> Int {
         let p = self.next_root_page;
         self.next_root_page = self.next_root_page + 1;
+        // Seed an empty row store entry so Insert/Rewind find a bucket.
+        let _ = self.table_store.insert(p, List.new());
         p
     }
 
     public fn peek_next_root_page(&self) -> Int { self.next_root_page }
+
+    // -------------------------------------------------------------------------
+    // Persistent table store — backs INSERT/SELECT-across-statements
+    // -------------------------------------------------------------------------
+
+    /// Current rows at `root_page`. Returns empty list if unknown.
+    public fn rows_at(&self, root_page: Int) -> List<List<Register>> {
+        if !self.table_store.contains_key(root_page) {
+            return List.new();
+        }
+        clone_rows(&self.table_store.get(root_page))
+    }
+
+    /// Replace rows at `root_page`. Creates the slot if absent.
+    public fn set_rows_at(&mut self, root_page: Int, rows: List<List<Register>>) {
+        let _ = self.table_store.insert(root_page, rows);
+    }
+
+    /// Has this root_page been registered? (CREATE TABLE allocates.)
+    public fn has_table_at(&self, root_page: Int) -> Bool {
+        self.table_store.contains_key(root_page)
+    }
+
+    /// Row count at `root_page`; 0 on missing.
+    public fn row_count_at(&self, root_page: Int) -> Int {
+        if !self.table_store.contains_key(root_page) { return 0; }
+        self.table_store.get(root_page).len()
+    }
+
+    /// Drop a table's rows. Called after successful DROP TABLE.
+    public fn forget_table_rows(&mut self, root_page: Int) {
+        if self.table_store.contains_key(root_page) {
+            let _ = self.table_store.remove(root_page);
+        }
+    }
 
     // -------------------------------------------------------------------------
     // Pager access — internal, consumed by the statement executor
@@ -221,4 +269,21 @@ implement Connection {
 
     public fn pager(&self) -> &Pager { &self.pager }
     public fn pager_mut(&mut self) -> &mut Pager { &mut self.pager }
+}
+
+fn clone_rows(xs: &List<List<Register>>) -> List<List<Register>> {
+    let mut out: List<List<Register>> = List.new();
+    let mut i: Int = 0;
+    while i < xs.len() {
+        let row = &xs[i];
+        let mut copy: List<Register> = List.new();
+        let mut j: Int = 0;
+        while j < row.len() {
+            copy.push(row[j]);
+            j = j + 1;
+        }
+        out.push(copy);
+        i = i + 1;
+    }
+    out
 }
