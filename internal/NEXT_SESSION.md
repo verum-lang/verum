@@ -165,6 +165,19 @@ Three sequential architectural commits closed the class of
     the warnings were masking real diagnostics for every user
     check.
 
+16. **`05218652` fix(stdlib): rename SemVer/JsonPointer `format` →
+    type-specific names** — two stdlib modules shadowed the built-in
+    `format("...", args)` string formatter with type-specific
+    `public fn format(v: &SemVer) -> Text` / `(p: &JsonPointer)`.
+    Any module that transitively imported them couldn't use
+    `format(...)` at all — every call got routed through the
+    SemVer/JsonPointer branch producing "expected 'SemVer', found
+    'Text'" (or 'JsonPointer'). Renamed to `format_semver` /
+    `format_json_pointer`. Architectural rule: stdlib public
+    function names must not shadow the language's compile-time
+    built-ins (`format`, `print`, `panic`, `assert`, etc.). L2
+    modules impact: 31/41 → 37/41 (+6).
+
 **L1 impact:** 533/535 → 534/537 (same 3 known residuals:
 higher_kinded HKT infer, sha256 stdlib, AOT field-offset panic in
 vtest harness). **L3 dependent impact:** 48/52 → 50/52 — closes
