@@ -1,0 +1,73 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: quic, rfc9000, cid, rotation, typecheck
+// @timeout: 10000
+// @expect: pass
+
+mount core.net.quic.{
+    CidPool, CidEntry, CidIssuer, CidPoolError,
+    ConnectionId, StatelessResetKey,
+};
+mount core.collections.List;
+
+fn exercise_cid_pool() -> Result<(), CidPoolError> {
+    let key = StatelessResetKey.generate();
+
+    // Client-side pool — tracks peer-issued (server) CIDs we'll use
+    // as Destination CID on outbound packets. active_connection_id_limit
+    // = 8 means we'll cache up to 8.
+    let mut pool = CidPool.new(8);
+
+    // Seed sequence 0 — the initial CID the server picked in its
+    // first response to our Initial.
+    let seed_cid = ConnectionId.from_bytes(&[0x01_u8, 0x02_u8, 0x03_u8, 0x04_u8][..])
+        .unwrap_or_else(|_| ConnectionId.empty());
+    let seed_token = key.token_for_cid(seed_cid.as_slice());
+    pool.seed_initial(seed_cid, seed_token);
+
+    // Server issues CID seq=1 via NEW_CONNECTION_ID.
+    let cid1 = ConnectionId.from_bytes(&[0x10_u8; 8][..])
+        .unwrap_or_else(|_| ConnectionId.empty());
+    let tok1 = key.token_for_cid(cid1.as_slice());
+    let _retired = pool.on_new_connection_id(1_u64, 0_u64, cid1, tok1)?;
+
+    // Server issues seq=2 but bumps retire_prior_to to 1 — forces us
+    // to retire seq=0. Returned list contains seq=0 so caller can
+    // emit RETIRE_CONNECTION_ID frames.
+    let cid2 = ConnectionId.from_bytes(&[0x20_u8; 8][..])
+        .unwrap_or_else(|_| ConnectionId.empty());
+    let tok2 = key.token_for_cid(cid2.as_slice());
+    let retired_seqs: List<UInt64> = pool.on_new_connection_id(2_u64, 1_u64, cid2, tok2)?;
+    let _ = retired_seqs.len();
+
+    // Round-robin selection for migration.
+    let _next = pool.pick_next_for_migration();
+    let _next2 = pool.pick_next_for_migration();
+
+    // Reset-token lookup by sequence.
+    let _token = pool.reset_token_for(1_u64);
+
+    let _ = pool.active_count();
+    let _ = pool.retire_prior_to();
+
+    // Peer-initiated retirement of a sequence we actually had.
+    pool.on_retire_connection_id(2_u64)?;
+
+    Ok(())
+}
+
+fn exercise_cid_issuer() {
+    // Server-side pool of CIDs WE issued and handed to the peer.
+    let mut iss = CidIssuer.new();
+    let seq1 = iss.next();
+    let seq2 = iss.next();
+    iss.raise_retire_prior_to(seq1);
+    let _ = seq2;
+    let _ = iss.retire_prior_to();
+}
+
+fn main() {
+    let _ = exercise_cid_pool();
+    exercise_cid_issuer();
+}

@@ -1,0 +1,264 @@
+// =============================================================================
+// net/quic/cid_pool.vr — per-connection CID manager (RFC 9000 §5.1)
+// =============================================================================
+// Layer: 5 (Network — QUIC)
+// Dependencies: core, core.net.quic.{connection_id, stateless_reset}
+// =============================================================================
+//
+// RFC 9000 §5.1.1 — each endpoint maintains a pool of peer-issued
+// connection IDs plus the tokens the peer supplied for stateless
+// reset (§10.3). The pool is managed by:
+//
+//   * NEW_CONNECTION_ID frames (§19.15) — peer advertises a fresh
+//     (seq, cid, reset_token) and a `retire_prior_to` low-water
+//     mark. Any local CID with seq < retire_prior_to MUST be
+//     retired via RETIRE_CONNECTION_ID.
+//
+//   * RETIRE_CONNECTION_ID frames (§19.16) — peer tells us a CID it
+//     sent earlier is no longer in use.
+//
+//   * active_connection_id_limit transport parameter (§18.2) caps
+//     how many active CIDs we're willing to track at once.
+//
+// This module models *one direction* — either the peer-issued CIDs
+// we use as Destination CID (when `side == Remote`) or our own
+// locally-issued CIDs for the peer to use (when `side == Local`).
+// Connections carry two pools, one per direction.
+//
+// # Invariants enforced
+//
+//   * Active pool size ≤ active_connection_id_limit (violation =
+//     TransportError.ConnectionIdLimitError).
+//   * Sequence numbers are monotonically non-decreasing; a peer
+//     that repeats or backdates a sequence is a protocol error.
+//   * retire_prior_to never decreases.
+//   * `pick_for_migration` rotates CIDs round-robin so traffic
+//     patterns don't re-identify the connection across migrations.
+//
+// =============================================================================
+
+module core.net.quic.cid_pool;
+
+mount core.*;
+mount core.collections.List;
+mount core.net.quic.connection_id.{ConnectionId};
+
+// =============================================================================
+// Pool error surface
+// =============================================================================
+
+public type CidPoolError is
+      LimitExceeded(Int)                  // active > active_connection_id_limit
+    | DuplicateSequence(UInt64)           // peer re-issued a sequence number
+    | UnknownSequence(UInt64)             // peer retired a seq we never had
+    | RetirePriorRegression              // retire_prior_to decreased
+    | PoolExhausted;                     // no active CIDs left
+
+// =============================================================================
+// A single entry in the pool
+// =============================================================================
+
+public type CidEntry is {
+    sequence:     UInt64,
+    cid:          ConnectionId,
+    reset_token:  [Byte; 16],
+    retired:      Bool,
+};
+
+// =============================================================================
+// The pool itself
+// =============================================================================
+
+public type CidPool is {
+    entries:                   List<CidEntry>,
+    retire_prior_to:           UInt64,
+    highest_sequence_seen:     UInt64,
+    active_connection_id_limit: Int,
+    /// Round-robin cursor for `pick_next_for_migration`.
+    rotation_cursor:           Int,
+};
+
+implement CidPool {
+    /// Construct an empty pool bounded by `limit` active entries.
+    /// `limit` MUST be ≥ 2 per RFC 9000 §5.1.1 (to allow migration).
+    public fn new(limit: Int) -> CidPool {
+        CidPool {
+            entries: [],
+            retire_prior_to: 0_u64,
+            highest_sequence_seen: 0_u64,
+            active_connection_id_limit: if limit < 2 { 2 } else { limit },
+            rotation_cursor: 0,
+        }
+    }
+
+    /// Initial CID — sequence 0, typically the one issued in the Initial
+    /// packet's Source Connection ID. Admits without any limit check.
+    public fn seed_initial(&mut self, cid: ConnectionId, reset_token: [Byte; 16]) {
+        self.entries.push(CidEntry {
+            sequence: 0_u64, cid: cid, reset_token: reset_token, retired: false,
+        });
+    }
+
+    /// Admit a NEW_CONNECTION_ID frame. Returns the sequence numbers
+    /// of CIDs that are now forced to retire (caller MUST emit a
+    /// RETIRE_CONNECTION_ID frame for each).
+    public fn on_new_connection_id(
+        &mut self,
+        sequence:        UInt64,
+        retire_prior_to: UInt64,
+        cid:             ConnectionId,
+        reset_token:     [Byte; 16],
+    ) -> Result<List<UInt64>, CidPoolError> {
+        if retire_prior_to < self.retire_prior_to {
+            return Err(CidPoolError.RetirePriorRegression);
+        }
+        if sequence < retire_prior_to {
+            // Frame itself mandates its own retirement — ignore silently
+            // per RFC 9000 §5.1.2.
+            return Ok([]);
+        }
+        // Duplicate sequence?
+        let mut i: Int = 0;
+        while i < self.entries.len() {
+            if self.entries[i].sequence == sequence {
+                return Err(CidPoolError.DuplicateSequence(sequence));
+            }
+            i = i + 1;
+        }
+
+        // Compute the list of sequences forced to retire.
+        let mut retired_seqs: List<UInt64> = [];
+        let mut j: Int = 0;
+        while j < self.entries.len() {
+            let e = &self.entries[j];
+            if !e.retired && e.sequence < retire_prior_to {
+                retired_seqs.push(e.sequence);
+            }
+            j = j + 1;
+        }
+
+        // Mark them retired + drop.
+        let mut k: Int = 0;
+        while k < self.entries.len() {
+            let e = &self.entries[k];
+            if e.sequence < retire_prior_to {
+                let _ = self.entries.remove(k);
+                continue;
+            }
+            k = k + 1;
+        }
+        self.retire_prior_to = retire_prior_to;
+        if sequence > self.highest_sequence_seen {
+            self.highest_sequence_seen = sequence;
+        }
+
+        // Enforce the active limit *after* retiring the forced ones.
+        if self.active_count() >= self.active_connection_id_limit {
+            return Err(CidPoolError.LimitExceeded(self.active_count()));
+        }
+
+        self.entries.push(CidEntry {
+            sequence: sequence, cid: cid, reset_token: reset_token, retired: false,
+        });
+        Ok(retired_seqs)
+    }
+
+    /// Peer-initiated retirement via RETIRE_CONNECTION_ID frame.
+    /// Returns Ok(()) on success, Err(UnknownSequence) when the seq
+    /// was never active.
+    public fn on_retire_connection_id(&mut self, sequence: UInt64) -> Result<(), CidPoolError> {
+        let mut i: Int = 0;
+        while i < self.entries.len() {
+            if self.entries[i].sequence == sequence {
+                let _ = self.entries.remove(i);
+                return Ok(());
+            }
+            i = i + 1;
+        }
+        Err(CidPoolError.UnknownSequence(sequence))
+    }
+
+    /// Number of non-retired entries.
+    public fn active_count(&self) -> Int {
+        let mut n: Int = 0;
+        let mut i: Int = 0;
+        while i < self.entries.len() {
+            if !self.entries[i].retired { n = n + 1; }
+            i = i + 1;
+        }
+        n
+    }
+
+    /// Round-robin select an active CID for the next outbound path /
+    /// datagram. Returns None when the pool is exhausted (forces the
+    /// connection to stall or migrate to a new handshake-issued CID).
+    public fn pick_next_for_migration(&mut self) -> Maybe<ConnectionId> {
+        if self.entries.len() == 0 { return None; }
+        let n = self.entries.len();
+        let mut tried: Int = 0;
+        while tried < n {
+            let idx = self.rotation_cursor % n;
+            self.rotation_cursor = self.rotation_cursor + 1;
+            if !self.entries[idx].retired {
+                return Some(self.entries[idx].cid.clone());
+            }
+            tried = tried + 1;
+        }
+        None
+    }
+
+    /// Look up the reset token for a specific sequence number (used
+    /// by the detector path when correlating a suspected stateless
+    /// reset with its originating CID).
+    public fn reset_token_for(&self, sequence: UInt64) -> Maybe<[Byte; 16]> {
+        let mut i: Int = 0;
+        while i < self.entries.len() {
+            if self.entries[i].sequence == sequence {
+                return Some(self.entries[i].reset_token);
+            }
+            i = i + 1;
+        }
+        None
+    }
+
+    public fn retire_prior_to(&self) -> UInt64 { self.retire_prior_to }
+}
+
+// =============================================================================
+// Issuer-side helper — produce the next (sequence, cid, reset_token) to
+// advertise in a NEW_CONNECTION_ID frame.
+// =============================================================================
+
+/// Bookkeeping for the *local* pool: the seq we'll hand out next and
+/// the retire_prior_to we advertise.
+public type CidIssuer is {
+    next_sequence:   UInt64,
+    retire_prior_to: UInt64,
+};
+
+implement CidIssuer {
+    public fn new() -> CidIssuer {
+        CidIssuer { next_sequence: 1_u64, retire_prior_to: 0_u64 }
+    }
+
+    /// Allocate the next sequence number. Caller derives the CID
+    /// bytes and associated reset token (e.g. via
+    /// `StatelessResetKey.token_for_cid`) and ships them in a
+    /// NEW_CONNECTION_ID frame.
+    public fn next(&mut self) -> UInt64 {
+        let s = self.next_sequence;
+        self.next_sequence = self.next_sequence + 1_u64;
+        s
+    }
+
+    /// Raise the retire_prior_to advertised to the peer. Bumps the
+    /// watermark so future NEW_CONNECTION_ID frames carry the new
+    /// value; local pool must have already pruned anything below it.
+    public fn raise_retire_prior_to(&mut self, new_watermark: UInt64) {
+        if new_watermark > self.retire_prior_to {
+            self.retire_prior_to = new_watermark;
+        }
+    }
+
+    public fn retire_prior_to(&self) -> UInt64 { self.retire_prior_to }
+}

@@ -68,6 +68,7 @@ public module path;                    // RFC 9000 §8 path validation + migrati
 public module api;                     // High-level QuicClient / QuicServer facade
 public module transport;               // UDP abstraction + ConnectionPump (end-to-end I/O)
 public module stateless_reset;         // RFC 9000 §10.3 Stateless Reset tokens + detection
+public module cid_pool;                // RFC 9000 §5.1 per-connection CID manager
 
 mount core.*;
 mount core.time.duration.{Duration};
@@ -94,6 +95,11 @@ public mount .stateless_reset.{
     StatelessResetKey, ResetTokenSet,
     build_stateless_reset, try_match_stateless_reset,
     STATELESS_RESET_MIN_SIZE, STATELESS_RESET_RECOMMENDED_SIZE,
+};
+
+// Re-exports — CID pool (NEW/RETIRE CONNECTION_ID plumbing)
+public mount .cid_pool.{
+    CidPool, CidEntry, CidIssuer, CidPoolError,
 };
 
 // =============================================================================
