@@ -1,0 +1,282 @@
+// =============================================================================
+// base/glob.vr — shell-style glob pattern matching
+// =============================================================================
+// Layer: 0 (Base)
+// Dependencies: core
+// =============================================================================
+//
+// Shell-style glob matching — the pattern language every file-
+// picker, `.gitignore`, workspace-manifest, and log-filter uses.
+//
+// # Supported syntax
+//
+//   *           match any sequence of non-separator characters
+//   **          match any number of path segments (extended glob)
+//   ?           match any single non-separator character
+//   [abc]       character class; matches any of `a`, `b`, `c`
+//   [a-z]       character range
+//   [!abc]      negated class (`^` also accepted)
+//   \c          literal `c` (escape)
+//   /           path separator; `*` does not cross it, `**` does.
+//
+// # API
+//
+// ```
+// // Simple match.
+// let ok: Bool = glob.matches("src/**/*.rs", "src/foo/bar.rs");
+//
+// // Compile once, test many — useful for a preloaded .gitignore.
+// let pat = glob.compile("target/**")?;
+// if pat.matches_path("target/debug/verum") { ... }
+// ```
+//
+// # Semantics
+//
+// Matching is byte-level — no UTF-8 case folding. Case-sensitivity
+// is caller-provided via a flag on `compile_with`.
+//
+// `**` must be a complete path segment: `a/**/b` matches `a/b` and
+// `a/x/y/b`. The equivalent in `fnmatch(FNM_PATHNAME | FNM_LEADING_DIR)`.
+//
+// # Why this ships
+//
+// Every user-level tool (.gitignore walker, Jest's test matchers,
+// tar's --exclude, rsync's filter, the Bazel and Cargo workspace
+// manifests) reinvents glob — almost always with a subtly different
+// `**` interpretation. One tested module unifies them.
+//
+// =============================================================================
+
+module core.base.glob;
+
+mount core.*;
+mount core.collections.List;
+
+public type GlobError is
+      UnclosedClass
+    | EmptyClass
+    | TrailingEscape;
+
+// =============================================================================
+// Compiled pattern
+// =============================================================================
+
+public type GlobPattern is {
+    /// Decomposed into `GlobPart`s for repeat matching.
+    parts:           List<GlobPart>,
+    case_sensitive:  Bool,
+};
+
+type GlobPart is
+      Literal(Byte)
+    | AnySingle                      // ?
+    | AnySequence                    // *
+    | Globstar                       // **
+    | Separator                      // /
+    | Class { negated: Bool, chars: List<Byte>, ranges: List<(Byte, Byte)> };
+
+// =============================================================================
+// Compile
+// =============================================================================
+
+public fn compile(pattern: &str) -> Result<GlobPattern, GlobError> {
+    compile_with(pattern, true)
+}
+
+public fn compile_with(pattern: &str, case_sensitive: Bool) -> Result<GlobPattern, GlobError> {
+    let mut parts: List<GlobPart> = [];
+    let b = pattern.as_bytes();
+    let mut i: Int = 0;
+    while i < b.len() {
+        let c = b[i];
+        if c == ('*' as Byte) {
+            // Check for `**`.
+            if i + 1 < b.len() && b[i + 1] == ('*' as Byte) {
+                parts.push(GlobPart.Globstar);
+                i = i + 2;
+            } else {
+                parts.push(GlobPart.AnySequence);
+                i = i + 1;
+            }
+            continue;
+        }
+        if c == ('?' as Byte) {
+            parts.push(GlobPart.AnySingle);
+            i = i + 1;
+            continue;
+        }
+        if c == ('/' as Byte) {
+            parts.push(GlobPart.Separator);
+            i = i + 1;
+            continue;
+        }
+        if c == ('\\' as Byte) {
+            if i + 1 >= b.len() {
+                return Err(GlobError.TrailingEscape);
+            }
+            let ch = b[i + 1];
+            parts.push(GlobPart.Literal(normalise(ch, case_sensitive)));
+            i = i + 2;
+            continue;
+        }
+        if c == ('[' as Byte) {
+            let (class_part, next_i) = parse_class(b, i + 1, case_sensitive)?;
+            parts.push(class_part);
+            i = next_i;
+            continue;
+        }
+        parts.push(GlobPart.Literal(normalise(c, case_sensitive)));
+        i = i + 1;
+    }
+    Ok(GlobPattern { parts: parts, case_sensitive: case_sensitive })
+}
+
+fn parse_class(b: &[Byte], from: Int, case_sensitive: Bool) -> Result<(GlobPart, Int), GlobError> {
+    let mut negated: Bool = false;
+    let mut chars: List<Byte> = [];
+    let mut ranges: List<(Byte, Byte)> = [];
+    let mut i = from;
+    if i < b.len() && (b[i] == ('!' as Byte) || b[i] == ('^' as Byte)) {
+        negated = true;
+        i = i + 1;
+    }
+    let start_of_class = i;
+    loop {
+        if i >= b.len() {
+            return Err(GlobError.UnclosedClass);
+        }
+        let c = b[i];
+        // `]` as the first char is literal per POSIX.
+        if c == (']' as Byte) && i > start_of_class {
+            if chars.len() == 0 && ranges.len() == 0 {
+                return Err(GlobError.EmptyClass);
+            }
+            return Ok((GlobPart.Class {
+                negated: negated, chars: chars, ranges: ranges,
+            }, i + 1));
+        }
+        // Range form `a-b`.
+        if i + 2 < b.len() && b[i + 1] == ('-' as Byte) && b[i + 2] != (']' as Byte) {
+            let lo = normalise(c, case_sensitive);
+            let hi = normalise(b[i + 2], case_sensitive);
+            ranges.push((lo, hi));
+            i = i + 3;
+        } else {
+            chars.push(normalise(c, case_sensitive));
+            i = i + 1;
+        }
+    }
+}
+
+// =============================================================================
+// Match
+// =============================================================================
+
+/// One-shot convenience — compile + match.
+public fn matches(pattern: &str, path: &str) -> Bool {
+    match compile(pattern) {
+        Ok(p) => p.matches_path(path),
+        Err(_) => false,
+    }
+}
+
+implement GlobPattern {
+    public fn matches_path(&self, path: &str) -> Bool {
+        let pb = path.as_bytes();
+        let mut text_buf: List<Byte> = [];
+        let mut i: Int = 0;
+        while i < pb.len() {
+            text_buf.push(normalise(pb[i], self.case_sensitive));
+            i = i + 1;
+        }
+        matches_impl(self.parts.as_slice(), 0, text_buf.as_slice(), 0)
+    }
+}
+
+fn matches_impl(parts: &[GlobPart], pi: Int, text: &[Byte], ti: Int) -> Bool {
+    if pi >= parts.len() {
+        return ti >= text.len();
+    }
+    let part = &parts[pi];
+    match part {
+        GlobPart.Literal(c) => {
+            if ti >= text.len() { return false; }
+            if text[ti] != *c { return false; }
+            matches_impl(parts, pi + 1, text, ti + 1)
+        },
+        GlobPart.AnySingle => {
+            if ti >= text.len() || text[ti] == ('/' as Byte) { return false; }
+            matches_impl(parts, pi + 1, text, ti + 1)
+        },
+        GlobPart.Separator => {
+            if ti >= text.len() { return false; }
+            if text[ti] != ('/' as Byte) { return false; }
+            matches_impl(parts, pi + 1, text, ti + 1)
+        },
+        GlobPart.Class { negated, chars, ranges } => {
+            if ti >= text.len() || text[ti] == ('/' as Byte) { return false; }
+            let ch = text[ti];
+            let inside = class_contains(ch, chars, ranges);
+            if (*negated && inside) || (!*negated && !inside) { return false; }
+            matches_impl(parts, pi + 1, text, ti + 1)
+        },
+        GlobPart.AnySequence => {
+            // `*` matches any non-separator run.
+            let mut k: Int = ti;
+            // Try matching rest at every position.
+            while k <= text.len() {
+                if matches_impl(parts, pi + 1, text, k) { return true; }
+                if k >= text.len() || text[k] == ('/' as Byte) { return false; }
+                k = k + 1;
+            }
+            false
+        },
+        GlobPart.Globstar => {
+            // `**` matches any sequence including `/`. If followed by
+            // `/`, skip the trailing separator in the pattern so
+            // `a/**/b` matches `a/b`.
+            let mut next_pi = pi + 1;
+            if next_pi < parts.len() {
+                match &parts[next_pi] {
+                    GlobPart.Separator => { next_pi = next_pi + 1; },
+                    _ => {},
+                }
+            }
+            // Option A: `**` consumes zero segments.
+            if matches_impl(parts, next_pi, text, ti) { return true; }
+            // Option B: `**` consumes one or more segments.
+            let mut k: Int = ti;
+            while k < text.len() {
+                if matches_impl(parts, next_pi, text, k) { return true; }
+                k = k + 1;
+            }
+            false
+        },
+    }
+}
+
+fn class_contains(ch: Byte, chars: &List<Byte>, ranges: &List<(Byte, Byte)>) -> Bool {
+    let mut i: Int = 0;
+    while i < chars.len() {
+        if chars[i] == ch { return true; }
+        i = i + 1;
+    }
+    let mut j: Int = 0;
+    while j < ranges.len() {
+        let (lo, hi) = &ranges[j];
+        if ch >= *lo && ch <= *hi { return true; }
+        j = j + 1;
+    }
+    false
+}
+
+// =============================================================================
+// Helpers
+// =============================================================================
+
+fn normalise(c: Byte, case_sensitive: Bool) -> Byte {
+    if case_sensitive { return c; }
+    if c >= ('A' as Byte) && c <= ('Z' as Byte) {
+        c + (('a' as Byte) - ('A' as Byte))
+    } else { c }
+}

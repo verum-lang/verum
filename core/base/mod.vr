@@ -52,6 +52,7 @@ public module uuid;  // RFC 4122/9562 UUIDs (v4 random, v7 time-ordered)
 public module snowflake;  // Twitter-style 64-bit time-ordered IDs
 public module nanoid;     // URL-safe short-ID generator (21 chars ≈ 126 bits)
 public module semver;     // Semantic Versioning 2.0.0 parser + comparator
+public module glob;       // Shell-style glob pattern matching (* ** ? [...])
 
 // =============================================================================
 // Prelude re-exports (commonly used items)

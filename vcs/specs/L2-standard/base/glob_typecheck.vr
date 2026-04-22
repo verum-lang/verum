@@ -1,0 +1,63 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: base, glob, pattern-match, typecheck
+// @timeout: 10000
+// @expect: pass
+
+mount core.base.glob.{
+    GlobPattern, GlobError,
+    compile, compile_with, matches,
+};
+
+fn exercise_glob() -> Result<(), GlobError> {
+    // Simple wildcard.
+    assert(matches("*.rs", "lib.rs"));
+    assert(!matches("*.rs", "lib.py"));
+
+    // `*` doesn't cross '/'.
+    assert(!matches("*.rs", "src/lib.rs"));
+
+    // `**` crosses path separators.
+    assert(matches("src/**/*.rs", "src/foo/bar.rs"));
+    assert(matches("src/**", "src/a/b/c/d.rs"));
+    assert(matches("src/**/*.rs", "src/lib.rs"));   // ** can match zero segments
+
+    // `?` — single non-separator char.
+    assert(matches("?.rs", "a.rs"));
+    assert(!matches("?.rs", "ab.rs"));
+
+    // Character class.
+    assert(matches("[abc].rs", "a.rs"));
+    assert(matches("[abc].rs", "c.rs"));
+    assert(!matches("[abc].rs", "d.rs"));
+
+    // Range.
+    assert(matches("[a-z].txt", "f.txt"));
+    assert(!matches("[a-z].txt", "7.txt"));
+
+    // Negated class.
+    assert(matches("[!abc].rs", "d.rs"));
+    assert(!matches("[!abc].rs", "a.rs"));
+
+    // Escape.
+    assert(matches("\\*.rs", "*.rs"));
+    assert(!matches("\\*.rs", "a.rs"));
+
+    // Compile once, match many.
+    let p: GlobPattern = compile("target/**")?;
+    assert(p.matches_path("target/debug/verum"));
+    assert(!p.matches_path("src/target"));
+
+    // Case-insensitive compile.
+    let ci = compile_with("*.MD", false)?;
+    assert(ci.matches_path("README.md"));
+
+    // Malformed class.
+    let bad = compile("[abc");
+    let _ = bad;
+
+    Ok(())
+}
+
+fn main() { let _ = exercise_glob(); }
