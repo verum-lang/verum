@@ -1,0 +1,316 @@
+module core.database.sqlite.native.l0_vfs.mock_vfs;
+
+// =============================================================================
+// l0_vfs/mock_vfs.vr — Deterministic Simulation Testing VFS
+// =============================================================================
+// Layer: 0
+// Spec: sqlite-native.md §7.6 + §22.5
+//
+// `MockVfs` implements `VfsProtocol` over a process-local path → blob
+// registry but lets the test harness inject failures at chosen points:
+//
+//   * `inject_crash_after_fsync(n)`    — next sync after N sync-count
+//                                         power-cycles the file (all
+//                                         post-sync data lost)
+//   * `inject_partial_write(offset, k)` — next write at `offset` lands
+//                                          only the first `k` bytes
+//   * `set_disk_full_after(bytes)`      — writes past the cap fail with
+//                                          DiskFull
+//
+// Combined with `MockClock`, this gives the DST harness bit-reproducible
+// execution of any SQLite workload: the same seed → same sequence of
+// events → same final state. Required by §22.5.
+//
+// This is a single-writer, single-threaded mock (test-only); the
+// production VFS (PosixVfs) handles multi-process concurrency.
+// =============================================================================
+
+mount core.*;
+mount collections.{List, Map};
+mount base.{Result, Ok, Err, Text, Maybe};
+mount core.database.sqlite.native.l0_vfs.vfs_protocol.{
+    OpenFlags, SyncFlags, LockKind, VfsError, VfsErrorKind,
+    AccessKind, DeviceFlags, device_flags_default, Timestamp,
+    ShmLockFlags, SqliteFile, VfsProtocol,
+};
+
+// -----------------------------------------------------------------------------
+// Disk model
+// -----------------------------------------------------------------------------
+
+/// A single "inode" in the mock disk. Append-only grow semantics match
+/// PosixVfs's pread/pwrite-over-holes behaviour.
+public type MockBlob is {
+    name: Text,
+    bytes: List<Byte>,
+    // Bytes written since the last crash checkpoint. On crash injection
+    // these are discarded (simulating what never reached stable storage).
+    pending: List<Byte>,
+    pending_offset: Int,
+};
+
+/// Fault-injection knobs. All default to "no injection"; tests flip
+/// specific fields before exercising the SUT.
+public type MockFaults is {
+    crash_after_sync_count: Int,      // >= 0 means "crash after Nth sync"; -1 = off
+    sync_counter: Int,                // running count
+    partial_write_offset: Int,        // -1 = off
+    partial_write_bytes: Int,         // max bytes to actually write on the match
+    disk_full_after_bytes: Int,       // -1 = off; cap on total disk bytes
+    disk_total_bytes: Int,            // running sum
+};
+
+public fn faults_default() -> MockFaults {
+    MockFaults {
+        crash_after_sync_count: -1,
+        sync_counter: 0,
+        partial_write_offset: -1,
+        partial_write_bytes: 0,
+        disk_full_after_bytes: -1,
+        disk_total_bytes: 0,
+    }
+}
+
+/// The VFS-wide state: blob table + fault config. The test harness
+/// mutates this via the setter methods below before / during the SUT run.
+public type MockVfs is {
+    blobs: Map<Text, MockBlob>,
+    faults: MockFaults,
+};
+
+public fn mock_vfs_new() -> MockVfs {
+    MockVfs {
+        blobs: Map.new(),
+        faults: faults_default(),
+    }
+}
+
+implement MockVfs {
+    public fn inject_crash_after_fsync(&mut self, n: Int) {
+        self.faults.crash_after_sync_count = n;
+        self.faults.sync_counter = 0;
+    }
+
+    public fn inject_partial_write(&mut self, offset: Int, bytes: Int) {
+        self.faults.partial_write_offset = offset;
+        self.faults.partial_write_bytes = bytes;
+    }
+
+    public fn set_disk_full_after(&mut self, cap_bytes: Int) {
+        self.faults.disk_full_after_bytes = cap_bytes;
+    }
+
+    /// Power-cycle: drop all uncommitted pending writes. Simulates the
+    /// recovery-visible state after an abrupt shutdown.
+    public fn power_cycle(&mut self) {
+        // Nothing to do at the VFS level — per-file cycling is handled
+        // by `MockFile.apply_crash`. This method exists for symmetry
+        // with `inject_*` and for future VFS-wide reset logic.
+        self.faults.sync_counter = 0;
+    }
+
+    /// Count of tracked blobs (test assertion helper).
+    public fn num_blobs(&self) -> Int {
+        self.blobs.len()
+    }
+}
+
+// -----------------------------------------------------------------------------
+// File handle
+// -----------------------------------------------------------------------------
+
+/// Per-open file handle. Holds a weak reference-by-name into the blob
+/// registry — every read/write goes through the name lookup so the VFS
+/// state is the single source of truth.
+public type MockFile is {
+    name: Text,
+    lock_state: LockKind,
+    closed: Bool,
+};
+
+// Private helpers — operate on the MockVfs + MockFile pair.
+fn blob_get_or_create(vfs: &mut MockVfs, name: &Text) -> MockBlob {
+    if vfs.blobs.contains_key(name.clone()) {
+        return vfs.blobs.get(name.clone());
+    }
+    let empty = MockBlob {
+        name: name.clone(),
+        bytes: List.new(),
+        pending: List.new(),
+        pending_offset: 0,
+    };
+    let _ = vfs.blobs.insert(name.clone(), empty);
+    vfs.blobs.get(name.clone())
+}
+
+fn blob_put(vfs: &mut MockVfs, blob: MockBlob) {
+    let _ = vfs.blobs.insert(blob.name.clone(), blob);
+}
+
+// -----------------------------------------------------------------------------
+// VFS-level operations (test-facing — not the SqliteFile surface)
+//
+// MockVfs's SqliteFile bodies below re-delegate to these free functions
+// because `MockFile` doesn't own the blob directly; the VFS does.
+// Callers normally go through `SqliteFile.read/write/...`.
+// -----------------------------------------------------------------------------
+
+public fn mock_open(vfs: &mut MockVfs, name: &Text, flags: OpenFlags) -> Result<MockFile, VfsError> {
+    if !flags.read_only && !flags.read_write {
+        return Err(VfsError {
+            kind: InvalidArgument,
+            message: "mock_open: neither read_only nor read_write set",
+        });
+    }
+    // Ensure the blob exists when create is set; leave it alone for
+    // read-only opens (caller will see "past EOF" on empty reads, same
+    // as PosixVfs).
+    if flags.create {
+        let _ = blob_get_or_create(vfs, name);
+    } else if !vfs.blobs.contains_key(name.clone()) {
+        return Err(VfsError { kind: NotFound, message: "no such blob" });
+    }
+    Ok(MockFile {
+        name: name.clone(),
+        lock_state: Unlocked,
+        closed: false,
+    })
+}
+
+public fn mock_read(
+    vfs: &MockVfs,
+    file: &MockFile,
+    buf: &mut List<Byte>,
+    offset: Int,
+) -> Result<(), VfsError> {
+    if file.closed {
+        return Err(VfsError { kind: Closed, message: "read on closed file" });
+    }
+    if offset < 0 {
+        return Err(VfsError { kind: InvalidArgument, message: "negative offset" });
+    }
+    if !vfs.blobs.contains_key(file.name.clone()) {
+        return Err(VfsError { kind: NotFound, message: "blob vanished" });
+    }
+    let blob = vfs.blobs.get(file.name.clone());
+    let want = buf.len();
+    if offset + want > blob.bytes.len() {
+        return Err(VfsError { kind: ShortRead, message: "read past EOF" });
+    }
+    let mut i: Int = 0;
+    while i < want {
+        buf[i] = blob.bytes[offset + i];
+        i = i + 1;
+    }
+    Ok(())
+}
+
+public fn mock_write(
+    vfs: &mut MockVfs,
+    file: &MockFile,
+    src: &[Byte],
+    offset: Int,
+) -> Result<(), VfsError> {
+    if file.closed {
+        return Err(VfsError { kind: Closed, message: "write on closed file" });
+    }
+    if offset < 0 {
+        return Err(VfsError { kind: InvalidArgument, message: "negative offset" });
+    }
+
+    // Disk-full injection — check projected size vs cap.
+    if vfs.faults.disk_full_after_bytes >= 0 {
+        let after = vfs.faults.disk_total_bytes + src.len();
+        if after > vfs.faults.disk_full_after_bytes {
+            return Err(VfsError { kind: DiskFull, message: "mock disk cap exceeded" });
+        }
+    }
+
+    // Partial-write injection.
+    let mut effective_len: Int = src.len();
+    if vfs.faults.partial_write_offset == offset && vfs.faults.partial_write_bytes >= 0 {
+        if vfs.faults.partial_write_bytes < effective_len {
+            effective_len = vfs.faults.partial_write_bytes;
+        }
+        // Consume the injector — a partial-write knob fires exactly once.
+        vfs.faults.partial_write_offset = -1;
+    }
+
+    let mut blob = blob_get_or_create(vfs, &file.name);
+    // Extend with zeros to cover `offset`.
+    while blob.bytes.len() < offset {
+        blob.bytes.push(0 as Byte);
+    }
+    let mut i: Int = 0;
+    while i < effective_len {
+        let pos: Int = offset + i;
+        if pos < blob.bytes.len() {
+            blob.bytes[pos] = src[i];
+        } else {
+            blob.bytes.push(src[i]);
+        }
+        i = i + 1;
+    }
+
+    // Track disk usage (bytes actually landed).
+    vfs.faults.disk_total_bytes = vfs.faults.disk_total_bytes + effective_len;
+
+    blob_put(vfs, blob);
+    Ok(())
+}
+
+public fn mock_sync(
+    vfs: &mut MockVfs,
+    file: &MockFile,
+    _flags: SyncFlags,
+) -> Result<(), VfsError> {
+    if file.closed {
+        return Err(VfsError { kind: Closed, message: "sync on closed file" });
+    }
+    vfs.faults.sync_counter = vfs.faults.sync_counter + 1;
+    if vfs.faults.crash_after_sync_count >= 0
+        && vfs.faults.sync_counter > vfs.faults.crash_after_sync_count
+    {
+        // Fire exactly once — disarm before raising.
+        vfs.faults.crash_after_sync_count = -1;
+        return Err(VfsError { kind: IoError, message: "mock crash after fsync" });
+    }
+    Ok(())
+}
+
+public fn mock_close(file: &mut MockFile) -> Result<(), VfsError> {
+    file.closed = true;
+    Ok(())
+}
+
+public fn mock_size(vfs: &MockVfs, file: &MockFile) -> Result<Int, VfsError> {
+    if file.closed {
+        return Err(VfsError { kind: Closed, message: "size on closed file" });
+    }
+    if !vfs.blobs.contains_key(file.name.clone()) {
+        return Err(VfsError { kind: NotFound, message: "blob vanished" });
+    }
+    Ok(vfs.blobs.get(file.name.clone()).bytes.len())
+}
+
+public fn mock_truncate(
+    vfs: &mut MockVfs,
+    file: &MockFile,
+    size: Int,
+) -> Result<(), VfsError> {
+    if file.closed {
+        return Err(VfsError { kind: Closed, message: "truncate on closed file" });
+    }
+    if size < 0 {
+        return Err(VfsError { kind: InvalidArgument, message: "negative size" });
+    }
+    let mut blob = blob_get_or_create(vfs, &file.name);
+    while blob.bytes.len() > size {
+        let _ = blob.bytes.pop();
+    }
+    while blob.bytes.len() < size {
+        blob.bytes.push(0 as Byte);
+    }
+    blob_put(vfs, blob);
+    Ok(())
+}

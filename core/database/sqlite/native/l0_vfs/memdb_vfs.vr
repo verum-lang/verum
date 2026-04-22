@@ -27,9 +27,11 @@ module core.database.sqlite.native.l0_vfs.memdb_vfs;
 
 mount core.*;
 mount collections.List;
-mount base.{Result, Ok, Err, Text};
+mount base.{Result, Ok, Err, Text, Maybe};
 mount core.database.sqlite.native.l0_vfs.vfs_protocol.{
-    OpenFlags, SyncFlags, LockKind, VfsError, VfsErrorKind
+    OpenFlags, SyncFlags, LockKind, VfsError, VfsErrorKind,
+    AccessKind, DeviceFlags, device_flags_default, Timestamp,
+    ShmLockFlags, SqliteFile, VfsProtocol,
 };
 
 // =============================================================================
@@ -197,4 +199,160 @@ public fn memdb_unlock(f: &mut MemDbFile, kind: LockKind) -> Result<(), VfsError
 public fn memdb_close(f: &mut MemDbFile) -> Result<(), VfsError> {
     f.closed = true;
     Ok(())
+}
+
+// =============================================================================
+// Protocol conformance
+// =============================================================================
+//
+// `MemDbFile` implements `SqliteFile`; `MemDbVfs` implements `VfsProtocol`.
+// Bodies delegate to the free-function implementations above — the
+// two surfaces coexist during migration (free-functions for legacy
+// call-sites, methods/protocol-dispatch for new code).
+
+implement SqliteFile for MemDbFile {
+    fn read(&self, buf: &mut List<Byte>, offset: Int) -> Result<(), VfsError> {
+        memdb_read(self, buf, offset)
+    }
+
+    fn write(&mut self, buf: &[Byte], offset: Int) -> Result<(), VfsError> {
+        memdb_write(self, buf, offset)
+    }
+
+    fn truncate(&mut self, size: Int) -> Result<(), VfsError> {
+        memdb_truncate(self, size)
+    }
+
+    fn sync(&self, flags: SyncFlags) -> Result<(), VfsError> {
+        memdb_sync(self, flags)
+    }
+
+    fn file_size(&self) -> Result<Int, VfsError> {
+        memdb_size(self)
+    }
+
+    fn lock(&mut self, kind: LockKind) -> Result<(), VfsError> {
+        memdb_lock(self, kind)
+    }
+
+    fn unlock(&mut self, kind: LockKind) -> Result<(), VfsError> {
+        memdb_unlock(self, kind)
+    }
+
+    fn check_reserved_lock(&self) -> Result<Bool, VfsError> {
+        // In-memory, single-process: RESERVED is held iff we are past
+        // Shared into Reserved/Pending/Exclusive.
+        let held = match self.lock_state {
+            Reserved | Pending | Exclusive => true,
+            Unlocked | Shared => false,
+        };
+        Ok(held)
+    }
+
+    fn sector_size(&self) -> Int {
+        // Arbitrary but matches SQLite's default. In-memory has no
+        // physical sector; 512 is the conservative choice used by the C
+        // implementation for :memory: databases.
+        512
+    }
+
+    fn device_characteristics(&self) -> DeviceFlags {
+        let mut f = device_flags_default();
+        // In-memory writes are trivially atomic and powersafe.
+        f.atomic = true;
+        f.atomic_512 = true;
+        f.safe_append = true;
+        f.powersafe_overwrite = true;
+        f
+    }
+
+    // Optional capabilities — unsupported on :memory:.
+
+    fn fetch(&self, _offset: Int, _len: Int) -> Result<Maybe<List<Byte>>, VfsError> {
+        Ok(None)
+    }
+
+    fn unfetch(&self, _offset: Int, _buf: &[Byte]) -> Result<(), VfsError> {
+        Ok(())
+    }
+
+    fn shm_map(&mut self, _region: Int, _size: Int, _extend: Bool)
+        -> Result<List<Byte>, VfsError>
+    {
+        Err(VfsError {
+            kind: Unsupported,
+            message: "shm_map not supported on :memory:",
+        })
+    }
+
+    fn shm_lock(&mut self, _start: Int, _count: Int, _flags: ShmLockFlags)
+        -> Result<(), VfsError>
+    {
+        Err(VfsError {
+            kind: Unsupported,
+            message: "shm_lock not supported on :memory:",
+        })
+    }
+
+    fn shm_barrier(&self) {
+        // No-op — single-process memory visibility is total.
+    }
+
+    fn shm_unmap(&mut self, _delete_flag: Bool) {
+        // No-op.
+    }
+
+    fn close(&mut self) -> Result<(), VfsError> {
+        memdb_close(self)
+    }
+}
+
+implement VfsProtocol for MemDbVfs {
+    type File = MemDbFile;
+
+    fn open(&self, path: &Text, flags: OpenFlags) -> Result<MemDbFile, VfsError> {
+        open_memory(path, flags)
+    }
+
+    fn delete(&self, _path: &Text, _sync_dir: Bool) -> Result<(), VfsError> {
+        // :memory: files vanish with their handle. Deleting a name is
+        // a no-op — there is no namespace to remove.
+        Ok(())
+    }
+
+    fn access(&self, _path: &Text, _kind: AccessKind) -> Result<Bool, VfsError> {
+        // No persistent namespace to probe.
+        Ok(false)
+    }
+
+    fn full_pathname(&self, path: &Text) -> Result<Text, VfsError> {
+        // Identity — no resolution required for :memory: URIs.
+        Ok(path.clone())
+    }
+
+    fn random_bytes(&self, len: Int) -> List<Byte> {
+        // Deterministic placeholder — DST tests should inject a
+        // MockVfs. Production randomness will plumb through
+        // `core/sys/linux/syscall.getrandom` once PosixVfs lands.
+        let mut out: List<Byte> = List.new();
+        let mut i: Int = 0;
+        while i < len {
+            out.push((i & 0xFF) as Byte);
+            i = i + 1;
+        }
+        out
+    }
+
+    fn current_time(&self) -> Timestamp {
+        Timestamp { nanos: 0 as Int64, is_monotonic: true }
+    }
+
+    fn get_last_error(&self) -> Maybe<VfsError> {
+        None
+    }
+
+    fn sleep_us(&self, _micros: Int) {
+        // No-op under :memory: — the pager's DST harness drives time
+        // explicitly via `MockClock`.
+    }
 }

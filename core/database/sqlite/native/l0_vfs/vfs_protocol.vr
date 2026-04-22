@@ -31,7 +31,7 @@ module core.database.sqlite.native.l0_vfs.vfs_protocol;
 
 mount core.*;
 mount collections.List;
-mount base.{Result, Ok, Err, Text};
+mount base.{Result, Ok, Err, Text, Maybe};
 
 // =============================================================================
 // Shared flag / enum types
@@ -133,3 +133,136 @@ public type VfsErrorKind is
     | DiskFull
     | Corrupt
     | Closed;
+
+// =============================================================================
+// Access / device flags / timestamps (auxiliary types for the protocol surface)
+// =============================================================================
+
+/// `access(path, kind)` probe — matches SQLite's three-valued API.
+public type AccessKind is
+      Exists         // path is present in the filesystem
+    | CanRead        // path is present and readable by the caller
+    | CanReadWrite;  // path is present and read-writable by the caller
+
+/// Device capability hints. Returned from `File.device_characteristics()`
+/// to let the pager skip redundant fsyncs / exploit atomic page writes.
+/// Flags track SQLite's `SQLITE_IOCAP_*` constants.
+public type DeviceFlags is {
+    atomic: Bool,                // any write ≤ sector_size is atomic
+    atomic_512: Bool,
+    atomic_1k:  Bool,
+    atomic_2k:  Bool,
+    atomic_4k:  Bool,
+    atomic_8k:  Bool,
+    atomic_16k: Bool,
+    atomic_32k: Bool,
+    atomic_64k: Bool,
+    safe_append: Bool,           // appending beyond EOF never shrinks
+    sequential:  Bool,           // kernel reads ahead in order
+    undeletable_when_open: Bool, // Windows semantic
+    powersafe_overwrite: Bool,
+    immutable:   Bool,
+    batch_atomic: Bool,
+};
+
+public fn device_flags_default() -> DeviceFlags {
+    DeviceFlags {
+        atomic: false,
+        atomic_512: false, atomic_1k: false, atomic_2k: false,
+        atomic_4k: false, atomic_8k: false, atomic_16k: false,
+        atomic_32k: false, atomic_64k: false,
+        safe_append: false, sequential: false,
+        undeletable_when_open: false,
+        powersafe_overwrite: false,
+        immutable: false, batch_atomic: false,
+    }
+}
+
+/// Nanoseconds-since-epoch timestamp returned from `VfsProtocol.current_time`.
+/// The VFS selects between monotonic and wall-clock; WAL metadata uses wall,
+/// rate-limit / backoff uses monotonic.
+public type Timestamp is {
+    nanos: Int64,
+    is_monotonic: Bool,
+};
+
+/// Flags for `File.shm_lock`. SHARED/EXCLUSIVE for the kind of lock;
+/// LOCK/UNLOCK for the direction. Matches SQLite's `SQLITE_SHM_*` bits.
+public type ShmLockFlags is {
+    lock: Bool,          // true = acquire, false = release
+    exclusive: Bool,     // true = exclusive, false = shared
+};
+
+// =============================================================================
+// File protocol — per-handle operations
+// =============================================================================
+
+/// Protocol every VFS-owned file handle implements. All methods are
+/// blocking / synchronous; async wrappers live in `posix_vfs` once
+/// io_uring / IOCP backends land.
+///
+/// `read` / `write` take absolute byte offsets (never disturb any implicit
+/// cursor; there is no cursor). `sync(flags.full)` maps to F_FULLFSYNC on
+/// Darwin, fsync on Linux, FlushFileBuffers on Windows.
+///
+/// Optional capabilities (`fetch` / `shm_*`) may return
+/// `VfsError { kind: Unsupported }`; callers must handle gracefully.
+public type SqliteFile is protocol {
+    // -- Core I/O ------------------------------------------------------------
+
+    fn read(&self, buf: &mut List<Byte>, offset: Int) -> Result<(), VfsError>;
+    fn write(&mut self, buf: &[Byte], offset: Int) -> Result<(), VfsError>;
+    fn truncate(&mut self, size: Int) -> Result<(), VfsError>;
+    fn sync(&self, flags: SyncFlags) -> Result<(), VfsError>;
+    fn file_size(&self) -> Result<Int, VfsError>;
+
+    // -- Locking (5-state SQLite protocol) -----------------------------------
+
+    fn lock(&mut self, kind: LockKind) -> Result<(), VfsError>;
+    fn unlock(&mut self, kind: LockKind) -> Result<(), VfsError>;
+    fn check_reserved_lock(&self) -> Result<Bool, VfsError>;
+
+    // -- Device info ---------------------------------------------------------
+
+    fn sector_size(&self) -> Int;
+    fn device_characteristics(&self) -> DeviceFlags;
+
+    // -- Optional: memory-mapped I/O -----------------------------------------
+
+    fn fetch(&self, offset: Int, len: Int) -> Result<Maybe<List<Byte>>, VfsError>;
+    fn unfetch(&self, offset: Int, buf: &[Byte]) -> Result<(), VfsError>;
+
+    // -- Optional: WAL-index shared memory -----------------------------------
+
+    fn shm_map(&mut self, region: Int, size: Int, extend: Bool)
+        -> Result<List<Byte>, VfsError>;
+    fn shm_lock(&mut self, start: Int, count: Int, flags: ShmLockFlags)
+        -> Result<(), VfsError>;
+    fn shm_barrier(&self);
+    fn shm_unmap(&mut self, delete_flag: Bool);
+
+    fn close(&mut self) -> Result<(), VfsError>;
+};
+
+// =============================================================================
+// VfsProtocol — filesystem-level operations
+// =============================================================================
+
+/// Top-level VFS protocol. Concrete implementations: `MemDbVfs`,
+/// `PosixVfs`, `Win32Vfs`, `MockVfs` (for DST). Each binds its own
+/// associated `File` type (`Self.File` must implement `SqliteFile`).
+public type VfsProtocol is protocol {
+    type File;
+
+    fn open(&self, path: &Text, flags: OpenFlags) -> Result<Self.File, VfsError>;
+    fn delete(&self, path: &Text, sync_dir: Bool) -> Result<(), VfsError>;
+    fn access(&self, path: &Text, kind: AccessKind) -> Result<Bool, VfsError>;
+    fn full_pathname(&self, path: &Text) -> Result<Text, VfsError>;
+    fn random_bytes(&self, len: Int) -> List<Byte>;
+    fn current_time(&self) -> Timestamp;
+    fn get_last_error(&self) -> Maybe<VfsError>;
+
+    /// Minimum sleep granularity in microseconds. SQLite's `xSleep` hook.
+    /// Backends should round the requested sleep up to this multiple.
+    fn sleep_us(&self, micros: Int);
+};

@@ -56,3 +56,9 @@ public module l1_pager;
 
 // Layer 2: record / type affinity / collation
 public module l2_record;
+
+// Layer 3: B-tree (page layout, cursor, balance)
+public module l3_btree;
+
+// Layer 4: VDBE (opcodes, register file, interpreter)
+public module l4_vdbe;

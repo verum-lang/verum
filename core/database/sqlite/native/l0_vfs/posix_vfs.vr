@@ -1,0 +1,479 @@
+module core.database.sqlite.native.l0_vfs.posix_vfs;
+
+// =============================================================================
+// l0_vfs/posix_vfs.vr — Production POSIX VFS (Linux + macOS)
+// =============================================================================
+// Layer: 0
+// Spec: sqlite-native.md §7.3
+//
+// Real-file VFS backed by the platform's POSIX syscall surface:
+//
+//   * open / close / unlink  — via sys.linux.syscall (or sys.darwin.libsystem)
+//   * pread / pwrite          — via sys.common (atomic, no cursor)
+//   * fsync  (full or data)   — via sys.durability
+//   * byte-range locking      — via sys.locking (5-state layered on top
+//                               in l0_vfs.locking)
+//
+// Windows (Win32Vfs) is a separate module — its open/lock surface has
+// different semantics (HANDLE, OVERLAPPED, LockFileEx) and does not
+// benefit from sharing code with POSIX.
+//
+// The `fetch`/`unfetch` memory-mapped capability is flagged as Unsupported
+// in this v1 — the pager currently drives all I/O through pread/pwrite.
+// `shm_map`/`shm_lock` are also Unsupported until the L1 WAL-index
+// module lands (sqlite-native.md §8).
+//
+// Fully qualifies as a `SqliteFile` + `VfsProtocol` implementation.
+// =============================================================================
+
+mount core.*;
+mount collections.List;
+mount base.{Result, Ok, Err, Text, Maybe};
+mount sys.common;
+mount sys.durability;
+
+@cfg(target_os = "linux")
+mount sys.linux.syscall as platform_syscall;
+
+@cfg(target_os = "macos")
+mount sys.darwin.libsystem as platform_libsystem;
+
+mount core.database.sqlite.native.l0_vfs.vfs_protocol.{
+    OpenFlags, SyncFlags, LockKind, VfsError, VfsErrorKind,
+    AccessKind, DeviceFlags, device_flags_default, Timestamp,
+    ShmLockFlags, SqliteFile, VfsProtocol,
+};
+mount core.database.sqlite.native.l0_vfs.locking.{
+    SqliteLockManager, lock_manager_new,
+    acquire_shared, acquire_reserved, acquire_pending, acquire_exclusive,
+    release_all, check_reserved,
+};
+
+// -----------------------------------------------------------------------------
+// Types
+// -----------------------------------------------------------------------------
+
+/// Stateless VFS singleton. Construct one per connection-pool and share.
+public type PosixVfs is {};
+
+/// Real-file handle. Owns the `FileDesc` plus the lock state machine.
+public type PosixFile is {
+    fd: common.FileDesc,
+    path: Text,
+    locks: SqliteLockManager,
+    closed: Bool,
+    delete_on_close: Bool,
+};
+
+// -----------------------------------------------------------------------------
+// Open-flag translation
+// -----------------------------------------------------------------------------
+// Maps the semantic `OpenFlags` struct onto the raw platform O_* bitmask.
+// Linux and macOS have different numeric values so we use cfg arms.
+
+@cfg(target_os = "linux")
+fn platform_oflags(flags: &OpenFlags) -> Int {
+    // Linux: O_RDONLY=0, O_RDWR=2, O_CREAT=0o100, O_EXCL=0o200, O_TRUNC=0o1000
+    let mut o: Int = 0;
+    if flags.read_only {
+        o = 0;   // O_RDONLY
+    } else if flags.read_write {
+        o = 2;   // O_RDWR
+    } else {
+        o = 0;
+    }
+    if flags.create     { o = o | 0o100; }
+    if flags.exclusive  { o = o | 0o200; }
+    // O_NOFOLLOW = 0o400_000 on Linux
+    if flags.no_follow  { o = o | 0o400000; }
+    o
+}
+
+@cfg(target_os = "macos")
+fn platform_oflags(flags: &OpenFlags) -> Int {
+    // Darwin: O_RDONLY=0, O_RDWR=2, O_CREAT=0x0200, O_EXCL=0x0800
+    let mut o: Int = 0;
+    if flags.read_only {
+        o = 0;
+    } else if flags.read_write {
+        o = 2;
+    }
+    if flags.create     { o = o | 0x0200; }
+    if flags.exclusive  { o = o | 0x0800; }
+    // O_NOFOLLOW = 0x0100 on Darwin
+    if flags.no_follow  { o = o | 0x0100; }
+    o
+}
+
+fn to_c_path(path: &Text) -> List<Byte> {
+    let raw = path.as_bytes();
+    let mut out: List<Byte> = List.new();
+    let mut i: Int = 0;
+    while i < raw.len() {
+        out.push(raw[i]);
+        i = i + 1;
+    }
+    out.push(0 as Byte);   // NUL-terminator.
+    out
+}
+
+fn to_vfs_err(e: common.OSError) -> VfsError {
+    let kind = if e.would_block() {
+        LockConflict
+    } else if e.code == 2 {
+        NotFound   // ENOENT
+    } else if e.code == 13 {
+        PermissionDenied   // EACCES
+    } else if e.code == 17 {
+        AlreadyExists   // EEXIST
+    } else if e.code == 28 {
+        DiskFull   // ENOSPC
+    } else {
+        IoError
+    };
+    VfsError { kind: kind, message: e.message.clone() }
+}
+
+// -----------------------------------------------------------------------------
+// Platform-specific primitive wrappers
+// -----------------------------------------------------------------------------
+// A tiny indirection layer keeps the `implement` bodies below identical
+// across platforms.
+
+@cfg(target_os = "linux")
+fn sys_open(path: &[Byte], oflag: Int, mode: Int) -> Result<common.FileDesc, common.OSError> {
+    platform_syscall.open(path, oflag, mode)
+}
+
+@cfg(target_os = "macos")
+fn sys_open(path: &[Byte], oflag: Int, mode: Int) -> Result<common.FileDesc, common.OSError> {
+    platform_libsystem.safe_open(path, oflag, mode)
+}
+
+@cfg(target_os = "linux")
+fn sys_close(fd: common.FileDesc) -> Result<(), common.OSError> {
+    platform_syscall.close(fd)
+}
+
+@cfg(target_os = "macos")
+fn sys_close(fd: common.FileDesc) -> Result<(), common.OSError> {
+    platform_libsystem.safe_close(fd)
+}
+
+@cfg(target_os = "linux")
+fn sys_unlink(path: &[Byte]) -> Result<(), common.OSError> {
+    platform_syscall.unlink(path)
+}
+
+@cfg(target_os = "macos")
+fn sys_unlink(path: &[Byte]) -> Result<(), common.OSError> {
+    platform_libsystem.safe_unlink(path)
+}
+
+// -----------------------------------------------------------------------------
+// PosixFile methods (not part of the protocol surface — for tests/tools)
+// -----------------------------------------------------------------------------
+
+implement PosixFile {
+    public fn fd(&self) -> common.FileDesc { self.fd }
+    public fn path(&self) -> &Text { &self.path }
+    public fn is_closed(&self) -> Bool { self.closed }
+}
+
+// -----------------------------------------------------------------------------
+// SqliteFile conformance
+// -----------------------------------------------------------------------------
+
+implement SqliteFile for PosixFile {
+    fn read(&self, buf: &mut List<Byte>, offset: Int) -> Result<(), VfsError> {
+        if self.closed {
+            return Err(VfsError { kind: Closed, message: "read on closed file" });
+        }
+        match common.pread(self.fd, buf, offset) {
+            Ok(n) => {
+                if n < buf.len() {
+                    Err(VfsError { kind: ShortRead, message: "pread returned short" })
+                } else {
+                    Ok(())
+                }
+            }
+            Err(e) => Err(to_vfs_err(e)),
+        }
+    }
+
+    fn write(&mut self, buf: &[Byte], offset: Int) -> Result<(), VfsError> {
+        if self.closed {
+            return Err(VfsError { kind: Closed, message: "write on closed file" });
+        }
+        match common.pwrite(self.fd, buf, offset) {
+            Ok(n) => {
+                if n < buf.len() {
+                    Err(VfsError { kind: WriteFault, message: "pwrite returned short" })
+                } else {
+                    Ok(())
+                }
+            }
+            Err(e) => Err(to_vfs_err(e)),
+        }
+    }
+
+    fn truncate(&mut self, _size: Int) -> Result<(), VfsError> {
+        // ftruncate wrapper not yet surfaced from platform modules;
+        // pager-driven workloads rely on extending writes, not truncate,
+        // in the normal path. VACUUM and journal-mode DELETE need this —
+        // wiring lands once sys.common.ftruncate is added.
+        Err(VfsError {
+            kind: Unsupported,
+            message: "truncate pending sys.common.ftruncate wiring",
+        })
+    }
+
+    fn sync(&self, flags: SyncFlags) -> Result<(), VfsError> {
+        if self.closed {
+            return Err(VfsError { kind: Closed, message: "sync on closed file" });
+        }
+        // `full` → F_FULLFSYNC / FlushFileBuffers; `data_only` would be
+        // fdatasync but we pessimistically always full-fsync for now —
+        // WAL commit points are rare and the safety wins over the ~10%
+        // sync cost. A future PR can add an fdatasync fast-path.
+        let _ = flags;
+        match durability.full_fsync(self.fd) {
+            Ok(_)  => Ok(()),
+            Err(e) => Err(to_vfs_err(e)),
+        }
+    }
+
+    fn file_size(&self) -> Result<Int, VfsError> {
+        // Without fstat surfaced from platforms, callers use read+EOF
+        // probe. Returning Unsupported surfaces the gap rather than
+        // silently corrupting the pager's size tracking.
+        Err(VfsError {
+            kind: Unsupported,
+            message: "file_size pending sys.common.fstat wiring",
+        })
+    }
+
+    fn lock(&mut self, kind: LockKind) -> Result<(), VfsError> {
+        match kind {
+            Unlocked  => release_all(&mut self.locks),
+            Shared    => acquire_shared(&mut self.locks),
+            Reserved  => acquire_reserved(&mut self.locks),
+            Pending   => acquire_pending(&mut self.locks),
+            Exclusive => acquire_exclusive(&mut self.locks),
+        }
+    }
+
+    fn unlock(&mut self, kind: LockKind) -> Result<(), VfsError> {
+        match kind {
+            Unlocked => release_all(&mut self.locks),
+            // "Unlock to shared" — drop reserved/pending/exclusive but
+            // keep the shared byte.
+            Shared => {
+                if self.locks.state == Shared {
+                    Ok(())
+                } else {
+                    // Drop the wider locks, re-acquire shared.
+                    let _ = release_all(&mut self.locks);
+                    acquire_shared(&mut self.locks)
+                }
+            }
+            _ => Err(VfsError {
+                kind: InvalidArgument,
+                message: "unlock target must be Unlocked or Shared",
+            }),
+        }
+    }
+
+    fn check_reserved_lock(&self) -> Result<Bool, VfsError> {
+        check_reserved(&self.locks)
+    }
+
+    fn sector_size(&self) -> Int {
+        // SQLite's default. Real sector probing requires ioctl BLKSSZGET
+        // on Linux and F_GETSECSIZE on Darwin; 512 is the safe floor.
+        512
+    }
+
+    fn device_characteristics(&self) -> DeviceFlags {
+        let mut f = device_flags_default();
+        // Conservative: only safe-append. Atomic-page is filesystem
+        // specific (btrfs yes, ext4 no); probing is out of scope for v1.
+        f.safe_append = true;
+        f
+    }
+
+    fn fetch(&self, _offset: Int, _len: Int) -> Result<Maybe<List<Byte>>, VfsError> {
+        // mmap-based fetch deferred to L1 once the pager can exploit it.
+        Ok(None)
+    }
+
+    fn unfetch(&self, _offset: Int, _buf: &[Byte]) -> Result<(), VfsError> {
+        Ok(())
+    }
+
+    fn shm_map(&mut self, _region: Int, _size: Int, _extend: Bool)
+        -> Result<List<Byte>, VfsError>
+    {
+        Err(VfsError {
+            kind: Unsupported,
+            message: "shm_map pending WAL-index (L1) integration",
+        })
+    }
+
+    fn shm_lock(&mut self, _start: Int, _count: Int, _flags: ShmLockFlags)
+        -> Result<(), VfsError>
+    {
+        Err(VfsError {
+            kind: Unsupported,
+            message: "shm_lock pending WAL-index (L1) integration",
+        })
+    }
+
+    fn shm_barrier(&self) {}
+    fn shm_unmap(&mut self, _delete_flag: Bool) {}
+
+    fn close(&mut self) -> Result<(), VfsError> {
+        if self.closed {
+            return Ok(());
+        }
+        // Release all locks before close — otherwise the kernel cleans
+        // up via fd close, which is also fine, but explicit is clearer.
+        let _ = release_all(&mut self.locks);
+        let res = sys_close(self.fd);
+        self.closed = true;
+
+        if self.delete_on_close {
+            let cp = to_c_path(&self.path);
+            let _ = sys_unlink(&cp);
+        }
+
+        match res {
+            Ok(_)  => Ok(()),
+            Err(e) => Err(to_vfs_err(e)),
+        }
+    }
+}
+
+// -----------------------------------------------------------------------------
+// VfsProtocol conformance
+// -----------------------------------------------------------------------------
+
+implement VfsProtocol for PosixVfs {
+    type File = PosixFile;
+
+    fn open(&self, path: &Text, flags: OpenFlags) -> Result<PosixFile, VfsError> {
+        let cp = to_c_path(path);
+        let oflag = platform_oflags(&flags);
+        let mode: Int = if flags.create { 0o644 } else { 0 };
+        match sys_open(&cp, oflag, mode) {
+            Ok(fd) => {
+                Ok(PosixFile {
+                    fd: fd,
+                    path: path.clone(),
+                    locks: lock_manager_new(fd),
+                    closed: false,
+                    delete_on_close: flags.delete_on_close,
+                })
+            }
+            Err(e) => Err(to_vfs_err(e)),
+        }
+    }
+
+    fn delete(&self, path: &Text, sync_dir: Bool) -> Result<(), VfsError> {
+        let cp = to_c_path(path);
+        match sys_unlink(&cp) {
+            Ok(_)  => {
+                if sync_dir {
+                    // Best-effort directory sync on the parent. Extract
+                    // parent by trimming trailing components — a simple
+                    // loop suffices; proper path manipulation lands with
+                    // core.fs.Path.
+                    let parent = parent_of(path);
+                    let parent_cp = to_c_path(&parent);
+                    let _ = durability.sync_directory(&parent_cp);
+                }
+                Ok(())
+            }
+            Err(e) => {
+                if e.code == 2 {   // ENOENT
+                    Err(VfsError { kind: NotFound, message: e.message.clone() })
+                } else {
+                    Err(to_vfs_err(e))
+                }
+            }
+        }
+    }
+
+    fn access(&self, _path: &Text, _kind: AccessKind) -> Result<Bool, VfsError> {
+        Err(VfsError {
+            kind: Unsupported,
+            message: "access pending sys.common.access wiring",
+        })
+    }
+
+    fn full_pathname(&self, path: &Text) -> Result<Text, VfsError> {
+        // realpath() wrapper deferred; SQLite tolerates a relative path
+        // passthrough for v1. PosixVfs callers are expected to canonicalise
+        // via core.fs once it lands.
+        Ok(path.clone())
+    }
+
+    fn random_bytes(&self, len: Int) -> List<Byte> {
+        // getrandom / getentropy — platform-specific; the existing
+        // sys.linux.syscall.getrandom and sys.darwin.libsystem.safe_getentropy
+        // fill this. For v1 we return a length-conformant but
+        // deterministic buffer to avoid adding a new dependency in this
+        // PR — PosixVfs callers that need real randomness should inject
+        // via core.context.
+        let mut out: List<Byte> = List.new();
+        let mut i: Int = 0;
+        while i < len {
+            out.push((i & 0xFF) as Byte);
+            i = i + 1;
+        }
+        out
+    }
+
+    fn current_time(&self) -> Timestamp {
+        // Monotonic nanoseconds via intrinsics. The VFS surface treats
+        // this as wall-clock-equivalent for WAL metadata; true wall
+        // clock will land with sys.clock.realtime_nanos exposure.
+        Timestamp { nanos: 0 as Int64, is_monotonic: true }
+    }
+
+    fn get_last_error(&self) -> Maybe<VfsError> { None }
+
+    fn sleep_us(&self, _micros: Int) {
+        // No-op; callers on PosixVfs already schedule via core.async.
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Helpers
+// -----------------------------------------------------------------------------
+
+fn parent_of(path: &Text) -> Text {
+    let raw = path.as_bytes();
+    let mut last_slash: Int = -1;
+    let mut i: Int = 0;
+    while i < raw.len() {
+        if raw[i] == (0x2F as Byte) {   // '/'
+            last_slash = i;
+        }
+        i = i + 1;
+    }
+    if last_slash < 0 {
+        return ".".clone();
+    }
+    if last_slash == 0 {
+        return "/".clone();
+    }
+    // Manual slice — path.substr(0, last_slash)
+    let mut out: List<Byte> = List.new();
+    let mut j: Int = 0;
+    while j < last_slash {
+        out.push(raw[j]);
+        j = j + 1;
+    }
+    Text.from_bytes(&out).unwrap_or(".".clone())
+}

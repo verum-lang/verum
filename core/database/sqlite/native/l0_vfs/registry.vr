@@ -1,0 +1,306 @@
+module core.database.sqlite.native.l0_vfs.registry;
+
+// =============================================================================
+// l0_vfs/registry.vr — VFS registry + URI path parser
+// =============================================================================
+// Layer: 0
+// Spec: sqlite-native.md §7.7
+//
+// SQLite lets callers pick between multiple VFS backends by name (the
+// `vfs=` query parameter on a `file:` URI). The registry keeps a list
+// of known backends, remembers a default (per platform), and resolves
+// a URI into `(kind, path, flags)` for `Database.open` to consume.
+//
+// Design note — associated-type protocols and dyn dispatch in Verum do
+// not currently combine well (VfsProtocol's `type File` prevents a
+// single `&dyn VfsProtocol` from being held). The registry therefore
+// uses a closed sum type `VfsBackend` over the in-tree implementations
+// (MemDbVfs, PosixVfs). Extending this requires recompiling the
+// registry, which matches SQLite's C practice anyway — VFS
+// registration at runtime is opened up via `Connection.register_vfs`
+// at the API layer, not through a first-class dyn protocol here.
+// =============================================================================
+
+mount core.*;
+mount collections.{List, Map};
+mount base.{Result, Ok, Err, Text, Maybe};
+mount core.database.sqlite.native.l0_vfs.vfs_protocol.{
+    OpenFlags, VfsError, VfsErrorKind, flags_default, flags_rwc, flags_ro,
+};
+mount core.database.sqlite.native.l0_vfs.memdb_vfs.MemDbVfs;
+mount core.database.sqlite.native.l0_vfs.posix_vfs.PosixVfs;
+
+// -----------------------------------------------------------------------------
+// Backend identity
+// -----------------------------------------------------------------------------
+
+/// Which in-tree VFS implementation to use. Matches SQLite's
+/// `sqlite3_vfs_find` convention of naming backends by string.
+public type VfsKind is
+      Memory      // ":memory:" / `memdb_vfs`
+    | Posix       // "unix" / `posix_vfs` — default on Linux/BSD/macOS
+    | Win32;      // "win32" / `win32_vfs` — default on Windows (pending L0.7)
+
+/// String name used by `PRAGMA vfs_list` and `file:...?vfs=<name>`.
+public fn vfs_kind_name(kind: VfsKind) -> Text {
+    match kind {
+        Memory => "memdb".clone(),
+        Posix  => "unix".clone(),
+        Win32  => "win32".clone(),
+    }
+}
+
+/// Parse a VFS name back to a kind. Returns None for unknown names.
+public fn vfs_kind_from_name(name: &Text) -> Maybe<VfsKind> {
+    if name == &"memdb".clone() || name == &":memory:".clone() {
+        Some(Memory)
+    } else if name == &"unix".clone() || name == &"posix".clone() {
+        Some(Posix)
+    } else if name == &"win32".clone() {
+        Some(Win32)
+    } else {
+        None
+    }
+}
+
+// -----------------------------------------------------------------------------
+// URI parsing
+// -----------------------------------------------------------------------------
+
+/// Result of parsing a `file:` URI / raw path.
+///
+/// * `kind`   — which backend to use
+/// * `path`   — filesystem path (empty for `:memory:`)
+/// * `flags`  — open-flag overrides extracted from the URI
+public type ParsedUri is {
+    kind: VfsKind,
+    path: Text,
+    flags: OpenFlags,
+};
+
+/// Parse a path (or `file:` URI) into a `ParsedUri`. Supported forms:
+///
+///   `"/abs/path"`                  → Posix default, no flag override
+///   `":memory:"`                    → Memory, path "", rwc flags
+///   `"file:/abs/path"`              → Posix, rwc default
+///   `"file:/abs/path?mode=ro"`      → Posix, ro flags
+///   `"file::memory:"`               → Memory
+///   `"file::memory:?cache=shared"`  → Memory with cache=shared (ignored for v1)
+///   `"file:/p?vfs=unix"`            → explicit backend selection
+///
+/// Matches SQLite's URI rules (sqlite.org/uri.html) up to query-string
+/// options; anything unrecognised is preserved but ignored. Returns a
+/// `VfsError { kind: InvalidArgument }` on empty / malformed input.
+public fn parse_uri(uri: &Text) -> Result<ParsedUri, VfsError> {
+    if uri.len() == 0 {
+        return Err(VfsError {
+            kind: InvalidArgument,
+            message: "parse_uri: empty URI",
+        });
+    }
+
+    // Fast path — ":memory:" bare literal.
+    if uri == &":memory:".clone() {
+        return Ok(ParsedUri {
+            kind: Memory,
+            path: "".clone(),
+            flags: flags_rwc(),
+        });
+    }
+
+    // No "file:" prefix → raw path, platform default, rwc.
+    if !starts_with_bytes(uri, "file:") {
+        return Ok(ParsedUri {
+            kind: platform_default(),
+            path: uri.clone(),
+            flags: flags_rwc(),
+        });
+    }
+
+    // Strip "file:" prefix.
+    let rest = drop_prefix(uri, 5);
+
+    // Split on '?' into (path, query).
+    let qpos = find_byte(&rest, 0x3F as Byte);   // '?'
+    let (path_part, query_part) = match qpos {
+        Some(p) => (slice_text(&rest, 0, p), slice_text(&rest, p + 1, rest.len())),
+        None    => (rest.clone(), "".clone()),
+    };
+
+    // Figure out the backend.
+    let mut kind = platform_default();
+    if path_part == ":memory:".clone() || starts_with_bytes(&path_part, ":memory:") {
+        kind = Memory;
+    }
+
+    // Parse the query for `vfs=<name>` and `mode=<ro|rw|rwc>`.
+    let mut flags = flags_rwc();
+    let pairs = split_ampersand(&query_part);
+    let mut i: Int = 0;
+    while i < pairs.len() {
+        let p = &pairs[i];
+        if starts_with_bytes(p, "vfs=") {
+            let name = drop_prefix(p, 4);
+            match vfs_kind_from_name(&name) {
+                Some(k) => { kind = k; },
+                None => {
+                    return Err(VfsError {
+                        kind: InvalidArgument,
+                        message: "parse_uri: unknown vfs name",
+                    });
+                }
+            }
+        } else if starts_with_bytes(p, "mode=") {
+            let m = drop_prefix(p, 5);
+            if m == "ro".clone() {
+                flags = flags_ro();
+            } else if m == "rw".clone() {
+                flags = flags_default();
+                flags.read_write = true;
+                flags.main_db = true;
+            } else if m == "rwc".clone() {
+                flags = flags_rwc();
+            }
+            // unknown modes are ignored — SQLite treats as rwc fallback.
+        }
+        // `cache=shared` / other options are accepted-but-ignored in v1;
+        // they land once the connection pool + shared-cache path is up.
+        i = i + 1;
+    }
+
+    Ok(ParsedUri {
+        kind: kind,
+        path: path_part,
+        flags: flags,
+    })
+}
+
+// -----------------------------------------------------------------------------
+// Platform default
+// -----------------------------------------------------------------------------
+
+@cfg(target_os = "linux")
+public fn platform_default() -> VfsKind { Posix }
+
+@cfg(target_os = "macos")
+public fn platform_default() -> VfsKind { Posix }
+
+@cfg(target_os = "windows")
+public fn platform_default() -> VfsKind { Win32 }
+
+// -----------------------------------------------------------------------------
+// Registry
+// -----------------------------------------------------------------------------
+
+/// Lookup table: `vfs_name` → `VfsKind`. Seeded at construct-time with
+/// the built-in backends; `Connection.register_vfs` extends it at run-time.
+public type VfsRegistry is {
+    entries: Map<Text, VfsKind>,
+    default_kind: VfsKind,
+};
+
+/// Build the default registry. Registers `memdb`, platform-default
+/// (`unix` / `win32`), and the aliases `:memory:` / `posix`.
+public fn default_registry() -> VfsRegistry {
+    let mut entries: Map<Text, VfsKind> = Map.new();
+    let _ = entries.insert("memdb".clone(), Memory);
+    let _ = entries.insert(":memory:".clone(), Memory);
+    let _ = entries.insert("unix".clone(), Posix);
+    let _ = entries.insert("posix".clone(), Posix);
+    let _ = entries.insert("win32".clone(), Win32);
+    VfsRegistry {
+        entries: entries,
+        default_kind: platform_default(),
+    }
+}
+
+implement VfsRegistry {
+    /// Register a name → kind mapping. `is_default` makes this the new
+    /// registry-default returned by `find_default`.
+    public fn register(&mut self, name: Text, kind: VfsKind, is_default: Bool) {
+        let _ = self.entries.insert(name, kind);
+        if is_default {
+            self.default_kind = kind;
+        }
+    }
+
+    /// Look up a VFS by name. Returns None on unknown.
+    public fn find(&self, name: &Text) -> Maybe<VfsKind> {
+        if !self.entries.contains_key(name.clone()) {
+            return None;
+        }
+        Some(self.entries.get(name.clone()))
+    }
+
+    /// Current default.
+    public fn find_default(&self) -> VfsKind {
+        self.default_kind
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Small text helpers (local — avoids introducing new core/text APIs)
+// -----------------------------------------------------------------------------
+
+fn starts_with_bytes(text: &Text, prefix: &str) -> Bool {
+    let raw = text.as_bytes();
+    let p = prefix.as_bytes();
+    if raw.len() < p.len() { return false; }
+    let mut i: Int = 0;
+    while i < p.len() {
+        if raw[i] != p[i] { return false; }
+        i = i + 1;
+    }
+    true
+}
+
+fn drop_prefix(text: &Text, n: Int) -> Text {
+    let raw = text.as_bytes();
+    let mut out: List<Byte> = List.new();
+    let mut i: Int = n;
+    while i < raw.len() {
+        out.push(raw[i]);
+        i = i + 1;
+    }
+    Text.from_bytes(&out).unwrap_or("".clone())
+}
+
+fn find_byte(text: &Text, b: Byte) -> Maybe<Int> {
+    let raw = text.as_bytes();
+    let mut i: Int = 0;
+    while i < raw.len() {
+        if raw[i] == b { return Some(i); }
+        i = i + 1;
+    }
+    None
+}
+
+fn slice_text(text: &Text, start: Int, end: Int) -> Text {
+    let raw = text.as_bytes();
+    let lo = if start < 0 { 0 } else { start };
+    let hi = if end > raw.len() { raw.len() } else { end };
+    let mut out: List<Byte> = List.new();
+    let mut i: Int = lo;
+    while i < hi {
+        out.push(raw[i]);
+        i = i + 1;
+    }
+    Text.from_bytes(&out).unwrap_or("".clone())
+}
+
+fn split_ampersand(text: &Text) -> List<Text> {
+    let mut out: List<Text> = List.new();
+    if text.len() == 0 { return out; }
+    let raw = text.as_bytes();
+    let mut start: Int = 0;
+    let mut i: Int = 0;
+    while i < raw.len() {
+        if raw[i] == (0x26 as Byte) {   // '&'
+            out.push(slice_text(text, start, i));
+            start = i + 1;
+        }
+        i = i + 1;
+    }
+    out.push(slice_text(text, start, raw.len()));
+    out
+}

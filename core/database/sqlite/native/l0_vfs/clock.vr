@@ -1,0 +1,171 @@
+module core.database.sqlite.native.l0_vfs.clock;
+
+// =============================================================================
+// l0_vfs/clock.vr — Clock abstraction (VfsProtocol.current_time backing)
+// =============================================================================
+// Layer: 0
+// Spec: sqlite-native.md §7.1 (VfsProtocol.current_time) + §4.10 DST tests
+//
+// The VFS surface returns `Timestamp { nanos, is_monotonic }` from
+// `current_time()`, used for:
+//
+//   * WAL metadata (`checkpoint_seq`, `sqlite_version_number`)
+//   * `busy_timeout` backoff + retry scheduling
+//   * `SQLITE_INSERT/UPDATE/DELETE` hook notifications (wall-clock)
+//
+// Production VFSes back this with the platform monotonic/realtime
+// intrinsics. DST tests inject `MockClock` to drive time deterministically
+// (`MockClock.advance(delta)` lets a test skip to checkpoint-trigger
+// without sleeping).
+//
+// No new syscalls — we reuse `core.intrinsics.runtime.time.{monotonic_nanos,
+// realtime_nanos}` which have @intrinsic attributes and lower to
+// clock_gettime / mach_absolute_time / QueryPerformanceCounter depending
+// on target.
+// =============================================================================
+
+mount core.*;
+mount core.intrinsics.runtime.time.{monotonic_nanos, realtime_nanos};
+mount core.database.sqlite.native.l0_vfs.vfs_protocol.Timestamp;
+
+// -----------------------------------------------------------------------------
+// Protocol
+// -----------------------------------------------------------------------------
+
+/// Every VFS's `current_time` ultimately delegates to one of these.
+/// Implementations: `SystemClock` (production) and `MockClock` (DST).
+public type Clock is protocol {
+    /// Monotonic nanoseconds since process start. Never goes backwards.
+    /// Use for rate-limit / backoff / timeout logic.
+    fn monotonic_nanos(&self) -> Int64;
+
+    /// Wall-clock nanoseconds since Unix epoch. Subject to NTP adjust.
+    /// Use only for metadata that is meant to represent calendar time.
+    fn wall_nanos(&self) -> Int64;
+};
+
+// -----------------------------------------------------------------------------
+// SystemClock — production implementation
+// -----------------------------------------------------------------------------
+
+/// Stateless production clock. Construct one per VFS and share.
+public type SystemClock is {};
+
+public fn system_clock() -> SystemClock { SystemClock {} }
+
+implement Clock for SystemClock {
+    fn monotonic_nanos(&self) -> Int64 {
+        monotonic_nanos() as Int64
+    }
+
+    fn wall_nanos(&self) -> Int64 {
+        realtime_nanos() as Int64
+    }
+}
+
+// -----------------------------------------------------------------------------
+// MockClock — DST driver
+// -----------------------------------------------------------------------------
+
+/// Deterministic clock for tests. Two counters — monotonic and wall —
+/// advance only via explicit `advance` / `advance_mono` / `advance_wall`
+/// calls. No real wall-clock coupling; bit-reproducible across runs
+/// and platforms.
+///
+/// Single-threaded test harness assumption: the mock is driven via
+/// `&mut` from the test body (not concurrently). The production
+/// `SystemClock` handles multi-threaded readers by default (intrinsics
+/// are thread-safe); cross-thread mock access should wrap this in
+/// `Shared<Mutex<MockClock>>`.
+public type MockClock is {
+    monotonic: Int64,
+    wall: Int64,
+};
+
+/// Fresh mock clock starting at (0, 0). Callers typically seed `wall`
+/// to a recognisable epoch via `advance_wall(seed)`.
+public fn mock_clock() -> MockClock {
+    MockClock { monotonic: 0 as Int64, wall: 0 as Int64 }
+}
+
+/// Seed at `(mono_start, wall_start)` nanoseconds. Useful for tests
+/// that want a plausible real wall-clock value (e.g.
+/// `mock_clock_at(0, 1_735_689_600_000_000_000)` for 2025-01-01 UTC).
+public fn mock_clock_at(mono_start: Int64, wall_start: Int64) -> MockClock {
+    MockClock { monotonic: mono_start, wall: wall_start }
+}
+
+implement MockClock {
+    /// Advance both clocks by `delta_nanos`. Monotonic never regresses;
+    /// negative deltas panic.
+    public fn advance(&mut self, delta_nanos: Int64) {
+        if delta_nanos < (0 as Int64) {
+            panic("MockClock.advance requires non-negative delta");
+        }
+        self.monotonic = self.monotonic + delta_nanos;
+        self.wall = self.wall + delta_nanos;
+    }
+
+    /// Advance only the monotonic counter (for benchmarks that keep
+    /// wall-clock fixed).
+    public fn advance_mono(&mut self, delta_nanos: Int64) {
+        if delta_nanos < (0 as Int64) {
+            panic("MockClock.advance_mono requires non-negative delta");
+        }
+        self.monotonic = self.monotonic + delta_nanos;
+    }
+
+    /// Advance only the wall counter. Wall may jump freely under
+    /// simulation (NTP step, user clock change) — no non-negative
+    /// constraint is enforced here.
+    public fn advance_wall(&mut self, delta_nanos: Int64) {
+        self.wall = self.wall + delta_nanos;
+    }
+
+    /// Current monotonic nanos — identical to the protocol method but
+    /// callable on `&MockClock` without protocol-dispatch overhead.
+    public fn peek_mono(&self) -> Int64 { self.monotonic }
+    public fn peek_wall(&self) -> Int64 { self.wall }
+}
+
+implement Clock for MockClock {
+    fn monotonic_nanos(&self) -> Int64 { self.monotonic }
+    fn wall_nanos(&self) -> Int64 { self.wall }
+}
+
+// -----------------------------------------------------------------------------
+// Timestamp helpers
+// -----------------------------------------------------------------------------
+
+/// Build a Timestamp from a SystemClock's monotonic reading.
+/// VfsProtocol.current_time backends call this instead of hand-rolling.
+public fn timestamp_monotonic(clock: &SystemClock) -> Timestamp {
+    Timestamp {
+        nanos: clock.monotonic_nanos(),
+        is_monotonic: true,
+    }
+}
+
+/// Build a Timestamp from a SystemClock's wall reading.
+public fn timestamp_wall(clock: &SystemClock) -> Timestamp {
+    Timestamp {
+        nanos: clock.wall_nanos(),
+        is_monotonic: false,
+    }
+}
+
+/// Same, but against a MockClock — separate function because protocol
+/// dispatch on `&dyn Clock` has extra cost and tests construct many.
+public fn timestamp_monotonic_mock(clock: &MockClock) -> Timestamp {
+    Timestamp {
+        nanos: clock.monotonic_nanos(),
+        is_monotonic: true,
+    }
+}
+
+public fn timestamp_wall_mock(clock: &MockClock) -> Timestamp {
+    Timestamp {
+        nanos: clock.wall_nanos(),
+        is_monotonic: false,
+    }
+}
