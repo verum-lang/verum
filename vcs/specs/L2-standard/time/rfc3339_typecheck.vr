@@ -1,0 +1,66 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: time, rfc3339, iso8601, typecheck
+// @timeout: 10000
+// @expect: pass
+
+mount core.time.rfc3339.{
+    Rfc3339Time, Rfc3339Error,
+    parse, format_utc, format_utc_with_nanos, format_with_offset,
+};
+
+fn exercise_parse_format() -> Result<(), Rfc3339Error> {
+    // UTC Z form.
+    let t: Rfc3339Time = parse(&Text.from("2026-04-22T14:30:00Z"))?;
+    assert(t.offset_minutes == 0);
+    assert(t.nanos == 0);
+
+    // Round-trip: format back.
+    let s = format_utc(t.unix_seconds, t.nanos);
+    let _ = s;
+
+    // Fractional seconds — 3-digit → 300_000_000 ns.
+    let t2 = parse(&Text.from("2026-04-22T14:30:00.123Z"))?;
+    assert(t2.nanos == 123_000_000);
+
+    // Full-precision nanoseconds.
+    let t3 = parse(&Text.from("2026-04-22T14:30:00.000000123Z"))?;
+    assert(t3.nanos == 123);
+
+    // Positive offset.
+    let t4 = parse(&Text.from("2026-04-22T17:30:00+03:00"))?;
+    assert(t4.offset_minutes == 180);
+    // Same instant as the UTC form above.
+    assert(t4.unix_seconds == t.unix_seconds);
+
+    // Negative offset.
+    let t5 = parse(&Text.from("2026-04-22T09:30:00-05:00"))?;
+    assert(t5.offset_minutes == -300);
+    assert(t5.unix_seconds == t.unix_seconds);
+
+    // Format with offset preserved.
+    let s_tz = format_with_offset(t4.unix_seconds, t4.nanos, 180);
+    let _ = s_tz;
+
+    // Format with nanosecond fraction.
+    let s_nano = format_utc_with_nanos(t.unix_seconds, 123_456_789);
+    let _ = s_nano;
+
+    // Malformed inputs produce typed errors.
+    let bad = parse(&Text.from("not a date"));
+    let _ = bad;
+
+    // Out-of-range month.
+    let oor = parse(&Text.from("2026-13-22T14:30:00Z"));
+    let _ = oor;
+
+    // Leap second collapses (pre-2012 compat).
+    let leap = parse(&Text.from("2016-12-31T23:59:60Z"))?;
+    let _ = leap.unix_seconds;
+    Ok(())
+}
+
+fn main() {
+    let _ = exercise_parse_format();
+}

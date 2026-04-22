@@ -1,0 +1,292 @@
+// =============================================================================
+// time/rfc3339.vr — RFC 3339 / ISO 8601 timestamp parser + formatter
+// =============================================================================
+// Layer: 2 (Time)
+// Dependencies: core, core.collections
+// =============================================================================
+//
+// RFC 3339 — the profile of ISO 8601 that every API, config file,
+// log line, and cloud service actually uses. Grammar (§5.6):
+//
+//   date-time  = full-date "T" full-time
+//   full-date  = 4DIGIT "-" 2DIGIT "-" 2DIGIT            ; YYYY-MM-DD
+//   full-time  = partial-time time-offset
+//   partial-time = 2DIGIT ":" 2DIGIT ":" 2DIGIT [ "." 1*DIGIT ]
+//   time-offset  = "Z" | ( ("+" | "-") 2DIGIT ":" 2DIGIT )
+//
+// # API
+//
+// ```
+// // Parse → unix seconds (UTC) + sub-second nanos + offset.
+// let ts: Rfc3339Time = rfc3339.parse(&Text.from("2026-04-22T14:30:00.123Z"))?;
+// assert(ts.unix_seconds == 1777213800);
+// assert(ts.nanos == 123_000_000);
+// assert(ts.offset_minutes == 0);
+//
+// // Build from unix seconds, emit UTC Z form.
+// let s: Text = rfc3339.format_utc(1777213800, 0);        // "2026-04-22T14:30:00Z"
+// let s: Text = rfc3339.format_utc_with_nanos(1777213800, 123_000_000);
+//                               // "2026-04-22T14:30:00.123000000Z"
+// ```
+//
+// # Timezone scope
+//
+// Parses and preserves the offset of the input (`offset_minutes`),
+// but `unix_seconds` is always UTC (offset applied on parse).
+// Formatting writes the offset verbatim when non-zero, `Z` for UTC.
+//
+// Historical UTC leap-seconds (`:60` in the seconds slot) are
+// accepted on parse for compatibility with pre-2012 datasets but
+// collapsed to `:59` in the unix-seconds output. Most callers
+// never hit this.
+//
+// =============================================================================
+
+module core.time.rfc3339;
+
+mount core.*;
+mount core.collections.List;
+
+// =============================================================================
+// Parsed value
+// =============================================================================
+
+public type Rfc3339Time is {
+    /// Seconds since 1970-01-01T00:00:00Z (UTC).
+    unix_seconds:    Int,
+    /// Sub-second nanoseconds (0..999_999_999).
+    nanos:           Int,
+    /// Offset of the original input in minutes (-1439..=1439).
+    /// 0 for Z-suffixed inputs.
+    offset_minutes:  Int,
+};
+
+public type Rfc3339Error is
+      Malformed(Text)
+    | InvalidField(Text)
+    | OutOfRange(Text);
+
+// =============================================================================
+// Parse
+// =============================================================================
+
+public fn parse(s: &Text) -> Result<Rfc3339Time, Rfc3339Error> {
+    let b = s.as_bytes();
+    if b.len() < 20 {
+        return Err(Rfc3339Error.Malformed(Text.from("too short")));
+    }
+    // YYYY-MM-DD
+    let year  = take_digits(b, 0, 4)?;
+    if b[4] != ('-' as Byte) { return Err(Rfc3339Error.Malformed(Text.from("expected '-'"))); }
+    let month = take_digits(b, 5, 2)?;
+    if b[7] != ('-' as Byte) { return Err(Rfc3339Error.Malformed(Text.from("expected '-'"))); }
+    let day   = take_digits(b, 8, 2)?;
+    if b[10] != ('T' as Byte) && b[10] != ('t' as Byte) && b[10] != (' ' as Byte) {
+        return Err(Rfc3339Error.Malformed(Text.from("expected 'T' or space")));
+    }
+    let hour   = take_digits(b, 11, 2)?;
+    if b[13] != (':' as Byte) { return Err(Rfc3339Error.Malformed(Text.from("expected ':'"))); }
+    let minute = take_digits(b, 14, 2)?;
+    if b[16] != (':' as Byte) { return Err(Rfc3339Error.Malformed(Text.from("expected ':'"))); }
+    let mut second = take_digits(b, 17, 2)?;
+
+    // Range checks.
+    if month < 1 || month > 12 {
+        return Err(Rfc3339Error.OutOfRange(Text.from("month")));
+    }
+    let max_day = days_in_month(year, month);
+    if day < 1 || day > max_day {
+        return Err(Rfc3339Error.OutOfRange(Text.from("day")));
+    }
+    if hour > 23 { return Err(Rfc3339Error.OutOfRange(Text.from("hour"))); }
+    if minute > 59 { return Err(Rfc3339Error.OutOfRange(Text.from("minute"))); }
+    if second > 60 { return Err(Rfc3339Error.OutOfRange(Text.from("second"))); }
+    if second == 60 { second = 59; }   // leap-second collapse
+
+    let mut i: Int = 19;
+    let mut nanos: Int = 0;
+
+    // Optional .FRACTION
+    if i < b.len() && b[i] == ('.' as Byte) {
+        i = i + 1;
+        let frac_start = i;
+        while i < b.len() && b[i] >= ('0' as Byte) && b[i] <= ('9' as Byte) {
+            i = i + 1;
+        }
+        let frac_len = i - frac_start;
+        if frac_len == 0 {
+            return Err(Rfc3339Error.Malformed(Text.from("empty fraction")));
+        }
+        // Normalise to nanoseconds (9 digits): pad with zeros or
+        // truncate.
+        nanos = 0;
+        let mut j: Int = 0;
+        while j < frac_len && j < 9 {
+            nanos = nanos * 10 + ((b[frac_start + j] - ('0' as Byte)) as Int);
+            j = j + 1;
+        }
+        while j < 9 { nanos = nanos * 10; j = j + 1; }
+    }
+
+    // Timezone: Z, z, or ±HH:MM
+    let offset_minutes: Int = if i < b.len() && (b[i] == ('Z' as Byte) || b[i] == ('z' as Byte)) {
+        i = i + 1;
+        0
+    } else if i + 6 <= b.len() && (b[i] == ('+' as Byte) || b[i] == ('-' as Byte))
+                              && b[i + 3] == (':' as Byte) {
+        let sign = if b[i] == ('+' as Byte) { 1 } else { -1 };
+        let off_h = take_digits(b, i + 1, 2)?;
+        let off_m = take_digits(b, i + 4, 2)?;
+        i = i + 6;
+        sign * (off_h * 60 + off_m)
+    } else {
+        return Err(Rfc3339Error.Malformed(Text.from("missing timezone")));
+    };
+
+    if i != b.len() {
+        return Err(Rfc3339Error.Malformed(Text.from("trailing bytes")));
+    }
+
+    // Compose (y, m, d, h, m, s) → unix seconds (UTC), applying offset.
+    let local_unix = compose_unix(year, month, day, hour, minute, second);
+    let unix_seconds = local_unix - (offset_minutes as Int) * 60;
+
+    Ok(Rfc3339Time {
+        unix_seconds:   unix_seconds,
+        nanos:          nanos,
+        offset_minutes: offset_minutes,
+    })
+}
+
+// =============================================================================
+// Format
+// =============================================================================
+
+public fn format_utc(unix_seconds: Int, nanos: Int) -> Text {
+    format_impl(unix_seconds, nanos, 0, nanos > 0)
+}
+
+public fn format_utc_with_nanos(unix_seconds: Int, nanos: Int) -> Text {
+    format_impl(unix_seconds, nanos, 0, true)
+}
+
+public fn format_with_offset(unix_seconds: Int, nanos: Int, offset_minutes: Int) -> Text {
+    format_impl(unix_seconds, nanos, offset_minutes, nanos > 0)
+}
+
+fn format_impl(unix: Int, nanos: Int, offset_minutes: Int, with_nanos: Bool) -> Text {
+    // Shift to the requested zone for display.
+    let local = unix + offset_minutes * 60;
+    let (year, month, day, hour, minute, second) = decompose_unix(local);
+
+    let mut out: List<Byte> = [];
+    push_padded(&mut out, year, 4);
+    out.push('-' as Byte);
+    push_padded(&mut out, month, 2);
+    out.push('-' as Byte);
+    push_padded(&mut out, day, 2);
+    out.push('T' as Byte);
+    push_padded(&mut out, hour, 2);
+    out.push(':' as Byte);
+    push_padded(&mut out, minute, 2);
+    out.push(':' as Byte);
+    push_padded(&mut out, second, 2);
+
+    if with_nanos && nanos > 0 {
+        out.push('.' as Byte);
+        push_padded(&mut out, nanos, 9);
+    }
+
+    if offset_minutes == 0 {
+        out.push('Z' as Byte);
+    } else {
+        out.push(if offset_minutes > 0 { '+' as Byte } else { '-' as Byte });
+        let off = if offset_minutes < 0 { -offset_minutes } else { offset_minutes };
+        push_padded(&mut out, off / 60, 2);
+        out.push(':' as Byte);
+        push_padded(&mut out, off % 60, 2);
+    }
+    Text.from_utf8_unchecked(out.as_slice())
+}
+
+// =============================================================================
+// Date math — Howard Hinnant civil_from_days / days_from_civil
+// =============================================================================
+
+fn compose_unix(y: Int, m: Int, d: Int, h: Int, mi: Int, s: Int) -> Int {
+    let y_adj = if m <= 2 { y - 1 } else { y };
+    let era = if y_adj >= 0 { y_adj / 400 } else { (y_adj - 399) / 400 };
+    let yoe = y_adj - era * 400;
+    let m_shift = if m > 2 { m - 3 } else { m + 9 };
+    let doy = (153 * m_shift + 2) / 5 + d - 1;
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    let days = era * 146097 + doe - 719468;
+    days * 86400 + h * 3600 + mi * 60 + s
+}
+
+fn decompose_unix(unix: Int) -> (Int, Int, Int, Int, Int, Int) {
+    let total_days = unix / 86400;
+    let rem = unix - total_days * 86400;
+    let hour = rem / 3600;
+    let minute = (rem % 3600) / 60;
+    let second = rem % 60;
+
+    let z = total_days + 719468;
+    let era = if z >= 0 { z / 146097 } else { (z - 146096) / 146097 };
+    let doe = z - era * 146097;
+    let yoe = (doe - doe/1460 + doe/36524 - doe/146096) / 365;
+    let y = yoe + era * 400;
+    let doy = doe - (365*yoe + yoe/4 - yoe/100);
+    let mp = (5*doy + 2) / 153;
+    let d = doy - (153*mp + 2)/5 + 1;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 };
+    let year = if m <= 2 { y + 1 } else { y };
+    (year, m, d, hour, minute, second)
+}
+
+fn days_in_month(year: Int, month: Int) -> Int {
+    if month == 2 {
+        if is_leap(year) { 29 } else { 28 }
+    } else if month == 4 || month == 6 || month == 9 || month == 11 {
+        30
+    } else { 31 }
+}
+
+fn is_leap(y: Int) -> Bool {
+    (y % 4 == 0 && y % 100 != 0) || (y % 400 == 0)
+}
+
+// =============================================================================
+// Byte helpers
+// =============================================================================
+
+fn take_digits(b: &[Byte], off: Int, n: Int) -> Result<Int, Rfc3339Error> {
+    if off + n > b.len() {
+        return Err(Rfc3339Error.Malformed(Text.from("truncated")));
+    }
+    let mut v: Int = 0;
+    let mut i: Int = 0;
+    while i < n {
+        let c = b[off + i];
+        if c < ('0' as Byte) || c > ('9' as Byte) {
+            return Err(Rfc3339Error.InvalidField(Text.from("non-digit")));
+        }
+        v = v * 10 + ((c - ('0' as Byte)) as Int);
+        i = i + 1;
+    }
+    Ok(v)
+}
+
+fn push_padded(dst: &mut List<Byte>, n: Int, width: Int) {
+    let mut buf: List<Byte> = [];
+    let mut x = if n < 0 { -n } else { n };
+    if x == 0 { buf.push('0' as Byte); }
+    while x > 0 {
+        let d = (x % 10) as Byte;
+        buf.push(('0' as Byte) + d);
+        x = x / 10;
+    }
+    while buf.len() < width { buf.push('0' as Byte); }
+    let mut i: Int = buf.len() - 1;
+    while i >= 0 { dst.push(buf[i]); i = i - 1; }
+}
