@@ -1,0 +1,85 @@
+module core.text.case_fold;
+
+// =============================================================================
+// core/text/case_fold.vr — Case-folded comparison primitives
+// =============================================================================
+// Layer: 2 (text)
+// Spec: internal/specs/sqlite-native.md §3.3 + §9.5
+//
+// SQLite's built-in `NOCASE` collation is documented as ASCII-only:
+//
+//     The built-in NOCASE collation differs from C's strcasecmp() only
+//     in that it uses the 26 upper-case characters of ASCII for folding.
+//     Case folding is NOT applied to Unicode characters outside of the
+//     ASCII range.  ICU-backed full Unicode folding is opt-in via the
+//     ICU extension cog.
+//
+// This module exposes the ASCII-subset folding used by that collation,
+// plus comparison helpers for use outside collation (e.g., PRAGMA
+// `case_sensitive_like`, SQL functions `lower`/`upper` when `LIKE` is
+// configured to match ASCII-case-insensitively).
+//
+// v1 policy: ASCII-only, documented limitation; v2 plans to pull full
+// Unicode case-fold tables (CaseFolding.txt, status=C+S+T) via
+// `cog.verum.collation-icu`.
+// =============================================================================
+
+mount core.text.text.Text;
+mount core.text.char.Char;
+mount core.base.ordering.Ordering;
+
+// -----------------------------------------------------------------------------
+// ASCII character folding
+// -----------------------------------------------------------------------------
+
+/// Fold a single character to ASCII-lowercase. Non-ASCII bytes pass
+/// through unchanged — the SQLite NOCASE contract.
+public fn fold_char_ascii(c: Char) -> Char {
+    c.to_ascii_lowercase()
+}
+
+/// Fold a single ASCII byte in place. Non-ASCII bytes pass through.
+/// Useful on UTF-8 byte-streams when the caller has already verified
+/// that the byte is ASCII (< 0x80).
+public fn fold_byte_ascii(b: Byte) -> Byte {
+    if b >= (0x41 as Byte) && b <= (0x5A as Byte) {
+        b + (0x20 as Byte)
+    } else {
+        b
+    }
+}
+
+// -----------------------------------------------------------------------------
+// ASCII text folding
+// -----------------------------------------------------------------------------
+
+/// Fold a Text to its ASCII-lowercase form. Equivalent to SQLite's
+/// `nocase` canonicalisation. Unicode characters pass through unchanged.
+public fn fold_text_ascii(s: &Text) -> Text {
+    s.to_ascii_lowercase()
+}
+
+// -----------------------------------------------------------------------------
+// Case-insensitive (ASCII) comparison
+// -----------------------------------------------------------------------------
+
+/// `compare_ascii_nocase(a, b)` — lex-compare two texts after ASCII
+/// lowercasing. Used directly as the comparator for SQLite's NOCASE
+/// collation. Matches C `strcasecmp` semantics on the ASCII subset.
+public fn compare_ascii_nocase(a: &Text, b: &Text) -> Ordering {
+    let a_folded = a.to_ascii_lowercase();
+    let b_folded = b.to_ascii_lowercase();
+    if a_folded < b_folded {
+        Less
+    } else if a_folded > b_folded {
+        Greater
+    } else {
+        Equal
+    }
+}
+
+/// ASCII case-insensitive equality check — the single most common use
+/// site for NOCASE in WHERE clauses.
+public fn equal_ascii_nocase(a: &Text, b: &Text) -> Bool {
+    a.to_ascii_lowercase() == b.to_ascii_lowercase()
+}

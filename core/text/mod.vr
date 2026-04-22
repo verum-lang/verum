@@ -34,6 +34,9 @@ public mount .text.TextMatchIndices;
 // Tagged string literals (SQL, HTML, regex, etc.)
 public mount .tagged_literals.*;
 
+// ASCII case-fold (SQLite NOCASE collation); full Unicode via ICU cog.
+public module case_fold;
+
 // Regex
 public mount .regex.Regex;
 

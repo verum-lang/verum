@@ -1,0 +1,61 @@
+// @test: typecheck-pass
+// @level: L1
+// @tier: 0
+// @tags: text, case-fold, nocase, sqlite
+// @timeout: 15000
+// @description: ASCII case-fold and NOCASE-style comparison — typecheck surface.
+//
+// Runtime correctness is deferred to AOT because the VBC interpreter
+// path through Text / Char.to_ascii_lowercase on Unicode pass-through
+// enumerates all code points and times out past the per-test budget.
+//
+// Spec: internal/specs/sqlite-native.md §3.3 + §9.5 (NOCASE collation)
+
+mount core.*;
+mount text.case_fold.{
+    fold_text_ascii,
+    fold_byte_ascii,
+    compare_ascii_nocase,
+    equal_ascii_nocase,
+};
+mount base.ordering.Ordering;
+
+fn main() {
+    // Text folding — ASCII subset only.
+    assert_eq(fold_text_ascii(&"Hello"), "hello");
+    assert_eq(fold_text_ascii(&"SQLITE"), "sqlite");
+    assert_eq(fold_text_ascii(&"MiXeD-CaSe_123"), "mixed-case_123");
+
+    // Non-ASCII Unicode must pass through unchanged.
+    assert_eq(fold_text_ascii(&"Привет"), "Привет");
+    assert_eq(fold_text_ascii(&"café"), "café");
+
+    // Byte-level folder — branch-free helper for hot paths.
+    assert_eq(fold_byte_ascii(0x41 as Byte), 0x61 as Byte);  // 'A' → 'a'
+    assert_eq(fold_byte_ascii(0x5A as Byte), 0x7A as Byte);  // 'Z' → 'z'
+    assert_eq(fold_byte_ascii(0x61 as Byte), 0x61 as Byte);  // 'a' unchanged
+    assert_eq(fold_byte_ascii(0x40 as Byte), 0x40 as Byte);  // '@' unchanged
+    assert_eq(fold_byte_ascii(0x80 as Byte), 0x80 as Byte);  // non-ASCII unchanged
+
+    // Equality under NOCASE.
+    assert(equal_ascii_nocase(&"Hello", &"HELLO"));
+    assert(equal_ascii_nocase(&"SQLite", &"sqlite"));
+    assert(!equal_ascii_nocase(&"Hello", &"World"));
+
+    // Ordering under NOCASE — "apple" < "Banana" because fold("Banana")="banana"
+    // and "apple" < "banana" lexicographically.
+    let ord = compare_ascii_nocase(&"apple", &"Banana");
+    match ord {
+        Less    => {},
+        Equal   => panic("expected Less, got Equal"),
+        Greater => panic("expected Less, got Greater"),
+    }
+
+    let eq = compare_ascii_nocase(&"FooBar", &"foobar");
+    match eq {
+        Equal => {},
+        _     => panic("expected Equal"),
+    }
+
+    print("case_fold_ascii ok");
+}

@@ -1,0 +1,56 @@
+// @test: typecheck-pass
+// @level: L2
+// @tier: 0
+// @tags: time, julian, date, sqlite
+// @timeout: 10000
+// @description: Julian-day converter — typecheck-level exercise.
+//
+// Spec: internal/specs/sqlite-native.md §3.3 (Julian-day converter)
+//
+// Runtime exercise is deferred: the interpreter's Float64 arithmetic
+// path on the `(delta * 86400000.0)` expression hits a slow enumerator
+// and times out well past the reasonable per-test budget. Typecheck
+// covers the surface shape; Float64 arithmetic correctness is verified
+// in an AOT build once tier-1 lowering lands for SQLite datetime.
+
+mount core.*;
+mount time.julian.{
+    julian_from_unix_ms,
+    unix_ms_from_julian,
+    julian_from_ymd,
+    ymd_from_julian,
+    julian_from_gregorian,
+    gregorian_from_julian,
+    mjd_from_julian,
+    julian_from_mjd,
+    JD_UNIX_EPOCH,
+    JD_J2000,
+    JD_MJD_EPOCH,
+};
+
+fn roundtrip_unix_ms(ms: Int64) -> Int64 {
+    unix_ms_from_julian(julian_from_unix_ms(ms))
+}
+
+fn roundtrip_ymd(y: Int, m: Int, d: Int) -> (Int, Int, Int) {
+    ymd_from_julian(julian_from_ymd(y, m, d))
+}
+
+fn roundtrip_full(
+    y: Int, m: Int, d: Int,
+    h: Int, mi: Int, s: Int, ms: Int,
+) -> (Int, Int, Int, Int, Int, Int, Int) {
+    gregorian_from_julian(julian_from_gregorian(y, m, d, h, mi, s, ms))
+}
+
+fn mjd_roundtrip(jd: Float64) -> Float64 {
+    julian_from_mjd(mjd_from_julian(jd))
+}
+
+fn main() {
+    // Surface exercise — every public entry point referenced.
+    let _ = JD_UNIX_EPOCH;
+    let _ = JD_J2000;
+    let _ = JD_MJD_EPOCH;
+    print("julian_roundtrip typecheck ok");
+}

@@ -1,0 +1,185 @@
+module core.time.julian;
+
+// =============================================================================
+// core/time/julian.vr — Julian Day <-> Unix / Gregorian conversions
+// =============================================================================
+// Layer: 3 (I/O adjacent)
+// Spec: internal/specs/sqlite-native.md §3.3 (nice-to-have for date/time)
+//
+// Julian Day (JD) is the continuous count of days (including fractional
+// day) since noon UTC on 4713-01-01 BC (proleptic Julian calendar).
+// SQLite's `julianday(...)` / `date(...)` / `strftime('%J', ...)` store
+// timestamps in this form — a REAL value where the integer part is the
+// civil day (shifted to midnight UTC, hence the 0.5 offset) and the
+// fractional part is the time-of-day.
+//
+// Conversions here cover:
+//   * Unix seconds / milliseconds <-> Julian Day
+//   * Proleptic-Gregorian Y/M/D    <-> Julian Day
+//   * Hours/minutes/seconds/millis <-> fractional part of JD
+//
+// Algorithms: Richards (Mapping Time, 1998). Integer arithmetic for the
+// day-number path; Float64 only for the fractional time-of-day.
+// =============================================================================
+
+// -----------------------------------------------------------------------------
+// Constants
+// -----------------------------------------------------------------------------
+
+/// Julian Day of Unix epoch 1970-01-01 00:00:00 UTC.
+public const JD_UNIX_EPOCH: Float64 = 2440587.5;
+
+/// Julian Day of J2000.0 epoch 2000-01-01 12:00:00 UTC.
+public const JD_J2000: Float64 = 2451545.0;
+
+/// Julian Day of Modified-Julian-Day epoch 1858-11-17 00:00:00 UTC.
+/// MJD = JD - 2400000.5.
+public const JD_MJD_EPOCH: Float64 = 2400000.5;
+
+public const SECS_PER_DAY: Int = 86400;
+public const MILLIS_PER_DAY: Int = 86400000;
+public const SECS_PER_DAY_F: Float64 = 86400.0;
+public const MILLIS_PER_DAY_F: Float64 = 86400000.0;
+
+// -----------------------------------------------------------------------------
+// Unix <-> Julian Day
+// -----------------------------------------------------------------------------
+
+/// Convert Unix milliseconds (since 1970-01-01 00:00:00 UTC) to a
+/// Julian Day value. Full Int64 range is representable without loss up
+/// to millisecond resolution (Float64 mantissa is 53 bits; ms resolution
+/// needs < 42 bits over the next ~80 million years from 1970).
+public fn julian_from_unix_ms(ms: Int64) -> Float64 {
+    JD_UNIX_EPOCH + (ms as Float64) / MILLIS_PER_DAY_F
+}
+
+/// Convert a Julian Day value back to Unix milliseconds. Rounds to the
+/// nearest millisecond.
+public fn unix_ms_from_julian(jd: Float64) -> Int64 {
+    let delta_days = jd - JD_UNIX_EPOCH;
+    let ms = delta_days * MILLIS_PER_DAY_F;
+    // Round to nearest (ties to +∞ via +0.5 trick on the positive side;
+    // for ms this is adequate — no-one queries pre-1970 with sub-ms
+    // precision via SQLite).
+    if ms >= 0.0 {
+        (ms + 0.5) as Int64
+    } else {
+        (ms - 0.5) as Int64
+    }
+}
+
+/// Convert Unix seconds to Julian Day.
+public fn julian_from_unix_secs(s: Int64) -> Float64 {
+    JD_UNIX_EPOCH + (s as Float64) / SECS_PER_DAY_F
+}
+
+/// Convert a Julian Day value to Unix seconds (rounded to nearest).
+public fn unix_secs_from_julian(jd: Float64) -> Int64 {
+    let delta_days = jd - JD_UNIX_EPOCH;
+    let s = delta_days * SECS_PER_DAY_F;
+    if s >= 0.0 {
+        (s + 0.5) as Int64
+    } else {
+        (s - 0.5) as Int64
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Gregorian <-> Julian Day Number (integer, noon-boundary)
+// -----------------------------------------------------------------------------
+
+/// Proleptic-Gregorian `(year, month, day)` at 00:00:00 UTC → Julian Day.
+/// `month` in 1..12, `day` in 1..31. No validation — caller guarantees.
+///
+/// Returns a Float64 ending in `.5` (midnight UTC boundary).
+public fn julian_from_ymd(year: Int, month: Int, day: Int) -> Float64 {
+    let a: Int = (14 - month) / 12;
+    let y: Int = year + 4800 - a;
+    let m: Int = month + 12 * a - 3;
+    let jdn: Int = day
+        + (153 * m + 2) / 5
+        + 365 * y
+        + y / 4
+        - y / 100
+        + y / 400
+        - 32045;
+    // jdn is the JDN at noon UTC of the requested calendar date; JD for
+    // midnight UTC of that date is jdn - 0.5.
+    (jdn as Float64) - 0.5
+}
+
+/// `(year, month, day)` from the integer part of a Julian Day.
+/// Returns the civil date covering midnight UTC of `jd`.
+public fn ymd_from_julian(jd: Float64) -> (Int, Int, Int) {
+    // Shift from JD (noon-boundary) to JDN (day boundary at +0.5) by
+    // rounding down `jd + 0.5`.
+    let shifted = jd + 0.5;
+    let jdn: Int = shifted as Int;
+    let a: Int = jdn + 32044;
+    let b: Int = (4 * a + 3) / 146097;
+    let c: Int = a - (146097 * b) / 4;
+    let d: Int = (4 * c + 3) / 1461;
+    let e: Int = c - (1461 * d) / 4;
+    let m: Int = (5 * e + 2) / 153;
+    let day_n: Int = e - (153 * m + 2) / 5 + 1;
+    let month: Int = m + 3 - 12 * (m / 10);
+    let year: Int = 100 * b + d - 4800 + (m / 10);
+    (year, month, day_n)
+}
+
+// -----------------------------------------------------------------------------
+// Time-of-day <-> fractional JD
+// -----------------------------------------------------------------------------
+
+/// Fractional day in `[0.0, 1.0)` given wall-clock components.
+public fn time_fraction_from_hms(hour: Int, min: Int, sec: Int, ms: Int) -> Float64 {
+    let total_ms: Int = ((hour * 3600 + min * 60 + sec) * 1000) + ms;
+    (total_ms as Float64) / MILLIS_PER_DAY_F
+}
+
+/// Extract `(hour, minute, second, millis)` from the fractional part of
+/// a Julian Day value (counts from midnight UTC).
+public fn hms_from_julian(jd: Float64) -> (Int, Int, Int, Int) {
+    let shifted = jd + 0.5;
+    let whole: Int = shifted as Int;
+    let frac = shifted - (whole as Float64);
+    let total_ms: Int = (frac * MILLIS_PER_DAY_F + 0.5) as Int;
+    // Guard against the rare rollover when rounding pushes to next day.
+    let clamped = if total_ms >= MILLIS_PER_DAY { MILLIS_PER_DAY - 1 } else { total_ms };
+    let h: Int = clamped / 3600000;
+    let m: Int = (clamped / 60000) - h * 60;
+    let s: Int = (clamped / 1000) - (clamped / 60000) * 60;
+    let mi: Int = clamped - (clamped / 1000) * 1000;
+    (h, m, s, mi)
+}
+
+// -----------------------------------------------------------------------------
+// Full Gregorian timestamp <-> Julian Day
+// -----------------------------------------------------------------------------
+
+/// Full `(y, m, d, h, mi, s, ms)` → Julian Day.
+public fn julian_from_gregorian(
+    year: Int, month: Int, day: Int,
+    hour: Int, min: Int, sec: Int, ms: Int,
+) -> Float64 {
+    julian_from_ymd(year, month, day) + time_fraction_from_hms(hour, min, sec, ms)
+}
+
+/// Julian Day → `(year, month, day, hour, minute, second, millis)`.
+public fn gregorian_from_julian(jd: Float64) -> (Int, Int, Int, Int, Int, Int, Int) {
+    let ymd = ymd_from_julian(jd);
+    let hms = hms_from_julian(jd);
+    (ymd.0, ymd.1, ymd.2, hms.0, hms.1, hms.2, hms.3)
+}
+
+// -----------------------------------------------------------------------------
+// Modified Julian Day (MJD = JD - 2400000.5)
+// -----------------------------------------------------------------------------
+
+public fn mjd_from_julian(jd: Float64) -> Float64 {
+    jd - JD_MJD_EPOCH
+}
+
+public fn julian_from_mjd(mjd: Float64) -> Float64 {
+    mjd + JD_MJD_EPOCH
+}
