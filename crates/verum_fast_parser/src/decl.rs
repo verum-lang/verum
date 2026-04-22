@@ -3230,29 +3230,65 @@ impl<'a> RecursiveParser<'a> {
                                 // Check token 5 to decide record-field vs named-refinement.
                                 //
                                 // Tok4 is a plain identifier (not `self`/`it` — those
-                                // returned false already). In a record-field position
-                                // `{ name: TypeName ...}`, tok4 is the field's type
-                                // name and tok5 is whatever continues that type:
-                                //   `Lt`  → `TypeName<Args>`         (generic type)
-                                //   `Dot` → `module.TypeName`        (qualified path)
-                                //   `Comma`/`RBrace` → end of field  (simple type)
-                                // None of these indicate a refinement predicate.
+                                // returned false already).
                                 //
-                                // Operators `>=`, `<=`, `==`, `!=`, arith, logical —
-                                // those are actual value-level comparisons/arith on a
-                                // refinement expression. `Gt` alone is kept on the
-                                // refinement side because the generic case (`Maybe<Int>`)
-                                // produces `Lt` at tok5, not `Gt`; a bare `Gt` at tok5
-                                // after `name: ident` is much more likely a comparison
-                                // like `{ count: xs > 0 }`.
+                                // Unambiguously operator-shaped at tok5 → refinement:
+                                //   `>=`, `<=`, `==`, `!=`, arith, `&&`, `||`
+                                //
+                                // Ambiguous at tok5 (`<`, `>`, `.`) — could be generic
+                                // type args (`Maybe<Int>`, `module.Type`) OR comparison
+                                // / method call on a value (`x < 0`, `x > 0`, `x.foo()`).
+                                // Disambiguate by peeking tok6:
+                                //   integer/float/minus literal → value comparison
+                                //   identifier starting with uppercase → type
+                                //   identifier starting with lowercase → value
+                                //
+                                // This keeps generic-type record-variant fields parsing
+                                // (the repro in `variant_record_maybe_bug.rs`) while
+                                // letting named refinements with `<`/`>` predicates
+                                // (`Int { x: x < 0 }`) route through the refinement
+                                // parser.
                                 if let Some(tok5) = self.stream.peek_nth(5).map(|t| &t.kind) {
                                     match tok5 {
+                                        // Always-refinement operators:
                                         TokenKind::GtEq | TokenKind::LtEq | TokenKind::EqEq |
-                                        TokenKind::BangEq | TokenKind::Gt |
+                                        TokenKind::BangEq |
                                         TokenKind::Plus | TokenKind::Minus | TokenKind::Star |
                                         TokenKind::Slash | TokenKind::Percent |
                                         TokenKind::AmpersandAmpersand | TokenKind::PipePipe => {
                                             return false; // Named refinement predicate
+                                        }
+                                        // Ambiguous — disambiguate on tok6:
+                                        TokenKind::Lt | TokenKind::Gt | TokenKind::Dot => {
+                                            match self.stream.peek_nth(6).map(|t| &t.kind) {
+                                                // Value literal → comparison/arith → refinement
+                                                Some(TokenKind::Integer(_))
+                                                | Some(TokenKind::Float(_))
+                                                | Some(TokenKind::Minus)
+                                                | Some(TokenKind::True)
+                                                | Some(TokenKind::False) => return false,
+                                                // Identifier: uppercase=Type (variant),
+                                                // lowercase=value (refinement). Tok5=`.`
+                                                // additionally disambiguates: after a
+                                                // value-ident, `.method()` is a value-
+                                                // expression — a refinement predicate.
+                                                Some(TokenKind::Ident(name)) => {
+                                                    let is_type_like = name
+                                                        .as_str()
+                                                        .chars()
+                                                        .next()
+                                                        .map(|c| c.is_ascii_uppercase())
+                                                        .unwrap_or(false);
+                                                    if !is_type_like {
+                                                        return false; // value → refinement
+                                                    }
+                                                    // Uppercase ident after `.` could be
+                                                    // a qualified TYPE path; after `<`
+                                                    // it's a generic type arg. Either way,
+                                                    // record-variant field.
+                                                }
+                                                _ => {}
+                                            }
                                         }
                                         _ => {}
                                     }

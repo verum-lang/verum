@@ -25,10 +25,10 @@
 // # API
 //
 // ```
-// let canon: Text = ipv6_canonical.format(&ipv6_addr);
+// let canon: Text = ipv6_canonical.format_ipv6(&ipv6_addr);
 //
 // let parsed: Ipv6Addr = ipv6_canonical.parse(&Text.from("2001:0DB8:0:0:0:0:0:1"))?;
-// let canon = ipv6_canonical.format(&parsed);   // "2001:db8::1"
+// let canon = ipv6_canonical.format_ipv6(&parsed);   // "2001:db8::1"
 // ```
 //
 // `parse` is a thin wrapper over `Ipv6Addr.parse` — the only
@@ -51,7 +51,7 @@ public type Ipv6CanonicalError is
 // =============================================================================
 
 /// Format an already-parsed `Ipv6Addr` in RFC 5952 canonical form.
-public fn format(addr: &Ipv6Addr) -> Text {
+public fn format_ipv6(addr: &Ipv6Addr) -> Text {
     let octets: [Byte; 16] = addr.octets();
     let mut groups: [UInt16; 8] = [0_u16; 8];
     let mut i: Int = 0;
@@ -101,7 +101,7 @@ public fn parse(text: &Text) -> Result<Ipv6Addr, Ipv6CanonicalError> {
 /// Parse + re-emit — the "normalise this text" one-call form.
 public fn canonicalize(text: &Text) -> Result<Text, Ipv6CanonicalError> {
     let addr = parse(text)?;
-    Ok(format(&addr))
+    Ok(format_ipv6(&addr))
 }
 
 /// Equality check modulo spelling — "are these two strings the
