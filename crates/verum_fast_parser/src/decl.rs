@@ -3227,19 +3227,31 @@ impl<'a> RecursiveParser<'a> {
                                     }
                                 }
 
-                                // Check token 5: if it's a comparison/arithmetic operator, it's a refinement
+                                // Check token 5 to decide record-field vs named-refinement.
+                                //
+                                // Tok4 is a plain identifier (not `self`/`it` — those
+                                // returned false already). In a record-field position
+                                // `{ name: TypeName ...}`, tok4 is the field's type
+                                // name and tok5 is whatever continues that type:
+                                //   `Lt`  → `TypeName<Args>`         (generic type)
+                                //   `Dot` → `module.TypeName`        (qualified path)
+                                //   `Comma`/`RBrace` → end of field  (simple type)
+                                // None of these indicate a refinement predicate.
+                                //
+                                // Operators `>=`, `<=`, `==`, `!=`, arith, logical —
+                                // those are actual value-level comparisons/arith on a
+                                // refinement expression. `Gt` alone is kept on the
+                                // refinement side because the generic case (`Maybe<Int>`)
+                                // produces `Lt` at tok5, not `Gt`; a bare `Gt` at tok5
+                                // after `name: ident` is much more likely a comparison
+                                // like `{ count: xs > 0 }`.
                                 if let Some(tok5) = self.stream.peek_nth(5).map(|t| &t.kind) {
                                     match tok5 {
-                                        // Comparison operators indicate refinement expression
                                         TokenKind::GtEq | TokenKind::LtEq | TokenKind::EqEq |
-                                        TokenKind::BangEq | TokenKind::Gt | TokenKind::Lt |
-                                        // Arithmetic operators also suggest expression
+                                        TokenKind::BangEq | TokenKind::Gt |
                                         TokenKind::Plus | TokenKind::Minus | TokenKind::Star |
                                         TokenKind::Slash | TokenKind::Percent |
-                                        // Logical operators
-                                        TokenKind::AmpersandAmpersand | TokenKind::PipePipe |
-                                        // Method call on the identifier
-                                        TokenKind::Dot => {
+                                        TokenKind::AmpersandAmpersand | TokenKind::PipePipe => {
                                             return false; // Named refinement predicate
                                         }
                                         _ => {}
