@@ -518,6 +518,12 @@ public fn step(state: &mut VdbeState, program: &VdbeProgram) -> StepResult {
             Yield
         }
 
+        SortRowStore(cursor_id, n_keys, dir_bits) => {
+            let _ = state.cursors.sort_by_prefix(cursor_id, n_keys, dir_bits);
+            state.pc = state.pc + 1;
+            Yield
+        }
+
         Transaction(_) => { state.pc = state.pc + 1; Yield }
         Commit         => { state.pc = state.pc + 1; Yield }
         RollbackOp(_)  => { state.pc = state.pc + 1; Yield }

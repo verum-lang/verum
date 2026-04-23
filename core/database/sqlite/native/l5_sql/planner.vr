@@ -653,7 +653,27 @@ fn plan_select_with_schema(
     }
     node = PnProject(Heap(node), plan_cols);
 
-    // LIMIT (no ORDER BY yet — spec-rich sort planner pending).
+    // ORDER BY — resolve every term's expression against the same scope.
+    if sel.order_by.len() > 0 {
+        let mut resolved_terms: List<OrderTerm> = List.new();
+        let mut t: Int = 0;
+        while t < sel.order_by.len() {
+            let term = &sel.order_by[t];
+            let r_expr = match resolve_expr(&term.expr, &scopes) {
+                Ok(e)  => e,
+                Err(_) => { return Err(plan_error("ORDER BY resolve failed".clone())); }
+            };
+            resolved_terms.push(OrderTerm {
+                expr: r_expr,
+                direction: term.direction,
+                nulls_first: term.nulls_first,
+            });
+            t = t + 1;
+        }
+        node = PnSort(Heap(node), resolved_terms);
+    }
+
+    // LIMIT / OFFSET.
     match sel.limit {
         Some(ref lc) => {
             let off: Maybe<Expr> = match lc.offset {

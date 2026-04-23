@@ -1,0 +1,119 @@
+// @test: typecheck-pass
+// @level: L2
+// @tier: 0
+// @tags: sqlite, native, l7, order-by, sort
+// @timeout: 20000
+// @description: SELECT ... ORDER BY codegen — materialize + in-place sort
+//
+// Spec: internal/specs/sqlite-native.md §14.2.4 (ORDER BY)
+
+mount core.*;
+mount collections.List;
+mount core.database.sqlite.native.l7_api.{
+    Database, DbError, open_admin,
+};
+mount core.database.sqlite.native.l4_vdbe.Register;
+
+fn order_by_asc_default() {
+    let mut db = match open_admin() {
+        Ok(d)  => d,
+        Err(_) => { panic("open"); return; }
+    };
+    let _ = db.execute(&"CREATE TABLE t (v INTEGER)".clone());
+    let _ = db.execute(&"INSERT INTO t VALUES (30)".clone());
+    let _ = db.execute(&"INSERT INTO t VALUES (10)".clone());
+    let _ = db.execute(&"INSERT INTO t VALUES (20)".clone());
+    match db.query_all(&"SELECT v FROM t ORDER BY v".clone()) {
+        Ok(rows) => {
+            assert_eq(rows.len(), 3);
+            // Ascending: 10, 20, 30.
+            match rows[0][0] { RInt(x) => assert_eq(x as Int, 10), _ => panic("asc[0]") }
+            match rows[1][0] { RInt(x) => assert_eq(x as Int, 20), _ => panic("asc[1]") }
+            match rows[2][0] { RInt(x) => assert_eq(x as Int, 30), _ => panic("asc[2]") }
+        }
+        Err(_) => panic("query_all ORDER BY v"),
+    }
+}
+
+fn order_by_desc() {
+    let mut db = match open_admin() {
+        Ok(d)  => d,
+        Err(_) => { panic("open"); return; }
+    };
+    let _ = db.execute(&"CREATE TABLE t (v INTEGER)".clone());
+    let _ = db.execute(&"INSERT INTO t VALUES (1)".clone());
+    let _ = db.execute(&"INSERT INTO t VALUES (3)".clone());
+    let _ = db.execute(&"INSERT INTO t VALUES (2)".clone());
+    match db.query_all(&"SELECT v FROM t ORDER BY v DESC".clone()) {
+        Ok(rows) => {
+            assert_eq(rows.len(), 3);
+            match rows[0][0] { RInt(x) => assert_eq(x as Int, 3), _ => panic("desc[0]") }
+            match rows[1][0] { RInt(x) => assert_eq(x as Int, 2), _ => panic("desc[1]") }
+            match rows[2][0] { RInt(x) => assert_eq(x as Int, 1), _ => panic("desc[2]") }
+        }
+        Err(_) => panic("query_all ORDER BY v DESC"),
+    }
+}
+
+fn order_by_with_where() {
+    let mut db = match open_admin() {
+        Ok(d)  => d,
+        Err(_) => { panic("open"); return; }
+    };
+    let _ = db.execute(&"CREATE TABLE nums (v INTEGER)".clone());
+    let _ = db.execute(&"INSERT INTO nums VALUES (5)".clone());
+    let _ = db.execute(&"INSERT INTO nums VALUES (1)".clone());
+    let _ = db.execute(&"INSERT INTO nums VALUES (7)".clone());
+    let _ = db.execute(&"INSERT INTO nums VALUES (3)".clone());
+    // Without WHERE-value comparison support we just check ordering:
+    match db.query_all(&"SELECT v FROM nums ORDER BY v".clone()) {
+        Ok(rows) => {
+            assert_eq(rows.len(), 4);
+            // Extract and verify ascending monotonicity.
+            let mut prev: Int = -1000000;
+            let mut i: Int = 0;
+            while i < rows.len() {
+                match rows[i][0] {
+                    RInt(x) => {
+                        let xi = x as Int;
+                        assert(prev <= xi);
+                        prev = xi;
+                    }
+                    _ => panic("ordered: expected RInt"),
+                }
+                i = i + 1;
+            }
+        }
+        Err(_) => panic("query_all ORDER BY v"),
+    }
+}
+
+fn order_by_limit_combined() {
+    let mut db = match open_admin() {
+        Ok(d)  => d,
+        Err(_) => { panic("open"); return; }
+    };
+    let _ = db.execute(&"CREATE TABLE t (v INTEGER)".clone());
+    let _ = db.execute(&"INSERT INTO t VALUES (50)".clone());
+    let _ = db.execute(&"INSERT INTO t VALUES (10)".clone());
+    let _ = db.execute(&"INSERT INTO t VALUES (30)".clone());
+    let _ = db.execute(&"INSERT INTO t VALUES (20)".clone());
+    let _ = db.execute(&"INSERT INTO t VALUES (40)".clone());
+    // ORDER BY v LIMIT 2 → smallest two = 10, 20
+    match db.query_all(&"SELECT v FROM t ORDER BY v LIMIT 2".clone()) {
+        Ok(rows) => {
+            assert_eq(rows.len(), 2);
+            match rows[0][0] { RInt(x) => assert_eq(x as Int, 10), _ => panic("limit[0]") }
+            match rows[1][0] { RInt(x) => assert_eq(x as Int, 20), _ => panic("limit[1]") }
+        }
+        Err(_) => panic("query_all ORDER BY LIMIT"),
+    }
+}
+
+fn main() {
+    order_by_asc_default();
+    order_by_desc();
+    order_by_with_where();
+    order_by_limit_combined();
+    print("order_by_clause typecheck ok");
+}

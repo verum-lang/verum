@@ -282,6 +282,7 @@ fn clone_opcode(op: &Opcode) -> Opcode {
         SorterSort(c)       => SorterSort(c),
         SorterData(c, d)    => SorterData(c, d),
         SorterNext(c, t)    => SorterNext(c, t),
+        SortRowStore(c, n, d) => SortRowStore(c, n, d),
         Transaction(w) => Transaction(w),
         Commit         => Commit,
         RollbackOp(n)  => RollbackOp(n),

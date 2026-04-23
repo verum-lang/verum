@@ -158,7 +158,7 @@ fn emit_plan(st: &mut CgState, plan: &PlanNode) -> Result<(), CodegenError> {
         PnProject(ref child, ref cols) => emit_project(st, child, cols),
         PnFilter(ref child, ref pred)  => emit_filter(st, child, pred),
         PnLimit(ref child, ref lim, ref off) => emit_limit(st, child, lim, off),
-        PnSort(_, _) => Err(unsupported("ORDER BY codegen pending".clone())),
+        PnSort(ref child, ref terms) => emit_sort(st, child, terms),
         PnTableScan(ref t, cid, n_cols) => emit_table_scan(st, t, cid, n_cols),
         PnInsert(ref t, ref cols, ref src, ref oc) => emit_insert(st, t, cols, src, oc),
         PnDelete(ref t, cid, ref pred) => emit_delete(st, t, cid, pred),
@@ -360,6 +360,149 @@ fn emit_scan_with_filter_project(
     st.program.replace(rewind_idx, Rewind(cursor_id, after));
     emit_limit_finalize_patches(st, after);
     let _ = st.program.emit(Close(cursor_id));
+    Ok(())
+}
+
+// -----------------------------------------------------------------------------
+// ORDER BY (materialise + in-place sort)
+//
+// Strategy: open an ephemeral cursor `sid` with `n_keys + n_proj`
+// columns. Scan the source table, and for each row evaluate the sort
+// keys AND the projection columns into a contiguous register window,
+// then Insert into the sorter. After the scan, SortRowStore sorts the
+// row store by the leading n_keys cells. Finally, Rewind+Next over the
+// sorter emits projection columns via ResultRow.
+// -----------------------------------------------------------------------------
+
+fn dir_bits_of(terms: &List<OrderTerm>) -> Int {
+    let mut bits: Int = 0;
+    let mut i: Int = 0;
+    while i < terms.len() {
+        match terms[i].direction {
+            OdDesc => { bits = bits | (1 << i); }
+            OdAsc  => {}
+        }
+        i = i + 1;
+    }
+    bits
+}
+
+fn emit_sort(
+    st: &mut CgState,
+    child: &PlanNode,
+    terms: &List<OrderTerm>,
+) -> Result<(), CodegenError> {
+    if terms.len() == 0 {
+        return emit_plan(st, child);
+    }
+    // Supported shapes:
+    //   PnProject(PnTableScan, cols)          — SELECT … FROM t ORDER BY …
+    //   PnProject(PnFilter(PnTableScan), cols) — SELECT … FROM t WHERE … ORDER BY …
+    match child {
+        PnProject(ref grand, ref proj_cols) => {
+            match grand {
+                PnTableScan(ref _t, cid, n) =>
+                    emit_sort_pipeline(st, cid, n, proj_cols, terms, false, &ELit(LNull)),
+                PnFilter(ref gg, ref pred) => match gg {
+                    PnTableScan(ref _t, cid, n) =>
+                        emit_sort_pipeline(st, cid, n, proj_cols, terms, true, pred),
+                    _ => Err(unsupported("ORDER BY over non-TableScan child pending".clone())),
+                },
+                _ => Err(unsupported("ORDER BY over non-TableScan child pending".clone())),
+            }
+        }
+        _ => Err(unsupported("ORDER BY must wrap a Project/TableScan pipeline".clone())),
+    }
+}
+
+fn emit_sort_pipeline(
+    st: &mut CgState,
+    src_cid: Int,
+    src_n_cols: Int,
+    proj_cols: &List<PlanColumn>,
+    terms: &List<OrderTerm>,
+    has_filter: Bool,
+    filter_pred: &Expr,
+) -> Result<(), CodegenError> {
+    let n_keys = terms.len();
+    let n_proj = proj_cols.len();
+    let dir_bits = dir_bits_of(terms);
+
+    // Ephemeral sort buffer.
+    let sid = st.program.declare_cursor(CkTable, 0, n_keys + n_proj);
+    let _ = st.program.emit(OpenEphemeral(sid, n_keys + n_proj));
+
+    // Source table scan.
+    if src_cid >= st.program.cursor_count() {
+        let _ = st.program.declare_cursor(CkTable, 0, src_n_cols);
+    }
+    let _ = st.program.emit(OpenRead(src_cid, 0, src_n_cols));
+    let scan_rewind_idx = st.program.emit(Rewind(src_cid, 0));
+    let scan_loop_top = st.program.instruction_count();
+
+    // If a WHERE predicate is present, skip the body on falsy.
+    let mut skip_patch: Int = -1;
+    let mut skip_pred_reg: Int = -1;
+    if has_filter {
+        let pr = st.regs.alloc();
+        match emit_expr(st, filter_pred, pr) {
+            Ok(_)  => {}, Err(e) => { return Err(e); }
+        }
+        skip_patch = st.program.emit(IfNot(pr, 0));
+        skip_pred_reg = pr;
+    }
+
+    // Evaluate keys + projection columns into a contiguous window.
+    let scratch_start = st.regs.alloc_n(n_keys + n_proj);
+    let mut k: Int = 0;
+    while k < n_keys {
+        match emit_expr(st, &terms[k].expr, scratch_start + k) {
+            Ok(_)  => {}, Err(e) => { return Err(e); }
+        }
+        k = k + 1;
+    }
+    let mut p: Int = 0;
+    while p < n_proj {
+        match emit_expr(st, &proj_cols[p].expr, scratch_start + n_keys + p) {
+            Ok(_)  => {}, Err(e) => { return Err(e); }
+        }
+        p = p + 1;
+    }
+    // Push into the sorter.
+    let key_reg = st.regs.alloc();
+    let _ = st.program.emit(NewRowid(sid, key_reg));
+    let _ = st.program.emit(Insert(sid, scratch_start, key_reg, 0));
+
+    if skip_patch >= 0 {
+        let skip_target = st.program.instruction_count();
+        st.program.replace(skip_patch, IfNot(skip_pred_reg, skip_target));
+    }
+
+    let _ = st.program.emit(Next(src_cid, scan_loop_top));
+    let after_scan = st.program.instruction_count();
+    st.program.replace(scan_rewind_idx, Rewind(src_cid, after_scan));
+    let _ = st.program.emit(Close(src_cid));
+
+    // Sort the buffer by the leading n_keys cells.
+    let _ = st.program.emit(SortRowStore(sid, n_keys, dir_bits));
+
+    // Emission loop over the sorted buffer.
+    let emit_rewind_idx = st.program.emit(Rewind(sid, 0));
+    let emit_loop_top = st.program.instruction_count();
+    let proj_dst_start = st.regs.alloc_n(n_proj);
+    let mut ek: Int = 0;
+    while ek < n_proj {
+        let _ = st.program.emit(Column(sid, n_keys + ek, proj_dst_start + ek));
+        ek = ek + 1;
+    }
+    let _ = st.program.emit(ResultRow(proj_dst_start, n_proj));
+    emit_limit_body_counter(st);
+    let _ = st.program.emit(Next(sid, emit_loop_top));
+    let after_emit = st.program.instruction_count();
+    st.program.replace(emit_rewind_idx, Rewind(sid, after_emit));
+    // Let any enclosing LIMIT patches land just before Close.
+    emit_limit_finalize_patches(st, after_emit);
+    let _ = st.program.emit(Close(sid));
     Ok(())
 }
 
