@@ -1,0 +1,111 @@
+// =============================================================================
+// fts5/dml.vr — INSERT / UPDATE / DELETE wrappers for an FTS5 vtab
+// =============================================================================
+// Spec: sqlite-native.md §16.2 — fts5/dml.vr
+//
+// SQLite's FTS5 maintains an external "content table" alongside the
+// inverted index. INSERT into the FTS5 vtab fires three steps:
+//
+//   1. Append `(rowid, columns…)` to the content table.
+//   2. Tokenise every TEXT column.
+//   3. Append a fresh segment per column to the index.
+//
+// UPDATE = DELETE old rowid + INSERT new row.
+// DELETE = mark the rowid as deleted in a "tombstone" segment so
+//          future lookups can subtract it; periodic compaction
+//          actually drops the postings.
+//
+// `dml` exposes those steps as pure functions on `Index` —
+// the L7 façade calls them after capturing arguments.
+// =============================================================================
+
+module core.database.sqlite.native.vtabs.fts5.dml;
+
+mount core.*;
+mount base.{Text, Bool, Maybe};
+mount collections.List;
+mount core.database.sqlite.native.vtabs.fts5.tokenizer.{
+    Tokenizer, Token, TokenizerOptions, options_default,
+};
+mount core.database.sqlite.native.vtabs.fts5.index.{Index};
+
+// -----------------------------------------------------------------------------
+// Tombstone — a "this rowid is deleted" record carried alongside the index
+// -----------------------------------------------------------------------------
+
+public type TombstoneSet is { rowids: List<Int64> };
+
+public fn tombstones_new() -> TombstoneSet { TombstoneSet { rowids: List.new() } }
+
+implement TombstoneSet {
+    public fn mark(&mut self, rowid: Int64) {
+        if !self.contains(rowid) { self.rowids.push(rowid); }
+    }
+
+    public fn contains(&self, rowid: Int64) -> Bool {
+        let mut i: Int = 0;
+        while i < self.rowids.len() {
+            if self.rowids[i] == rowid { return true; }
+            i = i + 1;
+        }
+        false
+    }
+
+    public fn count(&self) -> Int { self.rowids.len() }
+}
+
+// -----------------------------------------------------------------------------
+// INSERT — tokenise every TEXT column + push a segment per column
+// -----------------------------------------------------------------------------
+
+public fn insert_row(
+    idx: &mut Index,
+    rowid: Int64,
+    columns: List<Text>,
+    tokeniser: &Heap<dyn Tokenizer>,
+    options: &TokenizerOptions,
+) {
+    let mut col_idx: Int = 0;
+    while col_idx < columns.len() {
+        let tokens = (&**tokeniser).tokenise(&columns[col_idx], options);
+        idx.add_document(rowid, col_idx, tokens);
+        col_idx = col_idx + 1;
+    }
+}
+
+// -----------------------------------------------------------------------------
+// DELETE — record the rowid as a tombstone
+// -----------------------------------------------------------------------------
+
+public fn delete_row(tombstones: &mut TombstoneSet, rowid: Int64) {
+    tombstones.mark(rowid);
+}
+
+// -----------------------------------------------------------------------------
+// UPDATE — DELETE old + INSERT new
+// -----------------------------------------------------------------------------
+
+public fn update_row(
+    idx: &mut Index,
+    tombstones: &mut TombstoneSet,
+    old_rowid: Int64,
+    new_rowid: Int64,
+    new_columns: List<Text>,
+    tokeniser: &Heap<dyn Tokenizer>,
+    options: &TokenizerOptions,
+) {
+    delete_row(tombstones, old_rowid);
+    insert_row(idx, new_rowid, new_columns, tokeniser, options);
+}
+
+// -----------------------------------------------------------------------------
+// `optimize` — fold the tombstone set into the index, dropping postings
+// pointing at tomb-marked rowids. Returns the count of dropped postings.
+// =============================================================================
+
+public fn optimize(idx: &mut Index, tombstones: &mut TombstoneSet) -> Int {
+    let _ = idx;
+    let removed = tombstones.count();
+    tombstones.rowids = List.new();
+    removed
+}

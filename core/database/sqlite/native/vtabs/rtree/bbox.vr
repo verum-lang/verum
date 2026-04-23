@@ -1,0 +1,150 @@
+// =============================================================================
+// rtree/bbox.vr — N-dimensional axis-aligned bounding box
+// =============================================================================
+// Spec: sqlite-native.md §16.3
+//
+// `BBox` carries `[x_min, x_max, y_min, y_max, ...]` for the chosen
+// number of dimensions. SQLite caps R-tree at 5 dimensions; loom
+// matches that.
+//
+// All operations are pure: containment, overlap, union, area,
+// area-enlargement-after-insert (used by node-split heuristics).
+// =============================================================================
+
+module core.database.sqlite.native.vtabs.rtree.bbox;
+
+mount core.*;
+mount base.{Bool};
+mount collections.List;
+
+public const MAX_DIMS: Int = 5;
+
+// -----------------------------------------------------------------------------
+// BBox
+// -----------------------------------------------------------------------------
+
+public type BBox is {
+    /// Number of dimensions (1..5).
+    n_dims: Int,
+    /// Coordinates: [d0_min, d0_max, d1_min, d1_max, ...].
+    coords: List<Float64>,
+};
+
+/// Create a BBox from N pairs `[(min_d0, max_d0), (min_d1, max_d1), ...]`.
+public fn bbox_new(n_dims: Int, coords: List<Float64>) -> BBox {
+    BBox { n_dims: n_dims, coords: coords }
+}
+
+implement BBox {
+    public fn min_at(&self, dim: Int) -> Float64 {
+        self.coords[dim * 2]
+    }
+    public fn max_at(&self, dim: Int) -> Float64 {
+        self.coords[dim * 2 + 1]
+    }
+
+    /// Volume / area / length depending on n_dims.
+    public fn volume(&self) -> Float64 {
+        let mut v: Float64 = 1.0;
+        let mut d: Int = 0;
+        while d < self.n_dims {
+            let span = self.max_at(d) - self.min_at(d);
+            if span < 0.0 { return 0.0; }
+            v = v * span;
+            d = d + 1;
+        }
+        v
+    }
+
+    /// True if `inner` is fully inside `self`.
+    public fn contains(&self, inner: &BBox) -> Bool {
+        if self.n_dims != inner.n_dims { return false; }
+        let mut d: Int = 0;
+        while d < self.n_dims {
+            if inner.min_at(d) < self.min_at(d) { return false; }
+            if inner.max_at(d) > self.max_at(d) { return false; }
+            d = d + 1;
+        }
+        true
+    }
+
+    /// True if the two boxes share any point.
+    public fn overlaps(&self, other: &BBox) -> Bool {
+        if self.n_dims != other.n_dims { return false; }
+        let mut d: Int = 0;
+        while d < self.n_dims {
+            if other.max_at(d) < self.min_at(d) { return false; }
+            if other.min_at(d) > self.max_at(d) { return false; }
+            d = d + 1;
+        }
+        true
+    }
+
+    /// Smallest bbox containing both.
+    public fn union(&self, other: &BBox) -> BBox {
+        let mut coords: List<Float64> = List.new();
+        let mut d: Int = 0;
+        while d < self.n_dims {
+            let lo_a = self.min_at(d);
+            let lo_b = other.min_at(d);
+            let hi_a = self.max_at(d);
+            let hi_b = other.max_at(d);
+            let lo = if lo_a < lo_b { lo_a } else { lo_b };
+            let hi = if hi_a > hi_b { hi_a } else { hi_b };
+            coords.push(lo);
+            coords.push(hi);
+            d = d + 1;
+        }
+        BBox { n_dims: self.n_dims, coords: coords }
+    }
+
+    /// How much volume `self` would gain by absorbing `addition`.
+    public fn enlargement_to_include(&self, addition: &BBox) -> Float64 {
+        let union = self.union(addition);
+        union.volume() - self.volume()
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Equality
+// -----------------------------------------------------------------------------
+
+public fn bbox_equal(a: &BBox, b: &BBox) -> Bool {
+    if a.n_dims != b.n_dims { return false; }
+    if a.coords.len() != b.coords.len() { return false; }
+    let mut i: Int = 0;
+    while i < a.coords.len() {
+        if a.coords[i] != b.coords[i] { return false; }
+        i = i + 1;
+    }
+    true
+}
+
+// -----------------------------------------------------------------------------
+// Convenience constructors
+// -----------------------------------------------------------------------------
+
+public fn bbox_1d(lo: Float64, hi: Float64) -> BBox {
+    let mut c: List<Float64> = List.new();
+    c.push(lo); c.push(hi);
+    BBox { n_dims: 1, coords: c }
+}
+
+public fn bbox_2d(x_lo: Float64, x_hi: Float64, y_lo: Float64, y_hi: Float64) -> BBox {
+    let mut c: List<Float64> = List.new();
+    c.push(x_lo); c.push(x_hi);
+    c.push(y_lo); c.push(y_hi);
+    BBox { n_dims: 2, coords: c }
+}
+
+public fn bbox_3d(
+    x_lo: Float64, x_hi: Float64,
+    y_lo: Float64, y_hi: Float64,
+    z_lo: Float64, z_hi: Float64,
+) -> BBox {
+    let mut c: List<Float64> = List.new();
+    c.push(x_lo); c.push(x_hi);
+    c.push(y_lo); c.push(y_hi);
+    c.push(z_lo); c.push(z_hi);
+    BBox { n_dims: 3, coords: c }
+}

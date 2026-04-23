@@ -1,0 +1,292 @@
+// =============================================================================
+// rtree/tree.vr — RTree handle: insert / delete / search
+// =============================================================================
+// Spec: sqlite-native.md §16.3
+//
+// Holds a flat node table indexed by node_id, plus the root id. The
+// implementation is in-memory; a future revision can swap the table
+// for a pager-backed slice without changing the surface.
+//
+// Insert chooses the leaf with smallest area-enlargement, splits
+// when the leaf is full (linear-cost split — pick the two seeds with
+// largest "wasted area" then assign each remaining entry to the
+// group whose MBB grows least).
+// =============================================================================
+
+module core.database.sqlite.native.vtabs.rtree.tree;
+
+mount core.*;
+mount base.{Bool, Maybe};
+mount collections.List;
+mount core.database.sqlite.native.vtabs.rtree.bbox.{
+    BBox, bbox_equal,
+};
+mount core.database.sqlite.native.vtabs.rtree.node.{
+    Node, Leaf, Internal,
+    LeafContent, InternalContent, LeafEntry, InternalEntry,
+    leaf_new, internal_new, node_id, node_entry_count,
+    node_is_full, node_mbb,
+    RTREE_MAX_CELLS, RTREE_MIN_CELLS,
+};
+
+// -----------------------------------------------------------------------------
+// RTree
+// -----------------------------------------------------------------------------
+
+public type RTree is {
+    nodes: List<Node>,
+    root_id: Int,
+    n_dims: Int,
+    next_id: Int,
+};
+
+public fn rtree_new(n_dims: Int) -> RTree {
+    let mut nodes: List<Node> = List.new();
+    nodes.push(leaf_new(0));
+    RTree {
+        nodes: nodes,
+        root_id: 0,
+        n_dims: n_dims,
+        next_id: 1,
+    }
+}
+
+implement RTree {
+    pub fn dimensions(&self) -> Int { self.n_dims }
+    pub fn node_count(&self) -> Int { self.nodes.len() }
+    pub fn root(&self) -> Int { self.root_id }
+
+    /// Insert a `(rowid, bbox)` entry. Returns the leaf node id.
+    pub fn insert(&mut self, rowid: Int64, bbox: BBox) -> Int {
+        let leaf_id = self.choose_leaf(self.root_id, &bbox);
+        self.add_to_leaf(leaf_id, LeafEntry { rowid: rowid, bbox: bbox });
+        if node_is_full(&self.nodes[leaf_id]) {
+            self.split_leaf(leaf_id);
+        }
+        leaf_id
+    }
+
+    /// Search returns every leaf-entry whose bbox overlaps `query`.
+    pub fn search(&self, query: &BBox) -> List<Int64> {
+        let mut out: List<Int64> = List.new();
+        self.search_node(self.root_id, query, &mut out);
+        out
+    }
+
+    fn search_node(&self, node_idx: Int, query: &BBox, out: &mut List<Int64>) {
+        if node_idx >= self.nodes.len() { return; }
+        match &self.nodes[node_idx] {
+            Leaf(c) => {
+                let mut i: Int = 0;
+                while i < c.entries.len() {
+                    if c.entries[i].bbox.overlaps(query) {
+                        out.push(c.entries[i].rowid);
+                    }
+                    i = i + 1;
+                }
+            }
+            Internal(c) => {
+                let mut i: Int = 0;
+                while i < c.entries.len() {
+                    if c.entries[i].bbox.overlaps(query) {
+                        self.search_node(c.entries[i].child_node_id, query, out);
+                    }
+                    i = i + 1;
+                }
+            }
+        }
+    }
+
+    /// Delete a (rowid, bbox) entry. Returns true on success.
+    pub fn delete(&mut self, rowid: Int64) -> Bool {
+        let leaf = self.find_leaf_with(self.root_id, rowid);
+        match leaf {
+            Some(idx) => {
+                self.remove_from_leaf(idx, rowid);
+                true
+            }
+            None => false,
+        }
+    }
+
+    fn find_leaf_with(&self, node_idx: Int, rowid: Int64) -> Maybe<Int> {
+        if node_idx >= self.nodes.len() { return None; }
+        match &self.nodes[node_idx] {
+            Leaf(c) => {
+                let mut i: Int = 0;
+                while i < c.entries.len() {
+                    if c.entries[i].rowid == rowid { return Some(node_idx); }
+                    i = i + 1;
+                }
+                None
+            }
+            Internal(c) => {
+                let mut i: Int = 0;
+                while i < c.entries.len() {
+                    let r = self.find_leaf_with(c.entries[i].child_node_id, rowid);
+                    match r { Some(_) => { return r; }, None => {} }
+                    i = i + 1;
+                }
+                None
+            }
+        }
+    }
+
+    fn remove_from_leaf(&mut self, leaf_idx: Int, rowid: Int64) {
+        match &mut self.nodes[leaf_idx] {
+            Leaf(c) => {
+                let mut new_entries: List<LeafEntry> = List.new();
+                let mut i: Int = 0;
+                while i < c.entries.len() {
+                    if c.entries[i].rowid != rowid {
+                        new_entries.push(LeafEntry {
+                            rowid: c.entries[i].rowid,
+                            bbox: clone_bbox(&c.entries[i].bbox),
+                        });
+                    }
+                    i = i + 1;
+                }
+                c.entries = new_entries;
+            }
+            _ => {}
+        }
+    }
+
+    fn add_to_leaf(&mut self, leaf_idx: Int, entry: LeafEntry) {
+        match &mut self.nodes[leaf_idx] {
+            Leaf(c) => c.entries.push(entry),
+            _ => {}
+        }
+    }
+
+    /// Walk down the tree, choosing the child whose MBB requires the
+    /// smallest enlargement to absorb the new bbox. Tie-broken by
+    /// smallest current MBB area.
+    fn choose_leaf(&self, node_idx: Int, bbox: &BBox) -> Int {
+        match &self.nodes[node_idx] {
+            Leaf(_) => node_idx,
+            Internal(c) => {
+                let mut best: Int = -1;
+                let mut best_growth: Float64 = 0.0;
+                let mut best_volume: Float64 = 0.0;
+                let mut i: Int = 0;
+                while i < c.entries.len() {
+                    let entry = &c.entries[i];
+                    let growth = entry.bbox.enlargement_to_include(bbox);
+                    let take = if best < 0 {
+                        true
+                    } else if growth < best_growth {
+                        true
+                    } else if growth == best_growth && entry.bbox.volume() < best_volume {
+                        true
+                    } else { false };
+                    if take {
+                        best = i;
+                        best_growth = growth;
+                        best_volume = entry.bbox.volume();
+                    }
+                    i = i + 1;
+                }
+                if best < 0 { return node_idx; }
+                self.choose_leaf(c.entries[best].child_node_id, bbox)
+            }
+        }
+    }
+
+    /// Linear-cost split: pick the two extreme entries as seeds, then
+    /// distribute remaining entries to whichever side requires less
+    /// enlargement.
+    fn split_leaf(&mut self, leaf_idx: Int) {
+        let entries: List<LeafEntry> = match &self.nodes[leaf_idx] {
+            Leaf(c) => clone_leaf_entries(&c.entries),
+            _ => { return; }
+        };
+        // Pick the two entries with widest separation along dim 0
+        // (linear-cost heuristic).
+        let mut min_at_max: Float64 = entries[0].bbox.max_at(0);
+        let mut max_at_min: Float64 = entries[0].bbox.min_at(0);
+        let mut seed_a: Int = 0;
+        let mut seed_b: Int = 0;
+        let mut i: Int = 1;
+        while i < entries.len() {
+            let lo = entries[i].bbox.min_at(0);
+            let hi = entries[i].bbox.max_at(0);
+            if hi < min_at_max { min_at_max = hi; seed_a = i; }
+            if lo > max_at_min { max_at_min = lo; seed_b = i; }
+            i = i + 1;
+        }
+        if seed_a == seed_b {
+            seed_a = 0;
+            seed_b = entries.len() - 1;
+        }
+        let mut left: List<LeafEntry> = List.new();
+        let mut right: List<LeafEntry> = List.new();
+        left.push(clone_leaf_entry(&entries[seed_a]));
+        right.push(clone_leaf_entry(&entries[seed_b]));
+        let mut left_mbb = clone_bbox(&entries[seed_a].bbox);
+        let mut right_mbb = clone_bbox(&entries[seed_b].bbox);
+        let mut k: Int = 0;
+        while k < entries.len() {
+            if k == seed_a || k == seed_b { k = k + 1; continue; }
+            let g_left = left_mbb.enlargement_to_include(&entries[k].bbox);
+            let g_right = right_mbb.enlargement_to_include(&entries[k].bbox);
+            if g_left < g_right {
+                left_mbb = left_mbb.union(&entries[k].bbox);
+                left.push(clone_leaf_entry(&entries[k]));
+            } else {
+                right_mbb = right_mbb.union(&entries[k].bbox);
+                right.push(clone_leaf_entry(&entries[k]));
+            }
+            k = k + 1;
+        }
+        // Replace original leaf with the left half, allocate a new leaf for right.
+        match &mut self.nodes[leaf_idx] {
+            Leaf(c) => { c.entries = left; }
+            _ => {}
+        }
+        let new_id = self.next_id;
+        self.next_id = new_id + 1;
+        let mut right_leaf = leaf_new(new_id);
+        match &mut right_leaf {
+            Leaf(c) => { c.entries = right; }
+            _ => {}
+        }
+        self.nodes.push(right_leaf);
+        // If we split the root, create a new internal root.
+        if leaf_idx == self.root_id {
+            let new_root_id = self.next_id;
+            self.next_id = new_root_id + 1;
+            let mut new_root = internal_new(new_root_id);
+            match &mut new_root {
+                Internal(c) => {
+                    c.entries.push(InternalEntry { child_node_id: leaf_idx, bbox: left_mbb });
+                    c.entries.push(InternalEntry { child_node_id: new_id, bbox: right_mbb });
+                }
+                _ => {}
+            }
+            self.nodes.push(new_root);
+            self.root_id = new_root_id;
+        }
+    }
+}
+
+fn clone_leaf_entry(e: &LeafEntry) -> LeafEntry {
+    LeafEntry { rowid: e.rowid, bbox: clone_bbox(&e.bbox) }
+}
+
+fn clone_leaf_entries(entries: &List<LeafEntry>) -> List<LeafEntry> {
+    let mut out: List<LeafEntry> = List.new();
+    let mut i: Int = 0;
+    while i < entries.len() {
+        out.push(clone_leaf_entry(&entries[i]));
+        i = i + 1;
+    }
+    out
+}
+
+fn clone_bbox(b: &BBox) -> BBox {
+    let mut coords: List<Float64> = List.new();
+    let mut i: Int = 0;
+    while i < b.coords.len() { coords.push(b.coords[i]); i = i + 1; }
+    BBox { n_dims: b.n_dims, coords: coords }
+}

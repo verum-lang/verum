@@ -1,0 +1,111 @@
+// =============================================================================
+// fts5/merger.vr — background segment merger (level promotion)
+// =============================================================================
+// Spec: sqlite-native.md §16.2 — fts5/merger.vr
+//
+// When level-N has accumulated `merge_threshold` segments, the merger
+// fuses them into a single level-(N+1) segment. This compaction is
+// what keeps lookup cost logarithmic in number-of-documents rather
+// than linear in number-of-writes.
+//
+// The merger is *idempotent* — running it twice produces identical
+// state — and *level-by-level*: a single `compact_step` promotes
+// one level only, so the overall throughput is bounded.
+// =============================================================================
+
+module core.database.sqlite.native.vtabs.fts5.merger;
+
+mount core.*;
+mount base.{Bool};
+mount collections.List;
+mount core.database.sqlite.native.vtabs.fts5.segment.{
+    Segment, segment_merge, segment_empty,
+};
+mount core.database.sqlite.native.vtabs.fts5.index.{
+    Index, SegmentLevel, level_new,
+};
+
+// -----------------------------------------------------------------------------
+// MergerReport — what the merger did this iteration
+// -----------------------------------------------------------------------------
+
+public type MergerReport is {
+    levels_compacted: Int,
+    segments_merged: Int,
+    bytes_freed: Int,
+};
+
+public fn merger_report_zero() -> MergerReport {
+    MergerReport { levels_compacted: 0, segments_merged: 0, bytes_freed: 0 }
+}
+
+// -----------------------------------------------------------------------------
+// One step of compaction — promotes the lowest level that exceeds
+// the threshold.
+// -----------------------------------------------------------------------------
+
+public fn compact_step(idx: &mut Index) -> MergerReport {
+    let mut report = merger_report_zero();
+    let mut l: Int = 0;
+    while l < idx.level_count() {
+        let n_segs = idx.segments_at_level(l);
+        if n_segs >= idx.merge_threshold {
+            // Merge all segments at this level into a single segment,
+            // promote to level l+1, clear level l.
+            let merged = merge_level(idx, l);
+            report.segments_merged = report.segments_merged + n_segs;
+            report.levels_compacted = report.levels_compacted + 1;
+            // Promote.
+            ensure_level(idx, l + 1);
+            idx.levels[l + 1].segments.push(merged);
+            // Clear current level.
+            idx.levels[l] = level_new(l);
+            return report;
+        }
+        l = l + 1;
+    }
+    report
+}
+
+fn ensure_level(idx: &mut Index, level: Int) {
+    while idx.levels.len() <= level {
+        idx.levels.push(level_new(idx.levels.len()));
+    }
+}
+
+fn merge_level(idx: &Index, level: Int) -> Segment {
+    if level >= idx.level_count() { return segment_empty(); }
+    let segs = &idx.levels[level].segments;
+    if segs.len() == 0 { return segment_empty(); }
+    let mut acc = clone_segment(&segs[0]);
+    let mut i: Int = 1;
+    while i < segs.len() {
+        acc = segment_merge(&acc, &segs[i]);
+        i = i + 1;
+    }
+    acc
+}
+
+fn clone_segment(s: &Segment) -> Segment {
+    // We use segment_merge with empty to deep-clone.
+    segment_merge(s, &segment_empty())
+}
+
+// -----------------------------------------------------------------------------
+// Run-to-fixpoint variant — repeats compact_step until no level needs merging
+// or `max_steps` is reached.
+// -----------------------------------------------------------------------------
+
+public fn compact_to_fixpoint(idx: &mut Index, max_steps: Int) -> MergerReport {
+    let mut total = merger_report_zero();
+    let mut step: Int = 0;
+    let cap: Int = if max_steps <= 0 { 16 } else { max_steps };
+    while step < cap {
+        let r = compact_step(idx);
+        total.levels_compacted = total.levels_compacted + r.levels_compacted;
+        total.segments_merged = total.segments_merged + r.segments_merged;
+        if r.segments_merged == 0 { break; }
+        step = step + 1;
+    }
+    total
+}

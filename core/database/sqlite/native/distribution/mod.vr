@@ -1,0 +1,20 @@
+// =============================================================================
+// core/database/sqlite/native/distribution/mod.vr
+// =============================================================================
+// Layer: 7 (consumer-facing — surfaced via SQLITE_VERSION + PRAGMA compile_options)
+// Spec: sqlite-native.md §23
+//
+// loom version + build-time feature catalogue. Two surfaces:
+//
+//   * `version`  — semver + git revision + SQLite-compat string
+//   * `features` — boolean toggles for the optional subsystems
+//                  (FTS5 / R-tree / JSON1 / loadable extensions / etc).
+//                  Used by `pragma compile_options` and the public
+//                  `Database.feature_enabled(name) -> Bool` query.
+// =============================================================================
+
+module core.database.sqlite.native.distribution;
+
+public module version;
+public module features;
+public module manifest;

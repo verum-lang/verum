@@ -1,0 +1,172 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, auth, authorizer, hooks
+// @timeout: 5000
+// @expected-exit: 0
+//
+// Authorizer machinery:
+//   * decision combinators (Deny > Ignore > Allow)
+//   * empty-list default: Allow when open_by_default
+//   * built-in AllowAll permits everything
+//   * built-in ReadOnly denies DML/DDL but allows SELECT/PRAGMA
+//   * multi-hook composition picks the most restrictive
+//   * action display + classification helpers
+
+mount core.database.sqlite.native.ext.hooks.{
+    AuthorizerHook, AuthAction, AuthDecision,
+    AdAllow, AdDeny, AdIgnore,
+    AaSelect, AaInsert, AaUpdate, AaDelete,
+    AaCreateTable, AaDropTable, AaPragma, AaTransaction,
+    AaReadColumn, AaWriteColumn, AaFunction,
+};
+mount core.database.sqlite.native.auth.decision.{
+    combine, name as decision_name, permits_compile, forces_null,
+};
+mount core.database.sqlite.native.auth.action.{
+    display, is_dml, is_ddl, is_meta, is_read,
+};
+mount core.database.sqlite.native.auth.dispatch.{
+    Authorizer, authorizer_new,
+    AllowAll, allow_all,
+    ReadOnly, read_only,
+};
+
+// -----------------------------------------------------------------------------
+// decision
+// -----------------------------------------------------------------------------
+
+fn test_combine_deny_wins() {
+    match combine(AdAllow, AdDeny)  { AdDeny => {}, _ => panic("Deny wins over Allow") };
+    match combine(AdIgnore, AdDeny) { AdDeny => {}, _ => panic("Deny wins over Ignore") };
+}
+
+fn test_combine_ignore_beats_allow() {
+    match combine(AdAllow, AdIgnore) { AdIgnore => {}, _ => panic("Ignore beats Allow") };
+    match combine(AdIgnore, AdAllow) { AdIgnore => {}, _ => panic("symmetric") };
+}
+
+fn test_combine_allow_only_when_both_allow() {
+    match combine(AdAllow, AdAllow) { AdAllow => {}, _ => panic("Allow + Allow = Allow") };
+}
+
+fn test_decision_predicates() {
+    assert(permits_compile(&AdAllow));
+    assert(permits_compile(&AdIgnore));
+    assert(!permits_compile(&AdDeny));
+    assert(forces_null(&AdIgnore));
+    assert(!forces_null(&AdAllow));
+    assert(!forces_null(&AdDeny));
+}
+
+fn test_decision_names() {
+    assert(decision_name(&AdAllow) == "ALLOW".clone());
+    assert(decision_name(&AdDeny) == "DENY".clone());
+    assert(decision_name(&AdIgnore) == "IGNORE".clone());
+}
+
+// -----------------------------------------------------------------------------
+// action
+// -----------------------------------------------------------------------------
+
+fn test_action_display() {
+    let d = display(&AaInsert("users".clone()));
+    assert(d == "INSERT INTO users".clone());
+    let d2 = display(&AaPragma("foreign_keys".clone()));
+    assert(d2 == "PRAGMA foreign_keys".clone());
+    let d3 = display(&AaReadColumn("users".clone(), "email".clone()));
+    assert(d3 == "READ users.email".clone());
+}
+
+fn test_action_classification() {
+    assert(is_dml(&AaInsert("t".clone())));
+    assert(is_dml(&AaUpdate("t".clone())));
+    assert(is_dml(&AaDelete("t".clone())));
+    assert(!is_dml(&AaSelect));
+    assert(is_ddl(&AaCreateTable("t".clone())));
+    assert(is_ddl(&AaDropTable("t".clone())));
+    assert(!is_ddl(&AaSelect));
+    assert(is_meta(&AaPragma("p".clone())));
+    assert(is_meta(&AaTransaction));
+    assert(is_read(&AaSelect));
+    assert(is_read(&AaReadColumn("t".clone(), "c".clone())));
+}
+
+// -----------------------------------------------------------------------------
+// Authorizer
+// -----------------------------------------------------------------------------
+
+fn test_empty_authorizer_allows_when_open() {
+    let mut a = authorizer_new();
+    match a.authorize(&AaSelect) { AdAllow => {}, _ => panic("empty open authorizer allows") };
+}
+
+fn test_empty_authorizer_denies_when_closed() {
+    let mut a = authorizer_new();
+    a.set_default_open(false);
+    match a.authorize(&AaSelect) { AdDeny => {}, _ => panic("empty closed authorizer denies") };
+}
+
+fn test_allow_all_subscribed() {
+    let mut a = authorizer_new();
+    a.subscribe(Heap.new(allow_all()));
+    match a.authorize(&AaInsert("t".clone())) { AdAllow => {}, _ => panic("AllowAll allows DML") };
+    match a.authorize(&AaCreateTable("t".clone())) { AdAllow => {}, _ => panic("AllowAll allows DDL") };
+}
+
+fn test_read_only_denies_dml() {
+    let mut a = authorizer_new();
+    a.subscribe(Heap.new(read_only()));
+    match a.authorize(&AaInsert("t".clone())) { AdDeny => {}, _ => panic("ReadOnly must deny INSERT") };
+    match a.authorize(&AaUpdate("t".clone())) { AdDeny => {}, _ => panic("ReadOnly must deny UPDATE") };
+    match a.authorize(&AaDelete("t".clone())) { AdDeny => {}, _ => panic("ReadOnly must deny DELETE") };
+    match a.authorize(&AaCreateTable("t".clone())) { AdDeny => {}, _ => panic("ReadOnly must deny DDL") };
+}
+
+fn test_read_only_allows_reads() {
+    let mut a = authorizer_new();
+    a.subscribe(Heap.new(read_only()));
+    match a.authorize(&AaSelect) { AdAllow => {}, _ => panic("ReadOnly must allow SELECT") };
+    match a.authorize(&AaReadColumn("t".clone(), "c".clone())) { AdAllow => {}, _ => panic("ReadOnly allows READ column") };
+    match a.authorize(&AaPragma("foreign_keys".clone())) { AdAllow => {}, _ => panic("ReadOnly allows PRAGMA") };
+}
+
+fn test_multi_hook_most_restrictive_wins() {
+    let mut a = authorizer_new();
+    a.subscribe(Heap.new(allow_all()));
+    a.subscribe(Heap.new(read_only()));
+    match a.authorize(&AaInsert("t".clone())) {
+        AdDeny => {},
+        _ => panic("read_only restriction must propagate"),
+    }
+    match a.authorize(&AaSelect) {
+        AdAllow => {},
+        _ => panic("both allow SELECT"),
+    }
+}
+
+fn test_unsubscribe_all_resets() {
+    let mut a = authorizer_new();
+    a.subscribe(Heap.new(read_only()));
+    assert_eq(a.hook_count(), 1);
+    a.unsubscribe_all();
+    assert_eq(a.hook_count(), 0);
+    match a.authorize(&AaInsert("t".clone())) { AdAllow => {}, _ => panic("after unsub → open") };
+}
+
+fn main() {
+    test_combine_deny_wins();
+    test_combine_ignore_beats_allow();
+    test_combine_allow_only_when_both_allow();
+    test_decision_predicates();
+    test_decision_names();
+    test_action_display();
+    test_action_classification();
+    test_empty_authorizer_allows_when_open();
+    test_empty_authorizer_denies_when_closed();
+    test_allow_all_subscribed();
+    test_read_only_denies_dml();
+    test_read_only_allows_reads();
+    test_multi_hook_most_restrictive_wins();
+    test_unsubscribe_all_resets();
+}

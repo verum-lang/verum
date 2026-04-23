@@ -1,0 +1,128 @@
+// =============================================================================
+// rtree/node.vr — RTree internal + leaf node records
+// =============================================================================
+// Spec: sqlite-native.md §16.3
+//
+// `LeafEntry`  — (rowid, bbox)
+// `InternalEntry` — (child_node_id, bbox covering all child entries)
+// `Node`       — sum type with leaf / internal payloads
+//
+// Each node has a fixed capacity (16 entries by default — same as
+// SQLite's `RTREE_MAXCELLS`); when an insert would exceed it, the
+// node is split via the linear-cost heuristic in `tree.vr`.
+// =============================================================================
+
+module core.database.sqlite.native.vtabs.rtree.node;
+
+mount core.*;
+mount base.{Maybe};
+mount collections.List;
+mount core.database.sqlite.native.vtabs.rtree.bbox.{BBox};
+
+public const RTREE_MAX_CELLS: Int = 16;
+public const RTREE_MIN_CELLS: Int = 6;
+
+// -----------------------------------------------------------------------------
+// Entries
+// -----------------------------------------------------------------------------
+
+public type LeafEntry is { rowid: Int64, bbox: BBox };
+public type InternalEntry is { child_node_id: Int, bbox: BBox };
+
+// -----------------------------------------------------------------------------
+// Node
+// -----------------------------------------------------------------------------
+
+public type Node is
+      Leaf(LeafContent)
+    | Internal(InternalContent);
+
+public type LeafContent is {
+    node_id: Int,
+    parent: Maybe<Int>,
+    entries: List<LeafEntry>,
+};
+
+public type InternalContent is {
+    node_id: Int,
+    parent: Maybe<Int>,
+    entries: List<InternalEntry>,
+};
+
+public fn leaf_new(node_id: Int) -> Node {
+    Leaf(LeafContent {
+        node_id: node_id,
+        parent: None,
+        entries: List.new(),
+    })
+}
+
+public fn internal_new(node_id: Int) -> Node {
+    Internal(InternalContent {
+        node_id: node_id,
+        parent: None,
+        entries: List.new(),
+    })
+}
+
+// -----------------------------------------------------------------------------
+// Common queries
+// -----------------------------------------------------------------------------
+
+public fn node_id(n: &Node) -> Int {
+    match n {
+        Leaf(c)     => c.node_id,
+        Internal(c) => c.node_id,
+    }
+}
+
+public fn node_entry_count(n: &Node) -> Int {
+    match n {
+        Leaf(c)     => c.entries.len(),
+        Internal(c) => c.entries.len(),
+    }
+}
+
+public fn node_is_full(n: &Node) -> base.Bool {
+    node_entry_count(n) >= RTREE_MAX_CELLS
+}
+
+/// MBB covering every entry in the node.
+public fn node_mbb(n: &Node) -> Maybe<BBox> {
+    match n {
+        Leaf(c) => leaf_mbb(c),
+        Internal(c) => internal_mbb(c),
+    }
+}
+
+fn leaf_mbb(c: &LeafContent) -> Maybe<BBox> {
+    if c.entries.len() == 0 { return None; }
+    let mut acc = clone_bbox(&c.entries[0].bbox);
+    let mut i: Int = 1;
+    while i < c.entries.len() {
+        acc = acc.union(&c.entries[i].bbox);
+        i = i + 1;
+    }
+    Some(acc)
+}
+
+fn internal_mbb(c: &InternalContent) -> Maybe<BBox> {
+    if c.entries.len() == 0 { return None; }
+    let mut acc = clone_bbox(&c.entries[0].bbox);
+    let mut i: Int = 1;
+    while i < c.entries.len() {
+        acc = acc.union(&c.entries[i].bbox);
+        i = i + 1;
+    }
+    Some(acc)
+}
+
+fn clone_bbox(b: &BBox) -> BBox {
+    let mut coords: List<Float64> = List.new();
+    let mut i: Int = 0;
+    while i < b.coords.len() {
+        coords.push(b.coords[i]);
+        i = i + 1;
+    }
+    BBox { n_dims: b.n_dims, coords: coords }
+}

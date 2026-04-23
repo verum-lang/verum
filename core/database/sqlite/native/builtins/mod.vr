@@ -38,3 +38,5 @@ public module datetime_fns;
 public module aggregate_fns;
 public module window_fns;
 public module json_fns;
+// JSON path grammar + json_set/insert/replace/remove/patch.
+public module json_path;

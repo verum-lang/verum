@@ -1,0 +1,138 @@
+// =============================================================================
+// rtree/query.vr — translate WHERE predicates → BBox range probe
+// =============================================================================
+// Spec: sqlite-native.md §16.3
+//
+// Common SQLite R-tree usage:
+//
+//   SELECT id FROM things_rtree
+//    WHERE x_min <= 10 AND x_max >= 5
+//      AND y_min <= 20 AND y_max >= 15;
+//
+// We collect every per-dimension lower / upper bound and build the
+// final query bbox; the caller then runs `RTree.search(&bbox)`.
+// =============================================================================
+
+module core.database.sqlite.native.vtabs.rtree.query;
+
+mount core.*;
+mount base.{Maybe, Bool};
+mount collections.List;
+mount core.database.sqlite.native.vtabs.rtree.bbox.{BBox, MAX_DIMS};
+
+// -----------------------------------------------------------------------------
+// PredicateAtom — one WHERE clause atom on a single coordinate
+// -----------------------------------------------------------------------------
+
+public type CoordOp is OpLE | OpGE | OpEq;
+
+public type PredicateAtom is {
+    /// Dimension index (0..n_dims-1).
+    dim: Int,
+    /// True for the `_max` slot, false for `_min` slot.
+    is_max_slot: Bool,
+    op: CoordOp,
+    value: Float64,
+};
+
+public fn op_le(dim: Int, is_max_slot: Bool, value: Float64) -> PredicateAtom {
+    PredicateAtom { dim: dim, is_max_slot: is_max_slot, op: OpLE, value: value }
+}
+
+public fn op_ge(dim: Int, is_max_slot: Bool, value: Float64) -> PredicateAtom {
+    PredicateAtom { dim: dim, is_max_slot: is_max_slot, op: OpGE, value: value }
+}
+
+// -----------------------------------------------------------------------------
+// QueryBuilder — accumulate atoms then build a probe bbox
+// -----------------------------------------------------------------------------
+
+public type QueryBuilder is {
+    n_dims: Int,
+    /// Per-dim accumulator: [lo, hi] tuples; default to (-inf, +inf).
+    lo: List<Float64>,
+    hi: List<Float64>,
+};
+
+const NEG_INF: Float64 = -1.0e308;
+const POS_INF: Float64 = 1.0e308;
+
+public fn builder_new(n_dims: Int) -> QueryBuilder {
+    let mut lo: List<Float64> = List.new();
+    let mut hi: List<Float64> = List.new();
+    let mut i: Int = 0;
+    while i < n_dims {
+        lo.push(NEG_INF);
+        hi.push(POS_INF);
+        i = i + 1;
+    }
+    QueryBuilder { n_dims: n_dims, lo: lo, hi: hi }
+}
+
+implement QueryBuilder {
+    public fn add(&mut self, atom: PredicateAtom) {
+        if atom.dim < 0 || atom.dim >= self.n_dims { return; }
+        // SQLite-style: x_min <= 10 means "the row's lo bound ≤ 10",
+        // i.e. the column's upper-bound is at most 10. The SQLite
+        // R-tree grammar uses _min / _max suffixes per dimension.
+        // For the probe bbox:
+        //   * `_max OP value` constrains the *upper* slot
+        //   * `_min OP value` constrains the *lower* slot
+        match atom.op {
+            OpLE => {
+                if atom.is_max_slot {
+                    if atom.value < self.hi[atom.dim] { self.hi[atom.dim] = atom.value; }
+                } else {
+                    if atom.value < self.hi[atom.dim] { self.hi[atom.dim] = atom.value; }
+                }
+            }
+            OpGE => {
+                if atom.is_max_slot {
+                    if atom.value > self.lo[atom.dim] { self.lo[atom.dim] = atom.value; }
+                } else {
+                    if atom.value > self.lo[atom.dim] { self.lo[atom.dim] = atom.value; }
+                }
+            }
+            OpEq => {
+                if atom.value > self.lo[atom.dim] { self.lo[atom.dim] = atom.value; }
+                if atom.value < self.hi[atom.dim] { self.hi[atom.dim] = atom.value; }
+            }
+        }
+    }
+
+    public fn build(&self) -> BBox {
+        let mut coords: List<Float64> = List.new();
+        let mut d: Int = 0;
+        while d < self.n_dims {
+            coords.push(self.lo[d]);
+            coords.push(self.hi[d]);
+            d = d + 1;
+        }
+        BBox { n_dims: self.n_dims, coords: coords }
+    }
+
+    public fn dim_count(&self) -> Int { self.n_dims }
+}
+
+// -----------------------------------------------------------------------------
+// Convenience batch builder
+// -----------------------------------------------------------------------------
+
+public fn build_query(n_dims: Int, atoms: List<PredicateAtom>) -> BBox {
+    let mut b = builder_new(n_dims);
+    let mut i: Int = 0;
+    while i < atoms.len() {
+        b.add(PredicateAtom {
+            dim: atoms[i].dim,
+            is_max_slot: atoms[i].is_max_slot,
+            op: clone_op(&atoms[i].op),
+            value: atoms[i].value,
+        });
+        i = i + 1;
+    }
+    b.build()
+}
+
+fn clone_op(o: &CoordOp) -> CoordOp {
+    match o { OpLE => OpLE, OpGE => OpGE, OpEq => OpEq }
+}

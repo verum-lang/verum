@@ -1,0 +1,190 @@
+// =============================================================================
+// fts5/functions.vr — highlight / snippet / bm25 SQL functions
+// =============================================================================
+// Spec: sqlite-native.md §16.2 — FTS5 functions
+//
+// Three SQL functions ship out of the box:
+//
+//   * `highlight(table, col, open, close)` — bold-wrap matched
+//     tokens inside `col` with the open/close strings.
+//   * `snippet(table, col, open, close, ellipsis, nwords)` —
+//     return a contextual excerpt of length `nwords` around the
+//     matched tokens.
+//   * `bm25(table[, w1, w2, ...])` — return the BM25 relevance
+//     score of the current row, optionally weighted per column.
+// =============================================================================
+
+module core.database.sqlite.native.vtabs.fts5.functions;
+
+mount core.*;
+mount base.{Text, Maybe, Bool};
+mount collections.List;
+mount core.database.sqlite.native.vtabs.fts5.tokenizer.{
+    Tokenizer, Token, options_default,
+};
+mount core.database.sqlite.native.vtabs.fts5.query.{RowMatch};
+
+// -----------------------------------------------------------------------------
+// highlight()
+// -----------------------------------------------------------------------------
+
+public fn highlight(
+    text: &Text,
+    matched_terms: &List<Text>,
+    open: &Text,
+    close: &Text,
+    tokeniser: &Heap<dyn Tokenizer>,
+) -> Text {
+    let opts = options_default();
+    let tokens = (&**tokeniser).tokenise(text, &opts);
+    let mut out = Text.new();
+    let bs = text.as_bytes();
+    let mut cursor: Int = 0;
+    let mut i: Int = 0;
+    while i < tokens.len() {
+        let t = &tokens[i];
+        // Append any text between cursor and t.start verbatim.
+        let mut k: Int = cursor;
+        while k < t.start && k < bs.len() {
+            out.push_byte(bs[k]);
+            k = k + 1;
+        }
+        // Is this token in matched_terms?
+        let mut matched = false;
+        let mut j: Int = 0;
+        while j < matched_terms.len() {
+            if t.term == matched_terms[j] { matched = true; break; }
+            j = j + 1;
+        }
+        if matched { append_text(&mut out, open); }
+        let mut p: Int = t.start;
+        while p < t.start + t.length && p < bs.len() {
+            out.push_byte(bs[p]);
+            p = p + 1;
+        }
+        if matched { append_text(&mut out, close); }
+        cursor = t.start + t.length;
+        i = i + 1;
+    }
+    // Trailing text after the last token.
+    while cursor < bs.len() {
+        out.push_byte(bs[cursor]);
+        cursor = cursor + 1;
+    }
+    out
+}
+
+// -----------------------------------------------------------------------------
+// snippet()
+// -----------------------------------------------------------------------------
+//
+// Returns a contextual excerpt: locate the densest cluster of matches,
+// expand symmetrically up to `nwords` tokens, prepend/append `ellipsis`
+// when the excerpt is shorter than the full text.
+// =============================================================================
+
+public fn snippet(
+    text: &Text,
+    matched_terms: &List<Text>,
+    open: &Text,
+    close: &Text,
+    ellipsis: &Text,
+    nwords: Int,
+    tokeniser: &Heap<dyn Tokenizer>,
+) -> Text {
+    let opts = options_default();
+    let tokens = (&**tokeniser).tokenise(text, &opts);
+    if tokens.len() == 0 { return Text.new(); }
+    let bs = text.as_bytes();
+    // Find first token that matches.
+    let mut anchor: Int = -1;
+    let mut i: Int = 0;
+    while i < tokens.len() {
+        let mut j: Int = 0;
+        while j < matched_terms.len() {
+            if tokens[i].term == matched_terms[j] { anchor = i; break; }
+            j = j + 1;
+        }
+        if anchor >= 0 { break; }
+        i = i + 1;
+    }
+    if anchor < 0 {
+        // No match — return the first nwords tokens.
+        let mut end: Int = nwords;
+        if end > tokens.len() { end = tokens.len(); }
+        let last_byte = if end > 0 { tokens[end - 1].start + tokens[end - 1].length } else { 0 };
+        let mut out = Text.new();
+        let mut k: Int = 0;
+        while k < last_byte && k < bs.len() { out.push_byte(bs[k]); k = k + 1; }
+        if last_byte < bs.len() { append_text(&mut out, ellipsis); }
+        return out;
+    }
+    let half: Int = nwords / 2;
+    let mut start_tok: Int = anchor - half;
+    let mut end_tok: Int = anchor + half;
+    if start_tok < 0 { start_tok = 0; }
+    if end_tok >= tokens.len() { end_tok = tokens.len() - 1; }
+    let mut out = Text.new();
+    if start_tok > 0 { append_text(&mut out, ellipsis); }
+    let start_byte = tokens[start_tok].start;
+    let end_byte = tokens[end_tok].start + tokens[end_tok].length;
+    let mut k: Int = start_byte;
+    while k < end_byte && k < bs.len() {
+        // Find the token covering byte k.
+        let mut tok_idx: Int = start_tok;
+        while tok_idx <= end_tok {
+            if tokens[tok_idx].start <= k && k < tokens[tok_idx].start + tokens[tok_idx].length {
+                break;
+            }
+            tok_idx = tok_idx + 1;
+        }
+        let in_match: Bool = if tok_idx <= end_tok {
+            let mut hit = false;
+            let mut j: Int = 0;
+            while j < matched_terms.len() {
+                if tokens[tok_idx].term == matched_terms[j] { hit = true; break; }
+                j = j + 1;
+            }
+            hit && k == tokens[tok_idx].start
+        } else { false };
+        let in_match_close: Bool = if tok_idx <= end_tok {
+            let mut hit = false;
+            let mut j: Int = 0;
+            while j < matched_terms.len() {
+                if tokens[tok_idx].term == matched_terms[j] { hit = true; break; }
+                j = j + 1;
+            }
+            hit && k + 1 == tokens[tok_idx].start + tokens[tok_idx].length
+        } else { false };
+        if in_match { append_text(&mut out, open); }
+        out.push_byte(bs[k]);
+        if in_match_close { append_text(&mut out, close); }
+        k = k + 1;
+    }
+    if end_byte < bs.len() { append_text(&mut out, ellipsis); }
+    out
+}
+
+// -----------------------------------------------------------------------------
+// bm25() — already computed by `query::rank_bm25`; this is a façade
+// helper that picks the score for the row currently under cursor.
+// -----------------------------------------------------------------------------
+
+public fn bm25_for_row(rowid: Int64, ranked: &List<RowMatch>) -> Float64 {
+    let mut i: Int = 0;
+    while i < ranked.len() {
+        if ranked[i].rowid == rowid { return ranked[i].score; }
+        i = i + 1;
+    }
+    0.0
+}
+
+// -----------------------------------------------------------------------------
+// Helpers
+// -----------------------------------------------------------------------------
+
+fn append_text(dst: &mut Text, s: &Text) {
+    let bs = s.as_bytes();
+    let mut i: Int = 0;
+    while i < bs.len() { dst.push_byte(bs[i]); i = i + 1; }
+}

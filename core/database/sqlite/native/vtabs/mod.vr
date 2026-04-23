@@ -27,3 +27,7 @@ public module dbstat;
 public module generate_series;
 public module pragma_table;
 public module json_each;
+// Full-text search §16.2.
+public module fts5;
+// N-dimensional spatial index §16.3.
+public module rtree;

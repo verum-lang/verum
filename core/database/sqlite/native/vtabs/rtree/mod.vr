@@ -1,0 +1,24 @@
+// =============================================================================
+// vtabs/rtree/mod.vr — N-dimensional R-tree spatial index
+// =============================================================================
+// Layer: 6
+// Spec: sqlite-native.md §16.3
+//
+// N-dimensional R-tree (1..5 dimensions). Internal nodes carry
+// minimum bounding boxes (MBBs) of their children. Range queries
+// translate `WHERE x_min >= ? AND x_max <= ?` predicates into a
+// recursive MBB-overlap probe.
+//
+// Modules:
+//   * `bbox`     — axis-aligned bounding box geometry
+//   * `node`     — internal + leaf node records
+//   * `tree`     — RTree handle: insert / delete / search / split
+//   * `query`    — `WHERE` predicate translator
+// =============================================================================
+
+module core.database.sqlite.native.vtabs.rtree;
+
+public module bbox;
+public module node;
+public module tree;
+public module query;

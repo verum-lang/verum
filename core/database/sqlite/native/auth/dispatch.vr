@@ -1,0 +1,114 @@
+// =============================================================================
+// auth/dispatch.vr — Authorizer (multi-hook composition)
+// =============================================================================
+// Spec: sqlite-native.md §19.5
+//
+// `Authorizer` aggregates one or more `AuthorizerHook` impls. Calls to
+// `authorize(action)` invoke every hook in subscription order; the
+// final answer is the most-restrictive of all returned decisions.
+//
+// SQLite's `sqlite3_set_authorizer` allows only ONE authorizer at a
+// time. loom's multi-hook composition is a strict superset — when
+// only one hook is registered, behaviour is identical to upstream.
+// =============================================================================
+
+module core.database.sqlite.native.auth.dispatch;
+
+mount core.*;
+mount base.{Bool};
+mount collections.List;
+mount core.database.sqlite.native.ext.hooks.{
+    AuthorizerHook, AuthAction, AuthDecision, AdAllow,
+};
+mount core.database.sqlite.native.auth.decision.{
+    combine, permits_compile, forces_null,
+};
+
+// -----------------------------------------------------------------------------
+// Authorizer
+// -----------------------------------------------------------------------------
+
+public type Authorizer is {
+    hooks: List<Heap<dyn AuthorizerHook>>,
+    /// When true, no hooks subscribed → every action defaults to Allow.
+    /// When false, no hooks → DEFAULT_DECISION (defaults to Allow).
+    open_by_default: Bool,
+};
+
+public fn authorizer_new() -> Authorizer {
+    Authorizer { hooks: List.new(), open_by_default: true }
+}
+
+implement Authorizer {
+    public fn subscribe(&mut self, hook: Heap<dyn AuthorizerHook>) {
+        self.hooks.push(hook);
+    }
+
+    public fn unsubscribe_all(&mut self) {
+        self.hooks = List.new();
+    }
+
+    public fn hook_count(&self) -> Int { self.hooks.len() }
+
+    public fn set_default_open(&mut self, allow: Bool) {
+        self.open_by_default = allow;
+    }
+
+    /// Evaluate every subscribed hook against `action` + combine.
+    public fn authorize(&mut self, action: &AuthAction) -> AuthDecision {
+        if self.hooks.len() == 0 {
+            return if self.open_by_default { AdAllow } else { core.database.sqlite.native.ext.hooks.AdDeny };
+        }
+        let mut acc: AuthDecision = AdAllow;
+        let mut i: Int = 0;
+        while i < self.hooks.len() {
+            let hook_ref = &mut self.hooks[i];
+            let d = (&mut **hook_ref).authorize(action);
+            acc = combine(acc, d);
+            // Short-circuit if we've already hit Deny — no hook can
+            // make it more restrictive.
+            if !permits_compile(&acc) { break; }
+            i = i + 1;
+        }
+        acc
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Convenience built-in hooks
+// -----------------------------------------------------------------------------
+
+/// Always-Allow — useful as a smoke-test default.
+public type AllowAll is { unit: Bool };
+public fn allow_all() -> AllowAll { AllowAll { unit: true } }
+
+implement AuthorizerHook for AllowAll {
+    fn authorize(&mut self, _action: &AuthAction) -> AuthDecision { AdAllow }
+}
+
+/// Read-only mode — denies every DDL and DML, allows reads.
+public type ReadOnly is { unit: Bool };
+public fn read_only() -> ReadOnly { ReadOnly { unit: true } }
+
+implement AuthorizerHook for ReadOnly {
+    fn authorize(&mut self, action: &AuthAction) -> AuthDecision {
+        // Direct match keeps the protocol body free of cross-module
+        // imports; classification helpers live in `auth.action`.
+        match action {
+            core.database.sqlite.native.ext.hooks.AaInsert(_) |
+            core.database.sqlite.native.ext.hooks.AaUpdate(_) |
+            core.database.sqlite.native.ext.hooks.AaDelete(_) |
+            core.database.sqlite.native.ext.hooks.AaCreateTable(_) |
+            core.database.sqlite.native.ext.hooks.AaDropTable(_) |
+            core.database.sqlite.native.ext.hooks.AaCreateIndex(_) |
+            core.database.sqlite.native.ext.hooks.AaDropIndex(_) |
+            core.database.sqlite.native.ext.hooks.AaCreateView(_) |
+            core.database.sqlite.native.ext.hooks.AaDropView(_) |
+            core.database.sqlite.native.ext.hooks.AaCreateTrigger(_) |
+            core.database.sqlite.native.ext.hooks.AaDropTrigger(_) |
+            core.database.sqlite.native.ext.hooks.AaWriteColumn(_, _) =>
+                core.database.sqlite.native.ext.hooks.AdDeny,
+            _ => AdAllow,
+        }
+    }
+}

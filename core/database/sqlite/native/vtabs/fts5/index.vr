@@ -1,0 +1,125 @@
+// =============================================================================
+// fts5/index.vr — multi-segment inverted index
+// =============================================================================
+// Spec: sqlite-native.md §16.2 — fts5/index.vr
+//
+// An `Index` is a stack of segments organised into levels (level-N
+// segments are the result of merging level-(N-1) segments). Reads
+// scan every segment + union the postings; writes append a fresh
+// level-0 segment.
+//
+// The actual segment-file format is the responsibility of the
+// `segment` module; this module is the in-memory orchestration view.
+// =============================================================================
+
+module core.database.sqlite.native.vtabs.fts5.index;
+
+mount core.*;
+mount base.{Text, Maybe, Bool};
+mount collections.List;
+mount core.database.sqlite.native.vtabs.fts5.tokenizer.{Token};
+mount core.database.sqlite.native.vtabs.fts5.segment.{
+    Segment, PostingList, Posting,
+    segment_empty, segment_from_tokens, segment_lookup, segment_merge,
+    posting_list_new,
+};
+
+// -----------------------------------------------------------------------------
+// SegmentLevel
+// -----------------------------------------------------------------------------
+
+public type SegmentLevel is {
+    level: Int,
+    segments: List<Segment>,
+};
+
+public fn level_new(n: Int) -> SegmentLevel { SegmentLevel { level: n, segments: List.new() } }
+
+// -----------------------------------------------------------------------------
+// Index
+// -----------------------------------------------------------------------------
+
+public type Index is {
+    levels: List<SegmentLevel>,
+    /// Level-0 segments above this count trigger a merge.
+    merge_threshold: Int,
+};
+
+public fn index_new() -> Index {
+    let mut levels: List<SegmentLevel> = List.new();
+    levels.push(level_new(0));
+    Index { levels: levels, merge_threshold: 4 }
+}
+
+implement Index {
+    /// Append a new level-0 segment.
+    public fn add_segment(&mut self, seg: Segment) {
+        self.ensure_level(0);
+        self.levels[0].segments.push(seg);
+    }
+
+    /// Build + add a fresh segment from a single document.
+    public fn add_document(&mut self, rowid: Int64, column: Int, tokens: List<Token>) {
+        let seg = segment_from_tokens(rowid, column, tokens);
+        self.add_segment(seg);
+    }
+
+    fn ensure_level(&mut self, level: Int) {
+        while self.levels.len() <= level {
+            self.levels.push(level_new(self.levels.len()));
+        }
+    }
+
+    /// Lookup `term` across every segment + union the posting lists.
+    public fn lookup(&self, term: &Text) -> PostingList {
+        let mut union = posting_list_new();
+        let mut l: Int = 0;
+        while l < self.levels.len() {
+            let mut s: Int = 0;
+            while s < self.levels[l].segments.len() {
+                match segment_lookup(&self.levels[l].segments[s], term) {
+                    Some(pl) => {
+                        let mut k: Int = 0;
+                        let postings = pl.iter();
+                        while k < postings.len() {
+                            union.add(Posting {
+                                rowid: postings[k].rowid,
+                                column: postings[k].column,
+                                position: postings[k].position,
+                            });
+                            k = k + 1;
+                        }
+                    }
+                    None => {}
+                }
+                s = s + 1;
+            }
+            l = l + 1;
+        }
+        union
+    }
+
+    /// Total segment count across every level.
+    public fn segment_count(&self) -> Int {
+        let mut sum: Int = 0;
+        let mut l: Int = 0;
+        while l < self.levels.len() {
+            sum = sum + self.levels[l].segments.len();
+            l = l + 1;
+        }
+        sum
+    }
+
+    /// Returns true if a level-0 merge is needed.
+    public fn needs_merge(&self) -> Bool {
+        if self.levels.len() == 0 { return false; }
+        self.levels[0].segments.len() >= self.merge_threshold
+    }
+
+    public fn level_count(&self) -> Int { self.levels.len() }
+
+    public fn segments_at_level(&self, level: Int) -> Int {
+        if level >= self.levels.len() { return 0; }
+        self.levels[level].segments.len()
+    }
+}

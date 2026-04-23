@@ -1,0 +1,111 @@
+// =============================================================================
+// auth/action.vr — pretty-printer + grouping for AuthAction
+// =============================================================================
+// Spec: sqlite-native.md §19.5
+//
+// `AuthAction` itself lives in `ext.hooks` so the protocol and the
+// action enum stay together. This module provides:
+//
+//   * `display(action)` — human-readable string (used in trace logs)
+//   * `is_dml(action)` / `is_ddl(action)` / `is_meta(action)` —
+//     classification helpers used by tests + per-class authorization
+//     policies (e.g. "deny all DDL in read-only mode")
+// =============================================================================
+
+module core.database.sqlite.native.auth.action;
+
+mount core.*;
+mount base.{Text, Bool};
+mount core.database.sqlite.native.ext.hooks.{
+    AuthAction,
+    AaSelect, AaInsert, AaUpdate, AaDelete,
+    AaCreateTable, AaDropTable, AaCreateIndex, AaDropIndex,
+    AaCreateView, AaDropView, AaCreateTrigger, AaDropTrigger,
+    AaPragma, AaAttach, AaDetach,
+    AaTransaction, AaSavepoint, AaCopy,
+    AaFunction, AaReadColumn, AaWriteColumn,
+};
+
+public fn display(a: &AuthAction) -> Text {
+    match a {
+        AaSelect              => "SELECT".clone(),
+        AaInsert(t)           => prefix("INSERT INTO".clone(), t),
+        AaUpdate(t)           => prefix("UPDATE".clone(), t),
+        AaDelete(t)           => prefix("DELETE FROM".clone(), t),
+        AaCreateTable(t)      => prefix("CREATE TABLE".clone(), t),
+        AaDropTable(t)        => prefix("DROP TABLE".clone(), t),
+        AaCreateIndex(t)      => prefix("CREATE INDEX".clone(), t),
+        AaDropIndex(t)        => prefix("DROP INDEX".clone(), t),
+        AaCreateView(t)       => prefix("CREATE VIEW".clone(), t),
+        AaDropView(t)         => prefix("DROP VIEW".clone(), t),
+        AaCreateTrigger(t)    => prefix("CREATE TRIGGER".clone(), t),
+        AaDropTrigger(t)      => prefix("DROP TRIGGER".clone(), t),
+        AaPragma(name)        => prefix("PRAGMA".clone(), name),
+        AaAttach(path)        => prefix("ATTACH".clone(), path),
+        AaDetach(name)        => prefix("DETACH".clone(), name),
+        AaTransaction         => "TRANSACTION".clone(),
+        AaSavepoint           => "SAVEPOINT".clone(),
+        AaCopy                => "COPY".clone(),
+        AaFunction(name)      => prefix("FN".clone(), name),
+        AaReadColumn(t, c)    => triple("READ".clone(), t, c),
+        AaWriteColumn(t, c)   => triple("WRITE".clone(), t, c),
+    }
+}
+
+fn prefix(verb: Text, target: &Text) -> Text {
+    let mut out = verb;
+    out.push_byte(32 as Byte);
+    let bs = target.as_bytes();
+    let mut i: Int = 0;
+    while i < bs.len() { out.push_byte(bs[i]); i = i + 1; }
+    out
+}
+
+fn triple(verb: Text, table: &Text, column: &Text) -> Text {
+    let mut out = verb;
+    out.push_byte(32 as Byte);
+    let bs = table.as_bytes();
+    let mut i: Int = 0;
+    while i < bs.len() { out.push_byte(bs[i]); i = i + 1; }
+    out.push_byte(46 as Byte);  // .
+    let cb = column.as_bytes();
+    i = 0;
+    while i < cb.len() { out.push_byte(cb[i]); i = i + 1; }
+    out
+}
+
+// -----------------------------------------------------------------------------
+// Classification
+// -----------------------------------------------------------------------------
+
+public fn is_dml(a: &AuthAction) -> Bool {
+    match a {
+        AaInsert(_) | AaUpdate(_) | AaDelete(_) | AaWriteColumn(_, _) => true,
+        _ => false,
+    }
+}
+
+public fn is_ddl(a: &AuthAction) -> Bool {
+    match a {
+        AaCreateTable(_)   | AaDropTable(_)   |
+        AaCreateIndex(_)   | AaDropIndex(_)   |
+        AaCreateView(_)    | AaDropView(_)    |
+        AaCreateTrigger(_) | AaDropTrigger(_) => true,
+        _ => false,
+    }
+}
+
+public fn is_meta(a: &AuthAction) -> Bool {
+    match a {
+        AaPragma(_) | AaAttach(_) | AaDetach(_) | AaTransaction
+        | AaSavepoint | AaCopy => true,
+        _ => false,
+    }
+}
+
+public fn is_read(a: &AuthAction) -> Bool {
+    match a {
+        AaSelect | AaReadColumn(_, _) => true,
+        _ => false,
+    }
+}

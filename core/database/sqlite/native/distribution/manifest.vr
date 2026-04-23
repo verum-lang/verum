@@ -1,0 +1,88 @@
+// =============================================================================
+// distribution/manifest.vr — cog manifest fragment for the loom subsystem
+// =============================================================================
+// Spec: sqlite-native.md §23
+//
+// `BuildManifest` is the data the build system writes into the
+// `loom-info.json` artifact at compile time. The L7 façade exposes
+// it via `Database.build_info()`. It's the single source of
+// "what's in this binary, who built it, when".
+// =============================================================================
+
+module core.database.sqlite.native.distribution.manifest;
+
+mount core.*;
+mount base.{Text, Bool};
+mount collections.List;
+mount core.database.sqlite.native.distribution.version.{
+    Version, loom_version, version_string,
+};
+mount core.database.sqlite.native.distribution.features.{
+    FeatureFlag, loom_features, enabled_features,
+};
+
+// -----------------------------------------------------------------------------
+// BuildManifest
+// -----------------------------------------------------------------------------
+
+public type BuildManifest is {
+    /// Loom version triple.
+    version: Version,
+    /// Compile-time host triple, e.g. "aarch64-apple-darwin".
+    host_triple: Text,
+    /// Compile-time profile, e.g. "release".
+    profile: Text,
+    /// Compile-time SHA of the loom source tree (or "unknown").
+    source_sha: Text,
+    /// Active feature toggles.
+    features: List<FeatureFlag>,
+};
+
+public fn manifest_default() -> BuildManifest {
+    BuildManifest {
+        version: loom_version(),
+        host_triple: "unknown".clone(),
+        profile: "release".clone(),
+        source_sha: "unknown".clone(),
+        features: enabled_features(),
+    }
+}
+
+implement BuildManifest {
+    public fn set_host(&mut self, host: Text) { self.host_triple = host; }
+    public fn set_profile(&mut self, profile: Text) { self.profile = profile; }
+    public fn set_source_sha(&mut self, sha: Text) { self.source_sha = sha; }
+
+    public fn version_text(&self) -> Text { version_string(&self.version) }
+
+    /// True if the manifest was built with `feature_name` on.
+    public fn has_feature(&self, name: &Text) -> Bool {
+        let mut i: Int = 0;
+        while i < self.features.len() {
+            if self.features[i].name == name { return self.features[i].enabled; }
+            i = i + 1;
+        }
+        false
+    }
+
+    public fn feature_count(&self) -> Int { self.features.len() }
+}
+
+// -----------------------------------------------------------------------------
+// Convenience: render a single-line description suitable for SELECT-output
+// -----------------------------------------------------------------------------
+
+public fn one_line_summary(m: &BuildManifest) -> Text {
+    let mut out = "loom ".clone();
+    let v = version_string(&m.version);
+    let bs = v.as_bytes();
+    let mut i: Int = 0;
+    while i < bs.len() { out.push_byte(bs[i]); i = i + 1; }
+    out.push_byte(32 as Byte);
+    out.push_byte(40 as Byte);
+    let p = m.profile.as_bytes();
+    let mut k: Int = 0;
+    while k < p.len() { out.push_byte(p[k]); k = k + 1; }
+    out.push_byte(41 as Byte);
+    out
+}

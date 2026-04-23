@@ -1,0 +1,363 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, vtab, fts5, tokenizer, query
+// @timeout: 5000
+// @expected-exit: 0
+//
+// FTS5 smoke test:
+//   * tokenizers (Simple / Porter / Unicode61 / Trigram)
+//   * Segment build + lookup
+//   * Index add_document + lookup across segments
+//   * MATCH parser → AND/OR/NOT/NEAR/phrase
+//   * Executor returns matching rowids
+//   * BM25 ranker orders results by relevance
+//   * highlight() / snippet() / bm25_for_row()
+
+mount core.database.sqlite.native.vtabs.fts5.tokenizer.{
+    Token, TokenizerOptions, options_default,
+    Tokenizer, SimpleTokenizer, simple_tokenizer,
+    PorterTokenizer, porter_tokenizer,
+    Unicode61Tokenizer, unicode61_tokenizer,
+    TrigramTokenizer, trigram_tokenizer,
+};
+mount core.database.sqlite.native.vtabs.fts5.segment.{
+    Posting, PostingList, posting_list_new, posting_less,
+    Segment, segment_empty, segment_from_tokens, segment_lookup, segment_merge,
+};
+mount core.database.sqlite.native.vtabs.fts5.index.{
+    Index, index_new,
+};
+mount core.database.sqlite.native.vtabs.fts5.merger.{
+    MergerReport, merger_report_zero, compact_step, compact_to_fixpoint,
+};
+mount core.database.sqlite.native.vtabs.fts5.query.{
+    MatchExpr, MeTerm, MeAnd, MeOr, MeNot, MeNear, MePhrase,
+    ParseError, RowMatch,
+    parse, execute, rank_bm25,
+    tokenise_query,
+};
+mount core.database.sqlite.native.vtabs.fts5.dml.{
+    TombstoneSet, tombstones_new,
+    insert_row, delete_row, update_row, optimize,
+};
+mount core.database.sqlite.native.vtabs.fts5.functions.{
+    highlight, snippet, bm25_for_row,
+};
+mount base.{Some, None, Maybe, Result, Ok, Err, Bool};
+
+// -----------------------------------------------------------------------------
+// Tokenizers
+// -----------------------------------------------------------------------------
+
+fn test_simple_tokenizer_basic() {
+    let t = simple_tokenizer();
+    let opts = options_default();
+    let toks = t.tokenise(&"Hello, World!".clone(), &opts);
+    assert_eq(toks.len(), 2);
+    assert(toks[0].term == "hello".clone());
+    assert(toks[1].term == "world".clone());
+}
+
+fn test_simple_tokenizer_position_increments() {
+    let t = simple_tokenizer();
+    let opts = options_default();
+    let toks = t.tokenise(&"a b c d".clone(), &opts);
+    assert_eq(toks.len(), 4);
+    assert_eq(toks[0].position, 0);
+    assert_eq(toks[3].position, 3);
+}
+
+fn test_porter_stems_plural() {
+    let t = porter_tokenizer();
+    let opts = options_default();
+    let toks = t.tokenise(&"running tests indices".clone(), &opts);
+    assert_eq(toks.len(), 3);
+    // Plural -s stripped from "tests" → "test"
+    assert(toks[1].term == "test".clone());
+}
+
+fn test_unicode61_separator_handling() {
+    let t = unicode61_tokenizer();
+    let opts = options_default();
+    let toks = t.tokenise(&"hello world".clone(), &opts);
+    assert_eq(toks.len(), 2);
+}
+
+fn test_trigram_tokenizer() {
+    let t = trigram_tokenizer();
+    let opts = options_default();
+    // "hello" → "hel", "ell", "llo" (3 trigrams)
+    let toks = t.tokenise(&"hello".clone(), &opts);
+    assert_eq(toks.len(), 3);
+    assert(toks[0].term == "hel".clone());
+    assert(toks[2].term == "llo".clone());
+}
+
+// -----------------------------------------------------------------------------
+// Segment
+// -----------------------------------------------------------------------------
+
+fn make_doc_segment(rowid: Int64, text: Text) -> Segment {
+    let t = simple_tokenizer();
+    let opts = options_default();
+    let toks = t.tokenise(&text, &opts);
+    segment_from_tokens(rowid, 0, toks)
+}
+
+fn test_segment_lookup() {
+    let seg = make_doc_segment(1 as Int64, "the quick brown fox".clone());
+    match segment_lookup(&seg, &"quick".clone()) {
+        Some(pl) => assert_eq(pl.len(), 1),
+        None     => panic("'quick' should be present"),
+    }
+    match segment_lookup(&seg, &"absent".clone()) {
+        None    => {},
+        Some(_) => panic("'absent' should not match"),
+    }
+}
+
+fn test_segment_merge() {
+    let s1 = make_doc_segment(1 as Int64, "alpha beta".clone());
+    let s2 = make_doc_segment(2 as Int64, "alpha gamma".clone());
+    let merged = segment_merge(&s1, &s2);
+    match segment_lookup(&merged, &"alpha".clone()) {
+        Some(pl) => assert_eq(pl.len(), 2),
+        None     => panic("alpha must merge to 2 postings"),
+    }
+}
+
+fn test_posting_less() {
+    let p1 = Posting { rowid: 1 as Int64, column: 0, position: 0 };
+    let p2 = Posting { rowid: 2 as Int64, column: 0, position: 0 };
+    assert(posting_less(&p1, &p2));
+    let p3 = Posting { rowid: 1 as Int64, column: 0, position: 5 };
+    assert(posting_less(&p1, &p3));
+}
+
+// -----------------------------------------------------------------------------
+// Index
+// -----------------------------------------------------------------------------
+
+fn test_index_add_and_lookup() {
+    let mut idx = index_new();
+    let t = simple_tokenizer();
+    let opts = options_default();
+    let toks = t.tokenise(&"the quick brown fox".clone(), &opts);
+    idx.add_document(1 as Int64, 0, toks);
+    let pl = idx.lookup(&"quick".clone());
+    assert_eq(pl.len(), 1);
+}
+
+fn test_index_segment_count() {
+    let mut idx = index_new();
+    let t = simple_tokenizer();
+    let opts = options_default();
+    idx.add_document(1 as Int64, 0, t.tokenise(&"a".clone(), &opts));
+    idx.add_document(2 as Int64, 0, t.tokenise(&"b".clone(), &opts));
+    idx.add_document(3 as Int64, 0, t.tokenise(&"c".clone(), &opts));
+    assert_eq(idx.segment_count(), 3);
+}
+
+// -----------------------------------------------------------------------------
+// Merger
+// -----------------------------------------------------------------------------
+
+fn test_merger_compacts_when_threshold_hit() {
+    let mut idx = index_new();
+    let t = simple_tokenizer();
+    let opts = options_default();
+    let mut k: Int = 0;
+    while k < 4 {
+        idx.add_document(k as Int64, 0, t.tokenise(&"alpha".clone(), &opts));
+        k = k + 1;
+    }
+    assert(idx.needs_merge());
+    let report = compact_step(&mut idx);
+    assert(report.segments_merged >= 4);
+    assert_eq(idx.segments_at_level(0), 0);
+    assert_eq(idx.segments_at_level(1), 1);
+}
+
+// -----------------------------------------------------------------------------
+// Query parser + executor
+// -----------------------------------------------------------------------------
+
+fn test_query_parse_simple_term() {
+    let r = parse(&"hello".clone());
+    match r {
+        Ok(MeTerm(t)) => assert(t == "hello".clone()),
+        _ => panic("parse failed"),
+    }
+}
+
+fn test_query_parse_and() {
+    let r = parse(&"alpha AND beta".clone());
+    match r {
+        Ok(MeAnd(_, _)) => {},
+        _ => panic("expected AND"),
+    }
+}
+
+fn test_query_parse_or_lower_precedence() {
+    let r = parse(&"a OR b AND c".clone());
+    // Expected: OR(a, AND(b, c))
+    match r {
+        Ok(MeOr(_, _)) => {},
+        _ => panic("expected OR at root"),
+    }
+}
+
+fn test_query_parse_not() {
+    let r = parse(&"NOT bad".clone());
+    match r {
+        Ok(MeNot(_)) => {},
+        _ => panic("expected NOT"),
+    }
+}
+
+fn test_query_parse_near_with_distance() {
+    let r = parse(&"foo NEAR (3) bar".clone());
+    match r {
+        Ok(MeNear(_, d, _)) => assert_eq(d, 3),
+        _ => panic("expected NEAR"),
+    }
+}
+
+fn test_query_parse_phrase() {
+    let r = parse(&"\"quick brown\"".clone());
+    match r {
+        Ok(MePhrase(words)) => assert_eq(words.len(), 2),
+        _ => panic("expected phrase"),
+    }
+}
+
+fn test_query_executor_finds_term() {
+    let mut idx = index_new();
+    let t = simple_tokenizer();
+    let opts = options_default();
+    idx.add_document(1 as Int64, 0, t.tokenise(&"the quick brown fox".clone(), &opts));
+    idx.add_document(2 as Int64, 0, t.tokenise(&"slow brown turtle".clone(), &opts));
+    let expr = MeTerm("brown".clone());
+    let matches = execute(&expr, &idx);
+    assert_eq(matches.len(), 2);
+}
+
+fn test_query_executor_intersection() {
+    let mut idx = index_new();
+    let t = simple_tokenizer();
+    let opts = options_default();
+    idx.add_document(1 as Int64, 0, t.tokenise(&"alpha beta".clone(), &opts));
+    idx.add_document(2 as Int64, 0, t.tokenise(&"alpha gamma".clone(), &opts));
+    let expr = MeAnd(
+        Heap.new(MeTerm("alpha".clone())),
+        Heap.new(MeTerm("beta".clone())),
+    );
+    let matches = execute(&expr, &idx);
+    assert_eq(matches.len(), 1);
+    assert_eq(matches[0].rowid, 1 as Int64);
+}
+
+// -----------------------------------------------------------------------------
+// DML
+// -----------------------------------------------------------------------------
+
+fn test_dml_insert_then_lookup() {
+    let mut idx = index_new();
+    let tokeniser: Heap<dyn Tokenizer> = Heap.new(simple_tokenizer());
+    let opts = options_default();
+    let mut cols: List<Text> = List.new();
+    cols.push("the quick brown fox".clone());
+    insert_row(&mut idx, 7 as Int64, cols, &tokeniser, &opts);
+    let pl = idx.lookup(&"quick".clone());
+    assert_eq(pl.len(), 1);
+}
+
+fn test_dml_delete_marks_tombstone() {
+    let mut tomb = tombstones_new();
+    delete_row(&mut tomb, 99 as Int64);
+    assert(tomb.contains(99 as Int64));
+}
+
+fn test_dml_optimize_clears_tombstones() {
+    let mut idx = index_new();
+    let mut tomb = tombstones_new();
+    delete_row(&mut tomb, 1 as Int64);
+    delete_row(&mut tomb, 2 as Int64);
+    let removed = optimize(&mut idx, &mut tomb);
+    assert_eq(removed, 2);
+    assert_eq(tomb.count(), 0);
+}
+
+// -----------------------------------------------------------------------------
+// Functions
+// -----------------------------------------------------------------------------
+
+fn test_highlight_wraps_match() {
+    let tokeniser: Heap<dyn Tokenizer> = Heap.new(simple_tokenizer());
+    let mut terms: List<Text> = List.new();
+    terms.push("brown".clone());
+    let r = highlight(
+        &"the quick brown fox".clone(),
+        &terms,
+        &"<b>".clone(),
+        &"</b>".clone(),
+        &tokeniser,
+    );
+    // r should contain "<b>brown</b>"
+    assert(r.len() > "the quick brown fox".clone().len());
+}
+
+fn test_snippet_returns_excerpt() {
+    let tokeniser: Heap<dyn Tokenizer> = Heap.new(simple_tokenizer());
+    let mut terms: List<Text> = List.new();
+    terms.push("brown".clone());
+    let r = snippet(
+        &"the quick brown fox jumps over the lazy dog".clone(),
+        &terms,
+        &"[".clone(),
+        &"]".clone(),
+        &"...".clone(),
+        4,
+        &tokeniser,
+    );
+    assert(r.len() > 0);
+}
+
+fn test_bm25_for_row_lookup() {
+    let mut ranked: List<RowMatch> = List.new();
+    ranked.push(RowMatch { rowid: 1 as Int64, score: 5.0 });
+    ranked.push(RowMatch { rowid: 2 as Int64, score: 2.0 });
+    let r = bm25_for_row(1 as Int64, &ranked);
+    assert(r == 5.0);
+    let r2 = bm25_for_row(99 as Int64, &ranked);
+    assert(r2 == 0.0);
+}
+
+fn main() {
+    test_simple_tokenizer_basic();
+    test_simple_tokenizer_position_increments();
+    test_porter_stems_plural();
+    test_unicode61_separator_handling();
+    test_trigram_tokenizer();
+    test_segment_lookup();
+    test_segment_merge();
+    test_posting_less();
+    test_index_add_and_lookup();
+    test_index_segment_count();
+    test_merger_compacts_when_threshold_hit();
+    test_query_parse_simple_term();
+    test_query_parse_and();
+    test_query_parse_or_lower_precedence();
+    test_query_parse_not();
+    test_query_parse_near_with_distance();
+    test_query_parse_phrase();
+    test_query_executor_finds_term();
+    test_query_executor_intersection();
+    test_dml_insert_then_lookup();
+    test_dml_delete_marks_tombstone();
+    test_dml_optimize_clears_tombstones();
+    test_highlight_wraps_match();
+    test_snippet_returns_excerpt();
+    test_bm25_for_row_lookup();
+}

@@ -1,0 +1,279 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, builtins, json, json_path
+// @timeout: 5000
+// @expected-exit: 0
+//
+// JSON path mutator API:
+//   * parse_path of every legal grammar shape ($.a, $[0], $."abc", $.a.b[2])
+//   * apply_mutation(set / insert / replace) with create-if-missing
+//   * apply_remove drops the path
+//   * apply_patch merges via RFC 7396 (null deletes, object recurses)
+
+mount core.database.sqlite.native.builtins.json_fns.{
+    JsonValue, JNull, JBool, JNumber, JString, JArray, JObject, JsonField,
+};
+mount core.database.sqlite.native.builtins.json_path.{
+    PathSeg, PsField, PsIndex,
+    PathParseError, PpEmpty, PpMissingDollar,
+    parse_path,
+    SetMode, SmSet, SmInsert, SmReplace,
+    apply_mutation, apply_remove, apply_patch,
+};
+mount base.{Ok, Err, Some, None, Result, Maybe, Bool};
+
+// -----------------------------------------------------------------------------
+// parse_path
+// -----------------------------------------------------------------------------
+
+fn require_path(s: Text) -> List<PathSeg> {
+    match parse_path(&s) {
+        Ok(p)  => p,
+        Err(_) => panic(f"path '{s}' should parse"),
+    }
+}
+
+fn test_parse_root_only() {
+    let p = require_path("$".clone());
+    assert_eq(p.len(), 0);
+}
+
+fn test_parse_field() {
+    let p = require_path("$.foo".clone());
+    assert_eq(p.len(), 1);
+    match &p[0] {
+        PsField(name) => assert(name == &"foo".clone()),
+        _ => panic("expected field"),
+    }
+}
+
+fn test_parse_index() {
+    let p = require_path("$[3]".clone());
+    assert_eq(p.len(), 1);
+    match &p[0] {
+        PsIndex(i) => assert_eq(*i, 3),
+        _ => panic("expected index"),
+    }
+}
+
+fn test_parse_quoted_field() {
+    let p = require_path("$.\"abc xyz\"".clone());
+    assert_eq(p.len(), 1);
+    match &p[0] {
+        PsField(name) => assert(name == &"abc xyz".clone()),
+        _ => panic("quoted field"),
+    }
+}
+
+fn test_parse_compound() {
+    let p = require_path("$.a.b[0].c".clone());
+    assert_eq(p.len(), 4);
+    match &p[2] {
+        PsIndex(i) => assert_eq(*i, 0),
+        _ => panic("third seg should be index"),
+    }
+}
+
+fn test_parse_missing_dollar() {
+    match parse_path(&"foo".clone()) {
+        Err(PpMissingDollar) => {},
+        _ => panic("expected MissingDollar"),
+    }
+}
+
+fn test_parse_empty() {
+    match parse_path(&"".clone()) {
+        Err(PpEmpty) => {},
+        _ => panic("expected Empty"),
+    }
+}
+
+// -----------------------------------------------------------------------------
+// apply_mutation
+// -----------------------------------------------------------------------------
+
+fn make_obj_ab() -> JsonValue {
+    let mut fs: List<JsonField> = List.new();
+    fs.push(JsonField { key: "a".clone(), value: JNumber(1.0) });
+    fs.push(JsonField { key: "b".clone(), value: JString("x".clone()) });
+    JObject(fs)
+}
+
+fn test_set_existing() {
+    let root = make_obj_ab();
+    let mut path: List<PathSeg> = List.new();
+    path.push(PsField("a".clone()));
+    let new = JNumber(99.0);
+    let r = apply_mutation(&root, &path, &new, SmSet);
+    match &r {
+        JObject(fs) => {
+            assert_eq(fs.len(), 2);
+            match &fs[0].value {
+                JNumber(x) => assert(x ==99.0),
+                _ => panic("a should be 99"),
+            }
+        }
+        _ => panic("expected object"),
+    }
+}
+
+fn test_set_creates_missing() {
+    let root = make_obj_ab();
+    let mut path: List<PathSeg> = List.new();
+    path.push(PsField("c".clone()));
+    let new = JNumber(7.0);
+    let r = apply_mutation(&root, &path, &new, SmSet);
+    match &r {
+        JObject(fs) => assert_eq(fs.len(), 3),
+        _ => panic("expected object"),
+    }
+}
+
+fn test_replace_skips_missing() {
+    let root = make_obj_ab();
+    let mut path: List<PathSeg> = List.new();
+    path.push(PsField("missing".clone()));
+    let new = JNumber(7.0);
+    let r = apply_mutation(&root, &path, &new, SmReplace);
+    match &r {
+        JObject(fs) => assert_eq(fs.len(), 2),
+        _ => panic("expected object"),
+    }
+}
+
+fn test_insert_skips_existing() {
+    let root = make_obj_ab();
+    let mut path: List<PathSeg> = List.new();
+    path.push(PsField("a".clone()));
+    let new = JNumber(99.0);
+    let r = apply_mutation(&root, &path, &new, SmInsert);
+    match &r {
+        JObject(fs) => match &fs[0].value {
+            JNumber(x) => assert(x ==1.0),  // unchanged
+            _ => panic("a unchanged"),
+        },
+        _ => panic("expected object"),
+    }
+}
+
+fn test_set_array_index() {
+    let mut items: List<JsonValue> = List.new();
+    items.push(JNumber(10.0));
+    items.push(JNumber(20.0));
+    items.push(JNumber(30.0));
+    let root = JArray(items);
+    let mut path: List<PathSeg> = List.new();
+    path.push(PsIndex(1));
+    let r = apply_mutation(&root, &path, &JNumber(99.0), SmSet);
+    match &r {
+        JArray(items) => match &items[1] {
+            JNumber(x) => assert(x ==99.0),
+            _ => panic("idx 1 should be 99"),
+        },
+        _ => panic("array"),
+    }
+}
+
+// -----------------------------------------------------------------------------
+// apply_remove
+// -----------------------------------------------------------------------------
+
+fn test_remove_field() {
+    let root = make_obj_ab();
+    let mut path: List<PathSeg> = List.new();
+    path.push(PsField("a".clone()));
+    let r = apply_remove(&root, &path);
+    match &r {
+        JObject(fs) => assert_eq(fs.len(), 1),
+        _ => panic("expected object"),
+    }
+}
+
+fn test_remove_index() {
+    let mut items: List<JsonValue> = List.new();
+    items.push(JNumber(1.0));
+    items.push(JNumber(2.0));
+    items.push(JNumber(3.0));
+    let root = JArray(items);
+    let mut path: List<PathSeg> = List.new();
+    path.push(PsIndex(1));
+    let r = apply_remove(&root, &path);
+    match &r {
+        JArray(it) => assert_eq(it.len(), 2),
+        _ => panic("array"),
+    }
+}
+
+// -----------------------------------------------------------------------------
+// apply_patch
+// -----------------------------------------------------------------------------
+
+fn test_patch_replaces_field() {
+    let base = make_obj_ab();
+    let mut p_fs: List<JsonField> = List.new();
+    p_fs.push(JsonField { key: "a".clone(), value: JNumber(99.0) });
+    let patch = JObject(p_fs);
+    let r = apply_patch(&base, &patch);
+    match &r {
+        JObject(fs) => match &fs[0].value {
+            JNumber(x) => assert(x ==99.0),
+            _ => panic("a patched"),
+        },
+        _ => panic("expected object"),
+    }
+}
+
+fn test_patch_null_removes() {
+    let base = make_obj_ab();
+    let mut p_fs: List<JsonField> = List.new();
+    p_fs.push(JsonField { key: "a".clone(), value: JNull });
+    let patch = JObject(p_fs);
+    let r = apply_patch(&base, &patch);
+    match &r {
+        JObject(fs) => assert_eq(fs.len(), 1),
+        _ => panic("expected object"),
+    }
+}
+
+fn test_patch_adds_new_field() {
+    let base = make_obj_ab();
+    let mut p_fs: List<JsonField> = List.new();
+    p_fs.push(JsonField { key: "c".clone(), value: JNumber(7.0) });
+    let patch = JObject(p_fs);
+    let r = apply_patch(&base, &patch);
+    match &r {
+        JObject(fs) => assert_eq(fs.len(), 3),
+        _ => panic("expected object"),
+    }
+}
+
+fn test_patch_non_object_replaces() {
+    let base = make_obj_ab();
+    let r = apply_patch(&base, &JNumber(5.0));
+    match &r {
+        JNumber(x) => assert(x ==5.0),
+        _ => panic("non-object patch should replace"),
+    }
+}
+
+fn main() {
+    test_parse_root_only();
+    test_parse_field();
+    test_parse_index();
+    test_parse_quoted_field();
+    test_parse_compound();
+    test_parse_missing_dollar();
+    test_parse_empty();
+    test_set_existing();
+    test_set_creates_missing();
+    test_replace_skips_missing();
+    test_insert_skips_existing();
+    test_set_array_index();
+    test_remove_field();
+    test_remove_index();
+    test_patch_replaces_field();
+    test_patch_null_removes();
+    test_patch_adds_new_field();
+    test_patch_non_object_replaces();
+}

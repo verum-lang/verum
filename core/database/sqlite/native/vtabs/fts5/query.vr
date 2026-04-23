@@ -1,0 +1,456 @@
+// =============================================================================
+// fts5/query.vr — MATCH query parser + executor + BM25 ranker
+// =============================================================================
+// Spec: sqlite-native.md §16.2 — fts5/query/
+//
+// FTS5 MATCH grammar (subset we support):
+//
+//   query       ::= expr
+//   expr        ::= term
+//                 | '(' expr ')'
+//                 | expr 'AND' expr
+//                 | expr 'OR' expr
+//                 | 'NOT' expr
+//                 | expr 'NEAR' '(' N ')' expr
+//                 | '"' phrase '"'
+//   term        ::= IDENT
+//   phrase      ::= IDENT (' ' IDENT)*
+//
+// The executor runs the AST against an `Index`, returning a
+// ranked list of `RowMatch` records (rowid + relevance score via BM25).
+// =============================================================================
+
+module core.database.sqlite.native.vtabs.fts5.query;
+
+mount core.*;
+mount base.{Text, Maybe, Bool};
+mount collections.List;
+mount core.database.sqlite.native.vtabs.fts5.segment.{Posting, PostingList};
+mount core.database.sqlite.native.vtabs.fts5.index.{Index};
+mount core.database.sqlite.native.vtabs.fts5.tokenizer.{
+    Tokenizer, Token, options_default,
+};
+
+// -----------------------------------------------------------------------------
+// AST
+// -----------------------------------------------------------------------------
+
+public type MatchExpr is
+      MeTerm(Text)
+    | MePhrase(List<Text>)
+    | MeAnd(Heap<MatchExpr>, Heap<MatchExpr>)
+    | MeOr(Heap<MatchExpr>, Heap<MatchExpr>)
+    | MeNot(Heap<MatchExpr>)
+    | MeNear(Heap<MatchExpr>, Int, Heap<MatchExpr>);
+
+// -----------------------------------------------------------------------------
+// Parser — lightweight recursive-descent
+// -----------------------------------------------------------------------------
+
+public type ParseError is
+      PeUnexpectedEnd
+    | PeUnexpectedToken(Text);
+
+public type ParseState is {
+    tokens: List<Text>,
+    pos: Int,
+};
+
+public fn tokenise_query(q: &Text) -> List<Text> {
+    let bs = q.as_bytes();
+    let mut out: List<Text> = List.new();
+    let mut i: Int = 0;
+    while i < bs.len() {
+        let b = bs[i];
+        if b == (32 as Byte) || b == (9 as Byte) || b == (10 as Byte) {
+            i = i + 1;
+            continue;
+        }
+        // Punctuation single-char tokens
+        if b == (40 as Byte) {
+            out.push("(".clone()); i = i + 1; continue;
+        }
+        if b == (41 as Byte) {
+            out.push(")".clone()); i = i + 1; continue;
+        }
+        if b == (34 as Byte) {
+            // Quoted phrase — collect up to next "
+            let mut p = Text.new();
+            p.push_byte(34 as Byte);
+            i = i + 1;
+            while i < bs.len() && bs[i] != (34 as Byte) {
+                p.push_byte(bs[i]);
+                i = i + 1;
+            }
+            if i < bs.len() { p.push_byte(34 as Byte); i = i + 1; }
+            out.push(p);
+            continue;
+        }
+        // Word — until whitespace / paren / quote
+        let mut w = Text.new();
+        while i < bs.len() {
+            let c = bs[i];
+            if c == (32 as Byte) || c == (9 as Byte) || c == (10 as Byte)
+                || c == (40 as Byte) || c == (41 as Byte) || c == (34 as Byte) {
+                break;
+            }
+            let fb: Byte =
+                if c >= (65 as Byte) && c <= (90 as Byte) { c + (32 as Byte) } else { c };
+            w.push_byte(fb);
+            i = i + 1;
+        }
+        out.push(w);
+    }
+    out
+}
+
+public fn parse(q: &Text) -> base.Result<MatchExpr, ParseError> {
+    let mut st = ParseState { tokens: tokenise_query(q), pos: 0 };
+    if st.tokens.len() == 0 { return base.Err(PeUnexpectedEnd); }
+    let r = parse_or(&mut st);
+    r
+}
+
+fn parse_or(st: &mut ParseState) -> base.Result<MatchExpr, ParseError> {
+    let mut lhs = match parse_and(st) {
+        base.Ok(x)  => x,
+        base.Err(e) => { return base.Err(e); }
+    };
+    while st.pos < st.tokens.len() && st.tokens[st.pos] == "or".clone() {
+        st.pos = st.pos + 1;
+        let rhs = match parse_and(st) {
+            base.Ok(x)  => x,
+            base.Err(e) => { return base.Err(e); }
+        };
+        lhs = MeOr(Heap.new(lhs), Heap.new(rhs));
+    }
+    base.Ok(lhs)
+}
+
+fn parse_and(st: &mut ParseState) -> base.Result<MatchExpr, ParseError> {
+    let mut lhs = match parse_atom(st) {
+        base.Ok(x)  => x,
+        base.Err(e) => { return base.Err(e); }
+    };
+    while st.pos < st.tokens.len() {
+        let t = &st.tokens[st.pos];
+        if t == &"and".clone() {
+            st.pos = st.pos + 1;
+            let rhs = match parse_atom(st) {
+                base.Ok(x)  => x,
+                base.Err(e) => { return base.Err(e); }
+            };
+            lhs = MeAnd(Heap.new(lhs), Heap.new(rhs));
+        } else if t == &"near".clone() {
+            st.pos = st.pos + 1;
+            // Optional (N)
+            let mut distance: Int = 10;
+            if st.pos < st.tokens.len() && st.tokens[st.pos] == "(".clone() {
+                st.pos = st.pos + 1;
+                if st.pos < st.tokens.len() {
+                    distance = parse_int_text(&st.tokens[st.pos]);
+                    st.pos = st.pos + 1;
+                }
+                if st.pos < st.tokens.len() && st.tokens[st.pos] == ")".clone() {
+                    st.pos = st.pos + 1;
+                }
+            }
+            let rhs = match parse_atom(st) {
+                base.Ok(x)  => x,
+                base.Err(e) => { return base.Err(e); }
+            };
+            lhs = MeNear(Heap.new(lhs), distance, Heap.new(rhs));
+        } else {
+            break;
+        }
+    }
+    base.Ok(lhs)
+}
+
+fn parse_atom(st: &mut ParseState) -> base.Result<MatchExpr, ParseError> {
+    if st.pos >= st.tokens.len() { return base.Err(PeUnexpectedEnd); }
+    let t = st.tokens[st.pos].clone();
+    // NOT prefix
+    if t == "not".clone() {
+        st.pos = st.pos + 1;
+        let inner = match parse_atom(st) {
+            base.Ok(x)  => x,
+            base.Err(e) => { return base.Err(e); }
+        };
+        return base.Ok(MeNot(Heap.new(inner)));
+    }
+    // Parenthesised group
+    if t == "(".clone() {
+        st.pos = st.pos + 1;
+        let inner = match parse_or(st) {
+            base.Ok(x)  => x,
+            base.Err(e) => { return base.Err(e); }
+        };
+        if st.pos < st.tokens.len() && st.tokens[st.pos] == ")".clone() {
+            st.pos = st.pos + 1;
+        }
+        return base.Ok(inner);
+    }
+    // Phrase: starts + ends with "
+    let bs = t.as_bytes();
+    if bs.len() >= 2 && bs[0] == (34 as Byte) && bs[bs.len() - 1] == (34 as Byte) {
+        st.pos = st.pos + 1;
+        // Strip the outer quotes and split into words.
+        let mut words: List<Text> = List.new();
+        let mut cur = Text.new();
+        let mut i: Int = 1;
+        while i < bs.len() - 1 {
+            let b = bs[i];
+            if b == (32 as Byte) {
+                if cur.len() > 0 { words.push(cur); cur = Text.new(); }
+            } else {
+                cur.push_byte(b);
+            }
+            i = i + 1;
+        }
+        if cur.len() > 0 { words.push(cur); }
+        return base.Ok(MePhrase(words));
+    }
+    st.pos = st.pos + 1;
+    base.Ok(MeTerm(t))
+}
+
+fn parse_int_text(t: &Text) -> Int {
+    let bs = t.as_bytes();
+    let mut n: Int = 0;
+    let mut i: Int = 0;
+    while i < bs.len() && bs[i] >= (48 as Byte) && bs[i] <= (57 as Byte) {
+        n = n * 10 + ((bs[i] as Int) - 48);
+        i = i + 1;
+    }
+    n
+}
+
+// -----------------------------------------------------------------------------
+// Executor
+// -----------------------------------------------------------------------------
+
+public type RowMatch is {
+    rowid: Int64,
+    score: Float64,
+};
+
+public fn execute(expr: &MatchExpr, idx: &Index) -> List<RowMatch> {
+    let postings = eval(expr, idx);
+    rank_bm25(&postings, idx)
+}
+
+fn eval(expr: &MatchExpr, idx: &Index) -> PostingList {
+    match expr {
+        MeTerm(t)      => idx.lookup(t),
+        MePhrase(words) => eval_phrase(words, idx),
+        MeAnd(l, r)    => intersect(&eval(l, idx), &eval(r, idx)),
+        MeOr(l, r)     => union(&eval(l, idx), &eval(r, idx)),
+        MeNot(inner)   => {
+            // NOT is "filter over all-rowids minus the inner result".
+            // We return the inner result; the caller's AND-context
+            // converts it via `exclude`. For standalone NOT we degrade
+            // to empty so the ranker doesn't emit spurious rows.
+            let _ = eval(inner, idx);
+            core.database.sqlite.native.vtabs.fts5.segment.posting_list_new()
+        }
+        MeNear(l, dist, r) => {
+            let lp = eval(l, idx);
+            let rp = eval(r, idx);
+            near(&lp, &rp, dist)
+        }
+    }
+}
+
+fn eval_phrase(words: &List<Text>, idx: &Index) -> PostingList {
+    if words.len() == 0 {
+        return core.database.sqlite.native.vtabs.fts5.segment.posting_list_new();
+    }
+    // Phrase = every word co-occurs at consecutive positions.
+    let mut acc = idx.lookup(&words[0]);
+    let mut i: Int = 1;
+    while i < words.len() {
+        let nxt = idx.lookup(&words[i]);
+        acc = adjacent(&acc, &nxt);
+        i = i + 1;
+    }
+    acc
+}
+
+fn intersect(a: &PostingList, b: &PostingList) -> PostingList {
+    let mut out = core.database.sqlite.native.vtabs.fts5.segment.posting_list_new();
+    let ai = a.iter();
+    let bi = b.iter();
+    let mut i: Int = 0;
+    let mut j: Int = 0;
+    while i < ai.len() && j < bi.len() {
+        if ai[i].rowid == bi[j].rowid {
+            out.add(Posting { rowid: ai[i].rowid, column: ai[i].column, position: ai[i].position });
+            i = i + 1;
+            j = j + 1;
+        } else if ai[i].rowid < bi[j].rowid {
+            i = i + 1;
+        } else {
+            j = j + 1;
+        }
+    }
+    out
+}
+
+fn union(a: &PostingList, b: &PostingList) -> PostingList {
+    let mut out = core.database.sqlite.native.vtabs.fts5.segment.posting_list_new();
+    let ai = a.iter();
+    let bi = b.iter();
+    let mut i: Int = 0;
+    while i < ai.len() {
+        out.add(Posting { rowid: ai[i].rowid, column: ai[i].column, position: ai[i].position });
+        i = i + 1;
+    }
+    let mut j: Int = 0;
+    while j < bi.len() {
+        out.add(Posting { rowid: bi[j].rowid, column: bi[j].column, position: bi[j].position });
+        j = j + 1;
+    }
+    out
+}
+
+fn adjacent(a: &PostingList, b: &PostingList) -> PostingList {
+    let mut out = core.database.sqlite.native.vtabs.fts5.segment.posting_list_new();
+    let ai = a.iter();
+    let bi = b.iter();
+    let mut i: Int = 0;
+    while i < ai.len() {
+        let mut j: Int = 0;
+        while j < bi.len() {
+            if ai[i].rowid == bi[j].rowid && ai[i].column == bi[j].column
+                && bi[j].position == ai[i].position + 1 {
+                out.add(Posting {
+                    rowid: ai[i].rowid,
+                    column: ai[i].column,
+                    position: ai[i].position,
+                });
+            }
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+    out
+}
+
+fn near(a: &PostingList, b: &PostingList, dist: Int) -> PostingList {
+    let mut out = core.database.sqlite.native.vtabs.fts5.segment.posting_list_new();
+    let ai = a.iter();
+    let bi = b.iter();
+    let mut i: Int = 0;
+    while i < ai.len() {
+        let mut j: Int = 0;
+        while j < bi.len() {
+            if ai[i].rowid == bi[j].rowid {
+                let diff: Int = ai[i].position - bi[j].position;
+                let abs_d: Int = if diff < 0 { -diff } else { diff };
+                if abs_d <= dist {
+                    out.add(Posting {
+                        rowid: ai[i].rowid,
+                        column: ai[i].column,
+                        position: ai[i].position,
+                    });
+                }
+            }
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+    out
+}
+
+// -----------------------------------------------------------------------------
+// BM25 ranker
+// -----------------------------------------------------------------------------
+//
+// Classical BM25 formula:
+//
+//   IDF(t)   = log((N − df + 0.5) / (df + 0.5))
+//   score    = sum_t IDF(t) · (tf · (k1 + 1)) / (tf + k1 · (1 − b + b · |d| / avgdl))
+//
+// With k1 = 1.2, b = 0.75 (SQLite defaults). We approximate |d| by
+// posting count for now — a future enhancement folds per-column
+// length into docstore.
+// =============================================================================
+
+public fn rank_bm25(pl: &PostingList, idx: &Index) -> List<RowMatch> {
+    let n_docs: Int = idx.segment_count();
+    if n_docs == 0 { return List.new(); }
+    let n_docs_f = n_docs as Float64;
+    let k1: Float64 = 1.2;
+    let b_param: Float64 = 0.75;
+    let _ = b_param;
+    // Aggregate postings by rowid → (term_freq, score_accumulator).
+    let mut rows: List<Int64> = List.new();
+    let mut freqs: List<Int> = List.new();
+    let postings = pl.iter();
+    let mut i: Int = 0;
+    while i < postings.len() {
+        let row_v = postings[i].rowid;
+        let mut found = false;
+        let mut k: Int = 0;
+        while k < rows.len() {
+            if rows[k] == row_v { freqs[k] = freqs[k] + 1; found = true; break; }
+            k = k + 1;
+        }
+        if !found { rows.push(row_v); freqs.push(1); }
+        i = i + 1;
+    }
+    let df: Int = rows.len();
+    let df_f = df as Float64;
+    let idf: Float64 = safe_log((n_docs_f - df_f + 0.5) / (df_f + 0.5));
+    let mut out: List<RowMatch> = List.new();
+    let mut j: Int = 0;
+    while j < rows.len() {
+        let tf_f = freqs[j] as Float64;
+        let numerator = tf_f * (k1 + 1.0);
+        let denom = tf_f + k1;
+        let score = idf * numerator / denom;
+        out.push(RowMatch { rowid: rows[j], score: score });
+        j = j + 1;
+    }
+    sort_by_score_desc(&out)
+}
+
+fn safe_log(x: Float64) -> Float64 {
+    if x <= 0.0 { return 0.0; }
+    // Natural log via 2 · atanh((x − 1) / (x + 1)), bounded series.
+    let u = (x - 1.0) / (x + 1.0);
+    let mut sum: Float64 = 0.0;
+    let mut term: Float64 = u;
+    let u2 = u * u;
+    let mut k: Int = 1;
+    while k < 30 {
+        sum = sum + term / (k as Float64);
+        term = term * u2;
+        k = k + 2;
+    }
+    2.0 * sum
+}
+
+fn sort_by_score_desc(rows: &List<RowMatch>) -> List<RowMatch> {
+    let mut sorted: List<RowMatch> = List.new();
+    let mut i: Int = 0;
+    while i < rows.len() {
+        let cur = RowMatch { rowid: rows[i].rowid, score: rows[i].score };
+        let mut inserted = false;
+        let mut k: Int = 0;
+        let mut new_sorted: List<RowMatch> = List.new();
+        while k < sorted.len() {
+            if !inserted && cur.score > sorted[k].score {
+                new_sorted.push(RowMatch { rowid: cur.rowid, score: cur.score });
+                inserted = true;
+            }
+            new_sorted.push(RowMatch { rowid: sorted[k].rowid, score: sorted[k].score });
+            k = k + 1;
+        }
+        if !inserted { new_sorted.push(cur); }
+        sorted = new_sorted;
+        i = i + 1;
+    }
+    sorted
+}

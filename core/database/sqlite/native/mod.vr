@@ -100,3 +100,7 @@ public module planner_cost;
 public module subprograms;
 // - optimizer: pre-emission peephole / jump-thread / DCE / const-fold passes (§11.5)
 public module optimizer;
+// - auth: Authorizer multi-hook composition + AuthAction taxonomy (§19.5)
+public module auth;
+// - distribution: version + features + build manifest (§23)
+public module distribution;

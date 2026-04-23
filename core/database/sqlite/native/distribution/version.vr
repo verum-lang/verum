@@ -1,0 +1,96 @@
+// =============================================================================
+// distribution/version.vr — version triple + display helpers
+// =============================================================================
+// Spec: sqlite-native.md §23.4
+//
+// Loom version follows semver `MAJOR.MINOR.PATCH-SUFFIX+SQLITE_COMPAT`,
+// e.g. `0.1.0-alpha+3.45.0`. The SQLite-compat suffix tells callers
+// which upstream SQLite version this build claims compatibility with.
+// =============================================================================
+
+module core.database.sqlite.native.distribution.version;
+
+mount core.*;
+mount base.{Text};
+
+public type Version is {
+    major: Int,
+    minor: Int,
+    patch: Int,
+    suffix: Text,         // e.g. "alpha", "beta.3", "rc.1", or empty for stable
+    sqlite_compat: Text,  // e.g. "3.45.0"
+};
+
+// -----------------------------------------------------------------------------
+// Current build version
+// -----------------------------------------------------------------------------
+
+public fn loom_version() -> Version {
+    Version {
+        major: 0,
+        minor: 1,
+        patch: 0,
+        suffix: "alpha".clone(),
+        sqlite_compat: "3.45.0".clone(),
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Display helpers
+// -----------------------------------------------------------------------------
+
+fn append_int(dst: &mut Text, n: Int) {
+    if n == 0 { dst.push_byte(48 as Byte); return; }
+    let mut digits: List<Byte> = List.new();
+    let mut x: Int = if n < 0 { -n } else { n };
+    while x > 0 {
+        digits.push(((x % 10) + 48) as Byte);
+        x = x / 10;
+    }
+    if n < 0 { dst.push_byte(45 as Byte); }
+    let mut i: Int = digits.len() - 1;
+    while i >= 0 { dst.push_byte(digits[i]); i = i - 1; }
+}
+
+fn append_text(dst: &mut Text, s: &Text) {
+    let bs = s.as_bytes();
+    let mut i: Int = 0;
+    while i < bs.len() { dst.push_byte(bs[i]); i = i + 1; }
+}
+
+public fn version_string(v: &Version) -> Text {
+    let mut out = Text.new();
+    append_int(&mut out, v.major);
+    out.push_byte(46 as Byte);
+    append_int(&mut out, v.minor);
+    out.push_byte(46 as Byte);
+    append_int(&mut out, v.patch);
+    if v.suffix.len() > 0 {
+        out.push_byte(45 as Byte);
+        append_text(&mut out, &v.suffix);
+    }
+    if v.sqlite_compat.len() > 0 {
+        out.push_byte(43 as Byte);
+        append_text(&mut out, &v.sqlite_compat);
+    }
+    out
+}
+
+/// SQLITE_VERSION-compatible string (e.g. "3.45.0").
+public fn sqlite_version_compat() -> Text {
+    loom_version().sqlite_compat
+}
+
+// -----------------------------------------------------------------------------
+// Comparison
+// -----------------------------------------------------------------------------
+
+public fn precedes(a: &Version, b: &Version) -> base.Bool {
+    if a.major != b.major { return a.major < b.major; }
+    if a.minor != b.minor { return a.minor < b.minor; }
+    a.patch < b.patch
+}
+
+public fn at_least(have: &Version, want: &Version) -> base.Bool {
+    !precedes(have, want)
+}

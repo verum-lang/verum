@@ -1,0 +1,196 @@
+// =============================================================================
+// distribution/features.vr — compile-time / runtime feature toggles
+// =============================================================================
+// Spec: sqlite-native.md §23
+//
+// Each feature has a stable string ID that maps onto:
+//   * `pragma compile_options`   row format
+//   * `Database.feature_enabled(name)` query
+//
+// The default `loom_features()` mirrors what a stock `verum build`
+// of loom enables: every loom-native subsystem on, loadable
+// extensions off (security default).
+// =============================================================================
+
+module core.database.sqlite.native.distribution.features;
+
+mount core.*;
+mount base.{Text, Bool, Maybe};
+mount collections.List;
+
+// -----------------------------------------------------------------------------
+// FeatureFlag record
+// -----------------------------------------------------------------------------
+
+public type FeatureFlag is {
+    name: Text,
+    enabled: Bool,
+    /// Free-text description for `pragma compile_options` output.
+    description: Text,
+};
+
+public fn flag(name: Text, enabled: Bool, description: Text) -> FeatureFlag {
+    FeatureFlag { name: name, enabled: enabled, description: description }
+}
+
+// -----------------------------------------------------------------------------
+// Default catalogue
+// -----------------------------------------------------------------------------
+
+public fn loom_features() -> List<FeatureFlag> {
+    let mut out: List<FeatureFlag> = List.new();
+    out.push(flag(
+        "ENABLE_LOOM_PURE_VERUM".clone(),
+        true,
+        "Pure-Verum SQLite reimplementation".clone(),
+    ));
+    out.push(flag(
+        "THREADSAFE".clone(),
+        true,
+        "Serialized-mode (default) thread safety".clone(),
+    ));
+    out.push(flag("ENABLE_FTS5".clone(), true, "Full-text search v5".clone()));
+    out.push(flag("ENABLE_RTREE".clone(), true, "N-dimensional spatial index".clone()));
+    out.push(flag("ENABLE_JSON1".clone(), true, "JSON1 functions".clone()));
+    out.push(flag(
+        "ENABLE_MATH_FUNCTIONS".clone(),
+        true,
+        "SQLite 3.35+ math functions".clone(),
+    ));
+    out.push(flag(
+        "ENABLE_DBSTAT_VTAB".clone(),
+        true,
+        "dbstat virtual table".clone(),
+    ));
+    out.push(flag(
+        "ENABLE_PREUPDATE_HOOK".clone(),
+        true,
+        "PreUpdate hook for change-data capture".clone(),
+    ));
+    out.push(flag(
+        "ENABLE_SESSION".clone(),
+        true,
+        "Session change-set extension".clone(),
+    ));
+    out.push(flag(
+        "ENABLE_LOAD_EXTENSION".clone(),
+        false,
+        "Loadable Verum-cog extensions (off by default)".clone(),
+    ));
+    out.push(flag(
+        "ENABLE_VERIFY_CONTRACTS".clone(),
+        true,
+        "@verify-annotated invariant contracts".clone(),
+    ));
+    out.push(flag(
+        "ENABLE_DST_HARNESS".clone(),
+        true,
+        "Deterministic-simulation testing harness".clone(),
+    ));
+    out.push(flag(
+        "OMIT_DEPRECATED".clone(),
+        true,
+        "Skip deprecated SQLite legacy APIs".clone(),
+    ));
+    out.push(flag(
+        "MAX_PAGE_COUNT".clone(),
+        true,
+        "Honour PRAGMA max_page_count".clone(),
+    ));
+    out.push(flag(
+        "ENABLE_STAT4".clone(),
+        true,
+        "stat4-style histogram statistics".clone(),
+    ));
+    out.push(flag(
+        "ENABLE_FTS5_PORTER".clone(),
+        true,
+        "FTS5 Porter stemmer tokeniser".clone(),
+    ));
+    out.push(flag(
+        "ENABLE_FTS5_TRIGRAM".clone(),
+        true,
+        "FTS5 trigram tokeniser".clone(),
+    ));
+    out.push(flag(
+        "ENABLE_FTS5_UNICODE61".clone(),
+        true,
+        "FTS5 Unicode-61 tokeniser".clone(),
+    ));
+    out.push(flag(
+        "ENABLE_AUTHORIZER".clone(),
+        true,
+        "Per-action authorizer hook".clone(),
+    ));
+    out.push(flag(
+        "ENABLE_BUSY_RETRY_PROTOCOL".clone(),
+        true,
+        "BusyPolicy protocol with 3 default impls".clone(),
+    ));
+    out
+}
+
+// -----------------------------------------------------------------------------
+// Query helpers
+// -----------------------------------------------------------------------------
+
+fn ascii_lower(s: &Text) -> Text {
+    let bs = s.as_bytes();
+    let mut out = Text.new();
+    let mut i: Int = 0;
+    while i < bs.len() {
+        let b = bs[i];
+        let lo: Byte =
+            if b >= (65 as Byte) && b <= (90 as Byte) { b + (32 as Byte) } else { b };
+        out.push_byte(lo);
+        i = i + 1;
+    }
+    out
+}
+
+public fn feature_enabled(name: &Text) -> Bool {
+    let target = ascii_lower(name);
+    let cat = loom_features();
+    let mut i: Int = 0;
+    while i < cat.len() {
+        if ascii_lower(&cat[i].name) == target { return cat[i].enabled; }
+        i = i + 1;
+    }
+    false
+}
+
+public fn feature_lookup(name: &Text) -> Maybe<FeatureFlag> {
+    let target = ascii_lower(name);
+    let cat = loom_features();
+    let mut i: Int = 0;
+    while i < cat.len() {
+        if ascii_lower(&cat[i].name) == target {
+            return Some(FeatureFlag {
+                name: cat[i].name.clone(),
+                enabled: cat[i].enabled,
+                description: cat[i].description.clone(),
+            });
+        }
+        i = i + 1;
+    }
+    None
+}
+
+public fn feature_count() -> Int { loom_features().len() }
+
+public fn enabled_features() -> List<FeatureFlag> {
+    let mut out: List<FeatureFlag> = List.new();
+    let cat = loom_features();
+    let mut i: Int = 0;
+    while i < cat.len() {
+        if cat[i].enabled {
+            out.push(FeatureFlag {
+                name: cat[i].name.clone(),
+                enabled: true,
+                description: cat[i].description.clone(),
+            });
+        }
+        i = i + 1;
+    }
+    out
+}

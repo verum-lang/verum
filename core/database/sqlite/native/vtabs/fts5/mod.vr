@@ -1,0 +1,31 @@
+// =============================================================================
+// vtabs/fts5/mod.vr — FTS5 full-text-search virtual-table implementation
+// =============================================================================
+// Layer: 6
+// Spec: sqlite-native.md §16.2
+//
+// Inverted-index based full-text search. The architecture mirrors
+// upstream FTS5:
+//
+//   * `tokenizer/`   — Tokenizer protocol + 4 built-in implementations
+//                      (simple / porter / unicode61 / trigram)
+//   * `segment`      — immutable on-disk segment of (term → posting list)
+//                      pairs sorted lexicographically
+//   * `index`        — multi-segment inverted index with read-side merge
+//   * `merger`       — background segment merger (level-N → level-N+1)
+//   * `query/`       — MATCH grammar parser, AND/OR/NOT/NEAR executor,
+//                      BM25 ranker
+//   * `dml`          — INSERT/UPDATE/DELETE wrappers updating the
+//                      content table + index
+//   * `functions`    — highlight / snippet / bm25 SQL functions
+// =============================================================================
+
+module core.database.sqlite.native.vtabs.fts5;
+
+public module tokenizer;
+public module segment;
+public module index;
+public module merger;
+public module query;
+public module dml;
+public module functions;

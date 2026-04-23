@@ -1,0 +1,28 @@
+// =============================================================================
+// core/database/sqlite/native/auth/mod.vr
+// =============================================================================
+// Layer: 6
+// Spec: sqlite-native.md §19.5 (authorizer hook integration)
+//
+// Authorization is the connection-level pre-compile gate that says
+// "yes / no / ignore" for every privileged action the SQL compiler
+// is about to compile (read column, write table, drop view, …).
+// It's the loom equivalent of `sqlite3_set_authorizer`.
+//
+// The dispatch is two-level:
+//   1. `Authorizer` aggregates one or more `AuthorizerHook`
+//      implementations. Multiple hooks compose by intersection —
+//      the most restrictive decision wins.
+//   2. The L5 codegen calls `authorize(action)` before emitting any
+//      opcode for that action; the result determines whether to
+//      compile, refuse, or substitute a NULL.
+//
+// The hook list is stored deterministically (insertion order) so DST
+// runs reproduce identical decisions.
+// =============================================================================
+
+module core.database.sqlite.native.auth;
+
+public module decision;
+public module dispatch;
+public module action;

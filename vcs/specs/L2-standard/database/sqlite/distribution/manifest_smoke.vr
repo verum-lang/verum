@@ -1,0 +1,175 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, distribution, version, features, manifest
+// @timeout: 5000
+// @expected-exit: 0
+//
+// Distribution metadata:
+//   * Version triple + comparison + display
+//   * Feature catalogue defaults + lookup
+//   * BuildManifest construction + summary
+
+mount core.database.sqlite.native.distribution.version.{
+    Version, loom_version, version_string, sqlite_version_compat,
+    precedes, at_least,
+};
+mount core.database.sqlite.native.distribution.features.{
+    FeatureFlag, flag, loom_features,
+    feature_enabled, feature_lookup, feature_count, enabled_features,
+};
+mount core.database.sqlite.native.distribution.manifest.{
+    BuildManifest, manifest_default, one_line_summary,
+};
+mount base.{Some, None};
+
+// -----------------------------------------------------------------------------
+// version
+// -----------------------------------------------------------------------------
+
+fn test_loom_version_triple() {
+    let v = loom_version();
+    assert_eq(v.major, 0);
+    assert_eq(v.minor, 1);
+    assert_eq(v.patch, 0);
+    assert(v.suffix == "alpha".clone());
+    assert(v.sqlite_compat == "3.45.0".clone());
+}
+
+fn test_version_string_render() {
+    let v = loom_version();
+    let s = version_string(&v);
+    // "0.1.0-alpha+3.45.0"
+    assert(s == "0.1.0-alpha+3.45.0".clone());
+}
+
+fn test_sqlite_compat_string() {
+    let s = sqlite_version_compat();
+    assert(s == "3.45.0".clone());
+}
+
+fn test_version_precedes() {
+    let a = Version { major: 0, minor: 1, patch: 0, suffix: "".clone(), sqlite_compat: "".clone() };
+    let b = Version { major: 0, minor: 2, patch: 0, suffix: "".clone(), sqlite_compat: "".clone() };
+    assert(precedes(&a, &b));
+    assert(!precedes(&b, &a));
+    assert(at_least(&b, &a));
+    assert(at_least(&a, &a));
+}
+
+// -----------------------------------------------------------------------------
+// features
+// -----------------------------------------------------------------------------
+
+fn test_feature_count_in_range() {
+    let n = feature_count();
+    assert(n >= 15);
+    assert(n <= 40);
+}
+
+fn test_loadable_extensions_off_by_default() {
+    assert(!feature_enabled(&"ENABLE_LOAD_EXTENSION".clone()));
+}
+
+fn test_core_features_on_by_default() {
+    assert(feature_enabled(&"ENABLE_FTS5".clone()));
+    assert(feature_enabled(&"ENABLE_RTREE".clone()));
+    assert(feature_enabled(&"ENABLE_JSON1".clone()));
+    assert(feature_enabled(&"ENABLE_LOOM_PURE_VERUM".clone()));
+    assert(feature_enabled(&"THREADSAFE".clone()));
+}
+
+fn test_feature_lookup_returns_metadata() {
+    match feature_lookup(&"ENABLE_FTS5".clone()) {
+        Some(f) => {
+            assert(f.enabled);
+            assert(f.description.len() > 0);
+        }
+        None => panic("ENABLE_FTS5 should be present"),
+    }
+}
+
+fn test_feature_lookup_case_insensitive() {
+    match feature_lookup(&"enable_fts5".clone()) {
+        Some(_) => {}, None => panic("case-insensitive lookup"),
+    }
+}
+
+fn test_unknown_feature_returns_none() {
+    match feature_lookup(&"NONEXISTENT_FEATURE_FLAG".clone()) {
+        None    => {}, Some(_) => panic("unknown should return None"),
+    }
+    assert(!feature_enabled(&"NONEXISTENT".clone()));
+}
+
+fn test_enabled_subset_excludes_disabled() {
+    let on = enabled_features();
+    let mut found_load_ext = false;
+    let mut i: Int = 0;
+    while i < on.len() {
+        if on[i].name == "ENABLE_LOAD_EXTENSION".clone() { found_load_ext = true; }
+        i = i + 1;
+    }
+    assert(!found_load_ext);
+}
+
+// -----------------------------------------------------------------------------
+// manifest
+// -----------------------------------------------------------------------------
+
+fn test_manifest_defaults() {
+    let m = manifest_default();
+    assert_eq(m.version.major, 0);
+    assert(m.host_triple == "unknown".clone());
+    assert(m.profile == "release".clone());
+    assert(m.feature_count() >= 10);
+}
+
+fn test_manifest_setters() {
+    let mut m = manifest_default();
+    m.set_host("aarch64-apple-darwin".clone());
+    m.set_profile("debug".clone());
+    m.set_source_sha("abc123".clone());
+    assert(m.host_triple == "aarch64-apple-darwin".clone());
+    assert(m.profile == "debug".clone());
+    assert(m.source_sha == "abc123".clone());
+}
+
+fn test_manifest_has_feature() {
+    let m = manifest_default();
+    assert(m.has_feature(&"ENABLE_FTS5".clone()));
+    assert(!m.has_feature(&"NOPE".clone()));
+}
+
+fn test_manifest_summary() {
+    let mut m = manifest_default();
+    m.set_profile("release".clone());
+    let s = one_line_summary(&m);
+    // "loom 0.1.0-alpha+3.45.0 (release)"
+    assert(s.len() > 10);
+}
+
+fn test_manifest_version_text() {
+    let m = manifest_default();
+    let v = m.version_text();
+    assert(v == "0.1.0-alpha+3.45.0".clone());
+}
+
+fn main() {
+    test_loom_version_triple();
+    test_version_string_render();
+    test_sqlite_compat_string();
+    test_version_precedes();
+    test_feature_count_in_range();
+    test_loadable_extensions_off_by_default();
+    test_core_features_on_by_default();
+    test_feature_lookup_returns_metadata();
+    test_feature_lookup_case_insensitive();
+    test_unknown_feature_returns_none();
+    test_enabled_subset_excludes_disabled();
+    test_manifest_defaults();
+    test_manifest_setters();
+    test_manifest_has_feature();
+    test_manifest_summary();
+    test_manifest_version_text();
+}

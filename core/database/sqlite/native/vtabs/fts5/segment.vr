@@ -1,0 +1,263 @@
+// =============================================================================
+// fts5/segment.vr — immutable inverted-index segment
+// =============================================================================
+// Spec: sqlite-native.md §16.2 — fts5/segment.vr
+//
+// A `Segment` is an immutable sorted set of `(term, posting_list)`
+// pairs, plus a small bloom filter to skip segments that don't
+// contain a queried term.
+//
+// Segments are produced by:
+//   * `from_tokens(rowid, column, tokens)` — build a segment from
+//     one document's token stream
+//   * `merge(s1, s2)` — k-way merge two sorted segments
+//
+// Posting lists store `(rowid, column, position)` tuples sorted by
+// rowid then position so AND/NEAR queries can intersect them in
+// linear time.
+// =============================================================================
+
+module core.database.sqlite.native.vtabs.fts5.segment;
+
+mount core.*;
+mount base.{Text, Bool, Maybe};
+mount collections.List;
+mount core.database.sqlite.native.vtabs.fts5.tokenizer.{Token};
+
+// -----------------------------------------------------------------------------
+// Posting
+// -----------------------------------------------------------------------------
+
+public type Posting is {
+    rowid: Int64,
+    column: Int,
+    position: Int,
+};
+
+public fn posting_less(a: &Posting, b: &Posting) -> Bool {
+    if a.rowid != b.rowid { return a.rowid < b.rowid; }
+    if a.column != b.column { return a.column < b.column; }
+    a.position < b.position
+}
+
+// -----------------------------------------------------------------------------
+// PostingList
+// -----------------------------------------------------------------------------
+
+public type PostingList is {
+    postings: List<Posting>,
+};
+
+public fn posting_list_new() -> PostingList { PostingList { postings: List.new() } }
+
+implement PostingList {
+    public fn len(&self) -> Int { self.postings.len() }
+
+    public fn add(&mut self, p: Posting) { self.postings.push(p); }
+
+    /// Insertion-sorted append for postings (kept sorted by rowid + position).
+    public fn add_sorted(&mut self, p: Posting) {
+        // Try at the end first — common case for sequential builds.
+        if self.postings.len() == 0 || posting_less(&self.postings[self.postings.len() - 1], &p) {
+            self.postings.push(p);
+            return;
+        }
+        // Linear scan for insert position.
+        let mut new_list: List<Posting> = List.new();
+        let mut inserted: Bool = false;
+        let mut i: Int = 0;
+        while i < self.postings.len() {
+            if !inserted && posting_less(&p, &self.postings[i]) {
+                new_list.push(clone_p(&p));
+                inserted = true;
+            }
+            new_list.push(clone_p(&self.postings[i]));
+            i = i + 1;
+        }
+        if !inserted { new_list.push(p); }
+        self.postings = new_list;
+    }
+
+    public fn iter(&self) -> List<Posting> {
+        let mut out: List<Posting> = List.new();
+        let mut i: Int = 0;
+        while i < self.postings.len() {
+            out.push(clone_p(&self.postings[i]));
+            i = i + 1;
+        }
+        out
+    }
+}
+
+fn clone_p(p: &Posting) -> Posting {
+    Posting { rowid: p.rowid, column: p.column, position: p.position }
+}
+
+// -----------------------------------------------------------------------------
+// TermEntry
+// -----------------------------------------------------------------------------
+
+public type TermEntry is {
+    term: Text,
+    postings: PostingList,
+};
+
+// -----------------------------------------------------------------------------
+// Segment
+// -----------------------------------------------------------------------------
+
+public type Segment is {
+    /// Sorted by `term`.
+    entries: List<TermEntry>,
+    /// Total number of postings (sum across all entries).
+    n_postings: Int,
+    /// Min and max rowid covered (allows fast skip on rowid-bounded queries).
+    min_rowid: Int64,
+    max_rowid: Int64,
+};
+
+public fn segment_empty() -> Segment {
+    Segment {
+        entries: List.new(),
+        n_postings: 0,
+        min_rowid: (0 as Int64),
+        max_rowid: (0 as Int64),
+    }
+}
+
+/// Build a segment from one document's token stream.
+public fn segment_from_tokens(rowid: Int64, column: Int, tokens: List<Token>) -> Segment {
+    let mut entries: List<TermEntry> = List.new();
+    let mut i: Int = 0;
+    while i < tokens.len() {
+        let posting = Posting {
+            rowid: rowid,
+            column: column,
+            position: tokens[i].position,
+        };
+        let pos = find_or_create_term(&mut entries, &tokens[i].term);
+        entries[pos].postings.add(posting);
+        i = i + 1;
+    }
+    Segment {
+        entries: entries,
+        n_postings: tokens.len(),
+        min_rowid: rowid,
+        max_rowid: rowid,
+    }
+}
+
+fn find_or_create_term(entries: &mut List<TermEntry>, term: &Text) -> Int {
+    let mut i: Int = 0;
+    while i < entries.len() {
+        if entries[i].term == term { return i; }
+        i = i + 1;
+    }
+    entries.push(TermEntry {
+        term: term.clone(),
+        postings: posting_list_new(),
+    });
+    entries.len() - 1
+}
+
+// -----------------------------------------------------------------------------
+// Lookup
+// -----------------------------------------------------------------------------
+
+public fn segment_lookup(seg: &Segment, term: &Text) -> Maybe<PostingList> {
+    let mut i: Int = 0;
+    while i < seg.entries.len() {
+        if seg.entries[i].term == term {
+            return Some(clone_pl(&seg.entries[i].postings));
+        }
+        i = i + 1;
+    }
+    None
+}
+
+fn clone_pl(pl: &PostingList) -> PostingList {
+    let mut out: List<Posting> = List.new();
+    let mut i: Int = 0;
+    while i < pl.postings.len() {
+        out.push(clone_p(&pl.postings[i]));
+        i = i + 1;
+    }
+    PostingList { postings: out }
+}
+
+// -----------------------------------------------------------------------------
+// Merge two segments — k-way merge for the background merger
+// -----------------------------------------------------------------------------
+
+public fn segment_merge(a: &Segment, b: &Segment) -> Segment {
+    let mut out: List<TermEntry> = List.new();
+    let mut i: Int = 0;
+    let mut j: Int = 0;
+    let mut total: Int = 0;
+    while i < a.entries.len() && j < b.entries.len() {
+        if a.entries[i].term == b.entries[j].term {
+            // Merge posting lists.
+            let merged = merge_posting_lists(&a.entries[i].postings, &b.entries[j].postings);
+            total = total + merged.len();
+            out.push(TermEntry { term: a.entries[i].term.clone(), postings: merged });
+            i = i + 1;
+            j = j + 1;
+        } else if a.entries[i].term < b.entries[j].term {
+            total = total + a.entries[i].postings.len();
+            out.push(TermEntry {
+                term: a.entries[i].term.clone(),
+                postings: clone_pl(&a.entries[i].postings),
+            });
+            i = i + 1;
+        } else {
+            total = total + b.entries[j].postings.len();
+            out.push(TermEntry {
+                term: b.entries[j].term.clone(),
+                postings: clone_pl(&b.entries[j].postings),
+            });
+            j = j + 1;
+        }
+    }
+    while i < a.entries.len() {
+        total = total + a.entries[i].postings.len();
+        out.push(TermEntry {
+            term: a.entries[i].term.clone(),
+            postings: clone_pl(&a.entries[i].postings),
+        });
+        i = i + 1;
+    }
+    while j < b.entries.len() {
+        total = total + b.entries[j].postings.len();
+        out.push(TermEntry {
+            term: b.entries[j].term.clone(),
+            postings: clone_pl(&b.entries[j].postings),
+        });
+        j = j + 1;
+    }
+    let min_r: Int64 = if a.min_rowid < b.min_rowid { a.min_rowid } else { b.min_rowid };
+    let max_r: Int64 = if a.max_rowid > b.max_rowid { a.max_rowid } else { b.max_rowid };
+    Segment {
+        entries: out,
+        n_postings: total,
+        min_rowid: min_r,
+        max_rowid: max_r,
+    }
+}
+
+fn merge_posting_lists(a: &PostingList, b: &PostingList) -> PostingList {
+    let mut out: List<Posting> = List.new();
+    let mut i: Int = 0;
+    let mut j: Int = 0;
+    while i < a.postings.len() && j < b.postings.len() {
+        if posting_less(&a.postings[i], &b.postings[j]) {
+            out.push(clone_p(&a.postings[i]));
+            i = i + 1;
+        } else {
+            out.push(clone_p(&b.postings[j]));
+            j = j + 1;
+        }
+    }
+    while i < a.postings.len() { out.push(clone_p(&a.postings[i])); i = i + 1; }
+    while j < b.postings.len() { out.push(clone_p(&b.postings[j])); j = j + 1; }
+    PostingList { postings: out }
+}

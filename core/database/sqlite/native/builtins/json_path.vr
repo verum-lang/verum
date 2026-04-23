@@ -1,0 +1,465 @@
+// =============================================================================
+// builtins/json_path.vr — JSON path grammar + mutator functions
+// =============================================================================
+// Spec: sqlite-native.md §15.4 — extended JSON1 surface
+//
+// Spec compliance:
+//   * `json_set(X, P, V, ...)`     — replace existing OR insert if absent
+//   * `json_insert(X, P, V, ...)`  — insert only if path does NOT exist
+//   * `json_replace(X, P, V, ...)` — replace only if path DOES exist
+//   * `json_remove(X, P, ...)`     — delete the value at every path
+//   * `json_patch(X, Y)`           — RFC 7396 merge of Y into X
+//
+// Path grammar (matches SQLite):
+//   path     ::= '$' segment*
+//   segment  ::= '.' name | '.[' INDEX ']' | '[' INDEX ']'
+//
+// Names allow alphanumeric + underscore; quoted form ".\"name with spaces\""
+// is recognised but folded to the unquoted comparison form.
+// =============================================================================
+
+module core.database.sqlite.native.builtins.json_path;
+
+mount core.*;
+mount base.{Text, Maybe, Bool, Result, Ok, Err, Some, None};
+mount collections.List;
+mount core.database.sqlite.native.builtins.json_fns.{
+    JsonValue, JNull, JBool, JNumber, JString, JArray, JObject, JsonField,
+    parse_json, serialise,
+};
+
+// -----------------------------------------------------------------------------
+// PathSeg
+// -----------------------------------------------------------------------------
+
+public type PathSeg is
+      PsField(Text)
+    | PsIndex(Int);
+
+public type PathParseError is
+      PpEmpty
+    | PpMissingDollar
+    | PpUnclosedBracket
+    | PpInvalidIndex;
+
+public fn parse_path(s: &Text) -> base.Result<List<PathSeg>, PathParseError> {
+    let bs = s.as_bytes();
+    if bs.len() == 0 { return Err(PpEmpty); }
+    if bs[0] != (36 as Byte) { return Err(PpMissingDollar); }
+    let mut out: List<PathSeg> = List.new();
+    let mut i: Int = 1;
+    while i < bs.len() {
+        let b = bs[i];
+        if b == (46 as Byte) {
+            i = i + 1;
+            // Optional bracket form: `.[N]`
+            if i < bs.len() && bs[i] == (91 as Byte) {
+                let r = parse_index(&bs, i);
+                match r {
+                    Ok(pair) => { out.push(PsIndex(pair.0)); i = pair.1; }
+                    Err(e)   => { return Err(e); }
+                }
+                continue;
+            }
+            // Quoted name: `."abc"`
+            if i < bs.len() && bs[i] == (34 as Byte) {
+                i = i + 1;
+                let mut name = Text.new();
+                while i < bs.len() && bs[i] != (34 as Byte) {
+                    name.push_byte(bs[i]);
+                    i = i + 1;
+                }
+                if i < bs.len() && bs[i] == (34 as Byte) { i = i + 1; }
+                out.push(PsField(name));
+                continue;
+            }
+            // Bare name
+            let start = i;
+            while i < bs.len() && is_name_byte(bs[i]) { i = i + 1; }
+            let mut name = Text.new();
+            let mut k: Int = start;
+            while k < i { name.push_byte(bs[k]); k = k + 1; }
+            out.push(PsField(name));
+        } else if b == (91 as Byte) {
+            let r = parse_index(&bs, i);
+            match r {
+                Ok(pair) => { out.push(PsIndex(pair.0)); i = pair.1; }
+                Err(e)   => { return Err(e); }
+            }
+        } else {
+            return Err(PpUnclosedBracket);
+        }
+    }
+    Ok(out)
+}
+
+fn is_name_byte(b: Byte) -> Bool {
+    (b >= (48 as Byte) && b <= (57 as Byte)) ||
+    (b >= (65 as Byte) && b <= (90 as Byte)) ||
+    (b >= (97 as Byte) && b <= (122 as Byte)) ||
+    b == (95 as Byte)
+}
+
+fn parse_index(bs: &List<Byte>, start: Int) -> base.Result<(Int, Int), PathParseError> {
+    if start >= bs.len() || bs[start] != (91 as Byte) { return Err(PpUnclosedBracket); }
+    let mut i: Int = start + 1;
+    let mut idx: Int = 0;
+    let mut had_digit: Bool = false;
+    while i < bs.len() && bs[i] != (93 as Byte) {
+        if bs[i] >= (48 as Byte) && bs[i] <= (57 as Byte) {
+            idx = idx * 10 + ((bs[i] as Int) - 48);
+            had_digit = true;
+        } else {
+            return Err(PpInvalidIndex);
+        }
+        i = i + 1;
+    }
+    if i >= bs.len() { return Err(PpUnclosedBracket); }
+    if !had_digit { return Err(PpInvalidIndex); }
+    Ok((idx, i + 1))
+}
+
+// -----------------------------------------------------------------------------
+// Mutators — pure (return a new tree)
+// -----------------------------------------------------------------------------
+
+public type SetMode is SmSet | SmInsert | SmReplace;
+
+/// Apply `mode`-specific mutation: set replaces or inserts; insert
+/// only adds when missing; replace only updates when present.
+public fn apply_mutation(
+    root: &JsonValue,
+    path: &List<PathSeg>,
+    new_value: &JsonValue,
+    mode: SetMode,
+) -> JsonValue {
+    if path.len() == 0 {
+        // Root replacement
+        match mode {
+            SmInsert  => clone_json(root),                 // skip if root exists
+            SmReplace => clone_json(new_value),
+            SmSet     => clone_json(new_value),
+        }
+    } else {
+        mutate(root, path, 0, new_value, &mode)
+    }
+}
+
+fn mutate(
+    cur: &JsonValue,
+    path: &List<PathSeg>,
+    idx: Int,
+    new_value: &JsonValue,
+    mode: &SetMode,
+) -> JsonValue {
+    if idx >= path.len() {
+        match mode {
+            SmInsert => clone_json(cur),
+            _        => clone_json(new_value),
+        }
+    } else {
+        let seg = &path[idx];
+        match seg {
+            PsField(name) => mutate_field(cur, name, path, idx, new_value, mode),
+            PsIndex(i)    => mutate_index(cur, i, path, idx, new_value, mode),
+        }
+    }
+}
+
+fn mutate_field(
+    cur: &JsonValue,
+    name: &Text,
+    path: &List<PathSeg>,
+    idx: Int,
+    new_value: &JsonValue,
+    mode: &SetMode,
+) -> JsonValue {
+    match cur {
+        JObject(fields) => {
+            let mut out: List<JsonField> = List.new();
+            let mut found = false;
+            let mut i: Int = 0;
+            while i < fields.len() {
+                if fields[i].key == name {
+                    found = true;
+                    let new_inner = mutate(&fields[i].value, path, idx + 1, new_value, mode);
+                    out.push(JsonField { key: fields[i].key.clone(), value: new_inner });
+                } else {
+                    out.push(JsonField {
+                        key: fields[i].key.clone(),
+                        value: clone_json(&fields[i].value),
+                    });
+                }
+                i = i + 1;
+            }
+            if !found {
+                let mode_allow_create = match mode { SmReplace => false, _ => true };
+                if mode_allow_create {
+                    let leaf_value = mutate_create_leaf(path, idx + 1, new_value);
+                    out.push(JsonField { key: name.clone(), value: leaf_value });
+                }
+            }
+            JObject(out)
+        }
+        _ => {
+            // Cannot apply field path to non-object — return as-is.
+            clone_json(cur)
+        }
+    }
+}
+
+fn mutate_index(
+    cur: &JsonValue,
+    idx_value: Int,
+    path: &List<PathSeg>,
+    idx: Int,
+    new_value: &JsonValue,
+    mode: &SetMode,
+) -> JsonValue {
+    match cur {
+        JArray(items) => {
+            let mut out: List<JsonValue> = List.new();
+            let mut i: Int = 0;
+            let in_range = idx_value >= 0 && idx_value < items.len();
+            let mode_allow_create = match mode { SmReplace => false, _ => true };
+            while i < items.len() {
+                if i == idx_value {
+                    let new_inner = mutate(&items[i], path, idx + 1, new_value, mode);
+                    out.push(new_inner);
+                } else {
+                    out.push(clone_json(&items[i]));
+                }
+                i = i + 1;
+            }
+            if !in_range && mode_allow_create {
+                // Append the new value at end (SQLite append-on-overflow semantics).
+                let leaf_value = mutate_create_leaf(path, idx + 1, new_value);
+                out.push(leaf_value);
+            }
+            JArray(out)
+        }
+        _ => clone_json(cur),
+    }
+}
+
+fn mutate_create_leaf(path: &List<PathSeg>, idx: Int, new_value: &JsonValue) -> JsonValue {
+    if idx >= path.len() { return clone_json(new_value); }
+    let seg = &path[idx];
+    match seg {
+        PsField(name) => {
+            let inner = mutate_create_leaf(path, idx + 1, new_value);
+            let mut fields: List<JsonField> = List.new();
+            fields.push(JsonField { key: name.clone(), value: inner });
+            JObject(fields)
+        }
+        PsIndex(_) => {
+            let inner = mutate_create_leaf(path, idx + 1, new_value);
+            let mut items: List<JsonValue> = List.new();
+            items.push(inner);
+            JArray(items)
+        }
+    }
+}
+
+// -----------------------------------------------------------------------------
+// json_remove
+// -----------------------------------------------------------------------------
+
+public fn apply_remove(root: &JsonValue, path: &List<PathSeg>) -> JsonValue {
+    if path.len() == 0 { return JNull; }
+    remove(root, path, 0)
+}
+
+fn remove(cur: &JsonValue, path: &List<PathSeg>, idx: Int) -> JsonValue {
+    if idx + 1 >= path.len() {
+        // Final segment — drop it.
+        let seg = &path[idx];
+        match seg {
+            PsField(name) => match cur {
+                JObject(fields) => {
+                    let mut out: List<JsonField> = List.new();
+                    let mut i: Int = 0;
+                    while i < fields.len() {
+                        if fields[i].key != name {
+                            out.push(JsonField {
+                                key: fields[i].key.clone(),
+                                value: clone_json(&fields[i].value),
+                            });
+                        }
+                        i = i + 1;
+                    }
+                    JObject(out)
+                }
+                _ => clone_json(cur),
+            },
+            PsIndex(i_val) => match cur {
+                JArray(items) => {
+                    let mut out: List<JsonValue> = List.new();
+                    let mut i: Int = 0;
+                    while i < items.len() {
+                        if i != i_val { out.push(clone_json(&items[i])); }
+                        i = i + 1;
+                    }
+                    JArray(out)
+                }
+                _ => clone_json(cur),
+            },
+        }
+    } else {
+        // Recurse.
+        let seg = &path[idx];
+        match seg {
+            PsField(name) => match cur {
+                JObject(fields) => {
+                    let mut out: List<JsonField> = List.new();
+                    let mut i: Int = 0;
+                    while i < fields.len() {
+                        if fields[i].key == name {
+                            let new_inner = remove(&fields[i].value, path, idx + 1);
+                            out.push(JsonField { key: fields[i].key.clone(), value: new_inner });
+                        } else {
+                            out.push(JsonField {
+                                key: fields[i].key.clone(),
+                                value: clone_json(&fields[i].value),
+                            });
+                        }
+                        i = i + 1;
+                    }
+                    JObject(out)
+                }
+                _ => clone_json(cur),
+            },
+            PsIndex(i_val) => match cur {
+                JArray(items) => {
+                    let mut out: List<JsonValue> = List.new();
+                    let mut i: Int = 0;
+                    while i < items.len() {
+                        if i == i_val {
+                            out.push(remove(&items[i], path, idx + 1));
+                        } else {
+                            out.push(clone_json(&items[i]));
+                        }
+                        i = i + 1;
+                    }
+                    JArray(out)
+                }
+                _ => clone_json(cur),
+            },
+        }
+    }
+}
+
+// -----------------------------------------------------------------------------
+// json_patch — RFC 7396 merge
+// -----------------------------------------------------------------------------
+//
+// Merge semantics: for every key in `patch`:
+//   * if value is null → remove the key from `base`
+//   * if value is object AND base[key] is object → recurse
+//   * else → replace base[key]
+//
+// Non-object patches replace `base` entirely.
+// =============================================================================
+
+public fn apply_patch(base: &JsonValue, patch: &JsonValue) -> JsonValue {
+    match patch {
+        JObject(p_fields) => match base {
+            JObject(b_fields) => {
+                let mut out: List<JsonField> = List.new();
+                // Copy base fields, applying patches inline.
+                let mut i: Int = 0;
+                while i < b_fields.len() {
+                    let key = &b_fields[i].key;
+                    match find_field(p_fields, key) {
+                        Some(p_value) => {
+                            // Patched: maybe remove, maybe merge, maybe replace.
+                            match p_value {
+                                JNull => {}  // skip — this removes the key
+                                _ => {
+                                    let merged = apply_patch(&b_fields[i].value, &p_value);
+                                    out.push(JsonField { key: key.clone(), value: merged });
+                                }
+                            }
+                        }
+                        None => {
+                            out.push(JsonField {
+                                key: key.clone(),
+                                value: clone_json(&b_fields[i].value),
+                            });
+                        }
+                    }
+                    i = i + 1;
+                }
+                // Add patch keys that weren't in base (skip null-valued).
+                let mut k: Int = 0;
+                while k < p_fields.len() {
+                    let key = &p_fields[k].key;
+                    if !field_present(b_fields, key) {
+                        match &p_fields[k].value {
+                            JNull => {}
+                            v => {
+                                out.push(JsonField {
+                                    key: key.clone(),
+                                    value: clone_json(v),
+                                });
+                            }
+                        }
+                    }
+                    k = k + 1;
+                }
+                JObject(out)
+            }
+            _ => clone_json(patch),
+        },
+        _ => clone_json(patch),
+    }
+}
+
+fn find_field(fields: &List<JsonField>, key: &Text) -> Maybe<JsonValue> {
+    let mut i: Int = 0;
+    while i < fields.len() {
+        if fields[i].key == key { return Some(clone_json(&fields[i].value)); }
+        i = i + 1;
+    }
+    None
+}
+
+fn field_present(fields: &List<JsonField>, key: &Text) -> Bool {
+    let mut i: Int = 0;
+    while i < fields.len() {
+        if fields[i].key == key { return true; }
+        i = i + 1;
+    }
+    false
+}
+
+// -----------------------------------------------------------------------------
+// Helpers
+// -----------------------------------------------------------------------------
+
+fn clone_json(v: &JsonValue) -> JsonValue {
+    match v {
+        JNull       => JNull,
+        JBool(b)    => JBool(b),
+        JNumber(x)  => JNumber(x),
+        JString(s)  => JString(s.clone()),
+        JArray(its) => {
+            let mut out: List<JsonValue> = List.new();
+            let mut i: Int = 0;
+            while i < its.len() { out.push(clone_json(&its[i])); i = i + 1; }
+            JArray(out)
+        }
+        JObject(fs) => {
+            let mut out: List<JsonField> = List.new();
+            let mut i: Int = 0;
+            while i < fs.len() {
+                out.push(JsonField {
+                    key: fs[i].key.clone(),
+                    value: clone_json(&fs[i].value),
+                });
+                i = i + 1;
+            }
+            JObject(out)
+        }
+    }
+}

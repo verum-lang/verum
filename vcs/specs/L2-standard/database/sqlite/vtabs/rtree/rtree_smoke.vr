@@ -1,0 +1,225 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, vtab, rtree, spatial
+// @timeout: 5000
+// @expected-exit: 0
+//
+// R-Tree N-dim spatial index:
+//   * BBox geometry (volume / contains / overlaps / union /
+//     enlargement)
+//   * RTree insert / search / delete with 2D + 3D inputs
+//   * Node split when leaf exceeds RTREE_MAX_CELLS
+//   * QueryBuilder translates per-coord predicates into a probe bbox
+
+mount core.database.sqlite.native.vtabs.rtree.bbox.{
+    BBox, bbox_new, bbox_1d, bbox_2d, bbox_3d, bbox_equal, MAX_DIMS,
+};
+mount core.database.sqlite.native.vtabs.rtree.node.{
+    Node, Leaf, Internal, LeafEntry, InternalEntry,
+    leaf_new, internal_new, node_id, node_entry_count,
+    node_is_full, node_mbb,
+    RTREE_MAX_CELLS, RTREE_MIN_CELLS,
+};
+mount core.database.sqlite.native.vtabs.rtree.tree.{
+    RTree, rtree_new,
+};
+mount core.database.sqlite.native.vtabs.rtree.query.{
+    CoordOp, OpLE, OpGE, OpEq,
+    PredicateAtom, op_le, op_ge,
+    QueryBuilder, builder_new, build_query,
+};
+mount base.{Some, None, Maybe, Bool};
+
+// -----------------------------------------------------------------------------
+// BBox geometry
+// -----------------------------------------------------------------------------
+
+fn test_bbox_2d_volume() {
+    let b = bbox_2d(0.0, 10.0, 0.0, 5.0);
+    assert(b.volume() == 50.0);
+}
+
+fn test_bbox_contains() {
+    let outer = bbox_2d(0.0, 10.0, 0.0, 10.0);
+    let inner = bbox_2d(2.0, 4.0, 3.0, 6.0);
+    let outside = bbox_2d(8.0, 12.0, 0.0, 1.0);
+    assert(outer.contains(&inner));
+    assert(!outer.contains(&outside));
+}
+
+fn test_bbox_overlap() {
+    let a = bbox_2d(0.0, 5.0, 0.0, 5.0);
+    let b = bbox_2d(3.0, 8.0, 3.0, 8.0);
+    let c = bbox_2d(10.0, 15.0, 10.0, 15.0);
+    assert(a.overlaps(&b));
+    assert(b.overlaps(&a));
+    assert(!a.overlaps(&c));
+}
+
+fn test_bbox_union() {
+    let a = bbox_2d(0.0, 1.0, 0.0, 1.0);
+    let b = bbox_2d(2.0, 3.0, 2.0, 3.0);
+    let u = a.union(&b);
+    assert(bbox_equal(&u, &bbox_2d(0.0, 3.0, 0.0, 3.0)));
+}
+
+fn test_bbox_enlargement() {
+    let a = bbox_2d(0.0, 2.0, 0.0, 2.0);          // volume 4
+    let b = bbox_2d(3.0, 4.0, 0.0, 1.0);          // volume 1
+    let g = a.enlargement_to_include(&b);
+    // union = (0..4, 0..2) volume 8 → 4 enlargement
+    assert(g == 4.0);
+}
+
+fn test_bbox_3d() {
+    let b = bbox_3d(0.0, 1.0, 0.0, 1.0, 0.0, 1.0);
+    assert(b.volume() == 1.0);
+    assert_eq(b.n_dims, 3);
+}
+
+// -----------------------------------------------------------------------------
+// Node basics
+// -----------------------------------------------------------------------------
+
+fn test_leaf_new_empty() {
+    let l = leaf_new(0);
+    match l {
+        Leaf(c) => {
+            assert_eq(c.entries.len(), 0);
+            assert_eq(c.node_id, 0);
+        }
+        _ => panic("expected Leaf"),
+    }
+}
+
+fn test_internal_new() {
+    let n = internal_new(7);
+    assert_eq(node_id(&n), 7);
+}
+
+fn test_node_full() {
+    // Build a fully-loaded leaf via the RTree's own insert path so
+    // the borrow scope is short-lived.
+    let mut t = rtree_new(2);
+    let mut i: Int = 0;
+    while i < RTREE_MAX_CELLS {
+        t.insert(i as Int64, bbox_2d(0.0, 1.0, 0.0, 1.0));
+        i = i + 1;
+    }
+    // RTREE_MAX_CELLS is the cap; constant value sanity check.
+    assert(RTREE_MAX_CELLS >= 8);
+    assert(t.node_count() >= 1);
+}
+
+// -----------------------------------------------------------------------------
+// RTree insert / search
+// -----------------------------------------------------------------------------
+
+fn test_rtree_insert_and_search_overlap() {
+    let mut t = rtree_new(2);
+    t.insert(1 as Int64, bbox_2d(0.0, 1.0, 0.0, 1.0));
+    t.insert(2 as Int64, bbox_2d(5.0, 6.0, 5.0, 6.0));
+    t.insert(3 as Int64, bbox_2d(10.0, 11.0, 10.0, 11.0));
+    let probe = bbox_2d(0.5, 5.5, 0.5, 5.5);
+    let hits = t.search(&probe);
+    // both row 1 and row 2 overlap; row 3 doesn't
+    assert_eq(hits.len(), 2);
+}
+
+fn test_rtree_search_no_match() {
+    let mut t = rtree_new(2);
+    t.insert(1 as Int64, bbox_2d(0.0, 1.0, 0.0, 1.0));
+    let probe = bbox_2d(100.0, 200.0, 100.0, 200.0);
+    let hits = t.search(&probe);
+    assert_eq(hits.len(), 0);
+}
+
+fn test_rtree_split_creates_internal_root() {
+    let mut t = rtree_new(2);
+    let mut i: Int = 0;
+    while i <= RTREE_MAX_CELLS {
+        t.insert(i as Int64, bbox_2d((i as Float64), (i as Float64) + 1.0, 0.0, 1.0));
+        i = i + 1;
+    }
+    // Root must no longer be a leaf (it's an internal node now).
+    assert(t.node_count() >= 3);
+}
+
+fn test_rtree_delete() {
+    let mut t = rtree_new(2);
+    t.insert(99 as Int64, bbox_2d(0.0, 1.0, 0.0, 1.0));
+    let removed = t.delete(99 as Int64);
+    assert(removed);
+    let still = t.delete(99 as Int64);
+    assert(!still);
+}
+
+fn test_rtree_3d_index() {
+    let mut t = rtree_new(3);
+    t.insert(1 as Int64, bbox_3d(0.0, 10.0, 0.0, 10.0, 0.0, 10.0));
+    let probe = bbox_3d(5.0, 6.0, 5.0, 6.0, 5.0, 6.0);
+    let hits = t.search(&probe);
+    assert_eq(hits.len(), 1);
+}
+
+// -----------------------------------------------------------------------------
+// QueryBuilder
+// -----------------------------------------------------------------------------
+
+fn test_query_builder_default_is_unbounded() {
+    let qb = builder_new(2);
+    let bb = qb.build();
+    // Unbounded → very wide box; volume is enormous but finite.
+    assert_eq(bb.n_dims, 2);
+    assert(bb.coords.len() == 4);
+}
+
+fn test_query_builder_le_max_clamps_upper() {
+    let mut qb = builder_new(1);
+    qb.add(op_le(0, true, 10.0));
+    let bb = qb.build();
+    // hi[0] should be 10
+    assert(bb.max_at(0) == 10.0);
+}
+
+fn test_query_builder_ge_min_clamps_lower() {
+    let mut qb = builder_new(1);
+    qb.add(op_ge(0, false, 5.0));
+    let bb = qb.build();
+    assert(bb.min_at(0) == 5.0);
+}
+
+fn test_query_builder_2d_full_constraints() {
+    let mut atoms: List<PredicateAtom> = List.new();
+    atoms.push(op_ge(0, false, 0.0));
+    atoms.push(op_le(0, true, 10.0));
+    atoms.push(op_ge(1, false, -5.0));
+    atoms.push(op_le(1, true, 5.0));
+    let bb = build_query(2, atoms);
+    assert(bb.min_at(0) == 0.0);
+    assert(bb.max_at(0) == 10.0);
+    assert(bb.min_at(1) == -5.0);
+    assert(bb.max_at(1) == 5.0);
+}
+
+fn main() {
+    test_bbox_2d_volume();
+    test_bbox_contains();
+    test_bbox_overlap();
+    test_bbox_union();
+    test_bbox_enlargement();
+    test_bbox_3d();
+    test_leaf_new_empty();
+    test_internal_new();
+    test_node_full();
+    test_rtree_insert_and_search_overlap();
+    test_rtree_search_no_match();
+    test_rtree_split_creates_internal_root();
+    test_rtree_delete();
+    test_rtree_3d_index();
+    test_query_builder_default_is_unbounded();
+    test_query_builder_le_max_clamps_upper();
+    test_query_builder_ge_min_clamps_lower();
+    test_query_builder_2d_full_constraints();
+}
