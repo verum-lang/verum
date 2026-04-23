@@ -1,0 +1,21 @@
+// @test: typecheck-fail
+// @tier: 0
+// @level: L1
+// @tags: refinement, generic, turbofish, check_phase, language
+// @expect: errors
+
+// Regression: when a generic function is instantiated with a refined
+// type via turbofish syntax (`identity::<Positive>(0)`), the value `0`
+// is checked against the INSTANTIATED type's refinement. The check
+// phase must catch the violation.
+
+mount core.*;
+
+type Positive is Int where |n| { n > 0 };
+
+fn identity<T>(x: T) -> T { x }
+
+fn main() {
+    let x: Positive = identity::<Positive>(0);
+    print("should not compile");
+}

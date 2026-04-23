@@ -1,0 +1,28 @@
+// @test: typecheck-fail
+// @tier: 0
+// @level: L1
+// @tags: refinement, method-call, check_phase, language
+// @expect: errors
+
+// Regression: method-receiver-based argument refinement. `Counter.inc_by`
+// takes `Positive` (refined Int > 0); passing `0` at the call site must
+// be caught at check phase.
+
+mount core.*;
+
+type Positive is Int where |n| { n > 0 };
+
+type Counter is { value: Int };
+
+implement Counter {
+    public fn new() -> Counter { Counter { value: 1 } }
+    public fn inc_by(&mut self, n: Positive) {
+        self.value = self.value + n;
+    }
+}
+
+fn main() {
+    let mut c = Counter.new();
+    c.inc_by(0);
+    print("should not compile");
+}
