@@ -1,0 +1,94 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: base, result, error-handling
+// @timeout: 15000
+// @description: core.base.result — Result<T, E> query + combinator surface
+
+mount core.*;
+
+fn is_ok_is_err() {
+    let o: Result<Int, Text> = Ok(3);
+    let e: Result<Int, Text> = Err("oops".clone());
+    assert_eq(o.is_ok(), true);
+    assert_eq(o.is_err(), false);
+    assert_eq(e.is_ok(), false);
+    assert_eq(e.is_err(), true);
+}
+
+fn ok_err_project_to_maybe() {
+    let o: Result<Int, Text> = Ok(5);
+    match o.ok() {
+        Some(v) => { assert_eq(v, 5); }
+        None    => { panic("Ok.ok() must be Some"); }
+    }
+    let e: Result<Int, Text> = Err("x".clone());
+    match e.err() {
+        Some(_) => {}
+        None    => { panic("Err.err() must be Some"); }
+    }
+}
+
+fn unwrap_or_variants() {
+    let e: Result<Int, Text> = Err("x".clone());
+    assert_eq(e.unwrap_or(99), 99);
+    let e2: Result<Int, Text> = Err("x".clone());
+    let v = e2.unwrap_or_else(|_| 77);
+    assert_eq(v, 77);
+}
+
+fn map_and_map_err() {
+    let o: Result<Int, Text> = Ok(5);
+    let mapped = o.map(|v| v * 2);
+    match mapped {
+        Ok(v)  => { assert_eq(v, 10); }
+        Err(_) => { panic("map of Ok must stay Ok"); }
+    }
+    let e: Result<Int, Text> = Err("bad".clone());
+    let remapped = e.map_err(|_| 99);
+    match remapped {
+        Ok(_)  => { panic("map_err of Err must stay Err"); }
+        Err(v) => { assert_eq(v, 99); }
+    }
+}
+
+fn and_then_chain() {
+    let o: Result<Int, Text> = Ok(5);
+    let chained = o.and_then(|v| {
+        if v > 0 { Ok(v + 1) } else { Err("non-positive".clone()) }
+    });
+    match chained {
+        Ok(v)  => { assert_eq(v, 6); }
+        Err(_) => { panic("Ok(5).and_then(Ok) → Ok(6)"); }
+    }
+}
+
+fn or_else_recovers() {
+    let e: Result<Int, Text> = Err("initial".clone());
+    let recovered: Result<Int, Text> = e.or_else(|_| Ok(42));
+    match recovered {
+        Ok(v)  => { assert_eq(v, 42); }
+        Err(_) => { panic("or_else should recover"); }
+    }
+}
+
+fn inspect_does_not_consume_by_value() {
+    // inspect + inspect_err are pass-through combinators.
+    let o: Result<Int, Text> = Ok(3);
+    let out = o.inspect(|_v| {});
+    match out {
+        Ok(v)  => { assert_eq(v, 3); }
+        Err(_) => { panic("inspect of Ok must stay Ok with same value"); }
+    }
+}
+
+fn main() {
+    is_ok_is_err();
+    ok_err_project_to_maybe();
+    unwrap_or_variants();
+    map_and_map_err();
+    and_then_chain();
+    or_else_recovers();
+    inspect_does_not_consume_by_value();
+    print("result_typecheck ok");
+}
