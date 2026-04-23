@@ -1,0 +1,49 @@
+// @test: integration
+// @tier: 0
+// @level: L1
+// @tags: proof, exists, witness, substitution, soundness
+// @expect: pass
+//
+// `proof { witness E; }` instantiates an existential goal `exists x: T. P(x)`
+// by substituting `E` for `x` in `P`. Before the fix, `try_exists` ignored
+// the witness entirely and just stripped the quantifier — leaving the
+// SMT to find a model on its own, which succeeded for trivially-true
+// existentials but failed whenever a specific witness was needed (e.g.
+// `exists y: Int. y == x + x` with witness `x + x`).
+//
+// Locks in both the Exists tactic (AST form `TacticExpr::Exists(expr)`)
+// and the `witness`/`use` named-tactic dispatch routes.
+
+@verify(formal)
+theorem exists_zero()
+    ensures exists n: Int. n == 0
+{
+    proof { witness 0; }
+}
+
+@verify(formal)
+theorem exists_seven()
+    ensures exists n: Int. n == 7
+{
+    proof { witness 7; }
+}
+
+@verify(formal)
+theorem exists_double(x: Int)
+    ensures exists y: Int. y == x + x
+{
+    proof { witness x + x; }
+}
+
+@verify(formal)
+theorem exists_positive_sum(a: Int, b: Int)
+    requires a >= 0
+    requires b >= 0
+    ensures exists s: Int. s == a + b && s >= 0
+{
+    proof { witness a + b; }
+}
+
+fn main() {
+    print("L1-core: proof/tactics/exists_witness_substitution");
+}

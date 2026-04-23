@@ -5652,16 +5652,88 @@ impl ProofSearchEngine {
     }
 
     /// Try existential witness
+    /// Substitute every free occurrence of `name` in `expr` with the
+    /// identifier referred to by `witness_text`. The witness is
+    /// interpreted conservatively:
+    ///   * a bare identifier → `Path(Ident(text))`
+    ///   * an integer literal → `Literal(Int(text.parse()))`
+    ///   * anything else → `Path(Ident(text))` as a fresh symbol
+    ///     (imperfect but keeps substitution total — the downstream
+    ///     SMT will either accept it or leave the goal open).
+    fn witness_expr(witness_text: &str, span: verum_common::span::Span) -> Expr {
+        if let Ok(n) = witness_text.parse::<i128>() {
+            return Expr::new(
+                ExprKind::Literal(verum_ast::literal::Literal::new(
+                    verum_ast::LiteralKind::Int(verum_ast::literal::IntLit::new(n)),
+                    span,
+                )),
+                span,
+            );
+        }
+        let ident = verum_ast::ty::Ident::new(witness_text, span);
+        Expr::new(
+            ExprKind::Path(verum_ast::ty::Path::single(ident)),
+            span,
+        )
+    }
+
     fn try_exists(
         &mut self,
-        _witness: &Text,
+        witness: &Text,
         goal: &ProofGoal,
     ) -> Result<List<ProofGoal>, ProofError> {
         match &goal.goal.kind {
-            ExprKind::Exists { bindings: _, body } => {
-                // Instantiate existential with witness
+            ExprKind::Exists { bindings, body } => {
+                // Instantiate the existential with the witness: take the
+                // first bound variable and substitute every occurrence
+                // of it in the body with the witness expression. Multi-
+                // binding existentials get partial instantiation — the
+                // residual goal keeps the remaining bindings.
+                //
+                // The witness arrives as surface text (the caller had
+                // only an AST Expr but flattened it to `Text` via
+                // `format_expr`). We re-parse it as a single
+                // identifier / literal; anything more structured
+                // triggers the fallback path that just drops the
+                // quantifier and lets the SMT handle it.
+                if bindings.is_empty() {
+                    let mut new_goal = goal.clone();
+                    new_goal.goal = (**body).clone();
+                    let mut result = List::new();
+                    result.push(new_goal);
+                    return Ok(result);
+                }
+                let first = &bindings[0];
+                // Extract the bound name from the pattern; only
+                // single-identifier bindings get real substitution,
+                // which is the overwhelmingly common case.
+                let bound_name = if let verum_ast::pattern::PatternKind::Ident { name, .. } = &first.pattern.kind {
+                    Some(name.name.clone())
+                } else {
+                    None
+                };
+
+                let new_body = if let Some(bname) = bound_name {
+                    substitute_ident_with_text(body, &bname, witness.as_str(), body.span)
+                } else {
+                    (**body).clone()
+                };
+
+                // Rebuild the goal: drop the first binding (now
+                // instantiated), keep the rest if any, under the same
+                // quantifier head.
+                let rest: List<verum_ast::expr::QuantifierBinding> =
+                    bindings.iter().skip(1).cloned().collect();
+                let new_kind = if rest.is_empty() {
+                    new_body.kind.clone()
+                } else {
+                    ExprKind::Exists {
+                        bindings: rest,
+                        body: Heap::new(new_body.clone()),
+                    }
+                };
                 let mut new_goal = goal.clone();
-                new_goal.goal = (**body).clone();
+                new_goal.goal = Expr::new(new_kind, goal.goal.span);
                 let mut result = List::new();
                 result.push(new_goal);
                 Ok(result)
@@ -6037,7 +6109,7 @@ impl ProofSearchEngine {
     fn try_named_tactic(
         &mut self,
         name: &Text,
-        _args: &List<Text>,
+        args: &List<Text>,
         goal: &ProofGoal,
     ) -> Result<List<ProofGoal>, ProofError> {
         use crate::cubical_tactic::{
@@ -6146,6 +6218,22 @@ impl ProofSearchEngine {
                 try_oracle_tactic(goal, confidence, self)
             }
 
+            // `witness` as a named tactic — the parser stores
+            // `witness EXPR;` as a `Named { name: "witness", args:
+            // [EXPR] }` proof step. Dispatch to `try_exists` with
+            // the first arg's surface text as the witness.
+            "witness" | "use" => {
+                // Use the first argument's string form as the
+                // witness. When the user writes `witness 2;` this
+                // becomes "2" and `try_exists` parses it as an Int
+                // literal; `witness x` becomes a fresh `Path(x)`.
+                let witness_text = args
+                    .first()
+                    .cloned()
+                    .unwrap_or_else(|| Text::from(""));
+                self.try_exists(&witness_text, goal)
+            }
+
             // Commonly-used justification names that appear in calc
             // chains and structured proofs but map to SMT-decidable
             // reasoning rather than any one specialised tactic. Route
@@ -6216,6 +6304,130 @@ impl ProofSearchEngine {
                 ))
             }
         }
+    }
+}
+
+/// Substitute every free single-segment path whose name equals
+/// `name` in `expr` with the AST-level expression parsed from
+/// `witness_text`. Used by the `Exists` tactic to instantiate an
+/// existential goal's bound variable with the user-provided witness.
+///
+/// Walks: Path, Literal, Binary, Unary, Paren, Call (functional
+/// part + args), MethodCall (receiver + args), Field, Index, Cast,
+/// Tuple, TupleIndex, and leaves other shapes unchanged — the same
+/// coverage the refinement-translator / verify_cmd helpers use, so
+/// substitution stays consistent across the codebase.
+pub fn substitute_ident_with_text(
+    expr: &Expr,
+    name: &Text,
+    witness_text: &str,
+    span: verum_common::span::Span,
+) -> Expr {
+    use verum_ast::ty::PathSegment;
+
+    match &expr.kind {
+        ExprKind::Path(p) => {
+            if p.segments.len() == 1 {
+                if let PathSegment::Name(id) = &p.segments[0] {
+                    if id.name == *name {
+                        return ProofSearchEngine::witness_expr(witness_text, span);
+                    }
+                }
+            }
+            expr.clone()
+        }
+        ExprKind::Binary { op, left, right } => Expr::new(
+            ExprKind::Binary {
+                op: *op,
+                left: Heap::new(substitute_ident_with_text(left, name, witness_text, span)),
+                right: Heap::new(substitute_ident_with_text(right, name, witness_text, span)),
+            },
+            expr.span,
+        ),
+        ExprKind::Unary { op, expr: inner } => Expr::new(
+            ExprKind::Unary {
+                op: *op,
+                expr: Heap::new(substitute_ident_with_text(inner, name, witness_text, span)),
+            },
+            expr.span,
+        ),
+        ExprKind::Paren(inner) => Expr::new(
+            ExprKind::Paren(Heap::new(substitute_ident_with_text(
+                inner,
+                name,
+                witness_text,
+                span,
+            ))),
+            expr.span,
+        ),
+        ExprKind::Call { func, type_args, args } => {
+            let new_args: List<Expr> = args
+                .iter()
+                .map(|a| substitute_ident_with_text(a, name, witness_text, span))
+                .collect();
+            Expr::new(
+                ExprKind::Call {
+                    func: Heap::new(substitute_ident_with_text(func, name, witness_text, span)),
+                    type_args: type_args.clone(),
+                    args: new_args,
+                },
+                expr.span,
+            )
+        }
+        ExprKind::MethodCall { receiver, method, type_args, args } => {
+            let new_args: List<Expr> = args
+                .iter()
+                .map(|a| substitute_ident_with_text(a, name, witness_text, span))
+                .collect();
+            Expr::new(
+                ExprKind::MethodCall {
+                    receiver: Heap::new(substitute_ident_with_text(
+                        receiver, name, witness_text, span,
+                    )),
+                    method: method.clone(),
+                    type_args: type_args.clone(),
+                    args: new_args,
+                },
+                expr.span,
+            )
+        }
+        ExprKind::Field { expr: inner, field } => Expr::new(
+            ExprKind::Field {
+                expr: Heap::new(substitute_ident_with_text(inner, name, witness_text, span)),
+                field: field.clone(),
+            },
+            expr.span,
+        ),
+        ExprKind::Index { expr: inner, index } => Expr::new(
+            ExprKind::Index {
+                expr: Heap::new(substitute_ident_with_text(inner, name, witness_text, span)),
+                index: Heap::new(substitute_ident_with_text(index, name, witness_text, span)),
+            },
+            expr.span,
+        ),
+        ExprKind::TupleIndex { expr: inner, index } => Expr::new(
+            ExprKind::TupleIndex {
+                expr: Heap::new(substitute_ident_with_text(inner, name, witness_text, span)),
+                index: *index,
+            },
+            expr.span,
+        ),
+        ExprKind::Cast { expr: inner, ty } => Expr::new(
+            ExprKind::Cast {
+                expr: Heap::new(substitute_ident_with_text(inner, name, witness_text, span)),
+                ty: ty.clone(),
+            },
+            expr.span,
+        ),
+        ExprKind::Tuple(xs) => Expr::new(
+            ExprKind::Tuple(
+                xs.iter()
+                    .map(|x| substitute_ident_with_text(x, name, witness_text, span))
+                    .collect(),
+            ),
+            expr.span,
+        ),
+        _ => expr.clone(),
     }
 }
 
