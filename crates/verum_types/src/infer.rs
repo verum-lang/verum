@@ -33586,6 +33586,117 @@ impl TypeChecker {
                 }, quantified_vars));
             }
 
+            // Axioms with a callable signature (e.g. `axiom ua<A, B>(e: Equiv<A, B>)
+            // -> Path<Type>(A, B)` in `core.math.hott`) must be resolvable across
+            // modules the same way as `fn`. They're trusted declarations — the
+            // body is assumed true — but at the type layer they *are* functions
+            // with generics, parameters, and a return type, so cross-module
+            // callers should see them identically. Without this branch,
+            // `mount core.math.hott.{ua}` fails with E401 even though the
+            // declaration exists.
+            if let ItemKind::Axiom(axiom) = &item.kind
+                && axiom.name.name.as_str() == func_name
+            {
+                let mut type_param_map: std::collections::HashMap<Text, Type> =
+                    std::collections::HashMap::new();
+                let mut type_param_list: List<ContextTypeParam> = List::new();
+                let mut quantified_vars: List<TypeVar> = List::new();
+
+                for generic_param in &axiom.generics {
+                    if let GenericParamKind::Type { name, bounds, .. } = &generic_param.kind {
+                        let fresh_var = TypeVar::fresh();
+                        quantified_vars.push(fresh_var);
+                        let type_var = Type::Var(fresh_var);
+                        let name_text: Text = name.name.clone();
+                        type_param_map.insert(name_text.clone(), type_var.clone());
+                        self.ctx.define_type(name_text.clone(), type_var);
+                        let protocol_bounds: List<ProtocolBound> = bounds
+                            .iter()
+                            .filter_map(|bound| match &bound.kind {
+                                TypeBoundKind::Protocol(path) => {
+                                    Some(ProtocolBound::positive(path.clone(), List::new()))
+                                }
+                                TypeBoundKind::NegativeProtocol(path) => {
+                                    Some(ProtocolBound::negative(path.clone(), List::new()))
+                                }
+                                _ => None,
+                            })
+                            .collect();
+                        type_param_list.push(ContextTypeParam {
+                            name: name_text,
+                            bounds: protocol_bounds,
+                            default: verum_common::Maybe::None,
+                            variance: Variance::Invariant,
+                            is_meta: false,
+                            span: generic_param.span,
+                        });
+                    }
+                }
+
+                let param_types: List<Type> = axiom
+                    .params
+                    .iter()
+                    .filter_map(|p| match &p.kind {
+                        FunctionParamKind::Regular { pattern: _, ty, .. } => {
+                            match self.ast_to_type(ty) {
+                                Ok(t) => Some(t),
+                                Err(_) => {
+                                    if let verum_ast::ty::TypeKind::Path(path) = &ty.kind
+                                        && path.segments.len() == 1
+                                        && let Some(verum_ast::ty::PathSegment::Name(ident)) =
+                                            path.segments.first()
+                                    {
+                                        type_param_map.get(&ident.name).cloned().or_else(|| {
+                                            Some(Type::Named {
+                                                path: path.clone(),
+                                                args: List::new(),
+                                            })
+                                        })
+                                    } else {
+                                        Some(self.ast_to_type_lenient(ty))
+                                    }
+                                }
+                            }
+                        }
+                        _ => None,
+                    })
+                    .collect();
+
+                let return_type = match &axiom.return_type {
+                    verum_common::Maybe::Some(ret_ty) => match self.ast_to_type(ret_ty) {
+                        Ok(t) => t,
+                        Err(_) => {
+                            if let verum_ast::ty::TypeKind::Path(path) = &ret_ty.kind
+                                && path.segments.len() == 1
+                                && let Some(verum_ast::ty::PathSegment::Name(ident)) =
+                                    path.segments.first()
+                            {
+                                type_param_map.get(&ident.name).cloned().unwrap_or_else(|| {
+                                    Type::Named {
+                                        path: path.clone(),
+                                        args: List::new(),
+                                    }
+                                })
+                            } else {
+                                self.ast_to_type_lenient(ret_ty)
+                            }
+                        }
+                    },
+                    verum_common::Maybe::None => Type::bool(),
+                };
+
+                return Some((
+                    Type::Function {
+                        params: param_types,
+                        return_type: Box::new(return_type),
+                        contexts: None,
+                        type_params: type_param_list,
+                        properties: None,
+                    },
+                    quantified_vars,
+                ));
+            }
+
             // Check for variant constructors in type declarations
             // e.g., `type Maybe<T> is None | Some(T)` exports `Some` as a constructor function
             if let ItemKind::Type(type_decl) = &item.kind {

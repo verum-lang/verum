@@ -207,6 +207,15 @@ pub fn build_export_index(all_modules: &[(String, Vec<(PathBuf, verum_ast::Modul
                             }
                         }
                     }
+                    verum_ast::ItemKind::Axiom(axiom_decl) => {
+                        // Axioms with a signature (generics/params/return) behave
+                        // like callable declarations (e.g. `ua<A, B>(e: Equiv<A, B>)
+                        // -> Path<Type>(A, B)` in `core.math.hott`). They must be
+                        // importable across modules to support `mount core.math.hott.{ua}`.
+                        if matches!(axiom_decl.visibility, verum_ast::Visibility::Public) {
+                            exports.insert(axiom_decl.name.name.to_string());
+                        }
+                    }
                     _ => {}
                 }
             }
@@ -254,6 +263,11 @@ pub fn build_export_index(all_modules: &[(String, Vec<(PathBuf, verum_ast::Modul
                                 if matches!(func.visibility, verum_ast::Visibility::Public) {
                                     parent_exports.insert(func.name.name.to_string());
                                 }
+                            }
+                        }
+                        verum_ast::ItemKind::Axiom(axiom_decl) => {
+                            if matches!(axiom_decl.visibility, verum_ast::Visibility::Public) {
+                                parent_exports.insert(axiom_decl.name.name.to_string());
                             }
                         }
                         _ => {}

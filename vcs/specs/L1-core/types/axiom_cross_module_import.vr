@@ -1,0 +1,45 @@
+// @test: parse
+// @level: L1
+// @tags: types, axioms, modules, import, hott
+// @timeout: 5000
+
+/// `axiom` declarations with a callable signature (generics + params +
+/// return type) must be first-class declarations — visible to the
+/// module export index and resolvable by cross-module callers.
+///
+/// Before this fix, `mount core.math.hott.{ua}` failed with E401
+/// because:
+///
+///   1. `build_export_index` in `verum_compiler::core_compiler` dropped
+///      `ItemKind::Axiom` into a `_ => {}` bucket — import-validation
+///      saw no export and reported "cannot find `ua`".
+///   2. `extract_function_type_from_module` in `verum_types::infer`
+///      only matched `ItemKind::Function` for AST-fallback resolution.
+///
+/// The architectural root cause: axioms are trusted, parameterised
+/// declarations that semantically behave as functions at the type
+/// layer; the pipeline just didn't treat them that way. This test
+/// pins the parse-level acceptance of public axioms with signatures.
+/// Cross-module resolution is additionally exercised by
+/// `core/math/cubical.vr` which mounts `core.math.hott.{ua}`.
+
+module test_axiom_decl;
+
+public type Equiv<A, B> is {
+    forward: fn(A) -> B,
+    inverse: fn(B) -> A,
+};
+
+/// The univalence axiom pattern: generic, parameterised, explicit
+/// return type. Mirrors `core.math.hott.ua`.
+public axiom ax_ua<A, B>(e: Equiv<A, B>) -> Equiv<A, B>;
+
+/// Multiple-parameter axiom.
+public axiom ax_transport<A, B>(p: Equiv<A, B>, a: A) -> B;
+
+/// Nullary axiom (no params, no return type — pure assertion).
+public axiom ax_consistent;
+
+fn main() {
+    print("axiom declarations parsed");
+}

@@ -812,13 +812,30 @@ pub fn extract_exports_from_module(
                 }
             }
 
+            // Axioms are trusted declarations that can be referenced by
+            // name in both proof positions and (when they have parameters
+            // + return type, like univalence `ua`) expression positions.
+            // Export as Function so callers can resolve `mount …{ua}` the
+            // same way as regular functions.
+            ItemKind::Axiom(axiom_decl) => {
+                if axiom_decl.visibility == AstVisibility::Public {
+                    let exported = ExportedItem::new(
+                        axiom_decl.name.name.as_str(),
+                        ExportKind::Function,
+                        convert_visibility(&axiom_decl.visibility),
+                        module_id,
+                        item.span,
+                    );
+                    export_table.add_export(exported)?;
+                }
+            }
+
             // Implementation blocks and other items don't export themselves
             ItemKind::Impl(_)
             | ItemKind::FFIBoundary(_)
             | ItemKind::Theorem(_)
             | ItemKind::Lemma(_)
             | ItemKind::Corollary(_)
-            | ItemKind::Axiom(_)
             | ItemKind::Tactic(_)
             | ItemKind::View(_)
             | ItemKind::Pattern(_)
