@@ -1,0 +1,58 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: time, duration
+// @timeout: 15000
+// @description: core.time.duration surface — constructors + accessors
+
+mount core.*;
+mount core.time.Duration;
+
+fn zero_and_max() {
+    let z = Duration.zero();
+    let m = Duration.max_value();
+    // Neither is a contradiction.
+    assert_eq(z.as_nanos() >= 0, true);
+    assert(m.as_nanos() >= z.as_nanos());
+}
+
+fn nanos_micros_millis_secs() {
+    let n = Duration.nanos(1);
+    let u = Duration.micros(1);
+    let ms = Duration.millis(1);
+    let s = Duration.secs(1);
+    assert_eq(n.as_nanos(), 1);
+    assert_eq(u.as_nanos(), 1000);
+    assert_eq(ms.as_nanos(), 1000000);
+    assert_eq(s.as_nanos(), 1000000000);
+}
+
+fn mins_hours_compose() {
+    let m = Duration.mins(1);
+    let h = Duration.hours(1);
+    // 60*1e9 ns in a minute; 60*60*1e9 in an hour.
+    assert_eq(m.as_nanos(), 60000000000);
+    assert_eq(h.as_nanos(), 3600000000000);
+}
+
+fn from_aliases_match() {
+    // The from_* constructors are aliases for their short forms.
+    let a = Duration.millis(250);
+    let b = Duration.from_millis(250);
+    assert_eq(a.as_nanos(), b.as_nanos());
+}
+
+fn new_secs_nanos() {
+    // Duration.new(secs, nanos) — half a second specified with carry.
+    let d = Duration.new(0, 500000000);
+    assert_eq(d.as_nanos(), 500000000);
+}
+
+fn main() {
+    zero_and_max();
+    nanos_micros_millis_secs();
+    mins_hours_compose();
+    from_aliases_match();
+    new_secs_nanos();
+    print("duration_typecheck ok");
+}
