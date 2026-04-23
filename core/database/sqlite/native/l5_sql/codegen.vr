@@ -167,7 +167,7 @@ fn emit_plan(st: &mut CgState, plan: &PlanNode) -> Result<(), CodegenError> {
         PnDistinct(ref child, n_proj) => emit_distinct(st, child, n_proj),
         PnGroupBy(ref source, ref group_exprs, ref projection, ref having) =>
             emit_group_by(st, source, group_exprs, projection, having),
-        PnNestedLoopJoin(_, _, _, _, _, _, _) =>
+        PnNestedLoopJoin(_, _, _, _, _, _, _, _) =>
             Err(unsupported("bare nested-loop join needs a Project wrapper in v1".clone())),
         PnTableScan(ref t, cid, n_cols) => emit_table_scan(st, t, cid, n_cols),
         PnInsert(ref t, ref cols, ref src, ref oc) => emit_insert(st, t, cols, src, oc),
@@ -246,12 +246,12 @@ fn emit_project(
     }
     // Nested-loop JOIN sources:
     match child {
-        PnNestedLoopJoin(ref lt, lc, ln, ref rt, rc, rn, ref on) => {
-            return emit_join_with_project(st, lt, lc, ln, rt, rc, rn, on, cols, false, &ELit(LNull));
+        PnNestedLoopJoin(ref lt, lc, ln, ref rt, rc, rn, ref on, left_outer) => {
+            return emit_join_with_project(st, lt, lc, ln, rt, rc, rn, on, cols, false, &ELit(LNull), left_outer);
         }
         PnFilter(ref grand, ref pred) => match grand {
-            PnNestedLoopJoin(ref lt, lc, ln, ref rt, rc, rn, ref on) => {
-                return emit_join_with_project(st, lt, lc, ln, rt, rc, rn, on, cols, true, pred);
+            PnNestedLoopJoin(ref lt, lc, ln, ref rt, rc, rn, ref on, left_outer) => {
+                return emit_join_with_project(st, lt, lc, ln, rt, rc, rn, on, cols, true, pred, left_outer);
             }
             _ => {}
         },
@@ -439,6 +439,7 @@ fn emit_join_with_project(
     project_cols: &List<PlanColumn>,
     has_where: Bool,
     where_pred: &Expr,
+    is_left_outer: Bool,
 ) -> Result<(), CodegenError> {
     let _ = left_table;
     let _ = right_table;
@@ -451,8 +452,16 @@ fn emit_join_with_project(
     }
     let _ = st.program.emit(OpenRead(left_cid, 0, left_ncols));
     let _ = st.program.emit(OpenRead(right_cid, 0, right_ncols));
+
+    // Per-outer "matched_flag" for LEFT OUTER JOIN — tracks whether
+    // any inner row matched the current outer row.
+    let matched_flag = if is_left_outer { st.regs.alloc() } else { -1 };
+
     let outer_rewind_idx = st.program.emit(Rewind(left_cid, 0));
     let outer_loop_top = st.program.instruction_count();
+    if is_left_outer {
+        let _ = st.program.emit(Integer(0, matched_flag));
+    }
     let inner_rewind_idx = st.program.emit(Rewind(right_cid, 0));
     let inner_loop_top = st.program.instruction_count();
 
@@ -482,7 +491,10 @@ fn emit_join_with_project(
         where_skip_reg = pr;
     }
 
-    // Projection body.
+    // Matched path: flag=1 + projection + ResultRow.
+    if is_left_outer {
+        let _ = st.program.emit(Integer(1, matched_flag));
+    }
     let n_proj = project_cols.len();
     let proj_start = st.regs.alloc_n(n_proj);
     let mut i: Int = 0;
@@ -505,8 +517,34 @@ fn emit_join_with_project(
         st.program.replace(where_skip_patch, IfNot(where_skip_reg, inner_next));
     }
     let _ = st.program.emit(Next(right_cid, inner_loop_top));
-    let outer_next = st.program.instruction_count();
-    st.program.replace(inner_rewind_idx, Rewind(right_cid, outer_next));
+
+    // --- After inner loop: LEFT OUTER emit-on-no-match ---
+    let after_inner = st.program.instruction_count();
+    st.program.replace(inner_rewind_idx, Rewind(right_cid, after_inner));
+    let mut outer_next_patch: Int = -1;
+    if is_left_outer {
+        // If matched_flag == 1, skip the NULL-row emission.
+        outer_next_patch = st.program.emit(If(matched_flag, 0));
+        // NULL-padded emission: evaluate each projection column, but
+        // replace any EColumnRef(right_cid, *) with RNull inline via a
+        // codegen shim. v1 uses a simple approach: evaluate cols, but
+        // the right-side cursor is past-end so Column opcode returns
+        // RNull naturally. This is correct as long as the interpreter
+        // emits RNull for out-of-range positions (it does).
+        let nproj_start2 = st.regs.alloc_n(n_proj);
+        let mut k: Int = 0;
+        while k < n_proj {
+            match emit_expr(st, &project_cols[k].expr, nproj_start2 + k) {
+                Ok(_)  => {}, Err(err) => { return Err(err); }
+            }
+            k = k + 1;
+        }
+        let gp2 = emit_limit_body_prefix(st);
+        let _ = st.program.emit(ResultRow(nproj_start2, n_proj));
+        emit_limit_body_counter(st, gp2);
+        let after_nullrow = st.program.instruction_count();
+        st.program.replace(outer_next_patch, If(matched_flag, after_nullrow));
+    }
     let _ = st.program.emit(Next(left_cid, outer_loop_top));
     let end_idx = st.program.instruction_count();
     st.program.replace(outer_rewind_idx, Rewind(left_cid, end_idx));

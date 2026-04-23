@@ -99,6 +99,7 @@ public type PlanNode is
           right_cid: Int,
           right_ncols: Int,
           on: Maybe<Expr>,
+          is_left_outer: Bool,
       )
     | PnLimit(child: Heap<PlanNode>, limit: Expr, offset: Maybe<Expr>)
     | PnInsert(table: TableRef, columns: List<Text>, source: Heap<PlanNode>, on_conflict: Maybe<OnConflict>)
@@ -621,10 +622,11 @@ fn plan_from_for_select(
                     _ => { return Err(plan_error("JOIN right side must be a table in v1".clone())); }
                 }
             };
-            match jc.kind {
-                JInner | JCross => {}
-                _ => { return Err(plan_error("only INNER/CROSS JOIN supported in v1".clone())); }
-            }
+            let is_left_outer = match jc.kind {
+                JInner | JCross => false,
+                JLeftOuter => true,
+                _ => { return Err(plan_error("only INNER/CROSS/LEFT JOIN supported in v1".clone())); }
+            };
             let lmeta = match schema.lookup_table(&lt.schema, &lt.name) {
                 Ok(m)  => m,
                 Err(_) => { return Err(plan_error("JOIN left table unknown".clone())); }
@@ -647,6 +649,7 @@ fn plan_from_for_select(
                 clone_table_ref(lt), 0, lmeta.columns.len(),
                 clone_table_ref(rt), 1, rmeta.columns.len(),
                 on_resolved,
+                is_left_outer,
             );
             Ok((node, scopes, lmeta, 0))
         }

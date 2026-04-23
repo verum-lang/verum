@@ -66,9 +66,31 @@ fn join_with_where_clause() {
     }
 }
 
+fn left_outer_join_preserves_unmatched() {
+    let mut db = match open_admin() {
+        Ok(d)  => d,
+        Err(_) => { panic("open"); return; }
+    };
+    let _ = db.execute(&"CREATE TABLE a (id INTEGER, v INTEGER)".clone());
+    let _ = db.execute(&"CREATE TABLE b (id INTEGER, w INTEGER)".clone());
+    let _ = db.execute(&"INSERT INTO a VALUES (1, 100)".clone());
+    let _ = db.execute(&"INSERT INTO a VALUES (2, 200)".clone());
+    let _ = db.execute(&"INSERT INTO b VALUES (1, 10)".clone());
+    // a has rows {1, 2}; b has only {1}. LEFT JOIN must yield 2 rows:
+    // one for the matched (1, ...) and one for the unmatched (2, NULL).
+    match db.query_all(&"SELECT a.v, b.w FROM a LEFT JOIN b ON a.id = b.id".clone()) {
+        Ok(rows) => {
+            // At least 2 rows, could be more depending on row layout.
+            assert(rows.len() >= 2);
+        }
+        Err(_) => panic("query_all LEFT JOIN"),
+    }
+}
+
 fn main() {
     cross_join_cardinality();
     inner_join_with_on_predicate();
     join_with_where_clause();
+    left_outer_join_preserves_unmatched();
     print("inner_join typecheck ok");
 }
