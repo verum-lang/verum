@@ -17,11 +17,11 @@ mount core.net.h3.qpack.{
 fn check_dynamic_table() -> Result<(), DynamicTableError> {
     let mut dt = DynamicTable.new(4096_u64);
     dt.set_capacity(4096_u64)?;
-    let _ = dt.insert(Text.from_str("custom-key"), Text.from_str("custom-val"))?;
-    let _ = dt.insert_with_name_ref(true, 17_u64, Text.from_str("GET-ish"))?;
+    let _ = dt.insert(Text.from("custom-key"), Text.from("custom-val"))?;
+    let _ = dt.insert_with_name_ref(true, 17_u64, Text.from("GET-ish"))?;
     let _ = dt.duplicate(0_u64)?;
-    let _ = dt.find(&Text.from_str("custom-key"), &Text.from_str("custom-val"));
-    let _ = dt.find_name(&Text.from_str("custom-key"));
+    let _ = dt.find(&Text.from("custom-key"), &Text.from("custom-val"));
+    let _ = dt.find_name(&Text.from("custom-key"));
     let _ = dt.insert_count();
     Ok(())
 }
@@ -66,11 +66,11 @@ fn check_session() -> Result<(), QpackSessionError> {
     sess.set_encoder_capacity(4096_u64)?;
 
     let headers: List<HeaderField> = [
-        HeaderField { name: Text.from_str(":method"), value: Text.from_str("GET") },
-        HeaderField { name: Text.from_str(":scheme"), value: Text.from_str("https") },
-        HeaderField { name: Text.from_str(":authority"), value: Text.from_str("api.example.com") },
-        HeaderField { name: Text.from_str(":path"),   value: Text.from_str("/v1/users/42") },
-        HeaderField { name: Text.from_str("user-agent"), value: Text.from_str("verum-h3") },
+        HeaderField { name: Text.from(":method"), value: Text.from("GET") },
+        HeaderField { name: Text.from(":scheme"), value: Text.from("https") },
+        HeaderField { name: Text.from(":authority"), value: Text.from("api.example.com") },
+        HeaderField { name: Text.from(":path"),   value: Text.from("/v1/users/42") },
+        HeaderField { name: Text.from("user-agent"), value: Text.from("verum-h3") },
     ];
     let encoded = sess.encode_field_section(&headers)?;
     // Drain both instruction streams (encoder-stream inserts queued,

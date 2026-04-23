@@ -5,9 +5,20 @@
 // @timeout: 10000
 // @expect: pass
 
-mount core.net.h3.*;
-mount core.net.h3.qpack.*;
-mount core.net.h3.qpack.static_table as stat;
+// Explicit imports — avoid the glob-import collision where `stat`
+// module alias resolves to `core.sys.Stat` struct via a transitively
+// imported core.*.
+mount core.net.h3.frame.{
+    H3Frame, encode_frame, decode_frame,
+    SETTING_QPACK_MAX_TABLE_CAPACITY, SETTING_QPACK_BLOCKED_STREAMS,
+    UniStreamType, encode_stream_type, decode_stream_type,
+};
+mount core.net.h3.qpack.decoder.{
+    HeaderField, QpackDecodeError, decode_field_section,
+};
+mount core.net.h3.qpack.encoder.{encode_field_section};
+mount core.net.h3.qpack.static_table.{get as st_get, find as st_find, find_name as st_find_name};
+mount core.net.h3.qpack.huffman.{encoded_bit_length as huff_bit_len, encode as huff_encode, decode as huff_decode};
 
 fn check_frame_roundtrip() {
     let f = H3Frame.SettingsFrame([
@@ -26,19 +37,19 @@ fn check_stream_type() {
 }
 
 fn check_qpack_static_table() {
-    let _ = stat.get(0);
-    let _ = stat.get(98);
-    let _ = stat.find(&Text.from_str(":method"), &Text.from_str("GET"));
-    let _ = stat.find_name(&Text.from_str(":status"));
+    let _ = st_get(0);
+    let _ = st_get(98);
+    let _ = st_find(&Text.from(":method"), &Text.from("GET"));
+    let _ = st_find_name(&Text.from(":status"));
 }
 
 fn check_qpack_roundtrip() -> Result<(), QpackDecodeError> {
     let headers: List<HeaderField> = [
-        HeaderField { name: Text.from_str(":method"), value: Text.from_str("GET") },
-        HeaderField { name: Text.from_str(":scheme"), value: Text.from_str("https") },
-        HeaderField { name: Text.from_str(":path"),   value: Text.from_str("/api/users/42") },
-        HeaderField { name: Text.from_str(":authority"), value: Text.from_str("example.com") },
-        HeaderField { name: Text.from_str("user-agent"), value: Text.from_str("verum-h3/0.1") },
+        HeaderField { name: Text.from(":method"), value: Text.from("GET") },
+        HeaderField { name: Text.from(":scheme"), value: Text.from("https") },
+        HeaderField { name: Text.from(":path"),   value: Text.from("/api/users/42") },
+        HeaderField { name: Text.from(":authority"), value: Text.from("example.com") },
+        HeaderField { name: Text.from("user-agent"), value: Text.from("verum-h3/0.1") },
     ];
     let encoded = encode_field_section(&headers);
     let _ = decode_field_section(encoded.as_slice())?;
@@ -47,10 +58,10 @@ fn check_qpack_roundtrip() -> Result<(), QpackDecodeError> {
 
 fn check_huffman_shape() {
     let bytes: [Byte; 5] = [0x68_u8, 0x65_u8, 0x6c_u8, 0x6c_u8, 0x6f_u8];  // "hello"
-    let _ = huffman.encoded_bit_length(&bytes);
+    let _ = huff_bit_len(&bytes);
     let mut out: List<Byte> = [];
-    huffman.encode(&bytes, &mut out);
-    let _ = huffman.decode(out.as_slice());
+    huff_encode(&bytes, &mut out);
+    let _ = huff_decode(out.as_slice());
 }
 
 fn main() {

@@ -17,13 +17,22 @@
 // existing core.security.ecc / core.security.sig surfaces (follow-up
 // commit).
 
-mount core.net.tls13.*;
-mount core.net.tls13.handshake.*;
+// Explicit imports per the glob-import HashKind bug — `mount foo.*`
+// ahead of targeted submodule imports clobbers re-exports when
+// stacking multiple globs. Spec the surface here unambiguously.
 mount core.net.tls13.cipher_suite.{CipherSuite, HashKind};
 mount core.net.tls13.named_group.{NamedGroup};
 mount core.net.tls13.sig_scheme.{SignatureScheme};
 mount core.net.tls13.version.{LEGACY_VERSION_TLS_1_2, TLS_1_3};
 mount core.net.tls13.error.{TlsError};
+mount core.net.tls13.handshake.{
+    Transcript, HandshakeMessage, ClientHello, ServerHello,
+    Extension, ExtensionContext, KeyShareEntry, ServerName,
+    Finished, CertificateMessage, CertificateEntry,
+    ClientConfig, ClientSm,
+    encode_handshake, decode_handshake,
+    encode_extensions_block, decode_extensions_block,
+};
 mount core.security.x509.{TrustStore};
 
 fn check_transcript() {
