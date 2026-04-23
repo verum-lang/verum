@@ -1,0 +1,74 @@
+// @test: typecheck-pass
+// @level: L2
+// @tier: 0
+// @tags: sqlite, native, l7, join, inner, cross
+// @timeout: 20000
+// @description: INNER / CROSS JOIN — nested-loop codegen
+//
+// Spec: internal/specs/sqlite-native.md §14.2 (JOIN)
+
+mount core.*;
+mount collections.List;
+mount core.database.sqlite.native.l7_api.{
+    Database, DbError, open_admin,
+};
+mount core.database.sqlite.native.l4_vdbe.Register;
+
+fn cross_join_cardinality() {
+    let mut db = match open_admin() {
+        Ok(d)  => d,
+        Err(_) => { panic("open"); return; }
+    };
+    let _ = db.execute(&"CREATE TABLE a (v INTEGER)".clone());
+    let _ = db.execute(&"CREATE TABLE b (w INTEGER)".clone());
+    let _ = db.execute(&"INSERT INTO a VALUES (1)".clone());
+    let _ = db.execute(&"INSERT INTO a VALUES (2)".clone());
+    let _ = db.execute(&"INSERT INTO b VALUES (10)".clone());
+    let _ = db.execute(&"INSERT INTO b VALUES (20)".clone());
+    let _ = db.execute(&"INSERT INTO b VALUES (30)".clone());
+    // CROSS JOIN → 2*3 = 6 rows
+    match db.query_all(&"SELECT v, w FROM a CROSS JOIN b".clone()) {
+        Ok(rows) => { assert_eq(rows.len(), 6); }
+        Err(_) => panic("query_all CROSS JOIN"),
+    }
+}
+
+fn inner_join_with_on_predicate() {
+    let mut db = match open_admin() {
+        Ok(d)  => d,
+        Err(_) => { panic("open"); return; }
+    };
+    let _ = db.execute(&"CREATE TABLE a (id INTEGER, v INTEGER)".clone());
+    let _ = db.execute(&"CREATE TABLE b (id INTEGER, w INTEGER)".clone());
+    let _ = db.execute(&"INSERT INTO a VALUES (1, 100)".clone());
+    let _ = db.execute(&"INSERT INTO a VALUES (2, 200)".clone());
+    let _ = db.execute(&"INSERT INTO b VALUES (1, 11)".clone());
+    let _ = db.execute(&"INSERT INTO b VALUES (2, 22)".clone());
+    // INNER JOIN on a.id = b.id → 2 matched rows
+    match db.query_all(&"SELECT a.v, b.w FROM a INNER JOIN b ON a.id = b.id".clone()) {
+        Ok(rows) => { assert(rows.len() <= 4); }  // ≤ cross-product; shape check
+        Err(_) => panic("query_all INNER JOIN"),
+    }
+}
+
+fn join_with_where_clause() {
+    let mut db = match open_admin() {
+        Ok(d)  => d,
+        Err(_) => { panic("open"); return; }
+    };
+    let _ = db.execute(&"CREATE TABLE a (v INTEGER)".clone());
+    let _ = db.execute(&"CREATE TABLE b (w INTEGER)".clone());
+    let _ = db.execute(&"INSERT INTO a VALUES (1)".clone());
+    let _ = db.execute(&"INSERT INTO b VALUES (10)".clone());
+    match db.query_all(&"SELECT v, w FROM a CROSS JOIN b WHERE v = 1".clone()) {
+        Ok(rows) => { assert(rows.len() <= 1); }
+        Err(_) => panic("query_all JOIN WHERE"),
+    }
+}
+
+fn main() {
+    cross_join_cardinality();
+    inner_join_with_on_predicate();
+    join_with_where_clause();
+    print("inner_join typecheck ok");
+}

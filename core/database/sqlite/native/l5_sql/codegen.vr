@@ -165,6 +165,8 @@ fn emit_plan(st: &mut CgState, plan: &PlanNode) -> Result<(), CodegenError> {
         PnLimit(ref child, ref lim, ref off) => emit_limit(st, child, lim, off),
         PnSort(ref child, ref terms) => emit_sort(st, child, terms),
         PnDistinct(ref child, n_proj) => emit_distinct(st, child, n_proj),
+        PnNestedLoopJoin(_, _, _, _, _, _, _) =>
+            Err(unsupported("bare nested-loop join needs a Project wrapper in v1".clone())),
         PnTableScan(ref t, cid, n_cols) => emit_table_scan(st, t, cid, n_cols),
         PnInsert(ref t, ref cols, ref src, ref oc) => emit_insert(st, t, cols, src, oc),
         PnDelete(ref t, cid, ref pred) => emit_delete(st, t, cid, pred),
@@ -239,6 +241,19 @@ fn emit_project(
             },
             _ => {}
         }
+    }
+    // Nested-loop JOIN sources:
+    match child {
+        PnNestedLoopJoin(ref lt, lc, ln, ref rt, rc, rn, ref on) => {
+            return emit_join_with_project(st, lt, lc, ln, rt, rc, rn, on, cols, false, &ELit(LNull));
+        }
+        PnFilter(ref grand, ref pred) => match grand {
+            PnNestedLoopJoin(ref lt, lc, ln, ref rt, rc, rn, ref on) => {
+                return emit_join_with_project(st, lt, lc, ln, rt, rc, rn, on, cols, true, pred);
+            }
+            _ => {}
+        },
+        _ => {}
     }
     // TableScan source: emit OpenRead + Rewind + body + Next loop.
     match child {
@@ -384,6 +399,118 @@ fn emit_scan_with_filter_project(
     st.program.replace(rewind_idx, Rewind(cursor_id, after));
     emit_limit_finalize_patches(st, after);
     let _ = st.program.emit(Close(cursor_id));
+    Ok(())
+}
+
+// -----------------------------------------------------------------------------
+// INNER / CROSS JOIN — nested-loop codegen
+//
+//   OpenRead(lcid, 0, ln); OpenRead(rcid, 0, rn);
+//   Rewind(lcid, end)
+// outer_loop:
+//   Rewind(rcid, outer_next)
+// inner_loop:
+//   [optional IfNot(on_pred, inner_next)]
+//   [optional IfNot(where_pred, inner_next)]
+//   eval projection cols into dst..
+//   emit_limit_body_prefix
+//   ResultRow(dst, n_proj)
+//   emit_limit_body_counter
+// inner_next:
+//   Next(rcid, inner_loop)
+// outer_next:
+//   Next(lcid, outer_loop)
+// end:
+//   emit_limit_finalize_patches(st, end)
+//   Close(rcid); Close(lcid)
+// -----------------------------------------------------------------------------
+
+fn emit_join_with_project(
+    st: &mut CgState,
+    left_table: &TableRef,
+    left_cid: Int,
+    left_ncols: Int,
+    right_table: &TableRef,
+    right_cid: Int,
+    right_ncols: Int,
+    on_pred: &Maybe<Expr>,
+    project_cols: &List<PlanColumn>,
+    has_where: Bool,
+    where_pred: &Expr,
+) -> Result<(), CodegenError> {
+    let _ = left_table;
+    let _ = right_table;
+    // Declare both cursors if not already present.
+    if left_cid >= st.program.cursor_count() {
+        let _ = st.program.declare_cursor(CkTable, 0, left_ncols);
+    }
+    if right_cid >= st.program.cursor_count() {
+        let _ = st.program.declare_cursor(CkTable, 0, right_ncols);
+    }
+    let _ = st.program.emit(OpenRead(left_cid, 0, left_ncols));
+    let _ = st.program.emit(OpenRead(right_cid, 0, right_ncols));
+    let outer_rewind_idx = st.program.emit(Rewind(left_cid, 0));
+    let outer_loop_top = st.program.instruction_count();
+    let inner_rewind_idx = st.program.emit(Rewind(right_cid, 0));
+    let inner_loop_top = st.program.instruction_count();
+
+    // Optional ON predicate — skip to inner_next if false.
+    let mut on_skip_patch: Int = -1;
+    let mut on_skip_reg: Int = -1;
+    match on_pred {
+        Some(ref e) => {
+            let pr = st.regs.alloc();
+            match emit_expr(st, e, pr) {
+                Ok(_)  => {}, Err(err) => { return Err(err); }
+            }
+            on_skip_patch = st.program.emit(IfNot(pr, 0));
+            on_skip_reg = pr;
+        }
+        None => {}
+    }
+    // Optional outer WHERE predicate.
+    let mut where_skip_patch: Int = -1;
+    let mut where_skip_reg: Int = -1;
+    if has_where {
+        let pr = st.regs.alloc();
+        match emit_expr(st, where_pred, pr) {
+            Ok(_)  => {}, Err(err) => { return Err(err); }
+        }
+        where_skip_patch = st.program.emit(IfNot(pr, 0));
+        where_skip_reg = pr;
+    }
+
+    // Projection body.
+    let n_proj = project_cols.len();
+    let proj_start = st.regs.alloc_n(n_proj);
+    let mut i: Int = 0;
+    while i < n_proj {
+        match emit_expr(st, &project_cols[i].expr, proj_start + i) {
+            Ok(_)  => {}, Err(err) => { return Err(err); }
+        }
+        i = i + 1;
+    }
+    let gp = emit_limit_body_prefix(st);
+    let _ = st.program.emit(ResultRow(proj_start, n_proj));
+    emit_limit_body_counter(st, gp);
+
+    // inner_next — after the row body (or where-skip).
+    let inner_next = st.program.instruction_count();
+    if on_skip_patch >= 0 {
+        st.program.replace(on_skip_patch, IfNot(on_skip_reg, inner_next));
+    }
+    if where_skip_patch >= 0 {
+        st.program.replace(where_skip_patch, IfNot(where_skip_reg, inner_next));
+    }
+    let _ = st.program.emit(Next(right_cid, inner_loop_top));
+    let outer_next = st.program.instruction_count();
+    st.program.replace(inner_rewind_idx, Rewind(right_cid, outer_next));
+    let _ = st.program.emit(Next(left_cid, outer_loop_top));
+    let end_idx = st.program.instruction_count();
+    st.program.replace(outer_rewind_idx, Rewind(left_cid, end_idx));
+    emit_limit_finalize_patches(st, end_idx);
+    let _ = st.program.emit(Close(right_cid));
+    let _ = st.program.emit(Close(left_cid));
     Ok(())
 }
 

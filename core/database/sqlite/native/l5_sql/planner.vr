@@ -38,7 +38,8 @@ mount base.{Result, Ok, Err, Text, Maybe};
 mount core.database.sqlite.native.l5_sql.ast.{
     Statement, Expr, Literal, BinOp,
     SelectStmt, SelectKind, SimpleSelect,
-    ResultColumnItem, FromItem, OrderTerm, LimitClause,
+    ResultColumnItem, FromItem, JoinKind, JoinClause,
+    OrderTerm, LimitClause, OrderDirection,
     InsertStmt, InsertSource, OnConflict,
     UpdateStmt, UpdateAssignment,
     DeleteStmt,
@@ -75,6 +76,18 @@ public type PlanNode is
     | PnProject(child: Heap<PlanNode>, columns: List<PlanColumn>)
     | PnSort(child: Heap<PlanNode>, terms: List<OrderTerm>)
     | PnDistinct(child: Heap<PlanNode>, n_proj: Int)
+    // Nested-loop INNER JOIN of two TableScans. `on` is the ON clause
+    // (pre-resolved to use EColumnRef over both scopes). Outer WHERE
+    // lives in an enclosing PnFilter.
+    | PnNestedLoopJoin(
+          left_table: TableRef,
+          left_cid: Int,
+          left_ncols: Int,
+          right_table: TableRef,
+          right_cid: Int,
+          right_ncols: Int,
+          on: Maybe<Expr>,
+      )
     | PnLimit(child: Heap<PlanNode>, limit: Expr, offset: Maybe<Expr>)
     | PnInsert(table: TableRef, columns: List<Text>, source: Heap<PlanNode>, on_conflict: Maybe<OnConflict>)
     | PnDelete(table: TableRef, cursor_id: Int, predicate: Maybe<Expr>)
@@ -563,6 +576,72 @@ fn plan_delete_with_schema(
     Ok(PnDelete(clone_table_ref(&del.table), cursor_id, pred))
 }
 
+/// Resolve the SELECT's FROM clause. Returns the pre-WHERE plan
+/// node + the column scopes + the "primary" meta for `SELECT *`
+/// expansion + the default cursor_id for qualified column lookup.
+///
+/// v1 handles: FROM t, FROM t JOIN u ON … (INNER / CROSS only,
+/// single-level JOIN). Subqueries and RIGHT/FULL/LEFT OUTER joins
+/// defer to a later pass.
+fn plan_from_for_select(
+    fi: &FromItem,
+    schema: &SchemaCache,
+) -> Result<(PlanNode, List<ColumnScope>, TableMeta, Int), PlanError> {
+    match fi {
+        FiTable(ref t) => {
+            let meta = match schema.lookup_table(&t.schema, &t.name) {
+                Ok(m)  => m,
+                Err(_) => { return Err(plan_error("unknown table".clone())); }
+            };
+            let mut scopes: List<ColumnScope> = List.new();
+            scopes.push(scope_from_table_meta(0, t.alias.clone(), &meta));
+            let node = PnTableScan(clone_table_ref(t), 0, meta.columns.len());
+            Ok((node, scopes, meta, 0))
+        }
+        FiJoin(ref left_fi, ref jc) => {
+            let lt = match left_fi {
+                FiTable(ref x) => x,
+                _ => { return Err(plan_error("nested JOINs pending in v1".clone())); }
+            };
+            let rt = match jc.right {
+                ref right_fi => match right_fi {
+                    FiTable(ref x) => x,
+                    _ => { return Err(plan_error("JOIN right side must be a table in v1".clone())); }
+                }
+            };
+            match jc.kind {
+                JInner | JCross => {}
+                _ => { return Err(plan_error("only INNER/CROSS JOIN supported in v1".clone())); }
+            }
+            let lmeta = match schema.lookup_table(&lt.schema, &lt.name) {
+                Ok(m)  => m,
+                Err(_) => { return Err(plan_error("JOIN left table unknown".clone())); }
+            };
+            let rmeta = match schema.lookup_table(&rt.schema, &rt.name) {
+                Ok(m)  => m,
+                Err(_) => { return Err(plan_error("JOIN right table unknown".clone())); }
+            };
+            let mut scopes: List<ColumnScope> = List.new();
+            scopes.push(scope_from_table_meta(0, lt.alias.clone(), &lmeta));
+            scopes.push(scope_from_table_meta(1, rt.alias.clone(), &rmeta));
+            let on_resolved: Maybe<Expr> = match jc.on {
+                Some(ref e) => match resolve_expr(e, &scopes) {
+                    Ok(r)  => Some(r),
+                    Err(_) => { return Err(plan_error("JOIN ON resolve failed".clone())); }
+                },
+                None => None,
+            };
+            let node = PnNestedLoopJoin(
+                clone_table_ref(lt), 0, lmeta.columns.len(),
+                clone_table_ref(rt), 1, rmeta.columns.len(),
+                on_resolved,
+            );
+            Ok((node, scopes, lmeta, 0))
+        }
+        _ => Err(plan_error("only FROM <table> or FROM a JOIN b supported in v1".clone())),
+    }
+}
+
 fn plan_select_with_schema(
     sel: &SelectStmt,
     schema: &SchemaCache,
@@ -580,29 +659,16 @@ fn plan_select_with_schema(
         _ => {}
     }
 
-    // Resolve single-table FROM.
-    let (tref, cursor_id) = match simple.from {
-        Some(ref fi) => {
-            match fi {
-                FiTable(ref t) => (clone_table_ref(t), 0),
-                _ => { return Err(plan_error("only FROM <table> supported with schema awareness in v1".clone())); }
-            }
-        }
+    // Resolve FROM — single table, or single nested-loop JOIN of two.
+    let from_res = match simple.from {
+        Some(ref fi) => plan_from_for_select(fi, schema),
         None => { return Err(plan_error("unreachable".clone())); }
     };
-
-    let meta = match schema.lookup_table(&tref.schema, &tref.name) {
-        Ok(m)  => m,
-        Err(_) => { return Err(plan_error("unknown table".clone())); }
+    let (node_pre_where, scopes, meta, cursor_id) = match from_res {
+        Ok(v)  => v,
+        Err(e) => { return Err(e); }
     };
-
-    // Build scope, resolve expressions.
-    let scope = scope_from_table_meta(cursor_id, tref.alias.clone(), &meta);
-    let mut scopes: List<ColumnScope> = List.new();
-    scopes.push(scope);
-
-    // Scan source with real root_page + n_cols.
-    let mut node: PlanNode = PnTableScan(clone_table_ref(&tref), cursor_id, meta.columns.len());
+    let mut node: PlanNode = node_pre_where;
 
     // WHERE.
     match simple.where_clause {
