@@ -5,7 +5,11 @@
 // @timeout: 10000
 // @expect: pass
 
-mount core.net.h3.*;
+// Explicit submodule mounts — `mount core.net.h3.*;` here would
+// collide with the subsequent nested mounts (known latent bug in
+// nested+glob mount interaction where the second-listed items
+// report as unbound).
+mount core.net.h3.connection.{H3Connection};
 mount core.net.h3.settings.{H3Settings};
 mount core.net.h3.request.{H3Request, H3Response, H3Method};
 
@@ -14,8 +18,8 @@ fn check_client_flow() -> Result<(), core.net.h3.error.H3Error> {
     // Initial unistreams queued on construction.
     let _initial = conn.drain_outbound();
 
-    let req = H3Request.get(Text.from_str("example.com"), Text.from_str("/"))
-        .with_header(Text.from_str("user-agent"), Text.from_str("verum-h3/0.1"));
+    let req = H3Request.get("example.com", "/")
+        .with_header("user-agent", "verum-h3/0.1");
     let sid = conn.send_request(&req)?;
     let _ = sid;
     let _ = conn.drain_outbound();
@@ -29,7 +33,7 @@ fn check_server_flow() -> Result<(), core.net.h3.error.H3Error> {
 
     // Construct a canned response for send_response typecheck coverage.
     let resp = H3Response.ok(b"Hello".to_list())
-        .with_header(Text.from_str("content-type"), Text.from_str("text/plain"));
+        .with_header("content-type", "text/plain");
     let _ = conn.send_response(0_u64, &resp);
     Ok(())
 }
@@ -42,10 +46,10 @@ fn check_settings_roundtrip() {
 
 fn check_request_parse() {
     let fields = [
-        core.net.h3.qpack.HeaderField { name: Text.from_str(":method"), value: Text.from_str("GET") },
-        core.net.h3.qpack.HeaderField { name: Text.from_str(":scheme"), value: Text.from_str("https") },
-        core.net.h3.qpack.HeaderField { name: Text.from_str(":authority"), value: Text.from_str("x.test") },
-        core.net.h3.qpack.HeaderField { name: Text.from_str(":path"),   value: Text.from_str("/") },
+        core.net.h3.qpack.HeaderField { name: ":method", value: "GET" },
+        core.net.h3.qpack.HeaderField { name: ":scheme", value: "https" },
+        core.net.h3.qpack.HeaderField { name: ":authority", value: "x.test" },
+        core.net.h3.qpack.HeaderField { name: ":path",   value: "/" },
     ];
     let _ = parse_request_from_fields(&fields, []);
 }
