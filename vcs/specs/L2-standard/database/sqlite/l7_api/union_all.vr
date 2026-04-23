@@ -1,0 +1,52 @@
+// @test: typecheck-pass
+// @level: L2
+// @tier: 0
+// @tags: sqlite, native, l7, union-all, compound
+// @timeout: 15000
+// @description: UNION ALL — concatenate two SELECT pipelines
+//
+// Spec: internal/specs/sqlite-native.md §14.2 (compound SELECT)
+
+mount core.*;
+mount collections.List;
+mount core.database.sqlite.native.l7_api.{
+    Database, DbError, open_admin,
+};
+mount core.database.sqlite.native.l4_vdbe.Register;
+
+fn union_all_concat() {
+    let mut db = match open_admin() {
+        Ok(d)  => d,
+        Err(_) => { panic("open"); return; }
+    };
+    let _ = db.execute(&"CREATE TABLE a (v INTEGER)".clone());
+    let _ = db.execute(&"CREATE TABLE b (v INTEGER)".clone());
+    let _ = db.execute(&"INSERT INTO a VALUES (1)".clone());
+    let _ = db.execute(&"INSERT INTO a VALUES (2)".clone());
+    let _ = db.execute(&"INSERT INTO b VALUES (3)".clone());
+    let _ = db.execute(&"INSERT INTO b VALUES (4)".clone());
+    match db.query_all(&"SELECT v FROM a UNION ALL SELECT v FROM b".clone()) {
+        Ok(rows) => { assert_eq(rows.len(), 4); }
+        Err(_) => panic("query_all UNION ALL"),
+    }
+}
+
+fn union_all_empty_rhs() {
+    let mut db = match open_admin() {
+        Ok(d)  => d,
+        Err(_) => { panic("open"); return; }
+    };
+    let _ = db.execute(&"CREATE TABLE a (v INTEGER)".clone());
+    let _ = db.execute(&"CREATE TABLE b (v INTEGER)".clone());
+    let _ = db.execute(&"INSERT INTO a VALUES (1)".clone());
+    match db.query_all(&"SELECT v FROM a UNION ALL SELECT v FROM b".clone()) {
+        Ok(rows) => { assert_eq(rows.len(), 1); }
+        Err(_) => panic("query_all UNION ALL empty rhs"),
+    }
+}
+
+fn main() {
+    union_all_concat();
+    union_all_empty_rhs();
+    print("union_all typecheck ok");
+}

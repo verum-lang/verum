@@ -37,7 +37,7 @@ mount collections.List;
 mount base.{Result, Ok, Err, Text, Maybe};
 mount core.database.sqlite.native.l5_sql.ast.{
     Statement, Expr, Literal, BinOp,
-    SelectStmt, SelectKind, SimpleSelect,
+    SelectStmt, SelectKind, SimpleSelect, CompoundOp,
     ResultColumnItem, FromItem, JoinKind, JoinClause,
     OrderTerm, LimitClause, OrderDirection,
     InsertStmt, InsertSource, OnConflict,
@@ -91,6 +91,8 @@ public type PlanNode is
     // Nested-loop INNER JOIN of two TableScans. `on` is the ON clause
     // (pre-resolved to use EColumnRef over both scopes). Outer WHERE
     // lives in an enclosing PnFilter.
+    // UNION ALL — concatenate two plan pipelines' ResultRow emissions.
+    | PnUnionAll(left: Heap<PlanNode>, right: Heap<PlanNode>)
     | PnNestedLoopJoin(
           left_table: TableRef,
           left_cid: Int,
@@ -663,9 +665,18 @@ fn plan_select_with_schema(
 ) -> Result<PlanNode, PlanError> {
     let simple = match sel.kind {
         SkSimple(ref s) => s,
-        SkCompound(_, _, _) => {
-            return Err(plan_error("compound SELECT pending".clone()));
-        }
+        SkCompound(op, ref lhs, ref rhs) => match op {
+            CoUnionAll => {
+                let lp = match plan_select_with_schema(lhs, schema) {
+                    Ok(p)  => p, Err(e) => { return Err(e); }
+                };
+                let rp = match plan_select_with_schema(rhs, schema) {
+                    Ok(p)  => p, Err(e) => { return Err(e); }
+                };
+                return Ok(PnUnionAll(Heap(lp), Heap(rp)));
+            }
+            _ => { return Err(plan_error("compound SELECT op pending (UNION/INTERSECT/EXCEPT dedup)".clone())); }
+        },
     };
 
     // No FROM → fall back to the schema-free planner.

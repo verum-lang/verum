@@ -169,6 +169,7 @@ fn emit_plan(st: &mut CgState, plan: &PlanNode) -> Result<(), CodegenError> {
             emit_group_by(st, source, group_exprs, projection, having),
         PnNestedLoopJoin(_, _, _, _, _, _, _, _) =>
             Err(unsupported("bare nested-loop join needs a Project wrapper in v1".clone())),
+        PnUnionAll(ref lhs, ref rhs) => emit_union_all(st, lhs, rhs),
         PnTableScan(ref t, cid, n_cols) => emit_table_scan(st, t, cid, n_cols),
         PnInsert(ref t, ref cols, ref src, ref oc) => emit_insert(st, t, cols, src, oc),
         PnDelete(ref t, cid, ref pred) => emit_delete(st, t, cid, pred),
@@ -402,6 +403,23 @@ fn emit_scan_with_filter_project(
     emit_limit_finalize_patches(st, after);
     let _ = st.program.emit(Close(cursor_id));
     Ok(())
+}
+
+// -----------------------------------------------------------------------------
+// UNION ALL — simple concatenation of two ResultRow-emitting pipelines.
+// LIMIT wrapping works out-of-the-box via the shared CgState limit
+// plumbing (each inner emitter calls emit_limit_body_prefix/counter).
+// -----------------------------------------------------------------------------
+
+fn emit_union_all(
+    st: &mut CgState,
+    lhs: &PlanNode,
+    rhs: &PlanNode,
+) -> Result<(), CodegenError> {
+    match emit_plan(st, lhs) {
+        Ok(_)  => {}, Err(e) => { return Err(e); }
+    }
+    emit_plan(st, rhs)
 }
 
 // -----------------------------------------------------------------------------
