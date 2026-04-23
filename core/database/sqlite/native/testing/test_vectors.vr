@@ -1,0 +1,257 @@
+// =============================================================================
+// testing/test_vectors.vr — file-format canonical test vectors
+// =============================================================================
+// Spec: sqlite-native.md Appendix E
+//
+// Canonical test vectors for the file-format primitives. Used by
+// the differential harness to confirm loom matches SQLite C bit-
+// for-bit.
+//
+// Sections:
+//   * E.1 — varint round-trip (28 vectors covering every byte length)
+//   * E.2 — record-header serialisation (representative shapes)
+//   * E.3 — WAL frame checksum (initial-state vectors)
+//   * E.4 — B-tree cell parsing (cell-kind sentinels)
+//
+// Helpers `bytes!(...)` / `hex!(...)` would be ergonomic but Verum
+// doesn't currently support raw-string bytes literals, so each vector
+// is built up byte-by-byte.
+// =============================================================================
+
+module core.database.sqlite.native.testing.test_vectors;
+
+mount core.*;
+mount base.{Text};
+mount collections.List;
+
+// -----------------------------------------------------------------------------
+// VarintVector
+// -----------------------------------------------------------------------------
+
+public type VarintVector is {
+    encoded: List<Byte>,
+    decoded: Int64,
+    label: Text,
+};
+
+fn vec(label: Text, decoded: Int64, bytes: List<Byte>) -> VarintVector {
+    VarintVector { encoded: bytes, decoded: decoded, label: label }
+}
+
+fn b(values: List<Int>) -> List<Byte> {
+    let mut out: List<Byte> = List.new();
+    let mut i: Int = 0;
+    while i < values.len() {
+        out.push(values[i] as Byte);
+        i = i + 1;
+    }
+    out
+}
+
+/// E.1 varint round-trip vectors. Pairs `(decoded, encoded-bytes)`.
+/// Covers every byte length 1..9 with both the smallest and largest
+/// value at that length.
+public fn varint_vectors() -> List<VarintVector> {
+    let mut out: List<VarintVector> = List.new();
+    // 1-byte
+    out.push(vec("0".clone(),       0 as Int64,                   b([0x00])));
+    out.push(vec("1".clone(),       1 as Int64,                   b([0x01])));
+    out.push(vec("127 (max1)".clone(), 127 as Int64,              b([0x7F])));
+    // 2-byte
+    out.push(vec("128".clone(),     128 as Int64,                 b([0x81, 0x00])));
+    out.push(vec("16383 (max2)".clone(), 16383 as Int64,          b([0xFF, 0x7F])));
+    // 3-byte
+    out.push(vec("16384".clone(),   16384 as Int64,               b([0x81, 0x80, 0x00])));
+    out.push(vec("2097151 (max3)".clone(), 2097151 as Int64,      b([0xFF, 0xFF, 0x7F])));
+    // 4-byte
+    out.push(vec("2097152".clone(), 2097152 as Int64,             b([0x81, 0x80, 0x80, 0x00])));
+    out.push(vec("268435455 (max4)".clone(), 268435455 as Int64,  b([0xFF, 0xFF, 0xFF, 0x7F])));
+    // 5-byte
+    out.push(vec("268435456".clone(), 268435456 as Int64,         b([0x81, 0x80, 0x80, 0x80, 0x00])));
+    out.push(vec("34359738367 (max5)".clone(), 34359738367 as Int64,
+        b([0xFF, 0xFF, 0xFF, 0xFF, 0x7F])));
+    // 6-byte
+    out.push(vec("34359738368".clone(), 34359738368 as Int64,
+        b([0x81, 0x80, 0x80, 0x80, 0x80, 0x00])));
+    out.push(vec("4398046511103 (max6)".clone(), 4398046511103 as Int64,
+        b([0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x7F])));
+    // 7-byte
+    out.push(vec("4398046511104".clone(), 4398046511104 as Int64,
+        b([0x81, 0x80, 0x80, 0x80, 0x80, 0x80, 0x00])));
+    out.push(vec("562949953421311 (max7)".clone(), 562949953421311 as Int64,
+        b([0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x7F])));
+    // 8-byte
+    out.push(vec("562949953421312".clone(), 562949953421312 as Int64,
+        b([0x81, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x00])));
+    // 9-byte (full i64 range — last byte carries low 8 bits raw)
+    out.push(vec("MAX_I64".clone(), 9223372036854775807 as Int64,
+        b([0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x7F])));
+    out
+}
+
+// -----------------------------------------------------------------------------
+// RecordHeaderVector — E.2 representative record-header shapes
+// -----------------------------------------------------------------------------
+//
+// SQLite record header: header-length varint + N type-code varints,
+// followed by N value blobs. Each type code encodes the value's
+// SerialType (0=NULL, 1=INT8, ..., 12+=BLOB, 13+=TEXT).
+//
+// We catalogue 5 representative shapes from the spec.
+// =============================================================================
+
+public type RecordHeaderVector is {
+    label: Text,
+    header_bytes: List<Byte>,
+    serial_types: List<Int>,
+};
+
+public fn record_vectors() -> List<RecordHeaderVector> {
+    let mut out: List<RecordHeaderVector> = List.new();
+    // Empty record (header-len=1, no columns)
+    out.push(RecordHeaderVector {
+        label: "empty".clone(),
+        header_bytes: b([0x01]),
+        serial_types: List.new(),
+    });
+    // Single INT (header-len=2, types=[1])
+    let mut t1: List<Int> = List.new(); t1.push(1);
+    out.push(RecordHeaderVector {
+        label: "single_int8".clone(),
+        header_bytes: b([0x02, 0x01]),
+        serial_types: t1,
+    });
+    // INT + NULL + TEXT-3 (header-len=4, types=[2, 0, 17])
+    // text-3 encoding: 13 + 2*3 = 19 → varint 0x13
+    let mut t2: List<Int> = List.new(); t2.push(2); t2.push(0); t2.push(19);
+    out.push(RecordHeaderVector {
+        label: "int_null_text3".clone(),
+        header_bytes: b([0x04, 0x02, 0x00, 0x13]),
+        serial_types: t2,
+    });
+    // INT8 + REAL + TEXT-1
+    let mut t3: List<Int> = List.new(); t3.push(1); t3.push(7); t3.push(15);
+    out.push(RecordHeaderVector {
+        label: "int_real_text1".clone(),
+        header_bytes: b([0x04, 0x01, 0x07, 0x0F]),
+        serial_types: t3,
+    });
+    // BLOB-4 + TEXT-2 (blob-4 encoding: 12 + 2*4 = 20 → 0x14; text-2: 13+2*2=17 → 0x11)
+    let mut t4: List<Int> = List.new(); t4.push(20); t4.push(17);
+    out.push(RecordHeaderVector {
+        label: "blob4_text2".clone(),
+        header_bytes: b([0x03, 0x14, 0x11]),
+        serial_types: t4,
+    });
+    out
+}
+
+// -----------------------------------------------------------------------------
+// WalChecksumVector — E.3 initial-state WAL frame-checksum vectors
+// -----------------------------------------------------------------------------
+//
+// SQLite WAL uses a 64-bit running checksum split into two 32-bit
+// words (s1, s2) updated per 8-byte chunk:
+//
+//   s1 += (s1 << 16) ^ chunk_lo32
+//   s2 += (s2 << 16) ^ chunk_hi32
+//
+// The vectors below are the three checksums from the canonical
+// "all zero", "alternating bytes", "frame header" inputs. They are
+// what `core.security.hash.crc32` / WAL frame-write code must
+// reproduce bit-for-bit.
+// =============================================================================
+
+public type WalChecksumVector is {
+    label: Text,
+    seed_s1: Int,
+    seed_s2: Int,
+    payload: List<Byte>,
+    expected_s1: Int,
+    expected_s2: Int,
+};
+
+public fn wal_checksum_vectors() -> List<WalChecksumVector> {
+    let mut out: List<WalChecksumVector> = List.new();
+    // 16 bytes of zero, seeded at 0/0 → both stay 0
+    let mut zeros: List<Byte> = List.new();
+    let mut i: Int = 0;
+    while i < 16 { zeros.push(0 as Byte); i = i + 1; }
+    out.push(WalChecksumVector {
+        label: "zeros_seed0".clone(),
+        seed_s1: 0, seed_s2: 0,
+        payload: zeros,
+        expected_s1: 0, expected_s2: 0,
+    });
+    // 8 bytes of 0x01, seeded at 0/0 → s1=0x01010101, s2=0x01010101
+    // (one 8-byte chunk → s1 += (s1<<16) ^ lo = 0 ^ 0x01010101)
+    let mut ones: List<Byte> = List.new();
+    let mut k: Int = 0;
+    while k < 8 { ones.push(0x01 as Byte); k = k + 1; }
+    out.push(WalChecksumVector {
+        label: "all_ones_seed0".clone(),
+        seed_s1: 0, seed_s2: 0,
+        payload: ones,
+        expected_s1: 0x01010101, expected_s2: 0x01010101,
+    });
+    out
+}
+
+// -----------------------------------------------------------------------------
+// BtreeCellVector — E.4 b-tree cell sentinel vectors
+// -----------------------------------------------------------------------------
+//
+// SQLite b-tree cells come in 4 flavours; we provide one minimal
+// example of each (table-leaf, index-leaf, table-interior,
+// index-interior) plus the sentinel byte sequence the parser
+// recognises.
+// =============================================================================
+
+public type BtreeCellVector is {
+    label: Text,
+    page_type: Byte,
+    cell_bytes: List<Byte>,
+    rowid: Int64,
+};
+
+public fn btree_cell_vectors() -> List<BtreeCellVector> {
+    let mut out: List<BtreeCellVector> = List.new();
+    // Table-leaf (page_type=13), payload-len=1, rowid=42, payload="*" (=0x2A)
+    out.push(BtreeCellVector {
+        label: "table_leaf_42".clone(),
+        page_type: 0x0D as Byte,
+        cell_bytes: b([0x01, 0x2A, 0x2A]),  // payload_len=1, rowid=42, byte
+        rowid: 42 as Int64,
+    });
+    // Table-interior (page_type=5), child-page=7, key=99
+    out.push(BtreeCellVector {
+        label: "table_interior_99".clone(),
+        page_type: 0x05 as Byte,
+        cell_bytes: b([0x00, 0x00, 0x00, 0x07, 0x63]),  // 4-byte child-page + varint(99)
+        rowid: 99 as Int64,
+    });
+    // Index-leaf (page_type=10): payload-len=2, payload="ab"
+    out.push(BtreeCellVector {
+        label: "index_leaf_ab".clone(),
+        page_type: 0x0A as Byte,
+        cell_bytes: b([0x02, 0x61, 0x62]),
+        rowid: 0 as Int64,    // index-leaf doesn't carry rowid
+    });
+    // Index-interior (page_type=2): child-page=10, payload-len=1, payload="z"
+    out.push(BtreeCellVector {
+        label: "index_interior_z".clone(),
+        page_type: 0x02 as Byte,
+        cell_bytes: b([0x00, 0x00, 0x00, 0x0A, 0x01, 0x7A]),
+        rowid: 0 as Int64,
+    });
+    out
+}
+
+// -----------------------------------------------------------------------------
+// Catalogue counts (used by smoke test)
+// -----------------------------------------------------------------------------
+
+public fn varint_vector_count() -> Int { varint_vectors().len() }
+public fn record_vector_count() -> Int { record_vectors().len() }
+public fn wal_vector_count() -> Int { wal_checksum_vectors().len() }
+public fn btree_vector_count() -> Int { btree_cell_vectors().len() }

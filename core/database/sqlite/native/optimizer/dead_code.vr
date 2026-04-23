@@ -1,0 +1,131 @@
+// =============================================================================
+// optimizer/dead_code.vr — drop unreachable instructions
+// =============================================================================
+// Spec: sqlite-native.md §11.5
+//
+// After every `Halt`, `Goto`, `Return` (with no path back), or
+// `RollbackOp` whose successor is not the target of any jump, the
+// remaining instructions are unreachable. Drop them.
+//
+// Algorithm:
+//   1. Mark PC 0 as reachable.
+//   2. Walk forward; mark each successor reachable unless the entry
+//      is a terminator (Halt / Return).
+//   3. For every jump-bearing instruction, mark its target reachable.
+//   4. Iterate to fixpoint.
+//   5. Drop entries marked unreachable.
+//
+// We only consider opcodes catalogued in `opcode_catalog::effects`
+// as `is_branch` or terminator-shaped — extending the taxonomy adds
+// more terminators automatically.
+// =============================================================================
+
+module core.database.sqlite.native.optimizer.dead_code;
+
+mount core.*;
+mount base.{Text, Bool};
+mount collections.List;
+mount core.database.sqlite.native.opcode_catalog.metadata.{
+    OpcodeKind, opcode_name,
+};
+mount core.database.sqlite.native.optimizer.opstream.{
+    OpStream, OpEntry,
+};
+mount core.database.sqlite.native.optimizer.pass.{
+    OptimizationPass, PassResult, pass_result,
+};
+
+public type DeadCodeElim is { unit: Bool };
+public fn dead_code_elim() -> DeadCodeElim { DeadCodeElim { unit: true } }
+
+fn is_terminator(op: &OpcodeKind) -> Bool {
+    let nm = opcode_name(op);
+    nm == "Halt".clone() || nm == "Return".clone()
+        || nm == "HaltUserError".clone() || nm == "HaltIfNull".clone()
+}
+
+fn jump_target(e: &OpEntry) -> base.Maybe<Int> {
+    let nm = opcode_name(&e.op);
+    if nm == "Goto".clone() || nm == "Init".clone() || nm == "Once".clone()
+        || nm == "Jump".clone() {
+        return base.Some(e.p1);
+    }
+    if nm == "Eq".clone() || nm == "Ne".clone() || nm == "Lt".clone()
+        || nm == "Le".clone() || nm == "Gt".clone() || nm == "Ge".clone() {
+        return base.Some(e.p3);
+    }
+    if nm == "If".clone() || nm == "IfNot".clone() || nm == "IfNull".clone()
+        || nm == "NotNull".clone() || nm == "IfPos".clone()
+        || nm == "IfNeg".clone() || nm == "IfZero".clone() {
+        return base.Some(e.p2);
+    }
+    base.None
+}
+
+fn falls_through(op: &OpcodeKind) -> Bool {
+    let nm = opcode_name(op);
+    if is_terminator(op) { return false; }
+    // Unconditional Goto / Init / Jump never falls through.
+    if nm == "Goto".clone() || nm == "Jump".clone() { return false; }
+    // Init goes to its target then continues there; for our purposes
+    // it doesn't fall through to the next PC.
+    if nm == "Init".clone() { return false; }
+    true
+}
+
+implement OptimizationPass for DeadCodeElim {
+    fn name(&self) -> Text { "dead_code_elim".clone() }
+
+    fn apply(&self, stream: OpStream) -> PassResult {
+        let n = stream.len();
+        if n == 0 { return pass_result(stream, 0); }
+        let mut reachable: List<Bool> = List.new();
+        let mut i: Int = 0;
+        while i < n { reachable.push(false); i = i + 1; }
+        reachable[0] = true;
+        // Worklist of newly-reachable PCs.
+        let mut worklist: List<Int> = List.new();
+        worklist.push(0);
+        while worklist.len() > 0 {
+            let last = worklist.len() - 1;
+            let pc = worklist[last];
+            let mut new_wl: List<Int> = List.new();
+            let mut k: Int = 0;
+            while k < last { new_wl.push(worklist[k]); k = k + 1; }
+            worklist = new_wl;
+            let opt = stream.entry(pc);
+            let entry = match opt { base.Some(e) => e, base.None => { continue; } };
+            // Successor: pc+1 if falls through.
+            if falls_through(&entry.op) {
+                let next = pc + 1;
+                if next < n && !reachable[next] {
+                    reachable[next] = true;
+                    worklist.push(next);
+                }
+            }
+            // Jump target.
+            match jump_target(&entry) {
+                base.Some(t) => {
+                    if t >= 0 && t < n && !reachable[t] {
+                        reachable[t] = true;
+                        worklist.push(t);
+                    }
+                }
+                base.None => {}
+            }
+        }
+        // Drop unreachable entries from the back forward (so PCs
+        // we already inspected don't shift).
+        let mut stream = stream;
+        let mut edits: Int = 0;
+        let mut idx: Int = stream.len() - 1;
+        while idx >= 0 {
+            if !reachable[idx] {
+                stream.drop_at(idx);
+                edits = edits + 1;
+            }
+            idx = idx - 1;
+        }
+        pass_result(stream, edits)
+    }
+}

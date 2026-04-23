@@ -1,0 +1,52 @@
+// =============================================================================
+// optimizer/noop_elim.vr — drop Noop instructions, retarget jumps
+// =============================================================================
+// Spec: sqlite-native.md §11.5
+//
+// Noops accumulate from earlier passes (placeholder slots that the
+// codegen back-fills, jump targets that lost their need-to-jump,
+// dead-code-elimination scaffolding). Every removed Noop must
+// retarget every jump that pointed at a higher PC by -1.
+// =============================================================================
+
+module core.database.sqlite.native.optimizer.noop_elim;
+
+mount core.*;
+mount base.{Text, Bool};
+mount collections.List;
+mount core.database.sqlite.native.opcode_catalog.metadata.{
+    OpcodeKind, OpNoop, opcode_name,
+};
+mount core.database.sqlite.native.optimizer.opstream.{OpStream};
+mount core.database.sqlite.native.optimizer.pass.{
+    OptimizationPass, PassResult, pass_result,
+};
+
+public type NoopElim is { unit: Bool };
+public fn noop_elim() -> NoopElim { NoopElim { unit: true } }
+
+implement OptimizationPass for NoopElim {
+    fn name(&self) -> Text { "noop_elim".clone() }
+
+    fn apply(&self, stream: OpStream) -> PassResult {
+        let mut stream = stream;
+        let mut edits: Int = 0;
+        let mut i: Int = 0;
+        while i < stream.len() {
+            // Read entry — fall back to break if out-of-bounds (shouldn't happen)
+            let opt = stream.entry(i);
+            let entry = match opt {
+                base.Some(e) => e,
+                base.None    => { break; }
+            };
+            if opcode_name(&entry.op) == "Noop".clone() {
+                stream.drop_at(i);
+                edits = edits + 1;
+                // Don't advance i — the next entry has shifted into this slot
+            } else {
+                i = i + 1;
+            }
+        }
+        pass_result(stream, edits)
+    }
+}

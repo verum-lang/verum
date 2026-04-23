@@ -1,0 +1,178 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, subprograms, triggers, recursion
+// @timeout: 5000
+// @expected-exit: 0
+//
+// Sub-program registry + recursion guard:
+//   * register / lookup / drop
+//   * source-table cascade invalidation
+//   * register-window cap enforcement
+//   * RecursionGuard stack + recursion-allowed semantics
+//   * depth limit
+
+mount core.database.sqlite.native.subprograms.program.{
+    SubProgramId, SubProgram, SourceEvent,
+    SeTrigger, SeInsteadOfView, SeRecursiveCte, SeForeignKeyAction,
+    subprogram_new, source_event_name, id_value, id_equal,
+};
+mount core.database.sqlite.native.subprograms.registry.{
+    SubProgramRegistry, registry_new,
+    SubProgramError, SpDuplicateName, SpNotFound, SpRegisterWindowTooLarge,
+    MAX_REGISTER_WINDOW,
+};
+mount core.database.sqlite.native.subprograms.recursion.{
+    RecursionGuard, guard_new,
+    EnterDecision, RgAllow, RgDeny, RgDepthExceeded,
+    DEFAULT_MAX_DEPTH,
+};
+mount base.{Result, Ok, Err, Maybe, Some, None};
+
+fn make_trigger(name: Text, table: Text) -> SubProgram {
+    let mut sp = subprogram_new(0, 16, name, SeTrigger);
+    sp.attach_to_table(table);
+    sp
+}
+
+fn test_register_and_lookup() {
+    let mut reg = registry_new();
+    let id = reg.register(make_trigger("audit_users".clone(), "users".clone())).unwrap();
+    assert(id_value(&id) > 0);
+    match reg.lookup(&id) {
+        Some(_) => {}, None => panic("registered id should resolve"),
+    }
+    match reg.lookup_by_name(&"audit_users".clone()) {
+        Some(_) => {}, None => panic("name should resolve"),
+    }
+    assert_eq(reg.count(), 1);
+}
+
+fn test_duplicate_name_rejected() {
+    let mut reg = registry_new();
+    let _ = reg.register(make_trigger("audit".clone(), "users".clone()));
+    match reg.register(make_trigger("audit".clone(), "users".clone())) {
+        Err(SpDuplicateName) => {},
+        _ => panic("duplicate name should fail"),
+    }
+}
+
+fn test_register_window_cap() {
+    let mut reg = registry_new();
+    let mut sp = subprogram_new(0, MAX_REGISTER_WINDOW + 1, "huge".clone(), SeTrigger);
+    let _ = &mut sp;
+    match reg.register(sp) {
+        Err(SpRegisterWindowTooLarge) => {},
+        _ => panic("oversized window must be rejected"),
+    }
+}
+
+fn test_drop_cascade_for_table() {
+    let mut reg = registry_new();
+    let _ = reg.register(make_trigger("t1".clone(), "alpha".clone()));
+    let _ = reg.register(make_trigger("t2".clone(), "beta".clone()));
+    let _ = reg.register(make_trigger("t3".clone(), "alpha".clone()));
+    let dropped = reg.invalidate_for_table(&"alpha".clone());
+    assert_eq(dropped, 2);
+    assert_eq(reg.count(), 1);
+}
+
+fn test_drop_named() {
+    let mut reg = registry_new();
+    let _ = reg.register(make_trigger("only_one".clone(), "t".clone()));
+    assert(reg.drop_named(&"only_one".clone()));
+    assert(!reg.drop_named(&"only_one".clone()));
+    assert_eq(reg.count(), 0);
+}
+
+fn test_total_register_window() {
+    let mut reg = registry_new();
+    let _ = reg.register(subprogram_new(0, 10, "a".clone(), SeTrigger));
+    let _ = reg.register(subprogram_new(0, 20, "b".clone(), SeTrigger));
+    let _ = reg.register(subprogram_new(0, 5, "c".clone(), SeTrigger));
+    assert_eq(reg.total_register_window(), 35);
+}
+
+fn test_source_event_names() {
+    assert(source_event_name(&SeTrigger) == "trigger".clone());
+    assert(source_event_name(&SeInsteadOfView) == "instead_of_view".clone());
+    assert(source_event_name(&SeRecursiveCte) == "recursive_cte".clone());
+    assert(source_event_name(&SeForeignKeyAction) == "fk_action".clone());
+}
+
+// -----------------------------------------------------------------------------
+// recursion guard
+// -----------------------------------------------------------------------------
+
+fn test_guard_default_depth() {
+    let g = guard_new();
+    assert(g.depth() == 0);
+    assert(DEFAULT_MAX_DEPTH >= 100);
+}
+
+fn test_guard_blocks_recursion_when_off() {
+    let mut g = guard_new();
+    let id = SubProgramId { id: 1 };
+    match g.enter(SubProgramId { id: 1 }) { RgAllow => {}, _ => panic("first enter") };
+    match g.enter(SubProgramId { id: 1 }) {
+        RgDeny => {},
+        _      => panic("re-enter should be denied with recursion off"),
+    }
+    let _ = id;
+}
+
+fn test_guard_allows_recursion_when_on() {
+    let mut g = guard_new();
+    g.allow_recursion(true);
+    match g.enter(SubProgramId { id: 1 }) { RgAllow => {}, _ => panic("first") };
+    match g.enter(SubProgramId { id: 1 }) { RgAllow => {}, _ => panic("recursive ok") };
+    assert_eq(g.depth(), 2);
+}
+
+fn test_guard_depth_cap() {
+    let mut g = guard_new();
+    g.allow_recursion(true);
+    g.set_max_depth(3);
+    let _ = g.enter(SubProgramId { id: 1 });
+    let _ = g.enter(SubProgramId { id: 2 });
+    let _ = g.enter(SubProgramId { id: 3 });
+    match g.enter(SubProgramId { id: 4 }) {
+        RgDepthExceeded => {},
+        _               => panic("4th enter must be capped"),
+    }
+}
+
+fn test_guard_leave_pops() {
+    let mut g = guard_new();
+    let _ = g.enter(SubProgramId { id: 7 });
+    match g.leave() {
+        Some(id) => assert_eq(id_value(&id), 7),
+        None     => panic("leave should pop"),
+    }
+    assert_eq(g.depth(), 0);
+    match g.leave() { None => {}, _ => panic("empty stack leave → None") };
+}
+
+fn test_guard_reset() {
+    let mut g = guard_new();
+    let _ = g.enter(SubProgramId { id: 1 });
+    let _ = g.enter(SubProgramId { id: 2 });
+    g.reset();
+    assert_eq(g.depth(), 0);
+}
+
+fn main() {
+    test_register_and_lookup();
+    test_duplicate_name_rejected();
+    test_register_window_cap();
+    test_drop_cascade_for_table();
+    test_drop_named();
+    test_total_register_window();
+    test_source_event_names();
+    test_guard_default_depth();
+    test_guard_blocks_recursion_when_off();
+    test_guard_allows_recursion_when_on();
+    test_guard_depth_cap();
+    test_guard_leave_pops();
+    test_guard_reset();
+}

@@ -1,0 +1,97 @@
+// =============================================================================
+// optimizer/pass.vr — OptimizationPass protocol + Pipeline runner
+// =============================================================================
+// Spec: sqlite-native.md §11.5
+//
+// Each pre-emission pass is a protocol implementor, not a function
+// pointer. The protocol carries a name (for tracing / EXPLAIN), an
+// idempotency advertisement (so the pipeline can fix-point safely),
+// and the apply method itself.
+//
+// `Pipeline` runs every pass in order and re-runs the pipeline until
+// all passes report no change OR the iteration cap is reached. This
+// is enough for the SQLite-flavoured peephole + jump-thread + dead-
+// code passes; richer passes (DSE, GVN) can re-enter the pipeline
+// without changing the protocol.
+// =============================================================================
+
+module core.database.sqlite.native.optimizer.pass;
+
+mount core.*;
+mount base.{Text, Bool};
+mount collections.List;
+mount core.database.sqlite.native.optimizer.opstream.{OpStream};
+
+// -----------------------------------------------------------------------------
+// PassResult — what a single pass returns
+// -----------------------------------------------------------------------------
+
+public type PassResult is {
+    /// Optimised stream (may be unchanged).
+    stream: OpStream,
+    /// Number of edits the pass performed; pipeline stops when this
+    /// hits zero across every pass in a single iteration.
+    n_edits: Int,
+};
+
+public fn pass_result(stream: OpStream, n_edits: Int) -> PassResult {
+    PassResult { stream: stream, n_edits: n_edits }
+}
+
+// -----------------------------------------------------------------------------
+// OptimizationPass protocol
+// -----------------------------------------------------------------------------
+
+public type OptimizationPass is protocol {
+    fn name(&self) -> Text;
+    /// Pure: same input → same output.
+    fn is_idempotent(&self) -> Bool { true }
+    fn apply(&self, stream: OpStream) -> PassResult;
+};
+
+// -----------------------------------------------------------------------------
+// Pipeline runner
+// -----------------------------------------------------------------------------
+
+public const DEFAULT_MAX_ITERATIONS: Int = 8;
+
+public type PipelineReport is {
+    passes_run: Int,
+    iterations: Int,
+    total_edits: Int,
+};
+
+public fn pipeline_report_default() -> PipelineReport {
+    PipelineReport { passes_run: 0, iterations: 0, total_edits: 0 }
+}
+
+/// Run `passes` over `input` until a full iteration produces no
+/// edits (or `max_iterations` is reached). Returns the optimised
+/// stream and an aggregated report.
+public fn run_pipeline(
+    passes: List<Heap<dyn OptimizationPass>>,
+    input: OpStream,
+    max_iterations: Int,
+) -> (OpStream, PipelineReport) {
+    let mut stream = input;
+    let mut report = pipeline_report_default();
+    let mut iter: Int = 0;
+    let cap: Int = if max_iterations <= 0 { DEFAULT_MAX_ITERATIONS } else { max_iterations };
+    while iter < cap {
+        iter = iter + 1;
+        let mut iteration_edits: Int = 0;
+        let mut p: Int = 0;
+        while p < passes.len() {
+            let pass_ref = &passes[p];
+            let result = (&**pass_ref).apply(stream);
+            stream = result.stream;
+            iteration_edits = iteration_edits + result.n_edits;
+            report.passes_run = report.passes_run + 1;
+            p = p + 1;
+        }
+        report.total_edits = report.total_edits + iteration_edits;
+        if iteration_edits == 0 { break; }
+    }
+    report.iterations = iter;
+    (stream, report)
+}

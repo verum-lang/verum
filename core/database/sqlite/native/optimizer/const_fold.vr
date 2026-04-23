@@ -1,0 +1,157 @@
+// =============================================================================
+// optimizer/const_fold.vr — fold integer literal arithmetic
+// =============================================================================
+// Spec: sqlite-native.md §11.5
+//
+// Pattern (where dst = ra OP rb is `Add` / `Subtract` / `Multiply` /
+// `Divide` / `Remainder`):
+//
+//   N: Integer  c1, ra
+//   N+1: Integer c2, rb
+//   N+2: Add ra, rb, dst
+//
+// →
+//
+//   N:   Noop
+//   N+1: Noop
+//   N+2: Integer (c1 op c2), dst
+//
+// (The Noop pass cleans up the placeholders.)
+//
+// We restrict to Integer literals + integer operations to keep
+// SQLite's well-defined integer-overflow semantics. Division/Remainder
+// fold only when the divisor is non-zero.
+// =============================================================================
+
+module core.database.sqlite.native.optimizer.const_fold;
+
+mount core.*;
+mount base.{Text, Bool};
+mount collections.List;
+mount core.database.sqlite.native.opcode_catalog.metadata.{
+    OpcodeKind, OpInteger, OpNoop, opcode_name,
+};
+mount core.database.sqlite.native.optimizer.opstream.{
+    OpStream, OpEntry, op_entry,
+};
+mount core.database.sqlite.native.optimizer.pass.{
+    OptimizationPass, PassResult, pass_result,
+};
+
+public type ConstFold is { unit: Bool };
+public fn const_fold() -> ConstFold { ConstFold { unit: true } }
+
+fn is_integer_load(e: &OpEntry) -> Bool {
+    opcode_name(&e.op) == "Integer".clone()
+}
+
+fn fold_op(name: &Text, a: Int, b: Int) -> base.Maybe<Int> {
+    if name == &"Add".clone()       { return base.Some(a + b); }
+    if name == &"Subtract".clone()  { return base.Some(a - b); }
+    if name == &"Multiply".clone()  { return base.Some(a * b); }
+    if name == &"Divide".clone()    {
+        if b == 0 { return base.None; }
+        return base.Some(a / b);
+    }
+    if name == &"Remainder".clone() {
+        if b == 0 { return base.None; }
+        return base.Some(a % b);
+    }
+    if name == &"BitAnd".clone()    { return base.Some(a & b); }
+    if name == &"BitOr".clone()     { return base.Some(a | b); }
+    if name == &"ShiftLeft".clone() { return base.Some(a << b); }
+    if name == &"ShiftRight".clone(){ return base.Some(a >> b); }
+    base.None
+}
+
+implement OptimizationPass for ConstFold {
+    fn name(&self) -> Text { "const_fold".clone() }
+
+    fn apply(&self, stream: OpStream) -> PassResult {
+        let mut stream = stream;
+        let mut edits: Int = 0;
+        // Tag-based scan: for every arithmetic instruction at PC i,
+        // look up the most recent Integer load into ra and rb.
+        let mut i: Int = 0;
+        while i < stream.len() {
+            let opt = stream.entry(i);
+            let entry = match opt { base.Some(e) => e, base.None => { break; } };
+            let nm = opcode_name(&entry.op);
+            // Only consider opcodes whose p1, p2 are register operands
+            // and p3 is the destination — same shape as Add/Sub/Mul/...
+            let is_arith = nm == "Add".clone() || nm == "Subtract".clone()
+                || nm == "Multiply".clone() || nm == "Divide".clone()
+                || nm == "Remainder".clone() || nm == "BitAnd".clone()
+                || nm == "BitOr".clone() || nm == "ShiftLeft".clone()
+                || nm == "ShiftRight".clone();
+            if !is_arith { i = i + 1; continue; }
+            let ra = entry.p1;
+            let rb = entry.p2;
+            let dst = entry.p3;
+            // Walk back to find the most recent Integer→ra and Integer→rb.
+            let const_a = find_recent_integer_load(&stream, i, ra);
+            let const_b = find_recent_integer_load(&stream, i, rb);
+            match const_a {
+                base.Some((idx_a, val_a)) => match const_b {
+                    base.Some((idx_b, val_b)) => match fold_op(&nm, val_a, val_b) {
+                        base.Some(folded) => {
+                            // Replace this entry with `Integer folded → dst`.
+                            stream.replace_at(i, op_entry(OpInteger, folded, dst, 0, entry.original_pc));
+                            // Replace the two Integer loads with Noops.
+                            stream.replace_at(idx_a, op_entry(OpNoop, 0, 0, 0, idx_a));
+                            stream.replace_at(idx_b, op_entry(OpNoop, 0, 0, 0, idx_b));
+                            edits = edits + 1;
+                        }
+                        base.None => {}
+                    },
+                    base.None => {}
+                },
+                base.None => {}
+            }
+            i = i + 1;
+        }
+        pass_result(stream, edits)
+    }
+}
+
+fn find_recent_integer_load(stream: &OpStream, before: Int, reg: Int) -> base.Maybe<(Int, Int)> {
+    // Integer opcode shape is `Integer value, dst` → p1=value, p2=dst (per opcode_catalog).
+    let mut k: Int = before - 1;
+    while k >= 0 {
+        let opt = stream.entry(k);
+        let entry = match opt { base.Some(e) => e, base.None => { return base.None; } };
+        if is_integer_load(&entry) && entry.p2 == reg {
+            return base.Some((k, entry.p1));
+        }
+        // If a later instruction overwrites `reg` with non-Integer,
+        // stop (the literal is no longer the live value).
+        let nm = opcode_name(&entry.op);
+        let writes_reg = match nm.as_bytes()[0] as Int {
+            _ => writes_register(&entry, reg),
+        };
+        if writes_reg && !is_integer_load(&entry) {
+            return base.None;
+        }
+        k = k - 1;
+    }
+    base.None
+}
+
+fn writes_register(e: &OpEntry, reg: Int) -> Bool {
+    let nm = opcode_name(&e.op);
+    if nm == "Move".clone() || nm == "Copy".clone() || nm == "SCopy".clone() {
+        return e.p2 == reg;
+    }
+    if nm == "Integer".clone() || nm == "Int64".clone() || nm == "Real".clone()
+        || nm == "String8".clone() || nm == "Blob".clone() || nm == "Variable".clone() {
+        return e.p2 == reg;
+    }
+    if nm == "Add".clone() || nm == "Subtract".clone() || nm == "Multiply".clone()
+        || nm == "Divide".clone() || nm == "Remainder".clone()
+        || nm == "BitAnd".clone() || nm == "BitOr".clone()
+        || nm == "ShiftLeft".clone() || nm == "ShiftRight".clone()
+        || nm == "Concat".clone() {
+        return e.p3 == reg;
+    }
+    false
+}

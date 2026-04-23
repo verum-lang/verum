@@ -21,3 +21,5 @@ public module dst;
 public module differential;
 public module fuzz;
 public module coverage;
+// Appendix E canonical file-format test vectors.
+public module test_vectors;

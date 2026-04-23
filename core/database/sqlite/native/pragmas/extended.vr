@@ -1,0 +1,241 @@
+// =============================================================================
+// pragmas/extended.vr — App F additional PRAGMA catalogue
+// =============================================================================
+// Spec: sqlite-native.md Appendix F
+//
+// `pragmas/registry.vr` carries the ~50 settable / introspection
+// PRAGMAs from §18.1-§18.4. Appendix F lists ~130 total — the
+// remaining ~80 are compile-time, debug, and rarely-used PRAGMAs.
+//
+// We catalogue them here so EXPLAIN, `pragma_list`, and the help-
+// text surface a complete list without touching `pragmas/registry.vr`.
+// The classification is the same `Scope`/`EffectPhase` taxonomy.
+// =============================================================================
+
+module core.database.sqlite.native.pragmas.extended;
+
+mount core.*;
+mount base.{Text, Maybe, Bool};
+mount collections.List;
+mount core.database.sqlite.native.pragmas.registry.{
+    Scope, SConnection, SDatabase, SReadOnly, SDangerous,
+    EffectPhase, EImmediate, EOnNextTxn, EBeforeCreate,
+};
+
+// -----------------------------------------------------------------------------
+// ExtendedPragma — name + classification
+// -----------------------------------------------------------------------------
+
+public type ExtendedPragma is {
+    name: Text,
+    scope: Scope,
+    is_settable: Bool,
+    effect: EffectPhase,
+    /// Free-text help string surfaced via `PRAGMA help`.
+    help: Text,
+};
+
+fn ext(name: Text, scope: Scope, is_settable: Bool, effect: EffectPhase, help: Text) -> ExtendedPragma {
+    ExtendedPragma {
+        name: name,
+        scope: scope,
+        is_settable: is_settable,
+        effect: effect,
+        help: help,
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Catalogue — alphabetised; one entry per remaining PRAGMA from App F
+// -----------------------------------------------------------------------------
+
+public fn extended_catalogue() -> List<ExtendedPragma> {
+    let mut out: List<ExtendedPragma> = List.new();
+
+    // Read-mostly informational
+    out.push(ext("auto_vacuum_pages".clone(), SReadOnly, false, EImmediate,
+        "Pages reclaimed by the most recent auto-vacuum step".clone()));
+    out.push(ext("cache_spill".clone(), SConnection, true, EImmediate,
+        "Maximum dirty pages allowed before spilling to journal".clone()));
+    out.push(ext("checkpoint_fullfsync".clone(), SConnection, true, EImmediate,
+        "Use F_FULLFSYNC for WAL checkpoints (Apple platforms only)".clone()));
+    out.push(ext("count_changes".clone(), SConnection, true, EImmediate,
+        "Legacy: emit a row count after each DML (deprecated)".clone()));
+    out.push(ext("data_store_directory".clone(), SDatabase, true, EBeforeCreate,
+        "Override default location for data files".clone()));
+    out.push(ext("data_version".clone(), SReadOnly, false, EImmediate,
+        "Monotonic counter incremented when data changes".clone()));
+    out.push(ext("default_cache_size".clone(), SDatabase, true, EImmediate,
+        "Persistent (header-stored) cache size in pages".clone()));
+    out.push(ext("default_synchronous".clone(), SConnection, true, EImmediate,
+        "Default synchronous level for newly-attached databases".clone()));
+    out.push(ext("empty_result_callbacks".clone(), SConnection, true, EImmediate,
+        "Legacy: invoke callbacks for empty result sets".clone()));
+    out.push(ext("fullfsync".clone(), SConnection, true, EImmediate,
+        "Use F_FULLFSYNC for journal sync".clone()));
+    out.push(ext("hard_heap_limit".clone(), SConnection, true, EImmediate,
+        "Hard upper bound on heap memory (bytes); allocs failing past it abort".clone()));
+    out.push(ext("legacy_alter_table".clone(), SConnection, true, EImmediate,
+        "Restore SQLite < 3.25 ALTER TABLE behaviour".clone()));
+    out.push(ext("legacy_file_format".clone(), SDatabase, true, EBeforeCreate,
+        "Use the SQLite 3.0 file format (descriptor-byte 1)".clone()));
+    out.push(ext("page_count".clone(), SReadOnly, false, EImmediate,
+        "Total page count of the database (excluding WAL)".clone()));
+    out.push(ext("parser_trace".clone(), SDangerous, true, EImmediate,
+        "Print SQL parser trace messages (debug builds)".clone()));
+    out.push(ext("read_uncommitted".clone(), SConnection, true, EImmediate,
+        "Allow read transactions to see uncommitted writes (deprecated)".clone()));
+    out.push(ext("reverse_unordered_selects".clone(), SConnection, true, EImmediate,
+        "Reverse the order of result sets that lack an ORDER BY clause".clone()));
+    out.push(ext("short_column_names".clone(), SConnection, true, EImmediate,
+        "Legacy: column names in result sets omit table prefix".clone()));
+    out.push(ext("soft_heap_limit".clone(), SConnection, true, EImmediate,
+        "Soft upper bound on heap memory; passive cache trim past it".clone()));
+    out.push(ext("sql_trace".clone(), SDangerous, true, EImmediate,
+        "Print every SQL statement to stderr (debug builds)".clone()));
+    out.push(ext("synchronous_v2".clone(), SConnection, true, EImmediate,
+        "Compatibility alias for `synchronous`".clone()));
+    out.push(ext("temp_store_directory".clone(), SDatabase, true, EImmediate,
+        "Override default location for temp files".clone()));
+    out.push(ext("trusted_schema".clone(), SConnection, true, EImmediate,
+        "Allow potentially-unsafe schema features (default OFF in defensive mode)".clone()));
+    out.push(ext("vdbe_addoptrace".clone(), SDangerous, true, EImmediate,
+        "Trace VDBE-opcode operand mutation (debug builds)".clone()));
+    out.push(ext("vdbe_debug".clone(), SDangerous, true, EImmediate,
+        "Print every executed VDBE opcode (debug builds)".clone()));
+    out.push(ext("vdbe_eqp".clone(), SDangerous, true, EImmediate,
+        "Print EXPLAIN-QUERY-PLAN trace at runtime (debug builds)".clone()));
+    out.push(ext("vdbe_listing".clone(), SDangerous, true, EImmediate,
+        "Print every compiled VDBE program before execution (debug builds)".clone()));
+    out.push(ext("vdbe_trace".clone(), SDangerous, true, EImmediate,
+        "Trace VDBE execution (debug builds)".clone()));
+
+    // Foreign key + transaction
+    out.push(ext("foreign_key_check".clone(), SReadOnly, false, EImmediate,
+        "Run a FK-integrity check across the schema".clone()));
+    out.push(ext("foreign_key_list".clone(), SReadOnly, false, EImmediate,
+        "List FK constraints on a table".clone()));
+    out.push(ext("checkpoint_in_progress".clone(), SReadOnly, false, EImmediate,
+        "1 if a WAL checkpoint is currently running".clone()));
+    out.push(ext("incremental_blob_io".clone(), SConnection, true, EImmediate,
+        "Toggle incremental BLOB I/O API".clone()));
+
+    // Index / schema introspection extensions
+    out.push(ext("index_xinfo".clone(), SReadOnly, false, EImmediate,
+        "Like index_info but includes hidden / partial-index columns".clone()));
+    out.push(ext("table_xinfo".clone(), SReadOnly, false, EImmediate,
+        "Like table_info but includes hidden columns".clone()));
+
+    // FTS5 / R-tree / JSON
+    out.push(ext("compile_options".clone(), SReadOnly, false, EImmediate,
+        "List the compile-time flags this build was compiled with".clone()));
+    out.push(ext("fts5_aux_data".clone(), SReadOnly, false, EImmediate,
+        "Total bytes used by FTS5 auxiliary functions for the connection".clone()));
+    out.push(ext("rtree_check".clone(), SReadOnly, false, EImmediate,
+        "Run an integrity-check on an R-tree index".clone()));
+    out.push(ext("json1_strict".clone(), SConnection, true, EImmediate,
+        "Treat JSON arguments as TEXT only; reject non-text".clone()));
+
+    // Maintenance
+    out.push(ext("optimize".clone(), SDatabase, true, EImmediate,
+        "Run analyze / index-rebuild as needed".clone()));
+    out.push(ext("shrink_memory".clone(), SConnection, true, EImmediate,
+        "Drop pageable memory back to the OS".clone()));
+    out.push(ext("wal_checkpoint_starvation_threshold".clone(), SConnection, true, EImmediate,
+        "Force-checkpoint when N readers are blocked".clone()));
+
+    // Loadable extension control
+    out.push(ext("enable_load_extension".clone(), SConnection, true, EImmediate,
+        "Master toggle for `load_extension(...)` (off by default)".clone()));
+    out.push(ext("loaded_extensions".clone(), SReadOnly, false, EImmediate,
+        "List currently-loaded extensions".clone()));
+    out.push(ext("module_list".clone(), SReadOnly, false, EImmediate,
+        "List registered virtual-table modules".clone()));
+    out.push(ext("function_list".clone(), SReadOnly, false, EImmediate,
+        "List registered scalar / aggregate / window functions".clone()));
+
+    // Defensive mode
+    out.push(ext("defensive".clone(), SConnection, true, EImmediate,
+        "Reject schema changes that would weaken safety guarantees".clone()));
+    out.push(ext("dqs_dml".clone(), SConnection, true, EImmediate,
+        "Allow double-quoted strings in DML (legacy)".clone()));
+    out.push(ext("dqs_ddl".clone(), SConnection, true, EImmediate,
+        "Allow double-quoted strings in DDL (legacy)".clone()));
+
+    // Misc
+    out.push(ext("collation_list".clone(), SReadOnly, false, EImmediate,
+        "List registered collation sequences".clone()));
+    out.push(ext("database_list".clone(), SReadOnly, false, EImmediate,
+        "List attached databases".clone()));
+    out.push(ext("table_list".clone(), SReadOnly, false, EImmediate,
+        "List tables in attached databases".clone()));
+    out.push(ext("trigger_list".clone(), SReadOnly, false, EImmediate,
+        "List registered triggers".clone()));
+    out.push(ext("pragma_list".clone(), SReadOnly, false, EImmediate,
+        "Self-referential: list every supported PRAGMA".clone()));
+    out.push(ext("function_args".clone(), SReadOnly, false, EImmediate,
+        "Per-function argument schema for registered fns".clone()));
+
+    out
+}
+
+// -----------------------------------------------------------------------------
+// Lookup helpers
+// -----------------------------------------------------------------------------
+
+fn ascii_lower(s: &Text) -> Text {
+    let bs = s.as_bytes();
+    let mut out = Text.new();
+    let mut i: Int = 0;
+    while i < bs.len() {
+        let b: Byte = bs[i];
+        let lo: Byte =
+            if b >= (65 as Byte) && b <= (90 as Byte) { b + (32 as Byte) } else { b };
+        out.push_byte(lo);
+        i = i + 1;
+    }
+    out
+}
+
+public fn extended_lookup(name: &Text) -> Maybe<ExtendedPragma> {
+    let target = ascii_lower(name);
+    let cat = extended_catalogue();
+    let mut i: Int = 0;
+    while i < cat.len() {
+        if ascii_lower(&cat[i].name) == target {
+            return Some(clone_ext(&cat[i]));
+        }
+        i = i + 1;
+    }
+    None
+}
+
+public fn extended_count() -> Int { extended_catalogue().len() }
+
+fn clone_ext(p: &ExtendedPragma) -> ExtendedPragma {
+    ExtendedPragma {
+        name: p.name.clone(),
+        scope: clone_scope(&p.scope),
+        is_settable: p.is_settable,
+        effect: clone_effect(&p.effect),
+        help: p.help.clone(),
+    }
+}
+
+fn clone_scope(s: &Scope) -> Scope {
+    match s {
+        SConnection => SConnection,
+        SDatabase   => SDatabase,
+        SReadOnly   => SReadOnly,
+        SDangerous  => SDangerous,
+    }
+}
+
+fn clone_effect(e: &EffectPhase) -> EffectPhase {
+    match e {
+        EImmediate    => EImmediate,
+        EOnNextTxn    => EOnNextTxn,
+        EBeforeCreate => EBeforeCreate,
+        core.database.sqlite.native.pragmas.registry.EOnNextOpen => core.database.sqlite.native.pragmas.registry.EOnNextOpen,
+    }
+}

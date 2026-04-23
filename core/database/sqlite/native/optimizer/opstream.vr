@@ -1,0 +1,164 @@
+// =============================================================================
+// optimizer/opstream.vr — abstract opcode stream + edit primitives
+// =============================================================================
+// Spec: sqlite-native.md §11.5
+//
+// Optimisation passes operate over a `OpStream`: an opaque buffer of
+// `OpEntry` records. Each entry carries:
+//
+//   * `op`        — opcode kind (taxonomy from `opcode_catalog`)
+//   * `p1..p3`    — three small operand slots (matching the catalogue's
+//                   p1/p2/p3 shape)
+//   * `pc`        — original PC index (so jump targets remain valid
+//                   when entries are dropped or moved)
+//
+// The optimiser doesn't touch the actual `l4_vdbe::VdbeProgram` —
+// the gated interpreter file owns it. We define a minimal model that's
+// enough to run the passes; the codegen ingests the optimised stream.
+// =============================================================================
+
+module core.database.sqlite.native.optimizer.opstream;
+
+mount core.*;
+mount base.{Bool, Maybe};
+mount collections.List;
+mount core.database.sqlite.native.opcode_catalog.metadata.{
+    OpcodeKind, opcode_name,
+};
+
+// -----------------------------------------------------------------------------
+// OpEntry
+// -----------------------------------------------------------------------------
+
+public type OpEntry is {
+    op: OpcodeKind,
+    p1: Int,
+    p2: Int,
+    p3: Int,
+    /// Source PC index — preserved across pass-driven rewrites so
+    /// jump targets stay correct.
+    original_pc: Int,
+};
+
+public fn op_entry(op: OpcodeKind, p1: Int, p2: Int, p3: Int, pc: Int) -> OpEntry {
+    OpEntry { op: op, p1: p1, p2: p2, p3: p3, original_pc: pc }
+}
+
+// -----------------------------------------------------------------------------
+// OpStream
+// -----------------------------------------------------------------------------
+
+public type OpStream is {
+    entries: List<OpEntry>,
+};
+
+public fn opstream_new() -> OpStream { OpStream { entries: List.new() } }
+
+public fn opstream_from(entries: List<OpEntry>) -> OpStream {
+    OpStream { entries: entries }
+}
+
+implement OpStream {
+    public fn len(&self) -> Int { self.entries.len() }
+
+    public fn entry(&self, idx: Int) -> Maybe<OpEntry> {
+        if idx < 0 || idx >= self.entries.len() { return None; }
+        Some(clone_entry(&self.entries[idx]))
+    }
+
+    public fn push(&mut self, e: OpEntry) {
+        self.entries.push(e);
+    }
+
+    /// Drop the entry at `idx` and renumber every jump target that
+    /// pointed to a higher PC by -1. Other entries' `original_pc`
+    /// is preserved so the next pass sees a stable history.
+    public fn drop_at(&mut self, idx: Int) {
+        if idx < 0 || idx >= self.entries.len() { return; }
+        let mut new_entries: List<OpEntry> = List.new();
+        let mut i: Int = 0;
+        while i < self.entries.len() {
+            if i == idx { i = i + 1; continue; }
+            new_entries.push(clone_entry(&self.entries[i]));
+            i = i + 1;
+        }
+        self.entries = new_entries;
+        // Retarget jumps that pointed at PC > idx
+        retarget_jumps(self, idx);
+    }
+
+    /// Replace entry at `idx` with `replacement`, preserving the
+    /// original_pc so jumps remain stable.
+    public fn replace_at(&mut self, idx: Int, replacement: OpEntry) {
+        if idx < 0 || idx >= self.entries.len() { return; }
+        let original_pc = self.entries[idx].original_pc;
+        let mut new_replacement = clone_entry(&replacement);
+        new_replacement.original_pc = original_pc;
+        self.entries[idx] = new_replacement;
+    }
+
+    /// Convert the stream back to the canonical raw entry list.
+    public fn to_entries(self) -> List<OpEntry> { self.entries }
+
+    /// Count entries of a particular opcode kind — used by tests.
+    public fn count_op(&self, op: &OpcodeKind) -> Int {
+        let mut n: Int = 0;
+        let mut i: Int = 0;
+        while i < self.entries.len() {
+            if opcode_name(&self.entries[i].op) == opcode_name(op) {
+                n = n + 1;
+            }
+            i = i + 1;
+        }
+        n
+    }
+}
+
+fn clone_entry(e: &OpEntry) -> OpEntry {
+    OpEntry {
+        op: clone_opcode(&e.op),
+        p1: e.p1,
+        p2: e.p2,
+        p3: e.p3,
+        original_pc: e.original_pc,
+    }
+}
+
+fn clone_opcode(o: &OpcodeKind) -> OpcodeKind {
+    // We use a name comparison + match-style copy via a tiny dispatch.
+    // The metadata module provides the canonical name.
+    let name = opcode_name(o);
+    match core.database.sqlite.native.opcode_catalog.metadata.opcode_from_name(&name) {
+        Some(v) => v,
+        None    => clone_opcode_fallback(o),
+    }
+}
+
+fn clone_opcode_fallback(o: &OpcodeKind) -> OpcodeKind {
+    // Defensive — opcode_from_name should always succeed.
+    let _ = o;
+    core.database.sqlite.native.opcode_catalog.metadata.OpNoop
+}
+
+fn retarget_jumps(stream: &mut OpStream, dropped_idx: Int) {
+    let mut i: Int = 0;
+    while i < stream.entries.len() {
+        let nm = opcode_name(&stream.entries[i].op);
+        // For Goto / Init / Once — p1 is the jump target.
+        if nm == "Goto".clone() || nm == "Init".clone() || nm == "Once".clone()
+            || nm == "Jump".clone() {
+            if stream.entries[i].p1 > dropped_idx { stream.entries[i].p1 = stream.entries[i].p1 - 1; }
+        }
+        // For comparison / If* opcodes — p3 (or p2) is the target.
+        if nm == "Eq".clone() || nm == "Ne".clone() || nm == "Lt".clone()
+            || nm == "Le".clone() || nm == "Gt".clone() || nm == "Ge".clone() {
+            if stream.entries[i].p3 > dropped_idx { stream.entries[i].p3 = stream.entries[i].p3 - 1; }
+        }
+        if nm == "If".clone() || nm == "IfNot".clone() || nm == "IfNull".clone()
+            || nm == "NotNull".clone() || nm == "IfPos".clone()
+            || nm == "IfNeg".clone() || nm == "IfZero".clone() {
+            if stream.entries[i].p2 > dropped_idx { stream.entries[i].p2 = stream.entries[i].p2 - 1; }
+        }
+        i = i + 1;
+    }
+}

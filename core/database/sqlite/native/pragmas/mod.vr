@@ -21,3 +21,5 @@ module core.database.sqlite.native.pragmas;
 public module registry;
 public module config;
 public module dispatch;
+// App F additional ~50 PRAGMAs (compile-time / debug / legacy / FTS5 / R-tree).
+public module extended;

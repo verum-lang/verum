@@ -1,0 +1,133 @@
+// =============================================================================
+// optimizer/move_chain.vr — collapse SCopy/Move chains
+// =============================================================================
+// Spec: sqlite-native.md §11.5
+//
+// Pattern:
+//
+//   SCopy r1 → r2     // and r2 has no other use
+//   SCopy r2 → r3
+//
+// →
+//
+//   SCopy r1 → r3     (the first SCopy turns into Noop if r2 is dead)
+//
+// We only fold when the intermediate register has no consumer between
+// the two SCopy instructions.
+// =============================================================================
+
+module core.database.sqlite.native.optimizer.move_chain;
+
+mount core.*;
+mount base.{Text, Bool};
+mount collections.List;
+mount core.database.sqlite.native.opcode_catalog.metadata.{
+    OpcodeKind, OpNoop, opcode_name,
+};
+mount core.database.sqlite.native.optimizer.opstream.{
+    OpStream, OpEntry, op_entry,
+};
+mount core.database.sqlite.native.optimizer.pass.{
+    OptimizationPass, PassResult, pass_result,
+};
+
+public type MoveChain is { unit: Bool };
+public fn move_chain() -> MoveChain { MoveChain { unit: true } }
+
+fn is_scopy(e: &OpEntry) -> Bool {
+    opcode_name(&e.op) == "SCopy".clone()
+}
+
+fn is_move(e: &OpEntry) -> Bool {
+    let nm = opcode_name(&e.op);
+    nm == "SCopy".clone() || nm == "Move".clone() || nm == "Copy".clone()
+}
+
+implement OptimizationPass for MoveChain {
+    fn name(&self) -> Text { "move_chain".clone() }
+
+    fn apply(&self, stream: OpStream) -> PassResult {
+        let mut stream = stream;
+        let mut edits: Int = 0;
+        let mut i: Int = 0;
+        while i + 1 < stream.len() {
+            let opt_a = stream.entry(i);
+            let opt_b = stream.entry(i + 1);
+            let a = match opt_a { base.Some(x) => x, base.None => { break; } };
+            let b = match opt_b { base.Some(x) => x, base.None => { break; } };
+            // Only collapse pure SCopy chains (Move/Copy have side
+            // effects on counts via p3=count).
+            if is_scopy(&a) && is_scopy(&b) && a.p2 == b.p1 {
+                // Make sure r2 (=a.p2) is not read by any later
+                // instruction in the program — minimum-effort
+                // conservative check: between i+2 and the end, any
+                // read of register a.p2 disqualifies the fold.
+                if !register_used_after(&stream, i + 2, a.p2) {
+                    // Replace b with `SCopy a.p1 → b.p2`, replace a with Noop.
+                    let mut new_b = b;
+                    new_b.p1 = a.p1;
+                    stream.replace_at(i + 1, new_b);
+                    stream.replace_at(i, op_entry(OpNoop, 0, 0, 0, a.original_pc));
+                    edits = edits + 1;
+                }
+            }
+            i = i + 1;
+        }
+        pass_result(stream, edits)
+    }
+}
+
+fn register_used_after(stream: &OpStream, from: Int, reg: Int) -> Bool {
+    let mut k: Int = from;
+    while k < stream.len() {
+        let opt = stream.entry(k);
+        let entry = match opt { base.Some(e) => e, base.None => { return false; } };
+        if reads_register(&entry, reg) { return true; }
+        // Once the register is overwritten, the prior value is dead.
+        if overwrites_register(&entry, reg) { return false; }
+        k = k + 1;
+    }
+    false
+}
+
+fn reads_register(e: &OpEntry, reg: Int) -> Bool {
+    let nm = opcode_name(&e.op);
+    // p1 is the source for SCopy / Move / Copy / unary ops.
+    if nm == "SCopy".clone() || nm == "Move".clone() || nm == "Copy".clone() {
+        return e.p1 == reg;
+    }
+    // Arithmetic / comparison reads p1 + p2.
+    if nm == "Add".clone() || nm == "Subtract".clone() || nm == "Multiply".clone()
+        || nm == "Divide".clone() || nm == "Remainder".clone()
+        || nm == "BitAnd".clone() || nm == "BitOr".clone()
+        || nm == "ShiftLeft".clone() || nm == "ShiftRight".clone()
+        || nm == "Concat".clone() || nm == "Eq".clone() || nm == "Ne".clone()
+        || nm == "Lt".clone() || nm == "Le".clone() || nm == "Gt".clone() || nm == "Ge".clone() {
+        return e.p1 == reg || e.p2 == reg;
+    }
+    // Conditional jumps read their probe register (p1).
+    if nm == "If".clone() || nm == "IfNot".clone() || nm == "IfNull".clone()
+        || nm == "NotNull".clone() || nm == "IfPos".clone()
+        || nm == "IfNeg".clone() || nm == "IfZero".clone()
+        || nm == "Result".clone() || nm == "Insert".clone() {
+        return e.p1 == reg || e.p2 == reg;
+    }
+    false
+}
+
+fn overwrites_register(e: &OpEntry, reg: Int) -> Bool {
+    let nm = opcode_name(&e.op);
+    if nm == "Integer".clone() || nm == "Int64".clone() || nm == "Real".clone()
+        || nm == "String8".clone() || nm == "Blob".clone() || nm == "Variable".clone()
+        || nm == "Move".clone() || nm == "Copy".clone() || nm == "SCopy".clone() {
+        return e.p2 == reg;
+    }
+    if nm == "Add".clone() || nm == "Subtract".clone() || nm == "Multiply".clone()
+        || nm == "Divide".clone() || nm == "Remainder".clone()
+        || nm == "BitAnd".clone() || nm == "BitOr".clone()
+        || nm == "ShiftLeft".clone() || nm == "ShiftRight".clone()
+        || nm == "Concat".clone() {
+        return e.p3 == reg;
+    }
+    false
+}

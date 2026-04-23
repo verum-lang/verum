@@ -1,0 +1,180 @@
+// =============================================================================
+// subprograms/registry.vr — per-Connection sub-program table
+// =============================================================================
+// Spec: sqlite-native.md §11.4
+//
+// Allocates `SubProgramId`s, looks them up by id or by source name,
+// and supports cascade invalidation when a table is dropped.
+// =============================================================================
+
+module core.database.sqlite.native.subprograms.registry;
+
+mount core.*;
+mount base.{Text, Maybe, Result, Ok, Err, Bool};
+mount collections.List;
+mount core.database.sqlite.native.subprograms.program.{
+    SubProgram, SubProgramId, source_event_name,
+};
+
+// -----------------------------------------------------------------------------
+// Errors
+// -----------------------------------------------------------------------------
+
+public type SubProgramError is
+      SpDuplicateName
+    | SpNotFound
+    | SpRegisterWindowTooLarge;
+
+// -----------------------------------------------------------------------------
+// Configuration
+// -----------------------------------------------------------------------------
+//
+// SQLite caps the per-program register window at SQLITE_MAX_COLUMN
+// (default 2000). loom mirrors that ceiling.
+// =============================================================================
+
+public const MAX_REGISTER_WINDOW: Int = 2000;
+
+// -----------------------------------------------------------------------------
+// Registry
+// -----------------------------------------------------------------------------
+
+public type SubProgramRegistry is {
+    programs: List<SubProgram>,
+    next_id: Int,
+};
+
+public fn registry_new() -> SubProgramRegistry {
+    SubProgramRegistry {
+        programs: List.new(),
+        next_id: 1,
+    }
+}
+
+implement SubProgramRegistry {
+    /// Register a fresh sub-program. Allocates a new id; the caller's
+    /// `subprogram.id` field is overwritten. Returns the assigned id.
+    public fn register(&mut self, mut sp: SubProgram) -> Result<SubProgramId, SubProgramError> {
+        if sp.register_window > MAX_REGISTER_WINDOW {
+            return Err(SpRegisterWindowTooLarge);
+        }
+        // Reject if name is already registered for the same event.
+        let mut i: Int = 0;
+        while i < self.programs.len() {
+            if self.programs[i].source_name == sp.source_name {
+                return Err(SpDuplicateName);
+            }
+            i = i + 1;
+        }
+        let id = self.next_id;
+        self.next_id = id + 1;
+        sp.id = SubProgramId { id: id };
+        self.programs.push(sp);
+        Ok(SubProgramId { id: id })
+    }
+
+    /// Look up a sub-program by id.
+    public fn lookup(&self, id: &SubProgramId) -> Maybe<SubProgram> {
+        let mut i: Int = 0;
+        while i < self.programs.len() {
+            if self.programs[i].id.id == id.id {
+                return Some(clone_sp(&self.programs[i]));
+            }
+            i = i + 1;
+        }
+        None
+    }
+
+    /// Look up by source name.
+    public fn lookup_by_name(&self, name: &Text) -> Maybe<SubProgram> {
+        let mut i: Int = 0;
+        while i < self.programs.len() {
+            if self.programs[i].source_name == name {
+                return Some(clone_sp(&self.programs[i]));
+            }
+            i = i + 1;
+        }
+        None
+    }
+
+    /// Drop sub-programs attached to a given table — used by DROP TABLE.
+    /// Returns the number of dropped programs.
+    public fn invalidate_for_table(&mut self, table: &Text) -> Int {
+        let mut new_list: List<SubProgram> = List.new();
+        let mut dropped: Int = 0;
+        let mut i: Int = 0;
+        while i < self.programs.len() {
+            if self.programs[i].is_attached_to(table) {
+                dropped = dropped + 1;
+            } else {
+                new_list.push(clone_sp(&self.programs[i]));
+            }
+            i = i + 1;
+        }
+        self.programs = new_list;
+        dropped
+    }
+
+    /// Drop one sub-program by name. Returns true if found.
+    public fn drop_named(&mut self, name: &Text) -> Bool {
+        let mut new_list: List<SubProgram> = List.new();
+        let mut found: Bool = false;
+        let mut i: Int = 0;
+        while i < self.programs.len() {
+            if self.programs[i].source_name == name {
+                found = true;
+            } else {
+                new_list.push(clone_sp(&self.programs[i]));
+            }
+            i = i + 1;
+        }
+        self.programs = new_list;
+        found
+    }
+
+    public fn count(&self) -> Int { self.programs.len() }
+
+    public fn names(&self) -> List<Text> {
+        let mut out: List<Text> = List.new();
+        let mut i: Int = 0;
+        while i < self.programs.len() {
+            out.push(self.programs[i].source_name.clone());
+            i = i + 1;
+        }
+        out
+    }
+
+    /// Total register window across every registered sub-program.
+    /// The interpreter uses this to size the register file.
+    public fn total_register_window(&self) -> Int {
+        let mut sum: Int = 0;
+        let mut i: Int = 0;
+        while i < self.programs.len() {
+            sum = sum + self.programs[i].register_window;
+            i = i + 1;
+        }
+        sum
+    }
+}
+
+fn clone_sp(s: &SubProgram) -> SubProgram {
+    let table = match &s.source_table { Some(t) => Some(t.clone()), None => None };
+    SubProgram {
+        id: SubProgramId { id: s.id.id },
+        register_window: s.register_window,
+        source_name: s.source_name.clone(),
+        source_event: clone_event(&s.source_event),
+        source_table: table,
+        can_abort: s.can_abort,
+    }
+}
+
+fn clone_event(e: &core.database.sqlite.native.subprograms.program.SourceEvent) -> core.database.sqlite.native.subprograms.program.SourceEvent {
+    let _ = source_event_name;  // silence unused-import warning
+    match e {
+        core.database.sqlite.native.subprograms.program.SeTrigger          => core.database.sqlite.native.subprograms.program.SeTrigger,
+        core.database.sqlite.native.subprograms.program.SeInsteadOfView    => core.database.sqlite.native.subprograms.program.SeInsteadOfView,
+        core.database.sqlite.native.subprograms.program.SeRecursiveCte     => core.database.sqlite.native.subprograms.program.SeRecursiveCte,
+        core.database.sqlite.native.subprograms.program.SeForeignKeyAction => core.database.sqlite.native.subprograms.program.SeForeignKeyAction,
+    }
+}

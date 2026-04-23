@@ -1,0 +1,80 @@
+// =============================================================================
+// optimizer/jump_threading.vr — collapse Goto-to-Goto chains
+// =============================================================================
+// Spec: sqlite-native.md §11.5
+//
+// `Goto a; ... a: Goto b; ... b: ...` → `Goto b`.
+//
+// Repeats until convergence; idempotent on canonical input.
+// =============================================================================
+
+module core.database.sqlite.native.optimizer.jump_threading;
+
+mount core.*;
+mount base.{Text, Maybe, Some, None, Bool};
+mount collections.List;
+mount core.database.sqlite.native.opcode_catalog.metadata.{
+    OpcodeKind, opcode_name,
+};
+mount core.database.sqlite.native.optimizer.opstream.{
+    OpStream, OpEntry, op_entry,
+};
+mount core.database.sqlite.native.optimizer.pass.{
+    OptimizationPass, PassResult, pass_result,
+};
+
+public type JumpThreading is { unit: Bool };
+public fn jump_threading() -> JumpThreading { JumpThreading { unit: true } }
+
+fn target_at(stream: &OpStream, idx: Int) -> Maybe<Int> {
+    let opt = stream.entry(idx);
+    match opt {
+        Some(e) => {
+            if opcode_name(&e.op) == "Goto".clone() {
+                Some(e.p1)
+            } else { None }
+        }
+        None => None,
+    }
+}
+
+implement OptimizationPass for JumpThreading {
+    fn name(&self) -> Text { "jump_threading".clone() }
+
+    fn apply(&self, stream: OpStream) -> PassResult {
+        let mut stream = stream;
+        let mut edits: Int = 0;
+        let mut i: Int = 0;
+        while i < stream.len() {
+            let opt = stream.entry(i);
+            let entry = match opt {
+                Some(e) => e,
+                None    => { break; }
+            };
+            let nm = opcode_name(&entry.op);
+            // Goto X — chase X to its terminal target.
+            if nm == "Goto".clone() {
+                let mut target = entry.p1;
+                let mut hops: Int = 0;
+                while hops < 16 {
+                    match target_at(&stream, target) {
+                        Some(next) => {
+                            if next == target { break; }   // self-loop guard
+                            target = next;
+                            hops = hops + 1;
+                        }
+                        None => break,
+                    }
+                }
+                if target != entry.p1 {
+                    let mut new_entry = entry;
+                    new_entry.p1 = target;
+                    stream.replace_at(i, new_entry);
+                    edits = edits + 1;
+                }
+            }
+            i = i + 1;
+        }
+        pass_result(stream, edits)
+    }
+}

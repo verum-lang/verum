@@ -1,0 +1,108 @@
+// =============================================================================
+// subprograms/recursion.vr — recursion depth tracking + cycle break
+// =============================================================================
+// Spec: sqlite-native.md §11.4 (recursive triggers)
+//
+// SQLite caps trigger recursion at SQLITE_MAX_TRIGGER_DEPTH (default
+// 1000); recursive triggers are off by default
+// (`PRAGMA recursive_triggers = OFF`). loom mirrors both.
+//
+// `RecursionGuard` is a stack-of-(SubProgramId) the interpreter
+// maintains across `Gosub`. Each `enter` checks the new id against
+// the stack; if the id appears AND `recursive_triggers` is OFF, it
+// returns `RgDeny`. `RgDepthExceeded` is returned independently of
+// the recursive flag once the stack exceeds the cap.
+// =============================================================================
+
+module core.database.sqlite.native.subprograms.recursion;
+
+mount core.*;
+mount base.{Bool, Maybe};
+mount collections.List;
+mount core.database.sqlite.native.subprograms.program.{
+    SubProgramId, id_equal, id_value,
+};
+
+// -----------------------------------------------------------------------------
+// Configuration
+// -----------------------------------------------------------------------------
+
+public const DEFAULT_MAX_DEPTH: Int = 1000;
+
+// -----------------------------------------------------------------------------
+// Decision
+// -----------------------------------------------------------------------------
+
+public type EnterDecision is
+      RgAllow
+    | RgDeny                  // recursive_triggers=OFF and id is in stack
+    | RgDepthExceeded;
+
+// -----------------------------------------------------------------------------
+// RecursionGuard — bounded stack
+// -----------------------------------------------------------------------------
+
+public type RecursionGuard is {
+    stack: List<SubProgramId>,
+    max_depth: Int,
+    recursive_allowed: Bool,
+};
+
+public fn guard_new() -> RecursionGuard {
+    RecursionGuard {
+        stack: List.new(),
+        max_depth: DEFAULT_MAX_DEPTH,
+        recursive_allowed: false,
+    }
+}
+
+implement RecursionGuard {
+    public fn set_max_depth(&mut self, n: Int) {
+        if n > 0 { self.max_depth = n; }
+    }
+
+    public fn allow_recursion(&mut self, allow: Bool) {
+        self.recursive_allowed = allow;
+    }
+
+    public fn depth(&self) -> Int { self.stack.len() }
+
+    /// Try to enter a sub-program. Returns the decision.
+    public fn enter(&mut self, sp_id: SubProgramId) -> EnterDecision {
+        if self.stack.len() >= self.max_depth {
+            return RgDepthExceeded;
+        }
+        if !self.recursive_allowed && self.contains(&sp_id) {
+            return RgDeny;
+        }
+        self.stack.push(sp_id);
+        RgAllow
+    }
+
+    /// Pop the topmost frame. Returns Some(id) when a frame existed.
+    public fn leave(&mut self) -> Maybe<SubProgramId> {
+        if self.stack.len() == 0 { return None; }
+        let last = self.stack.len() - 1;
+        let id_v = id_value(&self.stack[last]);
+        let popped = SubProgramId { id: id_v };
+        let mut new_stack: List<SubProgramId> = List.new();
+        let mut i: Int = 0;
+        while i < last { new_stack.push(SubProgramId { id: id_value(&self.stack[i]) }); i = i + 1; }
+        self.stack = new_stack;
+        Some(popped)
+    }
+
+    fn contains(&self, sp_id: &SubProgramId) -> Bool {
+        let mut i: Int = 0;
+        while i < self.stack.len() {
+            if id_equal(&self.stack[i], sp_id) { return true; }
+            i = i + 1;
+        }
+        false
+    }
+
+    /// Convenience: clear the stack (used between top-level statements).
+    public fn reset(&mut self) {
+        self.stack = List.new();
+    }
+}

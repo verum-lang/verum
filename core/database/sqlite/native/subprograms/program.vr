@@ -1,0 +1,115 @@
+// =============================================================================
+// subprograms/program.vr — SubProgram record
+// =============================================================================
+// Spec: sqlite-native.md §11.4
+//
+// `SubProgram` is the metadata wrapper around a slice of opcodes
+// that the main VDBE can `Gosub` into. We carry:
+//
+//   * an opaque `SubProgramId` — the value the main program
+//     references; allocated by the registry, stable for the
+//     lifetime of the connection
+//   * a register window size — how many registers the sub-program
+//     wants to operate on; the interpreter shifts the parent's
+//     register-base by this amount before invocation
+//   * the source-table dependency — when DROP TABLE fires, every
+//     sub-program whose `source_table` matches must be invalidated
+//   * the trigger-event tag (for diagnostic / EXPLAIN hooks)
+//
+// We DON'T store the opcode list here directly — the opcode stream
+// lives in the gated `l4_vdbe/program.vr` `VdbeProgram` and is
+// addressed by id via the registry. This keeps the data layer
+// independent of the protected interpreter file.
+// =============================================================================
+
+module core.database.sqlite.native.subprograms.program;
+
+mount core.*;
+mount base.{Text, Maybe, Bool};
+mount collections.List;
+
+// -----------------------------------------------------------------------------
+// SubProgramId — opaque ID
+// -----------------------------------------------------------------------------
+
+public type SubProgramId is { id: Int };
+
+public fn id_value(s: &SubProgramId) -> Int { s.id }
+
+public fn id_equal(a: &SubProgramId, b: &SubProgramId) -> Bool {
+    a.id == b.id
+}
+
+// -----------------------------------------------------------------------------
+// Source-event tag (purely metadata — used by EXPLAIN + diagnostic)
+// -----------------------------------------------------------------------------
+
+public type SourceEvent is
+      SeTrigger
+    | SeInsteadOfView
+    | SeRecursiveCte
+    | SeForeignKeyAction;
+
+public fn source_event_name(e: &SourceEvent) -> Text {
+    match e {
+        SeTrigger           => "trigger".clone(),
+        SeInsteadOfView     => "instead_of_view".clone(),
+        SeRecursiveCte      => "recursive_cte".clone(),
+        SeForeignKeyAction  => "fk_action".clone(),
+    }
+}
+
+// -----------------------------------------------------------------------------
+// SubProgram metadata
+// -----------------------------------------------------------------------------
+
+public type SubProgram is {
+    id: SubProgramId,
+    /// Number of registers this sub-program needs.
+    register_window: Int,
+    /// Schema-qualified name of the source object (trigger name,
+    /// view name, table name, ...) for EXPLAIN / introspection.
+    source_name: Text,
+    /// What kind of event compiled this sub-program.
+    source_event: SourceEvent,
+    /// Table this sub-program is attached to. When the table is
+    /// dropped, the registry calls `invalidate_for_table`.
+    source_table: Maybe<Text>,
+    /// Whether the sub-program uses `RAISE(ABORT|FAIL|IGNORE|...)`.
+    /// The optimiser uses this to choose between Gosub and Program
+    /// (Program preserves savepoint-undo state across abort).
+    can_abort: Bool,
+};
+
+public fn subprogram_new(
+    id: Int,
+    register_window: Int,
+    source_name: Text,
+    source_event: SourceEvent,
+) -> SubProgram {
+    SubProgram {
+        id: SubProgramId { id: id },
+        register_window: register_window,
+        source_name: source_name,
+        source_event: source_event,
+        source_table: None,
+        can_abort: false,
+    }
+}
+
+implement SubProgram {
+    public fn attach_to_table(&mut self, table: Text) {
+        self.source_table = Some(table);
+    }
+
+    public fn mark_can_abort(&mut self) {
+        self.can_abort = true;
+    }
+
+    public fn is_attached_to(&self, table: &Text) -> Bool {
+        match &self.source_table {
+            Some(t) => t == table,
+            None    => false,
+        }
+    }
+}

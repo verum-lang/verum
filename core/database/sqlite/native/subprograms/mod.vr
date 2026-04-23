@@ -1,0 +1,21 @@
+// =============================================================================
+// core/database/sqlite/native/subprograms/mod.vr
+// =============================================================================
+// Layer: 4 (VDBE)
+// Spec: sqlite-native.md §11.4
+//
+// Sub-program registry. Triggers, INSTEAD-OF view DML, and recursive
+// CTEs all compile to a sub-VdbeProgram identified by a stable id.
+// The main VDBE invokes them via the `Gosub` / `Program` opcodes; on
+// `Return` the main program resumes at the next instruction.
+//
+// Each sub-program declares its own register window so its writes
+// don't disturb the caller's frame, and shares the constant pool of
+// the enclosing program (constants are immutable so sharing is safe).
+// =============================================================================
+
+module core.database.sqlite.native.subprograms;
+
+public module program;
+public module registry;
+public module recursion;

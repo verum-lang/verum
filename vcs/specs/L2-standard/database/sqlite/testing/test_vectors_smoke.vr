@@ -1,0 +1,115 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, testing, test_vectors, file_format
+// @timeout: 5000
+// @expected-exit: 0
+//
+// Appendix E canonical file-format test vectors:
+//   * varint vectors cover every byte length 1..9
+//   * record-header vectors cover representative shapes
+//   * WAL checksum vectors with seed/payload/expected fields
+//   * b-tree cell vectors for all 4 page kinds
+
+mount core.database.sqlite.native.testing.test_vectors.{
+    VarintVector, RecordHeaderVector, WalChecksumVector, BtreeCellVector,
+    varint_vectors, record_vectors, wal_checksum_vectors, btree_cell_vectors,
+    varint_vector_count, record_vector_count, wal_vector_count, btree_vector_count,
+};
+
+fn test_varint_vectors_cover_every_length() {
+    let vs = varint_vectors();
+    assert(vs.len() >= 16);
+    // Must include 0, 127 (1-byte), 128 (2-byte), 16384 (3-byte),
+    // and MAX_I64 (9-byte).
+    let mut found_zero = false;
+    let mut found_127 = false;
+    let mut found_max = false;
+    let mut i: Int = 0;
+    while i < vs.len() {
+        if vs[i].decoded == (0 as Int64) { found_zero = true; }
+        if vs[i].decoded == (127 as Int64) { found_127 = true; }
+        if vs[i].decoded == (9223372036854775807 as Int64) { found_max = true; }
+        i = i + 1;
+    }
+    assert(found_zero);
+    assert(found_127);
+    assert(found_max);
+}
+
+fn test_varint_max_byte_length_is_9() {
+    let vs = varint_vectors();
+    let mut max_len: Int = 0;
+    let mut i: Int = 0;
+    while i < vs.len() {
+        if vs[i].encoded.len() > max_len { max_len = vs[i].encoded.len(); }
+        i = i + 1;
+    }
+    assert_eq(max_len, 9);
+}
+
+fn test_varint_127_is_single_byte() {
+    let vs = varint_vectors();
+    let mut found = false;
+    let mut i: Int = 0;
+    while i < vs.len() {
+        if vs[i].decoded == (127 as Int64) {
+            assert_eq(vs[i].encoded.len(), 1);
+            assert_eq(vs[i].encoded[0], 0x7F as Byte);
+            found = true;
+        }
+        i = i + 1;
+    }
+    assert(found);
+}
+
+fn test_record_header_vectors() {
+    let rs = record_vectors();
+    assert(rs.len() >= 5);
+    // First vector is the empty-record sentinel
+    assert_eq(rs[0].header_bytes.len(), 1);
+    assert_eq(rs[0].header_bytes[0], 0x01 as Byte);
+    assert_eq(rs[0].serial_types.len(), 0);
+}
+
+fn test_wal_checksum_vectors() {
+    let ws = wal_checksum_vectors();
+    assert(ws.len() >= 2);
+    // First vector — all zeros, expected (0, 0)
+    assert_eq(ws[0].expected_s1, 0);
+    assert_eq(ws[0].expected_s2, 0);
+}
+
+fn test_btree_cell_vectors() {
+    let bs = btree_cell_vectors();
+    assert(bs.len() >= 4);
+    // Each cell-vector page_type matches one of the legal SQLite codes.
+    let mut i: Int = 0;
+    while i < bs.len() {
+        let pt: Byte = bs[i].page_type;
+        let ok =
+            pt == (0x02 as Byte) ||
+            pt == (0x05 as Byte) ||
+            pt == (0x0A as Byte) ||
+            pt == (0x0D as Byte);
+        assert(ok);
+        i = i + 1;
+    }
+}
+
+fn test_count_helpers() {
+    assert(varint_vector_count() >= 16);
+    assert(record_vector_count() >= 5);
+    assert(wal_vector_count() >= 2);
+    assert(btree_vector_count() >= 4);
+}
+
+fn main() {
+    test_varint_vectors_cover_every_length();
+    test_varint_max_byte_length_is_9();
+    test_varint_127_is_single_byte();
+    test_record_header_vectors();
+    test_wal_checksum_vectors();
+    test_btree_cell_vectors();
+    test_count_helpers();
+}

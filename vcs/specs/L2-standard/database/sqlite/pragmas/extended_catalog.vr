@@ -1,0 +1,88 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, pragma, extended
+// @timeout: 5000
+// @expected-exit: 0
+//
+// Verifies the App F extended PRAGMA catalogue:
+//   * count is in expected range (~50)
+//   * canonical names resolve case-insensitively
+//   * scope / settability / effect classification stays sane
+
+mount core.database.sqlite.native.pragmas.extended.{
+    ExtendedPragma, extended_catalogue, extended_lookup, extended_count,
+};
+mount core.database.sqlite.native.pragmas.registry.{
+    Scope, SConnection, SDatabase, SReadOnly, SDangerous,
+    EffectPhase, EImmediate, EOnNextTxn, EBeforeCreate, EOnNextOpen,
+};
+mount base.{Some, None};
+
+fn require_resolves(name: Text) -> ExtendedPragma {
+    match extended_lookup(&name) {
+        Some(p) => p,
+        None    => panic(f"extended PRAGMA '{name}' should resolve"),
+    }
+}
+
+fn test_count_in_range() {
+    let n = extended_count();
+    assert(n >= 40);
+    assert(n <= 80);
+}
+
+fn test_lookup_canonical_names() {
+    let _ = require_resolves("cache_spill".clone());
+    let _ = require_resolves("data_version".clone());
+    let _ = require_resolves("hard_heap_limit".clone());
+    let _ = require_resolves("soft_heap_limit".clone());
+    let _ = require_resolves("trusted_schema".clone());
+    let _ = require_resolves("vdbe_trace".clone());
+    let _ = require_resolves("enable_load_extension".clone());
+    let _ = require_resolves("module_list".clone());
+    let _ = require_resolves("function_list".clone());
+}
+
+fn test_lookup_case_insensitive() {
+    let _ = require_resolves("CACHE_SPILL".clone());
+    let _ = require_resolves("Data_Version".clone());
+    let _ = require_resolves("VDBE_TRACE".clone());
+}
+
+fn test_unknown_returns_none() {
+    match extended_lookup(&"this_does_not_exist".clone()) {
+        None    => {},
+        Some(_) => panic("unknown PRAGMA must not resolve"),
+    }
+}
+
+fn test_introspection_pragmas_are_read_only() {
+    let p = require_resolves("data_version".clone());
+    match p.scope { SReadOnly => {}, _ => panic("data_version must be read-only") };
+    assert(!p.is_settable);
+
+    let p2 = require_resolves("module_list".clone());
+    match p2.scope { SReadOnly => {}, _ => panic("module_list must be read-only") };
+    assert(!p2.is_settable);
+}
+
+fn test_dangerous_pragmas_classified() {
+    let p = require_resolves("vdbe_debug".clone());
+    match p.scope { SDangerous => {}, _ => panic("vdbe_debug = dangerous") };
+}
+
+fn test_help_text_present() {
+    let p = require_resolves("cache_spill".clone());
+    assert(p.help.len() > 0);
+}
+
+fn main() {
+    test_count_in_range();
+    test_lookup_canonical_names();
+    test_lookup_case_insensitive();
+    test_unknown_returns_none();
+    test_introspection_pragmas_are_read_only();
+    test_dangerous_pragmas_classified();
+    test_help_text_present();
+}

@@ -1,0 +1,33 @@
+// =============================================================================
+// core/database/sqlite/native/optimizer/mod.vr
+// =============================================================================
+// Layer: 4-5 (between codegen + interpreter)
+// Spec: sqlite-native.md §11.5
+//
+// Pre-emission optimisation passes operating on a `Vec<Opcode>` view.
+// Each pass implements the `OptimizationPass` protocol; passes are
+// composed into a deterministic `PassPipeline` that's idempotent on
+// already-canonicalised input.
+//
+// Submodules:
+//
+//   * `opstream`       — opaque opcode-stream view + edit primitives
+//   * `pass`           — `OptimizationPass` protocol + Pipeline runner
+//   * `noop_elim`      — drop `Noop` instructions, retarget jumps
+//   * `jump_threading` — `Goto a; a: Goto b` → `Goto b`
+//   * `dead_code`      — drop unreachable instructions after `Halt`/
+//                        `Goto` whose target lies outside the program
+//   * `const_fold`     — fold `Integer + Integer` etc. when both
+//                        operands are statically known
+//   * `move_chain`     — `Move r1→r2; Move r2→r3` → `Move r1→r3`
+// =============================================================================
+
+module core.database.sqlite.native.optimizer;
+
+public module opstream;
+public module pass;
+public module noop_elim;
+public module jump_threading;
+public module dead_code;
+public module const_fold;
+public module move_chain;

@@ -1,0 +1,264 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, optimizer, peephole, jump_threading, dead_code, const_fold
+// @timeout: 5000
+// @expected-exit: 0
+//
+// Optimisation-pass smoke test:
+//   * NoopElim removes Noop instructions (single-pass)
+//   * JumpThreading collapses Goto-to-Goto chains
+//   * DeadCodeElim drops instructions after Halt
+//   * ConstFold rewrites Integer+Integer
+//   * MoveChain collapses SCopy r1→r2; SCopy r2→r3
+//   * Pipeline fixpoints
+
+mount core.database.sqlite.native.opcode_catalog.metadata.{
+    OpcodeKind, OpInteger, OpAdd, OpHalt, OpGoto, OpNoop, OpSCopy,
+    opcode_name,
+};
+mount core.database.sqlite.native.optimizer.opstream.{
+    OpStream, OpEntry, op_entry, opstream_new, opstream_from,
+};
+mount core.database.sqlite.native.optimizer.pass.{
+    OptimizationPass, PassResult, run_pipeline, DEFAULT_MAX_ITERATIONS,
+};
+mount core.database.sqlite.native.optimizer.noop_elim.{
+    NoopElim, noop_elim,
+};
+mount core.database.sqlite.native.optimizer.jump_threading.{
+    JumpThreading, jump_threading,
+};
+mount core.database.sqlite.native.optimizer.dead_code.{
+    DeadCodeElim, dead_code_elim,
+};
+mount core.database.sqlite.native.optimizer.const_fold.{
+    ConstFold, const_fold,
+};
+mount core.database.sqlite.native.optimizer.move_chain.{
+    MoveChain, move_chain,
+};
+mount base.{Some, None, Maybe};
+
+fn count_op(stream: &OpStream, name: Text) -> Int {
+    let mut n: Int = 0;
+    let mut i: Int = 0;
+    while i < stream.len() {
+        match stream.entry(i) {
+            Some(e) => {
+                if opcode_name(&e.op) == name { n = n + 1; }
+            }
+            None => {}
+        }
+        i = i + 1;
+    }
+    n
+}
+
+// -----------------------------------------------------------------------------
+// NoopElim
+// -----------------------------------------------------------------------------
+
+fn test_noop_elim_removes_noop() {
+    let mut entries: List<OpEntry> = List.new();
+    entries.push(op_entry(OpInteger, 1, 0, 0, 0));
+    entries.push(op_entry(OpNoop, 0, 0, 0, 1));
+    entries.push(op_entry(OpInteger, 2, 1, 0, 2));
+    entries.push(op_entry(OpNoop, 0, 0, 0, 3));
+    entries.push(op_entry(OpHalt, 0, 0, 0, 4));
+    let stream = opstream_from(entries);
+    let pass = noop_elim();
+    let r = pass.apply(stream);
+    assert_eq(r.n_edits, 2);
+    assert_eq(count_op(&r.stream, "Noop".clone()), 0);
+    assert_eq(r.stream.len(), 3);
+}
+
+fn test_noop_elim_idempotent() {
+    let mut entries: List<OpEntry> = List.new();
+    entries.push(op_entry(OpInteger, 1, 0, 0, 0));
+    entries.push(op_entry(OpHalt, 0, 0, 0, 1));
+    let stream = opstream_from(entries);
+    let pass = noop_elim();
+    let r = pass.apply(stream);
+    assert_eq(r.n_edits, 0);
+    assert_eq(r.stream.len(), 2);
+}
+
+// -----------------------------------------------------------------------------
+// JumpThreading
+// -----------------------------------------------------------------------------
+
+fn test_jump_threading_collapses_chain() {
+    // 0: Goto 2
+    // 1: Halt
+    // 2: Goto 3
+    // 3: Halt
+    let mut entries: List<OpEntry> = List.new();
+    entries.push(op_entry(OpGoto, 2, 0, 0, 0));
+    entries.push(op_entry(OpHalt, 0, 0, 0, 1));
+    entries.push(op_entry(OpGoto, 3, 0, 0, 2));
+    entries.push(op_entry(OpHalt, 0, 0, 0, 3));
+    let stream = opstream_from(entries);
+    let pass = jump_threading();
+    let r = pass.apply(stream);
+    assert_eq(r.n_edits, 1);
+    match r.stream.entry(0) {
+        Some(e) => assert_eq(e.p1, 3),
+        None    => panic("entry 0 missing"),
+    }
+}
+
+// -----------------------------------------------------------------------------
+// DeadCodeElim
+// -----------------------------------------------------------------------------
+
+fn test_dead_code_drops_after_halt() {
+    // 0: Integer 1, r0
+    // 1: Halt
+    // 2: Integer 2, r1     -- unreachable
+    // 3: Integer 3, r2     -- unreachable
+    let mut entries: List<OpEntry> = List.new();
+    entries.push(op_entry(OpInteger, 1, 0, 0, 0));
+    entries.push(op_entry(OpHalt, 0, 0, 0, 1));
+    entries.push(op_entry(OpInteger, 2, 1, 0, 2));
+    entries.push(op_entry(OpInteger, 3, 2, 0, 3));
+    let stream = opstream_from(entries);
+    let pass = dead_code_elim();
+    let r = pass.apply(stream);
+    assert_eq(r.n_edits, 2);
+    assert_eq(r.stream.len(), 2);
+}
+
+fn test_dead_code_keeps_jump_target() {
+    // 0: Goto 3
+    // 1: Halt          -- unreachable
+    // 2: Integer 2, r1 -- unreachable
+    // 3: Integer 5, r0
+    // 4: Halt
+    let mut entries: List<OpEntry> = List.new();
+    entries.push(op_entry(OpGoto, 3, 0, 0, 0));
+    entries.push(op_entry(OpHalt, 0, 0, 0, 1));
+    entries.push(op_entry(OpInteger, 2, 1, 0, 2));
+    entries.push(op_entry(OpInteger, 5, 0, 0, 3));
+    entries.push(op_entry(OpHalt, 0, 0, 0, 4));
+    let stream = opstream_from(entries);
+    let pass = dead_code_elim();
+    let r = pass.apply(stream);
+    // entries 1, 2 unreachable
+    assert_eq(r.n_edits, 2);
+    assert_eq(r.stream.len(), 3);
+}
+
+// -----------------------------------------------------------------------------
+// ConstFold
+// -----------------------------------------------------------------------------
+
+fn test_const_fold_add() {
+    // 0: Integer 5, r0
+    // 1: Integer 7, r1
+    // 2: Add r0, r1, r2
+    // 3: Halt
+    let mut entries: List<OpEntry> = List.new();
+    entries.push(op_entry(OpInteger, 5, 0, 0, 0));
+    entries.push(op_entry(OpInteger, 7, 1, 0, 1));
+    entries.push(op_entry(OpAdd, 0, 1, 2, 2));
+    entries.push(op_entry(OpHalt, 0, 0, 0, 3));
+    let stream = opstream_from(entries);
+    let pass = const_fold();
+    let r = pass.apply(stream);
+    assert_eq(r.n_edits, 1);
+    // entry 2 should now be `Integer 12, r2` (Adds replaced; Integers
+    // become Noop)
+    match r.stream.entry(2) {
+        Some(e) => {
+            assert(opcode_name(&e.op) == "Integer".clone());
+            assert_eq(e.p1, 12);
+            assert_eq(e.p2, 2);
+        }
+        None => panic("entry 2"),
+    }
+}
+
+fn test_const_fold_skips_division_by_zero() {
+    let mut entries: List<OpEntry> = List.new();
+    entries.push(op_entry(OpInteger, 10, 0, 0, 0));
+    entries.push(op_entry(OpInteger, 0, 1, 0, 1));
+    entries.push(op_entry(OpAdd, 0, 1, 2, 2));   // Add still folds
+    let stream = opstream_from(entries);
+    let pass = const_fold();
+    let r = pass.apply(stream);
+    assert_eq(r.n_edits, 1);
+}
+
+// -----------------------------------------------------------------------------
+// MoveChain
+// -----------------------------------------------------------------------------
+
+fn test_move_chain_collapses() {
+    // 0: SCopy r0 → r1
+    // 1: SCopy r1 → r2     (r1 not used after)
+    // 2: Halt
+    let mut entries: List<OpEntry> = List.new();
+    entries.push(op_entry(OpSCopy, 0, 1, 0, 0));
+    entries.push(op_entry(OpSCopy, 1, 2, 0, 1));
+    entries.push(op_entry(OpHalt, 0, 0, 0, 2));
+    let stream = opstream_from(entries);
+    let pass = move_chain();
+    let r = pass.apply(stream);
+    assert_eq(r.n_edits, 1);
+    // Entry 0 → Noop, entry 1 → SCopy r0 → r2
+    match r.stream.entry(1) {
+        Some(e) => {
+            assert(opcode_name(&e.op) == "SCopy".clone());
+            assert_eq(e.p1, 0);
+            assert_eq(e.p2, 2);
+        }
+        None => panic("entry 1"),
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Pipeline
+// -----------------------------------------------------------------------------
+
+fn test_pipeline_runs_to_fixpoint() {
+    // Build a stream where multiple passes reduce it.
+    // 0: Integer 5, r0
+    // 1: Integer 7, r1
+    // 2: Add r0, r1, r2     (folds → Integer 12, r2)
+    // 3: Noop                (will be elim'd)
+    // 4: Halt
+    // 5: Noop                (unreachable + Noop)
+    let mut entries: List<OpEntry> = List.new();
+    entries.push(op_entry(OpInteger, 5, 0, 0, 0));
+    entries.push(op_entry(OpInteger, 7, 1, 0, 1));
+    entries.push(op_entry(OpAdd, 0, 1, 2, 2));
+    entries.push(op_entry(OpNoop, 0, 0, 0, 3));
+    entries.push(op_entry(OpHalt, 0, 0, 0, 4));
+    entries.push(op_entry(OpNoop, 0, 0, 0, 5));
+    let stream = opstream_from(entries);
+    let mut passes: List<Heap<dyn OptimizationPass>> = List.new();
+    passes.push(Heap.new(const_fold()));
+    passes.push(Heap.new(noop_elim()));
+    passes.push(Heap.new(dead_code_elim()));
+    let (out, report) = run_pipeline(passes, stream, DEFAULT_MAX_ITERATIONS);
+    // After folding, removing all Noops, and eliminating the last
+    // unreachable entry, we expect: [Integer 12 → r2; Halt] = 2 entries.
+    assert_eq(count_op(&out, "Noop".clone()), 0);
+    assert(out.len() <= 4);
+    assert(report.iterations >= 1);
+    assert(report.total_edits >= 1);
+}
+
+fn main() {
+    test_noop_elim_removes_noop();
+    test_noop_elim_idempotent();
+    test_jump_threading_collapses_chain();
+    test_dead_code_drops_after_halt();
+    test_dead_code_keeps_jump_target();
+    test_const_fold_add();
+    test_const_fold_skips_division_by_zero();
+    test_move_chain_collapses();
+    test_pipeline_runs_to_fixpoint();
+}

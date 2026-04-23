@@ -96,3 +96,7 @@ public module testing;
 public module opcode_catalog;
 // - planner_cost: cost model + statistics for the L5 planner (§13.2-§13.4)
 public module planner_cost;
+// - subprograms: Gosub target registry for triggers / INSTEAD-OF views (§11.4)
+public module subprograms;
+// - optimizer: pre-emission peephole / jump-thread / DCE / const-fold passes (§11.5)
+public module optimizer;
