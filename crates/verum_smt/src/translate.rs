@@ -377,6 +377,19 @@ impl<'ctx> Translator<'ctx> {
             .insert(name.to_string(), (param_sorts, ret_sort));
     }
 
+    /// Copy all callee signatures from `other` into `self`. Used
+    /// when the quantifier translator creates a fresh inner
+    /// translator — without this copy the inner context would lose
+    /// all Bool/Real user-function signatures and fall back to the
+    /// Int default, breaking `exists x. is_prime(x)`-style goals.
+    pub fn copy_callee_signatures_from(&self, other: &Translator<'_>) {
+        let src = other.callee_signatures.borrow();
+        let mut dst = self.callee_signatures.borrow_mut();
+        for (k, v) in src.iter() {
+            dst.insert(k.clone(), v.clone());
+        }
+    }
+
     /// Resolve an SMT-LIB sort name to a Z3 `Sort` object.
     /// Anything not recognised becomes `Int` — matching what the
     /// reflection registry does when it has no better information.
@@ -2347,6 +2360,12 @@ impl<'ctx> Translator<'ctx> {
         for (name, value) in self.bindings_iter() {
             inner_translator.bind(name.clone(), value.clone());
         }
+        // Callee signatures must flow through too — otherwise
+        // `is_prime` (Int → Bool) falls back to the Int-default
+        // inside the quantifier body and `exists p. is_prime(p) ||
+        // !is_prime(p)` fails translation with "body must be
+        // boolean".
+        inner_translator.copy_callee_signatures_from(self);
 
         // Bind the quantified variable
         inner_translator.bind(var_name.clone(), bound_var.clone());
@@ -2549,6 +2568,12 @@ impl<'ctx> Translator<'ctx> {
         for (name, value) in self.bindings_iter() {
             inner_translator.bind(name.clone(), value.clone());
         }
+        // Callee signatures must flow through too — otherwise
+        // `is_prime` (Int → Bool) falls back to the Int-default
+        // inside the quantifier body and `exists p. is_prime(p) ||
+        // !is_prime(p)` fails translation with "body must be
+        // boolean".
+        inner_translator.copy_callee_signatures_from(self);
 
         // Bind the quantified variable
         inner_translator.bind(var_name.clone(), bound_var.clone());

@@ -178,16 +178,47 @@ impl<'s> VerifyCommand<'s> {
         // the same feature set.
         let mut reflection_registry =
             verum_smt::refinement_reflection::RefinementReflectionRegistry::new();
+        // Sort signatures for every function declared in the module
+        // — including body-less declarations that `try_reflect_function`
+        // rejects. The translator's UF-fallback consults this when
+        // emitting `FuncDecl`s so Bool-returning functions translate
+        // to Bool sort (and not the Int-default that breaks
+        // `exists p: Nat. is_prime(p)`-style goals).
+        let mut callee_signatures_for_module: Vec<(Text, Vec<Text>, Text)> =
+            Vec::new();
         for item in &module.items {
             if let ItemKind::Function(fd) = &item.kind {
                 if let Some(rf) = verum_smt::expr_to_smtlib::try_reflect_function(fd) {
                     let _ = reflection_registry.register(rf);
                 }
+                let param_sorts: Vec<Text> = fd
+                    .params
+                    .iter()
+                    .filter_map(|p| {
+                        if let FunctionParamKind::Regular { ty, .. } = &p.kind {
+                            Some(Text::from(verum_smt::expr_to_smtlib::type_to_sort(ty)))
+                        } else {
+                            None
+                        }
+                    })
+                    .collect();
+                let ret_sort = match &fd.return_type {
+                    verum_common::Maybe::Some(t) => {
+                        Text::from(verum_smt::expr_to_smtlib::type_to_sort(t))
+                    }
+                    verum_common::Maybe::None => Text::from("Int"),
+                };
+                callee_signatures_for_module.push((
+                    Text::from(fd.name.as_str()),
+                    param_sorts,
+                    ret_sort,
+                ));
             }
         }
         debug!(
-            "CLI verify: refinement reflection registered {} function(s)",
-            reflection_registry.len()
+            "CLI verify: refinement={} signatures={}",
+            reflection_registry.len(),
+            callee_signatures_for_module.len(),
         );
 
         for item in &module.items {
@@ -299,7 +330,7 @@ impl<'s> VerifyCommand<'s> {
 
             let result = self.verify_theorem(
                 thm, kind_name, timeout, &alias_map, &module_hints,
-                &reflection_registry,
+                &reflection_registry, &callee_signatures_for_module,
             );
 
             // Note: Profiler is not used for theorem verification (different result type)
@@ -341,6 +372,7 @@ impl<'s> VerifyCommand<'s> {
         alias_map: &std::collections::HashMap<Text, Vec<Expr>>,
         module_hints: &verum_smt::proof_search::HintsDatabase,
         reflection_registry: &verum_smt::refinement_reflection::RefinementReflectionRegistry,
+        callee_signatures_for_module: &[(Text, Vec<Text>, Text)],
     ) -> VerificationResult {
         let start = Instant::now();
 
@@ -367,6 +399,20 @@ impl<'s> VerifyCommand<'s> {
         // queries can unfold calls to user-defined pure functions.
         if !reflection_registry.is_empty() {
             proof_engine.set_reflection_registry(reflection_registry.clone());
+        }
+
+        // Register sort signatures for every module function — even
+        // those without a body or those that `try_reflect_function`
+        // rejected. Without this, calls to Bool-returning declared
+        // functions translate as Int-UFs and goals like
+        //   theorem t(): exists p: Nat. is_prime(p)
+        // fail with "exists body must be a boolean expression".
+        for (name, ps, r) in callee_signatures_for_module {
+            proof_engine.register_callee_signature(
+                name.clone(),
+                ps.clone(),
+                r.clone(),
+            );
         }
 
         // Run the full proof verification pipeline

@@ -2204,6 +2204,18 @@ pub struct ProofSearchEngine {
     /// unfold user-defined functions during proof search.
     /// See `crate::refinement_reflection`.
     reflection_registry: crate::refinement_reflection::RefinementReflectionRegistry,
+
+    /// Callee signatures for functions that aren't in the
+    /// reflection registry but still need a sort-correct
+    /// Z3 `FuncDecl` when the translator falls back to UF
+    /// emission. Populated externally from the module's
+    /// function declarations (including body-less `fn f(...) -> T;`
+    /// surface). Each entry maps name → (param sort names, return
+    /// sort name) in SMT-LIB form.
+    callee_signatures: std::collections::HashMap<
+        Text,
+        (Vec<Text>, Text),
+    >,
 }
 
 /// Record of an incomplete proof (accepted via Sorry tactic)
@@ -2230,6 +2242,7 @@ impl ProofSearchEngine {
             backtrack_stack: List::new(),
             incomplete_proofs: List::new(),
             reflection_registry: crate::refinement_reflection::RefinementReflectionRegistry::new(),
+            callee_signatures: std::collections::HashMap::new(),
         }
     }
 
@@ -2245,6 +2258,7 @@ impl ProofSearchEngine {
             backtrack_stack: List::new(),
             incomplete_proofs: List::new(),
             reflection_registry: crate::refinement_reflection::RefinementReflectionRegistry::new(),
+            callee_signatures: std::collections::HashMap::new(),
         }
     }
 
@@ -2282,6 +2296,21 @@ impl ProofSearchEngine {
         registry: crate::refinement_reflection::RefinementReflectionRegistry,
     ) {
         self.reflection_registry = registry;
+    }
+
+    /// Register the sort signature of a user function that isn't
+    /// reflected (body-less declarations, extern declarations, …).
+    /// The UF fallback in the translator consults this map so calls
+    /// to Bool/Real-returning functions get the right Z3 sort even
+    /// without an axiom.
+    pub fn register_callee_signature(
+        &mut self,
+        name: Text,
+        param_sorts: Vec<Text>,
+        ret_sort: Text,
+    ) {
+        self.callee_signatures
+            .insert(name, (param_sorts, ret_sort));
     }
 
     /// Read-only access to the reflection registry, e.g. for
@@ -4383,6 +4412,21 @@ impl ProofSearchEngine {
                 rf.name.as_str(),
                 param_sorts,
                 rf.return_sort.as_str().to_string(),
+            );
+        }
+        // Also register signatures for body-less / extern / unreflected
+        // module functions (populated by the caller via
+        // `register_callee_signature`). These won't have defining
+        // axioms — they stay opaque — but the UF sort signature is
+        // correct, so `exists p: Nat. is_prime(p)` can at least
+        // translate without the "not boolean" failure.
+        for (name, (ps, r)) in &self.callee_signatures {
+            let param_sorts: Vec<String> =
+                ps.iter().map(|s| s.as_str().to_string()).collect();
+            translator.register_callee_signature(
+                name.as_str(),
+                param_sorts,
+                r.as_str().to_string(),
             );
         }
 
