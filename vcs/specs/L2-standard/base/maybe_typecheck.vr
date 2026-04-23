@@ -1,0 +1,107 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: base, maybe, option
+// @timeout: 15000
+// @description: core.base.maybe — Maybe<T> query + combinator surface
+
+mount core.*;
+
+fn is_some_is_none() {
+    let s: Maybe<Int> = Some(3);
+    let n: Maybe<Int> = None;
+    assert_eq(s.is_some(), true);
+    assert_eq(s.is_none(), false);
+    assert_eq(n.is_some(), false);
+    assert_eq(n.is_none(), true);
+}
+
+fn unwrap_or() {
+    let s: Maybe<Int> = Some(7);
+    let n: Maybe<Int> = None;
+    assert_eq(s.unwrap_or(0), 7);
+    assert_eq(n.unwrap_or(42), 42);
+}
+
+fn unwrap_or_else_lazy() {
+    let n: Maybe<Int> = None;
+    let v = n.unwrap_or_else(|| 99);
+    assert_eq(v, 99);
+}
+
+fn map_changes_value() {
+    let s: Maybe<Int> = Some(5);
+    let mapped = s.map(|v| v * 2);
+    match mapped {
+        Some(x) => { assert_eq(x, 10); }
+        None    => { panic("map of Some must be Some"); }
+    }
+    let n: Maybe<Int> = None;
+    let mapped_none = n.map(|v| v * 2);
+    match mapped_none {
+        Some(_) => { panic("map of None must be None"); }
+        None    => {}
+    }
+}
+
+fn and_then_is_flat_map() {
+    let s: Maybe<Int> = Some(5);
+    let chained = s.and_then(|v| if v > 0 { Some(v + 1) } else { None });
+    match chained {
+        Some(x) => { assert_eq(x, 6); }
+        None    => { panic("and_then on positive Some(5) → Some(6)"); }
+    }
+}
+
+fn filter_keeps_matching() {
+    let s: Maybe<Int> = Some(10);
+    let kept = s.filter(|v| *v > 5);
+    match kept {
+        Some(_) => {}
+        None    => { panic("10 > 5 must keep the Some"); }
+    }
+    let dropped = Some(1).filter(|v| *v > 5);
+    match dropped {
+        Some(_) => { panic("1 > 5 is false so filter must produce None"); }
+        None    => {}
+    }
+}
+
+fn ok_or_promotes_to_result() {
+    let s: Maybe<Int> = Some(3);
+    let r: Result<Int, Text> = s.ok_or("oops".clone());
+    match r {
+        Ok(v)  => { assert_eq(v, 3); }
+        Err(_) => { panic("Some.ok_or → Ok"); }
+    }
+    let n: Maybe<Int> = None;
+    let r2: Result<Int, Text> = n.ok_or("missing".clone());
+    match r2 {
+        Ok(_)  => { panic("None.ok_or → Err"); }
+        Err(_) => {}
+    }
+}
+
+fn and_or_xor_examples() {
+    let a: Maybe<Int> = Some(1);
+    let b: Maybe<Int> = Some(2);
+    let n: Maybe<Int> = None;
+    // a.and(b) == b if a is Some, else None
+    match a.and(b) { Some(v) => { assert_eq(v, 2); }, None => { panic("Some.and(Some)"); } }
+    // a.or(n) == a if Some
+    match a.or(n) { Some(v) => { assert_eq(v, 1); }, None => { panic("Some.or(None)"); } }
+    // Some.xor(Some) = None
+    match Some(1).xor(Some(2)) { Some(_) => { panic("xor of two Some must be None"); }, None => {} }
+}
+
+fn main() {
+    is_some_is_none();
+    unwrap_or();
+    unwrap_or_else_lazy();
+    map_changes_value();
+    and_then_is_flat_map();
+    filter_keeps_matching();
+    ok_or_promotes_to_result();
+    and_or_xor_examples();
+    print("maybe_typecheck ok");
+}
