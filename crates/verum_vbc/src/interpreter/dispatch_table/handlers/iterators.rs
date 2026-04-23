@@ -70,8 +70,49 @@ pub(in super::super) fn handle_iter_new(state: &mut InterpreterState) -> Interpr
         return Ok(DispatchResult::Continue);
     }
 
+    // Pre-built iterator blob conversion — if the source is already a
+    // 4-value iterator blob (TypeId::UNIT + 4 × Value with a valid iter_type
+    // tag in slot 3, produced by explicit `.iter()` on builtin Map/Set/
+    // List/Array), unwrap it to the collection pointer the 3-value blob
+    // layout expects, using the tagged iter_type from slot 3 instead of
+    // re-deriving it from the wrapper blob's own header (which is
+    // `TypeId::UNIT` and would otherwise misclassify as
+    // `ITER_TYPE_LIST`).
+    let (source, forced_iter_type) = if source.is_ptr() {
+        let src_ptr = source.as_ptr::<u8>();
+        if !src_ptr.is_null()
+            && (src_ptr as usize).is_multiple_of(std::mem::align_of::<heap::ObjectHeader>())
+        {
+            let src_header = unsafe { &*(src_ptr as *const heap::ObjectHeader) };
+            if src_header.type_id == TypeId::UNIT
+                && src_header.size as usize == 4 * std::mem::size_of::<Value>()
+            {
+                let data = unsafe {
+                    src_ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value
+                };
+                let tag = unsafe { (*data.add(3)).as_i64() };
+                if (ITER_TYPE_LIST..=ITER_TYPE_RANGE).contains(&tag) {
+                    let inner_source = unsafe { *data };
+                    (inner_source, Some(tag))
+                } else {
+                    (source, None)
+                }
+            } else {
+                (source, None)
+            }
+        } else {
+            (source, None)
+        }
+    } else {
+        (source, None)
+    };
+
     // Determine collection type by examining the object header
-    let iter_type = if source.is_ptr() {
+    let iter_type = if let Some(tag) = forced_iter_type {
+        // Already-built iterator blob — use the blob's tag rather than
+        // re-deriving from `source`'s (now unwrapped) header.
+        tag
+    } else if source.is_ptr() {
         let source_ptr = source.as_ptr::<u8>();
         if !source_ptr.is_null() {
             // Read object header to get type_id

@@ -1120,7 +1120,6 @@ pub(in super::super) fn handle_call_method(state: &mut InterpreterState) -> Inte
         }
     }
 
-
     Err(InterpreterError::Panic {
         message: format!("method '{}' not found on value", method_name),
     })
@@ -2727,14 +2726,36 @@ pub(super) fn dispatch_primitive_method(
                     return Ok(Some(Value::from_i64(count as i64)));
                 }
                 "iter" => {
-                    // Return the map/set itself — `IterNew` already
-                    // recognises `TypeId::MAP` / `TypeId::SET` and builds
-                    // the right `ITER_TYPE_MAP` iterator, and the `IterNext`
-                    // handler yields `(key, value)` tuples. Wrapping the
-                    // map in a second layer of iterator object would cause
-                    // `IterNew` to mis-classify it as a list (its type_id
-                    // becomes `TypeId::UNIT`).
-                    return Ok(Some(*receiver));
+                    // Return a proper 4-value iterator blob
+                    // [source_ptr, front_idx=0, back_idx=capacity, iter_type=ITER_TYPE_MAP]
+                    // so explicit `.next()` / `.size_hint()` / `.fold()` calls
+                    // work through the iterator-blob dispatch path at
+                    // `TypeId::UNIT + 4 × Value` layout below.
+                    //
+                    // For-loops continue to work: `IterNew` detects a
+                    // pre-built iterator blob (TypeId::UNIT + 4-value) and
+                    // passes it through unchanged — see the updated
+                    // `handle_iter_new` in `iterators.rs`.
+                    //
+                    // `back_idx` is set to `capacity` (not `len`) because
+                    // Map/Set iteration scans the raw `entries` array and
+                    // `next` on an iterator-blob skips empty slots.
+                    let header_ptr = unsafe {
+                        ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value
+                    };
+                    let capacity = unsafe { (*header_ptr.add(1)).as_i64() };
+                    let iter_obj = state.heap.alloc(TypeId::UNIT, 4 * std::mem::size_of::<Value>())?;
+                    state.record_allocation();
+                    let iter_ptr = unsafe {
+                        (iter_obj.as_ptr() as *mut u8).add(heap::OBJECT_HEADER_SIZE) as *mut Value
+                    };
+                    unsafe {
+                        *iter_ptr = *receiver;                         // source_ptr (Map/Set)
+                        *iter_ptr.add(1) = Value::from_i64(0);         // front_idx = 0
+                        *iter_ptr.add(2) = Value::from_i64(capacity);  // back_idx = capacity
+                        *iter_ptr.add(3) = Value::from_i64(ITER_TYPE_MAP); // iter_type
+                    }
+                    return Ok(Some(Value::from_ptr(iter_obj.as_ptr() as *mut u8)));
                 }
                 "contains" | "contains_key" if is_map => {
                     let caller_base = state.reg_base();
