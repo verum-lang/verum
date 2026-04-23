@@ -1,0 +1,68 @@
+// @test: integration
+// @tier: 0
+// @level: L1
+// @tags: verify, variant, adt, forall, exists, quantifier, exhaustiveness
+// @expect: pass
+//
+// The translator's quantifier path (`forall x: T. P(x)` / `exists
+// x: T. P(x)`) must inject the variant-exhaustiveness constraint
+// into the body when T is a declared variant type:
+//
+//     forall x: T. P(x)   →   forall x. (x == T.A || ...) → P(x)
+//     exists x: T. P(x)   →   exists x. (x == T.A || ...) ∧ P(x)
+//
+// Before the fix, parameter-level exhaustiveness only fired for
+// theorem parameters. Quantifier-bound variables inside the
+// formula didn't see the constraint; claims like
+// `forall c: Color. c == R || c == G || c == B` were unprovable.
+
+public type Color is Red | Green | Blue;
+public type Signal is On | Off | Unknown;
+
+// --- Forall cases ---
+
+@verify(formal)
+theorem forall_color_enum()
+    ensures forall c: Color.
+        c == Color.Red || c == Color.Green || c == Color.Blue
+    proof by auto;
+
+@verify(formal)
+theorem forall_signal_enum()
+    ensures forall s: Signal.
+        s == Signal.On || s == Signal.Off || s == Signal.Unknown
+    proof by auto;
+
+@verify(formal)
+theorem forall_color_excluded_middle()
+    ensures forall c: Color. c == Color.Red || c != Color.Red
+    proof by auto;
+
+// --- Exists cases ---
+
+@verify(formal)
+theorem exists_red()
+    ensures exists c: Color. c == Color.Red
+    proof by auto;
+
+@verify(formal)
+theorem exists_non_red()
+    ensures exists c: Color. c != Color.Red
+    proof by auto;
+
+@verify(formal)
+theorem exists_on_signal()
+    ensures exists s: Signal. s == Signal.On
+    proof by auto;
+
+// --- Mixed forall + exists ---
+
+@verify(formal)
+theorem forall_has_a_match()
+    ensures forall c: Color.
+        exists d: Color. c == d
+    proof by auto;
+
+fn main() {
+    print("L1-core: verification_phase/variant_quantifier_exhaustiveness");
+}

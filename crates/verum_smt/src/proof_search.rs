@@ -4476,6 +4476,15 @@ impl ProofSearchEngine {
             );
         }
 
+        // Push the variant registry into the translator so
+        // quantifier-bound variables typed as variants get the
+        // exhaustiveness constraint automatically applied.
+        for (type_name, ctors) in &self.variant_map {
+            let ctor_names: Vec<String> =
+                ctors.iter().map(|c| c.as_str().to_string()).collect();
+            translator.register_variant_type(type_name.as_str(), ctor_names);
+        }
+
         // Build formula: hypotheses ⇒ goal
         let mut formula = goal.goal.clone();
 

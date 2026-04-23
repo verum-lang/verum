@@ -286,6 +286,18 @@ pub struct Translator<'ctx> {
     callee_signatures: std::cell::RefCell<
         std::collections::HashMap<String, (Vec<String>, String)>,
     >,
+
+    /// Variant-type registry — variant type name → constructor
+    /// names. Used by the quantifier translator to emit
+    /// exhaustiveness constraints `∀c: T. (c == T.A || … ) → body`
+    /// automatically when the quantifier binds a variant-typed
+    /// variable. Without this the quantifier scope drops the
+    /// exhaustiveness hypothesis that's added at the theorem-param
+    /// layer, and `forall c: T. P(c)` claims fail even when
+    /// enumeration closes them.
+    variant_registry: std::cell::RefCell<
+        std::collections::HashMap<String, Vec<String>>,
+    >,
 }
 
 /// Build the canonical length-constant name for an expression.
@@ -321,6 +333,7 @@ impl<'ctx> Translator<'ctx> {
             length_constants: std::cell::RefCell::new(std::collections::BTreeSet::new()),
             pending_axioms: std::cell::RefCell::new(Vec::new()),
             callee_signatures: std::cell::RefCell::new(std::collections::HashMap::new()),
+            variant_registry: std::cell::RefCell::new(std::collections::HashMap::new()),
         }
     }
 
@@ -333,6 +346,7 @@ impl<'ctx> Translator<'ctx> {
             length_constants: std::cell::RefCell::new(std::collections::BTreeSet::new()),
             pending_axioms: std::cell::RefCell::new(Vec::new()),
             callee_signatures: std::cell::RefCell::new(std::collections::HashMap::new()),
+            variant_registry: std::cell::RefCell::new(std::collections::HashMap::new()),
         }
     }
 
@@ -388,6 +402,56 @@ impl<'ctx> Translator<'ctx> {
         for (k, v) in src.iter() {
             dst.insert(k.clone(), v.clone());
         }
+        // Propagate variant registry too — the quantifier bound
+        // variable might be typed as a variant.
+        let vs = other.variant_registry.borrow();
+        let mut vd = self.variant_registry.borrow_mut();
+        for (k, v) in vs.iter() {
+            vd.insert(k.clone(), v.clone());
+        }
+    }
+
+    /// Register a variant type on the translator so quantifier
+    /// translation emits exhaustiveness constraints for bound
+    /// variables typed as that variant.
+    pub fn register_variant_type(&self, type_name: &str, ctors: Vec<String>) {
+        self.variant_registry
+            .borrow_mut()
+            .insert(type_name.to_string(), ctors);
+    }
+
+    /// If `ty` is a single-segment `TypeKind::Path` naming a
+    /// registered variant, return the Bool expression
+    /// `x == T.A || x == T.B || ...` for the bound variable
+    /// `var_name`. Returns None when `ty` isn't a variant
+    /// reference or no registry entry exists — caller should
+    /// skip exhaustiveness in that case.
+    pub fn build_variant_exhaustiveness(
+        &self,
+        ty: &verum_ast::ty::Type,
+        var_name: &str,
+    ) -> Option<Bool> {
+        let type_name = match &ty.kind {
+            verum_ast::ty::TypeKind::Path(p) => p.as_ident()?.name.as_str().to_string(),
+            _ => return None,
+        };
+        let ctors = self.variant_registry.borrow().get(&type_name)?.clone();
+        if ctors.is_empty() {
+            return None;
+        }
+
+        // Build x == path_T.A ||  x == path_T.B || ...
+        // The bound-variable symbol is keyed by its name; each
+        // constructor uses the `path_T.C` canonical key.
+        let x_const = Int::new_const(var_name);
+        let mut equalities: Vec<Bool> = Vec::with_capacity(ctors.len());
+        for ctor in &ctors {
+            let ctor_key = format!("path_{}.{}", type_name, ctor);
+            let ctor_const = Int::new_const(ctor_key.as_str());
+            equalities.push(x_const.eq(&ctor_const));
+        }
+        let refs: Vec<&Bool> = equalities.iter().collect();
+        Some(Bool::or(&refs))
     }
 
     /// Resolve an SMT-LIB sort name to a Z3 `Sort` object.
@@ -2695,6 +2759,16 @@ impl<'ctx> Translator<'ctx> {
             }
         }
 
+        // Variant exhaustiveness for quantifier-bound variable: if
+        // `x: T` where T is a declared variant type with N
+        // constructors, transform `forall x: T. P(x)` into
+        // `forall x. (x == T.A || x == T.B || ... ) → P(x)`. Same
+        // contract the top-level parameter-exhaustiveness pass
+        // provides for theorem-level parameters.
+        if let Some(exhaust) = inner_translator.build_variant_exhaustiveness(&ty, &var_name) {
+            body_bool = exhaust.implies(&body_bool);
+        }
+
         // Generate instantiation patterns from the body
         let patterns = self.generate_quantifier_patterns(&bound_var, body)?;
 
@@ -2900,6 +2974,16 @@ impl<'ctx> Translator<'ctx> {
             if let Some(guard_bool) = guard_z3.as_bool() {
                 body_bool = Bool::and(&[&guard_bool, &body_bool]);
             }
+        }
+
+        // Variant exhaustiveness for exists-bound variable. For
+        // `exists x: T. P(x)` where T is a variant, conjoin the
+        // disjunction so `exists x. (x == T.A || ...) ∧ P(x)` —
+        // mirrors the forall transformation with AND instead of
+        // implication, which matches the existential semantics
+        // (we're asserting *some* inhabitant satisfies P).
+        if let Some(exhaust) = inner_translator.build_variant_exhaustiveness(&ty, &var_name) {
+            body_bool = Bool::and(&[&exhaust, &body_bool]);
         }
 
         // Generate instantiation patterns from the body
