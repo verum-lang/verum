@@ -2602,9 +2602,30 @@ impl TypeError {
 
             NotResultOrMaybe { ty, span } => {
                 let mut builder = DiagnosticBuilder::error()
-                    .message(format!("type `{}` is not Result or Maybe", ty));
+                    .code("E0205")
+                    .message(format!(
+                        "cannot use `?` on a value of type `{}`",
+                        ty
+                    ))
+                    .add_note(
+                        "the `?` operator requires a type that implements the \
+                         `Try` protocol (e.g. `Result<T, E>`, `Maybe<T>`)"
+                            .to_string(),
+                    )
+                    .help(format!(
+                        "pattern-match instead: `match expr {{ Some(v) => v, None => ... }}` \
+                         (or `Ok`/`Err` for Result)"
+                    ))
+                    .help(
+                        "for `Map`/`Set`/`List` lookups, use the `_optional` \
+                         variants (e.g. `map.get_optional(key)`) which return `Maybe<V>`"
+                            .to_string(),
+                    );
                 if let Some(diag_span) = convert_span(*span) {
-                    builder = builder.span(diag_span);
+                    builder = builder.span_label(
+                        diag_span,
+                        format!("`{}` does not implement `Try`", ty),
+                    );
                 }
                 builder.build()
             }
