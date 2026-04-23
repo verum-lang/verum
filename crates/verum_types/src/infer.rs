@@ -31204,14 +31204,28 @@ impl TypeChecker {
                     Type::unit()
                 };
 
-                // Wrap return type in Future<T> for async methods
-                // Syntax grammar: recursive-descent parseable (LL(k), k<=3), reserved keywords only let/fn/is, unified "type X is" definitions — Async functions return Future<T>
-                let final_return_type = if method.is_async {
-                    Type::Future {
-                        output: Box::new(return_type),
+                // Wrap return type in Result<T, E> for `throws(E)` methods,
+                // then Future<T> for `async`. Protocol method signatures
+                // must apply the same return-type transformations as
+                // free functions — external callers see the wrapped type.
+                let return_type_with_throws = if let Maybe::Some(ref tc) = method.throws_clause {
+                    if !tc.error_types.is_empty() {
+                        let error_ty = tc.error_types.iter().next()
+                            .map(|t| self.ast_to_type_lenient(t))
+                            .unwrap_or_else(|| Type::Var(TypeVar::fresh()));
+                        Type::result(return_type, error_ty)
+                    } else {
+                        return_type
                     }
                 } else {
                     return_type
+                };
+                let final_return_type = if method.is_async {
+                    Type::Future {
+                        output: Box::new(return_type_with_throws),
+                    }
+                } else {
+                    return_type_with_throws
                 };
 
                 // Build function type for this method
@@ -31494,14 +31508,30 @@ impl TypeChecker {
                 Type::unit()
             };
 
-            // Wrap return type in Future<T> for async methods
-            // Syntax grammar: recursive-descent parseable (LL(k), k<=3), reserved keywords only let/fn/is, unified "type X is" definitions — Async functions return Future<T>
-            let final_return_type = if method.is_async {
-                Type::Future {
-                    output: Box::new(return_type),
+            // Wrap return type in Result<T, E> for `throws(E)` methods,
+            // then Future<T> for `async`. Method signatures visible to
+            // callers must apply the same return-type transformations as
+            // free functions — otherwise `obj.method()` on a throws method
+            // is typed as the raw T, breaking `.map_err` / `?` at the
+            // call site.
+            let return_type_with_throws = if let Maybe::Some(ref tc) = method.throws_clause {
+                if !tc.error_types.is_empty() {
+                    let error_ty = tc.error_types.iter().next()
+                        .map(|t| self.ast_to_type_lenient(t))
+                        .unwrap_or_else(|| Type::Var(TypeVar::fresh()));
+                    Type::result(return_type, error_ty)
+                } else {
+                    return_type
                 }
             } else {
                 return_type
+            };
+            let final_return_type = if method.is_async {
+                Type::Future {
+                    output: Box::new(return_type_with_throws),
+                }
+            } else {
+                return_type_with_throws
             };
 
             // Build function type for this method
@@ -33655,13 +33685,31 @@ impl TypeChecker {
                     Type::unit()
                 };
 
-                // Wrap return type in Future<T> for async functions
-                let final_return_type = if func.is_async {
-                    Type::Future {
-                        output: Box::new(return_type),
+                // Wrap return type in Result<T, E> for `throws(E)` functions,
+                // then Future<T> for async. This is the cross-module
+                // function-signature extraction path — invoked when a
+                // user module imports a function from another inline
+                // module. Without the throws wrap here, callers see the
+                // raw body type (not `Result<T, E>`) and `.map_err` / `?`
+                // fail at the call site.
+                let return_type_with_throws = if let Maybe::Some(ref tc) = func.throws_clause {
+                    if !tc.error_types.is_empty() {
+                        let error_ty = tc.error_types.iter().next()
+                            .and_then(|t| self.ast_to_type(t).ok())
+                            .unwrap_or_else(|| Type::Var(TypeVar::fresh()));
+                        Type::result(return_type, error_ty)
+                    } else {
+                        return_type
                     }
                 } else {
                     return_type
+                };
+                let final_return_type = if func.is_async {
+                    Type::Future {
+                        output: Box::new(return_type_with_throws),
+                    }
+                } else {
+                    return_type_with_throws
                 };
 
                 return Some((Type::Function {
