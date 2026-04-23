@@ -2364,6 +2364,15 @@ pub enum CalcRelation {
 pub struct ProofCase {
     /// Case pattern
     pub pattern: Pattern,
+    /// Optional case condition, carrying the surface expression for
+    /// guard-shape cases like `case a >= b =>`. The parser falls back
+    /// to expression parsing when the pattern parser fails — without
+    /// preserving the expression here, the verifier can't thread
+    /// `a >= b` as a hypothesis inside the case body, and decidable
+    /// claims like `max(a, b) >= a` fail even though their content
+    /// is pure integer arithmetic under the case's condition.
+    #[serde(default)]
+    pub condition: Maybe<Heap<Expr>>,
     /// Proof for this case
     pub proof: List<ProofStep>,
     /// Source span

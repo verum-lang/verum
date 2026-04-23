@@ -879,9 +879,22 @@ fn verify_proof_cases(
             ))
         };
 
+        // Thread the case's condition expression as a hypothesis into
+        // the body. For `case a >= b => { ... }` the parser stored the
+        // expression `a >= b` in `case.condition`; inside that case's
+        // proof body it's a known fact. Without this, the verifier
+        // treated the case's condition as irrelevant and decidable
+        // arithmetic like `max(a, b) == a` (under `a >= b`) failed
+        // even though the SMT could discharge it in microseconds given
+        // the hypothesis.
+        let mut case_hypotheses = case_goal.hypotheses.clone();
+        if let Maybe::Some(cond) = &case.condition {
+            case_hypotheses.push(cond.as_ref().clone());
+        }
+
         // Verify the proof steps within this case
         let inner_steps =
-            verify_proof_steps(engine, smt_ctx, &case.proof, &case_goal.hypotheses)?;
+            verify_proof_steps(engine, smt_ctx, &case.proof, &case_hypotheses)?;
 
         steps.push(VerifiedStep {
             description: Text::from(format!("case {}: pattern {:?}", i + 1, case.pattern)),

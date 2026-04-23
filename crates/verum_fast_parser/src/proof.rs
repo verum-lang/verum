@@ -1409,6 +1409,7 @@ impl<'a> RecursiveParser<'a> {
                                     scrutinee: Heap::new(scrutinee),
                                     cases: List::from_iter([ProofCase {
                                         pattern: wildcard,
+                                        condition: Maybe::None,
                                         proof: steps.into_iter().collect(),
                                         span: case_span,
                                     }]),
@@ -1705,7 +1706,11 @@ impl<'a> RecursiveParser<'a> {
                 self.stream.advance();
             }
 
-            // Case pattern or expression predicate
+            // Case pattern or expression predicate. `condition`
+            // collects the Expr for guard-shape cases (`case a >= b`)
+            // so the verifier can thread it as a hypothesis; it
+            // stays `None` for real constructor / literal patterns.
+            let mut condition: Maybe<Heap<Expr>> = Maybe::None;
             // Try pattern first. If after pattern we don't see => or { or where,
             // backtrack and parse as expression (for `case x >= 0 =>` style)
             // Use parse_expr_bp(4) to stop before FatArrow (=>), which has bp=3.
@@ -1739,24 +1744,38 @@ impl<'a> RecursiveParser<'a> {
                     // Not a valid case continuation - parse as expression instead
                     self.stream.reset_to(checkpoint);
                     let expr = self.parse_expr_bp(4)?;
-                    Pattern::new(
+                    let pat = Pattern::new(
                         verum_ast::PatternKind::Literal(verum_ast::Literal::bool(true, expr.span)),
                         expr.span,
-                    )
+                    );
+                    // Preserve the expression as the case condition so
+                    // the verifier can thread it as a hypothesis into
+                    // the case body.
+                    condition = Maybe::Some(Heap::new(expr));
+                    pat
                 }
             } else {
                 // Parse as expression and wrap in a pattern
                 let expr = self.parse_expr_bp(4)?;
-                Pattern::new(
+                let pat = Pattern::new(
                     verum_ast::PatternKind::Literal(verum_ast::Literal::bool(true, expr.span)),
                     expr.span,
-                )
+                );
+                condition = Maybe::Some(Heap::new(expr));
+                pat
             };
 
             // Optional where guard: case n where cond => ...
-            // Parse and discard the guard condition (used for proof documentation)
+            // Parse and capture the guard expression so the verifier
+            // can use it alongside (or in place of) the case condition
+            // as a hypothesis in the body.
             if self.stream.consume(&TokenKind::Where).is_some() {
-                let _guard = self.parse_expr_no_struct()?;
+                let guard = self.parse_expr_no_struct()?;
+                // If no fallback-expression condition was set, use the
+                // where-guard as the case condition. If both are set,
+                // prefer the `where` guard — it's semantically the
+                // stronger surface form.
+                condition = Maybe::Some(Heap::new(guard));
             }
 
             // => or {
@@ -1766,6 +1785,7 @@ impl<'a> RecursiveParser<'a> {
                     let steps = self.parse_proof_case_body()?;
                     cases.push(ProofCase {
                         pattern,
+                        condition: condition.clone(),
                         proof: steps.into_iter().collect(),
                         span: self.stream.make_span(start_pos),
                     });
@@ -1775,6 +1795,7 @@ impl<'a> RecursiveParser<'a> {
                     let calc_span = chain.span;
                     cases.push(ProofCase {
                         pattern,
+                        condition: condition.clone(),
                         proof: List::from_iter([ProofStep {
                             kind: ProofStepKind::Calc(chain),
                             span: calc_span,
@@ -1789,6 +1810,7 @@ impl<'a> RecursiveParser<'a> {
                     // for the synthetic literal to ensure proper error reporting.
                     cases.push(ProofCase {
                         pattern,
+                        condition: condition.clone(),
                         proof: List::from_iter([ProofStep {
                             kind: ProofStepKind::Show {
                                 proposition: Heap::new(Expr::new(
@@ -1808,6 +1830,7 @@ impl<'a> RecursiveParser<'a> {
                 self.stream.expect(TokenKind::RBrace)?;
                 cases.push(ProofCase {
                     pattern,
+                    condition: condition.clone(),
                     proof: steps.into_iter().collect(),
                     span: self.stream.make_span(start_pos),
                 });

@@ -1,0 +1,54 @@
+// @test: integration
+// @tier: 0
+// @level: L1
+// @tags: proof, cases, guard, hypothesis, max
+// @expect: pass
+//
+// `proof by cases` with guard-shape case patterns like
+// `case a >= b =>` must thread the expression `a >= b` as a
+// hypothesis into the case body. Before the fix, the parser
+// discarded the fallback-expression when the pattern parser failed,
+// so the verifier treated the case condition as irrelevant and
+// decidable claims closed only if the SMT happened to see the fact
+// via some other route.
+//
+// Root-cause architectural fix:
+//   * `ProofCase` gains `condition: Maybe<Heap<Expr>>`.
+//   * The parser's fallback arms populate it.
+//   * `verify_proof_cases` pushes the condition onto the case's
+//     hypothesis set before verifying each case body.
+
+@verify(formal)
+theorem max_ge_both_via_cases(a: Int, b: Int)
+    ensures max(a, b) >= a && max(a, b) >= b
+{
+    proof by cases {
+        case a >= b => { conclude by auto }
+        case a < b  => { conclude by auto }
+    }
+}
+
+@verify(formal)
+theorem min_le_both_via_cases(a: Int, b: Int)
+    ensures min(a, b) <= a && min(a, b) <= b
+{
+    proof by cases {
+        case a <= b => { conclude by auto }
+        case a > b  => { conclude by auto }
+    }
+}
+
+@verify(formal)
+theorem sign_trichotomy_cases(x: Int)
+    ensures x > 0 || x == 0 || x < 0
+{
+    proof by cases {
+        case x > 0 => { conclude by auto }
+        case x == 0 => { conclude by auto }
+        case x < 0 => { conclude by auto }
+    }
+}
+
+fn main() {
+    print("L1-core: proof/tactics/cases_with_guard_condition");
+}
