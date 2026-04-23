@@ -1,0 +1,99 @@
+// =============================================================================
+// builtins/meta_fns.vr — Engine metadata functions
+// =============================================================================
+// Layer: 4
+// Spec: sqlite-native.md §15.1 (Metadata section)
+//
+// `typeof(X)` is a pure function over `Register`. The remaining
+// metadata functions (`changes`, `last_insert_rowid`, ...) read
+// per-connection state, so they take a `&MetaCtx` view that the
+// L6 connection layer materialises before each call. The catalogue
+// keeps the *declarations* here; wiring is done at the dispatch site.
+// =============================================================================
+
+module core.database.sqlite.native.builtins.meta_fns;
+
+mount core.*;
+mount base.{Text, Maybe};
+mount core.database.sqlite.native.l4_vdbe.register.{Register, RNull, RInt, RReal, RText, RBlob, RRowId};
+
+// -----------------------------------------------------------------------------
+// TYPEOF(X)
+// -----------------------------------------------------------------------------
+
+public fn typeof_value(v: &Register) -> Register {
+    let name: Text = match v {
+        RNull     => "null".clone(),
+        RInt(_)   => "integer".clone(),
+        RRowId(_) => "integer".clone(),
+        RReal(_)  => "real".clone(),
+        RText(_)  => "text".clone(),
+        RBlob(_)  => "blob".clone(),
+    };
+    RText(name)
+}
+
+// -----------------------------------------------------------------------------
+// SQLITE_VERSION() / SQLITE_SOURCE_ID() — fixed strings.
+// -----------------------------------------------------------------------------
+
+public fn loom_version() -> Text {
+    "3.45.0+loom-0.1".clone()
+}
+
+public fn loom_source_id() -> Text {
+    "2026-04-24 verum-loom alpha".clone()
+}
+
+public fn sqlite_version() -> Register { RText(loom_version()) }
+public fn sqlite_source_id() -> Register { RText(loom_source_id()) }
+
+// -----------------------------------------------------------------------------
+// Per-connection metadata view
+// -----------------------------------------------------------------------------
+//
+// Carries the bits the SQLITE_* metadata functions need, so a single
+// pure function can serve any caller (interpreter or external API).
+//
+// `n_changes`         — rows changed by the immediately previous INSERT/UPDATE/DELETE
+// `n_total_changes`   — cumulative row changes for the connection
+// `last_rowid`        — last automatically-assigned rowid by INSERT
+// =============================================================================
+
+public type MetaCtx is {
+    n_changes: Int64,
+    n_total_changes: Int64,
+    last_rowid: Int64,
+};
+
+public fn meta_ctx_new() -> MetaCtx {
+    MetaCtx {
+        n_changes: 0 as Int64,
+        n_total_changes: 0 as Int64,
+        last_rowid: 0 as Int64,
+    }
+}
+
+public fn changes(ctx: &MetaCtx) -> Register {
+    RInt(ctx.n_changes)
+}
+
+public fn total_changes(ctx: &MetaCtx) -> Register {
+    RInt(ctx.n_total_changes)
+}
+
+public fn last_insert_rowid(ctx: &MetaCtx) -> Register {
+    RInt(ctx.last_rowid)
+}
+
+// Update helpers (called from L6 after each DML)
+
+public fn meta_record_dml(ctx: &mut MetaCtx, rows: Int64) {
+    ctx.n_changes = rows;
+    ctx.n_total_changes = ctx.n_total_changes + rows;
+}
+
+public fn meta_record_insert(ctx: &mut MetaCtx, rowid: Int64) {
+    ctx.last_rowid = rowid;
+    meta_record_dml(ctx, 1 as Int64);
+}

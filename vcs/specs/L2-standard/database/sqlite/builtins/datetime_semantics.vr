@@ -1,0 +1,147 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, builtins, datetime
+// @timeout: 5000
+// @expected-exit: 0
+//
+// Pure-Verum semantics of the loom date/time builders. Hits the
+// happy paths only — modifier coverage is exercised by the
+// SQLite differential harness once the facade lands.
+
+mount core.database.sqlite.native.l4_vdbe.register.{
+    Register, RNull, RInt, RReal, RText,
+};
+mount core.database.sqlite.native.builtins.datetime_fns.{
+    Calendar, cal_zero, cal_to_julian, julian_to_cal,
+    parse_iso, format_date, format_time, format_datetime,
+    DateTimeClock, clock_unix_epoch, clock_at_julian,
+    julianday as fn_julianday,
+    unixepoch as fn_unixepoch,
+    date_fn,
+    time_fn,
+    datetime_fn,
+    strftime as fn_strftime,
+    timediff,
+};
+
+fn require_text(r: Register, expected: Text) {
+    match r {
+        RText(s) => assert(s == expected),
+        _        => panic("expected RText"),
+    }
+}
+
+fn require_int(r: Register, expected: Int64) {
+    match r {
+        RInt(x) => assert_eq(x, expected),
+        _       => panic("expected RInt"),
+    }
+}
+
+fn test_iso_round_trip() {
+    let cal = Calendar {
+        year: 2026, month: 4, day: 24,
+        hour: 12, minute: 0, second: 0, millis: 0,
+    };
+    let jd = cal_to_julian(&cal);
+    let back = julian_to_cal(jd);
+    assert_eq(back.year, 2026);
+    assert_eq(back.month, 4);
+    assert_eq(back.day, 24);
+    assert_eq(back.hour, 12);
+    assert_eq(back.minute, 0);
+    assert_eq(back.second, 0);
+}
+
+fn test_parse_iso_full() {
+    let parsed = parse_iso(&"2026-04-24 13:45:07.123".clone());
+    let cal = match parsed {
+        Some(c) => c,
+        None    => panic("ISO parse should succeed"),
+    };
+    assert_eq(cal.year, 2026);
+    assert_eq(cal.month, 4);
+    assert_eq(cal.day, 24);
+    assert_eq(cal.hour, 13);
+    assert_eq(cal.minute, 45);
+    assert_eq(cal.second, 7);
+    assert_eq(cal.millis, 123);
+}
+
+fn test_format_helpers() {
+    let cal = Calendar {
+        year: 1999, month: 1, day: 9,
+        hour: 3, minute: 5, second: 7, millis: 0,
+    };
+    assert(format_date(&cal) == "1999-01-09".clone());
+    assert(format_time(&cal) == "03:05:07".clone());
+    assert(format_datetime(&cal) == "1999-01-09 03:05:07".clone());
+}
+
+fn test_unixepoch_at_unix_zero() {
+    let clock = clock_unix_epoch();
+    let mut args: List<Register> = List.new();
+    args.push(RText("now".clone()));
+    require_int(fn_unixepoch(&args, &clock), 0 as Int64);
+}
+
+fn test_julianday_at_unix_zero() {
+    let clock = clock_unix_epoch();
+    let mut args: List<Register> = List.new();
+    args.push(RText("now".clone()));
+    match fn_julianday(&args, &clock) {
+        RReal(x) => assert(x == 2440587.5),
+        _        => panic("julianday should be REAL"),
+    }
+}
+
+fn test_date_with_modifier_plus_one_day() {
+    let clock = clock_unix_epoch();
+    let mut args: List<Register> = List.new();
+    args.push(RText("2026-04-24".clone()));
+    args.push(RText("+1 day".clone()));
+    require_text(date_fn(&args, &clock), "2026-04-25".clone());
+}
+
+fn test_datetime_full_format() {
+    let clock = clock_unix_epoch();
+    let mut args: List<Register> = List.new();
+    args.push(RText("2026-04-24 12:00:00".clone()));
+    require_text(datetime_fn(&args, &clock), "2026-04-24 12:00:00".clone());
+}
+
+fn test_strftime_year_month_day() {
+    let clock = clock_unix_epoch();
+    let mut args: List<Register> = List.new();
+    args.push(RText("%Y-%m-%d".clone()));
+    args.push(RText("2026-04-24".clone()));
+    require_text(fn_strftime(&args, &clock), "2026-04-24".clone());
+}
+
+fn test_timediff_positive() {
+    let clock = clock_unix_epoch();
+    match timediff(
+        &RText("2026-04-24 12:00:00".clone()),
+        &RText("2026-04-24 11:30:00".clone()),
+        &clock,
+    ) {
+        RText(s) => {
+            // Format: ±HH:MM:SS
+            assert(s.len() == 9);
+        }
+        _ => panic("TIMEDIFF should return RText"),
+    }
+}
+
+fn main() {
+    test_iso_round_trip();
+    test_parse_iso_full();
+    test_format_helpers();
+    test_unixepoch_at_unix_zero();
+    test_julianday_at_unix_zero();
+    test_date_with_modifier_plus_one_day();
+    test_datetime_full_format();
+    test_strftime_year_month_day();
+    test_timediff_positive();
+}

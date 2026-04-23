@@ -1,0 +1,212 @@
+// =============================================================================
+// builtins/window_fns.vr — SQL window functions
+// =============================================================================
+// Layer: 4
+// Spec: sqlite-native.md §15.3
+//
+// Window functions evaluate over a frame computed during the
+// sort-and-partition stage. Each window-fn call carries a
+// `WindowState` that the L4 interpreter advances at row level.
+//
+// We provide:
+//   ROW_NUMBER()                        — sequential counter per partition
+//   RANK() / DENSE_RANK()               — sort-aware tie semantics
+//   PERCENT_RANK() / CUME_DIST()        — distribution
+//   NTILE(N)                            — bucketise rows into N tiles
+//   LAG(X[, off[, default]])            — value `off` rows before
+//   LEAD(X[, off[, default]])           — value `off` rows after
+//   FIRST_VALUE(X) / LAST_VALUE(X) / NTH_VALUE(X, N)
+// =============================================================================
+
+module core.database.sqlite.native.builtins.window_fns;
+
+mount core.*;
+mount base.{Text, Maybe};
+mount collections.List;
+mount core.database.sqlite.native.l4_vdbe.register.{Register, RNull, RInt, RReal, RText, RBlob, RRowId};
+
+// -----------------------------------------------------------------------------
+// Window kind discriminator
+// -----------------------------------------------------------------------------
+
+public type WindowKind is
+      WRowNumber
+    | WRank
+    | WDenseRank
+    | WPercentRank
+    | WCumeDist
+    | WNtile
+    | WLag
+    | WLead
+    | WFirstValue
+    | WLastValue
+    | WNthValue;
+
+public fn window_kind_code(k: &WindowKind) -> Int {
+    match k {
+        WRowNumber   => 0,
+        WRank        => 1,
+        WDenseRank   => 2,
+        WPercentRank => 3,
+        WCumeDist    => 4,
+        WNtile       => 5,
+        WLag         => 6,
+        WLead        => 7,
+        WFirstValue  => 8,
+        WLastValue   => 9,
+        WNthValue    => 10,
+    }
+}
+
+// -----------------------------------------------------------------------------
+// WindowState — per-partition working storage
+// -----------------------------------------------------------------------------
+
+public type WindowState is {
+    kind: Int,
+    row_number: Int64,
+    rank_value: Int64,
+    dense_rank_value: Int64,
+    same_as_prev: Bool,
+    partition_size: Int64,
+    bucket_size: Int64,
+    n_param: Int64,
+    offset_param: Int,
+    default_value: Register,
+    buffered: List<Register>,
+    cur_index: Int,
+};
+
+public fn window_new(kind: Int) -> WindowState {
+    WindowState {
+        kind: kind,
+        row_number: 0 as Int64,
+        rank_value: 0 as Int64,
+        dense_rank_value: 0 as Int64,
+        same_as_prev: false,
+        partition_size: 0 as Int64,
+        bucket_size: 0 as Int64,
+        n_param: 0 as Int64,
+        offset_param: 1,
+        default_value: RNull,
+        buffered: List.new(),
+        cur_index: 0,
+    }
+}
+
+public fn window_set_offset(st: &mut WindowState, off: Int) {
+    st.offset_param = off;
+}
+
+public fn window_set_default(st: &mut WindowState, v: Register) {
+    st.default_value = v;
+}
+
+public fn window_set_n(st: &mut WindowState, n: Int64) {
+    st.n_param = n;
+}
+
+public fn window_set_partition_size(st: &mut WindowState, n: Int64) {
+    st.partition_size = n;
+    if st.kind == 5 && st.n_param > (0 as Int64) {
+        st.bucket_size = (n + st.n_param - (1 as Int64)) / st.n_param;
+    }
+}
+
+// -----------------------------------------------------------------------------
+// step_forward — called once per input row in frame-walk order
+// -----------------------------------------------------------------------------
+
+public fn window_step(st: &mut WindowState, value: &Register, same_value_as_prev: Bool) {
+    st.row_number = st.row_number + (1 as Int64);
+    if st.kind == 1 || st.kind == 2 || st.kind == 3 {
+        if same_value_as_prev {
+            // RANK / DENSE_RANK do not bump
+        } else {
+            st.rank_value = st.row_number;
+            st.dense_rank_value = st.dense_rank_value + (1 as Int64);
+        }
+        st.same_as_prev = same_value_as_prev;
+    }
+    if st.kind == 6 || st.kind == 7 || st.kind == 8 || st.kind == 9 || st.kind == 10 {
+        st.buffered.push(clone_register(value));
+    }
+}
+
+// -----------------------------------------------------------------------------
+// value — return the window function's current value
+// -----------------------------------------------------------------------------
+
+public fn window_value(st: &WindowState) -> Register {
+    match st.kind {
+        0 => RInt(st.row_number),
+        1 => RInt(st.rank_value),
+        2 => RInt(st.dense_rank_value),
+        3 => {
+            if st.partition_size <= (1 as Int64) {
+                RReal(0.0)
+            } else {
+                RReal((st.rank_value - (1 as Int64)) as Float64
+                      / (st.partition_size - (1 as Int64)) as Float64)
+            }
+        }
+        4 => {
+            if st.partition_size == (0 as Int64) {
+                RReal(0.0)
+            } else {
+                RReal((st.row_number as Float64) / (st.partition_size as Float64))
+            }
+        }
+        5 => {
+            if st.bucket_size == (0 as Int64) {
+                RInt(1 as Int64)
+            } else {
+                RInt(((st.row_number - (1 as Int64)) / st.bucket_size) + (1 as Int64))
+            }
+        }
+        6 => {
+            // LAG: index = current - offset
+            let target_idx: Int = (st.buffered.len() - 1) - st.offset_param;
+            if target_idx < 0 {
+                clone_register(&st.default_value)
+            } else {
+                clone_register(&st.buffered[target_idx])
+            }
+        }
+        7 => {
+            // LEAD: emitted by interpreter from the look-ahead buffer.
+            // Placeholder: fall back to default until ahead-buffer wired.
+            clone_register(&st.default_value)
+        }
+        8 => {
+            if st.buffered.len() == 0 { RNull }
+            else { clone_register(&st.buffered[0]) }
+        }
+        9 => {
+            if st.buffered.len() == 0 { RNull }
+            else { clone_register(&st.buffered[st.buffered.len() - 1]) }
+        }
+        10 => {
+            let target: Int = (st.n_param as Int) - 1;
+            if target < 0 || target >= st.buffered.len() { RNull }
+            else { clone_register(&st.buffered[target]) }
+        }
+        _ => RNull,
+    }
+}
+
+fn clone_register(r: &Register) -> Register {
+    match r {
+        RNull     => RNull,
+        RInt(x)   => RInt(x),
+        RReal(x)  => RReal(x),
+        RText(s)  => RText(s.clone()),
+        RBlob(b)  => {
+            let mut out: List<Byte> = List.new();
+            let mut i: Int = 0;
+            while i < b.len() { out.push(b[i]); i = i + 1; }
+            RBlob(out)
+        }
+        RRowId(x) => RRowId(x),
+    }
+}

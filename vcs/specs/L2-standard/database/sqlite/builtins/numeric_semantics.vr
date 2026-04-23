@@ -1,0 +1,136 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, builtins, numeric
+// @timeout: 5000
+// @expected-exit: 0
+//
+// Pure-Verum semantics for ABS, ROUND, COALESCE, IFNULL, NULLIF,
+// MIN/MAX (varargs), IIF, SIGN, ZEROBLOB, RNG-backed RANDOM.
+
+mount core.database.sqlite.native.l4_vdbe.register.{
+    Register, RNull, RInt, RReal, RBlob,
+};
+mount core.database.sqlite.native.builtins.numeric_fns.{
+    abs as fn_abs,
+    round as fn_round,
+    coalesce as fn_coalesce,
+    ifnull as fn_ifnull,
+    nullif as fn_nullif,
+    min_var,
+    max_var,
+    iif as fn_iif,
+    sign as fn_sign,
+    zero_blob,
+    random_blob,
+    rng_new,
+};
+
+fn require_int(r: Register, expected: Int64) {
+    match r {
+        RInt(x) => assert_eq(x, expected),
+        _       => panic("expected RInt"),
+    }
+}
+
+fn require_null(r: Register) {
+    match r {
+        RNull => {},
+        _     => panic("expected RNull"),
+    }
+}
+
+fn test_abs() {
+    require_int(fn_abs(&RInt(-7 as Int64)), 7 as Int64);
+    require_int(fn_abs(&RInt(7 as Int64)), 7 as Int64);
+    require_null(fn_abs(&RNull));
+}
+
+fn test_round_zero_digits() {
+    match fn_round(&RReal(3.7), &RInt(0 as Int64)) {
+        RReal(x) => assert(x == 4.0),
+        _        => panic("ROUND should return REAL"),
+    }
+}
+
+fn test_coalesce_picks_first_non_null() {
+    let mut args: List<Register> = List.new();
+    args.push(RNull);
+    args.push(RInt(42 as Int64));
+    args.push(RNull);
+    require_int(fn_coalesce(&args), 42 as Int64);
+}
+
+fn test_coalesce_all_null() {
+    let mut args: List<Register> = List.new();
+    args.push(RNull);
+    args.push(RNull);
+    require_null(fn_coalesce(&args));
+}
+
+fn test_ifnull() {
+    require_int(fn_ifnull(&RNull, &RInt(99 as Int64)), 99 as Int64);
+    require_int(fn_ifnull(&RInt(1 as Int64), &RInt(2 as Int64)), 1 as Int64);
+}
+
+fn test_nullif() {
+    require_int(fn_nullif(&RInt(1 as Int64), &RInt(2 as Int64)), 1 as Int64);
+    require_null(fn_nullif(&RInt(5 as Int64), &RInt(5 as Int64)));
+}
+
+fn test_min_max_varargs_skip_null() {
+    let mut args: List<Register> = List.new();
+    args.push(RNull);
+    args.push(RInt(3 as Int64));
+    args.push(RInt(1 as Int64));
+    args.push(RInt(2 as Int64));
+    require_int(min_var(&args), 1 as Int64);
+    require_int(max_var(&args), 3 as Int64);
+}
+
+fn test_iif() {
+    require_int(
+        fn_iif(&RInt(1 as Int64), &RInt(11 as Int64), &RInt(22 as Int64)),
+        11 as Int64,
+    );
+    require_int(
+        fn_iif(&RNull, &RInt(11 as Int64), &RInt(22 as Int64)),
+        22 as Int64,
+    );
+}
+
+fn test_sign() {
+    require_int(fn_sign(&RInt(5 as Int64)), 1 as Int64);
+    require_int(fn_sign(&RInt(-5 as Int64)), -1 as Int64);
+    require_int(fn_sign(&RInt(0 as Int64)), 0 as Int64);
+    require_null(fn_sign(&RNull));
+}
+
+fn test_zero_blob_size() {
+    match zero_blob(&RInt(8 as Int64)) {
+        RBlob(b) => assert_eq(b.len(), 8),
+        _        => panic("ZEROBLOB should return RBlob"),
+    }
+}
+
+fn test_random_blob_size() {
+    let mut rng = rng_new(1234 as Int64);
+    match random_blob(&RInt(16 as Int64), &mut rng) {
+        RBlob(b) => assert_eq(b.len(), 16),
+        _        => panic("RANDOMBLOB should return RBlob"),
+    }
+}
+
+fn main() {
+    test_abs();
+    test_round_zero_digits();
+    test_coalesce_picks_first_non_null();
+    test_coalesce_all_null();
+    test_ifnull();
+    test_nullif();
+    test_min_max_varargs_skip_null();
+    test_iif();
+    test_sign();
+    test_zero_blob_size();
+    test_random_blob_size();
+}

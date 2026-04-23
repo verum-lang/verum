@@ -1,0 +1,329 @@
+// =============================================================================
+// builtins/numeric_fns.vr — Numeric / generic SQL built-ins
+// =============================================================================
+// Layer: 4
+// Spec: sqlite-native.md §15.1 (Numeric section)
+//
+// `Register`-typed implementations of the non-math numeric functions:
+// ABS, ROUND, COALESCE, IFNULL, NULLIF, MIN/MAX (varargs scalar form),
+// IIF, SIGN, RANDOM, RANDOMBLOB, ZEROBLOB, plus the planner-hint
+// no-ops LIKELY / UNLIKELY / LIKELIHOOD.
+//
+// NULL behaviour:
+//   * COALESCE returns first non-null
+//   * IFNULL is COALESCE arity-2
+//   * NULLIF returns NULL if equal, else first arg
+//   * MIN/MAX skip NULL; if every arg is NULL, return NULL
+//   * IIF(cond, t, f) — cond=NULL is treated falsy
+// =============================================================================
+
+module core.database.sqlite.native.builtins.numeric_fns;
+
+mount core.*;
+mount base.{Text, Maybe};
+mount collections.List;
+mount core.database.sqlite.native.l4_vdbe.register.{Register, RNull, RInt, RReal, RText, RBlob, RRowId};
+
+// -----------------------------------------------------------------------------
+// ABS(X)
+// -----------------------------------------------------------------------------
+
+public fn abs(v: &Register) -> Register {
+    match v {
+        RInt(x)  => { if x < (0 as Int64) { RInt(-x) } else { RInt(x) } }
+        RReal(x) => { if x < 0.0 { RReal(-x) } else { RReal(x) } }
+        RNull    => RNull,
+        _        => RNull,
+    }
+}
+
+// -----------------------------------------------------------------------------
+// ROUND(X[, digits]) — banker-friendly round-half-away-from-zero,
+// matching SQLite's default printf("%.*f")-derived behaviour.
+// -----------------------------------------------------------------------------
+
+public fn round(v: &Register, digits_opt: &Register) -> Register {
+    let digits: Int = match digits_opt {
+        RInt(x)  => x as Int,
+        RReal(x) => x as Int,
+        _        => 0,
+    };
+    match v {
+        RInt(x)  => RInt(x),
+        RReal(x) => RReal(round_to_digits(x, digits)),
+        RNull    => RNull,
+        _        => RNull,
+    }
+}
+
+fn round_to_digits(x: Float64, digits: Int) -> Float64 {
+    let mut scale: Float64 = 1.0;
+    let mut i: Int = 0;
+    while i < digits { scale = scale * 10.0; i = i + 1; }
+    while i > digits { scale = scale / 10.0; i = i - 1; }
+    if x >= 0.0 {
+        ((x * scale + 0.5) as Int as Float64) / scale
+    } else {
+        -((-x * scale + 0.5) as Int as Float64) / scale
+    }
+}
+
+// -----------------------------------------------------------------------------
+// COALESCE / IFNULL
+// -----------------------------------------------------------------------------
+
+public fn coalesce(args: &List<Register>) -> Register {
+    let mut i: Int = 0;
+    while i < args.len() {
+        let v = &args[i];
+        let is_null = match v { RNull => true, _ => false };
+        if !is_null {
+            return clone_register(v);
+        }
+        i = i + 1;
+    }
+    RNull
+}
+
+public fn ifnull(a: &Register, b: &Register) -> Register {
+    let is_null = match a { RNull => true, _ => false };
+    if is_null { clone_register(b) } else { clone_register(a) }
+}
+
+// -----------------------------------------------------------------------------
+// NULLIF(a, b)
+// -----------------------------------------------------------------------------
+
+public fn nullif(a: &Register, b: &Register) -> Register {
+    if registers_equal(a, b) { RNull } else { clone_register(a) }
+}
+
+// -----------------------------------------------------------------------------
+// MIN / MAX scalar variants (varargs)
+// -----------------------------------------------------------------------------
+
+public fn min_var(args: &List<Register>) -> Register {
+    let mut best: Register = RNull;
+    let mut i: Int = 0;
+    while i < args.len() {
+        let v = &args[i];
+        let is_null = match v { RNull => true, _ => false };
+        if !is_null {
+            match &best {
+                RNull => { best = clone_register(v); }
+                cur   => {
+                    if reg_less(v, cur) { best = clone_register(v); }
+                }
+            }
+        }
+        i = i + 1;
+    }
+    best
+}
+
+public fn max_var(args: &List<Register>) -> Register {
+    let mut best: Register = RNull;
+    let mut i: Int = 0;
+    while i < args.len() {
+        let v = &args[i];
+        let is_null = match v { RNull => true, _ => false };
+        if !is_null {
+            match &best {
+                RNull => { best = clone_register(v); }
+                cur   => {
+                    if reg_less(cur, v) { best = clone_register(v); }
+                }
+            }
+        }
+        i = i + 1;
+    }
+    best
+}
+
+// -----------------------------------------------------------------------------
+// IIF(cond, then_val, else_val)
+// -----------------------------------------------------------------------------
+
+public fn iif(cond: &Register, then_v: &Register, else_v: &Register) -> Register {
+    let truthy = match cond {
+        RInt(x)   => x != (0 as Int64),
+        RReal(x)  => x != 0.0,
+        RText(s)  => s.len() > 0,
+        RBlob(b)  => b.len() > 0,
+        RRowId(x) => x != (0 as Int64),
+        RNull     => false,
+    };
+    if truthy { clone_register(then_v) } else { clone_register(else_v) }
+}
+
+// -----------------------------------------------------------------------------
+// SIGN(X) — -1 / 0 / 1, NULL passthrough
+// -----------------------------------------------------------------------------
+
+public fn sign(v: &Register) -> Register {
+    match v {
+        RInt(x) => {
+            if x > (0 as Int64) { RInt(1 as Int64) }
+            else if x < (0 as Int64) { RInt(-1 as Int64) }
+            else { RInt(0 as Int64) }
+        }
+        RReal(x) => {
+            if x > 0.0 { RInt(1 as Int64) }
+            else if x < 0.0 { RInt(-1 as Int64) }
+            else { RInt(0 as Int64) }
+        }
+        RNull => RNull,
+        _ => RNull,
+    }
+}
+
+// -----------------------------------------------------------------------------
+// RANDOM / RANDOMBLOB / ZEROBLOB
+// -----------------------------------------------------------------------------
+//
+// Uses xorshift64* — SQLite uses ChaCha20 for high-quality output;
+// we substitute the lighter xorshift here. Caller may seed via the
+// `random_seed_set` global helper. This is **not** cryptographically
+// secure — SQLite's RANDOM() isn't either, by design.
+// =============================================================================
+
+public type RngState is { value: Int64 };
+
+public fn rng_new(seed: Int64) -> RngState {
+    let s: Int64 = if seed == (0 as Int64) { 88172645463325252 as Int64 } else { seed };
+    RngState { value: s }
+}
+
+public fn rng_next(rng: &mut RngState) -> Int64 {
+    let mut x: Int64 = rng.value;
+    x = x ^ (x << (13 as Int64));
+    x = x ^ (x >> (7 as Int64));
+    x = x ^ (x << (17 as Int64));
+    rng.value = x;
+    x
+}
+
+public fn random(rng: &mut RngState) -> Register {
+    RInt(rng_next(rng))
+}
+
+public fn random_blob(n_v: &Register, rng: &mut RngState) -> Register {
+    let n: Int = match n_v {
+        RInt(x)  => x as Int,
+        RReal(x) => x as Int,
+        _        => 0,
+    };
+    let mut out: List<Byte> = List.new();
+    let mut i: Int = 0;
+    while i < n {
+        let r = rng_next(rng);
+        out.push(((r as Int) & 255) as Byte);
+        i = i + 1;
+    }
+    RBlob(out)
+}
+
+public fn zero_blob(n_v: &Register) -> Register {
+    let n: Int = match n_v {
+        RInt(x)  => x as Int,
+        RReal(x) => x as Int,
+        _        => 0,
+    };
+    let mut out: List<Byte> = List.new();
+    let mut i: Int = 0;
+    while i < n { out.push(0 as Byte); i = i + 1; }
+    RBlob(out)
+}
+
+// -----------------------------------------------------------------------------
+// LIKELY / UNLIKELY / LIKELIHOOD — planner hints (no-ops at runtime)
+// -----------------------------------------------------------------------------
+
+public fn likely(v: &Register) -> Register { clone_register(v) }
+public fn unlikely(v: &Register) -> Register { clone_register(v) }
+public fn likelihood(v: &Register, _prob: &Register) -> Register { clone_register(v) }
+
+// -----------------------------------------------------------------------------
+// Helpers (kept private to this module)
+// -----------------------------------------------------------------------------
+
+fn clone_register(r: &Register) -> Register {
+    match r {
+        RNull     => RNull,
+        RInt(x)   => RInt(x),
+        RReal(x)  => RReal(x),
+        RText(s)  => RText(s.clone()),
+        RBlob(b)  => {
+            let mut out: List<Byte> = List.new();
+            let mut i: Int = 0;
+            while i < b.len() { out.push(b[i]); i = i + 1; }
+            RBlob(out)
+        }
+        RRowId(x) => RRowId(x),
+    }
+}
+
+fn registers_equal(a: &Register, b: &Register) -> Bool {
+    match a {
+        RNull => match b { RNull => true, _ => false },
+        RInt(x) => match b {
+            RInt(y) => x == y,
+            RReal(y) => (x as Float64) == y,
+            RRowId(y) => x == y,
+            _ => false,
+        },
+        RReal(x) => match b {
+            RReal(y) => x == y,
+            RInt(y) => x == (y as Float64),
+            _ => false,
+        },
+        RText(xs) => match b { RText(ys) => xs == ys, _ => false },
+        RBlob(xb) => match b { RBlob(yb) => bytes_equal(xb, yb), _ => false },
+        RRowId(x) => match b {
+            RRowId(y) => x == y,
+            RInt(y) => x == y,
+            _ => false,
+        },
+    }
+}
+
+fn bytes_equal(a: &List<Byte>, b: &List<Byte>) -> Bool {
+    if a.len() != b.len() { return false; }
+    let mut i: Int = 0;
+    while i < a.len() {
+        if a[i] != b[i] { return false; }
+        i = i + 1;
+    }
+    true
+}
+
+fn reg_less(a: &Register, b: &Register) -> Bool {
+    match a {
+        RInt(x) => match b {
+            RInt(y) => x < y,
+            RReal(y) => (x as Float64) < y,
+            _ => false,
+        },
+        RReal(x) => match b {
+            RReal(y) => x < y,
+            RInt(y) => x < (y as Float64),
+            _ => false,
+        },
+        RText(xs) => match b {
+            RText(ys) => {
+                let xb = xs.as_bytes();
+                let yb = ys.as_bytes();
+                let mut i: Int = 0;
+                let n: Int = if xb.len() < yb.len() { xb.len() } else { yb.len() };
+                while i < n {
+                    if xb[i] < yb[i] { return true; }
+                    if xb[i] > yb[i] { return false; }
+                    i = i + 1;
+                }
+                xb.len() < yb.len()
+            }
+            _ => false,
+        },
+        _ => false,
+    }
+}

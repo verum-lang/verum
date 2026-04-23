@@ -1,0 +1,332 @@
+// =============================================================================
+// pragmas/dispatch.vr — read/write dispatch for `PRAGMA <name>[ = value | (arg)]`
+// =============================================================================
+// Layer: 5–6
+// Spec: sqlite-native.md §18
+//
+// Surface used by the L5 codegen when it lowers a `PStPragma` AST
+// node into VDBE. Returns either a single-row result-set (the
+// READ form) or applies a configuration mutation (the WRITE form).
+//
+// The dispatcher is purely Verum — no opcode emission. The codegen
+// embeds a `PragmaApply` opcode that calls back into this module
+// at runtime. This keeps the catalogue and execution semantics in
+// one place; new PRAGMAs are added by extending `PragmaKind` +
+// updating one match arm here.
+// =============================================================================
+
+module core.database.sqlite.native.pragmas.dispatch;
+
+mount core.*;
+mount base.{Text, Maybe};
+mount collections.List;
+mount core.database.sqlite.native.l4_vdbe.register.{
+    Register, RNull, RInt, RText,
+};
+mount core.database.sqlite.native.pragmas.registry.{
+    PragmaKind, PragmaSpec, pragma_spec, pragma_from_name,
+    PCacheSize, PPageSize, PJournalMode, PSynchronous, PForeignKeys,
+    PRecursiveTriggers, PUserVersion, PSchemaVersion, PApplicationId,
+    PJournalSizeLimit, PAutoVacuum, PBusyTimeout, PCaseSensitiveLike,
+    PEncoding, PTempStore, PSecureDelete, PWritableSchema, PQueryOnly,
+    PLockingMode, PMaxPageCount, PMmapSize, PThreads,
+    PWalAutocheckpoint, PWalCheckpoint, PDeferForeignKeys,
+    PIgnoreCheckConstraints, PCellSizeCheck,
+    PIntegrityCheck, PQuickCheck, PFreelistCount, PPageCount,
+    PCompileOptions, PPragmaList, PCollationList,
+    PIncrementalVacuum, PTableInfo, PTableXInfo, PIndexInfo, PIndexXInfo,
+    PIndexList, PForeignKeyList, PForeignKeyCheck, PStats,
+    PDatabaseList, PTableList, PTriggerList, PModuleList,
+    PFunctionList, POptimize, PShrinkMemory,
+    SConnection, SDatabase, SReadOnly, SDangerous,
+};
+mount core.database.sqlite.native.pragmas.config.{
+    PragmaConfig,
+    JournalMode, JmDelete, JmTruncate, JmPersist, JmMemory, JmWal, JmOff,
+    journal_mode_name, journal_mode_from_text,
+    Synchronous, SyncOff, SyncNormal, SyncFull, SyncExtra,
+    synchronous_code, synchronous_from_int,
+    LockingMode, LmNormal, LmExclusive, locking_mode_name,
+    AutoVacuum, AvNone, AvFull, AvIncremental, auto_vacuum_code,
+    Encoding, EncUtf8, encoding_name,
+};
+
+// -----------------------------------------------------------------------------
+// PragmaResult — what the dispatcher returns
+// -----------------------------------------------------------------------------
+
+public type PragmaResult is
+      PrRow(List<Register>)         // single row, possibly with multiple cols
+    | PrRows(List<List<Register>>)  // multi-row result (e.g. table_info)
+    | PrEmpty                       // no result-set, side-effect only
+    | PrError(Text);
+
+// -----------------------------------------------------------------------------
+// Public entry-point
+// -----------------------------------------------------------------------------
+
+public fn execute(
+    cfg: &mut PragmaConfig,
+    name: &Text,
+    write_value: Maybe<Register>,
+    fn_arg: Maybe<Text>,
+) -> PragmaResult {
+    let kind = match pragma_from_name(name) {
+        Some(k) => k,
+        None    => { return PrError(unknown_pragma_msg(name)); }
+    };
+    let _ = fn_arg;
+    match write_value {
+        Some(v) => execute_write(cfg, &kind, v),
+        None    => execute_read(cfg, &kind),
+    }
+}
+
+fn unknown_pragma_msg(name: &Text) -> Text {
+    let mut out = Text.new();
+    let prefix = "unknown PRAGMA: ".clone();
+    let pb = prefix.as_bytes();
+    let nb = name.as_bytes();
+    let mut i: Int = 0;
+    while i < pb.len() { out.push_byte(pb[i]); i = i + 1; }
+    i = 0;
+    while i < nb.len() { out.push_byte(nb[i]); i = i + 1; }
+    out
+}
+
+// -----------------------------------------------------------------------------
+// Read form: `PRAGMA name`
+// -----------------------------------------------------------------------------
+
+fn execute_read(cfg: &PragmaConfig, k: &PragmaKind) -> PragmaResult {
+    match k {
+        PCacheSize         => single_int(cfg.cache_size_pages as Int64),
+        PPageSize          => single_int(cfg.page_size as Int64),
+        PJournalMode       => single_text(journal_mode_name(&cfg.journal_mode)),
+        PSynchronous       => single_int(synchronous_code(&cfg.synchronous) as Int64),
+        PForeignKeys       => single_int(if cfg.foreign_keys { 1 as Int64 } else { 0 as Int64 }),
+        PRecursiveTriggers => single_int(if cfg.recursive_triggers { 1 as Int64 } else { 0 as Int64 }),
+        PUserVersion       => single_int(cfg.user_version as Int64),
+        PSchemaVersion     => single_int(cfg.schema_version as Int64),
+        PApplicationId     => single_int(cfg.application_id as Int64),
+        PJournalSizeLimit  => single_int(cfg.journal_size_limit),
+        PAutoVacuum        => single_int(auto_vacuum_code(&cfg.auto_vacuum) as Int64),
+        PBusyTimeout       => single_int(cfg.busy_timeout_ms as Int64),
+        PCaseSensitiveLike => single_int(if cfg.case_sensitive_like { 1 as Int64 } else { 0 as Int64 }),
+        PEncoding          => single_text(encoding_name(&cfg.encoding)),
+        PSecureDelete      => single_int(if cfg.secure_delete { 1 as Int64 } else { 0 as Int64 }),
+        PWritableSchema    => single_int(if cfg.writable_schema { 1 as Int64 } else { 0 as Int64 }),
+        PQueryOnly         => single_int(if cfg.query_only { 1 as Int64 } else { 0 as Int64 }),
+        PLockingMode       => single_text(locking_mode_name(&cfg.locking_mode)),
+        PMaxPageCount      => single_int(cfg.max_page_count as Int64),
+        PMmapSize          => single_int(cfg.mmap_size),
+        PThreads           => single_int(cfg.threads as Int64),
+        PWalAutocheckpoint => single_int(cfg.wal_autocheckpoint as Int64),
+        PDeferForeignKeys  => single_int(if cfg.defer_foreign_keys { 1 as Int64 } else { 0 as Int64 }),
+        PIgnoreCheckConstraints => single_int(if cfg.ignore_check_constraints { 1 as Int64 } else { 0 as Int64 }),
+        PCellSizeCheck     => single_int(if cfg.cell_size_check { 1 as Int64 } else { 0 as Int64 }),
+        PCompileOptions    => compile_options_rows(),
+        PPragmaList        => pragma_list_rows(),
+        // Stubs — rich rows follow as catalog evolves
+        PIntegrityCheck    => single_text("ok".clone()),
+        PQuickCheck        => single_text("ok".clone()),
+        PFreelistCount     => single_int(0 as Int64),
+        PPageCount         => single_int(0 as Int64),
+        // Schema introspections — empty until SchemaCache binding lands
+        PTableInfo | PTableXInfo | PIndexInfo | PIndexXInfo | PIndexList |
+        PForeignKeyList | PForeignKeyCheck | PStats | PDatabaseList |
+        PTableList | PTriggerList | PModuleList | PFunctionList |
+        PCollationList => PrRows(List.new()),
+        // Maintenance — no row
+        POptimize | PShrinkMemory | PWalCheckpoint | PIncrementalVacuum |
+        PTempStore => PrEmpty,
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Write form: `PRAGMA name = value`
+// -----------------------------------------------------------------------------
+
+fn execute_write(cfg: &mut PragmaConfig, k: &PragmaKind, v: Register) -> PragmaResult {
+    let spec_v = pragma_spec(k);
+    if !spec_v.is_settable {
+        return PrError("PRAGMA is read-only".clone());
+    }
+    match k {
+        PCacheSize         => { cfg.cache_size_pages = int_or(&v, cfg.cache_size_pages); PrEmpty }
+        PPageSize          => { cfg.page_size = int_or(&v, cfg.page_size); PrEmpty }
+        PJournalMode       => match &v {
+            RText(s) => match journal_mode_from_text(s) {
+                Some(m) => { cfg.journal_mode = m; single_text(journal_mode_name(&cfg.journal_mode)) }
+                None    => PrError("invalid journal_mode".clone()),
+            },
+            _ => PrError("expected text journal_mode".clone()),
+        },
+        PSynchronous       => match int_opt(&v) {
+            Some(n) => match synchronous_from_int(n) {
+                Some(sy) => { cfg.synchronous = sy; PrEmpty }
+                None     => PrError("invalid synchronous level".clone()),
+            },
+            None => PrError("expected integer".clone()),
+        },
+        PForeignKeys       => { cfg.foreign_keys = bool_or(&v, cfg.foreign_keys); PrEmpty }
+        PRecursiveTriggers => { cfg.recursive_triggers = bool_or(&v, cfg.recursive_triggers); PrEmpty }
+        PUserVersion       => { cfg.user_version = int_or(&v, cfg.user_version); PrEmpty }
+        PSchemaVersion     => { cfg.schema_version = int_or(&v, cfg.schema_version); PrEmpty }
+        PApplicationId     => { cfg.application_id = int_or(&v, cfg.application_id); PrEmpty }
+        PJournalSizeLimit  => { cfg.journal_size_limit = int64_or(&v, cfg.journal_size_limit); PrEmpty }
+        PBusyTimeout       => { cfg.busy_timeout_ms = int_or(&v, cfg.busy_timeout_ms); PrEmpty }
+        PCaseSensitiveLike => { cfg.case_sensitive_like = bool_or(&v, cfg.case_sensitive_like); PrEmpty }
+        PSecureDelete      => { cfg.secure_delete = bool_or(&v, cfg.secure_delete); PrEmpty }
+        PWritableSchema    => { cfg.writable_schema = bool_or(&v, cfg.writable_schema); PrEmpty }
+        PQueryOnly         => { cfg.query_only = bool_or(&v, cfg.query_only); PrEmpty }
+        PMaxPageCount      => { cfg.max_page_count = int_or(&v, cfg.max_page_count); PrEmpty }
+        PMmapSize          => { cfg.mmap_size = int64_or(&v, cfg.mmap_size); PrEmpty }
+        PThreads           => { cfg.threads = int_or(&v, cfg.threads); PrEmpty }
+        PWalAutocheckpoint => { cfg.wal_autocheckpoint = int_or(&v, cfg.wal_autocheckpoint); PrEmpty }
+        PDeferForeignKeys  => { cfg.defer_foreign_keys = bool_or(&v, cfg.defer_foreign_keys); PrEmpty }
+        PIgnoreCheckConstraints => { cfg.ignore_check_constraints = bool_or(&v, cfg.ignore_check_constraints); PrEmpty }
+        PCellSizeCheck     => { cfg.cell_size_check = bool_or(&v, cfg.cell_size_check); PrEmpty }
+        // Database-scope writes that need wider context — stubbed
+        // until pager/header threading lands.
+        PAutoVacuum | PEncoding | PLockingMode | PWalCheckpoint |
+        PIncrementalVacuum | POptimize | PShrinkMemory | PTempStore => PrEmpty,
+        _ => PrError("PRAGMA write not supported here".clone()),
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Result helpers
+// -----------------------------------------------------------------------------
+
+fn single_int(x: Int64) -> PragmaResult {
+    let mut row: List<Register> = List.new();
+    row.push(RInt(x));
+    PrRow(row)
+}
+
+fn single_text(s: Text) -> PragmaResult {
+    let mut row: List<Register> = List.new();
+    row.push(RText(s));
+    PrRow(row)
+}
+
+fn compile_options_rows() -> PragmaResult {
+    let mut rows: List<List<Register>> = List.new();
+    let opts = [
+        "ENABLE_LOOM_PURE_VERUM=1".clone(),
+        "THREADSAFE=1".clone(),
+        "ENABLE_FTS5=1".clone(),
+        "ENABLE_JSON1=1".clone(),
+        "ENABLE_RTREE=1".clone(),
+        "ENABLE_MATH_FUNCTIONS=1".clone(),
+    ];
+    let mut i: Int = 0;
+    while i < opts.len() {
+        let mut row: List<Register> = List.new();
+        row.push(RText(opts[i].clone()));
+        rows.push(row);
+        i = i + 1;
+    }
+    PrRows(rows)
+}
+
+fn pragma_list_rows() -> PragmaResult {
+    let names = [
+        "cache_size".clone(), "page_size".clone(), "journal_mode".clone(),
+        "synchronous".clone(), "foreign_keys".clone(), "user_version".clone(),
+        "application_id".clone(), "auto_vacuum".clone(), "busy_timeout".clone(),
+        "encoding".clone(), "secure_delete".clone(), "query_only".clone(),
+        "max_page_count".clone(), "mmap_size".clone(), "threads".clone(),
+        "wal_autocheckpoint".clone(), "wal_checkpoint".clone(),
+        "table_info".clone(), "index_info".clone(), "integrity_check".clone(),
+        "quick_check".clone(), "page_count".clone(), "freelist_count".clone(),
+        "compile_options".clone(), "pragma_list".clone(),
+    ];
+    let mut rows: List<List<Register>> = List.new();
+    let mut i: Int = 0;
+    while i < names.len() {
+        let mut row: List<Register> = List.new();
+        row.push(RText(names[i].clone()));
+        rows.push(row);
+        i = i + 1;
+    }
+    PrRows(rows)
+}
+
+// -----------------------------------------------------------------------------
+// Coercion helpers
+// -----------------------------------------------------------------------------
+
+fn int_or(v: &Register, fallback: Int) -> Int {
+    match v {
+        RInt(x)  => x as Int,
+        RText(s) => match parse_signed_int(s) { Some(x) => x as Int, None => fallback },
+        _        => fallback,
+    }
+}
+
+fn int64_or(v: &Register, fallback: Int64) -> Int64 {
+    match v {
+        RInt(x)  => x,
+        RText(s) => match parse_signed_int(s) { Some(x) => x, None => fallback },
+        _        => fallback,
+    }
+}
+
+fn int_opt(v: &Register) -> Maybe<Int> {
+    match v {
+        RInt(x)  => Some(x as Int),
+        RText(s) => match parse_signed_int(s) { Some(x) => Some(x as Int), None => None },
+        _        => None,
+    }
+}
+
+fn bool_or(v: &Register, fallback: Bool) -> Bool {
+    match v {
+        RInt(x)  => x != (0 as Int64),
+        RText(s) => {
+            let lo = ascii_lower(s);
+            if lo == "1".clone() || lo == "true".clone() || lo == "yes".clone() || lo == "on".clone() {
+                true
+            } else if lo == "0".clone() || lo == "false".clone() || lo == "no".clone() || lo == "off".clone() {
+                false
+            } else {
+                fallback
+            }
+        }
+        _ => fallback,
+    }
+}
+
+fn parse_signed_int(s: &Text) -> Maybe<Int64> {
+    let bs = s.as_bytes();
+    if bs.len() == 0 { return None; }
+    let mut sign: Int64 = 1 as Int64;
+    let mut i: Int = 0;
+    if bs[0] == (45 as Byte) { sign = -1 as Int64; i = 1; }
+    else if bs[0] == (43 as Byte) { i = 1; }
+    if i >= bs.len() { return None; }
+    let mut acc: Int64 = 0 as Int64;
+    while i < bs.len() {
+        let b = bs[i];
+        if b < (48 as Byte) || b > (57 as Byte) { return None; }
+        acc = acc * (10 as Int64) + ((b as Int64) - (48 as Int64));
+        i = i + 1;
+    }
+    Some(acc * sign)
+}
+
+fn ascii_lower(s: &Text) -> Text {
+    let bs = s.as_bytes();
+    let mut out = Text.new();
+    let mut i: Int = 0;
+    while i < bs.len() {
+        let b: Byte = bs[i];
+        let lo: Byte =
+            if b >= (65 as Byte) && b <= (90 as Byte) { b + (32 as Byte) } else { b };
+        out.push_byte(lo);
+        i = i + 1;
+    }
+    out
+}

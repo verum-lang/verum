@@ -1,0 +1,40 @@
+// =============================================================================
+// core/database/sqlite/native/builtins/mod.vr
+// =============================================================================
+// Layer: 4 (VDBE callees) / 5 (parser visibility)
+// Spec: sqlite-native.md §15 (Built-in Functions)
+//
+// Catalogue of SQLite built-in scalar / aggregate / window functions.
+// The catalogue is the single source of truth for:
+//
+//   * function name → kind code (used by the codegen ScalarFn opcode)
+//   * arity bounds (min, max) for parser-time arg-count checks
+//   * pure-Verum reference implementation, exercised directly by the
+//     test suite and indirectly by the VDBE interpreter once the
+//     interpreter switches from the inline `match kind` table to a
+//     catalogue-dispatched call.
+//
+// Modules:
+//
+//   * `registry`       — ScalarKind enum + name lookup + arity
+//   * `string_fns`     — LENGTH, LOWER, UPPER, SUBSTR, TRIM, ...
+//   * `numeric_fns`    — ABS, ROUND, MIN, MAX (varargs), SIGN, ...
+//   * `math_fns`       — PI, SQRT, POW, LN, LOG, SIN, COS, TAN, ...
+//   * `meta_fns`       — TYPEOF, SQLITE_VERSION, CHANGES, ...
+//   * `datetime_fns`   — DATE, TIME, DATETIME, JULIANDAY, ...
+//   * `aggregate_fns`  — COUNT, SUM, AVG, MIN, MAX, GROUP_CONCAT
+//   * `window_fns`     — ROW_NUMBER, RANK, LAG, LEAD, ...
+//   * `json_fns`       — JSON_VALID, JSON_TYPE, JSON_EXTRACT, ...
+// =============================================================================
+
+module core.database.sqlite.native.builtins;
+
+public module registry;
+public module string_fns;
+public module numeric_fns;
+public module math_fns;
+public module meta_fns;
+public module datetime_fns;
+public module aggregate_fns;
+public module window_fns;
+public module json_fns;

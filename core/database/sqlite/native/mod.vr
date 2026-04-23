@@ -71,3 +71,12 @@ public module l6_session;
 
 // Layer 7: public API (Database facade, DbError)
 public module l7_api;
+
+// Cross-cutting catalogues:
+// - builtins: scalar / aggregate / window / JSON1 functions (§15)
+// - pragmas:  PRAGMA registry, per-conn config, dispatch (§18)
+// - vtabs:    virtual-table protocol + built-in modules (§16)
+// - verify:   loom-side @verify contracts (§21)
+public module builtins;
+public module pragmas;
+public module vtabs;

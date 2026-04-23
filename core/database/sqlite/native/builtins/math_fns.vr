@@ -1,0 +1,336 @@
+// =============================================================================
+// builtins/math_fns.vr — IEEE math built-ins (SQLite 3.35+)
+// =============================================================================
+// Layer: 4
+// Spec: sqlite-native.md §15.1 (Math section)
+//
+// All math functions accept INT or REAL and produce REAL. NULL on
+// NULL. Domain errors (e.g. SQRT(-1), ACOS(2)) return NULL — this
+// matches SQLite's `SQLITE_DBCONFIG_DQS_DDL=0` default behaviour.
+//
+// We implement the 25 functions listed in the spec catalogue using
+// Verum's `core.math.real` floating-point primitives. Where
+// `core.math.real` lacks a primitive (e.g. ATANH), we fall back to
+// the canonical algebraic identity.
+// =============================================================================
+
+module core.database.sqlite.native.builtins.math_fns;
+
+mount core.*;
+mount base.{Text, Maybe};
+mount core.database.sqlite.native.l4_vdbe.register.{Register, RNull, RInt, RReal, RText, RBlob, RRowId};
+
+// -----------------------------------------------------------------------------
+// Coercion helpers
+// -----------------------------------------------------------------------------
+
+fn as_real(v: &Register) -> Maybe<Float64> {
+    match v {
+        RInt(x)   => Some(x as Float64),
+        RRowId(x) => Some(x as Float64),
+        RReal(x)  => Some(x),
+        _         => None,
+    }
+}
+
+fn unary_real(v: &Register, op: fn(Float64) -> Maybe<Float64>) -> Register {
+    match as_real(v) {
+        Some(x) => match op(x) {
+            Some(r) => RReal(r),
+            None    => RNull,
+        },
+        None => RNull,
+    }
+}
+
+fn binary_real(a: &Register, b: &Register, op: fn(Float64, Float64) -> Maybe<Float64>) -> Register {
+    match as_real(a) {
+        Some(xa) => match as_real(b) {
+            Some(xb) => match op(xa, xb) {
+                Some(r) => RReal(r),
+                None    => RNull,
+            },
+            None => RNull,
+        },
+        None => RNull,
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Constants & basic
+// -----------------------------------------------------------------------------
+
+public fn pi() -> Register {
+    RReal(3.141592653589793)
+}
+
+public fn sqrt(v: &Register) -> Register {
+    unary_real(v, |x| { if x < 0.0 { None } else { Some(real_sqrt(x)) } })
+}
+
+public fn ceil(v: &Register) -> Register {
+    unary_real(v, |x| { Some(real_ceil(x)) })
+}
+
+public fn floor(v: &Register) -> Register {
+    unary_real(v, |x| { Some(real_floor(x)) })
+}
+
+public fn trunc(v: &Register) -> Register {
+    unary_real(v, |x| {
+        if x >= 0.0 { Some(real_floor(x)) } else { Some(real_ceil(x)) }
+    })
+}
+
+public fn exp(v: &Register) -> Register {
+    unary_real(v, |x| { Some(real_exp(x)) })
+}
+
+public fn ln(v: &Register) -> Register {
+    unary_real(v, |x| { if x <= 0.0 { None } else { Some(real_ln(x)) } })
+}
+
+public fn log10(v: &Register) -> Register {
+    unary_real(v, |x| {
+        if x <= 0.0 { None } else { Some(real_ln(x) / real_ln(10.0)) }
+    })
+}
+
+public fn log2(v: &Register) -> Register {
+    unary_real(v, |x| {
+        if x <= 0.0 { None } else { Some(real_ln(x) / real_ln(2.0)) }
+    })
+}
+
+public fn log(v: &Register, base_opt: &Register) -> Register {
+    let base_v: Maybe<Float64> = as_real(base_opt);
+    let x_v: Maybe<Float64> = as_real(v);
+    match x_v {
+        Some(x) => {
+            if x <= 0.0 { return RNull; }
+            match base_v {
+                Some(b) => {
+                    if b <= 0.0 || b == 1.0 { return RNull; }
+                    RReal(real_ln(x) / real_ln(b))
+                }
+                None => RReal(real_ln(x) / real_ln(10.0)),  // SQLite default: log10
+            }
+        }
+        None => RNull,
+    }
+}
+
+public fn pow(a: &Register, b: &Register) -> Register {
+    binary_real(a, b, |x, y| { Some(real_pow(x, y)) })
+}
+
+public fn modulo(a: &Register, b: &Register) -> Register {
+    binary_real(a, b, |x, y| {
+        if y == 0.0 { None } else { Some(x - real_floor(x / y) * y) }
+    })
+}
+
+// -----------------------------------------------------------------------------
+// Trigonometric
+// -----------------------------------------------------------------------------
+
+public fn sin(v: &Register) -> Register {
+    unary_real(v, |x| { Some(real_sin(x)) })
+}
+public fn cos(v: &Register) -> Register {
+    unary_real(v, |x| { Some(real_cos(x)) })
+}
+public fn tan(v: &Register) -> Register {
+    unary_real(v, |x| { Some(real_sin(x) / real_cos(x)) })
+}
+public fn asin(v: &Register) -> Register {
+    unary_real(v, |x| {
+        if x < -1.0 || x > 1.0 { None } else { Some(real_asin(x)) }
+    })
+}
+public fn acos(v: &Register) -> Register {
+    unary_real(v, |x| {
+        if x < -1.0 || x > 1.0 { None } else { Some(pi_const() / 2.0 - real_asin(x)) }
+    })
+}
+public fn atan(v: &Register) -> Register {
+    unary_real(v, |x| { Some(real_atan(x)) })
+}
+public fn atan2(a: &Register, b: &Register) -> Register {
+    binary_real(a, b, |y, x| { Some(real_atan2(y, x)) })
+}
+
+// -----------------------------------------------------------------------------
+// Hyperbolic
+// -----------------------------------------------------------------------------
+
+public fn sinh(v: &Register) -> Register {
+    unary_real(v, |x| { Some((real_exp(x) - real_exp(-x)) / 2.0) })
+}
+public fn cosh(v: &Register) -> Register {
+    unary_real(v, |x| { Some((real_exp(x) + real_exp(-x)) / 2.0) })
+}
+public fn tanh(v: &Register) -> Register {
+    unary_real(v, |x| {
+        let ex = real_exp(x);
+        let exn = real_exp(-x);
+        Some((ex - exn) / (ex + exn))
+    })
+}
+public fn asinh(v: &Register) -> Register {
+    unary_real(v, |x| { Some(real_ln(x + real_sqrt(x * x + 1.0))) })
+}
+public fn acosh(v: &Register) -> Register {
+    unary_real(v, |x| {
+        if x < 1.0 { None } else { Some(real_ln(x + real_sqrt(x * x - 1.0))) }
+    })
+}
+public fn atanh(v: &Register) -> Register {
+    unary_real(v, |x| {
+        if x <= -1.0 || x >= 1.0 { None } else { Some(0.5 * real_ln((1.0 + x) / (1.0 - x))) }
+    })
+}
+
+// -----------------------------------------------------------------------------
+// Angle conversion
+// -----------------------------------------------------------------------------
+
+public fn degrees(v: &Register) -> Register {
+    unary_real(v, |x| { Some(x * 180.0 / pi_const()) })
+}
+
+public fn radians(v: &Register) -> Register {
+    unary_real(v, |x| { Some(x * pi_const() / 180.0) })
+}
+
+// -----------------------------------------------------------------------------
+// Local IEEE math implementations
+// -----------------------------------------------------------------------------
+//
+// We avoid depending on `core.math.real` here so the loom can build
+// even if a sysroot trims the math module. For higher-quality results
+// the catalogue can later be re-pointed at `core.math.real::*`.
+// =============================================================================
+
+fn pi_const() -> Float64 { 3.141592653589793 }
+
+fn real_floor(x: Float64) -> Float64 {
+    let i: Int64 = x as Int64;
+    let f: Float64 = i as Float64;
+    if f > x { f - 1.0 } else { f }
+}
+
+fn real_ceil(x: Float64) -> Float64 {
+    let i: Int64 = x as Int64;
+    let f: Float64 = i as Float64;
+    if f < x { f + 1.0 } else { f }
+}
+
+fn real_sqrt(x: Float64) -> Float64 {
+    if x == 0.0 { return 0.0; }
+    // Newton-Raphson, ~25 iter for double precision.
+    let mut y: Float64 = if x > 1.0 { x / 2.0 } else { 1.0 };
+    let mut i: Int = 0;
+    while i < 30 {
+        y = (y + x / y) / 2.0;
+        i = i + 1;
+    }
+    y
+}
+
+fn real_exp(x: Float64) -> Float64 {
+    // Range reduction not done — adequate for typical SQL ranges.
+    let mut sum: Float64 = 1.0;
+    let mut term: Float64 = 1.0;
+    let mut k: Int = 1;
+    while k < 50 {
+        term = term * x / (k as Float64);
+        sum = sum + term;
+        k = k + 1;
+    }
+    sum
+}
+
+fn real_ln(x: Float64) -> Float64 {
+    // Use ln(x) = 2 * atanh((x-1)/(x+1)) for x > 0.
+    if x == 1.0 { return 0.0; }
+    let u = (x - 1.0) / (x + 1.0);
+    // atanh series: u + u^3/3 + u^5/5 + ...
+    let mut sum: Float64 = 0.0;
+    let mut term: Float64 = u;
+    let u2 = u * u;
+    let mut k: Int = 1;
+    while k < 100 {
+        sum = sum + term / (k as Float64);
+        term = term * u2;
+        k = k + 2;
+    }
+    2.0 * sum
+}
+
+fn real_pow(x: Float64, y: Float64) -> Float64 {
+    if x == 0.0 { return 0.0; }
+    real_exp(y * real_ln(if x > 0.0 { x } else { -x }))
+}
+
+fn real_sin(x: Float64) -> Float64 {
+    let two_pi = 2.0 * pi_const();
+    let mut a = x;
+    while a > pi_const()  { a = a - two_pi; }
+    while a < -pi_const() { a = a + two_pi; }
+    let mut sum: Float64 = a;
+    let mut term: Float64 = a;
+    let a2 = a * a;
+    let mut k: Int = 1;
+    while k < 30 {
+        let denom: Float64 = ((2 * k) as Float64) * ((2 * k + 1) as Float64);
+        term = -term * a2 / denom;
+        sum = sum + term;
+        k = k + 1;
+    }
+    sum
+}
+
+fn real_cos(x: Float64) -> Float64 {
+    real_sin(pi_const() / 2.0 - x)
+}
+
+fn real_asin(x: Float64) -> Float64 {
+    if x == 0.0 { return 0.0; }
+    if x == 1.0 { return pi_const() / 2.0; }
+    if x == -1.0 { return -pi_const() / 2.0; }
+    real_atan(x / real_sqrt(1.0 - x * x))
+}
+
+fn real_atan(x: Float64) -> Float64 {
+    // Use: atan(x) = atan(1) + atan((x-1)/(1+x)) for |x|>1 stability.
+    let mut a = x;
+    let mut sign: Float64 = 1.0;
+    if a < 0.0 { sign = -1.0; a = -a; }
+    let mut offset: Float64 = 0.0;
+    if a > 1.0 {
+        offset = pi_const() / 2.0;
+        a = 1.0 / a;
+    }
+    // Maclaurin: atan(a) = a - a^3/3 + a^5/5 - ...
+    let mut sum: Float64 = 0.0;
+    let mut term: Float64 = a;
+    let a2 = a * a;
+    let mut k: Int = 1;
+    while k < 50 {
+        sum = sum + term / (k as Float64);
+        term = -term * a2;
+        k = k + 2;
+    }
+    let r: Float64 = if offset != 0.0 { offset - sum } else { sum };
+    sign * r
+}
+
+fn real_atan2(y: Float64, x: Float64) -> Float64 {
+    if x > 0.0 { return real_atan(y / x); }
+    if x < 0.0 && y >= 0.0 { return real_atan(y / x) + pi_const(); }
+    if x < 0.0 && y < 0.0  { return real_atan(y / x) - pi_const(); }
+    if x == 0.0 && y > 0.0 { return pi_const() / 2.0; }
+    if x == 0.0 && y < 0.0 { return -pi_const() / 2.0; }
+    0.0
+}

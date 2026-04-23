@@ -1,0 +1,194 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, builtins, string
+// @timeout: 5000
+// @expected-exit: 0
+//
+// Verifies pure-Verum semantics of the loom string built-ins.
+// Mirrors the SQLite spec §15.1 for: LENGTH, LOWER/UPPER, SUBSTR,
+// TRIM/LTRIM/RTRIM, REPLACE, INSTR, HEX, UNICODE, CHAR, CONCAT,
+// CONCAT_WS, GLOB, LIKE, SOUNDEX, sql_quote.
+
+mount core.database.sqlite.native.l4_vdbe.register.{
+    Register, RNull, RInt, RText, RBlob,
+};
+mount core.database.sqlite.native.builtins.string_fns.{
+    length as fn_length,
+    lower as fn_lower,
+    upper as fn_upper,
+    substr as fn_substr,
+    trim as fn_trim,
+    ltrim as fn_ltrim,
+    rtrim as fn_rtrim,
+    replace as fn_replace,
+    instr as fn_instr,
+    hex as fn_hex,
+    unhex as fn_unhex,
+    unicode as fn_unicode,
+    char_from_codepoints,
+    concat as fn_concat,
+    concat_ws as fn_concat_ws,
+    sql_quote,
+    glob as fn_glob,
+    like as fn_like,
+    soundex as fn_soundex,
+};
+
+fn r_int(x: Int64) -> Register { RInt(x) }
+fn r_text(s: Text) -> Register { RText(s) }
+
+fn require_text(r: Register, expected: Text) {
+    match r {
+        RText(s) => assert(s == expected),
+        _        => panic("expected RText"),
+    }
+}
+
+fn require_int(r: Register, expected: Int64) {
+    match r {
+        RInt(x) => assert_eq(x, expected),
+        _       => panic("expected RInt"),
+    }
+}
+
+fn test_length() {
+    require_int(fn_length(&r_text("hello".clone())), 5 as Int64);
+    require_int(fn_length(&r_text("".clone())), 0 as Int64);
+    match fn_length(&RNull) {
+        RNull => {},
+        _     => panic("LENGTH(NULL) should be NULL"),
+    }
+}
+
+fn test_case_fold() {
+    require_text(fn_lower(&r_text("Hello, WORLD".clone())), "hello, world".clone());
+    require_text(fn_upper(&r_text("Hello, WORLD".clone())), "HELLO, WORLD".clone());
+}
+
+fn test_substr_one_indexed() {
+    // SUBSTR('verum', 1, 3) = 'ver'
+    require_text(
+        fn_substr(&r_text("verum".clone()), &r_int(1 as Int64), &r_int(3 as Int64)),
+        "ver".clone(),
+    );
+    // SUBSTR('verum', 3) = 'rum' (no length given)
+    require_text(
+        fn_substr(&r_text("verum".clone()), &r_int(3 as Int64), &RNull),
+        "rum".clone(),
+    );
+}
+
+fn test_trim_family() {
+    require_text(fn_trim(&r_text("  hi  ".clone())), "hi".clone());
+    require_text(fn_ltrim(&r_text("  hi  ".clone())), "hi  ".clone());
+    require_text(fn_rtrim(&r_text("  hi  ".clone())), "  hi".clone());
+}
+
+fn test_replace_and_instr() {
+    require_text(
+        fn_replace(
+            &r_text("foo bar foo".clone()),
+            &r_text("foo".clone()),
+            &r_text("baz".clone()),
+        ),
+        "baz bar baz".clone(),
+    );
+    // INSTR('hello', 'lo') = 4 (1-indexed)
+    require_int(
+        fn_instr(&r_text("hello".clone()), &r_text("lo".clone())),
+        4 as Int64,
+    );
+    // not found → 0
+    require_int(
+        fn_instr(&r_text("hello".clone()), &r_text("xy".clone())),
+        0 as Int64,
+    );
+}
+
+fn test_hex_unhex_roundtrip() {
+    require_text(fn_hex(&r_text("AB".clone())), "4142".clone());
+    let decoded = fn_unhex(&r_text("4142".clone()));
+    match decoded {
+        RBlob(_) => {},
+        _        => panic("UNHEX should produce blob"),
+    }
+}
+
+fn test_unicode_and_char() {
+    require_int(fn_unicode(&r_text("A".clone())), 65 as Int64);
+    let mut codes: List<Register> = List.new();
+    codes.push(r_int(72 as Int64));   // H
+    codes.push(r_int(105 as Int64));  // i
+    require_text(char_from_codepoints(&codes), "Hi".clone());
+}
+
+fn test_concat_skips_null() {
+    let mut args: List<Register> = List.new();
+    args.push(r_text("a".clone()));
+    args.push(RNull);
+    args.push(r_text("b".clone()));
+    require_text(fn_concat(&args), "ab".clone());
+}
+
+fn test_concat_ws() {
+    let mut args: List<Register> = List.new();
+    args.push(r_text("alpha".clone()));
+    args.push(RNull);
+    args.push(r_text("beta".clone()));
+    require_text(
+        fn_concat_ws(&r_text(",".clone()), &args),
+        "alpha,beta".clone(),
+    );
+}
+
+fn test_sql_quote_escapes() {
+    // Single-quote inside string is doubled.
+    require_text(sql_quote(&r_text("it's".clone())), "'it''s'".clone());
+    require_text(sql_quote(&RNull), "NULL".clone());
+}
+
+fn test_glob_basic() {
+    require_int(fn_glob(&r_text("abc".clone()), &r_text("a*".clone())), 1 as Int64);
+    require_int(fn_glob(&r_text("abc".clone()), &r_text("a?c".clone())), 1 as Int64);
+    require_int(fn_glob(&r_text("abc".clone()), &r_text("[abc]bc".clone())), 1 as Int64);
+    require_int(fn_glob(&r_text("xbc".clone()), &r_text("[^a]bc".clone())), 1 as Int64);
+}
+
+fn test_like_basic() {
+    require_int(
+        fn_like(&r_text("Hello".clone()), &r_text("he%".clone()), &RNull),
+        1 as Int64,
+    );
+    require_int(
+        fn_like(&r_text("Hello".clone()), &r_text("h_llo".clone()), &RNull),
+        1 as Int64,
+    );
+    // ESCAPE '\'  → literal '%' match
+    require_int(
+        fn_like(&r_text("100%".clone()), &r_text("100\\%".clone()), &r_text("\\".clone())),
+        1 as Int64,
+    );
+}
+
+fn test_soundex_classic_examples() {
+    require_text(fn_soundex(&r_text("Robert".clone())), "R163".clone());
+    require_text(fn_soundex(&r_text("Rupert".clone())), "R163".clone());
+    require_text(fn_soundex(&r_text("Ashcraft".clone())), "A226".clone());
+}
+
+fn main() {
+    test_length();
+    test_case_fold();
+    test_substr_one_indexed();
+    test_trim_family();
+    test_replace_and_instr();
+    test_hex_unhex_roundtrip();
+    test_unicode_and_char();
+    test_concat_skips_null();
+    test_concat_ws();
+    test_sql_quote_escapes();
+    test_glob_basic();
+    test_like_basic();
+    test_soundex_classic_examples();
+}

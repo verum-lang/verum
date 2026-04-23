@@ -1,0 +1,237 @@
+// =============================================================================
+// builtins/aggregate_fns.vr — SQLite aggregate functions
+// =============================================================================
+// Layer: 4
+// Spec: sqlite-native.md §15.2
+//
+// All aggregates implement the (init, step, final) protocol. Each is
+// represented by a `AggregateState` instance carried in a register.
+// The L4 interpreter holds the per-group state and calls `step` for
+// each input row, then `final` once when the group flushes.
+//
+// Functions covered:
+//   COUNT(*)          — count all rows including NULLs
+//   COUNT(X)          — count non-NULL X
+//   SUM(X) / TOTAL(X) — numeric sum (TOTAL returns 0.0 on empty group)
+//   AVG(X)            — average; NULL on empty group, REAL otherwise
+//   MIN(X) / MAX(X)   — min/max non-NULL; NULL on empty group
+//   GROUP_CONCAT(X[, SEP])
+//   STRING_AGG(X, SEP)
+// =============================================================================
+
+module core.database.sqlite.native.builtins.aggregate_fns;
+
+mount core.*;
+mount base.{Text, Maybe};
+mount collections.List;
+mount core.database.sqlite.native.l4_vdbe.register.{Register, RNull, RInt, RReal, RText, RBlob, RRowId};
+
+// -----------------------------------------------------------------------------
+// AggregateState — single-cell working storage shared by all aggregates
+// -----------------------------------------------------------------------------
+
+public type AggregateState is {
+    // Discriminator: 0=count 1=sum 2=avg 3=min 4=max 5=total 6=group_concat
+    kind: Int,
+    count: Int64,
+    sum_int: Int64,
+    sum_real: Float64,
+    use_real: Bool,
+    min_max: Register,
+    has_value: Bool,
+    text_buf: Text,
+    sep: Text,
+};
+
+public fn agg_new(kind: Int) -> AggregateState {
+    AggregateState {
+        kind: kind,
+        count: 0 as Int64,
+        sum_int: 0 as Int64,
+        sum_real: 0.0,
+        use_real: false,
+        min_max: RNull,
+        has_value: false,
+        text_buf: Text.new(),
+        sep: ",".clone(),
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Step: feed one row's contribution
+// -----------------------------------------------------------------------------
+
+public fn agg_step(st: &mut AggregateState, value: &Register) {
+    match st.kind {
+        // COUNT(*) — count regardless of NULL.
+        0 => { st.count = st.count + (1 as Int64); }
+        // COUNT(X) handled by codegen as kind=0 with a NotNull guard,
+        // so this branch is not separate.
+        // SUM(X) and TOTAL(X)
+        1 => agg_step_sum(st, value),
+        5 => agg_step_sum(st, value),
+        // AVG(X)
+        2 => {
+            agg_step_sum(st, value);
+            let is_null = match value { RNull => true, _ => false };
+            if !is_null { st.count = st.count + (1 as Int64); }
+        }
+        // MIN(X)
+        3 => agg_step_minmax(st, value, true),
+        // MAX(X)
+        4 => agg_step_minmax(st, value, false),
+        // GROUP_CONCAT
+        6 => agg_step_concat(st, value, false),
+        // STRING_AGG
+        7 => agg_step_concat(st, value, true),
+        _ => {}
+    }
+}
+
+fn agg_step_sum(st: &mut AggregateState, value: &Register) {
+    match value {
+        RInt(x) => {
+            if st.use_real {
+                st.sum_real = st.sum_real + (x as Float64);
+            } else {
+                st.sum_int = st.sum_int + x;
+            }
+        }
+        RReal(x) => {
+            if !st.use_real {
+                st.sum_real = (st.sum_int as Float64);
+                st.use_real = true;
+            }
+            st.sum_real = st.sum_real + x;
+        }
+        _ => {}
+    }
+}
+
+fn agg_step_minmax(st: &mut AggregateState, value: &Register, want_min: Bool) {
+    let is_null = match value { RNull => true, _ => false };
+    if is_null { return; }
+    if !st.has_value {
+        st.min_max = clone_register(value);
+        st.has_value = true;
+        return;
+    }
+    let replace: Bool = if want_min {
+        reg_less(value, &st.min_max)
+    } else {
+        reg_less(&st.min_max, value)
+    };
+    if replace { st.min_max = clone_register(value); }
+}
+
+fn agg_step_concat(st: &mut AggregateState, value: &Register, want_sep_required: Bool) {
+    let _ = want_sep_required;
+    match value {
+        RText(s) => {
+            if st.has_value {
+                let sb = st.sep.as_bytes();
+                let mut i: Int = 0;
+                while i < sb.len() { st.text_buf.push_byte(sb[i]); i = i + 1; }
+            }
+            let bs = s.as_bytes();
+            let mut i: Int = 0;
+            while i < bs.len() { st.text_buf.push_byte(bs[i]); i = i + 1; }
+            st.has_value = true;
+        }
+        _ => {}
+    }
+}
+
+public fn agg_set_separator(st: &mut AggregateState, sep: &Text) {
+    st.sep = sep.clone();
+}
+
+// -----------------------------------------------------------------------------
+// Final: produce the result register
+// -----------------------------------------------------------------------------
+
+public fn agg_final(st: &AggregateState) -> Register {
+    match st.kind {
+        0 => RInt(st.count),
+        1 => {
+            // SUM — NULL if no rows, else int or real
+            if !st.use_real && st.sum_int == (0 as Int64) && !st.has_value {
+                RNull
+            } else if st.use_real {
+                RReal(st.sum_real)
+            } else {
+                RInt(st.sum_int)
+            }
+        }
+        5 => {
+            // TOTAL — 0.0 on empty
+            if st.use_real { RReal(st.sum_real) } else { RReal(st.sum_int as Float64) }
+        }
+        2 => {
+            if st.count == (0 as Int64) {
+                RNull
+            } else {
+                let sum_f = if st.use_real { st.sum_real } else { st.sum_int as Float64 };
+                RReal(sum_f / (st.count as Float64))
+            }
+        }
+        3 | 4 => {
+            if !st.has_value { RNull } else { clone_register(&st.min_max) }
+        }
+        6 | 7 => {
+            if !st.has_value { RNull } else { RText(st.text_buf.clone()) }
+        }
+        _ => RNull,
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Helpers
+// -----------------------------------------------------------------------------
+
+fn clone_register(r: &Register) -> Register {
+    match r {
+        RNull     => RNull,
+        RInt(x)   => RInt(x),
+        RReal(x)  => RReal(x),
+        RText(s)  => RText(s.clone()),
+        RBlob(b)  => {
+            let mut out: List<Byte> = List.new();
+            let mut i: Int = 0;
+            while i < b.len() { out.push(b[i]); i = i + 1; }
+            RBlob(out)
+        }
+        RRowId(x) => RRowId(x),
+    }
+}
+
+fn reg_less(a: &Register, b: &Register) -> Bool {
+    match a {
+        RInt(x) => match b {
+            RInt(y) => x < y,
+            RReal(y) => (x as Float64) < y,
+            _ => false,
+        },
+        RReal(x) => match b {
+            RReal(y) => x < y,
+            RInt(y) => x < (y as Float64),
+            _ => false,
+        },
+        RText(xs) => match b {
+            RText(ys) => {
+                let xb = xs.as_bytes();
+                let yb = ys.as_bytes();
+                let n: Int = if xb.len() < yb.len() { xb.len() } else { yb.len() };
+                let mut i: Int = 0;
+                while i < n {
+                    if xb[i] < yb[i] { return true; }
+                    if xb[i] > yb[i] { return false; }
+                    i = i + 1;
+                }
+                xb.len() < yb.len()
+            }
+            _ => false,
+        },
+        _ => false,
+    }
+}

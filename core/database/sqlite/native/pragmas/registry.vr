@@ -1,0 +1,285 @@
+// =============================================================================
+// pragmas/registry.vr — PRAGMA name registry + scope/effect taxonomy
+// =============================================================================
+// Layer: 5–6
+// Spec: sqlite-native.md §18, Appendix F
+// =============================================================================
+
+module core.database.sqlite.native.pragmas.registry;
+
+mount core.*;
+mount base.{Text, Maybe};
+
+// -----------------------------------------------------------------------------
+// PragmaKind — tagged ID for every supported PRAGMA
+// -----------------------------------------------------------------------------
+
+public type PragmaKind is
+    // Query/Config
+      PCacheSize
+    | PPageSize
+    | PJournalMode
+    | PSynchronous
+    | PForeignKeys
+    | PRecursiveTriggers
+    | PUserVersion
+    | PSchemaVersion
+    | PApplicationId
+    | PJournalSizeLimit
+    | PAutoVacuum
+    | PIncrementalVacuum
+    | PBusyTimeout
+    | PCaseSensitiveLike
+    | PEncoding
+    | PTempStore
+    | PSecureDelete
+    | PWritableSchema
+    | PQueryOnly
+    | PLockingMode
+    | PMaxPageCount
+    | PMmapSize
+    | PThreads
+    | PWalAutocheckpoint
+    | PWalCheckpoint
+    | PDeferForeignKeys
+    | PIgnoreCheckConstraints
+    | PCellSizeCheck
+
+    // Introspection
+    | PTableInfo
+    | PTableXInfo
+    | PIndexInfo
+    | PIndexXInfo
+    | PIndexList
+    | PForeignKeyList
+    | PForeignKeyCheck
+    | PIntegrityCheck
+    | PQuickCheck
+    | PStats
+    | PDatabaseList
+    | PTableList
+    | PTriggerList
+    | PModuleList
+    | PFunctionList
+    | PPragmaList
+    | PCompileOptions
+    | PCollationList
+
+    // Maintenance
+    | POptimize
+    | PShrinkMemory
+    | PFreelistCount
+    | PPageCount;
+
+public type Scope is SConnection | SDatabase | SReadOnly | SDangerous;
+
+public type EffectPhase is
+      EImmediate
+    | EOnNextTxn
+    | EOnNextOpen
+    | EBeforeCreate;     // can only be set before any table exists
+
+public type PragmaSpec is {
+    kind: PragmaKind,
+    scope: Scope,
+    is_settable: Bool,
+    effect: EffectPhase,
+};
+
+// -----------------------------------------------------------------------------
+// Name → kind
+// -----------------------------------------------------------------------------
+
+fn ascii_lower(s: &Text) -> Text {
+    let bs = s.as_bytes();
+    let mut out = Text.new();
+    let mut i: Int = 0;
+    while i < bs.len() {
+        let b: Byte = bs[i];
+        let lo: Byte =
+            if b >= (65 as Byte) && b <= (90 as Byte) { b + (32 as Byte) } else { b };
+        out.push_byte(lo);
+        i = i + 1;
+    }
+    out
+}
+
+public fn pragma_from_name(name: &Text) -> Maybe<PragmaKind> {
+    let n = ascii_lower(name);
+    if n == "cache_size".clone()        { return Some(PCacheSize); }
+    if n == "page_size".clone()         { return Some(PPageSize); }
+    if n == "journal_mode".clone()      { return Some(PJournalMode); }
+    if n == "synchronous".clone()       { return Some(PSynchronous); }
+    if n == "foreign_keys".clone()      { return Some(PForeignKeys); }
+    if n == "recursive_triggers".clone(){ return Some(PRecursiveTriggers); }
+    if n == "user_version".clone()      { return Some(PUserVersion); }
+    if n == "schema_version".clone()    { return Some(PSchemaVersion); }
+    if n == "application_id".clone()    { return Some(PApplicationId); }
+    if n == "journal_size_limit".clone(){ return Some(PJournalSizeLimit); }
+    if n == "auto_vacuum".clone()       { return Some(PAutoVacuum); }
+    if n == "incremental_vacuum".clone(){ return Some(PIncrementalVacuum); }
+    if n == "busy_timeout".clone()      { return Some(PBusyTimeout); }
+    if n == "case_sensitive_like".clone(){ return Some(PCaseSensitiveLike); }
+    if n == "encoding".clone()          { return Some(PEncoding); }
+    if n == "temp_store".clone()        { return Some(PTempStore); }
+    if n == "secure_delete".clone()     { return Some(PSecureDelete); }
+    if n == "writable_schema".clone()   { return Some(PWritableSchema); }
+    if n == "query_only".clone()        { return Some(PQueryOnly); }
+    if n == "locking_mode".clone()      { return Some(PLockingMode); }
+    if n == "max_page_count".clone()    { return Some(PMaxPageCount); }
+    if n == "mmap_size".clone()         { return Some(PMmapSize); }
+    if n == "threads".clone()           { return Some(PThreads); }
+    if n == "wal_autocheckpoint".clone(){ return Some(PWalAutocheckpoint); }
+    if n == "wal_checkpoint".clone()    { return Some(PWalCheckpoint); }
+    if n == "defer_foreign_keys".clone(){ return Some(PDeferForeignKeys); }
+    if n == "ignore_check_constraints".clone() { return Some(PIgnoreCheckConstraints); }
+    if n == "cell_size_check".clone()   { return Some(PCellSizeCheck); }
+    if n == "table_info".clone()        { return Some(PTableInfo); }
+    if n == "table_xinfo".clone()       { return Some(PTableXInfo); }
+    if n == "index_info".clone()        { return Some(PIndexInfo); }
+    if n == "index_xinfo".clone()       { return Some(PIndexXInfo); }
+    if n == "index_list".clone()        { return Some(PIndexList); }
+    if n == "foreign_key_list".clone()  { return Some(PForeignKeyList); }
+    if n == "foreign_key_check".clone() { return Some(PForeignKeyCheck); }
+    if n == "integrity_check".clone()   { return Some(PIntegrityCheck); }
+    if n == "quick_check".clone()       { return Some(PQuickCheck); }
+    if n == "stats".clone()             { return Some(PStats); }
+    if n == "database_list".clone()     { return Some(PDatabaseList); }
+    if n == "table_list".clone()        { return Some(PTableList); }
+    if n == "trigger_list".clone()      { return Some(PTriggerList); }
+    if n == "module_list".clone()       { return Some(PModuleList); }
+    if n == "function_list".clone()     { return Some(PFunctionList); }
+    if n == "pragma_list".clone()       { return Some(PPragmaList); }
+    if n == "compile_options".clone()   { return Some(PCompileOptions); }
+    if n == "collation_list".clone()    { return Some(PCollationList); }
+    if n == "optimize".clone()          { return Some(POptimize); }
+    if n == "shrink_memory".clone()     { return Some(PShrinkMemory); }
+    if n == "freelist_count".clone()    { return Some(PFreelistCount); }
+    if n == "page_count".clone()        { return Some(PPageCount); }
+    None
+}
+
+// -----------------------------------------------------------------------------
+// Spec lookup — describes scope/settability/effect-phase per pragma
+// -----------------------------------------------------------------------------
+
+public fn pragma_spec(k: &PragmaKind) -> PragmaSpec {
+    match k {
+        PCacheSize         => spec(k.clone(), SConnection, true,  EImmediate),
+        PPageSize          => spec(k.clone(), SDatabase,   true,  EBeforeCreate),
+        PJournalMode       => spec(k.clone(), SDatabase,   true,  EImmediate),
+        PSynchronous       => spec(k.clone(), SConnection, true,  EImmediate),
+        PForeignKeys       => spec(k.clone(), SConnection, true,  EImmediate),
+        PRecursiveTriggers => spec(k.clone(), SConnection, true,  EImmediate),
+        PUserVersion       => spec(k.clone(), SDatabase,   true,  EImmediate),
+        PSchemaVersion     => spec(k.clone(), SDatabase,   true,  EOnNextTxn),
+        PApplicationId     => spec(k.clone(), SDatabase,   true,  EImmediate),
+        PJournalSizeLimit  => spec(k.clone(), SDatabase,   true,  EImmediate),
+        PAutoVacuum        => spec(k.clone(), SDatabase,   true,  EBeforeCreate),
+        PIncrementalVacuum => spec(k.clone(), SDatabase,   true,  EImmediate),
+        PBusyTimeout       => spec(k.clone(), SConnection, true,  EImmediate),
+        PCaseSensitiveLike => spec(k.clone(), SConnection, true,  EImmediate),
+        PEncoding          => spec(k.clone(), SDatabase,   true,  EBeforeCreate),
+        PTempStore         => spec(k.clone(), SConnection, true,  EImmediate),
+        PSecureDelete      => spec(k.clone(), SDatabase,   true,  EImmediate),
+        PWritableSchema    => spec(k.clone(), SDangerous,  true,  EImmediate),
+        PQueryOnly         => spec(k.clone(), SConnection, true,  EImmediate),
+        PLockingMode       => spec(k.clone(), SDatabase,   true,  EImmediate),
+        PMaxPageCount      => spec(k.clone(), SDatabase,   true,  EImmediate),
+        PMmapSize          => spec(k.clone(), SConnection, true,  EImmediate),
+        PThreads           => spec(k.clone(), SConnection, true,  EImmediate),
+        PWalAutocheckpoint => spec(k.clone(), SConnection, true,  EImmediate),
+        PWalCheckpoint     => spec(k.clone(), SDatabase,   true,  EImmediate),
+        PDeferForeignKeys  => spec(k.clone(), SConnection, true,  EOnNextTxn),
+        PIgnoreCheckConstraints => spec(k.clone(), SConnection, true, EImmediate),
+        PCellSizeCheck     => spec(k.clone(), SDatabase,   true,  EImmediate),
+        // Introspection — read-only
+        PTableInfo         => spec(k.clone(), SReadOnly,   false, EImmediate),
+        PTableXInfo        => spec(k.clone(), SReadOnly,   false, EImmediate),
+        PIndexInfo         => spec(k.clone(), SReadOnly,   false, EImmediate),
+        PIndexXInfo        => spec(k.clone(), SReadOnly,   false, EImmediate),
+        PIndexList         => spec(k.clone(), SReadOnly,   false, EImmediate),
+        PForeignKeyList    => spec(k.clone(), SReadOnly,   false, EImmediate),
+        PForeignKeyCheck   => spec(k.clone(), SReadOnly,   false, EImmediate),
+        PIntegrityCheck    => spec(k.clone(), SReadOnly,   false, EImmediate),
+        PQuickCheck        => spec(k.clone(), SReadOnly,   false, EImmediate),
+        PStats             => spec(k.clone(), SReadOnly,   false, EImmediate),
+        PDatabaseList      => spec(k.clone(), SReadOnly,   false, EImmediate),
+        PTableList         => spec(k.clone(), SReadOnly,   false, EImmediate),
+        PTriggerList       => spec(k.clone(), SReadOnly,   false, EImmediate),
+        PModuleList        => spec(k.clone(), SReadOnly,   false, EImmediate),
+        PFunctionList      => spec(k.clone(), SReadOnly,   false, EImmediate),
+        PPragmaList        => spec(k.clone(), SReadOnly,   false, EImmediate),
+        PCompileOptions    => spec(k.clone(), SReadOnly,   false, EImmediate),
+        PCollationList     => spec(k.clone(), SReadOnly,   false, EImmediate),
+        POptimize          => spec(k.clone(), SDatabase,   true,  EImmediate),
+        PShrinkMemory      => spec(k.clone(), SConnection, true,  EImmediate),
+        PFreelistCount     => spec(k.clone(), SReadOnly,   false, EImmediate),
+        PPageCount         => spec(k.clone(), SReadOnly,   false, EImmediate),
+    }
+}
+
+fn spec(k: PragmaKind, scope: Scope, is_settable: Bool, effect: EffectPhase) -> PragmaSpec {
+    PragmaSpec { kind: k, scope: scope, is_settable: is_settable, effect: effect }
+}
+
+// -----------------------------------------------------------------------------
+// pragma_clone — clone a kind tag (avoids Clone trait dependency)
+// -----------------------------------------------------------------------------
+
+implement PragmaKind {
+    public fn clone(&self) -> PragmaKind {
+        match self {
+            PCacheSize         => PCacheSize,
+            PPageSize          => PPageSize,
+            PJournalMode       => PJournalMode,
+            PSynchronous       => PSynchronous,
+            PForeignKeys       => PForeignKeys,
+            PRecursiveTriggers => PRecursiveTriggers,
+            PUserVersion       => PUserVersion,
+            PSchemaVersion     => PSchemaVersion,
+            PApplicationId     => PApplicationId,
+            PJournalSizeLimit  => PJournalSizeLimit,
+            PAutoVacuum        => PAutoVacuum,
+            PIncrementalVacuum => PIncrementalVacuum,
+            PBusyTimeout       => PBusyTimeout,
+            PCaseSensitiveLike => PCaseSensitiveLike,
+            PEncoding          => PEncoding,
+            PTempStore         => PTempStore,
+            PSecureDelete      => PSecureDelete,
+            PWritableSchema    => PWritableSchema,
+            PQueryOnly         => PQueryOnly,
+            PLockingMode       => PLockingMode,
+            PMaxPageCount      => PMaxPageCount,
+            PMmapSize          => PMmapSize,
+            PThreads           => PThreads,
+            PWalAutocheckpoint => PWalAutocheckpoint,
+            PWalCheckpoint     => PWalCheckpoint,
+            PDeferForeignKeys  => PDeferForeignKeys,
+            PIgnoreCheckConstraints => PIgnoreCheckConstraints,
+            PCellSizeCheck     => PCellSizeCheck,
+            PTableInfo         => PTableInfo,
+            PTableXInfo        => PTableXInfo,
+            PIndexInfo         => PIndexInfo,
+            PIndexXInfo        => PIndexXInfo,
+            PIndexList         => PIndexList,
+            PForeignKeyList    => PForeignKeyList,
+            PForeignKeyCheck   => PForeignKeyCheck,
+            PIntegrityCheck    => PIntegrityCheck,
+            PQuickCheck        => PQuickCheck,
+            PStats             => PStats,
+            PDatabaseList      => PDatabaseList,
+            PTableList         => PTableList,
+            PTriggerList       => PTriggerList,
+            PModuleList        => PModuleList,
+            PFunctionList      => PFunctionList,
+            PPragmaList        => PPragmaList,
+            PCompileOptions    => PCompileOptions,
+            PCollationList     => PCollationList,
+            POptimize          => POptimize,
+            PShrinkMemory      => PShrinkMemory,
+            PFreelistCount     => PFreelistCount,
+            PPageCount         => PPageCount,
+        }
+    }
+}

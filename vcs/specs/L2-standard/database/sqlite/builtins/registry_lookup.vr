@@ -1,0 +1,147 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, builtins, registry
+// @timeout: 5000
+// @expected-exit: 0
+//
+// Verifies that the loom builtin-function registry compiles, that
+// `kind_from_name` resolves the canonical SQLite spellings to the
+// matching `ScalarKind`, and that arity descriptors agree with
+// the spec catalogue (sqlite-native.md §15.1).
+
+mount core.database.sqlite.native.builtins.registry.{
+    ScalarKind,
+    KLength, KSubstr, KConcat, KCoalesce, KMin, KMax,
+    KPi, KSqrt, KPow, KMod, KCeil, KFloor,
+    KSqliteVersion, KChanges, KLastInsertRowid,
+    KDate, KStrftime,
+    Arity,
+    kind_code, kind_from_name, arity_of, arity_accepts,
+    AggregateKind, AggCount, AggSum, AggAvg, AggMin, AggMax,
+    agg_kind_code, agg_from_name,
+};
+
+fn require_kind_for(name: Text) {
+    let opt = kind_from_name(&name);
+    let _: ScalarKind = match opt {
+        Some(k) => k,
+        None    => panic(f"name '{name}' should resolve"),
+    };
+}
+
+fn test_string_function_lookup() {
+    require_kind_for("length".clone());
+    require_kind_for("LENGTH".clone());        // case-insensitive
+    require_kind_for("substr".clone());
+    require_kind_for("substring".clone());     // alias
+    require_kind_for("concat".clone());
+    require_kind_for("trim".clone());
+}
+
+fn test_numeric_function_lookup() {
+    require_kind_for("abs".clone());
+    require_kind_for("round".clone());
+    require_kind_for("coalesce".clone());
+    require_kind_for("ifnull".clone());
+    require_kind_for("nullif".clone());
+    require_kind_for("min".clone());
+    require_kind_for("max".clone());
+    require_kind_for("iif".clone());
+    require_kind_for("sign".clone());
+}
+
+fn test_math_function_lookup() {
+    require_kind_for("pi".clone());
+    require_kind_for("sqrt".clone());
+    require_kind_for("pow".clone());
+    require_kind_for("power".clone());          // alias
+    require_kind_for("ceil".clone());
+    require_kind_for("ceiling".clone());        // alias
+    require_kind_for("sin".clone());
+    require_kind_for("atan2".clone());
+    require_kind_for("degrees".clone());
+}
+
+fn test_meta_function_lookup() {
+    require_kind_for("typeof".clone());
+    require_kind_for("sqlite_version".clone());
+    require_kind_for("changes".clone());
+    require_kind_for("last_insert_rowid".clone());
+}
+
+fn test_datetime_function_lookup() {
+    require_kind_for("date".clone());
+    require_kind_for("time".clone());
+    require_kind_for("datetime".clone());
+    require_kind_for("julianday".clone());
+    require_kind_for("strftime".clone());
+}
+
+fn test_arity_lookups_agree_with_spec() {
+    // LENGTH — exactly 1 arg
+    let l = arity_of(&KLength);
+    assert(arity_accepts(&l, 1));
+    assert(!arity_accepts(&l, 0));
+    assert(!arity_accepts(&l, 2));
+    // SUBSTR — 2 or 3
+    let s = arity_of(&KSubstr);
+    assert(arity_accepts(&s, 2));
+    assert(arity_accepts(&s, 3));
+    assert(!arity_accepts(&s, 1));
+    // CONCAT — unbounded, min 1
+    let c = arity_of(&KConcat);
+    assert(arity_accepts(&c, 1));
+    assert(arity_accepts(&c, 17));
+    // PI — exactly 0 args
+    let p = arity_of(&KPi);
+    assert(arity_accepts(&p, 0));
+    assert(!arity_accepts(&p, 1));
+}
+
+fn test_kind_codes_in_legacy_range_are_stable() {
+    // The first 28 kinds inherit their wire codes from the original
+    // inline table in l5_sql/codegen.scalar_fn_kind. They must not
+    // shift, otherwise existing VDBE programs would silently
+    // mis-dispatch.
+    assert_eq(kind_code(&KLength), 0);
+    assert_eq(kind_code(&KSubstr), 13);
+    assert_eq(kind_code(&KConcat), 12);
+    assert_eq(kind_code(&KCoalesce), 4);
+    assert_eq(kind_code(&KMin), 20);
+    assert_eq(kind_code(&KMax), 21);
+}
+
+fn require_agg(name: Text) {
+    let _: AggregateKind = match agg_from_name(&name) {
+        Some(k) => k,
+        None    => panic(f"aggregate '{name}' should resolve"),
+    };
+}
+
+fn test_aggregate_lookup() {
+    require_agg("count".clone());
+    require_agg("sum".clone());
+    require_agg("avg".clone());
+    require_agg("min".clone());
+    require_agg("max".clone());
+    require_agg("group_concat".clone());
+    require_agg("string_agg".clone());
+
+    assert_eq(agg_kind_code(&AggCount), 0);
+    assert_eq(agg_kind_code(&AggSum),   1);
+    assert_eq(agg_kind_code(&AggAvg),   2);
+    assert_eq(agg_kind_code(&AggMin),   3);
+    assert_eq(agg_kind_code(&AggMax),   4);
+}
+
+fn main() {
+    test_string_function_lookup();
+    test_numeric_function_lookup();
+    test_math_function_lookup();
+    test_meta_function_lookup();
+    test_datetime_function_lookup();
+    test_arity_lookups_agree_with_spec();
+    test_kind_codes_in_legacy_range_are_stable();
+    test_aggregate_lookup();
+}

@@ -1,0 +1,191 @@
+// =============================================================================
+// pragmas/config.vr — per-connection PRAGMA configuration record
+// =============================================================================
+// Layer: 6
+// Spec: sqlite-native.md §18
+//
+// Holds the live values of every connection-scope PRAGMA. The L6
+// `Connection<Mode>` carries one `PragmaConfig` per open handle; the
+// pager / vdbe / planner read these to alter their runtime behaviour.
+//
+// Database-scope PRAGMAs (page_size, journal_mode, ...) live in the
+// `DatabaseHeader` (cf. l1_pager/db_header.vr). They are surfaced
+// here only when read via `PRAGMA page_size`.
+// =============================================================================
+
+module core.database.sqlite.native.pragmas.config;
+
+mount core.*;
+mount base.{Text, Maybe};
+
+// -----------------------------------------------------------------------------
+// Mode-tagged enums
+// -----------------------------------------------------------------------------
+
+public type JournalMode is
+      JmDelete
+    | JmTruncate
+    | JmPersist
+    | JmMemory
+    | JmWal
+    | JmOff;
+
+public fn journal_mode_name(m: &JournalMode) -> Text {
+    match m {
+        JmDelete   => "delete".clone(),
+        JmTruncate => "truncate".clone(),
+        JmPersist  => "persist".clone(),
+        JmMemory   => "memory".clone(),
+        JmWal      => "wal".clone(),
+        JmOff      => "off".clone(),
+    }
+}
+
+public fn journal_mode_from_text(s: &Text) -> Maybe<JournalMode> {
+    let lo = ascii_lower(s);
+    if lo == "delete".clone()   { return Some(JmDelete); }
+    if lo == "truncate".clone() { return Some(JmTruncate); }
+    if lo == "persist".clone()  { return Some(JmPersist); }
+    if lo == "memory".clone()   { return Some(JmMemory); }
+    if lo == "wal".clone()      { return Some(JmWal); }
+    if lo == "off".clone()      { return Some(JmOff); }
+    None
+}
+
+public type Synchronous is
+      SyncOff      // 0
+    | SyncNormal   // 1
+    | SyncFull     // 2
+    | SyncExtra;   // 3
+
+public fn synchronous_code(s: &Synchronous) -> Int {
+    match s {
+        SyncOff    => 0,
+        SyncNormal => 1,
+        SyncFull   => 2,
+        SyncExtra  => 3,
+    }
+}
+
+public fn synchronous_from_int(n: Int) -> Maybe<Synchronous> {
+    if n == 0 { return Some(SyncOff); }
+    if n == 1 { return Some(SyncNormal); }
+    if n == 2 { return Some(SyncFull); }
+    if n == 3 { return Some(SyncExtra); }
+    None
+}
+
+public type LockingMode is LmNormal | LmExclusive;
+
+public fn locking_mode_name(m: &LockingMode) -> Text {
+    match m {
+        LmNormal    => "normal".clone(),
+        LmExclusive => "exclusive".clone(),
+    }
+}
+
+public type TempStore is TsDefault | TsFile | TsMemory;
+
+public type AutoVacuum is AvNone | AvFull | AvIncremental;
+
+public fn auto_vacuum_code(a: &AutoVacuum) -> Int {
+    match a {
+        AvNone        => 0,
+        AvFull        => 1,
+        AvIncremental => 2,
+    }
+}
+
+public type Encoding is EncUtf8 | EncUtf16Le | EncUtf16Be;
+
+public fn encoding_name(e: &Encoding) -> Text {
+    match e {
+        EncUtf8    => "UTF-8".clone(),
+        EncUtf16Le => "UTF-16le".clone(),
+        EncUtf16Be => "UTF-16be".clone(),
+    }
+}
+
+// -----------------------------------------------------------------------------
+// PragmaConfig — composite of per-connection state
+// -----------------------------------------------------------------------------
+
+public type PragmaConfig is {
+    cache_size_pages: Int,        // negative = bytes form (SQLite quirk)
+    page_size: Int,
+    journal_mode: JournalMode,
+    synchronous: Synchronous,
+    foreign_keys: Bool,
+    recursive_triggers: Bool,
+    user_version: Int,
+    schema_version: Int,
+    application_id: Int,
+    journal_size_limit: Int64,
+    auto_vacuum: AutoVacuum,
+    busy_timeout_ms: Int,
+    case_sensitive_like: Bool,
+    encoding: Encoding,
+    temp_store: TempStore,
+    secure_delete: Bool,
+    writable_schema: Bool,
+    query_only: Bool,
+    locking_mode: LockingMode,
+    max_page_count: Int,
+    mmap_size: Int64,
+    threads: Int,
+    wal_autocheckpoint: Int,
+    defer_foreign_keys: Bool,
+    ignore_check_constraints: Bool,
+    cell_size_check: Bool,
+};
+
+// Defaults match the SQLite C ones bundled in vendor/sqlite-amalgamation.
+
+public fn pragma_config_default() -> PragmaConfig {
+    PragmaConfig {
+        cache_size_pages: -2000,           // -2000 = ~2 MiB by SQLite convention
+        page_size: 4096,
+        journal_mode: JmDelete,
+        synchronous: SyncFull,
+        foreign_keys: false,
+        recursive_triggers: false,
+        user_version: 0,
+        schema_version: 1,
+        application_id: 0,
+        journal_size_limit: -1 as Int64,    // unbounded
+        auto_vacuum: AvNone,
+        busy_timeout_ms: 0,
+        case_sensitive_like: false,
+        encoding: EncUtf8,
+        temp_store: TsDefault,
+        secure_delete: false,
+        writable_schema: false,
+        query_only: false,
+        locking_mode: LmNormal,
+        max_page_count: 1073741823,
+        mmap_size: 0 as Int64,
+        threads: 0,
+        wal_autocheckpoint: 1000,
+        defer_foreign_keys: false,
+        ignore_check_constraints: false,
+        cell_size_check: true,
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Helpers
+// -----------------------------------------------------------------------------
+
+fn ascii_lower(s: &Text) -> Text {
+    let bs = s.as_bytes();
+    let mut out = Text.new();
+    let mut i: Int = 0;
+    while i < bs.len() {
+        let b: Byte = bs[i];
+        let lo: Byte =
+            if b >= (65 as Byte) && b <= (90 as Byte) { b + (32 as Byte) } else { b };
+        out.push_byte(lo);
+        i = i + 1;
+    }
+    out
+}

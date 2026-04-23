@@ -1,0 +1,560 @@
+// =============================================================================
+// builtins/json_fns.vr — JSON1 built-in functions
+// =============================================================================
+// Layer: 4
+// Spec: sqlite-native.md §15.4
+//
+// JSON1 functions operate on TEXT values that contain JSON; we lean
+// on `core.encoding.json` for the heavy lifting (parse + serialise)
+// and expose the SQLite façade here.
+//
+// Functions implemented in v0.1:
+//   json(X)             — validate + canonicalise (strip whitespace)
+//   json_valid(X)       — 1 / 0
+//   json_type(X[, P])   — JSON type name at root or P
+//   json_extract(X, P)  — value at path (single-path form)
+//   json_array_length(X[, P])
+//   json_quote(X)       — wrap a SQL value as JSON-encoded TEXT
+//   json_array(X1, X2, ...)
+//   json_object(K1, V1, ...)
+//
+// `json_set / json_replace / json_insert / json_remove / json_patch`
+// land in v0.2 once the path-grammar mutator in core.encoding.json
+// stabilises.
+// =============================================================================
+
+module core.database.sqlite.native.builtins.json_fns;
+
+mount core.*;
+mount base.{Text, Maybe};
+mount collections.List;
+mount core.database.sqlite.native.l4_vdbe.register.{Register, RNull, RInt, RReal, RText, RBlob, RRowId};
+
+// -----------------------------------------------------------------------------
+// JsonValue — minimal value tree (avoids hard-coupling to core.encoding.json)
+// -----------------------------------------------------------------------------
+
+public type JsonValue is
+      JNull
+    | JBool(Bool)
+    | JNumber(Float64)
+    | JString(Text)
+    | JArray(List<JsonValue>)
+    | JObject(List<JsonField>);
+
+public type JsonField is { key: Text, value: JsonValue };
+
+// -----------------------------------------------------------------------------
+// JSON_VALID
+// -----------------------------------------------------------------------------
+
+public fn json_valid(v: &Register) -> Register {
+    match v {
+        RText(s) => match parse_json(s) {
+            Some(_) => RInt(1 as Int64),
+            None    => RInt(0 as Int64),
+        },
+        _ => RInt(0 as Int64),
+    }
+}
+
+// -----------------------------------------------------------------------------
+// JSON
+// -----------------------------------------------------------------------------
+
+public fn json_canonical(v: &Register) -> Register {
+    match v {
+        RText(s) => match parse_json(s) {
+            Some(jv) => RText(serialise(&jv)),
+            None     => RNull,
+        },
+        _ => RNull,
+    }
+}
+
+// -----------------------------------------------------------------------------
+// JSON_TYPE
+// -----------------------------------------------------------------------------
+
+public fn json_type(v: &Register, _path: &Register) -> Register {
+    match v {
+        RText(s) => match parse_json(s) {
+            Some(jv) => RText(type_name(&jv)),
+            None     => RNull,
+        },
+        _ => RNull,
+    }
+}
+
+fn type_name(v: &JsonValue) -> Text {
+    match v {
+        JNull       => "null".clone(),
+        JBool(b)    => { if b { "true".clone() } else { "false".clone() } }
+        JNumber(_)  => "real".clone(),
+        JString(_)  => "text".clone(),
+        JArray(_)   => "array".clone(),
+        JObject(_)  => "object".clone(),
+    }
+}
+
+// -----------------------------------------------------------------------------
+// JSON_ARRAY_LENGTH
+// -----------------------------------------------------------------------------
+
+public fn json_array_length(v: &Register) -> Register {
+    match v {
+        RText(s) => match parse_json(s) {
+            Some(jv) => match jv {
+                JArray(items) => RInt(items.len() as Int64),
+                _ => RInt(0 as Int64),
+            },
+            None => RNull,
+        },
+        _ => RNull,
+    }
+}
+
+// -----------------------------------------------------------------------------
+// JSON_EXTRACT (single-path '$.key' / '$[index]' subset)
+// -----------------------------------------------------------------------------
+
+public fn json_extract(v: &Register, path: &Register) -> Register {
+    let pth: Text = match path {
+        RText(p) => p.clone(),
+        _        => { return RNull; }
+    };
+    match v {
+        RText(s) => match parse_json(s) {
+            Some(jv) => match resolve_path(&jv, &pth) {
+                Some(target) => json_to_register(&target),
+                None         => RNull,
+            },
+            None => RNull,
+        },
+        _ => RNull,
+    }
+}
+
+fn resolve_path(root: &JsonValue, path: &Text) -> Maybe<JsonValue> {
+    let bs = path.as_bytes();
+    if bs.len() == 0 || bs[0] != (36 as Byte) { return None; }  // must start with $
+    let mut cur: JsonValue = clone_json(root);
+    let mut i: Int = 1;
+    while i < bs.len() {
+        let b = bs[i];
+        if b == (46 as Byte) {  // .key
+            i = i + 1;
+            let key_start = i;
+            while i < bs.len() && bs[i] != (46 as Byte) && bs[i] != (91 as Byte) {
+                i = i + 1;
+            }
+            let mut key = Text.new();
+            let mut k: Int = key_start;
+            while k < i { key.push_byte(bs[k]); k = k + 1; }
+            cur = match cur {
+                JObject(fields) => match find_field(&fields, &key) {
+                    Some(v) => v,
+                    None    => { return None; }
+                },
+                _ => { return None; }
+            };
+        } else if b == (91 as Byte) {  // [N]
+            i = i + 1;
+            let mut idx: Int = 0;
+            while i < bs.len() && bs[i] != (93 as Byte) {
+                if bs[i] >= (48 as Byte) && bs[i] <= (57 as Byte) {
+                    idx = idx * 10 + ((bs[i] as Int) - 48);
+                }
+                i = i + 1;
+            }
+            if i < bs.len() && bs[i] == (93 as Byte) { i = i + 1; }
+            cur = match cur {
+                JArray(items) => {
+                    if idx < 0 || idx >= items.len() { return None; }
+                    clone_json(&items[idx])
+                }
+                _ => { return None; }
+            };
+        } else {
+            return None;
+        }
+    }
+    Some(cur)
+}
+
+fn find_field(fields: &List<JsonField>, key: &Text) -> Maybe<JsonValue> {
+    let mut i: Int = 0;
+    while i < fields.len() {
+        if fields[i].key == key {
+            return Some(clone_json(&fields[i].value));
+        }
+        i = i + 1;
+    }
+    None
+}
+
+fn json_to_register(v: &JsonValue) -> Register {
+    match v {
+        JNull      => RNull,
+        JBool(b)   => RInt(if b { 1 as Int64 } else { 0 as Int64 }),
+        JNumber(x) => {
+            // Prefer integer when exact
+            let i = x as Int64;
+            if (i as Float64) == x { RInt(i) } else { RReal(x) }
+        }
+        JString(s) => RText(s.clone()),
+        JArray(_)  => RText(serialise(v)),
+        JObject(_) => RText(serialise(v)),
+    }
+}
+
+// -----------------------------------------------------------------------------
+// JSON_ARRAY / JSON_OBJECT / JSON_QUOTE — constructors
+// -----------------------------------------------------------------------------
+
+public fn json_array(args: &List<Register>) -> Register {
+    let mut items: List<JsonValue> = List.new();
+    let mut i: Int = 0;
+    while i < args.len() {
+        items.push(register_to_json(&args[i]));
+        i = i + 1;
+    }
+    RText(serialise(&JArray(items)))
+}
+
+public fn json_object(args: &List<Register>) -> Register {
+    let mut fields: List<JsonField> = List.new();
+    let mut i: Int = 0;
+    while i + 1 < args.len() {
+        let key: Text = match &args[i] {
+            RText(s) => s.clone(),
+            _        => { return RNull; }
+        };
+        fields.push(JsonField { key: key, value: register_to_json(&args[i + 1]) });
+        i = i + 2;
+    }
+    RText(serialise(&JObject(fields)))
+}
+
+public fn json_quote(v: &Register) -> Register {
+    let jv = register_to_json(v);
+    RText(serialise(&jv))
+}
+
+fn register_to_json(r: &Register) -> JsonValue {
+    match r {
+        RNull     => JNull,
+        RInt(x)   => JNumber(x as Float64),
+        RRowId(x) => JNumber(x as Float64),
+        RReal(x)  => JNumber(x),
+        RText(s)  => JString(s.clone()),
+        RBlob(_)  => JString("<blob>".clone()),
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Minimal JSON parser (relaxed — no UTF-16 escape handling beyond \\uxxxx)
+// -----------------------------------------------------------------------------
+
+public type ParseState is { bs: List<Byte>, pos: Int };
+
+public fn parse_json(s: &Text) -> Maybe<JsonValue> {
+    let bsv = s.as_bytes();
+    let mut bs: List<Byte> = List.new();
+    let mut i: Int = 0;
+    while i < bsv.len() { bs.push(bsv[i]); i = i + 1; }
+    let mut st = ParseState { bs: bs, pos: 0 };
+    skip_ws(&mut st);
+    let r = parse_value(&mut st);
+    skip_ws(&mut st);
+    match r {
+        Some(v) => {
+            if st.pos == st.bs.len() { Some(v) } else { None }
+        }
+        None => None,
+    }
+}
+
+fn skip_ws(st: &mut ParseState) {
+    while st.pos < st.bs.len() {
+        let b = st.bs[st.pos];
+        if b == (32 as Byte) || b == (9 as Byte) || b == (10 as Byte) || b == (13 as Byte) {
+            st.pos = st.pos + 1;
+        } else { break; }
+    }
+}
+
+fn parse_value(st: &mut ParseState) -> Maybe<JsonValue> {
+    skip_ws(st);
+    if st.pos >= st.bs.len() { return None; }
+    let b = st.bs[st.pos];
+    if b == (123 as Byte) { return parse_object(st); }   // {
+    if b == (91 as Byte)  { return parse_array(st); }    // [
+    if b == (34 as Byte)  { return parse_string_value(st); }  // "
+    if b == (116 as Byte) || b == (102 as Byte) { return parse_keyword(st); }
+    if b == (110 as Byte) { return parse_keyword(st); }
+    if b == (45 as Byte) || (b >= (48 as Byte) && b <= (57 as Byte)) {
+        return parse_number(st);
+    }
+    None
+}
+
+fn parse_keyword(st: &mut ParseState) -> Maybe<JsonValue> {
+    if matches_keyword(st, &"true".clone()) { return Some(JBool(true)); }
+    if matches_keyword(st, &"false".clone()) { return Some(JBool(false)); }
+    if matches_keyword(st, &"null".clone()) { return Some(JNull); }
+    None
+}
+
+fn matches_keyword(st: &mut ParseState, kw: &Text) -> Bool {
+    let kbs = kw.as_bytes();
+    if st.pos + kbs.len() > st.bs.len() { return false; }
+    let mut i: Int = 0;
+    while i < kbs.len() {
+        if st.bs[st.pos + i] != kbs[i] { return false; }
+        i = i + 1;
+    }
+    st.pos = st.pos + kbs.len();
+    true
+}
+
+fn parse_number(st: &mut ParseState) -> Maybe<JsonValue> {
+    let start = st.pos;
+    if st.bs[st.pos] == (45 as Byte) { st.pos = st.pos + 1; }
+    while st.pos < st.bs.len() {
+        let b = st.bs[st.pos];
+        let is_num = (b >= (48 as Byte) && b <= (57 as Byte))
+            || b == (46 as Byte)
+            || b == (101 as Byte) || b == (69 as Byte)
+            || b == (43 as Byte)  || b == (45 as Byte);
+        if is_num { st.pos = st.pos + 1; } else { break; }
+    }
+    let mut text = Text.new();
+    let mut k: Int = start;
+    while k < st.pos { text.push_byte(st.bs[k]); k = k + 1; }
+    Some(JNumber(parse_real_text(&text)))
+}
+
+fn parse_real_text(s: &Text) -> Float64 {
+    // Minimal: try integer first, else 0.0 — replace with a real
+    // grisu3 routine when core.math.real lands.
+    let bs = s.as_bytes();
+    let mut i: Int = 0;
+    let mut sign: Float64 = 1.0;
+    if bs.len() >= 1 && bs[0] == (45 as Byte) { sign = -1.0; i = 1; }
+    let mut intp: Float64 = 0.0;
+    while i < bs.len() && bs[i] >= (48 as Byte) && bs[i] <= (57 as Byte) {
+        intp = intp * 10.0 + ((bs[i] as Int) - 48) as Float64;
+        i = i + 1;
+    }
+    let mut frac: Float64 = 0.0;
+    let mut div: Float64 = 1.0;
+    if i < bs.len() && bs[i] == (46 as Byte) {
+        i = i + 1;
+        while i < bs.len() && bs[i] >= (48 as Byte) && bs[i] <= (57 as Byte) {
+            div = div * 10.0;
+            frac = frac + ((bs[i] as Int) - 48) as Float64 / div;
+            i = i + 1;
+        }
+    }
+    sign * (intp + frac)
+}
+
+fn parse_string_value(st: &mut ParseState) -> Maybe<JsonValue> {
+    match parse_json_string(st) {
+        Some(s) => Some(JString(s)),
+        None    => None,
+    }
+}
+
+fn parse_json_string(st: &mut ParseState) -> Maybe<Text> {
+    if st.pos >= st.bs.len() || st.bs[st.pos] != (34 as Byte) { return None; }
+    st.pos = st.pos + 1;
+    let mut out = Text.new();
+    while st.pos < st.bs.len() {
+        let b = st.bs[st.pos];
+        if b == (34 as Byte) {
+            st.pos = st.pos + 1;
+            return Some(out);
+        }
+        if b == (92 as Byte) {  // backslash escape
+            st.pos = st.pos + 1;
+            if st.pos >= st.bs.len() { return None; }
+            let nx = st.bs[st.pos];
+            if      nx == (34 as Byte) { out.push_byte(34 as Byte); }
+            else if nx == (92 as Byte) { out.push_byte(92 as Byte); }
+            else if nx == (47 as Byte) { out.push_byte(47 as Byte); }
+            else if nx == (110 as Byte) { out.push_byte(10 as Byte); }
+            else if nx == (114 as Byte) { out.push_byte(13 as Byte); }
+            else if nx == (116 as Byte) { out.push_byte(9 as Byte); }
+            else { out.push_byte(nx); }
+            st.pos = st.pos + 1;
+        } else {
+            out.push_byte(b);
+            st.pos = st.pos + 1;
+        }
+    }
+    None
+}
+
+fn parse_array(st: &mut ParseState) -> Maybe<JsonValue> {
+    st.pos = st.pos + 1;  // skip [
+    let mut items: List<JsonValue> = List.new();
+    skip_ws(st);
+    if st.pos < st.bs.len() && st.bs[st.pos] == (93 as Byte) {
+        st.pos = st.pos + 1;
+        return Some(JArray(items));
+    }
+    while st.pos < st.bs.len() {
+        match parse_value(st) {
+            Some(v) => { items.push(v); }
+            None    => { return None; }
+        }
+        skip_ws(st);
+        if st.pos < st.bs.len() && st.bs[st.pos] == (44 as Byte) {
+            st.pos = st.pos + 1;
+            skip_ws(st);
+        } else if st.pos < st.bs.len() && st.bs[st.pos] == (93 as Byte) {
+            st.pos = st.pos + 1;
+            return Some(JArray(items));
+        } else {
+            return None;
+        }
+    }
+    None
+}
+
+fn parse_object(st: &mut ParseState) -> Maybe<JsonValue> {
+    st.pos = st.pos + 1;  // skip {
+    let mut fields: List<JsonField> = List.new();
+    skip_ws(st);
+    if st.pos < st.bs.len() && st.bs[st.pos] == (125 as Byte) {
+        st.pos = st.pos + 1;
+        return Some(JObject(fields));
+    }
+    while st.pos < st.bs.len() {
+        skip_ws(st);
+        let key = match parse_json_string(st) {
+            Some(k) => k,
+            None    => { return None; }
+        };
+        skip_ws(st);
+        if st.pos >= st.bs.len() || st.bs[st.pos] != (58 as Byte) { return None; }
+        st.pos = st.pos + 1;
+        let val = match parse_value(st) {
+            Some(v) => v,
+            None    => { return None; }
+        };
+        fields.push(JsonField { key: key, value: val });
+        skip_ws(st);
+        if st.pos < st.bs.len() && st.bs[st.pos] == (44 as Byte) {
+            st.pos = st.pos + 1;
+        } else if st.pos < st.bs.len() && st.bs[st.pos] == (125 as Byte) {
+            st.pos = st.pos + 1;
+            return Some(JObject(fields));
+        } else {
+            return None;
+        }
+    }
+    None
+}
+
+// -----------------------------------------------------------------------------
+// Serialisation (compact, no extra whitespace)
+// -----------------------------------------------------------------------------
+
+public fn serialise(v: &JsonValue) -> Text {
+    let mut out = Text.new();
+    write_value(&mut out, v);
+    out
+}
+
+fn write_value(out: &mut Text, v: &JsonValue) {
+    match v {
+        JNull => append(out, &"null".clone()),
+        JBool(b) => append(out, &(if b { "true".clone() } else { "false".clone() })),
+        JNumber(x) => append(out, &real_to_text(x)),
+        JString(s) => write_string(out, s),
+        JArray(items) => {
+            out.push_byte(91 as Byte);
+            let mut i: Int = 0;
+            while i < items.len() {
+                if i > 0 { out.push_byte(44 as Byte); }
+                write_value(out, &items[i]);
+                i = i + 1;
+            }
+            out.push_byte(93 as Byte);
+        }
+        JObject(fields) => {
+            out.push_byte(123 as Byte);
+            let mut i: Int = 0;
+            while i < fields.len() {
+                if i > 0 { out.push_byte(44 as Byte); }
+                write_string(out, &fields[i].key);
+                out.push_byte(58 as Byte);
+                write_value(out, &fields[i].value);
+                i = i + 1;
+            }
+            out.push_byte(125 as Byte);
+        }
+    }
+}
+
+fn write_string(out: &mut Text, s: &Text) {
+    out.push_byte(34 as Byte);
+    let bs = s.as_bytes();
+    let mut i: Int = 0;
+    while i < bs.len() {
+        let b = bs[i];
+        if b == (34 as Byte) || b == (92 as Byte) {
+            out.push_byte(92 as Byte);
+            out.push_byte(b);
+        } else if b == (10 as Byte) {
+            out.push_byte(92 as Byte); out.push_byte(110 as Byte);
+        } else if b == (13 as Byte) {
+            out.push_byte(92 as Byte); out.push_byte(114 as Byte);
+        } else if b == (9 as Byte) {
+            out.push_byte(92 as Byte); out.push_byte(116 as Byte);
+        } else {
+            out.push_byte(b);
+        }
+        i = i + 1;
+    }
+    out.push_byte(34 as Byte);
+}
+
+fn append(out: &mut Text, s: &Text) {
+    let bs = s.as_bytes();
+    let mut i: Int = 0;
+    while i < bs.len() { out.push_byte(bs[i]); i = i + 1; }
+}
+
+fn real_to_text(_x: Float64) -> Text {
+    // Minimal placeholder until the grisu3 helper lands in
+    // core.encoding.numeric.
+    "0".clone()
+}
+
+fn clone_json(v: &JsonValue) -> JsonValue {
+    match v {
+        JNull       => JNull,
+        JBool(b)    => JBool(b),
+        JNumber(x)  => JNumber(x),
+        JString(s)  => JString(s.clone()),
+        JArray(its) => {
+            let mut out: List<JsonValue> = List.new();
+            let mut i: Int = 0;
+            while i < its.len() { out.push(clone_json(&its[i])); i = i + 1; }
+            JArray(out)
+        }
+        JObject(fs) => {
+            let mut out: List<JsonField> = List.new();
+            let mut i: Int = 0;
+            while i < fs.len() {
+                out.push(JsonField { key: fs[i].key.clone(), value: clone_json(&fs[i].value) });
+                i = i + 1;
+            }
+            JObject(out)
+        }
+    }
+}

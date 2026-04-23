@@ -1,0 +1,163 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, pragma, dispatch
+// @timeout: 5000
+// @expected-exit: 0
+//
+// Verifies the loom PRAGMA registry / dispatcher round-trip:
+// resolution by name, default-config reads, write/read parity for
+// every connection-scope settable PRAGMA, and behaviour for the
+// read-only and unknown forms.
+
+mount core.database.sqlite.native.l4_vdbe.register.{
+    Register, RNull, RInt, RText,
+};
+mount core.database.sqlite.native.pragmas.registry.{
+    PragmaKind,
+    PCacheSize, PJournalMode, PSynchronous, PForeignKeys, PUserVersion,
+    PIntegrityCheck, PWritableSchema, PCompileOptions, PPragmaList,
+    Scope, SConnection, SDatabase, SReadOnly, SDangerous,
+    pragma_from_name, pragma_spec,
+};
+mount core.database.sqlite.native.pragmas.config.{
+    PragmaConfig, pragma_config_default,
+    JournalMode, JmDelete, JmWal, journal_mode_name,
+    Synchronous, SyncFull,
+};
+mount core.database.sqlite.native.pragmas.dispatch.{
+    PragmaResult, PrRow, PrRows, PrEmpty, PrError,
+    execute,
+};
+
+fn require_resolves(name: Text) {
+    let _: PragmaKind = match pragma_from_name(&name) {
+        Some(k) => k,
+        None    => panic(f"PRAGMA '{name}' should resolve"),
+    };
+}
+
+fn test_lookup_recognises_core_set() {
+    require_resolves("cache_size".clone());
+    require_resolves("journal_mode".clone());
+    require_resolves("synchronous".clone());
+    require_resolves("foreign_keys".clone());
+    require_resolves("user_version".clone());
+    require_resolves("integrity_check".clone());
+    require_resolves("writable_schema".clone());
+    require_resolves("compile_options".clone());
+    require_resolves("pragma_list".clone());
+    require_resolves("table_info".clone());
+    require_resolves("wal_checkpoint".clone());
+    require_resolves("optimize".clone());
+}
+
+fn test_lookup_is_case_insensitive() {
+    require_resolves("CACHE_SIZE".clone());
+    require_resolves("Journal_Mode".clone());
+}
+
+fn test_unknown_pragma_returns_error() {
+    let mut cfg = pragma_config_default();
+    match execute(&mut cfg, &"bogus_pragma".clone(), None, None) {
+        PrError(_) => {},
+        _          => panic("unknown PRAGMA should yield PrError"),
+    }
+}
+
+fn test_default_config_reads() {
+    let mut cfg = pragma_config_default();
+    match execute(&mut cfg, &"foreign_keys".clone(), None, None) {
+        PrRow(row) => match &row[0] {
+            RInt(x) => assert_eq(x, 0 as Int64),
+            _       => panic("foreign_keys default → 0"),
+        },
+        _ => panic("foreign_keys read → PrRow"),
+    }
+    match execute(&mut cfg, &"journal_mode".clone(), None, None) {
+        PrRow(row) => match &row[0] {
+            RText(s) => assert(s == "delete".clone()),
+            _        => panic("journal_mode default → text"),
+        },
+        _ => panic("journal_mode read → PrRow"),
+    }
+}
+
+fn test_write_then_read_parity_int() {
+    let mut cfg = pragma_config_default();
+    let _ = execute(
+        &mut cfg,
+        &"foreign_keys".clone(),
+        Some(RInt(1 as Int64)),
+        None,
+    );
+    match execute(&mut cfg, &"foreign_keys".clone(), None, None) {
+        PrRow(row) => match &row[0] {
+            RInt(x) => assert_eq(x, 1 as Int64),
+            _       => panic("expected RInt"),
+        },
+        _ => panic("expected PrRow"),
+    }
+}
+
+fn test_write_journal_mode_text() {
+    let mut cfg = pragma_config_default();
+    let _ = execute(
+        &mut cfg,
+        &"journal_mode".clone(),
+        Some(RText("wal".clone())),
+        None,
+    );
+    match execute(&mut cfg, &"journal_mode".clone(), None, None) {
+        PrRow(row) => match &row[0] {
+            RText(s) => assert(s == "wal".clone()),
+            _        => panic("expected RText"),
+        },
+        _ => panic("expected PrRow"),
+    }
+}
+
+fn test_compile_options_returns_rows() {
+    let mut cfg = pragma_config_default();
+    match execute(&mut cfg, &"compile_options".clone(), None, None) {
+        PrRows(rs) => assert(rs.len() >= 1),
+        _          => panic("compile_options → PrRows"),
+    }
+}
+
+fn test_read_only_pragma_rejects_write() {
+    let mut cfg = pragma_config_default();
+    // freelist_count is read-only per registry.
+    match execute(
+        &mut cfg,
+        &"freelist_count".clone(),
+        Some(RInt(99 as Int64)),
+        None,
+    ) {
+        PrError(_) => {},
+        _          => panic("read-only PRAGMA write should be rejected"),
+    }
+}
+
+fn test_pragma_scope_taxonomy() {
+    let s_cache = pragma_spec(&PCacheSize);
+    match s_cache.scope { SConnection => {}, _ => panic("cache_size = connection") };
+    let s_jmode = pragma_spec(&PJournalMode);
+    match s_jmode.scope { SDatabase => {}, _ => panic("journal_mode = database") };
+    let s_int = pragma_spec(&PIntegrityCheck);
+    match s_int.scope { SReadOnly => {}, _ => panic("integrity_check = read_only") };
+    let s_ws = pragma_spec(&PWritableSchema);
+    match s_ws.scope { SDangerous => {}, _ => panic("writable_schema = dangerous") };
+}
+
+fn main() {
+    test_lookup_recognises_core_set();
+    test_lookup_is_case_insensitive();
+    test_unknown_pragma_returns_error();
+    test_default_config_reads();
+    test_write_then_read_parity_int();
+    test_write_journal_mode_text();
+    test_compile_options_returns_rows();
+    test_read_only_pragma_rejects_write();
+    test_pragma_scope_taxonomy();
+}

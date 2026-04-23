@@ -1,0 +1,463 @@
+// =============================================================================
+// builtins/registry.vr — Single source of truth for SQL function names
+// =============================================================================
+// Layer: 4–5
+// Spec: sqlite-native.md §15
+//
+// `ScalarKind` enumerates every scalar function the engine recognises.
+// The numeric `kind_code(ScalarKind) -> Int` is the wire-level identifier
+// that the codegen embeds into the `ScalarFn` opcode and the interpreter
+// dispatches on.
+//
+// The ranges 0..27 are **stable** — they match the historic inline table
+// in `l5_sql/codegen.vr::scalar_fn_kind` and `l4_vdbe/interpreter.vr::ScalarFn`.
+// New functions extend upward; the wire codes are fixed forever.
+//
+// To add a new built-in:
+//   1. Add a variant here (preserve existing kind codes).
+//   2. Add it to `kind_code` and `kind_from_name`.
+//   3. Add an entry to `arity_of`.
+//   4. Implement the semantics in the matching `*_fns.vr` module.
+//   5. Register a unit test under
+//      `vcs/specs/L2-standard/database/sqlite/builtins/`.
+// =============================================================================
+
+module core.database.sqlite.native.builtins.registry;
+
+mount core.*;
+mount base.{Text, Maybe};
+mount collections.List;
+
+// -----------------------------------------------------------------------------
+// ScalarKind (extensible by appending; never reorder)
+// -----------------------------------------------------------------------------
+
+public type ScalarKind is
+    // String functions (0..29)
+      KLength
+    | KLower
+    | KUpper
+    | KConcat
+    | KSubstr
+    | KTrim
+    | KLtrim
+    | KRtrim
+    | KReplace
+    | KInstr
+    | KHex
+    | KUnicode
+    | KChar
+    | KQuote
+    | KConcatWs
+    | KGlob
+    | KLike
+    | KNotLike
+    | KSoundex
+    | KUnhex
+
+    // Numeric / generic (30..49)
+    | KAbs
+    | KRound
+    | KCoalesce
+    | KIfnull
+    | KNullif
+    | KMin
+    | KMax
+    | KIif
+    | KSign
+    | KRandom
+    | KRandomBlob
+    | KZeroBlob
+    | KLikely
+    | KUnlikely
+    | KLikelihood
+
+    // Math functions (50..79)
+    | KPi
+    | KSqrt
+    | KPow
+    | KMod
+    | KCeil
+    | KFloor
+    | KExp
+    | KLn
+    | KLog
+    | KLog2
+    | KLog10
+    | KSin
+    | KCos
+    | KTan
+    | KAsin
+    | KAcos
+    | KAtan
+    | KAtan2
+    | KSinh
+    | KCosh
+    | KTanh
+    | KAsinh
+    | KAcosh
+    | KAtanh
+    | KDegrees
+    | KRadians
+    | KTrunc
+
+    // Metadata functions (80..89)
+    | KTypeof
+    | KSqliteVersion
+    | KSqliteSourceId
+    | KChanges
+    | KTotalChanges
+    | KLastInsertRowid
+
+    // Date/time functions (90..99)
+    | KDate
+    | KTime
+    | KDatetime
+    | KJulianday
+    | KUnixepoch
+    | KStrftime
+    | KTimediff;
+
+// -----------------------------------------------------------------------------
+// Wire codes (must remain stable for every kind ever shipped)
+// -----------------------------------------------------------------------------
+
+public fn kind_code(k: &ScalarKind) -> Int {
+    match k {
+        // String 0..29
+        KLength    => 0,
+        KAbs       => 1,
+        KLower     => 2,
+        KUpper     => 3,
+        KCoalesce  => 4,
+        KIfnull    => 5,
+        KNullif    => 6,
+        // 7..9 reserved (legacy gaps)
+        KLike      => 10,
+        KNotLike   => 11,
+        KConcat    => 12,
+        KSubstr    => 13,
+        KTrim      => 14,
+        KLtrim     => 15,
+        KRtrim     => 16,
+        KReplace   => 17,
+        KInstr     => 18,
+        KRound     => 19,
+        KMin       => 20,
+        KMax       => 21,
+        KHex       => 22,
+        KTypeof    => 23,
+        KIif       => 24,
+        KUnicode   => 25,
+        KChar      => 26,
+        KSign      => 27,
+        // Extension range — assigned in the order they were added.
+        KQuote          => 30,
+        KConcatWs       => 31,
+        KGlob           => 32,
+        KSoundex        => 33,
+        KUnhex          => 34,
+        KRandom         => 35,
+        KRandomBlob     => 36,
+        KZeroBlob       => 37,
+        KLikely         => 38,
+        KUnlikely       => 39,
+        KLikelihood     => 40,
+        KPi             => 50,
+        KSqrt           => 51,
+        KPow            => 52,
+        KMod            => 53,
+        KCeil           => 54,
+        KFloor          => 55,
+        KExp            => 56,
+        KLn             => 57,
+        KLog            => 58,
+        KLog2           => 59,
+        KLog10          => 60,
+        KSin            => 61,
+        KCos            => 62,
+        KTan            => 63,
+        KAsin           => 64,
+        KAcos           => 65,
+        KAtan           => 66,
+        KAtan2          => 67,
+        KSinh           => 68,
+        KCosh           => 69,
+        KTanh           => 70,
+        KAsinh          => 71,
+        KAcosh          => 72,
+        KAtanh          => 73,
+        KDegrees        => 74,
+        KRadians        => 75,
+        KTrunc          => 76,
+        KSqliteVersion  => 80,
+        KSqliteSourceId => 81,
+        KChanges        => 82,
+        KTotalChanges   => 83,
+        KLastInsertRowid=> 84,
+        KDate           => 90,
+        KTime           => 91,
+        KDatetime       => 92,
+        KJulianday      => 93,
+        KUnixepoch      => 94,
+        KStrftime       => 95,
+        KTimediff       => 96,
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Name lookup (case-insensitive, ASCII only — matches SQLite)
+// -----------------------------------------------------------------------------
+
+fn ascii_lower(s: &Text) -> Text {
+    let bs = s.as_bytes();
+    let mut out = Text.new();
+    let mut i: Int = 0;
+    while i < bs.len() {
+        let b: Byte = bs[i];
+        let lo: Byte =
+            if b >= (65 as Byte) && b <= (90 as Byte) {
+                b + (32 as Byte)
+            } else { b };
+        out.push_byte(lo);
+        i = i + 1;
+    }
+    out
+}
+
+public fn kind_from_name(name: &Text) -> Maybe<ScalarKind> {
+    let n = ascii_lower(name);
+    // String
+    if n == "length".clone()    { return Some(KLength); }
+    if n == "lower".clone()     { return Some(KLower); }
+    if n == "upper".clone()     { return Some(KUpper); }
+    if n == "concat".clone()    { return Some(KConcat); }
+    if n == "concat_ws".clone() { return Some(KConcatWs); }
+    if n == "substr".clone() || n == "substring".clone() { return Some(KSubstr); }
+    if n == "trim".clone()      { return Some(KTrim); }
+    if n == "ltrim".clone()     { return Some(KLtrim); }
+    if n == "rtrim".clone()     { return Some(KRtrim); }
+    if n == "replace".clone()   { return Some(KReplace); }
+    if n == "instr".clone()     { return Some(KInstr); }
+    if n == "hex".clone()       { return Some(KHex); }
+    if n == "unhex".clone()     { return Some(KUnhex); }
+    if n == "unicode".clone()   { return Some(KUnicode); }
+    if n == "char".clone()      { return Some(KChar); }
+    if n == "quote".clone()     { return Some(KQuote); }
+    if n == "glob".clone()      { return Some(KGlob); }
+    if n == "like".clone()      { return Some(KLike); }
+    if n == "soundex".clone()   { return Some(KSoundex); }
+    // Numeric / generic
+    if n == "abs".clone()       { return Some(KAbs); }
+    if n == "round".clone()     { return Some(KRound); }
+    if n == "coalesce".clone()  { return Some(KCoalesce); }
+    if n == "ifnull".clone()    { return Some(KIfnull); }
+    if n == "nullif".clone()    { return Some(KNullif); }
+    if n == "min".clone()       { return Some(KMin); }
+    if n == "max".clone()       { return Some(KMax); }
+    if n == "iif".clone()       { return Some(KIif); }
+    if n == "sign".clone()      { return Some(KSign); }
+    if n == "random".clone()    { return Some(KRandom); }
+    if n == "randomblob".clone() { return Some(KRandomBlob); }
+    if n == "zeroblob".clone()  { return Some(KZeroBlob); }
+    if n == "likely".clone()    { return Some(KLikely); }
+    if n == "unlikely".clone()  { return Some(KUnlikely); }
+    if n == "likelihood".clone() { return Some(KLikelihood); }
+    // Math
+    if n == "pi".clone()        { return Some(KPi); }
+    if n == "sqrt".clone()      { return Some(KSqrt); }
+    if n == "pow".clone() || n == "power".clone() { return Some(KPow); }
+    if n == "mod".clone()       { return Some(KMod); }
+    if n == "ceil".clone() || n == "ceiling".clone() { return Some(KCeil); }
+    if n == "floor".clone()     { return Some(KFloor); }
+    if n == "exp".clone()       { return Some(KExp); }
+    if n == "ln".clone()        { return Some(KLn); }
+    if n == "log".clone()       { return Some(KLog); }
+    if n == "log2".clone()      { return Some(KLog2); }
+    if n == "log10".clone()     { return Some(KLog10); }
+    if n == "sin".clone()       { return Some(KSin); }
+    if n == "cos".clone()       { return Some(KCos); }
+    if n == "tan".clone()       { return Some(KTan); }
+    if n == "asin".clone()      { return Some(KAsin); }
+    if n == "acos".clone()      { return Some(KAcos); }
+    if n == "atan".clone()      { return Some(KAtan); }
+    if n == "atan2".clone()     { return Some(KAtan2); }
+    if n == "sinh".clone()      { return Some(KSinh); }
+    if n == "cosh".clone()      { return Some(KCosh); }
+    if n == "tanh".clone()      { return Some(KTanh); }
+    if n == "asinh".clone()     { return Some(KAsinh); }
+    if n == "acosh".clone()     { return Some(KAcosh); }
+    if n == "atanh".clone()     { return Some(KAtanh); }
+    if n == "degrees".clone()   { return Some(KDegrees); }
+    if n == "radians".clone()   { return Some(KRadians); }
+    if n == "trunc".clone()     { return Some(KTrunc); }
+    // Metadata
+    if n == "typeof".clone()           { return Some(KTypeof); }
+    if n == "sqlite_version".clone()   { return Some(KSqliteVersion); }
+    if n == "sqlite_source_id".clone() { return Some(KSqliteSourceId); }
+    if n == "changes".clone()          { return Some(KChanges); }
+    if n == "total_changes".clone()    { return Some(KTotalChanges); }
+    if n == "last_insert_rowid".clone(){ return Some(KLastInsertRowid); }
+    // Date/time
+    if n == "date".clone()      { return Some(KDate); }
+    if n == "time".clone()      { return Some(KTime); }
+    if n == "datetime".clone()  { return Some(KDatetime); }
+    if n == "julianday".clone() { return Some(KJulianday); }
+    if n == "unixepoch".clone() { return Some(KUnixepoch); }
+    if n == "strftime".clone()  { return Some(KStrftime); }
+    if n == "timediff".clone()  { return Some(KTimediff); }
+    None
+}
+
+// -----------------------------------------------------------------------------
+// Arity descriptors
+// -----------------------------------------------------------------------------
+
+public type Arity is {
+    min: Int,
+    // -1 = unbounded varargs
+    max: Int,
+};
+
+public fn arity_unbounded(min_args: Int) -> Arity {
+    Arity { min: min_args, max: -1 }
+}
+
+public fn arity_exact(n: Int) -> Arity {
+    Arity { min: n, max: n }
+}
+
+public fn arity_range(lo: Int, hi: Int) -> Arity {
+    Arity { min: lo, max: hi }
+}
+
+public fn arity_of(k: &ScalarKind) -> Arity {
+    match k {
+        // String
+        KLength    => arity_exact(1),
+        KLower     => arity_exact(1),
+        KUpper     => arity_exact(1),
+        KSubstr    => arity_range(2, 3),
+        KTrim      => arity_range(1, 2),
+        KLtrim     => arity_range(1, 2),
+        KRtrim     => arity_range(1, 2),
+        KReplace   => arity_exact(3),
+        KInstr     => arity_exact(2),
+        KHex       => arity_exact(1),
+        KUnhex     => arity_range(1, 2),
+        KUnicode   => arity_exact(1),
+        KChar      => arity_unbounded(1),
+        KConcat    => arity_unbounded(1),
+        KConcatWs  => arity_unbounded(2),
+        KQuote     => arity_exact(1),
+        KGlob      => arity_exact(2),
+        KLike      => arity_range(2, 3),
+        KNotLike   => arity_range(2, 3),
+        KSoundex   => arity_exact(1),
+        // Numeric
+        KAbs       => arity_exact(1),
+        KRound     => arity_range(1, 2),
+        KCoalesce  => arity_unbounded(2),
+        KIfnull    => arity_exact(2),
+        KNullif    => arity_exact(2),
+        KMin       => arity_unbounded(1),
+        KMax       => arity_unbounded(1),
+        KIif       => arity_exact(3),
+        KSign      => arity_exact(1),
+        KRandom    => arity_exact(0),
+        KRandomBlob=> arity_exact(1),
+        KZeroBlob  => arity_exact(1),
+        KLikely    => arity_exact(1),
+        KUnlikely  => arity_exact(1),
+        KLikelihood=> arity_exact(2),
+        // Math
+        KPi        => arity_exact(0),
+        KSqrt      => arity_exact(1),
+        KPow       => arity_exact(2),
+        KMod       => arity_exact(2),
+        KCeil      => arity_exact(1),
+        KFloor     => arity_exact(1),
+        KExp       => arity_exact(1),
+        KLn        => arity_exact(1),
+        KLog       => arity_range(1, 2),
+        KLog2      => arity_exact(1),
+        KLog10     => arity_exact(1),
+        KSin       => arity_exact(1),
+        KCos       => arity_exact(1),
+        KTan       => arity_exact(1),
+        KAsin      => arity_exact(1),
+        KAcos      => arity_exact(1),
+        KAtan      => arity_exact(1),
+        KAtan2     => arity_exact(2),
+        KSinh      => arity_exact(1),
+        KCosh      => arity_exact(1),
+        KTanh      => arity_exact(1),
+        KAsinh     => arity_exact(1),
+        KAcosh     => arity_exact(1),
+        KAtanh     => arity_exact(1),
+        KDegrees   => arity_exact(1),
+        KRadians   => arity_exact(1),
+        KTrunc     => arity_exact(1),
+        // Metadata
+        KTypeof          => arity_exact(1),
+        KSqliteVersion   => arity_exact(0),
+        KSqliteSourceId  => arity_exact(0),
+        KChanges         => arity_exact(0),
+        KTotalChanges    => arity_exact(0),
+        KLastInsertRowid => arity_exact(0),
+        // Date/time — all accept 1+ args (timestring + modifiers)
+        KDate       => arity_unbounded(0),
+        KTime       => arity_unbounded(0),
+        KDatetime   => arity_unbounded(0),
+        KJulianday  => arity_unbounded(0),
+        KUnixepoch  => arity_unbounded(0),
+        KStrftime   => arity_unbounded(1),
+        KTimediff   => arity_exact(2),
+    }
+}
+
+public fn arity_accepts(a: &Arity, n_args: Int) -> Bool {
+    if n_args < a.min { return false; }
+    if a.max >= 0 && n_args > a.max { return false; }
+    true
+}
+
+// -----------------------------------------------------------------------------
+// Aggregate kinds (parallel taxonomy — codes match l5_sql/codegen.agg_kind_for_name)
+// -----------------------------------------------------------------------------
+
+public type AggregateKind is
+      AggCount        // COUNT(*) and COUNT(X)
+    | AggSum
+    | AggAvg
+    | AggMin
+    | AggMax
+    | AggTotal
+    | AggGroupConcat
+    | AggStringAgg;
+
+public fn agg_kind_code(k: &AggregateKind) -> Int {
+    match k {
+        AggCount       => 0,
+        AggSum         => 1,
+        AggAvg         => 2,
+        AggMin         => 3,
+        AggMax         => 4,
+        AggTotal       => 5,
+        AggGroupConcat => 6,
+        AggStringAgg   => 7,
+    }
+}
+
+public fn agg_from_name(name: &Text) -> Maybe<AggregateKind> {
+    let n = ascii_lower(name);
+    if n == "count".clone()        { return Some(AggCount); }
+    if n == "sum".clone()          { return Some(AggSum); }
+    if n == "avg".clone()          { return Some(AggAvg); }
+    if n == "min".clone()          { return Some(AggMin); }
+    if n == "max".clone()          { return Some(AggMax); }
+    if n == "total".clone()        { return Some(AggTotal); }
+    if n == "group_concat".clone() { return Some(AggGroupConcat); }
+    if n == "string_agg".clone()   { return Some(AggStringAgg); }
+    None
+}

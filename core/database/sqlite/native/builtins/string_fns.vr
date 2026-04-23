@@ -1,0 +1,709 @@
+// =============================================================================
+// builtins/string_fns.vr — String / blob built-in semantics
+// =============================================================================
+// Layer: 4 (callable from interpreter)
+// Spec: sqlite-native.md §15.1 (String section)
+//
+// Pure-Verum reference implementations. Every function takes and
+// returns `Register` (the VDBE value tag), so it can be wired
+// straight into a future catalogue-dispatch loop in the interpreter.
+//
+// SQLite semantics notes:
+//
+//   * NULL propagation — almost every function returns NULL on a
+//     NULL operand (the exceptions are CONCAT_WS, COALESCE, IFNULL,
+//     NULLIF, IIF, COUNT — none of which live in this file).
+//   * String length is **byte length**, not codepoint length, unless
+//     the function name carries `_chars` (we don't expose that yet).
+//   * SUBSTR is 1-indexed; index 0 is treated as 1; negative indices
+//     count from the end (where -1 is the last byte).
+//   * LIKE pattern: '%' = any sequence, '_' = any one byte. ESCAPE
+//     supported via the optional 3rd argument (KLike arity 2..3).
+//   * GLOB pattern: '*' = any sequence, '?' = any one byte, '[abc]'
+//     character classes, '[^abc]' negation. Case-sensitive.
+// =============================================================================
+
+module core.database.sqlite.native.builtins.string_fns;
+
+mount core.*;
+mount base.{Text, Maybe};
+mount collections.List;
+mount core.database.sqlite.native.l4_vdbe.register.{Register, RNull, RInt, RText, RBlob, RReal, RRowId};
+
+// -----------------------------------------------------------------------------
+// LENGTH(X) — byte length of text/blob, NULL otherwise
+// -----------------------------------------------------------------------------
+
+public fn length(v: &Register) -> Register {
+    match v {
+        RText(s) => RInt(s.len() as Int64),
+        RBlob(b) => RInt(b.len() as Int64),
+        RNull    => RNull,
+        // SQLite coerces numeric to text first, then takes byte-length.
+        RInt(i)  => RInt(int_text_len(i) as Int64),
+        RReal(_) => RInt(15 as Int64),  // crude — proper conversion later
+        RRowId(i)=> RInt(int_text_len(i) as Int64),
+    }
+}
+
+fn int_text_len(x: Int64) -> Int {
+    if x == (0 as Int64) { return 1; }
+    let mut n: Int64 = if x < (0 as Int64) { -x } else { x };
+    let mut count: Int = if x < (0 as Int64) { 1 } else { 0 };
+    while n > (0 as Int64) {
+        count = count + 1;
+        n = n / (10 as Int64);
+    }
+    count
+}
+
+// -----------------------------------------------------------------------------
+// LOWER / UPPER (ASCII)
+// -----------------------------------------------------------------------------
+
+public fn lower(v: &Register) -> Register {
+    match v {
+        RText(s) => RText(ascii_fold_case(s, false)),
+        RNull    => RNull,
+        _        => RNull,
+    }
+}
+
+public fn upper(v: &Register) -> Register {
+    match v {
+        RText(s) => RText(ascii_fold_case(s, true)),
+        RNull    => RNull,
+        _        => RNull,
+    }
+}
+
+fn ascii_fold_case(s: &Text, to_upper: Bool) -> Text {
+    let bs = s.as_bytes();
+    let mut out = Text.new();
+    let mut i: Int = 0;
+    while i < bs.len() {
+        let b: Byte = bs[i];
+        let folded: Byte =
+            if to_upper && b >= (97 as Byte) && b <= (122 as Byte) {
+                b - (32 as Byte)
+            } else if !to_upper && b >= (65 as Byte) && b <= (90 as Byte) {
+                b + (32 as Byte)
+            } else { b };
+        out.push_byte(folded);
+        i = i + 1;
+    }
+    out
+}
+
+// -----------------------------------------------------------------------------
+// SUBSTR (1-indexed, SQLite semantics)
+// -----------------------------------------------------------------------------
+
+public fn substr(v: &Register, start: &Register, length_opt: &Register) -> Register {
+    match v {
+        RText(s) => {
+            let bs = s.as_bytes();
+            let n = bs.len();
+            let start_i: Int = match start {
+                RInt(x)  => x as Int,
+                RReal(x) => x as Int,
+                _        => 1,
+            };
+            let mut begin: Int = start_i;
+            if begin < 0 { begin = n + begin + 1; }
+            if begin < 1 { begin = 1; }
+            let end: Int = match length_opt {
+                RNull => n,
+                RInt(l) => begin + (l as Int) - 1,
+                RReal(l) => begin + (l as Int) - 1,
+                _ => n,
+            };
+            let mut out = Text.new();
+            let mut i: Int = begin;
+            while i <= end && i <= n {
+                if i >= 1 { out.push_byte(bs[i - 1]); }
+                i = i + 1;
+            }
+            RText(out)
+        }
+        RNull => RNull,
+        _ => RNull,
+    }
+}
+
+// -----------------------------------------------------------------------------
+// TRIM / LTRIM / RTRIM (whitespace only — SQLite supports custom set, TODO)
+// -----------------------------------------------------------------------------
+
+public fn trim(v: &Register) -> Register {
+    match v {
+        RText(s) => RText(trim_ascii(s, true, true)),
+        RNull    => RNull,
+        _        => RNull,
+    }
+}
+
+public fn ltrim(v: &Register) -> Register {
+    match v {
+        RText(s) => RText(trim_ascii(s, true, false)),
+        RNull    => RNull,
+        _        => RNull,
+    }
+}
+
+public fn rtrim(v: &Register) -> Register {
+    match v {
+        RText(s) => RText(trim_ascii(s, false, true)),
+        RNull    => RNull,
+        _        => RNull,
+    }
+}
+
+fn trim_ascii(s: &Text, left: Bool, right: Bool) -> Text {
+    let bs = s.as_bytes();
+    let mut start: Int = 0;
+    let mut end: Int = bs.len();
+    if left {
+        while start < end && is_ws(bs[start]) { start = start + 1; }
+    }
+    if right {
+        while end > start && is_ws(bs[end - 1]) { end = end - 1; }
+    }
+    let mut out = Text.new();
+    let mut i: Int = start;
+    while i < end { out.push_byte(bs[i]); i = i + 1; }
+    out
+}
+
+fn is_ws(b: Byte) -> Bool {
+    b == (32 as Byte) || b == (9 as Byte) || b == (10 as Byte) || b == (13 as Byte)
+}
+
+// -----------------------------------------------------------------------------
+// REPLACE / INSTR
+// -----------------------------------------------------------------------------
+
+public fn replace(s: &Register, find: &Register, repl: &Register) -> Register {
+    match s {
+        RText(t) => match find {
+            RText(f) => match repl {
+                RText(r) => RText(replace_all_bytes(t, f, r)),
+                _ => RNull,
+            },
+            _ => RNull,
+        },
+        _ => RNull,
+    }
+}
+
+fn replace_all_bytes(s: &Text, find: &Text, repl: &Text) -> Text {
+    let sb = s.as_bytes();
+    let fb = find.as_bytes();
+    let rb = repl.as_bytes();
+    if fb.len() == 0 { return s.clone(); }
+    let mut out = Text.new();
+    let mut i: Int = 0;
+    while i <= sb.len() - fb.len() {
+        let mut k: Int = 0;
+        let mut hit: Bool = true;
+        while k < fb.len() {
+            if sb[i + k] != fb[k] { hit = false; break; }
+            k = k + 1;
+        }
+        if hit {
+            let mut j: Int = 0;
+            while j < rb.len() { out.push_byte(rb[j]); j = j + 1; }
+            i = i + fb.len();
+        } else {
+            out.push_byte(sb[i]);
+            i = i + 1;
+        }
+    }
+    while i < sb.len() { out.push_byte(sb[i]); i = i + 1; }
+    out
+}
+
+public fn instr(haystack: &Register, needle: &Register) -> Register {
+    match haystack {
+        RText(h) => match needle {
+            RText(n) => RInt(instr_bytes(h, n) as Int64),
+            _ => RNull,
+        },
+        _ => RNull,
+    }
+}
+
+fn instr_bytes(h: &Text, n: &Text) -> Int {
+    let hb = h.as_bytes();
+    let nb = n.as_bytes();
+    if nb.len() == 0 { return 0; }
+    if nb.len() > hb.len() { return 0; }
+    let mut i: Int = 0;
+    while i <= hb.len() - nb.len() {
+        let mut k: Int = 0;
+        let mut hit: Bool = true;
+        while k < nb.len() {
+            if hb[i + k] != nb[k] { hit = false; break; }
+            k = k + 1;
+        }
+        if hit { return i + 1; }
+        i = i + 1;
+    }
+    0
+}
+
+// -----------------------------------------------------------------------------
+// HEX / UNHEX
+// -----------------------------------------------------------------------------
+
+public fn hex(v: &Register) -> Register {
+    match v {
+        RBlob(b) => RText(hex_encode(b)),
+        RText(s) => RText(hex_encode_text(s)),
+        RNull    => RNull,
+        _        => RNull,
+    }
+}
+
+public fn unhex(v: &Register) -> Register {
+    match v {
+        RText(s) => match hex_decode(s) {
+            Some(b) => RBlob(b),
+            None    => RNull,
+        },
+        RNull => RNull,
+        _ => RNull,
+    }
+}
+
+fn hex_nibble(b: Byte) -> Byte {
+    if b < (10 as Byte) { b + (48 as Byte) }
+    else { b - (10 as Byte) + (65 as Byte) }
+}
+
+fn hex_encode(b: &List<Byte>) -> Text {
+    let mut out = Text.new();
+    let mut i: Int = 0;
+    while i < b.len() {
+        let v = b[i];
+        out.push_byte(hex_nibble(v >> (4 as Byte)));
+        out.push_byte(hex_nibble(v & (15 as Byte)));
+        i = i + 1;
+    }
+    out
+}
+
+fn hex_encode_text(s: &Text) -> Text {
+    let bs = s.as_bytes();
+    let mut bl: List<Byte> = List.new();
+    let mut i: Int = 0;
+    while i < bs.len() { bl.push(bs[i]); i = i + 1; }
+    hex_encode(&bl)
+}
+
+fn nibble_value(b: Byte) -> Maybe<Byte> {
+    if b >= (48 as Byte) && b <= (57 as Byte) { return Some(b - (48 as Byte)); }
+    if b >= (65 as Byte) && b <= (70 as Byte) { return Some(b - (65 as Byte) + (10 as Byte)); }
+    if b >= (97 as Byte) && b <= (102 as Byte) { return Some(b - (97 as Byte) + (10 as Byte)); }
+    None
+}
+
+fn hex_decode(s: &Text) -> Maybe<List<Byte>> {
+    let bs = s.as_bytes();
+    if bs.len() % 2 != 0 { return None; }
+    let mut out: List<Byte> = List.new();
+    let mut i: Int = 0;
+    while i < bs.len() {
+        let hi = nibble_value(bs[i]);
+        let lo = nibble_value(bs[i + 1]);
+        match hi {
+            Some(h) => match lo {
+                Some(l) => out.push((h << (4 as Byte)) | l),
+                None => { return None; }
+            },
+            None => { return None; }
+        }
+        i = i + 2;
+    }
+    Some(out)
+}
+
+// -----------------------------------------------------------------------------
+// UNICODE(s) / CHAR(...)
+// -----------------------------------------------------------------------------
+
+public fn unicode(v: &Register) -> Register {
+    match v {
+        RText(s) => {
+            let bs = s.as_bytes();
+            if bs.len() == 0 { RNull } else { RInt(bs[0] as Int64) }
+        }
+        RNull => RNull,
+        _ => RNull,
+    }
+}
+
+public fn char_from_codepoints(codes: &List<Register>) -> Register {
+    let mut out = Text.new();
+    let mut i: Int = 0;
+    while i < codes.len() {
+        match &codes[i] {
+            RInt(x) => {
+                let b: Byte = ((x as Int) & 255) as Byte;
+                out.push_byte(b);
+            }
+            _ => {}
+        }
+        i = i + 1;
+    }
+    RText(out)
+}
+
+// -----------------------------------------------------------------------------
+// CONCAT / CONCAT_WS
+// -----------------------------------------------------------------------------
+
+public fn concat(args: &List<Register>) -> Register {
+    let mut out = Text.new();
+    let mut i: Int = 0;
+    while i < args.len() {
+        match &args[i] {
+            RText(s) => append_text(&mut out, s),
+            RInt(x)  => append_text(&mut out, &int_to_text(x)),
+            RReal(_) => append_text(&mut out, &"<real>".clone()),
+            RBlob(_) => append_text(&mut out, &"<blob>".clone()),
+            RRowId(x)=> append_text(&mut out, &int_to_text(x)),
+            RNull    => {}  // SQLite v3.44+: NULL skipped, not propagated, in CONCAT
+        }
+        i = i + 1;
+    }
+    RText(out)
+}
+
+public fn concat_ws(sep: &Register, args: &List<Register>) -> Register {
+    match sep {
+        RNull => RNull,
+        _ => {
+            let sep_t: Text = match sep {
+                RText(s) => s.clone(),
+                _ => "".clone(),
+            };
+            let mut out = Text.new();
+            let mut emitted: Bool = false;
+            let mut i: Int = 0;
+            while i < args.len() {
+                match &args[i] {
+                    RNull => {}  // skipped
+                    other => {
+                        if emitted { append_text(&mut out, &sep_t); }
+                        match other {
+                            RText(s) => append_text(&mut out, s),
+                            RInt(x)  => append_text(&mut out, &int_to_text(x)),
+                            RRowId(x)=> append_text(&mut out, &int_to_text(x)),
+                            _ => {}
+                        }
+                        emitted = true;
+                    }
+                }
+                i = i + 1;
+            }
+            RText(out)
+        }
+    }
+}
+
+fn append_text(dst: &mut Text, s: &Text) {
+    let bs = s.as_bytes();
+    let mut i: Int = 0;
+    while i < bs.len() { dst.push_byte(bs[i]); i = i + 1; }
+}
+
+fn int_to_text(x: Int64) -> Text {
+    if x == (0 as Int64) { return "0".clone(); }
+    let mut n: Int64 = x;
+    let mut neg: Bool = false;
+    if n < (0 as Int64) { neg = true; n = -n; }
+    let mut digits: List<Byte> = List.new();
+    while n > (0 as Int64) {
+        let d: Byte = ((n as Int) % 10) as Byte;
+        digits.push(d + (48 as Byte));
+        n = n / (10 as Int64);
+    }
+    let mut out = Text.new();
+    if neg { out.push_byte(45 as Byte); }
+    let mut i: Int = digits.len() - 1;
+    while i >= 0 { out.push_byte(digits[i]); i = i - 1; }
+    out
+}
+
+// -----------------------------------------------------------------------------
+// QUOTE(X) — SQL-quoted literal representation
+// -----------------------------------------------------------------------------
+//
+// SQLite spec: QUOTE produces a string suitable for embedding back
+// into SQL. For text, single-quote with internal '' escaping; for
+// blob, the X'...' form; for NULL, the bareword "NULL".
+// =============================================================================
+
+// `sql_quote` (not `quote`) — `quote` is reserved for staged
+// metaprogramming. Caller-side SQL still spells the function `QUOTE(X)`.
+public fn sql_quote(v: &Register) -> Register {
+    match v {
+        RNull => RText("NULL".clone()),
+        RInt(x) => RText(int_to_text(x)),
+        RRowId(x) => RText(int_to_text(x)),
+        RReal(x) => RText(real_to_text(x)),
+        RText(s) => {
+            let mut out = Text.new();
+            out.push_byte(39 as Byte);  // '
+            let bs = s.as_bytes();
+            let mut i: Int = 0;
+            while i < bs.len() {
+                let b = bs[i];
+                if b == (39 as Byte) {
+                    out.push_byte(39 as Byte);
+                    out.push_byte(39 as Byte);
+                } else {
+                    out.push_byte(b);
+                }
+                i = i + 1;
+            }
+            out.push_byte(39 as Byte);
+            RText(out)
+        }
+        RBlob(b) => {
+            let mut out = Text.new();
+            out.push_byte(88 as Byte);  // X
+            out.push_byte(39 as Byte);  // '
+            let mut i: Int = 0;
+            while i < b.len() {
+                let v = b[i];
+                out.push_byte(hex_nibble(v >> (4 as Byte)));
+                out.push_byte(hex_nibble(v & (15 as Byte)));
+                i = i + 1;
+            }
+            out.push_byte(39 as Byte);
+            RText(out)
+        }
+    }
+}
+
+fn real_to_text(_x: Float64) -> Text {
+    // TODO: real grisu3-like float→text routine in core/encoding/numeric
+    "0.0".clone()
+}
+
+// -----------------------------------------------------------------------------
+// LIKE / NOT LIKE / GLOB
+// -----------------------------------------------------------------------------
+
+public fn like(target: &Register, pattern: &Register, escape: &Register) -> Register {
+    match target {
+        RText(t) => match pattern {
+            RText(p) => {
+                let esc: Maybe<Byte> = match escape {
+                    RText(e) => {
+                        let eb = e.as_bytes();
+                        if eb.len() >= 1 { Some(eb[0]) } else { None }
+                    }
+                    _ => None,
+                };
+                if like_match(t, p, esc) {
+                    RInt(1 as Int64)
+                } else {
+                    RInt(0 as Int64)
+                }
+            }
+            _ => RInt(0 as Int64),
+        },
+        _ => RInt(0 as Int64),
+    }
+}
+
+public fn glob(target: &Register, pattern: &Register) -> Register {
+    match target {
+        RText(t) => match pattern {
+            RText(p) => {
+                if glob_match(t, p) { RInt(1 as Int64) } else { RInt(0 as Int64) }
+            }
+            _ => RInt(0 as Int64),
+        },
+        _ => RInt(0 as Int64),
+    }
+}
+
+fn like_match(target: &Text, pattern: &Text, esc: Maybe<Byte>) -> Bool {
+    let tb_bs = target.as_bytes();
+    let pb_bs = pattern.as_bytes();
+    let mut tb: List<Byte> = List.new();
+    let mut pb: List<Byte> = List.new();
+    let mut i: Int = 0;
+    while i < tb_bs.len() {
+        let b = tb_bs[i];
+        let f: Byte =
+            if b >= (65 as Byte) && b <= (90 as Byte) { b + (32 as Byte) } else { b };
+        tb.push(f);
+        i = i + 1;
+    }
+    i = 0;
+    while i < pb_bs.len() {
+        let b = pb_bs[i];
+        let f: Byte =
+            if b >= (65 as Byte) && b <= (90 as Byte) { b + (32 as Byte) } else { b };
+        pb.push(f);
+        i = i + 1;
+    }
+    like_rec(&tb, 0, &pb, 0, esc)
+}
+
+fn like_rec(tb: &List<Byte>, ti: Int, pb: &List<Byte>, pi: Int, esc: Maybe<Byte>) -> Bool {
+    if pi >= pb.len() { return ti >= tb.len(); }
+    let pc = pb[pi];
+    // ESCAPE handling: literal-match the next pattern byte.
+    let esc_match: Bool = match esc {
+        Some(e) => pc == e,
+        None    => false,
+    };
+    if esc_match {
+        if pi + 1 >= pb.len() { return false; }
+        if ti >= tb.len() { return false; }
+        if tb[ti] != pb[pi + 1] { return false; }
+        return like_rec(tb, ti + 1, pb, pi + 2, esc);
+    }
+    if pc == (37 as Byte) {  // '%'
+        if pi + 1 >= pb.len() { return true; }
+        let mut k: Int = ti;
+        while k <= tb.len() {
+            if like_rec(tb, k, pb, pi + 1, esc) { return true; }
+            k = k + 1;
+        }
+        return false;
+    }
+    if pc == (95 as Byte) {  // '_'
+        if ti >= tb.len() { return false; }
+        return like_rec(tb, ti + 1, pb, pi + 1, esc);
+    }
+    if ti >= tb.len() { return false; }
+    if tb[ti] != pc { return false; }
+    like_rec(tb, ti + 1, pb, pi + 1, esc)
+}
+
+fn glob_match(target: &Text, pattern: &Text) -> Bool {
+    let tb_bs = target.as_bytes();
+    let pb_bs = pattern.as_bytes();
+    let mut tb: List<Byte> = List.new();
+    let mut pb: List<Byte> = List.new();
+    let mut i: Int = 0;
+    while i < tb_bs.len() { tb.push(tb_bs[i]); i = i + 1; }
+    i = 0;
+    while i < pb_bs.len() { pb.push(pb_bs[i]); i = i + 1; }
+    glob_rec(&tb, 0, &pb, 0)
+}
+
+fn glob_rec(tb: &List<Byte>, ti: Int, pb: &List<Byte>, pi: Int) -> Bool {
+    if pi >= pb.len() { return ti >= tb.len(); }
+    let pc = pb[pi];
+    if pc == (42 as Byte) {  // '*'
+        if pi + 1 >= pb.len() { return true; }
+        let mut k: Int = ti;
+        while k <= tb.len() {
+            if glob_rec(tb, k, pb, pi + 1) { return true; }
+            k = k + 1;
+        }
+        return false;
+    }
+    if pc == (63 as Byte) {  // '?'
+        if ti >= tb.len() { return false; }
+        return glob_rec(tb, ti + 1, pb, pi + 1);
+    }
+    if pc == (91 as Byte) {  // '['  start of char class
+        if ti >= tb.len() { return false; }
+        // Parse class: optional '!' or '^' negation.
+        let mut k: Int = pi + 1;
+        let mut negate: Bool = false;
+        if k < pb.len() && (pb[k] == (33 as Byte) || pb[k] == (94 as Byte)) {
+            negate = true;
+            k = k + 1;
+        }
+        let mut hit: Bool = false;
+        while k < pb.len() && pb[k] != (93 as Byte) {
+            // Range a-b form
+            if k + 2 < pb.len() && pb[k + 1] == (45 as Byte) && pb[k + 2] != (93 as Byte) {
+                let lo = pb[k];
+                let hi = pb[k + 2];
+                let tc = tb[ti];
+                if tc >= lo && tc <= hi { hit = true; }
+                k = k + 3;
+            } else {
+                if pb[k] == tb[ti] { hit = true; }
+                k = k + 1;
+            }
+        }
+        if k >= pb.len() { return false; }  // unterminated class
+        if negate == hit { return false; }
+        return glob_rec(tb, ti + 1, pb, k + 1);
+    }
+    if ti >= tb.len() { return false; }
+    if tb[ti] != pc { return false; }
+    glob_rec(tb, ti + 1, pb, pi + 1)
+}
+
+// -----------------------------------------------------------------------------
+// SOUNDEX(X) — Knuth's classic 4-char code (matches SQLite)
+// -----------------------------------------------------------------------------
+
+public fn soundex(v: &Register) -> Register {
+    match v {
+        RText(s) => RText(soundex_compute(s)),
+        RNull    => RText("?000".clone()),
+        _        => RText("?000".clone()),
+    }
+}
+
+fn soundex_code(b: Byte) -> Byte {
+    let c: Byte =
+        if b >= (97 as Byte) && b <= (122 as Byte) { b - (32 as Byte) } else { b };
+    if c == (66 as Byte) || c == (70 as Byte) || c == (80 as Byte) || c == (86 as Byte) { return 49 as Byte; }
+    if c == (67 as Byte) || c == (71 as Byte) || c == (74 as Byte) || c == (75 as Byte) ||
+       c == (81 as Byte) || c == (83 as Byte) || c == (88 as Byte) || c == (90 as Byte) { return 50 as Byte; }
+    if c == (68 as Byte) || c == (84 as Byte) { return 51 as Byte; }
+    if c == (76 as Byte) { return 52 as Byte; }
+    if c == (77 as Byte) || c == (78 as Byte) { return 53 as Byte; }
+    if c == (82 as Byte) { return 54 as Byte; }
+    0 as Byte
+}
+
+fn soundex_compute(s: &Text) -> Text {
+    let bs = s.as_bytes();
+    let mut out = Text.new();
+    let mut i: Int = 0;
+    // Skip leading non-alpha
+    while i < bs.len() && !is_alpha(bs[i]) { i = i + 1; }
+    if i >= bs.len() { return "?000".clone(); }
+    let first = bs[i];
+    let upper_first: Byte =
+        if first >= (97 as Byte) && first <= (122 as Byte) { first - (32 as Byte) } else { first };
+    out.push_byte(upper_first);
+    let mut last_code: Byte = soundex_code(first);
+    i = i + 1;
+    let mut emitted: Int = 1;
+    while i < bs.len() && emitted < 4 {
+        let code = soundex_code(bs[i]);
+        if code != (0 as Byte) && code != last_code {
+            out.push_byte(code);
+            emitted = emitted + 1;
+        }
+        if code != (0 as Byte) { last_code = code; } else { last_code = 0 as Byte; }
+        i = i + 1;
+    }
+    while emitted < 4 {
+        out.push_byte(48 as Byte);
+        emitted = emitted + 1;
+    }
+    out
+}
+
+fn is_alpha(b: Byte) -> Bool {
+    (b >= (65 as Byte) && b <= (90 as Byte)) ||
+    (b >= (97 as Byte) && b <= (122 as Byte))
+}

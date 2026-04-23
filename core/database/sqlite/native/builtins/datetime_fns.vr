@@ -1,0 +1,493 @@
+// =============================================================================
+// builtins/datetime_fns.vr — SQLite date/time built-ins
+// =============================================================================
+// Layer: 4
+// Spec: sqlite-native.md §15.1 (Date/time section), §15.6
+//
+// SQLite stores dates in three forms:
+//   * TEXT    — ISO 8601 string `YYYY-MM-DD HH:MM:SS.SSS`
+//   * REAL    — Julian day number
+//   * INTEGER — Unix timestamp (seconds since 1970-01-01)
+//
+// All five builders (`date`, `time`, `datetime`, `julianday`,
+// `unixepoch`) share the same pipeline:
+//
+//   1. Parse the first argument into an absolute Julian-day number.
+//      `'now'` resolves to the current UTC instant via `core.time`.
+//   2. Apply each subsequent string argument as a modifier
+//      (`'+1 day'`, `'-3 hours'`, `'start of month'`, `'localtime'`,
+//      `'unixepoch'`, ...).
+//   3. Format back per the function's target form.
+//
+// `strftime(fmt, ...)` runs steps 1-2 then formats per a printf-like
+// specifier ('%Y', '%m', '%d', '%H', '%M', '%S', '%j', '%w', '%s',
+// '%J', '%%' …).
+//
+// Output of `date`/`time`/`datetime`/`strftime` is TEXT or NULL on
+// parse failure. `julianday` returns REAL, `unixepoch` returns INT.
+// =============================================================================
+
+module core.database.sqlite.native.builtins.datetime_fns;
+
+mount core.*;
+mount base.{Text, Maybe};
+mount collections.List;
+mount core.database.sqlite.native.l4_vdbe.register.{Register, RNull, RInt, RReal, RText, RBlob, RRowId};
+
+// -----------------------------------------------------------------------------
+// Calendar primitives — proleptic Gregorian
+// -----------------------------------------------------------------------------
+
+public type Calendar is {
+    year: Int,
+    month: Int,    // 1..12
+    day: Int,      // 1..31
+    hour: Int,     // 0..23
+    minute: Int,   // 0..59
+    second: Int,   // 0..60 (leap second)
+    millis: Int,   // 0..999
+};
+
+public fn cal_zero() -> Calendar {
+    Calendar { year: 1970, month: 1, day: 1, hour: 0, minute: 0, second: 0, millis: 0 }
+}
+
+// Julian-day-number conversion (Fliegel & Van Flandern, 1968).
+// Result is a Float64 to keep sub-second precision encoded in the
+// fractional component (Julian day starts at noon UTC).
+
+public fn cal_to_julian(c: &Calendar) -> Float64 {
+    let y = c.year;
+    let m = c.month;
+    let d = c.day;
+    let a: Int = (14 - m) / 12;
+    let y2: Int = y + 4800 - a;
+    let m2: Int = m + 12 * a - 3;
+    let jdn: Int = d + (153 * m2 + 2) / 5 + 365 * y2 + y2 / 4 - y2 / 100 + y2 / 400 - 32045;
+    let day_frac: Float64 =
+        ((c.hour as Float64) - 12.0) / 24.0
+        + (c.minute as Float64) / 1440.0
+        + (c.second as Float64) / 86400.0
+        + (c.millis as Float64) / 86400000.0;
+    (jdn as Float64) + day_frac
+}
+
+public fn julian_to_cal(jd: Float64) -> Calendar {
+    // Re-add 0.5 so day rolls over at midnight; integer part = JDN.
+    let jdf = jd + 0.5;
+    let jdn: Int = jdf as Int;
+    let frac: Float64 = jdf - (jdn as Float64);
+    // Inverse of cal_to_julian for Gregorian
+    let a: Int = jdn + 32044;
+    let b: Int = (4 * a + 3) / 146097;
+    let c: Int = a - (146097 * b) / 4;
+    let d: Int = (4 * c + 3) / 1461;
+    let e: Int = c - (1461 * d) / 4;
+    let m: Int = (5 * e + 2) / 153;
+    let day: Int   = e - (153 * m + 2) / 5 + 1;
+    let month: Int = m + 3 - 12 * (m / 10);
+    let year: Int  = 100 * b + d - 4800 + m / 10;
+    let total_ms: Int = (frac * 86400000.0) as Int;
+    let hour: Int = total_ms / 3600000;
+    let rem1: Int = total_ms % 3600000;
+    let minute: Int = rem1 / 60000;
+    let rem2: Int = rem1 % 60000;
+    let second: Int = rem2 / 1000;
+    let millis: Int = rem2 % 1000;
+    Calendar {
+        year: year, month: month, day: day,
+        hour: hour, minute: minute, second: second, millis: millis,
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Argument parsing
+// -----------------------------------------------------------------------------
+
+fn parse_uint(bs: &List<Byte>, start: Int, len: Int) -> Maybe<Int> {
+    if start + len > bs.len() { return None; }
+    let mut n: Int = 0;
+    let mut i: Int = 0;
+    while i < len {
+        let b = bs[start + i];
+        if b < (48 as Byte) || b > (57 as Byte) { return None; }
+        n = n * 10 + ((b as Int) - 48);
+        i = i + 1;
+    }
+    Some(n)
+}
+
+public fn parse_iso(s: &Text) -> Maybe<Calendar> {
+    let bs_t = s.as_bytes();
+    let mut bs: List<Byte> = List.new();
+    let mut i: Int = 0;
+    while i < bs_t.len() { bs.push(bs_t[i]); i = i + 1; }
+    if bs.len() < 10 { return None; }
+    let y = parse_uint(&bs, 0, 4);
+    let m = parse_uint(&bs, 5, 2);
+    let d = parse_uint(&bs, 8, 2);
+    let mut hh: Int = 0;
+    let mut mm: Int = 0;
+    let mut ss: Int = 0;
+    let mut ms: Int = 0;
+    if bs.len() >= 16 {
+        match parse_uint(&bs, 11, 2) { Some(v) => { hh = v; }, None => {} }
+        match parse_uint(&bs, 14, 2) { Some(v) => { mm = v; }, None => {} }
+    }
+    if bs.len() >= 19 {
+        match parse_uint(&bs, 17, 2) { Some(v) => { ss = v; }, None => {} }
+    }
+    if bs.len() >= 23 {
+        match parse_uint(&bs, 20, 3) { Some(v) => { ms = v; }, None => {} }
+    }
+    match y { Some(yv) => match m { Some(mv) => match d { Some(dv) => {
+        return Some(Calendar {
+            year: yv, month: mv, day: dv,
+            hour: hh, minute: mm, second: ss, millis: ms,
+        });
+    }, None => {} }, None => {} }, None => {} }
+    None
+}
+
+// -----------------------------------------------------------------------------
+// `now` clock — abstract over time source so DST tests can inject
+// -----------------------------------------------------------------------------
+
+public type DateTimeClock is { now_julian: Float64 };
+
+public fn clock_unix_epoch() -> DateTimeClock {
+    // 1970-01-01 00:00:00 UTC = JD 2440587.5
+    DateTimeClock { now_julian: 2440587.5 }
+}
+
+public fn clock_at_julian(jd: Float64) -> DateTimeClock {
+    DateTimeClock { now_julian: jd }
+}
+
+// -----------------------------------------------------------------------------
+// Builders: parse arg0 → Julian, apply modifiers, format
+// -----------------------------------------------------------------------------
+
+public fn julianday(args: &List<Register>, clock: &DateTimeClock) -> Register {
+    match resolve_julian(args, clock) {
+        Some(j) => RReal(j),
+        None    => RNull,
+    }
+}
+
+public fn unixepoch(args: &List<Register>, clock: &DateTimeClock) -> Register {
+    match resolve_julian(args, clock) {
+        Some(j) => RInt(((j - 2440587.5) * 86400.0) as Int64),
+        None    => RNull,
+    }
+}
+
+public fn date_fn(args: &List<Register>, clock: &DateTimeClock) -> Register {
+    match resolve_julian(args, clock) {
+        Some(j) => RText(format_date(&julian_to_cal(j))),
+        None    => RNull,
+    }
+}
+
+public fn time_fn(args: &List<Register>, clock: &DateTimeClock) -> Register {
+    match resolve_julian(args, clock) {
+        Some(j) => RText(format_time(&julian_to_cal(j))),
+        None    => RNull,
+    }
+}
+
+public fn datetime_fn(args: &List<Register>, clock: &DateTimeClock) -> Register {
+    match resolve_julian(args, clock) {
+        Some(j) => RText(format_datetime(&julian_to_cal(j))),
+        None    => RNull,
+    }
+}
+
+public fn strftime(args: &List<Register>, clock: &DateTimeClock) -> Register {
+    if args.len() == 0 { return RNull; }
+    let fmt = match &args[0] {
+        RText(s) => s.clone(),
+        _        => { return RNull; }
+    };
+    let mut rest: List<Register> = List.new();
+    let mut i: Int = 1;
+    while i < args.len() { rest.push(clone_register(&args[i])); i = i + 1; }
+    match resolve_julian(&rest, clock) {
+        Some(j) => {
+            let cal = julian_to_cal(j);
+            RText(apply_strftime(&fmt, &cal, j))
+        }
+        None => RNull,
+    }
+}
+
+public fn timediff(a: &Register, b: &Register, clock: &DateTimeClock) -> Register {
+    let mut sa: List<Register> = List.new();
+    sa.push(clone_register(a));
+    let mut sb: List<Register> = List.new();
+    sb.push(clone_register(b));
+    match resolve_julian(&sa, clock) { Some(ja) => {
+        match resolve_julian(&sb, clock) { Some(jb) => {
+            let diff_days: Float64 = ja - jb;
+            let total_secs: Int64 = (diff_days * 86400.0) as Int64;
+            // Format as ±HH:MM:SS.SSS — minimal version.
+            let mut neg: Bool = false;
+            let mut s = total_secs;
+            if s < (0 as Int64) { neg = true; s = -s; }
+            let hours = (s / (3600 as Int64)) as Int;
+            let mins = (((s % (3600 as Int64)) / (60 as Int64))) as Int;
+            let secs = ((s % (60 as Int64))) as Int;
+            let mut out = Text.new();
+            if neg { out.push_byte(45 as Byte); } else { out.push_byte(43 as Byte); }
+            push_pad(&mut out, hours, 2);
+            out.push_byte(58 as Byte);
+            push_pad(&mut out, mins, 2);
+            out.push_byte(58 as Byte);
+            push_pad(&mut out, secs, 2);
+            return RText(out);
+        }, None => {} }
+    }, None => {} }
+    RNull
+}
+
+// -----------------------------------------------------------------------------
+// resolve_julian — args[0] → seed, args[1..] → modifiers
+// -----------------------------------------------------------------------------
+
+fn resolve_julian(args: &List<Register>, clock: &DateTimeClock) -> Maybe<Float64> {
+    let mut jd: Float64 = clock.now_julian;
+    let mut start: Int = 0;
+    if args.len() >= 1 {
+        match &args[0] {
+            RText(s) => {
+                if text_eq_lower(s, &"now".clone()) {
+                    jd = clock.now_julian;
+                    start = 1;
+                } else {
+                    match parse_iso(s) {
+                        Some(c) => { jd = cal_to_julian(&c); start = 1; }
+                        None    => { return None; }
+                    }
+                }
+            }
+            RInt(x)   => { jd = 2440587.5 + ((x as Float64) / 86400.0); start = 1; }
+            RReal(x)  => { jd = x; start = 1; }
+            RNull     => { return None; }
+            _         => { return None; }
+        }
+    }
+    let mut i: Int = start;
+    while i < args.len() {
+        match &args[i] {
+            RText(s) => match apply_modifier(jd, s) {
+                Some(j) => { jd = j; }
+                None    => { return None; }
+            },
+            _ => { return None; }
+        }
+        i = i + 1;
+    }
+    Some(jd)
+}
+
+// -----------------------------------------------------------------------------
+// Modifiers — only the most common subset is implemented
+// -----------------------------------------------------------------------------
+
+fn apply_modifier(jd: Float64, m: &Text) -> Maybe<Float64> {
+    let lo = lower_text(m);
+    if text_eq(&lo, &"localtime".clone()) || text_eq(&lo, &"utc".clone()) {
+        return Some(jd);  // No timezone tracking in v0.1
+    }
+    if text_eq(&lo, &"unixepoch".clone()) {
+        return Some(2440587.5 + jd / 86400.0);
+    }
+    if text_eq(&lo, &"start of day".clone()) {
+        let frac_floor: Int64 = (jd + 0.5) as Int64;
+        return Some((frac_floor as Float64) - 0.5);
+    }
+    if text_eq(&lo, &"start of month".clone()) {
+        let mut c = julian_to_cal(jd);
+        c.day = 1; c.hour = 0; c.minute = 0; c.second = 0; c.millis = 0;
+        return Some(cal_to_julian(&c));
+    }
+    if text_eq(&lo, &"start of year".clone()) {
+        let mut c = julian_to_cal(jd);
+        c.month = 1; c.day = 1; c.hour = 0; c.minute = 0; c.second = 0; c.millis = 0;
+        return Some(cal_to_julian(&c));
+    }
+    // Pattern "±N <unit>"
+    let bs = lo.as_bytes();
+    if bs.len() >= 3 {
+        let mut sign: Float64 = 1.0;
+        let mut i: Int = 0;
+        if bs[0] == (45 as Byte) { sign = -1.0; i = 1; }
+        else if bs[0] == (43 as Byte) { i = 1; }
+        let mut n: Int = 0;
+        let mut had_digit: Bool = false;
+        while i < bs.len() && bs[i] >= (48 as Byte) && bs[i] <= (57 as Byte) {
+            n = n * 10 + ((bs[i] as Int) - 48);
+            had_digit = true;
+            i = i + 1;
+        }
+        if had_digit && i < bs.len() && bs[i] == (32 as Byte) { i = i + 1; }
+        if had_digit {
+            let unit_off = i;
+            let unit_text = bytes_to_text(&bs, unit_off);
+            let unit = lower_text(&unit_text);
+            let nf: Float64 = (n as Float64) * sign;
+            if text_eq(&unit, &"day".clone()) || text_eq(&unit, &"days".clone()) {
+                return Some(jd + nf);
+            }
+            if text_eq(&unit, &"hour".clone()) || text_eq(&unit, &"hours".clone()) {
+                return Some(jd + nf / 24.0);
+            }
+            if text_eq(&unit, &"minute".clone()) || text_eq(&unit, &"minutes".clone()) {
+                return Some(jd + nf / 1440.0);
+            }
+            if text_eq(&unit, &"second".clone()) || text_eq(&unit, &"seconds".clone()) {
+                return Some(jd + nf / 86400.0);
+            }
+            if text_eq(&unit, &"month".clone()) || text_eq(&unit, &"months".clone()) {
+                let mut c = julian_to_cal(jd);
+                c.month = c.month + (n as Int) * (sign as Int);
+                while c.month < 1 { c.year = c.year - 1; c.month = c.month + 12; }
+                while c.month > 12 { c.year = c.year + 1; c.month = c.month - 12; }
+                return Some(cal_to_julian(&c));
+            }
+            if text_eq(&unit, &"year".clone()) || text_eq(&unit, &"years".clone()) {
+                let mut c = julian_to_cal(jd);
+                c.year = c.year + (n as Int) * (sign as Int);
+                return Some(cal_to_julian(&c));
+            }
+        }
+    }
+    None
+}
+
+// -----------------------------------------------------------------------------
+// Formatters
+// -----------------------------------------------------------------------------
+
+fn push_pad(out: &mut Text, n: Int, width: Int) {
+    let mut digits: List<Byte> = List.new();
+    let mut x: Int = if n < 0 { -n } else { n };
+    if x == 0 { digits.push(48 as Byte); }
+    while x > 0 {
+        digits.push(((x % 10) + 48) as Byte);
+        x = x / 10;
+    }
+    let mut i: Int = digits.len();
+    while i < width { out.push_byte(48 as Byte); i = i + 1; }
+    let mut j: Int = digits.len() - 1;
+    while j >= 0 { out.push_byte(digits[j]); j = j - 1; }
+}
+
+public fn format_date(c: &Calendar) -> Text {
+    let mut out = Text.new();
+    push_pad(&mut out, c.year, 4);
+    out.push_byte(45 as Byte);
+    push_pad(&mut out, c.month, 2);
+    out.push_byte(45 as Byte);
+    push_pad(&mut out, c.day, 2);
+    out
+}
+
+public fn format_time(c: &Calendar) -> Text {
+    let mut out = Text.new();
+    push_pad(&mut out, c.hour, 2);
+    out.push_byte(58 as Byte);
+    push_pad(&mut out, c.minute, 2);
+    out.push_byte(58 as Byte);
+    push_pad(&mut out, c.second, 2);
+    out
+}
+
+public fn format_datetime(c: &Calendar) -> Text {
+    let mut out = format_date(c);
+    out.push_byte(32 as Byte);
+    let t = format_time(c);
+    let tb = t.as_bytes();
+    let mut i: Int = 0;
+    while i < tb.len() { out.push_byte(tb[i]); i = i + 1; }
+    out
+}
+
+fn apply_strftime(fmt: &Text, c: &Calendar, jd: Float64) -> Text {
+    let bs = fmt.as_bytes();
+    let mut out = Text.new();
+    let mut i: Int = 0;
+    while i < bs.len() {
+        let b = bs[i];
+        if b == (37 as Byte) && i + 1 < bs.len() {
+            let nx = bs[i + 1];
+            if      nx == (89 as Byte) { push_pad(&mut out, c.year, 4); }       // %Y
+            else if nx == (109 as Byte) { push_pad(&mut out, c.month, 2); }      // %m
+            else if nx == (100 as Byte) { push_pad(&mut out, c.day, 2); }        // %d
+            else if nx == (72 as Byte) { push_pad(&mut out, c.hour, 2); }        // %H
+            else if nx == (77 as Byte) { push_pad(&mut out, c.minute, 2); }      // %M
+            else if nx == (83 as Byte) { push_pad(&mut out, c.second, 2); }      // %S
+            else if nx == (74 as Byte) {                                        // %J
+                push_pad(&mut out, jd as Int, 1);
+            }
+            else if nx == (115 as Byte) {                                       // %s — unix seconds
+                let secs: Int = ((jd - 2440587.5) * 86400.0) as Int;
+                push_pad(&mut out, secs, 1);
+            }
+            else if nx == (37 as Byte) { out.push_byte(37 as Byte); }            // %%
+            else { out.push_byte(b); out.push_byte(nx); }
+            i = i + 2;
+        } else {
+            out.push_byte(b);
+            i = i + 1;
+        }
+    }
+    out
+}
+
+// -----------------------------------------------------------------------------
+// Register clone (local copy — keeps datetime self-contained)
+// -----------------------------------------------------------------------------
+
+fn clone_register(r: &Register) -> Register {
+    match r {
+        RNull     => RNull,
+        RInt(x)   => RInt(x),
+        RReal(x)  => RReal(x),
+        RText(s)  => RText(s.clone()),
+        RBlob(b)  => {
+            let mut out: List<Byte> = List.new();
+            let mut i: Int = 0;
+            while i < b.len() { out.push(b[i]); i = i + 1; }
+            RBlob(out)
+        }
+        RRowId(x) => RRowId(x),
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Tiny text helpers
+// -----------------------------------------------------------------------------
+
+fn lower_text(s: &Text) -> Text {
+    let bs = s.as_bytes();
+    let mut out = Text.new();
+    let mut i: Int = 0;
+    while i < bs.len() {
+        let b = bs[i];
+        let f: Byte = if b >= (65 as Byte) && b <= (90 as Byte) { b + (32 as Byte) } else { b };
+        out.push_byte(f);
+        i = i + 1;
+    }
+    out
+}
+
+fn text_eq(a: &Text, b: &Text) -> Bool { a == b }
+fn text_eq_lower(a: &Text, b: &Text) -> Bool { lower_text(a) == lower_text(b) }
+
+fn bytes_to_text(bs: &List<Byte>, off: Int) -> Text {
+    let mut out = Text.new();
+    let mut i: Int = off;
+    while i < bs.len() { out.push_byte(bs[i]); i = i + 1; }
+    out
+}

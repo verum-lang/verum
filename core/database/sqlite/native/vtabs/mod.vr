@@ -1,0 +1,29 @@
+// =============================================================================
+// core/database/sqlite/native/vtabs/mod.vr
+// =============================================================================
+// Layer: 5 (codegen-visible) / 6 (registration-visible)
+// Spec: sqlite-native.md §16
+//
+// Virtual-table protocol + module registry. Every virtual table
+// implementation supplies a `VtabModule` instance and is mounted
+// into a `VtabRegistry` per Connection.
+//
+// Built-in virtual tables shipped with loom v0.1:
+//
+//   * `dbstat`           — per-page statistics
+//   * `generate_series`  — number-sequence generator
+//   * `pragma_table_info`/`pragma_index_list` — pragma-as-row query
+//   * `json_each` / `json_tree` — JSON1 table-valued functions
+//
+// FTS5 / R-tree land in v0.2.
+// =============================================================================
+
+module core.database.sqlite.native.vtabs;
+
+public module protocol;
+public module registry;
+public module index_info;
+public module dbstat;
+public module generate_series;
+public module pragma_table;
+public module json_each;
