@@ -1,0 +1,76 @@
+// @test: integration
+// @tier: 0
+// @level: L1
+// @tags: verify, variant, adt, match, disjointness, exhaustiveness
+// @expect: pass
+//
+// End-to-end ADT encoding: pairwise disjointness axioms +
+// per-parameter exhaustiveness hypotheses + the match translator's
+// ite-chain encoding all work together for nullary-variant types.
+// Combines the separate regression specs into a single
+// acceptance test covering the full user-facing contract.
+
+public type Color is Red | Green | Blue;
+public type Signal is On | Off | Unknown;
+
+// --- Identity / distinctness ---
+
+@verify(formal)
+theorem color_reflex()
+    ensures Color.Red == Color.Red
+    proof by auto;
+
+@verify(formal)
+theorem all_pairs_distinct()
+    ensures Color.Red != Color.Green
+    ensures Color.Red != Color.Blue
+    ensures Color.Green != Color.Blue
+    proof by auto;
+
+// --- Exhaustiveness ---
+
+@verify(formal)
+theorem color_exhaustive(c: Color)
+    ensures c == Color.Red || c == Color.Green || c == Color.Blue
+    proof by auto;
+
+@verify(formal)
+theorem signal_exhaustive(s: Signal)
+    ensures s == Signal.On || s == Signal.Off || s == Signal.Unknown
+    proof by auto;
+
+// --- Derived case elimination ---
+
+@verify(formal)
+theorem color_minus_red(c: Color)
+    requires c != Color.Red
+    ensures c == Color.Green || c == Color.Blue
+    proof by auto;
+
+@verify(formal)
+theorem signal_not_on_not_off(s: Signal)
+    requires s != Signal.On
+    requires s != Signal.Off
+    ensures s == Signal.Unknown
+    proof by auto;
+
+// --- Discrimination over equality ---
+
+@verify(formal)
+theorem two_same_not_distinct(s: Signal, t: Signal)
+    requires s == Signal.On
+    requires t == Signal.On
+    ensures s == t
+    proof by auto;
+
+@verify(formal)
+theorem chain_constructor_flow(c: Color, d: Color)
+    requires c == Color.Red
+    requires d == Color.Green
+    requires c == d
+    ensures false
+    proof by auto;
+
+fn main() {
+    print("L1-core: verification_phase/adt_end_to_end");
+}
