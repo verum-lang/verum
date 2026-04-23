@@ -339,6 +339,148 @@ pub struct VerifyConfig {
     /// profiler. Default: `"1s"`.
     #[serde(default)]
     pub profile_threshold: Option<Text>,
+
+    /// Named verification profiles — e.g. `release`, `ci`, `dev`.
+    ///
+    /// Each profile inherits every field from the top-level `[verify]`
+    /// section and overrides only what it names. Selected via
+    /// `verum verify --profile <name>`. Matches the documented
+    /// workflow in `docs/verification/cli-workflow.md §9`.
+    ///
+    /// Example:
+    ///
+    /// ```toml
+    /// [verify]
+    /// default_strategy = "formal"
+    /// solver_timeout_ms = 10000
+    ///
+    /// [verify.profiles.release]
+    /// default_strategy = "certified"
+    /// solver_timeout_ms = 300000
+    /// fail_on_divergence = true
+    ///
+    /// [verify.profiles.ci]
+    /// default_strategy = "fast"
+    /// solver_timeout_ms = 3000
+    /// ```
+    ///
+    /// CLI flags STILL override profile values — selection order is:
+    /// CLI flag > profile override > base `[verify]` > default.
+    #[serde(default)]
+    pub profiles: Map<Text, VerifyProfileOverride>,
+}
+
+/// Per-profile override block in the `[verify.profiles.<name>]` section.
+///
+/// Every field is optional — profile inheritance means unset fields
+/// fall through to the base `[verify]` section. This preserves a
+/// "specify only what differs" ergonomics without losing parent
+/// settings silently.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct VerifyProfileOverride {
+    /// Override for `default_strategy`.
+    #[serde(default)]
+    pub default_strategy: Option<Text>,
+
+    /// Override for `solver_timeout_ms`.
+    #[serde(default)]
+    pub solver_timeout_ms: Option<u64>,
+
+    /// Override for `enable_telemetry`.
+    #[serde(default)]
+    pub enable_telemetry: Option<bool>,
+
+    /// Override for `persist_stats`.
+    #[serde(default)]
+    pub persist_stats: Option<bool>,
+
+    /// Override for `fail_on_divergence`.
+    #[serde(default)]
+    pub fail_on_divergence: Option<bool>,
+
+    /// Override for `total_budget`.
+    #[serde(default)]
+    pub total_budget: Option<Text>,
+
+    /// Override for `slow_threshold`.
+    #[serde(default)]
+    pub slow_threshold: Option<Text>,
+
+    /// Override for `cache_dir`.
+    #[serde(default)]
+    pub cache_dir: Option<Text>,
+
+    /// Override for `cache_max_size`.
+    #[serde(default)]
+    pub cache_max_size: Option<Text>,
+
+    /// Override for `cache_ttl`.
+    #[serde(default)]
+    pub cache_ttl: Option<Text>,
+
+    /// Override for `distributed_cache`.
+    #[serde(default)]
+    pub distributed_cache: Option<Text>,
+}
+
+impl VerifyConfig {
+    /// Apply a named profile's overrides on top of the base config,
+    /// producing the effective `VerifyConfig` the CLI should use.
+    ///
+    /// Inheritance policy: profile values override base values; unset
+    /// profile fields leave base values intact. Per-module overrides
+    /// (`modules`) are NOT merged — profiles cannot change per-module
+    /// settings in this release (see task #81 follow-up).
+    ///
+    /// Returns `Err` if the named profile does not exist.
+    pub fn with_profile(self, name: &str) -> std::result::Result<Self, Text> {
+        let profile = self
+            .profiles
+            .get(&Text::from(name))
+            .ok_or_else(|| {
+                Text::from(format!(
+                    "verify profile '{}' is not declared in [verify.profiles.*]",
+                    name
+                ))
+            })?
+            .clone();
+
+        let mut merged = self;
+        if let Some(v) = profile.default_strategy {
+            merged.default_strategy = v;
+        }
+        if let Some(v) = profile.solver_timeout_ms {
+            merged.solver_timeout_ms = v;
+        }
+        if let Some(v) = profile.enable_telemetry {
+            merged.enable_telemetry = v;
+        }
+        if let Some(v) = profile.persist_stats {
+            merged.persist_stats = v;
+        }
+        if let Some(v) = profile.fail_on_divergence {
+            merged.fail_on_divergence = v;
+        }
+        if let Some(v) = profile.total_budget {
+            merged.total_budget = Some(v);
+        }
+        if let Some(v) = profile.slow_threshold {
+            merged.slow_threshold = Some(v);
+        }
+        if let Some(v) = profile.cache_dir {
+            merged.cache_dir = Some(v);
+        }
+        if let Some(v) = profile.cache_max_size {
+            merged.cache_max_size = Some(v);
+        }
+        if let Some(v) = profile.cache_ttl {
+            merged.cache_ttl = Some(v);
+        }
+        if let Some(v) = profile.distributed_cache {
+            merged.distributed_cache = Some(v);
+        }
+        Ok(merged)
+    }
 }
 
 impl Default for VerifyConfig {
@@ -358,6 +500,7 @@ impl Default for VerifyConfig {
             distributed_cache: None,
             profile_slow_functions: true,
             profile_threshold: None,
+            profiles: Map::new(),
         }
     }
 }
@@ -1419,3 +1562,83 @@ pub fn create_default_manifest(
 /// Type alias for backwards compatibility
 /// Some modules use Config instead of Manifest
 pub type Config = Manifest;
+
+#[cfg(test)]
+mod verify_profile_tests {
+    use super::*;
+
+    // The tests deserialise `VerifyConfig` directly, so the TOML
+    // fragment represents the *contents* of the `[verify]` table
+    // (no wrapping table header). In a real `verum.toml` the same
+    // fields live under a `[verify]` header; see cli-workflow.md §9.
+
+    #[test]
+    fn profile_override_replaces_named_fields_only() {
+        let toml = r#"
+            default_strategy = "formal"
+            solver_timeout_ms = 10000
+            enable_telemetry = true
+
+            [profiles.release]
+            default_strategy = "certified"
+            solver_timeout_ms = 300000
+        "#;
+        let cfg: VerifyConfig = toml::from_str(toml).unwrap();
+        let merged = cfg.with_profile("release").unwrap();
+        assert_eq!(merged.default_strategy.as_str(), "certified");
+        assert_eq!(merged.solver_timeout_ms, 300000);
+        // enable_telemetry was not overridden; base value survives.
+        assert!(merged.enable_telemetry);
+    }
+
+    #[test]
+    fn profile_override_preserves_unset_base_values() {
+        let toml = r#"
+            default_strategy = "formal"
+
+            [profiles.ci]
+            solver_timeout_ms = 3000
+        "#;
+        let cfg: VerifyConfig = toml::from_str(toml).unwrap();
+        let merged = cfg.with_profile("ci").unwrap();
+        // default_strategy is inherited untouched.
+        assert_eq!(merged.default_strategy.as_str(), "formal");
+        assert_eq!(merged.solver_timeout_ms, 3000);
+    }
+
+    #[test]
+    fn unknown_profile_is_an_error_not_a_silent_fallthrough() {
+        let toml = r#"
+            default_strategy = "formal"
+        "#;
+        let cfg: VerifyConfig = toml::from_str(toml).unwrap();
+        let result = cfg.with_profile("nonexistent");
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(err.as_str().contains("nonexistent"));
+        assert!(err.as_str().contains("not declared"));
+    }
+
+    #[test]
+    fn profile_inherits_cache_and_budget_settings() {
+        let toml = r#"
+            default_strategy = "formal"
+            total_budget = "5m"
+            cache_dir = ".verum/cache"
+
+            [profiles.release]
+            total_budget = "30m"
+        "#;
+        let cfg: VerifyConfig = toml::from_str(toml).unwrap();
+        let merged = cfg.with_profile("release").unwrap();
+        assert_eq!(
+            merged.total_budget.as_ref().unwrap().as_str(),
+            "30m"
+        );
+        // cache_dir inherited unchanged.
+        assert_eq!(
+            merged.cache_dir.as_ref().unwrap().as_str(),
+            ".verum/cache"
+        );
+    }
+}
