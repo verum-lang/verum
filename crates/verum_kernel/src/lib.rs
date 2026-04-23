@@ -1148,7 +1148,26 @@ pub fn infer(
             Ok(CoreTerm::App(motive.clone(), scrutinee.clone()))
         }
 
-        CoreTerm::SmtProof(_) => Err(KernelError::NotImplemented("SmtProof")),
+        // An `SmtProof` node is replayed via `replay_smt_cert` at type
+        // lookup: the certificate is validated (schema + backend +
+        // rule-tag + obligation hash), a witness term is constructed,
+        // and the witness's conservative type is returned.
+        //
+        // Until the full step-by-step Z3 `(proof …)` / CVC5 ALETHE
+        // reconstruction lands (task #89), the witness type is
+        // `Inductive("Bool")` — the standing convention for
+        // propositional obligations that close via the
+        // `Unsat`-means-valid protocol. This matches the type set on
+        // the `Axiom` node `replay_smt_cert` produces, so upstream
+        // code that destructures the replayed term sees a consistent
+        // `CoreTerm::Inductive { "Bool", [] }` shape.
+        CoreTerm::SmtProof(cert) => {
+            let _witness = replay_smt_cert(ctx, cert)?;
+            Ok(CoreTerm::Inductive {
+                path: Text::from("Bool"),
+                args: List::new(),
+            })
+        }
 
         CoreTerm::Axiom { name, .. } => match axioms.get(name.as_str()) {
             Maybe::Some(entry) => Ok(entry.ty.clone()),
@@ -1678,6 +1697,87 @@ mod tests {
             }
             other => panic!("expected Axiom, got {:?}", other),
         }
+    }
+
+    // -----------------------------------------------------------------
+    // SmtProof constructor tests (task #62)
+    // -----------------------------------------------------------------
+
+    #[test]
+    fn smtproof_infer_replays_certificate_and_returns_bool_type() {
+        let mut trace = List::new();
+        trace.push(0x03); // smt_unsat tag
+        let cert = SmtCertificate::new(
+            Text::from("z3"),
+            Text::from("4.13.0"),
+            trace,
+            Text::from("sha256:deadbeef"),
+        );
+        let term = CoreTerm::SmtProof(cert);
+        let ctx = Context::new();
+        let reg = AxiomRegistry::new();
+        let ty = infer(&ctx, &term, &reg).unwrap();
+        assert_eq!(
+            ty,
+            CoreTerm::Inductive {
+                path: Text::from("Bool"),
+                args: List::new(),
+            }
+        );
+    }
+
+    #[test]
+    fn smtproof_infer_rejects_malformed_certificate() {
+        // Empty trace → replay fails → infer surfaces EmptyCertificate.
+        let cert = SmtCertificate::new(
+            Text::from("z3"),
+            Text::from("4.13.0"),
+            List::new(),
+            Text::from("sha256:x"),
+        );
+        let term = CoreTerm::SmtProof(cert);
+        let ctx = Context::new();
+        let reg = AxiomRegistry::new();
+        let err = infer(&ctx, &term, &reg).unwrap_err();
+        assert!(matches!(err, KernelError::EmptyCertificate));
+    }
+
+    #[test]
+    fn smtproof_infer_rejects_future_schema() {
+        let mut trace = List::new();
+        trace.push(0x01);
+        let mut cert = SmtCertificate::new(
+            Text::from("cvc5"),
+            Text::from("1.2.0"),
+            trace,
+            Text::from("sha256:1"),
+        );
+        cert.schema_version = CERTIFICATE_SCHEMA_VERSION + 5;
+        let term = CoreTerm::SmtProof(cert);
+        let ctx = Context::new();
+        let reg = AxiomRegistry::new();
+        let err = infer(&ctx, &term, &reg).unwrap_err();
+        assert!(matches!(
+            err,
+            KernelError::UnsupportedCertificateSchema { .. }
+        ));
+    }
+
+    #[test]
+    fn smtproof_check_returns_bool_shape() {
+        let mut trace = List::new();
+        trace.push(0x01);
+        let cert = SmtCertificate::new(
+            Text::from("z3"),
+            Text::from("4.13.0"),
+            trace,
+            Text::from("sha256:feed"),
+        );
+        let term = CoreTerm::SmtProof(cert);
+        let ctx = Context::new();
+        let reg = AxiomRegistry::new();
+        let head = check(&ctx, &term, &reg).unwrap();
+        assert_eq!(head, CoreType::Inductive(Text::from("Bool")));
     }
 
     // -----------------------------------------------------------------
