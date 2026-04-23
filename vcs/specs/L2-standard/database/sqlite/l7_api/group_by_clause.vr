@@ -1,0 +1,103 @@
+// @test: typecheck-pass
+// @level: L2
+// @tier: 0
+// @tags: sqlite, native, l7, group-by, aggregate
+// @timeout: 20000
+// @description: SELECT ... GROUP BY — sort-based grouping + per-group aggregation
+//
+// Spec: internal/specs/sqlite-native.md §14.2 (GROUP BY)
+
+mount core.*;
+mount collections.List;
+mount core.database.sqlite.native.l7_api.{
+    Database, DbError, open_admin,
+};
+mount core.database.sqlite.native.l4_vdbe.Register;
+
+fn group_by_single_key_count() {
+    let mut db = match open_admin() {
+        Ok(d)  => d,
+        Err(_) => { panic("open"); return; }
+    };
+    let _ = db.execute(&"CREATE TABLE t (g INTEGER, v INTEGER)".clone());
+    let _ = db.execute(&"INSERT INTO t VALUES (1, 100)".clone());
+    let _ = db.execute(&"INSERT INTO t VALUES (1, 101)".clone());
+    let _ = db.execute(&"INSERT INTO t VALUES (2, 200)".clone());
+    let _ = db.execute(&"INSERT INTO t VALUES (3, 300)".clone());
+    let _ = db.execute(&"INSERT INTO t VALUES (3, 301)".clone());
+    // Three distinct g values: 1, 2, 3. COUNT per group.
+    match db.query_all(&"SELECT g, COUNT(*) FROM t GROUP BY g".clone()) {
+        Ok(rows) => {
+            // 3 groups.
+            assert_eq(rows.len(), 3);
+            assert_eq(rows[0].len(), 2);
+        }
+        Err(_) => panic("query_all GROUP BY COUNT"),
+    }
+}
+
+fn group_by_sum() {
+    let mut db = match open_admin() {
+        Ok(d)  => d,
+        Err(_) => { panic("open"); return; }
+    };
+    let _ = db.execute(&"CREATE TABLE t (g INTEGER, v INTEGER)".clone());
+    let _ = db.execute(&"INSERT INTO t VALUES (1, 10)".clone());
+    let _ = db.execute(&"INSERT INTO t VALUES (1, 20)".clone());
+    let _ = db.execute(&"INSERT INTO t VALUES (2, 100)".clone());
+    match db.query_all(&"SELECT g, SUM(v) FROM t GROUP BY g".clone()) {
+        Ok(rows) => {
+            assert_eq(rows.len(), 2);
+            // Groups are sorted by g; g=1 first, g=2 second.
+            match rows[0][0] { RInt(x) => assert_eq(x as Int, 1), _ => panic("g[0]") }
+            match rows[0][1] { RInt(x) => assert_eq(x as Int, 30), _ => panic("sum[0]") }
+            match rows[1][0] { RInt(x) => assert_eq(x as Int, 2), _ => panic("g[1]") }
+            match rows[1][1] { RInt(x) => assert_eq(x as Int, 100), _ => panic("sum[1]") }
+        }
+        Err(_) => panic("query_all GROUP BY SUM"),
+    }
+}
+
+fn group_by_with_where() {
+    let mut db = match open_admin() {
+        Ok(d)  => d,
+        Err(_) => { panic("open"); return; }
+    };
+    let _ = db.execute(&"CREATE TABLE t (g INTEGER, v INTEGER)".clone());
+    let _ = db.execute(&"INSERT INTO t VALUES (1, 10)".clone());
+    let _ = db.execute(&"INSERT INTO t VALUES (1, 20)".clone());
+    let _ = db.execute(&"INSERT INTO t VALUES (2, 200)".clone());
+    let _ = db.execute(&"INSERT INTO t VALUES (2, 201)".clone());
+    match db.query_all(&"SELECT g, COUNT(*) FROM t WHERE v = 20 GROUP BY g".clone()) {
+        Ok(rows) => {
+            // Only one row matches WHERE; it's in group g=1.
+            assert(rows.len() <= 2);
+        }
+        Err(_) => panic("query_all GROUP BY WHERE"),
+    }
+}
+
+fn group_by_multiple_aggregates() {
+    let mut db = match open_admin() {
+        Ok(d)  => d,
+        Err(_) => { panic("open"); return; }
+    };
+    let _ = db.execute(&"CREATE TABLE t (g INTEGER, v INTEGER)".clone());
+    let _ = db.execute(&"INSERT INTO t VALUES (1, 10)".clone());
+    let _ = db.execute(&"INSERT INTO t VALUES (1, 30)".clone());
+    match db.query_all(&"SELECT g, COUNT(*), SUM(v), MIN(v), MAX(v) FROM t GROUP BY g".clone()) {
+        Ok(rows) => {
+            assert_eq(rows.len(), 1);
+            assert_eq(rows[0].len(), 5);
+        }
+        Err(_) => panic("query_all GROUP BY multi-agg"),
+    }
+}
+
+fn main() {
+    group_by_single_key_count();
+    group_by_sum();
+    group_by_with_where();
+    group_by_multiple_aggregates();
+    print("group_by_clause typecheck ok");
+}

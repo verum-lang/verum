@@ -165,6 +165,8 @@ fn emit_plan(st: &mut CgState, plan: &PlanNode) -> Result<(), CodegenError> {
         PnLimit(ref child, ref lim, ref off) => emit_limit(st, child, lim, off),
         PnSort(ref child, ref terms) => emit_sort(st, child, terms),
         PnDistinct(ref child, n_proj) => emit_distinct(st, child, n_proj),
+        PnGroupBy(ref source, ref group_exprs, ref projection, ref having) =>
+            emit_group_by(st, source, group_exprs, projection, having),
         PnNestedLoopJoin(_, _, _, _, _, _, _) =>
             Err(unsupported("bare nested-loop join needs a Project wrapper in v1".clone())),
         PnTableScan(ref t, cid, n_cols) => emit_table_scan(st, t, cid, n_cols),
@@ -705,6 +707,427 @@ fn emit_aggregate_scan(
     // Emit exactly one result row.
     let _ = st.program.emit(ResultRow(acc_start, n_proj));
     Ok(())
+}
+
+// -----------------------------------------------------------------------------
+// GROUP BY — sort-then-group aggregation
+//
+// Row layout in the ephemeral buffer:
+//   [group_key_0, ..., group_key_{n_keys-1}, agg_arg_0, ..., agg_arg_{m-1}]
+// where m is the number of aggregate calls that take an argument. COUNT(*)
+// takes no arg and so doesn't consume a buffer cell.
+//
+// After SortRowStore by the leading n_keys cells, we walk the buffer
+// detecting group boundaries via a Ne chain over (cur_key, prev_key).
+// On boundary we flush the previous group: AggFinal + project + emit.
+// -----------------------------------------------------------------------------
+
+fn find_group_key_index(e: &Expr, group_exprs: &List<Expr>) -> Int {
+    let mut i: Int = 0;
+    while i < group_exprs.len() {
+        if expr_equals(e, &group_exprs[i]) { return i; }
+        i = i + 1;
+    }
+    -1
+}
+
+fn expr_equals(a: &Expr, b: &Expr) -> Bool {
+    match a {
+        EColumnRef(ac, ai) => match b {
+            EColumnRef(bc, bi) => ac == bc && ai == bi,
+            _ => false,
+        },
+        ELit(ref la) => match b {
+            ELit(ref lb) => literal_equals(la, lb),
+            _ => false,
+        },
+        _ => false,
+    }
+}
+
+fn literal_equals(a: &Literal, b: &Literal) -> Bool {
+    match a {
+        LInt(x)  => match b { LInt(y)  => x == y, _ => false },
+        LReal(x) => match b { LReal(y) => x == y, _ => false },
+        LText(ref xs) => match b { LText(ref ys) => xs == ys, _ => false },
+        LTrue    => match b { LTrue  => true, _ => false },
+        LFalse   => match b { LFalse => true, _ => false },
+        LNull    => match b { LNull  => true, _ => false },
+        _ => false,
+    }
+}
+
+fn emit_group_by(
+    st: &mut CgState,
+    source: &PlanNode,
+    group_exprs: &List<Expr>,
+    projection: &List<PlanColumn>,
+    having: &Maybe<Expr>,
+) -> Result<(), CodegenError> {
+    // HAVING is deferred to a follow-up — its expression references
+    // aggregate outputs that haven't been made addressable in the
+    // evaluator yet.
+    match having {
+        Some(_) => { return Err(unsupported("HAVING clause pending".clone())); }
+        None => {}
+    }
+
+    // Resolve source into (src_cid, src_n_cols, has_filter, filter_pred).
+    let mut src_cid: Int = 0;
+    let mut src_n_cols: Int = 0;
+    let mut has_filter: Bool = false;
+    let mut filter_pred_clone: Expr = ELit(LNull);
+    match source {
+        PnTableScan(ref _t, cid, n) => { src_cid = cid; src_n_cols = n; }
+        PnFilter(ref grand, ref pred) => match grand {
+            PnTableScan(ref _t, cid, n) => {
+                src_cid = cid; src_n_cols = n;
+                has_filter = true;
+                filter_pred_clone = clone_expr_local(pred);
+            }
+            _ => { return Err(unsupported("GROUP BY source must be a TableScan".clone())); }
+        },
+        _ => { return Err(unsupported("GROUP BY source must be a TableScan".clone())); }
+    }
+
+    let n_keys = group_exprs.len();
+    if n_keys == 0 {
+        return Err(unsupported("GROUP BY with zero keys".clone()));
+    }
+
+    // Classify projection: proj_kind[k] = -1 for aggregate, else group-key index.
+    // Also catalog aggregate slots and their arg positions in the buffer.
+    let n_proj = projection.len();
+    let mut proj_kind: List<Int> = List.new();
+    let mut agg_kind_for_slot: List<Int> = List.new();      // only filled for aggregate slots
+    let mut agg_arg_buffer_idx: List<Int> = List.new();     // buffer column of the arg, or -1
+    let mut buffer_arg_count: Int = 0;
+    let mut arg_exprs: List<Expr> = List.new();
+    let mut i: Int = 0;
+    while i < n_proj {
+        match projection[i].expr {
+            EFunc(ref name, ref args, _) => {
+                let kv = agg_kind_for_name(name);
+                if kv < 0 {
+                    return Err(unsupported("GROUP BY projection: unknown aggregate".clone()));
+                }
+                proj_kind.push(-1);
+                agg_kind_for_slot.push(kv);
+                if args.len() > 0 {
+                    agg_arg_buffer_idx.push(n_keys + buffer_arg_count);
+                    arg_exprs.push(clone_expr_local(&args[0]));
+                    buffer_arg_count = buffer_arg_count + 1;
+                } else {
+                    agg_arg_buffer_idx.push(-1);
+                }
+            }
+            _ => {
+                let gk = find_group_key_index(&projection[i].expr, group_exprs);
+                if gk < 0 {
+                    return Err(unsupported("GROUP BY: non-aggregate projection must be in GROUP BY".clone()));
+                }
+                proj_kind.push(gk);
+                agg_kind_for_slot.push(-1);
+                agg_arg_buffer_idx.push(-1);
+            }
+        }
+        i = i + 1;
+    }
+
+    let row_width = n_keys + buffer_arg_count;
+
+    // --- Fill the ephemeral buffer ---
+    let sid = st.program.declare_cursor(CkTable, 0, row_width);
+    let _ = st.program.emit(OpenEphemeral(sid, row_width));
+    if src_cid >= st.program.cursor_count() {
+        let _ = st.program.declare_cursor(CkTable, 0, src_n_cols);
+    }
+    let _ = st.program.emit(OpenRead(src_cid, 0, src_n_cols));
+    let scan_rewind_idx = st.program.emit(Rewind(src_cid, 0));
+    let scan_loop_top = st.program.instruction_count();
+    let mut scan_skip_patch: Int = -1;
+    let mut scan_skip_reg: Int = -1;
+    if has_filter {
+        let pr = st.regs.alloc();
+        match emit_expr(st, &filter_pred_clone, pr) {
+            Ok(_)  => {}, Err(e) => { return Err(e); }
+        }
+        scan_skip_patch = st.program.emit(IfNot(pr, 0));
+        scan_skip_reg = pr;
+    }
+    let scratch = st.regs.alloc_n(row_width);
+    let mut gk: Int = 0;
+    while gk < n_keys {
+        match emit_expr(st, &group_exprs[gk], scratch + gk) {
+            Ok(_)  => {}, Err(e) => { return Err(e); }
+        }
+        gk = gk + 1;
+    }
+    let mut ap: Int = 0;
+    while ap < arg_exprs.len() {
+        match emit_expr(st, &arg_exprs[ap], scratch + n_keys + ap) {
+            Ok(_)  => {}, Err(e) => { return Err(e); }
+        }
+        ap = ap + 1;
+    }
+    let key_reg = st.regs.alloc();
+    let _ = st.program.emit(NewRowid(sid, key_reg));
+    let _ = st.program.emit(Insert(sid, scratch, key_reg, 0));
+    if scan_skip_patch >= 0 {
+        let tgt = st.program.instruction_count();
+        st.program.replace(scan_skip_patch, IfNot(scan_skip_reg, tgt));
+    }
+    let _ = st.program.emit(Next(src_cid, scan_loop_top));
+    let after_scan = st.program.instruction_count();
+    st.program.replace(scan_rewind_idx, Rewind(src_cid, after_scan));
+    let _ = st.program.emit(Close(src_cid));
+
+    // --- Sort by group keys ---
+    let _ = st.program.emit(SortRowStore(sid, n_keys, 0));
+
+    // --- Aggregation state + group-boundary tracking ---
+    let acc_start = st.regs.alloc_n(n_proj);
+    // avg_count_regs is parallel to projection — -1 when not AVG.
+    let mut avg_count_regs: List<Int> = List.new();
+    let mut a: Int = 0;
+    while a < n_proj {
+        if agg_kind_for_slot[a] == 4 {
+            avg_count_regs.push(st.regs.alloc());
+        } else {
+            avg_count_regs.push(-1);
+        }
+        a = a + 1;
+    }
+    let flag_reg = st.regs.alloc();
+    let cur_key_start = st.regs.alloc_n(n_keys);
+    let prev_key_start = st.regs.alloc_n(n_keys);
+    let out_start = st.regs.alloc_n(n_proj);
+    let _ = st.program.emit(Integer(0, flag_reg));
+    emit_group_seed(st, acc_start, &agg_kind_for_slot, &avg_count_regs);
+
+    // --- Walk the sorted buffer ---
+    let walk_rewind_idx = st.program.emit(Rewind(sid, 0));
+    let loop_top = st.program.instruction_count();
+
+    // Read cur keys.
+    let mut rk: Int = 0;
+    while rk < n_keys {
+        let _ = st.program.emit(Column(sid, rk, cur_key_start + rk));
+        rk = rk + 1;
+    }
+    // Branch 1: if flag == 0, go to first-iter seed.
+    let if_not_flag_patch = st.program.emit(IfNot(flag_reg, 0));
+    // Branch 2: compare cur keys vs prev keys; any Ne → flush_label.
+    let mut ne_patches: List<Int> = List.new();
+    let mut ck: Int = 0;
+    while ck < n_keys {
+        let p_idx = st.program.emit(Ne(cur_key_start + ck, prev_key_start + ck, 0));
+        ne_patches.push(p_idx);
+        ck = ck + 1;
+    }
+    // All equal → Goto accumulate (patched later).
+    let goto_accumulate_same_patch = st.program.emit(Goto(0));
+
+    // ---- flush_label ----
+    let flush_label = st.program.instruction_count();
+    // Finalize each aggregate into acc_start.
+    emit_group_finalize(st, acc_start, &agg_kind_for_slot, &avg_count_regs);
+    // Project out_start from prev_group_keys + acc_start (finalized).
+    emit_group_project(st, out_start, n_proj, &proj_kind, &agg_kind_for_slot, prev_key_start, acc_start);
+    let gp = emit_limit_body_prefix(st);
+    let _ = st.program.emit(ResultRow(out_start, n_proj));
+    emit_limit_body_counter(st, gp);
+    // Reset acc state for the new group.
+    emit_group_seed(st, acc_start, &agg_kind_for_slot, &avg_count_regs);
+    // Copy cur → prev for new group.
+    let mut cp: Int = 0;
+    while cp < n_keys {
+        let _ = st.program.emit(SCopy(cur_key_start + cp, prev_key_start + cp));
+        cp = cp + 1;
+    }
+    let goto_accum_after_flush_patch = st.program.emit(Goto(0));
+
+    // ---- seed_first_label ----
+    let seed_first_label = st.program.instruction_count();
+    // Copy cur → prev, set flag = 1.
+    let mut sf: Int = 0;
+    while sf < n_keys {
+        let _ = st.program.emit(SCopy(cur_key_start + sf, prev_key_start + sf));
+        sf = sf + 1;
+    }
+    let _ = st.program.emit(Integer(1, flag_reg));
+    let goto_accum_from_seed_patch = st.program.emit(Goto(0));
+
+    // ---- accumulate_label ----
+    let accumulate_label = st.program.instruction_count();
+    // Apply the current row's data to each aggregate.
+    emit_group_agg_step(st, sid, acc_start, &agg_kind_for_slot, &avg_count_regs, &agg_arg_buffer_idx);
+    let _ = st.program.emit(Next(sid, loop_top));
+
+    // ---- after_walk ----
+    let after_walk = st.program.instruction_count();
+    st.program.replace(walk_rewind_idx, Rewind(sid, after_walk));
+    // Patch same-group goto → accumulate_label.
+    st.program.replace(goto_accumulate_same_patch, Goto(accumulate_label));
+    // Patch Ne boundary patches → flush_label.
+    let mut np: Int = 0;
+    while np < ne_patches.len() {
+        st.program.replace(ne_patches[np], Ne(cur_key_start + np, prev_key_start + np, flush_label));
+        np = np + 1;
+    }
+    // Patch if_not_flag → seed_first_label.
+    st.program.replace(if_not_flag_patch, IfNot(flag_reg, seed_first_label));
+    // Patch both "go to accumulate" gotos.
+    st.program.replace(goto_accum_after_flush_patch, Goto(accumulate_label));
+    st.program.replace(goto_accum_from_seed_patch, Goto(accumulate_label));
+
+    // Final-flush path: if flag == 1, flush the last group.
+    let final_flush_skip = st.program.emit(IfNot(flag_reg, 0));
+    emit_group_finalize(st, acc_start, &agg_kind_for_slot, &avg_count_regs);
+    emit_group_project(st, out_start, n_proj, &proj_kind, &agg_kind_for_slot, prev_key_start, acc_start);
+    let gp_final = emit_limit_body_prefix(st);
+    let _ = st.program.emit(ResultRow(out_start, n_proj));
+    emit_limit_body_counter(st, gp_final);
+    let after_final = st.program.instruction_count();
+    st.program.replace(final_flush_skip, IfNot(flag_reg, after_final));
+    emit_limit_finalize_patches(st, after_final);
+    let _ = st.program.emit(Close(sid));
+    Ok(())
+}
+
+fn emit_group_seed(
+    st: &mut CgState,
+    acc_start: Int,
+    agg_kind_for_slot: &List<Int>,
+    avg_count_regs: &List<Int>,
+) {
+    let mut i: Int = 0;
+    while i < agg_kind_for_slot.len() {
+        let kind = agg_kind_for_slot[i];
+        match kind {
+            0 => { let _ = st.program.emit(Integer(0, acc_start + i)); }
+            1 => { let _ = st.program.emit(Integer(0, acc_start + i)); }
+            2 => { let _ = st.program.emit(Null(acc_start + i, acc_start + i)); }
+            3 => { let _ = st.program.emit(Null(acc_start + i, acc_start + i)); }
+            4 => {
+                let _ = st.program.emit(Integer(0, acc_start + i));
+                let cr = avg_count_regs[i];
+                if cr >= 0 { let _ = st.program.emit(Integer(0, cr)); }
+            }
+            _ => {}
+        }
+        i = i + 1;
+    }
+}
+
+fn emit_group_agg_step(
+    st: &mut CgState,
+    sid: Int,
+    acc_start: Int,
+    agg_kind_for_slot: &List<Int>,
+    avg_count_regs: &List<Int>,
+    agg_arg_buffer_idx: &List<Int>,
+) {
+    let mut i: Int = 0;
+    while i < agg_kind_for_slot.len() {
+        let kind = agg_kind_for_slot[i];
+        if kind < 0 { i = i + 1; continue; }
+        let arg_buf = agg_arg_buffer_idx[i];
+        let mut arg_reg: Int = -1;
+        let mut n_args: Int = 0;
+        if arg_buf >= 0 {
+            let r = st.regs.alloc();
+            let _ = st.program.emit(Column(sid, arg_buf, r));
+            arg_reg = r;
+            n_args = 1;
+        }
+        let first = if arg_reg < 0 { 0 } else { arg_reg };
+        if kind == 4 {
+            let count_reg = avg_count_regs[i];
+            let _ = st.program.emit(AggStepAvg(n_args, first, acc_start + i, count_reg));
+        } else {
+            let _ = st.program.emit(AggStep(kind, n_args, first, acc_start + i));
+        }
+        i = i + 1;
+    }
+}
+
+fn emit_group_finalize(
+    st: &mut CgState,
+    acc_start: Int,
+    agg_kind_for_slot: &List<Int>,
+    avg_count_regs: &List<Int>,
+) {
+    let mut i: Int = 0;
+    while i < agg_kind_for_slot.len() {
+        let kind = agg_kind_for_slot[i];
+        if kind < 0 { i = i + 1; continue; }
+        if kind == 4 {
+            let cr = avg_count_regs[i];
+            let _ = st.program.emit(AggFinalAvg(acc_start + i, cr, acc_start + i));
+        } else {
+            let _ = st.program.emit(AggFinal(kind, acc_start + i));
+        }
+        i = i + 1;
+    }
+}
+
+fn emit_group_project(
+    st: &mut CgState,
+    out_start: Int,
+    n_proj: Int,
+    proj_kind: &List<Int>,
+    agg_kind_for_slot: &List<Int>,
+    prev_key_start: Int,
+    acc_start: Int,
+) {
+    let mut i: Int = 0;
+    while i < n_proj {
+        if proj_kind[i] >= 0 {
+            // Group-key column: copy from prev_key window.
+            let _ = st.program.emit(SCopy(prev_key_start + proj_kind[i], out_start + i));
+        } else {
+            // Aggregate column: copy from acc.
+            let _ = st.program.emit(SCopy(acc_start + i, out_start + i));
+        }
+        let _ = agg_kind_for_slot;
+        i = i + 1;
+    }
+}
+
+// Local copy to avoid a cross-module import dance.
+fn clone_expr_local(e: &Expr) -> Expr {
+    match e {
+        ELit(ref l) => ELit(clone_literal_local(l)),
+        EColumnRef(a, b) => EColumnRef(a, b),
+        EColumn(ref t, ref n) => EColumn(TableRef { schema: t.schema.clone(), name: t.name.clone(), alias: t.alias.clone() }, n.clone()),
+        EVar(ref s) => EVar(s.clone()),
+        EPositional(i) => EPositional(i),
+        EFunc(ref name, ref args, d) => {
+            let mut out_args: List<Expr> = List.new();
+            let mut i: Int = 0;
+            while i < args.len() {
+                out_args.push(clone_expr_local(&args[i]));
+                i = i + 1;
+            }
+            EFunc(name.clone(), out_args, d)
+        }
+        EBinary(op, ref a, ref b) => EBinary(op, Heap(clone_expr_local(a)), Heap(clone_expr_local(b))),
+        EUnary(op, ref inner) => EUnary(op, Heap(clone_expr_local(inner))),
+        _ => ELit(LNull),
+    }
+}
+
+fn clone_literal_local(l: &Literal) -> Literal {
+    match l {
+        LInt(x)  => LInt(x),
+        LReal(x) => LReal(x),
+        LText(ref s) => LText(s.clone()),
+        LTrue    => LTrue,
+        LFalse   => LFalse,
+        LNull    => LNull,
+        _ => LNull,
+    }
 }
 
 // -----------------------------------------------------------------------------

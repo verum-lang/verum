@@ -76,6 +76,18 @@ public type PlanNode is
     | PnProject(child: Heap<PlanNode>, columns: List<PlanColumn>)
     | PnSort(child: Heap<PlanNode>, terms: List<OrderTerm>)
     | PnDistinct(child: Heap<PlanNode>, n_proj: Int)
+    // Sort-based GROUP BY over a single-table source. `source` is the
+    // pre-project plan node (PnTableScan or PnFilter(PnTableScan));
+    // `group_exprs` evaluate in the source scope; `projection` is the
+    // SELECT-list (each column is either an EColumnRef into the group
+    // keys or an aggregate call); `having` is the optional post-group
+    // filter.
+    | PnGroupBy(
+          source: Heap<PlanNode>,
+          group_exprs: List<Expr>,
+          projection: List<PlanColumn>,
+          having: Maybe<Expr>,
+      )
     // Nested-loop INNER JOIN of two TableScans. `on` is the ON clause
     // (pre-resolved to use EColumnRef over both scopes). Outer WHERE
     // lives in an enclosing PnFilter.
@@ -719,12 +731,35 @@ fn plan_select_with_schema(
         i = i + 1;
     }
     let n_proj = plan_cols.len();
-    node = PnProject(Heap(node), plan_cols);
 
-    // DISTINCT — wrap after projection so the distinct rows match what
-    // the user would see.
-    if simple.distinct {
-        node = PnDistinct(Heap(node), n_proj);
+    // GROUP BY — if present, short-circuit the plain PnProject path
+    // and emit a PnGroupBy wrapping the pre-project source.
+    if simple.group_by.len() > 0 {
+        let mut resolved_keys: List<Expr> = List.new();
+        let mut g: Int = 0;
+        while g < simple.group_by.len() {
+            let resolved = match resolve_expr(&simple.group_by[g], &scopes) {
+                Ok(e)  => e,
+                Err(_) => { return Err(plan_error("GROUP BY resolve failed".clone())); }
+            };
+            resolved_keys.push(resolved);
+            g = g + 1;
+        }
+        let having: Maybe<Expr> = match simple.having {
+            Some(ref h) => match resolve_expr(h, &scopes) {
+                Ok(e)  => Some(e),
+                Err(_) => { return Err(plan_error("HAVING resolve failed".clone())); }
+            },
+            None => None,
+        };
+        node = PnGroupBy(Heap(node), resolved_keys, plan_cols, having);
+    } else {
+        node = PnProject(Heap(node), plan_cols);
+        // DISTINCT — wrap after projection so the distinct rows match what
+        // the user would see.
+        if simple.distinct {
+            node = PnDistinct(Heap(node), n_proj);
+        }
     }
 
     // ORDER BY — resolve every term's expression against the same scope.
