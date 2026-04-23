@@ -5507,11 +5507,18 @@ impl<'a> RecursiveParser<'a> {
                         None => break, // Not an infix operator
                     };
 
+                    // Range operators are ALWAYS admitted in quantifier
+                    // domains — `forall i in 0..n` is the overwhelmingly
+                    // common idiom; after range precedence was lowered to
+                    // (3, 4), the generic `min_precedence=8` gate would
+                    // otherwise reject them.
+                    let is_range = matches!(kind, TokenKind::DotDot | TokenKind::DotDotEq);
+
                     // Comparison operators have precedence around 6
                     // If we don't allow comparisons (domain parsing), stop at level < 8
                     // If we do allow comparisons (guard parsing), only stop at logical AND/OR level (< 4)
                     let min_precedence = if allow_comparisons { 4 } else { 8 };
-                    if left_bp < min_precedence {
+                    if !is_range && left_bp < min_precedence {
                         break;
                     }
 
