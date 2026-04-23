@@ -2102,6 +2102,35 @@ impl RefinementChecker {
                 Self::try_extract_int_value(inner).map(|val| -val)
             }
             ExprKind::Paren(inner) => Self::try_extract_int_value(inner),
+            // `<literal-list>.len()` / `<byte-string>.len()` / `"text".len()`
+            // — common in refinement predicates where the bound variable
+            // gets substituted with a concrete list / byte-string / text
+            // literal. Fold to the compile-time length so the evaluator
+            // can reduce `xs.len() > 0` against `xs = []` etc.
+            ExprKind::MethodCall { receiver, method, args, .. }
+                if method.name.as_str() == "len" && args.is_empty() =>
+            {
+                match &receiver.kind {
+                    ExprKind::Array(arr) => match arr {
+                        verum_ast::expr::ArrayExpr::List(items) => {
+                            Maybe::Some(items.len() as i64)
+                        }
+                        verum_ast::expr::ArrayExpr::Repeat { count, .. } => {
+                            Self::try_extract_int_value(count)
+                        }
+                    },
+                    ExprKind::Literal(Literal {
+                        kind: verum_ast::literal::LiteralKind::Text(s),
+                        ..
+                    }) => Maybe::Some(s.as_str().len() as i64),
+                    ExprKind::Literal(Literal {
+                        kind: verum_ast::literal::LiteralKind::ByteString(b),
+                        ..
+                    }) => Maybe::Some(b.len() as i64),
+                    _ => Maybe::None,
+                }
+            }
+
             ExprKind::Binary { op, left, right } => {
                 use verum_ast::expr::BinOp;
                 let l = Self::try_extract_int_value(left);

@@ -1,0 +1,21 @@
+// @test: typecheck-fail
+// @tier: 0
+// @level: L1
+// @tags: refinement, len, list, const-fold, check_phase, language
+// @expect: errors
+
+// Regression: refinement predicates that mention `.len()` on a
+// receiver which substitutes to a concrete literal (list, text, byte
+// string) must fold at the syntactic evaluator stage. Without the
+// fold, `type NonEmpty is List<Int> where |xs| { xs.len() > 0 }`
+// would not reject an empty-list assignment at check phase.
+
+mount core.*;
+mount core.collections.List;
+
+type NonEmpty is List<Int> where |xs| { xs.len() > 0 };
+
+fn main() {
+    let bad: NonEmpty = [];
+    print("should not compile");
+}
