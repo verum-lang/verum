@@ -638,8 +638,38 @@ impl TypeChecker {
                     ))));
                 };
 
+                // Qualified pattern: `TypeName.Variant { … }` in a multi-type
+                // scrutinee context (e.g. the `recover` block of a function
+                // that throws `ParseError | ValidationError`) must resolve
+                // the variant against the explicit qualifier's type, not
+                // against the scrutinee type alone. Without this, the
+                // variant lookup silently uses only the first type in the
+                // union and reports `Unknown variant constructor` for
+                // variants that belong to the second type. The multi-type
+                // `recover` pattern is the canonical case.
+                let qualifier_name: Option<&str> = if path.segments.len() >= 2 {
+                    match &path.segments[path.segments.len() - 2] {
+                        verum_ast::ty::PathSegment::Name(id) => Some(id.name.as_str()),
+                        _ => None,
+                    }
+                } else {
+                    None
+                };
+
                 // Expand the scrutinee type and check if it's a variant
                 let mut expanded_ty = self.expand_generic_to_variant(&scheme.ty);
+
+                // If the pattern is explicitly qualified and the qualifier
+                // resolves to a known variant type in scope, prefer the
+                // qualifier's variants — overrides the scrutinee-derived
+                // variant set.
+                if let Some(q) = qualifier_name {
+                    if let Option::Some(def_ty) = self.ctx.lookup_type(q) {
+                        if let Type::Variant(variants) = def_ty.clone() {
+                            expanded_ty = Type::Variant(variants);
+                        }
+                    }
+                }
 
                 // Track if we're matching through a reference
                 let matching_through_ref = matches!(
@@ -795,8 +825,34 @@ impl TypeChecker {
                     }
                 };
 
+                // Qualified-pattern support: `TypeName.Variant(…)` in a
+                // multi-type scrutinee context (e.g. `recover` block of a
+                // function with `throws(A | B)`). The penultimate segment
+                // names the type; resolve the variant against it rather
+                // than against the scrutinee type, which may carry only
+                // the first union member's variants.
+                let qualifier_name: Option<&str> = if path.segments.len() >= 2 {
+                    match &path.segments[path.segments.len() - 2] {
+                        verum_ast::ty::PathSegment::Name(id) => Some(id.name.as_str()),
+                        _ => None,
+                    }
+                } else {
+                    None
+                };
+
                 // Expand Generic types like Maybe<T> and Result<T,E> to their variant form
                 let mut expanded_ty = self.expand_generic_to_variant(&scheme.ty);
+
+                // If the pattern is explicitly qualified and the qualifier
+                // resolves to a known variant type in scope, prefer the
+                // qualifier's variant set.
+                if let Some(q) = qualifier_name {
+                    if let Option::Some(def_ty) = self.ctx.lookup_type(q) {
+                        if let Type::Variant(variants) = def_ty.clone() {
+                            expanded_ty = Type::Variant(variants);
+                        }
+                    }
+                }
 
                 // Handle unresolved associated type projections (e.g., Item<_>)
                 // If the scrutinee is an unresolved generic type that starts with uppercase

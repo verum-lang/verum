@@ -21161,6 +21161,64 @@ impl TypeChecker {
         }
     }
 
+    /// Wrap a function's body-level return type with the externally-visible
+    /// signature transformations that callers need to see:
+    ///
+    ///   1. `throws(E) -> T`  →  `Result<T, E>` (or the first error type
+    ///      in a multi-throws union; multi-type unions are simplified per
+    ///      the existing semantics at `register_function_signature`).
+    ///   2. `async`           →  `Future<...>` wraps the throws-wrapped
+    ///      result.
+    ///
+    /// Every site that builds a `Type::Function` from a `FunctionDecl`
+    /// must apply both transformations in this order. Before this helper
+    /// existed, the throws wrap was applied at some sites and omitted at
+    /// others, producing call-site type mismatches (see 70be7846,
+    /// 05bba3d3). Callers that already have an explicit `Result<T, E>`
+    /// body are guarded by a `resolve_try_protocol` probe so we don't
+    /// produce `Result<Result<T, E>, E>`.
+    pub(crate) fn wrap_return_type_for_sig(
+        &mut self,
+        return_type: Type,
+        throws_clause: &verum_common::Maybe<verum_ast::decl::ThrowsClause>,
+        is_async: bool,
+    ) -> Type {
+        let with_throws = if let verum_common::Maybe::Some(tc) = throws_clause {
+            if !tc.error_types.is_empty() {
+                // Double-wrap guard: if the body already returns a
+                // Try-implementing type (Result<_, _> / Maybe<_> etc.),
+                // leave it alone.
+                if self
+                    .protocol_checker
+                    .read()
+                    .resolve_try_protocol(&return_type)
+                    .is_some()
+                {
+                    return_type
+                } else {
+                    let error_ty = tc
+                        .error_types
+                        .iter()
+                        .next()
+                        .and_then(|t| self.ast_to_type(t).ok())
+                        .unwrap_or_else(|| Type::Var(TypeVar::fresh()));
+                    Type::result(return_type, error_ty)
+                }
+            } else {
+                return_type
+            }
+        } else {
+            return_type
+        };
+        if is_async {
+            Type::Future {
+                output: Box::new(with_throws),
+            }
+        } else {
+            with_throws
+        }
+    }
+
     /// Convert AST type to internal type representation.
     ///
     /// Relies on RUST_MIN_STACK=16MB for stack safety on deep recursion.
@@ -50614,13 +50672,11 @@ impl TypeChecker {
 
                                 // CRITICAL FIX: Wrap return type in Future<T> for async static methods
                                 // This enables proper await type checking for Connection.connect().await
-                                let final_return_type = if func.is_async {
-                                    Type::Future {
-                                        output: Box::new(return_type),
-                                    }
-                                } else {
-                                    return_type
-                                };
+                                let final_return_type = self.wrap_return_type_for_sig(
+                                    return_type,
+                                    &func.throws_clause,
+                                    func.is_async,
+                                );
 
                                 let func_ty = Type::function(param_types, final_return_type);
                                 let qualified_name =
@@ -50724,13 +50780,11 @@ impl TypeChecker {
 
                                 // CRITICAL FIX: Wrap return type in Future<T> for async methods
                                 // This enables proper await type checking for inherent impls
-                                let final_return_type = if func.is_async {
-                                    Type::Future {
-                                        output: Box::new(return_type),
-                                    }
-                                } else {
-                                    return_type
-                                };
+                                let final_return_type = self.wrap_return_type_for_sig(
+                                    return_type,
+                                    &func.throws_clause,
+                                    func.is_async,
+                                );
 
                                 let method_ty = Type::function(param_types, final_return_type);
                                 let type_name_text = verum_common::Text::from(type_name_str.as_str());
@@ -51020,13 +51074,11 @@ impl TypeChecker {
                                     .map(|t| self.ast_to_type(t))
                                     .unwrap_or(Ok(Type::Unit))?;
 
-                                let final_return_type = if func.is_async {
-                                    Type::Future {
-                                        output: Box::new(return_type),
-                                    }
-                                } else {
-                                    return_type
-                                };
+                                let final_return_type = self.wrap_return_type_for_sig(
+                                    return_type,
+                                    &func.throws_clause,
+                                    func.is_async,
+                                );
 
                                 let method_ty = Type::function(param_types, final_return_type);
                                 let type_name_text = verum_common::Text::from(type_name_str.as_str());
@@ -51143,13 +51195,11 @@ impl TypeChecker {
                                     .map(|t| self.ast_to_type(t))
                                     .unwrap_or(Ok(Type::Unit))?;
 
-                                let final_return_type = if func.is_async {
-                                    Type::Future {
-                                        output: Box::new(return_type),
-                                    }
-                                } else {
-                                    return_type
-                                };
+                                let final_return_type = self.wrap_return_type_for_sig(
+                                    return_type,
+                                    &func.throws_clause,
+                                    func.is_async,
+                                );
 
                                 let method_ty = Type::function(param_types, final_return_type);
                                 let type_name_text = verum_common::Text::from(type_name_str.as_str());
