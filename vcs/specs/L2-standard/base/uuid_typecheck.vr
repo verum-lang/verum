@@ -1,0 +1,64 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: base, uuid
+// @timeout: 15000
+// @description: core.base.uuid surface — Uuid constructors / accessors / parse
+
+mount core.*;
+mount core.base.uuid.{Uuid, UuidError};
+
+fn nil_version_is_zero() {
+    let n = Uuid.nil();
+    // Nil UUID is all-zero bytes.
+    assert_eq(n.version(), 0);
+}
+
+fn to_text_then_parse_round_trip() {
+    // Any fixed-byte Uuid should survive to_text -> parse.
+    let bytes: [Byte; 16] = [
+        0 as Byte, 1 as Byte, 2 as Byte, 3 as Byte,
+        4 as Byte, 5 as Byte, 6 as Byte, 7 as Byte,
+        8 as Byte, 9 as Byte, 10 as Byte, 11 as Byte,
+        12 as Byte, 13 as Byte, 14 as Byte, 15 as Byte,
+    ];
+    let u = Uuid.from_bytes(&bytes);
+    let s = u.to_text();
+    assert(s.len() == 36);   // `xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx`
+    match Uuid.parse(&s) {
+        Ok(_)  => {}
+        Err(_) => { panic("round-trip parse must succeed"); }
+    }
+}
+
+fn parse_rejects_malformed() {
+    let bad: Text = "not-a-uuid".clone();
+    match Uuid.parse(&bad) {
+        Ok(_)  => { panic("malformed input must fail parse"); }
+        Err(_) => {}
+    }
+}
+
+fn from_bytes_to_bytes_round_trip() {
+    let bytes: [Byte; 16] = [
+        0xde as Byte, 0xad as Byte, 0xbe as Byte, 0xef as Byte,
+        0xba as Byte, 0xad as Byte, 0xf0 as Byte, 0x0d as Byte,
+        0xca as Byte, 0xfe as Byte, 0xba as Byte, 0xbe as Byte,
+        0x13 as Byte, 0x37 as Byte, 0xc0 as Byte, 0xde as Byte,
+    ];
+    let u = Uuid.from_bytes(&bytes);
+    let out = u.to_bytes();
+    let mut i: Int = 0;
+    while i < 16 {
+        assert_eq(out[i], bytes[i]);
+        i = i + 1;
+    }
+}
+
+fn main() {
+    nil_version_is_zero();
+    to_text_then_parse_round_trip();
+    parse_rejects_malformed();
+    from_bytes_to_bytes_round_trip();
+    print("uuid_typecheck ok");
+}
