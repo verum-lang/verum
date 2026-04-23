@@ -1,0 +1,100 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: iterator, constructors, lazy
+// @timeout: 15000
+// @description: core.base.iterator free-function constructors — once/once_with/empty/repeat/unfold/successors
+
+mount core.*;
+mount core.base.iterator.{
+    once, once_with, empty, repeat, repeat_n, repeat_with,
+    unfold, successors,
+};
+
+fn once_yields_exactly_one() {
+    let mut it = once(42);
+    match it.next() {
+        Some(v) => { assert_eq(v, 42); }
+        None    => { panic("once should yield one item"); }
+    }
+    match it.next() {
+        Some(_) => { panic("once must yield only one"); }
+        None    => {}
+    }
+}
+
+fn once_with_is_lazy() {
+    let mut it = once_with(|| 7);
+    match it.next() {
+        Some(v) => { assert_eq(v, 7); }
+        None    => { panic("once_with should produce its value"); }
+    }
+}
+
+fn empty_iter_yields_nothing() {
+    let mut e: Empty<Int> = empty();
+    match e.next() {
+        Some(_) => { panic("empty must never yield"); }
+        None    => {}
+    }
+}
+
+fn repeat_n_is_bounded() {
+    let mut it = repeat_n(5, 3);
+    let mut count: Int = 0;
+    loop {
+        match it.next() {
+            Some(_) => { count = count + 1; }
+            None    => { break; }
+        }
+        if count > 10 { break; }   // safety valve
+    }
+    assert_eq(count, 3);
+}
+
+fn successors_chain() {
+    // Start with 1, double until > 10: 1, 2, 4, 8.
+    let mut it = successors(Some(1), |x| {
+        let next = x * 2;
+        if next > 10 { None } else { Some(next) }
+    });
+    let mut count: Int = 0;
+    loop {
+        match it.next() {
+            Some(_) => { count = count + 1; }
+            None    => { break; }
+        }
+        if count > 10 { break; }
+    }
+    // 1, 2, 4, 8 → 4 items.
+    assert_eq(count, 4);
+}
+
+fn unfold_terminator() {
+    // Walk 0, 1, 2, ... until 3 then None.
+    let mut it = unfold(0, |st| {
+        if *st >= 3 { return None; }
+        let v = *st;
+        *st = *st + 1;
+        Some(v)
+    });
+    let mut n: Int = 0;
+    loop {
+        match it.next() {
+            Some(_) => { n = n + 1; }
+            None    => { break; }
+        }
+        if n > 10 { break; }
+    }
+    assert_eq(n, 3);
+}
+
+fn main() {
+    once_yields_exactly_one();
+    once_with_is_lazy();
+    empty_iter_yields_nothing();
+    repeat_n_is_bounded();
+    successors_chain();
+    unfold_terminator();
+    print("iterator_constructors typecheck ok");
+}
