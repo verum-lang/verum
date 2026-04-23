@@ -1888,7 +1888,7 @@ fn build_suggestions_from_proof_error(err: &ProofError) -> List<Text> {
 /// hypothesis, not just as a refinement on the type. Type-checking still
 /// enforces the refinement at call sites; this function merely threads it
 /// through the verification layer where the goal solver lives.
-fn refinement_hypotheses_from_params(
+pub fn refinement_hypotheses_from_params(
     params: &List<verum_ast::decl::FunctionParam>,
     alias_map: &std::collections::HashMap<Text, Vec<Expr>>,
 ) -> Vec<Expr> {

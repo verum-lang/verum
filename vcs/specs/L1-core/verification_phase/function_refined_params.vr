@@ -1,0 +1,53 @@
+// @test: integration
+// @tier: 0
+// @level: L1
+// @tags: verify, function, refinement, inline, self, ensures
+// @expect: pass
+//
+// User `fn` declarations with inline refinement predicates on
+// parameters (`Int { self > 0 }`) must flow those predicates as
+// hypotheses into the postcondition check — mirroring the theorem-path
+// behaviour. Before the fix:
+//   * the `self` binder translated as an "unsupported path" in SMT,
+//   * the standalone `verify_refinement(ty, None)` check on parameters
+//     produced spurious counterexamples (e.g. `it = -1 violates self >= 0`),
+//   * functions returning a refined type got the same broken check.
+// All three are fixed: `self` maps to the `it` binding, refinement
+// hypotheses land in `effective_requires`, and the pointless type-level
+// validity check is gone.
+
+@verify(formal)
+fn add_positives(x: Int { self > 0 }, y: Int { self > 0 }) -> Int
+    ensures result > 0
+    ensures result >= 2
+{
+    x + y
+}
+
+@verify(formal)
+fn square_of_nonneg(x: Int { self >= 0 }) -> Int
+    ensures result >= 0
+    ensures result == x * x
+{
+    x * x
+}
+
+@verify(formal)
+fn refined_multi(a: Int { self >= 0 }, b: Int { self > 0 }) -> Int
+    ensures result >= 0
+    ensures result == a * b
+{
+    a * b
+}
+
+@verify(formal)
+fn rule3_sigma(x: Int where x > 0) -> Int
+    ensures result > 1
+    ensures result == x + 1
+{
+    x + 1
+}
+
+fn main() {
+    print("L1-core: verification_phase/function_refined_params");
+}

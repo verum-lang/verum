@@ -410,6 +410,32 @@ impl<'ctx> Translator<'ctx> {
             ExprKind::Literal(lit) => self.translate_literal(lit),
 
             ExprKind::Path(path) => {
+                // A single-segment `PathSegment::SelfValue` is the AST
+                // shape of the `self` binder used in refinement
+                // predicates (`Int { self > 0 }`). The refinement check
+                // flows such predicates through `verify_refinement`,
+                // which binds the value under the conventional name
+                // `"it"`. Map `self` to that binding so the predicate
+                // translates against the correct Z3 symbol instead of
+                // tripping the "unsupported path" error below. If no
+                // `it` binding exists, fall back to a fresh `self` Int
+                // const — safe because in that context the refinement
+                // isn't tied to any particular value.
+                if path.segments.len() == 1 {
+                    if matches!(
+                        &path.segments[0],
+                        verum_ast::PathSegment::SelfValue
+                    ) {
+                        if let Maybe::Some(var) = self.bindings.get(&"it".to_text()) {
+                            return Ok(var.clone());
+                        }
+                        if let Maybe::Some(var) = self.bindings.get(&"self".to_text()) {
+                            return Ok(var.clone());
+                        }
+                        let int_var = Int::new_const("self");
+                        return Ok(Dynamic::from_ast(&int_var));
+                    }
+                }
                 // Handle simple identifiers and 'it' for refinement predicates
                 if let Some(ident) = path.as_ident() {
                     let name = ident.as_str();

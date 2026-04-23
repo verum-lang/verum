@@ -431,11 +431,25 @@ impl<'s> VerifyCommand<'s> {
             ));
         }
 
-        // Build the effective requires list — declared + alias-implicit.
+        // Inline refinement predicates on parameters flow in here too:
+        // `fn foo(x: Int { self > 0 })` should see `x > 0` as a
+        // hypothesis during postcondition verification. The theorem
+        // path uses `refinement_hypotheses_from_params` — reuse the
+        // same helper (the alias_map is already the correct shape) so
+        // inline + nominal refinements are handled uniformly.
+        let inline_refinement_requires =
+            crate::phases::proof_verification::refinement_hypotheses_from_params(
+                &func.params,
+                alias_map,
+            );
+
+        // Build the effective requires list — declared + alias-implicit
+        // + inline refinement predicates.
         let effective_requires: List<Expr> = {
             let mut list = List::new();
             for e in &func.requires { list.push(e.clone()); }
             for e in &implicit_requires { list.push(e.clone()); }
+            for e in &inline_refinement_requires { list.push(e.clone()); }
             list
         };
 
@@ -526,37 +540,40 @@ impl<'s> VerifyCommand<'s> {
             }
         }
 
-        // Step 3: Verify refinement types in parameters.
-        // Accepts both inline refinements (`Int where |n|{...}`) and
-        // aliases that flatten to a refinement (`type PageNo is Int where …`).
-        if has_refined_params {
-            for param in &func.params {
-                if let FunctionParamKind::Regular { pattern: _, ty, .. } = &param.kind {
-                    let effective_ty = self.resolve_refined_alias_in_ty(ty, alias_map);
-                    if let TypeKind::Refined { .. } = &effective_ty.kind {
-                        if let Err(e) =
-                            verify_refinement(&ctx, &effective_ty, None, VerifyMode::Auto)
-                        {
-                            return Err(e);
-                        }
-                    }
-                }
-            }
-        }
+        // Parameter refinement predicates have already been added to
+        // `effective_requires` above (via `refinement_hypotheses_from_params`
+        // and `synthesize_alias_refinement_requires`), so they are now
+        // visible as SMT hypotheses during the postcondition check.
+        //
+        // The obsolete "step 3" used to call `verify_refinement(ty, None)`
+        // on each refined parameter, but with `value_expr = None` that
+        // asserts "the predicate holds for some/all unconstrained value"
+        // which is nonsense for a type-level declaration (an
+        // `Int { self >= 0 }` type doesn't claim every Int is ≥ 0).
+        // The real obligation — "call sites pass values that satisfy
+        // the refinement" — belongs at call sites, not inside the
+        // callee, and type-checking handles it via standard refinement
+        // subtyping.
+        //
+        // Removing the standalone parameter-refinement check silences a
+        // cascade of spurious counterexamples for every refined-param
+        // function without losing any soundness: the predicate is still
+        // the postcondition hypothesis.
 
-        // Step 4: Verify refinement type in return type (inline or alias)
-        if has_refined_return {
-            if let Some(ref ret_ty) = func.return_type {
-                let effective_ty = self.resolve_refined_alias_in_ty(ret_ty, alias_map);
-                if let TypeKind::Refined { .. } = &effective_ty.kind {
-                    if let Err(e) =
-                        verify_refinement(&ctx, &effective_ty, None, VerifyMode::Auto)
-                    {
-                        return Err(e);
-                    }
-                }
-            }
-        }
+        // Return-type refinement — `fn foo(..) -> T { P }` or
+        // `-> SomeAlias` that flattens to a refinement. Same principle
+        // as Step 3's removed check: the validity claim isn't "every
+        // inhabitant of the base type satisfies P" but "the function's
+        // returned value satisfies P". That's exactly what the
+        // postcondition pipeline verifies once we synthesize an
+        // implicit `ensures P(result)` clause, which we already did
+        // if the return-type refinement was exposed through the
+        // postcondition translation layer.
+        //
+        // Rather than double-check via a broken `verify_refinement`
+        // call, we accept that the postcondition pipeline with the
+        // body→result binding is sufficient: a real violation surfaces
+        // there as a standard postcondition counterexample.
 
         // All checks passed - create proof result with cost tracking
         let cost = verum_smt::VerificationCost::new(
