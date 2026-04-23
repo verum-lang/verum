@@ -1,0 +1,86 @@
+// @test: typecheck-pass
+// @level: L2
+// @tier: 0
+// @tags: sqlite, native, l7, typeof, iif, char, unicode, sign
+// @timeout: 15000
+// @description: TYPEOF, IIF, UNICODE, CHAR, SIGN scalar functions
+//
+// Spec: internal/specs/sqlite-native.md §14.2
+
+mount core.*;
+mount collections.List;
+mount core.database.sqlite.native.l7_api.{
+    Database, DbError, open_admin,
+};
+mount core.database.sqlite.native.l4_vdbe.Register;
+
+fn typeof_on_each_kind() {
+    let mut db = match open_admin() {
+        Ok(d)  => d,
+        Err(_) => { panic("open"); return; }
+    };
+    let _ = db.execute(&"CREATE TABLE t (i INTEGER, s TEXT)".clone());
+    let _ = db.execute(&"INSERT INTO t VALUES (42, 'hi')".clone());
+    match db.query_all(&"SELECT TYPEOF(i), TYPEOF(s) FROM t".clone()) {
+        Ok(rows) => {
+            assert_eq(rows.len(), 1);
+            match rows[0][0] { RText(_) => {}, _ => panic("TYPEOF should be RText") }
+            match rows[0][1] { RText(_) => {}, _ => panic("TYPEOF should be RText") }
+        }
+        Err(_) => panic("query_all TYPEOF"),
+    }
+}
+
+fn iif_ternary() {
+    let mut db = match open_admin() {
+        Ok(d)  => d,
+        Err(_) => { panic("open"); return; }
+    };
+    let _ = db.execute(&"CREATE TABLE t (v INTEGER)".clone());
+    let _ = db.execute(&"INSERT INTO t VALUES (1)".clone());
+    match db.query_all(&"SELECT IIF(v > 0, 'pos', 'nonpos') FROM t".clone()) {
+        Ok(rows) => {
+            match rows[0][0] { RText(_) => {}, _ => panic("IIF should be RText") }
+        }
+        Err(_) => panic("query_all IIF"),
+    }
+}
+
+fn char_unicode() {
+    let mut db = match open_admin() {
+        Ok(d)  => d,
+        Err(_) => { panic("open"); return; }
+    };
+    let _ = db.execute(&"CREATE TABLE t (v INTEGER, s TEXT)".clone());
+    let _ = db.execute(&"INSERT INTO t VALUES (65, 'A')".clone());
+    match db.query_all(&"SELECT CHAR(v), UNICODE(s) FROM t".clone()) {
+        Ok(rows) => {
+            match rows[0][0] { RText(_) => {}, _ => panic("CHAR → RText") }
+            match rows[0][1] { RInt(x) => { assert_eq(x as Int, 65); }, _ => panic("UNICODE → RInt") }
+        }
+        Err(_) => panic("query_all CHAR/UNICODE"),
+    }
+}
+
+fn sign_function() {
+    let mut db = match open_admin() {
+        Ok(d)  => d,
+        Err(_) => { panic("open"); return; }
+    };
+    let _ = db.execute(&"CREATE TABLE t (v INTEGER)".clone());
+    let _ = db.execute(&"INSERT INTO t VALUES (-5)".clone());
+    match db.query_all(&"SELECT SIGN(v) FROM t".clone()) {
+        Ok(rows) => {
+            match rows[0][0] { RInt(x) => { assert_eq(x as Int, -1); }, _ => panic("SIGN") }
+        }
+        Err(_) => panic("query_all SIGN"),
+    }
+}
+
+fn main() {
+    typeof_on_each_kind();
+    iif_ternary();
+    char_unicode();
+    sign_function();
+    print("typeof_iif_char typecheck ok");
+}

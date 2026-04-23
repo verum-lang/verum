@@ -1010,6 +1010,95 @@ public fn step(state: &mut VdbeState, program: &VdbeProgram) -> StepResult {
                         }
                     }
                 }
+                23 => {
+                    // TYPEOF(x) — dynamic type name as text.
+                    if n_args < 1 {
+                        RNull
+                    } else {
+                        let v = state.regs.get(first_arg_reg);
+                        let name: Text = match v {
+                            RNull     => "null".clone(),
+                            RInt(_)   => "integer".clone(),
+                            RRowId(_) => "integer".clone(),
+                            RReal(_)  => "real".clone(),
+                            RText(_)  => "text".clone(),
+                            RBlob(_)  => "blob".clone(),
+                        };
+                        RText(name)
+                    }
+                }
+                24 => {
+                    // IIF(cond, a, b) — ternary helper (SQLite 3.32+).
+                    if n_args < 3 {
+                        RNull
+                    } else {
+                        let c = state.regs.get(first_arg_reg);
+                        let cond_true = match c {
+                            RInt(x)  => x != (0 as Int64),
+                            RReal(x) => x != 0.0,
+                            RText(ref s) => s.len() > 0,
+                            RBlob(ref b) => b.len() > 0,
+                            _ => false,
+                        };
+                        if cond_true {
+                            state.regs.get(first_arg_reg + 1)
+                        } else {
+                            state.regs.get(first_arg_reg + 2)
+                        }
+                    }
+                }
+                25 => {
+                    // UNICODE(s) — codepoint of first byte (ASCII subset).
+                    if n_args < 1 {
+                        RNull
+                    } else {
+                        match state.regs.get(first_arg_reg) {
+                            RText(ref s) => {
+                                let bs = s.as_bytes();
+                                if bs.len() == 0 { RNull } else { RInt(bs[0] as Int64) }
+                            }
+                            RNull => RNull,
+                            _ => RNull,
+                        }
+                    }
+                }
+                26 => {
+                    // CHAR(n) — single-char text from ASCII codepoint.
+                    if n_args < 1 {
+                        RNull
+                    } else {
+                        match state.regs.get(first_arg_reg) {
+                            RInt(x) => {
+                                let mut out = Text.new();
+                                let b: Byte = (x as Int) as Byte;
+                                out.push_byte(b);
+                                RText(out)
+                            }
+                            _ => RNull,
+                        }
+                    }
+                }
+                27 => {
+                    // SIGN(x) — -1/0/1 for numeric, NULL for others.
+                    if n_args < 1 {
+                        RNull
+                    } else {
+                        match state.regs.get(first_arg_reg) {
+                            RInt(x)  => {
+                                if x > (0 as Int64) { RInt(1 as Int64) }
+                                else if x < (0 as Int64) { RInt(-1 as Int64) }
+                                else { RInt(0 as Int64) }
+                            }
+                            RReal(x) => {
+                                if x > 0.0 { RInt(1 as Int64) }
+                                else if x < 0.0 { RInt(-1 as Int64) }
+                                else { RInt(0 as Int64) }
+                            }
+                            RNull => RNull,
+                            _ => RNull,
+                        }
+                    }
+                }
                 11 => {
                     // NOT LIKE — inverse of LIKE.
                     if n_args < 2 {

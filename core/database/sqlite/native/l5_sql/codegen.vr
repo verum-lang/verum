@@ -2315,6 +2315,11 @@ fn scalar_fn_kind(name: &Text) -> Int {
     if n == "min".clone()    { return 20; }
     if n == "max".clone()    { return 21; }
     if n == "hex".clone()    { return 22; }
+    if n == "typeof".clone() { return 23; }
+    if n == "iif".clone()    { return 24; }
+    if n == "unicode".clone() { return 25; }
+    if n == "char".clone()   { return 26; }
+    if n == "sign".clone()   { return 27; }
     -1
 }
 
