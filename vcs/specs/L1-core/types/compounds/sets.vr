@@ -37,16 +37,20 @@ fn main() {
     let set_b: Set<Int> = {3, 4, 5, 6};
 
     // Union: elements in either set
-    let union: Set<Int> = set_a.union(&set_b).copied().collect();
+    // (Verum's Set.union returns `Set<T>` directly — unlike Rust's `Union` iterator.
+    // Chaining `.copied().collect()` would wrap an already-constructed value
+    // back through an iterator for no reason, and the `.copied()` path on a
+    // bare `Set` is ill-defined.)
+    let union: Set<Int> = set_a.union(&set_b);
 
     // Intersection: elements in both sets
-    let intersection: Set<Int> = set_a.intersection(&set_b).copied().collect();
+    let intersection: Set<Int> = set_a.intersection(&set_b);
 
     // Difference: elements in A but not in B
-    let difference: Set<Int> = set_a.difference(&set_b).copied().collect();
+    let difference: Set<Int> = set_a.difference(&set_b);
 
     // Symmetric difference: elements in either but not both
-    let symmetric_diff: Set<Int> = set_a.symmetric_difference(&set_b).copied().collect();
+    let symmetric_diff: Set<Int> = set_a.symmetric_difference(&set_b);
 
     // Subset and superset checks
     let small: Set<Int> = {1, 2};
@@ -61,8 +65,10 @@ fn main() {
         sum = sum + *elem;
     }
 
-    // Conversion to sorted list
-    let sorted: List<Int> = numbers.iter().copied().sorted().collect();
+    // Conversion to sorted list. `Set.iter()` yields `&T`; collect first,
+    // then sort the resulting `List<Int>` via the stdlib's
+    // `List.sorted()` helper.
+    let sorted: List<Int> = numbers.iter().copied().collect::<List<Int>>().sorted();
 
     // Clearing set
     let mut to_clear: Set<Int> = {1, 2, 3};
