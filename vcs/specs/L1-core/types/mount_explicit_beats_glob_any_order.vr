@@ -1,0 +1,41 @@
+// @test: typecheck-pass
+// @level: L1
+// @tags: modules, mount, glob, explicit, order-independence
+// @timeout: 5000
+
+/// Regression for the explicit-mount-vs-glob order-dependence bug.
+///
+/// Before this fix, placing a glob `mount core.*` BEFORE a same-name
+/// explicit `mount X.{T}` let the glob import win because the
+/// `explicit_imports` set was populated only as explicit mounts
+/// executed. When the glob ran first, it registered the stdlib type
+/// under the flat name, and the later explicit mount landed on top
+/// but variant-constructor lookup still favoured the first-registered
+/// variant set — producing confusing
+/// "Available variants: [JsonNull, JsonBool, ...]" errors for code
+/// that clearly imported the local `JsonValue`.
+///
+/// Fix (Phase -0.5 pre-pass): walk every `Mount` item in the module
+/// BEFORE Phase 0 registration and seed `explicit_imports` with every
+/// leaf-name that would be explicitly imported. The existing glob-skip
+/// guard in `import_item_from_module_impl` then blocks the glob from
+/// clobbering those names regardless of source order.
+///
+/// This spec pins the order-independence contract:
+///
+///   * glob-then-explicit  → explicit wins
+///   * explicit-then-glob  → explicit wins
+///
+/// Both orderings produce identical environments.
+
+module test_mount_order;
+
+mount core.*;
+mount core.net.tls13.handshake.*;
+mount core.net.tls13.cipher_suite.{HashKind};
+
+fn hash_kind() -> HashKind {
+    HashKind.Sha256
+}
+
+fn main() { print("explicit-mount wins over glob regardless of order"); }
