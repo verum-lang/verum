@@ -883,10 +883,31 @@ impl<'ctx> Translator<'ctx> {
                     let int_var = Int::new_const(name);
                     Ok(Dynamic::from_ast(&int_var))
                 } else {
-                    Err(TranslationError::UnsupportedPath(Text::from(format!(
-                        "{:?}",
-                        path
-                    ))))
+                    // Multi-segment path like `Color.Red`. Encode
+                    // as a uninterpreted Int keyed by the joined
+                    // segment names — span-insensitive, so the
+                    // same path across call sites and axiom sites
+                    // denotes the same Z3 constant. This is what
+                    // makes variant-constructor references
+                    // (`Color.Red`, `Result.Ok`, …) unifiable
+                    // with the disjointness axioms the verifier
+                    // pre-asserts on the solver.
+                    let segs: Vec<String> = path
+                        .segments
+                        .iter()
+                        .map(|s| match s {
+                            verum_ast::PathSegment::Name(id) => {
+                                id.name.as_str().to_string()
+                            }
+                            verum_ast::PathSegment::SelfValue => "self".to_string(),
+                            verum_ast::PathSegment::Super => "super".to_string(),
+                            verum_ast::PathSegment::Cog => "cog".to_string(),
+                            verum_ast::PathSegment::Relative => ".".to_string(),
+                        })
+                        .collect();
+                    let key = format!("path_{}", segs.join("."));
+                    let int_var = Int::new_const(key.as_str());
+                    Ok(Dynamic::from_ast(&int_var))
                 }
             }
 
@@ -918,22 +939,66 @@ impl<'ctx> Translator<'ctx> {
                         Ok(Dynamic::from_ast(&int_var))
                     }
                     _ => {
-                        // General record-field access. Model as a
-                        // uninterpreted Int keyed on
-                        // `<pretty(receiver)>.<field>` so repeated
-                        // references to the same field on the same
-                        // receiver denote the same Z3 symbol. This
-                        // makes postconditions like
-                        //     requires p.x == q.x
-                        //     ensures p.x + p.y == q.x + q.y
-                        // close through linear arithmetic without a
-                        // dedicated Z3 datatype for the record.
-                        // Default sort is Int; other sorts need a
-                        // richer type-layer signal which isn't yet
-                        // plumbed through.
+                        // Distinguish two syntactic-identical cases:
+                        //
+                        //   (a) variant-constructor reference:
+                        //       `Color.Red` where `Color` is a
+                        //       declared variant type — this should
+                        //       canonicalise to the same Z3 symbol
+                        //       that the module's variant-
+                        //       disjointness axioms use.
+                        //
+                        //   (b) record-field access:
+                        //       `p.x` where `p` is a record value.
+                        //
+                        // The AST distinguishes them only at the
+                        // *receiver* position: case (a) has a bare
+                        // Path, case (b) has a Path that was bound
+                        // as a value. Without a type-layer signal
+                        // here we can't tell them apart fully, but
+                        // we can apply a syntactic heuristic: if
+                        // the receiver is a single-segment Path
+                        // whose first character is uppercase — the
+                        // Verum convention for type names — route
+                        // as a qualified-path reference (`path_T.X`),
+                        // matching the variant-axiom naming scheme.
+                        //
+                        // This means `p.x` where `p` starts with a
+                        // lower-case letter still goes through the
+                        // record-field path (same keys as before);
+                        // `Color.Red` routes through the path
+                        // scheme and unifies with disjointness.
+                        let receiver_stripped = strip_paren(expr);
+                        let is_type_qualified = matches!(
+                            &receiver_stripped.kind,
+                            ExprKind::Path(p)
+                                if p.segments.len() == 1
+                                && matches!(
+                                    &p.segments[0],
+                                    verum_ast::PathSegment::Name(id)
+                                    if id.name.as_str()
+                                        .chars()
+                                        .next()
+                                        .map(|c| c.is_uppercase())
+                                        .unwrap_or(false)
+                                )
+                        );
+                        if is_type_qualified {
+                            let type_name = match &receiver_stripped.kind {
+                                ExprKind::Path(p) => match &p.segments[0] {
+                                    verum_ast::PathSegment::Name(id) => id.name.as_str().to_string(),
+                                    _ => String::new(),
+                                },
+                                _ => String::new(),
+                            };
+                            let key = format!("path_{}.{}", type_name, field_name);
+                            let int_var = Int::new_const(key.as_str());
+                            return Ok(Dynamic::from_ast(&int_var));
+                        }
+                        // Regular record-field access.
                         let key = format!(
                             "field_{}__{}",
-                            verum_ast::pretty::format_expr(strip_paren(expr)),
+                            verum_ast::pretty::format_expr(receiver_stripped),
                             field_name
                         );
                         let int_var = Int::new_const(key.as_str());

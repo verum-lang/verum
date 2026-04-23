@@ -2216,6 +2216,13 @@ pub struct ProofSearchEngine {
         Text,
         (Vec<Text>, Text),
     >,
+
+    /// Module-level axiom expressions. Asserted on the solver
+    /// before every goal check. Populated from
+    /// `ProofSearchEngine::register_axiom` — e.g. variant
+    /// disjointness facts derived from `type T is A | B | C;`
+    /// declarations.
+    module_axioms: Vec<verum_ast::Expr>,
 }
 
 /// Record of an incomplete proof (accepted via Sorry tactic)
@@ -2243,6 +2250,7 @@ impl ProofSearchEngine {
             incomplete_proofs: List::new(),
             reflection_registry: crate::refinement_reflection::RefinementReflectionRegistry::new(),
             callee_signatures: std::collections::HashMap::new(),
+            module_axioms: Vec::new(),
         }
     }
 
@@ -2259,6 +2267,7 @@ impl ProofSearchEngine {
             incomplete_proofs: List::new(),
             reflection_registry: crate::refinement_reflection::RefinementReflectionRegistry::new(),
             callee_signatures: std::collections::HashMap::new(),
+            module_axioms: Vec::new(),
         }
     }
 
@@ -2311,6 +2320,22 @@ impl ProofSearchEngine {
     ) {
         self.callee_signatures
             .insert(name, (param_sorts, ret_sort));
+    }
+
+    /// Register a module-level axiom expression that will be
+    /// asserted on every solver context this engine builds.
+    /// Used for variant-disjointness axioms (`T.A != T.B` for
+    /// every pair of constructors of a variant type) and any
+    /// other module-scope facts that aren't expressible as
+    /// function reflections.
+    pub fn register_axiom(&mut self, expr: verum_ast::Expr) {
+        self.module_axioms.push(expr);
+    }
+
+    /// Read-only access to the registered module axioms. Used by
+    /// `try_smt_discharge` to assert them on the solver.
+    pub fn module_axioms(&self) -> &[verum_ast::Expr] {
+        &self.module_axioms
     }
 
     /// Read-only access to the reflection registry, e.g. for
@@ -4490,6 +4515,19 @@ impl ProofSearchEngine {
         // without the author having to restate the obvious.
         for axiom in translator.drain_stdlib_axioms() {
             solver.assert(&axiom);
+        }
+
+        // Inject module-level axioms — variant disjointness,
+        // user-registered facts. Translate each to Z3 here so
+        // they're visible alongside the goal. Translation
+        // failures silently skip the axiom (conservative — a
+        // unprocessable axiom just doesn't fire).
+        for ax in &self.module_axioms {
+            if let Ok(dyn_ax) = translator.translate_expr(ax) {
+                if let Some(b) = dyn_ax.as_bool() {
+                    solver.assert(&b);
+                }
+            }
         }
 
         // Validity check: a proposition `F` is valid iff `¬F` is

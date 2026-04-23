@@ -1,0 +1,50 @@
+// @test: integration
+// @tier: 0
+// @level: L1
+// @tags: verify, variant, adt, disjointness, axiom
+// @expect: pass
+//
+// For every `type T is A | B | C;` declaration, the verifier emits
+// pairwise-distinctness axioms `T.A != T.B`, `T.A != T.C`, `T.B !=
+// T.C` and asserts them on every solver check. This lets
+// user-facing claims about constructor distinctness close
+// automatically, and underpins match-over-variant's ite-chain
+// semantics.
+//
+// Root cause before the fix: `T.A` was parsed as `Field{expr: T,
+// field: A}` and routed through the record-field translator,
+// emitting `field_T__A`. The disjointness axioms emitted via the
+// Path path used `path_T.A`. The two denoted different Z3 symbols
+// so axioms had no effect on goals. Fix: the Field-translator arm
+// now detects "Type.Variant" shape (receiver is a capitalised
+// single-segment path) and canonicalises to the same `path_T.X`
+// scheme the axioms use.
+
+public type Color is Red | Green | Blue;
+public type Direction is North | South | East | West;
+public type Result is Ok | Err | Pending;
+
+@verify(formal)
+theorem color_variants_distinct()
+    ensures Color.Red != Color.Green
+    ensures Color.Red != Color.Blue
+    ensures Color.Green != Color.Blue
+    proof by auto;
+
+@verify(formal)
+theorem direction_cross_product()
+    ensures Direction.North != Direction.South
+    ensures Direction.East != Direction.West
+    ensures Direction.North != Direction.East
+    proof by auto;
+
+@verify(formal)
+theorem result_variants_distinct()
+    ensures Result.Ok != Result.Err
+    ensures Result.Ok != Result.Pending
+    ensures Result.Err != Result.Pending
+    proof by auto;
+
+fn main() {
+    print("L1-core: verification_phase/variant_disjointness");
+}

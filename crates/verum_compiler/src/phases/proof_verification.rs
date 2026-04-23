@@ -2195,6 +2195,80 @@ fn collect_refinements(
 }
 
 // ---------------------------------------------------------------------------
+// Variant disjointness — architectural treatment of algebraic data types
+// ---------------------------------------------------------------------------
+
+/// For every `type T is A | B | C;` declaration in the module,
+/// generate pairwise-distinctness axioms: `T.A != T.B`, `T.A != T.C`,
+/// `T.B != T.C`. These are asserted on the solver before every
+/// theorem check so claims like `theorem t(): T.A != T.B` close
+/// automatically, and so a `match` ite-chain's branch-selection
+/// logic has the right discriminator semantics.
+///
+/// The lowering matches the translator's Path-translation scheme:
+/// the qualified name `T.A` pretty-prints to `T.A` and emits
+/// `Int::new_const("path_T.A")`. Disjointness is therefore
+/// `path_T.A != path_T.B` at the Z3 level — no dedicated ADT sort
+/// required. Exhaustiveness (every value equals some constructor)
+/// is NOT emitted because it would need a universal over the
+/// variant sort, which we don't model; the `match` translator's
+/// ite-chain handles exhaustiveness indirectly when the user
+/// enumerates all constructors.
+pub fn variant_disjointness_axioms(module: &verum_ast::Module) -> Vec<Expr> {
+    use verum_ast::decl::TypeDeclBody;
+    use verum_ast::ItemKind;
+
+    let mut axioms: Vec<Expr> = Vec::new();
+    for item in &module.items {
+        if let ItemKind::Type(td) = &item.kind {
+            if let TypeDeclBody::Variant(variants) = &td.body {
+                if variants.len() < 2 {
+                    continue;
+                }
+                let type_name = td.name.name.as_str();
+                let type_span = td.span;
+
+                // Build the qualified-path Expr `T.A` for each
+                // variant. The translator's path-translation key
+                // matches `path_<joined_segments>` so we do the
+                // same canonical construction here.
+                let make_variant_path = |v_name: &verum_common::Text| -> Expr {
+                    let type_ident = verum_ast::ty::Ident::new(type_name, type_span);
+                    let variant_ident =
+                        verum_ast::ty::Ident::new(v_name.as_str(), type_span);
+                    let path = verum_ast::ty::Path::new(
+                        List::from_iter([
+                            verum_ast::ty::PathSegment::Name(type_ident),
+                            verum_ast::ty::PathSegment::Name(variant_ident),
+                        ]),
+                        type_span,
+                    );
+                    Expr::new(ExprKind::Path(path), type_span)
+                };
+
+                // Pairwise `A != B` for all distinct pairs.
+                for i in 0..variants.len() {
+                    for j in (i + 1)..variants.len() {
+                        let a = make_variant_path(&variants[i].name.name);
+                        let b = make_variant_path(&variants[j].name.name);
+                        let ne = Expr::new(
+                            ExprKind::Binary {
+                                op: verum_ast::BinOp::Ne,
+                                left: Heap::new(a),
+                                right: Heap::new(b),
+                            },
+                            type_span,
+                        );
+                        axioms.push(ne);
+                    }
+                }
+            }
+        }
+    }
+    axioms
+}
+
+// ---------------------------------------------------------------------------
 // Module-scoped lemma / axiom registration
 // ---------------------------------------------------------------------------
 

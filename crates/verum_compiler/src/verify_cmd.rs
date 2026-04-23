@@ -215,10 +215,18 @@ impl<'s> VerifyCommand<'s> {
                 ));
             }
         }
+        // Variant disjointness axioms: for every `type T is A | B
+        // | C;`, emit `T.A != T.B`, `T.A != T.C`, `T.B != T.C`.
+        // These are asserted on the solver so claims like
+        //     theorem variants_distinct(): T.A != T.B
+        // close automatically.
+        let variant_axioms =
+            crate::phases::proof_verification::variant_disjointness_axioms(module);
         debug!(
-            "CLI verify: refinement={} signatures={}",
+            "CLI verify: refinement={} signatures={} variant_axioms={}",
             reflection_registry.len(),
             callee_signatures_for_module.len(),
+            variant_axioms.len(),
         );
 
         for item in &module.items {
@@ -331,6 +339,7 @@ impl<'s> VerifyCommand<'s> {
             let result = self.verify_theorem(
                 thm, kind_name, timeout, &alias_map, &module_hints,
                 &reflection_registry, &callee_signatures_for_module,
+                &variant_axioms,
             );
 
             // Note: Profiler is not used for theorem verification (different result type)
@@ -373,6 +382,7 @@ impl<'s> VerifyCommand<'s> {
         module_hints: &verum_smt::proof_search::HintsDatabase,
         reflection_registry: &verum_smt::refinement_reflection::RefinementReflectionRegistry,
         callee_signatures_for_module: &[(Text, Vec<Text>, Text)],
+        variant_axioms: &[Expr],
     ) -> VerificationResult {
         let start = Instant::now();
 
@@ -413,6 +423,15 @@ impl<'s> VerifyCommand<'s> {
                 ps.clone(),
                 r.clone(),
             );
+        }
+
+        // Register variant-disjointness axioms (computed once per
+        // module, passed in via `variant_axioms`). Each pair of
+        // variants `T.A` / `T.B` gets an axiom `T.A != T.B` so
+        //     theorem variants_distinct(): T.A != T.B
+        // closes by SMT.
+        for ax in variant_axioms {
+            proof_engine.register_axiom(ax.clone());
         }
 
         // Run the full proof verification pipeline
