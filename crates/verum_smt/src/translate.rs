@@ -727,6 +727,80 @@ impl<'ctx> Translator<'ctx> {
                         let int_var = Int::new_const(base_name.as_str());
                         Ok(Dynamic::from_ast(&int_var))
                     }
+
+                    // Array / map read:  arr.at(i)  /  arr.get(i)
+                    // Encoded as a uninterpreted `Int` keyed on
+                    // `<receiver>_at_<index>`, with `<receiver>` the
+                    // pretty-printed surface of the *whole* receiver
+                    // expression. Two mentions of `arr.at(i)` with
+                    // the same receiver and index produce the same
+                    // Z3 symbol; paired with the read-through axiom
+                    // queued in the `update` / `insert` arm below,
+                    // this closes `ensures arr.update(i, v).at(i) == v`
+                    // and similar maps of the update/get contract.
+                    "at" | "get" if args.len() == 1 => {
+                        // Recursively translate the receiver. For
+                        // `arr.update(i, v).at(i)` the receiver is
+                        // itself a `MethodCall{update}` that queues
+                        // the read-through axiom — we must call
+                        // `translate_expr` on it so the axiom fires,
+                        // otherwise the `.at(i)` Z3 symbol has no
+                        // binding and Z3 treats it as unconstrained.
+                        let _ = self.translate_expr(receiver);
+                        let key = format!(
+                            "atget_{}_{}",
+                            verum_ast::pretty::format_expr(strip_paren(receiver)),
+                            verum_ast::pretty::format_expr(strip_paren(&args[0]))
+                        );
+                        let int_var = Int::new_const(key.as_str());
+                        Ok(Dynamic::from_ast(&int_var))
+                    }
+
+                    // Array / map write:  arr.update(i, v)  /
+                    //                     map.insert(i, v)
+                    // The whole `MethodCall` AST would pretty-print
+                    // to something like `arr.update(i, v)`. That
+                    // exact string is the key both `.at(i)` on this
+                    // result and we use here must agree on, so we
+                    // compose it via the surface-printer and use the
+                    // result uniformly.
+                    "update" | "insert" | "set" if args.len() == 2 => {
+                        // Build a MethodCall expression matching `expr`
+                        // exactly and pretty-print it. That's the
+                        // shape `.at()` will see when translating
+                        // the chained `.at(i)` call below.
+                        let whole_ast = Expr::new(
+                            ExprKind::MethodCall {
+                                receiver: verum_common::Heap::new(receiver.as_ref().clone()),
+                                method: method.clone(),
+                                type_args: List::new(),
+                                args: args.clone(),
+                            },
+                            receiver.span,
+                        );
+                        let whole_pretty = verum_ast::pretty::format_expr(&whole_ast);
+                        // Queue the axiom `atget_{whole}_{i} == v`.
+                        if let Ok(v_dyn) = self.translate_expr(&args[1]) {
+                            if let Some(v_int) = v_dyn.as_int() {
+                                let at_key = format!(
+                                    "atget_{}_{}",
+                                    whole_pretty,
+                                    verum_ast::pretty::format_expr(strip_paren(&args[0]))
+                                );
+                                let at_var = Int::new_const(at_key.as_str());
+                                self.pending_axioms
+                                    .borrow_mut()
+                                    .push(at_var.eq(&v_int));
+                            }
+                        }
+                        // The value of the update expression itself is
+                        // an opaque Int, keyed by the pretty form so
+                        // two occurrences share a Z3 symbol.
+                        let updated_var =
+                            Int::new_const(format!("arrval_{}", whole_pretty).as_str());
+                        Ok(Dynamic::from_ast(&updated_var))
+                    }
+
                     _ => Err(TranslationError::UnsupportedFunction(Text::from(format!(
                         "method: {}",
                         method_name
