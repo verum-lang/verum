@@ -467,6 +467,20 @@ impl<'ctx> Translator<'ctx> {
         }
     }
 
+    /// If `expr` is a single-segment path like `xs`, return the Int
+    /// constant the default translator would emit for it. Returns
+    /// None for any more complex shape — for those the caller
+    /// should not attempt value-level concat-identity axiomatisation.
+    fn path_ident_as_int(&self, expr: &Expr) -> Option<Int> {
+        let stripped = strip_paren(expr);
+        if let ExprKind::Path(p) = &stripped.kind {
+            if let Some(id) = p.as_ident() {
+                return Some(Int::new_const(id.as_str()));
+            }
+        }
+        None
+    }
+
     /// Walk the subtree looking for `ExprKind::Array(ArrayExpr::List(xs))`
     /// nodes and queue `length_<pretty> == xs.len()` axioms. This is
     /// what lets `len([]) == 0`, `len([1,2,3]) == 3`, and by
@@ -1514,13 +1528,38 @@ impl<'ctx> Translator<'ctx> {
                 .borrow_mut()
                 .push(c.eq(&(l + r)));
 
-            // Return an uninterpreted Int symbol for the concat value
-            // itself. We key it by the same canonical string so it's
-            // deterministic; two calls to `xs ++ ys` at different
-            // source positions produce the same Z3 symbol.
+            // List identity axioms at the value level: `xs ++ []`
+            // and `[] ++ xs` equal `xs` themselves, not just in
+            // length. When we detect an empty-list operand, queue
+            // `concat_val_whole == concat_val_non_empty` (we still
+            // identify the operands via opaque Int syms because we
+            // don't model lists as a dedicated sort).
+            let left_is_empty = matches!(
+                &strip_paren(left).kind,
+                ExprKind::Array(verum_ast::expr::ArrayExpr::List(xs)) if xs.is_empty()
+            );
+            let right_is_empty = matches!(
+                &strip_paren(right).kind,
+                ExprKind::Array(verum_ast::expr::ArrayExpr::List(xs)) if xs.is_empty()
+            );
             let concat_val = Int::new_const(
                 format!("concat_val_{}", concat_len).as_str(),
             );
+            if left_is_empty {
+                // Assert the concat-value equals whatever Z3 symbol
+                // the non-empty operand translates to. For a bare
+                // path like `xs`, that's the `Int::new_const("xs")`
+                // that the default translator emits — we replicate
+                // the key here so the two sides unify.
+                if let Some(rv) = self.path_ident_as_int(right) {
+                    self.pending_axioms.borrow_mut().push(concat_val.eq(&rv));
+                }
+            } else if right_is_empty {
+                if let Some(lv) = self.path_ident_as_int(left) {
+                    self.pending_axioms.borrow_mut().push(concat_val.eq(&lv));
+                }
+            }
+
             return Ok(Dynamic::from_ast(&concat_val));
         }
 
