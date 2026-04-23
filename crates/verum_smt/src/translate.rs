@@ -467,6 +467,35 @@ impl<'ctx> Translator<'ctx> {
         }
     }
 
+    /// Walk the subtree looking for `ExprKind::Array(ArrayExpr::List(xs))`
+    /// nodes and queue `length_<pretty> == xs.len()` axioms. This is
+    /// what lets `len([]) == 0`, `len([1,2,3]) == 3`, and by
+    /// transitivity `len([] ++ xs) == len(xs)` close through pure
+    /// linear arithmetic. Descends through Paren and Concat so the
+    /// walker doesn't miss `xs ++ []` literals nested inside larger
+    /// expressions.
+    fn emit_array_literal_length_axioms(&self, expr: &Expr) {
+        let stripped = strip_paren(expr);
+        match &stripped.kind {
+            ExprKind::Array(verum_ast::expr::ArrayExpr::List(xs)) => {
+                let key = length_key_for_expr(stripped);
+                self.record_length_const(&key);
+                let len_sym = Int::new_const(key.as_str());
+                let n = Int::from_i64(xs.len() as i64);
+                self.pending_axioms.borrow_mut().push(len_sym.eq(&n));
+            }
+            ExprKind::Binary {
+                op: BinOp::Concat,
+                left,
+                right,
+            } => {
+                self.emit_array_literal_length_axioms(left);
+                self.emit_array_literal_length_axioms(right);
+            }
+            _ => {}
+        }
+    }
+
     /// Given a concat `left ++ right`, enumerate neighbour groupings
     /// and emit their length axioms. `seen` is shared across the
     /// whole walk so each distinct grouping is emitted at most once.
@@ -750,6 +779,8 @@ impl<'ctx> Translator<'ctx> {
                             verum_ast::pretty::format_expr(expr)
                         );
                         self.record_length_const(&base_name);
+                        self.emit_concat_length_axioms(expr);
+                        self.emit_array_literal_length_axioms(expr);
                         let int_var = Int::new_const(base_name.as_str());
                         Ok(Dynamic::from_ast(&int_var))
                     }
@@ -778,6 +809,8 @@ impl<'ctx> Translator<'ctx> {
                             verum_ast::pretty::format_expr(receiver)
                         );
                         self.record_length_const(&base_name);
+                        self.emit_concat_length_axioms(receiver);
+                        self.emit_array_literal_length_axioms(receiver);
                         let int_var = Int::new_const(base_name.as_str());
                         Ok(Dynamic::from_ast(&int_var))
                     }
@@ -2075,6 +2108,10 @@ impl<'ctx> Translator<'ctx> {
                         // Z3 can chain them to close associativity
                         // claims.
                         self.emit_concat_length_axioms(&args[0]);
+                        // Emit the length axiom for any array /
+                        // list literal in the argument. `len([])
+                        // == 0`, `len([a, b, c]) == 3`, etc.
+                        self.emit_array_literal_length_axioms(&args[0]);
                         let int_var = Int::new_const(base_name.as_str());
                         Ok(Dynamic::from_ast(&int_var))
                     }
