@@ -294,6 +294,8 @@ fn clone_opcode(op: &Opcode) -> Opcode {
         Function(n, a, d, f) => Function(n, a, d, f),
         AggStep(f, n, a, c)  => AggStep(f, n, a, c),
         AggFinal(f, c)       => AggFinal(f, c),
+        AggStepAvg(n, a, s, c) => AggStepAvg(n, a, s, c),
+        AggFinalAvg(s, c, d)   => AggFinalAvg(s, c, d),
         ResultRow(s, n) => ResultRow(s, n),
     }
 }

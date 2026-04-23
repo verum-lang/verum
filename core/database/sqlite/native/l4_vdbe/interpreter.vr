@@ -594,8 +594,63 @@ public fn step(state: &mut VdbeState, program: &VdbeProgram) -> StepResult {
         }
 
         AggFinal(_agg_kind, _acc_reg) => {
-            // SQLite aggregates hold their final value in acc_reg already
-            // (COUNT/SUM/MIN/MAX). AVG would divide here. v1 is a no-op.
+            // COUNT / SUM / MIN / MAX all hold their final value in
+            // acc_reg already. AVG uses the dedicated AggFinalAvg path.
+            state.pc = state.pc + 1;
+            Yield
+        }
+
+        AggStepAvg(n_args, first_arg_reg, sum_reg, count_reg) => {
+            // AVG(x): NULL-skip; otherwise sum += x and count += 1.
+            // Supports AVG(*) form (n_args = 0) too by treating every
+            // row as "not null".
+            let skip = if n_args > 0 {
+                match state.regs.get(first_arg_reg) {
+                    RNull => true,
+                    _     => false,
+                }
+            } else {
+                false
+            };
+            if !skip {
+                if n_args > 0 {
+                    let v = state.regs.get(first_arg_reg);
+                    let cur = state.regs.get(sum_reg);
+                    state.regs.set(sum_reg, agg_add(&cur, &v));
+                }
+                let cur_count: Int64 = match state.regs.get(count_reg) {
+                    RInt(x) => x,
+                    _       => (0 as Int64),
+                };
+                state.regs.set(count_reg, RInt(cur_count + (1 as Int64)));
+            }
+            state.pc = state.pc + 1;
+            Yield
+        }
+
+        AggFinalAvg(sum_reg, count_reg, dst_reg) => {
+            let cnt: Int64 = match state.regs.get(count_reg) {
+                RInt(x) => x,
+                _       => (0 as Int64),
+            };
+            if cnt == (0 as Int64) {
+                state.regs.set(dst_reg, RNull);
+            } else {
+                let sum = state.regs.get(sum_reg);
+                let cnt_f: Float64 = (cnt as Float64);
+                match sum {
+                    RInt(s) => {
+                        let sf: Float64 = (s as Float64);
+                        state.regs.set(dst_reg, RReal(sf / cnt_f));
+                    }
+                    RReal(s) => {
+                        state.regs.set(dst_reg, RReal(s / cnt_f));
+                    }
+                    _ => {
+                        state.regs.set(dst_reg, RNull);
+                    }
+                }
+            }
             state.pc = state.pc + 1;
             Yield
         }

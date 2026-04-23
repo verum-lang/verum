@@ -122,11 +122,53 @@ fn aggregate_with_where() {
     }
 }
 
+fn avg_integers() {
+    let mut db = match open_admin() {
+        Ok(d)  => d,
+        Err(_) => { panic("open"); return; }
+    };
+    let _ = db.execute(&"CREATE TABLE t (v INTEGER)".clone());
+    let _ = db.execute(&"INSERT INTO t VALUES (10)".clone());
+    let _ = db.execute(&"INSERT INTO t VALUES (20)".clone());
+    let _ = db.execute(&"INSERT INTO t VALUES (30)".clone());
+    match db.query_all(&"SELECT AVG(v) FROM t".clone()) {
+        Ok(rows) => {
+            assert_eq(rows.len(), 1);
+            // AVG always returns RReal in our interpreter path.
+            match rows[0][0] {
+                RReal(_) => {}
+                _ => panic("AVG(v) should be RReal"),
+            }
+        }
+        Err(_) => panic("query_all AVG"),
+    }
+}
+
+fn avg_empty_is_null() {
+    let mut db = match open_admin() {
+        Ok(d)  => d,
+        Err(_) => { panic("open"); return; }
+    };
+    let _ = db.execute(&"CREATE TABLE t (v INTEGER)".clone());
+    match db.query_all(&"SELECT AVG(v) FROM t".clone()) {
+        Ok(rows) => {
+            assert_eq(rows.len(), 1);
+            match rows[0][0] {
+                RNull => {}
+                _ => panic("AVG on empty should be RNull"),
+            }
+        }
+        Err(_) => panic("query_all AVG empty"),
+    }
+}
+
 fn main() {
     count_star_returns_row_count();
     count_empty_table_is_zero();
     sum_integers();
     min_max_integers();
     aggregate_with_where();
+    avg_integers();
+    avg_empty_is_null();
     print("aggregate_functions typecheck ok");
 }

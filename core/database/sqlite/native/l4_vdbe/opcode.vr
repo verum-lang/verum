@@ -130,6 +130,10 @@ public type Opcode is
     | Function(n_args: Int, reg_first_arg: Int, reg_dst: Int, func_const_idx: Int)
     | AggStep(agg_const_idx: Int, n_args: Int, reg_first_arg: Int, reg_acc: Int)
     | AggFinal(agg_const_idx: Int, reg_acc: Int)
+    // AVG steps use separate sum + count regs (n_args is 0 or 1 — the
+    // optional arg is the value to average).
+    | AggStepAvg(n_args: Int, reg_first_arg: Int, reg_sum: Int, reg_count: Int)
+    | AggFinalAvg(reg_sum: Int, reg_count: Int, reg_dst: Int)
 
     // Result emission ---------------------------------------------------------
     | ResultRow(reg_start: Int, n_cols: Int);
@@ -218,6 +222,8 @@ public fn opcode_name(op: &Opcode) -> Text {
         Function(_, _, _, _) => "Function".clone(),
         AggStep(_, _, _, _)  => "AggStep".clone(),
         AggFinal(_, _)       => "AggFinal".clone(),
+        AggStepAvg(_, _, _, _) => "AggStepAvg".clone(),
+        AggFinalAvg(_, _, _)   => "AggFinalAvg".clone(),
         ResultRow(_, _) => "ResultRow".clone(),
     }
 }
