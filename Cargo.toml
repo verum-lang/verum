@@ -22,6 +22,8 @@ members = [
     "crates/verum_verification",
     # LCF-style trusted kernel — the sole proof-term checker in the TCB.
     "crates/verum_kernel",
+    # Shared typed-IR sitting between AST and kernel; pipeline contract.
+    "crates/verum_core",
     "crates/verum_integration_tests",
     "crates/verum_lsp",
     "crates/verum_interactive",
@@ -74,6 +76,7 @@ verum_interactive = { path = "crates/verum_interactive" }
 verum_modules = { path = "crates/verum_modules" }
 verum_verification = { path = "crates/verum_verification" }
 verum_kernel = { path = "crates/verum_kernel" }
+verum_core = { path = "crates/verum_core" }
 verum_dap = { path = "crates/verum_dap" }
 verum_vbc = { path = "crates/verum_vbc" }
 # LLVM/MLIR infrastructure

@@ -1,0 +1,26 @@
+[package]
+name = "verum_core"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Verum shared IR — typed intermediate representation for the verification pipeline"
+keywords = ["verum", "ir", "verification", "compilation"]
+categories = ["development-tools", "compilers"]
+
+[lints]
+workspace = true
+
+[lib]
+name = "verum_core"
+path = "src/lib.rs"
+
+[dependencies]
+verum_common = { workspace = true }
+verum_ast = { workspace = true }
+thiserror = { workspace = true }
+serde = { workspace = true }
+
+[dev-dependencies]
