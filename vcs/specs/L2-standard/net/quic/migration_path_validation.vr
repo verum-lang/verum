@@ -1,0 +1,86 @@
+// @test: unit
+// @tier: 0
+// @level: L2
+// @tags: quic, migration, path_validation, rfc9000_8, rfc9000_9
+// @timeout: 5000
+// @expect: pass
+
+// QUIC connection migration (RFC 9000 §8 — path validation, §9 — migration).
+//
+// Flow:
+//   1. Peer sends a packet from a NEW 4-tuple → PathManager.on_new_remote
+//      creates an Unvalidated standby path.
+//   2. We emit PATH_CHALLENGE on the standby; peer echoes PATH_RESPONSE.
+//   3. on_path_response validates standby; promote_standby makes it
+//      active and retires the old remote.
+//   4. The new active path becomes the target for subsequent emissions.
+
+mount core.*;
+mount core.time.instant.{Instant};
+mount core.net.addr.{SocketAddr, SocketAddrV4, Ipv4Addr};
+mount core.net.quic.path.{Path, PathManager, PathState};
+mount core.net.quic.connection_sm.path_control.{
+    on_path_response, PathUpdate,
+};
+
+fn v4(port: Int) -> SocketAddr {
+    SocketAddr.V4(SocketAddrV4.new(Ipv4Addr.localhost(), port))
+}
+
+fn main() {
+    // =========================================================================
+    // Fresh connection: active path validated at handshake.
+    // =========================================================================
+    let initial = Path.new(v4(4000), v4(5000), true);
+    let mut pm = PathManager.new(initial);
+    assert_eq(pm.active().is_validated(), true);
+    match pm.standby_mut() {
+        None    => {},
+        Some(_) => panic("fresh conn must have no standby"),
+    }
+
+    // =========================================================================
+    // Peer switches to a new 4-tuple — server notices new remote.
+    // =========================================================================
+    pm.on_new_remote(v4(4000), v4(6000));
+    match pm.standby_mut() {
+        Some(s) => assert_eq(s.is_validated(), false),
+        None    => panic("standby not created on new remote"),
+    }
+
+    // =========================================================================
+    // Initiate challenge + simulate response.
+    // =========================================================================
+    let now = Instant.now();
+    let challenge: [Byte; 8] = match pm.standby_mut() {
+        Some(s) => s.begin_validation(now.clone()),
+        None    => panic("no standby"),
+    };
+
+    // Wrong response — no promotion.
+    let wrong: [Byte; 8] = [0xFF_u8; 8];
+    match on_path_response(&mut pm, &wrong, now.clone()) {
+        PathUpdate.NoChange => {},
+        _ => panic("wrong PATH_RESPONSE promoted path"),
+    }
+
+    // Matching response — standby validates + promotes.
+    match on_path_response(&mut pm, &challenge, now.clone()) {
+        PathUpdate.StandbyPromoted { retired_remote: _ } => {},
+        PathUpdate.StandbyValidated                        => {},
+        other => panic(f"unexpected PathUpdate outcome on valid response"),
+    }
+
+    // After promotion, active's remote MUST be the new one (port 6000).
+    let active_remote = pm.active().remote_addr();
+    match active_remote {
+        SocketAddr.V4(v) => assert_eq(v.port(), 6000),
+        _ => panic("active should be IPv4 after migration"),
+    }
+    match pm.standby_mut() {
+        None    => {},
+        Some(_) => panic("standby should be cleared after promotion"),
+    }
+
+    print("RFC 9000 §8/§9 migration + path validation OK");
+}
