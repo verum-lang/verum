@@ -40,6 +40,8 @@ use verum_smt::proof_search::{
     MatchArm, ProofError, ProofGoal, ProofSearchEngine, ProofTactic,
 };
 use verum_smt::verify::VerificationError;
+use verum_verification::tactic_evaluation::{Goal, GoalMetadata, Hypothesis};
+use verum_verification::tactic_heuristics::{suggest_next_tactics, TacticSuggestion};
 
 // ---------------------------------------------------------------------------
 // Public result types
@@ -1499,13 +1501,16 @@ pub fn verify_proof_body_with_aliases(
                 }
                 Err(e) => {
                     let mut unproved = List::new();
+                    let mut suggestions =
+                        heuristic_suggestions(&proposition, &hypotheses, Maybe::None);
+                    suggestions.extend(build_suggestions_from_error(&e));
                     unproved.push(UnprovedSubgoal {
                         goal: format_expr(&proposition),
                         hypotheses: hypotheses
                             .iter()
                             .map(|h| format_expr(h))
                             .collect(),
-                        suggestions: build_suggestions_from_error(&e),
+                        suggestions,
                     });
                     ProofVerificationResult::Failed {
                         verified_steps: List::new(),
@@ -1548,13 +1553,19 @@ pub fn verify_proof_body_with_aliases(
                 }
                 Err(e) => {
                     let mut unproved = List::new();
+                    let mut suggestions = heuristic_suggestions(
+                        &proposition,
+                        &hypotheses,
+                        pv_error_tactic_name(&e),
+                    );
+                    suggestions.extend(build_suggestions_from_pv_error(&e));
                     unproved.push(UnprovedSubgoal {
                         goal: format_expr(&proposition),
                         hypotheses: hypotheses
                             .iter()
                             .map(|h| format_expr(h))
                             .collect(),
-                        suggestions: build_suggestions_from_pv_error(&e),
+                        suggestions,
                     });
                     ProofVerificationResult::Failed {
                         verified_steps: List::new(),
@@ -1589,13 +1600,19 @@ pub fn verify_proof_body_with_aliases(
                 }
                 Err(e) => {
                     let mut unproved = List::new();
+                    let mut suggestions = heuristic_suggestions(
+                        &proposition,
+                        &hypotheses,
+                        pv_error_tactic_name(&e),
+                    );
+                    suggestions.extend(build_suggestions_from_pv_error(&e));
                     unproved.push(UnprovedSubgoal {
                         goal: format_expr(&proposition),
                         hypotheses: hypotheses
                             .iter()
                             .map(|h| format_expr(h))
                             .collect(),
-                        suggestions: build_suggestions_from_pv_error(&e),
+                        suggestions,
                     });
                     ProofVerificationResult::Failed {
                         verified_steps: List::new(),
@@ -1649,13 +1666,19 @@ fn verify_structured_proof(
                             discharge_subgoals(engine, smt_ctx, &sub_goals, "conclusion")
                         {
                             let mut unproved = List::new();
+                            let mut suggestions = heuristic_suggestions(
+                                &proposition,
+                                &hypotheses,
+                                pv_error_tactic_name(&e),
+                            );
+                            suggestions.extend(build_suggestions_from_pv_error(&e));
                             unproved.push(UnprovedSubgoal {
                                 goal: format_expr(&proposition),
                                 hypotheses: hypotheses
                                     .iter()
                                     .map(|h| format_expr(h))
                                     .collect(),
-                                suggestions: build_suggestions_from_pv_error(&e),
+                                suggestions,
                             });
                             return ProofVerificationResult::Failed {
                                 verified_steps,
@@ -1671,13 +1694,16 @@ fn verify_structured_proof(
                     }
                     Err(e) => {
                         let mut unproved = List::new();
+                        let mut suggestions =
+                            heuristic_suggestions(&proposition, &hypotheses, Maybe::None);
+                        suggestions.extend(build_suggestions_from_proof_error(&e));
                         unproved.push(UnprovedSubgoal {
                             goal: format_expr(&proposition),
                             hypotheses: hypotheses
                                 .iter()
                                 .map(|h| format_expr(h))
                                 .collect(),
-                            suggestions: build_suggestions_from_proof_error(&e),
+                            suggestions,
                         });
                         return ProofVerificationResult::Failed {
                             verified_steps,
@@ -1710,13 +1736,16 @@ fn verify_structured_proof(
                     });
                 if let Err(e) = closer_result {
                     let mut unproved = List::new();
+                    let mut suggestions =
+                        heuristic_suggestions(&proposition, &hypotheses, Maybe::None);
+                    suggestions.extend(build_suggestions_from_proof_error(&e));
                     unproved.push(UnprovedSubgoal {
                         goal: format_expr(&proposition),
                         hypotheses: hypotheses
                             .iter()
                             .map(|h| format_expr(h))
                             .collect(),
-                        suggestions: build_suggestions_from_proof_error(&e),
+                        suggestions,
                     });
                     return ProofVerificationResult::Failed {
                         verified_steps,
@@ -1738,13 +1767,19 @@ fn verify_structured_proof(
         }
         Err(e) => {
             let mut unproved = List::new();
+            let mut suggestions = heuristic_suggestions(
+                &proposition,
+                &accumulated_hypotheses,
+                pv_error_tactic_name(&e),
+            );
+            suggestions.extend(build_suggestions_from_pv_error(&e));
             unproved.push(UnprovedSubgoal {
                 goal: format_expr(&proposition),
                 hypotheses: accumulated_hypotheses
                     .iter()
                     .map(|h| format_expr(h))
                     .collect(),
-                suggestions: build_suggestions_from_pv_error(&e),
+                suggestions,
             });
             ProofVerificationResult::Failed {
                 verified_steps: List::new(),
@@ -2020,6 +2055,74 @@ fn build_suggestions_from_proof_error(err: &ProofError) -> List<Text> {
         err
     )));
     suggestions
+}
+
+/// Extract the failed-tactic name from a `ProofVerificationError`, if the
+/// variant carries one. Used to feed the heuristic engine's
+/// `exhausted` parameter so it will not re-suggest the tactic that
+/// just failed.
+fn pv_error_tactic_name(err: &ProofVerificationError) -> Maybe<&str> {
+    match err {
+        ProofVerificationError::TacticFailed { tactic, .. } => {
+            Maybe::Some(tactic.as_str())
+        }
+        ProofVerificationError::MethodFailed { method, .. } => {
+            Maybe::Some(method.as_str())
+        }
+        _ => Maybe::None,
+    }
+}
+
+/// Build goal-aware tactic suggestions using the
+/// `verum_verification::tactic_heuristics` shape-level heuristic engine.
+///
+/// This is the structured counterpart to `build_suggestions_from_*`:
+/// instead of hard-coded prose, it inspects the goal expression and
+/// already-tried tactic name and emits ranked suggestions
+/// ("try `refl`", "try `split`", …) with a short rationale.
+///
+/// Empty result is fine — it signals "no shape-matching rule fires;
+/// fall back to the error-kind prose suggestions above".
+fn heuristic_suggestions(
+    goal_expr: &Expr,
+    hypothesis_exprs: &List<Expr>,
+    exhausted_tactic: Maybe<&str>,
+) -> List<Text> {
+    let hypotheses: List<Hypothesis> = hypothesis_exprs
+        .iter()
+        .enumerate()
+        .map(|(idx, h)| Hypothesis {
+            name: Text::from(format!("h{}", idx)),
+            proposition: Heap::new(h.clone()),
+            ty: Maybe::None,
+            source: verum_verification::tactic_evaluation::HypothesisSource::User,
+        })
+        .collect();
+
+    let goal = Goal {
+        id: 0,
+        proposition: Heap::new(goal_expr.clone()),
+        hypotheses,
+        meta: GoalMetadata::default(),
+    };
+
+    let exhausted_vec: Vec<&str> = match exhausted_tactic {
+        Maybe::Some(name) => vec![name],
+        Maybe::None => vec![],
+    };
+
+    let ranked: Vec<TacticSuggestion> =
+        suggest_next_tactics(&goal, &exhausted_vec);
+
+    ranked
+        .into_iter()
+        .map(|s| {
+            Text::from(format!(
+                "try `{}` — {} ({:?} confidence)",
+                s.tactic, s.rationale, s.confidence
+            ))
+        })
+        .collect()
 }
 
 // ---------------------------------------------------------------------------
