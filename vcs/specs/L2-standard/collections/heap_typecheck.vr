@@ -1,0 +1,67 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: collections, heap, priority-queue
+// @timeout: 15000
+// @description: core.collections.heap surface — BinaryHeap push/pop/peek + heap_sort
+
+mount core.*;
+mount core.collections.List;
+mount core.collections.heap.{BinaryHeap, heap_sort, list_heap_sort};
+
+fn push_pop_max_first() {
+    let mut h: BinaryHeap<Int> = BinaryHeap.new();
+    h.push(3);
+    h.push(1);
+    h.push(5);
+    h.push(4);
+    assert_eq(h.len(), 4);
+    assert_eq(h.is_empty(), false);
+    // BinaryHeap is a max-heap.
+    match h.pop() {
+        Some(top) => { assert_eq(top, 5); }
+        None      => { panic("non-empty heap must have a top"); }
+    }
+}
+
+fn with_capacity_is_empty() {
+    let h: BinaryHeap<Int> = BinaryHeap.with_capacity(16);
+    assert_eq(h.len(), 0);
+    assert_eq(h.is_empty(), true);
+}
+
+fn peek_non_destructive() {
+    let mut h: BinaryHeap<Int> = BinaryHeap.new();
+    h.push(7);
+    h.push(2);
+    // Peek must not shrink the heap.
+    let before = h.len();
+    let _ = h.peek();
+    assert_eq(h.len(), before);
+}
+
+fn heap_sort_list_in_place() {
+    let mut xs: List<Int> = [4, 1, 3, 2, 5];
+    heap_sort(&mut xs);
+    // Ascending order after heap_sort.
+    let mut i: Int = 1;
+    while i < xs.len() {
+        assert(xs[i - 1] <= xs[i]);
+        i = i + 1;
+    }
+}
+
+fn from_list_preserves_count() {
+    let xs: List<Int> = [5, 3, 8, 1];
+    let h: BinaryHeap<Int> = BinaryHeap.from_list(xs);
+    assert_eq(h.len(), 4);
+}
+
+fn main() {
+    push_pop_max_first();
+    with_capacity_is_empty();
+    peek_non_destructive();
+    heap_sort_list_in_place();
+    from_list_preserves_count();
+    print("heap_typecheck ok");
+}

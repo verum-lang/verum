@@ -1,0 +1,73 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: collections, deque, ring-buffer
+// @timeout: 15000
+// @description: core.collections.deque surface — Deque push/pop front+back
+
+mount core.*;
+mount core.collections.Deque;
+
+fn push_back_pop_back() {
+    let mut d: Deque<Int> = Deque.new();
+    d.push_back(1);
+    d.push_back(2);
+    d.push_back(3);
+    assert_eq(d.len(), 3);
+    assert_eq(d.is_empty(), false);
+    match d.pop_back() {
+        Some(v) => { assert_eq(v, 3); }
+        None    => { panic("pop_back of 3-deque"); }
+    }
+    assert_eq(d.len(), 2);
+}
+
+fn push_front_pop_front() {
+    let mut d: Deque<Int> = Deque.new();
+    d.push_front(1);
+    d.push_front(2);
+    d.push_front(3);
+    assert_eq(d.len(), 3);
+    match d.pop_front() {
+        Some(v) => { assert_eq(v, 3); }
+        None    => { panic("pop_front of 3-deque"); }
+    }
+}
+
+fn mixed_front_back() {
+    let mut d: Deque<Int> = Deque.new();
+    d.push_back(10);
+    d.push_front(5);
+    d.push_back(20);
+    // State: [5, 10, 20]
+    assert_eq(d.len(), 3);
+    match d.front() {
+        Some(v) => { assert_eq(v, 5); }
+        None    => { panic("front of 3-deque"); }
+    }
+    match d.back() {
+        Some(v) => { assert_eq(v, 20); }
+        None    => { panic("back of 3-deque"); }
+    }
+}
+
+fn empty_deque_returns_none() {
+    let mut d: Deque<Int> = Deque.new();
+    assert_eq(d.is_empty(), true);
+    match d.pop_front() {
+        Some(_) => { panic("empty pop_front must be None"); }
+        None    => {}
+    }
+    match d.pop_back() {
+        Some(_) => { panic("empty pop_back must be None"); }
+        None    => {}
+    }
+}
+
+fn main() {
+    push_back_pop_back();
+    push_front_pop_front();
+    mixed_front_back();
+    empty_deque_returns_none();
+    print("deque_typecheck ok");
+}
