@@ -27,6 +27,7 @@ mount core.collections.List;
 mount core.time.instant.{Instant};
 mount core.time.duration.{Duration};
 mount core.net.quic.frame.{AckRange, Frame};
+mount core.net.quic.ack_ranges.{AckRanges};
 
 // =============================================================================
 // Sent packet metadata — tracked for loss detection + retransmission
@@ -70,7 +71,12 @@ public type PnSpace is {
 
     // Inbound — received packets
     largest_acked_received: Maybe<UInt64>,     // largest PN we have ACKed from peer
-    ack_ranges:    List<AckRange>,              // outgoing ack set (desc-sorted, non-overlapping)
+    /// Outgoing ACK set — desc-sorted, non-overlapping, gap ≥ 2 per
+    /// RFC 9000 §19.3.1.  The `AckRanges` wrapper carries the V3
+    /// invariant at type level (see core.net.quic.ack_ranges) — direct
+    /// List<AckRange> mutation is no longer possible without going
+    /// through insert_pn().
+    ack_ranges:    AckRanges,
     ecn_ect0:      UInt64,
     ecn_ect1:      UInt64,
     ecn_ce:        UInt64,
@@ -88,7 +94,7 @@ implement PnSpace {
             kind: kind,
             next_pn: 0_u64,
             largest_acked_received: None,
-            ack_ranges: [],
+            ack_ranges: AckRanges.empty(),
             ecn_ect0: 0_u64, ecn_ect1: 0_u64, ecn_ce: 0_u64,
             largest_acked_sent: None,
             sent_packets: [],
@@ -140,7 +146,7 @@ implement PnSpace {
     public fn discard(&mut self) {
         self.discarded = true;
         self.sent_packets = [];
-        self.ack_ranges = [];
+        self.ack_ranges = AckRanges.empty();
     }
 
     /// Incorporate an incoming packet's PN into our outgoing ACK set.
@@ -154,7 +160,9 @@ implement PnSpace {
         };
         if should_update { self.largest_acked_received = Some(pn); }
 
-        insert_pn_into_ack_ranges(&mut self.ack_ranges, pn);
+        // Invariant-preserving insert via AckRanges wrapper (V3).
+        let taken = self.ack_ranges.clone();
+        self.ack_ranges = taken.insert_pn(pn);
     }
 
     /// Incorporate an ACK received from the peer. Returns freshly-acked
@@ -199,10 +207,14 @@ implement PnSpace {
         } else {
             Some(crate_ecn_snapshot(self))
         };
+        // The AckFrame wire variant still carries a plain List<AckRange>
+        // (codec-friendly); we convert from the invariant-carrying
+        // wrapper at the emission boundary. The V3 invariant therefore
+        // witnesses the wire list is well-formed on exit.
         Some(Frame.AckFrame {
             largest_acked: largest,
             ack_delay:     ack_delay_us,
-            ranges:        self.ack_ranges.clone(),
+            ranges:        self.ack_ranges.as_list().clone(),
             ecn:           ecn,
         })
     }
@@ -218,67 +230,10 @@ fn crate_ecn_snapshot(s: &PnSpace) -> core.net.quic.frame.EcnCounts {
 // Helpers
 // =============================================================================
 
-/// Maintain the RFC 9000 §19.3.1 invariant:
-///   ranges are in descending order,
-///   non-overlapping, with a gap of at least 2 between successive ranges.
-///
-/// We do a linear scan because real QUIC workloads keep ack_ranges
-/// short (≤ 20 in practice; the recommended cap is 255 ranges per
-/// ACK frame).
-fn insert_pn_into_ack_ranges(ranges: &mut List<AckRange>, pn: UInt64) {
-    // Find insertion point.
-    let mut i: Int = 0;
-    while i < ranges.len() && ranges[i].smallest > pn {
-        i = i + 1;
-    }
-
-    // Case: already inside an existing range.
-    if i > 0 {
-        let prev = &ranges[i - 1];
-        if pn >= prev.smallest && pn <= prev.largest { return; }
-    }
-    if i < ranges.len() {
-        let cur = &ranges[i];
-        if pn >= cur.smallest && pn <= cur.largest { return; }
-    }
-
-    // Try to extend the preceding range (if adjacent on the low side).
-    if i > 0 && ranges[i - 1].smallest == pn + 1_u64 {
-        ranges[i - 1] = AckRange { smallest: pn, largest: ranges[i - 1].largest };
-        // After extending, may now be adjacent to `cur` from above.
-        if i < ranges.len() && ranges[i - 1].smallest <= ranges[i].largest + 1_u64 {
-            // Merge i-1 and i.
-            let merged = AckRange {
-                smallest: ranges[i].smallest,
-                largest:  ranges[i - 1].largest,
-            };
-            ranges[i - 1] = merged;
-            let _ = ranges.remove(i);
-        }
-        return;
-    }
-
-    // Try to extend the following range from above.
-    if i < ranges.len() && ranges[i].largest + 1_u64 == pn {
-        ranges[i] = AckRange { smallest: ranges[i].smallest, largest: pn };
-        // After extending, may now be adjacent to `i-1` from below.
-        if i > 0 && ranges[i].largest + 1_u64 == ranges[i - 1].smallest {
-            let merged = AckRange {
-                smallest: ranges[i].smallest,
-                largest:  ranges[i - 1].largest,
-            };
-            ranges[i - 1] = merged;
-            let _ = ranges.remove(i);
-        }
-        return;
-    }
-
-    // Fresh single-PN range — insert at position i.
-    let new_range = AckRange { smallest: pn, largest: pn };
-    ranges.insert(i, new_range);
-}
-
-/// Does the list of ACK ranges contain `pn`?
+/// Membership test over a wire-ranges list (kept public for back-compat
+/// with consumers outside this module that parse ACK frames coming from
+/// the peer). Internal invariant-preserving insertion lives in
+/// `core.net.quic.ack_ranges.AckRanges.insert_pn`.
 public fn ranges_contain(ranges: &List<AckRange>, pn: UInt64) -> Bool {
     let mut i: Int = 0;
     while i < ranges.len() {
