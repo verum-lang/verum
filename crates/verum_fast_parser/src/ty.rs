@@ -1935,12 +1935,25 @@ impl<'a> RecursiveParser<'a> {
         // `self` / `&`. `core/math/infinity_topos.vr:54` uses this for
         // `C.cells(0)` / `C.cells(1)` throughout.
         else if self.stream.check(&TokenKind::LParen)
-            && matches!(
-                self.stream.peek_nth_kind(1),
-                Some(TokenKind::Integer(_)) | Some(TokenKind::Float(_))
-                | Some(TokenKind::Text(_)) | Some(TokenKind::True)
-                | Some(TokenKind::False) | Some(TokenKind::Minus)
-                | Some(TokenKind::SelfValue)
+            && (matches!(
+                    self.stream.peek_nth_kind(1),
+                    Some(TokenKind::Integer(_)) | Some(TokenKind::Float(_))
+                    | Some(TokenKind::Text(_)) | Some(TokenKind::True)
+                    | Some(TokenKind::False) | Some(TokenKind::Minus)
+                    | Some(TokenKind::SelfValue)
+                )
+                // Value-dependent type application: `B(x)`, `B(a1)`,
+                // where the first argument is a lowercase identifier
+                // referring to a value in scope (dependent type binder).
+                // Types follow the Verum uppercase-convention, so a
+                // lowercase Ident in argument position is unambiguously
+                // a value, not a type — this pattern is pervasive in
+                // HoTT signatures like `fn(x: A) -> B(x)`.
+                || matches!(
+                    self.stream.peek_nth_kind(1),
+                    Some(TokenKind::Ident(name))
+                        if name.as_str().chars().next().is_some_and(|c| c.is_lowercase())
+                )
             )
         {
             self.stream.advance(); // consume `(`

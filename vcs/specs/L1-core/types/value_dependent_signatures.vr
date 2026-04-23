@@ -1,0 +1,45 @@
+// @test: typecheck-pass
+// @level: L1
+// @tags: types, dependent, hott, value-dependent
+// @timeout: 5000
+
+/// Value-dependent type signatures — `B(x)` where `x` is a value-level
+/// identifier in scope (lowercase) must route through
+/// `TypeKind::DependentApp`, not the constructor-style `A(B(C(Int)))`
+/// path. Without this routing, the type-resolver would treat the
+/// argument as a type name and fail with "type not found: x" for every
+/// dependent signature.
+///
+/// Covers:
+///   - `fn(x: A) -> B(x)` — dependent function return (apd pattern).
+///   - `a1: A, b1: B(a1)` — dependent parameter type (sigma_path).
+///   - `(a: A, B(a))` inside tuple elements (sigma_path_fst).
+///
+/// These three patterns back all of `core/math/hott.vr` and
+/// `core/math/cubical.vr`.
+
+public type I is @builtin_interval;
+
+public fn identity_dep<A, B: fn(A) -> Type>(
+    f: fn(x: A) -> B(x),
+    a: A,
+) -> B(a) {
+    f(a)
+}
+
+public fn pair_dep<A, B: fn(A) -> Type>(
+    a1: A,
+    b1: B(a1),
+) -> (A, B(a1)) {
+    (a1, b1)
+}
+
+public fn fst_dep<A, B: fn(A) -> Type>(
+    s: (a: A, B(a)),
+) -> A {
+    s.0
+}
+
+fn main() {
+    print("value-dependent signatures parsed and typechecked");
+}
