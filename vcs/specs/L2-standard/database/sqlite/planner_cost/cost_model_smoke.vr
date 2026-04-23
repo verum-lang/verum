@@ -1,0 +1,301 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, planner, cost, statistics, join_order, explain
+// @timeout: 5000
+// @expected-exit: 0
+//
+// Loom planner cost model:
+//   * stats: TableStats / IndexStats round-trip; equality_selectivity
+//   * cost: estimate_access for each AccessMethod with sane orderings
+//   * selectivity: per-predicate kinds + AND/OR/NOT combinators
+//   * join_order: greedy chooser puts smallest-base relation first;
+//     dp_choose enumerates all permutations for ≤8 rels
+//   * explain: detail builders + ExplainBuilder tree assembly
+
+mount core.database.sqlite.native.planner_cost.stats.{
+    HistogramBucket,
+    IndexStats, index_stats_default,
+    ColumnStats, TableStats, table_stats_default,
+    StatsRegistry, stats_registry_new,
+};
+mount core.database.sqlite.native.planner_cost.cost.{
+    Cost, cost_zero, cost_total, cost_combine, cost_concat, cost_less,
+    AccessMethod, AmFullScan, AmRowidLookup, AmIndexSeek,
+    AmIndexRangeScan, AmCoveringIndexScan, AmEphemeralScan,
+    access_name,
+    estimate_access, estimate_sort_cost, estimate_aggregate_cost,
+};
+mount core.database.sqlite.native.planner_cost.selectivity.{
+    PredicateKind, PkColEqLiteral, PkColRange, PkColIn, PkColLike,
+    PkColIsNull, PkColIsNotNull, PkArbitrary,
+    estimate, and_select, or_select, not_select, estimate_conjunction,
+};
+mount core.database.sqlite.native.planner_cost.join_order.{
+    Relation, PlanJoinPair, JoinPlan, DpResult,
+    greedy, dp_choose,
+};
+mount core.database.sqlite.native.planner_cost.explain.{
+    ExplainRow, explain_row,
+    scan_table, search_index, search_rowid, covering_index,
+    use_temp_btree_for, detail_for,
+    ExplainBuilder, builder_new,
+};
+mount base.{Maybe, Some, None, Bool};
+
+// -----------------------------------------------------------------------------
+// stats
+// -----------------------------------------------------------------------------
+
+fn test_index_stats_equality_selectivity() {
+    let mut s = index_stats_default("idx_users_email".clone(), "users".clone(), 1000 as Int64);
+    // tuple_card = [1000, 5] means avg-rows-per-equality on first key = 5
+    s.tuple_card.push(5 as Int64);
+    let sel = s.equality_selectivity(1);
+    assert(sel == 5.0 / 1000.0);
+}
+
+fn test_index_stats_no_keys() {
+    let s = index_stats_default("idx".clone(), "t".clone(), 100 as Int64);
+    assert(s.equality_selectivity(0) == 1.0);
+    assert(s.equality_selectivity(99) == 1.0);  // table-card alone → no narrowing
+}
+
+fn test_table_stats_default_pages() {
+    let t = table_stats_default("users".clone(), 1000 as Int64);
+    assert(t.n_pages > (0 as Int64));
+}
+
+fn test_stats_registry_lookup() {
+    let mut r = stats_registry_new();
+    r.record_table(table_stats_default("users".clone(), 100 as Int64));
+    r.record_index(index_stats_default("idx".clone(), "users".clone(), 100 as Int64));
+    match r.table_for(&"users".clone()) {
+        Some(_) => {}, None => panic("table should be found"),
+    }
+    let idxs = r.indexes_on(&"users".clone());
+    assert_eq(idxs.len(), 1);
+}
+
+// -----------------------------------------------------------------------------
+// cost
+// -----------------------------------------------------------------------------
+
+fn test_full_scan_cost_proportional_to_rows() {
+    let small = table_stats_default("t1".clone(), 10 as Int64);
+    let big = table_stats_default("t2".clone(), 1000 as Int64);
+    let cs = estimate_access(&AmFullScan, &small, 1.0);
+    let cb = estimate_access(&AmFullScan, &big, 1.0);
+    assert(cost_less(&cs, &cb));
+}
+
+fn test_index_seek_cheaper_than_full_scan() {
+    let big = table_stats_default("t".clone(), 1000 as Int64);
+    let scan = estimate_access(&AmFullScan, &big, 0.5);
+    let seek = estimate_access(&AmIndexSeek(1), &big, 0.001);
+    assert(cost_less(&seek, &scan));
+}
+
+fn test_covering_index_cheaper_than_index_with_lookup() {
+    let big = table_stats_default("t".clone(), 1000 as Int64);
+    let cover = estimate_access(&AmCoveringIndexScan(1), &big, 0.1);
+    let seek  = estimate_access(&AmIndexSeek(1), &big, 0.1);
+    // cover.per_row_cost is half of seek.per_row_cost
+    assert(cover.per_row_cost < seek.per_row_cost);
+}
+
+fn test_sort_cost_grows_with_n() {
+    let s10 = estimate_sort_cost(10.0);
+    let s1000 = estimate_sort_cost(1000.0);
+    assert(cost_total(&s10) < cost_total(&s1000));
+}
+
+fn test_aggregate_cost_with_group_by() {
+    let plain = estimate_aggregate_cost(100.0, 0);
+    let grouped = estimate_aggregate_cost(100.0, 1);
+    assert(cost_total(&plain) < cost_total(&grouped));
+}
+
+fn test_access_name_for_each() {
+    assert(access_name(&AmFullScan) == "SCAN".clone());
+    assert(access_name(&AmRowidLookup) == "SEARCH ROWID".clone());
+}
+
+// -----------------------------------------------------------------------------
+// selectivity
+// -----------------------------------------------------------------------------
+
+fn test_default_eq_selectivity() {
+    let t = table_stats_default("t".clone(), 100 as Int64);
+    let p = PkColEqLiteral("name".clone());
+    let s = estimate(&p, &t);
+    assert(s == 0.1);   // default
+}
+
+fn test_eq_with_distinct_count() {
+    let mut t = table_stats_default("t".clone(), 100 as Int64);
+    let mut col = ColumnStats {
+        name: "status".clone(),
+        distinct_estimate: 4 as Int64,
+        null_fraction: 0.0,
+        histogram: List.new(),
+    };
+    let _ = &mut col;
+    t.columns.push(col);
+    let p = PkColEqLiteral("status".clone());
+    let s = estimate(&p, &t);
+    assert(s == 0.25);
+}
+
+fn test_in_predicate_caps_at_one() {
+    let mut t = table_stats_default("t".clone(), 100 as Int64);
+    t.columns.push(ColumnStats {
+        name: "id".clone(),
+        distinct_estimate: 4 as Int64,
+        null_fraction: 0.0,
+        histogram: List.new(),
+    });
+    let p = PkColIn("id".clone(), 100);  // n_values way larger than distinct
+    let s = estimate(&p, &t);
+    assert(s == 1.0);
+}
+
+fn test_like_with_leading_wildcard() {
+    let t = table_stats_default("t".clone(), 100 as Int64);
+    let p = PkColLike("c".clone(), true);
+    assert(estimate(&p, &t) == 0.9);
+    let p2 = PkColLike("c".clone(), false);
+    assert(estimate(&p2, &t) == 0.5);
+}
+
+fn test_isnull_with_default_fraction() {
+    let t = table_stats_default("t".clone(), 100 as Int64);
+    assert(estimate(&PkColIsNull("c".clone()), &t) == 0.1);
+    assert(estimate(&PkColIsNotNull("c".clone()), &t) == 0.9);
+}
+
+fn test_combinators_clamp() {
+    assert(and_select(0.5, 0.5) == 0.25);
+    assert(or_select(0.5, 0.5) == 0.75);
+    assert(not_select(0.25) == 0.75);
+    assert(or_select(0.9, 0.9) <= 1.0);
+}
+
+fn test_conjunction_estimate() {
+    let t = table_stats_default("t".clone(), 100 as Int64);
+    let mut preds: List<PredicateKind> = List.new();
+    preds.push(PkColEqLiteral("name".clone()));
+    preds.push(PkColRange("age".clone()));
+    let s = estimate_conjunction(&preds, &t);
+    assert(s == 0.1 * 0.33);
+}
+
+// -----------------------------------------------------------------------------
+// join_order
+// -----------------------------------------------------------------------------
+
+fn make_rel(id: Int, est_rows: Float64, base: Float64) -> Relation {
+    Relation {
+        id: id,
+        est_rows: est_rows,
+        base_cost: Cost { rows: est_rows, setup_cost: base, per_row_cost: 0.05 },
+    }
+}
+
+fn cheap_pair(_a: Int, _b: Int) -> PlanJoinPair {
+    PlanJoinPair { selectivity: 0.1, per_row_cost: 0.05 }
+}
+
+fn test_greedy_picks_cheapest_first() {
+    let mut rels: List<Relation> = List.new();
+    rels.push(make_rel(0, 100.0, 50.0));
+    rels.push(make_rel(1, 100.0, 5.0));   // cheapest base
+    rels.push(make_rel(2, 100.0, 25.0));
+    let plan = greedy(&rels, cheap_pair);
+    assert_eq(plan.order[0], 1);
+    assert_eq(plan.order.len(), 3);
+}
+
+fn test_dp_choose_finds_solution_for_small_n() {
+    let mut rels: List<Relation> = List.new();
+    rels.push(make_rel(0, 50.0, 5.0));
+    rels.push(make_rel(1, 100.0, 5.0));
+    rels.push(make_rel(2, 200.0, 5.0));
+    let r = dp_choose(&rels, cheap_pair);
+    // 3 rels → 6 permutations
+    assert_eq(r.n_alternatives, 6);
+    assert_eq(r.plan.order.len(), 3);
+}
+
+fn test_dp_choose_falls_back_for_large_n() {
+    let mut rels: List<Relation> = List.new();
+    let mut k: Int = 0;
+    while k < 9 {
+        rels.push(make_rel(k, 100.0, 5.0));
+        k = k + 1;
+    }
+    let r = dp_choose(&rels, cheap_pair);
+    // n_alternatives = rels.len() in the greedy fallback
+    assert_eq(r.n_alternatives, 9);
+    assert_eq(r.plan.order.len(), 9);
+}
+
+// -----------------------------------------------------------------------------
+// explain
+// -----------------------------------------------------------------------------
+
+fn test_detail_builders() {
+    let s = scan_table(&"users".clone());
+    assert(s == "SCAN TABLE users".clone());
+    let r = search_rowid(&"orders".clone());
+    assert(r == "SEARCH orders USING INTEGER PRIMARY KEY".clone());
+}
+
+fn test_detail_for_full_scan() {
+    let d = detail_for(&AmFullScan, &"users".clone(), None);
+    assert(d == "SCAN TABLE users".clone());
+}
+
+fn test_detail_for_index_seek_with_index_name() {
+    let d = detail_for(
+        &AmIndexSeek(1),
+        &"users".clone(),
+        Some("idx_users_email".clone()),
+    );
+    assert(d == "SEARCH users USING INDEX idx_users_email".clone());
+}
+
+fn test_explain_builder_tree() {
+    let mut b = builder_new();
+    let root = b.add_root("SCAN TABLE users".clone());
+    let _ = b.add_child(root, "USE TEMP B-TREE FOR ORDER BY".clone());
+    let _ = b.add_child(root, "USE INDEX idx_users_email".clone());
+    assert_eq(b.row_count(), 3);
+}
+
+fn main() {
+    test_index_stats_equality_selectivity();
+    test_index_stats_no_keys();
+    test_table_stats_default_pages();
+    test_stats_registry_lookup();
+    test_full_scan_cost_proportional_to_rows();
+    test_index_seek_cheaper_than_full_scan();
+    test_covering_index_cheaper_than_index_with_lookup();
+    test_sort_cost_grows_with_n();
+    test_aggregate_cost_with_group_by();
+    test_access_name_for_each();
+    test_default_eq_selectivity();
+    test_eq_with_distinct_count();
+    test_in_predicate_caps_at_one();
+    test_like_with_leading_wildcard();
+    test_isnull_with_default_fraction();
+    test_combinators_clamp();
+    test_conjunction_estimate();
+    test_greedy_picks_cheapest_first();
+    test_dp_choose_finds_solution_for_small_n();
+    test_dp_choose_falls_back_for_large_n();
+    test_detail_builders();
+    test_detail_for_full_scan();
+    test_detail_for_index_seek_with_index_name();
+    test_explain_builder_tree();
+}

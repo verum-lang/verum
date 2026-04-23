@@ -63,10 +63,10 @@ implement Lease {
 }
 
 // -----------------------------------------------------------------------------
-// ConnectionPool
+// DbConnectionPool
 // -----------------------------------------------------------------------------
 
-public type ConnectionPool is {
+public type DbConnectionPool is {
     capacity: Int,
     slots: List<Slot>,
     /// LIFO free-list of slot indices.
@@ -74,7 +74,7 @@ public type ConnectionPool is {
     closed: Bool,
 };
 
-public fn pool_new(capacity: Int) -> ConnectionPool {
+public fn db_pool_new(capacity: Int) -> DbConnectionPool {
     let mut slots: List<Slot> = List.new();
     let mut free: List<Int> = List.new();
     let mut i: Int = 0;
@@ -87,7 +87,7 @@ public fn pool_new(capacity: Int) -> ConnectionPool {
         free.push(capacity - 1 - i);
         i = i + 1;
     }
-    ConnectionPool {
+    DbConnectionPool {
         capacity: capacity,
         slots: slots,
         free: free,
@@ -95,7 +95,7 @@ public fn pool_new(capacity: Int) -> ConnectionPool {
     }
 }
 
-implement ConnectionPool {
+implement DbConnectionPool {
     public fn capacity(&self) -> Int { self.capacity }
     public fn available(&self) -> Int { self.free.len() }
     public fn in_use(&self) -> Int { self.capacity - self.free.len() }

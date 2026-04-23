@@ -1,0 +1,185 @@
+// =============================================================================
+// planner_cost/cost.vr — Cost record + access-method estimator
+// =============================================================================
+// Spec: sqlite-native.md §13.2
+//
+// `Cost` is the planner's currency: every candidate plan node is
+// scored by setup + per-row cost, and the cheapest one wins.
+// `AccessMethod` enumerates the four shapes a leaf access can take;
+// `estimate_access` returns a Cost for each given a `TableStats`
+// and the predicate selectivity.
+// =============================================================================
+
+module core.database.sqlite.native.planner_cost.cost;
+
+mount core.*;
+mount base.{Text};
+mount core.database.sqlite.native.planner_cost.stats.{TableStats, IndexStats};
+
+// -----------------------------------------------------------------------------
+// Cost record
+// -----------------------------------------------------------------------------
+
+public type Cost is {
+    rows: Float64,
+    setup_cost: Float64,
+    per_row_cost: Float64,
+};
+
+public fn cost_zero() -> Cost {
+    Cost { rows: 0.0, setup_cost: 0.0, per_row_cost: 0.0 }
+}
+
+public fn cost_total(c: &Cost) -> Float64 {
+    c.setup_cost + c.rows * c.per_row_cost
+}
+
+public fn cost_combine(a: &Cost, b: &Cost) -> Cost {
+    Cost {
+        rows: a.rows * b.rows,
+        setup_cost: a.setup_cost + b.setup_cost,
+        per_row_cost: a.per_row_cost + b.per_row_cost,
+    }
+}
+
+public fn cost_concat(a: &Cost, b: &Cost) -> Cost {
+    // Sequential composition: rows of `b` follow rows of `a`.
+    Cost {
+        rows: a.rows + b.rows,
+        setup_cost: a.setup_cost + b.setup_cost,
+        per_row_cost: a.per_row_cost + b.per_row_cost,
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Access methods
+// -----------------------------------------------------------------------------
+
+public type AccessMethod is
+      AmFullScan
+    | AmRowidLookup                  // INTEGER PRIMARY KEY equality
+    | AmIndexSeek(Int)              // n_keys = number of equality keys covered
+    | AmIndexRangeScan(Int)         // n_keys = leading equality cols
+    | AmCoveringIndexScan(Int)      // index has every selected col
+    | AmEphemeralScan;              // temp table built earlier
+
+public fn access_name(a: &AccessMethod) -> Text {
+    match a {
+        AmFullScan          => "SCAN".clone(),
+        AmRowidLookup       => "SEARCH ROWID".clone(),
+        AmIndexSeek(_)      => "SEARCH USING INDEX".clone(),
+        AmIndexRangeScan(_) => "SCAN USING INDEX (range)".clone(),
+        AmCoveringIndexScan(_) => "SCAN USING COVERING INDEX".clone(),
+        AmEphemeralScan     => "SCAN TEMP".clone(),
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Estimator
+// -----------------------------------------------------------------------------
+
+/// Per-row cost units (rough SQLite parity: page-read + row-decode).
+const COST_PAGE_FETCH: Float64 = 1.0;
+const COST_ROW_DECODE: Float64 = 0.05;
+const COST_INDEX_SEEK: Float64 = 3.0;
+const COST_TEMP_SCAN: Float64 = 0.5;
+const COST_PER_BTREE_LEVEL: Float64 = 1.5;
+
+public fn estimate_access(
+    method: &AccessMethod,
+    stats: &TableStats,
+    predicate_selectivity: Float64,
+) -> Cost {
+    let total_rows = stats.n_rows as Float64;
+    let pages = stats.n_pages as Float64;
+    let estimated_rows = total_rows * predicate_selectivity;
+    match method {
+        AmFullScan => Cost {
+            rows: estimated_rows,
+            setup_cost: pages * COST_PAGE_FETCH,
+            per_row_cost: COST_ROW_DECODE,
+        },
+        AmRowidLookup => Cost {
+            rows: 1.0,
+            setup_cost: COST_INDEX_SEEK,
+            per_row_cost: COST_ROW_DECODE,
+        },
+        AmIndexSeek(n_keys) => {
+            let k_cost = COST_INDEX_SEEK + (n_keys as Float64) * COST_PER_BTREE_LEVEL;
+            Cost {
+                rows: estimated_rows,
+                setup_cost: k_cost,
+                per_row_cost: COST_ROW_DECODE,
+            }
+        }
+        AmIndexRangeScan(n_keys) => {
+            let k_cost = COST_INDEX_SEEK + (n_keys as Float64) * COST_PER_BTREE_LEVEL;
+            Cost {
+                rows: estimated_rows,
+                setup_cost: k_cost,
+                per_row_cost: COST_ROW_DECODE * 1.2,  // range scan ≈ 20% slower per row
+            }
+        }
+        AmCoveringIndexScan(_n_keys) => Cost {
+            rows: estimated_rows,
+            setup_cost: COST_INDEX_SEEK,
+            per_row_cost: COST_ROW_DECODE * 0.5,  // no row-payload fetch
+        },
+        AmEphemeralScan => Cost {
+            rows: estimated_rows,
+            setup_cost: 0.0,
+            per_row_cost: COST_TEMP_SCAN,
+        },
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Sort cost (used by ORDER BY / DISTINCT)
+// -----------------------------------------------------------------------------
+//
+// External-merge sort: O(n log n) comparisons + pages-read passes.
+// =============================================================================
+
+public fn estimate_sort_cost(input_rows: Float64) -> Cost {
+    if input_rows <= 0.0 {
+        return Cost { rows: 0.0, setup_cost: 0.0, per_row_cost: 0.0 };
+    }
+    // log2 approximation (avoid pulling in core.math.real here).
+    let mut n: Float64 = input_rows;
+    let mut log_n: Float64 = 0.0;
+    while n > 1.0 {
+        n = n / 2.0;
+        log_n = log_n + 1.0;
+    }
+    Cost {
+        rows: input_rows,
+        setup_cost: input_rows * log_n * 0.3,
+        per_row_cost: 0.1,
+    }
+}
+
+public fn estimate_aggregate_cost(input_rows: Float64, group_by_cols: Int) -> Cost {
+    if group_by_cols == 0 {
+        // Plain aggregate — single-pass.
+        return Cost {
+            rows: 1.0,
+            setup_cost: 0.0,
+            per_row_cost: 0.05,
+        };
+    }
+    // GROUP BY requires sort or hash; we use sort as the upper bound.
+    let sort = estimate_sort_cost(input_rows);
+    Cost {
+        rows: input_rows / 4.0,   // assume average group of 4 rows
+        setup_cost: sort.setup_cost,
+        per_row_cost: sort.per_row_cost + 0.1,
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Comparison
+// -----------------------------------------------------------------------------
+
+public fn cost_less(a: &Cost, b: &Cost) -> base.Bool {
+    cost_total(a) < cost_total(b)
+}

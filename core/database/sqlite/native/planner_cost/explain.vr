@@ -1,0 +1,144 @@
+// =============================================================================
+// planner_cost/explain.vr — EXPLAIN QUERY PLAN row serialiser
+// =============================================================================
+// Spec: sqlite-native.md §13.2 (output of `EXPLAIN QUERY PLAN`)
+//
+// Produces the rows the user sees from
+//
+//   EXPLAIN QUERY PLAN SELECT ... ;
+//
+// SQLite emits rows of the form
+//   id INT, parent INT, notused INT, detail TEXT
+// where `detail` is a human-readable description like
+//   "SCAN TABLE users", "SEARCH INDEX users_email", "USE TEMP B-TREE FOR GROUP BY".
+// =============================================================================
+
+module core.database.sqlite.native.planner_cost.explain;
+
+mount core.*;
+mount base.{Text, Maybe};
+mount collections.List;
+mount core.database.sqlite.native.planner_cost.cost.{
+    AccessMethod, AmFullScan, AmRowidLookup, AmIndexSeek,
+    AmIndexRangeScan, AmCoveringIndexScan, AmEphemeralScan,
+    access_name,
+};
+
+public type ExplainRow is {
+    id: Int,
+    parent: Int,
+    detail: Text,
+};
+
+public fn explain_row(id: Int, parent: Int, detail: Text) -> ExplainRow {
+    ExplainRow { id: id, parent: parent, detail: detail }
+}
+
+// -----------------------------------------------------------------------------
+// Detail builders
+// -----------------------------------------------------------------------------
+
+public fn scan_table(table: &Text) -> Text {
+    let mut out = "SCAN TABLE ".clone();
+    push_text(&mut out, table);
+    out
+}
+
+public fn search_index(table: &Text, index: &Text) -> Text {
+    let mut out = "SEARCH ".clone();
+    push_text(&mut out, table);
+    let suffix = " USING INDEX ".clone();
+    push_text(&mut out, &suffix);
+    push_text(&mut out, index);
+    out
+}
+
+public fn search_rowid(table: &Text) -> Text {
+    let mut out = "SEARCH ".clone();
+    push_text(&mut out, table);
+    let suffix = " USING INTEGER PRIMARY KEY".clone();
+    push_text(&mut out, &suffix);
+    out
+}
+
+public fn covering_index(table: &Text, index: &Text) -> Text {
+    let mut out = "SCAN ".clone();
+    push_text(&mut out, table);
+    let suffix = " USING COVERING INDEX ".clone();
+    push_text(&mut out, &suffix);
+    push_text(&mut out, index);
+    out
+}
+
+public fn use_temp_btree_for(purpose: &Text) -> Text {
+    let mut out = "USE TEMP B-TREE FOR ".clone();
+    push_text(&mut out, purpose);
+    out
+}
+
+public fn correlated_subquery() -> Text {
+    "CORRELATED SCALAR SUBQUERY".clone()
+}
+
+public fn list_subquery() -> Text {
+    "LIST SUBQUERY".clone()
+}
+
+public fn detail_for(method: &AccessMethod, table: &Text, index: Maybe<Text>) -> Text {
+    match method {
+        AmFullScan => scan_table(table),
+        AmRowidLookup => search_rowid(table),
+        AmIndexSeek(_) => match index {
+            Some(name) => search_index(table, &name),
+            None       => search_rowid(table),
+        },
+        AmIndexRangeScan(_) => match index {
+            Some(name) => search_index(table, &name),
+            None       => scan_table(table),
+        },
+        AmCoveringIndexScan(_) => match index {
+            Some(name) => covering_index(table, &name),
+            None       => scan_table(table),
+        },
+        AmEphemeralScan => "SCAN TEMP".clone(),
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Builder for assembling a tree of rows
+// -----------------------------------------------------------------------------
+
+public type ExplainBuilder is {
+    rows: List<ExplainRow>,
+    next_id: Int,
+};
+
+public fn builder_new() -> ExplainBuilder {
+    ExplainBuilder { rows: List.new(), next_id: 0 }
+}
+
+implement ExplainBuilder {
+    public fn add_root(&mut self, detail: Text) -> Int {
+        let id = self.next_id;
+        self.next_id = id + 1;
+        self.rows.push(ExplainRow { id: id, parent: 0, detail: detail });
+        id
+    }
+
+    public fn add_child(&mut self, parent: Int, detail: Text) -> Int {
+        let id = self.next_id;
+        self.next_id = id + 1;
+        self.rows.push(ExplainRow { id: id, parent: parent, detail: detail });
+        id
+    }
+
+    public fn finish(self) -> List<ExplainRow> { self.rows }
+
+    public fn row_count(&self) -> Int { self.rows.len() }
+}
+
+fn push_text(dst: &mut Text, s: &Text) {
+    let bs = s.as_bytes();
+    let mut i: Int = 0;
+    while i < bs.len() { dst.push_byte(bs[i]); i = i + 1; }
+}

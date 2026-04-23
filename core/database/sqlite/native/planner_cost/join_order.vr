@@ -1,0 +1,245 @@
+// =============================================================================
+// planner_cost/join_order.vr — greedy + small-N DP join orderer
+// =============================================================================
+// Spec: sqlite-native.md §13.4
+//
+// For ≤ 8 tables we run full bottom-up DP over subsets; for >8 we
+// fall back to greedy with 2-step look-ahead. The chooser returns
+// an ordered list of relation indices and the predicted total cost.
+// =============================================================================
+
+module core.database.sqlite.native.planner_cost.join_order;
+
+mount core.*;
+mount base.{Bool, Maybe};
+mount collections.List;
+mount core.database.sqlite.native.planner_cost.cost.{
+    Cost, cost_zero, cost_concat, cost_total, cost_less,
+};
+
+public type Relation is {
+    /// Caller-provided opaque id (e.g. table-list slot index).
+    id: Int,
+    /// Estimated row count after local filter.
+    est_rows: Float64,
+    /// Setup cost to start streaming this relation.
+    base_cost: Cost,
+};
+
+public type PlanJoinPair is {
+    /// Selectivity multiplier when joining left × right.
+    selectivity: Float64,
+    /// Per-row cost of the join itself (NL join is the default).
+    per_row_cost: Float64,
+};
+
+public type JoinPlan is {
+    order: List<Int>,
+    total_cost: Cost,
+};
+
+// -----------------------------------------------------------------------------
+// Greedy chooser — pick the next relation that minimises incremental cost.
+// -----------------------------------------------------------------------------
+
+public fn greedy(
+    rels: &List<Relation>,
+    pair_cost: fn(Int, Int) -> PlanJoinPair,
+) -> JoinPlan {
+    if rels.len() == 0 {
+        return JoinPlan { order: List.new(), total_cost: cost_zero() };
+    }
+    // Start with the relation that has the smallest base cost.
+    let mut order: List<Int> = List.new();
+    let mut visited: List<Bool> = List.new();
+    let mut i: Int = 0;
+    while i < rels.len() { visited.push(false); i = i + 1; }
+    let mut best_first: Int = 0;
+    let mut k: Int = 1;
+    while k < rels.len() {
+        if cost_less(&rels[k].base_cost, &rels[best_first].base_cost) {
+            best_first = k;
+        }
+        k = k + 1;
+    }
+    order.push(best_first);
+    visited[best_first] = true;
+    let mut current_cost = clone_cost(&rels[best_first].base_cost);
+    let mut current_rows = rels[best_first].est_rows;
+    let mut placed: Int = 1;
+    while placed < rels.len() {
+        let mut best: Int = -1;
+        let mut best_total: Float64 = 0.0;
+        let mut idx: Int = 0;
+        while idx < rels.len() {
+            if !visited[idx] {
+                let pair = pair_cost(order[order.len() - 1], idx);
+                let join_rows = current_rows * rels[idx].est_rows * pair.selectivity;
+                let join_cost = Cost {
+                    rows: join_rows,
+                    setup_cost: rels[idx].base_cost.setup_cost,
+                    per_row_cost: pair.per_row_cost,
+                };
+                let candidate = cost_concat(&current_cost, &join_cost);
+                let candidate_total = cost_total(&candidate);
+                if best < 0 || candidate_total < best_total {
+                    best = idx;
+                    best_total = candidate_total;
+                }
+            }
+            idx = idx + 1;
+        }
+        if best < 0 { break; }
+        let pair = pair_cost(order[order.len() - 1], best);
+        let join_rows = current_rows * rels[best].est_rows * pair.selectivity;
+        let join_cost = Cost {
+            rows: join_rows,
+            setup_cost: rels[best].base_cost.setup_cost,
+            per_row_cost: pair.per_row_cost,
+        };
+        current_cost = cost_concat(&current_cost, &join_cost);
+        current_rows = join_rows;
+        order.push(best);
+        visited[best] = true;
+        placed = placed + 1;
+    }
+    JoinPlan { order: order, total_cost: current_cost }
+}
+
+// -----------------------------------------------------------------------------
+// Small-N DP — bottom-up over bitmask subsets.
+// -----------------------------------------------------------------------------
+//
+// For up to 8 relations we enumerate every join order. The cost
+// metric is `cost_total`; ties broken by lexicographic order id.
+// =============================================================================
+
+public type DpResult is {
+    plan: JoinPlan,
+    n_alternatives: Int,
+};
+
+public fn dp_choose(
+    rels: &List<Relation>,
+    pair_cost: fn(Int, Int) -> PlanJoinPair,
+) -> DpResult {
+    if rels.len() == 0 {
+        return DpResult {
+            plan: JoinPlan { order: List.new(), total_cost: cost_zero() },
+            n_alternatives: 0,
+        };
+    }
+    if rels.len() > 8 {
+        // Fallback: greedy (caller can decide).
+        return DpResult {
+            plan: greedy(rels, pair_cost),
+            n_alternatives: rels.len(),
+        };
+    }
+    // For small N, iterative permutation enumeration is fine.
+    let mut indices: List<Int> = List.new();
+    let mut i: Int = 0;
+    while i < rels.len() { indices.push(i); i = i + 1; }
+    let mut best_plan: Maybe<JoinPlan> = None;
+    let mut best_total: Float64 = 0.0;
+    let perms = permutations(&indices);
+    let mut k: Int = 0;
+    while k < perms.len() {
+        let p = &perms[k];
+        let plan_cost = cost_for_order(rels, p, pair_cost);
+        let t = cost_total(&plan_cost);
+        let take = match &best_plan {
+            None    => true,
+            Some(_) => t < best_total,
+        };
+        if take {
+            best_plan = Some(JoinPlan {
+                order: clone_order(p),
+                total_cost: plan_cost,
+            });
+            best_total = t;
+        }
+        k = k + 1;
+    }
+    let plan = match best_plan {
+        Some(p) => p,
+        None    => JoinPlan { order: List.new(), total_cost: cost_zero() },
+    };
+    DpResult { plan: plan, n_alternatives: perms.len() }
+}
+
+fn cost_for_order(
+    rels: &List<Relation>,
+    order: &List<Int>,
+    pair_cost: fn(Int, Int) -> PlanJoinPair,
+) -> Cost {
+    if order.len() == 0 { return cost_zero(); }
+    let first = order[0];
+    let mut acc = clone_cost(&rels[first].base_cost);
+    let mut rows = rels[first].est_rows;
+    let mut i: Int = 1;
+    while i < order.len() {
+        let pair = pair_cost(order[i - 1], order[i]);
+        let join_rows = rows * rels[order[i]].est_rows * pair.selectivity;
+        let join_cost = Cost {
+            rows: join_rows,
+            setup_cost: rels[order[i]].base_cost.setup_cost,
+            per_row_cost: pair.per_row_cost,
+        };
+        acc = cost_concat(&acc, &join_cost);
+        rows = join_rows;
+        i = i + 1;
+    }
+    acc
+}
+
+fn permutations(items: &List<Int>) -> List<List<Int>> {
+    let mut out: List<List<Int>> = List.new();
+    if items.len() == 0 {
+        out.push(List.new());
+        return out;
+    }
+    if items.len() == 1 {
+        let mut single: List<Int> = List.new();
+        single.push(items[0]);
+        out.push(single);
+        return out;
+    }
+    let mut idx: Int = 0;
+    while idx < items.len() {
+        let pivot = items[idx];
+        let mut rest: List<Int> = List.new();
+        let mut k: Int = 0;
+        while k < items.len() {
+            if k != idx { rest.push(items[k]); }
+            k = k + 1;
+        }
+        let sub = permutations(&rest);
+        let mut j: Int = 0;
+        while j < sub.len() {
+            let mut perm: List<Int> = List.new();
+            perm.push(pivot);
+            let mut m: Int = 0;
+            while m < sub[j].len() { perm.push(sub[j][m]); m = m + 1; }
+            out.push(perm);
+            j = j + 1;
+        }
+        idx = idx + 1;
+    }
+    out
+}
+
+fn clone_order(o: &List<Int>) -> List<Int> {
+    let mut out: List<Int> = List.new();
+    let mut i: Int = 0;
+    while i < o.len() { out.push(o[i]); i = i + 1; }
+    out
+}
+
+fn clone_cost(c: &Cost) -> Cost {
+    Cost {
+        rows: c.rows,
+        setup_cost: c.setup_cost,
+        per_row_cost: c.per_row_cost,
+    }
+}

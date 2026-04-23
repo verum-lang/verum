@@ -1,0 +1,26 @@
+// =============================================================================
+// core/database/sqlite/native/planner_cost/mod.vr
+// =============================================================================
+// Layer: 5 (planner)
+// Spec: sqlite-native.md §13.2 .. §13.5
+//
+// Cost model + statistics for the L5 query planner. Pure Verum data
+// types — no integer dispatch tables, no hardcoded knowledge of
+// stdlib types. The planner consumes:
+//
+//   * `stats`         — per-table / per-index row counts + histograms
+//                       (the analogue of SQLite's `sqlite_stat1` /
+//                       `sqlite_stat4`)
+//   * `cost`          — Cost record + estimator over the plan tree
+//   * `selectivity`   — predicate-level fraction-of-rows estimator
+//   * `join_order`    — greedy + DP join-order chooser
+//   * `explain`       — EXPLAIN QUERY PLAN row serialiser
+// =============================================================================
+
+module core.database.sqlite.native.planner_cost;
+
+public module stats;
+public module cost;
+public module selectivity;
+public module join_order;
+public module explain;

@@ -1,0 +1,230 @@
+// =============================================================================
+// planner_cost/stats.vr — table & index statistics records
+// =============================================================================
+// Spec: sqlite-native.md §13.2
+//
+// Mirrors the data SQLite stores in `sqlite_stat1` and `sqlite_stat4`:
+//
+//   * row count per table / index
+//   * average column "width" (key prefix selectivity tuple from stat1)
+//   * per-column histogram buckets (stat4)
+// =============================================================================
+
+module core.database.sqlite.native.planner_cost.stats;
+
+mount core.*;
+mount base.{Text, Maybe, Bool};
+mount collections.List;
+
+// -----------------------------------------------------------------------------
+// Histogram bucket — sample-based distinct-value estimate
+// -----------------------------------------------------------------------------
+
+public type HistogramBucket is {
+    /// Sample value (text-form for a generic representation).
+    sample: Text,
+    /// Estimated number of rows with this exact value.
+    n_eq: Int64,
+    /// Estimated number of rows less than this value.
+    n_lt: Int64,
+    /// Estimated number of distinct values less than this.
+    n_dlt: Int64,
+};
+
+// -----------------------------------------------------------------------------
+// IndexStats — per-index summary
+// -----------------------------------------------------------------------------
+//
+// `tuple_card` is the SQLite stat1 tuple — for an index over (a, b, c)
+// it stores [N, N1, N2, N3] where N is total rows and N_k is the
+// average number of rows that share the same value on the first k
+// columns. The selectivity of an equality predicate on column k is
+// then `1 / N_k`.
+// =============================================================================
+
+public type IndexStats is {
+    index_name: Text,
+    table_name: Text,
+    n_rows: Int64,
+    /// stat1-style tuple: [N_total, N_1, N_2, ...]
+    tuple_card: List<Int64>,
+    /// stat4-style histograms — one bucket list per indexed column.
+    histograms: List<List<HistogramBucket>>,
+};
+
+public fn index_stats_default(index_name: Text, table_name: Text, n_rows: Int64) -> IndexStats {
+    let mut tuple: List<Int64> = List.new();
+    tuple.push(n_rows);
+    IndexStats {
+        index_name: index_name,
+        table_name: table_name,
+        n_rows: n_rows,
+        tuple_card: tuple,
+        histograms: List.new(),
+    }
+}
+
+implement IndexStats {
+    /// Selectivity of an equality predicate on the first `n_keys`
+    /// indexed columns. SQLite stat1 convention.
+    public fn equality_selectivity(&self, n_keys: Int) -> Float64 {
+        if n_keys <= 0 || self.tuple_card.len() == 0 { return 1.0; }
+        let total: Float64 = self.tuple_card[0] as Float64;
+        if total == 0.0 { return 1.0; }
+        let key_idx: Int = if n_keys >= self.tuple_card.len() {
+            self.tuple_card.len() - 1
+        } else {
+            n_keys
+        };
+        let avg_per_key: Float64 = self.tuple_card[key_idx] as Float64;
+        if avg_per_key == 0.0 { return 1.0; }
+        avg_per_key / total
+    }
+
+    /// Estimated number of rows after filtering by N equality predicates.
+    public fn estimated_rows_after_eq(&self, n_keys: Int) -> Float64 {
+        let sel = self.equality_selectivity(n_keys);
+        (self.n_rows as Float64) * sel
+    }
+}
+
+// -----------------------------------------------------------------------------
+// TableStats — row count + per-column distinct-value estimate
+// -----------------------------------------------------------------------------
+
+public type ColumnStats is {
+    name: Text,
+    distinct_estimate: Int64,
+    null_fraction: Float64,
+    /// Optional per-column histogram (stat4).
+    histogram: List<HistogramBucket>,
+};
+
+public type TableStats is {
+    table_name: Text,
+    n_rows: Int64,
+    n_pages: Int64,
+    avg_row_size_bytes: Int,
+    columns: List<ColumnStats>,
+};
+
+public fn table_stats_default(name: Text, n_rows: Int64) -> TableStats {
+    TableStats {
+        table_name: name,
+        n_rows: n_rows,
+        n_pages: (n_rows / (32 as Int64)) + (1 as Int64),
+        avg_row_size_bytes: 64,
+        columns: List.new(),
+    }
+}
+
+// -----------------------------------------------------------------------------
+// StatsRegistry — per-Connection / per-Database stats container
+// -----------------------------------------------------------------------------
+
+public type StatsRegistry is {
+    tables: List<TableStats>,
+    indexes: List<IndexStats>,
+};
+
+public fn stats_registry_new() -> StatsRegistry {
+    StatsRegistry { tables: List.new(), indexes: List.new() }
+}
+
+implement StatsRegistry {
+    public fn record_table(&mut self, st: TableStats) {
+        self.tables.push(st);
+    }
+
+    public fn record_index(&mut self, st: IndexStats) {
+        self.indexes.push(st);
+    }
+
+    public fn table_for(&self, name: &Text) -> Maybe<TableStats> {
+        let mut i: Int = 0;
+        while i < self.tables.len() {
+            if self.tables[i].table_name == name {
+                return Some(clone_table(&self.tables[i]));
+            }
+            i = i + 1;
+        }
+        None
+    }
+
+    public fn indexes_on(&self, table: &Text) -> List<IndexStats> {
+        let mut out: List<IndexStats> = List.new();
+        let mut i: Int = 0;
+        while i < self.indexes.len() {
+            if self.indexes[i].table_name == table {
+                out.push(clone_index(&self.indexes[i]));
+            }
+            i = i + 1;
+        }
+        out
+    }
+
+    public fn table_count(&self) -> Int { self.tables.len() }
+    public fn index_count(&self) -> Int { self.indexes.len() }
+}
+
+fn clone_table(t: &TableStats) -> TableStats {
+    let mut cols: List<ColumnStats> = List.new();
+    let mut i: Int = 0;
+    while i < t.columns.len() {
+        cols.push(clone_column(&t.columns[i]));
+        i = i + 1;
+    }
+    TableStats {
+        table_name: t.table_name.clone(),
+        n_rows: t.n_rows,
+        n_pages: t.n_pages,
+        avg_row_size_bytes: t.avg_row_size_bytes,
+        columns: cols,
+    }
+}
+
+fn clone_column(c: &ColumnStats) -> ColumnStats {
+    let mut hist: List<HistogramBucket> = List.new();
+    let mut i: Int = 0;
+    while i < c.histogram.len() {
+        hist.push(clone_bucket(&c.histogram[i]));
+        i = i + 1;
+    }
+    ColumnStats {
+        name: c.name.clone(),
+        distinct_estimate: c.distinct_estimate,
+        null_fraction: c.null_fraction,
+        histogram: hist,
+    }
+}
+
+fn clone_bucket(b: &HistogramBucket) -> HistogramBucket {
+    HistogramBucket {
+        sample: b.sample.clone(),
+        n_eq: b.n_eq,
+        n_lt: b.n_lt,
+        n_dlt: b.n_dlt,
+    }
+}
+
+fn clone_index(idx: &IndexStats) -> IndexStats {
+    let mut tuple: List<Int64> = List.new();
+    let mut i: Int = 0;
+    while i < idx.tuple_card.len() { tuple.push(idx.tuple_card[i]); i = i + 1; }
+    let mut hist: List<List<HistogramBucket>> = List.new();
+    let mut k: Int = 0;
+    while k < idx.histograms.len() {
+        let mut inner: List<HistogramBucket> = List.new();
+        let mut j: Int = 0;
+        while j < idx.histograms[k].len() { inner.push(clone_bucket(&idx.histograms[k][j])); j = j + 1; }
+        hist.push(inner);
+        k = k + 1;
+    }
+    IndexStats {
+        index_name: idx.index_name.clone(),
+        table_name: idx.table_name.clone(),
+        n_rows: idx.n_rows,
+        tuple_card: tuple,
+        histograms: hist,
+    }
+}

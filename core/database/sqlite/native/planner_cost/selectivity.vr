@@ -1,0 +1,170 @@
+// =============================================================================
+// planner_cost/selectivity.vr — predicate selectivity estimator
+// =============================================================================
+// Spec: sqlite-native.md §13.3
+//
+// Per-predicate fraction-of-rows estimator. Returns a Float64 in
+// [0.0, 1.0]. Conjunctions multiply, disjunctions use the inclusion-
+// exclusion lower bound (a + b - a*b clamped to 1.0).
+// =============================================================================
+
+module core.database.sqlite.native.planner_cost.selectivity;
+
+mount core.*;
+mount base.{Bool, Maybe};
+mount collections.List;
+mount core.database.sqlite.native.planner_cost.stats.{
+    TableStats, ColumnStats, HistogramBucket,
+};
+
+// -----------------------------------------------------------------------------
+// PredicateKind — what shape of expression we're estimating
+// -----------------------------------------------------------------------------
+
+public type PredicateKind is
+      PkColEqLiteral(Text)            // col = literal
+    | PkColEqCol(Text)                // col1 = col2  (assumed 1/distinct(col1))
+    | PkColRange(Text)                // col BETWEEN a AND b OR col </<=/>=/> literal
+    | PkColIn(Text, Int)              // col IN (a, b, c) — n_values = bag size
+    | PkColLike(Text, Bool)           // col LIKE 'pat' — has_leading_wildcard
+    | PkColIsNull(Text)               // col IS NULL
+    | PkColIsNotNull(Text)            // col IS NOT NULL
+    | PkArbitrary;                    // unknown shape — pessimistic 0.5
+
+// -----------------------------------------------------------------------------
+// Default selectivity constants (mirrors SQLite defaults)
+// -----------------------------------------------------------------------------
+
+const DEFAULT_EQ_SELECTIVITY: Float64 = 0.1;        // col = ? when no histogram
+const DEFAULT_RANGE_SELECTIVITY: Float64 = 0.33;    // col < ?
+const DEFAULT_LIKE_SELECTIVITY: Float64 = 0.5;
+const DEFAULT_LIKE_LEADING_WILDCARD: Float64 = 0.9;
+const DEFAULT_NULL_SELECTIVITY: Float64 = 0.1;
+const DEFAULT_ARBITRARY: Float64 = 0.5;
+
+// -----------------------------------------------------------------------------
+// Estimator
+// -----------------------------------------------------------------------------
+
+public fn estimate(p: &PredicateKind, stats: &TableStats) -> Float64 {
+    match p {
+        PkColEqLiteral(col) => {
+            match column_stats(stats, col) {
+                Some(c) => {
+                    if c.distinct_estimate <= (0 as Int64) {
+                        DEFAULT_EQ_SELECTIVITY
+                    } else {
+                        1.0 / (c.distinct_estimate as Float64)
+                    }
+                }
+                None => DEFAULT_EQ_SELECTIVITY,
+            }
+        }
+        PkColEqCol(col) => {
+            match column_stats(stats, col) {
+                Some(c) => {
+                    if c.distinct_estimate <= (0 as Int64) {
+                        DEFAULT_EQ_SELECTIVITY
+                    } else {
+                        1.0 / (c.distinct_estimate as Float64)
+                    }
+                }
+                None => DEFAULT_EQ_SELECTIVITY,
+            }
+        }
+        PkColRange(_) => DEFAULT_RANGE_SELECTIVITY,
+        PkColIn(col, n) => {
+            let per_eq = match column_stats(stats, col) {
+                Some(c) => {
+                    if c.distinct_estimate <= (0 as Int64) {
+                        DEFAULT_EQ_SELECTIVITY
+                    } else {
+                        1.0 / (c.distinct_estimate as Float64)
+                    }
+                }
+                None => DEFAULT_EQ_SELECTIVITY,
+            };
+            let mut s = per_eq * (n as Float64);
+            if s > 1.0 { s = 1.0; }
+            s
+        }
+        PkColLike(_, has_lead) => {
+            if has_lead { DEFAULT_LIKE_LEADING_WILDCARD } else { DEFAULT_LIKE_SELECTIVITY }
+        }
+        PkColIsNull(col) => {
+            match column_stats(stats, col) {
+                Some(c) => c.null_fraction,
+                None    => DEFAULT_NULL_SELECTIVITY,
+            }
+        }
+        PkColIsNotNull(col) => {
+            match column_stats(stats, col) {
+                Some(c) => 1.0 - c.null_fraction,
+                None    => 1.0 - DEFAULT_NULL_SELECTIVITY,
+            }
+        }
+        PkArbitrary => DEFAULT_ARBITRARY,
+    }
+}
+
+fn column_stats(t: &TableStats, name: &Text) -> Maybe<ColumnStats> {
+    let mut i: Int = 0;
+    while i < t.columns.len() {
+        if t.columns[i].name == name {
+            return Some(clone_col(&t.columns[i]));
+        }
+        i = i + 1;
+    }
+    None
+}
+
+fn clone_col(c: &ColumnStats) -> ColumnStats {
+    let mut hist: List<HistogramBucket> = List.new();
+    let mut i: Int = 0;
+    while i < c.histogram.len() {
+        let b = &c.histogram[i];
+        hist.push(HistogramBucket {
+            sample: b.sample.clone(),
+            n_eq: b.n_eq,
+            n_lt: b.n_lt,
+            n_dlt: b.n_dlt,
+        });
+        i = i + 1;
+    }
+    ColumnStats {
+        name: c.name.clone(),
+        distinct_estimate: c.distinct_estimate,
+        null_fraction: c.null_fraction,
+        histogram: hist,
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Conjunction / disjunction combinators
+// -----------------------------------------------------------------------------
+
+public fn and_select(a: Float64, b: Float64) -> Float64 {
+    let r = a * b;
+    if r < 0.0 { 0.0 } else if r > 1.0 { 1.0 } else { r }
+}
+
+public fn or_select(a: Float64, b: Float64) -> Float64 {
+    let r = a + b - a * b;
+    if r < 0.0 { 0.0 } else if r > 1.0 { 1.0 } else { r }
+}
+
+public fn not_select(s: Float64) -> Float64 {
+    let r = 1.0 - s;
+    if r < 0.0 { 0.0 } else if r > 1.0 { 1.0 } else { r }
+}
+
+/// Combine a conjunction of independent predicates.
+public fn estimate_conjunction(preds: &List<PredicateKind>, stats: &TableStats) -> Float64 {
+    let mut acc: Float64 = 1.0;
+    let mut i: Int = 0;
+    while i < preds.len() {
+        acc = and_select(acc, estimate(&preds[i], stats));
+        i = i + 1;
+    }
+    acc
+}
