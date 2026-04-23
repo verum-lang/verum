@@ -1,0 +1,68 @@
+// @test: unit
+// @tier: 0
+// @level: L2
+// @tags: h3, qpack, rfc9204, dynamic_table
+// @timeout: 5000
+// @expect: pass
+
+// RFC 9204 §4.3 QPACK dynamic table — API-level validation.
+// The encoder-stream/decoder-stream wire protocol layer will plug
+// into this DynamicTable once encoder/decoder support non-zero
+// QPACK_MAX_TABLE_CAPACITY (tracked in warp roadmap as v1.1).
+
+mount core.*;
+mount core.net.h3.qpack.dynamic_table.{
+    DynamicTable, DynamicTableError,
+};
+
+fn main() {
+    // Empty table
+    let mut t = DynamicTable.new(4096_u64);
+    assert_eq(t.len(), 0);
+    assert_eq(t.current_size(), 0_u64);
+    assert_eq(t.insert_count(), 0_u64);
+
+    // Insert + lookup
+    match t.insert(Text.from("x-api-key"), Text.from("abc-123")) {
+        Ok(abs) => assert_eq(abs, 0_u64),
+        Err(_) => panic("insert failed on fresh table"),
+    }
+    assert_eq(t.len(), 1);
+    assert_eq(t.insert_count(), 1_u64);
+
+    // Exact-match find
+    match t.find(&Text.from("x-api-key"), &Text.from("abc-123")) {
+        Some(idx) => assert_eq(idx, 0_u64),
+        None      => panic("exact match missing"),
+    }
+
+    // Name-only find
+    match t.find_name(&Text.from("x-api-key")) {
+        Some(idx) => assert_eq(idx, 0_u64),
+        None      => panic("name match missing"),
+    }
+
+    // Capacity gate — insert too large.
+    let mut small = DynamicTable.new(32_u64);
+    // name(30) + value(30) + overhead(32) ≫ 32 → reject.
+    let long_name: Text = Text.from("very-long-header-name-exceeding");
+    let long_value: Text = Text.from("very-long-header-value-exceeding");
+    match small.insert(long_name, long_value) {
+        Ok(_)  => panic("oversized entry accepted"),
+        Err(_) => {},   // expected
+    }
+
+    // set_capacity shrink — entries over budget retire.
+    let mut big = DynamicTable.new(4096_u64);
+    let _ = big.insert(Text.from("a"), Text.from("1"));
+    let _ = big.insert(Text.from("b"), Text.from("2"));
+    let _ = big.insert(Text.from("c"), Text.from("3"));
+    assert_eq(big.len(), 3);
+    match big.set_capacity(0_u64) {
+        Ok(_)  => {},
+        Err(_) => panic("set_capacity to 0 should succeed"),
+    }
+    assert_eq(big.len(), 0);   // all entries retired
+
+    print("RFC 9204 QPACK DynamicTable API OK");
+}
