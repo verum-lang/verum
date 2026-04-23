@@ -15,7 +15,9 @@ mount core.base.memory.{Shared};
 
 fn check_sim_network() {
     let _ = SimNetwork.new();
-    let net = SimNetwork.new().with_loss_rate(0.05);
+    // SimNetwork uses integer basis-points (bp out of 10 000) for loss,
+    // not a floating-point rate. 500 bp = 5 %.
+    let net = SimNetwork.new().with_loss_rate_bp(500_u64);
     let _ = net;
 }
 
