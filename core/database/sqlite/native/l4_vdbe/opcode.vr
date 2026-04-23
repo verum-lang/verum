@@ -111,6 +111,9 @@ public type Opcode is
     // `n_keys` cells of each row are treated as sort keys; `dir_bits` is
     // a bitmask of ORDER BY directions (bit k set → key k is DESC).
     | SortRowStore(cursor_id: Int, n_keys: Int, dir_bits: Int)
+    // Remove adjacent duplicate rows that agree on the first `n_cells`
+    // cells. Intended to follow SortRowStore for SELECT DISTINCT.
+    | DedupRowStore(cursor_id: Int, n_cells: Int)
 
     // Transactions -----------------------------------------------------------
     | Transaction(write: Int)
@@ -204,6 +207,7 @@ public fn opcode_name(op: &Opcode) -> Text {
         SorterData(_, _)    => "SorterData".clone(),
         SorterNext(_, _)    => "SorterNext".clone(),
         SortRowStore(_, _, _) => "SortRowStore".clone(),
+        DedupRowStore(_, _)   => "DedupRowStore".clone(),
         Transaction(_) => "Transaction".clone(),
         Commit         => "Commit".clone(),
         RollbackOp(_)  => "Rollback".clone(),

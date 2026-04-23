@@ -524,6 +524,12 @@ public fn step(state: &mut VdbeState, program: &VdbeProgram) -> StepResult {
             Yield
         }
 
+        DedupRowStore(cursor_id, n_cells) => {
+            let _ = state.cursors.dedup_adjacent(cursor_id, n_cells);
+            state.pc = state.pc + 1;
+            Yield
+        }
+
         AggStep(agg_kind, n_args, first_arg_reg, acc_reg) => {
             match agg_kind {
                 0 => {

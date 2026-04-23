@@ -1,0 +1,75 @@
+// @test: typecheck-pass
+// @level: L2
+// @tier: 0
+// @tags: sqlite, native, l7, distinct, dedup
+// @timeout: 20000
+// @description: SELECT DISTINCT — sort + dedup adjacent pipeline
+//
+// Spec: internal/specs/sqlite-native.md §14.2 (DISTINCT)
+
+mount core.*;
+mount collections.List;
+mount core.database.sqlite.native.l7_api.{
+    Database, DbError, open_admin,
+};
+mount core.database.sqlite.native.l4_vdbe.Register;
+
+fn distinct_collapses_duplicates() {
+    let mut db = match open_admin() {
+        Ok(d)  => d,
+        Err(_) => { panic("open"); return; }
+    };
+    let _ = db.execute(&"CREATE TABLE t (v INTEGER)".clone());
+    let _ = db.execute(&"INSERT INTO t VALUES (1)".clone());
+    let _ = db.execute(&"INSERT INTO t VALUES (2)".clone());
+    let _ = db.execute(&"INSERT INTO t VALUES (1)".clone());
+    let _ = db.execute(&"INSERT INTO t VALUES (2)".clone());
+    let _ = db.execute(&"INSERT INTO t VALUES (3)".clone());
+    match db.query_all(&"SELECT DISTINCT v FROM t".clone()) {
+        Ok(rows) => {
+            assert_eq(rows.len(), 3);
+        }
+        Err(_) => panic("query_all DISTINCT"),
+    }
+}
+
+fn distinct_all_unique_keeps_all() {
+    let mut db = match open_admin() {
+        Ok(d)  => d,
+        Err(_) => { panic("open"); return; }
+    };
+    let _ = db.execute(&"CREATE TABLE t (v INTEGER)".clone());
+    let _ = db.execute(&"INSERT INTO t VALUES (1)".clone());
+    let _ = db.execute(&"INSERT INTO t VALUES (2)".clone());
+    let _ = db.execute(&"INSERT INTO t VALUES (3)".clone());
+    match db.query_all(&"SELECT DISTINCT v FROM t".clone()) {
+        Ok(rows) => { assert_eq(rows.len(), 3); }
+        Err(_) => panic("query_all DISTINCT-unique"),
+    }
+}
+
+fn distinct_multi_column() {
+    let mut db = match open_admin() {
+        Ok(d)  => d,
+        Err(_) => { panic("open"); return; }
+    };
+    let _ = db.execute(&"CREATE TABLE t (a INTEGER, b INTEGER)".clone());
+    let _ = db.execute(&"INSERT INTO t VALUES (1, 10)".clone());
+    let _ = db.execute(&"INSERT INTO t VALUES (1, 10)".clone());  // dup
+    let _ = db.execute(&"INSERT INTO t VALUES (1, 20)".clone());
+    let _ = db.execute(&"INSERT INTO t VALUES (2, 10)".clone());
+    match db.query_all(&"SELECT DISTINCT a, b FROM t".clone()) {
+        Ok(rows) => {
+            // 3 unique (a, b) combinations.
+            assert_eq(rows.len(), 3);
+        }
+        Err(_) => panic("query_all DISTINCT multi"),
+    }
+}
+
+fn main() {
+    distinct_collapses_duplicates();
+    distinct_all_unique_keeps_all();
+    distinct_multi_column();
+    print("distinct_clause typecheck ok");
+}

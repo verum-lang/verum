@@ -164,6 +164,7 @@ fn emit_plan(st: &mut CgState, plan: &PlanNode) -> Result<(), CodegenError> {
         PnFilter(ref child, ref pred)  => emit_filter(st, child, pred),
         PnLimit(ref child, ref lim, ref off) => emit_limit(st, child, lim, off),
         PnSort(ref child, ref terms) => emit_sort(st, child, terms),
+        PnDistinct(ref child, n_proj) => emit_distinct(st, child, n_proj),
         PnTableScan(ref t, cid, n_cols) => emit_table_scan(st, t, cid, n_cols),
         PnInsert(ref t, ref cols, ref src, ref oc) => emit_insert(st, t, cols, src, oc),
         PnDelete(ref t, cid, ref pred) => emit_delete(st, t, cid, pred),
@@ -543,6 +544,114 @@ fn emit_aggregate_scan(
 
     // Emit exactly one result row.
     let _ = st.program.emit(ResultRow(acc_start, n_proj));
+    Ok(())
+}
+
+// -----------------------------------------------------------------------------
+// DISTINCT (materialise + sort-by-all + dedup)
+// -----------------------------------------------------------------------------
+
+fn emit_distinct(
+    st: &mut CgState,
+    child: &PlanNode,
+    n_proj: Int,
+) -> Result<(), CodegenError> {
+    match child {
+        PnProject(ref grand, ref proj_cols) => {
+            match grand {
+                PnTableScan(ref _t, cid, n) =>
+                    emit_distinct_pipeline(st, cid, n, proj_cols, false, &ELit(LNull)),
+                PnFilter(ref gg, ref pred) => match gg {
+                    PnTableScan(ref _t, cid, n) =>
+                        emit_distinct_pipeline(st, cid, n, proj_cols, true, pred),
+                    _ => Err(unsupported("DISTINCT over non-TableScan child pending".clone())),
+                },
+                _ => Err(unsupported("DISTINCT over non-TableScan child pending".clone())),
+            }
+        }
+        _ => {
+            let _ = n_proj;
+            Err(unsupported("DISTINCT must wrap a Project/TableScan pipeline".clone()))
+        }
+    }
+}
+
+fn emit_distinct_pipeline(
+    st: &mut CgState,
+    src_cid: Int,
+    src_n_cols: Int,
+    proj_cols: &List<PlanColumn>,
+    has_filter: Bool,
+    filter_pred: &Expr,
+) -> Result<(), CodegenError> {
+    let n_proj = proj_cols.len();
+
+    let sid = st.program.declare_cursor(CkTable, 0, n_proj);
+    let _ = st.program.emit(OpenEphemeral(sid, n_proj));
+
+    // Fill the ephemeral buffer with the projected rows.
+    if src_cid >= st.program.cursor_count() {
+        let _ = st.program.declare_cursor(CkTable, 0, src_n_cols);
+    }
+    let _ = st.program.emit(OpenRead(src_cid, 0, src_n_cols));
+    let rewind_idx = st.program.emit(Rewind(src_cid, 0));
+    let loop_top = st.program.instruction_count();
+
+    let mut skip_patch: Int = -1;
+    let mut skip_pred_reg: Int = -1;
+    if has_filter {
+        let pr = st.regs.alloc();
+        match emit_expr(st, filter_pred, pr) {
+            Ok(_)  => {}, Err(e) => { return Err(e); }
+        }
+        skip_patch = st.program.emit(IfNot(pr, 0));
+        skip_pred_reg = pr;
+    }
+
+    let scratch = st.regs.alloc_n(n_proj);
+    let mut p: Int = 0;
+    while p < n_proj {
+        match emit_expr(st, &proj_cols[p].expr, scratch + p) {
+            Ok(_)  => {}, Err(e) => { return Err(e); }
+        }
+        p = p + 1;
+    }
+    let key_reg = st.regs.alloc();
+    let _ = st.program.emit(NewRowid(sid, key_reg));
+    let _ = st.program.emit(Insert(sid, scratch, key_reg, 0));
+
+    if skip_patch >= 0 {
+        let skip_target = st.program.instruction_count();
+        st.program.replace(skip_patch, IfNot(skip_pred_reg, skip_target));
+    }
+
+    let _ = st.program.emit(Next(src_cid, loop_top));
+    let after_scan = st.program.instruction_count();
+    st.program.replace(rewind_idx, Rewind(src_cid, after_scan));
+    let _ = st.program.emit(Close(src_cid));
+
+    // Sort by all columns ascending → adjacent duplicates are next to
+    // each other, then dedup.
+    let _ = st.program.emit(SortRowStore(sid, n_proj, 0));
+    let _ = st.program.emit(DedupRowStore(sid, n_proj));
+
+    // Emit.
+    let emit_rewind_idx = st.program.emit(Rewind(sid, 0));
+    let emit_loop_top = st.program.instruction_count();
+    let dst = st.regs.alloc_n(n_proj);
+    let mut ek: Int = 0;
+    while ek < n_proj {
+        let _ = st.program.emit(Column(sid, ek, dst + ek));
+        ek = ek + 1;
+    }
+    let gp = emit_limit_body_prefix(st);
+    let _ = st.program.emit(ResultRow(dst, n_proj));
+    emit_limit_body_counter(st, gp);
+    let _ = st.program.emit(Next(sid, emit_loop_top));
+    let after_emit = st.program.instruction_count();
+    st.program.replace(emit_rewind_idx, Rewind(sid, after_emit));
+    emit_limit_finalize_patches(st, after_emit);
+    let _ = st.program.emit(Close(sid));
     Ok(())
 }
 

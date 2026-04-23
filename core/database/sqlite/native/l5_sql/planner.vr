@@ -74,6 +74,7 @@ public type PlanNode is
     | PnFilter(child: Heap<PlanNode>, predicate: Expr)
     | PnProject(child: Heap<PlanNode>, columns: List<PlanColumn>)
     | PnSort(child: Heap<PlanNode>, terms: List<OrderTerm>)
+    | PnDistinct(child: Heap<PlanNode>, n_proj: Int)
     | PnLimit(child: Heap<PlanNode>, limit: Expr, offset: Maybe<Expr>)
     | PnInsert(table: TableRef, columns: List<Text>, source: Heap<PlanNode>, on_conflict: Maybe<OnConflict>)
     | PnDelete(table: TableRef, cursor_id: Int, predicate: Maybe<Expr>)
@@ -651,7 +652,14 @@ fn plan_select_with_schema(
         }
         i = i + 1;
     }
+    let n_proj = plan_cols.len();
     node = PnProject(Heap(node), plan_cols);
+
+    // DISTINCT — wrap after projection so the distinct rows match what
+    // the user would see.
+    if simple.distinct {
+        node = PnDistinct(Heap(node), n_proj);
+    }
 
     // ORDER BY — resolve every term's expression against the same scope.
     if sel.order_by.len() > 0 {

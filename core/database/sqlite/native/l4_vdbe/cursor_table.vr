@@ -549,6 +549,29 @@ implement CursorTable {
         out
     }
 
+    /// Remove adjacent rows that agree on the first `n_cells` cells.
+    /// Intended to follow `sort_by_prefix` for SELECT DISTINCT paths.
+    public fn dedup_adjacent(&mut self, cursor_id: Int, n_cells: Int) -> Bool {
+        if cursor_id < 0 || cursor_id >= self.slots.len() { return false; }
+        if n_cells <= 0 { return true; }
+        let s = &mut self.slots[cursor_id];
+        let mut kept: List<List<Register>> = List.new();
+        let mut i: Int = 0;
+        while i < s.rows.len() {
+            let push_it = if kept.len() == 0 {
+                true
+            } else {
+                let prev = &kept[kept.len() - 1];
+                compare_rows_prefix(prev, &s.rows[i], n_cells, 0) != 0
+            };
+            if push_it { kept.push(s.rows[i].clone()); }
+            i = i + 1;
+        }
+        s.rows = kept;
+        s.pos = 0;
+        true
+    }
+
     /// In-place stable sort of the row-store by the first `n_keys`
     /// cells of each row. `dir_bits` is a bitmask: bit k set → key k
     /// is DESC. Used by the SortRowStore opcode backing ORDER BY.
