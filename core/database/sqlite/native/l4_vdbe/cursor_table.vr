@@ -390,6 +390,17 @@ implement CursorTable {
         true
     }
 
+    /// Overwrite the row at the current `pos` with `row`. Used by
+    /// UPDATE codegen: evaluate per-column assignments into
+    /// contiguous registers, then call this to commit.
+    public fn replace_current_row(&mut self, cursor_id: Int, row: List<Register>) -> Bool {
+        if cursor_id < 0 || cursor_id >= self.slots.len() { return false; }
+        let s = &mut self.slots[cursor_id];
+        if s.pos >= s.rows.len() { return false; }
+        s.rows[s.pos] = row;
+        true
+    }
+
     /// Total rows currently in the store.
     public fn row_count(&self, cursor_id: Int) -> Int {
         if cursor_id < 0 || cursor_id >= self.slots.len() { return 0; }

@@ -95,6 +95,7 @@ public type Opcode is
     // Mutation ---------------------------------------------------------------
     | Insert(cursor_id: Int, data_reg: Int, key_reg: Int, flags: Int)
     | Delete(cursor_id: Int)
+    | UpdateRow(cursor_id: Int, data_reg: Int)
     | NewRowid(cursor_id: Int, reg_dst: Int)
     | MakeRecord(reg_start: Int, n_cols: Int, reg_dst: Int, affinity_const_idx: Int)
 
@@ -188,6 +189,7 @@ public fn opcode_name(op: &Opcode) -> Text {
         NotFound(_, _, _, _) => "NotFound".clone(),
         Insert(_, _, _, _) => "Insert".clone(),
         Delete(_)          => "Delete".clone(),
+        UpdateRow(_, _)    => "UpdateRow".clone(),
         NewRowid(_, _)     => "NewRowid".clone(),
         MakeRecord(_, _, _, _) => "MakeRecord".clone(),
         OpenEphemeral(_, _) => "OpenEphemeral".clone(),
@@ -244,6 +246,7 @@ public fn has_external_effect(op: &Opcode) -> Bool {
         ResultRow(_, _)
         | Insert(_, _, _, _)
         | Delete(_)
+        | UpdateRow(_, _)
         | OpenWrite(_, _, _)
         | Transaction(_)
         | Commit | RollbackOp(_) | SavepointOp(_)

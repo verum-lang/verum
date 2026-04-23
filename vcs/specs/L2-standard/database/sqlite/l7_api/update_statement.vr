@@ -1,0 +1,120 @@
+// @test: typecheck-pass
+// @level: L2
+// @tier: 0
+// @tags: sqlite, native, l7, update, dml
+// @timeout: 15000
+// @description: UPDATE codegen — full-scan + WHERE + multi-column SET through the facade
+//
+// Spec: internal/specs/sqlite-native.md §14.3 (UPDATE) + §16.3 (facade)
+
+mount core.*;
+mount collections.List;
+mount core.database.sqlite.native.l7_api.{
+    Database, DbError, open_admin,
+};
+mount core.database.sqlite.native.l4_vdbe.Register;
+
+// --- UPDATE-all (no WHERE) --------------------------------------------------
+
+fn update_all_rows_rewrites_column() {
+    let mut db = match open_admin() {
+        Ok(d)  => d,
+        Err(_) => { panic("open"); return; }
+    };
+    let _ = db.execute(&"CREATE TABLE t (v INTEGER)".clone());
+    let _ = db.execute(&"INSERT INTO t VALUES (10)".clone());
+    let _ = db.execute(&"INSERT INTO t VALUES (20)".clone());
+    let _ = db.execute(&"INSERT INTO t VALUES (30)".clone());
+    let _ = db.execute(&"UPDATE t SET v = 99".clone());
+    match db.query_all(&"SELECT v FROM t".clone()) {
+        Ok(rows) => {
+            assert_eq(rows.len(), 3);
+            // Every row should now hold 99.
+            let mut i: Int = 0;
+            while i < rows.len() {
+                match rows[i][0] {
+                    RInt(x) => { assert_eq(x as Int, 99); }
+                    _ => panic("UPDATE all: expected RInt"),
+                }
+                i = i + 1;
+            }
+        }
+        Err(_) => panic("query_all post-UPDATE"),
+    }
+}
+
+// --- UPDATE with WHERE ------------------------------------------------------
+
+fn update_where_filters_rewrites_only_matching() {
+    let mut db = match open_admin() {
+        Ok(d)  => d,
+        Err(_) => { panic("open"); return; }
+    };
+    let _ = db.execute(&"CREATE TABLE nums (v INTEGER)".clone());
+    let _ = db.execute(&"INSERT INTO nums VALUES (10)".clone());
+    let _ = db.execute(&"INSERT INTO nums VALUES (42)".clone());
+    let _ = db.execute(&"INSERT INTO nums VALUES (99)".clone());
+    // Only the v=42 row should be rewritten.
+    let _ = db.execute(&"UPDATE nums SET v = 7 WHERE v = 42".clone());
+    match db.query_all(&"SELECT v FROM nums".clone()) {
+        Ok(rows) => {
+            assert_eq(rows.len(), 3);
+            // The facade is not guaranteed to order; we just scan for
+            // the expected multiset { 10, 7, 99 }.
+            let mut saw10: Bool = false;
+            let mut saw7: Bool = false;
+            let mut saw99: Bool = false;
+            let mut i: Int = 0;
+            while i < rows.len() {
+                match rows[i][0] {
+                    RInt(x) => {
+                        let xi = x as Int;
+                        if xi == 10 { saw10 = true; }
+                        if xi == 7  { saw7  = true; }
+                        if xi == 99 { saw99 = true; }
+                    }
+                    _ => panic("expected RInt"),
+                }
+                i = i + 1;
+            }
+            assert(saw10);
+            assert(saw7);
+            assert(saw99);
+        }
+        Err(_) => panic("query_all post-UPDATE WHERE"),
+    }
+}
+
+// --- UPDATE multi-column SET -----------------------------------------------
+
+fn update_multi_column_set() {
+    let mut db = match open_admin() {
+        Ok(d)  => d,
+        Err(_) => { panic("open"); return; }
+    };
+    let _ = db.execute(&"CREATE TABLE users (id INTEGER, name TEXT)".clone());
+    let _ = db.execute(&"INSERT INTO users VALUES (1, 'Alice')".clone());
+    let _ = db.execute(&"UPDATE users SET id = 2, name = 'Bob'".clone());
+    match db.query_all(&"SELECT id, name FROM users".clone()) {
+        Ok(rows) => {
+            assert_eq(rows.len(), 1);
+            assert_eq(rows[0].len(), 2);
+            match rows[0][0] {
+                RInt(x) => { assert_eq(x as Int, 2); }
+                _ => panic("users.id should be RInt(2) after UPDATE"),
+            }
+            match rows[0][1] {
+                RText(_) => {},
+                _ => panic("users.name should be RText after UPDATE"),
+            }
+        }
+        Err(_) => panic("query_all multi-col UPDATE"),
+    }
+}
+
+fn main() {
+    update_all_rows_rewrites_column();
+    update_where_filters_rewrites_only_matching();
+    update_multi_column_set();
+    print("update_statement typecheck ok");
+}

@@ -272,6 +272,7 @@ fn clone_opcode(op: &Opcode) -> Opcode {
         NotFound(c, t, k, n) => NotFound(c, t, k, n),
         Insert(c, d, k, f) => Insert(c, d, k, f),
         Delete(c)          => Delete(c),
+        UpdateRow(c, d)    => UpdateRow(c, d),
         NewRowid(c, d)     => NewRowid(c, d),
         MakeRecord(s, n, d, a) => MakeRecord(s, n, d, a),
         OpenEphemeral(c, n) => OpenEphemeral(c, n),

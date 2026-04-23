@@ -60,7 +60,7 @@ fn build_insert_values() {
 
 fn build_update_basic() {
     let t = TableRef { schema: "".clone(), name: "users".clone(), alias: "".clone() };
-    let asg = UpdateAssignment { column: "name".clone(), value: ELit(LText("Bob".clone())) };
+    let asg = UpdateAssignment { column: "name".clone(), col_idx: -1, value: ELit(LText("Bob".clone())) };
     let upd = UpdateStmt {
         table: t,
         assignments: [asg],

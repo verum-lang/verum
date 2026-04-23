@@ -157,6 +157,9 @@ public type InsertStmt is {
 
 public type UpdateAssignment is {
     column: Text,
+    // Column index in the table (resolved by the planner against the
+    // schema cache). -1 = unresolved; codegen errors out on this.
+    col_idx: Int,
     value: Expr,
 };
 

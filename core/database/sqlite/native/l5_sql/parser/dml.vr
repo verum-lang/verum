@@ -168,7 +168,7 @@ public fn parse_update(ts: &mut TokenStream) -> Result<UpdateStmt, ParseError> {
         let value = match parse_expr(ts) {
             Ok(x)  => x, Err(err) => { return Err(err); }
         };
-        assignments.push(UpdateAssignment { column: col, value: value });
+        assignments.push(UpdateAssignment { column: col, col_idx: -1, value: value });
         if !ts.accept_punct(PComma) { break; }
     }
 

@@ -77,7 +77,7 @@ public type PlanNode is
     | PnLimit(child: Heap<PlanNode>, limit: Expr, offset: Maybe<Expr>)
     | PnInsert(table: TableRef, columns: List<Text>, source: Heap<PlanNode>, on_conflict: Maybe<OnConflict>)
     | PnDelete(table: TableRef, cursor_id: Int, predicate: Maybe<Expr>)
-    | PnUpdate(table: TableRef, cursor_id: Int, assignments: List<UpdateAssignment>, predicate: Maybe<Expr>)
+    | PnUpdate(table: TableRef, cursor_id: Int, n_cols: Int, assignments: List<UpdateAssignment>, predicate: Maybe<Expr>)
     | PnCreateTable(stmt: CreateTableStmt)
     | PnDrop(kind: DropPlanKind, if_exists: Bool, target: TableRef)
     | PnTransaction(tx: TxAction)
@@ -247,6 +247,7 @@ fn plan_update(upd: &UpdateStmt) -> Result<PlanNode, PlanError> {
     Ok(PnUpdate(
         clone_table_ref(&upd.table),
         cursor_id,
+        0,                               // n_cols unknown without schema
         clone_assignments(&upd.assignments),
         pred,
     ))
@@ -319,6 +320,7 @@ fn clone_assignments(xs: &List<UpdateAssignment>) -> List<UpdateAssignment> {
     while i < xs.len() {
         out.push(UpdateAssignment {
             column: xs[i].column.clone(),
+            col_idx: xs[i].col_idx,
             value: clone_expr(&xs[i].value),
         });
         i = i + 1;
@@ -465,8 +467,99 @@ public fn plan_statement_with_schema(
 ) -> Result<PlanNode, PlanError> {
     match stmt {
         SSelect(ref sel) => plan_select_with_schema(sel, schema),
+        SUpdate(ref upd) => plan_update_with_schema(upd, schema),
+        SDelete(ref del) => plan_delete_with_schema(del, schema),
         _ => plan_statement(stmt),
     }
+}
+
+fn plan_update_with_schema(
+    upd: &UpdateStmt,
+    schema: &SchemaCache,
+) -> Result<PlanNode, PlanError> {
+    let meta = match schema.lookup_table(&upd.table.schema, &upd.table.name) {
+        Ok(m)  => m,
+        Err(_) => { return Err(plan_error("UPDATE on unknown table".clone())); }
+    };
+
+    let cursor_id: Int = 0;
+    let scope = scope_from_table_meta(cursor_id, upd.table.alias.clone(), &meta);
+    let mut scopes: List<ColumnScope> = List.new();
+    scopes.push(scope);
+
+    // Resolve each assignment: look up col_idx + resolve the value
+    // expression's column references.
+    let mut resolved: List<UpdateAssignment> = List.new();
+    let mut i: Int = 0;
+    while i < upd.assignments.len() {
+        let a = &upd.assignments[i];
+        let mut col_idx: Int = -1;
+        let mut k: Int = 0;
+        while k < meta.columns.len() {
+            if meta.columns[k].name == a.column.clone() {
+                col_idx = k;
+                break;
+            }
+            k = k + 1;
+        }
+        if col_idx < 0 {
+            return Err(plan_error("SET references unknown column".clone()));
+        }
+        let value = match resolve_expr(&a.value, &scopes) {
+            Ok(e)  => e,
+            Err(_) => { return Err(plan_error("SET value resolution failed".clone())); }
+        };
+        resolved.push(UpdateAssignment {
+            column: a.column.clone(),
+            col_idx: col_idx,
+            value: value,
+        });
+        i = i + 1;
+    }
+
+    let pred: Maybe<Expr> = match upd.where_clause {
+        Some(ref e) => {
+            match resolve_expr(e, &scopes) {
+                Ok(r)  => Some(r),
+                Err(_) => { return Err(plan_error("UPDATE WHERE resolve failed".clone())); }
+            }
+        }
+        None => None,
+    };
+
+    Ok(PnUpdate(
+        clone_table_ref(&upd.table),
+        cursor_id,
+        meta.columns.len(),
+        resolved,
+        pred,
+    ))
+}
+
+fn plan_delete_with_schema(
+    del: &DeleteStmt,
+    schema: &SchemaCache,
+) -> Result<PlanNode, PlanError> {
+    let meta = match schema.lookup_table(&del.table.schema, &del.table.name) {
+        Ok(m)  => m,
+        Err(_) => { return Err(plan_error("DELETE from unknown table".clone())); }
+    };
+    let cursor_id: Int = 0;
+    let scope = scope_from_table_meta(cursor_id, del.table.alias.clone(), &meta);
+    let mut scopes: List<ColumnScope> = List.new();
+    scopes.push(scope);
+
+    let pred: Maybe<Expr> = match del.where_clause {
+        Some(ref e) => {
+            match resolve_expr(e, &scopes) {
+                Ok(r)  => Some(r),
+                Err(_) => { return Err(plan_error("DELETE WHERE resolve failed".clone())); }
+            }
+        }
+        None => None,
+    };
+
+    Ok(PnDelete(clone_table_ref(&del.table), cursor_id, pred))
 }
 
 fn plan_select_with_schema(

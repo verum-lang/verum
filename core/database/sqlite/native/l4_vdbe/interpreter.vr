@@ -502,6 +502,22 @@ public fn step(state: &mut VdbeState, program: &VdbeProgram) -> StepResult {
             Yield
         }
 
+        UpdateRow(cursor_id, data_reg) => {
+            // Read n_cols registers starting at data_reg, overwrite
+            // the row at current pos. Mirrors the Insert pattern but
+            // replaces instead of appending.
+            let n_cols = state.cursors.n_cols_of(cursor_id);
+            let mut row: List<Register> = List.new();
+            let mut i: Int = 0;
+            while i < n_cols {
+                row.push(state.regs.get(data_reg + i));
+                i = i + 1;
+            }
+            let _ = state.cursors.replace_current_row(cursor_id, row);
+            state.pc = state.pc + 1;
+            Yield
+        }
+
         Transaction(_) => { state.pc = state.pc + 1; Yield }
         Commit         => { state.pc = state.pc + 1; Yield }
         RollbackOp(_)  => { state.pc = state.pc + 1; Yield }

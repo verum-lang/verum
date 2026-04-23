@@ -150,7 +150,8 @@ fn emit_plan(st: &mut CgState, plan: &PlanNode) -> Result<(), CodegenError> {
         PnTableScan(ref t, cid, n_cols) => emit_table_scan(st, t, cid, n_cols),
         PnInsert(ref t, ref cols, ref src, ref oc) => emit_insert(st, t, cols, src, oc),
         PnDelete(ref t, cid, ref pred) => emit_delete(st, t, cid, pred),
-        PnUpdate(_, _, _, _) => Err(unsupported("UPDATE codegen pending L3 cursor I/O".clone())),
+        PnUpdate(ref t, cid, n_cols, ref asgns, ref pred) =>
+            emit_update(st, t, cid, n_cols, asgns, pred),
         PnCreateTable(ref ct) => emit_create_table(st, ct),
         PnDrop(ref kind, if_exists, ref target) => emit_drop(st, kind, if_exists, target),
         PnTransaction(ref action) => emit_transaction(st, action),
@@ -481,6 +482,101 @@ fn emit_delete(
             let _ = st.program.emit(Delete(cursor_id));
         }
     }
+    let _ = st.program.emit(Next(cursor_id, loop_top));
+    let after_loop = st.program.instruction_count();
+    st.program.replace(rewind_idx, Rewind(cursor_id, after_loop));
+    let _ = st.program.emit(Close(cursor_id));
+    Ok(())
+}
+
+// -----------------------------------------------------------------------------
+// UPDATE
+//
+//   Transaction(1)
+//   OpenWrite(cid, root=1, n_cols)
+//   Rewind(cid, end)
+// loop_top:
+//   [optional] pred_reg = emit_expr(pred)   IfNot pred_reg → skip to Next
+//   for k in 0..n_cols:  Column(cid, k, data_start + k)   // snapshot row
+//   for asgn in assignments:                               // overwrite cells
+//       emit_expr(asgn.value, data_start + asgn.col_idx)
+//   UpdateRow(cid, data_start)
+//   Next(cid, loop_top)
+// end:
+//   Close(cid)
+// -----------------------------------------------------------------------------
+
+fn emit_update(
+    st: &mut CgState,
+    table: &TableRef,
+    _cursor_id_hint: Int,
+    n_cols: Int,
+    assignments: &List<UpdateAssignment>,
+    predicate: &Maybe<Expr>,
+) -> Result<(), CodegenError> {
+    let _ = table;
+    if n_cols <= 0 {
+        return Err(unsupported("UPDATE needs schema-resolved column count".clone()));
+    }
+    // Validate that every assignment has a resolved col_idx in range.
+    let mut v: Int = 0;
+    while v < assignments.len() {
+        let ci = assignments[v].col_idx;
+        if ci < 0 || ci >= n_cols {
+            return Err(unsupported(
+                "UPDATE assignment with unresolved col_idx — run the resolver".clone()
+            ));
+        }
+        v = v + 1;
+    }
+
+    let cursor_id = st.program.declare_cursor(CkTable, 1, n_cols);
+    let _ = st.program.emit(Transaction(1));
+    let _ = st.program.emit(OpenWrite(cursor_id, 1, n_cols));
+    let rewind_idx = st.program.emit(Rewind(cursor_id, 0));
+    let loop_top = st.program.instruction_count();
+
+    // Predicate — evaluate and skip the body on falsy.
+    let mut skip_patch: Int = -1;
+    let mut skip_pred_reg: Int = -1;
+    match predicate {
+        Some(ref pred) => {
+            let pr = st.regs.alloc();
+            match emit_expr(st, pred, pr) {
+                Ok(_)  => {}, Err(e) => { return Err(e); }
+            }
+            skip_patch = st.program.emit(IfNot(pr, 0));
+            skip_pred_reg = pr;
+        }
+        None => {}
+    }
+
+    // Snapshot current row into data_start..data_start+n_cols.
+    let data_start = st.regs.alloc_n(n_cols);
+    let mut k: Int = 0;
+    while k < n_cols {
+        let _ = st.program.emit(Column(cursor_id, k, data_start + k));
+        k = k + 1;
+    }
+
+    // Overwrite columns named in SET.
+    let mut a: Int = 0;
+    while a < assignments.len() {
+        let ci = assignments[a].col_idx;
+        match emit_expr(st, &assignments[a].value, data_start + ci) {
+            Ok(_)  => {}, Err(e) => { return Err(e); }
+        }
+        a = a + 1;
+    }
+
+    let _ = st.program.emit(UpdateRow(cursor_id, data_start));
+
+    // Close the skip path (predicate-false jumps here, right before Next).
+    if skip_patch >= 0 {
+        let skip_target = st.program.instruction_count();
+        st.program.replace(skip_patch, IfNot(skip_pred_reg, skip_target));
+    }
+
     let _ = st.program.emit(Next(cursor_id, loop_top));
     let after_loop = st.program.instruction_count();
     st.program.replace(rewind_idx, Rewind(cursor_id, after_loop));
