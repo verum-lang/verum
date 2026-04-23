@@ -1,0 +1,68 @@
+// @test: unit
+// @tier: 0
+// @level: L2
+// @tags: quic, stateless_reset, rfc9000_10_3, kat
+// @timeout: 5000
+// @expect: pass
+
+// RFC 9000 §10.3 — Stateless Reset token generation + detection.
+//
+//   * Tokens derived deterministically from (static key, CID).
+//   * Same CID + same key → same token (determinism).
+//   * Different CIDs → different tokens (pseudo-unique).
+//   * Constant-time match against a datagram's trailing 16 bytes.
+
+mount core.*;
+mount core.collections.List;
+mount core.net.quic.stateless_reset.{
+    StatelessResetKey, ResetTokenSet,
+    build_stateless_reset, try_match_stateless_reset,
+    STATELESS_RESET_MIN_SIZE,
+};
+
+fn bytes16_eq(a: &[Byte; 16], b: &[Byte; 16]) -> Bool {
+    let mut i: Int = 0;
+    while i < 16 {
+        if a[i] != b[i] { return false; }
+        i = i + 1;
+    }
+    true
+}
+
+fn main() {
+    let key = StatelessResetKey.generate();
+
+    // Determinism: same CID → same token.
+    let cid_a: [Byte; 8] = [0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88];
+    let tok_a1 = key.token_for_cid(&cid_a);
+    let tok_a2 = key.token_for_cid(&cid_a);
+    assert_eq(bytes16_eq(&tok_a1, &tok_a2), true);
+
+    // Pseudo-uniqueness: different CID → different token.
+    let cid_b: [Byte; 8] = [0x88, 0x77, 0x66, 0x55, 0x44, 0x33, 0x22, 0x11];
+    let tok_b = key.token_for_cid(&cid_b);
+    assert_eq(bytes16_eq(&tok_a1, &tok_b), false);
+
+    // Wire detection: build a reset datagram, scan against a set that
+    // contains the matching token.
+    let wire = build_stateless_reset(&tok_a1, STATELESS_RESET_MIN_SIZE);
+    assert_eq(wire.len() >= STATELESS_RESET_MIN_SIZE, true);
+
+    let mut set = ResetTokenSet.new();
+    set.insert(tok_b.clone());          // non-match
+    set.insert(tok_a1.clone());         // match
+    match try_match_stateless_reset(wire.as_slice(), &set) {
+        Some(idx) => assert_eq(idx, 1), // index of tok_a1
+        None      => panic("matching reset token not detected"),
+    }
+
+    // Short-datagram rejection: a wire buffer below STATELESS_RESET_MIN_SIZE
+    // must be ignored even if the suffix would match.
+    let short: [Byte; 20] = [0; 20];
+    match try_match_stateless_reset(&short, &set) {
+        None    => {},
+        Some(_) => panic("short datagram wrongly matched"),
+    }
+
+    print("RFC 9000 §10.3 stateless reset KAT OK");
+}

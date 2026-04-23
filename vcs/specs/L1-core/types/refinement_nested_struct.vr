@@ -1,0 +1,29 @@
+// @test: typecheck-fail
+// @tier: 0
+// @level: L1
+// @tags: refinement, nested-struct, check_phase, language
+// @expect: errors
+
+// Regression for refinement firing at arbitrary depth in nested struct
+// literals.  Inner.page_no is PageNo (refined Int >= 1); the outer
+// struct literal wraps it.  The check phase must walk into Inner and
+// report the violation.
+
+mount core.*;
+
+type PageNo is Int where |n| { n >= 1 };
+
+type Inner is { page_no: PageNo };
+type Middle is { label: Text, inner: Inner };
+type Outer is { tag: Int, mid: Middle };
+
+fn main() {
+    let bad: Outer = Outer {
+        tag: 1,
+        mid: Middle {
+            label: Text.from("deep"),
+            inner: Inner { page_no: 0 },
+        },
+    };
+    print("should not compile");
+}

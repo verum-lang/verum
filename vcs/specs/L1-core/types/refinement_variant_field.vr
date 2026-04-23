@@ -1,0 +1,28 @@
+// @test: typecheck-fail
+// @tier: 0
+// @level: L1
+// @tags: refinement, variant-field, check_phase, language
+// @expect: errors
+
+// Regression for variant-field refinement propagation.  Struct-variant
+// fields can carry refinement types and the check phase must enforce
+// them at construction.  This is the pattern QUIC frame spec §19.4
+// uses for `ResetStream { final_size: i <= 2^62-1 }`.
+
+mount core.*;
+
+type StreamId is Int where |n| { n >= 0 && n < 4611686018427387904 };
+
+type QuicFrame is
+      Padding
+    | Ping
+    | ResetStream { stream_id: StreamId, error_code: Int };
+
+fn main() {
+    // Violation: stream_id = -1 fails the n >= 0 lower bound.
+    let f: QuicFrame = QuicFrame.ResetStream {
+        stream_id: -1,
+        error_code: 0,
+    };
+    print("should not compile");
+}
