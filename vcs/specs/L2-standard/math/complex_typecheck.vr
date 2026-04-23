@@ -1,0 +1,67 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: math, complex, imaginary
+// @timeout: 15000
+// @description: core.math.complex — Complex<Float> constructors + accessors
+
+mount core.*;
+mount core.math.complex.Complex;
+
+fn new_and_accessors() {
+    let c = Complex.new(3.0, 4.0);
+    // |3+4i| = 5.
+    let m = c.abs();
+    let diff = if m > 5.0 { m - 5.0 } else { 5.0 - m };
+    assert(diff < 0.0000001);
+    // |3+4i|² = 25.
+    let sq = c.abs_sq();
+    let diff2 = if sq > 25.0 { sq - 25.0 } else { 25.0 - sq };
+    assert(diff2 < 0.0000001);
+}
+
+fn zero_and_one() {
+    // Complex.zero()/.one() are type-param generic; route via i() and one()
+    // which fix T = Float, so .abs() is available.
+    let o = Complex.one();
+    let diff = if o.abs() > 1.0 { o.abs() - 1.0 } else { 1.0 - o.abs() };
+    assert(diff < 0.0000001);
+}
+
+fn imaginary_unit() {
+    let i = Complex.i();
+    // |i| = 1.
+    let m = i.abs();
+    let diff = if m > 1.0 { m - 1.0 } else { 1.0 - m };
+    assert(diff < 0.0000001);
+}
+
+fn conj_preserves_magnitude() {
+    let c = Complex.new(3.0, -4.0);
+    let c_conj = c.conj();
+    let diff = if c.abs() > c_conj.abs() { c.abs() - c_conj.abs() } else { c_conj.abs() - c.abs() };
+    assert(diff < 0.0000001);
+}
+
+fn recip_exists_for_nonzero() {
+    let c = Complex.new(2.0, 0.0);
+    match c.recip() {
+        Some(_) => {}
+        None    => { panic("1/2 exists"); }
+    }
+    // 0 recip-case: construct via new(0.0, 0.0) to fix T=Float.
+    let zero = Complex.new(0.0, 0.0);
+    match zero.recip() {
+        Some(_) => { panic("1/0 should be None"); }
+        None    => {}
+    }
+}
+
+fn main() {
+    new_and_accessors();
+    zero_and_one();
+    imaginary_unit();
+    conj_preserves_magnitude();
+    recip_exists_for_nonzero();
+    print("complex_typecheck ok");
+}
