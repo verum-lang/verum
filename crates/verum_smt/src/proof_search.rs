@@ -6125,9 +6125,24 @@ impl ProofSearchEngine {
             | "definition_unfold"
             | "unfold_definition" => self.try_auto(goal),
 
-            _ => Err(ProofError::TacticFailed(
-                format!("Unknown tactic: {}", name).into(),
-            )),
+            _ => {
+                // The name wasn't a dispatch-table entry. Before
+                // reporting failure, try to interpret it as a lemma
+                // reference: `by some_lemma` is a common structured-
+                // proof shorthand for `apply some_lemma`, and the
+                // module-lemma registration makes every sibling
+                // theorem/lemma/corollary/axiom findable by its
+                // unqualified name. If the lemma exists, run apply
+                // and return its subgoals; only if it doesn't exist
+                // either do we surface the "Unknown tactic" error.
+                let lookup_key = name.clone();
+                if self.hints.lemmas.contains_key(&lookup_key) {
+                    return self.try_apply(&lookup_key, goal);
+                }
+                Err(ProofError::TacticFailed(
+                    format!("Unknown tactic: {}", name).into(),
+                ))
+            }
         }
     }
 }
