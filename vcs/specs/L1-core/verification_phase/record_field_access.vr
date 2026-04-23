@@ -1,0 +1,49 @@
+// @test: integration
+// @tier: 0
+// @level: L1
+// @tags: verify, record, field, uninterpreted, ensures
+// @expect: pass
+//
+// Record field access `p.x`, `p.y` must translate to uninterpreted
+// Z3 symbols keyed on `<receiver>.<field>` so:
+//   * reflexivity closes: `p.x == p.x`;
+//   * field-equality propagates: `p.x == q.x && p.y == q.y →
+//     p.x + p.y == q.x + q.y`;
+//   * distinct fields / records stay distinct (`p.x == p.y` is NOT
+//     provable — preserved in soundness tests).
+//
+// Root cause before the fix: the translator's Field arm only
+// whitelisted `length`/`len`/`size` and rejected every other field
+// with `UnsupportedExpr`.
+
+public type Point is { x: Int, y: Int };
+public type Segment is { start: Point, end: Point };
+
+@verify(formal)
+theorem field_reflexive(p: Point)
+    ensures p.x == p.x
+    ensures p.y == p.y
+    proof by auto;
+
+@verify(formal)
+theorem field_equality_propagates(p: Point, q: Point)
+    requires p.x == q.x
+    requires p.y == q.y
+    ensures p.x + p.y == q.x + q.y
+    proof by auto;
+
+@verify(formal)
+theorem field_arith(p: Point)
+    requires p.x == 3
+    requires p.y == 4
+    ensures p.x + p.y == 7
+    proof by auto;
+
+@verify(formal)
+theorem nested_field(s: Segment)
+    ensures s.start.x == s.start.x
+    proof by auto;
+
+fn main() {
+    print("L1-core: verification_phase/record_field_access");
+}

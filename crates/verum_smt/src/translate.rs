@@ -798,10 +798,28 @@ impl<'ctx> Translator<'ctx> {
                         let int_var = Int::new_const(base_name.as_str());
                         Ok(Dynamic::from_ast(&int_var))
                     }
-                    _ => Err(TranslationError::UnsupportedExpr(Text::from(format!(
-                        "field access: {}",
-                        field_name
-                    )))),
+                    _ => {
+                        // General record-field access. Model as a
+                        // uninterpreted Int keyed on
+                        // `<pretty(receiver)>.<field>` so repeated
+                        // references to the same field on the same
+                        // receiver denote the same Z3 symbol. This
+                        // makes postconditions like
+                        //     requires p.x == q.x
+                        //     ensures p.x + p.y == q.x + q.y
+                        // close through linear arithmetic without a
+                        // dedicated Z3 datatype for the record.
+                        // Default sort is Int; other sorts need a
+                        // richer type-layer signal which isn't yet
+                        // plumbed through.
+                        let key = format!(
+                            "field_{}__{}",
+                            verum_ast::pretty::format_expr(strip_paren(expr)),
+                            field_name
+                        );
+                        let int_var = Int::new_const(key.as_str());
+                        Ok(Dynamic::from_ast(&int_var))
+                    }
                 }
             }
 
