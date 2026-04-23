@@ -1,0 +1,247 @@
+// =============================================================================
+// opcode_catalog/effects.vr — purity / side-effect classification
+// =============================================================================
+// Spec: sqlite-native.md §11.5
+//
+// Each opcode is classified by what state it observes and modifies.
+// The optimiser uses this to decide whether instructions can be:
+//
+//   * reordered (commutativity)
+//   * deduplicated (purity)
+//   * hoisted out of a loop (loop-invariance)
+//   * lifted across a transaction boundary
+//
+// Effects are a small bitset. We expose six independent facets so
+// new opcode authors don't have to invent ad-hoc classifications.
+// =============================================================================
+
+module core.database.sqlite.native.opcode_catalog.effects;
+
+mount core.*;
+mount base.{Bool};
+mount core.database.sqlite.native.opcode_catalog.metadata.{
+    OpcodeKind,
+    OpInit, OpHalt, OpHaltIfNull, OpGoto, OpGosub, OpReturn, OpOnce, OpNoop,
+    OpJump, OpExpire, OpAbortable, OpReleaseReg, OpYield, OpInteger32, OpResult,
+    OpInteger, OpInt64, OpReal, OpString8, OpBlob, OpNull, OpSoftNull,
+    OpMove, OpCopy, OpSCopy, OpZeroOrNull, OpVariable, OpString, OpClear,
+    OpResetCount, OpEphemeralAbs,
+    OpAdd, OpSubtract, OpMultiply, OpDivide, OpRemainder, OpAddImm, OpRealAffinity,
+    OpBitAnd, OpBitOr, OpShiftLeft, OpShiftRight, OpBitNot, OpConcat, OpCast,
+    OpMustBeInt, OpAffinity,
+    OpCompare, OpEq, OpNe, OpLt, OpLe, OpGt, OpGe,
+    OpIf, OpIfNot, OpIfNull, OpNotNull, OpIfPos, OpIfNeg, OpIfZero, OpAnd, OpOr,
+    OpOpenRead, OpOpenWrite, OpOpenAutoindex, OpOpenEphemeral, OpClose,
+    OpRewind, OpLast, OpNext, OpPrev, OpColumn, OpRowId, OpRowKey, OpRowData,
+    OpInsert, OpDelete, OpUpdateRow, OpFound, OpNotFound,
+    OpSeekGT, OpSeekLT, OpSeekGE, OpSeekLE, OpSeekRowId, OpSeekScan,
+    OpResetCursor, OpIdxInsert, OpIdxDelete, OpIdxRowid,
+    OpIdxLT, OpIdxLE, OpIdxGE, OpIdxGT,
+    OpAggStep, OpAggFinal, OpAggValue, OpAggInverse, OpAggFinalAvg,
+    OpSorterOpen, OpSorterInsert, OpSorterRewind, OpSorterNext,
+    OpSorterData, OpSorterCompare, OpSorterDistinct,
+    OpDistinct, OpScalarFn, OpFunction, OpAggregateContext,
+    OpTransaction, OpCommit, OpRollbackOp, OpSavepointOp, OpAutoCommit,
+    OpReadCookie, OpSetCookie, OpVacuum,
+    OpVNew, OpVOpen, OpVDestroy, OpVRename, OpVColumn, OpVNext, OpVUpdate, OpVFilter,
+    OpCollSeq, OpExpiredSchema, OpInitCoroutine, OpEndCoroutine, OpYieldCoroutine,
+    OpDecrJumpZero, OpIncrLoad, OpResetSorter, OpAddCheckpoint, OpJournalMode,
+    OpPragma, OpAnalyze, OpReleaseSavepoint, OpDestroy, OpCreateIndex, OpCreateTable,
+    OpFkCounter, OpFkIfZero, OpFkCheck, OpDeferredFk,
+    OpTriggerEnter, OpTriggerLeave, OpTriggerProgram, OpFkViolation,
+    OpFunctionInvoke, OpRowSetTest, OpRowSetAdd, OpRowSetRead,
+    OpProgram, OpParam, OpProgramReturn, OpJumpIfNotZero,
+    OpVerify, OpExplain, OpExplainQueryPlan, OpDebug, OpTrace, OpProfile,
+    OpProgressTick, OpDeleteAll, OpDeleteUntilZero,
+    OpJournalCheckpoint, OpPagerWrite, OpFinish, OpReset, OpBindParam,
+    OpHaltUserError, OpSqlReset,
+};
+
+// -----------------------------------------------------------------------------
+// Effects
+// -----------------------------------------------------------------------------
+
+public type Effects is {
+    /// Reads at least one register.
+    reads_register: Bool,
+    /// Writes at least one register.
+    writes_register: Bool,
+    /// Reads or advances a cursor.
+    touches_cursor: Bool,
+    /// Modifies pager state (commits a write to disk).
+    writes_pager: Bool,
+    /// Yields a row to the caller (Result / Yield opcode).
+    yields_row: Bool,
+    /// May not be eliminated even if its outputs are unused
+    /// (because it has external side-effects: I/O, randomness, etc).
+    has_side_effects: Bool,
+    /// Conditionally branches the program counter.
+    is_branch: Bool,
+};
+
+public fn pure_effects() -> Effects {
+    Effects {
+        reads_register: true,
+        writes_register: true,
+        touches_cursor: false,
+        writes_pager: false,
+        yields_row: false,
+        has_side_effects: false,
+        is_branch: false,
+    }
+}
+
+public fn branch_effects() -> Effects {
+    let mut e = pure_effects();
+    e.is_branch = true;
+    e
+}
+
+public fn pager_writer() -> Effects {
+    let mut e = pure_effects();
+    e.touches_cursor = true;
+    e.writes_pager = true;
+    e.has_side_effects = true;
+    e
+}
+
+public fn cursor_reader() -> Effects {
+    let mut e = pure_effects();
+    e.touches_cursor = true;
+    e
+}
+
+public fn yield_effects() -> Effects {
+    let mut e = pure_effects();
+    e.yields_row = true;
+    e.has_side_effects = true;
+    e
+}
+
+public fn external_effect() -> Effects {
+    let mut e = pure_effects();
+    e.has_side_effects = true;
+    e
+}
+
+// -----------------------------------------------------------------------------
+// Per-opcode effect signature
+// -----------------------------------------------------------------------------
+
+public fn effects_of(o: &OpcodeKind) -> Effects {
+    match o {
+        // Branches
+        OpInit | OpGoto | OpJump | OpOnce
+        | OpIf | OpIfNot | OpIfNull | OpNotNull | OpIfPos | OpIfNeg | OpIfZero
+        | OpEq | OpNe | OpLt | OpLe | OpGt | OpGe | OpCompare
+        | OpJumpIfNotZero | OpDecrJumpZero | OpFkIfZero
+        | OpYieldCoroutine | OpInitCoroutine | OpEndCoroutine
+        | OpFound | OpNotFound | OpSeekGT | OpSeekLT | OpSeekGE | OpSeekLE
+        | OpSeekRowId | OpSeekScan
+        | OpIdxLT | OpIdxLE | OpIdxGE | OpIdxGT
+        | OpDistinct | OpRewind | OpLast | OpNext | OpPrev
+        | OpSorterRewind | OpSorterNext | OpSorterCompare
+                                     => branch_effects(),
+
+        // Control flow / side effect markers
+        OpHalt | OpHaltIfNull | OpHaltUserError
+                                     => external_effect(),
+        OpGosub | OpReturn | OpProgramReturn | OpReleaseReg
+        | OpExpire | OpAbortable | OpYield
+        | OpExplain | OpExplainQueryPlan | OpDebug | OpTrace | OpProfile
+        | OpProgressTick | OpVerify
+                                     => external_effect(),
+        OpNoop | OpResetCount | OpExpiredSchema | OpFinish | OpReset | OpSqlReset
+                                     => pure_effects(),
+
+        // Result row
+        OpResult                     => yield_effects(),
+
+        // Pure register loads
+        OpInteger | OpInteger32 | OpInt64 | OpReal | OpString8 | OpBlob
+        | OpNull | OpSoftNull | OpMove | OpCopy | OpSCopy | OpZeroOrNull
+        | OpVariable | OpString | OpParam | OpBindParam
+                                     => pure_effects(),
+
+        OpClear                      => external_effect(),
+        OpEphemeralAbs               => cursor_reader(),
+
+        // Arithmetic
+        OpAdd | OpSubtract | OpMultiply | OpDivide | OpRemainder
+        | OpAddImm | OpBitAnd | OpBitOr | OpShiftLeft | OpShiftRight | OpBitNot
+        | OpConcat | OpCast | OpRealAffinity | OpAffinity | OpMustBeInt
+        | OpAnd | OpOr
+                                     => pure_effects(),
+
+        // Cursor ops (read)
+        OpOpenRead | OpOpenAutoindex | OpOpenEphemeral
+        | OpClose | OpResetCursor
+        | OpColumn | OpRowId | OpRowKey | OpRowData | OpIdxRowid
+                                     => cursor_reader(),
+
+        // Cursor ops (write)
+        OpOpenWrite | OpInsert | OpDelete | OpUpdateRow
+        | OpIdxInsert | OpIdxDelete
+                                     => pager_writer(),
+
+        // Aggregates / sort
+        OpAggStep | OpAggInverse | OpAggregateContext
+                                     => external_effect(),
+        OpAggFinal | OpAggValue | OpAggFinalAvg
+                                     => pure_effects(),
+        OpSorterOpen | OpSorterInsert | OpSorterData | OpSorterDistinct | OpResetSorter
+                                     => external_effect(),
+        OpScalarFn | OpFunction | OpFunctionInvoke
+                                     => external_effect(),
+
+        // Transaction / pager
+        OpTransaction | OpCommit | OpRollbackOp | OpSavepointOp | OpAutoCommit
+        | OpReleaseSavepoint | OpAddCheckpoint | OpJournalMode | OpJournalCheckpoint
+        | OpPagerWrite | OpVacuum
+                                     => external_effect(),
+
+        OpReadCookie                 => pure_effects(),
+        OpSetCookie | OpAnalyze | OpDestroy | OpCreateIndex | OpCreateTable
+        | OpDeleteAll | OpDeleteUntilZero
+                                     => external_effect(),
+
+        // Virtual tables — side-effecting by definition
+        OpVNew | OpVOpen | OpVDestroy | OpVRename | OpVColumn
+        | OpVNext | OpVUpdate | OpVFilter
+                                     => external_effect(),
+
+        // Foreign keys / triggers
+        OpFkCounter | OpFkCheck | OpDeferredFk | OpFkViolation
+        | OpTriggerEnter | OpTriggerLeave | OpTriggerProgram | OpProgram
+                                     => external_effect(),
+
+        // Row sets
+        OpRowSetTest                 => branch_effects(),
+        OpRowSetAdd | OpRowSetRead   => external_effect(),
+
+        // Coroutines / collation
+        OpCollSeq | OpIncrLoad       => pure_effects(),
+
+        // Pragma — opaque side-effect
+        OpPragma                     => external_effect(),
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Helpers — common queries
+// -----------------------------------------------------------------------------
+
+public fn is_pure(o: &OpcodeKind) -> Bool {
+    let e = effects_of(o);
+    !e.has_side_effects && !e.writes_pager && !e.touches_cursor && !e.is_branch
+}
+
+public fn is_dml(o: &OpcodeKind) -> Bool {
+    let e = effects_of(o);
+    e.writes_pager
+}
+
+public fn is_safe_to_hoist(o: &OpcodeKind) -> Bool {
+    let e = effects_of(o);
+    !e.has_side_effects && !e.writes_pager && !e.is_branch
+}

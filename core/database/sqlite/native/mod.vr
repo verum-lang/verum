@@ -91,3 +91,6 @@ public module ext;
 public module concurrency;
 // - testing: DST harness / differential / fuzz / coverage (§22)
 public module testing;
+// - opcode_catalog: Appendix C — full ~180-opcode taxonomy + Appendix D
+//   error codes; complements l4_vdbe/opcode.vr without changing it.
+public module opcode_catalog;

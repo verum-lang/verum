@@ -1,0 +1,207 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, opcode_catalog, vdbe
+// @timeout: 5000
+// @expected-exit: 0
+//
+// Verifies the loom Appendix C VDBE opcode catalogue:
+//   * every opcode has a stable wire code + canonical name
+//   * name → opcode lookup round-trip works
+//   * operand_shape covers every opcode exhaustively
+//   * effects classification + helpers (is_pure / is_dml /
+//     is_safe_to_hoist) on representative opcodes
+//   * SQLITE_* primary code → DbError mapping
+//   * extended-code pack/unpack round-trip
+
+mount core.database.sqlite.native.opcode_catalog.metadata.{
+    OpcodeKind, opcode_wire, opcode_name, opcode_from_name, opcode_count,
+    OpAdd, OpInsert, OpHalt, OpResult, OpNoop, OpScalarFn, OpAggStep,
+    OpRewind, OpNext, OpEq, OpIf, OpColumn, OpInteger, OpCommit,
+};
+mount core.database.sqlite.native.opcode_catalog.operand_shape.{
+    OperandSlot, OsRegister, OsCursor, OsJumpTarget, OsLiteralInt,
+    OsConstantPoolIdx, OsRootPage, OsErrorCode, OsScalarKind, OsUnused,
+    OperandShape, shape_of, shape_unused,
+};
+mount core.database.sqlite.native.opcode_catalog.effects.{
+    Effects, effects_of, is_pure, is_dml, is_safe_to_hoist,
+    pure_effects, branch_effects, pager_writer, cursor_reader, yield_effects,
+};
+mount core.database.sqlite.native.opcode_catalog.error_codes.{
+    PrimaryCode,
+    EcOk, EcError, EcBusy, EcLocked, EcConstraint, EcCorrupt, EcRow, EcDone,
+    primary_wire, primary_name, primary_to_dberror,
+    DbError, DbeOk, DbeBusy, DbeLocked,
+    pack_extended, unpack_primary, unpack_subcode,
+};
+mount base.{Maybe, Some, None};
+
+// -----------------------------------------------------------------------------
+// metadata
+// -----------------------------------------------------------------------------
+
+fn test_opcode_count_in_expected_range() {
+    let n = opcode_count();
+    // Spec: ~180 SQLite VDBE opcodes; our table covers 168+.
+    assert(n >= 160);
+    assert(n <= 200);
+}
+
+fn test_wire_codes_are_stable() {
+    assert_eq(opcode_wire(&OpHalt), 1);
+    assert_eq(opcode_wire(&OpNoop), 7);
+    assert_eq(opcode_wire(&OpInteger), 16);
+    assert_eq(opcode_wire(&OpAdd), 32);
+    assert_eq(opcode_wire(&OpEq), 49);
+    assert_eq(opcode_wire(&OpColumn), 73);
+    assert_eq(opcode_wire(&OpInsert), 77);
+    assert_eq(opcode_wire(&OpAggStep), 96);
+    assert_eq(opcode_wire(&OpScalarFn), 109);
+    assert_eq(opcode_wire(&OpCommit), 113);
+}
+
+fn test_canonical_names() {
+    assert(opcode_name(&OpHalt) == "Halt".clone());
+    assert(opcode_name(&OpAdd) == "Add".clone());
+    assert(opcode_name(&OpResult) == "Result".clone());
+    assert(opcode_name(&OpRewind) == "Rewind".clone());
+    assert(opcode_name(&OpScalarFn) == "ScalarFn".clone());
+    assert(opcode_name(&OpAggStep) == "AggStep".clone());
+}
+
+fn test_name_lookup_round_trip() {
+    let names = ["Halt".clone(), "Add".clone(), "Insert".clone(), "AggStep".clone()];
+    let mut i: Int = 0;
+    while i < names.len() {
+        match opcode_from_name(&names[i]) {
+            Some(_) => {}
+            None    => panic("name should resolve"),
+        }
+        i = i + 1;
+    }
+    match opcode_from_name(&"NoSuchOp".clone()) {
+        None    => {},
+        Some(_) => panic("bogus name should not resolve"),
+    }
+}
+
+// -----------------------------------------------------------------------------
+// operand_shape
+// -----------------------------------------------------------------------------
+
+fn test_operand_shape_arithmetic() {
+    let s = shape_of(&OpAdd);
+    match s.p1 { OsRegister => {}, _ => panic("Add p1 = register") };
+    match s.p2 { OsRegister => {}, _ => panic("Add p2 = register") };
+    match s.p3 { OsRegister => {}, _ => panic("Add p3 = register") };
+}
+
+fn test_operand_shape_jump() {
+    let s = shape_of(&OpEq);
+    match s.p3 { OsJumpTarget => {}, _ => panic("Eq p3 = jump target") };
+
+    let s2 = shape_of(&OpIf);
+    match s2.p2 { OsJumpTarget => {}, _ => panic("If p2 = jump") };
+}
+
+fn test_operand_shape_cursor() {
+    let s = shape_of(&OpInsert);
+    match s.p1 { OsCursor => {}, _ => panic("Insert p1 = cursor") };
+}
+
+fn test_operand_shape_noop_unused() {
+    let s = shape_of(&OpNoop);
+    match s.p1 { OsUnused => {}, _ => panic("Noop p1 = unused") };
+    match s.p2 { OsUnused => {}, _ => panic("Noop p2 = unused") };
+    match s.p3 { OsUnused => {}, _ => panic("Noop p3 = unused") };
+}
+
+// -----------------------------------------------------------------------------
+// effects
+// -----------------------------------------------------------------------------
+
+fn test_arithmetic_is_pure() {
+    assert(is_pure(&OpAdd));
+    assert(is_safe_to_hoist(&OpAdd));
+    assert(!is_dml(&OpAdd));
+}
+
+fn test_insert_is_dml() {
+    assert(is_dml(&OpInsert));
+    assert(!is_pure(&OpInsert));
+    assert(!is_safe_to_hoist(&OpInsert));
+}
+
+fn test_branches_classified() {
+    let e_eq = effects_of(&OpEq);
+    assert(e_eq.is_branch);
+    let e_if = effects_of(&OpIf);
+    assert(e_if.is_branch);
+    let e_rewind = effects_of(&OpRewind);
+    assert(e_rewind.is_branch);
+}
+
+fn test_yield_row_marker() {
+    let e = effects_of(&OpResult);
+    assert(e.yields_row);
+    assert(e.has_side_effects);
+}
+
+fn test_cursor_read_classification() {
+    let e = effects_of(&OpColumn);
+    assert(e.touches_cursor);
+    assert(!e.writes_pager);
+    assert(!is_dml(&OpColumn));
+}
+
+// -----------------------------------------------------------------------------
+// error_codes
+// -----------------------------------------------------------------------------
+
+fn test_sqlite_wire_codes() {
+    assert_eq(primary_wire(&EcOk), 0);
+    assert_eq(primary_wire(&EcError), 1);
+    assert_eq(primary_wire(&EcBusy), 5);
+    assert_eq(primary_wire(&EcConstraint), 19);
+    assert_eq(primary_wire(&EcRow), 100);
+    assert_eq(primary_wire(&EcDone), 101);
+}
+
+fn test_sqlite_canonical_names() {
+    assert(primary_name(&EcBusy) == "SQLITE_BUSY".clone());
+    assert(primary_name(&EcConstraint) == "SQLITE_CONSTRAINT".clone());
+    assert(primary_name(&EcCorrupt) == "SQLITE_CORRUPT".clone());
+}
+
+fn test_dberror_mapping() {
+    match primary_to_dberror(&EcOk, "".clone()) { DbeOk => {}, _ => panic("Ok") };
+    match primary_to_dberror(&EcBusy, "".clone()) { DbeBusy => {}, _ => panic("Busy") };
+    match primary_to_dberror(&EcLocked, "".clone()) { DbeLocked => {}, _ => panic("Locked") };
+}
+
+fn test_extended_code_pack_unpack() {
+    let packed = pack_extended(&EcCorrupt, 5);
+    assert_eq(unpack_primary(packed), 11);
+    assert_eq(unpack_subcode(packed), 5);
+}
+
+fn main() {
+    test_opcode_count_in_expected_range();
+    test_wire_codes_are_stable();
+    test_canonical_names();
+    test_name_lookup_round_trip();
+    test_operand_shape_arithmetic();
+    test_operand_shape_jump();
+    test_operand_shape_cursor();
+    test_operand_shape_noop_unused();
+    test_arithmetic_is_pure();
+    test_insert_is_dml();
+    test_branches_classified();
+    test_yield_row_marker();
+    test_cursor_read_classification();
+    test_sqlite_wire_codes();
+    test_sqlite_canonical_names();
+    test_dberror_mapping();
+    test_extended_code_pack_unpack();
+}

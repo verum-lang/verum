@@ -1,0 +1,26 @@
+// =============================================================================
+// core/database/sqlite/native/opcode_catalog/mod.vr
+// =============================================================================
+// Layer: 4-5 (codegen ↔ interpreter visible)
+// Spec: sqlite-native.md §11.2, Appendix C
+//
+// Single source of truth for the wire-level VDBE opcode catalogue.
+// `l4_vdbe/opcode.vr` carries the *enum* the interpreter dispatches
+// on; this module carries the metadata every other layer (codegen,
+// EXPLAIN, optimiser, fuzz mutator, debugger) needs about every
+// opcode WITHOUT re-deriving it from the enum.
+//
+// Layout:
+//
+//   * `metadata`      — OpcodeKind + name table (~180 codes)
+//   * `operand_shape` — operand kinds (jump-target / register / literal)
+//   * `effects`       — pure / writes-cursor / writes-pager / yields-row
+//   * `error_codes`   — SQLITE_* code table mapped to DbError
+// =============================================================================
+
+module core.database.sqlite.native.opcode_catalog;
+
+public module metadata;
+public module operand_shape;
+public module effects;
+public module error_codes;

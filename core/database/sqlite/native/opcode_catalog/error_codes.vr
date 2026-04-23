@@ -1,0 +1,208 @@
+// =============================================================================
+// opcode_catalog/error_codes.vr — SQLITE_* result code → DbError taxonomy
+// =============================================================================
+// Spec: sqlite-native.md Appendix D
+//
+// SQLite has ~30 primary result codes plus ~60 extended codes.
+// We carry both as a flat enum so the L7 façade can map any
+// SQLite-shaped error into a strongly-typed `DbError` for callers.
+//
+// Wire codes match SQLite C ABI exactly so debugger / log
+// aggregator tooling can decode them with the same tables.
+// =============================================================================
+
+module core.database.sqlite.native.opcode_catalog.error_codes;
+
+mount core.*;
+mount base.{Text, Maybe};
+
+// -----------------------------------------------------------------------------
+// PrimaryCode — SQLite 3.x primary result codes (no extended bits)
+// -----------------------------------------------------------------------------
+
+public type PrimaryCode is
+      EcOk            // 0
+    | EcError         // 1
+    | EcInternal      // 2
+    | EcPerm          // 3
+    | EcAbort         // 4
+    | EcBusy          // 5
+    | EcLocked        // 6
+    | EcNoMem         // 7
+    | EcReadOnly      // 8
+    | EcInterrupt     // 9
+    | EcIoErr         // 10
+    | EcCorrupt       // 11
+    | EcNotFound      // 12
+    | EcFull          // 13
+    | EcCantOpen      // 14
+    | EcProtocol      // 15
+    | EcEmpty         // 16
+    | EcSchema        // 17
+    | EcTooBig        // 18
+    | EcConstraint    // 19
+    | EcMismatch      // 20
+    | EcMisuse        // 21
+    | EcNoLfs         // 22
+    | EcAuth          // 23
+    | EcFormat        // 24
+    | EcRange         // 25
+    | EcNotADb        // 26
+    | EcNotice        // 27
+    | EcWarning       // 28
+    | EcRow           // 100
+    | EcDone;         // 101
+
+public fn primary_wire(c: &PrimaryCode) -> Int {
+    match c {
+        EcOk => 0, EcError => 1, EcInternal => 2, EcPerm => 3,
+        EcAbort => 4, EcBusy => 5, EcLocked => 6, EcNoMem => 7,
+        EcReadOnly => 8, EcInterrupt => 9, EcIoErr => 10, EcCorrupt => 11,
+        EcNotFound => 12, EcFull => 13, EcCantOpen => 14, EcProtocol => 15,
+        EcEmpty => 16, EcSchema => 17, EcTooBig => 18, EcConstraint => 19,
+        EcMismatch => 20, EcMisuse => 21, EcNoLfs => 22, EcAuth => 23,
+        EcFormat => 24, EcRange => 25, EcNotADb => 26, EcNotice => 27,
+        EcWarning => 28, EcRow => 100, EcDone => 101,
+    }
+}
+
+public fn primary_name(c: &PrimaryCode) -> Text {
+    match c {
+        EcOk => "SQLITE_OK".clone(), EcError => "SQLITE_ERROR".clone(),
+        EcInternal => "SQLITE_INTERNAL".clone(), EcPerm => "SQLITE_PERM".clone(),
+        EcAbort => "SQLITE_ABORT".clone(), EcBusy => "SQLITE_BUSY".clone(),
+        EcLocked => "SQLITE_LOCKED".clone(), EcNoMem => "SQLITE_NOMEM".clone(),
+        EcReadOnly => "SQLITE_READONLY".clone(), EcInterrupt => "SQLITE_INTERRUPT".clone(),
+        EcIoErr => "SQLITE_IOERR".clone(), EcCorrupt => "SQLITE_CORRUPT".clone(),
+        EcNotFound => "SQLITE_NOTFOUND".clone(), EcFull => "SQLITE_FULL".clone(),
+        EcCantOpen => "SQLITE_CANTOPEN".clone(), EcProtocol => "SQLITE_PROTOCOL".clone(),
+        EcEmpty => "SQLITE_EMPTY".clone(), EcSchema => "SQLITE_SCHEMA".clone(),
+        EcTooBig => "SQLITE_TOOBIG".clone(), EcConstraint => "SQLITE_CONSTRAINT".clone(),
+        EcMismatch => "SQLITE_MISMATCH".clone(), EcMisuse => "SQLITE_MISUSE".clone(),
+        EcNoLfs => "SQLITE_NOLFS".clone(), EcAuth => "SQLITE_AUTH".clone(),
+        EcFormat => "SQLITE_FORMAT".clone(), EcRange => "SQLITE_RANGE".clone(),
+        EcNotADb => "SQLITE_NOTADB".clone(), EcNotice => "SQLITE_NOTICE".clone(),
+        EcWarning => "SQLITE_WARNING".clone(), EcRow => "SQLITE_ROW".clone(),
+        EcDone => "SQLITE_DONE".clone(),
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Extended subcodes (subset — full table covered in Phase 5)
+// -----------------------------------------------------------------------------
+
+public type ConstraintKind is
+      CkCheck
+    | CkCommitHook
+    | CkForeignKey
+    | CkFunction
+    | CkNotNull
+    | CkPrimaryKey
+    | CkRowId
+    | CkTrigger
+    | CkUnique
+    | CkVirtual
+    | CkPinned;
+
+public type CorruptionKind is
+      CrkSchema
+    | CrkPage
+    | CrkIndex
+    | CrkCellSize
+    | CrkVTab
+    | CrkSequence;
+
+public type IoSubKind is
+      IokRead
+    | IokShortRead
+    | IokWrite
+    | IokFsync
+    | IokDirFsync
+    | IokTruncate
+    | IokFstat
+    | IokUnlock
+    | IokRDLock
+    | IokDelete
+    | IokBlocked
+    | IokNoMem
+    | IokAccess
+    | IokCheckReservedLock
+    | IokLock
+    | IokClose;
+
+// -----------------------------------------------------------------------------
+// DbError — what L7 surfaces to user code
+// -----------------------------------------------------------------------------
+
+public type DbError is
+      DbeOk
+    | DbeGeneric(Text)
+    | DbeBusy
+    | DbeLocked
+    | DbeOutOfMemory
+    | DbeReadOnly
+    | DbeInterrupted
+    | DbeIo(IoSubKind, Text)
+    | DbeCorrupt(CorruptionKind, Text)
+    | DbeFull
+    | DbeCannotOpen(Text)
+    | DbeConstraint(ConstraintKind, Text)
+    | DbeDataTypeMismatch
+    | DbeMisuse
+    | DbeAuthDenied
+    | DbeBindRange
+    | DbeNotADatabase
+    | DbeSchemaChanged
+    | DbeProtocolFailure
+    | DbeAbort(Text);
+
+public fn primary_to_dberror(c: &PrimaryCode, msg: Text) -> DbError {
+    match c {
+        EcOk             => DbeOk,
+        EcError          => DbeGeneric(msg),
+        EcInternal       => DbeGeneric(msg),
+        EcPerm           => DbeAuthDenied,
+        EcAbort          => DbeAbort(msg),
+        EcBusy           => DbeBusy,
+        EcLocked         => DbeLocked,
+        EcNoMem          => DbeOutOfMemory,
+        EcReadOnly       => DbeReadOnly,
+        EcInterrupt      => DbeInterrupted,
+        EcIoErr          => DbeIo(IokRead, msg),
+        EcCorrupt        => DbeCorrupt(CrkPage, msg),
+        EcNotFound       => DbeGeneric(msg),
+        EcFull           => DbeFull,
+        EcCantOpen       => DbeCannotOpen(msg),
+        EcProtocol       => DbeProtocolFailure,
+        EcEmpty          => DbeGeneric(msg),
+        EcSchema         => DbeSchemaChanged,
+        EcTooBig         => DbeGeneric(msg),
+        EcConstraint     => DbeConstraint(CkCheck, msg),
+        EcMismatch       => DbeDataTypeMismatch,
+        EcMisuse         => DbeMisuse,
+        EcNoLfs          => DbeGeneric(msg),
+        EcAuth           => DbeAuthDenied,
+        EcFormat         => DbeCorrupt(CrkSchema, msg),
+        EcRange          => DbeBindRange,
+        EcNotADb         => DbeNotADatabase,
+        EcNotice         => DbeOk,
+        EcWarning        => DbeOk,
+        EcRow | EcDone   => DbeOk,
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Extended-code helpers — the SQLite extended code is `primary | (sub << 8)`
+// -----------------------------------------------------------------------------
+
+public fn pack_extended(primary: &PrimaryCode, sub: Int) -> Int {
+    primary_wire(primary) | (sub << 8)
+}
+
+public fn unpack_primary(extended: Int) -> Int {
+    extended & 255
+}
+
+public fn unpack_subcode(extended: Int) -> Int {
+    extended >> 8
+}

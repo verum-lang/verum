@@ -1,0 +1,528 @@
+// =============================================================================
+// opcode_catalog/metadata.vr — VDBE opcode → name + wire-code table
+// =============================================================================
+// Spec: sqlite-native.md §11.2, Appendix C
+//
+// Approximately 180 SQLite VDBE opcodes are catalogued here. Wire
+// codes are stable — they are the values the interpreter (and any
+// VDBE bytecode persisted to disk) references. Names are the SQLite
+// canonical identifiers (matches `sqlite3_opcode_name`).
+//
+// We use a single `OpcodeKind` enum over the entire catalogue so the
+// optimiser, fuzz mutator, and EXPLAIN serialiser can pattern-match
+// exhaustively. Adding a new opcode here is a one-line insertion;
+// the existing wire codes are frozen forever.
+// =============================================================================
+
+module core.database.sqlite.native.opcode_catalog.metadata;
+
+mount core.*;
+mount base.{Text, Maybe};
+mount collections.List;
+
+// -----------------------------------------------------------------------------
+// OpcodeKind — every VDBE opcode loom can encode
+// -----------------------------------------------------------------------------
+
+public type OpcodeKind is
+    // 0-15 : program control
+      OpInit
+    | OpHalt
+    | OpHaltIfNull
+    | OpGoto
+    | OpGosub
+    | OpReturn
+    | OpOnce
+    | OpNoop
+    | OpJump
+    | OpExpire
+    | OpAbortable
+    | OpReleaseReg
+    | OpYield
+    | OpInteger32
+    | OpResult
+
+    // 16-31 : register moves & literals
+    | OpInteger
+    | OpInt64
+    | OpReal
+    | OpString8
+    | OpBlob
+    | OpNull
+    | OpSoftNull
+    | OpMove
+    | OpCopy
+    | OpSCopy
+    | OpZeroOrNull
+    | OpVariable
+    | OpString
+    | OpClear
+    | OpResetCount
+    | OpEphemeralAbs
+
+    // 32-47 : arithmetic + bitwise
+    | OpAdd
+    | OpSubtract
+    | OpMultiply
+    | OpDivide
+    | OpRemainder
+    | OpAddImm
+    | OpRealAffinity
+    | OpBitAnd
+    | OpBitOr
+    | OpShiftLeft
+    | OpShiftRight
+    | OpBitNot
+    | OpConcat
+    | OpCast
+    | OpMustBeInt
+    | OpAffinity
+
+    // 48-63 : comparisons & boolean
+    | OpCompare
+    | OpEq
+    | OpNe
+    | OpLt
+    | OpLe
+    | OpGt
+    | OpGe
+    | OpIf
+    | OpIfNot
+    | OpIfNull
+    | OpNotNull
+    | OpIfPos
+    | OpIfNeg
+    | OpIfZero
+    | OpAnd
+    | OpOr
+
+    // 64-95 : cursor & table operations
+    | OpOpenRead
+    | OpOpenWrite
+    | OpOpenAutoindex
+    | OpOpenEphemeral
+    | OpClose
+    | OpRewind
+    | OpLast
+    | OpNext
+    | OpPrev
+    | OpColumn
+    | OpRowId
+    | OpRowKey
+    | OpRowData
+    | OpInsert
+    | OpDelete
+    | OpUpdateRow
+    | OpFound
+    | OpNotFound
+    | OpSeekGT
+    | OpSeekLT
+    | OpSeekGE
+    | OpSeekLE
+    | OpSeekRowId
+    | OpSeekScan
+    | OpResetCursor
+    | OpIdxInsert
+    | OpIdxDelete
+    | OpIdxRowid
+    | OpIdxLT
+    | OpIdxLE
+    | OpIdxGE
+    | OpIdxGT
+
+    // 96-111 : aggregate / sort
+    | OpAggStep
+    | OpAggFinal
+    | OpAggValue
+    | OpAggInverse
+    | OpAggFinalAvg
+    | OpSorterOpen
+    | OpSorterInsert
+    | OpSorterRewind
+    | OpSorterNext
+    | OpSorterData
+    | OpSorterCompare
+    | OpSorterDistinct
+    | OpDistinct
+    | OpScalarFn
+    | OpFunction
+    | OpAggregateContext
+
+    // 112-127 : transaction & schema
+    | OpTransaction
+    | OpCommit
+    | OpRollbackOp
+    | OpSavepointOp
+    | OpAutoCommit
+    | OpReadCookie
+    | OpSetCookie
+    | OpVacuum
+    | OpVNew
+    | OpVOpen
+    | OpVDestroy
+    | OpVRename
+    | OpVColumn
+    | OpVNext
+    | OpVUpdate
+    | OpVFilter
+
+    // 128-143 : indexing helpers / collation
+    | OpCollSeq
+    | OpExpiredSchema
+    | OpInitCoroutine
+    | OpEndCoroutine
+    | OpYieldCoroutine
+    | OpDecrJumpZero
+    | OpIncrLoad
+    | OpResetSorter
+    | OpAddCheckpoint
+    | OpJournalMode
+    | OpPragma
+    | OpAnalyze
+    | OpReleaseSavepoint
+    | OpDestroy
+    | OpCreateIndex
+    | OpCreateTable
+
+    // 144-159 : foreign keys & triggers
+    | OpFkCounter
+    | OpFkIfZero
+    | OpFkCheck
+    | OpDeferredFk
+    | OpTriggerEnter
+    | OpTriggerLeave
+    | OpTriggerProgram
+    | OpFkViolation
+    | OpFunctionInvoke
+    | OpRowSetTest
+    | OpRowSetAdd
+    | OpRowSetRead
+    | OpProgram
+    | OpParam
+    | OpProgramReturn
+    | OpJumpIfNotZero
+
+    // 160-175 : misc / debug
+    | OpVerify
+    | OpExplain
+    | OpExplainQueryPlan
+    | OpDebug
+    | OpTrace
+    | OpProfile
+    | OpProgressTick
+    | OpDeleteAll
+    | OpDeleteUntilZero
+    | OpJournalCheckpoint
+    | OpPagerWrite
+    | OpFinish
+    | OpReset
+    | OpBindParam
+    | OpHaltUserError
+    | OpSqlReset;
+
+// -----------------------------------------------------------------------------
+// Wire codes
+// -----------------------------------------------------------------------------
+
+public fn opcode_wire(o: &OpcodeKind) -> Int {
+    match o {
+        // 0-15 — program control
+        OpInit => 0, OpHalt => 1, OpHaltIfNull => 2, OpGoto => 3,
+        OpGosub => 4, OpReturn => 5, OpOnce => 6, OpNoop => 7,
+        OpJump => 8, OpExpire => 9, OpAbortable => 10, OpReleaseReg => 11,
+        OpYield => 12, OpInteger32 => 13, OpResult => 14,
+        // 16-31 — register moves
+        OpInteger => 16, OpInt64 => 17, OpReal => 18, OpString8 => 19,
+        OpBlob => 20, OpNull => 21, OpSoftNull => 22, OpMove => 23,
+        OpCopy => 24, OpSCopy => 25, OpZeroOrNull => 26, OpVariable => 27,
+        OpString => 28, OpClear => 29, OpResetCount => 30, OpEphemeralAbs => 31,
+        // 32-47 — arithmetic
+        OpAdd => 32, OpSubtract => 33, OpMultiply => 34, OpDivide => 35,
+        OpRemainder => 36, OpAddImm => 37, OpRealAffinity => 38, OpBitAnd => 39,
+        OpBitOr => 40, OpShiftLeft => 41, OpShiftRight => 42, OpBitNot => 43,
+        OpConcat => 44, OpCast => 45, OpMustBeInt => 46, OpAffinity => 47,
+        // 48-63 — comparisons
+        OpCompare => 48, OpEq => 49, OpNe => 50, OpLt => 51,
+        OpLe => 52, OpGt => 53, OpGe => 54, OpIf => 55,
+        OpIfNot => 56, OpIfNull => 57, OpNotNull => 58, OpIfPos => 59,
+        OpIfNeg => 60, OpIfZero => 61, OpAnd => 62, OpOr => 63,
+        // 64-95 — cursor / table
+        OpOpenRead => 64, OpOpenWrite => 65, OpOpenAutoindex => 66, OpOpenEphemeral => 67,
+        OpClose => 68, OpRewind => 69, OpLast => 70, OpNext => 71,
+        OpPrev => 72, OpColumn => 73, OpRowId => 74, OpRowKey => 75,
+        OpRowData => 76, OpInsert => 77, OpDelete => 78, OpUpdateRow => 79,
+        OpFound => 80, OpNotFound => 81, OpSeekGT => 82, OpSeekLT => 83,
+        OpSeekGE => 84, OpSeekLE => 85, OpSeekRowId => 86, OpSeekScan => 87,
+        OpResetCursor => 88, OpIdxInsert => 89, OpIdxDelete => 90, OpIdxRowid => 91,
+        OpIdxLT => 92, OpIdxLE => 93, OpIdxGE => 94, OpIdxGT => 95,
+        // 96-111 — aggregates / sort
+        OpAggStep => 96, OpAggFinal => 97, OpAggValue => 98, OpAggInverse => 99,
+        OpAggFinalAvg => 100, OpSorterOpen => 101, OpSorterInsert => 102, OpSorterRewind => 103,
+        OpSorterNext => 104, OpSorterData => 105, OpSorterCompare => 106, OpSorterDistinct => 107,
+        OpDistinct => 108, OpScalarFn => 109, OpFunction => 110, OpAggregateContext => 111,
+        // 112-127 — transaction / schema
+        OpTransaction => 112, OpCommit => 113, OpRollbackOp => 114, OpSavepointOp => 115,
+        OpAutoCommit => 116, OpReadCookie => 117, OpSetCookie => 118, OpVacuum => 119,
+        OpVNew => 120, OpVOpen => 121, OpVDestroy => 122, OpVRename => 123,
+        OpVColumn => 124, OpVNext => 125, OpVUpdate => 126, OpVFilter => 127,
+        // 128-143 — collation / coroutines
+        OpCollSeq => 128, OpExpiredSchema => 129, OpInitCoroutine => 130, OpEndCoroutine => 131,
+        OpYieldCoroutine => 132, OpDecrJumpZero => 133, OpIncrLoad => 134, OpResetSorter => 135,
+        OpAddCheckpoint => 136, OpJournalMode => 137, OpPragma => 138, OpAnalyze => 139,
+        OpReleaseSavepoint => 140, OpDestroy => 141, OpCreateIndex => 142, OpCreateTable => 143,
+        // 144-159 — foreign keys / triggers
+        OpFkCounter => 144, OpFkIfZero => 145, OpFkCheck => 146, OpDeferredFk => 147,
+        OpTriggerEnter => 148, OpTriggerLeave => 149, OpTriggerProgram => 150, OpFkViolation => 151,
+        OpFunctionInvoke => 152, OpRowSetTest => 153, OpRowSetAdd => 154, OpRowSetRead => 155,
+        OpProgram => 156, OpParam => 157, OpProgramReturn => 158, OpJumpIfNotZero => 159,
+        // 160-175 — misc
+        OpVerify => 160, OpExplain => 161, OpExplainQueryPlan => 162, OpDebug => 163,
+        OpTrace => 164, OpProfile => 165, OpProgressTick => 166, OpDeleteAll => 167,
+        OpDeleteUntilZero => 168, OpJournalCheckpoint => 169, OpPagerWrite => 170, OpFinish => 171,
+        OpReset => 172, OpBindParam => 173, OpHaltUserError => 174, OpSqlReset => 175,
+    }
+}
+
+// -----------------------------------------------------------------------------
+// SQLite-canonical names
+// -----------------------------------------------------------------------------
+
+public fn opcode_name(o: &OpcodeKind) -> Text {
+    match o {
+        OpInit => "Init".clone(), OpHalt => "Halt".clone(), OpHaltIfNull => "HaltIfNull".clone(),
+        OpGoto => "Goto".clone(), OpGosub => "Gosub".clone(), OpReturn => "Return".clone(),
+        OpOnce => "Once".clone(), OpNoop => "Noop".clone(), OpJump => "Jump".clone(),
+        OpExpire => "Expire".clone(), OpAbortable => "Abortable".clone(),
+        OpReleaseReg => "ReleaseReg".clone(), OpYield => "Yield".clone(),
+        OpInteger32 => "Integer32".clone(), OpResult => "Result".clone(),
+        OpInteger => "Integer".clone(), OpInt64 => "Int64".clone(), OpReal => "Real".clone(),
+        OpString8 => "String8".clone(), OpBlob => "Blob".clone(), OpNull => "Null".clone(),
+        OpSoftNull => "SoftNull".clone(), OpMove => "Move".clone(), OpCopy => "Copy".clone(),
+        OpSCopy => "SCopy".clone(), OpZeroOrNull => "ZeroOrNull".clone(),
+        OpVariable => "Variable".clone(), OpString => "String".clone(), OpClear => "Clear".clone(),
+        OpResetCount => "ResetCount".clone(), OpEphemeralAbs => "EphemeralAbs".clone(),
+        OpAdd => "Add".clone(), OpSubtract => "Subtract".clone(), OpMultiply => "Multiply".clone(),
+        OpDivide => "Divide".clone(), OpRemainder => "Remainder".clone(), OpAddImm => "AddImm".clone(),
+        OpRealAffinity => "RealAffinity".clone(), OpBitAnd => "BitAnd".clone(),
+        OpBitOr => "BitOr".clone(), OpShiftLeft => "ShiftLeft".clone(),
+        OpShiftRight => "ShiftRight".clone(), OpBitNot => "BitNot".clone(),
+        OpConcat => "Concat".clone(), OpCast => "Cast".clone(), OpMustBeInt => "MustBeInt".clone(),
+        OpAffinity => "Affinity".clone(),
+        OpCompare => "Compare".clone(), OpEq => "Eq".clone(), OpNe => "Ne".clone(),
+        OpLt => "Lt".clone(), OpLe => "Le".clone(), OpGt => "Gt".clone(), OpGe => "Ge".clone(),
+        OpIf => "If".clone(), OpIfNot => "IfNot".clone(), OpIfNull => "IfNull".clone(),
+        OpNotNull => "NotNull".clone(), OpIfPos => "IfPos".clone(), OpIfNeg => "IfNeg".clone(),
+        OpIfZero => "IfZero".clone(), OpAnd => "And".clone(), OpOr => "Or".clone(),
+        OpOpenRead => "OpenRead".clone(), OpOpenWrite => "OpenWrite".clone(),
+        OpOpenAutoindex => "OpenAutoindex".clone(), OpOpenEphemeral => "OpenEphemeral".clone(),
+        OpClose => "Close".clone(), OpRewind => "Rewind".clone(), OpLast => "Last".clone(),
+        OpNext => "Next".clone(), OpPrev => "Prev".clone(), OpColumn => "Column".clone(),
+        OpRowId => "RowId".clone(), OpRowKey => "RowKey".clone(), OpRowData => "RowData".clone(),
+        OpInsert => "Insert".clone(), OpDelete => "Delete".clone(), OpUpdateRow => "UpdateRow".clone(),
+        OpFound => "Found".clone(), OpNotFound => "NotFound".clone(),
+        OpSeekGT => "SeekGT".clone(), OpSeekLT => "SeekLT".clone(),
+        OpSeekGE => "SeekGE".clone(), OpSeekLE => "SeekLE".clone(),
+        OpSeekRowId => "SeekRowid".clone(), OpSeekScan => "SeekScan".clone(),
+        OpResetCursor => "ResetCursor".clone(), OpIdxInsert => "IdxInsert".clone(),
+        OpIdxDelete => "IdxDelete".clone(), OpIdxRowid => "IdxRowid".clone(),
+        OpIdxLT => "IdxLT".clone(), OpIdxLE => "IdxLE".clone(),
+        OpIdxGE => "IdxGE".clone(), OpIdxGT => "IdxGT".clone(),
+        OpAggStep => "AggStep".clone(), OpAggFinal => "AggFinal".clone(),
+        OpAggValue => "AggValue".clone(), OpAggInverse => "AggInverse".clone(),
+        OpAggFinalAvg => "AggFinalAvg".clone(),
+        OpSorterOpen => "SorterOpen".clone(), OpSorterInsert => "SorterInsert".clone(),
+        OpSorterRewind => "SorterRewind".clone(), OpSorterNext => "SorterNext".clone(),
+        OpSorterData => "SorterData".clone(), OpSorterCompare => "SorterCompare".clone(),
+        OpSorterDistinct => "SorterDistinct".clone(),
+        OpDistinct => "Distinct".clone(), OpScalarFn => "ScalarFn".clone(),
+        OpFunction => "Function".clone(), OpAggregateContext => "AggregateContext".clone(),
+        OpTransaction => "Transaction".clone(), OpCommit => "Commit".clone(),
+        OpRollbackOp => "Rollback".clone(), OpSavepointOp => "Savepoint".clone(),
+        OpAutoCommit => "AutoCommit".clone(), OpReadCookie => "ReadCookie".clone(),
+        OpSetCookie => "SetCookie".clone(), OpVacuum => "Vacuum".clone(),
+        OpVNew => "VNew".clone(), OpVOpen => "VOpen".clone(), OpVDestroy => "VDestroy".clone(),
+        OpVRename => "VRename".clone(), OpVColumn => "VColumn".clone(),
+        OpVNext => "VNext".clone(), OpVUpdate => "VUpdate".clone(), OpVFilter => "VFilter".clone(),
+        OpCollSeq => "CollSeq".clone(), OpExpiredSchema => "ExpiredSchema".clone(),
+        OpInitCoroutine => "InitCoroutine".clone(), OpEndCoroutine => "EndCoroutine".clone(),
+        OpYieldCoroutine => "YieldCoroutine".clone(), OpDecrJumpZero => "DecrJumpZero".clone(),
+        OpIncrLoad => "IncrLoad".clone(), OpResetSorter => "ResetSorter".clone(),
+        OpAddCheckpoint => "AddCheckpoint".clone(), OpJournalMode => "JournalMode".clone(),
+        OpPragma => "Pragma".clone(), OpAnalyze => "Analyze".clone(),
+        OpReleaseSavepoint => "ReleaseSavepoint".clone(), OpDestroy => "Destroy".clone(),
+        OpCreateIndex => "CreateIndex".clone(), OpCreateTable => "CreateTable".clone(),
+        OpFkCounter => "FkCounter".clone(), OpFkIfZero => "FkIfZero".clone(),
+        OpFkCheck => "FkCheck".clone(), OpDeferredFk => "DeferredFk".clone(),
+        OpTriggerEnter => "TriggerEnter".clone(), OpTriggerLeave => "TriggerLeave".clone(),
+        OpTriggerProgram => "TriggerProgram".clone(), OpFkViolation => "FkViolation".clone(),
+        OpFunctionInvoke => "FunctionInvoke".clone(), OpRowSetTest => "RowSetTest".clone(),
+        OpRowSetAdd => "RowSetAdd".clone(), OpRowSetRead => "RowSetRead".clone(),
+        OpProgram => "Program".clone(), OpParam => "Param".clone(),
+        OpProgramReturn => "ProgramReturn".clone(), OpJumpIfNotZero => "JumpIfNotZero".clone(),
+        OpVerify => "Verify".clone(), OpExplain => "Explain".clone(),
+        OpExplainQueryPlan => "ExplainQueryPlan".clone(), OpDebug => "Debug".clone(),
+        OpTrace => "Trace".clone(), OpProfile => "Profile".clone(),
+        OpProgressTick => "ProgressTick".clone(), OpDeleteAll => "DeleteAll".clone(),
+        OpDeleteUntilZero => "DeleteUntilZero".clone(),
+        OpJournalCheckpoint => "JournalCheckpoint".clone(), OpPagerWrite => "PagerWrite".clone(),
+        OpFinish => "Finish".clone(), OpReset => "Reset".clone(),
+        OpBindParam => "BindParam".clone(), OpHaltUserError => "HaltUserError".clone(),
+        OpSqlReset => "SqlReset".clone(),
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Name → opcode lookup
+// -----------------------------------------------------------------------------
+
+public fn opcode_from_name(name: &Text) -> Maybe<OpcodeKind> {
+    let all = list_all();
+    let mut i: Int = 0;
+    while i < all.len() {
+        if opcode_name(&all[i]) == name {
+            return Some(clone_opcode(&all[i]));
+        }
+        i = i + 1;
+    }
+    None
+}
+
+public fn opcode_count() -> Int { list_all().len() }
+
+fn clone_opcode(o: &OpcodeKind) -> OpcodeKind {
+    // Match every variant explicitly so missing cases are caught.
+    let code = opcode_wire(o);
+    let _ = code;
+    // Reproduce the variant exactly.
+    match o {
+        OpInit => OpInit, OpHalt => OpHalt, OpHaltIfNull => OpHaltIfNull,
+        OpGoto => OpGoto, OpGosub => OpGosub, OpReturn => OpReturn,
+        OpOnce => OpOnce, OpNoop => OpNoop, OpJump => OpJump,
+        OpExpire => OpExpire, OpAbortable => OpAbortable,
+        OpReleaseReg => OpReleaseReg, OpYield => OpYield,
+        OpInteger32 => OpInteger32, OpResult => OpResult,
+        OpInteger => OpInteger, OpInt64 => OpInt64, OpReal => OpReal,
+        OpString8 => OpString8, OpBlob => OpBlob, OpNull => OpNull,
+        OpSoftNull => OpSoftNull, OpMove => OpMove, OpCopy => OpCopy,
+        OpSCopy => OpSCopy, OpZeroOrNull => OpZeroOrNull,
+        OpVariable => OpVariable, OpString => OpString, OpClear => OpClear,
+        OpResetCount => OpResetCount, OpEphemeralAbs => OpEphemeralAbs,
+        OpAdd => OpAdd, OpSubtract => OpSubtract, OpMultiply => OpMultiply,
+        OpDivide => OpDivide, OpRemainder => OpRemainder, OpAddImm => OpAddImm,
+        OpRealAffinity => OpRealAffinity, OpBitAnd => OpBitAnd,
+        OpBitOr => OpBitOr, OpShiftLeft => OpShiftLeft,
+        OpShiftRight => OpShiftRight, OpBitNot => OpBitNot,
+        OpConcat => OpConcat, OpCast => OpCast, OpMustBeInt => OpMustBeInt,
+        OpAffinity => OpAffinity,
+        OpCompare => OpCompare, OpEq => OpEq, OpNe => OpNe,
+        OpLt => OpLt, OpLe => OpLe, OpGt => OpGt, OpGe => OpGe,
+        OpIf => OpIf, OpIfNot => OpIfNot, OpIfNull => OpIfNull,
+        OpNotNull => OpNotNull, OpIfPos => OpIfPos, OpIfNeg => OpIfNeg,
+        OpIfZero => OpIfZero, OpAnd => OpAnd, OpOr => OpOr,
+        OpOpenRead => OpOpenRead, OpOpenWrite => OpOpenWrite,
+        OpOpenAutoindex => OpOpenAutoindex, OpOpenEphemeral => OpOpenEphemeral,
+        OpClose => OpClose, OpRewind => OpRewind, OpLast => OpLast,
+        OpNext => OpNext, OpPrev => OpPrev, OpColumn => OpColumn,
+        OpRowId => OpRowId, OpRowKey => OpRowKey, OpRowData => OpRowData,
+        OpInsert => OpInsert, OpDelete => OpDelete, OpUpdateRow => OpUpdateRow,
+        OpFound => OpFound, OpNotFound => OpNotFound,
+        OpSeekGT => OpSeekGT, OpSeekLT => OpSeekLT,
+        OpSeekGE => OpSeekGE, OpSeekLE => OpSeekLE,
+        OpSeekRowId => OpSeekRowId, OpSeekScan => OpSeekScan,
+        OpResetCursor => OpResetCursor, OpIdxInsert => OpIdxInsert,
+        OpIdxDelete => OpIdxDelete, OpIdxRowid => OpIdxRowid,
+        OpIdxLT => OpIdxLT, OpIdxLE => OpIdxLE,
+        OpIdxGE => OpIdxGE, OpIdxGT => OpIdxGT,
+        OpAggStep => OpAggStep, OpAggFinal => OpAggFinal,
+        OpAggValue => OpAggValue, OpAggInverse => OpAggInverse,
+        OpAggFinalAvg => OpAggFinalAvg,
+        OpSorterOpen => OpSorterOpen, OpSorterInsert => OpSorterInsert,
+        OpSorterRewind => OpSorterRewind, OpSorterNext => OpSorterNext,
+        OpSorterData => OpSorterData, OpSorterCompare => OpSorterCompare,
+        OpSorterDistinct => OpSorterDistinct,
+        OpDistinct => OpDistinct, OpScalarFn => OpScalarFn,
+        OpFunction => OpFunction, OpAggregateContext => OpAggregateContext,
+        OpTransaction => OpTransaction, OpCommit => OpCommit,
+        OpRollbackOp => OpRollbackOp, OpSavepointOp => OpSavepointOp,
+        OpAutoCommit => OpAutoCommit, OpReadCookie => OpReadCookie,
+        OpSetCookie => OpSetCookie, OpVacuum => OpVacuum,
+        OpVNew => OpVNew, OpVOpen => OpVOpen, OpVDestroy => OpVDestroy,
+        OpVRename => OpVRename, OpVColumn => OpVColumn,
+        OpVNext => OpVNext, OpVUpdate => OpVUpdate, OpVFilter => OpVFilter,
+        OpCollSeq => OpCollSeq, OpExpiredSchema => OpExpiredSchema,
+        OpInitCoroutine => OpInitCoroutine, OpEndCoroutine => OpEndCoroutine,
+        OpYieldCoroutine => OpYieldCoroutine, OpDecrJumpZero => OpDecrJumpZero,
+        OpIncrLoad => OpIncrLoad, OpResetSorter => OpResetSorter,
+        OpAddCheckpoint => OpAddCheckpoint, OpJournalMode => OpJournalMode,
+        OpPragma => OpPragma, OpAnalyze => OpAnalyze,
+        OpReleaseSavepoint => OpReleaseSavepoint, OpDestroy => OpDestroy,
+        OpCreateIndex => OpCreateIndex, OpCreateTable => OpCreateTable,
+        OpFkCounter => OpFkCounter, OpFkIfZero => OpFkIfZero,
+        OpFkCheck => OpFkCheck, OpDeferredFk => OpDeferredFk,
+        OpTriggerEnter => OpTriggerEnter, OpTriggerLeave => OpTriggerLeave,
+        OpTriggerProgram => OpTriggerProgram, OpFkViolation => OpFkViolation,
+        OpFunctionInvoke => OpFunctionInvoke, OpRowSetTest => OpRowSetTest,
+        OpRowSetAdd => OpRowSetAdd, OpRowSetRead => OpRowSetRead,
+        OpProgram => OpProgram, OpParam => OpParam,
+        OpProgramReturn => OpProgramReturn, OpJumpIfNotZero => OpJumpIfNotZero,
+        OpVerify => OpVerify, OpExplain => OpExplain,
+        OpExplainQueryPlan => OpExplainQueryPlan, OpDebug => OpDebug,
+        OpTrace => OpTrace, OpProfile => OpProfile,
+        OpProgressTick => OpProgressTick, OpDeleteAll => OpDeleteAll,
+        OpDeleteUntilZero => OpDeleteUntilZero,
+        OpJournalCheckpoint => OpJournalCheckpoint, OpPagerWrite => OpPagerWrite,
+        OpFinish => OpFinish, OpReset => OpReset,
+        OpBindParam => OpBindParam, OpHaltUserError => OpHaltUserError,
+        OpSqlReset => OpSqlReset,
+    }
+}
+
+fn list_all() -> List<OpcodeKind> {
+    let mut out: List<OpcodeKind> = List.new();
+    out.push(OpInit); out.push(OpHalt); out.push(OpHaltIfNull); out.push(OpGoto);
+    out.push(OpGosub); out.push(OpReturn); out.push(OpOnce); out.push(OpNoop);
+    out.push(OpJump); out.push(OpExpire); out.push(OpAbortable); out.push(OpReleaseReg);
+    out.push(OpYield); out.push(OpInteger32); out.push(OpResult);
+    out.push(OpInteger); out.push(OpInt64); out.push(OpReal); out.push(OpString8);
+    out.push(OpBlob); out.push(OpNull); out.push(OpSoftNull); out.push(OpMove);
+    out.push(OpCopy); out.push(OpSCopy); out.push(OpZeroOrNull); out.push(OpVariable);
+    out.push(OpString); out.push(OpClear); out.push(OpResetCount); out.push(OpEphemeralAbs);
+    out.push(OpAdd); out.push(OpSubtract); out.push(OpMultiply); out.push(OpDivide);
+    out.push(OpRemainder); out.push(OpAddImm); out.push(OpRealAffinity); out.push(OpBitAnd);
+    out.push(OpBitOr); out.push(OpShiftLeft); out.push(OpShiftRight); out.push(OpBitNot);
+    out.push(OpConcat); out.push(OpCast); out.push(OpMustBeInt); out.push(OpAffinity);
+    out.push(OpCompare); out.push(OpEq); out.push(OpNe); out.push(OpLt);
+    out.push(OpLe); out.push(OpGt); out.push(OpGe); out.push(OpIf);
+    out.push(OpIfNot); out.push(OpIfNull); out.push(OpNotNull); out.push(OpIfPos);
+    out.push(OpIfNeg); out.push(OpIfZero); out.push(OpAnd); out.push(OpOr);
+    out.push(OpOpenRead); out.push(OpOpenWrite); out.push(OpOpenAutoindex); out.push(OpOpenEphemeral);
+    out.push(OpClose); out.push(OpRewind); out.push(OpLast); out.push(OpNext);
+    out.push(OpPrev); out.push(OpColumn); out.push(OpRowId); out.push(OpRowKey);
+    out.push(OpRowData); out.push(OpInsert); out.push(OpDelete); out.push(OpUpdateRow);
+    out.push(OpFound); out.push(OpNotFound); out.push(OpSeekGT); out.push(OpSeekLT);
+    out.push(OpSeekGE); out.push(OpSeekLE); out.push(OpSeekRowId); out.push(OpSeekScan);
+    out.push(OpResetCursor); out.push(OpIdxInsert); out.push(OpIdxDelete); out.push(OpIdxRowid);
+    out.push(OpIdxLT); out.push(OpIdxLE); out.push(OpIdxGE); out.push(OpIdxGT);
+    out.push(OpAggStep); out.push(OpAggFinal); out.push(OpAggValue); out.push(OpAggInverse);
+    out.push(OpAggFinalAvg);
+    out.push(OpSorterOpen); out.push(OpSorterInsert); out.push(OpSorterRewind); out.push(OpSorterNext);
+    out.push(OpSorterData); out.push(OpSorterCompare); out.push(OpSorterDistinct);
+    out.push(OpDistinct); out.push(OpScalarFn); out.push(OpFunction); out.push(OpAggregateContext);
+    out.push(OpTransaction); out.push(OpCommit); out.push(OpRollbackOp); out.push(OpSavepointOp);
+    out.push(OpAutoCommit); out.push(OpReadCookie); out.push(OpSetCookie); out.push(OpVacuum);
+    out.push(OpVNew); out.push(OpVOpen); out.push(OpVDestroy); out.push(OpVRename);
+    out.push(OpVColumn); out.push(OpVNext); out.push(OpVUpdate); out.push(OpVFilter);
+    out.push(OpCollSeq); out.push(OpExpiredSchema); out.push(OpInitCoroutine); out.push(OpEndCoroutine);
+    out.push(OpYieldCoroutine); out.push(OpDecrJumpZero); out.push(OpIncrLoad); out.push(OpResetSorter);
+    out.push(OpAddCheckpoint); out.push(OpJournalMode); out.push(OpPragma); out.push(OpAnalyze);
+    out.push(OpReleaseSavepoint); out.push(OpDestroy); out.push(OpCreateIndex); out.push(OpCreateTable);
+    out.push(OpFkCounter); out.push(OpFkIfZero); out.push(OpFkCheck); out.push(OpDeferredFk);
+    out.push(OpTriggerEnter); out.push(OpTriggerLeave); out.push(OpTriggerProgram); out.push(OpFkViolation);
+    out.push(OpFunctionInvoke); out.push(OpRowSetTest); out.push(OpRowSetAdd); out.push(OpRowSetRead);
+    out.push(OpProgram); out.push(OpParam); out.push(OpProgramReturn); out.push(OpJumpIfNotZero);
+    out.push(OpVerify); out.push(OpExplain); out.push(OpExplainQueryPlan); out.push(OpDebug);
+    out.push(OpTrace); out.push(OpProfile); out.push(OpProgressTick); out.push(OpDeleteAll);
+    out.push(OpDeleteUntilZero); out.push(OpJournalCheckpoint); out.push(OpPagerWrite); out.push(OpFinish);
+    out.push(OpReset); out.push(OpBindParam); out.push(OpHaltUserError); out.push(OpSqlReset);
+    out
+}

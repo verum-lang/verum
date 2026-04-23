@@ -1,0 +1,217 @@
+// =============================================================================
+// opcode_catalog/operand_shape.vr — operand kind for each VDBE opcode
+// =============================================================================
+// Spec: sqlite-native.md §11.2
+//
+// Each opcode carries up to 5 operands (p1..p5 in SQLite's
+// terminology). The semantic kind of each slot determines:
+//
+//   * how the disassembler renders it (literal vs register vs jump)
+//   * how the optimiser can rewrite it
+//   * how the fuzz mutator picks valid replacement values
+//
+// We omit the legacy `p4` / `p5` slot details — they're seldom needed
+// in loom (constants live in the constant pool). The catalogue
+// captures the dominant first-three slot shape per opcode.
+// =============================================================================
+
+module core.database.sqlite.native.opcode_catalog.operand_shape;
+
+mount core.*;
+mount base.{Text, Bool};
+mount core.database.sqlite.native.opcode_catalog.metadata.{
+    OpcodeKind,
+    OpInit, OpHalt, OpHaltIfNull, OpGoto, OpGosub, OpReturn, OpOnce, OpNoop,
+    OpJump, OpExpire, OpAbortable, OpReleaseReg, OpYield, OpInteger32, OpResult,
+    OpInteger, OpInt64, OpReal, OpString8, OpBlob, OpNull, OpSoftNull,
+    OpMove, OpCopy, OpSCopy, OpZeroOrNull, OpVariable, OpString, OpClear,
+    OpResetCount, OpEphemeralAbs,
+    OpAdd, OpSubtract, OpMultiply, OpDivide, OpRemainder, OpAddImm, OpRealAffinity,
+    OpBitAnd, OpBitOr, OpShiftLeft, OpShiftRight, OpBitNot, OpConcat, OpCast,
+    OpMustBeInt, OpAffinity,
+    OpCompare, OpEq, OpNe, OpLt, OpLe, OpGt, OpGe,
+    OpIf, OpIfNot, OpIfNull, OpNotNull, OpIfPos, OpIfNeg, OpIfZero, OpAnd, OpOr,
+    OpOpenRead, OpOpenWrite, OpOpenAutoindex, OpOpenEphemeral, OpClose,
+    OpRewind, OpLast, OpNext, OpPrev, OpColumn, OpRowId, OpRowKey, OpRowData,
+    OpInsert, OpDelete, OpUpdateRow, OpFound, OpNotFound,
+    OpSeekGT, OpSeekLT, OpSeekGE, OpSeekLE, OpSeekRowId, OpSeekScan,
+    OpResetCursor, OpIdxInsert, OpIdxDelete, OpIdxRowid,
+    OpIdxLT, OpIdxLE, OpIdxGE, OpIdxGT,
+    OpAggStep, OpAggFinal, OpAggValue, OpAggInverse, OpAggFinalAvg,
+    OpSorterOpen, OpSorterInsert, OpSorterRewind, OpSorterNext,
+    OpSorterData, OpSorterCompare, OpSorterDistinct,
+    OpDistinct, OpScalarFn, OpFunction, OpAggregateContext,
+    OpTransaction, OpCommit, OpRollbackOp, OpSavepointOp, OpAutoCommit,
+    OpReadCookie, OpSetCookie, OpVacuum,
+    OpVNew, OpVOpen, OpVDestroy, OpVRename, OpVColumn, OpVNext, OpVUpdate, OpVFilter,
+    OpCollSeq, OpExpiredSchema, OpInitCoroutine, OpEndCoroutine, OpYieldCoroutine,
+    OpDecrJumpZero, OpIncrLoad, OpResetSorter, OpAddCheckpoint, OpJournalMode,
+    OpPragma, OpAnalyze, OpReleaseSavepoint, OpDestroy, OpCreateIndex, OpCreateTable,
+    OpFkCounter, OpFkIfZero, OpFkCheck, OpDeferredFk,
+    OpTriggerEnter, OpTriggerLeave, OpTriggerProgram, OpFkViolation,
+    OpFunctionInvoke, OpRowSetTest, OpRowSetAdd, OpRowSetRead,
+    OpProgram, OpParam, OpProgramReturn, OpJumpIfNotZero,
+    OpVerify, OpExplain, OpExplainQueryPlan, OpDebug, OpTrace, OpProfile,
+    OpProgressTick, OpDeleteAll, OpDeleteUntilZero,
+    OpJournalCheckpoint, OpPagerWrite, OpFinish, OpReset, OpBindParam,
+    OpHaltUserError, OpSqlReset,
+};
+
+// -----------------------------------------------------------------------------
+// OperandSlot — the semantic kind of a single operand
+// -----------------------------------------------------------------------------
+
+public type OperandSlot is
+      OsRegister              // an SSA-register index
+    | OsRegisterRange(Int)    // start, count operand-encoded
+    | OsCursor                // cursor table index
+    | OsJumpTarget            // PC index
+    | OsLiteralInt            // small immediate
+    | OsConstantPoolIdx       // index into KConstant pool
+    | OsRootPage              // db page number
+    | OsErrorCode             // SQLite SQLITE_* code
+    | OsFunctionId            // entry in the fn registry
+    | OsAggregateKind         // index into ext.aggregate registry
+    | OsScalarKind            // index into builtins.registry.kind_code
+    | OsUnused;               // reserved / not used
+
+// -----------------------------------------------------------------------------
+// Per-opcode shape — three slots covers the dominant case
+// -----------------------------------------------------------------------------
+
+public type OperandShape is {
+    p1: OperandSlot,
+    p2: OperandSlot,
+    p3: OperandSlot,
+};
+
+public fn shape_unused() -> OperandShape {
+    OperandShape { p1: OsUnused, p2: OsUnused, p3: OsUnused }
+}
+
+public fn shape_of(o: &OpcodeKind) -> OperandShape {
+    match o {
+        // Program control
+        OpInit | OpGoto              => OperandShape { p1: OsJumpTarget, p2: OsUnused, p3: OsUnused },
+        OpHalt | OpHaltUserError     => OperandShape { p1: OsErrorCode, p2: OsConstantPoolIdx, p3: OsUnused },
+        OpHaltIfNull                 => OperandShape { p1: OsErrorCode, p2: OsRegister, p3: OsUnused },
+        OpGosub                      => OperandShape { p1: OsRegister, p2: OsJumpTarget, p3: OsUnused },
+        OpReturn                     => OperandShape { p1: OsRegister, p2: OsUnused, p3: OsUnused },
+        OpOnce | OpJump              => OperandShape { p1: OsJumpTarget, p2: OsUnused, p3: OsUnused },
+        OpNoop | OpExpire | OpAbortable | OpYield | OpResetCount | OpExpiredSchema
+                                     => shape_unused(),
+        OpReleaseReg                 => OperandShape { p1: OsRegisterRange(2), p2: OsUnused, p3: OsUnused },
+        OpInteger32                  => OperandShape { p1: OsLiteralInt, p2: OsRegister, p3: OsUnused },
+        OpResult | OpFinish | OpReset | OpSqlReset
+                                     => shape_unused(),
+        // Register loads / moves
+        OpInteger                    => OperandShape { p1: OsLiteralInt, p2: OsRegister, p3: OsUnused },
+        OpInt64 | OpReal | OpString8 | OpBlob | OpString
+                                     => OperandShape { p1: OsConstantPoolIdx, p2: OsRegister, p3: OsUnused },
+        OpNull                       => OperandShape { p1: OsRegister, p2: OsRegister, p3: OsUnused },
+        OpSoftNull                   => OperandShape { p1: OsRegister, p2: OsUnused, p3: OsUnused },
+        OpMove | OpCopy              => OperandShape { p1: OsRegister, p2: OsRegister, p3: OsLiteralInt },
+        OpSCopy                      => OperandShape { p1: OsRegister, p2: OsRegister, p3: OsUnused },
+        OpZeroOrNull                 => OperandShape { p1: OsRegister, p2: OsRegister, p3: OsUnused },
+        OpVariable                   => OperandShape { p1: OsLiteralInt, p2: OsRegister, p3: OsUnused },
+        OpClear                      => OperandShape { p1: OsRootPage, p2: OsUnused, p3: OsUnused },
+        OpEphemeralAbs               => OperandShape { p1: OsCursor, p2: OsLiteralInt, p3: OsUnused },
+        // Arithmetic
+        OpAdd | OpSubtract | OpMultiply | OpDivide | OpRemainder
+        | OpBitAnd | OpBitOr | OpShiftLeft | OpShiftRight | OpConcat
+                                     => OperandShape { p1: OsRegister, p2: OsRegister, p3: OsRegister },
+        OpAddImm                     => OperandShape { p1: OsRegister, p2: OsLiteralInt, p3: OsUnused },
+        OpBitNot                     => OperandShape { p1: OsRegister, p2: OsRegister, p3: OsUnused },
+        OpRealAffinity | OpAffinity | OpMustBeInt
+                                     => OperandShape { p1: OsRegister, p2: OsUnused, p3: OsUnused },
+        OpCast                       => OperandShape { p1: OsRegister, p2: OsLiteralInt, p3: OsUnused },
+        // Comparisons
+        OpCompare | OpEq | OpNe | OpLt | OpLe | OpGt | OpGe
+                                     => OperandShape { p1: OsRegister, p2: OsRegister, p3: OsJumpTarget },
+        OpIf | OpIfNot | OpIfNull | OpNotNull | OpIfPos | OpIfNeg | OpIfZero
+                                     => OperandShape { p1: OsRegister, p2: OsJumpTarget, p3: OsUnused },
+        OpAnd | OpOr                 => OperandShape { p1: OsRegister, p2: OsRegister, p3: OsRegister },
+        // Cursor / table
+        OpOpenRead | OpOpenWrite | OpOpenAutoindex
+                                     => OperandShape { p1: OsCursor, p2: OsRootPage, p3: OsLiteralInt },
+        OpOpenEphemeral              => OperandShape { p1: OsCursor, p2: OsLiteralInt, p3: OsUnused },
+        OpClose                      => OperandShape { p1: OsCursor, p2: OsUnused, p3: OsUnused },
+        OpRewind | OpLast            => OperandShape { p1: OsCursor, p2: OsJumpTarget, p3: OsUnused },
+        OpNext | OpPrev              => OperandShape { p1: OsCursor, p2: OsJumpTarget, p3: OsLiteralInt },
+        OpColumn                     => OperandShape { p1: OsCursor, p2: OsLiteralInt, p3: OsRegister },
+        OpRowId | OpRowKey | OpRowData
+                                     => OperandShape { p1: OsCursor, p2: OsRegister, p3: OsUnused },
+        OpInsert                     => OperandShape { p1: OsCursor, p2: OsRegister, p3: OsRegister },
+        OpDelete                     => OperandShape { p1: OsCursor, p2: OsLiteralInt, p3: OsUnused },
+        OpUpdateRow                  => OperandShape { p1: OsCursor, p2: OsRegister, p3: OsLiteralInt },
+        OpFound | OpNotFound         => OperandShape { p1: OsCursor, p2: OsJumpTarget, p3: OsRegister },
+        OpSeekGT | OpSeekLT | OpSeekGE | OpSeekLE | OpSeekRowId | OpSeekScan
+                                     => OperandShape { p1: OsCursor, p2: OsJumpTarget, p3: OsRegister },
+        OpResetCursor                => OperandShape { p1: OsCursor, p2: OsUnused, p3: OsUnused },
+        OpIdxInsert | OpIdxDelete    => OperandShape { p1: OsCursor, p2: OsRegister, p3: OsLiteralInt },
+        OpIdxRowid                   => OperandShape { p1: OsCursor, p2: OsRegister, p3: OsUnused },
+        OpIdxLT | OpIdxLE | OpIdxGE | OpIdxGT
+                                     => OperandShape { p1: OsCursor, p2: OsJumpTarget, p3: OsRegister },
+        // Aggregates / sort
+        OpAggStep | OpAggInverse     => OperandShape { p1: OsRegister, p2: OsAggregateKind, p3: OsRegister },
+        OpAggFinal | OpAggValue      => OperandShape { p1: OsRegister, p2: OsAggregateKind, p3: OsUnused },
+        OpAggFinalAvg                => OperandShape { p1: OsRegister, p2: OsRegister, p3: OsRegister },
+        OpSorterOpen                 => OperandShape { p1: OsCursor, p2: OsLiteralInt, p3: OsUnused },
+        OpSorterInsert               => OperandShape { p1: OsCursor, p2: OsRegister, p3: OsUnused },
+        OpSorterRewind | OpSorterNext
+                                     => OperandShape { p1: OsCursor, p2: OsJumpTarget, p3: OsUnused },
+        OpSorterData | OpSorterDistinct
+                                     => OperandShape { p1: OsCursor, p2: OsRegister, p3: OsUnused },
+        OpSorterCompare              => OperandShape { p1: OsCursor, p2: OsRegister, p3: OsJumpTarget },
+        OpDistinct                   => OperandShape { p1: OsRegister, p2: OsRegister, p3: OsJumpTarget },
+        OpScalarFn                   => OperandShape { p1: OsScalarKind, p2: OsRegisterRange(0), p3: OsRegister },
+        OpFunction | OpFunctionInvoke
+                                     => OperandShape { p1: OsFunctionId, p2: OsRegisterRange(0), p3: OsRegister },
+        OpAggregateContext           => OperandShape { p1: OsRegister, p2: OsAggregateKind, p3: OsUnused },
+        // Transaction / schema
+        OpTransaction                => OperandShape { p1: OsLiteralInt, p2: OsUnused, p3: OsUnused },
+        OpCommit | OpAutoCommit | OpVacuum
+                                     => shape_unused(),
+        OpRollbackOp | OpSavepointOp | OpReleaseSavepoint
+                                     => OperandShape { p1: OsLiteralInt, p2: OsUnused, p3: OsUnused },
+        OpReadCookie                 => OperandShape { p1: OsLiteralInt, p2: OsRegister, p3: OsUnused },
+        OpSetCookie                  => OperandShape { p1: OsLiteralInt, p2: OsLiteralInt, p3: OsUnused },
+        // Virtual tables
+        OpVNew | OpVOpen | OpVDestroy | OpVRename | OpVColumn | OpVNext | OpVUpdate | OpVFilter
+                                     => OperandShape { p1: OsCursor, p2: OsRegister, p3: OsLiteralInt },
+        // Coroutines / collation
+        OpCollSeq                    => OperandShape { p1: OsConstantPoolIdx, p2: OsUnused, p3: OsUnused },
+        OpInitCoroutine | OpEndCoroutine | OpYieldCoroutine
+                                     => OperandShape { p1: OsRegister, p2: OsJumpTarget, p3: OsUnused },
+        OpDecrJumpZero | OpIncrLoad  => OperandShape { p1: OsRegister, p2: OsJumpTarget, p3: OsUnused },
+        OpResetSorter                => OperandShape { p1: OsCursor, p2: OsUnused, p3: OsUnused },
+        OpAddCheckpoint | OpJournalMode | OpJournalCheckpoint
+                                     => shape_unused(),
+        OpPragma                     => OperandShape { p1: OsConstantPoolIdx, p2: OsRegister, p3: OsRegister },
+        OpAnalyze                    => OperandShape { p1: OsRootPage, p2: OsUnused, p3: OsUnused },
+        OpDestroy | OpCreateIndex | OpCreateTable
+                                     => OperandShape { p1: OsRootPage, p2: OsRegister, p3: OsUnused },
+        // Foreign keys
+        OpFkCounter                  => OperandShape { p1: OsLiteralInt, p2: OsLiteralInt, p3: OsUnused },
+        OpFkIfZero                   => OperandShape { p1: OsLiteralInt, p2: OsJumpTarget, p3: OsUnused },
+        OpFkCheck | OpFkViolation | OpDeferredFk
+                                     => shape_unused(),
+        // Triggers
+        OpTriggerEnter | OpTriggerLeave
+                                     => shape_unused(),
+        OpTriggerProgram             => OperandShape { p1: OsLiteralInt, p2: OsRegister, p3: OsUnused },
+        OpProgram                    => OperandShape { p1: OsLiteralInt, p2: OsJumpTarget, p3: OsUnused },
+        OpProgramReturn              => OperandShape { p1: OsRegister, p2: OsUnused, p3: OsUnused },
+        OpParam                      => OperandShape { p1: OsLiteralInt, p2: OsRegister, p3: OsUnused },
+        OpJumpIfNotZero              => OperandShape { p1: OsRegister, p2: OsJumpTarget, p3: OsUnused },
+        OpRowSetTest | OpRowSetAdd | OpRowSetRead
+                                     => OperandShape { p1: OsRegister, p2: OsJumpTarget, p3: OsRegister },
+        // Misc
+        OpVerify | OpExplain | OpExplainQueryPlan | OpDebug | OpTrace | OpProfile | OpProgressTick
+                                     => shape_unused(),
+        OpDeleteAll | OpDeleteUntilZero
+                                     => OperandShape { p1: OsRootPage, p2: OsUnused, p3: OsUnused },
+        OpPagerWrite                 => OperandShape { p1: OsRootPage, p2: OsUnused, p3: OsUnused },
+        OpBindParam                  => OperandShape { p1: OsLiteralInt, p2: OsRegister, p3: OsUnused },
+    }
+}
