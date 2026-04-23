@@ -3672,8 +3672,27 @@ impl<'ctx> Translator<'ctx> {
                     let int_var = Int::new_const(name);
                     Ok(Dynamic::from_ast(&int_var))
                 } else {
-                    // Complex path - create symbolic constant
-                    let path_str = format!("{:?}", path);
+                    // Complex (multi-segment) path: canonicalise by
+                    // joining segment names with dots — span-insensitive
+                    // because segment identifiers are compared by name.
+                    // The previous `{:?}` emitted AST Debug text that
+                    // includes byte-offset spans, so two occurrences of
+                    // the same path at different source positions
+                    // denoted different Z3 constants — a latent
+                    // span-drift bug identical in spirit to the
+                    // `length_` keys fixed separately.
+                    let segs: Vec<String> = path
+                        .segments
+                        .iter()
+                        .map(|s| match s {
+                            verum_ast::PathSegment::Name(id) => id.name.as_str().to_string(),
+                            verum_ast::PathSegment::SelfValue => "self".to_string(),
+                            verum_ast::PathSegment::Super => "super".to_string(),
+                            verum_ast::PathSegment::Cog => "cog".to_string(),
+                            verum_ast::PathSegment::Relative => ".".to_string(),
+                        })
+                        .collect();
+                    let path_str = format!("path_{}", segs.join("."));
                     let int_var = Int::new_const(path_str.as_str());
                     Ok(Dynamic::from_ast(&int_var))
                 }
@@ -3690,8 +3709,14 @@ impl<'ctx> Translator<'ctx> {
             ExprKind::Paren(inner) => self.translate_pattern_arg(inner, z3_vars),
 
             _ => {
-                // For complex expressions, create a symbolic constant
-                let expr_str = format!("expr_{:?}", expr.kind);
+                // Same canonicalisation rationale as the complex-path
+                // arm above: pretty-print instead of Debug-format to
+                // strip spans and ensure a single Z3 symbol per
+                // distinct surface expression.
+                let expr_str = format!(
+                    "expr_{}",
+                    verum_ast::pretty::format_expr(expr)
+                );
                 let int_var = Int::new_const(expr_str.as_str());
                 Ok(Dynamic::from_ast(&int_var))
             }
