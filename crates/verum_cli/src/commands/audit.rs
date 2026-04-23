@@ -527,9 +527,27 @@ struct FrameworkUsage {
     citation: Text,
 }
 
-/// Entry point for `verum audit --framework-axioms`.
+/// Output format for audit commands.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AuditFormat {
+    /// Human-readable output with colours.
+    Plain,
+    /// Machine-parseable JSON with a stable schema. `schema_version`
+    /// is included for consumer negotiation; see
+    /// `docs/verification/cli-workflow.md` for the schema.
+    Json,
+}
+
+/// Legacy entry point — defaults to plain output.
 pub fn audit_framework_axioms() -> Result<()> {
-    ui::step("Enumerating framework-axiom trusted boundary");
+    audit_framework_axioms_with_format(AuditFormat::Plain)
+}
+
+/// Entry point for `verum audit --framework-axioms [--format FORMAT]`.
+pub fn audit_framework_axioms_with_format(format: AuditFormat) -> Result<()> {
+    if matches!(format, AuditFormat::Plain) {
+        ui::step("Enumerating framework-axiom trusted boundary");
+    }
 
     let manifest_dir = Manifest::find_manifest_dir()?;
     let vr_files = discover_vr_files(&manifest_dir);
@@ -601,12 +619,20 @@ pub fn audit_framework_axioms() -> Result<()> {
         }
     }
 
-    print_framework_report(
-        parsed_files,
-        skipped_files,
-        &by_framework,
-        &malformed,
-    );
+    match format {
+        AuditFormat::Plain => print_framework_report(
+            parsed_files,
+            skipped_files,
+            &by_framework,
+            &malformed,
+        ),
+        AuditFormat::Json => print_framework_report_json(
+            parsed_files,
+            skipped_files,
+            &by_framework,
+            &malformed,
+        ),
+    }
 
     if !malformed.is_empty() {
         return Err(crate::error::CliError::Custom(
@@ -620,6 +646,204 @@ pub fn audit_framework_axioms() -> Result<()> {
     }
 
     Ok(())
+}
+
+/// Enumerate the 18 primitive inference rules implemented by
+/// `verum_kernel`, corresponding to the rule table in
+/// `docs/verification/trusted-kernel.md`.
+///
+/// This is a static list of documented rules — the auditor can
+/// cross-reference it against the kernel's rule files to verify
+/// that every documented rule has an implementation and vice
+/// versa. The kernel itself does not carry a dynamic
+/// enumeration API today (see task #64 follow-up).
+pub fn audit_kernel_rules(format: AuditFormat) -> Result<()> {
+    /// One rule entry.
+    struct Rule {
+        number: u32,
+        family: &'static str,
+        name: &'static str,
+        signature: &'static str,
+    }
+
+    // Corresponds to trusted-kernel.md §4.1-§4.5.
+    const RULES: &[Rule] = &[
+        Rule { number:  1, family: "structural", name: "Var",          signature: "Γ, x:A ⊢ x : A" },
+        Rule { number:  2, family: "structural", name: "Lam",          signature: "Γ,x:A ⊢ t:B  ⟹  Γ ⊢ λx:A.t : Π x:A.B" },
+        Rule { number:  3, family: "structural", name: "App",          signature: "Γ ⊢ f:Π x:A.B, Γ ⊢ a:A  ⟹  Γ ⊢ f a : B[x↦a]" },
+        Rule { number:  4, family: "structural", name: "Pi-Form",      signature: "Γ ⊢ A:U_i, Γ,x:A ⊢ B:U_j  ⟹  Γ ⊢ Π x:A.B : U_max" },
+        Rule { number:  5, family: "inductive",  name: "Ind-Form",     signature: "strict positivity over constructor list" },
+        Rule { number:  6, family: "inductive",  name: "Ind-Intro",    signature: "Ctor(args) well-typed vs declared signature" },
+        Rule { number:  7, family: "inductive",  name: "Ind-Elim",     signature: "exhaustive pattern-match, arm typed in motive" },
+        Rule { number:  8, family: "equality",   name: "Refl",         signature: "Refl(t) : Eq(A, t, t)" },
+        Rule { number:  9, family: "equality",   name: "Eq-Elim (J)",  signature: "Martin-Löf J" },
+        Rule { number: 10, family: "equality",   name: "UIP-Free",     signature: "reject any axiom reducing to UIP" },
+        Rule { number: 11, family: "cubical",    name: "PathTy-Form",  signature: "PathTy(A, a, b) : U" },
+        Rule { number: 12, family: "cubical",    name: "HComp",        signature: "homogeneous composition" },
+        Rule { number: 13, family: "cubical",    name: "Transp",       signature: "transport along a path of types" },
+        Rule { number: 14, family: "cubical",    name: "Glue",         signature: "glue at face φ — univalence-enabling" },
+        Rule { number: 15, family: "cubical",    name: "Univalence",   signature: "ua : Equiv(A,B) → Path(U, A, B)  (via Glue)" },
+        Rule { number: 16, family: "axiom",      name: "Axiom-Intro",  signature: "admit registered CoreTerm::Axiom" },
+        Rule { number: 17, family: "smt",        name: "SmtProof-Replay", signature: "trust-tag replay of SmtCertificate" },
+        Rule { number: 18, family: "structural", name: "Universe-Cumul", signature: "Γ ⊢ A:U_i  ⟹  Γ ⊢ A:U_{i+1}" },
+    ];
+
+    match format {
+        AuditFormat::Plain => {
+            ui::step("Trusted-kernel primitive inference rules");
+            println!();
+            println!("  Rule  Family       Name                 Signature");
+            println!("  ────  ───────────  ───────────────────  ──────────────────────────────────");
+            for r in RULES {
+                println!(
+                    "  {:>3}   {:11}  {:19}  {}",
+                    r.number,
+                    r.family,
+                    r.name,
+                    r.signature
+                );
+            }
+            println!();
+            println!(
+                "  Total: {} rules across 5 families (structural / inductive /",
+                RULES.len()
+            );
+            println!(
+                "  equality / cubical / axiom+smt). See docs/verification/trusted-"
+            );
+            println!(
+                "  kernel.md §4 for the full semantics and the LCF context."
+            );
+        }
+        AuditFormat::Json => {
+            let mut out = String::from("{\n");
+            out.push_str("  \"schema_version\": 1,\n");
+            out.push_str(&format!(
+                "  \"rule_count\": {},\n",
+                RULES.len()
+            ));
+            out.push_str("  \"rules\": [\n");
+            for (i, r) in RULES.iter().enumerate() {
+                out.push_str(&format!(
+                    "    {{ \"number\": {}, \"family\": \"{}\", \"name\": \"{}\", \"signature\": \"{}\" }}{}\n",
+                    r.number,
+                    r.family,
+                    r.name,
+                    r.signature.replace('\\', "\\\\").replace('"', "\\\""),
+                    if i + 1 < RULES.len() { "," } else { "" }
+                ));
+            }
+            out.push_str("  ]\n");
+            out.push('}');
+            println!("{}", out);
+        }
+    }
+    Ok(())
+}
+
+fn print_framework_report_json(
+    parsed_files: usize,
+    skipped_files: usize,
+    by_framework: &BTreeMap<Text, Vec<FrameworkUsage>>,
+    malformed: &[(PathBuf, Text)],
+) {
+    let mut out = String::from("{\n");
+    out.push_str("  \"schema_version\": 1,\n");
+    out.push_str(&format!(
+        "  \"parsed_files\": {},\n",
+        parsed_files
+    ));
+    out.push_str(&format!(
+        "  \"skipped_files\": {},\n",
+        skipped_files
+    ));
+    let total_markers: usize = by_framework.values().map(|v| v.len()).sum();
+    out.push_str(&format!(
+        "  \"total_markers\": {},\n",
+        total_markers
+    ));
+    out.push_str(&format!(
+        "  \"framework_count\": {},\n",
+        by_framework.len()
+    ));
+    out.push_str("  \"frameworks\": [\n");
+    let mut first = true;
+    for (framework, uses) in by_framework {
+        if !first {
+            out.push_str(",\n");
+        }
+        first = false;
+        out.push_str("    {\n");
+        out.push_str(&format!(
+            "      \"framework\": \"{}\",\n",
+            json_escape(framework.as_str())
+        ));
+        out.push_str(&format!(
+            "      \"marker_count\": {},\n",
+            uses.len()
+        ));
+        out.push_str("      \"markers\": [\n");
+        let mut first_use = true;
+        for u in uses {
+            if !first_use {
+                out.push_str(",\n");
+            }
+            first_use = false;
+            out.push_str("        {\n");
+            out.push_str(&format!(
+                "          \"item_kind\": \"{}\",\n",
+                u.item_kind
+            ));
+            out.push_str(&format!(
+                "          \"item_name\": \"{}\",\n",
+                json_escape(u.item_name.as_str())
+            ));
+            out.push_str(&format!(
+                "          \"file\": \"{}\",\n",
+                json_escape(&u.file.display().to_string())
+            ));
+            out.push_str(&format!(
+                "          \"citation\": \"{}\"\n",
+                json_escape(u.citation.as_str())
+            ));
+            out.push_str("        }");
+        }
+        out.push_str("\n      ]\n    }");
+    }
+    out.push_str("\n  ],\n");
+    out.push_str("  \"malformed\": [\n");
+    let mut first_m = true;
+    for (file, item_name) in malformed {
+        if !first_m {
+            out.push_str(",\n");
+        }
+        first_m = false;
+        out.push_str(&format!(
+            "    {{ \"file\": \"{}\", \"item_name\": \"{}\" }}",
+            json_escape(&file.display().to_string()),
+            json_escape(item_name.as_str())
+        ));
+    }
+    out.push_str("\n  ]\n}");
+    println!("{}", out);
+}
+
+/// Escape a string for JSON. Handles quotes, backslashes, and control
+/// characters.
+fn json_escape(s: &str) -> String {
+    let mut out = String::with_capacity(s.len() + 2);
+    for c in s.chars() {
+        match c {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            c if c.is_control() => out.push_str(&format!("\\u{:04x}", c as u32)),
+            c => out.push(c),
+        }
+    }
+    out
 }
 
 /// Walk every `.vr` file under `root`, skipping target/ and hidden dirs.

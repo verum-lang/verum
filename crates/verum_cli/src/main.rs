@@ -610,6 +610,21 @@ enum Commands {
         /// malformed `@framework(...)` attribute is found.
         #[clap(long)]
         framework_axioms: bool,
+
+        /// Enumerate the 18 primitive inference rules implemented by
+        /// `verum_kernel`. Useful for auditors verifying the kernel's
+        /// trust boundary corresponds to its documented rule set.
+        #[clap(long)]
+        kernel_rules: bool,
+
+        /// Output format for the audit report: `plain` (default, human-
+        /// readable) or `json` (machine-parseable, stable schema).
+        ///
+        /// The `json` format is suitable for CI dashboards and
+        /// supply-chain enforcement — e.g. fail the build if a PR
+        /// introduces a new framework-axiom dependency.
+        #[clap(long, value_name = "FORMAT", default_value = "plain")]
+        format: String,
     },
 
     /// Export the project's theorems / lemmas / axioms to an external
@@ -1491,9 +1506,26 @@ fn run_command(cli: Cli) -> Result<()> {
             details,
             direct_only,
             framework_axioms,
+            kernel_rules,
+            format,
         } => {
-            if framework_axioms {
-                commands::audit::audit_framework_axioms()
+            let output_format = match format.as_str() {
+                "plain" => commands::audit::AuditFormat::Plain,
+                "json" => commands::audit::AuditFormat::Json,
+                other => {
+                    return Err(CliError::InvalidArgument(
+                        format!(
+                            "--format must be 'plain' or 'json', got '{}'",
+                            other
+                        )
+                        .into(),
+                    ));
+                }
+            };
+            if kernel_rules {
+                commands::audit::audit_kernel_rules(output_format)
+            } else if framework_axioms {
+                commands::audit::audit_framework_axioms_with_format(output_format)
             } else {
                 let options = commands::audit::AuditOptions {
                     verify_checksums: true,
