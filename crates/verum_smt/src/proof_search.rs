@@ -4514,8 +4514,6 @@ impl ProofSearchEngine {
                     // Proof-by-contradiction surface: to prove `!P`, the
                     // contradiction method assumes `P` as a named
                     // hypothesis and the residual goal becomes `False`.
-                    // Without this arm the whole method fails on the
-                    // very first `assume h: P` step.
                     current_goal.hypotheses.push((**inner).clone());
                     current_goal.goal = Expr::new(
                         ExprKind::Literal(verum_ast::literal::Literal::new(
@@ -4523,6 +4521,30 @@ impl ProofSearchEngine {
                             current_goal.goal.span,
                         )),
                         current_goal.goal.span,
+                    );
+                }
+                ExprKind::Binary { op: BinOp::Ne, left, right } => {
+                    // `a != b` is sugar for `!(a == b)`. Proof by
+                    // contradiction on a `Ne` goal therefore assumes
+                    // `a == b` and leaves `False` to derive — exactly
+                    // the classical "no natural is both positive and
+                    // zero" pattern.
+                    let span = current_goal.goal.span;
+                    let eq_expr = Expr::new(
+                        ExprKind::Binary {
+                            op: BinOp::Eq,
+                            left: left.clone(),
+                            right: right.clone(),
+                        },
+                        span,
+                    );
+                    current_goal.hypotheses.push(eq_expr);
+                    current_goal.goal = Expr::new(
+                        ExprKind::Literal(verum_ast::literal::Literal::new(
+                            verum_ast::LiteralKind::Bool(false),
+                            span,
+                        )),
+                        span,
                     );
                 }
                 _ => {
@@ -6084,7 +6106,24 @@ impl ProofSearchEngine {
             | "calc"
             | "induction_hypothesis"
             | "IH"
-            | "by_IH" => self.try_auto(goal),
+            | "by_IH"
+            // Names that show up in user-level structured proofs as
+            // the justification for `have` / `show` / calc steps.
+            // None has independent tactic semantics — they all reduce
+            // to "auto-discharge this step using the ambient
+            // hypotheses + SMT solver." Listing them here is cheap and
+            // makes textbook-style proofs portable.
+            | "precondition"
+            | "hypothesis"
+            | "substitution"
+            | "transitivity"
+            | "strict_order"
+            | "antisymmetry"
+            | "monotonicity"
+            | "linearity"
+            | "cancellation"
+            | "definition_unfold"
+            | "unfold_definition" => self.try_auto(goal),
 
             _ => Err(ProofError::TacticFailed(
                 format!("Unknown tactic: {}", name).into(),
