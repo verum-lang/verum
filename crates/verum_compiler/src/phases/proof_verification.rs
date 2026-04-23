@@ -1434,6 +1434,17 @@ pub fn verify_proof_body_with_aliases(
         hypotheses.push(hyp);
     }
 
+    // Variant-exhaustiveness hypotheses. For every parameter typed
+    // as a declared variant type `T is A | B | C;`, add the
+    // disjunctive claim `p == T.A || p == T.B || p == T.C`. Paired
+    // with the pairwise-disjointness axioms this encodes the
+    // complete ADT semantics Z3 needs for variant-indexed
+    // reasoning. The registry lives on the engine — populated by
+    // `verify_cmd::verify_module` from the module's `TypeDecl`s.
+    for hyp in variant_exhaustiveness_hypotheses(theorem, engine.variant_map()) {
+        hypotheses.push(hyp);
+    }
+
     let primary_goal = ProofGoal::with_hypotheses(proposition.clone(), hypotheses.clone());
 
     match proof_body {
@@ -2087,6 +2098,83 @@ pub fn propositional_witness_hypotheses(theorem: &TheoremDecl) -> Vec<Expr> {
                 }
             }
         }
+    }
+    out
+}
+
+/// Emit exhaustiveness hypotheses for every parameter typed as a
+/// declared variant type. Given a parameter `p: T` where
+/// `T is A | B | C`, produce the expression
+/// `p == T.A || p == T.B || p == T.C`.
+///
+/// Uses the variant registry `variant_map` (populated from the
+/// module's `TypeDecl`s at `verify_module` time). Parameters typed
+/// with non-variant types are skipped. Combined with the pairwise-
+/// disjointness axioms registered on the engine, this gives Z3
+/// complete information about inhabitants of the variant sort
+/// without needing a dedicated ADT datatype encoding.
+pub fn variant_exhaustiveness_hypotheses(
+    theorem: &TheoremDecl,
+    variant_map: &std::collections::HashMap<Text, Vec<Text>>,
+) -> Vec<Expr> {
+    use verum_ast::decl::FunctionParamKind;
+    use verum_ast::pattern::PatternKind;
+    use verum_ast::ty::TypeKind;
+
+    let mut out: Vec<Expr> = Vec::new();
+    for param in &theorem.params {
+        let FunctionParamKind::Regular { pattern, ty, .. } = &param.kind else { continue; };
+        let PatternKind::Ident { name: param_name, .. } = &pattern.kind else { continue; };
+        let TypeKind::Path(path) = &ty.kind else { continue; };
+        let Some(type_id) = path.as_ident() else { continue; };
+        let Some(ctors) = variant_map.get(&type_id.name) else { continue; };
+        if ctors.is_empty() {
+            continue;
+        }
+
+        // Build `p == T.Ctor` expressions for each constructor.
+        let make_disjunct = |ctor: &Text| -> Expr {
+            let type_seg = verum_ast::ty::Ident::new(type_id.name.as_str(), ty.span);
+            let ctor_seg = verum_ast::ty::Ident::new(ctor.as_str(), ty.span);
+            let qualified_path = verum_ast::ty::Path::new(
+                List::from_iter([
+                    verum_ast::ty::PathSegment::Name(type_seg),
+                    verum_ast::ty::PathSegment::Name(ctor_seg),
+                ]),
+                ty.span,
+            );
+            let qualified_expr = Expr::new(
+                ExprKind::Path(qualified_path),
+                ty.span,
+            );
+            let param_path = Expr::new(
+                ExprKind::Path(verum_ast::ty::Path::single(param_name.clone())),
+                ty.span,
+            );
+            Expr::new(
+                ExprKind::Binary {
+                    op: verum_ast::BinOp::Eq,
+                    left: Heap::new(param_path),
+                    right: Heap::new(qualified_expr),
+                },
+                ty.span,
+            )
+        };
+
+        // OR them together.
+        let mut disj = make_disjunct(&ctors[0]);
+        for c in &ctors[1..] {
+            let next = make_disjunct(c);
+            disj = Expr::new(
+                ExprKind::Binary {
+                    op: verum_ast::BinOp::Or,
+                    left: Heap::new(disj),
+                    right: Heap::new(next),
+                },
+                ty.span,
+            );
+        }
+        out.push(disj);
     }
     out
 }

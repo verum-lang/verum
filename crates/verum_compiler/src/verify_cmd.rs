@@ -222,6 +222,22 @@ impl<'s> VerifyCommand<'s> {
         // close automatically.
         let variant_axioms =
             crate::phases::proof_verification::variant_disjointness_axioms(module);
+
+        // Variant-type registry — (name, ctor-names) pairs for
+        // every `type T is A | B | C;`. Threaded to each theorem
+        // so the hypothesis layer can emit exhaustiveness claims.
+        let mut variant_registry: Vec<(Text, Vec<Text>)> = Vec::new();
+        for item in &module.items {
+            if let ItemKind::Type(td) = &item.kind {
+                if let verum_ast::decl::TypeDeclBody::Variant(vs) = &td.body {
+                    let ctors: Vec<Text> = vs
+                        .iter()
+                        .map(|v| Text::from(v.name.name.as_str()))
+                        .collect();
+                    variant_registry.push((Text::from(td.name.name.as_str()), ctors));
+                }
+            }
+        }
         debug!(
             "CLI verify: refinement={} signatures={} variant_axioms={}",
             reflection_registry.len(),
@@ -339,7 +355,7 @@ impl<'s> VerifyCommand<'s> {
             let result = self.verify_theorem(
                 thm, kind_name, timeout, &alias_map, &module_hints,
                 &reflection_registry, &callee_signatures_for_module,
-                &variant_axioms,
+                &variant_axioms, &variant_registry,
             );
 
             // Note: Profiler is not used for theorem verification (different result type)
@@ -383,6 +399,7 @@ impl<'s> VerifyCommand<'s> {
         reflection_registry: &verum_smt::refinement_reflection::RefinementReflectionRegistry,
         callee_signatures_for_module: &[(Text, Vec<Text>, Text)],
         variant_axioms: &[Expr],
+        variant_registry: &[(Text, Vec<Text>)],
     ) -> VerificationResult {
         let start = Instant::now();
 
@@ -432,6 +449,14 @@ impl<'s> VerifyCommand<'s> {
         // closes by SMT.
         for ax in variant_axioms {
             proof_engine.register_axiom(ax.clone());
+        }
+
+        // Register the variant-type registry so the hypothesis-
+        // elaboration pass can emit exhaustiveness claims for
+        // parameters typed as variants. Data is passed in as a
+        // pre-computed (type-name, ctors) list.
+        for (tname, ctors) in variant_registry {
+            proof_engine.register_variant_type(tname.clone(), ctors.clone());
         }
 
         // Run the full proof verification pipeline

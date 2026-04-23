@@ -1,0 +1,40 @@
+// @test: integration
+// @tier: 0
+// @level: L1
+// @tags: verify, variant, adt, exhaustiveness, hypothesis
+// @expect: pass
+//
+// Parameters typed as a declared variant type `T is A | B | C`
+// must carry the implicit exhaustiveness hypothesis
+// `p == T.A || p == T.B || p == T.C`. Combined with the pairwise-
+// disjointness axioms from the previous commit, this completes
+// the ADT encoding needed for most variant-over-arithmetic proofs.
+
+public type Color is Red | Green | Blue;
+public type Direction is North | South | East | West;
+
+@verify(formal)
+theorem color_exhaustive(c: Color)
+    ensures c == Color.Red || c == Color.Green || c == Color.Blue
+    proof by auto;
+
+@verify(formal)
+theorem direction_exhaustive(d: Direction)
+    ensures d == Direction.North || d == Direction.South
+         || d == Direction.East || d == Direction.West
+    proof by auto;
+
+@verify(formal)
+theorem color_or_not_red(c: Color)
+    ensures c == Color.Red || c != Color.Red
+    proof by auto;
+
+@verify(formal)
+theorem color_non_red_implies_green_or_blue(c: Color)
+    requires c != Color.Red
+    ensures c == Color.Green || c == Color.Blue
+    proof by auto;
+
+fn main() {
+    print("L1-core: verification_phase/variant_exhaustiveness");
+}

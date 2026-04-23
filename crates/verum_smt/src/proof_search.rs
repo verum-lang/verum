@@ -2223,6 +2223,13 @@ pub struct ProofSearchEngine {
     /// disjointness facts derived from `type T is A | B | C;`
     /// declarations.
     module_axioms: Vec<verum_ast::Expr>,
+
+    /// Variant-type registry: maps a variant type's unqualified
+    /// name (`"Color"`) to its constructor names (`["Red",
+    /// "Green", "Blue"]`). Used by the hypothesis-elaboration
+    /// layer to emit exhaustiveness claims (`p == T.A || p == T.B
+    /// || ...`) for parameters typed as a variant.
+    variant_map: std::collections::HashMap<Text, Vec<Text>>,
 }
 
 /// Record of an incomplete proof (accepted via Sorry tactic)
@@ -2251,6 +2258,7 @@ impl ProofSearchEngine {
             reflection_registry: crate::refinement_reflection::RefinementReflectionRegistry::new(),
             callee_signatures: std::collections::HashMap::new(),
             module_axioms: Vec::new(),
+            variant_map: std::collections::HashMap::new(),
         }
     }
 
@@ -2268,6 +2276,7 @@ impl ProofSearchEngine {
             reflection_registry: crate::refinement_reflection::RefinementReflectionRegistry::new(),
             callee_signatures: std::collections::HashMap::new(),
             module_axioms: Vec::new(),
+            variant_map: std::collections::HashMap::new(),
         }
     }
 
@@ -2336,6 +2345,18 @@ impl ProofSearchEngine {
     /// `try_smt_discharge` to assert them on the solver.
     pub fn module_axioms(&self) -> &[verum_ast::Expr] {
         &self.module_axioms
+    }
+
+    /// Register a variant type's constructor list. Used by the
+    /// hypothesis-elaboration pass to emit exhaustiveness facts
+    /// for parameters typed as a variant.
+    pub fn register_variant_type(&mut self, type_name: Text, ctors: Vec<Text>) {
+        self.variant_map.insert(type_name, ctors);
+    }
+
+    /// Read-only access to the variant registry.
+    pub fn variant_map(&self) -> &std::collections::HashMap<Text, Vec<Text>> {
+        &self.variant_map
     }
 
     /// Read-only access to the reflection registry, e.g. for
