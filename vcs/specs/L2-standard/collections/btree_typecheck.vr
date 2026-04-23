@@ -1,0 +1,71 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: collections, btree, ordered-map
+// @timeout: 15000
+// @description: core.collections.btree surface — BTreeMap + BTreeSet insert/get/remove
+
+mount core.*;
+mount core.collections.{BTreeMap, BTreeSet};
+
+fn btree_map_insert_get_remove() {
+    let mut m: BTreeMap<Int, Text> = BTreeMap.new();
+    assert_eq(m.len(), 0);
+    assert_eq(m.is_empty(), true);
+    let _ = m.insert(1, "one".clone());
+    let _ = m.insert(2, "two".clone());
+    let _ = m.insert(3, "three".clone());
+    assert_eq(m.len(), 3);
+    assert_eq(m.is_empty(), false);
+    assert_eq(m.contains_key(&2), true);
+    assert_eq(m.contains_key(&99), false);
+    match m.get(&2) {
+        Some(v) => { assert(v.len() > 0); }
+        None    => { panic("get(2) must be Some"); }
+    }
+    match m.remove(&2) {
+        Some(_) => {}
+        None    => { panic("remove(2) of existing key must be Some"); }
+    }
+    assert_eq(m.len(), 2);
+    assert_eq(m.contains_key(&2), false);
+}
+
+fn btree_map_insert_overwrites() {
+    let mut m: BTreeMap<Int, Int> = BTreeMap.new();
+    let _ = m.insert(1, 10);
+    // Overwriting existing key returns the prior value.
+    let prior = m.insert(1, 20);
+    match prior {
+        Some(v) => { assert_eq(v, 10); }
+        None    => { panic("overwrite must return prior Some(10)"); }
+    }
+    assert_eq(m.len(), 1);
+}
+
+fn btree_set_basic_ops() {
+    let mut s: BTreeSet<Int> = BTreeSet.new();
+    assert_eq(s.len(), 0);
+    assert_eq(s.is_empty(), true);
+    // First insert returns true; second for same element returns false.
+    let first = s.insert(5);
+    assert_eq(first, true);
+    let dup = s.insert(5);
+    assert_eq(dup, false);
+    assert_eq(s.len(), 1);
+    let _ = s.insert(3);
+    let _ = s.insert(7);
+    assert_eq(s.len(), 3);
+    assert_eq(s.contains(&3), true);
+    assert_eq(s.contains(&4), false);
+    let removed = s.remove(&3);
+    assert_eq(removed, true);
+    assert_eq(s.contains(&3), false);
+}
+
+fn main() {
+    btree_map_insert_get_remove();
+    btree_map_insert_overwrites();
+    btree_set_basic_ops();
+    print("btree_typecheck ok");
+}
