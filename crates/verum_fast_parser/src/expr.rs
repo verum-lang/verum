@@ -1865,8 +1865,11 @@ impl<'a> RecursiveParser<'a> {
             // Level 13: Exponentiation (right-assoc)
             TokenKind::StarStar => (13, 13),
 
-            // Level 14: Range (left-assoc, but special handling)
-            TokenKind::DotDot | TokenKind::DotDotEq => (14, 15),
+            // Range (left-assoc). Intentionally below arithmetic and
+            // comparison so `0..n - 1` parses as `0..(n - 1)` rather
+            // than `(0..n) - 1`. Matches Rust's convention — ranges are
+            // structural delimiters, not arithmetic operators.
+            TokenKind::DotDot | TokenKind::DotDotEq => (3, 4),
 
             // Level 16: Cast (special case, parsed separately)
             TokenKind::As => (16, 17),
