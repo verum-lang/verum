@@ -1,0 +1,25 @@
+// @test: typecheck-fail
+// @tier: 0
+// @level: L1
+// @tags: refinement, arithmetic, const-fold, check_phase, language
+// @expect: errors
+
+// Regression for the const-fold gap in try_extract_int_value.  Before
+// the fix, refinement predicates containing arithmetic over constant
+// operands — e.g. `n > 2 * 10`, `n <= 1 << 32`, `n != 0xFF & 0x0F` —
+// could not be reduced syntactically. The evaluator returned Unknown
+// and violations slipped through the check phase.
+//
+// After the fix, `try_extract_int_value` folds Add/Sub/Mul/Div/Rem/
+// Shl/Shr/BitAnd/BitOr/BitXor over compile-time literals, so the
+// predicate reduces to `n > 20` for substitution.
+
+mount core.*;
+
+type Doubled is Int where |n| { n > 2 * 10 };
+
+fn main() {
+    // 15 violates n > 20.
+    let bad: Doubled = 15;
+    print("should not compile");
+}

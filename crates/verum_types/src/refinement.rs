@@ -2080,7 +2080,15 @@ impl RefinementChecker {
     }
 
     /// Try to extract a constant integer value from an expression.
-    /// Handles plain int literals, negated int literals, and parenthesized expressions.
+    /// Handles plain int literals, negated int literals, parenthesised
+    /// expressions, and pure-integer arithmetic over constant operands
+    /// (`+`, `-`, `*`, `/`, `%`, `<<`, `>>`, `&`, `|`, `^`). Without the
+    /// arithmetic fold, refinement predicates like `n > 2 * 10` would
+    /// evaluate to Unknown at the syntactic check — the evaluator
+    /// couldn't prove `15 > 20` false, so violations slipped through.
+    /// Arithmetic on two compile-time literals is total and side-effect
+    /// free (div/mod by zero is conservatively refused by returning
+    /// None — the SMT layer handles that case).
     fn try_extract_int_value(expr: &Expr) -> Maybe<i64> {
         match &expr.kind {
             ExprKind::Literal(Literal {
@@ -2094,6 +2102,39 @@ impl RefinementChecker {
                 Self::try_extract_int_value(inner).map(|val| -val)
             }
             ExprKind::Paren(inner) => Self::try_extract_int_value(inner),
+            ExprKind::Binary { op, left, right } => {
+                use verum_ast::expr::BinOp;
+                let l = Self::try_extract_int_value(left);
+                let r = Self::try_extract_int_value(right);
+                match (l, r) {
+                    (Maybe::Some(lv), Maybe::Some(rv)) => match op {
+                        BinOp::Add => lv.checked_add(rv).map_or(Maybe::None, Maybe::Some),
+                        BinOp::Sub => lv.checked_sub(rv).map_or(Maybe::None, Maybe::Some),
+                        BinOp::Mul => lv.checked_mul(rv).map_or(Maybe::None, Maybe::Some),
+                        BinOp::Div => {
+                            if rv == 0 { Maybe::None }
+                            else { lv.checked_div(rv).map_or(Maybe::None, Maybe::Some) }
+                        }
+                        BinOp::Rem => {
+                            if rv == 0 { Maybe::None }
+                            else { Maybe::Some(lv.rem_euclid(rv)) }
+                        }
+                        BinOp::Shl => {
+                            if rv < 0 || rv >= 64 { Maybe::None }
+                            else { Maybe::Some(lv << rv) }
+                        }
+                        BinOp::Shr => {
+                            if rv < 0 || rv >= 64 { Maybe::None }
+                            else { Maybe::Some(lv >> rv) }
+                        }
+                        BinOp::BitAnd => Maybe::Some(lv & rv),
+                        BinOp::BitOr  => Maybe::Some(lv | rv),
+                        BinOp::BitXor => Maybe::Some(lv ^ rv),
+                        _ => Maybe::None,
+                    },
+                    _ => Maybe::None,
+                }
+            }
             _ => Maybe::None,
         }
     }
