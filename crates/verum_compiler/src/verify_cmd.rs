@@ -186,7 +186,7 @@ impl<'s> VerifyCommand<'s> {
 
                 // Verify the function
                 let start_time = Instant::now();
-                let result = self.verify_function(func, timeout);
+                let result = self.verify_function(func, timeout, &alias_map);
                 let elapsed = start_time.elapsed();
 
                 // Profile if enabled (extract location before mutable borrow)
@@ -395,21 +395,49 @@ impl<'s> VerifyCommand<'s> {
         &self,
         func: &FunctionDecl,
         timeout: Duration,
+        alias_map: &std::collections::HashMap<Text, Vec<Expr>>,
     ) -> Result<verum_smt::ProofResult, VerificationError> {
         let start = Instant::now();
 
-        // Check if function has any verifiable content
+        // Check if function has any verifiable content.
+        // The alias-map catches refinements that arrive through a named
+        // type alias (`type PageNo is Int where |n| { n >= 1 };`) so
+        // functions taking `p: PageNo` get the implicit `n >= 1`
+        // precondition without repeating it in a `requires` clause.
         let has_requires = !func.requires.is_empty();
         let has_ensures = !func.ensures.is_empty();
-        let has_refined_params = self.has_refinement_types_in_params(func);
-        let has_refined_return = self.has_refinement_type(&func.return_type);
+        let has_refined_params =
+            self.has_refinement_types_in_params_with_aliases(func, alias_map);
+        let has_refined_return =
+            self.has_refinement_type_with_aliases(&func.return_type, alias_map);
 
-        if !has_requires && !has_ensures && !has_refined_params && !has_refined_return {
+        // Synthesise implicit `requires` clauses from alias-wrapped
+        // refinements on parameters. For `fn foo(p: PageNo)` where
+        // `type PageNo is Int where |n| { n >= 1 }`, this adds an
+        // expression equivalent to `p >= 1` to the requires set.
+        let implicit_requires =
+            self.synthesize_alias_refinement_requires(func, alias_map);
+        let has_implicit_requires = !implicit_requires.is_empty();
+
+        if !has_requires
+            && !has_ensures
+            && !has_refined_params
+            && !has_refined_return
+            && !has_implicit_requires
+        {
             // Return a proof result with zero cost
             return Ok(verum_smt::ProofResult::new(
                 verum_smt::VerificationCost::new("no_verification".into(), Duration::ZERO, true),
             ));
         }
+
+        // Build the effective requires list — declared + alias-implicit.
+        let effective_requires: List<Expr> = {
+            let mut list = List::new();
+            for e in &func.requires { list.push(e.clone()); }
+            for e in &implicit_requires { list.push(e.clone()); }
+            list
+        };
 
         // Create Z3 context with timeout
         let config = ContextConfig {
@@ -433,9 +461,9 @@ impl<'s> VerifyCommand<'s> {
         }
 
         // Step 1: Verify preconditions are satisfiable (not contradictory)
-        if has_requires {
+        if has_requires || has_implicit_requires {
             if let Err(e) =
-                self.verify_preconditions(&ctx, &mut translator, &func.requires, timeout)
+                self.verify_preconditions(&ctx, &mut translator, &effective_requires, timeout)
             {
                 debug!(
                     "Precondition verification failed for {}: {}",
@@ -456,13 +484,18 @@ impl<'s> VerifyCommand<'s> {
             debug!("Preconditions verified for {}", func.name);
         }
 
-        // Step 2: Verify postconditions hold given preconditions
+        // Step 2: Verify postconditions hold given preconditions. Also
+        // pass the function body so `result` gets a proper Z3 binding:
+        // for expression-body / block-with-tail-expr functions we assert
+        // `result == body` so the SMT can check ensures against the actual
+        // return value rather than an unconstrained fresh variable.
         if has_ensures {
             match self.verify_postconditions(
                 &ctx,
                 &mut translator,
-                &func.requires,
+                &effective_requires,
                 &func.ensures,
+                func.body.as_ref(),
                 timeout,
             ) {
                 Ok(()) => debug!("Postconditions verified for {}", func.name),
@@ -493,16 +526,17 @@ impl<'s> VerifyCommand<'s> {
             }
         }
 
-        // Step 3: Verify refinement types in parameters
+        // Step 3: Verify refinement types in parameters.
+        // Accepts both inline refinements (`Int where |n|{...}`) and
+        // aliases that flatten to a refinement (`type PageNo is Int where …`).
         if has_refined_params {
             for param in &func.params {
                 if let FunctionParamKind::Regular { pattern: _, ty, .. } = &param.kind {
-                    if let TypeKind::Refined {
-                        base: _,
-                        predicate: _,
-                    } = &ty.kind
-                    {
-                        if let Err(e) = verify_refinement(&ctx, ty, None, VerifyMode::Auto) {
+                    let effective_ty = self.resolve_refined_alias_in_ty(ty, alias_map);
+                    if let TypeKind::Refined { .. } = &effective_ty.kind {
+                        if let Err(e) =
+                            verify_refinement(&ctx, &effective_ty, None, VerifyMode::Auto)
+                        {
                             return Err(e);
                         }
                     }
@@ -510,15 +544,14 @@ impl<'s> VerifyCommand<'s> {
             }
         }
 
-        // Step 4: Verify refinement type in return type
+        // Step 4: Verify refinement type in return type (inline or alias)
         if has_refined_return {
             if let Some(ref ret_ty) = func.return_type {
-                if let TypeKind::Refined {
-                    base: _,
-                    predicate: _,
-                } = &ret_ty.kind
-                {
-                    if let Err(e) = verify_refinement(&ctx, ret_ty, None, VerifyMode::Auto) {
+                let effective_ty = self.resolve_refined_alias_in_ty(ret_ty, alias_map);
+                if let TypeKind::Refined { .. } = &effective_ty.kind {
+                    if let Err(e) =
+                        verify_refinement(&ctx, &effective_ty, None, VerifyMode::Auto)
+                    {
                         return Err(e);
                     }
                 }
@@ -546,6 +579,162 @@ impl<'s> VerifyCommand<'s> {
         })
     }
 
+    /// Same as `has_refinement_types_in_params` but also counts aliases
+    /// whose target type contains refinement predicates.
+    fn has_refinement_types_in_params_with_aliases(
+        &self,
+        func: &FunctionDecl,
+        alias_map: &std::collections::HashMap<Text, Vec<Expr>>,
+    ) -> bool {
+        if self.has_refinement_types_in_params(func) { return true; }
+        func.params.iter().any(|p| {
+            if let FunctionParamKind::Regular { pattern: _, ty, .. } = &p.kind {
+                self.type_has_refinement_with_aliases(ty, alias_map)
+            } else {
+                false
+            }
+        })
+    }
+
+    /// Same as `has_refinement_type` but also follows name aliases.
+    fn has_refinement_type_with_aliases(
+        &self,
+        ty: &Option<Type>,
+        alias_map: &std::collections::HashMap<Text, Vec<Expr>>,
+    ) -> bool {
+        match ty {
+            Some(t) => self.type_has_refinement_with_aliases(t, alias_map),
+            None => false,
+        }
+    }
+
+    /// Recursive variant that treats `TypeKind::Path(Name)` as refined
+    /// if the alias chain contains refinement predicates.
+    fn type_has_refinement_with_aliases(
+        &self,
+        ty: &Type,
+        alias_map: &std::collections::HashMap<Text, Vec<Expr>>,
+    ) -> bool {
+        match &ty.kind {
+            TypeKind::Refined { .. } => true,
+            TypeKind::Path(path) => {
+                path.as_ident()
+                    .map(|id| alias_map.contains_key(&id.name))
+                    .unwrap_or(false)
+            }
+            TypeKind::Generic { base, args } => {
+                self.type_has_refinement_with_aliases(base, alias_map)
+                    || args.iter().any(|arg| {
+                        if let verum_ast::ty::GenericArg::Type(t) = arg {
+                            self.type_has_refinement_with_aliases(t, alias_map)
+                        } else { false }
+                    })
+            }
+            TypeKind::Tuple(types) => {
+                types.iter().any(|t| self.type_has_refinement_with_aliases(t, alias_map))
+            }
+            TypeKind::Reference { inner, .. }
+            | TypeKind::CheckedReference { inner, .. }
+            | TypeKind::UnsafeReference { inner, .. } => {
+                self.type_has_refinement_with_aliases(inner, alias_map)
+            }
+            TypeKind::Function { params, return_type, .. } => {
+                params.iter().any(|t| self.type_has_refinement_with_aliases(t, alias_map))
+                    || self.type_has_refinement_with_aliases(return_type, alias_map)
+            }
+            _ => false,
+        }
+    }
+
+    /// Build implicit `requires` clauses from alias-wrapped refinements
+    /// on parameters. Returns a fresh list of `Expr` values; each one
+    /// is the alias's flattened predicate with `self` rewritten to the
+    /// actual parameter identifier, so the SMT translator can lower it
+    /// against the bound param variable directly.
+    fn synthesize_alias_refinement_requires(
+        &self,
+        func: &FunctionDecl,
+        alias_map: &std::collections::HashMap<Text, Vec<Expr>>,
+    ) -> Vec<Expr> {
+        use crate::phases::proof_verification::substitute_ident;
+        let mut out: Vec<Expr> = Vec::new();
+        for param in &func.params {
+            let FunctionParamKind::Regular { pattern, ty, .. } = &param.kind else { continue; };
+            let Some(param_name) = self.extract_param_name(pattern) else { continue; };
+            // Follow the alias chain on the declared type.
+            let alias_name = match &ty.kind {
+                TypeKind::Path(p) => p.as_ident().map(|id| id.name.clone()),
+                _ => None,
+            };
+            let Some(alias_name) = alias_name else { continue; };
+            let Some(preds) = alias_map.get(&alias_name) else { continue; };
+            for pred in preds {
+                let substituted = substitute_ident(
+                    pred,
+                    &[(Text::from("self"), verum_ast::ty::Ident::new(param_name.as_str(), pred.span))],
+                );
+                out.push(substituted);
+            }
+        }
+        out
+    }
+
+    /// If `ty` is a `TypeKind::Path` that aliases to a refinement
+    /// chain, materialise a synthetic `Refined{base, predicate}` AST
+    /// node that `verify_refinement` can accept. Returns `ty` unchanged
+    /// otherwise. We synthesise with `base = Int` as a conservative
+    /// placeholder — the predicate is what drives satisfiability;
+    /// the base type is only consulted for primitive-vs-collection
+    /// dispatch and the compile-time type check has already ensured
+    /// coherence.
+    fn resolve_refined_alias_in_ty(
+        &self,
+        ty: &Type,
+        alias_map: &std::collections::HashMap<Text, Vec<Expr>>,
+    ) -> Type {
+        if matches!(ty.kind, TypeKind::Refined { .. }) {
+            return ty.clone();
+        }
+        let TypeKind::Path(path) = &ty.kind else { return ty.clone(); };
+        let Some(ident) = path.as_ident() else { return ty.clone(); };
+        let Some(preds) = alias_map.get(&ident.name) else { return ty.clone(); };
+        if preds.is_empty() { return ty.clone(); }
+
+        // AND-combine the chain. `preds` are already in the shape
+        // `P(self)`; verify_refinement interprets the binding name
+        // `it`/`self` according to AST convention — we pass them as-is.
+        let mut combined = preds[0].clone();
+        for extra in preds.iter().skip(1) {
+            let span = combined.span;
+            combined = verum_ast::expr::Expr::new(
+                verum_ast::expr::ExprKind::Binary {
+                    op: verum_ast::expr::BinOp::And,
+                    left: verum_common::Heap::new(combined),
+                    right: verum_common::Heap::new(extra.clone()),
+                },
+                span,
+            );
+        }
+
+        // Fabricate an Int-based Refined wrapper carrying the chain
+        // predicate. `verify_refinement` only needs the predicate
+        // expression plus *a* base type — the actual base is checked
+        // separately by the type system.
+        let base = Type::new(TypeKind::Int, ty.span);
+        let predicate = verum_ast::ty::RefinementPredicate {
+            binding: verum_common::Maybe::Some(verum_ast::ty::Ident::new("self", ty.span)),
+            expr: combined,
+            span: ty.span,
+        };
+        Type::new(
+            TypeKind::Refined {
+                base: verum_common::Heap::new(base),
+                predicate: verum_common::Heap::new(predicate),
+            },
+            ty.span,
+        )
+    }
+
     /// Check if type contains refinement predicates
     fn has_refinement_type(&self, ty: &Option<Type>) -> bool {
         match ty {
@@ -553,6 +742,7 @@ impl<'s> VerifyCommand<'s> {
             None => false,
         }
     }
+
 
     /// Recursively check if type has refinement
     fn type_has_refinement(&self, ty: &Type) -> bool {
@@ -666,6 +856,7 @@ impl<'s> VerifyCommand<'s> {
         translator: &mut Translator<'_>,
         requires: &[Expr],
         ensures: &[Expr],
+        body: verum_common::Maybe<&verum_ast::decl::FunctionBody>,
         _timeout: Duration,
     ) -> Result<(), VerifyError> {
         if ensures.is_empty() {
@@ -679,6 +870,55 @@ impl<'s> VerifyCommand<'s> {
             if let Ok(z3_expr) = translator.translate_expr(req) {
                 if let Some(bool_expr) = z3_expr.as_bool() {
                     solver.assert(&bool_expr);
+                }
+            }
+        }
+
+        // Bind `result` to the function body's return expression.
+        //
+        // Without this step, `result` is an unconstrained Z3 variable and
+        // every postcondition of shape `result <op> expr` finds a
+        // spurious counterexample. For functions whose body is a single
+        // expression (FunctionBody::Expr(e)) or a block with an empty
+        // statement list and a tail expression, we translate the
+        // expression and assert `result == body_expr`. Functions with
+        // real statement sequences (loops, intermediate lets, early
+        // returns) are out of scope here — they need the VBC/WP pipeline
+        // — and we simply skip the result binding, leaving `result` free;
+        // that's weaker but sound for existential reading of `ensures`.
+        if let verum_common::Maybe::Some(b) = body {
+            use verum_ast::decl::FunctionBody;
+            let tail_expr: Option<&Expr> = match b {
+                FunctionBody::Expr(e) => Some(e),
+                FunctionBody::Block(blk) if blk.stmts.is_empty() => {
+                    if let verum_common::Maybe::Some(boxed) = &blk.expr {
+                        Some(boxed.as_ref())
+                    } else {
+                        None
+                    }
+                }
+                FunctionBody::Block(_) => None,
+            };
+            if let Some(e) = tail_expr {
+                if let Ok(body_z3) = translator.translate_expr(e) {
+                    // Build a fresh `result` Z3 symbol of the matching
+                    // sort and assert `result == body`. We piggy-back on
+                    // the existing `Int::new_const("result")` convention
+                    // so the ensures-side translation (which also
+                    // resolves `result` as an Int const) unifies with
+                    // our binding.
+                    if let Some(body_int) = body_z3.as_int() {
+                        let result_var = z3::ast::Int::new_const("result");
+                        solver.assert(&result_var.eq(&body_int));
+                    } else if let Some(body_bool) = body_z3.as_bool() {
+                        let result_var = z3::ast::Bool::new_const("result");
+                        solver.assert(&result_var.iff(&body_bool));
+                    } else if let Some(body_real) = body_z3.as_real() {
+                        let result_var = z3::ast::Real::new_const("result");
+                        solver.assert(&result_var.eq(&body_real));
+                    }
+                    // Unknown sorts (tuples, arrays, user types) fall
+                    // through — future WP pipeline handles them.
                 }
             }
         }

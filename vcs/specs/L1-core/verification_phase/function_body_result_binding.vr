@@ -1,0 +1,60 @@
+// @test: integration
+// @tier: 0
+// @level: L1
+// @tags: verify, function, ensures, result, body, postcondition
+// @expect: pass
+//
+// `fn foo(..) -> T ensures result == <expr> { body }` must verify by
+// checking `ensures` against the actual body-returned value — not
+// against an unconstrained `result`. Without the body→result binding,
+// every non-trivial postcondition failed with a spurious counterexample.
+//
+// Locks in the FunctionBody encoding in `verify_postconditions`:
+// tail-expression functions and blocks whose only content is a tail
+// expression both get `result == body` asserted before ensures are
+// checked.
+
+@verify(formal)
+fn identity(x: Int) -> Int
+    ensures result == x
+{
+    x
+}
+
+@verify(formal)
+fn doubled(x: Int) -> Int
+    requires x >= 0
+    ensures result == 2 * x
+    ensures result >= 0
+{
+    x + x
+}
+
+@verify(formal)
+fn add_seven(n: Int) -> Int
+    requires n >= 0
+    ensures result == n + 7
+    ensures result >= 7
+{
+    n + 7
+}
+
+@verify(formal)
+fn square(x: Int) -> Int
+    requires x >= 0
+    ensures result == x * x
+    ensures result >= 0
+{
+    x * x
+}
+
+@verify(formal)
+fn negated(x: Int) -> Bool
+    ensures result == (x < 0)
+{
+    x < 0
+}
+
+fn main() {
+    print("L1-core: verification_phase/function_body_result_binding");
+}
