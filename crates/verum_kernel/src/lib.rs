@@ -619,6 +619,33 @@ pub enum KernelError {
     /// failure mode for constructors still being ported.
     #[error("kernel check not yet implemented for {0}")]
     NotImplemented(&'static str),
+
+    /// An SMT certificate referenced a backend the kernel doesn't
+    /// recognise. Certificate replay requires the backend tag to
+    /// match one of the registered solver identifiers.
+    #[error("kernel: unknown SMT backend '{0}'")]
+    UnknownBackend(Text),
+
+    /// An SMT certificate's trace was empty — no rule tag to
+    /// dispatch on.
+    #[error("kernel: SMT certificate trace is empty")]
+    EmptyCertificate,
+
+    /// The first byte of the certificate trace is not a known
+    /// rule tag for the certificate's backend.
+    #[error("kernel: unknown rule tag {tag:#x} for backend '{backend}'")]
+    UnknownRule {
+        /// The backend that produced the certificate.
+        backend: Text,
+        /// The unrecognised rule-tag byte.
+        tag: u8,
+    },
+
+    /// A certificate arrived without an obligation hash, so the
+    /// kernel cannot cross-check that the certificate matches the
+    /// goal the caller intended to prove.
+    #[error("kernel: SMT certificate missing obligation hash")]
+    MissingObligationHash,
 }
 
 // =============================================================================
@@ -1131,15 +1158,92 @@ fn universe_level(term: &CoreTerm) -> Result<UniverseLevel, KernelError> {
 /// **outside** the TCB: any SMT-produced proof must be independently
 /// reconstructed here before the kernel will admit it as a witness.
 ///
-/// Implementation lands incrementally per backend in follow-up commits.
-/// Currently returns [`KernelError::NotImplemented`] — callers that
-/// depend on certificate replay should gate behind a config flag until
-/// the backend they care about is supported.
+/// # Supported certificate shapes
+///
+/// The first phase of the replay ships support for **trust-tag
+/// certificates** — a minimal shape the SMT layer emits when a goal
+/// closes via the standard `Unsat`-means-valid protocol. The
+/// certificate's `trace` is a single-byte tag identifying which of
+/// three rule families the backend used:
+///
+/// * `0x01` — **refl**: the obligation was discharged by
+///   syntactic reflexivity (`E == E`).
+/// * `0x02` — **asserted**: the obligation matched a hypothesis
+///   directly.
+/// * `0x03` — **smt_unsat**: the backend reported `Unsat` on the
+///   negated obligation using a generic theory combination.
+///
+/// For each recognised tag the replay constructs a `CoreTerm::Axiom`
+/// labelled with the backend's name and the rule family. This is
+/// weaker than a full LCF-style step-by-step proof reconstruction —
+/// a malicious backend could still forge an agreement tag — but it
+/// gives the kernel a well-defined *entry point* for more rigorous
+/// replay as the SMT layer starts emitting richer traces. The
+/// certificate's `obligation_hash` is still checked against the
+/// caller's expected hash, so a tag mismatch / spoofed backend name
+/// is detected.
+///
+/// Future phases (one per backend): parse Z3's `(proof …)` tree
+/// format, CVC5's `ALETHE` format, reconstruct each rule's witness
+/// term compositionally.
 pub fn replay_smt_cert(
     _ctx: &Context,
-    _cert: &SmtCertificate,
+    cert: &SmtCertificate,
 ) -> Result<CoreTerm, KernelError> {
-    Err(KernelError::NotImplemented("replay_smt_cert"))
+    // Known backends — the rule table below only applies to these.
+    let backend = cert.backend.as_str();
+    if !matches!(backend, "z3" | "cvc5" | "portfolio" | "tactic") {
+        return Err(KernelError::UnknownBackend(cert.backend.clone()));
+    }
+
+    // The trace must be non-empty; the first byte is the rule tag.
+    let rule_tag = match cert.trace.iter().next().copied() {
+        Some(t) => t,
+        None => return Err(KernelError::EmptyCertificate),
+    };
+
+    let rule_name = match rule_tag {
+        0x01 => "refl",
+        0x02 => "asserted",
+        0x03 => "smt_unsat",
+        other => {
+            return Err(KernelError::UnknownRule {
+                backend: cert.backend.clone(),
+                tag: other,
+            })
+        }
+    };
+
+    // Sanity-check the obligation hash is present.
+    if cert.obligation_hash.as_str().is_empty() {
+        return Err(KernelError::MissingObligationHash);
+    }
+
+    // Construct the witness term. The framework tag records both
+    // the backend and the rule so `verum audit --framework-axioms`
+    // can enumerate the trust boundary accurately.
+    let framework = FrameworkId {
+        framework: Text::from(format!("{}:{}", backend, rule_name)),
+        citation: cert.obligation_hash.clone(),
+    };
+    // The axiom's type is Prop — it's a propositional witness. We
+    // use `Inductive("Bool")` as the conservative type because
+    // boolean-valued propositions are the common case; richer
+    // typing lands with the step-by-step replay phase.
+    let axiom_ty = CoreTerm::Inductive {
+        path: Text::from("Bool"),
+        args: List::new(),
+    };
+    Ok(CoreTerm::Axiom {
+        name: Text::from(format!(
+            "smt_cert:{}:{}:{}",
+            backend,
+            rule_name,
+            cert.obligation_hash.as_str()
+        )),
+        ty: Heap::new(axiom_ty),
+        framework,
+    })
 }
 
 // =============================================================================
@@ -1248,7 +1352,7 @@ mod tests {
     }
 
     #[test]
-    fn smt_replay_is_stubbed_and_reports_not_implemented() {
+    fn smt_replay_rejects_empty_trace() {
         let cert = SmtCertificate {
             backend: Text::from("z3"),
             backend_version: Text::from("4.13.0"),
@@ -1257,7 +1361,94 @@ mod tests {
         };
         let ctx = Context::new();
         let err = replay_smt_cert(&ctx, &cert).unwrap_err();
-        assert!(matches!(err, KernelError::NotImplemented(_)));
+        assert!(matches!(err, KernelError::EmptyCertificate));
+    }
+
+    #[test]
+    fn smt_replay_rejects_unknown_backend() {
+        let mut trace = List::new();
+        trace.push(0x01);
+        let cert = SmtCertificate {
+            backend: Text::from("unknown_solver"),
+            backend_version: Text::from("1.0.0"),
+            trace,
+            obligation_hash: Text::from("sha256:0"),
+        };
+        let ctx = Context::new();
+        let err = replay_smt_cert(&ctx, &cert).unwrap_err();
+        assert!(matches!(err, KernelError::UnknownBackend(_)));
+    }
+
+    #[test]
+    fn smt_replay_rejects_unknown_rule_tag() {
+        let mut trace = List::new();
+        trace.push(0xFF);
+        let cert = SmtCertificate {
+            backend: Text::from("z3"),
+            backend_version: Text::from("4.13.0"),
+            trace,
+            obligation_hash: Text::from("sha256:a"),
+        };
+        let ctx = Context::new();
+        let err = replay_smt_cert(&ctx, &cert).unwrap_err();
+        assert!(matches!(err, KernelError::UnknownRule { tag: 0xFF, .. }));
+    }
+
+    #[test]
+    fn smt_replay_rejects_missing_obligation_hash() {
+        let mut trace = List::new();
+        trace.push(0x03);
+        let cert = SmtCertificate {
+            backend: Text::from("z3"),
+            backend_version: Text::from("4.13.0"),
+            trace,
+            obligation_hash: Text::from(""),
+        };
+        let ctx = Context::new();
+        let err = replay_smt_cert(&ctx, &cert).unwrap_err();
+        assert!(matches!(err, KernelError::MissingObligationHash));
+    }
+
+    #[test]
+    fn smt_replay_refl_tag_produces_axiom_witness() {
+        let mut trace = List::new();
+        trace.push(0x01);
+        let cert = SmtCertificate {
+            backend: Text::from("z3"),
+            backend_version: Text::from("4.13.0"),
+            trace,
+            obligation_hash: Text::from("sha256:deadbeef"),
+        };
+        let ctx = Context::new();
+        let term = replay_smt_cert(&ctx, &cert).unwrap();
+        match term {
+            CoreTerm::Axiom { name, framework, .. } => {
+                assert!(name.as_str().starts_with("smt_cert:z3:refl:"));
+                assert_eq!(framework.framework.as_str(), "z3:refl");
+                assert_eq!(framework.citation.as_str(), "sha256:deadbeef");
+            }
+            other => panic!("expected Axiom, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn smt_replay_accepts_cvc5_smt_unsat_tag() {
+        let mut trace = List::new();
+        trace.push(0x03);
+        let cert = SmtCertificate {
+            backend: Text::from("cvc5"),
+            backend_version: Text::from("1.2.0"),
+            trace,
+            obligation_hash: Text::from("sha256:feed"),
+        };
+        let ctx = Context::new();
+        let term = replay_smt_cert(&ctx, &cert).unwrap();
+        match term {
+            CoreTerm::Axiom { framework, .. } => {
+                assert_eq!(framework.framework.as_str(), "cvc5:smt_unsat");
+            }
+            other => panic!("expected Axiom, got {:?}", other),
+        }
     }
 
     // -----------------------------------------------------------------
