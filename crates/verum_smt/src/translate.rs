@@ -750,6 +750,25 @@ impl<'ctx> Translator<'ctx> {
             // Tuple expressions - create Z3 datatype tuples
             ExprKind::Tuple(exprs) => self.translate_tuple(exprs),
 
+            // Tuple-field access `p.0`, `p.1`, … . We don't use a Z3
+            // tuple sort (see `translate_tuple` — tuples are encoded
+            // as opaque Ints) so element access is emitted as a
+            // canonical uninterpreted `Int` symbol keyed on the
+            // whole `expr.N` surface text. Multiple mentions of
+            // `p.0` collapse to the same Z3 const — exactly the
+            // property needed for postconditions like
+            //   ensures result.0 + result.1 == x
+            // to use the same symbol on both sides.
+            ExprKind::TupleIndex { expr, index } => {
+                let key = format!(
+                    "tuple_idx_{}_{}",
+                    verum_ast::pretty::format_expr(strip_paren(expr)),
+                    index
+                );
+                let int_var = Int::new_const(key.as_str());
+                Ok(Dynamic::from_ast(&int_var))
+            }
+
             // Interpolated string expressions - concatenate parts and expressions
             ExprKind::InterpolatedString {
                 handler,
