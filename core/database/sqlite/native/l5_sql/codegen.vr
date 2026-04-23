@@ -1820,9 +1820,51 @@ public fn emit_expr(st: &mut CgState, e: &Expr, dst: Int) -> Result<(), CodegenE
             let _ = st.program.emit(Column(cid, idx, dst));
             Ok(())
         }
-        EFunc(_, _, _) => Err(unsupported("function-call lowering pending builtin registry".clone())),
+        EFunc(ref name, ref args, _) => emit_scalar_call(st, name, args, dst),
         _ => Err(unsupported("expression kind not supported by v1 codegen".clone())),
     }
+}
+
+fn scalar_fn_kind(name: &Text) -> Int {
+    let n = ascii_lower(name);
+    if n == "length".clone() { return 0; }
+    if n == "abs".clone()    { return 1; }
+    if n == "lower".clone()  { return 2; }
+    if n == "upper".clone()  { return 3; }
+    if n == "coalesce".clone() { return 4; }
+    if n == "ifnull".clone() { return 5; }
+    if n == "nullif".clone() { return 6; }
+    -1
+}
+
+fn emit_scalar_call(
+    st: &mut CgState,
+    name: &Text,
+    args: &List<Expr>,
+    dst: Int,
+) -> Result<(), CodegenError> {
+    // Aggregates outside a GROUP BY / aggregate-projection pipeline
+    // can't be lowered at expression scope.
+    let akind = agg_kind_for_name(name);
+    if akind >= 0 {
+        return Err(unsupported("aggregate call in non-aggregate context".clone()));
+    }
+    let kind = scalar_fn_kind(name);
+    if kind < 0 {
+        return Err(unsupported("scalar function not in builtin registry".clone()));
+    }
+    let n_args = args.len();
+    // Evaluate every arg into a contiguous register window.
+    let first_arg = if n_args == 0 { 0 } else { st.regs.alloc_n(n_args) };
+    let mut i: Int = 0;
+    while i < n_args {
+        match emit_expr(st, &args[i], first_arg + i) {
+            Ok(_)  => {}, Err(e) => { return Err(e); }
+        }
+        i = i + 1;
+    }
+    let _ = st.program.emit(ScalarFn(kind, n_args, first_arg, dst));
+    Ok(())
 }
 
 fn emit_literal(st: &mut CgState, lit: &Literal, dst: Int) -> Result<(), CodegenError> {

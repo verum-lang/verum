@@ -292,6 +292,7 @@ fn clone_opcode(op: &Opcode) -> Opcode {
         ReadCookie(c, d)  => ReadCookie(c, d),
         WriteCookie(c, s) => WriteCookie(c, s),
         Function(n, a, d, f) => Function(n, a, d, f),
+        ScalarFn(k, n, a, d) => ScalarFn(k, n, a, d),
         AggStep(f, n, a, c)  => AggStep(f, n, a, c),
         AggFinal(f, c)       => AggFinal(f, c),
         AggStepAvg(n, a, s, c) => AggStepAvg(n, a, s, c),

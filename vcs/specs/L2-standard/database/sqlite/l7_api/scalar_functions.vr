@@ -1,0 +1,93 @@
+// @test: typecheck-pass
+// @level: L2
+// @tier: 0
+// @tags: sqlite, native, l7, scalar, builtin
+// @timeout: 15000
+// @description: Built-in scalar functions — LENGTH / ABS / LOWER / UPPER / COALESCE / IFNULL / NULLIF
+//
+// Spec: internal/specs/sqlite-native.md §14.2 (scalar functions)
+
+mount core.*;
+mount collections.List;
+mount core.database.sqlite.native.l7_api.{
+    Database, DbError, open_admin,
+};
+mount core.database.sqlite.native.l4_vdbe.Register;
+
+fn length_text() {
+    let mut db = match open_admin() {
+        Ok(d)  => d,
+        Err(_) => { panic("open"); return; }
+    };
+    let _ = db.execute(&"CREATE TABLE t (s TEXT)".clone());
+    let _ = db.execute(&"INSERT INTO t VALUES ('hello')".clone());
+    match db.query_all(&"SELECT LENGTH(s) FROM t".clone()) {
+        Ok(rows) => {
+            assert_eq(rows.len(), 1);
+            match rows[0][0] {
+                RInt(x) => { assert_eq(x as Int, 5); }
+                _ => panic("LENGTH should be RInt"),
+            }
+        }
+        Err(_) => panic("query_all LENGTH"),
+    }
+}
+
+fn abs_int() {
+    let mut db = match open_admin() {
+        Ok(d)  => d,
+        Err(_) => { panic("open"); return; }
+    };
+    let _ = db.execute(&"CREATE TABLE t (v INTEGER)".clone());
+    let _ = db.execute(&"INSERT INTO t VALUES (-42)".clone());
+    match db.query_all(&"SELECT ABS(v) FROM t".clone()) {
+        Ok(rows) => {
+            match rows[0][0] {
+                RInt(x) => { assert_eq(x as Int, 42); }
+                _ => panic("ABS should be RInt"),
+            }
+        }
+        Err(_) => panic("query_all ABS"),
+    }
+}
+
+fn upper_lower() {
+    let mut db = match open_admin() {
+        Ok(d)  => d,
+        Err(_) => { panic("open"); return; }
+    };
+    let _ = db.execute(&"CREATE TABLE t (s TEXT)".clone());
+    let _ = db.execute(&"INSERT INTO t VALUES ('Hello')".clone());
+    match db.query_all(&"SELECT LOWER(s), UPPER(s) FROM t".clone()) {
+        Ok(rows) => {
+            assert_eq(rows.len(), 1);
+            match rows[0][0] { RText(_) => {}, _ => panic("LOWER should be RText") }
+            match rows[0][1] { RText(_) => {}, _ => panic("UPPER should be RText") }
+        }
+        Err(_) => panic("query_all LOWER/UPPER"),
+    }
+}
+
+fn coalesce_ifnull() {
+    let mut db = match open_admin() {
+        Ok(d)  => d,
+        Err(_) => { panic("open"); return; }
+    };
+    let _ = db.execute(&"CREATE TABLE t (v INTEGER)".clone());
+    let _ = db.execute(&"INSERT INTO t VALUES (42)".clone());
+    match db.query_all(&"SELECT COALESCE(v, 0), IFNULL(v, 99) FROM t".clone()) {
+        Ok(rows) => {
+            assert_eq(rows.len(), 1);
+            assert_eq(rows[0].len(), 2);
+        }
+        Err(_) => panic("query_all COALESCE/IFNULL"),
+    }
+}
+
+fn main() {
+    length_text();
+    abs_int();
+    upper_lower();
+    coalesce_ifnull();
+    print("scalar_functions typecheck ok");
+}

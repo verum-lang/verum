@@ -628,6 +628,103 @@ public fn step(state: &mut VdbeState, program: &VdbeProgram) -> StepResult {
             Yield
         }
 
+        ScalarFn(kind, n_args, first_arg_reg, dst) => {
+            let result: Register = match kind {
+                0 => {
+                    // LENGTH(x) — byte length for text/blob, NULL otherwise.
+                    if n_args < 1 {
+                        RNull
+                    } else {
+                        match state.regs.get(first_arg_reg) {
+                            RText(ref s) => RInt(s.len() as Int64),
+                            RBlob(ref b) => RInt(b.len() as Int64),
+                            RNull        => RNull,
+                            _            => RNull,
+                        }
+                    }
+                }
+                1 => {
+                    // ABS(x) — numeric absolute value; NULL otherwise.
+                    if n_args < 1 {
+                        RNull
+                    } else {
+                        match state.regs.get(first_arg_reg) {
+                            RInt(x)  => { if x < (0 as Int64) { RInt(-x) } else { RInt(x) } }
+                            RReal(x) => { if x < 0.0 { RReal(-x) } else { RReal(x) } }
+                            RNull    => RNull,
+                            _        => RNull,
+                        }
+                    }
+                }
+                2 => {
+                    // LOWER(text) — ASCII lowercase.
+                    if n_args < 1 {
+                        RNull
+                    } else {
+                        match state.regs.get(first_arg_reg) {
+                            RText(ref s) => RText(ascii_fold_case(s, false)),
+                            RNull        => RNull,
+                            _            => RNull,
+                        }
+                    }
+                }
+                3 => {
+                    // UPPER(text) — ASCII uppercase.
+                    if n_args < 1 {
+                        RNull
+                    } else {
+                        match state.regs.get(first_arg_reg) {
+                            RText(ref s) => RText(ascii_fold_case(s, true)),
+                            RNull        => RNull,
+                            _            => RNull,
+                        }
+                    }
+                }
+                4 => {
+                    // COALESCE(a, b, ...) — first non-null.
+                    let mut i: Int = 0;
+                    let mut out: Register = RNull;
+                    while i < n_args {
+                        let v = state.regs.get(first_arg_reg + i);
+                        let is_null = match v { RNull => true, _ => false };
+                        if !is_null { out = v; break; }
+                        i = i + 1;
+                    }
+                    out
+                }
+                5 => {
+                    // IFNULL(a, b) — a if non-null else b.
+                    if n_args < 2 {
+                        state.regs.get(first_arg_reg)
+                    } else {
+                        let a = state.regs.get(first_arg_reg);
+                        let is_null = match a { RNull => true, _ => false };
+                        if is_null { state.regs.get(first_arg_reg + 1) } else { a }
+                    }
+                }
+                6 => {
+                    // NULLIF(a, b) — NULL if a == b else a.
+                    if n_args < 2 {
+                        state.regs.get(first_arg_reg)
+                    } else {
+                        let a = state.regs.get(first_arg_reg);
+                        let b = state.regs.get(first_arg_reg + 1);
+                        let eq = match a {
+                            RInt(x)  => match b { RInt(y)  => x == y, _ => false },
+                            RReal(x) => match b { RReal(y) => x == y, _ => false },
+                            RText(ref xs) => match b { RText(ref ys) => xs == ys, _ => false },
+                            _ => false,
+                        };
+                        if eq { RNull } else { a }
+                    }
+                }
+                _ => RNull,
+            };
+            state.regs.set(dst, result);
+            state.pc = state.pc + 1;
+            Yield
+        }
+
         AggFinalAvg(sum_reg, count_reg, dst_reg) => {
             let cnt: Int64 = match state.regs.get(count_reg) {
                 RInt(x) => x,
@@ -668,6 +765,27 @@ public fn step(state: &mut VdbeState, program: &VdbeProgram) -> StepResult {
     }
 }
 
+
+// -----------------------------------------------------------------------------
+// Scalar-function helpers
+// -----------------------------------------------------------------------------
+
+fn ascii_fold_case(s: &Text, to_upper: Bool) -> Text {
+    let mut out = Text.new();
+    let bs = s.as_bytes();
+    let mut i: Int = 0;
+    while i < bs.len() {
+        let b = bs[i];
+        let folded: Byte = if to_upper {
+            if b >= (97 as Byte) && b <= (122 as Byte) { b - (32 as Byte) } else { b }
+        } else {
+            if b >= (65 as Byte) && b <= (90 as Byte) { b + (32 as Byte) } else { b }
+        };
+        out.push_byte(folded);
+        i = i + 1;
+    }
+    out
+}
 
 // -----------------------------------------------------------------------------
 // Aggregate helpers
