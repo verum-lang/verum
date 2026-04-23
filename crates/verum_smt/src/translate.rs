@@ -1796,7 +1796,63 @@ impl<'ctx> Translator<'ctx> {
                         ))))
                     }
 
-                    _ => Err(TranslationError::UnsupportedFunction(func_name.to_text())),
+                    // Unknown function — translate as a uninterpreted
+                    // Int→Int function application. This is the hook
+                    // that lets the refinement-reflection registry
+                    // actually fire: registered functions emit
+                    // `(declare-fun name (Int …) Int)` plus a defining
+                    // axiom, and the translator emits matching
+                    // `(name arg₁ … argₙ)` calls here so Z3 can
+                    // unify the two.
+                    //
+                    // Sort defaults to `Int` for every argument and
+                    // the result — a conservative choice that matches
+                    // what `try_reflect_function` uses when no richer
+                    // type information is available, and what
+                    // `translate_call`'s caller sees when translating
+                    // goals that reference user functions.
+                    _ => {
+                        use z3::{FuncDecl, Sort};
+                        let int_sort = Sort::int();
+                        let arg_sorts: Vec<Sort> = (0..args.len())
+                            .map(|_| Sort::int())
+                            .collect();
+                        let decl = FuncDecl::new(
+                            func_name,
+                            arg_sorts.iter().collect::<Vec<_>>().as_slice(),
+                            &int_sort,
+                        );
+                        let mut z3_args: Vec<Dynamic> = Vec::with_capacity(args.len());
+                        for a in args {
+                            let v = self.translate_expr(a)?;
+                            // Coerce non-Int args to Int via as_int; if
+                            // that fails we bail because the FuncDecl
+                            // sort signature is Int-only.
+                            if v.as_int().is_some() {
+                                z3_args.push(v);
+                            } else if let Some(b) = v.as_bool() {
+                                // Bool args coerced to 0/1.
+                                let z = Int::from_i64(0);
+                                let o = Int::from_i64(1);
+                                let c = b.ite(&o, &z);
+                                z3_args.push(Dynamic::from_ast(&c));
+                            } else {
+                                return Err(TranslationError::UnsupportedFunction(
+                                    format!(
+                                        "{} (unsupported argument sort)",
+                                        func_name
+                                    )
+                                    .into(),
+                                ));
+                            }
+                        }
+                        let arg_refs: Vec<&dyn z3::ast::Ast> = z3_args
+                            .iter()
+                            .map(|a| a as &dyn z3::ast::Ast)
+                            .collect();
+                        let app = decl.apply(arg_refs.as_slice());
+                        Ok(app)
+                    }
                 }
             } else {
                 Err(TranslationError::UnsupportedFunction(Text::from(format!(

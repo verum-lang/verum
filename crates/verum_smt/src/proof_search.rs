@@ -4411,12 +4411,11 @@ impl ProofSearchEngine {
         // search instead of treating them as uninterpreted symbols.
         if !self.reflection_registry.is_empty() {
             let block = self.reflection_registry.to_smtlib_block();
-            // `from_string` parses SMT-LIB2 and adds every
-            // declare/assert it contains to the solver. Unknown
-            // sorts in axiom bodies leave the corresponding
-            // assertions inert without raising an error, which
-            // is the desired conservative behaviour: an axiom we
-            // can't translate simply doesn't fire.
+            // `from_string` parses SMT-LIB2 and adds every declare /
+            // assert it contains. Unknown sorts or operators in an
+            // axiom body leave the corresponding assertion inert —
+            // conservative: an axiom we can't translate doesn't fire
+            // rather than causing a spurious proof.
             solver.from_string(block.as_str().to_string());
         }
 

@@ -166,6 +166,30 @@ impl<'s> VerifyCommand<'s> {
         let mut module_hints = verum_smt::proof_search::HintsDatabase::new();
         crate::phases::proof_verification::register_module_lemmas(module, &mut module_hints);
 
+        // Pre-build a refinement-reflection registry so `proof by auto`
+        // / `by smt` can unfold calls to user-defined pure functions.
+        // Without this, a theorem like
+        //     theorem double_is_2x(x: Int) ensures double_it(x) == 2 * x
+        // failed because `double_it` was an uninterpreted Z3 symbol
+        // with no defining axiom — the CLI verification path had
+        // never been wired into the reflection pipeline that
+        // `pipeline::verify_theorem_proofs` used. This closes that
+        // split: both CLI verify and pipeline-time verify now share
+        // the same feature set.
+        let mut reflection_registry =
+            verum_smt::refinement_reflection::RefinementReflectionRegistry::new();
+        for item in &module.items {
+            if let ItemKind::Function(fd) = &item.kind {
+                if let Some(rf) = verum_smt::expr_to_smtlib::try_reflect_function(fd) {
+                    let _ = reflection_registry.register(rf);
+                }
+            }
+        }
+        debug!(
+            "CLI verify: refinement reflection registered {} function(s)",
+            reflection_registry.len()
+        );
+
         for item in &module.items {
             if let ItemKind::Function(func) = &item.kind {
                 // Skip if filter doesn't match
@@ -273,7 +297,10 @@ impl<'s> VerifyCommand<'s> {
                 continue;
             }
 
-            let result = self.verify_theorem(thm, kind_name, timeout, &alias_map, &module_hints);
+            let result = self.verify_theorem(
+                thm, kind_name, timeout, &alias_map, &module_hints,
+                &reflection_registry,
+            );
 
             // Note: Profiler is not used for theorem verification (different result type)
 
@@ -313,6 +340,7 @@ impl<'s> VerifyCommand<'s> {
         timeout: Duration,
         alias_map: &std::collections::HashMap<Text, Vec<Expr>>,
         module_hints: &verum_smt::proof_search::HintsDatabase,
+        reflection_registry: &verum_smt::refinement_reflection::RefinementReflectionRegistry,
     ) -> VerificationResult {
         let start = Instant::now();
 
@@ -334,6 +362,12 @@ impl<'s> VerifyCommand<'s> {
         // Create proof search engine seeded with this module's lemmas so
         // `apply <name>` dispatches to siblings declared in the same file.
         let mut proof_engine = ProofSearchEngine::with_hints(module_hints.clone());
+
+        // Install the pre-built refinement-reflection registry so SMT
+        // queries can unfold calls to user-defined pure functions.
+        if !reflection_registry.is_empty() {
+            proof_engine.set_reflection_registry(reflection_registry.clone());
+        }
 
         // Run the full proof verification pipeline
         match crate::phases::proof_verification::verify_proof_body_with_aliases(

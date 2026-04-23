@@ -1,0 +1,54 @@
+// @test: integration
+// @tier: 0
+// @level: L1
+// @tags: verify, reflection, pure-function, axiom
+// @expect: pass
+//
+// Pure user-defined functions must be reflected into the SMT solver
+// via their defining equation so that theorems referencing them can
+// actually close. Before the fix, the CLI `verum verify` path didn't
+// even build a reflection registry (only the pipeline-time path did),
+// and the translator rejected any user-defined function call with
+// `UnsupportedFunction`, blocking the axiom from ever applying.
+// Locks in:
+//   * `verify_cmd::verify_module` builds the reflection registry,
+//   * `verify_theorem` seeds each proof engine with it,
+//   * `translate_call`'s unknown-name arm emits a uninterpreted Z3
+//     FuncDecl application with `(Int … → Int)` sort defaults so the
+//     axiom and the call site unify.
+
+fn double_it(x: Int) -> Int { x + x }
+
+fn triple_it(x: Int) -> Int { x + x + x }
+
+fn square_it(x: Int) -> Int { x * x }
+
+@verify(formal)
+theorem double_positive(x: Int)
+    requires x > 0
+    ensures double_it(x) > 0
+    proof by auto;
+
+@verify(formal)
+theorem double_is_2x(x: Int)
+    ensures double_it(x) == 2 * x
+    proof by auto;
+
+@verify(formal)
+theorem triple_is_3x(x: Int)
+    ensures triple_it(x) == 3 * x
+    proof by auto;
+
+@verify(formal)
+theorem square_nonneg(x: Int)
+    ensures square_it(x) >= 0
+    proof by auto;
+
+@verify(formal)
+theorem double_double(x: Int)
+    ensures double_it(double_it(x)) == 4 * x
+    proof by auto;
+
+fn main() {
+    print("L1-core: verification_phase/refinement_reflection");
+}
