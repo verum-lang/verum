@@ -1,0 +1,51 @@
+// @test: integration
+// @tier: 0
+// @level: L1
+// @tags: verify, function, bool, ensures, propositional
+// @expect: pass
+//
+// User functions returning Bool with propositional ensures must verify
+// through the body→result binding. `translate_bool_binop` + Bool-Eq
+// coercion + the `Bool::new_const("result").iff(body)` dispatch all
+// need to line up for complex prop-logic identities to close.
+
+@verify(formal)
+fn implies(p: Bool, q: Bool) -> Bool
+    ensures result == (!p || q)
+    ensures p && !q -> !result
+    ensures !p || q -> result
+{
+    !p || q
+}
+
+@verify(formal)
+fn iff_via_and(p: Bool, q: Bool) -> Bool
+    ensures result == ((p && q) || (!p && !q))
+{
+    (p && q) || (!p && !q)
+}
+
+@verify(formal)
+fn xor_is_ne(p: Bool, q: Bool) -> Bool
+    ensures result == (p != q)
+{
+    p != q
+}
+
+@verify(formal)
+fn conj_proj(p: Bool, q: Bool) -> Bool
+    ensures p && q -> result
+{
+    p && q
+}
+
+@verify(formal)
+fn double_negation(p: Bool) -> Bool
+    ensures result == p
+{
+    !(!p)
+}
+
+fn main() {
+    print("L1-core: verification_phase/function_body_boolean_ensures");
+}
