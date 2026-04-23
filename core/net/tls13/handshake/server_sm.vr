@@ -321,30 +321,35 @@ fn on_client_finished(
                 return Err(TlsError.DecryptError);
             }
 
+            // RFC 8446 §7.1 Figure 12 transcript boundaries:
+            //   c/s_application_traffic_secret_0 = Derive-Secret(master,
+            //       "c ap traffic" / "s ap traffic", ClientHello..server Finished)
+            //   exporter_master                  = Derive-Secret(master,
+            //       "exp master",   ClientHello..server Finished)
+            //   resumption_master                = Derive-Secret(master,
+            //       "res master",   ClientHello..client Finished)
+            //
+            // The snapshot MUST be captured BEFORE appending client
+            // Finished for the three first derivations, and AFTER for
+            // resumption_master. Using the wrong snapshot produced
+            // keys that disagreed with RFC 8446 §7.1 — interop with
+            // any other conforming implementation (rustls, openssl,
+            // boringssl) would break silently at app-data decrypt.
+            let t_at_server_fin = wf.transcript.snapshot();
             wf.transcript.append(wire);
-            let t_after_cfin = wf.transcript.snapshot();
+            let t_after_client_fin = wf.transcript.snapshot();
 
             // Master secret derived from hs_secret (already have input seed).
             let master_secret = MasterSecret.derive(wf.hash.clone(), wf.master_secret_seed.as_slice())
                 .map_err(|_| TlsError.InternalError(Text.from_str("master")))?;
 
-            // Application traffic secrets were frozen at server Finished
-            // transcript (RFC 8446 §7.1 timeline).
-            // But we only snapshot `t_after_cfin` here; the correct
-            // snapshot for c_ap_traffic / s_ap_traffic is AT server
-            // Finished — wf.transcript at that point. For the skeleton
-            // we recompute via walking back is expensive; instead we
-            // store the snapshot in WaitClientFinished alongside
-            // master_secret_seed in a follow-up refactor. Here we
-            // derive against `t_after_cfin` as a placeholder — will be
-            // corrected in the RFC 8448 validation commit.
-            let client_ap = master_secret.client_traffic(t_after_cfin.as_slice())
+            let client_ap = master_secret.client_traffic(t_at_server_fin.as_slice())
                 .map_err(|_| TlsError.InternalError(Text.from_str("c ap")))?;
-            let server_ap = master_secret.server_traffic(t_after_cfin.as_slice())
+            let server_ap = master_secret.server_traffic(t_at_server_fin.as_slice())
                 .map_err(|_| TlsError.InternalError(Text.from_str("s ap")))?;
-            let exporter  = master_secret.exporter_master(t_after_cfin.as_slice())
+            let exporter  = master_secret.exporter_master(t_at_server_fin.as_slice())
                 .map_err(|_| TlsError.InternalError(Text.from_str("exporter")))?;
-            let resumption = master_secret.resumption_master(t_after_cfin.as_slice())
+            let resumption = master_secret.resumption_master(t_after_client_fin.as_slice())
                 .map_err(|_| TlsError.InternalError(Text.from_str("resumption")))?;
 
             let connected = ServerConnected {
