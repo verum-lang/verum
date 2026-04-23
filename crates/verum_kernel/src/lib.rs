@@ -295,8 +295,30 @@ pub enum UniverseLevel {
 /// The certificate format is backend-neutral: each backend's native
 /// proof trace is normalized into the common shape by
 /// `verum_smt::proof_extraction` before landing here.
+///
+/// # Envelope versioning
+///
+/// `schema_version` identifies the certificate envelope format. The
+/// kernel rejects any certificate whose `schema_version` is greater
+/// than [`CERTIFICATE_SCHEMA_VERSION`] — this lets forward
+/// compatibility be negotiated explicitly rather than silently
+/// accepting unknown-shape envelopes. Version `0` is treated as
+/// "legacy unversioned" for backward compatibility with pre-envelope
+/// certificates on disk.
+///
+/// # Metadata
+///
+/// `metadata` is a free-form key/value store for non-trust-relevant
+/// annotations (tactics used, solver options, timing, obligation
+/// provenance, …). The kernel never reads these fields — they are
+/// carried end-to-end so tooling (`verum audit --framework-axioms`,
+/// proof export, cross-tool replay) can preserve diagnostic context.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SmtCertificate {
+    /// Envelope schema version. Zero means "legacy unversioned";
+    /// current shipping version is [`CERTIFICATE_SCHEMA_VERSION`].
+    #[serde(default)]
+    pub schema_version: u32,
     /// Which backend produced the certificate (for routing the replay).
     pub backend: Text,
     /// Backend version — certificates are keyed by version because
@@ -308,6 +330,87 @@ pub struct SmtCertificate {
     /// Hash of the obligation so callers can cross-check that the
     /// certificate belongs to the goal they were trying to prove.
     pub obligation_hash: Text,
+    /// Verum compiler version that produced the certificate. Used by
+    /// the cross-tool replay matrix (task #90) to key CI runs.
+    #[serde(default)]
+    pub verum_version: Text,
+    /// ISO-8601 timestamp of certificate creation (UTC). Allows
+    /// disk-cached certificates to be invalidated by age without
+    /// re-hashing.
+    #[serde(default)]
+    pub created_at: Text,
+    /// Free-form non-trust-relevant annotations. Not inspected by the
+    /// kernel.
+    #[serde(default)]
+    pub metadata: List<(Text, Text)>,
+}
+
+/// Current SmtCertificate envelope schema version.
+///
+/// Bump this constant whenever the envelope shape changes
+/// incompatibly. The kernel rejects any certificate whose
+/// `schema_version` exceeds this value, which gives tooling a clean
+/// error path on version skew.
+pub const CERTIFICATE_SCHEMA_VERSION: u32 = 1;
+
+impl SmtCertificate {
+    /// Construct a new certificate with the current schema version
+    /// and [`verum_version`] filled in from the crate metadata.
+    ///
+    /// `created_at` is left empty; callers that want timestamps
+    /// should populate them via [`with_created_at`] (the kernel
+    /// crate is intentionally free of `chrono`/`std::time::SystemTime`
+    /// dependencies to keep the TCB minimal).
+    ///
+    /// [`verum_version`]: Self::verum_version
+    /// [`with_created_at`]: Self::with_created_at
+    pub fn new(
+        backend: Text,
+        backend_version: Text,
+        trace: List<u8>,
+        obligation_hash: Text,
+    ) -> Self {
+        Self {
+            schema_version: CERTIFICATE_SCHEMA_VERSION,
+            backend,
+            backend_version,
+            trace,
+            obligation_hash,
+            verum_version: Text::from(env!("CARGO_PKG_VERSION")),
+            created_at: Text::new(),
+            metadata: List::new(),
+        }
+    }
+
+    /// Attach an ISO-8601 timestamp to the certificate. The kernel
+    /// does not parse this field — it is carried end-to-end for
+    /// tooling use.
+    pub fn with_created_at(mut self, ts: Text) -> Self {
+        self.created_at = ts;
+        self
+    }
+
+    /// Attach a single metadata key/value pair. See the struct-level
+    /// docs for what metadata is used for.
+    pub fn with_metadata(mut self, key: Text, value: Text) -> Self {
+        self.metadata.push((key, value));
+        self
+    }
+
+    /// Validate the envelope schema. Returns [`Err`] if the schema
+    /// version is newer than this kernel build understands.
+    ///
+    /// Version `0` is accepted as "legacy unversioned" for backward
+    /// compatibility with pre-1.0 on-disk certificates.
+    pub fn validate_schema(&self) -> Result<(), KernelError> {
+        if self.schema_version > CERTIFICATE_SCHEMA_VERSION {
+            return Err(KernelError::UnsupportedCertificateSchema {
+                found: self.schema_version,
+                max_supported: CERTIFICATE_SCHEMA_VERSION,
+            });
+        }
+        Ok(())
+    }
 }
 
 // =============================================================================
@@ -744,6 +847,21 @@ pub enum KernelError {
     /// goal the caller intended to prove.
     #[error("kernel: SMT certificate missing obligation hash")]
     MissingObligationHash,
+
+    /// A certificate's envelope schema version is newer than the
+    /// kernel understands. See [`CERTIFICATE_SCHEMA_VERSION`] for
+    /// what the kernel can replay; schema-version bumps go through
+    /// task #90's cross-tool CI matrix before they ship.
+    #[error(
+        "kernel: unsupported certificate schema version {found} \
+         (max supported: {max_supported})"
+    )]
+    UnsupportedCertificateSchema {
+        /// Schema version found in the certificate.
+        found: u32,
+        /// Highest schema version this kernel build supports.
+        max_supported: u32,
+    },
 
     /// An axiom whose statement reduces to Uniqueness of Identity
     /// Proofs — `∀A, ∀(a b: A), ∀(p q: a = b), p = q`. UIP is
@@ -1297,6 +1415,10 @@ pub fn replay_smt_cert(
     _ctx: &Context,
     cert: &SmtCertificate,
 ) -> Result<CoreTerm, KernelError> {
+    // Envelope schema gate — reject future-version certificates
+    // rather than silently accepting an unknown shape.
+    cert.validate_schema()?;
+
     // Known backends — the rule table below only applies to these.
     let backend = cert.backend.as_str();
     if !matches!(backend, "z3" | "cvc5" | "portfolio" | "tactic") {
@@ -1460,12 +1582,12 @@ mod tests {
 
     #[test]
     fn smt_replay_rejects_empty_trace() {
-        let cert = SmtCertificate {
-            backend: Text::from("z3"),
-            backend_version: Text::from("4.13.0"),
-            trace: List::new(),
-            obligation_hash: Text::from("sha256:0"),
-        };
+        let cert = SmtCertificate::new(
+            Text::from("z3"),
+            Text::from("4.13.0"),
+            List::new(),
+            Text::from("sha256:0"),
+        );
         let ctx = Context::new();
         let err = replay_smt_cert(&ctx, &cert).unwrap_err();
         assert!(matches!(err, KernelError::EmptyCertificate));
@@ -1475,12 +1597,12 @@ mod tests {
     fn smt_replay_rejects_unknown_backend() {
         let mut trace = List::new();
         trace.push(0x01);
-        let cert = SmtCertificate {
-            backend: Text::from("unknown_solver"),
-            backend_version: Text::from("1.0.0"),
+        let cert = SmtCertificate::new(
+            Text::from("unknown_solver"),
+            Text::from("1.0.0"),
             trace,
-            obligation_hash: Text::from("sha256:0"),
-        };
+            Text::from("sha256:0"),
+        );
         let ctx = Context::new();
         let err = replay_smt_cert(&ctx, &cert).unwrap_err();
         assert!(matches!(err, KernelError::UnknownBackend(_)));
@@ -1490,12 +1612,12 @@ mod tests {
     fn smt_replay_rejects_unknown_rule_tag() {
         let mut trace = List::new();
         trace.push(0xFF);
-        let cert = SmtCertificate {
-            backend: Text::from("z3"),
-            backend_version: Text::from("4.13.0"),
+        let cert = SmtCertificate::new(
+            Text::from("z3"),
+            Text::from("4.13.0"),
             trace,
-            obligation_hash: Text::from("sha256:a"),
-        };
+            Text::from("sha256:a"),
+        );
         let ctx = Context::new();
         let err = replay_smt_cert(&ctx, &cert).unwrap_err();
         assert!(matches!(err, KernelError::UnknownRule { tag: 0xFF, .. }));
@@ -1505,12 +1627,12 @@ mod tests {
     fn smt_replay_rejects_missing_obligation_hash() {
         let mut trace = List::new();
         trace.push(0x03);
-        let cert = SmtCertificate {
-            backend: Text::from("z3"),
-            backend_version: Text::from("4.13.0"),
+        let cert = SmtCertificate::new(
+            Text::from("z3"),
+            Text::from("4.13.0"),
             trace,
-            obligation_hash: Text::from(""),
-        };
+            Text::from(""),
+        );
         let ctx = Context::new();
         let err = replay_smt_cert(&ctx, &cert).unwrap_err();
         assert!(matches!(err, KernelError::MissingObligationHash));
@@ -1520,12 +1642,12 @@ mod tests {
     fn smt_replay_refl_tag_produces_axiom_witness() {
         let mut trace = List::new();
         trace.push(0x01);
-        let cert = SmtCertificate {
-            backend: Text::from("z3"),
-            backend_version: Text::from("4.13.0"),
+        let cert = SmtCertificate::new(
+            Text::from("z3"),
+            Text::from("4.13.0"),
             trace,
-            obligation_hash: Text::from("sha256:deadbeef"),
-        };
+            Text::from("sha256:deadbeef"),
+        );
         let ctx = Context::new();
         let term = replay_smt_cert(&ctx, &cert).unwrap();
         match term {
@@ -1542,12 +1664,12 @@ mod tests {
     fn smt_replay_accepts_cvc5_smt_unsat_tag() {
         let mut trace = List::new();
         trace.push(0x03);
-        let cert = SmtCertificate {
-            backend: Text::from("cvc5"),
-            backend_version: Text::from("1.2.0"),
+        let cert = SmtCertificate::new(
+            Text::from("cvc5"),
+            Text::from("1.2.0"),
             trace,
-            obligation_hash: Text::from("sha256:feed"),
-        };
+            Text::from("sha256:feed"),
+        );
         let ctx = Context::new();
         let term = replay_smt_cert(&ctx, &cert).unwrap();
         match term {
@@ -1556,6 +1678,109 @@ mod tests {
             }
             other => panic!("expected Axiom, got {:?}", other),
         }
+    }
+
+    // -----------------------------------------------------------------
+    // Envelope schema + metadata tests (task #75)
+    // -----------------------------------------------------------------
+
+    #[test]
+    fn new_certificate_stamps_current_schema_version() {
+        let cert = SmtCertificate::new(
+            Text::from("z3"),
+            Text::from("4.13.0"),
+            List::new(),
+            Text::from("sha256:0"),
+        );
+        assert_eq!(cert.schema_version, CERTIFICATE_SCHEMA_VERSION);
+        assert_eq!(cert.verum_version.as_str(), env!("CARGO_PKG_VERSION"));
+        assert!(cert.metadata.is_empty());
+        assert!(cert.created_at.as_str().is_empty());
+    }
+
+    #[test]
+    fn legacy_unversioned_certificate_still_validates() {
+        let mut cert = SmtCertificate::new(
+            Text::from("z3"),
+            Text::from("4.13.0"),
+            List::new(),
+            Text::from("sha256:0"),
+        );
+        cert.schema_version = 0;
+        assert!(cert.validate_schema().is_ok());
+    }
+
+    #[test]
+    fn future_schema_version_is_rejected() {
+        let mut cert = SmtCertificate::new(
+            Text::from("z3"),
+            Text::from("4.13.0"),
+            List::new(),
+            Text::from("sha256:0"),
+        );
+        cert.schema_version = CERTIFICATE_SCHEMA_VERSION + 100;
+        let err = cert.validate_schema().unwrap_err();
+        assert!(matches!(
+            err,
+            KernelError::UnsupportedCertificateSchema { .. }
+        ));
+    }
+
+    #[test]
+    fn replay_rejects_future_schema_version() {
+        let mut trace = List::new();
+        trace.push(0x01);
+        let mut cert = SmtCertificate::new(
+            Text::from("z3"),
+            Text::from("4.13.0"),
+            trace,
+            Text::from("sha256:deadbeef"),
+        );
+        cert.schema_version = CERTIFICATE_SCHEMA_VERSION + 1;
+        let err = replay_smt_cert(&Context::new(), &cert).unwrap_err();
+        assert!(matches!(
+            err,
+            KernelError::UnsupportedCertificateSchema { found, max_supported }
+                if found == CERTIFICATE_SCHEMA_VERSION + 1
+                    && max_supported == CERTIFICATE_SCHEMA_VERSION
+        ));
+    }
+
+    #[test]
+    fn with_metadata_appends_keys_in_order() {
+        let cert = SmtCertificate::new(
+            Text::from("z3"),
+            Text::from("4.13.0"),
+            List::new(),
+            Text::from("sha256:0"),
+        )
+        .with_metadata(Text::from("tactic"), Text::from("omega"))
+        .with_metadata(Text::from("duration_ms"), Text::from("42"))
+        .with_created_at(Text::from("2026-04-23T12:34:56Z"));
+        assert_eq!(cert.metadata.len(), 2);
+        assert_eq!(cert.metadata[0].0.as_str(), "tactic");
+        assert_eq!(cert.metadata[0].1.as_str(), "omega");
+        assert_eq!(cert.metadata[1].0.as_str(), "duration_ms");
+        assert_eq!(cert.created_at.as_str(), "2026-04-23T12:34:56Z");
+    }
+
+    #[test]
+    fn serde_roundtrip_preserves_all_envelope_fields() {
+        let cert = SmtCertificate::new(
+            Text::from("cvc5"),
+            Text::from("1.2.0"),
+            {
+                let mut t = List::new();
+                t.push(0x03);
+                t
+            },
+            Text::from("sha256:feed"),
+        )
+        .with_metadata(Text::from("solver_opts"), Text::from("--produce-proofs"))
+        .with_created_at(Text::from("2026-04-23T00:00:00Z"));
+        let json = serde_json::to_string(&cert).unwrap();
+        let rehydrated: SmtCertificate = serde_json::from_str(&json).unwrap();
+        assert_eq!(rehydrated, cert);
     }
 
     // -----------------------------------------------------------------
