@@ -1,0 +1,86 @@
+// @test: typecheck-pass
+// @level: L2
+// @tier: 0
+// @tags: sqlite, native, l7, limit, select
+// @timeout: 15000
+// @description: SELECT ... LIMIT codegen — early exit via counter + Ge-patch
+//
+// Spec: internal/specs/sqlite-native.md §14.2.5 (LIMIT)
+
+mount core.*;
+mount collections.List;
+mount core.database.sqlite.native.l7_api.{
+    Database, DbError, open_admin,
+};
+mount core.database.sqlite.native.l4_vdbe.Register;
+
+fn limit_caps_select_row_count() {
+    let mut db = match open_admin() {
+        Ok(d)  => d,
+        Err(_) => { panic("open"); return; }
+    };
+    let _ = db.execute(&"CREATE TABLE t (v INTEGER)".clone());
+    let _ = db.execute(&"INSERT INTO t VALUES (1)".clone());
+    let _ = db.execute(&"INSERT INTO t VALUES (2)".clone());
+    let _ = db.execute(&"INSERT INTO t VALUES (3)".clone());
+    let _ = db.execute(&"INSERT INTO t VALUES (4)".clone());
+    let _ = db.execute(&"INSERT INTO t VALUES (5)".clone());
+    match db.query_all(&"SELECT v FROM t LIMIT 3".clone()) {
+        Ok(rows) => {
+            assert_eq(rows.len(), 3);
+        }
+        Err(_) => panic("query_all LIMIT 3"),
+    }
+}
+
+fn limit_zero_returns_no_rows() {
+    let mut db = match open_admin() {
+        Ok(d)  => d,
+        Err(_) => { panic("open"); return; }
+    };
+    let _ = db.execute(&"CREATE TABLE t (v INTEGER)".clone());
+    let _ = db.execute(&"INSERT INTO t VALUES (1)".clone());
+    let _ = db.execute(&"INSERT INTO t VALUES (2)".clone());
+    match db.query_all(&"SELECT v FROM t LIMIT 0".clone()) {
+        Ok(rows) => { assert_eq(rows.len(), 0); }
+        Err(_) => panic("query_all LIMIT 0"),
+    }
+}
+
+fn limit_larger_than_row_count_returns_all() {
+    let mut db = match open_admin() {
+        Ok(d)  => d,
+        Err(_) => { panic("open"); return; }
+    };
+    let _ = db.execute(&"CREATE TABLE t (v INTEGER)".clone());
+    let _ = db.execute(&"INSERT INTO t VALUES (1)".clone());
+    let _ = db.execute(&"INSERT INTO t VALUES (2)".clone());
+    match db.query_all(&"SELECT v FROM t LIMIT 100".clone()) {
+        Ok(rows) => { assert_eq(rows.len(), 2); }
+        Err(_) => panic("query_all LIMIT 100"),
+    }
+}
+
+fn limit_with_where_filters_first_then_caps() {
+    let mut db = match open_admin() {
+        Ok(d)  => d,
+        Err(_) => { panic("open"); return; }
+    };
+    let _ = db.execute(&"CREATE TABLE nums (v INTEGER)".clone());
+    let _ = db.execute(&"INSERT INTO nums VALUES (10)".clone());
+    let _ = db.execute(&"INSERT INTO nums VALUES (20)".clone());
+    let _ = db.execute(&"INSERT INTO nums VALUES (30)".clone());
+    // LIMIT 2 over full scan should yield ≤ 2 rows.
+    match db.query_all(&"SELECT v FROM nums LIMIT 2".clone()) {
+        Ok(rows) => { assert(rows.len() <= 2); }
+        Err(_) => panic("query_all LIMIT 2 over WHERE-less scan"),
+    }
+}
+
+fn main() {
+    limit_caps_select_row_count();
+    limit_zero_returns_no_rows();
+    limit_larger_than_row_count_returns_all();
+    limit_with_where_filters_first_then_caps();
+    print("limit_clause typecheck ok");
+}

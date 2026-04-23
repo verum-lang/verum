@@ -91,6 +91,14 @@ public type CgState is {
     program: VdbeProgram,
     regs: RegAlloc,
     sql: Text,
+
+    // LIMIT plumbing — flat fields so the inner emitters can cheaply
+    // probe state without match/unwrap on a nested record. All three
+    // registers are -1 when no LIMIT scope is active.
+    limit_reg: Int,
+    limit_one_reg: Int,
+    limit_count_reg: Int,
+    limit_patches: List<Int>,
 };
 
 fn cg_state_new(sql: Text) -> CgState {
@@ -98,6 +106,10 @@ fn cg_state_new(sql: Text) -> CgState {
         program: program_new(sql.clone(), 0),
         regs: reg_alloc_new(),
         sql: sql,
+        limit_reg: -1,
+        limit_one_reg: -1,
+        limit_count_reg: -1,
+        limit_patches: List.new(),
     }
 }
 
@@ -181,8 +193,12 @@ fn emit_values(st: &mut CgState, rows: &List<List<Expr>>, col_count: Int) -> Res
             j = j + 1;
         }
         let _ = st.program.emit(ResultRow(start, row.len()));
+        emit_limit_body_counter(st);
         i = i + 1;
     }
+    // Point any pending LIMIT-early-exit Ge's at the next instruction
+    // so control falls through cleanly.
+    emit_limit_finalize_patches(st, st.program.instruction_count());
     let _ = col_count;
     Ok(())
 }
@@ -290,10 +306,13 @@ fn emit_scan_with_project(
         i = i + 1;
     }
     let _ = st.program.emit(ResultRow(proj_start, project_cols.len()));
+    emit_limit_body_counter(st);
     let _ = st.program.emit(Next(cursor_id, loop_top));
 
     let after = st.program.instruction_count();
     st.program.replace(rewind_idx, Rewind(cursor_id, after));
+    // Patch LIMIT early-exits to jump over Next, straight at Close.
+    emit_limit_finalize_patches(st, after);
     let _ = st.program.emit(Close(cursor_id));
     Ok(())
 }
@@ -331,6 +350,7 @@ fn emit_scan_with_filter_project(
         i = i + 1;
     }
     let _ = st.program.emit(ResultRow(proj_start, project_cols.len()));
+    emit_limit_body_counter(st);
 
     let after_body = st.program.instruction_count();
     st.program.replace(skip_idx, IfNot(pred_reg, after_body));
@@ -338,6 +358,7 @@ fn emit_scan_with_filter_project(
     let _ = st.program.emit(Next(cursor_id, loop_top));
     let after = st.program.instruction_count();
     st.program.replace(rewind_idx, Rewind(cursor_id, after));
+    emit_limit_finalize_patches(st, after);
     let _ = st.program.emit(Close(cursor_id));
     Ok(())
 }
@@ -372,10 +393,12 @@ fn emit_filter(
                 }
                 let skip_idx = st.program.emit(IfNot(pred_reg, 0));
                 let _ = st.program.emit(ResultRow(start, row.len()));
+                emit_limit_body_counter(st);
                 let after_idx = st.program.instruction_count();
                 st.program.replace(skip_idx, IfNot(pred_reg, after_idx));
                 i = i + 1;
             }
+            emit_limit_finalize_patches(st, st.program.instruction_count());
             return Ok(());
         }
         _ => {}
@@ -385,17 +408,108 @@ fn emit_filter(
 
 // -----------------------------------------------------------------------------
 // Limit
+//
+// Strategy: set up a counter register, delegate to the child emitter via
+// `st.limit = Some(ctx)`. The inner emitters consult `st.limit`, and
+// after each ResultRow they emit:
+//     Add(count, one, count)
+//     Ge(count, limit, <patch>)     // patched to end-of-scan
+// On finalization (emit_limit_finalize_patches), every Ge-patch is
+// rewritten to point at the scan's Close (or, for Values, one past the
+// last ResultRow) so that the cursor is still closed cleanly on early
+// exit.
+//
+// OFFSET: deferred to v1.1 — an OFFSET expression is rejected with a
+// clear `unsupported` at codegen entry so we don't silently drop it.
 // -----------------------------------------------------------------------------
+
+fn eval_int_const(e: &Expr) -> Maybe<Int> {
+    match e {
+        ELit(ref lit) => match lit {
+            LInt(i) => Some(i as Int),
+            _ => None,
+        },
+        _ => None,
+    }
+}
 
 fn emit_limit(
     st: &mut CgState,
     child: &PlanNode,
-    _lim: &Expr,
-    _off: &Maybe<Expr>,
+    lim: &Expr,
+    off: &Maybe<Expr>,
 ) -> Result<(), CodegenError> {
-    // Minimal v1: forward to child. Real limit-counter opcodes land
-    // once we have a proper loop-counter IR pattern for cursor scans.
-    emit_plan(st, child)
+    // OFFSET handling is deferred; surface rather than misbehave.
+    match off {
+        Some(_) => { return Err(unsupported("LIMIT OFFSET pending".clone())); }
+        None => {}
+    }
+    let lim_val: Int = match eval_int_const(lim) {
+        Some(x) => x,
+        None => { return Err(unsupported("LIMIT with non-constant value pending".clone())); }
+    };
+    if lim_val <= 0 {
+        // LIMIT 0 — the scan body emits nothing.
+        return Ok(());
+    }
+
+    // Preamble: allocate regs + seed them.
+    let count_reg = st.regs.alloc();
+    let one_reg = st.regs.alloc();
+    let limit_reg = st.regs.alloc();
+    let _ = st.program.emit(Integer(0, count_reg));
+    let _ = st.program.emit(Integer(1, one_reg));
+    let _ = st.program.emit(Integer(lim_val, limit_reg));
+
+    // Enter the limit scope. (v1 doesn't nest — top-level only.)
+    st.limit_reg = limit_reg;
+    st.limit_one_reg = one_reg;
+    st.limit_count_reg = count_reg;
+    st.limit_patches = List.new();
+
+    let r = emit_plan(st, child);
+
+    // Drain any un-patched Ge-jumps to the current program tail; inner
+    // emitters for scan paths already finalize before Close, so this is
+    // a safety net.
+    emit_limit_finalize_patches(st, st.program.instruction_count());
+
+    // Leave the limit scope.
+    st.limit_reg = -1;
+    st.limit_one_reg = -1;
+    st.limit_count_reg = -1;
+    st.limit_patches = List.new();
+
+    match r {
+        Ok(_)  => Ok(()),
+        Err(e) => Err(e),
+    }
+}
+
+/// Called right after a ResultRow: increment the count register and
+/// register a Ge-patch that exits the scan loop. No-op when no LIMIT
+/// scope is active.
+fn emit_limit_body_counter(st: &mut CgState) {
+    if st.limit_reg < 0 { return; }
+    let _ = st.program.emit(Add(st.limit_count_reg, st.limit_one_reg, st.limit_count_reg));
+    let patch_idx = st.program.emit(Ge(st.limit_count_reg, st.limit_reg, 0));
+    st.limit_patches.push(patch_idx);
+}
+
+/// Patch every registered Ge-opcode to jump to `target`. Called right
+/// before the cursor's Close (or at the end of a Values run).
+fn emit_limit_finalize_patches(st: &mut CgState, target: Int) {
+    if st.limit_reg < 0 { return; }
+    let count_reg = st.limit_count_reg;
+    let limit_reg = st.limit_reg;
+    let mut i: Int = 0;
+    while i < st.limit_patches.len() {
+        st.program.replace(st.limit_patches[i], Ge(count_reg, limit_reg, target));
+        i = i + 1;
+    }
+    // Clear so a subsequent inner emitter sharing the same scope doesn't
+    // re-patch stale indices.
+    st.limit_patches = List.new();
 }
 
 // -----------------------------------------------------------------------------
