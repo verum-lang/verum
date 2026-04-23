@@ -399,6 +399,22 @@ pub struct TypeChecker {
     /// Maps module path (e.g., "cog.api.v1") to its declaration
     /// Module declaration: inline "module name { ... }" or file-based (foo.vr defines module foo) — Inline Modules
     pub(crate) inline_modules: Map<Text, verum_ast::decl::ModuleDecl>,
+    /// User-visible module aliases from `mount X as A;` declarations.
+    /// Maps the alias identifier (`A`) to the fully-qualified module
+    /// path (`X`, possibly with a `cog.` prefix). Populated by
+    /// `process_import_aliases` whenever the aliased path resolves to
+    /// a known module. Consulted by method-call dispatch so that
+    /// `A.method(...)` is treated as a module-path lookup
+    /// (`<path>.method`) rather than a value-lookup on the identifier.
+    ///
+    /// Needed because stdlib symbols (e.g. `core.sys.linux.syscall.stat`)
+    /// can be resolved into the flat name environment via cross-module
+    /// imports and shadow a locally-declared mount alias like
+    /// `mount core.net.h3.qpack.static_table as stat;`. Without this
+    /// registry the method-call receiver was synth_expr'd as the
+    /// stdlib function and `.get(0)` attempted method dispatch on a
+    /// function value.
+    pub(crate) module_aliases: Map<Text, Text>,
     /// Tracks which modules have had their function signatures pre-registered
     /// to avoid redundant pre-registration when importing multiple items from the same module
     preregistered_modules: std::collections::HashSet<String>,
@@ -970,7 +986,7 @@ impl TypeChecker {
             module_resolver: NameResolver::new(),
             module_registry: Shared::new(parking_lot::RwLock::new(ModuleRegistry::new())),
             current_module_path: verum_common::Text::from("cog"),
-            inline_modules: Map::new(),
+            inline_modules: Map::new(), module_aliases: Map::new(),
             preregistered_modules: std::collections::HashSet::new(),
             blanket_impls_registered_modules: std::collections::HashSet::new(),
             primitive_impls_registered_modules: std::collections::HashSet::new(),
@@ -1148,7 +1164,7 @@ impl TypeChecker {
             module_resolver: NameResolver::new(),
             module_registry: Shared::new(parking_lot::RwLock::new(ModuleRegistry::new())),
             current_module_path: verum_common::Text::from("cog"),
-            inline_modules: Map::new(),
+            inline_modules: Map::new(), module_aliases: Map::new(),
             preregistered_modules: std::collections::HashSet::new(),
             blanket_impls_registered_modules: std::collections::HashSet::new(),
             primitive_impls_registered_modules: std::collections::HashSet::new(),
@@ -1721,7 +1737,7 @@ impl TypeChecker {
             module_resolver: NameResolver::new(),
             module_registry: registry,
             current_module_path: verum_common::Text::from("cog"),
-            inline_modules: Map::new(),
+            inline_modules: Map::new(), module_aliases: Map::new(),
             preregistered_modules: std::collections::HashSet::new(),
             blanket_impls_registered_modules: std::collections::HashSet::new(),
             primitive_impls_registered_modules: std::collections::HashSet::new(),
@@ -1830,7 +1846,7 @@ impl TypeChecker {
             module_resolver: NameResolver::new(),
             module_registry: Shared::new(parking_lot::RwLock::new(ModuleRegistry::new())),
             current_module_path: verum_common::Text::from("cog"),
-            inline_modules: Map::new(),
+            inline_modules: Map::new(), module_aliases: Map::new(),
             preregistered_modules: std::collections::HashSet::new(),
             blanket_impls_registered_modules: std::collections::HashSet::new(),
             primitive_impls_registered_modules: std::collections::HashSet::new(),
@@ -1940,7 +1956,7 @@ impl TypeChecker {
             module_resolver: NameResolver::new(),
             module_registry: Shared::new(parking_lot::RwLock::new(ModuleRegistry::new())),
             current_module_path: verum_common::Text::from("cog"),
-            inline_modules: Map::new(),
+            inline_modules: Map::new(), module_aliases: Map::new(),
             preregistered_modules: std::collections::HashSet::new(),
             blanket_impls_registered_modules: std::collections::HashSet::new(),
             primitive_impls_registered_modules: std::collections::HashSet::new(),
@@ -28443,6 +28459,30 @@ impl TypeChecker {
                 let found_module = registry.get_by_path(full_normalized.as_str());
                 tracing::debug!("mount Path: module found in registry = {}", found_module.is_some());
                 if found_module.is_some() {
+                    // `mount X as A;` where X resolves to a module:
+                    // register a module alias so that later `A.method(...)`
+                    // routes through module-path dispatch rather than
+                    // competing with a same-named stdlib value symbol.
+                    // Example: `mount core.net.h3.qpack.static_table as stat;`
+                    // — without the alias map, `stat` would be shadowed by
+                    // core.sys.linux.syscall.stat (the POSIX stat fn).
+                    //
+                    // The top-level alias (`mount X as A;`) lives on the
+                    // `MountDecl` itself. A nested `mount X.{item as A}`
+                    // attaches the alias to the inner `MountTree` — that
+                    // case is an item alias, not a module alias, and is
+                    // handled elsewhere.
+                    let top_level_alias = match &import.alias {
+                        Maybe::Some(a) => Some(a),
+                        Maybe::None => match &import.tree.alias {
+                            Maybe::Some(a) => Some(a),
+                            Maybe::None => None,
+                        },
+                    };
+                    if let Some(alias) = top_level_alias {
+                        let alias_name: Text = alias.name.as_str().into();
+                        self.module_aliases.insert(alias_name, full_normalized.clone());
+                    }
                     self.import_all_from_module(&full_normalized, registry)?;
                 } else if let Some(dot_pos) = full_path_str.rfind('.') {
                     // Split into module path and item name
@@ -37938,6 +37978,104 @@ impl TypeChecker {
                     span,
                 });
             }
+        }
+
+        // Module-alias dispatch — `mount X as A;` then `A.method(...)`
+        // routes to `X.method(...)` rather than synth_expr'ing `A` as a
+        // value. Without this, a stdlib function with the same name as
+        // the user's alias (e.g. core.sys.linux.syscall.stat vs
+        // `mount core.net.h3.qpack.static_table as stat;`) wins at
+        // value-lookup and the whole `stat.get(0)` call breaks with a
+        // spurious method-dispatch error.
+        //
+        // Only fires on the first call of a chain (`!skip_static_lookup`).
+        if !skip_static_lookup
+            && let ExprKind::Path(path) = &receiver.kind
+            && path.segments.len() == 1
+            && let Some(verum_ast::ty::PathSegment::Name(ident)) = path.segments.first()
+            && let Some(module_path) = self.module_aliases.get(&ident.name).cloned()
+        {
+            let method_name = method.name.as_str();
+            let qualified: Text = format!("{}.{}", module_path, method_name).into();
+
+            // Fast path: the function may already have been imported into
+            // the type env under its qualified-module form by
+            // `import_all_from_module` when the mount was processed.
+            if let Some(scheme) = self.ctx.env.lookup(&qualified).cloned() {
+                let func_type = self.unifier.apply(&scheme.ty);
+                if let Type::Function { params, return_type, .. } = &func_type {
+                    if params.len() == args.len() {
+                        for (arg, param_ty) in args.iter().zip(params.iter()) {
+                            let resolved_param = self.unifier.apply(param_ty);
+                            self.check_expr(arg, &resolved_param)?;
+                        }
+                        let resolved_return = self.unifier.apply(return_type);
+                        return Ok(InferResult::new(resolved_return));
+                    }
+                }
+            }
+
+            // Slow path: walk inline_modules AST items.
+            let items_opt = self
+                .inline_modules
+                .get(&module_path)
+                .map(|m| m.items.clone())
+                .and_then(|items| items);
+            if let Some(items) = items_opt {
+                for item in items.iter() {
+                    if let verum_ast::ItemKind::Function(func_decl) = &item.kind {
+                        if func_decl.name.name.as_str() == method_name {
+                            let func_type = self.infer_function_type(func_decl)?;
+                            if let Type::Function { params, return_type, .. } = &func_type {
+                                if params.len() == args.len() {
+                                    for (arg, param_ty) in args.iter().zip(params.iter()) {
+                                        let resolved_param = self.unifier.apply(param_ty);
+                                        self.check_expr(arg, &resolved_param)?;
+                                    }
+                                    let resolved_return = self.unifier.apply(return_type);
+                                    return Ok(InferResult::new(resolved_return));
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Registry fallback: walk the parsed AST of the aliased
+            // module, find the named public function, infer its type,
+            // and type-check the call against it.
+            let registry = self.module_registry.read();
+            if let Some(module_info) = registry.get_by_path(module_path.as_str()) {
+                let items: Vec<_> = module_info.ast.items.iter().cloned().collect();
+                drop(registry);
+                for item in items.iter() {
+                    if let verum_ast::ItemKind::Function(func_decl) = &item.kind {
+                        if func_decl.name.name.as_str() == method_name
+                            && func_decl.visibility == verum_ast::decl::Visibility::Public
+                        {
+                            let func_type = self.infer_function_type(func_decl)?;
+                            if let Type::Function { params, return_type, .. } = &func_type {
+                                if params.len() == args.len() {
+                                    for (arg, param_ty) in args.iter().zip(params.iter()) {
+                                        let resolved_param = self.unifier.apply(param_ty);
+                                        self.check_expr(arg, &resolved_param)?;
+                                    }
+                                    let resolved_return = self.unifier.apply(return_type);
+                                    return Ok(InferResult::new(resolved_return));
+                                }
+                            }
+                        }
+                    }
+                }
+            } else {
+                drop(registry);
+            }
+
+            // Function not found in aliased module.
+            return Err(TypeError::UnboundVariable {
+                name: verum_common::Text::from(format!("{}.{}", module_path, method_name)),
+                span,
+            });
         }
 
         // Context-method dispatch has priority over stdlib module dispatch.
@@ -47526,10 +47664,24 @@ impl TypeChecker {
             })
         }
 
+        /// Extract the full module path from an AST Path, joined by dots.
+        /// e.g. `core.net.h3.qpack.static_table` → "core.net.h3.qpack.static_table".
+        fn extract_full_path(path: &verum_ast::ty::Path) -> String {
+            path.segments.iter().filter_map(|seg| {
+                if let verum_ast::ty::PathSegment::Name(ident) = seg {
+                    Some(ident.name.as_str().to_string())
+                } else {
+                    None
+                }
+            }).collect::<Vec<_>>().join(".")
+        }
+
         /// Process a single import tree for aliases
         fn process_tree(
             tree: &verum_ast::MountTree,
             ctx: &mut crate::context::TypeContext,
+            module_aliases: &mut Map<Text, Text>,
+            inline_modules: &Map<Text, verum_ast::decl::ModuleDecl>,
         ) {
             if let MountTreeKind::Path(path) = &tree.kind {
                 // Check if this import has an alias
@@ -47549,6 +47701,25 @@ impl TypeChecker {
                             args: verum_common::List::new(),
                         };
                         ctx.define_type(alias_name.clone(), type_ref);
+
+                        // If the aliased path resolves to a known module,
+                        // register a module alias too so that later method-
+                        // call dispatch (`alias.method(...)`) routes through
+                        // module-path lookup rather than competing with a
+                        // same-named stdlib value symbol. Example:
+                        //   mount core.net.h3.qpack.static_table as stat;
+                        // `stat` would otherwise be shadowed by
+                        // core.sys.linux.syscall.stat (the POSIX stat fn).
+                        let full_path: Text = extract_full_path(path).into();
+                        if inline_modules.contains_key(&full_path) {
+                            module_aliases.insert(alias_name.clone(), full_path.clone());
+                            tracing::debug!(
+                                "Pass 0: Registered module alias: {} -> {}",
+                                alias_name,
+                                full_path,
+                            );
+                        }
+
                         tracing::debug!(
                             "Pass 0: Registered import alias: {} -> {}",
                             alias_name,
@@ -47564,12 +47735,12 @@ impl TypeChecker {
             MountTreeKind::Nested { trees, .. } => {
                 // Process each nested import for potential aliases
                 for tree in trees {
-                    process_tree(tree, &mut self.ctx);
+                    process_tree(tree, &mut self.ctx, &mut self.module_aliases, &self.inline_modules);
                 }
             }
             MountTreeKind::Path(_) => {
                 // Single import might have alias at top level
-                process_tree(&import.tree, &mut self.ctx);
+                process_tree(&import.tree, &mut self.ctx, &mut self.module_aliases, &self.inline_modules);
             }
             MountTreeKind::Glob(_) => {
                 // Glob imports don't have aliases
