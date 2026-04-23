@@ -1326,6 +1326,18 @@ pub fn verify_proof_body_with_aliases(
         hypotheses.push(hyp);
     }
 
+    // Propositional-witness hypotheses. Curry-Howard reading: when a
+    // theorem is quantified over `<P: Prop>` and takes a parameter
+    // `p: P`, the parameter's existence is a witness that `P` holds.
+    // The SMT translator sees `P` as a Bool-kinded uninterpreted
+    // constant (via the Bool-coercion arm for `&&`, `||`, `==` that
+    // involve it), so injecting `P` as a hypothesis tells the solver
+    // the proposition is true — exactly what identity-style proofs
+    // over Prop generics need to close.
+    for hyp in propositional_witness_hypotheses(theorem) {
+        hypotheses.push(hyp);
+    }
+
     let primary_goal = ProofGoal::with_hypotheses(proposition.clone(), hypotheses.clone());
 
     match proof_body {
@@ -1918,6 +1930,71 @@ fn build_suggestions_from_proof_error(err: &ProofError) -> List<Text> {
 /// hypothesis, not just as a refinement on the type. Type-checking still
 /// enforces the refinement at call sites; this function merely threads it
 /// through the verification layer where the goal solver lives.
+/// Collect propositional-witness hypotheses for `<Q: Prop>` generics.
+///
+/// Rationale (Curry-Howard): a theorem quantified over a Prop-kinded
+/// type variable `Q` that also takes a parameter `p: Q` is saying
+/// "the caller supplies a proof of `Q`". Inside the body we can treat
+/// `Q` as `true`. Before this elaboration, goals of shape
+///
+///     theorem id_trivial<P: Prop>(p: P): P { proof by auto }
+///
+/// died in the SMT with "Goal is not boolean" because `P` was a bare
+/// Path with no context telling the solver that its value is fixed
+/// to `true`. The fix threads `P` itself as a hypothesis (i.e. a
+/// propositional fact), via the Bool-coercion the translator already
+/// applies to bare identifiers under propositional operators.
+pub fn propositional_witness_hypotheses(theorem: &TheoremDecl) -> Vec<Expr> {
+    use verum_ast::decl::FunctionParamKind;
+    use verum_ast::ty::{GenericParamKind, TypeBoundKind, TypeKind};
+
+    // Collect names of generics bound by the `Prop` protocol.
+    let mut prop_generic_names: std::collections::HashSet<Text> =
+        std::collections::HashSet::new();
+    for g in &theorem.generics {
+        if let GenericParamKind::Type { name, bounds, .. } = &g.kind {
+            for b in bounds {
+                if let TypeBoundKind::Protocol(path) = &b.kind {
+                    if path
+                        .as_ident()
+                        .map(|id| id.name.as_str() == "Prop")
+                        .unwrap_or(false)
+                    {
+                        prop_generic_names.insert(name.name.clone());
+                    }
+                }
+            }
+        }
+    }
+    if prop_generic_names.is_empty() {
+        return Vec::new();
+    }
+
+    // For every parameter whose type is one of those generic names,
+    // emit the hypothesis `Q` (as a bare identifier Expr). The
+    // translator's Bool-coercion will render it as a Bool constant;
+    // asserting that constant in the solver means the Prop holds.
+    let mut out: Vec<Expr> = Vec::new();
+    let mut emitted: std::collections::HashSet<Text> = std::collections::HashSet::new();
+    for p in &theorem.params {
+        if let FunctionParamKind::Regular { ty, .. } = &p.kind {
+            if let TypeKind::Path(path) = &ty.kind {
+                if let Some(id) = path.as_ident() {
+                    if prop_generic_names.contains(&id.name) && emitted.insert(id.name.clone()) {
+                        out.push(Expr::new(
+                            verum_ast::expr::ExprKind::Path(
+                                verum_ast::ty::Path::single(id.clone()),
+                            ),
+                            ty.span,
+                        ));
+                    }
+                }
+            }
+        }
+    }
+    out
+}
+
 pub fn refinement_hypotheses_from_params(
     params: &List<verum_ast::decl::FunctionParam>,
     alias_map: &std::collections::HashMap<Text, Vec<Expr>>,
