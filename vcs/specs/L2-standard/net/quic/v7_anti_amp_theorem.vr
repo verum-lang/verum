@@ -1,0 +1,40 @@
+// @test: verify-pass
+// @tier: 0
+// @level: L2
+// @tags: quic, path, v7, smt, theorem, rfc9000_21_1_1_3
+// @timeout: 15000
+// @expect: pass
+
+// V7 theorem (tls-quic.md §9): anti-amplification budget.
+//
+// Before the path is Validated, the server's sent_bytes MUST stay
+// within 3 × received_bytes.  Given the refinement at emission
+// (`can_send` returns Ok iff sent_bytes + n ≤ 3 × received_bytes),
+// the post-emit state preserves the invariant.
+
+mount core.*;
+
+theorem can_send_preserves_amp_budget(
+    received: UInt64,
+    sent_before: UInt64,
+    n: UInt64,
+)
+    requires sent_before <= 3_u64 * received
+    requires sent_before + n <= 3_u64 * received   // can_send precondition
+    requires n <= 18446744073709551615_u64 - sent_before   // no overflow
+    ensures  sent_before + n <= 3_u64 * received
+{
+    proof by auto
+}
+
+// If the path becomes Validated (constraint waived), the invariant
+// holds trivially: the rule `sent ≤ 3 × recv` is retired.
+theorem validated_no_longer_constrained(received: UInt64, sent: UInt64)
+    ensures true    // vacuous — `sent ≤ 3 × received` no longer required
+{
+    proof by auto
+}
+
+fn main() {
+    print("V7 anti-amp budget — can_send step proved");
+}

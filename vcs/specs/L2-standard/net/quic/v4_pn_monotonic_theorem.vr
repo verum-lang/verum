@@ -1,0 +1,43 @@
+// @test: verify-pass
+// @tier: 0
+// @level: L2
+// @tags: quic, pn_space, v4, smt, theorem, rfc9000_12_3
+// @timeout: 15000
+// @expect: pass
+
+// V4 theorem (tls-quic.md §9): PN space monotonicity.
+//
+// After `next_packet_number` emits `n` and sets `next_pn := n + 1`,
+// the new `next_pn` is strictly greater than every previously-emitted
+// packet number, and thus strictly greater than the largest previously
+// acknowledged packet number (`largest_acked_sent`), since
+// `largest_acked_sent ≤ emitted-max`.
+
+mount core.*;
+
+// Emission step: given current next_pn = n, the emitted value is n
+// and the new next_pn is n + 1.  Strict monotonicity means n < n + 1.
+theorem emit_step_strictly_increases(next_pn: UInt64)
+    requires next_pn < 18446744073709551615_u64   // not at u64 max
+    ensures  next_pn + 1_u64 > next_pn
+{
+    proof by auto
+}
+
+// Global invariant: if `largest_acked_sent ≤ n` (peer can't ACK a
+// packet we haven't sent), then after emitting packet number n the
+// new next_pn (= n + 1) is strictly greater than largest_acked_sent.
+theorem next_pn_after_emit_exceeds_largest_acked(
+    next_pn: UInt64,
+    largest_acked_sent: UInt64,
+)
+    requires next_pn < 18446744073709551615_u64
+    requires largest_acked_sent <= next_pn   // peer ACK invariant
+    ensures  next_pn + 1_u64 > largest_acked_sent
+{
+    proof by auto
+}
+
+fn main() {
+    print("V4 PN monotonicity — emit step + post-emit invariant proved");
+}

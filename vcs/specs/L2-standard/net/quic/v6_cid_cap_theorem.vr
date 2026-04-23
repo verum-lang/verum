@@ -1,0 +1,37 @@
+// @test: verify-pass
+// @tier: 0
+// @level: L2
+// @tags: quic, cid_pool, v6, smt, theorem, rfc9000_5_1
+// @timeout: 15000
+// @expect: pass
+
+// V6 theorem (tls-quic.md §9): active_count() ≤ active_connection_id_limit.
+//
+// CidPool.on_new_connection_id admits a new entry only after the
+// active-count check.  Algebraically: if the current active count n
+// already equals the limit L, rejecting is the correct action
+// (otherwise n' = n + 1 > L would break the invariant).
+
+mount core.*;
+
+theorem limit_check_refuses_overflow(n: Int, limit: Int)
+    requires n >= 0
+    requires limit >= 2   // RFC 9000 §18.2: active_connection_id_limit ≥ 2
+    requires n >= limit   // current state already at cap
+    ensures  !(n + 1 <= limit)   // admitting would break the invariant
+{
+    proof by auto
+}
+
+theorem limit_check_admits_when_below_cap(n: Int, limit: Int)
+    requires n >= 0
+    requires limit >= 2
+    requires n < limit
+    ensures  n + 1 <= limit
+{
+    proof by auto
+}
+
+fn main() {
+    print("V6 CID cap — refuse-at-cap / admit-below-cap proved");
+}
