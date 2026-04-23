@@ -1,0 +1,70 @@
+// @test: typecheck-pass
+// @level: L2
+// @tier: 0
+// @tags: sqlite, native, l7, arithmetic, binops
+// @timeout: 15000
+// @description: Arithmetic binops — +, -, *, /, %, bitwise, shifts — routing through emit_binary
+//
+// Spec: internal/specs/sqlite-native.md §14.2 (arithmetic)
+
+mount core.*;
+mount collections.List;
+mount core.database.sqlite.native.l7_api.{
+    Database, DbError, open_admin,
+};
+mount core.database.sqlite.native.l4_vdbe.Register;
+
+fn additive_and_multiplicative() {
+    let mut db = match open_admin() {
+        Ok(d)  => d,
+        Err(_) => { panic("open"); return; }
+    };
+    let _ = db.execute(&"CREATE TABLE t (a INTEGER, b INTEGER)".clone());
+    let _ = db.execute(&"INSERT INTO t VALUES (10, 3)".clone());
+    match db.query_all(&"SELECT a + b, a - b, a * b, a / b, a % b FROM t".clone()) {
+        Ok(rows) => {
+            assert_eq(rows.len(), 1);
+            assert_eq(rows[0].len(), 5);
+        }
+        Err(_) => panic("query_all additive/multiplicative"),
+    }
+}
+
+fn bitwise_and_shifts() {
+    let mut db = match open_admin() {
+        Ok(d)  => d,
+        Err(_) => { panic("open"); return; }
+    };
+    let _ = db.execute(&"CREATE TABLE t (a INTEGER, b INTEGER)".clone());
+    let _ = db.execute(&"INSERT INTO t VALUES (12, 10)".clone());
+    match db.query_all(&"SELECT a & b, a | b, a << 1, b >> 1 FROM t".clone()) {
+        Ok(rows) => {
+            assert_eq(rows.len(), 1);
+            assert_eq(rows[0].len(), 4);
+        }
+        Err(_) => panic("query_all bitwise/shifts"),
+    }
+}
+
+fn unary_operators() {
+    let mut db = match open_admin() {
+        Ok(d)  => d,
+        Err(_) => { panic("open"); return; }
+    };
+    let _ = db.execute(&"CREATE TABLE t (a INTEGER)".clone());
+    let _ = db.execute(&"INSERT INTO t VALUES (5)".clone());
+    match db.query_all(&"SELECT -a, +a, ~a, NOT a FROM t".clone()) {
+        Ok(rows) => {
+            assert_eq(rows.len(), 1);
+            assert_eq(rows[0].len(), 4);
+        }
+        Err(_) => panic("query_all unary ops"),
+    }
+}
+
+fn main() {
+    additive_and_multiplicative();
+    bitwise_and_shifts();
+    unary_operators();
+    print("arithmetic_binops typecheck ok");
+}

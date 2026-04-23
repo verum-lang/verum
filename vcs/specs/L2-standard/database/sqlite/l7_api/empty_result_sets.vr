@@ -1,0 +1,104 @@
+// @test: typecheck-pass
+// @level: L2
+// @tier: 0
+// @tags: sqlite, native, l7, empty-tables, edge-cases
+// @timeout: 15000
+// @description: Empty-table / no-rows path coverage for SELECT / WHERE / ORDER BY / aggregates
+//
+// Spec: internal/specs/sqlite-native.md §14.2 (result-set edge cases)
+
+mount core.*;
+mount collections.List;
+mount core.database.sqlite.native.l7_api.{
+    Database, DbError, open_admin,
+};
+mount core.database.sqlite.native.l4_vdbe.Register;
+
+fn select_from_empty_table() {
+    let mut db = match open_admin() {
+        Ok(d)  => d,
+        Err(_) => { panic("open"); return; }
+    };
+    let _ = db.execute(&"CREATE TABLE t (v INTEGER)".clone());
+    match db.query_all(&"SELECT v FROM t".clone()) {
+        Ok(rows) => { assert_eq(rows.len(), 0); }
+        Err(_) => panic("query_all empty"),
+    }
+}
+
+fn where_never_matches() {
+    let mut db = match open_admin() {
+        Ok(d)  => d,
+        Err(_) => { panic("open"); return; }
+    };
+    let _ = db.execute(&"CREATE TABLE t (v INTEGER)".clone());
+    let _ = db.execute(&"INSERT INTO t VALUES (1)".clone());
+    match db.query_all(&"SELECT v FROM t WHERE v = 99".clone()) {
+        Ok(rows) => { assert_eq(rows.len(), 0); }
+        Err(_) => panic("query_all WHERE never"),
+    }
+}
+
+fn order_by_on_empty() {
+    let mut db = match open_admin() {
+        Ok(d)  => d,
+        Err(_) => { panic("open"); return; }
+    };
+    let _ = db.execute(&"CREATE TABLE t (v INTEGER)".clone());
+    match db.query_all(&"SELECT v FROM t ORDER BY v DESC".clone()) {
+        Ok(rows) => { assert_eq(rows.len(), 0); }
+        Err(_) => panic("query_all ORDER BY empty"),
+    }
+}
+
+fn aggregate_on_empty() {
+    let mut db = match open_admin() {
+        Ok(d)  => d,
+        Err(_) => { panic("open"); return; }
+    };
+    let _ = db.execute(&"CREATE TABLE t (v INTEGER)".clone());
+    // COUNT(*) on empty table is 0; SUM is 0; MIN/MAX/AVG are NULL.
+    match db.query_all(&"SELECT COUNT(*), SUM(v), MIN(v), MAX(v), AVG(v) FROM t".clone()) {
+        Ok(rows) => {
+            assert_eq(rows.len(), 1);
+            assert_eq(rows[0].len(), 5);
+            // COUNT(*) on empty must be 0.
+            match rows[0][0] { RInt(x) => assert_eq(x as Int, 0), _ => panic("COUNT empty") }
+        }
+        Err(_) => panic("query_all aggregates empty"),
+    }
+}
+
+fn distinct_on_empty() {
+    let mut db = match open_admin() {
+        Ok(d)  => d,
+        Err(_) => { panic("open"); return; }
+    };
+    let _ = db.execute(&"CREATE TABLE t (v INTEGER)".clone());
+    match db.query_all(&"SELECT DISTINCT v FROM t".clone()) {
+        Ok(rows) => { assert_eq(rows.len(), 0); }
+        Err(_) => panic("query_all DISTINCT empty"),
+    }
+}
+
+fn group_by_on_empty() {
+    let mut db = match open_admin() {
+        Ok(d)  => d,
+        Err(_) => { panic("open"); return; }
+    };
+    let _ = db.execute(&"CREATE TABLE t (g INTEGER, v INTEGER)".clone());
+    match db.query_all(&"SELECT g, COUNT(*) FROM t GROUP BY g".clone()) {
+        Ok(rows) => { assert_eq(rows.len(), 0); }
+        Err(_) => panic("query_all GROUP BY empty"),
+    }
+}
+
+fn main() {
+    select_from_empty_table();
+    where_never_matches();
+    order_by_on_empty();
+    aggregate_on_empty();
+    distinct_on_empty();
+    group_by_on_empty();
+    print("empty_result_sets typecheck ok");
+}
