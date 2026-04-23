@@ -211,22 +211,83 @@ public type SimNetwork is {
     /// FIFO of (from, to, bytes, ecn). Production impl uses a
     /// scheduler-driven priority queue keyed on delivery_time.
     inflight: List<(SocketAddr, SocketAddr, List<Byte>, EcnCodepoint)>,
-    /// Drop probability per datagram (0.0 .. 1.0).
-    loss_rate: Float,
-    /// Deliver packets out of order with this probability.
-    reorder_rate: Float,
+    /// Drop probability per datagram, scaled to u64: gate = loss_q << 32.
+    /// A drawn 64-bit RNG value < gate => packet dropped.
+    /// 0 = never; (1 << 32) = always.
+    loss_q: UInt64,
+    /// Reorder probability, same scale as loss_q.
+    reorder_q: UInt64,
+    /// Deterministic PRNG state (xorshift64). `0` means not yet seeded.
+    rng_state: UInt64,
+    /// Total datagrams the network processed in send() — useful for
+    /// differential trace assertions.
+    sent_count: UInt64,
+    /// Datagrams dropped by the loss gate.
+    dropped_count: UInt64,
     closed:    Bool,
 };
 
 implement SimNetwork {
+    /// Fresh simulator with zero loss/reorder and seed 1.
     public fn new() -> SimNetwork {
-        SimNetwork { inflight: [], loss_rate: 0.0, reorder_rate: 0.0, closed: false }
+        SimNetwork {
+            inflight: [],
+            loss_q: 0_u64,
+            reorder_q: 0_u64,
+            rng_state: 0x9E3779B97F4A7C15_u64,   // non-zero default seed
+            sent_count: 0_u64,
+            dropped_count: 0_u64,
+            closed: false,
+        }
     }
 
-    /// Drop every datagram whose index hits the loss gate.
-    public fn with_loss_rate(mut self, rate: Float) -> SimNetwork {
-        self.loss_rate = rate; self
+    /// Seed the deterministic PRNG. Zero is forbidden (xorshift64 is
+    /// degenerate on 0) — callers get a seed forced to 1.
+    public fn with_seed(mut self, seed: UInt64) -> SimNetwork {
+        self.rng_state = if seed == 0_u64 { 1_u64 } else { seed };
+        self
     }
+
+    /// Probability ∈ [0, 1]. Input is a numerator over denom (1 << 32),
+    /// so `with_loss_rate_bp(250)` = 2.5% loss (250 per 10000).
+    public fn with_loss_rate_bp(mut self, bp_per_10000: UInt64) -> SimNetwork {
+        // Clamp to 10000 = 100%. Scale to [0, 1 << 32] for comparison
+        // against a 32-bit PRNG draw.
+        let clamped = if bp_per_10000 > 10000_u64 { 10000_u64 } else { bp_per_10000 };
+        // gate = clamped * (1 << 32) / 10000
+        self.loss_q = (clamped * 4294967296_u64) / 10000_u64;
+        self
+    }
+
+    public fn with_reorder_rate_bp(mut self, bp_per_10000: UInt64) -> SimNetwork {
+        let clamped = if bp_per_10000 > 10000_u64 { 10000_u64 } else { bp_per_10000 };
+        self.reorder_q = (clamped * 4294967296_u64) / 10000_u64;
+        self
+    }
+
+    /// xorshift64 step — deterministic, 64-bit period 2^64 - 1.
+    fn next_rng(&mut self) -> UInt64 {
+        let mut s = self.rng_state;
+        s = s ^ (s << 13_u64);
+        s = s ^ (s >> 7_u64);
+        s = s ^ (s << 17_u64);
+        self.rng_state = s;
+        s
+    }
+
+    /// Decide whether a newly-sent datagram should be dropped.
+    /// Returns true when the gate fires (drop).
+    public fn should_drop(&mut self) -> Bool {
+        if self.loss_q == 0_u64 { return false; }
+        let r = self.next_rng();
+        // Compare low 32 bits to loss gate.
+        (r & 0xFFFFFFFF_u64) < self.loss_q
+    }
+
+    /// Counters for test assertions.
+    public fn sent_count(&self)    -> UInt64 { self.sent_count }
+    public fn dropped_count(&self) -> UInt64 { self.dropped_count }
+    public fn inflight_count(&self) -> Int   { self.inflight.len() }
 }
 
 implement SimUdpTransport {
@@ -264,6 +325,17 @@ implement UdpTransport for SimUdpTransport {
     async fn send(&self, data: &[Byte], to: &SocketAddr, ecn: EcnCodepoint) -> Result<(), TransportError> {
         let mut net = self.network.lock().unwrap();
         if net.closed { return Err(TransportError.Closed); }
+        net.sent_count = net.sent_count + 1_u64;
+
+        // Loss gate: consult deterministic PRNG. Returning Ok(()) on a
+        // drop is intentional — from the sender's perspective the
+        // datagram left the host, mirroring real UDP which cannot
+        // observe mid-path packet loss.
+        if net.should_drop() {
+            net.dropped_count = net.dropped_count + 1_u64;
+            return Ok(());
+        }
+
         let mut owned: List<Byte> = [];
         let mut i: Int = 0;
         while i < data.len() { owned.push(data[i]); i = i + 1; }
