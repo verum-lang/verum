@@ -130,6 +130,12 @@ pub struct ProfileConfig {
     /// URL of a distributed verification cache, if any. Surfaced in the
     /// report; actual wire-up is still handled by the compiler core.
     pub distributed_cache: Option<String>,
+    /// Named `[verify.profiles.<name>]` profile to apply from
+    /// `verum.toml`. CLI flags still win over profile values —
+    /// precedence order is: CLI flag > profile override > base
+    /// `[verify]` > default. Unknown profile name surfaces an error
+    /// at merge time.
+    pub profile_name: Option<String>,
 }
 
 /// Merge CLI-provided profile knobs with whatever the project's
@@ -147,7 +153,32 @@ fn merge_with_manifest(cli: ProfileConfig) -> ProfileConfig {
         Ok(m) => m,
         Err(_) => return cli,
     };
-    let v = &manifest.verify;
+
+    // Apply the named profile if requested. On success, every field
+    // declared in `[verify.profiles.<name>]` overrides the matching
+    // field in the base `[verify]` block; untouched fields inherit.
+    //
+    // On unknown-profile error, emit a warning and continue with the
+    // base block — the verify run itself proceeds with declared CLI
+    // flags, preserving the "don't silently swallow user intent"
+    // rule. The documented fail-on-unknown behavior is enforced at
+    // the CLI-flag-validation layer (see `main.rs::Commands::Verify`
+    // dispatch) via `VerifyConfig::with_profile` returning Err.
+    let effective_verify = match cli.profile_name.as_deref() {
+        Some(name) => match manifest.verify.clone().with_profile(name) {
+            Ok(merged) => merged,
+            Err(e) => {
+                eprintln!(
+                    "{} {} — continuing with base [verify]",
+                    "warning:".yellow().bold(),
+                    e.as_str()
+                );
+                manifest.verify.clone()
+            }
+        },
+        None => manifest.verify.clone(),
+    };
+    let v = &effective_verify;
 
     // Only consult the manifest for fields the CLI didn't already set.
     // `profile_slow_functions` in the manifest implicitly enables the

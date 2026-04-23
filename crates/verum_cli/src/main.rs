@@ -518,6 +518,14 @@ enum Commands {
         compare_modes: bool,
         #[clap(long, default_value = "z3")]
         solver: Text,
+        /// Named `[verify.profiles.<name>]` profile from `verum.toml`
+        /// to apply. Profile fields inherit from the base `[verify]`
+        /// block; CLI flags still win over both. Unknown profile name
+        /// surfaces as a warning and falls back to the base block
+        /// (the downstream merge layer is tolerant). See
+        /// `docs/verification/cli-workflow.md §9`.
+        #[clap(long, value_name = "NAME")]
+        verify_profile: Option<Text>,
         /// Preferred backend for exporting SMT proof traces when the
         /// `Certified` strategy races a portfolio. CVC5's ALETHE proof
         /// format is more stable than Z3's native `(proof …)` format
@@ -1359,6 +1367,7 @@ fn run_command(cli: Cli) -> Result<()> {
             show_cost,
             compare_modes,
             solver,
+            verify_profile,
             smt_proof_preference,
             timeout,
             cache,
@@ -1435,6 +1444,7 @@ fn run_command(cli: Cli) -> Result<()> {
                     budget: budget_duration,
                     export_path: export,
                     distributed_cache: distributed_cache.map(|t| t.to_string()),
+                    profile_name: verify_profile.map(|t| t.to_string()),
                 };
                 // Verify project
                 commands::verify::execute(
