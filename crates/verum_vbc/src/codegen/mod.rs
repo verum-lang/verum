@@ -84,6 +84,22 @@ pub struct ProtocolInfo {
     /// Superprotocol names this protocol extends.
     pub super_protocols: Vec<String>,
 }
+
+/// A blanket protocol implementation waiting to be monomorphized onto
+/// every concrete implementor of its bound protocol.
+///
+/// Shape: `implement<T: base_protocol> derived_protocol for T { ... }`.
+#[derive(Debug, Clone)]
+pub struct BlanketImpl {
+    /// The bound protocol that receivers must implement — for every concrete
+    /// type implementing this, we replay the blanket impl.
+    pub base_protocol: String,
+    /// The protocol being implemented for all bound-satisfying receivers.
+    pub derived_protocol: String,
+    /// Method names explicitly implemented in the blanket-impl body.
+    /// These take priority over the derived protocol's default methods.
+    pub explicit_methods: std::collections::HashSet<String>,
+}
 pub use error::{CodegenError, CodegenErrorKind, CodegenResult};
 pub use registers::{RegisterAllocator, RegisterInfo, RegisterKind, RegisterSnapshot};
 
@@ -340,6 +356,17 @@ pub struct VbcCodegen {
     ///
     /// Stored as (func_decl, type_name) pairs.
     pending_default_methods: Vec<(verum_ast::FunctionDecl, String)>,
+
+    /// Blanket protocol implementations: `implement<T: BaseProto> DerivedProto for T {}`.
+    ///
+    /// These can't be monomorphized at collection time because not every
+    /// concrete implementor of BaseProto is known yet. When a concrete
+    /// `implement BaseProto for ConcreteTy` is processed, we replay each
+    /// matching blanket impl here to register DerivedProto's default methods
+    /// for ConcreteTy — without this, `h.derived_method()` on a concrete
+    /// receiver panics at runtime ("method not found on value") because the
+    /// default body was registered under the generic-param name.
+    blanket_impls: Vec<BlanketImpl>,
 
     /// Static variable initializer function IDs.
     /// These are registered as global constructors so they run before main().
@@ -897,6 +924,7 @@ impl VbcCodegen {
             context_names: Vec::new(),
             // Pending default protocol methods for deferred compilation
             pending_default_methods: Vec::new(),
+            blanket_impls: Vec::new(),
             // Static variable initializer functions (become global constructors)
             static_init_functions: Vec::new(),
             // Pending @thread_local static initializations
@@ -1105,48 +1133,99 @@ impl VbcCodegen {
         type_name: &str,
         implemented_methods: &std::collections::HashSet<String>,
     ) -> CodegenResult<()> {
-        // Collect all protocols to check (this protocol + all superprotocols)
+        // Collect all protocols to check (this protocol + all superprotocols
+        // + any blanket-impl derived protocol whose base is in the chain).
         let mut protocols_to_check = vec![protocol_name.to_string()];
         let mut checked = std::collections::HashSet::new();
 
-        // Traverse protocol inheritance to collect all superprotocols
+        // Shadowed per-protocol override: blanket-impl entries carry their
+        // own `explicit_methods` set that takes priority over the derived
+        // protocol's default bodies for the same method name.
+        let mut per_proto_overrides: std::collections::HashMap<String, std::collections::HashSet<String>> =
+            std::collections::HashMap::new();
+        per_proto_overrides.insert(protocol_name.to_string(), implemented_methods.clone());
+
         while let Some(proto_name) = protocols_to_check.pop() {
             if checked.contains(&proto_name) {
                 continue;
             }
             checked.insert(proto_name.clone());
 
+            // Enqueue any blanket-impl derived protocols whose base is
+            // the one we're about to process. This is the monomorphization
+            // step — `implement<B: Base> Derived for B {}` flows Derived's
+            // default methods down to every concrete implementor of Base.
+            let pending_derivations: Vec<(String, std::collections::HashSet<String>)> = self
+                .blanket_impls
+                .iter()
+                .filter(|b| b.base_protocol == proto_name)
+                .map(|b| (b.derived_protocol.clone(), b.explicit_methods.clone()))
+                .collect();
+            for (derived, overrides) in pending_derivations {
+                per_proto_overrides.entry(derived.clone()).or_insert(overrides);
+                if !checked.contains(&derived) {
+                    protocols_to_check.push(derived);
+                }
+            }
+
             if let Some(protocol_info) = self.protocol_registry.get(&proto_name).cloned() {
-                // Add superprotocols to the list to check
                 for super_proto in &protocol_info.super_protocols {
                     if !checked.contains(super_proto) {
                         protocols_to_check.push(super_proto.clone());
                     }
                 }
 
-                // Generate default implementations for methods not explicitly implemented
+                let empty = std::collections::HashSet::new();
+                let overrides = per_proto_overrides.get(&proto_name).unwrap_or(&empty);
+
                 for (method_name, default_func) in protocol_info.default_methods.iter() {
-                    if implemented_methods.contains(method_name) {
-                        continue; // Already explicitly implemented
+                    if overrides.contains(method_name) {
+                        continue;
                     }
 
-                    // Check if already registered (may have been registered from a previous superprotocol)
                     let full_method_name = format!("{}.{}", type_name, method_name);
                     if self.ctx.lookup_function(&full_method_name).is_some() {
-                        continue; // Already registered
+                        continue;
                     }
 
-                    // Register the default method for this type (declaration only)
                     self.register_impl_function(default_func, type_name)?;
-
-                    // Queue the function body for compilation during body compilation phase.
-                    // We can't compile immediately because the function may reference other
-                    // functions (like `range`) that haven't been registered yet.
                     self.pending_default_methods.push((default_func.clone(), type_name.to_string()));
                 }
             }
         }
         Ok(())
+    }
+
+    /// If the `for_type` of a protocol impl is a bare path matching one of
+    /// the impl's generic parameters, return that name. Otherwise None.
+    fn for_type_generic_param_name(ty: &verum_ast::ty::Type) -> Option<String> {
+        use verum_ast::ty::{PathSegment, TypeKind};
+        if let TypeKind::Path(path) = &ty.kind
+            && path.segments.len() == 1
+            && let Some(PathSegment::Name(ident)) = path.segments.first()
+        {
+            return Some(ident.name.to_string());
+        }
+        None
+    }
+
+    /// Extract the protocol path's last identifier from a TypeBound.
+    fn type_bound_protocol_name(b: &verum_ast::ty::TypeBound) -> Option<String> {
+        use verum_ast::ty::{PathSegment, TypeBoundKind, TypeKind};
+        let path = match &b.kind {
+            TypeBoundKind::Protocol(path) => path,
+            TypeBoundKind::GenericProtocol(ty) => {
+                if let TypeKind::Path(p) = &ty.kind { p } else { return None; }
+            }
+            _ => return None,
+        };
+        path.segments.last().and_then(|s| {
+            if let PathSegment::Name(ident) = s {
+                Some(ident.name.to_string())
+            } else {
+                None
+            }
+        })
     }
 
     /// Compiles pending default protocol methods.
@@ -3128,6 +3207,46 @@ impl VbcCodegen {
             ItemKind::Impl(impl_decl) => {
                 // Get the type name for qualified method registration
                 let type_name = self.extract_impl_type_name(&impl_decl.kind);
+
+                // Detect blanket impls: `implement<T: Base> Derived for T {}`.
+                // Deferred monomorphization — when a concrete type later
+                // `implement Base for Concrete`, we replay the blanket impl
+                // onto Concrete. Without this, the default method bodies
+                // register under the generic-param name and runtime
+                // dispatch panics with "method not found on value".
+                if let verum_ast::decl::ImplKind::Protocol { protocol, for_type, .. } = &impl_decl.kind {
+                    let derived_name = protocol.segments.last()
+                        .and_then(|s| match s {
+                            verum_ast::ty::PathSegment::Name(ident) => Some(ident.name.to_string()),
+                            _ => None,
+                        });
+                    let for_type_name = Self::for_type_generic_param_name(for_type);
+                    if let (Some(derived_name), Some(param_name)) = (derived_name, for_type_name) {
+                        for g in impl_decl.generics.iter() {
+                            if let verum_ast::ty::GenericParamKind::Type { name, bounds, .. } = &g.kind
+                                && name.name.as_str() == param_name
+                            {
+                                for b in bounds.iter() {
+                                    if let Some(base_name) = Self::type_bound_protocol_name(b) {
+                                        let explicit_methods: std::collections::HashSet<String> =
+                                            impl_decl.items.iter().filter_map(|item| {
+                                                if let verum_ast::decl::ImplItemKind::Function(f) = &item.kind {
+                                                    Some(f.name.name.to_string())
+                                                } else {
+                                                    None
+                                                }
+                                            }).collect();
+                                        self.blanket_impls.push(BlanketImpl {
+                                            base_protocol: base_name,
+                                            derived_protocol: derived_name.clone(),
+                                            explicit_methods,
+                                        });
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
 
                 // For protocol impls, inherent methods take priority.
                 // If "AppConfig.new" already exists from inherent impl,
