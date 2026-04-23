@@ -1,0 +1,54 @@
+// @test: typecheck-pass
+// @level: L1
+// @tags: termination, recursion, match, variant
+// @timeout: 5000
+
+/// Regression for a termination-checker blind spot.
+///
+/// `match sel.kind { V(ref lhs, ref rhs) => f(lhs, ...) }` — decomposing
+/// a variant-typed FIELD of a parameter, binding subcomponents with
+/// `ref` in the pattern — was flagged as `E321 unbounded recursion`
+/// even though the binding `lhs` is structurally smaller than `sel`.
+///
+/// Root cause: `termination::find_recursive_calls_impl` only recorded
+/// match_bindings when the scrutinee was a direct `Path` (bare
+/// parameter). A field scrutinee like `sel.kind` produced no binding
+/// and the subsequent structural-smaller check found nothing.
+///
+/// Fix: walk scrutinee through Field/Deref/Ref/as_ref-style chains to
+/// the root parameter and attribute pattern bindings there. This is
+/// the overwhelmingly common destructuring idiom for tagged-union
+/// fields — without it, every production planner/visitor/walker that
+/// matches on `self.kind` or `node.value` is falsely rejected.
+///
+/// Surface: unblocked `core/database/sqlite/native/l5_sql/planner.vr`
+/// (UNION ALL compound-select planner).
+
+module test_term_field;
+
+public type Tree is
+    | Leaf(Int)
+    | Node { left: Heap<Tree>, right: Heap<Tree> };
+
+public type Wrapped is {
+    t: Tree,
+};
+
+/// Match on `w.t` (field scrutinee) + recursive calls with a freshly-
+/// built wrapper that holds the pattern-bound subcomponent. Checker
+/// must recognise the pattern bindings `left`/`right` as structurally
+/// smaller descendants of `w` through `w.t`.
+public fn depth(w: &Wrapped) -> Int {
+    match w.t {
+        Tree.Leaf(_) => 1,
+        Tree.Node { ref left, ref right } => {
+            let wl = Wrapped { t: (**left).clone() };
+            let wr = Wrapped { t: (**right).clone() };
+            let dl = depth(&wl);
+            let dr = depth(&wr);
+            if dl > dr { dl + 1 } else { dr + 1 }
+        }
+    }
+}
+
+fn main() { print("termination via field scrutinee accepted"); }

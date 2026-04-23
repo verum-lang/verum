@@ -1003,12 +1003,16 @@ impl TerminationChecker {
             ExprKind::Match { expr: scrutinee, arms } => {
                 self.find_recursive_calls_impl(scrutinee, func_name, calls, match_bindings);
 
-                // Determine if the scrutinee is a parameter (simple path)
-                let scrutinee_name = if let ExprKind::Path(path) = &scrutinee.kind {
-                    Some(path_to_text(path))
-                } else {
-                    None
-                };
+                // Determine the "root parameter" the scrutinee decomposes. We
+                // accept both a direct path (`match sel`) and a field path
+                // (`match sel.kind`, `match self.node.next`). For field
+                // chains we walk to the root so pattern bindings still
+                // attribute to the outer parameter — variant-typed fields
+                // like `sel.kind` are the overwhelmingly common
+                // destructuring idiom, and without this the termination
+                // checker falsely flags every recursive function that
+                // decomposes a tagged-union field.
+                let scrutinee_name = Self::extract_root_param_name(scrutinee);
 
                 for arm in arms {
                     // Build extended bindings for this arm
@@ -1374,6 +1378,37 @@ impl TerminationChecker {
 
     /// Extract the innermost variable name from an expression, stripping derefs.
     /// e.g., `*tail` -> "tail", `**x` -> "x", `y` -> "y"
+    /// Walk through Deref/Ref/Field/MethodCall(.as_ref/.as_mut) nodes to
+    /// the root path identifier. Used to attribute pattern bindings from
+    /// scrutinees like `sel.kind`, `*sel`, `&sel.node`, `self.list.head`
+    /// back to the outer parameter they decompose.
+    fn extract_root_param_name(expr: &Expr) -> Option<Text> {
+        match &expr.kind {
+            ExprKind::Path(path) => Some(path_to_text(path)),
+            ExprKind::Field { expr: inner, .. } => Self::extract_root_param_name(inner),
+            ExprKind::Unary { op, expr: inner } if matches!(op,
+                verum_ast::expr::UnOp::Deref |
+                verum_ast::expr::UnOp::Ref |
+                verum_ast::expr::UnOp::RefMut |
+                verum_ast::expr::UnOp::RefChecked |
+                verum_ast::expr::UnOp::RefCheckedMut |
+                verum_ast::expr::UnOp::RefUnsafe |
+                verum_ast::expr::UnOp::RefUnsafeMut
+            ) => {
+                Self::extract_root_param_name(inner)
+            }
+            // `receiver.as_ref()` / `receiver.as_mut()` — reference-view
+            // accessors that preserve structural identity.
+            ExprKind::MethodCall { receiver, method, args, .. }
+                if args.is_empty()
+                    && matches!(method.name.as_str(), "as_ref" | "as_mut" | "clone") =>
+            {
+                Self::extract_root_param_name(receiver)
+            }
+            _ => None,
+        }
+    }
+
     fn extract_inner_var_name(expr: &Expr) -> Option<Text> {
         match &expr.kind {
             ExprKind::Path(path) => Some(path_to_text(path)),
