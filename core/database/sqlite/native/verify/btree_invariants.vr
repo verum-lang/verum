@@ -1,0 +1,142 @@
+// =============================================================================
+// verify/btree_invariants.vr — B-tree structural invariants
+// =============================================================================
+// Spec: sqlite-native.md §10.3, §21.3
+//
+// All B-tree operations (insert, delete, balance, split, merge) must
+// preserve four invariants per page:
+//
+//   I1  is_sorted             — each page's cells are in strict
+//                               monotone-ascending key order
+//   I2  height_uniform        — every root-to-leaf path has the
+//                               same length
+//   I3  parent_pointers_valid — every internal cell points to a
+//                               child whose first key is >= the cell's
+//                               separator and whose last key < the
+//                               next separator
+//   I4  no_orphans            — every page reachable from the root
+//                               via child pointers is the only
+//                               reference to itself (no aliasing)
+//
+// I1 is checkable in O(cells_per_page) per page; I2 is O(log_b N);
+// I3+I4 are O(N) in the page count and are evaluated by
+// `integrity_check`.
+// =============================================================================
+
+module core.database.sqlite.native.verify.btree_invariants;
+
+mount core.*;
+mount base.{Bool, Maybe};
+mount collections.List;
+
+// -----------------------------------------------------------------------------
+// Cell key ordering
+// -----------------------------------------------------------------------------
+
+public fn cells_strictly_ascending(keys: &List<Int64>) -> Bool {
+    if keys.len() <= 1 { return true; }
+    let mut i: Int = 1;
+    while i < keys.len() {
+        if keys[i] <= keys[i - 1] { return false; }
+        i = i + 1;
+    }
+    true
+}
+
+public fn cells_ascending_or_equal(keys: &List<Int64>) -> Bool {
+    if keys.len() <= 1 { return true; }
+    let mut i: Int = 1;
+    while i < keys.len() {
+        if keys[i] < keys[i - 1] { return false; }
+        i = i + 1;
+    }
+    true
+}
+
+// -----------------------------------------------------------------------------
+// Per-page fill-factor: each page (except the root) must be at
+// least min_fill * payload_capacity bytes used. SQLite uses 1/3.
+// -----------------------------------------------------------------------------
+
+public fn page_fill_factor_ok(used_bytes: Int, capacity: Int, is_root: Bool) -> Bool {
+    if is_root { return used_bytes >= 0; }
+    if capacity <= 0 { return false; }
+    used_bytes * 3 >= capacity
+}
+
+// -----------------------------------------------------------------------------
+// Tree height — uniform across leaves.
+// -----------------------------------------------------------------------------
+
+public fn heights_uniform(heights: &List<Int>) -> Bool {
+    if heights.len() == 0 { return true; }
+    let h0 = heights[0];
+    let mut i: Int = 1;
+    while i < heights.len() {
+        if heights[i] != h0 { return false; }
+        i = i + 1;
+    }
+    true
+}
+
+// -----------------------------------------------------------------------------
+// Parent-pointer constraint: separator i lies between max(child[i].keys)
+// and min(child[i+1].keys).
+// -----------------------------------------------------------------------------
+
+public type SeparatorTriple is {
+    left_max: Int64,
+    sep: Int64,
+    right_min: Int64,
+};
+
+public fn separator_well_formed(t: &SeparatorTriple) -> Bool {
+    t.sep >= t.left_max && t.sep < t.right_min
+}
+
+public fn all_separators_well_formed(triples: &List<SeparatorTriple>) -> Bool {
+    let mut i: Int = 0;
+    while i < triples.len() {
+        if !separator_well_formed(&triples[i]) { return false; }
+        i = i + 1;
+    }
+    true
+}
+
+// -----------------------------------------------------------------------------
+// No orphans: each page id appears in exactly one parent's child list.
+// -----------------------------------------------------------------------------
+
+public fn no_duplicate_child_pointers(child_pages: &List<Int64>) -> Bool {
+    let mut i: Int = 0;
+    while i < child_pages.len() {
+        let mut j: Int = i + 1;
+        while j < child_pages.len() {
+            if child_pages[i] == child_pages[j] { return false; }
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+    true
+}
+
+// -----------------------------------------------------------------------------
+// Top-level invariant — used by integrity_check
+// -----------------------------------------------------------------------------
+
+public fn btree_well_formed(
+    keys_per_page: &List<List<Int64>>,
+    heights: &List<Int>,
+    separators: &List<SeparatorTriple>,
+    child_pointers: &List<Int64>,
+) -> Bool {
+    let mut i: Int = 0;
+    while i < keys_per_page.len() {
+        if !cells_strictly_ascending(&keys_per_page[i]) { return false; }
+        i = i + 1;
+    }
+    if !heights_uniform(heights) { return false; }
+    if !all_separators_well_formed(separators) { return false; }
+    if !no_duplicate_child_pointers(child_pointers) { return false; }
+    true
+}

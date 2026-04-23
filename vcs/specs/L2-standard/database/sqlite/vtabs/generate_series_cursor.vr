@@ -1,0 +1,107 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, vtab, generate_series
+// @timeout: 5000
+// @expected-exit: 0
+//
+// generate_series virtual table: schema, cursor lifecycle, ascending
+// and descending sequences.
+
+mount core.database.sqlite.native.l4_vdbe.register.{Register, RNull, RInt};
+mount core.database.sqlite.native.vtabs.protocol.{VtabSchema, VtabError};
+mount core.database.sqlite.native.vtabs.generate_series.{
+    GsCursor, schema, cursor_new,
+};
+
+fn test_schema_has_value_column() {
+    let s: VtabSchema = schema();
+    assert(s.columns.len() == 4);
+    assert(s.columns[0].name == "value".clone());
+    assert(!s.columns[0].is_hidden);
+    // start/stop/step are hidden
+    assert(s.columns[1].is_hidden);
+    assert(s.columns[2].is_hidden);
+    assert(s.columns[3].is_hidden);
+}
+
+fn test_ascending_sequence() {
+    let mut cur = cursor_new();
+    let mut args: List<Register> = List.new();
+    args.push(RInt(1 as Int64));
+    args.push(RInt(5 as Int64));
+    let r = cur.filter(0, &"".clone(), &args);
+    assert(r.is_ok());
+    let mut emitted: List<Int64> = List.new();
+    while !cur.eof() {
+        match cur.column(0) {
+            RInt(x) => emitted.push(x),
+            _       => panic("value should be RInt"),
+        }
+        let _ = cur.next_row();
+    }
+    assert_eq(emitted.len(), 5);
+    assert_eq(emitted[0], 1 as Int64);
+    assert_eq(emitted[4], 5 as Int64);
+}
+
+fn test_explicit_step() {
+    let mut cur = cursor_new();
+    let mut args: List<Register> = List.new();
+    args.push(RInt(0 as Int64));
+    args.push(RInt(10 as Int64));
+    args.push(RInt(2 as Int64));
+    let _ = cur.filter(0, &"".clone(), &args);
+    let mut emitted: List<Int64> = List.new();
+    while !cur.eof() {
+        match cur.column(0) {
+            RInt(x) => emitted.push(x),
+            _       => {}
+        }
+        let _ = cur.next_row();
+    }
+    // 0, 2, 4, 6, 8, 10
+    assert_eq(emitted.len(), 6);
+    assert_eq(emitted[5], 10 as Int64);
+}
+
+fn test_zero_step_is_rejected() {
+    let mut cur = cursor_new();
+    let mut args: List<Register> = List.new();
+    args.push(RInt(0 as Int64));
+    args.push(RInt(10 as Int64));
+    args.push(RInt(0 as Int64));
+    match cur.filter(0, &"".clone(), &args) {
+        Err(_) => {},
+        Ok(_)  => panic("step=0 must be rejected"),
+    }
+}
+
+fn test_descending_sequence() {
+    let mut cur = cursor_new();
+    let mut args: List<Register> = List.new();
+    args.push(RInt(10 as Int64));
+    args.push(RInt(5 as Int64));
+    args.push(RInt(-1 as Int64));
+    let _ = cur.filter(0, &"".clone(), &args);
+    let mut emitted: List<Int64> = List.new();
+    while !cur.eof() {
+        match cur.column(0) {
+            RInt(x) => emitted.push(x),
+            _       => {}
+        }
+        let _ = cur.next_row();
+    }
+    // 10, 9, 8, 7, 6, 5
+    assert_eq(emitted.len(), 6);
+    assert_eq(emitted[0], 10 as Int64);
+    assert_eq(emitted[5], 5 as Int64);
+}
+
+fn main() {
+    test_schema_has_value_column();
+    test_ascending_sequence();
+    test_explicit_step();
+    test_zero_step_is_rejected();
+    test_descending_sequence();
+}

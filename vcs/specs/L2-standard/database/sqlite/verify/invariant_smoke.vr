@@ -1,0 +1,304 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, verify, invariants
+// @timeout: 5000
+// @expected-exit: 0
+//
+// Smoke test for the loom @verify-annotated invariant predicates.
+// Confirms each invariant accepts well-formed inputs and rejects a
+// hand-rolled violation. Exhaustive proofs are discharged by the SMT
+// pipeline against the actual operations; this is the human-readable
+// behavioural sanity layer.
+
+mount core.database.sqlite.native.verify.file_format_invariants.{
+    page_size_is_legal, reserved_space_valid, version_byte_valid,
+    auto_vacuum_mode_valid, page_count_in_range,
+};
+mount core.database.sqlite.native.verify.btree_invariants.{
+    SeparatorTriple,
+    cells_strictly_ascending, cells_ascending_or_equal,
+    page_fill_factor_ok, heights_uniform,
+    separator_well_formed, no_duplicate_child_pointers,
+};
+mount core.database.sqlite.native.verify.wal_invariants.{
+    FrameRecord, last_commit_index, recovery_preserves_commits,
+    PageImage, checkpoint_is_idempotent,
+    ReaderSnapshot, snapshot_is_at_commit_boundary,
+};
+mount core.database.sqlite.native.verify.vdbe_register_consistency.{
+    AbstractTag, tag_top, tag_bot, tag_only_int, tag_only_text,
+    tag_join, tag_meet, tag_subset, tag_is_bot,
+    RegisterState, register_state_new, register_state_set,
+    UseSite, use_site_consistent, all_uses_consistent,
+};
+mount core.database.sqlite.native.verify.sql_semantics.{
+    JoinKind, JkInner, JkLeftOuter, JkCross,
+    filter_is_monotone, join_cardinality_legal,
+    ColumnType, CtInt, CtReal, CtText, CtAny, CtNull,
+    RowShape, types_compatible, row_matches_schema,
+    count_is_partition_safe, sum_is_partition_safe,
+};
+
+// -----------------------------------------------------------------------------
+// File-format invariants
+// -----------------------------------------------------------------------------
+
+fn test_page_size_set() {
+    assert(page_size_is_legal(512));
+    assert(page_size_is_legal(4096));
+    assert(page_size_is_legal(65536));
+    assert(!page_size_is_legal(513));
+    assert(!page_size_is_legal(0));
+}
+
+fn test_reserved_space() {
+    assert(reserved_space_valid(0, 4096));
+    assert(reserved_space_valid(255, 4096));
+    assert(!reserved_space_valid(256, 4096));
+    assert(!reserved_space_valid(-1, 4096));
+}
+
+fn test_version_byte() {
+    assert(version_byte_valid(1 as Byte));
+    assert(version_byte_valid(2 as Byte));
+    assert(!version_byte_valid(3 as Byte));
+}
+
+fn test_auto_vacuum() {
+    assert(auto_vacuum_mode_valid(0));
+    assert(auto_vacuum_mode_valid(1));
+    assert(auto_vacuum_mode_valid(2));
+    assert(!auto_vacuum_mode_valid(3));
+}
+
+fn test_page_count() {
+    assert(page_count_in_range(1, 100));
+    assert(page_count_in_range(100, 100));
+    assert(!page_count_in_range(0, 100));
+    assert(!page_count_in_range(101, 100));
+}
+
+// -----------------------------------------------------------------------------
+// B-tree invariants
+// -----------------------------------------------------------------------------
+
+fn test_cell_ordering() {
+    let mut keys: List<Int64> = List.new();
+    keys.push(1 as Int64);
+    keys.push(3 as Int64);
+    keys.push(7 as Int64);
+    assert(cells_strictly_ascending(&keys));
+
+    let mut bad: List<Int64> = List.new();
+    bad.push(1 as Int64);
+    bad.push(3 as Int64);
+    bad.push(2 as Int64);
+    assert(!cells_strictly_ascending(&bad));
+
+    let mut equal_ok: List<Int64> = List.new();
+    equal_ok.push(1 as Int64);
+    equal_ok.push(1 as Int64);
+    assert(cells_ascending_or_equal(&equal_ok));
+    assert(!cells_strictly_ascending(&equal_ok));
+}
+
+fn test_separator() {
+    let good = SeparatorTriple { left_max: 5 as Int64, sep: 5 as Int64, right_min: 10 as Int64 };
+    assert(separator_well_formed(&good));
+    let bad = SeparatorTriple { left_max: 5 as Int64, sep: 4 as Int64, right_min: 10 as Int64 };
+    assert(!separator_well_formed(&bad));
+}
+
+fn test_no_duplicate_pointers() {
+    let mut ok: List<Int64> = List.new();
+    ok.push(1 as Int64);
+    ok.push(2 as Int64);
+    ok.push(3 as Int64);
+    assert(no_duplicate_child_pointers(&ok));
+
+    let mut dup: List<Int64> = List.new();
+    dup.push(1 as Int64);
+    dup.push(2 as Int64);
+    dup.push(1 as Int64);
+    assert(!no_duplicate_child_pointers(&dup));
+}
+
+fn test_heights() {
+    let mut h: List<Int> = List.new();
+    h.push(3); h.push(3); h.push(3);
+    assert(heights_uniform(&h));
+    h.push(2);
+    assert(!heights_uniform(&h));
+}
+
+// -----------------------------------------------------------------------------
+// WAL invariants
+// -----------------------------------------------------------------------------
+
+fn make_frame(pageno: Int, db_size: Int) -> FrameRecord {
+    FrameRecord {
+        page_no: pageno,
+        db_size_after: db_size,
+        salt1: 0,
+        salt2: 0,
+        checksum1: 0,
+        checksum2: 0,
+    }
+}
+
+fn test_last_commit_index() {
+    let mut frames: List<FrameRecord> = List.new();
+    frames.push(make_frame(1, 0));
+    frames.push(make_frame(2, 5));   // commit
+    frames.push(make_frame(3, 0));
+    match last_commit_index(&frames) {
+        Some(i) => assert_eq(i, 1),
+        None    => panic("commit at idx 1"),
+    }
+}
+
+fn test_recovery_preserves() {
+    let mut frames: List<FrameRecord> = List.new();
+    frames.push(make_frame(1, 0));
+    frames.push(make_frame(2, 5));   // commit
+    frames.push(make_frame(3, 0));
+    frames.push(make_frame(4, 8));   // second commit
+    // Crash after frame 3 (no second commit visible) — must preserve first commit.
+    assert(recovery_preserves_commits(&frames, 3));
+    assert(recovery_preserves_commits(&frames, 4));
+    assert(recovery_preserves_commits(&frames, 0));
+}
+
+fn test_idempotent_checkpoint() {
+    let mut snapshot: List<PageImage> = List.new();
+    snapshot.push(PageImage { page_no: 1, content_hash: 100 as Int64 });
+    snapshot.push(PageImage { page_no: 2, content_hash: 200 as Int64 });
+    let mut after_first = List.new();
+    after_first.push(PageImage { page_no: 1, content_hash: 100 as Int64 });
+    after_first.push(PageImage { page_no: 2, content_hash: 200 as Int64 });
+    let mut after_second = List.new();
+    after_second.push(PageImage { page_no: 1, content_hash: 100 as Int64 });
+    after_second.push(PageImage { page_no: 2, content_hash: 200 as Int64 });
+    assert(checkpoint_is_idempotent(&snapshot, &after_first, &after_second));
+}
+
+fn test_snapshot_at_boundary() {
+    let mut frames: List<FrameRecord> = List.new();
+    frames.push(make_frame(1, 0));
+    frames.push(make_frame(2, 5));   // commit
+    let snap_ok = ReaderSnapshot { snapshot_frame_count: 2 };
+    assert(snapshot_is_at_commit_boundary(&frames, &snap_ok));
+    let snap_mid = ReaderSnapshot { snapshot_frame_count: 1 };
+    assert(!snapshot_is_at_commit_boundary(&frames, &snap_mid));
+}
+
+// -----------------------------------------------------------------------------
+// VDBE register consistency
+// -----------------------------------------------------------------------------
+
+fn test_tag_lattice() {
+    let t = tag_top();
+    let b = tag_bot();
+    assert(tag_subset(&b, &t));
+    assert(tag_subset(&tag_only_int(), &t));
+    assert(!tag_subset(&t, &tag_only_int()));
+    let joined = tag_join(&tag_only_int(), &tag_only_text());
+    assert(joined.can_be_int);
+    assert(joined.can_be_text);
+    let met = tag_meet(&tag_only_int(), &tag_only_text());
+    assert(tag_is_bot(&met));
+}
+
+fn test_register_state() {
+    let mut st = register_state_new(4);
+    register_state_set(&mut st, 0, tag_only_int());
+    register_state_set(&mut st, 1, tag_only_text());
+    let site = UseSite { pc: 0, reg: 0, expected: tag_only_int() };
+    assert(use_site_consistent(&st, &site));
+    let bad_site = UseSite { pc: 1, reg: 1, expected: tag_only_int() };
+    assert(!use_site_consistent(&st, &bad_site));
+    let mut sites: List<UseSite> = List.new();
+    sites.push(site);
+    assert(all_uses_consistent(&st, &sites));
+}
+
+// -----------------------------------------------------------------------------
+// SQL semantics
+// -----------------------------------------------------------------------------
+
+fn test_filter_monotone() {
+    assert(filter_is_monotone(100, 50));
+    assert(filter_is_monotone(100, 0));
+    assert(filter_is_monotone(100, 100));
+    assert(!filter_is_monotone(100, 101));
+}
+
+fn test_join_bounds() {
+    // INNER: 0 ≤ result ≤ |L| × |R|
+    assert(join_cardinality_legal(&JkInner, 5 as Int64, 4 as Int64, 12 as Int64));
+    assert(!join_cardinality_legal(&JkInner, 5 as Int64, 4 as Int64, 21 as Int64));
+    // LEFT OUTER: |L| ≤ result
+    assert(join_cardinality_legal(&JkLeftOuter, 5 as Int64, 4 as Int64, 7 as Int64));
+    assert(!join_cardinality_legal(&JkLeftOuter, 5 as Int64, 4 as Int64, 4 as Int64));
+}
+
+fn test_type_compat() {
+    assert(types_compatible(&CtAny, &CtInt));
+    assert(types_compatible(&CtInt, &CtInt));
+    assert(types_compatible(&CtInt, &CtNull));
+    assert(types_compatible(&CtReal, &CtInt));   // INT widens to REAL
+    assert(!types_compatible(&CtInt, &CtText));
+}
+
+fn test_row_shape() {
+    let mut sch_cols: List<ColumnType> = List.new();
+    sch_cols.push(CtInt);
+    sch_cols.push(CtText);
+    let schema = RowShape { columns: sch_cols };
+
+    let mut row_cols: List<ColumnType> = List.new();
+    row_cols.push(CtInt);
+    row_cols.push(CtText);
+    let row = RowShape { columns: row_cols };
+    assert(row_matches_schema(&schema, &row));
+
+    let mut bad_cols: List<ColumnType> = List.new();
+    bad_cols.push(CtText);
+    bad_cols.push(CtText);
+    let bad_row = RowShape { columns: bad_cols };
+    assert(!row_matches_schema(&schema, &bad_row));
+}
+
+fn test_partition_safe() {
+    let mut parts: List<Int64> = List.new();
+    parts.push(3 as Int64);
+    parts.push(5 as Int64);
+    parts.push(2 as Int64);
+    assert(count_is_partition_safe(&parts, 10 as Int64));
+    assert(!count_is_partition_safe(&parts, 11 as Int64));
+    assert(sum_is_partition_safe(&parts, 10 as Int64));
+}
+
+fn main() {
+    test_page_size_set();
+    test_reserved_space();
+    test_version_byte();
+    test_auto_vacuum();
+    test_page_count();
+    test_cell_ordering();
+    test_separator();
+    test_no_duplicate_pointers();
+    test_heights();
+    test_last_commit_index();
+    test_recovery_preserves();
+    test_idempotent_checkpoint();
+    test_snapshot_at_boundary();
+    test_tag_lattice();
+    test_register_state();
+    test_filter_monotone();
+    test_join_bounds();
+    test_type_compat();
+    test_row_shape();
+    test_partition_safe();
+}

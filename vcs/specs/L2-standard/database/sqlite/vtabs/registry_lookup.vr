@@ -1,0 +1,78 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, vtab, registry
+// @timeout: 5000
+// @expected-exit: 0
+//
+// Loom virtual-table registry: built-in modules pre-registered,
+// case-insensitive lookup, user registration round-trip.
+
+mount core.database.sqlite.native.vtabs.registry.{
+    VtabBinding, VtabRegistry,
+    registry_new, registry_with_builtins,
+    BUILTIN_DBSTAT, BUILTIN_GENERATE_SERIES,
+    BUILTIN_PRAGMA_TABLE_INFO, BUILTIN_JSON_EACH,
+    BUILTIN_USER_REGISTERED,
+};
+mount core.database.sqlite.native.vtabs.protocol.{
+    VtabError,
+};
+mount base.{Result, Ok, Err};
+
+fn require_registered(reg: &VtabRegistry, name: Text) -> VtabBinding {
+    match reg.find(&name) {
+        Some(b) => b,
+        None    => panic(f"vtab '{name}' should be registered"),
+    }
+}
+
+fn test_builtin_modules_present() {
+    let reg = registry_with_builtins();
+    let _ = require_registered(&reg, "dbstat".clone());
+    let _ = require_registered(&reg, "generate_series".clone());
+    let _ = require_registered(&reg, "pragma_table_info".clone());
+    let _ = require_registered(&reg, "pragma_index_list".clone());
+    let _ = require_registered(&reg, "pragma_foreign_key_list".clone());
+    let _ = require_registered(&reg, "json_each".clone());
+    let _ = require_registered(&reg, "json_tree".clone());
+    assert(reg.count() >= 7);
+}
+
+fn test_lookup_is_case_insensitive() {
+    let reg = registry_with_builtins();
+    let _ = require_registered(&reg, "DbStat".clone());
+    let _ = require_registered(&reg, "GENERATE_SERIES".clone());
+}
+
+fn test_user_registration_roundtrip() {
+    let mut reg = registry_with_builtins();
+    let r = reg.register(&"my_module".clone(), false);
+    assert(r.is_ok());
+    let b = require_registered(&reg, "my_module".clone());
+    assert_eq(b.builtin_kind, BUILTIN_USER_REGISTERED);
+    assert(!b.is_writable);
+}
+
+fn test_user_registration_rejects_duplicate() {
+    let mut reg = registry_new();
+    let _ = reg.register(&"x".clone(), false);
+    match reg.register(&"x".clone(), false) {
+        Ok(_)  => panic("duplicate should be rejected"),
+        Err(_) => {},
+    }
+}
+
+fn test_builtin_codes_are_distinct() {
+    assert(BUILTIN_DBSTAT != BUILTIN_GENERATE_SERIES);
+    assert(BUILTIN_GENERATE_SERIES != BUILTIN_PRAGMA_TABLE_INFO);
+    assert(BUILTIN_JSON_EACH != BUILTIN_USER_REGISTERED);
+}
+
+fn main() {
+    test_builtin_modules_present();
+    test_lookup_is_case_insensitive();
+    test_user_registration_roundtrip();
+    test_user_registration_rejects_duplicate();
+    test_builtin_codes_are_distinct();
+}

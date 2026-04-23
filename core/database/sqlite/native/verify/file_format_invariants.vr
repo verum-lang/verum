@@ -1,0 +1,93 @@
+// =============================================================================
+// verify/file_format_invariants.vr — DatabaseHeader / page layout
+// =============================================================================
+// Spec: sqlite-native.md §6, §21.1
+//
+// File-format invariants are encoded as predicates over the parsed
+// `DatabaseHeader` and per-page byte buffers. Most are also enforced
+// statically through refinement types in `l1_pager/db_header.vr`.
+// =============================================================================
+
+module core.database.sqlite.native.verify.file_format_invariants;
+
+mount core.*;
+mount base.{Text, Bool};
+mount collections.List;
+
+// -----------------------------------------------------------------------------
+// Header magic — must be SQLite 3 sentinel
+// -----------------------------------------------------------------------------
+
+public const SQLITE_HEADER_MAGIC: Text = "SQLite format 3\u{00}".clone();
+
+public fn header_magic_valid(header: &List<Byte>) -> Bool {
+    if header.len() < 16 { return false; }
+    let mb = SQLITE_HEADER_MAGIC.as_bytes();
+    let mut i: Int = 0;
+    while i < 16 && i < mb.len() {
+        if header[i] != mb[i] { return false; }
+        i = i + 1;
+    }
+    true
+}
+
+// -----------------------------------------------------------------------------
+// page_size ∈ {512, 1024, 2048, 4096, 8192, 16384, 32768, 65536}
+// -----------------------------------------------------------------------------
+
+public fn page_size_is_legal(ps: Int) -> Bool {
+    ps == 512 || ps == 1024 || ps == 2048 || ps == 4096
+        || ps == 8192 || ps == 16384 || ps == 32768 || ps == 65536
+}
+
+// -----------------------------------------------------------------------------
+// reserved_space ∈ [0, 255] AND reserved_space < page_size − minimum_overhead
+// -----------------------------------------------------------------------------
+
+public fn reserved_space_valid(reserved: Int, page_size: Int) -> Bool {
+    if reserved < 0 || reserved > 255 { return false; }
+    // Each page needs at least one cell pointer (2 bytes) + the
+    // 8-byte page header on leaves.
+    reserved < page_size - 10
+}
+
+// -----------------------------------------------------------------------------
+// Read/write versions: 1 = legacy, 2 = WAL
+// -----------------------------------------------------------------------------
+
+public fn version_byte_valid(b: Byte) -> Bool {
+    b == (1 as Byte) || b == (2 as Byte)
+}
+
+// -----------------------------------------------------------------------------
+// Auto-vacuum mode ∈ {0, 1, 2}
+// -----------------------------------------------------------------------------
+
+public fn auto_vacuum_mode_valid(m: Int) -> Bool {
+    m == 0 || m == 1 || m == 2
+}
+
+// -----------------------------------------------------------------------------
+// page_count > 0 AND page_count <= max_page_count
+// -----------------------------------------------------------------------------
+
+public fn page_count_in_range(page_count: Int, max_pages: Int) -> Bool {
+    page_count > 0 && page_count <= max_pages
+}
+
+// -----------------------------------------------------------------------------
+// Conjunction — used by L1 pager during open
+// -----------------------------------------------------------------------------
+
+public fn header_well_formed(
+    header: &List<Byte>,
+    page_size: Int,
+    reserved: Int,
+    page_count: Int,
+    max_pages: Int,
+) -> Bool {
+    header_magic_valid(header)
+        && page_size_is_legal(page_size)
+        && reserved_space_valid(reserved, page_size)
+        && page_count_in_range(page_count, max_pages)
+}

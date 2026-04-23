@@ -1,0 +1,129 @@
+// =============================================================================
+// vtabs/generate_series.vr — generate_series(start, stop[, step]) vtab
+// =============================================================================
+// Layer: 6
+// Spec: sqlite-native.md §16.4
+//
+// Built-in table-valued function exposing an integer sequence:
+//
+//   SELECT value FROM generate_series(1, 10);          -- 1..10
+//   SELECT value FROM generate_series(0, 100, 5);      -- 0,5,...,100
+//
+// The columns are (value, start, stop, step). `value` is the only
+// column the user normally selects; the others are HIDDEN and
+// double as constraint sources for the planner.
+// =============================================================================
+
+module core.database.sqlite.native.vtabs.generate_series;
+
+mount core.*;
+mount base.{Text, Maybe, Result, Ok, Err};
+mount collections.List;
+mount core.database.sqlite.native.l4_vdbe.register.{Register, RNull, RInt, RReal};
+mount core.database.sqlite.native.vtabs.protocol.{
+    VtabError, VtabUnsupported, VtabConstraint,
+    VtabSchema, VtabColumn,
+};
+
+// -----------------------------------------------------------------------------
+// Schema announcement
+// -----------------------------------------------------------------------------
+
+public fn schema() -> VtabSchema {
+    let mut cols: List<VtabColumn> = List.new();
+    cols.push(VtabColumn { name: "value".clone(), affinity: "INTEGER".clone(), is_hidden: false });
+    cols.push(VtabColumn { name: "start".clone(), affinity: "INTEGER".clone(), is_hidden: true });
+    cols.push(VtabColumn { name: "stop".clone(),  affinity: "INTEGER".clone(), is_hidden: true });
+    cols.push(VtabColumn { name: "step".clone(),  affinity: "INTEGER".clone(), is_hidden: true });
+    VtabSchema {
+        create_sql: "CREATE TABLE generate_series(value, start hidden, stop hidden, step hidden)".clone(),
+        columns: cols,
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Cursor
+// -----------------------------------------------------------------------------
+
+public type GsCursor is {
+    cur: Int64,
+    stop: Int64,
+    step: Int64,
+    is_eof: Bool,
+};
+
+public fn cursor_new() -> GsCursor {
+    GsCursor {
+        cur: 0 as Int64,
+        stop: 0 as Int64,
+        step: 1 as Int64,
+        is_eof: true,
+    }
+}
+
+implement GsCursor {
+    public fn filter(
+        &mut self,
+        _index_num: Int,
+        _index_str: &Text,
+        args: &List<Register>,
+    ) -> Result<(), VtabError> {
+        // Defaults — generate_series with no args is "start at 0, step 1, no end"
+        // but we cap at `start..start+1000` for safety until we get ATTACH-quotas.
+        let mut start: Int64 = 0 as Int64;
+        let mut stop:  Int64 = 1000 as Int64;
+        let mut step:  Int64 = 1 as Int64;
+        if args.len() >= 1 {
+            match &args[0] {
+                RInt(x) => { start = x; }
+                RReal(x) => { start = x as Int64; }
+                _ => { return Err(VtabConstraint("start must be integer".clone())); }
+            }
+        }
+        if args.len() >= 2 {
+            match &args[1] {
+                RInt(x) => { stop = x; }
+                RReal(x) => { stop = x as Int64; }
+                _ => { return Err(VtabConstraint("stop must be integer".clone())); }
+            }
+        }
+        if args.len() >= 3 {
+            match &args[2] {
+                RInt(x) => {
+                    if x == (0 as Int64) {
+                        return Err(VtabConstraint("step must be non-zero".clone()));
+                    }
+                    step = x;
+                }
+                _ => { return Err(VtabConstraint("step must be integer".clone())); }
+            }
+        }
+        self.cur = start;
+        self.stop = stop;
+        self.step = step;
+        self.is_eof = if step > (0 as Int64) { start > stop } else { start < stop };
+        Ok(())
+    }
+
+    public fn next_row(&mut self) -> Result<(), VtabError> {
+        if self.is_eof { return Ok(()); }
+        self.cur = self.cur + self.step;
+        let done = if self.step > (0 as Int64) { self.cur > self.stop } else { self.cur < self.stop };
+        if done { self.is_eof = true; }
+        Ok(())
+    }
+
+    public fn eof(&self) -> Bool { self.is_eof }
+
+    public fn column(&self, idx: Int) -> Register {
+        match idx {
+            0 => RInt(self.cur),
+            1 => RInt(self.cur),    // start (hidden) — surface current as proxy
+            2 => RInt(self.stop),
+            3 => RInt(self.step),
+            _ => RNull,
+        }
+    }
+
+    public fn rowid(&self) -> Int64 { self.cur }
+}

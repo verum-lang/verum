@@ -1,0 +1,137 @@
+// =============================================================================
+// vtabs/dbstat.vr — per-page statistics virtual table
+// =============================================================================
+// Layer: 6
+// Spec: sqlite-native.md §16.4
+//
+// Surfaces page-level statistics over a single database file.
+// Each row corresponds to one storage page; columns mirror the
+// upstream SQLite dbstat schema:
+//
+//   name TEXT, path TEXT, pageno INT, pagetype TEXT,
+//   ncell INT, payload INT, unused INT, mx_payload INT,
+//   pgoffset INT, pgsize INT
+//
+// Phase-0 implementation backs the cursor with a synthetic
+// per-page sample list — the L1 pager will populate the real
+// statistics during a B-tree traversal pass once
+// `Pager.iter_pages()` lands.
+// =============================================================================
+
+module core.database.sqlite.native.vtabs.dbstat;
+
+mount core.*;
+mount base.{Text, Maybe, Result, Ok, Err};
+mount collections.List;
+mount core.database.sqlite.native.l4_vdbe.register.{Register, RNull, RInt, RText};
+mount core.database.sqlite.native.vtabs.protocol.{
+    VtabError, VtabSchema, VtabColumn,
+};
+
+// -----------------------------------------------------------------------------
+// Schema announcement
+// -----------------------------------------------------------------------------
+
+public fn schema() -> VtabSchema {
+    let mut cols: List<VtabColumn> = List.new();
+    cols.push(VtabColumn { name: "name".clone(),       affinity: "TEXT".clone(),    is_hidden: false });
+    cols.push(VtabColumn { name: "path".clone(),       affinity: "TEXT".clone(),    is_hidden: false });
+    cols.push(VtabColumn { name: "pageno".clone(),     affinity: "INTEGER".clone(), is_hidden: false });
+    cols.push(VtabColumn { name: "pagetype".clone(),   affinity: "TEXT".clone(),    is_hidden: false });
+    cols.push(VtabColumn { name: "ncell".clone(),      affinity: "INTEGER".clone(), is_hidden: false });
+    cols.push(VtabColumn { name: "payload".clone(),    affinity: "INTEGER".clone(), is_hidden: false });
+    cols.push(VtabColumn { name: "unused".clone(),     affinity: "INTEGER".clone(), is_hidden: false });
+    cols.push(VtabColumn { name: "mx_payload".clone(), affinity: "INTEGER".clone(), is_hidden: false });
+    cols.push(VtabColumn { name: "pgoffset".clone(),   affinity: "INTEGER".clone(), is_hidden: false });
+    cols.push(VtabColumn { name: "pgsize".clone(),     affinity: "INTEGER".clone(), is_hidden: false });
+    VtabSchema {
+        create_sql: "CREATE TABLE dbstat(name, path, pageno, pagetype, ncell, payload, unused, mx_payload, pgoffset, pgsize)".clone(),
+        columns: cols,
+    }
+}
+
+// -----------------------------------------------------------------------------
+// One-row payload + cursor
+// -----------------------------------------------------------------------------
+
+public type DbstatRow is {
+    name: Text,
+    path: Text,
+    pageno: Int64,
+    pagetype: Text,
+    ncell: Int64,
+    payload: Int64,
+    unused: Int64,
+    mx_payload: Int64,
+    pgoffset: Int64,
+    pgsize: Int64,
+};
+
+public type DbstatCursor is {
+    rows: List<DbstatRow>,
+    pos: Int,
+};
+
+public fn cursor_new() -> DbstatCursor {
+    DbstatCursor { rows: List.new(), pos: 0 }
+}
+
+/// Phase-0 placeholder: emit a single synthetic page descriptor so
+/// the cursor protocol round-trips end-to-end.
+public fn cursor_with_synthetic_baseline(page_size: Int) -> DbstatCursor {
+    let mut rows: List<DbstatRow> = List.new();
+    rows.push(DbstatRow {
+        name: "main".clone(),
+        path: "/".clone(),
+        pageno: 1 as Int64,
+        pagetype: "internal".clone(),
+        ncell: 0 as Int64,
+        payload: 0 as Int64,
+        unused: (page_size as Int64) - (100 as Int64),
+        mx_payload: 0 as Int64,
+        pgoffset: 0 as Int64,
+        pgsize: page_size as Int64,
+    });
+    DbstatCursor { rows: rows, pos: 0 }
+}
+
+implement DbstatCursor {
+    public fn filter(
+        &mut self,
+        _index_num: Int,
+        _index_str: &Text,
+        _args: &List<Register>,
+    ) -> Result<(), VtabError> {
+        self.pos = 0;
+        Ok(())
+    }
+
+    public fn next_row(&mut self) -> Result<(), VtabError> {
+        self.pos = self.pos + 1;
+        Ok(())
+    }
+
+    public fn eof(&self) -> Bool { self.pos >= self.rows.len() }
+
+    public fn column(&self, idx: Int) -> Register {
+        if self.eof() { return RNull; }
+        let row = &self.rows[self.pos];
+        match idx {
+            0 => RText(row.name.clone()),
+            1 => RText(row.path.clone()),
+            2 => RInt(row.pageno),
+            3 => RText(row.pagetype.clone()),
+            4 => RInt(row.ncell),
+            5 => RInt(row.payload),
+            6 => RInt(row.unused),
+            7 => RInt(row.mx_payload),
+            8 => RInt(row.pgoffset),
+            9 => RInt(row.pgsize),
+            _ => RNull,
+        }
+    }
+
+    public fn rowid(&self) -> Int64 {
+        if self.eof() { 0 as Int64 } else { self.rows[self.pos].pageno }
+    }
+}

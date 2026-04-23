@@ -1,0 +1,123 @@
+// =============================================================================
+// verify/sql_semantics.vr — SQL relational invariants
+// =============================================================================
+// Spec: sqlite-native.md §21.1 (SQL semantics row)
+//
+// Three invariants govern the loom planner + interpreter:
+//
+//   S1  filter_monotonicity         — applying an additional WHERE
+//                                     clause never adds rows
+//   S2  join_cardinality_lower_bound — INNER JOIN result size ≤
+//                                     |left| × |right|; LEFT JOIN
+//                                     ≥ |left|
+//   S3  result_shape_matches_schema — every output row's column
+//                                     count + types align with the
+//                                     SELECT list's declared shape
+// =============================================================================
+
+module core.database.sqlite.native.verify.sql_semantics;
+
+mount core.*;
+mount base.{Bool};
+mount collections.List;
+
+// -----------------------------------------------------------------------------
+// S1 — filter monotonicity
+// -----------------------------------------------------------------------------
+
+public fn filter_is_monotone(input_size: Int, filtered_size: Int) -> Bool {
+    filtered_size >= 0 && filtered_size <= input_size
+}
+
+// -----------------------------------------------------------------------------
+// S2 — join cardinality bounds
+// -----------------------------------------------------------------------------
+
+public type JoinKind is JkInner | JkLeftOuter | JkRightOuter | JkFull | JkCross;
+
+public fn join_cardinality_legal(
+    kind: &JoinKind,
+    left_size: Int64,
+    right_size: Int64,
+    result_size: Int64,
+) -> Bool {
+    let cross: Int64 = left_size * right_size;
+    match kind {
+        JkInner | JkCross => result_size >= (0 as Int64) && result_size <= cross,
+        JkLeftOuter       => result_size >= left_size  && result_size <= cross + left_size,
+        JkRightOuter      => result_size >= right_size && result_size <= cross + right_size,
+        JkFull            => result_size >= left_size + right_size && result_size <= cross + left_size + right_size,
+    }
+}
+
+// -----------------------------------------------------------------------------
+// S3 — result shape consistency
+// -----------------------------------------------------------------------------
+
+public type ColumnType is CtInt | CtReal | CtText | CtBlob | CtAny | CtNull;
+
+public fn types_compatible(declared: &ColumnType, observed: &ColumnType) -> Bool {
+    match declared {
+        CtAny => true,
+        CtInt => match observed { CtInt | CtNull => true, _ => false },
+        CtReal => match observed { CtReal | CtInt | CtNull => true, _ => false },
+        CtText => match observed { CtText | CtNull => true, _ => false },
+        CtBlob => match observed { CtBlob | CtNull => true, _ => false },
+        CtNull => match observed { CtNull => true, _ => false },
+    }
+}
+
+public type RowShape is { columns: List<ColumnType> };
+
+public fn row_matches_schema(schema: &RowShape, observed: &RowShape) -> Bool {
+    if schema.columns.len() != observed.columns.len() { return false; }
+    let mut i: Int = 0;
+    while i < schema.columns.len() {
+        if !types_compatible(&schema.columns[i], &observed.columns[i]) { return false; }
+        i = i + 1;
+    }
+    true
+}
+
+public fn rows_match_schema(schema: &RowShape, rows: &List<RowShape>) -> Bool {
+    let mut i: Int = 0;
+    while i < rows.len() {
+        if !row_matches_schema(schema, &rows[i]) { return false; }
+        i = i + 1;
+    }
+    true
+}
+
+// -----------------------------------------------------------------------------
+// Aggregation invariants — for COUNT/SUM/etc.
+// -----------------------------------------------------------------------------
+//
+// Property: aggregating a partition then summing equals aggregating the union.
+// Used to validate parallel/streaming execution plans.
+// =============================================================================
+
+public fn count_is_partition_safe(
+    partitions: &List<Int64>,
+    total_count: Int64,
+) -> Bool {
+    let mut sum: Int64 = 0 as Int64;
+    let mut i: Int = 0;
+    while i < partitions.len() {
+        sum = sum + partitions[i];
+        i = i + 1;
+    }
+    sum == total_count
+}
+
+public fn sum_is_partition_safe(
+    partition_sums: &List<Int64>,
+    total_sum: Int64,
+) -> Bool {
+    let mut acc: Int64 = 0 as Int64;
+    let mut i: Int = 0;
+    while i < partition_sums.len() {
+        acc = acc + partition_sums[i];
+        i = i + 1;
+    }
+    acc == total_sum
+}

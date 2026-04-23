@@ -80,3 +80,4 @@ public module l7_api;
 public module builtins;
 public module pragmas;
 public module vtabs;
+public module verify;

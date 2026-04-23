@@ -1,0 +1,63 @@
+// =============================================================================
+// vtabs/index_info.vr — IndexInfo helpers
+// =============================================================================
+// Layer: 5–6
+// Spec: sqlite-native.md §16.1
+//
+// Light builders + accessors over the IndexInfo struct exported from
+// `protocol.vr`. Kept separate so call sites don't pull in the
+// protocol typeclass when all they need is the data record.
+// =============================================================================
+
+module core.database.sqlite.native.vtabs.index_info;
+
+mount core.*;
+mount base.{Text, Maybe};
+mount collections.List;
+mount core.database.sqlite.native.vtabs.protocol.{
+    IndexInfo, Constraint, ConstraintUsage, OrderBy, ConstraintOp,
+    OpEq, OpGt, OpLt, OpGe, OpLe, OpMatch, OpLike, OpGlob, OpRegexp,
+    OpIsNotNull, OpIsNull, OpIsNotEqual,
+    index_info_new,
+};
+
+public fn add_constraint(info: &mut IndexInfo, column: Int, op: ConstraintOp, usable: Bool) {
+    info.constraints.push(Constraint { column: column, op: op, usable: usable });
+    info.constraint_usage.push(ConstraintUsage { arg_slot: 0, omit: false });
+}
+
+public fn add_order_by(info: &mut IndexInfo, column: Int, desc: Bool) {
+    info.order_by.push(OrderBy { column: column, desc: desc });
+}
+
+public fn use_constraint(info: &mut IndexInfo, idx: Int, arg_slot: Int, omit: Bool) {
+    if idx < 0 || idx >= info.constraint_usage.len() { return; }
+    info.constraint_usage[idx] = ConstraintUsage { arg_slot: arg_slot, omit: omit };
+}
+
+public fn op_name(op: &ConstraintOp) -> Text {
+    match op {
+        OpEq         => "=".clone(),
+        OpGt         => ">".clone(),
+        OpLt         => "<".clone(),
+        OpGe         => ">=".clone(),
+        OpLe         => "<=".clone(),
+        OpMatch      => "MATCH".clone(),
+        OpLike       => "LIKE".clone(),
+        OpGlob       => "GLOB".clone(),
+        OpRegexp     => "REGEXP".clone(),
+        OpIsNotNull  => "IS NOT NULL".clone(),
+        OpIsNull     => "IS NULL".clone(),
+        OpIsNotEqual => "<>".clone(),
+    }
+}
+
+public fn count_usable(info: &IndexInfo) -> Int {
+    let mut n: Int = 0;
+    let mut i: Int = 0;
+    while i < info.constraints.len() {
+        if info.constraints[i].usable { n = n + 1; }
+        i = i + 1;
+    }
+    n
+}

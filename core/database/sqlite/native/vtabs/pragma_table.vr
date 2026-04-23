@@ -1,0 +1,153 @@
+// =============================================================================
+// vtabs/pragma_table.vr — pragma_*() table-valued functions
+// =============================================================================
+// Layer: 6
+// Spec: sqlite-native.md §16.4
+//
+// Wraps the introspection PRAGMAs (`table_info`, `index_list`,
+// `index_info`, `foreign_key_list`) as virtual tables so users can
+// JOIN against them:
+//
+//   SELECT name FROM pragma_table_info('users');
+//
+// Each module produces the same column-set the underlying PRAGMA
+// emits (per SQLite docs).
+// =============================================================================
+
+module core.database.sqlite.native.vtabs.pragma_table;
+
+mount core.*;
+mount base.{Text, Maybe, Result, Ok, Err};
+mount collections.List;
+mount core.database.sqlite.native.l4_vdbe.register.{Register, RNull, RInt, RText};
+mount core.database.sqlite.native.vtabs.protocol.{
+    VtabError, VtabSchema, VtabColumn, VtabConstraint,
+};
+
+// -----------------------------------------------------------------------------
+// pragma_table_info schema
+// -----------------------------------------------------------------------------
+
+public fn table_info_schema() -> VtabSchema {
+    let mut cols: List<VtabColumn> = List.new();
+    cols.push(VtabColumn { name: "cid".clone(),        affinity: "INTEGER".clone(), is_hidden: false });
+    cols.push(VtabColumn { name: "name".clone(),       affinity: "TEXT".clone(),    is_hidden: false });
+    cols.push(VtabColumn { name: "type".clone(),       affinity: "TEXT".clone(),    is_hidden: false });
+    cols.push(VtabColumn { name: "notnull".clone(),    affinity: "INTEGER".clone(), is_hidden: false });
+    cols.push(VtabColumn { name: "dflt_value".clone(), affinity: "TEXT".clone(),    is_hidden: false });
+    cols.push(VtabColumn { name: "pk".clone(),         affinity: "INTEGER".clone(), is_hidden: false });
+    cols.push(VtabColumn { name: "schema".clone(),     affinity: "TEXT".clone(),    is_hidden: true });
+    cols.push(VtabColumn { name: "table_name".clone(), affinity: "TEXT".clone(),    is_hidden: true });
+    VtabSchema {
+        create_sql: "CREATE TABLE pragma_table_info(cid, name, type, notnull, dflt_value, pk, schema hidden, table_name hidden)".clone(),
+        columns: cols,
+    }
+}
+
+public type ColumnInfo is {
+    cid: Int,
+    name: Text,
+    type_name: Text,
+    notnull: Bool,
+    default_value: Maybe<Text>,
+    pk_position: Int,
+};
+
+public type TableInfoCursor is {
+    rows: List<ColumnInfo>,
+    pos: Int,
+};
+
+public fn table_info_cursor(rows: List<ColumnInfo>) -> TableInfoCursor {
+    TableInfoCursor { rows: rows, pos: 0 }
+}
+
+implement TableInfoCursor {
+    public fn filter(
+        &mut self,
+        _index_num: Int,
+        _index_str: &Text,
+        _args: &List<Register>,
+    ) -> Result<(), VtabError> {
+        self.pos = 0;
+        Ok(())
+    }
+
+    public fn next_row(&mut self) -> Result<(), VtabError> {
+        self.pos = self.pos + 1;
+        Ok(())
+    }
+
+    public fn eof(&self) -> Bool { self.pos >= self.rows.len() }
+
+    public fn column(&self, idx: Int) -> Register {
+        if self.eof() { return RNull; }
+        let r = &self.rows[self.pos];
+        match idx {
+            0 => RInt(r.cid as Int64),
+            1 => RText(r.name.clone()),
+            2 => RText(r.type_name.clone()),
+            3 => RInt(if r.notnull { 1 as Int64 } else { 0 as Int64 }),
+            4 => match &r.default_value {
+                Some(s) => RText(s.clone()),
+                None    => RNull,
+            },
+            5 => RInt(r.pk_position as Int64),
+            _ => RNull,
+        }
+    }
+
+    public fn rowid(&self) -> Int64 { self.pos as Int64 }
+}
+
+// -----------------------------------------------------------------------------
+// pragma_index_list schema
+// -----------------------------------------------------------------------------
+
+public fn index_list_schema() -> VtabSchema {
+    let mut cols: List<VtabColumn> = List.new();
+    cols.push(VtabColumn { name: "seq".clone(),    affinity: "INTEGER".clone(), is_hidden: false });
+    cols.push(VtabColumn { name: "name".clone(),   affinity: "TEXT".clone(),    is_hidden: false });
+    cols.push(VtabColumn { name: "unique".clone(), affinity: "INTEGER".clone(), is_hidden: false });
+    cols.push(VtabColumn { name: "origin".clone(), affinity: "TEXT".clone(),    is_hidden: false });
+    cols.push(VtabColumn { name: "partial".clone(),affinity: "INTEGER".clone(), is_hidden: false });
+    VtabSchema {
+        create_sql: "CREATE TABLE pragma_index_list(seq, name, [unique], origin, partial)".clone(),
+        columns: cols,
+    }
+}
+
+// -----------------------------------------------------------------------------
+// pragma_index_info schema
+// -----------------------------------------------------------------------------
+
+public fn index_info_schema() -> VtabSchema {
+    let mut cols: List<VtabColumn> = List.new();
+    cols.push(VtabColumn { name: "seqno".clone(), affinity: "INTEGER".clone(), is_hidden: false });
+    cols.push(VtabColumn { name: "cid".clone(),   affinity: "INTEGER".clone(), is_hidden: false });
+    cols.push(VtabColumn { name: "name".clone(),  affinity: "TEXT".clone(),    is_hidden: false });
+    VtabSchema {
+        create_sql: "CREATE TABLE pragma_index_info(seqno, cid, name)".clone(),
+        columns: cols,
+    }
+}
+
+// -----------------------------------------------------------------------------
+// pragma_foreign_key_list schema
+// -----------------------------------------------------------------------------
+
+public fn foreign_key_list_schema() -> VtabSchema {
+    let mut cols: List<VtabColumn> = List.new();
+    cols.push(VtabColumn { name: "id".clone(),       affinity: "INTEGER".clone(), is_hidden: false });
+    cols.push(VtabColumn { name: "seq".clone(),      affinity: "INTEGER".clone(), is_hidden: false });
+    cols.push(VtabColumn { name: "table".clone(),    affinity: "TEXT".clone(),    is_hidden: false });
+    cols.push(VtabColumn { name: "from".clone(),     affinity: "TEXT".clone(),    is_hidden: false });
+    cols.push(VtabColumn { name: "to".clone(),       affinity: "TEXT".clone(),    is_hidden: false });
+    cols.push(VtabColumn { name: "on_update".clone(),affinity: "TEXT".clone(),    is_hidden: false });
+    cols.push(VtabColumn { name: "on_delete".clone(),affinity: "TEXT".clone(),    is_hidden: false });
+    cols.push(VtabColumn { name: "match".clone(),    affinity: "TEXT".clone(),    is_hidden: false });
+    VtabSchema {
+        create_sql: "CREATE TABLE pragma_foreign_key_list(id, seq, [table], [from], [to], on_update, on_delete, [match])".clone(),
+        columns: cols,
+    }
+}

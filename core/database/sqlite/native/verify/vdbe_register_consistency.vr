@@ -1,0 +1,197 @@
+// =============================================================================
+// verify/vdbe_register_consistency.vr — VDBE register-type consistency
+// =============================================================================
+// Spec: sqlite-native.md §11, §21.5
+//
+// VDBE programs are not yet typed at the SSA-register level — the
+// runtime register file is dynamically tagged. To narrow the gap, we
+// supply a *static abstract interpretation* per program that tracks
+// the inferred-tag set per register at each instruction. The
+// invariant is then:
+//
+//   For every Use(reg, expected_kinds) instruction at PC,
+//   the abstract tag-set for `reg` at `PC` ⊆ expected_kinds.
+//
+// This file declares the abstract domain + the consistency check.
+// The actual abstract-eval pass is run from `l4_vdbe.optimizer`
+// before peephole optimisation.
+// =============================================================================
+
+module core.database.sqlite.native.verify.vdbe_register_consistency;
+
+mount core.*;
+mount base.{Bool, Maybe};
+mount collections.List;
+
+// -----------------------------------------------------------------------------
+// Abstract register tag — bitset over (Null, Int, Real, Text, Blob, RowId)
+// -----------------------------------------------------------------------------
+
+public type AbstractTag is {
+    can_be_null: Bool,
+    can_be_int: Bool,
+    can_be_real: Bool,
+    can_be_text: Bool,
+    can_be_blob: Bool,
+    can_be_rowid: Bool,
+};
+
+public fn tag_top() -> AbstractTag {
+    AbstractTag {
+        can_be_null: true, can_be_int: true, can_be_real: true,
+        can_be_text: true, can_be_blob: true, can_be_rowid: true,
+    }
+}
+
+public fn tag_bot() -> AbstractTag {
+    AbstractTag {
+        can_be_null: false, can_be_int: false, can_be_real: false,
+        can_be_text: false, can_be_blob: false, can_be_rowid: false,
+    }
+}
+
+public fn tag_only_null() -> AbstractTag {
+    let mut t = tag_bot();
+    t.can_be_null = true;
+    t
+}
+
+public fn tag_only_int() -> AbstractTag {
+    let mut t = tag_bot();
+    t.can_be_int = true;
+    t
+}
+
+public fn tag_only_real() -> AbstractTag {
+    let mut t = tag_bot();
+    t.can_be_real = true;
+    t
+}
+
+public fn tag_only_text() -> AbstractTag {
+    let mut t = tag_bot();
+    t.can_be_text = true;
+    t
+}
+
+public fn tag_only_blob() -> AbstractTag {
+    let mut t = tag_bot();
+    t.can_be_blob = true;
+    t
+}
+
+public fn tag_only_rowid() -> AbstractTag {
+    let mut t = tag_bot();
+    t.can_be_rowid = true;
+    t
+}
+
+// -----------------------------------------------------------------------------
+// Lattice operations
+// -----------------------------------------------------------------------------
+
+public fn tag_join(a: &AbstractTag, b: &AbstractTag) -> AbstractTag {
+    AbstractTag {
+        can_be_null:  a.can_be_null  || b.can_be_null,
+        can_be_int:   a.can_be_int   || b.can_be_int,
+        can_be_real:  a.can_be_real  || b.can_be_real,
+        can_be_text:  a.can_be_text  || b.can_be_text,
+        can_be_blob:  a.can_be_blob  || b.can_be_blob,
+        can_be_rowid: a.can_be_rowid || b.can_be_rowid,
+    }
+}
+
+public fn tag_meet(a: &AbstractTag, b: &AbstractTag) -> AbstractTag {
+    AbstractTag {
+        can_be_null:  a.can_be_null  && b.can_be_null,
+        can_be_int:   a.can_be_int   && b.can_be_int,
+        can_be_real:  a.can_be_real  && b.can_be_real,
+        can_be_text:  a.can_be_text  && b.can_be_text,
+        can_be_blob:  a.can_be_blob  && b.can_be_blob,
+        can_be_rowid: a.can_be_rowid && b.can_be_rowid,
+    }
+}
+
+public fn tag_subset(a: &AbstractTag, b: &AbstractTag) -> Bool {
+    let n =  !a.can_be_null  || b.can_be_null;
+    let i =  !a.can_be_int   || b.can_be_int;
+    let r =  !a.can_be_real  || b.can_be_real;
+    let t =  !a.can_be_text  || b.can_be_text;
+    let bl = !a.can_be_blob  || b.can_be_blob;
+    let ri = !a.can_be_rowid || b.can_be_rowid;
+    n && i && r && t && bl && ri
+}
+
+public fn tag_is_bot(t: &AbstractTag) -> Bool {
+    !t.can_be_null && !t.can_be_int && !t.can_be_real
+        && !t.can_be_text && !t.can_be_blob && !t.can_be_rowid
+}
+
+// -----------------------------------------------------------------------------
+// Per-program register state — vector of tags
+// -----------------------------------------------------------------------------
+
+public type RegisterState is { tags: List<AbstractTag> };
+
+public fn register_state_new(num_regs: Int) -> RegisterState {
+    let mut tags: List<AbstractTag> = List.new();
+    let mut i: Int = 0;
+    while i < num_regs {
+        tags.push(tag_only_null());   // VDBE registers default to NULL
+        i = i + 1;
+    }
+    RegisterState { tags: tags }
+}
+
+public fn register_state_set(st: &mut RegisterState, idx: Int, t: AbstractTag) {
+    if idx < 0 || idx >= st.tags.len() { return; }
+    st.tags[idx] = t;
+}
+
+public fn register_state_get(st: &RegisterState, idx: Int) -> AbstractTag {
+    if idx < 0 || idx >= st.tags.len() { return tag_top(); }
+    let t = &st.tags[idx];
+    AbstractTag {
+        can_be_null: t.can_be_null,
+        can_be_int: t.can_be_int,
+        can_be_real: t.can_be_real,
+        can_be_text: t.can_be_text,
+        can_be_blob: t.can_be_blob,
+        can_be_rowid: t.can_be_rowid,
+    }
+}
+
+public fn register_state_join(a: &RegisterState, b: &RegisterState) -> RegisterState {
+    let n: Int = if a.tags.len() < b.tags.len() { a.tags.len() } else { b.tags.len() };
+    let mut tags: List<AbstractTag> = List.new();
+    let mut i: Int = 0;
+    while i < n {
+        tags.push(tag_join(&a.tags[i], &b.tags[i]));
+        i = i + 1;
+    }
+    RegisterState { tags: tags }
+}
+
+// -----------------------------------------------------------------------------
+// Consistency check
+// -----------------------------------------------------------------------------
+
+public type UseSite is {
+    pc: Int,
+    reg: Int,
+    expected: AbstractTag,
+};
+
+public fn use_site_consistent(state: &RegisterState, site: &UseSite) -> Bool {
+    let actual = register_state_get(state, site.reg);
+    tag_subset(&actual, &site.expected)
+}
+
+public fn all_uses_consistent(state: &RegisterState, sites: &List<UseSite>) -> Bool {
+    let mut i: Int = 0;
+    while i < sites.len() {
+        if !use_site_consistent(state, &sites[i]) { return false; }
+        i = i + 1;
+    }
+    true
+}

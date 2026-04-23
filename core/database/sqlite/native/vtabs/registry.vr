@@ -1,0 +1,171 @@
+// =============================================================================
+// vtabs/registry.vr — per-Connection virtual-table module registry
+// =============================================================================
+// Layer: 6
+// Spec: sqlite-native.md §16.5
+//
+// Carries the set of `name → factory` bindings registered with a
+// Connection. CREATE VIRTUAL TABLE foo USING module(...) looks up
+// `module` here, calls `factory.create(...)`, stores the resulting
+// schema in the SchemaCache, and links the cursor-open callback so
+// the L4 interpreter can stream rows on SELECT.
+//
+// We keep the registry data-only (no protocol-typed slots) — the
+// L6 layer attaches a closure-style dispatcher at runtime to bridge
+// generic protocols to dynamic dispatch.
+// =============================================================================
+
+module core.database.sqlite.native.vtabs.registry;
+
+mount core.*;
+mount base.{Text, Maybe, Result, Ok, Err};
+mount collections.List;
+mount core.database.sqlite.native.vtabs.protocol.{
+    VtabError, VtabUnsupported, VtabSchema,
+};
+
+// -----------------------------------------------------------------------------
+// VtabBinding — one registered virtual-table module
+// -----------------------------------------------------------------------------
+
+public type VtabBinding is {
+    /// SQL-visible module name (case-insensitive on lookup).
+    name: Text,
+    /// Constructor stub — passed CREATE-VIRTUAL-TABLE args, returns
+    /// a schema for the planner. Real instances carry a closure;
+    /// the data-only binding here uses a discriminator so the
+    /// dispatcher can fan out at runtime.
+    builtin_kind: Int,
+    /// True if the module supports DML (UPDATE/INSERT/DELETE).
+    is_writable: Bool,
+};
+
+// Built-in kind discriminators
+public const BUILTIN_DBSTAT: Int = 0;
+public const BUILTIN_GENERATE_SERIES: Int = 1;
+public const BUILTIN_PRAGMA_TABLE_INFO: Int = 2;
+public const BUILTIN_PRAGMA_INDEX_LIST: Int = 3;
+public const BUILTIN_PRAGMA_INDEX_INFO: Int = 4;
+public const BUILTIN_PRAGMA_FOREIGN_KEY_LIST: Int = 5;
+public const BUILTIN_JSON_EACH: Int = 6;
+public const BUILTIN_JSON_TREE: Int = 7;
+public const BUILTIN_USER_REGISTERED: Int = 100;
+
+// -----------------------------------------------------------------------------
+// VtabRegistry
+// -----------------------------------------------------------------------------
+
+public type VtabRegistry is {
+    bindings: List<VtabBinding>,
+};
+
+public fn registry_new() -> VtabRegistry {
+    VtabRegistry { bindings: List.new() }
+}
+
+/// Pre-populate the registry with the loom built-in modules.
+public fn registry_with_builtins() -> VtabRegistry {
+    let mut r = registry_new();
+    r.bindings.push(VtabBinding {
+        name: "dbstat".clone(),
+        builtin_kind: BUILTIN_DBSTAT,
+        is_writable: false,
+    });
+    r.bindings.push(VtabBinding {
+        name: "generate_series".clone(),
+        builtin_kind: BUILTIN_GENERATE_SERIES,
+        is_writable: false,
+    });
+    r.bindings.push(VtabBinding {
+        name: "pragma_table_info".clone(),
+        builtin_kind: BUILTIN_PRAGMA_TABLE_INFO,
+        is_writable: false,
+    });
+    r.bindings.push(VtabBinding {
+        name: "pragma_index_list".clone(),
+        builtin_kind: BUILTIN_PRAGMA_INDEX_LIST,
+        is_writable: false,
+    });
+    r.bindings.push(VtabBinding {
+        name: "pragma_index_info".clone(),
+        builtin_kind: BUILTIN_PRAGMA_INDEX_INFO,
+        is_writable: false,
+    });
+    r.bindings.push(VtabBinding {
+        name: "pragma_foreign_key_list".clone(),
+        builtin_kind: BUILTIN_PRAGMA_FOREIGN_KEY_LIST,
+        is_writable: false,
+    });
+    r.bindings.push(VtabBinding {
+        name: "json_each".clone(),
+        builtin_kind: BUILTIN_JSON_EACH,
+        is_writable: false,
+    });
+    r.bindings.push(VtabBinding {
+        name: "json_tree".clone(),
+        builtin_kind: BUILTIN_JSON_TREE,
+        is_writable: false,
+    });
+    r
+}
+
+implement VtabRegistry {
+    /// Register a user-supplied vtab module.
+    public fn register(&mut self, name: &Text, writable: Bool) -> Result<(), VtabError> {
+        if self.find(name).is_some() {
+            return Err(VtabUnsupported("vtab module already registered".clone()));
+        }
+        self.bindings.push(VtabBinding {
+            name: name.clone(),
+            builtin_kind: BUILTIN_USER_REGISTERED,
+            is_writable: writable,
+        });
+        Ok(())
+    }
+
+    /// Look up a vtab by SQL-visible name (case-insensitive).
+    public fn find(&self, name: &Text) -> Maybe<VtabBinding> {
+        let target = ascii_lower(name);
+        let mut i: Int = 0;
+        while i < self.bindings.len() {
+            let cur = ascii_lower(&self.bindings[i].name);
+            if cur == target {
+                return Some(VtabBinding {
+                    name: self.bindings[i].name.clone(),
+                    builtin_kind: self.bindings[i].builtin_kind,
+                    is_writable: self.bindings[i].is_writable,
+                });
+            }
+            i = i + 1;
+        }
+        None
+    }
+
+    /// Number of registered modules.
+    public fn count(&self) -> Int { self.bindings.len() }
+
+    /// List all registered module names.
+    public fn names(&self) -> List<Text> {
+        let mut out: List<Text> = List.new();
+        let mut i: Int = 0;
+        while i < self.bindings.len() {
+            out.push(self.bindings[i].name.clone());
+            i = i + 1;
+        }
+        out
+    }
+}
+
+fn ascii_lower(s: &Text) -> Text {
+    let bs = s.as_bytes();
+    let mut out = Text.new();
+    let mut i: Int = 0;
+    while i < bs.len() {
+        let b: Byte = bs[i];
+        let lo: Byte =
+            if b >= (65 as Byte) && b <= (90 as Byte) { b + (32 as Byte) } else { b };
+        out.push_byte(lo);
+        i = i + 1;
+    }
+    out
+}

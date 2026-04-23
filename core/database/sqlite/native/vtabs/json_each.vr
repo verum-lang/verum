@@ -1,0 +1,330 @@
+// =============================================================================
+// vtabs/json_each.vr — json_each() / json_tree() table-valued functions
+// =============================================================================
+// Layer: 6
+// Spec: sqlite-native.md §15.4 / §16.4
+//
+// SELECT key, value FROM json_each('[10,20,30]');
+//   → (0, 10), (1, 20), (2, 30)
+//
+// SELECT key, value FROM json_each('{"a": 1, "b": 2}');
+//   → ("a", 1), ("b", 2)
+//
+// `json_each` walks the immediate children of the input;
+// `json_tree` recursively visits every node.
+//
+// Schema (matches SQLite):
+//   key   — element key (TEXT for objects, INTEGER for arrays, NULL for root)
+//   value — element value (any affinity)
+//   type  — "null"/"true"/"false"/"integer"/"real"/"text"/"array"/"object"
+//   atom  — non-null only for scalar leaves
+//   id    — internal sequential id of the node
+//   parent— parent's id (NULL at root)
+//   fullkey — '$' / '$.x' / '$[0]' path text
+//   path    — parent path
+// =============================================================================
+
+module core.database.sqlite.native.vtabs.json_each;
+
+// NOTE: do NOT `mount core.*` here. It pulls in
+// `core.encoding.json::JsonValue`, which collides with the local
+// `builtins.json_fns::JsonValue` and the variant-constructor lookup
+// resolves to the wrong variant set (see
+// memory/feedback_explicit_mount_glob_shadow.md). Use targeted
+// mounts instead.
+mount base.{Text, Maybe, Result, Ok, Err};
+mount collections.List;
+mount base.{Bool, Int, Int64, Float64, Byte};
+mount base.assert;
+mount core.database.sqlite.native.l4_vdbe.register.{
+    Register, RNull, RInt, RReal, RText,
+};
+mount core.database.sqlite.native.vtabs.protocol.{
+    VtabError, VtabConstraint, VtabSchema, VtabColumn,
+};
+mount core.database.sqlite.native.builtins.json_fns.{
+    JsonValue, JNull, JBool, JNumber, JString, JArray, JObject, JsonField,
+    parse_json, serialise,
+};
+
+// -----------------------------------------------------------------------------
+// Schema
+// -----------------------------------------------------------------------------
+
+public fn schema() -> VtabSchema {
+    let mut cols: List<VtabColumn> = List.new();
+    cols.push(VtabColumn { name: "key".clone(),     affinity: "".clone(),       is_hidden: false });
+    cols.push(VtabColumn { name: "value".clone(),   affinity: "".clone(),       is_hidden: false });
+    cols.push(VtabColumn { name: "type".clone(),    affinity: "TEXT".clone(),   is_hidden: false });
+    cols.push(VtabColumn { name: "atom".clone(),    affinity: "".clone(),       is_hidden: false });
+    cols.push(VtabColumn { name: "id".clone(),      affinity: "INTEGER".clone(),is_hidden: false });
+    cols.push(VtabColumn { name: "parent".clone(),  affinity: "INTEGER".clone(),is_hidden: false });
+    cols.push(VtabColumn { name: "fullkey".clone(), affinity: "TEXT".clone(),   is_hidden: false });
+    cols.push(VtabColumn { name: "path".clone(),    affinity: "TEXT".clone(),   is_hidden: false });
+    cols.push(VtabColumn { name: "json".clone(),    affinity: "".clone(),       is_hidden: true });
+    cols.push(VtabColumn { name: "root".clone(),    affinity: "".clone(),       is_hidden: true });
+    VtabSchema {
+        create_sql: "CREATE TABLE json_each(key, value, type, atom, id, parent, fullkey, path, json hidden, root hidden)".clone(),
+        columns: cols,
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Cursor — flattened row list built up-front; matches SQLite's behaviour
+// -----------------------------------------------------------------------------
+
+public type EachRow is {
+    key: Register,
+    value: Register,
+    type_name: Text,
+    atom: Register,
+    id: Int64,
+    parent: Maybe<Int64>,
+    fullkey: Text,
+    path: Text,
+};
+
+public type EachCursor is {
+    rows: List<EachRow>,
+    pos: Int,
+    recursive: Bool,
+};
+
+public fn cursor_new(recursive: Bool) -> EachCursor {
+    EachCursor { rows: List.new(), pos: 0, recursive: recursive }
+}
+
+implement EachCursor {
+    public fn filter(
+        &mut self,
+        _index_num: Int,
+        _index_str: &Text,
+        args: &List<Register>,
+    ) -> Result<(), VtabError> {
+        if args.len() == 0 {
+            return Err(VtabConstraint("json_each requires JSON arg".clone()));
+        }
+        let json_text: Text = match &args[0] {
+            RText(s) => s.clone(),
+            _        => { return Err(VtabConstraint("json must be TEXT".clone())); }
+        };
+        let root = match parse_json(&json_text) {
+            Some(v) => v,
+            None    => { return Err(VtabConstraint("invalid JSON".clone())); }
+        };
+        self.rows = List.new();
+        self.pos = 0;
+        let mut next_id: Int64 = 0 as Int64;
+        if self.recursive {
+            walk_recursive(&root, &"$".clone(), None, &mut self.rows, &mut next_id);
+        } else {
+            walk_immediate(&root, &"$".clone(), &mut self.rows, &mut next_id);
+        }
+        Ok(())
+    }
+
+    public fn next_row(&mut self) -> Result<(), VtabError> {
+        self.pos = self.pos + 1;
+        Ok(())
+    }
+
+    public fn eof(&self) -> Bool { self.pos >= self.rows.len() }
+
+    public fn column(&self, idx: Int) -> Register {
+        if self.eof() { return RNull; }
+        let r = &self.rows[self.pos];
+        match idx {
+            0 => clone_register(&r.key),
+            1 => clone_register(&r.value),
+            2 => RText(r.type_name.clone()),
+            3 => clone_register(&r.atom),
+            4 => RInt(r.id),
+            5 => match r.parent {
+                Some(p) => RInt(p),
+                None    => RNull,
+            },
+            6 => RText(r.fullkey.clone()),
+            7 => RText(r.path.clone()),
+            _ => RNull,
+        }
+    }
+
+    public fn rowid(&self) -> Int64 {
+        if self.eof() { 0 as Int64 } else { self.rows[self.pos].id }
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Walkers
+// -----------------------------------------------------------------------------
+
+fn walk_immediate(root: &JsonValue, base_path: &Text, out: &mut List<EachRow>, next_id: &mut Int64) {
+    match root {
+        JArray(items) => {
+            let mut i: Int = 0;
+            while i < items.len() {
+                let id = *next_id;
+                *next_id = *next_id + (1 as Int64);
+                let path_str = format_index(base_path, i);
+                out.push(EachRow {
+                    key: RInt(i as Int64),
+                    value: json_to_value_register(&items[i]),
+                    type_name: type_name(&items[i]),
+                    atom: json_to_atom(&items[i]),
+                    id: id,
+                    parent: None,
+                    fullkey: path_str.clone(),
+                    path: base_path.clone(),
+                });
+                i = i + 1;
+            }
+        }
+        JObject(fields) => {
+            let mut i: Int = 0;
+            while i < fields.len() {
+                let id = *next_id;
+                *next_id = *next_id + (1 as Int64);
+                let path_str = format_dot(base_path, &fields[i].key);
+                out.push(EachRow {
+                    key: RText(fields[i].key.clone()),
+                    value: json_to_value_register(&fields[i].value),
+                    type_name: type_name(&fields[i].value),
+                    atom: json_to_atom(&fields[i].value),
+                    id: id,
+                    parent: None,
+                    fullkey: path_str.clone(),
+                    path: base_path.clone(),
+                });
+                i = i + 1;
+            }
+        }
+        // Scalars become a single root row in json_each semantics.
+        _ => {
+            let id = *next_id;
+            *next_id = *next_id + (1 as Int64);
+            out.push(EachRow {
+                key: RNull,
+                value: json_to_value_register(root),
+                type_name: type_name(root),
+                atom: json_to_atom(root),
+                id: id,
+                parent: None,
+                fullkey: base_path.clone(),
+                path: base_path.clone(),
+            });
+        }
+    }
+}
+
+fn walk_recursive(node: &JsonValue, path: &Text, parent: Maybe<Int64>, out: &mut List<EachRow>, next_id: &mut Int64) {
+    let id = *next_id;
+    *next_id = *next_id + (1 as Int64);
+    let key_reg: Register = RNull;
+    out.push(EachRow {
+        key: key_reg,
+        value: json_to_value_register(node),
+        type_name: type_name(node),
+        atom: json_to_atom(node),
+        id: id,
+        parent: parent,
+        fullkey: path.clone(),
+        path: parent_path(path),
+    });
+    match node {
+        JArray(items) => {
+            let mut i: Int = 0;
+            while i < items.len() {
+                walk_recursive(&items[i], &format_index(path, i), Some(id), out, next_id);
+                i = i + 1;
+            }
+        }
+        JObject(fields) => {
+            let mut i: Int = 0;
+            while i < fields.len() {
+                walk_recursive(&fields[i].value, &format_dot(path, &fields[i].key), Some(id), out, next_id);
+                i = i + 1;
+            }
+        }
+        _ => {}
+    }
+}
+
+fn parent_path(p: &Text) -> Text {
+    let bs = p.as_bytes();
+    let mut i: Int = bs.len() - 1;
+    while i > 0 && bs[i] != (46 as Byte) && bs[i] != (91 as Byte) { i = i - 1; }
+    if i <= 0 { return "$".clone(); }
+    let mut out = Text.new();
+    let mut k: Int = 0;
+    while k < i { out.push_byte(bs[k]); k = k + 1; }
+    out
+}
+
+fn format_index(base: &Text, idx: Int) -> Text {
+    let mut out = base.clone();
+    out.push_byte(91 as Byte);  // [
+    if idx == 0 { out.push_byte(48 as Byte); }
+    else {
+        let mut digits: List<Byte> = List.new();
+        let mut x = idx;
+        while x > 0 {
+            digits.push(((x % 10) + 48) as Byte);
+            x = x / 10;
+        }
+        let mut k: Int = digits.len() - 1;
+        while k >= 0 { out.push_byte(digits[k]); k = k - 1; }
+    }
+    out.push_byte(93 as Byte);  // ]
+    out
+}
+
+fn format_dot(base: &Text, key: &Text) -> Text {
+    let mut out = base.clone();
+    out.push_byte(46 as Byte);  // .
+    let kb = key.as_bytes();
+    let mut k: Int = 0;
+    while k < kb.len() { out.push_byte(kb[k]); k = k + 1; }
+    out
+}
+
+fn type_name(v: &JsonValue) -> Text {
+    match v {
+        JNull       => "null".clone(),
+        JBool(b)    => { if b { "true".clone() } else { "false".clone() } }
+        JNumber(_)  => "real".clone(),
+        JString(_)  => "text".clone(),
+        JArray(_)   => "array".clone(),
+        JObject(_)  => "object".clone(),
+    }
+}
+
+fn json_to_value_register(v: &JsonValue) -> Register {
+    match v {
+        JNull      => RNull,
+        JBool(b)   => RInt(if b { 1 as Int64 } else { 0 as Int64 }),
+        JNumber(x) => {
+            let i = x as Int64;
+            if (i as Float64) == x { RInt(i) } else { RReal(x) }
+        }
+        JString(s) => RText(s.clone()),
+        JArray(_)  => RText(serialise(v)),
+        JObject(_) => RText(serialise(v)),
+    }
+}
+
+fn json_to_atom(v: &JsonValue) -> Register {
+    match v {
+        JArray(_) | JObject(_) => RNull,
+        scalar                 => json_to_value_register(scalar),
+    }
+}
+
+fn clone_register(r: &Register) -> Register {
+    match r {
+        RNull     => RNull,
+        RInt(x)   => RInt(x),
+        RReal(x)  => RReal(x),
+        RText(s)  => RText(s.clone()),
+        _         => RNull,
+    }
+}
