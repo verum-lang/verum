@@ -518,6 +518,15 @@ enum Commands {
         compare_modes: bool,
         #[clap(long, default_value = "z3")]
         solver: Text,
+        /// Preferred backend for exporting SMT proof traces when the
+        /// `Certified` strategy races a portfolio. CVC5's ALETHE proof
+        /// format is more stable than Z3's native `(proof …)` format
+        /// across releases, so the default is `cvc5` — matches the
+        /// recommendation in `docs/verification/proof-export.md §7`.
+        /// Only affects proof export; does not change which solver
+        /// closes an obligation.
+        #[clap(long, value_name = "BACKEND", default_value = "cvc5")]
+        smt_proof_preference: Text,
         // Default 120s: generous enough for induction and coinduction
         // proofs on realistic programs; too-short default (30s) was
         // causing spurious timeouts on legitimate verifications.
@@ -1350,6 +1359,7 @@ fn run_command(cli: Cli) -> Result<()> {
             show_cost,
             compare_modes,
             solver,
+            smt_proof_preference,
             timeout,
             cache,
             interactive,
@@ -1358,6 +1368,32 @@ fn run_command(cli: Cli) -> Result<()> {
             // `--export` implies `--profile` — you can't dump a profile you
             // didn't collect. Normalise here so downstream sees a single flag.
             let profile = profile || export.is_some();
+
+            // Validate --smt-proof-preference (cvc5 | z3). Down-stream
+            // passes the value to the Certified strategy's export path;
+            // when unrecognised, fail fast rather than silently picking
+            // an arbitrary default.
+            match smt_proof_preference.as_str() {
+                "cvc5" | "z3" => {}
+                other => {
+                    return Err(CliError::InvalidArgument(
+                        format!(
+                            "--smt-proof-preference must be 'cvc5' or 'z3', got '{}'",
+                            other
+                        )
+                        .into(),
+                    ));
+                }
+            }
+            // The preference flag is consumed by the Certified-strategy
+            // export path, not the solver selection path. For now,
+            // record it in telemetry; the export wiring (task #65)
+            // will read it from the session config when it lands.
+            tracing::debug!(
+                "smt_proof_preference = {}",
+                smt_proof_preference.as_str()
+            );
+            let _ = smt_proof_preference;
 
             let budget_duration = match budget.as_deref() {
                 None => None,
