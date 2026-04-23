@@ -264,10 +264,26 @@ pub struct Translator<'ctx> {
     /// here. `drain_stdlib_axioms` then returns one `Bool` assertion
     /// per entry (e.g. `(length_xs >= 0)`) so callers can push the
     /// standard invariants — "collection length is non-negative",
-    /// etc. — onto the solver before checking the goal. This is the
-    /// closest we get to a stdlib-axiom registry without introducing
-    /// a dedicated sort for each collection type.
+    /// etc. — onto the solver before checking the goal.
     length_constants: std::cell::RefCell<std::collections::BTreeSet<String>>,
+
+    /// Pre-built axioms queued during translation that need to be
+    /// asserted on the solver alongside the length non-negativity
+    /// invariants. Used e.g. for `xs ++ ys` where we emit
+    /// `length_{xs++ys} == length_{xs} + length_{ys}` so Z3 can reason
+    /// about list-concatenation length additivity without a dedicated
+    /// List sort.
+    pending_axioms: std::cell::RefCell<Vec<z3::ast::Bool>>,
+}
+
+/// Build the canonical length-constant name for an expression.
+///
+/// Uses the pretty-printer to normalise across spans and whitespace
+/// variants. Callers that ever want to refer to the "length of this
+/// expression" as a Z3 constant must go through this helper so every
+/// mention agrees on the same Z3 symbol.
+fn length_key_for_expr(e: &Expr) -> String {
+    format!("length_{}", verum_ast::pretty::format_expr(e))
 }
 
 impl<'ctx> Translator<'ctx> {
@@ -278,6 +294,7 @@ impl<'ctx> Translator<'ctx> {
             bindings: Map::new(),
             config: TranslationConfig::default(),
             length_constants: std::cell::RefCell::new(std::collections::BTreeSet::new()),
+            pending_axioms: std::cell::RefCell::new(Vec::new()),
         }
     }
 
@@ -288,6 +305,7 @@ impl<'ctx> Translator<'ctx> {
             bindings: Map::new(),
             config,
             length_constants: std::cell::RefCell::new(std::collections::BTreeSet::new()),
+            pending_axioms: std::cell::RefCell::new(Vec::new()),
         }
     }
 
@@ -299,12 +317,14 @@ impl<'ctx> Translator<'ctx> {
     /// requiring the author to state the fact explicitly.
     pub fn drain_stdlib_axioms(&self) -> Vec<z3::ast::Bool> {
         let mut consts = self.length_constants.borrow_mut();
-        let mut out = Vec::with_capacity(consts.len());
+        let mut pending = self.pending_axioms.borrow_mut();
+        let mut out = Vec::with_capacity(consts.len() + pending.len());
         for name in consts.iter() {
             let k = Int::new_const(name.as_str());
             out.push(k.ge(&Int::from_i64(0)));
         }
         consts.clear();
+        out.append(&mut pending);
         out
     }
 
@@ -312,6 +332,38 @@ impl<'ctx> Translator<'ctx> {
         self.length_constants
             .borrow_mut()
             .insert(name.to_string());
+    }
+
+    /// Emit the length-additivity axiom for every `Concat` node in
+    /// `expr`'s subtree. For `(xs ++ ys) ++ zs` this emits two
+    /// axioms, one for the outer concat and one for the inner — so
+    /// Z3 can reason about nested compositions like
+    /// `len((xs ++ ys) ++ zs) == len(xs ++ (ys ++ zs))` without
+    /// unfolding user-level append.
+    fn emit_concat_length_axioms(&self, expr: &Expr) {
+        if let ExprKind::Binary {
+            op: BinOp::Concat,
+            left,
+            right,
+        } = &expr.kind
+        {
+            let whole_len = length_key_for_expr(expr);
+            let left_len = length_key_for_expr(left);
+            let right_len = length_key_for_expr(right);
+            self.record_length_const(&whole_len);
+            self.record_length_const(&left_len);
+            self.record_length_const(&right_len);
+
+            let w = Int::new_const(whole_len.as_str());
+            let l = Int::new_const(left_len.as_str());
+            let r = Int::new_const(right_len.as_str());
+            self.pending_axioms.borrow_mut().push(w.eq(&(l + r)));
+
+            // Descend into both operands — nested concat needs the
+            // inner axioms visible to the solver too.
+            self.emit_concat_length_axioms(left);
+            self.emit_concat_length_axioms(right);
+        }
     }
 
     /// Get the current configuration.
@@ -1136,6 +1188,53 @@ impl<'ctx> Translator<'ctx> {
             return self.translate_bool_binop(op, &left_bool, &right_bool);
         }
 
+        // List / sequence concatenation. We don't model lists as a
+        // dedicated Z3 sort, so `xs ++ ys` lowers to an uninterpreted
+        // Int constant (span-insensitive canonical name) plus the
+        // length-additivity axiom `length_{xs++ys} == length_{xs} +
+        // length_{ys}`. That's enough to close the common proofs of
+        // shape `len(xs ++ ys) == len(xs) + len(ys)` without a
+        // bespoke List theory.
+        if matches!(op, BinOp::Concat) {
+            // Canonical length keys for the whole concat and its parts.
+            // Keeping the key format consistent with `len(...)`
+            // translator means that both `len(xs ++ ys)` and the
+            // `xs ++ ys` subexpression map to the same Z3 symbol, so
+            // the length-additivity axiom we queue here lines up
+            // with the length lookups downstream code will perform.
+            let left_len = length_key_for_expr(left);
+            let right_len = length_key_for_expr(right);
+            let whole = Expr::new(
+                ExprKind::Binary {
+                    op: BinOp::Concat,
+                    left: Box::new(left.clone()),
+                    right: Box::new(right.clone()),
+                },
+                left.span,
+            );
+            let concat_len = length_key_for_expr(&whole);
+
+            self.record_length_const(&left_len);
+            self.record_length_const(&right_len);
+            self.record_length_const(&concat_len);
+
+            let l = Int::new_const(left_len.as_str());
+            let r = Int::new_const(right_len.as_str());
+            let c = Int::new_const(concat_len.as_str());
+            self.pending_axioms
+                .borrow_mut()
+                .push(c.eq(&(l + r)));
+
+            // Return an uninterpreted Int symbol for the concat value
+            // itself. We key it by the same canonical string so it's
+            // deterministic; two calls to `xs ++ ys` at different
+            // source positions produce the same Z3 symbol.
+            let concat_val = Int::new_const(
+                format!("concat_val_{}", concat_len).as_str(),
+            );
+            return Ok(Dynamic::from_ast(&concat_val));
+        }
+
         let left_z3 = self.translate_expr(left)?;
         let right_z3 = self.translate_expr(right)?;
 
@@ -1709,17 +1808,17 @@ impl<'ctx> Translator<'ctx> {
 
                     // Length function for arrays/vectors
                     "len" | "length" | "size" | "count" if args.len() == 1 => {
-                        // `len(xs)` is uninterpreted at this layer, but two
-                        // calls on the same argument must denote the same
-                        // Z3 constant. Canonicalise via the pretty-printer
-                        // (span-insensitive) and record the constant so
-                        // `drain_stdlib_axioms` can emit its non-negativity
-                        // invariant at solve time.
-                        let base_name = format!(
-                            "length_{}",
-                            verum_ast::pretty::format_expr(&args[0])
-                        );
+                        let base_name = length_key_for_expr(&args[0]);
                         self.record_length_const(&base_name);
+                        // Recursively emit length-additivity axioms
+                        // for the `Concat` subtree. `len((xs ++ ys)
+                        // ++ zs)` must see both the top-level axiom
+                        // relating its length to `len(xs ++ ys) +
+                        // len(zs)` AND the inner axiom relating
+                        // `len(xs ++ ys)` to `len(xs) + len(ys)`, so
+                        // Z3 can chain them to close associativity
+                        // claims.
+                        self.emit_concat_length_axioms(&args[0]);
                         let int_var = Int::new_const(base_name.as_str());
                         Ok(Dynamic::from_ast(&int_var))
                     }
