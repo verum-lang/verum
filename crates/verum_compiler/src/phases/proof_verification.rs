@@ -721,6 +721,24 @@ fn verify_induction(
     let mut steps = List::new();
     let step_start = Instant::now();
 
+    // Auto-first: if the SMT solver can close the claim outright
+    // (e.g. `n * 2 >= 0` given `n >= 0`) there's no need to run the
+    // full case-split machinery. Many textbook induction-shaped
+    // goals in L3 specs are actually decidable arithmetic; the
+    // induction block serves as exposition of *why* the claim holds,
+    // not as the only way to check it. Same pattern as `by cases`.
+    if let Ok(auto_sub) = engine.execute_tactic(&ProofTactic::Auto, goal) {
+        if auto_sub.is_empty() {
+            let label = if strong { "strong induction" } else { "induction" };
+            steps.push(VerifiedStep {
+                description: Text::from(format!("{label} (goal closed by auto)")),
+                tactic_used: Text::from(format!("{label}→auto")),
+                duration: step_start.elapsed(),
+            });
+            return Ok(steps);
+        }
+    }
+
     // Determine the variable name (auto-detect if None)
     let var_name: Text = match on {
         Maybe::Some(ident) => ident.name.clone(),
