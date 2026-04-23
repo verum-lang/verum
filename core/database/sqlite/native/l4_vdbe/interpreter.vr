@@ -778,6 +778,42 @@ public fn step(state: &mut VdbeState, program: &VdbeProgram) -> StepResult {
                         if eq { RNull } else { a }
                     }
                 }
+                10 => {
+                    // LIKE: arg0 target text, arg1 pattern.
+                    if n_args < 2 {
+                        RInt(0 as Int64)
+                    } else {
+                        let tv = state.regs.get(first_arg_reg);
+                        let pv = state.regs.get(first_arg_reg + 1);
+                        match tv {
+                            RText(ref t) => match pv {
+                                RText(ref p) => {
+                                    if like_match(t, p) { RInt(1 as Int64) } else { RInt(0 as Int64) }
+                                }
+                                _ => RInt(0 as Int64),
+                            },
+                            _ => RInt(0 as Int64),
+                        }
+                    }
+                }
+                11 => {
+                    // NOT LIKE — inverse of LIKE.
+                    if n_args < 2 {
+                        RInt(1 as Int64)
+                    } else {
+                        let tv = state.regs.get(first_arg_reg);
+                        let pv = state.regs.get(first_arg_reg + 1);
+                        match tv {
+                            RText(ref t) => match pv {
+                                RText(ref p) => {
+                                    if like_match(t, p) { RInt(0 as Int64) } else { RInt(1 as Int64) }
+                                }
+                                _ => RInt(1 as Int64),
+                            },
+                            _ => RInt(1 as Int64),
+                        }
+                    }
+                }
                 _ => RNull,
             };
             state.regs.set(dst, result);
@@ -910,6 +946,41 @@ fn text_to_bytes(s: &Text) -> List<Byte> {
 // -----------------------------------------------------------------------------
 // Scalar-function helpers
 // -----------------------------------------------------------------------------
+
+/// SQLite LIKE semantics — case-insensitive ASCII, '%' matches any
+/// sequence of zero or more chars, '_' matches any single char.
+/// Escape character support omitted in v1.
+fn like_match(target: &Text, pattern: &Text) -> Bool {
+    let t = ascii_fold_case(target, false);
+    let p = ascii_fold_case(pattern, false);
+    let tb = t.as_bytes();
+    let pb = p.as_bytes();
+    like_rec(tb, 0, pb, 0)
+}
+
+fn like_rec(tb: &List<Byte>, ti: Int, pb: &List<Byte>, pi: Int) -> Bool {
+    if pi >= pb.len() { return ti >= tb.len(); }
+    let pc = pb[pi];
+    if pc == (37 as Byte) {
+        // '%' — try matching rest of pattern against every suffix.
+        if pi + 1 >= pb.len() { return true; }
+        let mut i: Int = ti;
+        while i <= tb.len() {
+            if like_rec(tb, i, pb, pi + 1) { return true; }
+            i = i + 1;
+        }
+        return false;
+    }
+    if pc == (95 as Byte) {
+        // '_' — any single char.
+        if ti >= tb.len() { return false; }
+        return like_rec(tb, ti + 1, pb, pi + 1);
+    }
+    // Literal byte match.
+    if ti >= tb.len() { return false; }
+    if tb[ti] != pc { return false; }
+    like_rec(tb, ti + 1, pb, pi + 1)
+}
 
 fn ascii_fold_case(s: &Text, to_upper: Bool) -> Text {
     let mut out = Text.new();

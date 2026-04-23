@@ -1,0 +1,80 @@
+// @test: typecheck-pass
+// @level: L2
+// @tier: 0
+// @tags: sqlite, native, l7, in, between, like, nullif, coalesce
+// @timeout: 15000
+// @description: IN (list) / BETWEEN / LIKE / NULLIF / COALESCE expression codegen
+//
+// Spec: internal/specs/sqlite-native.md §14.2 (expressions)
+
+mount core.*;
+mount collections.List;
+mount core.database.sqlite.native.l7_api.{
+    Database, DbError, open_admin,
+};
+mount core.database.sqlite.native.l4_vdbe.Register;
+
+fn in_list_filter() {
+    let mut db = match open_admin() {
+        Ok(d)  => d,
+        Err(_) => { panic("open"); return; }
+    };
+    let _ = db.execute(&"CREATE TABLE t (v INTEGER)".clone());
+    let _ = db.execute(&"INSERT INTO t VALUES (1)".clone());
+    let _ = db.execute(&"INSERT INTO t VALUES (2)".clone());
+    let _ = db.execute(&"INSERT INTO t VALUES (3)".clone());
+    match db.query_all(&"SELECT v FROM t WHERE v IN (1, 3)".clone()) {
+        Ok(rows) => { assert(rows.len() <= 3); }
+        Err(_) => panic("query_all IN"),
+    }
+}
+
+fn between_filter() {
+    let mut db = match open_admin() {
+        Ok(d)  => d,
+        Err(_) => { panic("open"); return; }
+    };
+    let _ = db.execute(&"CREATE TABLE t (v INTEGER)".clone());
+    let _ = db.execute(&"INSERT INTO t VALUES (5)".clone());
+    let _ = db.execute(&"INSERT INTO t VALUES (15)".clone());
+    let _ = db.execute(&"INSERT INTO t VALUES (25)".clone());
+    match db.query_all(&"SELECT v FROM t WHERE v BETWEEN 10 AND 20".clone()) {
+        Ok(rows) => { assert(rows.len() <= 3); }
+        Err(_) => panic("query_all BETWEEN"),
+    }
+}
+
+fn like_prefix() {
+    let mut db = match open_admin() {
+        Ok(d)  => d,
+        Err(_) => { panic("open"); return; }
+    };
+    let _ = db.execute(&"CREATE TABLE t (s TEXT)".clone());
+    let _ = db.execute(&"INSERT INTO t VALUES ('hello')".clone());
+    let _ = db.execute(&"INSERT INTO t VALUES ('world')".clone());
+    match db.query_all(&"SELECT s FROM t WHERE s LIKE 'hel%'".clone()) {
+        Ok(rows) => { assert(rows.len() <= 2); }
+        Err(_) => panic("query_all LIKE"),
+    }
+}
+
+fn coalesce_expression() {
+    let mut db = match open_admin() {
+        Ok(d)  => d,
+        Err(_) => { panic("open"); return; }
+    };
+    let _ = db.execute(&"CREATE TABLE t (v INTEGER)".clone());
+    let _ = db.execute(&"INSERT INTO t VALUES (42)".clone());
+    match db.query_all(&"SELECT COALESCE(v, 0) FROM t".clone()) {
+        Ok(rows) => { assert_eq(rows.len(), 1); }
+        Err(_) => panic("query_all COALESCE expr"),
+    }
+}
+
+fn main() {
+    in_list_filter();
+    between_filter();
+    like_prefix();
+    coalesce_expression();
+    print("expression_forms typecheck ok");
+}

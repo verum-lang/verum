@@ -1990,6 +1990,37 @@ public fn emit_expr(st: &mut CgState, e: &Expr, dst: Int) -> Result<(), CodegenE
         EFunc(ref name, ref args, _) => emit_scalar_call(st, name, args, dst),
         ECase(ref scrut_opt, ref arms, ref else_opt) =>
             emit_case(st, scrut_opt, arms, else_opt, dst),
+        EIn(ref x, ref xs, neg) => emit_in_list(st, x, xs, neg, dst),
+        EBetween(ref x, ref lo, ref hi, neg) => emit_between(st, x, lo, hi, neg, dst),
+        ELike(ref x, ref pat, ref escape, neg) => emit_like(st, x, pat, escape, neg, dst),
+        ENullIf(ref a, ref b) => {
+            let ar = st.regs.alloc();
+            let br = st.regs.alloc();
+            match emit_expr(st, a, ar) {
+                Ok(_)  => {}, Err(e) => { return Err(e); }
+            }
+            match emit_expr(st, b, br) {
+                Ok(_)  => {}, Err(e) => { return Err(e); }
+            }
+            let _ = st.program.emit(ScalarFn(6, 2, ar, dst));
+            Ok(())
+        }
+        ECoalesce(ref xs) => {
+            if xs.len() == 0 {
+                let _ = st.program.emit(Null(dst, dst));
+                return Ok(());
+            }
+            let start = st.regs.alloc_n(xs.len());
+            let mut i: Int = 0;
+            while i < xs.len() {
+                match emit_expr(st, &xs[i], start + i) {
+                    Ok(_)  => {}, Err(e) => { return Err(e); }
+                }
+                i = i + 1;
+            }
+            let _ = st.program.emit(ScalarFn(4, xs.len(), start, dst));
+            Ok(())
+        }
         ECast(ref inner, ref target_ty) => {
             let src = st.regs.alloc();
             match emit_expr(st, inner, src) {
@@ -2088,6 +2119,109 @@ fn emit_case(
         st.program.replace(after_patches[p], Goto(after_end));
         p = p + 1;
     }
+    Ok(())
+}
+
+fn emit_in_list(
+    st: &mut CgState,
+    x: &Expr,
+    xs: &List<Expr>,
+    negated: Bool,
+    dst: Int,
+) -> Result<(), CodegenError> {
+    let x_reg = st.regs.alloc();
+    match emit_expr(st, x, x_reg) {
+        Ok(_)  => {}, Err(e) => { return Err(e); }
+    }
+    // Seed dst to "no match" (false for IN, true for NOT IN).
+    let seed = if negated { 1 } else { 0 };
+    let hit  = if negated { 0 } else { 1 };
+    let _ = st.program.emit(Integer(seed, dst));
+
+    let mut match_jumps: List<Int> = List.new();
+    let mut i: Int = 0;
+    while i < xs.len() {
+        let y_reg = st.regs.alloc();
+        match emit_expr(st, &xs[i], y_reg) {
+            Ok(_)  => {}, Err(e) => { return Err(e); }
+        }
+        let jp = st.program.emit(Eq(x_reg, y_reg, 0));
+        match_jumps.push(jp);
+        i = i + 1;
+    }
+    let goto_end_idx = st.program.emit(Goto(0));
+    let match_label = st.program.instruction_count();
+    let _ = st.program.emit(Integer(hit, dst));
+    let end_label = st.program.instruction_count();
+    // Patch every Eq to jump to match_label on equality.
+    let mut j: Int = 0;
+    while j < match_jumps.len() {
+        // Each Eq patch needs to reconstruct a/b regs. We stored them
+        // implicitly — re-walk by index; since each xs[i] emission used
+        // a fresh y_reg, we can't get them back here. Instead we bake
+        // jump target into the existing Eq by reading the opcode via
+        // get_opcode and re-emitting. Simpler: just replace with a
+        // re-emission — Eq's a/b are already stored in the program.
+        match st.program.get_opcode(match_jumps[j]) {
+            Some(ref op) => match op {
+                Eq(ra, rb, _) => {
+                    st.program.replace(match_jumps[j], Eq(ra, rb, match_label));
+                }
+                _ => {}
+            }
+            None => {}
+        }
+        j = j + 1;
+    }
+    st.program.replace(goto_end_idx, Goto(end_label));
+    Ok(())
+}
+
+fn emit_between(
+    st: &mut CgState,
+    x: &Expr,
+    lo: &Expr,
+    hi: &Expr,
+    negated: Bool,
+    dst: Int,
+) -> Result<(), CodegenError> {
+    let xr = st.regs.alloc();
+    let lr = st.regs.alloc();
+    let hr = st.regs.alloc();
+    match emit_expr(st, x, xr) { Ok(_) => {}, Err(e) => { return Err(e); } }
+    match emit_expr(st, lo, lr) { Ok(_) => {}, Err(e) => { return Err(e); } }
+    match emit_expr(st, hi, hr) { Ok(_) => {}, Err(e) => { return Err(e); } }
+    // dst = (x >= lo) AND (x <= hi); flip for NOT BETWEEN.
+    let false_v = if negated { 1 } else { 0 };
+    let true_v  = if negated { 0 } else { 1 };
+    let _ = st.program.emit(Integer(false_v, dst));
+    // If x < lo, skip.
+    let lt_patch = st.program.emit(Lt(xr, lr, 0));
+    // If x > hi, skip.
+    let gt_patch = st.program.emit(Gt(xr, hr, 0));
+    // In range: dst = true_v.
+    let _ = st.program.emit(Integer(true_v, dst));
+    let end_label = st.program.instruction_count();
+    st.program.replace(lt_patch, Lt(xr, lr, end_label));
+    st.program.replace(gt_patch, Gt(xr, hr, end_label));
+    Ok(())
+}
+
+fn emit_like(
+    st: &mut CgState,
+    x: &Expr,
+    pat: &Expr,
+    _escape: &Maybe<Heap<Expr>>,
+    negated: Bool,
+    dst: Int,
+) -> Result<(), CodegenError> {
+    let xr = st.regs.alloc();
+    let pr = st.regs.alloc();
+    match emit_expr(st, x, xr) { Ok(_) => {}, Err(e) => { return Err(e); } }
+    match emit_expr(st, pat, pr) { Ok(_) => {}, Err(e) => { return Err(e); } }
+    // Kind 10 = LIKE in ScalarFn dispatch (not yet wired — extend).
+    let n = if negated { 1 } else { 0 };
+    let _ = st.program.emit(ScalarFn(10 + n, 2, xr, dst));
     Ok(())
 }
 
