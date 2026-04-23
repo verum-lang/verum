@@ -1,0 +1,73 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: math, checked, overflow
+// @timeout: 15000
+// @description: core.math.checked surface — checked_* + saturating_* entry points
+
+mount core.*;
+mount core.math.checked.{
+    CheckedResult,
+    checked_add, checked_sub, checked_mul, checked_div, checked_neg, checked_abs,
+    checked_add_u, checked_sub_u, checked_mul_u, checked_div_u,
+    saturating_add, saturating_sub,
+};
+
+fn checked_signed_add() {
+    match checked_add(1 as Int64, 2 as Int64) {
+        CheckedResult.Ok(v) => { assert_eq(v, 3 as Int64); }
+        CheckedResult.Overflow => { panic("1+2 should not overflow"); }
+    }
+}
+
+fn checked_signed_mul() {
+    match checked_mul(3 as Int64, 4 as Int64) {
+        CheckedResult.Ok(v) => { assert_eq(v, 12 as Int64); }
+        CheckedResult.Overflow => { panic("3*4 should not overflow"); }
+    }
+}
+
+fn checked_div_zero_overflows() {
+    match checked_div(10 as Int64, 0 as Int64) {
+        CheckedResult.Ok(_)     => { panic("division by zero must not succeed"); }
+        CheckedResult.Overflow  => {}
+    }
+}
+
+fn checked_neg_of_min_overflows() {
+    // -(Int64::MIN) overflows.
+    let min_i64: Int64 = -9223372036854775808 as Int64;
+    match checked_neg(min_i64) {
+        CheckedResult.Ok(_)     => { panic("negating MIN must overflow"); }
+        CheckedResult.Overflow  => {}
+    }
+}
+
+fn checked_unsigned_sub_underflow() {
+    // UInt64 can't go below 0.
+    match checked_sub_u(3 as UInt64, 5 as UInt64) {
+        CheckedResult.Ok(_)     => { panic("3u - 5u must underflow"); }
+        CheckedResult.Overflow  => {}
+    }
+}
+
+fn saturating_add_is_non_faulting() {
+    let sum = saturating_add(10 as Int64, 20 as Int64);
+    assert_eq(sum, 30 as Int64);
+}
+
+fn saturating_sub_is_non_faulting() {
+    let diff = saturating_sub(50 as Int64, 20 as Int64);
+    assert_eq(diff, 30 as Int64);
+}
+
+fn main() {
+    checked_signed_add();
+    checked_signed_mul();
+    checked_div_zero_overflows();
+    checked_neg_of_min_overflows();
+    checked_unsigned_sub_underflow();
+    saturating_add_is_non_faulting();
+    saturating_sub_is_non_faulting();
+    print("checked_arithmetic typecheck ok");
+}
