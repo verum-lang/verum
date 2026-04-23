@@ -224,6 +224,21 @@ fn emit_project(
         PnValues(_, _) => { return emit_plan(st, child); }
         _ => {}
     }
+    // Aggregate pipeline: every projection column is an aggregate call.
+    if all_aggregates(cols) {
+        match child {
+            PnTableScan(ref _t, cid, n_cols) => {
+                return emit_aggregate_scan(st, cid, n_cols, cols, false, &ELit(LNull));
+            }
+            PnFilter(ref gg, ref pred) => match gg {
+                PnTableScan(ref _t, cid, n_cols) => {
+                    return emit_aggregate_scan(st, cid, n_cols, cols, true, pred);
+                }
+                _ => {}
+            },
+            _ => {}
+        }
+    }
     // TableScan source: emit OpenRead + Rewind + body + Next loop.
     match child {
         PnTableScan(ref t, cid, n_cols) => {
@@ -368,6 +383,166 @@ fn emit_scan_with_filter_project(
     st.program.replace(rewind_idx, Rewind(cursor_id, after));
     emit_limit_finalize_patches(st, after);
     let _ = st.program.emit(Close(cursor_id));
+    Ok(())
+}
+
+// -----------------------------------------------------------------------------
+// Aggregates (COUNT / SUM / MIN / MAX)
+//
+// Only activated when EVERY projection column is an aggregate call;
+// mixed GROUP BY-style projections fall through to the non-aggregate
+// paths (pending task #68).
+//
+// Layout: one accumulator register per aggregate, seeded before the
+// scan. Per-row AggStep(kind, n_args, first_arg_reg, acc_reg). After
+// the scan, AggFinal + one ResultRow holding the accumulators.
+// -----------------------------------------------------------------------------
+
+fn ascii_lower(s: &Text) -> Text {
+    // Single-byte ASCII lowercase fold — sqlite function names are
+    // ASCII-only.
+    let mut out = Text.new();
+    let bs = s.as_bytes();
+    let mut i: Int = 0;
+    while i < bs.len() {
+        let b = bs[i];
+        let lower_b: Byte = if b >= (65 as Byte) && b <= (90 as Byte) {
+            (b + (32 as Byte))
+        } else {
+            b
+        };
+        out.push_byte(lower_b);
+        i = i + 1;
+    }
+    out
+}
+
+fn agg_kind_for_name(name: &Text) -> Int {
+    // 0 COUNT, 1 SUM, 2 MIN, 3 MAX, -1 if not a supported aggregate.
+    let n = ascii_lower(name);
+    if n == "count".clone() { return 0; }
+    if n == "sum".clone()   { return 1; }
+    if n == "total".clone() { return 1; }   // alias per SQLite docs
+    if n == "min".clone()   { return 2; }
+    if n == "max".clone()   { return 3; }
+    -1
+}
+
+fn is_aggregate_call(e: &Expr) -> Bool {
+    match e {
+        EFunc(ref name, _, _) => agg_kind_for_name(name) >= 0,
+        _ => false,
+    }
+}
+
+fn all_aggregates(cols: &List<PlanColumn>) -> Bool {
+    if cols.len() == 0 { return false; }
+    let mut i: Int = 0;
+    while i < cols.len() {
+        if !is_aggregate_call(&cols[i].expr) { return false; }
+        i = i + 1;
+    }
+    true
+}
+
+fn emit_aggregate_scan(
+    st: &mut CgState,
+    src_cid: Int,
+    src_n_cols: Int,
+    cols: &List<PlanColumn>,
+    has_filter: Bool,
+    filter_pred: &Expr,
+) -> Result<(), CodegenError> {
+    let n_proj = cols.len();
+
+    // Seed each accumulator. COUNT/SUM start at 0; MIN/MAX start NULL
+    // so the first non-NULL data point wins.
+    let acc_start = st.regs.alloc_n(n_proj);
+    let mut i: Int = 0;
+    while i < n_proj {
+        let kind = match cols[i].expr {
+            EFunc(ref name, _, _) => agg_kind_for_name(name),
+            _ => -1,
+        };
+        match kind {
+            0 => { let _ = st.program.emit(Integer(0, acc_start + i)); }      // COUNT
+            1 => { let _ = st.program.emit(Integer(0, acc_start + i)); }      // SUM → 0 (SQLite returns 0 for empty SUM)
+            2 => { let _ = st.program.emit(Null(acc_start + i, acc_start + i)); } // MIN
+            3 => { let _ = st.program.emit(Null(acc_start + i, acc_start + i)); } // MAX
+            _ => { let _ = st.program.emit(Null(acc_start + i, acc_start + i)); }
+        }
+        i = i + 1;
+    }
+
+    // Scan source.
+    if src_cid >= st.program.cursor_count() {
+        let _ = st.program.declare_cursor(CkTable, 0, src_n_cols);
+    }
+    let _ = st.program.emit(OpenRead(src_cid, 0, src_n_cols));
+    let rewind_idx = st.program.emit(Rewind(src_cid, 0));
+    let loop_top = st.program.instruction_count();
+
+    // WHERE predicate — skip the AggStep sequence when falsy.
+    let mut skip_patch: Int = -1;
+    let mut skip_pred_reg: Int = -1;
+    if has_filter {
+        let pr = st.regs.alloc();
+        match emit_expr(st, filter_pred, pr) {
+            Ok(_)  => {}, Err(e) => { return Err(e); }
+        }
+        skip_patch = st.program.emit(IfNot(pr, 0));
+        skip_pred_reg = pr;
+    }
+
+    // Per-row AggStep.
+    let mut k: Int = 0;
+    while k < n_proj {
+        let (kind, n_args, arg_reg) = match cols[k].expr {
+            EFunc(ref name, ref args, _) => {
+                let kind_v = agg_kind_for_name(name);
+                // COUNT(*) — no args; evaluated-arg aggregates pre-
+                // evaluate the first arg into a fresh register.
+                if args.len() == 0 {
+                    (kind_v, 0, -1)
+                } else {
+                    let r = st.regs.alloc();
+                    match emit_expr(st, &args[0], r) {
+                        Ok(_)  => {}, Err(e) => { return Err(e); }
+                    }
+                    (kind_v, args.len(), r)
+                }
+            }
+            _ => (-1, 0, -1),
+        };
+        if kind < 0 { return Err(unsupported("unknown aggregate in pipeline".clone())); }
+        let first = if arg_reg < 0 { 0 } else { arg_reg };
+        let _ = st.program.emit(AggStep(kind, n_args, first, acc_start + k));
+        k = k + 1;
+    }
+
+    if skip_patch >= 0 {
+        let skip_target = st.program.instruction_count();
+        st.program.replace(skip_patch, IfNot(skip_pred_reg, skip_target));
+    }
+
+    let _ = st.program.emit(Next(src_cid, loop_top));
+    let after_loop = st.program.instruction_count();
+    st.program.replace(rewind_idx, Rewind(src_cid, after_loop));
+    let _ = st.program.emit(Close(src_cid));
+
+    // Finalize.
+    let mut f: Int = 0;
+    while f < n_proj {
+        let kind = match cols[f].expr {
+            EFunc(ref name, _, _) => agg_kind_for_name(name),
+            _ => -1,
+        };
+        let _ = st.program.emit(AggFinal(kind, acc_start + f));
+        f = f + 1;
+    }
+
+    // Emit exactly one result row.
+    let _ = st.program.emit(ResultRow(acc_start, n_proj));
     Ok(())
 }
 

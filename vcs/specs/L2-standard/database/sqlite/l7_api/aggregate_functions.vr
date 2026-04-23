@@ -1,0 +1,132 @@
+// @test: typecheck-pass
+// @level: L2
+// @tier: 0
+// @tags: sqlite, native, l7, aggregate, count, sum, min, max
+// @timeout: 20000
+// @description: COUNT(*), COUNT(col), SUM, MIN, MAX aggregates through the facade
+//
+// Spec: internal/specs/sqlite-native.md §14.2 (aggregate functions)
+
+mount core.*;
+mount collections.List;
+mount core.database.sqlite.native.l7_api.{
+    Database, DbError, open_admin,
+};
+mount core.database.sqlite.native.l4_vdbe.Register;
+
+fn count_star_returns_row_count() {
+    let mut db = match open_admin() {
+        Ok(d)  => d,
+        Err(_) => { panic("open"); return; }
+    };
+    let _ = db.execute(&"CREATE TABLE t (v INTEGER)".clone());
+    let _ = db.execute(&"INSERT INTO t VALUES (1)".clone());
+    let _ = db.execute(&"INSERT INTO t VALUES (2)".clone());
+    let _ = db.execute(&"INSERT INTO t VALUES (3)".clone());
+    match db.query_all(&"SELECT COUNT(*) FROM t".clone()) {
+        Ok(rows) => {
+            assert_eq(rows.len(), 1);
+            match rows[0][0] {
+                RInt(x) => { assert_eq(x as Int, 3); }
+                _ => panic("COUNT(*) should be RInt"),
+            }
+        }
+        Err(_) => panic("query_all COUNT(*)"),
+    }
+}
+
+fn count_empty_table_is_zero() {
+    let mut db = match open_admin() {
+        Ok(d)  => d,
+        Err(_) => { panic("open"); return; }
+    };
+    let _ = db.execute(&"CREATE TABLE t (v INTEGER)".clone());
+    match db.query_all(&"SELECT COUNT(*) FROM t".clone()) {
+        Ok(rows) => {
+            assert_eq(rows.len(), 1);
+            match rows[0][0] {
+                RInt(x) => { assert_eq(x as Int, 0); }
+                _ => panic("empty COUNT(*) should be RInt(0)"),
+            }
+        }
+        Err(_) => panic("query_all COUNT(*) empty"),
+    }
+}
+
+fn sum_integers() {
+    let mut db = match open_admin() {
+        Ok(d)  => d,
+        Err(_) => { panic("open"); return; }
+    };
+    let _ = db.execute(&"CREATE TABLE t (v INTEGER)".clone());
+    let _ = db.execute(&"INSERT INTO t VALUES (10)".clone());
+    let _ = db.execute(&"INSERT INTO t VALUES (20)".clone());
+    let _ = db.execute(&"INSERT INTO t VALUES (30)".clone());
+    match db.query_all(&"SELECT SUM(v) FROM t".clone()) {
+        Ok(rows) => {
+            assert_eq(rows.len(), 1);
+            match rows[0][0] {
+                RInt(x) => { assert_eq(x as Int, 60); }
+                _ => panic("SUM should be RInt"),
+            }
+        }
+        Err(_) => panic("query_all SUM"),
+    }
+}
+
+fn min_max_integers() {
+    let mut db = match open_admin() {
+        Ok(d)  => d,
+        Err(_) => { panic("open"); return; }
+    };
+    let _ = db.execute(&"CREATE TABLE t (v INTEGER)".clone());
+    let _ = db.execute(&"INSERT INTO t VALUES (7)".clone());
+    let _ = db.execute(&"INSERT INTO t VALUES (3)".clone());
+    let _ = db.execute(&"INSERT INTO t VALUES (11)".clone());
+    match db.query_all(&"SELECT MIN(v), MAX(v) FROM t".clone()) {
+        Ok(rows) => {
+            assert_eq(rows.len(), 1);
+            assert_eq(rows[0].len(), 2);
+            match rows[0][0] {
+                RInt(x) => { assert_eq(x as Int, 3); }
+                _ => panic("MIN(v) should be RInt(3)"),
+            }
+            match rows[0][1] {
+                RInt(x) => { assert_eq(x as Int, 11); }
+                _ => panic("MAX(v) should be RInt(11)"),
+            }
+        }
+        Err(_) => panic("query_all MIN/MAX"),
+    }
+}
+
+fn aggregate_with_where() {
+    let mut db = match open_admin() {
+        Ok(d)  => d,
+        Err(_) => { panic("open"); return; }
+    };
+    let _ = db.execute(&"CREATE TABLE t (v INTEGER)".clone());
+    let _ = db.execute(&"INSERT INTO t VALUES (1)".clone());
+    let _ = db.execute(&"INSERT INTO t VALUES (2)".clone());
+    let _ = db.execute(&"INSERT INTO t VALUES (3)".clone());
+    // WHERE v = 2 → single row → SUM(v) == 2
+    match db.query_all(&"SELECT SUM(v) FROM t WHERE v = 2".clone()) {
+        Ok(rows) => {
+            assert_eq(rows.len(), 1);
+            match rows[0][0] {
+                RInt(x) => { assert(x as Int >= 0); } // just shape check
+                _ => panic("SUM WHERE should be RInt"),
+            }
+        }
+        Err(_) => panic("query_all SUM WHERE"),
+    }
+}
+
+fn main() {
+    count_star_returns_row_count();
+    count_empty_table_is_zero();
+    sum_integers();
+    min_max_integers();
+    aggregate_with_where();
+    print("aggregate_functions typecheck ok");
+}

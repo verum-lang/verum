@@ -524,6 +524,76 @@ public fn step(state: &mut VdbeState, program: &VdbeProgram) -> StepResult {
             Yield
         }
 
+        AggStep(agg_kind, n_args, first_arg_reg, acc_reg) => {
+            match agg_kind {
+                0 => {
+                    // COUNT. For COUNT(*), n_args = 0 → unconditional increment.
+                    // For COUNT(expr), skip if the arg is NULL.
+                    if n_args > 0 {
+                        match state.regs.get(first_arg_reg) {
+                            RNull => { state.pc = state.pc + 1; return Yield; }
+                            _     => {}
+                        }
+                    }
+                    let cur: Int64 = match state.regs.get(acc_reg) {
+                        RInt(v) => v,
+                        _       => (0 as Int64),
+                    };
+                    state.regs.set(acc_reg, RInt(cur + (1 as Int64)));
+                }
+                1 => {
+                    // SUM — NULL-skip; keep RReal if either side is real.
+                    let v = state.regs.get(first_arg_reg);
+                    let is_null = match v { RNull => true, _ => false };
+                    if !is_null {
+                        let cur = state.regs.get(acc_reg);
+                        let new_val = agg_add(&cur, &v);
+                        state.regs.set(acc_reg, new_val);
+                    }
+                }
+                2 => {
+                    // MIN — first non-null value wins, then min of subsequent.
+                    let v = state.regs.get(first_arg_reg);
+                    let is_null = match v { RNull => true, _ => false };
+                    if !is_null {
+                        let cur = state.regs.get(acc_reg);
+                        let cur_null = match cur { RNull => true, _ => false };
+                        if cur_null {
+                            state.regs.set(acc_reg, v);
+                        } else {
+                            let keep_cur = agg_less(&cur, &v);
+                            if !keep_cur { state.regs.set(acc_reg, v); }
+                        }
+                    }
+                }
+                3 => {
+                    // MAX — symmetric to MIN.
+                    let v = state.regs.get(first_arg_reg);
+                    let is_null = match v { RNull => true, _ => false };
+                    if !is_null {
+                        let cur = state.regs.get(acc_reg);
+                        let cur_null = match cur { RNull => true, _ => false };
+                        if cur_null {
+                            state.regs.set(acc_reg, v);
+                        } else {
+                            let keep_cur = agg_less(&v, &cur);
+                            if !keep_cur { state.regs.set(acc_reg, v); }
+                        }
+                    }
+                }
+                _ => {}
+            }
+            state.pc = state.pc + 1;
+            Yield
+        }
+
+        AggFinal(_agg_kind, _acc_reg) => {
+            // SQLite aggregates hold their final value in acc_reg already
+            // (COUNT/SUM/MIN/MAX). AVG would divide here. v1 is a no-op.
+            state.pc = state.pc + 1;
+            Yield
+        }
+
         Transaction(_) => { state.pc = state.pc + 1; Yield }
         Commit         => { state.pc = state.pc + 1; Yield }
         RollbackOp(_)  => { state.pc = state.pc + 1; Yield }
@@ -534,6 +604,70 @@ public fn step(state: &mut VdbeState, program: &VdbeProgram) -> StepResult {
             state.pc = state.pc + 1;
             Yield
         }
+    }
+}
+
+
+// -----------------------------------------------------------------------------
+// Aggregate helpers
+// -----------------------------------------------------------------------------
+
+/// Add two register values, preserving real-ness. NULLs are treated as
+/// 0 when the *other* side is non-null (matches SQLite's SUM behaviour
+/// for pre-initialized accumulators).
+fn agg_add(a: &Register, b: &Register) -> Register {
+    match a {
+        RNull => match b {
+            RNull => RNull,
+            _     => {
+                // a null, b real/int → return b's value (seed the sum).
+                match b {
+                    RInt(y)  => RInt(y),
+                    RReal(y) => RReal(y),
+                    _        => RNull,
+                }
+            }
+        },
+        RInt(x) => match b {
+            RNull    => RInt(x),
+            RInt(y)  => RInt(x + y),
+            RReal(y) => {
+                let xf: Float64 = (x as Float64);
+                RReal(xf + y)
+            }
+            _        => RInt(x),
+        },
+        RReal(x) => match b {
+            RNull    => RReal(x),
+            RInt(y)  => {
+                let yf: Float64 = (y as Float64);
+                RReal(x + yf)
+            }
+            RReal(y) => RReal(x + y),
+            _        => RReal(x),
+        },
+        _ => RNull,
+    }
+}
+
+/// Returns true when `a < b` for aggregate comparison purposes.
+fn agg_less(a: &Register, b: &Register) -> Bool {
+    match a {
+        RInt(x) => match b {
+            RInt(y)  => x < y,
+            RReal(y) => (x as Float64) < y,
+            _        => false,
+        },
+        RReal(x) => match b {
+            RInt(y)  => x < (y as Float64),
+            RReal(y) => x < y,
+            _        => false,
+        },
+        RText(ref xs) => match b {
+            RText(ref ys) => xs < ys,
+            _ => false,
+        },
+        _ => false,
     }
 }
 
