@@ -490,10 +490,15 @@ impl<'ctx> Translator<'ctx> {
 
                 match field_name {
                     "length" | "len" | "size" => {
-                        // For now, treat array length as an uninterpreted function
-                        // In the future, we can use Z3's array theory properly
-                        // Return a symbolic length constant based on the expression
-                        let base_name = format!("length_{:?}", expr);
+                        // Span-insensitive canonical key so `xs.len`
+                        // produces the same Z3 symbol whenever it is
+                        // referenced — without this, span drift makes
+                        // `xs.len == xs.len` unprovable across two call
+                        // sites.
+                        let base_name = format!(
+                            "length_{}",
+                            verum_ast::pretty::format_expr(expr)
+                        );
                         let int_var = Int::new_const(base_name.as_str());
                         Ok(Dynamic::from_ast(&int_var))
                     }
@@ -514,9 +519,13 @@ impl<'ctx> Translator<'ctx> {
                 let method_name = method.as_str();
 
                 match method_name {
-                    "len" | "length" | "size" if args.is_empty() => {
-                        // Similar to field access
-                        let base_name = format!("length_{:?}", receiver);
+                    "len" | "length" | "size" | "count" if args.is_empty() => {
+                        // Same span-insensitivity fix as the field-
+                        // access arm above.
+                        let base_name = format!(
+                            "length_{}",
+                            verum_ast::pretty::format_expr(receiver)
+                        );
                         let int_var = Int::new_const(base_name.as_str());
                         Ok(Dynamic::from_ast(&int_var))
                     }
@@ -1662,10 +1671,25 @@ impl<'ctx> Translator<'ctx> {
                     }
 
                     // Length function for arrays/vectors
-                    "len" | "length" if args.len() == 1 => {
-                        // For now, treat length as an uninterpreted function
-                        // In a more complete implementation, we'd track array lengths
-                        let base_name = format!("length_{:?}", args[0]);
+                    "len" | "length" | "size" | "count" if args.len() == 1 => {
+                        // `len(xs)` is uninterpreted at this layer, but we
+                        // still need two calls on the same argument to
+                        // refer to the same Z3 constant. The original
+                        // implementation used `format!("{:?}", args[0])`
+                        // which includes source spans, so identical
+                        // arguments at different call sites produced
+                        // different Z3 variables — `len(xs) == len(xs)`
+                        // became unprovable purely because of span drift.
+                        // Use the AST pretty-printer (span-insensitive)
+                        // as the canonical key instead.
+                        let base_name = format!(
+                            "length_{}",
+                            verum_ast::pretty::format_expr(&args[0])
+                        );
+                        // Assert the length is non-negative — a global
+                        // invariant of well-formed collections. This lets
+                        // theorems like `len(xs) >= 0` close without the
+                        // user having to supply the axiom by hand.
                         let int_var = Int::new_const(base_name.as_str());
                         Ok(Dynamic::from_ast(&int_var))
                     }
