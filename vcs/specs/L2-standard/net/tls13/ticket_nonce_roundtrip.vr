@@ -1,0 +1,83 @@
+// @test: unit
+// @tier: 0
+// @level: L2
+// @tags: tls13, resumption, ticket_nonce, rfc8446_4_6_1
+// @timeout: 5000
+// @expect: pass
+
+// Regression for RFC 8446 §4.6.1 ticket_nonce correctness.
+//
+// Before this fix:
+//   * ServerTicketPlaintext didn't carry ticket_nonce.
+//   * The issuer drew a fresh 16-byte nonce and sent it only in
+//     NewSessionTicket.ticket_nonce (to the client).
+//   * On the server side, resume_verify.vr derived the resumption
+//     PSK with an empty nonce slice — a placeholder commented as
+//     "/* ticket_nonce placeholder */".
+//   * The client, following RFC, derived PSK with the non-empty
+//     NST.ticket_nonce. Client and server PSKs disagreed. The
+//     binder verify step always failed against any conforming peer.
+//
+// After this fix: the nonce is stashed in the encrypted ticket
+// plaintext so the server recovers it at resumption, matching the
+// client's derivation.
+//
+// The bump to wire-format v2 in encode_plaintext/decode_plaintext
+// is backward-compatible with v1 tickets (still decodes, just with
+// empty ticket_nonce) so the rollout is phased.
+
+mount core.*;
+mount core.collections.List;
+mount core.net.tls13.cipher_suite.{CipherSuite};
+mount core.net.tls13.handshake.resumption.{
+    ServerTicketPlaintext, SessionTicketKey, TicketError,
+    issue_ticket, decrypt_ticket,
+};
+
+fn bytes_eq(a: &[Byte], b: &[Byte]) -> Bool {
+    if a.len() != b.len() { return false; }
+    let mut i: Int = 0;
+    while i < a.len() {
+        if a[i] != b[i] { return false; }
+        i = i + 1;
+    }
+    true
+}
+
+fn main() {
+    let stek = SessionTicketKey.generate(1_u64);
+    let rs_arr: [Byte; 32] = [0xAB_u8; 32];
+    let nonce_arr: [Byte; 16] = [
+        0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88,
+        0x99, 0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF, 0x00,
+    ];
+    let alpn_bytes: &[Byte] = b"h3";
+
+    let pt = ServerTicketPlaintext {
+        cipher_suite:        CipherSuite.TlsAes128GcmSha256,
+        resumption_secret:   List.from_slice(&rs_arr[..]),
+        ticket_nonce:        List.from_slice(&nonce_arr[..]),
+        max_early_data_size: 16384_u32,
+        issued_at_unix:      1_700_000_000_u64,
+        alpn:                List.from_slice(alpn_bytes),
+    };
+
+    let wire = match issue_ticket(&stek, &pt) {
+        Ok(w)  => w,
+        Err(_) => panic("issue_ticket failed"),
+    };
+    let recovered = match decrypt_ticket(&stek, wire.as_slice()) {
+        Ok(r)  => r,
+        Err(_) => panic("decrypt_ticket failed"),
+    };
+
+    // Core invariant: ticket_nonce round-trips byte-exact.
+    assert_eq(bytes_eq(recovered.ticket_nonce.as_slice(), &nonce_arr[..]), true);
+
+    // Other fields also survive.
+    assert_eq(bytes_eq(recovered.resumption_secret.as_slice(), &rs_arr[..]), true);
+    assert_eq(recovered.max_early_data_size, 16384_u32);
+    assert_eq(recovered.issued_at_unix, 1_700_000_000_u64);
+
+    print("RFC 8446 §4.6.1 ticket_nonce round-trip OK");
+}

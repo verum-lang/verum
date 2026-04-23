@@ -117,6 +117,12 @@ public fn issue_post_handshake_ticket(
     let pt = ServerTicketPlaintext {
         cipher_suite:        suite.clone(),
         resumption_secret:   List.from_slice(resumption_master.as_slice()),
+        // Stash the freshly-drawn nonce inside the encrypted ticket so
+        // the server can recover it on resumption and feed it into
+        // HKDF-Expand-Label(resumption_secret, "resumption", ticket_nonce,
+        // H.length) — RFC 8446 §4.6.1. The same nonce is also echoed to
+        // the client in the NewSessionTicket.ticket_nonce field below.
+        ticket_nonce:        ticket_nonce.clone(),
         max_early_data_size: options.max_early_data_size,
         issued_at_unix:      issued_unix,
         alpn:                options.alpn.clone(),

@@ -161,6 +161,16 @@ implement SessionTicketKey {
 public type ServerTicketPlaintext is {
     cipher_suite:        CipherSuite,
     resumption_secret:   List<Byte>,
+    /// Per-ticket fresh nonce (RFC 8446 §4.6.1) — the server issuer
+    /// draws 16 CSPRNG bytes, stores them here encrypted under the
+    /// STEK alongside the resumption secret, AND sends them in the
+    /// NewSessionTicket.ticket_nonce field. The client echoes the
+    /// nonce back at resumption time via the same NST.ticket_nonce;
+    /// the server recovers it from the decrypted ticket here and
+    /// feeds it to HKDF-Expand-Label(resumption_secret, "resumption",
+    /// ticket_nonce, H.length) so client and server agree on the PSK
+    /// byte-for-byte.
+    ticket_nonce:        List<Byte>,
     max_early_data_size: UInt32,
     issued_at_unix:      UInt64,
     /// Selected ALPN at issue time — stored so resumed handshakes
@@ -257,20 +267,28 @@ public fn decrypt_ticket(
 // Plaintext encode/decode — versioned wire-level layout
 // =============================================================================
 //
-//   version             u8 (always 1)
+//   version             u8 (always 2)
 //   cipher_suite        u16
 //   resumption_len      u16
 //   resumption_secret   bytes
+//   nonce_len           u8
+//   ticket_nonce        bytes   (NEW at v2 — see §4.6.1 correctness)
 //   max_early_data_size u32
 //   issued_at_unix      u64
 //   alpn_len            u8
 //   alpn                bytes
 //
+// The wire-format version was bumped 1 → 2 when the `ticket_nonce`
+// field was added. Decoder accepts v1 tickets (empty nonce) for
+// backward compatibility during rollout but will not resume a v1
+// ticket correctly — affected clients must re-issue tickets after
+// a server upgrade.
+//
 // =============================================================================
 
 fn encode_plaintext(pt: &ServerTicketPlaintext) -> List<Byte> {
     let mut out: List<Byte> = [];
-    out.push(1_u8);    // version
+    out.push(2_u8);    // version — bumped when ticket_nonce was added.
     let cs_u16 = pt.cipher_suite.to_u16();
     out.push(((cs_u16 >> 8) & 0xFF_u16) as Byte);
     out.push((cs_u16 & 0xFF_u16) as Byte);
@@ -280,6 +298,12 @@ fn encode_plaintext(pt: &ServerTicketPlaintext) -> List<Byte> {
     let mut i: Int = 0;
     while i < pt.resumption_secret.len() {
         out.push(pt.resumption_secret[i]); i = i + 1;
+    }
+    // ticket_nonce (u8 length prefix — RFC 8446 allows up to 255 bytes).
+    out.push(pt.ticket_nonce.len() as Byte);
+    let mut n: Int = 0;
+    while n < pt.ticket_nonce.len() {
+        out.push(pt.ticket_nonce[n]); n = n + 1;
     }
     let m = pt.max_early_data_size;
     out.push(((m >> 24) & 0xFF_u32) as Byte);
@@ -302,23 +326,40 @@ fn encode_plaintext(pt: &ServerTicketPlaintext) -> List<Byte> {
 }
 
 fn decode_plaintext(buf: &[Byte]) -> Result<ServerTicketPlaintext, TicketError> {
-    if buf.len() < 1 + 2 + 2 + 0 + 4 + 8 + 1 { return Err(TicketError.MalformedTicket); }
-    if buf[0] != 1_u8 { return Err(TicketError.MalformedTicket); }
+    // v1: no ticket_nonce (legacy); v2: ticket_nonce as u8-prefixed blob.
+    // Minimum v1 size = 1 ver + 2 suite + 2 rslen + 0 rs + 4 early + 8 unix + 1 alpn-len.
+    if buf.len() < 16 { return Err(TicketError.MalformedTicket); }
+    let version = buf[0];
+    if version != 1_u8 && version != 2_u8 { return Err(TicketError.MalformedTicket); }
     let cs_u16: UInt16 = ((buf[1] as UInt16) << 8) | (buf[2] as UInt16);
     let cipher = CipherSuite.from_u16(cs_u16);
     let rs_len: Int = (((buf[3] as UInt16) << 8) | (buf[4] as UInt16)) as Int;
     let rs_end = 5 + rs_len;
-    if rs_end + 4 + 8 + 1 > buf.len() { return Err(TicketError.MalformedTicket); }
+    if rs_end > buf.len() { return Err(TicketError.MalformedTicket); }
     let mut rs: List<Byte> = [];
     let mut i: Int = 5;
     while i < rs_end { rs.push(buf[i]); i = i + 1; }
 
+    // Version-gated ticket_nonce (v2 only).
+    let mut ticket_nonce: List<Byte> = [];
+    let mut post_nonce = rs_end;
+    if version >= 2_u8 {
+        if rs_end >= buf.len() { return Err(TicketError.MalformedTicket); }
+        let n_len = buf[rs_end] as Int;
+        let n_end = rs_end + 1 + n_len;
+        if n_end > buf.len() { return Err(TicketError.MalformedTicket); }
+        let mut nn: Int = rs_end + 1;
+        while nn < n_end { ticket_nonce.push(buf[nn]); nn = nn + 1; }
+        post_nonce = n_end;
+    }
+
+    if post_nonce + 4 + 8 + 1 > buf.len() { return Err(TicketError.MalformedTicket); }
     let m: UInt32 =
-          ((buf[rs_end] as UInt32) << 24)
-        | ((buf[rs_end + 1] as UInt32) << 16)
-        | ((buf[rs_end + 2] as UInt32) <<  8)
-        |  (buf[rs_end + 3] as UInt32);
-    let t_base = rs_end + 4;
+          ((buf[post_nonce] as UInt32) << 24)
+        | ((buf[post_nonce + 1] as UInt32) << 16)
+        | ((buf[post_nonce + 2] as UInt32) <<  8)
+        |  (buf[post_nonce + 3] as UInt32);
+    let t_base = post_nonce + 4;
     let t: UInt64 =
           ((buf[t_base] as UInt64) << 56)
         | ((buf[t_base + 1] as UInt64) << 48)
@@ -339,6 +380,7 @@ fn decode_plaintext(buf: &[Byte]) -> Result<ServerTicketPlaintext, TicketError> 
     Ok(ServerTicketPlaintext {
         cipher_suite:        cipher,
         resumption_secret:   rs,
+        ticket_nonce:        ticket_nonce,
         max_early_data_size: m,
         issued_at_unix:      t,
         alpn:                alpn,

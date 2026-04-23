@@ -218,10 +218,15 @@ fn try_verify_one(
     check_freshness(&plaintext, identity, now_unix, now_instant,
                     DEFAULT_FRESHNESS_WINDOW_MS)?;
 
-    // 4. Derive resumption PSK.
+    // 4. Derive resumption PSK using the per-ticket nonce recovered
+    //    from the decrypted ticket plaintext (RFC 8446 §4.6.1).
+    //    Before the ServerTicketPlaintext.ticket_nonce field landed,
+    //    this call passed an empty slice — the PSK then disagreed
+    //    with the client's (who computes with the NST.ticket_nonce
+    //    echoed back), so the binder verify below always failed.
     let psk = derive_resumption_psk(hash.clone(),
                                      plaintext.resumption_secret.as_slice(),
-                                     /* ticket_nonce placeholder */ &[])
+                                     plaintext.ticket_nonce.as_slice())
         .map_err(|e| ResumeVerifyError.KdfFailure(e))?;
 
     // 5. Rebuild EarlySecret + binder_key.

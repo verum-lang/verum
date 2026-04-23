@@ -26,9 +26,11 @@ fn check_ticket_roundtrip() -> Result<(), TicketError> {
     let stek = SessionTicketKey.generate();
     let rs_arr: [Byte; 32] = [0_u8; 32];
     let alpn_bytes: &[Byte] = b"h3";
+    let nonce_arr: [Byte; 16] = [0x42_u8; 16];
     let pt = ServerTicketPlaintext {
         cipher_suite:        CipherSuite.TlsAes128GcmSha256,
         resumption_secret:   List.from_slice(&rs_arr[..]),
+        ticket_nonce:        List.from_slice(&nonce_arr[..]),
         max_early_data_size: 16384_u32,
         issued_at_unix:      1_700_000_000_u64,
         alpn:                List.from_slice(alpn_bytes),
