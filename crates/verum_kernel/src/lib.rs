@@ -410,6 +410,28 @@ impl AxiomRegistry {
 
     /// Register a new axiom. Returns `Err` if an axiom with the same
     /// name already exists — the kernel refuses silent re-registration.
+    ///
+    /// Also rejects axioms whose statement is structurally equivalent
+    /// to **Uniqueness of Identity Proofs** (UIP):
+    ///
+    /// ```text
+    /// Π A. Π (a b : A). Π (p q : PathTy(A, a, b)). PathTy(PathTy(A, a, b), p, q)
+    /// ```
+    ///
+    /// UIP is a statement that any two proofs of the same equality are
+    /// themselves equal. It is **incompatible with univalence**: if the
+    /// kernel admitted UIP alongside the `ua` axiom and the `Glue` rule,
+    /// users could derive `Path<U>(A, B) = Path<U>(A, B) ≡ Refl` for
+    /// any `Equiv(A, B)` — collapsing the higher-path structure that
+    /// cubical type theory was designed to preserve.
+    ///
+    /// Detection is syntactic: we look for the exact shape
+    /// `Pi A. Pi a. Pi b. Pi p. Pi q. PathTy(PathTy(A, a, b), p, q)`.
+    /// More elaborate reductions (axioms that imply UIP transitively)
+    /// are out of scope — this check catches the direct case, which
+    /// is the common pitfall.
+    ///
+    /// Corresponds to rule 10 in `docs/verification/trusted-kernel.md`.
     pub fn register(
         &mut self,
         name: Text,
@@ -418,6 +440,9 @@ impl AxiomRegistry {
     ) -> Result<(), KernelError> {
         if self.entries.iter().any(|e| e.name == name) {
             return Err(KernelError::DuplicateAxiom(name));
+        }
+        if is_uip_shape(&ty) {
+            return Err(KernelError::UipForbidden(name));
         }
         self.entries.push(RegisteredAxiom { name, ty, framework });
         Ok(())
@@ -437,6 +462,79 @@ impl AxiomRegistry {
     pub fn all(&self) -> &List<RegisteredAxiom> {
         &self.entries
     }
+}
+
+/// Return `true` iff `ty` is the direct UIP shape:
+///
+/// ```text
+/// Π A. Π a. Π b. Π p. Π q. PathTy(PathTy(A, a, b), p, q)
+/// ```
+///
+/// The check is deliberately conservative: it inspects the outer
+/// five Π binders and confirms that the innermost codomain is a
+/// path-of-paths whose inner carrier is `A`. Axioms that imply UIP
+/// only indirectly (e.g. via a stated equivalence between path types
+/// and booleans) are NOT caught — that would require a reachability
+/// analysis beyond this kernel's scope. Users who need UIP for
+/// set-level programming should work in the `is_set`-typed fragment,
+/// where UIP is derivable (not axiomatised) from the proposition
+/// truncation.
+fn is_uip_shape(ty: &CoreTerm) -> bool {
+    // Π A : Type(_) . (rest with `A` in scope)
+    let CoreTerm::Pi { binder: b_a, domain: dom_a, codomain: after_a } = ty else {
+        return false;
+    };
+    if !matches!(dom_a.as_ref(), CoreTerm::Universe(_)) {
+        return false;
+    }
+    // Π a : A . ...
+    let CoreTerm::Pi { binder: b_a2, domain: dom_a2, codomain: after_a2 } = after_a.as_ref() else {
+        return false;
+    };
+    if !is_var_named(dom_a2, b_a.as_str()) {
+        return false;
+    }
+    let _ = b_a2; // bound as `a`
+    // Π b : A . ...
+    let CoreTerm::Pi { binder: b_b, domain: dom_b, codomain: after_b } = after_a2.as_ref() else {
+        return false;
+    };
+    if !is_var_named(dom_b, b_a.as_str()) {
+        return false;
+    }
+    let _ = b_b; // bound as `b`
+    // Π p : PathTy(A, a, b) . ...
+    let CoreTerm::Pi { binder: _, domain: dom_p, codomain: after_p } = after_b.as_ref() else {
+        return false;
+    };
+    if !is_path_over(dom_p, b_a.as_str()) {
+        return false;
+    }
+    // Π q : PathTy(A, a, b) . goal
+    let CoreTerm::Pi { binder: _, domain: dom_q, codomain: goal } = after_p.as_ref() else {
+        return false;
+    };
+    if !is_path_over(dom_q, b_a.as_str()) {
+        return false;
+    }
+    // goal: PathTy(PathTy(A, a, b), p, q)
+    let CoreTerm::PathTy { carrier: outer_carrier, .. } = goal.as_ref() else {
+        return false;
+    };
+    is_path_over(outer_carrier, b_a.as_str())
+}
+
+/// `ty` is `Var(name)` (or an alpha-renamed de Bruijn equivalent).
+fn is_var_named(ty: &CoreTerm, name: &str) -> bool {
+    matches!(ty, CoreTerm::Var(n) if n.as_str() == name)
+}
+
+/// `ty` is `PathTy(Var(carrier_name), _, _)`.
+fn is_path_over(ty: &CoreTerm, carrier_name: &str) -> bool {
+    matches!(
+        ty,
+        CoreTerm::PathTy { carrier, .. } if is_var_named(carrier.as_ref(), carrier_name)
+    )
 }
 
 // =============================================================================
@@ -646,6 +744,15 @@ pub enum KernelError {
     /// goal the caller intended to prove.
     #[error("kernel: SMT certificate missing obligation hash")]
     MissingObligationHash,
+
+    /// An axiom whose statement reduces to Uniqueness of Identity
+    /// Proofs — `∀A, ∀(a b: A), ∀(p q: a = b), p = q`. UIP is
+    /// incompatible with univalence and is explicitly rejected to
+    /// preserve HoTT soundness (rule 10 in the trusted-kernel
+    /// spec). Use `PathTy` and cubical rules for nontrivial
+    /// equality proofs instead.
+    #[error("kernel: axiom '{0}' is equivalent to UIP and is rejected (rule 10); use Path types instead")]
+    UipForbidden(Text),
 }
 
 // =============================================================================
@@ -2116,5 +2223,117 @@ mod tests {
         };
         let ty = infer(&Context::new(), &term, &reg).unwrap();
         assert!(matches!(ty, CoreTerm::Universe(_)));
+    }
+
+    // -------------------------------------------------------------
+    // Rule 10: UIP-Free — axioms reducing to UIP are rejected.
+    // -------------------------------------------------------------
+
+    /// Build the direct UIP statement:
+    /// `Π A. Π a. Π b. Π p. Π q. PathTy(PathTy(A, a, b), p, q)`.
+    fn uip_statement() -> CoreTerm {
+        fn var(n: &str) -> CoreTerm {
+            CoreTerm::Var(Text::from(n))
+        }
+        let path_a_a_b = CoreTerm::PathTy {
+            carrier: Heap::new(var("A")),
+            lhs: Heap::new(var("a")),
+            rhs: Heap::new(var("b")),
+        };
+        let path_of_paths = CoreTerm::PathTy {
+            carrier: Heap::new(path_a_a_b.clone()),
+            lhs: Heap::new(var("p")),
+            rhs: Heap::new(var("q")),
+        };
+        let pi_q = CoreTerm::Pi {
+            binder: Text::from("q"),
+            domain: Heap::new(path_a_a_b.clone()),
+            codomain: Heap::new(path_of_paths),
+        };
+        let pi_p = CoreTerm::Pi {
+            binder: Text::from("p"),
+            domain: Heap::new(path_a_a_b),
+            codomain: Heap::new(pi_q),
+        };
+        let pi_b = CoreTerm::Pi {
+            binder: Text::from("b"),
+            domain: Heap::new(var("A")),
+            codomain: Heap::new(pi_p),
+        };
+        let pi_a_val = CoreTerm::Pi {
+            binder: Text::from("a"),
+            domain: Heap::new(var("A")),
+            codomain: Heap::new(pi_b),
+        };
+        CoreTerm::Pi {
+            binder: Text::from("A"),
+            domain: Heap::new(CoreTerm::Universe(UniverseLevel::Concrete(0))),
+            codomain: Heap::new(pi_a_val),
+        }
+    }
+
+    #[test]
+    fn uip_axiom_is_rejected_by_register() {
+        let mut reg = AxiomRegistry::new();
+        let result = reg.register(
+            Text::from("uip"),
+            uip_statement(),
+            FrameworkId {
+                framework: Text::from("set_level"),
+                citation: Text::from("attempted UIP postulate"),
+            },
+        );
+        match result {
+            Err(KernelError::UipForbidden(name)) => {
+                assert_eq!(name.as_str(), "uip");
+            }
+            other => panic!("expected UipForbidden, got {:?}", other),
+        }
+        assert_eq!(reg.all().len(), 0);
+    }
+
+    #[test]
+    fn non_uip_axiom_is_accepted() {
+        // A plain axiom claiming a proposition about a universe
+        // is not UIP and must not be rejected by rule 10.
+        let mut reg = AxiomRegistry::new();
+        let result = reg.register(
+            Text::from("some_axiom"),
+            CoreTerm::Universe(UniverseLevel::Concrete(0)),
+            FrameworkId {
+                framework: Text::from("test"),
+                citation: Text::from("test"),
+            },
+        );
+        assert!(result.is_ok());
+        assert_eq!(reg.all().len(), 1);
+    }
+
+    #[test]
+    fn single_pi_over_path_is_not_uip() {
+        // A single Π over a path type is NOT UIP — guard should not
+        // false-positive on partial shapes.
+        fn var(n: &str) -> CoreTerm {
+            CoreTerm::Var(Text::from(n))
+        }
+        let almost = CoreTerm::Pi {
+            binder: Text::from("A"),
+            domain: Heap::new(CoreTerm::Universe(UniverseLevel::Concrete(0))),
+            codomain: Heap::new(CoreTerm::PathTy {
+                carrier: Heap::new(var("A")),
+                lhs: Heap::new(var("a")),
+                rhs: Heap::new(var("b")),
+            }),
+        };
+        let mut reg = AxiomRegistry::new();
+        let result = reg.register(
+            Text::from("path_forall"),
+            almost,
+            FrameworkId {
+                framework: Text::from("test"),
+                citation: Text::from("test"),
+            },
+        );
+        assert!(result.is_ok(), "partial shape must not trigger UIP guard");
     }
 }
