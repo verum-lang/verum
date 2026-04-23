@@ -1,0 +1,62 @@
+// @test: integration
+// @tier: 0
+// @level: L1
+// @tags: verify, smt, array, map, tuple, read-through
+// @expect: pass
+//
+// Locks in the translator-level support for:
+//   * TupleIndex (`p.0`, `p.1`, `tup.2`),
+//   * Array/List read `.at(i)` / `.get(i)`,
+//   * Array/Map write `.update(i, v)` / `.insert(k, v)` / `.set(i, v)`
+//     with the read-through axiom `col.update(i, v).at(i) == v`.
+//
+// These were blocking a whole class of postconditions over indexed
+// / keyed collections before the translator-level axioms landed.
+
+// --- Tuple component access ---
+
+@verify(formal)
+theorem tuple_component_reflex(p: (Int, Int))
+    ensures p.0 == p.0
+    ensures p.1 == p.1
+    proof by auto;
+
+@verify(formal)
+theorem tuple_sum_under_equality(p: (Int, Int), q: (Int, Int))
+    requires p.0 == q.0
+    requires p.1 == q.1
+    ensures p.0 + p.1 == q.0 + q.1
+    proof by auto;
+
+@verify(formal)
+theorem tuple_triple(p: (Int, Int, Int))
+    ensures p.0 + p.1 + p.2 == p.0 + p.1 + p.2
+    proof by auto;
+
+// --- Array / list read-through ---
+
+@verify(formal)
+theorem list_update_get<T>(arr: List<T>, i: Int, v: Int)
+    ensures arr.update(i, v).at(i) == v
+    proof by auto;
+
+@verify(formal)
+theorem list_at_stable<T>(arr: List<T>, i: Int)
+    ensures arr.at(i) == arr.at(i)
+    proof by auto;
+
+// --- Map insert / get read-through ---
+
+@verify(formal)
+theorem map_insert_get<K, V>(m: Map<K, V>, k: Int, v: Int)
+    ensures m.insert(k, v).get(k) == v
+    proof by auto;
+
+@verify(formal)
+theorem map_set_get<K, V>(m: Map<K, V>, k: Int, v: Int)
+    ensures m.set(k, v).get(k) == v
+    proof by auto;
+
+fn main() {
+    print("L1-core: verification_phase/smt_theory_arrays_tuples");
+}
