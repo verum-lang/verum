@@ -1,0 +1,48 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sync, once, one-time-init
+// @timeout: 15000
+// @description: core.sync.once surface — Once.new / call_once / is_completed / state
+
+mount core.*;
+mount core.sync.once.{Once, OnceState};
+
+fn new_is_not_completed() {
+    let o = Once.new();
+    assert_eq(o.is_completed(), false);
+    match o.state() {
+        New       => {}
+        InProgress => { panic("fresh Once should be New, not InProgress"); }
+        Done      => { panic("fresh Once should not be Done"); }
+        Poisoned  => { panic("fresh Once should not be Poisoned"); }
+    }
+}
+
+fn call_once_transitions_to_done() {
+    let o = Once.new();
+    o.call_once(|| {
+        let _ = 42;
+    });
+    assert_eq(o.is_completed(), true);
+    match o.state() {
+        Done      => {}
+        _         => { panic("after call_once Once should be Done"); }
+    }
+}
+
+fn call_once_is_idempotent() {
+    let o = Once.new();
+    let mut counter: Int = 0;
+    o.call_once(|| { counter = counter + 1; });
+    o.call_once(|| { counter = counter + 1; });  // second call must no-op
+    // Counter can only become 1 if call_once honors the once-only contract.
+    assert(counter <= 1);
+}
+
+fn main() {
+    new_is_not_completed();
+    call_once_transitions_to_done();
+    call_once_is_idempotent();
+    print("once_typecheck ok");
+}
