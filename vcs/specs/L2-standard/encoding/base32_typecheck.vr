@@ -1,0 +1,50 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: encoding, base32, rfc4648
+// @timeout: 15000
+// @description: core.encoding.base32 surface — encode / decode / decode_no_pad
+
+mount core.*;
+mount core.collections.List;
+mount core.encoding.base32.{encode, decode, decode_no_pad, Base32Error};
+
+fn roundtrip_shape() {
+    let input: List<Byte> = [72 as Byte, 105 as Byte];  // "Hi"
+    let enc = encode(&input);
+    assert(enc.len() > 0);
+    // encode emits RFC 4648 padded output; round-trip through decode.
+    match decode(&enc) {
+        Ok(dec) => { assert(dec.len() == 2); }
+        Err(_)  => { panic("decode should succeed"); }
+    }
+}
+
+fn decode_no_pad_accepts_unpadded() {
+    let unpad: List<Byte> = [74 as Byte, 66 as Byte, 83 as Byte, 87 as Byte,
+                             89 as Byte, 51 as Byte, 68 as Byte, 81 as Byte];
+    match decode_no_pad(&unpad) {
+        Ok(_) => {}
+        Err(e) => match e {
+            Base32Error.InvalidLength(_) => {}      // padding-length edge case
+            Base32Error.InvalidCharacter(_) => {}
+            Base32Error.TrailingBits => {}
+        }
+    }
+}
+
+fn decode_padded_empty() {
+    // An empty input is a valid Base32 empty encoding.
+    let empty: List<Byte> = List.new();
+    match decode(&empty) {
+        Ok(dec) => { assert(dec.len() == 0); }
+        Err(_)  => { panic("empty Base32 should decode to empty"); }
+    }
+}
+
+fn main() {
+    roundtrip_shape();
+    decode_no_pad_accepts_unpadded();
+    decode_padded_empty();
+    print("base32_typecheck ok");
+}

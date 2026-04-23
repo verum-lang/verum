@@ -1,0 +1,59 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: encoding, hex
+// @timeout: 15000
+// @description: core.encoding.hex surface — encode / encode_upper / decode
+
+mount core.*;
+mount core.collections.List;
+mount core.encoding.hex.{encode, encode_upper, decode, HexError};
+
+fn encode_roundtrip() {
+    let input: List<Byte> = [0xDE as Byte, 0xAD as Byte, 0xBE as Byte, 0xEF as Byte];
+    let lower: Text = encode(&input);
+    let upper: Text = encode_upper(&input);
+    // Each byte encodes as 2 hex chars.
+    assert(lower.len() == 8);
+    assert(upper.len() == 8);
+    match decode(&lower) {
+        Ok(dec) => { assert(dec.len() == 4); }
+        Err(_)  => { panic("hex decode lower"); }
+    }
+    match decode(&upper) {
+        Ok(dec) => { assert(dec.len() == 4); }
+        Err(_)  => { panic("hex decode upper"); }
+    }
+}
+
+fn decode_empty_is_empty() {
+    let empty: Text = "".clone();
+    match decode(&empty) {
+        Ok(dec) => { assert(dec.len() == 0); }
+        Err(_)  => { panic("empty hex should decode to empty"); }
+    }
+}
+
+fn decode_odd_length_errors() {
+    let odd: Text = "ABC".clone();
+    match decode(&odd) {
+        Ok(_)  => { panic("odd-length hex must fail"); }
+        Err(_) => {}
+    }
+}
+
+fn decode_bad_char_errors() {
+    let bad: Text = "GG".clone();
+    match decode(&bad) {
+        Ok(_)  => { panic("non-hex char must fail"); }
+        Err(_) => {}
+    }
+}
+
+fn main() {
+    encode_roundtrip();
+    decode_empty_is_empty();
+    decode_odd_length_errors();
+    decode_bad_char_errors();
+    print("hex_typecheck ok");
+}

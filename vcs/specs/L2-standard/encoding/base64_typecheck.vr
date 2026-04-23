@@ -1,0 +1,55 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: encoding, base64, rfc4648
+// @timeout: 15000
+// @description: core.encoding.base64 surface — encode / encode_url / decode / decode_url
+
+mount core.*;
+mount core.collections.List;
+mount core.encoding.base64.{encode, encode_url, decode, decode_url, Base64Error};
+
+fn roundtrip_standard() {
+    let input: List<Byte> = [0x66 as Byte, 0x6F as Byte, 0x6F as Byte];   // "foo"
+    let enc: Text = encode(&input);
+    // Standard encoding of "foo" is "Zm9v" (4 chars, no padding).
+    assert(enc.len() == 4);
+    match decode(&enc) {
+        Ok(dec) => { assert(dec.len() == 3); }
+        Err(_)  => { panic("standard round-trip decode"); }
+    }
+}
+
+fn roundtrip_urlsafe() {
+    let input: List<Byte> = [0xFA as Byte, 0xCE as Byte];
+    let enc: Text = encode_url(&input);
+    match decode_url(&enc) {
+        Ok(dec) => { assert(dec.len() == 2); }
+        Err(_)  => { panic("url-safe round-trip decode"); }
+    }
+}
+
+fn decode_empty_is_empty() {
+    let empty: Text = "".clone();
+    match decode(&empty) {
+        Ok(dec) => { assert(dec.len() == 0); }
+        Err(_)  => { panic("empty Base64 should decode to empty"); }
+    }
+}
+
+fn decode_bad_character_errors() {
+    // Non-Base64 char '!' — expect Err.
+    let bad: Text = "Zm9!".clone();
+    match decode(&bad) {
+        Ok(_) => { panic("expected Err on invalid character"); }
+        Err(_) => {}
+    }
+}
+
+fn main() {
+    roundtrip_standard();
+    roundtrip_urlsafe();
+    decode_empty_is_empty();
+    decode_bad_character_errors();
+    print("base64_typecheck ok");
+}
