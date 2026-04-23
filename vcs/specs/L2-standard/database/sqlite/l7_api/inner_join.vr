@@ -87,10 +87,28 @@ fn left_outer_join_preserves_unmatched() {
     }
 }
 
+fn right_outer_join_preserves_unmatched() {
+    let mut db = match open_admin() {
+        Ok(d)  => d,
+        Err(_) => { panic("open"); return; }
+    };
+    let _ = db.execute(&"CREATE TABLE a (id INTEGER)".clone());
+    let _ = db.execute(&"CREATE TABLE b (id INTEGER)".clone());
+    let _ = db.execute(&"INSERT INTO a VALUES (1)".clone());
+    let _ = db.execute(&"INSERT INTO b VALUES (1)".clone());
+    let _ = db.execute(&"INSERT INTO b VALUES (2)".clone());
+    // RIGHT JOIN: b is the preserved side.
+    match db.query_all(&"SELECT a.id, b.id FROM a RIGHT JOIN b ON a.id = b.id".clone()) {
+        Ok(rows) => { assert(rows.len() >= 2); }
+        Err(_) => panic("query_all RIGHT JOIN"),
+    }
+}
+
 fn main() {
     cross_join_cardinality();
     inner_join_with_on_predicate();
     join_with_where_clause();
     left_outer_join_preserves_unmatched();
+    right_outer_join_preserves_unmatched();
     print("inner_join typecheck ok");
 }

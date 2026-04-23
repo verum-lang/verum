@@ -873,28 +873,138 @@ public fn step(state: &mut VdbeState, program: &VdbeProgram) -> StepResult {
                         RNull
                     } else {
                         match state.regs.get(first_arg_reg) {
-                            RText(ref s) => {
-                                let bs = s.as_bytes();
-                                let n = bs.len();
-                                let mut i: Int = 0;
-                                while i < n {
-                                    let b = bs[i];
-                                    if b != (32 as Byte) && b != (9 as Byte)
-                                        && b != (10 as Byte) && b != (13 as Byte) { break; }
-                                    i = i + 1;
-                                }
-                                let mut j: Int = n;
-                                while j > i {
-                                    let b = bs[j - 1];
-                                    if b != (32 as Byte) && b != (9 as Byte)
-                                        && b != (10 as Byte) && b != (13 as Byte) { break; }
-                                    j = j - 1;
-                                }
-                                let mut out = Text.new();
-                                let mut k: Int = i;
-                                while k < j { out.push_byte(bs[k]); k = k + 1; }
-                                RText(out)
+                            RText(ref s) => RText(trim_ascii(s, true, true)),
+                            RNull => RNull,
+                            _ => RNull,
+                        }
+                    }
+                }
+                15 => {
+                    // LTRIM(s) — leading whitespace only.
+                    if n_args < 1 {
+                        RNull
+                    } else {
+                        match state.regs.get(first_arg_reg) {
+                            RText(ref s) => RText(trim_ascii(s, true, false)),
+                            RNull => RNull,
+                            _ => RNull,
+                        }
+                    }
+                }
+                16 => {
+                    // RTRIM(s) — trailing whitespace only.
+                    if n_args < 1 {
+                        RNull
+                    } else {
+                        match state.regs.get(first_arg_reg) {
+                            RText(ref s) => RText(trim_ascii(s, false, true)),
+                            RNull => RNull,
+                            _ => RNull,
+                        }
+                    }
+                }
+                17 => {
+                    // REPLACE(s, find, replacement).
+                    if n_args < 3 {
+                        RNull
+                    } else {
+                        let s_v = state.regs.get(first_arg_reg);
+                        let f_v = state.regs.get(first_arg_reg + 1);
+                        let r_v = state.regs.get(first_arg_reg + 2);
+                        match s_v {
+                            RText(ref s) => match f_v {
+                                RText(ref f) => match r_v {
+                                    RText(ref r) => RText(replace_all_bytes(s, f, r)),
+                                    _ => RNull,
+                                },
+                                _ => RNull,
+                            },
+                            _ => RNull,
+                        }
+                    }
+                }
+                18 => {
+                    // INSTR(haystack, needle) → 1-based index of first match, else 0.
+                    if n_args < 2 {
+                        RNull
+                    } else {
+                        let hv = state.regs.get(first_arg_reg);
+                        let nv = state.regs.get(first_arg_reg + 1);
+                        match hv {
+                            RText(ref h) => match nv {
+                                RText(ref n) => RInt(instr_bytes(h, n) as Int64),
+                                _ => RNull,
+                            },
+                            _ => RNull,
+                        }
+                    }
+                }
+                19 => {
+                    // ROUND(x [, digits]) — rounds to `digits` decimal places.
+                    if n_args < 1 {
+                        RNull
+                    } else {
+                        let v = state.regs.get(first_arg_reg);
+                        let digits: Int = if n_args >= 2 {
+                            match state.regs.get(first_arg_reg + 1) {
+                                RInt(x) => x as Int,
+                                _ => 0,
                             }
+                        } else { 0 };
+                        match v {
+                            RInt(x) => RInt(x),
+                            RReal(x) => RReal(round_to_digits(x, digits)),
+                            RNull    => RNull,
+                            _        => RNull,
+                        }
+                    }
+                }
+                20 => {
+                    // MIN(a, b, ...) as scalar — smallest of any non-null arg.
+                    let mut i: Int = 0;
+                    let mut best: Register = RNull;
+                    while i < n_args {
+                        let v = state.regs.get(first_arg_reg + i);
+                        let is_null = match v { RNull => true, _ => false };
+                        if !is_null {
+                            match best {
+                                RNull => { best = v; }
+                                _ => {
+                                    if agg_less(&v, &best) { best = v; }
+                                }
+                            }
+                        }
+                        i = i + 1;
+                    }
+                    best
+                }
+                21 => {
+                    // MAX(a, b, ...) as scalar.
+                    let mut i: Int = 0;
+                    let mut best: Register = RNull;
+                    while i < n_args {
+                        let v = state.regs.get(first_arg_reg + i);
+                        let is_null = match v { RNull => true, _ => false };
+                        if !is_null {
+                            match best {
+                                RNull => { best = v; }
+                                _ => {
+                                    if agg_less(&best, &v) { best = v; }
+                                }
+                            }
+                        }
+                        i = i + 1;
+                    }
+                    best
+                }
+                22 => {
+                    // HEX(blob) — hex-encode bytes.
+                    if n_args < 1 {
+                        RNull
+                    } else {
+                        match state.regs.get(first_arg_reg) {
+                            RBlob(ref b) => RText(hex_encode(b)),
+                            RText(ref s) => RText(hex_encode_text(s)),
                             RNull => RNull,
                             _ => RNull,
                         }
@@ -1050,6 +1160,117 @@ fn text_to_bytes(s: &Text) -> List<Byte> {
 // -----------------------------------------------------------------------------
 // Scalar-function helpers
 // -----------------------------------------------------------------------------
+
+fn is_ws(b: Byte) -> Bool {
+    b == (32 as Byte) || b == (9 as Byte) || b == (10 as Byte) || b == (13 as Byte)
+}
+
+fn trim_ascii(s: &Text, left: Bool, right: Bool) -> Text {
+    let bs = s.as_bytes();
+    let n = bs.len();
+    let mut i: Int = 0;
+    if left {
+        while i < n && is_ws(bs[i]) { i = i + 1; }
+    }
+    let mut j: Int = n;
+    if right {
+        while j > i && is_ws(bs[j - 1]) { j = j - 1; }
+    }
+    let mut out = Text.new();
+    let mut k: Int = i;
+    while k < j { out.push_byte(bs[k]); k = k + 1; }
+    out
+}
+
+fn bytes_equal_at(h: &List<Byte>, at: Int, n: &List<Byte>) -> Bool {
+    if at + n.len() > h.len() { return false; }
+    let mut i: Int = 0;
+    while i < n.len() {
+        if h[at + i] != n[i] { return false; }
+        i = i + 1;
+    }
+    true
+}
+
+fn replace_all_bytes(s: &Text, find: &Text, repl: &Text) -> Text {
+    let sb = s.as_bytes();
+    let fb = find.as_bytes();
+    let rb = repl.as_bytes();
+    let mut out = Text.new();
+    if fb.len() == 0 {
+        let mut i: Int = 0;
+        while i < sb.len() { out.push_byte(sb[i]); i = i + 1; }
+        return out;
+    }
+    let mut i: Int = 0;
+    while i < sb.len() {
+        if i + fb.len() <= sb.len() && bytes_equal_at(sb, i, fb) {
+            let mut k: Int = 0;
+            while k < rb.len() { out.push_byte(rb[k]); k = k + 1; }
+            i = i + fb.len();
+        } else {
+            out.push_byte(sb[i]);
+            i = i + 1;
+        }
+    }
+    out
+}
+
+fn instr_bytes(h: &Text, n: &Text) -> Int {
+    let hb = h.as_bytes();
+    let nb = n.as_bytes();
+    if nb.len() == 0 { return 0; }
+    let mut i: Int = 0;
+    while i + nb.len() <= hb.len() {
+        if bytes_equal_at(hb, i, nb) { return i + 1; }
+        i = i + 1;
+    }
+    0
+}
+
+fn round_to_digits(x: Float64, digits: Int) -> Float64 {
+    let mut scale: Float64 = 1.0;
+    let mut k: Int = 0;
+    while k < digits { scale = scale * 10.0; k = k + 1; }
+    let mut n_neg: Int = 0;
+    while n_neg > digits { scale = scale / 10.0; n_neg = n_neg - 1; }
+    let scaled = x * scale;
+    let rounded: Int64 = if scaled >= 0.0 {
+        (scaled + 0.5) as Int64
+    } else {
+        (scaled - 0.5) as Int64
+    };
+    (rounded as Float64) / scale
+}
+
+fn hex_nibble(b: Byte) -> Byte {
+    if b < (10 as Byte) { (b + (48 as Byte)) } else { (b + (55 as Byte)) }
+}
+
+fn hex_encode(b: &List<Byte>) -> Text {
+    let mut out = Text.new();
+    let mut i: Int = 0;
+    while i < b.len() {
+        let c = b[i];
+        out.push_byte(hex_nibble((c >> 4) & (15 as Byte)));
+        out.push_byte(hex_nibble(c & (15 as Byte)));
+        i = i + 1;
+    }
+    out
+}
+
+fn hex_encode_text(s: &Text) -> Text {
+    let bs = s.as_bytes();
+    let mut out = Text.new();
+    let mut i: Int = 0;
+    while i < bs.len() {
+        let c = bs[i];
+        out.push_byte(hex_nibble((c >> 4) & (15 as Byte)));
+        out.push_byte(hex_nibble(c & (15 as Byte)));
+        i = i + 1;
+    }
+    out
+}
 
 /// SQLite LIKE semantics — case-insensitive ASCII, '%' matches any
 /// sequence of zero or more chars, '_' matches any single char.

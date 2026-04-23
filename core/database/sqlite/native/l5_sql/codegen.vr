@@ -2307,6 +2307,14 @@ fn scalar_fn_kind(name: &Text) -> Int {
     if n == "substr".clone() { return 13; }
     if n == "substring".clone() { return 13; }
     if n == "trim".clone()   { return 14; }
+    if n == "ltrim".clone()  { return 15; }
+    if n == "rtrim".clone()  { return 16; }
+    if n == "replace".clone() { return 17; }
+    if n == "instr".clone()  { return 18; }
+    if n == "round".clone()  { return 19; }
+    if n == "min".clone()    { return 20; }
+    if n == "max".clone()    { return 21; }
+    if n == "hex".clone()    { return 22; }
     -1
 }
 
@@ -2316,10 +2324,12 @@ fn emit_scalar_call(
     args: &List<Expr>,
     dst: Int,
 ) -> Result<(), CodegenError> {
-    // Aggregates outside a GROUP BY / aggregate-projection pipeline
-    // can't be lowered at expression scope.
+    // MIN/MAX are aggregates when called with exactly 1 arg; with 2+
+    // args they're scalar "smallest/largest of these values" functions.
     let akind = agg_kind_for_name(name);
-    if akind >= 0 {
+    let lname = ascii_lower(name);
+    let is_minmax = lname == "min".clone() || lname == "max".clone();
+    if akind >= 0 && !(is_minmax && args.len() >= 2) {
         return Err(unsupported("aggregate call in non-aggregate context".clone()));
     }
     let kind = scalar_fn_kind(name);

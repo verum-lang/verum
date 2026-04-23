@@ -1,0 +1,90 @@
+// @test: typecheck-pass
+// @level: L2
+// @tier: 0
+// @tags: sqlite, native, l7, scalar, ltrim, rtrim, replace, instr, round, hex
+// @timeout: 15000
+// @description: Extended scalar functions — LTRIM/RTRIM/REPLACE/INSTR/ROUND/HEX/MIN/MAX scalar
+//
+// Spec: internal/specs/sqlite-native.md §14.2 (built-in scalar functions)
+
+mount core.*;
+mount collections.List;
+mount core.database.sqlite.native.l7_api.{
+    Database, DbError, open_admin,
+};
+mount core.database.sqlite.native.l4_vdbe.Register;
+
+fn ltrim_rtrim_replace_instr() {
+    let mut db = match open_admin() {
+        Ok(d)  => d,
+        Err(_) => { panic("open"); return; }
+    };
+    let _ = db.execute(&"CREATE TABLE t (s TEXT)".clone());
+    let _ = db.execute(&"INSERT INTO t VALUES ('  abc  ')".clone());
+    match db.query_all(&"SELECT LTRIM(s), RTRIM(s), REPLACE(s, 'a', 'Z'), INSTR(s, 'b') FROM t".clone()) {
+        Ok(rows) => {
+            assert_eq(rows.len(), 1);
+            assert_eq(rows[0].len(), 4);
+            match rows[0][0] { RText(_) => {}, _ => panic("LTRIM should be RText") }
+            match rows[0][1] { RText(_) => {}, _ => panic("RTRIM should be RText") }
+            match rows[0][2] { RText(_) => {}, _ => panic("REPLACE should be RText") }
+            match rows[0][3] { RInt(_) => {}, _ => panic("INSTR should be RInt") }
+        }
+        Err(_) => panic("query_all extended string fns"),
+    }
+}
+
+fn round_function() {
+    let mut db = match open_admin() {
+        Ok(d)  => d,
+        Err(_) => { panic("open"); return; }
+    };
+    let _ = db.execute(&"CREATE TABLE t (v REAL)".clone());
+    let _ = db.execute(&"INSERT INTO t VALUES (3.141592)".clone());
+    match db.query_all(&"SELECT ROUND(v, 2) FROM t".clone()) {
+        Ok(rows) => {
+            match rows[0][0] { RReal(_) => {}, _ => panic("ROUND should be RReal") }
+        }
+        Err(_) => panic("query_all ROUND"),
+    }
+}
+
+fn scalar_min_max() {
+    let mut db = match open_admin() {
+        Ok(d)  => d,
+        Err(_) => { panic("open"); return; }
+    };
+    let _ = db.execute(&"CREATE TABLE t (a INTEGER, b INTEGER, c INTEGER)".clone());
+    let _ = db.execute(&"INSERT INTO t VALUES (3, 1, 2)".clone());
+    match db.query_all(&"SELECT MIN(a, b, c), MAX(a, b, c) FROM t".clone()) {
+        Ok(rows) => {
+            assert_eq(rows.len(), 1);
+            match rows[0][0] { RInt(x) => { assert_eq(x as Int, 1); }, _ => panic("scalar MIN") }
+            match rows[0][1] { RInt(x) => { assert_eq(x as Int, 3); }, _ => panic("scalar MAX") }
+        }
+        Err(_) => panic("query_all scalar MIN/MAX"),
+    }
+}
+
+fn hex_encode_blob() {
+    let mut db = match open_admin() {
+        Ok(d)  => d,
+        Err(_) => { panic("open"); return; }
+    };
+    let _ = db.execute(&"CREATE TABLE t (s TEXT)".clone());
+    let _ = db.execute(&"INSERT INTO t VALUES ('AB')".clone());
+    match db.query_all(&"SELECT HEX(s) FROM t".clone()) {
+        Ok(rows) => {
+            match rows[0][0] { RText(_) => {}, _ => panic("HEX should yield RText") }
+        }
+        Err(_) => panic("query_all HEX"),
+    }
+}
+
+fn main() {
+    ltrim_rtrim_replace_instr();
+    round_function();
+    scalar_min_max();
+    hex_encode_blob();
+    print("extended_string_math typecheck ok");
+}

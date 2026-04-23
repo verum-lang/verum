@@ -614,20 +614,23 @@ fn plan_from_for_select(
             Ok((node, scopes, meta, 0))
         }
         FiJoin(ref left_fi, ref jc) => {
-            let lt = match left_fi {
+            let lt_orig = match left_fi {
                 FiTable(ref x) => x,
                 _ => { return Err(plan_error("nested JOINs pending in v1".clone())); }
             };
-            let rt = match jc.right {
+            let rt_orig = match jc.right {
                 ref right_fi => match right_fi {
                     FiTable(ref x) => x,
                     _ => { return Err(plan_error("JOIN right side must be a table in v1".clone())); }
                 }
             };
-            let is_left_outer = match jc.kind {
-                JInner | JCross => false,
-                JLeftOuter => true,
-                _ => { return Err(plan_error("only INNER/CROSS/LEFT JOIN supported in v1".clone())); }
+            // RIGHT OUTER JOIN normalizes to LEFT OUTER with sides
+            // swapped (the preserved side becomes the outer loop).
+            let (lt, rt, is_left_outer) = match jc.kind {
+                JInner | JCross => (lt_orig, rt_orig, false),
+                JLeftOuter      => (lt_orig, rt_orig, true),
+                JRightOuter     => (rt_orig, lt_orig, true),
+                _ => { return Err(plan_error("FULL OUTER JOIN pending in v1".clone())); }
             };
             let lmeta = match schema.lookup_table(&lt.schema, &lt.name) {
                 Ok(m)  => m,
