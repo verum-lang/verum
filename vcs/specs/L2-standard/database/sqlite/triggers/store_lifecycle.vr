@@ -1,0 +1,142 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, triggers, store
+// @timeout: 5000
+// @expected-exit: 0
+//
+// Trigger spec + store: defines a trigger, registers it, asks the
+// store for matches at each DML hook combination, drops the table
+// and verifies cascade.
+
+mount core.database.sqlite.native.triggers.spec.{
+    TriggerDef, TriggerTiming, TriggerEvent,
+    TtBefore, TtAfter, TtInsteadOf,
+    TeInsert, TeDelete, TeUpdate,
+    trigger_def_new,
+    RowBindingKind, RbNew, RbOld, row_binding_available_for_event,
+};
+mount core.database.sqlite.native.triggers.store.{
+    TriggerStore, store_new,
+};
+mount core.database.sqlite.native.triggers.fire.{
+    RowBinding, binding_for_insert, binding_for_delete, binding_for_update,
+    validate_binding_for_event, decide_fire,
+    FireDecision, FdSkip, FdRun,
+};
+mount core.database.sqlite.native.l4_vdbe.register.{Register, RNull, RInt};
+
+fn test_event_match_logic() {
+    let mut t = trigger_def_new(
+        "audit".clone(),
+        "users".clone(),
+        TtAfter,
+        TeInsert,
+    );
+    let _ = &mut t;
+    assert(t.fires_on_event(&TeInsert));
+    assert(!t.fires_on_event(&TeDelete));
+}
+
+fn test_update_column_overlap() {
+    let mut cols: List<Text> = List.new();
+    cols.push("email".clone());
+    let trig = trigger_def_new(
+        "email_changed".clone(),
+        "users".clone(),
+        TtAfter,
+        TeUpdate(cols),
+    );
+    let mut other_cols: List<Text> = List.new();
+    other_cols.push("email".clone());
+    other_cols.push("name".clone());
+    assert(trig.fires_on_event(&TeUpdate(other_cols)));
+
+    let mut unrelated: List<Text> = List.new();
+    unrelated.push("name".clone());
+    assert(!trig.fires_on_event(&TeUpdate(unrelated)));
+}
+
+fn test_store_add_and_match() {
+    let mut s = store_new();
+    let t1 = trigger_def_new("t1".clone(), "users".clone(), TtBefore, TeInsert);
+    let t2 = trigger_def_new("t2".clone(), "users".clone(), TtAfter, TeInsert);
+    let id1 = s.add(t1);
+    let id2 = s.add(t2);
+    assert(id1 != id2);
+    assert(id1 > 0);
+    assert(s.count() == 2);
+
+    let match_before = s.matching(&"users".clone(), &TtBefore, &TeInsert);
+    assert_eq(match_before.len(), 1);
+    let match_after = s.matching(&"users".clone(), &TtAfter, &TeInsert);
+    assert_eq(match_after.len(), 1);
+}
+
+fn test_drop_named() {
+    let mut s = store_new();
+    let _ = s.add(trigger_def_new("a".clone(), "x".clone(), TtAfter, TeDelete));
+    assert(s.drop_named(&"a".clone()));
+    assert(!s.drop_named(&"a".clone()));
+    assert_eq(s.count(), 0);
+}
+
+fn test_drop_for_table_cascade() {
+    let mut s = store_new();
+    let _ = s.add(trigger_def_new("t1".clone(), "alpha".clone(), TtBefore, TeInsert));
+    let _ = s.add(trigger_def_new("t2".clone(), "beta".clone(),  TtAfter,  TeDelete));
+    let _ = s.add(trigger_def_new("t3".clone(), "alpha".clone(), TtAfter,  TeInsert));
+    let dropped = s.drop_for_table(&"alpha".clone());
+    assert_eq(dropped, 2);
+    assert_eq(s.count(), 1);
+}
+
+fn test_row_bindings_for_event() {
+    assert(row_binding_available_for_event(&RbNew, &TeInsert));
+    assert(!row_binding_available_for_event(&RbOld, &TeInsert));
+    assert(row_binding_available_for_event(&RbOld, &TeDelete));
+    assert(!row_binding_available_for_event(&RbNew, &TeDelete));
+    let cols: List<Text> = List.new();
+    assert(row_binding_available_for_event(&RbNew, &TeUpdate(cols.clone())));
+    assert(row_binding_available_for_event(&RbOld, &TeUpdate(cols)));
+}
+
+fn test_binding_lookup() {
+    let mut new_row: List<Register> = List.new();
+    new_row.push(RInt(42 as Int64));
+    let b = binding_for_insert(new_row);
+    let v = b.lookup(&RbNew, 0);
+    match v {
+        RInt(x) => assert_eq(x, 42 as Int64),
+        _       => panic("expected RInt"),
+    }
+    // OLD on INSERT → RNull
+    match b.lookup(&RbOld, 0) {
+        RNull => {},
+        _     => panic("OLD on INSERT must be NULL"),
+    }
+}
+
+fn test_decide_fire() {
+    let mut t = trigger_def_new("x".clone(), "u".clone(), TtBefore, TeInsert);
+    t.sub_program_id = 7;
+    match decide_fire(&t, true) {
+        FdRun(id) => assert_eq(id, 7),
+        FdSkip    => panic("should fire"),
+    }
+    match decide_fire(&t, false) {
+        FdSkip    => {},
+        FdRun(_)  => panic("WHEN false should skip"),
+    }
+}
+
+fn main() {
+    test_event_match_logic();
+    test_update_column_overlap();
+    test_store_add_and_match();
+    test_drop_named();
+    test_drop_for_table_cascade();
+    test_row_bindings_for_event();
+    test_binding_lookup();
+    test_decide_fire();
+}

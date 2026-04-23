@@ -1,0 +1,144 @@
+// =============================================================================
+// constraints/spec.vr — constraint records
+// =============================================================================
+// Spec: sqlite-native.md §17.3..§17.6
+//
+// Five constraint kinds carried by a CREATE TABLE / ALTER TABLE:
+//
+//   * CheckConstraint  — `CHECK (expr)` table- or column-level
+//   * NotNull          — `NOT NULL [ON CONFLICT <pol>]`
+//   * Unique           — `UNIQUE (cols) [ON CONFLICT <pol>]`
+//   * PrimaryKey       — `PRIMARY KEY (cols) [autoincrement] [ON CONFLICT pol]`
+//   * ForeignKey       — `FOREIGN KEY (cols) REFERENCES t(cols) [actions]`
+//   * Generated        — column-level `GENERATED ALWAYS AS (expr) [STORED|VIRTUAL]`
+// =============================================================================
+
+module core.database.sqlite.native.constraints.spec;
+
+mount core.*;
+mount base.{Text, Maybe, Bool};
+mount collections.List;
+mount core.database.sqlite.native.constraints.conflict.{OnConflict, OcAbort};
+
+public type CheckConstraint is {
+    name: Maybe<Text>,
+    expr_sql: Text,
+    on_conflict: OnConflict,
+};
+
+public type NotNullConstraint is {
+    column: Text,
+    on_conflict: OnConflict,
+};
+
+public type UniqueConstraint is {
+    name: Maybe<Text>,
+    columns: List<Text>,
+    on_conflict: OnConflict,
+};
+
+public type PrimaryKeyConstraint is {
+    columns: List<Text>,
+    autoincrement: Bool,
+    on_conflict: OnConflict,
+};
+
+public type FkAction is FkNoAction | FkRestrict | FkSetNull | FkSetDefault | FkCascade;
+
+public fn fk_action_name(a: &FkAction) -> Text {
+    match a {
+        FkNoAction   => "NO ACTION".clone(),
+        FkRestrict   => "RESTRICT".clone(),
+        FkSetNull    => "SET NULL".clone(),
+        FkSetDefault => "SET DEFAULT".clone(),
+        FkCascade    => "CASCADE".clone(),
+    }
+}
+
+public type ForeignKeyConstraint is {
+    name: Maybe<Text>,
+    from_columns: List<Text>,
+    target_table: Text,
+    target_columns: List<Text>,
+    on_update: FkAction,
+    on_delete: FkAction,
+    deferrable: Bool,
+    initially_deferred: Bool,
+};
+
+public type GeneratedKind is GcStored | GcVirtual;
+
+public type GeneratedColumn is {
+    column: Text,
+    expr_sql: Text,
+    kind: GeneratedKind,
+};
+
+// -----------------------------------------------------------------------------
+// Constructors with sensible defaults
+// -----------------------------------------------------------------------------
+
+public fn check_new(expr_sql: Text) -> CheckConstraint {
+    CheckConstraint { name: None, expr_sql: expr_sql, on_conflict: OcAbort }
+}
+
+public fn not_null_new(column: Text) -> NotNullConstraint {
+    NotNullConstraint { column: column, on_conflict: OcAbort }
+}
+
+public fn unique_new(columns: List<Text>) -> UniqueConstraint {
+    UniqueConstraint { name: None, columns: columns, on_conflict: OcAbort }
+}
+
+public fn primary_key_new(columns: List<Text>) -> PrimaryKeyConstraint {
+    PrimaryKeyConstraint {
+        columns: columns,
+        autoincrement: false,
+        on_conflict: OcAbort,
+    }
+}
+
+public fn foreign_key_new(
+    from_cols: List<Text>,
+    target_table: Text,
+    target_cols: List<Text>,
+) -> ForeignKeyConstraint {
+    ForeignKeyConstraint {
+        name: None,
+        from_columns: from_cols,
+        target_table: target_table,
+        target_columns: target_cols,
+        on_update: FkNoAction,
+        on_delete: FkNoAction,
+        deferrable: false,
+        initially_deferred: false,
+    }
+}
+
+public fn generated_new(column: Text, expr_sql: Text, kind: GeneratedKind) -> GeneratedColumn {
+    GeneratedColumn { column: column, expr_sql: expr_sql, kind: kind }
+}
+
+// -----------------------------------------------------------------------------
+// Per-table aggregate
+// -----------------------------------------------------------------------------
+
+public type ConstraintSet is {
+    checks: List<CheckConstraint>,
+    not_nulls: List<NotNullConstraint>,
+    uniques: List<UniqueConstraint>,
+    primary_key: Maybe<PrimaryKeyConstraint>,
+    foreign_keys: List<ForeignKeyConstraint>,
+    generated_columns: List<GeneratedColumn>,
+};
+
+public fn constraint_set_new() -> ConstraintSet {
+    ConstraintSet {
+        checks: List.new(),
+        not_nulls: List.new(),
+        uniques: List.new(),
+        primary_key: None,
+        foreign_keys: List.new(),
+        generated_columns: List.new(),
+    }
+}

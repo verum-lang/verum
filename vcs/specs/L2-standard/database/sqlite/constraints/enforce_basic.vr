@@ -1,0 +1,144 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, constraints, enforce
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.l4_vdbe.register.{Register, RNull, RInt, RText};
+mount core.database.sqlite.native.constraints.spec.{
+    CheckConstraint, NotNullConstraint, UniqueConstraint,
+    PrimaryKeyConstraint, ForeignKeyConstraint, GeneratedColumn,
+    GeneratedKind, GcStored, GcVirtual,
+    FkAction, FkNoAction, FkCascade,
+    check_new, not_null_new, unique_new, primary_key_new,
+    foreign_key_new, generated_new,
+    constraint_set_new,
+};
+mount core.database.sqlite.native.constraints.conflict.{
+    OnConflict, OcAbort, OcIgnore, OcReplace, OcRollback,
+    ViolationDecision, VdRaiseError, VdSilentlySkipRow,
+    VdReplaceExisting, VdAbortAndRollbackTxn,
+    decision_for, on_conflict_from_name,
+};
+mount core.database.sqlite.native.constraints.enforce.{
+    enforce_check, enforce_not_null, enforce_unique,
+    enforce_primary_key, enforce_foreign_key,
+};
+
+fn test_check_satisfied_returns_none() {
+    let spec = check_new("x > 0".clone());
+    match enforce_check(&"users".clone(), &spec, true) {
+        None => {},
+        Some(_) => panic("satisfied check should yield None"),
+    }
+}
+
+fn test_check_violated_routes_through_policy() {
+    let mut spec = check_new("x > 0".clone());
+    spec.on_conflict = OcRollback;
+    match enforce_check(&"users".clone(), &spec, false) {
+        Some(VdAbortAndRollbackTxn(_)) => {},
+        _ => panic("rollback policy should yield VdAbortAndRollbackTxn"),
+    }
+}
+
+fn test_not_null_violation() {
+    let spec = not_null_new("email".clone());
+    match enforce_not_null(&"users".clone(), &spec, &RNull) {
+        Some(VdRaiseError(_)) => {},
+        _ => panic("NULL value should yield VdRaiseError"),
+    }
+    // Non-null value: no violation
+    match enforce_not_null(&"users".clone(), &spec, &RInt(42 as Int64)) {
+        None => {},
+        _    => panic("non-null value should yield None"),
+    }
+}
+
+fn test_unique_with_ignore_skips_row() {
+    let mut cols: List<Text> = List.new();
+    cols.push("email".clone());
+    let mut spec = unique_new(cols);
+    spec.on_conflict = OcIgnore;
+    match enforce_unique(&"users".clone(), &spec, true) {
+        Some(VdSilentlySkipRow) => {},
+        _ => panic("IGNORE policy should yield VdSilentlySkipRow"),
+    }
+}
+
+fn test_primary_key_with_replace() {
+    let mut cols: List<Text> = List.new();
+    cols.push("id".clone());
+    let mut spec = primary_key_new(cols);
+    spec.on_conflict = OcReplace;
+    match enforce_primary_key(&"users".clone(), &spec, true) {
+        Some(VdReplaceExisting) => {},
+        _ => panic("REPLACE should yield VdReplaceExisting"),
+    }
+}
+
+fn test_foreign_key_violation_when_target_missing() {
+    let mut from_cols: List<Text> = List.new();
+    from_cols.push("user_id".clone());
+    let mut target_cols: List<Text> = List.new();
+    target_cols.push("id".clone());
+    let spec = foreign_key_new(from_cols, "users".clone(), target_cols);
+    match enforce_foreign_key(&"posts".clone(), &spec, false) {
+        Some(_) => {},
+        None    => panic("missing FK parent must violate"),
+    }
+    match enforce_foreign_key(&"posts".clone(), &spec, true) {
+        None => {},
+        _    => panic("FK satisfied → None"),
+    }
+}
+
+fn test_decision_for_abort() {
+    match decision_for(&OcAbort, "boom".clone()) {
+        VdRaiseError(_) => {},
+        _ => panic("ABORT → VdRaiseError"),
+    }
+}
+
+fn test_on_conflict_from_name() {
+    match on_conflict_from_name(&"abort".clone()) {
+        Some(_) => {},
+        None    => panic("'abort' should resolve"),
+    }
+    match on_conflict_from_name(&"FAIL".clone()) {
+        Some(_) => {},
+        None    => panic("case-insensitive 'FAIL' should resolve"),
+    }
+    match on_conflict_from_name(&"bogus".clone()) {
+        None    => {},
+        Some(_) => panic("'bogus' should not resolve"),
+    }
+}
+
+fn test_constraint_set_starts_empty() {
+    let cs = constraint_set_new();
+    assert_eq(cs.checks.len(), 0);
+    assert_eq(cs.foreign_keys.len(), 0);
+    assert_eq(cs.uniques.len(), 0);
+}
+
+fn test_generated_column_kinds() {
+    let stored = generated_new("c1".clone(), "a + b".clone(), GcStored);
+    let virt   = generated_new("c2".clone(), "a * b".clone(), GcVirtual);
+    assert(stored.column == "c1".clone());
+    assert(virt.column == "c2".clone());
+}
+
+fn main() {
+    test_check_satisfied_returns_none();
+    test_check_violated_routes_through_policy();
+    test_not_null_violation();
+    test_unique_with_ignore_skips_row();
+    test_primary_key_with_replace();
+    test_foreign_key_violation_when_target_missing();
+    test_decision_for_abort();
+    test_on_conflict_from_name();
+    test_constraint_set_starts_empty();
+    test_generated_column_kinds();
+}

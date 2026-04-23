@@ -1,0 +1,52 @@
+// =============================================================================
+// views/spec.vr — ViewDef record
+// =============================================================================
+// Spec: sqlite-native.md §17.2
+//
+// CREATE [TEMP] VIEW [IF NOT EXISTS] name [(c1, c2, ...)] AS
+//     <select-stmt>;
+//
+// The planner inlines the SELECT into every reference; the view's
+// declared column list (if any) renames the SELECT projections.
+// =============================================================================
+
+module core.database.sqlite.native.views.spec;
+
+mount core.*;
+mount base.{Text, Maybe, Bool};
+mount collections.List;
+
+public type ViewDef is {
+    name: Text,
+    schema_name: Text,
+    /// Empty list means "use the SELECT's projection names verbatim".
+    column_aliases: List<Text>,
+    /// Original SELECT text — re-parsed at query time.
+    select_sql: Text,
+    /// True for CREATE TEMP VIEW.
+    is_temp: Bool,
+};
+
+public fn view_def_new(name: Text, select_sql: Text) -> ViewDef {
+    ViewDef {
+        name: name,
+        schema_name: "main".clone(),
+        column_aliases: List.new(),
+        select_sql: select_sql,
+        is_temp: false,
+    }
+}
+
+implement ViewDef {
+    public fn add_alias(&mut self, alias: Text) {
+        self.column_aliases.push(alias);
+    }
+
+    public fn set_temp(&mut self, t: Bool) { self.is_temp = t; }
+    public fn set_schema(&mut self, s: Text) { self.schema_name = s; }
+
+    public fn arity_or_none(&self) -> Maybe<Int> {
+        if self.column_aliases.len() == 0 { None }
+        else { Some(self.column_aliases.len()) }
+    }
+}

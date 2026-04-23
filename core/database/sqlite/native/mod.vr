@@ -81,3 +81,7 @@ public module builtins;
 public module pragmas;
 public module vtabs;
 public module verify;
+// - triggers/views/constraints: §17 schema-side feature catalogues
+public module triggers;
+public module views;
+public module constraints;

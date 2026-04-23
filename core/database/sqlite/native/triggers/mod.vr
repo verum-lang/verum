@@ -1,0 +1,23 @@
+// =============================================================================
+// core/database/sqlite/native/triggers/mod.vr
+// =============================================================================
+// Layer: 5 (parsing) / 6 (storage) / 4 (firing)
+// Spec: sqlite-native.md §17.1
+//
+// Trigger catalogue. The L5 parser builds `TriggerDef` records that
+// the L6 SchemaCache stores; the L4 interpreter fires them via
+// `Gosub trigger_id` at the appropriate DML hook (BEFORE / AFTER /
+// INSTEAD-OF). Each trigger compiles to a sub-program in the
+// VdbeProgram constant pool.
+//
+// This module is the data-layer source of truth — the AST/codegen
+// path will route through it once the SCreateTrigger AST node lands
+// in `l5_sql/ast.vr`. Until then, the catalogue is exercisable
+// directly from L7 API as `Connection.add_trigger(spec)`.
+// =============================================================================
+
+module core.database.sqlite.native.triggers;
+
+public module spec;
+public module store;
+public module fire;

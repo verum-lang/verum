@@ -1,0 +1,163 @@
+// =============================================================================
+// constraints/enforce.vr — runtime constraint validation
+// =============================================================================
+// Layer: 4
+// Spec: sqlite-native.md §17.3..§17.7
+//
+// Pure-Verum predicates the L4 interpreter calls at every INSERT /
+// UPDATE step. Each check returns a `Violation` if the constraint
+// fails; the caller threads the matching `OnConflict` policy through
+// `conflict::decision_for` to decide what to do next.
+//
+// `check_check_expr` returns `Ok(true)` for satisfied, `Ok(false)`
+// for violated, `Err` for evaluation error. The CHECK expression
+// itself is evaluated by a separate VDBE sub-program — the helper
+// here only takes the boolean result + the spec.
+// =============================================================================
+
+module core.database.sqlite.native.constraints.enforce;
+
+mount core.*;
+mount base.{Text, Maybe, Bool};
+mount collections.List;
+mount core.database.sqlite.native.l4_vdbe.register.{
+    Register, RNull, RInt,
+};
+mount core.database.sqlite.native.constraints.spec.{
+    CheckConstraint, NotNullConstraint, UniqueConstraint,
+    PrimaryKeyConstraint, ForeignKeyConstraint, GeneratedColumn,
+};
+mount core.database.sqlite.native.constraints.conflict.{
+    OnConflict, ViolationDecision, decision_for,
+};
+
+// -----------------------------------------------------------------------------
+// Violation message helpers
+// -----------------------------------------------------------------------------
+
+fn build_msg(prefix: Text, table: &Text, detail: &Text) -> Text {
+    let mut out = prefix;
+    let pb = " on ".clone();
+    let pbb = pb.as_bytes();
+    let mut i: Int = 0;
+    while i < pbb.len() { out.push_byte(pbb[i]); i = i + 1; }
+    let tb = table.as_bytes();
+    i = 0;
+    while i < tb.len() { out.push_byte(tb[i]); i = i + 1; }
+    let sep = ": ".clone();
+    let sb = sep.as_bytes();
+    i = 0;
+    while i < sb.len() { out.push_byte(sb[i]); i = i + 1; }
+    let db = detail.as_bytes();
+    i = 0;
+    while i < db.len() { out.push_byte(db[i]); i = i + 1; }
+    out
+}
+
+// -----------------------------------------------------------------------------
+// CHECK expression
+// -----------------------------------------------------------------------------
+
+public fn enforce_check(
+    table: &Text,
+    spec: &CheckConstraint,
+    is_satisfied: Bool,
+) -> Maybe<ViolationDecision> {
+    if is_satisfied { return None; }
+    let detail = match &spec.name {
+        Some(n) => n.clone(),
+        None    => "<unnamed CHECK>".clone(),
+    };
+    let msg = build_msg("CHECK constraint failed".clone(), table, &detail);
+    Some(decision_for(&spec.on_conflict, msg))
+}
+
+// -----------------------------------------------------------------------------
+// NOT NULL
+// -----------------------------------------------------------------------------
+
+public fn enforce_not_null(
+    table: &Text,
+    spec: &NotNullConstraint,
+    value: &Register,
+) -> Maybe<ViolationDecision> {
+    let is_null = match value { RNull => true, _ => false };
+    if !is_null { return None; }
+    let msg = build_msg("NOT NULL constraint failed".clone(), table, &spec.column);
+    Some(decision_for(&spec.on_conflict, msg))
+}
+
+// -----------------------------------------------------------------------------
+// UNIQUE
+// -----------------------------------------------------------------------------
+
+public fn enforce_unique(
+    table: &Text,
+    spec: &UniqueConstraint,
+    duplicate_found: Bool,
+) -> Maybe<ViolationDecision> {
+    if !duplicate_found { return None; }
+    let detail = match &spec.name {
+        Some(n) => n.clone(),
+        None    => join_columns(&spec.columns),
+    };
+    let msg = build_msg("UNIQUE constraint failed".clone(), table, &detail);
+    Some(decision_for(&spec.on_conflict, msg))
+}
+
+// -----------------------------------------------------------------------------
+// PRIMARY KEY (effectively a UNIQUE plus NOT NULL on the columns)
+// -----------------------------------------------------------------------------
+
+public fn enforce_primary_key(
+    table: &Text,
+    spec: &PrimaryKeyConstraint,
+    duplicate_found: Bool,
+) -> Maybe<ViolationDecision> {
+    if !duplicate_found { return None; }
+    let detail = join_columns(&spec.columns);
+    let msg = build_msg("PRIMARY KEY constraint failed".clone(), table, &detail);
+    Some(decision_for(&spec.on_conflict, msg))
+}
+
+// -----------------------------------------------------------------------------
+// FOREIGN KEY
+// -----------------------------------------------------------------------------
+//
+// `target_row_exists`: whether the referenced parent row was found.
+// FOREIGN KEY violations always use OcAbort by default (SQLite spec).
+// =============================================================================
+
+public fn enforce_foreign_key(
+    table: &Text,
+    spec: &ForeignKeyConstraint,
+    target_row_exists: Bool,
+) -> Maybe<ViolationDecision> {
+    if target_row_exists { return None; }
+    let detail = match &spec.name {
+        Some(n) => n.clone(),
+        None    => spec.target_table.clone(),
+    };
+    let msg = build_msg("FOREIGN KEY constraint failed".clone(), table, &detail);
+    Some(decision_for(&core.database.sqlite.native.constraints.conflict.OcAbort, msg))
+}
+
+// -----------------------------------------------------------------------------
+// Helpers
+// -----------------------------------------------------------------------------
+
+fn join_columns(cols: &List<Text>) -> Text {
+    let mut out = Text.new();
+    let mut i: Int = 0;
+    while i < cols.len() {
+        if i > 0 {
+            out.push_byte(44 as Byte);
+            out.push_byte(32 as Byte);
+        }
+        let cb = cols[i].as_bytes();
+        let mut k: Int = 0;
+        while k < cb.len() { out.push_byte(cb[k]); k = k + 1; }
+        i = i + 1;
+    }
+    out
+}

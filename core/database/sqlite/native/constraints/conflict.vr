@@ -1,0 +1,74 @@
+// =============================================================================
+// constraints/conflict.vr — ON CONFLICT resolution policy
+// =============================================================================
+// Spec: sqlite-native.md §17.7
+//
+// `OnConflict` mirrors SQLite's 5 conflict-handling modes plus the
+// row-level decision the interpreter must take.
+// =============================================================================
+
+module core.database.sqlite.native.constraints.conflict;
+
+mount core.*;
+mount base.{Text};
+
+public type OnConflict is
+      OcAbort
+    | OcFail
+    | OcIgnore
+    | OcReplace
+    | OcRollback;
+
+public fn on_conflict_name(o: &OnConflict) -> Text {
+    match o {
+        OcAbort    => "ABORT".clone(),
+        OcFail     => "FAIL".clone(),
+        OcIgnore   => "IGNORE".clone(),
+        OcReplace  => "REPLACE".clone(),
+        OcRollback => "ROLLBACK".clone(),
+    }
+}
+
+public fn on_conflict_from_name(s: &Text) -> base.Maybe<OnConflict> {
+    let lo = ascii_lower(s);
+    if lo == "abort".clone()    { return base.Some(OcAbort); }
+    if lo == "fail".clone()     { return base.Some(OcFail); }
+    if lo == "ignore".clone()   { return base.Some(OcIgnore); }
+    if lo == "replace".clone()  { return base.Some(OcReplace); }
+    if lo == "rollback".clone() { return base.Some(OcRollback); }
+    base.None
+}
+
+// -----------------------------------------------------------------------------
+// Decision the interpreter takes after seeing a violation
+// -----------------------------------------------------------------------------
+
+public type ViolationDecision is
+      VdRaiseError(Text)            // ABORT / FAIL — propagate the message
+    | VdSilentlySkipRow              // IGNORE
+    | VdReplaceExisting              // REPLACE — delete colliding row, retry
+    | VdAbortAndRollbackTxn(Text);   // ROLLBACK — undo the entire transaction
+
+public fn decision_for(policy: &OnConflict, msg: Text) -> ViolationDecision {
+    match policy {
+        OcAbort    => VdRaiseError(msg),
+        OcFail     => VdRaiseError(msg),    // FAIL stops mid-statement; ABORT undoes
+        OcIgnore   => VdSilentlySkipRow,
+        OcReplace  => VdReplaceExisting,
+        OcRollback => VdAbortAndRollbackTxn(msg),
+    }
+}
+
+fn ascii_lower(s: &Text) -> Text {
+    let bs = s.as_bytes();
+    let mut out = base.Text.new();
+    let mut i: base.Int = 0;
+    while i < bs.len() {
+        let b: base.Byte = bs[i];
+        let lo: base.Byte =
+            if b >= (65 as base.Byte) && b <= (90 as base.Byte) { b + (32 as base.Byte) } else { b };
+        out.push_byte(lo);
+        i = i + 1;
+    }
+    out
+}

@@ -1,0 +1,117 @@
+// =============================================================================
+// triggers/fire.vr — interpreter-side trigger firing helpers
+// =============================================================================
+// Layer: 4
+// Spec: sqlite-native.md §17.1
+//
+// Helpers used by the L4 interpreter at every DML hook to:
+//
+//   1. Build the (NEW, OLD) row binding context for a fired trigger.
+//   2. Evaluate the optional WHEN clause; skip body if false.
+//   3. Resolve and gosub into the trigger's compiled sub-program.
+//
+// The actual `Gosub` opcode emission lives in the codegen; this file
+// is the runtime façade. Currently the helpers only build the
+// binding context — the codegen wire-up will land once the AST node
+// for SCreateTrigger is added.
+// =============================================================================
+
+module core.database.sqlite.native.triggers.fire;
+
+mount core.*;
+mount base.{Text, Maybe, Bool};
+mount collections.List;
+mount core.database.sqlite.native.l4_vdbe.register.{
+    Register, RNull,
+};
+mount core.database.sqlite.native.triggers.spec.{
+    TriggerDef, TriggerEvent, TeInsert, TeDelete, TeUpdate,
+    RowBindingKind, RbNew, RbOld, row_binding_available_for_event,
+};
+
+// -----------------------------------------------------------------------------
+// Per-fire row binding
+// -----------------------------------------------------------------------------
+
+public type RowBinding is {
+    /// Indexed by column ordinal (matches the table's column list order).
+    new_row: List<Register>,
+    /// Empty when the event is INSERT.
+    old_row: List<Register>,
+};
+
+public fn binding_new() -> RowBinding {
+    RowBinding { new_row: List.new(), old_row: List.new() }
+}
+
+public fn binding_for_insert(new_row: List<Register>) -> RowBinding {
+    RowBinding { new_row: new_row, old_row: List.new() }
+}
+
+public fn binding_for_delete(old_row: List<Register>) -> RowBinding {
+    RowBinding { new_row: List.new(), old_row: old_row }
+}
+
+public fn binding_for_update(new_row: List<Register>, old_row: List<Register>) -> RowBinding {
+    RowBinding { new_row: new_row, old_row: old_row }
+}
+
+implement RowBinding {
+    /// Resolve `NEW.col_idx` / `OLD.col_idx`. Returns RNull if unavailable.
+    public fn lookup(&self, kind: &RowBindingKind, col_idx: Int) -> Register {
+        match kind {
+            RbNew => {
+                if col_idx < 0 || col_idx >= self.new_row.len() { return RNull; }
+                clone_register(&self.new_row[col_idx])
+            }
+            RbOld => {
+                if col_idx < 0 || col_idx >= self.old_row.len() { return RNull; }
+                clone_register(&self.old_row[col_idx])
+            }
+        }
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Pre-fire validation
+// -----------------------------------------------------------------------------
+
+public fn validate_binding_for_event(b: &RowBinding, event: &TriggerEvent) -> Bool {
+    match event {
+        TeInsert    => b.old_row.len() == 0,
+        TeDelete    => b.new_row.len() == 0,
+        TeUpdate(_) => b.new_row.len() > 0 || b.old_row.len() > 0,
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Fire decision
+// -----------------------------------------------------------------------------
+
+public type FireDecision is FdSkip | FdRun(Int);
+
+public fn decide_fire(trig: &TriggerDef, when_truthy: Bool) -> FireDecision {
+    if !when_truthy { return FdSkip; }
+    if trig.sub_program_id <= 0 { return FdSkip; }
+    FdRun(trig.sub_program_id)
+}
+
+// -----------------------------------------------------------------------------
+// Helpers
+// -----------------------------------------------------------------------------
+
+fn clone_register(r: &Register) -> Register {
+    match r {
+        RNull          => RNull,
+        core.database.sqlite.native.l4_vdbe.register.RInt(x)   => core.database.sqlite.native.l4_vdbe.register.RInt(x),
+        core.database.sqlite.native.l4_vdbe.register.RReal(x)  => core.database.sqlite.native.l4_vdbe.register.RReal(x),
+        core.database.sqlite.native.l4_vdbe.register.RText(s)  => core.database.sqlite.native.l4_vdbe.register.RText(s.clone()),
+        core.database.sqlite.native.l4_vdbe.register.RBlob(b)  => {
+            let mut out: List<Byte> = List.new();
+            let mut i: Int = 0;
+            while i < b.len() { out.push(b[i]); i = i + 1; }
+            core.database.sqlite.native.l4_vdbe.register.RBlob(out)
+        }
+        core.database.sqlite.native.l4_vdbe.register.RRowId(x) => core.database.sqlite.native.l4_vdbe.register.RRowId(x),
+    }
+}

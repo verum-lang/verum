@@ -1,0 +1,151 @@
+// =============================================================================
+// triggers/spec.vr — TriggerDef record
+// =============================================================================
+// Spec: sqlite-native.md §17.1
+//
+// CREATE TRIGGER name
+//     BEFORE | AFTER | INSTEAD OF
+//     INSERT | UPDATE [OF col1, col2, ...] | DELETE
+//     ON table
+//     [FOR EACH ROW]
+//     [WHEN condition]
+// BEGIN
+//     statement1;
+//     statement2;
+// END;
+// =============================================================================
+
+module core.database.sqlite.native.triggers.spec;
+
+mount core.*;
+mount base.{Text, Maybe, Bool};
+mount collections.List;
+
+// -----------------------------------------------------------------------------
+// Timing & event
+// -----------------------------------------------------------------------------
+
+public type TriggerTiming is TtBefore | TtAfter | TtInsteadOf;
+
+public type TriggerEvent is
+      TeInsert
+    | TeDelete
+    | TeUpdate(List<Text>);  // empty list = "any column"
+
+public fn timing_name(t: &TriggerTiming) -> Text {
+    match t {
+        TtBefore    => "BEFORE".clone(),
+        TtAfter     => "AFTER".clone(),
+        TtInsteadOf => "INSTEAD OF".clone(),
+    }
+}
+
+public fn event_name(e: &TriggerEvent) -> Text {
+    match e {
+        TeInsert    => "INSERT".clone(),
+        TeDelete    => "DELETE".clone(),
+        TeUpdate(_) => "UPDATE".clone(),
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Trigger statement body — at parse time we only carry the raw SQL
+// text; the L5 codegen re-parses it within the trigger context (so
+// NEW.col / OLD.col bindings resolve correctly).
+// -----------------------------------------------------------------------------
+
+public type TriggerBodyStmt is { sql: Text };
+
+public type TriggerDef is {
+    name: Text,
+    schema_name: Text,         // "main", "temp", "<attach-alias>"
+    timing: TriggerTiming,
+    event: TriggerEvent,
+    table_name: Text,
+    for_each_row: Bool,        // SQLite always true; kept for spec parity
+    when_clause: Maybe<Text>,  // optional WHEN <expr>
+    body: List<TriggerBodyStmt>,
+    /// Allocated by the SchemaCache when the trigger is registered.
+    /// 0 means "unbound — not yet stored".
+    sub_program_id: Int,
+};
+
+public fn trigger_def_new(
+    name: Text,
+    table_name: Text,
+    timing: TriggerTiming,
+    event: TriggerEvent,
+) -> TriggerDef {
+    TriggerDef {
+        name: name,
+        schema_name: "main".clone(),
+        timing: timing,
+        event: event,
+        table_name: table_name,
+        for_each_row: true,
+        when_clause: None,
+        body: List.new(),
+        sub_program_id: 0,
+    }
+}
+
+implement TriggerDef {
+    public fn add_body_stmt(&mut self, sql: Text) {
+        self.body.push(TriggerBodyStmt { sql: sql });
+    }
+
+    public fn set_when(&mut self, expr_sql: Text) {
+        self.when_clause = Some(expr_sql);
+    }
+
+    public fn set_schema(&mut self, schema: Text) {
+        self.schema_name = schema;
+    }
+
+    public fn fires_on_event(&self, evt: &TriggerEvent) -> Bool {
+        match self.event {
+            TeInsert    => match evt { TeInsert    => true, _ => false },
+            TeDelete    => match evt { TeDelete    => true, _ => false },
+            TeUpdate(self_cols) => match evt {
+                TeUpdate(other_cols) => {
+                    // No specific cols on the trigger = any column matches
+                    if self_cols.len() == 0 { return true; }
+                    if other_cols.len() == 0 { return false; }
+                    // Any overlap counts
+                    let mut i: Int = 0;
+                    while i < self_cols.len() {
+                        let mut j: Int = 0;
+                        while j < other_cols.len() {
+                            if self_cols[i] == other_cols[j] { return true; }
+                            j = j + 1;
+                        }
+                        i = i + 1;
+                    }
+                    false
+                }
+                _ => false,
+            },
+        }
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Special row binding tags — `NEW.col` / `OLD.col`
+// -----------------------------------------------------------------------------
+
+public type RowBindingKind is RbNew | RbOld;
+
+public fn row_binding_name(k: &RowBindingKind) -> Text {
+    match k {
+        RbNew => "NEW".clone(),
+        RbOld => "OLD".clone(),
+    }
+}
+
+public fn row_binding_available_for_event(k: &RowBindingKind, e: &TriggerEvent) -> Bool {
+    match e {
+        TeInsert    => match k { RbNew => true, RbOld => false },
+        TeDelete    => match k { RbNew => false, RbOld => true },
+        TeUpdate(_) => true,  // both NEW and OLD bound on UPDATE
+    }
+}

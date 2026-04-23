@@ -1,0 +1,167 @@
+// =============================================================================
+// triggers/store.vr — per-Connection trigger storage
+// =============================================================================
+// Layer: 6
+// Spec: sqlite-native.md §17.1
+//
+// Trigger sub-program registry attached to a SchemaCache. Indexed by
+// (table_name, timing, event) so the L4 interpreter can query all
+// matching triggers in a single lookup at every DML hook.
+// =============================================================================
+
+module core.database.sqlite.native.triggers.store;
+
+mount core.*;
+mount base.{Text, Maybe, Bool};
+mount collections.List;
+mount core.database.sqlite.native.triggers.spec.{
+    TriggerDef, TriggerTiming, TriggerEvent,
+    TtBefore, TtAfter, TtInsteadOf,
+    TeInsert, TeDelete, TeUpdate,
+};
+
+// -----------------------------------------------------------------------------
+// TriggerStore
+// -----------------------------------------------------------------------------
+
+public type TriggerStore is {
+    /// Flat list — small N, linear scan beats a HashMap for ≤ ~50 triggers.
+    triggers: List<TriggerDef>,
+    next_subprogram_id: Int,
+};
+
+public fn store_new() -> TriggerStore {
+    TriggerStore {
+        triggers: List.new(),
+        next_subprogram_id: 1,
+    }
+}
+
+implement TriggerStore {
+    public fn count(&self) -> Int { self.triggers.len() }
+
+    public fn add(&mut self, mut def: TriggerDef) -> Int {
+        let id = self.next_subprogram_id;
+        def.sub_program_id = id;
+        self.next_subprogram_id = id + 1;
+        self.triggers.push(def);
+        id
+    }
+
+    public fn drop_named(&mut self, name: &Text) -> Bool {
+        let mut i: Int = 0;
+        while i < self.triggers.len() {
+            if self.triggers[i].name == name {
+                let mut new_triggers: List<TriggerDef> = List.new();
+                let mut k: Int = 0;
+                while k < self.triggers.len() {
+                    if k != i { new_triggers.push(clone_def(&self.triggers[k])); }
+                    k = k + 1;
+                }
+                self.triggers = new_triggers;
+                return true;
+            }
+            i = i + 1;
+        }
+        false
+    }
+
+    /// Returns all triggers fitting (table_name, timing, event).
+    public fn matching(
+        &self,
+        table_name: &Text,
+        timing: &TriggerTiming,
+        event: &TriggerEvent,
+    ) -> List<TriggerDef> {
+        let mut out: List<TriggerDef> = List.new();
+        let mut i: Int = 0;
+        while i < self.triggers.len() {
+            let t = &self.triggers[i];
+            if t.table_name == table_name && timing_eq(&t.timing, timing) && t.fires_on_event(event) {
+                out.push(clone_def(t));
+            }
+            i = i + 1;
+        }
+        out
+    }
+
+    /// Drop every trigger attached to a given table — called when
+    /// the table itself is dropped.
+    public fn drop_for_table(&mut self, table_name: &Text) -> Int {
+        let mut new_triggers: List<TriggerDef> = List.new();
+        let mut dropped: Int = 0;
+        let mut i: Int = 0;
+        while i < self.triggers.len() {
+            if self.triggers[i].table_name != table_name {
+                new_triggers.push(clone_def(&self.triggers[i]));
+            } else {
+                dropped = dropped + 1;
+            }
+            i = i + 1;
+        }
+        self.triggers = new_triggers;
+        dropped
+    }
+
+    public fn names(&self) -> List<Text> {
+        let mut out: List<Text> = List.new();
+        let mut i: Int = 0;
+        while i < self.triggers.len() {
+            out.push(self.triggers[i].name.clone());
+            i = i + 1;
+        }
+        out
+    }
+}
+
+fn timing_eq(a: &TriggerTiming, b: &TriggerTiming) -> Bool {
+    match a {
+        TtBefore    => match b { TtBefore    => true, _ => false },
+        TtAfter     => match b { TtAfter     => true, _ => false },
+        TtInsteadOf => match b { TtInsteadOf => true, _ => false },
+    }
+}
+
+fn clone_def(d: &TriggerDef) -> TriggerDef {
+    let mut body: List<core.database.sqlite.native.triggers.spec.TriggerBodyStmt> = List.new();
+    let mut i: Int = 0;
+    while i < d.body.len() {
+        body.push(core.database.sqlite.native.triggers.spec.TriggerBodyStmt {
+            sql: d.body[i].sql.clone(),
+        });
+        i = i + 1;
+    }
+    let when_c = match &d.when_clause { Some(s) => Some(s.clone()), None => None };
+    TriggerDef {
+        name: d.name.clone(),
+        schema_name: d.schema_name.clone(),
+        timing: clone_timing(&d.timing),
+        event: clone_event(&d.event),
+        table_name: d.table_name.clone(),
+        for_each_row: d.for_each_row,
+        when_clause: when_c,
+        body: body,
+        sub_program_id: d.sub_program_id,
+    }
+}
+
+fn clone_timing(t: &TriggerTiming) -> TriggerTiming {
+    match t {
+        TtBefore    => TtBefore,
+        TtAfter     => TtAfter,
+        TtInsteadOf => TtInsteadOf,
+    }
+}
+
+fn clone_event(e: &TriggerEvent) -> TriggerEvent {
+    match e {
+        TeInsert    => TeInsert,
+        TeDelete    => TeDelete,
+        TeUpdate(cols) => {
+            let mut out: List<Text> = List.new();
+            let mut i: Int = 0;
+            while i < cols.len() { out.push(cols[i].clone()); i = i + 1; }
+            TeUpdate(out)
+        }
+    }
+}

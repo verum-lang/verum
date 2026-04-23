@@ -1,0 +1,68 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, views, store
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.views.spec.{ViewDef, view_def_new};
+mount core.database.sqlite.native.views.store.{
+    ViewStore, view_store_new,
+    ViewStoreError, VseDuplicateName,
+};
+mount base.{Maybe, Some, None, Result, Ok, Err};
+
+fn test_add_lookup_drop() {
+    let mut s = view_store_new();
+    let v = view_def_new("active_users".clone(), "SELECT * FROM users WHERE active = 1".clone());
+    let r = s.add(v, false);
+    assert(r.is_ok());
+    assert_eq(s.count(), 1);
+    let found = s.lookup(&"active_users".clone());
+    let _: ViewDef = match found {
+        Some(x) => x,
+        None    => panic("view should be found"),
+    };
+    assert(s.drop_named(&"active_users".clone()));
+    assert_eq(s.count(), 0);
+}
+
+fn test_duplicate_rejected_unless_if_not_exists() {
+    let mut s = view_store_new();
+    let _ = s.add(view_def_new("v1".clone(), "SELECT 1".clone()), false);
+    match s.add(view_def_new("v1".clone(), "SELECT 2".clone()), false) {
+        Ok(_) => panic("duplicate should fail without IF NOT EXISTS"),
+        Err(_) => {},
+    }
+    let r = s.add(view_def_new("v1".clone(), "SELECT 3".clone()), true);
+    assert(r.is_ok());
+}
+
+fn test_arity_alias_list() {
+    let mut v = view_def_new("renamed".clone(), "SELECT a, b FROM t".clone());
+    v.add_alias("x".clone());
+    v.add_alias("y".clone());
+    match v.arity_or_none() {
+        Some(n) => assert_eq(n, 2),
+        None    => panic("aliases declared → arity = 2"),
+    }
+    let v0 = view_def_new("noalias".clone(), "SELECT * FROM t".clone());
+    match v0.arity_or_none() {
+        None    => {},
+        Some(_) => panic("no aliases → None"),
+    }
+}
+
+fn test_temp_flag() {
+    let mut v = view_def_new("tmp".clone(), "SELECT 1".clone());
+    assert(!v.is_temp);
+    v.set_temp(true);
+    assert(v.is_temp);
+}
+
+fn main() {
+    test_add_lookup_drop();
+    test_duplicate_rejected_unless_if_not_exists();
+    test_arity_alias_list();
+    test_temp_flag();
+}

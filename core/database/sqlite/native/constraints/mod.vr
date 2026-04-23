@@ -1,0 +1,19 @@
+// =============================================================================
+// core/database/sqlite/native/constraints/mod.vr
+// =============================================================================
+// Layer: 5 (parsing) / 4 (enforcement)
+// Spec: sqlite-native.md §17.3 (CHECK), §17.4 (FK), §17.5 (UNIQUE/PK/NOTNULL),
+//       §17.6 (generated columns), §17.7 (conflict resolution)
+//
+// Constraint catalogue. Each constraint kind carries a `Spec` record;
+// the L4 interpreter calls `enforce::check_<kind>` at INSERT/UPDATE
+// time. Conflict resolution policy (ABORT / FAIL / IGNORE / REPLACE /
+// ROLLBACK) is attached per-constraint and decides what happens on
+// violation.
+// =============================================================================
+
+module core.database.sqlite.native.constraints;
+
+public module spec;
+public module conflict;
+public module enforce;
