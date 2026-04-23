@@ -2131,6 +2131,28 @@ impl RefinementChecker {
                 }
             }
 
+            // Tuple-index `.0`, `.1`, ... on a literal-tuple receiver.
+            // Refinements like `|p| { p.0 > 0 }` on `type T is (Int, Int)`
+            // substitute p with the actual tuple literal `(0, 100)`.
+            // Without this fold the evaluator can't reduce `(0, 100).0`
+            // to `0` and returns Unknown.
+            ExprKind::TupleIndex { expr: inner, index } => {
+                let peel = |e: &Expr| -> Maybe<i64> {
+                    if let ExprKind::Tuple(items) = &e.kind {
+                        let idx = *index as usize;
+                        if idx < items.len() {
+                            return Self::try_extract_int_value(&items[idx]);
+                        }
+                    }
+                    Maybe::None
+                };
+                match &inner.kind {
+                    ExprKind::Tuple(_) => peel(inner),
+                    ExprKind::Paren(p) => peel(p),
+                    _ => Maybe::None,
+                }
+            }
+
             ExprKind::Binary { op, left, right } => {
                 use verum_ast::expr::BinOp;
                 let l = Self::try_extract_int_value(left);
