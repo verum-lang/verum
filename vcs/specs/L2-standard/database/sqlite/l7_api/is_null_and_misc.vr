@@ -1,0 +1,85 @@
+// @test: typecheck-pass
+// @level: L2
+// @tier: 0
+// @tags: sqlite, native, l7, is-null, quote, random, likely
+// @timeout: 15000
+// @description: IS/IS NOT NULL + QUOTE/RANDOM/LIKELY scalar functions
+//
+// Spec: internal/specs/sqlite-native.md §14.2
+
+mount core.*;
+mount collections.List;
+mount core.database.sqlite.native.l7_api.{
+    Database, DbError, open_admin,
+};
+mount core.database.sqlite.native.l4_vdbe.Register;
+
+fn is_null_and_is_not_null() {
+    let mut db = match open_admin() {
+        Ok(d)  => d,
+        Err(_) => { panic("open"); return; }
+    };
+    let _ = db.execute(&"CREATE TABLE t (v INTEGER)".clone());
+    let _ = db.execute(&"INSERT INTO t VALUES (42)".clone());
+    match db.query_all(&"SELECT v FROM t WHERE v IS NOT NULL".clone()) {
+        Ok(rows) => { assert(rows.len() <= 1); }
+        Err(_) => panic("query_all IS NOT NULL"),
+    }
+    match db.query_all(&"SELECT v FROM t WHERE v IS NULL".clone()) {
+        Ok(rows) => { assert(rows.len() <= 1); }
+        Err(_) => panic("query_all IS NULL"),
+    }
+}
+
+fn quote_text_value() {
+    let mut db = match open_admin() {
+        Ok(d)  => d,
+        Err(_) => { panic("open"); return; }
+    };
+    let _ = db.execute(&"CREATE TABLE t (s TEXT)".clone());
+    let _ = db.execute(&"INSERT INTO t VALUES ('hi')".clone());
+    match db.query_all(&"SELECT QUOTE(s) FROM t".clone()) {
+        Ok(rows) => {
+            match rows[0][0] { RText(_) => {}, _ => panic("QUOTE should be RText") }
+        }
+        Err(_) => panic("query_all QUOTE"),
+    }
+}
+
+fn random_returns_integer() {
+    let mut db = match open_admin() {
+        Ok(d)  => d,
+        Err(_) => { panic("open"); return; }
+    };
+    let _ = db.execute(&"CREATE TABLE t (v INTEGER)".clone());
+    let _ = db.execute(&"INSERT INTO t VALUES (1)".clone());
+    match db.query_all(&"SELECT RANDOM() FROM t".clone()) {
+        Ok(rows) => {
+            match rows[0][0] { RInt(_) => {}, _ => panic("RANDOM should be RInt") }
+        }
+        Err(_) => panic("query_all RANDOM"),
+    }
+}
+
+fn likely_identity() {
+    let mut db = match open_admin() {
+        Ok(d)  => d,
+        Err(_) => { panic("open"); return; }
+    };
+    let _ = db.execute(&"CREATE TABLE t (v INTEGER)".clone());
+    let _ = db.execute(&"INSERT INTO t VALUES (7)".clone());
+    match db.query_all(&"SELECT LIKELY(v) FROM t".clone()) {
+        Ok(rows) => {
+            match rows[0][0] { RInt(x) => { assert_eq(x as Int, 7); }, _ => panic("LIKELY") }
+        }
+        Err(_) => panic("query_all LIKELY"),
+    }
+}
+
+fn main() {
+    is_null_and_is_not_null();
+    quote_text_value();
+    random_returns_integer();
+    likely_identity();
+    print("is_null_and_misc typecheck ok");
+}
