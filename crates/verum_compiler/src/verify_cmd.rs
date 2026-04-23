@@ -265,7 +265,13 @@ impl<'s> VerifyCommand<'s> {
 
                 // Verify the function
                 let start_time = Instant::now();
-                let result = self.verify_function(func, timeout, &alias_map);
+                let result = self.verify_function(
+                    func,
+                    timeout,
+                    &alias_map,
+                    &reflection_registry,
+                    &callee_signatures_for_module,
+                );
                 let elapsed = start_time.elapsed();
 
                 // Profile if enabled (extract location before mutable borrow)
@@ -520,6 +526,8 @@ impl<'s> VerifyCommand<'s> {
         func: &FunctionDecl,
         timeout: Duration,
         alias_map: &std::collections::HashMap<Text, Vec<Expr>>,
+        reflection_registry: &verum_smt::refinement_reflection::RefinementReflectionRegistry,
+        callee_signatures_for_module: &[(Text, Vec<Text>, Text)],
     ) -> Result<verum_smt::ProofResult, VerificationError> {
         let start = Instant::now();
 
@@ -598,14 +606,51 @@ impl<'s> VerifyCommand<'s> {
             }
         }
 
-        // NOTE: reflection_registry threading for verify_function
-        // is a TODO — the theorem-path (try_smt_discharge) already
-        // has it wired. For now, user-function calls in fn-level
-        // postconditions use the Int-default UF signature, which is
-        // correct for Int-returning user functions (the common case
-        // in stdlib) and sound for others (Z3 treats mismatched
-        // sorts as unrelated symbols, leaving the claim unprovable
-        // rather than unsound).
+        // Reflection registry + module-level callee signatures wired
+        // identically to the theorem-path (verify_theorem above).
+        //
+        // Theorem-path (`ProofSearchEngine::set_reflection_registry`
+        // + `register_callee_signature`) routes these into the same
+        // translator API. Function-path calls the translator API
+        // directly — no engine wrapper is needed because function
+        // verification is a single SMT query, not a structured proof.
+        //
+        // For every `@logic` function in the module, the translator
+        // now knows both the sort signature AND the SMT-LIB defining
+        // block, so calls like `safe_div(a, b)` unfold their body
+        // during solve — instead of becoming an opaque Int-returning
+        // UF symbol that defeats any non-trivial postcondition.
+        //
+        // Body-less or unreflected functions still get their sort
+        // signature registered, so Bool-returning declared-only
+        // functions (e.g. `fn is_prime(n: Int) -> Bool;`) translate
+        // to Bool-sorted UFs instead of the Int default, which was
+        // making `exists n: Nat. is_prime(n)`-style ensures clauses
+        // fail with "exists body must be a boolean expression."
+        //
+        // Pinned by:
+        //   vcs/specs/L1-core/verification_phase/reflection_function_level.vr
+        for rf in reflection_registry.iter() {
+            let param_sorts: Vec<String> = rf
+                .parameter_sorts
+                .iter()
+                .map(|s| s.as_str().to_string())
+                .collect();
+            translator.register_callee_signature(
+                rf.name.as_str(),
+                param_sorts,
+                rf.return_sort.as_str().to_string(),
+            );
+        }
+        for (name, ps, r) in callee_signatures_for_module {
+            let param_sorts: Vec<String> =
+                ps.iter().map(|s| s.as_str().to_string()).collect();
+            translator.register_callee_signature(
+                name.as_str(),
+                param_sorts,
+                r.as_str().to_string(),
+            );
+        }
 
         // Step 1: Verify preconditions are satisfiable (not contradictory)
         if has_requires || has_implicit_requires {
@@ -644,6 +689,7 @@ impl<'s> VerifyCommand<'s> {
                 &func.ensures,
                 func.body.as_ref(),
                 timeout,
+                reflection_registry,
             ) {
                 Ok(()) => debug!("Postconditions verified for {}", func.name),
                 Err(VerifyError::Timeout) => {
@@ -1008,12 +1054,25 @@ impl<'s> VerifyCommand<'s> {
         ensures: &[Expr],
         body: verum_common::Maybe<&verum_ast::decl::FunctionBody>,
         _timeout: Duration,
+        reflection_registry: &verum_smt::refinement_reflection::RefinementReflectionRegistry,
     ) -> Result<(), VerifyError> {
         if ensures.is_empty() {
             return Ok(());
         }
 
         let solver = ctx.solver();
+
+        // Inject the refinement-reflection SMT-LIB block BEFORE any
+        // assertions. The block defines every `@logic` function in
+        // the module as `declare-fun` + `forall` axiom pair. With it
+        // in scope, Z3 can unfold a call like `prime(n)` into its
+        // boolean body during proof search rather than leaving it
+        // opaque. Mirrors the theorem-path wiring at
+        // `proof_search.rs::apply_decision_procedure` line ~4529.
+        if !reflection_registry.is_empty() {
+            let block = reflection_registry.to_smtlib_block();
+            solver.from_string(block.as_str().to_string());
+        }
 
         // Assert preconditions as assumptions
         for req in requires {

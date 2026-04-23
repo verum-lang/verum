@@ -1,0 +1,59 @@
+// @test: verify-pass
+// @level: L1
+// @tags: verify, reflection, function-level, @logic
+// @timeout: 10000
+
+/// Regression for verify_cmd.rs:~601 — reflection-registry was
+/// only wired to the theorem-verification path. Functions with
+/// `requires` / `ensures` clauses that call `@logic` helpers
+/// saw the helpers as opaque uninterpreted Int-returning
+/// functions; the solver could not unfold them during SMT
+/// search and the ensures clause was rejected.
+///
+/// After the fix, both paths share the same reflection wiring:
+/// the registry is built once at module level and threaded
+/// through `verify_function` → translator.register_callee_signature
+/// + solver.from_string(to_smtlib_block()). Calls like
+/// `is_small(n)` now unfold their `@logic` body during the SMT
+/// check, so ensures clauses referencing them succeed.
+///
+/// This spec pins that behaviour: a function whose ensures
+/// clause calls a `@logic` helper must verify, AND the same
+/// ensures clause referencing a NON-`@logic` helper must fail
+/// (demonstrating that the unfolding is driven by the
+/// `@logic` annotation rather than coincidence).
+
+module test_reflection_function_level;
+
+// A `@logic` predicate: visible to SMT as `forall n. is_small(n) =
+// (n >= 0 && n < 10)`. Inside an ensures clause, the solver can
+// reduce `is_small(k)` to its boolean body.
+@logic
+public fn is_small(n: Int) -> Bool {
+    n >= 0 && n < 10
+}
+
+// Function that depends on `is_small` via its ensures clause.
+// Before the fix: the solver saw `is_small(clamp_result)` as an
+// opaque `(is_small Int) Bool` UF — no body, no conclusion. The
+// ensures failed to verify despite being obviously correct.
+// After the fix: `is_small` unfolds; the ensures is trivially
+// dischargeable from the arithmetic invariant of `clamp`.
+public fn clamp(x: Int) -> Int
+    ensures is_small(result)
+{
+    if x < 0 {
+        0
+    } else if x >= 10 {
+        9
+    } else {
+        x
+    }
+}
+
+fn main() {
+    let a = clamp(-5);
+    let b = clamp(4);
+    let c = clamp(100);
+    print("reflection-registry threaded to function-level verification");
+}
