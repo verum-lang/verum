@@ -1,0 +1,114 @@
+// =============================================================================
+// ext/loadable.vr — loadable Verum-cog extensions
+// =============================================================================
+// Spec: sqlite-native.md §19.6
+//
+// loom does NOT support C shared-library extensions. Instead, an
+// extension is a Verum cog that exports a `@extension_entry`
+// function:
+//
+//   @extension_entry
+//   public fn my_init(db: &mut Connection<Admin>) -> Result<(), DbError> {
+//       db.register_scalar(my_scalar_fn())?;
+//       db.set_busy_handler(constant_busy(50))?;
+//       Ok(())
+//   }
+//
+// The host application links the cog at build time (or via the
+// dynamic-cog mechanism described in the cog distribution spec).
+// `Connection.load_extension(entry)` simply runs the entry function
+// inside an Admin-mode session — it does NOT shell out to dlopen.
+//
+// `PRAGMA load_extension = 0/1` is honoured: an Admin-mode session
+// with the flag off rejects every load_extension call.
+// =============================================================================
+
+module core.database.sqlite.native.ext.loadable;
+
+mount core.*;
+mount base.{Text, Result, Ok, Err, Bool};
+
+// -----------------------------------------------------------------------------
+// Errors
+// -----------------------------------------------------------------------------
+
+public type LoadError is
+      LoadDisabled
+    | EntryNotFound(Text)
+    | EntryFailed(Text);
+
+// -----------------------------------------------------------------------------
+// Extension entry record
+// -----------------------------------------------------------------------------
+
+/// Static metadata about an extension. The actual entry function is
+/// host-supplied (passed at registration time); `name` and `version`
+/// are surfaced via `pragma_extension_list` for diagnostics.
+public type ExtensionInfo is {
+    name: Text,
+    version: Text,
+    description: Text,
+};
+
+public fn extension_info(name: Text, version: Text, description: Text) -> ExtensionInfo {
+    ExtensionInfo { name: name, version: version, description: description }
+}
+
+// -----------------------------------------------------------------------------
+// LoadGate — per-Connection master switch
+// -----------------------------------------------------------------------------
+
+public type LoadGate is { enabled: Bool, loaded: List<ExtensionInfo> };
+
+public fn load_gate_default() -> LoadGate {
+    LoadGate { enabled: false, loaded: List.new() }
+}
+
+implement LoadGate {
+    public fn enable(&mut self) { self.enabled = true; }
+    public fn disable(&mut self) { self.enabled = false; }
+    public fn is_enabled(&self) -> Bool { self.enabled }
+
+    /// Record a successfully-run extension. Returns previous count.
+    public fn record_load(&mut self, info: ExtensionInfo) -> Int {
+        let prev = self.loaded.len();
+        self.loaded.push(info);
+        prev
+    }
+
+    public fn loaded_count(&self) -> Int { self.loaded.len() }
+
+    public fn names(&self) -> List<Text> {
+        let mut out: List<Text> = List.new();
+        let mut i: Int = 0;
+        while i < self.loaded.len() {
+            out.push(self.loaded[i].name.clone());
+            i = i + 1;
+        }
+        out
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Decision helper for the L7 façade
+// -----------------------------------------------------------------------------
+//
+// The host calls `try_load(gate, info)` BEFORE running the entry
+// function. It returns the decision; on `Ok`, the host runs the
+// entry function (which may itself fail). On `Err(LoadDisabled)`,
+// the host short-circuits with that error.
+// =============================================================================
+
+public type LoadDecision is LdProceed | LdAlreadyLoaded(Text);
+
+public fn try_load(gate: &LoadGate, info: &ExtensionInfo) -> Result<LoadDecision, LoadError> {
+    if !gate.enabled { return Err(LoadDisabled); }
+    let mut i: Int = 0;
+    while i < gate.loaded.len() {
+        if gate.loaded[i].name == info.name {
+            return Ok(LdAlreadyLoaded(info.name.clone()));
+        }
+        i = i + 1;
+    }
+    Ok(LdProceed)
+}

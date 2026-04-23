@@ -1,0 +1,263 @@
+// =============================================================================
+// ext/registry.vr — per-Connection function & hook registry
+// =============================================================================
+// Spec: sqlite-native.md §19.1, §19.5
+//
+// Stores everything an extension can attach to a Connection:
+//
+//   * scalar functions  (Heap<dyn ScalarFn>)
+//   * aggregate factories (we keep a constructor closure rather than
+//     `dyn AggregateFn` because the protocol carries an associated
+//     `State` type; the registration site monomorphises it.)
+//   * hook handlers (one slot per hook surface — last subscriber wins)
+//
+// Lookup is case-insensitive on SQL-visible names. Built-in
+// catalogue (`builtins/`) is registered separately and queried first;
+// the L4 dispatch falls back here if a name is not built-in.
+// =============================================================================
+
+module core.database.sqlite.native.ext.registry;
+
+mount core.*;
+mount base.{Text, Maybe, Bool, Result, Ok, Err};
+mount collections.List;
+mount core.database.sqlite.native.ext.fn_flags.{FnFlags, flags_default};
+mount core.database.sqlite.native.ext.scalar.{ScalarFn};
+mount core.database.sqlite.native.ext.hooks.{
+    CommitHook, RollbackHook, UpdateHook, PreUpdateHook,
+    AuthorizerHook, BusyHandler, ProgressHandler, TraceHook,
+};
+
+// -----------------------------------------------------------------------------
+// Errors
+// -----------------------------------------------------------------------------
+
+public type RegistryError is
+      AlreadyRegistered(Text)
+    | NotFound(Text)
+    | InvalidArity(Text);
+
+// -----------------------------------------------------------------------------
+// ScalarFn entry — stored as a Heap<dyn ScalarFn>
+// -----------------------------------------------------------------------------
+
+public type ScalarEntry is {
+    name: Text,
+    fn_ref: Heap<dyn ScalarFn>,
+};
+
+// -----------------------------------------------------------------------------
+// AggregateFactory — opaque per-call constructor for the protocol's State
+// -----------------------------------------------------------------------------
+
+/// We can't store `dyn AggregateFn` directly because the protocol
+/// declares an associated type. Instead we close over the protocol
+/// dispatch in three thunks at registration time:
+///
+///   * init_fn      — () → boxed state
+///   * step_fn      — (boxed state, args) → ()
+///   * finalize_fn  — (boxed state) → Register
+///
+/// Each thunk knows how to drive the underlying typed AggregateFn via
+/// downcasting at the call site. `BoxedState` is defined opaquely
+/// using `Heap<dyn AggregateState>` (see `aggregate_state.vr`) so
+/// the registry remains type-erased.
+public type AggregateFactory is {
+    name: Text,
+    arity: Int,
+    flags: FnFlags,
+    init_fn: fn() -> Heap<dyn AggregateState>,
+    step_fn: fn(&mut dyn AggregateState, &List<core.database.sqlite.native.l4_vdbe.register.Register>),
+    finalize_fn: fn(Heap<dyn AggregateState>) -> core.database.sqlite.native.l4_vdbe.register.Register,
+};
+
+/// Marker protocol so the registry can hold any aggregate's State.
+/// Each concrete state type implements `AggregateState` automatically
+/// at registration via a thin wrapper.
+public type AggregateState is protocol {};
+
+// -----------------------------------------------------------------------------
+// FnRegistry
+// -----------------------------------------------------------------------------
+
+public type FnRegistry is {
+    scalars: List<ScalarEntry>,
+    aggregates: List<AggregateFactory>,
+
+    // Hook slots — `Maybe<Heap<dyn …>>` so absent = unsubscribed
+    commit_hook: Maybe<Heap<dyn CommitHook>>,
+    rollback_hook: Maybe<Heap<dyn RollbackHook>>,
+    update_hook: Maybe<Heap<dyn UpdateHook>>,
+    pre_update_hook: Maybe<Heap<dyn PreUpdateHook>>,
+    authorizer: Maybe<Heap<dyn AuthorizerHook>>,
+    busy_handler: Maybe<Heap<dyn BusyHandler>>,
+    progress_handler: Maybe<Heap<dyn ProgressHandler>>,
+    trace_hook: Maybe<Heap<dyn TraceHook>>,
+};
+
+public fn registry_new() -> FnRegistry {
+    FnRegistry {
+        scalars: List.new(),
+        aggregates: List.new(),
+        commit_hook: None,
+        rollback_hook: None,
+        update_hook: None,
+        pre_update_hook: None,
+        authorizer: None,
+        busy_handler: None,
+        progress_handler: None,
+        trace_hook: None,
+    }
+}
+
+implement FnRegistry {
+    // ----- scalar functions ----------------------------------------------
+
+    public fn register_scalar(
+        &mut self,
+        f: Heap<dyn ScalarFn>,
+    ) -> Result<(), RegistryError> {
+        let name = (&*f).name();
+        if self.find_scalar(&name).is_some() {
+            return Err(AlreadyRegistered(name));
+        }
+        self.scalars.push(ScalarEntry { name: name, fn_ref: f });
+        Ok(())
+    }
+
+    public fn find_scalar(&self, name: &Text) -> Maybe<Int> {
+        let target = ascii_lower(name);
+        let mut i: Int = 0;
+        while i < self.scalars.len() {
+            if ascii_lower(&self.scalars[i].name) == target { return Some(i); }
+            i = i + 1;
+        }
+        None
+    }
+
+    public fn drop_scalar(&mut self, name: &Text) -> Bool {
+        match self.find_scalar(name) {
+            Some(i) => {
+                let mut new_list: List<ScalarEntry> = List.new();
+                let mut k: Int = 0;
+                while k < self.scalars.len() {
+                    if k != i {
+                        new_list.push(ScalarEntry {
+                            name: self.scalars[k].name.clone(),
+                            fn_ref: self.scalars[k].fn_ref.clone(),
+                        });
+                    }
+                    k = k + 1;
+                }
+                self.scalars = new_list;
+                true
+            }
+            None => false,
+        }
+    }
+
+    // ----- aggregate factories -------------------------------------------
+
+    public fn register_aggregate(
+        &mut self,
+        factory: AggregateFactory,
+    ) -> Result<(), RegistryError> {
+        let target = ascii_lower(&factory.name);
+        let mut i: Int = 0;
+        while i < self.aggregates.len() {
+            if ascii_lower(&self.aggregates[i].name) == target {
+                return Err(AlreadyRegistered(factory.name));
+            }
+            i = i + 1;
+        }
+        self.aggregates.push(factory);
+        Ok(())
+    }
+
+    public fn find_aggregate(&self, name: &Text) -> Maybe<Int> {
+        let target = ascii_lower(name);
+        let mut i: Int = 0;
+        while i < self.aggregates.len() {
+            if ascii_lower(&self.aggregates[i].name) == target { return Some(i); }
+            i = i + 1;
+        }
+        None
+    }
+
+    // ----- hook subscription (last subscriber wins) ----------------------
+
+    public fn set_commit_hook(&mut self, h: Heap<dyn CommitHook>) {
+        self.commit_hook = Some(h);
+    }
+
+    public fn clear_commit_hook(&mut self) { self.commit_hook = None; }
+
+    public fn set_rollback_hook(&mut self, h: Heap<dyn RollbackHook>) {
+        self.rollback_hook = Some(h);
+    }
+
+    public fn set_update_hook(&mut self, h: Heap<dyn UpdateHook>) {
+        self.update_hook = Some(h);
+    }
+
+    public fn set_pre_update_hook(&mut self, h: Heap<dyn PreUpdateHook>) {
+        self.pre_update_hook = Some(h);
+    }
+
+    public fn set_authorizer(&mut self, h: Heap<dyn AuthorizerHook>) {
+        self.authorizer = Some(h);
+    }
+
+    public fn set_busy_handler(&mut self, h: Heap<dyn BusyHandler>) {
+        self.busy_handler = Some(h);
+    }
+
+    public fn set_progress_handler(&mut self, h: Heap<dyn ProgressHandler>) {
+        self.progress_handler = Some(h);
+    }
+
+    public fn set_trace_hook(&mut self, h: Heap<dyn TraceHook>) {
+        self.trace_hook = Some(h);
+    }
+
+    // ----- counts (for VCS smoke tests) ----------------------------------
+
+    public fn scalar_count(&self) -> Int { self.scalars.len() }
+    public fn aggregate_count(&self) -> Int { self.aggregates.len() }
+
+    public fn has_commit_hook(&self) -> Bool {
+        match &self.commit_hook { Some(_) => true, None => false }
+    }
+    public fn has_rollback_hook(&self) -> Bool {
+        match &self.rollback_hook { Some(_) => true, None => false }
+    }
+    public fn has_update_hook(&self) -> Bool {
+        match &self.update_hook { Some(_) => true, None => false }
+    }
+    public fn has_authorizer(&self) -> Bool {
+        match &self.authorizer { Some(_) => true, None => false }
+    }
+    public fn has_busy_handler(&self) -> Bool {
+        match &self.busy_handler { Some(_) => true, None => false }
+    }
+    public fn has_progress_handler(&self) -> Bool {
+        match &self.progress_handler { Some(_) => true, None => false }
+    }
+    public fn has_trace_hook(&self) -> Bool {
+        match &self.trace_hook { Some(_) => true, None => false }
+    }
+}
+
+fn ascii_lower(s: &Text) -> Text {
+    let bs = s.as_bytes();
+    let mut out = Text.new();
+    let mut i: Int = 0;
+    while i < bs.len() {
+        let b: Byte = bs[i];
+        let lo: Byte =
+            if b >= (65 as Byte) && b <= (90 as Byte) { b + (32 as Byte) } else { b };
+        out.push_byte(lo);
+        i = i + 1;
+    }
+    out
+}

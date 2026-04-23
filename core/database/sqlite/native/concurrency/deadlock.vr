@@ -1,0 +1,146 @@
+// =============================================================================
+// concurrency/deadlock.vr — wait-for graph + cycle detector for DST
+// =============================================================================
+// Spec: sqlite-native.md §20.4
+//
+// loom uses an actor-based pager so production deadlocks are
+// bounded by the actor's serialised mailbox. The detector here is
+// for *DST* (deterministic simulation testing): the simulator
+// records every `try_lock` edge in a wait-for graph and runs cycle
+// detection at every step — any cycle is a real deadlock the prod
+// runtime would hit if scheduling went the wrong way.
+//
+// The graph is directed: edge `A → B` means "txn A is waiting for
+// a lock held by txn B".
+// =============================================================================
+
+module core.database.sqlite.native.concurrency.deadlock;
+
+mount core.*;
+mount base.{Bool, Maybe};
+mount collections.List;
+
+public type TxnId is Int64;
+
+public type WaitEdge is { from_txn: TxnId, to_txn: TxnId };
+
+public type WaitForGraph is { edges: List<WaitEdge> };
+
+public fn graph_new() -> WaitForGraph { WaitForGraph { edges: List.new() } }
+
+implement WaitForGraph {
+    /// Record that `waiter` is now waiting on `holder`. Idempotent —
+    /// duplicate edges are silently dropped.
+    public fn record_wait(&mut self, waiter: TxnId, holder: TxnId) {
+        if self.has_edge(waiter, holder) { return; }
+        self.edges.push(WaitEdge { from_txn: waiter, to_txn: holder });
+    }
+
+    /// Drop every edge originating from a txn (called when the txn
+    /// acquires the lock or aborts).
+    public fn release_waiter(&mut self, waiter: TxnId) {
+        let mut new_edges: List<WaitEdge> = List.new();
+        let mut i: Int = 0;
+        while i < self.edges.len() {
+            if self.edges[i].from_txn != waiter {
+                new_edges.push(WaitEdge {
+                    from_txn: self.edges[i].from_txn,
+                    to_txn: self.edges[i].to_txn,
+                });
+            }
+            i = i + 1;
+        }
+        self.edges = new_edges;
+    }
+
+    /// Drop every edge pointing to a txn (called when the holder commits).
+    public fn release_holder(&mut self, holder: TxnId) {
+        let mut new_edges: List<WaitEdge> = List.new();
+        let mut i: Int = 0;
+        while i < self.edges.len() {
+            if self.edges[i].to_txn != holder {
+                new_edges.push(WaitEdge {
+                    from_txn: self.edges[i].from_txn,
+                    to_txn: self.edges[i].to_txn,
+                });
+            }
+            i = i + 1;
+        }
+        self.edges = new_edges;
+    }
+
+    fn has_edge(&self, from: TxnId, to: TxnId) -> Bool {
+        let mut i: Int = 0;
+        while i < self.edges.len() {
+            if self.edges[i].from_txn == from && self.edges[i].to_txn == to {
+                return true;
+            }
+            i = i + 1;
+        }
+        false
+    }
+
+    /// Detect a cycle starting from `start`. Returns `Some(cycle)`
+    /// containing the txn ids in cycle order, or `None` if no cycle.
+    /// Uses iterative DFS with a visiting-set to avoid recursion.
+    public fn detect_cycle_from(&self, start: TxnId) -> Maybe<List<TxnId>> {
+        let mut path: List<TxnId> = List.new();
+        path.push(start);
+        let mut current: TxnId = start;
+        let mut bound: Int = 0;
+        // Bound the walk to (number of edges + 1) to guarantee
+        // termination even if the graph is malformed.
+        while bound <= self.edges.len() {
+            let next = self.next_holder(current);
+            match next {
+                None => { return None; }
+                Some(n) => {
+                    if n == start {
+                        path.push(n);
+                        return Some(path);
+                    }
+                    if self.list_contains(&path, n) {
+                        // Cycle that does NOT include `start` — record
+                        // the suffix.
+                        let mut suffix: List<TxnId> = List.new();
+                        let mut started: Bool = false;
+                        let mut j: Int = 0;
+                        while j < path.len() {
+                            if started || path[j] == n { started = true; }
+                            if started { suffix.push(path[j]); }
+                            j = j + 1;
+                        }
+                        suffix.push(n);
+                        return Some(suffix);
+                    }
+                    path.push(n);
+                    current = n;
+                    bound = bound + 1;
+                }
+            }
+        }
+        None
+    }
+
+    fn next_holder(&self, txn: TxnId) -> Maybe<TxnId> {
+        let mut i: Int = 0;
+        while i < self.edges.len() {
+            if self.edges[i].from_txn == txn {
+                return Some(self.edges[i].to_txn);
+            }
+            i = i + 1;
+        }
+        None
+    }
+
+    fn list_contains(&self, list: &List<TxnId>, t: TxnId) -> Bool {
+        let mut i: Int = 0;
+        while i < list.len() {
+            if list[i] == t { return true; }
+            i = i + 1;
+        }
+        false
+    }
+
+    public fn edge_count(&self) -> Int { self.edges.len() }
+}

@@ -1,0 +1,267 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, concurrency, pool, snapshot, deadlock, busy
+// @timeout: 5000
+// @expected-exit: 0
+//
+// Concurrency primitives — pool LIFO acquire/release, busy retry
+// policies (no_retry / constant / exponential), snapshot table
+// issue/release/oldest, deadlock cycle detection on a synthetic
+// wait-for graph.
+
+mount core.database.sqlite.native.concurrency.thread_safety.{
+    ThreadSafetyMode, SingleThread, MultiThread, Serialized,
+    single_thread, multi_thread, serialized,
+};
+mount core.database.sqlite.native.concurrency.busy.{
+    BusyPolicy, RetryDecision, RdRetryAfter, RdGiveUp,
+    NoRetry, no_retry,
+    ConstantRetry, constant_retry,
+    ExponentialRetry, exponential_retry,
+    DeadlineGate, deadline_elapsed,
+};
+mount core.database.sqlite.native.concurrency.snapshot.{
+    Snapshot, snapshot_new, is_compatible_with,
+    SnapshotTable, snapshot_table_new,
+};
+mount core.database.sqlite.native.concurrency.deadlock.{
+    TxnId, WaitEdge, WaitForGraph, graph_new,
+};
+mount core.database.sqlite.native.concurrency.pool.{
+    PoolError, Timeout, PoolClosed, InvalidLease,
+    SlotId, Lease, DbConnectionPool, db_pool_new,
+};
+mount base.{Result, Ok, Err, Maybe, Some, None, Bool};
+
+// -----------------------------------------------------------------------------
+// thread_safety
+// -----------------------------------------------------------------------------
+
+fn test_thread_safety_modes() {
+    let st = single_thread();
+    assert(!st.allows_cross_thread());
+    assert(!st.allows_multiple_per_database());
+
+    let mt = multi_thread();
+    assert(!mt.allows_cross_thread());
+    assert(mt.allows_multiple_per_database());
+
+    let sr = serialized();
+    assert(sr.allows_cross_thread());
+    assert(sr.allows_multiple_per_database());
+    assert(sr.name() == "serialized".clone());
+}
+
+// -----------------------------------------------------------------------------
+// busy policies
+// -----------------------------------------------------------------------------
+
+fn test_no_retry_gives_up_first_attempt() {
+    let p = no_retry();
+    match p.decide(0) {
+        RdGiveUp => {},
+        _ => panic("no_retry should give up"),
+    }
+}
+
+fn test_constant_retry_bounded() {
+    let p = constant_retry(3, 10000 as Int64);
+    match p.decide(0) {
+        RdRetryAfter(ns) => assert_eq(ns, 10000 as Int64),
+        _ => panic("attempt 0 → retry"),
+    }
+    match p.decide(2) {
+        RdRetryAfter(_) => {},
+        _ => panic("attempt 2 → retry"),
+    }
+    match p.decide(3) {
+        RdGiveUp => {},
+        _ => panic("attempt 3 → give up"),
+    }
+}
+
+fn test_exponential_retry_caps() {
+    let p = exponential_retry(5, 100 as Int64, 1000 as Int64);
+    let mut last: Int64 = 0 as Int64;
+    let mut k: Int = 0;
+    while k < 5 {
+        match p.decide(k) {
+            RdRetryAfter(ns) => { assert(ns <= 1000 as Int64); last = ns; }
+            _ => panic("should retry within bound"),
+        }
+        k = k + 1;
+    }
+    let _ = last;
+    match p.decide(5) { RdGiveUp => {}, _ => panic("attempt 5 → give up") };
+}
+
+fn test_deadline_gate() {
+    let g_ok  = DeadlineGate { deadline_ns: 100 as Int64, now_ns: 50 as Int64 };
+    let g_exp = DeadlineGate { deadline_ns: 100 as Int64, now_ns: 100 as Int64 };
+    assert(!deadline_elapsed(&g_ok));
+    assert(deadline_elapsed(&g_exp));
+}
+
+// -----------------------------------------------------------------------------
+// snapshot
+// -----------------------------------------------------------------------------
+
+fn test_snapshot_basic() {
+    let mut tbl = snapshot_table_new();
+    let s1 = tbl.issue(10, 1, 5);
+    let s2 = tbl.issue(20, 2, 5);
+    assert_eq(tbl.count(), 2);
+    assert(s1.precedes(&s2));
+    assert(!s2.precedes(&s1));
+
+    match tbl.oldest() {
+        Some(o) => assert(o.equals(&s1)),
+        None    => panic("oldest must exist"),
+    }
+
+    assert(is_compatible_with(&s1, 5));
+    assert(!is_compatible_with(&s1, 6));
+
+    assert(tbl.release(s1.id));
+    assert_eq(tbl.count(), 1);
+    assert(!tbl.release(99 as Int64));
+}
+
+fn test_snapshot_oldest_after_releases() {
+    let mut tbl = snapshot_table_new();
+    let _s1 = tbl.issue(10, 1, 5);
+    let s2  = tbl.issue(20, 1, 5);
+    let s3  = tbl.issue(30, 1, 5);
+    assert(tbl.release(s2.id));
+    match tbl.oldest() {
+        Some(o) => assert_eq(o.frame_count, 10),
+        None    => panic("oldest still s1"),
+    }
+    let _ = s3;
+}
+
+// -----------------------------------------------------------------------------
+// deadlock
+// -----------------------------------------------------------------------------
+
+fn test_no_cycle_on_chain() {
+    let mut g = graph_new();
+    g.record_wait(1 as Int64, 2 as Int64);
+    g.record_wait(2 as Int64, 3 as Int64);
+    g.record_wait(3 as Int64, 4 as Int64);
+    match g.detect_cycle_from(1 as Int64) {
+        None    => {},
+        Some(_) => panic("chain should have no cycle"),
+    }
+}
+
+fn test_cycle_two_txns() {
+    let mut g = graph_new();
+    g.record_wait(1 as Int64, 2 as Int64);
+    g.record_wait(2 as Int64, 1 as Int64);
+    match g.detect_cycle_from(1 as Int64) {
+        Some(_) => {},
+        None    => panic("1→2→1 must be detected"),
+    }
+}
+
+fn test_cycle_three_txns() {
+    let mut g = graph_new();
+    g.record_wait(10 as Int64, 20 as Int64);
+    g.record_wait(20 as Int64, 30 as Int64);
+    g.record_wait(30 as Int64, 10 as Int64);
+    match g.detect_cycle_from(10 as Int64) {
+        Some(_) => {},
+        None    => panic("3-cycle missed"),
+    }
+}
+
+fn test_release_breaks_cycle() {
+    let mut g = graph_new();
+    g.record_wait(1 as Int64, 2 as Int64);
+    g.record_wait(2 as Int64, 1 as Int64);
+    g.release_waiter(2 as Int64);
+    assert_eq(g.edge_count(), 1);
+    match g.detect_cycle_from(1 as Int64) {
+        None    => {},
+        Some(_) => panic("after release, no cycle"),
+    }
+}
+
+fn test_idempotent_record() {
+    let mut g = graph_new();
+    g.record_wait(1 as Int64, 2 as Int64);
+    g.record_wait(1 as Int64, 2 as Int64);
+    g.record_wait(1 as Int64, 2 as Int64);
+    assert_eq(g.edge_count(), 1);
+}
+
+// -----------------------------------------------------------------------------
+// pool
+// -----------------------------------------------------------------------------
+
+fn test_pool_acquire_release_cycle() {
+    let mut p = db_pool_new(2);
+    assert_eq(p.capacity(), 2);
+    assert_eq(p.available(), 2);
+
+    let l1 = p.try_acquire().unwrap();
+    let l2 = p.try_acquire().unwrap();
+    assert_eq(p.available(), 0);
+    assert_eq(p.in_use(), 2);
+
+    // Pool empty → Timeout
+    match p.try_acquire() {
+        Err(Timeout) => {},
+        _            => panic("empty pool → Timeout"),
+    }
+
+    // Release l1 → 1 available
+    let _ = p.release(l1);
+    assert_eq(p.available(), 1);
+    let _ = p.release(l2);
+    assert_eq(p.available(), 2);
+}
+
+fn test_pool_lease_aba_protection() {
+    let mut p = db_pool_new(1);
+    let l1 = p.try_acquire().unwrap();
+    let l1_copy = Lease { slot: SlotId { id: l1.slot_id() }, sequence: l1.sequence };
+    let _ = p.release(l1);
+    // Re-acquire — sequence bumps
+    let _l2 = p.try_acquire().unwrap();
+    // Old lease no longer valid
+    match p.release(l1_copy) {
+        Err(InvalidLease) => {},
+        _ => panic("stale lease → InvalidLease"),
+    }
+}
+
+fn test_pool_close_rejects_acquire() {
+    let mut p = db_pool_new(2);
+    p.close();
+    assert(p.is_closed());
+    match p.try_acquire() {
+        Err(PoolClosed) => {},
+        _ => panic("closed pool → PoolClosed"),
+    }
+}
+
+fn main() {
+    test_thread_safety_modes();
+    test_no_retry_gives_up_first_attempt();
+    test_constant_retry_bounded();
+    test_exponential_retry_caps();
+    test_deadline_gate();
+    test_snapshot_basic();
+    test_snapshot_oldest_after_releases();
+    test_no_cycle_on_chain();
+    test_cycle_two_txns();
+    test_cycle_three_txns();
+    test_release_breaks_cycle();
+    test_idempotent_record();
+    test_pool_acquire_release_cycle();
+    test_pool_lease_aba_protection();
+    test_pool_close_rejects_acquire();
+}

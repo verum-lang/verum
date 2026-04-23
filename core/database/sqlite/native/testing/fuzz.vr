@@ -1,0 +1,272 @@
+// =============================================================================
+// testing/fuzz.vr — fuzz harness primitives
+// =============================================================================
+// Spec: sqlite-native.md §22.6
+//
+// Three fuzz mutators ship with the testing module:
+//
+//   * `GrammarFuzzer` — SQL grammar-guided generator (PEG-driven)
+//   * `FormatFuzzer`  — bit-flips on a SQLite database file image
+//   * `WalFuzzer`     — frame-sequence permutation / drop / duplicate
+//
+// All three implement `Mutator<I>` for some input type `I`. The
+// shrinker interface (`shrink`) lets a failing input be reduced
+// to a minimal repro — implementers return a `List<I>` of strictly
+// smaller candidates ordered by likelihood of preserving the failure.
+// =============================================================================
+
+module core.database.sqlite.native.testing.fuzz;
+
+mount core.*;
+mount base.{Text, Maybe, Bool};
+mount collections.List;
+
+// -----------------------------------------------------------------------------
+// Mutator protocol
+// -----------------------------------------------------------------------------
+
+public type Mutator is protocol {
+    type Input;
+
+    fn name(&self) -> Text;
+    /// Generate a fresh random input.
+    fn generate(&mut self) -> Self.Input;
+    /// Mutate an existing input (small change preserving structure).
+    fn mutate(&mut self, base: &Self.Input) -> Self.Input;
+    /// Produce smaller candidates of `failing_input` — used by the
+    /// shrinker. Returning an empty list ends the shrink walk.
+    fn shrink(&self, failing_input: &Self.Input) -> List<Self.Input>;
+};
+
+// -----------------------------------------------------------------------------
+// xorshift64 RNG — caller-supplied seed for reproducibility
+// -----------------------------------------------------------------------------
+
+public type FuzzRng is { state: Int64 };
+
+public fn fuzz_rng(seed: Int64) -> FuzzRng {
+    FuzzRng { state: if seed == (0 as Int64) { 1 as Int64 } else { seed } }
+}
+
+implement FuzzRng {
+    public fn next(&mut self) -> Int64 {
+        let mut x: Int64 = self.state;
+        x = x ^ (x << (13 as Int64));
+        x = x ^ (x >> (7 as Int64));
+        x = x ^ (x << (17 as Int64));
+        self.state = x;
+        x
+    }
+
+    public fn next_in(&mut self, lo: Int, hi_exclusive: Int) -> Int {
+        if hi_exclusive <= lo { return lo; }
+        let r = self.next();
+        let span: Int = hi_exclusive - lo;
+        lo + ((r as Int) & 2147483647) % span
+    }
+
+    public fn next_byte(&mut self) -> Byte {
+        let r = self.next();
+        ((r as Int) & 255) as Byte
+    }
+}
+
+// -----------------------------------------------------------------------------
+// FormatFuzzer — bit-flips on a binary image
+// -----------------------------------------------------------------------------
+
+public type FormatFuzzer is {
+    rng: FuzzRng,
+    flips_per_round: Int,
+};
+
+public fn format_fuzzer(seed: Int64, flips_per_round: Int) -> FormatFuzzer {
+    FormatFuzzer { rng: fuzz_rng(seed), flips_per_round: flips_per_round }
+}
+
+implement Mutator for FormatFuzzer {
+    type Input = List<Byte>;
+
+    fn name(&self) -> Text { "format_fuzzer".clone() }
+
+    fn generate(&mut self) -> List<Byte> {
+        // Empty image — caller usually mutates an existing one.
+        List.new()
+    }
+
+    fn mutate(&mut self, base: &List<Byte>) -> List<Byte> {
+        let mut out: List<Byte> = List.new();
+        let mut i: Int = 0;
+        while i < base.len() { out.push(base[i]); i = i + 1; }
+        if out.len() == 0 { return out; }
+        let mut k: Int = 0;
+        while k < self.flips_per_round {
+            let pos = self.rng.next_in(0, out.len());
+            let mask: Byte = self.rng.next_byte();
+            out[pos] = out[pos] ^ mask;
+            k = k + 1;
+        }
+        out
+    }
+
+    fn shrink(&self, base: &List<Byte>) -> List<List<Byte>> {
+        let mut out: List<List<Byte>> = List.new();
+        // Halve the image (one candidate)
+        if base.len() > 1 {
+            let mut half: List<Byte> = List.new();
+            let mut i: Int = 0;
+            while i < base.len() / 2 { half.push(base[i]); i = i + 1; }
+            out.push(half);
+        }
+        // Drop the last byte (one candidate)
+        if base.len() > 0 {
+            let mut shorter: List<Byte> = List.new();
+            let mut i: Int = 0;
+            while i + 1 < base.len() { shorter.push(base[i]); i = i + 1; }
+            out.push(shorter);
+        }
+        out
+    }
+}
+
+// -----------------------------------------------------------------------------
+// WalFuzzer — frame-sequence drop / duplicate / reorder
+// -----------------------------------------------------------------------------
+
+public type WalFuzzAction is FaDrop | FaDup | FaSwap;
+
+public type WalFuzzPlan is { actions: List<(WalFuzzAction, Int)> };
+
+public type WalFuzzer is { rng: FuzzRng, n_frames_max: Int };
+
+public fn wal_fuzzer(seed: Int64, n_frames_max: Int) -> WalFuzzer {
+    WalFuzzer { rng: fuzz_rng(seed), n_frames_max: n_frames_max }
+}
+
+implement Mutator for WalFuzzer {
+    type Input = WalFuzzPlan;
+
+    fn name(&self) -> Text { "wal_fuzzer".clone() }
+
+    fn generate(&mut self) -> WalFuzzPlan {
+        let n = self.rng.next_in(1, self.n_frames_max + 1);
+        let mut actions: List<(WalFuzzAction, Int)> = List.new();
+        let mut k: Int = 0;
+        while k < n {
+            let kind: WalFuzzAction = match self.rng.next_in(0, 3) {
+                0 => FaDrop,
+                1 => FaDup,
+                _ => FaSwap,
+            };
+            let frame_idx = self.rng.next_in(0, self.n_frames_max);
+            actions.push((kind, frame_idx));
+            k = k + 1;
+        }
+        WalFuzzPlan { actions: actions }
+    }
+
+    fn mutate(&mut self, base: &WalFuzzPlan) -> WalFuzzPlan {
+        let mut acts: List<(WalFuzzAction, Int)> = List.new();
+        let mut i: Int = 0;
+        while i < base.actions.len() {
+            let pair = &base.actions[i];
+            acts.push((clone_action(&pair.0), pair.1));
+            i = i + 1;
+        }
+        // Add or remove one action.
+        if self.rng.next_in(0, 2) == 0 && acts.len() > 1 {
+            let drop = self.rng.next_in(0, acts.len());
+            let mut new_acts: List<(WalFuzzAction, Int)> = List.new();
+            let mut k: Int = 0;
+            while k < acts.len() {
+                if k != drop { new_acts.push((clone_action(&acts[k].0), acts[k].1)); }
+                k = k + 1;
+            }
+            acts = new_acts;
+        } else {
+            let kind: WalFuzzAction = match self.rng.next_in(0, 3) {
+                0 => FaDrop, 1 => FaDup, _ => FaSwap,
+            };
+            acts.push((kind, self.rng.next_in(0, self.n_frames_max)));
+        }
+        WalFuzzPlan { actions: acts }
+    }
+
+    fn shrink(&self, base: &WalFuzzPlan) -> List<WalFuzzPlan> {
+        let mut out: List<WalFuzzPlan> = List.new();
+        let mut k: Int = 0;
+        while k < base.actions.len() {
+            let mut acts: List<(WalFuzzAction, Int)> = List.new();
+            let mut i: Int = 0;
+            while i < base.actions.len() {
+                if i != k {
+                    acts.push((clone_action(&base.actions[i].0), base.actions[i].1));
+                }
+                i = i + 1;
+            }
+            out.push(WalFuzzPlan { actions: acts });
+            k = k + 1;
+        }
+        out
+    }
+}
+
+fn clone_action(a: &WalFuzzAction) -> WalFuzzAction {
+    match a { FaDrop => FaDrop, FaDup => FaDup, FaSwap => FaSwap }
+}
+
+// -----------------------------------------------------------------------------
+// GrammarFuzzer — token-level SQL generator
+// -----------------------------------------------------------------------------
+//
+// A minimal token-level generator emitting valid-shape DML / DDL.
+// Real coverage comes from the corpus replayer — this exists for
+// quick smoke tests and as a worked example of the Mutator protocol
+// over a non-byte input.
+// =============================================================================
+
+public type GrammarFuzzer is { rng: FuzzRng };
+
+public fn grammar_fuzzer(seed: Int64) -> GrammarFuzzer {
+    GrammarFuzzer { rng: fuzz_rng(seed) }
+}
+
+implement Mutator for GrammarFuzzer {
+    type Input = Text;
+
+    fn name(&self) -> Text { "grammar_fuzzer".clone() }
+
+    fn generate(&mut self) -> Text {
+        let stmt_kind = self.rng.next_in(0, 4);
+        match stmt_kind {
+            0 => "SELECT 1".clone(),
+            1 => "CREATE TABLE t (id INTEGER PRIMARY KEY, name TEXT)".clone(),
+            2 => "INSERT INTO t VALUES (1, 'a')".clone(),
+            _ => "DELETE FROM t WHERE id = 1".clone(),
+        }
+    }
+
+    fn mutate(&mut self, base: &Text) -> Text {
+        // Append a no-op clause.
+        let mut out = base.clone();
+        let suffix = " ".clone();
+        let sb = suffix.as_bytes();
+        let mut i: Int = 0;
+        while i < sb.len() { out.push_byte(sb[i]); i = i + 1; }
+        let extra = if self.rng.next_in(0, 2) == 0 {
+            ";".clone()
+        } else {
+            " /* fuzz */".clone()
+        };
+        let eb = extra.as_bytes();
+        let mut k: Int = 0;
+        while k < eb.len() { out.push_byte(eb[k]); k = k + 1; }
+        out
+    }
+
+    fn shrink(&self, _base: &Text) -> List<Text> {
+        // SQL shrinking is not free-form; the corpus minimiser
+        // replaces this stub with a real tactic.
+        List.new()
+    }
+}

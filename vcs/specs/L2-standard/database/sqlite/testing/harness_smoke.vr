@@ -1,0 +1,288 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, testing, dst, differential, fuzz, coverage
+// @timeout: 5000
+// @expected-exit: 0
+//
+// Test infrastructure smoke: every harness module has a working
+// implementation of its protocol(s).
+
+mount core.database.sqlite.native.testing.dst.{
+    MockClock, StepClock, step_clock,
+    MockScheduler, RoundRobin, round_robin,
+    SeededScheduler, seeded_scheduler,
+    FaultInjector, FaultKind, Fault,
+    FkPowerLoss, FkPartialWrite, FkFsyncLost,
+    NoFaults, no_faults,
+    ScriptedFaults, scripted_faults,
+    DstEvent, DeOp, DeFault, DeAdvanceClock,
+    DstLedger, ledger_new,
+};
+mount core.database.sqlite.native.testing.differential.{
+    DiffCell, DcNull, DcInt, DcText,
+    DiffRow, DiffResult, DrRows, DrError, DrUnit,
+    SqlOracle,
+    Mode, MdRowsetEquality, MdRowsetSorted, MdErrorEquivalence,
+    Diff, DfMatch, DfRowCountMismatch, DfCellMismatch,
+    compare, is_match,
+};
+mount core.database.sqlite.native.testing.fuzz.{
+    Mutator, FuzzRng, fuzz_rng,
+    FormatFuzzer, format_fuzzer,
+    WalFuzzer, WalFuzzPlan, WalFuzzAction, FaDrop, FaDup, FaSwap,
+    wal_fuzzer,
+    GrammarFuzzer, grammar_fuzzer,
+};
+mount core.database.sqlite.native.testing.coverage.{
+    Phase, PhAlpha, PhBeta, PhRelease,
+    Stratum, StL0, StL1, StL2, StL3, StDifferential,
+    StratumTally, tally_new,
+    CoverageReport, report_new,
+    PhaseQuota, phase_quotas,
+};
+mount base.{Maybe, Some, None, Bool};
+
+// -----------------------------------------------------------------------------
+// dst — clock advance
+// -----------------------------------------------------------------------------
+
+fn test_step_clock_advances() {
+    let mut c = step_clock(1000 as Int64);
+    assert_eq(c.now_ns(), 1000 as Int64);
+    let after = c.advance(500 as Int64);
+    assert_eq(after, 1500 as Int64);
+    assert_eq(c.now_ns(), 1500 as Int64);
+}
+
+fn test_round_robin_cycles() {
+    let mut s = round_robin();
+    assert_eq(s.next_choice(3), 0);
+    assert_eq(s.next_choice(3), 1);
+    assert_eq(s.next_choice(3), 2);
+    assert_eq(s.next_choice(3), 0);
+}
+
+fn test_seeded_scheduler_deterministic() {
+    let mut a = seeded_scheduler(42 as Int64);
+    let mut b = seeded_scheduler(42 as Int64);
+    let mut k: Int = 0;
+    while k < 5 {
+        assert_eq(a.next_choice(8), b.next_choice(8));
+        k = k + 1;
+    }
+}
+
+fn test_no_faults_returns_none() {
+    let mut f = no_faults();
+    match f.next_fault(0) { None => {}, _ => panic("no_faults") };
+    match f.next_fault(99) { None => {}, _ => panic("no_faults") };
+}
+
+fn test_scripted_faults_fire_at_op_index() {
+    let mut sched: List<Fault> = List.new();
+    sched.push(Fault { at_op_index: 3, kind: FkPowerLoss });
+    sched.push(Fault { at_op_index: 7, kind: FkFsyncLost });
+    let mut inj = scripted_faults(sched);
+    match inj.next_fault(0) { None => {}, _ => panic("op0 no fault") };
+    match inj.next_fault(3) { Some(_) => {}, None => panic("op3 power loss") };
+    match inj.next_fault(7) { Some(_) => {}, None => panic("op7 fsync lost") };
+    match inj.next_fault(8) { None => {}, _ => panic("schedule exhausted") };
+}
+
+fn test_dst_ledger_records() {
+    let mut led = ledger_new(0xABCD as Int64);
+    led.record_op(0, "open".clone());
+    led.record_advance(1000 as Int64);
+    led.record_fault(1, FkPowerLoss);
+    led.abort();
+    assert_eq(led.event_count(), 3);
+    assert(led.was_aborted());
+}
+
+// -----------------------------------------------------------------------------
+// differential
+// -----------------------------------------------------------------------------
+
+fn make_row(ints: List<Int64>) -> DiffRow {
+    let mut cells: List<DiffCell> = List.new();
+    let mut i: Int = 0;
+    while i < ints.len() {
+        cells.push(DcInt(ints[i]));
+        i = i + 1;
+    }
+    DiffRow { cells: cells }
+}
+
+fn test_diff_match_when_rows_identical() {
+    let mut r1: List<Int64> = List.new(); r1.push(1 as Int64); r1.push(2 as Int64);
+    let mut r2: List<Int64> = List.new(); r2.push(1 as Int64); r2.push(2 as Int64);
+    let mut left: List<DiffRow> = List.new(); left.push(make_row(r1));
+    let mut right: List<DiffRow> = List.new(); right.push(make_row(r2));
+    let d = compare(&DrRows(left), &DrRows(right), &MdRowsetEquality);
+    assert(is_match(&d));
+}
+
+fn test_diff_row_count_mismatch() {
+    let mut r1: List<Int64> = List.new(); r1.push(1 as Int64);
+    let mut left: List<DiffRow> = List.new(); left.push(make_row(r1));
+    let right: List<DiffRow> = List.new();
+    match compare(&DrRows(left), &DrRows(right), &MdRowsetEquality) {
+        DfRowCountMismatch(a, b) => { assert_eq(a, 1); assert_eq(b, 0); }
+        _ => panic("row count diff missed"),
+    }
+}
+
+fn test_diff_cell_mismatch() {
+    let mut r1: List<Int64> = List.new(); r1.push(1 as Int64); r1.push(2 as Int64);
+    let mut r2: List<Int64> = List.new(); r2.push(1 as Int64); r2.push(99 as Int64);
+    let mut left: List<DiffRow> = List.new(); left.push(make_row(r1));
+    let mut right: List<DiffRow> = List.new(); right.push(make_row(r2));
+    match compare(&DrRows(left), &DrRows(right), &MdRowsetEquality) {
+        DfCellMismatch(_, col, _, _) => assert_eq(col, 1),
+        _ => panic("cell mismatch missed"),
+    }
+}
+
+fn test_diff_error_equivalence() {
+    let l = DrError("syntax error".clone());
+    let r = DrError("syntax error".clone());
+    let d = compare(&l, &r, &MdErrorEquivalence);
+    assert(is_match(&d));
+}
+
+fn test_diff_sorted_mode_handles_reorder() {
+    let mut r1: List<Int64> = List.new(); r1.push(2 as Int64);
+    let mut r2: List<Int64> = List.new(); r2.push(1 as Int64);
+    let mut left: List<DiffRow> = List.new(); left.push(make_row(r1)); left.push(make_row(r2));
+    let mut q1: List<Int64> = List.new(); q1.push(1 as Int64);
+    let mut q2: List<Int64> = List.new(); q2.push(2 as Int64);
+    let mut right: List<DiffRow> = List.new(); right.push(make_row(q1)); right.push(make_row(q2));
+    let d = compare(&DrRows(left), &DrRows(right), &MdRowsetSorted);
+    assert(is_match(&d));
+}
+
+// -----------------------------------------------------------------------------
+// fuzz
+// -----------------------------------------------------------------------------
+
+fn test_fuzz_rng_deterministic() {
+    let mut a = fuzz_rng(7 as Int64);
+    let mut b = fuzz_rng(7 as Int64);
+    let mut k: Int = 0;
+    while k < 5 {
+        assert_eq(a.next(), b.next());
+        k = k + 1;
+    }
+}
+
+fn test_format_fuzzer_mutates_changes_bytes() {
+    let mut input: List<Byte> = List.new();
+    let mut i: Int = 0;
+    while i < 16 { input.push(0 as Byte); i = i + 1; }
+    let mut f = format_fuzzer(123 as Int64, 4);
+    let mutated = f.mutate(&input);
+    assert_eq(mutated.len(), 16);
+    // Some byte changed (probabilistically; with seed 123 deterministic)
+    let mut changed = false;
+    let mut k: Int = 0;
+    while k < 16 {
+        if mutated[k] != input[k] { changed = true; break; }
+        k = k + 1;
+    }
+    assert(changed);
+}
+
+fn test_format_fuzzer_shrinks() {
+    let mut input: List<Byte> = List.new();
+    let mut i: Int = 0;
+    while i < 32 { input.push(0xff as Byte); i = i + 1; }
+    let f = format_fuzzer(1 as Int64, 1);
+    let candidates = f.shrink(&input);
+    assert(candidates.len() >= 1);
+    let mut all_smaller = true;
+    let mut k: Int = 0;
+    while k < candidates.len() {
+        if candidates[k].len() >= input.len() { all_smaller = false; break; }
+        k = k + 1;
+    }
+    assert(all_smaller);
+}
+
+fn test_wal_fuzzer_generates_plan() {
+    let mut f = wal_fuzzer(99 as Int64, 5);
+    let plan = f.generate();
+    assert(plan.actions.len() >= 1);
+    assert(plan.actions.len() <= 5);
+}
+
+fn test_grammar_fuzzer_generates_text() {
+    let mut g = grammar_fuzzer(0xDEAD as Int64);
+    let stmt = g.generate();
+    assert(stmt.len() > 0);
+}
+
+// -----------------------------------------------------------------------------
+// coverage
+// -----------------------------------------------------------------------------
+
+fn test_tally_pass_rate() {
+    let mut t = tally_new(StL2);
+    t.record_pass();
+    t.record_pass();
+    t.record_pass();
+    t.record_fail();
+    assert_eq(t.run_total(), 4);
+    assert_eq(t.pass_rate(), 75);
+}
+
+fn test_phase_quotas_increase() {
+    let alpha = phase_quotas(&PhAlpha);
+    let beta  = phase_quotas(&PhBeta);
+    let rel   = phase_quotas(&PhRelease);
+    assert(alpha.l2_min < beta.l2_min);
+    assert(beta.l2_min < rel.l2_min || beta.l2_min == rel.l2_min);
+    assert_eq(rel.l0_min, 100);
+    assert_eq(rel.diff_min, 100);
+}
+
+fn test_coverage_meets_alpha_with_partial_l2() {
+    let mut rep = report_new();
+    // L0 100% (1/1), L1 80% (4/5), L2 30% (3/10), differential 70% (7/10)
+    rep.record_pass(&StL0);
+    let mut k: Int = 0;
+    while k < 4 { rep.record_pass(&StL1); k = k + 1; }
+    rep.record_fail(&StL1);
+    k = 0;
+    while k < 3 { rep.record_pass(&StL2); k = k + 1; }
+    let mut f: Int = 0;
+    while f < 7 { rep.record_fail(&StL2); f = f + 1; }
+    k = 0;
+    while k < 7 { rep.record_pass(&StDifferential); k = k + 1; }
+    let mut g: Int = 0;
+    while g < 3 { rep.record_fail(&StDifferential); g = g + 1; }
+    assert(rep.meets_phase(&PhAlpha));
+    assert(!rep.meets_phase(&PhBeta));
+}
+
+fn main() {
+    test_step_clock_advances();
+    test_round_robin_cycles();
+    test_seeded_scheduler_deterministic();
+    test_no_faults_returns_none();
+    test_scripted_faults_fire_at_op_index();
+    test_dst_ledger_records();
+    test_diff_match_when_rows_identical();
+    test_diff_row_count_mismatch();
+    test_diff_cell_mismatch();
+    test_diff_error_equivalence();
+    test_diff_sorted_mode_handles_reorder();
+    test_fuzz_rng_deterministic();
+    test_format_fuzzer_mutates_changes_bytes();
+    test_format_fuzzer_shrinks();
+    test_wal_fuzzer_generates_plan();
+    test_grammar_fuzzer_generates_text();
+    test_tally_pass_rate();
+    test_phase_quotas_increase();
+    test_coverage_meets_alpha_with_partial_l2();
+}

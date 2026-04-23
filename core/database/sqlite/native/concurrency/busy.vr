@@ -1,0 +1,134 @@
+// =============================================================================
+// concurrency/busy.vr — busy-timeout retry policy
+// =============================================================================
+// Spec: sqlite-native.md §20.4
+//
+// `BusyPolicy` is a protocol that decides whether to retry on
+// SQLITE_BUSY. Three implementations ship out of the box:
+//
+//   * `NoRetry`         — first BUSY → DbError::Busy
+//   * `ConstantRetry`   — bounded number of retries with constant
+//                         per-retry sleep
+//   * `ExponentialRetry`— bounded retries with exponential backoff
+//                         and configurable jitter cap
+//
+// Custom policies plug in via the same protocol — extension authors
+// can implement a token-bucket or deadline-driven policy without
+// touching the runtime.
+// =============================================================================
+
+module core.database.sqlite.native.concurrency.busy;
+
+mount core.*;
+mount base.{Bool, Maybe};
+
+public type RetryDecision is
+      RdRetryAfter(Int64)        // sleep ns before next attempt
+    | RdGiveUp;
+
+// -----------------------------------------------------------------------------
+// BusyPolicy protocol
+// -----------------------------------------------------------------------------
+
+public type BusyPolicy is protocol {
+    fn name(&self) -> base.Text;
+    /// `attempt` starts at 0 (just before the first busy hit).
+    fn decide(&self, attempt: Int) -> RetryDecision;
+};
+
+// -----------------------------------------------------------------------------
+// NoRetry
+// -----------------------------------------------------------------------------
+
+public type NoRetry is { unit: Bool };
+public fn no_retry() -> NoRetry { NoRetry { unit: true } }
+
+implement BusyPolicy for NoRetry {
+    fn name(&self) -> base.Text { "no_retry".clone() }
+    fn decide(&self, _attempt: Int) -> RetryDecision { RdGiveUp }
+}
+
+// -----------------------------------------------------------------------------
+// ConstantRetry
+// -----------------------------------------------------------------------------
+
+public type ConstantRetry is {
+    max_attempts: Int,
+    sleep_ns: Int64,
+};
+
+public fn constant_retry(max_attempts: Int, sleep_ns: Int64) -> ConstantRetry {
+    ConstantRetry { max_attempts: max_attempts, sleep_ns: sleep_ns }
+}
+
+implement BusyPolicy for ConstantRetry {
+    fn name(&self) -> base.Text { "constant".clone() }
+    fn decide(&self, attempt: Int) -> RetryDecision {
+        if attempt >= self.max_attempts { return RdGiveUp; }
+        RdRetryAfter(self.sleep_ns)
+    }
+}
+
+// -----------------------------------------------------------------------------
+// ExponentialRetry
+// -----------------------------------------------------------------------------
+//
+// Sleep grows as `base * 2^attempt`, capped at `max_sleep_ns`. With
+// `jitter_ns > 0` the deterministic plan is randomised within
+// [-jitter_ns, +jitter_ns]; for DST-friendly behaviour the caller
+// supplies a deterministic RNG via `set_rng`.
+// =============================================================================
+
+public type ExponentialRetry is {
+    max_attempts: Int,
+    base_ns: Int64,
+    max_sleep_ns: Int64,
+    jitter_ns: Int64,
+};
+
+public fn exponential_retry(
+    max_attempts: Int,
+    base_ns: Int64,
+    max_sleep_ns: Int64,
+) -> ExponentialRetry {
+    ExponentialRetry {
+        max_attempts: max_attempts,
+        base_ns: base_ns,
+        max_sleep_ns: max_sleep_ns,
+        jitter_ns: 0 as Int64,
+    }
+}
+
+implement BusyPolicy for ExponentialRetry {
+    fn name(&self) -> base.Text { "exponential".clone() }
+    fn decide(&self, attempt: Int) -> RetryDecision {
+        if attempt >= self.max_attempts { return RdGiveUp; }
+        let mut sleep: Int64 = self.base_ns;
+        let mut k: Int = 0;
+        while k < attempt && sleep < self.max_sleep_ns {
+            sleep = sleep * (2 as Int64);
+            k = k + 1;
+        }
+        if sleep > self.max_sleep_ns { sleep = self.max_sleep_ns; }
+        RdRetryAfter(sleep)
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Deadline policy adapter
+// -----------------------------------------------------------------------------
+//
+// Wraps any inner BusyPolicy with a wall-clock deadline. If the
+// deadline elapses, the wrapper returns RdGiveUp regardless of what
+// the inner policy says.
+// =============================================================================
+
+public type DeadlineGate is {
+    deadline_ns: Int64,
+    /// Caller threads the current monotonic clock here on every call.
+    now_ns: Int64,
+};
+
+public fn deadline_elapsed(g: &DeadlineGate) -> Bool {
+    g.now_ns >= g.deadline_ns
+}

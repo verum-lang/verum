@@ -1,0 +1,23 @@
+// =============================================================================
+// core/database/sqlite/native/testing/mod.vr
+// =============================================================================
+// Layer: 7 (consumer-facing)
+// Spec: sqlite-native.md §22
+//
+// Test infrastructure shipped *with* loom so users can write their
+// own DST / differential / fuzz suites without re-implementing the
+// scaffolding. The four sub-modules cover the four pillars of §22:
+//
+//   * dst         — deterministic-simulation harness (mock clock,
+//                   mock VFS, deterministic scheduler hooks)
+//   * differential — V vs C comparator API for golden-output tests
+//   * fuzz        — grammar / format / WAL mutators with shrinking
+//   * coverage    — per-suite coverage taxonomy and quota tracker
+// =============================================================================
+
+module core.database.sqlite.native.testing;
+
+public module dst;
+public module differential;
+public module fuzz;
+public module coverage;

@@ -85,3 +85,9 @@ public module verify;
 public module triggers;
 public module views;
 public module constraints;
+// - ext: protocol-based Extensions API (§19) — user-defined fns + hooks
+public module ext;
+// - concurrency: pool / busy / snapshot / deadlock (§20)
+public module concurrency;
+// - testing: DST harness / differential / fuzz / coverage (§22)
+public module testing;

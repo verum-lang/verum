@@ -1,0 +1,352 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, ext, protocols, scalar, aggregate, window, hooks
+// @timeout: 5000
+// @expected-exit: 0
+//
+// Verifies the loom Extensions API surface (§19):
+//   * ScalarFn protocol — closure adapter eval / arity check
+//   * AggregateFn protocol — built-in CountAll / SumInt / MaxInt /
+//     Concat round-trip via init/step/finalize
+//   * WindowFn protocol — RowNumber + WSum step_forward/value
+//   * Hooks protocol — ConstantBusyHandler retry policy
+//   * Loadable extension gate — disabled by default, records loads
+//   * FnFlags — pure / random / custom builders
+//   * FnRegistry — scalar/aggregate insertion + hook subscriptions
+
+mount core.database.sqlite.native.l4_vdbe.register.{
+    Register, RNull, RInt, RText,
+};
+mount core.database.sqlite.native.ext.fn_flags.{
+    FnFlags, flags_default, flags_pure, flags_random,
+};
+mount core.database.sqlite.native.ext.scalar.{
+    ScalarFn, ScalarFnError, ArityMismatch,
+    ClosureScalar, closure_scalar, check_arity,
+};
+mount core.database.sqlite.native.ext.aggregate.{
+    AggregateFn,
+    CountAll, count_all,
+    SumInt, sum_int,
+    MaxInt, max_int,
+    Concat, concat_with,
+};
+mount core.database.sqlite.native.ext.window.{
+    WindowFn, WindowFrame, frame_default,
+    FrameKind, FrkRows, FrameBoundary, FbUnboundedPreceding, FbCurrent,
+    FrameExclusion, FxNone,
+    RowNumber, row_number,
+    WSum, w_sum,
+};
+mount core.database.sqlite.native.ext.hooks.{
+    BusyHandler, ConstantBusyHandler, constant_busy,
+    UpdateOp, UoInsert, UoUpdate, UoDelete, update_op_name,
+    AuthAction, AuthDecision, AdAllow, AdDeny, AaSelect, AaInsert,
+    CommitDecision, CdAllow, CdAbort,
+};
+mount core.database.sqlite.native.ext.loadable.{
+    LoadGate, load_gate_default,
+    ExtensionInfo, extension_info,
+    LoadError, LoadDisabled,
+    LoadDecision, LdProceed, LdAlreadyLoaded,
+    try_load,
+};
+mount core.database.sqlite.native.ext.registry.{
+    FnRegistry, registry_new,
+    RegistryError, AlreadyRegistered,
+};
+mount base.{Result, Ok, Err, Maybe, Some, None, Bool};
+
+// -----------------------------------------------------------------------------
+// FnFlags
+// -----------------------------------------------------------------------------
+
+fn test_flags_builders() {
+    // `pure` is a reserved Verum keyword, so use a non-conflicting binding name.
+    let pure_flags = flags_pure();
+    assert(pure_flags.deterministic);
+    assert(pure_flags.innocuous);
+    assert(!pure_flags.direct_only);
+
+    let rng = flags_random();
+    assert(rng.direct_only);
+    assert(!rng.deterministic);
+
+    let custom = flags_default().with_deterministic().with_subtype_aware();
+    assert(custom.deterministic);
+    assert(custom.subtype_aware);
+}
+
+// -----------------------------------------------------------------------------
+// ScalarFn
+// -----------------------------------------------------------------------------
+
+fn echo_first(args: &List<Register>) -> Result<Register, ScalarFnError> {
+    if args.len() == 0 { return Err(ArityMismatch("need 1".clone())); }
+    Ok(clone_register(&args[0]))
+}
+
+fn test_scalar_closure() {
+    let f: ClosureScalar = closure_scalar(
+        "echo".clone(),
+        1,
+        flags_pure(),
+        echo_first,
+    );
+    assert(f.name() == "echo".clone());
+    assert_eq(f.arity(), 1);
+
+    let mut args: List<Register> = List.new();
+    args.push(RInt(42 as Int64));
+    let r = f.eval(&args);
+    match r {
+        Ok(v) => match v {
+            RInt(x) => assert_eq(x, 42 as Int64),
+            _       => panic("expected RInt"),
+        },
+        Err(_) => panic("eval should succeed"),
+    }
+}
+
+fn test_arity_check() {
+    match check_arity(2, 2) { Ok(_) => {}, Err(_) => panic("2/2 ok") };
+    match check_arity(2, 3) { Err(_) => {}, Ok(_) => panic("2/3 mismatch") };
+    match check_arity(-1, 7) { Ok(_) => {}, Err(_) => panic("varargs ok") };
+}
+
+// -----------------------------------------------------------------------------
+// AggregateFn
+// -----------------------------------------------------------------------------
+
+fn drive_aggregate_count() {
+    let agg = count_all();
+    let mut st = agg.init();
+    let empty: List<Register> = List.new();
+    agg.step(&mut st, &empty);
+    agg.step(&mut st, &empty);
+    agg.step(&mut st, &empty);
+    match agg.finalize(st) {
+        RInt(x) => assert_eq(x, 3 as Int64),
+        _       => panic("CountAll finalize → RInt"),
+    }
+}
+
+fn drive_aggregate_sum() {
+    let agg = sum_int();
+    let mut st = agg.init();
+    let mut a1: List<Register> = List.new(); a1.push(RInt(10 as Int64));
+    let mut a2: List<Register> = List.new(); a2.push(RInt(20 as Int64));
+    let mut a3: List<Register> = List.new(); a3.push(RInt(30 as Int64));
+    agg.step(&mut st, &a1);
+    agg.step(&mut st, &a2);
+    agg.step(&mut st, &a3);
+    match agg.finalize(st) {
+        RInt(x) => assert_eq(x, 60 as Int64),
+        _       => panic("SumInt finalize → RInt"),
+    }
+}
+
+fn drive_aggregate_sum_empty_returns_null() {
+    let agg = sum_int();
+    let st = agg.init();
+    match agg.finalize(st) {
+        RNull => {},
+        _     => panic("empty SUM → NULL"),
+    }
+}
+
+fn drive_aggregate_max() {
+    let agg = max_int();
+    let mut st = agg.init();
+    let mut a: List<Register> = List.new(); a.push(RInt(5 as Int64));
+    agg.step(&mut st, &a);
+    let mut b: List<Register> = List.new(); b.push(RInt(99 as Int64));
+    agg.step(&mut st, &b);
+    let mut c: List<Register> = List.new(); c.push(RInt(7 as Int64));
+    agg.step(&mut st, &c);
+    match agg.finalize(st) {
+        RInt(x) => assert_eq(x, 99 as Int64),
+        _       => panic("MaxInt finalize → RInt"),
+    }
+}
+
+fn drive_aggregate_concat() {
+    let agg = concat_with("|".clone());
+    let mut st = agg.init();
+    let mut a: List<Register> = List.new(); a.push(RText("a".clone()));
+    let mut b: List<Register> = List.new(); b.push(RText("b".clone()));
+    let mut c: List<Register> = List.new(); c.push(RText("c".clone()));
+    agg.step(&mut st, &a);
+    agg.step(&mut st, &b);
+    agg.step(&mut st, &c);
+    match agg.finalize(st) {
+        RText(s) => assert(s == "a|b|c".clone()),
+        _        => panic("Concat finalize → RText"),
+    }
+}
+
+// -----------------------------------------------------------------------------
+// WindowFn
+// -----------------------------------------------------------------------------
+
+fn drive_window_row_number() {
+    let win = row_number();
+    let frame = frame_default();
+    let mut st = win.init(&frame);
+    let empty: List<Register> = List.new();
+    win.step_forward(&mut st, &empty);
+    win.step_forward(&mut st, &empty);
+    win.step_forward(&mut st, &empty);
+    match win.value(&st) {
+        RInt(x) => assert_eq(x, 3 as Int64),
+        _       => panic("ROW_NUMBER → RInt"),
+    }
+}
+
+fn drive_window_sum_with_step_back() {
+    let win = w_sum(0);
+    let frame = frame_default();
+    let mut st = win.init(&frame);
+    let mut r1: List<Register> = List.new(); r1.push(RInt(10 as Int64));
+    let mut r2: List<Register> = List.new(); r2.push(RInt(20 as Int64));
+    let mut r3: List<Register> = List.new(); r3.push(RInt(30 as Int64));
+    win.step_forward(&mut st, &r1);
+    win.step_forward(&mut st, &r2);
+    win.step_forward(&mut st, &r3);
+    match win.value(&st) {
+        RInt(x) => assert_eq(x, 60 as Int64),
+        _       => panic("WSum value → RInt"),
+    }
+    // Frame edge moves left — roll r1 out
+    win.step_back(&mut st, &r1);
+    match win.value(&st) {
+        RInt(x) => assert_eq(x, 50 as Int64),
+        _       => panic("WSum after step_back"),
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Hooks
+// -----------------------------------------------------------------------------
+
+fn test_busy_handler_bounded() {
+    let mut h = constant_busy(3);
+    assert(h.on_busy(0));
+    assert(h.on_busy(1));
+    assert(h.on_busy(2));
+    assert(!h.on_busy(3));
+}
+
+fn test_update_op_names() {
+    assert(update_op_name(&UoInsert) == "INSERT".clone());
+    assert(update_op_name(&UoUpdate) == "UPDATE".clone());
+    assert(update_op_name(&UoDelete) == "DELETE".clone());
+}
+
+// -----------------------------------------------------------------------------
+// Loadable extension gate
+// -----------------------------------------------------------------------------
+
+fn test_load_gate_disabled_by_default() {
+    let gate = load_gate_default();
+    assert(!gate.is_enabled());
+    let info = extension_info("vss".clone(), "0.1".clone(), "vector search".clone());
+    match try_load(&gate, &info) {
+        Err(LoadDisabled) => {},
+        _ => panic("disabled gate → LoadDisabled"),
+    }
+}
+
+fn test_load_gate_enable_then_record() {
+    let mut gate = load_gate_default();
+    gate.enable();
+    assert(gate.is_enabled());
+    let info = extension_info("vss".clone(), "0.1".clone(), "vector search".clone());
+    match try_load(&gate, &info) {
+        Ok(LdProceed) => {},
+        _ => panic("enabled gate → LdProceed"),
+    }
+    let _ = gate.record_load(info);
+    assert_eq(gate.loaded_count(), 1);
+}
+
+fn test_load_gate_already_loaded() {
+    let mut gate = load_gate_default();
+    gate.enable();
+    let info = extension_info("vss".clone(), "0.1".clone(), "v".clone());
+    let _ = gate.record_load(extension_info("vss".clone(), "0.1".clone(), "v".clone()));
+    match try_load(&gate, &info) {
+        Ok(LdAlreadyLoaded(_)) => {},
+        _ => panic("re-load → LdAlreadyLoaded"),
+    }
+}
+
+// -----------------------------------------------------------------------------
+// FnRegistry
+// -----------------------------------------------------------------------------
+
+fn test_registry_scalar_dedup() {
+    let mut reg = registry_new();
+    let f: Heap<dyn ScalarFn> = Heap.new(closure_scalar(
+        "echo".clone(),
+        1,
+        flags_pure(),
+        echo_first,
+    ));
+    let r = reg.register_scalar(f);
+    assert(r.is_ok());
+    assert_eq(reg.scalar_count(), 1);
+
+    let f2: Heap<dyn ScalarFn> = Heap.new(closure_scalar(
+        "echo".clone(),
+        1,
+        flags_pure(),
+        echo_first,
+    ));
+    match reg.register_scalar(f2) {
+        Err(AlreadyRegistered(_)) => {},
+        _ => panic("dup name → AlreadyRegistered"),
+    }
+}
+
+fn test_registry_busy_hook_subscription() {
+    let mut reg = registry_new();
+    assert(!reg.has_busy_handler());
+    let h: Heap<dyn BusyHandler> = Heap.new(constant_busy(5));
+    reg.set_busy_handler(h);
+    assert(reg.has_busy_handler());
+}
+
+// -----------------------------------------------------------------------------
+// Helpers
+// -----------------------------------------------------------------------------
+
+fn clone_register(r: &Register) -> Register {
+    match r {
+        RNull    => RNull,
+        RInt(x)  => RInt(x),
+        RText(s) => RText(s.clone()),
+        _        => RNull,
+    }
+}
+
+fn main() {
+    test_flags_builders();
+    test_scalar_closure();
+    test_arity_check();
+    drive_aggregate_count();
+    drive_aggregate_sum();
+    drive_aggregate_sum_empty_returns_null();
+    drive_aggregate_max();
+    drive_aggregate_concat();
+    drive_window_row_number();
+    drive_window_sum_with_step_back();
+    test_busy_handler_bounded();
+    test_update_op_names();
+    test_load_gate_disabled_by_default();
+    test_load_gate_enable_then_record();
+    test_load_gate_already_loaded();
+    test_registry_scalar_dedup();
+    test_registry_busy_hook_subscription();
+}

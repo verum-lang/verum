@@ -1,0 +1,196 @@
+// =============================================================================
+// testing/dst.vr — deterministic simulation testing harness
+// =============================================================================
+// Spec: sqlite-native.md §22.5
+//
+// Three protocols + a stitched runner give a DST suite the three
+// degrees of freedom it needs to reproduce production state under
+// adversarial scheduling:
+//
+//   * `MockClock`     — caller-controlled monotonic time
+//   * `MockScheduler` — deterministic task-priority + interleave
+//   * `FaultInjector` — hooks for power-loss, partial-write, fsync-loss
+//
+// Each is its own protocol so a DST author can swap one piece at a
+// time. The default `RngClock + RoundRobin + NoFaults` triple
+// reproduces a lossless serial run.
+// =============================================================================
+
+module core.database.sqlite.native.testing.dst;
+
+mount core.*;
+mount base.{Text, Bool, Maybe};
+mount collections.List;
+
+// -----------------------------------------------------------------------------
+// MockClock protocol
+// -----------------------------------------------------------------------------
+
+public type MockClock is protocol {
+    fn now_ns(&self) -> Int64;
+    /// Advance the clock by `delta_ns`. Returns the new `now_ns`.
+    fn advance(&mut self, delta_ns: Int64) -> Int64;
+};
+
+public type StepClock is { ns: Int64 };
+
+public fn step_clock(start_ns: Int64) -> StepClock {
+    StepClock { ns: start_ns }
+}
+
+implement MockClock for StepClock {
+    fn now_ns(&self) -> Int64 { self.ns }
+    fn advance(&mut self, delta_ns: Int64) -> Int64 {
+        self.ns = self.ns + delta_ns;
+        self.ns
+    }
+}
+
+// -----------------------------------------------------------------------------
+// MockScheduler — deterministic interleaving choice
+// -----------------------------------------------------------------------------
+//
+// `next_choice(n_runnable)` returns which runnable task to schedule
+// next (0..n_runnable). `RoundRobin` cycles through tasks; `Seeded`
+// uses a deterministic permutation; `WorstCaseAdversary` always
+// picks the most "interesting" choice (last-released / oldest-blocked).
+// =============================================================================
+
+public type MockScheduler is protocol {
+    fn name(&self) -> Text;
+    fn next_choice(&mut self, n_runnable: Int) -> Int;
+};
+
+public type RoundRobin is { tick: Int };
+
+public fn round_robin() -> RoundRobin { RoundRobin { tick: 0 } }
+
+implement MockScheduler for RoundRobin {
+    fn name(&self) -> Text { "round_robin".clone() }
+    fn next_choice(&mut self, n_runnable: Int) -> Int {
+        if n_runnable <= 0 { return 0; }
+        let r = self.tick % n_runnable;
+        self.tick = self.tick + 1;
+        r
+    }
+}
+
+public type SeededScheduler is { state: Int64 };
+
+public fn seeded_scheduler(seed: Int64) -> SeededScheduler {
+    SeededScheduler { state: if seed == (0 as Int64) { 1 as Int64 } else { seed } }
+}
+
+implement MockScheduler for SeededScheduler {
+    fn name(&self) -> Text { "seeded".clone() }
+    fn next_choice(&mut self, n_runnable: Int) -> Int {
+        if n_runnable <= 0 { return 0; }
+        // xorshift64
+        let mut x: Int64 = self.state;
+        x = x ^ (x << (13 as Int64));
+        x = x ^ (x >> (7 as Int64));
+        x = x ^ (x << (17 as Int64));
+        self.state = x;
+        let raw: Int = (x as Int) & 2147483647;
+        raw % n_runnable
+    }
+}
+
+// -----------------------------------------------------------------------------
+// FaultInjector
+// -----------------------------------------------------------------------------
+
+public type FaultKind is
+      FkPowerLoss
+    | FkPartialWrite(Int)         // write only first N bytes
+    | FkFsyncLost                  // fsync returned but data lost
+    | FkReadCorrupt(Int)          // read returns garbage at offset
+    | FkAppendFail
+    | FkOpenFail;
+
+public type Fault is {
+    at_op_index: Int,             // which I/O op number triggers
+    kind: FaultKind,
+};
+
+public type FaultInjector is protocol {
+    fn name(&self) -> Text;
+    /// Called before each I/O op; returns the fault to inject (if any).
+    fn next_fault(&mut self, op_index: Int) -> Maybe<FaultKind>;
+};
+
+public type NoFaults is { unit: Bool };
+public fn no_faults() -> NoFaults { NoFaults { unit: true } }
+
+implement FaultInjector for NoFaults {
+    fn name(&self) -> Text { "no_faults".clone() }
+    fn next_fault(&mut self, _op_index: Int) -> Maybe<FaultKind> { None }
+}
+
+public type ScriptedFaults is {
+    schedule: List<Fault>,
+    cursor: Int,
+};
+
+public fn scripted_faults(schedule: List<Fault>) -> ScriptedFaults {
+    ScriptedFaults { schedule: schedule, cursor: 0 }
+}
+
+implement FaultInjector for ScriptedFaults {
+    fn name(&self) -> Text { "scripted".clone() }
+    fn next_fault(&mut self, op_index: Int) -> Maybe<FaultKind> {
+        if self.cursor >= self.schedule.len() { return None; }
+        let f = &self.schedule[self.cursor];
+        if f.at_op_index == op_index {
+            let kind = clone_fault_kind(&f.kind);
+            self.cursor = self.cursor + 1;
+            return Some(kind);
+        }
+        None
+    }
+}
+
+fn clone_fault_kind(k: &FaultKind) -> FaultKind {
+    match k {
+        FkPowerLoss        => FkPowerLoss,
+        FkPartialWrite(n)  => FkPartialWrite(n),
+        FkFsyncLost        => FkFsyncLost,
+        FkReadCorrupt(n)   => FkReadCorrupt(n),
+        FkAppendFail       => FkAppendFail,
+        FkOpenFail         => FkOpenFail,
+    }
+}
+
+// -----------------------------------------------------------------------------
+// DST runner ledger — accumulates timeline + final assertion outcome
+// -----------------------------------------------------------------------------
+
+public type DstEvent is
+      DeOp(Int, Text)              // op_index, op_name
+    | DeFault(Int, FaultKind)
+    | DeAdvanceClock(Int64);
+
+public type DstLedger is {
+    seed: Int64,
+    events: List<DstEvent>,
+    aborted: Bool,
+};
+
+public fn ledger_new(seed: Int64) -> DstLedger {
+    DstLedger { seed: seed, events: List.new(), aborted: false }
+}
+
+implement DstLedger {
+    public fn record_op(&mut self, idx: Int, name: Text) {
+        self.events.push(DeOp(idx, name));
+    }
+    public fn record_fault(&mut self, idx: Int, kind: FaultKind) {
+        self.events.push(DeFault(idx, kind));
+    }
+    public fn record_advance(&mut self, delta_ns: Int64) {
+        self.events.push(DeAdvanceClock(delta_ns));
+    }
+    public fn abort(&mut self) { self.aborted = true; }
+    public fn was_aborted(&self) -> Bool { self.aborted }
+    public fn event_count(&self) -> Int { self.events.len() }
+}

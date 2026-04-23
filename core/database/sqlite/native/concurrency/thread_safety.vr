@@ -1,0 +1,63 @@
+// =============================================================================
+// concurrency/thread_safety.vr — Connection thread-safety mode tagging
+// =============================================================================
+// Spec: sqlite-native.md §20.1
+//
+// Three modes inherited from SQLite:
+//
+//   SingleThread     — connection bound to its creating thread
+//                      (Send/Sync impls deny cross-thread access)
+//   MultiThread      — connection bound to one thread, but the
+//                      Database handle may have many such connections
+//   Serialized       — connection may be passed across threads
+//                      (default — uses actor-based pager arbitration)
+//
+// We expose this as a phantom-typed marker on `Connection<T, S>`,
+// where `S: ThreadSafetyMode`. The marker constrains the Send/Sync
+// impls so misuse is a type error rather than a runtime panic.
+// =============================================================================
+
+module core.database.sqlite.native.concurrency.thread_safety;
+
+mount core.*;
+mount base.{Text, Bool};
+
+public type ThreadSafetyMode is protocol {
+    fn allows_cross_thread(&self) -> Bool;
+    fn allows_multiple_per_database(&self) -> Bool;
+    fn name(&self) -> Text;
+};
+
+// -----------------------------------------------------------------------------
+// Marker types
+// -----------------------------------------------------------------------------
+
+public type SingleThread is { unit: Bool };
+public type MultiThread  is { unit: Bool };
+public type Serialized   is { unit: Bool };
+
+public fn single_thread() -> SingleThread { SingleThread { unit: true } }
+public fn multi_thread()  -> MultiThread  { MultiThread  { unit: true } }
+public fn serialized()    -> Serialized   { Serialized   { unit: true } }
+
+// -----------------------------------------------------------------------------
+// Protocol impls
+// -----------------------------------------------------------------------------
+
+implement ThreadSafetyMode for SingleThread {
+    fn allows_cross_thread(&self) -> Bool { false }
+    fn allows_multiple_per_database(&self) -> Bool { false }
+    fn name(&self) -> Text { "single_thread".clone() }
+}
+
+implement ThreadSafetyMode for MultiThread {
+    fn allows_cross_thread(&self) -> Bool { false }
+    fn allows_multiple_per_database(&self) -> Bool { true }
+    fn name(&self) -> Text { "multi_thread".clone() }
+}
+
+implement ThreadSafetyMode for Serialized {
+    fn allows_cross_thread(&self) -> Bool { true }
+    fn allows_multiple_per_database(&self) -> Bool { true }
+    fn name(&self) -> Text { "serialized".clone() }
+}

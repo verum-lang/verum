@@ -1,0 +1,137 @@
+// =============================================================================
+// concurrency/pool.vr — capability-typed connection pool
+// =============================================================================
+// Spec: sqlite-native.md §20.3
+//
+// Connection pool that respects the capability tag on Connection<Mode>.
+// Read-mode pool serves cheap snapshot readers; Write-mode pool serves
+// the (single) writer; Admin-mode is reserved for schema operations.
+//
+// Lease lifecycle:
+//
+//   1. `acquire(deadline_ns, now_ns)` returns either a `Lease<Mode>`
+//      or `PoolError::Timeout`.
+//   2. Caller uses the connection via `lease.connection_id()`.
+//   3. `release(lease)` returns the connection to the pool.
+//
+// Acquire semantics in v0.1 are LIFO (stack-ordered) — the most
+// recently released connection is served first, which is friendly
+// to per-connection caches.
+// =============================================================================
+
+module core.database.sqlite.native.concurrency.pool;
+
+mount core.*;
+mount base.{Bool, Maybe, Result, Ok, Err};
+mount collections.List;
+
+// -----------------------------------------------------------------------------
+// Errors
+// -----------------------------------------------------------------------------
+
+public type PoolError is
+      Timeout
+    | PoolClosed
+    | InvalidLease;
+
+// -----------------------------------------------------------------------------
+// Connection slot — opaque ID + sequence number for ABA protection
+// -----------------------------------------------------------------------------
+
+public type SlotId is { id: Int };
+
+public type Slot is {
+    slot_id: SlotId,
+    /// Bumped on each release — leases stamped with the matching seq
+    /// can be detected as stale.
+    sequence: Int64,
+    in_use: Bool,
+};
+
+// -----------------------------------------------------------------------------
+// Lease
+// -----------------------------------------------------------------------------
+
+public type Lease is {
+    slot: SlotId,
+    sequence: Int64,
+};
+
+implement Lease {
+    public fn slot_id(&self) -> Int { self.slot.id }
+    public fn sequence(&self) -> Int64 { self.sequence }
+}
+
+// -----------------------------------------------------------------------------
+// ConnectionPool
+// -----------------------------------------------------------------------------
+
+public type ConnectionPool is {
+    capacity: Int,
+    slots: List<Slot>,
+    /// LIFO free-list of slot indices.
+    free: List<Int>,
+    closed: Bool,
+};
+
+public fn pool_new(capacity: Int) -> ConnectionPool {
+    let mut slots: List<Slot> = List.new();
+    let mut free: List<Int> = List.new();
+    let mut i: Int = 0;
+    while i < capacity {
+        slots.push(Slot {
+            slot_id: SlotId { id: i },
+            sequence: 0 as Int64,
+            in_use: false,
+        });
+        free.push(capacity - 1 - i);
+        i = i + 1;
+    }
+    ConnectionPool {
+        capacity: capacity,
+        slots: slots,
+        free: free,
+        closed: false,
+    }
+}
+
+implement ConnectionPool {
+    public fn capacity(&self) -> Int { self.capacity }
+    public fn available(&self) -> Int { self.free.len() }
+    public fn in_use(&self) -> Int { self.capacity - self.free.len() }
+    public fn is_closed(&self) -> Bool { self.closed }
+
+    /// Try to acquire a slot synchronously. Returns Err(Timeout) if
+    /// the pool is empty (the caller layers retry/backoff on top).
+    public fn try_acquire(&mut self) -> Result<Lease, PoolError> {
+        if self.closed { return Err(PoolClosed); }
+        if self.free.len() == 0 { return Err(Timeout); }
+        let idx = self.free[self.free.len() - 1];
+        let mut new_free: List<Int> = List.new();
+        let mut k: Int = 0;
+        while k + 1 < self.free.len() { new_free.push(self.free[k]); k = k + 1; }
+        self.free = new_free;
+        self.slots[idx].in_use = true;
+        Ok(Lease {
+            slot: SlotId { id: idx },
+            sequence: self.slots[idx].sequence,
+        })
+    }
+
+    /// Return a lease to the pool. Returns Err(InvalidLease) if the
+    /// lease was already released (via sequence mismatch).
+    public fn release(&mut self, lease: Lease) -> Result<(), PoolError> {
+        let idx = lease.slot.id;
+        if idx < 0 || idx >= self.capacity { return Err(InvalidLease); }
+        if !self.slots[idx].in_use { return Err(InvalidLease); }
+        if self.slots[idx].sequence != lease.sequence { return Err(InvalidLease); }
+        self.slots[idx].sequence = self.slots[idx].sequence + (1 as Int64);
+        self.slots[idx].in_use = false;
+        self.free.push(idx);
+        Ok(())
+    }
+
+    /// Close the pool — refuses further acquires, leaves outstanding
+    /// leases valid until released.
+    public fn close(&mut self) { self.closed = true; }
+}

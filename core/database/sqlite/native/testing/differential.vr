@@ -1,0 +1,247 @@
+// =============================================================================
+// testing/differential.vr — V vs C differential test scaffolding
+// =============================================================================
+// Spec: sqlite-native.md §22.4
+//
+// A differential test runs the same SQL on two implementations and
+// checks they agree. Implementations are abstracted as `SqlOracle`
+// — both `c-sqlite-binary` (subprocess) and `verum-sqlite-binary`
+// (in-proc) implement it.
+//
+// Three modes of comparison:
+//
+//   * `RowsetEquality`  — exact row-set match (column count, values,
+//                         NULL handling)
+//   * `RowsetSorted`    — sorted by every column (when ORDER BY absent)
+//   * `ErrorEquivalence` — both error or both ok with same shape
+// =============================================================================
+
+module core.database.sqlite.native.testing.differential;
+
+mount core.*;
+mount base.{Text, Maybe, Result, Ok, Err, Bool};
+mount collections.List;
+
+// -----------------------------------------------------------------------------
+// Generic row + result types
+// -----------------------------------------------------------------------------
+
+public type DiffCell is
+      DcNull
+    | DcInt(Int64)
+    | DcReal(Float64)
+    | DcText(Text)
+    | DcBlob(List<Byte>);
+
+public type DiffRow is { cells: List<DiffCell> };
+
+public type DiffResult is
+      DrRows(List<DiffRow>)
+    | DrError(Text)
+    | DrUnit;                      // INSERT/UPDATE/DELETE that returned nothing
+
+// -----------------------------------------------------------------------------
+// SqlOracle protocol — anything that runs SQL
+// -----------------------------------------------------------------------------
+
+public type SqlOracle is protocol {
+    fn name(&self) -> Text;
+    fn execute(&mut self, sql: &Text) -> DiffResult;
+};
+
+// -----------------------------------------------------------------------------
+// Comparison modes
+// -----------------------------------------------------------------------------
+
+public type Mode is MdRowsetEquality | MdRowsetSorted | MdErrorEquivalence;
+
+public type Diff is
+      DfMatch
+    | DfRowCountMismatch(Int, Int)
+    | DfCellMismatch(Int, Int, DiffCell, DiffCell)
+    | DfErrorVsRows(Text)
+    | DfRowsVsError(Text)
+    | DfBothErrorDifferent(Text, Text);
+
+pub fn compare(left: &DiffResult, right: &DiffResult, mode: &Mode) -> Diff {
+    match mode {
+        MdErrorEquivalence => compare_error_equivalence(left, right),
+        MdRowsetEquality   => compare_rows_strict(left, right),
+        MdRowsetSorted     => compare_rows_sorted(left, right),
+    }
+}
+
+fn compare_error_equivalence(left: &DiffResult, right: &DiffResult) -> Diff {
+    match left {
+        DrError(le) => match right {
+            DrError(re) => {
+                if le == re { DfMatch } else { DfBothErrorDifferent(le.clone(), re.clone()) }
+            }
+            _ => DfErrorVsRows(le.clone()),
+        },
+        _ => match right {
+            DrError(re) => DfRowsVsError(re.clone()),
+            _ => DfMatch,
+        },
+    }
+}
+
+fn compare_rows_strict(left: &DiffResult, right: &DiffResult) -> Diff {
+    let l = match left { DrRows(rs) => rs, _ => { return classify_non_rows(left, right); } };
+    let r = match right { DrRows(rs) => rs, _ => { return classify_non_rows(left, right); } };
+    if l.len() != r.len() { return DfRowCountMismatch(l.len(), r.len()); }
+    let mut i: Int = 0;
+    while i < l.len() {
+        let la = &l[i].cells;
+        let ra = &r[i].cells;
+        let n: Int = if la.len() < ra.len() { la.len() } else { ra.len() };
+        let mut j: Int = 0;
+        while j < n {
+            if !cells_equal(&la[j], &ra[j]) {
+                return DfCellMismatch(i, j, clone_cell(&la[j]), clone_cell(&ra[j]));
+            }
+            j = j + 1;
+        }
+        if la.len() != ra.len() {
+            return DfCellMismatch(i, n, DcNull, DcNull);
+        }
+        i = i + 1;
+    }
+    DfMatch
+}
+
+fn compare_rows_sorted(left: &DiffResult, right: &DiffResult) -> Diff {
+    // Sort both row lists lexicographically before strict compare.
+    let l = match left { DrRows(rs) => rs, _ => { return classify_non_rows(left, right); } };
+    let r = match right { DrRows(rs) => rs, _ => { return classify_non_rows(left, right); } };
+    let l_sorted = sort_rows(l);
+    let r_sorted = sort_rows(r);
+    compare_rows_strict(&DrRows(l_sorted), &DrRows(r_sorted))
+}
+
+fn classify_non_rows(l: &DiffResult, r: &DiffResult) -> Diff {
+    match l {
+        DrError(le) => match r {
+            DrError(re) => {
+                if le == re { DfMatch } else { DfBothErrorDifferent(le.clone(), re.clone()) }
+            }
+            _ => DfErrorVsRows(le.clone()),
+        },
+        _ => match r {
+            DrError(re) => DfRowsVsError(re.clone()),
+            _ => DfMatch,
+        },
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Cell equality + ordering
+// -----------------------------------------------------------------------------
+
+fn cells_equal(a: &DiffCell, b: &DiffCell) -> Bool {
+    match a {
+        DcNull   => match b { DcNull => true, _ => false },
+        DcInt(x) => match b { DcInt(y) => x == y, _ => false },
+        DcReal(x) => match b { DcReal(y) => x == y, _ => false },
+        DcText(x) => match b { DcText(y) => x == y, _ => false },
+        DcBlob(x) => match b {
+            DcBlob(y) => bytes_equal(x, y),
+            _         => false,
+        },
+    }
+}
+
+fn bytes_equal(a: &List<Byte>, b: &List<Byte>) -> Bool {
+    if a.len() != b.len() { return false; }
+    let mut i: Int = 0;
+    while i < a.len() { if a[i] != b[i] { return false; } i = i + 1; }
+    true
+}
+
+fn cell_less(a: &DiffCell, b: &DiffCell) -> Bool {
+    // SQLite ordering: NULL < INT < REAL < TEXT < BLOB
+    let rank_a = cell_rank(a);
+    let rank_b = cell_rank(b);
+    if rank_a != rank_b { return rank_a < rank_b; }
+    match a {
+        DcInt(x)  => match b { DcInt(y)  => x < y, _ => false },
+        DcReal(x) => match b { DcReal(y) => x < y, _ => false },
+        DcText(x) => match b { DcText(y) => x < y, _ => false },
+        _         => false,
+    }
+}
+
+fn cell_rank(c: &DiffCell) -> Int {
+    match c {
+        DcNull   => 0,
+        DcInt(_) => 1,
+        DcReal(_)=> 2,
+        DcText(_)=> 3,
+        DcBlob(_)=> 4,
+    }
+}
+
+fn clone_cell(c: &DiffCell) -> DiffCell {
+    match c {
+        DcNull   => DcNull,
+        DcInt(x) => DcInt(x),
+        DcReal(x)=> DcReal(x),
+        DcText(s)=> DcText(s.clone()),
+        DcBlob(b)=> {
+            let mut out: List<Byte> = List.new();
+            let mut i: Int = 0;
+            while i < b.len() { out.push(b[i]); i = i + 1; }
+            DcBlob(out)
+        }
+    }
+}
+
+fn clone_row(r: &DiffRow) -> DiffRow {
+    let mut out: List<DiffCell> = List.new();
+    let mut i: Int = 0;
+    while i < r.cells.len() { out.push(clone_cell(&r.cells[i])); i = i + 1; }
+    DiffRow { cells: out }
+}
+
+fn row_less(a: &DiffRow, b: &DiffRow) -> Bool {
+    let n: Int = if a.cells.len() < b.cells.len() { a.cells.len() } else { b.cells.len() };
+    let mut i: Int = 0;
+    while i < n {
+        if cell_less(&a.cells[i], &b.cells[i]) { return true; }
+        if cell_less(&b.cells[i], &a.cells[i]) { return false; }
+        i = i + 1;
+    }
+    a.cells.len() < b.cells.len()
+}
+
+// Insertion sort — fine for typical diff sizes.
+fn sort_rows(rows: &List<DiffRow>) -> List<DiffRow> {
+    let mut sorted: List<DiffRow> = List.new();
+    let mut i: Int = 0;
+    while i < rows.len() {
+        let cur = clone_row(&rows[i]);
+        let mut inserted: Bool = false;
+        let mut j: Int = 0;
+        let mut new_sorted: List<DiffRow> = List.new();
+        while j < sorted.len() {
+            if !inserted && row_less(&cur, &sorted[j]) {
+                new_sorted.push(clone_row(&cur));
+                inserted = true;
+            }
+            new_sorted.push(clone_row(&sorted[j]));
+            j = j + 1;
+        }
+        if !inserted { new_sorted.push(cur); }
+        sorted = new_sorted;
+        i = i + 1;
+    }
+    sorted
+}
+
+// -----------------------------------------------------------------------------
+// Public is-match helper
+// -----------------------------------------------------------------------------
+
+public fn is_match(d: &Diff) -> Bool {
+    match d { DfMatch => true, _ => false }
+}

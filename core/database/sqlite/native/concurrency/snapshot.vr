@@ -1,0 +1,143 @@
+// =============================================================================
+// concurrency/snapshot.vr — WAL-watermark snapshot isolation
+// =============================================================================
+// Spec: sqlite-native.md §20.6
+//
+// A `Snapshot` is a WAL frame index recorded by a Read-mode
+// connection. Once issued, every subsequent read on the same
+// connection that is bound to that snapshot sees only frames at
+// indices ≤ the watermark — even if other writers have appended
+// further frames in the meantime. This is identical to SQLite's
+// `sqlite3_snapshot` API.
+//
+// The actual WAL read-path consults `Snapshot.frame_count` when
+// rebuilding the index map for a transaction.
+// =============================================================================
+
+module core.database.sqlite.native.concurrency.snapshot;
+
+mount core.*;
+mount base.{Text, Maybe, Bool};
+mount collections.List;
+
+public type Snapshot is {
+    /// Connection-local opaque ID — used for "is this snapshot ours?".
+    id: Int64,
+    /// Frame index up to which reads see committed pages.
+    frame_count: Int,
+    /// Database-file change counter at snapshot time.
+    change_counter: Int,
+    /// Schema cookie at snapshot time — invalidates if schema changed.
+    schema_cookie: Int,
+};
+
+public fn snapshot_new(id: Int64, frame_count: Int, change_counter: Int, schema_cookie: Int) -> Snapshot {
+    Snapshot {
+        id: id,
+        frame_count: frame_count,
+        change_counter: change_counter,
+        schema_cookie: schema_cookie,
+    }
+}
+
+implement Snapshot {
+    public fn clone(&self) -> Snapshot {
+        Snapshot {
+            id: self.id,
+            frame_count: self.frame_count,
+            change_counter: self.change_counter,
+            schema_cookie: self.schema_cookie,
+        }
+    }
+
+    /// True if both snapshots reference the same WAL position.
+    public fn equals(&self, other: &Snapshot) -> Bool {
+        self.id == other.id
+            && self.frame_count == other.frame_count
+            && self.change_counter == other.change_counter
+    }
+
+    /// True if `self` is older (sees fewer frames) than `other`.
+    public fn precedes(&self, other: &Snapshot) -> Bool {
+        self.frame_count < other.frame_count
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Compatibility check
+// -----------------------------------------------------------------------------
+//
+// A schema-cookie change between snapshot creation and use means the
+// snapshot is no longer valid (table schemas differ). The caller
+// checks `is_compatible_with(current_cookie)` before each read.
+// =============================================================================
+
+public fn is_compatible_with(snap: &Snapshot, current_schema_cookie: Int) -> Bool {
+    snap.schema_cookie == current_schema_cookie
+}
+
+// -----------------------------------------------------------------------------
+// SnapshotTable — per-connection registry of issued snapshots
+// -----------------------------------------------------------------------------
+
+public type SnapshotTable is {
+    snapshots: List<Snapshot>,
+    next_id: Int64,
+};
+
+public fn snapshot_table_new() -> SnapshotTable {
+    SnapshotTable { snapshots: List.new(), next_id: 1 as Int64 }
+}
+
+implement SnapshotTable {
+    /// Issue a fresh Snapshot at the given watermark.
+    public fn issue(&mut self, frame_count: Int, change_counter: Int, schema_cookie: Int) -> Snapshot {
+        let snap = snapshot_new(self.next_id, frame_count, change_counter, schema_cookie);
+        self.next_id = self.next_id + (1 as Int64);
+        self.snapshots.push(snap.clone());
+        snap
+    }
+
+    /// Drop a snapshot by id. Returns true if found.
+    public fn release(&mut self, id: Int64) -> Bool {
+        let mut idx: Maybe<Int> = None;
+        let mut i: Int = 0;
+        while i < self.snapshots.len() {
+            if self.snapshots[i].id == id {
+                idx = Some(i);
+                break;
+            }
+            i = i + 1;
+        }
+        match idx {
+            Some(k) => {
+                let mut new_list: List<Snapshot> = List.new();
+                let mut j: Int = 0;
+                while j < self.snapshots.len() {
+                    if j != k { new_list.push(self.snapshots[j].clone()); }
+                    j = j + 1;
+                }
+                self.snapshots = new_list;
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// Oldest snapshot still alive (used by the checkpointer to
+    /// know which frames are still needed).
+    public fn oldest(&self) -> Maybe<Snapshot> {
+        if self.snapshots.len() == 0 { return None; }
+        let mut best = self.snapshots[0].clone();
+        let mut i: Int = 1;
+        while i < self.snapshots.len() {
+            if self.snapshots[i].precedes(&best) {
+                best = self.snapshots[i].clone();
+            }
+            i = i + 1;
+        }
+        Some(best)
+    }
+
+    public fn count(&self) -> Int { self.snapshots.len() }
+}

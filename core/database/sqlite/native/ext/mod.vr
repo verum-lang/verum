@@ -1,0 +1,29 @@
+// =============================================================================
+// core/database/sqlite/native/ext/mod.vr
+// =============================================================================
+// Layer: 6 (Connection-mode visible)
+// Spec: sqlite-native.md §19
+//
+// Extensions API. Every extension surface is expressed as a *protocol* —
+// no integer discriminators, no runtime tag dispatch beyond what Verum's
+// own protocol-table mechanism does for free.
+//
+// Surfaces:
+//
+//   * `ScalarFn`       — user-defined scalar functions
+//   * `AggregateFn`    — init / step / finalize, type State
+//   * `WindowFn`       — frame-aware aggregation (extends AggregateFn)
+//   * `Hooks`          — commit / rollback / update / authorizer / busy / progress
+//   * `Collation`      — already in `core.database.sqlite.native.l2_record.collation`
+//   * `Extension`      — loadable Verum cog with `@extension_entry`
+// =============================================================================
+
+module core.database.sqlite.native.ext;
+
+public module fn_flags;
+public module scalar;
+public module aggregate;
+public module window;
+public module hooks;
+public module registry;
+public module loadable;

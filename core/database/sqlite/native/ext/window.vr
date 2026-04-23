@@ -1,0 +1,149 @@
+// =============================================================================
+// ext/window.vr — WindowFn protocol
+// =============================================================================
+// Spec: sqlite-native.md §15.3, §19.1
+//
+// Window functions are stateful aggregators with frame-aware
+// observation: they accept rows in frame-walk order, can also be
+// asked to step BACKWARDS when the frame edge moves left, and
+// expose the current value at any time.
+//
+// `WindowFn` extends `AggregateFn` with `step_back` + `value` so
+// the SAME state type powers both an aggregate-style FINAL call and
+// the per-row VALUE materialisation needed for window queries.
+// =============================================================================
+
+module core.database.sqlite.native.ext.window;
+
+mount core.*;
+mount base.{Text};
+mount collections.List;
+mount core.database.sqlite.native.l4_vdbe.register.{Register, RNull, RInt};
+mount core.database.sqlite.native.ext.fn_flags.{FnFlags, flags_pure};
+mount core.database.sqlite.native.ext.aggregate.{AggregateFn};
+
+// -----------------------------------------------------------------------------
+// Frame specification (passed at frame setup)
+// -----------------------------------------------------------------------------
+
+public type FrameKind is FrkRows | FrkRange | FrkGroups;
+
+public type FrameBoundary is
+      FbUnboundedPreceding
+    | FbPreceding(Int)
+    | FbCurrent
+    | FbFollowing(Int)
+    | FbUnboundedFollowing;
+
+public type FrameExclusion is FxNone | FxCurrentRow | FxGroup | FxTies;
+
+public type WindowFrame is {
+    kind: FrameKind,
+    start: FrameBoundary,
+    end: FrameBoundary,
+    exclusion: FrameExclusion,
+};
+
+public fn frame_default() -> WindowFrame {
+    WindowFrame {
+        kind: FrkRows,
+        start: FbUnboundedPreceding,
+        end: FbCurrent,
+        exclusion: FxNone,
+    }
+}
+
+// -----------------------------------------------------------------------------
+// WindowFn protocol — extends AggregateFn semantics
+// -----------------------------------------------------------------------------
+
+public type WindowFn is protocol {
+    type State;
+
+    fn name(&self) -> Text;
+    fn arity(&self) -> Int;
+    fn flags(&self) -> FnFlags { flags_pure() }
+
+    /// Initialise per-partition state given the frame spec the planner
+    /// resolved for this window.
+    fn init(&self, frame: &WindowFrame) -> Self.State;
+
+    /// Frame edge moved right by one row → fold this row in.
+    fn step_forward(&self, st: &mut Self.State, row: &List<Register>);
+
+    /// Frame edge moved left by one row → unfold this row.
+    /// (Only required for non-monotonic aggregates; default is no-op
+    /// so simple aggregates that just accumulate forward don't need it.)
+    fn step_back(&self, st: &mut Self.State, row: &List<Register>) {
+        let _ = st;
+        let _ = row;
+    }
+
+    /// Current value materialised for the row currently under the
+    /// frame's "current row" pointer.
+    fn value(&self, st: &Self.State) -> Register;
+
+    /// End-of-partition flush. Defaults to the current value.
+    fn finalize(&self, st: Self.State) -> Register {
+        let v = self.value(&st);
+        v
+    }
+};
+
+// -----------------------------------------------------------------------------
+// Built-in: ROW_NUMBER (canonical zero-state window fn)
+// -----------------------------------------------------------------------------
+
+public type RowNumber is { unit: Bool };
+
+public fn row_number() -> RowNumber { RowNumber { unit: true } }
+
+implement WindowFn for RowNumber {
+    type State = Int64;
+    fn name(&self) -> Text { "row_number".clone() }
+    fn arity(&self) -> Int { 0 }
+    fn init(&self, _frame: &WindowFrame) -> Int64 { 0 as Int64 }
+    fn step_forward(&self, st: &mut Int64, _row: &List<Register>) {
+        *st = *st + (1 as Int64);
+    }
+    fn value(&self, st: &Int64) -> Register {
+        RInt(*st)
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Built-in: SUM (a frame-aware Window adapter that double-bookkeeps
+// the running sum so step_back can roll it down).
+// -----------------------------------------------------------------------------
+
+public type WSum is { col_idx: Int };
+
+public fn w_sum(col: Int) -> WSum { WSum { col_idx: col } }
+
+public type WSumState is { acc: Int64, has_value: Bool };
+
+implement WindowFn for WSum {
+    type State = WSumState;
+    fn name(&self) -> Text { "w_sum".clone() }
+    fn arity(&self) -> Int { 1 }
+    fn init(&self, _frame: &WindowFrame) -> WSumState {
+        WSumState { acc: 0 as Int64, has_value: false }
+    }
+    fn step_forward(&self, st: &mut WSumState, row: &List<Register>) {
+        if self.col_idx >= row.len() { return; }
+        match &row[self.col_idx] {
+            RInt(x) => { st.acc = st.acc + x; st.has_value = true; }
+            _       => {}
+        }
+    }
+    fn step_back(&self, st: &mut WSumState, row: &List<Register>) {
+        if self.col_idx >= row.len() { return; }
+        match &row[self.col_idx] {
+            RInt(x) => { st.acc = st.acc - x; }
+            _       => {}
+        }
+    }
+    fn value(&self, st: &WSumState) -> Register {
+        if !st.has_value { RNull } else { RInt(st.acc) }
+    }
+}

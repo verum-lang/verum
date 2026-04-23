@@ -1,0 +1,58 @@
+// =============================================================================
+// ext/fn_flags.vr — function-registration flags
+// =============================================================================
+// Spec: sqlite-native.md §19.1
+//
+// `FnFlags` is a small lattice of independent boolean facets stored as
+// a single record. The planner queries individual facets at lookup
+// time, so the record form (rather than a packed bitset) keeps each
+// query O(1) field access while staying open to future facets without
+// touching the wire format.
+// =============================================================================
+
+module core.database.sqlite.native.ext.fn_flags;
+
+mount core.*;
+mount base.{Bool};
+
+public type FnFlags is {
+    /// Always returns the same value for the same arguments — lets the
+    /// planner factor calls out of the row loop.
+    deterministic: Bool,
+    /// May NOT appear in CREATE TRIGGER, CREATE VIEW, CHECK, INDEX —
+    /// extension authors set this for `random()`-shaped fns.
+    direct_only: Bool,
+    /// Receives subtype information about its arguments (used by JSONB).
+    subtype_aware: Bool,
+    /// Considered safe even when `PRAGMA trusted_schema = OFF`.
+    innocuous: Bool,
+};
+
+public fn flags_default() -> FnFlags {
+    FnFlags {
+        deterministic: false,
+        direct_only: false,
+        subtype_aware: false,
+        innocuous: false,
+    }
+}
+
+public fn flags_pure() -> FnFlags {
+    let mut f = flags_default();
+    f.deterministic = true;
+    f.innocuous = true;
+    f
+}
+
+public fn flags_random() -> FnFlags {
+    let mut f = flags_default();
+    f.direct_only = true;
+    f
+}
+
+implement FnFlags {
+    public fn with_deterministic(mut self) -> FnFlags { self.deterministic = true; self }
+    public fn with_direct_only(mut self) -> FnFlags { self.direct_only = true; self }
+    public fn with_subtype_aware(mut self) -> FnFlags { self.subtype_aware = true; self }
+    public fn with_innocuous(mut self) -> FnFlags { self.innocuous = true; self }
+}

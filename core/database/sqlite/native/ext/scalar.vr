@@ -1,0 +1,113 @@
+// =============================================================================
+// ext/scalar.vr — ScalarFn protocol
+// =============================================================================
+// Spec: sqlite-native.md §19.1
+//
+// A scalar function maps a row of `Register` arguments to a single
+// `Register` result. The protocol carries:
+//
+//   * `arity()`           — the function's expected argument count;
+//                           negative = varargs accepted
+//   * `flags()`           — planner-visible properties
+//   * `eval(args)`        — pure evaluation step
+//
+// Built-in scalars in `core.database.sqlite.native.builtins` are
+// expressible as `ScalarFn` impls — the catalogue still carries them
+// as discriminator-coded ScalarKind for backwards compatibility with
+// the existing VDBE wire format, but the protocol is the long-term
+// home and lets users plug in custom dispatch.
+// =============================================================================
+
+module core.database.sqlite.native.ext.scalar;
+
+mount core.*;
+mount base.{Text, Result, Ok, Err};
+mount collections.List;
+mount core.database.sqlite.native.l4_vdbe.register.{Register, RNull};
+mount core.database.sqlite.native.ext.fn_flags.{FnFlags, flags_default};
+
+// -----------------------------------------------------------------------------
+// Errors
+// -----------------------------------------------------------------------------
+
+public type ScalarFnError is
+      ArityMismatch(Text)        // human-readable
+    | DomainError(Text)
+    | TypeError(Text)
+    | InternalError(Text);
+
+// -----------------------------------------------------------------------------
+// Protocol
+// -----------------------------------------------------------------------------
+
+public type ScalarFn is protocol {
+    /// SQL-visible function name (case-insensitive at lookup).
+    fn name(&self) -> Text;
+
+    /// Expected arity. Negative = varargs (passed-through to `eval`).
+    fn arity(&self) -> Int;
+
+    /// Planner-visible properties.
+    fn flags(&self) -> FnFlags { flags_default() }
+
+    /// Evaluate one call.
+    fn eval(&self, args: &List<Register>) -> Result<Register, ScalarFnError>;
+};
+
+// -----------------------------------------------------------------------------
+// Helper: arity check
+// -----------------------------------------------------------------------------
+
+public fn check_arity(declared: Int, actual: Int) -> Result<(), ScalarFnError> {
+    if declared < 0 { return Ok(()); }   // varargs
+    if declared == actual { return Ok(()); }
+    Err(ArityMismatch("arity mismatch".clone()))
+}
+
+// -----------------------------------------------------------------------------
+// Closure-style adapter
+// -----------------------------------------------------------------------------
+//
+// Most users supply a free-function rather than a fresh type. The
+// adapter wraps such a function as a `ScalarFn` impl without writing
+// out a new type each time.
+// =============================================================================
+
+public type ClosureScalar is {
+    nm: Text,
+    ar: Int,
+    fl: FnFlags,
+    body: fn(&List<Register>) -> Result<Register, ScalarFnError>,
+};
+
+public fn closure_scalar(
+    name: Text,
+    arity: Int,
+    flags: FnFlags,
+    body: fn(&List<Register>) -> Result<Register, ScalarFnError>,
+) -> ClosureScalar {
+    ClosureScalar { nm: name, ar: arity, fl: flags, body: body }
+}
+
+implement ScalarFn for ClosureScalar {
+    fn name(&self) -> Text { self.nm.clone() }
+    fn arity(&self) -> Int { self.ar }
+    fn flags(&self) -> FnFlags { self.fl.clone() }
+    fn eval(&self, args: &List<Register>) -> Result<Register, ScalarFnError> {
+        match check_arity(self.ar, args.len()) {
+            Ok(_)  => (self.body)(args),
+            Err(e) => Err(e),
+        }
+    }
+}
+
+implement FnFlags {
+    public fn clone(&self) -> FnFlags {
+        FnFlags {
+            deterministic: self.deterministic,
+            direct_only: self.direct_only,
+            subtype_aware: self.subtype_aware,
+            innocuous: self.innocuous,
+        }
+    }
+}

@@ -1,0 +1,22 @@
+// =============================================================================
+// core/database/sqlite/native/concurrency/mod.vr
+// =============================================================================
+// Layer: 6
+// Spec: sqlite-native.md §20
+//
+// Concurrency primitives for the loom runtime:
+//
+//   * thread_safety   — three SQLite thread-safety modes
+//   * pool            — connection pool with capability-typed acquire
+//   * busy            — deterministic busy-timeout retry policy
+//   * snapshot        — WAL-watermark snapshot isolation
+//   * deadlock        — wait-for graph + cycle detector for DST tests
+// =============================================================================
+
+module core.database.sqlite.native.concurrency;
+
+public module thread_safety;
+public module pool;
+public module busy;
+public module snapshot;
+public module deadlock;

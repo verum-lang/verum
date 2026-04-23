@@ -1,0 +1,142 @@
+// =============================================================================
+// ext/hooks.vr — connection-level hook protocols
+// =============================================================================
+// Spec: sqlite-native.md §19.5
+//
+// Hooks are connection-bound observation/decision points. Each
+// surface is its own protocol so connection-state machinery can
+// store implementations behind a `Heap<dyn Hook>` slot without
+// dragging in the others.
+// =============================================================================
+
+module core.database.sqlite.native.ext.hooks;
+
+mount core.*;
+mount base.{Text, Result, Ok, Err, Bool};
+mount collections.List;
+mount core.database.sqlite.native.l4_vdbe.register.{Register};
+
+// -----------------------------------------------------------------------------
+// CommitHook — vetoes an in-progress COMMIT
+// -----------------------------------------------------------------------------
+
+public type CommitDecision is CdAllow | CdAbort(Text);
+
+public type CommitHook is protocol {
+    fn on_commit(&mut self) -> CommitDecision;
+};
+
+// -----------------------------------------------------------------------------
+// RollbackHook — observes ROLLBACKs (notification only)
+// -----------------------------------------------------------------------------
+
+public type RollbackHook is protocol {
+    fn on_rollback(&mut self);
+};
+
+// -----------------------------------------------------------------------------
+// UpdateHook / PreUpdateHook — observe DML
+// -----------------------------------------------------------------------------
+
+public type UpdateOp is UoInsert | UoUpdate | UoDelete;
+
+public fn update_op_name(o: &UpdateOp) -> Text {
+    match o {
+        UoInsert => "INSERT".clone(),
+        UoUpdate => "UPDATE".clone(),
+        UoDelete => "DELETE".clone(),
+    }
+}
+
+public type UpdateHook is protocol {
+    fn on_update(&mut self, op: UpdateOp, db: &Text, table: &Text, rowid: Int64);
+};
+
+public type PreUpdateHook is protocol {
+    fn on_pre_update(
+        &mut self,
+        op: UpdateOp,
+        db: &Text,
+        table: &Text,
+        old_row: &List<Register>,
+        new_row: &List<Register>,
+    );
+};
+
+// -----------------------------------------------------------------------------
+// AuthorizerHook — pre-statement compile gate
+// -----------------------------------------------------------------------------
+
+public type AuthAction is
+      AaSelect
+    | AaInsert(Text)
+    | AaUpdate(Text)
+    | AaDelete(Text)
+    | AaCreateTable(Text)
+    | AaDropTable(Text)
+    | AaCreateIndex(Text)
+    | AaDropIndex(Text)
+    | AaCreateView(Text)
+    | AaDropView(Text)
+    | AaCreateTrigger(Text)
+    | AaDropTrigger(Text)
+    | AaPragma(Text)
+    | AaAttach(Text)
+    | AaDetach(Text)
+    | AaTransaction
+    | AaSavepoint
+    | AaCopy
+    | AaFunction(Text)
+    | AaReadColumn(Text, Text)
+    | AaWriteColumn(Text, Text);
+
+public type AuthDecision is AdAllow | AdDeny | AdIgnore;
+
+public type AuthorizerHook is protocol {
+    fn authorize(&mut self, action: &AuthAction) -> AuthDecision;
+};
+
+// -----------------------------------------------------------------------------
+// BusyHandler — retry policy when SQLITE_BUSY is hit
+// -----------------------------------------------------------------------------
+
+public type BusyHandler is protocol {
+    /// Returns true to retry, false to give up and surface SQLITE_BUSY.
+    fn on_busy(&mut self, retry_count: Int) -> Bool;
+};
+
+/// Built-in: bounded retry with constant back-off.
+public type ConstantBusyHandler is { max_retries: Int };
+
+public fn constant_busy(max_retries: Int) -> ConstantBusyHandler {
+    ConstantBusyHandler { max_retries: max_retries }
+}
+
+implement BusyHandler for ConstantBusyHandler {
+    fn on_busy(&mut self, retry_count: Int) -> Bool {
+        retry_count < self.max_retries
+    }
+}
+
+// -----------------------------------------------------------------------------
+// ProgressHandler — heartbeat called every N VM instructions
+// -----------------------------------------------------------------------------
+
+public type ProgressHandler is protocol {
+    /// Returns true to interrupt (SQLITE_INTERRUPT).
+    fn on_progress(&mut self) -> Bool;
+};
+
+// -----------------------------------------------------------------------------
+// TraceHook — observability surface
+// -----------------------------------------------------------------------------
+
+public type TraceEvent is
+      TeStmt(Text)               // SQL string about to run
+    | TeProfile(Int64)           // execution time in nanoseconds
+    | TeRow                      // one row produced
+    | TeClose;                   // statement finalised
+
+public type TraceHook is protocol {
+    fn on_trace(&mut self, event: &TraceEvent);
+};

@@ -1,0 +1,133 @@
+// =============================================================================
+// testing/coverage.vr — phase-by-phase test quota tracker
+// =============================================================================
+// Spec: sqlite-native.md §22.7
+//
+// The CI gate requires hitting per-phase pass-rate thresholds across
+// L0..L4 and the differential suite. `CoverageReport` accumulates
+// pass/fail tallies per stratum and answers `meets_phase(p) -> Bool`
+// for the current development phase.
+// =============================================================================
+
+module core.database.sqlite.native.testing.coverage;
+
+mount core.*;
+mount base.{Bool, Maybe};
+mount collections.List;
+
+public type Phase is PhAlpha | PhBeta | PhGamma | PhRelease;
+
+public type Stratum is StL0 | StL1 | StL2 | StL3 | StDifferential;
+
+public type StratumTally is {
+    stratum: Stratum,
+    passed: Int,
+    failed: Int,
+    skipped: Int,
+};
+
+public fn tally_new(stratum: Stratum) -> StratumTally {
+    StratumTally { stratum: stratum, passed: 0, failed: 0, skipped: 0 }
+}
+
+implement StratumTally {
+    public fn record_pass(&mut self) { self.passed = self.passed + 1; }
+    public fn record_fail(&mut self) { self.failed = self.failed + 1; }
+    public fn record_skip(&mut self) { self.skipped = self.skipped + 1; }
+
+    public fn run_total(&self) -> Int { self.passed + self.failed }
+
+    /// Pass rate as a percentage (0..100). `0` when zero tests run.
+    public fn pass_rate(&self) -> Int {
+        let total = self.run_total();
+        if total == 0 { return 0; }
+        (self.passed * 100) / total
+    }
+}
+
+// -----------------------------------------------------------------------------
+// CoverageReport
+// -----------------------------------------------------------------------------
+
+public type CoverageReport is {
+    l0: StratumTally,
+    l1: StratumTally,
+    l2: StratumTally,
+    l3: StratumTally,
+    differential: StratumTally,
+};
+
+public fn report_new() -> CoverageReport {
+    CoverageReport {
+        l0: tally_new(StL0),
+        l1: tally_new(StL1),
+        l2: tally_new(StL2),
+        l3: tally_new(StL3),
+        differential: tally_new(StDifferential),
+    }
+}
+
+implement CoverageReport {
+    public fn record_pass(&mut self, stratum: &Stratum) {
+        match stratum {
+            StL0 => self.l0.record_pass(),
+            StL1 => self.l1.record_pass(),
+            StL2 => self.l2.record_pass(),
+            StL3 => self.l3.record_pass(),
+            StDifferential => self.differential.record_pass(),
+        }
+    }
+
+    public fn record_fail(&mut self, stratum: &Stratum) {
+        match stratum {
+            StL0 => self.l0.record_fail(),
+            StL1 => self.l1.record_fail(),
+            StL2 => self.l2.record_fail(),
+            StL3 => self.l3.record_fail(),
+            StDifferential => self.differential.record_fail(),
+        }
+    }
+
+    public fn record_skip(&mut self, stratum: &Stratum) {
+        match stratum {
+            StL0 => self.l0.record_skip(),
+            StL1 => self.l1.record_skip(),
+            StL2 => self.l2.record_skip(),
+            StL3 => self.l3.record_skip(),
+            StDifferential => self.differential.record_skip(),
+        }
+    }
+
+    /// True if every stratum's pass-rate meets the spec threshold for
+    /// the requested phase. Thresholds match sqlite-native.md §22.7.
+    public fn meets_phase(&self, phase: &Phase) -> Bool {
+        let q = phase_quotas(phase);
+        if self.l0.pass_rate() < q.l0_min { return false; }
+        if self.l1.pass_rate() < q.l1_min { return false; }
+        if self.l2.pass_rate() < q.l2_min { return false; }
+        if self.l3.pass_rate() < q.l3_min { return false; }
+        if self.differential.pass_rate() < q.diff_min { return false; }
+        true
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Per-phase thresholds
+// -----------------------------------------------------------------------------
+
+public type PhaseQuota is {
+    l0_min: Int,
+    l1_min: Int,
+    l2_min: Int,
+    l3_min: Int,
+    diff_min: Int,
+};
+
+public fn phase_quotas(p: &Phase) -> PhaseQuota {
+    match p {
+        PhAlpha   => PhaseQuota { l0_min: 100, l1_min:  80, l2_min:  30, l3_min:   0, diff_min:  70 },
+        PhBeta    => PhaseQuota { l0_min: 100, l1_min: 100, l2_min:  80, l3_min:  40, diff_min:  95 },
+        PhGamma   => PhaseQuota { l0_min: 100, l1_min: 100, l2_min:  95, l3_min:  80, diff_min:  99 },
+        PhRelease => PhaseQuota { l0_min: 100, l1_min: 100, l2_min: 100, l3_min:  95, diff_min: 100 },
+    }
+}

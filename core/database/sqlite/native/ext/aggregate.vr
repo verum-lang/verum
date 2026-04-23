@@ -1,0 +1,191 @@
+// =============================================================================
+// ext/aggregate.vr — AggregateFn protocol with associated State type
+// =============================================================================
+// Spec: sqlite-native.md §15.2, §19.1
+//
+// Aggregate functions follow the canonical (init, step, finalize)
+// reduction pattern. The protocol uses an *associated type* (not a
+// type parameter) for the per-group accumulator, which keeps the
+// implementor's signature stable across registration sites and
+// allows polymorphic dispatch over arbitrary aggregates without
+// monomorphising the call site.
+//
+// Phase-1 ABI (used by the catalogue):
+//
+//   protocol AggregateFn {
+//       type State;
+//       fn init(&self) -> Self.State;
+//       fn step(&self, st: &mut Self.State, args: &List<Register>);
+//       fn finalize(&self, st: Self.State) -> Register;
+//   }
+//
+// Built-in aggregates (sum/avg/min/max/count) live in
+// `core.database.sqlite.native.builtins.aggregate_fns` as concrete
+// types whose `AggregateFn` impl plugs into this protocol — the
+// `Connection.register_aggregate_fn` call uses dynamic dispatch on
+// the protocol vtable.
+// =============================================================================
+
+module core.database.sqlite.native.ext.aggregate;
+
+mount core.*;
+mount base.{Text, Bool};
+mount collections.List;
+mount core.database.sqlite.native.l4_vdbe.register.{Register, RNull};
+mount core.database.sqlite.native.ext.fn_flags.{FnFlags, flags_default, flags_pure};
+
+// -----------------------------------------------------------------------------
+// AggregateFn protocol
+// -----------------------------------------------------------------------------
+
+public type AggregateFn is protocol {
+    type State;
+
+    /// SQL-visible name; case-insensitive lookup.
+    fn name(&self) -> Text;
+
+    /// Number of arguments per row contribution. Negative = varargs.
+    fn arity(&self) -> Int;
+
+    /// Planner-visible properties.
+    fn flags(&self) -> FnFlags { flags_pure() }
+
+    /// Build a fresh per-group accumulator.
+    fn init(&self) -> Self.State;
+
+    /// Accept one row's contribution.
+    fn step(&self, st: &mut Self.State, args: &List<Register>);
+
+    /// Reduce the accumulator to the group's output value.
+    fn finalize(&self, st: Self.State) -> Register;
+};
+
+// -----------------------------------------------------------------------------
+// Pre-canned aggregates as zero-state helpers (unit type)
+// -----------------------------------------------------------------------------
+//
+// Used by the test suite + as worked examples for extension authors.
+// The four below cover the full state-shape spectrum:
+//
+//   * `CountAll` — Int64 counter
+//   * `SumInt`   — Int64 accumulator + saw-non-null flag
+//   * `MaxInt`   — Maybe<Int64>
+//   * `Concat`   — Text builder
+// =============================================================================
+
+public type CountAll is { sep: Text };
+public fn count_all() -> CountAll { CountAll { sep: "".clone() } }
+
+implement AggregateFn for CountAll {
+    type State = Int64;
+    fn name(&self) -> Text { "count_all".clone() }
+    fn arity(&self) -> Int { 0 }
+    fn init(&self) -> Int64 { 0 as Int64 }
+    fn step(&self, st: &mut Int64, _args: &List<Register>) {
+        *st = *st + (1 as Int64);
+    }
+    fn finalize(&self, st: Int64) -> Register {
+        core.database.sqlite.native.l4_vdbe.register.RInt(st)
+    }
+}
+
+public type SumInt is { sep: Text };
+public fn sum_int() -> SumInt { SumInt { sep: "".clone() } }
+
+public type SumIntState is { acc: Int64, has_value: Bool };
+
+implement AggregateFn for SumInt {
+    type State = SumIntState;
+    fn name(&self) -> Text { "sum_int".clone() }
+    fn arity(&self) -> Int { 1 }
+    fn init(&self) -> SumIntState {
+        SumIntState { acc: 0 as Int64, has_value: false }
+    }
+    fn step(&self, st: &mut SumIntState, args: &List<Register>) {
+        if args.len() == 0 { return; }
+        match &args[0] {
+            core.database.sqlite.native.l4_vdbe.register.RInt(x) => {
+                st.acc = st.acc + x;
+                st.has_value = true;
+            }
+            core.database.sqlite.native.l4_vdbe.register.RReal(x) => {
+                st.acc = st.acc + (x as Int64);
+                st.has_value = true;
+            }
+            _ => {}
+        }
+    }
+    fn finalize(&self, st: SumIntState) -> Register {
+        if !st.has_value {
+            RNull
+        } else {
+            core.database.sqlite.native.l4_vdbe.register.RInt(st.acc)
+        }
+    }
+}
+
+public type MaxInt is { sep: Text };
+public fn max_int() -> MaxInt { MaxInt { sep: "".clone() } }
+
+implement AggregateFn for MaxInt {
+    type State = base.Maybe<Int64>;
+    fn name(&self) -> Text { "max_int".clone() }
+    fn arity(&self) -> Int { 1 }
+    fn init(&self) -> base.Maybe<Int64> { base.None }
+    fn step(&self, st: &mut base.Maybe<Int64>, args: &List<Register>) {
+        if args.len() == 0 { return; }
+        let v: Int64 = match &args[0] {
+            core.database.sqlite.native.l4_vdbe.register.RInt(x) => x,
+            core.database.sqlite.native.l4_vdbe.register.RReal(x) => x as Int64,
+            _ => { return; }
+        };
+        match st {
+            base.Some(cur) => { if v > *cur { *st = base.Some(v); } }
+            base.None      => { *st = base.Some(v); }
+        }
+    }
+    fn finalize(&self, st: base.Maybe<Int64>) -> Register {
+        match st {
+            base.Some(v) => core.database.sqlite.native.l4_vdbe.register.RInt(v),
+            base.None    => RNull,
+        }
+    }
+}
+
+public type Concat is { sep: Text };
+public fn concat_with(sep: Text) -> Concat { Concat { sep: sep } }
+
+public type ConcatState is { buf: Text, has_value: Bool };
+
+implement AggregateFn for Concat {
+    type State = ConcatState;
+    fn name(&self) -> Text { "concat".clone() }
+    fn arity(&self) -> Int { 1 }
+    fn init(&self) -> ConcatState {
+        ConcatState { buf: Text.new(), has_value: false }
+    }
+    fn step(&self, st: &mut ConcatState, args: &List<Register>) {
+        if args.len() == 0 { return; }
+        match &args[0] {
+            core.database.sqlite.native.l4_vdbe.register.RText(s) => {
+                if st.has_value {
+                    let sb = self.sep.as_bytes();
+                    let mut i: Int = 0;
+                    while i < sb.len() { st.buf.push_byte(sb[i]); i = i + 1; }
+                }
+                let bs = s.as_bytes();
+                let mut i: Int = 0;
+                while i < bs.len() { st.buf.push_byte(bs[i]); i = i + 1; }
+                st.has_value = true;
+            }
+            _ => {}
+        }
+    }
+    fn finalize(&self, st: ConcatState) -> Register {
+        if !st.has_value {
+            RNull
+        } else {
+            core.database.sqlite.native.l4_vdbe.register.RText(st.buf)
+        }
+    }
+}
