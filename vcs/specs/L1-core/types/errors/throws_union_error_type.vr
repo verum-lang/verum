@@ -1,0 +1,68 @@
+// @test: typecheck-pass
+// @level: L1
+// @tags: types, throws, result, union-error, map-err
+// @timeout: 5000
+
+/// Regression for multi-type throws union silently narrowing to the
+/// first error type at call sites.
+///
+/// `fn f() throws(A | B) -> T` previously surfaced to callers as
+/// `fn() -> Result<T, A>` — the union was lost, the closure inside
+/// `.map_err(|e| ...)` bound `e: A`, and passing `e` to a variant
+/// that expected `B` produced `E400 Type mismatch`.
+///
+/// Five registration sites used the same narrowing pattern
+/// (`throws_clause.error_types[0]` or `.iter().next()`). This
+/// commit routed them all through `wrap_return_type_for_sig`,
+/// which builds a `Type::Variant` union by flattening each
+/// throws entry — matching the semantics already used by
+/// `infer_try_operator` for the `?` operator.
+///
+/// Behaviour pinned by this spec:
+///
+///   * `.map_err` on a multi-type throws call sees `e` as the
+///     union, not just the first.
+///   * A `match` over the union accepts patterns from all
+///     constituent types.
+///   * `?` continues to propagate the union up to the caller.
+
+module test_throws_union;
+
+type ParseError is
+    | SyntaxErr(Text)
+    | UnexpectedEof;
+
+type ValidationError is
+    | InvalidFormat(Text)
+    | OutOfRange { min: Int, max: Int, actual: Int };
+
+type AppError is
+    | Parse(ParseError)
+    | Validation(ValidationError)
+    | Other(Text);
+
+/// Function throwing a UNION of two distinct error types.
+fn parse_and_validate(input: &Text) throws(ParseError | ValidationError) -> Int {
+    if input.is_empty() {
+        throw ParseError.UnexpectedEof;
+    }
+    if input.len() > 100 {
+        throw ValidationError.OutOfRange { min: 0, max: 100, actual: input.len() };
+    }
+    42
+}
+
+/// The union must survive into `.map_err` closures — `e` should be
+/// typed as `ParseError | ValidationError`, and the `match` arms
+/// should accept patterns from either constituent type.
+fn with_map_err(input: &Text) -> Result<Int, AppError> {
+    parse_and_validate(input).map_err(|e| match e {
+        ParseError.SyntaxErr(msg) => AppError.Parse(ParseError.SyntaxErr(msg)),
+        ParseError.UnexpectedEof => AppError.Parse(ParseError.UnexpectedEof),
+        ValidationError.InvalidFormat(m) => AppError.Validation(ValidationError.InvalidFormat(m)),
+        ValidationError.OutOfRange { min, max, actual } =>
+            AppError.Validation(ValidationError.OutOfRange { min: min, max: max, actual: actual }),
+    })
+}
+
+fn main() { print("multi-throws union preserved at call-site"); }

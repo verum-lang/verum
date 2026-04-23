@@ -8012,34 +8012,14 @@ impl TypeChecker {
             Type::unit()
         };
 
-        // Wrap return type in Result<T, E> for functions with throws clause
-        // A function declared as `fn foo() throws(E) -> T` returns Result<T, E> to callers
-        let return_type = if let Maybe::Some(ref throws_clause) = func.throws_clause {
-            if !throws_clause.error_types.is_empty() {
-                // Build error type: single type or union of error types
-                let error_ty = if throws_clause.error_types.len() == 1 {
-                    self.ast_to_type(&throws_clause.error_types[0]).unwrap_or_else(|_| Type::Var(TypeVar::fresh()))
-                } else {
-                    // Multiple error types: use first one (simplification)
-                    self.ast_to_type(&throws_clause.error_types[0]).unwrap_or_else(|_| Type::Var(TypeVar::fresh()))
-                };
-                Type::result(return_type, error_ty)
-            } else {
-                return_type
-            }
-        } else {
-            return_type
-        };
-
-        // Wrap return type in Future<T> for async functions
-        // Syntax grammar: recursive-descent parseable (LL(k), k<=3), reserved keywords only let/fn/is, unified "type X is" definitions — Async functions return Future<T>
-        let final_return_type = if func.is_async {
-            Type::Future {
-                output: Box::new(return_type),
-            }
-        } else {
-            return_type
-        };
+        // Unified throws + async wrap via the helper. Multi-type throws
+        // (e.g. `throws(A | B)`) become a `Type::Variant` union that
+        // `.map_err` closures can destructure correctly.
+        let final_return_type = self.wrap_return_type_for_sig(
+            return_type,
+            &func.throws_clause,
+            func.is_async,
+        );
 
         // Infer computational properties from the function declaration
         // This handles throws_clause -> Fallible correlation, async -> Async, and body analysis
@@ -21196,12 +21176,39 @@ impl TypeChecker {
                 {
                     return_type
                 } else {
-                    let error_ty = tc
+                    // Build the error type. For `throws(E)` single error,
+                    // use E directly. For `throws(A | B | …)` multi-error
+                    // union, build a Variant whose entries are the error
+                    // types themselves (flattening if an entry is already
+                    // a Variant — matches the `infer_try_operator`
+                    // semantics at line ~22710 so the closure inside a
+                    // `.map_err(|e| …)` sees the union rather than just
+                    // the first error type).
+                    let resolved: Vec<Type> = tc
                         .error_types
                         .iter()
-                        .next()
-                        .and_then(|t| self.ast_to_type(t).ok())
-                        .unwrap_or_else(|| Type::Var(TypeVar::fresh()));
+                        .filter_map(|t| self.ast_to_type(t).ok())
+                        .collect();
+                    let error_ty = if resolved.is_empty() {
+                        Type::Var(TypeVar::fresh())
+                    } else if resolved.len() == 1 {
+                        resolved.into_iter().next().unwrap()
+                    } else {
+                        let mut variants = indexmap::IndexMap::new();
+                        for t in resolved.into_iter() {
+                            match t {
+                                Type::Variant(inner) => {
+                                    for (name, ty) in inner.iter() {
+                                        variants.insert(name.clone(), ty.clone());
+                                    }
+                                }
+                                other => {
+                                    variants.insert(other.to_text(), other);
+                                }
+                            }
+                        }
+                        Type::Variant(variants)
+                    };
                     Type::result(return_type, error_ty)
                 }
             } else {
@@ -34377,21 +34384,17 @@ impl TypeChecker {
             }
         }
 
-        // Wrap return type for throws, async functions, and generators
-        // For throws functions, the EXTERNAL signature returns Result<T, E>,
-        // while the INTERNAL body checking uses the raw type T.
-        let return_for_sig_base = if let Maybe::Some(ref throws_clause) = func.throws_clause {
-            if !throws_clause.error_types.is_empty() {
-                let error_ty = throws_clause.error_types.iter().next()
-                    .and_then(|t| self.ast_to_type(t).ok())
-                    .unwrap_or_else(|| Type::Var(TypeVar::fresh()));
-                Type::result(initial_return_type.clone(), error_ty)
-            } else {
-                initial_return_type.clone()
-            }
-        } else {
-            initial_return_type.clone()
-        };
+        // Wrap return type for throws, async functions, and generators.
+        // Multi-type throws unions (`throws(A | B)`) are combined into a
+        // `Type::Variant` via the helper so `.map_err(|e| …)` closures
+        // see the union rather than only the first error type.
+        // NOTE: uses `throws` + `is_async`=false here because the outer
+        // generator wrap below also has its own async branch.
+        let return_for_sig_base = self.wrap_return_type_for_sig(
+            initial_return_type.clone(),
+            &func.throws_clause,
+            false,
+        );
 
         // Syntax grammar: recursive-descent parseable (LL(k), k<=3), reserved keywords only let/fn/is, unified "type X is" definitions — Async functions return Future<T>
         // Concurrency model: structured concurrency with nurseries, async/await, channels, Send/Sync protocol bounds — Section 12 - Generators return Generator<Y, R>
@@ -35529,24 +35532,16 @@ impl TypeChecker {
         // body-inferred raw return type silently overwrites the schema and
         // callers of throws functions see the unwrapped return (caller then
         // can't use `.map_err` / the `?` operator on the call result).
-        let final_return_for_sig = if let Maybe::Some(ref throws_clause) = func.throws_clause {
-            if !throws_clause.error_types.is_empty() {
-                let error_ty = throws_clause.error_types.iter().next()
-                    .and_then(|t| self.ast_to_type(t).ok())
-                    .unwrap_or_else(|| Type::Var(TypeVar::fresh()));
-                // If the body already returned Result<_, _> (explicit),
-                // don't double-wrap. Otherwise wrap the raw body type.
-                if self.protocol_checker.read().resolve_try_protocol(&final_return_type).is_some() {
-                    final_return_type.clone()
-                } else {
-                    Type::result(final_return_type.clone(), error_ty)
-                }
-            } else {
-                final_return_type.clone()
-            }
-        } else {
-            final_return_type.clone()
-        };
+        // Use the helper to apply throws + async wraps consistently,
+        // including multi-type `throws(A | B)` → `Type::Variant` unions.
+        // `is_async` is already baked into `final_return_type` above
+        // (the generator/future branches at line ~35276), so we pass
+        // `false` here to avoid double-wrapping.
+        let final_return_for_sig = self.wrap_return_type_for_sig(
+            final_return_type.clone(),
+            &func.throws_clause,
+            false,
+        );
         let final_func_type = Type::function_with_properties(
             param_types.clone(),
             final_return_for_sig,
@@ -51879,31 +51874,14 @@ impl TypeChecker {
             Type::Var(TypeVar::fresh())
         };
 
-        // Wrap return type in Result<T, E> for functions with throws clause
-        // A function declared as `fn foo() throws(E) -> T` returns Result<T, E> to callers
-        let return_type = if let Maybe::Some(ref throws_clause) = func.throws_clause {
-            if !throws_clause.error_types.is_empty() {
-                let error_ty = if throws_clause.error_types.len() == 1 {
-                    self.ast_to_type(&throws_clause.error_types[0]).unwrap_or_else(|_| Type::Var(TypeVar::fresh()))
-                } else {
-                    self.ast_to_type(&throws_clause.error_types[0]).unwrap_or_else(|_| Type::Var(TypeVar::fresh()))
-                };
-                Type::result(return_type, error_ty)
-            } else {
-                return_type
-            }
-        } else {
-            return_type
-        };
-
-        // Wrap return type in Future<T> for async functions
-        let return_for_sig = if func.is_async {
-            Type::Future {
-                output: Box::new(return_type),
-            }
-        } else {
-            return_type
-        };
+        // Unified throws + async wrap via the helper — ensures multi-type
+        // `throws(A | B)` unions are surfaced to callers as a proper
+        // `Type::Variant` instead of silently narrowing to the first type.
+        let return_for_sig = self.wrap_return_type_for_sig(
+            return_type,
+            &func.throws_clause,
+            func.is_async,
+        );
 
         // Build context requirement if present
         let func_type = if !func.contexts.is_empty() {
