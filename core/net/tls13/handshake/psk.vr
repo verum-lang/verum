@@ -34,6 +34,7 @@ mount core.*;
 mount core.collections.List;
 mount core.security.mac.hmac.{HmacSha256, HmacSha384};
 mount core.security.kdf.hkdf.{HkdfError};
+mount core.security.util.constant_time.{constant_time_eq as ct_shared_eq};
 mount core.net.tls13.cipher_suite.{CipherSuite, HashKind};
 mount core.net.tls13.keyschedule.hkdf_label.{hkdf_expand_label};
 mount core.net.tls13.keyschedule.derive_secret.{
@@ -213,15 +214,11 @@ public fn verify_binder(
     Ok(constant_time_eq(expected.as_slice(), received_binder))
 }
 
+/// Delegates to the audited, @verify(constant_time)-annotated helper
+/// in core.security.util.constant_time — keeps the call-site readable
+/// without duplicating the constant-time discipline.
 fn constant_time_eq(a: &[Byte], b: &[Byte]) -> Bool {
-    if a.len() != b.len() { return false; }
-    let mut diff: UInt8 = 0_u8;
-    let mut i: Int = 0;
-    while i < a.len() {
-        diff = diff | (a[i] ^ b[i]);
-        i = i + 1;
-    }
-    diff == 0_u8
+    ct_shared_eq(a, b)
 }
 
 // =============================================================================

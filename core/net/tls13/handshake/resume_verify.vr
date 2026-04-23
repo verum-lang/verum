@@ -34,6 +34,7 @@ mount core.collections.List;
 mount core.time.instant.{Instant};
 mount core.time.duration.{Duration};
 mount core.security.kdf.hkdf.{HkdfError};
+mount core.security.util.constant_time.{constant_time_eq as ct_shared_eq};
 mount core.net.tls13.cipher_suite.{CipherSuite, HashKind};
 mount core.net.tls13.keyschedule.schedule.{EarlySecret, SecretBytes};
 mount core.net.tls13.keyschedule.hkdf_label.{hkdf_expand_label};
@@ -262,13 +263,7 @@ fn derive_resumption_psk(
     hkdf_expand_label(hash, resumption_master, &LABEL_RESUMPTION, ticket_nonce, out_len)
 }
 
+/// Delegates to the audited core.security.util.constant_time helper.
 fn constant_time_eq(a: &[Byte], b: &[Byte]) -> Bool {
-    if a.len() != b.len() { return false; }
-    let mut diff: UInt8 = 0_u8;
-    let mut i: Int = 0;
-    while i < a.len() {
-        diff = diff | (a[i] ^ b[i]);
-        i = i + 1;
-    }
-    diff == 0_u8
+    ct_shared_eq(a, b)
 }

@@ -41,6 +41,7 @@ mount core.security.x509.spki.{SubjectPublicKey, RsaPublicKey, EcPublicKeyBytes,
 mount core.security.ecc.x25519.{X25519, X25519SecretKey, X25519PublicKey};
 mount core.security.ecc.p256.{P256, P256PrivateKey, P256PublicKey, P256Signature};
 mount core.security.ecc.ed25519.{Ed25519, Ed25519PublicKey as Ed25519Pk, Ed25519Signature};
+mount core.security.util.constant_time.{constant_time_eq};
 mount core.security.sig.rsa.{
     RsaPublicKey as RsaVerifyKey, RsaHash,
     verify_pkcs1_v15_prehashed, verify_pss_prehashed,
@@ -925,13 +926,9 @@ fn hmac_for_hash(hash: HashKind, key: &[Byte], msg: &[Byte]) -> List<Byte> {
     }
 }
 
+/// Local alias retained for call-site readability — all callers now
+/// dispatch to `core.security.util.constant_time.constant_time_eq`
+/// which is the single audited implementation (spec §8.2).
 fn constant_time_bytes_eq(a: &[Byte], b: &[Byte]) -> Bool {
-    if a.len() != b.len() { return false; }
-    let mut diff: UInt8 = 0_u8;
-    let mut i: Int = 0;
-    while i < a.len() {
-        diff = diff | (a[i] ^ b[i]);
-        i = i + 1;
-    }
-    diff == 0_u8
+    constant_time_eq(a, b)
 }
