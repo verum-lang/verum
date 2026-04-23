@@ -643,25 +643,24 @@ fn verify_proof_method(
                 ExprKind::Tuple(items) if items.is_empty()
             );
 
-            // For the empty-scrutinee surface, try closing the whole
-            // goal outright with `Auto` first. A classical disjunctive
-            // tautology like `x >= 0 || x < 0` needs no real case
-            // analysis — the SMT decides it directly. This lets users
-            // write `proof by cases { case … => … }` as documentation
-            // of the intended case shape even when the ambient goal is
-            // decidable on its own.
-            if is_empty_scrutinee {
-                if let Ok(auto_sub) = engine.execute_tactic(&ProofTactic::Auto, goal) {
-                    if auto_sub.is_empty() {
-                        steps.push(VerifiedStep {
-                            description: Text::from(
-                                "cases (goal closed by auto)",
-                            ),
-                            tactic_used: Text::from("cases→auto"),
-                            duration: step_start.elapsed(),
-                        });
-                        return Ok(steps);
-                    }
+            // Try closing the whole goal outright with `Auto` first.
+            // A classical disjunctive tautology like `x >= 0 || x < 0`
+            // or `b == true || b == false` needs no real case analysis
+            // — the SMT decides it directly. Covers both the empty-
+            // scrutinee and the `on <param>` surfaces: in practice
+            // users write the case block as documentation of the
+            // intended case structure even when the ambient goal is
+            // a tautology that auto can dispatch outright. Only if
+            // Auto produces further subgoals do we fall through to
+            // the explicit Split / CasesOn dispatch below.
+            if let Ok(auto_sub) = engine.execute_tactic(&ProofTactic::Auto, goal) {
+                if auto_sub.is_empty() {
+                    steps.push(VerifiedStep {
+                        description: Text::from("cases (goal closed by auto)"),
+                        tactic_used: Text::from("cases→auto"),
+                        duration: step_start.elapsed(),
+                    });
+                    return Ok(steps);
                 }
             }
 
