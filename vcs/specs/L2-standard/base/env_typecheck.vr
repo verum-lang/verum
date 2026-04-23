@@ -1,0 +1,63 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: base, env, args
+// @timeout: 15000
+// @description: core.base.env — process environment + args accessors
+
+mount core.*;
+mount core.base.env.{
+    args, arg, args_count, args_os, Args,
+    var, var_opt, set_var, remove_var, VarError,
+    home_dir,
+};
+
+fn args_shape_queries() {
+    let all = args();
+    let n = args_count();
+    assert_eq(all.len(), n);
+    // arg(0) may be None on empty args, but index never errors.
+    let _ = arg(0);
+}
+
+fn set_remove_var_round_trip() {
+    let k: Text = "VERUM_TEST_ENV_KEY".clone();
+    let v: Text = "value".clone();
+    set_var(&k, &v);
+    match var(&k) {
+        Ok(got) => { assert(got.len() > 0); }
+        Err(_)  => {}   // some targets may prevent env-var mutation
+    }
+    remove_var(&k);
+    // After remove, var_opt returns None on unset.
+    let _ = var_opt(&k);
+}
+
+fn var_err_variants() {
+    // Missing + non-utf8 are the documented error paths.
+    let missing: Text = "DEFINITELY_NOT_SET_VERUM_KEY_XYZ".clone();
+    match var(&missing) {
+        Ok(_)  => {}   // env may contain this on wild CI setups
+        Err(e) => match e {
+            VarError.NotPresent  => {}
+            VarError.NotUnicode(_) => {}
+        }
+    }
+}
+
+fn args_os_returns_iterator_type() {
+    let _a: Args = args_os();
+}
+
+fn home_returns_maybe() {
+    let _h: Maybe<Text> = home_dir();
+}
+
+fn main() {
+    args_shape_queries();
+    set_remove_var_round_trip();
+    var_err_variants();
+    args_os_returns_iterator_type();
+    home_returns_maybe();
+    print("env_typecheck ok");
+}
