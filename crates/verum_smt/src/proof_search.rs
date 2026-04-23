@@ -4557,9 +4557,66 @@ impl ProofSearchEngine {
                 Ok(Maybe::None)
             }
             z3::SatResult::Unknown => {
-                // Timeout or resource limit
-                Err(ProofError::SmtTimeout)
+                // Z3 couldn't decide within its resource budget.
+                // CVC5 has a different decision-procedure portfolio
+                // (stronger on quantifiers, strings, nonlinear
+                // arithmetic) — delegate the same obligation there
+                // before giving up. The formula we submit is
+                // `hypotheses ⇒ goal`, negated and parsed directly
+                // from the AST; CVC5's check_sat returns Unsat iff
+                // the negation is unsatisfiable iff the claim is
+                // valid — same convention Z3 uses.
+                self.try_cvc5_discharge(&formula, goal)
             }
+        }
+    }
+
+    /// CVC5 fallback for `try_smt_discharge`. Returns Some(proof)
+    /// on Unsat (goal valid), None on Sat (counterexample), and
+    /// Err(SmtTimeout) on Unknown or when CVC5 isn't available —
+    /// caller still sees a sound timeout signal in the latter
+    /// case.
+    fn try_cvc5_discharge(
+        &self,
+        formula: &Expr,
+        goal: &ProofGoal,
+    ) -> Result<Maybe<ProofTerm>, ProofError> {
+        #[cfg(feature = "cvc5")]
+        {
+            use crate::cvc5_backend::{Cvc5Backend, Cvc5Config};
+            let cfg = Cvc5Config::default();
+            let mut cvc5 = match Cvc5Backend::new(cfg) {
+                Ok(b) => b,
+                Err(_) => return Err(ProofError::SmtTimeout),
+            };
+
+            // Convert `¬formula` — the negated obligation, same
+            // direction Z3 uses: Unsat means valid.
+            let neg = Expr::new(
+                ExprKind::Unary {
+                    op: UnOp::Not,
+                    expr: Heap::new(formula.clone()),
+                },
+                formula.span,
+            );
+            if cvc5.assert_formula_from_expr(&neg).is_err() {
+                return Err(ProofError::SmtTimeout);
+            }
+            match cvc5.check_sat() {
+                Ok(crate::cvc5_backend::SatResult::Unsat) => {
+                    Ok(Maybe::Some(ProofTerm::SmtProof {
+                        solver: "cvc5".into(),
+                        formula: goal.goal.clone(),
+                    }))
+                }
+                Ok(crate::cvc5_backend::SatResult::Sat) => Ok(Maybe::None),
+                _ => Err(ProofError::SmtTimeout),
+            }
+        }
+        #[cfg(not(feature = "cvc5"))]
+        {
+            let _ = (formula, goal);
+            Err(ProofError::SmtTimeout)
         }
     }
 
