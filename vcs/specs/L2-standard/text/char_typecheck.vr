@@ -1,0 +1,70 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: text, char, ascii
+// @timeout: 15000
+// @description: core.text.char — Char ASCII/Unicode classification + case conversion
+
+mount core.*;
+
+fn ascii_digit_classification() {
+    let d: Char = '5';
+    assert_eq(d.is_ascii_digit(), true);
+    assert_eq(d.is_ascii_alphabetic(), false);
+    assert_eq(d.is_ascii_hexdigit(), true);
+    let a: Char = 'a';
+    assert_eq(a.is_ascii_digit(), false);
+    assert_eq(a.is_ascii_alphabetic(), true);
+    assert_eq(a.is_ascii_lowercase(), true);
+    assert_eq(a.is_ascii_uppercase(), false);
+}
+
+fn hexdigit_accepts_a_through_f() {
+    let x: Char = 'f';
+    assert_eq(x.is_ascii_hexdigit(), true);
+    let g: Char = 'g';
+    assert_eq(g.is_ascii_hexdigit(), false);
+}
+
+fn whitespace_and_punctuation() {
+    let sp: Char = ' ';
+    assert_eq(sp.is_ascii_whitespace(), true);
+    let dot: Char = '.';
+    assert_eq(dot.is_ascii_punctuation(), true);
+    let nl: Char = '\n';
+    assert_eq(nl.is_ascii_control(), true);
+}
+
+fn case_conversion() {
+    let a: Char = 'a';
+    let big = a.to_ascii_uppercase();
+    assert_eq(big.is_ascii_uppercase(), true);
+    let back = big.to_ascii_lowercase();
+    assert_eq(back.is_ascii_lowercase(), true);
+}
+
+fn case_insensitive_equality() {
+    let a: Char = 'a';
+    let big_a: Char = 'A';
+    assert_eq(a.eq_ignore_ascii_case(&big_a), true);
+    let b: Char = 'b';
+    assert_eq(a.eq_ignore_ascii_case(&b), false);
+}
+
+fn unicode_queries_work_on_ascii() {
+    let a: Char = 'a';
+    assert_eq(a.is_alphabetic(), true);
+    assert_eq(a.is_alphanumeric(), true);
+    let sp: Char = ' ';
+    assert_eq(sp.is_whitespace(), true);
+}
+
+fn main() {
+    ascii_digit_classification();
+    hexdigit_accepts_a_through_f();
+    whitespace_and_punctuation();
+    case_conversion();
+    case_insensitive_equality();
+    unicode_queries_work_on_ascii();
+    print("char_typecheck ok");
+}
