@@ -256,6 +256,18 @@ pub struct Translator<'ctx> {
     bindings: Map<Text, Dynamic>,
     /// Translation configuration
     config: TranslationConfig,
+    /// Stdlib uninterpreteds seen so far.
+    ///
+    /// When `translate_call` / `translate_method_call` lowers a call to
+    /// a recognised stdlib function (e.g. `len`, `count`) to an
+    /// uninterpreted Z3 Int constant, it records the constant's name
+    /// here. `drain_stdlib_axioms` then returns one `Bool` assertion
+    /// per entry (e.g. `(length_xs >= 0)`) so callers can push the
+    /// standard invariants — "collection length is non-negative",
+    /// etc. — onto the solver before checking the goal. This is the
+    /// closest we get to a stdlib-axiom registry without introducing
+    /// a dedicated sort for each collection type.
+    length_constants: std::cell::RefCell<std::collections::BTreeSet<String>>,
 }
 
 impl<'ctx> Translator<'ctx> {
@@ -265,6 +277,7 @@ impl<'ctx> Translator<'ctx> {
             context,
             bindings: Map::new(),
             config: TranslationConfig::default(),
+            length_constants: std::cell::RefCell::new(std::collections::BTreeSet::new()),
         }
     }
 
@@ -274,7 +287,31 @@ impl<'ctx> Translator<'ctx> {
             context,
             bindings: Map::new(),
             config,
+            length_constants: std::cell::RefCell::new(std::collections::BTreeSet::new()),
         }
+    }
+
+    /// Drain the stdlib axioms accumulated during translation so callers
+    /// can push them onto the solver. Each returned `Bool` is a
+    /// universally-true invariant of the primitive — currently just
+    /// "length / size / count constants are non-negative" — that the
+    /// SMT solver can use to close goals like `len(xs) >= 0` without
+    /// requiring the author to state the fact explicitly.
+    pub fn drain_stdlib_axioms(&self) -> Vec<z3::ast::Bool> {
+        let mut consts = self.length_constants.borrow_mut();
+        let mut out = Vec::with_capacity(consts.len());
+        for name in consts.iter() {
+            let k = Int::new_const(name.as_str());
+            out.push(k.ge(&Int::from_i64(0)));
+        }
+        consts.clear();
+        out
+    }
+
+    fn record_length_const(&self, name: &str) {
+        self.length_constants
+            .borrow_mut()
+            .insert(name.to_string());
     }
 
     /// Get the current configuration.
@@ -492,13 +529,12 @@ impl<'ctx> Translator<'ctx> {
                     "length" | "len" | "size" => {
                         // Span-insensitive canonical key so `xs.len`
                         // produces the same Z3 symbol whenever it is
-                        // referenced — without this, span drift makes
-                        // `xs.len == xs.len` unprovable across two call
-                        // sites.
+                        // referenced.
                         let base_name = format!(
                             "length_{}",
                             verum_ast::pretty::format_expr(expr)
                         );
+                        self.record_length_const(&base_name);
                         let int_var = Int::new_const(base_name.as_str());
                         Ok(Dynamic::from_ast(&int_var))
                     }
@@ -526,6 +562,7 @@ impl<'ctx> Translator<'ctx> {
                             "length_{}",
                             verum_ast::pretty::format_expr(receiver)
                         );
+                        self.record_length_const(&base_name);
                         let int_var = Int::new_const(base_name.as_str());
                         Ok(Dynamic::from_ast(&int_var))
                     }
@@ -1672,24 +1709,17 @@ impl<'ctx> Translator<'ctx> {
 
                     // Length function for arrays/vectors
                     "len" | "length" | "size" | "count" if args.len() == 1 => {
-                        // `len(xs)` is uninterpreted at this layer, but we
-                        // still need two calls on the same argument to
-                        // refer to the same Z3 constant. The original
-                        // implementation used `format!("{:?}", args[0])`
-                        // which includes source spans, so identical
-                        // arguments at different call sites produced
-                        // different Z3 variables — `len(xs) == len(xs)`
-                        // became unprovable purely because of span drift.
-                        // Use the AST pretty-printer (span-insensitive)
-                        // as the canonical key instead.
+                        // `len(xs)` is uninterpreted at this layer, but two
+                        // calls on the same argument must denote the same
+                        // Z3 constant. Canonicalise via the pretty-printer
+                        // (span-insensitive) and record the constant so
+                        // `drain_stdlib_axioms` can emit its non-negativity
+                        // invariant at solve time.
                         let base_name = format!(
                             "length_{}",
                             verum_ast::pretty::format_expr(&args[0])
                         );
-                        // Assert the length is non-negative — a global
-                        // invariant of well-formed collections. This lets
-                        // theorems like `len(xs) >= 0` close without the
-                        // user having to supply the axiom by hand.
+                        self.record_length_const(&base_name);
                         let int_var = Int::new_const(base_name.as_str());
                         Ok(Dynamic::from_ast(&int_var))
                     }

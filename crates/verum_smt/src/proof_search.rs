@@ -4420,6 +4420,17 @@ impl ProofSearchEngine {
             solver.from_string(block.as_str().to_string());
         }
 
+        // Inject stdlib-builtin axioms the translator accumulated
+        // during the formula lowering — currently
+        // "length/size/count constants are non-negative". These
+        // are universally-true invariants of the Verum stdlib and
+        // letting Z3 use them unblocks goals like
+        //   theorem t<T>(xs: List<T>) ensures len(xs) >= 0
+        // without the author having to restate the obvious.
+        for axiom in translator.drain_stdlib_axioms() {
+            solver.assert(&axiom);
+        }
+
         // Validity check: a proposition `F` is valid iff `¬F` is
         // unsatisfiable. We assert the NEGATION of the formula and
         // read Z3's verdict:

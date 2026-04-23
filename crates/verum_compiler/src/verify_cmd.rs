@@ -986,6 +986,22 @@ impl<'s> VerifyCommand<'s> {
             }
         }
 
+        // Push stdlib invariants the translator accumulated while
+        // lowering requires / body / ensures. Currently this is the
+        // "length/size/count constants are non-negative" axiom set
+        // — one assertion per length constant seen during
+        // translation. Must run AFTER all expression translation so
+        // the translator has observed every `len` call; running it
+        // once here (after body + requires, before the first ensures
+        // check) picks up everything seen so far, and subsequent
+        // ensures translations add to the set but those new
+        // constants will be flushed before their individual SAT
+        // check by walking the queue again inside the push/pop
+        // scope below.
+        for axiom in translator.drain_stdlib_axioms() {
+            solver.assert(&axiom);
+        }
+
         // For each postcondition, try to find a counterexample
         // (i.e., check if NOT(postcondition) is satisfiable)
         for ens in ensures {
@@ -994,6 +1010,16 @@ impl<'s> VerifyCommand<'s> {
                     if let Some(bool_expr) = z3_expr.as_bool() {
                         // Push a new scope
                         solver.push();
+
+                        // Flush any stdlib axioms the ensures
+                        // translation just introduced — typically the
+                        // non-negativity of fresh `length_X` consts
+                        // that this particular postcondition names.
+                        // They live inside the push/pop so they don't
+                        // pollute the base context.
+                        for axiom in translator.drain_stdlib_axioms() {
+                            solver.assert(&axiom);
+                        }
 
                         // Assert negation of postcondition
                         solver.assert(&bool_expr.not());
