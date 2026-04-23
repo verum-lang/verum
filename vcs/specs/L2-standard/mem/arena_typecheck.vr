@@ -1,0 +1,58 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: mem, arena, allocator
+// @timeout: 15000
+// @description: core.mem.arena — GenerationalArena bump-allocator surface
+
+mount core.*;
+mount core.mem.arena.{GenerationalArena, ArenaConfig, ArenaError};
+
+fn new_arena_is_empty() {
+    let a = GenerationalArena.new(4096);
+    assert_eq(a.used(), 0);
+    assert_eq(a.generation(), 0);
+    assert(a.capacity() >= 4096);
+}
+
+fn alloc_advances_used() {
+    let mut a = GenerationalArena.new(4096);
+    let _off1 = a.alloc(16);
+    assert(a.used() >= 16);
+    let _off2 = a.alloc(32);
+    assert(a.used() >= 48);
+}
+
+fn reset_bumps_generation() {
+    let mut a = GenerationalArena.new(1024);
+    let _ = a.alloc(64);
+    let g_before = a.generation();
+    a.reset();
+    assert_eq(a.used(), 0);
+    assert(a.generation() > g_before);
+}
+
+fn config_variants_typecheck() {
+    let d = ArenaConfig.default();
+    let f = ArenaConfig.fixed(2048);
+    let c = ArenaConfig.custom(1024, 65536, 2);
+    let _a1 = GenerationalArena.with_config(d);
+    let _a2 = GenerationalArena.with_config(f);
+    let _a3 = GenerationalArena.with_config(c);
+}
+
+fn alloc_aligned_honors_alignment() {
+    let mut a = GenerationalArena.new(1024);
+    let off = a.alloc_aligned(16, 8);
+    // Allocated offset must be 8-byte aligned.
+    assert_eq(off % 8, 0);
+}
+
+fn main() {
+    new_arena_is_empty();
+    alloc_advances_used();
+    reset_bumps_generation();
+    config_variants_typecheck();
+    alloc_aligned_honors_alignment();
+    print("arena_typecheck ok");
+}
