@@ -1,0 +1,58 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: text, builder
+// @timeout: 15000
+// @description: core.text.builder surface — TextBuilder incremental Text assembly
+
+mount core.*;
+mount core.text.builder.TextBuilder;
+
+fn new_is_empty() {
+    let b = TextBuilder.new();
+    assert_eq(b.is_empty(), true);
+    assert_eq(b.len(), 0);
+}
+
+fn with_capacity_is_still_empty() {
+    let b = TextBuilder.with_capacity(64);
+    assert_eq(b.is_empty(), true);
+    assert_eq(b.len(), 0);
+}
+
+fn push_accumulates() {
+    let mut b = TextBuilder.new();
+    b.push(&"hello".clone());
+    b.push(&" ".clone());
+    b.push(&"world".clone());
+    assert(b.len() > 0);
+    let out: Text = b.build();
+    // "hello world" = 11 bytes of ASCII.
+    assert_eq(out.len(), 11);
+}
+
+fn push_line_adds_newline() {
+    let mut b = TextBuilder.new();
+    b.push_line(&"first".clone());
+    b.push_line(&"second".clone());
+    let out: Text = b.build();
+    // "first\nsecond\n" = 13 bytes.
+    assert(out.len() >= 12);
+}
+
+fn clear_resets() {
+    let mut b = TextBuilder.new();
+    b.push(&"data".clone());
+    b.clear();
+    assert_eq(b.is_empty(), true);
+    assert_eq(b.len(), 0);
+}
+
+fn main() {
+    new_is_empty();
+    with_capacity_is_still_empty();
+    push_accumulates();
+    push_line_adds_newline();
+    clear_resets();
+    print("builder_typecheck ok");
+}

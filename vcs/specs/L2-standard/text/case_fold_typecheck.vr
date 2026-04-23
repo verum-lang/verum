@@ -1,0 +1,61 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: text, case-fold, ascii
+// @timeout: 15000
+// @description: core.text.case_fold surface — ASCII case folding + case-insensitive compare
+
+mount core.*;
+mount core.text.case_fold.{
+    fold_char_ascii, fold_byte_ascii, fold_text_ascii,
+    compare_ascii_nocase, equal_ascii_nocase,
+};
+mount core.base.ordering.Ordering;
+
+fn fold_byte_pins_uppercase_to_lower() {
+    let a_up: Byte = 65 as Byte;     // 'A'
+    let a_lo: Byte = fold_byte_ascii(a_up);
+    assert_eq(a_lo, 97 as Byte);     // 'a'
+    // Non-letter bytes pass through unchanged.
+    let digit: Byte = 48 as Byte;    // '0'
+    assert_eq(fold_byte_ascii(digit), digit);
+}
+
+fn fold_text_ascii_round_trip() {
+    let mixed: Text = "Hello WORLD".clone();
+    let folded: Text = fold_text_ascii(&mixed);
+    // Length must be preserved (ASCII-safe fold).
+    assert_eq(folded.len(), mixed.len());
+}
+
+fn compare_ascii_nocase_examples() {
+    let a: Text = "apple".clone();
+    let b: Text = "APPLE".clone();
+    // Same text regardless of case → Equal.
+    match compare_ascii_nocase(&a, &b) {
+        Equal   => {}
+        Less | Greater => { panic("ASCII-case-insensitive same text must compare Equal"); }
+    }
+    let c: Text = "banana".clone();
+    // 'a' < 'b' → Less.
+    match compare_ascii_nocase(&a, &c) {
+        Less    => {}
+        _       => { panic("apple < banana under ASCII case-insensitive"); }
+    }
+}
+
+fn equal_ascii_nocase_true_for_case_swap() {
+    let a: Text = "Hello".clone();
+    let b: Text = "hELLO".clone();
+    assert_eq(equal_ascii_nocase(&a, &b), true);
+    let c: Text = "hi".clone();
+    assert_eq(equal_ascii_nocase(&a, &c), false);
+}
+
+fn main() {
+    fold_byte_pins_uppercase_to_lower();
+    fold_text_ascii_round_trip();
+    compare_ascii_nocase_examples();
+    equal_ascii_nocase_true_for_case_swap();
+    print("case_fold_typecheck ok");
+}
