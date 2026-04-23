@@ -32554,6 +32554,23 @@ impl TypeChecker {
         // infinite recursion when processing large modules like sys.intrinsics.
         self.preregistered_modules.insert(module_path.to_string());
 
+        // CRITICAL: switch `current_module_path` while resolving the
+        // pre-registered function signatures so that unqualified type
+        // names in their parameter / return positions resolve against
+        // the SOURCE module's locally-defined types first. Without
+        // this, a function declared in M as
+        //
+        //     // module M; type Foo is { ... }; fn make() -> Foo { ... }
+        //
+        // would have its signature registered with `Foo` resolving
+        // against the *consumer's* flat-name table — picking up any
+        // same-named type that happens to be in scope (notably the
+        // stdlib `core.runtime.stack_alloc::ConnectionPool` alias when
+        // a sibling module locally defines `ConnectionPool`). The
+        // saved value is restored unconditionally after the loop.
+        let saved_module_path_pre = self.current_module_path.clone();
+        self.current_module_path = Text::from(module_path);
+
         // Register all function signatures to enable forward references
         for item in &ast.items {
             if let ItemKind::Function(func) = &item.kind {
@@ -32562,6 +32579,8 @@ impl TypeChecker {
                 let _ = self.register_function_signature(func);
             }
         }
+
+        self.current_module_path = saved_module_path_pre;
 
         // CRITICAL: Register protocol TYPE DEFINITIONS from this module.
         // The protocol definitions (like `type Into<T> is protocol { ... }`) must be
