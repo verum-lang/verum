@@ -103,6 +103,37 @@ fn format_value_for_print_depth(state: &InterpreterState, value: Value, depth: u
         return ss.as_str().to_string();
     }
 
+    // ThinRef / FatRef — deref to the pointed-to value and recurse.
+    //
+    // `List.iter().next()` and related builtin iterators wrap each
+    // element in a ThinRef (see `handlers/method_dispatch.rs` iterator
+    // dispatch) so the caller can observe the slot without taking
+    // ownership. When an f-string or `print` receives such a
+    // reference without explicit deref, we must auto-deref for
+    // rendering — otherwise the reference's raw address bits would
+    // be formatted as a heap pointer and then re-interpreted as an
+    // `ObjectHeader`, which SIGSEGVs on arbitrary memory.
+    //
+    // We deref into a `Value` (NaN-boxed) because that's how builtin
+    // iterator slots are stored. This covers the common case of
+    // `List<Int>` / `List<Float>` / `List<Text>` / `List<Bool>` etc.
+    if value.is_thin_ref() {
+        let tr = value.as_thin_ref();
+        if !tr.ptr.is_null() {
+            let derefed = unsafe { *(tr.ptr as *const Value) };
+            return format_value_for_print_depth(state, derefed, depth + 1);
+        }
+        return "<null thin ref>".to_string();
+    }
+    if value.is_fat_ref() {
+        let fr = value.as_fat_ref();
+        if !fr.thin.ptr.is_null() {
+            let derefed = unsafe { *(fr.thin.ptr as *const Value) };
+            return format_value_for_print_depth(state, derefed, depth + 1);
+        }
+        return "<null fat ref>".to_string();
+    }
+
     // Integer values - format as numbers.
     if value.is_int() && !value.is_bool() {
         return format!("{}", value.as_i64());
