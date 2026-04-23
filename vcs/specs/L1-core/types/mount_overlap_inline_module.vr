@@ -1,0 +1,60 @@
+// @test: typecheck-pass
+// @level: L1
+// @tags: modules, mount, re-export, variant-constructor
+// @timeout: 5000
+
+/// Regression for a false-positive `E100 unbound variable: …` at
+/// `<generated>:1:1` emitted when two mounts that overlap in name
+/// coverage are declared in sequence:
+///
+/// ```verum
+/// mount core.*;                               // brings in Result/Ok via re-export chain
+/// mount base.{Result, Ok, Err, Text, Maybe};  // explicitly re-declares them
+/// ```
+///
+/// Root cause: `register_imported_item_from_inline_module` fell
+/// through to a `Span::dummy()` `TypeError::UnboundVariable` when
+/// the target inline module had no populated `items` list (common
+/// during stdlib registration when submodule items are loaded
+/// lazily), or when the item was re-exported via a `public mount`
+/// chain rather than declared as a direct top-level item.
+///
+/// The emitted error had **no actionable source location** — the
+/// `<generated>:1:1` span is the fallback for dummy-span conversion
+/// in `session::convert_span`. Users saw `E100 unbound variable: Ok`
+/// with no way to find where in their code the problem was, even
+/// though `Ok` was bound via the prior `mount core.*`.
+///
+/// Fix: `register_imported_item_from_inline_module` now:
+///   1. Detects variant constructors (`Ok`/`Err`/`Some`/`None`) of
+///      sum types in the module's items and registers the parent
+///      type.
+///   2. Detects re-exports via `public mount .path.{name}` items
+///      and defers to the registry-backed `process_import` path.
+///   3. Silently returns `Ok(())` when the module's items list is
+///      empty (lazy-loaded), instead of emitting a dummy-span
+///      error. A genuine unbound use later surfaces with a real
+///      source location at the use site.
+
+module test_mount_overlap;
+
+mount core.*;
+mount base.{Result, Ok, Err, Text, Maybe};
+
+fn produce() -> Result<Int, Text> {
+    Ok(42)
+}
+
+fn consume(x: Maybe<Int>) -> Int {
+    match x {
+        Some(v) => v,
+        None => 0,
+    }
+}
+
+fn main() {
+    let r = produce();
+    let m: Maybe<Int> = Some(7);
+    let c = consume(m);
+    print("mount overlap resolved");
+}

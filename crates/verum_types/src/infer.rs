@@ -28081,6 +28081,35 @@ impl TypeChecker {
         use verum_ast::ItemKind;
 
         if let Some(items) = &module.items {
+            // First pass: if the imported name is a variant constructor of a
+            // sum type declared in this module (e.g. `Ok` / `Err` from
+            // `type Result<T, E> is Ok(T) | Err(E);`), register the variant's
+            // constructor. Without this pass, `mount base.{Ok, Err}` falls
+            // through to the unbound-variable error below even though the
+            // constructors ARE exported via the parent type — a soundness
+            // gap that surfaces as "unbound variable: Ok" at `<generated>:1:1`
+            // on the first use of `Ok(…)` later in the user module.
+            for item in items.iter() {
+                if let ItemKind::Type(type_decl) = &item.kind {
+                    if let verum_ast::decl::TypeDeclBody::Variant(ref variants) = type_decl.body {
+                        if variants.iter().any(|v| v.name.name.as_str() == item_name) {
+                            // Register the parent type first (idempotent); this
+                            // populates the variant-constructor entries in the
+                            // env keyed by the unqualified variant name.
+                            if let Err(e) = self.register_type_declaration(type_decl) {
+                                tracing::debug!(
+                                    "Failed to register parent type '{}' for variant '{}': {}",
+                                    type_decl.name.name.as_str(),
+                                    item_name,
+                                    e
+                                );
+                            }
+                            return Ok(());
+                        }
+                    }
+                }
+            }
+
             for item in items.iter() {
                 match &item.kind {
                     ItemKind::Function(func) if func.name.name.as_str() == item_name => {
@@ -28147,6 +28176,56 @@ impl TypeChecker {
                     _ => {}
                 }
             }
+        }
+
+        // Fallback: the item wasn't a direct Function/Type/Const/Pattern in
+        // this module's items list. Before emitting UnboundVariable, check
+        // whether a prior mount (glob or explicit) already registered the
+        // name — overlapping mounts are idiomatic:
+        //
+        //   mount core.*;                          // brings in Ok via prelude
+        //   mount base.{Result, Ok, Err, Text};    // re-declares Ok explicitly
+        //
+        // Without this check, the second mount walks `base`'s items, fails
+        // to find a top-level `Ok` item (it's a variant of Result, re-exported
+        // via a mount), and emits `E100 unbound variable: Ok` with a dummy
+        // `<generated>` span. The error is both wrong (`Ok` IS bound) and
+        // unactionable (span points nowhere).
+        if self.ctx.env.lookup(item_name).is_some() {
+            return Ok(());
+        }
+
+        // Also check whether the module re-exports the name via a
+        // `public mount .path.item` declaration. Those are explicit
+        // re-exports that make the name importable from this module
+        // path even though it isn't a direct top-level item.
+        if let Some(items) = &module.items {
+            for item in items.iter() {
+                if let ItemKind::Mount(mount_decl) = &item.kind {
+                    if !matches!(mount_decl.visibility, verum_ast::decl::Visibility::Public) {
+                        continue;
+                    }
+                    if mount_tree_exports_name(&mount_decl.tree, item_name) {
+                        // The name is re-exported via a `public mount` chain.
+                        // Skip emitting an error — the registry-backed
+                        // `process_import` path (invoked by `check_import`
+                        // after this function returns) will complete the
+                        // resolution through the re-export chain.
+                        return Ok(());
+                    }
+                }
+            }
+        }
+
+        // If this module's items weren't even populated yet (common during
+        // stdlib registration when submodule items are loaded lazily), do
+        // NOT fabricate an UnboundVariable error with a dummy span — that
+        // error gets reported at `<generated>:1:1` with no actionable
+        // location, and the registry-backed `process_import` path can
+        // still complete the resolution. A real unbound use later will
+        // surface with a proper source span at the use site.
+        if module.items.as_ref().map(|i| i.is_empty()).unwrap_or(true) {
+            return Ok(());
         }
 
         Err(TypeError::UnboundVariable {
@@ -45961,6 +46040,33 @@ impl ConditionExt for verum_ast::expr::ConditionKind {
 /// not cubical / HoTT language primitives — those fall through to the
 /// regular qualified-path resolution so that user-defined `@` meta
 /// types continue to work.
+/// Returns true if the given mount tree re-exports an item named `name`.
+/// Used by import resolution to recognise that a name is re-exported
+/// through a `public mount .path.{item}` chain even when it isn't a
+/// direct item in the module's items list.
+fn mount_tree_exports_name(tree: &verum_ast::decl::MountTree, name: &str) -> bool {
+    use verum_ast::decl::MountTreeKind;
+    use verum_ast::ty::PathSegment;
+
+    match &tree.kind {
+        MountTreeKind::Path(path) => {
+            // Last segment is the imported item name (or rename target).
+            if let Some(PathSegment::Name(ident)) = path.segments.last() {
+                return ident.name.as_str() == name;
+            }
+            false
+        }
+        MountTreeKind::Glob(_) => {
+            // Glob re-exports everything; conservatively treat as exporting
+            // any name. Callers fall through to real resolution.
+            true
+        }
+        MountTreeKind::Nested { trees, .. } => {
+            trees.iter().any(|t| mount_tree_exports_name(t, name))
+        }
+    }
+}
+
 fn resolve_builtin_meta_type(name: &str) -> Option<Type> {
     match name {
         "@builtin_interval" => Some(Type::Interval),
