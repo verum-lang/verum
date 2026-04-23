@@ -360,10 +360,9 @@ fn on_server_hello(
             let server_share = select_server_key_share(&sh.extensions)?;
             let dhe_priv = find_dhe_priv(&ws.dhe_privs, &server_share.group)?;
 
-            // Compute the DHE shared secret. We delegate group-specific
-            // math to core.security.ecc.* downstream; for the shape of
-            // this SM, we stub the call with a placeholder that the
-            // handshake integration layer (next session) fills in.
+            // Compute the DHE shared secret via core.security.ecc.* —
+            // X25519 / secp256r1 / secp384r1 all dispatched below in
+            // compute_dhe(). Returns an H-group-sized shared secret.
             let dhe_shared = compute_dhe(&server_share.group, &dhe_priv, &server_share.key_exchange)?;
 
             // Absorb SH into transcript.

@@ -38,7 +38,8 @@ public type AckRanges is {
 implement AckRanges {
     /// Empty range set — trivially valid.
     public fn empty() -> AckRanges {
-        AckRanges { inner: [] }
+        let v: List<AckRange> = List.new();
+        AckRanges { inner: v }
     }
 
     /// Borrow the underlying list for read-only emission.
@@ -83,92 +84,109 @@ implement AckRanges {
     }
 
     /// Insert a packet number, maintaining the V3 invariant.
-    /// Linear scan — real workloads keep the range list short (O(10)).
     ///
-    /// This is the invariant-preserving constructor: if the input was
-    /// valid and `pn` is a fresh packet number, the output is valid.
-    /// The SMT proof in
-    /// `vcs/specs/L2-standard/net/quic/ack_ranges_invariant_kat.vr`
-    /// discharges that obligation.
+    /// The stored list is strictly descending by `largest`, with a
+    /// gap of ≥ 2 between consecutive ranges. `pn` falls into exactly
+    /// one of:
+    ///
+    ///   (A) r[i] already covers pn           — no-op.
+    ///   (B) pn extends r[i] above (r.largest + 1 == pn).
+    ///   (C) pn extends r[i] below (pn + 1 == r.smallest).
+    ///   (D) pn fits in the gap between r[i-1] and r[i] — fresh
+    ///       singleton inserted at position i.
+    ///   (E) pn is above every range — prepended.
+    ///   (F) pn is below every range — appended.
+    ///
+    /// After (B) / (C), a coalesce-with-neighbour step runs in case
+    /// the extension closes the last gap between adjacent ranges.
+    ///
+    /// Linear scan; real workloads keep the list short (≤ 20 entries).
     public fn insert_pn(self, pn: UInt64) -> AckRanges {
         let mut ranges = self.inner;
+        let n = ranges.len();
+
+        // Case F: list empty OR pn is strictly below smallest range
+        // (the LAST element). Append at tail — position after the
+        // last range. Also handles Case A / C for the last range.
+        if n == 0 {
+            let mut tail: List<AckRange> = [];
+            tail.push(AckRange { smallest: pn, largest: pn });
+            return AckRanges { inner: tail };
+        }
+
+        // Find insertion anchor. With descending order by `largest`:
+        //   r[0].largest  > r[1].largest  > ... > r[n-1].largest
+        //   r[0].smallest > r[1].largest+1 > r[1].smallest > r[2].largest+1 > ...
+        //
+        // Scan to find the first i where r[i].largest < pn — i.e., pn
+        // is NOT below-or-equal-to r[i].  If no such i exists, pn is
+        // below every range (Case F).  If i == 0, pn is above every
+        // range (Case E).  Otherwise pn falls between r[i-1] and r[i]
+        // (Cases A / B / C / D).
         let mut i: Int = 0;
-        while i < ranges.len() {
-            let r = ranges[i].clone();
-            // Strictly greater → skip forward.
-            if pn > r.largest + 1_u64 {
-                i = i + 1;
-                continue;
-            }
-            // Extends above top of range.
-            if pn == r.largest + 1_u64 {
-                ranges[i] = AckRange { smallest: r.smallest, largest: pn };
-                // Possibly coalesce with range (i-1) above.
-                if i >= 1 && ranges[i - 1].smallest == pn + 1_u64 {
-                    let merged = AckRange {
-                        smallest: ranges[i].smallest,
-                        largest: ranges[i - 1].largest,
-                    };
-                    // Remove i-1 and collapse.
-                    let mut tail: List<AckRange> = [];
-                    let mut k: Int = 0;
-                    while k < ranges.len() {
-                        if k == i - 1 {
-                            tail.push(merged.clone());
-                        } else if k == i {
-                            // already merged
-                        } else {
-                            tail.push(ranges[k].clone());
-                        }
-                        k = k + 1;
-                    }
-                    ranges = tail;
-                }
+        while i < n && ranges[i].largest >= pn {
+            // If this range already contains pn (A), no-op early-out.
+            if pn >= ranges[i].smallest && pn <= ranges[i].largest {
                 return AckRanges { inner: ranges };
             }
-            // Already covered.
-            if pn >= r.smallest { return AckRanges { inner: ranges }; }
-            // Extends below current range's floor.
-            if pn + 1_u64 == r.smallest {
-                ranges[i] = AckRange { smallest: pn, largest: r.largest };
-                // Coalesce with next lower range.
-                if i + 1 < ranges.len() && ranges[i + 1].largest + 1_u64 == pn {
-                    let merged = AckRange {
-                        smallest: ranges[i + 1].smallest,
-                        largest: ranges[i].largest,
-                    };
-                    let mut tail: List<AckRange> = [];
-                    let mut k: Int = 0;
-                    while k < ranges.len() {
-                        if k == i {
-                            tail.push(merged.clone());
-                        } else if k == i + 1 {
-                            // absorbed
-                        } else {
-                            tail.push(ranges[k].clone());
-                        }
-                        k = k + 1;
-                    }
-                    ranges = tail;
-                }
-                return AckRanges { inner: ranges };
-            }
-            // Insert a fresh singleton BEFORE index i.
-            let fresh = AckRange { smallest: pn, largest: pn };
+            i = i + 1;
+        }
+
+        // At this point i is the first index where r[i].largest < pn
+        // (or i == n, meaning pn is below every range).
+        //
+        // Candidates to merge with:
+        //   above:  r[i-1] (if exists) — might match pn + 1 == r.smallest (C).
+        //   below:  r[i]   (if exists) — might match r.largest + 1 == pn (B).
+
+        let can_extend_above = i >= 1 && ranges[i - 1].smallest == pn + 1_u64;
+        let can_extend_below = i <  n && ranges[i].largest + 1_u64 == pn;
+
+        if can_extend_above && can_extend_below {
+            // Bridge — merge r[i-1] and r[i] into one range covering
+            // r[i].smallest..r[i-1].largest.
+            let merged = AckRange {
+                smallest: ranges[i].smallest,
+                largest:  ranges[i - 1].largest,
+            };
             let mut tail: List<AckRange> = [];
             let mut k: Int = 0;
-            while k < ranges.len() {
-                if k == i { tail.push(fresh.clone()); }
-                tail.push(ranges[k].clone());
+            while k < n {
+                if k == i - 1 { tail.push(merged.clone()); }
+                if k != i - 1 && k != i { tail.push(ranges[k].clone()); }
                 k = k + 1;
             }
-            ranges = tail;
+            return AckRanges { inner: tail };
+        }
+
+        if can_extend_above {
+            // Extend r[i-1] downward by one.
+            ranges[i - 1] = AckRange {
+                smallest: pn,
+                largest:  ranges[i - 1].largest,
+            };
             return AckRanges { inner: ranges };
         }
-        // Fell off the end — append.
+
+        if can_extend_below {
+            // Extend r[i] upward by one.
+            ranges[i] = AckRange {
+                smallest: ranges[i].smallest,
+                largest:  pn,
+            };
+            return AckRanges { inner: ranges };
+        }
+
+        // Fresh singleton at position i (shifts r[i..] right).
         let fresh = AckRange { smallest: pn, largest: pn };
-        let mut tail = ranges;
-        tail.push(fresh);
+        let mut tail: List<AckRange> = [];
+        let mut k: Int = 0;
+        while k < n {
+            if k == i { tail.push(fresh.clone()); }
+            tail.push(ranges[k].clone());
+            k = k + 1;
+        }
+        if i == n { tail.push(fresh); }
         AckRanges { inner: tail }
     }
 
