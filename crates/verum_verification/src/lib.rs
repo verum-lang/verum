@@ -87,6 +87,7 @@ pub mod separation_logic;
 pub mod ssa;
 pub mod subsumption;
 pub mod tactic_evaluation;
+pub mod tactic_heuristics;
 pub mod tensor_shapes;
 pub mod transition;
 pub mod vcgen;
