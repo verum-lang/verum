@@ -1190,8 +1190,35 @@ impl<'s> VerifyCommand<'s> {
                                 solver.pop(1);
                             }
                             z3::SatResult::Unknown => {
+                                // Z3 can't decide within its budget —
+                                // delegate to CVC5, which has a
+                                // complementary decision portfolio
+                                // (stronger on quantifiers, strings,
+                                // nonlinear arithmetic). Same
+                                // convention: `¬ensures` unsat means
+                                // the ensures holds. If CVC5 also
+                                // returns Unknown we surface the
+                                // timeout as before.
+                                let cvc5_result =
+                                    self.cvc5_discharge_negated(ens, requires);
                                 solver.pop(1);
-                                return Err(VerifyError::Timeout);
+                                match cvc5_result {
+                                    Cvc5Outcome::Valid => {
+                                        // ensures holds per CVC5
+                                    }
+                                    Cvc5Outcome::Invalid => {
+                                        return Err(VerifyError::Failed(
+                                            Text::from(format!(
+                                                "Postcondition violation (CVC5 found \
+                                                 counterexample for negated ensures)"
+                                            )),
+                                            None,
+                                        ));
+                                    }
+                                    Cvc5Outcome::Unknown => {
+                                        return Err(VerifyError::Timeout);
+                                    }
+                                }
                             }
                         }
                     }
@@ -1206,6 +1233,43 @@ impl<'s> VerifyCommand<'s> {
         }
 
         Ok(())
+    }
+
+    /// Outcome of a CVC5 fallback check for a function ensures.
+    /// Same trichotomy Z3 uses: Valid (ensures holds), Invalid
+    /// (counterexample), Unknown (solver can't decide).
+    #[allow(dead_code)]
+    fn cvc5_discharge_negated(
+        &self,
+        ensures: &Expr,
+        requires: &[Expr],
+    ) -> Cvc5Outcome {
+        use verum_smt::cvc5_backend::{Cvc5Backend, Cvc5Config, SatResult};
+        let mut cvc5 = match Cvc5Backend::new(Cvc5Config::default()) {
+            Ok(b) => b,
+            Err(_) => return Cvc5Outcome::Unknown,
+        };
+        // Assert preconditions, then the negated postcondition.
+        for req in requires {
+            if cvc5.assert_formula_from_expr(req).is_err() {
+                return Cvc5Outcome::Unknown;
+            }
+        }
+        let neg = Expr::new(
+            verum_ast::ExprKind::Unary {
+                op: verum_ast::UnOp::Not,
+                expr: verum_common::Heap::new(ensures.clone()),
+            },
+            ensures.span,
+        );
+        if cvc5.assert_formula_from_expr(&neg).is_err() {
+            return Cvc5Outcome::Unknown;
+        }
+        match cvc5.check_sat() {
+            Ok(SatResult::Unsat) => Cvc5Outcome::Valid,
+            Ok(SatResult::Sat) => Cvc5Outcome::Invalid,
+            _ => Cvc5Outcome::Unknown,
+        }
     }
 
     /// Display verification report
@@ -1504,6 +1568,17 @@ impl VerificationReport {
 /// lets the outer `VerificationError::CannotProve` thread the
 /// counterexample through to the CLI's display path rather than
 /// burying it inside a Debug-formatted string.
+/// Outcome of a CVC5 fallback discharge.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Cvc5Outcome {
+    /// Negation of the claim is Unsat — the claim is valid.
+    Valid,
+    /// Negation is Sat — a counterexample exists.
+    Invalid,
+    /// Solver returned Unknown or initialisation failed.
+    Unknown,
+}
+
 enum VerifyError {
     /// Verification timed out.
     Timeout,
