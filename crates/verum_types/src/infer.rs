@@ -22572,10 +22572,21 @@ impl TypeChecker {
 
         // If the inner type is not Result/Maybe, the inner expression might be a call
         // to a throws function whose return type wasn't properly resolved to Result<T, E>.
-        // Try to determine the error type from the caller's throws clause or
-        // from a generic fallback error type.
+        // Try to determine the error type from the caller's throws clause.
+        //
+        // Previously this fallback ALWAYS wrapped non-Try inner types in
+        // `Result<inner, fresh>`, even when outside a throws context. That
+        // silently produced a `Result<Never, _>` residual which then mismatched
+        // with a `Maybe<_>` outer function, reporting a confusing
+        // "cannot convert Result<Never, _> to Maybe<Never>" for code that
+        // simply forgot that `?` needs a Try-implementing type. Now we only
+        // wrap when an actual throws clause is in scope — otherwise the
+        // standard Step 2 resolution emits `NotResultOrMaybe`, pointing the
+        // user at the real issue (wrong method, missing Maybe wrapper, etc.).
         let inner_ty = if self.protocol_checker.read().resolve_try_protocol(&inner_ty).is_none() {
-            // Determine error type: prefer caller's throws, fallback to generic error
+            // Only wrap when the caller's throws clause supplies an error
+            // type — that's the scenario the fallback was designed for
+            // (throws function whose return type wasn't yet elaborated).
             let error_ty_opt = if let Maybe::Some(ref throws_types) = self.current_function_throws {
                 if !throws_types.is_empty() {
                     let ety = if throws_types.len() == 1 {
@@ -22596,10 +22607,7 @@ impl TypeChecker {
                     None
                 }
             } else {
-                // Not inside a throws function - use a fresh type variable for error type.
-                // This handles try { expr? } recover { ... } patterns where the caller
-                // doesn't have throws but uses try/recover for error handling.
-                Some(Type::Var(TypeVar::fresh()))
+                None
             };
             if let Some(error_ty) = error_ty_opt {
                 let wrapped = Type::result(inner_ty.clone(), error_ty);

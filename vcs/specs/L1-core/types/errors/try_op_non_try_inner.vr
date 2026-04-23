@@ -1,0 +1,33 @@
+// @test: typecheck-fail
+// @level: L1
+// @tags: types, try-operator, maybe, error-diagnostic
+// @timeout: 5000
+// @expected-error: NotResultOrMaybe
+
+/// The `?` operator must produce a clear error when applied to a value
+/// whose type does not implement Try (Result/Maybe/etc). Before the fix
+/// in `verum_types::infer::infer_try_operator`, a silent fallback wrapped
+/// non-Try inner types in `Result<T, fresh>`, producing the confusing
+/// `E0203: cannot convert Result<Never, _> to Maybe<Never>` even for
+/// code that simply forgot that `?` needs a Try-implementing type.
+///
+/// Root cause was architectural: the fallback-wrap branch triggered
+/// even outside a `throws` context, using a fresh type variable for the
+/// error type. Now it only wraps when a throws clause is in scope — in
+/// any other case, the standard Step-2 Try-protocol resolution emits
+/// `NotResultOrMaybe`, which names the real type the user wrote.
+///
+/// This spec pins the error message family for the `?`-on-plain-Int
+/// case. The earlier stdlib-facing surface bug was `Map.get(k)?` where
+/// `Map.get` returns `V` (not `Maybe<V>`); users now see "type `Int` is
+/// not Result or Maybe" instead of a misleading Result/Maybe mismatch.
+
+module test_try_non_try;
+
+fn bad() -> Maybe<Int> {
+    let plain: Int = 42;
+    let _v = plain?;   // ERROR: Int is not Result or Maybe
+    Some(1)
+}
+
+fn main() { print("compile-fail"); }
