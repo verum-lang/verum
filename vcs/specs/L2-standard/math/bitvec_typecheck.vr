@@ -1,0 +1,94 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: math, bitvec, smt
+// @timeout: 15000
+// @description: core.math.bitvec — fixed-width bit-vector construction + SMT-style ops
+
+mount core.*;
+mount core.math.bitvec.{
+    BitVec,
+    bv, bv8, bv16, bv32, bv64, bv_zero, bv_ones,
+    bitvec_and, bitvec_or, bitvec_xor, bitvec_not,
+    bitvec_add, bitvec_sub,
+    bitvec_shl, bitvec_lshr,
+    bitvec_eq,
+};
+
+fn construction_masks_to_width() {
+    // Overflow bits beyond the 8-bit width are masked off.
+    let a = bv8(0x1CA);
+    assert_eq(a.bits, 0xCA);
+    assert_eq(a.width, 8);
+}
+
+fn bv_zero_and_ones() {
+    let z = bv_zero(8);
+    let o = bv_ones(8);
+    assert_eq(z.bits, 0);
+    assert_eq(o.bits, 0xFF);
+}
+
+fn bitwise_logical_ops() {
+    let a = bv8(0xCA);
+    let b = bv8(0x5A);
+    let x = bitvec_xor(a, b);
+    assert_eq(x.bits, 0x90);
+    let n = bitvec_and(a, b);
+    assert_eq(n.bits, 0x4A);
+    let o = bitvec_or(a, b);
+    assert_eq(o.bits, 0xDA);
+}
+
+fn bitvec_not_flips_bits() {
+    let a = bv8(0x0F);
+    let n = bitvec_not(a);
+    assert_eq(n.bits, 0xF0);
+}
+
+fn arithmetic_ops_modular() {
+    let a = bv8(250);
+    let b = bv8(10);
+    let s = bitvec_add(a, b);
+    // 250 + 10 = 260 → mod 256 = 4.
+    assert_eq(s.bits, 4);
+}
+
+fn shift_ops() {
+    let a = bv8(1);
+    let l = bitvec_shl(a, 3);
+    assert_eq(l.bits, 8);
+    let r = bitvec_lshr(bv8(0x80), 3);
+    assert_eq(r.bits, 0x10);
+}
+
+fn eq_predicate() {
+    let a = bv8(0x42);
+    let b = bv8(0x42);
+    let c = bv8(0x43);
+    assert_eq(bitvec_eq(a, b), true);
+    assert_eq(bitvec_eq(a, c), false);
+}
+
+fn widths_8_16_32_64() {
+    let a = bv8(1);
+    let b = bv16(1);
+    let c = bv32(1);
+    let d = bv64(1);
+    assert_eq(a.width, 8);
+    assert_eq(b.width, 16);
+    assert_eq(c.width, 32);
+    assert_eq(d.width, 64);
+}
+
+fn main() {
+    construction_masks_to_width();
+    bv_zero_and_ones();
+    bitwise_logical_ops();
+    bitvec_not_flips_bits();
+    arithmetic_ops_modular();
+    shift_ops();
+    eq_predicate();
+    widths_8_16_32_64();
+    print("bitvec_typecheck ok");
+}
