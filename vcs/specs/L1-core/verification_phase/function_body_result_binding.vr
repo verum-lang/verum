@@ -76,6 +76,33 @@ fn multi_let(x: Int, y: Int) -> Int
     total
 }
 
+@verify(formal)
+fn max_int(a: Int, b: Int) -> Int
+    ensures result >= a
+    ensures result >= b
+{
+    if a >= b { a } else { b }
+}
+
+@verify(formal)
+fn abs_int(x: Int) -> Int
+    ensures result >= 0
+{
+    if x >= 0 { x } else { -x }
+}
+
+@verify(formal)
+fn clamp(x: Int, lo: Int, hi: Int) -> Int
+    requires lo <= hi
+    ensures result >= lo
+    ensures result <= hi
+    ensures (x < lo) -> result == lo
+    ensures (x > hi) -> result == hi
+    ensures (lo <= x && x <= hi) -> result == x
+{
+    if x < lo { lo } else if x > hi { hi } else { x }
+}
+
 fn main() {
     print("L1-core: verification_phase/function_body_result_binding");
 }
