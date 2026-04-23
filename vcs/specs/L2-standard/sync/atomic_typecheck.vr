@@ -1,0 +1,78 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sync, atomic, memory-ordering
+// @timeout: 15000
+// @description: core.sync.atomic surface — AtomicInt load/store/CAS/fetch_* + MemoryOrdering
+
+mount core.*;
+mount core.sync.atomic.{AtomicInt, MemoryOrdering};
+
+fn new_and_load() {
+    let a = AtomicInt.new(42);
+    let v = a.load(MemoryOrdering.Relaxed);
+    assert_eq(v, 42);
+}
+
+fn store_then_load() {
+    let a = AtomicInt.new(0);
+    a.store(100, MemoryOrdering.Release);
+    let v = a.load(MemoryOrdering.Acquire);
+    assert_eq(v, 100);
+}
+
+fn fetch_add_and_sub() {
+    let a = AtomicInt.new(10);
+    let prev_add = a.fetch_add(5, MemoryOrdering.AcqRel);
+    assert_eq(prev_add, 10);
+    let v1 = a.load(MemoryOrdering.Relaxed);
+    assert_eq(v1, 15);
+    let prev_sub = a.fetch_sub(7, MemoryOrdering.AcqRel);
+    assert_eq(prev_sub, 15);
+    let v2 = a.load(MemoryOrdering.Relaxed);
+    assert_eq(v2, 8);
+}
+
+fn increment_decrement() {
+    let a = AtomicInt.new(0);
+    let _ = a.increment(MemoryOrdering.SeqCst);
+    let _ = a.increment(MemoryOrdering.SeqCst);
+    let _ = a.decrement(MemoryOrdering.SeqCst);
+    let v = a.load(MemoryOrdering.Relaxed);
+    assert_eq(v, 1);
+}
+
+fn swap_returns_prior() {
+    let a = AtomicInt.new(7);
+    let prior = a.swap(99, MemoryOrdering.AcqRel);
+    assert_eq(prior, 7);
+    let after = a.load(MemoryOrdering.Relaxed);
+    assert_eq(after, 99);
+}
+
+fn bitwise_fetch() {
+    let a = AtomicInt.new(0b1100);
+    let _ = a.fetch_and(0b1010, MemoryOrdering.AcqRel);   // keeps 0b1000
+    assert_eq(a.load(MemoryOrdering.Relaxed), 0b1000);
+    let _ = a.fetch_or(0b0011, MemoryOrdering.AcqRel);    // adds 0b0011
+    assert_eq(a.load(MemoryOrdering.Relaxed), 0b1011);
+}
+
+fn fetch_max_min() {
+    let a = AtomicInt.new(5);
+    let _ = a.fetch_max(10, MemoryOrdering.AcqRel);
+    assert_eq(a.load(MemoryOrdering.Relaxed), 10);
+    let _ = a.fetch_min(2, MemoryOrdering.AcqRel);
+    assert_eq(a.load(MemoryOrdering.Relaxed), 2);
+}
+
+fn main() {
+    new_and_load();
+    store_then_load();
+    fetch_add_and_sub();
+    increment_decrement();
+    swap_returns_prior();
+    bitwise_fetch();
+    fetch_max_min();
+    print("atomic_typecheck ok");
+}
