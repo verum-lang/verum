@@ -1,0 +1,82 @@
+module core.database.sqlite.native.l6_session.bridge;
+
+// =============================================================================
+// l6_session/bridge.vr — seed / writeback between PreparedStatement cursors
+//                        and the Connection's persistent row store
+// =============================================================================
+// Layer: 6
+// Spec: sqlite-native.md §16.3 + §17
+//
+// Bridges the per-statement VdbeState.cursors and the connection-scoped
+// table_store, so INSERT / SELECT across statements in the same
+// connection see each other's rows.
+// =============================================================================
+
+mount core.*;
+mount collections.List;
+mount base.{Result, Ok, Err, Text};
+mount core.database.sqlite.native.l3_btree.BtreeKind;
+mount core.database.sqlite.native.l4_vdbe.{
+    Register, CursorTable, CursorSlotKind, CursorKind,
+    VdbeProgram,
+};
+mount core.database.sqlite.native.l6_session.connection.Connection;
+mount core.database.sqlite.native.l6_session.statement.PreparedStatement;
+
+public fn seed_cursors_from_connection(
+    stmt: &mut PreparedStatement,
+    conn: &Connection,
+) {
+    let n = stmt.program_ref().cursor_count();
+    let mut i: Int = 0;
+    while i < n {
+        let decl_opt = stmt.program_ref().get_cursor_decl(i);
+        match decl_opt {
+            Some(decl) => {
+                let is_table = match decl.kind {
+                    CkTable | CkIndex => true,
+                    _ => false,
+                };
+                if is_table {
+                    let has = conn.has_table_at(decl.root_page);
+                    let rows: List<List<Register>> = if has {
+                        conn.rows_at(decl.root_page)
+                    } else {
+                        List.new()
+                    };
+                    let ct = stmt.state_mut().cursor_table_mut();
+                    let _ = ct.open_write(i, decl.root_page, decl.n_cols, TableBtree);
+                    let _ = ct.install_rows(i, rows);
+                }
+            }
+            None => {}
+        }
+        i = i + 1;
+    }
+}
+
+public fn writeback_cursors_to_connection(
+    stmt: &PreparedStatement,
+    conn: &mut Connection,
+) {
+    let n = stmt.program_ref().cursor_count();
+    let mut i: Int = 0;
+    while i < n {
+        let decl_opt = stmt.program_ref().get_cursor_decl(i);
+        match decl_opt {
+            Some(decl) => {
+                let is_table = match decl.kind {
+                    CkTable | CkIndex => true,
+                    _ => false,
+                };
+                if is_table {
+                    let snapshot = stmt.state_ref().cursor_table_ref()
+                        .snapshot_rows(i);
+                    conn.set_rows_at(decl.root_page, snapshot);
+                }
+            }
+            None => {}
+        }
+        i = i + 1;
+    }
+}

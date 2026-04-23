@@ -400,4 +400,54 @@ implement CursorTable {
         if cursor_id < 0 || cursor_id >= self.slots.len() { return -1; }
         self.slots[cursor_id].pos
     }
+
+    /// Number of columns declared at open time. Interpreter reads
+    /// this to know how many registers an Insert's data_reg range
+    /// covers.
+    public fn n_cols_of(&self, cursor_id: Int) -> Int {
+        if cursor_id < 0 || cursor_id >= self.slots.len() { return 0; }
+        self.slots[cursor_id].n_cols
+    }
+
+    /// Read a specific cell at an explicit position. Does NOT touch
+    /// the cursor's current `pos`; used by the L6 writeback bridge
+    /// to extract all rows back to the connection's table_store.
+    public fn peek_cell_at(&self, cursor_id: Int, pos: Int, col: Int) -> Register {
+        if cursor_id < 0 || cursor_id >= self.slots.len() { return RNull; }
+        let s = &self.slots[cursor_id];
+        if pos < 0 || pos >= s.rows.len() { return RNull; }
+        let row = &s.rows[pos];
+        if col < 0 || col >= row.len() { return RNull; }
+        row[col]
+    }
+
+    /// Clone the entire row at `pos`.
+    public fn peek_row_at(&self, cursor_id: Int, pos: Int) -> List<Register> {
+        let mut out: List<Register> = List.new();
+        if cursor_id < 0 || cursor_id >= self.slots.len() { return out; }
+        let s = &self.slots[cursor_id];
+        if pos < 0 || pos >= s.rows.len() { return out; }
+        let row = &s.rows[pos];
+        let mut i: Int = 0;
+        while i < row.len() {
+            out.push(row[i]);
+            i = i + 1;
+        }
+        out
+    }
+
+    /// Snapshot every row into a fresh List<List<Register>>. Used by
+    /// the bridge to write back to the connection's table_store
+    /// after a prepared statement finishes.
+    public fn snapshot_rows(&self, cursor_id: Int) -> List<List<Register>> {
+        let mut out: List<List<Register>> = List.new();
+        if cursor_id < 0 || cursor_id >= self.slots.len() { return out; }
+        let row_total = self.slots[cursor_id].rows.len();
+        let mut i: Int = 0;
+        while i < row_total {
+            out.push(self.peek_row_at(cursor_id, i));
+            i = i + 1;
+        }
+        out
+    }
 }

@@ -146,6 +146,19 @@ implement VdbeProgram {
     public fn instruction_count(&self) -> Int { self.instructions.len() }
     public fn register_count(&self) -> Int { self.num_registers }
     public fn cursor_count(&self) -> Int { self.cursors.len() }
+
+    /// Look up a cursor declaration by cursor_id. Returns None when
+    /// out of range; used by L6 bridge to seed row-stores.
+    public fn get_cursor_decl(&self, i: Int) -> Maybe<CursorDecl> {
+        if i < 0 || i >= self.cursors.len() { return None; }
+        let d = &self.cursors[i];
+        Some(CursorDecl {
+            cursor_id: d.cursor_id,
+            kind: d.kind,
+            root_page: d.root_page,
+            n_cols: d.n_cols,
+        })
+    }
     public fn result_column_count(&self) -> Int { self.result_columns.len() }
 
     /// Append an opcode; returns its instruction index (useful for

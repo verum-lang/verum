@@ -10,6 +10,7 @@ module core.database.sqlite.native.l6_session;
 public module schema_cache;
 public module connection;
 public module statement;
+public module bridge;
 
 public mount .schema_cache.{
     ColumnMeta, TableKind, TableMeta, IndexMeta,
@@ -27,4 +28,8 @@ public mount .connection.{
 public mount .statement.{
     ParamBindings, PreparedStatement, StmtError,
     param_bindings_new, prepare, prepare_with_schema,
+};
+
+public mount .bridge.{
+    seed_cursors_from_connection, writeback_cursors_to_connection,
 };

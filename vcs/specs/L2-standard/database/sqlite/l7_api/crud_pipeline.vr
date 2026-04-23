@@ -1,0 +1,106 @@
+// @test: typecheck-pass
+// @level: L2
+// @tier: 0
+// @tags: sqlite, native, l7, crud, end-to-end, insert, select
+// @timeout: 15000
+// @description: End-to-end CREATE + INSERT + SELECT through Database facade
+//
+// Spec: internal/specs/sqlite-native.md §16.1
+//
+// Exercises the full facade loop:
+//   open_admin → execute CREATE → execute INSERT → query_all SELECT
+// with the connection-scoped row-store bridging the cursor state.
+
+mount core.*;
+mount collections.List;
+mount core.database.sqlite.native.l7_api.{
+    Database, DbError, open_admin,
+};
+mount core.database.sqlite.native.l4_vdbe.Register;
+
+fn create_insert_select_round_trip() {
+    let mut db = match open_admin() {
+        Ok(d)  => d,
+        Err(_) => { panic("open"); return; }
+    };
+    match db.execute(&"CREATE TABLE t (v INTEGER)".clone()) {
+        Ok(_)  => {},
+        Err(_) => { panic("CREATE"); return; }
+    }
+    match db.execute(&"INSERT INTO t VALUES (42)".clone()) {
+        Ok(_)  => {},
+        Err(_) => { panic("INSERT"); return; }
+    }
+    match db.query_all(&"SELECT v FROM t".clone()) {
+        Ok(rows) => {
+            // We expect the row we inserted back.
+            assert_eq(rows.len(), 1);
+            assert_eq(rows[0].len(), 1);
+            match rows[0][0] {
+                RInt(i) => { assert_eq(i as Int, 42); }
+                _ => panic("expected RInt(42) — cursor pipeline must surface the row"),
+            }
+        }
+        Err(_) => panic("query_all"),
+    }
+}
+
+fn empty_table_yields_no_rows() {
+    let mut db = match open_admin() {
+        Ok(d)  => d,
+        Err(_) => { panic("open"); return; }
+    };
+    let _ = db.execute(&"CREATE TABLE t (v INTEGER)".clone());
+    match db.query_all(&"SELECT v FROM t".clone()) {
+        Ok(rows) => { assert_eq(rows.len(), 0); }
+        Err(_) => panic("query_all empty"),
+    }
+}
+
+fn multiple_inserts_all_appear() {
+    let mut db = match open_admin() {
+        Ok(d)  => d,
+        Err(_) => { panic("open"); return; }
+    };
+    let _ = db.execute(&"CREATE TABLE t (v INTEGER)".clone());
+    let _ = db.execute(&"INSERT INTO t VALUES (1)".clone());
+    let _ = db.execute(&"INSERT INTO t VALUES (2)".clone());
+    let _ = db.execute(&"INSERT INTO t VALUES (3)".clone());
+    match db.query_all(&"SELECT v FROM t".clone()) {
+        Ok(rows) => {
+            assert_eq(rows.len(), 3);
+            match rows[0][0] { RInt(i) => { assert_eq(i as Int, 1); }, _ => panic("row 0"), }
+            match rows[1][0] { RInt(i) => { assert_eq(i as Int, 2); }, _ => panic("row 1"), }
+            match rows[2][0] { RInt(i) => { assert_eq(i as Int, 3); }, _ => panic("row 2"), }
+        }
+        Err(_) => panic("three-row select"),
+    }
+}
+
+fn row_count_persists_across_prepare() {
+    let mut db = match open_admin() {
+        Ok(d)  => d,
+        Err(_) => { panic("open"); return; }
+    };
+    let _ = db.execute(&"CREATE TABLE t (v INTEGER)".clone());
+    let _ = db.execute(&"INSERT INTO t VALUES (100)".clone());
+    // First SELECT.
+    let r1 = match db.query_all(&"SELECT v FROM t".clone()) {
+        Ok(r)  => r.len(), Err(_) => { panic("q1"); return; }
+    };
+    // Another INSERT.
+    let _ = db.execute(&"INSERT INTO t VALUES (200)".clone());
+    let r2 = match db.query_all(&"SELECT v FROM t".clone()) {
+        Ok(r)  => r.len(), Err(_) => { panic("q2"); return; }
+    };
+    assert_eq(r1, 1);
+    assert_eq(r2, 2);
+}
+
+fn main() {
+    create_insert_select_round_trip();
+    empty_table_yields_no_rows();
+    multiple_inserts_all_appear();
+    row_count_persists_across_prepare();
+    print("crud_pipeline typecheck ok");
+}

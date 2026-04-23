@@ -30,7 +30,7 @@ module core.database.sqlite.native.l7_api.database;
 
 mount core.*;
 mount collections.List;
-mount base.{Result, Ok, Err, Text};
+mount base.{Result, Ok, Err, Text, Maybe};
 mount core.database.sqlite.native.l4_vdbe.{Register, StepResult, VdbeProgram};
 mount core.database.sqlite.native.l5_sql.{
     CompileError, Statement,
@@ -42,6 +42,7 @@ mount core.database.sqlite.native.l6_session.{
     open_memory, prepare, prepare_with_schema,
     mode_can_write, mode_can_ddl,
     table_meta_from_create,
+    seed_cursors_from_connection, writeback_cursors_to_connection,
 };
 
 // -----------------------------------------------------------------------------
@@ -182,20 +183,30 @@ implement Database {
         let mut stmt = match self.prepare(sql) {
             Ok(s)  => s, Err(e) => { return Err(e); }
         };
+        seed_cursors_from_connection(&mut stmt, &self.conn);
+        let mut err_result: Maybe<DbError> = None;
         loop {
             match stmt.step() {
                 Done => { break; }
                 Row(_, _) => {
-                    return Err(DbMisuse("execute() called on a row-producing query".clone()));
+                    err_result = Some(DbMisuse("execute() called on a row-producing query".clone()));
+                    break;
                 }
-                ExecError(c, m) => { return Err(DbStmtError(StmtExec(c, m))); }
+                ExecError(c, m) => {
+                    err_result = Some(DbStmtError(StmtExec(c, m)));
+                    break;
+                }
                 Yield => {
                     // Shouldn't happen — run_until_row already drains
                     // Yields, but we guard.
                 }
             }
         }
-        Ok(())
+        writeback_cursors_to_connection(&stmt, &mut self.conn);
+        match err_result {
+            Some(e) => Err(e),
+            None    => Ok(()),
+        }
     }
 
     /// Compile + step once, returning the first row (if any) as a
@@ -205,7 +216,8 @@ implement Database {
         let mut stmt = match self.prepare(sql) {
             Ok(s)  => s, Err(e) => { return Err(e); }
         };
-        match stmt.step() {
+        seed_cursors_from_connection(&mut stmt, &self.conn);
+        let result = match stmt.step() {
             Row(start, cols) => {
                 let mut out: List<Register> = List.new();
                 let mut i: Int = 0;
@@ -218,6 +230,45 @@ implement Database {
             Done => Ok(List.new()),   // no rows
             ExecError(c, m) => Err(DbStmtError(StmtExec(c, m))),
             Yield => Err(DbMisuse("yield outside run_until_row".clone())),
+        };
+        writeback_cursors_to_connection(&stmt, &mut self.conn);
+        result
+    }
+
+    /// Collect every row a SELECT produces. Seeds cursors before
+    /// stepping and writes back after. Use for bounded-size result
+    /// sets; large scans should iterate via `prepare` + manual `step`
+    /// loop + the bridge helpers.
+    public fn query_all(&mut self, sql: &Text) -> Result<List<List<Register>>, DbError> {
+        let mut stmt = match self.prepare(sql) {
+            Ok(s)  => s, Err(e) => { return Err(e); }
+        };
+        seed_cursors_from_connection(&mut stmt, &self.conn);
+        let mut out: List<List<Register>> = List.new();
+        let mut err_result: Maybe<DbError> = None;
+        loop {
+            match stmt.step() {
+                Row(_, cols) => {
+                    let mut row: List<Register> = List.new();
+                    let mut i: Int = 0;
+                    while i < cols {
+                        row.push(stmt.column(i));
+                        i = i + 1;
+                    }
+                    out.push(row);
+                }
+                Done => { break; }
+                ExecError(c, m) => {
+                    err_result = Some(DbStmtError(StmtExec(c, m)));
+                    break;
+                }
+                Yield => {}
+            }
+        }
+        writeback_cursors_to_connection(&stmt, &mut self.conn);
+        match err_result {
+            Some(e) => Err(e),
+            None    => Ok(out),
         }
     }
 
