@@ -1,0 +1,53 @@
+// @test: typecheck-pass
+// @level: L1
+// @tags: types, throws, result, call-site, method-dispatch
+// @timeout: 5000
+
+/// Regression for a hidden double-registration bug in
+/// `check_function_inner`. A `fn foo(x) throws(E) -> T` function is
+/// registered TWICE in the type environment:
+///
+///   1. Initial registration (line ~34346) with
+///      `initial_return_for_sig` = `Result<T, E>` (throws wrap applied).
+///      This is what external callers should see.
+///   2. Post-body re-registration (line ~35424) with
+///      `final_return_type` = raw body type `T` (throws wrap DROPPED).
+///      This overwrote the env entry from step (1).
+///
+/// Consequence: call sites saw `parse(x)` as `-> Int`, not
+/// `Result<Int, MyError>`. Users couldn't use `.map_err`, `?`, or
+/// any Result combinator on throws-function call results — making
+/// `throws` nearly unusable in practice. `throws_type_checking.vr`
+/// and `throws_fallible.vr` had been failing for this reason plus
+/// misleading `E0205` diagnostics cascading from the mismatch.
+///
+/// Fix: re-apply the throws-wrap before building `final_func_type`
+/// in `check_function_inner`. Guarded by a `resolve_try_protocol`
+/// probe so a body that already returns `Result<_, _>` explicitly
+/// is not double-wrapped.
+
+module test_throws_call;
+
+type MyError is MsgErr(Text);
+
+fn parse(s: &Text) throws(MyError) -> Int {
+    if s.is_empty() {
+        throw MyError.MsgErr("empty".to_text());
+    }
+    42
+}
+
+/// External caller sees `parse` as `-> Result<Int, MyError>`:
+///
+///   * `?` on the call propagates the error (when outer returns Result);
+///   * `.map_err` dispatches on Result's method surface.
+fn use_try(s: &Text) -> Result<Int, MyError> {
+    let n = parse(s)?;
+    Ok(n + 1)
+}
+
+fn use_map_err(s: &Text) -> Result<Int, MyError> {
+    parse(s).map_err(|e| e)
+}
+
+fn main() { print("throws call-site returns Result"); }

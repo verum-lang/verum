@@ -35413,9 +35413,37 @@ impl TypeChecker {
         // Update the function type in the environment with the resolved return type
         // and inferred computational properties
         // (this is important for recursive functions where we used a type variable)
+        //
+        // CRITICAL: For `throws(E) -> T` functions, external callers must see
+        // `fn(…) -> Result<T, E>`. The `return_type` and `final_return_type`
+        // above track the BODY type (raw T), used by body checking and the
+        // `?` operator to unwrap inner values. The initial env registration
+        // at line ~34346 wrapped correctly with `initial_return_for_sig`,
+        // but this re-registration must preserve that wrap — otherwise the
+        // body-inferred raw return type silently overwrites the schema and
+        // callers of throws functions see the unwrapped return (caller then
+        // can't use `.map_err` / the `?` operator on the call result).
+        let final_return_for_sig = if let Maybe::Some(ref throws_clause) = func.throws_clause {
+            if !throws_clause.error_types.is_empty() {
+                let error_ty = throws_clause.error_types.iter().next()
+                    .and_then(|t| self.ast_to_type(t).ok())
+                    .unwrap_or_else(|| Type::Var(TypeVar::fresh()));
+                // If the body already returned Result<_, _> (explicit),
+                // don't double-wrap. Otherwise wrap the raw body type.
+                if self.protocol_checker.read().resolve_try_protocol(&final_return_type).is_some() {
+                    final_return_type.clone()
+                } else {
+                    Type::result(final_return_type.clone(), error_ty)
+                }
+            } else {
+                final_return_type.clone()
+            }
+        } else {
+            final_return_type.clone()
+        };
         let final_func_type = Type::function_with_properties(
             param_types.clone(),
-            final_return_type.clone(),
+            final_return_for_sig,
             inferred_properties,
         );
         // CRITICAL: Create TypeScheme explicitly with tracked type parameters (same as initial).
