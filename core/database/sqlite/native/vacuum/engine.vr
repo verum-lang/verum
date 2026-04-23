@@ -1,0 +1,193 @@
+// =============================================================================
+// vacuum/engine.vr — full-VACUUM state machine
+// =============================================================================
+// Spec: sqlite-native.md §10.5
+//
+// Full VACUUM walks every database page in its source order, copies
+// the live pages into a target file (densely-packed starting at page
+// 1), records the (src, dst) mapping in a `Relocator`, then walks
+// the target file and rewrites every internal pointer.
+//
+// State machine:
+//
+//   Init → CountSourcePages → CopyAlive → RewritePointers → Swap → Done
+//
+// `step()` advances by one page (Copy / Rewrite phases) or one
+// metadata pass (Init / Count / Swap). The L7 façade calls `step`
+// in a loop until `is_terminal()`.
+// =============================================================================
+
+module core.database.sqlite.native.vacuum.engine;
+
+mount core.*;
+mount base.{Text, Bool, Maybe};
+mount core.database.sqlite.native.vacuum.relocator.{
+    Relocator, MapEntry, relocator_new,
+};
+mount core.database.sqlite.native.vacuum.mode.{
+    AutoVacuumMode, AvNone, AvFull, AvIncremental,
+};
+
+// -----------------------------------------------------------------------------
+// Phase
+// -----------------------------------------------------------------------------
+
+public type EnginePhase is
+      EpInit
+    | EpCounting
+    | EpCopying(Int)              // current src page
+    | EpRewriting(Int)            // current target page
+    | EpSwapping
+    | EpDone
+    | EpFailed(Text);
+
+public fn phase_name(p: &EnginePhase) -> Text {
+    match p {
+        EpInit         => "init".clone(),
+        EpCounting     => "counting".clone(),
+        EpCopying(_)   => "copying".clone(),
+        EpRewriting(_) => "rewriting".clone(),
+        EpSwapping     => "swapping".clone(),
+        EpDone         => "done".clone(),
+        EpFailed(_)    => "failed".clone(),
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Engine
+// -----------------------------------------------------------------------------
+
+public type Engine is {
+    phase: EnginePhase,
+    src_page_count: Int,
+    src_alive_count: Int,
+    dst_next_page: Int,
+    relocator: Relocator,
+    /// Pre-computed list of source page IDs that are alive (skipping
+    /// freelist pages). Set during the Counting phase.
+    alive_pages: List<Int>,
+    /// Mode the engine was started under — affects post-VACUUM
+    /// freelist handling.
+    auto_mode: AutoVacuumMode,
+}
+
+public fn engine_new(auto_mode: AutoVacuumMode) -> Engine {
+    Engine {
+        phase: EpInit,
+        src_page_count: 0,
+        src_alive_count: 0,
+        dst_next_page: 1,
+        relocator: relocator_new(),
+        alive_pages: List.new(),
+        auto_mode: auto_mode,
+    }
+}
+
+implement Engine {
+    public fn current_phase(&self) -> EnginePhase {
+        clone_phase(&self.phase)
+    }
+
+    public fn is_terminal(&self) -> Bool {
+        match &self.phase {
+            EpDone | EpFailed(_) => true,
+            _ => false,
+        }
+    }
+
+    /// Tell the engine how many source pages exist and which are
+    /// alive. Called once during the Counting phase.
+    public fn supply_page_inventory(&mut self, total: Int, alive: List<Int>) {
+        self.src_page_count = total;
+        self.src_alive_count = alive.len();
+        self.alive_pages = alive;
+        self.phase = if self.src_alive_count == 0 {
+            EpSwapping
+        } else {
+            EpCopying(self.alive_pages[0])
+        };
+    }
+
+    /// Advance the engine by one operation. Returns the new phase.
+    public fn step(&mut self) -> EnginePhase {
+        match &self.phase {
+            EpInit       => { self.phase = EpCounting; }
+            EpCounting   => {
+                // Caller hasn't supplied inventory yet — stay put.
+            }
+            EpCopying(_) => self.advance_copy(),
+            EpRewriting(_) => self.advance_rewrite(),
+            EpSwapping   => { self.phase = EpDone; }
+            EpDone       => {}
+            EpFailed(_)  => {}
+        }
+        clone_phase(&self.phase)
+    }
+
+    fn advance_copy(&mut self) {
+        let mut copied_idx: Int = 0;
+        // Find the cursor in alive_pages from current phase.
+        let cur = match &self.phase {
+            EpCopying(p) => *p,
+            _ => 0,
+        };
+        let mut i: Int = 0;
+        while i < self.alive_pages.len() {
+            if self.alive_pages[i] == cur { copied_idx = i; break; }
+            i = i + 1;
+        }
+        // Record the relocation.
+        self.relocator.record(cur, self.dst_next_page);
+        self.dst_next_page = self.dst_next_page + 1;
+        // Advance to the next alive page, or transition to Rewriting.
+        if copied_idx + 1 < self.alive_pages.len() {
+            self.phase = EpCopying(self.alive_pages[copied_idx + 1]);
+        } else {
+            self.phase = EpRewriting(1);
+        }
+    }
+
+    fn advance_rewrite(&mut self) {
+        let cur = match &self.phase {
+            EpRewriting(p) => *p,
+            _              => 0,
+        };
+        if cur >= self.dst_next_page - 1 {
+            self.phase = EpSwapping;
+        } else {
+            self.phase = EpRewriting(cur + 1);
+        }
+    }
+
+    public fn fail(&mut self, msg: Text) {
+        self.phase = EpFailed(msg);
+    }
+
+    /// Number of pages the rebuilt file will contain (excluding header).
+    public fn rebuilt_page_count(&self) -> Int {
+        if self.dst_next_page == 0 { 0 } else { self.dst_next_page - 1 }
+    }
+
+    /// Pages reclaimed by the vacuum (= total - alive).
+    public fn reclaimed_pages(&self) -> Int {
+        if self.src_page_count <= self.src_alive_count { return 0; }
+        self.src_page_count - self.src_alive_count
+    }
+
+    /// Apply the relocation map to a parent pointer.
+    public fn rewrite_pointer(&self, p: Int) -> Int {
+        self.relocator.apply_to_pointer(p)
+    }
+}
+
+fn clone_phase(p: &EnginePhase) -> EnginePhase {
+    match p {
+        EpInit         => EpInit,
+        EpCounting     => EpCounting,
+        EpCopying(p)   => EpCopying(*p),
+        EpRewriting(p) => EpRewriting(*p),
+        EpSwapping     => EpSwapping,
+        EpDone         => EpDone,
+        EpFailed(t)    => EpFailed(t.clone()),
+    }
+}

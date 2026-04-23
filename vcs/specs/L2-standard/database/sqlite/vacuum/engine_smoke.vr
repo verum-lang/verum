@@ -1,0 +1,216 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, vacuum, auto_vacuum
+// @timeout: 5000
+// @expected-exit: 0
+//
+// VACUUM machinery:
+//   * AutoVacuumMode encoding ↔ wire codes
+//   * mode_permits combinations
+//   * Relocator: record / drop / lookup / apply_to_pointer
+//   * Engine state machine: Init → Counting → Copying → Rewriting → Done
+//   * Incremental session: drain + freelist exhaustion
+
+mount core.database.sqlite.native.vacuum.mode.{
+    AutoVacuumMode, AvNone, AvFull, AvIncremental,
+    auto_vacuum_code, auto_vacuum_from_code, auto_vacuum_name,
+    VacuumOp, VoFull, VoIncremental, VoAutoCommitTrim,
+    vacuum_op_name, mode_permits,
+};
+mount core.database.sqlite.native.vacuum.relocator.{
+    MapEntry, Relocator, relocator_new,
+};
+mount core.database.sqlite.native.vacuum.engine.{
+    EnginePhase, EpInit, EpCounting, EpCopying, EpRewriting,
+    EpSwapping, EpDone, EpFailed,
+    Engine, engine_new,
+    phase_name as engine_phase_name,
+};
+mount core.database.sqlite.native.vacuum.incremental.{
+    IncrementalSession, session_new,
+};
+mount base.{Some, None, Maybe, Bool};
+
+// -----------------------------------------------------------------------------
+// mode
+// -----------------------------------------------------------------------------
+
+fn test_auto_vacuum_codes() {
+    assert_eq(auto_vacuum_code(&AvNone), 0);
+    assert_eq(auto_vacuum_code(&AvFull), 1);
+    assert_eq(auto_vacuum_code(&AvIncremental), 2);
+}
+
+fn test_auto_vacuum_round_trip() {
+    match auto_vacuum_from_code(0) { Some(_) => {}, None => panic("0 → mode") };
+    match auto_vacuum_from_code(2) { Some(_) => {}, None => panic("2 → mode") };
+    match auto_vacuum_from_code(99) { None => {}, _ => panic("99 → None") };
+}
+
+fn test_mode_permits_full_always() {
+    assert(mode_permits(&AvNone, &VoFull));
+    assert(mode_permits(&AvFull, &VoFull));
+    assert(mode_permits(&AvIncremental, &VoFull));
+}
+
+fn test_mode_permits_incremental_only_in_incremental_mode() {
+    assert(mode_permits(&AvIncremental, &VoIncremental(10)));
+    assert(!mode_permits(&AvFull, &VoIncremental(10)));
+    assert(!mode_permits(&AvNone, &VoIncremental(10)));
+}
+
+fn test_mode_permits_auto_trim_in_full_mode() {
+    assert(mode_permits(&AvFull, &VoAutoCommitTrim));
+    assert(!mode_permits(&AvNone, &VoAutoCommitTrim));
+}
+
+// -----------------------------------------------------------------------------
+// relocator
+// -----------------------------------------------------------------------------
+
+fn test_relocator_record_and_lookup() {
+    let mut r = relocator_new();
+    r.record(7, 1);
+    r.record(13, 2);
+    match r.lookup(7) { Some(d) => assert_eq(d, 1), None => panic("7→?") };
+    match r.lookup(13) { Some(d) => assert_eq(d, 2), None => panic("13→?") };
+    match r.lookup(99) { None => {}, _ => panic("missing") };
+}
+
+fn test_relocator_overwrite() {
+    let mut r = relocator_new();
+    r.record(5, 1);
+    r.record(5, 9);
+    match r.lookup(5) { Some(d) => assert_eq(d, 9), None => panic("overwritten") };
+    assert_eq(r.entry_count(), 1);
+}
+
+fn test_relocator_drop_idempotent() {
+    let mut r = relocator_new();
+    r.drop_page(42);
+    r.drop_page(42);
+    assert_eq(r.dropped_count(), 1);
+    assert(r.is_dropped(42));
+    assert(!r.is_dropped(99));
+}
+
+fn test_relocator_apply_to_pointer() {
+    let mut r = relocator_new();
+    r.record(5, 1);
+    r.drop_page(7);
+    assert_eq(r.apply_to_pointer(5), 1);    // relocated
+    assert_eq(r.apply_to_pointer(7), 0);    // dropped → null
+    assert_eq(r.apply_to_pointer(8), 8);    // unchanged
+    assert_eq(r.apply_to_pointer(0), 0);    // null pointer stays null
+}
+
+// -----------------------------------------------------------------------------
+// engine
+// -----------------------------------------------------------------------------
+
+fn test_engine_initial() {
+    let e = engine_new(AvNone);
+    match e.current_phase() { EpInit => {}, _ => panic("Init") };
+    assert(!e.is_terminal());
+}
+
+fn test_engine_walk_to_done() {
+    let mut e = engine_new(AvNone);
+    let _ = e.step();   // Init → Counting
+    match e.current_phase() { EpCounting => {}, _ => panic("Counting") };
+    // Supply inventory: 5 total, 3 alive (pages 1, 3, 5)
+    let mut alive: List<Int> = List.new();
+    alive.push(1); alive.push(3); alive.push(5);
+    e.supply_page_inventory(5, alive);
+    match e.current_phase() {
+        EpCopying(p) => assert_eq(p, 1),
+        _ => panic("Copying after inventory"),
+    }
+    // Step through copy of all 3 alive pages.
+    let _ = e.step();   // copy 1, advance to 3
+    let _ = e.step();   // copy 3, advance to 5
+    let _ = e.step();   // copy 5, transition to Rewriting(1)
+    match e.current_phase() { EpRewriting(_) => {}, _ => panic("Rewriting") };
+    // Step through rewriting (3 dst pages)
+    let _ = e.step();
+    let _ = e.step();
+    let _ = e.step();
+    match e.current_phase() { EpDone | EpSwapping => {}, _ => panic("near terminal") };
+    // Final swap
+    let _ = e.step();
+    let _ = e.step();
+    assert(e.is_terminal());
+}
+
+fn test_engine_reclaimed_pages() {
+    let mut e = engine_new(AvNone);
+    let _ = e.step();
+    let mut alive: List<Int> = List.new();
+    alive.push(1); alive.push(2);
+    e.supply_page_inventory(10, alive);
+    assert_eq(e.reclaimed_pages(), 8);
+}
+
+fn test_engine_fail_is_terminal() {
+    let mut e = engine_new(AvNone);
+    e.fail("disk full".clone());
+    assert(e.is_terminal());
+    match e.current_phase() {
+        EpFailed(_) => {},
+        _ => panic("Failed"),
+    }
+}
+
+// -----------------------------------------------------------------------------
+// incremental
+// -----------------------------------------------------------------------------
+
+fn test_incremental_session_drain_to_quota() {
+    let mut s = session_new(3);
+    let mut freelist: List<Int> = List.new();
+    freelist.push(7); freelist.push(13); freelist.push(20); freelist.push(31); freelist.push(42);
+    s.seed_freelist(freelist);
+    let drained = s.drain();
+    assert_eq(drained.len(), 3);
+    // LIFO order
+    assert_eq(drained[0], 42);
+    assert_eq(drained[1], 31);
+    assert_eq(drained[2], 20);
+    assert_eq(s.freelist_remaining(), 2);
+}
+
+fn test_incremental_exhausts_short_freelist() {
+    let mut s = session_new(10);
+    let mut freelist: List<Int> = List.new();
+    freelist.push(1); freelist.push(2);
+    s.seed_freelist(freelist);
+    let drained = s.drain();
+    assert_eq(drained.len(), 2);
+    assert(s.is_done());
+}
+
+fn test_incremental_zero_quota_immediate_done() {
+    let mut s = session_new(0);
+    assert(s.is_done());
+    match s.release_next() { None => {}, _ => panic("zero quota → None") };
+}
+
+fn main() {
+    test_auto_vacuum_codes();
+    test_auto_vacuum_round_trip();
+    test_mode_permits_full_always();
+    test_mode_permits_incremental_only_in_incremental_mode();
+    test_mode_permits_auto_trim_in_full_mode();
+    test_relocator_record_and_lookup();
+    test_relocator_overwrite();
+    test_relocator_drop_idempotent();
+    test_relocator_apply_to_pointer();
+    test_engine_initial();
+    test_engine_walk_to_done();
+    test_engine_reclaimed_pages();
+    test_engine_fail_is_terminal();
+    test_incremental_session_drain_to_quota();
+    test_incremental_exhausts_short_freelist();
+    test_incremental_zero_quota_immediate_done();
+}

@@ -1,0 +1,73 @@
+// =============================================================================
+// vacuum/mode.vr — VACUUM mode taxonomy
+// =============================================================================
+// Spec: sqlite-native.md PRAGMA auto_vacuum
+//
+// Three flavours, encoded as a sum type so per-mode dispatch is
+// exhaustive at compile time.
+// =============================================================================
+
+module core.database.sqlite.native.vacuum.mode;
+
+mount core.*;
+mount base.{Text, Bool, Maybe};
+
+public type AutoVacuumMode is
+      AvNone
+    | AvFull
+    | AvIncremental;
+
+public fn auto_vacuum_code(m: &AutoVacuumMode) -> Int {
+    match m {
+        AvNone        => 0,
+        AvFull        => 1,
+        AvIncremental => 2,
+    }
+}
+
+public fn auto_vacuum_from_code(c: Int) -> Maybe<AutoVacuumMode> {
+    if c == 0 { return Some(AvNone); }
+    if c == 1 { return Some(AvFull); }
+    if c == 2 { return Some(AvIncremental); }
+    None
+}
+
+public fn auto_vacuum_name(m: &AutoVacuumMode) -> Text {
+    match m {
+        AvNone        => "NONE".clone(),
+        AvFull        => "FULL".clone(),
+        AvIncremental => "INCREMENTAL".clone(),
+    }
+}
+
+// -----------------------------------------------------------------------------
+// VacuumOp — the operation being requested
+// -----------------------------------------------------------------------------
+
+public type VacuumOp is
+      VoFull
+    | VoIncremental(Int)        // N pages
+    | VoAutoCommitTrim;         // post-COMMIT trim when auto_vacuum=FULL
+
+public fn vacuum_op_name(o: &VacuumOp) -> Text {
+    match o {
+        VoFull            => "VACUUM".clone(),
+        VoIncremental(_)  => "INCREMENTAL VACUUM".clone(),
+        VoAutoCommitTrim  => "AUTO-VACUUM TRIM".clone(),
+    }
+}
+
+/// Decide whether a given mode permits the requested operation.
+public fn mode_permits(mode: &AutoVacuumMode, op: &VacuumOp) -> Bool {
+    match op {
+        VoFull => true,    // always available
+        VoIncremental(_) => match mode {
+            AvIncremental => true,
+            _             => false,
+        },
+        VoAutoCommitTrim => match mode {
+            AvFull => true,
+            _      => false,
+        },
+    }
+}

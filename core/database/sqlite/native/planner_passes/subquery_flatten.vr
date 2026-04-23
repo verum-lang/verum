@@ -1,0 +1,157 @@
+// =============================================================================
+// planner_passes/subquery_flatten.vr — flatten trivial subqueries
+// =============================================================================
+// Spec: sqlite-native.md §13.5
+//
+// Pattern:
+//
+//   SELECT … FROM (SELECT col1, col2 FROM t WHERE p1) AS sub
+//    WHERE p2(sub.col1, sub.col2);
+//
+// becomes
+//
+//   SELECT … FROM t WHERE p1 AND p2(col1, col2);
+//
+// Conditions for safe flattening (per SQLite docs §6 and Verum
+// extension):
+//   1. The inner SELECT has a single FROM source (no JOIN).
+//   2. The inner SELECT has no GROUP BY, no aggregates, no LIMIT,
+//      no DISTINCT.
+//   3. The outer query is not a UNION ALL branch with a recursive CTE.
+//
+// We model this transform as: when the outer is `Project(Filter(
+// Project(Filter(Scan))))` we collapse the redundant inner Project
+// + Filter into the outer ones.
+// =============================================================================
+
+module core.database.sqlite.native.planner_passes.subquery_flatten;
+
+mount core.*;
+mount base.{Text, Bool};
+mount core.database.sqlite.native.planner_passes.plan_view.{
+    PvNode, PvScan, PvFilter, PvProject, PvJoin, PvAggregate,
+    PvUnionAll, PvSubquery, PvRecursive, PvWindow,
+    PvFilterInfo, PvProjectInfo,
+    node_id, node_kind_name,
+};
+mount core.database.sqlite.native.planner_passes.pass.{
+    PlannerPass, PassResult, pass_result,
+};
+
+public type SubqueryFlatten is { unit: Bool };
+public fn subquery_flatten() -> SubqueryFlatten { SubqueryFlatten { unit: true } }
+
+implement PlannerPass for SubqueryFlatten {
+    fn name(&self) -> Text { "subquery_flatten".clone() }
+
+    fn apply(&self, plan: PvNode) -> PassResult {
+        let mut edits: Int = 0;
+        let new_plan = walk(plan, &mut edits);
+        pass_result(new_plan, edits)
+    }
+}
+
+fn walk(node: PvNode, edits: &mut Int) -> PvNode {
+    match node {
+        PvProject(outer) => {
+            let new_child = walk(unwrap_heap(outer.child), edits);
+            // Pattern: Project(Project(child)) → Project(child) with merged columns
+            match new_child {
+                PvProject(inner) => {
+                    *edits = *edits + 1;
+                    let merged_cols = if outer.columns_sql.len() > 0 {
+                        clone_text_list(&outer.columns_sql)
+                    } else {
+                        clone_text_list(&inner.columns_sql)
+                    };
+                    PvProject(PvProjectInfo {
+                        id: outer.id,
+                        columns_sql: merged_cols,
+                        child: inner.child,
+                    })
+                }
+                other => PvProject(PvProjectInfo {
+                    id: outer.id,
+                    columns_sql: outer.columns_sql,
+                    child: Heap.new(other),
+                }),
+            }
+        }
+        PvFilter(outer) => {
+            let new_child = walk(unwrap_heap(outer.child), edits);
+            // Pattern: Filter(p1, Filter(p2, child)) → Filter(p1 AND p2, child)
+            match new_child {
+                PvFilter(inner) => {
+                    *edits = *edits + 1;
+                    PvFilter(PvFilterInfo {
+                        id: outer.id,
+                        predicate_sql: combine_and(&outer.predicate_sql, &inner.predicate_sql),
+                        is_correlated: outer.is_correlated || inner.is_correlated,
+                        child: inner.child,
+                    })
+                }
+                other => PvFilter(PvFilterInfo {
+                    id: outer.id,
+                    predicate_sql: outer.predicate_sql,
+                    is_correlated: outer.is_correlated,
+                    child: Heap.new(other),
+                }),
+            }
+        }
+        PvJoin(j) => {
+            let new_left = walk(unwrap_heap(j.left), edits);
+            let new_right = walk(unwrap_heap(j.right), edits);
+            PvJoin(core.database.sqlite.native.planner_passes.plan_view.PvJoinInfo {
+                id: j.id,
+                kind: j.kind,
+                on_predicate_sql: j.on_predicate_sql,
+                left: Heap.new(new_left),
+                right: Heap.new(new_right),
+            })
+        }
+        PvAggregate(a) => {
+            let new_child = walk(unwrap_heap(a.child), edits);
+            PvAggregate(core.database.sqlite.native.planner_passes.plan_view.PvAggregateInfo {
+                id: a.id,
+                group_by_sql: a.group_by_sql,
+                aggregates_sql: a.aggregates_sql,
+                child: Heap.new(new_child),
+            })
+        }
+        PvWindow(w) => {
+            let new_child = walk(unwrap_heap(w.child), edits);
+            PvWindow(core.database.sqlite.native.planner_passes.plan_view.PvWindowInfo {
+                id: w.id,
+                partition_by_sql: w.partition_by_sql,
+                order_by_sql: w.order_by_sql,
+                frame_spec_sql: w.frame_spec_sql,
+                fns_sql: w.fns_sql,
+                child: Heap.new(new_child),
+            })
+        }
+        other => other,
+    }
+}
+
+fn unwrap_heap(h: Heap<PvNode>) -> PvNode {
+    *h
+}
+
+fn clone_text_list(l: &List<Text>) -> List<Text> {
+    let mut out: List<Text> = List.new();
+    let mut i: Int = 0;
+    while i < l.len() { out.push(l[i].clone()); i = i + 1; }
+    out
+}
+
+fn combine_and(a: &Text, b: &Text) -> Text {
+    let mut out = a.clone();
+    let glue = " AND ".clone();
+    let bs = glue.as_bytes();
+    let mut i: Int = 0;
+    while i < bs.len() { out.push_byte(bs[i]); i = i + 1; }
+    let bb = b.as_bytes();
+    i = 0;
+    while i < bb.len() { out.push_byte(bb[i]); i = i + 1; }
+    out
+}

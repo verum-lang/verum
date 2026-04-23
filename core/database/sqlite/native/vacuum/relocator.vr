@@ -1,0 +1,110 @@
+// =============================================================================
+// vacuum/relocator.vr — page-relocation map for VACUUM
+// =============================================================================
+// Spec: sqlite-native.md §10.5
+//
+// VACUUM rewrites every parent-pointer in the database file when it
+// moves a page from `src_pgno` to `dst_pgno`. The relocation map is
+// the source of truth for that rewrite step:
+//
+//   * `Relocator` accumulates `(src, dst)` pairs as the engine
+//     decides where each surviving page lands.
+//   * `lookup(src) -> Maybe<dst>` answers "does this page live in
+//     the new file, and where?".
+//   * `apply_to_pointer(p)` rewrites a parent-pointer slot — used
+//     by the engine when re-walking the source tree.
+// =============================================================================
+
+module core.database.sqlite.native.vacuum.relocator;
+
+mount core.*;
+mount base.{Bool, Maybe};
+mount collections.List;
+
+// -----------------------------------------------------------------------------
+// MapEntry
+// -----------------------------------------------------------------------------
+
+public type MapEntry is { src: Int, dst: Int };
+
+// -----------------------------------------------------------------------------
+// Relocator
+// -----------------------------------------------------------------------------
+
+public type Relocator is {
+    /// Sorted by `src` for binary lookup; insertion-sorted append
+    /// keeps it cheap when relocations come in dense order.
+    entries: List<MapEntry>,
+    /// Pages explicitly dropped (released to OS).
+    dropped: List<Int>,
+}
+
+public fn relocator_new() -> Relocator {
+    Relocator { entries: List.new(), dropped: List.new() }
+}
+
+implement Relocator {
+    public fn entry_count(&self) -> Int { self.entries.len() }
+    public fn dropped_count(&self) -> Int { self.dropped.len() }
+
+    /// Record a (src → dst) relocation. Idempotent — re-recording
+    /// the same src silently overwrites.
+    public fn record(&mut self, src: Int, dst: Int) {
+        let mut found = false;
+        let mut i: Int = 0;
+        while i < self.entries.len() {
+            if self.entries[i].src == src {
+                self.entries[i] = MapEntry { src: src, dst: dst };
+                found = true;
+                break;
+            }
+            i = i + 1;
+        }
+        if !found { self.entries.push(MapEntry { src: src, dst: dst }); }
+    }
+
+    /// Mark a page as dropped (no destination — the page is freed).
+    public fn drop_page(&mut self, src: Int) {
+        let mut already = false;
+        let mut i: Int = 0;
+        while i < self.dropped.len() {
+            if self.dropped[i] == src { already = true; break; }
+            i = i + 1;
+        }
+        if !already { self.dropped.push(src); }
+    }
+
+    /// Where did `src` go? `None` means "not relocated yet" or "dropped".
+    public fn lookup(&self, src: Int) -> Maybe<Int> {
+        let mut i: Int = 0;
+        while i < self.entries.len() {
+            if self.entries[i].src == src { return Some(self.entries[i].dst); }
+            i = i + 1;
+        }
+        None
+    }
+
+    /// True if the page was explicitly dropped.
+    public fn is_dropped(&self, src: Int) -> Bool {
+        let mut i: Int = 0;
+        while i < self.dropped.len() {
+            if self.dropped[i] == src { return true; }
+            i = i + 1;
+        }
+        false
+    }
+
+    /// Apply the relocation to a parent-pointer slot.
+    /// Returns the new pointer (or 0 if the target was dropped).
+    public fn apply_to_pointer(&self, p: Int) -> Int {
+        if p == 0 { return 0; }
+        if self.is_dropped(p) { return 0; }
+        match self.lookup(p) {
+            Some(dst) => dst,
+            None      => p,            // unchanged
+        }
+    }
+
+    /// Total number of pages that survive into the rebuilt file.
+    public fn survivor_count(&self) -> Int { self.entries.len() }
+}

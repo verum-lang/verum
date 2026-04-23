@@ -1,0 +1,313 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, planner, subquery, decorrelate, magic_sets, window
+// @timeout: 5000
+// @expected-exit: 0
+//
+// Planner-pass surface smoke test:
+//   * PvNode construction + node_id / kind names
+//   * SubqueryFlatten merges Project(Project) and Filter(Filter)
+//   * Decorrelate transforms uncorrelated EXISTS into SEMI join
+//   * MagicSets wraps recursive CTEs with frontier filter
+//   * WindowPlan collects sort spec + frame budget
+//   * Pipeline runs to fixpoint
+
+mount core.database.sqlite.native.planner_passes.plan_view.{
+    PvNode, PvScan, PvFilter, PvProject, PvJoin,
+    PvAggregate, PvUnionAll, PvSubquery, PvRecursive, PvWindow,
+    PvScanInfo, PvFilterInfo, PvProjectInfo, PvJoinInfo,
+    PvSubqueryInfo, PvRecursiveInfo, PvWindowInfo,
+    PvJoinKind, PvjkInner, PvjkSemi, PvjkAnti,
+    PvSubqueryShape, PvssIn, PvssExists, PvssNotExists, PvssScalar,
+    node_id, node_kind_name, join_kind_name, subquery_shape_name,
+    count_kind,
+};
+mount core.database.sqlite.native.planner_passes.pass.{
+    PlannerPass, PassResult, run_pipeline, DEFAULT_MAX_ITERATIONS,
+};
+mount core.database.sqlite.native.planner_passes.subquery_flatten.{
+    SubqueryFlatten, subquery_flatten,
+};
+mount core.database.sqlite.native.planner_passes.decorrelate.{
+    Decorrelate, decorrelate,
+};
+mount core.database.sqlite.native.planner_passes.magic_sets.{
+    MagicSets, magic_sets, magic_sets_with_hint,
+};
+mount core.database.sqlite.native.planner_passes.window_plan.{
+    SortSpec, FrameBudget, FbUnbounded, FbBounded,
+    WindowDecoration, WindowPlanResult,
+    sort_spec_from_window, sort_specs_equal,
+    frame_budget_from_text, plan_windows,
+    WindowPlanPass, window_plan_pass,
+};
+
+// -----------------------------------------------------------------------------
+// PvNode construction + meta
+// -----------------------------------------------------------------------------
+
+fn make_scan(id: Int, table: Text) -> PvNode {
+    PvScan(PvScanInfo { id: id, table: table, alias: None })
+}
+
+fn test_node_kind_names() {
+    assert(node_kind_name(&make_scan(1, "users".clone())) == "Scan".clone());
+    assert(join_kind_name(&PvjkInner) == "INNER".clone());
+    assert(join_kind_name(&PvjkSemi) == "SEMI".clone());
+    assert(subquery_shape_name(&PvssIn) == "IN".clone());
+}
+
+fn test_count_kind_walks_tree() {
+    let scan = make_scan(1, "t".clone());
+    let f = PvFilter(PvFilterInfo {
+        id: 2,
+        predicate_sql: "x>0".clone(),
+        is_correlated: false,
+        child: Heap.new(scan),
+    });
+    let p = PvProject(PvProjectInfo {
+        id: 3,
+        columns_sql: List.new(),
+        child: Heap.new(f),
+    });
+    assert_eq(count_kind(&p, "Scan".clone()), 1);
+    assert_eq(count_kind(&p, "Filter".clone()), 1);
+    assert_eq(count_kind(&p, "Project".clone()), 1);
+}
+
+// -----------------------------------------------------------------------------
+// SubqueryFlatten
+// -----------------------------------------------------------------------------
+
+fn test_flatten_merges_nested_projects() {
+    let mut inner_cols: List<Text> = List.new();
+    inner_cols.push("a".clone());
+    let inner_scan = make_scan(1, "t".clone());
+    let inner_proj = PvProject(PvProjectInfo {
+        id: 2,
+        columns_sql: inner_cols,
+        child: Heap.new(inner_scan),
+    });
+    let mut outer_cols: List<Text> = List.new();
+    outer_cols.push("a".clone());
+    let outer_proj = PvProject(PvProjectInfo {
+        id: 3,
+        columns_sql: outer_cols,
+        child: Heap.new(inner_proj),
+    });
+    let pass = subquery_flatten();
+    let r = pass.apply(outer_proj);
+    assert(r.n_edits >= 1);
+    assert_eq(count_kind(&r.plan, "Project".clone()), 1);
+}
+
+fn test_flatten_merges_nested_filters() {
+    let scan = make_scan(1, "t".clone());
+    let inner_f = PvFilter(PvFilterInfo {
+        id: 2,
+        predicate_sql: "x>0".clone(),
+        is_correlated: false,
+        child: Heap.new(scan),
+    });
+    let outer_f = PvFilter(PvFilterInfo {
+        id: 3,
+        predicate_sql: "y<10".clone(),
+        is_correlated: false,
+        child: Heap.new(inner_f),
+    });
+    let pass = subquery_flatten();
+    let r = pass.apply(outer_f);
+    assert(r.n_edits >= 1);
+    assert_eq(count_kind(&r.plan, "Filter".clone()), 1);
+}
+
+// -----------------------------------------------------------------------------
+// Decorrelate
+// -----------------------------------------------------------------------------
+
+fn test_decorrelate_uncorrelated_exists_to_semi() {
+    let inner_scan = make_scan(1, "audit".clone());
+    let sub = PvSubquery(PvSubqueryInfo {
+        id: 2,
+        shape: PvssExists,
+        outer_predicate_sql: "EXISTS(...)".clone(),
+        body: Heap.new(inner_scan),
+        correlations: List.new(),
+    });
+    let pass = decorrelate();
+    let r = pass.apply(sub);
+    assert(r.n_edits >= 1);
+    // After decorrelate the top should be a Join (SEMI).
+    match &r.plan {
+        PvJoin(j) => match j.kind { PvjkSemi => {}, _ => panic("EXISTS → SEMI") },
+        _ => panic("expected Join after decorrelate"),
+    }
+}
+
+fn test_decorrelate_correlated_subquery_left_alone() {
+    let inner_scan = make_scan(1, "child".clone());
+    let mut corr: List<Text> = List.new();
+    corr.push("outer.id".clone());
+    let sub = PvSubquery(PvSubqueryInfo {
+        id: 2,
+        shape: PvssIn,
+        outer_predicate_sql: "x IN (...)".clone(),
+        body: Heap.new(inner_scan),
+        correlations: corr,
+    });
+    let pass = decorrelate();
+    let r = pass.apply(sub);
+    // Correlated subqueries must NOT be decorrelated by this pass.
+    match &r.plan { PvSubquery(_) => {}, _ => panic("correlated stays") };
+}
+
+fn test_decorrelate_not_exists_to_anti() {
+    let inner = make_scan(1, "t".clone());
+    let sub = PvSubquery(PvSubqueryInfo {
+        id: 2,
+        shape: PvssNotExists,
+        outer_predicate_sql: "NOT EXISTS(...)".clone(),
+        body: Heap.new(inner),
+        correlations: List.new(),
+    });
+    let r = decorrelate().apply(sub);
+    match &r.plan {
+        PvJoin(j) => match j.kind { PvjkAnti => {}, _ => panic("NOT EXISTS → ANTI") },
+        _ => panic("expected Join"),
+    }
+}
+
+// -----------------------------------------------------------------------------
+// MagicSets
+// -----------------------------------------------------------------------------
+
+fn test_magic_sets_wraps_recursive_branch() {
+    let anchor = make_scan(1, "employees".clone());
+    let recursive = make_scan(2, "employees".clone());
+    let rec = PvRecursive(PvRecursiveInfo {
+        id: 3,
+        cte_name: "descendants".clone(),
+        anchor: Heap.new(anchor),
+        recursive: Heap.new(recursive),
+    });
+    let pass = magic_sets();
+    let r = pass.apply(rec);
+    assert_eq(r.n_edits, 1);
+    // Recursive branch is now wrapped in a Filter.
+    match &r.plan {
+        PvRecursive(rr) => match &*rr.recursive {
+            PvFilter(_) => {},
+            _ => panic("recursive branch wrapped in Filter"),
+        },
+        _ => panic("still Recursive at root"),
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Window planning
+// -----------------------------------------------------------------------------
+
+fn make_window(part: List<Text>, order: List<Text>, frame: Text, fns: List<Text>) -> PvNode {
+    PvWindow(PvWindowInfo {
+        id: 1,
+        partition_by_sql: part,
+        order_by_sql: order,
+        frame_spec_sql: frame,
+        fns_sql: fns,
+        child: Heap.new(make_scan(2, "events".clone())),
+    })
+}
+
+fn test_window_sort_spec_extraction() {
+    let mut p: List<Text> = List.new();
+    p.push("user_id".clone());
+    let mut o: List<Text> = List.new();
+    o.push("ts".clone());
+    let mut fns: List<Text> = List.new();
+    fns.push("ROW_NUMBER()".clone());
+    let n = make_window(p.clone(), o.clone(), "ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW".clone(), fns);
+    match &n {
+        PvWindow(w) => {
+            let s = sort_spec_from_window(w);
+            assert_eq(s.partition_keys.len(), 1);
+            assert_eq(s.order_keys.len(), 1);
+        }
+        _ => panic("window node"),
+    }
+}
+
+fn test_frame_budget_unbounded() {
+    let s = "ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW".clone();
+    match frame_budget_from_text(&s) {
+        FbUnbounded => {},
+        _ => panic("UNBOUNDED → FbUnbounded"),
+    }
+}
+
+fn test_frame_budget_current_row_only() {
+    let s = "ROWS CURRENT ROW".clone();
+    match frame_budget_from_text(&s) {
+        FbBounded(n) => assert_eq(n, 1),
+        _ => panic("CURRENT ROW only → FbBounded(1)"),
+    }
+}
+
+fn test_plan_windows_collects() {
+    let mut p: List<Text> = List.new(); p.push("x".clone());
+    let mut o: List<Text> = List.new(); o.push("ts".clone());
+    let mut fns: List<Text> = List.new(); fns.push("RANK()".clone()); fns.push("LEAD(y)".clone());
+    let n = make_window(p, o, "ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING".clone(), fns);
+    let res = plan_windows(&n);
+    assert_eq(res.decorations.len(), 1);
+    assert_eq(res.decorations[0].fn_count, 2);
+    match res.decorations[0].frame_budget {
+        FbUnbounded => {},
+        _ => panic("UNBOUNDED budget"),
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Pipeline
+// -----------------------------------------------------------------------------
+
+fn test_pipeline_runs_passes() {
+    // Stack a flatten-able tree.
+    let mut inner_cols: List<Text> = List.new();
+    inner_cols.push("a".clone());
+    let scan = make_scan(1, "t".clone());
+    let inner_proj = PvProject(PvProjectInfo {
+        id: 2,
+        columns_sql: inner_cols,
+        child: Heap.new(scan),
+    });
+    let mut outer_cols: List<Text> = List.new();
+    outer_cols.push("a".clone());
+    let outer_proj = PvProject(PvProjectInfo {
+        id: 3,
+        columns_sql: outer_cols,
+        child: Heap.new(inner_proj),
+    });
+    let mut passes: List<Heap<dyn PlannerPass>> = List.new();
+    passes.push(Heap.new(subquery_flatten()));
+    let (out, report) = run_pipeline(passes, outer_proj, DEFAULT_MAX_ITERATIONS);
+    assert(report.iterations >= 1);
+    assert(report.total_edits >= 1);
+    assert_eq(count_kind(&out, "Project".clone()), 1);
+}
+
+fn main() {
+    test_node_kind_names();
+    test_count_kind_walks_tree();
+    test_flatten_merges_nested_projects();
+    test_flatten_merges_nested_filters();
+    test_decorrelate_uncorrelated_exists_to_semi();
+    test_decorrelate_correlated_subquery_left_alone();
+    test_decorrelate_not_exists_to_anti();
+    test_magic_sets_wraps_recursive_branch();
+    test_window_sort_spec_extraction();
+    test_frame_budget_unbounded();
+    test_frame_budget_current_row_only();
+    test_plan_windows_collects();
+    test_pipeline_runs_passes();
+}

@@ -1,0 +1,182 @@
+// =============================================================================
+// planner_passes/window_plan.vr — window-function planning
+// =============================================================================
+// Spec: sqlite-native.md §13.6
+//
+// Window functions execute in a dedicated stage between the main
+// query and the final projection:
+//
+//   Main query → Sort by PARTITION/ORDER → Window evaluator → Projection
+//
+// `WindowPlan` decorates a `PvWindow` node with:
+//
+//   * sort spec  — the (PARTITION cols, ORDER cols) tuple the
+//                   sort stage must produce
+//   * frame-buffer size — # rows the evaluator needs to keep live
+//                          for the chosen frame
+//   * ordering of fns — when multiple window fns share a partition,
+//                          they're evaluated together; otherwise
+//                          a separate Window node is needed
+// =============================================================================
+
+module core.database.sqlite.native.planner_passes.window_plan;
+
+mount core.*;
+mount base.{Text, Bool};
+mount collections.List;
+mount core.database.sqlite.native.planner_passes.plan_view.{
+    PvNode, PvWindow, PvProject,
+    PvWindowInfo,
+    node_id,
+};
+mount core.database.sqlite.native.planner_passes.pass.{
+    PlannerPass, PassResult, pass_result,
+};
+
+// -----------------------------------------------------------------------------
+// SortSpec — what the sort stage must produce
+// -----------------------------------------------------------------------------
+
+public type SortSpec is {
+    /// PARTITION BY columns (sorted first, ASC).
+    partition_keys: List<Text>,
+    /// ORDER BY columns (sorted second; direction encoded in the
+    /// caller's parsed AST, omitted from this view).
+    order_keys: List<Text>,
+}
+
+public fn sort_spec_from_window(w: &PvWindowInfo) -> SortSpec {
+    SortSpec {
+        partition_keys: clone_text_list(&w.partition_by_sql),
+        order_keys: clone_text_list(&w.order_by_sql),
+    }
+}
+
+public fn sort_specs_equal(a: &SortSpec, b: &SortSpec) -> Bool {
+    if a.partition_keys.len() != b.partition_keys.len() { return false; }
+    if a.order_keys.len() != b.order_keys.len() { return false; }
+    let mut i: Int = 0;
+    while i < a.partition_keys.len() {
+        if a.partition_keys[i] != b.partition_keys[i] { return false; }
+        i = i + 1;
+    }
+    i = 0;
+    while i < a.order_keys.len() {
+        if a.order_keys[i] != b.order_keys[i] { return false; }
+        i = i + 1;
+    }
+    true
+}
+
+// -----------------------------------------------------------------------------
+// FrameBufferSize — how many rows the evaluator must keep live
+// -----------------------------------------------------------------------------
+//
+// We approximate from the frame_spec_sql text. Real planning needs
+// a frame parser; the L5 codegen extends this when frame parsing
+// lands.
+//
+// Heuristic: ROWS BETWEEN UNBOUNDED PRECEDING / UNBOUNDED FOLLOWING
+// → unbounded buffer; ROWS BETWEEN N PRECEDING AND M FOLLOWING →
+// N+M+1 buffer; CURRENT ROW only → 1.
+// =============================================================================
+
+public type FrameBudget is FbUnbounded | FbBounded(Int);
+
+public fn frame_budget_from_text(spec: &Text) -> FrameBudget {
+    let bs = spec.as_bytes();
+    if contains(&bs, &"UNBOUNDED".clone()) { return FbUnbounded; }
+    if contains(&bs, &"CURRENT ROW".clone()) && !contains(&bs, &"PRECEDING".clone())
+        && !contains(&bs, &"FOLLOWING".clone()) {
+        return FbBounded(1);
+    }
+    // Default conservative — single-row buffer for unknown shapes.
+    FbBounded(2)
+}
+
+fn contains(haystack: &List<Byte>, needle: &Text) -> Bool {
+    let nb = needle.as_bytes();
+    if nb.len() == 0 { return true; }
+    if nb.len() > haystack.len() { return false; }
+    let mut i: Int = 0;
+    while i + nb.len() <= haystack.len() {
+        let mut k: Int = 0;
+        let mut hit: Bool = true;
+        while k < nb.len() {
+            if haystack[i + k] != nb[k] { hit = false; break; }
+            k = k + 1;
+        }
+        if hit { return true; }
+        i = i + 1;
+    }
+    false
+}
+
+fn clone_text_list(l: &List<Text>) -> List<Text> {
+    let mut out: List<Text> = List.new();
+    let mut i: Int = 0;
+    while i < l.len() { out.push(l[i].clone()); i = i + 1; }
+    out
+}
+
+// -----------------------------------------------------------------------------
+// WindowDecoration — what the planner attaches to each PvWindow
+// -----------------------------------------------------------------------------
+
+public type WindowDecoration is {
+    sort_spec: SortSpec,
+    frame_budget: FrameBudget,
+    /// Number of window functions sharing this evaluator stage.
+    fn_count: Int,
+}
+
+// -----------------------------------------------------------------------------
+// WindowPlanPass
+// -----------------------------------------------------------------------------
+
+public type WindowPlanPass is { unit: Bool };
+public fn window_plan_pass() -> WindowPlanPass { WindowPlanPass { unit: true } }
+
+public type WindowPlanResult is {
+    decorations: List<WindowDecoration>,
+}
+
+public fn plan_windows(root: &PvNode) -> WindowPlanResult {
+    let mut out: List<WindowDecoration> = List.new();
+    walk_collect(root, &mut out);
+    WindowPlanResult { decorations: out }
+}
+
+fn walk_collect(node: &PvNode, out: &mut List<WindowDecoration>) {
+    match node {
+        PvWindow(w) => {
+            out.push(WindowDecoration {
+                sort_spec: sort_spec_from_window(w),
+                frame_budget: frame_budget_from_text(&w.frame_spec_sql),
+                fn_count: w.fns_sql.len(),
+            });
+            walk_collect(&*w.child, out);
+        }
+        PvProject(p) => walk_collect(&*p.child, out),
+        core.database.sqlite.native.planner_passes.plan_view.PvFilter(f) =>
+            walk_collect(&*f.child, out),
+        core.database.sqlite.native.planner_passes.plan_view.PvJoin(j) => {
+            walk_collect(&*j.left, out);
+            walk_collect(&*j.right, out);
+        }
+        core.database.sqlite.native.planner_passes.plan_view.PvAggregate(a) =>
+            walk_collect(&*a.child, out),
+        _ => {}
+    }
+}
+
+implement PlannerPass for WindowPlanPass {
+    fn name(&self) -> Text { "window_plan".clone() }
+    fn apply(&self, plan: PvNode) -> PassResult {
+        // This pass is observational — it doesn't rewrite, it
+        // collects decorations the codegen consults. We return the
+        // plan unchanged with n_edits = 0 so the pipeline reports
+        // accurate counters.
+        pass_result(plan, 0)
+    }
+}

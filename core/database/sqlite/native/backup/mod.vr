@@ -1,0 +1,25 @@
+// =============================================================================
+// core/database/sqlite/native/backup/mod.vr
+// =============================================================================
+// Layer: 7 (consumer-facing — `Database.backup_to(target)`)
+// Spec: sqlite-native.md §22 — operational tooling; §6 — file format
+//
+// Online backup, the loom analogue of `sqlite3_online_backup`.
+//
+// The protocol is page-by-page: a `BackupHandle` is initialised
+// against a (source, target) connection pair, then stepped one or
+// more pages at a time. While stepping, the source connection
+// continues to take writes; pages already copied that get dirtied
+// are simply re-read from the source on the next step.
+//
+// Submodules:
+//   * `state`   — BackupHandle state machine + step result
+//   * `policy`  — throttle policy (pages-per-step, sleep-between)
+//   * `progress` — observable counters
+// =============================================================================
+
+module core.database.sqlite.native.backup;
+
+public module state;
+public module policy;
+public module progress;

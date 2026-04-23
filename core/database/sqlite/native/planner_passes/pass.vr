@@ -1,0 +1,75 @@
+// =============================================================================
+// planner_passes/pass.vr — PlannerPass protocol + Pipeline runner
+// =============================================================================
+// Spec: sqlite-native.md §13.5
+//
+// Same shape as `optimizer/pass.vr` but operating on `PvNode` trees
+// rather than opcode streams. The runner repeats the pipeline until
+// no pass reports an edit OR `max_iterations` is reached.
+// =============================================================================
+
+module core.database.sqlite.native.planner_passes.pass;
+
+mount core.*;
+mount base.{Text, Bool};
+mount collections.List;
+mount core.database.sqlite.native.planner_passes.plan_view.{PvNode};
+
+public type PassResult is {
+    plan: PvNode,
+    n_edits: Int,
+}
+
+public fn pass_result(plan: PvNode, n_edits: Int) -> PassResult {
+    PassResult { plan: plan, n_edits: n_edits }
+}
+
+public type PlannerPass is protocol {
+    fn name(&self) -> Text;
+    fn is_idempotent(&self) -> Bool { true }
+    fn apply(&self, plan: PvNode) -> PassResult;
+};
+
+// -----------------------------------------------------------------------------
+// Pipeline
+// -----------------------------------------------------------------------------
+
+public const DEFAULT_MAX_ITERATIONS: Int = 8;
+
+public type PipelineReport is {
+    passes_run: Int,
+    iterations: Int,
+    total_edits: Int,
+}
+
+public fn pipeline_report_default() -> PipelineReport {
+    PipelineReport { passes_run: 0, iterations: 0, total_edits: 0 }
+}
+
+public fn run_pipeline(
+    passes: List<Heap<dyn PlannerPass>>,
+    input: PvNode,
+    max_iterations: Int,
+) -> (PvNode, PipelineReport) {
+    let mut plan = input;
+    let mut report = pipeline_report_default();
+    let mut iter: Int = 0;
+    let cap = if max_iterations <= 0 { DEFAULT_MAX_ITERATIONS } else { max_iterations };
+    while iter < cap {
+        iter = iter + 1;
+        let mut iteration_edits: Int = 0;
+        let mut p: Int = 0;
+        while p < passes.len() {
+            let pass_ref = &passes[p];
+            let r = (&**pass_ref).apply(plan);
+            plan = r.plan;
+            iteration_edits = iteration_edits + r.n_edits;
+            report.passes_run = report.passes_run + 1;
+            p = p + 1;
+        }
+        report.total_edits = report.total_edits + iteration_edits;
+        if iteration_edits == 0 { break; }
+    }
+    report.iterations = iter;
+    (plan, report)
+}

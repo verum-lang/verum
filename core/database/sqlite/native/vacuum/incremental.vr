@@ -1,0 +1,82 @@
+// =============================================================================
+// vacuum/incremental.vr — incremental_vacuum(N) freelist trim
+// =============================================================================
+// Spec: sqlite-native.md PRAGMA incremental_vacuum
+//
+// Releases up to N pages from the freelist back to the OS without
+// rebuilding the file. Only meaningful when `auto_vacuum=INCREMENTAL`
+// is the database mode (otherwise the freelist isn't maintained).
+//
+// `IncrementalSession` is the state carrier for one trim operation.
+// Caller seeds it with the freelist (`seed_freelist`), then calls
+// `release_next()` until the requested page count is met OR the
+// freelist is exhausted.
+// =============================================================================
+
+module core.database.sqlite.native.vacuum.incremental;
+
+mount core.*;
+mount base.{Bool, Maybe};
+mount collections.List;
+
+// -----------------------------------------------------------------------------
+// IncrementalSession
+// -----------------------------------------------------------------------------
+
+public type IncrementalSession is {
+    requested: Int,
+    released: Int,
+    /// Freelist pages — released in LIFO order so the most recently
+    /// freed pages go back first (matches SQLite's behaviour).
+    freelist: List<Int>,
+}
+
+public fn session_new(requested: Int) -> IncrementalSession {
+    IncrementalSession {
+        requested: if requested < 0 { 0 } else { requested },
+        released: 0,
+        freelist: List.new(),
+    }
+}
+
+implement IncrementalSession {
+    pub fn seed_freelist(&mut self, pages: List<Int>) {
+        self.freelist = pages;
+    }
+
+    pub fn requested_count(&self) -> Int { self.requested }
+    pub fn released_count(&self) -> Int { self.released }
+    pub fn freelist_remaining(&self) -> Int { self.freelist.len() }
+
+    pub fn is_done(&self) -> Bool {
+        self.released >= self.requested || self.freelist.len() == 0
+    }
+
+    /// Pop the next freelist page and mark it as released. Returns
+    /// the page number (or `None` if the freelist is empty / quota
+    /// is met).
+    pub fn release_next(&mut self) -> Maybe<Int> {
+        if self.is_done() { return None; }
+        let last = self.freelist.len() - 1;
+        let page = self.freelist[last];
+        let mut new_freelist: List<Int> = List.new();
+        let mut k: Int = 0;
+        while k < last { new_freelist.push(self.freelist[k]); k = k + 1; }
+        self.freelist = new_freelist;
+        self.released = self.released + 1;
+        Some(page)
+    }
+
+    /// Drive the session to completion — returns the list of
+    /// released page numbers.
+    pub fn drain(&mut self) -> List<Int> {
+        let mut out: List<Int> = List.new();
+        while !self.is_done() {
+            match self.release_next() {
+                Some(p) => out.push(p),
+                None    => break,
+            }
+        }
+        out
+    }
+}

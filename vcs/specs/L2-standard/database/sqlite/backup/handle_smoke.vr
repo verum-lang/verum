@@ -1,0 +1,174 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, backup, throttle, progress
+// @timeout: 5000
+// @expected-exit: 0
+//
+// Online backup machinery:
+//   * Handle state machine: Initialised → Streaming → Done
+//   * step() advances by N pages, never beyond total
+//   * record_reread() decrements and re-enters Streaming
+//   * fail() puts the handle into a terminal Failed state
+//   * Throttle policies: unlimited / bounded / adaptive_load
+//   * ProgressTracker computes pages-per-sec + ETA
+
+mount core.database.sqlite.native.backup.state.{
+    BackupHandle, BackupPhase, BackupError,
+    BpInitialised, BpStreaming, BpDone, BpFailed,
+    BeIoError, BeSchemaChanged,
+    handle_new, phase_name, phase_is_terminal,
+};
+mount core.database.sqlite.native.backup.policy.{
+    ThrottlePolicy,
+    Unlimited, unlimited,
+    Bounded, bounded,
+    AdaptiveLoad, adaptive_load,
+};
+mount core.database.sqlite.native.backup.progress.{
+    ProgressSnapshot, ProgressTracker, tracker_new,
+    render,
+};
+
+// -----------------------------------------------------------------------------
+// state
+// -----------------------------------------------------------------------------
+
+fn test_handle_initial_state() {
+    let h = handle_new("main->dest".clone(), 100, 4096);
+    match h.phase_ref() { BpInitialised => {}, _ => panic("init") };
+    assert_eq(h.total_pages, 100);
+    assert_eq(h.copied_pages, 0);
+    assert_eq(h.percent_done(), 0);
+    assert_eq(h.pages_remaining(), 100);
+}
+
+fn test_step_advances() {
+    let mut h = handle_new("x".clone(), 10, 4096);
+    let p1 = h.step(3);
+    match p1 { BpStreaming => {}, _ => panic("streaming after partial") };
+    assert_eq(h.copied_pages, 3);
+    let p2 = h.step(20);   // overshoots — clamps to remaining
+    match p2 { BpDone => {}, _ => panic("done") };
+    assert_eq(h.copied_pages, 10);
+}
+
+fn test_step_after_done_is_noop() {
+    let mut h = handle_new("x".clone(), 5, 4096);
+    let _ = h.step(5);
+    let p = h.step(99);
+    match p { BpDone => {}, _ => panic("still done") };
+}
+
+fn test_step_zero_is_noop() {
+    let mut h = handle_new("x".clone(), 5, 4096);
+    let p = h.step(0);
+    match p { BpInitialised => {}, _ => panic("zero step → no-op") };
+}
+
+fn test_record_reread_returns_to_streaming() {
+    let mut h = handle_new("x".clone(), 10, 4096);
+    let _ = h.step(10);
+    match h.phase_ref() { BpDone => {}, _ => panic("done") };
+    h.record_reread();
+    match h.phase_ref() { BpStreaming => {}, _ => panic("streaming after re-read") };
+    assert_eq(h.copied_pages, 9);
+    assert_eq(h.re_read_pages, 1);
+}
+
+fn test_fail_is_terminal() {
+    let mut h = handle_new("x".clone(), 10, 4096);
+    h.fail(BeIoError("ENOSPC".clone()));
+    match h.phase_ref() {
+        BpFailed(_) => {},
+        _ => panic("must be Failed"),
+    }
+    assert(phase_is_terminal(&h.phase_ref()));
+    let p = h.step(5);
+    match p {
+        BpFailed(_) => {},
+        _ => panic("Failed is sticky"),
+    }
+}
+
+fn test_percent_done_calculation() {
+    let mut h = handle_new("x".clone(), 100, 4096);
+    let _ = h.step(25);
+    assert_eq(h.percent_done(), 25);
+    let _ = h.step(50);
+    assert_eq(h.percent_done(), 75);
+}
+
+// -----------------------------------------------------------------------------
+// policy
+// -----------------------------------------------------------------------------
+
+fn test_unlimited_policy() {
+    let mut p = unlimited();
+    assert(p.pages_for_next_step() > 100000);
+    assert(p.sleep_ns() == (0 as Int64));
+}
+
+fn test_bounded_policy() {
+    let mut p = bounded(8, 1000 as Int64);
+    assert_eq(p.pages_for_next_step(), 8);
+    assert(p.sleep_ns() == (1000 as Int64));
+    assert_eq(p.pages_for_next_step(), 8);   // stable
+}
+
+fn test_bounded_clamps_zero_pages() {
+    let p = bounded(0, 100 as Int64);
+    assert_eq(p.pages_per_step, 1);
+}
+
+fn test_adaptive_load_backoff_on_writes() {
+    let mut p = adaptive_load(8, 100 as Int64, 4);
+    let initial = p.pages_for_next_step();
+    assert_eq(initial, 8);
+    p.observe_source_writes(100);
+    let after = p.pages_for_next_step();
+    // Halved
+    assert(after <= initial / 2 + 1);
+}
+
+// -----------------------------------------------------------------------------
+// progress
+// -----------------------------------------------------------------------------
+
+fn test_progress_snapshot_renders() {
+    let mut h = handle_new("main->dest".clone(), 100, 4096);
+    let _ = h.step(47);
+    let mut tr = tracker_new(0 as Int64);
+    let snap = tr.snapshot(&h, 1000000000 as Int64);   // 1 second elapsed
+    assert_eq(snap.percent, 47);
+    let line = render(&snap);
+    assert(line.len() > 0);
+}
+
+fn test_progress_throughput() {
+    let mut h = handle_new("x".clone(), 100, 4096);
+    let _ = h.step(50);
+    let mut tr = tracker_new(0 as Int64);
+    // 1 second → 50 pages/sec
+    let snap = tr.snapshot(&h, 1000000000 as Int64);
+    assert(snap.avg_pages_per_sec >= 49.0);
+    assert(snap.avg_pages_per_sec <= 51.0);
+    // ETA: 50 pages remaining @ 50 pages/sec = ~1s
+    assert(snap.eta_ns > (500000000 as Int64));
+}
+
+fn main() {
+    test_handle_initial_state();
+    test_step_advances();
+    test_step_after_done_is_noop();
+    test_step_zero_is_noop();
+    test_record_reread_returns_to_streaming();
+    test_fail_is_terminal();
+    test_percent_done_calculation();
+    test_unlimited_policy();
+    test_bounded_policy();
+    test_bounded_clamps_zero_pages();
+    test_adaptive_load_backoff_on_writes();
+    test_progress_snapshot_renders();
+    test_progress_throughput();
+}

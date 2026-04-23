@@ -1,0 +1,157 @@
+// =============================================================================
+// backup/state.vr — BackupHandle state machine
+// =============================================================================
+// Spec: sqlite-native.md §22
+//
+// A `BackupHandle` walks a source database page-by-page into a target
+// database. The state machine has four phases:
+//
+//   * `Initialised`  — handle created, no pages copied yet
+//   * `Streaming`    — `copied_pages > 0`, more pages remain
+//   * `Done`         — `copied_pages == total_pages`
+//   * `Failed`       — IO error or source change rendering snapshot invalid
+//
+// `step(n_pages)` advances the cursor by up to `n_pages`, returns
+// the new state. Calling `step` after `Done` or `Failed` is a no-op
+// (returns the current state).
+//
+// Throttling is the caller's responsibility — see `policy.vr`.
+// =============================================================================
+
+module core.database.sqlite.native.backup.state;
+
+mount core.*;
+mount base.{Text, Bool, Maybe};
+
+// -----------------------------------------------------------------------------
+// Errors
+// -----------------------------------------------------------------------------
+
+public type BackupError is
+      BeSourceClosed
+    | BeTargetReadOnly
+    | BeIoError(Text)
+    | BeSchemaChanged(Text)         // source schema changed mid-backup
+    | BeNotEnoughSpace(Int64);
+
+// -----------------------------------------------------------------------------
+// Phase
+// -----------------------------------------------------------------------------
+
+public type BackupPhase is
+      BpInitialised
+    | BpStreaming
+    | BpDone
+    | BpFailed(BackupError);
+
+public fn phase_name(p: &BackupPhase) -> Text {
+    match p {
+        BpInitialised => "initialised".clone(),
+        BpStreaming   => "streaming".clone(),
+        BpDone        => "done".clone(),
+        BpFailed(_)   => "failed".clone(),
+    }
+}
+
+public fn phase_is_terminal(p: &BackupPhase) -> Bool {
+    match p {
+        BpDone | BpFailed(_) => true,
+        _                    => false,
+    }
+}
+
+// -----------------------------------------------------------------------------
+// BackupHandle
+// -----------------------------------------------------------------------------
+
+public type BackupHandle is {
+    /// Logical name for diagnostics (e.g. "main->dest").
+    label: Text,
+    phase: BackupPhase,
+    total_pages: Int,
+    copied_pages: Int,
+    /// Number of pages that were re-read because they were dirtied
+    /// after the initial copy. Counter is exposed via progress reports.
+    re_read_pages: Int,
+    /// Page size in bytes — fixed at handle creation.
+    page_size: Int,
+}
+
+public fn handle_new(label: Text, total_pages: Int, page_size: Int) -> BackupHandle {
+    BackupHandle {
+        label: label,
+        phase: BpInitialised,
+        total_pages: total_pages,
+        copied_pages: 0,
+        re_read_pages: 0,
+        page_size: page_size,
+    }
+}
+
+implement BackupHandle {
+    public fn phase_ref(&self) -> BackupPhase {
+        clone_phase(&self.phase)
+    }
+
+    public fn pages_remaining(&self) -> Int {
+        if self.copied_pages >= self.total_pages { return 0; }
+        self.total_pages - self.copied_pages
+    }
+
+    public fn percent_done(&self) -> Int {
+        if self.total_pages == 0 { return 100; }
+        (self.copied_pages * 100) / self.total_pages
+    }
+
+    /// Advance the backup by `requested_pages`. Returns the new
+    /// phase. The actual number of pages copied may be less than
+    /// requested (if the backup completes during this step).
+    public fn step(&mut self, requested_pages: Int) -> BackupPhase {
+        if phase_is_terminal(&self.phase) { return clone_phase(&self.phase); }
+        if requested_pages <= 0 { return clone_phase(&self.phase); }
+        let remaining = self.pages_remaining();
+        let to_copy = if requested_pages > remaining { remaining } else { requested_pages };
+        self.copied_pages = self.copied_pages + to_copy;
+        if self.copied_pages >= self.total_pages {
+            self.phase = BpDone;
+        } else {
+            self.phase = BpStreaming;
+        }
+        clone_phase(&self.phase)
+    }
+
+    /// Mark a previously-copied page as re-read because the source
+    /// dirtied it after the copy. The caller increments the source
+    /// page back into the work queue.
+    public fn record_reread(&mut self) {
+        self.re_read_pages = self.re_read_pages + 1;
+        if self.copied_pages > 0 { self.copied_pages = self.copied_pages - 1; }
+        if !phase_is_terminal(&self.phase) {
+            self.phase = BpStreaming;
+        }
+    }
+
+    /// Abort the backup with an error. Subsequent steps are no-ops.
+    public fn fail(&mut self, err: BackupError) {
+        self.phase = BpFailed(err);
+    }
+}
+
+fn clone_phase(p: &BackupPhase) -> BackupPhase {
+    match p {
+        BpInitialised => BpInitialised,
+        BpStreaming   => BpStreaming,
+        BpDone        => BpDone,
+        BpFailed(e)   => BpFailed(clone_err(e)),
+    }
+}
+
+fn clone_err(e: &BackupError) -> BackupError {
+    match e {
+        BeSourceClosed         => BeSourceClosed,
+        BeTargetReadOnly       => BeTargetReadOnly,
+        BeIoError(t)           => BeIoError(t.clone()),
+        BeSchemaChanged(t)     => BeSchemaChanged(t.clone()),
+        BeNotEnoughSpace(n)    => BeNotEnoughSpace(n),
+    }
+}

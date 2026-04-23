@@ -104,3 +104,9 @@ public module optimizer;
 public module auth;
 // - distribution: version + features + build manifest (§23)
 public module distribution;
+// - backup: page-by-page online backup state machine + throttle policy (§22)
+public module backup;
+// - vacuum: full / incremental / auto-vacuum modes (§10.5 + PRAGMA auto_vacuum)
+public module vacuum;
+// - planner_passes: subquery flatten / decorrelate / magic-sets / window-plan (§13.5-§13.6)
+public module planner_passes;

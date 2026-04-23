@@ -1,0 +1,136 @@
+// =============================================================================
+// backup/policy.vr — throttle policy for paced page copying
+// =============================================================================
+// Spec: sqlite-native.md §22 (operational tooling)
+//
+// Throttling determines how aggressively the backup process copies
+// pages. Two facets:
+//
+//   * `pages_per_step`  — pages copied per call to `BackupHandle.step`
+//   * `sleep_between_ns` — caller-driven inter-step wait in nanoseconds
+//
+// Three pre-canned policies cover the common cases:
+//
+//   * `unlimited()`        — copy as fast as the I/O subsystem allows
+//   * `bounded(n, sleep)`  — `n` pages per step + constant sleep
+//   * `adaptive_load()`    — slow down when source-write rate is high
+// =============================================================================
+
+module core.database.sqlite.native.backup.policy;
+
+mount core.*;
+mount base.{Bool};
+
+// -----------------------------------------------------------------------------
+// ThrottlePolicy
+// -----------------------------------------------------------------------------
+
+public type ThrottlePolicy is protocol {
+    fn name(&self) -> base.Text;
+    /// How many pages to request on the next step.
+    fn pages_for_next_step(&mut self) -> Int;
+    /// Nanoseconds to wait before invoking the next step. The L7
+    /// caller threads this into its async sleep.
+    fn sleep_ns(&self) -> Int64;
+    /// Feed back observed source-write activity (page count). The
+    /// adaptive policy uses this to back off; constant policies
+    /// ignore it.
+    fn observe_source_writes(&mut self, n_writes: Int) {
+        let _ = n_writes;
+    }
+};
+
+// -----------------------------------------------------------------------------
+// Unlimited — copy everything in one step
+// -----------------------------------------------------------------------------
+
+public type Unlimited is { unit: Bool };
+
+public fn unlimited() -> Unlimited { Unlimited { unit: true } }
+
+implement ThrottlePolicy for Unlimited {
+    fn name(&self) -> base.Text { "unlimited".clone() }
+    fn pages_for_next_step(&mut self) -> Int { 0x7fffffff }
+    fn sleep_ns(&self) -> Int64 { 0 as Int64 }
+}
+
+// -----------------------------------------------------------------------------
+// Bounded — fixed pages-per-step + constant sleep
+// -----------------------------------------------------------------------------
+
+public type Bounded is {
+    pages_per_step: Int,
+    sleep_per_step_ns: Int64,
+}
+
+public fn bounded(pages: Int, sleep_ns: Int64) -> Bounded {
+    Bounded {
+        pages_per_step: if pages <= 0 { 1 } else { pages },
+        sleep_per_step_ns: if sleep_ns < (0 as Int64) { 0 as Int64 } else { sleep_ns },
+    }
+}
+
+implement ThrottlePolicy for Bounded {
+    fn name(&self) -> base.Text { "bounded".clone() }
+    fn pages_for_next_step(&mut self) -> Int { self.pages_per_step }
+    fn sleep_ns(&self) -> Int64 { self.sleep_per_step_ns }
+}
+
+// -----------------------------------------------------------------------------
+// AdaptiveLoad — back off when source is busy
+// -----------------------------------------------------------------------------
+//
+// Maintains an exponential-moving-average of recent source-write
+// counts. When the EMA exceeds `threshold_writes`, halves the
+// next-step page count (down to 1) and doubles the sleep.
+// =============================================================================
+
+public type AdaptiveLoad is {
+    base_pages: Int,
+    base_sleep_ns: Int64,
+    threshold_writes: Int,
+    cur_pages: Int,
+    cur_sleep_ns: Int64,
+    ema_writes: Int,
+}
+
+public fn adaptive_load(base_pages: Int, base_sleep_ns: Int64, threshold_writes: Int) -> AdaptiveLoad {
+    let safe_pages = if base_pages <= 0 { 4 } else { base_pages };
+    AdaptiveLoad {
+        base_pages: safe_pages,
+        base_sleep_ns: base_sleep_ns,
+        threshold_writes: if threshold_writes <= 0 { 16 } else { threshold_writes },
+        cur_pages: safe_pages,
+        cur_sleep_ns: base_sleep_ns,
+        ema_writes: 0,
+    }
+}
+
+implement ThrottlePolicy for AdaptiveLoad {
+    fn name(&self) -> base.Text { "adaptive_load".clone() }
+
+    fn pages_for_next_step(&mut self) -> Int {
+        // Decay EMA back toward 0 each step.
+        self.ema_writes = self.ema_writes / 2;
+        // Recover to base if quiet.
+        if self.ema_writes < self.threshold_writes {
+            self.cur_pages = self.base_pages;
+            self.cur_sleep_ns = self.base_sleep_ns;
+        }
+        self.cur_pages
+    }
+
+    fn sleep_ns(&self) -> Int64 { self.cur_sleep_ns }
+
+    fn observe_source_writes(&mut self, n_writes: Int) {
+        // EMA = (3 * old + new) / 4
+        self.ema_writes = (self.ema_writes * 3 + n_writes) / 4;
+        if self.ema_writes >= self.threshold_writes {
+            self.cur_pages = if self.cur_pages > 1 { self.cur_pages / 2 } else { 1 };
+            self.cur_sleep_ns = self.cur_sleep_ns * (2 as Int64);
+            // Hard cap to prevent unbounded slow-down.
+            let cap: Int64 = 1000000000 as Int64;   // 1 second
+            if self.cur_sleep_ns > cap { self.cur_sleep_ns = cap; }
+        }
+    }
+}

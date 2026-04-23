@@ -1,0 +1,35 @@
+// =============================================================================
+// core/database/sqlite/native/vacuum/mod.vr
+// =============================================================================
+// Layer: 7 (façade) / 1 (pager interaction)
+// Spec: sqlite-native.md §10.5 (B-tree balancing) + PRAGMA auto_vacuum
+//
+// VACUUM operations — three modes:
+//
+//   * Full VACUUM (`VACUUM`)      — copy every page to a fresh
+//     database file in dense order, then atomically swap.
+//   * Incremental VACUUM
+//     (`PRAGMA incremental_vacuum(N)`) — release N pages from the
+//     freelist back to the OS without rebuilding.
+//   * Auto-vacuum (PRAGMA auto_vacuum)
+//     - NONE        — never auto-shrink
+//     - FULL        — release pages on every COMMIT
+//     - INCREMENTAL — pages move to freelist immediately, manual
+//                     vacuum releases them.
+//
+// All three modes share the same page-relocation strategy: source
+// page → target page mapping with parent-pointer rewriting.
+//
+// Submodules:
+//   * `mode`        — enums + dispatch
+//   * `relocator`   — page-relocation map / batch
+//   * `engine`      — full-VACUUM engine state machine
+//   * `incremental` — incremental_vacuum(N) trim
+// =============================================================================
+
+module core.database.sqlite.native.vacuum;
+
+public module mode;
+public module relocator;
+public module engine;
+public module incremental;

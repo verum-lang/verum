@@ -1,0 +1,126 @@
+// =============================================================================
+// planner_passes/magic_sets.vr — Magic Sets transform for recursive CTEs
+// =============================================================================
+// Spec: sqlite-native.md §13.5
+//
+// Magic Sets is a planner technique for recursive queries that
+// constrains each iteration of the recursive branch to only generate
+// rows that are *reachable* from the seed values supplied by the
+// outer query. Without it, a `WITH RECURSIVE descendants(id) AS (
+//   SELECT id FROM employees WHERE manager = 'alice'
+//   UNION ALL
+//   SELECT e.id FROM employees e JOIN descendants d ON e.manager = d.id
+// )` runs the recursive branch over the WHOLE employee table on every
+// step; with Magic Sets, only rows whose `manager` is in the running
+// frontier are scanned.
+//
+// We model it as: when a `Recursive` node is found, decorate it with
+// a synthetic `MagicFilter` predicate that the codegen materialises
+// as `WHERE manager IN (frontier)`. The filter starts empty and is
+// populated by the seed plan.
+// =============================================================================
+
+module core.database.sqlite.native.planner_passes.magic_sets;
+
+mount core.*;
+mount base.{Text, Bool};
+mount collections.List;
+mount core.database.sqlite.native.planner_passes.plan_view.{
+    PvNode, PvRecursive, PvFilter, PvProject,
+    PvFilterInfo, PvRecursiveInfo,
+    node_id,
+};
+mount core.database.sqlite.native.planner_passes.pass.{
+    PlannerPass, PassResult, pass_result,
+};
+
+// -----------------------------------------------------------------------------
+// MagicSets pass
+// -----------------------------------------------------------------------------
+
+public type MagicSets is {
+    /// Optional column-name hint that the seed plan binds — used to
+    /// build the frontier-membership predicate. Empty string → use
+    /// the codegen's default seed-column inference.
+    seed_column_hint: Text,
+}
+
+public fn magic_sets() -> MagicSets {
+    MagicSets { seed_column_hint: "".clone() }
+}
+
+public fn magic_sets_with_hint(col: Text) -> MagicSets {
+    MagicSets { seed_column_hint: col }
+}
+
+implement PlannerPass for MagicSets {
+    fn name(&self) -> Text { "magic_sets".clone() }
+
+    fn apply(&self, plan: PvNode) -> PassResult {
+        let mut edits: Int = 0;
+        let new_plan = walk(plan, &self.seed_column_hint, &mut edits);
+        pass_result(new_plan, edits)
+    }
+}
+
+fn walk(node: PvNode, hint: &Text, edits: &mut Int) -> PvNode {
+    match node {
+        PvRecursive(r) => {
+            // Wrap the recursive branch with a frontier filter.
+            *edits = *edits + 1;
+            let predicate = build_frontier_predicate(&r.cte_name, hint);
+            let new_recursive = PvFilter(PvFilterInfo {
+                id: node_id(&*r.recursive),
+                predicate_sql: predicate,
+                is_correlated: true,
+                child: r.recursive,
+            });
+            PvRecursive(PvRecursiveInfo {
+                id: r.id,
+                cte_name: r.cte_name,
+                anchor: r.anchor,
+                recursive: Heap.new(new_recursive),
+            })
+        }
+        PvFilter(f) => {
+            let new_child = walk(*f.child, hint, edits);
+            PvFilter(PvFilterInfo {
+                id: f.id,
+                predicate_sql: f.predicate_sql,
+                is_correlated: f.is_correlated,
+                child: Heap.new(new_child),
+            })
+        }
+        PvProject(p) => {
+            let new_child = walk(*p.child, hint, edits);
+            PvProject(core.database.sqlite.native.planner_passes.plan_view.PvProjectInfo {
+                id: p.id,
+                columns_sql: p.columns_sql,
+                child: Heap.new(new_child),
+            })
+        }
+        other => other,
+    }
+}
+
+fn build_frontier_predicate(cte_name: &Text, hint: &Text) -> Text {
+    let mut out = Text.new();
+    let prefix = "/* magic-sets */ ".clone();
+    append(&mut out, &prefix);
+    if hint.len() > 0 {
+        append(&mut out, hint);
+    } else {
+        append(&mut out, &"recursive_join_key".clone());
+    }
+    let mid = " IN (SELECT * FROM ".clone();
+    append(&mut out, &mid);
+    append(&mut out, cte_name);
+    out.push_byte(41 as Byte);
+    out
+}
+
+fn append(dst: &mut Text, s: &Text) {
+    let bs = s.as_bytes();
+    let mut i: Int = 0;
+    while i < bs.len() { dst.push_byte(bs[i]); i = i + 1; }
+}

@@ -1,0 +1,28 @@
+// =============================================================================
+// core/database/sqlite/native/planner_passes/mod.vr
+// =============================================================================
+// Layer: 5 (planner)
+// Spec: sqlite-native.md §13.5, §13.6
+//
+// Pure-Verum planner-level rewrite passes operating on a `PlanNode`
+// AST view. Each pass implements the `PlannerPass` protocol (mirrors
+// the `OptimizationPass` shape from `optimizer/`) so they compose
+// into a deterministic pipeline.
+//
+// Submodules:
+//   * `plan_view`        — opaque PlanNode + edit primitives
+//   * `pass`             — PlannerPass protocol + Pipeline runner
+//   * `subquery_flatten` — `SELECT … FROM (SELECT …)` → flat
+//   * `decorrelate`      — IN/EXISTS subquery → semi-join
+//   * `magic_sets`       — recursive-CTE Magic Sets transform
+//   * `window_plan`      — PARTITION BY + ORDER BY frame layout
+// =============================================================================
+
+module core.database.sqlite.native.planner_passes;
+
+public module plan_view;
+public module pass;
+public module subquery_flatten;
+public module decorrelate;
+public module magic_sets;
+public module window_plan;

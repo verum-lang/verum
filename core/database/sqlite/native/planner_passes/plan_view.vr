@@ -1,0 +1,187 @@
+// =============================================================================
+// planner_passes/plan_view.vr — minimal PlanNode model
+// =============================================================================
+// Spec: sqlite-native.md §13
+//
+// We can't touch `l5_sql/codegen.vr` (the gated authoritative
+// `PlanNode` lives there). Passes operate on a *view*: a small set
+// of variants covering exactly the rewrites the passes implement.
+//
+// Each `PvNode` carries an opaque `id` so post-pass we can map
+// edits back into the codegen's PlanNode tree.
+// =============================================================================
+
+module core.database.sqlite.native.planner_passes.plan_view;
+
+mount core.*;
+mount base.{Text, Maybe, Bool};
+mount collections.List;
+
+// -----------------------------------------------------------------------------
+// PvNode — pass-visible plan node
+// -----------------------------------------------------------------------------
+
+public type PvJoinKind is PvjkInner | PvjkLeft | PvjkRight | PvjkFull | PvjkSemi | PvjkAnti;
+
+public type PvNode is
+      PvScan(PvScanInfo)
+    | PvFilter(PvFilterInfo)
+    | PvProject(PvProjectInfo)
+    | PvJoin(PvJoinInfo)
+    | PvAggregate(PvAggregateInfo)
+    | PvUnionAll(PvUnionInfo)
+    | PvSubquery(PvSubqueryInfo)
+    | PvRecursive(PvRecursiveInfo)
+    | PvWindow(PvWindowInfo);
+
+public type PvScanInfo is {
+    id: Int,
+    table: Text,
+    alias: Maybe<Text>,
+};
+
+public type PvFilterInfo is {
+    id: Int,
+    predicate_sql: Text,
+    /// True if the predicate references a column from a different
+    /// scope (correlated subquery indicator).
+    is_correlated: Bool,
+    child: Heap<PvNode>,
+};
+
+public type PvProjectInfo is {
+    id: Int,
+    columns_sql: List<Text>,
+    child: Heap<PvNode>,
+};
+
+public type PvJoinInfo is {
+    id: Int,
+    kind: PvJoinKind,
+    on_predicate_sql: Text,
+    left: Heap<PvNode>,
+    right: Heap<PvNode>,
+};
+
+public type PvAggregateInfo is {
+    id: Int,
+    group_by_sql: List<Text>,
+    aggregates_sql: List<Text>,
+    child: Heap<PvNode>,
+};
+
+public type PvUnionInfo is {
+    id: Int,
+    branches: List<PvNode>,
+};
+
+public type PvSubqueryShape is PvssScalar | PvssIn | PvssExists | PvssNotExists;
+
+public type PvSubqueryInfo is {
+    id: Int,
+    shape: PvSubqueryShape,
+    /// SQL of the OUTER predicate this subquery participates in
+    /// (e.g. "x IN (...)").
+    outer_predicate_sql: Text,
+    body: Heap<PvNode>,
+    /// If non-empty, list of outer-scope columns referenced inside.
+    correlations: List<Text>,
+};
+
+public type PvRecursiveInfo is {
+    id: Int,
+    cte_name: Text,
+    /// Anchor branch — non-recursive, evaluated once.
+    anchor: Heap<PvNode>,
+    /// Recursive branch — evaluated until it produces no new rows.
+    recursive: Heap<PvNode>,
+};
+
+public type PvWindowInfo is {
+    id: Int,
+    partition_by_sql: List<Text>,
+    order_by_sql: List<Text>,
+    /// Frame spec text — "ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW", etc.
+    frame_spec_sql: Text,
+    fns_sql: List<Text>,
+    child: Heap<PvNode>,
+};
+
+// -----------------------------------------------------------------------------
+// Constructors / accessors
+// -----------------------------------------------------------------------------
+
+public fn node_id(n: &PvNode) -> Int {
+    match n {
+        PvScan(s)      => s.id,
+        PvFilter(f)    => f.id,
+        PvProject(p)   => p.id,
+        PvJoin(j)      => j.id,
+        PvAggregate(a) => a.id,
+        PvUnionAll(u)  => u.id,
+        PvSubquery(s)  => s.id,
+        PvRecursive(r) => r.id,
+        PvWindow(w)    => w.id,
+    }
+}
+
+public fn node_kind_name(n: &PvNode) -> Text {
+    match n {
+        PvScan(_)      => "Scan".clone(),
+        PvFilter(_)    => "Filter".clone(),
+        PvProject(_)   => "Project".clone(),
+        PvJoin(_)      => "Join".clone(),
+        PvAggregate(_) => "Aggregate".clone(),
+        PvUnionAll(_)  => "UnionAll".clone(),
+        PvSubquery(_)  => "Subquery".clone(),
+        PvRecursive(_) => "Recursive".clone(),
+        PvWindow(_)    => "Window".clone(),
+    }
+}
+
+public fn join_kind_name(k: &PvJoinKind) -> Text {
+    match k {
+        PvjkInner => "INNER".clone(),
+        PvjkLeft  => "LEFT".clone(),
+        PvjkRight => "RIGHT".clone(),
+        PvjkFull  => "FULL".clone(),
+        PvjkSemi  => "SEMI".clone(),
+        PvjkAnti  => "ANTI".clone(),
+    }
+}
+
+public fn subquery_shape_name(s: &PvSubqueryShape) -> Text {
+    match s {
+        PvssScalar    => "SCALAR".clone(),
+        PvssIn        => "IN".clone(),
+        PvssExists    => "EXISTS".clone(),
+        PvssNotExists => "NOT EXISTS".clone(),
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Tree-walking helper — count nodes by kind
+// -----------------------------------------------------------------------------
+
+public fn count_kind(root: &PvNode, kind: Text) -> Int {
+    let mut n = if node_kind_name(root) == kind { 1 } else { 0 };
+    match root {
+        PvFilter(f)    => n + count_kind(&*f.child, kind),
+        PvProject(p)   => n + count_kind(&*p.child, kind),
+        PvJoin(j)      => n + count_kind(&*j.left, kind.clone()) + count_kind(&*j.right, kind),
+        PvAggregate(a) => n + count_kind(&*a.child, kind),
+        PvUnionAll(u)  => {
+            let mut sum: Int = n;
+            let mut i: Int = 0;
+            while i < u.branches.len() {
+                sum = sum + count_kind(&u.branches[i], kind.clone());
+                i = i + 1;
+            }
+            sum
+        }
+        PvSubquery(s)  => n + count_kind(&*s.body, kind),
+        PvRecursive(r) => n + count_kind(&*r.anchor, kind.clone()) + count_kind(&*r.recursive, kind),
+        PvWindow(w)    => n + count_kind(&*w.child, kind),
+        PvScan(_)      => n,
+    }
+}

@@ -1,0 +1,132 @@
+// =============================================================================
+// backup/progress.vr — observable progress + ETA estimation
+// =============================================================================
+// Spec: sqlite-native.md §22
+//
+// Wraps a `BackupHandle` with a per-step counter ledger and an ETA
+// estimator (constant-throughput model). The L7 façade exposes
+// `Database.backup_progress(handle) -> ProgressSnapshot` so callers
+// can render a progress bar / log line.
+// =============================================================================
+
+module core.database.sqlite.native.backup.progress;
+
+mount core.*;
+mount base.{Text, Bool};
+mount core.database.sqlite.native.backup.state.{
+    BackupHandle, BackupPhase, phase_name, phase_is_terminal,
+};
+
+// -----------------------------------------------------------------------------
+// ProgressSnapshot
+// -----------------------------------------------------------------------------
+
+public type ProgressSnapshot is {
+    label: Text,
+    phase: Text,
+    total_pages: Int,
+    copied_pages: Int,
+    re_read_pages: Int,
+    percent: Int,
+    /// Pages-per-second average over the lifetime of the backup.
+    avg_pages_per_sec: Float64,
+    /// Estimated nanoseconds remaining (0 when phase is terminal).
+    eta_ns: Int64,
+}
+
+// -----------------------------------------------------------------------------
+// ProgressTracker — accumulates samples + computes ETA
+// -----------------------------------------------------------------------------
+
+public type ProgressTracker is {
+    started_ns: Int64,
+    last_sample_ns: Int64,
+    last_copied: Int,
+}
+
+public fn tracker_new(now_ns: Int64) -> ProgressTracker {
+    ProgressTracker {
+        started_ns: now_ns,
+        last_sample_ns: now_ns,
+        last_copied: 0,
+    }
+}
+
+implement ProgressTracker {
+    public fn snapshot(&mut self, h: &BackupHandle, now_ns: Int64) -> ProgressSnapshot {
+        let elapsed: Int64 = if now_ns > self.started_ns { now_ns - self.started_ns } else { 1 as Int64 };
+        let elapsed_secs: Float64 = (elapsed as Float64) / 1000000000.0;
+        let copied = h.copied_pages;
+        let throughput: Float64 = if elapsed_secs > 0.0 {
+            (copied as Float64) / elapsed_secs
+        } else {
+            0.0
+        };
+        let remaining = h.pages_remaining();
+        let eta: Int64 = if throughput > 0.0 && remaining > 0 {
+            let secs = (remaining as Float64) / throughput;
+            (secs * 1000000000.0) as Int64
+        } else {
+            0 as Int64
+        };
+        self.last_sample_ns = now_ns;
+        self.last_copied = copied;
+        ProgressSnapshot {
+            label: h.label.clone(),
+            phase: phase_name(&h.phase_ref()),
+            total_pages: h.total_pages,
+            copied_pages: copied,
+            re_read_pages: h.re_read_pages,
+            percent: h.percent_done(),
+            avg_pages_per_sec: throughput,
+            eta_ns: eta,
+        }
+    }
+
+    public fn is_terminal(&self, h: &BackupHandle) -> Bool {
+        phase_is_terminal(&h.phase_ref())
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Convenience: render a snapshot as a single-line summary
+// -----------------------------------------------------------------------------
+//
+// Format: "main->dest 47%/2000pp (2.4 Mp/s)" — caller chooses
+// whether to print + when.
+// =============================================================================
+
+fn append_text(dst: &mut Text, s: &Text) {
+    let bs = s.as_bytes();
+    let mut i: Int = 0;
+    while i < bs.len() { dst.push_byte(bs[i]); i = i + 1; }
+}
+
+fn append_int(dst: &mut Text, n: Int) {
+    if n == 0 { dst.push_byte(48 as Byte); return; }
+    let mut digits: List<Byte> = List.new();
+    let mut x: Int = if n < 0 { -n } else { n };
+    while x > 0 {
+        digits.push(((x % 10) + 48) as Byte);
+        x = x / 10;
+    }
+    if n < 0 { dst.push_byte(45 as Byte); }
+    let mut i: Int = digits.len() - 1;
+    while i >= 0 { dst.push_byte(digits[i]); i = i - 1; }
+}
+
+public fn render(s: &ProgressSnapshot) -> Text {
+    let mut out = Text.new();
+    append_text(&mut out, &s.label);
+    out.push_byte(32 as Byte);
+    append_int(&mut out, s.percent);
+    out.push_byte(37 as Byte);
+    out.push_byte(47 as Byte);
+    append_int(&mut out, s.total_pages);
+    out.push_byte(112 as Byte); out.push_byte(112 as Byte);
+    out.push_byte(32 as Byte);
+    out.push_byte(40 as Byte);
+    append_text(&mut out, &s.phase);
+    out.push_byte(41 as Byte);
+    out
+}
