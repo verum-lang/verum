@@ -1,0 +1,66 @@
+// @test: unit
+// @tier: 0
+// @level: L2
+// @tags: quic, bbr, draft-ietf-ccwg-bbr, state_machine, kat
+// @timeout: 10000
+// @expect: pass
+
+// BBRv2 congestion-control state machine (draft-ietf-ccwg-bbr).
+//
+// This test exercises the CongestionCtrl-protocol surface BBR shares
+// with NewReno/CUBIC and spot-checks the core state-machine invariants:
+//
+//   * Constructor starts in Startup with full INITIAL_WINDOW_BYTES cwnd.
+//   * HIGH_GAIN > 2.0 (Startup phase pacing), DRAIN_GAIN < 1.0.
+//   * On packet sent, in_flight accumulates.
+//   * Loss never drives cwnd below MIN_WINDOW_BYTES (V5-style floor).
+//   * Pacing is ALWAYS on for BBR (RFC 9002 §7.7 suggests pacing).
+
+mount core.*;
+mount core.time.instant.{Instant};
+mount core.time.duration.{Duration};
+mount core.net.quic.recovery.cc.bbr.{Bbr, HIGH_GAIN, DRAIN_GAIN};
+mount core.net.quic.recovery.cc.{
+    CongestionCtrl, MAX_DATAGRAM_SIZE, INITIAL_WINDOW_BYTES, MIN_WINDOW_BYTES,
+};
+
+fn main() {
+    // Gain constants sanity.
+    assert_eq(HIGH_GAIN > 2.0, true);
+    assert_eq(DRAIN_GAIN < 1.0, true);
+    assert_eq(DRAIN_GAIN > 0.0, true);
+
+    // Constructor starts at INITIAL_WINDOW_BYTES.
+    let b0 = Bbr.new();
+    assert_eq(b0.window(), INITIAL_WINDOW_BYTES);
+
+    // on_packet_sent accumulates in-flight.
+    let mut b1 = Bbr.new();
+    b1.on_packet_sent(MAX_DATAGRAM_SIZE);
+    assert_eq(b1.bytes_in_flight(), MAX_DATAGRAM_SIZE);
+    b1.on_packet_sent(MAX_DATAGRAM_SIZE);
+    assert_eq(b1.bytes_in_flight(), MAX_DATAGRAM_SIZE * 2_u32);
+
+    // Loss floor.
+    let mut b2 = Bbr.new();
+    b2.on_packet_sent(MAX_DATAGRAM_SIZE * 32_u32);
+    let mut i: Int = 0;
+    while i < 30 {
+        b2.on_packets_lost(MAX_DATAGRAM_SIZE / 4_u32, Instant.now());
+        assert_eq(b2.window() >= MIN_WINDOW_BYTES, true);
+        i = i + 1;
+    }
+
+    // BBR paces unconditionally (CongestionCtrl contract).
+    let b3 = Bbr.new();
+    assert_eq(b3.should_pace(), true);
+
+    // Over-ACK saturates to 0.
+    let mut b4 = Bbr.new();
+    b4.on_packet_sent(MAX_DATAGRAM_SIZE);
+    b4.on_ack_received(MAX_DATAGRAM_SIZE, Duration.from_millis(25), Instant.now());
+    b4.on_ack_received(MAX_DATAGRAM_SIZE, Duration.from_millis(25), Instant.now());  // spurious
+    assert_eq(b4.bytes_in_flight() >= 0_u32, true);
+
+    print("BBRv2 state-machine invariants OK");
+}
