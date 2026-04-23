@@ -1,0 +1,76 @@
+// @test: typecheck-pass
+// @level: L2
+// @tier: 0
+// @tags: sqlite, native, l7, cast
+// @timeout: 15000
+// @description: CAST(x AS <type>) expression support
+//
+// Spec: internal/specs/sqlite-native.md §14.2 (CAST)
+
+mount core.*;
+mount collections.List;
+mount core.database.sqlite.native.l7_api.{
+    Database, DbError, open_admin,
+};
+mount core.database.sqlite.native.l4_vdbe.Register;
+
+fn cast_text_to_int() {
+    let mut db = match open_admin() {
+        Ok(d)  => d,
+        Err(_) => { panic("open"); return; }
+    };
+    let _ = db.execute(&"CREATE TABLE t (s TEXT)".clone());
+    let _ = db.execute(&"INSERT INTO t VALUES ('42')".clone());
+    match db.query_all(&"SELECT CAST(s AS INTEGER) FROM t".clone()) {
+        Ok(rows) => {
+            match rows[0][0] {
+                RInt(x) => { assert_eq(x as Int, 42); }
+                _ => panic("CAST to INTEGER should be RInt"),
+            }
+        }
+        Err(_) => panic("query_all CAST INTEGER"),
+    }
+}
+
+fn cast_int_to_real() {
+    let mut db = match open_admin() {
+        Ok(d)  => d,
+        Err(_) => { panic("open"); return; }
+    };
+    let _ = db.execute(&"CREATE TABLE t (v INTEGER)".clone());
+    let _ = db.execute(&"INSERT INTO t VALUES (7)".clone());
+    match db.query_all(&"SELECT CAST(v AS REAL) FROM t".clone()) {
+        Ok(rows) => {
+            match rows[0][0] {
+                RReal(_) => {}
+                _ => panic("CAST to REAL should be RReal"),
+            }
+        }
+        Err(_) => panic("query_all CAST REAL"),
+    }
+}
+
+fn cast_int_to_text() {
+    let mut db = match open_admin() {
+        Ok(d)  => d,
+        Err(_) => { panic("open"); return; }
+    };
+    let _ = db.execute(&"CREATE TABLE t (v INTEGER)".clone());
+    let _ = db.execute(&"INSERT INTO t VALUES (123)".clone());
+    match db.query_all(&"SELECT CAST(v AS TEXT) FROM t".clone()) {
+        Ok(rows) => {
+            match rows[0][0] {
+                RText(_) => {}
+                _ => panic("CAST to TEXT should be RText"),
+            }
+        }
+        Err(_) => panic("query_all CAST TEXT"),
+    }
+}
+
+fn main() {
+    cast_text_to_int();
+    cast_int_to_real();
+    cast_int_to_text();
+    print("cast_expression typecheck ok");
+}

@@ -628,6 +628,66 @@ public fn step(state: &mut VdbeState, program: &VdbeProgram) -> StepResult {
             Yield
         }
 
+        CastVal(src_reg, target_kind, dst) => {
+            let v = state.regs.get(src_reg);
+            let out: Register = match target_kind {
+                0 => match v {
+                    RInt(x)  => RInt(x),
+                    RReal(x) => RInt(x as Int64),
+                    RText(ref s) => match parse_int_text(s) {
+                        Some(i) => RInt(i),
+                        None    => RInt(0 as Int64),
+                    },
+                    RNull => RNull,
+                    _ => RInt(0 as Int64),
+                },
+                1 => match v {
+                    RInt(x)  => RReal(x as Float64),
+                    RReal(x) => RReal(x),
+                    RText(ref s) => match parse_real_text(s) {
+                        Some(f) => RReal(f),
+                        None    => RReal(0.0),
+                    },
+                    RNull => RNull,
+                    _ => RReal(0.0),
+                },
+                2 => match v {
+                    RInt(x)  => RText(int_to_text(x)),
+                    RReal(x) => RText(real_to_text(x)),
+                    RText(ref s) => RText(s.clone()),
+                    RNull => RNull,
+                    RBlob(ref b) => RText(bytes_to_text(b)),
+                    _ => RText("".clone()),
+                },
+                3 => match v {
+                    RBlob(ref b) => RBlob(b.clone()),
+                    RText(ref s) => RBlob(text_to_bytes(s)),
+                    RNull => RNull,
+                    _ => RBlob(List.new()),
+                },
+                4 => {
+                    // NUMERIC affinity: prefer int if lossless else real.
+                    match v {
+                        RInt(x)  => RInt(x),
+                        RReal(x) => RReal(x),
+                        RText(ref s) => match parse_int_text(s) {
+                            Some(i) => RInt(i),
+                            None    => match parse_real_text(s) {
+                                Some(f) => RReal(f),
+                                None    => RText(s.clone()),
+                            }
+                        },
+                        RNull => RNull,
+                        _ => v,
+                    }
+                }
+                _ => v,
+            };
+            state.regs.set(dst, out);
+            state.pc = state.pc + 1;
+            Yield
+        }
+
         ScalarFn(kind, n_args, first_arg_reg, dst) => {
             let result: Register = match kind {
                 0 => {
@@ -765,6 +825,87 @@ public fn step(state: &mut VdbeState, program: &VdbeProgram) -> StepResult {
     }
 }
 
+
+// -----------------------------------------------------------------------------
+// Cast helpers
+// -----------------------------------------------------------------------------
+
+fn parse_int_text(s: &Text) -> Maybe<Int64> {
+    let bs = s.as_bytes();
+    if bs.len() == 0 { return None; }
+    let mut i: Int = 0;
+    let mut sign: Int64 = 1 as Int64;
+    if bs[0] == (45 as Byte) { sign = -1 as Int64; i = 1; }
+    else if bs[0] == (43 as Byte) { i = 1; }
+    if i >= bs.len() { return None; }
+    let mut acc: Int64 = 0 as Int64;
+    while i < bs.len() {
+        let b = bs[i];
+        if b < (48 as Byte) || b > (57 as Byte) { return None; }
+        let d: Int64 = ((b - (48 as Byte)) as Int64);
+        acc = acc * (10 as Int64) + d;
+        i = i + 1;
+    }
+    Some(acc * sign)
+}
+
+fn parse_real_text(s: &Text) -> Maybe<Float64> {
+    // Very minimal: tries integer first, falls back to NaN-guard.
+    match parse_int_text(s) {
+        Some(i) => Some(i as Float64),
+        None    => None,
+    }
+}
+
+fn int_to_text(x: Int64) -> Text {
+    // Manual base-10 render (SQLite cheat: allocate small buffer).
+    if x == (0 as Int64) { return "0".clone(); }
+    let mut n: Int64 = x;
+    let mut neg: Bool = false;
+    if n < (0 as Int64) { neg = true; n = -n; }
+    let mut digits: List<Byte> = List.new();
+    while n > (0 as Int64) {
+        let d: Byte = ((n as Int) % 10) as Byte;
+        digits.push(d + (48 as Byte));
+        n = n / (10 as Int64);
+    }
+    let mut out = Text.new();
+    if neg { out.push_byte(45 as Byte); }
+    let mut i: Int = digits.len() - 1;
+    while i >= 0 {
+        out.push_byte(digits[i]);
+        i = i - 1;
+    }
+    out
+}
+
+fn real_to_text(x: Float64) -> Text {
+    // Quick-and-dirty: render integral part only. Full IEEE rendering
+    // lives in a dedicated helper outside the interpreter hot path.
+    let i = x as Int64;
+    int_to_text(i)
+}
+
+fn bytes_to_text(b: &List<Byte>) -> Text {
+    let mut out = Text.new();
+    let mut i: Int = 0;
+    while i < b.len() {
+        out.push_byte(b[i]);
+        i = i + 1;
+    }
+    out
+}
+
+fn text_to_bytes(s: &Text) -> List<Byte> {
+    let mut out: List<Byte> = List.new();
+    let bs = s.as_bytes();
+    let mut i: Int = 0;
+    while i < bs.len() {
+        out.push(bs[i]);
+        i = i + 1;
+    }
+    out
+}
 
 // -----------------------------------------------------------------------------
 // Scalar-function helpers

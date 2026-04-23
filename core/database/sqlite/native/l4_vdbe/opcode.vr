@@ -133,6 +133,9 @@ public type Opcode is
     //   0  LENGTH   1  ABS      2  LOWER   3  UPPER
     //   4  COALESCE  5  IFNULL  6  NULLIF
     | ScalarFn(kind: Int, n_args: Int, reg_first_arg: Int, reg_dst: Int)
+    // CAST(src AS <target>). target_kind: 0 INTEGER / 1 REAL / 2 TEXT /
+    // 3 BLOB / 4 NUMERIC (affinity coerce).
+    | CastVal(reg_src: Int, target_kind: Int, reg_dst: Int)
     | AggStep(agg_const_idx: Int, n_args: Int, reg_first_arg: Int, reg_acc: Int)
     | AggFinal(agg_const_idx: Int, reg_acc: Int)
     // AVG steps use separate sum + count regs (n_args is 0 or 1 — the
@@ -226,6 +229,7 @@ public fn opcode_name(op: &Opcode) -> Text {
         WriteCookie(_, _) => "WriteCookie".clone(),
         Function(_, _, _, _) => "Function".clone(),
         ScalarFn(_, _, _, _) => "ScalarFn".clone(),
+        CastVal(_, _, _)     => "CastVal".clone(),
         AggStep(_, _, _, _)  => "AggStep".clone(),
         AggFinal(_, _)       => "AggFinal".clone(),
         AggStepAvg(_, _, _, _) => "AggStepAvg".clone(),

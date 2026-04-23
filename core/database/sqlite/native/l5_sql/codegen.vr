@@ -1988,8 +1988,33 @@ public fn emit_expr(st: &mut CgState, e: &Expr, dst: Int) -> Result<(), CodegenE
             Ok(())
         }
         EFunc(ref name, ref args, _) => emit_scalar_call(st, name, args, dst),
+        ECast(ref inner, ref target_ty) => {
+            let src = st.regs.alloc();
+            match emit_expr(st, inner, src) {
+                Ok(_)  => {}, Err(e) => { return Err(e); }
+            }
+            let kind = cast_target_kind(target_ty);
+            if kind < 0 {
+                return Err(unsupported("CAST target type unrecognized".clone()));
+            }
+            let _ = st.program.emit(CastVal(src, kind, dst));
+            Ok(())
+        }
         _ => Err(unsupported("expression kind not supported by v1 codegen".clone())),
     }
+}
+
+fn cast_target_kind(ty: &Text) -> Int {
+    let n = ascii_lower(ty);
+    if n == "integer".clone() { return 0; }
+    if n == "int".clone()     { return 0; }
+    if n == "real".clone()    { return 1; }
+    if n == "float".clone()   { return 1; }
+    if n == "text".clone()    { return 2; }
+    if n == "varchar".clone() { return 2; }
+    if n == "blob".clone()    { return 3; }
+    if n == "numeric".clone() { return 4; }
+    -1
 }
 
 fn scalar_fn_kind(name: &Text) -> Int {
