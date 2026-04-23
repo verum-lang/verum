@@ -1,0 +1,55 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: base, ordering, comparison
+// @timeout: 15000
+// @description: core.base.ordering — Less/Equal/Greater queries + reverse/then
+
+mount core.*;
+mount core.base.ordering.Ordering;
+
+fn is_queries() {
+    let l: Ordering = Less;
+    let e: Ordering = Equal;
+    let g: Ordering = Greater;
+    assert_eq(l.is_less(), true);
+    assert_eq(e.is_equal(), true);
+    assert_eq(g.is_greater(), true);
+    assert_eq(l.is_le(), true);
+    assert_eq(e.is_le(), true);
+    assert_eq(g.is_le(), false);
+    assert_eq(g.is_ge(), true);
+    assert_eq(e.is_ge(), true);
+    assert_eq(l.is_ge(), false);
+}
+
+fn reverse_swaps_less_greater() {
+    let l: Ordering = Less;
+    let r = l.reverse();
+    assert_eq(r.is_greater(), true);
+    let g: Ordering = Greater;
+    let r2 = g.reverse();
+    assert_eq(r2.is_less(), true);
+    // Equal stays equal under reverse.
+    let e: Ordering = Equal;
+    let r3 = e.reverse();
+    assert_eq(r3.is_equal(), true);
+}
+
+fn then_chains_equal_fields() {
+    let e: Ordering = Equal;
+    let l: Ordering = Less;
+    // Equal.then(anything) returns the argument.
+    let chained = e.then(l);
+    assert_eq(chained.is_less(), true);
+    // Non-equal dominates.
+    let dominates = l.then(Greater);
+    assert_eq(dominates.is_less(), true);
+}
+
+fn main() {
+    is_queries();
+    reverse_swaps_less_greater();
+    then_chains_equal_fields();
+    print("ordering_typecheck ok");
+}
