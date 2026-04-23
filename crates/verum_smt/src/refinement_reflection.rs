@@ -153,6 +153,14 @@ impl RefinementReflectionRegistry {
         self.by_name.get(name)
     }
 
+    /// Iterate over every reflected function in the registry. Used by
+    /// the translator to register callee signatures so the UF fallback
+    /// emits `FuncDecl`s with the correct sort signature (Bool/Real/
+    /// Int) and stays in sync with the SMT-LIB declaration block.
+    pub fn iter(&self) -> impl Iterator<Item = &ReflectedFunction> {
+        self.by_name.values()
+    }
+
     pub fn len(&self) -> usize {
         self.by_name.len()
     }

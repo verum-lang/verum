@@ -274,6 +274,18 @@ pub struct Translator<'ctx> {
     /// about list-concatenation length additivity without a dedicated
     /// List sort.
     pending_axioms: std::cell::RefCell<Vec<z3::ast::Bool>>,
+
+    /// Signatures of known user functions (name → list of parameter
+    /// sort names, return sort name). Populated by the caller from
+    /// the module's `FunctionDecl`s so the UF-fallback arm in
+    /// `translate_call` can emit the correct Z3 sort signature for
+    /// Bool-returning, Real-returning, etc. user functions —
+    /// otherwise every call defaults to `Int` and Z3 treats the
+    /// reflection-axiom's declaration and the call-site's
+    /// declaration as distinct (conflicting) symbols.
+    callee_signatures: std::cell::RefCell<
+        std::collections::HashMap<String, (Vec<String>, String)>,
+    >,
 }
 
 /// Build the canonical length-constant name for an expression.
@@ -308,6 +320,7 @@ impl<'ctx> Translator<'ctx> {
             config: TranslationConfig::default(),
             length_constants: std::cell::RefCell::new(std::collections::BTreeSet::new()),
             pending_axioms: std::cell::RefCell::new(Vec::new()),
+            callee_signatures: std::cell::RefCell::new(std::collections::HashMap::new()),
         }
     }
 
@@ -319,6 +332,7 @@ impl<'ctx> Translator<'ctx> {
             config,
             length_constants: std::cell::RefCell::new(std::collections::BTreeSet::new()),
             pending_axioms: std::cell::RefCell::new(Vec::new()),
+            callee_signatures: std::cell::RefCell::new(std::collections::HashMap::new()),
         }
     }
 
@@ -345,6 +359,33 @@ impl<'ctx> Translator<'ctx> {
         self.length_constants
             .borrow_mut()
             .insert(name.to_string());
+    }
+
+    /// Register a known user-function signature so the UF fallback
+    /// in `translate_call` emits the correct Z3 `FuncDecl` sort
+    /// signature. `param_sorts` and `ret_sort` are SMT-LIB sort
+    /// names (`"Int"`, `"Bool"`, `"Real"`, etc.); any other value
+    /// falls back to `Int` when resolved.
+    pub fn register_callee_signature(
+        &self,
+        name: &str,
+        param_sorts: Vec<String>,
+        ret_sort: String,
+    ) {
+        self.callee_signatures
+            .borrow_mut()
+            .insert(name.to_string(), (param_sorts, ret_sort));
+    }
+
+    /// Resolve an SMT-LIB sort name to a Z3 `Sort` object.
+    /// Anything not recognised becomes `Int` — matching what the
+    /// reflection registry does when it has no better information.
+    fn sort_from_name(name: &str) -> z3::Sort {
+        match name {
+            "Bool" => z3::Sort::bool(),
+            "Real" => z3::Sort::real(),
+            _ => z3::Sort::int(),
+        }
     }
 
     /// Emit the length-additivity axiom for every `Concat` node in
@@ -2113,15 +2154,36 @@ impl<'ctx> Translator<'ctx> {
                     // `translate_call`'s caller sees when translating
                     // goals that reference user functions.
                     _ => {
-                        use z3::{FuncDecl, Sort};
-                        let int_sort = Sort::int();
-                        let arg_sorts: Vec<Sort> = (0..args.len())
-                            .map(|_| Sort::int())
-                            .collect();
+                        use z3::FuncDecl;
+                        // Prefer the registered signature when we
+                        // have one — this gives Bool/Real-returning
+                        // user functions the right Z3 sort and keeps
+                        // the translator's `FuncDecl` in sync with
+                        // the reflection registry's SMT-LIB
+                        // declaration. Without it, the two emit
+                        // conflicting symbols and Z3 sees them as
+                        // distinct uninterpreted functions.
+                        let (arg_sorts_vec, ret_sort) =
+                            if let Some((p, r)) = self
+                                .callee_signatures
+                                .borrow()
+                                .get(func_name)
+                                .cloned()
+                            {
+                                let ps: Vec<z3::Sort> =
+                                    p.iter().map(|n| Self::sort_from_name(n)).collect();
+                                (ps, Self::sort_from_name(&r))
+                            } else {
+                                // Default: Int → Int → … → Int
+                                let ps: Vec<z3::Sort> = (0..args.len())
+                                    .map(|_| z3::Sort::int())
+                                    .collect();
+                                (ps, z3::Sort::int())
+                            };
                         let decl = FuncDecl::new(
                             func_name,
-                            arg_sorts.iter().collect::<Vec<_>>().as_slice(),
-                            &int_sort,
+                            arg_sorts_vec.iter().collect::<Vec<_>>().as_slice(),
+                            &ret_sort,
                         );
                         let mut z3_args: Vec<Dynamic> = Vec::with_capacity(args.len());
                         for a in args {

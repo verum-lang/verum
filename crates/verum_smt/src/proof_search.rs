@@ -4368,6 +4368,24 @@ impl ProofSearchEngine {
         // Translate goal to Z3
         let translator = Translator::new(context);
 
+        // Populate callee signatures from the reflection registry so
+        // the translator's UF-fallback emits Bool/Real-returning
+        // `FuncDecl`s where appropriate (instead of defaulting every
+        // call to `Int` and conflicting with the registry's SMT-LIB
+        // declaration block).
+        for rf in self.reflection_registry.iter() {
+            let param_sorts: Vec<String> = rf
+                .parameter_sorts
+                .iter()
+                .map(|s| s.as_str().to_string())
+                .collect();
+            translator.register_callee_signature(
+                rf.name.as_str(),
+                param_sorts,
+                rf.return_sort.as_str().to_string(),
+            );
+        }
+
         // Build formula: hypotheses ⇒ goal
         let mut formula = goal.goal.clone();
 

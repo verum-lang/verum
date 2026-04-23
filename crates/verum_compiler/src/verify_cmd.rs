@@ -508,6 +508,15 @@ impl<'s> VerifyCommand<'s> {
             }
         }
 
+        // NOTE: reflection_registry threading for verify_function
+        // is a TODO — the theorem-path (try_smt_discharge) already
+        // has it wired. For now, user-function calls in fn-level
+        // postconditions use the Int-default UF signature, which is
+        // correct for Int-returning user functions (the common case
+        // in stdlib) and sound for others (Z3 treats mismatched
+        // sorts as unrelated symbols, leaving the claim unprovable
+        // rather than unsound).
+
         // Step 1: Verify preconditions are satisfiable (not contradictory)
         if has_requires || has_implicit_requires {
             if let Err(e) =
