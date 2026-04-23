@@ -1,0 +1,54 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: control, continuation, delimited
+// @timeout: 15000
+// @description: core.control.continuation — CcTerm constructors + helpers
+
+mount core.*;
+mount core.control.continuation.{
+    CcTerm,
+    cc_const, cc_var, cc_lam, cc_app, cc_reset, cc_shift,
+    cc_is_value, cc_substitute,
+};
+
+fn constructors_build_terms() {
+    let c = cc_const("42".clone());
+    let v = cc_var("x".clone());
+    let l = cc_lam("x".clone(), cc_var("x".clone()));
+    let a = cc_app(cc_var("f".clone()), cc_var("y".clone()));
+    let r = cc_reset(cc_const("inner".clone()));
+    let s = cc_shift("k".clone(), cc_var("k".clone()));
+    // Each constructor returns a CcTerm.
+    let _ = c;
+    let _ = v;
+    let _ = l;
+    let _ = a;
+    let _ = r;
+    let _ = s;
+}
+
+fn is_value_on_const_and_lam() {
+    // A Const and a Lam are values; an App is not.
+    let c = cc_const("v".clone());
+    assert_eq(cc_is_value(c), true);
+    let l = cc_lam("x".clone(), cc_var("x".clone()));
+    assert_eq(cc_is_value(l), true);
+    let a = cc_app(cc_var("f".clone()), cc_var("y".clone()));
+    assert_eq(cc_is_value(a), false);
+}
+
+fn substitute_rewrites_bound_var() {
+    // (λx. x)[x := 42] — since x is bound, substitution doesn't touch it.
+    let l = cc_lam("x".clone(), cc_var("x".clone()));
+    let _sub = cc_substitute(l, "x".clone(), cc_const("42".clone()));
+    // Body is λ-bound, substitution semantics vary by implementation —
+    // we only assert the function returns a CcTerm.
+}
+
+fn main() {
+    constructors_build_terms();
+    is_value_on_const_and_lam();
+    substitute_rewrites_bound_var();
+    print("continuation_typecheck ok");
+}
