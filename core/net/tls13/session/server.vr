@@ -1,0 +1,190 @@
+// =============================================================================
+// net/tls13/session/server.vr — Typed-state TLS 1.3 server session (spec §4.3)
+// =============================================================================
+// Layer: 7 (Session)
+// Spec: internal/specs/tls-quic.md §4.3 — typed state machines
+//       RFC 8446 §4.2 (server handshake), §5 (record layer)
+// =============================================================================
+//
+// Mirrors `client.vr`: a phase-parameterised `TlsServer<S>` wrapping
+// the existing ServerSm with:
+//
+//   * `TlsServer<Handshaking>` — new(), feed(inbound_handshake)
+//   * `TlsServer<Established>` — read(), write(), close()
+//   * `TlsServer<Closed>`      — terminal
+//
+// Wire bytes flow like on the client. Integrations with `core.net.tcp`
+// are the caller's responsibility.
+//
+// =============================================================================
+
+module core.net.tls13.session.server;
+
+mount core.*;
+mount core.collections.List;
+mount core.net.tls13.error.{TlsError};
+mount core.net.tls13.cipher_suite.{AeadKind};
+mount core.net.tls13.record.{AeadState, ContentType, RecordError,
+                              MAX_PLAINTEXT_SIZE};
+mount core.net.tls13.keyschedule.{TrafficSecret, TrafficKeys, TrafficDirection};
+mount core.net.tls13.handshake.server_sm.{
+    ServerConfig, ServerSm, ServerStepOutput, ServerConnected,
+};
+mount core.net.tls13.session.state.{Handshaking, Established, Closed};
+
+// =============================================================================
+// TlsServer<S>
+// =============================================================================
+
+public type TlsServer<S> is {
+    _phase: S,
+    sm: ServerSm,
+    pending_out: List<Byte>,
+    outbound: Maybe<AeadState>,
+    inbound:  Maybe<AeadState>,
+    connected: Maybe<ServerConnected>,
+};
+
+implement TlsServer<Handshaking> {
+    public fn new(config: ServerConfig) -> TlsServer<Handshaking> {
+        TlsServer {
+            _phase: (),
+            sm: ServerSm.new(config),
+            pending_out: [],
+            outbound: Maybe.None,
+            inbound: Maybe.None,
+            connected: Maybe.None,
+        }
+    }
+
+    public fn progress(self, inbound_handshake: &[Byte]) -> Result<ServerProgress, TlsError> {
+        let (sm_next, step) = self.sm.on_handshake(inbound_handshake)?;
+        let mut pending = self.pending_out;
+        let mut i: Int = 0;
+        while i < step.outbound_handshake.len() {
+            pending.push(step.outbound_handshake[i]);
+            i = i + 1;
+        }
+        match step.connected {
+            Maybe.Some(conn) => {
+                let (out_aead, in_aead) = derive_aead_pair(&conn)?;
+                let established = TlsServer {
+                    _phase: (),
+                    sm: sm_next,
+                    pending_out: pending,
+                    outbound: Maybe.Some(out_aead),
+                    inbound:  Maybe.Some(in_aead),
+                    connected: Maybe.Some(conn),
+                };
+                Ok(ServerProgress.Done(established))
+            },
+            Maybe.None => {
+                let keep = TlsServer {
+                    _phase: (),
+                    sm: sm_next,
+                    pending_out: pending,
+                    outbound: Maybe.None,
+                    inbound: Maybe.None,
+                    connected: Maybe.None,
+                };
+                Ok(ServerProgress.Continue(keep))
+            },
+        }
+    }
+
+    public fn take_pending(&mut self) -> List<Byte> {
+        let mut out: List<Byte> = [];
+        let mut i: Int = 0;
+        while i < self.pending_out.len() {
+            out.push(self.pending_out[i]);
+            i = i + 1;
+        }
+        self.pending_out = [];
+        out
+    }
+}
+
+public type ServerProgress is
+      Continue(TlsServer<Handshaking>)
+    | Done(TlsServer<Established>);
+
+implement TlsServer<Established> {
+    public fn write(&mut self, data: &[Byte]) -> Result<List<Byte>, TlsError> {
+        if data.len() > MAX_PLAINTEXT_SIZE {
+            return Err(TlsError.InternalError(Text.from_str("record too large")));
+        }
+        match &mut self.outbound {
+            Maybe.Some(aead) => {
+                match aead.seal(data, ContentType.ApplicationData, 0) {
+                    Ok(wire) => Ok(wire),
+                    Err(_) => Err(TlsError.InternalError(Text.from_str("aead seal failed"))),
+                }
+            },
+            Maybe.None => Err(TlsError.InternalError(Text.from_str("outbound keys missing"))),
+        }
+    }
+
+    public fn recv(&mut self, wire: &[Byte]) -> Result<(ContentType, List<Byte>), TlsError> {
+        match &mut self.inbound {
+            Maybe.Some(aead) => {
+                match aead.open(wire) {
+                    Ok(pair) => Ok(pair),
+                    Err(_) => Err(TlsError.InternalError(Text.from_str("aead open failed"))),
+                }
+            },
+            Maybe.None => Err(TlsError.InternalError(Text.from_str("inbound keys missing"))),
+        }
+    }
+
+    public fn close(self) -> Result<(TlsServer<Closed>, List<Byte>), TlsError> {
+        let mut out = self;
+        let alert = build_close_notify();
+        let wire = match &mut out.outbound {
+            Maybe.Some(aead) => {
+                match aead.seal(alert.as_slice(), ContentType.Alert, 0) {
+                    Ok(w) => w,
+                    Err(_) => return Err(TlsError.InternalError(Text.from_str("close_notify seal failed"))),
+                }
+            },
+            Maybe.None => return Err(TlsError.InternalError(Text.from_str("outbound keys missing"))),
+        };
+        let closed = TlsServer {
+            _phase: (),
+            sm: ServerSm.ServerClosedSm,
+            pending_out: [],
+            outbound: Maybe.None,
+            inbound: Maybe.None,
+            connected: out.connected,
+        };
+        Ok((closed, wire))
+    }
+}
+
+implement TlsServer<Closed> {
+    public fn connected_summary(&self) -> Maybe<ServerConnected> {
+        self.connected.clone()
+    }
+}
+
+fn derive_aead_pair(conn: &ServerConnected) -> Result<(AeadState, AeadState), TlsError> {
+    let aead_kind = conn.suite.aead();
+    let key_len = aead_kind.key_len();
+    let iv_len  = aead_kind.iv_len();
+    let client_keys: TrafficKeys = conn.client_ap_traffic
+        .derive_keys(key_len, iv_len)
+        .map_err(|_| TlsError.InternalError(Text.from_str("client traffic derive")))?;
+    let server_keys: TrafficKeys = conn.server_ap_traffic
+        .derive_keys(key_len, iv_len)
+        .map_err(|_| TlsError.InternalError(Text.from_str("server traffic derive")))?;
+    // Server outbound = server_ap_traffic; inbound = client_ap_traffic.
+    let out_aead = AeadState.new(aead_kind.clone(), server_keys.key.clone(), server_keys.iv);
+    let in_aead  = AeadState.new(aead_kind.clone(), client_keys.key.clone(), client_keys.iv);
+    Ok((out_aead, in_aead))
+}
+
+fn build_close_notify() -> List<Byte> {
+    let mut a: List<Byte> = [];
+    a.push(0x01_u8);  // warning
+    a.push(0x00_u8);  // close_notify
+    a
+}

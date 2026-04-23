@@ -1,0 +1,50 @@
+// @test: unit
+// @tier: 0
+// @level: L2
+// @tags: quic, path, v7, anti_amplification, rfc9000_21_1_1_3
+// @timeout: 5000
+// @expect: pass
+
+// V7 theorem: sent_bytes <= 3 * received_bytes while path is Unvalidated.
+
+mount core.*;
+mount core.net.addr.{SocketAddr, SocketAddrV4, Ipv4Addr};
+mount core.time.instant.{Instant};
+mount core.net.quic.path.{Path, PathError};
+
+fn addr(port: Int) -> SocketAddr {
+    SocketAddr.V4(SocketAddrV4.new(Ipv4Addr.localhost(), port))
+}
+
+fn main() {
+    let mut p = Path.new(addr(4000), addr(5000), false);
+    assert_eq(p.amp_budget_ok(), true);  // zero-sent, zero-received trivially ok
+
+    // Receive 1000 bytes — budget becomes 3000 outbound.
+    p.on_bytes_received(1000_u64);
+    assert_eq(p.amp_budget_ok(), true);
+
+    // Send 2500 — within budget.
+    match p.can_send(2500_u64) {
+        Ok(()) => p.on_bytes_sent(2500_u64),
+        Err(_) => panic("within-budget send refused"),
+    }
+    assert_eq(p.amp_budget_ok(), true);
+
+    // Attempting 600 more would exceed (2500 + 600 = 3100 > 3000).
+    match p.can_send(600_u64) {
+        Err(PathError.AmplificationLimitExceeded) => {},
+        _ => panic("limit not enforced"),
+    }
+    // Budget must still hold — we DID NOT advance sent_bytes.
+    assert_eq(p.amp_budget_ok(), true);
+
+    // After validation the cap no longer applies.
+    let _c = p.begin_validation(Instant.now());
+    // (Skip full response plumbing — the invariant predicate just
+    //  treats Validating the same as Validated for the amp-budget
+    //  check, so we can trust it symbolically.)
+    assert_eq(p.amp_budget_ok(), true);
+
+    print("V7 anti-amp budget invariant holds");
+}

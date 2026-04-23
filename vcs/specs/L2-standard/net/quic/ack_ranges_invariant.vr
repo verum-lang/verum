@@ -1,0 +1,68 @@
+// @test: unit
+// @tier: 0
+// @level: L2
+// @tags: quic, ack_ranges, v3, refinement, rfc9000
+// @timeout: 5000
+// @expect: pass
+
+// Empirical check of the V3 invariant on `core.net.quic.ack_ranges.AckRanges`.
+// We run a mixed sequence of inserts and assert the structural
+// invariant (non-overlapping, strictly descending, gap ≥ 2) after
+// every step. The SMT-level proof lives in the paired
+// `ack_ranges_invariant_kat.vr` once the field-refinement path is
+// fully wired; this test keeps the invariant observable without
+// requiring the solver to be on.
+
+mount core.*;
+mount core.net.quic.ack_ranges.{AckRanges};
+
+fn assert_valid(r: &AckRanges, stage: &str) {
+    if !r.is_valid() {
+        print(f"AckRanges invariant broken at stage {stage}");
+        panic("V3 invariant violated");
+    }
+}
+
+fn main() {
+    // Empty — trivially valid.
+    let r0 = AckRanges.empty();
+    assert_valid(&r0, "empty");
+    assert_eq(r0.len(), 0);
+
+    // Single insertion.
+    let r1 = r0.insert_pn(5_u64);
+    assert_valid(&r1, "single 5");
+    assert_eq(r1.len(), 1);
+    assert_eq(r1.contains(5_u64), true);
+
+    // Non-adjacent — new disjoint range appears, desc order.
+    let r2 = r1.insert_pn(10_u64);
+    assert_valid(&r2, "10 after 5");
+    assert_eq(r2.len(), 2);
+    // Ranges are descending by largest; [10..10, 5..5].
+    assert_eq(r2.largest(), Maybe.Some(10_u64));
+
+    // Adjacent above — coalesces.
+    let r3 = r2.insert_pn(6_u64);
+    assert_valid(&r3, "6 coalesces with 5");
+    // Now two ranges: [10..10, 6..6+... actually just [10..10, 5..6] and [10..10] still separate].
+    // Either way the invariant must hold.
+
+    // Fill the gap 7, 8, 9 — eventually one big range 5..=10.
+    let r4 = r3.insert_pn(7_u64);
+    assert_valid(&r4, "7 joins");
+    let r5 = r4.insert_pn(8_u64);
+    assert_valid(&r5, "8 joins");
+    let r6 = r5.insert_pn(9_u64);
+    assert_valid(&r6, "9 joins, should coalesce with 10 above");
+
+    // Duplicate insert — idempotent.
+    let r7 = r6.insert_pn(7_u64);
+    assert_valid(&r7, "duplicate 7");
+
+    // Insert far below — new range on the low side.
+    let r8 = r7.insert_pn(1_u64);
+    assert_valid(&r8, "far below 1");
+
+    print("ack_ranges V3 invariant holds across insert sequence");
+}

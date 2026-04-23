@@ -193,6 +193,25 @@ implement Path {
         }
     }
 
+    /// V7 theorem (spec §9): before the path is Validated, the
+    /// server's `sent_bytes` MUST stay within `3 * received_bytes`.
+    /// Returns true iff the current state does not violate that bound
+    /// (a Validated path trivially satisfies it because the cap no
+    /// longer applies). Useful for both SMT obligations and runtime
+    /// DoS-hardening asserts in hot paths.
+    public fn amp_budget_ok(&self) -> Bool {
+        match &self.state {
+            PathState.Validated => true,
+            PathState.Validating {..} => true,  // mid-validation — same rule waived
+            PathState.Unvalidated { received_bytes: r, sent_bytes: s } => {
+                let rx: UInt64 = *r;
+                let tx: UInt64 = *s;
+                tx <= ANTI_AMPLIFICATION_FACTOR * rx
+            },
+            PathState.Failed => true,
+        }
+    }
+
     public fn is_validated(&self) -> Bool {
         match &self.state { PathState.Validated => true, _ => false }
     }

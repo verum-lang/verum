@@ -1,0 +1,47 @@
+// @test: unit
+// @tier: 0
+// @level: L2
+// @tags: quic, transport_params, v9, rfc9000_18_2
+// @timeout: 5000
+// @expect: pass
+
+// V9 theorem: RFC 9000 §18.2 transport-parameter bounds hold for the
+// baseline defaults + for mutations within the allowed range.
+
+mount core.*;
+mount core.net.quic.transport_params.{
+    TransportParams, MAX_STREAMS_LIMIT, MAX_ACK_DELAY_EXPONENT,
+    MIN_ACTIVE_CID_LIMIT, MIN_MAX_UDP_PAYLOAD_SIZE,
+};
+
+fn main() {
+    // Defaults — RFC §18.2 canonical baseline.
+    let mut p = TransportParams.defaults();
+    assert_eq(p.bounds_ok(), true);
+
+    // Push values to their maxima / minima — still valid.
+    p.initial_max_streams_bidi = MAX_STREAMS_LIMIT;
+    p.initial_max_streams_uni  = MAX_STREAMS_LIMIT;
+    p.ack_delay_exponent       = MAX_ACK_DELAY_EXPONENT;
+    p.active_connection_id_limit = MIN_ACTIVE_CID_LIMIT;
+    p.max_udp_payload_size       = MIN_MAX_UDP_PAYLOAD_SIZE;
+    assert_eq(p.bounds_ok(), true);
+
+    // Now intentionally exceed — each violation flips the predicate to false.
+    p.initial_max_streams_bidi = MAX_STREAMS_LIMIT + 1_u64;
+    assert_eq(p.bounds_ok(), false);
+
+    p = TransportParams.defaults();
+    p.ack_delay_exponent = MAX_ACK_DELAY_EXPONENT + 1_u8;
+    assert_eq(p.bounds_ok(), false);
+
+    p = TransportParams.defaults();
+    p.active_connection_id_limit = 1_u64;  // RFC mandates >= 2
+    assert_eq(p.bounds_ok(), false);
+
+    p = TransportParams.defaults();
+    p.max_udp_payload_size = 1199_u64;     // < 1200 → reject
+    assert_eq(p.bounds_ok(), false);
+
+    print("V9 transport-params bounds invariant holds");
+}

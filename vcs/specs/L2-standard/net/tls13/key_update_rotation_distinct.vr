@@ -1,0 +1,77 @@
+// @test: unit
+// @tier: 0
+// @level: L2
+// @tags: tls13, keyschedule, v2, rfc8446_4_6_3, key_update
+// @timeout: 5000
+// @expect: pass
+
+// V2 theorem (spec §9): each KeyUpdate rotation produces a STRICTLY NEW
+// traffic secret. Successive applications of
+// `HKDF-Expand-Label(s, "traffic upd", "", H.length)` cannot collide
+// (with overwhelming probability — we use SHA-256 which is
+// collision-resistant; the test asserts byte inequality on several
+// rotations as a structural sanity check).
+
+mount core.*;
+mount core.collections.List;
+mount core.net.tls13.cipher_suite.{HashKind};
+mount core.net.tls13.keyschedule.schedule.{TrafficSecret, TrafficPhase, TrafficDirection, SecretBytes};
+
+fn slice_eq(a: &[Byte], b: &[Byte]) -> Bool {
+    if a.len() != b.len() { return false; }
+    let mut i: Int = 0;
+    while i < a.len() {
+        if a[i] != b[i] { return false; }
+        i = i + 1;
+    }
+    true
+}
+
+fn main() {
+    // Arbitrary 32-byte traffic secret seed. Real handshakes derive
+    // this via the full key schedule; for a structural V2 test the
+    // initial value does not matter as long as it is fixed.
+    let seed: [Byte; 32] = [
+        0xAB, 0xCD, 0xEF, 0x01, 0x23, 0x45, 0x67, 0x89,
+        0xAB, 0xCD, 0xEF, 0x01, 0x23, 0x45, 0x67, 0x89,
+        0xAB, 0xCD, 0xEF, 0x01, 0x23, 0x45, 0x67, 0x89,
+        0xAB, 0xCD, 0xEF, 0x01, 0x23, 0x45, 0x67, 0x89,
+    ];
+    let mut seed_list: List<Byte> = [];
+    let mut i: Int = 0;
+    while i < 32 {
+        seed_list.push(seed[i]);
+        i = i + 1;
+    }
+
+    let s0 = TrafficSecret {
+        secret: SecretBytes.from(seed_list),
+        hash:   HashKind.Sha256,
+        phase:  TrafficPhase.Application,
+        dir:    TrafficDirection.Client,
+    };
+
+    // Three successive rotations — each MUST be distinct from the
+    // previous generation AND from the original.
+    let s1 = match s0.next_generation() {
+        Ok(s) => s, Err(_) => panic("rotation 0→1 failed"),
+    };
+    let s2 = match s1.next_generation() {
+        Ok(s) => s, Err(_) => panic("rotation 1→2 failed"),
+    };
+    let s3 = match s2.next_generation() {
+        Ok(s) => s, Err(_) => panic("rotation 2→3 failed"),
+    };
+
+    let v0 = s0.secret.as_slice();
+    let v1 = s1.secret.as_slice();
+    let v2 = s2.secret.as_slice();
+    let v3 = s3.secret.as_slice();
+
+    if slice_eq(v0, v1) { panic("V2 violated: s0 == s1"); }
+    if slice_eq(v1, v2) { panic("V2 violated: s1 == s2"); }
+    if slice_eq(v2, v3) { panic("V2 violated: s2 == s3"); }
+    if slice_eq(v0, v3) { panic("V2 violated: s0 == s3"); }
+
+    print("V2 key-update rotation distinctness holds over 3 cycles");
+}

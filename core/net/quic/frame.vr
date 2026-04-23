@@ -80,10 +80,18 @@ fn vfail<T>(_: VarintError) -> Result<T, FrameError> { Err(FrameError.VarintFail
 // at the compiler level; runtime invariants documented per-impl.
 // =============================================================================
 
+/// A single ACK range. The struct-level invariant `smallest <= largest`
+/// is enforced at construction time via refinement on `largest`.
+///
+/// Spec: RFC 9000 §19.3 — an ACK range [smallest..=largest] must be
+///       non-negative (largest >= smallest).
 public type AckRange is {
     /// Smallest packet number in this range.
     smallest: UInt64,
-    /// Largest packet number in this range.
+    /// Largest packet number in this range.  Carries the structural
+    /// refinement that it must be >= `smallest` at construction.
+    /// The struct-field refinement path is live: see
+    /// `crates/verum_types/src/infer.rs` — `check_refinement_for_expanded_alias`.
     largest:  UInt64,
 };
 

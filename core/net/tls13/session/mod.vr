@@ -1,0 +1,30 @@
+// =============================================================================
+// net/tls13/session/mod.vr — Typed-state TLS 1.3 session facade (spec §4.3)
+// =============================================================================
+// Layer: 7 (Session)
+// Spec: internal/specs/tls-quic.md §4.3 — typed state machines
+// =============================================================================
+//
+// Re-exports for the pure-Verum TLS 1.3 typed session surface:
+//
+//   * `state`: phase phantom types Handshaking / Established / Closed
+//   * `client`: TlsClient<S> + Progress
+//   * `server`: TlsServer<S> + ServerProgress
+//
+// The design is documented in each submodule. The intent is that once a
+// handshake completes, you reach `Established` via a type transition —
+// `write()` / `recv()` do not exist on `Handshaking`, so attempting to
+// send application data mid-handshake is rejected by the type checker.
+//
+// =============================================================================
+
+module core.net.tls13.session;
+
+public module state;
+public module client;
+public module server;
+
+// Re-exports
+public mount .state.{Handshaking, Established, Closed};
+public mount .client.{TlsClient, Progress};
+public mount .server.{TlsServer, ServerProgress};

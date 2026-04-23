@@ -101,10 +101,33 @@ implement PnSpace {
     /// start at packet number 0. Subsequent packets sent in the same
     /// packet-number space MUST increase the packet number by at
     /// least one.").
+    ///
+    /// V4 obligation (spec §9): after this call, `self.next_pn` is
+    /// strictly greater than the returned `pn`, and also strictly
+    /// greater than `self.largest_acked_sent` (if any). `pn_monotonic_ok()`
+    /// checks the invariant explicitly; regressions surface as a panic
+    /// via `debug_assert_monotonic()` below.
     public fn next_packet_number(&mut self) -> UInt64 {
         let pn = self.next_pn;
         self.next_pn = pn + 1_u64;
+        self.debug_assert_monotonic();
         pn
+    }
+
+    /// V4 theorem: `self.next_pn > self.largest_acked_sent` after every
+    /// emit. Expressed as a predicate so the SMT layer can discharge
+    /// the obligation symbolically + callers can assert empirically.
+    public fn pn_monotonic_ok(&self) -> Bool {
+        match self.largest_acked_sent {
+            Some(v) => self.next_pn > v,
+            None    => true,
+        }
+    }
+
+    fn debug_assert_monotonic(&self) {
+        if !self.pn_monotonic_ok() {
+            panic("QUIC V4 invariant broken: next_pn <= largest_acked_sent");
+        }
     }
 
     /// Record a freshly sent packet for loss tracking.

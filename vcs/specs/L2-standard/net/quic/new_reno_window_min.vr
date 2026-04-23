@@ -1,0 +1,44 @@
+// @test: unit
+// @tier: 0
+// @level: L2
+// @tags: quic, congestion_control, new_reno, v5, rfc9002_7_2
+// @timeout: 5000
+// @expect: pass
+
+// V5 theorem: NewReno.cwnd >= MIN_WINDOW_BYTES = 2 * MAX_DATAGRAM_SIZE
+// at all times.
+
+mount core.*;
+mount core.time.instant.{Instant};
+mount core.time.duration.{Duration};
+mount core.net.quic.recovery.cc.new_reno.{NewReno};
+mount core.net.quic.recovery.cc.{CongestionCtrl, MIN_WINDOW_BYTES};
+
+fn main() {
+    let mut nr = NewReno.new();
+    assert_eq(nr.window_min_ok(), true);
+    let _w0 = nr.window();
+
+    // Hit with successive loss events — cwnd halves, then floors at MIN.
+    let now = Instant.now();
+    nr.on_packet_sent(10_000_u32);
+    nr.on_packets_lost(5_000_u32, now.clone());
+    assert_eq(nr.window_min_ok(), true);
+
+    nr.on_packets_lost(1_000_u32, now.clone());
+    assert_eq(nr.window_min_ok(), true);
+
+    nr.on_packets_lost(1_000_u32, now.clone());
+    assert_eq(nr.window_min_ok(), true);
+
+    // Repeated losses keep the floor intact.
+    let mut i: Int = 0;
+    while i < 20 {
+        nr.on_packets_lost(200_u32, now.clone());
+        assert_eq(nr.window_min_ok(), true);
+        i = i + 1;
+    }
+    assert_eq(nr.window() >= MIN_WINDOW_BYTES, true);
+
+    print("V5 NewReno window floor holds");
+}

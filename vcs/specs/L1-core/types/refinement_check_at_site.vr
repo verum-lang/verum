@@ -1,0 +1,33 @@
+// @test: typecheck-fail
+// @tier: 0
+// @level: L1
+// @tags: refinement, check_phase, lambda_body, language
+// @expect: errors
+
+// Regression for the Block-unwrap gap in `try_syntactic_eval`.
+//
+// Before the fix, refinements of the form `Int where |n| { pred }`
+// parsed into `Block { expr: pred }` at the AST level. The syntactic
+// refinement evaluator inspected only `Literal` and `Binary` kinds at
+// the top level, so the Block wrapper made the evaluator return
+// Unknown and the violation slipped through at compile time — even
+// for blatantly-wrong call-site arguments like passing `0` to a
+// parameter whose refinement requires `n >= 1`.
+//
+// After the fix, `try_syntactic_eval` unwraps single-expression Block
+// and Paren wrappers before dispatching, so the check fires
+// correctly.
+
+mount core.*;
+
+type PageNo is Int where |n| { n >= 1 };
+
+fn use_pn(p: PageNo) -> Int {
+    p + 1
+}
+
+fn main() {
+    // Explicit violation — `0` does not satisfy `n >= 1`.
+    let x: Int = use_pn(0);
+    print("should not compile");
+}

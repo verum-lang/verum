@@ -1,0 +1,72 @@
+// @test: unit
+// @tier: 0
+// @level: L2
+// @tags: h3, qpack, rfc9204, rfc7541, huffman
+// @timeout: 5000
+// @expect: pass
+
+// RFC 7541 Appendix B — Huffman encode/decode round-trip KAT.
+// We exercise the codec against a handful of canonical strings
+// including the RFC 7541 examples. Encoding then decoding MUST
+// reproduce the original byte stream.
+
+mount core.*;
+mount core.collections.List;
+mount core.net.h3.qpack.huffman.{encode, decode, encoded_byte_length, HuffError};
+
+fn roundtrip(input: &[Byte]) {
+    // encoded_byte_length pre-computes the output size; verify it
+    // agrees with the actual encode() emission before round-tripping.
+    let expected_len = encoded_byte_length(input);
+    let mut buf: List<Byte> = [];
+    encode(input, &mut buf);
+    assert_eq(buf.len(), expected_len);
+
+    match decode(buf.as_slice()) {
+        Ok(out) => {
+            assert_eq(out.len(), input.len());
+            let mut i: Int = 0;
+            while i < input.len() {
+                if out[i] != input[i] {
+                    print(f"round-trip diverged at byte {i}");
+                    panic("huffman round-trip mismatch");
+                }
+                i = i + 1;
+            }
+        },
+        Err(_) => panic("decode rejected a valid round-trip"),
+    }
+}
+
+fn main() {
+    // Empty input — trivially valid.
+    let empty: [Byte; 0] = [];
+    roundtrip(&empty);
+
+    // RFC 7541 Appendix C.4 — "www.example.com"
+    let rfc_example = b"www.example.com";
+    roundtrip(rfc_example);
+
+    // Canonical lowercase header names.
+    roundtrip(b"content-type");
+    roundtrip(b"accept-encoding");
+    roundtrip(b"user-agent");
+
+    // ASCII punctuation + digits.
+    roundtrip(b"/api/v1/search?q=test&limit=50");
+
+    // Single character edge — forces EOS padding of 7 bits.
+    let single = b"a";
+    roundtrip(single);
+
+    // All 256 byte values — stresses every codeword in the table.
+    let mut every_byte: List<Byte> = [];
+    let mut b: Int = 0;
+    while b < 256 {
+        every_byte.push(b as Byte);
+        b = b + 1;
+    }
+    roundtrip(every_byte.as_slice());
+
+    print("qpack huffman round-trip KAT OK");
+}

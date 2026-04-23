@@ -1,0 +1,53 @@
+// @test: unit
+// @tier: 0
+// @level: L2
+// @tags: quic, cid_pool, v6, limit
+// @timeout: 5000
+// @expect: pass
+
+// V6 theorem: active_count() <= active_connection_id_limit.
+
+mount core.*;
+mount core.net.quic.cid_pool.{CidPool, CidPoolError};
+mount core.net.quic.connection_id.{ConnectionId};
+
+fn main() {
+    let mut pool = CidPool.new(2);
+    assert_eq(pool.cid_limit_ok(), true);
+    assert_eq(pool.active_count(), 0);
+
+    // Seed initial (sequence 0) — does not count against the limit
+    // check per RFC; the constructor/ seeder short-circuits the check.
+    let token0: [Byte; 16] = [0; 16];
+    pool.seed_initial(ConnectionId.from_bytes(&[0xAA_u8, 0xBB_u8, 0xCC_u8]), token0);
+    assert_eq(pool.cid_limit_ok(), true);
+
+    // Issue one NEW_CONNECTION_ID within the limit.
+    let token1: [Byte; 16] = [1; 16];
+    match pool.on_new_connection_id(
+        1_u64, 0_u64,
+        ConnectionId.from_bytes(&[0x11_u8, 0x22_u8, 0x33_u8]),
+        token1,
+    ) {
+        Ok(_) => {},
+        Err(_) => panic("unexpected pool error"),
+    }
+    assert_eq(pool.cid_limit_ok(), true);
+
+    // Another — still within the doubled limit? Initial + sequence 1 = 2
+    // active, pool limit = 2, so the next should hit the cap.
+    let token2: [Byte; 16] = [2; 16];
+    let r = pool.on_new_connection_id(
+        2_u64, 0_u64,
+        ConnectionId.from_bytes(&[0xAA_u8, 0xBB_u8, 0xCC_u8]),
+        token2,
+    );
+    match r {
+        Ok(_) => panic("limit check missed"),
+        Err(CidPoolError.LimitExceeded(_)) => {},
+        Err(_) => panic("wrong error kind"),
+    }
+    assert_eq(pool.cid_limit_ok(), true);
+
+    print("V6 CID cap invariant holds");
+}

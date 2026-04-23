@@ -1,0 +1,41 @@
+// =============================================================================
+// net/tls13/session/state.vr — Typed state phantom tags (spec §4.3)
+// =============================================================================
+// Layer: 7 (Session)
+// Spec: internal/specs/tls-quic.md §4.3 — typed state machines
+// =============================================================================
+//
+// Verum TLS sessions carry their phase in the TYPE, not in a runtime enum.
+// Methods only available in a given phase are attached to an `implement`
+// block keyed on that phase type. Nothing about this is runtime — the
+// compiler rejects `write()` on `TlsClient<Handshaking>` by the same
+// mechanism that rejects calling a missing method on any type.
+//
+// Three phases (TLS 1.3):
+//
+//   Handshaking    — ClientHello has been sent / is being sent.
+//                    read/write for application data are NOT available.
+//                    Only `progress(io)` advances toward Established.
+//
+//   Established    — Handshake finished, application traffic open.
+//                    read / write / key_update / close available.
+//
+//   Closed         — `close_notify` alert sent (and optionally received).
+//                    Only status getters available.
+//
+// Progress-exits are visible at the TYPE boundary: `progress(…)` returns
+// `Progress<Handshaking, Established>` whose two constructors carry the
+// respective phase value, so callers must pattern-match to continue.
+//
+// =============================================================================
+
+module core.net.tls13.session.state;
+
+/// Phantom tag — handshake in progress.
+public type Handshaking is ();
+
+/// Phantom tag — 1-RTT keys installed, application data may flow.
+public type Established is ();
+
+/// Phantom tag — close_notify issued; endpoint is terminal.
+public type Closed is ();

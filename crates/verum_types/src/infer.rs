@@ -3650,6 +3650,51 @@ impl TypeChecker {
         }
     }
 
+    /// When a `Type::Named { path: X }` coerces via the newtype-alias path to
+    /// its expansion, and that expansion is a refinement, enforce the
+    /// refinement on the value expression. Without this the alias
+    /// indirection bypasses the refinement check entirely — struct-field
+    /// types like `PageNo = Int where |n|{n >= 1}` would accept `0`.
+    ///
+    /// Spec: tls-quic.md §4.6 (AckRanges), §9 (V3–V7 invariants).
+    pub(crate) fn check_refinement_for_expanded_alias(
+        &mut self,
+        value: &verum_ast::expr::Expr,
+        expanded: &Type,
+    ) -> Result<()> {
+        // Normalize in case the alias expanded to another Named alias that
+        // itself resolves to Refined (rare but legal: `type A is B; type B is
+        // Int where ...`).
+        let normalized = self.normalize_type(expanded);
+        let Type::Refined { ref base, ref predicate } = normalized else {
+            return Ok(());
+        };
+        let refinement_type = crate::refinement::RefinementType {
+            base_type: (**base).clone(),
+            predicate: predicate.clone(),
+            span: value.span,
+        };
+        match self.check_refinement_with_evidence(value, &refinement_type) {
+            Ok(crate::refinement::VerificationResult::Invalid { .. }) => {
+                // Mirror the call-site policy at `synth_and_check`:
+                // only hard-error when the syntactic evaluator
+                // confirms the violation; otherwise defer to gradual
+                // verification.
+                if let verum_common::Maybe::Some(
+                    crate::refinement::VerificationResult::Invalid { .. }
+                ) = self.refinement.syntactic_check_only(value, predicate) {
+                    let pred_text = format!("{}", predicate);
+                    return Err(TypeError::RefinementFailed {
+                        predicate: verum_common::Text::from(pred_text),
+                        span: value.span,
+                    });
+                }
+                Ok(())
+            }
+            _ => Ok(()),
+        }
+    }
+
     /// Get evidence statistics for debugging/optimization
     ///
     /// Returns (conditions_added, conditions_used, cache_hits)
@@ -9468,12 +9513,19 @@ impl TypeChecker {
                         // (e.g., IoResult<Unit> -> Result<Unit, StreamError>)
                         if let Some(expanded) = self.expand_type_alias(newtype_check_target) {
                             if self.unifier.unify(&result.ty, &expanded, span).is_ok() {
-                                // Actual type matches the expanded alias, allow coercion
+                                // Actual type matches the expanded alias, allow coercion.
+                                // If the alias resolves to Refined, run the refinement
+                                // check so struct-field aliases like `type PageNo is
+                                // Int where |n| { n >= 1 }` enforce at construction time
+                                // (spec §4.6, §9 V3-V7 obligations).
+                                self.check_refinement_for_expanded_alias(expr, &expanded)?;
                                 return Ok(InferResult::new(expected.clone()));
                             }
                         } else if let Some(alias_target) = self.ctx.resolve_alias(type_name) {
-                            if self.unifier.unify(&result.ty, alias_target, span).is_ok() {
+                            let alias_target = alias_target.clone();
+                            if self.unifier.unify(&result.ty, &alias_target, span).is_ok() {
                                 // Actual type matches the alias target, allow coercion
+                                self.check_refinement_for_expanded_alias(expr, &alias_target)?;
                                 return Ok(InferResult::new(expected.clone()));
                             }
                         }
@@ -28017,6 +28069,34 @@ impl TypeChecker {
                         // Register type
                         if let Err(e) = self.register_type_declaration(type_decl) {
                             tracing::debug!("Failed to register imported type '{}': {}", item_name, e);
+                        }
+                        // Also import the type's `implement` blocks so that
+                        // inherent methods (especially static constructors
+                        // like `Validated.valid`) are reachable from the
+                        // mounting module. The cross-module import path
+                        // (`import_item_from_module_impl`) does this around
+                        // line 28799; without the same step here, mounting
+                        // a type via its defining inline-module path
+                        // (`mount core.base.result.{Validated}`) registers
+                        // the type but loses its impl blocks, while a
+                        // re-export mount (`mount base.{Validated}`) coincidentally
+                        // works because the global stdlib pre-pass populated
+                        // the methods first.
+                        let synthetic_module = verum_ast::Module::new(
+                            module.items.as_ref()
+                                .map(|items| items.clone())
+                                .unwrap_or_else(List::new),
+                            verum_common::span::FileId::dummy(),
+                            module.span,
+                        );
+                        if let Err(e) = self.import_impl_blocks_for_type(
+                            &synthetic_module,
+                            item_name,
+                        ) {
+                            tracing::debug!(
+                                "Failed to import implement blocks for inline-mounted type '{}': {}",
+                                item_name, e
+                            );
                         }
                         return Ok(());
                     }

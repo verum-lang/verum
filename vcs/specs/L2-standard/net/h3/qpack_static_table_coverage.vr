@@ -1,0 +1,35 @@
+// @test: unit
+// @tier: 0
+// @level: L2
+// @tags: h3, qpack, rfc9204, static_table
+// @timeout: 5000
+// @expect: pass
+
+// RFC 9204 Appendix A — static table MUST have exactly 99 entries
+// indexed 0..=98, and get(index) MUST be Some(...) for each one + None
+// outside that range.
+
+mount core.*;
+mount core.net.h3.qpack.static_table.{get, STATIC_TABLE_SIZE};
+
+fn main() {
+    assert_eq(STATIC_TABLE_SIZE, 99);
+
+    // Every in-range index resolves.
+    let mut i: Int = 0;
+    while i < STATIC_TABLE_SIZE {
+        let e = get(i);
+        match e {
+            Some(_) => {},
+            None    => panic(f"static_table.get({i}) returned None"),
+        }
+        i = i + 1;
+    }
+
+    // Out-of-range returns None.
+    match get(-1) { None => {}, Some(_) => panic("get(-1) should be None") }
+    match get(99) { None => {}, Some(_) => panic("get(99) should be None") }
+    match get(200) { None => {}, Some(_) => panic("get(200) should be None") }
+
+    print("qpack static table coverage OK (99 entries)");
+}

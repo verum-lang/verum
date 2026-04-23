@@ -69,6 +69,7 @@ public module error;
 public module keyschedule;
 public module record;
 public module handshake;
+public module session;
 
 // Re-exports
 public mount .version.{ProtocolVersion, TLS_1_3, LEGACY_VERSION_TLS_1_2,
@@ -94,4 +95,9 @@ public mount .handshake.{
     encode_handshake, decode_handshake,
     encode_extensions_block, decode_extensions_block,
     is_hello_retry_request,
+};
+public mount .session.{
+    Handshaking, Established, Closed,
+    TlsClient, Progress,
+    TlsServer, ServerProgress,
 };

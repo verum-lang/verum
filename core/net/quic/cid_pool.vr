@@ -178,6 +178,13 @@ implement CidPool {
         Err(CidPoolError.UnknownSequence(sequence))
     }
 
+    /// V6 theorem (spec §9): `active_count() <= active_connection_id_limit`.
+    /// Exposed as a pure predicate so SMT + empirical tests can both
+    /// observe it without walking the entries list.
+    public fn cid_limit_ok(&self) -> Bool {
+        self.active_count() <= self.active_connection_id_limit
+    }
+
     /// Number of non-retired entries.
     public fn active_count(&self) -> Int {
         let mut n: Int = 0;

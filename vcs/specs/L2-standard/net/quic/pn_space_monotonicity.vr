@@ -1,0 +1,29 @@
+// @test: unit
+// @tier: 0
+// @level: L2
+// @tags: quic, pn_space, v4, monotonicity
+// @timeout: 5000
+// @expect: pass
+
+// V4 theorem: `next_pn > largest_acked_sent` after every emit.
+
+mount core.*;
+mount core.net.quic.recovery.pn_space.{PnSpace, PnSpaceKind};
+
+fn main() {
+    let mut sp = PnSpace.new(PnSpaceKind.Application);
+    assert_eq(sp.pn_monotonic_ok(), true);
+
+    // Emit a few packets — next_pn strictly increases.
+    let _p0 = sp.next_packet_number();
+    let _p1 = sp.next_packet_number();
+    let _p2 = sp.next_packet_number();
+    assert_eq(sp.pn_monotonic_ok(), true);
+
+    // Discard keeps the invariant vacuously true (largest_acked_sent
+    // is untouched, next_pn is not reset per RFC).
+    sp.discard();
+    assert_eq(sp.pn_monotonic_ok(), true);
+
+    print("V4 PN monotonicity holds");
+}

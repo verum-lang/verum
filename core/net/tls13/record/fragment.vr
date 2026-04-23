@@ -1,0 +1,143 @@
+// =============================================================================
+// net/tls13/record/fragment.vr — Record fragmentation / reassembly
+// =============================================================================
+// Layer: 5 (Record)
+// Spec: RFC 8446 §5.1 (fragmentation), §5.2 (ciphertext record cap)
+// =============================================================================
+//
+// TLS 1.3 records cap the inner-plaintext fragment at 2^14 bytes. Any
+// outgoing application payload larger than that must be split into
+// successive records by the sender. Conversely, large inbound messages
+// (e.g. a multi-KB certificate chain carried over multiple Handshake
+// records) must be concatenated back to a single logical payload.
+//
+// This module gives both directions:
+//
+//   seal_all / open_all:  Application-data convenience that invokes
+//                          AeadState.seal / open over a vector of
+//                          MAX_PLAINTEXT_SIZE slices.
+//
+//   HandshakeReassembler:  Concatenates Handshake-record bodies across
+//                          record boundaries (RFC 8446 §5.1 para 3 —
+//                          handshake messages MAY span multiple
+//                          records within the same flight).
+//
+// =============================================================================
+
+module core.net.tls13.record.fragment;
+
+mount core.*;
+mount core.collections.List;
+mount core.net.tls13.record.aead.{AeadState, RecordError};
+mount core.net.tls13.record.content_type.{ContentType};
+mount core.net.tls13.record.plaintext.{MAX_PLAINTEXT_SIZE};
+
+// =============================================================================
+// Outbound — chop a large payload into MAX_PLAINTEXT_SIZE records.
+// =============================================================================
+
+/// Seal a logical payload as one or more records. Returns the
+/// concatenated wire bytes. Each record is independently AEAD-sealed
+/// against the AeadState; the `seq` counter advances once per record.
+public fn seal_all(
+    aead: &mut AeadState,
+    content_type: ContentType,
+    data: &[Byte],
+) -> Result<List<Byte>, RecordError> {
+    let mut out: List<Byte> = [];
+    let total = data.len();
+    let mut off: Int = 0;
+    while off < total {
+        let remaining = total - off;
+        let take = if remaining > MAX_PLAINTEXT_SIZE { MAX_PLAINTEXT_SIZE } else { remaining };
+        // Slice into fresh List for the seal call (AeadState.seal
+        // takes `&[Byte]`, so a live slice is sufficient — but we
+        // materialise for safety given `data` is a borrowed slice).
+        let mut chunk: List<Byte> = [];
+        let mut i: Int = 0;
+        while i < take {
+            chunk.push(data[off + i]);
+            i = i + 1;
+        }
+        let wire = aead.seal(chunk.as_slice(), content_type.clone(), 0)?;
+        let mut j: Int = 0;
+        while j < wire.len() {
+            out.push(wire[j]);
+            j = j + 1;
+        }
+        off = off + take;
+    }
+    // Empty payload case — emit no record at all; caller can still emit
+    // an explicit 0-byte one by calling aead.seal directly if desired.
+    Ok(out)
+}
+
+// =============================================================================
+// Inbound — reassemble handshake messages that span records
+// =============================================================================
+//
+// A Handshake message has its own 4-byte length prefix (type + 24-bit
+// length). The record layer might deliver the header and body split
+// across multiple records. The reassembler buffers opened-record
+// fragments until one or more complete handshake messages are available.
+//
+// Usage per record:
+//   1. Open the TLS record (obtain (ContentType.Handshake, bytes)).
+//   2. Push the body bytes into the reassembler.
+//   3. Drain complete messages by calling `take_next` in a loop.
+//
+// The reassembler is content-type-agnostic; the caller ensures it is
+// only fed Handshake-content bytes. For ApplicationData there is
+// nothing to reassemble.
+// =============================================================================
+
+public type HandshakeReassembler is {
+    buf: List<Byte>,
+};
+
+implement HandshakeReassembler {
+    public fn new() -> HandshakeReassembler {
+        HandshakeReassembler { buf: [] }
+    }
+
+    /// Append the body of an opened Handshake record.
+    public fn push(&mut self, bytes: &[Byte]) {
+        let mut i: Int = 0;
+        while i < bytes.len() {
+            self.buf.push(bytes[i]);
+            i = i + 1;
+        }
+    }
+
+    /// If a full handshake message (header + body) is available,
+    /// remove + return its wire bytes (header included). Otherwise
+    /// returns None and leaves the buffer intact.
+    public fn take_next(&mut self) -> Maybe<List<Byte>> {
+        if self.buf.len() < 4 { return Maybe.None; }
+        // Header: type(1) + length(3 big-endian).
+        let len: Int = ((self.buf[1] as Int) << 16)
+                      | ((self.buf[2] as Int) << 8)
+                      |  (self.buf[3] as Int);
+        let need: Int = 4 + len;
+        if self.buf.len() < need { return Maybe.None; }
+
+        // Copy out the first `need` bytes, then shift remainder forward.
+        let mut out: List<Byte> = [];
+        let mut i: Int = 0;
+        while i < need {
+            out.push(self.buf[i]);
+            i = i + 1;
+        }
+        let mut tail: List<Byte> = [];
+        let mut j: Int = need;
+        while j < self.buf.len() {
+            tail.push(self.buf[j]);
+            j = j + 1;
+        }
+        self.buf = tail;
+        Maybe.Some(out)
+    }
+
+    /// How many bytes are sitting in the buffer.
+    public fn buffered(&self) -> Int { self.buf.len() }
+}

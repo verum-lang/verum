@@ -1,0 +1,312 @@
+// =============================================================================
+// net/tls13/session/client.vr — Typed-state TLS 1.3 client session (spec §4.3)
+// =============================================================================
+// Layer: 7 (Session)
+// Spec: internal/specs/tls-quic.md §4.3 — typed state machines
+//       RFC 8446 §4 (handshake), §5 (record layer), §6 (alerts)
+// =============================================================================
+//
+// Public entry point for pure-Verum TLS 1.3 client sessions.
+//
+// # Compile-time state progression
+//
+// ```text
+//     ┌──────────────────────┐   progress()             ┌─────────────────┐
+//     │ TlsClient<Handshaking> │ ──── Continue ──▶       │ TlsClient<Handshaking> │
+//     │                      │ ──── Done     ──▶       │ TlsClient<Established> │
+//     └──────────────────────┘                          └────────┬────────┘
+//                                                               │
+//                                                               │ close()
+//                                                               ▼
+//                                                      ┌─────────────────┐
+//                                                      │ TlsClient<Closed>    │
+//                                                      └─────────────────┘
+// ```
+//
+// `read()` / `write()` only exist on `TlsClient<Established>`. Attempting
+// `client.write(...)` in `Handshaking` is a compile error (no such method
+// on the type) — exactly the architectural property §4.3 promises.
+//
+// # Wire-layer separation
+//
+// This module does NOT own the transport. A caller feeds raw bytes
+// into `progress()` / `recv()` and consumes the outbound bytes returned
+// for transmission. Integration with `core.net.tcp` / any async framing
+// is the caller's responsibility (the facade in `core.net.tls.session.*`
+// composes both).
+//
+// =============================================================================
+
+module core.net.tls13.session.client;
+
+mount core.*;
+mount core.collections.List;
+mount core.time.instant.{Instant};
+mount core.net.tls13.error.{TlsError};
+mount core.net.tls13.cipher_suite.{AeadKind};
+mount core.net.tls13.record.{AeadState, ContentType, RecordError,
+                              MAX_PLAINTEXT_SIZE};
+mount core.net.tls13.keyschedule.{TrafficSecret, TrafficKeys, TrafficDirection};
+mount core.net.tls13.handshake.client_sm.{
+    ClientConfig, ClientSm, StepOutput, PostHandshakeOutcome, Connected,
+};
+mount core.net.tls13.handshake.messages.{KeyUpdate, KeyUpdateRequest};
+mount core.net.tls13.handshake.resumption.{ClientSession};
+mount core.net.tls13.session.state.{Handshaking, Established, Closed};
+
+// =============================================================================
+// TlsClient<S> — parameterised by phase
+// =============================================================================
+
+/// Shared per-session data. The phase phantom parameter gates which
+/// methods are available through the `implement TlsClient<S>` block.
+public type TlsClient<S> is {
+    /// Phase tag — always `()`, its only purpose is to steer dispatch.
+    _phase: S,
+
+    /// Active handshake SM. Only carries useful data in `Handshaking`.
+    sm: ClientSm,
+
+    /// Outbound handshake bytes the caller still has to transmit.
+    pending_out: List<Byte>,
+
+    /// Traffic state after handshake is complete. `Maybe.None` while
+    /// we are in `Handshaking`.
+    outbound: Maybe<AeadState>,
+    inbound:  Maybe<AeadState>,
+
+    /// Captured `Connected` payload (suite/hash/master/exporter). Only
+    /// populated in `Established` phase. Used for KeyUpdate rotation
+    /// and exporters.
+    connected: Maybe<Connected>,
+
+    /// Last post-handshake outcome surfaced to the caller — caller
+    /// can pull tickets via `last_post_handshake()` after `recv()`.
+    last_pho: Maybe<PostHandshakeOutcome>,
+
+    /// Stored resumable session if the server issued NewSessionTicket.
+    session: Maybe<ClientSession>,
+};
+
+// =============================================================================
+// Construction + Handshaking-phase methods
+// =============================================================================
+
+implement TlsClient<Handshaking> {
+    /// Create a client session + drive ClientHello emission.
+    /// Returns (session, initial_clienthello_wire).
+    public fn new(config: ClientConfig) -> Result<(TlsClient<Handshaking>, List<Byte>), TlsError> {
+        let sm0 = ClientSm.new(config);
+        let (sm1, wire) = sm0.start()?;
+        let c = TlsClient {
+            _phase: (),
+            sm: sm1,
+            pending_out: [],
+            outbound: Maybe.None,
+            inbound: Maybe.None,
+            connected: Maybe.None,
+            last_pho: Maybe.None,
+            session: Maybe.None,
+        };
+        Ok((c, wire))
+    }
+
+    /// Feed one inbound handshake message to the state machine.
+    /// Returns `Progress.Continue(self)` while still handshaking,
+    /// or `Progress.Done(TlsClient<Established>)` when the server's
+    /// Finished has been verified and 1-RTT keys installed.
+    public fn progress(self, inbound_handshake: &[Byte]) -> Result<Progress, TlsError> {
+        let (sm_next, step) = self.sm.on_handshake(inbound_handshake)?;
+        let mut pending = self.pending_out;
+        let mut i: Int = 0;
+        while i < step.outbound_handshake.len() {
+            pending.push(step.outbound_handshake[i]);
+            i = i + 1;
+        }
+        match step.connected {
+            Maybe.Some(conn) => {
+                // Install 1-RTT application-traffic keys.
+                let (out_aead, in_aead) = derive_aead_pair(&conn)?;
+                let established = TlsClient {
+                    _phase: (),
+                    sm: sm_next,
+                    pending_out: pending,
+                    outbound: Maybe.Some(out_aead),
+                    inbound:  Maybe.Some(in_aead),
+                    connected: Maybe.Some(conn),
+                    last_pho: Maybe.None,
+                    session: Maybe.None,
+                };
+                Ok(Progress.Done(established))
+            },
+            Maybe.None => {
+                let keep = TlsClient {
+                    _phase: (),
+                    sm: sm_next,
+                    pending_out: pending,
+                    outbound: Maybe.None,
+                    inbound: Maybe.None,
+                    connected: Maybe.None,
+                    last_pho: Maybe.None,
+                    session: Maybe.None,
+                };
+                Ok(Progress.Continue(keep))
+            },
+        }
+    }
+
+    /// Drain any outbound handshake bytes queued by `progress()`.
+    /// Idempotent — after draining, the buffer is empty.
+    public fn take_pending(&mut self) -> List<Byte> {
+        let mut out: List<Byte> = [];
+        let mut i: Int = 0;
+        while i < self.pending_out.len() {
+            out.push(self.pending_out[i]);
+            i = i + 1;
+        }
+        self.pending_out = [];
+        out
+    }
+}
+
+// =============================================================================
+// Progress — compile-time signal that we've crossed the phase boundary
+// =============================================================================
+
+public type Progress is
+      Continue(TlsClient<Handshaking>)
+    | Done(TlsClient<Established>);
+
+// =============================================================================
+// Established-phase methods — application data + post-handshake
+// =============================================================================
+
+implement TlsClient<Established> {
+    /// Seal one application-data record. Returns the wire bytes the
+    /// caller must transmit. `data.len()` must fit one record (≤ 2^14)
+    /// — fragmentation is handled by `fragment::seal_many` at a
+    /// higher layer.
+    public fn write(&mut self, data: &[Byte]) -> Result<List<Byte>, TlsError> {
+        if data.len() > MAX_PLAINTEXT_SIZE {
+            return Err(TlsError.InternalError(Text.from_str("record too large, fragment first")));
+        }
+        match &mut self.outbound {
+            Maybe.Some(aead) => {
+                match aead.seal(data, ContentType.ApplicationData, 0) {
+                    Ok(wire) => Ok(wire),
+                    Err(_) => Err(TlsError.InternalError(Text.from_str("aead seal failed"))),
+                }
+            },
+            Maybe.None => Err(TlsError.InternalError(Text.from_str("outbound keys missing"))),
+        }
+    }
+
+    /// Open one wire record. Returns the decrypted payload along with
+    /// its inner content-type so the caller can demux ApplicationData
+    /// from Handshake (post-handshake messages) and Alert records.
+    public fn recv(&mut self, wire: &[Byte]) -> Result<(ContentType, List<Byte>), TlsError> {
+        match &mut self.inbound {
+            Maybe.Some(aead) => {
+                match aead.open(wire) {
+                    Ok(pair) => {
+                        let (ct, bytes) = pair;
+                        // Post-handshake messages (NewSessionTicket,
+                        // CertificateRequest, KeyUpdate) arrive as
+                        // Handshake records over the 1-RTT layer — surface
+                        // them to ClientSm.on_post_handshake.
+                        match ct {
+                            ContentType.Handshake => {
+                                let now = Instant.now();
+                                match self.sm.on_post_handshake(bytes.as_slice(), now) {
+                                    Ok(pho) => self.last_pho = Maybe.Some(pho.clone()),
+                                    Err(e) => return Err(e),
+                                }
+                                Ok((ct, bytes))
+                            },
+                            _ => Ok((ct, bytes)),
+                        }
+                    },
+                    Err(_) => Err(TlsError.InternalError(Text.from_str("aead open failed"))),
+                }
+            },
+            Maybe.None => Err(TlsError.InternalError(Text.from_str("inbound keys missing"))),
+        }
+    }
+
+    /// Pull + clear the most recent post-handshake outcome.
+    public fn last_post_handshake(&mut self) -> Maybe<PostHandshakeOutcome> {
+        let v = self.last_pho.clone();
+        self.last_pho = Maybe.None;
+        v
+    }
+
+    /// Emit a `close_notify` alert (RFC 8446 §6.1) and transition to
+    /// the `Closed` phase. Caller must transmit the returned record.
+    public fn close(self) -> Result<(TlsClient<Closed>, List<Byte>), TlsError> {
+        let mut out = self;
+        let alert = build_close_notify();
+        let wire = match &mut out.outbound {
+            Maybe.Some(aead) => {
+                match aead.seal(alert.as_slice(), ContentType.Alert, 0) {
+                    Ok(w) => w,
+                    Err(_) => return Err(TlsError.InternalError(Text.from_str("close_notify seal failed"))),
+                }
+            },
+            Maybe.None => return Err(TlsError.InternalError(Text.from_str("outbound keys missing"))),
+        };
+        let closed = TlsClient {
+            _phase: (),
+            sm: ClientSm.ClosedSm,
+            pending_out: [],
+            outbound: Maybe.None,
+            inbound: Maybe.None,
+            connected: out.connected,
+            last_pho: out.last_pho,
+            session: out.session,
+        };
+        Ok((closed, wire))
+    }
+}
+
+// =============================================================================
+// Closed-phase — read-only inspection
+// =============================================================================
+
+implement TlsClient<Closed> {
+    /// Expose any session captured from `NewSessionTicket` during the
+    /// connection so callers can persist it for resumption.
+    public fn take_session(&mut self) -> Maybe<ClientSession> {
+        let v = self.session.clone();
+        self.session = Maybe.None;
+        v
+    }
+}
+
+// =============================================================================
+// Internal helpers
+// =============================================================================
+
+fn derive_aead_pair(conn: &Connected) -> Result<(AeadState, AeadState), TlsError> {
+    let aead_kind = match conn.suite {
+        _ => conn.suite.aead(),
+    };
+    let key_len = aead_kind.key_len();
+    let iv_len  = aead_kind.iv_len();
+    let client_keys: TrafficKeys = conn.client_ap_traffic
+        .derive_keys(key_len, iv_len)
+        .map_err(|_| TlsError.InternalError(Text.from_str("client traffic derive")))?;
+    let server_keys: TrafficKeys = conn.server_ap_traffic
+        .derive_keys(key_len, iv_len)
+        .map_err(|_| TlsError.InternalError(Text.from_str("server traffic derive")))?;
+    let out_aead = AeadState.new(aead_kind.clone(), client_keys.key.clone(), client_keys.iv);
+    let in_aead  = AeadState.new(aead_kind.clone(), server_keys.key.clone(), server_keys.iv);
+    Ok((out_aead, in_aead))
+}
+
+fn build_close_notify() -> List<Byte> {
+    // RFC 8446 §6 — Alert { warning(1), close_notify(0) }.
+    let mut a: List<Byte> = [];
+    a.push(0x01_u8);
+    a.push(0x00_u8);
+    a
+}

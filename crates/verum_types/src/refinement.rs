@@ -1974,6 +1974,25 @@ impl RefinementChecker {
 
     /// Recursively evaluate an expression syntactically if possible
     fn try_syntactic_eval(&self, expr: &Expr) -> Maybe<VerificationResult> {
+        // Unwrap Paren + Block wrappers — the lambda-body refinement
+        // syntax `|n| { n >= 1 }` parses into `Block { expr: Binary(...) }`
+        // and plain `(pred)` parses into `Paren(Binary(...))`. Without
+        // this unwrap the Binary-and-Literal arms below never see the
+        // actual predicate, and the syntactic evaluator silently returns
+        // None — which, for lambda-style refinements on type aliases,
+        // caused the refinement check to degrade into "Unknown" and let
+        // violations through at compile time.
+        if let ExprKind::Paren(inner) = &expr.kind {
+            return self.try_syntactic_eval(inner);
+        }
+        if let ExprKind::Block(block) = &expr.kind {
+            if block.stmts.is_empty() {
+                if let Some(inner) = block.expr.as_ref() {
+                    return self.try_syntactic_eval(inner);
+                }
+            }
+        }
+
         // Check for literal true/false
         if let ExprKind::Literal(Literal {
             kind: verum_ast::literal::LiteralKind::Bool(b),

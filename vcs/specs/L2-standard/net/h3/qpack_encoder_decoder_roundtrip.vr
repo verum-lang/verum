@@ -1,0 +1,99 @@
+// @test: unit
+// @tier: 0
+// @level: L2
+// @tags: h3, qpack, rfc9204, encoder, decoder, roundtrip
+// @timeout: 8000
+// @expect: pass
+
+// RFC 9204 encoder + decoder round-trip — exercises the three
+// representation variants used when QPACK_MAX_TABLE_CAPACITY = 0:
+//
+//   1. Indexed Field Line (static-table hit): `:method GET`, `:scheme https`, `:status 200`.
+//   2. Literal Field Line with Name Reference (static): `content-type: application/json`.
+//   3. Literal Field Line with Literal Name: `x-custom-header: value`.
+//
+// The encoded byte stream is fed back through decode_field_section and
+// the resulting HeaderField list MUST equal the original.
+
+mount core.*;
+mount core.collections.List;
+mount core.net.h3.qpack.encoder.{encode_field_section};
+mount core.net.h3.qpack.decoder.{decode_field_section, HeaderField};
+
+fn text_eq(a: &Text, b: &Text) -> Bool {
+    let sa = a.as_bytes();
+    let sb = b.as_bytes();
+    if sa.len() != sb.len() { return false; }
+    let mut i: Int = 0;
+    while i < sa.len() {
+        if sa[i] != sb[i] { return false; }
+        i = i + 1;
+    }
+    true
+}
+
+fn assert_roundtrip(headers: &List<HeaderField>, scenario: &str) {
+    let wire = encode_field_section(headers);
+    match decode_field_section(wire.as_slice()) {
+        Ok(out) => {
+            if out.len() != headers.len() {
+                print(f"{scenario}: length mismatch — expected {headers.len()}, got {out.len()}");
+                panic("qpack round-trip length diverged");
+            }
+            let mut i: Int = 0;
+            while i < headers.len() {
+                if !text_eq(&out[i].name, &headers[i].name) {
+                    print(f"{scenario}: name mismatch at {i}");
+                    panic("qpack name diverged");
+                }
+                if !text_eq(&out[i].value, &headers[i].value) {
+                    print(f"{scenario}: value mismatch at {i}");
+                    panic("qpack value diverged");
+                }
+                i = i + 1;
+            }
+        },
+        Err(_) => panic(f"{scenario}: decode failed"),
+    }
+}
+
+fn main() {
+    // (1) Pure indexed — all three are static-table entries.
+    let mut indexed: List<HeaderField> = [];
+    indexed.push(HeaderField { name: Text.from(":method"),  value: Text.from("GET") });
+    indexed.push(HeaderField { name: Text.from(":scheme"),  value: Text.from("https") });
+    indexed.push(HeaderField { name: Text.from(":status"),  value: Text.from("200") });
+    assert_roundtrip(&indexed, "pure-indexed");
+
+    // (2) Literal with name reference — name in static, value literal.
+    let mut name_ref: List<HeaderField> = [];
+    name_ref.push(HeaderField {
+        name:  Text.from("content-type"),
+        value: Text.from("application/json"),
+    });
+    name_ref.push(HeaderField {
+        name:  Text.from("accept-encoding"),
+        value: Text.from("gzip, br"),
+    });
+    assert_roundtrip(&name_ref, "literal-with-name-reference");
+
+    // (3) Literal with literal name — both name and value are literal.
+    let mut literal: List<HeaderField> = [];
+    literal.push(HeaderField {
+        name:  Text.from("x-request-id"),
+        value: Text.from("abc-123-def"),
+    });
+    assert_roundtrip(&literal, "literal-name");
+
+    // (4) Mixed scenario simulating a real HTTP/3 request flight.
+    let mut mixed: List<HeaderField> = [];
+    mixed.push(HeaderField { name: Text.from(":method"),  value: Text.from("POST") });
+    mixed.push(HeaderField { name: Text.from(":scheme"),  value: Text.from("https") });
+    mixed.push(HeaderField { name: Text.from(":path"),    value: Text.from("/api/v1/resource") });
+    mixed.push(HeaderField { name: Text.from(":authority"), value: Text.from("api.example.com") });
+    mixed.push(HeaderField { name: Text.from("content-type"), value: Text.from("application/grpc") });
+    mixed.push(HeaderField { name: Text.from("x-trace-id"),   value: Text.from("deadbeef-cafe") });
+    assert_roundtrip(&mixed, "mixed-real-flight");
+
+    print("QPACK encoder/decoder round-trip (4 scenarios) OK");
+}

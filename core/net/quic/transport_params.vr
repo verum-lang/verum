@@ -67,7 +67,35 @@ public type PreferredAddress is {
     stateless_reset_token: [Byte; 16],
 };
 
+/// RFC 9000 §18.2 — per-type bounds for streams and ack-delay-exponent.
+/// `initial_max_streams_{bidi,uni}` MUST NOT exceed 2^60.
+public const MAX_STREAMS_LIMIT: UInt64 = 1152921504606846976_u64;  // 2^60
+
+/// `ack_delay_exponent` MUST NOT exceed 20 (RFC 9000 §18.2).
+public const MAX_ACK_DELAY_EXPONENT: UInt8 = 20_u8;
+
+/// Required minimum per RFC 9000 §18.2 — active_connection_id_limit ≥ 2.
+public const MIN_ACTIVE_CID_LIMIT: UInt64 = 2_u64;
+
+/// RFC 9000 §18.2 — max_udp_payload_size MUST be ≥ 1200.
+public const MIN_MAX_UDP_PAYLOAD_SIZE: UInt64 = 1200_u64;
+
 implement TransportParams {
+    /// V9 theorem (spec §9): `initial_max_streams_bidi` and
+    /// `initial_max_streams_uni` are ≤ 2^60 per RFC 9000 §18.2;
+    /// `ack_delay_exponent` ≤ 20; `active_connection_id_limit` ≥ 2;
+    /// `max_udp_payload_size` ≥ 1200. Returns `true` iff every
+    /// invariant holds.  Used both as a validation gate after decode
+    /// (TransportError.ProtocolViolation on false) and as the SMT
+    /// obligation for V9.
+    public fn bounds_ok(&self) -> Bool {
+        self.initial_max_streams_bidi <= MAX_STREAMS_LIMIT
+            && self.initial_max_streams_uni  <= MAX_STREAMS_LIMIT
+            && self.ack_delay_exponent       <= MAX_ACK_DELAY_EXPONENT
+            && self.active_connection_id_limit >= MIN_ACTIVE_CID_LIMIT
+            && self.max_udp_payload_size     >= MIN_MAX_UDP_PAYLOAD_SIZE
+    }
+
     /// Default values per RFC 9000 §18.2.
     public fn defaults() -> TransportParams {
         TransportParams {

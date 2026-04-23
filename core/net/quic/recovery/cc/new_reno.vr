@@ -169,6 +169,16 @@ implement CongestionCtrl for NewReno {
 }
 
 implement NewReno {
+    /// V5 theorem (spec §9): `cwnd >= MIN_WINDOW_BYTES` at all times.
+    /// MIN_WINDOW_BYTES = 2 × MAX_DATAGRAM_SIZE per RFC 9002 §7.2.
+    /// The constructor initialises to INITIAL_WINDOW_BYTES ≥ MIN, and
+    /// `on_packets_lost` floors the post-halve value at MIN — so this
+    /// predicate must always hold. `debug_assert_window_min` surfaces
+    /// regressions as a hard panic in development builds.
+    public fn window_min_ok(&self) -> Bool {
+        self.cwnd >= MIN_WINDOW_BYTES
+    }
+
     /// Called by the outer loss-detection loop when an ACK advances
     /// past the recovery start time — transitions recovery → avoidance.
     public fn exit_recovery_if_appropriate(&mut self, acked_time_sent: Instant) {

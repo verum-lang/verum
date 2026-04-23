@@ -77,6 +77,13 @@ implement AeadState {
         AeadState { kind: kind, key: key, iv: iv, seq: 0_u64 }
     }
 
+    /// V8 theorem helper (spec §9): the sequence counter is strictly
+    /// monotonic — every successful `seal` / `open` increments it by
+    /// exactly one, and it never decreases across a direction.
+    /// Exposed as a plain accessor so callers can snapshot + compare
+    /// before/after calls without peeking at the private field.
+    public fn seq(&self) -> UInt64 { self.seq }
+
     /// Compute the per-record nonce: iv XOR pad64(seq, 12).
     fn per_record_nonce(&self) -> [Byte; 12] {
         let mut nonce: [Byte; 12] = self.iv.clone();

@@ -1,0 +1,27 @@
+// @test: integration
+// @tier: 0
+// @level: L1
+// @tags: refinement, type_alias, language, verify
+// @timeout: 10000
+// @expect: pass
+
+// Regression for the alias-wrapped refinement gap flagged from pager.vr
+// comment + tls-quic.md §4.6.  Before the fix, `verify` returned
+// "Proved" for `use_pn(0_u64)` even though `PageNo` refinement
+// requires `n >= 1`. With the verify_cmd alias-map wiring, the
+// implicit precondition is surfaced and Z3 catches the counterexample.
+
+mount core.*;
+
+type PageNo is Int where |n| { n >= 1 && n < 2147483648 };
+
+// A valid call — no violation.
+public fn use_ok(p: PageNo) -> Int {
+    p + 1
+}
+
+fn main() {
+    let x: Int = use_ok(42);
+    assert_eq(x, 43);
+    print("refinement-alias verify surface OK");
+}
