@@ -796,6 +796,110 @@ public fn step(state: &mut VdbeState, program: &VdbeProgram) -> StepResult {
                         }
                     }
                 }
+                12 => {
+                    // Concat two texts.
+                    if n_args < 2 {
+                        RNull
+                    } else {
+                        let a = state.regs.get(first_arg_reg);
+                        let b = state.regs.get(first_arg_reg + 1);
+                        match a {
+                            RText(ref as_s) => match b {
+                                RText(ref bs_s) => {
+                                    let mut out = Text.new();
+                                    let abytes = as_s.as_bytes();
+                                    let bbytes = bs_s.as_bytes();
+                                    let mut i: Int = 0;
+                                    while i < abytes.len() { out.push_byte(abytes[i]); i = i + 1; }
+                                    i = 0;
+                                    while i < bbytes.len() { out.push_byte(bbytes[i]); i = i + 1; }
+                                    RText(out)
+                                }
+                                RNull => RNull,
+                                _ => RNull,
+                            },
+                            RNull => RNull,
+                            _ => RNull,
+                        }
+                    }
+                }
+                13 => {
+                    // SUBSTR(s, start, [length]) — 1-indexed, SQLite style.
+                    if n_args < 2 {
+                        RNull
+                    } else {
+                        let s_reg = state.regs.get(first_arg_reg);
+                        let start_reg = state.regs.get(first_arg_reg + 1);
+                        let start_i: Int = match start_reg {
+                            RInt(x) => x as Int,
+                            _       => 1,
+                        };
+                        let length_opt: Maybe<Int> = if n_args >= 3 {
+                            match state.regs.get(first_arg_reg + 2) {
+                                RInt(x) => Some(x as Int),
+                                _       => None,
+                            }
+                        } else {
+                            None
+                        };
+                        match s_reg {
+                            RText(ref s) => {
+                                let bs = s.as_bytes();
+                                let n = bs.len();
+                                // SQLite: start=0 treated as 1; negative counts from end.
+                                let mut begin: Int = start_i;
+                                if begin < 0 { begin = n + begin + 1; }
+                                if begin < 1 { begin = 1; }
+                                let end: Int = match length_opt {
+                                    Some(l) => begin + l - 1,
+                                    None    => n,
+                                };
+                                let mut out = Text.new();
+                                let mut i: Int = begin;
+                                while i <= end && i <= n {
+                                    if i >= 1 { out.push_byte(bs[i - 1]); }
+                                    i = i + 1;
+                                }
+                                RText(out)
+                            }
+                            RNull => RNull,
+                            _ => RNull,
+                        }
+                    }
+                }
+                14 => {
+                    // TRIM(s) — ASCII whitespace (space/tab/CR/LF).
+                    if n_args < 1 {
+                        RNull
+                    } else {
+                        match state.regs.get(first_arg_reg) {
+                            RText(ref s) => {
+                                let bs = s.as_bytes();
+                                let n = bs.len();
+                                let mut i: Int = 0;
+                                while i < n {
+                                    let b = bs[i];
+                                    if b != (32 as Byte) && b != (9 as Byte)
+                                        && b != (10 as Byte) && b != (13 as Byte) { break; }
+                                    i = i + 1;
+                                }
+                                let mut j: Int = n;
+                                while j > i {
+                                    let b = bs[j - 1];
+                                    if b != (32 as Byte) && b != (9 as Byte)
+                                        && b != (10 as Byte) && b != (13 as Byte) { break; }
+                                    j = j - 1;
+                                }
+                                let mut out = Text.new();
+                                let mut k: Int = i;
+                                while k < j { out.push_byte(bs[k]); k = k + 1; }
+                                RText(out)
+                            }
+                            RNull => RNull,
+                            _ => RNull,
+                        }
+                    }
+                }
                 11 => {
                     // NOT LIKE — inverse of LIKE.
                     if n_args < 2 {

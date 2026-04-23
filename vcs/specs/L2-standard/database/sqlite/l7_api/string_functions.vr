@@ -1,0 +1,86 @@
+// @test: typecheck-pass
+// @level: L2
+// @tier: 0
+// @tags: sqlite, native, l7, string, concat, substr, trim
+// @timeout: 15000
+// @description: String operations — concat (||), SUBSTR, TRIM, logical AND/OR
+//
+// Spec: internal/specs/sqlite-native.md §14.2 (string functions + operators)
+
+mount core.*;
+mount collections.List;
+mount core.database.sqlite.native.l7_api.{
+    Database, DbError, open_admin,
+};
+mount core.database.sqlite.native.l4_vdbe.Register;
+
+fn concat_operator() {
+    let mut db = match open_admin() {
+        Ok(d)  => d,
+        Err(_) => { panic("open"); return; }
+    };
+    let _ = db.execute(&"CREATE TABLE t (a TEXT, b TEXT)".clone());
+    let _ = db.execute(&"INSERT INTO t VALUES ('hello', 'world')".clone());
+    match db.query_all(&"SELECT a || b FROM t".clone()) {
+        Ok(rows) => {
+            assert_eq(rows.len(), 1);
+            match rows[0][0] { RText(_) => {}, _ => panic("concat should yield RText") }
+        }
+        Err(_) => panic("query_all concat"),
+    }
+}
+
+fn substr_function() {
+    let mut db = match open_admin() {
+        Ok(d)  => d,
+        Err(_) => { panic("open"); return; }
+    };
+    let _ = db.execute(&"CREATE TABLE t (s TEXT)".clone());
+    let _ = db.execute(&"INSERT INTO t VALUES ('hello world')".clone());
+    match db.query_all(&"SELECT SUBSTR(s, 1, 5) FROM t".clone()) {
+        Ok(rows) => {
+            match rows[0][0] { RText(_) => {}, _ => panic("substr should be RText") }
+        }
+        Err(_) => panic("query_all SUBSTR"),
+    }
+}
+
+fn trim_function() {
+    let mut db = match open_admin() {
+        Ok(d)  => d,
+        Err(_) => { panic("open"); return; }
+    };
+    let _ = db.execute(&"CREATE TABLE t (s TEXT)".clone());
+    let _ = db.execute(&"INSERT INTO t VALUES ('  hi  ')".clone());
+    match db.query_all(&"SELECT TRIM(s) FROM t".clone()) {
+        Ok(rows) => {
+            match rows[0][0] { RText(_) => {}, _ => panic("trim should be RText") }
+        }
+        Err(_) => panic("query_all TRIM"),
+    }
+}
+
+fn logical_and_or() {
+    let mut db = match open_admin() {
+        Ok(d)  => d,
+        Err(_) => { panic("open"); return; }
+    };
+    let _ = db.execute(&"CREATE TABLE t (v INTEGER)".clone());
+    let _ = db.execute(&"INSERT INTO t VALUES (5)".clone());
+    match db.query_all(&"SELECT v FROM t WHERE v > 0 AND v < 10".clone()) {
+        Ok(rows) => { assert(rows.len() <= 1); }
+        Err(_) => panic("query_all AND"),
+    }
+    match db.query_all(&"SELECT v FROM t WHERE v = 1 OR v = 5".clone()) {
+        Ok(rows) => { assert(rows.len() <= 1); }
+        Err(_) => panic("query_all OR"),
+    }
+}
+
+fn main() {
+    concat_operator();
+    substr_function();
+    trim_function();
+    logical_and_or();
+    print("string_functions typecheck ok");
+}

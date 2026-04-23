@@ -2303,6 +2303,10 @@ fn scalar_fn_kind(name: &Text) -> Int {
     if n == "coalesce".clone() { return 4; }
     if n == "ifnull".clone() { return 5; }
     if n == "nullif".clone() { return 6; }
+    if n == "concat".clone() { return 12; }
+    if n == "substr".clone() { return 13; }
+    if n == "substring".clone() { return 13; }
+    if n == "trim".clone()   { return 14; }
     -1
 }
 
@@ -2447,6 +2451,7 @@ fn emit_binary(
         BBitOr  => { let _ = st.program.emit(BitOr(ra, rb, dst)); Ok(()) }
         BShl    => { let _ = st.program.emit(ShiftLeft(ra, rb, dst)); Ok(()) }
         BShr    => { let _ = st.program.emit(ShiftRight(ra, rb, dst)); Ok(()) }
+        BConcat => { let _ = st.program.emit(ScalarFn(12, 2, ra, dst)); Ok(()) }
         BEq => {
             // Materialise as boolean via `Eq` + Integer.
             let _ = st.program.emit(Integer(0, dst));
@@ -2457,6 +2462,52 @@ fn emit_binary(
             let after = st.program.instruction_count();
             st.program.replace(jump_idx, Eq(ra, rb, set_true));
             st.program.replace(jump_idx + 1, Goto(after));
+            Ok(())
+        }
+        BNe | BLt | BLe | BGt | BGe => {
+            let _ = st.program.emit(Integer(0, dst));
+            let jump_idx = match op {
+                BNe => st.program.emit(Ne(ra, rb, 0)),
+                BLt => st.program.emit(Lt(ra, rb, 0)),
+                BLe => st.program.emit(Le(ra, rb, 0)),
+                BGt => st.program.emit(Gt(ra, rb, 0)),
+                BGe => st.program.emit(Ge(ra, rb, 0)),
+                _   => st.program.emit(Eq(ra, rb, 0)),
+            };
+            let goto_idx = st.program.emit(Goto(0));
+            let set_true = st.program.instruction_count();
+            let _ = st.program.emit(Integer(1, dst));
+            let after = st.program.instruction_count();
+            match op {
+                BNe => st.program.replace(jump_idx, Ne(ra, rb, set_true)),
+                BLt => st.program.replace(jump_idx, Lt(ra, rb, set_true)),
+                BLe => st.program.replace(jump_idx, Le(ra, rb, set_true)),
+                BGt => st.program.replace(jump_idx, Gt(ra, rb, set_true)),
+                BGe => st.program.replace(jump_idx, Ge(ra, rb, set_true)),
+                _   => st.program.replace(jump_idx, Eq(ra, rb, set_true)),
+            }
+            st.program.replace(goto_idx, Goto(after));
+            Ok(())
+        }
+        BAnd => {
+            // Logical AND — truthy path: dst = 1 iff both non-zero.
+            let _ = st.program.emit(Integer(0, dst));
+            let a_false = st.program.emit(IfNot(ra, 0));
+            let b_false = st.program.emit(IfNot(rb, 0));
+            let _ = st.program.emit(Integer(1, dst));
+            let after = st.program.instruction_count();
+            st.program.replace(a_false, IfNot(ra, after));
+            st.program.replace(b_false, IfNot(rb, after));
+            Ok(())
+        }
+        BOr => {
+            let _ = st.program.emit(Integer(1, dst));
+            let a_true = st.program.emit(If(ra, 0));
+            let b_true = st.program.emit(If(rb, 0));
+            let _ = st.program.emit(Integer(0, dst));
+            let after = st.program.instruction_count();
+            st.program.replace(a_true, If(ra, after));
+            st.program.replace(b_true, If(rb, after));
             Ok(())
         }
         _ => Err(unsupported("binop codegen pending".clone())),
