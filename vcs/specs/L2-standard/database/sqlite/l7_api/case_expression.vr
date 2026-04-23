@@ -1,0 +1,70 @@
+// @test: typecheck-pass
+// @level: L2
+// @tier: 0
+// @tags: sqlite, native, l7, case, when
+// @timeout: 15000
+// @description: CASE WHEN ... THEN ... ELSE ... END
+//
+// Spec: internal/specs/sqlite-native.md §14.2 (CASE)
+
+mount core.*;
+mount collections.List;
+mount core.database.sqlite.native.l7_api.{
+    Database, DbError, open_admin,
+};
+mount core.database.sqlite.native.l4_vdbe.Register;
+
+fn searched_case_returns_matching_arm() {
+    let mut db = match open_admin() {
+        Ok(d)  => d,
+        Err(_) => { panic("open"); return; }
+    };
+    let _ = db.execute(&"CREATE TABLE t (v INTEGER)".clone());
+    let _ = db.execute(&"INSERT INTO t VALUES (5)".clone());
+    match db.query_all(&"SELECT CASE WHEN v > 10 THEN 'big' WHEN v > 0 THEN 'pos' ELSE 'zero' END FROM t".clone()) {
+        Ok(rows) => {
+            assert_eq(rows.len(), 1);
+            match rows[0][0] { RText(_) => {}, _ => panic("CASE result should be RText") }
+        }
+        Err(_) => panic("query_all CASE"),
+    }
+}
+
+fn simple_case_matches_scrutinee() {
+    let mut db = match open_admin() {
+        Ok(d)  => d,
+        Err(_) => { panic("open"); return; }
+    };
+    let _ = db.execute(&"CREATE TABLE t (v INTEGER)".clone());
+    let _ = db.execute(&"INSERT INTO t VALUES (2)".clone());
+    match db.query_all(&"SELECT CASE v WHEN 1 THEN 'one' WHEN 2 THEN 'two' ELSE 'other' END FROM t".clone()) {
+        Ok(rows) => {
+            assert_eq(rows.len(), 1);
+            match rows[0][0] { RText(_) => {}, _ => panic("simple CASE result should be RText") }
+        }
+        Err(_) => panic("query_all simple CASE"),
+    }
+}
+
+fn case_without_else_returns_null() {
+    let mut db = match open_admin() {
+        Ok(d)  => d,
+        Err(_) => { panic("open"); return; }
+    };
+    let _ = db.execute(&"CREATE TABLE t (v INTEGER)".clone());
+    let _ = db.execute(&"INSERT INTO t VALUES (99)".clone());
+    match db.query_all(&"SELECT CASE WHEN v = 1 THEN 'one' END FROM t".clone()) {
+        Ok(rows) => {
+            assert_eq(rows.len(), 1);
+            match rows[0][0] { RNull => {}, _ => panic("CASE without ELSE matching none should be RNull") }
+        }
+        Err(_) => panic("query_all CASE no-else"),
+    }
+}
+
+fn main() {
+    searched_case_returns_matching_arm();
+    simple_case_matches_scrutinee();
+    case_without_else_returns_null();
+    print("case_expression typecheck ok");
+}

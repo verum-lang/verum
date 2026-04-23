@@ -1988,6 +1988,8 @@ public fn emit_expr(st: &mut CgState, e: &Expr, dst: Int) -> Result<(), CodegenE
             Ok(())
         }
         EFunc(ref name, ref args, _) => emit_scalar_call(st, name, args, dst),
+        ECase(ref scrut_opt, ref arms, ref else_opt) =>
+            emit_case(st, scrut_opt, arms, else_opt, dst),
         ECast(ref inner, ref target_ty) => {
             let src = st.regs.alloc();
             match emit_expr(st, inner, src) {
@@ -2002,6 +2004,91 @@ public fn emit_expr(st: &mut CgState, e: &Expr, dst: Int) -> Result<(), CodegenE
         }
         _ => Err(unsupported("expression kind not supported by v1 codegen".clone())),
     }
+}
+
+fn emit_case(
+    st: &mut CgState,
+    scrut: &Maybe<Heap<Expr>>,
+    arms: &List<(Expr, Expr)>,
+    else_: &Maybe<Heap<Expr>>,
+    dst: Int,
+) -> Result<(), CodegenError> {
+    // Seed dst to NULL in case no arm fires and there is no ELSE.
+    let _ = st.program.emit(Null(dst, dst));
+
+    // For a simple CASE, evaluate the scrutinee once upfront.
+    let mut scrut_reg: Int = -1;
+    match scrut {
+        Some(ref s) => {
+            let r = st.regs.alloc();
+            match emit_expr(st, s, r) {
+                Ok(_)  => {}, Err(e) => { return Err(e); }
+            }
+            scrut_reg = r;
+        }
+        None => {}
+    }
+
+    // Track "after" patches — each arm branches to `after` on body
+    // completion so subsequent arms are skipped.
+    let mut after_patches: List<Int> = List.new();
+
+    let mut i: Int = 0;
+    while i < arms.len() {
+        let pair = &arms[i];
+        let pred_reg = st.regs.alloc();
+        if scrut_reg >= 0 {
+            // Simple CASE: compare scrutinee with arm's WHEN value.
+            let when_reg = st.regs.alloc();
+            match emit_expr(st, &pair.0, when_reg) {
+                Ok(_)  => {}, Err(e) => { return Err(e); }
+            }
+            // Boolean-compare scrut_reg == when_reg → pred_reg.
+            let _ = st.program.emit(Integer(0, pred_reg));
+            let jump_eq = st.program.emit(Eq(scrut_reg, when_reg, 0));
+            let goto_skip = st.program.emit(Goto(0));
+            let set_true_idx = st.program.instruction_count();
+            let _ = st.program.emit(Integer(1, pred_reg));
+            let after_cmp = st.program.instruction_count();
+            st.program.replace(jump_eq, Eq(scrut_reg, when_reg, set_true_idx));
+            st.program.replace(goto_skip, Goto(after_cmp));
+        } else {
+            // Searched CASE: the WHEN expression IS the predicate.
+            match emit_expr(st, &pair.0, pred_reg) {
+                Ok(_)  => {}, Err(e) => { return Err(e); }
+            }
+        }
+        // If predicate is false, skip to next arm.
+        let skip_patch = st.program.emit(IfNot(pred_reg, 0));
+        // Body: evaluate THEN into dst, then Goto after_end.
+        match emit_expr(st, &pair.1, dst) {
+            Ok(_)  => {}, Err(e) => { return Err(e); }
+        }
+        let after_patch = st.program.emit(Goto(0));
+        after_patches.push(after_patch);
+        let next_arm_idx = st.program.instruction_count();
+        st.program.replace(skip_patch, IfNot(pred_reg, next_arm_idx));
+        i = i + 1;
+    }
+
+    // ELSE path (only reached if no arm fired).
+    match else_ {
+        Some(ref e) => {
+            match emit_expr(st, e, dst) {
+                Ok(_)  => {}, Err(er) => { return Err(er); }
+            }
+        }
+        None => {}
+    }
+
+    // Patch every arm's "goto after end" to the current instruction.
+    let after_end = st.program.instruction_count();
+    let mut p: Int = 0;
+    while p < after_patches.len() {
+        st.program.replace(after_patches[p], Goto(after_end));
+        p = p + 1;
+    }
+    Ok(())
 }
 
 fn cast_target_kind(ty: &Text) -> Int {
