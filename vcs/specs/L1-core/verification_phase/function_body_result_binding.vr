@@ -55,6 +55,27 @@ fn negated(x: Int) -> Bool
     x < 0
 }
 
+@verify(formal)
+fn single_let(x: Int) -> Int
+    requires x >= 0
+    ensures result == x * 2
+{
+    let y = x + x;
+    y
+}
+
+@verify(formal)
+fn multi_let(x: Int, y: Int) -> Int
+    requires x >= 0
+    requires y >= 0
+    ensures result == x + y + 1
+    ensures result >= 1
+{
+    let sum = x + y;
+    let total = sum + 1;
+    total
+}
+
 fn main() {
     print("L1-core: verification_phase/function_body_result_binding");
 }

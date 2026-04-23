@@ -888,25 +888,73 @@ impl<'s> VerifyCommand<'s> {
         // that's weaker but sound for existential reading of `ensures`.
         if let verum_common::Maybe::Some(b) = body {
             use verum_ast::decl::FunctionBody;
-            let tail_expr: Option<&Expr> = match b {
-                FunctionBody::Expr(e) => Some(e),
-                FunctionBody::Block(blk) if blk.stmts.is_empty() => {
-                    if let verum_common::Maybe::Some(boxed) = &blk.expr {
-                        Some(boxed.as_ref())
+            use verum_ast::stmt::StmtKind;
+            use verum_ast::pattern::PatternKind;
+
+            // Assert each `let name = expr;` in the block's statement
+            // list as a fresh Z3 binding so the tail expression can
+            // reference intermediate values. We ignore let statements
+            // whose pattern isn't a plain identifier (destructuring
+            // patterns fall through — a future WP pipeline will handle
+            // them) and any statement kind other than Let / tail Expr,
+            // which means early returns, defers, and assignments bail
+            // the encoding conservatively and leave `result` free.
+            let mut tail_expr: Option<&Expr> = None;
+            let mut safe_encoding = true;
+
+            match b {
+                FunctionBody::Expr(e) => {
+                    tail_expr = Some(e);
+                }
+                FunctionBody::Block(blk) => {
+                    for stmt in &blk.stmts {
+                        match &stmt.kind {
+                            StmtKind::Let { pattern, value: verum_common::Maybe::Some(val), .. } => {
+                                if let PatternKind::Ident { name, .. } = &pattern.kind {
+                                    if let Ok(val_z3) = translator.translate_expr(val) {
+                                        let n = name.as_str();
+                                        if let Some(v_int) = val_z3.as_int() {
+                                            let var = z3::ast::Int::new_const(n);
+                                            solver.assert(&var.eq(&v_int));
+                                        } else if let Some(v_bool) = val_z3.as_bool() {
+                                            let var = z3::ast::Bool::new_const(n);
+                                            solver.assert(&var.iff(&v_bool));
+                                        } else if let Some(v_real) = val_z3.as_real() {
+                                            let var = z3::ast::Real::new_const(n);
+                                            solver.assert(&var.eq(&v_real));
+                                        }
+                                    }
+                                }
+                            }
+                            StmtKind::Expr { expr, has_semi: false } => {
+                                // Tail expression appearing as the final
+                                // stmt (block without separate `.expr`
+                                // — some parser shapes produce this).
+                                tail_expr = Some(expr);
+                            }
+                            StmtKind::Expr { has_semi: true, .. } => {
+                                // Expression-with-semicolon statements
+                                // have no return value; ignore them but
+                                // don't invalidate the encoding.
+                            }
+                            _ => {
+                                safe_encoding = false;
+                                break;
+                            }
+                        }
+                    }
+                    if safe_encoding {
+                        if let verum_common::Maybe::Some(boxed) = &blk.expr {
+                            tail_expr = Some(boxed.as_ref());
+                        }
                     } else {
-                        None
+                        tail_expr = None;
                     }
                 }
-                FunctionBody::Block(_) => None,
-            };
+            }
+
             if let Some(e) = tail_expr {
                 if let Ok(body_z3) = translator.translate_expr(e) {
-                    // Build a fresh `result` Z3 symbol of the matching
-                    // sort and assert `result == body`. We piggy-back on
-                    // the existing `Int::new_const("result")` convention
-                    // so the ensures-side translation (which also
-                    // resolves `result` as an Int const) unifies with
-                    // our binding.
                     if let Some(body_int) = body_z3.as_int() {
                         let result_var = z3::ast::Int::new_const("result");
                         solver.assert(&result_var.eq(&body_int));
@@ -917,8 +965,6 @@ impl<'s> VerifyCommand<'s> {
                         let result_var = z3::ast::Real::new_const("result");
                         solver.assert(&result_var.eq(&body_real));
                     }
-                    // Unknown sorts (tuples, arrays, user types) fall
-                    // through — future WP pipeline handles them.
                 }
             }
         }
