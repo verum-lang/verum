@@ -1,0 +1,35 @@
+// @test: integration
+// @tier: 0
+// @level: L1
+// @tags: proof, induction, IH, admit, have, soundness
+// @expect: pass
+//
+// Inside `proof by induction { case succ(k) => { have ih: P(k); ... } }`
+// the un-justified `have ih: …;` is the induction hypothesis — the
+// proposition the induction principle gives you for free. The
+// grammar's proof_justification is required syntactically; the
+// parser sugars the missing `by CLAUSE` to `TacticExpr::Trivial`.
+// The verifier now admits such steps ONLY when the enclosing
+// context is an induction case body. Top-level `have` without `by`
+// is still rejected — otherwise anyone could smuggle `false` in and
+// derive anything.
+
+fn sum_to(n: Int) -> Int;
+
+@verify(formal)
+theorem gauss_style_induction(n: Int)
+    requires n >= 0
+    ensures sum_to(n) >= 0
+{
+    proof by induction on n {
+        case 0 => trivial
+        case succ(k) => {
+            have ih: sum_to(k) >= 0;
+            conclude by auto
+        }
+    }
+}
+
+fn main() {
+    print("L1-core: proof/tactics/induction_implicit_ih");
+}

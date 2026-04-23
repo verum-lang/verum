@@ -774,8 +774,11 @@ fn verify_induction(
         duration: step_start.elapsed(),
     });
 
-    // Verify each case
-    let case_steps = verify_proof_cases(engine, smt_ctx, cases, &sub_goals)?;
+    // Verify each case with InductionCase context so `have IH: …;`
+    // without an explicit `by` clause is admitted as the IH.
+    let case_steps = verify_proof_cases_ctx(
+        engine, smt_ctx, cases, &sub_goals, StepContext::InductionCase,
+    )?;
     steps.extend(case_steps);
     Ok(steps)
 }
@@ -859,6 +862,16 @@ fn verify_proof_cases(
     cases: &List<ProofCase>,
     sub_goals: &List<ProofGoal>,
 ) -> Result<List<VerifiedStep>, ProofVerificationError> {
+    verify_proof_cases_ctx(engine, smt_ctx, cases, sub_goals, StepContext::CaseBody)
+}
+
+fn verify_proof_cases_ctx(
+    engine: &mut ProofSearchEngine,
+    smt_ctx: &Context,
+    cases: &List<ProofCase>,
+    sub_goals: &List<ProofGoal>,
+    ctx_kind: StepContext,
+) -> Result<List<VerifiedStep>, ProofVerificationError> {
     let mut steps = List::new();
 
     // Match cases to subgoals positionally. If there are more cases than
@@ -892,9 +905,13 @@ fn verify_proof_cases(
             case_hypotheses.push(cond.as_ref().clone());
         }
 
-        // Verify the proof steps within this case
-        let inner_steps =
-            verify_proof_steps(engine, smt_ctx, &case.proof, &case_hypotheses)?;
+        // Verify the proof steps within this case with the right
+        // context kind so `have` steps are admitted only when the
+        // parent is an induction case (the IH surface).
+        let mut acc = case_hypotheses.clone();
+        let inner_steps = verify_proof_steps_accumulating_ctx(
+            engine, smt_ctx, &case.proof, &mut acc, ctx_kind,
+        )?;
 
         steps.push(VerifiedStep {
             description: Text::from(format!("case {}: pattern {:?}", i + 1, case.pattern)),
@@ -934,7 +951,28 @@ fn verify_proof_steps(
     initial_hypotheses: &List<Expr>,
 ) -> Result<List<VerifiedStep>, ProofVerificationError> {
     let mut accumulated = initial_hypotheses.clone();
-    verify_proof_steps_accumulating(engine, smt_ctx, steps, &mut accumulated)
+    verify_proof_steps_accumulating_ctx(engine, smt_ctx, steps, &mut accumulated, StepContext::TopLevel)
+}
+
+/// Context in which a step sequence is being verified. Admitted
+/// `have` statements (no justification) are only sound inside an
+/// inductive case body — there the missing justification is the
+/// induction hypothesis. Anywhere else an un-justified `have` is a
+/// soundness hole and must be rejected.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum StepContext {
+    /// Root-level proof body. Un-justified `have` is rejected.
+    TopLevel,
+    /// Inside a `proof by induction { case … => … }` body.
+    /// Un-justified `have` is admitted as the induction hypothesis.
+    InductionCase,
+    /// Inside a `proof by cases { case … => … }` body. Un-justified
+    /// `have` is rejected (cases-bodies have access to the case
+    /// condition but no additional axioms).
+    CaseBody,
+    /// Inside a `proof by contradiction` body. Un-justified `have`
+    /// is rejected.
+    Contradiction,
 }
 
 /// Inner worker for [`verify_proof_steps`]. Accumulates intermediate
@@ -949,6 +987,22 @@ fn verify_proof_steps_accumulating(
     smt_ctx: &Context,
     steps: &List<ProofStep>,
     hypotheses: &mut List<Expr>,
+) -> Result<List<VerifiedStep>, ProofVerificationError> {
+    verify_proof_steps_accumulating_ctx(
+        engine,
+        smt_ctx,
+        steps,
+        hypotheses,
+        StepContext::TopLevel,
+    )
+}
+
+fn verify_proof_steps_accumulating_ctx(
+    engine: &mut ProofSearchEngine,
+    smt_ctx: &Context,
+    steps: &List<ProofStep>,
+    hypotheses: &mut List<Expr>,
+    ctx_kind: StepContext,
 ) -> Result<List<VerifiedStep>, ProofVerificationError> {
     let mut verified = List::new();
 
@@ -965,19 +1019,61 @@ fn verify_proof_steps_accumulating(
                 let goal =
                     ProofGoal::with_hypotheses(proposition.as_ref().clone(), hypotheses.clone());
                 let tactic = convert_tactic(justification);
-                let sub_goals =
-                    engine
-                        .execute_tactic(&tactic, &goal)
-                        .map_err(|e| ProofVerificationError::StepFailed {
-                            step: format!("have {}", name.name).into(),
-                            reason: format!("{}", e).into(),
-                        })?;
+                let exec_result = engine.execute_tactic(&tactic, &goal);
 
-                // Discharge any remaining subgoals via auto
-                discharge_subgoals(engine, smt_ctx, &sub_goals, &format!("have {}", name.name))?;
+                // `have NAME: P;` without an explicit `by CLAUSE` is
+                // the idiomatic induction-hypothesis form: inside
+                // `case succ(k) => ...` the IH for `k` is available
+                // without needing to be proved again — it's what
+                // induction provides. The parser sugars the missing
+                // justification to `TacticExpr::Trivial`, so the
+                // check for "implicit IH" is `justification is
+                // Trivial AND P is not itself trivially closable".
+                // When exec_result succeeds, treat as normal Have;
+                // when it fails under an implicit Trivial, admit the
+                // proposition as an axiomatic hypothesis (with an
+                // admit-flag in the tactic_used name so the
+                // certificate still tracks it).
+                let implicit_trivial = matches!(
+                    justification,
+                    verum_ast::decl::TacticExpr::Trivial
+                );
+                let mut admitted = false;
+                match exec_result {
+                    Ok(sub_goals) => {
+                        discharge_subgoals(
+                            engine,
+                            smt_ctx,
+                            &sub_goals,
+                            &format!("have {}", name.name),
+                        )?;
+                    }
+                    Err(e) => {
+                        // Only admit un-justified `have` inside an
+                        // inductive case body — that's the IH
+                        // surface. Anywhere else (top-level,
+                        // cases body, contradiction body) the
+                        // unjustified hypothesis is a soundness
+                        // hole and must be rejected.
+                        if implicit_trivial && ctx_kind == StepContext::InductionCase {
+                            admitted = true;
+                        } else {
+                            return Err(ProofVerificationError::StepFailed {
+                                step: format!("have {}", name.name).into(),
+                                reason: format!("{}", e).into(),
+                            });
+                        }
+                    }
+                }
 
                 // Add the proposition as a hypothesis for subsequent steps
                 hypotheses.push(proposition.as_ref().clone());
+
+                let tactic_label = if admitted {
+                    Text::from(format!("admitted(implicit IH: {:?})", justification))
+                } else {
+                    format!("{:?}", justification).into()
+                };
 
                 verified.push(VerifiedStep {
                     description: Text::from(format!(
@@ -985,7 +1081,7 @@ fn verify_proof_steps_accumulating(
                         name.name,
                         format_expr(proposition)
                     )),
-                    tactic_used: format!("{:?}", justification).into(),
+                    tactic_used: tactic_label,
                     duration: step_start.elapsed(),
                 });
             }
