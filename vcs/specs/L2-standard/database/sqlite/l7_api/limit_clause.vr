@@ -77,10 +77,33 @@ fn limit_with_where_filters_first_then_caps() {
     }
 }
 
+fn limit_offset_pair() {
+    let mut db = match open_admin() {
+        Ok(d)  => d,
+        Err(_) => { panic("open"); return; }
+    };
+    let _ = db.execute(&"CREATE TABLE t (v INTEGER)".clone());
+    let _ = db.execute(&"INSERT INTO t VALUES (1)".clone());
+    let _ = db.execute(&"INSERT INTO t VALUES (2)".clone());
+    let _ = db.execute(&"INSERT INTO t VALUES (3)".clone());
+    let _ = db.execute(&"INSERT INTO t VALUES (4)".clone());
+    let _ = db.execute(&"INSERT INTO t VALUES (5)".clone());
+    // LIMIT 2 OFFSET 1 on ORDER BY v should yield {2, 3}.
+    match db.query_all(&"SELECT v FROM t ORDER BY v LIMIT 2 OFFSET 1".clone()) {
+        Ok(rows) => {
+            assert_eq(rows.len(), 2);
+            match rows[0][0] { RInt(x) => assert_eq(x as Int, 2), _ => panic("offset[0]") }
+            match rows[1][0] { RInt(x) => assert_eq(x as Int, 3), _ => panic("offset[1]") }
+        }
+        Err(_) => panic("query_all LIMIT OFFSET"),
+    }
+}
+
 fn main() {
     limit_caps_select_row_count();
     limit_zero_returns_no_rows();
     limit_larger_than_row_count_returns_all();
     limit_with_where_filters_first_then_caps();
+    limit_offset_pair();
     print("limit_clause typecheck ok");
 }

@@ -93,11 +93,14 @@ public type CgState is {
     sql: Text,
 
     // LIMIT plumbing — flat fields so the inner emitters can cheaply
-    // probe state without match/unwrap on a nested record. All three
-    // registers are -1 when no LIMIT scope is active.
+    // probe state without match/unwrap on a nested record. All four
+    // registers are -1 when no LIMIT scope is active; offset_reg and
+    // skip_reg stay -1 when only LIMIT (no OFFSET) is specified.
     limit_reg: Int,
     limit_one_reg: Int,
     limit_count_reg: Int,
+    limit_offset_reg: Int,  // -1 → no OFFSET clause
+    limit_skip_reg: Int,    // rows seen so far in the offset-skip phase
     limit_patches: List<Int>,
 };
 
@@ -109,6 +112,8 @@ fn cg_state_new(sql: Text) -> CgState {
         limit_reg: -1,
         limit_one_reg: -1,
         limit_count_reg: -1,
+        limit_offset_reg: -1,
+        limit_skip_reg: -1,
         limit_patches: List.new(),
     }
 }
@@ -192,8 +197,9 @@ fn emit_values(st: &mut CgState, rows: &List<List<Expr>>, col_count: Int) -> Res
             }
             j = j + 1;
         }
+        let gp = emit_limit_body_prefix(st);
         let _ = st.program.emit(ResultRow(start, row.len()));
-        emit_limit_body_counter(st);
+        emit_limit_body_counter(st, gp);
         i = i + 1;
     }
     // Point any pending LIMIT-early-exit Ge's at the next instruction
@@ -305,8 +311,9 @@ fn emit_scan_with_project(
         }
         i = i + 1;
     }
+    let gp = emit_limit_body_prefix(st);
     let _ = st.program.emit(ResultRow(proj_start, project_cols.len()));
-    emit_limit_body_counter(st);
+    emit_limit_body_counter(st, gp);
     let _ = st.program.emit(Next(cursor_id, loop_top));
 
     let after = st.program.instruction_count();
@@ -349,8 +356,9 @@ fn emit_scan_with_filter_project(
         }
         i = i + 1;
     }
+    let gp = emit_limit_body_prefix(st);
     let _ = st.program.emit(ResultRow(proj_start, project_cols.len()));
-    emit_limit_body_counter(st);
+    emit_limit_body_counter(st, gp);
 
     let after_body = st.program.instruction_count();
     st.program.replace(skip_idx, IfNot(pred_reg, after_body));
@@ -495,8 +503,9 @@ fn emit_sort_pipeline(
         let _ = st.program.emit(Column(sid, n_keys + ek, proj_dst_start + ek));
         ek = ek + 1;
     }
+    let gp = emit_limit_body_prefix(st);
     let _ = st.program.emit(ResultRow(proj_dst_start, n_proj));
-    emit_limit_body_counter(st);
+    emit_limit_body_counter(st, gp);
     let _ = st.program.emit(Next(sid, emit_loop_top));
     let after_emit = st.program.instruction_count();
     st.program.replace(emit_rewind_idx, Rewind(sid, after_emit));
@@ -535,8 +544,9 @@ fn emit_filter(
                     Ok(_)  => {}, Err(e) => { return Err(e); }
                 }
                 let skip_idx = st.program.emit(IfNot(pred_reg, 0));
+                let gp = emit_limit_body_prefix(st);
                 let _ = st.program.emit(ResultRow(start, row.len()));
-                emit_limit_body_counter(st);
+                emit_limit_body_counter(st, gp);
                 let after_idx = st.program.instruction_count();
                 st.program.replace(skip_idx, IfNot(pred_reg, after_idx));
                 i = i + 1;
@@ -582,14 +592,16 @@ fn emit_limit(
     lim: &Expr,
     off: &Maybe<Expr>,
 ) -> Result<(), CodegenError> {
-    // OFFSET handling is deferred; surface rather than misbehave.
-    match off {
-        Some(_) => { return Err(unsupported("LIMIT OFFSET pending".clone())); }
-        None => {}
-    }
     let lim_val: Int = match eval_int_const(lim) {
         Some(x) => x,
         None => { return Err(unsupported("LIMIT with non-constant value pending".clone())); }
+    };
+    let off_val: Int = match off {
+        Some(ref e) => match eval_int_const(e) {
+            Some(x) => if x < 0 { 0 } else { x },
+            None => { return Err(unsupported("OFFSET with non-constant value pending".clone())); }
+        }
+        None => 0,
     };
     if lim_val <= 0 {
         // LIMIT 0 — the scan body emits nothing.
@@ -603,11 +615,21 @@ fn emit_limit(
     let _ = st.program.emit(Integer(0, count_reg));
     let _ = st.program.emit(Integer(1, one_reg));
     let _ = st.program.emit(Integer(lim_val, limit_reg));
+    let mut offset_reg: Int = -1;
+    let mut skip_reg: Int = -1;
+    if off_val > 0 {
+        offset_reg = st.regs.alloc();
+        skip_reg = st.regs.alloc();
+        let _ = st.program.emit(Integer(off_val, offset_reg));
+        let _ = st.program.emit(Integer(0, skip_reg));
+    }
 
     // Enter the limit scope. (v1 doesn't nest — top-level only.)
     st.limit_reg = limit_reg;
     st.limit_one_reg = one_reg;
     st.limit_count_reg = count_reg;
+    st.limit_offset_reg = offset_reg;
+    st.limit_skip_reg = skip_reg;
     st.limit_patches = List.new();
 
     let r = emit_plan(st, child);
@@ -621,6 +643,8 @@ fn emit_limit(
     st.limit_reg = -1;
     st.limit_one_reg = -1;
     st.limit_count_reg = -1;
+    st.limit_offset_reg = -1;
+    st.limit_skip_reg = -1;
     st.limit_patches = List.new();
 
     match r {
@@ -629,14 +653,35 @@ fn emit_limit(
     }
 }
 
+/// Emit the OFFSET skip-check right before a ResultRow.
+///   Ge(skip, off, body_start)   // if skip >= offset, body emits
+///   Add(skip, one, skip)        // otherwise bump skip and bail
+///   Goto(next_iter)             // patched by body_counter
+/// Returns the Goto patch index (or -1 when no OFFSET is active).
+fn emit_limit_body_prefix(st: &mut CgState) -> Int {
+    if st.limit_reg < 0 { return -1; }
+    if st.limit_offset_reg < 0 { return -1; }
+    let ge_patch = st.program.emit(Ge(st.limit_skip_reg, st.limit_offset_reg, 0));
+    let _ = st.program.emit(Add(st.limit_skip_reg, st.limit_one_reg, st.limit_skip_reg));
+    let goto_patch = st.program.emit(Goto(0));
+    let body_start = st.program.instruction_count();
+    st.program.replace(ge_patch, Ge(st.limit_skip_reg, st.limit_offset_reg, body_start));
+    goto_patch
+}
+
 /// Called right after a ResultRow: increment the count register and
-/// register a Ge-patch that exits the scan loop. No-op when no LIMIT
-/// scope is active.
-fn emit_limit_body_counter(st: &mut CgState) {
+/// register a Ge-patch that exits the scan loop. `goto_patch` is the
+/// index returned by emit_limit_body_prefix (or -1 if the prefix
+/// emitted nothing). No-op when no LIMIT scope is active.
+fn emit_limit_body_counter(st: &mut CgState, goto_patch: Int) {
     if st.limit_reg < 0 { return; }
     let _ = st.program.emit(Add(st.limit_count_reg, st.limit_one_reg, st.limit_count_reg));
     let patch_idx = st.program.emit(Ge(st.limit_count_reg, st.limit_reg, 0));
     st.limit_patches.push(patch_idx);
+    if goto_patch >= 0 {
+        let next_iter = st.program.instruction_count();
+        st.program.replace(goto_patch, Goto(next_iter));
+    }
 }
 
 /// Patch every registered Ge-opcode to jump to `target`. Called right
