@@ -1,0 +1,58 @@
+// @test: integration
+// @tier: 0
+// @level: L1
+// @tags: verify, user-function, bool, reflection, quantifier, exists
+// @expect: pass
+//
+// Bool-returning user functions — whether reflected (body present) or
+// merely declared (body-less) — must translate with the correct Z3
+// `FuncDecl` sort so quantified postconditions and Bool-connective
+// usage both work. Before the fix:
+//   * reflected Bool-returning functions had their axiom declared
+//     with `Bool` but the call-site UF emitted with `Int`, so Z3
+//     saw two distinct symbols;
+//   * declared-only functions had no registered signature at all;
+//   * `exists x. is_prime(x) || !is_prime(x)` failed because the
+//     quantifier's inner translator dropped the signature map.
+// All three are fixed — this spec locks the end-to-end flow.
+
+// --- Reflected, body-present Bool user function ---
+fn is_positive(x: Int) -> Bool { x > 0 }
+
+@verify(formal)
+theorem positive_five_is_positive()
+    ensures is_positive(5)
+    proof by auto;
+
+@verify(formal)
+theorem positive_implies_gt_zero(x: Int)
+    requires is_positive(x)
+    ensures x > 0
+    proof by auto;
+
+@verify(formal)
+theorem exists_positive()
+    ensures exists x: Int. is_positive(x)
+    proof by auto;
+
+// --- Declared-only (body-less) Bool user function ---
+fn is_prime(n: Int) -> Bool;
+
+@verify(formal)
+theorem prime_excluded_middle(p: Int)
+    ensures is_prime(p) || !is_prime(p)
+    proof by auto;
+
+@verify(formal)
+theorem exists_prime_or_not()
+    ensures exists p: Int. is_prime(p) || !is_prime(p)
+    proof by auto;
+
+@verify(formal)
+theorem forall_prime_excluded_middle()
+    ensures forall p: Int. is_prime(p) || !is_prime(p)
+    proof by auto;
+
+fn main() {
+    print("L1-core: verification_phase/user_function_bool_return");
+}
