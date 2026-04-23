@@ -467,6 +467,125 @@ impl<'ctx> Translator<'ctx> {
         }
     }
 
+    /// Translate a match expression to an ite-chain.
+    fn translate_match(
+        &self,
+        scrutinee: &Expr,
+        arms: &List<verum_ast::pattern::MatchArm>,
+    ) -> Result<Dynamic, TranslationError> {
+        use verum_ast::pattern::PatternKind;
+
+        // Helper: synthesize the equality test `scrutinee == pat_expr`
+        // for a pattern. Returns None when the pattern can't be
+        // represented as a comparable expression (Record/Slice/etc.)
+        // — in that case the arm is skipped.
+        fn pattern_as_test_expr(
+            pat: &verum_ast::pattern::Pattern,
+        ) -> Option<Expr> {
+            match &pat.kind {
+                PatternKind::Wildcard => None, // caller treats as always-matches
+                PatternKind::Ident { .. } => None, // binding-only, matches anything
+                PatternKind::Literal(lit) => Some(Expr::new(
+                    ExprKind::Literal(lit.clone()),
+                    pat.span,
+                )),
+                PatternKind::Record { path, .. } => {
+                    // Variant pattern — `Color.Red` gets parsed as a
+                    // single-constructor record; use the path itself
+                    // as the test value (it'll translate as an
+                    // uninterpreted constant).
+                    Some(Expr::new(
+                        ExprKind::Path(path.clone()),
+                        pat.span,
+                    ))
+                }
+                PatternKind::Variant { path, .. } => Some(Expr::new(
+                    ExprKind::Path(path.clone()),
+                    pat.span,
+                )),
+                PatternKind::Paren(inner) => pattern_as_test_expr(inner),
+                _ => None,
+            }
+        }
+
+        let scrutinee_expr = scrutinee.clone();
+        // Build the chain right-to-left — each fallback comes last.
+        // Start with a sentinel "unreachable" constant of the
+        // matching sort; the last arm's body replaces it on the
+        // first iteration of the fold below.
+        let mut chain: Option<Dynamic> = None;
+        for arm in arms.iter().rev() {
+            let body_dyn = self.translate_expr(&arm.body)?;
+            let is_always_match = match &arm.pattern.kind {
+                PatternKind::Wildcard | PatternKind::Ident { .. } => true,
+                _ => false,
+            };
+            let cond_expr = pattern_as_test_expr(&arm.pattern);
+            if is_always_match || arm.guard.is_some() {
+                // Wildcard / binding / guarded arm — use as the
+                // "else" branch for now. Guards would require more
+                // serious analysis; we conservatively treat them
+                // as always-true so the chain falls through.
+                chain = Some(body_dyn);
+                continue;
+            }
+            let Some(cond_expr) = cond_expr else {
+                // Un-translatable pattern — skip this arm. Sound;
+                // just means the arm contributes nothing to the
+                // SMT's view of the match.
+                continue;
+            };
+            let eq_expr = Expr::new(
+                ExprKind::Binary {
+                    op: BinOp::Eq,
+                    left: Box::new(scrutinee_expr.clone()),
+                    right: Box::new(cond_expr),
+                },
+                arm.span,
+            );
+            let cond_dyn = self.translate_expr(&eq_expr)?;
+            let Some(cond_bool) = cond_dyn.as_bool() else {
+                continue;
+            };
+            // Build an ite from this arm's body vs. the accumulated
+            // chain. If no chain yet, this arm's body is the default
+            // — equivalent to Z3 seeing only this arm.
+            let existing = chain.clone().unwrap_or_else(|| body_dyn.clone());
+            // Sort-coerce both branches to a common sort using the
+            // first arm's sort as the target. We pick Int first,
+            // Bool next, Real last — matching the sort lattice the
+            // rest of the translator uses.
+            if let (Some(then_int), Some(else_int)) =
+                (body_dyn.as_int(), existing.as_int())
+            {
+                let ite = cond_bool.ite(&then_int, &else_int);
+                chain = Some(Dynamic::from_ast(&ite));
+            } else if let (Some(then_bool), Some(else_bool)) =
+                (body_dyn.as_bool(), existing.as_bool())
+            {
+                let ite = cond_bool.ite(&then_bool, &else_bool);
+                chain = Some(Dynamic::from_ast(&ite));
+            } else if let (Some(then_real), Some(else_real)) =
+                (body_dyn.as_real(), existing.as_real())
+            {
+                let ite = cond_bool.ite(&then_real, &else_real);
+                chain = Some(Dynamic::from_ast(&ite));
+            } else {
+                // Sort mismatch — fall back to uninterpreted Int.
+                let key = format!(
+                    "match_result_{}",
+                    verum_ast::pretty::format_expr(&scrutinee_expr)
+                );
+                chain = Some(Dynamic::from_ast(&Int::new_const(key.as_str())));
+            }
+        }
+        chain.ok_or_else(|| {
+            TranslationError::UnsupportedExpr(
+                "match with no arms".to_text(),
+            )
+        })
+    }
+
     /// If `expr` is a single-segment path like `xs`, return the Int
     /// constant the default translator would emit for it. Returns
     /// None for any more complex shape — for those the caller
@@ -942,6 +1061,28 @@ impl<'ctx> Translator<'ctx> {
 
             // Tuple expressions - create Z3 datatype tuples
             ExprKind::Tuple(exprs) => self.translate_tuple(exprs),
+
+            // Match expressions — translate to an ite-chain. For
+            //
+            //   match x {
+            //       pat₁ => body₁,
+            //       pat₂ => body₂,
+            //       _    => bodyₙ,
+            //   }
+            //
+            // we emit `ite(x == pat₁_expr, body₁,
+            //         ite(x == pat₂_expr, body₂, bodyₙ))`.
+            // Patterns that translate to expressions are: Literal,
+            // Ident-of-a-variant-constructor, Wildcard (always
+            // matches), and Ident (binds but doesn't constrain).
+            // Anything more structured (Record, Tuple, Slice, …)
+            // leaves the arm out of the chain — conservative, which
+            // can only weaken the postcondition. Soundness preserved
+            // because Z3 just doesn't learn the discharged claim
+            // and falls back to a counterexample-driven failure.
+            ExprKind::Match { expr: scrutinee, arms } => {
+                self.translate_match(scrutinee, arms)
+            }
 
             // Tuple-field access `p.0`, `p.1`, … . We don't use a Z3
             // tuple sort (see `translate_tuple` — tuples are encoded

@@ -1,0 +1,49 @@
+// @test: integration
+// @tier: 0
+// @level: L1
+// @tags: verify, match, expression, ite, discriminator
+// @expect: pass
+//
+// `match` expressions in postcondition / body positions must
+// translate to an `ite`-chain so the SMT can reason about the
+// selected arm under each discriminator value. Before the fix,
+// `ExprKind::Match` had no translator arm — every match-bodied
+// function or match-involving ensures failed.
+
+@verify(formal)
+fn abs_match(x: Int) -> Int
+    requires x == 0 || x > 0 || x < 0
+    ensures result >= 0
+{
+    match x {
+        0 => 0,
+        _ => if x > 0 { x } else { -x },
+    }
+}
+
+@verify(formal)
+theorem match_literal_zero(x: Int)
+    requires x == 0
+    ensures (match x { 0 => 10, _ => 20 }) == 10
+    proof by auto;
+
+@verify(formal)
+theorem match_literal_nonzero(x: Int)
+    requires x != 0
+    ensures (match x { 0 => 10, _ => 20 }) == 20
+    proof by auto;
+
+@verify(formal)
+theorem match_chain_arithmetic(x: Int)
+    requires x == 1
+    ensures (match x {
+        0 => 100,
+        1 => 200,
+        2 => 300,
+        _ => 0,
+    }) == 200
+    proof by auto;
+
+fn main() {
+    print("L1-core: verification_phase/match_expression_body");
+}
