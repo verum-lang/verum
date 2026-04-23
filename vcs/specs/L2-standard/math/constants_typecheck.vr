@@ -1,0 +1,78 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: math, constants
+// @timeout: 15000
+// @description: core.math.constants — named constants + refinement types
+
+mount core.*;
+mount core.math.constants.{
+    PI, TAU, E, PHI,
+    SQRT2, SQRT3, SQRT5,
+    LN2, LN10, LOG2_E, LOG10_E,
+    FRAC_PI_2, FRAC_PI_3, FRAC_PI_4, FRAC_PI_6,
+};
+
+fn pi_tau_relationship() {
+    // TAU = 2 * PI.
+    let lhs: Float = TAU;
+    let rhs: Float = PI + PI;
+    // IEEE tolerance is tight here — both should equal at the digits above.
+    let diff = if lhs > rhs { lhs - rhs } else { rhs - lhs };
+    assert(diff < 0.0000001);
+}
+
+fn sqrt_ordering() {
+    // √2 < √3 < √5.
+    assert(SQRT2 < SQRT3);
+    assert(SQRT3 < SQRT5);
+}
+
+fn log_log_reciprocals() {
+    // ln(2) * log2(e) ≈ 1 via approximate reciprocal identity.
+    let prod = LN2 * LOG2_E;
+    let diff = if prod > 1.0 { prod - 1.0 } else { 1.0 - prod };
+    assert(diff < 0.0000001);
+    // Same for LN10 and LOG10_E.
+    let p2 = LN10 * LOG10_E;
+    let d2 = if p2 > 1.0 { p2 - 1.0 } else { 1.0 - p2 };
+    assert(d2 < 0.0000001);
+}
+
+fn frac_pi_constants_split_pi() {
+    // FRAC_PI_2 + FRAC_PI_2 ≈ PI.
+    let sum = FRAC_PI_2 + FRAC_PI_2;
+    let d = if sum > PI { sum - PI } else { PI - sum };
+    assert(d < 0.0000001);
+    // FRAC_PI_3 * 3 ≈ PI.
+    let sum3 = FRAC_PI_3 + FRAC_PI_3 + FRAC_PI_3;
+    let d3 = if sum3 > PI { sum3 - PI } else { PI - sum3 };
+    assert(d3 < 0.0000001);
+}
+
+fn golden_ratio_defined() {
+    // PHI ≈ (1 + √5) / 2.
+    let computed = (1.0 + SQRT5) / 2.0;
+    let diff = if PHI > computed { PHI - computed } else { computed - PHI };
+    assert(diff < 0.0000001);
+}
+
+fn e_and_frac_pi_4() {
+    // FRAC_PI_4 × 4 ≈ PI.
+    let s = FRAC_PI_4 * 4.0;
+    let d = if s > PI { s - PI } else { PI - s };
+    assert(d < 0.0000001);
+    // E itself is just a named float.
+    assert(E > 2.0);
+    assert(E < 3.0);
+}
+
+fn main() {
+    pi_tau_relationship();
+    sqrt_ordering();
+    log_log_reciprocals();
+    frac_pi_constants_split_pi();
+    golden_ratio_defined();
+    e_and_frac_pi_4();
+    print("constants_typecheck ok");
+}
