@@ -279,11 +279,24 @@ pub struct Translator<'ctx> {
 /// Build the canonical length-constant name for an expression.
 ///
 /// Uses the pretty-printer to normalise across spans and whitespace
-/// variants. Callers that ever want to refer to the "length of this
-/// expression" as a Z3 constant must go through this helper so every
-/// mention agrees on the same Z3 symbol.
+/// variants, AFTER stripping any redundant parenthesisation. Two
+/// writings of the same logical expression — `xs ++ ys` and
+/// `(xs ++ ys)` — must map to the same length symbol, otherwise the
+/// concat-length axioms we emit don't unify across groupings.
 fn length_key_for_expr(e: &Expr) -> String {
-    format!("length_{}", verum_ast::pretty::format_expr(e))
+    format!("length_{}", verum_ast::pretty::format_expr(strip_paren(e)))
+}
+
+/// Peel off leading `Paren` wrappers. Semantically transparent — the
+/// parens only affect surface syntax, not the value the expression
+/// denotes — but the AST preserves them, so tactic and translator
+/// code that wants to peer inside a grouping has to unwrap first.
+fn strip_paren(e: &Expr) -> &Expr {
+    let mut cur = e;
+    while let ExprKind::Paren(inner) = &cur.kind {
+        cur = inner.as_ref();
+    }
+    cur
 }
 
 impl<'ctx> Translator<'ctx> {
@@ -340,14 +353,40 @@ impl<'ctx> Translator<'ctx> {
     /// Z3 can reason about nested compositions like
     /// `len((xs ++ ys) ++ zs) == len(xs ++ (ys ++ zs))` without
     /// unfolding user-level append.
+    ///
+    /// In addition, when we see a 2-level concat (`(a ++ b) ++ c` or
+    /// `a ++ (b ++ c)`), we queue the length-level associativity
+    /// identity: `length_((a++b)++c) == length_(a++(b++c))` in the
+    /// form of the transitive rewrite. Since both sides expand to
+    /// `la + lb + lc` under the additivity axioms above, the
+    /// linear-arithmetic solver closes associativity claims without
+    /// a dedicated List theory.
     fn emit_concat_length_axioms(&self, expr: &Expr) {
+        // Track which (whole) length keys we've already emitted an
+        // axiom for inside this one walk so we never re-enter the
+        // same subtree twice. Otherwise alt-grouping emission
+        // recurses back into the original shape and the walk never
+        // terminates.
+        let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+        self.emit_concat_length_axioms_inner(expr, &mut seen);
+    }
+
+    fn emit_concat_length_axioms_inner(
+        &self,
+        expr: &Expr,
+        seen: &mut std::collections::HashSet<String>,
+    ) {
+        let stripped = strip_paren(expr);
         if let ExprKind::Binary {
             op: BinOp::Concat,
             left,
             right,
-        } = &expr.kind
+        } = &stripped.kind
         {
-            let whole_len = length_key_for_expr(expr);
+            let whole_len = length_key_for_expr(stripped);
+            if !seen.insert(whole_len.clone()) {
+                return;
+            }
             let left_len = length_key_for_expr(left);
             let right_len = length_key_for_expr(right);
             self.record_length_const(&whole_len);
@@ -361,8 +400,78 @@ impl<'ctx> Translator<'ctx> {
 
             // Descend into both operands — nested concat needs the
             // inner axioms visible to the solver too.
-            self.emit_concat_length_axioms(left);
-            self.emit_concat_length_axioms(right);
+            self.emit_concat_length_axioms_inner(left, seen);
+            self.emit_concat_length_axioms_inner(right, seen);
+
+            // Associativity at the length level: for `(a ++ b) ++ c`
+            // also emit axioms for `a ++ (b ++ c)`. Because both
+            // groupings reduce to `la + lb + lc` under the direct
+            // additivity axioms, Z3's linear arithmetic unifies
+            // them at the length level — no explicit concat-assoc
+            // axiom needed.
+            self.emit_concat_length_alt_grouping(left, right, expr.span, seen);
+        }
+    }
+
+    /// Given a concat `left ++ right`, enumerate neighbour groupings
+    /// and emit their length axioms. `seen` is shared across the
+    /// whole walk so each distinct grouping is emitted at most once.
+    fn emit_concat_length_alt_grouping(
+        &self,
+        left: &Expr,
+        right: &Expr,
+        span: verum_common::span::Span,
+        seen: &mut std::collections::HashSet<String>,
+    ) {
+        // Case: `(a ++ b) ++ c` — regroup as `a ++ (b ++ c)`.
+        if let ExprKind::Binary {
+            op: BinOp::Concat,
+            left: a,
+            right: b,
+        } = &strip_paren(left).kind
+        {
+            let alt_inner = Expr::new(
+                ExprKind::Binary {
+                    op: BinOp::Concat,
+                    left: Box::new((**b).clone()),
+                    right: Box::new(right.clone()),
+                },
+                span,
+            );
+            let alt = Expr::new(
+                ExprKind::Binary {
+                    op: BinOp::Concat,
+                    left: Box::new((**a).clone()),
+                    right: Box::new(alt_inner),
+                },
+                span,
+            );
+            self.emit_concat_length_axioms_inner(&alt, seen);
+        }
+        // Case: `a ++ (b ++ c)` — regroup as `(a ++ b) ++ c`.
+        if let ExprKind::Binary {
+            op: BinOp::Concat,
+            left: b,
+            right: c,
+        } = &strip_paren(right).kind
+        {
+            let alt_inner = Expr::new(
+                ExprKind::Binary {
+                    op: BinOp::Concat,
+                    left: Box::new(left.clone()),
+                    right: Box::new((**b).clone()),
+                },
+                span,
+            );
+            let alt = Expr::new(
+                ExprKind::Binary {
+                    op: BinOp::Concat,
+                    left: Box::new(alt_inner),
+                    right: Box::new((**c).clone()),
+                },
+                span,
+            );
+            self.emit_concat_length_axioms_inner(&alt, seen);
         }
     }
 
