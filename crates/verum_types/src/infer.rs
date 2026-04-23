@@ -3388,6 +3388,33 @@ impl TypeChecker {
             }
         }
 
+        // Phase -0.5: Collect every explicitly-imported name across the
+        // file's `mount` declarations BEFORE any of those mounts run.
+        //
+        // Why: an explicit `mount X.{Bar}` is supposed to be authoritative
+        // for the name `Bar` for the rest of the file. The existing guard
+        // at `import_item_from_module_impl` (search "explicit_imports")
+        // prevents glob re-imports from clobbering an explicit one — but
+        // only when the explicit was processed first. When `mount foo.*`
+        // appears before the explicit mount in source order, the glob runs
+        // first, registers `foo::Bar`, and the later explicit `{Bar}`
+        // import races against an existing flat-name binding, producing
+        // confusing variant-set diagnostics for users.
+        //
+        // The fix is order-independent: pre-scan every `Mount` item, walk
+        // its tree, and seed `explicit_imports` with every leaf-name that
+        // *would* be imported explicitly. Then when a glob runs in Phase 2,
+        // the existing guard skips those names — explicit always wins
+        // regardless of source order.
+        //
+        // Spec note: this matches the user-intuitive semantics — explicit
+        // imports are authoritative, gloss are background.
+        for item in items {
+            if let verum_ast::ItemKind::Mount(mount_decl) = &item.kind {
+                self.collect_explicit_import_names(&mount_decl.tree);
+            }
+        }
+
         // Phase 0: Register all type declarations FIRST
         // This is critical for user-defined types like Maybe<T>, Result<T, E> to be available
         // before type-checking functions that use them.
@@ -33533,6 +33560,58 @@ impl TypeChecker {
     /// Import all public items from a module (glob import).
     ///
     /// Import and re-export system: "mount module.{item1, item2}" for imports, pub use for re-exports, glob imports
+    /// Pre-pass helper: walk a `MountTree` and seed `explicit_imports`
+    /// with every leaf-name that *would* be registered explicitly.
+    ///
+    /// This is consulted by `import_item_from_module_impl`'s glob-skip
+    /// guard, so that explicit imports always win regardless of source
+    /// order: `mount foo.*` followed by `mount bar.{T}` and the reverse
+    /// produce identical environments.
+    ///
+    /// Recognised forms:
+    ///   * `mount X.Bar`              → "Bar" (or alias if `as Y`)
+    ///   * `mount X.{A, B, C}`        → "A", "B", "C" (each may carry an alias)
+    ///   * `mount X.{A as Y}`         → "Y" (alias takes precedence)
+    ///   * `mount X.*`                → skipped (glob is by definition non-explicit)
+    ///   * nested `{X.{A, B}}`        → recurses into inner trees
+    fn collect_explicit_import_names(&mut self, tree: &verum_ast::decl::MountTree) {
+        use verum_ast::decl::MountTreeKind;
+        // Determine the explicit-leaf name for this tree.
+        // Alias wins; otherwise extract the last segment of the path.
+        let alias_name: Option<String> = match &tree.alias {
+            verum_common::Maybe::Some(ident) => Some(ident.name.as_str().to_string()),
+            verum_common::Maybe::None => None,
+        };
+        match &tree.kind {
+            MountTreeKind::Path(path) => {
+                if let Some(name) = alias_name {
+                    self.explicit_imports.insert(name);
+                } else if let Some(last_name) = path
+                    .segments
+                    .iter()
+                    .rev()
+                    .find_map(|seg| {
+                        if let verum_ast::ty::PathSegment::Name(ident) = seg {
+                            Some(ident.name.as_str().to_string())
+                        } else {
+                            None
+                        }
+                    })
+                {
+                    self.explicit_imports.insert(last_name);
+                }
+            }
+            MountTreeKind::Glob(_) => {
+                // Glob is non-explicit by definition.
+            }
+            MountTreeKind::Nested { prefix: _, trees } => {
+                for inner in trees {
+                    self.collect_explicit_import_names(inner);
+                }
+            }
+        }
+    }
+
     fn import_all_from_module(
         &mut self,
         module_path: &Text,
