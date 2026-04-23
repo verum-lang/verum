@@ -94,10 +94,31 @@ fn group_by_multiple_aggregates() {
     }
 }
 
+fn group_by_having_filter() {
+    let mut db = match open_admin() {
+        Ok(d)  => d,
+        Err(_) => { panic("open"); return; }
+    };
+    let _ = db.execute(&"CREATE TABLE t (g INTEGER)".clone());
+    let _ = db.execute(&"INSERT INTO t VALUES (1)".clone());
+    let _ = db.execute(&"INSERT INTO t VALUES (1)".clone());
+    let _ = db.execute(&"INSERT INTO t VALUES (2)".clone());
+    // HAVING COUNT(*) > 1 — only g=1 survives.
+    match db.query_all(&"SELECT g, COUNT(*) FROM t GROUP BY g HAVING COUNT(*) > 1".clone()) {
+        Ok(rows) => {
+            assert_eq(rows.len(), 1);
+            match rows[0][0] { RInt(x) => assert_eq(x as Int, 1), _ => panic("g[0]") }
+            match rows[0][1] { RInt(x) => assert_eq(x as Int, 2), _ => panic("count[0]") }
+        }
+        Err(_) => panic("query_all GROUP BY HAVING"),
+    }
+}
+
 fn main() {
     group_by_single_key_count();
     group_by_sum();
     group_by_with_where();
     group_by_multiple_aggregates();
+    group_by_having_filter();
     print("group_by_clause typecheck ok");
 }

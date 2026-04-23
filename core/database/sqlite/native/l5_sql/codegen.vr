@@ -741,7 +741,145 @@ fn expr_equals(a: &Expr, b: &Expr) -> Bool {
             ELit(ref lb) => literal_equals(la, lb),
             _ => false,
         },
+        EFunc(ref na, ref aa, ad) => match b {
+            EFunc(ref nb, ref ab, bd) => {
+                if na != nb { return false; }
+                if ad != bd { return false; }
+                if aa.len() != ab.len() { return false; }
+                let mut i: Int = 0;
+                while i < aa.len() {
+                    if !expr_equals(&aa[i], &ab[i]) { return false; }
+                    i = i + 1;
+                }
+                true
+            }
+            _ => false,
+        },
         _ => false,
+    }
+}
+
+/// Emit a HAVING expression into `dst`. Differs from emit_expr by
+/// routing EColumnRef → group-key register SCopy and EFunc (aggregate)
+/// → matching projection slot's accumulator SCopy.
+fn emit_having_expr(
+    st: &mut CgState,
+    e: &Expr,
+    dst: Int,
+    group_exprs: &List<Expr>,
+    prev_key_start: Int,
+    projection: &List<PlanColumn>,
+    agg_kind_for_slot: &List<Int>,
+    acc_start: Int,
+) -> Result<(), CodegenError> {
+    match e {
+        ELit(ref lit) => emit_literal(st, lit, dst),
+        EUnary(op, ref inner) => {
+            let src = st.regs.alloc();
+            match emit_having_expr(st, inner, src, group_exprs, prev_key_start, projection, agg_kind_for_slot, acc_start) {
+                Ok(_)  => {}, Err(er) => { return Err(er); }
+            }
+            match op {
+                UNot => {
+                    // NOT by Integer(1, dst) - src; fast path omitted.
+                    let _ = st.program.emit(SCopy(src, dst));
+                    Ok(())
+                }
+                UNeg => {
+                    let zero_reg = st.regs.alloc();
+                    let _ = st.program.emit(Integer(0, zero_reg));
+                    let _ = st.program.emit(Subtract(zero_reg, src, dst));
+                    Ok(())
+                }
+                UPlus => {
+                    let _ = st.program.emit(SCopy(src, dst));
+                    Ok(())
+                }
+                UBitNot => {
+                    let _ = st.program.emit(BitNot(src, dst));
+                    Ok(())
+                }
+            }
+        }
+        EBinary(op, ref a, ref b) => {
+            let ra = st.regs.alloc();
+            let rb = st.regs.alloc();
+            match emit_having_expr(st, a, ra, group_exprs, prev_key_start, projection, agg_kind_for_slot, acc_start) {
+                Ok(_)  => {}, Err(er) => { return Err(er); }
+            }
+            match emit_having_expr(st, b, rb, group_exprs, prev_key_start, projection, agg_kind_for_slot, acc_start) {
+                Ok(_)  => {}, Err(er) => { return Err(er); }
+            }
+            match op {
+                BAdd => { let _ = st.program.emit(Add(ra, rb, dst)); Ok(()) }
+                BSub => { let _ = st.program.emit(Subtract(ra, rb, dst)); Ok(()) }
+                BMul => { let _ = st.program.emit(Multiply(ra, rb, dst)); Ok(()) }
+                BDiv => { let _ = st.program.emit(Divide(ra, rb, dst)); Ok(()) }
+                BEq | BNe | BLt | BLe | BGt | BGe => {
+                    // Use the same Eq-builder pattern as regular emit_binary.
+                    let _ = st.program.emit(Integer(0, dst));
+                    let op_idx = match op {
+                        BEq => st.program.emit(Eq(ra, rb, 0)),
+                        BNe => st.program.emit(Ne(ra, rb, 0)),
+                        BLt => st.program.emit(Lt(ra, rb, 0)),
+                        BLe => st.program.emit(Le(ra, rb, 0)),
+                        BGt => st.program.emit(Gt(ra, rb, 0)),
+                        BGe => st.program.emit(Ge(ra, rb, 0)),
+                        _   => st.program.emit(Eq(ra, rb, 0)),
+                    };
+                    let goto_idx = st.program.emit(Goto(0));
+                    let set_true = st.program.instruction_count();
+                    let _ = st.program.emit(Integer(1, dst));
+                    let after = st.program.instruction_count();
+                    match op {
+                        BEq => st.program.replace(op_idx, Eq(ra, rb, set_true)),
+                        BNe => st.program.replace(op_idx, Ne(ra, rb, set_true)),
+                        BLt => st.program.replace(op_idx, Lt(ra, rb, set_true)),
+                        BLe => st.program.replace(op_idx, Le(ra, rb, set_true)),
+                        BGt => st.program.replace(op_idx, Gt(ra, rb, set_true)),
+                        BGe => st.program.replace(op_idx, Ge(ra, rb, set_true)),
+                        _   => st.program.replace(op_idx, Eq(ra, rb, set_true)),
+                    }
+                    st.program.replace(goto_idx, Goto(after));
+                    Ok(())
+                }
+                _ => Err(unsupported("HAVING binop not supported in v1".clone())),
+            }
+        }
+        EColumnRef(_cid, _idx) => {
+            // Rewrite to group-key SCopy. find_group_key_index needs
+            // the expression — since cid/idx is enough, we search
+            // directly.
+            let mut found: Int = -1;
+            let mut i: Int = 0;
+            while i < group_exprs.len() {
+                if expr_equals(e, &group_exprs[i]) { found = i; break; }
+                i = i + 1;
+            }
+            if found < 0 {
+                return Err(unsupported("HAVING references non-grouped column".clone()));
+            }
+            let _ = st.program.emit(SCopy(prev_key_start + found, dst));
+            Ok(())
+        }
+        EFunc(_, _, _) => {
+            // Lookup matching aggregate slot in projection.
+            let mut found: Int = -1;
+            let mut i: Int = 0;
+            while i < projection.len() {
+                if agg_kind_for_slot[i] >= 0 && expr_equals(e, &projection[i].expr) {
+                    found = i;
+                    break;
+                }
+                i = i + 1;
+            }
+            if found < 0 {
+                return Err(unsupported("HAVING aggregate not found in projection".clone()));
+            }
+            let _ = st.program.emit(SCopy(acc_start + found, dst));
+            Ok(())
+        }
+        _ => Err(unsupported("HAVING expression form pending".clone())),
     }
 }
 
@@ -764,13 +902,7 @@ fn emit_group_by(
     projection: &List<PlanColumn>,
     having: &Maybe<Expr>,
 ) -> Result<(), CodegenError> {
-    // HAVING is deferred to a follow-up — its expression references
-    // aggregate outputs that haven't been made addressable in the
-    // evaluator yet.
-    match having {
-        Some(_) => { return Err(unsupported("HAVING clause pending".clone())); }
-        None => {}
-    }
+    // HAVING is emitted in the flush path — see emit_having_expr below.
 
     // Resolve source into (src_cid, src_n_cols, has_filter, filter_pred).
     let mut src_cid: Int = 0;
@@ -932,11 +1064,29 @@ fn emit_group_by(
     let flush_label = st.program.instruction_count();
     // Finalize each aggregate into acc_start.
     emit_group_finalize(st, acc_start, &agg_kind_for_slot, &avg_count_regs);
+    // Optional HAVING predicate — skip ResultRow on falsy.
+    let mut having_skip_patch: Int = -1;
+    let mut having_skip_reg: Int = -1;
+    match having {
+        Some(ref h) => {
+            let pr = st.regs.alloc();
+            match emit_having_expr(st, h, pr, group_exprs, prev_key_start, projection, &agg_kind_for_slot, acc_start) {
+                Ok(_)  => {}, Err(er) => { return Err(er); }
+            }
+            having_skip_patch = st.program.emit(IfNot(pr, 0));
+            having_skip_reg = pr;
+        }
+        None => {}
+    }
     // Project out_start from prev_group_keys + acc_start (finalized).
     emit_group_project(st, out_start, n_proj, &proj_kind, &agg_kind_for_slot, prev_key_start, acc_start);
     let gp = emit_limit_body_prefix(st);
     let _ = st.program.emit(ResultRow(out_start, n_proj));
     emit_limit_body_counter(st, gp);
+    if having_skip_patch >= 0 {
+        let tgt = st.program.instruction_count();
+        st.program.replace(having_skip_patch, IfNot(having_skip_reg, tgt));
+    }
     // Reset acc state for the new group.
     emit_group_seed(st, acc_start, &agg_kind_for_slot, &avg_count_regs);
     // Copy cur → prev for new group.
@@ -984,10 +1134,27 @@ fn emit_group_by(
     // Final-flush path: if flag == 1, flush the last group.
     let final_flush_skip = st.program.emit(IfNot(flag_reg, 0));
     emit_group_finalize(st, acc_start, &agg_kind_for_slot, &avg_count_regs);
+    let mut final_having_skip: Int = -1;
+    let mut final_having_reg: Int = -1;
+    match having {
+        Some(ref h) => {
+            let pr = st.regs.alloc();
+            match emit_having_expr(st, h, pr, group_exprs, prev_key_start, projection, &agg_kind_for_slot, acc_start) {
+                Ok(_)  => {}, Err(er) => { return Err(er); }
+            }
+            final_having_skip = st.program.emit(IfNot(pr, 0));
+            final_having_reg = pr;
+        }
+        None => {}
+    }
     emit_group_project(st, out_start, n_proj, &proj_kind, &agg_kind_for_slot, prev_key_start, acc_start);
     let gp_final = emit_limit_body_prefix(st);
     let _ = st.program.emit(ResultRow(out_start, n_proj));
     emit_limit_body_counter(st, gp_final);
+    if final_having_skip >= 0 {
+        let tgt = st.program.instruction_count();
+        st.program.replace(final_having_skip, IfNot(final_having_reg, tgt));
+    }
     let after_final = st.program.instruction_count();
     st.program.replace(final_flush_skip, IfNot(flag_reg, after_final));
     emit_limit_finalize_patches(st, after_final);
