@@ -1,0 +1,24 @@
+// =============================================================================
+// core/database/sqlite/native/sorter_api/mod.vr
+// =============================================================================
+// Layer: 5 (façade — VDBE sorter for ORDER BY / GROUP BY)
+// Spec: SQLite source — vdbesort.c.
+//
+// The sorter ingests rows, spills to disk once in-memory budget
+// overflows, then merges-back on read.  Shape:
+//
+//   * `SorterState` — in-memory vs on-disk phase w/ pma count
+//   * `PmaRun`      — one "packed merge area" on disk
+//   * `SorterStats` — peak memory, rows ingested, rows emitted
+//
+// Submodules:
+//   * `state`   — state machine + transitions
+//   * `pma`     — one PMA run descriptor
+//   * `engine`  — accumulate / finalize / iterate
+// =============================================================================
+
+module core.database.sqlite.native.sorter_api;
+
+public module state;
+public module pma;
+public module engine;

@@ -1,0 +1,23 @@
+// =============================================================================
+// core/database/sqlite/native/value_dup_api/mod.vr
+// =============================================================================
+// Layer: 7 (façade — sqlite3_value_dup + _value_free)
+// Spec: SQLite C API
+//
+//   sqlite3_value *sqlite3_value_dup(const sqlite3_value *)
+//   void           sqlite3_value_free(sqlite3_value *)
+//
+// `_value_dup` creates a deep copy of a SqliteValue that outlives the
+// current callback frame — essential when user functions cache
+// arguments for later use (e.g. aggregate accumulators).  `_value_free`
+// releases a dup'd handle.
+//
+// Submodules:
+//   * `handle`   — DupHandle (refcount simulation)
+//   * `registry` — lifetime tracker across dup/free
+// =============================================================================
+
+module core.database.sqlite.native.value_dup_api;
+
+public module handle;
+public module registry;

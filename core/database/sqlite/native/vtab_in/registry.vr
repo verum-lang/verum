@@ -1,0 +1,83 @@
+// =============================================================================
+// vtab_in/registry.vr — per-constraint IN state
+// =============================================================================
+// Spec: SQLite C API
+// =============================================================================
+
+module core.database.sqlite.native.vtab_in.registry;
+
+mount core.*;
+mount base.{Bool};
+mount collections.List;
+mount core.database.sqlite.native.vtab_in.mode.{
+    RequestMode, RmQuery, RmCommit, RmRevert,
+};
+
+public type ConstraintInState is {
+    /// xBestIndex constraint index.
+    index: Int,
+    /// True iff this constraint is an IN with a runtime-expanded value list.
+    eligible: Bool,
+    /// True iff the vtab has committed to multi-value dispatch.
+    handled: Bool,
+}
+
+public fn new_state(index: Int, eligible: Bool) -> ConstraintInState {
+    ConstraintInState { index: index, eligible: eligible, handled: false }
+}
+
+public type VtabInRegistry is {
+    states: List<ConstraintInState>,
+}
+
+public fn new_registry() -> VtabInRegistry {
+    VtabInRegistry { states: List.new() }
+}
+
+implement VtabInRegistry {
+    pub fn register(&mut self, s: ConstraintInState) {
+        self.states.push(s);
+    }
+
+    fn find(&self, index: Int) -> Int {
+        let mut i: Int = 0;
+        while i < self.states.len() {
+            if self.states.get(i).index == index { return i; }
+            i = i + 1;
+        }
+        -1
+    }
+
+    /// Returns 0 / 1 per the sqlite3_vtab_in contract.  Query-mode
+    /// returns eligibility; Commit / Revert flip the handled flag.
+    pub fn sqlite3_vtab_in(&mut self, index: Int, mode: &RequestMode) -> Int {
+        let idx = self.find(index);
+        if idx < 0 { return 0; }
+        match mode {
+            RmQuery => {
+                if self.states.get(idx).eligible { 1 } else { 0 }
+            }
+            RmCommit => {
+                if self.states.get(idx).eligible {
+                    self.states.get_mut(idx).handled = true;
+                    1
+                } else {
+                    0
+                }
+            }
+            RmRevert => {
+                self.states.get_mut(idx).handled = false;
+                if self.states.get(idx).eligible { 1 } else { 0 }
+            }
+        }
+    }
+
+    pub fn any_handled(&self) -> Bool {
+        let mut i: Int = 0;
+        while i < self.states.len() {
+            if self.states.get(i).handled { return true; }
+            i = i + 1;
+        }
+        false
+    }
+}

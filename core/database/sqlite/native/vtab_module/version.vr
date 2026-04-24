@@ -1,0 +1,55 @@
+// =============================================================================
+// vtab_module/version.vr — iVersion gate + feature detection
+// =============================================================================
+// Spec: SQLite C API
+//
+// The iVersion bump history:
+//   1 — original (xRename)
+//   2 — adds xSavepoint/xRelease/xRollbackTo
+//   3 — adds xShadowName
+//   4 — adds xIntegrity (+ xFilter argv in-constraint dispatch)
+// =============================================================================
+
+module core.database.sqlite.native.vtab_module.version;
+
+mount core.*;
+mount base.{Bool};
+mount core.database.sqlite.native.vtab_module.method_set.{
+    MethodSet, supports_savepoints,
+};
+
+public type ModuleVersion is {
+    i_version: Int,
+}
+
+public fn version_one() -> ModuleVersion   { ModuleVersion { i_version: 1 } }
+public fn version_two() -> ModuleVersion   { ModuleVersion { i_version: 2 } }
+public fn version_three() -> ModuleVersion { ModuleVersion { i_version: 3 } }
+public fn version_four() -> ModuleVersion  { ModuleVersion { i_version: 4 } }
+
+public fn supports_savepoint_iversion(v: &ModuleVersion) -> Bool {
+    v.i_version >= 2
+}
+
+public fn supports_shadow_name(v: &ModuleVersion) -> Bool {
+    v.i_version >= 3
+}
+
+public fn supports_integrity(v: &ModuleVersion) -> Bool {
+    v.i_version >= 4
+}
+
+/// True iff `set` is consistent with the declared iVersion —
+/// savepoint methods cannot appear in iVersion < 2, etc.
+public fn set_consistent_with_version(set: &MethodSet, v: &ModuleVersion) -> Bool {
+    if supports_savepoints(set) && !supports_savepoint_iversion(v) {
+        return false;
+    }
+    if set.has_shadow_name && !supports_shadow_name(v) {
+        return false;
+    }
+    if set.has_integrity && !supports_integrity(v) {
+        return false;
+    }
+    true
+}

@@ -1,0 +1,35 @@
+// =============================================================================
+// sorter_api/pma.vr — Packed Merge Area run
+// =============================================================================
+// Spec: SQLite source — vdbesort.c.
+//
+// Each spill flushes the current in-memory heap to disk as one PMA.
+// The merge phase walks every PMA in key order.
+// =============================================================================
+
+module core.database.sqlite.native.sorter_api.pma;
+
+mount core.*;
+mount base.{Bool};
+
+public type PmaRun is {
+    index: Int,
+    /// On-disk offset + byte-length.
+    offset: Int64,
+    byte_len: Int64,
+    /// Number of rows packed into this run.
+    row_count: Int64,
+}
+
+public fn new_run(index: Int, offset: Int64, byte_len: Int64, row_count: Int64) -> PmaRun {
+    PmaRun {
+        index: index,
+        offset: offset,
+        byte_len: byte_len,
+        row_count: row_count,
+    }
+}
+
+public fn run_is_empty(r: &PmaRun) -> Bool {
+    r.byte_len == (0 as Int64) || r.row_count == (0 as Int64)
+}

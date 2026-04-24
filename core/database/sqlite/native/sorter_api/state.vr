@@ -1,0 +1,39 @@
+// =============================================================================
+// sorter_api/state.vr — sorter phase state machine
+// =============================================================================
+// Spec: SQLite source — vdbesort.c.
+// =============================================================================
+
+module core.database.sqlite.native.sorter_api.state;
+
+mount core.*;
+mount base.{Bool, Text};
+
+public type SorterState is
+      SsIngest             // accept rows into the in-memory heap
+    | SsSpilling(Int)      // copy heap to disk as PMA #N
+    | SsMerging             // merge every PMA on read
+    | SsDrained;
+
+public fn state_name(s: &SorterState) -> Text {
+    match s {
+        SsIngest       => "ingest".clone(),
+        SsSpilling(_)  => "spilling".clone(),
+        SsMerging      => "merging".clone(),
+        SsDrained      => "drained".clone(),
+    }
+}
+
+public fn is_terminal(s: &SorterState) -> Bool {
+    match s {
+        SsDrained => true,
+        _ => false,
+    }
+}
+
+public fn is_writing(s: &SorterState) -> Bool {
+    match s {
+        SsIngest | SsSpilling(_) => true,
+        _ => false,
+    }
+}

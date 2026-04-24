@@ -1,0 +1,40 @@
+// =============================================================================
+// bind_zeroblob/spec.vr — ZeroBlobSpec
+// =============================================================================
+// Spec: SQLite C API
+// =============================================================================
+
+module core.database.sqlite.native.bind_zeroblob.spec;
+
+mount core.*;
+mount base.{Bool};
+
+public type ZeroBlobApi is
+      ZaV1         // sqlite3_bind_zeroblob (32-bit)
+    | ZaV2;        // sqlite3_bind_zeroblob64
+
+public type ZeroBlobSpec is {
+    size_bytes: Int64,
+    api: ZeroBlobApi,
+}
+
+public fn v1_spec(size_bytes: Int) -> ZeroBlobSpec {
+    ZeroBlobSpec { size_bytes: size_bytes as Int64, api: ZaV1 }
+}
+
+public fn v2_spec(size_bytes: Int64) -> ZeroBlobSpec {
+    ZeroBlobSpec { size_bytes: size_bytes, api: ZaV2 }
+}
+
+/// sqlite3_bind_zeroblob (32-bit) rejects N < 0 OR N > INT32_MAX.
+/// The 64-bit variant only rejects negative.
+public fn is_valid(s: &ZeroBlobSpec) -> Bool {
+    if s.size_bytes < (0 as Int64) { return false; }
+    match &s.api {
+        ZaV1 => {
+            let max32: Int64 = 2147483647 as Int64;
+            s.size_bytes <= max32
+        }
+        ZaV2 => true,
+    }
+}

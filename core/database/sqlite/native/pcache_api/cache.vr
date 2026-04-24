@@ -1,0 +1,135 @@
+// =============================================================================
+// pcache_api/cache.vr — LRU page cache
+// =============================================================================
+// Spec: SQLite source — pcache1.c
+// =============================================================================
+
+module core.database.sqlite.native.pcache_api.cache;
+
+mount core.*;
+mount base.{Bool, Maybe};
+mount collections.List;
+mount core.database.sqlite.native.pcache_api.page_slot.{
+    PageSlot, new_slot, is_pinned, is_evictable, pin, unpin,
+    mark_dirty, mark_clean,
+};
+
+public type PageCache is {
+    slots: List<PageSlot>,
+    max_pages: Int,
+    generation: Int64,
+    hits: Int64,
+    misses: Int64,
+    evictions: Int64,
+}
+
+public fn new_cache(max_pages: Int) -> PageCache {
+    PageCache {
+        slots: List.new(),
+        max_pages: max_pages,
+        generation: 0 as Int64,
+        hits: 0 as Int64,
+        misses: 0 as Int64,
+        evictions: 0 as Int64,
+    }
+}
+
+implement PageCache {
+    fn tick(&mut self) -> Int64 {
+        self.generation = self.generation + (1 as Int64);
+        self.generation
+    }
+
+    fn find_index(&self, page_no: Int64) -> Int {
+        let mut i: Int = 0;
+        while i < self.slots.len() {
+            if self.slots.get(i).page_no == page_no { return i; }
+            i = i + 1;
+        }
+        -1
+    }
+
+    /// Pin page `page_no`; returns true on hit, false on miss (the
+    /// caller must fault-in the page contents separately).
+    pub fn pin_page(&mut self, page_no: Int64) -> Bool {
+        let idx = self.find_index(page_no);
+        let gen = self.tick();
+        if idx >= 0 {
+            pin(self.slots.get_mut(idx), gen);
+            self.hits = self.hits + (1 as Int64);
+            return true;
+        }
+        if self.slots.len() >= self.max_pages {
+            let _ = self.evict_lru();
+        }
+        self.slots.push(new_slot(page_no, gen));
+        self.misses = self.misses + (1 as Int64);
+        false
+    }
+
+    pub fn unpin_page(&mut self, page_no: Int64) -> Bool {
+        let idx = self.find_index(page_no);
+        if idx < 0 { return false; }
+        unpin(self.slots.get_mut(idx));
+        true
+    }
+
+    pub fn mark_dirty_page(&mut self, page_no: Int64) -> Bool {
+        let idx = self.find_index(page_no);
+        if idx < 0 { return false; }
+        mark_dirty(self.slots.get_mut(idx));
+        true
+    }
+
+    pub fn mark_clean_page(&mut self, page_no: Int64) -> Bool {
+        let idx = self.find_index(page_no);
+        if idx < 0 { return false; }
+        mark_clean(self.slots.get_mut(idx));
+        true
+    }
+
+    fn evict_lru(&mut self) -> Bool {
+        let mut best: Int = -1;
+        let mut best_gen: Int64 = 9223372036854775807 as Int64;
+        let mut i: Int = 0;
+        while i < self.slots.len() {
+            let s = self.slots.get(i);
+            if is_evictable(s) && s.generation < best_gen {
+                best = i;
+                best_gen = s.generation;
+            }
+            i = i + 1;
+        }
+        if best < 0 { return false; }
+        let _ = self.slots.remove(best);
+        self.evictions = self.evictions + (1 as Int64);
+        true
+    }
+
+    /// Truncate: drop every slot whose page_no > `watermark`.
+    pub fn truncate(&mut self, watermark: Int64) -> Int {
+        let mut removed: Int = 0;
+        let mut i: Int = 0;
+        while i < self.slots.len() {
+            if self.slots.get(i).page_no > watermark {
+                let _ = self.slots.remove(i);
+                removed = removed + 1;
+                continue;
+            }
+            i = i + 1;
+        }
+        removed
+    }
+
+    pub fn pin_count(&self) -> Int {
+        let mut n: Int = 0;
+        let mut i: Int = 0;
+        while i < self.slots.len() {
+            if is_pinned(self.slots.get(i)) { n = n + 1; }
+            i = i + 1;
+        }
+        n
+    }
+
+    pub fn len(&self) -> Int { self.slots.len() }
+}

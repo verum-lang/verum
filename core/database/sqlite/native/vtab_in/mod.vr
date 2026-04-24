@@ -1,0 +1,25 @@
+// =============================================================================
+// core/database/sqlite/native/vtab_in/mod.vr
+// =============================================================================
+// Layer: 7 (façade — sqlite3_vtab_in)
+// Spec: SQLite C API (3.38+)
+//
+//   int sqlite3_vtab_in(sqlite3_index_info *pIdx, int iCons, int bHandle)
+//       bHandle == 0 → query: is this constraint an IN that can be
+//                       dispatched value-at-a-time?
+//       bHandle >  0 → commit: vtab will handle the multi-value dispatch
+//                       itself; xFilter will see rows for each value.
+//       bHandle <  0 → revert: release a prior commit.
+//
+// Complements `vtab_helpers/in_iter` (which drives
+// sqlite3_vtab_in_first / _next).
+//
+// Submodules:
+//   * `mode`       — RequestMode sum (Query / Commit / Revert)
+//   * `registry`   — per-constraint state (eligible / handled)
+// =============================================================================
+
+module core.database.sqlite.native.vtab_in;
+
+public module mode;
+public module registry;

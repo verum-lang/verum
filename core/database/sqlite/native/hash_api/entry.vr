@@ -1,0 +1,36 @@
+// =============================================================================
+// hash_api/entry.vr — key/value pair
+// =============================================================================
+// Spec: SQLite C API
+// =============================================================================
+
+module core.database.sqlite.native.hash_api.entry;
+
+mount core.*;
+mount base.{Bool, Text};
+
+public type HashEntry is {
+    key: Text,
+    value: Int64,
+}
+
+public fn new_entry(key: Text, value: Int64) -> HashEntry {
+    HashEntry { key: key, value: value }
+}
+
+/// Case-insensitive ASCII compare — matches the SQLite hash.
+public fn keys_equal(a: &Text, b: &Text) -> Bool {
+    let ab = a.as_bytes();
+    let bb = b.as_bytes();
+    if ab.len() != bb.len() { return false; }
+    let mut i: Int = 0;
+    while i < ab.len() {
+        let mut x = ab[i];
+        let mut y = bb[i];
+        if x >= (0x61 as u8) && x <= (0x7A as u8) { x = x - (0x20 as u8); }
+        if y >= (0x61 as u8) && y <= (0x7A as u8) { y = y - (0x20 as u8); }
+        if x != y { return false; }
+        i = i + 1;
+    }
+    true
+}

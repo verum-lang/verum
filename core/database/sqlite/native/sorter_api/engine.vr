@@ -1,0 +1,105 @@
+// =============================================================================
+// sorter_api/engine.vr — sorter driver
+// =============================================================================
+// Spec: SQLite source — vdbesort.c.
+// =============================================================================
+
+module core.database.sqlite.native.sorter_api.engine;
+
+mount core.*;
+mount base.{Bool};
+mount collections.List;
+mount core.database.sqlite.native.sorter_api.state.{
+    SorterState, SsIngest, SsSpilling, SsMerging, SsDrained,
+};
+mount core.database.sqlite.native.sorter_api.pma.{
+    PmaRun, new_run,
+};
+
+public type SorterStats is {
+    rows_ingested: Int64,
+    rows_emitted: Int64,
+    pmas_spilled: Int64,
+    peak_memory_bytes: Int64,
+}
+
+public fn new_stats() -> SorterStats {
+    SorterStats {
+        rows_ingested: 0 as Int64,
+        rows_emitted: 0 as Int64,
+        pmas_spilled: 0 as Int64,
+        peak_memory_bytes: 0 as Int64,
+    }
+}
+
+public type SorterEngine is {
+    state: SorterState,
+    runs: List<PmaRun>,
+    in_memory_bytes: Int64,
+    spill_threshold_bytes: Int64,
+    stats: SorterStats,
+}
+
+public fn new_engine(spill_threshold_bytes: Int64) -> SorterEngine {
+    SorterEngine {
+        state: SsIngest,
+        runs: List.new(),
+        in_memory_bytes: 0 as Int64,
+        spill_threshold_bytes: spill_threshold_bytes,
+        stats: new_stats(),
+    }
+}
+
+implement SorterEngine {
+    pub fn accept_row(&mut self, row_bytes: Int64) -> Bool {
+        match &self.state {
+            SsIngest => {}
+            SsSpilling(_) => {}
+            _ => return false,
+        }
+        self.stats.rows_ingested = self.stats.rows_ingested + (1 as Int64);
+        self.in_memory_bytes = self.in_memory_bytes + row_bytes;
+        if self.in_memory_bytes > self.stats.peak_memory_bytes {
+            self.stats.peak_memory_bytes = self.in_memory_bytes;
+        }
+        // Auto-spill once the budget is exceeded.
+        if self.in_memory_bytes > self.spill_threshold_bytes {
+            self.spill(row_bytes);
+        }
+        true
+    }
+
+    fn spill(&mut self, run_bytes: Int64) {
+        let idx = self.runs.len();
+        self.state = SsSpilling(idx);
+        self.runs.push(new_run(
+            idx,
+            (idx as Int64) * run_bytes,
+            run_bytes,
+            1 as Int64,
+        ));
+        self.stats.pmas_spilled = self.stats.pmas_spilled + (1 as Int64);
+        self.in_memory_bytes = 0 as Int64;
+        self.state = SsIngest;
+    }
+
+    pub fn finalize(&mut self) {
+        self.state = SsMerging;
+    }
+
+    pub fn emit_row(&mut self) -> Bool {
+        match &self.state {
+            SsMerging => {
+                self.stats.rows_emitted = self.stats.rows_emitted + (1 as Int64);
+                if self.stats.rows_emitted >= self.stats.rows_ingested {
+                    self.state = SsDrained;
+                }
+                true
+            }
+            _ => false,
+        }
+    }
+
+    pub fn pma_count(&self) -> Int { self.runs.len() }
+    pub fn is_pure_memory(&self) -> Bool { self.runs.len() == 0 }
+}

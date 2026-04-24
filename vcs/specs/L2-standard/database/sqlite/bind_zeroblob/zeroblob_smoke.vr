@@ -1,0 +1,77 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, bind_zeroblob, blob, capi
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.bind_zeroblob.spec.{
+    ZeroBlobSpec, ZeroBlobApi, ZaV1, ZaV2,
+    v1_spec, v2_spec, is_valid,
+};
+mount core.database.sqlite.native.bind_zeroblob.engine.{
+    ZeroBlobSlot, ZeroBlobBindEngine,
+    empty_slot, new_engine,
+};
+mount base.{Bool, Maybe};
+
+fn test_v1_spec_valid_in_range() {
+    let s = v1_spec(1024);
+    assert(is_valid(&s));
+}
+
+fn test_v1_spec_rejects_above_int32_max() {
+    let s = v1_spec(-1);
+    assert(!is_valid(&s));
+}
+
+fn test_v2_spec_accepts_large_sizes() {
+    let big: Int64 = 4_000_000_000 as Int64;
+    let s = v2_spec(big);
+    assert(is_valid(&s));
+}
+
+fn test_v2_spec_rejects_negative() {
+    let s = v2_spec(-1 as Int64);
+    assert(!is_valid(&s));
+}
+
+fn test_engine_bind_ok_returns_zero() {
+    let mut e = new_engine(4);
+    let r = e.sqlite3_bind_zeroblob(2, v1_spec(1024));
+    assert_eq(r, 0);
+    assert_eq(e.slot_size(2), 1024 as Int64);
+}
+
+fn test_engine_bind_out_of_range_is_sqlite_range() {
+    let mut e = new_engine(2);
+    let r = e.sqlite3_bind_zeroblob(0, v1_spec(32));
+    assert_eq(r, 25);  // SQLITE_RANGE
+    let r2 = e.sqlite3_bind_zeroblob(99, v1_spec(32));
+    assert_eq(r2, 25);
+}
+
+fn test_engine_bind_invalid_spec_is_sqlite_toobig() {
+    let mut e = new_engine(4);
+    let r = e.sqlite3_bind_zeroblob(1, v1_spec(-1));
+    assert_eq(r, 18);  // SQLITE_TOOBIG
+    assert_eq(e.rejections, 1 as Int64);
+}
+
+fn test_engine_clear_zeroes_slot() {
+    let mut e = new_engine(4);
+    let _ = e.sqlite3_bind_zeroblob(2, v1_spec(1024));
+    assert(e.clear(2));
+    assert_eq(e.slot_size(2), 0 as Int64);
+}
+
+fn main() {
+    test_v1_spec_valid_in_range();
+    test_v1_spec_rejects_above_int32_max();
+    test_v2_spec_accepts_large_sizes();
+    test_v2_spec_rejects_negative();
+    test_engine_bind_ok_returns_zero();
+    test_engine_bind_out_of_range_is_sqlite_range();
+    test_engine_bind_invalid_spec_is_sqlite_toobig();
+    test_engine_clear_zeroes_slot();
+}

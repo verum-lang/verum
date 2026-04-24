@@ -1,0 +1,30 @@
+// =============================================================================
+// vtab_collation/engine.vr — C-API-aligned accessor
+// =============================================================================
+// Spec: SQLite C API
+//
+// Returns the collation name for the given constraint.  When the
+// constraint has no explicit COLLATE clause, falls back to "BINARY".
+// When the index is out of range the real SQLite would return NULL
+// (we surface that via Maybe.None).
+// =============================================================================
+
+module core.database.sqlite.native.vtab_collation.engine;
+
+mount core.*;
+mount base.{Bool, Maybe, Text};
+mount core.database.sqlite.native.vtab_collation.lookup.{
+    CollationTable,
+};
+
+public fn sqlite3_vtab_collation(t: &CollationTable, constraint_index: Int) -> Maybe<Text> {
+    t.lookup(constraint_index)
+}
+
+/// Convenience: resolves to "BINARY" when the lookup misses.
+public fn sqlite3_vtab_collation_or_binary(t: &CollationTable, constraint_index: Int) -> Text {
+    match t.lookup(constraint_index) {
+        Maybe.Some(n) => n,
+        Maybe.None => "BINARY".clone(),
+    }
+}

@@ -1,0 +1,76 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, vtab_in, multi_value, capi
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.vtab_in.mode.{
+    RequestMode, RmQuery, RmCommit, RmRevert,
+    mode_name, from_bhandle,
+};
+mount core.database.sqlite.native.vtab_in.registry.{
+    ConstraintInState, VtabInRegistry,
+    new_state, new_registry,
+};
+mount base.{Bool};
+
+fn test_mode_names() {
+    assert(mode_name(&RmQuery) == "query".clone());
+    assert(mode_name(&RmCommit) == "commit".clone());
+    assert(mode_name(&RmRevert) == "revert".clone());
+}
+
+fn test_from_bhandle_dispatch() {
+    match from_bhandle(0)   { RmQuery  => {}, _ => assert(false) }
+    match from_bhandle(1)   { RmCommit => {}, _ => assert(false) }
+    match from_bhandle(-1)  { RmRevert => {}, _ => assert(false) }
+    match from_bhandle(999) { RmCommit => {}, _ => assert(false) }
+}
+
+fn test_query_returns_eligibility() {
+    let mut r = new_registry();
+    r.register(new_state(0, true));
+    r.register(new_state(1, false));
+    assert_eq(r.sqlite3_vtab_in(0, &RmQuery), 1);
+    assert_eq(r.sqlite3_vtab_in(1, &RmQuery), 0);
+    assert(!r.any_handled());
+}
+
+fn test_commit_sets_handled_when_eligible() {
+    let mut r = new_registry();
+    r.register(new_state(0, true));
+    assert_eq(r.sqlite3_vtab_in(0, &RmCommit), 1);
+    assert(r.any_handled());
+}
+
+fn test_commit_ineligible_constraint_rejected() {
+    let mut r = new_registry();
+    r.register(new_state(0, false));
+    assert_eq(r.sqlite3_vtab_in(0, &RmCommit), 0);
+    assert(!r.any_handled());
+}
+
+fn test_revert_clears_handled_flag() {
+    let mut r = new_registry();
+    r.register(new_state(0, true));
+    let _ = r.sqlite3_vtab_in(0, &RmCommit);
+    assert(r.any_handled());
+    let _ = r.sqlite3_vtab_in(0, &RmRevert);
+    assert(!r.any_handled());
+}
+
+fn test_unknown_constraint_returns_zero() {
+    let mut r = new_registry();
+    assert_eq(r.sqlite3_vtab_in(99, &RmQuery), 0);
+}
+
+fn main() {
+    test_mode_names();
+    test_from_bhandle_dispatch();
+    test_query_returns_eligibility();
+    test_commit_sets_handled_when_eligible();
+    test_commit_ineligible_constraint_rejected();
+    test_revert_clears_handled_flag();
+    test_unknown_constraint_returns_zero();
+}

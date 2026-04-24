@@ -1,0 +1,64 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, value_dup_api, capi
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.value_dup_api.handle.{
+    DupHandle,
+    new_handle, is_live, free,
+};
+mount core.database.sqlite.native.value_dup_api.registry.{
+    DupRegistry,
+    new_registry,
+};
+mount base.{Bool};
+
+fn test_new_handle_is_live() {
+    let h = new_handle(1 as Int64, 99 as Int64);
+    assert(is_live(&h));
+}
+
+fn test_free_transitions_to_not_live() {
+    let mut h = new_handle(1 as Int64, 99 as Int64);
+    free(&mut h);
+    assert(!is_live(&h));
+}
+
+fn test_registry_dup_assigns_ids() {
+    let mut r = new_registry();
+    let id1 = r.sqlite3_value_dup(10 as Int64);
+    let id2 = r.sqlite3_value_dup(20 as Int64);
+    assert(id1 != id2);
+    assert_eq(r.outstanding_count(), 2);
+}
+
+fn test_registry_free_decrements_outstanding() {
+    let mut r = new_registry();
+    let id = r.sqlite3_value_dup(10 as Int64);
+    assert(r.sqlite3_value_free(id));
+    assert_eq(r.outstanding_count(), 0);
+}
+
+fn test_registry_double_free_counted() {
+    let mut r = new_registry();
+    let id = r.sqlite3_value_dup(10 as Int64);
+    assert(r.sqlite3_value_free(id));
+    assert(!r.sqlite3_value_free(id));
+    assert_eq(r.double_frees, 1 as Int64);
+}
+
+fn test_registry_free_unknown_returns_false() {
+    let mut r = new_registry();
+    assert(!r.sqlite3_value_free(99 as Int64));
+}
+
+fn main() {
+    test_new_handle_is_live();
+    test_free_transitions_to_not_live();
+    test_registry_dup_assigns_ids();
+    test_registry_free_decrements_outstanding();
+    test_registry_double_free_counted();
+    test_registry_free_unknown_returns_false();
+}

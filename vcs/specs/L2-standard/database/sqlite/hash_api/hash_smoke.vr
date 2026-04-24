@@ -1,0 +1,86 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, hash_api, utility, capi
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.hash_api.entry.{
+    HashEntry, new_entry, keys_equal,
+};
+mount core.database.sqlite.native.hash_api.table.{
+    HashTable, new_table,
+};
+mount base.{Bool, Maybe};
+
+fn test_keys_equal_case_insensitive() {
+    assert(keys_equal(&"FooBar".clone(), &"foobar".clone()));
+    assert(keys_equal(&"FooBar".clone(), &"FOOBAR".clone()));
+    assert(!keys_equal(&"FooBar".clone(), &"FooBaz".clone()));
+}
+
+fn test_insert_and_find() {
+    let mut t = new_table();
+    let prev = t.insert("SELECT".clone(), 42 as Int64);
+    assert_eq(prev, 0 as Int64);
+    match t.find_value(&"select".clone()) {
+        Maybe.Some(v) => assert_eq(v, 42 as Int64),
+        Maybe.None => assert(false),
+    }
+}
+
+fn test_insert_overwrite_returns_prev() {
+    let mut t = new_table();
+    let _ = t.insert("K".clone(), 1 as Int64);
+    let prev = t.insert("k".clone(), 2 as Int64);
+    assert_eq(prev, 1 as Int64);
+    match t.find_value(&"K".clone()) {
+        Maybe.Some(v) => assert_eq(v, 2 as Int64),
+        Maybe.None => assert(false),
+    }
+}
+
+fn test_find_value_miss() {
+    let t = new_table();
+    match t.find_value(&"absent".clone()) {
+        Maybe.None => {},
+        Maybe.Some(_) => assert(false),
+    }
+}
+
+fn test_remove_returns_prev_and_shrinks() {
+    let mut t = new_table();
+    let _ = t.insert("X".clone(), 7 as Int64);
+    match t.remove(&"x".clone()) {
+        Maybe.Some(v) => assert_eq(v, 7 as Int64),
+        Maybe.None => assert(false),
+    }
+    assert_eq(t.count(), 0);
+}
+
+fn test_remove_missing_returns_none() {
+    let mut t = new_table();
+    match t.remove(&"nope".clone()) {
+        Maybe.None => {},
+        Maybe.Some(_) => assert(false),
+    }
+}
+
+fn test_audit_counters() {
+    let mut t = new_table();
+    let _ = t.insert("a".clone(), 1 as Int64);
+    let _ = t.insert("b".clone(), 2 as Int64);
+    let _ = t.remove(&"a".clone());
+    assert_eq(t.inserts, 2 as Int64);
+    assert_eq(t.removes, 1 as Int64);
+}
+
+fn main() {
+    test_keys_equal_case_insensitive();
+    test_insert_and_find();
+    test_insert_overwrite_returns_prev();
+    test_find_value_miss();
+    test_remove_returns_prev_and_shrinks();
+    test_remove_missing_returns_none();
+    test_audit_counters();
+}

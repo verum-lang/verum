@@ -1,0 +1,123 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, pcache_api, lru, page_cache, capi
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.pcache_api.page_slot.{
+    PageSlot, new_slot, is_pinned, is_evictable,
+    pin, unpin, mark_dirty, mark_clean,
+};
+mount core.database.sqlite.native.pcache_api.cache.{
+    PageCache, new_cache,
+};
+mount core.database.sqlite.native.pcache_api.engine.{
+    FetchOutcome, FoHit, FoMiss, FoRefused,
+    is_hit,
+    sqlite3_pcache_fetch, sqlite3_pcache_unpin,
+    sqlite3_pcache_truncate, sqlite3_pcache_mark_dirty,
+};
+mount base.{Bool};
+
+fn test_slot_pin_unpin_dirty() {
+    let mut s = new_slot(1 as Int64, 1 as Int64);
+    assert(is_pinned(&s));
+    assert(!is_evictable(&s));
+    unpin(&mut s);
+    assert(is_evictable(&s));
+    mark_dirty(&mut s);
+    assert(!is_evictable(&s));
+    mark_clean(&mut s);
+    assert(is_evictable(&s));
+}
+
+fn test_slot_pin_bumps_generation() {
+    let mut s = new_slot(1 as Int64, 1 as Int64);
+    unpin(&mut s);
+    pin(&mut s, 5 as Int64);
+    assert_eq(s.generation, 5 as Int64);
+    assert_eq(s.pin_count, 1);
+}
+
+fn test_cache_first_fetch_is_miss() {
+    let mut c = new_cache(4);
+    match sqlite3_pcache_fetch(&mut c, 1 as Int64) {
+        FoMiss => {},
+        _ => assert(false),
+    }
+    assert_eq(c.misses, 1 as Int64);
+}
+
+fn test_cache_subsequent_fetch_is_hit() {
+    let mut c = new_cache(4);
+    let _ = sqlite3_pcache_fetch(&mut c, 1 as Int64);
+    let _ = sqlite3_pcache_unpin(&mut c, 1 as Int64);
+    match sqlite3_pcache_fetch(&mut c, 1 as Int64) {
+        FoHit => {},
+        _ => assert(false),
+    }
+    assert_eq(c.hits, 1 as Int64);
+}
+
+fn test_cache_eviction_once_full() {
+    let mut c = new_cache(2);
+    let _ = sqlite3_pcache_fetch(&mut c, 1 as Int64);
+    let _ = sqlite3_pcache_unpin(&mut c, 1 as Int64);
+    let _ = sqlite3_pcache_fetch(&mut c, 2 as Int64);
+    let _ = sqlite3_pcache_unpin(&mut c, 2 as Int64);
+    // 3rd page triggers eviction (LRU: page 1).
+    let _ = sqlite3_pcache_fetch(&mut c, 3 as Int64);
+    assert_eq(c.evictions, 1 as Int64);
+    assert_eq(c.len(), 2);
+}
+
+fn test_cache_refuses_when_all_pinned() {
+    let mut c = new_cache(2);
+    let _ = sqlite3_pcache_fetch(&mut c, 1 as Int64);  // pinned
+    let _ = sqlite3_pcache_fetch(&mut c, 2 as Int64);  // pinned
+    match sqlite3_pcache_fetch(&mut c, 3 as Int64) {
+        FoRefused => {},
+        _ => assert(false),
+    }
+}
+
+fn test_cache_mark_dirty_blocks_eviction() {
+    let mut c = new_cache(2);
+    let _ = sqlite3_pcache_fetch(&mut c, 1 as Int64);
+    let _ = sqlite3_pcache_unpin(&mut c, 1 as Int64);
+    assert(sqlite3_pcache_mark_dirty(&mut c, 1 as Int64));
+    let _ = sqlite3_pcache_fetch(&mut c, 2 as Int64);
+    let _ = sqlite3_pcache_unpin(&mut c, 2 as Int64);
+    // Page 1 is dirty → must not evict; page 2 evictable.
+    let _ = sqlite3_pcache_fetch(&mut c, 3 as Int64);
+    assert_eq(c.evictions, 1 as Int64);
+}
+
+fn test_cache_truncate_drops_above_watermark() {
+    let mut c = new_cache(8);
+    let _ = sqlite3_pcache_fetch(&mut c, 1 as Int64);
+    let _ = sqlite3_pcache_fetch(&mut c, 2 as Int64);
+    let _ = sqlite3_pcache_fetch(&mut c, 3 as Int64);
+    let removed = sqlite3_pcache_truncate(&mut c, 1 as Int64);
+    assert_eq(removed, 2);
+    assert_eq(c.len(), 1);
+}
+
+fn test_is_hit_predicate() {
+    assert(is_hit(&FoHit));
+    assert(!is_hit(&FoMiss));
+    assert(!is_hit(&FoRefused));
+}
+
+fn main() {
+    test_slot_pin_unpin_dirty();
+    test_slot_pin_bumps_generation();
+    test_cache_first_fetch_is_miss();
+    test_cache_subsequent_fetch_is_hit();
+    test_cache_eviction_once_full();
+    test_cache_refuses_when_all_pinned();
+    test_cache_mark_dirty_blocks_eviction();
+    test_cache_truncate_drops_above_watermark();
+    test_is_hit_predicate();
+}

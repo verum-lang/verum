@@ -1,0 +1,23 @@
+// =============================================================================
+// core/database/sqlite/native/vtab_collation/mod.vr
+// =============================================================================
+// Layer: 7 (façade — sqlite3_vtab_collation)
+// Spec: SQLite C API (3.22+)
+//
+//   const char *sqlite3_vtab_collation(sqlite3_index_info *pIdx,
+//                                       int iConstraint)
+//
+// Called from xBestIndex to discover the collation that will be used
+// for a particular constraint; that lets the vtab decide whether its
+// index can serve the constraint natively or if the engine must
+// perform a post-filter.
+//
+// Submodules:
+//   * `lookup`   — ConstraintCollation table keyed by constraint index
+//   * `engine`   — C-API-aligned accessor
+// =============================================================================
+
+module core.database.sqlite.native.vtab_collation;
+
+public module lookup;
+public module engine;

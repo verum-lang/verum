@@ -1,0 +1,71 @@
+// =============================================================================
+// hash_api/table.vr — ordered table + CI-lookup
+// =============================================================================
+// Spec: SQLite C API
+// =============================================================================
+
+module core.database.sqlite.native.hash_api.table;
+
+mount core.*;
+mount base.{Bool, Maybe, Text};
+mount collections.List;
+mount core.database.sqlite.native.hash_api.entry.{
+    HashEntry, new_entry, keys_equal,
+};
+
+public type HashTable is {
+    entries: List<HashEntry>,
+    /// Monotone insertion counter (for audit).
+    inserts: Int64,
+    /// Monotone removal counter.
+    removes: Int64,
+}
+
+public fn new_table() -> HashTable {
+    HashTable {
+        entries: List.new(),
+        inserts: 0 as Int64,
+        removes: 0 as Int64,
+    }
+}
+
+implement HashTable {
+    fn find(&self, key: &Text) -> Int {
+        let mut i: Int = 0;
+        while i < self.entries.len() {
+            if keys_equal(&self.entries.get(i).key, key) { return i; }
+            i = i + 1;
+        }
+        -1
+    }
+
+    /// Inserts (or overwrites).  Returns the previous value or 0.
+    pub fn insert(&mut self, key: Text, value: Int64) -> Int64 {
+        let idx = self.find(&key);
+        if idx >= 0 {
+            let prev = self.entries.get(idx).value;
+            self.entries.get_mut(idx).value = value;
+            return prev;
+        }
+        self.entries.push(new_entry(key, value));
+        self.inserts = self.inserts + (1 as Int64);
+        0 as Int64
+    }
+
+    pub fn find_value(&self, key: &Text) -> Maybe<Int64> {
+        let idx = self.find(key);
+        if idx < 0 { return Maybe.None; }
+        Maybe.Some(self.entries.get(idx).value)
+    }
+
+    pub fn remove(&mut self, key: &Text) -> Maybe<Int64> {
+        let idx = self.find(key);
+        if idx < 0 { return Maybe.None; }
+        let prev = self.entries.get(idx).value;
+        let _ = self.entries.remove(idx);
+        self.removes = self.removes + (1 as Int64);
+        Maybe.Some(prev)
+    }
+
+    pub fn count(&self) -> Int { self.entries.len() }
+}

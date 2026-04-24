@@ -1,0 +1,47 @@
+// =============================================================================
+// core/database/sqlite/native/vtab_module/mod.vr
+// =============================================================================
+// Layer: 7 (façade — sqlite3_module vtable)
+// Spec: SQLite C API
+//
+//   struct sqlite3_module {
+//     int iVersion;     // 1, 2, 3, or 4
+//     int (*xCreate)(...);
+//     int (*xConnect)(...);
+//     int (*xBestIndex)(...);
+//     int (*xDisconnect)(...);
+//     int (*xDestroy)(...);
+//     int (*xOpen)(...);
+//     int (*xClose)(...);
+//     int (*xFilter)(...);
+//     int (*xNext)(...);
+//     int (*xEof)(...);
+//     int (*xColumn)(...);
+//     int (*xRowid)(...);
+//     int (*xUpdate)(...);
+//     int (*xBegin)(...);
+//     int (*xSync)(...);
+//     int (*xCommit)(...);
+//     int (*xRollback)(...);
+//     int (*xFindFunction)(...);
+//     int (*xRename)(...);                  // iVersion >= 1
+//     int (*xSavepoint)(...);               // iVersion >= 2
+//     int (*xRelease)(...);                 // iVersion >= 2
+//     int (*xRollbackTo)(...);              // iVersion >= 2
+//     int (*xShadowName)(const char *);     // iVersion >= 3
+//     int (*xIntegrity)(...);               // iVersion >= 4
+//   };
+//
+// Distinct from `vtabs/protocol.vr` which is the internal method-
+// dispatch shape.  This catalogue models the C-level vtable a module
+// author must fill in.
+//
+// Submodules:
+//   * `method_set`  — bool-per-slot presence map
+//   * `version`     — iVersion gate w/ feature detection
+// =============================================================================
+
+module core.database.sqlite.native.vtab_module;
+
+public module method_set;
+public module version;

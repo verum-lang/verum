@@ -1,0 +1,110 @@
+// =============================================================================
+// vtab_module/method_set.vr — presence map for every xMethod
+// =============================================================================
+// Spec: SQLite C API
+// =============================================================================
+
+module core.database.sqlite.native.vtab_module.method_set;
+
+mount core.*;
+mount base.{Bool, Text};
+
+public type MethodSet is {
+    // Always required (iVersion 1+).
+    has_best_index: Bool,
+    has_disconnect: Bool,
+    has_open: Bool,
+    has_close: Bool,
+    has_filter: Bool,
+    has_next: Bool,
+    has_eof: Bool,
+    has_column: Bool,
+    has_rowid: Bool,
+
+    // Create/Connect pair (at least one required — "eponymous" modules
+    // may skip xCreate).
+    has_create: Bool,
+    has_connect: Bool,
+
+    // Optional — write path.
+    has_destroy: Bool,
+    has_update: Bool,
+    has_begin: Bool,
+    has_sync: Bool,
+    has_commit: Bool,
+    has_rollback: Bool,
+
+    // Optional — extensions.
+    has_find_function: Bool,
+    has_rename: Bool,         // iVersion >= 1
+    has_savepoint: Bool,      // iVersion >= 2
+    has_release: Bool,        // iVersion >= 2
+    has_rollback_to: Bool,    // iVersion >= 2
+    has_shadow_name: Bool,    // iVersion >= 3
+    has_integrity: Bool,      // iVersion >= 4
+}
+
+public fn minimal_read_only_set() -> MethodSet {
+    MethodSet {
+        has_best_index: true,
+        has_disconnect: true,
+        has_open: true,
+        has_close: true,
+        has_filter: true,
+        has_next: true,
+        has_eof: true,
+        has_column: true,
+        has_rowid: true,
+        has_create: false,
+        has_connect: true,
+        has_destroy: false,
+        has_update: false,
+        has_begin: false,
+        has_sync: false,
+        has_commit: false,
+        has_rollback: false,
+        has_find_function: false,
+        has_rename: false,
+        has_savepoint: false,
+        has_release: false,
+        has_rollback_to: false,
+        has_shadow_name: false,
+        has_integrity: false,
+    }
+}
+
+public fn supports_write(m: &MethodSet) -> Bool {
+    m.has_update
+}
+
+public fn supports_transactions(m: &MethodSet) -> Bool {
+    m.has_begin && m.has_sync && m.has_commit && m.has_rollback
+}
+
+public fn supports_savepoints(m: &MethodSet) -> Bool {
+    m.has_savepoint && m.has_release && m.has_rollback_to
+}
+
+public fn is_eponymous(m: &MethodSet) -> Bool {
+    m.has_connect && !m.has_create
+}
+
+/// True iff the required slots are all filled; returns the name of
+/// the first missing mandatory slot as the failure reason.
+public fn missing_required(m: &MethodSet) -> Text {
+    if !m.has_connect      { return "xConnect".clone(); }
+    if !m.has_best_index   { return "xBestIndex".clone(); }
+    if !m.has_disconnect   { return "xDisconnect".clone(); }
+    if !m.has_open         { return "xOpen".clone(); }
+    if !m.has_close        { return "xClose".clone(); }
+    if !m.has_filter       { return "xFilter".clone(); }
+    if !m.has_next         { return "xNext".clone(); }
+    if !m.has_eof          { return "xEof".clone(); }
+    if !m.has_column       { return "xColumn".clone(); }
+    if !m.has_rowid        { return "xRowid".clone(); }
+    "".clone()
+}
+
+public fn is_viable(m: &MethodSet) -> Bool {
+    missing_required(m).len() == 0
+}

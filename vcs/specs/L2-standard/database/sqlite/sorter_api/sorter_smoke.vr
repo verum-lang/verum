@@ -1,0 +1,99 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, sorter_api, order_by, group_by
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.sorter_api.state.{
+    SorterState, SsIngest, SsSpilling, SsMerging, SsDrained,
+    state_name, is_terminal, is_writing,
+};
+mount core.database.sqlite.native.sorter_api.pma.{
+    PmaRun, new_run, run_is_empty,
+};
+mount core.database.sqlite.native.sorter_api.engine.{
+    SorterEngine, SorterStats,
+    new_stats, new_engine,
+};
+mount base.{Bool};
+
+fn test_state_names() {
+    assert(state_name(&SsIngest) == "ingest".clone());
+    assert(state_name(&SsMerging) == "merging".clone());
+}
+
+fn test_is_writing_only_ingest_and_spilling() {
+    assert(is_writing(&SsIngest));
+    assert(is_writing(&SsSpilling(0)));
+    assert(!is_writing(&SsMerging));
+    assert(!is_writing(&SsDrained));
+}
+
+fn test_is_terminal_only_drained() {
+    assert(is_terminal(&SsDrained));
+    assert(!is_terminal(&SsMerging));
+}
+
+fn test_pma_empty_flag() {
+    let empty = new_run(0, 0 as Int64, 0 as Int64, 0 as Int64);
+    assert(run_is_empty(&empty));
+    let non_empty = new_run(0, 0 as Int64, 100 as Int64, 5 as Int64);
+    assert(!run_is_empty(&non_empty));
+}
+
+fn test_engine_accept_without_spill() {
+    let threshold: Int64 = 10000 as Int64;
+    let mut e = new_engine(threshold);
+    let _ = e.accept_row(100 as Int64);
+    let _ = e.accept_row(200 as Int64);
+    assert_eq(e.stats.rows_ingested, 2 as Int64);
+    assert(e.is_pure_memory());
+}
+
+fn test_engine_auto_spill_on_overflow() {
+    let mut e = new_engine(100 as Int64);
+    let _ = e.accept_row(500 as Int64);
+    assert_eq(e.pma_count(), 1);
+    assert_eq(e.in_memory_bytes, 0 as Int64);
+}
+
+fn test_engine_peak_memory_tracked() {
+    let mut e = new_engine(1000 as Int64);
+    let _ = e.accept_row(300 as Int64);
+    assert_eq(e.stats.peak_memory_bytes, 300 as Int64);
+    let _ = e.accept_row(500 as Int64);
+    assert_eq(e.stats.peak_memory_bytes, 800 as Int64);
+}
+
+fn test_engine_finalize_and_emit() {
+    let mut e = new_engine(1000 as Int64);
+    let _ = e.accept_row(100 as Int64);
+    let _ = e.accept_row(100 as Int64);
+    e.finalize();
+    assert(e.emit_row());
+    assert(e.emit_row());
+    // Third emit should fail (drained).
+    assert(!e.emit_row());
+    assert(is_terminal(&e.state));
+}
+
+fn test_engine_accept_after_drained_rejected() {
+    let mut e = new_engine(1000 as Int64);
+    e.finalize();
+    let _ = e.emit_row();
+    // After drained, accept_row fails (not Ingest/Spilling).
+    assert(!e.accept_row(100 as Int64));
+}
+
+fn main() {
+    test_state_names();
+    test_is_writing_only_ingest_and_spilling();
+    test_is_terminal_only_drained();
+    test_pma_empty_flag();
+    test_engine_accept_without_spill();
+    test_engine_auto_spill_on_overflow();
+    test_engine_peak_memory_tracked();
+    test_engine_finalize_and_emit();
+    test_engine_accept_after_drained_rejected();
+}

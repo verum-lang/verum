@@ -1,0 +1,21 @@
+// =============================================================================
+// core/database/sqlite/native/pcache_api/mod.vr
+// =============================================================================
+// Layer: 1 (façade — runtime page-cache calls)
+// Spec: SQLite source — pcache.c / pcache1.c.
+//
+// Complements `pcache_methods/` (vtable shape) with the invocation
+// side: per-connection page cache with LRU eviction + pin reference
+// counts + dirty-flag tracking.
+//
+// Submodules:
+//   * `page_slot`   — one in-memory page (number, pinned, dirty)
+//   * `cache`       — LRU cache w/ maxPages + pinned count
+//   * `engine`      — xFetch / xUnpin / xRekey / xTruncate dispatch
+// =============================================================================
+
+module core.database.sqlite.native.pcache_api;
+
+public module page_slot;
+public module cache;
+public module engine;

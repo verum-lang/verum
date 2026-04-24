@@ -1,0 +1,29 @@
+// =============================================================================
+// vtab_in/mode.vr — RequestMode
+// =============================================================================
+// Spec: SQLite C API
+// =============================================================================
+
+module core.database.sqlite.native.vtab_in.mode;
+
+mount core.*;
+mount base.{Text};
+
+public type RequestMode is
+      RmQuery            // bHandle == 0
+    | RmCommit           // bHandle >  0
+    | RmRevert;          // bHandle <  0
+
+public fn mode_name(m: &RequestMode) -> Text {
+    match m {
+        RmQuery  => "query".clone(),
+        RmCommit => "commit".clone(),
+        RmRevert => "revert".clone(),
+    }
+}
+
+public fn from_bhandle(b: Int) -> RequestMode {
+    if b == 0 { return RmQuery; }
+    if b > 0  { return RmCommit; }
+    RmRevert
+}

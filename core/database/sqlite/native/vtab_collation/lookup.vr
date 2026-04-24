@@ -1,0 +1,49 @@
+// =============================================================================
+// vtab_collation/lookup.vr — ConstraintCollation table
+// =============================================================================
+// Spec: SQLite C API
+// =============================================================================
+
+module core.database.sqlite.native.vtab_collation.lookup;
+
+mount core.*;
+mount base.{Bool, Maybe, Text};
+mount collections.List;
+
+public type ConstraintCollation is {
+    /// 0-based constraint index as seen by xBestIndex.
+    constraint_index: Int,
+    collation_name: Text,
+}
+
+public fn entry(constraint_index: Int, collation_name: Text) -> ConstraintCollation {
+    ConstraintCollation {
+        constraint_index: constraint_index,
+        collation_name: collation_name,
+    }
+}
+
+public type CollationTable is {
+    entries: List<ConstraintCollation>,
+}
+
+public fn new_table() -> CollationTable {
+    CollationTable { entries: List.new() }
+}
+
+implement CollationTable {
+    pub fn push(&mut self, e: ConstraintCollation) { self.entries.push(e); }
+
+    pub fn lookup(&self, idx: Int) -> Maybe<Text> {
+        let mut i: Int = 0;
+        while i < self.entries.len() {
+            if self.entries.get(i).constraint_index == idx {
+                return Maybe.Some(self.entries.get(i).collation_name.clone());
+            }
+            i = i + 1;
+        }
+        Maybe.None
+    }
+
+    pub fn len(&self) -> Int { self.entries.len() }
+}

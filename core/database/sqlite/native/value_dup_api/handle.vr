@@ -1,0 +1,28 @@
+// =============================================================================
+// value_dup_api/handle.vr — DupHandle
+// =============================================================================
+// Spec: SQLite C API
+//
+// A DupHandle records the allocation site + a freed flag.  Production
+// SQLite uses malloc; the catalogue keeps it abstract.
+// =============================================================================
+
+module core.database.sqlite.native.value_dup_api.handle;
+
+mount core.*;
+mount base.{Bool};
+
+public type DupHandle is {
+    id: Int64,
+    /// The source sqlite3_value that was dup'd (opaque id).
+    source_id: Int64,
+    freed: Bool,
+}
+
+public fn new_handle(id: Int64, source_id: Int64) -> DupHandle {
+    DupHandle { id: id, source_id: source_id, freed: false }
+}
+
+public fn is_live(h: &DupHandle) -> Bool { !h.freed }
+
+public fn free(h: &mut DupHandle) { h.freed = true; }

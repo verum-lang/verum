@@ -1,0 +1,68 @@
+// =============================================================================
+// value_dup_api/registry.vr — lifetime tracker
+// =============================================================================
+// Spec: SQLite C API
+// =============================================================================
+
+module core.database.sqlite.native.value_dup_api.registry;
+
+mount core.*;
+mount base.{Bool, Maybe};
+mount collections.List;
+mount core.database.sqlite.native.value_dup_api.handle.{
+    DupHandle, new_handle, is_live, free,
+};
+
+public type DupRegistry is {
+    handles: List<DupHandle>,
+    next_id: Int64,
+    /// Count of free-of-already-freed handles (catches double-free bugs).
+    double_frees: Int64,
+}
+
+public fn new_registry() -> DupRegistry {
+    DupRegistry {
+        handles: List.new(),
+        next_id: 1 as Int64,
+        double_frees: 0 as Int64,
+    }
+}
+
+implement DupRegistry {
+    pub fn sqlite3_value_dup(&mut self, source_id: Int64) -> Int64 {
+        let id = self.next_id;
+        self.next_id = self.next_id + (1 as Int64);
+        self.handles.push(new_handle(id, source_id));
+        id
+    }
+
+    fn find(&self, id: Int64) -> Int {
+        let mut i: Int = 0;
+        while i < self.handles.len() {
+            if self.handles.get(i).id == id { return i; }
+            i = i + 1;
+        }
+        -1
+    }
+
+    pub fn sqlite3_value_free(&mut self, id: Int64) -> Bool {
+        let idx = self.find(id);
+        if idx < 0 { return false; }
+        if !is_live(self.handles.get(idx)) {
+            self.double_frees = self.double_frees + (1 as Int64);
+            return false;
+        }
+        free(self.handles.get_mut(idx));
+        true
+    }
+
+    pub fn outstanding_count(&self) -> Int {
+        let mut n: Int = 0;
+        let mut i: Int = 0;
+        while i < self.handles.len() {
+            if is_live(self.handles.get(i)) { n = n + 1; }
+            i = i + 1;
+        }
+        n
+    }
+}

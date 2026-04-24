@@ -332,3 +332,19 @@ public module database_file_object;
 public module sql_render;
 // - schema_version_api: schema_version / user_version / application_id — header counters
 public module schema_version_api;
+// - vtab_module: sqlite3_module vtable shape — 22 xMethods + iVersion 1-4 gating
+public module vtab_module;
+// - vtab_collation: sqlite3_vtab_collation — per-constraint collation lookup in xBestIndex
+public module vtab_collation;
+// - vtab_in: sqlite3_vtab_in (3.38+) — mark an IN constraint for multi-value dispatch
+public module vtab_in;
+// - bind_zeroblob: sqlite3_bind_zeroblob / _bind_zeroblob64 — allocate-only blob bindings
+public module bind_zeroblob;
+// - value_dup_api: sqlite3_value_dup / _value_free — deep-copy + refcounted release
+public module value_dup_api;
+// - hash_api: low-level sqlite3_hash utility — case-insensitive keyed tables
+public module hash_api;
+// - sorter_api: VDBE sorter — PMA runs + merge pass for ORDER BY / GROUP BY
+public module sorter_api;
+// - pcache_api: sqlite3_pcache_* runtime — LRU page cache w/ pin/unpin/dirty tracking
+public module pcache_api;

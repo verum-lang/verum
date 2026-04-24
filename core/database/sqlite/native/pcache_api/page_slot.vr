@@ -1,0 +1,41 @@
+// =============================================================================
+// pcache_api/page_slot.vr — one page slot
+// =============================================================================
+// Spec: SQLite source
+// =============================================================================
+
+module core.database.sqlite.native.pcache_api.page_slot;
+
+mount core.*;
+mount base.{Bool};
+
+public type PageSlot is {
+    page_no: Int64,         // 1-based database page number
+    pin_count: Int,         // > 0 ⇒ pinned / not evictable
+    dirty: Bool,
+    generation: Int64,      // bumped on every pin/unpin — LRU key
+}
+
+public fn new_slot(page_no: Int64, generation: Int64) -> PageSlot {
+    PageSlot {
+        page_no: page_no,
+        pin_count: 1,
+        dirty: false,
+        generation: generation,
+    }
+}
+
+public fn is_pinned(s: &PageSlot) -> Bool { s.pin_count > 0 }
+public fn is_evictable(s: &PageSlot) -> Bool { s.pin_count == 0 && !s.dirty }
+
+public fn pin(s: &mut PageSlot, generation: Int64) {
+    s.pin_count = s.pin_count + 1;
+    s.generation = generation;
+}
+
+public fn unpin(s: &mut PageSlot) {
+    if s.pin_count > 0 { s.pin_count = s.pin_count - 1; }
+}
+
+public fn mark_dirty(s: &mut PageSlot) { s.dirty = true; }
+public fn mark_clean(s: &mut PageSlot) { s.dirty = false; }

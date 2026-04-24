@@ -1,0 +1,109 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, vtab_module, capi
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.vtab_module.method_set.{
+    MethodSet,
+    minimal_read_only_set, is_viable, missing_required,
+    supports_write, supports_transactions, supports_savepoints,
+    is_eponymous,
+};
+mount core.database.sqlite.native.vtab_module.version.{
+    ModuleVersion,
+    version_one, version_two, version_three, version_four,
+    supports_savepoint_iversion, supports_shadow_name, supports_integrity,
+    set_consistent_with_version,
+};
+mount base.{Bool};
+
+fn test_minimal_set_is_viable_and_eponymous() {
+    let m = minimal_read_only_set();
+    assert(is_viable(&m));
+    assert_eq(missing_required(&m).len(), 0);
+    assert(is_eponymous(&m));
+}
+
+fn test_missing_column_flags_column() {
+    let mut m = minimal_read_only_set();
+    m.has_column = false;
+    assert(missing_required(&m) == "xColumn".clone());
+    assert(!is_viable(&m));
+}
+
+fn test_supports_write_requires_update() {
+    let m = minimal_read_only_set();
+    assert(!supports_write(&m));
+    let mut w = minimal_read_only_set();
+    w.has_update = true;
+    assert(supports_write(&w));
+}
+
+fn test_supports_transactions_requires_all_four() {
+    let mut m = minimal_read_only_set();
+    m.has_begin = true;
+    m.has_sync = true;
+    m.has_commit = true;
+    assert(!supports_transactions(&m));
+    m.has_rollback = true;
+    assert(supports_transactions(&m));
+}
+
+fn test_supports_savepoints_requires_trio() {
+    let mut m = minimal_read_only_set();
+    m.has_savepoint = true;
+    assert(!supports_savepoints(&m));
+    m.has_release = true;
+    assert(!supports_savepoints(&m));
+    m.has_rollback_to = true;
+    assert(supports_savepoints(&m));
+}
+
+fn test_version_feature_gating() {
+    let v1 = version_one();
+    let v2 = version_two();
+    let v3 = version_three();
+    let v4 = version_four();
+    assert(!supports_savepoint_iversion(&v1));
+    assert(supports_savepoint_iversion(&v2));
+    assert(!supports_shadow_name(&v2));
+    assert(supports_shadow_name(&v3));
+    assert(!supports_integrity(&v3));
+    assert(supports_integrity(&v4));
+}
+
+fn test_savepoint_method_requires_iversion_two() {
+    let mut m = minimal_read_only_set();
+    m.has_savepoint = true;
+    m.has_release = true;
+    m.has_rollback_to = true;
+    assert(!set_consistent_with_version(&m, &version_one()));
+    assert(set_consistent_with_version(&m, &version_two()));
+}
+
+fn test_integrity_method_requires_iversion_four() {
+    let mut m = minimal_read_only_set();
+    m.has_integrity = true;
+    assert(!set_consistent_with_version(&m, &version_three()));
+    assert(set_consistent_with_version(&m, &version_four()));
+}
+
+fn test_create_makes_not_eponymous() {
+    let mut m = minimal_read_only_set();
+    m.has_create = true;
+    assert(!is_eponymous(&m));
+}
+
+fn main() {
+    test_minimal_set_is_viable_and_eponymous();
+    test_missing_column_flags_column();
+    test_supports_write_requires_update();
+    test_supports_transactions_requires_all_four();
+    test_supports_savepoints_requires_trio();
+    test_version_feature_gating();
+    test_savepoint_method_requires_iversion_two();
+    test_integrity_method_requires_iversion_four();
+    test_create_makes_not_eponymous();
+}

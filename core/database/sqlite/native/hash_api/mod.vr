@@ -1,0 +1,20 @@
+// =============================================================================
+// core/database/sqlite/native/hash_api/mod.vr
+// =============================================================================
+// Layer: 7 (façade — low-level sqlite3_hash utility)
+// Spec: SQLite C API — sqlite3ext.h HashTable API (used by extensions).
+//
+// Tiny linear-probe table keyed by case-insensitive Text.  The C
+// version is used by SQLite for the function registry, collation
+// registry, module registry, etc.  Catalogue keeps it generic over
+// opaque Int64 handles.
+//
+// Submodules:
+//   * `entry`    — one (key, value, freed) tuple
+//   * `table`    — ordered insertion list + CI-lookup
+// =============================================================================
+
+module core.database.sqlite.native.hash_api;
+
+public module entry;
+public module table;

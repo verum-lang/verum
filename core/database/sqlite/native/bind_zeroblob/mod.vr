@@ -1,0 +1,22 @@
+// =============================================================================
+// core/database/sqlite/native/bind_zeroblob/mod.vr
+// =============================================================================
+// Layer: 7 (façade — sqlite3_bind_zeroblob)
+// Spec: SQLite C API
+//
+//   sqlite3_bind_zeroblob(stmt, idx, n)     — n < 2 GiB
+//   sqlite3_bind_zeroblob64(stmt, idx, n64) — 64-bit version
+//
+// A zeroblob says "allocate an N-byte blob filled with zeros" —
+// without the caller materialising the bytes; useful for staging
+// large incremental-blob writes.
+//
+// Submodules:
+//   * `spec`     — ZeroBlobSpec (size + source API variant)
+//   * `engine`   — per-stmt bind-zeroblob slot + validation
+// =============================================================================
+
+module core.database.sqlite.native.bind_zeroblob;
+
+public module spec;
+public module engine;
