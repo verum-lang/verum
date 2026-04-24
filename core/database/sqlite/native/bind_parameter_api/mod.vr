@@ -1,0 +1,19 @@
+// =============================================================================
+// core/database/sqlite/native/bind_parameter_api/mod.vr
+// =============================================================================
+// Layer: 7 (façade — bind-parameter reflection)
+// Spec: SQLite C API
+//
+//   sqlite3_bind_parameter_count(stmt)
+//   sqlite3_bind_parameter_name(stmt, index)   → "?NNN"/":name"/"@name"/"$name" or NULL
+//   sqlite3_bind_parameter_index(stmt, zName)  → 1-based index or 0 if not found
+//
+// Submodules:
+//   * `descriptor`  — ParamSpec (1-based index + optional name)
+//   * `table`       — ordered spec list + accessors
+// =============================================================================
+
+module core.database.sqlite.native.bind_parameter_api;
+
+public module descriptor;
+public module table;

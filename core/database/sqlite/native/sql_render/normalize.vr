@@ -1,0 +1,94 @@
+// =============================================================================
+// sql_render/normalize.vr — literal → `?` + whitespace canonicalisation
+// =============================================================================
+// Spec: SQLite C API
+//
+// The normalized form is what sqlite3_normalized_sql returns: a
+// fingerprint used as a plan-cache key.  The transform:
+//
+//   * collapses runs of whitespace to a single space,
+//   * replaces numeric literals (123, 4.5, 1e-3) with `?`,
+//   * replaces string literals with `?`,
+//   * preserves identifiers + keywords in their input casing (the
+//     real SQLite uppercases; this catalogue keeps the implementation
+//     simple and documents that in the header).
+// =============================================================================
+
+module core.database.sqlite.native.sql_render.normalize;
+
+mount core.*;
+mount base.{Bool, Text};
+mount collections.List;
+
+fn is_ws(b: u8) -> Bool {
+    b == (0x20 as u8) || b == (0x09 as u8) || b == (0x0A as u8)
+        || b == (0x0B as u8) || b == (0x0C as u8) || b == (0x0D as u8)
+}
+
+fn is_digit(b: u8) -> Bool {
+    b >= (0x30 as u8) && b <= (0x39 as u8)
+}
+
+public fn normalize(sql: &Text) -> Text {
+    let bs = sql.as_bytes();
+    let mut out = "".clone();
+    let mut prev_was_ws: Bool = true;
+    let mut i: Int = 0;
+    while i < bs.len() {
+        let b = bs[i];
+        if is_ws(b) {
+            if !prev_was_ws {
+                out.push_byte(0x20 as u8);
+                prev_was_ws = true;
+            }
+            i = i + 1;
+            continue;
+        }
+        prev_was_ws = false;
+        if b == (0x27 as u8) {
+            // Single-quoted string literal → '?'.
+            out.push_byte(0x3F as u8);
+            i = i + 1;
+            while i < bs.len() {
+                let c = bs[i];
+                i = i + 1;
+                if c == (0x27 as u8) {
+                    // Handle the `''` escape.
+                    if i < bs.len() && bs[i] == (0x27 as u8) {
+                        i = i + 1;
+                        continue;
+                    }
+                    break;
+                }
+            }
+            continue;
+        }
+        if is_digit(b) {
+            out.push_byte(0x3F as u8);
+            while i < bs.len()
+                  && (is_digit(bs[i])
+                      || bs[i] == (0x2E as u8)
+                      || bs[i] == (0x65 as u8)
+                      || bs[i] == (0x45 as u8)
+                      || bs[i] == (0x2D as u8)
+                      || bs[i] == (0x2B as u8)) {
+                i = i + 1;
+            }
+            continue;
+        }
+        out.push_byte(b);
+        i = i + 1;
+    }
+    // Strip trailing space.
+    let tb = out.as_bytes();
+    if tb.len() > 0 && tb[tb.len() - 1] == (0x20 as u8) {
+        let mut trimmed = "".clone();
+        let mut j: Int = 0;
+        while j < tb.len() - 1 {
+            trimmed.push_byte(tb[j]);
+            j = j + 1;
+        }
+        return trimmed;
+    }
+    out
+}

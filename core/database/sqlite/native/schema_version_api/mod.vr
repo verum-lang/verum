@@ -1,0 +1,21 @@
+// =============================================================================
+// core/database/sqlite/native/schema_version_api/mod.vr
+// =============================================================================
+// Layer: 7 (façade — header counters)
+// Spec: SQLite file format §6.1 + PRAGMA semantics
+//
+// Three 32-bit counters live in the database header:
+//
+//   * `schema_version`  — bumped by any DDL (CREATE/DROP/ALTER)
+//   * `user_version`    — application-owned counter; no engine effect
+//   * `application_id`  — 4-byte magic number; e.g. "SQLAR" uses 0x53514C41
+//
+// Submodules:
+//   * `counters`  — the three slots + update policy
+//   * `engine`    — set/get/auto-increment helpers
+// =============================================================================
+
+module core.database.sqlite.native.schema_version_api;
+
+public module counters;
+public module engine;

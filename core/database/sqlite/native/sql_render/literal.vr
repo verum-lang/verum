@@ -1,0 +1,117 @@
+// =============================================================================
+// sql_render/literal.vr — RenderLiteral
+// =============================================================================
+// Spec: SQLite C API — sqlite3_expanded_sql.
+//
+// Integers and reals render as decimal digits; text renders inside
+// single quotes with `'` doubled; blobs render as `X'…hex…'`; NULL
+// renders as the bareword NULL.
+// =============================================================================
+
+module core.database.sqlite.native.sql_render.literal;
+
+mount core.*;
+mount base.{Bool, Text};
+mount collections.List;
+
+public type RenderLiteral is
+      RlNull
+    | RlInt(Int64)
+    | RlReal(Float)
+    | RlText(Text)
+    | RlBlob(List<u8>);
+
+public fn literal_kind(l: &RenderLiteral) -> Text {
+    match l {
+        RlNull    => "NULL".clone(),
+        RlInt(_)  => "INTEGER".clone(),
+        RlReal(_) => "REAL".clone(),
+        RlText(_) => "TEXT".clone(),
+        RlBlob(_) => "BLOB".clone(),
+    }
+}
+
+fn push_digit(dst: &mut Text, d: Int) {
+    dst.push_byte((0x30 + d) as u8);
+}
+
+fn push_int64(dst: &mut Text, mut n: Int64) {
+    if n < (0 as Int64) {
+        dst.push_byte(0x2D as u8);
+        n = (0 as Int64) - n;
+    }
+    if n == (0 as Int64) { push_digit(dst, 0); return; }
+    let mut digits: Int = 0;
+    let mut x = n;
+    while x > (0 as Int64) { digits = digits + 1; x = x / (10 as Int64); }
+    let mut buf: Int64 = 1 as Int64;
+    let mut d: Int = 1;
+    while d < digits { buf = buf * (10 as Int64); d = d + 1; }
+    while buf > (0 as Int64) {
+        let c = (n / buf) - ((n / (buf * (10 as Int64))) * (10 as Int64));
+        push_digit(dst, c as Int);
+        buf = buf / (10 as Int64);
+    }
+}
+
+fn push_single_quoted(dst: &mut Text, s: &Text) {
+    dst.push_byte(0x27 as u8);
+    let bs = s.as_bytes();
+    let mut i: Int = 0;
+    while i < bs.len() {
+        let b = bs[i];
+        if b == (0x27 as u8) {
+            dst.push_byte(0x27 as u8);
+            dst.push_byte(0x27 as u8);
+        } else {
+            dst.push_byte(b);
+        }
+        i = i + 1;
+    }
+    dst.push_byte(0x27 as u8);
+}
+
+fn push_hex_byte(dst: &mut Text, b: u8) {
+    let high: Int = ((b as Int) / 16) & 0xF;
+    let low: Int = (b as Int) & 0xF;
+    let table: Int = 0x30;        // '0'
+    let alpha: Int = 0x41 - 10;   // 'A'-10
+    let hc = if high < 10 { table + high } else { alpha + high };
+    let lc = if low  < 10 { table + low  } else { alpha + low  };
+    dst.push_byte(hc as u8);
+    dst.push_byte(lc as u8);
+}
+
+fn push_blob_x_literal(dst: &mut Text, bytes: &List<u8>) {
+    dst.push_byte(0x58 as u8);      // 'X'
+    dst.push_byte(0x27 as u8);      // '\''
+    let mut i: Int = 0;
+    while i < bytes.len() {
+        push_hex_byte(dst, bytes[i]);
+        i = i + 1;
+    }
+    dst.push_byte(0x27 as u8);
+}
+
+public fn render_literal(dst: &mut Text, l: &RenderLiteral) {
+    match l {
+        RlNull => {
+            dst.push_byte(0x4E as u8);
+            dst.push_byte(0x55 as u8);
+            dst.push_byte(0x4C as u8);
+            dst.push_byte(0x4C as u8);
+        }
+        RlInt(n)  => push_int64(dst, *n),
+        RlReal(_) => {
+            // Real formatting isn't byte-exact across platforms; emit a
+            // placeholder.  Embedders that need byte-exact output pass
+            // RlText(format_real_locally) instead.
+            let five = "REAL?".clone();
+            let bs = five.as_bytes();
+            let mut i: Int = 0;
+            while i < bs.len() { dst.push_byte(bs[i]); i = i + 1; }
+        }
+        RlText(t) => push_single_quoted(dst, t),
+        RlBlob(b) => push_blob_x_literal(dst, b),
+    }
+}

@@ -1,0 +1,20 @@
+// =============================================================================
+// core/database/sqlite/native/database_file_object/mod.vr
+// =============================================================================
+// Layer: 7 (façade — sqlite3_database_file_object)
+// Spec: SQLite C API
+//
+//   sqlite3_database_file_object(const char *zName) → sqlite3_file *
+//
+// Returns the VFS-level sqlite3_file* backing the named schema on the
+// connection, or NULL if the schema doesn't exist or is a memdb.
+//
+// Submodules:
+//   * `handle`    — FileObjectHandle (opaque id + schema name)
+//   * `registry`  — per-connection name→handle map
+// =============================================================================
+
+module core.database.sqlite.native.database_file_object;
+
+public module handle;
+public module registry;

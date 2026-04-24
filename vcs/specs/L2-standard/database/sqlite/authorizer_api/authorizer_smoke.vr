@@ -1,0 +1,94 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, authorizer_api, capi
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.authorizer_api.decision.{
+    Decision, DOk, DDeny, DIgnore,
+    SQLITE_OK, SQLITE_DENY, SQLITE_IGNORE,
+    decision_numeric, decision_name, from_numeric, blocks_prepare,
+};
+mount core.database.sqlite.native.authorizer_api.engine.{
+    AuthSlot, AuthorizerEngine,
+    empty_slot, is_installed, new_engine,
+};
+mount base.{Bool};
+
+fn test_decision_numeric_matches_c_header() {
+    assert_eq(SQLITE_OK, 0);
+    assert_eq(SQLITE_DENY, 1);
+    assert_eq(SQLITE_IGNORE, 2);
+    assert_eq(decision_numeric(&DOk), 0);
+    assert_eq(decision_numeric(&DDeny), 1);
+    assert_eq(decision_numeric(&DIgnore), 2);
+}
+
+fn test_decision_names() {
+    assert(decision_name(&DOk) == "SQLITE_OK".clone());
+    assert(decision_name(&DDeny) == "SQLITE_DENY".clone());
+    assert(decision_name(&DIgnore) == "SQLITE_IGNORE".clone());
+}
+
+fn test_from_numeric_round_trip() {
+    match from_numeric(0) { DOk     => {}, _ => assert(false) }
+    match from_numeric(1) { DDeny   => {}, _ => assert(false) }
+    match from_numeric(2) { DIgnore => {}, _ => assert(false) }
+    match from_numeric(99) { DOk    => {}, _ => assert(false) }
+}
+
+fn test_blocks_prepare_only_deny() {
+    assert(blocks_prepare(&DDeny));
+    assert(!blocks_prepare(&DOk));
+    assert(!blocks_prepare(&DIgnore));
+}
+
+fn test_empty_slot_not_installed() {
+    let s = empty_slot();
+    assert(!is_installed(&s));
+}
+
+fn test_slot_installed_when_user_data_nonzero() {
+    let s = AuthSlot { tag: "audit".clone(), user_data: 42 as Int64 };
+    assert(is_installed(&s));
+}
+
+fn test_engine_install_tracks_slot() {
+    let mut e = new_engine();
+    assert(!e.authorizer_installed());
+    e.sqlite3_set_authorizer(AuthSlot { tag: "audit".clone(), user_data: 1 as Int64 });
+    assert(e.authorizer_installed());
+    e.clear();
+    assert(!e.authorizer_installed());
+}
+
+fn test_engine_observe_counters() {
+    let mut e = new_engine();
+    e.observe(&DOk);
+    e.observe(&DDeny);
+    e.observe(&DDeny);
+    e.observe(&DIgnore);
+    assert_eq(e.calls_observed, 4 as Int64);
+    assert_eq(e.denies, 2 as Int64);
+    assert_eq(e.ignores, 1 as Int64);
+}
+
+fn test_engine_should_reject_only_deny() {
+    let e = new_engine();
+    assert(e.should_reject_prepare(&DDeny));
+    assert(!e.should_reject_prepare(&DOk));
+    assert(!e.should_reject_prepare(&DIgnore));
+}
+
+fn main() {
+    test_decision_numeric_matches_c_header();
+    test_decision_names();
+    test_from_numeric_round_trip();
+    test_blocks_prepare_only_deny();
+    test_empty_slot_not_installed();
+    test_slot_installed_when_user_data_nonzero();
+    test_engine_install_tracks_slot();
+    test_engine_observe_counters();
+    test_engine_should_reject_only_deny();
+}

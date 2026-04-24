@@ -1,0 +1,96 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, get_table_api, capi
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.get_table_api.matrix.{
+    ResultMatrix, empty_matrix, new_matrix,
+};
+mount core.database.sqlite.native.get_table_api.engine.{
+    GetTableOutcome, GtoOk, GtoError,
+    is_ok, sqlite3_get_table, sqlite3_free_table,
+};
+mount collections.List;
+mount base.{Bool};
+
+fn test_empty_matrix_defaults() {
+    let m = empty_matrix();
+    assert_eq(m.n_column(), 0);
+    assert_eq(m.n_row(), 0);
+    assert(m.is_live());
+}
+
+fn test_new_matrix_header_count() {
+    let mut h: List<Text> = List.new();
+    h.push("id".clone());
+    h.push("name".clone());
+    let m = new_matrix(h);
+    assert_eq(m.n_column(), 2);
+}
+
+fn test_push_row_ok_when_len_matches() {
+    let mut h: List<Text> = List.new();
+    h.push("a".clone());
+    h.push("b".clone());
+    let mut m = new_matrix(h);
+    let mut r: List<Text> = List.new();
+    r.push("1".clone());
+    r.push("alice".clone());
+    assert(m.push_row(r));
+    assert_eq(m.n_row(), 1);
+    assert_eq(m.total_cells(), 4);   // 2 cols * (1 header + 1 row)
+}
+
+fn test_push_row_rejected_on_mismatch() {
+    let mut h: List<Text> = List.new();
+    h.push("a".clone());
+    h.push("b".clone());
+    let mut m = new_matrix(h);
+    let mut r: List<Text> = List.new();
+    r.push("only-one".clone());
+    assert(!m.push_row(r));
+}
+
+fn test_free_table_drops_data() {
+    let mut h: List<Text> = List.new();
+    h.push("x".clone());
+    let mut m = new_matrix(h);
+    sqlite3_free_table(&mut m);
+    assert(!m.is_live());
+    assert_eq(m.n_column(), 0);
+}
+
+fn test_sqlite3_get_table_success() {
+    let mut h: List<Text> = List.new();
+    h.push("id".clone());
+    let mut rows: List<List<Text>> = List.new();
+    let mut r1: List<Text> = List.new();
+    r1.push("1".clone());
+    rows.push(r1);
+    let outcome = sqlite3_get_table(h, rows);
+    assert(is_ok(&outcome));
+}
+
+fn test_sqlite3_get_table_error_on_row_mismatch() {
+    let mut h: List<Text> = List.new();
+    h.push("id".clone());
+    h.push("name".clone());
+    let mut rows: List<List<Text>> = List.new();
+    let mut r1: List<Text> = List.new();
+    r1.push("incomplete".clone());
+    rows.push(r1);
+    let outcome = sqlite3_get_table(h, rows);
+    assert(!is_ok(&outcome));
+}
+
+fn main() {
+    test_empty_matrix_defaults();
+    test_new_matrix_header_count();
+    test_push_row_ok_when_len_matches();
+    test_push_row_rejected_on_mismatch();
+    test_free_table_drops_data();
+    test_sqlite3_get_table_success();
+    test_sqlite3_get_table_error_on_row_mismatch();
+}

@@ -1,0 +1,37 @@
+// =============================================================================
+// test_control/engine.vr — call counter + last-observed op
+// =============================================================================
+// Spec: SQLite C API
+// =============================================================================
+
+module core.database.sqlite.native.test_control.engine;
+
+mount core.*;
+mount base.{Bool, Maybe};
+mount core.database.sqlite.native.test_control.opcode.{
+    TestCtrlOp, is_safe_in_prod, op_numeric,
+};
+
+public type TestControlEngine is {
+    calls: Int64,
+    unsafe_calls: Int64,
+    last_op_numeric: Int,
+}
+
+public fn new_engine() -> TestControlEngine {
+    TestControlEngine {
+        calls: 0 as Int64,
+        unsafe_calls: 0 as Int64,
+        last_op_numeric: -1,
+    }
+}
+
+implement TestControlEngine {
+    pub fn sqlite3_test_control(&mut self, op: &TestCtrlOp) {
+        self.calls = self.calls + (1 as Int64);
+        self.last_op_numeric = op_numeric(op);
+        if !is_safe_in_prod(op) {
+            self.unsafe_calls = self.unsafe_calls + (1 as Int64);
+        }
+    }
+}

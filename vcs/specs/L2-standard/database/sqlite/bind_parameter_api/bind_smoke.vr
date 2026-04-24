@@ -1,0 +1,104 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, bind_parameter_api, capi
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.bind_parameter_api.descriptor.{
+    ParamSpec, ParamKind,
+    PkAnonymous, PkQuestion, PkColon, PkAt, PkDollar,
+    new_spec, spec_name, is_named,
+};
+mount core.database.sqlite.native.bind_parameter_api.table.{
+    ParamTable, new_table,
+};
+mount base.{Bool, Maybe};
+
+fn test_is_named() {
+    assert(!is_named(&PkAnonymous));
+    assert(!is_named(&PkQuestion(1)));
+    assert(is_named(&PkColon("name".clone())));
+    assert(is_named(&PkAt("name".clone())));
+    assert(is_named(&PkDollar("name".clone())));
+}
+
+fn test_spec_name_renders_sigil() {
+    let s = new_spec(1, PkColon("user_id".clone()));
+    match spec_name(&s) {
+        Maybe.Some(t) => assert(t == ":user_id".clone()),
+        Maybe.None => assert(false),
+    }
+    let q = new_spec(2, PkAt("x".clone()));
+    match spec_name(&q) {
+        Maybe.Some(t) => assert(t == "@x".clone()),
+        Maybe.None => assert(false),
+    }
+    let d = new_spec(3, PkDollar("y".clone()));
+    match spec_name(&d) {
+        Maybe.Some(t) => assert(t == "$y".clone()),
+        Maybe.None => assert(false),
+    }
+}
+
+fn test_anonymous_has_no_name() {
+    let a = new_spec(1, PkAnonymous);
+    match spec_name(&a) {
+        Maybe.None => {},
+        Maybe.Some(_) => assert(false),
+    }
+    let q = new_spec(2, PkQuestion(5));
+    match spec_name(&q) {
+        Maybe.None => {},
+        Maybe.Some(_) => assert(false),
+    }
+}
+
+fn test_table_count() {
+    let mut t = new_table();
+    t.push(new_spec(1, PkAnonymous));
+    t.push(new_spec(2, PkColon("x".clone())));
+    assert_eq(t.sqlite3_bind_parameter_count(), 2);
+}
+
+fn test_table_name_by_index() {
+    let mut t = new_table();
+    t.push(new_spec(1, PkColon("alpha".clone())));
+    match t.sqlite3_bind_parameter_name(1) {
+        Maybe.Some(n) => assert(n == ":alpha".clone()),
+        Maybe.None => assert(false),
+    }
+}
+
+fn test_table_name_out_of_range_is_none() {
+    let t = new_table();
+    match t.sqlite3_bind_parameter_name(1) {
+        Maybe.None => {},
+        Maybe.Some(_) => assert(false),
+    }
+    let mut t2 = new_table();
+    t2.push(new_spec(1, PkAnonymous));
+    match t2.sqlite3_bind_parameter_name(99) {
+        Maybe.None => {},
+        Maybe.Some(_) => assert(false),
+    }
+}
+
+fn test_table_index_by_name() {
+    let mut t = new_table();
+    t.push(new_spec(1, PkColon("a".clone())));
+    t.push(new_spec(2, PkAt("b".clone())));
+    assert_eq(t.sqlite3_bind_parameter_index(&":a".clone()), 1);
+    assert_eq(t.sqlite3_bind_parameter_index(&"@b".clone()), 2);
+    assert_eq(t.sqlite3_bind_parameter_index(&":missing".clone()), 0);
+}
+
+fn main() {
+    test_is_named();
+    test_spec_name_renders_sigil();
+    test_anonymous_has_no_name();
+    test_table_count();
+    test_table_name_by_index();
+    test_table_name_out_of_range_is_none();
+    test_table_index_by_name();
+}

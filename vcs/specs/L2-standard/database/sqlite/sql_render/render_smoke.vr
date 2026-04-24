@@ -1,0 +1,122 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, sql_render, expanded_sql, normalized_sql, capi
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.sql_render.literal.{
+    RenderLiteral, RlNull, RlInt, RlReal, RlText, RlBlob,
+    literal_kind, render_literal,
+};
+mount core.database.sqlite.native.sql_render.expand.{
+    BoundValue, new_bound, expand,
+};
+mount core.database.sqlite.native.sql_render.normalize.{
+    normalize,
+};
+mount collections.List;
+mount base.{Bool};
+
+fn test_literal_kind() {
+    assert(literal_kind(&RlNull) == "NULL".clone());
+    assert(literal_kind(&RlInt(1 as Int64)) == "INTEGER".clone());
+    assert(literal_kind(&RlText("x".clone())) == "TEXT".clone());
+    let b: List<u8> = List.new();
+    assert(literal_kind(&RlBlob(b)) == "BLOB".clone());
+}
+
+fn test_render_null() {
+    let mut out = "".clone();
+    render_literal(&mut out, &RlNull);
+    assert(out == "NULL".clone());
+}
+
+fn test_render_int() {
+    let mut out = "".clone();
+    render_literal(&mut out, &RlInt(42 as Int64));
+    assert(out == "42".clone());
+    let mut neg = "".clone();
+    render_literal(&mut neg, &RlInt(-17 as Int64));
+    assert(neg == "-17".clone());
+}
+
+fn test_render_text_escapes_single_quote() {
+    let mut out = "".clone();
+    render_literal(&mut out, &RlText("O'Reilly".clone()));
+    assert(out == "'O''Reilly'".clone());
+}
+
+fn test_render_blob_hex() {
+    let mut bytes: List<u8> = List.new();
+    bytes.push(0xDE as u8);
+    bytes.push(0xAD as u8);
+    let mut out = "".clone();
+    render_literal(&mut out, &RlBlob(bytes));
+    assert(out == "X'DEAD'".clone());
+}
+
+fn test_expand_positional_placeholders() {
+    let mut bindings: List<BoundValue> = List.new();
+    bindings.push(new_bound(1, RlInt(42 as Int64)));
+    bindings.push(new_bound(2, RlText("alice".clone())));
+    let out = expand(&"SELECT ?, ?".clone(), &bindings);
+    assert(out == "SELECT 42, 'alice'".clone());
+}
+
+fn test_expand_explicit_indexed() {
+    let mut bindings: List<BoundValue> = List.new();
+    bindings.push(new_bound(1, RlInt(1 as Int64)));
+    bindings.push(new_bound(2, RlInt(2 as Int64)));
+    let out = expand(&"SELECT ?2, ?1".clone(), &bindings);
+    assert(out == "SELECT 2, 1".clone());
+}
+
+fn test_expand_missing_binding_leaves_placeholder() {
+    let bindings: List<BoundValue> = List.new();
+    let out = expand(&"SELECT ?".clone(), &bindings);
+    assert(out == "SELECT ?".clone());
+}
+
+fn test_expand_preserves_string_literals() {
+    let mut bindings: List<BoundValue> = List.new();
+    bindings.push(new_bound(1, RlInt(7 as Int64)));
+    let out = expand(&"SELECT 'keep ?', ?".clone(), &bindings);
+    assert(out == "SELECT 'keep ?', 7".clone());
+}
+
+fn test_normalize_collapses_whitespace() {
+    let out = normalize(&"SELECT   a   FROM   t".clone());
+    assert(out == "SELECT a FROM t".clone());
+}
+
+fn test_normalize_replaces_numeric_literal() {
+    let out = normalize(&"SELECT 42 FROM t".clone());
+    assert(out == "SELECT ? FROM t".clone());
+}
+
+fn test_normalize_replaces_string_literal() {
+    let out = normalize(&"SELECT 'hello' FROM t".clone());
+    assert(out == "SELECT ? FROM t".clone());
+}
+
+fn test_normalize_strips_trailing_space() {
+    let out = normalize(&"SELECT 1   ".clone());
+    assert(out == "SELECT ?".clone());
+}
+
+fn main() {
+    test_literal_kind();
+    test_render_null();
+    test_render_int();
+    test_render_text_escapes_single_quote();
+    test_render_blob_hex();
+    test_expand_positional_placeholders();
+    test_expand_explicit_indexed();
+    test_expand_missing_binding_leaves_placeholder();
+    test_expand_preserves_string_literals();
+    test_normalize_collapses_whitespace();
+    test_normalize_replaces_numeric_literal();
+    test_normalize_replaces_string_literal();
+    test_normalize_strips_trailing_space();
+}

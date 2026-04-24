@@ -1,0 +1,26 @@
+// =============================================================================
+// core/database/sqlite/native/authorizer_api/mod.vr
+// =============================================================================
+// Layer: 7 (façade — sqlite3_set_authorizer)
+// Spec: SQLite C API
+//
+//   sqlite3_set_authorizer(db, xAuth, pUserData)
+//
+// The authorizer callback runs during statement preparation for every
+// schema-touching operation.  It returns one of:
+//   SQLITE_OK     = 0   → allow
+//   SQLITE_DENY   = 1   → reject (prepare fails with SQLITE_AUTH)
+//   SQLITE_IGNORE = 2   → allow but suppress results (READ only)
+//
+// Complements `auth/` (multi-hook dispatch + action taxonomy) with
+// the public-facing install / replace / invoke slot.
+//
+// Submodules:
+//   * `decision`  — Decision sum w/ numeric mapping
+//   * `engine`    — single-slot installer + audit counters
+// =============================================================================
+
+module core.database.sqlite.native.authorizer_api;
+
+public module decision;
+public module engine;

@@ -1,0 +1,29 @@
+// =============================================================================
+// database_file_object/handle.vr — FileObjectHandle
+// =============================================================================
+// Spec: SQLite C API
+// =============================================================================
+
+module core.database.sqlite.native.database_file_object.handle;
+
+mount core.*;
+mount base.{Bool, Text};
+
+public type FileObjectHandle is {
+    schema: Text,
+    /// Opaque sqlite3_file* address.  0 means "no file backing"
+    /// (e.g. :memory:, temp, or missing schema).
+    file_ptr: Int64,
+}
+
+public fn new_handle(schema: Text, file_ptr: Int64) -> FileObjectHandle {
+    FileObjectHandle { schema: schema, file_ptr: file_ptr }
+}
+
+public fn null_handle() -> FileObjectHandle {
+    FileObjectHandle { schema: "".clone(), file_ptr: 0 as Int64 }
+}
+
+public fn is_null(h: &FileObjectHandle) -> Bool {
+    h.file_ptr == (0 as Int64)
+}

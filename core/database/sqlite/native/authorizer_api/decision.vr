@@ -1,0 +1,48 @@
+// =============================================================================
+// authorizer_api/decision.vr — Decision sum
+// =============================================================================
+// Spec: SQLite C API
+// =============================================================================
+
+module core.database.sqlite.native.authorizer_api.decision;
+
+mount core.*;
+mount base.{Bool, Text};
+
+public const SQLITE_OK: Int     = 0;
+public const SQLITE_DENY: Int   = 1;
+public const SQLITE_IGNORE: Int = 2;
+
+public type Decision is
+      DOk
+    | DDeny
+    | DIgnore;
+
+public fn decision_numeric(d: &Decision) -> Int {
+    match d {
+        DOk     => SQLITE_OK,
+        DDeny   => SQLITE_DENY,
+        DIgnore => SQLITE_IGNORE,
+    }
+}
+
+public fn decision_name(d: &Decision) -> Text {
+    match d {
+        DOk     => "SQLITE_OK".clone(),
+        DDeny   => "SQLITE_DENY".clone(),
+        DIgnore => "SQLITE_IGNORE".clone(),
+    }
+}
+
+public fn from_numeric(n: Int) -> Decision {
+    if n == SQLITE_DENY   { return DDeny; }
+    if n == SQLITE_IGNORE { return DIgnore; }
+    DOk
+}
+
+public fn blocks_prepare(d: &Decision) -> Bool {
+    match d {
+        DDeny => true,
+        _ => false,
+    }
+}

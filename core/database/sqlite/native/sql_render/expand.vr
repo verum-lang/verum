@@ -1,0 +1,146 @@
+// =============================================================================
+// sql_render/expand.vr — bind-placeholder substitution
+// =============================================================================
+// Spec: SQLite C API
+//
+// Scans the SQL text byte-by-byte; each placeholder is replaced with
+// the rendered literal via the caller-supplied lookup closure.
+// Inside quoted strings / identifiers the scanner passes bytes
+// through verbatim (matches SQLite's expand path).
+// =============================================================================
+
+module core.database.sqlite.native.sql_render.expand;
+
+mount core.*;
+mount base.{Bool, Maybe, Text};
+mount collections.List;
+mount core.database.sqlite.native.sql_render.literal.{
+    RenderLiteral, render_literal,
+};
+
+public type BoundValue is {
+    /// 1-based bind index as reported by sqlite3_bind_parameter_index.
+    index: Int,
+    value: RenderLiteral,
+}
+
+public fn new_bound(index: Int, value: RenderLiteral) -> BoundValue {
+    BoundValue { index: index, value: value }
+}
+
+fn is_ident_byte(b: u8) -> Bool {
+    (b >= (0x41 as u8) && b <= (0x5A as u8))
+        || (b >= (0x61 as u8) && b <= (0x7A as u8))
+        || (b >= (0x30 as u8) && b <= (0x39 as u8))
+        || b == (0x5F as u8)
+}
+
+fn parse_digits(bytes: &List<u8>, start: Int) -> Int {
+    let mut i: Int = start;
+    let mut out: Int = 0;
+    while i < bytes.len() {
+        let b = bytes[i];
+        if b < (0x30 as u8) || b > (0x39 as u8) { break; }
+        out = (out * 10) + ((b - (0x30 as u8)) as Int);
+        i = i + 1;
+    }
+    out
+}
+
+fn find_by_index(bindings: &List<BoundValue>, index: Int) -> Maybe<RenderLiteral> {
+    let mut i: Int = 0;
+    while i < bindings.len() {
+        let b = bindings.get(i);
+        if b.index == index {
+            return Maybe.Some(clone_literal(&b.value));
+        }
+        i = i + 1;
+    }
+    Maybe.None
+}
+
+fn clone_literal(l: &RenderLiteral) -> RenderLiteral {
+    match l {
+        core.database.sqlite.native.sql_render.literal.RlNull    => core.database.sqlite.native.sql_render.literal.RlNull,
+        core.database.sqlite.native.sql_render.literal.RlInt(n)  => core.database.sqlite.native.sql_render.literal.RlInt(*n),
+        core.database.sqlite.native.sql_render.literal.RlReal(f) => core.database.sqlite.native.sql_render.literal.RlReal(*f),
+        core.database.sqlite.native.sql_render.literal.RlText(t) => core.database.sqlite.native.sql_render.literal.RlText(t.clone()),
+        core.database.sqlite.native.sql_render.literal.RlBlob(b) => core.database.sqlite.native.sql_render.literal.RlBlob(b.clone()),
+    }
+}
+
+/// Expand placeholders.  Positional `?` uses a running counter;
+/// explicit `?NNN` uses the embedded index.  Named placeholders are
+/// not resolved here — the caller must map them to numeric indices
+/// first and feed the numeric form.
+public fn expand(sql: &Text, bindings: &List<BoundValue>) -> Text {
+    let bs = sql.as_bytes();
+    let mut out = "".clone();
+    let mut positional: Int = 0;
+    let mut i: Int = 0;
+    while i < bs.len() {
+        let b = bs[i];
+        if b == (0x27 as u8) {
+            // Single-quoted string — copy through to matching quote.
+            out.push_byte(b);
+            i = i + 1;
+            while i < bs.len() {
+                let c = bs[i];
+                out.push_byte(c);
+                i = i + 1;
+                if c == (0x27 as u8) { break; }
+            }
+            continue;
+        }
+        if b == (0x22 as u8) {
+            out.push_byte(b);
+            i = i + 1;
+            while i < bs.len() {
+                let c = bs[i];
+                out.push_byte(c);
+                i = i + 1;
+                if c == (0x22 as u8) { break; }
+            }
+            continue;
+        }
+        if b == (0x3F as u8) {
+            let mut index = positional + 1;
+            if i + 1 < bs.len() {
+                let nxt = bs[i + 1];
+                if nxt >= (0x30 as u8) && nxt <= (0x39 as u8) {
+                    index = parse_digits(&bytes_to_list(bs), i + 1);
+                    // Skip the digit run.
+                    let mut j = i + 1;
+                    while j < bs.len()
+                          && bs[j] >= (0x30 as u8)
+                          && bs[j] <= (0x39 as u8) { j = j + 1; }
+                    i = j;
+                    match find_by_index(bindings, index) {
+                        Maybe.Some(lit) => render_literal(&mut out, &lit),
+                        Maybe.None      => {
+                            out.push_byte(0x3F as u8);
+                        }
+                    }
+                    continue;
+                }
+            }
+            positional = positional + 1;
+            match find_by_index(bindings, index) {
+                Maybe.Some(lit) => render_literal(&mut out, &lit),
+                Maybe.None      => out.push_byte(0x3F as u8),
+            }
+            i = i + 1;
+            continue;
+        }
+        out.push_byte(b);
+        i = i + 1;
+    }
+    out
+}
+
+fn bytes_to_list(bytes: &List<u8>) -> List<u8> {
+    let mut out: List<u8> = List.new();
+    let mut i: Int = 0;
+    while i < bytes.len() { out.push(bytes[i]); i = i + 1; }
+    out
+}

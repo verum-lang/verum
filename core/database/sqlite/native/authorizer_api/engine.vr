@@ -1,0 +1,70 @@
+// =============================================================================
+// authorizer_api/engine.vr — single-slot installer + audit counters
+// =============================================================================
+// Spec: SQLite C API
+// =============================================================================
+
+module core.database.sqlite.native.authorizer_api.engine;
+
+mount core.*;
+mount base.{Bool, Maybe, Text};
+mount core.database.sqlite.native.authorizer_api.decision.{
+    Decision, DOk, DDeny, DIgnore, blocks_prepare,
+};
+
+public type AuthSlot is {
+    tag: Text,
+    /// Opaque user-data pointer handle; 0 ⇒ no authorizer installed.
+    user_data: Int64,
+}
+
+public fn empty_slot() -> AuthSlot {
+    AuthSlot { tag: "".clone(), user_data: 0 as Int64 }
+}
+
+public fn is_installed(s: &AuthSlot) -> Bool {
+    s.user_data != (0 as Int64)
+}
+
+public type AuthorizerEngine is {
+    slot: AuthSlot,
+    calls_observed: Int64,
+    denies: Int64,
+    ignores: Int64,
+}
+
+public fn new_engine() -> AuthorizerEngine {
+    AuthorizerEngine {
+        slot: empty_slot(),
+        calls_observed: 0 as Int64,
+        denies: 0 as Int64,
+        ignores: 0 as Int64,
+    }
+}
+
+implement AuthorizerEngine {
+    pub fn sqlite3_set_authorizer(&mut self, slot: AuthSlot) {
+        self.slot = slot;
+    }
+
+    pub fn clear(&mut self) {
+        self.slot = empty_slot();
+    }
+
+    pub fn authorizer_installed(&self) -> Bool { is_installed(&self.slot) }
+
+    /// Observe an authorizer verdict — used by callers that feed raw
+    /// xAuth return values through this engine.
+    pub fn observe(&mut self, d: &Decision) {
+        self.calls_observed = self.calls_observed + (1 as Int64);
+        match d {
+            DDeny   => self.denies = self.denies + (1 as Int64),
+            DIgnore => self.ignores = self.ignores + (1 as Int64),
+            _ => {}
+        }
+    }
+
+    pub fn should_reject_prepare(&self, d: &Decision) -> Bool {
+        blocks_prepare(d)
+    }
+}

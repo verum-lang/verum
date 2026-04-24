@@ -1,0 +1,27 @@
+// =============================================================================
+// core/database/sqlite/native/sql_render/mod.vr
+// =============================================================================
+// Layer: 7 (façade — sqlite3_expanded_sql / _normalized_sql implementation)
+// Spec: SQLite C API
+//
+// Two transformations share a scanner core:
+//
+//   * EXPAND     — replace each bind placeholder (? / ?NNN / :name / …)
+//                   with a literal rendered from the bound value.
+//   * NORMALIZE  — replace every LITERAL (including bound values) with
+//                   `?`, collapse runs of whitespace, and uppercase the
+//                   keyword tokens.  Used by query-plan signatures.
+//
+// Both transforms preserve SQL strings + identifiers verbatim.
+//
+// Submodules:
+//   * `literal`  — RenderLiteral sum (Int / Real / Text / Blob / Null)
+//   * `expand`   — per-placeholder substitution
+//   * `normalize` — literal → `?` + whitespace canonicalisation
+// =============================================================================
+
+module core.database.sqlite.native.sql_render;
+
+public module literal;
+public module expand;
+public module normalize;

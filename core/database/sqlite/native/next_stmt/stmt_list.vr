@@ -1,0 +1,53 @@
+// =============================================================================
+// next_stmt/stmt_list.vr — live-statement registry
+// =============================================================================
+// Spec: SQLite C API
+//
+// Per-connection insertion-ordered list of live statement ids.
+// Finalized statements are removed immediately.
+// =============================================================================
+
+module core.database.sqlite.native.next_stmt.stmt_list;
+
+mount core.*;
+mount base.{Bool};
+mount collections.List;
+
+public type StmtList is {
+    ids: List<Int64>,
+}
+
+public fn new_list() -> StmtList {
+    StmtList { ids: List.new() }
+}
+
+implement StmtList {
+    pub fn register(&mut self, id: Int64) -> Bool {
+        if self.contains(id) { return false; }
+        self.ids.push(id);
+        true
+    }
+
+    pub fn finalize(&mut self, id: Int64) -> Bool {
+        let mut i: Int = 0;
+        while i < self.ids.len() {
+            if *self.ids.get(i) == id {
+                let _ = self.ids.remove(i);
+                return true;
+            }
+            i = i + 1;
+        }
+        false
+    }
+
+    pub fn contains(&self, id: Int64) -> Bool {
+        let mut i: Int = 0;
+        while i < self.ids.len() {
+            if *self.ids.get(i) == id { return true; }
+            i = i + 1;
+        }
+        false
+    }
+
+    pub fn len(&self) -> Int { self.ids.len() }
+}

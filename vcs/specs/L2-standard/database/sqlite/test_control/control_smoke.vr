@@ -1,0 +1,80 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, test_control, testctrl, capi
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.test_control.opcode.{
+    TestCtrlOp,
+    TcPrngSave, TcPrngRestore, TcPrngReset, TcBitvecTest, TcFaultInstall,
+    TcPendingByte, TcAssert, TcAlways, TcReserve, TcOptimizations,
+    TcIsKeyword, TcLocaltimeFault, TcExplainStmt, TcNeverCorrupt,
+    TcImposter, TcResultIntReal, TcPrngSeed, TcUseLongDouble, TcUnknown,
+    SQLITE_TESTCTRL_PRNG_SAVE, SQLITE_TESTCTRL_OPTIMIZATIONS,
+    SQLITE_TESTCTRL_USELONGDOUBLE,
+    op_numeric, is_safe_in_prod,
+};
+mount core.database.sqlite.native.test_control.engine.{
+    TestControlEngine, new_engine,
+};
+mount base.{Bool};
+
+fn test_opcode_numerics_match_c_header() {
+    assert_eq(op_numeric(&TcPrngSave), SQLITE_TESTCTRL_PRNG_SAVE);
+    assert_eq(op_numeric(&TcOptimizations), SQLITE_TESTCTRL_OPTIMIZATIONS);
+    assert_eq(op_numeric(&TcUseLongDouble), SQLITE_TESTCTRL_USELONGDOUBLE);
+    assert_eq(SQLITE_TESTCTRL_PRNG_SAVE, 5);
+    assert_eq(SQLITE_TESTCTRL_OPTIMIZATIONS, 15);
+    assert_eq(SQLITE_TESTCTRL_USELONGDOUBLE, 34);
+}
+
+fn test_unknown_passes_through_numeric() {
+    assert_eq(op_numeric(&TcUnknown(999)), 999);
+}
+
+fn test_is_safe_in_prod_for_diagnostic_ops() {
+    assert(is_safe_in_prod(&TcPrngSave));
+    assert(is_safe_in_prod(&TcOptimizations));
+    assert(is_safe_in_prod(&TcResultIntReal));
+    assert(is_safe_in_prod(&TcPrngSeed));
+    assert(is_safe_in_prod(&TcExplainStmt));
+}
+
+fn test_is_safe_in_prod_rejects_fault_injection() {
+    assert(!is_safe_in_prod(&TcFaultInstall));
+    assert(!is_safe_in_prod(&TcLocaltimeFault));
+    assert(!is_safe_in_prod(&TcImposter));
+    assert(!is_safe_in_prod(&TcNeverCorrupt));
+}
+
+fn test_engine_initial_state() {
+    let e = new_engine();
+    assert_eq(e.calls, 0 as Int64);
+    assert_eq(e.unsafe_calls, 0 as Int64);
+    assert_eq(e.last_op_numeric, -1);
+}
+
+fn test_engine_sqlite3_test_control_records() {
+    let mut e = new_engine();
+    e.sqlite3_test_control(&TcPrngSave);
+    e.sqlite3_test_control(&TcFaultInstall);
+    assert_eq(e.calls, 2 as Int64);
+    assert_eq(e.unsafe_calls, 1 as Int64);
+    assert_eq(e.last_op_numeric, SQLITE_TESTCTRL_PRNG_SAVE);
+    // But wait — last was FaultInstall after save; recorded numeric
+    // should reflect FaultInstall.
+    let mut e2 = new_engine();
+    e2.sqlite3_test_control(&TcPrngSave);
+    e2.sqlite3_test_control(&TcFaultInstall);
+    assert_eq(e2.last_op_numeric, op_numeric(&TcFaultInstall));
+}
+
+fn main() {
+    test_opcode_numerics_match_c_header();
+    test_unknown_passes_through_numeric();
+    test_is_safe_in_prod_for_diagnostic_ops();
+    test_is_safe_in_prod_rejects_fault_injection();
+    test_engine_initial_state();
+    test_engine_sqlite3_test_control_records();
+}

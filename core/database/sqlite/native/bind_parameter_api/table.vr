@@ -1,0 +1,49 @@
+// =============================================================================
+// bind_parameter_api/table.vr — per-stmt parameter table
+// =============================================================================
+// Spec: SQLite C API
+// =============================================================================
+
+module core.database.sqlite.native.bind_parameter_api.table;
+
+mount core.*;
+mount base.{Bool, Maybe, Text};
+mount collections.List;
+mount core.database.sqlite.native.bind_parameter_api.descriptor.{
+    ParamSpec, spec_name,
+};
+
+public type ParamTable is {
+    params: List<ParamSpec>,
+}
+
+public fn new_table() -> ParamTable {
+    ParamTable { params: List.new() }
+}
+
+implement ParamTable {
+    pub fn push(&mut self, p: ParamSpec) { self.params.push(p); }
+
+    pub fn sqlite3_bind_parameter_count(&self) -> Int { self.params.len() }
+
+    /// 1-based index → name or None.
+    pub fn sqlite3_bind_parameter_name(&self, index: Int) -> Maybe<Text> {
+        if index <= 0 || index > self.params.len() { return Maybe.None; }
+        spec_name(self.params.get(index - 1))
+    }
+
+    /// Look up by name (with leading sigil); returns 1-based index or 0.
+    pub fn sqlite3_bind_parameter_index(&self, name: &Text) -> Int {
+        let mut i: Int = 0;
+        while i < self.params.len() {
+            match spec_name(self.params.get(i)) {
+                Maybe.Some(found) => {
+                    if found == *name { return i + 1; }
+                }
+                Maybe.None => {}
+            }
+            i = i + 1;
+        }
+        0
+    }
+}

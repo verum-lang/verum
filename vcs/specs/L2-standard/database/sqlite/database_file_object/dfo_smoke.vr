@@ -1,0 +1,65 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, database_file_object, capi
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.database_file_object.handle.{
+    FileObjectHandle, new_handle, null_handle, is_null,
+};
+mount core.database.sqlite.native.database_file_object.registry.{
+    FileObjectRegistry, new_registry,
+};
+mount base.{Bool};
+
+fn test_null_handle_is_null() {
+    let h = null_handle();
+    assert(is_null(&h));
+}
+
+fn test_non_zero_handle_not_null() {
+    let h = new_handle("main".clone(), 42 as Int64);
+    assert(!is_null(&h));
+}
+
+fn test_registry_register_unique() {
+    let mut r = new_registry();
+    assert(r.register(new_handle("main".clone(), 42 as Int64)));
+    assert(!r.register(new_handle("main".clone(), 99 as Int64)));
+    assert_eq(r.len(), 1);
+}
+
+fn test_registry_unregister() {
+    let mut r = new_registry();
+    let _ = r.register(new_handle("main".clone(), 42 as Int64));
+    assert(r.unregister(&"main".clone()));
+    assert_eq(r.len(), 0);
+    assert(!r.unregister(&"main".clone()));
+}
+
+fn test_registry_lookup_hit() {
+    let mut r = new_registry();
+    let _ = r.register(new_handle("main".clone(), 42 as Int64));
+    let _ = r.register(new_handle("temp".clone(), 77 as Int64));
+    let h = r.sqlite3_database_file_object(&"main".clone());
+    assert(!is_null(&h));
+    assert_eq(h.file_ptr, 42 as Int64);
+    let h2 = r.sqlite3_database_file_object(&"temp".clone());
+    assert_eq(h2.file_ptr, 77 as Int64);
+}
+
+fn test_registry_lookup_miss_returns_null() {
+    let r = new_registry();
+    let h = r.sqlite3_database_file_object(&"missing".clone());
+    assert(is_null(&h));
+}
+
+fn main() {
+    test_null_handle_is_null();
+    test_non_zero_handle_not_null();
+    test_registry_register_unique();
+    test_registry_unregister();
+    test_registry_lookup_hit();
+    test_registry_lookup_miss_returns_null();
+}

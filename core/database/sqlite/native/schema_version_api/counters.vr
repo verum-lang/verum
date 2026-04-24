@@ -1,0 +1,38 @@
+// =============================================================================
+// schema_version_api/counters.vr — the three slots
+// =============================================================================
+// Spec: SQLite file format §6.1
+// =============================================================================
+
+module core.database.sqlite.native.schema_version_api.counters;
+
+mount core.*;
+mount base.{Bool};
+
+public type HeaderCounters is {
+    schema_version: Int,
+    user_version: Int,
+    application_id: Int,
+}
+
+public fn fresh_counters() -> HeaderCounters {
+    HeaderCounters {
+        schema_version: 0,
+        user_version: 0,
+        application_id: 0,
+    }
+}
+
+/// Well-known magic numbers that identify on-disk formats built on
+/// top of SQLite.  Embedders may add their own.
+public const APPID_SQLAR: Int    = 0x53514C41;   // "SQLA" big-endian
+public const APPID_MBTILES: Int  = 0x4D504D4E;   // "MPMN"
+public const APPID_FDO: Int      = 0x46444F20;   // "FDO "
+public const APPID_GPKG: Int     = 0x47504B47;   // "GPKG"
+
+public fn is_known_appid(appid: Int) -> Bool {
+    appid == APPID_SQLAR
+        || appid == APPID_MBTILES
+        || appid == APPID_FDO
+        || appid == APPID_GPKG
+}

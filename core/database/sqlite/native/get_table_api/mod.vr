@@ -1,0 +1,22 @@
+// =============================================================================
+// core/database/sqlite/native/get_table_api/mod.vr
+// =============================================================================
+// Layer: 7 (façade — sqlite3_get_table / _free_table)
+// Spec: SQLite C API (legacy convenience).
+//
+//   sqlite3_get_table(db, zSQL, &pazResult, &nRow, &nColumn, &pzErrmsg)
+//       → malloc'd 2-D result array (rows × cols, row 0 = column names)
+//   sqlite3_free_table(pazResult)
+//
+// Superseded by sqlite3_exec but preserved in the API surface for
+// legacy embedders.
+//
+// Submodules:
+//   * `matrix`  — ResultMatrix: header row + body rows
+//   * `engine`  — fill / free helpers
+// =============================================================================
+
+module core.database.sqlite.native.get_table_api;
+
+public module matrix;
+public module engine;

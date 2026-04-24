@@ -1,0 +1,70 @@
+// =============================================================================
+// schema_version_api/engine.vr — set/get/bump helpers
+// =============================================================================
+// Spec: SQLite file format §6.1
+//
+// Semantics:
+//   * schema_version is incremented by the engine on every DDL commit.
+//   * user_version is set explicitly via `PRAGMA user_version = N` —
+//     setting requires a writable DB.
+//   * application_id is set via `PRAGMA application_id = N`, and is
+//     persisted verbatim.
+//
+// The engine records a readonly flag mirroring the connection state.
+// =============================================================================
+
+module core.database.sqlite.native.schema_version_api.engine;
+
+mount core.*;
+mount base.{Bool};
+mount core.database.sqlite.native.schema_version_api.counters.{
+    HeaderCounters, fresh_counters,
+};
+
+public type SetOutcome is
+      SoOk
+    | SoReadOnly;
+
+public type VersionEngine is {
+    counters: HeaderCounters,
+    readonly: Bool,
+    ddl_commits: Int64,
+}
+
+public fn new_engine(readonly: Bool) -> VersionEngine {
+    VersionEngine {
+        counters: fresh_counters(),
+        readonly: readonly,
+        ddl_commits: 0 as Int64,
+    }
+}
+
+implement VersionEngine {
+    pub fn schema_version(&self) -> Int { self.counters.schema_version }
+    pub fn user_version(&self) -> Int { self.counters.user_version }
+    pub fn application_id(&self) -> Int { self.counters.application_id }
+
+    /// Called by the DDL commit path — bumps schema_version.  Returns
+    /// the new value.  No-op (and returns unchanged value) when read-only.
+    pub fn bump_schema_version(&mut self) -> Int {
+        if self.readonly { return self.counters.schema_version; }
+        self.counters.schema_version = self.counters.schema_version + 1;
+        self.ddl_commits = self.ddl_commits + (1 as Int64);
+        self.counters.schema_version
+    }
+
+    pub fn set_user_version(&mut self, v: Int) -> SetOutcome {
+        if self.readonly { return SoReadOnly; }
+        self.counters.user_version = v;
+        SoOk
+    }
+
+    pub fn set_application_id(&mut self, id: Int) -> SetOutcome {
+        if self.readonly { return SoReadOnly; }
+        self.counters.application_id = id;
+        SoOk
+    }
+
+    pub fn upgrade_writable(&mut self) { self.readonly = false; }
+    pub fn downgrade_readonly(&mut self) { self.readonly = true; }
+}

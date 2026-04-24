@@ -1,0 +1,64 @@
+// =============================================================================
+// database_file_object/registry.vr — per-connection schema→file map
+// =============================================================================
+// Spec: SQLite C API
+// =============================================================================
+
+module core.database.sqlite.native.database_file_object.registry;
+
+mount core.*;
+mount base.{Bool, Text};
+mount collections.List;
+mount core.database.sqlite.native.database_file_object.handle.{
+    FileObjectHandle, null_handle,
+};
+
+public type FileObjectRegistry is {
+    handles: List<FileObjectHandle>,
+}
+
+public fn new_registry() -> FileObjectRegistry {
+    FileObjectRegistry { handles: List.new() }
+}
+
+implement FileObjectRegistry {
+    pub fn register(&mut self, h: FileObjectHandle) -> Bool {
+        let mut i: Int = 0;
+        while i < self.handles.len() {
+            if self.handles.get(i).schema == h.schema { return false; }
+            i = i + 1;
+        }
+        self.handles.push(h);
+        true
+    }
+
+    pub fn unregister(&mut self, schema: &Text) -> Bool {
+        let mut i: Int = 0;
+        while i < self.handles.len() {
+            if self.handles.get(i).schema == *schema {
+                let _ = self.handles.remove(i);
+                return true;
+            }
+            i = i + 1;
+        }
+        false
+    }
+
+    /// Returns a null handle if the schema is unknown or is memdb.
+    pub fn sqlite3_database_file_object(&self, schema: &Text) -> FileObjectHandle {
+        let mut i: Int = 0;
+        while i < self.handles.len() {
+            if self.handles.get(i).schema == *schema {
+                let h = self.handles.get(i);
+                return FileObjectHandle {
+                    schema: h.schema.clone(),
+                    file_ptr: h.file_ptr,
+                };
+            }
+            i = i + 1;
+        }
+        null_handle()
+    }
+
+    pub fn len(&self) -> Int { self.handles.len() }
+}

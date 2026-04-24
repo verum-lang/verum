@@ -1,0 +1,118 @@
+// =============================================================================
+// test_control/opcode.vr — SQLITE_TESTCTRL_* opcodes
+// =============================================================================
+// Spec: SQLite C API — sqlite3_test_control.
+// =============================================================================
+
+module core.database.sqlite.native.test_control.opcode;
+
+mount core.*;
+mount base.{Text};
+
+public const SQLITE_TESTCTRL_PRNG_SAVE: Int         = 5;
+public const SQLITE_TESTCTRL_PRNG_RESTORE: Int      = 6;
+public const SQLITE_TESTCTRL_PRNG_RESET: Int        = 7;
+public const SQLITE_TESTCTRL_BITVEC_TEST: Int       = 8;
+public const SQLITE_TESTCTRL_FAULT_INSTALL: Int     = 9;
+public const SQLITE_TESTCTRL_BENIGN_MALLOC_HOOKS: Int = 10;
+public const SQLITE_TESTCTRL_PENDING_BYTE: Int      = 11;
+public const SQLITE_TESTCTRL_ASSERT: Int            = 12;
+public const SQLITE_TESTCTRL_ALWAYS: Int            = 13;
+public const SQLITE_TESTCTRL_RESERVE: Int           = 14;
+public const SQLITE_TESTCTRL_OPTIMIZATIONS: Int     = 15;
+public const SQLITE_TESTCTRL_ISKEYWORD: Int         = 16;
+public const SQLITE_TESTCTRL_SCRATCHMALLOC: Int     = 17;
+public const SQLITE_TESTCTRL_LOCALTIME_FAULT: Int   = 18;
+public const SQLITE_TESTCTRL_EXPLAIN_STMT: Int      = 19;
+public const SQLITE_TESTCTRL_ONCE_RESET_THRESHOLD: Int = 19;
+public const SQLITE_TESTCTRL_NEVER_CORRUPT: Int     = 20;
+public const SQLITE_TESTCTRL_VDBE_COVERAGE: Int     = 21;
+public const SQLITE_TESTCTRL_BYTEORDER: Int         = 22;
+public const SQLITE_TESTCTRL_ISINIT: Int            = 23;
+public const SQLITE_TESTCTRL_SORTER_MMAP: Int       = 24;
+public const SQLITE_TESTCTRL_IMPOSTER: Int          = 25;
+public const SQLITE_TESTCTRL_PARSER_COVERAGE: Int   = 26;
+public const SQLITE_TESTCTRL_RESULT_INTREAL: Int    = 27;
+public const SQLITE_TESTCTRL_PRNG_SEED: Int         = 28;
+public const SQLITE_TESTCTRL_EXTRA_SCHEMA_CHECKS: Int = 29;
+public const SQLITE_TESTCTRL_SEEK_COUNT: Int        = 30;
+public const SQLITE_TESTCTRL_TRACEFLAGS: Int        = 31;
+public const SQLITE_TESTCTRL_TUNE: Int              = 32;
+public const SQLITE_TESTCTRL_LOGEST: Int            = 33;
+public const SQLITE_TESTCTRL_USELONGDOUBLE: Int     = 34;
+
+public type TestCtrlOp is
+      TcPrngSave
+    | TcPrngRestore
+    | TcPrngReset
+    | TcBitvecTest
+    | TcFaultInstall
+    | TcPendingByte
+    | TcAssert
+    | TcAlways
+    | TcReserve
+    | TcOptimizations
+    | TcIsKeyword
+    | TcLocaltimeFault
+    | TcExplainStmt
+    | TcNeverCorrupt
+    | TcVdbeCoverage
+    | TcByteOrder
+    | TcIsInit
+    | TcSorterMmap
+    | TcImposter
+    | TcParserCoverage
+    | TcResultIntReal
+    | TcPrngSeed
+    | TcExtraSchemaChecks
+    | TcSeekCount
+    | TcTraceFlags
+    | TcTune
+    | TcLogEst
+    | TcUseLongDouble
+    | TcUnknown(Int);
+
+public fn op_numeric(op: &TestCtrlOp) -> Int {
+    match op {
+        TcPrngSave            => SQLITE_TESTCTRL_PRNG_SAVE,
+        TcPrngRestore         => SQLITE_TESTCTRL_PRNG_RESTORE,
+        TcPrngReset           => SQLITE_TESTCTRL_PRNG_RESET,
+        TcBitvecTest          => SQLITE_TESTCTRL_BITVEC_TEST,
+        TcFaultInstall        => SQLITE_TESTCTRL_FAULT_INSTALL,
+        TcPendingByte         => SQLITE_TESTCTRL_PENDING_BYTE,
+        TcAssert              => SQLITE_TESTCTRL_ASSERT,
+        TcAlways              => SQLITE_TESTCTRL_ALWAYS,
+        TcReserve             => SQLITE_TESTCTRL_RESERVE,
+        TcOptimizations       => SQLITE_TESTCTRL_OPTIMIZATIONS,
+        TcIsKeyword           => SQLITE_TESTCTRL_ISKEYWORD,
+        TcLocaltimeFault      => SQLITE_TESTCTRL_LOCALTIME_FAULT,
+        TcExplainStmt         => SQLITE_TESTCTRL_EXPLAIN_STMT,
+        TcNeverCorrupt        => SQLITE_TESTCTRL_NEVER_CORRUPT,
+        TcVdbeCoverage        => SQLITE_TESTCTRL_VDBE_COVERAGE,
+        TcByteOrder           => SQLITE_TESTCTRL_BYTEORDER,
+        TcIsInit              => SQLITE_TESTCTRL_ISINIT,
+        TcSorterMmap          => SQLITE_TESTCTRL_SORTER_MMAP,
+        TcImposter            => SQLITE_TESTCTRL_IMPOSTER,
+        TcParserCoverage      => SQLITE_TESTCTRL_PARSER_COVERAGE,
+        TcResultIntReal       => SQLITE_TESTCTRL_RESULT_INTREAL,
+        TcPrngSeed            => SQLITE_TESTCTRL_PRNG_SEED,
+        TcExtraSchemaChecks   => SQLITE_TESTCTRL_EXTRA_SCHEMA_CHECKS,
+        TcSeekCount           => SQLITE_TESTCTRL_SEEK_COUNT,
+        TcTraceFlags          => SQLITE_TESTCTRL_TRACEFLAGS,
+        TcTune                => SQLITE_TESTCTRL_TUNE,
+        TcLogEst              => SQLITE_TESTCTRL_LOGEST,
+        TcUseLongDouble       => SQLITE_TESTCTRL_USELONGDOUBLE,
+        TcUnknown(n)          => *n,
+    }
+}
+
+public fn is_safe_in_prod(op: &TestCtrlOp) -> base.Bool {
+    // Most TESTCTRL_* are production-safe read-only queries; the few
+    // that inject faults (FaultInstall, LocaltimeFault, Imposter,
+    // NeverCorrupt) must be avoided in real deployments.
+    match op {
+        TcFaultInstall | TcLocaltimeFault | TcImposter | TcNeverCorrupt
+        | TcBitvecTest | TcAssert | TcAlways => false,
+        _ => true,
+    }
+}

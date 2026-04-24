@@ -316,3 +316,19 @@ public module scanstatus_v2;
 public module interrupt_deadline;
 // - cksm_file: SQLITE_FCNTL_CKSM_FILE + _RESERVE_BYTES — per-page checksum verify
 public module cksm_file;
+// - get_table_api: sqlite3_get_table / _free_table — legacy 2-D result matrix convenience
+public module get_table_api;
+// - next_stmt: sqlite3_next_stmt — iterate a connection's live prepared statements
+public module next_stmt;
+// - bind_parameter_api: sqlite3_bind_parameter_count / _name / _index — bind-param reflection
+public module bind_parameter_api;
+// - authorizer_api: sqlite3_set_authorizer — install + OK/DENY/IGNORE verdict dispatch
+public module authorizer_api;
+// - test_control: sqlite3_test_control — SQLITE_TESTCTRL_* opcode taxonomy
+public module test_control;
+// - database_file_object: sqlite3_database_file_object — per-schema VFS handle lookup
+public module database_file_object;
+// - sql_render: sqlite3_expanded_sql + _normalized_sql — expand/normalize engines
+public module sql_render;
+// - schema_version_api: schema_version / user_version / application_id — header counters
+public module schema_version_api;

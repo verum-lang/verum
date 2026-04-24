@@ -1,0 +1,79 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, next_stmt, iteration, capi
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.next_stmt.stmt_list.{
+    StmtList, new_list,
+};
+mount core.database.sqlite.native.next_stmt.engine.{
+    sqlite3_next_stmt, walk_all,
+};
+mount base.{Bool};
+
+fn noop(_id: Int64) {}
+
+fn test_empty_list_returns_zero() {
+    let l = new_list();
+    assert_eq(sqlite3_next_stmt(&l, 0 as Int64), 0 as Int64);
+}
+
+fn test_register_unique() {
+    let mut l = new_list();
+    assert(l.register(1 as Int64));
+    assert(!l.register(1 as Int64));
+    assert_eq(l.len(), 1);
+}
+
+fn test_first_via_zero() {
+    let mut l = new_list();
+    let _ = l.register(7 as Int64);
+    let _ = l.register(11 as Int64);
+    assert_eq(sqlite3_next_stmt(&l, 0 as Int64), 7 as Int64);
+}
+
+fn test_next_advances() {
+    let mut l = new_list();
+    let _ = l.register(7 as Int64);
+    let _ = l.register(11 as Int64);
+    let _ = l.register(13 as Int64);
+    assert_eq(sqlite3_next_stmt(&l, 7 as Int64), 11 as Int64);
+    assert_eq(sqlite3_next_stmt(&l, 11 as Int64), 13 as Int64);
+    assert_eq(sqlite3_next_stmt(&l, 13 as Int64), 0 as Int64);
+}
+
+fn test_missing_returns_zero() {
+    let mut l = new_list();
+    let _ = l.register(7 as Int64);
+    assert_eq(sqlite3_next_stmt(&l, 99 as Int64), 0 as Int64);
+}
+
+fn test_finalize_removes() {
+    let mut l = new_list();
+    let _ = l.register(7 as Int64);
+    let _ = l.register(11 as Int64);
+    assert(l.finalize(7 as Int64));
+    assert_eq(l.len(), 1);
+    assert(!l.finalize(7 as Int64));
+    assert_eq(sqlite3_next_stmt(&l, 0 as Int64), 11 as Int64);
+}
+
+fn test_walk_all_visits_every_entry() {
+    let mut l = new_list();
+    let _ = l.register(1 as Int64);
+    let _ = l.register(2 as Int64);
+    let _ = l.register(3 as Int64);
+    walk_all(&l, noop);
+}
+
+fn main() {
+    test_empty_list_returns_zero();
+    test_register_unique();
+    test_first_via_zero();
+    test_next_advances();
+    test_missing_returns_zero();
+    test_finalize_removes();
+    test_walk_all_visits_every_entry();
+}

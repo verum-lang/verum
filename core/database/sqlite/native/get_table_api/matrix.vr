@@ -1,0 +1,63 @@
+// =============================================================================
+// get_table_api/matrix.vr — ResultMatrix
+// =============================================================================
+// Spec: SQLite C API
+//
+// The classical layout flattens the matrix into a single array of
+// (nRow + 1) * nColumn strings, row 0 being the header.  Our
+// catalogue keeps the header explicit for type-checkability.
+// =============================================================================
+
+module core.database.sqlite.native.get_table_api.matrix;
+
+mount core.*;
+mount base.{Bool, Text};
+mount collections.List;
+
+public type ResultMatrix is {
+    header: List<Text>,              // column names
+    rows: List<List<Text>>,          // body; each inner list has `header.len()` entries
+    freed: Bool,
+}
+
+public fn empty_matrix() -> ResultMatrix {
+    ResultMatrix {
+        header: List.new(),
+        rows: List.new(),
+        freed: false,
+    }
+}
+
+public fn new_matrix(header: List<Text>) -> ResultMatrix {
+    ResultMatrix {
+        header: header,
+        rows: List.new(),
+        freed: false,
+    }
+}
+
+implement ResultMatrix {
+    pub fn n_column(&self) -> Int { self.header.len() }
+    pub fn n_row(&self) -> Int { self.rows.len() }
+
+    /// Total number of Text cells in the flattened SQLite layout =
+    /// (nRow + 1) * nColumn.
+    pub fn total_cells(&self) -> Int {
+        if self.header.len() == 0 { return 0; }
+        (self.rows.len() + 1) * self.header.len()
+    }
+
+    pub fn push_row(&mut self, row: List<Text>) -> Bool {
+        if row.len() != self.header.len() { return false; }
+        self.rows.push(row);
+        true
+    }
+
+    pub fn free(&mut self) {
+        self.freed = true;
+        self.header = List.new();
+        self.rows = List.new();
+    }
+
+    pub fn is_live(&self) -> Bool { !self.freed }
+}

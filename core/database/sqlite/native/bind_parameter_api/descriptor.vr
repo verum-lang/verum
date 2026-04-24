@@ -1,0 +1,69 @@
+// =============================================================================
+// bind_parameter_api/descriptor.vr — ParamSpec
+// =============================================================================
+// Spec: SQLite C API
+//
+// SQLite accepts four bind-parameter syntaxes:
+//   ?        — anonymous (index assigned in order of occurrence)
+//   ?NNN     — explicit index
+//   :name    — named
+//   @name    — named (alternate sigil)
+//   $name    — named (Tcl-style)
+// =============================================================================
+
+module core.database.sqlite.native.bind_parameter_api.descriptor;
+
+mount core.*;
+mount base.{Bool, Maybe, Text};
+
+public type ParamKind is
+      PkAnonymous
+    | PkQuestion(Int)          // ?NNN
+    | PkColon(Text)            // :name
+    | PkAt(Text)               // @name
+    | PkDollar(Text);          // $name
+
+public type ParamSpec is {
+    /// 1-based index as seen by sqlite3_bind_*.
+    index: Int,
+    kind: ParamKind,
+}
+
+public fn new_spec(index: Int, kind: ParamKind) -> ParamSpec {
+    ParamSpec { index: index, kind: kind }
+}
+
+public fn spec_name(s: &ParamSpec) -> Maybe<Text> {
+    match &s.kind {
+        PkAnonymous => Maybe.None,
+        PkQuestion(_) => Maybe.None,
+        PkColon(n) => {
+            let mut out = ":".clone();
+            push_text(&mut out, n);
+            Maybe.Some(out)
+        }
+        PkAt(n) => {
+            let mut out = "@".clone();
+            push_text(&mut out, n);
+            Maybe.Some(out)
+        }
+        PkDollar(n) => {
+            let mut out = "$".clone();
+            push_text(&mut out, n);
+            Maybe.Some(out)
+        }
+    }
+}
+
+fn push_text(dst: &mut Text, s: &Text) {
+    let bs = s.as_bytes();
+    let mut i: Int = 0;
+    while i < bs.len() { dst.push_byte(bs[i]); i = i + 1; }
+}
+
+public fn is_named(k: &ParamKind) -> Bool {
+    match k {
+        PkColon(_) | PkAt(_) | PkDollar(_) => true,
+        _ => false,
+    }
+}

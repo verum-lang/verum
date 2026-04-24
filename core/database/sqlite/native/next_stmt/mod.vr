@@ -1,0 +1,20 @@
+// =============================================================================
+// core/database/sqlite/native/next_stmt/mod.vr
+// =============================================================================
+// Layer: 7 (façade — sqlite3_next_stmt)
+// Spec: SQLite C API
+//
+//   sqlite3_next_stmt(db, pStmt) → next prepared stmt (or NULL)
+//
+// Walks a connection's live-statement list.  Passing `pStmt == NULL`
+// returns the first; passing the last stmt returns NULL.
+//
+// Submodules:
+//   * `stmt_list`  — ordered list of live stmt ids
+//   * `engine`     — cursor + next helper
+// =============================================================================
+
+module core.database.sqlite.native.next_stmt;
+
+public module stmt_list;
+public module engine;

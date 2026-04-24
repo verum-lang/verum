@@ -1,0 +1,44 @@
+// =============================================================================
+// get_table_api/engine.vr — C-API-aligned helpers
+// =============================================================================
+// Spec: SQLite C API
+// =============================================================================
+
+module core.database.sqlite.native.get_table_api.engine;
+
+mount core.*;
+mount base.{Bool, Maybe, Text};
+mount collections.List;
+mount core.database.sqlite.native.get_table_api.matrix.{
+    ResultMatrix, empty_matrix, new_matrix,
+};
+
+public type GetTableOutcome is
+      GtoOk(ResultMatrix)
+    | GtoError(Text);
+
+public fn is_ok(o: &GetTableOutcome) -> Bool {
+    match o {
+        GtoOk(_) => true,
+        _ => false,
+    }
+}
+
+public fn sqlite3_get_table(
+    header: List<Text>,
+    rows: List<List<Text>>,
+) -> GetTableOutcome {
+    let mut m = new_matrix(header);
+    let mut i: Int = 0;
+    while i < rows.len() {
+        if !m.push_row(rows.get(i).clone()) {
+            return GtoError("row/column count mismatch".clone());
+        }
+        i = i + 1;
+    }
+    GtoOk(m)
+}
+
+public fn sqlite3_free_table(m: &mut ResultMatrix) {
+    m.free();
+}
