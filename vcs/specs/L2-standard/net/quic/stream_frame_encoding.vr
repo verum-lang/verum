@@ -1,0 +1,98 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: quic, stream, frame, rfc9000_19_8
+// @timeout: 15000
+// @expected-exit: 0
+
+// RFC 9000 §19.8 STREAM frame: first byte is 0x08 | flags where
+// flags occupy the low 3 bits: 0x04 = OFF, 0x02 = LEN, 0x01 = FIN.
+// Our encoder always sets LEN (so PADDING can't glue onto the tail)
+// and conditionally sets OFF (offset != 0) + FIN.
+
+mount core.*;
+mount core.collections.List;
+mount core.net.quic.frame.{Frame, encode_frame, decode_all_frames, StreamFlags};
+
+fn stream_frame_with_fin_and_offset_has_all_bits_set() {
+    let data: List<Byte> = [0x68_u8, 0x69_u8];   // "hi"
+    let f = Frame.StreamFrame {
+        stream_id: 4_u64,
+        offset:    100_u64,
+        data:      data,
+        fin:       true,
+    };
+    let mut buf: List<Byte> = [];
+    let _ = encode_frame(&f, &mut buf);
+    // Type byte = 0x08 | OFF(0x04) | LEN(0x02) | FIN(0x01) = 0x0F.
+    assert(buf[0] == 0x0F_u8);
+}
+
+fn stream_frame_without_offset_clears_off_bit() {
+    let data: List<Byte> = [0x01_u8];
+    let f = Frame.StreamFrame {
+        stream_id: 0_u64,
+        offset:    0_u64,
+        data:      data,
+        fin:       false,
+    };
+    let mut buf: List<Byte> = [];
+    let _ = encode_frame(&f, &mut buf);
+    // Type byte = 0x08 | LEN(0x02) = 0x0A — OFF and FIN cleared.
+    assert(buf[0] == 0x0A_u8);
+}
+
+fn stream_frame_with_fin_only() {
+    let data: List<Byte> = [0x00_u8];
+    let f = Frame.StreamFrame {
+        stream_id: 8_u64,
+        offset:    0_u64,
+        data:      data,
+        fin:       true,
+    };
+    let mut buf: List<Byte> = [];
+    let _ = encode_frame(&f, &mut buf);
+    // Type byte = 0x08 | LEN(0x02) | FIN(0x01) = 0x0B.
+    assert(buf[0] == 0x0B_u8);
+}
+
+fn stream_frame_roundtrip_preserves_payload_and_fin() {
+    let data: List<Byte> = [0x01_u8, 0x02_u8, 0x03_u8, 0x04_u8];
+    let f = Frame.StreamFrame {
+        stream_id: 12_u64,
+        offset:    256_u64,
+        data:      data.clone(),
+        fin:       true,
+    };
+    let mut buf: List<Byte> = [];
+    let _ = encode_frame(&f, &mut buf);
+    let frames = decode_all_frames(&buf).unwrap();
+    assert(frames.len() == 1);
+    match &frames[0] {
+        Frame.StreamFrame { stream_id, offset, data: d, fin } => {
+            assert(stream_id == 12_u64);
+            assert(offset    == 256_u64);
+            assert(d.len()   == 4);
+            assert(fin       == true);
+        },
+        _ => panic("expected StreamFrame"),
+    }
+}
+
+fn stream_flags_type_constructible() {
+    let f = StreamFlags { has_offset: true, has_length: true, fin: false };
+    assert(f.has_offset);
+    assert(f.has_length);
+    assert(false == f.fin);
+}
+
+@main
+public fn main() -> Int {
+    stream_frame_with_fin_and_offset_has_all_bits_set();
+    stream_frame_without_offset_clears_off_bit();
+    stream_frame_with_fin_only();
+    stream_frame_roundtrip_preserves_payload_and_fin();
+    stream_flags_type_constructible();
+    print("RFC 9000 §19.8 STREAM frame encoding verified");
+    0
+}
