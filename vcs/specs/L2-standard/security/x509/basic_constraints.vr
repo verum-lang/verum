@@ -1,0 +1,69 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: x509, basic_constraints, rfc5280_4_2_1_9
+// @timeout: 15000
+// @expected-exit: 0
+
+// RFC 5280 §4.2.1.9 BasicConstraints:
+//
+//   BasicConstraints ::= SEQUENCE {
+//     cA                      BOOLEAN DEFAULT FALSE,
+//     pathLenConstraint       INTEGER (0..MAX) OPTIONAL
+//   }
+//
+//   * Only meaningful when `is_ca = true`; else path_len_constraint
+//     MUST be absent.
+//   * path_len_constraint = Some(n) means "at most n intermediate CAs
+//     below this one."
+
+mount core.*;
+mount core.security.x509.ext.basic_constraints.{BasicConstraints};
+
+fn leaf_cert_is_not_ca() {
+    let bc = BasicConstraints { is_ca: false, path_len_constraint: None };
+    assert(false == bc.is_ca);
+    match bc.path_len_constraint {
+        None => {},
+        _ => panic("leaf must not carry path_len"),
+    }
+}
+
+fn root_ca_has_no_path_len_limit() {
+    let bc = BasicConstraints { is_ca: true, path_len_constraint: None };
+    assert(bc.is_ca);
+    match bc.path_len_constraint {
+        None => {},
+        _ => panic("root CA with no path limit"),
+    }
+}
+
+fn intermediate_ca_enforces_path_len() {
+    // Intermediate that may be followed by at most ONE further CA:
+    let bc = BasicConstraints { is_ca: true, path_len_constraint: Some(1) };
+    assert(bc.is_ca);
+    match bc.path_len_constraint {
+        Some(n) => assert(n == 1),
+        None => panic("intermediate must carry path_len"),
+    }
+}
+
+fn path_len_zero_is_leaf_signer() {
+    // An intermediate with path_len = 0 may sign only end-entity
+    // certs below it (no further sub-CAs).
+    let bc = BasicConstraints { is_ca: true, path_len_constraint: Some(0) };
+    match bc.path_len_constraint {
+        Some(n) => assert(n == 0),
+        _ => panic("path_len=0 must be Some(0)"),
+    }
+}
+
+@main
+public fn main() -> Int {
+    leaf_cert_is_not_ca();
+    root_ca_has_no_path_len_limit();
+    intermediate_ca_enforces_path_len();
+    path_len_zero_is_leaf_signer();
+    print("RFC 5280 §4.2.1.9 BasicConstraints verified");
+    0
+}

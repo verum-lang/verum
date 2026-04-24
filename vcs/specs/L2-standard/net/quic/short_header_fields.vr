@@ -1,0 +1,93 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: quic, packet, short_header, rfc9000_17_3
+// @timeout: 15000
+// @expected-exit: 0
+
+// RFC 9000 §17.3 Short Header layout:
+//   bit 7: Header Form = 0 (short)
+//   bit 6: Fixed Bit = 1
+//   bit 5: Spin Bit
+//   bit 4..3: Reserved (MUST be 0 after header protection)
+//   bit 2: Key Phase
+//   bit 1..0: PN Length - 1
+
+mount core.*;
+mount core.collections.List;
+mount core.net.quic.packet.{ShortHeader};
+mount core.net.quic.connection_id.{ConnectionId};
+
+fn short_header_field_accessors() {
+    let dcid_bytes: List<Byte> = [0x01_u8, 0x02_u8, 0x03_u8, 0x04_u8];
+    let dcid = ConnectionId.from_bytes(dcid_bytes.as_slice()).unwrap();
+    let payload: List<Byte> = [0x00_u8; 32];
+    let h = ShortHeader {
+        first_byte:    0x40_u8,    // fixed bit set, all others clear
+        dcid:          dcid,
+        packet_number: 42_u32,
+        pn_len:        1_u8,
+        payload:       payload,
+    };
+    assert(h.dcid.len() == 4);
+    assert(h.packet_number == 42_u32);
+    assert(h.pn_len == 1_u8);
+    assert(h.payload.len() == 32);
+}
+
+fn first_byte_spin_bit_position() {
+    // Spin bit is bit 5 = 0x20.
+    let dcid = ConnectionId.empty();
+    let h_no_spin = ShortHeader {
+        first_byte: 0x40_u8,
+        dcid: dcid.clone(), packet_number: 0_u32, pn_len: 1_u8, payload: [],
+    };
+    let h_spin = ShortHeader {
+        first_byte: 0x60_u8,      // 0x40 | 0x20
+        dcid: dcid.clone(), packet_number: 0_u32, pn_len: 1_u8, payload: [],
+    };
+    assert((h_no_spin.first_byte & 0x20_u8) == 0_u8);
+    assert((h_spin.first_byte    & 0x20_u8) == 0x20_u8);
+}
+
+fn first_byte_key_phase_bit_position() {
+    // Key Phase is bit 2 = 0x04.
+    let dcid = ConnectionId.empty();
+    let h_kp0 = ShortHeader {
+        first_byte: 0x40_u8,
+        dcid: dcid.clone(), packet_number: 0_u32, pn_len: 1_u8, payload: [],
+    };
+    let h_kp1 = ShortHeader {
+        first_byte: 0x44_u8,
+        dcid: dcid.clone(), packet_number: 0_u32, pn_len: 1_u8, payload: [],
+    };
+    assert((h_kp0.first_byte & 0x04_u8) == 0_u8);
+    assert((h_kp1.first_byte & 0x04_u8) == 0x04_u8);
+}
+
+fn pn_len_encoding_2_lsb() {
+    // PN length encoded in bits 0-1 as (len - 1) per §17.3:
+    //   00 = 1 byte, 01 = 2, 10 = 3, 11 = 4.
+    // So first_byte's low 2 bits must match pn_len - 1.
+    let dcid = ConnectionId.empty();
+    let h_pn1 = ShortHeader {
+        first_byte: 0x40_u8,   // low 2 bits = 00
+        dcid: dcid.clone(), packet_number: 0_u32, pn_len: 1_u8, payload: [],
+    };
+    let h_pn4 = ShortHeader {
+        first_byte: 0x43_u8,   // low 2 bits = 11
+        dcid: dcid.clone(), packet_number: 0_u32, pn_len: 4_u8, payload: [],
+    };
+    assert((h_pn1.first_byte & 0x03_u8) == ((h_pn1.pn_len - 1_u8) as UInt8));
+    assert((h_pn4.first_byte & 0x03_u8) == ((h_pn4.pn_len - 1_u8) as UInt8));
+}
+
+@main
+public fn main() -> Int {
+    short_header_field_accessors();
+    first_byte_spin_bit_position();
+    first_byte_key_phase_bit_position();
+    pn_len_encoding_2_lsb();
+    print("RFC 9000 §17.3 Short Header layout verified");
+    0
+}

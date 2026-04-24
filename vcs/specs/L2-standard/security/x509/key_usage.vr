@@ -1,0 +1,75 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: x509, key_usage, rfc5280_4_2_1_3
+// @timeout: 15000
+// @expected-exit: 0
+
+// RFC 5280 §4.2.1.3 KeyUsage bit flags encoded as a BIT STRING.
+// 9 flags total; `is_any()` true iff at least one bit set.
+
+mount core.*;
+mount core.security.x509.ext.key_usage.{KeyUsage};
+
+fn empty_has_no_flags_set() {
+    let ku = KeyUsage.empty();
+    assert(false == ku.digital_signature);
+    assert(false == ku.non_repudiation);
+    assert(false == ku.key_encipherment);
+    assert(false == ku.data_encipherment);
+    assert(false == ku.key_agreement);
+    assert(false == ku.key_cert_sign);
+    assert(false == ku.crl_sign);
+    assert(false == ku.encipher_only);
+    assert(false == ku.decipher_only);
+    assert(false == ku.is_any());
+}
+
+fn any_individual_flag_triggers_is_any() {
+    let mut ku = KeyUsage.empty();
+    ku.digital_signature = true;
+    assert(ku.is_any());
+}
+
+fn key_cert_sign_isolation() {
+    // CA certs set key_cert_sign; end-entity certs MUST NOT.
+    let mut ca = KeyUsage.empty();
+    ca.key_cert_sign = true;
+    assert(ca.is_any());
+    assert(ca.key_cert_sign);
+
+    let mut leaf = KeyUsage.empty();
+    leaf.digital_signature = true;
+    leaf.key_encipherment  = true;
+    assert(leaf.is_any());
+    assert(false == leaf.key_cert_sign);
+}
+
+fn all_nine_flags_storable() {
+    let ku = KeyUsage {
+        digital_signature: true,
+        non_repudiation:   true,
+        key_encipherment:  true,
+        data_encipherment: true,
+        key_agreement:     true,
+        key_cert_sign:     true,
+        crl_sign:          true,
+        encipher_only:     true,
+        decipher_only:     true,
+    };
+    assert(ku.is_any());
+    // Every individual flag visible.
+    assert(ku.digital_signature && ku.non_repudiation && ku.key_encipherment);
+    assert(ku.data_encipherment && ku.key_agreement   && ku.key_cert_sign);
+    assert(ku.crl_sign          && ku.encipher_only   && ku.decipher_only);
+}
+
+@main
+public fn main() -> Int {
+    empty_has_no_flags_set();
+    any_individual_flag_triggers_is_any();
+    key_cert_sign_isolation();
+    all_nine_flags_storable();
+    print("RFC 5280 §4.2.1.3 KeyUsage bit flags verified");
+    0
+}
