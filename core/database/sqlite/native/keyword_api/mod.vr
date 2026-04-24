@@ -1,0 +1,19 @@
+// =============================================================================
+// core/database/sqlite/native/keyword_api/mod.vr
+// =============================================================================
+// Layer: 7 (façade — keyword-reflection API)
+// Spec: SQLite C API
+//
+//   sqlite3_keyword_count()         → int         total number of keywords
+//   sqlite3_keyword_name(i, &name)  → SQLITE_OK   the i-th keyword
+//   sqlite3_keyword_check(name, n)  → 1 / 0       is `name` a keyword?
+//
+// Submodules:
+//   * `table`   — canonical SQL keyword table (~150 entries)
+//   * `engine`  — public accessors
+// =============================================================================
+
+module core.database.sqlite.native.keyword_api;
+
+public module table;
+public module engine;

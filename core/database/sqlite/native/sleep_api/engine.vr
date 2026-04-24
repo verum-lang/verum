@@ -1,0 +1,50 @@
+// =============================================================================
+// sleep_api/engine.vr — sleeps-taken accounting + floor clamp
+// =============================================================================
+// Spec: SQLite C API
+//
+// The engine records how many sleeps were issued + the total
+// requested / actually slept milliseconds.  `floor_ms` lets platforms
+// with ≥1 ms minimum granularity upgrade tiny requests.
+// =============================================================================
+
+module core.database.sqlite.native.sleep_api.engine;
+
+mount core.*;
+mount base.{Bool};
+mount core.database.sqlite.native.sleep_api.request.{
+    SleepRequest, is_noop,
+};
+
+public type SleepEngine is {
+    floor_ms: Int,
+    sleeps_taken: Int64,
+    requested_ms: Int64,
+    actual_ms: Int64,
+}
+
+public fn new_engine(floor_ms: Int) -> SleepEngine {
+    SleepEngine {
+        floor_ms: floor_ms,
+        sleeps_taken: 0 as Int64,
+        requested_ms: 0 as Int64,
+        actual_ms: 0 as Int64,
+    }
+}
+
+implement SleepEngine {
+    /// Returns the number of milliseconds actually slept (per
+    /// sqlite3_sleep's return-value contract).
+    pub fn sqlite3_sleep(&mut self, req: &SleepRequest) -> Int {
+        if is_noop(req) { return 0; }
+        self.sleeps_taken = self.sleeps_taken + (1 as Int64);
+        self.requested_ms = self.requested_ms + (req.milliseconds as Int64);
+        let effective = if req.milliseconds < self.floor_ms {
+            self.floor_ms
+        } else {
+            req.milliseconds
+        };
+        self.actual_ms = self.actual_ms + (effective as Int64);
+        effective
+    }
+}

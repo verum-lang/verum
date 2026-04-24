@@ -1,0 +1,54 @@
+// =============================================================================
+// version_api/identity.vr — version triple + sourceid
+// =============================================================================
+// Spec: SQLite C API
+//
+// The compiled-in version is <major>.<minor>.<patch>, encoded in
+// sqlite3.h as SQLITE_VERSION_NUMBER = 1_000_000 * M + 1_000 * m + p.
+// =============================================================================
+
+module core.database.sqlite.native.version_api.identity;
+
+mount core.*;
+mount base.{Bool, Text};
+
+public type LibVersion is {
+    major: Int,
+    minor: Int,
+    patch: Int,
+    source_id: Text,
+}
+
+public fn new_version(major: Int, minor: Int, patch: Int, source_id: Text) -> LibVersion {
+    LibVersion { major: major, minor: minor, patch: patch, source_id: source_id }
+}
+
+public fn version_number(v: &LibVersion) -> Int {
+    (v.major * 1_000_000) + (v.minor * 1_000) + v.patch
+}
+
+public fn version_text(v: &LibVersion) -> Text {
+    let mut out = "".clone();
+    push_int(&mut out, v.major);
+    out.push_byte(0x2E as u8);
+    push_int(&mut out, v.minor);
+    out.push_byte(0x2E as u8);
+    push_int(&mut out, v.patch);
+    out
+}
+
+fn push_int(dst: &mut Text, mut n: Int) {
+    if n < 0 { dst.push_byte(0x2D as u8); n = 0 - n; }
+    if n == 0 { dst.push_byte(0x30 as u8); return; }
+    let mut digits: Int = 0;
+    let mut x: Int = n;
+    while x > 0 { digits = digits + 1; x = x / 10; }
+    let mut buf: Int = 1;
+    let mut d: Int = 1;
+    while d < digits { buf = buf * 10; d = d + 1; }
+    while buf > 0 {
+        let c = (n / buf) - ((n / (buf * 10)) * 10);
+        dst.push_byte((0x30 + c) as u8);
+        buf = buf / 10;
+    }
+}

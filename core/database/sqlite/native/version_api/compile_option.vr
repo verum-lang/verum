@@ -1,0 +1,98 @@
+// =============================================================================
+// version_api/compile_option.vr — registered -D flags
+// =============================================================================
+// Spec: SQLite C API
+//
+// sqlite3_compileoption_get(N) returns the N-th compile flag in the
+// order they were declared; sqlite3_compileoption_used(flag) returns
+// 1 iff the flag is present (with or without a "SQLITE_" prefix).
+// =============================================================================
+
+module core.database.sqlite.native.version_api.compile_option;
+
+mount core.*;
+mount base.{Bool, Maybe, Text};
+mount collections.List;
+
+public type OptionRegistry is {
+    flags: List<Text>,
+}
+
+public fn new_registry() -> OptionRegistry {
+    OptionRegistry { flags: List.new() }
+}
+
+public fn default_registry() -> OptionRegistry {
+    let mut r = new_registry();
+    r.add("ENABLE_FTS5".clone());
+    r.add("ENABLE_JSON1".clone());
+    r.add("ENABLE_RTREE".clone());
+    r.add("ENABLE_COLUMN_METADATA".clone());
+    r.add("ENABLE_STAT4".clone());
+    r.add("ENABLE_SESSION".clone());
+    r.add("ENABLE_PREUPDATE_HOOK".clone());
+    r.add("ENABLE_DESERIALIZE".clone());
+    r.add("THREADSAFE=1".clone());
+    r
+}
+
+implement OptionRegistry {
+    pub fn add(&mut self, flag: Text) {
+        self.flags.push(flag);
+    }
+
+    pub fn get(&self, index: Int) -> Maybe<Text> {
+        if index < 0 || index >= self.flags.len() { return Maybe.None; }
+        Maybe.Some(self.flags.get(index).clone())
+    }
+
+    pub fn len(&self) -> Int { self.flags.len() }
+
+    /// Match with the same case-insensitive, optional-"SQLITE_"-prefix
+    /// logic as sqlite3_compileoption_used.
+    pub fn used(&self, needle: &Text) -> Bool {
+        let stripped = strip_sqlite_prefix(needle);
+        let mut i: Int = 0;
+        while i < self.flags.len() {
+            let entry = self.flags.get(i);
+            let entry_stripped = strip_sqlite_prefix(entry);
+            if ci_eq(&entry_stripped, &stripped) { return true; }
+            i = i + 1;
+        }
+        false
+    }
+}
+
+fn strip_sqlite_prefix(s: &Text) -> Text {
+    let bs = s.as_bytes();
+    let prefix = "SQLITE_".clone();
+    let pb = prefix.as_bytes();
+    if bs.len() < pb.len() { return s.clone(); }
+    let mut i: Int = 0;
+    while i < pb.len() {
+        let mut b = bs[i];
+        if b >= (0x61 as u8) && b <= (0x7A as u8) { b = b - (0x20 as u8); }
+        if b != pb[i] { return s.clone(); }
+        i = i + 1;
+    }
+    let mut out = "".clone();
+    let mut j: Int = pb.len();
+    while j < bs.len() { out.push_byte(bs[j]); j = j + 1; }
+    out
+}
+
+fn ci_eq(a: &Text, b: &Text) -> Bool {
+    let ab = a.as_bytes();
+    let bb = b.as_bytes();
+    if ab.len() != bb.len() { return false; }
+    let mut i: Int = 0;
+    while i < ab.len() {
+        let mut x = ab[i];
+        let mut y = bb[i];
+        if x >= (0x61 as u8) && x <= (0x7A as u8) { x = x - (0x20 as u8); }
+        if y >= (0x61 as u8) && y <= (0x7A as u8) { y = y - (0x20 as u8); }
+        if x != y { return false; }
+        i = i + 1;
+    }
+    true
+}

@@ -1,0 +1,23 @@
+// =============================================================================
+// core/database/sqlite/native/strcmp_api/mod.vr
+// =============================================================================
+// Layer: 7 (façade — public string comparators)
+// Spec: SQLite C API
+//
+//   sqlite3_stricmp(a, b)          → signed int (like stricmp)
+//   sqlite3_strnicmp(a, b, n)      → bounded
+//   sqlite3_strglob(pattern, text) → 0 iff match  (GLOB semantics)
+//   sqlite3_strlike(pattern, text,
+//                    escape)       → 0 iff match  (LIKE semantics)
+//
+// Submodules:
+//   * `compare`  — stricmp / strnicmp
+//   * `glob`     — strglob (* / ? / [set])
+//   * `like`     — strlike (% / _ with optional escape)
+// =============================================================================
+
+module core.database.sqlite.native.strcmp_api;
+
+public module compare;
+public module glob;
+public module like;

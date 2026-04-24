@@ -1,0 +1,26 @@
+// =============================================================================
+// core/database/sqlite/native/version_api/mod.vr
+// =============================================================================
+// Layer: 7 (façade — sqlite3_libversion / _sourceid / _compileoption_*)
+// Spec: SQLite C API
+//
+//   sqlite3_libversion()               → Text   e.g. "3.46.1"
+//   sqlite3_libversion_number()        → Int    e.g. 3046001
+//   sqlite3_sourceid()                 → Text   e.g. "2024-08-13 09:46:03 …"
+//   sqlite3_compileoption_get(N)       → Text   the N-th compile flag
+//   sqlite3_compileoption_used(zFlag)  → Int    1 / 0
+//
+// Complements distribution/version.vr (which models the build
+// manifest); this catalogue is the API surface that C embedders call.
+//
+// Submodules:
+//   * `identity`       — version triple + sourceid
+//   * `compile_option` — registered -DSQLITE_* flags
+//   * `engine`         — API-aligned accessors
+// =============================================================================
+
+module core.database.sqlite.native.version_api;
+
+public module identity;
+public module compile_option;
+public module engine;

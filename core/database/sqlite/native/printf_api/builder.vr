@@ -1,0 +1,105 @@
+// =============================================================================
+// printf_api/builder.vr — sqlite3_str incremental builder
+// =============================================================================
+// Spec: SQLite C API
+//
+// sqlite3_str is a resizable text builder.  It silently truncates at
+// `max_len` bytes if one is configured; otherwise grows as needed.
+// =============================================================================
+
+module core.database.sqlite.native.printf_api.builder;
+
+mount core.*;
+mount base.{Bool, Text};
+mount collections.List;
+
+public type SqliteStr is {
+    buffer: Text,
+    /// 0 => unlimited.  Matches the SQLITE_LIMIT_LENGTH ceiling.
+    max_len: Int,
+    /// True once the builder overflowed past max_len.
+    overflow: Bool,
+    /// True once the builder hit an allocation failure (reserved).
+    nomem: Bool,
+}
+
+public fn new_str() -> SqliteStr {
+    SqliteStr {
+        buffer: "".clone(),
+        max_len: 0,
+        overflow: false,
+        nomem: false,
+    }
+}
+
+public fn new_str_with_limit(max_len: Int) -> SqliteStr {
+    SqliteStr {
+        buffer: "".clone(),
+        max_len: max_len,
+        overflow: false,
+        nomem: false,
+    }
+}
+
+fn append_bytes(dst: &mut Text, bs: List<u8>) {
+    let mut i: Int = 0;
+    while i < bs.len() {
+        dst.push_byte(bs[i]);
+        i = i + 1;
+    }
+}
+
+implement SqliteStr {
+    pub fn sqlite3_str_appendall(&mut self, s: &Text) {
+        let total = self.buffer.len() + s.len();
+        if self.max_len > 0 && total > self.max_len {
+            self.overflow = true;
+            let remaining = self.max_len - self.buffer.len();
+            if remaining <= 0 { return; }
+            let bytes = s.as_bytes();
+            let mut i: Int = 0;
+            while i < remaining {
+                self.buffer.push_byte(bytes[i]);
+                i = i + 1;
+            }
+            return;
+        }
+        let bytes = s.as_bytes();
+        let mut i: Int = 0;
+        while i < bytes.len() {
+            self.buffer.push_byte(bytes[i]);
+            i = i + 1;
+        }
+    }
+
+    pub fn sqlite3_str_append(&mut self, s: &Text, n: Int) {
+        let bytes = s.as_bytes();
+        let take = if n < 0 || n > bytes.len() { bytes.len() } else { n };
+        let mut slice: List<u8> = List.new();
+        let mut i: Int = 0;
+        while i < take { slice.push(bytes[i]); i = i + 1; }
+        let snip = text_from_bytes(slice);
+        self.sqlite3_str_appendall(&snip);
+    }
+
+    pub fn sqlite3_str_length(&self) -> Int { self.buffer.len() }
+    pub fn sqlite3_str_value(&self) -> Text { self.buffer.clone() }
+
+    pub fn sqlite3_str_reset(&mut self) {
+        self.buffer = "".clone();
+        self.overflow = false;
+        self.nomem = false;
+    }
+
+    pub fn is_healthy(&self) -> Bool { !self.overflow && !self.nomem }
+}
+
+fn text_from_bytes(bytes: List<u8>) -> Text {
+    let mut out = "".clone();
+    let mut i: Int = 0;
+    while i < bytes.len() {
+        out.push_byte(bytes[i]);
+        i = i + 1;
+    }
+    out
+}

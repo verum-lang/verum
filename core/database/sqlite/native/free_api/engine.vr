@@ -1,0 +1,98 @@
+// =============================================================================
+// free_api/engine.vr — simulated allocator + stats
+// =============================================================================
+// Spec: SQLite C API
+//
+// The catalogue engine hands out increasing integer ids for each
+// malloc, tracks total outstanding bytes, and refuses on "nomem".
+// Real memory allocation goes through mem_methods / the platform
+// allocator; this layer only proves the public API shape.
+// =============================================================================
+
+module core.database.sqlite.native.free_api.engine;
+
+mount core.*;
+mount base.{Bool};
+mount core.database.sqlite.native.free_api.ptr.{
+    OpaqueHandle, null_handle, new_handle, is_null,
+};
+
+public type FreeEngine is {
+    next_id: Int64,
+    outstanding_bytes: Int64,
+    mallocs: Int64,
+    frees: Int64,
+    reallocs: Int64,
+    /// If > 0, reject allocations that would push `outstanding_bytes`
+    /// above this limit.
+    hard_limit: Int64,
+}
+
+public fn new_engine() -> FreeEngine {
+    FreeEngine {
+        next_id: 1 as Int64,
+        outstanding_bytes: 0 as Int64,
+        mallocs: 0 as Int64,
+        frees: 0 as Int64,
+        reallocs: 0 as Int64,
+        hard_limit: 0 as Int64,
+    }
+}
+
+implement FreeEngine {
+    pub fn set_hard_limit(&mut self, n: Int64) { self.hard_limit = n; }
+
+    fn reject_oom(&self, size: Int64) -> Bool {
+        self.hard_limit > (0 as Int64)
+            && (self.outstanding_bytes + size) > self.hard_limit
+    }
+
+    pub fn sqlite3_malloc(&mut self, n: Int) -> OpaqueHandle {
+        if n <= 0 { return null_handle(); }
+        let size = n as Int64;
+        if self.reject_oom(size) { return null_handle(); }
+        let id = self.next_id;
+        self.next_id = self.next_id + (1 as Int64);
+        self.outstanding_bytes = self.outstanding_bytes + size;
+        self.mallocs = self.mallocs + (1 as Int64);
+        new_handle(id, size)
+    }
+
+    pub fn sqlite3_malloc64(&mut self, n: Int64) -> OpaqueHandle {
+        if n <= (0 as Int64) { return null_handle(); }
+        if self.reject_oom(n) { return null_handle(); }
+        let id = self.next_id;
+        self.next_id = self.next_id + (1 as Int64);
+        self.outstanding_bytes = self.outstanding_bytes + n;
+        self.mallocs = self.mallocs + (1 as Int64);
+        new_handle(id, n)
+    }
+
+    pub fn sqlite3_free(&mut self, h: &OpaqueHandle) {
+        if is_null(h) { return; }
+        if self.outstanding_bytes >= h.size {
+            self.outstanding_bytes = self.outstanding_bytes - h.size;
+        } else {
+            self.outstanding_bytes = 0 as Int64;
+        }
+        self.frees = self.frees + (1 as Int64);
+    }
+
+    /// Classical realloc semantics: free(old) + malloc(new).  On OOM
+    /// return NULL *without* freeing the old handle (C-library contract).
+    pub fn sqlite3_realloc(&mut self, old: &OpaqueHandle, new_size: Int) -> OpaqueHandle {
+        if new_size <= 0 { self.sqlite3_free(old); return null_handle(); }
+        let size = new_size as Int64;
+        let delta = if size > old.size { size - old.size } else { 0 as Int64 };
+        if self.reject_oom(delta) { return null_handle(); }
+        self.reallocs = self.reallocs + (1 as Int64);
+        self.outstanding_bytes = self.outstanding_bytes + (size - old.size);
+        let id = self.next_id;
+        self.next_id = self.next_id + (1 as Int64);
+        new_handle(id, size)
+    }
+
+    pub fn sqlite3_msize(&self, h: &OpaqueHandle) -> Int64 {
+        h.size
+    }
+}

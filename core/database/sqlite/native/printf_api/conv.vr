@@ -1,0 +1,76 @@
+// =============================================================================
+// printf_api/conv.vr — printf-style conversion specifiers
+// =============================================================================
+// Spec: SQLite C API — sqlite3_mprintf extensions.
+//
+// SQLite supports %d/%u/%x/%X/%o/%s/%z/%q/%Q/%w/%f/%e/%g/%c/%%
+// The non-standard specifiers:
+//   %q  — single-quote-escaped string (SQL literal)
+//   %Q  — like %q but emits NULL for NULL arguments and wraps in quotes
+//   %w  — identifier-escaped string (double-quoted with "" doubled)
+//   %z  — plain string that sqlite3_free'd after use
+// =============================================================================
+
+module core.database.sqlite.native.printf_api.conv;
+
+mount core.*;
+mount base.{Bool, Text};
+
+public type ConvKind is
+      CkSignedInt          // %d / %i
+    | CkUnsignedInt        // %u
+    | CkHex                // %x / %X
+    | CkOctal              // %o
+    | CkFloat              // %f
+    | CkExp                // %e / %E
+    | CkGeneral            // %g / %G
+    | CkChar               // %c
+    | CkPercent            // %%
+    | CkString             // %s
+    | CkStringFreed        // %z
+    | CkSqlLiteral         // %q
+    | CkSqlLiteralNull     // %Q
+    | CkIdentifier;        // %w
+
+public fn kind_name(k: &ConvKind) -> Text {
+    match k {
+        CkSignedInt       => "d".clone(),
+        CkUnsignedInt     => "u".clone(),
+        CkHex             => "x".clone(),
+        CkOctal           => "o".clone(),
+        CkFloat           => "f".clone(),
+        CkExp             => "e".clone(),
+        CkGeneral         => "g".clone(),
+        CkChar            => "c".clone(),
+        CkPercent         => "%".clone(),
+        CkString          => "s".clone(),
+        CkStringFreed     => "z".clone(),
+        CkSqlLiteral      => "q".clone(),
+        CkSqlLiteralNull  => "Q".clone(),
+        CkIdentifier      => "w".clone(),
+    }
+}
+
+public fn is_sql_specific(k: &ConvKind) -> Bool {
+    match k {
+        CkSqlLiteral | CkSqlLiteralNull | CkIdentifier | CkStringFreed => true,
+        _ => false,
+    }
+}
+
+public fn from_byte(b: u8) -> ConvKind {
+    if b == (0x64 as u8) || b == (0x69 as u8) { return CkSignedInt; }
+    if b == (0x75 as u8) { return CkUnsignedInt; }
+    if b == (0x78 as u8) || b == (0x58 as u8) { return CkHex; }
+    if b == (0x6F as u8) { return CkOctal; }
+    if b == (0x66 as u8) { return CkFloat; }
+    if b == (0x65 as u8) || b == (0x45 as u8) { return CkExp; }
+    if b == (0x67 as u8) || b == (0x47 as u8) { return CkGeneral; }
+    if b == (0x63 as u8) { return CkChar; }
+    if b == (0x25 as u8) { return CkPercent; }
+    if b == (0x71 as u8) { return CkSqlLiteral; }
+    if b == (0x51 as u8) { return CkSqlLiteralNull; }
+    if b == (0x77 as u8) { return CkIdentifier; }
+    if b == (0x7A as u8) { return CkStringFreed; }
+    CkString
+}

@@ -1,0 +1,53 @@
+// =============================================================================
+// keyword_api/engine.vr — public accessors
+// =============================================================================
+// Spec: SQLite C API
+// =============================================================================
+
+module core.database.sqlite.native.keyword_api.engine;
+
+mount core.*;
+mount base.{Bool, Maybe, Text};
+mount collections.List;
+mount core.database.sqlite.native.keyword_api.table.{
+    keywords, keyword_count,
+};
+
+public fn sqlite3_keyword_count() -> Int {
+    keyword_count()
+}
+
+/// Returns Maybe<Text> instead of the C-style "out-param plus
+/// integer return" pair.
+public fn sqlite3_keyword_name(index: Int) -> Maybe<Text> {
+    let kw = keywords();
+    if index < 0 || index >= kw.len() { return Maybe.None; }
+    Maybe.Some(kw.get(index).clone())
+}
+
+/// Case-insensitive membership test.  Byte length `n` matches
+/// sqlite3_keyword_check(name, n) — caller may pass n > word.len()
+/// because the canonical table uses NUL-terminated C strings.
+public fn sqlite3_keyword_check(name: &Text, n: Int) -> Int {
+    let bytes = name.as_bytes();
+    let take = if n < 0 || n > bytes.len() { bytes.len() } else { n };
+    let kw = keywords();
+    let mut i: Int = 0;
+    while i < kw.len() {
+        let kb = kw.get(i).as_bytes();
+        if kb.len() == take {
+            let mut j: Int = 0;
+            let mut eq = true;
+            while j < take {
+                let mut c = bytes[j];
+                let k = kb[j];
+                if c >= (0x61 as u8) && c <= (0x7A as u8) { c = c - (0x20 as u8); }
+                if c != k { eq = false; break; }
+                j = j + 1;
+            }
+            if eq { return 1; }
+        }
+        i = i + 1;
+    }
+    0
+}

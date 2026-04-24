@@ -1,0 +1,20 @@
+// =============================================================================
+// core/database/sqlite/native/sleep_api/mod.vr
+// =============================================================================
+// Layer: 7 (façade — sqlite3_sleep)
+// Spec: SQLite C API
+//
+//   sqlite3_sleep(int ms) → int   number of milliseconds actually slept
+//
+// Used by the default busy-handler retry loop; may undersleep on
+// platforms without a high-resolution sleep.
+//
+// Submodules:
+//   * `request`  — SleepRequest (milliseconds)
+//   * `engine`   — returns actual sleep duration + sleeps-taken counter
+// =============================================================================
+
+module core.database.sqlite.native.sleep_api;
+
+public module request;
+public module engine;

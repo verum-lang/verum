@@ -1,0 +1,58 @@
+// =============================================================================
+// randomness_api/engine.vr — public façade bookkeeping
+// =============================================================================
+// Spec: SQLite C API
+//
+// The actual byte generation lives in `prng/`; this engine only
+// records request counts + the "seeded" flag so embedders can verify
+// the PRNG isn't used before being reseeded after fork / snapshot /
+// deserialize.
+// =============================================================================
+
+module core.database.sqlite.native.randomness_api.engine;
+
+mount core.*;
+mount base.{Bool};
+mount core.database.sqlite.native.randomness_api.request.{
+    RandomnessRequest, RrFill, RrReseed, RrNoop, is_reseed, fill_size,
+};
+
+public type RandomnessEngine is {
+    seeded: Bool,
+    bytes_generated: Int64,
+    reseed_count: Int64,
+    noop_count: Int64,
+}
+
+public fn new_engine() -> RandomnessEngine {
+    RandomnessEngine {
+        seeded: false,
+        bytes_generated: 0 as Int64,
+        reseed_count: 0 as Int64,
+        noop_count: 0 as Int64,
+    }
+}
+
+implement RandomnessEngine {
+    /// Drive one request.  Returns the actual byte-count that will be
+    /// produced / consumed (0 for noop, size for fill, reseed-len for
+    /// reseed).
+    pub fn drive(&mut self, req: &RandomnessRequest) -> Int {
+        match req {
+            RrFill(n) => {
+                self.bytes_generated = self.bytes_generated + (*n as Int64);
+                self.seeded = true;
+                *n
+            }
+            RrReseed(bytes) => {
+                self.reseed_count = self.reseed_count + (1 as Int64);
+                self.seeded = true;
+                bytes.len()
+            }
+            RrNoop => {
+                self.noop_count = self.noop_count + (1 as Int64);
+                0
+            }
+        }
+    }
+}

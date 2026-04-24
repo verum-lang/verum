@@ -1,0 +1,57 @@
+// =============================================================================
+// table_metadata/query.vr — TableColumnQuery + Outcome
+// =============================================================================
+// Spec: SQLite C API
+// =============================================================================
+
+module core.database.sqlite.native.table_metadata.query;
+
+mount core.*;
+mount base.{Bool, Maybe, Text};
+mount core.database.sqlite.native.table_metadata.column_info.{
+    ColumnInfo,
+};
+
+public type TableColumnQuery is {
+    schema: Text,          // "main" / "temp" / ATTACH-ed
+    table: Text,
+    /// None => "does the table exist?" query.
+    column: Maybe<Text>,
+}
+
+public fn column_query(schema: Text, table: Text, column: Text) -> TableColumnQuery {
+    TableColumnQuery {
+        schema: schema,
+        table: table,
+        column: Maybe.Some(column),
+    }
+}
+
+public fn table_exists_query(schema: Text, table: Text) -> TableColumnQuery {
+    TableColumnQuery { schema: schema, table: table, column: Maybe.None }
+}
+
+public fn is_existence_query(q: &TableColumnQuery) -> Bool {
+    match &q.column { Maybe.None => true, Maybe.Some(_) => false }
+}
+
+public type QueryOutcome is
+      QoColumn(ColumnInfo)
+    | QoTableOnly       // table exists; no column requested
+    | QoUnknownTable
+    | QoUnknownColumn;
+
+public fn is_found(o: &QueryOutcome) -> Bool {
+    match o {
+        QoColumn(_) | QoTableOnly => true,
+        _ => false,
+    }
+}
+
+public fn outcome_numeric(o: &QueryOutcome) -> Int {
+    match o {
+        QoColumn(_)    => 0,   // SQLITE_OK
+        QoTableOnly    => 0,
+        QoUnknownTable | QoUnknownColumn => 1,  // SQLITE_ERROR
+    }
+}

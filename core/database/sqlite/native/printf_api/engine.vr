@@ -1,0 +1,80 @@
+// =============================================================================
+// printf_api/engine.vr — snprintf truncation + finish
+// =============================================================================
+// Spec: SQLite C API
+//
+// sqlite3_snprintf(n, buf, ...) — matches classical snprintf behaviour:
+// at most n-1 bytes are written into buf, followed by a NUL.  The
+// return value is the pointer to the buffer (just like the C API).
+//
+// sqlite3_str_finish returns the malloc'd Text AND resets the builder;
+// the catalogue returns just the Text.
+// =============================================================================
+
+module core.database.sqlite.native.printf_api.engine;
+
+mount core.*;
+mount base.{Bool, Maybe, Text};
+mount core.database.sqlite.native.printf_api.builder.{
+    SqliteStr, new_str,
+};
+
+public fn sqlite3_str_finish(s: &mut SqliteStr) -> Text {
+    let out = s.sqlite3_str_value();
+    s.sqlite3_str_reset();
+    out
+}
+
+/// Truncate `rendered` to fit into a buffer of capacity `n`.  Mimics
+/// sqlite3_snprintf's "at most n-1 bytes" guarantee — n<=0 yields
+/// empty; otherwise take at most n-1 bytes.
+public fn sqlite3_snprintf_truncate(n: Int, rendered: &Text) -> Text {
+    if n <= 0 { return "".clone(); }
+    let bytes = rendered.as_bytes();
+    let take = if bytes.len() < n - 1 { bytes.len() } else { n - 1 };
+    let mut out = "".clone();
+    let mut i: Int = 0;
+    while i < take {
+        out.push_byte(bytes[i]);
+        i = i + 1;
+    }
+    out
+}
+
+/// Escape a string for the %q / %Q specifier: single-quote-escape all
+/// internal `'` bytes by doubling.  For %Q the caller is expected to
+/// handle the NULL case.
+public fn escape_sql_string(s: &Text) -> Text {
+    let bytes = s.as_bytes();
+    let mut out = "".clone();
+    let mut i: Int = 0;
+    while i < bytes.len() {
+        let b = bytes[i];
+        if b == (0x27 as u8) {
+            out.push_byte(0x27 as u8);
+            out.push_byte(0x27 as u8);
+        } else {
+            out.push_byte(b);
+        }
+        i = i + 1;
+    }
+    out
+}
+
+/// Escape a string for %w: double-quote-doubling (identifier quote).
+public fn escape_sql_identifier(s: &Text) -> Text {
+    let bytes = s.as_bytes();
+    let mut out = "".clone();
+    let mut i: Int = 0;
+    while i < bytes.len() {
+        let b = bytes[i];
+        if b == (0x22 as u8) {
+            out.push_byte(0x22 as u8);
+            out.push_byte(0x22 as u8);
+        } else {
+            out.push_byte(b);
+        }
+        i = i + 1;
+    }
+    out
+}

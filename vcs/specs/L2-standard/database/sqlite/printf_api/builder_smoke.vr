@@ -1,0 +1,118 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, printf_api, mprintf, capi
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.printf_api.conv.{
+    ConvKind,
+    CkSignedInt, CkString, CkSqlLiteral, CkSqlLiteralNull, CkIdentifier,
+    CkStringFreed, CkPercent,
+    kind_name, is_sql_specific, from_byte,
+};
+mount core.database.sqlite.native.printf_api.builder.{
+    SqliteStr, new_str, new_str_with_limit,
+};
+mount core.database.sqlite.native.printf_api.engine.{
+    sqlite3_str_finish, sqlite3_snprintf_truncate,
+    escape_sql_string, escape_sql_identifier,
+};
+mount base.{Bool};
+
+fn test_kind_names() {
+    assert(kind_name(&CkSignedInt) == "d".clone());
+    assert(kind_name(&CkSqlLiteral) == "q".clone());
+    assert(kind_name(&CkPercent) == "%".clone());
+}
+
+fn test_is_sql_specific() {
+    assert(is_sql_specific(&CkSqlLiteral));
+    assert(is_sql_specific(&CkSqlLiteralNull));
+    assert(is_sql_specific(&CkIdentifier));
+    assert(is_sql_specific(&CkStringFreed));
+    assert(!is_sql_specific(&CkSignedInt));
+    assert(!is_sql_specific(&CkString));
+}
+
+fn test_from_byte_dispatch() {
+    match from_byte(0x64 as u8) { CkSignedInt      => {}, _ => assert(false) }
+    match from_byte(0x71 as u8) { CkSqlLiteral     => {}, _ => assert(false) }
+    match from_byte(0x51 as u8) { CkSqlLiteralNull => {}, _ => assert(false) }
+    match from_byte(0x77 as u8) { CkIdentifier     => {}, _ => assert(false) }
+    match from_byte(0x7A as u8) { CkStringFreed    => {}, _ => assert(false) }
+    match from_byte(0x25 as u8) { CkPercent        => {}, _ => assert(false) }
+}
+
+fn test_builder_appendall_growth() {
+    let mut s = new_str();
+    s.sqlite3_str_appendall(&"hello, ".clone());
+    s.sqlite3_str_appendall(&"world".clone());
+    assert_eq(s.sqlite3_str_length(), 12);
+    assert(s.is_healthy());
+    assert(s.sqlite3_str_value() == "hello, world".clone());
+}
+
+fn test_builder_limit_overflow() {
+    let mut s = new_str_with_limit(5);
+    s.sqlite3_str_appendall(&"abcdefg".clone());
+    assert_eq(s.sqlite3_str_length(), 5);
+    assert(!s.is_healthy());
+}
+
+fn test_builder_reset() {
+    let mut s = new_str();
+    s.sqlite3_str_appendall(&"trash".clone());
+    s.sqlite3_str_reset();
+    assert_eq(s.sqlite3_str_length(), 0);
+    assert(s.is_healthy());
+}
+
+fn test_finish_returns_text_and_resets() {
+    let mut s = new_str();
+    s.sqlite3_str_appendall(&"done".clone());
+    let out = sqlite3_str_finish(&mut s);
+    assert(out == "done".clone());
+    assert_eq(s.sqlite3_str_length(), 0);
+}
+
+fn test_snprintf_truncate_respects_capacity() {
+    let out = sqlite3_snprintf_truncate(4, &"hello".clone());
+    // capacity 4 → fits 3 bytes (plus NUL).
+    assert_eq(out.len(), 3);
+}
+
+fn test_snprintf_truncate_zero_capacity_empty() {
+    assert_eq(sqlite3_snprintf_truncate(0, &"hello".clone()).len(), 0);
+}
+
+fn test_escape_sql_string_doubles_single_quotes() {
+    let e = escape_sql_string(&"O'Reilly".clone());
+    assert(e == "O''Reilly".clone());
+}
+
+fn test_escape_sql_identifier_doubles_double_quotes() {
+    let e = escape_sql_identifier(&"foo\"bar".clone());
+    assert(e == "foo\"\"bar".clone());
+}
+
+fn test_builder_append_bounded() {
+    let mut s = new_str();
+    s.sqlite3_str_append(&"trailing garbage".clone(), 5);
+    assert_eq(s.sqlite3_str_length(), 5);
+}
+
+fn main() {
+    test_kind_names();
+    test_is_sql_specific();
+    test_from_byte_dispatch();
+    test_builder_appendall_growth();
+    test_builder_limit_overflow();
+    test_builder_reset();
+    test_finish_returns_text_and_resets();
+    test_snprintf_truncate_respects_capacity();
+    test_snprintf_truncate_zero_capacity_empty();
+    test_escape_sql_string_doubles_single_quotes();
+    test_escape_sql_identifier_doubles_double_quotes();
+    test_builder_append_bounded();
+}

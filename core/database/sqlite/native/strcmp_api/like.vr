@@ -1,0 +1,85 @@
+// =============================================================================
+// strcmp_api/like.vr — sqlite3_strlike
+// =============================================================================
+// Spec: SQLite C API
+//
+// LIKE (case-insensitive by default):
+//   %       — zero or more characters
+//   _       — exactly one character
+//   escape  — optional byte that literalises the next one
+//
+// Iterative two-pointer walk with a single saved "last-%" position.
+// =============================================================================
+
+module core.database.sqlite.native.strcmp_api.like;
+
+mount core.*;
+mount base.{Bool, Text};
+mount collections.List;
+
+fn to_upper(b: u8) -> u8 {
+    if b >= (0x61 as u8) && b <= (0x7A as u8) { return b - (0x20 as u8); }
+    b
+}
+
+fn eq_ci(a: u8, b: u8) -> Bool {
+    to_upper(a) == to_upper(b)
+}
+
+fn like_match(pat: &Text, txt: &Text, esc: u8) -> Bool {
+    let pb = pat.as_bytes();
+    let tb = txt.as_bytes();
+    let pn = pb.len();
+    let tn = tb.len();
+    let mut pi: Int = 0;
+    let mut ti: Int = 0;
+    let mut wild_pi: Int = -1;
+    let mut wild_ti: Int = 0;
+    while ti < tn {
+        // Escape — next byte is a literal.
+        if esc != (0 as u8) && pi < pn && pb[pi] == esc && pi + 1 < pn {
+            if eq_ci(pb[pi + 1], tb[ti]) {
+                pi = pi + 2;
+                ti = ti + 1;
+                continue;
+            }
+            if wild_pi >= 0 {
+                pi = wild_pi + 1;
+                wild_ti = wild_ti + 1;
+                ti = wild_ti;
+                continue;
+            }
+            return false;
+        }
+        if pi < pn && pb[pi] == (0x25 as u8) {
+            wild_pi = pi;
+            wild_ti = ti;
+            pi = pi + 1;
+            continue;
+        }
+        if pi < pn && pb[pi] == (0x5F as u8) {
+            pi = pi + 1;
+            ti = ti + 1;
+            continue;
+        }
+        if pi < pn && eq_ci(pb[pi], tb[ti]) {
+            pi = pi + 1;
+            ti = ti + 1;
+            continue;
+        }
+        if wild_pi >= 0 {
+            pi = wild_pi + 1;
+            wild_ti = wild_ti + 1;
+            ti = wild_ti;
+            continue;
+        }
+        return false;
+    }
+    while pi < pn && pb[pi] == (0x25 as u8) { pi = pi + 1; }
+    pi >= pn
+}
+
+public fn sqlite3_strlike(pattern: &Text, text: &Text, escape: Int) -> Int {
+    let esc_byte: u8 = if escape <= 0 { 0 as u8 } else { (escape & 0xFF) as u8 };
+    if like_match(pattern, text, esc_byte) { 0 } else { 1 }
+}

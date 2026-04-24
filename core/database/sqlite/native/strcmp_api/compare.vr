@@ -1,0 +1,57 @@
+// =============================================================================
+// strcmp_api/compare.vr — case-insensitive compare
+// =============================================================================
+// Spec: SQLite C API
+// =============================================================================
+
+module core.database.sqlite.native.strcmp_api.compare;
+
+mount core.*;
+mount base.{Text};
+
+fn to_upper(b: u8) -> u8 {
+    if b >= (0x61 as u8) && b <= (0x7A as u8) { return b - (0x20 as u8); }
+    b
+}
+
+/// Classical stricmp: compare until terminator or divergence.
+/// Returns -1, 0, or +1 (catalogue simplifies from C's arbitrary
+/// signed magnitude).
+public fn sqlite3_stricmp(a: &Text, b: &Text) -> Int {
+    let ab = a.as_bytes();
+    let bb = b.as_bytes();
+    let lim = if ab.len() < bb.len() { ab.len() } else { bb.len() };
+    let mut i: Int = 0;
+    while i < lim {
+        let ca = to_upper(ab[i]);
+        let cb = to_upper(bb[i]);
+        if ca < cb { return -1; }
+        if ca > cb { return 1; }
+        i = i + 1;
+    }
+    if ab.len() < bb.len() { return -1; }
+    if ab.len() > bb.len() { return 1; }
+    0
+}
+
+/// Bounded case-insensitive compare.
+public fn sqlite3_strnicmp(a: &Text, b: &Text, n: Int) -> Int {
+    if n <= 0 { return 0; }
+    let ab = a.as_bytes();
+    let bb = b.as_bytes();
+    let mut lim = if ab.len() < bb.len() { ab.len() } else { bb.len() };
+    if n < lim { lim = n; }
+    let mut i: Int = 0;
+    while i < lim {
+        let ca = to_upper(ab[i]);
+        let cb = to_upper(bb[i]);
+        if ca < cb { return -1; }
+        if ca > cb { return 1; }
+        i = i + 1;
+    }
+    // If both strings are at least n bytes long we stop comparing.
+    if n <= ab.len() && n <= bb.len() { return 0; }
+    if ab.len() < bb.len() && n > ab.len() { return -1; }
+    if ab.len() > bb.len() && n > bb.len() { return 1; }
+    0
+}

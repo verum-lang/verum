@@ -1,0 +1,98 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, version_api, libversion, compileoption, capi
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.version_api.identity.{
+    LibVersion, new_version, version_number, version_text,
+};
+mount core.database.sqlite.native.version_api.compile_option.{
+    OptionRegistry, new_registry, default_registry,
+};
+mount core.database.sqlite.native.version_api.engine.{
+    sqlite3_libversion, sqlite3_libversion_number, sqlite3_sourceid,
+    sqlite3_compileoption_get, sqlite3_compileoption_used,
+};
+mount base.{Maybe};
+
+fn test_version_number_encoding() {
+    let v = new_version(3, 46, 1, "2024-08-13".clone());
+    assert_eq(version_number(&v), 3_046_001);
+}
+
+fn test_version_text_formats_dotted() {
+    let v = new_version(3, 46, 1, "".clone());
+    assert(version_text(&v) == "3.46.1".clone());
+}
+
+fn test_version_text_zero_patches() {
+    let v = new_version(3, 0, 0, "".clone());
+    assert(version_text(&v) == "3.0.0".clone());
+}
+
+fn test_sqlite3_libversion_accessors() {
+    let v = new_version(3, 46, 1, "abc123".clone());
+    assert(sqlite3_libversion(&v) == "3.46.1".clone());
+    assert_eq(sqlite3_libversion_number(&v), 3_046_001);
+    assert(sqlite3_sourceid(&v) == "abc123".clone());
+}
+
+fn test_default_registry_has_fts5() {
+    let r = default_registry();
+    assert_eq(sqlite3_compileoption_used(&r, &"ENABLE_FTS5".clone()), 1);
+    assert_eq(sqlite3_compileoption_used(&r, &"ENABLE_JSON1".clone()), 1);
+}
+
+fn test_compileoption_used_strips_sqlite_prefix() {
+    let r = default_registry();
+    // Either form should match.
+    assert_eq(sqlite3_compileoption_used(&r, &"SQLITE_ENABLE_FTS5".clone()), 1);
+    assert_eq(sqlite3_compileoption_used(&r, &"ENABLE_FTS5".clone()), 1);
+}
+
+fn test_compileoption_used_case_insensitive() {
+    let r = default_registry();
+    assert_eq(sqlite3_compileoption_used(&r, &"enable_fts5".clone()), 1);
+}
+
+fn test_compileoption_used_absent_returns_zero() {
+    let r = default_registry();
+    assert_eq(sqlite3_compileoption_used(&r, &"ENABLE_UNKNOWN".clone()), 0);
+}
+
+fn test_compileoption_get_by_index() {
+    let r = default_registry();
+    match sqlite3_compileoption_get(&r, 0) {
+        Maybe.Some(t) => assert(t.len() > 0),
+        Maybe.None => assert(false),
+    }
+}
+
+fn test_compileoption_get_out_of_range_none() {
+    let r = default_registry();
+    match sqlite3_compileoption_get(&r, 9999) {
+        Maybe.None => {},
+        Maybe.Some(_) => assert(false),
+    }
+}
+
+fn test_empty_registry_has_no_options() {
+    let r = new_registry();
+    assert_eq(sqlite3_compileoption_used(&r, &"ENABLE_FTS5".clone()), 0);
+}
+
+fn main() {
+    test_version_number_encoding();
+    test_version_text_formats_dotted();
+    test_version_text_zero_patches();
+    test_sqlite3_libversion_accessors();
+    test_default_registry_has_fts5();
+    test_compileoption_used_strips_sqlite_prefix();
+    test_compileoption_used_case_insensitive();
+    test_compileoption_used_absent_returns_zero();
+    test_compileoption_get_by_index();
+    test_compileoption_get_out_of_range_none();
+    test_empty_registry_has_no_options();
+}

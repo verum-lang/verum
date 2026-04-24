@@ -1,0 +1,83 @@
+// =============================================================================
+// table_metadata/column_info.vr — per-column reflected record
+// =============================================================================
+// Spec: SQLite C API — sqlite3_table_column_metadata.
+// =============================================================================
+
+module core.database.sqlite.native.table_metadata.column_info;
+
+mount core.*;
+mount base.{Bool, Text};
+
+public type ColumnInfo is {
+    data_type: Text,         // declared type (or "INTEGER" for rowid alias)
+    collation: Text,         // "BINARY", "NOCASE", "RTRIM", or user-defined
+    not_null: Bool,
+    primary_key: Bool,
+    autoinc: Bool,
+}
+
+public fn new_info(
+    data_type: Text,
+    collation: Text,
+    not_null: Bool,
+    primary_key: Bool,
+    autoinc: Bool,
+) -> ColumnInfo {
+    ColumnInfo {
+        data_type: data_type,
+        collation: collation,
+        not_null: not_null,
+        primary_key: primary_key,
+        autoinc: autoinc,
+    }
+}
+
+/// INTEGER PRIMARY KEY rowid alias is the only place autoinc ever
+/// applies; helper reflects that invariant for call-sites that want
+/// to validate a constructed ColumnInfo.
+public fn is_consistent(c: &ColumnInfo) -> Bool {
+    if c.autoinc { return c.primary_key; }
+    true
+}
+
+/// Best guess for the ANALYZE affinity derived from data_type; this
+/// mirrors SQLite's classical rules from §3.1.
+public fn affinity_hint(c: &ColumnInfo) -> Text {
+    let dt = &c.data_type;
+    if contains_ci(dt, &"INT".clone())  { return "INTEGER".clone(); }
+    if contains_ci(dt, &"CHAR".clone()) { return "TEXT".clone(); }
+    if contains_ci(dt, &"CLOB".clone()) { return "TEXT".clone(); }
+    if contains_ci(dt, &"TEXT".clone()) { return "TEXT".clone(); }
+    if contains_ci(dt, &"BLOB".clone()) { return "BLOB".clone(); }
+    if contains_ci(dt, &"REAL".clone()) { return "REAL".clone(); }
+    if contains_ci(dt, &"FLOA".clone()) { return "REAL".clone(); }
+    if contains_ci(dt, &"DOUB".clone()) { return "REAL".clone(); }
+    "NUMERIC".clone()
+}
+
+fn contains_ci(haystack: &Text, needle: &Text) -> Bool {
+    let hb = haystack.as_bytes();
+    let nb = needle.as_bytes();
+    let hlen = hb.len();
+    let nlen = nb.len();
+    if nlen == 0 { return true; }
+    if hlen < nlen { return false; }
+    let limit = hlen - nlen;
+    let mut i: Int = 0;
+    while i <= limit {
+        let mut j: Int = 0;
+        let mut eq = true;
+        while j < nlen {
+            let mut h = hb[i + j];
+            let mut n = nb[j];
+            if h >= (0x61 as u8) && h <= (0x7A as u8) { h = h - (0x20 as u8); }
+            if n >= (0x61 as u8) && n <= (0x7A as u8) { n = n - (0x20 as u8); }
+            if h != n { eq = false; break; }
+            j = j + 1;
+        }
+        if eq { return true; }
+        i = i + 1;
+    }
+    false
+}

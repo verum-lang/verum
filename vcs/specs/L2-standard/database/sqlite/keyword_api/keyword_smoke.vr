@@ -1,0 +1,81 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, keyword_api, reflection, capi
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.keyword_api.table.{
+    keywords, keyword_count,
+};
+mount core.database.sqlite.native.keyword_api.engine.{
+    sqlite3_keyword_count, sqlite3_keyword_name, sqlite3_keyword_check,
+};
+mount base.{Maybe};
+
+fn test_keyword_count_matches_table_len() {
+    assert_eq(sqlite3_keyword_count(), keyword_count());
+    assert(sqlite3_keyword_count() > 100);
+}
+
+fn test_keyword_name_returns_some_for_valid_index() {
+    match sqlite3_keyword_name(0) {
+        Maybe.Some(t) => assert(t.len() > 0),
+        Maybe.None => assert(false),
+    }
+}
+
+fn test_keyword_name_none_for_negative_index() {
+    match sqlite3_keyword_name(-1) {
+        Maybe.None => {},
+        Maybe.Some(_) => assert(false),
+    }
+}
+
+fn test_keyword_name_none_for_out_of_range_index() {
+    match sqlite3_keyword_name(9999) {
+        Maybe.None => {},
+        Maybe.Some(_) => assert(false),
+    }
+}
+
+fn test_keyword_check_matches_upper() {
+    let kw = "SELECT".clone();
+    assert_eq(sqlite3_keyword_check(&kw, kw.len()), 1);
+}
+
+fn test_keyword_check_matches_lower() {
+    let kw = "select".clone();
+    assert_eq(sqlite3_keyword_check(&kw, kw.len()), 1);
+}
+
+fn test_keyword_check_matches_mixed_case() {
+    let kw = "Select".clone();
+    assert_eq(sqlite3_keyword_check(&kw, kw.len()), 1);
+}
+
+fn test_keyword_check_rejects_non_keyword() {
+    let kw = "customers".clone();
+    assert_eq(sqlite3_keyword_check(&kw, kw.len()), 0);
+}
+
+fn test_keyword_check_length_bound() {
+    // "SELECTx" truncated to "SELECT" should still match.
+    let kw = "SELECTx".clone();
+    assert_eq(sqlite3_keyword_check(&kw, 6), 1);
+    // But "SELEC" shouldn't.
+    let short = "SELEC".clone();
+    assert_eq(sqlite3_keyword_check(&short, short.len()), 0);
+}
+
+fn main() {
+    test_keyword_count_matches_table_len();
+    test_keyword_name_returns_some_for_valid_index();
+    test_keyword_name_none_for_negative_index();
+    test_keyword_name_none_for_out_of_range_index();
+    test_keyword_check_matches_upper();
+    test_keyword_check_matches_lower();
+    test_keyword_check_matches_mixed_case();
+    test_keyword_check_rejects_non_keyword();
+    test_keyword_check_length_bound();
+}

@@ -1,0 +1,32 @@
+// =============================================================================
+// version_api/engine.vr — API-aligned accessors
+// =============================================================================
+// Spec: SQLite C API
+// =============================================================================
+
+module core.database.sqlite.native.version_api.engine;
+
+mount core.*;
+mount base.{Maybe, Text};
+mount core.database.sqlite.native.version_api.identity.{
+    LibVersion, version_number, version_text,
+};
+mount core.database.sqlite.native.version_api.compile_option.{
+    OptionRegistry,
+};
+
+public fn sqlite3_libversion(v: &LibVersion) -> Text { version_text(v) }
+
+public fn sqlite3_libversion_number(v: &LibVersion) -> Int {
+    version_number(v)
+}
+
+public fn sqlite3_sourceid(v: &LibVersion) -> Text { v.source_id.clone() }
+
+public fn sqlite3_compileoption_get(r: &OptionRegistry, index: Int) -> Maybe<Text> {
+    r.get(index)
+}
+
+public fn sqlite3_compileoption_used(r: &OptionRegistry, flag: &Text) -> Int {
+    if r.used(flag) { 1 } else { 0 }
+}

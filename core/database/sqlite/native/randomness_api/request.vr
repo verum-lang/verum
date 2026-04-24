@@ -1,0 +1,36 @@
+// =============================================================================
+// randomness_api/request.vr — RandomnessRequest
+// =============================================================================
+// Spec: SQLite C API
+// =============================================================================
+
+module core.database.sqlite.native.randomness_api.request;
+
+mount core.*;
+mount base.{Bool};
+mount collections.List;
+
+public type RandomnessRequest is
+      RrFill(Int)              // fill N bytes
+    | RrReseed(List<u8>)       // reseed PRNG with these bytes
+    | RrNoop;                  // N == 0
+
+public fn request_for(n: Int, maybe_reseed: List<u8>) -> RandomnessRequest {
+    if n == 0 { return RrNoop; }
+    if n < 0 { return RrReseed(maybe_reseed); }
+    RrFill(n)
+}
+
+public fn is_reseed(r: &RandomnessRequest) -> Bool {
+    match r {
+        RrReseed(_) => true,
+        _ => false,
+    }
+}
+
+public fn fill_size(r: &RandomnessRequest) -> Int {
+    match r {
+        RrFill(n) => *n,
+        _ => 0,
+    }
+}

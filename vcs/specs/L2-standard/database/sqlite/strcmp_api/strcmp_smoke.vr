@@ -1,0 +1,104 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, strcmp_api, glob, like, capi
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.strcmp_api.compare.{
+    sqlite3_stricmp, sqlite3_strnicmp,
+};
+mount core.database.sqlite.native.strcmp_api.glob.{
+    sqlite3_strglob,
+};
+mount core.database.sqlite.native.strcmp_api.like.{
+    sqlite3_strlike,
+};
+
+fn test_stricmp_equal_case_insensitive() {
+    assert_eq(sqlite3_stricmp(&"HELLO".clone(), &"hello".clone()), 0);
+    assert_eq(sqlite3_stricmp(&"SQLite".clone(), &"sqlite".clone()), 0);
+}
+
+fn test_stricmp_detects_order() {
+    assert_eq(sqlite3_stricmp(&"abc".clone(), &"abd".clone()), -1);
+    assert_eq(sqlite3_stricmp(&"abd".clone(), &"abc".clone()), 1);
+}
+
+fn test_stricmp_shorter_is_less() {
+    assert_eq(sqlite3_stricmp(&"ab".clone(), &"abc".clone()), -1);
+    assert_eq(sqlite3_stricmp(&"abcd".clone(), &"abc".clone()), 1);
+}
+
+fn test_strnicmp_bound_zero() {
+    assert_eq(sqlite3_strnicmp(&"foo".clone(), &"bar".clone(), 0), 0);
+}
+
+fn test_strnicmp_bounded_match() {
+    // "foobar" and "FooBaz" match for the first 5 bytes.
+    assert_eq(sqlite3_strnicmp(&"foobar".clone(), &"FooBaz".clone(), 5), 0);
+    // …but diverge at byte 6.
+    assert(sqlite3_strnicmp(&"foobar".clone(), &"FooBaz".clone(), 6) != 0);
+}
+
+fn test_strglob_star_matches_everything() {
+    assert_eq(sqlite3_strglob(&"*".clone(), &"anything".clone()), 0);
+    assert_eq(sqlite3_strglob(&"*".clone(), &"".clone()), 0);
+}
+
+fn test_strglob_question_single_char() {
+    assert_eq(sqlite3_strglob(&"h?llo".clone(), &"hello".clone()), 0);
+    assert(sqlite3_strglob(&"h?llo".clone(), &"hllo".clone()) != 0);
+}
+
+fn test_strglob_mismatch() {
+    assert(sqlite3_strglob(&"cat".clone(), &"dog".clone()) != 0);
+}
+
+fn test_strglob_literal_match() {
+    assert_eq(sqlite3_strglob(&"cat".clone(), &"cat".clone()), 0);
+}
+
+fn test_strglob_prefix_pattern() {
+    assert_eq(sqlite3_strglob(&"hel*".clone(), &"hello".clone()), 0);
+    assert_eq(sqlite3_strglob(&"hel*".clone(), &"hel".clone()), 0);
+}
+
+fn test_strlike_percent_matches() {
+    assert_eq(sqlite3_strlike(&"%ello".clone(), &"hello".clone(), 0), 0);
+    assert_eq(sqlite3_strlike(&"%".clone(), &"anything".clone(), 0), 0);
+}
+
+fn test_strlike_underscore_matches_single() {
+    assert_eq(sqlite3_strlike(&"h_llo".clone(), &"hello".clone(), 0), 0);
+    assert(sqlite3_strlike(&"h_llo".clone(), &"hllo".clone(), 0) != 0);
+}
+
+fn test_strlike_case_insensitive() {
+    assert_eq(sqlite3_strlike(&"%abc".clone(), &"xyzABC".clone(), 0), 0);
+}
+
+fn test_strlike_escape_literalises() {
+    // With escape `\`, "\\%" should match literal "%".
+    let pat = "100\\%".clone();
+    let txt = "100%".clone();
+    let esc = 0x5C;   // '\'
+    assert_eq(sqlite3_strlike(&pat, &txt, esc), 0);
+}
+
+fn main() {
+    test_stricmp_equal_case_insensitive();
+    test_stricmp_detects_order();
+    test_stricmp_shorter_is_less();
+    test_strnicmp_bound_zero();
+    test_strnicmp_bounded_match();
+    test_strglob_star_matches_everything();
+    test_strglob_question_single_char();
+    test_strglob_mismatch();
+    test_strglob_literal_match();
+    test_strglob_prefix_pattern();
+    test_strlike_percent_matches();
+    test_strlike_underscore_matches_single();
+    test_strlike_case_insensitive();
+    test_strlike_escape_literalises();
+}

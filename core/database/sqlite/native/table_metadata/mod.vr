@@ -1,0 +1,23 @@
+// =============================================================================
+// core/database/sqlite/native/table_metadata/mod.vr
+// =============================================================================
+// Layer: 7 (façade — sqlite3_table_column_metadata)
+// Spec: SQLite C API
+//
+//   sqlite3_table_column_metadata(db, zDbName, zTableName, zColumnName,
+//                                 &pzDataType, &pzCollSeq,
+//                                 &pNotNull, &pPrimaryKey, &pAutoinc)
+//
+// Reflects the schema of a column without parsing its CREATE TABLE.
+// Returning pzColumnName == NULL requests only "does the table
+// exist?" (all five out-values are left in their default state).
+//
+// Submodules:
+//   * `column_info`  — ColumnInfo record with data_type/collation/flags
+//   * `query`        — TableColumnQuery + Outcome (found/unknown table/column)
+// =============================================================================
+
+module core.database.sqlite.native.table_metadata;
+
+public module column_info;
+public module query;

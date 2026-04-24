@@ -268,3 +268,19 @@ public module recover;
 public module drop_modules;
 // - checkpoint_api: sqlite3_wal_checkpoint / _v2 / _autocheckpoint — request + progress + auto-threshold
 public module checkpoint_api;
+// - table_metadata: sqlite3_table_column_metadata — reflect col type/collation/notnull/pk/autoinc
+public module table_metadata;
+// - keyword_api: sqlite3_keyword_count / _keyword_name / _keyword_check — reserved-word reflection
+public module keyword_api;
+// - printf_api: sqlite3_mprintf / _str_* / _snprintf — printf-style formatting + incremental builder
+public module printf_api;
+// - strcmp_api: sqlite3_stricmp / _strnicmp / _strglob / _strlike — case-insensitive comparators
+public module strcmp_api;
+// - randomness_api: sqlite3_randomness — public PRNG façade + request/engine bookkeeping
+public module randomness_api;
+// - sleep_api: sqlite3_sleep — blocking sleep + floor clamp + stats
+public module sleep_api;
+// - free_api: sqlite3_malloc / _realloc / _free / _msize — public allocator surface
+public module free_api;
+// - version_api: sqlite3_libversion / _sourceid / _compileoption_get / _used — version + build flags
+public module version_api;

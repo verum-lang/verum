@@ -1,0 +1,88 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, randomness_api, prng, capi
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.randomness_api.request.{
+    RandomnessRequest, RrFill, RrReseed, RrNoop,
+    request_for, is_reseed, fill_size,
+};
+mount core.database.sqlite.native.randomness_api.engine.{
+    RandomnessEngine, new_engine,
+};
+mount collections.List;
+mount base.{Bool};
+
+fn test_request_for_zero_is_noop() {
+    let empty: List<u8> = List.new();
+    match request_for(0, empty) { RrNoop => {}, _ => assert(false) }
+}
+
+fn test_request_for_positive_is_fill() {
+    let empty: List<u8> = List.new();
+    let r = request_for(128, empty);
+    match &r { RrFill(_) => {}, _ => assert(false) }
+    assert_eq(fill_size(&r), 128);
+    assert(!is_reseed(&r));
+}
+
+fn test_request_for_negative_is_reseed() {
+    let mut bytes: List<u8> = List.new();
+    bytes.push(0xDE as u8);
+    bytes.push(0xAD as u8);
+    bytes.push(0xBE as u8);
+    bytes.push(0xEF as u8);
+    let r = request_for(-4, bytes);
+    assert(is_reseed(&r));
+}
+
+fn test_engine_initial_state() {
+    let e = new_engine();
+    assert(!e.seeded);
+    assert_eq(e.bytes_generated, 0 as Int64);
+    assert_eq(e.reseed_count, 0 as Int64);
+    assert_eq(e.noop_count, 0 as Int64);
+}
+
+fn test_engine_drive_fill_seeds_and_counts() {
+    let empty: List<u8> = List.new();
+    let req = request_for(64, empty);
+    let mut e = new_engine();
+    let bytes = e.drive(&req);
+    assert_eq(bytes, 64);
+    assert(e.seeded);
+    assert_eq(e.bytes_generated, 64 as Int64);
+}
+
+fn test_engine_drive_reseed_increments_counter() {
+    let mut seed: List<u8> = List.new();
+    seed.push(0x01 as u8);
+    seed.push(0x02 as u8);
+    let req = request_for(-2, seed);
+    let mut e = new_engine();
+    let _ = e.drive(&req);
+    assert_eq(e.reseed_count, 1 as Int64);
+    assert(e.seeded);
+}
+
+fn test_engine_drive_noop_no_effect_except_count() {
+    let empty: List<u8> = List.new();
+    let req = request_for(0, empty);
+    let mut e = new_engine();
+    let bytes = e.drive(&req);
+    assert_eq(bytes, 0);
+    assert(!e.seeded);
+    assert_eq(e.noop_count, 1 as Int64);
+}
+
+fn main() {
+    test_request_for_zero_is_noop();
+    test_request_for_positive_is_fill();
+    test_request_for_negative_is_reseed();
+    test_engine_initial_state();
+    test_engine_drive_fill_seeds_and_counts();
+    test_engine_drive_reseed_increments_counter();
+    test_engine_drive_noop_no_effect_except_count();
+}

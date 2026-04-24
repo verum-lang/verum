@@ -1,0 +1,172 @@
+// =============================================================================
+// keyword_api/table.vr — canonical keyword table
+// =============================================================================
+// Spec: SQLite C API — the ~145 words SQLite treats as reserved in
+// its grammar (see mkkeywordhash.c in the SQLite source).  The
+// catalogue ships a compact uppercase list; sqlite3_keyword_check
+// matches case-insensitively.
+// =============================================================================
+
+module core.database.sqlite.native.keyword_api.table;
+
+mount core.*;
+mount base.{Bool, Text};
+mount collections.List;
+
+/// Canonical uppercase keyword list.  Order is stable — callers of
+/// sqlite3_keyword_name iterate by index.
+public fn keywords() -> List<Text> {
+    let mut out: List<Text> = List.new();
+    out.push("ABORT".clone());
+    out.push("ACTION".clone());
+    out.push("ADD".clone());
+    out.push("AFTER".clone());
+    out.push("ALL".clone());
+    out.push("ALTER".clone());
+    out.push("ALWAYS".clone());
+    out.push("ANALYZE".clone());
+    out.push("AND".clone());
+    out.push("AS".clone());
+    out.push("ASC".clone());
+    out.push("ATTACH".clone());
+    out.push("AUTOINCREMENT".clone());
+    out.push("BEFORE".clone());
+    out.push("BEGIN".clone());
+    out.push("BETWEEN".clone());
+    out.push("BY".clone());
+    out.push("CASCADE".clone());
+    out.push("CASE".clone());
+    out.push("CAST".clone());
+    out.push("CHECK".clone());
+    out.push("COLLATE".clone());
+    out.push("COLUMN".clone());
+    out.push("COMMIT".clone());
+    out.push("CONFLICT".clone());
+    out.push("CONSTRAINT".clone());
+    out.push("CREATE".clone());
+    out.push("CROSS".clone());
+    out.push("CURRENT".clone());
+    out.push("CURRENT_DATE".clone());
+    out.push("CURRENT_TIME".clone());
+    out.push("CURRENT_TIMESTAMP".clone());
+    out.push("DATABASE".clone());
+    out.push("DEFAULT".clone());
+    out.push("DEFERRABLE".clone());
+    out.push("DEFERRED".clone());
+    out.push("DELETE".clone());
+    out.push("DESC".clone());
+    out.push("DETACH".clone());
+    out.push("DISTINCT".clone());
+    out.push("DO".clone());
+    out.push("DROP".clone());
+    out.push("EACH".clone());
+    out.push("ELSE".clone());
+    out.push("END".clone());
+    out.push("ESCAPE".clone());
+    out.push("EXCEPT".clone());
+    out.push("EXCLUDE".clone());
+    out.push("EXCLUSIVE".clone());
+    out.push("EXISTS".clone());
+    out.push("EXPLAIN".clone());
+    out.push("FAIL".clone());
+    out.push("FILTER".clone());
+    out.push("FIRST".clone());
+    out.push("FOLLOWING".clone());
+    out.push("FOR".clone());
+    out.push("FOREIGN".clone());
+    out.push("FROM".clone());
+    out.push("FULL".clone());
+    out.push("GENERATED".clone());
+    out.push("GLOB".clone());
+    out.push("GROUP".clone());
+    out.push("GROUPS".clone());
+    out.push("HAVING".clone());
+    out.push("IF".clone());
+    out.push("IGNORE".clone());
+    out.push("IMMEDIATE".clone());
+    out.push("IN".clone());
+    out.push("INDEX".clone());
+    out.push("INDEXED".clone());
+    out.push("INITIALLY".clone());
+    out.push("INNER".clone());
+    out.push("INSERT".clone());
+    out.push("INSTEAD".clone());
+    out.push("INTERSECT".clone());
+    out.push("INTO".clone());
+    out.push("IS".clone());
+    out.push("ISNULL".clone());
+    out.push("JOIN".clone());
+    out.push("KEY".clone());
+    out.push("LAST".clone());
+    out.push("LEFT".clone());
+    out.push("LIKE".clone());
+    out.push("LIMIT".clone());
+    out.push("MATCH".clone());
+    out.push("MATERIALIZED".clone());
+    out.push("NATURAL".clone());
+    out.push("NO".clone());
+    out.push("NOT".clone());
+    out.push("NOTHING".clone());
+    out.push("NOTNULL".clone());
+    out.push("NULL".clone());
+    out.push("NULLS".clone());
+    out.push("OF".clone());
+    out.push("OFFSET".clone());
+    out.push("ON".clone());
+    out.push("OR".clone());
+    out.push("ORDER".clone());
+    out.push("OTHERS".clone());
+    out.push("OUTER".clone());
+    out.push("OVER".clone());
+    out.push("PARTITION".clone());
+    out.push("PLAN".clone());
+    out.push("PRAGMA".clone());
+    out.push("PRECEDING".clone());
+    out.push("PRIMARY".clone());
+    out.push("QUERY".clone());
+    out.push("RAISE".clone());
+    out.push("RANGE".clone());
+    out.push("RECURSIVE".clone());
+    out.push("REFERENCES".clone());
+    out.push("REGEXP".clone());
+    out.push("REINDEX".clone());
+    out.push("RELEASE".clone());
+    out.push("RENAME".clone());
+    out.push("REPLACE".clone());
+    out.push("RESTRICT".clone());
+    out.push("RETURNING".clone());
+    out.push("RIGHT".clone());
+    out.push("ROLLBACK".clone());
+    out.push("ROW".clone());
+    out.push("ROWS".clone());
+    out.push("SAVEPOINT".clone());
+    out.push("SELECT".clone());
+    out.push("SET".clone());
+    out.push("TABLE".clone());
+    out.push("TEMP".clone());
+    out.push("TEMPORARY".clone());
+    out.push("THEN".clone());
+    out.push("TIES".clone());
+    out.push("TO".clone());
+    out.push("TRANSACTION".clone());
+    out.push("TRIGGER".clone());
+    out.push("UNBOUNDED".clone());
+    out.push("UNION".clone());
+    out.push("UNIQUE".clone());
+    out.push("UPDATE".clone());
+    out.push("USING".clone());
+    out.push("VACUUM".clone());
+    out.push("VALUES".clone());
+    out.push("VIEW".clone());
+    out.push("VIRTUAL".clone());
+    out.push("WHEN".clone());
+    out.push("WHERE".clone());
+    out.push("WINDOW".clone());
+    out.push("WITH".clone());
+    out.push("WITHOUT".clone());
+    out
+}
+
+public fn keyword_count() -> Int {
+    keywords().len()
+}

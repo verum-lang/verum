@@ -1,0 +1,22 @@
+// =============================================================================
+// core/database/sqlite/native/free_api/mod.vr
+// =============================================================================
+// Layer: 7 (façade — public allocator API)
+// Spec: SQLite C API
+//
+//   sqlite3_malloc(int)        → void *
+//   sqlite3_malloc64(u64)      → void *
+//   sqlite3_realloc(void *, int)
+//   sqlite3_realloc64(void *, u64)
+//   sqlite3_free(void *)
+//   sqlite3_msize(void *)      → u64   actual bytes allocated
+//
+// Submodules:
+//   * `ptr`      — OpaqueHandle (u64 id)
+//   * `engine`   — simulated allocator + stats; delegates to mem_methods
+// =============================================================================
+
+module core.database.sqlite.native.free_api;
+
+public module ptr;
+public module engine;

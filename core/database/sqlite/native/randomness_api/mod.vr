@@ -1,0 +1,23 @@
+// =============================================================================
+// core/database/sqlite/native/randomness_api/mod.vr
+// =============================================================================
+// Layer: 7 (façade — sqlite3_randomness)
+// Spec: SQLite C API
+//
+//   sqlite3_randomness(int N, void *P)
+//
+// Fills `P[0..N]` with pseudo-random bytes.  This is the public façade
+// over the internal ARC4 PRNG exposed via `prng/`.  N < 0 is a
+// zero-fill request (docs note: "If N is negative, then the PRNG is
+// reset to its initial state using the seed in the first N bytes of
+// P" — we model both shapes).
+//
+// Submodules:
+//   * `request`  — RandomnessRequest (size + reseed bytes)
+//   * `engine`   — per-connection / per-process bookkeeping
+// =============================================================================
+
+module core.database.sqlite.native.randomness_api;
+
+public module request;
+public module engine;

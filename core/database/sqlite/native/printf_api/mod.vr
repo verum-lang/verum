@@ -1,0 +1,29 @@
+// =============================================================================
+// core/database/sqlite/native/printf_api/mod.vr
+// =============================================================================
+// Layer: 7 (façade — sqlite3_mprintf / sqlite3_str_*)
+// Spec: SQLite C API
+//
+//   sqlite3_mprintf(fmt, …)       → malloc'd Text
+//   sqlite3_snprintf(n, buf, …)   → truncate into buf
+//   sqlite3_vsnprintf(n, buf, …)  → va_list variant
+//   sqlite3_str_new(db)
+//   sqlite3_str_appendall(str, z)
+//   sqlite3_str_appendf(str, fmt, …)
+//   sqlite3_str_append(str, z, n)
+//   sqlite3_str_finish(str) → malloc'd Text
+//   sqlite3_str_length(str)
+//   sqlite3_str_value(str)
+//   sqlite3_str_reset(str)
+//
+// Submodules:
+//   * `conv`     — ConvKind sum + parsing of %-escapes
+//   * `builder`  — sqlite3_str incremental builder (SqliteStr type)
+//   * `engine`   — finish / reset / snprintf semantics
+// =============================================================================
+
+module core.database.sqlite.native.printf_api;
+
+public module conv;
+public module builder;
+public module engine;

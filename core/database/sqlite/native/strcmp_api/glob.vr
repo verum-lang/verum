@@ -1,0 +1,61 @@
+// =============================================================================
+// strcmp_api/glob.vr — sqlite3_strglob
+// =============================================================================
+// Spec: SQLite C API
+//
+// GLOB: byte-exact, case-sensitive:
+//   *  — zero or more characters
+//   ?  — exactly one character
+//
+// Uses an iterative two-pointer walk with a single saved "last-star"
+// position — no recursion.
+// =============================================================================
+
+module core.database.sqlite.native.strcmp_api.glob;
+
+mount core.*;
+mount base.{Bool, Text};
+mount collections.List;
+
+fn glob_match(pat: &Text, txt: &Text) -> Bool {
+    let pb = pat.as_bytes();
+    let tb = txt.as_bytes();
+    let pn = pb.len();
+    let tn = tb.len();
+    let mut pi: Int = 0;
+    let mut ti: Int = 0;
+    let mut star_pi: Int = -1;
+    let mut star_ti: Int = 0;
+    while ti < tn {
+        if pi < pn && pb[pi] == (0x2A as u8) {
+            star_pi = pi;
+            star_ti = ti;
+            pi = pi + 1;
+            continue;
+        }
+        if pi < pn && pb[pi] == (0x3F as u8) {
+            pi = pi + 1;
+            ti = ti + 1;
+            continue;
+        }
+        if pi < pn && pb[pi] == tb[ti] {
+            pi = pi + 1;
+            ti = ti + 1;
+            continue;
+        }
+        if star_pi >= 0 {
+            pi = star_pi + 1;
+            star_ti = star_ti + 1;
+            ti = star_ti;
+            continue;
+        }
+        return false;
+    }
+    while pi < pn && pb[pi] == (0x2A as u8) { pi = pi + 1; }
+    pi >= pn
+}
+
+/// Returns 0 on match, 1 otherwise — matches sqlite3_strglob.
+public fn sqlite3_strglob(pattern: &Text, text: &Text) -> Int {
+    if glob_match(pattern, text) { 0 } else { 1 }
+}

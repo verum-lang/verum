@@ -1,0 +1,101 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, table_metadata, reflection, capi
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.table_metadata.column_info.{
+    ColumnInfo, new_info, is_consistent, affinity_hint,
+};
+mount core.database.sqlite.native.table_metadata.query.{
+    TableColumnQuery, QueryOutcome,
+    QoColumn, QoTableOnly, QoUnknownTable, QoUnknownColumn,
+    column_query, table_exists_query, is_existence_query,
+    is_found, outcome_numeric,
+};
+mount base.{Bool, Maybe};
+
+fn test_info_record_fields() {
+    let ci = new_info(
+        "INTEGER".clone(), "BINARY".clone(),
+        true, true, true,
+    );
+    assert(ci.not_null);
+    assert(ci.primary_key);
+    assert(ci.autoinc);
+    assert(ci.data_type == "INTEGER".clone());
+}
+
+fn test_is_consistent_autoinc_requires_pk() {
+    let bad = new_info("INT".clone(), "BINARY".clone(), false, false, true);
+    assert(!is_consistent(&bad));
+    let ok = new_info("INT".clone(), "BINARY".clone(), false, true, true);
+    assert(is_consistent(&ok));
+}
+
+fn test_affinity_hint_integer() {
+    let ci = new_info("BIGINT".clone(), "BINARY".clone(), false, false, false);
+    assert(affinity_hint(&ci) == "INTEGER".clone());
+}
+
+fn test_affinity_hint_text() {
+    let ci = new_info("VARCHAR(100)".clone(), "BINARY".clone(), false, false, false);
+    assert(affinity_hint(&ci) == "TEXT".clone());
+}
+
+fn test_affinity_hint_blob() {
+    let ci = new_info("BLOB".clone(), "BINARY".clone(), false, false, false);
+    assert(affinity_hint(&ci) == "BLOB".clone());
+}
+
+fn test_affinity_hint_real() {
+    let ci = new_info("DOUBLE PRECISION".clone(), "BINARY".clone(), false, false, false);
+    assert(affinity_hint(&ci) == "REAL".clone());
+}
+
+fn test_affinity_hint_fallback_numeric() {
+    let ci = new_info("DECIMAL".clone(), "BINARY".clone(), false, false, false);
+    assert(affinity_hint(&ci) == "NUMERIC".clone());
+}
+
+fn test_column_query_builds() {
+    let q = column_query("main".clone(), "users".clone(), "id".clone());
+    assert(!is_existence_query(&q));
+}
+
+fn test_table_exists_query() {
+    let q = table_exists_query("main".clone(), "users".clone());
+    assert(is_existence_query(&q));
+}
+
+fn test_outcome_found_flags() {
+    let ci = new_info("INT".clone(), "BINARY".clone(), false, false, false);
+    let o: QueryOutcome = QoColumn(ci);
+    assert(is_found(&o));
+    assert(is_found(&QoTableOnly));
+    assert(!is_found(&QoUnknownTable));
+    assert(!is_found(&QoUnknownColumn));
+}
+
+fn test_outcome_numeric() {
+    let ci = new_info("INT".clone(), "BINARY".clone(), false, false, false);
+    assert_eq(outcome_numeric(&QoColumn(ci)), 0);
+    assert_eq(outcome_numeric(&QoTableOnly), 0);
+    assert_eq(outcome_numeric(&QoUnknownTable), 1);
+    assert_eq(outcome_numeric(&QoUnknownColumn), 1);
+}
+
+fn main() {
+    test_info_record_fields();
+    test_is_consistent_autoinc_requires_pk();
+    test_affinity_hint_integer();
+    test_affinity_hint_text();
+    test_affinity_hint_blob();
+    test_affinity_hint_real();
+    test_affinity_hint_fallback_numeric();
+    test_column_query_builds();
+    test_table_exists_query();
+    test_outcome_found_flags();
+    test_outcome_numeric();
+}

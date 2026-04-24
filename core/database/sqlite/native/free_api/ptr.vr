@@ -1,0 +1,30 @@
+// =============================================================================
+// free_api/ptr.vr — OpaqueHandle for allocator returns
+// =============================================================================
+// Spec: SQLite C API
+//
+// sqlite3_malloc returns a raw pointer; catalogue-layer code uses an
+// opaque Int64 handle to stand in.  0 is the NULL sentinel.
+// =============================================================================
+
+module core.database.sqlite.native.free_api.ptr;
+
+mount core.*;
+mount base.{Bool};
+
+public type OpaqueHandle is {
+    id: Int64,
+    size: Int64,
+}
+
+public fn null_handle() -> OpaqueHandle {
+    OpaqueHandle { id: 0 as Int64, size: 0 as Int64 }
+}
+
+public fn new_handle(id: Int64, size: Int64) -> OpaqueHandle {
+    OpaqueHandle { id: id, size: size }
+}
+
+public fn is_null(h: &OpaqueHandle) -> Bool {
+    h.id == (0 as Int64)
+}
