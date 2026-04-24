@@ -1,12 +1,12 @@
 // @test: unit
 // @tier: 0
 // @level: L3
-// @tags: mathesis, translation, kan-extension
+// @tags: theory_interop, translation, kan-extension
 // @expect: pass
 //
-// Test: Mathesis translation between theories via Kan extensions.
+// Test: theory-interop translation between theories via Kan extensions.
 
-mount core.mathesis.*;
+mount core.theory_interop.*;
 mount core.math.epistemic.{Theory, Claim, ClaimType, EpistemicStatus};
 
 fn main() {

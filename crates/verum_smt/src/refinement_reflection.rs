@@ -35,13 +35,16 @@
 //! of the registry and call [`apply_to_solver`] before discharging
 //! a goal — this asserts every relevant axiom into the Z3 context.
 //!
-//! ## Mathesis-readiness
+//! ## Why it matters
 //!
 //! Refinement reflection is what makes SMT-backed proofs over
 //! arbitrary user data structures feasible at scale: without it,
-//! every helper function is opaque to Z3 and the user has to rewrite
-//! manually. With it, the proof search can chain unfoldings of
-//! user-defined functions automatically.
+//! every helper function is opaque to Z3 and the user has to
+//! rewrite manually. With it, the proof search can chain
+//! unfoldings of user-defined functions automatically — the
+//! mechanism that scales refinement types from trivial integer
+//! bounds to domain-rich stdlib and downstream-project proof
+//! corpora.
 
 use verum_common::{List, Map, Text};
 

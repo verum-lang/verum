@@ -262,12 +262,14 @@ public module mesh;
 // Layer A: Application (Depends on: math, io, collections)
 // =============================================================================
 
-// Mathesis: The Computational ∞-Topos of Formal Theories.
-// Theory loading (Yoneda), translation (Kan extensions), coherence (descent),
-// auditing. MCP JSON-RPC protocol server for Claude integration.
-// Built on: math.epistemic, math.infinity_topos, math.kan_extension,
-// math.quantum_logic, math.giry, math.cohesive, math.day_convolution.
-public module mathesis;
+// Theory interoperation: a computational ∞-topos of formally
+// represented theories. Theory loading (Yoneda), translation
+// (Kan extensions), coherence (descent), auditing, and a
+// JSON-RPC wire protocol for external tooling.
+// Built on: math.epistemic, math.infinity_topos,
+// math.kan_extension, math.quantum_logic, math.giry,
+// math.cohesive, math.day_convolution.
+public module theory_interop;
 
 // =============================================================================
 // Layer M: Meta (Compile-time, no runtime dependencies)

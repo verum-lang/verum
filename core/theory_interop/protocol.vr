@@ -1,12 +1,12 @@
 // =============================================================================
-// protocol.vr — Mathesis MCP JSON-RPC Server
+// protocol.vr — Theory-interop JSON-RPC Server
 // =============================================================================
-// Layer: Application (Mathesis Framework)
-// Spec: verum-ext.md §5.2 — Mathesis MCP Protocol
+// Layer: Application (Theory Interoperation)
+// Spec: Theory-interop JSON-RPC protocol
 //
 // Implements the Model Context Protocol (MCP) JSON-RPC 2.0 server for
-// the Mathesis ∞-topos. External tools (LLM agents, IDE plug-ins, CLI)
-// communicate with Mathesis through this thin JSON envelope layer.
+// the theory-interop ∞-topos. External tools (LLM agents, IDE plug-ins, CLI)
+// communicate with the theory-interop layer through this thin JSON envelope layer.
 //
 // Supported methods:
 //   theory/list        — enumerate all loaded theories
@@ -16,7 +16,7 @@
 //   theory/load        — load a theory from a JSON parameter blob
 //   theory/coherence   — check coherence across a set of translation pairs
 //
-// Error codes follow JSON-RPC 2.0 conventions extended with Mathesis codes:
+// Error codes follow JSON-RPC 2.0 conventions extended with theory-interop-specific codes:
 //   -32700  Parse error
 //   -32600  Invalid request
 //   -32601  Method not found (404)
@@ -27,14 +27,14 @@
 //    1003   Coherence violation
 //
 // Dependencies:
-//   core.mathesis.core  — registry, load/translate/audit/coherence
+//   core.theory_interop.core  — registry, load/translate/audit/coherence
 //   core.math.epistemic — Theory, Claim, ClaimType, EpistemicStatus
 // =============================================================================
 
-module core.mathesis.protocol;
+module core.theory_interop.protocol;
 
-mount core.mathesis.core.{
-    MathesisRegistry,
+mount core.theory_interop.core.{
+    TheoryRegistry,
     LoadedTheory,
     TranslationResult,
     CoherenceResult,
@@ -302,18 +302,18 @@ fn err_response(id: Int, code: Int, message: Text) -> JsonRpcResponse {
 }
 
 // =============================================================================
-// §5. MathesisServer — stateful request handler
+// §5. TheoryInteropServer — stateful request handler
 // =============================================================================
 
-/// The Mathesis MCP server.  Wraps a `MathesisRegistry` and dispatches
+/// The theory-interop JSON-RPC server.  Wraps a `TheoryRegistry` and dispatches
 /// incoming JSON-RPC requests to the appropriate core functions.
-public type MathesisServer is {
-    registry: MathesisRegistry,
+public type TheoryInteropServer is {
+    registry: TheoryRegistry,
 };
 
 /// Construct a new server with an empty registry.
-public fn new_server() -> MathesisServer {
-    MathesisServer {
+public fn new_server() -> TheoryInteropServer {
+    TheoryInteropServer {
         registry: new_registry(),
     }
 }
@@ -326,7 +326,7 @@ public fn new_server() -> MathesisServer {
 ///
 /// Returns a JSON array of all loaded theory names.
 /// Parameters: {} (none required)
-fn handle_list_theories(server: &MathesisServer, id: Int) -> JsonRpcResponse {
+fn handle_list_theories(server: &TheoryInteropServer, id: Int) -> JsonRpcResponse {
     let names = list_theories(&server.registry);
     let json  = serialize_text_list(&names);
     ok_response(id, json)
@@ -337,7 +337,7 @@ fn handle_list_theories(server: &MathesisServer, id: Int) -> JsonRpcResponse {
 /// Translates claims between two theories using Kan extensions.
 /// Parameters: {"source": "<name>", "target": "<name>", "map": "[]"}
 fn handle_translate(
-    server: &MathesisServer,
+    server: &TheoryInteropServer,
     id:     Int,
     params: &Text,
 ) -> JsonRpcResponse {
@@ -367,7 +367,7 @@ fn handle_translate(
 /// Audits a named theory for internal consistency.
 /// Parameters: {"theory": "<name>"}
 fn handle_audit_theory(
-    server: &mut MathesisServer,
+    server: &mut TheoryInteropServer,
     id:     Int,
     params: &Text,
 ) -> JsonRpcResponse {
@@ -405,7 +405,7 @@ fn handle_audit_meta(id: Int) -> JsonRpcResponse {
 /// Loads a new theory from a JSON parameter blob and registers it.
 /// Parameters: {"name": "<name>", "body": "<theory-json>"}
 fn handle_load_theory(
-    server: &mut MathesisServer,
+    server: &mut TheoryInteropServer,
     id:     Int,
     params: &Text,
 ) -> JsonRpcResponse {
@@ -434,7 +434,7 @@ fn handle_load_theory(
 /// Checks coherence across a set of translation pairs.
 /// Parameters: {"pairs": "[[\"T1\",\"T2\"],[\"T2\",\"T3\"]]"}
 fn handle_coherence(
-    server: &MathesisServer,
+    server: &TheoryInteropServer,
     id:     Int,
     params: &Text,
 ) -> JsonRpcResponse {
@@ -500,7 +500,7 @@ fn parse_name_pairs(json: &Text) -> List<(Text, Text)> {
 /// This is the primary entry point for the MCP server.  All unknown methods
 /// return error code -32601 (Method not found).
 public fn handle_request(
-    server: &mut MathesisServer,
+    server: &mut TheoryInteropServer,
     req:    JsonRpcRequest,
 ) -> JsonRpcResponse {
     match req.method {
@@ -532,7 +532,7 @@ public fn handle_request(
 /// Identical to `handle_request`; provided as a named entry-point for
 /// callers that prefer a free function over method syntax.
 public fn serve_request(
-    server: &mut MathesisServer,
+    server: &mut TheoryInteropServer,
     req:    JsonRpcRequest,
 ) -> JsonRpcResponse {
     handle_request(server, req)

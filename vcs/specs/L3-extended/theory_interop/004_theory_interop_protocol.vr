@@ -1,12 +1,12 @@
 // @test: unit
 // @tier: 0
 // @level: L3
-// @tags: mathesis, protocol, mcp, json-rpc
+// @tags: theory_interop, protocol, mcp, json-rpc
 // @expect: pass
 //
-// Test: Mathesis MCP JSON-RPC protocol — all 6 methods.
+// Test: theory-interop JSON-RPC protocol — all 6 methods.
 
-mount core.mathesis.*;
+mount core.theory_interop.*;
 
 fn main() {
     let mut server = new_server();

@@ -1,12 +1,12 @@
 // @test: unit
 // @tier: 0
 // @level: L3
-// @tags: mathesis, registry, theory
+// @tags: theory_interop, registry, theory
 // @expect: pass
 //
-// Test: Mathesis theory registry — load, find, list operations.
+// Test: theory-interop registry — load, find, list operations.
 
-mount core.mathesis.*;
+mount core.theory_interop.*;
 mount core.math.epistemic.{Theory, Claim, ClaimType, EpistemicStatus};
 
 fn main() {

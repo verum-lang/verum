@@ -854,7 +854,9 @@ impl SmtBackendSwitcher {
         if matches!(name, "select" | "store" | "array_select" | "array_store") {
             chars.has_arrays = true;
         }
-        // Descent / sheaf (security-critical in Mathesis)
+        // Descent / sheaf — security-critical for theory-
+        // interop consumers (coherence proofs over translation
+        // chains).
         if matches!(
             name,
             "check_descent" | "verify_descent" | "sheaf_condition" | "compatible_sections"

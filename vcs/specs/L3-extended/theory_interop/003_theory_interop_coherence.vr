@@ -1,12 +1,12 @@
 // @test: unit
 // @tier: 0
 // @level: L3
-// @tags: mathesis, coherence, descent
+// @tags: theory_interop, coherence, descent
 // @expect: pass
 //
-// Test: Mathesis coherence checking across theory translations.
+// Test: theory-interop coherence checking across theory translations.
 
-mount core.mathesis.*;
+mount core.theory_interop.*;
 mount core.math.epistemic.{Theory, Claim, ClaimType, EpistemicStatus};
 
 fn main() {

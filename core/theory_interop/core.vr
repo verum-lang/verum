@@ -1,10 +1,10 @@
 // =============================================================================
-// core.vr — Mathesis: The Computational ∞-Topos of Formal Theories
+// core.vr — Theory Interop: Computational ∞-Topos of Theories
 // =============================================================================
-// Layer: Application (Mathesis Framework)
-// Spec: verum-ext.md §5.1 — Mathesis Core
+// Layer: Application (Theory Interoperation)
+// Spec: Theory-interop core
 //
-// Mathesis is the computational ∞-topos where formal theories live as
+// A computational ∞-topos where formally-represented theories live as
 // sheaves. This module provides the three fundamental operations:
 //
 //   1. load_theory()    — Yoneda embedding: Theory → Sh_∞(Th, J_ep)
@@ -25,14 +25,14 @@
 //   core.math.giry           — LlmOracle (for stochastic translation)
 // =============================================================================
 
-module core.mathesis.core;
+module core.theory_interop.core;
 
 mount core.math.epistemic.{
     EpistemicStatus, Theory, Claim, ClaimType,
     EpistemicTopology, propagate_status, StatusChange,
     compute_kan_extension as epistemic_kan,
     compute_obstruction as epistemic_obstruction,
-    theory_site, mathesis as mathesis_topos,
+    theory_site, theory_universe,
     theory_category, epistemic_topology,
 };
 mount core.math.infinity_topos.{
@@ -54,7 +54,7 @@ mount core.math.giry.{Giry, LlmOracle, sample_above};
 // §1. Theory Registration and Yoneda Embedding
 // =============================================================================
 
-/// A loaded theory in the Mathesis ∞-topos: the result of Yoneda embedding.
+/// A loaded theory in the theory ∞-topos: the result of Yoneda embedding.
 /// The sheaf F_T = y(T) represents the theory as an object in Sh_∞(Th, J_ep).
 public type LoadedTheory is {
     /// The underlying theory data.
@@ -67,23 +67,23 @@ public type LoadedTheory is {
     dependency_count: Int,
 };
 
-/// The Mathesis registry: keeps track of all loaded theories.
-public type MathesisRegistry is {
+/// The theory registry: keeps track of all loaded theories.
+public type TheoryRegistry is {
     theories: List<LoadedTheory>,
     translations: List<TranslationRecord>,
     next_handle: Int,
 };
 
-/// Create a new empty Mathesis registry.
-public fn new_registry() -> MathesisRegistry {
-    MathesisRegistry {
+/// Create a new empty theory registry.
+public fn new_registry() -> TheoryRegistry {
+    TheoryRegistry {
         theories: List::new(),
         translations: List::new(),
         next_handle: 1,
     }
 }
 
-/// Load a theory into the Mathesis ∞-topos via Yoneda embedding.
+/// Load a theory into the theory ∞-topos via Yoneda embedding.
 ///
 /// The Yoneda embedding y : Th → Sh_∞(Th, J_ep) sends each theory T
 /// to the representable sheaf y(T)(S) = Hom(S, T). This is the
@@ -94,7 +94,7 @@ public fn new_registry() -> MathesisRegistry {
 ///   - y preserves limits: y(lim T_i) = lim y(T_i)
 ///   - y(T) is always a sheaf (representables are sheaves)
 public fn load_theory(
-    registry: &mut MathesisRegistry,
+    registry: &mut TheoryRegistry,
     theory: Theory,
 ) -> LoadedTheory {
     let handle = registry.next_handle;
@@ -115,7 +115,7 @@ public fn load_theory(
 }
 
 /// Find a loaded theory by name.
-public fn find_theory(registry: &MathesisRegistry, name: &Text) -> Maybe<&LoadedTheory> {
+public fn find_theory(registry: &TheoryRegistry, name: &Text) -> Maybe<&LoadedTheory> {
     for t in registry.theories.iter() {
         if t.theory.name == *name {
             return Some(t);
@@ -125,7 +125,7 @@ public fn find_theory(registry: &MathesisRegistry, name: &Text) -> Maybe<&Loaded
 }
 
 /// List all loaded theories.
-public fn list_theories(registry: &MathesisRegistry) -> List<Text> {
+public fn list_theories(registry: &TheoryRegistry) -> List<Text> {
     registry.theories.iter().map(fn(t) -> t.theory.name.clone()).collect()
 }
 
@@ -283,10 +283,10 @@ public type CoherenceResult is
 ///   2. Descent condition: the Čech nerve of the covering resolves
 ///   3. No circular contradictions in epistemic status
 ///
-/// This is the computational heart of the Mathesis system: it verifies
+/// This is the computational heart of the theory-interop system: it verifies
 /// that a web of theory translations forms a consistent picture.
 public fn check_coherence(
-    registry: &MathesisRegistry,
+    registry: &TheoryRegistry,
     translation_pairs: &List<(Text, Text)>,
 ) -> CoherenceResult {
     // Build Translation objects from registry
@@ -422,10 +422,10 @@ public fn audit_theory(theory: &mut Theory) -> AuditResult {
     }
 }
 
-/// Audit the meta-theory T_meta (the theory about Mathesis itself).
+/// Audit the meta-theory T_meta (the theory about the registry itself).
 ///
 /// The meta-theory has a special constraint: claims about the
-/// consistency of Mathesis cannot have status stronger than [H]
+/// consistency of the registry cannot have status stronger than [H]
 /// (Hypothesis), by Gödel's second incompleteness theorem.
 public fn audit_meta() -> AuditResult {
     // T_meta is a fixed theory with known structure
@@ -440,7 +440,7 @@ public fn audit_meta() -> AuditResult {
     meta_theory.statements.push(Claim {
         id: f"meta_consistency",
         claim_type: ClaimType.Conjecture,
-        content: f"Mathesis is internally consistent",
+        content: f"The theory-interop layer is internally consistent",
         status: EpistemicStatus.Hypothesis,
     });
 

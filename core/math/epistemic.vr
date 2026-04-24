@@ -2,14 +2,14 @@
 // epistemic.vr — Epistemic Status, Claims, and Theory Sites
 // =============================================================================
 // Layer: Foundations (Mathematical Structures)
-// Spec: verum-ext-2.md §3.3 — Formal Epistemology and Theory Sites
 //
-// Implements the epistemic framework for the Mathesis ∞-topos project.
-// A Theory is represented as an ∞-category of Claims equipped with an
+// Epistemic framework for formally-represented theories. A Theory
+// is represented as an ∞-category of Claims equipped with an
 // EpistemicFunctor (assigning epistemic status to each claim), a
-// Grothendieck topology (EpistemicTopology) capturing "joint faithfulness"
-// cover relations, and Kan-extension machinery for propagating status
-// across theory morphisms.
+// Grothendieck topology (EpistemicTopology) capturing "joint
+// faithfulness" cover relations, and Kan-extension machinery for
+// propagating status across theory morphisms. Building block for
+// theory-interop consumers (see `core.theory_interop`).
 //
 // Key constructions:
 //   * EpistemicStatus   — ordered variant type for proof strength
@@ -517,20 +517,31 @@ theorem jep_is_grothendieck_topology()
 // export collector.
 
 // =============================================================================
-// 8. mathesis — the ∞-topos of epistemic sheaves
+// 8. Theory ∞-topos — the ∞-topos of epistemic sheaves
 // =============================================================================
 
-/// Construct the **mathesis ∞-topos**: the ∞-category of ∞-sheaves on
-/// `theory_site`.  By the general theory (HTT §6.2.2), this is an
-/// ∞-topos.
+/// Construct the **theory ∞-topos**: the ∞-category of ∞-sheaves
+/// on `theory_site`. By the general theory (HTT §6.2.2), this is
+/// an ∞-topos.
 ///
-/// In the Mathesis project this ∞-topos is the semantic universe in
-/// which all formal knowledge lives: a claim is "true" iff the
-/// corresponding sheaf has a global section.
-public fn mathesis_topos() -> SheafInfinityTopos<InfinityCategory> {
+/// This ∞-topos is the semantic universe in which formally-
+/// represented knowledge lives: a claim is "true" in a theory
+/// iff the corresponding sheaf has a global section.
+///
+/// Exposed to downstream theory-interop consumers via
+/// `core.theory_interop`. The legacy identifier `mathesis_topos`
+/// is retained as a compatibility alias during the
+/// naming-migration window.
+public fn theory_topos() -> SheafInfinityTopos<InfinityCategory> {
     SheafInfinityTopos {
         underlying_site: theory_site,
     }
+}
+
+/// Compatibility alias — prefer `theory_topos`. Will be removed
+/// after the naming-migration window closes.
+public fn mathesis_topos() -> SheafInfinityTopos<InfinityCategory> {
+    theory_topos()
 }
 
 // =============================================================================
@@ -1060,7 +1071,7 @@ theorem right_kan_is_pointwise_meet(
     proof by auto;
 
 // =============================================================================
-// §11. Global Constants — Canonical Mathesis Objects
+// §11. Global Constants — Canonical Theory-∞-Topos Objects
 // =============================================================================
 
 /// The category of theories: objects are Theory, morphisms are
@@ -1075,24 +1086,30 @@ public fn epistemic_topology() -> EpistemicTopology {
     EpistemicTopology {}
 }
 
-/// The canonical site of theories: (Th, J_ep).
-/// This is the pre-topos data from which Mathesis is built.
+/// The canonical site of theories: (Th, J_ep). The pre-topos
+/// data from which the theory ∞-topos is built.
 public let theory_site: Site = Site {
     underlying_category: theory_category(),
     topology: epistemic_topology(),
 };
 
-/// The ∞-topos Mathesis: Sh_∞(Th, J_ep).
+/// The theory ∞-topos: Sh_∞(Th, J_ep).
 ///
-/// This is THE central mathematical object — the computational ∞-topos
-/// where formal theories live as sheaves. Constructed from the theory
-/// site via the sheafification functor.
+/// The central semantic object — the computational ∞-topos
+/// where formally-represented theories live as sheaves.
+/// Constructed from `theory_site` via the sheafification functor.
 ///
 /// Properties (by construction):
 ///   - Has all small colimits and finite limits (Giraud G1-G2)
 ///   - Colimits are universal (Giraud G3)
 ///   - Coproducts are disjoint (Giraud G4)
 ///   - Groupoid objects are effective (Giraud G5)
-///   - Yoneda embedding y : Th → Mathesis is fully faithful
-///   - Every theory T maps to a sheaf y(T) in Mathesis
-public let mathesis: SheafInfinityTopos = @builtin_construct_sheaf_topos(theory_site);
+///   - Yoneda embedding y : Th → <topos> is fully faithful
+///   - Every theory T maps to a sheaf y(T) in the topos
+public let theory_universe: SheafInfinityTopos =
+    @builtin_construct_sheaf_topos(theory_site);
+
+/// Compatibility alias — prefer `theory_universe`. Retained
+/// during the naming-migration window; will be dropped once
+/// downstream callers migrate.
+public let mathesis: SheafInfinityTopos = theory_universe;

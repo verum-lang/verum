@@ -1,13 +1,13 @@
 // @test: unit
 // @tier: 0
 // @level: L3
-// @tags: mathesis, audit, epistemic, meta-theory
+// @tags: theory_interop, audit, epistemic, meta-theory
 // @expect: pass
 //
 // Test: Theory auditing — status propagation, circular dependency detection,
 //       dangling references, and T_meta audit.
 
-mount core.mathesis.*;
+mount core.theory_interop.*;
 mount core.math.epistemic.{Theory, Claim, ClaimType, EpistemicStatus};
 
 fn main() {
