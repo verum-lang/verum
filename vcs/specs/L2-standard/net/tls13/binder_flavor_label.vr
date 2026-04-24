@@ -1,0 +1,115 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: tls13, psk, binder, rfc8446_4_2_11_2, label
+// @timeout: 15000
+// @expected-exit: 0
+
+// RFC 8446 §4.2.11.2 PSK binder key derivation:
+//
+//   binder_key = Derive-Secret(early_secret, "{res|ext} binder", "")
+//
+// `BinderFlavor.ResumptionBinder` → "res binder" (for NewSessionTicket
+// resumption PSKs). `BinderFlavor.ExternalBinder` → "ext binder" (for
+// out-of-band provisioned PSKs). The two labels MUST differ so the
+// MAC domain-separates resumption binders from external binders.
+//
+// This test also pins PskIdentity / OfferedPsks structural fields.
+
+mount core.*;
+mount core.collections.List;
+mount core.net.tls13.handshake.psk.{
+    BinderFlavor, PskIdentity, OfferedPsks,
+};
+mount core.net.tls13.keyschedule.derive_secret.{
+    LABEL_RES_BINDER, LABEL_EXT_BINDER,
+};
+
+fn resumption_flavor_routes_to_res_binder() {
+    let f = BinderFlavor.ResumptionBinder;
+    let lbl = f.label();
+    assert(lbl.len() == 10);
+    let mut i: Int = 0;
+    while i < 10 {
+        assert(lbl[i] == LABEL_RES_BINDER[i]);
+        i = i + 1;
+    }
+}
+
+fn external_flavor_routes_to_ext_binder() {
+    let f = BinderFlavor.ExternalBinder;
+    let lbl = f.label();
+    assert(lbl.len() == 10);
+    let mut i: Int = 0;
+    while i < 10 {
+        assert(lbl[i] == LABEL_EXT_BINDER[i]);
+        i = i + 1;
+    }
+}
+
+fn res_and_ext_labels_differ_at_prefix() {
+    // "res binder" vs "ext binder" differ at bytes 0, 1, 2.
+    // "res " = 0x72 0x65 0x73 0x20
+    // "ext " = 0x65 0x78 0x74 0x20
+    assert(LABEL_RES_BINDER[0] != LABEL_EXT_BINDER[0]);
+    assert(LABEL_RES_BINDER[1] != LABEL_EXT_BINDER[1]);
+    assert(LABEL_RES_BINDER[2] != LABEL_EXT_BINDER[2]);
+    // Shared " binder" suffix.
+    let mut i: Int = 3;
+    while i < 10 {
+        assert(LABEL_RES_BINDER[i] == LABEL_EXT_BINDER[i]);
+        i = i + 1;
+    }
+}
+
+fn psk_identity_carries_identity_and_age() {
+    let id_bytes: List<Byte> = [0xDE_u8, 0xAD_u8, 0xBE_u8, 0xEF_u8];
+    let id = PskIdentity {
+        identity:       id_bytes.clone(),
+        obfuscated_age: 0x12345678_u32,
+    };
+    assert(id.identity.len() == 4);
+    assert(id.identity[0] == 0xDE_u8);
+    assert(id.obfuscated_age == 0x12345678_u32);
+}
+
+fn offered_psks_pairs_identities_and_binders() {
+    let bin_a: List<Byte> = [0x11_u8; 32];  // 32-byte SHA-256 HMAC
+    let bin_b: List<Byte> = [0x22_u8; 32];
+    let o = OfferedPsks {
+        identities: [
+            PskIdentity { identity: [0x01_u8, 0x02_u8], obfuscated_age: 100_u32 },
+            PskIdentity { identity: [0x03_u8, 0x04_u8], obfuscated_age: 200_u32 },
+        ],
+        binders: [bin_a, bin_b],
+    };
+    assert(o.identities.len() == 2);
+    assert(o.binders.len() == 2);
+    // §4.2.11: len(identities) == len(binders).
+    assert(o.identities.len() == o.binders.len());
+    assert(o.identities[0].obfuscated_age == 100_u32);
+    assert(o.binders[0].len() == 32);
+}
+
+fn offered_psks_empty_is_valid_shape() {
+    // Empty list is a legal degenerate — real wire uses at least one
+    // entry, but the type must still be constructible.
+    let o = OfferedPsks {
+        identities: [],
+        binders:    [],
+    };
+    assert(o.identities.len() == 0);
+    assert(o.binders.len() == 0);
+}
+
+@main
+public fn main() -> Int {
+    resumption_flavor_routes_to_res_binder();
+    external_flavor_routes_to_ext_binder();
+    res_and_ext_labels_differ_at_prefix();
+    psk_identity_carries_identity_and_age();
+    offered_psks_pairs_identities_and_binders();
+    offered_psks_empty_is_valid_shape();
+    print("RFC 8446 §4.2.11.2 BinderFlavor label routing + OfferedPsks shape verified");
+    0
+}

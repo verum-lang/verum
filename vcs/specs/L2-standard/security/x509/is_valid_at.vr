@@ -1,0 +1,111 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: x509, validity, rfc5280_6_1_3, boundary
+// @timeout: 15000
+// @expected-exit: 0
+
+// RFC 5280 §6.1.3(a)(2): a certificate is valid at time T iff
+//   notBefore ≤ T ≤ notAfter   (both inclusive)
+//
+// This test pins the inclusive boundaries, rejects points before the
+// window and after the window, and verifies time_to_unix conversion
+// across year boundaries.
+
+mount core.*;
+mount core.encoding.der.{Time};
+mount core.security.x509.time.{
+    Validity, is_valid_at, time_to_unix,
+};
+
+fn make_time(year: UInt32, month: UInt8, day: UInt8, hour: UInt8, minute: UInt8, second: UInt8) -> Time {
+    Time { year: year, month: month, day: day, hour: hour, minute: minute, second: second }
+}
+
+fn inside_window_is_valid() {
+    let v = Validity {
+        not_before: make_time(2024_u32, 1_u8, 1_u8, 0_u8, 0_u8, 0_u8),
+        not_after:  make_time(2026_u32, 1_u8, 1_u8, 0_u8, 0_u8, 0_u8),
+    };
+    // 2025-06-15 00:00:00 UTC ≈ Unix 1749945600 — well inside the window.
+    let midpoint: Int64 = 1_749_945_600_i64;
+    assert(is_valid_at(&v, midpoint));
+}
+
+fn exactly_at_not_before_is_valid() {
+    let v = Validity {
+        not_before: make_time(2024_u32, 1_u8, 1_u8, 0_u8, 0_u8, 0_u8),
+        not_after:  make_time(2026_u32, 1_u8, 1_u8, 0_u8, 0_u8, 0_u8),
+    };
+    // The boundary IS inclusive per §6.1.3(a)(2).
+    let at_nb = time_to_unix(&v.not_before);
+    assert(is_valid_at(&v, at_nb));
+}
+
+fn exactly_at_not_after_is_valid() {
+    let v = Validity {
+        not_before: make_time(2024_u32, 1_u8, 1_u8, 0_u8, 0_u8, 0_u8),
+        not_after:  make_time(2026_u32, 1_u8, 1_u8, 0_u8, 0_u8, 0_u8),
+    };
+    let at_na = time_to_unix(&v.not_after);
+    assert(is_valid_at(&v, at_na));
+}
+
+fn one_second_before_window_is_invalid() {
+    let v = Validity {
+        not_before: make_time(2024_u32, 1_u8, 1_u8, 0_u8, 0_u8, 0_u8),
+        not_after:  make_time(2026_u32, 1_u8, 1_u8, 0_u8, 0_u8, 0_u8),
+    };
+    let one_before = time_to_unix(&v.not_before) - 1_i64;
+    assert(false == is_valid_at(&v, one_before));
+}
+
+fn one_second_after_window_is_invalid() {
+    let v = Validity {
+        not_before: make_time(2024_u32, 1_u8, 1_u8, 0_u8, 0_u8, 0_u8),
+        not_after:  make_time(2026_u32, 1_u8, 1_u8, 0_u8, 0_u8, 0_u8),
+    };
+    let one_after = time_to_unix(&v.not_after) + 1_i64;
+    assert(false == is_valid_at(&v, one_after));
+}
+
+fn zero_width_validity_accepts_exact_point() {
+    // notBefore == notAfter — the cert is valid at exactly one instant.
+    let pt = make_time(2024_u32, 6_u8, 15_u8, 12_u8, 0_u8, 0_u8);
+    let v = Validity { not_before: pt.clone(), not_after: pt.clone() };
+    let at = time_to_unix(&pt);
+    assert(is_valid_at(&v, at));
+    assert(false == is_valid_at(&v, at - 1_i64));
+    assert(false == is_valid_at(&v, at + 1_i64));
+}
+
+fn time_to_unix_handles_hms_precision() {
+    // 2024-01-01 00:00:00 UTC ≈ 1704067200 (Unix epoch seconds).
+    let base = make_time(2024_u32, 1_u8, 1_u8, 0_u8, 0_u8, 0_u8);
+    let u0 = time_to_unix(&base);
+    // Adding 1h2m3s should shift by exactly 3723 seconds.
+    let plus = make_time(2024_u32, 1_u8, 1_u8, 1_u8, 2_u8, 3_u8);
+    let u1 = time_to_unix(&plus);
+    assert(u1 - u0 == 3723_i64);
+}
+
+fn time_to_unix_handles_year_boundary() {
+    // 2024-12-31 23:59:59 + 1s == 2025-01-01 00:00:00.
+    let end_of_2024 = make_time(2024_u32, 12_u8, 31_u8, 23_u8, 59_u8, 59_u8);
+    let start_of_2025 = make_time(2025_u32, 1_u8, 1_u8, 0_u8, 0_u8, 0_u8);
+    assert(time_to_unix(&start_of_2025) - time_to_unix(&end_of_2024) == 1_i64);
+}
+
+@main
+public fn main() -> Int {
+    inside_window_is_valid();
+    exactly_at_not_before_is_valid();
+    exactly_at_not_after_is_valid();
+    one_second_before_window_is_invalid();
+    one_second_after_window_is_invalid();
+    zero_width_validity_accepts_exact_point();
+    time_to_unix_handles_hms_precision();
+    time_to_unix_handles_year_boundary();
+    print("RFC 5280 §6.1.3(a)(2) is_valid_at inclusive-boundary predicate verified");
+    0
+}
