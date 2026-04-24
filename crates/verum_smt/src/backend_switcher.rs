@@ -334,14 +334,12 @@ impl SmtBackendSwitcher {
         let saved = self.current;
 
         let result = match strategy {
-            VerifyStrategy::Runtime | VerifyStrategy::Static => {
+            VerifyStrategy::Runtime
+            | VerifyStrategy::Static
+            | VerifyStrategy::Proof => {
+                // Runtime/Static are non-SMT; Proof is user-supplied
+                // tactic, rechecked by the kernel.
                 unreachable!("requires_smt() should have rejected these");
-            }
-            VerifyStrategy::Formal => {
-                // Default: route via the capability system. The compiler
-                // picks the best available technique for the goal's theory.
-                self.current = BackendChoice::Capability;
-                self.solve(assertions)
             }
             VerifyStrategy::Fast => {
                 // Fast: capability routing with tighter timeouts. The
@@ -350,29 +348,38 @@ impl SmtBackendSwitcher {
                 self.current = BackendChoice::Capability;
                 self.solve(assertions)
             }
+            VerifyStrategy::Formal => {
+                // Default: route via the capability system. The compiler
+                // picks the best available technique for the goal's theory.
+                self.current = BackendChoice::Capability;
+                self.solve(assertions)
+            }
             VerifyStrategy::Thorough => {
                 // Thorough: race multiple techniques in parallel and
-                // accept the first successful result.
+                // accept the first successful result. Callers supply
+                // explicit frame/invariant/decreases specs.
                 self.current = BackendChoice::Portfolio;
                 self.solve(assertions)
             }
+            VerifyStrategy::Reliable => {
+                // Reliable: Z3 AND CVC5 must both return UNSAT; any
+                // disagreement → UNKNOWN. Minimal cross-validation
+                // level — strictly stronger than Thorough but
+                // weaker than Certified (no certificate artifact).
+                self.solve_cross_validate(assertions)
+            }
             VerifyStrategy::Certified => {
-                // Certified: cross-validate the result with an independent
-                // technique. Divergence is a hard error (solver bug or
-                // encoding issue). Required for exportable proof certificates.
+                // Certified: reliable + certificate materialisation +
+                // kernel recheck. Divergence is a hard error. Required
+                // for exportable proof certificates.
                 self.solve_cross_validate(assertions)
             }
             VerifyStrategy::Synthesize => {
-                // Synthesize: genuine program synthesis, not a satisfiability
-                // check. The previous implementation silently routed to
-                // `Capability` (which runs Sat/Unsat), so a user who asked for
-                // synthesis got a sat/unsat answer and no synthesized program
-                // — a correctness bug, not "not implemented".
-                //
-                // The fix: route through `solve_synthesize`, which tries
-                // CVC5's SyGuS path and returns an `Error` with a clear
-                // rationale if the synthesis backend is unavailable. No more
-                // silent fallback to satisfiability.
+                // Synthesize: genuine program synthesis, not a
+                // satisfiability check. Routes through solve_synthesize,
+                // which tries CVC5's SyGuS path and returns an Error
+                // with a clear rationale if the synthesis backend is
+                // unavailable. No silent fallback to satisfiability.
                 self.solve_synthesize(assertions)
             }
         };

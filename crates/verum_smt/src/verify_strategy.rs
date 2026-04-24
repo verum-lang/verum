@@ -67,63 +67,145 @@ use crate::backend_switcher::BackendChoice;
 /// When the Verum compiler migrates to a custom in-house solver, existing
 /// user annotations remain valid without modification. Only the internal
 /// dispatch logic in `BackendSwitcher` changes.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+/// The nine-strategy verification ladder (VUVA §2.3, §12).
+///
+/// Each variant is SOUND; they differ in completeness and cost. The
+/// ordering forms a monotone lift: a function that passes
+/// `@verify(reliable)` also passes `@verify(formal)` / `@verify(fast)`
+/// / `@verify(static)` / `@verify(runtime)`. `Synthesize` sits
+/// orthogonally above — it's an inverse-search path, not a stricter
+/// check. Each strategy is mapped to the Diakrisis ν-invariant via
+/// [`VerifyStrategy::nu_ordinal`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum VerifyStrategy {
-    /// `@verify(runtime)` — insert runtime assertion, skip formal proof.
+    /// `@verify(runtime)` — emit runtime assertion; do not discharge
+    /// at compile time. ν = 0.
     Runtime,
 
-    /// `@verify(static)` — type-level static verification only.
+    /// `@verify(static)` — conservative static analysis (CBGR,
+    /// dataflow, constant folding, bounds simplification).
+    /// No SMT. ν < ω (finite step count).
     Static,
 
-    /// `@verify(formal)` or `@verify(proof)` — the default formal
-    /// verification path. The compiler picks the best technique based on
-    /// the goal's structure. Recommended for most cases.
-    Formal,
-
-    /// `@verify(fast)` — prioritize verification speed over completeness.
-    ///
-    /// Uses the fastest technique known to decide the goal's theory.
-    /// May return "unknown" on difficult goals that a more thorough strategy
-    /// would solve. Ideal for iterative development and tight feedback loops.
+    /// `@verify(fast)` — single-solver SMT with bounded timeout
+    /// (default 100ms). UNKNOWN → conservative accept (warning).
+    /// ν < ω.
     Fast,
 
-    /// `@verify(thorough)` or `@verify(reliable)` — prioritize completeness
-    /// over speed.
-    ///
-    /// Runs multiple complementary techniques in parallel and accepts the
-    /// first successful result. More reliable on hard goals but consumes
-    /// more resources. Use for production-critical verification.
+    /// `@verify(formal)` — portfolio SMT (Z3 + CVC5) with 5s timeout.
+    /// UNKNOWN from any solver → conservative accept. ν = ω.
+    Formal,
+
+    /// `@verify(proof)` — user supplies a `proof { … }` tactic
+    /// block; kernel rechecks. Unbounded user time but mechanically
+    /// checked. ν = ω.
+    Proof,
+
+    /// `@verify(thorough)` — `formal` plus mandatory `decreases`,
+    /// `invariant`, `frame` specifications. ≈2× formal cost.
+    /// ν = ω·2.
     Thorough,
 
-    /// `@verify(certified)` — produce an independently verifiable proof
-    /// certificate.
-    ///
-    /// Runs two independent verification techniques and requires them to
-    /// agree on the result. Divergence is treated as a hard error (it
-    /// indicates either a bug in a verifier or an encoding issue). Used
-    /// for security-critical verification and for exporting proof artifacts
-    /// to external tools (Coq / Lean / Dedukti / Metamath).
+    /// `@verify(reliable)` — `thorough` plus Z3 AND CVC5 must both
+    /// return UNSAT. Any disagreement → UNKNOWN. ≈2× thorough.
+    /// ν = ω·2.
+    Reliable,
+
+    /// `@verify(certified)` — `reliable` plus certificate
+    /// materialisation, kernel re-check, multi-format export.
+    /// Any recheck failure → compile error. ≈3× thorough.
+    /// ν = ω·2.
     Certified,
 
-    /// `@verify(synthesize)` — treat the goal as a synthesis problem.
-    ///
-    /// Instead of just checking satisfiability, generate a term that
-    /// satisfies the specification. Used for program synthesis, invariant
-    /// generation, and precondition inference.
+    /// `@verify(synthesize)` — inverse proof search across
+    /// 𝔐 to fill missing lemmas / auxiliary theorems.
+    /// Orthogonal to the monotone ladder. ν ≤ ω·3+1.
     Synthesize,
 }
 
+/// The Diakrisis ν-invariant ordinal assigned to a verification
+/// strategy (VUVA §12 Table). Ordinals encoded as a compact enum
+/// rather than a full ordinal calculus — the strata coarsely match
+/// the first three transfinite levels of ω.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum NuOrdinal {
+    /// ν = 0 — runtime-only.
+    Zero,
+    /// ν < ω — finite-step compile-time check.
+    FiniteBelowOmega,
+    /// ν = ω — first transfinite stratum; full SMT or kernel proof.
+    Omega,
+    /// ν = ω·2 — multi-strategy / cross-solver / certificate-backed.
+    OmegaTwice,
+    /// ν ≤ ω·3+1 — inverse search across 𝔐.
+    OmegaThricePlusOne,
+}
+
+impl NuOrdinal {
+    /// Human-readable rendering of the ordinal.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Zero => "0",
+            Self::FiniteBelowOmega => "<ω",
+            Self::Omega => "ω",
+            Self::OmegaTwice => "ω·2",
+            Self::OmegaThricePlusOne => "≤ω·3+1",
+        }
+    }
+
+    /// Total order on the ladder — mirrors the monotone-lift
+    /// semantics of VUVA §2.3. `Synthesize` is treated as distinct
+    /// but comparable via its `≤ω·3+1` upper bound for ordering
+    /// purposes; callers that care about the orthogonality should
+    /// use [`VerifyStrategy::is_synthesis`] explicitly.
+    pub fn rank(&self) -> u8 {
+        match self {
+            Self::Zero => 0,
+            Self::FiniteBelowOmega => 1,
+            Self::Omega => 2,
+            Self::OmegaTwice => 3,
+            Self::OmegaThricePlusOne => 4,
+        }
+    }
+}
+
+impl std::fmt::Display for NuOrdinal {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.as_str())
+    }
+}
+
 impl VerifyStrategy {
+    /// All nine strategies in monotone-lift order (`Synthesize` last,
+    /// orthogonal). Useful for diagnostics and iteration.
+    pub const LADDER: [VerifyStrategy; 9] = [
+        Self::Runtime,
+        Self::Static,
+        Self::Fast,
+        Self::Formal,
+        Self::Proof,
+        Self::Thorough,
+        Self::Reliable,
+        Self::Certified,
+        Self::Synthesize,
+    ];
+
     /// Parse a verify-attribute argument string into a strategy.
     ///
     /// Returns `None` for unrecognized values. Case-insensitive match.
+    /// Legacy aliases (`quick`/`rapid`, `robust`, `cross_validate`,
+    /// `synthesis`/`synth`) are preserved so existing `.vr` sources
+    /// keep working; `proof` and `reliable` are now distinct from
+    /// `formal` and `thorough` respectively (VUVA §12).
     pub fn from_attribute_value(value: &str) -> Option<Self> {
         match value.to_lowercase().as_str() {
             "runtime" => Some(Self::Runtime),
             "static" => Some(Self::Static),
-            "formal" | "proof" => Some(Self::Formal),
             "fast" | "quick" | "rapid" => Some(Self::Fast),
-            "thorough" | "reliable" | "robust" => Some(Self::Thorough),
+            "formal" => Some(Self::Formal),
+            "proof" => Some(Self::Proof),
+            "thorough" | "robust" => Some(Self::Thorough),
+            "reliable" => Some(Self::Reliable),
             "certified" | "cross_validate" | "cross-validate" | "crossvalidate" => {
                 Some(Self::Certified)
             }
@@ -137,84 +219,141 @@ impl VerifyStrategy {
         match self {
             Self::Runtime => "runtime",
             Self::Static => "static",
-            Self::Formal => "formal",
             Self::Fast => "fast",
+            Self::Formal => "formal",
+            Self::Proof => "proof",
             Self::Thorough => "thorough",
+            Self::Reliable => "reliable",
             Self::Certified => "certified",
             Self::Synthesize => "synthesize",
         }
     }
 
+    /// Diakrisis ν-invariant ordinal for this strategy (VUVA §12 table).
+    pub fn nu_ordinal(&self) -> NuOrdinal {
+        match self {
+            Self::Runtime => NuOrdinal::Zero,
+            Self::Static | Self::Fast => NuOrdinal::FiniteBelowOmega,
+            Self::Formal | Self::Proof => NuOrdinal::Omega,
+            Self::Thorough | Self::Reliable | Self::Certified => NuOrdinal::OmegaTwice,
+            Self::Synthesize => NuOrdinal::OmegaThricePlusOne,
+        }
+    }
+
+    /// Monotone-lift rank on the verification ladder (VUVA §2.3).
+    /// Higher rank ⇒ stricter strategy. A function passing rank `k`
+    /// MUST also pass every rank `< k` (the compiler enforces this
+    /// by construction — any strategy implies all weaker ones).
+    ///
+    /// `Synthesize` is ranked at the top of the ordering for
+    /// convenience; use [`Self::is_synthesis`] when the orthogonal
+    /// semantics matter.
+    pub fn rank(&self) -> u8 {
+        match self {
+            Self::Runtime => 0,
+            Self::Static => 1,
+            Self::Fast => 2,
+            Self::Formal => 3,
+            Self::Proof => 4,
+            Self::Thorough => 5,
+            Self::Reliable => 6,
+            Self::Certified => 7,
+            Self::Synthesize => 8,
+        }
+    }
+
+    /// True when `self` is at least as strict as `other`. Used by
+    /// the compiler when a module declares a floor strategy and a
+    /// function inside it carries a per-function override.
+    pub fn at_least(&self, other: &Self) -> bool {
+        self.rank() >= other.rank()
+    }
+
     /// Map the strategy to an internal `BackendChoice` for the switcher.
     ///
-    /// This is an INTERNAL mapping that callers outside the compiler should
-    /// generally not use directly — prefer `BackendSwitcher::solve_with_strategy`.
-    ///
     /// Returns `None` for strategies that don't require formal proof
-    /// infrastructure (`Runtime`, `Static`).
-    ///
-    /// The mapping intent:
-    /// - `Formal` → default capability routing (compiler picks best solver)
-    /// - `Fast`   → capability routing + fast-timeout single-solver preference
-    /// - `Thorough` → portfolio mode (parallel complementary strategies)
-    /// - `Certified` → cross-validation (two independent techniques must agree)
-    /// - `Synthesize` → synthesis backend (CVC5 SyGuS, future: custom)
+    /// infrastructure (`Runtime`, `Static`, `Proof` — the last is
+    /// user-supplied and bypasses SMT).
     #[cfg(feature = "cvc5")]
     pub fn to_backend_choice(&self) -> Option<BackendChoice> {
         match self {
+            // Runtime / Static are not SMT-backed.
             Self::Runtime | Self::Static => None,
-            // Default formal verification — router decides.
-            Self::Formal => Some(BackendChoice::Capability),
-            // Fast: same router but with stricter timeouts (handled separately
-            // in solve_with_strategy — keep as Capability here).
+            // Proof is user-supplied tactic; kernel rechecks, no SMT routing.
+            Self::Proof => None,
+            // Fast: capability routing + stricter timeouts.
             Self::Fast => Some(BackendChoice::Capability),
-            // Thorough: portfolio mode.
-            Self::Thorough => Some(BackendChoice::Portfolio),
-            // Certified: capability router with security-critical flag so
-            // the router dispatches to SolverChoice::CrossValidate.
+            // Formal: capability routing — portfolio picks best solver.
+            Self::Formal => Some(BackendChoice::Capability),
+            // Thorough / Reliable: portfolio mode.
+            Self::Thorough | Self::Reliable => Some(BackendChoice::Portfolio),
+            // Certified: capability router + cross-validation flag.
             Self::Certified => Some(BackendChoice::Capability),
-            // Synthesize: capability router — it routes to the synthesis-capable backend.
+            // Synthesize: capability router — synthesis-capable backend.
             Self::Synthesize => Some(BackendChoice::Capability),
         }
     }
 
-    /// True if the strategy requires marking the goal as security-critical.
-    ///
-    /// When true, the goal is dispatched to cross-validation (both primary
-    /// and secondary verification techniques must agree on the result).
+    /// True if the strategy requires cross-validation (both primary
+    /// and secondary solvers must agree). Applies to `Reliable` and
+    /// `Certified` — `Reliable` is the minimal cross-validation
+    /// level; `Certified` adds certificate export on top.
     pub fn requires_cross_validation(&self) -> bool {
+        matches!(self, Self::Reliable | Self::Certified)
+    }
+
+    /// True if the strategy must produce a kernel-rechecked
+    /// certificate artifact (`@verify(certified)`).
+    pub fn requires_certificate(&self) -> bool {
         matches!(self, Self::Certified)
     }
 
-    /// True if the strategy requires formal verification infrastructure
-    /// (as opposed to runtime or static checks).
+    /// True if the strategy requires formal SMT infrastructure.
+    /// `Runtime`, `Static`, `Proof` all bypass the SMT portfolio.
     pub fn requires_smt(&self) -> bool {
-        !matches!(self, Self::Runtime | Self::Static)
+        !matches!(self, Self::Runtime | Self::Static | Self::Proof)
     }
 
-    /// True if the strategy is a synthesis problem (generates a term from
-    /// a specification) rather than a decision problem (checks satisfiability).
+    /// True if the strategy is a synthesis problem rather than a
+    /// decision problem.
     pub fn is_synthesis(&self) -> bool {
         matches!(self, Self::Synthesize)
     }
 
-    /// True if the strategy prefers thorough/robust verification over speed.
+    /// True if the strategy prefers thorough/robust verification
+    /// over speed.
     pub fn prefers_thoroughness(&self) -> bool {
-        matches!(self, Self::Thorough | Self::Certified)
+        matches!(
+            self,
+            Self::Thorough | Self::Reliable | Self::Certified
+        )
+    }
+
+    /// True when the strategy expects a user-supplied `proof { … }`
+    /// tactic block (not auto-discharged).
+    pub fn requires_tactic_proof(&self) -> bool {
+        matches!(self, Self::Proof)
+    }
+
+    /// True when the strategy requires explicit frame / invariant /
+    /// decreases specifications on every obligation.
+    pub fn requires_explicit_specs(&self) -> bool {
+        matches!(
+            self,
+            Self::Thorough | Self::Reliable | Self::Certified
+        )
     }
 
     /// Recommended timeout multiplier for this strategy.
-    ///
-    /// Applied to the base timeout configured in the BackendSwitcher.
-    /// Fast strategies get shorter timeouts, thorough strategies get longer.
     pub fn timeout_multiplier(&self) -> f64 {
         match self {
-            Self::Runtime | Self::Static => 0.0, // no timeout needed
-            Self::Fast => 0.3,       // 30% of base
-            Self::Formal => 1.0,     // base
-            Self::Thorough => 2.0,   // 2x base
-            Self::Certified => 3.0,  // 3x base (two solvers)
-            Self::Synthesize => 5.0, // 5x base (synthesis is hard)
+            Self::Runtime | Self::Static | Self::Proof => 0.0, // no SMT timeout
+            Self::Fast => 0.3,       // 30% of base (≤100ms)
+            Self::Formal => 1.0,     // base (5s)
+            Self::Thorough => 2.0,   // 2× formal
+            Self::Reliable => 3.0,   // two solvers, agreement required
+            Self::Certified => 3.0,  // reliable + cert materialisation
+            Self::Synthesize => 5.0, // synthesis is hard
         }
     }
 }
@@ -344,13 +483,16 @@ mod tests {
 
     #[test]
     fn parses_aliases() {
+        // After VUVA §12, `proof` and `reliable` are DISTINCT variants,
+        // not aliases of `formal` / `thorough`. Only legacy aliases
+        // (robust, cross_validate, quick/rapid, synthesis/synth) remain.
         assert_eq!(
             VerifyStrategy::from_attribute_value("proof"),
-            Some(VerifyStrategy::Formal)
+            Some(VerifyStrategy::Proof)
         );
         assert_eq!(
             VerifyStrategy::from_attribute_value("reliable"),
-            Some(VerifyStrategy::Thorough)
+            Some(VerifyStrategy::Reliable)
         );
         assert_eq!(
             VerifyStrategy::from_attribute_value("robust"),

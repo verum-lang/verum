@@ -349,18 +349,23 @@ impl ContractVerificationPhase {
         if let Some(s) = strategy {
             use verum_smt::verify_strategy::VerifyStrategy as VS;
             match s {
-                VS::Runtime | VS::Static => {
+                VS::Runtime | VS::Static | VS::Proof => {
+                    // Runtime/Static skip SMT entirely; Proof is a
+                    // user-supplied tactic block that the kernel
+                    // rechecks — the SMT phase has nothing to add.
                     tracing::debug!(
-                        "Skipping SMT for {} — strategy {:?} is runtime-only",
+                        "Skipping SMT for {} — strategy {:?} bypasses the SMT phase",
                         func.name, s
                     );
                     stats.functions_with_contracts += 1;
                     stats.functions_skipped_smt += 1;
                     return Ok(warnings);
                 }
-                VS::Formal => stats.functions_strategy_formal += 1,
                 VS::Fast => stats.functions_strategy_fast += 1,
-                VS::Thorough => stats.functions_strategy_thorough += 1,
+                VS::Formal => stats.functions_strategy_formal += 1,
+                VS::Thorough | VS::Reliable => {
+                    stats.functions_strategy_thorough += 1
+                }
                 VS::Certified => stats.functions_strategy_certified += 1,
                 VS::Synthesize => stats.functions_strategy_synthesize += 1,
             }
