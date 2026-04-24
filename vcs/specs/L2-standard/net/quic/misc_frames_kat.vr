@@ -1,0 +1,172 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: quic, frame, padding, ping, path_challenge, path_response, handshake_done, reset_stream, stop_sending, new_token, encode, rfc9000_19
+// @timeout: 15000
+// @expected-exit: 0
+
+// RFC 9000 §19 misc frame catalogue byte-exact:
+//
+//   0x00 PADDING            : variable-length run of 0x00 bytes
+//   0x01 PING               : single-byte probe
+//   0x04 RESET_STREAM       : stream_id | error_code | final_size
+//   0x05 STOP_SENDING       : stream_id | error_code
+//   0x07 NEW_TOKEN          : token_len (varint) | token_bytes
+//   0x1A PATH_CHALLENGE     : 8 fixed bytes
+//   0x1B PATH_RESPONSE      : 8 fixed bytes
+//   0x1E HANDSHAKE_DONE     : zero-length body (single type byte)
+
+mount core.*;
+mount core.collections.List;
+mount core.net.quic.frame.{Frame, encode_frame, decode_frame};
+
+fn padding_run_is_all_zero_bytes() {
+    // N=5 padding run encodes as 5 × 0x00.
+    let f = Frame.PaddingRun(5);
+    let mut out: List<Byte> = [];
+    let _ = encode_frame(&f, &mut out);
+    assert(out.len() == 5);
+    let mut i: Int = 0;
+    while i < 5 {
+        assert(out[i] == 0x00_u8);
+        i = i + 1;
+    }
+}
+
+fn padding_run_zero_length_is_empty() {
+    let f = Frame.PaddingRun(0);
+    let mut out: List<Byte> = [];
+    let _ = encode_frame(&f, &mut out);
+    assert(out.len() == 0);
+}
+
+fn ping_is_single_byte_01() {
+    let mut out: List<Byte> = [];
+    let _ = encode_frame(&Frame.PingFrame, &mut out);
+    assert(out.len() == 1);
+    assert(out[0] == 0x01_u8);
+}
+
+fn handshake_done_is_single_byte_1E() {
+    let mut out: List<Byte> = [];
+    let _ = encode_frame(&Frame.HandshakeDone, &mut out);
+    assert(out.len() == 1);
+    assert(out[0] == 0x1E_u8);
+}
+
+fn reset_stream_byte_exact() {
+    let f = Frame.ResetStream {
+        stream_id:  4_u64,
+        error_code: 3_u64,
+        final_size: 100_u64,
+    };
+    let mut out: List<Byte> = [];
+    let _ = encode_frame(&f, &mut out);
+    // Wire: type(1) + sid(1) + error(1) + final_size(1 — fits in 1 byte for <64).
+    // 100 encodes as 2-byte varint: 0x40 | 0x00, 0x64 → 0x40 0x64.
+    assert(out[0] == 0x04_u8);      // RESET_STREAM type
+    assert(out[1] == 0x04_u8);      // sid
+    assert(out[2] == 0x03_u8);      // error
+    assert(out[3] == 0x40_u8);      // varint high byte for 100
+    assert(out[4] == 0x64_u8);      // varint low byte for 100
+    assert(out.len() == 5);
+}
+
+fn stop_sending_byte_exact() {
+    let f = Frame.StopSending { stream_id: 8_u64, error_code: 0_u64 };
+    let mut out: List<Byte> = [];
+    let _ = encode_frame(&f, &mut out);
+    assert(out.len() == 3);
+    assert(out[0] == 0x05_u8);
+    assert(out[1] == 0x08_u8);
+    assert(out[2] == 0x00_u8);
+}
+
+fn new_token_byte_exact() {
+    let token: List<Byte> = [0xAA_u8, 0xBB_u8, 0xCC_u8, 0xDD_u8];
+    let f = Frame.NewToken(token);
+    let mut out: List<Byte> = [];
+    let _ = encode_frame(&f, &mut out);
+    // Wire: type(1) + token_len varint(1) + 4 bytes = 6.
+    assert(out.len() == 6);
+    assert(out[0] == 0x07_u8);
+    assert(out[1] == 0x04_u8);
+    assert(out[2] == 0xAA_u8);
+    assert(out[5] == 0xDD_u8);
+}
+
+fn path_challenge_exactly_eight_bytes_after_type() {
+    let data: [Byte; 8] = [
+        0x01_u8, 0x02_u8, 0x03_u8, 0x04_u8,
+        0x05_u8, 0x06_u8, 0x07_u8, 0x08_u8,
+    ];
+    let f = Frame.PathChallenge(data);
+    let mut out: List<Byte> = [];
+    let _ = encode_frame(&f, &mut out);
+    // Type(1) + 8 data bytes = 9.
+    assert(out.len() == 9);
+    assert(out[0] == 0x1A_u8);
+    let mut i: Int = 0;
+    while i < 8 {
+        assert(out[1 + i] == data[i]);
+        i = i + 1;
+    }
+}
+
+fn path_response_distinct_from_challenge() {
+    let data: [Byte; 8] = [
+        0xFF_u8, 0xEE_u8, 0xDD_u8, 0xCC_u8,
+        0xBB_u8, 0xAA_u8, 0x99_u8, 0x88_u8,
+    ];
+    let f = Frame.PathResponse(data);
+    let mut out: List<Byte> = [];
+    let _ = encode_frame(&f, &mut out);
+    assert(out.len() == 9);
+    assert(out[0] == 0x1B_u8);
+    assert(out[1] == 0xFF_u8);
+    assert(out[8] == 0x88_u8);
+}
+
+fn path_frames_are_probing_not_ack_eliciting_handshake_done() {
+    // §9.1 probing frames: PATH_CHALLENGE / PATH_RESPONSE / NEW_CONNECTION_ID /
+    // PADDING — but path frames are ack-eliciting; PADDING is not.
+    let pc = Frame.PathChallenge([0_u8; 8]);
+    let pr = Frame.PathResponse([0_u8; 8]);
+    assert(pc.is_probing());
+    assert(pr.is_probing());
+    assert(Frame.PaddingRun(3).is_probing());
+    assert(pc.is_ack_eliciting());
+    assert(pr.is_ack_eliciting());
+    assert(!Frame.PaddingRun(3).is_ack_eliciting());
+    // HANDSHAKE_DONE is ack-eliciting, not probing.
+    assert(Frame.HandshakeDone.is_ack_eliciting());
+    assert(!Frame.HandshakeDone.is_probing());
+}
+
+fn ping_handshake_done_decode_roundtrip() {
+    let mut w1: List<Byte> = [];
+    let mut w2: List<Byte> = [];
+    let _ = encode_frame(&Frame.PingFrame, &mut w1);
+    let _ = encode_frame(&Frame.HandshakeDone, &mut w2);
+    let (d1, _) = decode_frame(w1.as_slice(), 0).unwrap();
+    let (d2, _) = decode_frame(w2.as_slice(), 0).unwrap();
+    match d1 { Frame.PingFrame => {}, _ => panic("expected PingFrame"), }
+    match d2 { Frame.HandshakeDone => {}, _ => panic("expected HandshakeDone"), }
+}
+
+@main
+public fn main() -> Int {
+    padding_run_is_all_zero_bytes();
+    padding_run_zero_length_is_empty();
+    ping_is_single_byte_01();
+    handshake_done_is_single_byte_1E();
+    reset_stream_byte_exact();
+    stop_sending_byte_exact();
+    new_token_byte_exact();
+    path_challenge_exactly_eight_bytes_after_type();
+    path_response_distinct_from_challenge();
+    path_frames_are_probing_not_ack_eliciting_handshake_done();
+    ping_handshake_done_decode_roundtrip();
+    print("RFC 9000 §19 misc-frame encode byte-exact KAT verified");
+    0
+}

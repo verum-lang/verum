@@ -1,0 +1,144 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: tls13, extension, key_share, encode, rfc8446_4_2_8
+// @timeout: 15000
+// @expected-exit: 0
+
+// RFC 8446 §4.2.8 key_share extension — three carriers:
+//
+//   * ClientHello:            KeyShareClientHello { KeyShareEntry<4..2^16-1> }
+//   * ServerHello:            KeyShareServerHello { KeyShareEntry }
+//   * HelloRetryRequest:      KeyShareHelloRetryRequest { NamedGroup }
+//
+// KeyShareEntry ::= NamedGroup (u16) || opaque key_exchange<1..2^16-1>
+//
+// Extension frame: ext_type (u16=0x33) || outer u16 length || payload.
+
+mount core.*;
+mount core.collections.List;
+mount core.net.tls13.named_group.{NamedGroup};
+mount core.net.tls13.handshake.extension.{
+    Extension, KeyShareEntry, encode_extension, EXT_KEY_SHARE,
+};
+
+fn ext_keyshare_id_is_51() {
+    assert(EXT_KEY_SHARE == 51_u16);
+}
+
+fn key_share_client_x25519_byte_exact() {
+    // X25519 share = 32 bytes all 0xAB.
+    let mut kx: List<Byte> = [];
+    let mut i: Int = 0;
+    while i < 32 { kx.push(0xAB_u8); i = i + 1; }
+    let entry = KeyShareEntry { group: NamedGroup.X25519, key_exchange: kx };
+    let ext = Extension.KeyShareClient { shares: [entry] };
+    let mut out: List<Byte> = [];
+    encode_extension(&ext, &mut out).unwrap();
+    // Layout:
+    //   [0..2]  ext_type = 0x00 0x33
+    //   [2..4]  outer len = 2 + 2 + 2 + 32 = 38
+    //   [4..6]  inner list len = 2 + 2 + 32 = 36
+    //   [6..8]  group = X25519 = 0x001D
+    //   [8..10] key_exchange len = 32
+    //   [10..42] key_exchange bytes
+    assert(out.len() == 42);
+    assert(out[0] == 0x00_u8 && out[1] == 0x33_u8);
+    assert(out[2] == 0x00_u8 && out[3] == 0x26_u8);    // outer = 38
+    assert(out[4] == 0x00_u8 && out[5] == 0x24_u8);    // inner = 36
+    assert(out[6] == 0x00_u8 && out[7] == 0x1D_u8);    // X25519
+    assert(out[8] == 0x00_u8 && out[9] == 0x20_u8);    // kx len = 32
+    assert(out[10] == 0xAB_u8);
+    assert(out[41] == 0xAB_u8);
+}
+
+fn key_share_client_empty_list_is_six_bytes() {
+    // ClientHello with no key_share entries — empty inner list.
+    let ext = Extension.KeyShareClient { shares: [] };
+    let mut out: List<Byte> = [];
+    encode_extension(&ext, &mut out).unwrap();
+    // ext_type(2) + outer len(2) + inner len(2) = 6.
+    assert(out.len() == 6);
+    assert(out[0] == 0x00_u8 && out[1] == 0x33_u8);
+    assert(out[2] == 0x00_u8 && out[3] == 0x02_u8);    // outer = 2
+    assert(out[4] == 0x00_u8 && out[5] == 0x00_u8);    // inner = 0
+}
+
+fn key_share_client_two_shares() {
+    // X25519 (32 bytes 0x01) + Secp256r1 (65 bytes starting 0x04 uncompressed).
+    let mut xkx: List<Byte> = [];
+    let mut i: Int = 0;
+    while i < 32 { xkx.push(0x01_u8); i = i + 1; }
+    let mut pkx: List<Byte> = [];
+    pkx.push(0x04_u8);
+    let mut j: Int = 0;
+    while j < 64 { pkx.push(0x02_u8); j = j + 1; }
+    let e1 = KeyShareEntry { group: NamedGroup.X25519,    key_exchange: xkx };
+    let e2 = KeyShareEntry { group: NamedGroup.Secp256r1, key_exchange: pkx };
+    let ext = Extension.KeyShareClient { shares: [e1, e2] };
+    let mut out: List<Byte> = [];
+    encode_extension(&ext, &mut out).unwrap();
+    // inner list = (2+2+32) + (2+2+65) = 36 + 69 = 105. outer = 107.
+    // total = 4 + 107 = 111.
+    assert(out.len() == 111);
+    assert(out[2] == 0x00_u8 && out[3] == 0x6B_u8);    // outer = 107
+    assert(out[4] == 0x00_u8 && out[5] == 0x69_u8);    // inner = 105
+    // First share: X25519.
+    assert(out[6] == 0x00_u8 && out[7] == 0x1D_u8);
+    assert(out[8] == 0x00_u8 && out[9] == 0x20_u8);    // len = 32
+    assert(out[10] == 0x01_u8);
+    // Second share: Secp256r1 starts after 32-byte X25519 payload at offset 10+32 = 42.
+    assert(out[42] == 0x00_u8 && out[43] == 0x17_u8);  // Secp256r1 = 0x0017
+    assert(out[44] == 0x00_u8 && out[45] == 0x41_u8);  // len = 65
+    assert(out[46] == 0x04_u8);                         // uncompressed sentinel
+}
+
+fn key_share_server_byte_exact() {
+    // ServerHello variant — single entry, no inner-list wrapper.
+    let mut kx: List<Byte> = [];
+    let mut i: Int = 0;
+    while i < 32 { kx.push(0xCC_u8); i = i + 1; }
+    let entry = KeyShareEntry { group: NamedGroup.X25519, key_exchange: kx };
+    let ext = Extension.KeyShareServer { share: entry };
+    let mut out: List<Byte> = [];
+    encode_extension(&ext, &mut out).unwrap();
+    // Layout:
+    //   [0..2]  ext_type = 0x00 0x33
+    //   [2..4]  outer len = 2 + 2 + 32 = 36
+    //   [4..6]  group = X25519
+    //   [6..8]  key_exchange len = 32
+    //   [8..40] key_exchange
+    assert(out.len() == 40);
+    assert(out[0] == 0x00_u8 && out[1] == 0x33_u8);
+    assert(out[2] == 0x00_u8 && out[3] == 0x24_u8);    // outer = 36
+    assert(out[4] == 0x00_u8 && out[5] == 0x1D_u8);    // X25519
+    assert(out[6] == 0x00_u8 && out[7] == 0x20_u8);    // len = 32
+    assert(out[8]  == 0xCC_u8);
+    assert(out[39] == 0xCC_u8);
+}
+
+fn key_share_hello_retry_request_byte_exact() {
+    // HRR variant — just the selected NamedGroup, no key material.
+    let ext = Extension.KeyShareHelloRetryRequest {
+        selected_group: NamedGroup.Secp256r1,
+    };
+    let mut out: List<Byte> = [];
+    encode_extension(&ext, &mut out).unwrap();
+    // ext_type(2) + outer u16(2) + group(2) = 6 bytes.
+    assert(out.len() == 6);
+    assert(out[0] == 0x00_u8 && out[1] == 0x33_u8);
+    assert(out[2] == 0x00_u8 && out[3] == 0x02_u8);    // outer = 2
+    assert(out[4] == 0x00_u8 && out[5] == 0x17_u8);    // Secp256r1 = 0x0017
+}
+
+@main
+public fn main() -> Int {
+    ext_keyshare_id_is_51();
+    key_share_client_x25519_byte_exact();
+    key_share_client_empty_list_is_six_bytes();
+    key_share_client_two_shares();
+    key_share_server_byte_exact();
+    key_share_hello_retry_request_byte_exact();
+    print("RFC 8446 §4.2.8 key_share extension encode byte-exact verified");
+    0
+}

@@ -1,0 +1,141 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: quic, frame, flow_control, encode, rfc9000_19_9, rfc9000_19_10, rfc9000_19_11, rfc9000_19_12, rfc9000_19_13, rfc9000_19_14
+// @timeout: 15000
+// @expected-exit: 0
+
+// RFC 9000 §19.9-§19.14 flow-control frame family. Every frame here
+// is a type varint followed by one or two additional varints:
+//
+//   0x10 MAX_DATA            : Maximum Data
+//   0x11 MAX_STREAM_DATA     : Stream ID | Maximum Stream Data
+//   0x12 MAX_STREAMS_BIDI    : Maximum Streams (bidi)
+//   0x13 MAX_STREAMS_UNI     : Maximum Streams (uni)
+//   0x14 DATA_BLOCKED        : Maximum Data
+//   0x15 STREAM_DATA_BLOCKED : Stream ID | Maximum Stream Data
+//   0x16 STREAMS_BLOCKED_BIDI: Maximum Streams
+//   0x17 STREAMS_BLOCKED_UNI : Maximum Streams
+//
+// All scalars here fit in a 1-byte QUIC varint (< 64), so byte offsets
+// map 1-to-1 to field positions.
+
+mount core.*;
+mount core.collections.List;
+mount core.net.quic.frame.{Frame, encode_frame, decode_frame};
+
+fn max_data_byte_exact() {
+    let f = Frame.MaxData(42_u64);
+    let mut out: List<Byte> = [];
+    let _ = encode_frame(&f, &mut out);
+    assert(out.len() == 2);
+    assert(out[0] == 0x10_u8);
+    assert(out[1] == 0x2A_u8);
+}
+
+fn max_stream_data_byte_exact() {
+    let f = Frame.MaxStreamData { stream_id: 4_u64, limit: 16_u64 };
+    let mut out: List<Byte> = [];
+    let _ = encode_frame(&f, &mut out);
+    assert(out.len() == 3);
+    assert(out[0] == 0x11_u8);
+    assert(out[1] == 0x04_u8);
+    assert(out[2] == 0x10_u8);
+}
+
+fn max_streams_bidi_uni_distinct_types() {
+    let fb = Frame.MaxStreamsBidi(8_u64);
+    let fu = Frame.MaxStreamsUni(8_u64);
+    let mut ob: List<Byte> = [];
+    let mut ou: List<Byte> = [];
+    let _ = encode_frame(&fb, &mut ob);
+    let _ = encode_frame(&fu, &mut ou);
+    assert(ob[0] == 0x12_u8);
+    assert(ou[0] == 0x13_u8);
+    assert(ob[1] == 0x08_u8);
+    assert(ou[1] == 0x08_u8);
+}
+
+fn data_blocked_byte_exact() {
+    let f = Frame.DataBlocked(12_u64);
+    let mut out: List<Byte> = [];
+    let _ = encode_frame(&f, &mut out);
+    assert(out.len() == 2);
+    assert(out[0] == 0x14_u8);
+    assert(out[1] == 0x0C_u8);
+}
+
+fn stream_data_blocked_byte_exact() {
+    let f = Frame.StreamDataBlocked { stream_id: 6_u64, limit: 20_u64 };
+    let mut out: List<Byte> = [];
+    let _ = encode_frame(&f, &mut out);
+    assert(out.len() == 3);
+    assert(out[0] == 0x15_u8);
+    assert(out[1] == 0x06_u8);
+    assert(out[2] == 0x14_u8);
+}
+
+fn streams_blocked_bidi_uni_distinct_types() {
+    let fb = Frame.StreamsBlockedBidi(2_u64);
+    let fu = Frame.StreamsBlockedUni(3_u64);
+    let mut ob: List<Byte> = [];
+    let mut ou: List<Byte> = [];
+    let _ = encode_frame(&fb, &mut ob);
+    let _ = encode_frame(&fu, &mut ou);
+    assert(ob[0] == 0x16_u8);
+    assert(ou[0] == 0x17_u8);
+    assert(ob[1] == 0x02_u8);
+    assert(ou[1] == 0x03_u8);
+}
+
+fn flow_control_frames_all_ack_eliciting() {
+    // RFC 9000 §13.2.1 — all flow-control frames are ack-eliciting.
+    assert(Frame.MaxData(1_u64).is_ack_eliciting());
+    assert(Frame.MaxStreamData { stream_id: 4_u64, limit: 1_u64 }.is_ack_eliciting());
+    assert(Frame.MaxStreamsBidi(1_u64).is_ack_eliciting());
+    assert(Frame.MaxStreamsUni(1_u64).is_ack_eliciting());
+    assert(Frame.DataBlocked(1_u64).is_ack_eliciting());
+    assert(Frame.StreamDataBlocked { stream_id: 4_u64, limit: 1_u64 }.is_ack_eliciting());
+    assert(Frame.StreamsBlockedBidi(1_u64).is_ack_eliciting());
+    assert(Frame.StreamsBlockedUni(1_u64).is_ack_eliciting());
+}
+
+fn max_data_decode_roundtrip() {
+    let f = Frame.MaxData(1_000_000_u64);
+    let mut wire: List<Byte> = [];
+    let _ = encode_frame(&f, &mut wire);
+    let (decoded, _) = decode_frame(wire.as_slice(), 0).unwrap();
+    match decoded {
+        Frame.MaxData(n) => assert(n == 1_000_000_u64),
+        _ => panic("expected MaxData"),
+    }
+}
+
+fn max_stream_data_decode_roundtrip() {
+    let f = Frame.MaxStreamData { stream_id: 12_u64, limit: 2048_u64 };
+    let mut wire: List<Byte> = [];
+    let _ = encode_frame(&f, &mut wire);
+    let (decoded, _) = decode_frame(wire.as_slice(), 0).unwrap();
+    match decoded {
+        Frame.MaxStreamData { stream_id, limit } => {
+            assert(stream_id == 12_u64);
+            assert(limit == 2048_u64);
+        },
+        _ => panic("expected MaxStreamData"),
+    }
+}
+
+@main
+public fn main() -> Int {
+    max_data_byte_exact();
+    max_stream_data_byte_exact();
+    max_streams_bidi_uni_distinct_types();
+    data_blocked_byte_exact();
+    stream_data_blocked_byte_exact();
+    streams_blocked_bidi_uni_distinct_types();
+    flow_control_frames_all_ack_eliciting();
+    max_data_decode_roundtrip();
+    max_stream_data_decode_roundtrip();
+    print("RFC 9000 §19.9-§19.14 flow-control frame encode verified");
+    0
+}
