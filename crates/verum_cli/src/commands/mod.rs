@@ -38,5 +38,6 @@ pub mod export;
 pub mod publish;
 pub mod remove;
 pub mod search;
+pub mod smt_check;
 pub mod tree;
 pub mod update;

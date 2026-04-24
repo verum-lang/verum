@@ -518,6 +518,29 @@ enum Commands {
         /// `docs/verification/cli-workflow.md §13`.
         #[clap(long)]
         lsp_mode: bool,
+        /// Dump every SMT-LIB query the verifier generates to the
+        /// given directory. One file per obligation, named
+        /// `<function>-<obligation-idx>.smt2`. Intended for
+        /// debugging "why did Z3 time out on this specific goal".
+        /// The verifier still runs normally; dumping is a
+        /// side-effect. Docs: `docs/verification/cli-workflow.md §14`.
+        #[clap(long, value_name = "DIR")]
+        dump_smt: Option<std::path::PathBuf>,
+        /// Read an SMT-LIB 2 file from disk and dispatch it to the
+        /// configured solver; print `sat` / `unsat` / `unknown` on
+        /// stdout. Used to replay a dumped query (from
+        /// `--dump-smt`) against a different solver / timeout /
+        /// backend configuration. Incompatible with `FILE` — when
+        /// `--check-smt-formula` is set the positional FILE is
+        /// ignored.
+        #[clap(long, value_name = "SMT_FILE")]
+        check_smt_formula: Option<std::path::PathBuf>,
+        /// Log every solver command / response to stderr as it
+        /// happens. Useful for diagnosing solver-quirk issues
+        /// (e.g. Z3 accepting a command CVC5 rejects). One line
+        /// per send/recv, prefixed with `[→]` / `[←]`.
+        #[clap(long)]
+        solver_protocol: bool,
         /// Fail the build if total verification time exceeds this budget.
         /// Accepts human-readable durations: `120s`, `2m`, `90`, `1h`.
         #[clap(long, value_name = "DURATION")]
@@ -1427,6 +1450,9 @@ fn run_command(cli: Cli) -> Result<()> {
             diff,
             function,
             lsp_mode,
+            dump_smt,
+            check_smt_formula,
+            solver_protocol,
         } => {
             // --lsp-mode implies no human output; set an env var
             // the downstream report-renderer reads to switch from
@@ -1439,6 +1465,44 @@ fn run_command(cli: Cli) -> Result<()> {
                 // format toggle. Single-threaded context at CLI
                 // entry — no TOCTOU hazard.
                 unsafe { std::env::set_var("VERUM_LSP_MODE", "1"); }
+            }
+
+            // SMT debugging flags — propagated to the solver via
+            // env vars the backend-switcher / Z3 / CVC5 wrappers
+            // consult at solver-construction time. Same
+            // loose-coupling pattern as VERUM_LSP_MODE; avoids
+            // plumbing per-flag knobs through every options
+            // struct from CLI → session → solver factory.
+            if let Some(ref dir) = dump_smt {
+                std::fs::create_dir_all(dir).map_err(|e| {
+                    CliError::Custom(
+                        format!("creating --dump-smt dir {}: {}", dir.display(), e).into(),
+                    )
+                })?;
+                // SAFETY: single-threaded CLI entry; see --lsp-mode
+                // rationale above.
+                unsafe {
+                    std::env::set_var(
+                        "VERUM_DUMP_SMT_DIR",
+                        dir.display().to_string(),
+                    );
+                }
+            }
+            if solver_protocol {
+                unsafe { std::env::set_var("VERUM_SOLVER_PROTOCOL", "1"); }
+            }
+            if let Some(ref smt_file) = check_smt_formula {
+                // --check-smt-formula short-circuits: read the
+                // file, dispatch to the configured solver, print
+                // sat/unsat/unknown. Skips the whole verify
+                // pipeline because the input is raw SMT-LIB — the
+                // Verum AST / type-checker / VC generator don't
+                // need to run.
+                return commands::smt_check::run(
+                    smt_file,
+                    solver.as_str(),
+                    timeout,
+                );
             }
             // `--export` implies `--profile` — you can't dump a profile you
             // didn't collect. `--profile-obligation` also implies `--profile`
