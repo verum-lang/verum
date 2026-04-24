@@ -263,6 +263,123 @@ fn first_framework(attrs: &List<verum_ast::attr::Attribute>) -> Maybe<FrameworkA
 }
 
 // -----------------------------------------------------------------------------
+// Framework-lineage → target-library mapping (VUVA §8.5)
+//
+// When a `@framework(<lineage>, "...")` marker has a known mapping in a
+// target ecosystem, the exporter emits the corresponding `import` /
+// `Require` / dependency stanza so the resulting file is ready to check
+// against the target assistant's standard library. Unmapped lineages
+// fall through to the plain-axiom scaffolding (current MVP behaviour)
+// and are flagged in the output as comments so reviewers see the
+// missing hook.
+//
+// The table is intentionally small and curated — stdlib "standard
+// six-pack" per VUVA §6.2 plus a handful of widely-cited foundations.
+// User-authored packages extend this by shipping a `@lineage_map`
+// attribute on their `@framework` declarations (Phase 3 work).
+// -----------------------------------------------------------------------------
+
+/// Dependency stanza for a specific exporter target.
+#[derive(Debug, Clone, Copy)]
+struct LineageImport {
+    lean: Option<&'static str>,
+    coq: Option<&'static str>,
+    dedukti: Option<&'static str>,
+    metamath: Option<&'static str>,
+}
+
+/// Curated map from Verum framework lineage slug → target-ecosystem
+/// dependency stanza. Ordering: lineage slug alphabetical for
+/// deterministic output.
+const LINEAGE_IMPORTS: &[(&str, LineageImport)] = &[
+    (
+        "arnold_mather",
+        LineageImport {
+            // Not yet mapped to any mainstream library; emitted as
+            // plain axiom with citation comment.
+            lean: None,
+            coq: None,
+            dedukti: None,
+            metamath: None,
+        },
+    ),
+    (
+        "baez_dolan",
+        LineageImport {
+            lean: Some("import Mathlib.CategoryTheory.Monoidal.Category"),
+            coq: Some("Require Import Category.Category.CategoryTheory."),
+            dedukti: None,
+            metamath: None,
+        },
+    ),
+    (
+        "connes_reconstruction",
+        LineageImport {
+            lean: Some("import Mathlib.Analysis.NormedSpace.OperatorNorm"),
+            coq: None,
+            dedukti: None,
+            metamath: None,
+        },
+    ),
+    (
+        "lurie_htt",
+        LineageImport {
+            lean: Some("import Mathlib.CategoryTheory.Category.Basic"),
+            coq: Some("Require Import Category.Theory.Category."),
+            dedukti: None,
+            metamath: None,
+        },
+    ),
+    (
+        "petz_classification",
+        LineageImport {
+            lean: Some("import Mathlib.Analysis.InnerProductSpace.Basic"),
+            coq: None,
+            dedukti: None,
+            metamath: None,
+        },
+    ),
+    (
+        "schreiber_dcct",
+        LineageImport {
+            lean: Some("import Mathlib.CategoryTheory.Sites.Sheaf"),
+            coq: None,
+            dedukti: None,
+            metamath: None,
+        },
+    ),
+    (
+        "univalence",
+        LineageImport {
+            lean: Some("import Mathlib.Logic.Equiv.Defs"),
+            coq: Some("Require Import HoTT.Univalence."),
+            dedukti: None,
+            metamath: None,
+        },
+    ),
+];
+
+/// Look up a lineage's target-library dependency stanza, if any.
+fn lineage_import(lineage: &str) -> Option<&'static LineageImport> {
+    LINEAGE_IMPORTS
+        .iter()
+        .find(|(slug, _)| *slug == lineage)
+        .map(|(_, li)| li)
+}
+
+/// Collect every distinct framework lineage appearing in `decls` —
+/// used to emit the per-file import header.
+fn distinct_lineages(decls: &[Declaration]) -> Vec<Text> {
+    let mut seen = std::collections::BTreeSet::new();
+    for d in decls {
+        if let Maybe::Some(fw) = &d.framework {
+            seen.insert(fw.name.clone());
+        }
+    }
+    seen.into_iter().collect()
+}
+
+// -----------------------------------------------------------------------------
 // Dedukti emitter
 // -----------------------------------------------------------------------------
 
@@ -314,11 +431,48 @@ fn emit_dedukti(decls: &[Declaration]) -> String {
 // Coq emitter
 // -----------------------------------------------------------------------------
 
+fn emit_coq_imports(decls: &[Declaration], out: &mut String) {
+    let lineages = distinct_lineages(decls);
+    if lineages.is_empty() {
+        return;
+    }
+    let mut import_lines: Vec<&'static str> = Vec::new();
+    let mut unmapped: Vec<&str> = Vec::new();
+    for l in &lineages {
+        match lineage_import(l.as_str()).and_then(|li| li.coq) {
+            Some(stanza) if !import_lines.contains(&stanza) => {
+                import_lines.push(stanza)
+            }
+            Some(_) => {}
+            None => unmapped.push(l.as_str()),
+        }
+    }
+    for line in &import_lines {
+        out.push_str(line);
+        out.push('\n');
+    }
+    if !import_lines.is_empty() {
+        out.push('\n');
+    }
+    for u in &unmapped {
+        out.push_str(&format!(
+            "(* note: framework lineage `{u}` has no Coq-library mapping \
+             yet; emitted as opaque axiom. *)\n"
+        ));
+    }
+    if !unmapped.is_empty() {
+        out.push('\n');
+    }
+}
+
 fn emit_coq(decls: &[Declaration]) -> String {
     let mut out = String::new();
     out.push_str("(* Exported by `verum export --to coq`. *)\n");
     out.push_str("(* Statements only — proofs are admitted. Full proof-term replay *)\n");
     out.push_str("(* through verum_kernel lands with per-backend SMT reconstruction. *)\n\n");
+
+    // VUVA §8.5 framework-lineage → Coq-library mapping.
+    emit_coq_imports(decls, &mut out);
 
     let by_framework = group_by_framework(decls);
     for (framework_key, group) in &by_framework {
@@ -442,6 +596,40 @@ fn emit_lean(decls: &[Declaration]) -> String {
     out.push_str("-- Exported by `verum export --to lean`.\n");
     out.push_str("-- Statements only — proofs are `sorry`. Full proof-term replay\n");
     out.push_str("-- through verum_kernel lands with per-backend SMT reconstruction.\n\n");
+
+    // VUVA §8.5: emit `import` stanzas for known framework-lineage
+    // mappings so the file is ready to check against Mathlib without
+    // manual editing. Unmapped lineages fall through with a comment.
+    let lineages = distinct_lineages(decls);
+    if !lineages.is_empty() {
+        let mut import_lines: Vec<&'static str> = Vec::new();
+        let mut unmapped: Vec<&str> = Vec::new();
+        for l in &lineages {
+            match lineage_import(l.as_str()).and_then(|li| li.lean) {
+                Some(stanza) if !import_lines.contains(&stanza) => {
+                    import_lines.push(stanza)
+                }
+                Some(_) => {}
+                None => unmapped.push(l.as_str()),
+            }
+        }
+        for line in &import_lines {
+            out.push_str(line);
+            out.push('\n');
+        }
+        if !import_lines.is_empty() {
+            out.push('\n');
+        }
+        for u in &unmapped {
+            out.push_str(&format!(
+                "-- note: framework lineage `{u}` has no Lean-library \
+                 mapping yet; emitted as opaque axiom.\n"
+            ));
+        }
+        if !unmapped.is_empty() {
+            out.push('\n');
+        }
+    }
 
     let by_framework = group_by_framework(decls);
     for (framework_key, group) in &by_framework {
