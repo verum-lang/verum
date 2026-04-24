@@ -31833,11 +31833,21 @@ impl TypeChecker {
         current_module_path: &Text,
         registry: &verum_modules::ModuleRegistry,
     ) -> Option<(verum_ast::decl::TypeDecl, Text)> {
+        // Thread a fresh visited-set through the recursion so that ring-shaped
+        // `public mount` re-exports (e.g., `core.pkg` re-exports `core.pkg.sub`
+        // whose last segment matches a type `sub` being searched for — the
+        // source path strips the last segment back to `core.pkg`, re-entering
+        // the same AST) terminate with None instead of blowing the stack.
+        // See also: `resolve_export_kind_with_reexports` (343fc3a8) which uses
+        // the same pattern for the sibling kind-resolution walk.
+        let mut visited: std::collections::HashSet<(Text, Text)> =
+            std::collections::HashSet::new();
         self.find_type_declaration_with_source_module_inner(
             ast,
             type_name,
             current_module_path,
             registry,
+            &mut visited,
         )
     }
 
@@ -31848,10 +31858,23 @@ impl TypeChecker {
         type_name: &str,
         current_module_path: &Text,
         registry: &verum_modules::ModuleRegistry,
+        visited: &mut std::collections::HashSet<(Text, Text)>,
     ) -> Option<(verum_ast::decl::TypeDecl, Text)> {
         use verum_ast::ItemKind;
         use verum_ast::decl::{MountTreeKind, Visibility as AstVisibility};
         use verum_ast::ty::PathSegment;
+
+        // Cycle guard: if we are already walking the re-export chain for this
+        // (module, type) pair, return None to break the recursion. Returning
+        // None is safe — callers fall through to their next strategy (e.g.,
+        // checking the module's own export table or searching parent modules).
+        // Without this guard, a module that re-exports a submodule whose name
+        // collides with the target type (`public mount a.b.sub;` + lookup of
+        // `sub` in `a.b`) recurses indefinitely and SIGBUSes.
+        let key = (current_module_path.clone(), Text::from(type_name));
+        if !visited.insert(key) {
+            return None;
+        }
 
         // First, try to find the type declaration directly in this module
         if let Some(decl) = self.find_type_declaration_in_module(ast, type_name) {
@@ -31954,13 +31977,16 @@ impl TypeChecker {
                     // Look up the source module and find the type there
                     // Use path aliases since "core.io.path" may be stored as "std.io.path"
                     if let Some(source_module) = self.get_module_with_path_aliases(source_path, registry) {
-                        // Recursively search (handles chains of re-exports)
+                        // Recursively search (handles chains of re-exports).
+                        // Thread the visited-set so ring-shaped re-exports
+                        // terminate with None rather than blowing the stack.
                         if let Some((decl, final_path)) = self
-                            .find_type_declaration_with_source_module(
+                            .find_type_declaration_with_source_module_inner(
                                 &source_module.ast,
                                 type_name,
                                 &verum_common::Text::from(source_path.as_str()),
                                 registry,
+                                visited,
                             )
                         {
                             return Some((decl, final_path));
@@ -55585,6 +55611,72 @@ mod mount_cycle_tests {
     fn mount_glob_decl_helper_produces_glob_kind() {
         let decl = mount_glob_decl("core.action");
         assert!(matches!(decl.tree.kind, MountTreeKind::Glob(_)));
+    }
+
+    /// Regression: `find_type_declaration_with_source_module` used to recurse
+    /// indefinitely when a module re-exported a sibling whose last segment
+    /// matched the target type name, e.g.
+    ///
+    /// ```ignore
+    /// // core/tmp_repro/mod.vr (module path "core.tmp_repro")
+    /// public mount core.tmp_repro.sub;
+    /// ```
+    ///
+    /// Looking up type `sub` in module `core.tmp_repro` would match the mount,
+    /// strip the last segment back to `core.tmp_repro`, and re-enter the same
+    /// AST — SIGBUSing after ~32k recursive frames in release builds.
+    ///
+    /// The fix threads a visited-set through
+    /// `find_type_declaration_with_source_module_inner`; re-entry now returns
+    /// `None` instead of blowing the stack.
+    #[test]
+    fn self_referential_mount_terminates_with_none() {
+        use verum_ast::decl::{Item, ItemKind, MountDecl, MountTree, MountTreeKind, Visibility};
+        use verum_common::FileId;
+
+        let checker = TypeChecker::new();
+        let span = Span::dummy();
+
+        // Build MountDecl equivalent to `public mount core.tmp_repro.sub;`
+        // (a Path mount, not a Glob, so it hits the
+        // `find_type_declaration_with_source_module` re-export code path).
+        let segments: List<PathSegment> = ["core", "tmp_repro", "sub"]
+            .iter()
+            .map(|seg| PathSegment::Name(Ident::new(*seg, span)))
+            .collect();
+        let mount_item = Item::new(
+            ItemKind::Mount(MountDecl {
+                visibility: Visibility::Public,
+                tree: MountTree {
+                    kind: MountTreeKind::Path(Path::new(segments, span)),
+                    alias: Maybe::None,
+                    span,
+                },
+                alias: Maybe::None,
+                span,
+            }),
+            span,
+        );
+
+        let items: List<Item> = List::from(vec![mount_item]);
+        let ast = verum_ast::Module::new(items, FileId::new(0), span);
+
+        let registry = verum_modules::ModuleRegistry::new();
+        // The key property: this call MUST return (rather than blow the
+        // stack). The answer itself is `None` — `sub` is not actually
+        // resolvable through the self-referential mount — and that is the
+        // correct fallback signal for upstream callers.
+        let result = checker.find_type_declaration_with_source_module(
+            &ast,
+            "sub",
+            &Text::from("core.tmp_repro"),
+            &registry,
+        );
+        assert!(
+            result.is_none(),
+            "self-referential mount should resolve to None (was: {:?})",
+            result
+        );
     }
 }
 
