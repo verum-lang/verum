@@ -1,0 +1,25 @@
+// =============================================================================
+// core/database/sqlite/native/window_frame_api/mod.vr
+// =============================================================================
+// Window-function frame specification — ROWS / RANGE / GROUPS + EXCLUDE clause.
+// Spec: internal/specs/sqlite-native.md §13.7 — window function planning
+//
+// Covers SQLite 3.28+ window-function grammar:
+//
+//   frame_spec ::= (ROWS | RANGE | GROUPS) frame_bound_clause [EXCLUDE exclude]
+//   frame_bound_clause ::= BETWEEN frame_bound AND frame_bound | frame_bound
+//   frame_bound ::= UNBOUNDED PRECEDING
+//                 | expr PRECEDING
+//                 | CURRENT ROW
+//                 | expr FOLLOWING
+//                 | UNBOUNDED FOLLOWING
+//   exclude ::= NO OTHERS | CURRENT ROW | GROUP | TIES
+//
+// =============================================================================
+
+module core.database.sqlite.native.window_frame_api;
+
+public module frame_unit;
+public module frame_bound;
+public module frame_spec;
+public module exclude_clause;

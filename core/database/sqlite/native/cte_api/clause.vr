@@ -1,0 +1,62 @@
+// WITH clause — a group of CTE definitions.
+
+module core.database.sqlite.native.cte_api.clause;
+
+mount core.database.sqlite.native.cte_api.definition.{
+    CteDefinition, forces_materialize, forces_inline,
+};
+mount base.{Bool, Text, Maybe};
+mount core.collections.list.{List};
+
+public type WithClause is {
+    recursive: Bool,
+    defs: List<CteDefinition>,
+};
+
+public fn new() -> WithClause {
+    WithClause { recursive: false, defs: [].clone() as List<CteDefinition> }
+}
+
+public fn new_recursive() -> WithClause {
+    WithClause { recursive: true, defs: [].clone() as List<CteDefinition> }
+}
+
+public fn push(mut w: WithClause, d: CteDefinition) -> WithClause {
+    w.defs.push(d);
+    w
+}
+
+public fn len(w: &WithClause) -> Int { w.defs.len() }
+
+public fn is_empty(w: &WithClause) -> Bool { w.defs.len() == 0 }
+
+public fn find(w: &WithClause, name: &Text) -> Maybe<Int> {
+    let mut i: Int = 0;
+    while i < w.defs.len() {
+        let d = &w.defs[i];
+        if d.name == *name {
+            return Maybe.Some(i);
+        }
+        i = i + 1;
+    }
+    Maybe.None
+}
+
+// Detect if any CTE references another in a cycle.
+// SQLite allows cycles only in RECURSIVE CTEs referencing themselves;
+// non-recursive clauses cannot forward-reference or cycle.
+public fn has_duplicate_name(w: &WithClause) -> Bool {
+    let mut i: Int = 0;
+    while i < w.defs.len() {
+        let n_i = &w.defs[i].name;
+        let mut j: Int = i + 1;
+        while j < w.defs.len() {
+            if *n_i == w.defs[j].name {
+                return true;
+            }
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+    false
+}

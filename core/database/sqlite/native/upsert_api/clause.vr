@@ -1,0 +1,44 @@
+// Full UPSERT clause: target + action. One INSERT may stack multiple clauses.
+
+module core.database.sqlite.native.upsert_api.clause;
+
+mount core.database.sqlite.native.upsert_api.target.{
+    ConflictTarget, is_specific, has_partial_pred,
+};
+mount core.database.sqlite.native.upsert_api.action.{
+    UpsertAction, is_do_nothing, is_do_update, do_update_cardinality, do_update_has_where,
+};
+mount base.{Bool};
+
+public type UpsertClause is {
+    target: ConflictTarget,
+    action: UpsertAction,
+};
+
+public fn new(target: ConflictTarget, action: UpsertAction) -> UpsertClause {
+    UpsertClause { target: target, action: action }
+}
+
+public fn is_noop(c: &UpsertClause) -> Bool {
+    is_do_nothing(&c.action)
+}
+
+public fn action_updates(c: &UpsertClause) -> Bool {
+    is_do_update(&c.action)
+}
+
+public fn has_partial_target(c: &UpsertClause) -> Bool {
+    has_partial_pred(&c.target)
+}
+
+public fn update_set_size(c: &UpsertClause) -> Int {
+    do_update_cardinality(&c.action)
+}
+
+public fn has_update_where(c: &UpsertClause) -> Bool {
+    do_update_has_where(&c.action)
+}
+
+public fn target_is_any(c: &UpsertClause) -> Bool {
+    !is_specific(&c.target)
+}

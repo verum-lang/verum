@@ -1,0 +1,88 @@
+// Row-value comparison operators + three-valued logic outcome.
+
+module core.database.sqlite.native.row_value_api.compare;
+
+mount base.{Bool, Text};
+
+public type CmpOp is
+    | CoEq        // =
+    | CoNe        // <> / !=
+    | CoLt        // <
+    | CoLe        // <=
+    | CoGt        // >
+    | CoGe        // >=
+    | CoIs        // IS (null-safe equality)
+    | CoIsNot     // IS NOT
+    ;
+
+public fn op_name(o: &CmpOp) -> Text {
+    match o {
+        CoEq    => "=".clone(),
+        CoNe    => "<>".clone(),
+        CoLt    => "<".clone(),
+        CoLe    => "<=".clone(),
+        CoGt    => ">".clone(),
+        CoGe    => ">=".clone(),
+        CoIs    => "IS".clone(),
+        CoIsNot => "IS NOT".clone(),
+    }
+}
+
+public fn is_null_safe(o: &CmpOp) -> Bool {
+    match o { CoIs => true, CoIsNot => true, _ => false }
+}
+
+public fn is_ordering(o: &CmpOp) -> Bool {
+    match o {
+        CoLt => true, CoLe => true, CoGt => true, CoGe => true,
+        _    => false,
+    }
+}
+
+public fn is_equality(o: &CmpOp) -> Bool {
+    match o {
+        CoEq => true, CoNe => true, CoIs => true, CoIsNot => true,
+        _    => false,
+    }
+}
+
+// Three-valued logic result — SQL NULL semantics.
+public type Tri is
+    | TriTrue
+    | TriFalse
+    | TriUnknown
+    ;
+
+public fn tri_name(t: &Tri) -> Text {
+    match t {
+        TriTrue    => "TRUE".clone(),
+        TriFalse   => "FALSE".clone(),
+        TriUnknown => "UNKNOWN".clone(),
+    }
+}
+
+public fn tri_and(a: &Tri, b: &Tri) -> Tri {
+    match a {
+        TriFalse => TriFalse,
+        TriUnknown => match b { TriFalse => TriFalse, _ => TriUnknown },
+        TriTrue => match b {
+            TriTrue    => TriTrue,
+            TriFalse   => TriFalse,
+            TriUnknown => TriUnknown,
+        },
+    }
+}
+
+public fn tri_not(a: &Tri) -> Tri {
+    match a {
+        TriTrue    => TriFalse,
+        TriFalse   => TriTrue,
+        TriUnknown => TriUnknown,
+    }
+}
+
+// A WHERE clause is only satisfied when the predicate evaluates to TriTrue;
+// both FALSE and UNKNOWN filter the row out.
+public fn passes_filter(t: &Tri) -> Bool {
+    match t { TriTrue => true, _ => false }
+}

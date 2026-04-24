@@ -1,0 +1,49 @@
+// Physical join plan — executor-facing strategy selection.
+
+module core.database.sqlite.native.full_outer_join_api.plan;
+
+mount core.database.sqlite.native.full_outer_join_api.pair.{JoinPair};
+mount core.database.sqlite.native.full_outer_join_api.join_kind.{
+    JoinKind, JkInner, JkLeft, JkRight, JkFull, JkCross,
+    preserves_left, preserves_right,
+};
+mount base.{Bool, Text};
+
+public type JoinStrategy is
+    | JsNestedLoop           // default for indexed / small builds
+    | JsNestedLoopWithHash   // build hash on right side
+    | JsLeftOuterScan        // scan left + index right, emit null-padded on miss
+    | JsLeftThenRightFillup  // LEFT scan, then right-anti-semi pass for FULL
+    ;
+
+public fn strategy_name(s: &JoinStrategy) -> Text {
+    match s {
+        JsNestedLoop          => "NestedLoop".clone(),
+        JsNestedLoopWithHash  => "NestedLoopWithHash".clone(),
+        JsLeftOuterScan       => "LeftOuterScan".clone(),
+        JsLeftThenRightFillup => "LeftThenRightFillup".clone(),
+    }
+}
+
+// Pick the default strategy the planner would emit without other hints.
+public fn default_strategy(p: &JoinPair) -> JoinStrategy {
+    match p.kind {
+        JkInner => JsNestedLoop,
+        JkCross => JsNestedLoop,
+        JkLeft  => JsLeftOuterScan,
+        JkRight => JsLeftOuterScan,   // planner swaps sides internally
+        JkFull  => JsLeftThenRightFillup,
+    }
+}
+
+public fn needs_right_fillup(s: &JoinStrategy) -> Bool {
+    match s { JsLeftThenRightFillup => true, _ => false }
+}
+
+public fn uses_hash_build(s: &JoinStrategy) -> Bool {
+    match s {
+        JsNestedLoopWithHash  => true,
+        JsLeftThenRightFillup => true,    // right-anti-semi needs hash over seen keys
+        _                     => false,
+    }
+}

@@ -1,0 +1,21 @@
+// =============================================================================
+// core/database/sqlite/native/generated_col_api/mod.vr
+// =============================================================================
+// Generated columns (SQLite 3.31+) — VIRTUAL vs STORED semantics.
+// Spec §17 — schema features.
+//
+// CREATE TABLE t(
+//   a INTEGER,
+//   b INTEGER GENERATED ALWAYS AS (a + 1) VIRTUAL,
+//   c INTEGER GENERATED ALWAYS AS (a * 2) STORED
+// );
+//
+// VIRTUAL: expression evaluated on read; takes no disk space.
+// STORED:  expression evaluated on write; occupies disk space like a normal column.
+//
+// =============================================================================
+
+module core.database.sqlite.native.generated_col_api;
+
+public module storage;
+public module spec;

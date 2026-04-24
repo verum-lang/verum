@@ -1,0 +1,50 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, index_hint_api, sql, planner
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.index_hint_api.hint.{
+    IndexHint, IhNone, IhIndexedBy, IhNotIndexed,
+    hint_name, is_explicit, forces_scan, forces_index, required_index,
+};
+mount base.{Bool};
+
+fn test_hint_names() {
+    assert(hint_name(&IhNone) == "none".clone());
+    assert(hint_name(&IhIndexedBy("idx_x".clone())) == "INDEXED BY".clone());
+    assert(hint_name(&IhNotIndexed) == "NOT INDEXED".clone());
+}
+
+fn test_is_explicit() {
+    assert(!is_explicit(&IhNone));
+    assert(is_explicit(&IhNotIndexed));
+    assert(is_explicit(&IhIndexedBy("idx".clone())));
+}
+
+fn test_forces_scan_only_not_indexed() {
+    assert(forces_scan(&IhNotIndexed));
+    assert(!forces_scan(&IhIndexedBy("idx".clone())));
+    assert(!forces_scan(&IhNone));
+}
+
+fn test_forces_index_only_indexed_by() {
+    assert(forces_index(&IhIndexedBy("idx".clone())));
+    assert(!forces_index(&IhNone));
+    assert(!forces_index(&IhNotIndexed));
+}
+
+fn test_required_index_name() {
+    assert(required_index(&IhIndexedBy("idx_y".clone())) == "idx_y".clone());
+    assert(required_index(&IhNone) == "".clone());
+    assert(required_index(&IhNotIndexed) == "".clone());
+}
+
+fn main() {
+    test_hint_names();
+    test_is_explicit();
+    test_forces_scan_only_not_indexed();
+    test_forces_index_only_indexed_by();
+    test_required_index_name();
+}

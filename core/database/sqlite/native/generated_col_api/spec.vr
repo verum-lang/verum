@@ -1,0 +1,51 @@
+// Generated-column spec: name + expression + storage + declared type.
+
+module core.database.sqlite.native.generated_col_api.spec;
+
+mount core.database.sqlite.native.generated_col_api.storage.{
+    GenStorage, GsVirtual, GsStored, default_storage, consumes_disk_space,
+};
+mount base.{Bool, Text};
+
+public type GeneratedColSpec is {
+    column_name: Text,
+    declared_type: Text,     // e.g. "INTEGER", "TEXT"; "" when omitted
+    expr_sql: Text,          // raw expression — parse + bind in l5_sql
+    storage: GenStorage,
+    always: Bool,            // GENERATED ALWAYS vs GENERATED (same effect — both force generation)
+};
+
+public fn new_virtual(name: Text, expr: Text) -> GeneratedColSpec {
+    GeneratedColSpec {
+        column_name: name,
+        declared_type: "".clone(),
+        expr_sql: expr,
+        storage: GsVirtual,
+        always: true,
+    }
+}
+
+public fn new_stored(name: Text, expr: Text) -> GeneratedColSpec {
+    GeneratedColSpec {
+        column_name: name,
+        declared_type: "".clone(),
+        expr_sql: expr,
+        storage: GsStored,
+        always: true,
+    }
+}
+
+public fn with_declared_type(mut s: GeneratedColSpec, ty: Text) -> GeneratedColSpec {
+    s.declared_type = ty;
+    s
+}
+
+public fn occupies_disk(s: &GeneratedColSpec) -> Bool {
+    consumes_disk_space(&s.storage)
+}
+
+// A generated column cannot appear in a PRIMARY KEY, UNIQUE, or FOREIGN KEY
+// constraint of the same table unless it is STORED; enforced at CREATE TABLE.
+public fn allowed_in_constraint(s: &GeneratedColSpec) -> Bool {
+    match s.storage { GsStored => true, _ => false }
+}

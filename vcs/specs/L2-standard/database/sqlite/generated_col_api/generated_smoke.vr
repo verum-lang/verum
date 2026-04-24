@@ -1,0 +1,62 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, generated_col_api, sql, schema
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.generated_col_api.storage.{
+    GenStorage, GsVirtual, GsStored,
+    storage_name, is_virtual, is_stored, consumes_disk_space, default_storage,
+};
+mount core.database.sqlite.native.generated_col_api.spec.{
+    GeneratedColSpec,
+    new_virtual, new_stored, with_declared_type,
+    occupies_disk, allowed_in_constraint,
+};
+mount base.{Bool};
+
+fn test_storage_names() {
+    assert(storage_name(&GsVirtual) == "VIRTUAL".clone());
+    assert(storage_name(&GsStored) == "STORED".clone());
+}
+
+fn test_storage_classification() {
+    assert(is_virtual(&GsVirtual));
+    assert(!is_virtual(&GsStored));
+    assert(is_stored(&GsStored));
+    assert(!consumes_disk_space(&GsVirtual));
+    assert(consumes_disk_space(&GsStored));
+}
+
+fn test_default_is_virtual() {
+    match default_storage() { GsVirtual => {}, _ => assert(false) }
+}
+
+fn test_new_virtual_defaults() {
+    let s = new_virtual("comp".clone(), "a + 1".clone());
+    assert(!occupies_disk(&s));
+    assert(!allowed_in_constraint(&s));
+    assert(s.always);
+    assert(s.declared_type == "".clone());
+}
+
+fn test_new_stored_occupies_disk() {
+    let s = new_stored("comp".clone(), "a * 2".clone());
+    assert(occupies_disk(&s));
+    assert(allowed_in_constraint(&s));
+}
+
+fn test_with_declared_type() {
+    let s = with_declared_type(new_virtual("x".clone(), "1".clone()), "INTEGER".clone());
+    assert(s.declared_type == "INTEGER".clone());
+}
+
+fn main() {
+    test_storage_names();
+    test_storage_classification();
+    test_default_is_virtual();
+    test_new_virtual_defaults();
+    test_new_stored_occupies_disk();
+    test_with_declared_type();
+}

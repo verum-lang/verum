@@ -1,0 +1,19 @@
+// =============================================================================
+// core/database/sqlite/native/row_value_api/mod.vr
+// =============================================================================
+// Row-value expressions (SQLite 3.15+):
+//
+//   (a, b) = (c, d)
+//   (a, b) < (c, d)                 -- lexicographic
+//   (a, b) IN (SELECT x, y FROM t)
+//   (a, b) IS (c, d)
+//
+// Comparison rules: row values compare element-wise with lexicographic order;
+// NULL propagates with three-valued logic.
+// Spec §14 — expressions.
+// =============================================================================
+
+module core.database.sqlite.native.row_value_api;
+
+public module shape;
+public module compare;

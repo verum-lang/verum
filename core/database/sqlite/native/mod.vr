@@ -428,3 +428,19 @@ public module txn_rollback_ops;
 public module soft_int_api;
 // - compile_option_detail: SQLITE_{ENABLE,DISABLE,OMIT,MAX,DEFAULT}_* flag taxonomy
 public module compile_option_detail;
+// - window_frame_api: ROWS / RANGE / GROUPS + EXCLUDE clause — window-function frame spec
+public module window_frame_api;
+// - cte_api: WITH / WITH RECURSIVE + MATERIALIZED / NOT MATERIALIZED hint
+public module cte_api;
+// - generated_col_api: GENERATED ALWAYS AS (expr) VIRTUAL | STORED
+public module generated_col_api;
+// - full_outer_join_api: FULL OUTER JOIN + JoinKind taxonomy + JoinStrategy planner surface
+public module full_outer_join_api;
+// - row_value_api: (a,b) row-value shape + lexicographic compare + three-valued logic
+public module row_value_api;
+// - upsert_api: INSERT ... ON CONFLICT(...) DO {NOTHING|UPDATE SET ...}
+public module upsert_api;
+// - index_hint_api: INDEXED BY / NOT INDEXED planner hints
+public module index_hint_api;
+// - vtab_constraint_ops: SQLITE_INDEX_CONSTRAINT_* opcode taxonomy (EQ/LT/MATCH/LIMIT/…)
+public module vtab_constraint_ops;

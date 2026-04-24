@@ -1,0 +1,49 @@
+// UPSERT action taxonomy — DO NOTHING vs DO UPDATE SET ...
+
+module core.database.sqlite.native.upsert_api.action;
+
+mount base.{Bool, Text};
+mount core.collections.list.{List};
+
+public type SetAssign is {
+    column: Text,
+    value_sql: Text,       // parsed expr raw text; references excluded.* for NEW row
+};
+
+public fn assign(col: Text, val: Text) -> SetAssign {
+    SetAssign { column: col, value_sql: val }
+}
+
+public type UpsertAction is
+    | UaDoNothing
+    | UaDoUpdate { set_list: List<SetAssign>, where_sql: Text }
+    ;
+
+public fn action_name(a: &UpsertAction) -> Text {
+    match a {
+        UpsertAction.UaDoNothing            => "DO NOTHING".clone(),
+        UpsertAction.UaDoUpdate { .. }      => "DO UPDATE".clone(),
+    }
+}
+
+public fn is_do_nothing(a: &UpsertAction) -> Bool {
+    match a { UpsertAction.UaDoNothing => true, _ => false }
+}
+
+public fn is_do_update(a: &UpsertAction) -> Bool {
+    match a { UpsertAction.UaDoUpdate { .. } => true, _ => false }
+}
+
+public fn do_update_cardinality(a: &UpsertAction) -> Int {
+    match a {
+        UpsertAction.UaDoUpdate { set_list, where_sql: _ } => set_list.len(),
+        _ => 0,
+    }
+}
+
+public fn do_update_has_where(a: &UpsertAction) -> Bool {
+    match a {
+        UpsertAction.UaDoUpdate { set_list: _, where_sql } => where_sql.len() > 0,
+        _ => false,
+    }
+}

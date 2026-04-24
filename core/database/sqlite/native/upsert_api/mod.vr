@@ -1,0 +1,18 @@
+// =============================================================================
+// core/database/sqlite/native/upsert_api/mod.vr
+// =============================================================================
+// UPSERT clause (SQLite 3.24+): INSERT ... ON CONFLICT(...) DO {NOTHING|UPDATE SET ...}.
+// Spec §17.2 — INSERT with conflict resolution.
+//
+//   INSERT INTO t(a, b) VALUES(1, 2)
+//     ON CONFLICT(a) DO NOTHING;
+//   INSERT INTO t(a, b) VALUES(1, 2)
+//     ON CONFLICT(a) DO UPDATE SET b = excluded.b WHERE t.b < excluded.b;
+//
+// =============================================================================
+
+module core.database.sqlite.native.upsert_api;
+
+public module target;
+public module action;
+public module clause;

@@ -1,0 +1,102 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, upsert_api, sql
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.upsert_api.target.{
+    ConflictTarget,
+    new_any, new_on, with_where, is_specific, arity, has_partial_pred,
+};
+mount core.database.sqlite.native.upsert_api.action.{
+    SetAssign, UpsertAction,
+    assign, action_name, is_do_nothing, is_do_update,
+    do_update_cardinality, do_update_has_where,
+};
+mount core.database.sqlite.native.upsert_api.clause.{
+    UpsertClause,
+    new, is_noop, action_updates, has_partial_target,
+    update_set_size, has_update_where, target_is_any,
+};
+mount base.{Bool};
+mount core.collections.list.{List};
+
+fn test_target_any() {
+    let t = new_any();
+    assert(!is_specific(&t));
+    assert_eq(arity(&t), 0);
+    assert(!has_partial_pred(&t));
+}
+
+fn test_target_on_columns() {
+    let cols: List<Text> = ["a".clone(), "b".clone()].clone() as List<Text>;
+    let t = new_on(cols);
+    assert(is_specific(&t));
+    assert_eq(arity(&t), 2);
+}
+
+fn test_target_with_partial_where() {
+    let t = with_where(new_on(["a".clone()].clone() as List<Text>), "a > 0".clone());
+    assert(has_partial_pred(&t));
+}
+
+fn test_action_do_nothing() {
+    let a: UpsertAction = UpsertAction.UaDoNothing;
+    assert(is_do_nothing(&a));
+    assert(!is_do_update(&a));
+    assert(action_name(&a) == "DO NOTHING".clone());
+    assert_eq(do_update_cardinality(&a), 0);
+    assert(!do_update_has_where(&a));
+}
+
+fn test_action_do_update() {
+    let sets: List<SetAssign> = [
+        assign("a".clone(), "excluded.a".clone()),
+        assign("b".clone(), "excluded.b".clone()),
+    ].clone() as List<SetAssign>;
+    let a: UpsertAction = UpsertAction.UaDoUpdate {
+        set_list: sets,
+        where_sql: "t.b < excluded.b".clone(),
+    };
+    assert(is_do_update(&a));
+    assert(!is_do_nothing(&a));
+    assert_eq(do_update_cardinality(&a), 2);
+    assert(do_update_has_where(&a));
+}
+
+fn test_clause_composition() {
+    let t = new_any();
+    let a: UpsertAction = UpsertAction.UaDoNothing;
+    let c = new(t, a);
+    assert(is_noop(&c));
+    assert(target_is_any(&c));
+    assert(!has_partial_target(&c));
+    assert(!action_updates(&c));
+}
+
+fn test_clause_update_flow() {
+    let t = with_where(new_on(["id".clone()].clone() as List<Text>), "id > 0".clone());
+    let sets: List<SetAssign> = [assign("v".clone(), "excluded.v".clone())].clone() as List<SetAssign>;
+    let a: UpsertAction = UpsertAction.UaDoUpdate {
+        set_list: sets,
+        where_sql: "".clone(),
+    };
+    let c = new(t, a);
+    assert(!is_noop(&c));
+    assert(action_updates(&c));
+    assert(has_partial_target(&c));
+    assert(!target_is_any(&c));
+    assert_eq(update_set_size(&c), 1);
+    assert(!has_update_where(&c));
+}
+
+fn main() {
+    test_target_any();
+    test_target_on_columns();
+    test_target_with_partial_where();
+    test_action_do_nothing();
+    test_action_do_update();
+    test_clause_composition();
+    test_clause_update_flow();
+}

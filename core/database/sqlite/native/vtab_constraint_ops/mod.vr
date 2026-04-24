@@ -1,0 +1,13 @@
+// =============================================================================
+// core/database/sqlite/native/vtab_constraint_ops/mod.vr
+// =============================================================================
+// SQLITE_INDEX_CONSTRAINT_* opcode family — used by sqlite3_index_info in
+// xBestIndex to describe WHERE-clause constraints offered to the vtab.
+// Spec §16.1 — virtual-table protocol.
+//
+// Values mirror the SQLite C header <sqlite3.h>.
+// =============================================================================
+
+module core.database.sqlite.native.vtab_constraint_ops;
+
+public module op;

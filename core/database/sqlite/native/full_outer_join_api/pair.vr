@@ -1,0 +1,48 @@
+// A binary-join pair — two source table aliases + join kind + ON predicate id.
+
+module core.database.sqlite.native.full_outer_join_api.pair;
+
+mount core.database.sqlite.native.full_outer_join_api.join_kind.{
+    JoinKind, preserves_left, preserves_right, is_outer, is_cross,
+};
+mount base.{Bool, Text};
+
+public type JoinPair is {
+    left_alias: Text,
+    right_alias: Text,
+    kind: JoinKind,
+    on_predicate_id: Int,    // key into predicate table; -1 when USING/NATURAL or no ON
+    natural: Bool,           // NATURAL JOIN sugar
+};
+
+public fn new(left: Text, right: Text, kind: JoinKind) -> JoinPair {
+    JoinPair {
+        left_alias: left,
+        right_alias: right,
+        kind: kind,
+        on_predicate_id: -1,
+        natural: false,
+    }
+}
+
+public fn with_on(mut p: JoinPair, pred_id: Int) -> JoinPair {
+    p.on_predicate_id = pred_id;
+    p
+}
+
+public fn as_natural(mut p: JoinPair) -> JoinPair {
+    p.natural = true;
+    p
+}
+
+public fn keeps_left_unmatched(p: &JoinPair) -> Bool {
+    preserves_left(&p.kind)
+}
+
+public fn keeps_right_unmatched(p: &JoinPair) -> Bool {
+    preserves_right(&p.kind)
+}
+
+public fn has_on(p: &JoinPair) -> Bool {
+    p.on_predicate_id >= 0
+}

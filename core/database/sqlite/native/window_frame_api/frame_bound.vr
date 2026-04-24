@@ -1,0 +1,66 @@
+// Frame bound: UNBOUNDED / offset PRECEDING / CURRENT ROW / offset FOLLOWING / UNBOUNDED FOLLOWING.
+
+module core.database.sqlite.native.window_frame_api.frame_bound;
+
+mount base.{Bool, Text, Int64};
+
+public type FrameBound is
+    | FbUnboundedPreceding
+    | FbPreceding(Int64)         // offset value, e.g. `3 PRECEDING`
+    | FbCurrentRow
+    | FbFollowing(Int64)         // offset value, e.g. `2 FOLLOWING`
+    | FbUnboundedFollowing
+    ;
+
+public fn bound_name(b: &FrameBound) -> Text {
+    match b {
+        FbUnboundedPreceding => "UNBOUNDED PRECEDING".clone(),
+        FbPreceding(_)       => "PRECEDING".clone(),
+        FbCurrentRow         => "CURRENT ROW".clone(),
+        FbFollowing(_)       => "FOLLOWING".clone(),
+        FbUnboundedFollowing => "UNBOUNDED FOLLOWING".clone(),
+    }
+}
+
+public fn is_before_current(b: &FrameBound) -> Bool {
+    match b {
+        FbUnboundedPreceding => true,
+        FbPreceding(_)       => true,
+        _                    => false,
+    }
+}
+
+public fn is_after_current(b: &FrameBound) -> Bool {
+    match b {
+        FbUnboundedFollowing => true,
+        FbFollowing(_)       => true,
+        _                    => false,
+    }
+}
+
+public fn is_anchored_current(b: &FrameBound) -> Bool {
+    match b { FbCurrentRow => true, _ => false }
+}
+
+// A frame [start, end] must satisfy: start <= end in the induced total order.
+// Pre-parse rule (SQLite raises "frame starting offset must be non-negative"):
+//   offsets in PRECEDING/FOLLOWING must be non-negative.
+public fn offset_is_valid(b: &FrameBound) -> Bool {
+    match b {
+        FbPreceding(n) => n >= 0 as Int64,
+        FbFollowing(n) => n >= 0 as Int64,
+        _              => true,
+    }
+}
+
+// Ordering index used for validity checks — start must not exceed end.
+//   UnboundedPreceding < Preceding < CurrentRow < Following < UnboundedFollowing
+public fn ordering_index(b: &FrameBound) -> Int {
+    match b {
+        FbUnboundedPreceding => 0,
+        FbPreceding(_)       => 1,
+        FbCurrentRow         => 2,
+        FbFollowing(_)       => 3,
+        FbUnboundedFollowing => 4,
+    }
+}

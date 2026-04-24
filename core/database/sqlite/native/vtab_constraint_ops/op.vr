@@ -1,0 +1,128 @@
+// SQLITE_INDEX_CONSTRAINT_* opcode taxonomy.
+
+module core.database.sqlite.native.vtab_constraint_ops.op;
+
+mount base.{Bool, Text, Maybe};
+
+public type ConstraintOp is
+    | CoEq              // =
+    | CoGt              // >
+    | CoLe              // <=
+    | CoLt              // <
+    | CoGe              // >=
+    | CoMatch           // MATCH
+    | CoLike            // LIKE
+    | CoGlob            // GLOB
+    | CoRegexp          // REGEXP
+    | CoNe              // <>  !=
+    | CoIsNot           // IS NOT
+    | CoIsNotNull       // IS NOT NULL
+    | CoIsNull          // IS NULL
+    | CoIs              // IS
+    | CoLimit           // LIMIT (3.38+)
+    | CoOffset          // OFFSET (3.38+)
+    | CoFunction(Int)   // SQLITE_INDEX_CONSTRAINT_FUNCTION (>=150)
+    ;
+
+public fn op_code(o: &ConstraintOp) -> Int {
+    match o {
+        CoEq          =>  2,
+        CoGt          =>  4,
+        CoLe          =>  8,
+        CoLt          => 16,
+        CoGe          => 32,
+        CoMatch       => 64,
+        CoLike        => 65,
+        CoGlob        => 66,
+        CoRegexp      => 67,
+        CoNe          => 68,
+        CoIsNot       => 69,
+        CoIsNotNull   => 70,
+        CoIsNull      => 71,
+        CoIs          => 72,
+        CoLimit       => 73,
+        CoOffset      => 74,
+        CoFunction(n) => n,   // user-defined, >= 150
+    }
+}
+
+public fn from_code(code: Int) -> Maybe<ConstraintOp> {
+    if code ==  2 { return Maybe.Some(CoEq); }
+    if code ==  4 { return Maybe.Some(CoGt); }
+    if code ==  8 { return Maybe.Some(CoLe); }
+    if code == 16 { return Maybe.Some(CoLt); }
+    if code == 32 { return Maybe.Some(CoGe); }
+    if code == 64 { return Maybe.Some(CoMatch); }
+    if code == 65 { return Maybe.Some(CoLike); }
+    if code == 66 { return Maybe.Some(CoGlob); }
+    if code == 67 { return Maybe.Some(CoRegexp); }
+    if code == 68 { return Maybe.Some(CoNe); }
+    if code == 69 { return Maybe.Some(CoIsNot); }
+    if code == 70 { return Maybe.Some(CoIsNotNull); }
+    if code == 71 { return Maybe.Some(CoIsNull); }
+    if code == 72 { return Maybe.Some(CoIs); }
+    if code == 73 { return Maybe.Some(CoLimit); }
+    if code == 74 { return Maybe.Some(CoOffset); }
+    if code >= 150 { return Maybe.Some(CoFunction(code)); }
+    Maybe.None
+}
+
+public fn op_name(o: &ConstraintOp) -> Text {
+    match o {
+        CoEq          => "=".clone(),
+        CoGt          => ">".clone(),
+        CoLe          => "<=".clone(),
+        CoLt          => "<".clone(),
+        CoGe          => ">=".clone(),
+        CoMatch       => "MATCH".clone(),
+        CoLike        => "LIKE".clone(),
+        CoGlob        => "GLOB".clone(),
+        CoRegexp      => "REGEXP".clone(),
+        CoNe          => "<>".clone(),
+        CoIsNot       => "IS NOT".clone(),
+        CoIsNotNull   => "IS NOT NULL".clone(),
+        CoIsNull      => "IS NULL".clone(),
+        CoIs          => "IS".clone(),
+        CoLimit       => "LIMIT".clone(),
+        CoOffset      => "OFFSET".clone(),
+        CoFunction(_) => "FUNCTION".clone(),
+    }
+}
+
+public fn is_equality(o: &ConstraintOp) -> Bool {
+    match o {
+        CoEq => true, CoIs => true,
+        _    => false,
+    }
+}
+
+public fn is_ordering(o: &ConstraintOp) -> Bool {
+    match o {
+        CoLt => true, CoLe => true, CoGt => true, CoGe => true,
+        _    => false,
+    }
+}
+
+public fn is_null_test(o: &ConstraintOp) -> Bool {
+    match o {
+        CoIsNull => true, CoIsNotNull => true,
+        _        => false,
+    }
+}
+
+public fn is_string_pattern(o: &ConstraintOp) -> Bool {
+    match o {
+        CoLike => true, CoGlob => true, CoRegexp => true, CoMatch => true,
+        _      => false,
+    }
+}
+
+// SQLite 3.38+ surface that lets vtabs see LIMIT / OFFSET pushdown.
+public fn is_limit_offset(o: &ConstraintOp) -> Bool {
+    match o {
+        CoLimit => true, CoOffset => true,
+        _       => false,
+    }
+}
+
+public fn well_known_count() -> Int { 16 }

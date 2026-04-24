@@ -1,0 +1,19 @@
+// =============================================================================
+// core/database/sqlite/native/full_outer_join_api/mod.vr
+// =============================================================================
+// FULL OUTER JOIN (SQLite 3.39+) — union of LEFT + RIGHT outer join semantics.
+// Spec §13.6 — planner / join handling.
+//
+//   SELECT ... FROM a FULL OUTER JOIN b ON a.k = b.k
+//
+// Every row from both sides is emitted; unmatched rows are NULL-padded on the
+// missing side. SQLite implements this as a left-outer scan followed by a
+// right-anti-semi pass of b (the "right leftovers") that were not matched.
+//
+// =============================================================================
+
+module core.database.sqlite.native.full_outer_join_api;
+
+public module join_kind;
+public module pair;
+public module plan;

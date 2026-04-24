@@ -1,0 +1,95 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, row_value_api, sql, expressions
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.row_value_api.shape.{
+    RowShape,
+    new, with_labels, is_scalar, has_labels, arities_match,
+};
+mount core.database.sqlite.native.row_value_api.compare.{
+    CmpOp, CoEq, CoNe, CoLt, CoLe, CoGt, CoGe, CoIs, CoIsNot,
+    op_name, is_null_safe, is_ordering, is_equality,
+    Tri, TriTrue, TriFalse, TriUnknown,
+    tri_name, tri_and, tri_not, passes_filter,
+};
+mount base.{Bool};
+mount core.collections.list.{List};
+
+fn test_shape_scalar_vs_tuple() {
+    let s1 = new(1);
+    let s2 = new(3);
+    assert(is_scalar(&s1));
+    assert(!is_scalar(&s2));
+    assert(!has_labels(&s1));
+}
+
+fn test_shape_with_labels() {
+    let labels: List<Text> = ["a".clone(), "b".clone()].clone() as List<Text>;
+    let s = with_labels(new(2), labels);
+    assert(has_labels(&s));
+    assert_eq(s.arity, 2);
+}
+
+fn test_arities_match() {
+    assert(arities_match(&new(3), &new(3)));
+    assert(!arities_match(&new(2), &new(4)));
+}
+
+fn test_cmp_op_names() {
+    assert(op_name(&CoEq) == "=".clone());
+    assert(op_name(&CoNe) == "<>".clone());
+    assert(op_name(&CoIs) == "IS".clone());
+}
+
+fn test_op_classification() {
+    assert(is_null_safe(&CoIs));
+    assert(is_null_safe(&CoIsNot));
+    assert(!is_null_safe(&CoEq));
+    assert(is_ordering(&CoLt));
+    assert(is_ordering(&CoGe));
+    assert(!is_ordering(&CoEq));
+    assert(is_equality(&CoEq));
+    assert(is_equality(&CoIs));
+    assert(!is_equality(&CoLt));
+}
+
+fn test_tri_names() {
+    assert(tri_name(&TriTrue) == "TRUE".clone());
+    assert(tri_name(&TriFalse) == "FALSE".clone());
+    assert(tri_name(&TriUnknown) == "UNKNOWN".clone());
+}
+
+fn test_tri_and_truth_table() {
+    match tri_and(&TriTrue, &TriTrue) { TriTrue => {}, _ => assert(false) }
+    match tri_and(&TriTrue, &TriFalse) { TriFalse => {}, _ => assert(false) }
+    match tri_and(&TriTrue, &TriUnknown) { TriUnknown => {}, _ => assert(false) }
+    match tri_and(&TriFalse, &TriUnknown) { TriFalse => {}, _ => assert(false) }
+    match tri_and(&TriUnknown, &TriUnknown) { TriUnknown => {}, _ => assert(false) }
+}
+
+fn test_tri_not_involution() {
+    match tri_not(&TriTrue) { TriFalse => {}, _ => assert(false) }
+    match tri_not(&TriFalse) { TriTrue => {}, _ => assert(false) }
+    match tri_not(&TriUnknown) { TriUnknown => {}, _ => assert(false) }
+}
+
+fn test_passes_filter_only_true() {
+    assert(passes_filter(&TriTrue));
+    assert(!passes_filter(&TriFalse));
+    assert(!passes_filter(&TriUnknown));
+}
+
+fn main() {
+    test_shape_scalar_vs_tuple();
+    test_shape_with_labels();
+    test_arities_match();
+    test_cmp_op_names();
+    test_op_classification();
+    test_tri_names();
+    test_tri_and_truth_table();
+    test_tri_not_involution();
+    test_passes_filter_only_true();
+}

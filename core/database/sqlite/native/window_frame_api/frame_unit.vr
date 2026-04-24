@@ -1,0 +1,31 @@
+// Frame unit: ROWS vs RANGE vs GROUPS — how the frame bounds count peers.
+
+module core.database.sqlite.native.window_frame_api.frame_unit;
+
+mount base.{Bool, Text};
+
+public type FrameUnit is
+    | FuRows       // physical offset — exact row count
+    | FuRange      // value-relative — peers by ORDER BY value
+    | FuGroups     // peer groups — counts distinct ORDER BY groups
+    ;
+
+public fn unit_name(u: &FrameUnit) -> Text {
+    match u {
+        FuRows   => "ROWS".clone(),
+        FuRange  => "RANGE".clone(),
+        FuGroups => "GROUPS".clone(),
+    }
+}
+
+public fn is_physical(u: &FrameUnit) -> Bool {
+    match u { FuRows => true, _ => false }
+}
+
+// RANGE with a numeric offset requires exactly one numeric ORDER BY column;
+// GROUPS counts peer groups and needs at least one ORDER BY column.
+public fn requires_order_by(u: &FrameUnit) -> Bool {
+    match u { FuRows => false, _ => true }
+}
+
+public fn default_unit() -> FrameUnit { FuRange }

@@ -1,0 +1,33 @@
+// CTE materialization hint — since SQLite 3.35.
+
+module core.database.sqlite.native.cte_api.materialization;
+
+mount base.{Bool, Text};
+
+public type MaterializeHint is
+    | MhDefault        // no hint — planner chooses
+    | MhMaterialized   // force materialization (compute once, store rows)
+    | MhNotMaterialized // force inlining (substitute into each reference)
+    ;
+
+public fn hint_name(h: &MaterializeHint) -> Text {
+    match h {
+        MhDefault         => "default".clone(),
+        MhMaterialized    => "MATERIALIZED".clone(),
+        MhNotMaterialized => "NOT MATERIALIZED".clone(),
+    }
+}
+
+public fn is_explicit(h: &MaterializeHint) -> Bool {
+    match h { MhDefault => false, _ => true }
+}
+
+public fn forces_materialization(h: &MaterializeHint) -> Bool {
+    match h { MhMaterialized => true, _ => false }
+}
+
+public fn forces_inlining(h: &MaterializeHint) -> Bool {
+    match h { MhNotMaterialized => true, _ => false }
+}
+
+public fn default_hint() -> MaterializeHint { MhDefault }

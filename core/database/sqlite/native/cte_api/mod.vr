@@ -1,0 +1,17 @@
+// =============================================================================
+// core/database/sqlite/native/cte_api/mod.vr
+// =============================================================================
+// Common Table Expression (CTE) definitions — WITH / WITH RECURSIVE /
+// MATERIALIZED / NOT MATERIALIZED. Spec §13.5 — planner CTE handling.
+//
+// SQLite grammar:
+//   with_clause ::= WITH [RECURSIVE] cte_def (',' cte_def)*
+//   cte_def ::= name '(' col_list? ')' [AS [MATERIALIZED | NOT MATERIALIZED] '(' select ')']
+//
+// =============================================================================
+
+module core.database.sqlite.native.cte_api;
+
+public module materialization;
+public module definition;
+public module clause;

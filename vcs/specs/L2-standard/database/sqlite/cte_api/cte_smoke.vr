@@ -1,0 +1,104 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, cte_api, sql
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.cte_api.materialization.{
+    MaterializeHint, MhDefault, MhMaterialized, MhNotMaterialized,
+    hint_name, is_explicit, forces_materialization, forces_inlining, default_hint,
+};
+mount core.database.sqlite.native.cte_api.definition.{
+    CteDefinition,
+    new, with_columns, with_hint, as_recursive,
+    has_explicit_columns, arity, forces_materialize, forces_inline,
+};
+mount core.database.sqlite.native.cte_api.clause.{
+    WithClause,
+    new_recursive, push, len, is_empty, find, has_duplicate_name,
+};
+mount base.{Bool, Maybe};
+mount core.collections.list.{List};
+
+fn test_materialize_defaults() {
+    let h = default_hint();
+    match h { MhDefault => {}, _ => assert(false) }
+    assert(!is_explicit(&h));
+    assert(!forces_materialization(&h));
+    assert(!forces_inlining(&h));
+}
+
+fn test_materialize_explicit() {
+    assert(forces_materialization(&MhMaterialized));
+    assert(forces_inlining(&MhNotMaterialized));
+    assert(is_explicit(&MhMaterialized));
+    assert(hint_name(&MhMaterialized) == "MATERIALIZED".clone());
+}
+
+fn test_definition_new_defaults() {
+    let d = new("ranks".clone(), "SELECT 1 AS v".clone());
+    assert(!has_explicit_columns(&d));
+    assert_eq(arity(&d), 0);
+    assert(!forces_materialize(&d));
+    assert(!forces_inline(&d));
+}
+
+fn test_definition_with_columns() {
+    let cols: List<Text> = ["id".clone(), "val".clone()].clone() as List<Text>;
+    let d = with_columns(new("t".clone(), "SELECT 1, 2".clone()), cols);
+    assert(has_explicit_columns(&d));
+    assert_eq(arity(&d), 2);
+}
+
+fn test_definition_with_hint_and_recursive() {
+    let d0 = new("r".clone(), "SELECT 1".clone());
+    let d1 = with_hint(d0, MhMaterialized);
+    let d2 = as_recursive(d1);
+    assert(forces_materialize(&d2));
+    assert(!forces_inline(&d2));
+    assert(d2.recursive);
+}
+
+fn test_with_clause_push_and_find() {
+    let w0: WithClause = WithClause { recursive: false, defs: [].clone() as List<CteDefinition> };
+    let w1 = push(w0, new("a".clone(), "SELECT 1".clone()));
+    let w2 = push(w1, new("b".clone(), "SELECT 2".clone()));
+    assert_eq(len(&w2), 2);
+    assert(!is_empty(&w2));
+    match find(&w2, &"b".clone()) {
+        Maybe.Some(i) => assert_eq(i, 1),
+        Maybe.None => assert(false),
+    }
+    match find(&w2, &"missing".clone()) {
+        Maybe.None => {},
+        Maybe.Some(_) => assert(false),
+    }
+}
+
+fn test_with_clause_detects_duplicates() {
+    let w0: WithClause = WithClause { recursive: false, defs: [].clone() as List<CteDefinition> };
+    let w1 = push(w0, new("x".clone(), "SELECT 1".clone()));
+    let w2 = push(w1, new("y".clone(), "SELECT 2".clone()));
+    let w3 = push(w2, new("x".clone(), "SELECT 3".clone()));
+    assert(has_duplicate_name(&w3));
+    let empty: WithClause = WithClause { recursive: false, defs: [].clone() as List<CteDefinition> };
+    assert(!has_duplicate_name(&empty));
+}
+
+fn test_new_recursive_flag() {
+    let w = new_recursive();
+    assert(w.recursive);
+    assert(is_empty(&w));
+}
+
+fn main() {
+    test_materialize_defaults();
+    test_materialize_explicit();
+    test_definition_new_defaults();
+    test_definition_with_columns();
+    test_definition_with_hint_and_recursive();
+    test_with_clause_push_and_find();
+    test_with_clause_detects_duplicates();
+    test_new_recursive_flag();
+}

@@ -1,0 +1,15 @@
+// =============================================================================
+// core/database/sqlite/native/index_hint_api/mod.vr
+// =============================================================================
+// Planner hints: INDEXED BY / NOT INDEXED / CROSS JOIN.
+// Spec §13.4 — planner cost model overrides.
+//
+// SELECT ... FROM t INDEXED BY idx_name WHERE ...
+// SELECT ... FROM t NOT INDEXED WHERE ...
+// SELECT ... FROM a CROSS JOIN b ON a.k = b.k        -- preserve join order
+//
+// =============================================================================
+
+module core.database.sqlite.native.index_hint_api;
+
+public module hint;

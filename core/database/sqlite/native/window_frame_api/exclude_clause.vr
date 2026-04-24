@@ -1,0 +1,39 @@
+// EXCLUDE clause — row-skip policy applied after frame computation.
+
+module core.database.sqlite.native.window_frame_api.exclude_clause;
+
+mount base.{Bool, Text};
+
+public type ExcludeClause is
+    | EcNoOthers     // default — exclude nothing
+    | EcCurrentRow   // skip the current row
+    | EcGroup        // skip the current row + all its peers
+    | EcTies         // skip peers but keep the current row
+    ;
+
+public fn exclude_name(e: &ExcludeClause) -> Text {
+    match e {
+        EcNoOthers    => "NO OTHERS".clone(),
+        EcCurrentRow  => "CURRENT ROW".clone(),
+        EcGroup       => "GROUP".clone(),
+        EcTies        => "TIES".clone(),
+    }
+}
+
+public fn default_exclude() -> ExcludeClause { EcNoOthers }
+
+public fn removes_current_row(e: &ExcludeClause) -> Bool {
+    match e {
+        EcCurrentRow => true,
+        EcGroup      => true,
+        _            => false,
+    }
+}
+
+public fn removes_peers(e: &ExcludeClause) -> Bool {
+    match e {
+        EcGroup => true,
+        EcTies  => true,
+        _       => false,
+    }
+}

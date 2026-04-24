@@ -1,0 +1,124 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, window_frame_api, sql
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.window_frame_api.frame_unit.{
+    FrameUnit, FuRows, FuRange, FuGroups,
+    unit_name, is_physical, requires_order_by, default_unit,
+};
+mount core.database.sqlite.native.window_frame_api.frame_bound.{
+    FrameBound,
+    FbUnboundedPreceding, FbPreceding, FbCurrentRow, FbFollowing, FbUnboundedFollowing,
+    bound_name, is_before_current, is_after_current, is_anchored_current,
+    offset_is_valid, ordering_index,
+};
+mount core.database.sqlite.native.window_frame_api.exclude_clause.{
+    ExcludeClause, EcNoOthers, EcCurrentRow, EcGroup, EcTies,
+    exclude_name, default_exclude, removes_current_row, removes_peers,
+};
+mount core.database.sqlite.native.window_frame_api.frame_spec.{
+    FrameSpec, make, make_default, make_exact,
+    is_well_formed, is_default, spans_whole_partition,
+};
+mount base.{Bool};
+
+fn test_unit_names() {
+    assert(unit_name(&FuRows) == "ROWS".clone());
+    assert(unit_name(&FuRange) == "RANGE".clone());
+    assert(unit_name(&FuGroups) == "GROUPS".clone());
+}
+
+fn test_rows_is_physical() {
+    assert(is_physical(&FuRows));
+    assert(!is_physical(&FuRange));
+    assert(!requires_order_by(&FuRows));
+    assert(requires_order_by(&FuRange));
+    assert(requires_order_by(&FuGroups));
+}
+
+fn test_default_unit_is_range() {
+    match default_unit() { FuRange => {}, _ => assert(false) }
+}
+
+fn test_bound_predicates() {
+    assert(is_before_current(&FbUnboundedPreceding));
+    assert(is_before_current(&FbPreceding(3 as Int64)));
+    assert(is_anchored_current(&FbCurrentRow));
+    assert(is_after_current(&FbFollowing(2 as Int64)));
+    assert(is_after_current(&FbUnboundedFollowing));
+    assert(!is_before_current(&FbCurrentRow));
+}
+
+fn test_offset_non_negative() {
+    assert(offset_is_valid(&FbPreceding(0 as Int64)));
+    assert(offset_is_valid(&FbPreceding(5 as Int64)));
+    assert(!offset_is_valid(&FbPreceding(-1 as Int64)));
+    assert(!offset_is_valid(&FbFollowing(-3 as Int64)));
+}
+
+fn test_ordering_index_is_total() {
+    assert(ordering_index(&FbUnboundedPreceding) < ordering_index(&FbPreceding(1 as Int64)));
+    assert(ordering_index(&FbPreceding(1 as Int64)) < ordering_index(&FbCurrentRow));
+    assert(ordering_index(&FbCurrentRow) < ordering_index(&FbFollowing(1 as Int64)));
+    assert(ordering_index(&FbFollowing(1 as Int64)) < ordering_index(&FbUnboundedFollowing));
+}
+
+fn test_exclude_semantics() {
+    assert(exclude_name(&EcNoOthers) == "NO OTHERS".clone());
+    assert(removes_current_row(&EcCurrentRow));
+    assert(removes_current_row(&EcGroup));
+    assert(!removes_current_row(&EcTies));
+    assert(removes_peers(&EcGroup));
+    assert(removes_peers(&EcTies));
+    assert(!removes_peers(&EcCurrentRow));
+    match default_exclude() { EcNoOthers => {}, _ => assert(false) }
+}
+
+fn test_default_frame() {
+    let fs = make_default();
+    assert(is_well_formed(&fs));
+    assert(is_default(&fs));
+    assert(!spans_whole_partition(&fs));
+}
+
+fn test_well_formed_rejects_inverted() {
+    let bad = make(FuRows, FbFollowing(5 as Int64), FbPreceding(1 as Int64));
+    assert(!is_well_formed(&bad));
+}
+
+fn test_well_formed_rejects_unbounded_end_as_start() {
+    let bad = make(FuRows, FbUnboundedFollowing, FbUnboundedFollowing);
+    assert(!is_well_formed(&bad));
+    let bad2 = make(FuRows, FbUnboundedPreceding, FbUnboundedPreceding);
+    assert(!is_well_formed(&bad2));
+}
+
+fn test_full_partition_detection() {
+    let fs = make(FuRows, FbUnboundedPreceding, FbUnboundedFollowing);
+    assert(spans_whole_partition(&fs));
+    assert(is_well_formed(&fs));
+}
+
+fn test_make_exact_preserves_exclude() {
+    let fs = make_exact(FuGroups, FbCurrentRow, FbUnboundedFollowing, EcTies);
+    assert(is_well_formed(&fs));
+    match fs.exclude { EcTies => {}, _ => assert(false) }
+}
+
+fn main() {
+    test_unit_names();
+    test_rows_is_physical();
+    test_default_unit_is_range();
+    test_bound_predicates();
+    test_offset_non_negative();
+    test_ordering_index_is_total();
+    test_exclude_semantics();
+    test_default_frame();
+    test_well_formed_rejects_inverted();
+    test_well_formed_rejects_unbounded_end_as_start();
+    test_full_partition_detection();
+    test_make_exact_preserves_exclude();
+}

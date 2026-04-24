@@ -1,0 +1,91 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, full_outer_join_api, sql
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.full_outer_join_api.join_kind.{
+    JoinKind, JkInner, JkLeft, JkRight, JkFull, JkCross,
+    kind_name, preserves_left, preserves_right, is_outer, is_cross, reorder_allowed,
+};
+mount core.database.sqlite.native.full_outer_join_api.pair.{
+    JoinPair,
+    new, with_on, as_natural, keeps_left_unmatched, keeps_right_unmatched, has_on,
+};
+mount core.database.sqlite.native.full_outer_join_api.plan.{
+    JoinStrategy, JsNestedLoop, JsNestedLoopWithHash, JsLeftOuterScan, JsLeftThenRightFillup,
+    strategy_name, default_strategy, needs_right_fillup, uses_hash_build,
+};
+mount base.{Bool};
+
+fn test_kind_names() {
+    assert(kind_name(&JkInner) == "INNER".clone());
+    assert(kind_name(&JkLeft)  == "LEFT OUTER".clone());
+    assert(kind_name(&JkFull)  == "FULL OUTER".clone());
+}
+
+fn test_preservation_flags() {
+    assert(!preserves_left(&JkInner));
+    assert(preserves_left(&JkLeft));
+    assert(preserves_right(&JkRight));
+    assert(preserves_left(&JkFull));
+    assert(preserves_right(&JkFull));
+    assert(!preserves_right(&JkLeft));
+}
+
+fn test_outer_cross_predicates() {
+    assert(is_outer(&JkLeft));
+    assert(is_outer(&JkRight));
+    assert(is_outer(&JkFull));
+    assert(!is_outer(&JkCross));
+    assert(!is_outer(&JkInner));
+    assert(is_cross(&JkCross));
+}
+
+fn test_reorder_permissions() {
+    assert(reorder_allowed(&JkInner));
+    assert(!reorder_allowed(&JkCross));
+    assert(!reorder_allowed(&JkLeft));
+    assert(!reorder_allowed(&JkFull));
+}
+
+fn test_pair_constructors() {
+    let p0 = new("a".clone(), "b".clone(), JkLeft);
+    assert(!has_on(&p0));
+    assert(keeps_left_unmatched(&p0));
+    assert(!keeps_right_unmatched(&p0));
+    let p1 = with_on(p0, 42);
+    assert(has_on(&p1));
+    assert_eq(p1.on_predicate_id, 42);
+    let p2 = as_natural(p1);
+    assert(p2.natural);
+}
+
+fn test_default_strategy_per_kind() {
+    let p_inner = new("a".clone(), "b".clone(), JkInner);
+    match default_strategy(&p_inner) { JsNestedLoop => {}, _ => assert(false) }
+    let p_left = new("a".clone(), "b".clone(), JkLeft);
+    match default_strategy(&p_left) { JsLeftOuterScan => {}, _ => assert(false) }
+    let p_full = new("a".clone(), "b".clone(), JkFull);
+    match default_strategy(&p_full) { JsLeftThenRightFillup => {}, _ => assert(false) }
+}
+
+fn test_strategy_flags() {
+    assert(needs_right_fillup(&JsLeftThenRightFillup));
+    assert(!needs_right_fillup(&JsLeftOuterScan));
+    assert(uses_hash_build(&JsNestedLoopWithHash));
+    assert(uses_hash_build(&JsLeftThenRightFillup));
+    assert(!uses_hash_build(&JsNestedLoop));
+    assert(strategy_name(&JsLeftOuterScan) == "LeftOuterScan".clone());
+}
+
+fn main() {
+    test_kind_names();
+    test_preservation_flags();
+    test_outer_cross_predicates();
+    test_reorder_permissions();
+    test_pair_constructors();
+    test_default_strategy_per_kind();
+    test_strategy_flags();
+}

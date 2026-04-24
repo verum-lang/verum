@@ -1,0 +1,64 @@
+// Join kinds — taxonomy extending what SQLite supports.
+
+module core.database.sqlite.native.full_outer_join_api.join_kind;
+
+mount base.{Bool, Text};
+
+public type JoinKind is
+    | JkInner      // INNER JOIN / JOIN / comma
+    | JkLeft       // LEFT [OUTER] JOIN
+    | JkRight      // RIGHT [OUTER] JOIN (3.39+)
+    | JkFull       // FULL [OUTER] JOIN (3.39+)
+    | JkCross      // CROSS JOIN — inner with planner hint
+    ;
+
+public fn kind_name(k: &JoinKind) -> Text {
+    match k {
+        JkInner => "INNER".clone(),
+        JkLeft  => "LEFT OUTER".clone(),
+        JkRight => "RIGHT OUTER".clone(),
+        JkFull  => "FULL OUTER".clone(),
+        JkCross => "CROSS".clone(),
+    }
+}
+
+public fn preserves_left(k: &JoinKind) -> Bool {
+    match k {
+        JkLeft  => true,
+        JkFull  => true,
+        _       => false,
+    }
+}
+
+public fn preserves_right(k: &JoinKind) -> Bool {
+    match k {
+        JkRight => true,
+        JkFull  => true,
+        _       => false,
+    }
+}
+
+public fn is_outer(k: &JoinKind) -> Bool {
+    match k {
+        JkInner => false,
+        JkCross => false,
+        _       => true,
+    }
+}
+
+public fn is_cross(k: &JoinKind) -> Bool {
+    match k { JkCross => true, _ => false }
+}
+
+// SQLite reorders INNER/CROSS joins freely (subject to CROSS JOIN hint) but
+// outer joins pin the table order per ON clause. LEFT and RIGHT share a
+// reorder gate, FULL never reorders.
+public fn reorder_allowed(k: &JoinKind) -> Bool {
+    match k {
+        JkInner => true,
+        JkCross => false,   // hint: programmer requested this order
+        JkLeft  => false,
+        JkRight => false,
+        JkFull  => false,
+    }
+}

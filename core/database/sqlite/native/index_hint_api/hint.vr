@@ -1,0 +1,44 @@
+// Per-source-table planner hint.
+
+module core.database.sqlite.native.index_hint_api.hint;
+
+mount base.{Bool, Text};
+
+public type IndexHint is
+    | IhNone                 // no hint — planner chooses
+    | IhIndexedBy(Text)      // force use of this index — raise "no query plan" on miss
+    | IhNotIndexed           // force full table scan
+    ;
+
+public fn hint_name(h: &IndexHint) -> Text {
+    match h {
+        IhNone          => "none".clone(),
+        IhIndexedBy(_)  => "INDEXED BY".clone(),
+        IhNotIndexed    => "NOT INDEXED".clone(),
+    }
+}
+
+public fn is_explicit(h: &IndexHint) -> Bool {
+    match h { IhNone => false, _ => true }
+}
+
+public fn forces_scan(h: &IndexHint) -> Bool {
+    match h { IhNotIndexed => true, _ => false }
+}
+
+public fn forces_index(h: &IndexHint) -> Bool {
+    match h { IhIndexedBy(_) => true, _ => false }
+}
+
+public fn required_index(h: &IndexHint) -> Text {
+    match h {
+        IhIndexedBy(name) => name.clone(),
+        _                 => "".clone(),
+    }
+}
+
+// CROSS JOIN is a JOIN-level hint — it tells the planner "do not reorder
+// this join". The hint lives on the JoinPair, not on a source table.
+public fn describes_cross_join_hint() -> Text {
+    "Use JoinKind::JkCross on full_outer_join_api::JoinPair for CROSS JOIN.".clone()
+}

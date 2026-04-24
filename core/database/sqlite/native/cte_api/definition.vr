@@ -1,0 +1,58 @@
+// A single CTE definition: name + optional column list + body + materialization hint.
+
+module core.database.sqlite.native.cte_api.definition;
+
+mount core.database.sqlite.native.cte_api.materialization.{
+    MaterializeHint, default_hint, forces_materialization, forces_inlining,
+};
+mount base.{Bool, Text};
+mount core.collections.list.{List};
+
+public type CteDefinition is {
+    name: Text,
+    columns: List<Text>,             // empty = inferred from body
+    body_sql: Text,                  // raw SELECT text — full parse is in l5_sql
+    hint: MaterializeHint,
+    recursive: Bool,                 // true when containing WITH uses RECURSIVE
+};
+
+public fn new(name: Text, body_sql: Text) -> CteDefinition {
+    CteDefinition {
+        name: name,
+        columns: [].clone() as List<Text>,
+        body_sql: body_sql,
+        hint: default_hint(),
+        recursive: false,
+    }
+}
+
+public fn with_columns(mut c: CteDefinition, cols: List<Text>) -> CteDefinition {
+    c.columns = cols;
+    c
+}
+
+public fn with_hint(mut c: CteDefinition, h: MaterializeHint) -> CteDefinition {
+    c.hint = h;
+    c
+}
+
+public fn as_recursive(mut c: CteDefinition) -> CteDefinition {
+    c.recursive = true;
+    c
+}
+
+public fn has_explicit_columns(c: &CteDefinition) -> Bool {
+    c.columns.len() > 0
+}
+
+public fn arity(c: &CteDefinition) -> Int {
+    c.columns.len()
+}
+
+public fn forces_materialize(c: &CteDefinition) -> Bool {
+    forces_materialization(&c.hint)
+}
+
+public fn forces_inline(c: &CteDefinition) -> Bool {
+    forces_inlining(&c.hint)
+}

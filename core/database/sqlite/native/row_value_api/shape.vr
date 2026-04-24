@@ -1,0 +1,29 @@
+// Shape of a row-value expression — arity + label hint.
+
+module core.database.sqlite.native.row_value_api.shape;
+
+mount base.{Bool, Text};
+mount core.collections.list.{List};
+
+public type RowShape is {
+    arity: Int,
+    labels: List<Text>,   // optional column-name hints; empty = anonymous
+};
+
+public fn new(arity: Int) -> RowShape {
+    RowShape { arity: arity, labels: [].clone() as List<Text> }
+}
+
+public fn with_labels(mut s: RowShape, labels: List<Text>) -> RowShape {
+    s.labels = labels;
+    s
+}
+
+public fn is_scalar(s: &RowShape) -> Bool { s.arity == 1 }
+
+public fn has_labels(s: &RowShape) -> Bool { s.labels.len() > 0 }
+
+// SQLite rejects row-value comparisons where the arities differ.
+public fn arities_match(a: &RowShape, b: &RowShape) -> Bool {
+    a.arity == b.arity
+}

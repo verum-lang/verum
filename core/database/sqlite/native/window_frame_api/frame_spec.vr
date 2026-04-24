@@ -1,0 +1,91 @@
+// Frame spec = unit + start bound + end bound + exclude.
+
+module core.database.sqlite.native.window_frame_api.frame_spec;
+
+mount core.database.sqlite.native.window_frame_api.frame_unit.{
+    FrameUnit, FuRows, FuRange, FuGroups, default_unit, is_physical,
+};
+mount core.database.sqlite.native.window_frame_api.frame_bound.{
+    FrameBound,
+    FbUnboundedPreceding, FbPreceding, FbCurrentRow, FbFollowing, FbUnboundedFollowing,
+    ordering_index, offset_is_valid, is_before_current, is_after_current,
+};
+mount core.database.sqlite.native.window_frame_api.exclude_clause.{
+    ExcludeClause, EcNoOthers, default_exclude,
+};
+mount base.{Bool, Text};
+
+public type FrameSpec is {
+    unit: FrameUnit,
+    start: FrameBound,
+    end: FrameBound,
+    exclude: ExcludeClause,
+};
+
+public fn make_default() -> FrameSpec {
+    FrameSpec {
+        unit: default_unit(),
+        start: FbUnboundedPreceding,
+        end: FbCurrentRow,
+        exclude: default_exclude(),
+    }
+}
+
+public fn make(unit: FrameUnit, start: FrameBound, end: FrameBound) -> FrameSpec {
+    FrameSpec { unit: unit, start: start, end: end, exclude: default_exclude() }
+}
+
+public fn make_exact(
+    unit: FrameUnit,
+    start: FrameBound,
+    end: FrameBound,
+    exclude: ExcludeClause,
+) -> FrameSpec {
+    FrameSpec { unit: unit, start: start, end: end, exclude: exclude }
+}
+
+// Validate: start <= end in ordering_index, offsets non-negative,
+// and end is not UNBOUNDED PRECEDING (empty frame).
+public fn is_well_formed(fs: &FrameSpec) -> Bool {
+    if !offset_is_valid(&fs.start) { return false; }
+    if !offset_is_valid(&fs.end)   { return false; }
+    // UNBOUNDED PRECEDING as end is impossible — always empty.
+    match fs.end {
+        FbUnboundedPreceding => return false,
+        _ => {}
+    }
+    // UNBOUNDED FOLLOWING as start is impossible — always empty.
+    match fs.start {
+        FbUnboundedFollowing => return false,
+        _ => {}
+    }
+    ordering_index(&fs.start) <= ordering_index(&fs.end)
+}
+
+// A default frame — RANGE BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW —
+// is produced by a bare `OVER (ORDER BY ...)` with no explicit frame clause.
+public fn is_default(fs: &FrameSpec) -> Bool {
+    let unit_ok = match fs.unit { FuRange => true, _ => false };
+    let start_ok = match fs.start { FbUnboundedPreceding => true, _ => false };
+    let end_ok = match fs.end { FbCurrentRow => true, _ => false };
+    let exc_ok = match fs.exclude { EcNoOthers => true, _ => false };
+    unit_ok && start_ok && end_ok && exc_ok
+}
+
+// Whether the frame is the full partition — used to bypass frame calculation.
+public fn spans_whole_partition(fs: &FrameSpec) -> Bool {
+    let start_full = match fs.start { FbUnboundedPreceding => true, _ => false };
+    let end_full   = match fs.end   { FbUnboundedFollowing => true, _ => false };
+    let exc_ok     = match fs.exclude { EcNoOthers => true, _ => false };
+    start_full && end_full && exc_ok
+}
+
+public fn render(fs: &FrameSpec) -> Text {
+    let mut out = "".clone();
+    match fs.unit {
+        FuRows   => out = out + "ROWS".clone(),
+        FuRange  => out = out + "RANGE".clone(),
+        FuGroups => out = out + "GROUPS".clone(),
+    }
+    out + " BETWEEN ... AND ...".clone()
+}

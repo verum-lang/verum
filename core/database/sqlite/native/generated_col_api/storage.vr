@@ -1,0 +1,35 @@
+// Generated-column storage class.
+
+module core.database.sqlite.native.generated_col_api.storage;
+
+mount base.{Bool, Text};
+
+public type GenStorage is
+    | GsVirtual   // computed on read
+    | GsStored    // computed on write, materialized on disk
+    ;
+
+public fn storage_name(s: &GenStorage) -> Text {
+    match s {
+        GsVirtual => "VIRTUAL".clone(),
+        GsStored  => "STORED".clone(),
+    }
+}
+
+public fn is_virtual(s: &GenStorage) -> Bool {
+    match s { GsVirtual => true, _ => false }
+}
+
+public fn is_stored(s: &GenStorage) -> Bool {
+    match s { GsStored => true, _ => false }
+}
+
+// STRICT mode (3.37+) disallows VIRTUAL on rowid tables that also have
+// FOREIGN KEY CASCADE / RESTRICT because deferred FK checks cannot re-read
+// virtual values without reference; the engine raises a table-create error.
+public fn consumes_disk_space(s: &GenStorage) -> Bool {
+    match s { GsStored => true, _ => false }
+}
+
+// Default when neither keyword is specified: VIRTUAL.
+public fn default_storage() -> GenStorage { GsVirtual }

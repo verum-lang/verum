@@ -1,0 +1,41 @@
+// Conflict target — column list + optional WHERE predicate for partial indexes.
+
+module core.database.sqlite.native.upsert_api.target;
+
+mount base.{Bool, Text};
+mount core.collections.list.{List};
+
+public type ConflictTarget is {
+    columns: List<Text>,              // column-name list
+    index_predicate: Text,            // optional WHERE on a partial index
+    none_means_any_unique: Bool,      // empty target matches any unique constraint
+};
+
+public fn new_any() -> ConflictTarget {
+    ConflictTarget {
+        columns: [].clone() as List<Text>,
+        index_predicate: "".clone(),
+        none_means_any_unique: true,
+    }
+}
+
+public fn new_on(cols: List<Text>) -> ConflictTarget {
+    ConflictTarget {
+        columns: cols,
+        index_predicate: "".clone(),
+        none_means_any_unique: false,
+    }
+}
+
+public fn with_where(mut t: ConflictTarget, pred: Text) -> ConflictTarget {
+    t.index_predicate = pred;
+    t
+}
+
+public fn is_specific(t: &ConflictTarget) -> Bool { !t.none_means_any_unique }
+
+public fn arity(t: &ConflictTarget) -> Int { t.columns.len() }
+
+public fn has_partial_pred(t: &ConflictTarget) -> Bool {
+    t.index_predicate.len() > 0
+}
