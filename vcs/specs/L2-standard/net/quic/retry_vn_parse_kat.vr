@@ -1,0 +1,159 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: quic, packet, retry, version_negotiation, parse, rfc9000_17_2_1, rfc9000_17_2_5
+// @timeout: 15000
+// @expected-exit: 0
+
+// RFC 9000 §17.2.5 Retry packet:
+//
+//   Long header (type bits = 11):
+//     first_byte || version || DCID len + DCID || SCID len + SCID ||
+//     Retry Token (variable) || Retry Integrity Tag (16 bytes)
+//
+// The integrity tag is AEAD_AES_128_GCM output with fixed key + nonce
+// keyed on original_destination_connection_id — `rfc9001_retry_integrity_kat`
+// exercises that derivation. This KAT focuses on the wire-parse itself:
+// token + tag unpack.
+//
+// RFC 9000 §17.2.1 Version Negotiation packet:
+//
+//   first_byte (any) || version = 0x00000000 || DCID len + DCID ||
+//   SCID len + SCID || Supported Version (4) × N
+//
+// Server emits this when it receives a packet carrying an unsupported
+// version.  The first-byte type bits are meaningless; the version=0
+// field selects the VN branch.
+
+mount core.*;
+mount core.collections.List;
+mount core.net.quic.packet.{Packet, LongBody, parse_long};
+
+fn retry_packet_parse_byte_exact() {
+    // Retry type bits = 11 → first = 0xF0.
+    // Layout: first | version(4) | dcid_len | dcid | scid_len | scid
+    //   | token (variable) | integrity_tag (16)
+    let wire: List<Byte> = [
+        0xF0_u8,                                    // Retry first byte
+        0x00_u8, 0x00_u8, 0x00_u8, 0x01_u8,         // version 0x00000001
+        0x04_u8, 0xAA_u8, 0xBB_u8, 0xCC_u8, 0xDD_u8,  // DCID (4 bytes)
+        0x00_u8,                                    // SCID len = 0
+        0x74_u8, 0x6F_u8, 0x6B_u8, 0x65_u8, 0x6E_u8, // 5-byte token "token"
+        // 16-byte integrity tag
+        0x01_u8, 0x02_u8, 0x03_u8, 0x04_u8,
+        0x05_u8, 0x06_u8, 0x07_u8, 0x08_u8,
+        0x09_u8, 0x0A_u8, 0x0B_u8, 0x0C_u8,
+        0x0D_u8, 0x0E_u8, 0x0F_u8, 0x10_u8,
+    ];
+    let parsed = parse_long(wire.as_slice()).unwrap();
+    match parsed {
+        Packet.Long(lp) => {
+            match lp.body {
+                LongBody.RetryBody { token, integrity_tag } => {
+                    assert(token.len() == 5);
+                    assert(token[0] == 0x74_u8);
+                    assert(token[4] == 0x6E_u8);
+                    assert(integrity_tag[0]  == 0x01_u8);
+                    assert(integrity_tag[15] == 0x10_u8);
+                },
+                _ => panic("expected RetryBody"),
+            }
+        },
+        _ => panic("expected Long packet"),
+    }
+}
+
+fn retry_packet_with_empty_token() {
+    // Retry with no token — just the 16-byte tag.
+    let wire: List<Byte> = [
+        0xF0_u8,
+        0x00_u8, 0x00_u8, 0x00_u8, 0x01_u8,
+        0x00_u8, 0x00_u8,                           // DCID/SCID empty
+        0xFF_u8, 0xFF_u8, 0xFF_u8, 0xFF_u8,
+        0xFF_u8, 0xFF_u8, 0xFF_u8, 0xFF_u8,
+        0xFF_u8, 0xFF_u8, 0xFF_u8, 0xFF_u8,
+        0xFF_u8, 0xFF_u8, 0xFF_u8, 0xFF_u8,
+    ];
+    let parsed = parse_long(wire.as_slice()).unwrap();
+    match parsed {
+        Packet.Long(lp) => {
+            match lp.body {
+                LongBody.RetryBody { token, integrity_tag } => {
+                    assert(token.len() == 0);
+                    // Entire tag is 0xFF.
+                    let mut i: Int = 0;
+                    while i < 16 {
+                        assert(integrity_tag[i] == 0xFF_u8);
+                        i = i + 1;
+                    }
+                },
+                _ => panic("expected RetryBody"),
+            }
+        },
+        _ => panic("expected Long packet"),
+    }
+}
+
+fn version_negotiation_parse_three_versions() {
+    // VN: version field = 0x00000000 → dispatches to VersionNegotiation branch.
+    let wire: List<Byte> = [
+        0x80_u8,                                    // first byte (type bits irrelevant)
+        0x00_u8, 0x00_u8, 0x00_u8, 0x00_u8,         // version = 0 (VN sentinel)
+        0x04_u8, 0xAA_u8, 0xBB_u8, 0xCC_u8, 0xDD_u8,  // DCID (4)
+        0x00_u8,                                    // SCID len = 0
+        // Supported versions — 3 × 4 bytes.
+        0x00_u8, 0x00_u8, 0x00_u8, 0x01_u8,         // QUIC v1
+        0x6B_u8, 0x33_u8, 0x43_u8, 0xCF_u8,         // QUIC v2 (RFC 9369)
+        0x0A_u8, 0x0A_u8, 0x0A_u8, 0x0A_u8,         // greased
+    ];
+    let parsed = parse_long(wire.as_slice()).unwrap();
+    match parsed {
+        Packet.VersionNegotiation { dcid, scid, versions } => {
+            assert(dcid.len() == 4);
+            assert(scid.len() == 0);
+            assert(versions.len() == 3);
+            assert(versions[0] == 0x00000001_u32);
+            assert(versions[1] == 0x6B3343CF_u32);
+            assert(versions[2] == 0x0A0A0A0A_u32);
+        },
+        _ => panic("expected VersionNegotiation"),
+    }
+}
+
+fn version_negotiation_empty_version_list_rejects() {
+    // §17.2.1 — VN MUST list at least one version; empty body must fail.
+    let wire: List<Byte> = [
+        0x80_u8,
+        0x00_u8, 0x00_u8, 0x00_u8, 0x00_u8,
+        0x00_u8, 0x00_u8,                           // empty CIDs
+    ];
+    match parse_long(wire.as_slice()) {
+        Err(_) => {},
+        Ok(_) => panic("empty VN must reject"),
+    }
+}
+
+fn version_negotiation_non_multiple_of_four_rejects() {
+    // VN version list length must be a multiple of 4.
+    let wire: List<Byte> = [
+        0x80_u8,
+        0x00_u8, 0x00_u8, 0x00_u8, 0x00_u8,
+        0x00_u8, 0x00_u8,                           // empty CIDs
+        0x00_u8, 0x00_u8, 0x00_u8,                  // 3 bytes (not multiple of 4)
+    ];
+    match parse_long(wire.as_slice()) {
+        Err(_) => {},
+        Ok(_) => panic("non-multiple-of-4 VN body must reject"),
+    }
+}
+
+@main
+public fn main() -> Int {
+    retry_packet_parse_byte_exact();
+    retry_packet_with_empty_token();
+    version_negotiation_parse_three_versions();
+    version_negotiation_empty_version_list_rejects();
+    version_negotiation_non_multiple_of_four_rejects();
+    print("RFC 9000 §17.2.1 VersionNegotiation + §17.2.5 Retry parse verified");
+    0
+}

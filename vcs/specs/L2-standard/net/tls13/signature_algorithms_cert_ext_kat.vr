@@ -1,0 +1,102 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: tls13, extension, signature_algorithms_cert, encode, rfc8446_4_2_3
+// @timeout: 15000
+// @expected-exit: 0
+
+// RFC 8446 §4.2.3 signature_algorithms_cert extension.
+//
+// Carries the signature algorithms the sender is willing to accept in
+// CERTIFICATE chains (distinct from the signature_algorithms extension
+// which scopes to the peer's CertificateVerify signature only).
+//
+// Identical wire layout to signature_algorithms (§4.2.3 first half),
+// only the IANA ext_type differs (0x0032 vs 0x000D).
+//
+//   Extension 50 (u16) || outer u16 len || inner u16 list len ||
+//     SignatureScheme (u16) × N
+
+mount core.*;
+mount core.collections.List;
+mount core.net.tls13.sig_scheme.{SignatureScheme};
+mount core.net.tls13.handshake.extension.{
+    Extension, encode_extension,
+    EXT_SIGNATURE_ALGORITHMS, EXT_SIGNATURE_ALGORITHMS_CERT,
+};
+
+fn ext_signature_algorithms_cert_id_is_50() {
+    assert(EXT_SIGNATURE_ALGORITHMS_CERT == 50_u16);
+    assert(EXT_SIGNATURE_ALGORITHMS      == 13_u16);
+    assert(EXT_SIGNATURE_ALGORITHMS_CERT != EXT_SIGNATURE_ALGORITHMS);
+}
+
+fn single_ed25519_scheme_byte_exact() {
+    let ext = Extension.SignatureAlgorithmsCertExt {
+        schemes: [SignatureScheme.Ed25519Scheme],
+    };
+    let mut out: List<Byte> = [];
+    encode_extension(&ext, &mut out).unwrap();
+    // Layout: ext_type(2) + outer u16(2) + inner u16(2) + scheme(2) = 8.
+    assert(out.len() == 8);
+    assert(out[0] == 0x00_u8 && out[1] == 0x32_u8);    // ext_type = 50
+    assert(out[2] == 0x00_u8 && out[3] == 0x04_u8);    // outer = 4
+    assert(out[4] == 0x00_u8 && out[5] == 0x02_u8);    // inner = 2
+    assert(out[6] == 0x08_u8 && out[7] == 0x07_u8);    // Ed25519 = 0x0807
+}
+
+fn three_schemes_order_preserved() {
+    // RSA-PSS-RSAE-SHA256 (0x0804), ECDSA-P-256-SHA256 (0x0403),
+    // Ed25519 (0x0807) — order-preserved emission.
+    let schemes: List<SignatureScheme> = [
+        SignatureScheme.RsaPssRsaeSha256,
+        SignatureScheme.EcdsaSecp256r1Sha256,
+        SignatureScheme.Ed25519Scheme,
+    ];
+    let ext = Extension.SignatureAlgorithmsCertExt { schemes: schemes };
+    let mut out: List<Byte> = [];
+    encode_extension(&ext, &mut out).unwrap();
+    // inner = 3 × 2 = 6; outer = 8; total = 12.
+    assert(out.len() == 12);
+    assert(out[2] == 0x00_u8 && out[3] == 0x08_u8);    // outer = 8
+    assert(out[4] == 0x00_u8 && out[5] == 0x06_u8);    // inner = 6
+    // First scheme bytes [6..=7].
+    assert(out[6]  == 0x08_u8 && out[7]  == 0x04_u8);  // RSA-PSS RSAE SHA256
+    assert(out[8]  == 0x04_u8 && out[9]  == 0x03_u8);  // ECDSA P-256 SHA256
+    assert(out[10] == 0x08_u8 && out[11] == 0x07_u8);  // Ed25519
+}
+
+fn wire_layout_matches_signature_algorithms_byte_for_byte_except_type() {
+    // Encoding the same scheme list via SignatureAlgorithms and
+    // SignatureAlgorithmsCert should produce identical bytes except
+    // for the leading 2-byte ext_type.
+    let schemes: List<SignatureScheme> = [
+        SignatureScheme.Ed25519Scheme,
+        SignatureScheme.EcdsaSecp384r1Sha384,
+    ];
+    let sa = Extension.SignatureAlgorithmsExt      { schemes: schemes.clone() };
+    let sac = Extension.SignatureAlgorithmsCertExt { schemes: schemes };
+    let mut osa:  List<Byte> = [];
+    let mut osac: List<Byte> = [];
+    encode_extension(&sa,  &mut osa).unwrap();
+    encode_extension(&sac, &mut osac).unwrap();
+    assert(osa.len() == osac.len());
+    // Only bytes 0..=1 (ext_type) differ.
+    assert(osa[0]  == 0x00_u8 && osa[1]  == 0x0D_u8);
+    assert(osac[0] == 0x00_u8 && osac[1] == 0x32_u8);
+    let mut i: Int = 2;
+    while i < osa.len() {
+        assert(osa[i] == osac[i]);
+        i = i + 1;
+    }
+}
+
+@main
+public fn main() -> Int {
+    ext_signature_algorithms_cert_id_is_50();
+    single_ed25519_scheme_byte_exact();
+    three_schemes_order_preserved();
+    wire_layout_matches_signature_algorithms_byte_for_byte_except_type();
+    print("RFC 8446 §4.2.3 signature_algorithms_cert extension encode verified");
+    0
+}
