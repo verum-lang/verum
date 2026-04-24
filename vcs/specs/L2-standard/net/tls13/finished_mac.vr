@@ -1,0 +1,118 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: tls13, finished, hmac, rfc8446_4_4_4
+// @timeout: 15000
+// @expected-exit: 0
+
+// RFC 8446 §4.4.4 Finished message:
+//
+//   finished_key = HKDF-Expand-Label(BaseKey, "finished", "", Hash.length)
+//   verify_data  = HMAC(finished_key, Transcript-Hash(Handshake Context))
+//
+// Verify-data length equals Hash.length. This test pins:
+//   (a) hkdf_expand_label returns exactly `out_len` bytes for the
+//       finished-key derivation when out_len = Hash.length.
+//   (b) HMAC-SHA-256(finished_key, transcript_hash) produces a
+//       32-byte MAC; HMAC-SHA-384 → 48-byte MAC.
+
+mount core.*;
+mount core.collections.List;
+mount core.net.tls13.cipher_suite.{HashKind};
+mount core.net.tls13.keyschedule.hkdf_label.{hkdf_expand_label};
+mount core.net.tls13.keyschedule.derive_secret.{LABEL_FINISHED};
+mount core.security.mac.hmac.{hmac_sha256, hmac_sha384};
+
+fn finished_key_sha256_has_32_bytes() {
+    let base_key: List<Byte> = [
+        0_u8, 0_u8, 0_u8, 0_u8, 0_u8, 0_u8, 0_u8, 0_u8,
+        0_u8, 0_u8, 0_u8, 0_u8, 0_u8, 0_u8, 0_u8, 0_u8,
+        0_u8, 0_u8, 0_u8, 0_u8, 0_u8, 0_u8, 0_u8, 0_u8,
+        0_u8, 0_u8, 0_u8, 0_u8, 0_u8, 0_u8, 0_u8, 0_u8,
+    ];
+    let empty: List<Byte> = [];
+    let fk = hkdf_expand_label(
+        HashKind.Sha256,
+        base_key.as_slice(),
+        LABEL_FINISHED.as_slice(),
+        empty.as_slice(),
+        32,
+    ).unwrap();
+    assert(fk.len() == 32);
+}
+
+fn finished_key_sha384_has_48_bytes() {
+    let base_key: List<Byte> = [
+        0_u8, 0_u8, 0_u8, 0_u8, 0_u8, 0_u8, 0_u8, 0_u8,
+        0_u8, 0_u8, 0_u8, 0_u8, 0_u8, 0_u8, 0_u8, 0_u8,
+        0_u8, 0_u8, 0_u8, 0_u8, 0_u8, 0_u8, 0_u8, 0_u8,
+        0_u8, 0_u8, 0_u8, 0_u8, 0_u8, 0_u8, 0_u8, 0_u8,
+        0_u8, 0_u8, 0_u8, 0_u8, 0_u8, 0_u8, 0_u8, 0_u8,
+        0_u8, 0_u8, 0_u8, 0_u8, 0_u8, 0_u8, 0_u8, 0_u8,
+    ];
+    let empty: List<Byte> = [];
+    let fk = hkdf_expand_label(
+        HashKind.Sha384,
+        base_key.as_slice(),
+        LABEL_FINISHED.as_slice(),
+        empty.as_slice(),
+        48,
+    ).unwrap();
+    assert(fk.len() == 48);
+}
+
+fn hmac_sha256_verify_data_is_32_bytes() {
+    let fk: List<Byte> = [0x11_u8; 32];
+    let transcript_hash: List<Byte> = [0x22_u8; 32];
+    let mac = hmac_sha256(fk.as_slice(), transcript_hash.as_slice());
+    assert(mac.len() == 32);
+}
+
+fn hmac_sha384_verify_data_is_48_bytes() {
+    let fk: List<Byte> = [0x11_u8; 48];
+    let transcript_hash: List<Byte> = [0x22_u8; 48];
+    let mac = hmac_sha384(fk.as_slice(), transcript_hash.as_slice());
+    assert(mac.len() == 48);
+}
+
+fn finished_mac_deterministic() {
+    // Same (key, data) pair → identical MAC.
+    let fk: List<Byte> = [0x01_u8; 32];
+    let data: List<Byte> = [0x02_u8; 32];
+    let m1 = hmac_sha256(fk.as_slice(), data.as_slice());
+    let m2 = hmac_sha256(fk.as_slice(), data.as_slice());
+    let mut i: Int = 0;
+    while i < 32 {
+        assert(m1[i] == m2[i]);
+        i = i + 1;
+    }
+}
+
+fn finished_mac_sensitive_to_key_flip() {
+    let k_a: List<Byte> = [0xAA_u8; 32];
+    let k_b: List<Byte> = [0xBB_u8; 32];
+    let data: List<Byte> = [0x00_u8; 32];
+    let m_a = hmac_sha256(k_a.as_slice(), data.as_slice());
+    let m_b = hmac_sha256(k_b.as_slice(), data.as_slice());
+    // Any byte must differ — HMAC collision on full 256-bit output is
+    // cryptographically impossible.
+    let mut any_diff = false;
+    let mut i: Int = 0;
+    while i < 32 {
+        if m_a[i] != m_b[i] { any_diff = true; }
+        i = i + 1;
+    }
+    assert(any_diff);
+}
+
+@main
+public fn main() -> Int {
+    finished_key_sha256_has_32_bytes();
+    finished_key_sha384_has_48_bytes();
+    hmac_sha256_verify_data_is_32_bytes();
+    hmac_sha384_verify_data_is_48_bytes();
+    finished_mac_deterministic();
+    finished_mac_sensitive_to_key_flip();
+    print("RFC 8446 §4.4.4 Finished MAC derivation surface verified");
+    0
+}

@@ -1,0 +1,73 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: quic, transport, inbound_datagram, ecn
+// @timeout: 15000
+// @expected-exit: 0
+
+// InboundDatagram struct — the cmsg-annotated payload the transport
+// delivers to the connection pump. data carries the QUIC packet(s),
+// peer_addr is the source-UDP 4-tuple's peer half, ecn is the IP-
+// header ECN field the kernel surfaced (0 when unavailable).
+
+mount core.*;
+mount core.collections.List;
+mount core.net.addr.{SocketAddr, Ipv4Addr};
+mount core.net.quic.transport.abstraction.{InboundDatagram, EcnCodepoint};
+
+fn datagram_field_accessors() {
+    let data: List<Byte> = [0xC0_u8, 0x00_u8, 0x00_u8, 0x00_u8, 0x01_u8];
+    let peer = SocketAddr.new_v4(Ipv4Addr.new(192_u8, 0_u8, 2_u8, 1_u8), 443);
+    let dg = InboundDatagram {
+        data:      data.clone(),
+        peer_addr: peer,
+        ecn:       EcnCodepoint.Ect0,
+    };
+    assert(dg.data.len() == 5);
+    assert(dg.data[0] == 0xC0_u8);
+    assert(dg.peer_addr.port() == 443);
+    match dg.ecn {
+        EcnCodepoint.Ect0 => {},
+        _ => panic("expected Ect0"),
+    }
+}
+
+fn datagram_notect_default_semantics() {
+    let dg = InboundDatagram {
+        data:      [],
+        peer_addr: SocketAddr.new_v4(Ipv4Addr.new(127_u8, 0_u8, 0_u8, 1_u8), 0),
+        ecn:       EcnCodepoint.NotEct,
+    };
+    assert(dg.data.len() == 0);
+    assert(dg.ecn.to_u8() == 0_u8);
+}
+
+fn datagram_all_ecn_codepoints_storable() {
+    let peer = SocketAddr.new_v4(Ipv4Addr.new(198_u8, 51_u8, 100_u8, 1_u8), 4433);
+    let ecns: [EcnCodepoint; 4] = [
+        EcnCodepoint.NotEct,
+        EcnCodepoint.Ect0,
+        EcnCodepoint.Ect1,
+        EcnCodepoint.Ce,
+    ];
+    let mut i: Int = 0;
+    while i < 4 {
+        let dg = InboundDatagram {
+            data:      [i as Byte],
+            peer_addr: peer.clone(),
+            ecn:       ecns[i].clone(),
+        };
+        assert(dg.data.len() == 1);
+        let _ = dg.ecn;
+        i = i + 1;
+    }
+}
+
+@main
+public fn main() -> Int {
+    datagram_field_accessors();
+    datagram_notect_default_semantics();
+    datagram_all_ecn_codepoints_storable();
+    print("QUIC InboundDatagram + ECN plumbing verified");
+    0
+}

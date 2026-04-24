@@ -1,0 +1,88 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: quic, packet, retry, rfc9000_17_2_5
+// @timeout: 15000
+// @expected-exit: 0
+
+// RFC 9000 §17.2.5 Retry packet body:
+//
+//   Retry Packet {
+//     Header Form (1) = 1,
+//     Fixed Bit (1) = 1,
+//     Long Packet Type (2) = 3,           ← RetryType
+//     Unused (4),
+//     Version (32),
+//     DCID Length (8), DCID,
+//     SCID Length (8), SCID,
+//     Retry Token (..),                   ← arbitrary-length token
+//     Retry Integrity Tag (128),          ← AEAD_AES_128_GCM tag
+//   }
+
+mount core.*;
+mount core.collections.List;
+mount core.net.quic.packet.{LongBody, LongHeader, LongPacket, LongPacketType};
+mount core.net.quic.connection_id.{ConnectionId};
+
+fn retry_body_stores_token_and_tag() {
+    let token: List<Byte> = [0xDE_u8, 0xAD_u8, 0xBE_u8, 0xEF_u8];
+    let tag: [Byte; 16] = [
+        0x00_u8, 0x01_u8, 0x02_u8, 0x03_u8, 0x04_u8, 0x05_u8, 0x06_u8, 0x07_u8,
+        0x08_u8, 0x09_u8, 0x0A_u8, 0x0B_u8, 0x0C_u8, 0x0D_u8, 0x0E_u8, 0x0F_u8,
+    ];
+    let body = LongBody.RetryBody {
+        token:         token.clone(),
+        integrity_tag: tag,
+    };
+    match body {
+        LongBody.RetryBody { token: t, integrity_tag: g } => {
+            assert(t.len() == 4);
+            assert(t[0] == 0xDE_u8);
+            assert(g[15] == 0x0F_u8);
+        },
+        _ => panic("expected RetryBody"),
+    }
+}
+
+fn retry_packet_type_bits_are_three() {
+    // §17.2.5 / Table 5: Long Packet Type = 3 ↔ Retry.
+    assert(LongPacketType.Retry.to_bits() == 3_u8);
+    match LongPacketType.from_bits(3_u8) {
+        LongPacketType.Retry => {},
+        _ => panic("type 3 must be Retry"),
+    }
+}
+
+fn long_packet_assembly() {
+    let dcid_bytes: List<Byte> = [0x01_u8, 0x02_u8, 0x03_u8];
+    let scid_bytes: List<Byte> = [0x10_u8, 0x20_u8];
+    let dcid = ConnectionId.from_bytes(dcid_bytes.as_slice()).unwrap();
+    let scid = ConnectionId.from_bytes(scid_bytes.as_slice()).unwrap();
+    let header = LongHeader {
+        first_byte: 0xF0_u8,       // long + fixed + type=Retry(11) << 4
+        version:    0x00000001_u32,
+        dcid:       dcid,
+        scid:       scid,
+    };
+    let token: List<Byte> = [0x74_u8, 0x6B_u8];   // "tk"
+    let tag: [Byte; 16] = [0_u8; 16];
+    let pkt = LongPacket {
+        header: header,
+        body:   LongBody.RetryBody { token: token, integrity_tag: tag },
+    };
+    assert(pkt.header.dcid.len() == 3);
+    assert(pkt.header.scid.len() == 2);
+    match pkt.body {
+        LongBody.RetryBody { token: t, integrity_tag: _ } => assert(t.len() == 2),
+        _ => panic("body must be RetryBody"),
+    }
+}
+
+@main
+public fn main() -> Int {
+    retry_body_stores_token_and_tag();
+    retry_packet_type_bits_are_three();
+    long_packet_assembly();
+    print("RFC 9000 §17.2.5 Retry packet body verified");
+    0
+}
