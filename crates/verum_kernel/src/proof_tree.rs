@@ -436,9 +436,20 @@ pub fn replay_z3_tree(tree: &ProofNode) -> Result<CoreTerm, KernelError> {
 /// specific Z3 rule. `Inductive("Bool")` is the carrier type
 /// — matches the type assigned to Phase 1 trust-tag
 /// certificates so downstream consumers see a consistent shape.
+///
+/// # Structural recursion on children
+///
+/// Children of the proof node that are themselves Lists (nested
+/// rule applications) are recursively replayed via
+/// `replay_z3_tree`, and the resulting witnesses are composed
+/// with the parent rule's axiom via `CoreTerm::App`. That gives
+/// the kernel a *hierarchical* term that mirrors the proof
+/// tree's shape — a forged leaf can't just be wrapped in a
+/// known rule name and pass the check; the kernel sees each
+/// level's witness structure.
 fn construct_witness_for_rule(
     rule: &str,
-    _children: &List<ProofNode>,
+    children: &List<ProofNode>,
 ) -> Result<CoreTerm, KernelError> {
     // Implemented rule set — grows across Phase 2 clusters. Every
     // rule in Z3_KNOWN_RULES that this match covers produces a
@@ -483,14 +494,38 @@ fn construct_witness_for_rule(
         });
     }
 
-    // All implemented rules construct the same witness shape:
-    // Axiom { name = "z3:<rule>", ty = Bool, framework = Z3
-    // with rule citation }. The structural difference between
-    // rules is what's *verified* (the child replays), not what
-    // the witness looks like — both Phase 1 and this Phase 2
-    // replay produce Bool-typed axiom nodes. Full dependent
-    // typing of the witness arrives with the next follow-up.
-    Ok(build_witness("z3", rule, "Z3 proof-tree replay (Phase 2)"))
+    // The rule's axiom — the top-level tag that says "this
+    // rule produced the witness".
+    let rule_axiom = build_witness("z3", rule, "Z3 proof-tree replay (Phase 2)");
+
+    // Recurse into children. Sub-List children are nested
+    // rule applications that we replay recursively; Atom
+    // children are expression leaves that we don't replay
+    // (they're the rule's argument terms, not sub-proofs).
+    //
+    // The first child is the rule name atom (we already
+    // matched on it), so skip it.
+    let mut witness = rule_axiom;
+    for (idx, child) in children.iter().enumerate() {
+        if idx == 0 {
+            continue; // rule-name atom
+        }
+        if let ProofNode::List(_) = child {
+            // A nested proof node — recursively replay and
+            // compose into the witness via App. The App
+            // threads the child witness as an argument to
+            // the parent axiom.
+            let child_witness = replay_z3_tree(child)?;
+            witness = CoreTerm::App(
+                Heap::new(witness),
+                Heap::new(child_witness),
+            );
+        }
+        // Atom children: not replayed. They're expression
+        // arguments, not proof sub-terms.
+    }
+
+    Ok(witness)
 }
 
 /// Backend-agnostic witness constructor used by both
@@ -573,11 +608,38 @@ pub fn replay_aletha_tree(tree: &ProofNode) -> Result<CoreTerm, KernelError> {
                 });
             }
 
-            Ok(build_witness(
+            let rule_axiom = build_witness(
                 "aletha",
                 &rule,
                 "CVC5 ALETHE proof-tree replay (Phase 2)",
-            ))
+            );
+
+            // Recurse into sub-proof children, same as the
+            // Z3 path. ALETHE's step-node has :premises /
+            // :args keywords whose sub-Lists may themselves
+            // be sub-proofs; we conservatively recurse into
+            // any List child that has a known rule head.
+            let mut witness = rule_axiom;
+            for (idx, child) in children.iter().enumerate() {
+                if idx == 0 {
+                    continue;
+                }
+                if let ProofNode::List(sub_children) = child {
+                    if let Some(ProofNode::Atom(head_atom)) =
+                        sub_children.iter().next()
+                    {
+                        if is_known_rule("aletha", head_atom.as_str()) {
+                            let child_witness = replay_aletha_tree(child)?;
+                            witness = CoreTerm::App(
+                                Heap::new(witness),
+                                Heap::new(child_witness),
+                            );
+                        }
+                    }
+                }
+            }
+
+            Ok(witness)
         }
         ProofNode::Atom(_) => Err(KernelError::SmtReplayFailed {
             reason: Text::from(
@@ -908,6 +970,73 @@ mod tests {
             }
             other => panic!("expected SmtReplayFailed, got {:?}", other),
         }
+    }
+
+    // -- Hierarchical composition ------------------------------------
+
+    #[test]
+    fn nested_z3_proof_composes_child_witnesses_via_app() {
+        // (mp (refl x) (asserted y)) — mp has two nested
+        // sub-proofs. The resulting witness should be App(App
+        // (mp_axiom, refl_witness), asserted_witness) — the
+        // kernel's hierarchical term that mirrors the proof
+        // tree's shape.
+        let tree = parse_sexpr("(mp (refl x) (asserted y))").unwrap();
+        let term = replay_z3_tree(&tree).unwrap();
+
+        // Outermost should be App.
+        match &term {
+            crate::CoreTerm::App(_, _) => {}
+            other => panic!("expected App at root, got {:?}", other),
+        }
+
+        // Structural peek: destructure the App chain and
+        // verify we see the axiom tags we expect.
+        let mut shape_str = format!("{:?}", term);
+        // The shape string contains Axiom tags for each
+        // participating rule.
+        assert!(
+            shape_str.contains("z3:mp"),
+            "expected z3:mp in witness: {}",
+            shape_str
+        );
+        assert!(
+            shape_str.contains("z3:refl"),
+            "expected z3:refl in witness: {}",
+            shape_str
+        );
+        assert!(
+            shape_str.contains("z3:asserted"),
+            "expected z3:asserted in witness: {}",
+            shape_str
+        );
+        // Silence unused-mut lint
+        let _ = &mut shape_str;
+    }
+
+    #[test]
+    fn atom_children_are_not_recursively_replayed() {
+        // (refl x) — `x` is an atom leaf, NOT a sub-proof.
+        // Witness should be just the refl axiom, no App wrap.
+        let tree = parse_sexpr("(refl x)").unwrap();
+        let term = replay_z3_tree(&tree).unwrap();
+        assert!(
+            matches!(term, crate::CoreTerm::Axiom { .. }),
+            "atom-only children should not create App wrappers"
+        );
+    }
+
+    #[test]
+    fn nested_forged_rule_fails_at_any_depth() {
+        // A forged rule nested inside a legitimate outer rule
+        // must still be caught. This validates that the
+        // allowlist check runs at every recursion level.
+        let tree = parse_sexpr("(mp (fabricate x) (asserted y))").unwrap();
+        let err = replay_z3_tree(&tree).unwrap_err();
+        assert!(matches!(
+            err,
+            crate::KernelError::UnknownRule { .. }
+        ));
     }
 
     // -- ALETHE replay ------------------------------------------------
