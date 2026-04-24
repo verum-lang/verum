@@ -1,0 +1,54 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: tls13, psk, psk_ke_modes, rfc8446_4_2_9
+// @timeout: 15000
+// @expected-exit: 0
+
+// RFC 8446 §4.2.9 psk_key_exchange_modes: u8 codepoints
+//   PskKe     = 0      — pure PSK (no DHE)
+//   PskDheKe  = 1      — PSK + (EC)DHE (warp default)
+// Unknown values MUST be passed through + ignored (forward compat).
+
+mount core.*;
+mount core.net.tls13.handshake.extension.{PskKeMode};
+
+fn codepoints_match_rfc() {
+    assert(PskKeMode.PskKe.to_u8()     == 0_u8);
+    assert(PskKeMode.PskDheKe.to_u8()  == 1_u8);
+    // Unknown pass-through.
+    assert(PskKeMode.UnknownMode(42_u8).to_u8() == 42_u8);
+    assert(PskKeMode.UnknownMode(255_u8).to_u8() == 255_u8);
+}
+
+fn from_u8_roundtrip() {
+    match PskKeMode.from_u8(0_u8) { PskKeMode.PskKe => {},    _ => panic("0") }
+    match PskKeMode.from_u8(1_u8) { PskKeMode.PskDheKe => {}, _ => panic("1") }
+    match PskKeMode.from_u8(2_u8) {
+        PskKeMode.UnknownMode(v) => assert(v == 2_u8),
+        _ => panic("2 must pass through"),
+    }
+    match PskKeMode.from_u8(255_u8) {
+        PskKeMode.UnknownMode(v) => assert(v == 255_u8),
+        _ => panic("255 must pass through"),
+    }
+}
+
+fn every_registered_codepoint_roundtrips() {
+    let codes: [UInt8; 2] = [0_u8, 1_u8];
+    let mut i: Int = 0;
+    while i < 2 {
+        let m = PskKeMode.from_u8(codes[i]);
+        assert(m.to_u8() == codes[i]);
+        i = i + 1;
+    }
+}
+
+@main
+public fn main() -> Int {
+    codepoints_match_rfc();
+    from_u8_roundtrip();
+    every_registered_codepoint_roundtrips();
+    print("RFC 8446 §4.2.9 psk_key_exchange_modes verified");
+    0
+}

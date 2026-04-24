@@ -1,0 +1,133 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: tls13, record, fragment, reassembly, rfc8446_5_1
+// @timeout: 15000
+// @expected-exit: 0
+
+// RFC 8446 §5.1 handshake message reassembly: handshake messages MAY
+// span multiple records within the same flight. HandshakeReassembler
+// buffers record bodies and yields whole messages whenever the
+// 4-byte type+length header + body is available.
+
+mount core.*;
+mount core.collections.List;
+mount core.net.tls13.record.fragment.{HandshakeReassembler};
+
+fn empty_reassembler_yields_none() {
+    let mut r = HandshakeReassembler::new();
+    assert(r.buffered() == 0);
+    match r.take_next() {
+        None => {},
+        _ => panic("empty must yield None"),
+    }
+}
+
+fn partial_header_does_not_produce_message() {
+    let mut r = HandshakeReassembler::new();
+    // Only 3 header bytes — reassembler can't even read the length yet.
+    let partial: List<Byte> = [0x01_u8, 0x00_u8, 0x00_u8];
+    r.push(partial.as_slice());
+    assert(r.buffered() == 3);
+    match r.take_next() {
+        None => {},
+        _ => panic("partial header must buffer"),
+    }
+}
+
+fn complete_small_message_yields_whole_bytes() {
+    let mut r = HandshakeReassembler::new();
+    // ClientHello header (1 byte type + 3-byte u24 length=3) + 3 body bytes.
+    let msg: List<Byte> = [
+        0x01_u8, 0x00_u8, 0x00_u8, 0x03_u8,
+        0xAA_u8, 0xBB_u8, 0xCC_u8,
+    ];
+    r.push(msg.as_slice());
+    match r.take_next() {
+        Some(out) => {
+            assert(out.len() == 7);
+            assert(out[0] == 0x01_u8);
+            assert(out[3] == 0x03_u8);
+            assert(out[6] == 0xCC_u8);
+        },
+        None => panic("full message must be emitted"),
+    }
+    assert(r.buffered() == 0);
+}
+
+fn message_split_across_two_pushes_reassembles() {
+    let mut r = HandshakeReassembler::new();
+    // 7-byte message — feed (header + 1 byte) then the remaining 2 bytes.
+    let first:  List<Byte> = [0x01_u8, 0x00_u8, 0x00_u8, 0x03_u8, 0xAA_u8];
+    let second: List<Byte> = [0xBB_u8, 0xCC_u8];
+    r.push(first.as_slice());
+    match r.take_next() {
+        None => {},
+        _ => panic("partial body should still buffer"),
+    }
+    r.push(second.as_slice());
+    match r.take_next() {
+        Some(out) => {
+            assert(out.len() == 7);
+            assert(out[4] == 0xAA_u8);
+            assert(out[6] == 0xCC_u8);
+        },
+        None => panic("concat should complete the message"),
+    }
+}
+
+fn multiple_messages_drain_in_sequence() {
+    let mut r = HandshakeReassembler::new();
+    // Two back-to-back messages in one push.
+    let two: List<Byte> = [
+        // msg1: type 0x01, length 2, body 0xAA 0xBB
+        0x01_u8, 0x00_u8, 0x00_u8, 0x02_u8, 0xAA_u8, 0xBB_u8,
+        // msg2: type 0x02, length 1, body 0xCC
+        0x02_u8, 0x00_u8, 0x00_u8, 0x01_u8, 0xCC_u8,
+    ];
+    r.push(two.as_slice());
+
+    match r.take_next() {
+        Some(out) => {
+            assert(out.len() == 6);
+            assert(out[0] == 0x01_u8);
+        },
+        None => panic("msg1 must drain"),
+    }
+    match r.take_next() {
+        Some(out) => {
+            assert(out.len() == 5);
+            assert(out[0] == 0x02_u8);
+            assert(out[4] == 0xCC_u8);
+        },
+        None => panic("msg2 must drain"),
+    }
+    assert(r.buffered() == 0);
+}
+
+fn take_next_idempotent_once_drained() {
+    let mut r = HandshakeReassembler::new();
+    let msg: List<Byte> = [0x01_u8, 0x00_u8, 0x00_u8, 0x00_u8];   // 0-length body
+    r.push(msg.as_slice());
+    match r.take_next() {
+        Some(out) => assert(out.len() == 4),
+        None => panic("0-body message must drain"),
+    }
+    // Second call — empty buffer → None.
+    match r.take_next() {
+        None => {},
+        _ => panic("post-drain must yield None"),
+    }
+}
+
+@main
+public fn main() -> Int {
+    empty_reassembler_yields_none();
+    partial_header_does_not_produce_message();
+    complete_small_message_yields_whole_bytes();
+    message_split_across_two_pushes_reassembles();
+    multiple_messages_drain_in_sequence();
+    take_next_idempotent_once_drained();
+    print("RFC 8446 §5.1 HandshakeReassembler verified");
+    0
+}
