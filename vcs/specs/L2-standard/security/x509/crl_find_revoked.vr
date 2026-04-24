@@ -1,0 +1,139 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: x509, crl, revocation, find_revoked, rfc5280_5_3_1
+// @timeout: 15000
+// @expected-exit: 0
+
+// RFC 5280 §5 CRL consumer-side lookup — `find_revoked(crl, serial)`
+// walks the list of `RevokedEntry`s comparing serial bytes byte-exact
+// via `serials_equal`. Returns Some(&entry) on first match, None if
+// the serial is not in the list.
+
+mount core.*;
+mount core.collections.List;
+mount core.encoding.der.{Time};
+mount core.security.x509.crl.{
+    CertificateList, RevokedEntry, CrlReason,
+    find_revoked, decode_reason,
+};
+
+fn make_time() -> Time {
+    Time { year: 2024_u32, month: 1_u8, day: 1_u8, hour: 0_u8, minute: 0_u8, second: 0_u8 }
+}
+
+fn make_entry(serial: List<Byte>) -> RevokedEntry {
+    RevokedEntry {
+        serial_number:        serial,
+        revocation_date:      make_time(),
+        raw_entry_extensions: None,
+    }
+}
+
+fn make_crl(entries: List<RevokedEntry>) -> CertificateList {
+    CertificateList {
+        version:            1_u32,
+        issuer_der:         [],
+        this_update:        make_time(),
+        next_update:        None,
+        revoked:            entries,
+        raw_crl_extensions: None,
+    }
+}
+
+fn empty_crl_returns_none() {
+    let crl = make_crl([]);
+    let probe: List<Byte> = [0x01_u8];
+    match find_revoked(&crl, probe.as_slice()) {
+        None => {},
+        _ => panic("empty CRL must return None"),
+    }
+}
+
+fn matching_serial_returns_entry() {
+    let serial: List<Byte> = [0x0A_u8, 0xBB_u8, 0xCC_u8];
+    let crl = make_crl([make_entry(serial.clone())]);
+    match find_revoked(&crl, serial.as_slice()) {
+        Some(e) => {
+            assert(e.serial_number.len() == 3);
+            assert(e.serial_number[0] == 0x0A_u8);
+            assert(e.serial_number[2] == 0xCC_u8);
+        },
+        None => panic("existing serial must be found"),
+    }
+}
+
+fn non_matching_serial_returns_none() {
+    let crl = make_crl([make_entry([0x01_u8, 0x02_u8])]);
+    let probe: List<Byte> = [0x03_u8, 0x04_u8];
+    match find_revoked(&crl, probe.as_slice()) {
+        None => {},
+        _ => panic("missing serial must return None"),
+    }
+}
+
+fn iterates_full_list_to_find_later_entries() {
+    let crl = make_crl([
+        make_entry([0x01_u8]),
+        make_entry([0x02_u8]),
+        make_entry([0x03_u8]),
+        make_entry([0xFF_u8, 0xFE_u8, 0xFD_u8]),   // the target — last
+    ]);
+    let probe: List<Byte> = [0xFF_u8, 0xFE_u8, 0xFD_u8];
+    match find_revoked(&crl, probe.as_slice()) {
+        Some(e) => {
+            assert(e.serial_number.len() == 3);
+            assert(e.serial_number[0] == 0xFF_u8);
+        },
+        None => panic("last entry must be found"),
+    }
+}
+
+fn length_mismatch_is_rejected() {
+    // serial bytes 0x01 0x02 vs probe 0x01 — matching prefix must NOT
+    // count as equal.
+    let crl = make_crl([make_entry([0x01_u8, 0x02_u8])]);
+    let probe: List<Byte> = [0x01_u8];
+    match find_revoked(&crl, probe.as_slice()) {
+        None => {},
+        _ => panic("length mismatch must fail"),
+    }
+}
+
+fn first_match_wins_for_duplicates() {
+    // RFC 5280 doesn't forbid duplicate serials in a CRL; find_revoked
+    // returns the first matching entry.
+    let crl = make_crl([
+        make_entry([0x42_u8]),
+        make_entry([0x42_u8]),
+    ]);
+    let probe: List<Byte> = [0x42_u8];
+    match find_revoked(&crl, probe.as_slice()) {
+        Some(e) => assert(e.serial_number[0] == 0x42_u8),
+        None => panic("duplicates must still match"),
+    }
+}
+
+fn decode_reason_key_compromise_is_pinned() {
+    // Sanity cross-check: decode_reason maps 1 → KeyCompromise. The
+    // CRL verifier uses this to distinguish KeyCompromise (always
+    // fatal) from Superseded (may permit cached chains under some
+    // policy regimes).
+    match decode_reason(1_u32) {
+        CrlReason.KeyCompromise => {},
+        _ => panic("decode_reason(1) must be KeyCompromise"),
+    }
+}
+
+@main
+public fn main() -> Int {
+    empty_crl_returns_none();
+    matching_serial_returns_entry();
+    non_matching_serial_returns_none();
+    iterates_full_list_to_find_later_entries();
+    length_mismatch_is_rejected();
+    first_match_wins_for_duplicates();
+    decode_reason_key_compromise_is_pinned();
+    print("RFC 5280 §5 CRL find_revoked verified");
+    0
+}

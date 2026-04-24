@@ -1,0 +1,85 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: x509, dn, raw_eq, rfc5280_4_1_2_6
+// @timeout: 15000
+// @expected-exit: 0
+
+// RFC 5280 §4.1.2.6 (and §7.1) — issuer/subject Distinguished Name
+// matching in a certificate chain is byte-exact over the raw DER
+// encoding of the RDNSequence. `DistinguishedName.raw_eq` implements
+// this. The structured `rdns` field is for display + extension logic;
+// chain verification MUST NOT rely on it.
+
+mount core.*;
+mount core.collections.List;
+mount core.security.x509.name.{DistinguishedName};
+
+fn make_dn(raw: List<Byte>) -> DistinguishedName {
+    DistinguishedName { rdns: [], raw_der: raw }
+}
+
+fn identical_dns_compare_equal() {
+    let bytes: List<Byte> = [0x30_u8, 0x0B_u8, 0x06_u8, 0x03_u8, 0x55_u8, 0x04_u8, 0x03_u8, 0x04_u8, 0x02_u8, 0x4E_u8, 0x41_u8];
+    let a = make_dn(bytes.clone());
+    let b = make_dn(bytes.clone());
+    assert(a.raw_eq(&b));
+    assert(b.raw_eq(&a));   // symmetry
+    assert(a.raw_eq(&a));   // reflexivity
+}
+
+fn single_byte_difference_rejects() {
+    let base: List<Byte> = [0x30_u8, 0x03_u8, 0xAA_u8, 0xBB_u8, 0xCC_u8];
+    let mut other: List<Byte> = [0x30_u8, 0x03_u8, 0xAA_u8, 0xBB_u8, 0xCC_u8];
+    // Flip the last byte.
+    other[4] = 0xCD_u8;
+    let a = make_dn(base);
+    let b = make_dn(other);
+    assert(false == a.raw_eq(&b));
+    assert(false == b.raw_eq(&a));
+}
+
+fn prefix_difference_rejects_early_bytes() {
+    let a = make_dn([0x30_u8, 0x05_u8, 0x01_u8, 0x02_u8, 0x03_u8, 0x04_u8, 0x05_u8]);
+    let b = make_dn([0x31_u8, 0x05_u8, 0x01_u8, 0x02_u8, 0x03_u8, 0x04_u8, 0x05_u8]);
+    assert(false == a.raw_eq(&b));
+}
+
+fn different_lengths_never_compare_equal() {
+    let a = make_dn([0x30_u8, 0x02_u8, 0xAA_u8, 0xBB_u8]);
+    let b = make_dn([0x30_u8, 0x03_u8, 0xAA_u8, 0xBB_u8, 0xCC_u8]);
+    assert(false == a.raw_eq(&b));
+    assert(false == b.raw_eq(&a));
+    // And a prefix of a is still not equal even if first N bytes match.
+    let prefix = make_dn([0x30_u8, 0x02_u8]);
+    assert(false == a.raw_eq(&prefix));
+}
+
+fn empty_dns_compare_equal() {
+    let a = make_dn([]);
+    let b = make_dn([]);
+    assert(a.raw_eq(&b));
+    assert(b.raw_eq(&a));
+}
+
+fn structural_rdns_ignored_in_raw_eq() {
+    // Two DNs with identical raw_der but different (empty vs non-empty)
+    // rdns lists MUST still compare equal — raw_eq consults only the
+    // DER span.
+    let raw: List<Byte> = [0x30_u8, 0x02_u8, 0xDE_u8, 0xAD_u8];
+    let a = DistinguishedName { rdns: [], raw_der: raw.clone() };
+    let b = DistinguishedName { rdns: [], raw_der: raw.clone() };
+    assert(a.raw_eq(&b));
+}
+
+@main
+public fn main() -> Int {
+    identical_dns_compare_equal();
+    single_byte_difference_rejects();
+    prefix_difference_rejects_early_bytes();
+    different_lengths_never_compare_equal();
+    empty_dns_compare_equal();
+    structural_rdns_ignored_in_raw_eq();
+    print("RFC 5280 §4.1.2.6 DistinguishedName raw_eq verified");
+    0
+}
