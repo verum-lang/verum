@@ -1,0 +1,50 @@
+// WAL per-frame header (24 bytes, precedes each page payload).
+
+module core.database.sqlite.native.wal_frame_layout.frame_header;
+
+mount core.database.sqlite.native.wal_frame_layout.constants.{frame_header_size};
+mount base.{Bool};
+
+public type WalFrameHeader is {
+    page_number: u32,
+    commit_size: u32,      // 0 for non-commit frames; DB page count for commits
+    salt1: u32,            // must match file header
+    salt2: u32,
+    checksum1: u32,
+    checksum2: u32,
+};
+
+public fn new(
+    page_number: u32,
+    commit_size: u32,
+    salt1: u32,
+    salt2: u32,
+    checksum1: u32,
+    checksum2: u32,
+) -> WalFrameHeader {
+    WalFrameHeader {
+        page_number: page_number,
+        commit_size: commit_size,
+        salt1: salt1,
+        salt2: salt2,
+        checksum1: checksum1,
+        checksum2: checksum2,
+    }
+}
+
+public fn size_on_disk() -> Int { frame_header_size() }
+
+// A commit frame is one whose commit_size > 0; it marks the end of a txn.
+public fn is_commit_frame(h: &WalFrameHeader) -> Bool {
+    h.commit_size != (0 as u32)
+}
+
+public fn is_non_commit_frame(h: &WalFrameHeader) -> Bool {
+    h.commit_size == (0 as u32)
+}
+
+// Per §6.4: a frame is valid iff its salts match the file header salts and
+// its checksum matches the rolling Fossil SHA1 of (prior_checksum, payload).
+public fn salts_match(h: &WalFrameHeader, file_s1: u32, file_s2: u32) -> Bool {
+    h.salt1 == file_s1 && h.salt2 == file_s2
+}

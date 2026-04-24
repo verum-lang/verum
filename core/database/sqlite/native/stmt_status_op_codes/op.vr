@@ -1,0 +1,79 @@
+// SQLITE_STMTSTATUS_* codes.
+
+module core.database.sqlite.native.stmt_status_op_codes.op;
+
+mount base.{Bool, Text, Maybe};
+
+public type StmtStatusOp is
+    | SsFullscanStep      // 1  number of "full table scan" steps
+    | SsSort              // 2  sort operations
+    | SsAutoIndex         // 3  automatic indexes created + used
+    | SsVmStep            // 4  virtual machine steps
+    | SsReprepare         // 5  reprepare operations (3.20+)
+    | SsRun               // 6  number of times the stmt has run (3.20+)
+    | SsFilterMiss        // 7  Bloom filter misses (3.39+)
+    | SsFilterHit         // 8  Bloom filter hits  (3.39+)
+    | SsMemUsed           // 99 peak memory used by the stmt
+    ;
+
+public fn op_code(o: &StmtStatusOp) -> Int {
+    match o {
+        SsFullscanStep => 1,
+        SsSort         => 2,
+        SsAutoIndex    => 3,
+        SsVmStep       => 4,
+        SsReprepare    => 5,
+        SsRun          => 6,
+        SsFilterMiss   => 7,
+        SsFilterHit    => 8,
+        SsMemUsed      => 99,
+    }
+}
+
+public fn from_code(code: Int) -> Maybe<StmtStatusOp> {
+    if code == 1  { return Maybe.Some(SsFullscanStep); }
+    if code == 2  { return Maybe.Some(SsSort); }
+    if code == 3  { return Maybe.Some(SsAutoIndex); }
+    if code == 4  { return Maybe.Some(SsVmStep); }
+    if code == 5  { return Maybe.Some(SsReprepare); }
+    if code == 6  { return Maybe.Some(SsRun); }
+    if code == 7  { return Maybe.Some(SsFilterMiss); }
+    if code == 8  { return Maybe.Some(SsFilterHit); }
+    if code == 99 { return Maybe.Some(SsMemUsed); }
+    Maybe.None
+}
+
+public fn op_name(o: &StmtStatusOp) -> Text {
+    match o {
+        SsFullscanStep => "FULLSCAN_STEP".clone(),
+        SsSort         => "SORT".clone(),
+        SsAutoIndex    => "AUTOINDEX".clone(),
+        SsVmStep       => "VM_STEP".clone(),
+        SsReprepare    => "REPREPARE".clone(),
+        SsRun          => "RUN".clone(),
+        SsFilterMiss   => "FILTER_MISS".clone(),
+        SsFilterHit    => "FILTER_HIT".clone(),
+        SsMemUsed      => "MEMUSED".clone(),
+    }
+}
+
+// FULLSCAN / SORT / AUTOINDEX are performance-warning counters — large values
+// usually indicate a missing index.
+public fn is_performance_warning(o: &StmtStatusOp) -> Bool {
+    match o {
+        SsFullscanStep => true,
+        SsSort         => true,
+        SsAutoIndex    => true,
+        _              => false,
+    }
+}
+
+public fn is_bloom_filter_counter(o: &StmtStatusOp) -> Bool {
+    match o {
+        SsFilterHit  => true,
+        SsFilterMiss => true,
+        _            => false,
+    }
+}
+
+public fn well_known_count() -> Int { 9 }

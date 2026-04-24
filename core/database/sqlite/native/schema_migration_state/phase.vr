@@ -1,0 +1,71 @@
+// Migration phase taxonomy.
+
+module core.database.sqlite.native.schema_migration_state.phase;
+
+mount base.{Bool, Text};
+
+public type Phase is
+    | PhInit           // pre-flight: validate restrictions
+    | PhCreateShadow   // CREATE TABLE ..._new with target schema
+    | PhCopyRows       // INSERT INTO ..._new SELECT ... FROM ...
+    | PhRewireSchema   // drop old, rename shadow, rewrite sqlite_schema
+    | PhReindex        // rebuild indexes on the new table
+    | PhDone           // terminal success
+    | PhFailed         // terminal failure — transaction to roll back
+    ;
+
+public fn phase_name(p: &Phase) -> Text {
+    match p {
+        PhInit         => "init".clone(),
+        PhCreateShadow => "create_shadow".clone(),
+        PhCopyRows     => "copy_rows".clone(),
+        PhRewireSchema => "rewire_schema".clone(),
+        PhReindex      => "reindex".clone(),
+        PhDone         => "done".clone(),
+        PhFailed       => "failed".clone(),
+    }
+}
+
+public fn is_terminal(p: &Phase) -> Bool {
+    match p {
+        PhDone   => true,
+        PhFailed => true,
+        _        => false,
+    }
+}
+
+// Phases that must hold the database write lock.
+public fn requires_write_lock(p: &Phase) -> Bool {
+    match p {
+        PhCreateShadow => true,
+        PhCopyRows     => true,
+        PhRewireSchema => true,
+        PhReindex      => true,
+        _              => false,
+    }
+}
+
+// Return the next phase in the linear happy path.
+public fn next_phase(p: &Phase) -> Phase {
+    match p {
+        PhInit         => PhCreateShadow,
+        PhCreateShadow => PhCopyRows,
+        PhCopyRows     => PhRewireSchema,
+        PhRewireSchema => PhReindex,
+        PhReindex      => PhDone,
+        PhDone         => PhDone,
+        PhFailed       => PhFailed,
+    }
+}
+
+public fn numeric_index(p: &Phase) -> Int {
+    match p {
+        PhInit         => 0,
+        PhCreateShadow => 1,
+        PhCopyRows     => 2,
+        PhRewireSchema => 3,
+        PhReindex      => 4,
+        PhDone         => 5,
+        PhFailed       => -1,
+    }
+}

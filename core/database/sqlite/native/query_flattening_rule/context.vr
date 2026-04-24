@@ -1,0 +1,104 @@
+// Flatten-context + probe function that finds the first blocking rule.
+
+module core.database.sqlite.native.query_flattening_rule.context;
+
+mount core.database.sqlite.native.query_flattening_rule.rule.{
+    Rule,
+    RuAggregateInner, RuAggregateOuter,
+    RuDistinctInner, RuDistinctOuter,
+    RuOrderByBoth,
+    RuLimitInnerNonzero, RuLimitOuterNonzero,
+    RuCompoundInner,
+    RuNaturalJoinOuter,
+    RuOuterJoinInnerIsCompound,
+    RuWindowFnInner,
+    RuGroupByInner,
+    RuInnerUsesRecursive,
+    RuReturningInner,
+    RuInnerIsRowValue,
+    RuValuesInner,
+    RuInnerIsSampled,
+    RuInnerHasOffset,
+    RuLeftJoinWithLimit,
+};
+mount base.{Bool, Maybe};
+
+// Feature flags captured from the inner + outer SELECTs.
+public type FlattenContext is {
+    inner_aggregate: Bool,
+    outer_aggregate: Bool,
+    inner_distinct: Bool,
+    outer_distinct: Bool,
+    inner_order_by: Bool,
+    outer_order_by: Bool,
+    inner_limit: Bool,
+    outer_limit: Bool,
+    inner_compound: Bool,
+    outer_natural_join: Bool,
+    outer_outer_join: Bool,
+    inner_window: Bool,
+    inner_group_by: Bool,
+    inner_recursive: Bool,
+    inner_returning: Bool,
+    inner_row_value: Bool,
+    inner_values: Bool,
+    inner_sampled: Bool,
+    inner_offset: Bool,
+    outer_left_join: Bool,
+};
+
+public fn zeroed() -> FlattenContext {
+    FlattenContext {
+        inner_aggregate: false,
+        outer_aggregate: false,
+        inner_distinct: false,
+        outer_distinct: false,
+        inner_order_by: false,
+        outer_order_by: false,
+        inner_limit: false,
+        outer_limit: false,
+        inner_compound: false,
+        outer_natural_join: false,
+        outer_outer_join: false,
+        inner_window: false,
+        inner_group_by: false,
+        inner_recursive: false,
+        inner_returning: false,
+        inner_row_value: false,
+        inner_values: false,
+        inner_sampled: false,
+        inner_offset: false,
+        outer_left_join: false,
+    }
+}
+
+// Returns the first blocking rule; Maybe.None means "flatten allowed".
+public fn first_block(ctx: &FlattenContext) -> Maybe<Rule> {
+    if ctx.inner_aggregate { return Maybe.Some(RuAggregateInner); }
+    if ctx.outer_aggregate { return Maybe.Some(RuAggregateOuter); }
+    if ctx.inner_distinct  { return Maybe.Some(RuDistinctInner); }
+    if ctx.outer_distinct  { return Maybe.Some(RuDistinctOuter); }
+    if ctx.inner_order_by && ctx.outer_order_by { return Maybe.Some(RuOrderByBoth); }
+    if ctx.inner_limit     { return Maybe.Some(RuLimitInnerNonzero); }
+    if ctx.outer_limit     { return Maybe.Some(RuLimitOuterNonzero); }
+    if ctx.inner_compound  { return Maybe.Some(RuCompoundInner); }
+    if ctx.outer_natural_join { return Maybe.Some(RuNaturalJoinOuter); }
+    if ctx.outer_outer_join && ctx.inner_compound { return Maybe.Some(RuOuterJoinInnerIsCompound); }
+    if ctx.inner_window    { return Maybe.Some(RuWindowFnInner); }
+    if ctx.inner_group_by  { return Maybe.Some(RuGroupByInner); }
+    if ctx.inner_recursive { return Maybe.Some(RuInnerUsesRecursive); }
+    if ctx.inner_returning { return Maybe.Some(RuReturningInner); }
+    if ctx.inner_row_value { return Maybe.Some(RuInnerIsRowValue); }
+    if ctx.inner_values    { return Maybe.Some(RuValuesInner); }
+    if ctx.inner_sampled   { return Maybe.Some(RuInnerIsSampled); }
+    if ctx.inner_offset    { return Maybe.Some(RuInnerHasOffset); }
+    if ctx.outer_left_join && ctx.inner_limit { return Maybe.Some(RuLeftJoinWithLimit); }
+    Maybe.None
+}
+
+public fn can_flatten(ctx: &FlattenContext) -> Bool {
+    match first_block(ctx) {
+        Maybe.None    => true,
+        Maybe.Some(_) => false,
+    }
+}

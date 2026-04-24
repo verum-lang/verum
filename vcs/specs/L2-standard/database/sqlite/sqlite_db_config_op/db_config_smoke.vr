@@ -1,0 +1,88 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, sqlite_db_config_op, capi
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.sqlite_db_config_op.op.{
+    DbConfigOp,
+    DcMainDbName, DcLookaside, DcEnableFkey, DcEnableTrigger,
+    DcEnableFts3Tokenizer, DcEnableLoadExtension, DcNoCkptOnClose,
+    DcEnableQpsg, DcTriggerEqpTrace, DcResetDatabase,
+    DcDefensive, DcWritableSchema, DcLegacyAlterTable,
+    DcDqsDml, DcDqsDdl, DcEnableView, DcLegacyFileFormat,
+    DcTrustedSchema, DcStmtScanStatus, DcReverseScanOrder,
+    op_code, from_code, op_name,
+    is_boolean_toggle, well_known_count,
+};
+mount base.{Bool, Maybe};
+
+fn test_op_codes_match_sqlite_header() {
+    assert_eq(op_code(&DcMainDbName),          1000);
+    assert_eq(op_code(&DcLookaside),           1001);
+    assert_eq(op_code(&DcEnableFkey),          1002);
+    assert_eq(op_code(&DcEnableTrigger),       1003);
+    assert_eq(op_code(&DcEnableFts3Tokenizer), 1004);
+    assert_eq(op_code(&DcEnableLoadExtension), 1005);
+    assert_eq(op_code(&DcNoCkptOnClose),       1006);
+    assert_eq(op_code(&DcEnableQpsg),          1007);
+    assert_eq(op_code(&DcTriggerEqpTrace),     1008);
+    assert_eq(op_code(&DcResetDatabase),       1009);
+    assert_eq(op_code(&DcDefensive),           1010);
+    assert_eq(op_code(&DcWritableSchema),      1011);
+    assert_eq(op_code(&DcLegacyAlterTable),    1012);
+    assert_eq(op_code(&DcDqsDml),              1013);
+    assert_eq(op_code(&DcDqsDdl),              1014);
+    assert_eq(op_code(&DcEnableView),          1015);
+    assert_eq(op_code(&DcLegacyFileFormat),    1016);
+    assert_eq(op_code(&DcTrustedSchema),       1017);
+    assert_eq(op_code(&DcStmtScanStatus),      1018);
+    assert_eq(op_code(&DcReverseScanOrder),    1019);
+}
+
+fn test_round_trip() {
+    match from_code(1010) {
+        Maybe.Some(o) => match &o { DcDefensive => {}, _ => assert(false) },
+        Maybe.None => assert(false),
+    }
+    match from_code(1019) {
+        Maybe.Some(o) => match &o { DcReverseScanOrder => {}, _ => assert(false) },
+        Maybe.None => assert(false),
+    }
+}
+
+fn test_unknown_returns_none() {
+    match from_code(999)  { Maybe.None => {}, Maybe.Some(_) => assert(false) }
+    match from_code(1020) { Maybe.None => {}, Maybe.Some(_) => assert(false) }
+    match from_code(0)    { Maybe.None => {}, Maybe.Some(_) => assert(false) }
+}
+
+fn test_names() {
+    assert(op_name(&DcEnableFkey) == "ENABLE_FKEY".clone());
+    assert(op_name(&DcDefensive)  == "DEFENSIVE".clone());
+    assert(op_name(&DcMainDbName) == "MAINDBNAME".clone());
+}
+
+fn test_boolean_toggle_set() {
+    // LOOKASIDE takes a struct (not a bool) → not a toggle.
+    assert(!is_boolean_toggle(&DcLookaside));
+    assert(!is_boolean_toggle(&DcMainDbName));
+    assert(is_boolean_toggle(&DcEnableFkey));
+    assert(is_boolean_toggle(&DcDefensive));
+    assert(is_boolean_toggle(&DcWritableSchema));
+    assert(is_boolean_toggle(&DcReverseScanOrder));
+}
+
+fn test_well_known_count() {
+    assert_eq(well_known_count(), 20);
+}
+
+fn main() {
+    test_op_codes_match_sqlite_header();
+    test_round_trip();
+    test_unknown_returns_none();
+    test_names();
+    test_boolean_toggle_set();
+    test_well_known_count();
+}

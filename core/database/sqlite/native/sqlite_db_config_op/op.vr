@@ -1,0 +1,129 @@
+// SQLITE_DBCONFIG_* codes.
+
+module core.database.sqlite.native.sqlite_db_config_op.op;
+
+mount base.{Bool, Text, Maybe};
+
+public type DbConfigOp is
+    | DcMainDbName             // 1000
+    | DcLookaside              // 1001
+    | DcEnableFkey             // 1002
+    | DcEnableTrigger          // 1003
+    | DcEnableFts3Tokenizer    // 1004
+    | DcEnableLoadExtension    // 1005
+    | DcNoCkptOnClose          // 1006
+    | DcEnableQpsg             // 1007  Query Planner Stability Guarantee
+    | DcTriggerEqpTrace        // 1008
+    | DcResetDatabase          // 1009
+    | DcDefensive              // 1010
+    | DcWritableSchema         // 1011
+    | DcLegacyAlterTable       // 1012
+    | DcDqsDml                 // 1013  double-quoted string literals in DML
+    | DcDqsDdl                 // 1014
+    | DcEnableView             // 1015
+    | DcLegacyFileFormat       // 1016
+    | DcTrustedSchema          // 1017
+    | DcStmtScanStatus         // 1018 (3.42+)
+    | DcReverseScanOrder       // 1019 (3.45+)
+    ;
+
+public fn op_code(o: &DbConfigOp) -> Int {
+    match o {
+        DcMainDbName           => 1000,
+        DcLookaside            => 1001,
+        DcEnableFkey           => 1002,
+        DcEnableTrigger        => 1003,
+        DcEnableFts3Tokenizer  => 1004,
+        DcEnableLoadExtension  => 1005,
+        DcNoCkptOnClose        => 1006,
+        DcEnableQpsg           => 1007,
+        DcTriggerEqpTrace      => 1008,
+        DcResetDatabase        => 1009,
+        DcDefensive            => 1010,
+        DcWritableSchema       => 1011,
+        DcLegacyAlterTable     => 1012,
+        DcDqsDml               => 1013,
+        DcDqsDdl               => 1014,
+        DcEnableView           => 1015,
+        DcLegacyFileFormat     => 1016,
+        DcTrustedSchema        => 1017,
+        DcStmtScanStatus       => 1018,
+        DcReverseScanOrder     => 1019,
+    }
+}
+
+public fn from_code(code: Int) -> Maybe<DbConfigOp> {
+    if code == 1000 { return Maybe.Some(DcMainDbName); }
+    if code == 1001 { return Maybe.Some(DcLookaside); }
+    if code == 1002 { return Maybe.Some(DcEnableFkey); }
+    if code == 1003 { return Maybe.Some(DcEnableTrigger); }
+    if code == 1004 { return Maybe.Some(DcEnableFts3Tokenizer); }
+    if code == 1005 { return Maybe.Some(DcEnableLoadExtension); }
+    if code == 1006 { return Maybe.Some(DcNoCkptOnClose); }
+    if code == 1007 { return Maybe.Some(DcEnableQpsg); }
+    if code == 1008 { return Maybe.Some(DcTriggerEqpTrace); }
+    if code == 1009 { return Maybe.Some(DcResetDatabase); }
+    if code == 1010 { return Maybe.Some(DcDefensive); }
+    if code == 1011 { return Maybe.Some(DcWritableSchema); }
+    if code == 1012 { return Maybe.Some(DcLegacyAlterTable); }
+    if code == 1013 { return Maybe.Some(DcDqsDml); }
+    if code == 1014 { return Maybe.Some(DcDqsDdl); }
+    if code == 1015 { return Maybe.Some(DcEnableView); }
+    if code == 1016 { return Maybe.Some(DcLegacyFileFormat); }
+    if code == 1017 { return Maybe.Some(DcTrustedSchema); }
+    if code == 1018 { return Maybe.Some(DcStmtScanStatus); }
+    if code == 1019 { return Maybe.Some(DcReverseScanOrder); }
+    Maybe.None
+}
+
+public fn op_name(o: &DbConfigOp) -> Text {
+    match o {
+        DcMainDbName           => "MAINDBNAME".clone(),
+        DcLookaside            => "LOOKASIDE".clone(),
+        DcEnableFkey           => "ENABLE_FKEY".clone(),
+        DcEnableTrigger        => "ENABLE_TRIGGER".clone(),
+        DcEnableFts3Tokenizer  => "ENABLE_FTS3_TOKENIZER".clone(),
+        DcEnableLoadExtension  => "ENABLE_LOAD_EXTENSION".clone(),
+        DcNoCkptOnClose        => "NO_CKPT_ON_CLOSE".clone(),
+        DcEnableQpsg           => "ENABLE_QPSG".clone(),
+        DcTriggerEqpTrace      => "TRIGGER_EQP".clone(),
+        DcResetDatabase        => "RESET_DATABASE".clone(),
+        DcDefensive            => "DEFENSIVE".clone(),
+        DcWritableSchema       => "WRITABLE_SCHEMA".clone(),
+        DcLegacyAlterTable     => "LEGACY_ALTER_TABLE".clone(),
+        DcDqsDml               => "DQS_DML".clone(),
+        DcDqsDdl               => "DQS_DDL".clone(),
+        DcEnableView           => "ENABLE_VIEW".clone(),
+        DcLegacyFileFormat     => "LEGACY_FILE_FORMAT".clone(),
+        DcTrustedSchema        => "TRUSTED_SCHEMA".clone(),
+        DcStmtScanStatus       => "STMT_SCANSTATUS".clone(),
+        DcReverseScanOrder     => "REVERSE_SCANORDER".clone(),
+    }
+}
+
+// Ops that take a bool-int argument (vs. a complex struct).
+public fn is_boolean_toggle(o: &DbConfigOp) -> Bool {
+    match o {
+        DcEnableFkey          => true,
+        DcEnableTrigger       => true,
+        DcEnableFts3Tokenizer => true,
+        DcEnableLoadExtension => true,
+        DcNoCkptOnClose       => true,
+        DcEnableQpsg          => true,
+        DcTriggerEqpTrace     => true,
+        DcResetDatabase       => true,
+        DcDefensive           => true,
+        DcWritableSchema      => true,
+        DcLegacyAlterTable    => true,
+        DcDqsDml              => true,
+        DcDqsDdl              => true,
+        DcEnableView          => true,
+        DcLegacyFileFormat    => true,
+        DcTrustedSchema       => true,
+        DcStmtScanStatus      => true,
+        DcReverseScanOrder    => true,
+        _                     => false,
+    }
+}
+
+public fn well_known_count() -> Int { 20 }

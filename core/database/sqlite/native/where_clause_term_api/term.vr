@@ -1,0 +1,63 @@
+// A single WHERE term.
+
+module core.database.sqlite.native.where_clause_term_api.term;
+
+mount core.database.sqlite.native.where_clause_term_api.operator.{
+    TermOp, ToEquality, ToInList, ToRangeLT, ToRangeGT, ToOther,
+    is_sargable, is_equality, is_range,
+};
+mount base.{Bool, Text, Int64};
+
+public type WhereTerm is {
+    op: TermOp,
+    involves_cursors: Int64,      // bitset of source-table cursors the term references
+    required_before: Int64,       // bitset of cursors that must be scanned first
+    virtual_term: Bool,           // introduced by the planner (e.g. derived from IN)
+    cost_hint: Int,               // estimated rows; <0 means "use stats"
+};
+
+public fn simple(op: TermOp, cursors: Int64) -> WhereTerm {
+    WhereTerm {
+        op: op,
+        involves_cursors: cursors,
+        required_before: 0 as Int64,
+        virtual_term: false,
+        cost_hint: -1,
+    }
+}
+
+public fn as_virtual(mut t: WhereTerm) -> WhereTerm {
+    t.virtual_term = true;
+    t
+}
+
+public fn with_cost_hint(mut t: WhereTerm, rows: Int) -> WhereTerm {
+    t.cost_hint = rows;
+    t
+}
+
+public fn can_push_to_index(t: &WhereTerm) -> Bool {
+    is_sargable(&t.op)
+}
+
+public fn touches_cursor(t: &WhereTerm, cursor_bit: Int64) -> Bool {
+    (t.involves_cursors & cursor_bit) != (0 as Int64)
+}
+
+// A term applies to a loop-scope iff it only references cursors in that scope.
+public fn applies_in_scope(t: &WhereTerm, scope_bits: Int64) -> Bool {
+    (t.involves_cursors & !scope_bits) == (0 as Int64)
+}
+
+public fn is_join_equality(t: &WhereTerm) -> Bool {
+    // Equality term touching >=2 cursors — a join-condition candidate.
+    if !is_equality(&t.op) { return false; }
+    // popcount(involves_cursors) >= 2
+    let mut n: Int = 0;
+    let mut mask: Int64 = t.involves_cursors;
+    while mask != (0 as Int64) {
+        if (mask & (1 as Int64)) != (0 as Int64) { n = n + 1; }
+        mask = mask >> (1 as Int64);
+    }
+    n >= 2
+}

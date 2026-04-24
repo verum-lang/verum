@@ -1,0 +1,74 @@
+// Migration session state.
+
+module core.database.sqlite.native.schema_migration_state.session;
+
+mount core.database.sqlite.native.schema_migration_state.phase.{
+    Phase, PhInit, PhCopyRows, PhReindex, PhDone, PhFailed,
+    next_phase, is_terminal, requires_write_lock,
+};
+mount base.{Bool, Text, Int64};
+
+public type MigrationSession is {
+    table_name: Text,
+    phase: Phase,
+    rows_copied: Int64,
+    rows_total: Int64,       // -1 when unknown
+    indexes_rebuilt: Int64,
+    indexes_total: Int64,
+    failure_reason: Text,
+};
+
+public fn start(table_name: Text, rows_total: Int64, indexes_total: Int64) -> MigrationSession {
+    MigrationSession {
+        table_name: table_name,
+        phase: PhInit,
+        rows_copied: 0 as Int64,
+        rows_total: rows_total,
+        indexes_rebuilt: 0 as Int64,
+        indexes_total: indexes_total,
+        failure_reason: "".clone(),
+    }
+}
+
+public fn advance(mut s: MigrationSession) -> MigrationSession {
+    s.phase = next_phase(&s.phase);
+    s
+}
+
+public fn record_row(mut s: MigrationSession) -> MigrationSession {
+    s.rows_copied = s.rows_copied + (1 as Int64);
+    s
+}
+
+public fn record_index(mut s: MigrationSession) -> MigrationSession {
+    s.indexes_rebuilt = s.indexes_rebuilt + (1 as Int64);
+    s
+}
+
+public fn fail(mut s: MigrationSession, reason: Text) -> MigrationSession {
+    s.phase = PhFailed;
+    s.failure_reason = reason;
+    s
+}
+
+public fn is_done(s: &MigrationSession) -> Bool {
+    is_terminal(&s.phase)
+}
+
+public fn needs_write_lock(s: &MigrationSession) -> Bool {
+    requires_write_lock(&s.phase)
+}
+
+public fn copy_progress(s: &MigrationSession) -> Float {
+    if s.rows_total <= (0 as Int64) { return 0.0 as Float; }
+    let r = s.rows_copied as Float;
+    let t = s.rows_total as Float;
+    r / t
+}
+
+public fn index_progress(s: &MigrationSession) -> Float {
+    if s.indexes_total <= (0 as Int64) { return 1.0 as Float; }
+    let r = s.indexes_rebuilt as Float;
+    let t = s.indexes_total as Float;
+    r / t
+}

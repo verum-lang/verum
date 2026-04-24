@@ -1,0 +1,122 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, wal_frame_layout, pager
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.wal_frame_layout.constants.{
+    file_header_size, frame_header_size,
+    magic_little, magic_big, current_format_version,
+    min_page_size, max_page_size, sentinel_for_65536,
+    is_valid_page_size, is_valid_magic,
+};
+mount core.database.sqlite.native.wal_frame_layout.file_header.{
+    WalFileHeader, new,
+    size_on_disk, is_little_endian, is_big_endian,
+    has_valid_magic, has_valid_page_size, is_freshly_initialized,
+};
+mount core.database.sqlite.native.wal_frame_layout.frame_header.{
+    WalFrameHeader,
+    size_on_disk as frame_size_on_disk, is_commit_frame, is_non_commit_frame, salts_match,
+};
+mount base.{Bool};
+
+fn test_layout_sizes() {
+    assert_eq(file_header_size(), 32);
+    assert_eq(frame_header_size(), 24);
+}
+
+fn test_magic_and_version_constants() {
+    assert(magic_little() == (0x377f0682 as u32));
+    assert(magic_big() == (0x377f0683 as u32));
+    assert(current_format_version() == (3007000 as u32));
+}
+
+fn test_page_size_range() {
+    assert_eq(min_page_size(), 512);
+    assert_eq(max_page_size(), 65536);
+    assert_eq(sentinel_for_65536(), 1);
+}
+
+fn test_valid_page_sizes() {
+    assert(is_valid_page_size(1));
+    assert(is_valid_page_size(512));
+    assert(is_valid_page_size(1024));
+    assert(is_valid_page_size(4096));
+    assert(is_valid_page_size(65536));
+    assert(!is_valid_page_size(0));
+    assert(!is_valid_page_size(256));
+    assert(!is_valid_page_size(3000));
+    assert(!is_valid_page_size(131072));
+}
+
+fn test_valid_magic() {
+    assert(is_valid_magic(magic_little()));
+    assert(is_valid_magic(magic_big()));
+    assert(!is_valid_magic(0 as u32));
+    assert(!is_valid_magic(0xDEADBEEF as u32));
+}
+
+fn test_file_header_little_endian() {
+    let h = new(
+        magic_little(), current_format_version(), 4096,
+        0 as u32, 0xAA as u32, 0xBB as u32, 0 as u32, 0 as u32,
+    );
+    assert(is_little_endian(&h));
+    assert(!is_big_endian(&h));
+    assert(has_valid_magic(&h));
+    assert(has_valid_page_size(&h));
+    assert(is_freshly_initialized(&h));
+    assert_eq(size_on_disk(), 32);
+}
+
+fn test_file_header_big_endian() {
+    let h = new(
+        magic_big(), current_format_version(), 8192,
+        7 as u32, 1 as u32, 2 as u32, 0 as u32, 0 as u32,
+    );
+    assert(!is_little_endian(&h));
+    assert(is_big_endian(&h));
+    assert(!is_freshly_initialized(&h));
+}
+
+fn test_frame_header_commit_vs_non_commit() {
+    let commit = WalFrameHeader {
+        page_number: 5 as u32, commit_size: 100 as u32,
+        salt1: 1 as u32, salt2: 2 as u32,
+        checksum1: 3 as u32, checksum2: 4 as u32,
+    };
+    let non_commit = WalFrameHeader {
+        page_number: 7 as u32, commit_size: 0 as u32,
+        salt1: 1 as u32, salt2: 2 as u32,
+        checksum1: 5 as u32, checksum2: 6 as u32,
+    };
+    assert(is_commit_frame(&commit));
+    assert(!is_commit_frame(&non_commit));
+    assert(is_non_commit_frame(&non_commit));
+    assert(!is_non_commit_frame(&commit));
+    assert_eq(frame_size_on_disk(), 24);
+}
+
+fn test_salts_match() {
+    let f = WalFrameHeader {
+        page_number: 1 as u32, commit_size: 0 as u32,
+        salt1: 0xA as u32, salt2: 0xB as u32,
+        checksum1: 0 as u32, checksum2: 0 as u32,
+    };
+    assert(salts_match(&f, 0xA as u32, 0xB as u32));
+    assert(!salts_match(&f, 0xA as u32, 0xC as u32));
+}
+
+fn main() {
+    test_layout_sizes();
+    test_magic_and_version_constants();
+    test_page_size_range();
+    test_valid_page_sizes();
+    test_valid_magic();
+    test_file_header_little_endian();
+    test_file_header_big_endian();
+    test_frame_header_commit_vs_non_commit();
+    test_salts_match();
+}

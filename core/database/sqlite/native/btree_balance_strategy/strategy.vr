@@ -1,0 +1,59 @@
+// B-tree rebalance strategy selector.
+
+module core.database.sqlite.native.btree_balance_strategy.strategy;
+
+mount base.{Bool, Text};
+
+public type Strategy is
+    | BsNoBalance         // page still fits — no-op
+    | BsQuick             // append overflow page only; no page rewrite
+    | BsDeeper            // root page overflow — grow tree height
+    | BsNonroot           // interior overflow — sibling reshuffle
+    ;
+
+public fn strategy_name(s: &Strategy) -> Text {
+    match s {
+        BsNoBalance => "no_balance".clone(),
+        BsQuick     => "balance_quick".clone(),
+        BsDeeper    => "balance_deeper".clone(),
+        BsNonroot   => "balance_nonroot".clone(),
+    }
+}
+
+public fn changes_page_count(s: &Strategy) -> Bool {
+    match s {
+        BsNoBalance => false,
+        BsQuick     => true,   // allocates one overflow page
+        BsDeeper    => true,   // allocates a new root
+        BsNonroot   => true,   // may allocate or free siblings
+    }
+}
+
+public fn changes_tree_height(s: &Strategy) -> Bool {
+    match s { BsDeeper => true, _ => false }
+}
+
+public fn touches_siblings(s: &Strategy) -> Bool {
+    match s { BsNonroot => true, _ => false }
+}
+
+// Pick the strategy. `page_is_root` + `page_overflow` + `payload_is_single_trailing`.
+public fn classify(
+    page_fits: Bool,
+    page_is_root: Bool,
+    payload_is_single_trailing_row: Bool,
+) -> Strategy {
+    if page_fits { return BsNoBalance; }
+    if payload_is_single_trailing_row { return BsQuick; }
+    if page_is_root { return BsDeeper; }
+    BsNonroot
+}
+
+// Per §12.4, balance_nonroot works with up to 3 siblings at once; deeper
+// cascades upwards.
+public fn max_sibling_page_count(s: &Strategy) -> Int {
+    match s {
+        BsNonroot => 3,
+        _         => 1,
+    }
+}

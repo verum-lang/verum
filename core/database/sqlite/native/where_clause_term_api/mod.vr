@@ -1,0 +1,13 @@
+// =============================================================================
+// core/database/sqlite/native/where_clause_term_api/mod.vr
+// =============================================================================
+// WHERE-clause term structure as the planner sees it — split into AND terms,
+// tag each term with its applicable table cursors, equality vs range, etc.
+// Spec §13.4 — WHERE-clause analysis.
+// =============================================================================
+
+module core.database.sqlite.native.where_clause_term_api;
+
+public module operator;
+public module term;
+public module clause;

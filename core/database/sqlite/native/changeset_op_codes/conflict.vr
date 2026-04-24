@@ -1,0 +1,89 @@
+// Changeset conflict type + conflict-resolution disposition.
+
+module core.database.sqlite.native.changeset_op_codes.conflict;
+
+mount base.{Bool, Text, Maybe};
+
+// Conflict reason passed to the xConflict callback.
+public type ConflictReason is
+    | CrData            // SQLITE_CHANGESET_DATA         = 1
+    | CrNotFound        // SQLITE_CHANGESET_NOTFOUND     = 2
+    | CrConflict        // SQLITE_CHANGESET_CONFLICT     = 3
+    | CrConstraint      // SQLITE_CHANGESET_CONSTRAINT   = 4
+    | CrForeignKey      // SQLITE_CHANGESET_FOREIGN_KEY  = 5
+    ;
+
+public fn reason_code(r: &ConflictReason) -> Int {
+    match r {
+        CrData        => 1,
+        CrNotFound    => 2,
+        CrConflict    => 3,
+        CrConstraint  => 4,
+        CrForeignKey  => 5,
+    }
+}
+
+public fn reason_from_code(code: Int) -> Maybe<ConflictReason> {
+    if code == 1 { return Maybe.Some(CrData); }
+    if code == 2 { return Maybe.Some(CrNotFound); }
+    if code == 3 { return Maybe.Some(CrConflict); }
+    if code == 4 { return Maybe.Some(CrConstraint); }
+    if code == 5 { return Maybe.Some(CrForeignKey); }
+    Maybe.None
+}
+
+public fn reason_name(r: &ConflictReason) -> Text {
+    match r {
+        CrData        => "DATA".clone(),
+        CrNotFound    => "NOTFOUND".clone(),
+        CrConflict    => "CONFLICT".clone(),
+        CrConstraint  => "CONSTRAINT".clone(),
+        CrForeignKey  => "FOREIGN_KEY".clone(),
+    }
+}
+
+// Verdict returned by xConflict.
+public type Disposition is
+    | DpOmit        // SQLITE_CHANGESET_OMIT    = 0
+    | DpReplace     // SQLITE_CHANGESET_REPLACE = 1
+    | DpAbort       // SQLITE_CHANGESET_ABORT   = 2
+    ;
+
+public fn disposition_code(d: &Disposition) -> Int {
+    match d {
+        DpOmit    => 0,
+        DpReplace => 1,
+        DpAbort   => 2,
+    }
+}
+
+public fn disposition_from_code(code: Int) -> Maybe<Disposition> {
+    if code == 0 { return Maybe.Some(DpOmit); }
+    if code == 1 { return Maybe.Some(DpReplace); }
+    if code == 2 { return Maybe.Some(DpAbort); }
+    Maybe.None
+}
+
+public fn disposition_name(d: &Disposition) -> Text {
+    match d {
+        DpOmit    => "OMIT".clone(),
+        DpReplace => "REPLACE".clone(),
+        DpAbort   => "ABORT".clone(),
+    }
+}
+
+public fn default_disposition() -> Disposition { DpAbort }
+
+public fn is_terminal_disposition(d: &Disposition) -> Bool {
+    match d { DpAbort => true, _ => false }
+}
+
+// Certain conflict reasons can only meaningfully be resolved by OMIT or ABORT.
+public fn allows_replace(r: &ConflictReason) -> Bool {
+    match r {
+        CrData       => true,
+        CrConflict   => true,
+        CrConstraint => true,
+        _            => false,
+    }
+}

@@ -1,0 +1,42 @@
+// Per-row operation encoded in a changeset entry.
+
+module core.database.sqlite.native.changeset_op_codes.row_op;
+
+mount base.{Bool, Text, Maybe};
+
+public type RowOp is
+    | RoInsert      // SQLITE_INSERT = 18
+    | RoUpdate      // SQLITE_UPDATE = 23
+    | RoDelete      // SQLITE_DELETE = 9
+    ;
+
+public fn op_code(o: &RowOp) -> Int {
+    match o {
+        RoInsert => 18,
+        RoUpdate => 23,
+        RoDelete =>  9,
+    }
+}
+
+public fn from_code(code: Int) -> Maybe<RowOp> {
+    if code == 18 { return Maybe.Some(RoInsert); }
+    if code == 23 { return Maybe.Some(RoUpdate); }
+    if code ==  9 { return Maybe.Some(RoDelete); }
+    Maybe.None
+}
+
+public fn op_name(o: &RowOp) -> Text {
+    match o {
+        RoInsert => "INSERT".clone(),
+        RoUpdate => "UPDATE".clone(),
+        RoDelete => "DELETE".clone(),
+    }
+}
+
+public fn carries_new_row(o: &RowOp) -> Bool {
+    match o { RoDelete => false, _ => true }
+}
+
+public fn carries_old_row(o: &RowOp) -> Bool {
+    match o { RoInsert => false, _ => true }
+}

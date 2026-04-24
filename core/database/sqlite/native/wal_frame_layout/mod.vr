@@ -1,0 +1,31 @@
+// =============================================================================
+// core/database/sqlite/native/wal_frame_layout/mod.vr
+// =============================================================================
+// WAL file byte-level layout — 32-byte file header + per-frame 24-byte header.
+// Spec §6.3-§6.4 — WAL format.
+//
+// File header (32 bytes):
+//   0-3  magic: 0x377f0682 (little) / 0x377f0683 (big)
+//   4-7  file format version (3007000)
+//   8-11 database page size
+//   12-15 checkpoint sequence number
+//   16-19 salt-1 (random, changes on each re-init)
+//   20-23 salt-2 (random)
+//   24-27 checksum-1
+//   28-31 checksum-2
+//
+// Frame header (24 bytes):
+//   0-3  page number
+//   4-7  commit size (DB size after commit; 0 = non-commit)
+//   8-11 salt-1 (matches file header)
+//   12-15 salt-2
+//   16-19 frame checksum-1
+//   20-23 frame checksum-2
+//
+// =============================================================================
+
+module core.database.sqlite.native.wal_frame_layout;
+
+public module constants;
+public module file_header;
+public module frame_header;

@@ -1,0 +1,15 @@
+// =============================================================================
+// core/database/sqlite/native/btree_balance_strategy/mod.vr
+// =============================================================================
+// B-tree rebalance decision — balance_quick / deeper / nonroot.
+// Spec §12.2-§12.4 — B-tree balancing.
+//
+// balance_quick:   one page that spilled — just split a trailing overflow page.
+// balance_deeper:  root overflow — grow tree a level (new root pointing to split).
+// balance_nonroot: interior page overflow — 3-page reshuffle with siblings.
+//
+// =============================================================================
+
+module core.database.sqlite.native.btree_balance_strategy;
+
+public module strategy;

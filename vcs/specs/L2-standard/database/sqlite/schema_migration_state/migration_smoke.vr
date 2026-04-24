@@ -1,0 +1,115 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, schema_migration_state, ddl
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.schema_migration_state.phase.{
+    Phase, PhInit, PhCreateShadow, PhCopyRows, PhRewireSchema, PhReindex, PhDone, PhFailed,
+    phase_name, is_terminal, requires_write_lock, next_phase, numeric_index,
+};
+mount core.database.sqlite.native.schema_migration_state.session.{
+    MigrationSession,
+    start, advance, record_row, record_index, fail,
+    is_done, needs_write_lock, copy_progress, index_progress,
+};
+mount base.{Bool, Int64};
+
+fn test_phase_names() {
+    assert(phase_name(&PhInit)         == "init".clone());
+    assert(phase_name(&PhCreateShadow) == "create_shadow".clone());
+    assert(phase_name(&PhCopyRows)     == "copy_rows".clone());
+    assert(phase_name(&PhReindex)      == "reindex".clone());
+    assert(phase_name(&PhDone)         == "done".clone());
+    assert(phase_name(&PhFailed)       == "failed".clone());
+}
+
+fn test_is_terminal() {
+    assert(is_terminal(&PhDone));
+    assert(is_terminal(&PhFailed));
+    assert(!is_terminal(&PhInit));
+    assert(!is_terminal(&PhReindex));
+}
+
+fn test_requires_write_lock_set() {
+    assert(!requires_write_lock(&PhInit));
+    assert(requires_write_lock(&PhCreateShadow));
+    assert(requires_write_lock(&PhCopyRows));
+    assert(requires_write_lock(&PhRewireSchema));
+    assert(requires_write_lock(&PhReindex));
+    assert(!requires_write_lock(&PhDone));
+    assert(!requires_write_lock(&PhFailed));
+}
+
+fn test_next_phase_linear_path() {
+    match next_phase(&PhInit)         { PhCreateShadow => {}, _ => assert(false) }
+    match next_phase(&PhCreateShadow) { PhCopyRows => {},     _ => assert(false) }
+    match next_phase(&PhCopyRows)     { PhRewireSchema => {}, _ => assert(false) }
+    match next_phase(&PhRewireSchema) { PhReindex => {},      _ => assert(false) }
+    match next_phase(&PhReindex)      { PhDone => {},         _ => assert(false) }
+    match next_phase(&PhDone)         { PhDone => {},         _ => assert(false) }
+    match next_phase(&PhFailed)       { PhFailed => {},       _ => assert(false) }
+}
+
+fn test_numeric_index_monotonic() {
+    assert(numeric_index(&PhInit) < numeric_index(&PhCreateShadow));
+    assert(numeric_index(&PhCopyRows) < numeric_index(&PhRewireSchema));
+    assert(numeric_index(&PhRewireSchema) < numeric_index(&PhReindex));
+    assert(numeric_index(&PhReindex) < numeric_index(&PhDone));
+    assert(numeric_index(&PhFailed) < 0);
+}
+
+fn test_start_defaults() {
+    let s = start("users".clone(), 100 as Int64, 3 as Int64);
+    assert(!is_done(&s));
+    assert(!needs_write_lock(&s));    // PhInit doesn't need the lock
+    assert_eq(s.rows_copied, 0 as Int64);
+    assert_eq(s.indexes_rebuilt, 0 as Int64);
+}
+
+fn test_advance_and_record() {
+    let s0 = start("t".clone(), 100 as Int64, 2 as Int64);
+    let s1 = advance(s0);                 // → CreateShadow
+    let s2 = advance(s1);                 // → CopyRows
+    let s3 = record_row(record_row(s2));
+    assert_eq(s3.rows_copied, 2 as Int64);
+    assert(needs_write_lock(&s3));
+    let s4 = advance(advance(s3));        // → Reindex
+    let s5 = record_index(s4);
+    assert_eq(s5.indexes_rebuilt, 1 as Int64);
+}
+
+fn test_fail_marks_failed() {
+    let s0 = start("t".clone(), 10 as Int64, 1 as Int64);
+    let s1 = fail(s0, "out of disk".clone());
+    assert(is_done(&s1));
+    assert(s1.failure_reason == "out of disk".clone());
+}
+
+fn test_progress_percentages() {
+    let mut s = start("t".clone(), 4 as Int64, 0 as Int64);
+    s = advance(s);
+    s = advance(s);   // → CopyRows
+    s = record_row(s);
+    s = record_row(s);
+    // 2/4 = 0.5
+    let p = copy_progress(&s);
+    assert(p > 0.49 as Float);
+    assert(p < 0.51 as Float);
+    // zero-index denominator → 1.0
+    let ip = index_progress(&s);
+    assert(ip > 0.99 as Float);
+}
+
+fn main() {
+    test_phase_names();
+    test_is_terminal();
+    test_requires_write_lock_set();
+    test_next_phase_linear_path();
+    test_numeric_index_monotonic();
+    test_start_defaults();
+    test_advance_and_record();
+    test_fail_marks_failed();
+    test_progress_percentages();
+}

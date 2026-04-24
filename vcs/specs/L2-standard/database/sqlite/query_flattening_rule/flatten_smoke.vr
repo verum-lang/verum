@@ -1,0 +1,116 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, query_flattening_rule, planner
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.query_flattening_rule.rule.{
+    Rule,
+    RuAggregateInner, RuAggregateOuter, RuDistinctInner, RuLimitInnerNonzero,
+    RuCompoundInner, RuWindowFnInner, RuLeftJoinWithLimit, RuInnerIsRowValue,
+    rule_number, rule_name, total_rules,
+};
+mount core.database.sqlite.native.query_flattening_rule.context.{
+    FlattenContext,
+    zeroed, first_block, can_flatten,
+};
+mount base.{Bool, Maybe};
+
+fn test_rule_numbers_are_1_19() {
+    assert_eq(rule_number(&RuAggregateInner), 1);
+    assert_eq(rule_number(&RuAggregateOuter), 2);
+    assert_eq(rule_number(&RuDistinctInner), 3);
+    assert_eq(rule_number(&RuLimitInnerNonzero), 6);
+    assert_eq(rule_number(&RuCompoundInner), 8);
+    assert_eq(rule_number(&RuWindowFnInner), 11);
+    assert_eq(rule_number(&RuLeftJoinWithLimit), 19);
+}
+
+fn test_total_rules_is_19() {
+    assert_eq(total_rules(), 19);
+}
+
+fn test_names_are_stable() {
+    assert(rule_name(&RuAggregateInner) == "aggregate-inner".clone());
+    assert(rule_name(&RuInnerIsRowValue) == "inner-row-value".clone());
+}
+
+fn test_zero_context_allows_flatten() {
+    let ctx = zeroed();
+    assert(can_flatten(&ctx));
+    match first_block(&ctx) {
+        Maybe.None => {},
+        Maybe.Some(_) => assert(false),
+    }
+}
+
+fn test_aggregate_inner_blocks() {
+    let mut ctx = zeroed();
+    ctx.inner_aggregate = true;
+    match first_block(&ctx) {
+        Maybe.Some(r) => match &r { RuAggregateInner => {}, _ => assert(false) },
+        Maybe.None => assert(false),
+    }
+    assert(!can_flatten(&ctx));
+}
+
+fn test_window_fn_inner_blocks() {
+    let mut ctx = zeroed();
+    ctx.inner_window = true;
+    match first_block(&ctx) {
+        Maybe.Some(r) => match &r { RuWindowFnInner => {}, _ => assert(false) },
+        Maybe.None => assert(false),
+    }
+}
+
+fn test_order_by_both_blocks() {
+    let mut ctx = zeroed();
+    ctx.inner_order_by = true;
+    ctx.outer_order_by = true;
+    match first_block(&ctx) {
+        Maybe.Some(_) => {},
+        Maybe.None => assert(false),
+    }
+    // but if only one side has ORDER BY, it's fine
+    let mut ctx2 = zeroed();
+    ctx2.inner_order_by = true;
+    assert(can_flatten(&ctx2));
+}
+
+fn test_left_join_with_limit_blocks() {
+    let mut ctx = zeroed();
+    ctx.outer_left_join = true;
+    ctx.inner_limit = true;
+    match first_block(&ctx) {
+        Maybe.Some(r) => {
+            // either LimitInnerNonzero (rule 6, earlier in check order) or LeftJoinWithLimit
+            let n = rule_number(&r);
+            assert(n == 6 || n == 19);
+        },
+        Maybe.None => assert(false),
+    }
+}
+
+fn test_first_blocking_rule_wins() {
+    let mut ctx = zeroed();
+    ctx.inner_aggregate = true;
+    ctx.outer_aggregate = true;
+    ctx.inner_distinct = true;
+    match first_block(&ctx) {
+        Maybe.Some(r) => assert_eq(rule_number(&r), 1),
+        Maybe.None => assert(false),
+    }
+}
+
+fn main() {
+    test_rule_numbers_are_1_19();
+    test_total_rules_is_19();
+    test_names_are_stable();
+    test_zero_context_allows_flatten();
+    test_aggregate_inner_blocks();
+    test_window_fn_inner_blocks();
+    test_order_by_both_blocks();
+    test_left_join_with_limit_blocks();
+    test_first_blocking_rule_wins();
+}

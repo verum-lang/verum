@@ -1,0 +1,78 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, btree_balance_strategy, btree
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.btree_balance_strategy.strategy.{
+    Strategy, BsNoBalance, BsQuick, BsDeeper, BsNonroot,
+    strategy_name, changes_page_count, changes_tree_height, touches_siblings,
+    classify, max_sibling_page_count,
+};
+mount base.{Bool};
+
+fn test_strategy_names() {
+    assert(strategy_name(&BsNoBalance) == "no_balance".clone());
+    assert(strategy_name(&BsQuick)     == "balance_quick".clone());
+    assert(strategy_name(&BsDeeper)    == "balance_deeper".clone());
+    assert(strategy_name(&BsNonroot)   == "balance_nonroot".clone());
+}
+
+fn test_page_count_changes() {
+    assert(!changes_page_count(&BsNoBalance));
+    assert(changes_page_count(&BsQuick));
+    assert(changes_page_count(&BsDeeper));
+    assert(changes_page_count(&BsNonroot));
+}
+
+fn test_height_only_deeper() {
+    assert(changes_tree_height(&BsDeeper));
+    assert(!changes_tree_height(&BsQuick));
+    assert(!changes_tree_height(&BsNonroot));
+    assert(!changes_tree_height(&BsNoBalance));
+}
+
+fn test_siblings_only_nonroot() {
+    assert(touches_siblings(&BsNonroot));
+    assert(!touches_siblings(&BsDeeper));
+    assert(!touches_siblings(&BsQuick));
+    assert(!touches_siblings(&BsNoBalance));
+}
+
+fn test_classify_page_fits() {
+    match classify(true, false, false) { BsNoBalance => {}, _ => assert(false) }
+    match classify(true, true, true)   { BsNoBalance => {}, _ => assert(false) }
+}
+
+fn test_classify_quick_single_trailing() {
+    match classify(false, false, true) { BsQuick => {}, _ => assert(false) }
+    match classify(false, true, true)  { BsQuick => {}, _ => assert(false) }
+}
+
+fn test_classify_deeper_root_overflow() {
+    match classify(false, true, false) { BsDeeper => {}, _ => assert(false) }
+}
+
+fn test_classify_nonroot_default() {
+    match classify(false, false, false) { BsNonroot => {}, _ => assert(false) }
+}
+
+fn test_max_sibling_count() {
+    assert_eq(max_sibling_page_count(&BsNonroot), 3);
+    assert_eq(max_sibling_page_count(&BsDeeper), 1);
+    assert_eq(max_sibling_page_count(&BsQuick), 1);
+    assert_eq(max_sibling_page_count(&BsNoBalance), 1);
+}
+
+fn main() {
+    test_strategy_names();
+    test_page_count_changes();
+    test_height_only_deeper();
+    test_siblings_only_nonroot();
+    test_classify_page_fits();
+    test_classify_quick_single_trailing();
+    test_classify_deeper_root_overflow();
+    test_classify_nonroot_default();
+    test_max_sibling_count();
+}

@@ -1,0 +1,57 @@
+// The full WHERE clause after AND-splitting.
+
+module core.database.sqlite.native.where_clause_term_api.clause;
+
+mount core.database.sqlite.native.where_clause_term_api.term.{
+    WhereTerm,
+    can_push_to_index, is_join_equality, applies_in_scope, touches_cursor,
+};
+mount base.{Bool, Int64};
+mount core.collections.list.{List};
+
+public type WhereClause is {
+    terms: List<WhereTerm>,
+};
+
+public fn new() -> WhereClause {
+    WhereClause { terms: [].clone() as List<WhereTerm> }
+}
+
+public fn push(mut c: WhereClause, t: WhereTerm) -> WhereClause {
+    c.terms.push(t);
+    c
+}
+
+public fn len(c: &WhereClause) -> Int { c.terms.len() }
+
+public fn is_empty(c: &WhereClause) -> Bool { c.terms.len() == 0 }
+
+public fn count_sargable(c: &WhereClause) -> Int {
+    let mut n: Int = 0;
+    let mut i: Int = 0;
+    while i < c.terms.len() {
+        if can_push_to_index(&c.terms[i]) { n = n + 1; }
+        i = i + 1;
+    }
+    n
+}
+
+public fn count_join_equalities(c: &WhereClause) -> Int {
+    let mut n: Int = 0;
+    let mut i: Int = 0;
+    while i < c.terms.len() {
+        if is_join_equality(&c.terms[i]) { n = n + 1; }
+        i = i + 1;
+    }
+    n
+}
+
+public fn terms_touching(c: &WhereClause, cursor_bit: Int64) -> Int {
+    let mut n: Int = 0;
+    let mut i: Int = 0;
+    while i < c.terms.len() {
+        if touches_cursor(&c.terms[i], cursor_bit) { n = n + 1; }
+        i = i + 1;
+    }
+    n
+}

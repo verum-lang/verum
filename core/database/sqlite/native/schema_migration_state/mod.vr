@@ -1,0 +1,12 @@
+// =============================================================================
+// core/database/sqlite/native/schema_migration_state/mod.vr
+// =============================================================================
+// Online schema-migration state machine used by ALTER TABLE (notably
+// DROP COLUMN), plus `VACUUM INTO` and table-rebuild sequences.
+// Spec §17 — schema evolution.
+// =============================================================================
+
+module core.database.sqlite.native.schema_migration_state;
+
+public module phase;
+public module session;

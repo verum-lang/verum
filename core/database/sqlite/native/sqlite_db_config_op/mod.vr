@@ -1,0 +1,10 @@
+// =============================================================================
+// core/database/sqlite/native/sqlite_db_config_op/mod.vr
+// =============================================================================
+// sqlite3_db_config() opcode taxonomy (SQLITE_DBCONFIG_*).
+// Values mirror sqlite3.h.
+// =============================================================================
+
+module core.database.sqlite.native.sqlite_db_config_op;
+
+public module op;

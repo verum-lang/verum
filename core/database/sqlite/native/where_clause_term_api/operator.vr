@@ -1,0 +1,64 @@
+// Term-operator classification.
+
+module core.database.sqlite.native.where_clause_term_api.operator;
+
+mount base.{Bool, Text};
+
+public type TermOp is
+    | ToEquality      // = / IS
+    | ToInList        // IN (...)
+    | ToRangeLT       // <  / <=
+    | ToRangeGT       // >  / >=
+    | ToStringPattern // LIKE / GLOB / REGEXP
+    | ToIsNull
+    | ToIsNotNull
+    | ToExists        // EXISTS(subselect)
+    | ToAnd
+    | ToOr
+    | ToNot
+    | ToOther
+    ;
+
+public fn op_name(o: &TermOp) -> Text {
+    match o {
+        ToEquality      => "eq".clone(),
+        ToInList        => "in".clone(),
+        ToRangeLT       => "lt".clone(),
+        ToRangeGT       => "gt".clone(),
+        ToStringPattern => "pattern".clone(),
+        ToIsNull        => "is_null".clone(),
+        ToIsNotNull     => "is_not_null".clone(),
+        ToExists        => "exists".clone(),
+        ToAnd           => "and".clone(),
+        ToOr            => "or".clone(),
+        ToNot           => "not".clone(),
+        ToOther         => "other".clone(),
+    }
+}
+
+public fn is_equality(o: &TermOp) -> Bool {
+    match o {
+        ToEquality => true,
+        ToInList   => true,        // IN-list is a disjunction of equalities
+        ToIsNull   => true,
+        _          => false,
+    }
+}
+
+public fn is_range(o: &TermOp) -> Bool {
+    match o { ToRangeLT => true, ToRangeGT => true, _ => false }
+}
+
+// Sargable terms are ones the planner can push to an index lookup.
+public fn is_sargable(o: &TermOp) -> Bool {
+    match o {
+        ToEquality      => true,
+        ToInList        => true,
+        ToRangeLT       => true,
+        ToRangeGT       => true,
+        ToIsNull        => true,
+        ToIsNotNull     => true,
+        ToStringPattern => true,    // left-anchored LIKE/GLOB can be sargable
+        _               => false,
+    }
+}

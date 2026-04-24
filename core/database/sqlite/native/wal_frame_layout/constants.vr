@@ -1,0 +1,39 @@
+// WAL layout constants.
+
+module core.database.sqlite.native.wal_frame_layout.constants;
+
+mount base.{Bool};
+
+public fn file_header_size() -> Int { 32 }
+public fn frame_header_size() -> Int { 24 }
+
+// WAL magic for little-endian checksum mode.
+public fn magic_little() -> u32 { 0x377f0682 as u32 }
+public fn magic_big() -> u32    { 0x377f0683 as u32 }
+
+// Current SQLite WAL format version.
+public fn current_format_version() -> u32 { 3007000 as u32 }
+
+// Page sizes: SQLite allows 512..65536 (powers of two), plus the sentinel 1.
+public fn min_page_size() -> Int { 512 }
+public fn max_page_size() -> Int { 65536 }
+
+// A page size of 1 in the file header is a stand-in for 65536 (too large for 16 bits).
+public fn sentinel_for_65536() -> Int { 1 }
+
+public fn is_valid_page_size(n: Int) -> Bool {
+    if n == sentinel_for_65536() { return true; }
+    if n < min_page_size() { return false; }
+    if n > max_page_size() { return false; }
+    // must be a power of two
+    let mut x = n;
+    while x > 1 {
+        if (x % 2) != 0 { return false; }
+        x = x / 2;
+    }
+    true
+}
+
+public fn is_valid_magic(m: u32) -> Bool {
+    m == magic_little() || m == magic_big()
+}

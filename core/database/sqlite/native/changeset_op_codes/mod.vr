@@ -1,0 +1,12 @@
+// =============================================================================
+// core/database/sqlite/native/changeset_op_codes/mod.vr
+// =============================================================================
+// Session-extension changeset operation + conflict taxonomy.
+// Values mirror the SQLITE_INSERT / _UPDATE / _DELETE and SQLITE_CHANGESET_*
+// constants in sqlite3.h / sqlite3session.h.
+// =============================================================================
+
+module core.database.sqlite.native.changeset_op_codes;
+
+public module row_op;
+public module conflict;

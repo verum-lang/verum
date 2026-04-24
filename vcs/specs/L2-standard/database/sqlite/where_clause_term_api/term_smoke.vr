@@ -1,0 +1,115 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, where_clause_term_api, planner
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.where_clause_term_api.operator.{
+    TermOp,
+    ToEquality, ToInList, ToRangeLT, ToRangeGT, ToStringPattern,
+    ToIsNull, ToIsNotNull, ToExists, ToAnd, ToOr, ToNot, ToOther,
+    op_name, is_equality, is_range, is_sargable,
+};
+mount core.database.sqlite.native.where_clause_term_api.term.{
+    WhereTerm,
+    simple, as_virtual, with_cost_hint,
+    can_push_to_index, touches_cursor, applies_in_scope, is_join_equality,
+};
+mount core.database.sqlite.native.where_clause_term_api.clause.{
+    WhereClause,
+    new, push, len, is_empty,
+    count_sargable, count_join_equalities, terms_touching,
+};
+mount base.{Bool, Int64};
+
+fn test_op_names() {
+    assert(op_name(&ToEquality) == "eq".clone());
+    assert(op_name(&ToInList)   == "in".clone());
+    assert(op_name(&ToOr)       == "or".clone());
+}
+
+fn test_is_equality_set() {
+    assert(is_equality(&ToEquality));
+    assert(is_equality(&ToInList));
+    assert(is_equality(&ToIsNull));
+    assert(!is_equality(&ToRangeLT));
+    assert(!is_equality(&ToAnd));
+}
+
+fn test_is_range_set() {
+    assert(is_range(&ToRangeLT));
+    assert(is_range(&ToRangeGT));
+    assert(!is_range(&ToEquality));
+}
+
+fn test_is_sargable_set() {
+    assert(is_sargable(&ToEquality));
+    assert(is_sargable(&ToInList));
+    assert(is_sargable(&ToRangeLT));
+    assert(is_sargable(&ToRangeGT));
+    assert(is_sargable(&ToIsNull));
+    assert(is_sargable(&ToIsNotNull));
+    assert(is_sargable(&ToStringPattern));
+    assert(!is_sargable(&ToExists));
+    assert(!is_sargable(&ToOr));
+    assert(!is_sargable(&ToAnd));
+    assert(!is_sargable(&ToOther));
+}
+
+fn test_simple_term_defaults() {
+    let t = simple(ToEquality, 1 as Int64);
+    assert(!t.virtual_term);
+    assert_eq(t.cost_hint, -1);
+    assert(can_push_to_index(&t));
+    assert(touches_cursor(&t, 1 as Int64));
+    assert(!touches_cursor(&t, 2 as Int64));
+}
+
+fn test_as_virtual_and_cost_hint() {
+    let t0 = simple(ToRangeLT, 4 as Int64);
+    let t1 = with_cost_hint(as_virtual(t0), 10);
+    assert(t1.virtual_term);
+    assert_eq(t1.cost_hint, 10);
+}
+
+fn test_applies_in_scope() {
+    let t = simple(ToEquality, 0x5 as Int64);    // cursors 0 + 2
+    assert(applies_in_scope(&t, 0x5 as Int64));
+    assert(applies_in_scope(&t, 0xF as Int64));  // wider scope still covers
+    assert(!applies_in_scope(&t, 0x1 as Int64)); // missing cursor 2
+}
+
+fn test_is_join_equality() {
+    let two_cursors = simple(ToEquality, 0x3 as Int64);    // bits 0 and 1
+    assert(is_join_equality(&two_cursors));
+    let one_cursor = simple(ToEquality, 0x1 as Int64);
+    assert(!is_join_equality(&one_cursor));
+    let two_cursors_range = simple(ToRangeLT, 0x3 as Int64);
+    assert(!is_join_equality(&two_cursors_range));
+}
+
+fn test_where_clause_builder() {
+    let c0 = new();
+    assert(is_empty(&c0));
+    let c1 = push(c0, simple(ToEquality, 0x3 as Int64));
+    let c2 = push(c1, simple(ToRangeLT, 0x1 as Int64));
+    let c3 = push(c2, simple(ToOr, 0x1 as Int64));
+    assert_eq(len(&c3), 3);
+    assert_eq(count_sargable(&c3), 2);
+    assert_eq(count_join_equalities(&c3), 1);
+    assert_eq(terms_touching(&c3, 1 as Int64), 3);
+    assert_eq(terms_touching(&c3, 2 as Int64), 1);
+}
+
+fn main() {
+    test_op_names();
+    test_is_equality_set();
+    test_is_range_set();
+    test_is_sargable_set();
+    test_simple_term_defaults();
+    test_as_virtual_and_cost_hint();
+    test_applies_in_scope();
+    test_is_join_equality();
+    test_where_clause_builder();
+}

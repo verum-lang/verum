@@ -1,0 +1,77 @@
+// Per-rule flattening restriction.
+
+module core.database.sqlite.native.query_flattening_rule.rule;
+
+mount base.{Bool, Text};
+
+public type Rule is
+    | RuAggregateInner
+    | RuAggregateOuter
+    | RuDistinctInner
+    | RuDistinctOuter
+    | RuOrderByBoth
+    | RuLimitInnerNonzero
+    | RuLimitOuterNonzero
+    | RuCompoundInner
+    | RuNaturalJoinOuter
+    | RuOuterJoinInnerIsCompound
+    | RuWindowFnInner
+    | RuGroupByInner
+    | RuInnerUsesRecursive
+    | RuReturningInner
+    | RuInnerIsRowValue
+    | RuValuesInner
+    | RuInnerIsSampled
+    | RuInnerHasOffset
+    | RuLeftJoinWithLimit
+    ;
+
+public fn rule_number(r: &Rule) -> Int {
+    match r {
+        RuAggregateInner           => 1,
+        RuAggregateOuter           => 2,
+        RuDistinctInner            => 3,
+        RuDistinctOuter            => 4,
+        RuOrderByBoth              => 5,
+        RuLimitInnerNonzero        => 6,
+        RuLimitOuterNonzero        => 7,
+        RuCompoundInner            => 8,
+        RuNaturalJoinOuter         => 9,
+        RuOuterJoinInnerIsCompound => 10,
+        RuWindowFnInner            => 11,
+        RuGroupByInner             => 12,
+        RuInnerUsesRecursive       => 13,
+        RuReturningInner           => 14,
+        RuInnerIsRowValue          => 15,
+        RuValuesInner              => 16,
+        RuInnerIsSampled           => 17,
+        RuInnerHasOffset           => 18,
+        RuLeftJoinWithLimit        => 19,
+    }
+}
+
+public fn rule_name(r: &Rule) -> Text {
+    match r {
+        RuAggregateInner           => "aggregate-inner".clone(),
+        RuAggregateOuter           => "aggregate-outer".clone(),
+        RuDistinctInner            => "distinct-inner".clone(),
+        RuDistinctOuter            => "distinct-outer".clone(),
+        RuOrderByBoth              => "order-by-both".clone(),
+        RuLimitInnerNonzero        => "limit-inner".clone(),
+        RuLimitOuterNonzero        => "limit-outer".clone(),
+        RuCompoundInner            => "compound-inner".clone(),
+        RuNaturalJoinOuter         => "natural-join-outer".clone(),
+        RuOuterJoinInnerIsCompound => "outer-join-inner-compound".clone(),
+        RuWindowFnInner            => "window-fn-inner".clone(),
+        RuGroupByInner             => "group-by-inner".clone(),
+        RuInnerUsesRecursive       => "inner-recursive".clone(),
+        RuReturningInner           => "returning-inner".clone(),
+        RuInnerIsRowValue          => "inner-row-value".clone(),
+        RuValuesInner              => "values-inner".clone(),
+        RuInnerIsSampled           => "inner-sampled".clone(),
+        RuInnerHasOffset           => "inner-offset".clone(),
+        RuLeftJoinWithLimit        => "left-join-with-limit".clone(),
+    }
+}
+
+public fn total_rules() -> Int { 19 }

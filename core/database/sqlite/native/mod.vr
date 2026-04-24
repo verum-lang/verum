@@ -476,3 +476,19 @@ public module math_fn_package;
 public module numeric_literal_parser_api;
 // - conflict_clause_api: ON CONFLICT 5-way (ROLLBACK / ABORT / FAIL / IGNORE / REPLACE)
 public module conflict_clause_api;
+// - wal_frame_layout: WAL on-disk layout — 32-byte file header + 24-byte frame header
+public module wal_frame_layout;
+// - schema_migration_state: 7-phase online schema-migration state machine
+public module schema_migration_state;
+// - btree_balance_strategy: B-tree rebalance decision (quick/deeper/nonroot/no-op)
+public module btree_balance_strategy;
+// - query_flattening_rule: 19 preconditions that block subquery flattening (§13.5)
+public module query_flattening_rule;
+// - where_clause_term_api: WHERE-term structure + sargable/range/join-equality classifier
+public module where_clause_term_api;
+// - stmt_status_op_codes: SQLITE_STMTSTATUS_* 9-entry opcode taxonomy
+public module stmt_status_op_codes;
+// - sqlite_db_config_op: SQLITE_DBCONFIG_* 20-entry opcode taxonomy
+public module sqlite_db_config_op;
+// - changeset_op_codes: SQLITE_INSERT/UPDATE/DELETE + 5-way conflict reason + 3-way disposition
+public module changeset_op_codes;

@@ -1,0 +1,64 @@
+// WAL file header record.
+
+module core.database.sqlite.native.wal_frame_layout.file_header;
+
+mount core.database.sqlite.native.wal_frame_layout.constants.{
+    file_header_size, is_valid_magic, is_valid_page_size, magic_little, magic_big,
+};
+mount base.{Bool};
+
+public type WalFileHeader is {
+    magic: u32,
+    format_version: u32,
+    page_size: Int,        // decoded (sentinel 1 → 65536)
+    checkpoint_seq: u32,
+    salt1: u32,
+    salt2: u32,
+    checksum1: u32,
+    checksum2: u32,
+};
+
+public fn new(
+    magic: u32,
+    format_version: u32,
+    page_size: Int,
+    checkpoint_seq: u32,
+    salt1: u32,
+    salt2: u32,
+    checksum1: u32,
+    checksum2: u32,
+) -> WalFileHeader {
+    WalFileHeader {
+        magic: magic,
+        format_version: format_version,
+        page_size: page_size,
+        checkpoint_seq: checkpoint_seq,
+        salt1: salt1,
+        salt2: salt2,
+        checksum1: checksum1,
+        checksum2: checksum2,
+    }
+}
+
+public fn size_on_disk() -> Int { file_header_size() }
+
+public fn is_little_endian(h: &WalFileHeader) -> Bool {
+    h.magic == magic_little()
+}
+
+public fn is_big_endian(h: &WalFileHeader) -> Bool {
+    h.magic == magic_big()
+}
+
+public fn has_valid_magic(h: &WalFileHeader) -> Bool {
+    is_valid_magic(h.magic)
+}
+
+public fn has_valid_page_size(h: &WalFileHeader) -> Bool {
+    is_valid_page_size(h.page_size)
+}
+
+// A freshly-initialized WAL has checkpoint_seq = 0.
+public fn is_freshly_initialized(h: &WalFileHeader) -> Bool {
+    h.checkpoint_seq == (0 as u32)
+}

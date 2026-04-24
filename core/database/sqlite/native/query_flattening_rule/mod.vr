@@ -1,0 +1,12 @@
+// =============================================================================
+// core/database/sqlite/native/query_flattening_rule/mod.vr
+// =============================================================================
+// SQLite subquery-flattening — per optimizer §13.5 — 19 preconditions that
+// block FROM-subquery inlining. Encoded as predicates so the planner can
+// short-circuit at the first hit and produce a precise rejection reason.
+// =============================================================================
+
+module core.database.sqlite.native.query_flattening_rule;
+
+public module rule;
+public module context;

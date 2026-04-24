@@ -1,0 +1,10 @@
+// =============================================================================
+// core/database/sqlite/native/stmt_status_op_codes/mod.vr
+// =============================================================================
+// sqlite3_stmt_status() opcode taxonomy (SQLITE_STMTSTATUS_*).
+// Values mirror sqlite3.h.
+// =============================================================================
+
+module core.database.sqlite.native.stmt_status_op_codes;
+
+public module op;
