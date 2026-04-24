@@ -1,0 +1,138 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: x509, algorithm, signature, der, rfc5280_4_1_1_2
+// @timeout: 15000
+// @expected-exit: 0
+
+// RFC 5280 §4.1.1.2 AlgorithmIdentifier — byte-exact parse of
+// `SignatureAlg` variants from DER. Tests the mainstream WebPKI
+// OIDs + NULL-vs-absent parameter tolerance:
+//
+//   * Ed25519   OID 1.3.101.112          → arcs 2B 65 70 (3 bytes)
+//   * Ed448     OID 1.3.101.113          → arcs 2B 65 71 (3 bytes)
+//   * ECDSA-SHA-256 1.2.840.10045.4.3.2  → 8 bytes
+//   * SHA-256-WithRSA 1.2.840.113549.1.1.11 → 9 bytes
+//
+// DER wire: 30 <seq_len> 06 <oid_len> <oid_bytes> [05 00 NULL optional]
+
+mount core.*;
+mount core.collections.List;
+mount core.encoding.der.{DerReader};
+mount core.security.x509.algorithm.{SignatureAlg, parse_signature_alg};
+
+fn ed25519_absent_params_parses_to_ed25519_sig() {
+    // 30 05 06 03 2B 65 70 — SEQUENCE { OID ed25519 }
+    let der: List<Byte> = [
+        0x30_u8, 0x05_u8,
+        0x06_u8, 0x03_u8, 0x2B_u8, 0x65_u8, 0x70_u8,
+    ];
+    let mut r = DerReader.new(der.as_slice());
+    let alg = parse_signature_alg(&mut r).unwrap();
+    match alg {
+        SignatureAlg.Ed25519Sig => {},
+        _ => panic("expected Ed25519Sig"),
+    }
+}
+
+fn ed25519_explicit_null_params_also_parses() {
+    // 30 07 06 03 2B 65 70 05 00 — some issuers emit NULL against RFC
+    // 8410. The parser tolerates it.
+    let der: List<Byte> = [
+        0x30_u8, 0x07_u8,
+        0x06_u8, 0x03_u8, 0x2B_u8, 0x65_u8, 0x70_u8,
+        0x05_u8, 0x00_u8,
+    ];
+    let mut r = DerReader.new(der.as_slice());
+    let alg = parse_signature_alg(&mut r).unwrap();
+    match alg {
+        SignatureAlg.Ed25519Sig => {},
+        _ => panic("explicit NULL must still parse as Ed25519Sig"),
+    }
+}
+
+fn ed448_parses() {
+    // OID 1.3.101.113 → 2B 65 71.
+    let der: List<Byte> = [
+        0x30_u8, 0x05_u8,
+        0x06_u8, 0x03_u8, 0x2B_u8, 0x65_u8, 0x71_u8,
+    ];
+    let mut r = DerReader.new(der.as_slice());
+    let alg = parse_signature_alg(&mut r).unwrap();
+    match alg {
+        SignatureAlg.Ed448Sig => {},
+        _ => panic("expected Ed448Sig"),
+    }
+}
+
+fn ecdsa_with_sha_256_parses() {
+    // OID 1.2.840.10045.4.3.2 → 2A 86 48 CE 3D 04 03 02 (8 bytes).
+    let der: List<Byte> = [
+        0x30_u8, 0x0A_u8,
+        0x06_u8, 0x08_u8, 0x2A_u8, 0x86_u8, 0x48_u8, 0xCE_u8, 0x3D_u8, 0x04_u8, 0x03_u8, 0x02_u8,
+    ];
+    let mut r = DerReader.new(der.as_slice());
+    let alg = parse_signature_alg(&mut r).unwrap();
+    match alg {
+        SignatureAlg.EcdsaWithSha256 => {},
+        _ => panic("expected EcdsaWithSha256"),
+    }
+}
+
+fn sha256_with_rsa_with_null_params_parses() {
+    // OID 1.2.840.113549.1.1.11 → 2A 86 48 86 F7 0D 01 01 0B (9 bytes).
+    // With NULL params: 30 0D 06 09 <oid> 05 00
+    let der: List<Byte> = [
+        0x30_u8, 0x0D_u8,
+        0x06_u8, 0x09_u8,
+        0x2A_u8, 0x86_u8, 0x48_u8, 0x86_u8, 0xF7_u8, 0x0D_u8, 0x01_u8, 0x01_u8, 0x0B_u8,
+        0x05_u8, 0x00_u8,
+    ];
+    let mut r = DerReader.new(der.as_slice());
+    let alg = parse_signature_alg(&mut r).unwrap();
+    match alg {
+        SignatureAlg.Sha256WithRsa => {},
+        _ => panic("expected Sha256WithRsa"),
+    }
+}
+
+fn unknown_oid_falls_through_to_unknown_variant() {
+    // OID 1.2.3.4 — completely fictitious → SignatureAlg.Unknown(oid).
+    let der: List<Byte> = [
+        0x30_u8, 0x05_u8,
+        0x06_u8, 0x03_u8, 0x2A_u8, 0x03_u8, 0x04_u8,
+    ];
+    let mut r = DerReader.new(der.as_slice());
+    let alg = parse_signature_alg(&mut r).unwrap();
+    match alg {
+        SignatureAlg.Unknown(_) => {},
+        _ => panic("unknown OID must land in Unknown variant"),
+    }
+}
+
+fn ecdsa_with_sha_384_parses() {
+    // OID 1.2.840.10045.4.3.3.
+    let der: List<Byte> = [
+        0x30_u8, 0x0A_u8,
+        0x06_u8, 0x08_u8, 0x2A_u8, 0x86_u8, 0x48_u8, 0xCE_u8, 0x3D_u8, 0x04_u8, 0x03_u8, 0x03_u8,
+    ];
+    let mut r = DerReader.new(der.as_slice());
+    let alg = parse_signature_alg(&mut r).unwrap();
+    match alg {
+        SignatureAlg.EcdsaWithSha384 => {},
+        _ => panic("expected EcdsaWithSha384"),
+    }
+}
+
+@main
+public fn main() -> Int {
+    ed25519_absent_params_parses_to_ed25519_sig();
+    ed25519_explicit_null_params_also_parses();
+    ed448_parses();
+    ecdsa_with_sha_256_parses();
+    sha256_with_rsa_with_null_params_parses();
+    unknown_oid_falls_through_to_unknown_variant();
+    ecdsa_with_sha_384_parses();
+    print("RFC 5280 §4.1.1.2 parse_signature_alg DER KAT verified");
+    0
+}
