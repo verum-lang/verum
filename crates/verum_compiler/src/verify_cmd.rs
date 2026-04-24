@@ -1477,27 +1477,26 @@ impl<'s> VerifyCommand<'s> {
         println!("{}", "\nSlowest obligations:".bold());
         println!("{}", "=".repeat(60));
 
-        let mut per_fn: Vec<(Text, Duration)> = Vec::new();
-        for (name, result) in &report.results {
-            let elapsed = match result {
-                VerificationResult::Proved { elapsed } => Some(*elapsed),
-                VerificationResult::Failed { elapsed, .. } => Some(*elapsed),
-                VerificationResult::Timeout { elapsed, .. } => Some(*elapsed),
-                VerificationResult::Skipped => None,
+        // When obligation-level instrumentation is available,
+        // render true per-obligation rows (function.obligation,
+        // one row per discharge). Otherwise fall back to the
+        // function-granular view (one row per function).
+        let rows: Vec<(Text, Duration)> =
+            if report.total_obligation_count() > 0 {
+                self.collect_per_obligation_rows(report)
+            } else {
+                self.collect_per_function_rows(report)
             };
-            if let Some(e) = elapsed {
-                per_fn.push((name.clone(), e));
-            }
-        }
 
-        if per_fn.is_empty() {
+        if rows.is_empty() {
             println!("  (no obligations discharged in this run)");
             println!();
             return;
         }
 
-        per_fn.sort_by(|a, b| b.1.cmp(&a.1));
-        let take = per_fn.len().min(10);
+        let mut sorted = rows;
+        sorted.sort_by(|a, b| b.1.cmp(&a.1));
+        let take = sorted.len().min(10);
 
         println!(
             "  {:<40} {:>12} {:>10}",
@@ -1506,9 +1505,9 @@ impl<'s> VerifyCommand<'s> {
         println!("  {}", "-".repeat(64));
 
         let total_ms: f64 =
-            per_fn.iter().map(|(_, d)| d.as_secs_f64() * 1000.0).sum();
+            sorted.iter().map(|(_, d)| d.as_secs_f64() * 1000.0).sum();
 
-        for (name, elapsed) in per_fn.iter().take(take) {
+        for (name, elapsed) in sorted.iter().take(take) {
             let ms = elapsed.as_secs_f64() * 1000.0;
             let share = if total_ms > 0.0 {
                 100.0 * ms / total_ms
@@ -1523,14 +1522,57 @@ impl<'s> VerifyCommand<'s> {
             );
         }
 
-        if per_fn.len() > take {
+        if sorted.len() > take {
             println!(
                 "  (… {} more obligations omitted; pass --export to dump full list)",
-                per_fn.len() - take
+                sorted.len() - take
             );
         }
 
         println!();
+    }
+
+    /// Collect rows from instrumented per-obligation timings.
+    /// Row label is `function.obligation` so the renderer can
+    /// tell which function each obligation came from.
+    fn collect_per_obligation_rows(
+        &self,
+        report: &VerificationReport,
+    ) -> Vec<(Text, Duration)> {
+        let mut rows = Vec::new();
+        for (fn_name, timings) in &report.obligation_timings {
+            for (label, elapsed) in timings {
+                let composite = Text::from(format!(
+                    "{}.{}",
+                    fn_name.as_str(),
+                    label.as_str()
+                ));
+                rows.push((composite, *elapsed));
+            }
+        }
+        rows
+    }
+
+    /// Collect rows from function-granular aggregate timings.
+    /// Used when obligation-level instrumentation is
+    /// unavailable. One row per function.
+    fn collect_per_function_rows(
+        &self,
+        report: &VerificationReport,
+    ) -> Vec<(Text, Duration)> {
+        let mut rows = Vec::new();
+        for (name, result) in &report.results {
+            let elapsed = match result {
+                VerificationResult::Proved { elapsed } => Some(*elapsed),
+                VerificationResult::Failed { elapsed, .. } => Some(*elapsed),
+                VerificationResult::Timeout { elapsed, .. } => Some(*elapsed),
+                VerificationResult::Skipped => None,
+            };
+            if let Some(e) = elapsed {
+                rows.push((name.clone(), e));
+            }
+        }
+        rows
     }
 
     /// Emit newline-delimited JSON LSP-format diagnostics for every
@@ -1703,12 +1745,28 @@ pub enum VerificationResult {
 pub struct VerificationReport {
     results: List<(Text, VerificationResult)>,
     start_time: Instant,
+    /// Optional per-obligation timings keyed by function name.
+    ///
+    /// Populated when the verifier has obligation-level
+    /// instrumentation available (currently: none of the
+    /// in-tree verify paths — this is the slot a future
+    /// instrumentation patch writes into). Empty map means
+    /// "only function-granular timing is available" — the
+    /// `--profile-obligation` renderer falls back to
+    /// aggregate-per-function rows in that case.
+    ///
+    /// The key is the function name (matching `results`'s
+    /// first tuple element); the value is
+    /// `[(obligation_label, elapsed), …]` in order of
+    /// discharge.
+    obligation_timings: List<(Text, List<(Text, Duration)>)>,
 }
 
 impl VerificationReport {
     /// Create a new empty verification report
     pub fn new() -> Self {
         Self {
+            obligation_timings: List::new(),
             results: List::new(),
             start_time: Instant::now(),
         }
@@ -1717,6 +1775,60 @@ impl VerificationReport {
     /// Add a verification result for a function
     pub fn add_result(&mut self, name: Text, result: VerificationResult) {
         self.results.push((name, result));
+    }
+
+    /// Record per-obligation timings for a function.
+    ///
+    /// Called by instrumentation-aware verifiers after
+    /// discharging each obligation. Labels are caller-chosen
+    /// (typical: `"pre"`, `"post"`, `"refinement(x)"`,
+    /// `"loop_inv(i)"`, `"termination"`) — the renderer
+    /// displays them verbatim.
+    ///
+    /// Multiple calls for the same function name append to
+    /// the existing timing list, preserving discharge order.
+    pub fn add_obligation_timings(
+        &mut self,
+        function: Text,
+        timings: List<(Text, Duration)>,
+    ) {
+        // Look up existing entry for this function; append or
+        // create. List<(K, V)> is the stdlib pattern for
+        // order-preserving maps — we match it here.
+        for (name, existing) in self.obligation_timings.iter_mut() {
+            if name.as_str() == function.as_str() {
+                for t in timings {
+                    existing.push(t);
+                }
+                return;
+            }
+        }
+        self.obligation_timings.push((function, timings));
+    }
+
+    /// Return the per-obligation timings for `function`, or
+    /// empty if none were recorded.
+    pub fn obligation_timings_for(
+        &self,
+        function: &str,
+    ) -> &[(Text, Duration)] {
+        for (name, timings) in &self.obligation_timings {
+            if name.as_str() == function {
+                return timings.as_slice();
+            }
+        }
+        &[]
+    }
+
+    /// Total number of recorded obligations across every
+    /// function in the report. Zero when no instrumentation
+    /// is available — the caller should fall back to the
+    /// function-granular view.
+    pub fn total_obligation_count(&self) -> usize {
+        self.obligation_timings
+            .iter()
+            .map(|(_, t)| t.len())
+            .sum()
     }
 
     /// Count of successfully proved functions
