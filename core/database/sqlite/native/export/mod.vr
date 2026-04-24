@@ -1,0 +1,29 @@
+// =============================================================================
+// core/database/sqlite/native/export/mod.vr
+// =============================================================================
+// Layer: 7 (façade utility)
+// Spec: sqlite-native.md §22 (operational tooling — dump / restore)
+//
+// Read-only export tooling. Three pieces:
+//
+//   * `schema_dump` — emit `CREATE TABLE` / `CREATE INDEX` /
+//                     `CREATE TRIGGER` / `CREATE VIEW` for every
+//                     schema object (mirrors `.schema` in sqlite3 CLI)
+//   * `data_dump`   — emit each row as `INSERT INTO ... VALUES (...)`
+//                     (matches `.dump`), or as CSV / JSONL
+//   * `restore`     — counterpart that consumes the dump back into
+//                     a fresh Database
+//
+// Submodules:
+//   * `value`       — abstracted SqlValue + textual rendering
+//   * `schema_dump` — schema-object DDL emitter
+//   * `data_dump`   — row emitter (INSERT / CSV / JSONL formats)
+//   * `restore`     — dump-stream applier
+// =============================================================================
+
+module core.database.sqlite.native.export;
+
+public module value;
+public module schema_dump;
+public module data_dump;
+public module restore;

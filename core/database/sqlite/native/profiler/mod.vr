@@ -1,0 +1,25 @@
+// =============================================================================
+// core/database/sqlite/native/profiler/mod.vr
+// =============================================================================
+// Layer: 6 (per-Connection)
+// Spec: sqlite-native.md §22 (operational tooling — EXPLAIN ANALYZE)
+//
+// Per-execution runtime accounting. The profiler observes what the
+// VDBE actually did — opcode counts, cycle estimates, page reads /
+// writes, plan-node row counts. Output mirrors EXPLAIN ANALYZE
+// in PostgreSQL: actual row counts vs the planner's estimate, plus
+// per-node wall-clock slices.
+//
+// Submodules:
+//   * `opstat`     — per-Opcode counter + cumulative duration
+//   * `nodestat`   — per-PlanNode row + duration tracker
+//   * `session`    — per-statement profile (collects op + node stats)
+//   * `report`     — formatted EXPLAIN ANALYZE-style text rendering
+// =============================================================================
+
+module core.database.sqlite.native.profiler;
+
+public module opstat;
+public module nodestat;
+public module session;
+public module report;

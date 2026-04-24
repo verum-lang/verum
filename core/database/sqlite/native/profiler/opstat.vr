@@ -1,0 +1,119 @@
+// =============================================================================
+// profiler/opstat.vr — per-opcode runtime accounting
+// =============================================================================
+// Spec: sqlite-native.md §22 (operational tooling — EXPLAIN ANALYZE)
+//
+// `OpStat` records, for each opcode the VDBE actually executed:
+//
+//   * `count`         — times the opcode dispatched
+//   * `total_ns`      — cumulative wall-clock time in handler
+//   * `worst_ns`      — slowest single dispatch
+//
+// Aggregated across a query, a single `OpStat` table tells you
+// where the interpreter actually spent its budget.
+// =============================================================================
+
+module core.database.sqlite.native.profiler.opstat;
+
+mount core.*;
+mount base.{Text, Bool, Maybe};
+mount collections.List;
+
+// -----------------------------------------------------------------------------
+// OpStat
+// -----------------------------------------------------------------------------
+
+public type OpStat is {
+    /// Opcode name — kept as Text rather than the Opcode enum so
+    /// the profiler doesn't take a hard dependency on l4_vdbe.
+    opcode: Text,
+    count: Int64,
+    total_ns: Int64,
+    worst_ns: Int64,
+}
+
+public fn opstat_new(opcode: Text) -> OpStat {
+    OpStat {
+        opcode: opcode,
+        count: 0 as Int64,
+        total_ns: 0 as Int64,
+        worst_ns: 0 as Int64,
+    }
+}
+
+implement OpStat {
+    public fn record(&mut self, ns: Int64) {
+        self.count = self.count + (1 as Int64);
+        self.total_ns = self.total_ns + ns;
+        if ns > self.worst_ns { self.worst_ns = ns; }
+    }
+
+    public fn average_ns(&self) -> Int64 {
+        if self.count == (0 as Int64) { 0 as Int64 } else { self.total_ns / self.count }
+    }
+}
+
+// -----------------------------------------------------------------------------
+// OpStatTable — aggregator across all opcodes touched
+// -----------------------------------------------------------------------------
+
+public type OpStatTable is { entries: List<OpStat> }
+
+public fn opstat_table_new() -> OpStatTable { OpStatTable { entries: List.new() } }
+
+implement OpStatTable {
+    public fn len(&self) -> Int { self.entries.len() }
+
+    /// Idempotent ensure — returns existing index or creates a new entry.
+    fn ensure(&mut self, opcode: &Text) -> Int {
+        let mut i: Int = 0;
+        while i < self.entries.len() {
+            if self.entries[i].opcode == *opcode { return i; }
+            i = i + 1;
+        }
+        self.entries.push(opstat_new(opcode.clone()));
+        self.entries.len() - 1
+    }
+
+    pub fn record(&mut self, opcode: &Text, ns: Int64) {
+        let idx = self.ensure(opcode);
+        self.entries[idx].record(ns);
+    }
+
+    pub fn lookup(&self, opcode: &Text) -> Maybe<OpStat> {
+        let mut i: Int = 0;
+        while i < self.entries.len() {
+            if self.entries[i].opcode == *opcode {
+                let e = &self.entries[i];
+                return Some(OpStat {
+                    opcode: e.opcode.clone(),
+                    count: e.count,
+                    total_ns: e.total_ns,
+                    worst_ns: e.worst_ns,
+                });
+            }
+            i = i + 1;
+        }
+        None
+    }
+
+    pub fn total_dispatches(&self) -> Int64 {
+        let mut sum: Int64 = 0 as Int64;
+        let mut i: Int = 0;
+        while i < self.entries.len() {
+            sum = sum + self.entries[i].count;
+            i = i + 1;
+        }
+        sum
+    }
+
+    pub fn total_time_ns(&self) -> Int64 {
+        let mut sum: Int64 = 0 as Int64;
+        let mut i: Int = 0;
+        while i < self.entries.len() {
+            sum = sum + self.entries[i].total_ns;
+            i = i + 1;
+        }
+        sum
+    }
+}

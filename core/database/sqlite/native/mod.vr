@@ -124,3 +124,11 @@ public module observability;
 public module alter;
 // - encryption: PageCipher + KeyDerivation + KeyRing protocols (§23 security)
 public module encryption;
+// - replication: WAL streaming primary→replica, role transitions, lag tracking (§22)
+public module replication;
+// - limits: per-Connection resource quotas with soft/strict enforcement (§22)
+public module limits;
+// - profiler: EXPLAIN ANALYZE-shaped per-opcode + per-plan-node stats (§22)
+public module profiler;
+// - export: schema_dump / data_dump / restore harness (§22)
+public module export;

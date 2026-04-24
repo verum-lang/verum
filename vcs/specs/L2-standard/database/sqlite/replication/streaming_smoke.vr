@@ -1,0 +1,230 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, replication, wal_streaming, role, lag, protocol
+// @timeout: 5000
+// @expected-exit: 0
+//
+// Replication surface:
+//   * Role transitions (try_promote)
+//   * Frame producer enqueue + per-replica drain + ack
+//   * Stream consumer apply ordering + epoch checks
+//   * Lag tracker thresholds
+//   * Protocol message validation
+
+mount core.database.sqlite.native.replication.role.{
+    Role, RolePrimary, RoleReplica, RoleStandby, RoleWitness,
+    role_accepts_writes, role_accepts_reads, try_promote,
+    PromotionResult, PrAllowed, PrRejected,
+};
+mount core.database.sqlite.native.replication.frame.{
+    FrameHeader, WalFrameRecord, FrameBatch,
+    frame_record, frame_position, batch_empty,
+};
+mount core.database.sqlite.native.replication.stream.{
+    StreamProducer, producer_new,
+    StreamConsumer, consumer_new,
+    StreamError, SeOutOfOrder, SeEpochMismatch, SeChecksumMismatch, SeApplyFailed,
+};
+mount core.database.sqlite.native.replication.lag.{
+    LagSeverity, LsHealthy, LsWarning, LsCritical,
+    LagThresholds, thresholds_default,
+    LagTracker, lag_tracker_new,
+};
+mount core.database.sqlite.native.replication.protocol.{
+    Hello, HelloAck, RequestFrames, Ack, ErrorMessage,
+    Message, MsgHello, MsgAck, message_kind,
+    ProtocolErrorCode, PecRoleRefused, PecVersionUnsupported, PecAuthFailure,
+    PecPositionAhead,
+    validate_hello, validate_request, PROTOCOL_VERSION,
+};
+mount base.{Ok, Err, Some, None, Maybe, Bool, Text};
+
+// -----------------------------------------------------------------------------
+// Role
+// -----------------------------------------------------------------------------
+
+fn test_role_capabilities() {
+    assert(role_accepts_writes(&RolePrimary));
+    assert(!role_accepts_writes(&RoleReplica));
+    assert(role_accepts_reads(&RoleReplica));
+    assert(!role_accepts_reads(&RoleWitness));
+}
+
+fn test_role_promotion_paths() {
+    match try_promote(&RoleStandby, &RolePrimary) {
+        PrAllowed       => {},
+        PrRejected(_)   => panic("standby may promote"),
+    }
+    match try_promote(&RoleWitness, &RolePrimary) {
+        PrRejected(_)   => {},
+        PrAllowed       => panic("witness must not become primary"),
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Frame + position
+// -----------------------------------------------------------------------------
+
+fn make_header() -> FrameHeader {
+    FrameHeader {
+        page_no: 7,
+        db_size_after: 1024,
+        salt1: 1,
+        salt2: 2,
+        checksum1: 0,
+        checksum2: 0,
+    }
+}
+
+fn test_frame_position_packs_epoch_and_seq() {
+    let f = frame_record(3 as Int64, 42 as Int64, make_header(), make_payload(8));
+    let p = frame_position(&f);
+    assert(p > (0 as Int64));
+}
+
+fn make_payload(n: Int) -> List<Byte> {
+    let mut out: List<Byte> = List.new();
+    let mut i: Int = 0;
+    while i < n { out.push((i % 256) as Byte); i = i + 1; }
+    out
+}
+
+// -----------------------------------------------------------------------------
+// StreamProducer / Consumer
+// -----------------------------------------------------------------------------
+
+fn test_producer_drain_per_replica() {
+    let mut p = producer_new(1 as Int64);
+    p.add_replica("rep-A".clone());
+    p.add_replica("rep-B".clone());
+    let _seq = p.enqueue_frame(make_header(), make_payload(16));
+    let a = p.drain(&"rep-A".clone());
+    match a {
+        Some(_) => {},
+        None    => panic("rep-A pulls"),
+    }
+}
+
+fn test_producer_ack() {
+    let mut p = producer_new(1 as Int64);
+    p.add_replica("rep-A".clone());
+    let _seq = p.enqueue_frame(make_header(), make_payload(8));
+    assert(p.ack(&"rep-A".clone(), 1 as Int64));
+    assert(!p.ack(&"unknown".clone(), 1 as Int64));
+}
+
+fn test_producer_advance_epoch() {
+    let mut p = producer_new(5 as Int64);
+    assert_eq(p.current_epoch(), 5 as Int64);
+    p.advance_epoch();
+    assert_eq(p.current_epoch(), 6 as Int64);
+}
+
+fn dummy_apply(_f: &WalFrameRecord) -> Maybe<Text> { None }
+
+fn test_consumer_first_frame_initialises_epoch() {
+    let mut c = consumer_new();
+    let f1 = frame_record(2 as Int64, 1 as Int64, make_header(), make_payload(4));
+    match c.apply_frame(&f1, dummy_apply) {
+        Ok(_)   => {},
+        Err(_)  => panic("first frame applies"),
+    }
+}
+
+fn test_consumer_rejects_lower_epoch() {
+    let mut c = consumer_new();
+    let f1 = frame_record(5 as Int64, 1 as Int64, make_header(), make_payload(4));
+    let _ = c.apply_frame(&f1, dummy_apply);
+    let f_back = frame_record(2 as Int64, 1 as Int64, make_header(), make_payload(4));
+    match c.apply_frame(&f_back, dummy_apply) {
+        Err(SeEpochMismatch(_, _)) => {},
+        _                          => panic("epoch regression rejected"),
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Lag tracker
+// -----------------------------------------------------------------------------
+
+fn test_lag_thresholds_default() {
+    let t = thresholds_default();
+    assert(t.warn_frames > (0 as Int64));
+    assert(t.crit_frames > t.warn_frames);
+}
+
+fn test_lag_severity_classification() {
+    let mut tr = lag_tracker_new();
+    tr.record_replica_ack(&"rep-A".clone(), 1 as Int64, 1010 as Int64);
+    tr.record_primary_commit(10000 as Int64);
+    match tr.snapshot(&"rep-A".clone(), 2000 as Int64) {
+        Some(_) => {},
+        None    => panic("snapshot exists"),
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Protocol validators
+// -----------------------------------------------------------------------------
+
+fn test_validate_hello_rejects_bad_version() {
+    let h = Hello {
+        replica_id: "rep-A".clone(),
+        last_known_position: 0 as Int64,
+        role_request: RoleReplica,
+        proto_version: 9999,
+    };
+    match validate_hello(&h) {
+        Some(PecVersionUnsupported) => {},
+        _                           => panic("version mismatch flagged"),
+    }
+}
+
+fn test_validate_hello_requires_replica_id() {
+    let h = Hello {
+        replica_id: "".clone(),
+        last_known_position: 0 as Int64,
+        role_request: RoleReplica,
+        proto_version: PROTOCOL_VERSION,
+    };
+    match validate_hello(&h) {
+        Some(PecAuthFailure) => {},
+        _                    => panic("empty replica_id flagged"),
+    }
+}
+
+fn test_validate_request_position_ahead() {
+    let r = RequestFrames { since_position: 100 as Int64, max_frames: 10 };
+    match validate_request(&r, 50 as Int64) {
+        Some(PecPositionAhead) => {},
+        _                      => panic("position-ahead flagged"),
+    }
+}
+
+fn test_message_kinds() {
+    let h = Hello {
+        replica_id: "rep-A".clone(),
+        last_known_position: 0 as Int64,
+        role_request: RoleReplica,
+        proto_version: PROTOCOL_VERSION,
+    };
+    let m = MsgHello(h);
+    assert(message_kind(&m) == "HELLO".clone());
+}
+
+fn main() {
+    test_role_capabilities();
+    test_role_promotion_paths();
+    test_frame_position_packs_epoch_and_seq();
+    test_producer_drain_per_replica();
+    test_producer_ack();
+    test_producer_advance_epoch();
+    test_consumer_first_frame_initialises_epoch();
+    test_consumer_rejects_lower_epoch();
+    test_lag_thresholds_default();
+    test_lag_severity_classification();
+    test_validate_hello_rejects_bad_version();
+    test_validate_hello_requires_replica_id();
+    test_validate_request_position_ahead();
+    test_message_kinds();
+}

@@ -1,0 +1,108 @@
+// =============================================================================
+// profiler/report.vr — render ProfileSession as EXPLAIN ANALYZE text
+// =============================================================================
+// Spec: sqlite-native.md §22 (operational tooling — EXPLAIN ANALYZE)
+//
+// Output shape (one line per node, one per opcode bucket):
+//
+//   ANALYZE <sql>
+//   total_time_ns=<N>
+//
+//   PLAN:
+//     [<node_id>] <kind>  est=<E>  actual=<A>  ms=<T>
+//
+//   OPS:
+//     <opcode>  count=<C>  total_ns=<T>  worst_ns=<W>
+//
+// Sufficient for a unit test or a CLI dump; the renderer is
+// deliberately simple — fancy column alignment is the host's job.
+// =============================================================================
+
+module core.database.sqlite.native.profiler.report;
+
+mount core.*;
+mount base.{Text, Bool};
+mount collections.List;
+mount core.database.sqlite.native.profiler.session.{ProfileSession};
+
+public fn render(session: &ProfileSession) -> Text {
+    let mut out = "ANALYZE ".clone();
+    push(&mut out, &session.sql);
+    out.push_byte(10 as Byte);
+
+    push(&mut out, &"total_time_ns=".clone());
+    append_int64(&mut out, session.elapsed_ns());
+    out.push_byte(10 as Byte);
+    out.push_byte(10 as Byte);
+
+    push(&mut out, &"PLAN:\n".clone());
+    let mut i: Int = 0;
+    while i < session.nodes.entries.len() {
+        let n = &session.nodes.entries[i];
+        push(&mut out, &"  [".clone());
+        append_int(&mut out, n.node_id);
+        push(&mut out, &"] ".clone());
+        push(&mut out, &n.kind);
+        push(&mut out, &"  est=".clone());
+        append_int64(&mut out, n.estimated_rows);
+        push(&mut out, &"  actual=".clone());
+        append_int64(&mut out, n.actual_rows);
+        push(&mut out, &"  ns=".clone());
+        append_int64(&mut out, n.total_ns);
+        out.push_byte(10 as Byte);
+        i = i + 1;
+    }
+    out.push_byte(10 as Byte);
+
+    push(&mut out, &"OPS:\n".clone());
+    i = 0;
+    while i < session.ops.entries.len() {
+        let o = &session.ops.entries[i];
+        push(&mut out, &"  ".clone());
+        push(&mut out, &o.opcode);
+        push(&mut out, &"  count=".clone());
+        append_int64(&mut out, o.count);
+        push(&mut out, &"  total_ns=".clone());
+        append_int64(&mut out, o.total_ns);
+        push(&mut out, &"  worst_ns=".clone());
+        append_int64(&mut out, o.worst_ns);
+        out.push_byte(10 as Byte);
+        i = i + 1;
+    }
+
+    out
+}
+
+fn push(dst: &mut Text, s: &Text) {
+    let bs = s.as_bytes();
+    let mut i: Int = 0;
+    while i < bs.len() { dst.push_byte(bs[i]); i = i + 1; }
+}
+
+fn append_int(dst: &mut Text, n: Int) {
+    if n == 0 { dst.push_byte(48 as Byte); return; }
+    let mut digits: List<Byte> = List.new();
+    let mut x: Int = if n < 0 { -n } else { n };
+    while x > 0 {
+        let d: Byte = (x % 10) as Byte;
+        digits.push(d + (48 as Byte));
+        x = x / 10;
+    }
+    if n < 0 { dst.push_byte(45 as Byte); }
+    let mut i: Int = digits.len() - 1;
+    while i >= 0 { dst.push_byte(digits[i]); i = i - 1; }
+}
+
+fn append_int64(dst: &mut Text, n: Int64) {
+    if n == (0 as Int64) { dst.push_byte(48 as Byte); return; }
+    let mut digits: List<Byte> = List.new();
+    let mut x: Int64 = if n < (0 as Int64) { -n } else { n };
+    while x > (0 as Int64) {
+        let d: Byte = ((x as Int) % 10) as Byte;
+        digits.push(d + (48 as Byte));
+        x = x / (10 as Int64);
+    }
+    if n < (0 as Int64) { dst.push_byte(45 as Byte); }
+    let mut i: Int = digits.len() - 1;
+    while i >= 0 { dst.push_byte(digits[i]); i = i - 1; }
+}

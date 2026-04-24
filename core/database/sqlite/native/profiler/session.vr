@@ -1,0 +1,109 @@
+// =============================================================================
+// profiler/session.vr — per-statement profile aggregation
+// =============================================================================
+// Spec: sqlite-native.md §22 (operational tooling — EXPLAIN ANALYZE)
+//
+// `ProfileSession` is the per-statement aggregator. The L4 interpreter
+// calls into it on every dispatch and every row materialised; the L7
+// façade returns it from `Statement.explain_analyze()`.
+// =============================================================================
+
+module core.database.sqlite.native.profiler.session;
+
+mount core.*;
+mount base.{Text, Bool, Maybe};
+mount collections.List;
+mount core.database.sqlite.native.profiler.opstat.{
+    OpStatTable, opstat_table_new,
+};
+mount core.database.sqlite.native.profiler.nodestat.{
+    NodeStatTable, nodestat_table_new,
+};
+
+// -----------------------------------------------------------------------------
+// ProfileSession
+// -----------------------------------------------------------------------------
+
+public type ProfileSession is {
+    /// SQL fragment (used for human-readable header).
+    sql: Text,
+    started_at_ns: Int64,
+    finished_at_ns: Int64,
+    /// True between `start()` and `finish()`.
+    running: Bool,
+    ops: OpStatTable,
+    nodes: NodeStatTable,
+    /// Stack of node ids currently active. Codegen pushes on entry,
+    /// pops on exit; the top is "the node we're spending time in".
+    node_stack: List<Int>,
+}
+
+public fn session_new(sql: Text) -> ProfileSession {
+    ProfileSession {
+        sql: sql,
+        started_at_ns: 0 as Int64,
+        finished_at_ns: 0 as Int64,
+        running: false,
+        ops: opstat_table_new(),
+        nodes: nodestat_table_new(),
+        node_stack: List.new(),
+    }
+}
+
+implement ProfileSession {
+    pub fn start(&mut self, when_ns: Int64) {
+        self.started_at_ns = when_ns;
+        self.finished_at_ns = when_ns;
+        self.running = true;
+    }
+
+    pub fn finish(&mut self, when_ns: Int64) {
+        self.finished_at_ns = when_ns;
+        self.running = false;
+    }
+
+    pub fn elapsed_ns(&self) -> Int64 { self.finished_at_ns - self.started_at_ns }
+
+    pub fn register_node(&mut self, node_id: Int, kind: Text, est: Int64) {
+        self.nodes.register(node_id, kind, est);
+    }
+
+    pub fn enter_node(&mut self, node_id: Int) {
+        self.node_stack.push(node_id);
+    }
+
+    pub fn exit_node(&mut self) {
+        if self.node_stack.len() > 0 {
+            let last = self.node_stack.len() - 1;
+            self.node_stack.remove(last);
+        }
+    }
+
+    pub fn current_node(&self) -> Maybe<Int> {
+        if self.node_stack.len() == 0 { None }
+        else { Some(self.node_stack[self.node_stack.len() - 1]) }
+    }
+
+    /// Called by the interpreter after each opcode dispatch with the
+    /// elapsed handler time. Time also accumulates against the
+    /// currently-active plan node.
+    pub fn observe_op(&mut self, opcode: &Text, ns: Int64) {
+        self.ops.record(opcode, ns);
+        match self.current_node() {
+            Some(nid) => self.nodes.add_time(nid, ns),
+            None      => {}
+        }
+    }
+
+    pub fn observe_row(&mut self, when_ns: Int64) {
+        match self.current_node() {
+            Some(nid) => self.nodes.record_row(nid, when_ns),
+            None      => {}
+        }
+    }
+
+    pub fn op_count(&self) -> Int { self.ops.len() }
+    pub fn node_count(&self) -> Int { self.nodes.len() }
+    pub fn dispatches(&self) -> Int64 { self.ops.total_dispatches() }
+    pub fn op_time_ns(&self) -> Int64 { self.ops.total_time_ns() }
+}

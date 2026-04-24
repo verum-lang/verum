@@ -1,0 +1,105 @@
+// =============================================================================
+// limits/breach.vr — breach record + journal
+// =============================================================================
+// Spec: sqlite-native.md §22 (operational tooling — quotas)
+// =============================================================================
+
+module core.database.sqlite.native.limits.breach;
+
+mount core.*;
+mount base.{Text, Bool};
+mount collections.List;
+mount core.database.sqlite.native.limits.dimension.{
+    LimitDimension, dimension_name,
+};
+
+// -----------------------------------------------------------------------------
+// BreachRecord
+// -----------------------------------------------------------------------------
+
+public type BreachRecord is {
+    dimension: LimitDimension,
+    cap: Int64,
+    actual: Int64,
+    happened_at_ns: Int64,
+    /// Caller-supplied context — usually the SQL fragment running
+    /// when the breach happened.
+    context: Text,
+}
+
+public fn breach(
+    dim: LimitDimension,
+    cap: Int64,
+    actual: Int64,
+    when_ns: Int64,
+    context: Text,
+) -> BreachRecord {
+    BreachRecord {
+        dimension: dim,
+        cap: cap,
+        actual: actual,
+        happened_at_ns: when_ns,
+        context: context,
+    }
+}
+
+implement BreachRecord {
+    public fn overage(&self) -> Int64 {
+        if self.actual > self.cap { self.actual - self.cap } else { 0 as Int64 }
+    }
+
+    public fn dimension_label(&self) -> Text { dimension_name(&self.dimension) }
+}
+
+// -----------------------------------------------------------------------------
+// BreachJournal
+// -----------------------------------------------------------------------------
+
+public type BreachJournal is { entries: List<BreachRecord> }
+
+public fn journal_new() -> BreachJournal { BreachJournal { entries: List.new() } }
+
+implement BreachJournal {
+    public fn count(&self) -> Int { self.entries.len() }
+
+    public fn record(&mut self, r: BreachRecord) {
+        self.entries.push(r);
+    }
+
+    public fn by_dimension(&self, dim: &LimitDimension) -> Int {
+        let target = dimension_name(dim);
+        let mut n: Int = 0;
+        let mut i: Int = 0;
+        while i < self.entries.len() {
+            if dimension_name(&self.entries[i].dimension) == target { n = n + 1; }
+            i = i + 1;
+        }
+        n
+    }
+
+    /// Most recent breach across every dimension.
+    public fn last(&self) -> base.Maybe<BreachRecord> {
+        if self.entries.len() == 0 { return base.None; }
+        let last = self.entries.len() - 1;
+        let r = &self.entries[last];
+        base.Some(BreachRecord {
+            dimension: clone_dim(&r.dimension),
+            cap: r.cap,
+            actual: r.actual,
+            happened_at_ns: r.happened_at_ns,
+            context: r.context.clone(),
+        })
+    }
+}
+
+fn clone_dim(d: &LimitDimension) -> LimitDimension {
+    match d {
+        core.database.sqlite.native.limits.dimension.LdMemoryBytes      => core.database.sqlite.native.limits.dimension.LdMemoryBytes,
+        core.database.sqlite.native.limits.dimension.LdQueryDurationNs  => core.database.sqlite.native.limits.dimension.LdQueryDurationNs,
+        core.database.sqlite.native.limits.dimension.LdRowsScanned      => core.database.sqlite.native.limits.dimension.LdRowsScanned,
+        core.database.sqlite.native.limits.dimension.LdPagesCached      => core.database.sqlite.native.limits.dimension.LdPagesCached,
+        core.database.sqlite.native.limits.dimension.LdRecursionDepth   => core.database.sqlite.native.limits.dimension.LdRecursionDepth,
+        core.database.sqlite.native.limits.dimension.LdSubprogramCount  => core.database.sqlite.native.limits.dimension.LdSubprogramCount,
+        core.database.sqlite.native.limits.dimension.LdAttachedDbs      => core.database.sqlite.native.limits.dimension.LdAttachedDbs,
+    }
+}

@@ -1,0 +1,149 @@
+// =============================================================================
+// export/schema_dump.vr — DDL emitter
+// =============================================================================
+// Spec: sqlite-native.md §22 (operational tooling — dump / restore)
+//
+// Drives the `.schema` and the schema-half of `.dump`. Input is
+// the abstract `SchemaObject` which the L6 SchemaCache exposes
+// (or any host-side adapter).
+//
+// Output is a `;`-terminated DDL stream identical to what
+// SQLite's CLI emits — round-trippable by feeding into a
+// fresh Database.execute().
+// =============================================================================
+
+module core.database.sqlite.native.export.schema_dump;
+
+mount core.*;
+mount base.{Text, Bool, Maybe};
+mount collections.List;
+
+// -----------------------------------------------------------------------------
+// SchemaObject — abstracted form of one CREATE statement
+// -----------------------------------------------------------------------------
+
+public type SchemaObjectKind is
+      SokTable
+    | SokIndex
+    | SokView
+    | SokTrigger;
+
+public fn schema_object_kind_name(k: &SchemaObjectKind) -> Text {
+    match k {
+        SokTable   => "TABLE".clone(),
+        SokIndex   => "INDEX".clone(),
+        SokView    => "VIEW".clone(),
+        SokTrigger => "TRIGGER".clone(),
+    }
+}
+
+public type SchemaObject is {
+    kind: SchemaObjectKind,
+    name: Text,
+    /// Schema name — empty Text means "main".
+    schema: Text,
+    /// Already-formatted CREATE statement; the SchemaCache stores
+    /// these verbatim from CREATE-time (sqlite_master.sql).
+    sql: Text,
+}
+
+public fn schema_object(kind: SchemaObjectKind, name: Text, schema: Text, sql: Text) -> SchemaObject {
+    SchemaObject { kind: kind, name: name, schema: schema, sql: sql }
+}
+
+// -----------------------------------------------------------------------------
+// Dump options
+// -----------------------------------------------------------------------------
+
+public type SchemaDumpOptions is {
+    /// Wrap the dump in `BEGIN; ... COMMIT;` so it applies atomically.
+    transactional: Bool,
+    /// Emit `DROP IF EXISTS` before each CREATE.
+    drop_first: Bool,
+    /// Include `sqlite_sequence` housekeeping (false by default —
+    /// the restore path bumps it through INSERTs).
+    include_internal_tables: Bool,
+}
+
+public fn schema_dump_defaults() -> SchemaDumpOptions {
+    SchemaDumpOptions {
+        transactional: true,
+        drop_first: false,
+        include_internal_tables: false,
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Dumper
+// -----------------------------------------------------------------------------
+
+public fn dump_schema(objects: &List<SchemaObject>, opts: &SchemaDumpOptions) -> Text {
+    let mut out = Text.new();
+    if opts.transactional { push(&mut out, &"BEGIN;\n".clone()); }
+
+    // Tables first (constraints reference them), then indexes, then
+    // views, then triggers — matches sqlite3 .dump ordering.
+    emit_kind(&mut out, objects, &SokTable, opts);
+    emit_kind(&mut out, objects, &SokIndex, opts);
+    emit_kind(&mut out, objects, &SokView, opts);
+    emit_kind(&mut out, objects, &SokTrigger, opts);
+
+    if opts.transactional { push(&mut out, &"COMMIT;\n".clone()); }
+    out
+}
+
+fn emit_kind(out: &mut Text, objects: &List<SchemaObject>, want: &SchemaObjectKind, opts: &SchemaDumpOptions) {
+    let want_name = schema_object_kind_name(want);
+    let mut i: Int = 0;
+    while i < objects.len() {
+        let o = &objects[i];
+        if schema_object_kind_name(&o.kind) == want_name {
+            if !opts.include_internal_tables && is_internal(&o.name) {
+                i = i + 1;
+                continue;
+            }
+            if opts.drop_first {
+                push(out, &"DROP ".clone());
+                push(out, &want_name);
+                push(out, &" IF EXISTS ".clone());
+                push(out, &qualified_name(&o.schema, &o.name));
+                push(out, &";\n".clone());
+            }
+            push(out, &o.sql);
+            push(out, &";\n".clone());
+        }
+        i = i + 1;
+    }
+}
+
+fn is_internal(name: &Text) -> Bool {
+    starts_with(name, &"sqlite_".clone())
+}
+
+fn qualified_name(schema: &Text, name: &Text) -> Text {
+    let mut out = Text.new();
+    if schema.len() > 0 {
+        push(&mut out, schema);
+        out.push_byte(46 as Byte);
+    }
+    push(&mut out, name);
+    out
+}
+
+fn starts_with(t: &Text, prefix: &Text) -> Bool {
+    let bs = t.as_bytes();
+    let ps = prefix.as_bytes();
+    if bs.len() < ps.len() { return false; }
+    let mut i: Int = 0;
+    while i < ps.len() {
+        if bs[i] != ps[i] { return false; }
+        i = i + 1;
+    }
+    true
+}
+
+fn push(dst: &mut Text, s: &Text) {
+    let bs = s.as_bytes();
+    let mut i: Int = 0;
+    while i < bs.len() { dst.push_byte(bs[i]); i = i + 1; }
+}

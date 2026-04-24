@@ -1,0 +1,194 @@
+// =============================================================================
+// limits/tracker.vr — running totals + threshold detector
+// =============================================================================
+// Spec: sqlite-native.md §22 (operational tooling — quotas)
+//
+// `LimitTracker` is a per-Connection accumulator that the L4
+// interpreter, L1 pager, and L7 façade all bump as work progresses.
+// On `check(dimension, current_value)`:
+//
+//   * record the running total
+//   * compare against the configured cap
+//   * consult the policy (Permissive/SoftWarn/Strict) on a breach
+//   * record the breach in the journal
+//   * return an `EnforcementDecision` the caller acts on
+// =============================================================================
+
+module core.database.sqlite.native.limits.tracker;
+
+mount core.*;
+mount base.{Bool, Maybe};
+mount collections.List;
+mount core.database.sqlite.native.limits.dimension.{
+    LimitDimension, dimension_name, default_limit,
+};
+mount core.database.sqlite.native.limits.policy.{
+    LimitPolicy, LpPermissive, LpSoftWarn, LpStrict,
+    EnforcementDecision, EdAllow, EdAllowOnceWithWarning, EdDeny,
+    PolicyConfig, policy_config, decide,
+};
+mount core.database.sqlite.native.limits.breach.{
+    BreachRecord, BreachJournal, breach, journal_new,
+};
+
+// -----------------------------------------------------------------------------
+// LimitTracker
+// -----------------------------------------------------------------------------
+
+public type DimensionState is {
+    dimension: LimitDimension,
+    cap: Int64,
+    policy: LimitPolicy,
+    /// Latest accumulated value the caller fed in.
+    current: Int64,
+    /// Number of breaches recorded so far for this dimension.
+    breach_count: Int,
+}
+
+public fn dimension_state(cfg: PolicyConfig) -> DimensionState {
+    DimensionState {
+        dimension: cfg.dimension,
+        cap: cfg.cap,
+        policy: cfg.policy,
+        current: 0 as Int64,
+        breach_count: 0,
+    }
+}
+
+public type LimitTracker is {
+    states: List<DimensionState>,
+    journal: BreachJournal,
+}
+
+public fn tracker_new() -> LimitTracker {
+    LimitTracker {
+        states: List.new(),
+        journal: journal_new(),
+    }
+}
+
+implement LimitTracker {
+    public fn dimension_count(&self) -> Int { self.states.len() }
+    public fn breach_journal_size(&self) -> Int { self.journal.count() }
+
+    /// Configure (or reconfigure) one dimension. Idempotent — calling
+    /// twice with different policy/cap replaces the existing entry.
+    pub fn configure(&mut self, cfg: PolicyConfig) {
+        let dim_name = dimension_name(&cfg.dimension);
+        let mut i: Int = 0;
+        while i < self.states.len() {
+            if dimension_name(&self.states[i].dimension) == dim_name {
+                self.states[i].cap = cfg.cap;
+                self.states[i].policy = clone_policy(&cfg.policy);
+                return;
+            }
+            i = i + 1;
+        }
+        self.states.push(dimension_state(cfg));
+    }
+
+    /// Look up the configured policy for a dimension, defaulting to
+    /// Strict + per-dimension default cap when none was configured.
+    fn ensure_state(&mut self, dim: &LimitDimension) -> Int {
+        let dim_name = dimension_name(dim);
+        let mut i: Int = 0;
+        while i < self.states.len() {
+            if dimension_name(&self.states[i].dimension) == dim_name {
+                return i;
+            }
+            i = i + 1;
+        }
+        let cfg = policy_config(clone_dimension(dim), default_limit(dim), LpStrict);
+        self.states.push(dimension_state(cfg));
+        self.states.len() - 1
+    }
+
+    /// Check `current_value` against the cap for `dimension`. Records
+    /// the value, fires a breach + decision when needed.
+    pub fn check(
+        &mut self,
+        dim: LimitDimension,
+        current_value: Int64,
+        when_ns: Int64,
+        context: base.Text,
+    ) -> EnforcementDecision {
+        let idx = self.ensure_state(&dim);
+        self.states[idx].current = current_value;
+        if current_value <= self.states[idx].cap {
+            return EdAllow;
+        }
+        let prior = self.states[idx].breach_count;
+        let policy = clone_policy(&self.states[idx].policy);
+        let cap = self.states[idx].cap;
+        self.journal.record(breach(clone_dimension(&dim), cap, current_value, when_ns, context));
+        self.states[idx].breach_count = prior + 1;
+        decide(&policy, prior)
+    }
+
+    pub fn current_value(&self, dim: &LimitDimension) -> Maybe<Int64> {
+        let dim_name = dimension_name(dim);
+        let mut i: Int = 0;
+        while i < self.states.len() {
+            if dimension_name(&self.states[i].dimension) == dim_name {
+                return Some(self.states[i].current);
+            }
+            i = i + 1;
+        }
+        None
+    }
+
+    pub fn breach_count(&self, dim: &LimitDimension) -> Int {
+        let dim_name = dimension_name(dim);
+        let mut i: Int = 0;
+        while i < self.states.len() {
+            if dimension_name(&self.states[i].dimension) == dim_name {
+                return self.states[i].breach_count;
+            }
+            i = i + 1;
+        }
+        0
+    }
+
+    /// Reset only the running totals — leaves cap, policy, and
+    /// breach_count alone. Called between queries.
+    pub fn reset_running_values(&mut self) {
+        let mut i: Int = 0;
+        while i < self.states.len() {
+            self.states[i].current = 0 as Int64;
+            i = i + 1;
+        }
+    }
+
+    /// Reset breach counts (used by SoftWarn re-arm after a query
+    /// completes successfully).
+    pub fn rearm_soft_warn(&mut self) {
+        let mut i: Int = 0;
+        while i < self.states.len() {
+            match &self.states[i].policy {
+                LpSoftWarn => { self.states[i].breach_count = 0; }
+                _ => {}
+            }
+            i = i + 1;
+        }
+    }
+}
+
+fn clone_policy(p: &LimitPolicy) -> LimitPolicy {
+    match p {
+        LpPermissive => LpPermissive,
+        LpSoftWarn   => LpSoftWarn,
+        LpStrict     => LpStrict,
+    }
+}
+
+fn clone_dimension(d: &LimitDimension) -> LimitDimension {
+    match d {
+        core.database.sqlite.native.limits.dimension.LdMemoryBytes      => core.database.sqlite.native.limits.dimension.LdMemoryBytes,
+        core.database.sqlite.native.limits.dimension.LdQueryDurationNs  => core.database.sqlite.native.limits.dimension.LdQueryDurationNs,
+        core.database.sqlite.native.limits.dimension.LdRowsScanned      => core.database.sqlite.native.limits.dimension.LdRowsScanned,
+        core.database.sqlite.native.limits.dimension.LdPagesCached      => core.database.sqlite.native.limits.dimension.LdPagesCached,
+        core.database.sqlite.native.limits.dimension.LdRecursionDepth   => core.database.sqlite.native.limits.dimension.LdRecursionDepth,
+        core.database.sqlite.native.limits.dimension.LdSubprogramCount  => core.database.sqlite.native.limits.dimension.LdSubprogramCount,
+        core.database.sqlite.native.limits.dimension.LdAttachedDbs      => core.database.sqlite.native.limits.dimension.LdAttachedDbs,
+    }
+}

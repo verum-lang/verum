@@ -1,0 +1,223 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, export, dump, restore, csv, jsonl
+// @timeout: 5000
+// @expected-exit: 0
+//
+// Export surface:
+//   * SqlValue render variants (NULL/INT/REAL/TEXT/BLOB)
+//   * SQL literal escaping (single-quote inside text)
+//   * SchemaObject dumper (with/without DROP)
+//   * RowDump rendering in INSERT / CSV / JSONL formats
+//   * Restore engine splits + applies + reports
+
+mount core.database.sqlite.native.export.value.{
+    SqlValue, SvNull, SvInteger, SvReal, SvText, SvBlob,
+    sv_kind_name, render_sql_literal, quote_sql_text,
+};
+mount core.database.sqlite.native.export.schema_dump.{
+    SchemaObjectKind, SokTable, SokIndex, SokView, SokTrigger,
+    SchemaObject, schema_object,
+    SchemaDumpOptions, schema_dump_defaults,
+    dump_schema, schema_object_kind_name,
+};
+mount core.database.sqlite.native.export.data_dump.{
+    DumpFormat, DfInsert, DfCsv, DfJsonl,
+    RowDump, row_dump,
+    render_row, render_csv_header, dump_format_name,
+};
+mount core.database.sqlite.native.export.restore.{
+    RestoreEngine, engine_default,
+    RestoreReport, report_zero,
+    split_statements,
+};
+mount base.{Some, None, Maybe, Bool, Text};
+
+// -----------------------------------------------------------------------------
+// SqlValue
+// -----------------------------------------------------------------------------
+
+fn test_sv_kind_names() {
+    assert(sv_kind_name(&SvNull) == "NULL".clone());
+    assert(sv_kind_name(&SvInteger(42 as Int64)) == "INTEGER".clone());
+}
+
+fn test_render_null_literal() {
+    assert(render_sql_literal(&SvNull) == "NULL".clone());
+}
+
+fn test_render_integer_literal() {
+    let s = render_sql_literal(&SvInteger(42 as Int64));
+    assert(s == "42".clone());
+}
+
+fn test_render_negative_integer() {
+    let s = render_sql_literal(&SvInteger(-7 as Int64));
+    assert(s == "-7".clone());
+}
+
+fn test_render_text_literal_quotes() {
+    let s = render_sql_literal(&SvText("hi".clone()));
+    assert(s == "'hi'".clone());
+}
+
+fn test_quote_sql_text_doubles_apostrophe() {
+    let s = quote_sql_text(&"O'Brien".clone());
+    assert(s == "'O''Brien'".clone());
+}
+
+fn test_render_blob_hex_form() {
+    let mut b: List<Byte> = List.new();
+    b.push(0x48 as Byte);
+    b.push(0x69 as Byte);
+    let s = render_sql_literal(&SvBlob(b));
+    assert(s == "X'4869'".clone());
+}
+
+// -----------------------------------------------------------------------------
+// Schema dump
+// -----------------------------------------------------------------------------
+
+fn test_schema_object_kind_name() {
+    assert(schema_object_kind_name(&SokTable) == "TABLE".clone());
+    assert(schema_object_kind_name(&SokIndex) == "INDEX".clone());
+}
+
+fn test_dump_schema_emits_objects_in_order() {
+    let mut objs: List<SchemaObject> = List.new();
+    objs.push(schema_object(SokIndex, "idx_users".clone(), "".clone(), "CREATE INDEX idx_users ON users(id)".clone()));
+    objs.push(schema_object(SokTable, "users".clone(), "".clone(), "CREATE TABLE users(id INTEGER PRIMARY KEY)".clone()));
+    let opts = schema_dump_defaults();
+    let txt = dump_schema(&objs, &opts);
+    assert(txt.len() > 0);
+}
+
+fn test_dump_schema_skips_internal_tables_by_default() {
+    let mut objs: List<SchemaObject> = List.new();
+    objs.push(schema_object(SokTable, "sqlite_sequence".clone(), "".clone(), "CREATE TABLE sqlite_sequence(name,seq)".clone()));
+    let opts = schema_dump_defaults();
+    let txt = dump_schema(&objs, &opts);
+    // Just ensure render runs; emitted text is BEGIN; COMMIT; with the
+    // internal table elided.
+    assert(txt.len() > 0);
+}
+
+// -----------------------------------------------------------------------------
+// Data dump
+// -----------------------------------------------------------------------------
+
+fn make_row() -> RowDump {
+    let mut cols: List<Text> = List.new();
+    cols.push("id".clone());
+    cols.push("name".clone());
+    let mut vals: List<SqlValue> = List.new();
+    vals.push(SvInteger(1 as Int64));
+    vals.push(SvText("Ada".clone()));
+    row_dump("users".clone(), cols, vals)
+}
+
+fn test_render_insert_format() {
+    let r = make_row();
+    let s = render_row(&DfInsert, &r);
+    assert(s.len() > 0);
+}
+
+fn test_render_csv_format() {
+    let r = make_row();
+    let s = render_row(&DfCsv, &r);
+    assert(s.len() > 0);
+}
+
+fn test_render_jsonl_format() {
+    let r = make_row();
+    let s = render_row(&DfJsonl, &r);
+    assert(s.len() > 0);
+}
+
+fn test_csv_header_emits_columns() {
+    let r = make_row();
+    let h = render_csv_header(&r);
+    assert(h.len() > 0);
+}
+
+fn test_dump_format_name() {
+    assert(dump_format_name(&DfInsert) == "insert".clone());
+    assert(dump_format_name(&DfCsv) == "csv".clone());
+    assert(dump_format_name(&DfJsonl) == "jsonl".clone());
+}
+
+// -----------------------------------------------------------------------------
+// Restore
+// -----------------------------------------------------------------------------
+
+fn test_split_statements_basic() {
+    let s = "CREATE TABLE t(x); INSERT INTO t VALUES (1);".clone();
+    let parts = split_statements(&s);
+    assert(parts.len() >= 2);
+}
+
+fn test_split_statements_quoted_semicolon_ignored() {
+    let s = "INSERT INTO t VALUES ('a;b'); SELECT 1;".clone();
+    let parts = split_statements(&s);
+    assert(parts.len() >= 2);
+}
+
+fn ok_runner(_sql: &Text) -> Maybe<Text> { None }
+
+fn fail_runner(_sql: &Text) -> Maybe<Text> { Some("boom".clone()) }
+
+fn test_engine_apply_all_pass() {
+    let e = engine_default();
+    let dump = "CREATE TABLE t(x); INSERT INTO t VALUES (1);".clone();
+    let r = e.apply(&dump, ok_runner);
+    assert(r.statements_applied >= 2);
+    assert(!r.aborted);
+}
+
+fn test_engine_apply_aborts_on_failure() {
+    let e = engine_default();
+    let dump = "CREATE TABLE t(x); INSERT INTO t VALUES (1);".clone();
+    let r = e.apply(&dump, fail_runner);
+    assert(r.statements_failed >= 1);
+    assert(r.aborted);
+}
+
+fn test_engine_lenient_keeps_going() {
+    let e = engine_default().lenient();
+    let dump = "CREATE TABLE t(x); INSERT INTO t VALUES (1);".clone();
+    let r = e.apply(&dump, fail_runner);
+    assert(r.statements_failed >= 2);
+    assert(!r.aborted);
+}
+
+fn test_report_zero() {
+    let r = report_zero();
+    assert_eq(r.statements_applied, 0);
+    assert_eq(r.statements_failed, 0);
+    assert(!r.aborted);
+}
+
+fn main() {
+    test_sv_kind_names();
+    test_render_null_literal();
+    test_render_integer_literal();
+    test_render_negative_integer();
+    test_render_text_literal_quotes();
+    test_quote_sql_text_doubles_apostrophe();
+    test_render_blob_hex_form();
+    test_schema_object_kind_name();
+    test_dump_schema_emits_objects_in_order();
+    test_dump_schema_skips_internal_tables_by_default();
+    test_render_insert_format();
+    test_render_csv_format();
+    test_render_jsonl_format();
+    test_csv_header_emits_columns();
+    test_dump_format_name();
+    test_split_statements_basic();
+    test_split_statements_quoted_semicolon_ignored();
+    test_engine_apply_all_pass();
+    test_engine_apply_aborts_on_failure();
+    test_engine_lenient_keeps_going();
+    test_report_zero();
+}

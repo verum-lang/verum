@@ -1,0 +1,142 @@
+// =============================================================================
+// export/value.vr — abstracted SQL value + textual rendering
+// =============================================================================
+// Spec: sqlite-native.md §22 (operational tooling — dump / restore)
+//
+// Export modules don't take a hard dependency on l4_vdbe register
+// types. Instead they consume `SqlValue`, a five-variant sum that
+// matches SQLite storage classes (NULL / INTEGER / REAL / TEXT /
+// BLOB). The host adapter converts l4_vdbe registers into
+// `SqlValue` once.
+// =============================================================================
+
+module core.database.sqlite.native.export.value;
+
+mount core.*;
+mount base.{Text, Bool};
+mount collections.List;
+
+// -----------------------------------------------------------------------------
+// SqlValue
+// -----------------------------------------------------------------------------
+
+public type SqlValue is
+      SvNull
+    | SvInteger(Int64)
+    | SvReal(Float64)
+    | SvText(Text)
+    | SvBlob(List<Byte>);
+
+public fn sv_kind_name(v: &SqlValue) -> Text {
+    match v {
+        SvNull       => "NULL".clone(),
+        SvInteger(_) => "INTEGER".clone(),
+        SvReal(_)    => "REAL".clone(),
+        SvText(_)    => "TEXT".clone(),
+        SvBlob(_)    => "BLOB".clone(),
+    }
+}
+
+// -----------------------------------------------------------------------------
+// SQL literal rendering — used by the INSERT-statement emitter
+// -----------------------------------------------------------------------------
+
+public fn render_sql_literal(v: &SqlValue) -> Text {
+    match v {
+        SvNull       => "NULL".clone(),
+        SvInteger(n) => render_int64(*n),
+        SvReal(f)    => render_float(*f),
+        SvText(t)    => quote_sql_text(t),
+        SvBlob(b)    => render_blob_x(b),
+    }
+}
+
+/// Single-quoted SQL string with `'` doubled inside.
+public fn quote_sql_text(t: &Text) -> Text {
+    let mut out = "'".clone();
+    let bs = t.as_bytes();
+    let mut i: Int = 0;
+    while i < bs.len() {
+        let b = bs[i];
+        if b == (39 as Byte) {
+            out.push_byte(39 as Byte);
+            out.push_byte(39 as Byte);
+        } else {
+            out.push_byte(b);
+        }
+        i = i + 1;
+    }
+    out.push_byte(39 as Byte);
+    out
+}
+
+/// Hex-blob literal — `X'48656c6c6f'`.
+fn render_blob_x(b: &List<Byte>) -> Text {
+    let mut out = "X'".clone();
+    let mut i: Int = 0;
+    while i < b.len() {
+        let v = b[i];
+        out.push_byte(hex_digit((v >> (4 as Byte)) & (15 as Byte)));
+        out.push_byte(hex_digit(v & (15 as Byte)));
+        i = i + 1;
+    }
+    out.push_byte(39 as Byte);
+    out
+}
+
+fn hex_digit(n: Byte) -> Byte {
+    if n < (10 as Byte) { n + (48 as Byte) } else { (n - (10 as Byte)) + (97 as Byte) }
+}
+
+fn render_int64(n: Int64) -> Text {
+    if n == (0 as Int64) { return "0".clone(); }
+    let mut digits: List<Byte> = List.new();
+    let neg = n < (0 as Int64);
+    let mut x: Int64 = if neg { -n } else { n };
+    while x > (0 as Int64) {
+        let d: Byte = ((x as Int) % 10) as Byte;
+        digits.push(d + (48 as Byte));
+        x = x / (10 as Int64);
+    }
+    let mut out = Text.new();
+    if neg { out.push_byte(45 as Byte); }
+    let mut i: Int = digits.len() - 1;
+    while i >= 0 { out.push_byte(digits[i]); i = i - 1; }
+    out
+}
+
+/// Float renderer — mantissa-only, no exponent. We stick with
+/// six significant digits which matches sqlite3's default REAL
+/// formatting precisely enough for round-trippable text dumps.
+fn render_float(f: Float64) -> Text {
+    let neg = f < (0.0 as Float64);
+    let abs_f: Float64 = if neg { -f } else { f };
+    let int_part: Int64 = abs_f as Int64;
+    let frac: Float64 = abs_f - (int_part as Float64);
+    let scaled: Int64 = (frac * (1000000.0 as Float64)) as Int64;
+
+    let mut out = Text.new();
+    if neg { out.push_byte(45 as Byte); }
+    push(&mut out, &render_int64(int_part));
+    out.push_byte(46 as Byte);
+
+    // zero-pad fractional digits to 6 places
+    let mut digits: List<Byte> = List.new();
+    let mut x: Int64 = if scaled < (0 as Int64) { -scaled } else { scaled };
+    let mut placed: Int = 0;
+    while placed < 6 {
+        let d: Byte = ((x as Int) % 10) as Byte;
+        digits.push(d + (48 as Byte));
+        x = x / (10 as Int64);
+        placed = placed + 1;
+    }
+    let mut i: Int = digits.len() - 1;
+    while i >= 0 { out.push_byte(digits[i]); i = i - 1; }
+    out
+}
+
+fn push(dst: &mut Text, s: &Text) {
+    let bs = s.as_bytes();
+    let mut i: Int = 0;
+    while i < bs.len() { dst.push_byte(bs[i]); i = i + 1; }
+}

@@ -1,0 +1,213 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, profiler, explain_analyze, opstat, nodestat
+// @timeout: 5000
+// @expected-exit: 0
+//
+// Profiler surface:
+//   * OpStat record + average
+//   * OpStatTable lookup + totals
+//   * NodeStat row + estimate ratio
+//   * NodeStatTable register + record_row + add_time
+//   * ProfileSession enter/exit_node + observe_op routing
+//   * report.render produces non-empty text
+
+mount core.database.sqlite.native.profiler.opstat.{
+    OpStat, opstat_new,
+    OpStatTable, opstat_table_new,
+};
+mount core.database.sqlite.native.profiler.nodestat.{
+    NodeStat, nodestat_new,
+    NodeStatTable, nodestat_table_new,
+};
+mount core.database.sqlite.native.profiler.session.{
+    ProfileSession, session_new,
+};
+mount core.database.sqlite.native.profiler.report.{render};
+mount base.{Some, None, Maybe, Bool};
+
+// -----------------------------------------------------------------------------
+// OpStat
+// -----------------------------------------------------------------------------
+
+fn test_opstat_record_updates_count_total_worst() {
+    let mut s = opstat_new("Add".clone());
+    s.record(100 as Int64);
+    s.record(200 as Int64);
+    s.record(50 as Int64);
+    assert_eq(s.count, 3 as Int64);
+    assert_eq(s.total_ns, 350 as Int64);
+    assert_eq(s.worst_ns, 200 as Int64);
+}
+
+fn test_opstat_average() {
+    let mut s = opstat_new("Add".clone());
+    s.record(100 as Int64);
+    s.record(200 as Int64);
+    assert_eq(s.average_ns(), 150 as Int64);
+}
+
+fn test_opstat_average_zero_safe() {
+    let s = opstat_new("Empty".clone());
+    assert_eq(s.average_ns(), 0 as Int64);
+}
+
+// -----------------------------------------------------------------------------
+// OpStatTable
+// -----------------------------------------------------------------------------
+
+fn test_opstat_table_first_record_creates_entry() {
+    let mut t = opstat_table_new();
+    t.record(&"Add".clone(), 100 as Int64);
+    assert_eq(t.len(), 1);
+    assert_eq(t.total_dispatches(), 1 as Int64);
+}
+
+fn test_opstat_table_idempotent_for_same_op() {
+    let mut t = opstat_table_new();
+    t.record(&"Add".clone(), 100 as Int64);
+    t.record(&"Add".clone(), 200 as Int64);
+    t.record(&"Mul".clone(), 50 as Int64);
+    assert_eq(t.len(), 2);
+    assert_eq(t.total_dispatches(), 3 as Int64);
+    assert_eq(t.total_time_ns(), 350 as Int64);
+}
+
+fn test_opstat_table_lookup_present() {
+    let mut t = opstat_table_new();
+    t.record(&"Add".clone(), 100 as Int64);
+    match t.lookup(&"Add".clone()) {
+        Some(s) => assert_eq(s.count, 1 as Int64),
+        None    => panic("Add registered"),
+    }
+}
+
+fn test_opstat_table_lookup_absent() {
+    let t = opstat_table_new();
+    match t.lookup(&"Add".clone()) {
+        None    => {},
+        Some(_) => panic("nothing registered"),
+    }
+}
+
+// -----------------------------------------------------------------------------
+// NodeStat
+// -----------------------------------------------------------------------------
+
+fn test_nodestat_record_row_first_row_seen() {
+    let mut n = nodestat_new(0, "PnTableScan".clone(), 1000 as Int64);
+    n.record_row(500 as Int64);
+    assert_eq(n.actual_rows, 1 as Int64);
+    assert(n.first_row_seen);
+    assert_eq(n.first_row_ns, 500 as Int64);
+}
+
+fn test_nodestat_estimate_ratio() {
+    let mut n = nodestat_new(0, "PnTableScan".clone(), 1000 as Int64);
+    n.record_row(0 as Int64);
+    n.record_row(0 as Int64);
+    n.record_row(0 as Int64);
+    n.record_row(0 as Int64);
+    let r = n.estimate_ratio();
+    assert(r > (200.0 as Float64));
+}
+
+// -----------------------------------------------------------------------------
+// NodeStatTable
+// -----------------------------------------------------------------------------
+
+fn test_nodestat_table_register_and_record() {
+    let mut t = nodestat_table_new();
+    t.register(0, "PnTableScan(users)".clone(), 1000 as Int64);
+    t.register(1, "PnFilter".clone(), 500 as Int64);
+    t.record_row(0, 100 as Int64);
+    t.record_row(0, 200 as Int64);
+    t.add_time(0, 500 as Int64);
+    match t.lookup(0) {
+        Some(n) => {
+            assert_eq(n.actual_rows, 2 as Int64);
+            assert_eq(n.total_ns, 500 as Int64);
+        }
+        None => panic("node 0 registered"),
+    }
+}
+
+fn test_nodestat_register_idempotent() {
+    let mut t = nodestat_table_new();
+    t.register(0, "PnFoo".clone(), 100 as Int64);
+    t.register(0, "PnDifferent".clone(), 9999 as Int64);
+    assert_eq(t.len(), 1);
+}
+
+// -----------------------------------------------------------------------------
+// ProfileSession
+// -----------------------------------------------------------------------------
+
+fn test_session_lifecycle() {
+    let mut s = session_new("SELECT 1".clone());
+    s.start(100 as Int64);
+    s.finish(500 as Int64);
+    assert_eq(s.elapsed_ns(), 400 as Int64);
+}
+
+fn test_session_node_stack() {
+    let mut s = session_new("SELECT 1".clone());
+    s.register_node(0, "PnTableScan".clone(), 1000 as Int64);
+    s.enter_node(0);
+    match s.current_node() {
+        Some(id) => assert_eq(id, 0),
+        None     => panic("node entered"),
+    }
+    s.exit_node();
+    match s.current_node() {
+        None    => {},
+        Some(_) => panic("popped"),
+    }
+}
+
+fn test_session_observe_op_routes_to_active_node() {
+    let mut s = session_new("SELECT 1".clone());
+    s.register_node(0, "PnTableScan".clone(), 1000 as Int64);
+    s.enter_node(0);
+    s.observe_op(&"Next".clone(), 50 as Int64);
+    s.observe_op(&"Column".clone(), 30 as Int64);
+    s.observe_row(200 as Int64);
+    assert_eq(s.dispatches(), 2 as Int64);
+    assert_eq(s.op_time_ns(), 80 as Int64);
+}
+
+// -----------------------------------------------------------------------------
+// Report
+// -----------------------------------------------------------------------------
+
+fn test_report_render_non_empty() {
+    let mut s = session_new("SELECT 1".clone());
+    s.start(0 as Int64);
+    s.register_node(0, "PnTableScan".clone(), 100 as Int64);
+    s.enter_node(0);
+    s.observe_op(&"Next".clone(), 50 as Int64);
+    s.observe_row(100 as Int64);
+    s.exit_node();
+    s.finish(1000 as Int64);
+    let txt = render(&s);
+    assert(txt.len() > 0);
+}
+
+fn main() {
+    test_opstat_record_updates_count_total_worst();
+    test_opstat_average();
+    test_opstat_average_zero_safe();
+    test_opstat_table_first_record_creates_entry();
+    test_opstat_table_idempotent_for_same_op();
+    test_opstat_table_lookup_present();
+    test_opstat_table_lookup_absent();
+    test_nodestat_record_row_first_row_seen();
+    test_nodestat_estimate_ratio();
+    test_nodestat_table_register_and_record();
+    test_nodestat_register_idempotent();
+    test_session_lifecycle();
+    test_session_node_stack();
+    test_session_observe_op_routes_to_active_node();
+    test_report_render_non_empty();
+}

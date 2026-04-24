@@ -1,0 +1,147 @@
+// =============================================================================
+// replication/protocol.vr — handshake messages
+// =============================================================================
+// Spec: sqlite-native.md §22 (operational tooling — CDC + replication)
+//
+// Wire-level message taxonomy. Actual encoding is the host's
+// responsibility (typically protobuf or flatbuffers); we expose
+// the shape + the validation rules.
+//
+// Message flow:
+//
+//   Replica → Primary: HELLO {replica_id, last_known_position, role_request}
+//   Primary → Replica: HELLO_ACK {epoch, server_id, accepted_role}
+//   Replica → Primary: REQUEST_FRAMES {since_position, max_frames}
+//   Primary → Replica: FRAME_BATCH {frames, ends_at_commit}
+//   Replica → Primary: ACK {applied_position}
+//   Either:           ERROR {code, detail}
+// =============================================================================
+
+module core.database.sqlite.native.replication.protocol;
+
+mount core.*;
+mount base.{Text, Bool, Maybe};
+mount collections.List;
+mount core.database.sqlite.native.replication.role.{Role, RoleReplica, RoleStandby};
+mount core.database.sqlite.native.replication.frame.{WalFrameRecord, FrameBatch};
+
+// -----------------------------------------------------------------------------
+// Error codes
+// -----------------------------------------------------------------------------
+
+public type ProtocolErrorCode is
+      PecRoleRefused
+    | PecEpochMismatch
+    | PecPositionAhead          // replica claims to know a position past primary
+    | PecAuthFailure
+    | PecVersionUnsupported
+    | PecInternal;
+
+public fn protocol_error_name(c: &ProtocolErrorCode) -> Text {
+    match c {
+        PecRoleRefused        => "ROLE_REFUSED".clone(),
+        PecEpochMismatch      => "EPOCH_MISMATCH".clone(),
+        PecPositionAhead      => "POSITION_AHEAD".clone(),
+        PecAuthFailure        => "AUTH_FAILURE".clone(),
+        PecVersionUnsupported => "VERSION_UNSUPPORTED".clone(),
+        PecInternal           => "INTERNAL".clone(),
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Hello
+// -----------------------------------------------------------------------------
+
+public type Hello is {
+    replica_id: Text,
+    last_known_position: Int64,
+    role_request: Role,
+    /// Protocol version replica speaks.
+    proto_version: Int,
+}
+
+public type HelloAck is {
+    epoch: Int64,
+    server_id: Text,
+    accepted_role: Role,
+    /// Protocol version primary speaks.
+    proto_version: Int,
+}
+
+// -----------------------------------------------------------------------------
+// RequestFrames
+// -----------------------------------------------------------------------------
+
+public type RequestFrames is {
+    since_position: Int64,
+    max_frames: Int,
+}
+
+// -----------------------------------------------------------------------------
+// Ack
+// -----------------------------------------------------------------------------
+
+public type Ack is {
+    applied_position: Int64,
+    /// Optional replica health report — mirrors what the lag tracker
+    /// would compute primary-side, but supplied by replica.
+    replica_load_avg: Float64,
+}
+
+// -----------------------------------------------------------------------------
+// ErrorMessage
+// -----------------------------------------------------------------------------
+
+public type ErrorMessage is {
+    code: ProtocolErrorCode,
+    detail: Text,
+}
+
+// -----------------------------------------------------------------------------
+// Message
+// -----------------------------------------------------------------------------
+
+public type Message is
+      MsgHello(Hello)
+    | MsgHelloAck(HelloAck)
+    | MsgRequestFrames(RequestFrames)
+    | MsgFrameBatch(FrameBatch)
+    | MsgAck(Ack)
+    | MsgError(ErrorMessage);
+
+public fn message_kind(m: &Message) -> Text {
+    match m {
+        MsgHello(_)         => "HELLO".clone(),
+        MsgHelloAck(_)      => "HELLO_ACK".clone(),
+        MsgRequestFrames(_) => "REQUEST_FRAMES".clone(),
+        MsgFrameBatch(_)    => "FRAME_BATCH".clone(),
+        MsgAck(_)           => "ACK".clone(),
+        MsgError(_)         => "ERROR".clone(),
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Handshake validation
+// -----------------------------------------------------------------------------
+
+public const PROTOCOL_VERSION: Int = 1;
+
+public fn validate_hello(hello: &Hello) -> Maybe<ProtocolErrorCode> {
+    if hello.proto_version != PROTOCOL_VERSION {
+        return Some(PecVersionUnsupported);
+    }
+    if hello.replica_id.len() == 0 {
+        return Some(PecAuthFailure);
+    }
+    match hello.role_request {
+        RoleReplica => None,
+        RoleStandby => None,
+        _           => Some(PecRoleRefused),
+    }
+}
+
+public fn validate_request(req: &RequestFrames, primary_position: Int64) -> Maybe<ProtocolErrorCode> {
+    if req.since_position > primary_position { return Some(PecPositionAhead); }
+    if req.max_frames <= 0 { return Some(PecInternal); }
+    None
+}

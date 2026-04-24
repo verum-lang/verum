@@ -1,0 +1,28 @@
+// =============================================================================
+// core/database/sqlite/native/limits/mod.vr
+// =============================================================================
+// Layer: 6 (per-Connection)
+// Spec: sqlite-native.md §22 (operational tooling — quotas)
+//
+// Per-Connection resource caps. Each `LimitDimension` enforces one
+// of:
+//
+//   * memory (bytes allocated by this connection)
+//   * query duration (ns since current query started)
+//   * row count (rows scanned by current query)
+//   * page count (pages this connection has cached)
+//   * recursion depth (trigger / CTE nesting)
+//
+// Submodules:
+//   * `dimension`  — LimitDimension taxonomy + enforcement helpers
+//   * `policy`     — LimitPolicy (Permissive / Strict / SoftWarn)
+//   * `tracker`    — running totals + threshold-crossing detector
+//   * `breach`     — what to do when a limit is crossed
+// =============================================================================
+
+module core.database.sqlite.native.limits;
+
+public module dimension;
+public module policy;
+public module tracker;
+public module breach;

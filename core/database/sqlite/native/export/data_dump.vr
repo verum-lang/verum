@@ -1,0 +1,224 @@
+// =============================================================================
+// export/data_dump.vr — row emitter (INSERT / CSV / JSONL)
+// =============================================================================
+// Spec: sqlite-native.md §22 (operational tooling — dump / restore)
+//
+// Row-stream emitter. Three formats:
+//
+//   * `DfInsert` — `INSERT INTO <table>(<cols>) VALUES (<vals>);`
+//                   round-trippable via Database.execute()
+//   * `DfCsv`    — RFC 4180 CSV with header row
+//   * `DfJsonl`  — one JSON object per line, keys = column names
+//
+// The caller wraps each row in a `RowDump` (column names + values).
+// =============================================================================
+
+module core.database.sqlite.native.export.data_dump;
+
+mount core.*;
+mount base.{Text, Bool};
+mount collections.List;
+mount core.database.sqlite.native.export.value.{
+    SqlValue, SvNull, SvInteger, SvReal, SvText, SvBlob,
+    render_sql_literal, quote_sql_text,
+};
+
+// -----------------------------------------------------------------------------
+// DumpFormat
+// -----------------------------------------------------------------------------
+
+public type DumpFormat is DfInsert | DfCsv | DfJsonl;
+
+public fn dump_format_name(f: &DumpFormat) -> Text {
+    match f {
+        DfInsert => "insert".clone(),
+        DfCsv    => "csv".clone(),
+        DfJsonl  => "jsonl".clone(),
+    }
+}
+
+// -----------------------------------------------------------------------------
+// RowDump
+// -----------------------------------------------------------------------------
+
+public type RowDump is {
+    table: Text,
+    columns: List<Text>,
+    values: List<SqlValue>,
+}
+
+public fn row_dump(table: Text, columns: List<Text>, values: List<SqlValue>) -> RowDump {
+    RowDump { table: table, columns: columns, values: values }
+}
+
+// -----------------------------------------------------------------------------
+// Render entry-point
+// -----------------------------------------------------------------------------
+
+public fn render_row(format: &DumpFormat, row: &RowDump) -> Text {
+    match format {
+        DfInsert => render_insert(row),
+        DfCsv    => render_csv(row),
+        DfJsonl  => render_jsonl(row),
+    }
+}
+
+/// CSV header — emitted once before the first row.
+public fn render_csv_header(row: &RowDump) -> Text {
+    let mut out = Text.new();
+    let mut i: Int = 0;
+    while i < row.columns.len() {
+        if i > 0 { out.push_byte(44 as Byte); }
+        push(&mut out, &csv_quote(&row.columns[i]));
+        i = i + 1;
+    }
+    out.push_byte(10 as Byte);
+    out
+}
+
+// -----------------------------------------------------------------------------
+// INSERT format
+// -----------------------------------------------------------------------------
+
+fn render_insert(row: &RowDump) -> Text {
+    let mut out = "INSERT INTO ".clone();
+    push(&mut out, &row.table);
+    push(&mut out, &"(".clone());
+    let mut i: Int = 0;
+    while i < row.columns.len() {
+        if i > 0 { push(&mut out, &", ".clone()); }
+        push(&mut out, &row.columns[i]);
+        i = i + 1;
+    }
+    push(&mut out, &") VALUES (".clone());
+    i = 0;
+    while i < row.values.len() {
+        if i > 0 { push(&mut out, &", ".clone()); }
+        push(&mut out, &render_sql_literal(&row.values[i]));
+        i = i + 1;
+    }
+    push(&mut out, &");\n".clone());
+    out
+}
+
+// -----------------------------------------------------------------------------
+// CSV format (RFC 4180)
+// -----------------------------------------------------------------------------
+
+fn render_csv(row: &RowDump) -> Text {
+    let mut out = Text.new();
+    let mut i: Int = 0;
+    while i < row.values.len() {
+        if i > 0 { out.push_byte(44 as Byte); }
+        push(&mut out, &render_csv_value(&row.values[i]));
+        i = i + 1;
+    }
+    out.push_byte(10 as Byte);
+    out
+}
+
+fn render_csv_value(v: &SqlValue) -> Text {
+    match v {
+        SvNull       => "".clone(),
+        SvInteger(_) => csv_quote_if_needed(&render_csv_plain(v)),
+        SvReal(_)    => render_csv_plain(v),
+        SvText(t)    => csv_quote(t),
+        SvBlob(_)    => csv_quote(&render_csv_plain(v)),
+    }
+}
+
+fn render_csv_plain(v: &SqlValue) -> Text {
+    // Reuse SQL-literal renderer minus the leading X' / quotes.
+    render_sql_literal(v)
+}
+
+fn csv_quote(t: &Text) -> Text {
+    let mut out = "\"".clone();
+    let bs = t.as_bytes();
+    let mut i: Int = 0;
+    while i < bs.len() {
+        let b = bs[i];
+        if b == (34 as Byte) { out.push_byte(34 as Byte); }
+        out.push_byte(b);
+        i = i + 1;
+    }
+    out.push_byte(34 as Byte);
+    out
+}
+
+fn csv_quote_if_needed(t: &Text) -> Text {
+    let bs = t.as_bytes();
+    let mut needs_quote = false;
+    let mut i: Int = 0;
+    while i < bs.len() {
+        let b = bs[i];
+        if b == (44 as Byte) || b == (34 as Byte) || b == (10 as Byte) || b == (13 as Byte) {
+            needs_quote = true;
+            break;
+        }
+        i = i + 1;
+    }
+    if needs_quote { csv_quote(t) } else { t.clone() }
+}
+
+// -----------------------------------------------------------------------------
+// JSONL format
+// -----------------------------------------------------------------------------
+
+fn render_jsonl(row: &RowDump) -> Text {
+    let mut out = "{".clone();
+    let mut i: Int = 0;
+    while i < row.columns.len() {
+        if i > 0 { push(&mut out, &", ".clone()); }
+        out.push_byte(34 as Byte);
+        push(&mut out, &row.columns[i]);
+        push(&mut out, &"\":".clone());
+        push(&mut out, &render_jsonl_value(&row.values[i]));
+        i = i + 1;
+    }
+    push(&mut out, &"}\n".clone());
+    out
+}
+
+fn render_jsonl_value(v: &SqlValue) -> Text {
+    match v {
+        SvNull       => "null".clone(),
+        SvInteger(_) => render_sql_literal(v),
+        SvReal(_)    => render_sql_literal(v),
+        SvText(t)    => json_quote(t),
+        SvBlob(_)    => json_quote(&render_sql_literal(v)),
+    }
+}
+
+fn json_quote(t: &Text) -> Text {
+    let mut out = "\"".clone();
+    let bs = t.as_bytes();
+    let mut i: Int = 0;
+    while i < bs.len() {
+        let b = bs[i];
+        if b == (34 as Byte) || b == (92 as Byte) {
+            out.push_byte(92 as Byte);
+            out.push_byte(b);
+        } else if b == (10 as Byte) {
+            out.push_byte(92 as Byte);
+            out.push_byte(110 as Byte);
+        } else if b == (13 as Byte) {
+            out.push_byte(92 as Byte);
+            out.push_byte(114 as Byte);
+        } else if b == (9 as Byte) {
+            out.push_byte(92 as Byte);
+            out.push_byte(116 as Byte);
+        } else {
+            out.push_byte(b);
+        }
+        i = i + 1;
+    }
+    out.push_byte(34 as Byte);
+    out
+}
+
+fn push(dst: &mut Text, s: &Text) {
+    let bs = s.as_bytes();
+    let mut i: Int = 0;
+    while i < bs.len() { dst.push_byte(bs[i]); i = i + 1; }
+}

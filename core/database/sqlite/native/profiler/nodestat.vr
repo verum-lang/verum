@@ -1,0 +1,140 @@
+// =============================================================================
+// profiler/nodestat.vr — per-PlanNode runtime accounting
+// =============================================================================
+// Spec: sqlite-native.md §22 (operational tooling — EXPLAIN ANALYZE)
+//
+// Where `OpStat` aggregates by VDBE opcode, `NodeStat` aggregates
+// by L5 plan-node identity. The L4 interpreter is wired with a
+// "current plan node" stack (managed by the codegen → it knows
+// which range of opcodes corresponds to which node), and the
+// profiler bumps the active node on each row materialised.
+//
+// Final output:
+//
+//   PlanNode                        Estimated  Actual    ms
+//   -------------------------------- --------- -------- -----
+//   PnTableScan(users)                  1000      9821    12
+//   └── PnFilter(active = 1)            500       4233     7
+//       └── PnSort(name)                500       4233     2
+// =============================================================================
+
+module core.database.sqlite.native.profiler.nodestat;
+
+mount core.*;
+mount base.{Text, Bool, Maybe};
+mount collections.List;
+
+// -----------------------------------------------------------------------------
+// NodeStat
+// -----------------------------------------------------------------------------
+
+public type NodeStat is {
+    /// Stable plan-node id assigned by the planner (depth-first index).
+    node_id: Int,
+    /// Human-readable kind tag — e.g. "PnTableScan(users)".
+    kind: Text,
+    /// Planner's row estimate.
+    estimated_rows: Int64,
+    /// Actual rows the node emitted.
+    actual_rows: Int64,
+    /// Total wall-clock spent in this node's opcode range.
+    total_ns: Int64,
+    /// First-row latency (helps spot non-pipelined sorts).
+    first_row_ns: Int64,
+    /// True once the first row was observed.
+    first_row_seen: Bool,
+}
+
+public fn nodestat_new(node_id: Int, kind: Text, estimated_rows: Int64) -> NodeStat {
+    NodeStat {
+        node_id: node_id,
+        kind: kind,
+        estimated_rows: estimated_rows,
+        actual_rows: 0 as Int64,
+        total_ns: 0 as Int64,
+        first_row_ns: 0 as Int64,
+        first_row_seen: false,
+    }
+}
+
+implement NodeStat {
+    public fn record_row(&mut self, when_ns: Int64) {
+        self.actual_rows = self.actual_rows + (1 as Int64);
+        if !self.first_row_seen {
+            self.first_row_ns = when_ns;
+            self.first_row_seen = true;
+        }
+    }
+
+    public fn add_time(&mut self, ns: Int64) { self.total_ns = self.total_ns + ns; }
+
+    /// Ratio of estimate over actual; 1.0 means perfect, > 1 means
+    /// over-estimate, < 1 means under-estimate.
+    public fn estimate_ratio(&self) -> Float64 {
+        if self.actual_rows == (0 as Int64) { 0.0 as Float64 }
+        else { (self.estimated_rows as Float64) / (self.actual_rows as Float64) }
+    }
+}
+
+// -----------------------------------------------------------------------------
+// NodeStatTable
+// -----------------------------------------------------------------------------
+
+public type NodeStatTable is { entries: List<NodeStat> }
+
+public fn nodestat_table_new() -> NodeStatTable { NodeStatTable { entries: List.new() } }
+
+implement NodeStatTable {
+    public fn len(&self) -> Int { self.entries.len() }
+
+    pub fn register(&mut self, node_id: Int, kind: Text, estimated_rows: Int64) {
+        let mut i: Int = 0;
+        while i < self.entries.len() {
+            if self.entries[i].node_id == node_id { return; }
+            i = i + 1;
+        }
+        self.entries.push(nodestat_new(node_id, kind, estimated_rows));
+    }
+
+    pub fn record_row(&mut self, node_id: Int, when_ns: Int64) {
+        let mut i: Int = 0;
+        while i < self.entries.len() {
+            if self.entries[i].node_id == node_id {
+                self.entries[i].record_row(when_ns);
+                return;
+            }
+            i = i + 1;
+        }
+    }
+
+    pub fn add_time(&mut self, node_id: Int, ns: Int64) {
+        let mut i: Int = 0;
+        while i < self.entries.len() {
+            if self.entries[i].node_id == node_id {
+                self.entries[i].add_time(ns);
+                return;
+            }
+            i = i + 1;
+        }
+    }
+
+    pub fn lookup(&self, node_id: Int) -> Maybe<NodeStat> {
+        let mut i: Int = 0;
+        while i < self.entries.len() {
+            if self.entries[i].node_id == node_id {
+                let e = &self.entries[i];
+                return Some(NodeStat {
+                    node_id: e.node_id,
+                    kind: e.kind.clone(),
+                    estimated_rows: e.estimated_rows,
+                    actual_rows: e.actual_rows,
+                    total_ns: e.total_ns,
+                    first_row_ns: e.first_row_ns,
+                    first_row_seen: e.first_row_seen,
+                });
+            }
+            i = i + 1;
+        }
+        None
+    }
+}

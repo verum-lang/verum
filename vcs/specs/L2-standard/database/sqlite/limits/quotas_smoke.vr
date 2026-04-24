@@ -1,0 +1,206 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, limits, quotas, breach, policy
+// @timeout: 5000
+// @expected-exit: 0
+//
+// Resource-limit surface:
+//   * LimitDimension taxonomy + default cap
+//   * LimitPolicy.decide for every (policy × prior_breach_count)
+//   * Breach record + journal counts
+//   * Tracker.check returns EdAllow under cap, EdDeny over Strict cap
+//   * configure idempotency
+//   * reset_running_values + rearm_soft_warn
+
+mount core.database.sqlite.native.limits.dimension.{
+    LimitDimension,
+    LdMemoryBytes, LdQueryDurationNs, LdRowsScanned, LdRecursionDepth,
+    dimension_name, default_limit,
+};
+mount core.database.sqlite.native.limits.policy.{
+    LimitPolicy, LpPermissive, LpSoftWarn, LpStrict,
+    EnforcementDecision, EdAllow, EdAllowOnceWithWarning, EdDeny,
+    PolicyConfig, policy_config, decide, policy_name,
+};
+mount core.database.sqlite.native.limits.breach.{
+    BreachRecord, BreachJournal, breach, journal_new,
+};
+mount core.database.sqlite.native.limits.tracker.{
+    LimitTracker, tracker_new,
+};
+mount base.{Some, None, Maybe, Bool};
+
+// -----------------------------------------------------------------------------
+// Dimensions
+// -----------------------------------------------------------------------------
+
+fn test_dimension_names() {
+    assert(dimension_name(&LdMemoryBytes) == "memory_bytes".clone());
+    assert(dimension_name(&LdRecursionDepth) == "recursion_depth".clone());
+}
+
+fn test_default_caps_positive() {
+    assert(default_limit(&LdMemoryBytes) > (0 as Int64));
+    assert(default_limit(&LdRowsScanned) > (0 as Int64));
+}
+
+// -----------------------------------------------------------------------------
+// Policy
+// -----------------------------------------------------------------------------
+
+fn test_policy_permissive_always_allows() {
+    match decide(&LpPermissive, 0) {
+        EdAllow => {},
+        _       => panic("permissive 0 → allow"),
+    }
+    match decide(&LpPermissive, 99) {
+        EdAllow => {},
+        _       => panic("permissive 99 → allow"),
+    }
+}
+
+fn test_policy_soft_warn_grants_one() {
+    match decide(&LpSoftWarn, 0) {
+        EdAllowOnceWithWarning => {},
+        _                       => panic("first soft-warn breach"),
+    }
+    match decide(&LpSoftWarn, 1) {
+        EdDeny => {},
+        _      => panic("subsequent soft-warn → deny"),
+    }
+}
+
+fn test_policy_strict_denies_first() {
+    match decide(&LpStrict, 0) {
+        EdDeny => {},
+        _      => panic("strict denies immediately"),
+    }
+}
+
+fn test_policy_names() {
+    assert(policy_name(&LpPermissive) == "permissive".clone());
+    assert(policy_name(&LpSoftWarn) == "soft_warn".clone());
+    assert(policy_name(&LpStrict) == "strict".clone());
+}
+
+// -----------------------------------------------------------------------------
+// Breach + journal
+// -----------------------------------------------------------------------------
+
+fn test_breach_overage() {
+    let r = breach(LdRowsScanned, 100 as Int64, 250 as Int64, 0 as Int64, "ctx".clone());
+    assert_eq(r.overage(), 150 as Int64);
+}
+
+fn test_breach_no_overage_when_under_cap() {
+    let r = breach(LdRowsScanned, 1000 as Int64, 50 as Int64, 0 as Int64, "ctx".clone());
+    assert_eq(r.overage(), 0 as Int64);
+}
+
+fn test_journal_record_and_count() {
+    let mut j = journal_new();
+    j.record(breach(LdRowsScanned, 100 as Int64, 200 as Int64, 0 as Int64, "q1".clone()));
+    j.record(breach(LdMemoryBytes, 1024 as Int64, 4096 as Int64, 0 as Int64, "q2".clone()));
+    assert_eq(j.count(), 2);
+    assert_eq(j.by_dimension(&LdRowsScanned), 1);
+    assert_eq(j.by_dimension(&LdQueryDurationNs), 0);
+}
+
+fn test_journal_last_returns_some() {
+    let mut j = journal_new();
+    j.record(breach(LdRowsScanned, 100 as Int64, 200 as Int64, 1 as Int64, "q1".clone()));
+    match j.last() {
+        Some(_) => {},
+        None    => panic("last present"),
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Tracker
+// -----------------------------------------------------------------------------
+
+fn test_tracker_allows_under_cap() {
+    let mut t = tracker_new();
+    t.configure(policy_config(LdRowsScanned, 1000 as Int64, LpStrict));
+    match t.check(LdRowsScanned, 500 as Int64, 0 as Int64, "scan".clone()) {
+        EdAllow => {},
+        _       => panic("under-cap allowed"),
+    }
+}
+
+fn test_tracker_denies_over_cap_strict() {
+    let mut t = tracker_new();
+    t.configure(policy_config(LdRowsScanned, 100 as Int64, LpStrict));
+    match t.check(LdRowsScanned, 200 as Int64, 0 as Int64, "scan".clone()) {
+        EdDeny => {},
+        _      => panic("over-cap strict → deny"),
+    }
+}
+
+fn test_tracker_soft_warn_first_then_deny() {
+    let mut t = tracker_new();
+    t.configure(policy_config(LdRowsScanned, 100 as Int64, LpSoftWarn));
+    match t.check(LdRowsScanned, 200 as Int64, 0 as Int64, "scan1".clone()) {
+        EdAllowOnceWithWarning => {},
+        _                       => panic("first cross warns"),
+    }
+    match t.check(LdRowsScanned, 250 as Int64, 1 as Int64, "scan2".clone()) {
+        EdDeny => {},
+        _      => panic("second cross denies"),
+    }
+}
+
+fn test_tracker_records_breach_in_journal() {
+    let mut t = tracker_new();
+    t.configure(policy_config(LdRowsScanned, 100 as Int64, LpStrict));
+    let _ = t.check(LdRowsScanned, 200 as Int64, 0 as Int64, "scan".clone());
+    assert_eq(t.breach_journal_size(), 1);
+}
+
+fn test_tracker_configure_is_idempotent() {
+    let mut t = tracker_new();
+    t.configure(policy_config(LdRowsScanned, 100 as Int64, LpStrict));
+    t.configure(policy_config(LdRowsScanned, 200 as Int64, LpSoftWarn));
+    assert_eq(t.dimension_count(), 1);
+}
+
+fn test_tracker_reset_running_values_keeps_breaches() {
+    let mut t = tracker_new();
+    t.configure(policy_config(LdRowsScanned, 100 as Int64, LpStrict));
+    let _ = t.check(LdRowsScanned, 200 as Int64, 0 as Int64, "scan".clone());
+    t.reset_running_values();
+    assert_eq(t.breach_count(&LdRowsScanned), 1);
+    match t.current_value(&LdRowsScanned) {
+        Some(v) => assert_eq(v, 0 as Int64),
+        None    => panic("current zeroed"),
+    }
+}
+
+fn test_tracker_rearm_soft_warn() {
+    let mut t = tracker_new();
+    t.configure(policy_config(LdRowsScanned, 100 as Int64, LpSoftWarn));
+    let _ = t.check(LdRowsScanned, 200 as Int64, 0 as Int64, "scan1".clone());
+    t.rearm_soft_warn();
+    assert_eq(t.breach_count(&LdRowsScanned), 0);
+}
+
+fn main() {
+    test_dimension_names();
+    test_default_caps_positive();
+    test_policy_permissive_always_allows();
+    test_policy_soft_warn_grants_one();
+    test_policy_strict_denies_first();
+    test_policy_names();
+    test_breach_overage();
+    test_breach_no_overage_when_under_cap();
+    test_journal_record_and_count();
+    test_journal_last_returns_some();
+    test_tracker_allows_under_cap();
+    test_tracker_denies_over_cap_strict();
+    test_tracker_soft_warn_first_then_deny();
+    test_tracker_records_breach_in_journal();
+    test_tracker_configure_is_idempotent();
+    test_tracker_reset_running_values_keeps_breaches();
+    test_tracker_rearm_soft_warn();
+}

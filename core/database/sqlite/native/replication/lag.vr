@@ -1,0 +1,199 @@
+// =============================================================================
+// replication/lag.vr — replication-lag tracker + alert thresholds
+// =============================================================================
+// Spec: sqlite-native.md §22 (operational tooling — CDC + replication)
+//
+// Tracks two lag axes per replica:
+//
+//   * Position lag — primary_position - replica_position (in frames)
+//   * Time lag     — wall-clock ns elapsed since the latest frame
+//                    primary committed but the replica hasn't acked
+//
+// Alerts fire when EITHER axis crosses its configured threshold.
+// =============================================================================
+
+module core.database.sqlite.native.replication.lag;
+
+mount core.*;
+mount base.{Text, Bool, Maybe};
+mount collections.List;
+
+// -----------------------------------------------------------------------------
+// LagAlert
+// -----------------------------------------------------------------------------
+
+public type LagSeverity is LsHealthy | LsWarning | LsCritical;
+
+public fn severity_name(s: &LagSeverity) -> Text {
+    match s {
+        LsHealthy  => "healthy".clone(),
+        LsWarning  => "warning".clone(),
+        LsCritical => "critical".clone(),
+    }
+}
+
+public type LagThresholds is {
+    /// Position lag (in frames) at which severity becomes Warning.
+    warn_frames: Int64,
+    crit_frames: Int64,
+    /// Time lag (in ns) at which severity becomes Warning.
+    warn_ns: Int64,
+    crit_ns: Int64,
+}
+
+public fn thresholds_default() -> LagThresholds {
+    LagThresholds {
+        warn_frames: 1000 as Int64,
+        crit_frames: 10000 as Int64,
+        warn_ns: 5_000_000_000 as Int64,    // 5 seconds
+        crit_ns: 30_000_000_000 as Int64,   // 30 seconds
+    }
+}
+
+// -----------------------------------------------------------------------------
+// LagSnapshot
+// -----------------------------------------------------------------------------
+
+public type LagSnapshot is {
+    replica_id: Text,
+    frames_behind: Int64,
+    ns_behind: Int64,
+    severity: LagSeverity,
+}
+
+public fn classify(
+    replica_id: Text,
+    frames_behind: Int64,
+    ns_behind: Int64,
+    th: &LagThresholds,
+) -> LagSnapshot {
+    let by_frame: LagSeverity = if frames_behind >= th.crit_frames {
+        LsCritical
+    } else if frames_behind >= th.warn_frames {
+        LsWarning
+    } else {
+        LsHealthy
+    };
+    let by_time: LagSeverity = if ns_behind >= th.crit_ns {
+        LsCritical
+    } else if ns_behind >= th.warn_ns {
+        LsWarning
+    } else {
+        LsHealthy
+    };
+    let worst = if severity_rank(&by_frame) >= severity_rank(&by_time) { by_frame } else { by_time };
+    LagSnapshot {
+        replica_id: replica_id,
+        frames_behind: frames_behind,
+        ns_behind: ns_behind,
+        severity: worst,
+    }
+}
+
+fn severity_rank(s: &LagSeverity) -> Int {
+    match s {
+        LsHealthy  => 0,
+        LsWarning  => 1,
+        LsCritical => 2,
+    }
+}
+
+// -----------------------------------------------------------------------------
+// LagTracker — accumulates per-replica state
+// -----------------------------------------------------------------------------
+
+public type ReplicaLagState is {
+    replica_id: Text,
+    last_primary_position: Int64,
+    last_replica_position: Int64,
+    last_replica_ack_ns: Int64,
+}
+
+public fn lag_state(replica_id: Text) -> ReplicaLagState {
+    ReplicaLagState {
+        replica_id: replica_id,
+        last_primary_position: 0 as Int64,
+        last_replica_position: 0 as Int64,
+        last_replica_ack_ns: 0 as Int64,
+    }
+}
+
+public type LagTracker is {
+    states: List<ReplicaLagState>,
+    thresholds: LagThresholds,
+}
+
+public fn lag_tracker_new() -> LagTracker {
+    LagTracker {
+        states: List.new(),
+        thresholds: thresholds_default(),
+    }
+}
+
+implement LagTracker {
+    public fn replica_count(&self) -> Int { self.states.len() }
+
+    pub fn set_thresholds(&mut self, th: LagThresholds) {
+        self.thresholds = th;
+    }
+
+    pub fn record_primary_commit(&mut self, position: Int64) {
+        let mut i: Int = 0;
+        while i < self.states.len() {
+            if self.states[i].last_primary_position < position {
+                self.states[i].last_primary_position = position;
+            }
+            i = i + 1;
+        }
+    }
+
+    pub fn record_replica_ack(&mut self, replica_id: &Text, position: Int64, now_ns: Int64) {
+        let mut i: Int = 0;
+        while i < self.states.len() {
+            if self.states[i].replica_id == replica_id {
+                self.states[i].last_replica_position = position;
+                self.states[i].last_replica_ack_ns = now_ns;
+                return;
+            }
+            i = i + 1;
+        }
+        // Unknown replica → register
+        let mut s = lag_state(replica_id.clone());
+        s.last_replica_position = position;
+        s.last_replica_ack_ns = now_ns;
+        self.states.push(s);
+    }
+
+    pub fn snapshot(&self, replica_id: &Text, now_ns: Int64) -> Maybe<LagSnapshot> {
+        let mut i: Int = 0;
+        while i < self.states.len() {
+            if self.states[i].replica_id == replica_id {
+                let s = &self.states[i];
+                let frames_behind = if s.last_primary_position > s.last_replica_position {
+                    s.last_primary_position - s.last_replica_position
+                } else { 0 as Int64 };
+                let ns_behind = if now_ns > s.last_replica_ack_ns {
+                    now_ns - s.last_replica_ack_ns
+                } else { 0 as Int64 };
+                return Some(classify(replica_id.clone(), frames_behind, ns_behind, &self.thresholds));
+            }
+            i = i + 1;
+        }
+        None
+    }
+
+    /// Snapshot every known replica's lag at `now_ns`.
+    pub fn snapshot_all(&self, now_ns: Int64) -> List<LagSnapshot> {
+        let mut out: List<LagSnapshot> = List.new();
+        let mut i: Int = 0;
+        while i < self.states.len() {
+            let snap = self.snapshot(&self.states[i].replica_id, now_ns);
+            match snap {
+                Some(s) => out.push(s),
+                None    => {}
+            }
+            i = i + 1;
+        }
+        out
+    }
+}

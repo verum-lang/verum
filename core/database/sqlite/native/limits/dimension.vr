@@ -1,0 +1,45 @@
+// =============================================================================
+// limits/dimension.vr — LimitDimension taxonomy
+// =============================================================================
+// Spec: sqlite-native.md §22 (operational tooling — quotas)
+// =============================================================================
+
+module core.database.sqlite.native.limits.dimension;
+
+mount core.*;
+mount base.{Text};
+
+public type LimitDimension is
+      LdMemoryBytes
+    | LdQueryDurationNs
+    | LdRowsScanned
+    | LdPagesCached
+    | LdRecursionDepth
+    | LdSubprogramCount
+    | LdAttachedDbs;
+
+public fn dimension_name(d: &LimitDimension) -> Text {
+    match d {
+        LdMemoryBytes      => "memory_bytes".clone(),
+        LdQueryDurationNs  => "query_duration_ns".clone(),
+        LdRowsScanned      => "rows_scanned".clone(),
+        LdPagesCached      => "pages_cached".clone(),
+        LdRecursionDepth   => "recursion_depth".clone(),
+        LdSubprogramCount  => "subprogram_count".clone(),
+        LdAttachedDbs      => "attached_dbs".clone(),
+    }
+}
+
+/// Default cap per dimension — mirrors SQLite's SQLITE_LIMIT_*
+/// defaults where applicable.
+public fn default_limit(d: &LimitDimension) -> Int64 {
+    match d {
+        LdMemoryBytes      => 134217728 as Int64,    // 128 MiB
+        LdQueryDurationNs  => 30_000_000_000 as Int64,  // 30 sec
+        LdRowsScanned      => 100_000_000 as Int64,
+        LdPagesCached      => 32768 as Int64,        // ~128 MiB at 4KiB pages
+        LdRecursionDepth   => 1000 as Int64,
+        LdSubprogramCount  => 1000 as Int64,
+        LdAttachedDbs      => 10 as Int64,
+    }
+}

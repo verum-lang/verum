@@ -1,0 +1,271 @@
+// =============================================================================
+// replication/stream.vr — primary StreamProducer + replica StreamConsumer
+// =============================================================================
+// Spec: sqlite-native.md §22 (operational tooling — CDC + replication)
+//
+// `StreamProducer` runs on the primary: every commit pushes a
+// `FrameBatch` into the producer's outbox, batched per-replica.
+// Replicas pull batches via `next_batch(replica_id)` and ack
+// per-frame.
+//
+// `StreamConsumer` runs on the replica: receives `FrameBatch`,
+// validates frame chain (epoch monotonic, seq strictly-increasing
+// within epoch), and applies them via the supplied closure.
+// =============================================================================
+
+module core.database.sqlite.native.replication.stream;
+
+mount core.*;
+mount base.{Text, Bool, Maybe, Result, Ok, Err};
+mount collections.List;
+mount core.database.sqlite.native.replication.frame.{
+    WalFrameRecord, FrameHeader, FrameBatch,
+    frame_record, batch_empty, frame_position, frame_precedes,
+};
+
+// -----------------------------------------------------------------------------
+// Errors
+// -----------------------------------------------------------------------------
+
+public type StreamError is
+      SeOutOfOrder(Int64, Int64)        // (expected_position, got_position)
+    | SeEpochMismatch(Int64, Int64)
+    | SeChecksumMismatch
+    | SeApplyFailed(Text);
+
+// -----------------------------------------------------------------------------
+// ReplicaTrack — primary's per-replica state
+// -----------------------------------------------------------------------------
+
+public type ReplicaTrack is {
+    replica_id: Text,
+    /// Last position the replica has acked.
+    acked_position: Int64,
+    /// Outbox — frames not yet picked up by this replica.
+    outbox: FrameBatch,
+}
+
+public fn replica_track(id: Text) -> ReplicaTrack {
+    ReplicaTrack {
+        replica_id: id,
+        acked_position: 0 as Int64,
+        outbox: batch_empty(),
+    }
+}
+
+// -----------------------------------------------------------------------------
+// StreamProducer
+// -----------------------------------------------------------------------------
+
+public type StreamProducer is {
+    epoch: Int64,
+    next_seq: Int64,
+    /// Per-replica outboxes.
+    tracks: List<ReplicaTrack>,
+}
+
+public fn producer_new(epoch: Int64) -> StreamProducer {
+    StreamProducer {
+        epoch: epoch,
+        next_seq: 0 as Int64,
+        tracks: List.new(),
+    }
+}
+
+implement StreamProducer {
+    public fn current_epoch(&self) -> Int64 { self.epoch }
+
+    public fn replica_count(&self) -> Int { self.tracks.len() }
+
+    /// Register a new replica.
+    public fn add_replica(&mut self, id: Text) {
+        let mut i: Int = 0;
+        while i < self.tracks.len() {
+            if self.tracks[i].replica_id == id { return; }
+            i = i + 1;
+        }
+        self.tracks.push(replica_track(id));
+    }
+
+    /// Drop a replica (after disconnection / removal).
+    public fn drop_replica(&mut self, id: &Text) -> Bool {
+        let mut new_tracks: List<ReplicaTrack> = List.new();
+        let mut found = false;
+        let mut i: Int = 0;
+        while i < self.tracks.len() {
+            if self.tracks[i].replica_id == id {
+                found = true;
+            } else {
+                new_tracks.push(clone_track(&self.tracks[i]));
+            }
+            i = i + 1;
+        }
+        self.tracks = new_tracks;
+        found
+    }
+
+    /// Append a frame to every replica's outbox.
+    pub fn enqueue_frame(&mut self, header: FrameHeader, payload: List<Byte>) -> Int64 {
+        let seq = self.next_seq;
+        self.next_seq = seq + (1 as Int64);
+        let mut i: Int = 0;
+        while i < self.tracks.len() {
+            let mut payload_clone: List<Byte> = List.new();
+            let mut k: Int = 0;
+            while k < payload.len() { payload_clone.push(payload[k]); k = k + 1; }
+            let frame = frame_record(self.epoch, seq, clone_header(&header), payload_clone);
+            self.tracks[i].outbox.append(frame);
+            i = i + 1;
+        }
+        seq
+    }
+
+    /// Drain the outbox for a replica. Returns the batch + clears
+    /// the producer-side queue.
+    pub fn drain(&mut self, replica_id: &Text) -> Maybe<FrameBatch> {
+        let mut i: Int = 0;
+        while i < self.tracks.len() {
+            if self.tracks[i].replica_id == replica_id {
+                let snapshot = clone_batch(&self.tracks[i].outbox);
+                self.tracks[i].outbox = batch_empty();
+                return Some(snapshot);
+            }
+            i = i + 1;
+        }
+        None
+    }
+
+    /// Replica acks up to `position` — drop frames with position
+    /// ≤ position from the outbox + bump acked_position.
+    pub fn ack(&mut self, replica_id: &Text, position: Int64) -> Bool {
+        let mut i: Int = 0;
+        while i < self.tracks.len() {
+            if self.tracks[i].replica_id == replica_id {
+                if position > self.tracks[i].acked_position {
+                    self.tracks[i].acked_position = position;
+                }
+                return true;
+            }
+            i = i + 1;
+        }
+        false
+    }
+
+    /// Bump epoch — on primary failover the new primary calls this
+    /// then begins emitting frames at seq 0.
+    pub fn advance_epoch(&mut self) {
+        self.epoch = self.epoch + (1 as Int64);
+        self.next_seq = 0 as Int64;
+    }
+}
+
+fn clone_track(t: &ReplicaTrack) -> ReplicaTrack {
+    ReplicaTrack {
+        replica_id: t.replica_id.clone(),
+        acked_position: t.acked_position,
+        outbox: clone_batch(&t.outbox),
+    }
+}
+
+fn clone_batch(b: &FrameBatch) -> FrameBatch {
+    let mut frames: List<WalFrameRecord> = List.new();
+    let mut i: Int = 0;
+    while i < b.frames.len() {
+        frames.push(clone_frame(&b.frames[i]));
+        i = i + 1;
+    }
+    FrameBatch { frames: frames, ends_at_commit: b.ends_at_commit }
+}
+
+fn clone_frame(f: &WalFrameRecord) -> WalFrameRecord {
+    let mut payload: List<Byte> = List.new();
+    let mut i: Int = 0;
+    while i < f.payload.len() { payload.push(f.payload[i]); i = i + 1; }
+    WalFrameRecord {
+        epoch: f.epoch,
+        seq: f.seq,
+        header: clone_header(&f.header),
+        payload: payload,
+    }
+}
+
+fn clone_header(h: &FrameHeader) -> FrameHeader {
+    FrameHeader {
+        page_no: h.page_no,
+        db_size_after: h.db_size_after,
+        salt1: h.salt1,
+        salt2: h.salt2,
+        checksum1: h.checksum1,
+        checksum2: h.checksum2,
+    }
+}
+
+// -----------------------------------------------------------------------------
+// StreamConsumer (replica side)
+// -----------------------------------------------------------------------------
+
+public type StreamConsumer is {
+    /// Last successfully-applied position.
+    applied_position: Int64,
+    /// Tracked epoch — set on first frame, then expected to be monotonic.
+    expected_epoch: Int64,
+    epoch_initialised: Bool,
+}
+
+public fn consumer_new() -> StreamConsumer {
+    StreamConsumer {
+        applied_position: 0 as Int64,
+        expected_epoch: 0 as Int64,
+        epoch_initialised: false,
+    }
+}
+
+implement StreamConsumer {
+    public fn applied(&self) -> Int64 { self.applied_position }
+
+    /// Apply a single frame. Returns the new position on success
+    /// (the frame is guaranteed to have been appended to the local
+    /// WAL by the supplied closure).
+    public fn apply_frame(
+        &mut self,
+        frame: &WalFrameRecord,
+        applier: fn(&WalFrameRecord) -> Maybe<Text>,
+    ) -> Result<Int64, StreamError> {
+        if self.epoch_initialised && frame.epoch < self.expected_epoch {
+            return Err(SeEpochMismatch(self.expected_epoch, frame.epoch));
+        }
+        if !self.epoch_initialised {
+            self.expected_epoch = frame.epoch;
+            self.epoch_initialised = true;
+        }
+        let pos = frame_position(frame);
+        if pos <= self.applied_position {
+            return Err(SeOutOfOrder(self.applied_position + (1 as Int64), pos));
+        }
+        match applier(frame) {
+            None      => {
+                self.applied_position = pos;
+                Ok(pos)
+            }
+            Some(err) => Err(SeApplyFailed(err)),
+        }
+    }
+
+    /// Apply a whole batch. Stops at first error.
+    public fn apply_batch(
+        &mut self,
+        batch: &FrameBatch,
+        applier: fn(&WalFrameRecord) -> Maybe<Text>,
+    ) -> Result<Int, StreamError> {
+        let mut applied: Int = 0;
+        let mut i: Int = 0;
+        while i < batch.frames.len() {
+            match self.apply_frame(&batch.frames[i], applier) {
+                Ok(_)  => { applied = applied + 1; }
+                Err(e) => { return Err(e); }
+            }
+            i = i + 1;
+        }
+        Ok(applied)
+    }
+}

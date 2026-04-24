@@ -1,0 +1,62 @@
+// =============================================================================
+// limits/policy.vr — LimitPolicy enforcement modes
+// =============================================================================
+// Spec: sqlite-native.md §22 (operational tooling — quotas)
+//
+// Three enforcement modes:
+//
+//   * `Permissive`  — record breaches in the journal but allow the
+//                      operation (audit-only)
+//   * `SoftWarn`    — emit a warning span on first cross, allow once;
+//                      hard-deny subsequent crosses
+//   * `Strict`      — deny on first cross
+// =============================================================================
+
+module core.database.sqlite.native.limits.policy;
+
+mount core.*;
+mount base.{Text, Bool};
+mount core.database.sqlite.native.limits.dimension.{LimitDimension};
+
+public type LimitPolicy is LpPermissive | LpSoftWarn | LpStrict;
+
+public fn policy_name(p: &LimitPolicy) -> Text {
+    match p {
+        LpPermissive => "permissive".clone(),
+        LpSoftWarn   => "soft_warn".clone(),
+        LpStrict     => "strict".clone(),
+    }
+}
+
+// -----------------------------------------------------------------------------
+// EnforcementDecision
+// -----------------------------------------------------------------------------
+
+public type EnforcementDecision is
+      EdAllow
+    | EdAllowOnceWithWarning
+    | EdDeny;
+
+public fn decide(policy: &LimitPolicy, prior_breaches: Int) -> EnforcementDecision {
+    match policy {
+        LpPermissive => EdAllow,
+        LpSoftWarn   => {
+            if prior_breaches == 0 { EdAllowOnceWithWarning } else { EdDeny }
+        }
+        LpStrict     => EdDeny,
+    }
+}
+
+// -----------------------------------------------------------------------------
+// PolicyConfig
+// -----------------------------------------------------------------------------
+
+public type PolicyConfig is {
+    dimension: LimitDimension,
+    cap: Int64,
+    policy: LimitPolicy,
+}
+
+public fn policy_config(dim: LimitDimension, cap: Int64, policy: LimitPolicy) -> PolicyConfig {
+    PolicyConfig { dimension: dim, cap: cap, policy: policy }
+}

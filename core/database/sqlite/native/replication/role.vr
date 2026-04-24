@@ -1,0 +1,87 @@
+// =============================================================================
+// replication/role.vr — Role taxonomy + invariants
+// =============================================================================
+// Spec: sqlite-native.md §22 (operational tooling)
+//
+// `Role` is the connection's replication identity:
+//
+//   * `Primary`   — accepts writes; emits WAL frames
+//   * `Replica`   — accepts reads; consumes WAL frames; cannot write
+//   * `Standby`   — passive — neither emits nor consumes;
+//                    promotion candidate
+//   * `Witness`   — quorum participant only; no data storage
+//
+// Role transitions are protected by a `Promotion` state machine:
+//
+//   Primary  ↔  Standby
+//   Replica  →  Primary  (only via promotion)
+//   Standby  →  Primary | Replica
+//   Witness  →  no transitions
+// =============================================================================
+
+module core.database.sqlite.native.replication.role;
+
+mount core.*;
+mount base.{Text, Bool};
+
+public type Role is RolePrimary | RoleReplica | RoleStandby | RoleWitness;
+
+public fn role_name(r: &Role) -> Text {
+    match r {
+        RolePrimary => "primary".clone(),
+        RoleReplica => "replica".clone(),
+        RoleStandby => "standby".clone(),
+        RoleWitness => "witness".clone(),
+    }
+}
+
+public fn role_accepts_writes(r: &Role) -> Bool {
+    match r { RolePrimary => true, _ => false }
+}
+
+public fn role_accepts_reads(r: &Role) -> Bool {
+    match r {
+        RolePrimary => true,
+        RoleReplica => true,
+        RoleStandby => false,
+        RoleWitness => false,
+    }
+}
+
+public fn role_emits_wal(r: &Role) -> Bool {
+    match r { RolePrimary => true, _ => false }
+}
+
+public fn role_consumes_wal(r: &Role) -> Bool {
+    match r { RoleReplica => true, _ => false }
+}
+
+// -----------------------------------------------------------------------------
+// PromotionDecision — what's the destination role?
+// -----------------------------------------------------------------------------
+
+public type PromotionResult is
+      PrAllowed
+    | PrRejected(Text);
+
+public fn try_promote(from: &Role, to: &Role) -> PromotionResult {
+    match from {
+        RoleWitness => PrRejected("witness role is locked".clone()),
+        RolePrimary => match to {
+            RoleStandby => PrAllowed,
+            RolePrimary => PrAllowed,         // no-op
+            _           => PrRejected("primary may only demote to standby".clone()),
+        },
+        RoleReplica => match to {
+            RolePrimary => PrAllowed,
+            RoleReplica => PrAllowed,         // no-op
+            _           => PrRejected("replica may only promote to primary".clone()),
+        },
+        RoleStandby => match to {
+            RoleStandby => PrAllowed,
+            RolePrimary => PrAllowed,
+            RoleReplica => PrAllowed,
+            RoleWitness => PrRejected("standby cannot become witness".clone()),
+        },
+    }
+}

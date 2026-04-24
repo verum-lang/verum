@@ -1,0 +1,109 @@
+// =============================================================================
+// replication/frame.vr — WalFrameRecord transport wrapper
+// =============================================================================
+// Spec: sqlite-native.md §22 (operational tooling — CDC + replication)
+//
+// `WalFrameRecord` carries one WAL frame across the wire — header
+// metadata + payload. Identical to the on-disk WAL frame layout,
+// plus a transport-level epoch counter so replicas can detect
+// primary failover (a fresh primary starts at epoch+1).
+// =============================================================================
+
+module core.database.sqlite.native.replication.frame;
+
+mount core.*;
+mount base.{Text, Bool};
+mount collections.List;
+
+public type FrameHeader is {
+    /// Page number this frame writes.
+    page_no: Int,
+    /// `db_size_after` — non-zero for commit frames; carries the
+    /// new database page count.
+    db_size_after: Int,
+    /// Salt-1 + salt-2 from the WAL header — replica uses these to
+    /// validate frame chain.
+    salt1: Int,
+    salt2: Int,
+    /// FNV-1a / SQLite running checksum.
+    checksum1: Int,
+    checksum2: Int,
+}
+
+public type WalFrameRecord is {
+    /// Replication epoch — incremented on each primary failover so
+    /// replicas can detect the boundary.
+    epoch: Int64,
+    /// Monotonic frame index within this epoch.
+    seq: Int64,
+    header: FrameHeader,
+    /// Page payload bytes (page_size bytes).
+    payload: List<Byte>,
+}
+
+public fn frame_record(epoch: Int64, seq: Int64, header: FrameHeader, payload: List<Byte>) -> WalFrameRecord {
+    WalFrameRecord {
+        epoch: epoch,
+        seq: seq,
+        header: header,
+        payload: payload,
+    }
+}
+
+implement WalFrameRecord {
+    public fn is_commit(&self) -> Bool { self.header.db_size_after > 0 }
+    public fn payload_len(&self) -> Int { self.payload.len() }
+}
+
+// -----------------------------------------------------------------------------
+// Comparator — establish a strict total order on frames
+// -----------------------------------------------------------------------------
+//
+// Order: epoch ASC, seq ASC. Used by replica's apply-loop to detect
+// out-of-order delivery and by the lag tracker to determine "how far
+// behind".
+// =============================================================================
+
+public fn frame_precedes(a: &WalFrameRecord, b: &WalFrameRecord) -> Bool {
+    if a.epoch != b.epoch { return a.epoch < b.epoch; }
+    a.seq < b.seq
+}
+
+public fn frame_position(f: &WalFrameRecord) -> Int64 {
+    // Combine epoch + seq into a single sortable position. The
+    // upper 32 bits are the epoch; the lower 32 are the seq.
+    // Replica clamps to 32-bit seq; loom replication ratchets the
+    // epoch on overflow so this remains injective.
+    (f.epoch << (32 as Int64)) | (f.seq & ((4294967295 as Int64)))
+}
+
+// -----------------------------------------------------------------------------
+// FrameBatch — a chunk of consecutive frames the producer streams
+// -----------------------------------------------------------------------------
+
+public type FrameBatch is {
+    frames: List<WalFrameRecord>,
+    /// True ⇒ the last frame in the batch is a commit boundary.
+    /// Replica uses this to atomically swap state.
+    ends_at_commit: Bool,
+}
+
+public fn batch_empty() -> FrameBatch {
+    FrameBatch { frames: List.new(), ends_at_commit: false }
+}
+
+implement FrameBatch {
+    public fn frame_count(&self) -> Int { self.frames.len() }
+
+    public fn append(&mut self, f: WalFrameRecord) {
+        let was_commit = f.is_commit();
+        self.frames.push(f);
+        self.ends_at_commit = was_commit;
+    }
+
+    public fn last_position(&self) -> base.Maybe<Int64> {
+        if self.frames.len() == 0 { return base.None; }
+        let last = self.frames.len() - 1;
+        base.Some(frame_position(&self.frames[last]))
+    }
+}

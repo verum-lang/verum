@@ -1,0 +1,25 @@
+// =============================================================================
+// core/database/sqlite/native/replication/mod.vr
+// =============================================================================
+// Layer: 7 (consumer-facing) / 1 (pager hooks)
+// Spec: sqlite-native.md §22 (operational tooling — CDC + replication)
+//
+// Replication primitives. The unit of transport is a WAL frame —
+// primary streams committed frames in order, replica appends them
+// to its own WAL and replays.
+//
+// Submodules:
+//   * `role`      — Primary / Replica / Standby + invariants
+//   * `frame`     — WalFrameRecord transport-format wrapper
+//   * `stream`    — primary StreamProducer + replica StreamConsumer
+//   * `lag`       — replication-lag tracker + alert thresholds
+//   * `protocol`  — handshake messages (HELLO, REQUEST_FRAMES, ACK)
+// =============================================================================
+
+module core.database.sqlite.native.replication;
+
+public module role;
+public module frame;
+public module stream;
+public module lag;
+public module protocol;

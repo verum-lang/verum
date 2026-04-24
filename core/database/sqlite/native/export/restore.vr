@@ -1,0 +1,183 @@
+// =============================================================================
+// export/restore.vr — apply a dump stream to a fresh Database
+// =============================================================================
+// Spec: sqlite-native.md §22 (operational tooling — dump / restore)
+//
+// `RestoreEngine` consumes a dump (typically the output of
+// `dump_schema(...)` followed by per-row `render_row(DfInsert, ...)`
+// concatenated with `;` terminators) and applies each statement
+// in order. The engine is dump-format-aware:
+//
+//   * skips blank + `--` comment lines
+//   * splits on un-quoted `;` (string literals + `--` comments
+//     mask the terminator)
+//   * tracks BEGIN/COMMIT so a partial restore aborts cleanly
+//
+// The engine doesn't take a hard dependency on l7_api.Database;
+// the caller passes a SQL-runner closure (same shape as the
+// migrations runner uses).
+// =============================================================================
+
+module core.database.sqlite.native.export.restore;
+
+mount core.*;
+mount base.{Text, Bool, Maybe};
+mount collections.List;
+
+// -----------------------------------------------------------------------------
+// RestoreReport
+// -----------------------------------------------------------------------------
+
+public type RestoreReport is {
+    statements_applied: Int,
+    statements_failed: Int,
+    /// First failure detail; empty Text means "no failures".
+    first_failure: Text,
+    aborted: Bool,
+}
+
+public fn report_zero() -> RestoreReport {
+    RestoreReport {
+        statements_applied: 0,
+        statements_failed: 0,
+        first_failure: Text.new(),
+        aborted: false,
+    }
+}
+
+// -----------------------------------------------------------------------------
+// RestoreEngine
+// -----------------------------------------------------------------------------
+
+public type RestoreEngine is {
+    /// If true, stop on the first failure. False → keep applying
+    /// (useful for "salvage mode" dumps from corrupt sources).
+    abort_on_failure: Bool,
+}
+
+public fn engine_default() -> RestoreEngine {
+    RestoreEngine { abort_on_failure: true }
+}
+
+implement RestoreEngine {
+    pub fn lenient(mut self) -> RestoreEngine {
+        self.abort_on_failure = false;
+        self
+    }
+
+    pub fn apply(
+        &self,
+        dump: &Text,
+        runner: fn(&Text) -> Maybe<Text>,
+    ) -> RestoreReport {
+        let mut report = report_zero();
+        let stmts = split_statements(dump);
+        let mut i: Int = 0;
+        while i < stmts.len() {
+            let s = trim(&stmts[i]);
+            if s.len() == 0 || is_comment_only(&s) {
+                i = i + 1;
+                continue;
+            }
+            match (runner)(&s) {
+                None => { report.statements_applied = report.statements_applied + 1; }
+                Some(err) => {
+                    report.statements_failed = report.statements_failed + 1;
+                    if report.first_failure.len() == 0 {
+                        report.first_failure = err.clone();
+                    }
+                    if self.abort_on_failure {
+                        report.aborted = true;
+                        break;
+                    }
+                }
+            }
+            i = i + 1;
+        }
+        report
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Statement splitter — `;` terminated, string + comment aware
+// -----------------------------------------------------------------------------
+
+public fn split_statements(dump: &Text) -> List<Text> {
+    let mut out: List<Text> = List.new();
+    let bs = dump.as_bytes();
+    let mut buf: Text = Text.new();
+    let mut in_single = false;
+    let mut in_double = false;
+    let mut in_line_comment = false;
+    let mut in_block_comment = false;
+    let mut i: Int = 0;
+    while i < bs.len() {
+        let b = bs[i];
+        if in_line_comment {
+            buf.push_byte(b);
+            if b == (10 as Byte) { in_line_comment = false; }
+        } else if in_block_comment {
+            buf.push_byte(b);
+            if b == (42 as Byte) && (i + 1) < bs.len() && bs[i + 1] == (47 as Byte) {
+                buf.push_byte(bs[i + 1]);
+                in_block_comment = false;
+                i = i + 1;
+            }
+        } else if in_single {
+            buf.push_byte(b);
+            if b == (39 as Byte) {
+                if (i + 1) < bs.len() && bs[i + 1] == (39 as Byte) {
+                    buf.push_byte(bs[i + 1]);
+                    i = i + 1;
+                } else {
+                    in_single = false;
+                }
+            }
+        } else if in_double {
+            buf.push_byte(b);
+            if b == (34 as Byte) { in_double = false; }
+        } else {
+            if b == (39 as Byte) { in_single = true; buf.push_byte(b); }
+            else if b == (34 as Byte) { in_double = true; buf.push_byte(b); }
+            else if b == (45 as Byte) && (i + 1) < bs.len() && bs[i + 1] == (45 as Byte) {
+                in_line_comment = true;
+                buf.push_byte(b);
+            } else if b == (47 as Byte) && (i + 1) < bs.len() && bs[i + 1] == (42 as Byte) {
+                in_block_comment = true;
+                buf.push_byte(b);
+                buf.push_byte(bs[i + 1]);
+                i = i + 1;
+            } else if b == (59 as Byte) {
+                out.push(buf);
+                buf = Text.new();
+            } else {
+                buf.push_byte(b);
+            }
+        }
+        i = i + 1;
+    }
+    if buf.len() > 0 { out.push(buf); }
+    out
+}
+
+fn trim(t: &Text) -> Text {
+    let bs = t.as_bytes();
+    let mut start: Int = 0;
+    while start < bs.len() && is_ws(bs[start]) { start = start + 1; }
+    let mut end: Int = bs.len();
+    while end > start && is_ws(bs[end - 1]) { end = end - 1; }
+    let mut out = Text.new();
+    let mut i: Int = start;
+    while i < end { out.push_byte(bs[i]); i = i + 1; }
+    out
+}
+
+fn is_ws(b: Byte) -> Bool {
+    b == (32 as Byte) || b == (9 as Byte) || b == (10 as Byte) || b == (13 as Byte)
+}
+
+fn is_comment_only(t: &Text) -> Bool {
+    let bs = t.as_bytes();
+    if bs.len() < 2 { return false; }
+    bs[0] == (45 as Byte) && bs[1] == (45 as Byte)
+}
