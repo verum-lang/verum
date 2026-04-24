@@ -1,0 +1,117 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: quic, transport_params, rfc9000_18, roundtrip
+// @timeout: 15000
+// @expected-exit: 0
+
+// RFC 9000 §18 TransportParams wire round-trip: every set field MUST
+// survive encode → decode.
+
+mount core.*;
+mount core.collections.List;
+mount core.net.quic.transport_params.{TransportParams, encode, decode};
+mount core.net.quic.connection_id.{ConnectionId};
+
+fn default_params_roundtrip() {
+    let params = TransportParams.defaults();
+    let mut buf: List<Byte> = [];
+    encode(&params, &mut buf);
+    let decoded = decode(buf.as_slice()).unwrap();
+    assert(decoded.max_udp_payload_size         == params.max_udp_payload_size);
+    assert(decoded.ack_delay_exponent           == params.ack_delay_exponent);
+    assert(decoded.max_ack_delay_ms             == params.max_ack_delay_ms);
+    assert(decoded.active_connection_id_limit   == params.active_connection_id_limit);
+    assert(decoded.disable_active_migration     == params.disable_active_migration);
+}
+
+fn non_default_fields_roundtrip() {
+    let mut params = TransportParams.defaults();
+    params.max_idle_timeout_ms            = 30_000_u64;
+    params.initial_max_data               = 1_000_000_u64;
+    params.initial_max_stream_data_bidi_local  = 65_536_u64;
+    params.initial_max_stream_data_bidi_remote = 32_768_u64;
+    params.initial_max_stream_data_uni         = 16_384_u64;
+    params.initial_max_streams_bidi       = 100_u64;
+    params.initial_max_streams_uni        = 50_u64;
+    params.ack_delay_exponent             = 5_u8;
+    params.max_ack_delay_ms               = 50_u64;
+    params.disable_active_migration       = true;
+    params.active_connection_id_limit     = 4_u64;
+    params.grease_quic_bit                = true;
+
+    let mut buf: List<Byte> = [];
+    encode(&params, &mut buf);
+    let decoded = decode(buf.as_slice()).unwrap();
+    assert(decoded.max_idle_timeout_ms == 30_000_u64);
+    assert(decoded.initial_max_data == 1_000_000_u64);
+    assert(decoded.initial_max_stream_data_bidi_local  == 65_536_u64);
+    assert(decoded.initial_max_stream_data_bidi_remote == 32_768_u64);
+    assert(decoded.initial_max_stream_data_uni         == 16_384_u64);
+    assert(decoded.initial_max_streams_bidi == 100_u64);
+    assert(decoded.initial_max_streams_uni == 50_u64);
+    assert(decoded.ack_delay_exponent == 5_u8);
+    assert(decoded.max_ack_delay_ms == 50_u64);
+    assert(decoded.disable_active_migration == true);
+    assert(decoded.active_connection_id_limit == 4_u64);
+    assert(decoded.grease_quic_bit == true);
+}
+
+fn stateless_reset_token_roundtrip() {
+    let token: [Byte; 16] = [
+        0x10_u8, 0x20_u8, 0x30_u8, 0x40_u8, 0x50_u8, 0x60_u8, 0x70_u8, 0x80_u8,
+        0x90_u8, 0xA0_u8, 0xB0_u8, 0xC0_u8, 0xD0_u8, 0xE0_u8, 0xF0_u8, 0xFF_u8,
+    ];
+    let mut params = TransportParams.defaults();
+    params.stateless_reset_token = Some(token);
+    let mut buf: List<Byte> = [];
+    encode(&params, &mut buf);
+    let decoded = decode(buf.as_slice()).unwrap();
+    match decoded.stateless_reset_token {
+        Some(t) => {
+            let mut i: Int = 0;
+            while i < 16 {
+                assert(t[i] == token[i]);
+                i = i + 1;
+            }
+        },
+        None => panic("stateless_reset_token lost in round-trip"),
+    }
+}
+
+fn max_datagram_frame_size_feature_gated() {
+    let mut params = TransportParams.defaults();
+    params.max_datagram_frame_size = Some(65527_u64);
+    let mut buf: List<Byte> = [];
+    encode(&params, &mut buf);
+    let decoded = decode(buf.as_slice()).unwrap();
+    match decoded.max_datagram_frame_size {
+        Some(sz) => assert(sz == 65527_u64),
+        None => panic("max_datagram_frame_size lost"),
+    }
+}
+
+fn initial_source_connection_id_roundtrip() {
+    let mut params = TransportParams.defaults();
+    let cid_bytes: List<Byte> = [0xAA_u8, 0xBB_u8, 0xCC_u8, 0xDD_u8, 0xEE_u8, 0xFF_u8];
+    let cid = ConnectionId.from_bytes(cid_bytes.as_slice()).unwrap();
+    params.initial_source_connection_id = Some(cid);
+    let mut buf: List<Byte> = [];
+    encode(&params, &mut buf);
+    let decoded = decode(buf.as_slice()).unwrap();
+    match decoded.initial_source_connection_id {
+        Some(c) => assert(c.len() == 6),
+        None => panic("initial_source_cid lost"),
+    }
+}
+
+@main
+public fn main() -> Int {
+    default_params_roundtrip();
+    non_default_fields_roundtrip();
+    stateless_reset_token_roundtrip();
+    max_datagram_frame_size_feature_gated();
+    initial_source_connection_id_roundtrip();
+    print("RFC 9000 §18 TransportParams round-trip verified");
+    0
+}

@@ -1,0 +1,110 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: quic, path, challenge_response, anti_amplification, rfc9000_8_2
+// @timeout: 15000
+// @expected-exit: 0
+
+// RFC 9000 §8.2 PATH_CHALLENGE / PATH_RESPONSE echo: PATH_CHALLENGE
+// carries 8 random bytes the peer MUST echo verbatim. Server-side
+// paths start Unvalidated and enforce the 3× anti-amplification
+// budget until validation succeeds.
+
+mount core.*;
+mount core.time.instant.{Instant};
+mount core.net.addr.{SocketAddr, Ipv4Addr};
+mount core.net.quic.path.{
+    Path, PathError,
+    ANTI_AMPLIFICATION_FACTOR, CHALLENGE_TIMEOUT, MAX_CHALLENGE_ATTEMPTS,
+};
+
+fn local_addr() -> SocketAddr {
+    SocketAddr.new_v4(Ipv4Addr.new(127_u8, 0_u8, 0_u8, 1_u8), 9001)
+}
+
+fn remote_addr() -> SocketAddr {
+    SocketAddr.new_v4(Ipv4Addr.new(192_u8, 0_u8, 2_u8, 1_u8), 443)
+}
+
+fn constants_match_rfc_9000_8() {
+    // RFC 9000 §8.1: server MUST NOT send more than 3× bytes received.
+    assert(ANTI_AMPLIFICATION_FACTOR == 3_u64);
+    assert(CHALLENGE_TIMEOUT.as_millis() == 500_u64);
+    assert(MAX_CHALLENGE_ATTEMPTS == 3_u32);
+}
+
+fn unvalidated_path_enforces_amplification_cap() {
+    let mut p = Path::new(local_addr(), remote_addr(), false);
+    // Server received 1200 bytes → budget = 3 × 1200 = 3600.
+    p.on_bytes_received(1200_u64);
+    assert(p.can_send(3500_u64).is_ok());
+    // Over-budget send MUST be refused.
+    match p.can_send(4000_u64) {
+        Err(PathError.AmplificationLimitExceeded) => {},
+        _ => panic("3× cap must refuse over-budget send"),
+    }
+}
+
+fn validated_path_has_no_budget() {
+    let mut p = Path::new(local_addr(), remote_addr(), true);
+    // No received bytes; a validated path can send arbitrary data.
+    assert(p.can_send(100_000_u64).is_ok());
+    assert(p.is_validated());
+}
+
+fn begin_validation_produces_unique_challenges() {
+    let mut p = Path::new(local_addr(), remote_addr(), false);
+    let now = Instant.now();
+    let c1 = p.begin_validation(now.clone());
+    let c2 = p.begin_validation(now);
+    // Cryptographic random — some byte MUST differ.
+    let mut any_diff = false;
+    let mut i: Int = 0;
+    while i < 8 {
+        if c1[i] != c2[i] { any_diff = true; }
+        i = i + 1;
+    }
+    assert(any_diff);
+}
+
+fn on_path_response_matching_challenge_validates() {
+    let mut p = Path::new(local_addr(), remote_addr(), false);
+    let challenge = p.begin_validation(Instant.now());
+    let ok = p.on_path_response(&challenge, Instant.now()).unwrap();
+    assert(ok);
+    assert(p.is_validated());
+}
+
+fn on_path_response_stale_payload_does_not_validate() {
+    let mut p = Path::new(local_addr(), remote_addr(), false);
+    let _ = p.begin_validation(Instant.now());
+    let mismatched: [Byte; 8] = [0x00_u8; 8];
+    let r = p.on_path_response(&mismatched, Instant.now()).unwrap();
+    assert(r == false);
+    // Path stays unvalidated (or still validating).
+    assert(false == p.is_validated());
+}
+
+fn budget_grows_monotonically_with_received_bytes() {
+    let mut p = Path::new(local_addr(), remote_addr(), false);
+    p.on_bytes_received(100_u64);
+    assert(p.amp_budget_ok());                         // received=100, sent=0
+    p.on_bytes_sent(250_u64);
+    assert(p.amp_budget_ok());                         // 250 ≤ 3×100 = 300
+    p.on_bytes_sent(100_u64);
+    // 350 > 300 — over budget.
+    assert(false == p.amp_budget_ok());
+}
+
+@main
+public fn main() -> Int {
+    constants_match_rfc_9000_8();
+    unvalidated_path_enforces_amplification_cap();
+    validated_path_has_no_budget();
+    begin_validation_produces_unique_challenges();
+    on_path_response_matching_challenge_validates();
+    on_path_response_stale_payload_does_not_validate();
+    budget_grows_monotonically_with_received_bytes();
+    print("RFC 9000 §8 PATH_CHALLENGE / PATH_RESPONSE + anti-amp verified");
+    0
+}

@@ -1,0 +1,90 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: h3, frame, type_codes, rfc9114_7_2
+// @timeout: 15000
+// @expected-exit: 0
+
+// RFC 9114 §7.2 HTTP/3 frame type codepoints. Each constant MUST
+// match the IANA HTTP/3 Frame Type registry.
+
+mount core.*;
+mount core.collections.List;
+mount core.net.h3.frame.{
+    H3Frame,
+    FT_DATA, FT_HEADERS, FT_CANCEL_PUSH, FT_SETTINGS,
+    FT_PUSH_PROMISE, FT_GOAWAY, FT_MAX_PUSH_ID,
+};
+
+fn frame_type_constants_match_iana() {
+    assert(FT_DATA         == 0x00_u64);
+    assert(FT_HEADERS      == 0x01_u64);
+    // 0x02 reserved.
+    assert(FT_CANCEL_PUSH  == 0x03_u64);
+    assert(FT_SETTINGS     == 0x04_u64);
+    assert(FT_PUSH_PROMISE == 0x05_u64);
+    // 0x06 reserved.
+    assert(FT_GOAWAY       == 0x07_u64);
+    // 0x08..0x0C reserved.
+    assert(FT_MAX_PUSH_ID  == 0x0D_u64);
+}
+
+fn frame_type_codes_pairwise_distinct() {
+    let codes: [UInt64; 7] = [
+        FT_DATA, FT_HEADERS, FT_CANCEL_PUSH, FT_SETTINGS,
+        FT_PUSH_PROMISE, FT_GOAWAY, FT_MAX_PUSH_ID,
+    ];
+    let mut i: Int = 0;
+    while i < 7 {
+        let mut j: Int = i + 1;
+        while j < 7 {
+            assert(codes[i] != codes[j]);
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+}
+
+fn control_stream_vs_request_stream_legality() {
+    let data_frame     = H3Frame.DataFrame([]);
+    let headers        = H3Frame.HeadersFrame([]);
+    let cancel_push    = H3Frame.CancelPushFrame(1_u64);
+    let settings: List<(UInt64, UInt64)> = [];
+    let settings_frame = H3Frame.SettingsFrame(settings);
+    let push_promise   = H3Frame.PushPromiseFrame {
+        push_id: 1_u64, encoded_headers: [],
+    };
+    let goaway         = H3Frame.GoawayFrame(0_u64);
+    let max_push       = H3Frame.MaxPushIdFrame(10_u64);
+
+    // RFC 9114 §6.2.1 — control-stream legal frames:
+    // SETTINGS, GOAWAY, MAX_PUSH_ID, CANCEL_PUSH.
+    assert(settings_frame.is_control_stream_legal());
+    assert(goaway.is_control_stream_legal());
+    assert(max_push.is_control_stream_legal());
+    assert(cancel_push.is_control_stream_legal());
+    // DATA / HEADERS / PUSH_PROMISE illegal on control stream.
+    assert(false == data_frame.is_control_stream_legal());
+    assert(false == headers.is_control_stream_legal());
+    assert(false == push_promise.is_control_stream_legal());
+
+    // RFC 9114 §7.2.1/§7.2.2/§7.2.5 — request-stream legal frames:
+    // DATA, HEADERS, PUSH_PROMISE.
+    assert(data_frame.is_request_stream_legal());
+    assert(headers.is_request_stream_legal());
+    assert(push_promise.is_request_stream_legal());
+    // Control frames illegal on request stream.
+    assert(false == settings_frame.is_request_stream_legal());
+    assert(false == cancel_push.is_request_stream_legal());
+    assert(false == goaway.is_request_stream_legal());
+    assert(false == max_push.is_request_stream_legal());
+}
+
+@main
+public fn main() -> Int {
+    frame_type_constants_match_iana();
+    frame_type_codes_pairwise_distinct();
+    control_stream_vs_request_stream_legality();
+    print("RFC 9114 §7.2 HTTP/3 frame-type codepoints verified");
+    0
+}
