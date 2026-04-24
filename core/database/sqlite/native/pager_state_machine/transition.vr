@@ -1,0 +1,88 @@
+// Per-event state-machine transitions.
+
+module core.database.sqlite.native.pager_state_machine.transition;
+
+mount core.database.sqlite.native.pager_state_machine.state.{
+    PagerState, PsOpen, PsReader,
+    PsWriterLocked, PsWriterCacheMod, PsWriterDbMod, PsWriterFinished, PsError,
+};
+mount base.{Bool, Text};
+
+public type PagerEvent is
+    | PeOpen              // sqlite3_open
+    | PeBeginRead         // BEGIN (implicit read)
+    | PeBeginWrite        // write attempt → take RESERVED
+    | PeWriteCache        // first dirty page created
+    | PeSyncJournal       // journal fsync completes
+    | PeCommit            // COMMIT → acquire EXCLUSIVE
+    | PeRelease           // drop locks, return to READER
+    | PeRollback          // ROLLBACK → back to READER
+    | PeClose             // sqlite3_close
+    | PeFault             // unrecoverable error
+    ;
+
+public fn event_name(e: &PagerEvent) -> Text {
+    match e {
+        PeOpen         => "open".clone(),
+        PeBeginRead    => "begin_read".clone(),
+        PeBeginWrite   => "begin_write".clone(),
+        PeWriteCache   => "write_cache".clone(),
+        PeSyncJournal  => "sync_journal".clone(),
+        PeCommit       => "commit".clone(),
+        PeRelease      => "release".clone(),
+        PeRollback     => "rollback".clone(),
+        PeClose        => "close".clone(),
+        PeFault        => "fault".clone(),
+    }
+}
+
+// Apply event to state — returns new state (or PsError if not allowed).
+public fn step(s: &PagerState, e: &PagerEvent) -> PagerState {
+    // Any event can fault.
+    match e { PeFault => return PsError, _ => {} }
+    // Once in error, only close can exit.
+    match s {
+        PsError => match e { PeClose => return PsOpen, _ => return PsError },
+        _ => {},
+    }
+    match s {
+        PsOpen => match e {
+            PeOpen      => PsOpen,
+            PeBeginRead => PsReader,
+            PeClose     => PsOpen,
+            _           => PsError,
+        },
+        PsReader => match e {
+            PeBeginWrite => PsWriterLocked,
+            PeRelease    => PsOpen,
+            PeClose      => PsOpen,
+            _            => PsReader,
+        },
+        PsWriterLocked => match e {
+            PeWriteCache => PsWriterCacheMod,
+            PeRollback   => PsReader,
+            PeCommit     => PsWriterFinished,
+            _            => PsWriterLocked,
+        },
+        PsWriterCacheMod => match e {
+            PeSyncJournal => PsWriterDbMod,
+            PeRollback    => PsReader,
+            _             => PsWriterCacheMod,
+        },
+        PsWriterDbMod => match e {
+            PeCommit   => PsWriterFinished,
+            PeRollback => PsReader,
+            _          => PsWriterDbMod,
+        },
+        PsWriterFinished => match e {
+            PeRelease => PsReader,
+            _         => PsWriterFinished,
+        },
+        PsError => PsError,
+    }
+}
+
+public fn is_legal(s: &PagerState, e: &PagerEvent) -> Bool {
+    let ns = step(s, e);
+    match ns { PsError => false, _ => true }
+}

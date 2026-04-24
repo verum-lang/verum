@@ -1,0 +1,17 @@
+// =============================================================================
+// core/database/sqlite/native/stat4_sample_api/mod.vr
+// =============================================================================
+// sqlite_stat4 sample row shape — used by ANALYZE to give the planner
+// per-index-column selectivity.
+// Spec §13.2 — statistics.
+//
+// sqlite_stat4(tbl, idx, neq, nlt, ndlt, sample)
+//   neq   — number of rows equal to the prefix (list of ints per column)
+//   nlt   — number of rows strictly less than the prefix
+//   ndlt  — number of distinct rows strictly less than the prefix
+//   sample — raw key bytes
+// =============================================================================
+
+module core.database.sqlite.native.stat4_sample_api;
+
+public module sample;

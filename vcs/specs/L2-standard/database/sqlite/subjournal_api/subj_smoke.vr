@@ -1,0 +1,64 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, subjournal_api, pager
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.subjournal_api.record.{
+    SubjRecord,
+    new, on_disk_length, offset_of, is_valid,
+};
+mount core.database.sqlite.native.subjournal_api.mark.{
+    SubjMark,
+    open, records_to_rollback, truncate_point,
+};
+mount base.{Bool, Int64};
+
+fn test_on_disk_length_includes_page_header() {
+    let r = new(42 as u32, 4096);
+    assert_eq(on_disk_length(&r), 4100);
+}
+
+fn test_offset_of_nth_record() {
+    // page_size 4096, each record 4100 bytes
+    assert_eq(offset_of(0, 4096), 0 as Int64);
+    assert_eq(offset_of(1, 4096), 4100 as Int64);
+    assert_eq(offset_of(3, 4096), 12300 as Int64);
+}
+
+fn test_record_validity() {
+    let good = new(1 as u32, 4096);
+    assert(is_valid(&good));
+    let bad = new(2 as u32, 0);
+    assert(!is_valid(&bad));
+    let bad2 = new(2 as u32, -100);
+    assert(!is_valid(&bad2));
+}
+
+fn test_mark_open_captures_count() {
+    let m = open("sp1".clone(), 10 as Int64);
+    assert(m.savepoint_name == "sp1".clone());
+    assert_eq(m.record_count_at_open, 10 as Int64);
+}
+
+fn test_records_to_rollback() {
+    let m = open("sp".clone(), 10 as Int64);
+    assert_eq(records_to_rollback(&m, 15 as Int64), 5 as Int64);
+    assert_eq(records_to_rollback(&m, 10 as Int64), 0 as Int64);
+    assert_eq(records_to_rollback(&m, 5 as Int64),  0 as Int64);    // clamped
+}
+
+fn test_truncate_point() {
+    let m = open("sp".clone(), 7 as Int64);
+    assert_eq(truncate_point(&m), 7 as Int64);
+}
+
+fn main() {
+    test_on_disk_length_includes_page_header();
+    test_offset_of_nth_record();
+    test_record_validity();
+    test_mark_open_captures_count();
+    test_records_to_rollback();
+    test_truncate_point();
+}

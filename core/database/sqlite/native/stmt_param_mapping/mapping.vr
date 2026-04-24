@@ -1,0 +1,91 @@
+// Per-statement parameter slot allocator — converts a parse-order stream of
+// ParamForm into slot indices.
+
+module core.database.sqlite.native.stmt_param_mapping.mapping;
+
+mount core.database.sqlite.native.stmt_param_mapping.form.{
+    ParamForm, PfAnonymous, PfPositional, PfColon, PfAt, PfDollar,
+    is_named, param_name, explicit_slot,
+};
+mount base.{Bool, Text, Maybe};
+mount core.collections.list.{List};
+
+public type Mapping is {
+    slot_count: Int,                 // highest slot number seen
+    names: List<Text>,               // per-slot name (empty if anonymous)
+    next_auto: Int,                  // next auto-assigned anonymous slot
+};
+
+public fn empty() -> Mapping {
+    Mapping {
+        slot_count: 0,
+        names: [].clone() as List<Text>,
+        next_auto: 1,
+    }
+}
+
+// Ensure `slot` is within the names vector (1-based); extend with "".
+fn ensure_slot(mut m: Mapping, slot: Int) -> Mapping {
+    while m.names.len() < slot {
+        m.names.push("".clone());
+    }
+    if slot > m.slot_count { m.slot_count = slot; }
+    m
+}
+
+// Find the slot number (1-based) already assigned to a named parameter; 0 if new.
+fn find_named_slot(m: &Mapping, name: &Text) -> Int {
+    let mut i: Int = 0;
+    while i < m.names.len() {
+        if m.names[i] == *name { return i + 1; }
+        i = i + 1;
+    }
+    0
+}
+
+// Add one parameter occurrence; returns the new mapping.
+public fn add(mut m: Mapping, p: ParamForm) -> Mapping {
+    match p {
+        PfAnonymous => {
+            let slot = m.next_auto;
+            m.next_auto = m.next_auto + 1;
+            m = ensure_slot(m, slot);
+            m
+        },
+        PfPositional(n) => {
+            if n >= m.next_auto { m.next_auto = n + 1; }
+            m = ensure_slot(m, n);
+            m
+        },
+        _ => {
+            let key = param_name(&p);
+            let existing = find_named_slot(&m, &key);
+            if existing > 0 {
+                m
+            } else {
+                let slot = m.next_auto;
+                m.next_auto = m.next_auto + 1;
+                let mut m2 = ensure_slot(m, slot);
+                m2.names[slot - 1] = key;
+                m2
+            }
+        },
+    }
+}
+
+public fn slot_count(m: &Mapping) -> Int {
+    m.slot_count
+}
+
+// Resolve a named parameter back to its slot; 0 if unknown.
+public fn resolve_name(m: &Mapping, name: &Text) -> Int {
+    find_named_slot(m, name)
+}
+
+public fn is_anonymous_slot(m: &Mapping, slot: Int) -> Bool {
+    if slot < 1 { return false; }
+    if slot > m.names.len() { return false; }
+    m.names[slot - 1].len() == 0
+}
+
+public fn max_slot_reserved() -> Int { 999 }   // SQLite's SQLITE_MAX_VARIABLE_NUMBER default

@@ -1,0 +1,18 @@
+// =============================================================================
+// core/database/sqlite/native/stmt_param_mapping/mod.vr
+// =============================================================================
+// Prepared-statement parameter taxonomy + name → slot-index table.
+// Spec §11.3 — bind parameter resolution.
+//
+// SQLite accepts five parameter forms in SQL:
+//   ?          — anonymous positional (auto-assigned next slot)
+//   ?NNN       — explicit positional (NNN is slot number; 1-based)
+//   :name      — named
+//   @name      — named (equivalent to :name)
+//   $name      — named (SQL-92 host variable)
+// =============================================================================
+
+module core.database.sqlite.native.stmt_param_mapping;
+
+public module form;
+public module mapping;

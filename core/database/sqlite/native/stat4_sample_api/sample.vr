@@ -1,0 +1,65 @@
+// Per-sample row + helper predicates.
+
+module core.database.sqlite.native.stat4_sample_api.sample;
+
+mount base.{Bool, Text, Int64};
+mount core.collections.list.{List};
+
+public type Stat4Sample is {
+    table_name: Text,
+    index_name: Text,
+    neq: List<Int64>,    // per-column equality counts
+    nlt: List<Int64>,    // per-column less-than counts
+    ndlt: List<Int64>,   // per-column distinct less-than counts
+    sample_bytes: Int,
+};
+
+public fn new(
+    table: Text,
+    index: Text,
+    neq: List<Int64>,
+    nlt: List<Int64>,
+    ndlt: List<Int64>,
+    sample_bytes: Int,
+) -> Stat4Sample {
+    Stat4Sample {
+        table_name: table,
+        index_name: index,
+        neq: neq, nlt: nlt, ndlt: ndlt,
+        sample_bytes: sample_bytes,
+    }
+}
+
+public fn column_count(s: &Stat4Sample) -> Int {
+    s.neq.len()
+}
+
+public fn arity_consistent(s: &Stat4Sample) -> Bool {
+    s.neq.len() == s.nlt.len() && s.neq.len() == s.ndlt.len()
+}
+
+public fn is_well_formed(s: &Stat4Sample) -> Bool {
+    if !arity_consistent(s) { return false; }
+    if s.neq.len() == 0     { return false; }
+    if s.sample_bytes <= 0  { return false; }
+    // nlt and ndlt must be monotone in s.ndlt (distinct <= all).
+    let mut i: Int = 0;
+    while i < s.neq.len() {
+        if s.ndlt[i] > s.nlt[i] { return false; }
+        if s.nlt[i] < (0 as Int64) { return false; }
+        if s.neq[i] < (0 as Int64) { return false; }
+        i = i + 1;
+    }
+    true
+}
+
+// Return approximated selectivity for an equality lookup on the first `prefix`
+// columns — rows_eq / rows_total, as a log-est difference.
+public fn equality_rows_for_prefix(s: &Stat4Sample, prefix: Int) -> Int64 {
+    if prefix <= 0 { return 0 as Int64; }
+    let idx = if prefix > s.neq.len() { s.neq.len() - 1 } else { prefix - 1 };
+    s.neq[idx]
+}
+
+// ANALYZE stores up to 24 samples per index by default.
+public fn default_samples_per_index() -> Int { 24 }

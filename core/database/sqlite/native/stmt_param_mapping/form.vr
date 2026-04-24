@@ -1,0 +1,57 @@
+// Parameter form taxonomy.
+
+module core.database.sqlite.native.stmt_param_mapping.form;
+
+mount base.{Bool, Text};
+
+public type ParamForm is
+    | PfAnonymous         // ?
+    | PfPositional(Int)   // ?NNN — 1-based
+    | PfColon(Text)       // :name
+    | PfAt(Text)          // @name
+    | PfDollar(Text)      // $name
+    ;
+
+public fn form_name(p: &ParamForm) -> Text {
+    match p {
+        PfAnonymous     => "anonymous".clone(),
+        PfPositional(_) => "positional".clone(),
+        PfColon(_)      => "colon".clone(),
+        PfAt(_)         => "at".clone(),
+        PfDollar(_)     => "dollar".clone(),
+    }
+}
+
+public fn is_named(p: &ParamForm) -> Bool {
+    match p {
+        PfColon(_)  => true,
+        PfAt(_)     => true,
+        PfDollar(_) => true,
+        _           => false,
+    }
+}
+
+public fn is_positional(p: &ParamForm) -> Bool {
+    match p {
+        PfAnonymous     => true,
+        PfPositional(_) => true,
+        _               => false,
+    }
+}
+
+public fn param_name(p: &ParamForm) -> Text {
+    match p {
+        PfColon(name)  => ":".clone() + name.clone(),
+        PfAt(name)     => "@".clone() + name.clone(),
+        PfDollar(name) => "$".clone() + name.clone(),
+        _              => "".clone(),
+    }
+}
+
+// Explicit positional slot number, or 0 for auto-assigned.
+public fn explicit_slot(p: &ParamForm) -> Int {
+    match p {
+        PfPositional(n) => n,
+        _               => 0,
+    }
+}

@@ -1,0 +1,106 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, eqp_node_emitter, explain
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.eqp_node_emitter.node.{
+    EqpNode, EqpTree,
+    new, is_root, empty_tree, add, count,
+    has_node_with_id, depth_of, children_count,
+};
+mount core.database.sqlite.native.eqp_node_emitter.render.{
+    render_line, render_all, max_depth,
+};
+mount base.{Bool};
+
+fn test_node_root_flag() {
+    let root = new(1, 0, "SCAN users".clone());
+    assert(is_root(&root));
+    let child = new(2, 1, "USE TEMP B-TREE".clone());
+    assert(!is_root(&child));
+}
+
+fn test_empty_tree() {
+    let t = empty_tree();
+    assert_eq(count(&t), 0);
+    assert(!has_node_with_id(&t, 1));
+    assert_eq(max_depth(&t), 0);
+}
+
+fn test_add_and_count() {
+    let t = add(add(empty_tree(), new(1, 0, "A".clone())), new(2, 1, "B".clone()));
+    assert_eq(count(&t), 2);
+    assert(has_node_with_id(&t, 1));
+    assert(has_node_with_id(&t, 2));
+    assert(!has_node_with_id(&t, 3));
+}
+
+fn test_depth_of() {
+    let mut t = empty_tree();
+    t = add(t, new(1, 0, "root".clone()));
+    t = add(t, new(2, 1, "child".clone()));
+    t = add(t, new(3, 2, "grandchild".clone()));
+    assert_eq(depth_of(&t, 1), 1);
+    assert_eq(depth_of(&t, 2), 2);
+    assert_eq(depth_of(&t, 3), 3);
+    assert_eq(depth_of(&t, 99), -1);
+}
+
+fn test_children_count() {
+    let mut t = empty_tree();
+    t = add(t, new(1, 0, "root".clone()));
+    t = add(t, new(2, 1, "a".clone()));
+    t = add(t, new(3, 1, "b".clone()));
+    t = add(t, new(4, 2, "a.1".clone()));
+    assert_eq(children_count(&t, 0), 1);
+    assert_eq(children_count(&t, 1), 2);
+    assert_eq(children_count(&t, 2), 1);
+    assert_eq(children_count(&t, 3), 0);
+}
+
+fn test_max_depth() {
+    let mut t = empty_tree();
+    t = add(t, new(1, 0, "root".clone()));
+    t = add(t, new(2, 1, "c".clone()));
+    t = add(t, new(3, 2, "gc".clone()));
+    assert_eq(max_depth(&t), 3);
+}
+
+fn test_render_line_for_root() {
+    let mut t = empty_tree();
+    t = add(t, new(1, 0, "SCAN t".clone()));
+    let line = render_line(&t, &t.nodes[0]);
+    // depth 1 → safe level = 0 → empty prefix
+    assert(line == "SCAN t".clone());
+}
+
+fn test_render_line_for_child_has_prefix() {
+    let mut t = empty_tree();
+    t = add(t, new(1, 0, "root".clone()));
+    t = add(t, new(2, 1, "child".clone()));
+    let line = render_line(&t, &t.nodes[1]);
+    // depth 2 → safe level = 1 → "|--" prefix + detail
+    assert(line == "|--child".clone());
+}
+
+fn test_render_all_joins_with_newline() {
+    let mut t = empty_tree();
+    t = add(t, new(1, 0, "A".clone()));
+    t = add(t, new(2, 1, "B".clone()));
+    let out = render_all(&t);
+    assert(out == "A\n|--B".clone());
+}
+
+fn main() {
+    test_node_root_flag();
+    test_empty_tree();
+    test_add_and_count();
+    test_depth_of();
+    test_children_count();
+    test_max_depth();
+    test_render_line_for_root();
+    test_render_line_for_child_has_prefix();
+    test_render_all_joins_with_newline();
+}

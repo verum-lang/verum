@@ -1,0 +1,114 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, hot_journal_detector, pager
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.hot_journal_detector.signal.{
+    Signal, empty_snapshot, is_absent, is_empty, has_owner, header_intact,
+};
+mount core.database.sqlite.native.hot_journal_detector.verdict.{
+    Verdict, VdNoJournal, VdStaleEmpty, VdOwnedByWriter, VdMalformed, VdHot,
+    verdict_name, requires_replay, safe_to_read_directly, classify,
+};
+mount base.{Bool, Int64};
+
+fn test_empty_snapshot_fields() {
+    let s = empty_snapshot();
+    assert(is_absent(&s));
+    assert(!is_empty(&s));
+    assert(!has_owner(&s));
+    assert(!header_intact(&s));
+}
+
+fn test_verdict_names() {
+    assert(verdict_name(&VdNoJournal)     == "no_journal".clone());
+    assert(verdict_name(&VdStaleEmpty)    == "stale_empty".clone());
+    assert(verdict_name(&VdOwnedByWriter) == "owned_by_writer".clone());
+    assert(verdict_name(&VdMalformed)     == "malformed".clone());
+    assert(verdict_name(&VdHot)           == "hot".clone());
+}
+
+fn test_replay_and_safe_predicates() {
+    assert(requires_replay(&VdHot));
+    assert(!requires_replay(&VdMalformed));
+    assert(safe_to_read_directly(&VdNoJournal));
+    assert(safe_to_read_directly(&VdStaleEmpty));
+    assert(safe_to_read_directly(&VdOwnedByWriter));
+    assert(!safe_to_read_directly(&VdHot));
+}
+
+fn test_classify_no_journal() {
+    let s = empty_snapshot();
+    match classify(&s) { VdNoJournal => {}, _ => assert(false) }
+}
+
+fn test_classify_stale_empty() {
+    let s = Signal {
+        journal_exists: true,
+        journal_nonempty: false,
+        exclusive_held_on_db: false,
+        magic_matches: false,
+        reserved_byte_matches: false,
+        journal_size_bytes: 0 as Int64,
+    };
+    match classify(&s) { VdStaleEmpty => {}, _ => assert(false) }
+}
+
+fn test_classify_owned_by_writer() {
+    let s = Signal {
+        journal_exists: true,
+        journal_nonempty: true,
+        exclusive_held_on_db: true,
+        magic_matches: true,
+        reserved_byte_matches: true,
+        journal_size_bytes: 4096 as Int64,
+    };
+    match classify(&s) { VdOwnedByWriter => {}, _ => assert(false) }
+}
+
+fn test_classify_malformed() {
+    let s = Signal {
+        journal_exists: true,
+        journal_nonempty: true,
+        exclusive_held_on_db: false,
+        magic_matches: false,
+        reserved_byte_matches: true,
+        journal_size_bytes: 4096 as Int64,
+    };
+    match classify(&s) { VdMalformed => {}, _ => assert(false) }
+    let s2 = Signal {
+        journal_exists: true,
+        journal_nonempty: true,
+        exclusive_held_on_db: false,
+        magic_matches: true,
+        reserved_byte_matches: false,
+        journal_size_bytes: 4096 as Int64,
+    };
+    match classify(&s2) { VdMalformed => {}, _ => assert(false) }
+}
+
+fn test_classify_hot() {
+    let s = Signal {
+        journal_exists: true,
+        journal_nonempty: true,
+        exclusive_held_on_db: false,
+        magic_matches: true,
+        reserved_byte_matches: true,
+        journal_size_bytes: 4096 as Int64,
+    };
+    match classify(&s) { VdHot => {}, _ => assert(false) }
+    assert(requires_replay(&classify(&s)));
+}
+
+fn main() {
+    test_empty_snapshot_fields();
+    test_verdict_names();
+    test_replay_and_safe_predicates();
+    test_classify_no_journal();
+    test_classify_stale_empty();
+    test_classify_owned_by_writer();
+    test_classify_malformed();
+    test_classify_hot();
+}

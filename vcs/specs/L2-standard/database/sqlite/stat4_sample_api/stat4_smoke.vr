@@ -1,0 +1,75 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, stat4_sample_api, statistics
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.stat4_sample_api.sample.{
+    Stat4Sample,
+    new, column_count, arity_consistent, is_well_formed,
+    equality_rows_for_prefix, default_samples_per_index,
+};
+mount base.{Bool, Int64};
+mount core.collections.list.{List};
+
+fn test_default_sample_count() {
+    assert_eq(default_samples_per_index(), 24);
+}
+
+fn test_column_count_and_arity() {
+    let neq:  List<Int64> = [10 as Int64, 5 as Int64].clone() as List<Int64>;
+    let nlt:  List<Int64> = [100 as Int64, 50 as Int64].clone() as List<Int64>;
+    let ndlt: List<Int64> = [90 as Int64, 40 as Int64].clone() as List<Int64>;
+    let s = new("t".clone(), "idx".clone(), neq, nlt, ndlt, 64);
+    assert_eq(column_count(&s), 2);
+    assert(arity_consistent(&s));
+    assert(is_well_formed(&s));
+}
+
+fn test_ill_formed_arity_mismatch() {
+    let neq:  List<Int64> = [1 as Int64, 2 as Int64].clone() as List<Int64>;
+    let nlt:  List<Int64> = [10 as Int64].clone() as List<Int64>;
+    let ndlt: List<Int64> = [1 as Int64].clone() as List<Int64>;
+    let s = new("t".clone(), "i".clone(), neq, nlt, ndlt, 32);
+    assert(!arity_consistent(&s));
+    assert(!is_well_formed(&s));
+}
+
+fn test_ill_formed_zero_sample_bytes() {
+    let neq:  List<Int64> = [1 as Int64].clone() as List<Int64>;
+    let nlt:  List<Int64> = [2 as Int64].clone() as List<Int64>;
+    let ndlt: List<Int64> = [1 as Int64].clone() as List<Int64>;
+    let s = new("t".clone(), "i".clone(), neq, nlt, ndlt, 0);
+    assert(!is_well_formed(&s));
+}
+
+fn test_ill_formed_ndlt_gt_nlt() {
+    let neq:  List<Int64> = [5 as Int64].clone() as List<Int64>;
+    let nlt:  List<Int64> = [10 as Int64].clone() as List<Int64>;
+    let ndlt: List<Int64> = [20 as Int64].clone() as List<Int64>;   // distinct > total → invalid
+    let s = new("t".clone(), "i".clone(), neq, nlt, ndlt, 16);
+    assert(!is_well_formed(&s));
+}
+
+fn test_equality_rows_for_prefix_bounds() {
+    let neq:  List<Int64> = [100 as Int64, 20 as Int64, 5 as Int64].clone() as List<Int64>;
+    let nlt:  List<Int64> = [1000 as Int64, 500 as Int64, 100 as Int64].clone() as List<Int64>;
+    let ndlt: List<Int64> = [900 as Int64, 400 as Int64, 80 as Int64].clone() as List<Int64>;
+    let s = new("t".clone(), "i".clone(), neq, nlt, ndlt, 24);
+    assert_eq(equality_rows_for_prefix(&s, 0), 0 as Int64);
+    assert_eq(equality_rows_for_prefix(&s, 1), 100 as Int64);
+    assert_eq(equality_rows_for_prefix(&s, 2), 20 as Int64);
+    assert_eq(equality_rows_for_prefix(&s, 3), 5 as Int64);
+    // prefix beyond arity → clamped to last column
+    assert_eq(equality_rows_for_prefix(&s, 10), 5 as Int64);
+}
+
+fn main() {
+    test_default_sample_count();
+    test_column_count_and_arity();
+    test_ill_formed_arity_mismatch();
+    test_ill_formed_zero_sample_bytes();
+    test_ill_formed_ndlt_gt_nlt();
+    test_equality_rows_for_prefix_bounds();
+}

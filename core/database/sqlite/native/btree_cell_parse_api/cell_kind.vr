@@ -1,0 +1,67 @@
+// B-tree page cell kind.
+
+module core.database.sqlite.native.btree_cell_parse_api.cell_kind;
+
+mount base.{Bool, Text};
+
+public type CellKind is
+    | CkTableLeaf        // page type 0x0D
+    | CkTableInterior    // page type 0x05
+    | CkIndexLeaf        // page type 0x0A
+    | CkIndexInterior    // page type 0x02
+    ;
+
+public fn kind_name(k: &CellKind) -> Text {
+    match k {
+        CkTableLeaf     => "table_leaf".clone(),
+        CkTableInterior => "table_interior".clone(),
+        CkIndexLeaf     => "index_leaf".clone(),
+        CkIndexInterior => "index_interior".clone(),
+    }
+}
+
+// SQLite page-type byte stored at page offset 0.
+public fn page_type_byte(k: &CellKind) -> u8 {
+    match k {
+        CkTableLeaf     => 0x0D as u8,
+        CkTableInterior => 0x05 as u8,
+        CkIndexLeaf     => 0x0A as u8,
+        CkIndexInterior => 0x02 as u8,
+    }
+}
+
+public fn is_leaf(k: &CellKind) -> Bool {
+    match k {
+        CkTableLeaf => true,
+        CkIndexLeaf => true,
+        _           => false,
+    }
+}
+
+public fn is_interior(k: &CellKind) -> Bool {
+    !is_leaf(k)
+}
+
+public fn is_table(k: &CellKind) -> Bool {
+    match k {
+        CkTableLeaf     => true,
+        CkTableInterior => true,
+        _               => false,
+    }
+}
+
+public fn is_index(k: &CellKind) -> Bool {
+    !is_table(k)
+}
+
+public fn has_rowid(k: &CellKind) -> Bool {
+    is_table(k)
+}
+
+public fn has_left_child_pointer(k: &CellKind) -> Bool {
+    is_interior(k)
+}
+
+public fn has_payload(k: &CellKind) -> Bool {
+    match k { CkTableInterior => false, _ => true }
+}

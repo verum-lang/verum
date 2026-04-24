@@ -1,0 +1,15 @@
+// =============================================================================
+// core/database/sqlite/native/eqp_node_emitter/mod.vr
+// =============================================================================
+// EXPLAIN QUERY PLAN node taxonomy + indent-based tree renderer.
+// Spec §22.3 — EQP output.
+//
+// EQP emits (id, parent, notused, detail) rows. This catalogue mirrors that
+// shape plus a pure-text indent renderer that matches SQLite shell output:
+//   "--"  per level
+// =============================================================================
+
+module core.database.sqlite.native.eqp_node_emitter;
+
+public module node;
+public module render;

@@ -1,0 +1,31 @@
+// SAVEPOINT mark into the sub-journal — records the record-count at the time
+// the savepoint opened.
+
+module core.database.sqlite.native.subjournal_api.mark;
+
+mount base.{Bool, Int64, Text};
+
+public type SubjMark is {
+    savepoint_name: Text,
+    record_count_at_open: Int64,
+};
+
+public fn open(savepoint_name: Text, current_record_count: Int64) -> SubjMark {
+    SubjMark {
+        savepoint_name: savepoint_name,
+        record_count_at_open: current_record_count,
+    }
+}
+
+// On ROLLBACK TO, pages beyond this mark are restored. Returns the number of
+// entries to replay.
+public fn records_to_rollback(m: &SubjMark, current_record_count: Int64) -> Int64 {
+    if current_record_count <= m.record_count_at_open { return 0 as Int64; }
+    current_record_count - m.record_count_at_open
+}
+
+// The sub-journal file can be truncated back to `record_count_at_open` once
+// the rollback is done.
+public fn truncate_point(m: &SubjMark) -> Int64 {
+    m.record_count_at_open
+}

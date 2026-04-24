@@ -1,0 +1,57 @@
+// VTab distinct-consumer mode.
+
+module core.database.sqlite.native.vtab_distinct_api.mode;
+
+mount base.{Bool, Text, Maybe};
+
+public type DistinctMode is
+    | DmNone                  // 0 — every row
+    | DmOrderByOnly           // 1 — ORDER BY satisfied, dup rows OK
+    | DmGroupBy               // 2 — DISTINCT / GROUP BY, one per equality class
+    | DmAggressiveSkip        // 3 — may even skip ORDER BY ties
+    ;
+
+public fn code(m: &DistinctMode) -> Int {
+    match m {
+        DmNone            => 0,
+        DmOrderByOnly     => 1,
+        DmGroupBy         => 2,
+        DmAggressiveSkip  => 3,
+    }
+}
+
+public fn from_code(c: Int) -> Maybe<DistinctMode> {
+    if c == 0 { return Maybe.Some(DmNone); }
+    if c == 1 { return Maybe.Some(DmOrderByOnly); }
+    if c == 2 { return Maybe.Some(DmGroupBy); }
+    if c == 3 { return Maybe.Some(DmAggressiveSkip); }
+    Maybe.None
+}
+
+public fn mode_name(m: &DistinctMode) -> Text {
+    match m {
+        DmNone           => "NONE".clone(),
+        DmOrderByOnly    => "ORDER_BY".clone(),
+        DmGroupBy        => "GROUP_BY".clone(),
+        DmAggressiveSkip => "AGGRESSIVE".clone(),
+    }
+}
+
+// Modes >= 1 allow the vtab to skip duplicates on some condition.
+public fn permits_skip(m: &DistinctMode) -> Bool {
+    match m { DmNone => false, _ => true }
+}
+
+// Modes >= 2 permit skipping full equality classes; mode 1 only allows the
+// vtab to reorder within ORDER BY ties.
+public fn permits_class_skip(m: &DistinctMode) -> Bool {
+    match m {
+        DmGroupBy        => true,
+        DmAggressiveSkip => true,
+        _                => false,
+    }
+}
+
+public fn stricter_than(a: &DistinctMode, b: &DistinctMode) -> Bool {
+    code(a) > code(b)
+}

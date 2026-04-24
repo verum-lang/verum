@@ -1,0 +1,18 @@
+// =============================================================================
+// core/database/sqlite/native/hot_journal_detector/mod.vr
+// =============================================================================
+// Hot-journal detection — when a crash leaves an unfinished rollback journal,
+// the next reader must detect and replay it before accessing the DB.
+// Spec §6.2.2 — hot journal detection.
+//
+// A journal is "hot" when all of the following hold:
+//   * journal file exists and is non-empty
+//   * the corresponding DB file does NOT have an exclusive lock held
+//   * journal header's magic matches
+//   * journal's reserved byte of the DB header matches
+// =============================================================================
+
+module core.database.sqlite.native.hot_journal_detector;
+
+public module signal;
+public module verdict;

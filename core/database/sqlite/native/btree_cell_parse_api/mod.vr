@@ -1,0 +1,21 @@
+// =============================================================================
+// core/database/sqlite/native/btree_cell_parse_api/mod.vr
+// =============================================================================
+// B-tree cell byte-level layout — table-leaf / table-interior / index-leaf /
+// index-interior cells, plus their parsed-size helpers.
+// Spec §12.3 — B-tree cell formats.
+//
+// Table-leaf cell:
+//   varint payload_size  +  varint rowid  +  payload_prefix  +  [overflow_page (4B)]
+// Table-interior cell:
+//   u32 left_child_page  +  varint rowid
+// Index-leaf cell:
+//   varint payload_size  +  payload_prefix  +  [overflow_page (4B)]
+// Index-interior cell:
+//   u32 left_child_page  +  varint payload_size  +  payload_prefix  +  [overflow_page (4B)]
+// =============================================================================
+
+module core.database.sqlite.native.btree_cell_parse_api;
+
+public module cell_kind;
+public module parsed;

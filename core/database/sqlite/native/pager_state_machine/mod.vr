@@ -1,0 +1,22 @@
+// =============================================================================
+// core/database/sqlite/native/pager_state_machine/mod.vr
+// =============================================================================
+// Pager state machine — per-pager state that mirrors PAGER_* in SQLite's
+// pager.c (rollback-journal mode; WAL mode has its own sub-states inside
+// READER/WRITER).
+// Spec §6.1 — pager states.
+//
+// States (classic rollback-journal):
+//   OPEN        — no database file is open
+//   READER      — has a shared lock + can read committed data
+//   WRITER_LOCKED    — RESERVED lock, no data written yet
+//   WRITER_CACHEMOD  — data mod in cache, journal not sync'd
+//   WRITER_DBMOD     — journal sync'd, may write to DB file
+//   WRITER_FINISHED  — EXCLUSIVE lock held, about to release
+//   ERROR       — unrecoverable error occurred
+// =============================================================================
+
+module core.database.sqlite.native.pager_state_machine;
+
+public module state;
+public module transition;

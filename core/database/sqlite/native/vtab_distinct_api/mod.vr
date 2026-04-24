@@ -1,0 +1,17 @@
+// =============================================================================
+// core/database/sqlite/native/vtab_distinct_api/mod.vr
+// =============================================================================
+// sqlite3_vtab_distinct (3.38+) — advertises to a vtab that the planner only
+// needs DISTINCT / ORDER BY subset of rows.
+// Spec §16.1.12 — vtab distinct protocol.
+//
+// Return values of sqlite3_vtab_distinct():
+//   0 — generic query; every matching row needed
+//   1 — ORDER BY is satisfied by the index; dup rows OK
+//   2 — GROUP BY / DISTINCT — only one row per equality class needed
+//   3 — same as 2, vtab may even skip equality-ties of the ORDER BY column
+// =============================================================================
+
+module core.database.sqlite.native.vtab_distinct_api;
+
+public module mode;

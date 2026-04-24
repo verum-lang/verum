@@ -540,3 +540,19 @@ public module checkpoint_frame_range;
 public module lookaside_allocator_api;
 // - omit_join_ordering: 7-reason reorder-barrier lattice (hard vs preference)
 public module omit_join_ordering;
+// - subjournal_api: statement-level rollback journal — SubjRecord + SavepointMark
+public module subjournal_api;
+// - stat4_sample_api: sqlite_stat4 sample row (neq/nlt/ndlt + sample bytes)
+public module stat4_sample_api;
+// - btree_cell_parse_api: 4-kind cell (table/index × leaf/interior) + parsed layout
+public module btree_cell_parse_api;
+// - pager_state_machine: 7-state pager + 10-event transition matrix
+public module pager_state_machine;
+// - vtab_distinct_api: sqlite3_vtab_distinct 4-mode return (3.38+)
+public module vtab_distinct_api;
+// - stmt_param_mapping: prepared-stmt ?/?NNN/:x/@x/$x → slot-index mapping
+public module stmt_param_mapping;
+// - hot_journal_detector: Signal snapshot + 5-verdict classifier (hot/absent/owned/malformed)
+public module hot_journal_detector;
+// - eqp_node_emitter: EXPLAIN QUERY PLAN node tree + depth-indent renderer
+public module eqp_node_emitter;

@@ -1,0 +1,51 @@
+// Indent-based renderer: "|--" per depth level.
+
+module core.database.sqlite.native.eqp_node_emitter.render;
+
+mount core.database.sqlite.native.eqp_node_emitter.node.{
+    EqpNode, EqpTree, depth_of,
+};
+mount base.{Bool, Text};
+
+// Prefix "|-- " times `level`. level 0 → empty.
+fn prefix_for(level: Int) -> Text {
+    let mut out = "".clone();
+    let mut i: Int = 0;
+    while i < level {
+        out = out + "|--".clone();
+        i = i + 1;
+    }
+    out
+}
+
+// Render a single node's line.
+public fn render_line(t: &EqpTree, n: &EqpNode) -> Text {
+    let d = depth_of(t, n.id);
+    let eff = if d < 0 { 0 } else { d - 1 };
+    let safe = if eff < 0 { 0 } else { eff };
+    prefix_for(safe) + n.detail.clone()
+}
+
+public fn render_all(t: &EqpTree) -> Text {
+    let mut out = "".clone();
+    let mut i: Int = 0;
+    while i < t.nodes.len() {
+        let line = render_line(t, &t.nodes[i]);
+        out = out + line;
+        if i + 1 < t.nodes.len() { out = out + "\n".clone(); }
+        i = i + 1;
+    }
+    out
+}
+
+// Maximum render depth found in the tree — used by tests to bound output.
+public fn max_depth(t: &EqpTree) -> Int {
+    let mut best: Int = 0;
+    let mut i: Int = 0;
+    while i < t.nodes.len() {
+        let d = depth_of(t, t.nodes[i].id);
+        if d > best { best = d; }
+        i = i + 1;
+    }
+    best
+}

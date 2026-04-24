@@ -1,0 +1,41 @@
+// Per-check signal — one boolean result per detection step.
+
+module core.database.sqlite.native.hot_journal_detector.signal;
+
+mount base.{Bool, Int64};
+
+public type Signal is {
+    journal_exists: Bool,
+    journal_nonempty: Bool,
+    exclusive_held_on_db: Bool,     // if another process holds EXCLUSIVE, not hot (owner will replay)
+    magic_matches: Bool,
+    reserved_byte_matches: Bool,
+    journal_size_bytes: Int64,
+};
+
+public fn empty_snapshot() -> Signal {
+    Signal {
+        journal_exists: false,
+        journal_nonempty: false,
+        exclusive_held_on_db: false,
+        magic_matches: false,
+        reserved_byte_matches: false,
+        journal_size_bytes: 0 as Int64,
+    }
+}
+
+public fn is_absent(s: &Signal) -> Bool {
+    !s.journal_exists
+}
+
+public fn is_empty(s: &Signal) -> Bool {
+    s.journal_exists && !s.journal_nonempty
+}
+
+public fn has_owner(s: &Signal) -> Bool {
+    s.exclusive_held_on_db
+}
+
+public fn header_intact(s: &Signal) -> Bool {
+    s.magic_matches && s.reserved_byte_matches
+}

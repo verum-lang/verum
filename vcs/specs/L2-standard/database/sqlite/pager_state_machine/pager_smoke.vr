@@ -1,0 +1,122 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, pager_state_machine, pager
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.pager_state_machine.state.{
+    PagerState, PsOpen, PsReader,
+    PsWriterLocked, PsWriterCacheMod, PsWriterDbMod, PsWriterFinished, PsError,
+    state_name, is_writer, has_reserved_lock, has_exclusive_lock,
+    can_read, can_write, is_error,
+};
+mount core.database.sqlite.native.pager_state_machine.transition.{
+    PagerEvent,
+    PeOpen, PeBeginRead, PeBeginWrite, PeWriteCache,
+    PeSyncJournal, PeCommit, PeRelease, PeRollback, PeClose, PeFault,
+    event_name, step, is_legal,
+};
+mount base.{Bool};
+
+fn test_state_names() {
+    assert(state_name(&PsOpen)             == "OPEN".clone());
+    assert(state_name(&PsReader)           == "READER".clone());
+    assert(state_name(&PsWriterLocked)     == "WRITER_LOCKED".clone());
+    assert(state_name(&PsWriterCacheMod)   == "WRITER_CACHEMOD".clone());
+    assert(state_name(&PsWriterDbMod)      == "WRITER_DBMOD".clone());
+    assert(state_name(&PsWriterFinished)   == "WRITER_FINISHED".clone());
+    assert(state_name(&PsError)            == "ERROR".clone());
+}
+
+fn test_is_writer_set() {
+    assert(!is_writer(&PsOpen));
+    assert(!is_writer(&PsReader));
+    assert(is_writer(&PsWriterLocked));
+    assert(is_writer(&PsWriterCacheMod));
+    assert(is_writer(&PsWriterDbMod));
+    assert(is_writer(&PsWriterFinished));
+    assert(!is_writer(&PsError));
+}
+
+fn test_lock_strength() {
+    assert(has_reserved_lock(&PsWriterLocked));
+    assert(has_reserved_lock(&PsWriterFinished));
+    assert(!has_reserved_lock(&PsReader));
+    assert(!has_exclusive_lock(&PsWriterLocked));
+    assert(has_exclusive_lock(&PsWriterFinished));
+}
+
+fn test_can_read_can_write() {
+    assert(can_read(&PsReader));
+    assert(can_read(&PsWriterCacheMod));
+    assert(!can_read(&PsOpen));
+    assert(can_write(&PsWriterCacheMod));
+    assert(can_write(&PsWriterDbMod));
+    assert(!can_write(&PsWriterLocked));
+    assert(!can_write(&PsReader));
+}
+
+fn test_happy_path_commit_sequence() {
+    let s0 = PsOpen;
+    let s1 = step(&s0, &PeBeginRead);
+    match s1 { PsReader => {}, _ => assert(false) }
+    let s2 = step(&s1, &PeBeginWrite);
+    match s2 { PsWriterLocked => {}, _ => assert(false) }
+    let s3 = step(&s2, &PeWriteCache);
+    match s3 { PsWriterCacheMod => {}, _ => assert(false) }
+    let s4 = step(&s3, &PeSyncJournal);
+    match s4 { PsWriterDbMod => {}, _ => assert(false) }
+    let s5 = step(&s4, &PeCommit);
+    match s5 { PsWriterFinished => {}, _ => assert(false) }
+    let s6 = step(&s5, &PeRelease);
+    match s6 { PsReader => {}, _ => assert(false) }
+}
+
+fn test_rollback_any_writer_state_returns_reader() {
+    let sl = step(&PsWriterLocked,   &PeRollback);
+    match sl { PsReader => {}, _ => assert(false) }
+    let sc = step(&PsWriterCacheMod, &PeRollback);
+    match sc { PsReader => {}, _ => assert(false) }
+    let sd = step(&PsWriterDbMod,    &PeRollback);
+    match sd { PsReader => {}, _ => assert(false) }
+}
+
+fn test_fault_always_transitions_to_error() {
+    let f1 = step(&PsReader,         &PeFault);
+    match f1 { PsError => {}, _ => assert(false) }
+    let f2 = step(&PsWriterCacheMod, &PeFault);
+    match f2 { PsError => {}, _ => assert(false) }
+    assert(is_error(&f2));
+}
+
+fn test_error_only_exits_via_close() {
+    let s = step(&PsError, &PeBeginRead);
+    match s { PsError => {}, _ => assert(false) }
+    let c = step(&PsError, &PeClose);
+    match c { PsOpen => {}, _ => assert(false) }
+}
+
+fn test_is_legal_helper() {
+    assert(is_legal(&PsReader, &PeBeginWrite));
+    assert(!is_legal(&PsReader, &PeFault));   // fault → Error → not legal
+}
+
+fn test_event_names() {
+    assert(event_name(&PeBeginRead) == "begin_read".clone());
+    assert(event_name(&PeSyncJournal) == "sync_journal".clone());
+    assert(event_name(&PeFault) == "fault".clone());
+}
+
+fn main() {
+    test_state_names();
+    test_is_writer_set();
+    test_lock_strength();
+    test_can_read_can_write();
+    test_happy_path_commit_sequence();
+    test_rollback_any_writer_state_returns_reader();
+    test_fault_always_transitions_to_error();
+    test_error_only_exits_via_close();
+    test_is_legal_helper();
+    test_event_names();
+}

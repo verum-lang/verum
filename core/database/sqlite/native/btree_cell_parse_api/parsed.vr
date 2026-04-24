@@ -1,0 +1,96 @@
+// Parsed B-tree cell metadata.
+
+module core.database.sqlite.native.btree_cell_parse_api.parsed;
+
+mount core.database.sqlite.native.btree_cell_parse_api.cell_kind.{
+    CellKind, CkTableLeaf, CkTableInterior, CkIndexLeaf, CkIndexInterior,
+    is_leaf, is_interior, has_rowid, has_left_child_pointer, has_payload,
+};
+mount base.{Bool, Int64};
+
+public type ParsedCell is {
+    kind: CellKind,
+    left_child_page: u32,     // 0 for leaves
+    rowid: Int64,             // 0 for index cells
+    payload_size: Int64,      // 0 for table-interior
+    local_bytes: Int,         // bytes stored inline
+    overflow_page: u32,       // 0 if no overflow chain
+};
+
+public fn table_leaf(rowid: Int64, payload_size: Int64, local_bytes: Int, overflow_page: u32) -> ParsedCell {
+    ParsedCell {
+        kind: CkTableLeaf,
+        left_child_page: 0 as u32,
+        rowid: rowid,
+        payload_size: payload_size,
+        local_bytes: local_bytes,
+        overflow_page: overflow_page,
+    }
+}
+
+public fn table_interior(left_child: u32, rowid: Int64) -> ParsedCell {
+    ParsedCell {
+        kind: CkTableInterior,
+        left_child_page: left_child,
+        rowid: rowid,
+        payload_size: 0 as Int64,
+        local_bytes: 0,
+        overflow_page: 0 as u32,
+    }
+}
+
+public fn index_leaf(payload_size: Int64, local_bytes: Int, overflow_page: u32) -> ParsedCell {
+    ParsedCell {
+        kind: CkIndexLeaf,
+        left_child_page: 0 as u32,
+        rowid: 0 as Int64,
+        payload_size: payload_size,
+        local_bytes: local_bytes,
+        overflow_page: overflow_page,
+    }
+}
+
+public fn index_interior(left_child: u32, payload_size: Int64, local_bytes: Int, overflow_page: u32) -> ParsedCell {
+    ParsedCell {
+        kind: CkIndexInterior,
+        left_child_page: left_child,
+        rowid: 0 as Int64,
+        payload_size: payload_size,
+        local_bytes: local_bytes,
+        overflow_page: overflow_page,
+    }
+}
+
+public fn has_overflow(c: &ParsedCell) -> Bool {
+    c.overflow_page != (0 as u32)
+}
+
+// overflow_page non-zero iff local_bytes < payload_size.
+public fn layout_is_consistent(c: &ParsedCell) -> Bool {
+    // table-interior skips payload checks.
+    match c.kind {
+        CkTableInterior => return c.payload_size == (0 as Int64) && c.local_bytes == 0,
+        _ => {}
+    }
+    let on_disk = c.local_bytes as Int64;
+    if c.overflow_page == (0 as u32) {
+        on_disk == c.payload_size
+    } else {
+        on_disk < c.payload_size
+    }
+}
+
+public fn cell_kind_invariant(c: &ParsedCell) -> Bool {
+    if has_left_child_pointer(&c.kind) {
+        if c.left_child_page == (0 as u32) { return false; }
+    } else {
+        if c.left_child_page != (0 as u32) { return false; }
+    }
+    if has_rowid(&c.kind) {
+        if c.rowid == (0 as Int64) { return true; }   // rowid 0 is valid
+    }
+    if !has_payload(&c.kind) {
+        if c.payload_size != (0 as Int64) { return false; }
+    }
+    true
+}

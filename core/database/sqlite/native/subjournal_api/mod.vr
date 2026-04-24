@@ -1,0 +1,17 @@
+// =============================================================================
+// core/database/sqlite/native/subjournal_api/mod.vr
+// =============================================================================
+// Statement-level sub-journal — holds pre-images for mid-statement rollback
+// (e.g., constraint violation rollback of a multi-row INSERT).
+// Spec §6.2.3 — sub-journal.
+//
+// Record layout per sub-journal entry: page-number (u32) + full page image
+// (page_size bytes). When a SAVEPOINT starts, the pager records a mark into
+// the sub-journal; on ROLLBACK TO the pages between the mark and EOF are
+// restored in reverse order.
+// =============================================================================
+
+module core.database.sqlite.native.subjournal_api;
+
+public module record;
+public module mark;

@@ -1,0 +1,127 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, btree_cell_parse_api, btree
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.btree_cell_parse_api.cell_kind.{
+    CellKind, CkTableLeaf, CkTableInterior, CkIndexLeaf, CkIndexInterior,
+    kind_name, page_type_byte, is_leaf, is_interior, is_table, is_index,
+    has_rowid, has_left_child_pointer, has_payload,
+};
+mount core.database.sqlite.native.btree_cell_parse_api.parsed.{
+    ParsedCell,
+    table_leaf, table_interior, index_leaf, index_interior,
+    has_overflow, layout_is_consistent, cell_kind_invariant,
+};
+mount base.{Bool, Int64};
+
+fn test_page_type_bytes() {
+    assert_eq(page_type_byte(&CkTableLeaf),     0x0D as u8);
+    assert_eq(page_type_byte(&CkTableInterior), 0x05 as u8);
+    assert_eq(page_type_byte(&CkIndexLeaf),     0x0A as u8);
+    assert_eq(page_type_byte(&CkIndexInterior), 0x02 as u8);
+}
+
+fn test_leaf_vs_interior_and_table_vs_index() {
+    assert(is_leaf(&CkTableLeaf));
+    assert(is_leaf(&CkIndexLeaf));
+    assert(is_interior(&CkTableInterior));
+    assert(is_interior(&CkIndexInterior));
+    assert(is_table(&CkTableLeaf));
+    assert(is_table(&CkTableInterior));
+    assert(is_index(&CkIndexLeaf));
+    assert(is_index(&CkIndexInterior));
+}
+
+fn test_rowid_and_child_pointer_presence() {
+    assert(has_rowid(&CkTableLeaf));
+    assert(has_rowid(&CkTableInterior));
+    assert(!has_rowid(&CkIndexLeaf));
+    assert(!has_rowid(&CkIndexInterior));
+    assert(!has_left_child_pointer(&CkTableLeaf));
+    assert(has_left_child_pointer(&CkTableInterior));
+    assert(has_left_child_pointer(&CkIndexInterior));
+}
+
+fn test_has_payload() {
+    assert(has_payload(&CkTableLeaf));
+    assert(has_payload(&CkIndexLeaf));
+    assert(has_payload(&CkIndexInterior));
+    assert(!has_payload(&CkTableInterior));
+}
+
+fn test_kind_name() {
+    assert(kind_name(&CkTableLeaf) == "table_leaf".clone());
+    assert(kind_name(&CkIndexInterior) == "index_interior".clone());
+}
+
+fn test_parsed_constructors_inline() {
+    let tl = table_leaf(42 as Int64, 100 as Int64, 100, 0 as u32);
+    assert(!has_overflow(&tl));
+    assert(layout_is_consistent(&tl));
+    assert(cell_kind_invariant(&tl));
+}
+
+fn test_parsed_constructors_with_overflow() {
+    let tl = table_leaf(42 as Int64, 10000 as Int64, 1000, 55 as u32);
+    assert(has_overflow(&tl));
+    assert(layout_is_consistent(&tl));
+}
+
+fn test_parsed_table_interior() {
+    let ti = table_interior(7 as u32, 99 as Int64);
+    assert(cell_kind_invariant(&ti));
+    assert(layout_is_consistent(&ti));
+    assert(!has_overflow(&ti));
+}
+
+fn test_parsed_index_interior() {
+    let ii = index_interior(5 as u32, 50 as Int64, 50, 0 as u32);
+    assert(cell_kind_invariant(&ii));
+    assert(layout_is_consistent(&ii));
+    let ii_of = index_interior(5 as u32, 5000 as Int64, 500, 9 as u32);
+    assert(has_overflow(&ii_of));
+    assert(layout_is_consistent(&ii_of));
+}
+
+fn test_invariant_rejects_wrong_left_child() {
+    // table-leaf with non-zero left_child → invalid
+    let bad = ParsedCell {
+        kind: CkTableLeaf,
+        left_child_page: 7 as u32,
+        rowid: 1 as Int64,
+        payload_size: 10 as Int64,
+        local_bytes: 10,
+        overflow_page: 0 as u32,
+    };
+    assert(!cell_kind_invariant(&bad));
+}
+
+fn test_layout_inconsistent_when_overflow_matches_inline() {
+    // overflow_page == 0 but local_bytes < payload_size → inconsistent
+    let bad = ParsedCell {
+        kind: CkIndexLeaf,
+        left_child_page: 0 as u32,
+        rowid: 0 as Int64,
+        payload_size: 100 as Int64,
+        local_bytes: 10,
+        overflow_page: 0 as u32,
+    };
+    assert(!layout_is_consistent(&bad));
+}
+
+fn main() {
+    test_page_type_bytes();
+    test_leaf_vs_interior_and_table_vs_index();
+    test_rowid_and_child_pointer_presence();
+    test_has_payload();
+    test_kind_name();
+    test_parsed_constructors_inline();
+    test_parsed_constructors_with_overflow();
+    test_parsed_table_interior();
+    test_parsed_index_interior();
+    test_invariant_rejects_wrong_left_child();
+    test_layout_inconsistent_when_overflow_matches_inline();
+}

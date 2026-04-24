@@ -1,0 +1,82 @@
+// EQP node record + builder.
+
+module core.database.sqlite.native.eqp_node_emitter.node;
+
+mount base.{Bool, Text};
+mount core.collections.list.{List};
+
+public type EqpNode is {
+    id: Int,
+    parent: Int,          // 0 = top-level
+    detail: Text,
+};
+
+public fn new(id: Int, parent: Int, detail: Text) -> EqpNode {
+    EqpNode { id: id, parent: parent, detail: detail }
+}
+
+public fn is_root(n: &EqpNode) -> Bool {
+    n.parent == 0
+}
+
+public type EqpTree is {
+    nodes: List<EqpNode>,
+};
+
+public fn empty_tree() -> EqpTree {
+    EqpTree { nodes: [].clone() as List<EqpNode> }
+}
+
+public fn add(mut t: EqpTree, n: EqpNode) -> EqpTree {
+    t.nodes.push(n);
+    t
+}
+
+public fn count(t: &EqpTree) -> Int { t.nodes.len() }
+
+public fn has_node_with_id(t: &EqpTree, id: Int) -> Bool {
+    let mut i: Int = 0;
+    while i < t.nodes.len() {
+        if t.nodes[i].id == id { return true; }
+        i = i + 1;
+    }
+    false
+}
+
+// Depth of a node in the tree (root = 0). -1 if not found.
+public fn depth_of(t: &EqpTree, id: Int) -> Int {
+    let mut current = id;
+    let mut d: Int = 0;
+    let max_iters = t.nodes.len() + 1;
+    let mut it: Int = 0;
+    while it < max_iters {
+        if current == 0 { return d; }
+        // find the node.
+        let mut i: Int = 0;
+        let mut found = false;
+        while i < t.nodes.len() {
+            if t.nodes[i].id == current {
+                current = t.nodes[i].parent;
+                d = d + 1;
+                found = true;
+                i = t.nodes.len();
+            } else {
+                i = i + 1;
+            }
+        }
+        if !found { return -1; }
+        it = it + 1;
+    }
+    -1
+}
+
+// Count immediate children of a node.
+public fn children_count(t: &EqpTree, id: Int) -> Int {
+    let mut n: Int = 0;
+    let mut i: Int = 0;
+    while i < t.nodes.len() {
+        if t.nodes[i].parent == id { n = n + 1; }
+        i = i + 1;
+    }
+    n
+}

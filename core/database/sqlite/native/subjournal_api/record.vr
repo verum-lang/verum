@@ -1,0 +1,28 @@
+// Per-entry sub-journal record.
+
+module core.database.sqlite.native.subjournal_api.record;
+
+mount base.{Bool, Int64};
+
+public type SubjRecord is {
+    page_number: u32,
+    page_image_bytes: Int,     // should equal pager's page size
+};
+
+public fn new(page_number: u32, page_image_bytes: Int) -> SubjRecord {
+    SubjRecord { page_number: page_number, page_image_bytes: page_image_bytes }
+}
+
+// On-disk length per entry = 4 (page_number) + page_image_bytes.
+public fn on_disk_length(r: &SubjRecord) -> Int {
+    4 + r.page_image_bytes
+}
+
+// Byte offset of the n-th record in the sub-journal (0-based).
+public fn offset_of(n: Int, page_size: Int) -> Int64 {
+    (n as Int64) * ((4 + page_size) as Int64)
+}
+
+public fn is_valid(r: &SubjRecord) -> Bool {
+    r.page_image_bytes > 0
+}

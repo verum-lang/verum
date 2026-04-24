@@ -1,0 +1,109 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, stmt_param_mapping, parser
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.stmt_param_mapping.form.{
+    ParamForm, PfAnonymous, PfPositional, PfColon, PfAt, PfDollar,
+    form_name, is_named, is_positional, param_name, explicit_slot,
+};
+mount core.database.sqlite.native.stmt_param_mapping.mapping.{
+    Mapping,
+    empty, add, slot_count, resolve_name, is_anonymous_slot, max_slot_reserved,
+};
+mount base.{Bool};
+
+fn test_form_names() {
+    assert(form_name(&PfAnonymous) == "anonymous".clone());
+    assert(form_name(&PfPositional(3)) == "positional".clone());
+    assert(form_name(&PfColon("x".clone())) == "colon".clone());
+    assert(form_name(&PfAt("y".clone())) == "at".clone());
+    assert(form_name(&PfDollar("z".clone())) == "dollar".clone());
+}
+
+fn test_is_named_and_positional() {
+    assert(is_named(&PfColon("x".clone())));
+    assert(is_named(&PfAt("x".clone())));
+    assert(is_named(&PfDollar("x".clone())));
+    assert(!is_named(&PfAnonymous));
+    assert(!is_named(&PfPositional(1)));
+    assert(is_positional(&PfAnonymous));
+    assert(is_positional(&PfPositional(7)));
+    assert(!is_positional(&PfColon("x".clone())));
+}
+
+fn test_param_name_formatting() {
+    assert(param_name(&PfColon("foo".clone())) == ":foo".clone());
+    assert(param_name(&PfAt("foo".clone()))    == "@foo".clone());
+    assert(param_name(&PfDollar("foo".clone())) == "$foo".clone());
+    assert(param_name(&PfAnonymous) == "".clone());
+    assert(param_name(&PfPositional(5)) == "".clone());
+}
+
+fn test_explicit_slot() {
+    assert_eq(explicit_slot(&PfPositional(3)), 3);
+    assert_eq(explicit_slot(&PfAnonymous), 0);
+    assert_eq(explicit_slot(&PfColon("x".clone())), 0);
+}
+
+fn test_max_slot_reserved_default() {
+    assert_eq(max_slot_reserved(), 999);
+}
+
+fn test_empty_mapping() {
+    let m = empty();
+    assert_eq(slot_count(&m), 0);
+    assert_eq(resolve_name(&m, &":foo".clone()), 0);
+}
+
+fn test_anonymous_auto_assigns_slots() {
+    let mut m = empty();
+    m = add(m, PfAnonymous);
+    m = add(m, PfAnonymous);
+    m = add(m, PfAnonymous);
+    assert_eq(slot_count(&m), 3);
+    assert(is_anonymous_slot(&m, 1));
+    assert(is_anonymous_slot(&m, 2));
+    assert(is_anonymous_slot(&m, 3));
+}
+
+fn test_explicit_positional_extends_range() {
+    let mut m = empty();
+    m = add(m, PfAnonymous);       // slot 1
+    m = add(m, PfPositional(5));   // slot 5, extends slot_count
+    assert_eq(slot_count(&m), 5);
+}
+
+fn test_named_mapping_deduplicates() {
+    let mut m = empty();
+    m = add(m, PfColon("a".clone()));
+    m = add(m, PfColon("b".clone()));
+    m = add(m, PfColon("a".clone()));    // same → no new slot
+    assert_eq(slot_count(&m), 2);
+    assert_eq(resolve_name(&m, &":a".clone()), 1);
+    assert_eq(resolve_name(&m, &":b".clone()), 2);
+    assert_eq(resolve_name(&m, &":unknown".clone()), 0);
+}
+
+fn test_is_anonymous_slot_bounds() {
+    let mut m = empty();
+    m = add(m, PfColon("x".clone()));
+    assert(!is_anonymous_slot(&m, 1));
+    assert(!is_anonymous_slot(&m, 0));
+    assert(!is_anonymous_slot(&m, 999));
+}
+
+fn main() {
+    test_form_names();
+    test_is_named_and_positional();
+    test_param_name_formatting();
+    test_explicit_slot();
+    test_max_slot_reserved_default();
+    test_empty_mapping();
+    test_anonymous_auto_assigns_slots();
+    test_explicit_positional_extends_range();
+    test_named_mapping_deduplicates();
+    test_is_anonymous_slot_bounds();
+}

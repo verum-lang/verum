@@ -1,0 +1,78 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, vtab_distinct_api, vtab
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.vtab_distinct_api.mode.{
+    DistinctMode, DmNone, DmOrderByOnly, DmGroupBy, DmAggressiveSkip,
+    code, from_code, mode_name,
+    permits_skip, permits_class_skip, stricter_than,
+};
+mount base.{Bool, Maybe};
+
+fn test_codes_0_to_3() {
+    assert_eq(code(&DmNone),           0);
+    assert_eq(code(&DmOrderByOnly),    1);
+    assert_eq(code(&DmGroupBy),        2);
+    assert_eq(code(&DmAggressiveSkip), 3);
+}
+
+fn test_from_code_round_trip() {
+    match from_code(0) {
+        Maybe.Some(m) => match &m { DmNone => {}, _ => assert(false) },
+        Maybe.None => assert(false),
+    }
+    match from_code(1) {
+        Maybe.Some(m) => match &m { DmOrderByOnly => {}, _ => assert(false) },
+        Maybe.None => assert(false),
+    }
+    match from_code(2) {
+        Maybe.Some(m) => match &m { DmGroupBy => {}, _ => assert(false) },
+        Maybe.None => assert(false),
+    }
+    match from_code(3) {
+        Maybe.Some(m) => match &m { DmAggressiveSkip => {}, _ => assert(false) },
+        Maybe.None => assert(false),
+    }
+    match from_code(4) { Maybe.None => {}, Maybe.Some(_) => assert(false) }
+    match from_code(-1) { Maybe.None => {}, Maybe.Some(_) => assert(false) }
+}
+
+fn test_mode_names() {
+    assert(mode_name(&DmNone)           == "NONE".clone());
+    assert(mode_name(&DmOrderByOnly)    == "ORDER_BY".clone());
+    assert(mode_name(&DmGroupBy)        == "GROUP_BY".clone());
+    assert(mode_name(&DmAggressiveSkip) == "AGGRESSIVE".clone());
+}
+
+fn test_permits_skip_set() {
+    assert(!permits_skip(&DmNone));
+    assert(permits_skip(&DmOrderByOnly));
+    assert(permits_skip(&DmGroupBy));
+    assert(permits_skip(&DmAggressiveSkip));
+}
+
+fn test_permits_class_skip_set() {
+    assert(!permits_class_skip(&DmNone));
+    assert(!permits_class_skip(&DmOrderByOnly));
+    assert(permits_class_skip(&DmGroupBy));
+    assert(permits_class_skip(&DmAggressiveSkip));
+}
+
+fn test_stricter_than_ordering() {
+    assert(stricter_than(&DmAggressiveSkip, &DmGroupBy));
+    assert(stricter_than(&DmGroupBy, &DmOrderByOnly));
+    assert(stricter_than(&DmOrderByOnly, &DmNone));
+    assert(!stricter_than(&DmNone, &DmOrderByOnly));
+}
+
+fn main() {
+    test_codes_0_to_3();
+    test_from_code_round_trip();
+    test_mode_names();
+    test_permits_skip_set();
+    test_permits_class_skip_set();
+    test_stricter_than_ordering();
+}

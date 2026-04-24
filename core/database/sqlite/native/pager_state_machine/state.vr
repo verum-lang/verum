@@ -1,0 +1,65 @@
+// Pager state taxonomy.
+
+module core.database.sqlite.native.pager_state_machine.state;
+
+mount base.{Bool, Text};
+
+public type PagerState is
+    | PsOpen
+    | PsReader
+    | PsWriterLocked
+    | PsWriterCacheMod
+    | PsWriterDbMod
+    | PsWriterFinished
+    | PsError
+    ;
+
+public fn state_name(s: &PagerState) -> Text {
+    match s {
+        PsOpen            => "OPEN".clone(),
+        PsReader          => "READER".clone(),
+        PsWriterLocked    => "WRITER_LOCKED".clone(),
+        PsWriterCacheMod  => "WRITER_CACHEMOD".clone(),
+        PsWriterDbMod     => "WRITER_DBMOD".clone(),
+        PsWriterFinished  => "WRITER_FINISHED".clone(),
+        PsError           => "ERROR".clone(),
+    }
+}
+
+public fn is_writer(s: &PagerState) -> Bool {
+    match s {
+        PsWriterLocked    => true,
+        PsWriterCacheMod  => true,
+        PsWriterDbMod     => true,
+        PsWriterFinished  => true,
+        _                 => false,
+    }
+}
+
+public fn has_reserved_lock(s: &PagerState) -> Bool {
+    is_writer(s)
+}
+
+public fn has_exclusive_lock(s: &PagerState) -> Bool {
+    match s { PsWriterFinished => true, _ => false }
+}
+
+public fn can_read(s: &PagerState) -> Bool {
+    match s {
+        PsReader         => true,
+        _                => is_writer(s),
+    }
+}
+
+public fn can_write(s: &PagerState) -> Bool {
+    match s {
+        PsWriterCacheMod => true,
+        PsWriterDbMod    => true,
+        PsWriterFinished => true,
+        _                => false,
+    }
+}
+
+public fn is_error(s: &PagerState) -> Bool {
+    match s { PsError => true, _ => false }
+}
