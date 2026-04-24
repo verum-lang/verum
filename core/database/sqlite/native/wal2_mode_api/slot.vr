@@ -1,0 +1,43 @@
+// WAL2 slot identifiers + role per tick.
+
+module core.database.sqlite.native.wal2_mode_api.slot;
+
+mount base.{Bool, Text};
+
+public type WalSlot is
+    | WsZero       // first WAL file
+    | WsOne        // second WAL file
+    ;
+
+public fn slot_name(s: &WalSlot) -> Text {
+    match s {
+        WsZero => "wal-0".clone(),
+        WsOne  => "wal-1".clone(),
+    }
+}
+
+public fn other(s: &WalSlot) -> WalSlot {
+    match s { WsZero => WsOne, WsOne => WsZero }
+}
+
+public type SlotRole is
+    | SrActive          // writer currently appending
+    | SrCheckpointing   // readers may drain; no more writes
+    | SrIdle            // empty, ready to become active
+    ;
+
+public fn role_name(r: &SlotRole) -> Text {
+    match r {
+        SrActive        => "active".clone(),
+        SrCheckpointing => "checkpointing".clone(),
+        SrIdle          => "idle".clone(),
+    }
+}
+
+public fn writers_allowed(r: &SlotRole) -> Bool {
+    match r { SrActive => true, _ => false }
+}
+
+public fn readers_allowed(r: &SlotRole) -> Bool {
+    match r { SrIdle => false, _ => true }
+}

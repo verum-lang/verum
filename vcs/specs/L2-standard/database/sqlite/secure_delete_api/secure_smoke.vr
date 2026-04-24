@@ -1,0 +1,69 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, secure_delete_api, pragma
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.secure_delete_api.mode.{
+    SecureMode, SmOff, SmOn, SmFast,
+    mode_code, from_code, mode_name,
+    zeroes_full_page, zeroes_tail_only, leaves_residue,
+    default_mode, min_version_for,
+};
+mount base.{Bool, Maybe};
+
+fn test_codes() {
+    assert_eq(mode_code(&SmOff),  0);
+    assert_eq(mode_code(&SmOn),   1);
+    assert_eq(mode_code(&SmFast), 2);
+}
+
+fn test_round_trip() {
+    match from_code(0) {
+        Maybe.Some(m) => match &m { SmOff => {}, _ => assert(false) },
+        Maybe.None => assert(false),
+    }
+    match from_code(2) {
+        Maybe.Some(m) => match &m { SmFast => {}, _ => assert(false) },
+        Maybe.None => assert(false),
+    }
+    match from_code(3) { Maybe.None => {}, Maybe.Some(_) => assert(false) }
+    match from_code(-1) { Maybe.None => {}, Maybe.Some(_) => assert(false) }
+}
+
+fn test_names() {
+    assert(mode_name(&SmOff)  == "OFF".clone());
+    assert(mode_name(&SmOn)   == "ON".clone());
+    assert(mode_name(&SmFast) == "FAST".clone());
+}
+
+fn test_zero_behavior() {
+    assert(!zeroes_full_page(&SmOff));
+    assert(zeroes_full_page(&SmOn));
+    assert(!zeroes_full_page(&SmFast));
+    assert(!zeroes_tail_only(&SmOn));
+    assert(zeroes_tail_only(&SmFast));
+    assert(leaves_residue(&SmOff));
+    assert(!leaves_residue(&SmOn));
+    assert(!leaves_residue(&SmFast));
+}
+
+fn test_default_is_off() {
+    match default_mode() { SmOff => {}, _ => assert(false) }
+}
+
+fn test_min_version_table() {
+    assert(min_version_for(&SmOff)  == "3.0.0".clone());
+    assert(min_version_for(&SmOn)   == "3.0.0".clone());
+    assert(min_version_for(&SmFast) == "3.31.0".clone());
+}
+
+fn main() {
+    test_codes();
+    test_round_trip();
+    test_names();
+    test_zero_behavior();
+    test_default_is_off();
+    test_min_version_table();
+}

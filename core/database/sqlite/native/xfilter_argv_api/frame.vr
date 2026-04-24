@@ -1,0 +1,74 @@
+// xFilter argv frame.
+
+module core.database.sqlite.native.xfilter_argv_api.frame;
+
+mount core.database.sqlite.native.xfilter_argv_api.slot.{
+    SlotSource, SsConstraint, SsRowid, SsLimit, SsOffset,
+    is_pushdown_slot, is_constraint,
+};
+mount base.{Bool, Text};
+mount core.collections.list.{List};
+
+public type FilterFrame is {
+    idx_num: Int,             // xBestIndex's idxNum pass-through
+    idx_str: Text,            // xBestIndex's idxStr pass-through
+    slots: List<SlotSource>,
+};
+
+public fn new(idx_num: Int, idx_str: Text) -> FilterFrame {
+    FilterFrame {
+        idx_num: idx_num,
+        idx_str: idx_str,
+        slots: [].clone() as List<SlotSource>,
+    }
+}
+
+public fn push_slot(mut f: FilterFrame, s: SlotSource) -> FilterFrame {
+    f.slots.push(s);
+    f
+}
+
+public fn argc(f: &FilterFrame) -> Int { f.slots.len() }
+
+public fn has_idx_str(f: &FilterFrame) -> Bool {
+    f.idx_str.len() > 0
+}
+
+// Count constraint vs pushdown slots.
+public fn constraint_count(f: &FilterFrame) -> Int {
+    let mut n: Int = 0;
+    let mut i: Int = 0;
+    while i < f.slots.len() {
+        if is_constraint(&f.slots[i]) { n = n + 1; }
+        i = i + 1;
+    }
+    n
+}
+
+public fn pushdown_count(f: &FilterFrame) -> Int {
+    let mut n: Int = 0;
+    let mut i: Int = 0;
+    while i < f.slots.len() {
+        if is_pushdown_slot(&f.slots[i]) { n = n + 1; }
+        i = i + 1;
+    }
+    n
+}
+
+// A well-formed frame has at most one SsLimit + one SsOffset + an ordered
+// constraint sequence (no gaps).
+public fn is_well_formed(f: &FilterFrame) -> Bool {
+    let mut n_limit: Int = 0;
+    let mut n_offset: Int = 0;
+    let mut i: Int = 0;
+    while i < f.slots.len() {
+        let s = &f.slots[i];
+        match s {
+            SsLimit  => n_limit = n_limit + 1,
+            SsOffset => n_offset = n_offset + 1,
+            _ => {}
+        }
+        i = i + 1;
+    }
+    n_limit <= 1 && n_offset <= 1
+}

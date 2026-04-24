@@ -1,0 +1,45 @@
+// FTS5 shadow-table suffix taxonomy.
+
+module core.database.sqlite.native.shadow_vtab_meta_api.fts5_family;
+
+mount base.{Bool, Text};
+
+public type Fts5Shadow is
+    | F5Data          // <name>_data
+    | F5Config        // <name>_config
+    | F5DocSize       // <name>_docsize
+    | F5Content       // <name>_content
+    | F5Idx           // <name>_idx
+    | F5VocabRow      // <name>_v (vocab)
+    ;
+
+public fn suffix(s: &Fts5Shadow) -> Text {
+    match s {
+        F5Data     => "_data".clone(),
+        F5Config   => "_config".clone(),
+        F5DocSize  => "_docsize".clone(),
+        F5Content  => "_content".clone(),
+        F5Idx      => "_idx".clone(),
+        F5VocabRow => "_v".clone(),
+    }
+}
+
+public fn table_name(vtab_name: &Text, s: &Fts5Shadow) -> Text {
+    vtab_name.clone() + suffix(s)
+}
+
+// A fresh fts5 vtab always creates _data + _idx + _docsize + _config; _content
+// only when the vtab uses content=.
+public fn always_created(s: &Fts5Shadow) -> Bool {
+    match s {
+        F5Data    => true,
+        F5Idx     => true,
+        F5DocSize => true,
+        F5Config  => true,
+        _         => false,
+    }
+}
+
+public fn only_when_external_content(s: &Fts5Shadow) -> Bool {
+    match s { F5Content => true, _ => false }
+}

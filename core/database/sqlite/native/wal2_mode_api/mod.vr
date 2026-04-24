@@ -1,0 +1,11 @@
+// =============================================================================
+// core/database/sqlite/native/wal2_mode_api/mod.vr
+// =============================================================================
+// WAL2 mode — dual WAL files; one active writer, one being checkpointed.
+// Spec §6.7 — WAL2 mode (SQLite 3.46+ branch, experimental).
+// =============================================================================
+
+module core.database.sqlite.native.wal2_mode_api;
+
+public module slot;
+public module engine;

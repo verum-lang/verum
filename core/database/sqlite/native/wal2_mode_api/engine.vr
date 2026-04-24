@@ -1,0 +1,91 @@
+// WAL2 engine — which slot is active, which is being checkpointed.
+
+module core.database.sqlite.native.wal2_mode_api.engine;
+
+mount core.database.sqlite.native.wal2_mode_api.slot.{
+    WalSlot, WsZero, WsOne, other,
+    SlotRole, SrActive, SrCheckpointing, SrIdle,
+    writers_allowed, readers_allowed,
+};
+mount base.{Bool, Int64};
+
+public type Wal2Engine is {
+    slot_zero_role: SlotRole,
+    slot_one_role: SlotRole,
+    swaps: Int64,
+};
+
+public fn fresh() -> Wal2Engine {
+    Wal2Engine {
+        slot_zero_role: SrActive,
+        slot_one_role: SrIdle,
+        swaps: 0 as Int64,
+    }
+}
+
+public fn role_of(e: &Wal2Engine, s: &WalSlot) -> SlotRole {
+    match s {
+        WsZero => match e.slot_zero_role {
+            SrActive        => SrActive,
+            SrCheckpointing => SrCheckpointing,
+            SrIdle          => SrIdle,
+        },
+        WsOne  => match e.slot_one_role {
+            SrActive        => SrActive,
+            SrCheckpointing => SrCheckpointing,
+            SrIdle          => SrIdle,
+        },
+    }
+}
+
+// Invariant: at most one slot is Active at any time.
+public fn has_single_writer(e: &Wal2Engine) -> Bool {
+    let a = match e.slot_zero_role { SrActive => true, _ => false };
+    let b = match e.slot_one_role   { SrActive => true, _ => false };
+    let mut n: Int = 0;
+    if a { n = n + 1; }
+    if b { n = n + 1; }
+    n <= 1
+}
+
+public fn active_slot(e: &Wal2Engine) -> WalSlot {
+    match e.slot_zero_role {
+        SrActive => WsZero,
+        _        => WsOne,
+    }
+}
+
+// Swap roles: the currently-active slot becomes the new checkpointing slot,
+// and the idle slot (if any) becomes active. Pre-condition: the idle slot is
+// indeed SrIdle.
+public fn rotate(mut e: Wal2Engine) -> Wal2Engine {
+    let active = active_slot(&e);
+    match active {
+        WsZero => {
+            e.slot_zero_role = SrCheckpointing;
+            e.slot_one_role = SrActive;
+        },
+        WsOne => {
+            e.slot_one_role = SrCheckpointing;
+            e.slot_zero_role = SrActive;
+        },
+    }
+    e.swaps = e.swaps + (1 as Int64);
+    e
+}
+
+// Mark a checkpointing slot as idle once draining is complete.
+public fn mark_idle(mut e: Wal2Engine, s: &WalSlot) -> Wal2Engine {
+    match s {
+        WsZero => e.slot_zero_role = SrIdle,
+        WsOne  => e.slot_one_role = SrIdle,
+    }
+    e
+}
+
+public fn can_start_checkpoint(e: &Wal2Engine) -> Bool {
+    // Either slot must currently be in SrCheckpointing.
+    let a = match e.slot_zero_role { SrCheckpointing => true, _ => false };
+    let b = match e.slot_one_role   { SrCheckpointing => true, _ => false };
+    a || b
+}

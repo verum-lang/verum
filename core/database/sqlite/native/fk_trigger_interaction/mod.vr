@@ -1,0 +1,19 @@
+// =============================================================================
+// core/database/sqlite/native/fk_trigger_interaction/mod.vr
+// =============================================================================
+// Firing-order taxonomy for cascaded FK actions + user-defined triggers.
+// Spec §17.3.4 — trigger / FK interaction.
+//
+// Per row-modify operation the engine fires:
+//   1. BEFORE statement triggers (if any)
+//   2. BEFORE row triggers
+//   3. constraint checks (CHECK, NOT NULL)
+//   4. row write
+//   5. AFTER row triggers
+//   6. FK action cascades
+//   7. AFTER statement triggers
+// =============================================================================
+
+module core.database.sqlite.native.fk_trigger_interaction;
+
+public module phase;

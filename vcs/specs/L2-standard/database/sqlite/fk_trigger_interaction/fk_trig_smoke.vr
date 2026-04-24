@@ -1,0 +1,81 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, fk_trigger_interaction, triggers
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.fk_trigger_interaction.phase.{
+    WritePhase,
+    WpBeforeStmtTrigger, WpBeforeRowTrigger, WpConstraintCheck,
+    WpRowWrite, WpAfterRowTrigger, WpFkCascade, WpAfterStmtTrigger,
+    phase_name, phase_order, next_phase,
+    is_row_level, is_cascaded_at_commit_when_deferred,
+    can_reference_post_write_rowid, fires_before_write,
+};
+mount base.{Bool, Maybe};
+
+fn test_phase_names() {
+    assert(phase_name(&WpBeforeStmtTrigger) == "before_stmt".clone());
+    assert(phase_name(&WpFkCascade)         == "fk_cascade".clone());
+    assert(phase_name(&WpAfterStmtTrigger)  == "after_stmt".clone());
+}
+
+fn test_phase_order_monotonic() {
+    assert(phase_order(&WpBeforeStmtTrigger) < phase_order(&WpBeforeRowTrigger));
+    assert(phase_order(&WpBeforeRowTrigger)  < phase_order(&WpConstraintCheck));
+    assert(phase_order(&WpConstraintCheck)   < phase_order(&WpRowWrite));
+    assert(phase_order(&WpRowWrite)          < phase_order(&WpAfterRowTrigger));
+    assert(phase_order(&WpAfterRowTrigger)   < phase_order(&WpFkCascade));
+    assert(phase_order(&WpFkCascade)         < phase_order(&WpAfterStmtTrigger));
+}
+
+fn test_next_phase_chain() {
+    match next_phase(&WpBeforeStmtTrigger) {
+        Maybe.Some(p) => match &p { WpBeforeRowTrigger => {}, _ => assert(false) },
+        Maybe.None => assert(false),
+    }
+    match next_phase(&WpAfterStmtTrigger) { Maybe.None => {}, Maybe.Some(_) => assert(false) }
+}
+
+fn test_is_row_level_set() {
+    assert(is_row_level(&WpBeforeRowTrigger));
+    assert(is_row_level(&WpConstraintCheck));
+    assert(is_row_level(&WpRowWrite));
+    assert(is_row_level(&WpAfterRowTrigger));
+    assert(is_row_level(&WpFkCascade));
+    assert(!is_row_level(&WpBeforeStmtTrigger));
+    assert(!is_row_level(&WpAfterStmtTrigger));
+}
+
+fn test_deferred_fk_only_at_commit() {
+    assert(is_cascaded_at_commit_when_deferred(&WpFkCascade));
+    assert(!is_cascaded_at_commit_when_deferred(&WpConstraintCheck));
+}
+
+fn test_post_write_rowid_visibility() {
+    assert(can_reference_post_write_rowid(&WpAfterRowTrigger));
+    assert(can_reference_post_write_rowid(&WpFkCascade));
+    assert(can_reference_post_write_rowid(&WpAfterStmtTrigger));
+    assert(!can_reference_post_write_rowid(&WpBeforeRowTrigger));
+    assert(!can_reference_post_write_rowid(&WpConstraintCheck));
+    assert(!can_reference_post_write_rowid(&WpRowWrite));
+}
+
+fn test_fires_before_write() {
+    assert(fires_before_write(&WpBeforeStmtTrigger));
+    assert(fires_before_write(&WpBeforeRowTrigger));
+    assert(fires_before_write(&WpConstraintCheck));
+    assert(!fires_before_write(&WpRowWrite));
+    assert(!fires_before_write(&WpFkCascade));
+}
+
+fn main() {
+    test_phase_names();
+    test_phase_order_monotonic();
+    test_next_phase_chain();
+    test_is_row_level_set();
+    test_deferred_fk_only_at_commit();
+    test_post_write_rowid_visibility();
+    test_fires_before_write();
+}

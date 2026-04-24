@@ -1,0 +1,12 @@
+// =============================================================================
+// core/database/sqlite/native/fts5_auxiliary_api/mod.vr
+// =============================================================================
+// FTS5 auxiliary-function protocol — xPhraseCount / xPhraseSize /
+// xInstCount / xColumnSize / xColumnText / xColumnTotalSize / xRowCount /
+// xTokenize / xQueryPhrase / xSetAuxdata / xGetAuxdata.
+// Spec §16.2.5 — FTS5 auxiliary API.
+// =============================================================================
+
+module core.database.sqlite.native.fts5_auxiliary_api;
+
+public module method;

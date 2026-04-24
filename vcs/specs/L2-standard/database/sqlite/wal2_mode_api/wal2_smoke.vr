@@ -1,0 +1,87 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, wal2_mode_api, wal
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.wal2_mode_api.slot.{
+    WalSlot, WsZero, WsOne,
+    slot_name, other,
+    SlotRole, SrActive, SrCheckpointing, SrIdle,
+    role_name, writers_allowed, readers_allowed,
+};
+mount core.database.sqlite.native.wal2_mode_api.engine.{
+    Wal2Engine,
+    fresh, role_of, has_single_writer, active_slot, rotate, mark_idle,
+    can_start_checkpoint,
+};
+mount base.{Bool, Int64};
+
+fn test_slot_names() {
+    assert(slot_name(&WsZero) == "wal-0".clone());
+    assert(slot_name(&WsOne)  == "wal-1".clone());
+}
+
+fn test_other_is_involution() {
+    match other(&WsZero) { WsOne  => {}, _ => assert(false) }
+    match other(&WsOne)  { WsZero => {}, _ => assert(false) }
+}
+
+fn test_role_access_rules() {
+    assert(writers_allowed(&SrActive));
+    assert(!writers_allowed(&SrCheckpointing));
+    assert(!writers_allowed(&SrIdle));
+    assert(!readers_allowed(&SrIdle));
+    assert(readers_allowed(&SrActive));
+    assert(readers_allowed(&SrCheckpointing));
+}
+
+fn test_fresh_engine_has_active_zero() {
+    let e = fresh();
+    match active_slot(&e) { WsZero => {}, _ => assert(false) }
+    match role_of(&e, &WsOne) { SrIdle => {}, _ => assert(false) }
+    assert(has_single_writer(&e));
+    assert(!can_start_checkpoint(&e));
+}
+
+fn test_rotate_swaps_roles() {
+    let e = fresh();
+    let r = rotate(e);
+    match role_of(&r, &WsZero) { SrCheckpointing => {}, _ => assert(false) }
+    match role_of(&r, &WsOne)  { SrActive        => {}, _ => assert(false) }
+    assert(has_single_writer(&r));
+    assert(can_start_checkpoint(&r));
+    assert_eq(r.swaps, 1 as Int64);
+}
+
+fn test_mark_idle_completes_drain() {
+    let r = rotate(fresh());
+    let done = mark_idle(r, &WsZero);
+    match role_of(&done, &WsZero) { SrIdle   => {}, _ => assert(false) }
+    match role_of(&done, &WsOne)  { SrActive => {}, _ => assert(false) }
+    assert(!can_start_checkpoint(&done));
+}
+
+fn test_double_rotate_toggles_back() {
+    let e = rotate(rotate(fresh()));
+    match active_slot(&e) { WsZero => {}, _ => assert(false) }
+    assert_eq(e.swaps, 2 as Int64);
+}
+
+fn test_role_name() {
+    assert(role_name(&SrActive)        == "active".clone());
+    assert(role_name(&SrCheckpointing) == "checkpointing".clone());
+    assert(role_name(&SrIdle)          == "idle".clone());
+}
+
+fn main() {
+    test_slot_names();
+    test_other_is_involution();
+    test_role_access_rules();
+    test_fresh_engine_has_active_zero();
+    test_rotate_swaps_roles();
+    test_mark_idle_completes_drain();
+    test_double_rotate_toggles_back();
+    test_role_name();
+}

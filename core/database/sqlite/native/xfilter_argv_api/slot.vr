@@ -1,0 +1,40 @@
+// One constraint value slot in xFilter argv.
+
+module core.database.sqlite.native.xfilter_argv_api.slot;
+
+mount base.{Bool, Text};
+
+public type SlotSource is
+    | SsConstraint(Int)    // aConstraintUsage[N].argvIndex == argv-pos
+    | SsRowid              // vtab-rowid lookup
+    | SsLimit              // 3.38+ LIMIT pushdown
+    | SsOffset             // 3.38+ OFFSET pushdown
+    ;
+
+public fn source_name(s: &SlotSource) -> Text {
+    match s {
+        SsConstraint(_) => "constraint".clone(),
+        SsRowid         => "rowid".clone(),
+        SsLimit         => "limit".clone(),
+        SsOffset        => "offset".clone(),
+    }
+}
+
+public fn constraint_index(s: &SlotSource) -> Int {
+    match s {
+        SsConstraint(i) => i,
+        _               => -1,
+    }
+}
+
+public fn is_pushdown_slot(s: &SlotSource) -> Bool {
+    match s {
+        SsLimit  => true,
+        SsOffset => true,
+        _        => false,
+    }
+}
+
+public fn is_constraint(s: &SlotSource) -> Bool {
+    match s { SsConstraint(_) => true, _ => false }
+}

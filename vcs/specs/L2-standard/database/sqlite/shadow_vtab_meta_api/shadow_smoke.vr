@@ -1,0 +1,78 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, shadow_vtab_meta_api, vtab
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.shadow_vtab_meta_api.fts5_family.{
+    Fts5Shadow, F5Data, F5Config, F5DocSize, F5Content, F5Idx, F5VocabRow,
+    suffix as fts5_suffix,
+    table_name as fts5_table_name,
+    always_created as fts5_always_created,
+    only_when_external_content,
+};
+mount core.database.sqlite.native.shadow_vtab_meta_api.rtree_family.{
+    RtreeShadow, RsNode, RsRowid, RsParent,
+    suffix as rtree_suffix,
+    table_name as rtree_table_name,
+    always_created as rtree_always_created,
+    shadow_count,
+};
+mount base.{Bool};
+
+fn test_fts5_suffixes() {
+    assert(fts5_suffix(&F5Data)     == "_data".clone());
+    assert(fts5_suffix(&F5Config)   == "_config".clone());
+    assert(fts5_suffix(&F5DocSize)  == "_docsize".clone());
+    assert(fts5_suffix(&F5Content)  == "_content".clone());
+    assert(fts5_suffix(&F5Idx)      == "_idx".clone());
+    assert(fts5_suffix(&F5VocabRow) == "_v".clone());
+}
+
+fn test_fts5_table_name() {
+    assert(fts5_table_name(&"docs".clone(), &F5Data) == "docs_data".clone());
+    assert(fts5_table_name(&"docs".clone(), &F5Idx)  == "docs_idx".clone());
+}
+
+fn test_fts5_always_created_set() {
+    assert(fts5_always_created(&F5Data));
+    assert(fts5_always_created(&F5Idx));
+    assert(fts5_always_created(&F5DocSize));
+    assert(fts5_always_created(&F5Config));
+    assert(!fts5_always_created(&F5Content));
+    assert(!fts5_always_created(&F5VocabRow));
+}
+
+fn test_fts5_only_when_external_content() {
+    assert(only_when_external_content(&F5Content));
+    assert(!only_when_external_content(&F5Data));
+    assert(!only_when_external_content(&F5Idx));
+}
+
+fn test_rtree_suffixes() {
+    assert(rtree_suffix(&RsNode)   == "_node".clone());
+    assert(rtree_suffix(&RsRowid)  == "_rowid".clone());
+    assert(rtree_suffix(&RsParent) == "_parent".clone());
+}
+
+fn test_rtree_table_name() {
+    assert(rtree_table_name(&"geo".clone(), &RsNode) == "geo_node".clone());
+}
+
+fn test_rtree_all_always_created() {
+    assert(rtree_always_created(&RsNode));
+    assert(rtree_always_created(&RsRowid));
+    assert(rtree_always_created(&RsParent));
+    assert_eq(shadow_count(), 3);
+}
+
+fn main() {
+    test_fts5_suffixes();
+    test_fts5_table_name();
+    test_fts5_always_created_set();
+    test_fts5_only_when_external_content();
+    test_rtree_suffixes();
+    test_rtree_table_name();
+    test_rtree_all_always_created();
+}

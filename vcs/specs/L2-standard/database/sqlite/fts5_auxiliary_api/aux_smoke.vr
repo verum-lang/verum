@@ -1,0 +1,98 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, fts5_auxiliary_api, fts5
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.fts5_auxiliary_api.method.{
+    AuxMethod,
+    AmPhraseCount, AmPhraseSize, AmInstCount, AmInst, AmRowid,
+    AmColumnText, AmColumnSize, AmColumnTotalSize, AmRowCount,
+    AmTokenize, AmQueryPhrase, AmSetAuxdata, AmGetAuxdata,
+    method_name, returns_integer, returns_text, is_corpus_wide,
+    needs_match_row, uses_auxdata_slot, total_methods, from_name,
+};
+mount base.{Bool, Maybe};
+
+fn test_method_names() {
+    assert(method_name(&AmPhraseCount)     == "xPhraseCount".clone());
+    assert(method_name(&AmColumnText)      == "xColumnText".clone());
+    assert(method_name(&AmQueryPhrase)     == "xQueryPhrase".clone());
+    assert(method_name(&AmColumnTotalSize) == "xColumnTotalSize".clone());
+}
+
+fn test_returns_integer_set() {
+    assert(returns_integer(&AmPhraseCount));
+    assert(returns_integer(&AmPhraseSize));
+    assert(returns_integer(&AmColumnSize));
+    assert(returns_integer(&AmColumnTotalSize));
+    assert(returns_integer(&AmRowCount));
+    assert(!returns_integer(&AmColumnText));
+    assert(!returns_integer(&AmTokenize));
+}
+
+fn test_returns_text_only_column_text() {
+    assert(returns_text(&AmColumnText));
+    assert(!returns_text(&AmPhraseCount));
+}
+
+fn test_is_corpus_wide() {
+    assert(is_corpus_wide(&AmColumnTotalSize));
+    assert(is_corpus_wide(&AmRowCount));
+    assert(!is_corpus_wide(&AmColumnSize));
+    assert(!is_corpus_wide(&AmInst));
+}
+
+fn test_needs_match_row() {
+    assert(needs_match_row(&AmInst));
+    assert(needs_match_row(&AmRowid));
+    assert(needs_match_row(&AmColumnText));
+    assert(needs_match_row(&AmColumnSize));
+    assert(!needs_match_row(&AmPhraseCount));
+    assert(!needs_match_row(&AmRowCount));
+    assert(!needs_match_row(&AmColumnTotalSize));
+    assert(!needs_match_row(&AmTokenize));
+}
+
+fn test_uses_auxdata_slot() {
+    assert(uses_auxdata_slot(&AmSetAuxdata));
+    assert(uses_auxdata_slot(&AmGetAuxdata));
+    assert(!uses_auxdata_slot(&AmPhraseCount));
+}
+
+fn test_total_methods() {
+    assert_eq(total_methods(), 13);
+}
+
+fn test_from_name_round_trip() {
+    match from_name(&"xPhraseCount".clone()) {
+        Maybe.Some(m) => match &m { AmPhraseCount => {}, _ => assert(false) },
+        Maybe.None => assert(false),
+    }
+    match from_name(&"xColumnTotalSize".clone()) {
+        Maybe.Some(m) => match &m { AmColumnTotalSize => {}, _ => assert(false) },
+        Maybe.None => assert(false),
+    }
+    match from_name(&"xGetAuxdata".clone()) {
+        Maybe.Some(m) => match &m { AmGetAuxdata => {}, _ => assert(false) },
+        Maybe.None => assert(false),
+    }
+}
+
+fn test_from_name_unknown_returns_none() {
+    match from_name(&"xNotReal".clone()) { Maybe.None => {}, Maybe.Some(_) => assert(false) }
+    match from_name(&"".clone()) { Maybe.None => {}, Maybe.Some(_) => assert(false) }
+}
+
+fn main() {
+    test_method_names();
+    test_returns_integer_set();
+    test_returns_text_only_column_text();
+    test_is_corpus_wide();
+    test_needs_match_row();
+    test_uses_auxdata_slot();
+    test_total_methods();
+    test_from_name_round_trip();
+    test_from_name_unknown_returns_none();
+}

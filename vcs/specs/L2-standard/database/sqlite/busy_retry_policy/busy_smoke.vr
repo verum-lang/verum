@@ -1,0 +1,72 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, busy_retry_policy, concurrency
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.busy_retry_policy.schedule.{
+    delay_table, table_length,
+    delay_ms, cumulative_wait_ms,
+    Verdict, VrContinue, VrGiveUp,
+    verdict, is_continue,
+};
+mount base.{Bool, Int64};
+
+fn test_table_length() {
+    assert_eq(table_length(), 12);
+    let t = delay_table();
+    assert_eq(t.len(), 12);
+}
+
+fn test_table_first_entries() {
+    let t = delay_table();
+    assert_eq(t[0], 1);
+    assert_eq(t[1], 2);
+    assert_eq(t[2], 5);
+    assert_eq(t[3], 10);
+}
+
+fn test_table_last_entry() {
+    let t = delay_table();
+    assert_eq(t[11], 100);
+}
+
+fn test_delay_ms_within_and_past_table() {
+    assert_eq(delay_ms(0),  1);
+    assert_eq(delay_ms(3),  10);
+    assert_eq(delay_ms(11), 100);
+    // Past the table → stays at 100
+    assert_eq(delay_ms(12), 100);
+    assert_eq(delay_ms(100), 100);
+    // Negative → 0
+    assert_eq(delay_ms(-1), 0);
+}
+
+fn test_cumulative_wait() {
+    assert_eq(cumulative_wait_ms(0), 0 as Int64);
+    assert_eq(cumulative_wait_ms(1), 1 as Int64);
+    assert_eq(cumulative_wait_ms(2), 3 as Int64);   // 1 + 2
+    assert_eq(cumulative_wait_ms(3), 8 as Int64);   // 1 + 2 + 5
+    assert_eq(cumulative_wait_ms(4), 18 as Int64);  // + 10
+}
+
+fn test_verdict_within_budget() {
+    let v = verdict(0, 5000 as Int64);
+    assert(is_continue(&v));
+}
+
+fn test_verdict_past_budget_gives_up() {
+    // Total after 1 retry = 1ms; budget 0ms → give up because next delay exceeds.
+    match verdict(0, 0 as Int64) { VrGiveUp => {}, _ => assert(false) }
+}
+
+fn main() {
+    test_table_length();
+    test_table_first_entries();
+    test_table_last_entry();
+    test_delay_ms_within_and_past_table();
+    test_cumulative_wait();
+    test_verdict_within_budget();
+    test_verdict_past_budget_gives_up();
+}

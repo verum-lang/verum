@@ -1,0 +1,12 @@
+// =============================================================================
+// core/database/sqlite/native/xfilter_argv_api/mod.vr
+// =============================================================================
+// sqlite3_module.xFilter argv marshalling — the argv passed in must match the
+// xBestIndex constraint_usage order and argv-count.
+// Spec §16.1.8 — xFilter.
+// =============================================================================
+
+module core.database.sqlite.native.xfilter_argv_api;
+
+public module slot;
+public module frame;

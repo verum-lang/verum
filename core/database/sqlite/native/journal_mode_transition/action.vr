@@ -1,0 +1,93 @@
+// Transition action classifier.
+
+module core.database.sqlite.native.journal_mode_transition.action;
+
+mount base.{Bool, Text};
+
+public type JournalMode is
+    | JmDelete
+    | JmTruncate
+    | JmPersist
+    | JmMemory
+    | JmWal
+    | JmOff
+    ;
+
+public fn mode_name(m: &JournalMode) -> Text {
+    match m {
+        JmDelete   => "DELETE".clone(),
+        JmTruncate => "TRUNCATE".clone(),
+        JmPersist  => "PERSIST".clone(),
+        JmMemory   => "MEMORY".clone(),
+        JmWal      => "WAL".clone(),
+        JmOff      => "OFF".clone(),
+    }
+}
+
+public fn is_wal(m: &JournalMode) -> Bool {
+    match m { JmWal => true, _ => false }
+}
+
+public fn is_off(m: &JournalMode) -> Bool {
+    match m { JmOff => true, _ => false }
+}
+
+// Rollback-journal family (DELETE, TRUNCATE, PERSIST all use rollback-journal).
+public fn is_rollback_family(m: &JournalMode) -> Bool {
+    match m {
+        JmDelete   => true,
+        JmTruncate => true,
+        JmPersist  => true,
+        _          => false,
+    }
+}
+
+public type TransitionAction is
+    | TaNoop                 // from == to
+    | TaInPlace              // same-family; just flip the header flag
+    | TaDeleteJournal        // need to unlink leftover journal
+    | TaCheckpointAndDrop    // WAL → rollback: checkpoint then drop -wal
+    | TaCreateWalShm         // rollback → WAL: allocate -shm + -wal
+    | TaRequiresExclusive    // transitions that need SQLITE_LOCK_EXCLUSIVE
+    ;
+
+public fn action_name(a: &TransitionAction) -> Text {
+    match a {
+        TaNoop               => "noop".clone(),
+        TaInPlace            => "in_place".clone(),
+        TaDeleteJournal      => "delete_journal".clone(),
+        TaCheckpointAndDrop  => "checkpoint_and_drop".clone(),
+        TaCreateWalShm       => "create_wal_shm".clone(),
+        TaRequiresExclusive  => "requires_exclusive".clone(),
+    }
+}
+
+public fn needs_exclusive_lock(a: &TransitionAction) -> Bool {
+    match a {
+        TaCheckpointAndDrop => true,
+        TaCreateWalShm      => true,
+        TaRequiresExclusive => true,
+        _                   => false,
+    }
+}
+
+public fn plan(from: &JournalMode, to: &JournalMode) -> TransitionAction {
+    let from_wal = is_wal(from);
+    let to_wal   = is_wal(to);
+    let same_family = is_rollback_family(from) && is_rollback_family(to);
+    // noop if modes match
+    let eq = match (from, to) {
+        (JmDelete,   JmDelete)   => true,
+        (JmTruncate, JmTruncate) => true,
+        (JmPersist,  JmPersist)  => true,
+        (JmMemory,   JmMemory)   => true,
+        (JmWal,      JmWal)      => true,
+        (JmOff,      JmOff)      => true,
+        _                        => false,
+    };
+    if eq { return TaNoop; }
+    if from_wal && !to_wal { return TaCheckpointAndDrop; }
+    if !from_wal && to_wal { return TaCreateWalShm; }
+    if same_family         { return TaInPlace; }
+    TaDeleteJournal
+}

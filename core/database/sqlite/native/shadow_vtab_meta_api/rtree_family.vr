@@ -1,0 +1,35 @@
+// R-tree shadow-table suffix taxonomy.
+
+module core.database.sqlite.native.shadow_vtab_meta_api.rtree_family;
+
+mount base.{Bool, Text};
+
+public type RtreeShadow is
+    | RsNode         // <name>_node
+    | RsRowid        // <name>_rowid
+    | RsParent       // <name>_parent
+    ;
+
+public fn suffix(s: &RtreeShadow) -> Text {
+    match s {
+        RsNode   => "_node".clone(),
+        RsRowid  => "_rowid".clone(),
+        RsParent => "_parent".clone(),
+    }
+}
+
+public fn table_name(vtab_name: &Text, s: &RtreeShadow) -> Text {
+    vtab_name.clone() + suffix(s)
+}
+
+// All three are always created when an rtree vtab is declared.
+public fn always_created(s: &RtreeShadow) -> Bool {
+    match s {
+        RsNode   => true,
+        RsRowid  => true,
+        RsParent => true,
+    }
+}
+
+// Count: r-tree always emits exactly 3 shadow tables.
+public fn shadow_count() -> Int { 3 }

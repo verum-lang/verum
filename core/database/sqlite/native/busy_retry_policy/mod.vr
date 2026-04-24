@@ -1,0 +1,15 @@
+// =============================================================================
+// core/database/sqlite/native/busy_retry_policy/mod.vr
+// =============================================================================
+// sqlite3_busy_timeout retry schedule — mirrors the default delay table in
+// sqlite3.c (sqliteDefaultBusyCallback).
+// Spec §7.3 — busy handler.
+//
+// Delays (ms): [1, 2, 5, 10, 15, 20, 25, 25, 25, 50, 50, 100] — indexed by
+// retry count, capped; after the cap the handler still returns 1 up to the
+// user's millisecond budget.
+// =============================================================================
+
+module core.database.sqlite.native.busy_retry_policy;
+
+public module schedule;

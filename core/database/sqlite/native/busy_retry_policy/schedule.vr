@@ -1,0 +1,61 @@
+// Default-busy-handler delay schedule.
+
+module core.database.sqlite.native.busy_retry_policy.schedule;
+
+mount base.{Bool, Int64};
+mount core.collections.list.{List};
+
+public fn delay_table() -> List<Int> {
+    let mut out: List<Int> = [].clone() as List<Int>;
+    out.push(1);
+    out.push(2);
+    out.push(5);
+    out.push(10);
+    out.push(15);
+    out.push(20);
+    out.push(25);
+    out.push(25);
+    out.push(25);
+    out.push(50);
+    out.push(50);
+    out.push(100);
+    out
+}
+
+public fn table_length() -> Int { 12 }
+
+// Delay for retry number `n` (0-based). After the table, delays stay at 100ms.
+public fn delay_ms(n: Int) -> Int {
+    let t = delay_table();
+    if n < 0 { return 0; }
+    if n < t.len() { return t[n]; }
+    t[t.len() - 1]
+}
+
+// Cumulative wait after `n` retries (0 means "before first retry").
+public fn cumulative_wait_ms(n: Int) -> Int64 {
+    let mut total: Int64 = 0 as Int64;
+    let mut i: Int = 0;
+    while i < n {
+        total = total + (delay_ms(i) as Int64);
+        i = i + 1;
+    }
+    total
+}
+
+public type Verdict is
+    | VrContinue    // handler returns 1 — try again
+    | VrGiveUp      // handler returns 0 — propagate SQLITE_BUSY
+    ;
+
+public fn verdict(retry_count: Int, budget_ms: Int64) -> Verdict {
+    if cumulative_wait_ms(retry_count + 1) > budget_ms {
+        VrGiveUp
+    } else {
+        VrContinue
+    }
+}
+
+public fn is_continue(v: &Verdict) -> Bool {
+    match v { VrContinue => true, _ => false }
+}

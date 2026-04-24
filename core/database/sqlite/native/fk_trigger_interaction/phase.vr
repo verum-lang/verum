@@ -1,0 +1,82 @@
+// Per-row write phase ordering.
+
+module core.database.sqlite.native.fk_trigger_interaction.phase;
+
+mount base.{Bool, Text, Maybe};
+
+public type WritePhase is
+    | WpBeforeStmtTrigger
+    | WpBeforeRowTrigger
+    | WpConstraintCheck
+    | WpRowWrite
+    | WpAfterRowTrigger
+    | WpFkCascade
+    | WpAfterStmtTrigger
+    ;
+
+public fn phase_name(p: &WritePhase) -> Text {
+    match p {
+        WpBeforeStmtTrigger => "before_stmt".clone(),
+        WpBeforeRowTrigger  => "before_row".clone(),
+        WpConstraintCheck   => "constraint".clone(),
+        WpRowWrite          => "row_write".clone(),
+        WpAfterRowTrigger   => "after_row".clone(),
+        WpFkCascade         => "fk_cascade".clone(),
+        WpAfterStmtTrigger  => "after_stmt".clone(),
+    }
+}
+
+public fn phase_order(p: &WritePhase) -> Int {
+    match p {
+        WpBeforeStmtTrigger => 1,
+        WpBeforeRowTrigger  => 2,
+        WpConstraintCheck   => 3,
+        WpRowWrite          => 4,
+        WpAfterRowTrigger   => 5,
+        WpFkCascade         => 6,
+        WpAfterStmtTrigger  => 7,
+    }
+}
+
+public fn next_phase(p: &WritePhase) -> Maybe<WritePhase> {
+    match p {
+        WpBeforeStmtTrigger => Maybe.Some(WpBeforeRowTrigger),
+        WpBeforeRowTrigger  => Maybe.Some(WpConstraintCheck),
+        WpConstraintCheck   => Maybe.Some(WpRowWrite),
+        WpRowWrite          => Maybe.Some(WpAfterRowTrigger),
+        WpAfterRowTrigger   => Maybe.Some(WpFkCascade),
+        WpFkCascade         => Maybe.Some(WpAfterStmtTrigger),
+        WpAfterStmtTrigger  => Maybe.None,
+    }
+}
+
+public fn is_row_level(p: &WritePhase) -> Bool {
+    match p {
+        WpBeforeRowTrigger => true,
+        WpConstraintCheck  => true,
+        WpRowWrite         => true,
+        WpAfterRowTrigger  => true,
+        WpFkCascade        => true,
+        _                  => false,
+    }
+}
+
+// A deferred FK check runs at COMMIT instead of WpFkCascade time.
+public fn is_cascaded_at_commit_when_deferred(p: &WritePhase) -> Bool {
+    match p { WpFkCascade => true, _ => false }
+}
+
+// AFTER ROW triggers see the *new* rowid for INSERT/UPDATE; BEFORE ROW
+// triggers see pre-constraint state.
+public fn can_reference_post_write_rowid(p: &WritePhase) -> Bool {
+    match p {
+        WpAfterRowTrigger  => true,
+        WpFkCascade        => true,
+        WpAfterStmtTrigger => true,
+        _                  => false,
+    }
+}
+
+public fn fires_before_write(p: &WritePhase) -> Bool {
+    phase_order(p) < phase_order(&WpRowWrite)
+}

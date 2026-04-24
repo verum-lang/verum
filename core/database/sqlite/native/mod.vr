@@ -588,3 +588,19 @@ public module virtual_column_api;
 public module pushdown_filter_api;
 // - double_quoted_string_api: DQS_DML / DQS_DDL config + 3-way resolver (ident / legacy / error)
 public module double_quoted_string_api;
+// - xfilter_argv_api: xFilter argv slot taxonomy (constraint/rowid/limit/offset) + frame
+public module xfilter_argv_api;
+// - wal2_mode_api: dual-WAL slot state (active/checkpointing/idle) + rotate engine
+public module wal2_mode_api;
+// - secure_delete_api: PRAGMA secure_delete 3-mode (OFF=0/ON=1/FAST=2) taxonomy
+public module secure_delete_api;
+// - fk_trigger_interaction: 7-phase row-write pipeline (before_stmt/row/constraint/write/after/fk/after_stmt)
+public module fk_trigger_interaction;
+// - shadow_vtab_meta_api: fts5 + rtree shadow-table suffix conventions
+public module shadow_vtab_meta_api;
+// - journal_mode_transition: 6-mode matrix → 6-action transition plan (requires-exclusive gate)
+public module journal_mode_transition;
+// - busy_retry_policy: default [1,2,5,10,15,20,25,25,25,50,50,100]ms delay schedule
+public module busy_retry_policy;
+// - fts5_auxiliary_api: 13-method FTS5 auxiliary fn taxonomy + name lookup
+public module fts5_auxiliary_api;

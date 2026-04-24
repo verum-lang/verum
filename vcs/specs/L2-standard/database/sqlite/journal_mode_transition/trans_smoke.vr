@@ -1,0 +1,94 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, journal_mode_transition, pager
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.journal_mode_transition.action.{
+    JournalMode, JmDelete, JmTruncate, JmPersist, JmMemory, JmWal, JmOff,
+    mode_name, is_wal, is_off, is_rollback_family,
+    TransitionAction,
+    TaNoop, TaInPlace, TaDeleteJournal, TaCheckpointAndDrop,
+    TaCreateWalShm, TaRequiresExclusive,
+    action_name, needs_exclusive_lock, plan,
+};
+mount base.{Bool};
+
+fn test_mode_names() {
+    assert(mode_name(&JmDelete)   == "DELETE".clone());
+    assert(mode_name(&JmTruncate) == "TRUNCATE".clone());
+    assert(mode_name(&JmWal)      == "WAL".clone());
+    assert(mode_name(&JmOff)      == "OFF".clone());
+}
+
+fn test_is_wal_and_off() {
+    assert(is_wal(&JmWal));
+    assert(!is_wal(&JmDelete));
+    assert(is_off(&JmOff));
+    assert(!is_off(&JmDelete));
+}
+
+fn test_is_rollback_family() {
+    assert(is_rollback_family(&JmDelete));
+    assert(is_rollback_family(&JmTruncate));
+    assert(is_rollback_family(&JmPersist));
+    assert(!is_rollback_family(&JmWal));
+    assert(!is_rollback_family(&JmMemory));
+    assert(!is_rollback_family(&JmOff));
+}
+
+fn test_action_names() {
+    assert(action_name(&TaNoop)              == "noop".clone());
+    assert(action_name(&TaInPlace)           == "in_place".clone());
+    assert(action_name(&TaCheckpointAndDrop) == "checkpoint_and_drop".clone());
+    assert(action_name(&TaCreateWalShm)      == "create_wal_shm".clone());
+}
+
+fn test_needs_exclusive_lock() {
+    assert(needs_exclusive_lock(&TaCheckpointAndDrop));
+    assert(needs_exclusive_lock(&TaCreateWalShm));
+    assert(needs_exclusive_lock(&TaRequiresExclusive));
+    assert(!needs_exclusive_lock(&TaNoop));
+    assert(!needs_exclusive_lock(&TaInPlace));
+    assert(!needs_exclusive_lock(&TaDeleteJournal));
+}
+
+fn test_plan_noop_on_same_mode() {
+    match plan(&JmDelete,   &JmDelete)   { TaNoop => {}, _ => assert(false) }
+    match plan(&JmWal,      &JmWal)      { TaNoop => {}, _ => assert(false) }
+    match plan(&JmOff,      &JmOff)      { TaNoop => {}, _ => assert(false) }
+}
+
+fn test_plan_wal_to_rollback() {
+    match plan(&JmWal, &JmDelete)   { TaCheckpointAndDrop => {}, _ => assert(false) }
+    match plan(&JmWal, &JmTruncate) { TaCheckpointAndDrop => {}, _ => assert(false) }
+}
+
+fn test_plan_rollback_to_wal() {
+    match plan(&JmDelete,  &JmWal) { TaCreateWalShm => {}, _ => assert(false) }
+    match plan(&JmPersist, &JmWal) { TaCreateWalShm => {}, _ => assert(false) }
+}
+
+fn test_plan_within_rollback_family_is_in_place() {
+    match plan(&JmDelete, &JmTruncate) { TaInPlace => {}, _ => assert(false) }
+    match plan(&JmPersist, &JmDelete)  { TaInPlace => {}, _ => assert(false) }
+}
+
+fn test_plan_off_or_memory_defaults_delete_journal() {
+    match plan(&JmOff, &JmDelete)    { TaDeleteJournal => {}, _ => assert(false) }
+    match plan(&JmMemory, &JmDelete) { TaDeleteJournal => {}, _ => assert(false) }
+}
+
+fn main() {
+    test_mode_names();
+    test_is_wal_and_off();
+    test_is_rollback_family();
+    test_action_names();
+    test_needs_exclusive_lock();
+    test_plan_noop_on_same_mode();
+    test_plan_wal_to_rollback();
+    test_plan_rollback_to_wal();
+    test_plan_within_rollback_family_is_in_place();
+    test_plan_off_or_memory_defaults_delete_journal();
+}

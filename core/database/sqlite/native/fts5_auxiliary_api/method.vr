@@ -1,0 +1,103 @@
+// FTS5 auxiliary-method taxonomy.
+
+module core.database.sqlite.native.fts5_auxiliary_api.method;
+
+mount base.{Bool, Text, Maybe};
+
+public type AuxMethod is
+    | AmPhraseCount        // integer — phrases in query
+    | AmPhraseSize         // integer — tokens in phrase-N
+    | AmInstCount          // integer — instance count
+    | AmInst               // populate (idx, iCol, iOff)
+    | AmRowid              // rowid of current match
+    | AmColumnText         // text of iCol
+    | AmColumnSize         // size in tokens of iCol
+    | AmColumnTotalSize    // sum across corpus
+    | AmRowCount           // total rows in virtual table
+    | AmTokenize           // run tokenizer on text
+    | AmQueryPhrase        // execute a sub-query phrase
+    | AmSetAuxdata         // set auxiliary data for this phrase
+    | AmGetAuxdata         // read back auxiliary data
+    ;
+
+public fn method_name(m: &AuxMethod) -> Text {
+    match m {
+        AmPhraseCount     => "xPhraseCount".clone(),
+        AmPhraseSize      => "xPhraseSize".clone(),
+        AmInstCount       => "xInstCount".clone(),
+        AmInst            => "xInst".clone(),
+        AmRowid           => "xRowid".clone(),
+        AmColumnText      => "xColumnText".clone(),
+        AmColumnSize      => "xColumnSize".clone(),
+        AmColumnTotalSize => "xColumnTotalSize".clone(),
+        AmRowCount        => "xRowCount".clone(),
+        AmTokenize        => "xTokenize".clone(),
+        AmQueryPhrase     => "xQueryPhrase".clone(),
+        AmSetAuxdata      => "xSetAuxdata".clone(),
+        AmGetAuxdata      => "xGetAuxdata".clone(),
+    }
+}
+
+public fn returns_integer(m: &AuxMethod) -> Bool {
+    match m {
+        AmPhraseCount     => true,
+        AmPhraseSize      => true,
+        AmInstCount       => true,
+        AmColumnSize      => true,
+        AmColumnTotalSize => true,
+        AmRowCount        => true,
+        _                 => false,
+    }
+}
+
+public fn returns_text(m: &AuxMethod) -> Bool {
+    match m { AmColumnText => true, _ => false }
+}
+
+public fn is_corpus_wide(m: &AuxMethod) -> Bool {
+    match m {
+        AmColumnTotalSize => true,
+        AmRowCount        => true,
+        _                 => false,
+    }
+}
+
+public fn needs_match_row(m: &AuxMethod) -> Bool {
+    match m {
+        AmColumnTotalSize => false,
+        AmRowCount        => false,
+        AmTokenize        => false,
+        AmPhraseCount     => false,
+        AmPhraseSize      => false,
+        AmSetAuxdata      => false,
+        AmGetAuxdata      => false,
+        _                 => true,
+    }
+}
+
+public fn uses_auxdata_slot(m: &AuxMethod) -> Bool {
+    match m {
+        AmSetAuxdata => true,
+        AmGetAuxdata => true,
+        _            => false,
+    }
+}
+
+public fn total_methods() -> Int { 13 }
+
+public fn from_name(s: &Text) -> Maybe<AuxMethod> {
+    if *s == "xPhraseCount".clone()     { return Maybe.Some(AmPhraseCount); }
+    if *s == "xPhraseSize".clone()      { return Maybe.Some(AmPhraseSize); }
+    if *s == "xInstCount".clone()       { return Maybe.Some(AmInstCount); }
+    if *s == "xInst".clone()            { return Maybe.Some(AmInst); }
+    if *s == "xRowid".clone()           { return Maybe.Some(AmRowid); }
+    if *s == "xColumnText".clone()      { return Maybe.Some(AmColumnText); }
+    if *s == "xColumnSize".clone()      { return Maybe.Some(AmColumnSize); }
+    if *s == "xColumnTotalSize".clone() { return Maybe.Some(AmColumnTotalSize); }
+    if *s == "xRowCount".clone()        { return Maybe.Some(AmRowCount); }
+    if *s == "xTokenize".clone()        { return Maybe.Some(AmTokenize); }
+    if *s == "xQueryPhrase".clone()     { return Maybe.Some(AmQueryPhrase); }
+    if *s == "xSetAuxdata".clone()      { return Maybe.Some(AmSetAuxdata); }
+    if *s == "xGetAuxdata".clone()      { return Maybe.Some(AmGetAuxdata); }
+    Maybe.None
+}

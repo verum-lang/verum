@@ -1,0 +1,89 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, xfilter_argv_api, vtab
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.xfilter_argv_api.slot.{
+    SlotSource, SsConstraint, SsRowid, SsLimit, SsOffset,
+    source_name, constraint_index, is_pushdown_slot, is_constraint,
+};
+mount core.database.sqlite.native.xfilter_argv_api.frame.{
+    FilterFrame,
+    new, push_slot, argc, has_idx_str,
+    constraint_count, pushdown_count, is_well_formed,
+};
+mount base.{Bool};
+
+fn test_source_names() {
+    assert(source_name(&SsConstraint(0)) == "constraint".clone());
+    assert(source_name(&SsRowid)         == "rowid".clone());
+    assert(source_name(&SsLimit)         == "limit".clone());
+    assert(source_name(&SsOffset)        == "offset".clone());
+}
+
+fn test_constraint_index_projection() {
+    assert_eq(constraint_index(&SsConstraint(3)), 3);
+    assert_eq(constraint_index(&SsRowid), -1);
+    assert_eq(constraint_index(&SsLimit), -1);
+}
+
+fn test_is_pushdown_and_is_constraint() {
+    assert(is_constraint(&SsConstraint(0)));
+    assert(!is_constraint(&SsLimit));
+    assert(is_pushdown_slot(&SsLimit));
+    assert(is_pushdown_slot(&SsOffset));
+    assert(!is_pushdown_slot(&SsConstraint(0)));
+    assert(!is_pushdown_slot(&SsRowid));
+}
+
+fn test_frame_defaults() {
+    let f = new(0, "".clone());
+    assert_eq(argc(&f), 0);
+    assert(!has_idx_str(&f));
+    assert(is_well_formed(&f));
+}
+
+fn test_frame_idx_str() {
+    let f = new(5, "lookup".clone());
+    assert(has_idx_str(&f));
+    assert_eq(f.idx_num, 5);
+}
+
+fn test_push_slot_and_counts() {
+    let mut f = new(0, "".clone());
+    f = push_slot(f, SsConstraint(0));
+    f = push_slot(f, SsConstraint(1));
+    f = push_slot(f, SsLimit);
+    f = push_slot(f, SsOffset);
+    assert_eq(argc(&f), 4);
+    assert_eq(constraint_count(&f), 2);
+    assert_eq(pushdown_count(&f), 2);
+}
+
+fn test_well_formed_rejects_two_limits() {
+    let mut f = new(0, "".clone());
+    f = push_slot(f, SsLimit);
+    f = push_slot(f, SsLimit);
+    assert(!is_well_formed(&f));
+}
+
+fn test_well_formed_allows_one_limit_one_offset() {
+    let mut f = new(0, "".clone());
+    f = push_slot(f, SsConstraint(0));
+    f = push_slot(f, SsLimit);
+    f = push_slot(f, SsOffset);
+    assert(is_well_formed(&f));
+}
+
+fn main() {
+    test_source_names();
+    test_constraint_index_projection();
+    test_is_pushdown_and_is_constraint();
+    test_frame_defaults();
+    test_frame_idx_str();
+    test_push_slot_and_counts();
+    test_well_formed_rejects_two_limits();
+    test_well_formed_allows_one_limit_one_offset();
+}

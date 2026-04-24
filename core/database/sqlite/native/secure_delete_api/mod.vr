@@ -1,0 +1,15 @@
+// =============================================================================
+// core/database/sqlite/native/secure_delete_api/mod.vr
+// =============================================================================
+// PRAGMA secure_delete — zero-out freed pages so deleted data doesn't linger.
+// Spec §18.4 — secure_delete.
+//
+// Modes:
+//   0 / OFF  — fast, leaves plaintext in freed pages
+//   1 / ON   — zero-fill freed pages (strongest)
+//   2 / FAST — zero only the reserved-bytes tail (3.31+)
+// =============================================================================
+
+module core.database.sqlite.native.secure_delete_api;
+
+public module mode;
