@@ -1,0 +1,150 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: x509, spki, public_key, rfc5280_4_1_2_7
+// @timeout: 15000
+// @expected-exit: 0
+
+// RFC 5280 §4.1.2.7 SubjectPublicKeyInfo — the decoded typed key ADT
+// exposes nine variants matching the algorithms WebPKI + TLS 1.3
+// negotiate:
+//
+//   EC:   P-256 / P-384 / P-521 (uncompressed SEC1)
+//   EdDSA: Ed25519 / Ed448
+//   X-DH:  X25519 / X448 (raw bytes)
+//   RSA:   modulus + exponent
+//   Unsupported (decoder's "drop this algorithm" slot)
+//
+// This test pins that every variant is constructible + distinguishable
+// under a total match, and that the embedded key bytes are readable
+// back after construction.
+
+mount core.*;
+mount core.collections.List;
+mount core.security.x509.spki.{
+    SubjectPublicKey, RsaPublicKey, EcPublicKeyBytes,
+    Ed25519PublicKeyBytes, Ed448PublicKeyBytes,
+    X25519PublicKeyBytes, X448PublicKeyBytes,
+};
+
+fn make_rsa() -> RsaPublicKey {
+    RsaPublicKey {
+        modulus:  [0x01_u8, 0x00_u8, 0x01_u8, 0x00_u8],
+        exponent: [0x01_u8, 0x00_u8, 0x01_u8],
+    }
+}
+
+fn make_ec(first: Byte, len: Int) -> EcPublicKeyBytes {
+    let mut v: List<Byte> = [];
+    v.push(first);
+    let mut i: Int = 1;
+    while i < len { v.push(0_u8); i = i + 1; }
+    EcPublicKeyBytes { bytes: v }
+}
+
+fn all_nine_variants_tagged_distinctly() {
+    let keys: [SubjectPublicKey; 9] = [
+        SubjectPublicKey.Rsa(make_rsa()),
+        SubjectPublicKey.EcP256(make_ec(0x04_u8, 65)),
+        SubjectPublicKey.EcP384(make_ec(0x04_u8, 97)),
+        SubjectPublicKey.EcP521(make_ec(0x04_u8, 133)),
+        SubjectPublicKey.Ed25519(Ed25519PublicKeyBytes { bytes: [0xAA_u8; 32] }),
+        SubjectPublicKey.Ed448(Ed448PublicKeyBytes { bytes: [0xBB_u8; 57] }),
+        SubjectPublicKey.X25519(X25519PublicKeyBytes { bytes: [0xCC_u8; 32] }),
+        SubjectPublicKey.X448(X448PublicKeyBytes { bytes: [0xDD_u8; 56] }),
+        SubjectPublicKey.Unsupported,
+    ];
+    let mut tags: [Int; 9] = [0; 9];
+    let mut i: Int = 0;
+    while i < 9 {
+        tags[i] = match keys[i] {
+            SubjectPublicKey.Rsa(_)     => 1,
+            SubjectPublicKey.EcP256(_)  => 2,
+            SubjectPublicKey.EcP384(_)  => 3,
+            SubjectPublicKey.EcP521(_)  => 4,
+            SubjectPublicKey.Ed25519(_) => 5,
+            SubjectPublicKey.Ed448(_)   => 6,
+            SubjectPublicKey.X25519(_)  => 7,
+            SubjectPublicKey.X448(_)    => 8,
+            SubjectPublicKey.Unsupported => 9,
+        };
+        i = i + 1;
+    }
+    let mut j: Int = 0;
+    while j < 9 {
+        let mut k: Int = j + 1;
+        while k < 9 {
+            assert(tags[j] != tags[k]);
+            k = k + 1;
+        }
+        j = j + 1;
+    }
+}
+
+fn rsa_payload_preserves_modulus_and_exponent() {
+    let k = SubjectPublicKey.Rsa(make_rsa());
+    match k {
+        SubjectPublicKey.Rsa(rsa) => {
+            assert(rsa.modulus.len() == 4);
+            assert(rsa.modulus[0] == 0x01_u8);
+            assert(rsa.exponent.len() == 3);
+            assert(rsa.exponent[0] == 0x01_u8);
+            assert(rsa.exponent[2] == 0x01_u8);
+        },
+        _ => panic("expected Rsa"),
+    }
+}
+
+fn ec_p256_payload_has_sec1_prefix_and_length() {
+    let k = SubjectPublicKey.EcP256(make_ec(0x04_u8, 65));
+    match k {
+        SubjectPublicKey.EcP256(ec) => {
+            assert(ec.bytes.len() == 65);
+            assert(ec.bytes[0] == 0x04_u8);   // uncompressed point
+        },
+        _ => panic("expected EcP256"),
+    }
+}
+
+fn ed25519_payload_is_fixed_32_bytes() {
+    let k = SubjectPublicKey.Ed25519(Ed25519PublicKeyBytes { bytes: [0xAB_u8; 32] });
+    match k {
+        SubjectPublicKey.Ed25519(ed) => {
+            // bytes is a fixed [Byte; 32].
+            assert(ed.bytes[0]  == 0xAB_u8);
+            assert(ed.bytes[31] == 0xAB_u8);
+        },
+        _ => panic("expected Ed25519"),
+    }
+}
+
+fn x448_payload_is_fixed_56_bytes() {
+    let k = SubjectPublicKey.X448(X448PublicKeyBytes { bytes: [0xCD_u8; 56] });
+    match k {
+        SubjectPublicKey.X448(x) => {
+            assert(x.bytes[0]  == 0xCD_u8);
+            assert(x.bytes[55] == 0xCD_u8);
+        },
+        _ => panic("expected X448"),
+    }
+}
+
+fn unsupported_is_a_unit_variant() {
+    let k = SubjectPublicKey.Unsupported;
+    match k {
+        SubjectPublicKey.Unsupported => {},
+        _ => panic("Unsupported must be unit"),
+    }
+}
+
+@main
+public fn main() -> Int {
+    all_nine_variants_tagged_distinctly();
+    rsa_payload_preserves_modulus_and_exponent();
+    ec_p256_payload_has_sec1_prefix_and_length();
+    ed25519_payload_is_fixed_32_bytes();
+    x448_payload_is_fixed_56_bytes();
+    unsupported_is_a_unit_variant();
+    print("RFC 5280 §4.1.2.7 SubjectPublicKey variant dispatch verified");
+    0
+}
