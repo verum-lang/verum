@@ -1,0 +1,85 @@
+// Text → Int64 strict parser.
+
+module core.database.sqlite.native.text_to_int_strict_api.parse_;
+
+mount base.{Bool, Int64, Text};
+
+public fn int64_max() -> Int64 { 0x7FFFFFFFFFFFFFFF as Int64 }
+public fn int64_min() -> Int64 {
+    let hi: Int64 = 0x8000000000000000 as Int64;    // -2^63
+    hi
+}
+
+public type ParseOutcome is {
+    value: Int64,
+    had_digits: Bool,
+    is_overflow: Bool,
+    trailing_non_digit: Bool,
+    was_negative: Bool,
+};
+
+public fn failed() -> ParseOutcome {
+    ParseOutcome {
+        value: 0 as Int64,
+        had_digits: false,
+        is_overflow: false,
+        trailing_non_digit: false,
+        was_negative: false,
+    }
+}
+
+fn is_space(b: u8) -> Bool {
+    b == 0x20 as u8 || b == 0x09 as u8 || b == 0x0A as u8 || b == 0x0D as u8
+}
+
+fn is_digit(b: u8) -> Bool {
+    b >= 0x30 as u8 && b <= 0x39 as u8
+}
+
+public fn parse(raw: &Text) -> ParseOutcome {
+    let bs = raw.as_bytes();
+    let mut i: Int = 0;
+    while i < bs.len() && is_space(bs[i]) { i = i + 1; }
+    let mut was_negative = false;
+    if i < bs.len() {
+        if bs[i] == (0x2B as u8) {
+            i = i + 1;
+        } else if bs[i] == (0x2D as u8) {
+            was_negative = true;
+            i = i + 1;
+        }
+    }
+    let digits_start = i;
+    let mut acc: Int64 = 0 as Int64;
+    let mut overflow = false;
+    while i < bs.len() && is_digit(bs[i]) {
+        let d = (bs[i] - (0x30 as u8)) as Int64;
+        // Check multiply overflow.
+        if acc > int64_max() / (10 as Int64) { overflow = true; }
+        acc = acc * (10 as Int64) + d;
+        if acc < (0 as Int64) { overflow = true; }
+        i = i + 1;
+    }
+    let had_digits = i > digits_start;
+    // Apply sign.
+    if was_negative { acc = -acc; }
+    let trailing_non_digit = i < bs.len();
+    if overflow {
+        if was_negative { acc = int64_min(); } else { acc = int64_max(); }
+    }
+    ParseOutcome {
+        value: acc,
+        had_digits: had_digits,
+        is_overflow: overflow,
+        trailing_non_digit: trailing_non_digit,
+        was_negative: was_negative,
+    }
+}
+
+public fn is_valid_integer(p: &ParseOutcome) -> Bool {
+    p.had_digits && !p.trailing_non_digit && !p.is_overflow
+}
+
+public fn is_within_int64_range(v: Int64) -> Bool {
+    v >= int64_min() && v <= int64_max()
+}

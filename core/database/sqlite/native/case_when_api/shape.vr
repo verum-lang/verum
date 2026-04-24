@@ -1,0 +1,76 @@
+// CASE expression shape + branch bookkeeping.
+
+module core.database.sqlite.native.case_when_api.shape;
+
+mount base.{Bool, Text};
+mount core.collections.list.{List};
+
+public type CaseShape is
+    | CsSimple(Text)      // CASE <operand_sql> WHEN ... → equality comparisons
+    | CsSearched          // CASE WHEN <bool_sql> THEN ... → boolean predicates
+    ;
+
+public fn shape_name(s: &CaseShape) -> Text {
+    match s {
+        CsSimple(_)  => "simple".clone(),
+        CsSearched   => "searched".clone(),
+    }
+}
+
+public fn has_operand(s: &CaseShape) -> Bool {
+    match s { CsSimple(_) => true, _ => false }
+}
+
+public fn operand_sql(s: &CaseShape) -> Text {
+    match s {
+        CsSimple(sql) => sql.clone(),
+        CsSearched    => "".clone(),
+    }
+}
+
+public type WhenBranch is {
+    predicate_sql: Text,    // for simple CASE: the value to compare equal-to
+    result_sql: Text,
+};
+
+public fn branch(predicate_sql: Text, result_sql: Text) -> WhenBranch {
+    WhenBranch { predicate_sql: predicate_sql, result_sql: result_sql }
+}
+
+public type CaseExpr is {
+    shape: CaseShape,
+    branches: List<WhenBranch>,
+    else_sql: Text,          // empty = no ELSE
+};
+
+public fn new(shape: CaseShape) -> CaseExpr {
+    CaseExpr {
+        shape: shape,
+        branches: [].clone() as List<WhenBranch>,
+        else_sql: "".clone(),
+    }
+}
+
+public fn push_branch(mut e: CaseExpr, b: WhenBranch) -> CaseExpr {
+    e.branches.push(b);
+    e
+}
+
+public fn with_else(mut e: CaseExpr, body: Text) -> CaseExpr {
+    e.else_sql = body;
+    e
+}
+
+public fn has_else(e: &CaseExpr) -> Bool { e.else_sql.len() > 0 }
+
+public fn branch_count(e: &CaseExpr) -> Int { e.branches.len() }
+
+// SQLite rule: at least one WHEN ... THEN ... clause required.
+public fn is_well_formed(e: &CaseExpr) -> Bool {
+    e.branches.len() > 0
+}
+
+// Without ELSE, a CASE returns NULL when no WHEN matches.
+public fn may_return_null(e: &CaseExpr) -> Bool {
+    !has_else(e)
+}

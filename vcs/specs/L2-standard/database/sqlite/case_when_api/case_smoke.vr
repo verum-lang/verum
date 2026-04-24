@@ -1,0 +1,63 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, case_when_api, sql
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.case_when_api.shape.{
+    CaseShape, CsSimple, CsSearched,
+    shape_name, has_operand, operand_sql,
+    WhenBranch, branch,
+    CaseExpr,
+    new, push_branch, with_else,
+    has_else, branch_count, is_well_formed, may_return_null,
+};
+mount base.{Bool};
+
+fn test_shape_names() {
+    assert(shape_name(&CsSimple("x".clone())) == "simple".clone());
+    assert(shape_name(&CsSearched) == "searched".clone());
+}
+
+fn test_has_operand() {
+    assert(has_operand(&CsSimple("age".clone())));
+    assert(!has_operand(&CsSearched));
+    assert(operand_sql(&CsSimple("age".clone())) == "age".clone());
+    assert(operand_sql(&CsSearched) == "".clone());
+}
+
+fn test_empty_case_is_ill_formed() {
+    let e = new(CsSearched);
+    assert(!is_well_formed(&e));
+    assert(may_return_null(&e));
+    assert(!has_else(&e));
+}
+
+fn test_push_branch_with_and_without_else() {
+    let e0 = new(CsSearched);
+    let e1 = push_branch(e0, branch("age > 18".clone(), "adult".clone()));
+    assert(is_well_formed(&e1));
+    assert_eq(branch_count(&e1), 1);
+    assert(may_return_null(&e1));    // no ELSE
+    let e2 = with_else(e1, "minor".clone());
+    assert(has_else(&e2));
+    assert(!may_return_null(&e2));
+}
+
+fn test_simple_case_shape_with_operand() {
+    let e0 = new(CsSimple("status".clone()));
+    let e1 = push_branch(e0, branch("'A'".clone(), "Active".clone()));
+    let e2 = push_branch(e1, branch("'I'".clone(), "Inactive".clone()));
+    assert(is_well_formed(&e2));
+    assert_eq(branch_count(&e2), 2);
+    assert(has_operand(&e2.shape));
+}
+
+fn main() {
+    test_shape_names();
+    test_has_operand();
+    test_empty_case_is_ill_formed();
+    test_push_branch_with_and_without_else();
+    test_simple_case_shape_with_operand();
+}

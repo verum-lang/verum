@@ -1,0 +1,17 @@
+// =============================================================================
+// core/database/sqlite/native/text_to_int_strict_api/mod.vr
+// =============================================================================
+// Strict text-to-integer parser — SQLite's sqlite3Atoi64() semantics.
+// Spec §15.3 — text conversion.
+//
+// Rules:
+//   * leading whitespace is trimmed
+//   * optional '+' / '-' sign
+//   * digits 0-9; stop at first non-digit
+//   * accepts "empty after trimming" as 0 (lenient SQLite behaviour)
+//   * overflow → clamp to Int64 bounds + is_overflow = true
+// =============================================================================
+
+module core.database.sqlite.native.text_to_int_strict_api;
+
+public module parse_;

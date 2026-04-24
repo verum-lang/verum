@@ -1,0 +1,12 @@
+// =============================================================================
+// core/database/sqlite/native/case_when_api/mod.vr
+// =============================================================================
+// CASE WHEN expression — two shapes in SQLite grammar:
+//   "simple":   CASE x WHEN v1 THEN e1 WHEN v2 THEN e2 ELSE e3 END
+//   "searched": CASE WHEN p1 THEN e1 WHEN p2 THEN e2 ELSE e3 END
+// Spec §14.2.5 — CASE.
+// =============================================================================
+
+module core.database.sqlite.native.case_when_api;
+
+public module shape;

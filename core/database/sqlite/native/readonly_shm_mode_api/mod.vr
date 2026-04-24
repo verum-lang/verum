@@ -1,0 +1,16 @@
+// =============================================================================
+// core/database/sqlite/native/readonly_shm_mode_api/mod.vr
+// =============================================================================
+// Shared-memory (WAL -shm) behaviour in readonly mode — SQLITE_OPEN_READONLY
+// vs SQLITE_READONLY + SQLITE_FCNTL_READONLY_SHM handshake.
+// Spec §6.6.3 — readonly WAL.
+//
+// Three modes:
+//   RW     — standard read-write shm (default)
+//   RO_MAP — read-only mmap of existing -shm (VFS supports mmap)
+//   NO_SHM — VFS returns SQLITE_IOERR_SHMLOCK; SQLite falls back to heap shm
+// =============================================================================
+
+module core.database.sqlite.native.readonly_shm_mode_api;
+
+public module mode;

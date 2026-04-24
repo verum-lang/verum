@@ -1,0 +1,16 @@
+// =============================================================================
+// core/database/sqlite/native/stat1_schema_api/mod.vr
+// =============================================================================
+// sqlite_stat1 row shape — per ANALYZE output.
+// Spec §13.2.1 — sqlite_stat1.
+//
+//   tbl  TEXT     — table name
+//   idx  TEXT     — index name (NULL → whole-table stats)
+//   stat TEXT     — space-separated counts: "N k1 k2 ... kM"
+//                     N  = total rows in index
+//                     ki = average number of rows with same first-i key cols
+// =============================================================================
+
+module core.database.sqlite.native.stat1_schema_api;
+
+public module row;

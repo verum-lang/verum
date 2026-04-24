@@ -1,0 +1,65 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, pragma_optimize_api, pragma
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.pragma_optimize_api.mask.{
+    f_debug, f_analyze_needed, f_record_usage, f_check_every, f_integrity_after,
+    default_mask,
+    is_set, set, clear,
+    should_debug, should_analyze_stale, should_record_usage,
+    should_check_all, should_run_integrity,
+    is_known_only, well_known_bit_count,
+};
+mount base.{Bool, Int64};
+
+fn test_flag_constants() {
+    assert_eq(f_debug(),          0x01 as Int64);
+    assert_eq(f_analyze_needed(), 0x02 as Int64);
+    assert_eq(f_record_usage(),   0x04 as Int64);
+    assert_eq(f_check_every(),    0x08 as Int64);
+    assert_eq(f_integrity_after(), 0x10 as Int64);
+    assert_eq(well_known_bit_count(), 5);
+}
+
+fn test_default_mask_includes_analyze_and_record() {
+    let m = default_mask();
+    assert(should_analyze_stale(m));
+    assert(should_record_usage(m));
+    assert(!should_debug(m));
+    assert(!should_check_all(m));
+}
+
+fn test_set_clear_flags() {
+    let mut m: Int64 = 0 as Int64;
+    m = set(m, f_debug());
+    assert(should_debug(m));
+    m = clear(m, f_debug());
+    assert(!should_debug(m));
+}
+
+fn test_classifier_helpers() {
+    let full = f_debug() | f_analyze_needed() | f_record_usage()
+             | f_check_every() | f_integrity_after();
+    assert(should_debug(full));
+    assert(should_analyze_stale(full));
+    assert(should_record_usage(full));
+    assert(should_check_all(full));
+    assert(should_run_integrity(full));
+}
+
+fn test_is_known_only() {
+    assert(is_known_only(0 as Int64));
+    assert(is_known_only(f_debug() | f_integrity_after()));
+    assert(!is_known_only(0x20 as Int64));
+}
+
+fn main() {
+    test_flag_constants();
+    test_default_mask_includes_analyze_and_record();
+    test_set_clear_flags();
+    test_classifier_helpers();
+    test_is_known_only();
+}

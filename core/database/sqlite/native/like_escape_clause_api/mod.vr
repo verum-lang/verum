@@ -1,0 +1,13 @@
+// =============================================================================
+// core/database/sqlite/native/like_escape_clause_api/mod.vr
+// =============================================================================
+// LIKE / GLOB ESCAPE clause — overrides the escape character.
+// Spec §15.2 — LIKE.
+//
+//   X LIKE Y           → default escape is NONE
+//   X LIKE Y ESCAPE E  → E must be a single UTF-8 byte (not multibyte)
+// =============================================================================
+
+module core.database.sqlite.native.like_escape_clause_api;
+
+public module clause;

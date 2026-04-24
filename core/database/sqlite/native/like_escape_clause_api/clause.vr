@@ -1,0 +1,62 @@
+// LIKE ESCAPE clause validation + escape-byte helpers.
+
+module core.database.sqlite.native.like_escape_clause_api.clause;
+
+mount base.{Bool, Int64};
+
+public type EscapeSetting is {
+    has_escape: Bool,
+    escape_byte: u8,
+};
+
+public fn no_escape() -> EscapeSetting {
+    EscapeSetting { has_escape: false, escape_byte: 0 as u8 }
+}
+
+public fn with_escape(b: u8) -> EscapeSetting {
+    EscapeSetting { has_escape: true, escape_byte: b }
+}
+
+public fn escapes_char(s: &EscapeSetting, b: u8) -> Bool {
+    s.has_escape && b == s.escape_byte
+}
+
+public type ValidationVerdict is
+    | VvOk
+    | VvMultiByteChar        // spec: escape must be single byte
+    | VvEmptyEscape          // ESCAPE '' is rejected
+    | VvAmbiguousChoice      // ESCAPE char same as '%' or '_' is legal but odd
+    ;
+
+public fn verdict_name(v: &ValidationVerdict) -> Text {
+    match v {
+        VvOk               => "ok".clone(),
+        VvMultiByteChar    => "multi_byte".clone(),
+        VvEmptyEscape      => "empty_escape".clone(),
+        VvAmbiguousChoice  => "ambiguous_choice".clone(),
+    }
+}
+
+public fn is_accepted(v: &ValidationVerdict) -> Bool {
+    match v {
+        VvOk              => true,
+        VvAmbiguousChoice => true,  // SQLite warns but accepts
+        _                 => false,
+    }
+}
+
+public fn classify(raw: &Text) -> ValidationVerdict {
+    let bs = raw.as_bytes();
+    if bs.len() == 0 { return VvEmptyEscape; }
+    if bs.len() > 1 { return VvMultiByteChar; }
+    let b = bs[0];
+    if b == (0x25 as u8) || b == (0x5F as u8) { return VvAmbiguousChoice; }
+    VvOk
+}
+
+public fn default_for_like() -> EscapeSetting { no_escape() }
+
+// GLOB syntax does NOT support ESCAPE; spec explicitly documents this.
+public fn glob_supports_escape() -> Bool { false }
+
+mount base.{Text};

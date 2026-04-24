@@ -732,3 +732,19 @@ public module stmt_readonly_api;
 public module nocase_icu_compat_api;
 // - vacuum_truncate_api: 3-mode TruncateMode (release_all/incremental/no) + pages/bytes freed
 public module vacuum_truncate_api;
+// - pragma_optimize_api: 5-bit mask (debug / analyze-needed / record-usage / check-every / integrity-after)
+public module pragma_optimize_api;
+// - case_when_api: simple vs searched CASE + WhenBranch list + ELSE body + may_return_null
+public module case_when_api;
+// - pragma_analysis_limit_api: ANALYZE sample-cap gate + 1000-default recommendation
+public module pragma_analysis_limit_api;
+// - char_fn_api: CHAR / UNICODE / HEX / UNHEX (3.41+) arity + return-type taxonomy
+public module char_fn_api;
+// - like_escape_clause_api: LIKE ... ESCAPE validator (single byte + empty reject + wildcard warn)
+public module like_escape_clause_api;
+// - readonly_shm_mode_api: rw / ro_map / heap_fallback resolver for WAL -shm
+public module readonly_shm_mode_api;
+// - stat1_schema_api: sqlite_stat1 row + total_rows + per-prefix avg + text renderer
+public module stat1_schema_api;
+// - text_to_int_strict_api: SQLite sqlite3Atoi64 parser — sign + digits + overflow clamp
+public module text_to_int_strict_api;

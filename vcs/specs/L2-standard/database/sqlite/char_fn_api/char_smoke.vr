@@ -1,0 +1,78 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, char_fn_api, builtins
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.char_fn_api.fn_.{
+    CharKind, CkChar, CkUnicode, CkHex, CkUnhex,
+    fn_name, min_arity, max_arity, is_variadic, accepts_arity,
+    returns_text, returns_int, returns_blob,
+    min_version,
+    char_zero_args_returns_empty, unicode_empty_returns_zero,
+};
+mount base.{Bool};
+
+fn test_fn_names() {
+    assert(fn_name(&CkChar)    == "char".clone());
+    assert(fn_name(&CkUnicode) == "unicode".clone());
+    assert(fn_name(&CkHex)     == "hex".clone());
+    assert(fn_name(&CkUnhex)   == "unhex".clone());
+}
+
+fn test_char_is_variadic() {
+    assert(is_variadic(&CkChar));
+    assert_eq(min_arity(&CkChar), 0);
+    assert(accepts_arity(&CkChar, 0));
+    assert(accepts_arity(&CkChar, 10));
+}
+
+fn test_unicode_and_hex_arity() {
+    assert_eq(min_arity(&CkUnicode), 1);
+    assert_eq(max_arity(&CkUnicode), 1);
+    assert_eq(min_arity(&CkHex),     1);
+    assert_eq(max_arity(&CkHex),     1);
+    assert(!accepts_arity(&CkUnicode, 0));
+    assert(accepts_arity(&CkUnicode, 1));
+    assert(!accepts_arity(&CkUnicode, 2));
+}
+
+fn test_unhex_accepts_optional_ignore() {
+    assert_eq(min_arity(&CkUnhex), 1);
+    assert_eq(max_arity(&CkUnhex), 2);
+    assert(accepts_arity(&CkUnhex, 1));
+    assert(accepts_arity(&CkUnhex, 2));
+    assert(!accepts_arity(&CkUnhex, 3));
+}
+
+fn test_return_types() {
+    assert(returns_text(&CkChar));
+    assert(returns_text(&CkHex));
+    assert(!returns_text(&CkUnicode));
+    assert(!returns_text(&CkUnhex));
+    assert(returns_int(&CkUnicode));
+    assert(!returns_int(&CkHex));
+    assert(returns_blob(&CkUnhex));
+    assert(!returns_blob(&CkChar));
+}
+
+fn test_min_versions() {
+    assert(min_version(&CkChar)  == "3.0.0".clone());
+    assert(min_version(&CkUnhex) == "3.41.0".clone());
+}
+
+fn test_edge_cases_documented() {
+    assert(char_zero_args_returns_empty());
+    assert(unicode_empty_returns_zero());
+}
+
+fn main() {
+    test_fn_names();
+    test_char_is_variadic();
+    test_unicode_and_hex_arity();
+    test_unhex_accepts_optional_ignore();
+    test_return_types();
+    test_min_versions();
+    test_edge_cases_documented();
+}

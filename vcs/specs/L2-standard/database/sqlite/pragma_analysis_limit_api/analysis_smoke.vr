@@ -1,0 +1,76 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, pragma_analysis_limit_api, pragma
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.pragma_analysis_limit_api.limit.{
+    AnalysisLimit,
+    no_limit, capped,
+    is_no_limit, has_cap, recommended_default,
+    is_reasonable, should_continue, samples_remaining,
+};
+mount base.{Bool, Int64};
+
+fn test_no_limit_defaults() {
+    let l = no_limit();
+    assert(is_no_limit(&l));
+    assert(!has_cap(&l));
+    assert_eq(l.sample_cap, 0 as Int64);
+}
+
+fn test_capped_positive() {
+    let l = capped(500 as Int64);
+    assert(has_cap(&l));
+    assert_eq(l.sample_cap, 500 as Int64);
+}
+
+fn test_capped_negative_coerces_to_zero() {
+    let l = capped(-5 as Int64);
+    assert(is_no_limit(&l));
+}
+
+fn test_recommended_default() {
+    assert_eq(recommended_default(), 1000 as Int64);
+}
+
+fn test_is_reasonable() {
+    assert(is_reasonable(&no_limit()));
+    assert(is_reasonable(&capped(100 as Int64)));
+    assert(!is_reasonable(&capped(1 as Int64)));
+}
+
+fn test_should_continue_unlimited() {
+    let l = no_limit();
+    assert(should_continue(&l, 0 as Int64));
+    assert(should_continue(&l, 1000000 as Int64));
+}
+
+fn test_should_continue_capped() {
+    let l = capped(100 as Int64);
+    assert(should_continue(&l, 0 as Int64));
+    assert(should_continue(&l, 99 as Int64));
+    assert(!should_continue(&l, 100 as Int64));
+    assert(!should_continue(&l, 101 as Int64));
+}
+
+fn test_samples_remaining() {
+    let unlimited = no_limit();
+    assert_eq(samples_remaining(&unlimited, 100 as Int64), -1 as Int64);
+    let capped_l = capped(50 as Int64);
+    assert_eq(samples_remaining(&capped_l, 30 as Int64), 20 as Int64);
+    assert_eq(samples_remaining(&capped_l, 50 as Int64), 0 as Int64);
+    assert_eq(samples_remaining(&capped_l, 100 as Int64), 0 as Int64);
+}
+
+fn main() {
+    test_no_limit_defaults();
+    test_capped_positive();
+    test_capped_negative_coerces_to_zero();
+    test_recommended_default();
+    test_is_reasonable();
+    test_should_continue_unlimited();
+    test_should_continue_capped();
+    test_samples_remaining();
+}

@@ -1,0 +1,17 @@
+// =============================================================================
+// core/database/sqlite/native/pragma_optimize_api/mod.vr
+// =============================================================================
+// PRAGMA optimize — bit-mask of optimisation phases.
+// Spec §18.4 — optimize.
+//
+// Defined bits:
+//   0x0001  Debug — enable diagnostics
+//   0x0002  ANALYZE tables that need it
+//   0x0004  Record usage stats for subsequent rounds
+//   0x0008  Check every table (even if sqlite_stat* is up to date)
+//   0x0010  Run integrity_check after ANALYZE (extra diagnostics)
+// =============================================================================
+
+module core.database.sqlite.native.pragma_optimize_api;
+
+public module mask;

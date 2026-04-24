@@ -1,0 +1,65 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, stat1_schema_api, statistics
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.stat1_schema_api.row.{
+    Stat1Row,
+    new, push_prefix_count,
+    is_whole_table, index_column_count, column_count,
+    rows_for_prefix, render_stat_text,
+};
+mount base.{Bool, Int64};
+
+fn test_column_count_is_three() {
+    assert_eq(column_count(), 3);
+}
+
+fn test_new_whole_table() {
+    let r = new("users".clone(), "".clone(), 1000 as Int64);
+    assert(is_whole_table(&r));
+    assert_eq(r.total_rows, 1000 as Int64);
+    assert_eq(index_column_count(&r), 0);
+}
+
+fn test_new_index_row() {
+    let r = new("users".clone(), "idx_name".clone(), 1000 as Int64);
+    assert(!is_whole_table(&r));
+}
+
+fn test_push_prefix_count_and_query() {
+    let r0 = new("users".clone(), "idx".clone(), 1000 as Int64);
+    let r1 = push_prefix_count(r0, 100 as Int64);
+    let r2 = push_prefix_count(r1, 10 as Int64);
+    assert_eq(index_column_count(&r2), 2);
+    assert_eq(rows_for_prefix(&r2, 0), 1000 as Int64);
+    assert_eq(rows_for_prefix(&r2, 1), 100 as Int64);
+    assert_eq(rows_for_prefix(&r2, 2), 10 as Int64);
+    // Prefix beyond arity clamps to last column.
+    assert_eq(rows_for_prefix(&r2, 10), 10 as Int64);
+}
+
+fn test_render_stat_text() {
+    let r0 = new("users".clone(), "idx".clone(), 1000 as Int64);
+    let r1 = push_prefix_count(r0, 100 as Int64);
+    let r2 = push_prefix_count(r1, 10 as Int64);
+    let s = render_stat_text(&r2);
+    assert(s == "1000 100 10".clone());
+}
+
+fn test_render_stat_text_whole_table_single_count() {
+    let r = new("t".clone(), "".clone(), 500 as Int64);
+    let s = render_stat_text(&r);
+    assert(s == "500".clone());
+}
+
+fn main() {
+    test_column_count_is_three();
+    test_new_whole_table();
+    test_new_index_row();
+    test_push_prefix_count_and_query();
+    test_render_stat_text();
+    test_render_stat_text_whole_table_single_count();
+}

@@ -1,0 +1,45 @@
+// ANALYZE sample-limit setting.
+
+module core.database.sqlite.native.pragma_analysis_limit_api.limit;
+
+mount base.{Bool, Int64};
+
+public type AnalysisLimit is {
+    sample_cap: Int64,       // 0 = no cap
+};
+
+public fn no_limit() -> AnalysisLimit {
+    AnalysisLimit { sample_cap: 0 as Int64 }
+}
+
+public fn capped(n: Int64) -> AnalysisLimit {
+    let clipped = if n < (0 as Int64) { 0 as Int64 } else { n };
+    AnalysisLimit { sample_cap: clipped }
+}
+
+public fn is_no_limit(l: &AnalysisLimit) -> Bool {
+    l.sample_cap == (0 as Int64)
+}
+
+public fn has_cap(l: &AnalysisLimit) -> Bool { !is_no_limit(l) }
+
+// Suggested defaults per SQLite recommendation:
+//   PRAGMA analysis_limit = 1000 is a good starting point for big tables.
+public fn recommended_default() -> Int64 { 1000 as Int64 }
+
+public fn is_reasonable(l: &AnalysisLimit) -> Bool {
+    // 0 (unlimited) or > 1 is reasonable; a cap of 1 is degenerate.
+    l.sample_cap == (0 as Int64) || l.sample_cap > (1 as Int64)
+}
+
+// Whether scan should continue past `seen` samples.
+public fn should_continue(l: &AnalysisLimit, seen: Int64) -> Bool {
+    if is_no_limit(l) { return true; }
+    seen < l.sample_cap
+}
+
+public fn samples_remaining(l: &AnalysisLimit, seen: Int64) -> Int64 {
+    if is_no_limit(l) { return -1 as Int64; }
+    if seen >= l.sample_cap { return 0 as Int64; }
+    l.sample_cap - seen
+}

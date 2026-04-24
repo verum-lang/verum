@@ -1,0 +1,37 @@
+// PRAGMA optimize mask bits + helpers.
+
+module core.database.sqlite.native.pragma_optimize_api.mask;
+
+mount base.{Bool, Int64};
+
+public fn f_debug()          -> Int64 { 0x01 as Int64 }
+public fn f_analyze_needed() -> Int64 { 0x02 as Int64 }
+public fn f_record_usage()   -> Int64 { 0x04 as Int64 }
+public fn f_check_every()    -> Int64 { 0x08 as Int64 }
+public fn f_integrity_after() -> Int64 { 0x10 as Int64 }
+
+public fn default_mask() -> Int64 {
+    // SQLite default (since 3.36) = analyze needed + record usage.
+    f_analyze_needed() | f_record_usage()
+}
+
+public fn is_set(mask: Int64, bit: Int64) -> Bool {
+    (mask & bit) != (0 as Int64)
+}
+
+public fn set(mask: Int64, bit: Int64) -> Int64 { mask | bit }
+public fn clear(mask: Int64, bit: Int64) -> Int64 { mask & !bit }
+
+public fn should_debug(mask: Int64) -> Bool { is_set(mask, f_debug()) }
+public fn should_analyze_stale(mask: Int64) -> Bool { is_set(mask, f_analyze_needed()) }
+public fn should_record_usage(mask: Int64) -> Bool { is_set(mask, f_record_usage()) }
+public fn should_check_all(mask: Int64) -> Bool { is_set(mask, f_check_every()) }
+public fn should_run_integrity(mask: Int64) -> Bool { is_set(mask, f_integrity_after()) }
+
+public fn is_known_only(mask: Int64) -> Bool {
+    let known = f_debug() | f_analyze_needed() | f_record_usage()
+              | f_check_every() | f_integrity_after();
+    (mask & !known) == (0 as Int64)
+}
+
+public fn well_known_bit_count() -> Int { 5 }

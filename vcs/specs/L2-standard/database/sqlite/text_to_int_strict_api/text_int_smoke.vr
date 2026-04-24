@@ -1,0 +1,96 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, text_to_int_strict_api, types
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.text_to_int_strict_api.parse_.{
+    int64_max, int64_min,
+    ParseOutcome,
+    failed, parse,
+    is_valid_integer, is_within_int64_range,
+};
+mount base.{Bool, Int64};
+
+fn test_failed_defaults() {
+    let p = failed();
+    assert(!p.had_digits);
+    assert(!is_valid_integer(&p));
+    assert_eq(p.value, 0 as Int64);
+}
+
+fn test_parse_empty() {
+    let p = parse(&"".clone());
+    assert(!p.had_digits);
+    assert_eq(p.value, 0 as Int64);
+    assert(!is_valid_integer(&p));
+}
+
+fn test_parse_simple_positive() {
+    let p = parse(&"42".clone());
+    assert(p.had_digits);
+    assert_eq(p.value, 42 as Int64);
+    assert(!p.was_negative);
+    assert(is_valid_integer(&p));
+}
+
+fn test_parse_negative() {
+    let p = parse(&"-100".clone());
+    assert(p.had_digits);
+    assert_eq(p.value, -100 as Int64);
+    assert(p.was_negative);
+    assert(is_valid_integer(&p));
+}
+
+fn test_parse_with_plus() {
+    let p = parse(&"+7".clone());
+    assert_eq(p.value, 7 as Int64);
+    assert(!p.was_negative);
+}
+
+fn test_parse_skips_whitespace() {
+    let p = parse(&"   42".clone());
+    assert_eq(p.value, 42 as Int64);
+}
+
+fn test_parse_trailing_non_digit() {
+    let p = parse(&"42abc".clone());
+    assert_eq(p.value, 42 as Int64);
+    assert(p.had_digits);
+    assert(p.trailing_non_digit);
+    assert(!is_valid_integer(&p));
+}
+
+fn test_parse_overflow_clamp_positive() {
+    let p = parse(&"99999999999999999999".clone());
+    assert(p.is_overflow);
+    assert_eq(p.value, int64_max());
+}
+
+fn test_parse_overflow_clamp_negative() {
+    let p = parse(&"-99999999999999999999".clone());
+    assert(p.is_overflow);
+    assert_eq(p.value, int64_min());
+}
+
+fn test_int64_bounds_constants() {
+    assert_eq(int64_max(), 0x7FFFFFFFFFFFFFFF as Int64);
+    assert(int64_min() < (0 as Int64));
+    assert(is_within_int64_range(0 as Int64));
+    assert(is_within_int64_range(int64_max()));
+    assert(is_within_int64_range(int64_min()));
+}
+
+fn main() {
+    test_failed_defaults();
+    test_parse_empty();
+    test_parse_simple_positive();
+    test_parse_negative();
+    test_parse_with_plus();
+    test_parse_skips_whitespace();
+    test_parse_trailing_non_digit();
+    test_parse_overflow_clamp_positive();
+    test_parse_overflow_clamp_negative();
+    test_int64_bounds_constants();
+}

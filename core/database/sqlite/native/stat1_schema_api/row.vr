@@ -1,0 +1,82 @@
+// sqlite_stat1 row + stat-text parser.
+
+module core.database.sqlite.native.stat1_schema_api.row;
+
+mount base.{Bool, Int64, Text};
+mount core.collections.list.{List};
+
+public type Stat1Row is {
+    table_name: Text,
+    index_name: Text,      // empty = whole-table stats
+    total_rows: Int64,
+    avg_per_prefix: List<Int64>,
+};
+
+public fn new(table_name: Text, index_name: Text, total_rows: Int64) -> Stat1Row {
+    Stat1Row {
+        table_name: table_name,
+        index_name: index_name,
+        total_rows: total_rows,
+        avg_per_prefix: [].clone() as List<Int64>,
+    }
+}
+
+public fn push_prefix_count(mut r: Stat1Row, n: Int64) -> Stat1Row {
+    r.avg_per_prefix.push(n);
+    r
+}
+
+public fn is_whole_table(r: &Stat1Row) -> Bool {
+    r.index_name.len() == 0
+}
+
+public fn index_column_count(r: &Stat1Row) -> Int {
+    r.avg_per_prefix.len()
+}
+
+public fn column_count() -> Int { 3 }    // matches PRAGMA-style columns
+
+// Selectivity estimator for N key-columns given a row with `avg_per_prefix`.
+public fn rows_for_prefix(r: &Stat1Row, prefix_cols: Int) -> Int64 {
+    if prefix_cols <= 0 { return r.total_rows; }
+    let idx = if prefix_cols > r.avg_per_prefix.len() {
+        r.avg_per_prefix.len() - 1
+    } else {
+        prefix_cols - 1
+    };
+    if idx < 0 { return r.total_rows; }
+    r.avg_per_prefix[idx]
+}
+
+// Quick decimal-digit formatter used by Stat1 text roundtrip.
+fn int_to_text(n: Int64) -> Text {
+    if n == (0 as Int64) { return "0".clone(); }
+    let mut v = if n < (0 as Int64) { 0 as Int64 - n } else { n };
+    let mut digits = "".clone();
+    while v > (0 as Int64) {
+        let d = (v % (10 as Int64)) as u8;
+        digits.push_byte((d + (0x30 as u8)) as u8);
+        v = v / (10 as Int64);
+    }
+    let bs = digits.as_bytes();
+    let mut out = "".clone();
+    if n < (0 as Int64) { out.push_byte(0x2D as u8); }
+    let mut i: Int = bs.len() - 1;
+    while i >= 0 {
+        out.push_byte(bs[i]);
+        i = i - 1;
+    }
+    out
+}
+
+// Render the "stat" column text "N k1 k2 ... kM".
+public fn render_stat_text(r: &Stat1Row) -> Text {
+    let mut out = int_to_text(r.total_rows);
+    let mut i: Int = 0;
+    while i < r.avg_per_prefix.len() {
+        out.push_byte(0x20 as u8);
+        out = out + int_to_text(r.avg_per_prefix[i]);
+        i = i + 1;
+    }
+    out
+}

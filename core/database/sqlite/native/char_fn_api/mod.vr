@@ -1,0 +1,15 @@
+// =============================================================================
+// core/database/sqlite/native/char_fn_api/mod.vr
+// =============================================================================
+// CHAR() / UNICODE() / HEX() / UNHEX() built-ins.
+// Spec §15.2 — built-in scalar functions.
+//
+// CHAR(N1, N2, ...)  → Text of Unicode codepoints
+// UNICODE(str)       → Int codepoint of first char (0 on empty)
+// HEX(blob)          → upper-case hex Text
+// UNHEX(hex [, ignore]) → blob (3.41+)
+// =============================================================================
+
+module core.database.sqlite.native.char_fn_api;
+
+public module fn_;

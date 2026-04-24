@@ -1,0 +1,15 @@
+// =============================================================================
+// core/database/sqlite/native/pragma_analysis_limit_api/mod.vr
+// =============================================================================
+// PRAGMA analysis_limit — per-call sample ceiling for ANALYZE.
+// Spec §18.4 — analysis_limit.
+//
+// Rules:
+//   0            — no limit; scan every row (classic ANALYZE)
+//   positive     — approximate-analyze, stops after N samples per index
+//   negative/zero on write — same as 0
+// =============================================================================
+
+module core.database.sqlite.native.pragma_analysis_limit_api;
+
+public module limit;

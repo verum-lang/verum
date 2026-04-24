@@ -1,0 +1,83 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, like_escape_clause_api, sql
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.like_escape_clause_api.clause.{
+    EscapeSetting,
+    no_escape, with_escape, escapes_char,
+    ValidationVerdict,
+    VvOk, VvMultiByteChar, VvEmptyEscape, VvAmbiguousChoice,
+    verdict_name, is_accepted, classify,
+    default_for_like, glob_supports_escape,
+};
+mount base.{Bool};
+
+fn test_no_escape_defaults() {
+    let s = no_escape();
+    assert(!s.has_escape);
+    assert(!escapes_char(&s, 0x5C as u8));
+}
+
+fn test_with_escape_backslash() {
+    let s = with_escape(0x5C as u8);
+    assert(s.has_escape);
+    assert(escapes_char(&s, 0x5C as u8));
+    assert(!escapes_char(&s, 0x2F as u8));
+}
+
+fn test_classify_ok() {
+    match classify(&"\\".clone()) { VvOk => {}, _ => assert(false) }
+    match classify(&"/".clone())  { VvOk => {}, _ => assert(false) }
+}
+
+fn test_classify_empty() {
+    match classify(&"".clone()) { VvEmptyEscape => {}, _ => assert(false) }
+}
+
+fn test_classify_multibyte() {
+    match classify(&"ab".clone()) { VvMultiByteChar => {}, _ => assert(false) }
+}
+
+fn test_classify_ambiguous() {
+    match classify(&"%".clone()) { VvAmbiguousChoice => {}, _ => assert(false) }
+    match classify(&"_".clone()) { VvAmbiguousChoice => {}, _ => assert(false) }
+}
+
+fn test_is_accepted() {
+    assert(is_accepted(&VvOk));
+    assert(is_accepted(&VvAmbiguousChoice));     // accepted with warning
+    assert(!is_accepted(&VvEmptyEscape));
+    assert(!is_accepted(&VvMultiByteChar));
+}
+
+fn test_default_for_like_is_no_escape() {
+    let s = default_for_like();
+    assert(!s.has_escape);
+}
+
+fn test_glob_does_not_support_escape() {
+    assert(!glob_supports_escape());
+}
+
+fn test_verdict_names() {
+    assert(verdict_name(&VvOk)              == "ok".clone());
+    assert(verdict_name(&VvMultiByteChar)   == "multi_byte".clone());
+    assert(verdict_name(&VvEmptyEscape)     == "empty_escape".clone());
+    assert(verdict_name(&VvAmbiguousChoice) == "ambiguous_choice".clone());
+}
+
+fn main() {
+    test_no_escape_defaults();
+    test_with_escape_backslash();
+    test_classify_ok();
+    test_classify_empty();
+    test_classify_multibyte();
+    test_classify_ambiguous();
+    test_is_accepted();
+    test_default_for_like_is_no_escape();
+    test_glob_does_not_support_escape();
+    test_verdict_names();
+}

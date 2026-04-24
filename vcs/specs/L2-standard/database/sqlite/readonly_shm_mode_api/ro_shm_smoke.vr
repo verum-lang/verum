@@ -1,0 +1,65 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, readonly_shm_mode_api, wal
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.readonly_shm_mode_api.mode.{
+    ShmMode, SmReadWrite, SmReadOnlyMap, SmHeapFallback,
+    mode_name, allows_writers, allows_multiple_processes,
+    needs_file_backed_shm, resolve,
+};
+mount base.{Bool};
+
+fn test_mode_names() {
+    assert(mode_name(&SmReadWrite)    == "rw".clone());
+    assert(mode_name(&SmReadOnlyMap)  == "ro_map".clone());
+    assert(mode_name(&SmHeapFallback) == "heap_fallback".clone());
+}
+
+fn test_allows_writers_only_rw() {
+    assert(allows_writers(&SmReadWrite));
+    assert(!allows_writers(&SmReadOnlyMap));
+    assert(!allows_writers(&SmHeapFallback));
+}
+
+fn test_multi_process_excludes_heap_fallback() {
+    assert(allows_multiple_processes(&SmReadWrite));
+    assert(allows_multiple_processes(&SmReadOnlyMap));
+    assert(!allows_multiple_processes(&SmHeapFallback));
+}
+
+fn test_file_backed_excludes_heap() {
+    assert(needs_file_backed_shm(&SmReadWrite));
+    assert(needs_file_backed_shm(&SmReadOnlyMap));
+    assert(!needs_file_backed_shm(&SmHeapFallback));
+}
+
+fn test_resolve_rw_when_not_readonly() {
+    match resolve(false, true, true) { SmReadWrite => {}, _ => assert(false) }
+    match resolve(false, false, false) { SmReadWrite => {}, _ => assert(false) }
+}
+
+fn test_resolve_heap_fallback_when_no_shm_file() {
+    match resolve(true, true, false) { SmHeapFallback => {}, _ => assert(false) }
+}
+
+fn test_resolve_ro_map_when_vfs_supports_and_file_exists() {
+    match resolve(true, true, true) { SmReadOnlyMap => {}, _ => assert(false) }
+}
+
+fn test_resolve_heap_fallback_when_vfs_unsupported() {
+    match resolve(true, false, true) { SmHeapFallback => {}, _ => assert(false) }
+}
+
+fn main() {
+    test_mode_names();
+    test_allows_writers_only_rw();
+    test_multi_process_excludes_heap_fallback();
+    test_file_backed_excludes_heap();
+    test_resolve_rw_when_not_readonly();
+    test_resolve_heap_fallback_when_no_shm_file();
+    test_resolve_ro_map_when_vfs_supports_and_file_exists();
+    test_resolve_heap_fallback_when_vfs_unsupported();
+}

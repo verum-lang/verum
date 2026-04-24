@@ -1,0 +1,80 @@
+// CHAR/UNICODE/HEX/UNHEX taxonomy + arity rules.
+
+module core.database.sqlite.native.char_fn_api.fn_;
+
+mount base.{Bool, Text};
+
+public type CharKind is
+    | CkChar          // CHAR(N1, N2, ...)
+    | CkUnicode       // UNICODE(str)
+    | CkHex           // HEX(blob)
+    | CkUnhex         // UNHEX(hex [, ignore]) — 3.41+
+    ;
+
+public fn fn_name(k: &CharKind) -> Text {
+    match k {
+        CkChar     => "char".clone(),
+        CkUnicode  => "unicode".clone(),
+        CkHex      => "hex".clone(),
+        CkUnhex    => "unhex".clone(),
+    }
+}
+
+public fn min_arity(k: &CharKind) -> Int {
+    match k {
+        CkChar    => 0,     // CHAR() with zero args is allowed (empty string)
+        CkUnicode => 1,
+        CkHex     => 1,
+        CkUnhex   => 1,
+    }
+}
+
+public fn max_arity(k: &CharKind) -> Int {
+    match k {
+        CkChar    => -1,    // variadic
+        CkUnicode => 1,
+        CkHex     => 1,
+        CkUnhex   => 2,
+    }
+}
+
+public fn is_variadic(k: &CharKind) -> Bool {
+    max_arity(k) < 0
+}
+
+public fn accepts_arity(k: &CharKind, n: Int) -> Bool {
+    if n < min_arity(k) { return false; }
+    let m = max_arity(k);
+    if m < 0 { return true; }
+    n <= m
+}
+
+public fn returns_text(k: &CharKind) -> Bool {
+    match k {
+        CkChar    => true,
+        CkHex     => true,
+        _         => false,
+    }
+}
+
+public fn returns_int(k: &CharKind) -> Bool {
+    match k { CkUnicode => true, _ => false }
+}
+
+public fn returns_blob(k: &CharKind) -> Bool {
+    match k { CkUnhex => true, _ => false }
+}
+
+// Min SQLite version that exposes the fn.
+public fn min_version(k: &CharKind) -> Text {
+    match k {
+        CkUnhex => "3.41.0".clone(),
+        _       => "3.0.0".clone(),
+    }
+}
+
+// CHAR returns "" for zero args (edge case documented here).
+public fn char_zero_args_returns_empty() -> Bool { true }
+
+// UNICODE on empty string returns 0.
+public fn unicode_empty_returns_zero() -> Bool { true }

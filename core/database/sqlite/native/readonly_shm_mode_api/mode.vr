@@ -1,0 +1,51 @@
+// Readonly-shm mode taxonomy.
+
+module core.database.sqlite.native.readonly_shm_mode_api.mode;
+
+mount base.{Bool, Text};
+
+public type ShmMode is
+    | SmReadWrite         // normal rw -shm
+    | SmReadOnlyMap       // ro mmap; no xShmLock writes
+    | SmHeapFallback      // VFS has no shm → in-memory heap shm (single-process)
+    ;
+
+public fn mode_name(m: &ShmMode) -> Text {
+    match m {
+        SmReadWrite    => "rw".clone(),
+        SmReadOnlyMap  => "ro_map".clone(),
+        SmHeapFallback => "heap_fallback".clone(),
+    }
+}
+
+public fn allows_writers(m: &ShmMode) -> Bool {
+    match m { SmReadWrite => true, _ => false }
+}
+
+public fn allows_multiple_processes(m: &ShmMode) -> Bool {
+    match m {
+        SmReadWrite    => true,
+        SmReadOnlyMap  => true,
+        SmHeapFallback => false,
+    }
+}
+
+public fn needs_file_backed_shm(m: &ShmMode) -> Bool {
+    match m {
+        SmReadWrite    => true,
+        SmReadOnlyMap  => true,
+        SmHeapFallback => false,
+    }
+}
+
+// Resolve given (db_opened_readonly, vfs_supports_ro_shm, shm_file_exists).
+public fn resolve(
+    db_opened_readonly: Bool,
+    vfs_supports_ro_shm: Bool,
+    shm_file_exists: Bool,
+) -> ShmMode {
+    if !db_opened_readonly { return SmReadWrite; }
+    if !shm_file_exists { return SmHeapFallback; }
+    if vfs_supports_ro_shm { return SmReadOnlyMap; }
+    SmHeapFallback
+}
