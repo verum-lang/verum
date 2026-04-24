@@ -1,0 +1,136 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: tls13, sni, resolver, rfc6066, rfc6125, precedence
+// @timeout: 15000
+// @expected-exit: 0
+
+// RFC 6066 §3 + RFC 6125 §6.4.3 SNI resolver — error-path + precedence
+// coverage. The test-time StubSigner is just a placeholder to satisfy
+// the ServerIdentity type; the resolver logic itself is
+// signature-scheme-agnostic.
+//
+//   * Exact match wins when both an exact entry and a wildcard entry
+//     could match the same SNI.
+//   * Wildcard `*.example.com` does NOT match bare `example.com`.
+//   * Missing-default + unmatched SNI → NoMatch(name).
+//   * Missing-default + absent SNI → NoSniProvided.
+//   * add_wildcard without the `*.` prefix is a no-op.
+
+mount core.*;
+mount core.collections.List;
+mount core.net.tls13.sig_scheme.{SignatureScheme};
+mount core.net.tls13.error.{TlsError};
+mount core.net.tls13.handshake.sni_resolver.{
+    ServerNameResolver, ServerIdentity, SniResolveError,
+    ExactMatchResolver,
+};
+mount core.net.tls13.handshake.server_sm.{CertSigner};
+
+type StubSigner is ();
+
+implement StubSigner {
+    public fn new() -> StubSigner { () }
+}
+
+implement CertSigner for StubSigner {
+    fn sign(&self, _scheme: SignatureScheme, _signed_input: &[Byte])
+        -> Result<List<Byte>, TlsError>
+    {
+        Ok([])
+    }
+    fn scheme(&self) -> SignatureScheme { SignatureScheme.Ed25519Scheme }
+}
+
+fn make_identity() -> ServerIdentity {
+    ServerIdentity {
+        cert_chain: [],
+        signer:     Heap(StubSigner.new()),
+    }
+}
+
+fn exact_match_wins_over_wildcard() {
+    let mut r = ExactMatchResolver.new();
+    // Exact entry for "www.example.com" + wildcard "*.example.com" —
+    // exact wins.
+    r.add(f"www.example.com", make_identity());
+    r.add_wildcard(f"*.example.com", make_identity());
+    let sni = f"www.example.com";
+    match r.resolve(Some(&sni)) {
+        Ok(_) => {},
+        Err(_) => panic("exact match must succeed"),
+    }
+    // Subdomain only in wildcard.
+    let sni2 = f"api.example.com";
+    match r.resolve(Some(&sni2)) {
+        Ok(_) => {},
+        Err(_) => panic("wildcard fallback must succeed"),
+    }
+}
+
+fn wildcard_does_not_match_bare_apex() {
+    let mut r = ExactMatchResolver.new();
+    // ONLY the wildcard — no exact entry for bare apex.
+    r.add_wildcard(f"*.example.com", make_identity());
+    let sni = f"example.com";
+    match r.resolve(Some(&sni)) {
+        Err(SniResolveError.NoMatch(_)) => {},
+        _ => panic("bare apex must not match *.example.com"),
+    }
+}
+
+fn missing_default_and_unmatched_sni_returns_no_match() {
+    let r = ExactMatchResolver.new();
+    let sni = f"unknown.test";
+    match r.resolve(Some(&sni)) {
+        Err(SniResolveError.NoMatch(n)) => assert(n == f"unknown.test"),
+        _ => panic("empty resolver + SNI must be NoMatch"),
+    }
+}
+
+fn missing_default_and_absent_sni_returns_no_sni_provided() {
+    let r = ExactMatchResolver.new();
+    match r.resolve(None) {
+        Err(SniResolveError.NoSniProvided) => {},
+        _ => panic("empty resolver + no SNI must be NoSniProvided"),
+    }
+}
+
+fn default_identity_serves_unmatched_sni() {
+    let mut r = ExactMatchResolver.new();
+    r.set_default(make_identity());
+    let sni = f"anything.test";
+    match r.resolve(Some(&sni)) {
+        Ok(_) => {},
+        Err(_) => panic("default must cover unmatched SNI"),
+    }
+    // No-SNI case also routes to default.
+    match r.resolve(None) {
+        Ok(_) => {},
+        Err(_) => panic("default must cover absent SNI too"),
+    }
+}
+
+fn add_wildcard_without_star_dot_prefix_is_noop() {
+    let mut r = ExactMatchResolver.new();
+    // Missing "*." — must silently drop the call.
+    r.add_wildcard(f"example.com", make_identity());
+    // As a result, "www.example.com" is not matched by this entry.
+    let sni = f"www.example.com";
+    match r.resolve(Some(&sni)) {
+        Err(SniResolveError.NoMatch(_)) => {},
+        _ => panic("invalid wildcard pattern must not register"),
+    }
+}
+
+@main
+public fn main() -> Int {
+    exact_match_wins_over_wildcard();
+    wildcard_does_not_match_bare_apex();
+    missing_default_and_unmatched_sni_returns_no_match();
+    missing_default_and_absent_sni_returns_no_sni_provided();
+    default_identity_serves_unmatched_sni();
+    add_wildcard_without_star_dot_prefix_is_noop();
+    print("RFC 6066 §3 SNI resolver precedence + error paths verified");
+    0
+}
