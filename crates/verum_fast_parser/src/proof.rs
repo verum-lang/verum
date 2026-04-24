@@ -697,6 +697,11 @@ impl<'a> RecursiveParser<'a> {
             Some(TokenKind::Theorem) => { self.stream.advance(); Text::from("theorem") }
             Some(TokenKind::Axiom) => { self.stream.advance(); Text::from("axiom") }
             Some(TokenKind::Corollary) => { self.stream.advance(); Text::from("corollary") }
+            // `quote` is reserved for staged-metaprogramming expressions in
+            // `fn` bodies, but inside a `tactic` decl the stdlib uses it as
+            // the surface name of the meta-programming primitive — same
+            // override pattern as the other reserved tactic keywords above.
+            Some(TokenKind::QuoteKeyword) => { self.stream.advance(); Text::from("quote") }
             _ => self.consume_ident()?,
         };
 
