@@ -490,19 +490,118 @@ fn construct_witness_for_rule(
     // the witness looks like — both Phase 1 and this Phase 2
     // replay produce Bool-typed axiom nodes. Full dependent
     // typing of the witness arrives with the next follow-up.
-    let framework = FrameworkId {
-        framework: Text::from(format!("z3:{}", rule)),
-        citation: Text::from("Z3 proof-tree replay (Phase 2)"),
-    };
+    Ok(build_witness("z3", rule, "Z3 proof-tree replay (Phase 2)"))
+}
 
-    Ok(CoreTerm::Axiom {
-        name: Text::from(format!("z3_proof:{}", rule)),
+/// Backend-agnostic witness constructor used by both
+/// `replay_z3_tree` and `replay_aletha_tree`. The witness shape
+/// is identical across backends at this phase — only the
+/// `framework.framework` tag differs (e.g. `"z3:mp"` vs
+/// `"aletha:resolution"`).
+fn build_witness(backend: &str, rule: &str, citation: &str) -> CoreTerm {
+    let framework = FrameworkId {
+        framework: Text::from(format!("{}:{}", backend, rule)),
+        citation: Text::from(citation.to_string()),
+    };
+    CoreTerm::Axiom {
+        name: Text::from(format!("{}_proof:{}", backend, rule)),
         ty: Heap::new(CoreTerm::Inductive {
             path: Text::from("Bool"),
             args: List::new(),
         }),
         framework,
-    })
+    }
+}
+
+/// Replay a CVC5 ALETHE proof-tree node into a `CoreTerm`
+/// witness.
+///
+/// Parallel to `replay_z3_tree`: walks the tree's root (must be
+/// a List), validates the head against
+/// `CVC5_ALETHE_KNOWN_RULES`, constructs the witness.
+///
+/// The ALETHE format uses step-by-step linear reasoning
+/// (`step t1 :rule <name> :premises (…) :args (…) :conclusion
+/// …`), but the S-expr parser normalises every step into a
+/// common `ProofNode::List` where the head atom is `step` and
+/// the `:rule` keyword's value is the second element. This
+/// function's current (Phase 2) replay treats every node as
+/// "named rule producing a Bool witness" so the same witness
+/// shape carries across both backends.
+///
+/// Full ALETHE-specific step-structure parsing (:premises,
+/// :args, :conclusion keyword parsing) arrives with the
+/// witness-type-specialisation follow-up.
+pub fn replay_aletha_tree(tree: &ProofNode) -> Result<CoreTerm, KernelError> {
+    match tree {
+        ProofNode::List(children) => {
+            let head = match children.iter().next() {
+                Some(ProofNode::Atom(t)) => t.as_str(),
+                _ => {
+                    return Err(KernelError::SmtReplayFailed {
+                        reason: Text::from(
+                            "proof-tree list starts with a non-atom head",
+                        ),
+                    });
+                }
+            };
+
+            // ALETHE's step nodes always lead with the atom
+            // `step`; the actual rule name follows `:rule`. For
+            // direct-named rule nodes (the common case in our
+            // test corpus + the form CVC5 emits for unsat
+            // traces), the head IS the rule name. Handle both.
+            let rule = if head == "step" {
+                // Find the `:rule` keyword and read the next
+                // atom. ALETHE conventions: `:rule` precedes
+                // the rule name.
+                extract_aletha_rule_name(children).ok_or_else(|| {
+                    KernelError::SmtReplayFailed {
+                        reason: Text::from(
+                            "ALETHE step missing :rule keyword",
+                        ),
+                    }
+                })?
+            } else {
+                head.to_string()
+            };
+
+            if !is_known_rule("aletha", &rule) {
+                return Err(KernelError::UnknownRule {
+                    backend: Text::from("aletha"),
+                    tag: 0,
+                });
+            }
+
+            Ok(build_witness(
+                "aletha",
+                &rule,
+                "CVC5 ALETHE proof-tree replay (Phase 2)",
+            ))
+        }
+        ProofNode::Atom(_) => Err(KernelError::SmtReplayFailed {
+            reason: Text::from(
+                "proof tree must be a list, got a bare atom",
+            ),
+        }),
+    }
+}
+
+/// Extract the rule name following the `:rule` keyword in an
+/// ALETHE step node. Returns `None` if the keyword is missing
+/// or not followed by an atom.
+fn extract_aletha_rule_name(children: &List<ProofNode>) -> Option<String> {
+    let mut iter = children.iter();
+    while let Some(node) = iter.next() {
+        if let ProofNode::Atom(t) = node {
+            if t.as_str() == ":rule" {
+                if let Some(ProofNode::Atom(rule)) = iter.next() {
+                    return Some(rule.as_str().to_string());
+                }
+            }
+        }
+    }
+    None
 }
 
 use verum_common::Heap;
@@ -803,6 +902,93 @@ mod tests {
     fn replay_rejects_bare_atom() {
         let tree = parse_sexpr("justanatom").unwrap();
         let err = replay_z3_tree(&tree).unwrap_err();
+        match err {
+            crate::KernelError::SmtReplayFailed { reason } => {
+                assert!(reason.as_str().contains("bare atom"));
+            }
+            other => panic!("expected SmtReplayFailed, got {:?}", other),
+        }
+    }
+
+    // -- ALETHE replay ------------------------------------------------
+
+    #[test]
+    fn replay_aletha_direct_rule_name_produces_axiom() {
+        let tree = parse_sexpr("(resolution p1 p2)").unwrap();
+        let term = replay_aletha_tree(&tree).unwrap();
+        match term {
+            crate::CoreTerm::Axiom { name, framework, .. } => {
+                assert_eq!(name.as_str(), "aletha_proof:resolution");
+                assert_eq!(framework.framework.as_str(), "aletha:resolution");
+            }
+            other => panic!("expected Axiom, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn replay_aletha_step_node_extracts_rule_keyword() {
+        // ALETHE's canonical step shape:
+        // (step t1 :rule refl :premises () :conclusion (= x x))
+        let trace = "(step t1 :rule refl :premises ())";
+        let tree = parse_sexpr(trace).unwrap();
+        let term = replay_aletha_tree(&tree).unwrap();
+        match term {
+            crate::CoreTerm::Axiom { framework, .. } => {
+                assert_eq!(framework.framework.as_str(), "aletha:refl");
+            }
+            other => panic!("expected Axiom, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn replay_aletha_step_without_rule_keyword_rejected() {
+        let trace = "(step t1 :premises ())";
+        let tree = parse_sexpr(trace).unwrap();
+        let err = replay_aletha_tree(&tree).unwrap_err();
+        match err {
+            crate::KernelError::SmtReplayFailed { reason } => {
+                assert!(reason.as_str().contains(":rule"));
+            }
+            other => panic!("expected SmtReplayFailed, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn replay_aletha_unknown_rule_rejected_by_allowlist() {
+        let tree = parse_sexpr("(fabricate_rule dummy)").unwrap();
+        let err = replay_aletha_tree(&tree).unwrap_err();
+        assert!(matches!(
+            err,
+            crate::KernelError::UnknownRule { .. }
+        ));
+    }
+
+    #[test]
+    fn replay_aletha_covers_every_allowlist_rule() {
+        // Same invariant as the Z3 version: every rule the
+        // allowlist admits must be replayable.
+        for rule in CVC5_ALETHE_KNOWN_RULES {
+            // Skip `step` itself — it's a meta-node wrapper,
+            // not a rule. Its body carries a `:rule` keyword
+            // that names the real rule.
+            if *rule == "step" || *rule == "assume" || *rule == "anchor" {
+                continue;
+            }
+            let tree = parse_sexpr(&format!("({} dummy)", rule)).unwrap();
+            let result = replay_aletha_tree(&tree);
+            assert!(
+                result.is_ok(),
+                "ALETHE rule `{}` is in allowlist but replay failed: {:?}",
+                rule,
+                result.err()
+            );
+        }
+    }
+
+    #[test]
+    fn replay_aletha_rejects_bare_atom() {
+        let tree = parse_sexpr("justanatom").unwrap();
+        let err = replay_aletha_tree(&tree).unwrap_err();
         match err {
             crate::KernelError::SmtReplayFailed { reason } => {
                 assert!(reason.as_str().contains("bare atom"));
