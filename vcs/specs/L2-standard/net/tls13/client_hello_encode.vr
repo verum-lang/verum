@@ -1,0 +1,125 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: tls13, handshake, client_hello, encode, rfc8446_4_1_2
+// @timeout: 15000
+// @expected-exit: 0
+
+// RFC 8446 §4.1.2 ClientHello wire body:
+//
+//   ProtocolVersion legacy_version = 0x0303;          -- u16
+//   Random random;                                     -- 32 bytes
+//   opaque legacy_session_id<0..32>;                   -- u8 len-prefixed
+//   CipherSuite cipher_suites<2..2^16-2>;              -- u16 len-prefixed
+//   opaque legacy_compression_methods<1..2^8-1>;       -- u8 len-prefixed (always [0])
+//   Extension extensions<8..2^16-1>;                   -- u16 len-prefixed
+//
+// Handshake wrap: type=1 (client_hello), u24 length.
+
+mount core.*;
+mount core.collections.List;
+mount core.net.tls13.cipher_suite.{CipherSuite};
+mount core.net.tls13.version.{LEGACY_VERSION_TLS_1_2};
+mount core.net.tls13.handshake.messages.{
+    HandshakeMessage, ClientHello, encode_handshake,
+    HST_CLIENT_HELLO,
+};
+
+fn minimum_client_hello_byte_exact() {
+    // Fixed 32-byte random, empty session_id, one suite (0x1301),
+    // no extensions.
+    let mut random: [Byte; 32] = [0_u8; 32];
+    let mut i: Int = 0;
+    while i < 32 { random[i] = 0x42_u8; i = i + 1; }
+    let ch = ClientHello {
+        legacy_version:             LEGACY_VERSION_TLS_1_2,
+        random:                     random,
+        legacy_session_id:          [],
+        cipher_suites:              [CipherSuite.TlsAes128GcmSha256],
+        legacy_compression_methods: [0_u8],
+        extensions:                 [],
+    };
+    let mut out: List<Byte> = [];
+    encode_handshake(&HandshakeMessage.ClientHelloMsg(ch), &mut out).unwrap();
+    // Wrap header (4) + body.
+    // body = 2 (version) + 32 (random) + 1 (sess_id len) + 2 (cs len) + 2 (cs)
+    //      + 1 (compression len) + 1 (compression) + 2 (ext len) = 43.
+    assert(out.len() == 47);
+    assert(out[0] == HST_CLIENT_HELLO);        // type 1
+    // Body length 43 → 0x00 0x00 0x2B.
+    assert(out[1] == 0x00_u8);
+    assert(out[2] == 0x00_u8);
+    assert(out[3] == 0x2B_u8);
+    // legacy_version = 0x0303.
+    assert(out[4] == 0x03_u8 && out[5] == 0x03_u8);
+    // 32 random bytes all 0x42.
+    let mut j: Int = 0;
+    while j < 32 { assert(out[6 + j] == 0x42_u8); j = j + 1; }
+    // session_id len = 0.
+    assert(out[38] == 0x00_u8);
+    // cipher_suites len = 2 (one suite = 2 bytes).
+    assert(out[39] == 0x00_u8 && out[40] == 0x02_u8);
+    // TLS_AES_128_GCM_SHA256 = 0x1301.
+    assert(out[41] == 0x13_u8 && out[42] == 0x01_u8);
+    // compression methods len = 1, value = 0.
+    assert(out[43] == 0x01_u8);
+    assert(out[44] == 0x00_u8);
+    // extensions block empty u16.
+    assert(out[45] == 0x00_u8 && out[46] == 0x00_u8);
+}
+
+fn session_id_bytes_preserved() {
+    let random: [Byte; 32] = [0_u8; 32];
+    let ch = ClientHello {
+        legacy_version:             LEGACY_VERSION_TLS_1_2,
+        random:                     random,
+        legacy_session_id:          [0xAA_u8, 0xBB_u8, 0xCC_u8, 0xDD_u8],
+        cipher_suites:              [CipherSuite.TlsAes128GcmSha256],
+        legacy_compression_methods: [0_u8],
+        extensions:                 [],
+    };
+    let mut out: List<Byte> = [];
+    encode_handshake(&HandshakeMessage.ClientHelloMsg(ch), &mut out).unwrap();
+    // sess_id len = 4; sess_id bytes at offset 39..42.
+    assert(out[38] == 0x04_u8);
+    assert(out[39] == 0xAA_u8);
+    assert(out[40] == 0xBB_u8);
+    assert(out[41] == 0xCC_u8);
+    assert(out[42] == 0xDD_u8);
+}
+
+fn three_cipher_suites_in_big_endian_order() {
+    let random: [Byte; 32] = [0_u8; 32];
+    let ch = ClientHello {
+        legacy_version:             LEGACY_VERSION_TLS_1_2,
+        random:                     random,
+        legacy_session_id:          [],
+        cipher_suites:              [
+            CipherSuite.TlsAes256GcmSha384,
+            CipherSuite.TlsAes128GcmSha256,
+            CipherSuite.TlsChaCha20Poly1305Sha256,
+        ],
+        legacy_compression_methods: [0_u8],
+        extensions:                 [],
+    };
+    let mut out: List<Byte> = [];
+    encode_handshake(&HandshakeMessage.ClientHelloMsg(ch), &mut out).unwrap();
+    // cipher_suites u16-len = 6 (3 suites × 2 bytes).
+    // Positioned after 4 (header) + 2 (ver) + 32 (random) + 1 (sess_id len 0) = 39.
+    assert(out[39] == 0x00_u8 && out[40] == 0x06_u8);
+    // 256-GCM-384 = 0x1302.
+    assert(out[41] == 0x13_u8 && out[42] == 0x02_u8);
+    // 128-GCM-256 = 0x1301.
+    assert(out[43] == 0x13_u8 && out[44] == 0x01_u8);
+    // ChaCha20-Poly1305-256 = 0x1303.
+    assert(out[45] == 0x13_u8 && out[46] == 0x03_u8);
+}
+
+@main
+public fn main() -> Int {
+    minimum_client_hello_byte_exact();
+    session_id_bytes_preserved();
+    three_cipher_suites_in_big_endian_order();
+    print("RFC 8446 §4.1.2 ClientHello encode byte-exact verified");
+    0
+}
