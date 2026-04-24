@@ -1,0 +1,72 @@
+// =============================================================================
+// core.action.enactments — composition, activation modality A
+// =============================================================================
+
+@derive(Clone)
+public type Enactment is {
+    name: Text,
+    steps: List<Primitive>,
+    activation_rank: Int,
+};
+
+public fn primitive_enact(e: Primitive) -> Enactment {
+    let mut steps: List<Primitive> = List.new();
+    steps.push(e);
+    Enactment {
+        name: primitive_as_text(e),
+        steps: steps,
+        activation_rank: 0,
+    }
+}
+
+public fn identity_enact() -> Enactment {
+    Enactment {
+        name: "id_ε",
+        steps: List.new(),
+        activation_rank: 0,
+    }
+}
+
+public fn compose(a: Enactment, b: Enactment) -> Enactment {
+    let mut joined: List<Primitive> = a.steps.clone();
+    let mut i: Int = 0;
+    while i < b.steps.len() as Int {
+        joined.push(*b.steps.get(i as Int).unwrap());
+        i = i + 1;
+    }
+    let rank: Int = if a.activation_rank >= b.activation_rank {
+        a.activation_rank
+    } else {
+        b.activation_rank
+    };
+    Enactment {
+        name: a.name.concat(" ∘ ").concat(b.name.clone()),
+        steps: joined,
+        activation_rank: rank,
+    }
+}
+
+public fn activation(e: Enactment) -> Enactment {
+    Enactment {
+        name: e.name,
+        steps: e.steps,
+        activation_rank: e.activation_rank + 1,
+    }
+}
+
+public fn activation_iterate(e: Enactment, k: Int) -> Enactment {
+    if k <= 0 {
+        return e.clone();
+    }
+    Enactment {
+        name: e.name.clone(),
+        steps: e.steps.clone(),
+        activation_rank: e.activation_rank + k,
+    }
+}
+
+public let AUTOPOIETIC_THRESHOLD: Int = 64;
+
+public fn is_autopoietic(e: Enactment) -> Bool {
+    e.activation_rank >= AUTOPOIETIC_THRESHOLD
+}

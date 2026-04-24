@@ -1,0 +1,61 @@
+// @test: unit
+// @tier: 0
+// @level: L1
+// @tags: action, actic, epsilon, dual-stdlib
+// @timeout: 5000
+// @expect: pass
+//
+// VUVA §11.2 Phase 5 E1 — OC/DC dual stdlib smoke test.
+// Exercises core.action.*: every primitive lifts to an Enactment,
+// composes sequentially, and canonicalises with deterministic gauge
+// normalisation.
+
+mount core.action.primitives;
+mount core.action.enactments;
+mount core.action.gauge;
+mount core.action.verify;
+
+fn main() {
+    // --- primitive round-trips -----------------------------------
+    assert(primitive_as_text(EpsilonProve) == "ε_prove");
+    assert(primitive_as_text(EpsilonMath) == "ε_math");
+
+    // --- classifier predicates -----------------------------------
+    assert(is_observational(EpsilonObserve));
+    assert(!is_observational(EpsilonCompute));
+    assert(is_proof_producing(EpsilonProve));
+    assert(is_constructive(EpsilonMath));
+
+    // --- single-primitive Enactment ------------------------------
+    let e_prove: Enactment = primitive_enact(EpsilonProve);
+    assert(e_prove.activation_rank == 0);
+
+    // --- composition ---------------------------------------------
+    let e_math: Enactment = primitive_enact(EpsilonMath);
+    let composed: Enactment = compose(e_prove, e_math);
+    assert(composed.steps.len() == 2);
+
+    // --- activation modality -------------------------------------
+    let lifted: Enactment = activation(composed);
+    assert(lifted.activation_rank == 1);
+
+    let deeply_lifted: Enactment = activation_iterate(lifted, 10);
+    assert(deeply_lifted.activation_rank == 11);
+    assert(!is_autopoietic(deeply_lifted));
+
+    // --- canonicalisation: non-empty rank preserved --------------
+    let c1: Enactment = canonicalise(primitive_enact(EpsilonDecide));
+    assert(c1.activation_rank == 0);
+
+    // --- verify_epsilon Consistent on matching primitive ---------
+    let ok_v: AuditVerdict = verify_epsilon(
+        EpsilonProve,
+        primitive_enact(EpsilonProve),
+    );
+    match ok_v {
+        Consistent => {}
+        _          => panic("expected Consistent"),
+    }
+
+    print("core.action smoke ok");
+}

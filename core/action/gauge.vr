@@ -1,0 +1,63 @@
+// =============================================================================
+// core.action.gauge — gauge freedom on enactments
+// =============================================================================
+
+fn sort_observational_runs(steps: List<Primitive>) -> List<Primitive> {
+    let mut result: List<Primitive> = List.new();
+    let mut i: Int = 0;
+    while i < steps.len() as Int {
+        let step: &Primitive = steps.get(i as Int).unwrap();
+        let last_is_observe: Bool = if result.is_empty() {
+            false
+        } else {
+            matches_observe(result.last().unwrap())
+        };
+        let this_is_observe: Bool = matches_observe(step);
+        if last_is_observe && this_is_observe {
+            // absorb duplicate observation
+        } else {
+            result.push(*step);
+        }
+        i = i + 1;
+    }
+    result
+}
+
+fn matches_observe(p: &Primitive) -> Bool {
+    match p {
+        EpsilonObserve => true,
+        _              => false,
+    }
+}
+
+public fn canonicalise(e: Enactment) -> Enactment {
+    if e.steps.is_empty() {
+        return identity_enact();
+    }
+    let sorted: List<Primitive> = sort_observational_runs(e.steps.clone());
+    Enactment {
+        name: "ε_canonical",
+        steps: sorted,
+        activation_rank: e.activation_rank,
+    }
+}
+
+public fn gauge_equivalent(a: Enactment, b: Enactment) -> Bool {
+    let ca: Enactment = canonicalise(a);
+    let cb: Enactment = canonicalise(b);
+    enactment_eq(ca, cb)
+}
+
+fn enactment_eq(a: Enactment, b: Enactment) -> Bool {
+    if a.activation_rank != b.activation_rank { return false; }
+    if a.steps.len() != b.steps.len() { return false; }
+    let mut i: Int = 0;
+    while i < a.steps.len() as Int {
+        if !primitive_eq(*a.steps.get(i as Int).unwrap(),
+                         *b.steps.get(i as Int).unwrap()) {
+            return false;
+        }
+        i = i + 1;
+    }
+    true
+}

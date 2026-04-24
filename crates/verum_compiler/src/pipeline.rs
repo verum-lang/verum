@@ -4407,6 +4407,8 @@ impl<'s> CompilationPipeline<'s> {
                         | "term"
                         | "net"
                         | "meta" | "cognitive"
+                        // VUVA §11.2 Actic-dual stdlib (Phase 5 E1).
+                        | "action"
                     );
                     let (resolved_path, base_dir) = if is_stdlib_import {
                         // Stdlib import - map to core/ directory

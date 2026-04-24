@@ -1,0 +1,31 @@
+// =============================================================================
+// core.action — the Actic dual to core.math (VUVA §11.2)
+// =============================================================================
+//
+// DC-side stdlib (dependency-centric enactments) — mirror of core.math
+// on the object-centric side. Per Diakrisis 108.T (AC/OC Morita-duality),
+// every articulation has a canonical enactment. This module exposes
+// the DC layer as a first-class stdlib, the headline differentiator of
+// Verum per VUVA §2.6.
+//
+// Sub-packages:
+//
+//   core.action.primitives   — seven primitive acts (ε_math, ε_compute,
+//                              ε_observe, ε_prove, ε_decide, ε_translate,
+//                              ε_construct)
+//
+//   core.action.enactments   — composition, activation modality A,
+//                              autopoietic closure at A^{ω^2}
+//
+//   core.action.gauge        — gauge freedom on enactments;
+//                              canonicalise picks a canonical
+//                              representative per equivalence class
+//
+//   core.action.verify       — ε-audit helpers consumed by
+//                              `verum audit --epsilon`
+// =============================================================================
+
+public mount core.action.primitives;
+public mount core.action.enactments;
+public mount core.action.gauge;
+public mount core.action.verify;

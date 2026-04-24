@@ -1,0 +1,99 @@
+// =============================================================================
+// core.action.verify — ε-audit, gauge-consistency (VUVA §11.2, §11.4)
+// =============================================================================
+
+public type AuditVerdict is
+    Consistent
+  | TooWeak
+  | TooStrong
+  | GaugeMismatch;
+
+public fn verdict_as_text(v: AuditVerdict) -> Text {
+    match v {
+        Consistent     => "consistent",
+        TooWeak        => "too-weak",
+        TooStrong      => "too-strong",
+        GaugeMismatch  => "gauge-mismatch",
+    }
+}
+
+public fn verify_epsilon(declared: Primitive, observed: Enactment) -> AuditVerdict {
+    let canonical: Enactment = canonicalise(observed);
+
+    let mut all_observational: Bool = true;
+    let mut any_constructive: Bool = false;
+    let mut any_proof: Bool = false;
+    let mut i: Int = 0;
+    while i < canonical.steps.len() as Int {
+        let step: Primitive = *canonical.steps.get(i as Int).unwrap();
+        if !is_observational(step) { all_observational = false; }
+        if is_constructive(step)    { any_constructive = true; }
+        if is_proof_producing(step) { any_proof = true; }
+        i = i + 1;
+    }
+
+    match declared {
+        EpsilonObserve => {
+            if canonical.steps.is_empty() { return Consistent; }
+            if !all_observational { return TooWeak; }
+            Consistent
+        }
+        EpsilonProve => {
+            if !any_proof { return TooStrong; }
+            Consistent
+        }
+        EpsilonConstruct => {
+            if !any_constructive && !canonical.steps.is_empty() { return TooStrong; }
+            Consistent
+        }
+        EpsilonMath      => Consistent,
+        EpsilonCompute   => Consistent,
+        EpsilonDecide    => Consistent,
+        EpsilonTranslate => Consistent,
+    }
+}
+
+public type ConsistencyReport is {
+    epsilon: Text,
+    declared_count: Int,
+    consistent_count: Int,
+    divergent_count: Int,
+};
+
+public fn gauge_consistency(
+    epsilon: Primitive,
+    observed: List<Enactment>,
+) -> ConsistencyReport {
+    let name: Text = primitive_as_text(epsilon);
+    if observed.is_empty() {
+        return ConsistencyReport {
+            epsilon: name,
+            declared_count: 0,
+            consistent_count: 0,
+            divergent_count: 0,
+        };
+    }
+    let representative: Enactment = canonicalise(observed.get(0).unwrap().clone());
+    let mut consistent: Int = 1;
+    let mut divergent: Int = 0;
+    let mut i: Int = 1;
+    while i < observed.len() as Int {
+        let candidate: Enactment = canonicalise(observed.get(i as Int).unwrap().clone());
+        if gauge_equivalent(representative.clone(), candidate) {
+            consistent = consistent + 1;
+        } else {
+            divergent = divergent + 1;
+        }
+        i = i + 1;
+    }
+    ConsistencyReport {
+        epsilon: name,
+        declared_count: observed.len() as Int,
+        consistent_count: consistent,
+        divergent_count: divergent,
+    }
+}
+
+public fn autopoietic_flag(e: Enactment) -> Bool {
+    is_autopoietic(e)
+}

@@ -1,0 +1,66 @@
+// =============================================================================
+// core.action.primitives — seven primitive acts (Diakrisis Actic §1)
+// =============================================================================
+
+@derive(Clone)
+public type Primitive is
+    EpsilonMath
+  | EpsilonCompute
+  | EpsilonObserve
+  | EpsilonProve
+  | EpsilonDecide
+  | EpsilonTranslate
+  | EpsilonConstruct;
+
+public fn primitive_as_text(e: Primitive) -> Text {
+    match e {
+        EpsilonMath      => "ε_math",
+        EpsilonCompute   => "ε_compute",
+        EpsilonObserve   => "ε_observe",
+        EpsilonProve     => "ε_prove",
+        EpsilonDecide    => "ε_decide",
+        EpsilonTranslate => "ε_translate",
+        EpsilonConstruct => "ε_construct",
+    }
+}
+
+public fn is_observational(e: Primitive) -> Bool {
+    match e {
+        EpsilonObserve => true,
+        _              => false,
+    }
+}
+
+public fn is_constructive(e: Primitive) -> Bool {
+    match e {
+        EpsilonConstruct => true,
+        EpsilonMath      => true,
+        EpsilonCompute   => true,
+        _                => false,
+    }
+}
+
+public fn is_proof_producing(e: Primitive) -> Bool {
+    match e {
+        EpsilonProve => true,
+        _            => false,
+    }
+}
+
+public fn is_decision_point(e: Primitive) -> Bool {
+    match e {
+        EpsilonDecide => true,
+        _             => false,
+    }
+}
+
+public fn is_translation(e: Primitive) -> Bool {
+    match e {
+        EpsilonTranslate => true,
+        _                => false,
+    }
+}
+
+public fn primitive_eq(a: Primitive, b: Primitive) -> Bool {
+    primitive_as_text(a).eq(primitive_as_text(b))
+}
