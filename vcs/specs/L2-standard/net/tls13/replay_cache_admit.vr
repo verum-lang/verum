@@ -1,0 +1,100 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: tls13, zero_rtt, replay_cache, rfc8446_8_2, bloom
+// @timeout: 15000
+// @expected-exit: 0
+
+// RFC 8446 §8.2 0-RTT replay cache contract:
+//
+//   * First admission of a (psk_id, ch_hash) pair → true (accepted).
+//   * Replay of the same pair → false (rejected).
+//   * Same psk_id with a different ch_hash → true (still accepted).
+//   * NoReplayGuard stub always admits — useful for servers that
+//     opt out of 0-RTT replay protection (single-use tickets only).
+//   * ReplayConfig.default() matches the RFC 8446 §8.3 recommendation:
+//     2^20 entries, 0.1% FP target, 10-second window.
+
+mount core.*;
+mount core.collections.List;
+mount core.time.instant.{Instant};
+mount core.net.tls13.handshake.zero_rtt_antireplay.{
+    ReplayCache, ReplayConfig, ReplayGuard, NoReplayGuard,
+};
+
+fn first_admit_accepted() {
+    let mut cache = ReplayCache.with_defaults();
+    let psk_id:  [Byte; 8]  = [0xAA_u8, 0xBB_u8, 0xCC_u8, 0xDD_u8,
+                                0xEE_u8, 0xFF_u8, 0x00_u8, 0x11_u8];
+    let ch_hash: [Byte; 32] = [0x42_u8; 32];
+    let now = Instant.now();
+    assert(cache.try_admit(&psk_id[..], &ch_hash[..], now));
+}
+
+fn replay_of_same_pair_rejected() {
+    let mut cache = ReplayCache.with_defaults();
+    let psk_id:  [Byte; 4]  = [0x01_u8, 0x02_u8, 0x03_u8, 0x04_u8];
+    let ch_hash: [Byte; 32] = [0xAB_u8; 32];
+    let now = Instant.now();
+    // First admission: accept.
+    assert(cache.try_admit(&psk_id[..], &ch_hash[..], now.clone()));
+    // Replay with identical (psk_id, ch_hash) at the same instant: reject.
+    assert(cache.try_admit(&psk_id[..], &ch_hash[..], now) == false);
+}
+
+fn different_ch_hash_same_psk_accepted() {
+    let mut cache = ReplayCache.with_defaults();
+    let psk_id:  [Byte; 4]  = [0xDE_u8, 0xAD_u8, 0xBE_u8, 0xEF_u8];
+    let ch_a: [Byte; 32] = [0x11_u8; 32];
+    let ch_b: [Byte; 32] = [0x22_u8; 32];
+    let now = Instant.now();
+    assert(cache.try_admit(&psk_id[..], &ch_a[..], now.clone()));
+    assert(cache.try_admit(&psk_id[..], &ch_b[..], now));
+}
+
+fn no_replay_guard_always_admits() {
+    let mut stub = NoReplayGuard.new();
+    let psk_id:  [Byte; 4]  = [0x55_u8; 4];
+    let ch_hash: [Byte; 32] = [0xAA_u8; 32];
+    let now = Instant.now();
+    // Even the same pair twice returns true under the stub.
+    assert(stub.try_admit(&psk_id[..], &ch_hash[..], now.clone()));
+    assert(stub.try_admit(&psk_id[..], &ch_hash[..], now));
+}
+
+fn replay_config_defaults_match_rfc_recommendation() {
+    let c = ReplayConfig.default();
+    // RFC 8446 §8.3 — 10-second freshness window.
+    assert(c.window_ms == 10_000);
+    // 2^20 ≈ 1_048_576 expected entries per bucket.
+    assert(c.expected_entries == 1_048_576);
+    // 0.1% target false-positive rate (1000 parts per million).
+    assert(c.target_fp_ppm == 1_000);
+}
+
+fn custom_small_cache_honours_config() {
+    let cfg = ReplayConfig {
+        expected_entries: 1_024,
+        target_fp_ppm:    10_000,
+        window_ms:        2_000,
+    };
+    let mut small = ReplayCache.new(cfg);
+    let psk_id:  [Byte; 2]  = [0x77_u8, 0x88_u8];
+    let ch_hash: [Byte; 32] = [0x99_u8; 32];
+    let now = Instant.now();
+    assert(small.try_admit(&psk_id[..], &ch_hash[..], now.clone()));
+    // Replay rejected just like with the default-size cache.
+    assert(small.try_admit(&psk_id[..], &ch_hash[..], now) == false);
+}
+
+@main
+public fn main() -> Int {
+    first_admit_accepted();
+    replay_of_same_pair_rejected();
+    different_ch_hash_same_psk_accepted();
+    no_replay_guard_always_admits();
+    replay_config_defaults_match_rfc_recommendation();
+    custom_small_cache_honours_config();
+    print("RFC 8446 §8.2 ReplayCache admit behavior verified");
+    0
+}
