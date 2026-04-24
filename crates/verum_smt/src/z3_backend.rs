@@ -177,6 +177,14 @@ impl<'ctx> Z3Solver<'ctx> {
 
     /// Assert a formula into the solver
     pub fn assert(&mut self, formula: &Bool) {
+        // --solver-protocol: log the assertion to stderr when
+        // enabled. `Bool` implements Display via z3-rs's SMT-LIB
+        // serialisation, so the log line is directly replayable.
+        // No-op when the env var is unset.
+        crate::solver_diagnostics::log_send(&format!(
+            "(assert {})",
+            formula
+        ));
         self.solver.assert(formula);
     }
 
@@ -374,6 +382,20 @@ impl<'ctx> Z3Solver<'ctx> {
         let start = Instant::now();
         self.local_stats.total_checks += 1;
 
+        // --solver-protocol: log the check-sat boundary +
+        // --dump-smt: if configured, dump the full assertion
+        // set as an SMT-LIB file. Both are no-ops when the
+        // env vars are unset.
+        crate::solver_diagnostics::log_send("(check-sat)");
+        if let Some(_) = crate::solver_diagnostics::dump_smt_dir() {
+            let mut content = String::new();
+            for assertion in self.solver.get_assertions() {
+                content.push_str(&format!("(assert {})\n", assertion));
+            }
+            content.push_str("(check-sat)\n");
+            crate::solver_diagnostics::dump_smt_query("z3-query", &content);
+        }
+
         // FAST PATH: Try goal-based early detection (10-20% speedup)
         // Create goal from current assertions
         let goal = Goal::new(false, false, false);
@@ -397,6 +419,7 @@ impl<'ctx> Z3Solver<'ctx> {
             };
 
             self.local_stats.total_time_ms += start.elapsed().as_millis() as u64;
+            log_advanced_result(&result);
             return result;
         }
 
@@ -404,6 +427,7 @@ impl<'ctx> Z3Solver<'ctx> {
         let result = self.check_with_solver_strategy();
 
         self.local_stats.total_time_ms += start.elapsed().as_millis() as u64;
+        log_advanced_result(&result);
         result
     }
 
@@ -2560,6 +2584,21 @@ impl OverflowVerificationResult {
     pub fn is_unknown(&self) -> bool {
         matches!(self, OverflowVerificationResult::Unknown { .. })
     }
+}
+
+// ==================== Diagnostics helper ====================
+
+/// Log the verdict line for an `AdvancedResult` to the
+/// solver-protocol stderr channel. No-op when the protocol
+/// env var is unset.
+fn log_advanced_result(result: &AdvancedResult) {
+    let line = match result {
+        AdvancedResult::Sat { .. } => "sat",
+        AdvancedResult::SatOptimal { .. } => "sat (optimal)",
+        AdvancedResult::Unsat { .. } => "unsat",
+        AdvancedResult::Unknown { .. } => "unknown",
+    };
+    crate::solver_diagnostics::log_recv(line);
 }
 
 // ==================== Tests ====================
