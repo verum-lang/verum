@@ -1,0 +1,151 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: quic, error, rfc9000_20, connection_close
+// @timeout: 15000
+// @expected-exit: 0
+
+// RFC 9000 §20 — the transport signals fatal conditions as either a
+// TransportError (frame-type-tagged) or an ApplicationError (opaque to
+// the transport). This test pins that every variant of QuicError is
+// constructible, carries its payload, and is distinguishable under a
+// total match.
+
+mount core.*;
+mount core.net.quic.error.{QuicError, TransportErrorCode, ApplicationErrorCode};
+
+fn transport_error_carries_frame_type_and_reason() {
+    let e = QuicError.TransportError {
+        code:       TransportErrorCode.new(TransportErrorCode.FLOW_CONTROL_ERROR),
+        frame_type: 0x14_u64,  // STREAM_DATA_BLOCKED
+        reason:     f"stream 4 exceeded flow window",
+    };
+    match e {
+        QuicError.TransportError { code, frame_type, reason: _ } => {
+            assert(code.value() == 0x03_u64);
+            assert(frame_type == 0x14_u64);
+        },
+        _ => panic("expected TransportError payload"),
+    }
+}
+
+fn application_error_carries_opaque_code() {
+    let e = QuicError.ApplicationError {
+        code:   ApplicationErrorCode.new(0x010C_u64),  // H3_REQUEST_CANCELLED
+        reason: f"upstream aborted",
+    };
+    match e {
+        QuicError.ApplicationError { code, reason: _ } => {
+            assert(code.value() == 0x010C_u64);
+        },
+        _ => panic("expected ApplicationError payload"),
+    }
+}
+
+fn stream_reset_carries_stream_id_and_code() {
+    let e = QuicError.StreamReset {
+        stream_id: 7_u64,
+        code:      ApplicationErrorCode.new(0x0107_u64),  // H3_EXCESSIVE_LOAD
+    };
+    match e {
+        QuicError.StreamReset { stream_id, code } => {
+            assert(stream_id == 7_u64);
+            assert(code.value() == 0x0107_u64);
+        },
+        _ => panic("expected StreamReset payload"),
+    }
+}
+
+fn quic_error_structural_variants_constructible() {
+    let _a: QuicError = QuicError.ConnectionRefused(f"server full");
+    let _b: QuicError = QuicError.HandshakeFailed(f"bad certificate");
+    let _c: QuicError = QuicError.IdleTimeout;
+    let _d: QuicError = QuicError.StatelessReset;
+    let _e: QuicError = QuicError.VersionMismatch;
+    let _f: QuicError = QuicError.InvalidTransportParameter(f"initial_max_data out of range");
+    let _g: QuicError = QuicError.Closed;
+}
+
+fn quic_error_tagged_distinctly() {
+    let errs: [QuicError; 9] = [
+        QuicError.ConnectionRefused(f"a"),
+        QuicError.HandshakeFailed(f"b"),
+        QuicError.TransportError {
+            code:       TransportErrorCode.new(0_u64),
+            frame_type: 0_u64,
+            reason:     f"",
+        },
+        QuicError.ApplicationError {
+            code:   ApplicationErrorCode.new(0_u64),
+            reason: f"",
+        },
+        QuicError.StreamReset {
+            stream_id: 0_u64,
+            code:      ApplicationErrorCode.new(0_u64),
+        },
+        QuicError.IdleTimeout,
+        QuicError.StatelessReset,
+        QuicError.VersionMismatch,
+        QuicError.InvalidTransportParameter(f"c"),
+    ];
+    let mut tags: [Int; 9] = [0; 9];
+    let mut i: Int = 0;
+    while i < 9 {
+        tags[i] = match errs[i] {
+            QuicError.ConnectionRefused(_)              => 1,
+            QuicError.HandshakeFailed(_)                => 2,
+            QuicError.TransportError { .. }             => 3,
+            QuicError.ApplicationError { .. }           => 4,
+            QuicError.StreamReset { .. }                => 5,
+            QuicError.IdleTimeout                       => 6,
+            QuicError.StatelessReset                    => 7,
+            QuicError.VersionMismatch                   => 8,
+            QuicError.InvalidTransportParameter(_)      => 9,
+            QuicError.Closed                            => 10,
+        };
+        i = i + 1;
+    }
+    let mut j: Int = 0;
+    while j < 9 {
+        let mut k: Int = j + 1;
+        while k < 9 {
+            assert(tags[j] != tags[k]);
+            k = k + 1;
+        }
+        j = j + 1;
+    }
+}
+
+fn transport_error_crypto_carries_alert_offset() {
+    // CRYPTO_ERROR frame codes sit at [0x0100, 0x01FF] —
+    // transport signals "a TLS alert fired" without leaking which one
+    // beyond the base+alert offset.
+    let alert_handshake_failure = 40_u64;
+    let e = QuicError.TransportError {
+        code: TransportErrorCode.new(
+            TransportErrorCode.CRYPTO_ERROR_BASE + alert_handshake_failure,
+        ),
+        frame_type: 0_u64,  // CRYPTO frame
+        reason:     f"",
+    };
+    match e {
+        QuicError.TransportError { code, .. } => {
+            assert(code.value() == 0x0128_u64);
+            assert(code.value() >= TransportErrorCode.CRYPTO_ERROR_BASE);
+            assert(code.value() <  TransportErrorCode.CRYPTO_ERROR_BASE + 256_u64);
+        },
+        _ => panic("expected TransportError CRYPTO_ERROR"),
+    }
+}
+
+@main
+public fn main() -> Int {
+    transport_error_carries_frame_type_and_reason();
+    application_error_carries_opaque_code();
+    stream_reset_carries_stream_id_and_code();
+    quic_error_structural_variants_constructible();
+    quic_error_tagged_distinctly();
+    transport_error_crypto_carries_alert_offset();
+    print("RFC 9000 §20 QuicError variants + CRYPTO_ERROR offset verified");
+    0
+}

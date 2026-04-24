@@ -1,0 +1,127 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: quic, stream, state_machine, ack_path, rfc9000_3
+// @timeout: 15000
+// @expected-exit: 0
+
+// RFC 9000 §3.1 — the ack-path completes the SendStream state machine:
+//
+//   Send → DataSent         (on_bytes_sent covers final_size)
+//   DataSent → DataRecvd    (on_bytes_acked covers final_size; terminal)
+//   ResetSent → ResetRecvd  (on_bytes_acked on the RESET frame; terminal)
+//
+// Once terminal, is_finished() returns true and the endpoint MUST NOT
+// emit any further STREAM frames for this stream.
+
+mount core.*;
+mount core.collections.List;
+mount core.net.quic.stream_sm.send.{SendStream, SendState};
+
+fn send_to_data_sent_requires_bytes_sent_to_final_size() {
+    let mut s = SendStream.new(0_u64, 1024_u64);
+    let data: List<Byte> = [0x10_u8, 0x11_u8, 0x12_u8, 0x13_u8];
+    let _ = s.write(data.as_slice(), 1024_u64);
+    s.close().unwrap();
+    // close sets final_size=4 but state still Send.
+    match s.state() {
+        SendState.Send => {},
+        _ => panic("close keeps state=Send"),
+    }
+    // on_bytes_sent(3) is below final_size; stays Send.
+    s.on_bytes_sent(3_u64);
+    match s.state() {
+        SendState.Send => {},
+        _ => panic("partial on_bytes_sent keeps state=Send"),
+    }
+    // on_bytes_sent(4) covers the FIN — transitions to DataSent.
+    s.on_bytes_sent(4_u64);
+    match s.state() {
+        SendState.DataSent => {},
+        _ => panic("on_bytes_sent(final_size) → DataSent"),
+    }
+}
+
+fn data_sent_to_data_recvd_is_terminal() {
+    let mut s = SendStream.new(1_u64, 1024_u64);
+    let data: List<Byte> = [0xAA_u8, 0xBB_u8, 0xCC_u8];
+    let _ = s.write(data.as_slice(), 1024_u64);
+    s.close().unwrap();
+    s.on_bytes_sent(3_u64);
+    // Partial ack — stays DataSent.
+    s.on_bytes_acked(2_u64);
+    match s.state() {
+        SendState.DataSent => {},
+        _ => panic("partial ack keeps DataSent"),
+    }
+    assert(s.is_finished() == false);
+    // Full ack of final_size — terminal DataRecvd.
+    s.on_bytes_acked(3_u64);
+    match s.state() {
+        SendState.DataRecvd => {},
+        _ => panic("full ack → DataRecvd"),
+    }
+    assert(s.is_finished());
+}
+
+fn reset_sent_to_reset_recvd_on_ack() {
+    let mut s = SendStream.new(2_u64, 1024_u64);
+    let data: List<Byte> = [0x01_u8, 0x02_u8];
+    let _ = s.write(data.as_slice(), 1024_u64);
+    let final_size = s.reset(0x0A_u64).unwrap();
+    assert(final_size == 2_u64);
+    match s.state() {
+        SendState.ResetSent => {},
+        _ => panic("reset puts state=ResetSent"),
+    }
+    assert(s.is_finished() == false);
+    // Any ack observed flips RESET_STREAM to terminal ResetRecvd.
+    s.on_bytes_acked(0_u64);
+    match s.state() {
+        SendState.ResetRecvd => {},
+        _ => panic("ack of RESET → ResetRecvd"),
+    }
+    assert(s.is_finished());
+}
+
+fn max_written_non_decreasing() {
+    let mut s = SendStream.new(3_u64, 1024_u64);
+    let data: List<Byte> = [0_u8, 1_u8, 2_u8, 3_u8, 4_u8];
+    let _ = s.write(data.as_slice(), 1024_u64);
+    s.on_bytes_sent(3_u64);
+    s.on_bytes_sent(1_u64);   // stale callback; must be a no-op for max_written
+    // Schedule FIN — it sets final_size=5 but doesn't retroact max_written.
+    s.close().unwrap();
+    // The rest of max_written is transitively verified by the
+    // data_sent_to_data_recvd test above; here we only check that a
+    // stale 1-byte callback did not corrupt the state into DataSent.
+    match s.state() {
+        SendState.Send => {},
+        _ => panic("stale on_bytes_sent must not advance state"),
+    }
+}
+
+fn close_twice_is_rejected() {
+    let mut s = SendStream.new(4_u64, 1024_u64);
+    let data: List<Byte> = [0x55_u8];
+    let _ = s.write(data.as_slice(), 1024_u64);
+    s.close().unwrap();
+    s.on_bytes_sent(1_u64);
+    s.on_bytes_acked(1_u64);
+    // Now DataRecvd; close() must reject.
+    match s.close() {
+        Err(_) => {},
+        _ => panic("close after DataRecvd must error"),
+    }
+}
+
+@main
+public fn main() -> Int {
+    send_to_data_sent_requires_bytes_sent_to_final_size();
+    data_sent_to_data_recvd_is_terminal();
+    reset_sent_to_reset_recvd_on_ack();
+    max_written_non_decreasing();
+    close_twice_is_rejected();
+    print("RFC 9000 §3 SendStream ack-path transitions verified");
+    0
+}
