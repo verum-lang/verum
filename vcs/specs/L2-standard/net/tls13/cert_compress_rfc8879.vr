@@ -1,0 +1,115 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: tls13, cert_compress, rfc8879
+// @timeout: 15000
+// @expected-exit: 0
+
+// RFC 8879 Certificate Compression — extension + handshake-message
+// encode/decode surface coverage.
+
+mount core.*;
+mount core.collections.List;
+mount core.net.tls13.cert_compress.{
+    CertCompressionAlgorithm, CompressCertificate,
+    CompressCertificateError, CompressedCertificate,
+    encode_compress_certificate, decode_compress_certificate,
+    encode_compressed_certificate, decode_compressed_certificate,
+    HST_COMPRESSED_CERTIFICATE,
+};
+
+fn algorithm_codepoints_match_rfc() {
+    assert(CertCompressionAlgorithm.Zlib.to_u16()   == 1_u16);
+    assert(CertCompressionAlgorithm.Brotli.to_u16() == 2_u16);
+    assert(CertCompressionAlgorithm.Zstd.to_u16()   == 3_u16);
+    match CertCompressionAlgorithm.from_u16(1_u16) { CertCompressionAlgorithm.Zlib => {}, _ => panic("1") }
+    match CertCompressionAlgorithm.from_u16(2_u16) { CertCompressionAlgorithm.Brotli => {}, _ => panic("2") }
+    match CertCompressionAlgorithm.from_u16(3_u16) { CertCompressionAlgorithm.Zstd => {}, _ => panic("3") }
+    match CertCompressionAlgorithm.from_u16(255_u16) {
+        CertCompressionAlgorithm.UnknownAlgo(c) => assert(c == 255_u16),
+        _ => panic("255 should be UnknownAlgo"),
+    }
+    assert(CertCompressionAlgorithm.Zlib.is_registered());
+    assert(false == CertCompressionAlgorithm.UnknownAlgo(0x0A0A_u16).is_registered());
+}
+
+fn extension_rejects_empty_and_odd_lengths() {
+    let empty: List<CertCompressionAlgorithm> = [];
+    let ext_empty = CompressCertificate { algorithms: empty };
+    let mut out: List<Byte> = [];
+    match encode_compress_certificate(&ext_empty, &mut out) {
+        Err(CompressCertificateError.BadAlgorithmListLength) => {},
+        _ => panic("empty list must be BadAlgorithmListLength"),
+    }
+
+    // Malformed decode: reported length is odd → reject.
+    let malformed: List<Byte> = [0x03_u8, 0x00_u8, 0x01_u8, 0x00_u8];
+    match decode_compress_certificate(malformed.as_slice()) {
+        Err(CompressCertificateError.BadAlgorithmListLength) => {},
+        _ => panic("odd length must be BadAlgorithmListLength"),
+    }
+}
+
+fn extension_roundtrip_zlib_brotli_zstd() {
+    let algos: List<CertCompressionAlgorithm> = [
+        CertCompressionAlgorithm.Zlib,
+        CertCompressionAlgorithm.Brotli,
+        CertCompressionAlgorithm.Zstd,
+    ];
+    let ext = CompressCertificate { algorithms: algos };
+    let mut out: List<Byte> = [];
+    encode_compress_certificate(&ext, &mut out).unwrap();
+
+    // 1 (byte-len prefix) + 3 × 2 bytes = 7.
+    assert(out.len() == 7);
+    assert(out[0] == 0x06_u8);                  // byte length = 6 (3 algos × 2 bytes)
+    assert(out[1] == 0x00_u8 && out[2] == 0x01_u8);
+    assert(out[3] == 0x00_u8 && out[4] == 0x02_u8);
+    assert(out[5] == 0x00_u8 && out[6] == 0x03_u8);
+
+    let decoded = decode_compress_certificate(out.as_slice()).unwrap();
+    assert(decoded.algorithms.len() == 3);
+}
+
+fn compressed_certificate_roundtrip() {
+    let payload: List<Byte> = [0x78_u8, 0x9C_u8, 0xDE_u8, 0xAD_u8];
+    let msg = CompressedCertificate {
+        algorithm:           CertCompressionAlgorithm.Zlib,
+        uncompressed_length: 0x123456_u32,
+        compressed_message:  payload.clone(),
+    };
+
+    let mut out: List<Byte> = [];
+    encode_compressed_certificate(&msg, &mut out);
+    // 2 (algo) + 3 (uncompressed_length u24) + 3 (compressed-length u24)
+    // + 4 (payload) = 12 bytes.
+    assert(out.len() == 12);
+    assert(out[0] == 0x00_u8 && out[1] == 0x01_u8);         // algorithm = Zlib
+    assert(out[2] == 0x12_u8 && out[3] == 0x34_u8 && out[4] == 0x56_u8);
+    assert(out[5] == 0x00_u8 && out[6] == 0x00_u8 && out[7] == 0x04_u8);
+    assert(out[8] == 0x78_u8 && out[9] == 0x9C_u8);
+
+    let decoded = decode_compressed_certificate(out.as_slice()).unwrap();
+    assert(decoded.uncompressed_length == 0x123456_u32);
+    assert(decoded.compressed_message.len() == 4);
+    match decoded.algorithm {
+        CertCompressionAlgorithm.Zlib => {},
+        _ => panic("expected Zlib"),
+    }
+}
+
+fn handshake_type_matches_rfc() {
+    // RFC 8879 §4 — handshake message type 25.
+    assert(HST_COMPRESSED_CERTIFICATE == 25_u8);
+}
+
+@main
+public fn main() -> Int {
+    algorithm_codepoints_match_rfc();
+    extension_rejects_empty_and_odd_lengths();
+    extension_roundtrip_zlib_brotli_zstd();
+    compressed_certificate_roundtrip();
+    handshake_type_matches_rfc();
+    print("RFC 8879 cert_compress surface verified");
+    0
+}

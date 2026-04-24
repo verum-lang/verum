@@ -1,0 +1,214 @@
+// =============================================================================
+// net/tls13/cert_compress.vr — RFC 8879 Certificate Compression
+// =============================================================================
+// Layer: 5 (Network — TLS 1.3 core)
+// =============================================================================
+//
+// RFC 8879 adds a "compress_certificate" TLS extension (type 0x001B)
+// carrying the list of supported compression algorithms. If peer
+// advertises, server MAY send a `CompressedCertificate` (handshake
+// type 25) instead of a plain `Certificate` (type 11).
+//
+// Wire format (RFC 8879 §5):
+//
+//   struct {
+//       CertificateCompressionAlgorithm algorithms<2..2^8-2>;
+//   } CompressCertificate;
+//
+//   struct {
+//       CertificateCompressionAlgorithm algorithm;
+//       uint24 uncompressed_length;
+//       opaque compressed_certificate_message<1..2^24-1>;
+//   } CompressedCertificate;
+//
+//   enum {
+//       zlib(1),
+//       brotli(2),
+//       zstd(3),
+//       (65535)
+//   } CertificateCompressionAlgorithm;
+//
+// Warp MUST decode the extension and the handshake message for
+// interop even when we don't initiate compression ourselves. The
+// decompressor (zlib/brotli/zstd) lives outside this module — the
+// wire types here pass through `compressed_certificate_message` as
+// raw bytes so integration code can delegate to
+// `core.compress.{zlib,brotli,zstd}`.
+//
+// =============================================================================
+
+module core.net.tls13.cert_compress;
+
+mount core.*;
+mount core.collections.List;
+
+// =============================================================================
+// Algorithm codepoints (RFC 8879 §3)
+// =============================================================================
+
+public type CertCompressionAlgorithm is
+      Zlib
+    | Brotli
+    | Zstd
+    | UnknownAlgo(UInt16);
+
+implement CertCompressionAlgorithm {
+    public fn to_u16(&self) -> UInt16 {
+        match self {
+            CertCompressionAlgorithm.Zlib           => 1_u16,
+            CertCompressionAlgorithm.Brotli         => 2_u16,
+            CertCompressionAlgorithm.Zstd           => 3_u16,
+            CertCompressionAlgorithm.UnknownAlgo(v) => *v,
+        }
+    }
+
+    public fn from_u16(v: UInt16) -> CertCompressionAlgorithm {
+        match v {
+            1_u16 => CertCompressionAlgorithm.Zlib,
+            2_u16 => CertCompressionAlgorithm.Brotli,
+            3_u16 => CertCompressionAlgorithm.Zstd,
+            _     => CertCompressionAlgorithm.UnknownAlgo(v),
+        }
+    }
+
+    /// True iff the algorithm is one of the three currently registered
+    /// by IANA; UnknownAlgo → false. Useful for ignoring grease entries
+    /// (grease codepoints match the RFC 8701 `0x?a?a` pattern).
+    public fn is_registered(&self) -> Bool {
+        match self {
+            CertCompressionAlgorithm.UnknownAlgo(_) => false,
+            _ => true,
+        }
+    }
+}
+
+// =============================================================================
+// CompressCertificate extension body
+// =============================================================================
+
+public type CompressCertificate is {
+    algorithms: List<CertCompressionAlgorithm>,
+};
+
+public type CompressCertificateError is
+      Truncated
+    | BadAlgorithmListLength;
+
+pub fn encode_compress_certificate(ext: &CompressCertificate, out: &mut List<Byte>)
+    -> Result<(), CompressCertificateError>
+{
+    // RFC 8879 §5: algorithms field is length-prefixed u8, and the
+    // length MUST be in the range [2, 254] and be even.
+    let byte_len: Int = ext.algorithms.len() * 2;
+    if byte_len < 2 || byte_len > 254 || (byte_len % 2) != 0 {
+        return Err(CompressCertificateError.BadAlgorithmListLength);
+    }
+    out.push(byte_len as Byte);
+    let mut i: Int = 0;
+    while i < ext.algorithms.len() {
+        let v = ext.algorithms[i].to_u16();
+        out.push(((v >> 8_u32) & 0xFF_u16) as Byte);
+        out.push((v & 0xFF_u16) as Byte);
+        i = i + 1;
+    }
+    Ok(())
+}
+
+pub fn decode_compress_certificate(buf: &[Byte])
+    -> Result<CompressCertificate, CompressCertificateError>
+{
+    if buf.len() < 1 { return Err(CompressCertificateError.Truncated); }
+    let total_len = buf[0] as Int;
+    if total_len < 2 || total_len > 254 || (total_len % 2) != 0 {
+        return Err(CompressCertificateError.BadAlgorithmListLength);
+    }
+    if 1 + total_len > buf.len() {
+        return Err(CompressCertificateError.Truncated);
+    }
+    let mut algos: List<CertCompressionAlgorithm> = [];
+    let mut pos: Int = 1;
+    while pos < 1 + total_len {
+        let hi = buf[pos] as UInt16;
+        let lo = buf[pos + 1] as UInt16;
+        let code: UInt16 = ((hi << 8_u32) | lo);
+        algos.push(CertCompressionAlgorithm.from_u16(code));
+        pos = pos + 2;
+    }
+    Ok(CompressCertificate { algorithms: algos })
+}
+
+// =============================================================================
+// CompressedCertificate handshake message (handshake type 25)
+// =============================================================================
+
+/// Handshake-message-level handshake type for `compressed_certificate`.
+public const HST_COMPRESSED_CERTIFICATE: UInt8 = 25_u8;
+
+public type CompressedCertificate is {
+    algorithm:              CertCompressionAlgorithm,
+    /// uncompressed_length — always fits in 24 bits (RFC 8879 §4).
+    uncompressed_length:    UInt32,
+    /// Opaque compressed bytes; decompress via the algorithm-specific
+    /// codec (core.compress.zlib / brotli / zstd) externally.
+    compressed_message:     List<Byte>,
+};
+
+pub fn encode_compressed_certificate(
+    msg: &CompressedCertificate,
+    out: &mut List<Byte>,
+) {
+    let algo = msg.algorithm.to_u16();
+    out.push(((algo >> 8_u32) & 0xFF_u16) as Byte);
+    out.push((algo & 0xFF_u16) as Byte);
+
+    // uint24 uncompressed_length
+    out.push(((msg.uncompressed_length >> 16_u32) & 0xFF_u32) as Byte);
+    out.push(((msg.uncompressed_length >>  8_u32) & 0xFF_u32) as Byte);
+    out.push((msg.uncompressed_length & 0xFF_u32) as Byte);
+
+    // uint24 compressed length
+    let clen = msg.compressed_message.len() as UInt32;
+    out.push(((clen >> 16_u32) & 0xFF_u32) as Byte);
+    out.push(((clen >>  8_u32) & 0xFF_u32) as Byte);
+    out.push((clen & 0xFF_u32) as Byte);
+
+    let mut i: Int = 0;
+    while i < msg.compressed_message.len() {
+        out.push(msg.compressed_message[i]);
+        i = i + 1;
+    }
+}
+
+pub fn decode_compressed_certificate(buf: &[Byte])
+    -> Result<CompressedCertificate, CompressCertificateError>
+{
+    if buf.len() < 2 + 3 + 3 { return Err(CompressCertificateError.Truncated); }
+    let algo_u = ((buf[0] as UInt16) << 8_u32) | (buf[1] as UInt16);
+    let algo = CertCompressionAlgorithm.from_u16(algo_u);
+
+    let uncompressed: UInt32 =
+        ((buf[2] as UInt32) << 16_u32) |
+        ((buf[3] as UInt32) <<  8_u32) |
+         (buf[4] as UInt32);
+
+    let compressed_len: Int =
+        (((buf[5] as UInt32) << 16_u32) |
+         ((buf[6] as UInt32) <<  8_u32) |
+          (buf[7] as UInt32)) as Int;
+
+    if 8 + compressed_len > buf.len() {
+        return Err(CompressCertificateError.Truncated);
+    }
+    let mut payload: List<Byte> = [];
+    let mut i: Int = 8;
+    while i < 8 + compressed_len {
+        payload.push(buf[i]);
+        i = i + 1;
+    }
+
+    Ok(CompressedCertificate {
+        algorithm:           algo,
+        uncompressed_length: uncompressed,
+        compressed_message:  payload,
+    })
+}

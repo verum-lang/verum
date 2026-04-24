@@ -1,0 +1,100 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: tls13, grease, rfc8701, ossification_prevention
+// @timeout: 15000
+// @expected-exit: 0
+
+// RFC 8701 grease — clients MAY attach one reserved codepoint to
+// cipher suites / extensions / named groups / signature algorithms /
+// supported versions so peers' ignore-unknown paths stay exercised.
+//
+// This test exercises:
+//   1. grease_values() lists all 16 RFC 8701 reserved codepoints.
+//   2. is_grease(code) is true for each listed value and false for
+//      non-grease anchors (0x0000, 0x0303, 0x1301).
+//   3. The emitters produce values whose payload is a grease codepoint.
+
+mount core.*;
+mount core.collections.List;
+mount core.net.tls13.handshake.extension.{Extension};
+mount core.net.tls13.handshake.grease.{
+    grease_values, is_grease, pick_grease,
+    grease_extension, grease_named_group, grease_signature_scheme,
+    grease_cipher_suite, grease_version,
+};
+mount core.net.tls13.named_group.{NamedGroup};
+mount core.net.tls13.sig_scheme.{SignatureScheme};
+mount core.net.tls13.cipher_suite.{CipherSuite};
+
+fn grease_table_matches_rfc8701() {
+    let vs = grease_values();
+    assert(vs.len() == 16);
+    let mut i: Int = 0;
+    while i < vs.len() {
+        assert(is_grease(vs[i]));
+        i = i + 1;
+    }
+}
+
+fn is_grease_rejects_real_codepoints() {
+    // Non-grease TLS registered values.
+    assert(!is_grease(0x0000_u16));   // server_name ext
+    assert(!is_grease(0x002B_u16));   // supported_versions ext (43)
+    assert(!is_grease(0x0033_u16));   // key_share ext (51)
+    assert(!is_grease(0x1301_u16));   // TLS_AES_128_GCM_SHA256
+    assert(!is_grease(0x001D_u16));   // x25519 group (29)
+    assert(!is_grease(0x0304_u16));   // TLS 1.3 version
+}
+
+fn emitters_produce_grease_codepoints() {
+    // Deterministic entropy — pick_grease is a pure mod-16 map so
+    // these calls always select the same grease from the table.
+    let e1: UInt64 = 0x1234_5678_ABCD_EF01_u64;
+    let e2: UInt64 = 0xFEDC_BA98_7654_3210_u64;
+
+    // Extension — round-trip ext_type through is_grease.
+    let ext = grease_extension(e1);
+    match ext {
+        Extension.Unknown { ext_type, data } => {
+            assert(is_grease(ext_type));
+            assert(data.len() == 0);
+        },
+        _ => panic("grease_extension produced a known extension"),
+    }
+
+    // NamedGroup
+    let g = grease_named_group(e2);
+    match g {
+        NamedGroup.Unknown(code) => assert(is_grease(code)),
+        _ => panic("grease_named_group produced a known group"),
+    }
+
+    // SignatureScheme
+    let s = grease_signature_scheme(e1);
+    match s {
+        SignatureScheme.Unknown(code) => assert(is_grease(code)),
+        _ => panic("grease_signature_scheme produced a known scheme"),
+    }
+
+    // CipherSuite
+    let c = grease_cipher_suite(e2);
+    match c {
+        CipherSuite.Unknown(code) => assert(is_grease(code)),
+        _ => panic("grease_cipher_suite produced a known suite"),
+    }
+
+    // ProtocolVersion — both bytes equal and low nibble = A.
+    let v = grease_version(e1);
+    assert(v.major == v.minor);
+    assert((v.major & 0x0F_u8) == 0x0A_u8);
+}
+
+@main
+public fn main() -> Int {
+    grease_table_matches_rfc8701();
+    is_grease_rejects_real_codepoints();
+    emitters_produce_grease_codepoints();
+    print("RFC 8701 grease emitters + predicate verified");
+    0
+}

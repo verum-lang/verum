@@ -1,0 +1,125 @@
+// =============================================================================
+// net/tls13/handshake/grease.vr — RFC 8701 "grease" values
+// =============================================================================
+// Layer: 5 (Network — TLS 1.3 core)
+// =============================================================================
+//
+// RFC 8701 reserves a set of IANA values that clients and servers MAY
+// advertise but that MUST be ignored when parsed. Their purpose is to
+// exercise peers' "ignore-unknown" paths so that real future
+// extensions are not blocked by brittle implementations that reject
+// anything they don't recognise.
+//
+// The spec recommends:
+//
+//   * Clients include at least one grease value from each of
+//     {cipher_suites, extensions, named_groups, signature_algorithms,
+//      supported_versions, psk_key_exchange_modes}.
+//   * Servers echo none of them; they MUST NOT fail the handshake on
+//     receipt.
+//
+// All reserved values have the pattern 0x?A?A where the two hex
+// digits are identical (16 values in total). `is_grease` recognises
+// them by the byte-level mask described in RFC 8701 §4.
+//
+// =============================================================================
+
+module core.net.tls13.handshake.grease;
+
+mount core.*;
+mount core.collections.List;
+mount core.net.tls13.handshake.extension.{Extension};
+mount core.net.tls13.cipher_suite.{CipherSuite};
+mount core.net.tls13.named_group.{NamedGroup};
+mount core.net.tls13.sig_scheme.{SignatureScheme};
+mount core.net.tls13.version.{ProtocolVersion};
+
+// =============================================================================
+// RFC 8701 §3 reserved grease table
+// =============================================================================
+
+/// The 16 reserved grease code-points (RFC 8701 Table 1). All have
+/// the pattern 0x?A?A where the two hex digits are identical.
+public fn grease_values() -> List<UInt16> {
+    let mut v: List<UInt16> = [];
+    v.push(0x0A0A_u16);
+    v.push(0x1A1A_u16);
+    v.push(0x2A2A_u16);
+    v.push(0x3A3A_u16);
+    v.push(0x4A4A_u16);
+    v.push(0x5A5A_u16);
+    v.push(0x6A6A_u16);
+    v.push(0x7A7A_u16);
+    v.push(0x8A8A_u16);
+    v.push(0x9A9A_u16);
+    v.push(0xAAAA_u16);
+    v.push(0xBABA_u16);
+    v.push(0xCACA_u16);
+    v.push(0xDADA_u16);
+    v.push(0xEAEA_u16);
+    v.push(0xFAFA_u16);
+    v
+}
+
+/// True iff `code` is one of the 16 RFC 8701 grease values. Equivalent
+/// to the byte-level test: low and high bytes are equal and both end
+/// in 0xA (low nibble).
+public fn is_grease(code: UInt16) -> Bool {
+    let lo: UInt8 = (code & 0xFF_u16) as UInt8;
+    let hi: UInt8 = ((code >> 8) & 0xFF_u16) as UInt8;
+    lo == hi && (lo & 0x0F_u8) == 0x0A_u8
+}
+
+/// Pick a grease value deterministically given a 64-bit entropy draw.
+/// Intended use: call `fill_secure(&mut [..8])` once, interpret the
+/// bytes as a u64, feed here — the output is uniformly distributed
+/// over the 16 reserved codepoints.
+public fn pick_grease(entropy: UInt64) -> UInt16 {
+    let vs = grease_values();
+    let idx = (entropy as Int) % vs.len();
+    vs[if idx < 0 { idx + vs.len() } else { idx }]
+}
+
+// =============================================================================
+// Convenience emitters — one grease instance per surface
+// =============================================================================
+
+/// Build an `Extension.Unknown` with a grease ext_type and an empty
+/// body. Clients SHOULD attach one to `ClientHello.extensions`.
+public fn grease_extension(entropy: UInt64) -> Extension {
+    Extension.Unknown {
+        ext_type: pick_grease(entropy),
+        data:     [],
+    }
+}
+
+/// Build a grease `NamedGroup` value. Safe to append to
+/// `SupportedGroupsExt.groups` — peers treat it as `Unknown(code)`.
+public fn grease_named_group(entropy: UInt64) -> NamedGroup {
+    NamedGroup.Unknown(pick_grease(entropy))
+}
+
+/// Build a grease `SignatureScheme` value. Safe to append to
+/// `SignatureAlgorithmsExt.schemes`.
+public fn grease_signature_scheme(entropy: UInt64) -> SignatureScheme {
+    SignatureScheme.Unknown(pick_grease(entropy))
+}
+
+/// Build a grease `CipherSuite`. Safe to append to
+/// `ClientHello.cipher_suites`.
+public fn grease_cipher_suite(entropy: UInt64) -> CipherSuite {
+    CipherSuite.Unknown(pick_grease(entropy))
+}
+
+/// Build a grease `ProtocolVersion`. Safe to append to
+/// `SupportedVersionsClient.versions`. `ProtocolVersion` is a raw
+/// (major, minor) byte pair — we take the high byte of the grease
+/// codepoint as `major` and the low byte as `minor`; by construction
+/// both bytes are identical and grease by the is_grease predicate.
+public fn grease_version(entropy: UInt64) -> ProtocolVersion {
+    let v = pick_grease(entropy);
+    ProtocolVersion {
+        major: ((v >> 8) & 0xFF_u16) as UInt8,
+        minor: (v & 0xFF_u16) as UInt8,
+    }
+}
