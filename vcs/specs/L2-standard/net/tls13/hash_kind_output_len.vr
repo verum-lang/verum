@@ -1,0 +1,40 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: tls13, hash_kind, rfc6234
+// @timeout: 15000
+// @expected-exit: 0
+
+// RFC 8446 §4.1.3 + FIPS 180-4: TLS 1.3 hash families are SHA-256
+// and SHA-384. output_len is the digest size in bytes (256 / 8 = 32,
+// 384 / 8 = 48).
+
+mount core.*;
+mount core.net.tls13.cipher_suite.{HashKind};
+
+fn sha256_is_32_bytes() {
+    assert(HashKind.Sha256.output_len() == 32);
+}
+
+fn sha384_is_48_bytes() {
+    assert(HashKind.Sha384.output_len() == 48);
+}
+
+fn output_len_matches_bit_width() {
+    assert(HashKind.Sha256.output_len() * 8 == 256);
+    assert(HashKind.Sha384.output_len() * 8 == 384);
+}
+
+fn output_lens_are_distinct() {
+    assert(HashKind.Sha256.output_len() != HashKind.Sha384.output_len());
+}
+
+@main
+public fn main() -> Int {
+    sha256_is_32_bytes();
+    sha384_is_48_bytes();
+    output_len_matches_bit_width();
+    output_lens_are_distinct();
+    print("TLS 1.3 HashKind output_len verified");
+    0
+}

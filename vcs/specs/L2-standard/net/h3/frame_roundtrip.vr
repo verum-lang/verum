@@ -1,0 +1,116 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: h3, frame, roundtrip, rfc9114_7_2
+// @timeout: 15000
+// @expected-exit: 0
+
+// RFC 9114 §7.2 H3Frame encode/decode round-trip: every frame type
+// serialises to `type_varint || length_varint || payload` and
+// decodes back to the same payload bytes.
+
+mount core.*;
+mount core.collections.List;
+mount core.net.h3.frame.{H3Frame, encode_frame, decode_frame};
+
+fn bytes_eq(a: &[Byte], b: &[Byte]) -> Bool {
+    if a.len() != b.len() { return false; }
+    let mut i: Int = 0;
+    while i < a.len() {
+        if a[i] != b[i] { return false; }
+        i = i + 1;
+    }
+    true
+}
+
+fn data_frame_roundtrip() {
+    let payload: List<Byte> = [0xAA_u8, 0xBB_u8, 0xCC_u8, 0xDD_u8];
+    let f = H3Frame.DataFrame(payload.clone());
+    let mut wire: List<Byte> = [];
+    encode_frame(&f, &mut wire);
+    // Byte 0 is frame type = 0x00 (DATA).
+    assert(wire[0] == 0x00_u8);
+    let (decoded, next) = decode_frame(wire.as_slice(), 0).unwrap();
+    match decoded {
+        H3Frame.DataFrame(b) => assert(bytes_eq(b.as_slice(), payload.as_slice())),
+        _ => panic("expected DataFrame"),
+    }
+    assert(next == wire.len());
+}
+
+fn headers_frame_roundtrip() {
+    let hdrs: List<Byte> = [0xD1_u8];    // QPACK indexed :method GET
+    let f = H3Frame.HeadersFrame(hdrs.clone());
+    let mut wire: List<Byte> = [];
+    encode_frame(&f, &mut wire);
+    assert(wire[0] == 0x01_u8);
+    let (decoded, _next) = decode_frame(wire.as_slice(), 0).unwrap();
+    match decoded {
+        H3Frame.HeadersFrame(b) => assert(bytes_eq(b.as_slice(), hdrs.as_slice())),
+        _ => panic("expected HeadersFrame"),
+    }
+}
+
+fn settings_frame_roundtrip() {
+    let entries: List<(UInt64, UInt64)> = [
+        (0x01_u64, 4096_u64),     // qpack_max_table_capacity
+        (0x06_u64, 16_384_u64),   // max_field_section_size
+    ];
+    let f = H3Frame.SettingsFrame(entries.clone());
+    let mut wire: List<Byte> = [];
+    encode_frame(&f, &mut wire);
+    assert(wire[0] == 0x04_u8);
+    let (decoded, _next) = decode_frame(wire.as_slice(), 0).unwrap();
+    match decoded {
+        H3Frame.SettingsFrame(e) => assert(e.len() == 2),
+        _ => panic("expected SettingsFrame"),
+    }
+}
+
+fn goaway_frame_roundtrip() {
+    let f = H3Frame.GoawayFrame(1234_u64);
+    let mut wire: List<Byte> = [];
+    encode_frame(&f, &mut wire);
+    assert(wire[0] == 0x07_u8);
+    let (decoded, _next) = decode_frame(wire.as_slice(), 0).unwrap();
+    match decoded {
+        H3Frame.GoawayFrame(stream_id) => assert(stream_id == 1234_u64),
+        _ => panic("expected GoawayFrame"),
+    }
+}
+
+fn cancel_push_frame_roundtrip() {
+    let f = H3Frame.CancelPushFrame(7_u64);
+    let mut wire: List<Byte> = [];
+    encode_frame(&f, &mut wire);
+    assert(wire[0] == 0x03_u8);
+    let (decoded, _next) = decode_frame(wire.as_slice(), 0).unwrap();
+    match decoded {
+        H3Frame.CancelPushFrame(push_id) => assert(push_id == 7_u64),
+        _ => panic("expected CancelPushFrame"),
+    }
+}
+
+fn max_push_id_frame_roundtrip() {
+    let f = H3Frame.MaxPushIdFrame(100_u64);
+    let mut wire: List<Byte> = [];
+    encode_frame(&f, &mut wire);
+    assert(wire[0] == 0x0D_u8);
+    let (decoded, _next) = decode_frame(wire.as_slice(), 0).unwrap();
+    match decoded {
+        H3Frame.MaxPushIdFrame(id) => assert(id == 100_u64),
+        _ => panic("expected MaxPushIdFrame"),
+    }
+}
+
+@main
+public fn main() -> Int {
+    data_frame_roundtrip();
+    headers_frame_roundtrip();
+    settings_frame_roundtrip();
+    goaway_frame_roundtrip();
+    cancel_push_frame_roundtrip();
+    max_push_id_frame_roundtrip();
+    print("RFC 9114 §7.2 H3Frame round-trip verified");
+    0
+}
