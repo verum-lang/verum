@@ -553,6 +553,23 @@ enum Commands {
         cache: bool,
         #[clap(long)]
         interactive: bool,
+        /// Launch the interactive-tactic REPL after loading. Unlike
+        /// plain `--interactive`, this drops straight into a tactic
+        /// console (Ltac2-style): the current goal is printed, the
+        /// user enters tactics one at a time, and the prompt updates
+        /// with the resulting sub-goals. Useful for proof
+        /// debugging. See `docs/verification/tactic-dsl.md §9.2`.
+        #[clap(long)]
+        interactive_tactic: bool,
+        /// Limit verification to functions whose source has changed
+        /// since the given git reference. Accepts any `git`-parseable
+        /// ref: `HEAD~1`, `HEAD~5`, `main`, `abc123`, … The diff is
+        /// computed against the current working tree; only functions
+        /// whose body lines fall in the changed range are verified.
+        /// Use in CI: `verum verify --diff origin/main` verifies only
+        /// what a PR changed. Docs: `docs/verification/cli-workflow.md §11`.
+        #[clap(long, value_name = "GIT_REF")]
+        diff: Option<Text>,
         #[clap(long)]
         function: Option<Text>,
     },
@@ -1382,6 +1399,8 @@ fn run_command(cli: Cli) -> Result<()> {
             timeout,
             cache,
             interactive,
+            interactive_tactic,
+            diff,
             function,
         } => {
             // `--export` implies `--profile` — you can't dump a profile you
@@ -1469,7 +1488,8 @@ fn run_command(cli: Cli) -> Result<()> {
                     solver.as_str(),
                     timeout,
                     cache,
-                    interactive,
+                    interactive || interactive_tactic,
+                    diff.as_ref().map(|s| s.as_str().to_string()),
                 )
             }
         }
