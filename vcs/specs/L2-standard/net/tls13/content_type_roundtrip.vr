@@ -1,0 +1,60 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: tls13, record, content_type, rfc8446_5_1
+// @timeout: 15000
+// @expected-exit: 0
+
+// RFC 8446 §5.1 ContentType u8 codepoints + round-trip through
+// to_u8/from_u8.
+
+mount core.*;
+mount core.net.tls13.record.content_type.{ContentType};
+
+fn codepoints_match_rfc() {
+    assert(ContentType.Invalid.to_u8()          == 0_u8);
+    assert(ContentType.ChangeCipherSpec.to_u8() == 20_u8);
+    assert(ContentType.Alert.to_u8()            == 21_u8);
+    assert(ContentType.Handshake.to_u8()        == 22_u8);
+    assert(ContentType.ApplicationData.to_u8()  == 23_u8);
+    // Unknown pass-through (grease / future).
+    assert(ContentType.Unknown(0xFF_u8).to_u8() == 0xFF_u8);
+}
+
+fn from_u8_roundtrip() {
+    match ContentType.from_u8(0_u8)  { ContentType.Invalid => {},          _ => panic("0") }
+    match ContentType.from_u8(20_u8) { ContentType.ChangeCipherSpec => {}, _ => panic("20") }
+    match ContentType.from_u8(21_u8) { ContentType.Alert => {},            _ => panic("21") }
+    match ContentType.from_u8(22_u8) { ContentType.Handshake => {},        _ => panic("22") }
+    match ContentType.from_u8(23_u8) { ContentType.ApplicationData => {},  _ => panic("23") }
+    // Unknown passes through.
+    match ContentType.from_u8(50_u8) {
+        ContentType.Unknown(v) => assert(v == 50_u8),
+        _ => panic("50 must pass through"),
+    }
+    match ContentType.from_u8(255_u8) {
+        ContentType.Unknown(v) => assert(v == 255_u8),
+        _ => panic("255 must pass through"),
+    }
+}
+
+fn every_codepoint_is_8_bit_preserving() {
+    // For every registered codepoint, from_u8(x).to_u8() == x.
+    let codes: [UInt8; 5] = [0_u8, 20_u8, 21_u8, 22_u8, 23_u8];
+    let mut i: Int = 0;
+    while i < 5 {
+        let c = codes[i];
+        let ct = ContentType.from_u8(c);
+        assert(ct.to_u8() == c);
+        i = i + 1;
+    }
+}
+
+@main
+public fn main() -> Int {
+    codepoints_match_rfc();
+    from_u8_roundtrip();
+    every_codepoint_is_8_bit_preserving();
+    print("RFC 8446 §5.1 ContentType round-trip verified");
+    0
+}

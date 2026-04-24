@@ -1,0 +1,82 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: tls13, version, downgrade_sentinel, rfc8446_4_1_2, rfc8446_4_1_3
+// @timeout: 15000
+// @expected-exit: 0
+
+// RFC 8446 §4.1.2 ProtocolVersion + §4.1.3 downgrade-sentinel
+// constants (DOWNGRD\x01 / DOWNGRD\x00 for the last 8 bytes of
+// ServerHello.random when a 1.3-capable server would negotiate
+// 1.2 / 1.1 respectively).
+
+mount core.*;
+mount core.net.tls13.version.{
+    ProtocolVersion,
+    TLS_1_3, LEGACY_VERSION_TLS_1_2,
+    DOWNGRADE_SENTINEL_TLS12, DOWNGRADE_SENTINEL_TLS11,
+};
+
+fn tls_1_3_wire_value_is_0x0304() {
+    assert(TLS_1_3.major == 0x03_u8);
+    assert(TLS_1_3.minor == 0x04_u8);
+    assert(TLS_1_3.to_u16() == 0x0304_u16);
+}
+
+fn legacy_field_is_0x0303_for_middlebox_compat() {
+    assert(LEGACY_VERSION_TLS_1_2.major == 0x03_u8);
+    assert(LEGACY_VERSION_TLS_1_2.minor == 0x03_u8);
+    assert(LEGACY_VERSION_TLS_1_2.to_u16() == 0x0303_u16);
+}
+
+fn from_u16_roundtrip() {
+    let v = ProtocolVersion.from_u16(0x0304_u16);
+    assert(v.eq(&TLS_1_3));
+    let v2 = ProtocolVersion.from_u16(0x0303_u16);
+    assert(v2.eq(&LEGACY_VERSION_TLS_1_2));
+}
+
+fn downgrade_sentinel_tls12_is_DOWNGRD_01() {
+    // ASCII "DOWNGRD" + 0x01
+    assert(DOWNGRADE_SENTINEL_TLS12[0] == 0x44_u8);   // 'D'
+    assert(DOWNGRADE_SENTINEL_TLS12[1] == 0x4F_u8);   // 'O'
+    assert(DOWNGRADE_SENTINEL_TLS12[2] == 0x57_u8);   // 'W'
+    assert(DOWNGRADE_SENTINEL_TLS12[3] == 0x4E_u8);   // 'N'
+    assert(DOWNGRADE_SENTINEL_TLS12[4] == 0x47_u8);   // 'G'
+    assert(DOWNGRADE_SENTINEL_TLS12[5] == 0x52_u8);   // 'R'
+    assert(DOWNGRADE_SENTINEL_TLS12[6] == 0x44_u8);   // 'D'
+    assert(DOWNGRADE_SENTINEL_TLS12[7] == 0x01_u8);
+}
+
+fn downgrade_sentinel_tls11_is_DOWNGRD_00() {
+    // ASCII "DOWNGRD" + 0x00
+    assert(DOWNGRADE_SENTINEL_TLS11[0] == 0x44_u8);
+    assert(DOWNGRADE_SENTINEL_TLS11[6] == 0x44_u8);
+    assert(DOWNGRADE_SENTINEL_TLS11[7] == 0x00_u8);
+    // Differs from the 1.2 sentinel only in the final byte.
+    let mut i: Int = 0;
+    while i < 7 {
+        assert(DOWNGRADE_SENTINEL_TLS11[i] == DOWNGRADE_SENTINEL_TLS12[i]);
+        i = i + 1;
+    }
+}
+
+fn version_equality() {
+    let a = ProtocolVersion.from_u16(0x0304_u16);
+    let b = ProtocolVersion.from_u16(0x0304_u16);
+    let c = ProtocolVersion.from_u16(0x0303_u16);
+    assert(a.eq(&b));
+    assert(false == a.eq(&c));
+}
+
+@main
+public fn main() -> Int {
+    tls_1_3_wire_value_is_0x0304();
+    legacy_field_is_0x0303_for_middlebox_compat();
+    from_u16_roundtrip();
+    downgrade_sentinel_tls12_is_DOWNGRD_01();
+    downgrade_sentinel_tls11_is_DOWNGRD_00();
+    version_equality();
+    print("RFC 8446 §4.1.2 + §4.1.3 version + downgrade-sentinel verified");
+    0
+}

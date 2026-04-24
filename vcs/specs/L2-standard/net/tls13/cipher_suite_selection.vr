@@ -1,0 +1,120 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: tls13, cipher_suite, server_select, rfc8446_4_1_3, rfc8446_9_1
+// @timeout: 15000
+// @expected-exit: 0
+
+// RFC 8446 §4.1.3 cipher-suite negotiation: server picks the first
+// of its preferences that is offered by the client AND supported.
+// §9.1 mandates support for TLS_AES_128_GCM_SHA256 and
+// TLS_CHACHA20_POLY1305_SHA256; TLS_AES_256_GCM_SHA384 is
+// recommended. CCM suites may parse but warp never negotiates them.
+
+mount core.*;
+mount core.collections.List;
+mount core.net.tls13.cipher_suite.{
+    CipherSuite, HashKind, AeadKind,
+    select_server_suite,
+};
+
+fn cipher_suite_to_u16_matches_iana() {
+    assert(CipherSuite.TlsAes128GcmSha256.to_u16()        == 0x1301_u16);
+    assert(CipherSuite.TlsAes256GcmSha384.to_u16()        == 0x1302_u16);
+    assert(CipherSuite.TlsChaCha20Poly1305Sha256.to_u16() == 0x1303_u16);
+    assert(CipherSuite.TlsAes128CcmSha256.to_u16()        == 0x1304_u16);
+    assert(CipherSuite.TlsAes128Ccm8Sha256.to_u16()       == 0x1305_u16);
+}
+
+fn only_three_supported_per_rfc_9_1() {
+    assert(CipherSuite.TlsAes128GcmSha256.is_supported());
+    assert(CipherSuite.TlsChaCha20Poly1305Sha256.is_supported());
+    assert(CipherSuite.TlsAes256GcmSha384.is_supported());
+    // CCM suites parse but must not be offered or accepted.
+    assert(false == CipherSuite.TlsAes128CcmSha256.is_supported());
+    assert(false == CipherSuite.TlsAes128Ccm8Sha256.is_supported());
+    assert(false == CipherSuite.Unknown(0x1309_u16).is_supported());
+}
+
+fn hash_kind_matches_suite() {
+    match CipherSuite.TlsAes128GcmSha256.hash_kind()        { HashKind.Sha256 => {}, _ => panic("128gcm hash") }
+    match CipherSuite.TlsAes256GcmSha384.hash_kind()        { HashKind.Sha384 => {}, _ => panic("256gcm hash") }
+    match CipherSuite.TlsChaCha20Poly1305Sha256.hash_kind() { HashKind.Sha256 => {}, _ => panic("cha20 hash") }
+}
+
+fn aead_kind_matches_suite() {
+    match CipherSuite.TlsAes128GcmSha256.aead_kind()        { AeadKind.Aes128Gcm        => {}, _ => panic("128gcm aead") }
+    match CipherSuite.TlsAes256GcmSha384.aead_kind()        { AeadKind.Aes256Gcm        => {}, _ => panic("256gcm aead") }
+    match CipherSuite.TlsChaCha20Poly1305Sha256.aead_kind() { AeadKind.ChaCha20Poly1305 => {}, _ => panic("cha20 aead") }
+}
+
+fn server_picks_first_preferred_match() {
+    // Server prefers: 256-GCM, 128-GCM, ChaCha20.
+    let prefs: List<CipherSuite> = [
+        CipherSuite.TlsAes256GcmSha384,
+        CipherSuite.TlsAes128GcmSha256,
+        CipherSuite.TlsChaCha20Poly1305Sha256,
+    ];
+    // Client offers: 128-GCM, ChaCha20 (no 256-GCM).
+    let offers: List<CipherSuite> = [
+        CipherSuite.TlsAes128GcmSha256,
+        CipherSuite.TlsChaCha20Poly1305Sha256,
+    ];
+    match select_server_suite(&prefs, &offers) {
+        Some(chosen) => assert(chosen.to_u16() == 0x1301_u16),
+        None => panic("must negotiate 128-GCM"),
+    }
+}
+
+fn server_skips_unsupported_preferences() {
+    // Server lists CCM first (unsupported), then 128-GCM. Client offers
+    // CCM + 128-GCM. Server must skip CCM even if offered and pick 128-GCM.
+    let prefs: List<CipherSuite> = [
+        CipherSuite.TlsAes128CcmSha256,
+        CipherSuite.TlsAes128GcmSha256,
+    ];
+    let offers: List<CipherSuite> = [
+        CipherSuite.TlsAes128CcmSha256,
+        CipherSuite.TlsAes128GcmSha256,
+    ];
+    match select_server_suite(&prefs, &offers) {
+        Some(chosen) => assert(chosen.to_u16() == 0x1301_u16),
+        None => panic("must skip CCM and negotiate 128-GCM"),
+    }
+}
+
+fn server_returns_none_when_no_overlap() {
+    let prefs: List<CipherSuite> = [CipherSuite.TlsAes128GcmSha256];
+    let offers: List<CipherSuite> = [CipherSuite.TlsChaCha20Poly1305Sha256];
+    match select_server_suite(&prefs, &offers) {
+        None => {},
+        _ => panic("disjoint lists must return None"),
+    }
+}
+
+fn server_returns_none_on_empty_inputs() {
+    let empty: List<CipherSuite> = [];
+    let some: List<CipherSuite> = [CipherSuite.TlsAes128GcmSha256];
+    match select_server_suite(&empty, &some) {
+        None => {},
+        _ => panic("empty prefs must return None"),
+    }
+    match select_server_suite(&some, &empty) {
+        None => {},
+        _ => panic("empty offers must return None"),
+    }
+}
+
+@main
+public fn main() -> Int {
+    cipher_suite_to_u16_matches_iana();
+    only_three_supported_per_rfc_9_1();
+    hash_kind_matches_suite();
+    aead_kind_matches_suite();
+    server_picks_first_preferred_match();
+    server_skips_unsupported_preferences();
+    server_returns_none_when_no_overlap();
+    server_returns_none_on_empty_inputs();
+    print("RFC 8446 §4.1.3 + §9.1 cipher-suite selection verified");
+    0
+}

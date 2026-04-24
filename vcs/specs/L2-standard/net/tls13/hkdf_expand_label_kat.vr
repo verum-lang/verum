@@ -1,0 +1,129 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: tls13, hkdf, expand_label, rfc8446_7_1, kat, byte_exact
+// @timeout: 15000
+// @expected-exit: 0
+
+// RFC 8446 §7.1 HKDF-Expand-Label — byte-exact encode_hkdf_label KAT.
+// The encoded `info` blob is what HKDF-Expand consumes. Verifying it
+// matches the RFC 8448 §A.1 vector-derived form closes the wire-
+// contract gap between warp's key schedule and the rustls reference.
+//
+// HkdfLabel ::= struct {
+//     uint16 length;
+//     opaque label<7..255> = "tls13 " + Label;
+//     opaque ctx_buf<0..255>;
+// } HkdfLabel;
+
+mount core.*;
+mount core.collections.List;
+mount core.net.tls13.keyschedule.hkdf_label.{encode_hkdf_label};
+mount core.net.tls13.keyschedule.derive_secret.{
+    LABEL_CLIENT_HS_TRAFFIC,
+    LABEL_KEY,
+    LABEL_IV,
+    LABEL_FINISHED,
+};
+
+fn bytes_eq(a: &[Byte], b: &[Byte]) -> Bool {
+    if a.len() != b.len() { return false; }
+    let mut i: Int = 0;
+    while i < a.len() {
+        if a[i] != b[i] { return false; }
+        i = i + 1;
+    }
+    true
+}
+
+fn encode_client_hs_traffic_byte_exact() {
+    // length = 32 (SHA-256), label = "tls13 c hs traffic", ctx_buf = empty 32 zeroes.
+    let mut ctx_buf: List<Byte> = [];
+    let mut i: Int = 0;
+    while i < 32 {
+        ctx_buf.push(0_u8);
+        i = i + 1;
+    }
+    let info = encode_hkdf_label(32, LABEL_CLIENT_HS_TRAFFIC.as_slice(), ctx_buf.as_slice());
+
+    // Expected bytes:
+    //   uint16(32)                             → 0x00 0x20
+    //   uint8(label_len = 6 + 12 = 18)         → 0x12
+    //   "tls13 "                               → 74 6c 73 31 33 20
+    //   "c hs traffic"                         → 63 20 68 73 20 74 72 61 66 66 69 63
+    //   uint8(ctx_buf_len = 32)                → 0x20
+    //   ctx_buf (32 × 0x00)
+    //
+    // Total = 2 + 1 + 18 + 1 + 32 = 54 bytes.
+    assert(info.len() == 54);
+    assert(info[0] == 0x00_u8 && info[1] == 0x20_u8);
+    assert(info[2] == 0x12_u8);
+    // "tls13 "
+    assert(info[3] == 0x74_u8);
+    assert(info[4] == 0x6C_u8);
+    assert(info[5] == 0x73_u8);
+    assert(info[6] == 0x31_u8);
+    assert(info[7] == 0x33_u8);
+    assert(info[8] == 0x20_u8);
+    // "c hs traffic"
+    assert(info[9]  == 0x63_u8);   // 'c'
+    assert(info[10] == 0x20_u8);   // ' '
+    assert(info[11] == 0x68_u8);   // 'h'
+    assert(info[12] == 0x73_u8);   // 's'
+    assert(info[20] == 0x69_u8);   // 'i' in "traffic"
+    assert(info[21] == 0x63_u8);   // 'c'
+    // ctx_buf length
+    assert(info[22] == 0x20_u8);
+    // first ctx_buf byte zero
+    assert(info[23] == 0x00_u8);
+    assert(info[info.len() - 1] == 0x00_u8);
+}
+
+fn encode_key_no_ctx_buf_byte_exact() {
+    // length = 16 (AES-128-GCM key), label = "tls13 key", no ctx_buf.
+    let info = encode_hkdf_label(16, LABEL_KEY.as_slice(), [].as_slice());
+    //   uint16(16)                             → 0x00 0x10
+    //   uint8(label_len = 6 + 3 = 9)           → 0x09
+    //   "tls13 key"                            → 9 bytes
+    //   uint8(ctx_buf_len = 0)                 → 0x00
+    // Total = 2 + 1 + 9 + 1 = 13 bytes.
+    assert(info.len() == 13);
+    assert(info[0] == 0x00_u8 && info[1] == 0x10_u8);
+    assert(info[2] == 0x09_u8);
+    // "tls13 key"
+    assert(info[3] == 0x74_u8 && info[4] == 0x6C_u8 && info[5] == 0x73_u8);
+    assert(info[6] == 0x31_u8 && info[7] == 0x33_u8 && info[8] == 0x20_u8);
+    assert(info[9] == 0x6B_u8 && info[10] == 0x65_u8 && info[11] == 0x79_u8);
+    // ctx_buf length = 0
+    assert(info[12] == 0x00_u8);
+}
+
+fn encode_iv_no_ctx_buf_byte_exact() {
+    // length = 12, label = "tls13 iv", no ctx_buf.
+    let info = encode_hkdf_label(12, LABEL_IV.as_slice(), [].as_slice());
+    assert(info.len() == 12);
+    assert(info[0] == 0x00_u8 && info[1] == 0x0C_u8);
+    assert(info[2] == 0x08_u8);                         // 6 + 2
+    assert(info[9]  == 0x69_u8);                        // 'i'
+    assert(info[10] == 0x76_u8);                        // 'v'
+    assert(info[11] == 0x00_u8);
+}
+
+fn encode_finished_no_ctx_buf_byte_exact() {
+    let info = encode_hkdf_label(32, LABEL_FINISHED.as_slice(), [].as_slice());
+    assert(info[2] == 0x0E_u8);                         // label_len = 6 + 8
+    // "tls13 finished"
+    assert(info[9]  == 0x66_u8);                        // 'f'
+    assert(info[16] == 0x64_u8);                        // 'd'
+    assert(info[17] == 0x00_u8);                        // ctx_buf_len = 0
+}
+
+@main
+public fn main() -> Int {
+    encode_client_hs_traffic_byte_exact();
+    encode_key_no_ctx_buf_byte_exact();
+    encode_iv_no_ctx_buf_byte_exact();
+    encode_finished_no_ctx_buf_byte_exact();
+    print("RFC 8446 §7.1 HKDF-Expand-Label encode KAT verified");
+    0
+}

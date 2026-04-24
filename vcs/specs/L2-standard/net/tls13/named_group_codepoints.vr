@@ -1,0 +1,73 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: tls13, named_group, rfc8446_4_2_7, iana
+// @timeout: 15000
+// @expected-exit: 0
+
+// RFC 8446 §4.2.7 NamedGroup IANA codepoints + supported-groups
+// filter + public-key length table.
+
+mount core.*;
+mount core.net.tls13.named_group.{NamedGroup};
+
+fn named_group_codepoints_match_iana() {
+    assert(NamedGroup.X25519.to_u16()    == 0x001D_u16);
+    assert(NamedGroup.Secp256r1.to_u16() == 0x0017_u16);
+    assert(NamedGroup.Secp384r1.to_u16() == 0x0018_u16);
+    assert(NamedGroup.Secp521r1.to_u16() == 0x0019_u16);
+    assert(NamedGroup.X448.to_u16()      == 0x001E_u16);
+    assert(NamedGroup.Ffdhe2048.to_u16() == 0x0100_u16);
+    assert(NamedGroup.Ffdhe3072.to_u16() == 0x0101_u16);
+    assert(NamedGroup.Ffdhe4096.to_u16() == 0x0102_u16);
+    assert(NamedGroup.Unknown(0xAAAA_u16).to_u16() == 0xAAAA_u16);
+}
+
+fn from_u16_roundtrips_registered_codepoints() {
+    match NamedGroup.from_u16(0x001D_u16) { NamedGroup.X25519 => {},    _ => panic("0x1D") }
+    match NamedGroup.from_u16(0x0017_u16) { NamedGroup.Secp256r1 => {}, _ => panic("0x17") }
+    match NamedGroup.from_u16(0x0018_u16) { NamedGroup.Secp384r1 => {}, _ => panic("0x18") }
+    match NamedGroup.from_u16(0x001E_u16) { NamedGroup.X448 => {},      _ => panic("0x1E") }
+    match NamedGroup.from_u16(0x0100_u16) { NamedGroup.Ffdhe2048 => {}, _ => panic("0x100") }
+    // Unknown pass-through.
+    match NamedGroup.from_u16(0x9999_u16) {
+        NamedGroup.Unknown(code) => assert(code == 0x9999_u16),
+        _ => panic("0x9999 must pass through"),
+    }
+}
+
+fn v1_supported_groups_per_spec_1_1() {
+    assert(NamedGroup.X25519.is_supported());
+    assert(NamedGroup.Secp256r1.is_supported());
+    assert(NamedGroup.Secp384r1.is_supported());
+    // v1 NOT-supported — parsed for interop but never negotiated.
+    assert(false == NamedGroup.Secp521r1.is_supported());
+    assert(false == NamedGroup.X448.is_supported());
+    assert(false == NamedGroup.Ffdhe2048.is_supported());
+    assert(false == NamedGroup.Ffdhe3072.is_supported());
+    assert(false == NamedGroup.Ffdhe4096.is_supported());
+    assert(false == NamedGroup.Unknown(0x0042_u16).is_supported());
+}
+
+fn public_key_lengths_match_curve_spec() {
+    // X25519 / X448 are compact fixed-size coordinate encodings.
+    assert(NamedGroup.X25519.public_key_len() == 32);
+    assert(NamedGroup.X448.public_key_len()   == 56);
+    // Uncompressed EC point: 0x04 || X || Y, with field sizes
+    // 32 / 48 / 66 bytes respectively.
+    assert(NamedGroup.Secp256r1.public_key_len() == 65);
+    assert(NamedGroup.Secp384r1.public_key_len() == 97);
+    assert(NamedGroup.Secp521r1.public_key_len() == 133);
+    // Unknown / FFDHE not yet sized.
+    assert(NamedGroup.Unknown(0_u16).public_key_len() == 0);
+}
+
+@main
+public fn main() -> Int {
+    named_group_codepoints_match_iana();
+    from_u16_roundtrips_registered_codepoints();
+    v1_supported_groups_per_spec_1_1();
+    public_key_lengths_match_curve_spec();
+    print("RFC 8446 §4.2.7 NamedGroup codepoint table verified");
+    0
+}

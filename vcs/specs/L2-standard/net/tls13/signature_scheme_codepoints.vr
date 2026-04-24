@@ -1,0 +1,91 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: tls13, signature_scheme, rfc8446_4_2_3, iana
+// @timeout: 15000
+// @expected-exit: 0
+
+// RFC 8446 §4.2.3 SignatureScheme u16 codepoints + §4.4.3
+// CertificateVerify eligibility filter (SHA-1 and RSA-PKCS#1-v1.5
+// MUST NOT appear in CertificateVerify).
+
+mount core.*;
+mount core.collections.List;
+mount core.net.tls13.sig_scheme.{SignatureScheme};
+
+fn iana_codepoints() {
+    assert(SignatureScheme.RsaPkcs1Sha256.to_u16()       == 0x0401_u16);
+    assert(SignatureScheme.EcdsaSecp256r1Sha256.to_u16() == 0x0403_u16);
+    assert(SignatureScheme.RsaPkcs1Sha384.to_u16()       == 0x0501_u16);
+    assert(SignatureScheme.EcdsaSecp384r1Sha384.to_u16() == 0x0503_u16);
+    assert(SignatureScheme.RsaPkcs1Sha512.to_u16()       == 0x0601_u16);
+    assert(SignatureScheme.EcdsaSecp521r1Sha512.to_u16() == 0x0603_u16);
+    assert(SignatureScheme.RsaPssRsaeSha256.to_u16()     == 0x0804_u16);
+    assert(SignatureScheme.RsaPssRsaeSha384.to_u16()     == 0x0805_u16);
+    assert(SignatureScheme.RsaPssRsaeSha512.to_u16()     == 0x0806_u16);
+    assert(SignatureScheme.Ed25519Scheme.to_u16()        == 0x0807_u16);
+    assert(SignatureScheme.Ed448Scheme.to_u16()          == 0x0808_u16);
+    assert(SignatureScheme.RsaPssPssSha256.to_u16()      == 0x0809_u16);
+    assert(SignatureScheme.RsaPssPssSha384.to_u16()      == 0x080A_u16);
+    assert(SignatureScheme.RsaPssPssSha512.to_u16()      == 0x080B_u16);
+    assert(SignatureScheme.RsaPkcs1Sha1.to_u16()         == 0x0201_u16);
+    assert(SignatureScheme.EcdsaSha1.to_u16()            == 0x0203_u16);
+}
+
+fn from_u16_roundtrip() {
+    match SignatureScheme.from_u16(0x0807_u16) {
+        SignatureScheme.Ed25519Scheme => {},
+        _ => panic("Ed25519"),
+    }
+    match SignatureScheme.from_u16(0x0403_u16) {
+        SignatureScheme.EcdsaSecp256r1Sha256 => {},
+        _ => panic("ECDSA-P256-SHA256"),
+    }
+    match SignatureScheme.from_u16(0xAAAA_u16) {
+        SignatureScheme.Unknown(v) => assert(v == 0xAAAA_u16),
+        _ => panic("grease must pass through"),
+    }
+}
+
+fn certificate_verify_excludes_legacy() {
+    // Valid in CertificateVerify (RFC 8446 §4.4.3).
+    assert(SignatureScheme.Ed25519Scheme.is_valid_for_certificate_verify());
+    assert(SignatureScheme.EcdsaSecp256r1Sha256.is_valid_for_certificate_verify());
+    assert(SignatureScheme.RsaPssRsaeSha256.is_valid_for_certificate_verify());
+    assert(SignatureScheme.RsaPssPssSha512.is_valid_for_certificate_verify());
+    // RFC 8446 §4.4.3 explicitly BANS SHA-1 and RSA-PKCS#1 v1.5 in
+    // CertificateVerify (allowed in signature_algorithms_cert only).
+    assert(false == SignatureScheme.RsaPkcs1Sha1.is_valid_for_certificate_verify());
+    assert(false == SignatureScheme.RsaPkcs1Sha256.is_valid_for_certificate_verify());
+    assert(false == SignatureScheme.RsaPkcs1Sha384.is_valid_for_certificate_verify());
+    assert(false == SignatureScheme.RsaPkcs1Sha512.is_valid_for_certificate_verify());
+    assert(false == SignatureScheme.EcdsaSha1.is_valid_for_certificate_verify());
+    // Unknown — defensive reject.
+    assert(false == SignatureScheme.Unknown(0x0042_u16).is_valid_for_certificate_verify());
+}
+
+fn default_offer_list_starts_with_ed25519() {
+    let offers = SignatureScheme.default_offer_list();
+    assert(offers.len() >= 9);
+    // Ed25519 first.
+    match &offers[0] {
+        SignatureScheme.Ed25519Scheme => {},
+        _ => panic("Ed25519 must be first in default_offer_list"),
+    }
+    // Every entry valid for CertificateVerify (no legacy RSA-PKCS#1).
+    let mut i: Int = 0;
+    while i < offers.len() {
+        assert(offers[i].is_valid_for_certificate_verify());
+        i = i + 1;
+    }
+}
+
+@main
+public fn main() -> Int {
+    iana_codepoints();
+    from_u16_roundtrip();
+    certificate_verify_excludes_legacy();
+    default_offer_list_starts_with_ed25519();
+    print("RFC 8446 §4.2.3 + §4.4.3 SignatureScheme codepoints verified");
+    0
+}

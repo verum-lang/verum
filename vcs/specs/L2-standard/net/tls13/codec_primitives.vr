@@ -1,0 +1,133 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: tls13, codec, handshake, primitive, rfc8446_3
+// @timeout: 15000
+// @expected-exit: 0
+
+// RFC 8446 §3 structural encoding primitives — put_u8/u16/u24/u32
+// big-endian serialisation + vec_u8/vec_u16/vec_u24 length-prefixed
+// writers + Reader bounds checks.
+
+mount core.*;
+mount core.collections.List;
+mount core.net.tls13.handshake.codec.{
+    Reader, CodecError,
+    put_u8, put_u16, put_u24, put_u32, put_bytes,
+    vec_u8, vec_u16,
+};
+
+fn put_u8_writes_single_byte() {
+    let mut out: List<Byte> = [];
+    put_u8(&mut out, 0xAB_u8);
+    assert(out.len() == 1);
+    assert(out[0] == 0xAB_u8);
+}
+
+fn put_u16_is_big_endian() {
+    let mut out: List<Byte> = [];
+    put_u16(&mut out, 0x1234_u16);
+    assert(out.len() == 2);
+    assert(out[0] == 0x12_u8);
+    assert(out[1] == 0x34_u8);
+}
+
+fn put_u24_is_big_endian() {
+    let mut out: List<Byte> = [];
+    put_u24(&mut out, 0x00ABCDEF_u32);
+    assert(out.len() == 3);
+    assert(out[0] == 0xAB_u8);
+    assert(out[1] == 0xCD_u8);
+    assert(out[2] == 0xEF_u8);
+}
+
+fn put_u32_is_big_endian() {
+    let mut out: List<Byte> = [];
+    put_u32(&mut out, 0xDEADBEEF_u32);
+    assert(out.len() == 4);
+    assert(out[0] == 0xDE_u8);
+    assert(out[1] == 0xAD_u8);
+    assert(out[2] == 0xBE_u8);
+    assert(out[3] == 0xEF_u8);
+}
+
+fn put_bytes_appends_slice() {
+    let src: List<Byte> = [0x01_u8, 0x02_u8, 0x03_u8];
+    let mut out: List<Byte> = [];
+    put_bytes(&mut out, src.as_slice());
+    assert(out.len() == 3);
+    assert(out[0] == 0x01_u8);
+    assert(out[2] == 0x03_u8);
+}
+
+fn vec_u8_backpatches_length() {
+    let mut out: List<Byte> = [];
+    vec_u8(&mut out, |b| {
+        put_u16(b, 0x0102_u16);
+        put_u8(b, 0xFF_u8);
+        Ok(())
+    }).unwrap();
+    assert(out.len() == 4);     // 1 length byte + 3 body bytes
+    assert(out[0] == 0x03_u8);
+    assert(out[1] == 0x01_u8);
+    assert(out[2] == 0x02_u8);
+    assert(out[3] == 0xFF_u8);
+}
+
+fn vec_u16_backpatches_length() {
+    let mut out: List<Byte> = [];
+    vec_u16(&mut out, |b| {
+        // Write 300 bytes — exercises the 2-byte length prefix path.
+        let mut i: Int = 0;
+        while i < 300 {
+            put_u8(b, (i & 0xFF_u32) as Byte);
+            i = i + 1;
+        }
+        Ok(())
+    }).unwrap();
+    assert(out.len() == 302);                 // 2 length bytes + 300 body
+    assert(out[0] == 0x01_u8);                 // length high byte
+    assert(out[1] == 0x2C_u8);                 // length low byte (300 = 0x012C)
+}
+
+fn reader_take_u8_advances_cursor() {
+    let bytes: List<Byte> = [0xAA_u8, 0xBB_u8, 0xCC_u8];
+    let mut r = Reader::new(bytes.as_slice());
+    assert(r.remaining() == 3);
+    assert(r.take_u8().unwrap() == 0xAA_u8);
+    assert(r.take_u8().unwrap() == 0xBB_u8);
+    assert(r.remaining() == 1);
+    assert(r.take_u8().unwrap() == 0xCC_u8);
+    assert(r.is_at_end());
+}
+
+fn reader_take_u16_big_endian() {
+    let bytes: List<Byte> = [0x12_u8, 0x34_u8];
+    let mut r = Reader::new(bytes.as_slice());
+    assert(r.take_u16().unwrap() == 0x1234_u16);
+}
+
+fn reader_truncated_take_returns_err() {
+    let bytes: List<Byte> = [0x01_u8];
+    let mut r = Reader::new(bytes.as_slice());
+    match r.take_u16() {
+        Err(CodecError.Truncated) => {},
+        _ => panic("take_u16 on 1-byte buffer must return Truncated"),
+    }
+}
+
+@main
+public fn main() -> Int {
+    put_u8_writes_single_byte();
+    put_u16_is_big_endian();
+    put_u24_is_big_endian();
+    put_u32_is_big_endian();
+    put_bytes_appends_slice();
+    vec_u8_backpatches_length();
+    vec_u16_backpatches_length();
+    reader_take_u8_advances_cursor();
+    reader_take_u16_big_endian();
+    reader_truncated_take_returns_err();
+    print("RFC 8446 §3 TLS handshake codec primitives verified");
+    0
+}

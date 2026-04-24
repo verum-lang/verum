@@ -1,0 +1,80 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: tls13, alert, rfc8446_6, wire_exact
+// @timeout: 15000
+// @expected-exit: 0
+
+// RFC 8446 §6 — AlertDescription codepoint table. Every named variant
+// MUST encode to the IANA-assigned u8 and the Unknown pass-through
+// carries arbitrary values.
+
+mount core.*;
+mount core.net.tls13.alert.{AlertLevel, AlertDescription, AlertRecord};
+
+fn alert_descriptions_match_rfc() {
+    assert(AlertDescription.CloseNotify.to_u8()                  == 0_u8);
+    assert(AlertDescription.UnexpectedMessage.to_u8()            == 10_u8);
+    assert(AlertDescription.BadRecordMac.to_u8()                 == 20_u8);
+    assert(AlertDescription.DecryptionFailed.to_u8()             == 21_u8);
+    assert(AlertDescription.RecordOverflow.to_u8()               == 22_u8);
+    assert(AlertDescription.HandshakeFailure.to_u8()             == 40_u8);
+    assert(AlertDescription.BadCertificate.to_u8()               == 42_u8);
+    assert(AlertDescription.UnsupportedCertificate.to_u8()       == 43_u8);
+    assert(AlertDescription.CertificateRevoked.to_u8()           == 44_u8);
+    assert(AlertDescription.CertificateExpired.to_u8()           == 45_u8);
+    assert(AlertDescription.CertificateUnknown.to_u8()           == 46_u8);
+    assert(AlertDescription.IllegalParameter.to_u8()             == 47_u8);
+    assert(AlertDescription.UnknownCa.to_u8()                    == 48_u8);
+    assert(AlertDescription.AccessDenied.to_u8()                 == 49_u8);
+    assert(AlertDescription.DecodeError.to_u8()                  == 50_u8);
+    assert(AlertDescription.DecryptError.to_u8()                 == 51_u8);
+    assert(AlertDescription.ProtocolVersion.to_u8()              == 70_u8);
+    assert(AlertDescription.InsufficientSecurity.to_u8()         == 71_u8);
+    assert(AlertDescription.InternalError.to_u8()                == 80_u8);
+    assert(AlertDescription.InappropriateFallback.to_u8()        == 86_u8);
+    assert(AlertDescription.UserCanceled.to_u8()                 == 90_u8);
+    assert(AlertDescription.MissingExtension.to_u8()             == 109_u8);
+    assert(AlertDescription.UnsupportedExtension.to_u8()         == 110_u8);
+    assert(AlertDescription.UnrecognizedName.to_u8()             == 112_u8);
+    assert(AlertDescription.BadCertificateStatusResponse.to_u8() == 113_u8);
+    assert(AlertDescription.UnknownPskIdentity.to_u8()           == 115_u8);
+    assert(AlertDescription.CertificateRequired.to_u8()          == 116_u8);
+    assert(AlertDescription.NoApplicationProtocol.to_u8()        == 120_u8);
+    // Pass-through for unknown codes.
+    assert(AlertDescription.Unknown(200_u8).to_u8()              == 200_u8);
+}
+
+fn alert_level_codepoints_match_rfc() {
+    assert(AlertLevel.Warning.to_u8() == 1_u8);
+    assert(AlertLevel.Fatal.to_u8()   == 2_u8);
+}
+
+fn alert_record_byte_exact_encode() {
+    let rec = AlertRecord {
+        level:       AlertLevel.Fatal,
+        description: AlertDescription.HandshakeFailure,
+    };
+    let bytes = rec.encode();
+    assert(bytes[0] == 2_u8);                          // Fatal
+    assert(bytes[1] == AlertDescription.HandshakeFailure.to_u8());
+}
+
+fn fatal_helper_sets_level() {
+    let rec = AlertRecord.fatal(AlertDescription.InternalError);
+    match rec.level {
+        AlertLevel.Fatal => {},
+        _ => panic("AlertRecord.fatal must produce Fatal level"),
+    }
+    assert(rec.description.to_u8() == 80_u8);
+}
+
+@main
+public fn main() -> Int {
+    alert_descriptions_match_rfc();
+    alert_level_codepoints_match_rfc();
+    alert_record_byte_exact_encode();
+    fatal_helper_sets_level();
+    print("RFC 8446 §6 alert table verified");
+    0
+}
