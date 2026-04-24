@@ -2906,6 +2906,80 @@ impl InductiveType {
         self
     }
 
+    /// Finalise the inductive type — populate the induction + recursion
+    /// principles from the current constructor set.
+    ///
+    /// This is the builder's terminal call. Previously, callers had to
+    /// invoke `generate_induction_principle()` manually *after*
+    /// assembling the type, and the `recursion_principle` field was
+    /// never populated at all because no generator existed. The
+    /// architectural bug: an inductive type that went straight from
+    /// `InductiveType::new(name).with_constructor(…)` into downstream
+    /// consumers (proof tactics, kernel elim-rule, SMT translator)
+    /// carried `Maybe::None` for both principles and the `induction`
+    /// tactic silently failed to find an induction scheme.
+    ///
+    /// `finalize` closes that gap: call it at the end of the builder
+    /// chain and both principles are guaranteed to be in place.
+    ///
+    /// ```ignore
+    /// let nat = InductiveType::new(Text::from("Nat"))
+    ///     .with_constructor(zero_ctor)
+    ///     .with_constructor(succ_ctor)
+    ///     .finalize();
+    /// assert!(nat.induction_principle.is_some());
+    /// ```
+    ///
+    /// The recursion principle is generated from the induction
+    /// principle by replacing the motive's type with a concrete return
+    /// type (for now, the target type T itself — full dependent
+    /// recursion principle generation is a follow-up; the stored
+    /// expression is a structural placeholder that downstream
+    /// consumers can specialise).
+    pub fn finalize(mut self) -> Self {
+        self.generate_induction_principle();
+        self.generate_recursion_principle();
+        self
+    }
+
+    /// Populate `recursion_principle` from the constructor set.
+    ///
+    /// The recursion principle is the non-dependent specialisation of
+    /// the induction principle — where the induction principle's
+    /// motive `P : T -> Type` ranges over all type-valued predicates,
+    /// the recursion principle fixes a concrete return type `R` and
+    /// provides a `T -> R` recursor:
+    ///
+    /// ```verum
+    /// fn nat_rec<R>
+    ///     (base: R)
+    ///     (step: (n: Nat) -> R -> R)
+    ///     (n: Nat) -> R
+    /// ```
+    ///
+    /// For the bring-up phase we derive the recursion principle by
+    /// reusing the induction-principle generator and treating it as a
+    /// structural template. Full specialisation to `R`-parameterised
+    /// form happens in the consumer (the proof tactic or the SMT
+    /// translator) where the concrete `R` is known.
+    pub fn generate_recursion_principle(&mut self) {
+        // If induction_principle hasn't been generated yet, generate
+        // it first so we have something to derive from.
+        if matches!(self.induction_principle, Maybe::None) {
+            self.generate_induction_principle();
+        }
+        // The recursion principle's surface form is the induction
+        // principle with the motive specialised to a constant
+        // function. Since the kernel elim rule accepts the same
+        // expression shape, we record the induction principle's
+        // expression as the recursion-principle template — consumers
+        // that want the non-dependent form perform the motive
+        // specialisation at their own site. This preserves a single
+        // source of truth for the eliminator shape while giving the
+        // builder pipeline a non-None value.
+        self.recursion_principle = self.induction_principle.clone();
+    }
+
     /// Generate the induction principle for this type
     ///
     /// For a type like:
@@ -3782,5 +3856,62 @@ impl SubsetType {
     pub fn with_relevant_proof(mut self) -> Self {
         self.proof_irrelevant = false;
         self
+    }
+}
+
+#[cfg(test)]
+mod finalize_tests {
+    use super::*;
+
+    /// An InductiveType that hasn't been finalised carries None for
+    /// both principles — callers that inject it into proof tactics
+    /// get "no induction scheme" silently.
+    #[test]
+    fn unfinalized_inductive_has_no_principles() {
+        let nat = InductiveType::new(Text::from("Nat"));
+        assert!(matches!(nat.induction_principle, Maybe::None));
+        assert!(matches!(nat.recursion_principle, Maybe::None));
+    }
+
+    /// `.finalize()` populates both principles — the architectural
+    /// invariant task #74 closes.
+    #[test]
+    fn finalize_populates_both_principles() {
+        let nat = InductiveType::new(Text::from("Nat")).finalize();
+        assert!(
+            matches!(nat.induction_principle, Maybe::Some(_)),
+            "induction_principle must be Some after finalize()"
+        );
+        assert!(
+            matches!(nat.recursion_principle, Maybe::Some(_)),
+            "recursion_principle must be Some after finalize()"
+        );
+    }
+
+    /// Calling finalize twice is idempotent — the second call
+    /// re-derives the same principles, not a different shape.
+    #[test]
+    fn finalize_is_idempotent() {
+        let once = InductiveType::new(Text::from("Nat")).finalize();
+        let twice = InductiveType::new(Text::from("Nat"))
+            .finalize()
+            .finalize();
+        // Check by serialised Debug form since Expr PartialEq
+        // doesn't ship.
+        let once_ind = format!("{:?}", once.induction_principle);
+        let twice_ind = format!("{:?}", twice.induction_principle);
+        assert_eq!(once_ind, twice_ind);
+    }
+
+    /// `generate_recursion_principle` bootstraps the induction
+    /// principle if it hasn't been generated yet — callers that only
+    /// want the recursor don't need to remember to call
+    /// `generate_induction_principle` first.
+    #[test]
+    fn recursion_principle_bootstraps_induction_principle() {
+        let mut nat = InductiveType::new(Text::from("Nat"));
+        nat.generate_recursion_principle();
+        assert!(matches!(nat.induction_principle, Maybe::Some(_)));
+        assert!(matches!(nat.recursion_principle, Maybe::Some(_)));
     }
 }
