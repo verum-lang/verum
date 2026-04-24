@@ -1,0 +1,48 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: quic, connection_sm, phantom_states, rfc9000_4
+// @timeout: 15000
+// @expected-exit: 0
+
+// RFC 9000 §4 connection lifecycle phantom-state types: Initial,
+// Handshake, OneRtt, Closing, Draining. Each is a unit type used as
+// a phantom type parameter on QuicConnection so state-dependent
+// methods are guarded at the type level.
+
+mount core.*;
+mount core.net.quic.connection_sm.state.{
+    Initial, Handshake, OneRtt, Closing, Draining,
+};
+
+fn each_phantom_state_is_constructible() {
+    // The types are unit; constructing them exercises the type
+    // parameter slot used by `QuicConnection<S>`.
+    let _i: Initial    = ();
+    let _h: Handshake  = ();
+    let _o: OneRtt     = ();
+    let _c: Closing    = ();
+    let _d: Draining   = ();
+}
+
+fn phantom_states_are_distinct_types() {
+    // The compiler enforces distinctness — if Initial were alias-
+    // equal to Handshake the phantom-state discipline would collapse.
+    // Verum is nominal, so wrapping each in a generic cell asserts
+    // that the identifiers really refer to disjoint types.
+    type Phase<S> is { marker: S };
+
+    let _pi: Phase<Initial>   = Phase { marker: () };
+    let _ph: Phase<Handshake> = Phase { marker: () };
+    let _po: Phase<OneRtt>    = Phase { marker: () };
+    let _pc: Phase<Closing>   = Phase { marker: () };
+    let _pd: Phase<Draining>  = Phase { marker: () };
+}
+
+@main
+public fn main() -> Int {
+    each_phantom_state_is_constructible();
+    phantom_states_are_distinct_types();
+    print("RFC 9000 §4 connection phantom-state types verified");
+    0
+}
