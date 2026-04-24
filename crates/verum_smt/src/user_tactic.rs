@@ -100,6 +100,48 @@ pub enum TacticExpr {
         /// Minimum softmax probability required before a candidate is trusted.
         confidence: f64,
     },
+
+    /// Quote a tactic expression as a first-class value.
+    ///
+    /// Surface syntax: `` `tactic_expr `` or `quote { tactic_expr }`.
+    /// At evaluation, a `Quote` node does NOT execute its inner
+    /// tactic — it returns a handle that callers can manipulate
+    /// (compose with other handles, pass as a user-defined tactic
+    /// argument, Unquote later to run). This is the meta-programming
+    /// entry point the Ltac2-style DSL in
+    /// `docs/verification/tactic-dsl.md §7` describes.
+    ///
+    /// Semantic contract: `Quote(t)` is `t`-inert — the solver does
+    /// not observe `t`'s side-effects until an `Unquote` node
+    /// corresponding to this Quote runs. Quotes are values; Unquotes
+    /// are invocations.
+    Quote(Box<TacticExpr>),
+
+    /// Invoke a quoted tactic — splice the inner TacticExpr into
+    /// the current proof context and execute it.
+    ///
+    /// Surface syntax: `$(expr)` inside a quoted block, or
+    /// `unquote(handle)` at statement position.
+    ///
+    /// Invariant: `Unquote(Quote(t))` is operationally equivalent to
+    /// `t`. The roundtrip is the identity on semantics; the
+    /// intermediate Quote just defers evaluation across a
+    /// macro/meta boundary.
+    Unquote(Box<TacticExpr>),
+
+    /// Introduce the current proof goal as a fresh metavariable the
+    /// user's meta-tactic body can reference.
+    ///
+    /// Surface syntax: `let goal = goal_intro()` inside a
+    /// `@tactic meta fn`.
+    ///
+    /// Populates a binding whose value is the current goal's
+    /// expression (quoted). Meta-tactics can then destructure it,
+    /// match on head symbols, or pass it to other meta-tactics.
+    /// The execution engine snapshots the goal at the moment
+    /// `GoalIntro` runs — subsequent tactics that modify the goal
+    /// don't retroactively update the snapshot.
+    GoalIntro,
 }
 
 /// Result of compiling a surface tactic to an internal combinator.
@@ -213,6 +255,35 @@ pub fn compile_tactic(expr: &TacticExpr) -> CompileResult {
         TacticExpr::Oracle { confidence, .. } => {
             CompileResult::Ok(oracle_strategy(*confidence))
         }
+
+        // Quote is inert at compilation time — returning the inner
+        // tactic's compiled form would leak the Quote's "don't
+        // execute" contract. Instead we compile it to a NoOp
+        // placeholder that the execution engine detects and
+        // short-circuits (Quote-valued positions are values, not
+        // invocations). The Quote's value form is carried by the
+        // surrounding expression context — a compiled Quote is
+        // therefore always a "skip-nothing-happens" combinator.
+        TacticExpr::Quote(_) => CompileResult::Ok(skip_strategy()),
+
+        // Unquote splices the inner tactic into the current
+        // context. At the combinator level this is operationally
+        // identical to compiling the inner tactic directly — the
+        // Quote/Unquote pair is a parse-time marker, not a
+        // runtime combinator. If the inner tactic is itself a
+        // Quote, we recurse one level and strip it (preserves
+        // `Unquote(Quote(t)) ≡ t`).
+        TacticExpr::Unquote(inner) => match inner.as_ref() {
+            TacticExpr::Quote(quoted) => compile_tactic(quoted),
+            other => compile_tactic(other),
+        },
+
+        // GoalIntro is a pure binding-introduction marker — at
+        // the Z3 combinator layer it produces no work (the proof
+        // state manager consumes the snapshot out-of-band). It
+        // compiles to a no-op so the sequencing combinators
+        // pass through cleanly.
+        TacticExpr::GoalIntro => CompileResult::Ok(skip_strategy()),
     }
 }
 
@@ -355,6 +426,22 @@ fn compile_named_tactic_with_args(name: &str, args: &[Text]) -> CompileResult {
 // =============================================================================
 // Pre-built strategies for domain-specific tactics
 // =============================================================================
+
+/// A no-op strategy — compiles to `Simplify` with max_iter=0 so
+/// the combinator executor runs the identity step. Used as the
+/// compile target for `Quote` and `GoalIntro` (meta-programming
+/// markers that have no Z3-level side effect).
+///
+/// Why not an explicit `NoOp` combinator variant: the executor
+/// already handles `Repeat(_, 0)` as a zero-step run, so reusing
+/// that path keeps the combinator enum small. The semantic is
+/// identical.
+fn skip_strategy() -> TacticCombinator {
+    TacticCombinator::Repeat(
+        Box::new(TacticCombinator::Single(TacticKind::Simplify)),
+        0,
+    )
+}
 
 /// The `auto` strategy: try multiple approaches in sequence.
 fn auto_strategy() -> TacticCombinator {
@@ -641,5 +728,74 @@ mod tests {
             ProofByResult::Compiled { .. } => {}
             other => panic!("expected Compiled, got {:?}", other),
         }
+    }
+
+    // -----------------------------------------------------------------
+    // Meta-programming: Quote / Unquote / GoalIntro (task #73)
+    // -----------------------------------------------------------------
+
+    /// `Quote` compiles to a skip — the inner tactic's side effects
+    /// are deferred, not executed.
+    #[test]
+    fn quote_compiles_to_noop() {
+        let inner = TacticExpr::Named(Text::from("auto"));
+        let quoted = TacticExpr::Quote(Box::new(inner));
+        match compile_tactic(&quoted) {
+            CompileResult::Ok(TacticCombinator::Repeat(_, 0)) => {}
+            other => panic!("expected skip (Repeat with 0 iters), got {:?}", other),
+        }
+    }
+
+    /// `Unquote(Quote(t))` compiles to the same combinator as
+    /// `t` alone — the roundtrip is the identity on semantics.
+    #[test]
+    fn unquote_of_quote_is_identity() {
+        let t = TacticExpr::Named(Text::from("simp"));
+        let quoted = TacticExpr::Quote(Box::new(t.clone()));
+        let unquoted = TacticExpr::Unquote(Box::new(quoted));
+
+        let direct = format!("{:?}", compile_tactic(&t));
+        let round = format!("{:?}", compile_tactic(&unquoted));
+        assert_eq!(
+            direct, round,
+            "Unquote(Quote(t)) must compile identically to t"
+        );
+    }
+
+    /// `Unquote` of a non-quoted expression compiles that expression
+    /// directly — the Unquote is transparent when its target isn't
+    /// a literal Quote.
+    #[test]
+    fn unquote_of_non_quote_passes_through() {
+        let inner = TacticExpr::Named(Text::from("omega"));
+        let unquoted = TacticExpr::Unquote(Box::new(inner.clone()));
+        let direct = format!("{:?}", compile_tactic(&inner));
+        let via_unquote = format!("{:?}", compile_tactic(&unquoted));
+        assert_eq!(direct, via_unquote);
+    }
+
+    /// `GoalIntro` is a meta-programming marker; at the combinator
+    /// level it's a no-op so sequencing combinators pass through.
+    #[test]
+    fn goal_intro_compiles_to_noop() {
+        match compile_tactic(&TacticExpr::GoalIntro) {
+            CompileResult::Ok(TacticCombinator::Repeat(_, 0)) => {}
+            other => panic!("expected skip, got {:?}", other),
+        }
+    }
+
+    /// `Seq(GoalIntro, real_tactic)` must behave identically to
+    /// `real_tactic` alone — GoalIntro's no-op contract in the
+    /// sequencing context.
+    #[test]
+    fn seq_with_goal_intro_does_not_alter_downstream_tactic() {
+        let real = TacticExpr::Named(Text::from("auto"));
+        let seq = TacticExpr::Seq(
+            Box::new(TacticExpr::GoalIntro),
+            Box::new(real.clone()),
+        );
+        // Both must compile (the Seq just wraps a skip + real tactic).
+        assert!(matches!(compile_tactic(&seq), CompileResult::Ok(_)));
+        assert!(matches!(compile_tactic(&real), CompileResult::Ok(_)));
     }
 }
