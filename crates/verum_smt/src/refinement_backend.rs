@@ -3,25 +3,26 @@
 //! Refinement types with gradual verification: types can carry predicates (Int{> 0}) verified at compile-time or runtime depending on verification level — .1 - Refinement Types with SMT
 //!
 //! This module provides a bridge implementation that delegates to verum_smt's
-//! SubsumptionChecker for all SMT operations. This avoids code duplication
-//! and ensures consistent Z3 usage across the codebase.
+//! SubsumptionChecker for all SMT operations. It implements the
+//! `verum_types::refinement::SmtBackend` trait.
+//!
+//! Historical note: this module used to live in `verum_types::smt_backend`.
+//! It was moved into `verum_smt` to break the circular dependency between
+//! `verum_smt` and `verum_types`. The public type was renamed from
+//! `Z3Backend` to `RefinementZ3Backend` to avoid colliding with the
+//! pre-existing `verum_smt::solver::Z3Backend` type.
 //!
 //! ## Architecture
 //!
 //! ```text
 //! RefinementChecker (verum_types)
-//!   ↓ (uses SmtBackend trait)
-//! Z3Backend (verum_types - this file, delegation)
+//!   ↓ (uses SmtBackend trait from verum_types::refinement)
+//! RefinementZ3Backend (verum_smt - this file, delegation)
 //!   ↓ (delegates to)
 //! SubsumptionChecker (verum_smt - full Z3 implementation)
 //!   ↓ (uses)
 //! Z3 Solver (via z3-rs with proper Context management)
 //! ```
-//!
-//! ## Performance Targets
-//! - Subsumption check: < 100ms (per spec)
-//! - Cache hit rate: > 90%
-//! - Translation overhead: < 5ms
 
 use std::sync::Arc;
 use std::time::Instant;
@@ -31,12 +32,12 @@ use verum_ast::literal::{Literal, LiteralKind};
 use verum_ast::span::Span;
 use verum_common::{Map, Text};
 
-use crate::refinement::{
+use verum_types::refinement::{
     CounterExample, RefinementError, SmtBackend, SmtResult, VerificationResult,
 };
 
-// Import SubsumptionChecker from verum_smt
-use verum_smt::{CheckMode, SubsumptionChecker, SubsumptionResult};
+// Import SubsumptionChecker from this crate
+use crate::{CheckMode, SubsumptionChecker, SubsumptionResult};
 
 /// Z3-based SMT backend for refinement verification
 ///
@@ -47,16 +48,14 @@ use verum_smt::{CheckMode, SubsumptionChecker, SubsumptionResult};
 /// - Syntactic pre-checking for common cases
 /// - Timeout handling
 /// - Performance statistics
-///
-/// Refinement types with gradual verification: types can carry predicates (Int{> 0}) verified at compile-time or runtime depending on verification level — .1
-pub struct Z3Backend {
+pub struct RefinementZ3Backend {
     /// The underlying SubsumptionChecker from verum_smt
     checker: SubsumptionChecker,
     /// Statistics tracking
     stats: Arc<parking_lot::RwLock<BackendStats>>,
 }
 
-impl Z3Backend {
+impl RefinementZ3Backend {
     /// Create a new Z3 backend with default configuration
     pub fn new() -> Self {
         Self {
@@ -68,7 +67,7 @@ impl Z3Backend {
     /// Create with custom timeout in milliseconds
     pub fn with_timeout(timeout_ms: u64) -> Self {
         Self {
-            checker: SubsumptionChecker::with_config(verum_smt::SubsumptionConfig {
+            checker: SubsumptionChecker::with_config(crate::SubsumptionConfig {
                 smt_timeout_ms: timeout_ms,
                 ..Default::default()
             }),
@@ -90,7 +89,7 @@ impl Z3Backend {
     }
 
     /// Get SubsumptionChecker statistics
-    pub fn checker_stats(&self) -> verum_smt::SubsumptionStats {
+    pub fn checker_stats(&self) -> crate::SubsumptionStats {
         self.checker.stats()
     }
 
@@ -100,22 +99,14 @@ impl Z3Backend {
     }
 }
 
-impl Default for Z3Backend {
+impl Default for RefinementZ3Backend {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl SmtBackend for Z3Backend {
+impl SmtBackend for RefinementZ3Backend {
     /// Check satisfiability of an expression
-    ///
-    /// Uses SubsumptionChecker to determine if the expression can be true.
-    /// Strategy: Check if `expr => false` is valid (via subsumption).
-    /// - If valid: expr is always false, so it's UNSAT
-    /// - If invalid: expr can be true, so it's SAT
-    /// - If unknown: cannot determine
-    ///
-    /// Refinement types with gradual verification: types can carry predicates (Int{> 0}) verified at compile-time or runtime depending on verification level — .1
     fn check(&mut self, expr: &Expr) -> Result<SmtResult, RefinementError> {
         let start = Instant::now();
 
@@ -134,11 +125,9 @@ impl SmtBackend for Z3Backend {
         let elapsed_ms = start.elapsed().as_millis() as u64;
 
         // Map SubsumptionResult to SmtResult
-        // Note: if expr => false is VALID, then expr is UNSAT (always false)
-        //        if expr => false is INVALID, then expr is SAT (can be true)
         let smt_result = match result {
-            SubsumptionResult::Syntactic(true) => SmtResult::Unsat,   // expr always false
-            SubsumptionResult::Syntactic(false) => SmtResult::Sat,    // expr can be true
+            SubsumptionResult::Syntactic(true) => SmtResult::Unsat,
+            SubsumptionResult::Syntactic(false) => SmtResult::Sat,
             SubsumptionResult::Smt { valid: true, .. } => SmtResult::Unsat,
             SubsumptionResult::Smt { valid: false, .. } => SmtResult::Sat,
             SubsumptionResult::Unknown { .. } => SmtResult::Unknown,
@@ -159,20 +148,11 @@ impl SmtBackend for Z3Backend {
     }
 
     /// Get model (satisfying assignment) for SAT result
-    ///
-    /// Note: Model extraction is handled internally by SubsumptionChecker.
-    /// For counterexamples, use verify_refinement() which returns them properly.
     fn get_model(&mut self) -> Result<Map<Text, Text>, RefinementError> {
-        // Model extraction is not directly supported through this interface.
-        // Use verify_refinement() for counterexample extraction.
         Ok(Map::new())
     }
 
     /// Verify that a refinement predicate holds for a given value
-    ///
-    /// Checks if: assumptions ∧ value ⊨ predicate
-    ///
-    /// Refinement types with gradual verification: types can carry predicates (Int{> 0}) verified at compile-time or runtime depending on verification level — .1
     fn verify_refinement(
         &mut self,
         predicate: &Expr,
@@ -210,7 +190,6 @@ impl SmtBackend for Z3Backend {
                 VerificationResult::Valid
             }
             SubsumptionResult::Syntactic(false) | SubsumptionResult::Smt { valid: false, .. } => {
-                // No counterexample available from SubsumptionChecker
                 VerificationResult::Invalid {
                     counterexample: Option::None,
                 }
@@ -293,8 +272,6 @@ impl BackendStats {
 /// 1. First tries syntactic subsumption (cheap, no SMT)
 /// 2. If inconclusive, uses Z3 to check ¬(φ1 ⇒ φ2) is UNSAT
 /// 3. Caches results for performance
-///
-/// Refinement types with gradual verification: types can carry predicates (Int{> 0}) verified at compile-time or runtime depending on verification level — .1 - Refinement Types with SMT
 pub fn check_subsumption_smt(
     phi1: &Expr,
     phi2: &Expr,

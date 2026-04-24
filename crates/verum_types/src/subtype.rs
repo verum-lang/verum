@@ -235,18 +235,18 @@ impl Subtyping {
                 }
 
                 // Tier 2: SMT solver with timeout (10-100ms)
-                // Refinement types with gradual verification: types can carry predicates (Int{> 0}) verified at compile-time or runtime depending on verification level — .1
-                use crate::smt_backend::check_subsumption_smt;
-
-                // Try SMT solver with 100ms timeout (per performance spec)
+                //
+                // Previously delegated to `crate::smt_backend::check_subsumption_smt`,
+                // which has been moved to `verum_smt::refinement_backend` to
+                // break the `verum_types ↔ verum_smt` cycle. `Subtyping` no
+                // longer has direct access to an SMT backend, so we
+                // conservative-reject when the syntactic path could not
+                // decide the relation. Callers that want SMT subsumption
+                // should go through `RefinementChecker` (which owns an
+                // injected `SmtBackend`).
+                //
                 // Refinement types with gradual verification: types can carry predicates (Int{> 0}) verified at compile-time or runtime depending on verification level — .1 line 439 requires conservative rejection
-                match check_subsumption_smt(&p1.predicate, &p2.predicate, 100) {
-                    Ok(valid) => valid,
-                    Err(_) => {
-                        // Conservative rejection on SMT timeout/failure
-                        false
-                    }
-                }
+                false
             }
 
             // Refinement erases to base: T{p} <: T
@@ -578,14 +578,14 @@ impl Subtyping {
 
                 // Refinements must be compatible
                 match (r1, r2) {
-                    (Some(pred1), Some(pred2)) => {
-                        // Use SMT solver to check pred1 => pred2
-                        // Refinement types with gradual verification: types can carry predicates (Int{> 0}) verified at compile-time or runtime depending on verification level — .1 line 439 requires conservative rejection
-                        use crate::smt_backend::check_subsumption_smt;
-                        match check_subsumption_smt(&pred1.predicate, &pred2.predicate, 100) {
-                            Ok(valid) => valid,
-                            Err(_) => false, // Conservative rejection on SMT timeout/failure
-                        }
+                    (Some(_pred1), Some(_pred2)) => {
+                        // Previously delegated to `crate::smt_backend::check_subsumption_smt`,
+                        // which has been moved to `verum_smt::refinement_backend`
+                        // to break the `verum_types ↔ verum_smt` cycle.
+                        // `Subtyping` conservative-rejects without an
+                        // injected SMT backend; callers that want SMT
+                        // subsumption should use `RefinementChecker`.
+                        false
                     }
                     (None, None) => true,
                     (Some(_), None) => true, // Stronger predicate is subtype

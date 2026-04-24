@@ -21,7 +21,11 @@ verum_common = { workspace = true }
 verum_diagnostics = { workspace = true }
 verum_error = { workspace = true }
 verum_protocol_types = { workspace = true }
-verum_smt = { workspace = true }
+# verum_smt removed 2026-04-24 — edge flipped to break circular dependency.
+# Concrete SMT-backed implementations now live in verum_smt and plug into
+# verum_types via the traits in `refinement::SmtBackend`,
+# `dependent_integration::DependentTypeChecker`, and
+# `exhaustiveness::GuardVerifier`.
 verum_modules = { workspace = true }
 dashmap = { workspace = true }
 parking_lot = { workspace = true }
@@ -41,6 +45,10 @@ tempfile = { workspace = true }
 verum_parser = { workspace = true }
 serde_json = { workspace = true }
 indexmap = { workspace = true }
+# dev-only: test the SMT bridges that moved to verum_smt. This is safe
+# because dev-dependencies are only linked for the test/bench binaries
+# and do not re-introduce the production circular dependency.
+verum_smt = { workspace = true }
 
 [[bench]]
 name = "production_targets"

@@ -4873,6 +4873,11 @@ impl<'s> CompilationPipeline<'s> {
         // but register_builtins() is idempotent and ensures core intrinsics are available.
         checker.register_builtins();
 
+        // Post-cycle-break (2026-04-24): install the SMT backend by hand.
+        checker.set_smt_backend(Box::new(
+            verum_smt::refinement_backend::RefinementZ3Backend::new(),
+        ));
+
         // Enable orphan-rule checking: without a current cog name,
         // ProtocolChecker::check_orphan_rule silently returns Ok(()).
         // Use the input file's stem as the cog identifier (stable for
@@ -5586,6 +5591,13 @@ impl<'s> CompilationPipeline<'s> {
         // but register_builtins() is idempotent and ensures core intrinsics are available.
         checker.register_builtins();
 
+        // Post-cycle-break (2026-04-24): `RefinementChecker` no longer
+        // auto-constructs a Z3 backend. Install the concrete bridge from
+        // `verum_smt` so refinement subsumption keeps working.
+        checker.set_smt_backend(Box::new(
+            verum_smt::refinement_backend::RefinementZ3Backend::new(),
+        ));
+
         // Enable lenient contexts if the module has meta functions with using clauses.
         // Meta contexts (MetaTypes, MetaRuntime, etc.) are handled at the meta evaluation
         // level, not at the runtime context level. Without lenient mode, @const blocks
@@ -5659,7 +5671,13 @@ impl<'s> CompilationPipeline<'s> {
         });
         if has_proof_items {
             debug!("Phase 3: Enabling dependent type checking (proof items detected)");
+            // Post-cycle-break (2026-04-24): `enable_dependent_types()`
+            // no longer auto-constructs a verifier. Inject the SMT-backed
+            // implementation directly from `verum_smt`.
             checker.enable_dependent_types();
+            checker.set_dependent_checker(Box::new(
+                verum_smt::dependent_backend::SmtDependentTypeChecker::new(),
+            ));
         }
 
         // Configure type checker with module registry for cross-file resolution

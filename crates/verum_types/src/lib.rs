@@ -204,7 +204,7 @@ pub mod refinement;
 pub mod refinement_diagnostics;
 pub mod refinement_evidence; // Refinement types enhancement: flow-sensitive refinement propagation, evidence tracking for verified predicates — Flow-sensitive refinement propagation
 pub mod send_sync;
-pub mod smt_backend;
+// smt_backend: moved to `verum_smt::refinement_backend` (cycle break).
 pub mod source_files; // Source file registry for span→line:col conversion
 pub mod subtype;
 pub mod termination; // Termination checking for recursive functions (Termination checking: ensuring recursive functions terminate via structural recursion on well-founded orderings — )
@@ -399,7 +399,9 @@ pub use refinement_diagnostics::{
 pub use send_sync::{
     SendSyncDerivation, register_send_sync_protocols, register_standard_send_sync_impls,
 };
-pub use smt_backend::{BackendStats, Z3Backend, check_subsumption_smt};
+// smt_backend::{BackendStats, Z3Backend, check_subsumption_smt} moved to
+// verum_smt::refinement_backend::{BackendStats, RefinementZ3Backend, check_subsumption_smt}.
+// Callers that want the full concrete SMT bridge should depend on verum_smt.
 
 // New features (where clause disambiguation, type aliases, HKTs, existential types, type-level strings)
 pub use affine::{AffineTracker, check_linear_modifier, check_resource_modifier};
@@ -477,8 +479,8 @@ pub use stage_checker::{
 pub use dependent_helpers::{DependentTypeCheckerExt, enable_dependent_types, has_dependent_types};
 pub use dependent_integration::{
     DependentTypeChecker, DependentTypeConstraint, DependentVerificationStats,
-    SmtDependentTypeChecker,
 };
+// SmtDependentTypeChecker moved to verum_smt::dependent_backend::SmtDependentTypeChecker.
 
 // Termination Checking - Termination checking: ensuring recursive functions terminate via structural recursion on well-founded orderings
 pub use termination::{TerminationChecker, TerminationError};

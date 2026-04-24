@@ -5235,7 +5235,6 @@ dependencies = [
  "verum_ast",
  "verum_common",
  "verum_error",
- "verum_smt",
 ]
 
 [[package]]
@@ -5319,6 +5318,7 @@ version = "0.1.0"
 dependencies = [
  "proptest",
  "serde",
+ "serde_json",
  "thiserror 2.0.18",
  "verum_ast",
  "verum_common",
@@ -5520,6 +5520,7 @@ dependencies = [
  "verum_common",
  "verum_error",
  "verum_protocol_types",
+ "verum_types",
  "z3",
  "z3-sys",
 ]

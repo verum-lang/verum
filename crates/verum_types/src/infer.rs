@@ -3617,10 +3617,36 @@ impl TypeChecker {
 
     /// Enable dependent type checking
     ///
-    /// Call this to enable SMT-based dependent type verification.
-    /// Creates a SmtDependentTypeChecker instance in RefinementChecker.
+    /// Historical name: used to auto-construct `SmtDependentTypeChecker` in
+    /// `RefinementChecker`. Post-cycle-break, callers must also call
+    /// `set_dependent_checker(...)` with a backend boxed from
+    /// `verum_smt::dependent_backend::SmtDependentTypeChecker` (or another
+    /// impl of `DependentTypeChecker`). Kept as a stub for backward
+    /// compatibility.
     pub fn enable_dependent_types(&mut self) {
         self.refinement.enable_dependent_types();
+    }
+
+    /// Install a concrete dependent type checker (e.g.
+    /// `verum_smt::dependent_backend::SmtDependentTypeChecker`).
+    pub fn set_dependent_checker(
+        &mut self,
+        checker: Box<dyn crate::dependent_integration::DependentTypeChecker>,
+    ) {
+        self.refinement.set_dependent_checker(checker);
+    }
+
+    /// Install a concrete SMT backend (e.g.
+    /// `verum_smt::refinement_backend::RefinementZ3Backend`).
+    ///
+    /// Needed post-cycle-break: the default `RefinementChecker::new` no
+    /// longer auto-constructs a `Z3Backend`. Call this once during type
+    /// checker setup to restore SMT-backed refinement verification.
+    pub fn set_smt_backend(
+        &mut self,
+        backend: Box<dyn crate::refinement::SmtBackend>,
+    ) {
+        self.refinement.set_smt_backend(backend);
     }
 
     /// Check if dependent type checking is enabled

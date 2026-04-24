@@ -109,10 +109,25 @@ pub mod error_conversions; // Conversions to verum_error::VerumError
 pub mod solver;
 pub mod subsumption;
 pub mod translate;
-// DISABLED: Circular dependency (verum_types -> verum_diagnostics -> verum_smt)
-// To enable: Break circular dependency by moving diagnostics out of verum_types
-// or by moving verum_smt's diagnostic usage to a separate crate
+// Enabled 2026-04-24 after the `verum_types ↔ verum_smt` cycle was broken.
+//
+// TODO(cycle-break): The legacy `type_translator.rs` file was authored
+// against a snapshot of `verum_types::ty::Type` that no longer matches
+// reality — it references removed enum variants (`Unknown`, `ExtensibleRecord`,
+// `VolatilePointer`, `DynProtocol`, `PathType`), uses `UniverseLevel::Max(u32,u32)`
+// in a way that no longer type-checks on current rustc, and references
+// `verum_types::ty::TypeKind` which does not exist. Re-enable after the
+// module is rewritten against the present `Type` shape — the cycle break
+// itself is now complete.
 // pub mod type_translator; // verum_types::Type to Z3 translation (dependent types)
+
+// Concrete implementations of traits defined in verum_types (migrated
+// from `verum_types::{smt_backend, dependent_integration, exhaustiveness::smt}`
+// as part of the cycle break).
+pub mod refinement_backend;
+pub mod dependent_backend;
+pub mod exhaustiveness_backend;
+
 pub mod verification_cache;
 pub mod verify;
 pub mod z3_backend;

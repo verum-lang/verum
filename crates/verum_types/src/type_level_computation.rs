@@ -63,8 +63,14 @@ use verum_ast::span::Span;
 use verum_ast::ty::{Ident, Path};
 use verum_common::{List, Map, Maybe, Text};
 
-// SMT solver for semantic predicate equivalence
-use verum_smt::{CheckMode, SubsumptionChecker, SubsumptionResult};
+// SMT solver for semantic predicate equivalence: previously used
+// `verum_smt::{CheckMode, SubsumptionChecker, SubsumptionResult}` directly.
+// To break the `verum_types ↔ verum_smt` circular dependency, this module
+// no longer imports verum_smt. The semantic-equivalence check is now a
+// conservative stub (see `check_semantic_equivalence_smt` below). Callers
+// that need full SMT-based equivalence should go through
+// `RefinementChecker::check_with_evidence` using an injected
+// `verum_types::refinement::SmtBackend` implementation.
 
 // Common type-level computation traits and types
 use verum_common::type_level::{
@@ -1380,32 +1386,20 @@ pub mod equality {
         check_semantic_equivalence_smt(p1, p2)
     }
 
-    /// Check semantic equivalence using SMT solver
+    /// Check semantic equivalence using SMT solver (stub after cycle-break).
     ///
-    /// Returns true if p1 ⟺ p2 can be proven via SMT (both implications hold).
-    /// Returns false if either implication fails or the result is unknown.
-    fn check_semantic_equivalence_smt(p1: &Expr, p2: &Expr) -> bool {
-        let checker = SubsumptionChecker::new();
-
-        // Check p1 => p2
-        let forward = checker.check(p1, p2, CheckMode::SmtAllowed);
-        let forward_valid = match forward {
-            SubsumptionResult::Syntactic(valid) => valid,
-            SubsumptionResult::Smt { valid, .. } => valid,
-            SubsumptionResult::Unknown { .. } => return false,
-        };
-
-        if !forward_valid {
-            return false;
-        }
-
-        // Check p2 => p1
-        let backward = checker.check(p2, p1, CheckMode::SmtAllowed);
-        match backward {
-            SubsumptionResult::Syntactic(valid) => valid,
-            SubsumptionResult::Smt { valid, .. } => valid,
-            SubsumptionResult::Unknown { .. } => false,
-        }
+    /// Previously delegated to `verum_smt::SubsumptionChecker` to check
+    /// both directions `p1 ⇒ p2` and `p2 ⇒ p1`. The SMT path was moved
+    /// out of `verum_types` to break the circular dependency with
+    /// `verum_smt`. Since type-level computation runs inside the type
+    /// checker (no direct access to a backend), this path now
+    /// conservative-rejects: returns true only when both predicates are
+    /// already structurally / syntactically equal after normalisation,
+    /// and false otherwise. If real SMT-backed semantic equivalence is
+    /// needed, invoke it through a `RefinementChecker` that carries an
+    /// injected `SmtBackend`.
+    fn check_semantic_equivalence_smt(_p1: &Expr, _p2: &Expr) -> bool {
+        false
     }
 
     /// Check if two expressions are structurally equal

@@ -956,39 +956,28 @@ pub struct RefinementChecker {
 }
 
 impl RefinementChecker {
-    /// Create a new refinement checker
+    /// Create a new refinement checker.
     ///
-    /// If SMT is enabled in config, automatically creates and wires up a Z3Backend.
+    /// Historical note: this constructor used to auto-wire an SMT backend
+    /// (`Z3Backend` from `verum_types::smt_backend`) and a dependent-type
+    /// checker (`SmtDependentTypeChecker` from
+    /// `verum_types::dependent_integration`) whenever `config.enable_smt`
+    /// was true. Both concrete implementations now live in `verum_smt` to
+    /// break the `verum_types ↔ verum_smt` circular dependency.
+    ///
+    /// Callers that want the SMT path must inject backends via
+    /// `.with_smt_backend(...)` and `.with_dependent_checker(...)` /
+    /// `.set_dependent_checker(...)`. `verum_compiler::pipeline`
+    /// does this right after constructing the checker. Without
+    /// injection, the checker falls back to syntactic checks only.
     pub fn new(config: RefinementConfig) -> Self {
-        // Automatically wire up Z3Backend if SMT is enabled
-        let smt_backend = if config.enable_smt {
-            use crate::smt_backend::Z3Backend;
-            let backend = Z3Backend::with_timeout(config.timeout_ms);
-            Maybe::Some(Arc::new(RwLock::new(
-                Box::new(backend) as Box<dyn SmtBackend>
-            )))
-        } else {
-            Maybe::None
-        };
-
-        // Auto-initialize dependent_checker when SMT is enabled
-        // Dependent types (future v2.0+): Pi types, Sigma types, equality types, universe hierarchy, dependent pattern matching, termination checking — Enable dependent type verification automatically
-        // when SMT is available, since SMT is required for verifying dependent types
-        let dependent_checker = if config.enable_smt {
-            use crate::dependent_integration::SmtDependentTypeChecker;
-            Maybe::Some(Box::new(SmtDependentTypeChecker::new())
-                as Box<dyn crate::dependent_integration::DependentTypeChecker>)
-        } else {
-            Maybe::None
-        };
-
         Self {
             config,
             stats: Arc::new(RwLock::new(VerificationStats::default())),
             error_gen: RefinementErrorGenerator::new(),
-            smt_backend,
+            smt_backend: Maybe::None,
             cache: Arc::new(RwLock::new(Map::new())),
-            dependent_checker,
+            dependent_checker: Maybe::None,
         }
     }
 
@@ -996,6 +985,11 @@ impl RefinementChecker {
     pub fn with_smt_backend(mut self, backend: Box<dyn SmtBackend>) -> Self {
         self.smt_backend = Maybe::Some(Arc::new(RwLock::new(backend)));
         self
+    }
+
+    /// Install an SMT backend after construction.
+    pub fn set_smt_backend(&mut self, backend: Box<dyn SmtBackend>) {
+        self.smt_backend = Maybe::Some(Arc::new(RwLock::new(backend)));
     }
 
     /// Check if value satisfies refinement type

@@ -57,7 +57,7 @@
 //! - Pattern exhaustiveness checking: ensuring match expressions cover all possible values
 
 mod constructors;
-mod diagnostics;
+pub mod diagnostics;
 mod matrix;
 mod ranges;
 mod usefulness;
@@ -94,8 +94,7 @@ pub use refinement::{
     extract_refinement,
 };
 pub use smt::{
-    GuardedPattern, SmtGuardConfig, SmtGuardResult, SmtGuardVerifier, SmtValue, SmtWitness,
-    analyze_guarded_match,
+    GuardedPattern, GuardVerifier, SmtGuardConfig, SmtGuardResult, SmtValue, SmtWitness,
 };
 pub use dependent::{
     DependentExhaustivenessChecker, DependentExhaustivenessConfig, DependentExhaustivenessResult,
@@ -222,11 +221,11 @@ pub fn check_exhaustiveness(
 ///
 /// This allows fine-grained control over the exhaustiveness checking process,
 /// including whether to use refinement-aware analysis and SMT verification.
-pub fn check_exhaustiveness_with_options(
+pub fn check_exhaustiveness_with_options<'a>(
     patterns: &[Pattern],
     scrutinee_ty: &Type,
     env: &TypeEnv,
-    config: &ExhaustivenessConfig,
+    config: &ExhaustivenessConfig<'a>,
 ) -> Result<ExhaustivenessResult, TypeError> {
     // Handle empty patterns - always non-exhaustive (unless scrutinee is empty type)
     if patterns.is_empty() {
@@ -265,18 +264,23 @@ pub fn check_exhaustiveness_with_options(
 
     // Try SMT guard verification for all-guarded matches
     // This can prove exhaustiveness for cases like: n < 0, n == 0, n > 0
-    if all_guarded && config.use_smt_guards {
+    //
+    // Dispatch is through a trait so verum_types does not need to link Z3.
+    // When no backend is injected, this path is skipped entirely.
+    if all_guarded && config.use_smt_guards && config.guard_verifier.is_some() {
         let guarded_patterns = extract_guarded_patterns(&matrix, scrutinee_ty);
 
         if !guarded_patterns.is_empty() {
-            let smt_config = smt::SmtGuardConfig {
+            // SmtGuardConfig is data-only; actual behaviour is picked up
+            // through the injected verifier.
+            let _smt_config = smt::SmtGuardConfig {
                 timeout_ms: config.smt_timeout_ms,
                 max_guards: guarded_patterns.len(),
                 extract_witnesses: true,
                 detect_redundancy: config.check_redundancy,
             };
 
-            let verifier = smt::SmtGuardVerifier::new(smt_config);
+            let verifier = config.guard_verifier.unwrap();
             let smt_result = verifier.verify_guards(&guarded_patterns, scrutinee_ty, env);
 
             if !smt_result.skipped {
@@ -949,8 +953,8 @@ fn check_exhaustiveness_internal(
 }
 
 /// Configuration for exhaustiveness checking
-#[derive(Debug, Clone)]
-pub struct ExhaustivenessConfig {
+#[derive(Clone)]
+pub struct ExhaustivenessConfig<'a> {
     /// Maximum number of witnesses to generate
     pub max_witnesses: usize,
 
@@ -965,14 +969,20 @@ pub struct ExhaustivenessConfig {
     pub use_refinement: bool,
 
     /// Whether to use SMT solving for guard verification
-    /// When enabled, guards like `n < 0`, `n == 0`, `n > 0` can be proven exhaustive
+    /// When enabled, guards like `n < 0`, `n == 0`, `n > 0` can be proven exhaustive.
+    /// Actual verification is dispatched to the injected `guard_verifier`.
     pub use_smt_guards: bool,
 
     /// Timeout for SMT guard verification (in milliseconds)
     pub smt_timeout_ms: u64,
+
+    /// Optional SMT-backed guard verifier. When `None`, the SMT path is
+    /// skipped regardless of `use_smt_guards`. Concrete verifiers live in
+    /// `verum_smt::exhaustiveness_backend`.
+    pub guard_verifier: Option<&'a dyn GuardVerifier>,
 }
 
-impl Default for ExhaustivenessConfig {
+impl<'a> Default for ExhaustivenessConfig<'a> {
     fn default() -> Self {
         Self {
             max_witnesses: 3,
@@ -981,12 +991,17 @@ impl Default for ExhaustivenessConfig {
             use_refinement: true,
             use_smt_guards: false, // Disabled by default due to Z3 dependency
             smt_timeout_ms: 100,
+            guard_verifier: None,
         }
     }
 }
 
-impl ExhaustivenessConfig {
-    /// Create a configuration with all advanced features enabled
+impl<'a> ExhaustivenessConfig<'a> {
+    /// Create a configuration with all advanced features enabled.
+    ///
+    /// Note: to actually use SMT guard verification, callers must also
+    /// inject a `guard_verifier` (e.g. from
+    /// `verum_smt::exhaustiveness_backend::SmtGuardVerifier`).
     pub fn full() -> Self {
         Self {
             max_witnesses: 5,
@@ -995,6 +1010,7 @@ impl ExhaustivenessConfig {
             use_refinement: true,
             use_smt_guards: true,
             smt_timeout_ms: 200,
+            guard_verifier: None,
         }
     }
 
@@ -1007,6 +1023,7 @@ impl ExhaustivenessConfig {
             use_refinement: false,
             use_smt_guards: false,
             smt_timeout_ms: 0,
+            guard_verifier: None,
         }
     }
 }

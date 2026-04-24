@@ -194,6 +194,12 @@ impl CompilationPhase for SemanticAnalysisPhase {
         // but register_builtins() is idempotent and ensures core intrinsics are available.
         phase_checker.register_builtins();
 
+        // Post-cycle-break (2026-04-24): install SMT backend here — the
+        // verum_types `RefinementChecker` no longer constructs one itself.
+        phase_checker.set_smt_backend(Box::new(
+            verum_smt::refinement_backend::RefinementZ3Backend::new(),
+        ));
+
         // Apply ALL session-level feature gates to the type checker.
         phase_checker.set_cubical_enabled(self.cubical_enabled);
         phase_checker.set_dependent_enabled(self.dependent_enabled);

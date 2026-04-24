@@ -17,7 +17,12 @@ use verum_ast::literal::Literal;
 use verum_ast::span::Span;
 use verum_common::Heap;
 use verum_types::refinement::SmtBackend;
-use verum_types::smt_backend::*;
+// `verum_types::smt_backend::*` moved to `verum_smt::refinement_backend::*`
+// (2026-04-24 cycle-break). Rename the bridge type to the legacy name so
+// this test file keeps its original assertions.
+use verum_smt::refinement_backend::{
+    BackendStats, RefinementZ3Backend as Z3Backend, check_subsumption_smt,
+};
 
 fn make_bool(b: bool) -> Expr {
     Expr::literal(Literal::bool(b, Span::dummy()))

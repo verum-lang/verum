@@ -1,8 +1,9 @@
 //! Integration layer for dependent types SMT verification
 //!
-//! This module provides the bridge between verum_types type checking and
-//! verum_smt dependent types verification. It wraps verum_smt::DependentTypeBackend
-//! to provide type checking integration without creating circular dependencies.
+//! This module defines the *interface* between verum_types type checking and
+//! an SMT-based dependent type verifier. The concrete SMT-backed
+//! implementation (`SmtDependentTypeChecker`) lives in the `verum_smt`
+//! crate (`verum_smt::dependent_backend`) to avoid a circular dependency.
 //!
 //! Dependent types (future v2.0+): Pi types, Sigma types, equality types, universe hierarchy, dependent pattern matching, termination checking — Dependent Types Extension (v2.0+)
 //!
@@ -10,40 +11,22 @@
 //!
 //! ```text
 //! TypeChecker (verum_types)
-//!   ↓ uses
-//! DependentTypeChecker (this module)
+//!   ↓ uses trait
+//! DependentTypeChecker trait (this module)
+//!   ↓ implemented by
+//! SmtDependentTypeChecker (verum_smt::dependent_backend)
 //!   ↓ delegates to
 //! verum_smt::DependentTypeBackend
 //!   ↓ uses
 //! Z3 SMT Solver
 //! ```
-//!
-//! # Key Design Decisions
-//!
-//! 1. **No Circular Dependencies**: verum_smt doesn't depend on verum_types
-//! 2. **Lazy Initialization**: SMT backend only created when needed
-//! 3. **Caching**: Results cached in RefinementChecker's cache
-//! 4. **Graceful Degradation**: Falls back to syntactic checking if SMT unavailable
 
-use std::sync::Arc;
-use std::time::Instant;
-
-use parking_lot::RwLock;
 use verum_ast::Type;
 use verum_ast::expr::Expr;
 use verum_ast::span::Span;
-use verum_common::{List, Map, Maybe, Text};
+use verum_common::{Maybe, Text};
 
-use crate::context::TypeContext;
 use crate::refinement::{RefinementError, VerificationResult};
-use crate::ty::Type as InternalType;
-
-// Import from verum_smt
-use verum_smt::translate::Translator;
-use verum_smt::{
-    Context as SmtContext, DependentTypeBackend, EqualityType, PiType, SigmaType,
-    VerificationError, VerificationResult as SmtVerificationResult,
-};
 
 // ==================== Dependent Type Checker Interface ====================
 
@@ -104,286 +87,6 @@ pub trait DependentTypeChecker: Send + Sync {
     ) -> Result<VerificationResult, RefinementError>;
 }
 
-// ==================== SMT-Based Implementation ====================
-
-/// SMT-based dependent type checker
-///
-/// Delegates to verum_smt::DependentTypeBackend for all verification.
-/// Maintains a Z3 context and translator for AST to SMT conversion.
-pub struct SmtDependentTypeChecker {
-    /// Z3 context (thread-local, managed by verum_smt)
-    smt_context: Arc<RwLock<Maybe<SmtContext>>>,
-    /// Dependent type backend
-    backend: Arc<RwLock<DependentTypeBackend>>,
-    /// Verification statistics
-    stats: Arc<RwLock<DependentVerificationStats>>,
-}
-
-impl SmtDependentTypeChecker {
-    /// Create a new SMT-based dependent type checker
-    pub fn new() -> Self {
-        Self {
-            smt_context: Arc::new(RwLock::new(Maybe::None)),
-            backend: Arc::new(RwLock::new(DependentTypeBackend::new())),
-            stats: Arc::new(RwLock::new(DependentVerificationStats::default())),
-        }
-    }
-
-    /// Get or create the SMT context (lazy initialization)
-    fn get_smt_context(&self) -> Result<SmtContext, RefinementError> {
-        let mut ctx_lock = self.smt_context.write();
-        match &*ctx_lock {
-            Maybe::Some(ctx) => Ok(ctx.clone()),
-            Maybe::None => {
-                // Create new Z3 context
-                let ctx = SmtContext::new();
-                *ctx_lock = Maybe::Some(ctx.clone());
-                Ok(ctx)
-            }
-        }
-    }
-
-    /// Convert SMT verification result to refinement verification result
-    fn convert_result(
-        &self,
-        smt_result: Result<verum_smt::verify::ProofResult, VerificationError>,
-    ) -> Result<VerificationResult, RefinementError> {
-        match smt_result {
-            Ok(_proof) => Ok(VerificationResult::Valid),
-            Err(VerificationError::CannotProve {
-                constraint,
-                counterexample,
-                ..
-            }) => {
-                // Convert counterexample if available
-                let ce = if let Some(ce_smt) = counterexample {
-                    // Extract first variable assignment as a simple counterexample
-                    let (var_name, value) = if let Some((k, v)) = ce_smt.assignments.iter().next() {
-                        (k.clone(), format!("{}", v).into())
-                    } else {
-                        ("value".into(), "unknown".into())
-                    };
-
-                    Maybe::Some(crate::refinement::CounterExample {
-                        var_name,
-                        value,
-                        explanation: Maybe::Some(ce_smt.description),
-                    })
-                } else {
-                    Maybe::None
-                };
-                Ok(VerificationResult::Invalid { counterexample: ce })
-            }
-            Err(VerificationError::Timeout { .. }) => Ok(VerificationResult::Unknown {
-                reason: "SMT solver timeout".into(),
-            }),
-            Err(VerificationError::Translation(e)) => Err(RefinementError::new(
-                format!("Translation error: {}", e).into(),
-                Span::dummy(),
-            )),
-            Err(VerificationError::SolverError(msg)) => {
-                Ok(VerificationResult::Unknown { reason: msg })
-            }
-            Err(VerificationError::Unknown(reason)) => Ok(VerificationResult::Unknown { reason }),
-        }
-    }
-
-    /// Update verification statistics
-    fn update_stats(&self, result: &VerificationResult, elapsed_ms: u64) {
-        let mut stats = self.stats.write();
-        stats.total_checks += 1;
-        stats.total_time_ms += elapsed_ms;
-
-        match result {
-            VerificationResult::Valid => stats.valid_count += 1,
-            VerificationResult::Invalid { .. } => stats.invalid_count += 1,
-            VerificationResult::Unknown { .. } => stats.unknown_count += 1,
-        }
-    }
-
-    /// Get statistics
-    pub fn stats(&self) -> DependentVerificationStats {
-        self.stats.read().clone()
-    }
-}
-
-impl Default for SmtDependentTypeChecker {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl DependentTypeChecker for SmtDependentTypeChecker {
-    fn verify_pi_type(
-        &mut self,
-        param_name: Text,
-        param_type: &Type,
-        return_type: &Type,
-        span: Span,
-    ) -> Result<VerificationResult, RefinementError> {
-        let start = Instant::now();
-
-        // Get SMT context
-        let ctx = self.get_smt_context()?;
-
-        // Create translator
-        let translator = Translator::new(&ctx);
-
-        // Create Pi type structure
-        let pi = PiType::new(param_name, param_type.clone(), return_type.clone());
-
-        // Verify using backend
-        let backend = self.backend.read();
-        let result = self.convert_result(backend.verify_pi_type(&pi, &translator))?;
-
-        // Update stats
-        let elapsed = start.elapsed().as_millis() as u64;
-        self.update_stats(&result, elapsed);
-
-        Ok(result)
-    }
-
-    fn verify_sigma_type(
-        &mut self,
-        fst_name: Text,
-        fst_type: &Type,
-        snd_type: &Type,
-        span: Span,
-    ) -> Result<VerificationResult, RefinementError> {
-        let start = Instant::now();
-
-        // Get SMT context
-        let ctx = self.get_smt_context()?;
-
-        // Create translator
-        let translator = Translator::new(&ctx);
-
-        // Create Sigma type structure
-        let sigma = SigmaType::new(fst_name, fst_type.clone(), snd_type.clone());
-
-        // Verify using backend
-        let backend = self.backend.read();
-        let result = self.convert_result(backend.verify_sigma_type(&sigma, &translator))?;
-
-        // Update stats
-        let elapsed = start.elapsed().as_millis() as u64;
-        self.update_stats(&result, elapsed);
-
-        Ok(result)
-    }
-
-    fn verify_equality(
-        &mut self,
-        value_type: &Type,
-        lhs: &Expr,
-        rhs: &Expr,
-        span: Span,
-    ) -> Result<VerificationResult, RefinementError> {
-        let start = Instant::now();
-
-        // Get SMT context
-        let ctx = self.get_smt_context()?;
-
-        // Create translator
-        let translator = Translator::new(&ctx);
-
-        // Create equality type structure
-        let eq = EqualityType::new(value_type.clone(), lhs.clone(), rhs.clone());
-
-        // Verify using backend
-        let backend = self.backend.read();
-        let result = self.convert_result(backend.verify_equality(&eq, &translator))?;
-
-        // Update stats
-        let elapsed = start.elapsed().as_millis() as u64;
-        self.update_stats(&result, elapsed);
-
-        Ok(result)
-    }
-
-    fn verify_fin_type(
-        &mut self,
-        value: &Expr,
-        bound: &Expr,
-        span: Span,
-    ) -> Result<VerificationResult, RefinementError> {
-        let start = Instant::now();
-
-        // Get SMT context
-        let ctx = self.get_smt_context()?;
-
-        // Create translator
-        let translator = Translator::new(&ctx);
-
-        // Verify using backend
-        let mut backend = self.backend.write();
-        let result = self.convert_result(backend.verify_fin_type(value, bound, &translator))?;
-
-        // Update stats
-        let elapsed = start.elapsed().as_millis() as u64;
-        self.update_stats(&result, elapsed);
-
-        Ok(result)
-    }
-}
-
-// ==================== Statistics ====================
-
-/// Statistics for dependent type verification
-#[derive(Debug, Clone, Default)]
-pub struct DependentVerificationStats {
-    /// Total verification checks
-    pub total_checks: usize,
-    /// Valid verifications
-    pub valid_count: usize,
-    /// Invalid verifications
-    pub invalid_count: usize,
-    /// Unknown results
-    pub unknown_count: usize,
-    /// Total time in milliseconds
-    pub total_time_ms: u64,
-}
-
-impl DependentVerificationStats {
-    /// Get average verification time
-    pub fn average_time_ms(&self) -> f64 {
-        if self.total_checks == 0 {
-            0.0
-        } else {
-            self.total_time_ms as f64 / self.total_checks as f64
-        }
-    }
-
-    /// Get success rate (valid + invalid vs unknown)
-    pub fn success_rate(&self) -> f64 {
-        if self.total_checks == 0 {
-            0.0
-        } else {
-            (self.valid_count + self.invalid_count) as f64 / self.total_checks as f64
-        }
-    }
-
-    /// Generate a report
-    pub fn report(&self) -> Text {
-        format!(
-            "Dependent Type Verification Statistics:\n\
-             - Total checks: {}\n\
-             - Valid: {}, Invalid: {}, Unknown: {}\n\
-             - Success rate: {:.1}%\n\
-             - Average time: {:.2}ms\n\
-             - Total time: {}ms",
-            self.total_checks,
-            self.valid_count,
-            self.invalid_count,
-            self.unknown_count,
-            self.success_rate() * 100.0,
-            self.average_time_ms(),
-            self.total_time_ms
-        )
-        .into()
-    }
-}
-
 // ==================== Integration with RefinementChecker ====================
 
 /// Extension methods for RefinementChecker to support dependent types
@@ -391,7 +94,9 @@ impl crate::refinement::RefinementChecker {
     /// Verify a dependent type constraint
     ///
     /// This is the primary integration point. Called by the type checker when
-    /// it encounters dependent types that need verification.
+    /// it encounters dependent types that need verification. Returns
+    /// `VerificationResult::Unknown` when no dependent type checker has been
+    /// injected.
     pub fn verify_dependent_type(
         &mut self,
         constraint: &DependentTypeConstraint,
@@ -429,12 +134,35 @@ impl crate::refinement::RefinementChecker {
         }
     }
 
-    /// Enable dependent type checking
+    /// Inject an SMT-backed dependent type checker.
     ///
-    /// Call this to enable SMT-based dependent type verification.
-    /// This is typically done during type checker initialization.
+    /// Call this with e.g. `verum_smt::dependent_backend::SmtDependentTypeChecker::new()`
+    /// (boxed) to enable SMT verification. When unset, `verify_dependent_type`
+    /// returns `Unknown`.
+    pub fn with_dependent_checker(mut self, checker: Box<dyn DependentTypeChecker>) -> Self {
+        self.dependent_checker = Maybe::Some(checker);
+        self
+    }
+
+    /// Install a previously-constructed dependent type checker.
+    pub fn set_dependent_checker(&mut self, checker: Box<dyn DependentTypeChecker>) {
+        self.dependent_checker = Maybe::Some(checker);
+    }
+
+    /// Enable dependent type checking (legacy no-arg API).
+    ///
+    /// This used to construct an `SmtDependentTypeChecker` automatically.
+    /// To preserve the circular-dependency-free `verum_types` crate, the
+    /// SMT-backed implementation now lives in `verum_smt`. Downstream
+    /// callers that want the full SMT integration should call
+    /// `set_dependent_checker` with a `verum_smt::dependent_backend::SmtDependentTypeChecker`
+    /// instance. Calling this method without injecting a checker is a
+    /// no-op and leaves dependent type checking disabled (returns
+    /// `Unknown`).
     pub fn enable_dependent_types(&mut self) {
-        self.dependent_checker = Maybe::Some(Box::new(SmtDependentTypeChecker::new()));
+        // Legacy signature preserved. Without an injected checker this is a
+        // no-op — callers in verum_compiler set a checker explicitly via
+        // `set_dependent_checker` right after.
     }
 
     /// Check if dependent type checking is enabled
@@ -480,13 +208,50 @@ pub enum DependentTypeConstraint {
     },
 }
 
-// ==================== Update RefinementChecker struct ====================
+/// Statistics for dependent type verification (public data-only copy; the
+/// SMT backend exports its own richer version).
+#[derive(Debug, Clone, Default)]
+pub struct DependentVerificationStats {
+    pub total_checks: usize,
+    pub valid_count: usize,
+    pub invalid_count: usize,
+    pub unknown_count: usize,
+    pub total_time_ms: u64,
+}
 
-// Note: We need to add a field to RefinementChecker to hold the dependent type checker.
-// This is done by modifying the existing struct in refinement.rs.
-// The field is added as:
-//
-// pub(crate) dependent_checker: Maybe<Box<dyn DependentTypeChecker>>,
-//
-// This is initialized to Maybe::None by default and can be enabled by calling
-// enable_dependent_types().
+impl DependentVerificationStats {
+    pub fn average_time_ms(&self) -> f64 {
+        if self.total_checks == 0 {
+            0.0
+        } else {
+            self.total_time_ms as f64 / self.total_checks as f64
+        }
+    }
+
+    pub fn success_rate(&self) -> f64 {
+        if self.total_checks == 0 {
+            0.0
+        } else {
+            (self.valid_count + self.invalid_count) as f64 / self.total_checks as f64
+        }
+    }
+
+    pub fn report(&self) -> Text {
+        format!(
+            "Dependent Type Verification Statistics:\n\
+             - Total checks: {}\n\
+             - Valid: {}, Invalid: {}, Unknown: {}\n\
+             - Success rate: {:.1}%\n\
+             - Average time: {:.2}ms\n\
+             - Total time: {}ms",
+            self.total_checks,
+            self.valid_count,
+            self.invalid_count,
+            self.unknown_count,
+            self.success_rate() * 100.0,
+            self.average_time_ms(),
+            self.total_time_ms
+        )
+        .into()
+    }
+}
