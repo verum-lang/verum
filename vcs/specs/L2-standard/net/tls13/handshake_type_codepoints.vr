@@ -1,0 +1,78 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: tls13, handshake, type_codes, rfc8446_4_1
+// @timeout: 15000
+// @expected-exit: 0
+
+// RFC 8446 §4 + RFC 8879 + RFC 9261 handshake type codepoints: each
+// message's first byte. Values intentionally sparse (e.g. 3, 6, 7,
+// 9, 10, 12, 14, 16..19, 21..23, 26..253 are unassigned/reserved).
+
+mount core.*;
+mount core.net.tls13.handshake.messages.{
+    HST_CLIENT_HELLO,
+    HST_SERVER_HELLO,
+    HST_NEW_SESSION_TICKET,
+    HST_END_OF_EARLY_DATA,
+    HST_ENCRYPTED_EXTENSIONS,
+    HST_CERTIFICATE,
+    HST_CERTIFICATE_REQUEST,
+    HST_CERTIFICATE_VERIFY,
+    HST_FINISHED,
+    HST_KEY_UPDATE,
+    HST_MESSAGE_HASH,
+};
+mount core.net.tls13.cert_compress.{HST_COMPRESSED_CERTIFICATE};
+
+fn rfc_8446_handshake_type_codes() {
+    assert(HST_CLIENT_HELLO            == 1_u8);
+    assert(HST_SERVER_HELLO            == 2_u8);
+    assert(HST_NEW_SESSION_TICKET      == 4_u8);
+    assert(HST_END_OF_EARLY_DATA       == 5_u8);
+    assert(HST_ENCRYPTED_EXTENSIONS    == 8_u8);
+    assert(HST_CERTIFICATE             == 11_u8);
+    assert(HST_CERTIFICATE_REQUEST     == 13_u8);
+    assert(HST_CERTIFICATE_VERIFY      == 15_u8);
+    assert(HST_FINISHED                == 20_u8);
+    assert(HST_KEY_UPDATE              == 24_u8);
+    // RFC 8879 §4 CompressedCertificate.
+    assert(HST_COMPRESSED_CERTIFICATE  == 25_u8);
+    // RFC 8446 §4.4.1 synthetic message_hash for the post-HRR
+    // transcript.
+    assert(HST_MESSAGE_HASH            == 254_u8);
+}
+
+fn handshake_type_codes_are_pairwise_distinct() {
+    let codes: [UInt8; 12] = [
+        HST_CLIENT_HELLO,
+        HST_SERVER_HELLO,
+        HST_NEW_SESSION_TICKET,
+        HST_END_OF_EARLY_DATA,
+        HST_ENCRYPTED_EXTENSIONS,
+        HST_CERTIFICATE,
+        HST_CERTIFICATE_REQUEST,
+        HST_CERTIFICATE_VERIFY,
+        HST_FINISHED,
+        HST_KEY_UPDATE,
+        HST_COMPRESSED_CERTIFICATE,
+        HST_MESSAGE_HASH,
+    ];
+    let mut i: Int = 0;
+    while i < 12 {
+        let mut j: Int = i + 1;
+        while j < 12 {
+            assert(codes[i] != codes[j]);
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+}
+
+@main
+public fn main() -> Int {
+    rfc_8446_handshake_type_codes();
+    handshake_type_codes_are_pairwise_distinct();
+    print("RFC 8446 §4 + RFC 8879 handshake type codepoints verified");
+    0
+}
