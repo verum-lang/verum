@@ -1,0 +1,84 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: crypto, hmac, sha256, rfc2104, rfc4231, kat
+// @timeout: 15000
+// @expected-exit: 0
+
+// RFC 4231 §4.1 test case 1 — HMAC-SHA-256:
+//   key  = 0x0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b
+//   data = "Hi There"
+//   mac  = b0344c61d8db38535ca8afceaf0bf12b881dc200c9833da726e9376c2e32cff7
+
+mount core.*;
+mount core.collections.List;
+mount core.security.mac.hmac.{hmac_sha256, hmac_sha384};
+
+fn rfc_4231_test_case_1_sha256() {
+    let key: List<Byte> = [
+        0x0B_u8, 0x0B_u8, 0x0B_u8, 0x0B_u8, 0x0B_u8, 0x0B_u8, 0x0B_u8,
+        0x0B_u8, 0x0B_u8, 0x0B_u8, 0x0B_u8, 0x0B_u8, 0x0B_u8, 0x0B_u8,
+        0x0B_u8, 0x0B_u8, 0x0B_u8, 0x0B_u8, 0x0B_u8, 0x0B_u8,
+    ];
+    let data: List<Byte> = [
+        0x48_u8, 0x69_u8, 0x20_u8, 0x54_u8, 0x68_u8, 0x65_u8, 0x72_u8, 0x65_u8,  // "Hi There"
+    ];
+    let mac = hmac_sha256(key.as_slice(), data.as_slice());
+    let expected: [Byte; 32] = [
+        0xB0_u8, 0x34_u8, 0x4C_u8, 0x61_u8, 0xD8_u8, 0xDB_u8, 0x38_u8, 0x53_u8,
+        0x5C_u8, 0xA8_u8, 0xAF_u8, 0xCE_u8, 0xAF_u8, 0x0B_u8, 0xF1_u8, 0x2B_u8,
+        0x88_u8, 0x1D_u8, 0xC2_u8, 0x00_u8, 0xC9_u8, 0x83_u8, 0x3D_u8, 0xA7_u8,
+        0x26_u8, 0xE9_u8, 0x37_u8, 0x6C_u8, 0x2E_u8, 0x32_u8, 0xCF_u8, 0xF7_u8,
+    ];
+    let mut i: Int = 0;
+    while i < 32 {
+        assert(mac[i] == expected[i]);
+        i = i + 1;
+    }
+}
+
+fn hmac_sha384_output_length_is_48() {
+    let key: List<Byte> = [0x0B_u8; 20];
+    let data: List<Byte> = [0x48_u8, 0x69_u8];
+    let mac = hmac_sha384(key.as_slice(), data.as_slice());
+    // 48-byte MAC produced.
+    let _head = mac[0];
+    let _tail = mac[47];
+}
+
+fn hmac_deterministic_on_identical_inputs() {
+    let key: List<Byte> = [0xAA_u8, 0xBB_u8];
+    let data: List<Byte> = [0xCC_u8, 0xDD_u8];
+    let m1 = hmac_sha256(key.as_slice(), data.as_slice());
+    let m2 = hmac_sha256(key.as_slice(), data.as_slice());
+    let mut i: Int = 0;
+    while i < 32 {
+        assert(m1[i] == m2[i]);
+        i = i + 1;
+    }
+}
+
+fn hmac_sensitive_to_key_flip() {
+    let k_a: List<Byte> = [0xAA_u8; 16];
+    let k_b: List<Byte> = [0xBB_u8; 16];
+    let data: List<Byte> = [0x00_u8; 16];
+    let m_a = hmac_sha256(k_a.as_slice(), data.as_slice());
+    let m_b = hmac_sha256(k_b.as_slice(), data.as_slice());
+    let mut any_diff = false;
+    let mut i: Int = 0;
+    while i < 32 {
+        if m_a[i] != m_b[i] { any_diff = true; }
+        i = i + 1;
+    }
+    assert(any_diff);
+}
+
+@main
+public fn main() -> Int {
+    rfc_4231_test_case_1_sha256();
+    hmac_sha384_output_length_is_48();
+    hmac_deterministic_on_identical_inputs();
+    hmac_sensitive_to_key_flip();
+    print("RFC 4231 HMAC-SHA-256 KAT verified");
+    0
+}

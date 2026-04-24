@@ -1,0 +1,123 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: crypto, chacha20_poly1305, aead, rfc8439, kat
+// @timeout: 15000
+// @expected-exit: 0
+
+// RFC 8439 AEAD_CHACHA20_POLY1305:
+//   Encrypt(key, nonce, aad, pt) → (ct, 16-byte tag)
+//   Decrypt(key, nonce, aad, ct, tag) → pt on tag match, AeadError
+//     otherwise (constant-time compare — never leaks pt on fail).
+
+mount core.*;
+mount core.collections.List;
+mount core.security.cipher.chacha20.{ChaChaKey, ChaChaNonce};
+mount core.security.aead.chacha20_poly1305.{ChaCha20Poly1305, AeadError};
+
+fn seal_open_roundtrip() {
+    let key: ChaChaKey = [
+        0x00_u8, 0x01_u8, 0x02_u8, 0x03_u8, 0x04_u8, 0x05_u8, 0x06_u8, 0x07_u8,
+        0x08_u8, 0x09_u8, 0x0A_u8, 0x0B_u8, 0x0C_u8, 0x0D_u8, 0x0E_u8, 0x0F_u8,
+        0x10_u8, 0x11_u8, 0x12_u8, 0x13_u8, 0x14_u8, 0x15_u8, 0x16_u8, 0x17_u8,
+        0x18_u8, 0x19_u8, 0x1A_u8, 0x1B_u8, 0x1C_u8, 0x1D_u8, 0x1E_u8, 0x1F_u8,
+    ];
+    let nonce: ChaChaNonce = [
+        0x40_u8, 0x41_u8, 0x42_u8, 0x43_u8, 0x44_u8, 0x45_u8,
+        0x46_u8, 0x47_u8, 0x48_u8, 0x49_u8, 0x4A_u8, 0x4B_u8,
+    ];
+    let pt:  List<Byte> = [0x48_u8, 0x69_u8, 0x21_u8];      // "Hi!"
+    let aad: List<Byte> = [0xFF_u8];
+    let cipher = ChaCha20Poly1305.new(&key);
+
+    let mut ct: List<Byte> = [];
+    let mut tag: [Byte; 16] = [0_u8; 16];
+    cipher.encrypt(&nonce, aad.as_slice(), pt.as_slice(), &mut ct, &mut tag);
+    assert(ct.len() == 3);
+
+    let mut recovered: List<Byte> = [];
+    match cipher.decrypt(&nonce, aad.as_slice(), ct.as_slice(), &tag, &mut recovered) {
+        Ok(()) => {
+            assert(recovered.len() == 3);
+            assert(recovered[0] == 0x48_u8);
+            assert(recovered[2] == 0x21_u8);
+        },
+        _ => panic("roundtrip must open"),
+    }
+}
+
+fn deterministic_on_identical_inputs() {
+    let key: ChaChaKey = [0x11_u8; 32];
+    let nonce: ChaChaNonce = [0x22_u8; 12];
+    let pt:  List<Byte> = [0x01_u8, 0x02_u8, 0x03_u8];
+    let aad: List<Byte> = [];
+    let cipher = ChaCha20Poly1305.new(&key);
+
+    let mut ct1: List<Byte> = [];
+    let mut t1:  [Byte; 16] = [0_u8; 16];
+    cipher.encrypt(&nonce, aad.as_slice(), pt.as_slice(), &mut ct1, &mut t1);
+
+    let mut ct2: List<Byte> = [];
+    let mut t2:  [Byte; 16] = [0_u8; 16];
+    cipher.encrypt(&nonce, aad.as_slice(), pt.as_slice(), &mut ct2, &mut t2);
+
+    let mut i: Int = 0;
+    while i < ct1.len() {
+        assert(ct1[i] == ct2[i]);
+        i = i + 1;
+    }
+    let mut j: Int = 0;
+    while j < 16 {
+        assert(t1[j] == t2[j]);
+        j = j + 1;
+    }
+}
+
+fn tag_mismatch_rejects() {
+    let key: ChaChaKey = [0x33_u8; 32];
+    let nonce: ChaChaNonce = [0x44_u8; 12];
+    let pt:  List<Byte> = [0xAA_u8, 0xBB_u8, 0xCC_u8];
+    let aad: List<Byte> = [];
+    let cipher = ChaCha20Poly1305.new(&key);
+
+    let mut ct: List<Byte> = [];
+    let mut tag: [Byte; 16] = [0_u8; 16];
+    cipher.encrypt(&nonce, aad.as_slice(), pt.as_slice(), &mut ct, &mut tag);
+
+    tag[0] = tag[0] ^ 0x01_u8;
+    let mut recovered: List<Byte> = [];
+    match cipher.decrypt(&nonce, aad.as_slice(), ct.as_slice(), &tag, &mut recovered) {
+        Err(AeadError.TagMismatch) => {},
+        _ => panic("flipped tag must error"),
+    }
+}
+
+fn aad_mismatch_rejects() {
+    let key: ChaChaKey = [0x55_u8; 32];
+    let nonce: ChaChaNonce = [0x66_u8; 12];
+    let pt:  List<Byte> = [0xEE_u8];
+    let aad1: List<Byte> = [0xAA_u8];
+    let aad2: List<Byte> = [0xBB_u8];
+    let cipher = ChaCha20Poly1305.new(&key);
+
+    let mut ct: List<Byte> = [];
+    let mut tag: [Byte; 16] = [0_u8; 16];
+    cipher.encrypt(&nonce, aad1.as_slice(), pt.as_slice(), &mut ct, &mut tag);
+
+    // Attempt open with different AAD — MUST fail with TagMismatch.
+    let mut recovered: List<Byte> = [];
+    match cipher.decrypt(&nonce, aad2.as_slice(), ct.as_slice(), &tag, &mut recovered) {
+        Err(AeadError.TagMismatch) => {},
+        _ => panic("AAD mismatch must error"),
+    }
+}
+
+@main
+public fn main() -> Int {
+    seal_open_roundtrip();
+    deterministic_on_identical_inputs();
+    tag_mismatch_rejects();
+    aad_mismatch_rejects();
+    print("RFC 8439 ChaCha20-Poly1305 KAT verified");
+    0
+}

@@ -1,0 +1,121 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: encoding, hex, base64, rfc4648
+// @timeout: 15000
+// @expected-exit: 0
+
+// RFC 4648 base16 (hex) + base64 encode/decode round-trip.
+// Both codecs expose an encode(&[Byte]) → Text and
+// decode(&Text) → Result<List<Byte>, _> surface.
+
+mount core.collections.List;
+mount core.encoding.hex.{encode as hex_encode, encode_upper as hex_encode_upper, decode as hex_decode};
+mount core.encoding.base64.{encode as b64_encode, encode_url as b64_encode_url, decode as b64_decode};
+
+fn bytes_eq(a: &[Byte], b: &[Byte]) -> Bool {
+    if a.len() != b.len() { return false; }
+    let mut i: Int = 0;
+    while i < a.len() {
+        if a[i] != b[i] { return false; }
+        i = i + 1;
+    }
+    true
+}
+
+fn hex_encode_is_lowercase() {
+    let data: List<Byte> = [0xDE_u8, 0xAD_u8, 0xBE_u8, 0xEF_u8];
+    let s = hex_encode(data.as_slice());
+    // Lowercase nibbles per RFC 4648 default.
+    assert(s == f"deadbeef");
+}
+
+fn hex_encode_upper_is_uppercase() {
+    let data: List<Byte> = [0xDE_u8, 0xAD_u8];
+    let s = hex_encode_upper(data.as_slice());
+    assert(s == f"DEAD");
+}
+
+fn hex_roundtrip() {
+    let data: List<Byte> = [
+        0x00_u8, 0x01_u8, 0x02_u8, 0x03_u8,
+        0x7F_u8, 0x80_u8, 0xFE_u8, 0xFF_u8,
+    ];
+    let s = hex_encode(data.as_slice());
+    let back = hex_decode(&s).unwrap();
+    assert(bytes_eq(back.as_slice(), data.as_slice()));
+}
+
+fn hex_decode_rejects_odd_length() {
+    // Odd-length hex is malformed per RFC 4648.
+    let bad = f"abc";
+    match hex_decode(&bad) {
+        Err(_) => {},
+        _ => panic("odd-length hex must error"),
+    }
+}
+
+fn base64_empty_input_roundtrip() {
+    let empty: List<Byte> = [];
+    let s = b64_encode(empty.as_slice());
+    assert(s == f"");
+    let back = b64_decode(&s).unwrap();
+    assert(back.len() == 0);
+}
+
+fn base64_three_byte_group_has_no_padding() {
+    // "foo" = 0x66 0x6F 0x6F → base64 = "Zm9v" (no '=' padding).
+    let foo: List<Byte> = [0x66_u8, 0x6F_u8, 0x6F_u8];
+    let s = b64_encode(foo.as_slice());
+    assert(s == f"Zm9v");
+}
+
+fn base64_two_byte_group_has_one_pad() {
+    // "fo" → "Zm8=".
+    let fo: List<Byte> = [0x66_u8, 0x6F_u8];
+    let s = b64_encode(fo.as_slice());
+    assert(s == f"Zm8=");
+}
+
+fn base64_one_byte_group_has_two_pads() {
+    // "f" → "Zg==".
+    let f: List<Byte> = [0x66_u8];
+    let s = b64_encode(f.as_slice());
+    assert(s == f"Zg==");
+}
+
+fn base64_roundtrip_random_bytes() {
+    let data: List<Byte> = [
+        0xDE_u8, 0xAD_u8, 0xBE_u8, 0xEF_u8,
+        0x00_u8, 0x01_u8, 0x02_u8, 0x03_u8,
+        0xFF_u8, 0xFE_u8,
+    ];
+    let s = b64_encode(data.as_slice());
+    let back = b64_decode(&s).unwrap();
+    assert(bytes_eq(back.as_slice(), data.as_slice()));
+}
+
+fn base64_url_differs_from_standard_on_plus_slash() {
+    // Content that would produce '+' / '/' in standard base64
+    // produces '-' / '_' in URL variant.
+    let data: List<Byte> = [0xFB_u8, 0xFF_u8, 0xBF_u8];
+    let std = b64_encode(data.as_slice());
+    let url = b64_encode_url(data.as_slice());
+    assert(std != url);
+}
+
+@main
+public fn main() -> Int {
+    hex_encode_is_lowercase();
+    hex_encode_upper_is_uppercase();
+    hex_roundtrip();
+    hex_decode_rejects_odd_length();
+    base64_empty_input_roundtrip();
+    base64_three_byte_group_has_no_padding();
+    base64_two_byte_group_has_one_pad();
+    base64_one_byte_group_has_two_pads();
+    base64_roundtrip_random_bytes();
+    base64_url_differs_from_standard_on_plus_slash();
+    print("RFC 4648 hex + base64 round-trip verified");
+    0
+}
