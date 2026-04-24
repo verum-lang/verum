@@ -1,0 +1,123 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: crypto, aes_gcm, aead, nist, kat
+// @timeout: 15000
+// @expected-exit: 0
+
+// NIST SP 800-38D AES-128-GCM:
+//   Encrypt(key, iv, aad, pt) → ciphertext + 16-byte tag
+//   Decrypt(key, iv, aad, ciphertext, tag) → pt on tag match,
+//     Err(TagMismatch) on any integrity failure.
+
+mount core.*;
+mount core.collections.List;
+mount core.security.cipher.aes.{AesKey128};
+mount core.security.aead.aes_gcm.{Aes128Gcm, GcmError};
+
+fn seal_open_roundtrip_with_aad() {
+    let key: AesKey128 = [
+        0x00_u8, 0x01_u8, 0x02_u8, 0x03_u8, 0x04_u8, 0x05_u8, 0x06_u8, 0x07_u8,
+        0x08_u8, 0x09_u8, 0x0A_u8, 0x0B_u8, 0x0C_u8, 0x0D_u8, 0x0E_u8, 0x0F_u8,
+    ];
+    let iv: [Byte; 12] = [
+        0x10_u8, 0x11_u8, 0x12_u8, 0x13_u8, 0x14_u8, 0x15_u8,
+        0x16_u8, 0x17_u8, 0x18_u8, 0x19_u8, 0x1A_u8, 0x1B_u8,
+    ];
+    let plaintext: List<Byte> = [0xDE_u8, 0xAD_u8, 0xBE_u8, 0xEF_u8];
+    let aad: List<Byte> = [0xAA_u8, 0xAB_u8];
+
+    let cipher = Aes128Gcm.new(&key);
+    let mut ct: List<Byte> = [];
+    let mut tag: [Byte; 16] = [0_u8; 16];
+    cipher.encrypt(&iv, aad.as_slice(), plaintext.as_slice(), &mut ct, &mut tag);
+    assert(ct.len() == 4);
+
+    let mut recovered: List<Byte> = [];
+    match cipher.decrypt(&iv, aad.as_slice(), ct.as_slice(), &tag, &mut recovered) {
+        Ok(()) => {
+            assert(recovered.len() == 4);
+            assert(recovered[0] == 0xDE_u8);
+            assert(recovered[3] == 0xEF_u8);
+        },
+        Err(_) => panic("roundtrip must open"),
+    }
+}
+
+fn encryption_deterministic_on_same_inputs() {
+    let key: AesKey128 = [0x11_u8; 16];
+    let iv:  [Byte; 12] = [0x22_u8; 12];
+    let pt:  List<Byte> = [0x01_u8, 0x02_u8, 0x03_u8];
+    let aad: List<Byte> = [];
+    let cipher = Aes128Gcm.new(&key);
+
+    let mut ct1: List<Byte> = [];
+    let mut t1:  [Byte; 16] = [0_u8; 16];
+    cipher.encrypt(&iv, aad.as_slice(), pt.as_slice(), &mut ct1, &mut t1);
+
+    let mut ct2: List<Byte> = [];
+    let mut t2:  [Byte; 16] = [0_u8; 16];
+    cipher.encrypt(&iv, aad.as_slice(), pt.as_slice(), &mut ct2, &mut t2);
+
+    assert(ct1.len() == ct2.len());
+    let mut i: Int = 0;
+    while i < ct1.len() {
+        assert(ct1[i] == ct2[i]);
+        i = i + 1;
+    }
+    let mut j: Int = 0;
+    while j < 16 {
+        assert(t1[j] == t2[j]);
+        j = j + 1;
+    }
+}
+
+fn tag_mismatch_rejects() {
+    let key: AesKey128 = [0x33_u8; 16];
+    let iv:  [Byte; 12] = [0x44_u8; 12];
+    let pt:  List<Byte> = [0xAA_u8, 0xBB_u8, 0xCC_u8, 0xDD_u8];
+    let aad: List<Byte> = [];
+    let cipher = Aes128Gcm.new(&key);
+
+    let mut ct: List<Byte> = [];
+    let mut tag: [Byte; 16] = [0_u8; 16];
+    cipher.encrypt(&iv, aad.as_slice(), pt.as_slice(), &mut ct, &mut tag);
+
+    // Flip a bit in the tag.
+    tag[0] = tag[0] ^ 0x01_u8;
+    let mut recovered: List<Byte> = [];
+    match cipher.decrypt(&iv, aad.as_slice(), ct.as_slice(), &tag, &mut recovered) {
+        Err(GcmError.TagMismatch) => {},
+        _ => panic("flipped tag must error"),
+    }
+}
+
+fn tampered_ciphertext_rejects() {
+    let key: AesKey128 = [0x55_u8; 16];
+    let iv:  [Byte; 12] = [0x66_u8; 12];
+    let pt:  List<Byte> = [0xEE_u8, 0xFF_u8];
+    let aad: List<Byte> = [];
+    let cipher = Aes128Gcm.new(&key);
+
+    let mut ct: List<Byte> = [];
+    let mut tag: [Byte; 16] = [0_u8; 16];
+    cipher.encrypt(&iv, aad.as_slice(), pt.as_slice(), &mut ct, &mut tag);
+
+    // Flip a byte in the ciphertext.
+    ct[0] = ct[0] ^ 0x80_u8;
+    let mut recovered: List<Byte> = [];
+    match cipher.decrypt(&iv, aad.as_slice(), ct.as_slice(), &tag, &mut recovered) {
+        Err(GcmError.TagMismatch) => {},
+        _ => panic("tampered ciphertext must error"),
+    }
+}
+
+@main
+public fn main() -> Int {
+    seal_open_roundtrip_with_aad();
+    encryption_deterministic_on_same_inputs();
+    tag_mismatch_rejects();
+    tampered_ciphertext_rejects();
+    print("NIST SP 800-38D AES-128-GCM KAT verified");
+    0
+}

@@ -1,0 +1,92 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: crypto, p256, ecdhe, nist_sp800_56a, sec_p256r1
+// @timeout: 15000
+// @expected-exit: 0
+
+// P-256 ECDHE (NIST SP 800-56A §5.7.1.2): parties compute the
+// shared secret via scalar-mult of their private key against the
+// peer's public key; the 32-byte x-coordinate is the raw shared
+// secret and MUST be fed into HKDF before use as a key.
+
+mount core.*;
+mount core.collections.List;
+mount core.security.ecc.p256.{P256, P256Error};
+
+fn ecdh_symmetry() {
+    // Both parties generate fresh keys + derive matching shared secrets.
+    let sk_a = P256.generate_private_key();
+    let sk_b = P256.generate_private_key();
+    let pk_a = P256.public_key(&sk_a).unwrap();
+    let pk_b = P256.public_key(&sk_b).unwrap();
+
+    let ss_a = P256.ecdh(&sk_a, &pk_b).unwrap();
+    let ss_b = P256.ecdh(&sk_b, &pk_a).unwrap();
+
+    let mut i: Int = 0;
+    while i < 32 {
+        assert(ss_a[i] == ss_b[i]);
+        i = i + 1;
+    }
+}
+
+fn ecdh_deterministic_on_same_inputs() {
+    let sk1 = P256.generate_private_key();
+    let sk2 = P256.generate_private_key();
+    let pk2 = P256.public_key(&sk2).unwrap();
+
+    let a = P256.ecdh(&sk1, &pk2).unwrap();
+    let b = P256.ecdh(&sk1, &pk2).unwrap();
+
+    let mut i: Int = 0;
+    while i < 32 {
+        assert(a[i] == b[i]);
+        i = i + 1;
+    }
+}
+
+fn public_key_deterministic_on_same_secret() {
+    let raw_sk: [Byte; 32] = [
+        0x01_u8, 0x02_u8, 0x03_u8, 0x04_u8, 0x05_u8, 0x06_u8, 0x07_u8, 0x08_u8,
+        0x09_u8, 0x0A_u8, 0x0B_u8, 0x0C_u8, 0x0D_u8, 0x0E_u8, 0x0F_u8, 0x10_u8,
+        0x11_u8, 0x12_u8, 0x13_u8, 0x14_u8, 0x15_u8, 0x16_u8, 0x17_u8, 0x18_u8,
+        0x19_u8, 0x1A_u8, 0x1B_u8, 0x1C_u8, 0x1D_u8, 0x1E_u8, 0x1F_u8, 0x20_u8,
+    ];
+    let sk = P256.private_key_from_bytes(&raw_sk).unwrap();
+    let pk1 = P256.public_key(&sk).unwrap();
+    let pk2 = P256.public_key(&sk).unwrap();
+    // Deterministic keygen — both ECDH derivations against a third
+    // party's pubkey yield identical shared secrets (proxy for
+    // pubkey equality).
+    let sk_third = P256.generate_private_key();
+    let pk_third = P256.public_key(&sk_third).unwrap();
+    let ss1 = P256.ecdh(&sk_third, &pk1).unwrap();
+    let ss2 = P256.ecdh(&sk_third, &pk2).unwrap();
+    let mut i: Int = 0;
+    while i < 32 {
+        assert(ss1[i] == ss2[i]);
+        i = i + 1;
+    }
+}
+
+fn ecdsa_sign_verify_roundtrip() {
+    let sk = P256.generate_private_key();
+    let pk = P256.public_key(&sk).unwrap();
+    let msg: List<Byte> = [0x68_u8, 0x69_u8];   // "hi"
+    let sig = P256.sign(&sk, msg.as_slice()).unwrap();
+    match P256.verify(&pk, msg.as_slice(), &sig) {
+        Ok(()) => {},
+        _ => panic("self-signed P-256 must verify"),
+    }
+}
+
+@main
+public fn main() -> Int {
+    ecdh_symmetry();
+    ecdh_deterministic_on_same_inputs();
+    public_key_deterministic_on_same_secret();
+    ecdsa_sign_verify_roundtrip();
+    print("P-256 ECDH + ECDSA round-trip verified");
+    0
+}
