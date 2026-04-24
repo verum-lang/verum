@@ -1,0 +1,55 @@
+// core.proof.tactics.arithmetic — decision procedures for
+// arithmetic fragments.
+//
+// Every tactic in this file dispatches to Z3 or a specialised
+// arithmetic routine and fails cleanly on goals outside its
+// fragment. Ordering in a `first { … }` block should go from
+// cheapest (omega) to most expensive (nlinarith).
+
+// Linear arithmetic over integers.
+//
+// Decides quantifier-free formulas over `Int` with `+` / `-` /
+// `<` / `<=` / `==` and integer multiplication by literal
+// constants. Fails on nonlinear terms; use `nlinarith` for
+// those.
+//
+// Complexity: polynomial in the number of constraints.
+tactic omega() { omega }
+
+// Linear arithmetic over rationals / reals.
+//
+// Same shape as `omega` but dispatches through Z3's LRA theory.
+// Accepts `Float` / `Real` operands. Fails on nonlinear terms.
+tactic linarith() { linarith }
+
+// Nonlinear arithmetic over integers / reals.
+//
+// Extends `linarith` / `omega` to handle polynomial products.
+// Slower than linear decision procedures but complete over
+// decidable nonlinear fragments. Use sparingly in hot paths —
+// `first { linarith; nlinarith }` is the standard dispatch.
+tactic nlinarith() { nlinarith }
+
+// Commutative-ring normalisation.
+//
+// Proves identities over commutative rings: `x + y == y + x`,
+// `(a + b) * c == a*c + b*c`, etc. Internally normalises both
+// sides to a canonical polynomial form and checks structural
+// equality. Faster than the Z3 nonlinear path when the goal is
+// a pure ring identity.
+tactic ring() { ring }
+
+// Field-axiom normalisation.
+//
+// Like `ring` but admits division by non-zero terms. Emits a
+// side condition `denominator != 0` for each division in the
+// goal; the proof closes only when the side conditions are
+// dischargeable.
+tactic field() { field }
+
+// Numerical literal normalisation.
+//
+// Simplifies goals whose reasoning is pure arithmetic on
+// literals — `2 + 3 == 5`, `10 * 0 == 0`, `3 < 5`. Cheapest of
+// the arithmetic tactics; a good first step before `linarith`.
+tactic norm_num() { norm_num }

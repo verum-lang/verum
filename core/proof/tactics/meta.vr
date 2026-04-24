@@ -1,0 +1,59 @@
+// core.proof.tactics.meta — tactic DSL meta-programming
+// primitives.
+//
+// The three primitives here are the meta-programming entry
+// points documented in `docs/verification/tactic-dsl.md §7`.
+// They're the surface form of `TacticExpr::Quote / Unquote /
+// GoalIntro` landed in task #73 at the compiler layer.
+//
+// The law `unquote(quote(t)) ≡ t` holds structurally — the
+// Quote/Unquote roundtrip is guaranteed to be the identity on
+// semantics. The tactic-laws simplifier strips the roundtrip
+// from any compiled tactic before it reaches the executor.
+
+// Defer evaluation of a tactic expression.
+//
+// `quote(t)` returns a handle that represents `t` without
+// running it. The handle can be passed as an argument to
+// user-defined tactics, composed with other handles, or
+// later run by `unquote`. This is the entry point for
+// tactic meta-programming — use it whenever you want to
+// manipulate tactic values as data.
+//
+// Surface syntax (planned parser extension): backtick-quote
+// `` `expr `` or block-form `quote { expr }`.
+tactic quote(body: Tactic) { quote { body } }
+
+// Invoke a quoted tactic — splice it into the current proof
+// context.
+//
+// `unquote(handle)` runs the tactic value `handle` produced
+// earlier by `quote`. The roundtrip invariant
+// `unquote(quote(t)) ≡ t` holds structurally; anything else
+// rolls back to the pre-quote state.
+//
+// Surface syntax (planned parser extension): `$(handle)` inside
+// a quoted block.
+tactic unquote(handle: Tactic) { unquote(handle) }
+
+// Introduce the current proof goal as a fresh metavariable
+// the meta-tactic body can reference.
+//
+// `goal_intro()` captures a snapshot of the current goal's
+// expression and returns a handle that meta-tactics can
+// destructure, inspect, or pass to another meta-tactic.
+// Subsequent tactics that modify the goal don't retroactively
+// update the snapshot — it's a value, not a view.
+//
+// Useful for dispatch-by-shape: `let g = goal_intro(); if g is
+// Forall(…) { intro } else { smt }`.
+tactic goal_intro() { goal_intro }
+
+// Inspect the current hypotheses list.
+//
+// `hypotheses_intro()` mirrors `goal_intro` for the hypothesis
+// list: returns a snapshot of every available hypothesis so
+// meta-tactics can iterate / filter / pick one by predicate.
+// Combined with `exact(h)` or `apply(h)`, it lets meta-tactics
+// implement custom search strategies.
+tactic hypotheses_intro() { hypotheses_intro }

@@ -1,0 +1,43 @@
+// core.proof.tactics — Verum standard tactic library.
+//
+// The standard-library tactic surface is split across seven
+// topic-specific files for navigability. Each file exports a
+// cohesive family of `tactic` declarations that users `mount`
+// into their proof scripts by name.
+//
+// Layout
+//
+// ```
+// core.proof.tactics.basic        — refl, assumption, trivial, exact
+// core.proof.tactics.arithmetic   — ring, omega, linarith, nlinarith, norm_num
+// core.proof.tactics.logical      — intro, split, left, right, auto, smt
+// core.proof.tactics.structural   — induction, destruct, case_analysis, cases
+// core.proof.tactics.rewrite      — rewrite, simp, unfold, fold, change
+// core.proof.tactics.combinators  — sequence (;), orelse (|), repeat, first, all_goals
+// core.proof.tactics.meta         — quote, unquote, goal_intro
+// ```
+//
+// Task #87's `TacticPackageRegistry` populates these entries in
+// the `Stdlib` scope at session start; user projects that
+// re-declare a name of the same shape *shadow* the stdlib
+// definition (project scope > imported-cog scope > stdlib).
+//
+// Task #86's tactic_laws describe the algebraic laws every
+// combinator in this library obeys — see
+// `core.proof.tactics.combinators` for the specific law
+// inventory.
+//
+// ## Reading order
+//
+// New users should start with `basic` + `rewrite` + `combinators`;
+// the remaining files are theory-specific and are pulled in on
+// demand. All seven mods re-export the tactics they define so a
+// `mount core.proof.tactics.*` gets the whole library.
+
+mount core.proof.tactics.basic.*;
+mount core.proof.tactics.arithmetic.*;
+mount core.proof.tactics.logical.*;
+mount core.proof.tactics.structural.*;
+mount core.proof.tactics.rewrite.*;
+mount core.proof.tactics.combinators.*;
+mount core.proof.tactics.meta.*;

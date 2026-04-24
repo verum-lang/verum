@@ -1,0 +1,84 @@
+// core.proof.tactics.rewrite — equational reasoning /
+// definitional unfolding / structural simplification.
+//
+// These tactics manipulate the goal via equality rewrites and
+// definitional expansions. They form the equational core that
+// the rest of the tactic library composes around.
+
+// Simplify the goal using the active simp set.
+//
+// Applies the compiler's normalisation pass (arithmetic
+// constant folding, boolean simplification, obvious identity
+// elimination) until no more rewrites apply. Fails only if the
+// simplifier encounters an internal error; an "already
+// normalised" goal is a no-op success.
+tactic simp() { simp }
+
+// Simplify using a specific lemma set.
+//
+// `simp_with(lemmas)` runs the simplifier restricted to the
+// given lemma list. Useful when the default simp set would
+// rewrite in the wrong direction or unfold too aggressively.
+tactic simp_with(lemmas: List<Expr>) { simp_with(lemmas) }
+
+// Rewrite the goal by a given equation.
+//
+// `rewrite(eq)` takes `eq: a == b` and replaces every
+// occurrence of `a` in the goal with `b`. Left-to-right by
+// default; use `rewrite_reverse` for the other direction.
+// Fails if `a` doesn't appear in the goal — combine with
+// `try { rewrite(…) }` when the rewrite is optional.
+tactic rewrite(eq: Expr) { rewrite(eq) }
+
+// Rewrite right-to-left.
+//
+// `rewrite_reverse(eq)` given `eq: a == b` replaces every
+// occurrence of `b` with `a`. Semantically equivalent to
+// `symm(eq); rewrite(…)` but avoids the intermediate step.
+tactic rewrite_reverse(eq: Expr) { rewrite_reverse(eq) }
+
+// Expand a definition.
+//
+// `unfold(name)` replaces every occurrence of `name` in the
+// goal with its definitional body. `name` must be a
+// `@logic`-annotated function (which marks it as eligible for
+// reflection-unfolding; see `docs/verification/refinement-
+// reflection.md`). Non-`@logic` functions are opaque to the
+// prover and cannot be unfolded.
+tactic unfold(name: Text) { unfold(name) }
+
+// Fold a definition (inverse of unfold).
+//
+// `fold(name)` replaces the definitional body of `name` with
+// the name itself — useful when the goal has been partially
+// unfolded and you want to re-wrap the remaining bits.
+tactic fold(name: Text) { fold(name) }
+
+// Replace the goal with a definitionally-equal form.
+//
+// `change(goal)` replaces the current goal with `goal` if the
+// two are definitionally equal (reducible to the same normal
+// form). Useful for cleaning up the displayed goal shape
+// before applying another tactic. Fails if the two goals
+// aren't defeq.
+tactic change(new_goal: Expr) { change(new_goal) }
+
+// Symmetry on the equality goal.
+//
+// For `a == b`, `symm` flips to `b == a`. Standard Ltac-style
+// goal-rearrangement.
+tactic symm() { symm }
+
+// Transitivity.
+//
+// For `a == c`, `trans(b)` splits into `a == b` and `b == c`.
+// The intermediate point `b` is provided by the user.
+tactic trans(mid: Expr) { trans(mid) }
+
+// Congruence on the goal's head symbol.
+//
+// For `f(x, y) == f(a, b)`, `congr` splits into `x == a` and
+// `y == b`. Applies to any reflexive head — functions, record
+// constructors, variant constructors. Fails if the two sides
+// have different heads.
+tactic congr() { congr }

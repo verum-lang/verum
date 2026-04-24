@@ -1,0 +1,86 @@
+// core.proof.tactics.logical — propositional + first-order
+// introduction / elimination tactics.
+//
+// These tactics drive the proof state by shape: an `&&` goal
+// splits, a `forall` introduces a fresh variable, a `P -> Q`
+// moves `P` into the hypothesis list. They are the Ltac-style
+// workhorses that the auto tactic composes internally.
+
+// Introduce the antecedent of an implication / universal.
+//
+// For `P -> Q`, moves `P` into the hypothesis list and leaves
+// `Q` as the new goal. For `forall x: T. P(x)`, introduces `x`
+// into the context and leaves `P(x)` as the goal. Fails on
+// goals of other shapes — combine with `destruct` when you
+// need to introduce a sum-type binder.
+tactic intro() { intro }
+
+// Introduce the antecedent + name it.
+//
+// `intro_as(name)` is the named form of `intro`: the introduced
+// hypothesis / variable is bound under `name` so later tactics
+// can cite it by name. The default `intro` gives it a
+// compiler-assigned fresh name.
+tactic intro_as(name: Text) { intro(name) }
+
+// Split a conjunction goal.
+//
+// For `P && Q`, produces two subgoals: `P` and `Q`. Each must
+// be discharged separately. The split is the logical
+// complement of `intro` — destructs on the goal side where
+// `intro` destructs on the hypothesis side.
+tactic split() { split }
+
+// Commit to the left disjunct.
+//
+// For `P || Q`, replaces the goal with `P`. Fails if `P` is
+// itself unprovable; combine with `first { left; right }` when
+// you don't know which side is true.
+tactic left() { left }
+
+// Commit to the right disjunct.
+//
+// Symmetric to `left`: for `P || Q`, replaces the goal with
+// `Q`.
+tactic right() { right }
+
+// Close the current goal by exhibiting a witness.
+//
+// For `exists x: T. P(x)`, `witness(t)` replaces the goal with
+// `P(t)`. The witness must be in scope and have type `T`; the
+// remaining goal is whatever `P` becomes under substitution.
+tactic witness(term: Expr) { witness(term) }
+
+// Generic auto-dispatch — the Ltac-auto equivalent.
+//
+// Tries, in order: `trivial` → `simp` → `intro` → `split` /
+// `left` / `right` on obvious shapes → `smt` fallback. Fails
+// only when every strategy fails. This is the workhorse tactic
+// most Verum proofs use as their default closer.
+tactic auto() { auto }
+
+// SMT fallback.
+//
+// Asks the configured SMT backend (Z3 / CVC5 / portfolio) to
+// discharge the goal. The dispatch goes through the solver
+// capability router so the actual solver is chosen per-goal's
+// theory. `smt` is the most powerful individual tactic but also
+// the slowest; reserve it for goals the other tactics can't
+// close.
+tactic smt() { smt }
+
+// Explosive logical hammer.
+//
+// `blast` is Z3's portfolio with aggressive optimisation — it
+// runs several tactics in parallel and accepts the first
+// success. Slower than `smt` on single goals but better at
+// finding a working approach on arbitrary inputs.
+tactic blast() { blast }
+
+// Proof by contradiction.
+//
+// Negates the goal and tries to derive `False`. Succeeds when
+// the negated goal has a refutation in the current context.
+// Classical-only — doesn't respect constructive settings;
+// prefer `not_intro; …` for constructive proofs.
+tactic by_contradiction() { by_contradiction }

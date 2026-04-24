@@ -1,0 +1,94 @@
+// core.proof.tactics.combinators — tacticals.
+//
+// The algebraic laws these combinators satisfy are encoded in
+// `verum_smt::tactic_laws` (task #86); see that module for the
+// full inventory. Key laws:
+//
+//   skip ; t  ≡  t            (AndThen left identity)
+//   t ; skip  ≡  t            (AndThen right identity)
+//   (t;u);v   ≡  t;(u;v)       (associativity)
+//   fail | t  ≡  t            (OrElse left identity)
+//   t | fail  ≡  t            (OrElse right identity)
+//   Repeat(t,0) ≡ skip
+//   Repeat(t,1) ≡ t
+
+// Do-nothing tactic. The identity element for sequencing.
+//
+// `skip` always succeeds without affecting the proof state.
+// Used as a placeholder in conditional constructs: `if cond
+// { smt } else { skip }` runs `smt` only when `cond` holds.
+tactic skip() { skip }
+
+// Always-failing tactic. The identity element for OrElse.
+//
+// `fail` never succeeds. Used to shortcut alternatives: `first
+// { cond_tactic | fail }` forces the user to provide a
+// successful branch.
+tactic fail() { fail }
+
+// Sequencing combinator — run `a`, then `b` on every subgoal
+// `a` produced.
+//
+// Surface syntax: `a ; b`. Represented here as a named tactic
+// for programmatic use. Associativity lets `(a ; b) ; c` and
+// `a ; (b ; c)` be used interchangeably; the simplifier
+// canonicalises to right-association for dedup.
+tactic seq(first: Tactic, then: Tactic) { first; then }
+
+// Alternative — try `a`; if it fails, try `b`.
+//
+// Surface syntax: `a | b`. The two alternatives are tried in
+// order; the first success wins. Fails only when both fail.
+// Associativity lets `(a | b) | c` and `a | (b | c)` be used
+// interchangeably.
+tactic orelse(primary: Tactic, fallback: Tactic) {
+    try { primary } else { fallback }
+}
+
+// Repeat until fixpoint or bound.
+//
+// `repeat(n, t)` runs `t` up to `n` times, stopping when `t`
+// fails or the goal stops changing. `repeat(0, t)` is
+// equivalent to `skip`; `repeat(1, t)` is equivalent to `t`
+// — the tactic-laws simplifier strips both boilerplate cases.
+tactic repeat_n(count: Int, body: Tactic) {
+    repeat(count) { body }
+}
+
+// Unbounded repeat — runs until fixpoint.
+//
+// The unbounded form is safer than it looks: the proof state
+// manager's goal-unchanged detector ensures termination — any
+// tactic that makes no progress halts the loop.
+tactic repeat_until_done(body: Tactic) { repeat { body } }
+
+// Pick the first successful alternative from a list.
+//
+// `first { t1; t2; t3 }` runs each `ti` in order and keeps the
+// first success. Equivalent to nested `orelse` but reads
+// better at three+ alternatives.
+tactic first_of(alternatives: List<Tactic>) { first(alternatives) }
+
+// Apply a tactic to every remaining goal in parallel.
+//
+// After a branching tactic (e.g. `split`, `destruct`), the
+// proof state has multiple goals. `all_goals(t)` runs `t` on
+// each of them independently. Fails if `t` fails on any goal.
+tactic all_goals(body: Tactic) { all_goals { body } }
+
+// Focus on a specific subgoal by index.
+//
+// `focus(i, t)` restricts the proof state to the i-th goal
+// and runs `t` on that alone. The other goals are preserved
+// for later. Useful for surgical intervention on a single
+// subgoal without affecting the rest.
+tactic focus(index: Int, body: Tactic) {
+    focus(index) { body }
+}
+
+// Try a tactic; on failure, silently continue.
+//
+// `try { t }` is the "best-effort" combinator: it runs `t`, but
+// if `t` fails, the proof state is unchanged and `try` still
+// succeeds. Equivalent to `t | skip`.
+tactic try_tactic(body: Tactic) { try { body } }

@@ -1,0 +1,46 @@
+// core.proof.tactics.basic — elementary single-step tactics.
+//
+// These tactics close trivial obligations without invoking the
+// SMT backend — they're the cheapest step in the dispatch ladder
+// and should be tried first. Every tactic here is pure structural
+// (no model lookup) and fails cheaply when inapplicable so
+// `first { refl | auto | smt }`-style combinators stay fast.
+
+// Prove `x == x` by syntactic reflexivity.
+//
+// Accepts any expression whose head is a reflexive relation:
+// `==` (Eq), `<=` / `>=` when the two sides are the same term,
+// `Path<A>(a, a)` in cubical mode. Fails if the two sides differ
+// syntactically — `refl` does NOT call the simplifier; combine
+// with `simp; refl` when normalisation is required first.
+tactic refl() { refl }
+
+// Close the current goal by citing a hypothesis whose type
+// matches the goal.
+//
+// Searches the local hypothesis list in reverse declaration
+// order (most-recent first) and applies the first match. Fails
+// if no hypothesis has the goal's type — unlike `exact(h)`, this
+// is a zero-argument tactic that finds the hypothesis for you.
+tactic assumption() { assumption }
+
+// Close the current goal if it reduces to `True` (syntactic
+// unit), `0 == 0`, or an already-assumed literal. Trivial's
+// dispatch is: `refl` → `assumption` → `simplify-check`.
+tactic trivial() { first { refl; assumption; simp } }
+
+// Close the current goal by citing an exact proof term.
+//
+// `exact(t)` takes a fully-elaborated term `t` whose type matches
+// the goal. The kernel checks the match structurally — mismatched
+// types fail. Use `exact` when you know the precise proof and
+// don't want the auto-search to find it.
+tactic exact(term: Expr) { exact(term) }
+
+// Close the goal by citing an axiom-registered fact.
+//
+// `by_axiom(name)` looks up `name` in the current
+// `AxiomRegistry` and applies it. Fails if the name isn't
+// registered. The axiom's framework attribution rides along so
+// `verum audit --framework-axioms` shows this use site.
+tactic by_axiom(name: Text) { by_axiom(name) }
