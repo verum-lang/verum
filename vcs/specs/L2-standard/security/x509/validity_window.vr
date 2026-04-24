@@ -1,0 +1,77 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: x509, validity, time, rfc5280_4_1_2_5
+// @timeout: 15000
+// @expected-exit: 0
+
+// RFC 5280 §4.1.2.5 Validity: two time points `not_before` /
+// `not_after`. The invariant is `not_before ≤ not_after`. Time
+// comparisons use time_cmp / time_eq / time_lt / time_le / time_gt
+// / time_ge helpers defined in security/x509/time.vr.
+
+mount core.*;
+mount core.encoding.der.{Time};
+mount core.security.x509.time.{
+    Validity,
+    time_cmp, time_eq, time_lt, time_le, time_gt, time_ge,
+    time_to_unix, is_in_past, is_in_future,
+};
+
+fn make_time(year: UInt32, month: UInt8, day: UInt8) -> Time {
+    Time {
+        year: year, month: month, day: day,
+        hour: 0_u8, minute: 0_u8, second: 0_u8,
+    }
+}
+
+fn time_cmp_orders_chronologically() {
+    let a = make_time(2024_u32, 1_u8, 1_u8);
+    let b = make_time(2025_u32, 1_u8, 1_u8);
+    assert(time_cmp(&a, &b) < 0);
+    assert(time_cmp(&b, &a) > 0);
+    assert(time_cmp(&a, &a) == 0);
+}
+
+fn time_helpers_consistent() {
+    let a = make_time(2024_u32, 1_u8, 1_u8);
+    let b = make_time(2025_u32, 1_u8, 1_u8);
+    assert(time_eq(&a, &a));
+    assert(false == time_eq(&a, &b));
+    assert(time_lt(&a, &b));
+    assert(time_le(&a, &a));
+    assert(time_gt(&b, &a));
+    assert(time_ge(&a, &a));
+}
+
+fn validity_struct_carries_both_endpoints() {
+    let v = Validity {
+        not_before: make_time(2024_u32, 1_u8, 1_u8),
+        not_after:  make_time(2026_u32, 1_u8, 1_u8),
+    };
+    assert(time_le(&v.not_before, &v.not_after));
+}
+
+fn time_is_in_past_and_future() {
+    let january_2024 = make_time(2024_u32, 1_u8, 1_u8);
+    let unix = time_to_unix(&january_2024);
+    // 2024-01-01 UTC ≈ Unix 1704067200.
+    assert(unix > 1_700_000_000_i64);
+    assert(unix < 1_800_000_000_i64);
+
+    // From the perspective of a later time (2026-01-01 ≈ Unix 1767225600),
+    // the 2024 point is in the past.
+    assert(is_in_past(&january_2024, 1_767_225_600_i64));
+    // From the perspective of an earlier time (2022-01-01), 2024 is future.
+    assert(is_in_future(&january_2024, 1_640_995_200_i64));
+}
+
+@main
+public fn main() -> Int {
+    time_cmp_orders_chronologically();
+    time_helpers_consistent();
+    validity_struct_carries_both_endpoints();
+    time_is_in_past_and_future();
+    print("RFC 5280 §4.1.2.5 Validity + Time helpers verified");
+    0
+}

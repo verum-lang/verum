@@ -1,0 +1,69 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: x509, eku, ext_key_usage, rfc5280_4_2_1_12
+// @timeout: 15000
+// @expected-exit: 0
+
+// RFC 5280 §4.2.1.12 ExtKeyUsage — per-purpose OIDs. The
+// AnyPurpose value opts out of purpose restrictions entirely.
+
+mount core.*;
+mount core.collections.List;
+mount core.security.x509.ext.ext_key_usage.{
+    ExtKeyUsagePurpose, ExtKeyUsage,
+};
+
+fn server_auth_present_allows_server_auth() {
+    let eku = ExtKeyUsage {
+        purposes: [ExtKeyUsagePurpose.ServerAuth, ExtKeyUsagePurpose.ClientAuth],
+    };
+    assert(eku.allows_server_auth());
+    assert(eku.allows_client_auth());
+}
+
+fn only_client_auth_disallows_server_auth() {
+    let eku = ExtKeyUsage {
+        purposes: [ExtKeyUsagePurpose.ClientAuth],
+    };
+    assert(false == eku.allows_server_auth());
+    assert(eku.allows_client_auth());
+}
+
+fn any_purpose_allows_all() {
+    let eku = ExtKeyUsage {
+        purposes: [ExtKeyUsagePurpose.AnyPurpose],
+    };
+    assert(eku.allows_server_auth());
+    assert(eku.allows_client_auth());
+}
+
+fn empty_eku_allows_nothing() {
+    let eku = ExtKeyUsage { purposes: [] };
+    assert(false == eku.allows_server_auth());
+    assert(false == eku.allows_client_auth());
+}
+
+fn non_webpki_purposes_dont_grant_webpki() {
+    let eku = ExtKeyUsage {
+        purposes: [
+            ExtKeyUsagePurpose.CodeSigning,
+            ExtKeyUsagePurpose.EmailProtection,
+            ExtKeyUsagePurpose.TimeStamping,
+            ExtKeyUsagePurpose.OcspSigning,
+        ],
+    };
+    assert(false == eku.allows_server_auth());
+    assert(false == eku.allows_client_auth());
+}
+
+@main
+public fn main() -> Int {
+    server_auth_present_allows_server_auth();
+    only_client_auth_disallows_server_auth();
+    any_purpose_allows_all();
+    empty_eku_allows_nothing();
+    non_webpki_purposes_dont_grant_webpki();
+    print("RFC 5280 §4.2.1.12 ExtKeyUsage verified");
+    0
+}

@@ -1,0 +1,76 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: x509, name_constraints, rfc5280_4_2_1_10
+// @timeout: 15000
+// @expected-exit: 0
+
+// RFC 5280 §4.2.1.10 NameConstraints: permitted + excluded subtrees.
+// permits_dns(host) returns true iff:
+//   * host ∉ any excluded DNS subtree, AND
+//   * either no permitted DNS entry exists, or host ∈ at least one.
+
+mount core.*;
+mount core.collections.List;
+mount core.security.x509.ext.name_constraints.{
+    NameConstraints, GeneralSubtree,
+};
+mount core.security.x509.ext.subject_alt_name.{GeneralName};
+
+fn empty_constraints_permit_all() {
+    let nc = NameConstraints.empty();
+    assert(nc.permits_dns(&f"example.com"));
+    assert(nc.permits_dns(&f"any.other.test"));
+}
+
+fn permitted_only_grants_that_subtree() {
+    let nc = NameConstraints {
+        permitted: [
+            GeneralSubtree { base: GeneralName.DnsName(f"example.com") },
+        ],
+        excluded: [],
+    };
+    assert(nc.permits_dns(&f"example.com"));
+    assert(nc.permits_dns(&f"www.example.com"));      // sub-domain within subtree
+    assert(false == nc.permits_dns(&f"evil.test"));
+}
+
+fn excluded_overrides_permitted() {
+    let nc = NameConstraints {
+        permitted: [
+            GeneralSubtree { base: GeneralName.DnsName(f"example.com") },
+        ],
+        excluded: [
+            GeneralSubtree { base: GeneralName.DnsName(f"bad.example.com") },
+        ],
+    };
+    assert(nc.permits_dns(&f"good.example.com"));
+    // Excluded subtree beats permitted.
+    assert(false == nc.permits_dns(&f"bad.example.com"));
+    assert(false == nc.permits_dns(&f"sub.bad.example.com"));
+}
+
+fn non_dns_permitted_does_not_restrict_dns() {
+    // RFC 5280 §4.2.1.10 last paragraph: a permitted constraint of a
+    // different name type (IP, email, etc.) does NOT restrict dNSName
+    // matching — the host is accepted.
+    let nc = NameConstraints {
+        permitted: [
+            GeneralSubtree {
+                base: GeneralName.Rfc822Name(f"user@example.com"),
+            },
+        ],
+        excluded: [],
+    };
+    assert(nc.permits_dns(&f"anything.test"));
+}
+
+@main
+public fn main() -> Int {
+    empty_constraints_permit_all();
+    permitted_only_grants_that_subtree();
+    excluded_overrides_permitted();
+    non_dns_permitted_does_not_restrict_dns();
+    print("RFC 5280 §4.2.1.10 NameConstraints verified");
+    0
+}
