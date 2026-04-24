@@ -1,0 +1,54 @@
+// =============================================================================
+// deserialize/image.vr — DbImage
+// =============================================================================
+// Spec: SQLite C API
+// =============================================================================
+
+module core.database.sqlite.native.deserialize.image;
+
+mount core.*;
+mount base.{Bool};
+mount collections.List;
+
+public type DbImage is {
+    bytes: List<Byte>,
+    page_size: Int,
+    /// Convenience: bytes.len() / page_size.
+    page_count: Int,
+}
+
+public fn db_image(bytes: List<Byte>, page_size: Int) -> DbImage {
+    let page_count = if page_size > 0 { bytes.len() / page_size } else { 0 };
+    DbImage { bytes: bytes, page_size: page_size, page_count: page_count }
+}
+
+implement DbImage {
+    pub fn byte_count(&self) -> Int { self.bytes.len() }
+
+    pub fn is_empty(&self) -> Bool { self.bytes.len() == 0 }
+
+    /// Read one page (1-based index — SQLite convention).
+    pub fn read_page(&self, page_no: Int) -> List<Byte> {
+        let mut out: List<Byte> = List.new();
+        if page_no < 1 || page_no > self.page_count { return out; }
+        let off = (page_no - 1) * self.page_size;
+        let end = off + self.page_size;
+        let mut i: Int = off;
+        while i < end && i < self.bytes.len() {
+            out.push(self.bytes[i]);
+            i = i + 1;
+        }
+        out
+    }
+
+    /// Append a page (used when re-serialising). Caller is responsible
+    /// for keeping `page_count` in sync.
+    pub fn append_page(&mut self, page_bytes: List<Byte>) {
+        let mut i: Int = 0;
+        while i < page_bytes.len() {
+            self.bytes.push(page_bytes[i]);
+            i = i + 1;
+        }
+        self.page_count = self.page_count + 1;
+    }
+}

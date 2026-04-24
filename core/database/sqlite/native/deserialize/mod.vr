@@ -1,0 +1,22 @@
+// =============================================================================
+// core/database/sqlite/native/deserialize/mod.vr
+// =============================================================================
+// Layer: 7 (façade — sqlite3_serialize / sqlite3_deserialize)
+// Spec: SQLite C API (3.36+)
+//
+// `sqlite3_serialize(db, schema, *psize, flags)` returns a byte
+// buffer that holds the entire SQLite database file image — either
+// for archival or for immediate in-memory exchange via
+// `sqlite3_deserialize`.
+//
+// Submodules:
+//   * `image`    — DbImage (bytes + page_size + page_count)
+//   * `flags`    — DeserializeFlag bit set (FREEONCLOSE/READONLY/RESIZEABLE)
+//   * `engine`   — Serialise + Deserialise pure-Verum drivers
+// =============================================================================
+
+module core.database.sqlite.native.deserialize;
+
+public module image;
+public module flags;
+public module engine;

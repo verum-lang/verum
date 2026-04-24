@@ -1,0 +1,75 @@
+// =============================================================================
+// explain/vdbe_row.vr — VdbeExplainRow
+// =============================================================================
+// Spec: SQLite EXPLAIN
+//
+// One row per opcode in the prepared VDBE program. Field semantics
+// match the documented sqlite3_column_* output of EXPLAIN <sql>.
+// =============================================================================
+
+module core.database.sqlite.native.explain.vdbe_row;
+
+mount core.*;
+mount base.{Text, Bool};
+mount collections.List;
+
+public type VdbeExplainRow is {
+    addr: Int,                    // 0-based opcode address
+    opcode: Text,                 // human-readable opcode name
+    p1: Int,
+    p2: Int,
+    p3: Int,
+    p4: Text,                     // p4 may be a string literal / SQL fragment / register-spec
+    p5: Int,
+    comment: Text,
+}
+
+public fn vdbe_row(
+    addr: Int, opcode: Text,
+    p1: Int, p2: Int, p3: Int, p4: Text, p5: Int,
+    comment: Text,
+) -> VdbeExplainRow {
+    VdbeExplainRow {
+        addr: addr,
+        opcode: opcode,
+        p1: p1, p2: p2, p3: p3,
+        p4: p4, p5: p5,
+        comment: comment,
+    }
+}
+
+// -----------------------------------------------------------------------------
+// VdbeExplainTable — full result set for EXPLAIN <sql>
+// -----------------------------------------------------------------------------
+
+public type VdbeExplainTable is { rows: List<VdbeExplainRow> }
+
+public fn vdbe_table_new() -> VdbeExplainTable {
+    VdbeExplainTable { rows: List.new() }
+}
+
+implement VdbeExplainTable {
+    public fn len(&self) -> Int { self.rows.len() }
+
+    pub fn add(&mut self, r: VdbeExplainRow) { self.rows.push(r); }
+
+    /// True iff `addr` was registered.
+    pub fn contains_addr(&self, addr: Int) -> Bool {
+        let mut i: Int = 0;
+        while i < self.rows.len() {
+            if self.rows[i].addr == addr { return true; }
+            i = i + 1;
+        }
+        false
+    }
+
+    /// First occurrence of an opcode by name — useful for sniff-tests.
+    pub fn find_opcode(&self, want: &Text) -> base.Maybe<Int> {
+        let mut i: Int = 0;
+        while i < self.rows.len() {
+            if self.rows[i].opcode == *want { return base.Some(i); }
+            i = i + 1;
+        }
+        base.None
+    }
+}

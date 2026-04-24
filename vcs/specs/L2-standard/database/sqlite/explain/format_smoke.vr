@@ -1,0 +1,127 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, explain, query_plan, vdbe_row, formatter
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.explain.vdbe_row.{
+    VdbeExplainRow, vdbe_row,
+    VdbeExplainTable, vdbe_table_new,
+};
+mount core.database.sqlite.native.explain.query_plan.{
+    QueryPlanRow, query_plan_row,
+    QueryPlanTree, query_plan_tree_new,
+};
+mount core.database.sqlite.native.explain.formatter.{
+    format_vdbe, format_query_plan,
+};
+mount base.{Some, None, Maybe, Bool};
+
+// -----------------------------------------------------------------------------
+// VDBE table
+// -----------------------------------------------------------------------------
+
+fn test_vdbe_table_add_increments() {
+    let mut t = vdbe_table_new();
+    t.add(vdbe_row(0, "Init".clone(), 0, 0, 0, "".clone(), 0, "".clone()));
+    t.add(vdbe_row(1, "OpenRead".clone(), 0, 1, 0, "users".clone(), 0, "".clone()));
+    assert_eq(t.len(), 2);
+}
+
+fn test_vdbe_table_contains_addr() {
+    let mut t = vdbe_table_new();
+    t.add(vdbe_row(7, "ResultRow".clone(), 0, 0, 0, "".clone(), 0, "".clone()));
+    assert(t.contains_addr(7));
+    assert(!t.contains_addr(99));
+}
+
+fn test_vdbe_table_find_opcode() {
+    let mut t = vdbe_table_new();
+    t.add(vdbe_row(0, "Init".clone(), 0, 0, 0, "".clone(), 0, "".clone()));
+    t.add(vdbe_row(1, "ResultRow".clone(), 0, 0, 0, "".clone(), 0, "".clone()));
+    match t.find_opcode(&"ResultRow".clone()) {
+        Some(idx) => assert_eq(idx, 1),
+        None      => panic("ResultRow found"),
+    }
+}
+
+// -----------------------------------------------------------------------------
+// QueryPlan tree
+// -----------------------------------------------------------------------------
+
+fn test_plan_tree_root_count() {
+    let mut tree = query_plan_tree_new();
+    tree.add(query_plan_row(1, 0, "SCAN TABLE users".clone()));
+    tree.add(query_plan_row(2, 0, "SEARCH TABLE posts".clone()));
+    tree.add(query_plan_row(3, 1, "USING INDEX idx_users_name".clone()));
+    assert_eq(tree.root_count(), 2);
+}
+
+fn test_plan_tree_children_of() {
+    let mut tree = query_plan_tree_new();
+    tree.add(query_plan_row(1, 0, "SCAN TABLE users".clone()));
+    tree.add(query_plan_row(2, 1, "USING INDEX idx".clone()));
+    tree.add(query_plan_row(3, 1, "USE TEMP B-TREE".clone()));
+    let kids = tree.children_of(1);
+    assert_eq(kids.len(), 2);
+}
+
+fn test_plan_tree_depth_of() {
+    let mut tree = query_plan_tree_new();
+    tree.add(query_plan_row(1, 0, "ROOT".clone()));
+    tree.add(query_plan_row(2, 1, "CHILD".clone()));
+    tree.add(query_plan_row(3, 2, "GRANDCHILD".clone()));
+    assert_eq(tree.depth_of(3), 2);
+}
+
+fn test_plan_tree_find_by_id() {
+    let mut tree = query_plan_tree_new();
+    tree.add(query_plan_row(1, 0, "node 1".clone()));
+    match tree.find_by_id(1) {
+        Some(_) => {},
+        None    => panic("found"),
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Formatters — non-empty output
+// -----------------------------------------------------------------------------
+
+fn test_format_vdbe_non_empty() {
+    let mut t = vdbe_table_new();
+    t.add(vdbe_row(0, "Init".clone(), 0, 0, 0, "".clone(), 0, "".clone()));
+    let txt = format_vdbe(&t);
+    assert(txt.len() > 0);
+}
+
+fn test_format_query_plan_renders_header() {
+    let mut tree = query_plan_tree_new();
+    tree.add(query_plan_row(1, 0, "SCAN".clone()));
+    let txt = format_query_plan(&tree);
+    assert(txt.len() > 0);
+}
+
+fn test_format_query_plan_iterative_walk() {
+    // Catalogues forbid recursion — verify the iterative walk handles
+    // a 3-level tree without panic.
+    let mut tree = query_plan_tree_new();
+    tree.add(query_plan_row(1, 0, "ROOT".clone()));
+    tree.add(query_plan_row(2, 1, "CHILD".clone()));
+    tree.add(query_plan_row(3, 2, "GRANDCHILD".clone()));
+    let txt = format_query_plan(&tree);
+    assert(txt.len() > 0);
+}
+
+fn main() {
+    test_vdbe_table_add_increments();
+    test_vdbe_table_contains_addr();
+    test_vdbe_table_find_opcode();
+    test_plan_tree_root_count();
+    test_plan_tree_children_of();
+    test_plan_tree_depth_of();
+    test_plan_tree_find_by_id();
+    test_format_vdbe_non_empty();
+    test_format_query_plan_renders_header();
+    test_format_query_plan_iterative_walk();
+}

@@ -1,0 +1,56 @@
+// =============================================================================
+// deserialize/flags.vr — DeserializeFlag bit set
+// =============================================================================
+// Spec: SQLite C API — SQLITE_DESERIALIZE_*
+// =============================================================================
+
+module core.database.sqlite.native.deserialize.flags;
+
+mount core.*;
+mount base.{Text, Bool};
+
+public const DESERIALIZE_FREEONCLOSE: Int = 0x01;
+public const DESERIALIZE_RESIZEABLE: Int  = 0x02;
+public const DESERIALIZE_READONLY: Int    = 0x04;
+
+public type DeserializeFlag is DfFreeOnClose | DfResizeable | DfReadOnly;
+
+public fn flag_bit(f: &DeserializeFlag) -> Int {
+    match f {
+        DfFreeOnClose => DESERIALIZE_FREEONCLOSE,
+        DfResizeable  => DESERIALIZE_RESIZEABLE,
+        DfReadOnly    => DESERIALIZE_READONLY,
+    }
+}
+
+public fn flag_name(f: &DeserializeFlag) -> Text {
+    match f {
+        DfFreeOnClose => "free_on_close".clone(),
+        DfResizeable  => "resizeable".clone(),
+        DfReadOnly    => "read_only".clone(),
+    }
+}
+
+public type FlagSet is { bits: Int }
+
+public fn flag_set_empty() -> FlagSet { FlagSet { bits: 0 } }
+
+implement FlagSet {
+    pub fn include(mut self, f: DeserializeFlag) -> FlagSet {
+        self.bits = self.bits | flag_bit(&f);
+        self
+    }
+
+    pub fn exclude(mut self, f: DeserializeFlag) -> FlagSet {
+        self.bits = self.bits & !flag_bit(&f);
+        self
+    }
+
+    public fn has(&self, f: &DeserializeFlag) -> Bool {
+        (self.bits & flag_bit(f)) != 0
+    }
+
+    public fn is_writable(&self) -> Bool { !self.has(&DfReadOnly) }
+
+    public fn raw_bits(&self) -> Int { self.bits }
+}

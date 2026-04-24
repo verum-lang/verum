@@ -1,0 +1,193 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, deserialize, image, flags, engine
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.deserialize.image.{
+    DbImage, db_image,
+};
+mount core.database.sqlite.native.deserialize.flags.{
+    DESERIALIZE_FREEONCLOSE, DESERIALIZE_RESIZEABLE, DESERIALIZE_READONLY,
+    DeserializeFlag, DfFreeOnClose, DfResizeable, DfReadOnly,
+    flag_bit, flag_name,
+    FlagSet, flag_set_empty,
+};
+mount core.database.sqlite.native.deserialize.engine.{
+    DeserialiseAction, DaMountReadWrite, DaMountReadOnly, DaMountResizeable, DaReject,
+    SerializeEngine, serialize_engine,
+    DeserializeEngine, deserialize_engine, quick_deserialize,
+    action_kind_name,
+};
+mount base.{Bool};
+
+// -----------------------------------------------------------------------------
+// DbImage
+// -----------------------------------------------------------------------------
+
+fn make_bytes(n: Int) -> List<Byte> {
+    let mut out: List<Byte> = List.new();
+    let mut i: Int = 0;
+    while i < n { out.push((i % 256) as Byte); i = i + 1; }
+    out
+}
+
+fn test_image_page_count_derived() {
+    let img = db_image(make_bytes(4096), 1024);
+    assert_eq(img.page_count, 4);
+}
+
+fn test_image_is_empty() {
+    let empty: List<Byte> = List.new();
+    let img = db_image(empty, 4096);
+    assert(img.is_empty());
+}
+
+fn test_image_read_page_round_trip() {
+    let img = db_image(make_bytes(4096), 1024);
+    let page = img.read_page(2);
+    assert_eq(page.len(), 1024);
+}
+
+fn test_image_read_page_out_of_range_empty() {
+    let img = db_image(make_bytes(4096), 1024);
+    let page = img.read_page(99);
+    assert_eq(page.len(), 0);
+}
+
+fn test_image_append_page_advances() {
+    let mut img = db_image(make_bytes(0), 16);
+    img.append_page(make_bytes(16));
+    assert_eq(img.page_count, 1);
+    assert_eq(img.byte_count(), 16);
+}
+
+// -----------------------------------------------------------------------------
+// DeserializeFlag bits
+// -----------------------------------------------------------------------------
+
+fn test_flag_bits_match_sqlite() {
+    assert_eq(flag_bit(&DfFreeOnClose), DESERIALIZE_FREEONCLOSE);
+    assert_eq(flag_bit(&DfResizeable), DESERIALIZE_RESIZEABLE);
+    assert_eq(flag_bit(&DfReadOnly), DESERIALIZE_READONLY);
+}
+
+fn test_flag_set_include_then_has() {
+    let s = flag_set_empty().include(DfReadOnly);
+    assert(s.has(&DfReadOnly));
+    assert(!s.has(&DfFreeOnClose));
+}
+
+fn test_flag_set_exclude() {
+    let s = flag_set_empty().include(DfReadOnly).exclude(DfReadOnly);
+    assert(!s.has(&DfReadOnly));
+}
+
+fn test_flag_set_writable() {
+    let writable = flag_set_empty();
+    assert(writable.is_writable());
+    let ro = flag_set_empty().include(DfReadOnly);
+    assert(!ro.is_writable());
+}
+
+// -----------------------------------------------------------------------------
+// SerializeEngine
+// -----------------------------------------------------------------------------
+
+fn test_serialise_concatenates_pages() {
+    let e = serialize_engine(16);
+    let mut pages: List<List<Byte>> = List.new();
+    pages.push(make_bytes(16));
+    pages.push(make_bytes(16));
+    pages.push(make_bytes(16));
+    let img = e.serialize(pages);
+    assert_eq(img.byte_count(), 48);
+    assert_eq(img.page_count, 3);
+}
+
+fn test_serialise_pads_short_pages() {
+    let e = serialize_engine(32);
+    let mut pages: List<List<Byte>> = List.new();
+    pages.push(make_bytes(8));
+    let img = e.serialize(pages);
+    assert_eq(img.byte_count(), 32);
+}
+
+// -----------------------------------------------------------------------------
+// DeserializeEngine
+// -----------------------------------------------------------------------------
+
+fn test_deserialise_empty_rejects() {
+    let e = deserialize_engine();
+    let img = db_image(make_bytes(0), 4096);
+    match e.deserialize(&img, &flag_set_empty()) {
+        DaReject(_) => {},
+        _           => panic("empty rejected"),
+    }
+}
+
+fn test_deserialise_writable_default() {
+    let e = deserialize_engine();
+    let img = db_image(make_bytes(4096), 4096);
+    match e.deserialize(&img, &flag_set_empty()) {
+        DaMountReadWrite => {},
+        _                => panic("writable default"),
+    }
+}
+
+fn test_deserialise_read_only_flag() {
+    let e = deserialize_engine();
+    let img = db_image(make_bytes(4096), 4096);
+    let flags = flag_set_empty().include(DfReadOnly);
+    match e.deserialize(&img, &flags) {
+        DaMountReadOnly => {},
+        _               => panic("read-only path"),
+    }
+}
+
+fn test_deserialise_resizeable_flag() {
+    let e = deserialize_engine();
+    let img = db_image(make_bytes(4096), 4096);
+    let flags = flag_set_empty().include(DfResizeable);
+    match e.deserialize(&img, &flags) {
+        DaMountResizeable => {},
+        _                  => panic("resizeable path"),
+    }
+}
+
+fn test_quick_deserialize_writable() {
+    let img = db_image(make_bytes(4096), 4096);
+    match quick_deserialize(&img) {
+        DaMountReadWrite => {},
+        _                => panic("quick → writable"),
+    }
+}
+
+fn test_action_names_distinct() {
+    let n1 = action_kind_name(&DaMountReadWrite);
+    let n2 = action_kind_name(&DaMountReadOnly);
+    let n3 = action_kind_name(&DaReject("x".clone()));
+    assert(n1 != n2);
+    assert(n2 != n3);
+}
+
+fn main() {
+    test_image_page_count_derived();
+    test_image_is_empty();
+    test_image_read_page_round_trip();
+    test_image_read_page_out_of_range_empty();
+    test_image_append_page_advances();
+    test_flag_bits_match_sqlite();
+    test_flag_set_include_then_has();
+    test_flag_set_exclude();
+    test_flag_set_writable();
+    test_serialise_concatenates_pages();
+    test_serialise_pads_short_pages();
+    test_deserialise_empty_rejects();
+    test_deserialise_writable_default();
+    test_deserialise_read_only_flag();
+    test_deserialise_resizeable_flag();
+    test_quick_deserialize_writable();
+    test_action_names_distinct();
+}

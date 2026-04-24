@@ -1,0 +1,120 @@
+// =============================================================================
+// explain/formatter.vr — text rendering matching sqlite3 CLI output
+// =============================================================================
+// Spec: https://www.sqlite.org/eqp.html
+//
+// Two renderers:
+//
+//   * `format_vdbe(table)`     — one row per opcode, fixed-column-width text
+//   * `format_query_plan(tree)` — indented tree shape with `--` connectors
+// =============================================================================
+
+module core.database.sqlite.native.explain.formatter;
+
+mount core.*;
+mount base.{Text, Bool};
+mount collections.List;
+mount core.database.sqlite.native.explain.vdbe_row.{
+    VdbeExplainRow, VdbeExplainTable,
+};
+mount core.database.sqlite.native.explain.query_plan.{
+    QueryPlanRow, QueryPlanTree,
+};
+
+// -----------------------------------------------------------------------------
+// VDBE renderer
+// -----------------------------------------------------------------------------
+
+public fn format_vdbe(table: &VdbeExplainTable) -> Text {
+    let mut out = Text.new();
+    push_text(&mut out, &"addr  opcode             p1  p2  p3  p4                p5  comment\n".clone());
+    push_text(&mut out, &"----  -----------------  --  --  --  ----------------  --  -------\n".clone());
+    let mut i: Int = 0;
+    while i < table.rows.len() {
+        let r = &table.rows[i];
+        push_int(&mut out, r.addr);
+        push_text(&mut out, &"  ".clone());
+        push_text(&mut out, &r.opcode);
+        out.push_byte(32 as Byte);
+        push_int(&mut out, r.p1);
+        out.push_byte(32 as Byte);
+        push_int(&mut out, r.p2);
+        out.push_byte(32 as Byte);
+        push_int(&mut out, r.p3);
+        out.push_byte(32 as Byte);
+        push_text(&mut out, &r.p4);
+        out.push_byte(32 as Byte);
+        push_int(&mut out, r.p5);
+        out.push_byte(32 as Byte);
+        push_text(&mut out, &r.comment);
+        out.push_byte(10 as Byte);
+        i = i + 1;
+    }
+    out
+}
+
+// -----------------------------------------------------------------------------
+// Query plan renderer — indented tree
+// -----------------------------------------------------------------------------
+
+public fn format_query_plan(tree: &QueryPlanTree) -> Text {
+    let mut out = Text.new();
+    push_text(&mut out, &"QUERY PLAN\n".clone());
+    // Iterative DFS using an explicit (id, depth) stack — Verum
+    // disallows unbounded recursion in catalogue code by default.
+    let mut stack: List<(Int, Int)> = List.new();
+    let roots = tree.children_of(0);
+    let mut i: Int = roots.len() - 1;
+    while i >= 0 {
+        stack.push((roots[i].id, 0));
+        i = i - 1;
+    }
+    while stack.len() > 0 {
+        let top_idx = stack.len() - 1;
+        let (id, depth) = stack[top_idx];
+        stack.remove(top_idx);
+
+        let mut k: Int = 0;
+        while k < depth {
+            push_text(&mut out, &"|--".clone());
+            k = k + 1;
+        }
+        match tree.find_by_id(id) {
+            base.Some(r) => {
+                push_text(&mut out, &r.detail);
+                out.push_byte(10 as Byte);
+            }
+            base.None => {}
+        }
+        let children = tree.children_of(id);
+        let mut j: Int = children.len() - 1;
+        while j >= 0 {
+            stack.push((children[j].id, depth + 1));
+            j = j - 1;
+        }
+    }
+    out
+}
+
+// -----------------------------------------------------------------------------
+// Helpers
+// -----------------------------------------------------------------------------
+
+fn push_text(dst: &mut Text, s: &Text) {
+    let bs = s.as_bytes();
+    let mut i: Int = 0;
+    while i < bs.len() { dst.push_byte(bs[i]); i = i + 1; }
+}
+
+fn push_int(dst: &mut Text, n: Int) {
+    if n == 0 { dst.push_byte(48 as Byte); return; }
+    let mut digits: List<Byte> = List.new();
+    let mut x: Int = if n < 0 { -n } else { n };
+    while x > 0 {
+        digits.push(((x % 10) as Byte) + (48 as Byte));
+        x = x / 10;
+    }
+    if n < 0 { dst.push_byte(45 as Byte); }
+    let mut i: Int = digits.len() - 1;
+    while i >= 0 { dst.push_byte(digits[i]); i = i - 1; }
+}

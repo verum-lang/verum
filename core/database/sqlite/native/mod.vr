@@ -176,3 +176,7 @@ public module lockfile;
 public module mutex;
 // - soft_heap: sqlite3_soft_heap_limit + pressure callback + alloc planner
 public module soft_heap;
+// - deserialize: sqlite3_serialize / sqlite3_deserialize — DbImage + flags + engines
+public module deserialize;
+// - explain: EXPLAIN + EXPLAIN QUERY PLAN row shapes + tree formatter
+public module explain;

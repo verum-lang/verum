@@ -1,0 +1,107 @@
+// =============================================================================
+// explain/query_plan.vr — QueryPlanRow + tree
+// =============================================================================
+// Spec: https://www.sqlite.org/eqp.html (EXPLAIN QUERY PLAN)
+//
+// Each row:
+//
+//   id      INTEGER   — node id
+//   parent  INTEGER   — parent node id (0 ⇒ root)
+//   notused INTEGER   — always 0 (legacy)
+//   detail  TEXT      — human description ("SCAN TABLE users", etc.)
+//
+// Rows form a forest where `id > parent`; children of one parent
+// appear in execution order.
+// =============================================================================
+
+module core.database.sqlite.native.explain.query_plan;
+
+mount core.*;
+mount base.{Text, Bool, Maybe};
+mount collections.List;
+
+public type QueryPlanRow is {
+    id: Int,
+    parent: Int,
+    notused: Int,
+    detail: Text,
+}
+
+public fn query_plan_row(id: Int, parent: Int, detail: Text) -> QueryPlanRow {
+    QueryPlanRow { id: id, parent: parent, notused: 0, detail: detail }
+}
+
+// -----------------------------------------------------------------------------
+// QueryPlanTree — collection + tree-shape predicates
+// -----------------------------------------------------------------------------
+
+public type QueryPlanTree is { rows: List<QueryPlanRow> }
+
+public fn query_plan_tree_new() -> QueryPlanTree {
+    QueryPlanTree { rows: List.new() }
+}
+
+implement QueryPlanTree {
+    public fn len(&self) -> Int { self.rows.len() }
+
+    pub fn add(&mut self, r: QueryPlanRow) { self.rows.push(r); }
+
+    /// Children rows of `parent_id`, in insertion order.
+    pub fn children_of(&self, parent_id: Int) -> List<QueryPlanRow> {
+        let mut out: List<QueryPlanRow> = List.new();
+        let mut i: Int = 0;
+        while i < self.rows.len() {
+            if self.rows[i].parent == parent_id {
+                out.push(query_plan_row(
+                    self.rows[i].id,
+                    self.rows[i].parent,
+                    self.rows[i].detail.clone(),
+                ));
+            }
+            i = i + 1;
+        }
+        out
+    }
+
+    /// Depth of a node by walking parents back to 0.
+    pub fn depth_of(&self, id: Int) -> Int {
+        let mut depth: Int = 0;
+        let mut current = id;
+        while current != 0 {
+            match self.find_by_id(current) {
+                Some(r) => {
+                    if r.parent == current { return depth; }
+                    current = r.parent;
+                    depth = depth + 1;
+                }
+                None => return depth,
+            }
+        }
+        depth
+    }
+
+    pub fn find_by_id(&self, id: Int) -> Maybe<QueryPlanRow> {
+        let mut i: Int = 0;
+        while i < self.rows.len() {
+            if self.rows[i].id == id {
+                return Some(query_plan_row(
+                    self.rows[i].id,
+                    self.rows[i].parent,
+                    self.rows[i].detail.clone(),
+                ));
+            }
+            i = i + 1;
+        }
+        None
+    }
+
+    pub fn root_count(&self) -> Int {
+        let mut n: Int = 0;
+        let mut i: Int = 0;
+        while i < self.rows.len() {
+            if self.rows[i].parent == 0 { n = n + 1; }
+            i = i + 1;
+        }
+        n
+    }
+}

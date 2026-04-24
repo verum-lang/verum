@@ -1,0 +1,25 @@
+// =============================================================================
+// core/database/sqlite/native/explain/mod.vr
+// =============================================================================
+// Layer: 5 (codegen output) / 7 (façade — EXPLAIN / EXPLAIN QUERY PLAN)
+// Spec: https://www.sqlite.org/eqp.html
+//
+// SQLite's `EXPLAIN <stmt>` lists the VDBE program one opcode per row:
+//
+//   addr | opcode | p1 | p2 | p3 | p4 | p5 | comment
+//
+// `EXPLAIN QUERY PLAN <stmt>` lists the high-level plan tree:
+//
+//   id | parent | notused | detail
+//
+// Submodules:
+//   * `vdbe_row`   — VdbeExplainRow + table-shape helpers
+//   * `query_plan` — QueryPlanRow + indented `detail` rendering
+//   * `formatter`  — text rendering (matching sqlite3 CLI output)
+// =============================================================================
+
+module core.database.sqlite.native.explain;
+
+public module vdbe_row;
+public module query_plan;
+public module formatter;

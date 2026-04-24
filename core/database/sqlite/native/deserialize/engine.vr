@@ -1,0 +1,98 @@
+// =============================================================================
+// deserialize/engine.vr — Serialise + Deserialise drivers
+// =============================================================================
+// Spec: SQLite C API
+//
+// `SerializeEngine.serialize()` walks the page-cache (or any source
+// of (page_no, page_bytes) tuples) and emits a `DbImage`.
+//
+// `DeserializeEngine.deserialize(image, flags)` returns a result
+// describing what action the host VFS should take to mount the
+// image as the database.
+// =============================================================================
+
+module core.database.sqlite.native.deserialize.engine;
+
+mount core.*;
+mount base.{Text, Bool};
+mount collections.List;
+mount core.database.sqlite.native.deserialize.image.{
+    DbImage, db_image,
+};
+mount core.database.sqlite.native.deserialize.flags.{
+    FlagSet, flag_set_empty, DeserializeFlag, DfReadOnly, DfFreeOnClose, DfResizeable,
+};
+
+// -----------------------------------------------------------------------------
+// SerializeEngine
+// -----------------------------------------------------------------------------
+
+public type SerializeEngine is { page_size: Int }
+
+public fn serialize_engine(page_size: Int) -> SerializeEngine {
+    SerializeEngine { page_size: page_size }
+}
+
+implement SerializeEngine {
+    /// Serialise from a `(page_no, page_bytes)` source. Pages must be
+    /// fed in 1-based ascending order; missing pages produce zeroed
+    /// blocks.
+    pub fn serialize(&self, pages: List<List<Byte>>) -> DbImage {
+        let mut bytes: List<Byte> = List.new();
+        let mut p: Int = 0;
+        while p < pages.len() {
+            let pg = &pages[p];
+            let mut k: Int = 0;
+            while k < self.page_size {
+                if k < pg.len() { bytes.push(pg[k]); }
+                else            { bytes.push(0 as Byte); }
+                k = k + 1;
+            }
+            p = p + 1;
+        }
+        db_image(bytes, self.page_size)
+    }
+}
+
+// -----------------------------------------------------------------------------
+// DeserialiseAction — what the host VFS should do
+// -----------------------------------------------------------------------------
+
+public type DeserialiseAction is
+      DaMountReadWrite
+    | DaMountReadOnly
+    | DaMountResizeable
+    | DaReject(Text);                  // reason
+
+public fn action_kind_name(a: &DeserialiseAction) -> Text {
+    match a {
+        DaMountReadWrite    => "mount_rw".clone(),
+        DaMountReadOnly     => "mount_ro".clone(),
+        DaMountResizeable   => "mount_resizeable".clone(),
+        DaReject(_)         => "reject".clone(),
+    }
+}
+
+// -----------------------------------------------------------------------------
+// DeserializeEngine
+// -----------------------------------------------------------------------------
+
+public type DeserializeEngine is { unit: Bool }
+
+public fn deserialize_engine() -> DeserializeEngine { DeserializeEngine { unit: true } }
+
+implement DeserializeEngine {
+    pub fn deserialize(&self, image: &DbImage, flags: &FlagSet) -> DeserialiseAction {
+        if image.is_empty() { return DaReject("empty image".clone()); }
+        if image.page_size == 0 { return DaReject("page size = 0".clone()); }
+        if flags.has(&DfReadOnly) { return DaMountReadOnly; }
+        if flags.has(&DfResizeable) { return DaMountResizeable; }
+        DaMountReadWrite
+    }
+}
+
+/// Convenience shortcut.
+public fn quick_deserialize(image: &DbImage) -> DeserialiseAction {
+    let engine = deserialize_engine();
+    engine.deserialize(image, &flag_set_empty())
+}
