@@ -172,3 +172,7 @@ public module column;
 public module status;
 // - lockfile: SQLite reserved-byte lock scheme + LockState + transition plans (§7.4)
 public module lockfile;
+// - mutex: sqlite3_mutex_* — 11 classes + state + methods protocol
+public module mutex;
+// - soft_heap: sqlite3_soft_heap_limit + pressure callback + alloc planner
+public module soft_heap;

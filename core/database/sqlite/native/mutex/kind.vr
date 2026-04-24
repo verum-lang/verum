@@ -1,0 +1,73 @@
+// =============================================================================
+// mutex/kind.vr — MutexClass taxonomy
+// =============================================================================
+// Spec: sqlite3.h — SQLITE_MUTEX_*
+// =============================================================================
+
+module core.database.sqlite.native.mutex.kind;
+
+mount core.*;
+mount base.{Text, Bool};
+
+public type MutexClass is
+      MutexFast                  // SQLITE_MUTEX_FAST          = 0
+    | MutexRecursive             // SQLITE_MUTEX_RECURSIVE     = 1
+    | MutexStaticMain            // SQLITE_MUTEX_STATIC_MAIN   = 2
+    | MutexStaticMem             // SQLITE_MUTEX_STATIC_MEM    = 3
+    | MutexStaticOpen            // SQLITE_MUTEX_STATIC_OPEN   = 4
+    | MutexStaticPrng            // SQLITE_MUTEX_STATIC_PRNG   = 5
+    | MutexStaticLru             // SQLITE_MUTEX_STATIC_LRU    = 6
+    | MutexStaticPmem            // SQLITE_MUTEX_STATIC_PMEM   = 7
+    | MutexStaticApp1            // SQLITE_MUTEX_STATIC_APP1   = 8
+    | MutexStaticApp2            // SQLITE_MUTEX_STATIC_APP2   = 9
+    | MutexStaticApp3;           // SQLITE_MUTEX_STATIC_APP3   = 10
+
+public fn class_code(c: &MutexClass) -> Int {
+    match c {
+        MutexFast         => 0,
+        MutexRecursive    => 1,
+        MutexStaticMain   => 2,
+        MutexStaticMem    => 3,
+        MutexStaticOpen   => 4,
+        MutexStaticPrng   => 5,
+        MutexStaticLru    => 6,
+        MutexStaticPmem   => 7,
+        MutexStaticApp1   => 8,
+        MutexStaticApp2   => 9,
+        MutexStaticApp3   => 10,
+    }
+}
+
+public fn class_name(c: &MutexClass) -> Text {
+    match c {
+        MutexFast         => "fast".clone(),
+        MutexRecursive    => "recursive".clone(),
+        MutexStaticMain   => "static_main".clone(),
+        MutexStaticMem    => "static_mem".clone(),
+        MutexStaticOpen   => "static_open".clone(),
+        MutexStaticPrng   => "static_prng".clone(),
+        MutexStaticLru    => "static_lru".clone(),
+        MutexStaticPmem   => "static_pmem".clone(),
+        MutexStaticApp1   => "static_app1".clone(),
+        MutexStaticApp2   => "static_app2".clone(),
+        MutexStaticApp3   => "static_app3".clone(),
+    }
+}
+
+/// True iff this class corresponds to a fixed (statically-allocated) mutex
+/// — i.e. cannot be passed to sqlite3_mutex_free.
+public fn is_static(c: &MutexClass) -> Bool {
+    match c {
+        MutexFast | MutexRecursive => false,
+        _                          => true,
+    }
+}
+
+/// True iff the class permits the same thread to acquire the mutex more
+/// than once without unlocking in-between.
+public fn is_recursive(c: &MutexClass) -> Bool {
+    match c {
+        MutexRecursive => true,
+        _              => false,
+    }
+}

@@ -1,0 +1,74 @@
+// =============================================================================
+// soft_heap/pressure.vr — PressureCallback protocol
+// =============================================================================
+// Spec: SQLite C API
+//
+// SQLite calls the registered pressure handler with one of these
+// events when an allocation is about to push past the soft limit.
+// Handlers may return a "bytes reclaimed" count; if the engine then
+// finds the allocation fits, it proceeds.
+// =============================================================================
+
+module core.database.sqlite.native.soft_heap.pressure;
+
+mount core.*;
+mount base.{Text, Bool};
+mount collections.List;
+
+// -----------------------------------------------------------------------------
+// PressureEvent
+// -----------------------------------------------------------------------------
+
+public type PressureEvent is
+      PeSoftThresholdCrossing(Int64, Int64)    // (current_used, attempted_alloc)
+    | PeHardThresholdImminent(Int64, Int64)
+    | PeReleaseRequest(Int64);                 // bytes the engine wants back
+
+public fn event_kind_name(e: &PressureEvent) -> Text {
+    match e {
+        PeSoftThresholdCrossing(_, _) => "soft_crossing".clone(),
+        PeHardThresholdImminent(_, _) => "hard_imminent".clone(),
+        PeReleaseRequest(_)           => "release_request".clone(),
+    }
+}
+
+// -----------------------------------------------------------------------------
+// PressureCallback protocol
+// -----------------------------------------------------------------------------
+
+public type PressureCallback is protocol {
+    fn name(&self) -> Text;
+    /// Returns the number of bytes the handler reclaimed.
+    fn on_pressure(&mut self, event: &PressureEvent) -> Int64;
+};
+
+// -----------------------------------------------------------------------------
+// NoopCallback — used when the host has no reclaim hook installed
+// -----------------------------------------------------------------------------
+
+public type NoopCallback is { unit: Bool }
+
+public fn noop_callback() -> NoopCallback { NoopCallback { unit: true } }
+
+implement PressureCallback for NoopCallback {
+    fn name(&self) -> Text { "noop".clone() }
+    fn on_pressure(&mut self, _event: &PressureEvent) -> Int64 { 0 as Int64 }
+}
+
+// -----------------------------------------------------------------------------
+// FixedReleaseCallback — always reports the same bytes-released
+// -----------------------------------------------------------------------------
+
+public type FixedReleaseCallback is { release_per_call: Int64 }
+
+public fn fixed_release_callback(bytes: Int64) -> FixedReleaseCallback {
+    FixedReleaseCallback { release_per_call: bytes }
+}
+
+implement PressureCallback for FixedReleaseCallback {
+    fn name(&self) -> Text { "fixed_release".clone() }
+
+    fn on_pressure(&mut self, _event: &PressureEvent) -> Int64 {
+        self.release_per_call
+    }
+}

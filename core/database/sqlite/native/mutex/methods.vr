@@ -1,0 +1,135 @@
+// =============================================================================
+// mutex/methods.vr — MutexMethods protocol
+// =============================================================================
+// Spec: SQLite C API — sqlite3_mutex_methods (Posix / Win32 / Noop variants)
+//
+// `MutexMethods` is the OS-abstraction layer. SQLite ships three
+// reference implementations:
+//
+//   * `posix`  — pthread_mutex_t backed
+//   * `win32`  — CRITICAL_SECTION backed
+//   * `noop`   — single-threaded build; every op succeeds without
+//                touching anything (tests this here as `NoopMethods`)
+// =============================================================================
+
+module core.database.sqlite.native.mutex.methods;
+
+mount core.*;
+mount base.{Text, Bool};
+mount collections.List;
+mount core.database.sqlite.native.mutex.kind.{
+    MutexClass, MutexFast, MutexRecursive, MutexStaticMain,
+    is_static, is_recursive, class_name,
+};
+mount core.database.sqlite.native.mutex.state.{
+    MutexState, state_unheld,
+};
+
+// -----------------------------------------------------------------------------
+// MutexMethods protocol
+// -----------------------------------------------------------------------------
+
+public type MutexMethods is protocol {
+    fn name(&self) -> Text;
+    fn alloc(&mut self, class_kind: MutexClass) -> Int64;
+    fn enter(&mut self, mutex_id: Int64, thread_id: Int64) -> Bool;
+    fn try_enter(&mut self, mutex_id: Int64, thread_id: Int64) -> Bool;
+    fn leave(&mut self, mutex_id: Int64, thread_id: Int64) -> Bool;
+    fn held(&self, mutex_id: Int64, thread_id: Int64) -> Bool;
+};
+
+// -----------------------------------------------------------------------------
+// NoopMethods — single-threaded build
+// -----------------------------------------------------------------------------
+
+public type NoopMethods is { unit: Bool }
+
+public fn noop_methods() -> NoopMethods { NoopMethods { unit: true } }
+
+implement MutexMethods for NoopMethods {
+    fn name(&self) -> Text { "noop".clone() }
+    fn alloc(&mut self, _class_kind: MutexClass) -> Int64 { 1 as Int64 }
+    fn enter(&mut self, _mutex_id: Int64, _thread_id: Int64) -> Bool { true }
+    fn try_enter(&mut self, _mutex_id: Int64, _thread_id: Int64) -> Bool { true }
+    fn leave(&mut self, _mutex_id: Int64, _thread_id: Int64) -> Bool { true }
+    fn held(&self, _mutex_id: Int64, _thread_id: Int64) -> Bool { true }
+}
+
+// -----------------------------------------------------------------------------
+// TrackingMethods — minimal in-process methods used for tests
+// -----------------------------------------------------------------------------
+
+public type MutexEntry is { id: Int64, state: MutexState }
+
+public fn mutex_entry(id: Int64, state: MutexState) -> MutexEntry {
+    MutexEntry { id: id, state: state }
+}
+
+public type TrackingMethods is {
+    entries: List<MutexEntry>,
+    next_id: Int64,
+}
+
+public fn tracking_methods() -> TrackingMethods {
+    TrackingMethods { entries: List.new(), next_id: 1 as Int64 }
+}
+
+implement MutexMethods for TrackingMethods {
+    fn name(&self) -> Text { "tracking".clone() }
+
+    fn alloc(&mut self, class_kind: MutexClass) -> Int64 {
+        let id = self.next_id;
+        self.next_id = id + (1 as Int64);
+        self.entries.push(mutex_entry(id, state_unheld(class_kind)));
+        id
+    }
+
+    fn enter(&mut self, mutex_id: Int64, thread_id: Int64) -> Bool {
+        let mut i: Int = 0;
+        while i < self.entries.len() {
+            if self.entries[i].id == mutex_id {
+                return self.entries[i].state.enter(thread_id);
+            }
+            i = i + 1;
+        }
+        false
+    }
+
+    fn try_enter(&mut self, mutex_id: Int64, thread_id: Int64) -> Bool {
+        let mut i: Int = 0;
+        while i < self.entries.len() {
+            if self.entries[i].id == mutex_id {
+                if !self.entries[i].state.would_acquire(thread_id) { return false; }
+                return self.entries[i].state.enter(thread_id);
+            }
+            i = i + 1;
+        }
+        false
+    }
+
+    fn leave(&mut self, mutex_id: Int64, thread_id: Int64) -> Bool {
+        let mut i: Int = 0;
+        while i < self.entries.len() {
+            if self.entries[i].id == mutex_id {
+                return self.entries[i].state.leave(thread_id);
+            }
+            i = i + 1;
+        }
+        false
+    }
+
+    fn held(&self, mutex_id: Int64, thread_id: Int64) -> Bool {
+        let mut i: Int = 0;
+        while i < self.entries.len() {
+            if self.entries[i].id == mutex_id {
+                return self.entries[i].state.held_by(thread_id);
+            }
+            i = i + 1;
+        }
+        false
+    }
+}
+
+implement TrackingMethods {
+    public fn allocated_count(&self) -> Int { self.entries.len() }
+}

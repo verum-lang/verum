@@ -1,0 +1,163 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, soft_heap, limit, pressure, engine
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.soft_heap.limit.{
+    Limit, limit_unset, limit_with,
+};
+mount core.database.sqlite.native.soft_heap.pressure.{
+    PressureEvent, PeSoftThresholdCrossing, PeHardThresholdImminent, PeReleaseRequest,
+    PressureCallback,
+    NoopCallback, noop_callback,
+    FixedReleaseCallback, fixed_release_callback,
+    event_kind_name,
+};
+mount core.database.sqlite.native.soft_heap.engine.{
+    AllocOutcome, AoGranted, AoGrantedAfterReclaim, AoRefusedSoft, AoRefusedHard,
+    SoftHeapEngine, engine_new,
+    is_granted,
+    outcome_kind_name,
+};
+mount base.{Bool};
+
+// -----------------------------------------------------------------------------
+// Limit
+// -----------------------------------------------------------------------------
+
+fn test_limit_unset_disabled() {
+    let l = limit_unset();
+    assert(l.is_disabled());
+}
+
+fn test_limit_with_threshold_active() {
+    let l = limit_with(1024 as Int64);
+    assert(!l.is_disabled());
+}
+
+fn test_limit_add_advances_hwm() {
+    let mut l = limit_with(1024 as Int64);
+    l.add(500 as Int64);
+    let (_, used, hwm) = l.snapshot();
+    assert_eq(used, 500 as Int64);
+    assert_eq(hwm, 500 as Int64);
+}
+
+fn test_limit_sub_does_not_lower_hwm() {
+    let mut l = limit_with(1024 as Int64);
+    l.add(500 as Int64);
+    l.sub(200 as Int64);
+    let (_, used, hwm) = l.snapshot();
+    assert_eq(used, 300 as Int64);
+    assert_eq(hwm, 500 as Int64);
+}
+
+fn test_limit_would_exceed() {
+    let l = limit_with(100 as Int64);
+    assert(l.would_exceed(150 as Int64));
+    assert(!l.would_exceed(50 as Int64));
+}
+
+fn test_limit_set_threshold_returns_previous() {
+    let mut l = limit_with(100 as Int64);
+    let prev = l.set_threshold(200 as Int64);
+    assert_eq(prev, 100 as Int64);
+}
+
+fn test_limit_reset_high_water_to_used() {
+    let mut l = limit_with(1024 as Int64);
+    l.add(800 as Int64);
+    l.sub(500 as Int64);
+    l.reset_high_water();
+    let (_, used, hwm) = l.snapshot();
+    assert_eq(used, 300 as Int64);
+    assert_eq(hwm, 300 as Int64);
+}
+
+// -----------------------------------------------------------------------------
+// Pressure callbacks
+// -----------------------------------------------------------------------------
+
+fn test_event_kind_names_unique() {
+    let n1 = event_kind_name(&PeSoftThresholdCrossing(0 as Int64, 0 as Int64));
+    let n2 = event_kind_name(&PeHardThresholdImminent(0 as Int64, 0 as Int64));
+    let n3 = event_kind_name(&PeReleaseRequest(0 as Int64));
+    assert(n1 != n2);
+    assert(n2 != n3);
+}
+
+fn test_noop_callback_returns_zero() {
+    let mut cb = noop_callback();
+    let n = cb.on_pressure(&PeReleaseRequest(1024 as Int64));
+    assert_eq(n, 0 as Int64);
+}
+
+fn test_fixed_release_callback_reports_constant() {
+    let mut cb = fixed_release_callback(512 as Int64);
+    let n = cb.on_pressure(&PeReleaseRequest(0 as Int64));
+    assert_eq(n, 512 as Int64);
+}
+
+// -----------------------------------------------------------------------------
+// Engine
+// -----------------------------------------------------------------------------
+
+fn test_engine_disabled_grants_everything() {
+    let e = engine_new();
+    assert(is_granted(&e.plan(1_000_000 as Int64)));
+}
+
+fn test_engine_soft_limit_refuses() {
+    let mut e = engine_new();
+    let _ = e.set_soft_limit(100 as Int64);
+    match e.plan(150 as Int64) {
+        AoRefusedSoft => {},
+        _             => panic("soft refusal"),
+    }
+}
+
+fn test_engine_hard_limit_refuses() {
+    let mut e = engine_new();
+    let _ = e.set_soft_limit(100 as Int64);
+    let _ = e.set_hard_limit(200 as Int64);
+    match e.plan(300 as Int64) {
+        AoRefusedHard => {},
+        _             => panic("hard refusal"),
+    }
+}
+
+fn test_engine_note_allocation_then_used() {
+    let mut e = engine_new();
+    let _ = e.set_soft_limit(1000 as Int64);
+    e.note_allocation(300 as Int64);
+    assert_eq(e.used_bytes(), 300 as Int64);
+}
+
+fn outcome_names_distinct() {
+    let n1 = outcome_kind_name(&AoGranted);
+    let n2 = outcome_kind_name(&AoGrantedAfterReclaim(0 as Int64));
+    let n3 = outcome_kind_name(&AoRefusedSoft);
+    let n4 = outcome_kind_name(&AoRefusedHard);
+    assert(n1 != n2);
+    assert(n3 != n4);
+}
+
+fn main() {
+    test_limit_unset_disabled();
+    test_limit_with_threshold_active();
+    test_limit_add_advances_hwm();
+    test_limit_sub_does_not_lower_hwm();
+    test_limit_would_exceed();
+    test_limit_set_threshold_returns_previous();
+    test_limit_reset_high_water_to_used();
+    test_event_kind_names_unique();
+    test_noop_callback_returns_zero();
+    test_fixed_release_callback_reports_constant();
+    test_engine_disabled_grants_everything();
+    test_engine_soft_limit_refuses();
+    test_engine_hard_limit_refuses();
+    test_engine_note_allocation_then_used();
+    outcome_names_distinct();
+}

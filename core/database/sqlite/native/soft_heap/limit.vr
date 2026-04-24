@@ -1,0 +1,62 @@
+// =============================================================================
+// soft_heap/limit.vr — Limit + accounting
+// =============================================================================
+// Spec: SQLite C API
+//
+// `Limit` records ONE threshold and the HWM bytes-allocated since
+// last reset. Setting the limit to 0 disables enforcement (matches
+// SQLite's documented behaviour).
+// =============================================================================
+
+module core.database.sqlite.native.soft_heap.limit;
+
+mount core.*;
+mount base.{Bool};
+
+public type Limit is {
+    /// Threshold bytes; 0 disables.
+    threshold: Int64,
+    /// Bytes currently allocated.
+    used: Int64,
+    /// Highest bytes ever allocated since last reset.
+    high_water: Int64,
+}
+
+public fn limit_unset() -> Limit {
+    Limit { threshold: 0 as Int64, used: 0 as Int64, high_water: 0 as Int64 }
+}
+
+public fn limit_with(threshold: Int64) -> Limit {
+    Limit { threshold: threshold, used: 0 as Int64, high_water: 0 as Int64 }
+}
+
+implement Limit {
+    pub fn is_disabled(&self) -> Bool { self.threshold <= (0 as Int64) }
+
+    /// Increase used and adjust HWM.
+    pub fn add(&mut self, bytes: Int64) {
+        self.used = self.used + bytes;
+        if self.used > self.high_water { self.high_water = self.used; }
+    }
+
+    pub fn sub(&mut self, bytes: Int64) {
+        self.used = self.used - bytes;
+        if self.used < (0 as Int64) { self.used = 0 as Int64; }
+    }
+
+    /// True iff `used + delta` would exceed the threshold (when enabled).
+    pub fn would_exceed(&self, delta: Int64) -> Bool {
+        if self.is_disabled() { return false; }
+        (self.used + delta) > self.threshold
+    }
+
+    pub fn set_threshold(&mut self, new_threshold: Int64) -> Int64 {
+        let prev = self.threshold;
+        self.threshold = new_threshold;
+        prev
+    }
+
+    pub fn reset_high_water(&mut self) { self.high_water = self.used; }
+
+    pub fn snapshot(&self) -> (Int64, Int64, Int64) { (self.threshold, self.used, self.high_water) }
+}

@@ -1,0 +1,120 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, mutex, methods, state
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.mutex.kind.{
+    MutexClass, MutexFast, MutexRecursive, MutexStaticMain,
+    class_code, class_name, is_static, is_recursive,
+};
+mount core.database.sqlite.native.mutex.state.{MutexState, state_unheld};
+mount core.database.sqlite.native.mutex.methods.{
+    MutexMethods, NoopMethods, noop_methods,
+    TrackingMethods, tracking_methods,
+};
+mount base.{Bool};
+
+fn test_class_codes_distinct() {
+    assert_eq(class_code(&MutexFast), 0);
+    assert_eq(class_code(&MutexRecursive), 1);
+    assert_eq(class_code(&MutexStaticMain), 2);
+}
+
+fn test_class_static_predicate() {
+    assert(!is_static(&MutexFast));
+    assert(!is_static(&MutexRecursive));
+    assert(is_static(&MutexStaticMain));
+}
+
+fn test_class_recursive_predicate() {
+    assert(is_recursive(&MutexRecursive));
+    assert(!is_recursive(&MutexFast));
+}
+
+fn test_state_unheld_initial() {
+    let s = state_unheld(MutexFast);
+    assert(!s.is_held());
+    assert(!s.held_by(1 as Int64));
+}
+
+fn test_state_enter_then_held() {
+    let mut s = state_unheld(MutexFast);
+    assert(s.enter(7 as Int64));
+    assert(s.is_held());
+    assert(s.held_by(7 as Int64));
+}
+
+fn test_state_fast_reentrant_fails() {
+    let mut s = state_unheld(MutexFast);
+    assert(s.enter(7 as Int64));
+    assert(!s.enter(7 as Int64));   // fast cannot re-enter
+}
+
+fn test_state_recursive_reenter_succeeds() {
+    let mut s = state_unheld(MutexRecursive);
+    assert(s.enter(7 as Int64));
+    assert(s.enter(7 as Int64));
+    assert(s.held_by(7 as Int64));
+}
+
+fn test_state_other_thread_blocked() {
+    let mut s = state_unheld(MutexRecursive);
+    let _ = s.enter(7 as Int64);
+    assert(!s.would_acquire(8 as Int64));
+}
+
+fn test_state_leave_decrements() {
+    let mut s = state_unheld(MutexRecursive);
+    let _ = s.enter(7 as Int64);
+    let _ = s.enter(7 as Int64);
+    assert(s.leave(7 as Int64));
+    assert(s.is_held());            // still held once
+    assert(s.leave(7 as Int64));
+    assert(!s.is_held());
+}
+
+fn test_state_leave_wrong_thread_fails() {
+    let mut s = state_unheld(MutexFast);
+    let _ = s.enter(7 as Int64);
+    assert(!s.leave(8 as Int64));
+}
+
+fn test_noop_methods_always_succeed() {
+    let mut m = noop_methods();
+    let id = m.alloc(MutexFast);
+    assert(m.enter(id, 1 as Int64));
+    assert(m.leave(id, 1 as Int64));
+    assert(m.held(id, 1 as Int64));
+}
+
+fn test_tracking_methods_alloc_increments() {
+    let mut m = tracking_methods();
+    let _ = m.alloc(MutexFast);
+    let _ = m.alloc(MutexRecursive);
+    assert_eq(m.allocated_count(), 2);
+}
+
+fn test_tracking_methods_try_enter_blocks_other_thread() {
+    let mut m = tracking_methods();
+    let id = m.alloc(MutexFast);
+    let _ = m.enter(id, 1 as Int64);
+    assert(!m.try_enter(id, 2 as Int64));
+}
+
+fn main() {
+    test_class_codes_distinct();
+    test_class_static_predicate();
+    test_class_recursive_predicate();
+    test_state_unheld_initial();
+    test_state_enter_then_held();
+    test_state_fast_reentrant_fails();
+    test_state_recursive_reenter_succeeds();
+    test_state_other_thread_blocked();
+    test_state_leave_decrements();
+    test_state_leave_wrong_thread_fails();
+    test_noop_methods_always_succeed();
+    test_tracking_methods_alloc_increments();
+    test_tracking_methods_try_enter_blocks_other_thread();
+}

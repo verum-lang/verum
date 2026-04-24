@@ -1,0 +1,68 @@
+// =============================================================================
+// mutex/state.vr — MutexState
+// =============================================================================
+// Spec: SQLite C API
+//
+// Models the held / not-held state of one mutex. Recursive mutexes
+// also track the per-thread acquisition count.
+// =============================================================================
+
+module core.database.sqlite.native.mutex.state;
+
+mount core.*;
+mount base.{Bool};
+mount core.database.sqlite.native.mutex.kind.{
+    MutexClass, MutexFast, MutexRecursive, is_recursive,
+};
+
+public type MutexState is {
+    class_kind: MutexClass,
+    /// Number of times the mutex has been entered minus the times it
+    /// has been left. 0 means unheld.
+    held_count: Int,
+    /// Owning thread id (0 ⇒ not held).
+    owner_thread_id: Int64,
+}
+
+public fn state_unheld(class_kind: MutexClass) -> MutexState {
+    MutexState {
+        class_kind: class_kind,
+        held_count: 0,
+        owner_thread_id: 0 as Int64,
+    }
+}
+
+implement MutexState {
+    public fn is_held(&self) -> Bool { self.held_count > 0 }
+
+    pub fn enter(&mut self, thread_id: Int64) -> Bool {
+        if self.is_held() && self.owner_thread_id != thread_id {
+            return false;    // contended — caller must wait
+        }
+        if self.is_held() && !is_recursive(&self.class_kind) {
+            return false;    // re-entry on non-recursive = misuse
+        }
+        self.owner_thread_id = thread_id;
+        self.held_count = self.held_count + 1;
+        true
+    }
+
+    /// Returns true if a try-lock would succeed.
+    pub fn would_acquire(&self, thread_id: Int64) -> Bool {
+        if !self.is_held() { return true; }
+        if self.owner_thread_id == thread_id && is_recursive(&self.class_kind) { return true; }
+        false
+    }
+
+    pub fn leave(&mut self, thread_id: Int64) -> Bool {
+        if !self.is_held() { return false; }
+        if self.owner_thread_id != thread_id { return false; }
+        self.held_count = self.held_count - 1;
+        if self.held_count == 0 { self.owner_thread_id = 0 as Int64; }
+        true
+    }
+
+    pub fn held_by(&self, thread_id: Int64) -> Bool {
+        self.is_held() && self.owner_thread_id == thread_id
+    }
+}

@@ -1,0 +1,26 @@
+// =============================================================================
+// core/database/sqlite/native/soft_heap/mod.vr
+// =============================================================================
+// Layer: 7 (façade — sqlite3_soft_heap_limit / sqlite3_hard_heap_limit)
+// Spec: SQLite C API — `sqlite3_soft_heap_limit64`, `sqlite3_hard_heap_limit64`
+//
+// Two heap-pressure thresholds:
+//
+//   * `soft`  — when allocation would exceed this, SQLite tries to
+//                reclaim memory (page cache eviction, scratch release)
+//                BEFORE failing the allocation. May be exceeded.
+//   * `hard`  — strict ceiling: allocation past this point returns
+//                SQLITE_NOMEM regardless of reclaim.
+//
+// Submodules:
+//   * `limit`     — Limit (current + high-water-mark)
+//   * `pressure`  — PressureCallback protocol — caller registers a
+//                    handler that receives memory pressure events
+//   * `engine`    — SoftHeapEngine: enforces `try_allocate(bytes)` against both limits
+// =============================================================================
+
+module core.database.sqlite.native.soft_heap;
+
+public module limit;
+public module pressure;
+public module engine;

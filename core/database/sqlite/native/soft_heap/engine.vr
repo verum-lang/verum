@@ -1,0 +1,141 @@
+// =============================================================================
+// soft_heap/engine.vr — SoftHeapEngine
+// =============================================================================
+// Spec: SQLite C API
+//
+// Two-tier limit enforcement. `try_allocate(bytes)` walks:
+//
+//   1. If both limits disabled → succeed
+//   2. If `used + bytes ≤ soft.threshold` → succeed
+//   3. Fire SoftThresholdCrossing — handler reclaims K bytes; retry
+//   4. If `used + bytes ≤ hard.threshold` (after reclaim) → succeed
+//   5. Fire HardThresholdImminent → handler reclaims more; retry
+//   6. If still over hard → return AllocOutcome.Refused (NOMEM)
+// =============================================================================
+
+module core.database.sqlite.native.soft_heap.engine;
+
+mount core.*;
+mount base.{Bool};
+mount core.database.sqlite.native.soft_heap.limit.{
+    Limit, limit_unset,
+};
+mount core.database.sqlite.native.soft_heap.pressure.{
+    PressureEvent, PeSoftThresholdCrossing, PeHardThresholdImminent,
+};
+
+// -----------------------------------------------------------------------------
+// AllocOutcome
+// -----------------------------------------------------------------------------
+
+public type AllocOutcome is
+      AoGranted
+    | AoGrantedAfterReclaim(Int64)             // bytes reclaimed
+    | AoRefusedSoft                            // handler refused / no handler
+    | AoRefusedHard;
+
+public fn outcome_kind_name(o: &AllocOutcome) -> base.Text {
+    match o {
+        AoGranted                  => "granted".clone(),
+        AoGrantedAfterReclaim(_)   => "granted_after_reclaim".clone(),
+        AoRefusedSoft              => "refused_soft".clone(),
+        AoRefusedHard              => "refused_hard".clone(),
+    }
+}
+
+public fn is_granted(o: &AllocOutcome) -> Bool {
+    match o {
+        AoGranted | AoGrantedAfterReclaim(_) => true,
+        _ => false,
+    }
+}
+
+// -----------------------------------------------------------------------------
+// SoftHeapEngine
+// -----------------------------------------------------------------------------
+
+public type SoftHeapEngine is {
+    soft: Limit,
+    hard: Limit,
+}
+
+public fn engine_new() -> SoftHeapEngine {
+    SoftHeapEngine { soft: limit_unset(), hard: limit_unset() }
+}
+
+implement SoftHeapEngine {
+    pub fn set_soft_limit(&mut self, threshold: Int64) -> Int64 {
+        let prev = self.soft.set_threshold(threshold);
+        prev
+    }
+
+    pub fn set_hard_limit(&mut self, threshold: Int64) -> Int64 {
+        let prev = self.hard.set_threshold(threshold);
+        prev
+    }
+
+    pub fn used_bytes(&self) -> Int64 { self.soft.used }
+
+    /// Plan an allocation. The host applies the returned reclaim hint
+    /// and re-invokes if necessary.
+    pub fn plan(&self, bytes: Int64) -> AllocOutcome {
+        if self.soft.would_exceed(bytes) {
+            if self.hard.would_exceed(bytes) {
+                return AoRefusedHard;
+            }
+            return AoRefusedSoft;
+        }
+        AoGranted
+    }
+
+    /// Apply a reclaim — the soft+hard limits drop their `used` by N.
+    pub fn note_reclaim(&mut self, bytes: Int64) {
+        self.soft.sub(bytes);
+        self.hard.sub(bytes);
+    }
+
+    /// Commit an allocation — both limits' `used` rises.
+    pub fn note_allocation(&mut self, bytes: Int64) {
+        self.soft.add(bytes);
+        self.hard.add(bytes);
+    }
+
+    pub fn note_free(&mut self, bytes: Int64) {
+        self.soft.sub(bytes);
+        self.hard.sub(bytes);
+    }
+
+    /// Convenience: whole try-with-reclaim pipeline. Returns the outcome
+    /// + bytes reclaimed during the attempt.
+    pub fn try_allocate(&mut self, bytes: Int64, reclaim_callback: fn(&PressureEvent) -> Int64) -> AllocOutcome {
+        match self.plan(bytes) {
+            AoGranted => {
+                self.note_allocation(bytes);
+                return AoGranted;
+            }
+            AoRefusedSoft => {
+                let used = self.soft.used;
+                let event = PeSoftThresholdCrossing(used, bytes);
+                let reclaimed = (reclaim_callback)(&event);
+                if reclaimed > (0 as Int64) { self.note_reclaim(reclaimed); }
+                if !self.soft.would_exceed(bytes) {
+                    self.note_allocation(bytes);
+                    return AoGrantedAfterReclaim(reclaimed);
+                }
+                AoRefusedSoft
+            }
+            AoRefusedHard => {
+                let used = self.hard.used;
+                let event = PeHardThresholdImminent(used, bytes);
+                let reclaimed = (reclaim_callback)(&event);
+                if reclaimed > (0 as Int64) { self.note_reclaim(reclaimed); }
+                if !self.hard.would_exceed(bytes) {
+                    self.note_allocation(bytes);
+                    return AoGrantedAfterReclaim(reclaimed);
+                }
+                AoRefusedHard
+            }
+            AoGrantedAfterReclaim(_) => AoGranted,
+        }
+    }
+}

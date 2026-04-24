@@ -1,0 +1,26 @@
+// =============================================================================
+// core/database/sqlite/native/mutex/mod.vr
+// =============================================================================
+// Layer: 7+ (cross-cutting)
+// Spec: SQLite C API — `sqlite3_mutex_alloc`, `sqlite3_mutex_enter`,
+// `sqlite3_mutex_try`, `sqlite3_mutex_leave`, `sqlite3_mutex_held`,
+// `sqlite3_mutex_notheld`, `sqlite3_mutex_methods`.
+//
+// 11 mutex classes:
+//
+//   * `MutexFast`        — non-recursive (callee-locks-once)
+//   * `MutexRecursive`   — recursive (callee-locks-N-times-must-unlock-N)
+//   * Eight `MutexStatic*` slots used internally — STATIC_MAIN, STATIC_MEM,
+//     STATIC_OPEN, STATIC_PRNG, STATIC_LRU, STATIC_PMEM, STATIC_APP1..3
+//
+// Submodules:
+//   * `kind`     — MutexClass taxonomy + sqlite3.h numeric codes
+//   * `state`    — MutexState (LkUnheld/LkHeldOnce/LkHeldRecursive)
+//   * `methods`  — MutexMethods protocol (alloc/enter/try/leave/held)
+// =============================================================================
+
+module core.database.sqlite.native.mutex;
+
+public module kind;
+public module state;
+public module methods;
