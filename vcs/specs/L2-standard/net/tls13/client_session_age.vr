@@ -1,0 +1,105 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: tls13, client_session, resumption, rfc8446_4_6_1
+// @timeout: 15000
+// @expected-exit: 0
+
+// RFC 8446 §4.6.1 ClientSession age helpers:
+//
+//   * is_fresh(now) — true iff elapsed ≤ ticket_lifetime_sec.
+//   * obfuscated_age(now) — elapsed_ms + ticket_age_add (mod 2^32).
+//     The obfuscator hides the precise wall-clock age from a passive
+//     observer while still letting the server recover it after
+//     subtracting the agreed-upon add value.
+
+mount core.*;
+mount core.collections.List;
+mount core.time.instant.{Instant};
+mount core.time.duration.{Duration};
+mount core.net.tls13.cipher_suite.{CipherSuite};
+mount core.net.tls13.handshake.resumption.{ClientSession};
+
+fn make_session(
+    created_at: Instant,
+    lifetime_sec: UInt32,
+    age_add: UInt32,
+) -> ClientSession {
+    ClientSession {
+        ticket:              [0xAA_u8; 32].to_list(),
+        ticket_age_add:      age_add,
+        ticket_lifetime_sec: lifetime_sec,
+        cipher_suite:        CipherSuite.TlsAes128GcmSha256,
+        resumption_secret:   [0xBB_u8; 32].to_list(),
+        max_early_data_size: 0_u32,
+        created_at:          created_at,
+        ticket_nonce:        [0xCC_u8; 8].to_list(),
+    }
+}
+
+fn session_within_lifetime_is_fresh() {
+    let t0 = Instant.now();
+    let s = make_session(t0.clone(), 3_600_u32, 0_u32);
+    // Still within the 1-hour lifetime 30 minutes in.
+    let t_mid = t0.checked_add(Duration.from_secs(1_800)).unwrap();
+    assert(s.is_fresh(t_mid));
+}
+
+fn session_past_lifetime_is_not_fresh() {
+    let t0 = Instant.now();
+    let s = make_session(t0.clone(), 60_u32, 0_u32);
+    // 61 seconds later — past the 60s cap.
+    let t_after = t0.checked_add(Duration.from_secs(61)).unwrap();
+    assert(s.is_fresh(t_after) == false);
+}
+
+fn session_exactly_at_lifetime_is_still_fresh() {
+    // is_fresh uses `elapsed_sec <= ticket_lifetime_sec` (inclusive).
+    let t0 = Instant.now();
+    let s = make_session(t0.clone(), 60_u32, 0_u32);
+    let t_boundary = t0.checked_add(Duration.from_secs(60)).unwrap();
+    assert(s.is_fresh(t_boundary));
+}
+
+fn obfuscated_age_adds_ticket_age_add() {
+    let t0 = Instant.now();
+    let s = make_session(t0.clone(), 3_600_u32, 0xDEAD_BEEF_u32);
+    // At t0 elapsed_ms = 0, so obfuscated_age = age_add.
+    assert(s.obfuscated_age(t0) == 0xDEAD_BEEF_u32);
+}
+
+fn obfuscated_age_accumulates_elapsed_ms_linearly() {
+    let t0 = Instant.now();
+    let s = make_session(t0.clone(), 3_600_u32, 0_u32);
+    // At t0 + 1000ms, age_add = 0 → obfuscated_age = 1000.
+    let t_1s = t0.checked_add(Duration.from_millis(1000)).unwrap();
+    let age = s.obfuscated_age(t_1s);
+    // Allow ±a few ms for the Instant arithmetic jitter.
+    assert(age >= 900_u32);
+    assert(age <= 1_100_u32);
+}
+
+fn obfuscated_age_survives_u32_wrap() {
+    let t0 = Instant.now();
+    // age_add near u32 max — obfuscated_age adds elapsed_ms and wraps.
+    let s = make_session(t0.clone(), 3_600_u32, 0xFFFF_FFFF_u32);
+    // elapsed_ms = 0 → obfuscated_age = 0xFFFF_FFFF exactly.
+    assert(s.obfuscated_age(t0) == 0xFFFF_FFFF_u32);
+    // At t + ~2ms, obfuscated_age wraps past 2^32 (0xFFFF_FFFF + 2 = 0x0000_0001).
+    let t_2ms = t0.checked_add(Duration.from_millis(2)).unwrap();
+    let age = s.obfuscated_age(t_2ms);
+    // Allow ±2ms jitter — result is small unsigned after wrap.
+    assert(age <= 5_u32);
+}
+
+@main
+public fn main() -> Int {
+    session_within_lifetime_is_fresh();
+    session_past_lifetime_is_not_fresh();
+    session_exactly_at_lifetime_is_still_fresh();
+    obfuscated_age_adds_ticket_age_add();
+    obfuscated_age_accumulates_elapsed_ms_linearly();
+    obfuscated_age_survives_u32_wrap();
+    print("RFC 8446 §4.6.1 ClientSession age helpers verified");
+    0
+}
