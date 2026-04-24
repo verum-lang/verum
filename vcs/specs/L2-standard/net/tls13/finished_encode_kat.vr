@@ -1,0 +1,110 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: tls13, handshake, finished, encode, rfc8446_4_4_4
+// @timeout: 15000
+// @expected-exit: 0
+
+// RFC 8446 §4.4.4 Finished + §4.5 EndOfEarlyData + §4.6.3 KeyUpdate
+// handshake-message wire encoding:
+//
+//   Handshake {
+//       HandshakeType msg_type;       // uint8
+//       uint24        length;         // big-endian u24 body length
+//       select (msg_type) { ...body... }
+//   }
+//
+// Finished body is just verify_data bytes (no inner length prefix).
+// EndOfEarlyData body is empty.
+// KeyUpdate body is 1 byte: request_update (0 or 1).
+
+mount core.*;
+mount core.collections.List;
+mount core.net.tls13.handshake.codec.{CodecError};
+mount core.net.tls13.handshake.messages.{
+    HandshakeMessage, Finished, KeyUpdate, KeyUpdateRequest,
+    encode_handshake,
+    HST_FINISHED, HST_END_OF_EARLY_DATA, HST_KEY_UPDATE,
+};
+
+fn finished_sha256_32_byte_body() {
+    // verify_data = 32 bytes of 0xAB.
+    let fin = Finished {
+        verify_data: [0xAB_u8; 32].to_list(),
+    };
+    let mut out: List<Byte> = [];
+    encode_handshake(&HandshakeMessage.FinishedMsg(fin), &mut out).unwrap();
+    // 4-byte header (1 type + 3 length) + 32 body = 36 bytes.
+    assert(out.len() == 36);
+    assert(out[0] == HST_FINISHED);          // 20
+    // length = 32 → 0x00 0x00 0x20
+    assert(out[1] == 0x00_u8);
+    assert(out[2] == 0x00_u8);
+    assert(out[3] == 0x20_u8);
+    // First and last body bytes.
+    assert(out[4]  == 0xAB_u8);
+    assert(out[35] == 0xAB_u8);
+}
+
+fn finished_sha384_48_byte_body() {
+    let fin = Finished {
+        verify_data: [0xCD_u8; 48].to_list(),
+    };
+    let mut out: List<Byte> = [];
+    encode_handshake(&HandshakeMessage.FinishedMsg(fin), &mut out).unwrap();
+    // 4 + 48 = 52.
+    assert(out.len() == 52);
+    // length = 48 → 0x00 0x00 0x30
+    assert(out[1] == 0x00_u8);
+    assert(out[2] == 0x00_u8);
+    assert(out[3] == 0x30_u8);
+}
+
+fn end_of_early_data_has_empty_body() {
+    let mut out: List<Byte> = [];
+    encode_handshake(&HandshakeMessage.EndOfEarlyDataMsg, &mut out).unwrap();
+    // Just the 4-byte header: type=5, length=0.
+    assert(out.len() == 4);
+    assert(out[0] == HST_END_OF_EARLY_DATA);   // 5
+    assert(out[1] == 0x00_u8);
+    assert(out[2] == 0x00_u8);
+    assert(out[3] == 0x00_u8);
+}
+
+fn key_update_requested_has_one_body_byte() {
+    let ku = KeyUpdate { request_update: KeyUpdateRequest.UpdateRequested };
+    let mut out: List<Byte> = [];
+    encode_handshake(&HandshakeMessage.KeyUpdateMsg(ku), &mut out).unwrap();
+    assert(out.len() == 5);
+    assert(out[0] == HST_KEY_UPDATE);          // 24
+    assert(out[1] == 0x00_u8);
+    assert(out[2] == 0x00_u8);
+    assert(out[3] == 0x01_u8);                 // length = 1
+    assert(out[4] == 0x01_u8);                 // UpdateRequested = 1
+}
+
+fn key_update_not_requested_has_zero_body_byte() {
+    let ku = KeyUpdate { request_update: KeyUpdateRequest.UpdateNotRequested };
+    let mut out: List<Byte> = [];
+    encode_handshake(&HandshakeMessage.KeyUpdateMsg(ku), &mut out).unwrap();
+    assert(out.len() == 5);
+    assert(out[4] == 0x00_u8);
+}
+
+fn handshake_type_codepoints_match_rfc() {
+    assert(HST_FINISHED           == 20_u8);
+    assert(HST_END_OF_EARLY_DATA  == 5_u8);
+    assert(HST_KEY_UPDATE         == 24_u8);
+}
+
+@main
+public fn main() -> Int {
+    finished_sha256_32_byte_body();
+    finished_sha384_48_byte_body();
+    end_of_early_data_has_empty_body();
+    key_update_requested_has_one_body_byte();
+    key_update_not_requested_has_zero_body_byte();
+    handshake_type_codepoints_match_rfc();
+    print("RFC 8446 §4 Finished/EndOfEarlyData/KeyUpdate handshake-wire encode verified");
+    0
+}
