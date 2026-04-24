@@ -1,0 +1,155 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: quic, frame, new_connection_id, retire_connection_id, encode, rfc9000_19_15, rfc9000_19_16
+// @timeout: 15000
+// @expected-exit: 0
+
+// RFC 9000 §19.15 NEW_CONNECTION_ID frame (Type = 0x18):
+//
+//   NEW_CONNECTION_ID Frame {
+//       Type (i) = 0x18,
+//       Sequence Number (i),
+//       Retire Prior To (i),
+//       Length (8),                        -- raw u8, NOT varint
+//       Connection ID (8..160 bits),
+//       Stateless Reset Token (128),       -- 16 fixed bytes
+//   }
+//
+// §19.16 RETIRE_CONNECTION_ID frame (Type = 0x19):
+//
+//   RETIRE_CONNECTION_ID Frame {
+//       Type (i) = 0x19,
+//       Sequence Number (i),
+//   }
+//
+// Note: `retire_prior_to <= sequence_number` (§19.15 constraint) —
+// enforced at higher layers, not the encoder.
+
+mount core.*;
+mount core.collections.List;
+mount core.net.quic.frame.{Frame, encode_frame, decode_frame};
+
+fn new_connection_id_minimum_byte_exact() {
+    // seq=3, retire_prior_to=1, 4-byte CID, all-zero reset token.
+    // Wire:
+    //   [0] type = 0x18
+    //   [1] seq varint = 0x03
+    //   [2] retire_prior_to varint = 0x01
+    //   [3] CID len (raw u8) = 0x04
+    //   [4..8] CID bytes
+    //   [8..24] 16-byte reset token
+    let cid: List<Byte> = [0xAA_u8, 0xBB_u8, 0xCC_u8, 0xDD_u8];
+    let token: [Byte; 16] = [0_u8; 16];
+    let f = Frame.NewConnectionId {
+        sequence_number:       3_u64,
+        retire_prior_to:       1_u64,
+        connection_id:         cid,
+        stateless_reset_token: token,
+    };
+    let mut out: List<Byte> = [];
+    let _ = encode_frame(&f, &mut out);
+    // Total = 1 type + 1 seq + 1 retire + 1 cid_len + 4 cid + 16 token = 24.
+    assert(out.len() == 24);
+    assert(out[0] == 0x18_u8);        // type = NEW_CONNECTION_ID
+    assert(out[1] == 0x03_u8);        // seq
+    assert(out[2] == 0x01_u8);        // retire_prior_to
+    assert(out[3] == 0x04_u8);        // CID length (raw u8)
+    assert(out[4] == 0xAA_u8 && out[5] == 0xBB_u8 && out[6] == 0xCC_u8 && out[7] == 0xDD_u8);
+    // Reset token spans bytes [8..=23]; all zero.
+    let mut i: Int = 8;
+    while i < 24 {
+        assert(out[i] == 0x00_u8);
+        i = i + 1;
+    }
+}
+
+fn new_connection_id_stateless_reset_token_preserved() {
+    let cid: List<Byte> = [0x01_u8];    // minimum valid CID length (1 byte)
+    let mut token: [Byte; 16] = [0_u8; 16];
+    let mut i: Int = 0;
+    while i < 16 { token[i] = (0x40_u8 | (i as Byte)); i = i + 1; }
+    let f = Frame.NewConnectionId {
+        sequence_number:       0_u64,
+        retire_prior_to:       0_u64,
+        connection_id:         cid,
+        stateless_reset_token: token,
+    };
+    let mut out: List<Byte> = [];
+    let _ = encode_frame(&f, &mut out);
+    // Layout: 1+1+1+1+1+16 = 21.
+    assert(out.len() == 21);
+    assert(out[3] == 0x01_u8);        // CID length = 1
+    assert(out[4] == 0x01_u8);        // CID byte
+    // Check first+last token byte are distinct and match their generation pattern.
+    assert(out[5]  == 0x40_u8);        // first reset-token byte
+    assert(out[20] == 0x4F_u8);        // last reset-token byte (0x40 | 15)
+}
+
+fn retire_connection_id_byte_exact() {
+    // RETIRE with seq=7.  Wire: 0x19 0x07.
+    let f = Frame.RetireConnectionId(7_u64);
+    let mut out: List<Byte> = [];
+    let _ = encode_frame(&f, &mut out);
+    assert(out.len() == 2);
+    assert(out[0] == 0x19_u8);
+    assert(out[1] == 0x07_u8);
+}
+
+fn new_connection_id_decode_roundtrip() {
+    let cid: List<Byte> = [0xDE_u8, 0xAD_u8, 0xBE_u8, 0xEF_u8, 0xFA_u8, 0xCE_u8, 0xCA_u8, 0xFE_u8];
+    let mut token: [Byte; 16] = [0_u8; 16];
+    let mut i: Int = 0;
+    while i < 16 { token[i] = 0xA5_u8; i = i + 1; }
+    let f = Frame.NewConnectionId {
+        sequence_number:       5_u64,
+        retire_prior_to:       2_u64,
+        connection_id:         cid.clone(),
+        stateless_reset_token: token,
+    };
+    let mut wire: List<Byte> = [];
+    let _ = encode_frame(&f, &mut wire);
+    let (decoded, _) = decode_frame(wire.as_slice(), 0).unwrap();
+    match decoded {
+        Frame.NewConnectionId {
+            sequence_number, retire_prior_to, connection_id, stateless_reset_token
+        } => {
+            assert(sequence_number == 5_u64);
+            assert(retire_prior_to == 2_u64);
+            assert(connection_id.len() == 8);
+            let mut j: Int = 0;
+            while j < 8 {
+                assert(connection_id[j] == cid[j]);
+                j = j + 1;
+            }
+            let mut k: Int = 0;
+            while k < 16 {
+                assert(stateless_reset_token[k] == 0xA5_u8);
+                k = k + 1;
+            }
+        },
+        _ => panic("expected NewConnectionId"),
+    }
+}
+
+fn retire_connection_id_decode_roundtrip() {
+    let f = Frame.RetireConnectionId(42_u64);
+    let mut wire: List<Byte> = [];
+    let _ = encode_frame(&f, &mut wire);
+    let (decoded, _) = decode_frame(wire.as_slice(), 0).unwrap();
+    match decoded {
+        Frame.RetireConnectionId(seq) => assert(seq == 42_u64),
+        _ => panic("expected RetireConnectionId"),
+    }
+}
+
+@main
+public fn main() -> Int {
+    new_connection_id_minimum_byte_exact();
+    new_connection_id_stateless_reset_token_preserved();
+    retire_connection_id_byte_exact();
+    new_connection_id_decode_roundtrip();
+    retire_connection_id_decode_roundtrip();
+    print("RFC 9000 §19.15 NEW_CONNECTION_ID + §19.16 RETIRE_CONNECTION_ID encode verified");
+    0
+}

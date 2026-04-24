@@ -1,0 +1,168 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: quic, frame, ack, encode, rfc9000_19_3
+// @timeout: 15000
+// @expected-exit: 0
+
+// RFC 9000 §19.3 ACK frame wire body (Type = 0x02, or 0x03 with ECN):
+//
+//   ACK Frame {
+//       Type (i) = 0x02..0x03,
+//       Largest Acknowledged (i),
+//       ACK Delay (i),
+//       ACK Range Count (i),
+//       First ACK Range (i),                -- length of first range
+//       ACK Range (..) ...,                 -- (gap, range_length) pairs
+//       [ECN Counts (..)],                  -- three varints when type = 0x03
+//   }
+//
+// The first range [Largest - first_len .. Largest] is always present.
+// Subsequent ranges follow descending PN order; `gap` between range i
+// and range i+1 satisfies `prev.smallest = curr.largest + gap + 2`
+// (§19.3.1).
+//
+// All values here are small enough to encode as a 1-byte QUIC varint,
+// so byte positions correspond to logical field positions 1-to-1.
+
+mount core.*;
+mount core.collections.List;
+mount core.net.quic.frame.{
+    Frame, AckRange, EcnCounts, encode_frame, decode_frame,
+};
+
+fn ack_frame_no_ranges_no_ecn_byte_exact() {
+    // largest=10, ack_delay=5, first range = {smallest:10, largest:10}
+    //   -> first_len = 0, range_count = 0.
+    // Wire: 0x02 0x0A 0x05 0x00 0x00
+    let ranges: List<AckRange> = [ AckRange { smallest: 10_u64, largest: 10_u64 } ];
+    let f = Frame.AckFrame {
+        largest_acked: 10_u64,
+        ack_delay:     5_u64,
+        ranges:        ranges,
+        ecn:           None,
+    };
+    let mut out: List<Byte> = [];
+    let _ = encode_frame(&f, &mut out);
+    assert(out.len() == 5);
+    assert(out[0] == 0x02_u8);        // type = ACK
+    assert(out[1] == 0x0A_u8);        // largest = 10
+    assert(out[2] == 0x05_u8);        // ack_delay = 5
+    assert(out[3] == 0x00_u8);        // range_count = 0
+    assert(out[4] == 0x00_u8);        // first_range_len = 0
+}
+
+fn ack_frame_with_first_range_width_3() {
+    // largest=20, first range {smallest:17, largest:20} → first_len = 3.
+    let ranges: List<AckRange> = [ AckRange { smallest: 17_u64, largest: 20_u64 } ];
+    let f = Frame.AckFrame {
+        largest_acked: 20_u64,
+        ack_delay:     1_u64,
+        ranges:        ranges,
+        ecn:           None,
+    };
+    let mut out: List<Byte> = [];
+    let _ = encode_frame(&f, &mut out);
+    assert(out.len() == 5);
+    assert(out[0] == 0x02_u8);
+    assert(out[1] == 0x14_u8);        // 20
+    assert(out[2] == 0x01_u8);        // delay = 1
+    assert(out[3] == 0x00_u8);        // range_count = 0
+    assert(out[4] == 0x03_u8);        // first_len = 3
+}
+
+fn ack_frame_two_ranges_gap_between() {
+    // Two ranges descending:
+    //   [0] {smallest:17, largest:20} — reported first; first_len = 3
+    //   [1] {smallest:10, largest:15} — range_count = 1; len = 5
+    //   gap = prev.smallest - curr.largest - 2 = 17 - 15 - 2 = 0
+    // Wire: 0x02 0x14 0x00 0x01 0x03 0x00 0x05
+    let ranges: List<AckRange> = [
+        AckRange { smallest: 17_u64, largest: 20_u64 },
+        AckRange { smallest: 10_u64, largest: 15_u64 },
+    ];
+    let f = Frame.AckFrame {
+        largest_acked: 20_u64,
+        ack_delay:     0_u64,
+        ranges:        ranges,
+        ecn:           None,
+    };
+    let mut out: List<Byte> = [];
+    let _ = encode_frame(&f, &mut out);
+    assert(out.len() == 7);
+    assert(out[0] == 0x02_u8);
+    assert(out[1] == 0x14_u8);        // largest
+    assert(out[2] == 0x00_u8);        // delay
+    assert(out[3] == 0x01_u8);        // range_count = 1
+    assert(out[4] == 0x03_u8);        // first_len = 3
+    assert(out[5] == 0x00_u8);        // gap = 0
+    assert(out[6] == 0x05_u8);        // range_len = 5
+}
+
+fn ack_ecn_type_is_three_and_three_trailing_varints() {
+    // Smallest wire ACK-ECN: largest=3, delay=0, single range, ECN 0/0/0.
+    // Wire: 0x03 0x03 0x00 0x00 0x00 [ect0 ect1 ce each 0x00] = 8 bytes.
+    let ranges: List<AckRange> = [ AckRange { smallest: 3_u64, largest: 3_u64 } ];
+    let f = Frame.AckFrame {
+        largest_acked: 3_u64,
+        ack_delay:     0_u64,
+        ranges:        ranges,
+        ecn:           Some(EcnCounts { ect0: 0_u64, ect1: 0_u64, ce: 0_u64 }),
+    };
+    let mut out: List<Byte> = [];
+    let _ = encode_frame(&f, &mut out);
+    assert(out.len() == 8);
+    assert(out[0] == 0x03_u8);        // type = ACK_ECN
+    assert(out[1] == 0x03_u8);        // largest
+    assert(out[5] == 0x00_u8);        // ect0
+    assert(out[6] == 0x00_u8);        // ect1
+    assert(out[7] == 0x00_u8);        // ce
+}
+
+fn ack_frame_decode_roundtrip() {
+    // Two ranges + ECN — ensure decode_frame reconstructs everything.
+    let ranges: List<AckRange> = [
+        AckRange { smallest: 17_u64, largest: 20_u64 },
+        AckRange { smallest: 10_u64, largest: 15_u64 },
+    ];
+    let f = Frame.AckFrame {
+        largest_acked: 20_u64,
+        ack_delay:     2_u64,
+        ranges:        ranges,
+        ecn:           Some(EcnCounts { ect0: 7_u64, ect1: 0_u64, ce: 1_u64 }),
+    };
+    let mut wire: List<Byte> = [];
+    let _ = encode_frame(&f, &mut wire);
+    let (decoded, _next) = decode_frame(wire.as_slice(), 0).unwrap();
+    match decoded {
+        Frame.AckFrame { largest_acked, ack_delay, ranges: dec_ranges, ecn } => {
+            assert(largest_acked == 20_u64);
+            assert(ack_delay == 2_u64);
+            assert(dec_ranges.len() == 2);
+            assert(dec_ranges[0].largest == 20_u64);
+            assert(dec_ranges[0].smallest == 17_u64);
+            assert(dec_ranges[1].largest == 15_u64);
+            assert(dec_ranges[1].smallest == 10_u64);
+            match ecn {
+                Some(c) => {
+                    assert(c.ect0 == 7_u64);
+                    assert(c.ect1 == 0_u64);
+                    assert(c.ce == 1_u64);
+                },
+                None => panic("ECN expected"),
+            }
+        },
+        _ => panic("expected AckFrame"),
+    }
+}
+
+@main
+public fn main() -> Int {
+    ack_frame_no_ranges_no_ecn_byte_exact();
+    ack_frame_with_first_range_width_3();
+    ack_frame_two_ranges_gap_between();
+    ack_ecn_type_is_three_and_three_trailing_varints();
+    ack_frame_decode_roundtrip();
+    print("RFC 9000 §19.3 ACK frame encode byte-exact KAT verified");
+    0
+}
