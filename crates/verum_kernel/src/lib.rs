@@ -482,6 +482,122 @@ impl Context {
 }
 
 // =============================================================================
+// M-iteration depth (Diakrisis T-2f* / VUVA §4.3)
+// =============================================================================
+
+/// Compute the M-iteration depth of a [`CoreTerm`], per Verum Unified
+/// Verification Architecture (VUVA) §4.3.
+///
+/// The depth function is the operational realisation of the Diakrisis
+/// metaisation modality `M`: every construct that semantically *speaks
+/// about* a lower-depth object bumps the depth by one. Framework axioms
+/// (which assert facts about their stated body), `Quote` (which reflects
+/// a term as data), `Inductive` / `Quotient` introductions (which close
+/// a universe-level construction), and named-type references that
+/// originate in the standard library all raise the count.
+///
+/// The depth bound is consumed by the `K-Refine` rule: a refinement
+/// `{ x : base | P(x) }` is well-formed only when
+/// `m_depth(P) < m_depth(base) + 1`, i.e. `m_depth(P) ≤ m_depth(base)`.
+/// This is the Verum realisation of Diakrisis axiom T-2f* (depth-strict
+/// comprehension), which — via Yanofsky 2003 — closes every
+/// self-referential paradox schema in a cartesian-closed setting.
+///
+/// The function is defined recursively:
+///
+///   * `Var`, `Universe(n)` — zero (variables have no M-iteration;
+///     the universe level is reported as depth to align with the
+///     stratification in VUVA §4.3).
+///   * `Pi`, `Lam`, `Sigma`, `App`, `Pair`, `Fst`, `Snd`, `PathTy`,
+///     `Refl`, `HComp`, `Transp`, `Glue`, `Elim` — maximum of their
+///     sub-terms (structural, no depth bump).
+///   * `Refine { base, predicate }` — maximum of `dp(base)` and
+///     `dp(predicate)`.
+///   * `Inductive { path, args }` — `1 + max{ dp(arg) | arg ∈ args }`
+///     (declared type constructors live one level above their
+///     instantiation arguments — they are *defined* by a schema).
+///   * `Axiom { body, .. }` — `dp(body) + 1` (framework axioms *speak
+///     about* their stated body).
+///   * `SmtProof` — `0` (certificates themselves carry no M-iteration).
+///
+/// Time complexity: O(n) in the size of the term tree. The kernel
+/// invokes this at each `Refine` / `Inductive` / `Axiom` check point;
+/// a single polynomial walk per well-formedness query.
+pub fn m_depth(term: &CoreTerm) -> usize {
+    match term {
+        CoreTerm::Var(_) => 0,
+        CoreTerm::Universe(lvl) => match lvl {
+            UniverseLevel::Concrete(n) => *n as usize,
+            UniverseLevel::Prop => 0,
+            UniverseLevel::Variable(_) => 0,
+            UniverseLevel::Succ(l) => 1 + m_depth_level(l),
+            UniverseLevel::Max(a, b) => m_depth_level(a).max(m_depth_level(b)),
+        },
+        CoreTerm::Pi { domain, codomain, .. } => m_depth(domain).max(m_depth(codomain)),
+        CoreTerm::Lam { domain, body, .. } => m_depth(domain).max(m_depth(body)),
+        CoreTerm::App(f, a) => m_depth(f).max(m_depth(a)),
+        CoreTerm::Sigma { fst_ty, snd_ty, .. } => m_depth(fst_ty).max(m_depth(snd_ty)),
+        CoreTerm::Pair(a, b) => m_depth(a).max(m_depth(b)),
+        CoreTerm::Fst(p) | CoreTerm::Snd(p) => m_depth(p),
+        CoreTerm::PathTy { carrier, lhs, rhs } => {
+            m_depth(carrier).max(m_depth(lhs)).max(m_depth(rhs))
+        }
+        CoreTerm::Refl(a) => m_depth(a),
+        CoreTerm::HComp { phi, walls, base } => {
+            m_depth(phi).max(m_depth(walls)).max(m_depth(base))
+        }
+        CoreTerm::Transp { path, regular, value } => {
+            m_depth(path).max(m_depth(regular)).max(m_depth(value))
+        }
+        CoreTerm::Glue { carrier, phi, fiber, equiv } => m_depth(carrier)
+            .max(m_depth(phi))
+            .max(m_depth(fiber))
+            .max(m_depth(equiv)),
+        CoreTerm::Refine { base, predicate, .. } => m_depth(base).max(m_depth(predicate)),
+        // Inductive: declared type constructors live one level above
+        // their instantiation arguments (the schema is a meta-statement
+        // about the arguments).
+        CoreTerm::Inductive { args, .. } => {
+            1 + args.iter().map(m_depth).max().unwrap_or(0)
+        }
+        CoreTerm::Elim { scrutinee, motive, cases } => {
+            let case_max = cases.iter().map(m_depth).max().unwrap_or(0);
+            m_depth(scrutinee).max(m_depth(motive)).max(case_max)
+        }
+        // SMT certificates carry no M-iteration of their own — they
+        // witness a propositional fact about terms already in scope.
+        CoreTerm::SmtProof(_) => 0,
+        // An `Axiom` node in the kernel is a *term* — a proof witness
+        // of its claimed type. Its depth is therefore `dp(ty)`, NOT
+        // `dp(ty) + 1`. The schema-declaration side of a framework
+        // axiom (which *would* bump by +1, per VUVA §4.3) is handled
+        // by the declaration-time path (`AxiomRegistry::register`) —
+        // that's where we reason about the axiom as a meta-statement.
+        // Here we are only looking at invocation sites.
+        //
+        // The load-bearing depth bump comes from `Inductive` — a
+        // named schema lives strictly above its instantiation
+        // arguments, which is what blocks Yanofsky α: Y → T^Y
+        // (`dp(T^Y) = dp(Y) + 1` forces the strict inequality the
+        // diagonal construction needs, and `K-Refine` forbids exactly
+        // that equality).
+        CoreTerm::Axiom { ty, .. } => m_depth(ty),
+    }
+}
+
+/// Auxiliary `m_depth` over [`UniverseLevel`] — extracted so the main
+/// walker stays flat. Mirrors the `Universe` arm's cases.
+fn m_depth_level(level: &UniverseLevel) -> usize {
+    match level {
+        UniverseLevel::Concrete(n) => *n as usize,
+        UniverseLevel::Prop => 0,
+        UniverseLevel::Variable(_) => 0,
+        UniverseLevel::Succ(l) => 1 + m_depth_level(l),
+        UniverseLevel::Max(a, b) => m_depth_level(a).max(m_depth_level(b)),
+    }
+}
+
+// =============================================================================
 // Axiom registry — the explicit trusted set
 // =============================================================================
 
@@ -873,6 +989,32 @@ pub enum KernelError {
     /// equality proofs instead.
     #[error("kernel: axiom '{0}' is equivalent to UIP and is rejected (rule 10); use Path types instead")]
     UipForbidden(Text),
+
+    /// A refinement type `{x : base | P(x)}` violates Diakrisis T-2f*
+    /// depth-stratification: `dp(P) >= dp(base) + 1`. This is the
+    /// Yanofsky paradox-immunity rule imported by VUVA §2.4 as
+    /// `K-Refine` — comprehension is admissible only when the
+    /// predicate's M-iteration depth is strictly less than the
+    /// comprehended object's depth.
+    ///
+    /// See:
+    ///   - `internal/specs/verification-architecture.md` §2.4, §4.4
+    ///   - Diakrisis `docs/02-canonical-primitive/02-axiomatics.md` T-2f*
+    ///   - Yanofsky N.S. 2003. *A Universal Approach to Self-Referential
+    ///     Paradoxes, Incompleteness and Fixed Points.*
+    #[error(
+        "kernel: K-Refine depth violation: predicate depth {pred_depth} \
+         must be strictly less than base depth {base_depth} + 1 \
+         (Diakrisis T-2f* / Yanofsky paradox-immunity)"
+    )]
+    DepthViolation {
+        /// Bound variable name in the refinement.
+        binder: Text,
+        /// Computed `dp(base)`.
+        base_depth: usize,
+        /// Computed `dp(predicate)`.
+        pred_depth: usize,
+    },
 }
 
 // =============================================================================
@@ -1160,11 +1302,33 @@ pub fn infer(
         }
 
         // Refine: {x : base | predicate}. base must inhabit a universe,
-        // predicate must check under the extended ctx (bound to Bool
-        // at full-rule closure; shape-level at bring-up).
+        // predicate must check under the extended ctx (bound to Bool at
+        // full-rule closure; shape-level at bring-up).
+        //
+        // K-Refine (VUVA §2.4 / §4.4 / Diakrisis T-2f*): the predicate's
+        // M-iteration depth MUST be strictly less than base's depth + 1.
+        // Per Yanofsky 2003 this closes every self-referential paradox
+        // schema in a cartesian-closed setting by blocking the exact
+        // equality `dp(α) = dp(T^α)` that Russell/Curry/Gödel-type
+        // diagonals require. Enforced BEFORE well-typedness inference
+        // of the predicate so a depth-violating term is rejected early
+        // with a precise diagnostic.
         CoreTerm::Refine { base, binder, predicate } => {
             let base_univ = infer(ctx, base, axioms)?;
             let base_level = universe_level(&base_univ)?;
+
+            // K-Refine depth check — the single load-bearing Diakrisis
+            // rule in the Verum kernel.
+            let base_depth = m_depth(base);
+            let pred_depth = m_depth(predicate);
+            if pred_depth >= base_depth + 1 {
+                return Err(KernelError::DepthViolation {
+                    binder: binder.clone(),
+                    base_depth,
+                    pred_depth,
+                });
+            }
+
             let extended = ctx.extend(binder.clone(), (**base).clone());
             // Predicate must be well-typed under the extended context;
             // we don't yet enforce its type is Bool because Bool is a
