@@ -1,0 +1,140 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: quic, stream, recv, read_path, rfc9000_3_2
+// @timeout: 15000
+// @expected-exit: 0
+
+// RFC 9000 §3.2 RecvStream read path — the app-facing consumer side:
+//
+//   on_stream_frame(offset, data, fin)   — out-of-order ingest
+//   read()                                — yields contiguous prefix
+//   close_read()                          — terminal DataRead / ResetRead
+//
+// Invariants:
+//   * read() yields bytes in stream order (reassembled prefix).
+//   * Out-of-order runs are held back until the gap fills.
+//   * Once bytes_read ≥ final_size the next read() returns is_fin=true
+//     and advances state to DataRecvd (from Recv or SizeKnown).
+//   * close_read() moves DataRecvd → DataRead, ResetRecvd → ResetRead.
+
+mount core.*;
+mount core.collections.List;
+mount core.net.quic.stream_sm.recv.{RecvStream, RecvState};
+
+fn in_order_read_drains_buffer() {
+    let mut s = RecvStream.new(0_u64, 1024_u64);
+    let data: List<Byte> = [0xAA_u8, 0xBB_u8, 0xCC_u8];
+    assert(s.on_stream_frame(0_u64, data.as_slice(), false).is_ok());
+    let (bytes, fin) = s.read();
+    assert(bytes.len() == 3);
+    assert(bytes[0] == 0xAA_u8);
+    assert(bytes[1] == 0xBB_u8);
+    assert(bytes[2] == 0xCC_u8);
+    // No FIN yet.
+    assert(fin == false);
+    // Second read drains nothing.
+    let (bytes2, _fin2) = s.read();
+    assert(bytes2.len() == 0);
+}
+
+fn out_of_order_frames_hold_until_gap_fills() {
+    let mut s = RecvStream.new(0_u64, 1024_u64);
+    // Frame arrives at offset 3 first (out-of-order).
+    let part_b: List<Byte> = [0x10_u8, 0x20_u8];
+    assert(s.on_stream_frame(3_u64, part_b.as_slice(), false).is_ok());
+    // read() yields nothing because the prefix [0..3) is missing.
+    let (bytes, _) = s.read();
+    assert(bytes.len() == 0);
+    // Now the prefix arrives.
+    let part_a: List<Byte> = [0x01_u8, 0x02_u8, 0x03_u8];
+    assert(s.on_stream_frame(0_u64, part_a.as_slice(), false).is_ok());
+    // read() drains all 5 bytes contiguously.
+    let (bytes2, _) = s.read();
+    assert(bytes2.len() == 5);
+    assert(bytes2[0] == 0x01_u8);
+    assert(bytes2[4] == 0x20_u8);
+}
+
+fn read_with_fin_transitions_to_data_recvd() {
+    let mut s = RecvStream.new(0_u64, 1024_u64);
+    let data: List<Byte> = [0x55_u8, 0x66_u8];
+    assert(s.on_stream_frame(0_u64, data.as_slice(), true).is_ok());
+    // FIN means final_size = 2.
+    let (bytes, fin) = s.read();
+    assert(bytes.len() == 2);
+    assert(fin);
+    // State transitioned into DataRecvd because bytes_read (2) >= final_size.
+    match s.state() {
+        RecvState.DataRecvd => {},
+        _ => panic("expected DataRecvd after read drained past fin"),
+    }
+    assert(s.is_finished() == false);
+}
+
+fn close_read_moves_data_recvd_to_data_read() {
+    let mut s = RecvStream.new(0_u64, 1024_u64);
+    let data: List<Byte> = [0x11_u8];
+    assert(s.on_stream_frame(0_u64, data.as_slice(), true).is_ok());
+    let _ = s.read();
+    match s.state() {
+        RecvState.DataRecvd => {},
+        _ => panic("precondition: DataRecvd"),
+    }
+    s.close_read();
+    match s.state() {
+        RecvState.DataRead => {},
+        _ => panic("close_read must move DataRecvd → DataRead"),
+    }
+    assert(s.is_finished());
+}
+
+fn close_read_moves_reset_recvd_to_reset_read() {
+    let mut s = RecvStream.new(0_u64, 1024_u64);
+    assert(s.on_reset(0x0A_u64, 0_u64).is_ok());
+    match s.state() {
+        RecvState.ResetRecvd => {},
+        _ => panic("precondition: ResetRecvd"),
+    }
+    s.close_read();
+    match s.state() {
+        RecvState.ResetRead => {},
+        _ => panic("close_read must move ResetRecvd → ResetRead"),
+    }
+    assert(s.is_finished());
+}
+
+fn close_read_is_noop_in_non_terminal_states() {
+    // Only DataRecvd / ResetRecvd advance via close_read. Recv stays Recv.
+    let mut s = RecvStream.new(0_u64, 1024_u64);
+    s.close_read();
+    match s.state() {
+        RecvState.Recv => {},
+        _ => panic("close_read must be no-op when Recv"),
+    }
+}
+
+fn repeated_read_is_idempotent_after_drain() {
+    let mut s = RecvStream.new(0_u64, 1024_u64);
+    let data: List<Byte> = [0xA0_u8, 0xB0_u8, 0xC0_u8, 0xD0_u8];
+    assert(s.on_stream_frame(0_u64, data.as_slice(), false).is_ok());
+    let (first, _) = s.read();
+    assert(first.len() == 4);
+    let (second, _) = s.read();
+    assert(second.len() == 0);
+    let (third, _) = s.read();
+    assert(third.len() == 0);
+}
+
+@main
+public fn main() -> Int {
+    in_order_read_drains_buffer();
+    out_of_order_frames_hold_until_gap_fills();
+    read_with_fin_transitions_to_data_recvd();
+    close_read_moves_data_recvd_to_data_read();
+    close_read_moves_reset_recvd_to_reset_read();
+    close_read_is_noop_in_non_terminal_states();
+    repeated_read_is_idempotent_after_drain();
+    print("RFC 9000 §3.2 RecvStream read + close_read transitions verified");
+    0
+}
