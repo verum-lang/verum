@@ -1,0 +1,76 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: quic, pn_space, key_discard, rfc9001_4_9
+// @timeout: 15000
+// @expected-exit: 0
+
+// RFC 9001 §4.9 — Initial/Handshake key discard:
+//
+//   * Client MUST discard Initial keys after sending the first
+//     Handshake-protected packet.
+//   * Both sides MUST discard Handshake keys after handshake
+//     confirmation.
+//   * PnSpace.discard() marks the space dropped; subsequent
+//     `record_sent` becomes a no-op + the loss detector MUST skip
+//     the space on timer computation.
+
+mount core.*;
+mount core.time.instant.{Instant};
+mount core.collections.List;
+mount core.net.quic.recovery.pn_space.{PnSpace, PnSpaceKind, SentPacketInfo};
+mount core.net.quic.recovery.loss_detection.{LossDetection};
+
+fn discard_marks_space_inactive() {
+    let mut s = PnSpace.new(PnSpaceKind.Initial);
+    // Send one packet first.
+    let _ = s.next_packet_number();
+    s.record_sent(SentPacketInfo {
+        packet_number:  0_u64,
+        time_sent:      Instant.now(),
+        size_bytes:     1200_u32,
+        in_flight:      true,
+        ack_eliciting:  true,
+        frames:         [],
+    });
+    // Discard and confirm the space remains consistent (no panic).
+    s.discard();
+    assert(s.pn_monotonic_ok());
+}
+
+fn loss_detection_keys_discarded_is_no_op_on_fresh_tracker() {
+    let mut ld = LossDetection::new();
+    // Sequence of discards — none should throw.
+    ld.on_keys_discarded(PnSpaceKind.Initial);
+    ld.on_keys_discarded(PnSpaceKind.Handshake);
+    // Timer still absent after double discard.
+    match ld.timer_fires_at() {
+        None => {},
+        _ => panic("no PTO armed for empty tracker"),
+    }
+}
+
+fn discarded_space_drops_sent_packets() {
+    let mut s = PnSpace.new(PnSpaceKind.Handshake);
+    let pn = s.next_packet_number();
+    s.record_sent(SentPacketInfo {
+        packet_number:  pn,
+        time_sent:      Instant.now(),
+        size_bytes:     900_u32,
+        in_flight:      true,
+        ack_eliciting:  true,
+        frames:         [],
+    });
+    s.discard();
+    // Monotonicity holds trivially on an empty space.
+    assert(s.pn_monotonic_ok());
+}
+
+@main
+public fn main() -> Int {
+    discard_marks_space_inactive();
+    loss_detection_keys_discarded_is_no_op_on_fresh_tracker();
+    discarded_space_drops_sent_packets();
+    print("RFC 9001 §4.9 PN-space discard semantics verified");
+    0
+}

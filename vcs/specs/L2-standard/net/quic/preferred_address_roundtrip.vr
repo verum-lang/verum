@@ -1,0 +1,108 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: quic, transport_params, preferred_address, rfc9000_18_2
+// @timeout: 15000
+// @expected-exit: 0
+
+// RFC 9000 §18.2 preferred_address (TP id 0x0d, server only):
+//   IPv4 addr (4 bytes) + port (u16) +
+//   IPv6 addr (16 bytes) + port (u16) +
+//   CID len (u8) + CID bytes +
+//   16-byte stateless_reset_token.
+
+mount core.*;
+mount core.collections.List;
+mount core.net.quic.transport_params.{TransportParams, PreferredAddress, encode, decode};
+mount core.net.quic.connection_id.{ConnectionId};
+
+fn preferred_address_roundtrips_in_full() {
+    let ipv4: [Byte; 4]  = [192_u8, 0_u8, 2_u8, 1_u8];
+    let ipv6: [Byte; 16] = [
+        0x20_u8, 0x01_u8, 0x0D_u8, 0xB8_u8,
+        0x00_u8, 0x00_u8, 0x00_u8, 0x00_u8,
+        0x00_u8, 0x00_u8, 0x00_u8, 0x00_u8,
+        0x00_u8, 0x00_u8, 0x00_u8, 0x01_u8,
+    ];
+    let token: [Byte; 16] = [
+        0xA0_u8, 0xA1_u8, 0xA2_u8, 0xA3_u8,
+        0xA4_u8, 0xA5_u8, 0xA6_u8, 0xA7_u8,
+        0xA8_u8, 0xA9_u8, 0xAA_u8, 0xAB_u8,
+        0xAC_u8, 0xAD_u8, 0xAE_u8, 0xAF_u8,
+    ];
+    let cid_bytes: List<Byte> = [0x00_u8, 0x11_u8, 0x22_u8, 0x33_u8, 0x44_u8, 0x55_u8, 0x66_u8, 0x77_u8];
+    let cid = ConnectionId.from_bytes(cid_bytes.as_slice()).unwrap();
+
+    let pa = PreferredAddress {
+        ipv4_addr: ipv4,
+        ipv4_port: 443_u16,
+        ipv6_addr: ipv6,
+        ipv6_port: 4433_u16,
+        connection_id:         cid,
+        stateless_reset_token: token,
+    };
+
+    let mut params = TransportParams.defaults();
+    params.preferred_address = Some(pa);
+
+    let mut buf: List<Byte> = [];
+    encode(&params, &mut buf);
+
+    let decoded = decode(buf.as_slice()).unwrap();
+    match decoded.preferred_address {
+        Some(got) => {
+            // IPv4 + port.
+            let mut i: Int = 0;
+            while i < 4 {
+                assert(got.ipv4_addr[i] == ipv4[i]);
+                i = i + 1;
+            }
+            assert(got.ipv4_port == 443_u16);
+            // IPv6 + port.
+            let mut j: Int = 0;
+            while j < 16 {
+                assert(got.ipv6_addr[j] == ipv6[j]);
+                j = j + 1;
+            }
+            assert(got.ipv6_port == 4433_u16);
+            // CID length preserved.
+            assert(got.connection_id.len() == 8);
+            // Stateless reset token preserved.
+            let mut k: Int = 0;
+            while k < 16 {
+                assert(got.stateless_reset_token[k] == token[k]);
+                k = k + 1;
+            }
+        },
+        None => panic("preferred_address lost on round-trip"),
+    }
+}
+
+fn preferred_address_with_empty_cid() {
+    // §18.2 allows the CID length to be 0 (server omits new CID).
+    let pa = PreferredAddress {
+        ipv4_addr: [0_u8; 4],
+        ipv4_port: 0_u16,
+        ipv6_addr: [0_u8; 16],
+        ipv6_port: 0_u16,
+        connection_id:         ConnectionId.empty(),
+        stateless_reset_token: [0_u8; 16],
+    };
+    let mut params = TransportParams.defaults();
+    params.preferred_address = Some(pa);
+    let mut buf: List<Byte> = [];
+    encode(&params, &mut buf);
+    let decoded = decode(buf.as_slice()).unwrap();
+    match decoded.preferred_address {
+        Some(got) => assert(got.connection_id.len() == 0),
+        None => panic("preferred_address with empty CID lost"),
+    }
+}
+
+@main
+public fn main() -> Int {
+    preferred_address_roundtrips_in_full();
+    preferred_address_with_empty_cid();
+    print("RFC 9000 §18.2 PreferredAddress (0x0D) round-trip verified");
+    0
+}

@@ -1,0 +1,104 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: quic, flow_control, max_data, rfc9000_4_1
+// @timeout: 15000
+// @expected-exit: 0
+
+// RFC 9000 §4.1 connection-level flow control. ConnFlowControl
+// separately tracks the peer-advertised budget we send against
+// (max_data_remote) and our own credit we publish to the peer
+// (max_data_local). Both sides are monotonically non-decreasing
+// per MAX_DATA frames.
+
+mount core.*;
+mount core.net.quic.stream_sm.flow_control.{ConnFlowControl};
+
+fn fresh_fc_accounting() {
+    let fc = ConnFlowControl::new(
+        /* max_data_remote */ 8_192_u64,
+        /* max_data_local  */ 16_384_u64,
+        /* max_streams_bidi_remote */ 10_u64,
+        /* max_streams_bidi_local  */ 20_u64,
+        /* max_streams_uni_remote  */ 5_u64,
+        /* max_streams_uni_local   */ 8_u64,
+    );
+    assert(fc.send_budget() == 8_192_u64);
+}
+
+fn on_bytes_sent_drains_budget() {
+    let mut fc = ConnFlowControl::new(
+        1000_u64, 1000_u64, 0_u64, 0_u64, 0_u64, 0_u64
+    );
+    fc.on_bytes_sent(600_u64);
+    assert(fc.send_budget() == 400_u64);
+    fc.on_bytes_sent(400_u64);
+    assert(fc.send_budget() == 0_u64);
+    // Over-send saturates budget at 0 (caller was expected to clamp).
+    fc.on_bytes_sent(100_u64);
+    assert(fc.send_budget() == 0_u64);
+}
+
+fn on_peer_max_data_monotonic_raise_only() {
+    let mut fc = ConnFlowControl::new(
+        1000_u64, 1000_u64, 0_u64, 0_u64, 0_u64, 0_u64
+    );
+    fc.on_bytes_sent(500_u64);
+    // Peer raises — budget refreshes.
+    fc.on_peer_max_data(5_000_u64);
+    assert(fc.send_budget() == 4_500_u64);
+    // Peer "lowers" (rogue) — ignored.
+    fc.on_peer_max_data(100_u64);
+    assert(fc.send_budget() == 4_500_u64);
+}
+
+fn on_bytes_recv_enforces_local_max_data() {
+    let mut fc = ConnFlowControl::new(
+        1000_u64, 1000_u64, 0_u64, 0_u64, 0_u64, 0_u64
+    );
+    // Within budget — accept.
+    assert(fc.on_bytes_recv(500_u64).is_ok());
+    assert(fc.on_bytes_recv(500_u64).is_ok());
+    // Over budget — FLOW_CONTROL_ERROR.
+    match fc.on_bytes_recv(1_u64) {
+        Err(_) => {},
+        _ => panic("over-limit recv must fail"),
+    }
+}
+
+fn suggested_max_data_tracks_recv_plus_window() {
+    let mut fc = ConnFlowControl::new(
+        0_u64, 10_000_u64, 0_u64, 0_u64, 0_u64, 0_u64
+    );
+    assert(fc.suggested_max_data(16_384_u64) == 16_384_u64);
+    let _ = fc.on_bytes_recv(4_096_u64);
+    assert(fc.suggested_max_data(16_384_u64) == 4_096_u64 + 16_384_u64);
+}
+
+fn update_max_data_local_publishes_to_peer() {
+    let mut fc = ConnFlowControl::new(
+        0_u64, 1_000_u64, 0_u64, 0_u64, 0_u64, 0_u64
+    );
+    fc.update_max_data_local(2_000_u64);
+    // Publishing beyond the current local max should now accept
+    // additional bytes up to the new limit.
+    let _ = fc.on_bytes_recv(1_500_u64);
+    assert(fc.on_bytes_recv(400_u64).is_ok());
+    // But 101 over the new 2_000 limit still fails.
+    match fc.on_bytes_recv(200_u64) {
+        Err(_) => {},
+        _ => panic("recv beyond new limit must fail"),
+    }
+}
+
+@main
+public fn main() -> Int {
+    fresh_fc_accounting();
+    on_bytes_sent_drains_budget();
+    on_peer_max_data_monotonic_raise_only();
+    on_bytes_recv_enforces_local_max_data();
+    suggested_max_data_tracks_recv_plus_window();
+    update_max_data_local_publishes_to_peer();
+    print("RFC 9000 §4.1 connection-level flow control verified");
+    0
+}
