@@ -1,0 +1,234 @@
+// =============================================================================
+// observability/exporter.vr — Prometheus + OTLP-shaped exporters
+// =============================================================================
+// Spec: sqlite-native.md §22 (operational tooling)
+//
+// Three exporter shapes ship out of the box:
+//
+//   * `PrometheusExporter` — text-format scrape rendering
+//                            (HELP/TYPE/value lines)
+//   * `OtlpExporter`       — pre-shaped record matching the OTLP
+//                            metric data-point schema (no actual
+//                            wire encoding — that's the host's
+//                            responsibility)
+//   * `JsonLineExporter`   — one JSON-lines row per metric, useful
+//                            for ad-hoc ingestion
+// =============================================================================
+
+module core.database.sqlite.native.observability.exporter;
+
+mount core.*;
+mount base.{Text, Bool};
+mount collections.List;
+mount core.database.sqlite.native.observability.metric.{
+    Counter, Gauge, Histogram,
+};
+mount core.database.sqlite.native.observability.registry.{MetricRegistry};
+
+// -----------------------------------------------------------------------------
+// MetricExporter
+// -----------------------------------------------------------------------------
+
+public type MetricExporter is protocol {
+    fn name(&self) -> Text;
+    fn render(&self, registry: &MetricRegistry) -> Text;
+};
+
+// -----------------------------------------------------------------------------
+// Prometheus exporter
+// -----------------------------------------------------------------------------
+
+public type PrometheusExporter is { unit: Bool };
+public fn prometheus() -> PrometheusExporter { PrometheusExporter { unit: true } }
+
+implement MetricExporter for PrometheusExporter {
+    fn name(&self) -> Text { "prometheus".clone() }
+
+    fn render(&self, registry: &MetricRegistry) -> Text {
+        let mut out = Text.new();
+        let mut i: Int = 0;
+        while i < registry.counters.len() {
+            let c = &registry.counters[i];
+            append_text(&mut out, &"# TYPE ".clone());
+            append_text(&mut out, &c.name);
+            append_text(&mut out, &" counter\n".clone());
+            append_text(&mut out, &c.name);
+            out.push_byte(32 as Byte);
+            append_int64(&mut out, c.value);
+            out.push_byte(10 as Byte);
+            i = i + 1;
+        }
+        i = 0;
+        while i < registry.gauges.len() {
+            let g = &registry.gauges[i];
+            append_text(&mut out, &"# TYPE ".clone());
+            append_text(&mut out, &g.name);
+            append_text(&mut out, &" gauge\n".clone());
+            append_text(&mut out, &g.name);
+            out.push_byte(32 as Byte);
+            append_int64(&mut out, g.value);
+            out.push_byte(10 as Byte);
+            i = i + 1;
+        }
+        i = 0;
+        while i < registry.histograms.len() {
+            let h = &registry.histograms[i];
+            append_text(&mut out, &"# TYPE ".clone());
+            append_text(&mut out, &h.name);
+            append_text(&mut out, &" histogram\n".clone());
+            // Buckets
+            let mut k: Int = 0;
+            while k < h.bounds_ns.len() {
+                append_text(&mut out, &h.name);
+                append_text(&mut out, &"_bucket{le=\"".clone());
+                append_int64(&mut out, h.bounds_ns[k]);
+                append_text(&mut out, &"\"} ".clone());
+                append_int64(&mut out, h.cumulative(k));
+                out.push_byte(10 as Byte);
+                k = k + 1;
+            }
+            // +Inf bucket
+            append_text(&mut out, &h.name);
+            append_text(&mut out, &"_bucket{le=\"+Inf\"} ".clone());
+            append_int64(&mut out, h.count_total);
+            out.push_byte(10 as Byte);
+            // _sum / _count
+            append_text(&mut out, &h.name);
+            append_text(&mut out, &"_sum ".clone());
+            append_int64(&mut out, h.sum_ns);
+            out.push_byte(10 as Byte);
+            append_text(&mut out, &h.name);
+            append_text(&mut out, &"_count ".clone());
+            append_int64(&mut out, h.count_total);
+            out.push_byte(10 as Byte);
+            i = i + 1;
+        }
+        out
+    }
+}
+
+// -----------------------------------------------------------------------------
+// JSON-lines exporter
+// -----------------------------------------------------------------------------
+
+public type JsonLineExporter is { unit: Bool };
+public fn json_lines() -> JsonLineExporter { JsonLineExporter { unit: true } }
+
+implement MetricExporter for JsonLineExporter {
+    fn name(&self) -> Text { "jsonl".clone() }
+
+    fn render(&self, registry: &MetricRegistry) -> Text {
+        let mut out = Text.new();
+        let mut i: Int = 0;
+        while i < registry.counters.len() {
+            append_text(&mut out, &"{\"type\":\"counter\",\"name\":\"".clone());
+            append_text(&mut out, &registry.counters[i].name);
+            append_text(&mut out, &"\",\"value\":".clone());
+            append_int64(&mut out, registry.counters[i].value);
+            append_text(&mut out, &"}\n".clone());
+            i = i + 1;
+        }
+        i = 0;
+        while i < registry.gauges.len() {
+            append_text(&mut out, &"{\"type\":\"gauge\",\"name\":\"".clone());
+            append_text(&mut out, &registry.gauges[i].name);
+            append_text(&mut out, &"\",\"value\":".clone());
+            append_int64(&mut out, registry.gauges[i].value);
+            append_text(&mut out, &"}\n".clone());
+            i = i + 1;
+        }
+        i = 0;
+        while i < registry.histograms.len() {
+            let h = &registry.histograms[i];
+            append_text(&mut out, &"{\"type\":\"histogram\",\"name\":\"".clone());
+            append_text(&mut out, &h.name);
+            append_text(&mut out, &"\",\"count\":".clone());
+            append_int64(&mut out, h.count_total);
+            append_text(&mut out, &",\"sum_ns\":".clone());
+            append_int64(&mut out, h.sum_ns);
+            append_text(&mut out, &"}\n".clone());
+            i = i + 1;
+        }
+        out
+    }
+}
+
+// -----------------------------------------------------------------------------
+// OTLP-shaped exporter — produces the records, leaves wire-encoding
+// to the host (typically gRPC/protobuf — out of scope here).
+// =============================================================================
+
+public type OtlpDataPoint is {
+    metric_name: Text,
+    /// "counter" / "gauge" / "histogram"
+    metric_type: Text,
+    value: Int64,
+    /// Sum + count for histograms; both 0 for non-histograms.
+    sum: Int64,
+    count: Int64,
+}
+
+public type OtlpExporter is { unit: Bool };
+public fn otlp() -> OtlpExporter { OtlpExporter { unit: true } }
+
+public fn otlp_export(_e: &OtlpExporter, registry: &MetricRegistry) -> List<OtlpDataPoint> {
+    let mut out: List<OtlpDataPoint> = List.new();
+    let mut i: Int = 0;
+    while i < registry.counters.len() {
+        out.push(OtlpDataPoint {
+            metric_name: registry.counters[i].name.clone(),
+            metric_type: "counter".clone(),
+            value: registry.counters[i].value,
+            sum: 0 as Int64,
+            count: 0 as Int64,
+        });
+        i = i + 1;
+    }
+    i = 0;
+    while i < registry.gauges.len() {
+        out.push(OtlpDataPoint {
+            metric_name: registry.gauges[i].name.clone(),
+            metric_type: "gauge".clone(),
+            value: registry.gauges[i].value,
+            sum: 0 as Int64,
+            count: 0 as Int64,
+        });
+        i = i + 1;
+    }
+    i = 0;
+    while i < registry.histograms.len() {
+        out.push(OtlpDataPoint {
+            metric_name: registry.histograms[i].name.clone(),
+            metric_type: "histogram".clone(),
+            value: 0 as Int64,
+            sum: registry.histograms[i].sum_ns,
+            count: registry.histograms[i].count_total,
+        });
+        i = i + 1;
+    }
+    out
+}
+
+// -----------------------------------------------------------------------------
+// Helpers
+// -----------------------------------------------------------------------------
+
+fn append_text(dst: &mut Text, s: &Text) {
+    let bs = s.as_bytes();
+    let mut i: Int = 0;
+    while i < bs.len() { dst.push_byte(bs[i]); i = i + 1; }
+}
+
+fn append_int64(dst: &mut Text, n: Int64) {
+    if n == (0 as Int64) { dst.push_byte(48 as Byte); return; }
+    let mut digits: List<Byte> = List.new();
+    let mut x: Int64 = if n < (0 as Int64) { -n } else { n };
+    while x > (0 as Int64) {
+        let d: Byte = ((x as Int) % 10) as Byte;
+        digits.push(d + (48 as Byte));
+        x = x / (10 as Int64);
+    }
+    if n < (0 as Int64) { dst.push_byte(45 as Byte); }
+    let mut i: Int = digits.len() - 1;
+    while i >= 0 { dst.push_byte(digits[i]); i = i - 1; }
+}

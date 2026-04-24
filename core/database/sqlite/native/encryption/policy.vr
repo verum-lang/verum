@@ -1,0 +1,37 @@
+// =============================================================================
+// encryption/policy.vr — per-page encryption policy
+// =============================================================================
+// Spec: sqlite-native.md §23 (security)
+//
+// Decides which pages get encrypted. Three policies:
+//
+//   * `EpEncryptAll`     — every page (header included)
+//   * `EpUserPagesOnly`  — pages 2.. (skips the SQLite header on
+//                          page 1 so external tools can detect the
+//                          format without needing the key)
+//   * `EpNone`           — no encryption (disable cipher hook)
+// =============================================================================
+
+module core.database.sqlite.native.encryption.policy;
+
+mount core.*;
+mount base.{Bool, Text};
+
+public type EncryptionPolicy is EpEncryptAll | EpUserPagesOnly | EpNone;
+
+public fn policy_name(p: &EncryptionPolicy) -> Text {
+    match p {
+        EpEncryptAll     => "encrypt_all".clone(),
+        EpUserPagesOnly  => "user_pages_only".clone(),
+        EpNone           => "none".clone(),
+    }
+}
+
+/// True if `page_no` should be encrypted under this policy.
+public fn should_encrypt(p: &EncryptionPolicy, page_no: Int) -> Bool {
+    match p {
+        EpEncryptAll     => true,
+        EpUserPagesOnly  => page_no >= 2,
+        EpNone           => false,
+    }
+}

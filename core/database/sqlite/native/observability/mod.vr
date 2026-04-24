@@ -1,0 +1,23 @@
+// =============================================================================
+// core/database/sqlite/native/observability/mod.vr
+// =============================================================================
+// Layer: 7 (consumer-facing)
+// Spec: sqlite-native.md §22 (operational tooling)
+//
+// Metric + tracing primitives for the Database. Every counter and
+// histogram is surfaced both via the public `Database.metrics()` API
+// and as a row in the `dbstat` virtual table extension.
+//
+// Submodules:
+//   * `metric`     — Counter / Gauge / Histogram primitives
+//   * `registry`   — per-Connection MetricRegistry
+//   * `span`       — TracingSpan record + Span protocol
+//   * `exporter`   — protocol with Prometheus + OTLP-shaped impls
+// =============================================================================
+
+module core.database.sqlite.native.observability;
+
+public module metric;
+public module registry;
+public module span;
+public module exporter;

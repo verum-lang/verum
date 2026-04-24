@@ -1,0 +1,159 @@
+// =============================================================================
+// encryption/kdf.vr — KeyDerivation protocol + impls
+// =============================================================================
+// Spec: sqlite-native.md §23 (security)
+//
+// Derives a per-database master key from caller-supplied secret
+// material. Three impls:
+//
+//   * `RawKey`         — pass-through: caller already has a 32-byte
+//                         key, no KDF needed
+//   * `Pbkdf2Sha256`   — PBKDF2-HMAC-SHA256 (matches SQLCipher v3
+//                         default)
+//   * `ScryptSimple`   — scrypt with caller-controlled cost params
+//
+// `KdfParams` carries the salt + iteration count and is persisted in
+// the file's reserved-space header so reopening a database can
+// re-derive without storing the key.
+// =============================================================================
+
+module core.database.sqlite.native.encryption.kdf;
+
+mount core.*;
+mount base.{Text, Bool, Result, Ok, Err};
+mount collections.List;
+
+// -----------------------------------------------------------------------------
+// KdfError
+// -----------------------------------------------------------------------------
+
+public type KdfError is
+      KeBadParams(Text)
+    | KeUnsupported(Text)
+    | KeWeakKey;
+
+// -----------------------------------------------------------------------------
+// KdfParams
+// -----------------------------------------------------------------------------
+
+public type KdfParams is {
+    /// Random per-database salt — typically 16 bytes.
+    salt: List<Byte>,
+    /// Iteration count (PBKDF2) or N (scrypt).
+    cost: Int,
+    /// Output key length in bytes (typically 32 for AES-256).
+    key_len: Int,
+}
+
+public fn params_default() -> KdfParams {
+    let mut salt: List<Byte> = List.new();
+    let mut i: Int = 0;
+    while i < 16 { salt.push(0 as Byte); i = i + 1; }
+    KdfParams {
+        salt: salt,
+        cost: 256000,        // SQLCipher v4 default
+        key_len: 32,
+    }
+}
+
+implement KdfParams {
+    public fn with_salt(mut self, salt: List<Byte>) -> KdfParams {
+        self.salt = salt;
+        self
+    }
+    public fn with_cost(mut self, cost: Int) -> KdfParams {
+        self.cost = cost;
+        self
+    }
+    public fn with_key_len(mut self, key_len: Int) -> KdfParams {
+        self.key_len = key_len;
+        self
+    }
+}
+
+// -----------------------------------------------------------------------------
+// KeyDerivation protocol
+// -----------------------------------------------------------------------------
+
+public type KeyDerivation is protocol {
+    fn name(&self) -> Text;
+    fn derive(
+        &self,
+        secret: &List<Byte>,
+        params: &KdfParams,
+    ) -> Result<List<Byte>, KdfError>;
+};
+
+// -----------------------------------------------------------------------------
+// RawKey — passthrough
+// -----------------------------------------------------------------------------
+
+public type RawKey is { unit: Bool };
+public fn raw_key() -> RawKey { RawKey { unit: true } }
+
+implement KeyDerivation for RawKey {
+    fn name(&self) -> Text { "raw".clone() }
+    fn derive(&self, secret: &List<Byte>, params: &KdfParams) -> Result<List<Byte>, KdfError> {
+        if secret.len() != params.key_len {
+            return Err(KeBadParams("raw key length mismatch".clone()));
+        }
+        let mut out: List<Byte> = List.new();
+        let mut i: Int = 0;
+        while i < secret.len() { out.push(secret[i]); i = i + 1; }
+        Ok(out)
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Pbkdf2Sha256
+// -----------------------------------------------------------------------------
+
+public type Pbkdf2Sha256 is { unit: Bool };
+public fn pbkdf2_sha256() -> Pbkdf2Sha256 { Pbkdf2Sha256 { unit: true } }
+
+implement KeyDerivation for Pbkdf2Sha256 {
+    fn name(&self) -> Text { "pbkdf2-sha256".clone() }
+    fn derive(&self, secret: &List<Byte>, params: &KdfParams) -> Result<List<Byte>, KdfError> {
+        if params.cost < 1000 { return Err(KeBadParams("PBKDF2 iteration count < 1000".clone())); }
+        if params.key_len <= 0 { return Err(KeBadParams("zero key_len".clone())); }
+        // Real implementation calls core.security.kdf.pbkdf2_hmac_sha256;
+        // contract-only stub here: derive a key by repeated XOR of
+        // (secret, salt, iteration index) — NOT cryptographically
+        // safe; replaced when wired to the security crate.
+        let mut out: List<Byte> = List.new();
+        let mut i: Int = 0;
+        while i < params.key_len {
+            let s: Byte = if i < secret.len() { secret[i] } else { 0 as Byte };
+            let salt: Byte = if i < params.salt.len() { params.salt[i] } else { 0 as Byte };
+            let cost_byte: Byte = ((params.cost >> ((i % 4) * 8)) & 255) as Byte;
+            out.push(s ^ salt ^ cost_byte);
+            i = i + 1;
+        }
+        Ok(out)
+    }
+}
+
+// -----------------------------------------------------------------------------
+// ScryptSimple
+// -----------------------------------------------------------------------------
+
+public type ScryptSimple is { unit: Bool };
+public fn scrypt_simple() -> ScryptSimple { ScryptSimple { unit: true } }
+
+implement KeyDerivation for ScryptSimple {
+    fn name(&self) -> Text { "scrypt".clone() }
+    fn derive(&self, secret: &List<Byte>, params: &KdfParams) -> Result<List<Byte>, KdfError> {
+        if params.cost < 16 { return Err(KeBadParams("scrypt N too small".clone())); }
+        if params.key_len <= 0 { return Err(KeBadParams("zero key_len".clone())); }
+        // Same shape as PBKDF2 stub.
+        let mut out: List<Byte> = List.new();
+        let mut i: Int = 0;
+        while i < params.key_len {
+            let s: Byte = if i < secret.len() { secret[i] } else { 0 as Byte };
+            let salt: Byte = if i < params.salt.len() { params.salt[i] } else { 0 as Byte };
+            out.push(s ^ salt);
+            i = i + 1;
+        }
+        Ok(out)
+    }
+}

@@ -1,0 +1,233 @@
+// =============================================================================
+// observability/span.vr — TracingSpan + Span protocol
+// =============================================================================
+// Spec: sqlite-native.md §22 (operational tooling)
+//
+// Spans bracket significant operations — query compile, query
+// execute, transaction, sub-program invocation. They surface to
+// any subscribed `SpanSink` (Jaeger / OTLP / println-style).
+//
+// `TraceCtx` is the per-Connection trace context — carries the
+// trace ID + parent span ID so spans across thread / RPC boundaries
+// remain correlated.
+// =============================================================================
+
+module core.database.sqlite.native.observability.span;
+
+mount core.*;
+mount base.{Text, Bool, Maybe};
+mount collections.List;
+
+// -----------------------------------------------------------------------------
+// SpanKind
+// -----------------------------------------------------------------------------
+
+public type SpanKind is
+      SkInternal       // pure-internal step (parser, planner, codegen)
+    | SkClient         // outbound to external service
+    | SkServer         // serving an inbound request
+    | SkProducer       // emitting onto a queue / WAL
+    | SkConsumer;      // pulling from a queue / WAL
+
+public fn span_kind_name(k: &SpanKind) -> Text {
+    match k {
+        SkInternal => "internal".clone(),
+        SkClient   => "client".clone(),
+        SkServer   => "server".clone(),
+        SkProducer => "producer".clone(),
+        SkConsumer => "consumer".clone(),
+    }
+}
+
+// -----------------------------------------------------------------------------
+// SpanStatus
+// -----------------------------------------------------------------------------
+
+public type SpanStatus is SsUnset | SsOk | SsError(Text);
+
+public fn span_status_name(s: &SpanStatus) -> Text {
+    match s {
+        SsUnset    => "unset".clone(),
+        SsOk       => "ok".clone(),
+        SsError(_) => "error".clone(),
+    }
+}
+
+// -----------------------------------------------------------------------------
+// TraceCtx
+// -----------------------------------------------------------------------------
+
+public type TraceCtx is {
+    /// 128-bit trace identifier — split into two Int64 for portability.
+    trace_id_hi: Int64,
+    trace_id_lo: Int64,
+    /// 64-bit span identifier of the *parent* span (0 ⇒ root span).
+    parent_span_id: Int64,
+}
+
+public fn trace_ctx_root(trace_hi: Int64, trace_lo: Int64) -> TraceCtx {
+    TraceCtx {
+        trace_id_hi: trace_hi,
+        trace_id_lo: trace_lo,
+        parent_span_id: 0 as Int64,
+    }
+}
+
+public fn trace_ctx_child(parent: &TraceCtx, span_id: Int64) -> TraceCtx {
+    TraceCtx {
+        trace_id_hi: parent.trace_id_hi,
+        trace_id_lo: parent.trace_id_lo,
+        parent_span_id: span_id,
+    }
+}
+
+// -----------------------------------------------------------------------------
+// SpanAttribute — key/value tag
+// -----------------------------------------------------------------------------
+
+public type AttrValue is
+      AvText(Text)
+    | AvInt(Int64)
+    | AvFloat(Float64)
+    | AvBool(Bool);
+
+public type SpanAttribute is {
+    key: Text,
+    value: AttrValue,
+}
+
+public fn attr_text(key: Text, value: Text) -> SpanAttribute {
+    SpanAttribute { key: key, value: AvText(value) }
+}
+
+public fn attr_int(key: Text, value: Int64) -> SpanAttribute {
+    SpanAttribute { key: key, value: AvInt(value) }
+}
+
+// -----------------------------------------------------------------------------
+// TracingSpan
+// -----------------------------------------------------------------------------
+
+public type TracingSpan is {
+    name: Text,
+    kind: SpanKind,
+    span_id: Int64,
+    parent_span_id: Int64,
+    started_ns: Int64,
+    ended_ns: Int64,
+    status: SpanStatus,
+    attributes: List<SpanAttribute>,
+}
+
+public fn span_start(name: Text, kind: SpanKind, ctx: &TraceCtx, span_id: Int64, now_ns: Int64) -> TracingSpan {
+    TracingSpan {
+        name: name,
+        kind: kind,
+        span_id: span_id,
+        parent_span_id: ctx.parent_span_id,
+        started_ns: now_ns,
+        ended_ns: 0 as Int64,
+        status: SsUnset,
+        attributes: List.new(),
+    }
+}
+
+implement TracingSpan {
+    pub fn set_attribute(&mut self, attr: SpanAttribute) {
+        self.attributes.push(attr);
+    }
+
+    pub fn end(&mut self, now_ns: Int64) {
+        self.ended_ns = now_ns;
+        match &self.status { SsUnset => { self.status = SsOk; }, _ => {} }
+    }
+
+    pub fn end_with_error(&mut self, now_ns: Int64, err: Text) {
+        self.ended_ns = now_ns;
+        self.status = SsError(err);
+    }
+
+    pub fn duration_ns(&self) -> Int64 {
+        if self.ended_ns == (0 as Int64) { return 0 as Int64; }
+        self.ended_ns - self.started_ns
+    }
+
+    pub fn is_ended(&self) -> Bool { self.ended_ns != (0 as Int64) }
+}
+
+// -----------------------------------------------------------------------------
+// SpanSink protocol — subscribers
+// -----------------------------------------------------------------------------
+
+public type SpanSink is protocol {
+    fn name(&self) -> Text;
+    fn on_span_end(&mut self, span: &TracingSpan);
+};
+
+/// Built-in sink that buffers every span ended through it — used in
+/// tests and as a worked example.
+public type BufferingSink is { spans: List<TracingSpan> }
+
+public fn buffering_sink() -> BufferingSink {
+    BufferingSink { spans: List.new() }
+}
+
+implement SpanSink for BufferingSink {
+    fn name(&self) -> Text { "buffering".clone() }
+    fn on_span_end(&mut self, span: &TracingSpan) {
+        self.spans.push(clone_span(span));
+    }
+}
+
+implement BufferingSink {
+    public fn buffered_count(&self) -> Int { self.spans.len() }
+}
+
+fn clone_span(s: &TracingSpan) -> TracingSpan {
+    let mut attrs: List<SpanAttribute> = List.new();
+    let mut i: Int = 0;
+    while i < s.attributes.len() {
+        attrs.push(SpanAttribute {
+            key: s.attributes[i].key.clone(),
+            value: clone_attr_value(&s.attributes[i].value),
+        });
+        i = i + 1;
+    }
+    TracingSpan {
+        name: s.name.clone(),
+        kind: clone_kind(&s.kind),
+        span_id: s.span_id,
+        parent_span_id: s.parent_span_id,
+        started_ns: s.started_ns,
+        ended_ns: s.ended_ns,
+        status: clone_status(&s.status),
+        attributes: attrs,
+    }
+}
+
+fn clone_kind(k: &SpanKind) -> SpanKind {
+    match k {
+        SkInternal => SkInternal,
+        SkClient   => SkClient,
+        SkServer   => SkServer,
+        SkProducer => SkProducer,
+        SkConsumer => SkConsumer,
+    }
+}
+
+fn clone_status(s: &SpanStatus) -> SpanStatus {
+    match s {
+        SsUnset    => SsUnset,
+        SsOk       => SsOk,
+        SsError(e) => SsError(e.clone()),
+    }
+}
+
+fn clone_attr_value(v: &AttrValue) -> AttrValue {
+    match v {
+        AvText(t)  => AvText(t.clone()),
+        AvInt(x)   => AvInt(*x),
+        AvFloat(x) => AvFloat(*x),
+        AvBool(b)  => AvBool(*b),
+    }
+}

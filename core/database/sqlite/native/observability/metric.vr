@@ -1,0 +1,174 @@
+// =============================================================================
+// observability/metric.vr — Counter / Gauge / Histogram primitives
+// =============================================================================
+// Spec: sqlite-native.md §22 (operational tooling)
+//
+// Three flavour primitives:
+//
+//   * `Counter`   — strictly-monotonic Int64 (rows_read,
+//                    queries_total, ...)
+//   * `Gauge`     — observable Int64 that may go up or down
+//                    (cache_size_bytes, open_cursors, ...)
+//   * `Histogram` — bucketed distribution with O(1) record;
+//                    SQLite-shaped buckets:
+//                    [10us, 100us, 1ms, 10ms, 100ms, 1s, 10s, +inf]
+//                    (matches the latency profile of typical
+//                    OLTP workloads)
+// =============================================================================
+
+module core.database.sqlite.native.observability.metric;
+
+mount core.*;
+mount base.{Text, Bool, Maybe};
+mount collections.List;
+
+// -----------------------------------------------------------------------------
+// Counter
+// -----------------------------------------------------------------------------
+
+public type Counter is { name: Text, value: Int64 }
+
+public fn counter_new(name: Text) -> Counter {
+    Counter { name: name, value: 0 as Int64 }
+}
+
+implement Counter {
+    public fn inc(&mut self) { self.value = self.value + (1 as Int64); }
+    public fn add(&mut self, n: Int64) { self.value = self.value + n; }
+    public fn get(&self) -> Int64 { self.value }
+}
+
+// -----------------------------------------------------------------------------
+// Gauge
+// -----------------------------------------------------------------------------
+
+public type Gauge is { name: Text, value: Int64 }
+
+public fn gauge_new(name: Text) -> Gauge {
+    Gauge { name: name, value: 0 as Int64 }
+}
+
+implement Gauge {
+    public fn set(&mut self, value: Int64) { self.value = value; }
+    public fn inc(&mut self) { self.value = self.value + (1 as Int64); }
+    public fn dec(&mut self) { self.value = self.value - (1 as Int64); }
+    public fn add(&mut self, n: Int64) { self.value = self.value + n; }
+    public fn sub(&mut self, n: Int64) { self.value = self.value - n; }
+    public fn get(&self) -> Int64 { self.value }
+}
+
+// -----------------------------------------------------------------------------
+// Histogram
+// -----------------------------------------------------------------------------
+
+public const NS_PER_US: Int64 = 1000 as Int64;
+public const NS_PER_MS: Int64 = 1000000 as Int64;
+public const NS_PER_S: Int64 = 1000000000 as Int64;
+
+/// Default bucket upper bounds in nanoseconds.
+public fn default_bucket_bounds_ns() -> List<Int64> {
+    let mut out: List<Int64> = List.new();
+    out.push((10 as Int64) * NS_PER_US);
+    out.push((100 as Int64) * NS_PER_US);
+    out.push(NS_PER_MS);
+    out.push((10 as Int64) * NS_PER_MS);
+    out.push((100 as Int64) * NS_PER_MS);
+    out.push(NS_PER_S);
+    out.push((10 as Int64) * NS_PER_S);
+    out
+}
+
+public type Histogram is {
+    name: Text,
+    bounds_ns: List<Int64>,
+    /// Bucket counts; len() == bounds_ns.len() + 1 (last bucket = +inf).
+    counts: List<Int64>,
+    sum_ns: Int64,
+    count_total: Int64,
+}
+
+public fn histogram_new(name: Text, bounds_ns: List<Int64>) -> Histogram {
+    let n = bounds_ns.len() + 1;
+    let mut counts: List<Int64> = List.new();
+    let mut i: Int = 0;
+    while i < n { counts.push(0 as Int64); i = i + 1; }
+    Histogram {
+        name: name,
+        bounds_ns: bounds_ns,
+        counts: counts,
+        sum_ns: 0 as Int64,
+        count_total: 0 as Int64,
+    }
+}
+
+public fn histogram_default(name: Text) -> Histogram {
+    histogram_new(name, default_bucket_bounds_ns())
+}
+
+implement Histogram {
+    public fn observe(&mut self, value_ns: Int64) {
+        self.sum_ns = self.sum_ns + value_ns;
+        self.count_total = self.count_total + (1 as Int64);
+        let mut i: Int = 0;
+        while i < self.bounds_ns.len() {
+            if value_ns <= self.bounds_ns[i] {
+                self.counts[i] = self.counts[i] + (1 as Int64);
+                return;
+            }
+            i = i + 1;
+        }
+        // Overflow bucket.
+        let last = self.counts.len() - 1;
+        self.counts[last] = self.counts[last] + (1 as Int64);
+    }
+
+    public fn count(&self) -> Int64 { self.count_total }
+    public fn sum(&self) -> Int64 { self.sum_ns }
+
+    /// Mean observation in nanoseconds (0 when no observations).
+    public fn mean_ns(&self) -> Int64 {
+        if self.count_total == (0 as Int64) { return 0 as Int64; }
+        self.sum_ns / self.count_total
+    }
+
+    /// Cumulative count for a given bucket (inclusive — returns the
+    /// total observations whose value was <= bounds_ns[bucket_idx]).
+    public fn cumulative(&self, bucket_idx: Int) -> Int64 {
+        let mut acc: Int64 = 0 as Int64;
+        let mut i: Int = 0;
+        while i < self.counts.len() && i <= bucket_idx {
+            acc = acc + self.counts[i];
+            i = i + 1;
+        }
+        acc
+    }
+
+    /// Approximate quantile from the bucket boundaries — interpolate
+    /// linearly within the bucket containing the q-th observation.
+    public fn approx_quantile_ns(&self, q: Float64) -> Int64 {
+        if self.count_total == (0 as Int64) { return 0 as Int64; }
+        let target: Float64 = (self.count_total as Float64) * q;
+        let mut acc: Float64 = 0.0;
+        let mut i: Int = 0;
+        while i < self.counts.len() {
+            acc = acc + (self.counts[i] as Float64);
+            if acc >= target {
+                if i < self.bounds_ns.len() {
+                    return self.bounds_ns[i];
+                }
+                // Overflow bucket — return last finite bound.
+                if self.bounds_ns.len() > 0 {
+                    return self.bounds_ns[self.bounds_ns.len() - 1];
+                }
+                return 0 as Int64;
+            }
+            i = i + 1;
+        }
+        if self.bounds_ns.len() > 0 {
+            return self.bounds_ns[self.bounds_ns.len() - 1];
+        }
+        0 as Int64
+    }
+
+    public fn bucket_count(&self) -> Int { self.counts.len() }
+}

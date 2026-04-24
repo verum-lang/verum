@@ -1,0 +1,132 @@
+// =============================================================================
+// encryption/key_ring.vr — per-Connection key management
+// =============================================================================
+// Spec: sqlite-native.md §23 (security)
+//
+// `KeyRing` carries the active master key + key-rotation history.
+// Used by the pager when (de)encrypting pages.
+//
+// Each key has:
+//   * `key_id`     — opaque identifier; pages persist this so an
+//                     old-key page can be decrypted during rotation
+//   * `material`   — the key bytes
+//   * `valid_from_ns` / `valid_to_ns` — wall-clock window
+//
+// On `rekey`: encrypt every page with the new key, retain the old
+// key in history until rotation completes.
+// =============================================================================
+
+module core.database.sqlite.native.encryption.key_ring;
+
+mount core.*;
+mount base.{Bool, Maybe};
+mount collections.List;
+
+// -----------------------------------------------------------------------------
+// KeyEntry
+// -----------------------------------------------------------------------------
+
+public type KeyEntry is {
+    key_id: Int,
+    material: List<Byte>,
+    valid_from_ns: Int64,
+    valid_to_ns: Int64,    // 0 = open-ended (current key)
+}
+
+public fn key_entry(key_id: Int, material: List<Byte>, valid_from_ns: Int64) -> KeyEntry {
+    KeyEntry {
+        key_id: key_id,
+        material: material,
+        valid_from_ns: valid_from_ns,
+        valid_to_ns: 0 as Int64,
+    }
+}
+
+// -----------------------------------------------------------------------------
+// KeyRing
+// -----------------------------------------------------------------------------
+
+public type KeyRing is {
+    entries: List<KeyEntry>,
+    next_id: Int,
+}
+
+public fn key_ring_new() -> KeyRing {
+    KeyRing { entries: List.new(), next_id: 1 }
+}
+
+implement KeyRing {
+    public fn key_count(&self) -> Int { self.entries.len() }
+
+    /// Install a new key, returning its assigned `key_id`. The new
+    /// key becomes the current (active) key; the previous current
+    /// key gets its `valid_to_ns` set to `now_ns`.
+    pub fn install(&mut self, material: List<Byte>, now_ns: Int64) -> Int {
+        // Close the previous current key.
+        let mut i: Int = 0;
+        while i < self.entries.len() {
+            if self.entries[i].valid_to_ns == (0 as Int64) {
+                self.entries[i].valid_to_ns = now_ns;
+            }
+            i = i + 1;
+        }
+        let id = self.next_id;
+        self.next_id = id + 1;
+        self.entries.push(key_entry(id, material, now_ns));
+        id
+    }
+
+    /// Look up a key by id (used to decrypt an old-key page).
+    pub fn lookup(&self, key_id: Int) -> Maybe<KeyEntry> {
+        let mut i: Int = 0;
+        while i < self.entries.len() {
+            if self.entries[i].key_id == key_id {
+                return Some(clone_entry(&self.entries[i]));
+            }
+            i = i + 1;
+        }
+        None
+    }
+
+    /// The active (open-ended) key.
+    pub fn current(&self) -> Maybe<KeyEntry> {
+        let mut i: Int = self.entries.len() - 1;
+        while i >= 0 {
+            if self.entries[i].valid_to_ns == (0 as Int64) {
+                return Some(clone_entry(&self.entries[i]));
+            }
+            i = i - 1;
+        }
+        None
+    }
+
+    /// Drop a historical key (after rotation completes). Returns
+    /// true if the id was found AND was historical (not current).
+    pub fn retire(&mut self, key_id: Int) -> Bool {
+        let mut new_entries: List<KeyEntry> = List.new();
+        let mut found: Bool = false;
+        let mut i: Int = 0;
+        while i < self.entries.len() {
+            if self.entries[i].key_id == key_id && self.entries[i].valid_to_ns != (0 as Int64) {
+                found = true;
+            } else {
+                new_entries.push(clone_entry(&self.entries[i]));
+            }
+            i = i + 1;
+        }
+        self.entries = new_entries;
+        found
+    }
+}
+
+fn clone_entry(e: &KeyEntry) -> KeyEntry {
+    let mut mat: List<Byte> = List.new();
+    let mut i: Int = 0;
+    while i < e.material.len() { mat.push(e.material[i]); i = i + 1; }
+    KeyEntry {
+        key_id: e.key_id,
+        material: mat,
+        valid_from_ns: e.valid_from_ns,
+        valid_to_ns: e.valid_to_ns,
+    }
+}

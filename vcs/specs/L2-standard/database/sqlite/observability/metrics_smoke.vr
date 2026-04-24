@@ -1,0 +1,252 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, observability, metrics, tracing, spans
+// @timeout: 5000
+// @expected-exit: 0
+//
+// Observability:
+//   * Counter inc / add monotonic
+//   * Gauge set / inc / dec
+//   * Histogram bucket placement + cumulative + approx_quantile
+//   * MetricRegistry get-or-create + register_defaults
+//   * TracingSpan start / end / duration
+//   * BufferingSink protocol
+//   * Prometheus / JSONL / OTLP exporters
+
+mount core.database.sqlite.native.observability.metric.{
+    Counter, Gauge, Histogram,
+    counter_new, gauge_new, histogram_new, histogram_default,
+    default_bucket_bounds_ns,
+    NS_PER_US, NS_PER_MS, NS_PER_S,
+};
+mount core.database.sqlite.native.observability.registry.{
+    MetricRegistry, registry_new, register_defaults,
+};
+mount core.database.sqlite.native.observability.span.{
+    SpanKind, SkInternal, SkClient, SkServer,
+    SpanStatus, SsUnset, SsOk, SsError,
+    span_kind_name, span_status_name,
+    TraceCtx, trace_ctx_root, trace_ctx_child,
+    AttrValue, AvText, AvInt,
+    SpanAttribute, attr_text, attr_int,
+    TracingSpan, span_start,
+    SpanSink, BufferingSink, buffering_sink,
+};
+mount core.database.sqlite.native.observability.exporter.{
+    MetricExporter,
+    PrometheusExporter, prometheus,
+    JsonLineExporter, json_lines,
+    OtlpExporter, OtlpDataPoint, otlp, otlp_export,
+};
+mount base.{Some, None, Maybe};
+
+// -----------------------------------------------------------------------------
+// metric — counter / gauge
+// -----------------------------------------------------------------------------
+
+fn test_counter_inc_add() {
+    let mut c = counter_new("queries".clone());
+    assert(c.get() == (0 as Int64));
+    c.inc();
+    c.inc();
+    c.add(5 as Int64);
+    assert(c.get() == (7 as Int64));
+}
+
+fn test_gauge_set_inc_dec() {
+    let mut g = gauge_new("cursors".clone());
+    g.set(10 as Int64);
+    g.inc();
+    g.dec();
+    g.dec();
+    assert(g.get() == (9 as Int64));
+}
+
+// -----------------------------------------------------------------------------
+// histogram
+// -----------------------------------------------------------------------------
+
+fn test_histogram_bucket_placement() {
+    let mut h = histogram_default("latency".clone());
+    h.observe(5 as Int64);                  // 5 ns → 10us bucket
+    h.observe(50000 as Int64);              // 50µs → 100us bucket
+    h.observe(500000000 as Int64);          // 500ms → 1s bucket
+    assert(h.count() == (3 as Int64));
+    assert(h.cumulative(0) >= (1 as Int64)); // 10us bucket has at least 1
+}
+
+fn test_histogram_mean() {
+    let mut h = histogram_default("latency".clone());
+    h.observe(100 as Int64);
+    h.observe(200 as Int64);
+    h.observe(300 as Int64);
+    assert(h.mean_ns() == (200 as Int64));
+}
+
+fn test_histogram_quantile_picks_bucket() {
+    let mut h = histogram_default("latency".clone());
+    let mut i: Int = 0;
+    while i < 10 { h.observe(50 as Int64); i = i + 1; }
+    let q50 = h.approx_quantile_ns(0.5);
+    // p50 falls in the 10us bucket
+    assert(q50 == (10 as Int64) * NS_PER_US);
+}
+
+fn test_histogram_overflow_bucket() {
+    let mut h = histogram_default("latency".clone());
+    h.observe(99999 * NS_PER_S);   // way beyond the largest bound
+    assert(h.count() == (1 as Int64));
+}
+
+// -----------------------------------------------------------------------------
+// registry
+// -----------------------------------------------------------------------------
+
+fn test_registry_get_or_create() {
+    let mut r = registry_new();
+    let i1 = r.counter("queries".clone());
+    let i2 = r.counter("queries".clone());
+    assert_eq(i1, i2);
+    assert_eq(r.counter_count(), 1);
+}
+
+fn test_registry_inc_then_read() {
+    let mut r = registry_new();
+    r.inc_counter("rows_read".clone());
+    r.inc_counter("rows_read".clone());
+    r.add_counter("rows_read".clone(), 8 as Int64);
+    match r.counter_value(&"rows_read".clone()) {
+        Some(v) => assert(v == (10 as Int64)),
+        None    => panic("counter present"),
+    }
+}
+
+fn test_registry_set_gauge() {
+    let mut r = registry_new();
+    r.set_gauge("open_cursors".clone(), 5 as Int64);
+    match r.gauge_value(&"open_cursors".clone()) {
+        Some(v) => assert(v == (5 as Int64)),
+        None    => panic("gauge present"),
+    }
+}
+
+fn test_registry_observe() {
+    let mut r = registry_new();
+    r.observe("latency".clone(), 1500 as Int64);
+    r.observe("latency".clone(), 2500 as Int64);
+    match r.histogram_observations(&"latency".clone()) {
+        Some(v) => assert(v == (2 as Int64)),
+        None    => panic("histogram present"),
+    }
+}
+
+fn test_register_defaults_creates_set() {
+    let mut r = registry_new();
+    register_defaults(&mut r);
+    assert(r.counter_count() >= 6);
+    assert(r.gauge_count() >= 3);
+    assert(r.histogram_count() >= 2);
+}
+
+// -----------------------------------------------------------------------------
+// span
+// -----------------------------------------------------------------------------
+
+fn test_trace_ctx_child_inherits_trace_id() {
+    let root = trace_ctx_root(0xAA as Int64, 0xBB as Int64);
+    let child = trace_ctx_child(&root, 7 as Int64);
+    assert(child.trace_id_hi == root.trace_id_hi);
+    assert(child.trace_id_lo == root.trace_id_lo);
+    assert(child.parent_span_id == (7 as Int64));
+}
+
+fn test_span_lifecycle() {
+    let ctx = trace_ctx_root(1 as Int64, 2 as Int64);
+    let mut s = span_start("query".clone(), SkInternal, &ctx, 100 as Int64, 0 as Int64);
+    assert(!s.is_ended());
+    s.set_attribute(attr_text("sql".clone(), "SELECT 1".clone()));
+    s.set_attribute(attr_int("rows".clone(), 1 as Int64));
+    s.end(500 as Int64);
+    assert(s.is_ended());
+    assert(s.duration_ns() == (500 as Int64));
+    match &s.status { SsOk => {}, _ => panic("end-clean defaults to Ok") };
+}
+
+fn test_span_end_with_error() {
+    let ctx = trace_ctx_root(0 as Int64, 0 as Int64);
+    let mut s = span_start("q".clone(), SkInternal, &ctx, 0 as Int64, 0 as Int64);
+    s.end_with_error(100 as Int64, "boom".clone());
+    match &s.status { SsError(_) => {}, _ => panic("error status") };
+}
+
+fn test_span_kind_names() {
+    assert(span_kind_name(&SkInternal) == "internal".clone());
+    assert(span_kind_name(&SkClient) == "client".clone());
+    assert(span_kind_name(&SkServer) == "server".clone());
+}
+
+// -----------------------------------------------------------------------------
+// SpanSink — buffering
+// -----------------------------------------------------------------------------
+
+fn test_buffering_sink_collects() {
+    let mut sink = buffering_sink();
+    let ctx = trace_ctx_root(0 as Int64, 0 as Int64);
+    let mut s = span_start("a".clone(), SkInternal, &ctx, 1 as Int64, 0 as Int64);
+    s.end(10 as Int64);
+    sink.on_span_end(&s);
+    sink.on_span_end(&s);
+    assert_eq(sink.buffered_count(), 2);
+}
+
+// -----------------------------------------------------------------------------
+// exporters
+// -----------------------------------------------------------------------------
+
+fn test_prometheus_exporter() {
+    let mut r = registry_new();
+    r.inc_counter("queries".clone());
+    r.set_gauge("open".clone(), 4 as Int64);
+    let e = prometheus();
+    let s = e.render(&r);
+    assert(s.len() > 0);
+}
+
+fn test_jsonl_exporter() {
+    let mut r = registry_new();
+    r.inc_counter("queries".clone());
+    let e = json_lines();
+    let s = e.render(&r);
+    assert(s.len() > 0);
+}
+
+fn test_otlp_export() {
+    let mut r = registry_new();
+    register_defaults(&mut r);
+    let e = otlp();
+    let dp = otlp_export(&e, &r);
+    assert(dp.len() >= 11);
+}
+
+fn main() {
+    test_counter_inc_add();
+    test_gauge_set_inc_dec();
+    test_histogram_bucket_placement();
+    test_histogram_mean();
+    test_histogram_quantile_picks_bucket();
+    test_histogram_overflow_bucket();
+    test_registry_get_or_create();
+    test_registry_inc_then_read();
+    test_registry_set_gauge();
+    test_registry_observe();
+    test_register_defaults_creates_set();
+    test_trace_ctx_child_inherits_trace_id();
+    test_span_lifecycle();
+    test_span_end_with_error();
+    test_span_kind_names();
+    test_buffering_sink_collects();
+    test_prometheus_exporter();
+    test_jsonl_exporter();
+    test_otlp_export();
+}

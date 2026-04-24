@@ -1,0 +1,103 @@
+// =============================================================================
+// alter/op.vr — AlterOp taxonomy
+// =============================================================================
+// Spec: sqlite-native.md §17
+//
+// Five operations supported (matches upstream SQLite + DROP COLUMN
+// from 3.35.0):
+//
+//   * `RenameTable(old_name → new_name)`
+//   * `RenameColumn(table, old_col → new_col)`
+//   * `AddColumn(table, col_def)`
+//   * `DropColumn(table, col_name)`
+//   * `AlterColumnDefault(table, col, new_default_expr)`
+// =============================================================================
+
+module core.database.sqlite.native.alter.op;
+
+mount core.*;
+mount base.{Text, Maybe, Bool};
+mount collections.List;
+
+// -----------------------------------------------------------------------------
+// ColumnDef — minimal subset needed for ADD COLUMN
+// -----------------------------------------------------------------------------
+
+public type ColumnDef is {
+    name: Text,
+    type_affinity: Text,
+    not_null: Bool,
+    default_expr: Maybe<Text>,
+    is_unique: Bool,
+}
+
+public fn column_def(name: Text, type_affinity: Text) -> ColumnDef {
+    ColumnDef {
+        name: name,
+        type_affinity: type_affinity,
+        not_null: false,
+        default_expr: None,
+        is_unique: false,
+    }
+}
+
+implement ColumnDef {
+    public fn require_not_null(mut self) -> ColumnDef { self.not_null = true; self }
+    public fn with_default(mut self, expr: Text) -> ColumnDef { self.default_expr = Some(expr); self }
+    public fn unique(mut self) -> ColumnDef { self.is_unique = true; self }
+}
+
+// -----------------------------------------------------------------------------
+// AlterOp
+// -----------------------------------------------------------------------------
+
+public type AlterOp is
+      AoRenameTable(Text, Text)            // (old_name, new_name)
+    | AoRenameColumn(Text, Text, Text)     // (table, old_col, new_col)
+    | AoAddColumn(Text, ColumnDef)
+    | AoDropColumn(Text, Text)
+    | AoAlterColumnDefault(Text, Text, Maybe<Text>);
+
+public fn op_name(o: &AlterOp) -> Text {
+    match o {
+        AoRenameTable(_, _)         => "RENAME TABLE".clone(),
+        AoRenameColumn(_, _, _)     => "RENAME COLUMN".clone(),
+        AoAddColumn(_, _)           => "ADD COLUMN".clone(),
+        AoDropColumn(_, _)          => "DROP COLUMN".clone(),
+        AoAlterColumnDefault(_, _, _) => "ALTER COLUMN DEFAULT".clone(),
+    }
+}
+
+public fn op_target_table(o: &AlterOp) -> Text {
+    match o {
+        AoRenameTable(old, _)         => old.clone(),
+        AoRenameColumn(t, _, _)       => t.clone(),
+        AoAddColumn(t, _)             => t.clone(),
+        AoDropColumn(t, _)            => t.clone(),
+        AoAlterColumnDefault(t, _, _) => t.clone(),
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Builders
+// -----------------------------------------------------------------------------
+
+public fn rename_table(old_name: Text, new_name: Text) -> AlterOp {
+    AoRenameTable(old_name, new_name)
+}
+
+public fn rename_column(table: Text, old_col: Text, new_col: Text) -> AlterOp {
+    AoRenameColumn(table, old_col, new_col)
+}
+
+public fn add_column(table: Text, def: ColumnDef) -> AlterOp {
+    AoAddColumn(table, def)
+}
+
+public fn drop_column(table: Text, col_name: Text) -> AlterOp {
+    AoDropColumn(table, col_name)
+}
+
+public fn alter_default(table: Text, col_name: Text, new_default: Maybe<Text>) -> AlterOp {
+    AoAlterColumnDefault(table, col_name, new_default)
+}

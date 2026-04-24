@@ -1,0 +1,90 @@
+// =============================================================================
+// migrations/migration.vr — Migration record + builder
+// =============================================================================
+// Spec: sqlite-native.md operational tooling
+//
+// A `Migration` is a fully-described migration step:
+//
+//   * `version`      — strict-monotonic identifier (the number stored
+//                      in `PRAGMA user_version` after this migration
+//                      successfully applies)
+//   * `name`         — human-readable label for journal output
+//   * `up_sql`       — SQL run on apply
+//   * `down_sql`     — SQL run on rollback (None ⇒ migration is
+//                      irreversible; rollback past it requires manual
+//                      intervention)
+//   * `depends_on`   — versions of migrations that must apply first
+//   * `is_idempotent`— True ⇒ safe to re-run without dropping;
+//                      lets the runner skip the `user_version` guard
+//                      when only this migration is in the plan.
+// =============================================================================
+
+module core.database.sqlite.native.migrations.migration;
+
+mount core.*;
+mount base.{Text, Bool, Maybe};
+mount collections.List;
+
+// -----------------------------------------------------------------------------
+// Migration
+// -----------------------------------------------------------------------------
+
+public type Migration is {
+    version: Int,
+    name: Text,
+    up_sql: Text,
+    down_sql: Maybe<Text>,
+    depends_on: List<Int>,
+    is_idempotent: Bool,
+}
+
+public fn migration_new(version: Int, name: Text, up_sql: Text) -> Migration {
+    Migration {
+        version: version,
+        name: name,
+        up_sql: up_sql,
+        down_sql: None,
+        depends_on: List.new(),
+        is_idempotent: false,
+    }
+}
+
+implement Migration {
+    public fn with_down(mut self, sql: Text) -> Migration {
+        self.down_sql = Some(sql);
+        self
+    }
+
+    public fn with_dependency(mut self, version: Int) -> Migration {
+        self.depends_on.push(version);
+        self
+    }
+
+    public fn mark_idempotent(mut self) -> Migration {
+        self.is_idempotent = true;
+        self
+    }
+
+    public fn is_reversible(&self) -> Bool {
+        match &self.down_sql { Some(_) => true, None => false }
+    }
+}
+
+// -----------------------------------------------------------------------------
+// MigrationStatus — what the journal records about each version
+// -----------------------------------------------------------------------------
+
+public type MigrationStatus is
+      MsPending          // declared but not applied
+    | MsApplied(Int64)   // applied — wall-clock ns of completion
+    | MsRolledBack(Int64)
+    | MsFailed(Text);    // the error text from the failure
+
+public fn status_name(s: &MigrationStatus) -> Text {
+    match s {
+        MsPending      => "pending".clone(),
+        MsApplied(_)   => "applied".clone(),
+        MsRolledBack(_)=> "rolled_back".clone(),
+        MsFailed(_)    => "failed".clone(),
+    }
+}

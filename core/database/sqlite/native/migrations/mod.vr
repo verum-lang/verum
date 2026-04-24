@@ -1,0 +1,30 @@
+// =============================================================================
+// core/database/sqlite/native/migrations/mod.vr
+// =============================================================================
+// Layer: 7 (consumer-facing — `Database.migrate(plan)`)
+// Spec: sqlite-native.md operational tooling
+//
+// Versioned schema-migration framework. Each `Migration` carries
+// an integer version, an optional human-readable name, an `up`
+// SQL block (+ optional `down` for rollback), and a list of
+// migration versions it depends on (typically `[version - 1]`).
+//
+// `MigrationRunner` walks the dependency graph in topological order
+// and applies each migration whose version is greater than the
+// `user_version` PRAGMA value. On error, optionally rolls back
+// applied migrations (LIFO) before propagating.
+//
+// Submodules:
+//   * `migration`     — Migration record + builder
+//   * `plan`          — MigrationPlan (sorted by dep DAG)
+//   * `runner`        — MigrationRunner state machine
+//   * `journal`       — applied-migration log (persisted in
+//                       `__loom_migrations` table)
+// =============================================================================
+
+module core.database.sqlite.native.migrations;
+
+public module migration;
+public module plan;
+public module runner;
+public module journal;

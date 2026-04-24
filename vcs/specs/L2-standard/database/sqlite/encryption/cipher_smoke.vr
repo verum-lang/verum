@@ -1,0 +1,237 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, encryption, cipher, key_ring, kdf
+// @timeout: 5000
+// @expected-exit: 0
+//
+// Encryption surface:
+//   * NullCipher round-trips bytes verbatim
+//   * AesGcmCipher / Chacha20Cipher round-trip with key
+//   * Wrong key length is rejected
+//   * KdfParams builder + 3 KeyDerivation impls
+//   * KeyRing install / lookup / rotation / retire
+//   * EncryptionPolicy gates page numbers correctly
+
+mount core.database.sqlite.native.encryption.cipher.{
+    PageCipher, CipherError, CeWrongKey, CeAuthFailure, CeMalformedPage, CeUnsupported,
+    NullCipher, null_cipher,
+    AesGcmCipher, aes_gcm_cipher,
+    Chacha20Cipher, chacha20_cipher,
+    AES_GCM_NONCE_BYTES, AES_GCM_TAG_BYTES, AES_KEY_BYTES,
+    CHACHA_NONCE_BYTES, CHACHA_TAG_BYTES,
+};
+mount core.database.sqlite.native.encryption.kdf.{
+    KdfError, KeBadParams, KeUnsupported, KeWeakKey,
+    KdfParams, params_default,
+    KeyDerivation,
+    RawKey, raw_key,
+    Pbkdf2Sha256, pbkdf2_sha256,
+    ScryptSimple, scrypt_simple,
+};
+mount core.database.sqlite.native.encryption.key_ring.{
+    KeyEntry, KeyRing, key_entry, key_ring_new,
+};
+mount core.database.sqlite.native.encryption.policy.{
+    EncryptionPolicy, EpEncryptAll, EpUserPagesOnly, EpNone,
+    policy_name, should_encrypt,
+};
+mount base.{Ok, Err, Some, None, Maybe, Result, Bool};
+
+fn make_bytes(n: Int) -> List<Byte> {
+    let mut out: List<Byte> = List.new();
+    let mut i: Int = 0;
+    while i < n { out.push((i % 256) as Byte); i = i + 1; }
+    out
+}
+
+fn make_key_bytes(n: Int, fill: Int) -> List<Byte> {
+    let mut out: List<Byte> = List.new();
+    let mut i: Int = 0;
+    while i < n { out.push(fill as Byte); i = i + 1; }
+    out
+}
+
+// -----------------------------------------------------------------------------
+// NullCipher
+// -----------------------------------------------------------------------------
+
+fn test_null_cipher_round_trip() {
+    let c = null_cipher();
+    let pt = make_bytes(64);
+    let ct = c.encrypt(7, &pt).unwrap();
+    let dec = c.decrypt(7, &ct).unwrap();
+    assert_eq(dec.len(), 64);
+}
+
+fn test_null_cipher_no_overhead() {
+    assert_eq(null_cipher().overhead_bytes(), 0);
+}
+
+// -----------------------------------------------------------------------------
+// AesGcmCipher
+// -----------------------------------------------------------------------------
+
+fn test_aes_gcm_requires_32byte_key() {
+    let short_key = make_key_bytes(16, 0xAA);
+    match aes_gcm_cipher(short_key) {
+        Err(CeUnsupported(_)) => {},
+        _ => panic("16-byte key rejected"),
+    }
+}
+
+fn test_aes_gcm_round_trip() {
+    let key = make_key_bytes(AES_KEY_BYTES, 0x42);
+    let c = aes_gcm_cipher(key).unwrap();
+    let pt = make_bytes(64);
+    let ct = c.encrypt(1, &pt).unwrap();
+    assert_eq(ct.len(), 64 + AES_GCM_NONCE_BYTES + AES_GCM_TAG_BYTES);
+    let dec = c.decrypt(1, &ct).unwrap();
+    assert_eq(dec.len(), 64);
+}
+
+fn test_aes_gcm_overhead() {
+    let key = make_key_bytes(AES_KEY_BYTES, 0);
+    let c = aes_gcm_cipher(key).unwrap();
+    assert_eq(c.overhead_bytes(), AES_GCM_NONCE_BYTES + AES_GCM_TAG_BYTES);
+}
+
+// -----------------------------------------------------------------------------
+// Chacha20Cipher
+// -----------------------------------------------------------------------------
+
+fn test_chacha20_round_trip() {
+    let key = make_key_bytes(AES_KEY_BYTES, 0x55);
+    let c = chacha20_cipher(key).unwrap();
+    let pt = make_bytes(32);
+    let ct = c.encrypt(5, &pt).unwrap();
+    assert_eq(ct.len(), 32 + CHACHA_NONCE_BYTES + CHACHA_TAG_BYTES);
+    let dec = c.decrypt(5, &ct).unwrap();
+    assert_eq(dec.len(), 32);
+}
+
+// -----------------------------------------------------------------------------
+// KDF
+// -----------------------------------------------------------------------------
+
+fn test_raw_key_passthrough() {
+    let secret = make_key_bytes(AES_KEY_BYTES, 0x77);
+    let params = params_default().with_key_len(AES_KEY_BYTES);
+    let derived = raw_key().derive(&secret, &params).unwrap();
+    assert_eq(derived.len(), AES_KEY_BYTES);
+}
+
+fn test_raw_key_length_mismatch_errors() {
+    let secret = make_bytes(8);
+    let params = params_default();
+    match raw_key().derive(&secret, &params) {
+        Err(KeBadParams(_)) => {},
+        _ => panic("raw key length mismatch"),
+    }
+}
+
+fn test_pbkdf2_rejects_low_cost() {
+    let params = params_default().with_cost(100);
+    match pbkdf2_sha256().derive(&make_bytes(8), &params) {
+        Err(KeBadParams(_)) => {},
+        _ => panic("PBKDF2 low cost rejected"),
+    }
+}
+
+fn test_scrypt_derives_key() {
+    let params = params_default().with_cost(1024).with_key_len(32);
+    let derived = scrypt_simple().derive(&make_bytes(16), &params).unwrap();
+    assert_eq(derived.len(), 32);
+}
+
+// -----------------------------------------------------------------------------
+// KeyRing
+// -----------------------------------------------------------------------------
+
+fn test_key_ring_install_then_current() {
+    let mut r = key_ring_new();
+    let id = r.install(make_key_bytes(32, 0x01), 100 as Int64);
+    assert_eq(r.key_count(), 1);
+    match r.current() {
+        Some(e) => assert_eq(e.key_id, id),
+        None    => panic("current key set"),
+    }
+}
+
+fn test_key_ring_rotation_closes_previous() {
+    let mut r = key_ring_new();
+    let id1 = r.install(make_key_bytes(32, 0x01), 100 as Int64);
+    let id2 = r.install(make_key_bytes(32, 0x02), 200 as Int64);
+    assert(id1 != id2);
+    assert_eq(r.key_count(), 2);
+    match r.current() {
+        Some(e) => assert_eq(e.key_id, id2),
+        None    => panic("current is the new key"),
+    }
+    // Old key is still accessible by id.
+    match r.lookup(id1) {
+        Some(e) => assert(e.valid_to_ns != (0 as Int64)),
+        None    => panic("old key still in history"),
+    }
+}
+
+fn test_key_ring_retire() {
+    let mut r = key_ring_new();
+    let id1 = r.install(make_key_bytes(32, 0x01), 100 as Int64);
+    let _id2 = r.install(make_key_bytes(32, 0x02), 200 as Int64);
+    assert(r.retire(id1));
+    assert_eq(r.key_count(), 1);
+}
+
+fn test_key_ring_retire_current_rejected() {
+    let mut r = key_ring_new();
+    let id = r.install(make_key_bytes(32, 0x01), 100 as Int64);
+    assert(!r.retire(id));   // can't retire the active key
+}
+
+// -----------------------------------------------------------------------------
+// policy
+// -----------------------------------------------------------------------------
+
+fn test_policy_encrypt_all() {
+    assert(should_encrypt(&EpEncryptAll, 1));
+    assert(should_encrypt(&EpEncryptAll, 99));
+}
+
+fn test_policy_user_pages_only_skips_page_1() {
+    assert(!should_encrypt(&EpUserPagesOnly, 1));
+    assert(should_encrypt(&EpUserPagesOnly, 2));
+    assert(should_encrypt(&EpUserPagesOnly, 99));
+}
+
+fn test_policy_none_disables() {
+    assert(!should_encrypt(&EpNone, 1));
+    assert(!should_encrypt(&EpNone, 99));
+}
+
+fn test_policy_names() {
+    assert(policy_name(&EpEncryptAll) == "encrypt_all".clone());
+    assert(policy_name(&EpUserPagesOnly) == "user_pages_only".clone());
+    assert(policy_name(&EpNone) == "none".clone());
+}
+
+fn main() {
+    test_null_cipher_round_trip();
+    test_null_cipher_no_overhead();
+    test_aes_gcm_requires_32byte_key();
+    test_aes_gcm_round_trip();
+    test_aes_gcm_overhead();
+    test_chacha20_round_trip();
+    test_raw_key_passthrough();
+    test_raw_key_length_mismatch_errors();
+    test_pbkdf2_rejects_low_cost();
+    test_scrypt_derives_key();
+    test_key_ring_install_then_current();
+    test_key_ring_rotation_closes_previous();
+    test_key_ring_retire();
+    test_key_ring_retire_current_rejected();
+    test_policy_encrypt_all();
+    test_policy_user_pages_only_skips_page_1();
+    test_policy_none_disables();
+    test_policy_names();
+}

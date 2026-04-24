@@ -1,0 +1,29 @@
+// =============================================================================
+// core/database/sqlite/native/alter/mod.vr
+// =============================================================================
+// Layer: 5 (planner) / 6 (schema)
+// Spec: sqlite-native.md §17 — schema evolution
+//
+// Online ALTER TABLE: SQLite supports a small set of ALTER variants
+// (RENAME TABLE, RENAME COLUMN, ADD COLUMN, DROP COLUMN). loom adds
+// a state machine that:
+//
+//   * validates the operation against the current schema
+//   * computes the post-ALTER schema delta
+//   * generates the SQL the codegen will emit
+//   * surfaces a compatible-rewrite preview for triggers / views
+//     that reference the affected table
+//
+// Submodules:
+//   * `op`         — AlterOp sum type + builders
+//   * `validator`  — pre-execution validation against SchemaCache
+//   * `delta`      — SchemaDelta + impact analysis
+//   * `engine`     — execution state machine
+// =============================================================================
+
+module core.database.sqlite.native.alter;
+
+public module op;
+public module validator;
+public module delta;
+public module engine;

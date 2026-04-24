@@ -1,0 +1,242 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, migrations, runner, journal
+// @timeout: 5000
+// @expected-exit: 0
+//
+// Migration framework:
+//   * Migration builder with depends_on / mark_idempotent
+//   * Plan validates duplicate-version, unknown-dep, cycle
+//   * Toposort produces a deterministic order
+//   * Journal records pending → applied transitions
+//   * Drift detection on checksum mismatch
+//   * Runner dry-run produces decisions without executing
+//   * Strict-mode rollback on failure (LIFO)
+
+mount core.database.sqlite.native.migrations.migration.{
+    Migration, MigrationStatus, MsPending, MsApplied, MsRolledBack, MsFailed,
+    migration_new, status_name,
+};
+mount core.database.sqlite.native.migrations.plan.{
+    PlanError, PeDuplicateVersion, PeUnknownDependency, PeCycle,
+    MigrationPlan, build,
+};
+mount core.database.sqlite.native.migrations.journal.{
+    JournalEntry, MigrationJournal, journal_new, checksum_for_sql,
+};
+mount core.database.sqlite.native.migrations.runner.{
+    RunMode, RmDryRun, RmStrict, RmContinueOnDrift,
+    RunDecision, RdSkip, RdApply, RdSkipDrift, RdAbortDrift,
+    RunReport, report_zero,
+    MigrationRunner, runner_new,
+    decision_kind_name, run_mode_name,
+};
+mount base.{Ok, Err, Some, None, Maybe, Result};
+
+// -----------------------------------------------------------------------------
+// migration
+// -----------------------------------------------------------------------------
+
+fn test_migration_builder() {
+    let m = migration_new(1, "init".clone(), "CREATE TABLE t".clone())
+        .with_down("DROP TABLE t".clone())
+        .with_dependency(0)
+        .mark_idempotent();
+    assert(m.is_reversible());
+    assert(m.is_idempotent);
+    assert_eq(m.depends_on.len(), 1);
+}
+
+fn test_status_names() {
+    assert(status_name(&MsPending) == "pending".clone());
+    assert(status_name(&MsApplied(100 as Int64)) == "applied".clone());
+    assert(status_name(&MsRolledBack(0 as Int64)) == "rolled_back".clone());
+    assert(status_name(&MsFailed("boom".clone())) == "failed".clone());
+}
+
+// -----------------------------------------------------------------------------
+// plan
+// -----------------------------------------------------------------------------
+
+fn test_plan_empty() {
+    let plan = build(List.new()).unwrap();
+    assert_eq(plan.ordered.len(), 0);
+}
+
+fn test_plan_duplicate_version() {
+    let mut steps: List<Migration> = List.new();
+    steps.push(migration_new(1, "a".clone(), "X".clone()));
+    steps.push(migration_new(1, "b".clone(), "Y".clone()));
+    match build(steps) {
+        Err(PeDuplicateVersion(v)) => assert_eq(v, 1),
+        _                          => panic("duplicate version detected"),
+    }
+}
+
+fn test_plan_unknown_dependency() {
+    let mut steps: List<Migration> = List.new();
+    steps.push(migration_new(2, "needs_99".clone(), "X".clone()).with_dependency(99));
+    match build(steps) {
+        Err(PeUnknownDependency(v, dep)) => {
+            assert_eq(v, 2); assert_eq(dep, 99);
+        }
+        _ => panic("unknown dependency detected"),
+    }
+}
+
+fn test_plan_cycle_detection() {
+    let mut steps: List<Migration> = List.new();
+    steps.push(migration_new(1, "a".clone(), "X".clone()).with_dependency(2));
+    steps.push(migration_new(2, "b".clone(), "Y".clone()).with_dependency(1));
+    match build(steps) {
+        Err(PeCycle(_)) => {},
+        _               => panic("cycle detected"),
+    }
+}
+
+fn test_plan_topological_order() {
+    let mut steps: List<Migration> = List.new();
+    // c depends on b depends on a; submit in reverse order — plan should reorder.
+    steps.push(migration_new(3, "c".clone(), "Z".clone()).with_dependency(2));
+    steps.push(migration_new(2, "b".clone(), "Y".clone()).with_dependency(1));
+    steps.push(migration_new(1, "a".clone(), "X".clone()));
+    let plan = build(steps).unwrap();
+    assert_eq(plan.ordered.len(), 3);
+    assert_eq(plan.ordered[0].version, 1);
+    assert_eq(plan.ordered[1].version, 2);
+    assert_eq(plan.ordered[2].version, 3);
+    assert_eq(plan.min_version, 1);
+    assert_eq(plan.max_version, 3);
+}
+
+fn test_plan_reversibility() {
+    let mut steps: List<Migration> = List.new();
+    steps.push(migration_new(1, "a".clone(), "X".clone()).with_down("Y".clone()));
+    let plan = build(steps).unwrap();
+    assert(plan.is_reversible);
+    let mut steps2: List<Migration> = List.new();
+    steps2.push(migration_new(1, "a".clone(), "X".clone()));
+    let plan2 = build(steps2).unwrap();
+    assert(!plan2.is_reversible);
+}
+
+// -----------------------------------------------------------------------------
+// journal
+// -----------------------------------------------------------------------------
+
+fn test_journal_records_status() {
+    let mut j = journal_new();
+    let m = migration_new(1, "init".clone(), "CREATE TABLE x".clone());
+    j.record_pending(&m);
+    assert_eq(j.entry_count(), 1);
+    j.record_applied(&m, 1000 as Int64);
+    assert(j.is_applied(1));
+    assert_eq(j.high_water(), 1);
+}
+
+fn test_journal_drift_detection() {
+    let mut j = journal_new();
+    let original = migration_new(1, "init".clone(), "CREATE TABLE x".clone());
+    j.record_applied(&original, 1000 as Int64);
+    let modified = migration_new(1, "init".clone(), "CREATE TABLE x (id INT)".clone());
+    assert(j.drift_detected(&modified));
+    assert(!j.drift_detected(&original));
+}
+
+fn test_checksum_sensitivity() {
+    let a = checksum_for_sql(&"CREATE TABLE t".clone());
+    let b = checksum_for_sql(&"CREATE TABLE T".clone());
+    assert(a != b);
+}
+
+// -----------------------------------------------------------------------------
+// runner
+// -----------------------------------------------------------------------------
+
+fn no_op_runner(_sql: &Text) -> Maybe<Text> { None }
+fn fail_at_v2_runner(sql: &Text) -> Maybe<Text> {
+    if sql == &"CREATE TABLE b".clone() { Some("simulated failure".clone()) }
+    else { None }
+}
+
+fn build_three_step_plan() -> MigrationPlan {
+    let mut steps: List<Migration> = List.new();
+    steps.push(migration_new(1, "a".clone(), "CREATE TABLE a".clone()).with_down("DROP TABLE a".clone()));
+    steps.push(migration_new(2, "b".clone(), "CREATE TABLE b".clone()).with_down("DROP TABLE b".clone()));
+    steps.push(migration_new(3, "c".clone(), "CREATE TABLE c".clone()).with_down("DROP TABLE c".clone()));
+    build(steps).unwrap()
+}
+
+fn test_dry_run_skips_everything() {
+    let plan = build_three_step_plan();
+    let mut journal = journal_new();
+    let runner = runner_new(RmDryRun);
+    let report = runner.execute(&plan, &mut journal, 1000 as Int64, no_op_runner);
+    assert_eq(report.applied, 0);
+    assert_eq(report.skipped, 3);
+}
+
+fn test_strict_applies_three() {
+    let plan = build_three_step_plan();
+    let mut journal = journal_new();
+    let runner = runner_new(RmStrict);
+    let report = runner.execute(&plan, &mut journal, 2000 as Int64, no_op_runner);
+    assert_eq(report.applied, 3);
+    assert(!report.aborted);
+    assert_eq(journal.high_water(), 3);
+}
+
+fn test_strict_rolls_back_on_failure() {
+    let plan = build_three_step_plan();
+    let mut journal = journal_new();
+    let runner = runner_new(RmStrict);
+    let report = runner.execute(&plan, &mut journal, 3000 as Int64, fail_at_v2_runner);
+    assert(report.aborted);
+    assert_eq(report.applied, 1);
+    // a was applied, b failed → rollback should drop a
+    assert(report.rolled_back >= 1);
+}
+
+fn test_decisions_preview() {
+    let plan = build_three_step_plan();
+    let journal = journal_new();
+    let runner = runner_new(RmStrict);
+    let decisions = runner.plan_decisions(&plan, &journal);
+    assert_eq(decisions.len(), 3);
+    let mut all_apply = true;
+    let mut i: Int = 0;
+    while i < decisions.len() {
+        match &decisions[i] {
+            RdApply(_, _) => {},
+            _             => { all_apply = false; break; }
+        }
+        i = i + 1;
+    }
+    assert(all_apply);
+}
+
+fn test_run_mode_names() {
+    assert(run_mode_name(&RmDryRun) == "dry-run".clone());
+    assert(run_mode_name(&RmStrict) == "strict".clone());
+    assert(run_mode_name(&RmContinueOnDrift) == "continue-on-drift".clone());
+}
+
+fn main() {
+    test_migration_builder();
+    test_status_names();
+    test_plan_empty();
+    test_plan_duplicate_version();
+    test_plan_unknown_dependency();
+    test_plan_cycle_detection();
+    test_plan_topological_order();
+    test_plan_reversibility();
+    test_journal_records_status();
+    test_journal_drift_detection();
+    test_checksum_sensitivity();
+    test_dry_run_skips_everything();
+    test_strict_applies_three();
+    test_strict_rolls_back_on_failure();
+    test_decisions_preview();
+    test_run_mode_names();
+}

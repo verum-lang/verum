@@ -1,0 +1,213 @@
+// =============================================================================
+// alter/validator.vr — pre-execution validation
+// =============================================================================
+// Spec: sqlite-native.md §17
+//
+// Catches authoring errors before the engine touches the schema:
+//
+//   * `VeNoSuchTable`     — operating on a table that doesn't exist
+//   * `VeNoSuchColumn`    — operating on a column that doesn't exist
+//   * `VeDuplicateName`   — would create a duplicate (table or column)
+//   * `VeNotNullWithoutDefault` — ADD COLUMN NOT NULL without DEFAULT
+//                                  on a table that already has rows
+//   * `VePrimaryKey`      — would alter a PK column (SQLite forbids)
+//   * `VeForeignKey`      — would break an inbound FK reference
+//
+// We model the schema as `TableShape` records — a minimal subset
+// of `SchemaCache` that's enough to validate. The L7 façade fills
+// it in from the live cache before validating.
+// =============================================================================
+
+module core.database.sqlite.native.alter.validator;
+
+mount core.*;
+mount base.{Text, Bool, Maybe, Result, Ok, Err};
+mount collections.List;
+mount core.database.sqlite.native.alter.op.{
+    AlterOp, ColumnDef,
+    AoRenameTable, AoRenameColumn, AoAddColumn, AoDropColumn, AoAlterColumnDefault,
+};
+
+// -----------------------------------------------------------------------------
+// Errors
+// -----------------------------------------------------------------------------
+
+public type ValidationError is
+      VeNoSuchTable(Text)
+    | VeNoSuchColumn(Text, Text)        // (table, col)
+    | VeDuplicateName(Text)
+    | VeNotNullWithoutDefault(Text, Text)
+    | VePrimaryKey(Text, Text)
+    | VeForeignKey(Text, Text);
+
+public fn error_kind(e: &ValidationError) -> Text {
+    match e {
+        VeNoSuchTable(_)            => "no_such_table".clone(),
+        VeNoSuchColumn(_, _)        => "no_such_column".clone(),
+        VeDuplicateName(_)          => "duplicate_name".clone(),
+        VeNotNullWithoutDefault(_, _) => "not_null_without_default".clone(),
+        VePrimaryKey(_, _)          => "primary_key".clone(),
+        VeForeignKey(_, _)          => "foreign_key".clone(),
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Schema-shape records
+// -----------------------------------------------------------------------------
+
+public type ColumnShape is {
+    name: Text,
+    is_pk: Bool,
+}
+
+public type TableShape is {
+    name: Text,
+    columns: List<ColumnShape>,
+    /// True ⇒ has rows currently; ADD COLUMN NOT NULL needs DEFAULT.
+    has_rows: Bool,
+    /// Names of OTHER tables whose FKs reference this table — used
+    /// to gate RENAME / DROP.
+    inbound_fk_tables: List<Text>,
+}
+
+public fn table_shape(name: Text, columns: List<ColumnShape>) -> TableShape {
+    TableShape {
+        name: name,
+        columns: columns,
+        has_rows: false,
+        inbound_fk_tables: List.new(),
+    }
+}
+
+implement TableShape {
+    public fn mark_non_empty(mut self) -> TableShape { self.has_rows = true; self }
+    public fn referenced_by(mut self, table: Text) -> TableShape {
+        self.inbound_fk_tables.push(table);
+        self
+    }
+
+    public fn column(&self, name: &Text) -> base.Maybe<ColumnShape> {
+        let mut i: Int = 0;
+        while i < self.columns.len() {
+            if self.columns[i].name == name {
+                return base.Some(ColumnShape {
+                    name: self.columns[i].name.clone(),
+                    is_pk: self.columns[i].is_pk,
+                });
+            }
+            i = i + 1;
+        }
+        base.None
+    }
+
+    public fn has_inbound_fk(&self) -> Bool { self.inbound_fk_tables.len() > 0 }
+}
+
+// -----------------------------------------------------------------------------
+// SchemaSnapshot
+// -----------------------------------------------------------------------------
+
+public type SchemaSnapshot is {
+    tables: List<TableShape>,
+}
+
+public fn snapshot_new() -> SchemaSnapshot { SchemaSnapshot { tables: List.new() } }
+
+implement SchemaSnapshot {
+    public fn add_table(&mut self, t: TableShape) { self.tables.push(t); }
+
+    public fn table(&self, name: &Text) -> Maybe<TableShape> {
+        let mut i: Int = 0;
+        while i < self.tables.len() {
+            if self.tables[i].name == name {
+                return Some(clone_table(&self.tables[i]));
+            }
+            i = i + 1;
+        }
+        None
+    }
+
+    public fn table_count(&self) -> Int { self.tables.len() }
+}
+
+fn clone_table(t: &TableShape) -> TableShape {
+    let mut cols: List<ColumnShape> = List.new();
+    let mut i: Int = 0;
+    while i < t.columns.len() {
+        cols.push(ColumnShape {
+            name: t.columns[i].name.clone(),
+            is_pk: t.columns[i].is_pk,
+        });
+        i = i + 1;
+    }
+    let mut fks: List<Text> = List.new();
+    let mut k: Int = 0;
+    while k < t.inbound_fk_tables.len() {
+        fks.push(t.inbound_fk_tables[k].clone());
+        k = k + 1;
+    }
+    TableShape {
+        name: t.name.clone(),
+        columns: cols,
+        has_rows: t.has_rows,
+        inbound_fk_tables: fks,
+    }
+}
+
+// -----------------------------------------------------------------------------
+// validate
+// -----------------------------------------------------------------------------
+
+public fn validate(op: &AlterOp, snap: &SchemaSnapshot) -> Result<(), ValidationError> {
+    match op {
+        AoRenameTable(old, new) => {
+            if snap.table(old).is_none() { return Err(VeNoSuchTable(old.clone())); }
+            if snap.table(new).is_some() { return Err(VeDuplicateName(new.clone())); }
+            // SQLite handles inbound FK rewrites itself — no extra check.
+            Ok(())
+        }
+        AoRenameColumn(table, old_col, new_col) => {
+            let t = match snap.table(table) {
+                Some(x) => x,
+                None    => { return Err(VeNoSuchTable(table.clone())); }
+            };
+            if t.column(old_col).is_none() { return Err(VeNoSuchColumn(table.clone(), old_col.clone())); }
+            if t.column(new_col).is_some() { return Err(VeDuplicateName(new_col.clone())); }
+            Ok(())
+        }
+        AoAddColumn(table, def) => {
+            let t = match snap.table(table) {
+                Some(x) => x,
+                None    => { return Err(VeNoSuchTable(table.clone())); }
+            };
+            if t.column(&def.name).is_some() { return Err(VeDuplicateName(def.name.clone())); }
+            if t.has_rows && def.not_null {
+                let no_default = match &def.default_expr { Some(_) => false, None => true };
+                if no_default { return Err(VeNotNullWithoutDefault(table.clone(), def.name.clone())); }
+            }
+            Ok(())
+        }
+        AoDropColumn(table, col) => {
+            let t = match snap.table(table) {
+                Some(x) => x,
+                None    => { return Err(VeNoSuchTable(table.clone())); }
+            };
+            let c = match t.column(col) {
+                Some(x) => x,
+                None    => { return Err(VeNoSuchColumn(table.clone(), col.clone())); }
+            };
+            if c.is_pk { return Err(VePrimaryKey(table.clone(), col.clone())); }
+            // SQLite forbids dropping a column referenced by a FK on another table.
+            if t.has_inbound_fk() { return Err(VeForeignKey(table.clone(), col.clone())); }
+            Ok(())
+        }
+        AoAlterColumnDefault(table, col, _) => {
+            let t = match snap.table(table) {
+                Some(x) => x,
+                None    => { return Err(VeNoSuchTable(table.clone())); }
+            };
+            if t.column(col).is_none() { return Err(VeNoSuchColumn(table.clone(), col.clone())); }
+            Ok(())
+        }
+    }
+}

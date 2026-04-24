@@ -116,3 +116,11 @@ public module session;
 public module index_variants;
 // - stmt_cache: per-Connection LRU prepared-statement cache (§11.1)
 public module stmt_cache;
+// - migrations: versioned schema migrations + DAG-toposort runner
+public module migrations;
+// - observability: counters / gauges / histograms + tracing spans (§22)
+public module observability;
+// - alter: online ALTER TABLE state machine (§17 schema evolution)
+public module alter;
+// - encryption: PageCipher + KeyDerivation + KeyRing protocols (§23 security)
+public module encryption;

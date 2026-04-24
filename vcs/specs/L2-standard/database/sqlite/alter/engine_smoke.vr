@@ -1,0 +1,304 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, alter, schema, validation
+// @timeout: 5000
+// @expected-exit: 0
+//
+// ALTER engine + validator + delta:
+//   * AlterOp builders + name + target_table
+//   * SchemaSnapshot lookup + table.column lookup
+//   * validate detects: NoSuchTable / NoSuchColumn / DuplicateName
+//     / NotNullWithoutDefault / PrimaryKey / ForeignKey
+//   * generate_sql produces upstream-compatible SQL
+//   * ImpactReport tracks affected dependents
+//   * AlterEngine state machine drives Init→Validating→Done
+
+mount core.database.sqlite.native.alter.op.{
+    AlterOp, ColumnDef,
+    AoRenameTable, AoRenameColumn, AoAddColumn, AoDropColumn, AoAlterColumnDefault,
+    op_name, op_target_table,
+    column_def, rename_table, rename_column, add_column, drop_column, alter_default,
+};
+mount core.database.sqlite.native.alter.validator.{
+    ValidationError,
+    VeNoSuchTable, VeNoSuchColumn, VeDuplicateName,
+    VeNotNullWithoutDefault, VePrimaryKey, VeForeignKey,
+    ColumnShape, TableShape, table_shape,
+    SchemaSnapshot, snapshot_new,
+    validate, error_kind,
+};
+mount core.database.sqlite.native.alter.delta.{
+    SchemaDelta,
+    SdTableRenamed, SdColumnRenamed, SdColumnAdded, SdColumnDropped, SdColumnDefaultChanged,
+    delta_from,
+    DependentObject, DependentObjectKind,
+    DkTrigger, DkView, DkIndex, DkForeignKey,
+    dep_kind_name,
+    ImpactReport, report_for,
+};
+mount core.database.sqlite.native.alter.engine.{
+    AlterEngine, engine_new,
+    EnginePhase, EpInit, EpValidating, EpGeneratingSql,
+    EpExecuting, EpApplyingDelta, EpDone, EpFailed,
+    AlterEngineFailure, AefValidation, AefExecution,
+    phase_name as engine_phase_name,
+    generate_sql,
+};
+mount base.{Ok, Err, Some, None, Maybe, Result, Bool};
+
+// -----------------------------------------------------------------------------
+// op
+// -----------------------------------------------------------------------------
+
+fn test_op_names() {
+    assert(op_name(&rename_table("a".clone(), "b".clone())) == "RENAME TABLE".clone());
+    assert(op_name(&drop_column("t".clone(), "c".clone())) == "DROP COLUMN".clone());
+}
+
+fn test_op_target_table() {
+    let op = rename_column("users".clone(), "name".clone(), "full_name".clone());
+    assert(op_target_table(&op) == "users".clone());
+}
+
+fn test_column_def_builder() {
+    let c = column_def("email".clone(), "TEXT".clone())
+        .require_not_null()
+        .with_default("''".clone())
+        .unique();
+    assert(c.not_null);
+    assert(c.is_unique);
+    match &c.default_expr { Some(_) => {}, None => panic("default present") };
+}
+
+// -----------------------------------------------------------------------------
+// snapshot + validate
+// -----------------------------------------------------------------------------
+
+fn pk_col(name: Text) -> ColumnShape {
+    ColumnShape { name: name, is_pk: true }
+}
+
+fn ord_col(name: Text) -> ColumnShape {
+    ColumnShape { name: name, is_pk: false }
+}
+
+fn make_users_snapshot() -> SchemaSnapshot {
+    let mut snap = snapshot_new();
+    let mut cols: List<ColumnShape> = List.new();
+    cols.push(pk_col("id".clone()));
+    cols.push(ord_col("email".clone()));
+    cols.push(ord_col("name".clone()));
+    snap.add_table(table_shape("users".clone(), cols));
+    snap
+}
+
+fn test_validate_rename_table_no_such_table() {
+    let snap = snapshot_new();
+    let op = rename_table("missing".clone(), "x".clone());
+    match validate(&op, &snap) {
+        Err(VeNoSuchTable(_)) => {},
+        _ => panic("missing table error"),
+    }
+}
+
+fn test_validate_rename_to_existing_name() {
+    let mut snap = make_users_snapshot();
+    let mut cols: List<ColumnShape> = List.new();
+    cols.push(pk_col("id".clone()));
+    snap.add_table(table_shape("audit".clone(), cols));
+    let op = rename_table("users".clone(), "audit".clone());
+    match validate(&op, &snap) {
+        Err(VeDuplicateName(_)) => {},
+        _ => panic("duplicate name"),
+    }
+}
+
+fn test_validate_drop_pk_column_fails() {
+    let snap = make_users_snapshot();
+    let op = drop_column("users".clone(), "id".clone());
+    match validate(&op, &snap) {
+        Err(VePrimaryKey(_, _)) => {},
+        _ => panic("PK protection"),
+    }
+}
+
+fn test_validate_drop_column_with_inbound_fk() {
+    let mut snap = snapshot_new();
+    let mut cols: List<ColumnShape> = List.new();
+    cols.push(pk_col("id".clone()));
+    cols.push(ord_col("email".clone()));
+    let mut t = table_shape("users".clone(), cols);
+    t = t.referenced_by("orders".clone());
+    snap.add_table(t);
+    let op = drop_column("users".clone(), "email".clone());
+    match validate(&op, &snap) {
+        Err(VeForeignKey(_, _)) => {},
+        _ => panic("FK protection"),
+    }
+}
+
+fn test_validate_add_not_null_without_default_on_non_empty() {
+    let mut snap = snapshot_new();
+    let mut cols: List<ColumnShape> = List.new();
+    cols.push(pk_col("id".clone()));
+    let mut t = table_shape("users".clone(), cols);
+    t = t.mark_non_empty();
+    snap.add_table(t);
+    let bad = column_def("status".clone(), "TEXT".clone()).require_not_null();
+    let op = add_column("users".clone(), bad);
+    match validate(&op, &snap) {
+        Err(VeNotNullWithoutDefault(_, _)) => {},
+        _ => panic("NOT NULL needs DEFAULT"),
+    }
+}
+
+fn test_validate_add_column_clean() {
+    let snap = make_users_snapshot();
+    let def = column_def("created_at".clone(), "INTEGER".clone());
+    let op = add_column("users".clone(), def);
+    match validate(&op, &snap) {
+        Ok(_) => {},
+        Err(_) => panic("clean ADD COLUMN"),
+    }
+}
+
+// -----------------------------------------------------------------------------
+// delta + impact
+// -----------------------------------------------------------------------------
+
+fn test_delta_rename_table() {
+    let op = rename_table("a".clone(), "b".clone());
+    match delta_from(&op) {
+        SdTableRenamed(_, _) => {},
+        _ => panic("rename delta"),
+    }
+}
+
+fn test_delta_add_column() {
+    let op = add_column("t".clone(), column_def("x".clone(), "INT".clone()));
+    match delta_from(&op) {
+        SdColumnAdded(_, _) => {},
+        _ => panic("add-col delta"),
+    }
+}
+
+fn test_impact_report_dep_classification() {
+    let delta = SdColumnRenamed("users".clone(), "name".clone(), "full_name".clone());
+    let mut deps: List<DependentObject> = List.new();
+    deps.push(DependentObject {
+        kind: DkTrigger,
+        name: "audit_users".clone(),
+        original_sql: "CREATE TRIGGER ...".clone(),
+    });
+    deps.push(DependentObject {
+        kind: DkView,
+        name: "active_users".clone(),
+        original_sql: "CREATE VIEW ...".clone(),
+    });
+    let mut r = report_for(delta, deps);
+    r.add_hint("OLD.name".clone(), "OLD.full_name".clone());
+    assert_eq(r.affected_count(), 2);
+    assert_eq(r.affects_kind(&"trigger".clone()), 1);
+    assert_eq(r.rewrite_hints.len(), 1);
+}
+
+// -----------------------------------------------------------------------------
+// SQL generation
+// -----------------------------------------------------------------------------
+
+fn test_generate_sql_rename_table() {
+    let sql = generate_sql(&rename_table("a".clone(), "b".clone()));
+    assert(sql == "ALTER TABLE a RENAME TO b".clone());
+}
+
+fn test_generate_sql_add_column() {
+    let sql = generate_sql(&add_column("t".clone(),
+        column_def("x".clone(), "INTEGER".clone()).require_not_null().with_default("0".clone())));
+    assert(sql == "ALTER TABLE t ADD COLUMN x INTEGER NOT NULL DEFAULT 0".clone());
+}
+
+fn test_generate_sql_drop_column() {
+    let sql = generate_sql(&drop_column("t".clone(), "c".clone()));
+    assert(sql == "ALTER TABLE t DROP COLUMN c".clone());
+}
+
+fn test_generate_sql_alter_default_drop() {
+    let sql = generate_sql(&alter_default("t".clone(), "c".clone(), None));
+    assert(sql == "ALTER TABLE t ALTER COLUMN c DROP DEFAULT".clone());
+}
+
+// -----------------------------------------------------------------------------
+// engine
+// -----------------------------------------------------------------------------
+
+fn no_op_runner(_sql: &Text) -> Maybe<Text> { None }
+fn always_fail_runner(_sql: &Text) -> Maybe<Text> { Some("simulated".clone()) }
+
+fn test_engine_walks_to_done() {
+    let snap = make_users_snapshot();
+    let op = add_column("users".clone(), column_def("created_at".clone(), "INTEGER".clone()));
+    let mut e = engine_new(op);
+    let mut steps: Int = 0;
+    while !e.is_terminal() && steps < 20 {
+        e.step(&snap, no_op_runner);
+        steps = steps + 1;
+    }
+    assert(e.is_terminal());
+    match e.current_phase() {
+        EpDone(_) => {},
+        _         => panic("expected EpDone"),
+    }
+}
+
+fn test_engine_validation_failure_terminal() {
+    let snap = snapshot_new();
+    let op = rename_table("missing".clone(), "x".clone());
+    let mut e = engine_new(op);
+    let mut steps: Int = 0;
+    while !e.is_terminal() && steps < 20 {
+        e.step(&snap, no_op_runner);
+        steps = steps + 1;
+    }
+    match e.current_phase() {
+        EpFailed(_) => {},
+        _ => panic("validation failure terminal"),
+    }
+}
+
+fn test_engine_execution_failure_terminal() {
+    let snap = make_users_snapshot();
+    let op = drop_column("users".clone(), "name".clone());
+    let mut e = engine_new(op);
+    let mut steps: Int = 0;
+    while !e.is_terminal() && steps < 20 {
+        e.step(&snap, always_fail_runner);
+        steps = steps + 1;
+    }
+    match e.current_phase() {
+        EpFailed(_) => {},
+        _ => panic("execution failure terminal"),
+    }
+}
+
+fn main() {
+    test_op_names();
+    test_op_target_table();
+    test_column_def_builder();
+    test_validate_rename_table_no_such_table();
+    test_validate_rename_to_existing_name();
+    test_validate_drop_pk_column_fails();
+    test_validate_drop_column_with_inbound_fk();
+    test_validate_add_not_null_without_default_on_non_empty();
+    test_validate_add_column_clean();
+    test_delta_rename_table();
+    test_delta_add_column();
+    test_impact_report_dep_classification();
+    test_generate_sql_rename_table();
+    test_generate_sql_add_column();
+    test_generate_sql_drop_column();
+    test_generate_sql_alter_default_drop();
+    test_engine_walks_to_done();
+    test_engine_validation_failure_terminal();
+    test_engine_execution_failure_terminal();
+}

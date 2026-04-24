@@ -1,0 +1,32 @@
+// =============================================================================
+// core/database/sqlite/native/encryption/mod.vr
+// =============================================================================
+// Layer: 1 (pager hooks)
+// Spec: sqlite-native.md §23 (security)
+//
+// Page-level encryption hooks — the loom analogue of SQLite's SEE
+// (SQLite Encryption Extension) and SQLCipher.
+//
+// Two protocols:
+//
+//   * `PageCipher`   — encrypts / decrypts a single page in-place
+//                      (caller passes the page buffer + index;
+//                      cipher returns ciphertext sized identically)
+//   * `KeyDerivation`— derives a per-database master key from
+//                      caller-supplied secret material (passphrase,
+//                      KMS reference, hardware key)
+//
+// Submodules:
+//   * `cipher`      — PageCipher protocol + 3 built-in impls
+//   * `kdf`         — KeyDerivation protocol + PBKDF2 / Argon2-like
+//   * `key_ring`    — per-Connection key management
+//   * `policy`      — per-page policy (encrypt all / encrypt user
+//                     pages only / null cipher for testing)
+// =============================================================================
+
+module core.database.sqlite.native.encryption;
+
+public module cipher;
+public module kdf;
+public module key_ring;
+public module policy;

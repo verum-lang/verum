@@ -1,0 +1,107 @@
+// =============================================================================
+// alter/delta.vr — schema delta + impact analysis
+// =============================================================================
+// Spec: sqlite-native.md §17
+//
+// `SchemaDelta` records what an `AlterOp` changes. It's used by:
+//
+//   * SchemaCache — to update its in-memory shape after the engine
+//     runs the SQL
+//   * trigger / view rewriter — to surface dependent objects whose
+//     SQL must be rewritten when a column or table is renamed
+//   * EXPLAIN ALTER — render the post-ALTER schema for the user
+// =============================================================================
+
+module core.database.sqlite.native.alter.delta;
+
+mount core.*;
+mount base.{Text, Bool, Maybe};
+mount collections.List;
+mount core.database.sqlite.native.alter.op.{
+    AlterOp, ColumnDef,
+    AoRenameTable, AoRenameColumn, AoAddColumn, AoDropColumn, AoAlterColumnDefault,
+};
+
+// -----------------------------------------------------------------------------
+// SchemaDelta
+// -----------------------------------------------------------------------------
+
+public type SchemaDelta is
+      SdTableRenamed(Text, Text)
+    | SdColumnRenamed(Text, Text, Text)
+    | SdColumnAdded(Text, Text)
+    | SdColumnDropped(Text, Text)
+    | SdColumnDefaultChanged(Text, Text, Maybe<Text>);
+
+public fn delta_from(op: &AlterOp) -> SchemaDelta {
+    match op {
+        AoRenameTable(old, new)         => SdTableRenamed(old.clone(), new.clone()),
+        AoRenameColumn(t, old, new)     => SdColumnRenamed(t.clone(), old.clone(), new.clone()),
+        AoAddColumn(t, def)             => SdColumnAdded(t.clone(), def.name.clone()),
+        AoDropColumn(t, c)              => SdColumnDropped(t.clone(), c.clone()),
+        AoAlterColumnDefault(t, c, exp) => SdColumnDefaultChanged(t.clone(), c.clone(), clone_default(exp)),
+    }
+}
+
+fn clone_default(d: &Maybe<Text>) -> Maybe<Text> {
+    match d {
+        Some(s) => Some(s.clone()),
+        None    => None,
+    }
+}
+
+// -----------------------------------------------------------------------------
+// ImpactAnalysis — what dependent objects need rewriting
+// -----------------------------------------------------------------------------
+
+public type DependentObjectKind is DkTrigger | DkView | DkIndex | DkForeignKey;
+
+public fn dep_kind_name(k: &DependentObjectKind) -> Text {
+    match k {
+        DkTrigger    => "trigger".clone(),
+        DkView       => "view".clone(),
+        DkIndex      => "index".clone(),
+        DkForeignKey => "foreign_key".clone(),
+    }
+}
+
+public type DependentObject is {
+    kind: DependentObjectKind,
+    name: Text,
+    /// Original SQL text — included for the rewriter.
+    original_sql: Text,
+}
+
+public type ImpactReport is {
+    delta: SchemaDelta,
+    affected: List<DependentObject>,
+    /// Hand-rolled rewrite hints — the L5 rewriter consumes these.
+    /// Format: `original → suggested`.
+    rewrite_hints: List<(Text, Text)>,
+}
+
+public fn report_for(delta: SchemaDelta, affected: List<DependentObject>) -> ImpactReport {
+    ImpactReport {
+        delta: delta,
+        affected: affected,
+        rewrite_hints: List.new(),
+    }
+}
+
+implement ImpactReport {
+    public fn add_hint(&mut self, original: Text, suggested: Text) {
+        self.rewrite_hints.push((original, suggested));
+    }
+
+    public fn affected_count(&self) -> Int { self.affected.len() }
+
+    pub fn affects_kind(&self, kind_name: &Text) -> Int {
+        let mut n: Int = 0;
+        let mut i: Int = 0;
+        while i < self.affected.len() {
+            if dep_kind_name(&self.affected[i].kind) == kind_name { n = n + 1; }
+            i = i + 1;
+        }
+        n
+    }
+}

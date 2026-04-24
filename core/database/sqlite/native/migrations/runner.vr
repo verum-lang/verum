@@ -1,0 +1,238 @@
+// =============================================================================
+// migrations/runner.vr — MigrationRunner state machine
+// =============================================================================
+// Spec: sqlite-native.md operational tooling
+//
+// `MigrationRunner` walks a `MigrationPlan` from low to high version,
+// skipping every step the journal already records as Applied.
+//
+// Three execution modes:
+//
+//   * `RmDryRun`        — validate the plan, log every step, but
+//                          don't actually run any SQL
+//   * `RmStrict`        — abort on first failure; rollback applied
+//                          steps in LIFO order if `auto_rollback`
+//                          is true
+//   * `RmContinueOnDrift` — apply checksum-mismatched steps as if
+//                          fresh (use with care)
+//
+// `RunDecision` lets callers see what the runner will do BEFORE it
+// runs, so deployment scripts can confirm.
+// =============================================================================
+
+module core.database.sqlite.native.migrations.runner;
+
+mount core.*;
+mount base.{Text, Bool, Maybe};
+mount collections.List;
+mount core.database.sqlite.native.migrations.migration.{
+    Migration, MigrationStatus, MsApplied, MsPending,
+};
+mount core.database.sqlite.native.migrations.plan.{MigrationPlan};
+mount core.database.sqlite.native.migrations.journal.{
+    MigrationJournal, JournalEntry, journal_new, checksum_for_sql,
+};
+
+// -----------------------------------------------------------------------------
+// Modes
+// -----------------------------------------------------------------------------
+
+public type RunMode is RmDryRun | RmStrict | RmContinueOnDrift;
+
+public fn run_mode_name(m: &RunMode) -> Text {
+    match m {
+        RmDryRun           => "dry-run".clone(),
+        RmStrict           => "strict".clone(),
+        RmContinueOnDrift  => "continue-on-drift".clone(),
+    }
+}
+
+// -----------------------------------------------------------------------------
+// RunDecision — what the runner intends to do per migration
+// -----------------------------------------------------------------------------
+
+public type RunDecision is
+      RdSkip(Int, Text)            // version, reason
+    | RdApply(Int, Text)           // version, sql
+    | RdSkipDrift(Int, Text)
+    | RdAbortDrift(Int, Text);
+
+public fn decision_kind_name(d: &RunDecision) -> Text {
+    match d {
+        RdSkip(_, _)        => "skip".clone(),
+        RdApply(_, _)       => "apply".clone(),
+        RdSkipDrift(_, _)   => "skip_drift".clone(),
+        RdAbortDrift(_, _)  => "abort_drift".clone(),
+    }
+}
+
+// -----------------------------------------------------------------------------
+// RunReport
+// -----------------------------------------------------------------------------
+
+public type RunReport is {
+    applied: Int,
+    skipped: Int,
+    failed: Int,
+    rolled_back: Int,
+    aborted: Bool,
+    abort_reason: Maybe<Text>,
+}
+
+public fn report_zero() -> RunReport {
+    RunReport {
+        applied: 0,
+        skipped: 0,
+        failed: 0,
+        rolled_back: 0,
+        aborted: false,
+        abort_reason: None,
+    }
+}
+
+// -----------------------------------------------------------------------------
+// MigrationRunner
+// -----------------------------------------------------------------------------
+
+public type MigrationRunner is {
+    mode: RunMode,
+    auto_rollback: Bool,
+}
+
+public fn runner_new(mode: RunMode) -> MigrationRunner {
+    MigrationRunner { mode: mode, auto_rollback: true }
+}
+
+implement MigrationRunner {
+    pub fn disable_rollback(mut self) -> MigrationRunner {
+        self.auto_rollback = false;
+        self
+    }
+
+    /// Compute the runner's decision per migration WITHOUT executing.
+    /// Used to render a deployment-time preview.
+    pub fn plan_decisions(&self, plan: &MigrationPlan, journal: &MigrationJournal) -> List<RunDecision> {
+        let mut out: List<RunDecision> = List.new();
+        let mut i: Int = 0;
+        while i < plan.ordered.len() {
+            let m = &plan.ordered[i];
+            let drift = journal.drift_detected(m);
+            let applied = journal.is_applied(m.version);
+            if applied && !drift {
+                out.push(RdSkip(m.version, "already applied".clone()));
+            } else if applied && drift {
+                match self.mode {
+                    RmContinueOnDrift => out.push(RdApply(m.version, m.up_sql.clone())),
+                    _                  => out.push(RdAbortDrift(m.version, "checksum mismatch".clone())),
+                }
+            } else {
+                match self.mode {
+                    RmDryRun => out.push(RdSkip(m.version, "dry-run".clone())),
+                    _        => out.push(RdApply(m.version, m.up_sql.clone())),
+                }
+            }
+            i = i + 1;
+        }
+        out
+    }
+
+    /// Execute the plan against an SQL runner closure. The closure
+    /// returns `None` on success or `Some(error_message)` on failure.
+    /// We hand SQL strings, not parsed statements — the closure is
+    /// responsible for parsing + executing per its connection mode.
+    pub fn execute(
+        &self,
+        plan: &MigrationPlan,
+        journal: &mut MigrationJournal,
+        clock_ns: Int64,
+        sql_runner: fn(&Text) -> Maybe<Text>,
+    ) -> RunReport {
+        let mut report = report_zero();
+        let decisions = self.plan_decisions(plan, journal);
+        let mut applied_steps: List<Migration> = List.new();
+        let mut idx: Int = 0;
+        while idx < decisions.len() {
+            let m = &plan.ordered[idx];
+            match &decisions[idx] {
+                RdSkip(_, _)       => { report.skipped = report.skipped + 1; }
+                RdSkipDrift(_, _)  => { report.skipped = report.skipped + 1; }
+                RdAbortDrift(_, reason) => {
+                    report.aborted = true;
+                    report.abort_reason = Some(reason.clone());
+                    break;
+                }
+                RdApply(_, sql) => {
+                    journal.record_pending(m);
+                    let res = (sql_runner)(sql);
+                    match res {
+                        None => {
+                            journal.record_applied(m, clock_ns);
+                            report.applied = report.applied + 1;
+                            applied_steps.push(clone_mig(m));
+                        }
+                        Some(err) => {
+                            journal.record_failed(m, err.clone());
+                            report.failed = report.failed + 1;
+                            report.aborted = true;
+                            report.abort_reason = Some(err);
+                            if self.auto_rollback {
+                                self.rollback_lifo(&applied_steps, journal, clock_ns, sql_runner, &mut report);
+                            }
+                            break;
+                        }
+                    }
+                }
+            }
+            idx = idx + 1;
+        }
+        report
+    }
+
+    fn rollback_lifo(
+        &self,
+        applied: &List<Migration>,
+        journal: &mut MigrationJournal,
+        clock_ns: Int64,
+        sql_runner: fn(&Text) -> Maybe<Text>,
+        report: &mut RunReport,
+    ) {
+        let mut i: Int = applied.len() - 1;
+        while i >= 0 {
+            match &applied[i].down_sql {
+                Some(sql) => {
+                    let res = (sql_runner)(sql);
+                    match res {
+                        None      => {
+                            journal.record_rolled_back(&applied[i], clock_ns);
+                            report.rolled_back = report.rolled_back + 1;
+                        }
+                        Some(err) => {
+                            journal.record_failed(&applied[i], err);
+                            // Keep going — we want to attempt every
+                            // rollback even if one fails.
+                        }
+                    }
+                }
+                None => {
+                    // Irreversible — leave applied; surface in report.
+                }
+            }
+            i = i - 1;
+        }
+    }
+}
+
+fn clone_mig(m: &Migration) -> Migration {
+    let mut deps: List<Int> = List.new();
+    let mut i: Int = 0;
+    while i < m.depends_on.len() { deps.push(m.depends_on[i]); i = i + 1; }
+    let down = match &m.down_sql { Some(s) => Some(s.clone()), None => None };
+    Migration {
+        version: m.version,
+        name: m.name.clone(),
+        up_sql: m.up_sql.clone(),
+        down_sql: down,
+        depends_on: deps,
+        is_idempotent: m.is_idempotent,
+    }
+}

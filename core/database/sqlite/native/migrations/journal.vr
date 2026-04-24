@@ -1,0 +1,186 @@
+// =============================================================================
+// migrations/journal.vr — applied-migration log
+// =============================================================================
+// Spec: sqlite-native.md operational tooling
+//
+// `MigrationJournal` is the structured representation of the
+// `__loom_migrations` table. The runner consults it to skip
+// already-applied versions and writes a row per attempt.
+//
+// Schema:
+//
+//   CREATE TABLE __loom_migrations (
+//       version    INTEGER PRIMARY KEY,
+//       name       TEXT NOT NULL,
+//       status     TEXT NOT NULL,          -- pending/applied/rolled_back/failed
+//       applied_at INTEGER,                -- monotonic ns
+//       error      TEXT,                   -- non-NULL on Failed
+//       checksum   INTEGER NOT NULL        -- SQL-text fingerprint
+//   );
+// =============================================================================
+
+module core.database.sqlite.native.migrations.journal;
+
+mount core.*;
+mount base.{Text, Bool, Maybe};
+mount collections.List;
+mount core.database.sqlite.native.migrations.migration.{
+    Migration, MigrationStatus,
+    MsPending, MsApplied, MsRolledBack, MsFailed,
+    status_name,
+};
+
+// -----------------------------------------------------------------------------
+// JournalEntry
+// -----------------------------------------------------------------------------
+
+public type JournalEntry is {
+    version: Int,
+    name: Text,
+    status: MigrationStatus,
+    /// FNV-1a hash of `up_sql` — used to detect drift.
+    checksum: Int64,
+}
+
+public fn checksum_for_sql(sql: &Text) -> Int64 {
+    // FNV-1a 64-bit; adequate for drift detection (not for crypto).
+    let mut h: Int64 = -3750763034362895579 as Int64;   // FNV offset basis
+    let bs = sql.as_bytes();
+    let mut i: Int = 0;
+    while i < bs.len() {
+        h = h ^ (bs[i] as Int64);
+        h = h * (1099511628211 as Int64);
+        i = i + 1;
+    }
+    h
+}
+
+// -----------------------------------------------------------------------------
+// MigrationJournal
+// -----------------------------------------------------------------------------
+
+public type MigrationJournal is {
+    entries: List<JournalEntry>,
+}
+
+public fn journal_new() -> MigrationJournal {
+    MigrationJournal { entries: List.new() }
+}
+
+implement MigrationJournal {
+    public fn entry_count(&self) -> Int { self.entries.len() }
+
+    public fn record_pending(&mut self, m: &Migration) {
+        let cs = checksum_for_sql(&m.up_sql);
+        self.replace_or_insert(m.version, m.name.clone(), MsPending, cs);
+    }
+
+    public fn record_applied(&mut self, m: &Migration, applied_at_ns: Int64) {
+        let cs = checksum_for_sql(&m.up_sql);
+        self.replace_or_insert(m.version, m.name.clone(), MsApplied(applied_at_ns), cs);
+    }
+
+    public fn record_rolled_back(&mut self, m: &Migration, ts_ns: Int64) {
+        let cs = checksum_for_sql(&m.up_sql);
+        self.replace_or_insert(m.version, m.name.clone(), MsRolledBack(ts_ns), cs);
+    }
+
+    public fn record_failed(&mut self, m: &Migration, error: Text) {
+        let cs = checksum_for_sql(&m.up_sql);
+        self.replace_or_insert(m.version, m.name.clone(), MsFailed(error), cs);
+    }
+
+    public fn lookup(&self, version: Int) -> Maybe<JournalEntry> {
+        let mut i: Int = 0;
+        while i < self.entries.len() {
+            if self.entries[i].version == version {
+                return Some(JournalEntry {
+                    version: self.entries[i].version,
+                    name: self.entries[i].name.clone(),
+                    status: clone_status(&self.entries[i].status),
+                    checksum: self.entries[i].checksum,
+                });
+            }
+            i = i + 1;
+        }
+        None
+    }
+
+    public fn is_applied(&self, version: Int) -> Bool {
+        match self.lookup(version) {
+            Some(e) => match e.status {
+                MsApplied(_) => true,
+                _            => false,
+            },
+            None => false,
+        }
+    }
+
+    /// Greatest version with status=Applied.
+    public fn high_water(&self) -> Int {
+        let mut hi: Int = 0;
+        let mut i: Int = 0;
+        while i < self.entries.len() {
+            match &self.entries[i].status {
+                MsApplied(_) => {
+                    if self.entries[i].version > hi { hi = self.entries[i].version; }
+                }
+                _ => {}
+            }
+            i = i + 1;
+        }
+        hi
+    }
+
+    /// Detect SQL-text drift between a stored entry and a current
+    /// migration object. Returns true if checksums diverge → caller
+    /// must decide whether to abort or migrate-anyway.
+    public fn drift_detected(&self, m: &Migration) -> Bool {
+        let now = checksum_for_sql(&m.up_sql);
+        match self.lookup(m.version) {
+            Some(e) => e.checksum != now,
+            None    => false,
+        }
+    }
+
+    fn replace_or_insert(
+        &mut self,
+        version: Int,
+        name: Text,
+        status: MigrationStatus,
+        checksum: Int64,
+    ) {
+        let mut found = false;
+        let mut i: Int = 0;
+        while i < self.entries.len() {
+            if self.entries[i].version == version {
+                self.entries[i] = JournalEntry {
+                    version: version,
+                    name: name.clone(),
+                    status: clone_status(&status),
+                    checksum: checksum,
+                };
+                found = true;
+                break;
+            }
+            i = i + 1;
+        }
+        if !found {
+            self.entries.push(JournalEntry {
+                version: version,
+                name: name,
+                status: status,
+                checksum: checksum,
+            });
+        }
+    }
+}
+
+fn clone_status(s: &MigrationStatus) -> MigrationStatus {
+    match s {
+        MsPending       => MsPending,
+        MsApplied(t)    => MsApplied(*t),
+        MsRolledBack(t) => MsRolledBack(*t),
+        MsFailed(e)     => MsFailed(e.clone()),
+    }
+}

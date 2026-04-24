@@ -1,0 +1,234 @@
+// =============================================================================
+// alter/engine.vr — ALTER execution state machine
+// =============================================================================
+// Spec: sqlite-native.md §17
+//
+// State sequence:
+//
+//   Init → Validating → GeneratingSql → Executing → ApplyingDelta → Done
+//
+// On validation failure → `Failed(ValidationError)`. On execution
+// failure → `Failed(ExecutionError(message))`.
+// =============================================================================
+
+module core.database.sqlite.native.alter.engine;
+
+mount core.*;
+mount base.{Text, Bool, Maybe};
+mount core.database.sqlite.native.alter.op.{
+    AlterOp, op_name, op_target_table,
+    AoRenameTable, AoRenameColumn, AoAddColumn, AoDropColumn, AoAlterColumnDefault,
+};
+mount core.database.sqlite.native.alter.validator.{
+    ValidationError, SchemaSnapshot, validate, error_kind,
+};
+mount core.database.sqlite.native.alter.delta.{
+    SchemaDelta, ImpactReport, delta_from, report_for,
+};
+
+// -----------------------------------------------------------------------------
+// EnginePhase
+// -----------------------------------------------------------------------------
+
+public type AlterEngineFailure is
+      AefValidation(ValidationError)
+    | AefExecution(Text);
+
+public type EnginePhase is
+      EpInit
+    | EpValidating
+    | EpGeneratingSql
+    | EpExecuting(Text)            // SQL string
+    | EpApplyingDelta(SchemaDelta)
+    | EpDone(SchemaDelta)
+    | EpFailed(AlterEngineFailure);
+
+public fn phase_name(p: &EnginePhase) -> Text {
+    match p {
+        EpInit             => "init".clone(),
+        EpValidating       => "validating".clone(),
+        EpGeneratingSql    => "generating_sql".clone(),
+        EpExecuting(_)     => "executing".clone(),
+        EpApplyingDelta(_) => "applying_delta".clone(),
+        EpDone(_)          => "done".clone(),
+        EpFailed(_)        => "failed".clone(),
+    }
+}
+
+// -----------------------------------------------------------------------------
+// AlterEngine
+// -----------------------------------------------------------------------------
+
+public type AlterEngine is {
+    op: AlterOp,
+    phase: EnginePhase,
+}
+
+public fn engine_new(op: AlterOp) -> AlterEngine {
+    AlterEngine { op: op, phase: EpInit }
+}
+
+implement AlterEngine {
+    public fn current_phase(&self) -> EnginePhase {
+        clone_phase(&self.phase)
+    }
+
+    public fn is_terminal(&self) -> Bool {
+        match &self.phase {
+            EpDone(_) | EpFailed(_) => true,
+            _                       => false,
+        }
+    }
+
+    /// Step the engine. The caller drives execution by feeding back
+    /// `validate_against` (snapshot) + `sql_runner` (executor). The
+    /// loop in the L7 façade is:
+    ///
+    ///   while !engine.is_terminal() { engine.step(snap, runner); }
+    pub fn step(
+        &mut self,
+        snap: &SchemaSnapshot,
+        sql_runner: fn(&Text) -> Maybe<Text>,
+    ) {
+        match &self.phase {
+            EpInit => { self.phase = EpValidating; }
+            EpValidating => {
+                match validate(&self.op, snap) {
+                    base.Ok(_)  => { self.phase = EpGeneratingSql; }
+                    base.Err(e) => { self.phase = EpFailed(AefValidation(e)); }
+                }
+            }
+            EpGeneratingSql => {
+                let sql = generate_sql(&self.op);
+                self.phase = EpExecuting(sql);
+            }
+            EpExecuting(sql) => {
+                match (sql_runner)(sql) {
+                    None        => {
+                        let d = delta_from(&self.op);
+                        self.phase = EpApplyingDelta(d);
+                    }
+                    Some(err)   => {
+                        self.phase = EpFailed(AefExecution(err));
+                    }
+                }
+            }
+            EpApplyingDelta(d) => {
+                self.phase = EpDone(clone_delta(d));
+            }
+            EpDone(_)   => {}
+            EpFailed(_) => {}
+        }
+    }
+
+    pub fn delta(&self) -> Maybe<SchemaDelta> {
+        match &self.phase {
+            EpDone(d)          => Some(clone_delta(d)),
+            EpApplyingDelta(d) => Some(clone_delta(d)),
+            _                  => None,
+        }
+    }
+}
+
+// -----------------------------------------------------------------------------
+// SQL generation
+// -----------------------------------------------------------------------------
+
+public fn generate_sql(op: &AlterOp) -> Text {
+    let mut out = "ALTER TABLE ".clone();
+    let target = op_target_table(op);
+    push(&mut out, &target);
+    match op {
+        AoRenameTable(_, new) => {
+            push(&mut out, &" RENAME TO ".clone());
+            push(&mut out, new);
+        }
+        AoRenameColumn(_, old, new) => {
+            push(&mut out, &" RENAME COLUMN ".clone());
+            push(&mut out, old);
+            push(&mut out, &" TO ".clone());
+            push(&mut out, new);
+        }
+        AoAddColumn(_, def) => {
+            push(&mut out, &" ADD COLUMN ".clone());
+            push(&mut out, &def.name);
+            out.push_byte(32 as Byte);
+            push(&mut out, &def.type_affinity);
+            if def.not_null { push(&mut out, &" NOT NULL".clone()); }
+            match &def.default_expr {
+                Some(e) => {
+                    push(&mut out, &" DEFAULT ".clone());
+                    push(&mut out, e);
+                }
+                None => {}
+            }
+            if def.is_unique { push(&mut out, &" UNIQUE".clone()); }
+        }
+        AoDropColumn(_, col) => {
+            push(&mut out, &" DROP COLUMN ".clone());
+            push(&mut out, col);
+        }
+        AoAlterColumnDefault(_, col, exp) => {
+            push(&mut out, &" ALTER COLUMN ".clone());
+            push(&mut out, col);
+            match exp {
+                Some(e) => {
+                    push(&mut out, &" SET DEFAULT ".clone());
+                    push(&mut out, e);
+                }
+                None => {
+                    push(&mut out, &" DROP DEFAULT".clone());
+                }
+            }
+        }
+    }
+    out
+}
+
+fn push(dst: &mut Text, s: &Text) {
+    let bs = s.as_bytes();
+    let mut i: Int = 0;
+    while i < bs.len() { dst.push_byte(bs[i]); i = i + 1; }
+}
+
+fn clone_phase(p: &EnginePhase) -> EnginePhase {
+    match p {
+        EpInit              => EpInit,
+        EpValidating        => EpValidating,
+        EpGeneratingSql     => EpGeneratingSql,
+        EpExecuting(s)      => EpExecuting(s.clone()),
+        EpApplyingDelta(d)  => EpApplyingDelta(clone_delta(d)),
+        EpDone(d)           => EpDone(clone_delta(d)),
+        EpFailed(f)         => EpFailed(clone_failure(f)),
+    }
+}
+
+fn clone_failure(f: &AlterEngineFailure) -> AlterEngineFailure {
+    match f {
+        AefValidation(_e) => {
+            // ValidationError is a sum we can't deeply clone here without
+            // pattern-matching every variant — reuse a placeholder text.
+            AefExecution(error_kind(_e))
+        }
+        AefExecution(t) => AefExecution(t.clone()),
+    }
+}
+
+fn clone_delta(d: &SchemaDelta) -> SchemaDelta {
+    match d {
+        core.database.sqlite.native.alter.delta.SdTableRenamed(a, b) =>
+            core.database.sqlite.native.alter.delta.SdTableRenamed(a.clone(), b.clone()),
+        core.database.sqlite.native.alter.delta.SdColumnRenamed(t, a, b) =>
+            core.database.sqlite.native.alter.delta.SdColumnRenamed(t.clone(), a.clone(), b.clone()),
+        core.database.sqlite.native.alter.delta.SdColumnAdded(t, c) =>
+            core.database.sqlite.native.alter.delta.SdColumnAdded(t.clone(), c.clone()),
+        core.database.sqlite.native.alter.delta.SdColumnDropped(t, c) =>
+            core.database.sqlite.native.alter.delta.SdColumnDropped(t.clone(), c.clone()),
+        core.database.sqlite.native.alter.delta.SdColumnDefaultChanged(t, c, e) =>
+            core.database.sqlite.native.alter.delta.SdColumnDefaultChanged(
+                t.clone(),
+                c.clone(),
+                match e { Some(s) => Some(s.clone()), None => None },
+            ),
+    }
+}

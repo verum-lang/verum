@@ -1,0 +1,189 @@
+// =============================================================================
+// migrations/plan.vr — MigrationPlan with dependency-DAG topological sort
+// =============================================================================
+// Spec: sqlite-native.md operational tooling
+//
+// `MigrationPlan` is the deterministic ordering of `Migration`s the
+// runner will apply. It catches three categories of authoring error
+// at plan-build time:
+//
+//   * `PeDuplicateVersion`  — two migrations declare the same version
+//   * `PeUnknownDependency` — depends_on references a missing version
+//   * `PeCycle`             — dependency DAG has a cycle
+//
+// On success the plan exposes:
+//
+//   * `ordered`        — Migration sequence in apply order
+//   * `min_version`    — smallest version (after which a runner
+//                         operating on an empty DB starts work)
+//   * `max_version`    — largest version (where it ends)
+//   * `is_reversible`  — True ⇒ every step has a down_sql
+// =============================================================================
+
+module core.database.sqlite.native.migrations.plan;
+
+mount core.*;
+mount base.{Text, Bool, Maybe, Result, Ok, Err};
+mount collections.List;
+mount core.database.sqlite.native.migrations.migration.{
+    Migration,
+};
+
+// -----------------------------------------------------------------------------
+// PlanError
+// -----------------------------------------------------------------------------
+
+public type PlanError is
+      PeDuplicateVersion(Int)
+    | PeUnknownDependency(Int, Int)   // (migration version, missing dep)
+    | PeCycle(List<Int>);
+
+// -----------------------------------------------------------------------------
+// MigrationPlan
+// -----------------------------------------------------------------------------
+
+public type MigrationPlan is {
+    ordered: List<Migration>,
+    min_version: Int,
+    max_version: Int,
+    is_reversible: Bool,
+}
+
+public fn build(steps: List<Migration>) -> Result<MigrationPlan, PlanError> {
+    // 1. Detect duplicate versions.
+    let mut i: Int = 0;
+    while i < steps.len() {
+        let mut k: Int = i + 1;
+        while k < steps.len() {
+            if steps[i].version == steps[k].version {
+                return Err(PeDuplicateVersion(steps[i].version));
+            }
+            k = k + 1;
+        }
+        i = i + 1;
+    }
+    // 2. Validate dependencies exist.
+    let mut idx: Int = 0;
+    while idx < steps.len() {
+        let mut d: Int = 0;
+        while d < steps[idx].depends_on.len() {
+            let dep = steps[idx].depends_on[d];
+            if !version_present(&steps, dep) {
+                return Err(PeUnknownDependency(steps[idx].version, dep));
+            }
+            d = d + 1;
+        }
+        idx = idx + 1;
+    }
+    // 3. Topological sort (Kahn's algorithm).
+    let sorted = match toposort(&steps) {
+        Ok(s)  => s,
+        Err(e) => { return Err(e); }
+    };
+    // 4. Compute aggregate fields.
+    if sorted.len() == 0 {
+        return Ok(MigrationPlan {
+            ordered: List.new(),
+            min_version: 0,
+            max_version: 0,
+            is_reversible: true,
+        });
+    }
+    let mut min_v: Int = sorted[0].version;
+    let mut max_v: Int = sorted[0].version;
+    let mut reversible: Bool = true;
+    let mut k: Int = 0;
+    while k < sorted.len() {
+        if sorted[k].version < min_v { min_v = sorted[k].version; }
+        if sorted[k].version > max_v { max_v = sorted[k].version; }
+        if !sorted[k].is_reversible() { reversible = false; }
+        k = k + 1;
+    }
+    Ok(MigrationPlan {
+        ordered: sorted,
+        min_version: min_v,
+        max_version: max_v,
+        is_reversible: reversible,
+    })
+}
+
+fn version_present(steps: &List<Migration>, version: Int) -> Bool {
+    let mut i: Int = 0;
+    while i < steps.len() {
+        if steps[i].version == version { return true; }
+        i = i + 1;
+    }
+    false
+}
+
+// -----------------------------------------------------------------------------
+// Kahn's algorithm — O(V+E) topological sort
+// -----------------------------------------------------------------------------
+
+fn toposort(steps: &List<Migration>) -> Result<List<Migration>, PlanError> {
+    let mut in_degree: List<Int> = List.new();
+    let mut i: Int = 0;
+    while i < steps.len() {
+        in_degree.push(steps[i].depends_on.len());
+        i = i + 1;
+    }
+    let mut queue: List<Int> = List.new();   // indices into `steps`
+    i = 0;
+    while i < steps.len() {
+        if in_degree[i] == 0 { queue.push(i); }
+        i = i + 1;
+    }
+    let mut out: List<Migration> = List.new();
+    while queue.len() > 0 {
+        // Stable pop — index 0 (oldest enqueued).
+        let chosen = queue[0];
+        let mut new_q: List<Int> = List.new();
+        let mut k: Int = 1;
+        while k < queue.len() { new_q.push(queue[k]); k = k + 1; }
+        queue = new_q;
+        out.push(clone_migration(&steps[chosen]));
+        // Decrement in-degree of every step that depended on `chosen`.
+        let chosen_v = steps[chosen].version;
+        let mut idx: Int = 0;
+        while idx < steps.len() {
+            let mut d: Int = 0;
+            while d < steps[idx].depends_on.len() {
+                if steps[idx].depends_on[d] == chosen_v {
+                    in_degree[idx] = in_degree[idx] - 1;
+                    if in_degree[idx] == 0 { queue.push(idx); }
+                }
+                d = d + 1;
+            }
+            idx = idx + 1;
+        }
+    }
+    if out.len() != steps.len() {
+        // Cycle detected — collect remaining versions.
+        let mut cyc: List<Int> = List.new();
+        let mut i: Int = 0;
+        while i < steps.len() {
+            if in_degree[i] > 0 { cyc.push(steps[i].version); }
+            i = i + 1;
+        }
+        return Err(PeCycle(cyc));
+    }
+    Ok(out)
+}
+
+fn clone_migration(m: &Migration) -> Migration {
+    let mut deps: List<Int> = List.new();
+    let mut i: Int = 0;
+    while i < m.depends_on.len() { deps.push(m.depends_on[i]); i = i + 1; }
+    let down = match &m.down_sql {
+        Some(s) => Some(s.clone()),
+        None    => None,
+    };
+    Migration {
+        version: m.version,
+        name: m.name.clone(),
+        up_sql: m.up_sql.clone(),
+        down_sql: down,
+        depends_on: deps,
+        is_idempotent: m.is_idempotent,
+    }
+}

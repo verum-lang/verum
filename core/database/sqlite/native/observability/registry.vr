@@ -1,0 +1,151 @@
+// =============================================================================
+// observability/registry.vr — per-Connection MetricRegistry
+// =============================================================================
+// Spec: sqlite-native.md §22 (operational tooling)
+//
+// `MetricRegistry` is the central catalogue every layer (pager,
+// vdbe, planner, ext) writes into. Each metric is stored by name;
+// re-fetching by the same name returns the existing instance so
+// counters accumulate across the connection's lifetime.
+//
+// Built-in metrics for every Connection (set up in `register_defaults`):
+//
+//   counters:   queries_total, queries_failed, rows_read, rows_written,
+//               cache_hits, cache_misses
+//   gauges:     open_cursors, prepared_statements, txn_depth
+//   histograms: query_latency_ns, txn_latency_ns
+// =============================================================================
+
+module core.database.sqlite.native.observability.registry;
+
+mount core.*;
+mount base.{Text, Maybe, Bool};
+mount collections.List;
+mount core.database.sqlite.native.observability.metric.{
+    Counter, Gauge, Histogram,
+    counter_new, gauge_new, histogram_default,
+};
+
+// -----------------------------------------------------------------------------
+// MetricRegistry
+// -----------------------------------------------------------------------------
+
+public type MetricRegistry is {
+    counters: List<Counter>,
+    gauges: List<Gauge>,
+    histograms: List<Histogram>,
+}
+
+public fn registry_new() -> MetricRegistry {
+    MetricRegistry {
+        counters: List.new(),
+        gauges: List.new(),
+        histograms: List.new(),
+    }
+}
+
+implement MetricRegistry {
+    pub fn counter_count(&self) -> Int { self.counters.len() }
+    pub fn gauge_count(&self) -> Int { self.gauges.len() }
+    pub fn histogram_count(&self) -> Int { self.histograms.len() }
+
+    /// Get-or-create counter by name.
+    pub fn counter(&mut self, name: Text) -> Int {
+        let mut i: Int = 0;
+        while i < self.counters.len() {
+            if self.counters[i].name == name { return i; }
+            i = i + 1;
+        }
+        self.counters.push(counter_new(name));
+        self.counters.len() - 1
+    }
+
+    pub fn gauge(&mut self, name: Text) -> Int {
+        let mut i: Int = 0;
+        while i < self.gauges.len() {
+            if self.gauges[i].name == name { return i; }
+            i = i + 1;
+        }
+        self.gauges.push(gauge_new(name));
+        self.gauges.len() - 1
+    }
+
+    pub fn histogram(&mut self, name: Text) -> Int {
+        let mut i: Int = 0;
+        while i < self.histograms.len() {
+            if self.histograms[i].name == name { return i; }
+            i = i + 1;
+        }
+        self.histograms.push(histogram_default(name));
+        self.histograms.len() - 1
+    }
+
+    /// Increment a counter by 1.
+    pub fn inc_counter(&mut self, name: Text) {
+        let idx = self.counter(name);
+        self.counters[idx].inc();
+    }
+
+    /// Add to a counter.
+    pub fn add_counter(&mut self, name: Text, n: Int64) {
+        let idx = self.counter(name);
+        self.counters[idx].add(n);
+    }
+
+    pub fn set_gauge(&mut self, name: Text, value: Int64) {
+        let idx = self.gauge(name);
+        self.gauges[idx].set(value);
+    }
+
+    pub fn observe(&mut self, name: Text, value_ns: Int64) {
+        let idx = self.histogram(name);
+        self.histograms[idx].observe(value_ns);
+    }
+
+    pub fn counter_value(&self, name: &Text) -> Maybe<Int64> {
+        let mut i: Int = 0;
+        while i < self.counters.len() {
+            if self.counters[i].name == name { return Some(self.counters[i].get()); }
+            i = i + 1;
+        }
+        None
+    }
+
+    pub fn gauge_value(&self, name: &Text) -> Maybe<Int64> {
+        let mut i: Int = 0;
+        while i < self.gauges.len() {
+            if self.gauges[i].name == name { return Some(self.gauges[i].get()); }
+            i = i + 1;
+        }
+        None
+    }
+
+    /// Renamed from `histogram_count` to avoid the collision with
+    /// the catalogue-cardinality query above.
+    pub fn histogram_observations(&self, name: &Text) -> Maybe<Int64> {
+        let mut i: Int = 0;
+        while i < self.histograms.len() {
+            if self.histograms[i].name == name { return Some(self.histograms[i].count()); }
+            i = i + 1;
+        }
+        None
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Default metric set
+// -----------------------------------------------------------------------------
+
+public fn register_defaults(reg: &mut MetricRegistry) {
+    let _ = reg.counter("queries_total".clone());
+    let _ = reg.counter("queries_failed".clone());
+    let _ = reg.counter("rows_read".clone());
+    let _ = reg.counter("rows_written".clone());
+    let _ = reg.counter("cache_hits".clone());
+    let _ = reg.counter("cache_misses".clone());
+    let _ = reg.gauge("open_cursors".clone());
+    let _ = reg.gauge("prepared_statements".clone());
+    let _ = reg.gauge("txn_depth".clone());
+    let _ = reg.histogram("query_latency_ns".clone());
+    let _ = reg.histogram("txn_latency_ns".clone());
+}
