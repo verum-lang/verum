@@ -1,0 +1,108 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: x509, key_usage, der, rfc5280_4_2_1_3, parse
+// @timeout: 15000
+// @expected-exit: 0
+
+// RFC 5280 §4.2.1.3 KeyUsage decoded from a raw DER BIT STRING.
+//
+//   KeyUsage ::= BIT STRING {
+//       digitalSignature   (0),   -- 0x80 of byte 0
+//       nonRepudiation     (1),   -- 0x40
+//       keyEncipherment    (2),   -- 0x20
+//       dataEncipherment   (3),   -- 0x10
+//       keyAgreement       (4),   -- 0x08
+//       keyCertSign        (5),   -- 0x04
+//       cRLSign            (6),   -- 0x02
+//       encipherOnly       (7),   -- 0x01
+//       decipherOnly       (8)    -- 0x80 of byte 1 (when present)
+//   }
+//
+// DER BIT STRING wire form:  03 <len> <unused_bits> <bytes...>
+
+mount core.*;
+mount core.collections.List;
+mount core.security.x509.ext.key_usage.{KeyUsage, parse};
+
+fn ca_profile_key_cert_sign_crl_sign() {
+    // keyCertSign (bit 5) + cRLSign (bit 6) set in byte 0 →
+    // 0x04 | 0x02 = 0x06. BIT STRING: 03 02 01 06 (unused=1, data=0x06).
+    let der: List<Byte> = [0x03_u8, 0x02_u8, 0x01_u8, 0x06_u8];
+    let ku = parse(der.as_slice()).unwrap();
+    assert(ku.key_cert_sign);
+    assert(ku.crl_sign);
+    assert(false == ku.digital_signature);
+    assert(false == ku.key_encipherment);
+    assert(ku.is_any());
+}
+
+fn ee_rsa_profile_digital_signature_key_encipherment() {
+    // digitalSignature (bit 0) + keyEncipherment (bit 2) →
+    // 0x80 | 0x20 = 0xA0. BIT STRING: 03 02 05 A0 (unused=5).
+    let der: List<Byte> = [0x03_u8, 0x02_u8, 0x05_u8, 0xA0_u8];
+    let ku = parse(der.as_slice()).unwrap();
+    assert(ku.digital_signature);
+    assert(ku.key_encipherment);
+    assert(false == ku.key_cert_sign);
+    assert(false == ku.crl_sign);
+}
+
+fn ee_ecdsa_profile_digital_signature_only() {
+    // Just digitalSignature → 0x80. BIT STRING: 03 02 07 80 (unused=7).
+    let der: List<Byte> = [0x03_u8, 0x02_u8, 0x07_u8, 0x80_u8];
+    let ku = parse(der.as_slice()).unwrap();
+    assert(ku.digital_signature);
+    assert(false == ku.non_repudiation);
+    assert(false == ku.key_encipherment);
+}
+
+fn decipher_only_needs_second_byte() {
+    // decipherOnly (bit 8) lives in byte 1 at 0x80. Combined with
+    // encipherOnly (bit 7) in byte 0:
+    //   byte 0 = 0x01, byte 1 = 0x80.
+    // BIT STRING: 03 03 07 01 80 (9 bits total, unused=7 in last byte).
+    let der: List<Byte> = [0x03_u8, 0x03_u8, 0x07_u8, 0x01_u8, 0x80_u8];
+    let ku = parse(der.as_slice()).unwrap();
+    assert(ku.encipher_only);
+    assert(ku.decipher_only);
+}
+
+fn every_byte_zero_is_nothing_set() {
+    // DS.nonRep=keyEnc=etc all zero → byte 0 = 0x00. BIT STRING:
+    // 03 02 00 00 (8 bits used). Decode yields empty.
+    let der: List<Byte> = [0x03_u8, 0x02_u8, 0x00_u8, 0x00_u8];
+    let ku = parse(der.as_slice()).unwrap();
+    assert(false == ku.is_any());
+}
+
+fn malformed_missing_unused_bits_byte_rejected() {
+    // BIT STRING of length 0 → invalid (unused-bits byte required).
+    let der: List<Byte> = [0x03_u8, 0x00_u8];
+    match parse(der.as_slice()) {
+        Err(_) => {},
+        _ => panic("empty BIT STRING body must reject"),
+    }
+}
+
+fn malformed_unused_bits_above_7_rejected() {
+    // unused = 8 is illegal (max 7 per X.690).
+    let der: List<Byte> = [0x03_u8, 0x02_u8, 0x08_u8, 0x00_u8];
+    match parse(der.as_slice()) {
+        Err(_) => {},
+        _ => panic("unused-bits > 7 must reject"),
+    }
+}
+
+@main
+public fn main() -> Int {
+    ca_profile_key_cert_sign_crl_sign();
+    ee_rsa_profile_digital_signature_key_encipherment();
+    ee_ecdsa_profile_digital_signature_only();
+    decipher_only_needs_second_byte();
+    every_byte_zero_is_nothing_set();
+    malformed_missing_unused_bits_byte_rejected();
+    malformed_unused_bits_above_7_rejected();
+    print("RFC 5280 §4.2.1.3 KeyUsage DER BIT STRING parse verified");
+    0
+}
