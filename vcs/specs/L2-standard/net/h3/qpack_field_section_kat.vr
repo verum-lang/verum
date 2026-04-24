@@ -1,0 +1,108 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: h3, qpack, field_section, encode, rfc9204_4_5
+// @timeout: 15000
+// @expected-exit: 0
+
+// RFC 9204 §4.5 QPACK field section encoding (encoder side):
+//
+//   Encoded Required Insert Count (8-bit prefix, §4.5.1)
+//   Sign-bit (1) + Delta Base (7-bit prefix, §4.5.1)
+//   (header lines...)
+//
+// For the MAX_TABLE_CAPACITY=0 profile used by `encode_field_section`,
+// both RIC and Delta Base are 0 — so the prefix is always `0x00 0x00`.
+//
+// Static-table hits emit a single "Indexed Field Line (static)" byte
+// `11Txxxxxx` with T=1, 6-bit-prefix index. Examples:
+//
+//   Index 17 `:method: GET`       → 0xC0 | 17 = 0xD1
+//   Index 25 `:status: 200`       → 0xC0 | 25 = 0xD9
+//   Index 1  `:path: /`           → 0xC0 | 1  = 0xC1
+
+mount core.*;
+mount core.collections.List;
+mount core.net.h3.qpack.encoder.{encode_field_section};
+mount core.net.h3.qpack.decoder.{HeaderField, decode_field_section};
+
+fn empty_field_section_is_just_prefix() {
+    let headers: List<HeaderField> = [];
+    let out = encode_field_section(&headers);
+    // RIC=0 (1 byte) + Delta Base sign 0 + value 0 (1 byte) = 2 bytes.
+    assert(out.len() == 2);
+    assert(out[0] == 0x00_u8);
+    assert(out[1] == 0x00_u8);
+}
+
+fn single_method_get_uses_static_index_17() {
+    let h = HeaderField { name: f":method", value: f"GET" };
+    let out = encode_field_section(&[h]);
+    // Prefix 0x00 0x00 || Indexed Field Line static idx 17 = 0xD1.
+    assert(out.len() == 3);
+    assert(out[0] == 0x00_u8);
+    assert(out[1] == 0x00_u8);
+    assert(out[2] == 0xD1_u8);
+}
+
+fn status_200_uses_static_index_25() {
+    let h = HeaderField { name: f":status", value: f"200" };
+    let out = encode_field_section(&[h]);
+    assert(out.len() == 3);
+    assert(out[2] == 0xD9_u8);        // 0xC0 | 25 = 0xD9
+}
+
+fn path_slash_uses_static_index_1() {
+    let h = HeaderField { name: f":path", value: f"/" };
+    let out = encode_field_section(&[h]);
+    assert(out[2] == 0xC1_u8);        // 0xC0 | 1
+}
+
+fn three_indexed_fields_emit_three_single_bytes() {
+    // Compose a request-line triplet: :method GET, :scheme https, :path /.
+    // :method GET = 17 → 0xD1, :scheme https = 23 → 0xD7, :path / = 1 → 0xC1.
+    let hs: List<HeaderField> = [
+        HeaderField { name: f":method", value: f"GET" },
+        HeaderField { name: f":scheme", value: f"https" },
+        HeaderField { name: f":path",   value: f"/" },
+    ];
+    let out = encode_field_section(&hs);
+    assert(out.len() == 5);
+    assert(out[0] == 0x00_u8 && out[1] == 0x00_u8);
+    assert(out[2] == 0xD1_u8);       // method GET
+    assert(out[3] == 0xD7_u8);       // scheme https
+    assert(out[4] == 0xC1_u8);       // path /
+}
+
+fn field_section_decode_roundtrip_indexed() {
+    let hs: List<HeaderField> = [
+        HeaderField { name: f":method", value: f"GET" },
+        HeaderField { name: f":status", value: f"200" },
+    ];
+    let out = encode_field_section(&hs);
+    let decoded = decode_field_section(out.as_slice()).unwrap();
+    assert(decoded.len() == 2);
+}
+
+fn indexed_field_line_static_bits_are_11_pattern() {
+    // Confirm opcode bit discipline: every static indexed emission has
+    // the top 2 bits set (11xxxxxx), distinguishing from other opcodes.
+    let h = HeaderField { name: f":method", value: f"GET" };
+    let out = encode_field_section(&[h]);
+    assert((out[2] & 0xC0_u8) == 0xC0_u8);
+    // T-bit (bit 6) set = static table reference.
+    assert((out[2] & 0x40_u8) == 0x40_u8);
+}
+
+@main
+public fn main() -> Int {
+    empty_field_section_is_just_prefix();
+    single_method_get_uses_static_index_17();
+    status_200_uses_static_index_25();
+    path_slash_uses_static_index_1();
+    three_indexed_fields_emit_three_single_bytes();
+    field_section_decode_roundtrip_indexed();
+    indexed_field_line_static_bits_are_11_pattern();
+    print("RFC 9204 §4.5 QPACK field section encode byte-exact verified");
+    0
+}
