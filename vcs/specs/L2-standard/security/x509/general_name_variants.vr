@@ -1,0 +1,144 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: x509, san, general_name, rfc5280_4_2_1_6
+// @timeout: 15000
+// @expected-exit: 0
+
+// RFC 5280 §4.2.1.6 GeneralName — 7 variants the WebPKI parser keeps
+// typed, plus the Unsupported catch-all for tags we don't decode
+// (x400Address / ediPartyName / registeredID):
+//
+//   [2] dNSName                    → DnsName(Text)
+//   [7] iPAddress                  → IpAddress(List<Byte>)
+//   [1] rfc822Name                 → Rfc822Name(Text)
+//   [6] uniformResourceIdentifier  → Uri(Text)
+//   [4] directoryName              → DirectoryName(raw_der)
+//   [0] otherName                  → OtherName(raw_der)
+//   (anything else)                → Unsupported
+//
+// Pairwise distinct under a total match + SAN matchers only fire on
+// their matching variant (DNS never on IP, IP never on DNS).
+
+mount core.*;
+mount core.collections.List;
+mount core.security.x509.ext.subject_alt_name.{
+    SubjectAltName, GeneralName,
+};
+
+fn all_seven_variants_constructible_and_distinct() {
+    let names: [GeneralName; 7] = [
+        GeneralName.DnsName(f"example.com"),
+        GeneralName.IpAddress([192_u8, 0_u8, 2_u8, 1_u8]),
+        GeneralName.Rfc822Name(f"user@example.com"),
+        GeneralName.Uri(f"https://example.com/"),
+        GeneralName.DirectoryName([0x30_u8, 0x00_u8]),
+        GeneralName.OtherName([0xDE_u8, 0xAD_u8]),
+        GeneralName.Unsupported,
+    ];
+    let mut tags: [Int; 7] = [0; 7];
+    let mut i: Int = 0;
+    while i < 7 {
+        tags[i] = match &names[i] {
+            GeneralName.DnsName(_)       => 1,
+            GeneralName.IpAddress(_)     => 2,
+            GeneralName.Rfc822Name(_)    => 3,
+            GeneralName.Uri(_)           => 4,
+            GeneralName.DirectoryName(_) => 5,
+            GeneralName.OtherName(_)     => 6,
+            GeneralName.Unsupported      => 7,
+        };
+        i = i + 1;
+    }
+    let mut j: Int = 0;
+    while j < 7 {
+        let mut k: Int = j + 1;
+        while k < 7 {
+            assert(tags[j] != tags[k]);
+            k = k + 1;
+        }
+        j = j + 1;
+    }
+}
+
+fn dns_matcher_ignores_non_dns_variants() {
+    // Only the DnsName variant should match against a DNS reference.
+    // Populating a SAN with non-DNS entries whose textual payload is
+    // the same string MUST NOT satisfy matches_dns.
+    let san = SubjectAltName {
+        names: [
+            GeneralName.Rfc822Name(f"example.com"),      // same text — wrong kind
+            GeneralName.Uri(f"example.com"),
+            GeneralName.OtherName([0x65_u8]),            // 'e' opaque
+            GeneralName.Unsupported,
+        ],
+    };
+    assert(san.matches_dns(&f"example.com") == false);
+}
+
+fn ip_matcher_ignores_non_ip_variants() {
+    let san = SubjectAltName {
+        names: [
+            GeneralName.DnsName(f"10.0.0.1"),            // textual only
+            GeneralName.Uri(f"tel:10.0.0.1"),
+            GeneralName.Unsupported,
+        ],
+    };
+    let v4: List<Byte> = [10_u8, 0_u8, 0_u8, 1_u8];
+    assert(san.matches_ip(v4.as_slice()) == false);
+}
+
+fn directory_name_preserves_raw_der_payload() {
+    // directoryName carries the raw Name DER so the chain verifier can
+    // compare byte-exact against issuer/subject DNs.
+    let der: List<Byte> = [0x30_u8, 0x0A_u8, 0x31_u8, 0x08_u8];
+    let gn = GeneralName.DirectoryName(der.clone());
+    match gn {
+        GeneralName.DirectoryName(raw) => {
+            assert(raw.len() == 4);
+            assert(raw[0] == 0x30_u8);
+            assert(raw[3] == 0x08_u8);
+        },
+        _ => panic("expected DirectoryName"),
+    }
+}
+
+fn other_name_is_opaque() {
+    let gn = GeneralName.OtherName([0x01_u8, 0x02_u8, 0x03_u8]);
+    match gn {
+        GeneralName.OtherName(raw) => assert(raw.len() == 3),
+        _ => panic("expected OtherName"),
+    }
+}
+
+fn mixed_san_matches_only_exact_variant() {
+    // A SAN combining DNS + IP + others must match hostname via DNS
+    // entry and IP via IP entry — no cross-pollination.
+    let v4: List<Byte> = [192_u8, 0_u8, 2_u8, 1_u8];
+    let san = SubjectAltName {
+        names: [
+            GeneralName.DnsName(f"host.test"),
+            GeneralName.IpAddress(v4.clone()),
+            GeneralName.Rfc822Name(f"host.test"),
+            GeneralName.DirectoryName([0x30_u8, 0x00_u8]),
+        ],
+    };
+    assert(san.matches_dns(&f"host.test"));
+    assert(san.matches_ip(v4.as_slice()));
+    // Non-member DNS / IP don't match.
+    assert(san.matches_dns(&f"other.test") == false);
+    let other_v4: List<Byte> = [10_u8, 0_u8, 0_u8, 1_u8];
+    assert(san.matches_ip(other_v4.as_slice()) == false);
+}
+
+@main
+public fn main() -> Int {
+    all_seven_variants_constructible_and_distinct();
+    dns_matcher_ignores_non_dns_variants();
+    ip_matcher_ignores_non_ip_variants();
+    directory_name_preserves_raw_der_payload();
+    other_name_is_opaque();
+    mixed_san_matches_only_exact_variant();
+    print("RFC 5280 §4.2.1.6 GeneralName variant dispatch verified");
+    0
+}
