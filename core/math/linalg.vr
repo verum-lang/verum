@@ -1994,11 +1994,12 @@ public fn schur<T: Numeric>(a: &Matrix<T>) -> SchurDecomposition<T> {
 // represents a probability distribution over pure states — i.e. a
 // degree of belief about the system's quantum state.
 //
-// This section supplies the bare-minimum protocol surface so that
-// downstream projects (e.g. quantum logic programming, formal
-// epistemology, the Mathesis epistemic engine) can construct
-// concrete density-matrix implementations that satisfy the
-// well-formedness properties as `@verify(formal)` obligations.
+// This section supplies the bare-minimum protocol surface
+// so that downstream projects (quantum logic programming,
+// formal epistemology, theory-interop consumers) can
+// construct concrete density-matrix implementations that
+// satisfy the well-formedness properties as
+// `@verify(formal)` obligations.
 //
 // Related:
 //   - core/math/algebra.vr  (OrthomodularLattice, CommutingPair)

@@ -1076,7 +1076,7 @@ public mount .epistemic.{
 
 public mount .cohesive.{
     CohesiveStructure, DifferentiallyCohesive,
-    mathesis_cohesive_structure,
+    theory_cohesive_structure, theory_differentially_cohesive,
 };
 
 public mount .day_convolution.{

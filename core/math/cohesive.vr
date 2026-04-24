@@ -36,7 +36,8 @@
 // Downstream:
 //   * core/math/sdg.vr          — infinitesimal analysis
 //   * core/math/infinity_topos.vr — ∞-topos foundations
-//   * Mathesis epistemic architecture
+//   * core/theory_interop         — theory registry that
+//                                   consumes cohesive structure
 // =============================================================================
 
 module core.math.cohesive;
@@ -474,13 +475,14 @@ public fn make_adjunction(
 }
 
 // =============================================================================
-// 7. mathesis_cohesive_structure — concrete construction for Mathesis
+// 7. theory_cohesive_structure — concrete construction for the theory ∞-topos
 // =============================================================================
 //
-// The Mathesis ∞-topos is the ∞-category of ∞-sheaves on the locally
-// contractible "theory site" — the site whose objects are formal theories
-// and whose coverings are collections of consistent sub-theories whose
-// union (colimit) recovers the original.
+// The theory ∞-topos is the ∞-category of ∞-sheaves on the
+// locally contractible "theory site" — the site whose objects
+// are formally-represented theories and whose coverings are
+// collections of consistent sub-theories whose union
+// (colimit) recovers the original.
 //
 // * Π (shape) arises from the geometric morphism to ∞Grpd induced by
 //   local contractibility of the site.
@@ -493,9 +495,9 @@ public fn make_adjunction(
 // * &   — infinitesimal flat (crystal structure of formal thickenings).
 // * Rh  — reduction (kills nilpotent / redundant formal data).
 
-/// Construct the cohesive structure for the Mathesis ∞-topos.
+/// Construct the cohesive structure for the theory ∞-topos.
 /// Returns a fully assembled CohesiveToposData.
-public fn mathesis_cohesive_structure<H: InfinityTopos>(
+public fn theory_cohesive_structure<H: InfinityTopos>(
     theory_site: &Int,
 ) -> CohesiveToposData<H> {
     // -- Core functors derived from the locally contractible site ----------
@@ -554,13 +556,14 @@ public fn mathesis_cohesive_structure<H: InfinityTopos>(
     }
 }
 
-/// Extend the Mathesis cohesive structure with infinitesimal modalities,
+/// Extend the theory-∞-topos cohesive structure with
+/// infinitesimal modalities,
 /// yielding a full DifferentiallyCohesiveData.
-public fn mathesis_differentially_cohesive<H: InfinityTopos>(
+public fn theory_differentially_cohesive<H: InfinityTopos>(
     theory_site:   &Int,
     reduced_site:  &Int,
 ) -> DifferentiallyCohesiveData<H> {
-    let cohesive = mathesis_cohesive_structure(theory_site);
+    let cohesive = theory_cohesive_structure(theory_site);
 
     // Infinitesimal shape Im: quotient by formal/nilpotent thickenings
     // on the reduced sub-site.

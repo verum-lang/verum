@@ -24,11 +24,13 @@
 // monoidal unit is the Yoneda presheaf y(e) = V(–, e) where e is the
 // monoidal unit of V.
 //
-// ## Cognitive extension (verum-ext-2.md §3.5)
+// ## Cognitive extension
 //
-// The Mathesis cognitive architecture fuses the biological information
-// channel H_bio (sensory–hippocampal memory) with the mechanical
-// channel H_M (abstract mathematical structure) via Day convolution:
+// A canonical downstream application: a cognitive
+// architecture that fuses two symmetric monoidal channels
+// — a biological information channel H_bio (sensory /
+// hippocampal memory) and a mechanical channel H_M
+// (abstract mathematical structure) — via Day convolution:
 //
 //     H_ext = H_bio ⊗_Day H_M
 //
@@ -394,11 +396,11 @@ public fn triple_swap<V: SmcFull<Int>>(
 // 7. CognitiveExtension — H_bio ⊗_Day H_M
 // =============================================================================
 //
-// The Mathesis **cognitive extension** fuses the biological information
-// channel H_bio (sensory–hippocampal memory) with the mechanical/
-// mathematical channel H_M via Day convolution over a shared base
-// category C_cog of cognitive objects (conceptual types / attention
-// contexts):
+// The **cognitive extension** fuses a biological information
+// channel H_bio (sensory / hippocampal memory) with a
+// mechanical / mathematical channel H_M via Day convolution
+// over a shared base category C_cog of cognitive objects
+// (conceptual types / attention contexts):
 //
 //     H_ext = H_bio ⊗_Day H_M : C_cog^op → Set
 //
@@ -407,7 +409,9 @@ public fn triple_swap<V: SmcFull<Int>>(
 // biological state bio_a and mechanical state mec_b can be "fused" via
 // the structural morphism mor.
 
-/// The Mathesis cognitive extension record.
+/// The cognitive-extension record: a Day convolution
+/// H_bio ⊗_Day H_M keyed by a cognitive base category
+/// C_cog.
 public type CognitiveExtension<V: SmcFull<Int>> is {
     /// The underlying Day convolution H_bio ⊗_Day H_M.
     convolution: DayConvolution<V>,

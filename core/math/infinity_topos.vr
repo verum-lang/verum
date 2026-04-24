@@ -13,8 +13,9 @@
 // An ∞-topos is a presentable ∞-category equivalent to the ∞-category
 // of ∞-sheaves on some ∞-site. The elementary examples are spaces
 // (∞-groupoids), diagrams of spaces, and sheaves on a site. External
-// applications include derived algebraic geometry, homotopy type theory,
-// and formal epistemology (the Mathesis project).
+// applications include derived algebraic geometry, homotopy
+// type theory, and formal epistemology (consumed by
+// `core.theory_interop`).
 //
 // This module provides:
 //   §1  Sieves and Grothendieck topologies
@@ -493,8 +494,9 @@ public fn check_descent<C: InfinityCategory>(
 // §9. Coherence Violations
 // =============================================================================
 
-/// Five canonical types of coherence violations arising from descent
-/// failure in the Mathesis epistemic ∞-topos.
+/// Five canonical types of coherence violations arising
+/// from descent failure in the epistemic ∞-topos of
+/// theories.
 public type CoherenceViolation is
     /// Epistemic status of a claim disagrees across theories.
     | StatusMisalignment { claim: Text, expected_status: Text, actual_status: Text }

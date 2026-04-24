@@ -417,10 +417,11 @@ public type ObstructionData is {
 /// The obstruction is the deviation of the counit ε : Ran_K ∘ K* → Id
 /// from being an isomorphism. Returns detailed obstruction data.
 ///
-/// An obstruction of 0 means the extension is exact (no information loss).
-/// This is the key diagnostic for the Mathesis translation system:
-/// when translating between theories, the obstruction measures how much
-/// content is lost or distorted.
+/// An obstruction of 0 means the extension is exact (no
+/// information loss). This is the key diagnostic for
+/// theory-translation systems: when translating between
+/// theories, the obstruction measures how much content is
+/// lost or distorted.
 public fn compute_obstruction(
     k_values: &List<Int>,
     f_values: &List<Int>,

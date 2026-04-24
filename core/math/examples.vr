@@ -4191,12 +4191,12 @@ theorem chain3_total_order_pair_count()
     proof by auto;
 
 // =============================================================================
-// Phase C — Mathesis Foundation Examples (verum-ext-2.md §3)
+// ∞-Topos Foundation — Worked Examples
 // =============================================================================
 
 // --- Quantum Logic Example ---
 
-/// A 2-level epistemic system (simplified Mathesis toy example).
+/// A 2-level epistemic system — simplified toy example.
 /// Demonstrates density matrix construction and measurement.
 public fn quantum_logic_example() -> Bool {
     // Pure state: claim is in status Theorem (index 0)
