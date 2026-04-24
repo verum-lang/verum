@@ -1,0 +1,92 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: tls13, early_data, budget, rfc8446_4_2_10
+// @timeout: 15000
+// @expected-exit: 0
+
+// RFC 8446 §4.2.10 — max_early_data_size budget tracker:
+//
+//   * try_consume(n) grants min(n, remaining) and advances consumed.
+//   * Once consumed ≥ limit, try_consume returns 0 (saturated).
+//   * remaining() = max(0, limit - consumed).
+//   * exceeded() is true only if consumed > limit (internal state).
+//
+// Zero-limit budgets accept nothing — correct server-side refusal
+// posture when 0-RTT is opt-out.
+
+mount core.*;
+mount core.net.tls13.handshake.early_data.{EarlyDataBudget};
+
+fn fresh_budget_has_full_limit() {
+    let b = EarlyDataBudget.new(16_384_u32);
+    assert(b.remaining() == 16_384_u32);
+    assert(b.exceeded() == false);
+}
+
+fn try_consume_grants_up_to_limit() {
+    let mut b = EarlyDataBudget.new(1000_u32);
+    assert(b.try_consume(400_u32) == 400_u32);
+    assert(b.remaining() == 600_u32);
+    assert(b.try_consume(600_u32) == 600_u32);
+    assert(b.remaining() == 0_u32);
+    // Saturated — further consumes return 0.
+    assert(b.try_consume(100_u32) == 0_u32);
+    assert(b.remaining() == 0_u32);
+}
+
+fn try_consume_clamps_to_remaining() {
+    let mut b = EarlyDataBudget.new(500_u32);
+    // Ask for more than the budget — grant equals remaining.
+    assert(b.try_consume(2000_u32) == 500_u32);
+    assert(b.remaining() == 0_u32);
+    // After saturation, further large asks still return 0.
+    assert(b.try_consume(10_000_u32) == 0_u32);
+}
+
+fn zero_limit_budget_never_grants() {
+    let mut b = EarlyDataBudget.new(0_u32);
+    assert(b.remaining() == 0_u32);
+    assert(b.try_consume(1_u32) == 0_u32);
+    assert(b.try_consume(1_000_u32) == 0_u32);
+    assert(b.exceeded() == false);
+}
+
+fn budget_does_not_exceed_unless_inflated_externally() {
+    // The type's own surface keeps consumed ≤ limit; exceeded()
+    // remains false across successful consumes.
+    let mut b = EarlyDataBudget.new(100_u32);
+    let mut i: Int = 0;
+    while i < 10 {
+        let _ = b.try_consume(20_u32);
+        i = i + 1;
+    }
+    // 10 × 20 = 200 asks against limit 100 → consumed saturates at 100.
+    assert(b.remaining() == 0_u32);
+    assert(b.exceeded() == false);
+}
+
+fn many_small_consumes_tile_limit_exactly() {
+    let mut b = EarlyDataBudget.new(10_u32);
+    let mut granted: UInt32 = 0_u32;
+    let mut i: Int = 0;
+    while i < 20 {
+        granted = granted + b.try_consume(1_u32);
+        i = i + 1;
+    }
+    // First 10 single-byte consumes succeed, next 10 return 0.
+    assert(granted == 10_u32);
+    assert(b.remaining() == 0_u32);
+}
+
+@main
+public fn main() -> Int {
+    fresh_budget_has_full_limit();
+    try_consume_grants_up_to_limit();
+    try_consume_clamps_to_remaining();
+    zero_limit_budget_never_grants();
+    budget_does_not_exceed_unless_inflated_externally();
+    many_small_consumes_tile_limit_exactly();
+    print("RFC 8446 §4.2.10 EarlyDataBudget accounting verified");
+    0
+}
