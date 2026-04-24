@@ -22,6 +22,7 @@ mod commands;
 mod config;
 mod error;
 mod feature_overrides;
+mod tier;
 mod cog;
 mod cog_manager;
 pub mod registry;
@@ -275,17 +276,45 @@ enum Commands {
 
     /// Run tests
     Test {
+        /// Substring match on test name (use `--exact` for equality).
         #[clap(long)]
         filter: Option<Text>,
         #[clap(short, long)]
         release: bool,
+        /// Don't capture stdout/stderr of test binaries.
         #[clap(long)]
         nocapture: bool,
+        /// Max parallel test workers (default: num CPUs when
+        /// [test].parallel = true).
         #[clap(long)]
         test_threads: Option<usize>,
-        /// Enable code coverage instrumentation and report generation
+        /// Enable code coverage instrumentation and report generation.
         #[clap(long)]
         coverage: bool,
+        /// Run via interpreter (Tier 0, in-process).
+        #[clap(long, conflicts_with = "aot")]
+        interp: bool,
+        /// Compile each test to native and spawn (Tier 1, default).
+        #[clap(long, conflicts_with = "interp")]
+        aot: bool,
+        /// Presentation: pretty | terse | json (libtest convention).
+        #[clap(long, value_name = "FMT", default_value = "pretty")]
+        format: Text,
+        /// Print discovered tests and exit without running them.
+        #[clap(long)]
+        list: bool,
+        /// Run all tests, including @ignore'd.
+        #[clap(long, conflicts_with = "ignored")]
+        include_ignored: bool,
+        /// Run ONLY @ignore'd tests.
+        #[clap(long)]
+        ignored: bool,
+        /// Require filter to match the full test name.
+        #[clap(long)]
+        exact: bool,
+        /// Skip tests whose name contains this pattern (repeatable).
+        #[clap(long)]
+        skip: Vec<Text>,
 
         /// Language-feature overrides (applied on top of verum.toml).
         #[clap(flatten)]
@@ -294,12 +323,46 @@ enum Commands {
 
     /// Run benchmarks
     Bench {
+        /// Substring match on bench name.
         #[clap(long)]
         filter: Option<Text>,
-        #[clap(long)]
+        /// Save current run as a named baseline (target/bench/NAME.json).
+        #[clap(long, value_name = "NAME")]
         save_baseline: Option<Text>,
-        #[clap(long)]
+        /// Diff against a previously saved baseline.
+        #[clap(long, value_name = "NAME")]
         baseline: Option<Text>,
+        /// Run each @bench via interpreter (Tier 0, in-process, no spawn).
+        #[clap(long, conflicts_with = "aot")]
+        interp: bool,
+        /// Compile each @bench to a native driver and spawn (Tier 1, default).
+        #[clap(long, conflicts_with = "interp")]
+        aot: bool,
+        /// Warm-up budget in seconds before timed samples.
+        #[clap(long, value_name = "SECS", default_value = "3.0")]
+        warm_up_time: f64,
+        /// Measurement budget in seconds (terminates after min-samples).
+        #[clap(long, value_name = "SECS", default_value = "5.0")]
+        measurement_time: f64,
+        /// Lower bound on samples per bench (ignored if --sample-size set).
+        #[clap(long, value_name = "N", default_value = "10")]
+        min_samples: usize,
+        /// Upper bound on samples per bench (or fixed count with --sample-size).
+        #[clap(long, value_name = "N", default_value = "100")]
+        max_samples: usize,
+        /// Run exactly this many samples, skipping time-budget logic.
+        #[clap(long, value_name = "N")]
+        sample_size: Option<usize>,
+        /// Percent change below which a diff vs baseline is "noise".
+        #[clap(long, value_name = "PCT", default_value = "2.0")]
+        noise_threshold: f64,
+        /// Output format: table | json | csv | markdown.
+        #[clap(long, value_name = "FMT", default_value = "table")]
+        format: Text,
+
+        /// Language-feature overrides (applied on top of verum.toml).
+        #[clap(flatten)]
+        feature_overrides: feature_overrides::LanguageFeatureOverrides,
     },
 
     /// Check without building (works with projects or single .vr files)
@@ -1235,16 +1298,72 @@ fn run_command(cli: Cli) -> Result<()> {
             nocapture,
             test_threads,
             coverage,
+            interp,
+            aot,
+            format,
+            list,
+            include_ignored,
+            ignored,
+            exact,
+            skip,
             feature_overrides,
         } => {
+            let tier_override = feature_overrides.tier.clone();
             feature_overrides::install(feature_overrides);
-            commands::test::execute(filter, release, nocapture, test_threads, coverage, None)
+            let resolved =
+                tier::resolve(interp, aot, tier_override.as_ref(), tier::Tier::Aot)?;
+            let opts = commands::test::TestOptions {
+                filter,
+                release,
+                nocapture,
+                test_threads,
+                coverage,
+                verify: None,
+                tier: resolved.tier,
+                format: commands::test::TestFormat::parse(format.as_str())?,
+                list,
+                include_ignored,
+                ignored_only: ignored,
+                exact,
+                skip,
+            };
+            commands::test::execute(opts)
         }
         Commands::Bench {
             filter,
             save_baseline,
             baseline,
-        } => commands::bench::execute(filter, save_baseline, baseline, false, false),
+            interp,
+            aot,
+            warm_up_time,
+            measurement_time,
+            min_samples,
+            max_samples,
+            sample_size,
+            noise_threshold,
+            format,
+            feature_overrides,
+        } => {
+            let tier_override = feature_overrides.tier.clone();
+            feature_overrides::install(feature_overrides);
+            let resolved =
+                tier::resolve(interp, aot, tier_override.as_ref(), tier::Tier::Aot)?;
+            let opts = commands::bench::BenchOptions {
+                filter,
+                save_baseline,
+                baseline,
+                tier: resolved.tier,
+                format: commands::bench::ReportFormat::parse(format.as_str())?,
+                warm_up_time: std::time::Duration::from_secs_f64(warm_up_time),
+                measurement_time: std::time::Duration::from_secs_f64(measurement_time),
+                min_samples,
+                max_samples,
+                sample_size,
+                noise_threshold_pct: noise_threshold,
+                no_color: false,
+            };
+            commands::bench::execute(opts)
+        }
         Commands::Check {
             path,
             workspace,

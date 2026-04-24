@@ -12,6 +12,7 @@ pub mod commands;
 pub mod config;
 pub mod error;
 pub mod feature_overrides;
+pub mod tier;
 pub mod cog;
 pub mod cog_manager;
 pub mod registry;

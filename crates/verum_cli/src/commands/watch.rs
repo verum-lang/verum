@@ -60,12 +60,7 @@ pub fn execute(command: &str, clear: bool) -> Result<()> {
                 false,      // smt_stats
             ),
             "test" => crate::commands::test::execute(
-                None,  // filter
-                false, // release
-                false, // nocapture
-                None,  // test_threads
-                false, // coverage
-                None,  // verify
+                crate::commands::test::TestOptions::default(),
             ),
             "run" => crate::commands::run::execute(
                 None,                   // tier
