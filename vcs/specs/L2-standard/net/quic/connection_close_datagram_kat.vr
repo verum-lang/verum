@@ -1,0 +1,169 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: quic, frame, connection_close, datagram, encode, kat, rfc9000_19_19, rfc9000_19_20, rfc9221
+// @timeout: 15000
+// @expected-exit: 0
+
+// RFC 9000 §19.19 CONNECTION_CLOSE (transport, Type = 0x1C):
+//   type(i) || error_code(i) || frame_type(i) || reason_len(i) || reason_bytes
+//
+// §19.20 CONNECTION_CLOSE (application, Type = 0x1D):
+//   type(i) || error_code(i) || reason_len(i) || reason_bytes
+//
+// RFC 9221 DATAGRAM frame (Type = 0x30 / 0x31):
+//   0x30 = no length (consumes rest of packet payload)
+//   0x31 = with length, type(i) || length(i) || data
+
+mount core.*;
+mount core.collections.List;
+mount core.net.quic.frame.{Frame, encode_frame, decode_frame};
+
+fn connection_close_transport_empty_reason() {
+    let f = Frame.ConnectionCloseTransport {
+        error_code: 0_u64,
+        frame_type: 0_u64,
+        reason:     [],
+    };
+    let mut out: List<Byte> = [];
+    let _ = encode_frame(&f, &mut out);
+    // Wire: type(1) + error(1) + frame_type(1) + reason_len(1) = 4.
+    assert(out.len() == 4);
+    assert(out[0] == 0x1C_u8);        // CONNECTION_CLOSE (transport)
+    assert(out[1] == 0x00_u8);        // error_code = NO_ERROR
+    assert(out[2] == 0x00_u8);        // frame_type = 0 (generic)
+    assert(out[3] == 0x00_u8);        // reason_len = 0
+}
+
+fn connection_close_transport_with_reason_byte_exact() {
+    // PROTOCOL_VIOLATION (0x0A), source frame = 0x06 CRYPTO, reason "bad".
+    let reason: List<Byte> = [0x62_u8, 0x61_u8, 0x64_u8];    // "bad"
+    let f = Frame.ConnectionCloseTransport {
+        error_code: 0x0A_u64,
+        frame_type: 0x06_u64,
+        reason:     reason,
+    };
+    let mut out: List<Byte> = [];
+    let _ = encode_frame(&f, &mut out);
+    // type(1) + error(1) + ft(1) + reason_len(1) + 3 = 7.
+    assert(out.len() == 7);
+    assert(out[0] == 0x1C_u8);
+    assert(out[1] == 0x0A_u8);
+    assert(out[2] == 0x06_u8);
+    assert(out[3] == 0x03_u8);         // reason_len = 3
+    assert(out[4] == 0x62_u8);         // 'b'
+    assert(out[5] == 0x61_u8);
+    assert(out[6] == 0x64_u8);
+}
+
+fn connection_close_application_variant_byte_exact() {
+    let reason: List<Byte> = [0x48_u8, 0x33_u8];             // "H3"
+    let f = Frame.ConnectionCloseApplication {
+        error_code: 0x0100_u64,    // H3_NO_ERROR (RFC 9114)
+        reason:     reason,
+    };
+    let mut out: List<Byte> = [];
+    let _ = encode_frame(&f, &mut out);
+    // type(1) + error(2 — 0x0100 > 63 so 2-byte varint) + reason_len(1) + 2 = 6.
+    // 0x0100 = 256 → 2-byte varint: 0x41 0x00.
+    assert(out.len() == 6);
+    assert(out[0] == 0x1D_u8);         // CONNECTION_CLOSE (app)
+    assert(out[1] == 0x41_u8);         // error_code varint high
+    assert(out[2] == 0x00_u8);         // error_code varint low
+    assert(out[3] == 0x02_u8);         // reason_len = 2
+    assert(out[4] == 0x48_u8);
+    assert(out[5] == 0x33_u8);
+}
+
+fn connection_close_frames_not_ack_eliciting() {
+    // §13.2.1 — CONNECTION_CLOSE frames MUST NOT elicit an ACK.
+    let t = Frame.ConnectionCloseTransport {
+        error_code: 0_u64, frame_type: 0_u64, reason: [],
+    };
+    let a = Frame.ConnectionCloseApplication {
+        error_code: 0_u64, reason: [],
+    };
+    assert(!t.is_ack_eliciting());
+    assert(!a.is_ack_eliciting());
+}
+
+fn datagram_with_length_type_0x31() {
+    // DATAGRAM with explicit length (must be used when not the last frame).
+    let data: List<Byte> = [0xAA_u8, 0xBB_u8, 0xCC_u8];
+    let f = Frame.Datagram { data: data, with_length: true };
+    let mut out: List<Byte> = [];
+    let _ = encode_frame(&f, &mut out);
+    // type(1) + length(1) + 3 = 5.
+    assert(out.len() == 5);
+    assert(out[0] == 0x31_u8);
+    assert(out[1] == 0x03_u8);
+    assert(out[2] == 0xAA_u8);
+    assert(out[4] == 0xCC_u8);
+}
+
+fn datagram_no_length_type_0x30() {
+    // DATAGRAM without length — consumes rest of packet payload.
+    let data: List<Byte> = [0xDE_u8, 0xAD_u8];
+    let f = Frame.Datagram { data: data, with_length: false };
+    let mut out: List<Byte> = [];
+    let _ = encode_frame(&f, &mut out);
+    // type(1) + 2 data = 3.
+    assert(out.len() == 3);
+    assert(out[0] == 0x30_u8);
+    assert(out[1] == 0xDE_u8);
+    assert(out[2] == 0xAD_u8);
+}
+
+fn connection_close_transport_decode_roundtrip() {
+    let reason: List<Byte> = [0x78_u8, 0x79_u8, 0x7A_u8];     // "xyz"
+    let f = Frame.ConnectionCloseTransport {
+        error_code: 0x0D_u64,       // APPLICATION_ERROR
+        frame_type: 0_u64,
+        reason:     reason.clone(),
+    };
+    let mut wire: List<Byte> = [];
+    let _ = encode_frame(&f, &mut wire);
+    let (decoded, _) = decode_frame(wire.as_slice(), 0).unwrap();
+    match decoded {
+        Frame.ConnectionCloseTransport { error_code, frame_type, reason: r2 } => {
+            assert(error_code == 0x0D_u64);
+            assert(frame_type == 0_u64);
+            assert(r2.len() == 3);
+            assert(r2[0] == 0x78_u8 && r2[2] == 0x7A_u8);
+        },
+        _ => panic("expected ConnectionCloseTransport"),
+    }
+}
+
+fn connection_close_application_decode_roundtrip() {
+    let reason: List<Byte> = [0x42_u8];
+    let f = Frame.ConnectionCloseApplication {
+        error_code: 0x0101_u64,
+        reason:     reason.clone(),
+    };
+    let mut wire: List<Byte> = [];
+    let _ = encode_frame(&f, &mut wire);
+    let (decoded, _) = decode_frame(wire.as_slice(), 0).unwrap();
+    match decoded {
+        Frame.ConnectionCloseApplication { error_code, reason: r2 } => {
+            assert(error_code == 0x0101_u64);
+            assert(r2.len() == 1);
+            assert(r2[0] == 0x42_u8);
+        },
+        _ => panic("expected ConnectionCloseApplication"),
+    }
+}
+
+@main
+public fn main() -> Int {
+    connection_close_transport_empty_reason();
+    connection_close_transport_with_reason_byte_exact();
+    connection_close_application_variant_byte_exact();
+    connection_close_frames_not_ack_eliciting();
+    datagram_with_length_type_0x31();
+    datagram_no_length_type_0x30();
+    connection_close_transport_decode_roundtrip();
+    connection_close_application_decode_roundtrip();
+    print("RFC 9000 §19.19-20 CONNECTION_CLOSE + RFC 9221 DATAGRAM encode KAT verified");
+    0
+}

@@ -1,0 +1,111 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: tls13, extension, quic_transport_parameters, record_size_limit, unknown_ext, encode, rfc9001_8_2, rfc8449
+// @timeout: 15000
+// @expected-exit: 0
+
+// RFC 9001 §8.2 quic_transport_parameters extension:
+//   Extension 57 (0x0039) || outer u16 len || transport_parameters_bytes
+//
+// RFC 8449 record_size_limit extension:
+//   Extension 28 (0x001c) || outer u16 len(=2) || record_size_limit u16
+//
+// Unknown extension pass-through — preserves the IANA codepoint and
+// the raw body bytes via `Extension.Unknown { ext_type, data }`.
+
+mount core.*;
+mount core.collections.List;
+mount core.net.tls13.handshake.extension.{
+    Extension, encode_extension,
+    EXT_QUIC_TRANSPORT_PARAMETERS, EXT_RECORD_SIZE_LIMIT,
+};
+
+fn quic_transport_parameters_ext_id_is_57() {
+    assert(EXT_QUIC_TRANSPORT_PARAMETERS == 57_u16);
+    assert(EXT_RECORD_SIZE_LIMIT == 28_u16);
+}
+
+fn quic_transport_parameters_embeds_opaque_body_byte_exact() {
+    // The TLS extension wraps an opaque byte-string that carries the
+    // entire QUIC transport parameters wire emitted by
+    // `core.net.quic.transport_params.encode`.  The TLS layer does not
+    // parse the inner body — it treats it as opaque `opaque<0..2^16-1>`.
+    let tp_wire: List<Byte> = [
+        0x01_u8, 0x01_u8, 0x1E_u8,    // max_idle_timeout = 30 (3 bytes)
+        0x03_u8, 0x02_u8, 0x44_u8, 0xB0_u8,  // max_udp_payload_size = 1200 (4 bytes)
+    ];
+    let ext = Extension.QuicTransportParametersExt { params: tp_wire.clone() };
+    let mut out: List<Byte> = [];
+    encode_extension(&ext, &mut out).unwrap();
+    // Layout: ext_type(2) + outer u16(2) + 7 body = 11.
+    assert(out.len() == 11);
+    // ext_type = 57 = 0x0039.
+    assert(out[0] == 0x00_u8 && out[1] == 0x39_u8);
+    assert(out[2] == 0x00_u8 && out[3] == 0x07_u8);    // outer = 7
+    // Body bytes mirror the inner QUIC wire exactly.
+    assert(out[4]  == 0x01_u8);
+    assert(out[5]  == 0x01_u8);
+    assert(out[6]  == 0x1E_u8);
+    assert(out[7]  == 0x03_u8);
+    assert(out[8]  == 0x02_u8);
+    assert(out[9]  == 0x44_u8);
+    assert(out[10] == 0xB0_u8);
+}
+
+fn record_size_limit_ext_byte_exact() {
+    // RecordSizeLimit = 1234 (0x04D2) — u16 big-endian body.
+    let ext = Extension.RecordSizeLimitExt { limit: 1234_u16 };
+    let mut out: List<Byte> = [];
+    encode_extension(&ext, &mut out).unwrap();
+    // ext_type(2) + outer(2=0x0002) + u16 limit(2) = 6.
+    assert(out.len() == 6);
+    assert(out[0] == 0x00_u8 && out[1] == 0x1C_u8);    // ext_type = 28
+    assert(out[2] == 0x00_u8 && out[3] == 0x02_u8);    // outer = 2
+    assert(out[4] == 0x04_u8 && out[5] == 0xD2_u8);    // 1234
+}
+
+fn record_size_limit_max_16384_is_tls13_payload_cap() {
+    // RFC 8446 §5.1 — inner plaintext limit is 16384. RFC 8449 extension
+    // MUST encode 16384 exactly when declaring the default cap.
+    let ext = Extension.RecordSizeLimitExt { limit: 16384_u16 };
+    let mut out: List<Byte> = [];
+    encode_extension(&ext, &mut out).unwrap();
+    assert(out[4] == 0x40_u8 && out[5] == 0x00_u8);
+}
+
+fn unknown_extension_byte_exact_passthrough() {
+    // Unknown 2-byte ext_type + opaque body — encoder preserves both.
+    let data: List<Byte> = [0x11_u8, 0x22_u8, 0x33_u8];
+    let ext = Extension.Unknown { ext_type: 0xFEED_u16, data: data };
+    let mut out: List<Byte> = [];
+    encode_extension(&ext, &mut out).unwrap();
+    // ext_type(2) + outer u16(2) + 3 body = 7.
+    assert(out.len() == 7);
+    assert(out[0] == 0xFE_u8 && out[1] == 0xED_u8);
+    assert(out[2] == 0x00_u8 && out[3] == 0x03_u8);
+    assert(out[4] == 0x11_u8);
+    assert(out[5] == 0x22_u8);
+    assert(out[6] == 0x33_u8);
+}
+
+fn unknown_extension_empty_body_allowed() {
+    let ext = Extension.Unknown { ext_type: 0x0AAB_u16, data: [] };
+    let mut out: List<Byte> = [];
+    encode_extension(&ext, &mut out).unwrap();
+    assert(out.len() == 4);
+    assert(out[0] == 0x0A_u8 && out[1] == 0xAB_u8);
+    assert(out[2] == 0x00_u8 && out[3] == 0x00_u8);
+}
+
+@main
+public fn main() -> Int {
+    quic_transport_parameters_ext_id_is_57();
+    quic_transport_parameters_embeds_opaque_body_byte_exact();
+    record_size_limit_ext_byte_exact();
+    record_size_limit_max_16384_is_tls13_payload_cap();
+    unknown_extension_byte_exact_passthrough();
+    unknown_extension_empty_body_allowed();
+    print("RFC 9001 §8.2 quic_transport_parameters + RFC 8449 record_size_limit + Unknown verified");
+    0
+}
