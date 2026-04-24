@@ -1,0 +1,78 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, trace_v1_legacy, deprecated, capi
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.trace_v1_legacy.kind.{
+    LegacyHookKind, LhkTrace, LhkProfile,
+    kind_name, fires_on_begin, fires_on_end,
+};
+mount core.database.sqlite.native.trace_v1_legacy.engine.{
+    LegacySlot, LegacyTraceEngine,
+    empty_slot, is_installed, new_engine,
+};
+mount base.{Bool};
+
+fn test_kind_names() {
+    assert(kind_name(&LhkTrace) == "trace".clone());
+    assert(kind_name(&LhkProfile) == "profile".clone());
+}
+
+fn test_fire_timing() {
+    assert(fires_on_begin(&LhkTrace));
+    assert(!fires_on_begin(&LhkProfile));
+    assert(!fires_on_end(&LhkTrace));
+    assert(fires_on_end(&LhkProfile));
+}
+
+fn test_empty_slot_not_installed() {
+    let s = empty_slot();
+    assert(!is_installed(&s));
+}
+
+fn test_install_trace_slot() {
+    let mut e = new_engine();
+    let slot = LegacySlot { callback: 42 as Int64, user_data: 0 as Int64 };
+    e.sqlite3_trace(slot);
+    assert(is_installed(&e.trace));
+    assert(!is_installed(&e.profile));
+    assert(e.any_installed());
+}
+
+fn test_install_profile_slot() {
+    let mut e = new_engine();
+    let slot = LegacySlot { callback: 7 as Int64, user_data: 0 as Int64 };
+    e.sqlite3_profile(slot);
+    assert(is_installed(&e.profile));
+    assert(!is_installed(&e.trace));
+}
+
+fn test_fire_begin_only_if_installed() {
+    let mut e = new_engine();
+    assert(!e.fire_begin());
+    let slot = LegacySlot { callback: 1 as Int64, user_data: 0 as Int64 };
+    e.sqlite3_trace(slot);
+    assert(e.fire_begin());
+    assert_eq(e.trace_calls, 1 as Int64);
+}
+
+fn test_fire_end_only_if_installed() {
+    let mut e = new_engine();
+    assert(!e.fire_end());
+    let slot = LegacySlot { callback: 2 as Int64, user_data: 0 as Int64 };
+    e.sqlite3_profile(slot);
+    assert(e.fire_end());
+    assert_eq(e.profile_calls, 1 as Int64);
+}
+
+fn main() {
+    test_kind_names();
+    test_fire_timing();
+    test_empty_slot_not_installed();
+    test_install_trace_slot();
+    test_install_profile_slot();
+    test_fire_begin_only_if_installed();
+    test_fire_end_only_if_installed();
+}

@@ -1,0 +1,89 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, txn_rollback_ops, capi
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.txn_rollback_ops.mode.{
+    BeginMode, BmDeferred, BmImmediate, BmExclusive,
+    mode_name, acquires_write_lock_immediately, locks_others_out,
+};
+mount core.database.sqlite.native.txn_rollback_ops.op.{
+    TxnOp, ToBegin, ToCommit, ToRollback,
+    op_name, is_open, is_close,
+};
+mount core.database.sqlite.native.txn_rollback_ops.outcome.{
+    TxnOutcome, ToOk, ToAlreadyInTxn, ToNotInTxn, ToFailed,
+    is_ok, outcome_numeric, outcome_name,
+};
+mount core.database.sqlite.native.errors.code.{
+    extended_of, PcIoErr,
+};
+mount base.{Bool};
+
+fn test_mode_names() {
+    assert(mode_name(&BmDeferred) == "DEFERRED".clone());
+    assert(mode_name(&BmImmediate) == "IMMEDIATE".clone());
+    assert(mode_name(&BmExclusive) == "EXCLUSIVE".clone());
+}
+
+fn test_acquires_write_lock_immediately() {
+    assert(!acquires_write_lock_immediately(&BmDeferred));
+    assert(acquires_write_lock_immediately(&BmImmediate));
+    assert(acquires_write_lock_immediately(&BmExclusive));
+}
+
+fn test_locks_others_out_only_exclusive() {
+    assert(!locks_others_out(&BmDeferred));
+    assert(!locks_others_out(&BmImmediate));
+    assert(locks_others_out(&BmExclusive));
+}
+
+fn test_op_names() {
+    assert(op_name(&ToBegin(BmDeferred)) == "BEGIN".clone());
+    assert(op_name(&ToCommit) == "COMMIT".clone());
+    assert(op_name(&ToRollback) == "ROLLBACK".clone());
+}
+
+fn test_is_open_and_close() {
+    assert(is_open(&ToBegin(BmDeferred)));
+    assert(!is_open(&ToCommit));
+    assert(is_close(&ToCommit));
+    assert(is_close(&ToRollback));
+    assert(!is_close(&ToBegin(BmImmediate)));
+}
+
+fn test_outcome_is_ok_only_to_ok() {
+    assert(is_ok(&ToOk));
+    assert(!is_ok(&ToAlreadyInTxn));
+    assert(!is_ok(&ToNotInTxn));
+}
+
+fn test_outcome_numeric() {
+    assert_eq(outcome_numeric(&ToOk), 0);
+    assert_eq(outcome_numeric(&ToAlreadyInTxn), 1);
+    assert_eq(outcome_numeric(&ToNotInTxn), 1);
+    let failed: TxnOutcome = ToFailed {
+        code: extended_of(PcIoErr, 0),
+        reason: "io".clone(),
+    };
+    assert(outcome_numeric(&failed) != 0);
+}
+
+fn test_outcome_names() {
+    assert(outcome_name(&ToOk) == "ok".clone());
+    assert(outcome_name(&ToAlreadyInTxn) == "already-in-txn".clone());
+    assert(outcome_name(&ToNotInTxn) == "not-in-txn".clone());
+}
+
+fn main() {
+    test_mode_names();
+    test_acquires_write_lock_immediately();
+    test_locks_others_out_only_exclusive();
+    test_op_names();
+    test_is_open_and_close();
+    test_outcome_is_ok_only_to_ok();
+    test_outcome_numeric();
+    test_outcome_names();
+}

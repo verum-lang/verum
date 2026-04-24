@@ -1,0 +1,55 @@
+// =============================================================================
+// attach_detach_api/directive.vr — ATTACH / DETACH shapes
+// =============================================================================
+// Spec: SQLite SQL
+// =============================================================================
+
+module core.database.sqlite.native.attach_detach_api.directive;
+
+mount core.*;
+mount base.{Bool, Text};
+
+public type AttachDirective is {
+    filename: Text,
+    alias: Text,
+    /// URI flag — when true the filename supports ?cache=... etc.
+    uri_mode: Bool,
+}
+
+public fn new_attach(filename: Text, alias: Text) -> AttachDirective {
+    AttachDirective { filename: filename, alias: alias, uri_mode: false }
+}
+
+public fn new_attach_uri(filename: Text, alias: Text) -> AttachDirective {
+    AttachDirective { filename: filename, alias: alias, uri_mode: true }
+}
+
+public type DetachDirective is {
+    alias: Text,
+}
+
+public fn new_detach(alias: Text) -> DetachDirective {
+    DetachDirective { alias: alias }
+}
+
+/// "main" and "temp" are reserved — neither can be attached nor
+/// detached.
+public fn is_reserved_alias(alias: &Text) -> Bool {
+    ci_eq(alias, &"main".clone()) || ci_eq(alias, &"temp".clone())
+}
+
+fn ci_eq(a: &Text, b: &Text) -> Bool {
+    let ab = a.as_bytes();
+    let bb = b.as_bytes();
+    if ab.len() != bb.len() { return false; }
+    let mut i: Int = 0;
+    while i < ab.len() {
+        let mut x = ab[i];
+        let mut y = bb[i];
+        if x >= (0x41 as u8) && x <= (0x5A as u8) { x = x + (0x20 as u8); }
+        if y >= (0x41 as u8) && y <= (0x5A as u8) { y = y + (0x20 as u8); }
+        if x != y { return false; }
+        i = i + 1;
+    }
+    true
+}

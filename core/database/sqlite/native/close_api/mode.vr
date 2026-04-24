@@ -1,0 +1,28 @@
+// =============================================================================
+// close_api/mode.vr — CloseMode
+// =============================================================================
+// Spec: SQLite C API
+// =============================================================================
+
+module core.database.sqlite.native.close_api.mode;
+
+mount core.*;
+mount base.{Bool, Text};
+
+public type CloseMode is
+      CmStrict         // sqlite3_close — reject w/ BUSY if stmts are live
+    | CmDeferred;      // sqlite3_close_v2 — accept, enter Zombie state
+
+public fn mode_name(m: &CloseMode) -> Text {
+    match m {
+        CmStrict   => "strict".clone(),
+        CmDeferred => "deferred".clone(),
+    }
+}
+
+public fn rejects_on_busy(m: &CloseMode) -> Bool {
+    match m {
+        CmStrict => true,
+        _ => false,
+    }
+}

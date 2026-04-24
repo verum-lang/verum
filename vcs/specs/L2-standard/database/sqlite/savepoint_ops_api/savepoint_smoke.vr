@@ -1,0 +1,102 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, savepoint_ops_api, capi
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.savepoint_ops_api.op.{
+    SavepointOp, SoBegin, SoRelease, SoRollbackTo,
+    op_name, is_pushing, target_name,
+};
+mount core.database.sqlite.native.savepoint_ops_api.stack.{
+    SavepointStack, SavepointOutcome, SpoOk, SpoUnknown,
+    new_stack, outcome_is_ok,
+};
+mount base.{Bool};
+
+fn test_op_names() {
+    assert(op_name(&SoBegin("s".clone())) == "BEGIN".clone());
+    assert(op_name(&SoRelease("s".clone())) == "RELEASE".clone());
+    assert(op_name(&SoRollbackTo("s".clone())) == "ROLLBACK_TO".clone());
+}
+
+fn test_is_pushing_only_begin() {
+    assert(is_pushing(&SoBegin("a".clone())));
+    assert(!is_pushing(&SoRelease("a".clone())));
+    assert(!is_pushing(&SoRollbackTo("a".clone())));
+}
+
+fn test_target_name_returns_label() {
+    assert(target_name(&SoBegin("inner".clone())) == "inner".clone());
+}
+
+fn test_new_stack_empty() {
+    let s = new_stack();
+    assert(s.is_empty());
+    assert_eq(s.depth(), 0);
+}
+
+fn test_begin_pushes() {
+    let mut s = new_stack();
+    let o = s.apply(&SoBegin("a".clone()));
+    assert(outcome_is_ok(&o));
+    assert_eq(s.depth(), 1);
+    assert_eq(s.pushes, 1 as Int64);
+}
+
+fn test_release_unwinds_above_and_including() {
+    let mut s = new_stack();
+    let _ = s.apply(&SoBegin("a".clone()));
+    let _ = s.apply(&SoBegin("b".clone()));
+    let _ = s.apply(&SoBegin("c".clone()));
+    assert_eq(s.depth(), 3);
+    let o = s.apply(&SoRelease("b".clone()));
+    assert(outcome_is_ok(&o));
+    // RELEASE("b") pops c, b — leaves only "a".
+    assert_eq(s.depth(), 1);
+    assert_eq(s.releases, 1 as Int64);
+}
+
+fn test_rollback_to_keeps_target() {
+    let mut s = new_stack();
+    let _ = s.apply(&SoBegin("a".clone()));
+    let _ = s.apply(&SoBegin("b".clone()));
+    let _ = s.apply(&SoBegin("c".clone()));
+    let o = s.apply(&SoRollbackTo("b".clone()));
+    assert(outcome_is_ok(&o));
+    // ROLLBACK TO("b") pops c — leaves "a", "b".
+    assert_eq(s.depth(), 2);
+    assert_eq(s.rollbacks, 1 as Int64);
+}
+
+fn test_release_unknown_is_spo_unknown() {
+    let mut s = new_stack();
+    let _ = s.apply(&SoBegin("a".clone()));
+    match s.apply(&SoRelease("missing".clone())) {
+        SpoUnknown => {},
+        _ => assert(false),
+    }
+    assert_eq(s.depth(), 1);
+}
+
+fn test_topmost_resolution() {
+    let mut s = new_stack();
+    let _ = s.apply(&SoBegin("x".clone()));
+    let _ = s.apply(&SoBegin("x".clone()));    // shadow
+    // RELEASE("x") resolves to the innermost — unwinds only 1 frame.
+    let _ = s.apply(&SoRelease("x".clone()));
+    assert_eq(s.depth(), 1);
+}
+
+fn main() {
+    test_op_names();
+    test_is_pushing_only_begin();
+    test_target_name_returns_label();
+    test_new_stack_empty();
+    test_begin_pushes();
+    test_release_unwinds_above_and_including();
+    test_rollback_to_keeps_target();
+    test_release_unknown_is_spo_unknown();
+    test_topmost_resolution();
+}

@@ -1,0 +1,18 @@
+// =============================================================================
+// core/database/sqlite/native/compile_option_detail/mod.vr
+// =============================================================================
+// Layer: 7 (façade — SQLITE_ENABLE_* / _DISABLE_* / _OMIT_* taxonomy)
+// Spec: SQLite C API — compile options.
+//
+// Complements `version_api/compile_option` (which holds the runtime
+// registry) with a typed category + well-known flag catalogue.
+//
+// Submodules:
+//   * `category` — OptionCategory Feature / Tuning / Omit / Enable / Disable
+//   * `flags`    — well-known flag list w/ category lookup
+// =============================================================================
+
+module core.database.sqlite.native.compile_option_detail;
+
+public module category;
+public module flags;

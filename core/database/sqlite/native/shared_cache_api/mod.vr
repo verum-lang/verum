@@ -1,0 +1,19 @@
+// =============================================================================
+// core/database/sqlite/native/shared_cache_api/mod.vr
+// =============================================================================
+// Layer: 7 (façade — sqlite3_enable_shared_cache)
+// Spec: SQLite C API (deprecated).
+//
+//   int sqlite3_enable_shared_cache(int onoff)
+//
+// Process-global toggle for shared-cache mode.  Deprecated because it
+// interacts poorly with WAL mode; modern callers rely on cache=shared
+// URI parameters instead.  Still exported for binary compatibility.
+//
+// Submodules:
+//   * `state`  — SharedCacheState w/ process-global flag + toggle count
+// =============================================================================
+
+module core.database.sqlite.native.shared_cache_api;
+
+public module state;

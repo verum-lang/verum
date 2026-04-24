@@ -1,0 +1,23 @@
+// =============================================================================
+// core/database/sqlite/native/close_api/mod.vr
+// =============================================================================
+// Layer: 7 (façade — sqlite3_close / _close_v2)
+// Spec: SQLite C API
+//
+//   int sqlite3_close(sqlite3 *)       — strict: fails w/ SQLITE_BUSY if any
+//                                         statement is still live
+//   int sqlite3_close_v2(sqlite3 *)    — deferred: accepts the call but keeps
+//                                         the connection in "zombie" state
+//                                         until the last stmt is finalized
+//
+// Submodules:
+//   * `mode`     — CloseMode (Strict / Deferred)
+//   * `state`    — ConnectionState (Live / Zombie / Closed)
+//   * `engine`   — outstanding-stmt count + state-machine driver
+// =============================================================================
+
+module core.database.sqlite.native.close_api;
+
+public module mode;
+public module state;
+public module engine;

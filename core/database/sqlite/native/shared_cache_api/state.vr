@@ -1,0 +1,42 @@
+// =============================================================================
+// shared_cache_api/state.vr — process-global flag
+// =============================================================================
+// Spec: SQLite C API (deprecated).
+// =============================================================================
+
+module core.database.sqlite.native.shared_cache_api.state;
+
+mount core.*;
+mount base.{Bool};
+
+public type SharedCacheState is {
+    enabled: Bool,
+    /// Monotone toggle-count for audit.
+    toggles: Int64,
+    /// Number of deprecation warnings logged (implementation-defined;
+    /// catalogue lets tooling estimate legacy API traffic).
+    deprecation_warnings: Int64,
+}
+
+public fn new_state() -> SharedCacheState {
+    SharedCacheState {
+        enabled: false,
+        toggles: 0 as Int64,
+        deprecation_warnings: 0 as Int64,
+    }
+}
+
+public fn set_enabled(s: &mut SharedCacheState, on: Bool) {
+    if s.enabled != on {
+        s.enabled = on;
+        s.toggles = s.toggles + (1 as Int64);
+    }
+}
+
+public fn sqlite3_enable_shared_cache(s: &mut SharedCacheState, onoff: Int) -> Int {
+    s.deprecation_warnings = s.deprecation_warnings + (1 as Int64);
+    set_enabled(s, onoff != 0);
+    0   // SQLITE_OK
+}
+
+public fn is_enabled(s: &SharedCacheState) -> Bool { s.enabled }

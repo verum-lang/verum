@@ -1,0 +1,40 @@
+// =============================================================================
+// txn_rollback_ops/op.vr — BeginOp sum
+// =============================================================================
+// Spec: SQLite SQL
+// =============================================================================
+
+module core.database.sqlite.native.txn_rollback_ops.op;
+
+mount core.*;
+mount base.{Bool, Text};
+mount core.database.sqlite.native.txn_rollback_ops.mode.{
+    BeginMode,
+};
+
+public type TxnOp is
+      ToBegin(BeginMode)
+    | ToCommit              // COMMIT / END
+    | ToRollback;
+
+public fn op_name(o: &TxnOp) -> Text {
+    match o {
+        ToBegin(_)  => "BEGIN".clone(),
+        ToCommit    => "COMMIT".clone(),
+        ToRollback  => "ROLLBACK".clone(),
+    }
+}
+
+public fn is_open(o: &TxnOp) -> Bool {
+    match o {
+        ToBegin(_) => true,
+        _ => false,
+    }
+}
+
+public fn is_close(o: &TxnOp) -> Bool {
+    match o {
+        ToCommit | ToRollback => true,
+        _ => false,
+    }
+}

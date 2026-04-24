@@ -1,0 +1,57 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, shared_cache_api, deprecated, capi
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.shared_cache_api.state.{
+    SharedCacheState,
+    new_state, set_enabled, sqlite3_enable_shared_cache, is_enabled,
+};
+mount base.{Bool};
+
+fn test_new_state_disabled() {
+    let s = new_state();
+    assert(!is_enabled(&s));
+    assert_eq(s.toggles, 0 as Int64);
+    assert_eq(s.deprecation_warnings, 0 as Int64);
+}
+
+fn test_sqlite3_enable_sets_bit_and_returns_ok() {
+    let mut s = new_state();
+    assert_eq(sqlite3_enable_shared_cache(&mut s, 1), 0);
+    assert(is_enabled(&s));
+    assert_eq(s.toggles, 1 as Int64);
+    assert_eq(s.deprecation_warnings, 1 as Int64);
+}
+
+fn test_repeated_set_is_idempotent_except_for_warnings() {
+    let mut s = new_state();
+    let _ = sqlite3_enable_shared_cache(&mut s, 1);
+    let _ = sqlite3_enable_shared_cache(&mut s, 1);
+    assert_eq(s.toggles, 1 as Int64);
+    assert_eq(s.deprecation_warnings, 2 as Int64);
+}
+
+fn test_disable_after_enable() {
+    let mut s = new_state();
+    let _ = sqlite3_enable_shared_cache(&mut s, 1);
+    let _ = sqlite3_enable_shared_cache(&mut s, 0);
+    assert(!is_enabled(&s));
+    assert_eq(s.toggles, 2 as Int64);
+}
+
+fn test_set_enabled_does_not_bump_warnings() {
+    let mut s = new_state();
+    set_enabled(&mut s, true);
+    assert_eq(s.deprecation_warnings, 0 as Int64);
+}
+
+fn main() {
+    test_new_state_disabled();
+    test_sqlite3_enable_sets_bit_and_returns_ok();
+    test_repeated_set_is_idempotent_except_for_warnings();
+    test_disable_after_enable();
+    test_set_enabled_does_not_bump_warnings();
+}

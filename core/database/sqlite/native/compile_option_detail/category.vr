@@ -1,0 +1,45 @@
+// =============================================================================
+// compile_option_detail/category.vr — OptionCategory
+// =============================================================================
+// Spec: SQLite compile-option docs.
+// =============================================================================
+
+module core.database.sqlite.native.compile_option_detail.category;
+
+mount core.*;
+mount base.{Bool, Text};
+
+public type OptionCategory is
+      OcEnable       // SQLITE_ENABLE_* — add a feature
+    | OcDisable      // SQLITE_DISABLE_* — suppress a default feature
+    | OcOmit         // SQLITE_OMIT_* — remove a feature entirely
+    | OcTuning       // non-ENABLE/OMIT options tuning parameters
+    | OcThreadsafe   // THREADSAFE=0/1/2
+    | OcDefaults;    // SQLITE_DEFAULT_*
+
+public fn category_name(c: &OptionCategory) -> Text {
+    match c {
+        OcEnable      => "enable".clone(),
+        OcDisable     => "disable".clone(),
+        OcOmit        => "omit".clone(),
+        OcTuning      => "tuning".clone(),
+        OcThreadsafe  => "threadsafe".clone(),
+        OcDefaults    => "default".clone(),
+    }
+}
+
+/// Does this category ADD functionality to the build?  Used by
+/// feature-level diff tooling.
+public fn is_additive(c: &OptionCategory) -> Bool {
+    match c {
+        OcEnable => true,
+        _ => false,
+    }
+}
+
+public fn is_subtractive(c: &OptionCategory) -> Bool {
+    match c {
+        OcDisable | OcOmit => true,
+        _ => false,
+    }
+}

@@ -1,0 +1,35 @@
+// =============================================================================
+// trace_v1_legacy/kind.vr — LegacyHookKind
+// =============================================================================
+// Spec: SQLite C API (deprecated).
+// =============================================================================
+
+module core.database.sqlite.native.trace_v1_legacy.kind;
+
+mount core.*;
+mount base.{Bool, Text};
+
+public type LegacyHookKind is
+      LhkTrace
+    | LhkProfile;
+
+public fn kind_name(k: &LegacyHookKind) -> Text {
+    match k {
+        LhkTrace   => "trace".clone(),
+        LhkProfile => "profile".clone(),
+    }
+}
+
+public fn fires_on_begin(k: &LegacyHookKind) -> Bool {
+    match k {
+        LhkTrace => true,
+        _ => false,
+    }
+}
+
+public fn fires_on_end(k: &LegacyHookKind) -> Bool {
+    match k {
+        LhkProfile => true,
+        _ => false,
+    }
+}

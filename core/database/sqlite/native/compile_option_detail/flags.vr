@@ -1,0 +1,161 @@
+// =============================================================================
+// compile_option_detail/flags.vr — well-known SQLITE_* flag table
+// =============================================================================
+// Spec: SQLite compile-option docs.
+// =============================================================================
+
+module core.database.sqlite.native.compile_option_detail.flags;
+
+mount core.*;
+mount base.{Bool, Maybe, Text};
+mount collections.List;
+mount core.database.sqlite.native.compile_option_detail.category.{
+    OptionCategory,
+    OcEnable, OcDisable, OcOmit, OcTuning, OcThreadsafe, OcDefaults,
+};
+
+public type FlagEntry is {
+    name: Text,
+    category: OptionCategory,
+}
+
+public fn entry(name: Text, category: OptionCategory) -> FlagEntry {
+    FlagEntry { name: name, category: category }
+}
+
+public fn well_known_flags() -> List<FlagEntry> {
+    let mut out: List<FlagEntry> = List.new();
+
+    // ENABLE set (the ones most embedders flip on).
+    out.push(entry("ENABLE_FTS5".clone(), OcEnable));
+    out.push(entry("ENABLE_FTS4".clone(), OcEnable));
+    out.push(entry("ENABLE_FTS3".clone(), OcEnable));
+    out.push(entry("ENABLE_RTREE".clone(), OcEnable));
+    out.push(entry("ENABLE_JSON1".clone(), OcEnable));
+    out.push(entry("ENABLE_GEOPOLY".clone(), OcEnable));
+    out.push(entry("ENABLE_SESSION".clone(), OcEnable));
+    out.push(entry("ENABLE_PREUPDATE_HOOK".clone(), OcEnable));
+    out.push(entry("ENABLE_DESERIALIZE".clone(), OcEnable));
+    out.push(entry("ENABLE_COLUMN_METADATA".clone(), OcEnable));
+    out.push(entry("ENABLE_STAT4".clone(), OcEnable));
+    out.push(entry("ENABLE_LOAD_EXTENSION".clone(), OcEnable));
+    out.push(entry("ENABLE_NORMALIZE".clone(), OcEnable));
+    out.push(entry("ENABLE_DBPAGE_VTAB".clone(), OcEnable));
+    out.push(entry("ENABLE_DBSTAT_VTAB".clone(), OcEnable));
+    out.push(entry("ENABLE_BYTECODE_VTAB".clone(), OcEnable));
+    out.push(entry("ENABLE_RBU".clone(), OcEnable));
+    out.push(entry("ENABLE_SNAPSHOT".clone(), OcEnable));
+    out.push(entry("ENABLE_UNLOCK_NOTIFY".clone(), OcEnable));
+
+    // OMIT set (minimisation).
+    out.push(entry("OMIT_AUTOINIT".clone(), OcOmit));
+    out.push(entry("OMIT_AUTHORIZATION".clone(), OcOmit));
+    out.push(entry("OMIT_AUTOMATIC_INDEX".clone(), OcOmit));
+    out.push(entry("OMIT_DEPRECATED".clone(), OcOmit));
+    out.push(entry("OMIT_DECLTYPE".clone(), OcOmit));
+    out.push(entry("OMIT_LOAD_EXTENSION".clone(), OcOmit));
+    out.push(entry("OMIT_PROGRESS_CALLBACK".clone(), OcOmit));
+    out.push(entry("OMIT_SHARED_CACHE".clone(), OcOmit));
+    out.push(entry("OMIT_TRACE".clone(), OcOmit));
+
+    // DISABLE set (narrow feature opt-out).
+    out.push(entry("DISABLE_DIRSYNC".clone(), OcDisable));
+    out.push(entry("DISABLE_FTS4_DEFERRED".clone(), OcDisable));
+    out.push(entry("DISABLE_LFS".clone(), OcDisable));
+    out.push(entry("DISABLE_INTRINSIC".clone(), OcDisable));
+    out.push(entry("DISABLE_PAGECACHE_OVERFLOW_STATS".clone(), OcDisable));
+
+    // Tuning parameters.
+    out.push(entry("MAX_ATTACHED".clone(), OcTuning));
+    out.push(entry("MAX_COLUMN".clone(), OcTuning));
+    out.push(entry("MAX_COMPOUND_SELECT".clone(), OcTuning));
+    out.push(entry("MAX_EXPR_DEPTH".clone(), OcTuning));
+    out.push(entry("MAX_FUNCTION_ARG".clone(), OcTuning));
+    out.push(entry("MAX_LENGTH".clone(), OcTuning));
+    out.push(entry("MAX_LIKE_PATTERN_LENGTH".clone(), OcTuning));
+    out.push(entry("MAX_MMAP_SIZE".clone(), OcTuning));
+    out.push(entry("MAX_PAGE_COUNT".clone(), OcTuning));
+    out.push(entry("MAX_PAGE_SIZE".clone(), OcTuning));
+    out.push(entry("MAX_SQL_LENGTH".clone(), OcTuning));
+    out.push(entry("MAX_TRIGGER_DEPTH".clone(), OcTuning));
+    out.push(entry("MAX_VARIABLE_NUMBER".clone(), OcTuning));
+    out.push(entry("MAX_WORKER_THREADS".clone(), OcTuning));
+
+    // Threadsafe + Defaults.
+    out.push(entry("THREADSAFE=1".clone(), OcThreadsafe));
+    out.push(entry("THREADSAFE=2".clone(), OcThreadsafe));
+    out.push(entry("DEFAULT_AUTOVACUUM".clone(), OcDefaults));
+    out.push(entry("DEFAULT_CACHE_SIZE".clone(), OcDefaults));
+    out.push(entry("DEFAULT_FOREIGN_KEYS".clone(), OcDefaults));
+    out.push(entry("DEFAULT_JOURNAL_SIZE_LIMIT".clone(), OcDefaults));
+    out.push(entry("DEFAULT_LOCKING_MODE".clone(), OcDefaults));
+    out.push(entry("DEFAULT_MMAP_SIZE".clone(), OcDefaults));
+    out.push(entry("DEFAULT_MEMSTATUS".clone(), OcDefaults));
+    out.push(entry("DEFAULT_PAGE_SIZE".clone(), OcDefaults));
+    out.push(entry("DEFAULT_SYNCHRONOUS".clone(), OcDefaults));
+    out.push(entry("DEFAULT_TEMP_CACHE_SIZE".clone(), OcDefaults));
+    out.push(entry("DEFAULT_WAL_AUTOCHECKPOINT".clone(), OcDefaults));
+    out.push(entry("DEFAULT_WAL_SYNCHRONOUS".clone(), OcDefaults));
+
+    out
+}
+
+/// Case-insensitive lookup, tolerating optional SQLITE_ prefix.
+public fn find(name: &Text) -> Maybe<OptionCategory> {
+    let entries = well_known_flags();
+    let needle = strip_sqlite_prefix(name);
+    let mut i: Int = 0;
+    while i < entries.len() {
+        let e = entries.get(i);
+        if ci_eq(&e.name, &needle) {
+            return Maybe.Some(clone_category(&e.category));
+        }
+        i = i + 1;
+    }
+    Maybe.None
+}
+
+fn strip_sqlite_prefix(s: &Text) -> Text {
+    let bs = s.as_bytes();
+    let prefix = "SQLITE_".clone();
+    let pb = prefix.as_bytes();
+    if bs.len() < pb.len() { return s.clone(); }
+    let mut i: Int = 0;
+    while i < pb.len() {
+        let mut b = bs[i];
+        if b >= (0x61 as u8) && b <= (0x7A as u8) { b = b - (0x20 as u8); }
+        if b != pb[i] { return s.clone(); }
+        i = i + 1;
+    }
+    let mut out = "".clone();
+    let mut j: Int = pb.len();
+    while j < bs.len() { out.push_byte(bs[j]); j = j + 1; }
+    out
+}
+
+fn ci_eq(a: &Text, b: &Text) -> Bool {
+    let ab = a.as_bytes();
+    let bb = b.as_bytes();
+    if ab.len() != bb.len() { return false; }
+    let mut i: Int = 0;
+    while i < ab.len() {
+        let mut x = ab[i];
+        let mut y = bb[i];
+        if x >= (0x61 as u8) && x <= (0x7A as u8) { x = x - (0x20 as u8); }
+        if y >= (0x61 as u8) && y <= (0x7A as u8) { y = y - (0x20 as u8); }
+        if x != y { return false; }
+        i = i + 1;
+    }
+    true
+}
+
+fn clone_category(c: &OptionCategory) -> OptionCategory {
+    match c {
+        OcEnable     => OcEnable,
+        OcDisable    => OcDisable,
+        OcOmit       => OcOmit,
+        OcTuning     => OcTuning,
+        OcThreadsafe => OcThreadsafe,
+        OcDefaults   => OcDefaults,
+    }
+}

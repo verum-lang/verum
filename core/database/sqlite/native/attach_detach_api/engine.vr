@@ -1,0 +1,102 @@
+// =============================================================================
+// attach_detach_api/engine.vr — schema registry + limit
+// =============================================================================
+// Spec: SQLite SQL
+// =============================================================================
+
+module core.database.sqlite.native.attach_detach_api.engine;
+
+mount core.*;
+mount base.{Bool, Text};
+mount collections.List;
+mount core.database.sqlite.native.attach_detach_api.directive.{
+    AttachDirective, DetachDirective, is_reserved_alias,
+};
+
+public const DEFAULT_MAX_ATTACHED: Int = 10;
+
+public type AttachedSchema is {
+    alias: Text,
+    filename: Text,
+}
+
+public type AttachEngine is {
+    schemas: List<AttachedSchema>,
+    max_attached: Int,
+    attaches_performed: Int64,
+    detaches_performed: Int64,
+}
+
+public fn new_engine() -> AttachEngine {
+    AttachEngine {
+        schemas: List.new(),
+        max_attached: DEFAULT_MAX_ATTACHED,
+        attaches_performed: 0 as Int64,
+        detaches_performed: 0 as Int64,
+    }
+}
+
+public type AttachOutcome is
+      AoOk
+    | AoReservedAlias
+    | AoDuplicateAlias
+    | AoAtLimit;
+
+public fn attach_is_ok(o: &AttachOutcome) -> Bool {
+    match o {
+        AoOk => true,
+        _ => false,
+    }
+}
+
+public type DetachOutcome is
+      DoOk
+    | DoReservedAlias
+    | DoUnknownAlias;
+
+public fn detach_is_ok(o: &DetachOutcome) -> Bool {
+    match o {
+        DoOk => true,
+        _ => false,
+    }
+}
+
+implement AttachEngine {
+    pub fn set_max_attached(&mut self, n: Int) -> Bool {
+        if n < 0 { return false; }
+        self.max_attached = n;
+        true
+    }
+
+    fn find(&self, alias: &Text) -> Int {
+        let mut i: Int = 0;
+        while i < self.schemas.len() {
+            if self.schemas.get(i).alias == *alias { return i; }
+            i = i + 1;
+        }
+        -1
+    }
+
+    pub fn attach(&mut self, d: &AttachDirective) -> AttachOutcome {
+        if is_reserved_alias(&d.alias) { return AoReservedAlias; }
+        if self.find(&d.alias) >= 0 { return AoDuplicateAlias; }
+        if self.schemas.len() >= self.max_attached { return AoAtLimit; }
+        self.schemas.push(AttachedSchema {
+            alias: d.alias.clone(),
+            filename: d.filename.clone(),
+        });
+        self.attaches_performed = self.attaches_performed + (1 as Int64);
+        AoOk
+    }
+
+    pub fn detach(&mut self, d: &DetachDirective) -> DetachOutcome {
+        if is_reserved_alias(&d.alias) { return DoReservedAlias; }
+        let idx = self.find(&d.alias);
+        if idx < 0 { return DoUnknownAlias; }
+        let _ = self.schemas.remove(idx);
+        self.detaches_performed = self.detaches_performed + (1 as Int64);
+        DoOk
+    }
+
+    pub fn len(&self) -> Int { self.schemas.len() }
+}

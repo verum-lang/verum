@@ -1,0 +1,106 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, compile_option_detail, capi
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.compile_option_detail.category.{
+    OptionCategory,
+    OcEnable, OcDisable, OcOmit, OcTuning, OcThreadsafe, OcDefaults,
+    category_name, is_additive, is_subtractive,
+};
+mount core.database.sqlite.native.compile_option_detail.flags.{
+    FlagEntry,
+    entry, well_known_flags, find,
+};
+mount base.{Bool, Maybe};
+
+fn test_category_names() {
+    assert(category_name(&OcEnable) == "enable".clone());
+    assert(category_name(&OcOmit) == "omit".clone());
+    assert(category_name(&OcTuning) == "tuning".clone());
+}
+
+fn test_additive_and_subtractive() {
+    assert(is_additive(&OcEnable));
+    assert(!is_additive(&OcDisable));
+    assert(is_subtractive(&OcDisable));
+    assert(is_subtractive(&OcOmit));
+    assert(!is_subtractive(&OcTuning));
+}
+
+fn test_well_known_flags_includes_fts5() {
+    match find(&"ENABLE_FTS5".clone()) {
+        Maybe.Some(c) => match &c { OcEnable => {}, _ => assert(false) },
+        Maybe.None => assert(false),
+    }
+}
+
+fn test_well_known_flags_includes_omits() {
+    match find(&"OMIT_LOAD_EXTENSION".clone()) {
+        Maybe.Some(c) => match &c { OcOmit => {}, _ => assert(false) },
+        Maybe.None => assert(false),
+    }
+}
+
+fn test_tuning_flag() {
+    match find(&"MAX_ATTACHED".clone()) {
+        Maybe.Some(c) => match &c { OcTuning => {}, _ => assert(false) },
+        Maybe.None => assert(false),
+    }
+}
+
+fn test_threadsafe_classified() {
+    match find(&"THREADSAFE=1".clone()) {
+        Maybe.Some(c) => match &c { OcThreadsafe => {}, _ => assert(false) },
+        Maybe.None => assert(false),
+    }
+}
+
+fn test_default_classified() {
+    match find(&"DEFAULT_JOURNAL_SIZE_LIMIT".clone()) {
+        Maybe.Some(c) => match &c { OcDefaults => {}, _ => assert(false) },
+        Maybe.None => assert(false),
+    }
+}
+
+fn test_find_strips_sqlite_prefix() {
+    match find(&"SQLITE_ENABLE_FTS5".clone()) {
+        Maybe.Some(c) => match &c { OcEnable => {}, _ => assert(false) },
+        Maybe.None => assert(false),
+    }
+}
+
+fn test_find_case_insensitive() {
+    match find(&"enable_fts5".clone()) {
+        Maybe.Some(_) => {},
+        Maybe.None => assert(false),
+    }
+}
+
+fn test_unknown_flag_none() {
+    match find(&"UNKNOWN_FLAG".clone()) {
+        Maybe.None => {},
+        Maybe.Some(_) => assert(false),
+    }
+}
+
+fn test_well_known_flags_count_reasonable() {
+    let flags = well_known_flags();
+    assert(flags.len() >= 40);
+}
+
+fn main() {
+    test_category_names();
+    test_additive_and_subtractive();
+    test_well_known_flags_includes_fts5();
+    test_well_known_flags_includes_omits();
+    test_tuning_flag();
+    test_threadsafe_classified();
+    test_default_classified();
+    test_find_strips_sqlite_prefix();
+    test_find_case_insensitive();
+    test_unknown_flag_none();
+    test_well_known_flags_count_reasonable();
+}

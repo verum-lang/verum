@@ -1,0 +1,38 @@
+// =============================================================================
+// savepoint_ops_api/op.vr — SavepointOp sum
+// =============================================================================
+// Spec: SQLite SQL
+// =============================================================================
+
+module core.database.sqlite.native.savepoint_ops_api.op;
+
+mount core.*;
+mount base.{Bool, Text};
+
+public type SavepointOp is
+      SoBegin(Text)         // SAVEPOINT name
+    | SoRelease(Text)       // RELEASE name
+    | SoRollbackTo(Text);   // ROLLBACK TO name
+
+public fn op_name(o: &SavepointOp) -> Text {
+    match o {
+        SoBegin(_)      => "BEGIN".clone(),
+        SoRelease(_)    => "RELEASE".clone(),
+        SoRollbackTo(_) => "ROLLBACK_TO".clone(),
+    }
+}
+
+public fn is_pushing(o: &SavepointOp) -> Bool {
+    match o {
+        SoBegin(_) => true,
+        _ => false,
+    }
+}
+
+public fn target_name(o: &SavepointOp) -> Text {
+    match o {
+        SoBegin(n)      => n.clone(),
+        SoRelease(n)    => n.clone(),
+        SoRollbackTo(n) => n.clone(),
+    }
+}

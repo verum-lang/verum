@@ -1,0 +1,25 @@
+// =============================================================================
+// core/database/sqlite/native/savepoint_ops_api/mod.vr
+// =============================================================================
+// Layer: 7 (façade — SAVEPOINT / RELEASE / ROLLBACK TO stack)
+// Spec: SQLite SQL
+//
+//   SAVEPOINT name;
+//   RELEASE [SAVEPOINT] name;
+//   ROLLBACK TO [SAVEPOINT] name;
+//
+// Named savepoints form a stack within a transaction.  RELEASE +
+// ROLLBACK TO both search top-down for the named savepoint; RELEASE
+// unwinds everything at-or-above (including `name`), whereas
+// ROLLBACK TO rolls back everything above but keeps the named
+// savepoint active.
+//
+// Submodules:
+//   * `op`       — SavepointOp sum (Begin / Release / RollbackTo)
+//   * `stack`    — SavepointStack w/ named savepoint search
+// =============================================================================
+
+module core.database.sqlite.native.savepoint_ops_api;
+
+public module op;
+public module stack;

@@ -1,0 +1,50 @@
+// =============================================================================
+// soft_int_api/engine.vr — deprecated soft-heap wrapper
+// =============================================================================
+// Spec: SQLite C API (deprecated).
+// =============================================================================
+
+module core.database.sqlite.native.soft_int_api.engine;
+
+mount core.*;
+mount base.{Bool};
+
+public type SoftIntEngine is {
+    current_bytes: Int64,
+    calls: Int64,
+    deprecation_warnings: Int64,
+    /// True iff any call saturated the 32-bit Int parameter — a flag
+    /// for migration tooling.
+    saw_saturation: Bool,
+}
+
+public fn new_engine() -> SoftIntEngine {
+    SoftIntEngine {
+        current_bytes: 0 as Int64,
+        calls: 0 as Int64,
+        deprecation_warnings: 0 as Int64,
+        saw_saturation: false,
+    }
+}
+
+/// Matches sqlite3_soft_heap_limit(N): returns the PREVIOUS value.
+/// Negative `N` queries without writing.  A successful set of 0
+/// disables the soft limit.
+public fn sqlite3_soft_heap_limit(e: &mut SoftIntEngine, n: Int) -> Int {
+    e.calls = e.calls + (1 as Int64);
+    e.deprecation_warnings = e.deprecation_warnings + (1 as Int64);
+    let prev = if e.current_bytes > (2147483647 as Int64) {
+        e.saw_saturation = true;
+        2147483647
+    } else {
+        e.current_bytes as Int
+    };
+    if n >= 0 {
+        e.current_bytes = n as Int64;
+    }
+    prev
+}
+
+public fn widen_to_64(e: &SoftIntEngine) -> Int64 {
+    e.current_bytes
+}

@@ -1,0 +1,25 @@
+// =============================================================================
+// core/database/sqlite/native/txn_rollback_ops/mod.vr
+// =============================================================================
+// Layer: 7 (façade — BEGIN / COMMIT / ROLLBACK semantics)
+// Spec: SQLite SQL
+//
+//   BEGIN [DEFERRED | IMMEDIATE | EXCLUSIVE] [TRANSACTION];
+//   COMMIT;
+//   ROLLBACK;
+//   END;  -- alias for COMMIT
+//
+// Differs from `txn/` which tracks the schema-vs-autocommit state —
+// this catalogue models the outer BEGIN/COMMIT/ROLLBACK protocol.
+//
+// Submodules:
+//   * `mode`      — BeginMode Deferred / Immediate / Exclusive
+//   * `op`        — Op Begin / Commit / Rollback
+//   * `outcome`   — normalised outcome
+// =============================================================================
+
+module core.database.sqlite.native.txn_rollback_ops;
+
+public module mode;
+public module op;
+public module outcome;

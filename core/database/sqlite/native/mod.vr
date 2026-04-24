@@ -412,3 +412,19 @@ public module bitvec_test_api;
 public module returning_clause_api;
 // - dbpage_vtab_api: sqlite_dbpage vtab (3.31+) — DbPageRow + WriteGuard
 public module dbpage_vtab_api;
+// - close_api: sqlite3_close / _close_v2 — strict vs deferred close + zombie state
+public module close_api;
+// - trace_v1_legacy: deprecated sqlite3_trace / sqlite3_profile — v1 callback slots
+public module trace_v1_legacy;
+// - shared_cache_api: sqlite3_enable_shared_cache (deprecated) — process-global toggle
+public module shared_cache_api;
+// - attach_detach_api: ATTACH / DETACH DATABASE — alias registry w/ MAX_ATTACHED cap
+public module attach_detach_api;
+// - savepoint_ops_api: SAVEPOINT / RELEASE / ROLLBACK TO — named-stack semantics
+public module savepoint_ops_api;
+// - txn_rollback_ops: BEGIN / COMMIT / ROLLBACK w/ DEFERRED/IMMEDIATE/EXCLUSIVE modes
+public module txn_rollback_ops;
+// - soft_int_api: deprecated sqlite3_soft_heap_limit (Int version) — migration helper
+public module soft_int_api;
+// - compile_option_detail: SQLITE_{ENABLE,DISABLE,OMIT,MAX,DEFAULT}_* flag taxonomy
+public module compile_option_detail;

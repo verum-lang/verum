@@ -1,0 +1,20 @@
+// =============================================================================
+// core/database/sqlite/native/soft_int_api/mod.vr
+// =============================================================================
+// Layer: 7 (façade — deprecated sqlite3_soft_heap_limit)
+// Spec: SQLite C API (deprecated).
+//
+//   int sqlite3_soft_heap_limit(int N)
+//
+// Deprecated in 3.7.3 — the Int version truncates on 64-bit systems
+// where heap limits may exceed INT32_MAX.  Use sqlite3_soft_heap_limit64
+// instead.  Still exported for binary compatibility.
+//
+// Submodules:
+//   * `engine`  — wraps memory_stats soft-limit; tracks deprecation
+//                 warning count
+// =============================================================================
+
+module core.database.sqlite.native.soft_int_api;
+
+public module engine;

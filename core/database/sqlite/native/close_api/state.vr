@@ -1,0 +1,37 @@
+// =============================================================================
+// close_api/state.vr — ConnectionState
+// =============================================================================
+// Spec: SQLite C API
+// =============================================================================
+
+module core.database.sqlite.native.close_api.state;
+
+mount core.*;
+mount base.{Bool, Text};
+
+public type ConnectionState is
+      CsLive                      // fully open
+    | CsZombie                    // close_v2 called; draining outstanding stmts
+    | CsClosed;                   // fully released
+
+public fn state_name(s: &ConnectionState) -> Text {
+    match s {
+        CsLive    => "live".clone(),
+        CsZombie  => "zombie".clone(),
+        CsClosed  => "closed".clone(),
+    }
+}
+
+public fn accepts_new_stmts(s: &ConnectionState) -> Bool {
+    match s {
+        CsLive => true,
+        _ => false,
+    }
+}
+
+public fn is_terminal(s: &ConnectionState) -> Bool {
+    match s {
+        CsClosed => true,
+        _ => false,
+    }
+}

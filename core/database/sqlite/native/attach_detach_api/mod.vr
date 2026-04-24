@@ -1,0 +1,19 @@
+// =============================================================================
+// core/database/sqlite/native/attach_detach_api/mod.vr
+// =============================================================================
+// Layer: 7 (façade — ATTACH DATABASE / DETACH)
+// Spec: SQLite SQL — ATTACH DATABASE 'file' AS name;
+//
+// SQLite binds an arbitrary number of auxiliary databases into one
+// connection; each has a schema name (alias) separate from the
+// filename.  "main" and "temp" are pre-bound and cannot be detached.
+//
+// Submodules:
+//   * `directive`  — AttachDirective / DetachDirective shapes
+//   * `engine`     — schema registry + SQLITE_LIMIT_ATTACHED cap
+// =============================================================================
+
+module core.database.sqlite.native.attach_detach_api;
+
+public module directive;
+public module engine;

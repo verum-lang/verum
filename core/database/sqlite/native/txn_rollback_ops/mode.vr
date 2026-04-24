@@ -1,0 +1,37 @@
+// =============================================================================
+// txn_rollback_ops/mode.vr — BeginMode
+// =============================================================================
+// Spec: SQLite SQL
+// =============================================================================
+
+module core.database.sqlite.native.txn_rollback_ops.mode;
+
+mount core.*;
+mount base.{Bool, Text};
+
+public type BeginMode is
+      BmDeferred       // default — no lock until first statement
+    | BmImmediate      // RESERVED lock immediately
+    | BmExclusive;     // EXCLUSIVE lock immediately
+
+public fn mode_name(m: &BeginMode) -> Text {
+    match m {
+        BmDeferred  => "DEFERRED".clone(),
+        BmImmediate => "IMMEDIATE".clone(),
+        BmExclusive => "EXCLUSIVE".clone(),
+    }
+}
+
+public fn acquires_write_lock_immediately(m: &BeginMode) -> Bool {
+    match m {
+        BmImmediate | BmExclusive => true,
+        _ => false,
+    }
+}
+
+public fn locks_others_out(m: &BeginMode) -> Bool {
+    match m {
+        BmExclusive => true,
+        _ => false,
+    }
+}

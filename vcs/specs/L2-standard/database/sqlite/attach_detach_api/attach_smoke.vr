@@ -1,0 +1,111 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, attach_detach_api, capi
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.attach_detach_api.directive.{
+    AttachDirective, DetachDirective,
+    new_attach, new_attach_uri, new_detach, is_reserved_alias,
+};
+mount core.database.sqlite.native.attach_detach_api.engine.{
+    AttachEngine, AttachOutcome, DetachOutcome,
+    AoOk, AoReservedAlias, AoDuplicateAlias, AoAtLimit,
+    DoOk, DoReservedAlias, DoUnknownAlias,
+    DEFAULT_MAX_ATTACHED,
+    new_engine, attach_is_ok, detach_is_ok,
+};
+mount base.{Bool};
+
+fn test_default_max_attached() {
+    assert_eq(DEFAULT_MAX_ATTACHED, 10);
+}
+
+fn test_is_reserved_main_and_temp() {
+    assert(is_reserved_alias(&"main".clone()));
+    assert(is_reserved_alias(&"MAIN".clone()));
+    assert(is_reserved_alias(&"temp".clone()));
+    assert(!is_reserved_alias(&"aux1".clone()));
+}
+
+fn test_new_attach_uri_mode() {
+    let d = new_attach_uri("file:/tmp/x.db?cache=shared".clone(), "aux1".clone());
+    assert(d.uri_mode);
+}
+
+fn test_attach_ok_path() {
+    let mut e = new_engine();
+    let d = new_attach("/tmp/x.db".clone(), "aux1".clone());
+    let o = e.attach(&d);
+    assert(attach_is_ok(&o));
+    assert_eq(e.len(), 1);
+    assert_eq(e.attaches_performed, 1 as Int64);
+}
+
+fn test_attach_rejects_reserved_alias() {
+    let mut e = new_engine();
+    let d = new_attach("/tmp/x.db".clone(), "main".clone());
+    match e.attach(&d) {
+        AoReservedAlias => {},
+        _ => assert(false),
+    }
+}
+
+fn test_attach_rejects_duplicate_alias() {
+    let mut e = new_engine();
+    let _ = e.attach(&new_attach("/tmp/x.db".clone(), "aux1".clone()));
+    match e.attach(&new_attach("/tmp/y.db".clone(), "aux1".clone())) {
+        AoDuplicateAlias => {},
+        _ => assert(false),
+    }
+}
+
+fn test_attach_hits_limit() {
+    let mut e = new_engine();
+    let _ = e.set_max_attached(2);
+    let _ = e.attach(&new_attach("/a".clone(), "a1".clone()));
+    let _ = e.attach(&new_attach("/b".clone(), "a2".clone()));
+    match e.attach(&new_attach("/c".clone(), "a3".clone())) {
+        AoAtLimit => {},
+        _ => assert(false),
+    }
+}
+
+fn test_detach_ok_path() {
+    let mut e = new_engine();
+    let _ = e.attach(&new_attach("/tmp/x.db".clone(), "aux1".clone()));
+    let d = new_detach("aux1".clone());
+    let o = e.detach(&d);
+    assert(detach_is_ok(&o));
+    assert_eq(e.len(), 0);
+}
+
+fn test_detach_rejects_main() {
+    let mut e = new_engine();
+    match e.detach(&new_detach("main".clone())) {
+        DoReservedAlias => {},
+        _ => assert(false),
+    }
+}
+
+fn test_detach_unknown_alias() {
+    let mut e = new_engine();
+    match e.detach(&new_detach("ghost".clone())) {
+        DoUnknownAlias => {},
+        _ => assert(false),
+    }
+}
+
+fn main() {
+    test_default_max_attached();
+    test_is_reserved_main_and_temp();
+    test_new_attach_uri_mode();
+    test_attach_ok_path();
+    test_attach_rejects_reserved_alias();
+    test_attach_rejects_duplicate_alias();
+    test_attach_hits_limit();
+    test_detach_ok_path();
+    test_detach_rejects_main();
+    test_detach_unknown_alias();
+}

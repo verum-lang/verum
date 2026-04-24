@@ -1,0 +1,92 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, close_api, capi
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.close_api.mode.{
+    CloseMode, CmStrict, CmDeferred,
+    mode_name, rejects_on_busy,
+};
+mount core.database.sqlite.native.close_api.state.{
+    ConnectionState, CsLive, CsZombie, CsClosed,
+    state_name, accepts_new_stmts, is_terminal,
+};
+mount core.database.sqlite.native.close_api.engine.{
+    CloseEngine, new_engine,
+};
+mount base.{Bool};
+
+fn test_mode_names() {
+    assert(mode_name(&CmStrict) == "strict".clone());
+    assert(mode_name(&CmDeferred) == "deferred".clone());
+}
+
+fn test_rejects_on_busy_only_strict() {
+    assert(rejects_on_busy(&CmStrict));
+    assert(!rejects_on_busy(&CmDeferred));
+}
+
+fn test_state_flags() {
+    assert(accepts_new_stmts(&CsLive));
+    assert(!accepts_new_stmts(&CsZombie));
+    assert(!accepts_new_stmts(&CsClosed));
+    assert(is_terminal(&CsClosed));
+    assert(!is_terminal(&CsLive));
+    assert(state_name(&CsZombie) == "zombie".clone());
+}
+
+fn test_strict_close_rejects_when_busy() {
+    let mut e = new_engine();
+    let _ = e.register_stmt();
+    assert_eq(e.close(&CmStrict), 5);   // SQLITE_BUSY
+    match &e.state { CsLive => {}, _ => assert(false) }
+}
+
+fn test_deferred_close_enters_zombie() {
+    let mut e = new_engine();
+    let _ = e.register_stmt();
+    assert_eq(e.close(&CmDeferred), 0);
+    match &e.state { CsZombie => {}, _ => assert(false) }
+}
+
+fn test_zombie_finalize_transitions_to_closed() {
+    let mut e = new_engine();
+    let _ = e.register_stmt();
+    let _ = e.close(&CmDeferred);
+    e.finalize_stmt();
+    match &e.state { CsClosed => {}, _ => assert(false) }
+}
+
+fn test_strict_close_with_no_stmts_ok() {
+    let mut e = new_engine();
+    assert_eq(e.close(&CmStrict), 0);
+    match &e.state { CsClosed => {}, _ => assert(false) }
+}
+
+fn test_register_stmt_rejects_in_zombie() {
+    let mut e = new_engine();
+    let _ = e.register_stmt();
+    let _ = e.close(&CmDeferred);
+    assert(!e.register_stmt());
+}
+
+fn test_close_is_counted() {
+    let mut e = new_engine();
+    let _ = e.close(&CmStrict);
+    let _ = e.close(&CmStrict);   // already closed, still counts
+    assert_eq(e.closes_attempted, 2 as Int64);
+}
+
+fn main() {
+    test_mode_names();
+    test_rejects_on_busy_only_strict();
+    test_state_flags();
+    test_strict_close_rejects_when_busy();
+    test_deferred_close_enters_zombie();
+    test_zombie_finalize_transitions_to_closed();
+    test_strict_close_with_no_stmts_ok();
+    test_register_stmt_rejects_in_zombie();
+    test_close_is_counted();
+}

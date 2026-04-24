@@ -1,0 +1,87 @@
+// =============================================================================
+// savepoint_ops_api/stack.vr — SavepointStack
+// =============================================================================
+// Spec: SQLite SQL
+// =============================================================================
+
+module core.database.sqlite.native.savepoint_ops_api.stack;
+
+mount core.*;
+mount base.{Bool, Text};
+mount collections.List;
+mount core.database.sqlite.native.savepoint_ops_api.op.{
+    SavepointOp, SoBegin, SoRelease, SoRollbackTo, target_name,
+};
+
+public type SavepointStack is {
+    names: List<Text>,
+    pushes: Int64,
+    releases: Int64,
+    rollbacks: Int64,
+}
+
+public fn new_stack() -> SavepointStack {
+    SavepointStack {
+        names: List.new(),
+        pushes: 0 as Int64,
+        releases: 0 as Int64,
+        rollbacks: 0 as Int64,
+    }
+}
+
+public type SavepointOutcome is
+      SpoOk
+    | SpoUnknown;
+
+public fn outcome_is_ok(o: &SavepointOutcome) -> Bool {
+    match o {
+        SpoOk => true,
+        _ => false,
+    }
+}
+
+implement SavepointStack {
+    fn find_topmost(&self, name: &Text) -> Int {
+        // SQLite searches top → bottom (latest push first).
+        let mut i: Int = self.names.len() - 1;
+        while i >= 0 {
+            if self.names.get(i) == name { return i; }
+            i = i - 1;
+        }
+        -1
+    }
+
+    pub fn apply(&mut self, op: &SavepointOp) -> SavepointOutcome {
+        match op {
+            SoBegin(n) => {
+                self.names.push(n.clone());
+                self.pushes = self.pushes + (1 as Int64);
+                SpoOk
+            }
+            SoRelease(n) => {
+                let idx = self.find_topmost(n);
+                if idx < 0 { return SpoUnknown; }
+                // RELEASE unwinds every entry at-or-above (including n).
+                while self.names.len() > idx {
+                    let _ = self.names.remove(self.names.len() - 1);
+                }
+                self.releases = self.releases + (1 as Int64);
+                SpoOk
+            }
+            SoRollbackTo(n) => {
+                let idx = self.find_topmost(n);
+                if idx < 0 { return SpoUnknown; }
+                // ROLLBACK TO unwinds every entry ABOVE n (keeps n itself).
+                while self.names.len() > idx + 1 {
+                    let _ = self.names.remove(self.names.len() - 1);
+                }
+                self.rollbacks = self.rollbacks + (1 as Int64);
+                SpoOk
+            }
+        }
+    }
+
+    pub fn depth(&self) -> Int { self.names.len() }
+
+    pub fn is_empty(&self) -> Bool { self.names.len() == 0 }
+}

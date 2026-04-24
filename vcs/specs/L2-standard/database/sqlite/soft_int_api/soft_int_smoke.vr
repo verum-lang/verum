@@ -1,0 +1,66 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, soft_int_api, deprecated, capi
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.soft_int_api.engine.{
+    SoftIntEngine,
+    new_engine, sqlite3_soft_heap_limit, widen_to_64,
+};
+mount base.{Bool};
+
+fn test_new_engine_zero() {
+    let e = new_engine();
+    assert_eq(e.current_bytes, 0 as Int64);
+    assert_eq(e.calls, 0 as Int64);
+    assert(!e.saw_saturation);
+}
+
+fn test_set_returns_previous() {
+    let mut e = new_engine();
+    let prev1 = sqlite3_soft_heap_limit(&mut e, 1024);
+    assert_eq(prev1, 0);
+    let prev2 = sqlite3_soft_heap_limit(&mut e, 2048);
+    assert_eq(prev2, 1024);
+}
+
+fn test_negative_n_queries_without_writing() {
+    let mut e = new_engine();
+    let _ = sqlite3_soft_heap_limit(&mut e, 512);
+    let prev = sqlite3_soft_heap_limit(&mut e, -1);
+    assert_eq(prev, 512);
+    assert_eq(e.current_bytes, 512 as Int64);
+}
+
+fn test_set_zero_disables() {
+    let mut e = new_engine();
+    let _ = sqlite3_soft_heap_limit(&mut e, 1024);
+    let _ = sqlite3_soft_heap_limit(&mut e, 0);
+    assert_eq(e.current_bytes, 0 as Int64);
+}
+
+fn test_each_call_bumps_deprecation_warning() {
+    let mut e = new_engine();
+    let _ = sqlite3_soft_heap_limit(&mut e, 1);
+    let _ = sqlite3_soft_heap_limit(&mut e, -1);
+    let _ = sqlite3_soft_heap_limit(&mut e, 2);
+    assert_eq(e.deprecation_warnings, 3 as Int64);
+    assert_eq(e.calls, 3 as Int64);
+}
+
+fn test_widen_to_64_returns_current() {
+    let mut e = new_engine();
+    let _ = sqlite3_soft_heap_limit(&mut e, 1024);
+    assert_eq(widen_to_64(&e), 1024 as Int64);
+}
+
+fn main() {
+    test_new_engine_zero();
+    test_set_returns_previous();
+    test_negative_n_queries_without_writing();
+    test_set_zero_disables();
+    test_each_call_bumps_deprecation_warning();
+    test_widen_to_64_returns_current();
+}

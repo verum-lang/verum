@@ -1,0 +1,70 @@
+// =============================================================================
+// trace_v1_legacy/engine.vr — installed callbacks + invocation counters
+// =============================================================================
+// Spec: SQLite C API (deprecated).
+// =============================================================================
+
+module core.database.sqlite.native.trace_v1_legacy.engine;
+
+mount core.*;
+mount base.{Bool};
+mount core.database.sqlite.native.trace_v1_legacy.kind.{
+    LegacyHookKind, LhkTrace, LhkProfile, fires_on_begin, fires_on_end,
+};
+
+public type LegacySlot is {
+    /// Opaque callback-handle id; 0 ⇒ slot empty.
+    callback: Int64,
+    /// Opaque user-data pointer.
+    user_data: Int64,
+}
+
+public fn empty_slot() -> LegacySlot {
+    LegacySlot { callback: 0 as Int64, user_data: 0 as Int64 }
+}
+
+public fn is_installed(s: &LegacySlot) -> Bool {
+    s.callback != (0 as Int64)
+}
+
+public type LegacyTraceEngine is {
+    trace: LegacySlot,
+    profile: LegacySlot,
+    trace_calls: Int64,
+    profile_calls: Int64,
+}
+
+public fn new_engine() -> LegacyTraceEngine {
+    LegacyTraceEngine {
+        trace: empty_slot(),
+        profile: empty_slot(),
+        trace_calls: 0 as Int64,
+        profile_calls: 0 as Int64,
+    }
+}
+
+implement LegacyTraceEngine {
+    pub fn sqlite3_trace(&mut self, slot: LegacySlot) {
+        self.trace = slot;
+    }
+
+    pub fn sqlite3_profile(&mut self, slot: LegacySlot) {
+        self.profile = slot;
+    }
+
+    pub fn fire_begin(&mut self) -> Bool {
+        if !is_installed(&self.trace) { return false; }
+        self.trace_calls = self.trace_calls + (1 as Int64);
+        true
+    }
+
+    pub fn fire_end(&mut self) -> Bool {
+        if !is_installed(&self.profile) { return false; }
+        self.profile_calls = self.profile_calls + (1 as Int64);
+        true
+    }
+
+    pub fn any_installed(&self) -> Bool {
+        is_installed(&self.trace) || is_installed(&self.profile)
+    }
+}

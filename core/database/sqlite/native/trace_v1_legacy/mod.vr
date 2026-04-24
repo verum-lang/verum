@@ -1,0 +1,26 @@
+// =============================================================================
+// core/database/sqlite/native/trace_v1_legacy/mod.vr
+// =============================================================================
+// Layer: 7 (façade — deprecated sqlite3_trace / sqlite3_profile)
+// Spec: SQLite C API (deprecated — superseded by sqlite3_trace_v2).
+//
+//   sqlite3_trace(db, xTrace, pArg)
+//       — xTrace(pArg, zSql)  fires once per statement-begin with the
+//                             expanded SQL text
+//
+//   sqlite3_profile(db, xProfile, pArg)
+//       — xProfile(pArg, zSql, timeNs)  fires once per statement-end
+//                                        with wall-clock duration
+//
+// Both exist only for binary compatibility.  Modern callers should
+// use sqlite3_trace_v2 with SQLITE_TRACE_STMT / _PROFILE mask bits.
+//
+// Submodules:
+//   * `kind`    — LegacyHookKind (Trace / Profile)
+//   * `engine`  — installed callback slot + invocation counters
+// =============================================================================
+
+module core.database.sqlite.native.trace_v1_legacy;
+
+public module kind;
+public module engine;

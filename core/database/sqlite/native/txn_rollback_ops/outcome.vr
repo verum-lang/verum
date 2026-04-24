@@ -1,0 +1,44 @@
+// =============================================================================
+// txn_rollback_ops/outcome.vr — normalised outcome
+// =============================================================================
+// Spec: SQLite SQL
+// =============================================================================
+
+module core.database.sqlite.native.txn_rollback_ops.outcome;
+
+mount core.*;
+mount base.{Bool, Text};
+mount core.database.sqlite.native.errors.code.{
+    ExtendedCode, extended_numeric,
+};
+
+public type TxnOutcome is
+      ToOk
+    | ToAlreadyInTxn           // BEGIN while already in a txn
+    | ToNotInTxn               // COMMIT / ROLLBACK outside a txn
+    | ToFailed { code: ExtendedCode, reason: Text };
+
+public fn is_ok(o: &TxnOutcome) -> Bool {
+    match o {
+        ToOk => true,
+        _ => false,
+    }
+}
+
+public fn outcome_numeric(o: &TxnOutcome) -> Int {
+    match o {
+        ToOk              => 0,
+        ToAlreadyInTxn    => 1,    // SQLITE_ERROR
+        ToNotInTxn        => 1,
+        ToFailed { code, .. } => extended_numeric(code),
+    }
+}
+
+public fn outcome_name(o: &TxnOutcome) -> Text {
+    match o {
+        ToOk              => "ok".clone(),
+        ToAlreadyInTxn    => "already-in-txn".clone(),
+        ToNotInTxn        => "not-in-txn".clone(),
+        ToFailed { .. }   => "failed".clone(),
+    }
+}
