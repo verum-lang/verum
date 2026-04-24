@@ -314,6 +314,19 @@ unsafe extern "C" {
         n: c_uint,
     ) -> Cvc5Result;
 
+    // --- Assertion inspection ---
+    //
+    // Returns a pointer to a contiguous array of `*size`
+    // asserted terms. The pointer is only valid until the
+    // next call to `cvc5_get_assertions` on the same
+    // solver. Callers must copy the terms (or their string
+    // representations) before invoking any other
+    // `cvc5_get_assertions` call.
+    pub fn cvc5_get_assertions(
+        solver: cvc5_solver,
+        size: *mut usize,
+    ) -> *const cvc5_term;
+
     // --- Incremental solving ---
     pub fn cvc5_solver_push(solver: cvc5_solver, levels: c_uint);
     pub fn cvc5_solver_pop(solver: cvc5_solver, levels: c_uint);

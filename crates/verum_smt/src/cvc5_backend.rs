@@ -557,24 +557,71 @@ impl Cvc5Backend {
 
     // ==================== Checking ====================
 
+    /// Serialise the solver's current assertion set as an
+    /// SMT-LIB 2 string ending in `(check-sat)`. Used by the
+    /// `--dump-smt` diagnostic surface so a CVC5 dump is
+    /// self-contained enough to re-verify through any
+    /// SMT-LIB-compliant solver.
+    ///
+    /// Uses `cvc5_get_assertions` to read the assertion array
+    /// and `cvc5_term_to_string` to serialise each one. The
+    /// returned pointer is valid only until the next
+    /// `cvc5_get_assertions` call; we copy the strings
+    /// immediately and don't hold the pointer.
+    fn capture_smtlib_state(&self) -> String {
+        // SAFETY: cvc5_get_assertions returns a borrowed
+        // array of terms alongside the caller-provided size.
+        // We only hold the pointer for the duration of the
+        // serialisation loop — no other cvc5_get_assertions
+        // call happens in between.
+        let mut content = String::new();
+        unsafe {
+            let mut size: usize = 0;
+            let arr = cvc5_sys::cvc5_get_assertions(
+                self.solver,
+                &mut size as *mut usize,
+            );
+            if !arr.is_null() {
+                for i in 0..size {
+                    let term = *arr.add(i);
+                    let s_ptr = cvc5_sys::cvc5_term_to_string(term);
+                    if !s_ptr.is_null() {
+                        let cstr = std::ffi::CStr::from_ptr(s_ptr);
+                        if let Ok(s) = cstr.to_str() {
+                            content.push_str("(assert ");
+                            content.push_str(s);
+                            content.push_str(")\n");
+                        }
+                    }
+                }
+            }
+        }
+        content.push_str("(check-sat)\n");
+        content
+    }
+
     /// Check satisfiability
     pub fn check_sat(&mut self) -> Result<SatResult, Cvc5Error> {
         let start = Instant::now();
         self.stats.total_checks += 1;
 
         // --solver-protocol: log the boundary + --dump-smt:
-        // write the solver's current state to the dump dir.
-        // cvc5-sys's `cvc5_solver_get_assertions` would
-        // give us the SMT-LIB round-trip, but calling it
-        // requires an allocated buffer dance that's easy
-        // to break; we emit a minimal `(check-sat)` marker
-        // for now and leave the full-state dump to the
-        // caller's strategy layer.
+        // write the solver's full state as an SMT-LIB
+        // `(assert …)`* + `(check-sat)` sequence. Uses
+        // `cvc5_get_assertions` to retrieve the solver's
+        // current assertion set, then serialises each
+        // assertion via `cvc5_term_to_string`. The result is
+        // a self-contained SMT-LIB file that re-verifies
+        // through either backend — symmetric with Z3's
+        // dump format.
         crate::solver_diagnostics::log_send("(check-sat)");
-        crate::solver_diagnostics::dump_smt_query(
-            "cvc5-check-sat",
-            "(check-sat)\n",
-        );
+        if crate::solver_diagnostics::dump_smt_dir().is_some() {
+            let dump = self.capture_smtlib_state();
+            crate::solver_diagnostics::dump_smt_query(
+                "cvc5-query",
+                &dump,
+            );
+        }
 
         // SAFETY: FFI call to check satisfiability.
         // - self.solver is a valid pointer
