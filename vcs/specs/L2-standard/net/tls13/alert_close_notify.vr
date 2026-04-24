@@ -1,0 +1,99 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: tls13, alert, close_notify, rfc8446_6_1
+// @timeout: 15000
+// @expected-exit: 0
+
+// RFC 8446 §6.1 TLS 1.3 close_notify — graceful connection close.
+// AlertRecord.close_notify() produces { level=Warning, description=
+// CloseNotify }. Wire form is 2 bytes: [AlertLevel, AlertDescription]
+// = [0x01, 0x00]. close_notify is the ONE warning alert still in use
+// by TLS 1.3 (all other alerts MUST be Fatal per §6.2).
+//
+// AlertLevel.from_u8 maps Warning (1) / Fatal (2) and defaults
+// unknown values to Fatal (conservative).
+
+mount core.*;
+mount core.net.tls13.alert.{AlertLevel, AlertDescription, AlertRecord};
+
+fn close_notify_has_warning_level() {
+    let r = AlertRecord.close_notify();
+    match r.level {
+        AlertLevel.Warning => {},
+        _ => panic("close_notify must be Warning level"),
+    }
+    match r.description {
+        AlertDescription.CloseNotify => {},
+        _ => panic("close_notify description must be CloseNotify"),
+    }
+}
+
+fn close_notify_wire_form_is_0x01_0x00() {
+    let r = AlertRecord.close_notify();
+    let bytes = r.encode();
+    assert(bytes[0] == 0x01_u8);   // Warning level
+    assert(bytes[1] == 0x00_u8);   // CloseNotify description
+}
+
+fn fatal_helper_pins_level_to_fatal() {
+    let r = AlertRecord.fatal(AlertDescription.HandshakeFailure);
+    match r.level {
+        AlertLevel.Fatal => {},
+        _ => panic("AlertRecord.fatal must set level=Fatal"),
+    }
+    let bytes = r.encode();
+    assert(bytes[0] == 0x02_u8);                                      // Fatal
+    assert(bytes[1] == AlertDescription.HandshakeFailure.to_u8());
+}
+
+fn alert_level_from_u8_routes_warning_and_fatal() {
+    match AlertLevel.from_u8(1_u8) {
+        AlertLevel.Warning => {},
+        _ => panic("1 → Warning"),
+    }
+    match AlertLevel.from_u8(2_u8) {
+        AlertLevel.Fatal => {},
+        _ => panic("2 → Fatal"),
+    }
+}
+
+fn alert_level_from_u8_unknown_defaults_to_fatal() {
+    // RFC 8446 §6.2 — all alerts MUST be Fatal in TLS 1.3 except
+    // close_notify and user_canceled. Unknown level values from peers
+    // running bad stacks default to Fatal (conservative reject).
+    match AlertLevel.from_u8(0_u8) {
+        AlertLevel.Fatal => {},
+        _ => panic("0 → Fatal default"),
+    }
+    match AlertLevel.from_u8(255_u8) {
+        AlertLevel.Fatal => {},
+        _ => panic("255 → Fatal default"),
+    }
+}
+
+fn close_notify_wire_survives_encode_then_read_back() {
+    let r = AlertRecord.close_notify();
+    let wire = r.encode();
+    // AlertLevel.from_u8(1) + AlertDescription.from_u8(0) = original.
+    let back_level = AlertLevel.from_u8(wire[0]);
+    match back_level {
+        AlertLevel.Warning => {},
+        _ => panic("level round-trip"),
+    }
+    // AlertDescription doesn't have from_u8 as a primary method; we
+    // just pin the numeric value.
+    assert(wire[1] == AlertDescription.CloseNotify.to_u8());
+}
+
+@main
+public fn main() -> Int {
+    close_notify_has_warning_level();
+    close_notify_wire_form_is_0x01_0x00();
+    fatal_helper_pins_level_to_fatal();
+    alert_level_from_u8_routes_warning_and_fatal();
+    alert_level_from_u8_unknown_defaults_to_fatal();
+    close_notify_wire_survives_encode_then_read_back();
+    print("RFC 8446 §6.1 AlertRecord.close_notify + AlertLevel.from_u8 verified");
+    0
+}
