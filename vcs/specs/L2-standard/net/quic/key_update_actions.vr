@@ -1,0 +1,96 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: quic, key_update, rfc9001_6_2, inbound_phase_action
+// @timeout: 15000
+// @expected-exit: 0
+
+// RFC 9001 §6.2 — reaction of the KeyUpdate state machine to an
+// observed inbound Key Phase bit. Three outcomes:
+//
+//   NoChange                  — peer still in our current phase.
+//   TryDecryptWithNextKeys    — peer has flipped; attempt with prepared
+//                                next-phase keys before committing.
+//   MustDiscardKeys           — confidentiality / integrity limit hit,
+//                                caller MUST close the connection.
+//
+// Additionally every KeyUpdateError variant must be distinguishable.
+
+mount core.*;
+mount core.net.quic.key_update.{InboundPhaseAction, KeyUpdateError};
+
+fn inbound_phase_action_variants_constructible() {
+    let _n: InboundPhaseAction = InboundPhaseAction.NoChange;
+    let _t: InboundPhaseAction = InboundPhaseAction.TryDecryptWithNextKeys;
+    let _d: InboundPhaseAction = InboundPhaseAction.MustDiscardKeys;
+}
+
+fn inbound_phase_action_distinct_via_match() {
+    let actions: [InboundPhaseAction; 3] = [
+        InboundPhaseAction.NoChange,
+        InboundPhaseAction.TryDecryptWithNextKeys,
+        InboundPhaseAction.MustDiscardKeys,
+    ];
+    let mut tags: [Int; 3] = [0; 3];
+    let mut i: Int = 0;
+    while i < 3 {
+        tags[i] = match actions[i] {
+            InboundPhaseAction.NoChange                => 1,
+            InboundPhaseAction.TryDecryptWithNextKeys  => 2,
+            InboundPhaseAction.MustDiscardKeys         => 3,
+        };
+        i = i + 1;
+    }
+    assert(tags[0] == 1);
+    assert(tags[1] == 2);
+    assert(tags[2] == 3);
+}
+
+fn key_update_error_variants_constructible() {
+    let _a: KeyUpdateError = KeyUpdateError.PendingRotationInProgress;
+    let _b: KeyUpdateError = KeyUpdateError.PeerInitiatedTooEarly;
+    let _c: KeyUpdateError = KeyUpdateError.DeriveFailed;
+    let _d: KeyUpdateError = KeyUpdateError.IntegrityLimitExceeded;
+    let _e: KeyUpdateError = KeyUpdateError.ConfidentialityLimitExceeded;
+}
+
+fn key_update_error_distinct_via_match() {
+    let errs: [KeyUpdateError; 5] = [
+        KeyUpdateError.PendingRotationInProgress,
+        KeyUpdateError.PeerInitiatedTooEarly,
+        KeyUpdateError.DeriveFailed,
+        KeyUpdateError.IntegrityLimitExceeded,
+        KeyUpdateError.ConfidentialityLimitExceeded,
+    ];
+    let mut tags: [Int; 5] = [0; 5];
+    let mut i: Int = 0;
+    while i < 5 {
+        tags[i] = match errs[i] {
+            KeyUpdateError.PendingRotationInProgress     => 1,
+            KeyUpdateError.PeerInitiatedTooEarly         => 2,
+            KeyUpdateError.DeriveFailed                  => 3,
+            KeyUpdateError.IntegrityLimitExceeded        => 4,
+            KeyUpdateError.ConfidentialityLimitExceeded  => 5,
+        };
+        i = i + 1;
+    }
+    let mut j: Int = 0;
+    while j < 5 {
+        let mut k: Int = j + 1;
+        while k < 5 {
+            assert(tags[j] != tags[k]);
+            k = k + 1;
+        }
+        j = j + 1;
+    }
+}
+
+@main
+public fn main() -> Int {
+    inbound_phase_action_variants_constructible();
+    inbound_phase_action_distinct_via_match();
+    key_update_error_variants_constructible();
+    key_update_error_distinct_via_match();
+    print("RFC 9001 §6.2 InboundPhaseAction + KeyUpdateError surface verified");
+    0
+}

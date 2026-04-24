@@ -1,0 +1,50 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: quic, retry, rfc9001_5_8, constants
+// @timeout: 15000
+// @expected-exit: 0
+
+// RFC 9001 §5.8 — Retry integrity tag AEAD_AES_128_GCM uses a fixed
+// key + nonce for QUIC v1. Constants are embedded as [Byte; 16] and
+// [Byte; 12] respectively.
+
+mount core.*;
+mount core.net.quic.crypto.retry.{RETRY_INTEGRITY_KEY_V1, RETRY_INTEGRITY_NONCE_V1};
+
+fn retry_integrity_key_v1_matches_rfc() {
+    // RFC 9001 §5.8: key = 0xbe0c690b9f66575a1d766b54e368c84e
+    let expected: [Byte; 16] = [
+        0xBE_u8, 0x0C_u8, 0x69_u8, 0x0B_u8,
+        0x9F_u8, 0x66_u8, 0x57_u8, 0x5A_u8,
+        0x1D_u8, 0x76_u8, 0x6B_u8, 0x54_u8,
+        0xE3_u8, 0x68_u8, 0xC8_u8, 0x4E_u8,
+    ];
+    let mut i: Int = 0;
+    while i < 16 {
+        assert(RETRY_INTEGRITY_KEY_V1[i] == expected[i]);
+        i = i + 1;
+    }
+}
+
+fn retry_integrity_nonce_v1_matches_rfc() {
+    // RFC 9001 §5.8: nonce = 0x461599d35d632bf2239825bb
+    let expected: [Byte; 12] = [
+        0x46_u8, 0x15_u8, 0x99_u8, 0xD3_u8,
+        0x5D_u8, 0x63_u8, 0x2B_u8, 0xF2_u8,
+        0x23_u8, 0x98_u8, 0x25_u8, 0xBB_u8,
+    ];
+    let mut i: Int = 0;
+    while i < 12 {
+        assert(RETRY_INTEGRITY_NONCE_V1[i] == expected[i]);
+        i = i + 1;
+    }
+}
+
+@main
+public fn main() -> Int {
+    retry_integrity_key_v1_matches_rfc();
+    retry_integrity_nonce_v1_matches_rfc();
+    print("RFC 9001 §5.8 Retry v1 key + nonce constants verified");
+    0
+}

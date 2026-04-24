@@ -1,0 +1,94 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: quic, pacer, token_bucket, rfc9002_7_7
+// @timeout: 15000
+// @expected-exit: 0
+
+// RFC 9002 §7.7 pacer — token-bucket rate limiter.
+//
+//   * new(capacity) starts with a full bucket + 0 bps rate (unlimited).
+//   * set_rate(bps) switches to paced mode.
+//   * check(n) returns Send while bucket ≥ n, NotYet(d) otherwise.
+//   * on_packet_sent(n) drains n tokens.
+//   * rate_bps=0 keeps bucket full (unbounded mode).
+
+mount core.*;
+mount core.time.instant.{Instant};
+mount core.time.duration.{Duration};
+mount core.net.quic.pacer.{Pacer, PacerDecision};
+
+fn new_pacer_starts_full() {
+    let p = Pacer::new(3_000_u64);
+    assert(p.tokens() == 3_000_u64);
+    assert(p.rate_bps() == 0_u64);
+}
+
+fn with_mss_doubles_capacity() {
+    let p = Pacer.with_mss(1200_u64);
+    // 2 × MSS = 2400 bytes initial capacity.
+    assert(p.tokens() == 2400_u64);
+}
+
+fn unlimited_mode_always_sends() {
+    let mut p = Pacer::new(1200_u64);
+    let now = Instant.now();
+    match p.check(5000_u64, now) {
+        PacerDecision.Send => {},
+        _ => panic("unlimited pacer must admit any size"),
+    }
+}
+
+fn paced_bucket_depletion() {
+    let mut p = Pacer::new(1200_u64);
+    p.set_rate(1_000_000_u64);   // 1 Mbps = 125_000 bytes/s
+    let now = Instant.now();
+
+    // First send — bucket has full 1200 tokens.
+    match p.check(1200_u64, now.clone()) {
+        PacerDecision.Send => {},
+        _ => panic("1200-byte send must be admitted on full bucket"),
+    }
+    p.on_packet_sent(1200_u64, now.clone());
+    assert(p.tokens() == 0_u64);
+
+    // Immediate second send without refill — must NotYet.
+    match p.check(600_u64, now) {
+        PacerDecision.NotYet(d) => {
+            // wait_us = (600 × 1e6) / 1e6 = 600_000 µs = 600 ms.
+            assert(d.as_millis() >= 500_u64);
+            assert(d.as_millis() <= 700_u64);
+        },
+        _ => panic("empty bucket must return NotYet"),
+    }
+}
+
+fn set_rate_switches_mode() {
+    let mut p = Pacer::new(100_u64);
+    assert(p.rate_bps() == 0_u64);
+    p.set_rate(8_000_u64);       // 1 KB/s
+    assert(p.rate_bps() == 8_000_u64);
+    p.set_rate(0_u64);           // back to unlimited
+    assert(p.rate_bps() == 0_u64);
+}
+
+fn drained_tokens_saturate_at_zero() {
+    let mut p = Pacer::new(500_u64);
+    p.set_rate(1_000_000_u64);
+    let now = Instant.now();
+    // Send beyond the bucket — tokens clamp at 0.
+    p.on_packet_sent(10_000_u64, now);
+    assert(p.tokens() == 0_u64);
+}
+
+@main
+public fn main() -> Int {
+    new_pacer_starts_full();
+    with_mss_doubles_capacity();
+    unlimited_mode_always_sends();
+    paced_bucket_depletion();
+    set_rate_switches_mode();
+    drained_tokens_saturate_at_zero();
+    print("RFC 9002 §7.7 Pacer token-bucket surface verified");
+    0
+}
