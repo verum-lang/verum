@@ -380,6 +380,25 @@ implement<K: Hash + Eq, V> Map<K, V> {
 
     // Get value by key. Returns the value or 0/default if not found.
     // Takes key by value (avoids &K deref limitation in AOT codegen).
+    //
+    // ⚠ SEMANTIC HAZARD — DEPRECATED IN FAVOR OF `get_optional`.
+    //
+    // The 0/default fallback is unsound when `V`'s zero value is a
+    // legitimate domain value: a map containing `(k, 0)` returns the
+    // same answer as a map missing `k`. This silently masks lookup
+    // failures. Task #54 tracks the architectural fix.
+    //
+    // Prefer:
+    //
+    //   * `get_optional(key) -> Maybe<V>` — explicit presence
+    //     semantics, the type-level safe default.
+    //   * `get_or(key, fallback)` — explicit fallback, makes the
+    //     fallback value visible at the call site.
+    //
+    // `get` stays available because a ~666-call-site migration is
+    // out of scope for a single patch. Every new call site SHOULD
+    // use `get_optional` or `get_or`; future linter warning W505
+    // flags `get` uses.
     public fn get(&self, key: K) -> V {
         if self.cap == 0 {
             return 0 as V;
@@ -456,6 +475,29 @@ implement<K: Hash + Eq, V> Map<K, V> {
             if psl > self.cap {
                 return None;
             }
+        }
+    }
+
+    /// Get value by key with an explicit fallback.
+    ///
+    /// Semantic complement of `get`: the fallback value is visible at
+    /// the call site, so readers can tell presence-missing from a
+    /// legitimate zero-valued entry. Recommended over `get` when the
+    /// caller genuinely wants "this key or that default".
+    ///
+    /// ```verum
+    /// let age = users.get_or(user_id, 0);  // 0 is an explicit default
+    /// let name = settings.get_or(key, "anonymous");
+    /// ```
+    ///
+    /// Implementation: delegates to `get_optional` + `unwrap_or(default)`
+    /// so the fallback path is exactly the same as the Maybe-based API.
+    /// Closes the silent-fallback ambiguity of `get` without forcing
+    /// a 666-call-site rewrite.
+    public fn get_or(&self, key: K, default: V) -> V {
+        match self.get_optional(key) {
+            Some(value) => value,
+            None => default,
         }
     }
 
