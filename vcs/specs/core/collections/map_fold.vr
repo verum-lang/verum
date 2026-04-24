@@ -1,0 +1,27 @@
+// @test: unit
+// @tier: 0
+// @level: L1
+// @tags: map, higher_order, closure, fold
+// @timeout: 5000
+// @expect: pass
+//
+// Regression: `Map.fold(init, fn(U, &K, &V) -> U)` had no interpreter
+// builtin handler and the `is_builtin_collection` guard blocked
+// user-defined dispatch, so any call panicked with "method 'Map.fold'
+// not found on value". Added a Map-specific builtin alongside the
+// existing Map.for_each/filter/any/all handlers.
+
+mount core.collections.map.Map;
+
+fn main() {
+    let mut m: Map<Text, Int> = Map.new();
+    m.insert("a", 1);
+    m.insert("b", 2);
+    m.insert("c", 3);
+
+    let sum_values = m.fold(0, |acc, k, v| acc + v);
+    assert(sum_values == 6);
+
+    let product_values = m.fold(1, |acc, k, v| acc * v);
+    assert(product_values == 6);
+}

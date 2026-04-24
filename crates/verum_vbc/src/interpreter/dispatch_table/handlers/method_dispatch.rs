@@ -4115,6 +4115,28 @@ pub(super) fn dispatch_primitive_method(
                     }
                     return Ok(Some(Value::unit()));
                 }
+                "fold" if is_map => {
+                    // Map.fold(init, closure) -> U — fold over (key, value) entries
+                    let caller_base = state.reg_base();
+                    let mut acc = state.registers.get(caller_base, Reg(args.start.0));
+                    let closure_val = state.registers.get(caller_base, Reg(args.start.0 + 1));
+                    let header_ptr = unsafe {
+                        ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value
+                    };
+                    let capacity = unsafe { (*header_ptr.add(1)).as_i64() } as usize;
+                    let entries_ptr = unsafe { (*header_ptr.add(2)).as_ptr::<u8>() };
+                    let entries_data = unsafe {
+                        entries_ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value
+                    };
+                    for i in 0..capacity {
+                        let k = unsafe { *entries_data.add(i * 2) };
+                        if !k.is_unit() {
+                            let v = unsafe { *entries_data.add(i * 2 + 1) };
+                            acc = call_closure_sync(state, closure_val, &[acc, k, v])?;
+                        }
+                    }
+                    return Ok(Some(acc));
+                }
                 "filter" if is_map => {
                     // Map.filter(closure) -> Map (new map with entries where closure(k,v) is true)
                     let caller_base = state.reg_base();
