@@ -1,0 +1,106 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: quic, stateless_reset, rfc9000_10_3
+// @timeout: 15000
+// @expected-exit: 0
+
+// RFC 9000 §10.3 Stateless Reset: derives a 16-byte token from
+// HMAC-SHA256(StatelessResetKey, cid)[0..16]; token_for_cid must be
+// deterministic for the same (key, cid) pair and distinct across
+// different CIDs.
+
+mount core.*;
+mount core.collections.List;
+mount core.net.quic.stateless_reset.{
+    StatelessResetKey, ResetTokenSet,
+    build_stateless_reset,
+    STATELESS_RESET_MIN_SIZE, STATELESS_RESET_RECOMMENDED_SIZE,
+};
+
+fn token_same_cid_is_deterministic() {
+    let k = StatelessResetKey::generate();
+    let cid: List<Byte> = [0x01_u8, 0x02_u8, 0x03_u8, 0x04_u8];
+    let t1 = k.token_for_cid(cid.as_slice());
+    let t2 = k.token_for_cid(cid.as_slice());
+    let mut i: Int = 0;
+    while i < 16 {
+        assert(t1[i] == t2[i]);
+        i = i + 1;
+    }
+}
+
+fn token_differs_across_cids() {
+    let k = StatelessResetKey::generate();
+    let cid_a: List<Byte> = [0xAA_u8, 0xAA_u8, 0xAA_u8, 0xAA_u8];
+    let cid_b: List<Byte> = [0xBB_u8, 0xBB_u8, 0xBB_u8, 0xBB_u8];
+    let t_a = k.token_for_cid(cid_a.as_slice());
+    let t_b = k.token_for_cid(cid_b.as_slice());
+    // HMAC collision probability is cryptographically negligible.
+    // Any single mismatched byte is sufficient proof of distinctness.
+    let mut any_diff = false;
+    let mut i: Int = 0;
+    while i < 16 {
+        if t_a[i] != t_b[i] { any_diff = true; }
+        i = i + 1;
+    }
+    assert(any_diff);
+}
+
+fn min_size_constants_match_rfc_10_3() {
+    // Stateless-reset ≥ 21 bytes (16-byte token + 5 bytes fill) per RFC.
+    assert(STATELESS_RESET_MIN_SIZE == 21);
+    // Recommended ≥ 43 + 16 = 59 — indistinguishable from 1-RTT traffic.
+    assert(STATELESS_RESET_RECOMMENDED_SIZE == 59);
+}
+
+fn build_stateless_reset_respects_min_size() {
+    let token: [Byte; 16] = [
+        0x00_u8, 0x11_u8, 0x22_u8, 0x33_u8, 0x44_u8, 0x55_u8, 0x66_u8, 0x77_u8,
+        0x88_u8, 0x99_u8, 0xAA_u8, 0xBB_u8, 0xCC_u8, 0xDD_u8, 0xEE_u8, 0xFF_u8,
+    ];
+    // min_size below the recommended floor → builder clamps up to
+    // STATELESS_RESET_RECOMMENDED_SIZE (59 bytes).
+    let pkt = build_stateless_reset(&token, 20);
+    assert(pkt.len() == STATELESS_RESET_RECOMMENDED_SIZE);
+    // Byte 0 has the fixed bit set and long-header bit clear.
+    assert((pkt[0] & 0x40_u8) == 0x40_u8);
+    assert((pkt[0] & 0x80_u8) == 0x00_u8);
+    // Last 16 bytes = the canonical token.
+    let tail_start = pkt.len() - 16;
+    let mut i: Int = 0;
+    while i < 16 {
+        assert(pkt[tail_start + i] == token[i]);
+        i = i + 1;
+    }
+}
+
+fn build_stateless_reset_at_larger_target() {
+    let token: [Byte; 16] = [0xAB_u8; 16];
+    let target = 128;
+    let pkt = build_stateless_reset(&token, target);
+    assert(pkt.len() == target);
+}
+
+fn reset_token_set_basic_ops() {
+    let mut set = ResetTokenSet::new();
+    assert(set.len() == 0);
+    let t: [Byte; 16] = [0x01_u8; 16];
+    set.insert(t);
+    assert(set.len() == 1);
+    // Remove removes the inserted token.
+    set.remove(&t);
+    assert(set.len() == 0);
+}
+
+@main
+public fn main() -> Int {
+    token_same_cid_is_deterministic();
+    token_differs_across_cids();
+    min_size_constants_match_rfc_10_3();
+    build_stateless_reset_respects_min_size();
+    build_stateless_reset_at_larger_target();
+    reset_token_set_basic_ops();
+    print("RFC 9000 §10.3 Stateless Reset surface verified");
+    0
+}

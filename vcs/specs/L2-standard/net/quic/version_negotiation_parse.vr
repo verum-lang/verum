@@ -1,0 +1,107 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: quic, version_negotiation, rfc9000_17_2_1
+// @timeout: 15000
+// @expected-exit: 0
+
+// RFC 9000 §17.2.1 Version Negotiation packet — long header with
+// version=0; carries DCID/SCID and a vector of 32-bit versions. parse_long
+// dispatches to the VN branch when the version field equals 0x00000000.
+
+mount core.*;
+mount core.collections.List;
+mount core.net.quic.packet.{Packet, parse_long};
+
+fn build_vn_packet(versions: &[UInt32]) -> List<Byte> {
+    let mut v: List<Byte> = [];
+    // First byte: Long header bit (0x80) set + fixed bit (0x40). Other
+    // bits are server-random per §17.2.1.
+    v.push(0xC0_u8);
+    // Version = 0 (4 bytes of zeros).
+    v.push(0x00_u8); v.push(0x00_u8); v.push(0x00_u8); v.push(0x00_u8);
+    // DCID len = 0 (no DCID).
+    v.push(0x00_u8);
+    // SCID len = 0 (no SCID).
+    v.push(0x00_u8);
+    // Versions vector — 4 bytes each, big-endian.
+    let mut i: Int = 0;
+    while i < versions.len() {
+        let ver = versions[i];
+        v.push(((ver >> 24) & 0xFF_u32) as Byte);
+        v.push(((ver >> 16) & 0xFF_u32) as Byte);
+        v.push(((ver >>  8) & 0xFF_u32) as Byte);
+        v.push((ver & 0xFF_u32) as Byte);
+        i = i + 1;
+    }
+    v
+}
+
+fn parse_vn_with_single_version() {
+    let versions: List<UInt32> = [0x00000001_u32];
+    let wire = build_vn_packet(versions.as_slice());
+    let pkt = parse_long(wire.as_slice()).unwrap();
+    match pkt {
+        Packet.VersionNegotiation { dcid, scid, versions: vs } => {
+            assert(dcid.len() == 0);
+            assert(scid.len() == 0);
+            assert(vs.len() == 1);
+            assert(vs[0] == 0x00000001_u32);
+        },
+        _ => panic("expected VersionNegotiation"),
+    }
+}
+
+fn parse_vn_with_multiple_versions_including_grease() {
+    // Server offers v1 + v2 + a grease-pattern.
+    let versions: List<UInt32> = [
+        0x00000001_u32,    // QUIC v1
+        0x6B3343CF_u32,    // QUIC v2
+        0xAAAAAAAA_u32,    // grease
+    ];
+    let wire = build_vn_packet(versions.as_slice());
+    let pkt = parse_long(wire.as_slice()).unwrap();
+    match pkt {
+        Packet.VersionNegotiation { dcid: _, scid: _, versions: vs } => {
+            assert(vs.len() == 3);
+            assert(vs[0] == 0x00000001_u32);
+            assert(vs[1] == 0x6B3343CF_u32);
+            assert(vs[2] == 0xAAAAAAAA_u32);
+        },
+        _ => panic("expected VersionNegotiation with 3 versions"),
+    }
+}
+
+fn parse_vn_with_non_empty_dcid_scid() {
+    let mut v: List<Byte> = [];
+    v.push(0xC0_u8);
+    // Version = 0.
+    v.push(0x00_u8); v.push(0x00_u8); v.push(0x00_u8); v.push(0x00_u8);
+    // DCID len = 4.
+    v.push(0x04_u8);
+    v.push(0x11_u8); v.push(0x22_u8); v.push(0x33_u8); v.push(0x44_u8);
+    // SCID len = 3.
+    v.push(0x03_u8);
+    v.push(0x55_u8); v.push(0x66_u8); v.push(0x77_u8);
+    // One version (v1).
+    v.push(0x00_u8); v.push(0x00_u8); v.push(0x00_u8); v.push(0x01_u8);
+
+    let pkt = parse_long(v.as_slice()).unwrap();
+    match pkt {
+        Packet.VersionNegotiation { dcid, scid, versions: vs } => {
+            assert(dcid.len() == 4);
+            assert(scid.len() == 3);
+            assert(vs.len() == 1);
+        },
+        _ => panic("expected VersionNegotiation"),
+    }
+}
+
+@main
+public fn main() -> Int {
+    parse_vn_with_single_version();
+    parse_vn_with_multiple_versions_including_grease();
+    parse_vn_with_non_empty_dcid_scid();
+    print("RFC 9000 §17.2.1 Version Negotiation parse verified");
+    0
+}

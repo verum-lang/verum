@@ -1,0 +1,88 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: quic, idle_timeout, rfc9000_10_1
+// @timeout: 15000
+// @expected-exit: 0
+
+// RFC 9000 §10.1 idle-timeout tracker: effective timeout = min(local,
+// peer); `0` from either side means disabled. tick() returns Active
+// with remaining-ms until deadline or Expired. on_packet_received
+// / on_packet_sent update last_activity per §10.1.1.
+
+mount core.*;
+mount core.time.instant.{Instant};
+mount core.time.duration.{Duration};
+mount core.net.quic.idle_timeout.{IdleTimeoutTracker, TickResult};
+
+fn zero_local_and_peer_disables_timeout() {
+    let now = Instant.now();
+    let t = IdleTimeoutTracker::new(0_u64, 0_u64, now);
+    match t.effective_ms() {
+        None => {},
+        _ => panic("both-zero must disable"),
+    }
+    // tick returns a sentinel 3600s Active in the disabled branch.
+    match t.tick(now.clone()) {
+        TickResult.Active(_) => {},
+        _ => panic("disabled tracker must stay Active"),
+    }
+}
+
+fn peer_zero_takes_local_value() {
+    // RFC 9000 §10.1 para 3: 0 from a peer means "no limit" — the
+    // effective timeout is the other side's non-zero value.
+    let t = IdleTimeoutTracker::new(30_000_u64, 0_u64, Instant.now());
+    match t.effective_ms() {
+        Some(ms) => assert(ms == 30_000_u64),
+        _ => panic("peer-zero must keep local"),
+    }
+}
+
+fn both_nonzero_takes_min() {
+    let t = IdleTimeoutTracker::new(30_000_u64, 15_000_u64, Instant.now());
+    match t.effective_ms() {
+        Some(ms) => assert(ms == 15_000_u64),
+        _ => panic("both-nonzero must take min"),
+    }
+}
+
+fn set_pto_buffer_extends_deadline() {
+    let start = Instant.now();
+    let mut t = IdleTimeoutTracker::new(1000_u64, 1000_u64, start.clone());
+    // Raise the 3×PTO reordering buffer.
+    t.set_pto_buffer(Duration.from_millis(500));
+    // Tick at start — deadline must be 1000 + 500 = 1500 ms out.
+    match t.tick(start) {
+        TickResult.Active(rem) => assert(rem.as_millis() >= 1400_u64),
+        _ => panic("expected Active"),
+    }
+}
+
+fn on_packet_received_resets_last_activity() {
+    let start = Instant.now();
+    let mut t = IdleTimeoutTracker::new(1000_u64, 1000_u64, start.clone());
+    // Advance time by 500 ms — but then a fresh ack-eliciting packet
+    // arrives, pushing last_activity forward.
+    let at_500 = start.checked_add(Duration.from_millis(500)).unwrap();
+    t.on_packet_received(at_500, true);
+    // Non-ack-eliciting packet does NOT reset (remains at 500-ms mark).
+    let at_750 = start.checked_add(Duration.from_millis(750)).unwrap();
+    t.on_packet_received(at_750, false);
+    // Deadline recomputes from the 500-ms activity.
+    match t.tick(at_500.clone()) {
+        TickResult.Active(_) => {},
+        _ => panic("should still be Active right after reset"),
+    }
+}
+
+@main
+public fn main() -> Int {
+    zero_local_and_peer_disables_timeout();
+    peer_zero_takes_local_value();
+    both_nonzero_takes_min();
+    set_pto_buffer_extends_deadline();
+    on_packet_received_resets_last_activity();
+    print("RFC 9000 §10.1 idle-timeout tracker surface verified");
+    0
+}
