@@ -1004,3 +1004,177 @@ mod tests {
         assert!(diag.is_none());
     }
 }
+
+// =============================================================================
+// Stdlib hazards — separate lint family from intrinsics
+// =============================================================================
+
+/// Stdlib-specific lint categories.
+///
+/// Warnings in the W05xx range flag API calls that are
+/// technically correct but semantically hazardous — usually
+/// because they silently conflate two distinct domain cases
+/// (e.g. `Map::get`'s 0-fallback conflates "key missing" with
+/// "key present with zero value"). Each lint here corresponds
+/// to a documented stdlib hazard with a safer alternative the
+/// caller should migrate to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum StdlibLint {
+    /// `Map::get(key) -> V` — zero-fallback conflates missing
+    /// key with zero-valued entry. Recommend `get_optional`
+    /// (Maybe<V>) or `get_or(key, default)` (explicit default).
+    /// Docs: `core/collections/map.vr` — the `get` doc comment
+    /// carries the full hazard-and-alternatives writeup.
+    MapGetHazard,
+}
+
+impl StdlibLint {
+    /// The short lint name (for CLI `-A<name>` / `-W<name>`).
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::MapGetHazard => "map_get_hazard",
+        }
+    }
+
+    /// Parse a lint name from the CLI.
+    pub fn from_str(s: &str) -> Option<Self> {
+        match s {
+            "map_get_hazard" => Some(Self::MapGetHazard),
+            _ => None,
+        }
+    }
+
+    /// The W-code rendered in diagnostics.
+    pub fn warning_code(self) -> &'static str {
+        match self {
+            Self::MapGetHazard => "W0505",
+        }
+    }
+
+    /// Default severity — all stdlib hazards default to Warn
+    /// so existing call sites remain buildable; users can
+    /// `-Dmap_get_hazard` in CI to tighten.
+    pub fn default_level(self) -> LintLevel {
+        LintLevel::Warn
+    }
+
+    /// One-line hazard summary used in the diagnostic message.
+    pub fn summary(self) -> &'static str {
+        match self {
+            Self::MapGetHazard => {
+                "`Map::get(key)` returns a zero value on miss, silently \
+                 conflating missing keys with zero-valued entries. \
+                 Prefer `get_optional(key)` (Maybe<V>) or \
+                 `get_or(key, default)` (explicit default)."
+            }
+        }
+    }
+}
+
+/// Detect whether a call-site looks like `SOMETHING.get(KEY)`.
+///
+/// Takes the method name and the receiver-type name (as the
+/// type-checker sees it). Returns `Some(StdlibLint::MapGetHazard)`
+/// when the two combine to the flagged shape, else `None`.
+///
+/// We deliberately key on a string receiver-type name rather
+/// than a concrete `Type` value so this helper can be invoked
+/// from any AST-walker layer that has the receiver's name —
+/// verum_types, the LSP, IDE adapters. The cost of a
+/// stringly-typed receiver check is one `str::starts_with`;
+/// fast enough to run on every call-site.
+///
+/// Accepts both `Map` and `Map<K, V>` forms.
+pub fn detect_stdlib_hazard(
+    method_name: &str,
+    receiver_type_name: &str,
+) -> Option<StdlibLint> {
+    if method_name != "get" {
+        return None;
+    }
+    // Accept `Map`, `Map<...>`, or any dotted path ending in
+    // `Map` (e.g. `core.collections.map.Map`). We do NOT flag
+    // `HashMap` / `BTreeMap` / etc — those have their own
+    // presence semantics and aren't in the same hazard class.
+    let ty = receiver_type_name;
+    let matches_map = ty == "Map"
+        || ty.starts_with("Map<")
+        || ty.ends_with(".Map")
+        || ty.ends_with("::Map");
+    if matches_map {
+        Some(StdlibLint::MapGetHazard)
+    } else {
+        None
+    }
+}
+
+#[cfg(test)]
+mod stdlib_lint_tests {
+    use super::*;
+
+    #[test]
+    fn map_get_hazard_has_w0505_code() {
+        assert_eq!(StdlibLint::MapGetHazard.warning_code(), "W0505");
+        assert_eq!(StdlibLint::MapGetHazard.name(), "map_get_hazard");
+    }
+
+    #[test]
+    fn map_get_hazard_default_is_warn() {
+        assert_eq!(StdlibLint::MapGetHazard.default_level(), LintLevel::Warn);
+    }
+
+    #[test]
+    fn detect_flags_simple_map_get() {
+        assert_eq!(
+            detect_stdlib_hazard("get", "Map"),
+            Some(StdlibLint::MapGetHazard)
+        );
+    }
+
+    #[test]
+    fn detect_flags_generic_map_get() {
+        assert_eq!(
+            detect_stdlib_hazard("get", "Map<Text, Int>"),
+            Some(StdlibLint::MapGetHazard)
+        );
+    }
+
+    #[test]
+    fn detect_flags_dotted_map_path() {
+        assert_eq!(
+            detect_stdlib_hazard("get", "core.collections.map.Map"),
+            Some(StdlibLint::MapGetHazard)
+        );
+    }
+
+    #[test]
+    fn detect_does_not_flag_other_methods() {
+        assert_eq!(detect_stdlib_hazard("insert", "Map"), None);
+        assert_eq!(detect_stdlib_hazard("get_optional", "Map"), None);
+        assert_eq!(detect_stdlib_hazard("get_or", "Map"), None);
+    }
+
+    #[test]
+    fn detect_does_not_flag_non_map_types() {
+        // Different presence semantics — not in the hazard
+        // class this lint covers.
+        assert_eq!(detect_stdlib_hazard("get", "List"), None);
+        assert_eq!(detect_stdlib_hazard("get", "HashMap"), None);
+        assert_eq!(detect_stdlib_hazard("get", "BTreeMap"), None);
+        assert_eq!(detect_stdlib_hazard("get", "Maybe"), None);
+    }
+
+    #[test]
+    fn from_str_roundtrip() {
+        let l = StdlibLint::MapGetHazard;
+        assert_eq!(StdlibLint::from_str(l.name()), Some(l));
+        assert_eq!(StdlibLint::from_str("nonexistent"), None);
+    }
+
+    #[test]
+    fn summary_mentions_both_alternatives() {
+        let summary = StdlibLint::MapGetHazard.summary();
+        assert!(summary.contains("get_optional"));
+        assert!(summary.contains("get_or"));
+    }
+}
