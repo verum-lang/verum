@@ -1,0 +1,92 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: quic, error, rfc9000_20
+// @timeout: 15000
+// @expected-exit: 0
+
+// RFC 9000 §20.1 transport error codes + CRYPTO_ERROR base offset.
+// Every value MUST match the IANA QUIC Transport Error Codes
+// registry.
+
+mount core.*;
+mount core.net.quic.error.{TransportErrorCode, ApplicationErrorCode};
+
+fn rfc_9000_20_1_transport_codes() {
+    assert(TransportErrorCode::NO_ERROR                  == 0x00_u64);
+    assert(TransportErrorCode::INTERNAL_ERROR            == 0x01_u64);
+    assert(TransportErrorCode::CONNECTION_REFUSED        == 0x02_u64);
+    assert(TransportErrorCode::FLOW_CONTROL_ERROR        == 0x03_u64);
+    assert(TransportErrorCode::STREAM_LIMIT_ERROR        == 0x04_u64);
+    assert(TransportErrorCode::STREAM_STATE_ERROR        == 0x05_u64);
+    assert(TransportErrorCode::FINAL_SIZE_ERROR          == 0x06_u64);
+    assert(TransportErrorCode::FRAME_ENCODING_ERROR      == 0x07_u64);
+    assert(TransportErrorCode::TRANSPORT_PARAMETER_ERROR == 0x08_u64);
+    assert(TransportErrorCode::CONNECTION_ID_LIMIT_ERROR == 0x09_u64);
+    assert(TransportErrorCode::PROTOCOL_VIOLATION        == 0x0A_u64);
+    assert(TransportErrorCode::INVALID_TOKEN             == 0x0B_u64);
+    assert(TransportErrorCode::APPLICATION_ERROR         == 0x0C_u64);
+    assert(TransportErrorCode::CRYPTO_BUFFER_EXCEEDED    == 0x0D_u64);
+    assert(TransportErrorCode::KEY_UPDATE_ERROR          == 0x0E_u64);
+    assert(TransportErrorCode::AEAD_LIMIT_REACHED        == 0x0F_u64);
+    assert(TransportErrorCode::NO_VIABLE_PATH            == 0x10_u64);
+}
+
+fn crypto_error_base_is_0x0100() {
+    // RFC 9000 §20.1: CRYPTO_ERROR codes occupy [0x0100, 0x01FF].
+    // The base MUST be 0x0100 so base + alert(0) is 0x0100,
+    // base + handshake_failure(40) = 0x0128, etc.
+    assert(TransportErrorCode::CRYPTO_ERROR_BASE == 0x0100_u64);
+    let handshake_failure_alert = 40_u64;
+    let crypto_handshake_failure =
+        TransportErrorCode::CRYPTO_ERROR_BASE + handshake_failure_alert;
+    assert(crypto_handshake_failure == 0x0128_u64);
+}
+
+fn transport_codes_are_pairwise_distinct() {
+    let codes: [UInt64; 17] = [
+        TransportErrorCode::NO_ERROR,
+        TransportErrorCode::INTERNAL_ERROR,
+        TransportErrorCode::CONNECTION_REFUSED,
+        TransportErrorCode::FLOW_CONTROL_ERROR,
+        TransportErrorCode::STREAM_LIMIT_ERROR,
+        TransportErrorCode::STREAM_STATE_ERROR,
+        TransportErrorCode::FINAL_SIZE_ERROR,
+        TransportErrorCode::FRAME_ENCODING_ERROR,
+        TransportErrorCode::TRANSPORT_PARAMETER_ERROR,
+        TransportErrorCode::CONNECTION_ID_LIMIT_ERROR,
+        TransportErrorCode::PROTOCOL_VIOLATION,
+        TransportErrorCode::INVALID_TOKEN,
+        TransportErrorCode::APPLICATION_ERROR,
+        TransportErrorCode::CRYPTO_BUFFER_EXCEEDED,
+        TransportErrorCode::KEY_UPDATE_ERROR,
+        TransportErrorCode::AEAD_LIMIT_REACHED,
+        TransportErrorCode::NO_VIABLE_PATH,
+    ];
+    let mut i: Int = 0;
+    while i < 17 {
+        let mut j: Int = i + 1;
+        while j < 17 {
+            assert(codes[i] != codes[j]);
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+}
+
+fn error_code_wrappers_value_accessor() {
+    let tc = TransportErrorCode.new(TransportErrorCode::INTERNAL_ERROR);
+    assert(tc.value() == 0x01_u64);
+    let ac = ApplicationErrorCode.new(0x0101_u64);
+    assert(ac.value() == 0x0101_u64);
+}
+
+@main
+public fn main() -> Int {
+    rfc_9000_20_1_transport_codes();
+    crypto_error_base_is_0x0100();
+    transport_codes_are_pairwise_distinct();
+    error_code_wrappers_value_accessor();
+    print("RFC 9000 §20 QUIC error codepoints verified");
+    0
+}
