@@ -20,9 +20,7 @@ use verum_types::refinement::SmtBackend;
 // `verum_types::smt_backend::*` moved to `verum_smt::refinement_backend::*`
 // (2026-04-24 cycle-break). Rename the bridge type to the legacy name so
 // this test file keeps its original assertions.
-use verum_smt::refinement_backend::{
-    BackendStats, RefinementZ3Backend as Z3Backend, check_subsumption_smt,
-};
+use verum_smt::refinement_backend::{RefinementZ3Backend as Z3Backend, check_subsumption_smt};
 
 fn make_bool(b: bool) -> Expr {
     Expr::literal(Literal::bool(b, Span::dummy()))
@@ -61,7 +59,7 @@ fn make_var(name: &str) -> Expr {
 fn test_backend_creation() {
     let backend = Z3Backend::new();
     let stats = backend.stats();
-    assert_eq!(stats.total_queries, 0);
+    assert_eq!(stats.num_checks, 0);
 }
 
 #[test]
@@ -73,7 +71,7 @@ fn test_trivial_check() {
     assert!(result.is_ok());
 
     let stats = backend.stats();
-    assert_eq!(stats.total_queries, 1);
+    assert_eq!(stats.num_checks, 1);
 }
 
 #[test]
@@ -124,7 +122,7 @@ fn test_stats_tracking() {
     let _ = backend.check(&expr);
 
     let stats = backend.stats();
-    assert_eq!(stats.total_queries, 2);
+    assert_eq!(stats.num_checks, 2);
     // Note: Time tracking may still be 0ms for very fast operations
     // This is acceptable as the subsumption checker is optimized
 }

@@ -319,15 +319,10 @@ fn test_z3_backend_stats() {
     let _ = backend.check(&comparison);
 
     let stats = backend.stats();
-    assert_eq!(stats.total_queries, 1, "Should have 1 query");
-    // Note: elapsed time might be 0ms for very fast checks, so check >= 0
+    assert_eq!(stats.num_checks, 1, "Should have 1 query");
+    // time_ms is always >= 0 (u64) — assert succ rate reflects the one check.
     assert!(
-        stats.total_time_ms >= 0,
-        "Should have recorded time (even if 0)"
-    );
-    // Check that at least one of the result counters was incremented
-    assert!(
-        stats.sat_count + stats.unsat_count + stats.unknown_count > 0,
+        stats.num_sat + stats.num_unsat + stats.num_unknown > 0,
         "Should have counted the result"
     );
 }

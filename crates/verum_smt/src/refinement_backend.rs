@@ -36,8 +36,8 @@ use verum_types::refinement::{
     CounterExample, RefinementError, SmtBackend, SmtResult, VerificationResult,
 };
 
-// Import SubsumptionChecker from this crate
-use crate::{CheckMode, SubsumptionChecker, SubsumptionResult};
+// Import SubsumptionChecker + shared stats struct from this crate
+use crate::{CheckMode, SolverStats, SubsumptionChecker, SubsumptionResult};
 
 /// Z3-based SMT backend for refinement verification
 ///
@@ -51,8 +51,8 @@ use crate::{CheckMode, SubsumptionChecker, SubsumptionResult};
 pub struct RefinementZ3Backend {
     /// The underlying SubsumptionChecker from verum_smt
     checker: SubsumptionChecker,
-    /// Statistics tracking
-    stats: Arc<parking_lot::RwLock<BackendStats>>,
+    /// Statistics tracking — reuses crate-wide `SolverStats`.
+    stats: Arc<parking_lot::RwLock<SolverStats>>,
 }
 
 impl RefinementZ3Backend {
@@ -60,7 +60,7 @@ impl RefinementZ3Backend {
     pub fn new() -> Self {
         Self {
             checker: SubsumptionChecker::new(),
-            stats: Arc::new(parking_lot::RwLock::new(BackendStats::default())),
+            stats: Arc::new(parking_lot::RwLock::new(SolverStats::new())),
         }
     }
 
@@ -71,7 +71,7 @@ impl RefinementZ3Backend {
                 smt_timeout_ms: timeout_ms,
                 ..Default::default()
             }),
-            stats: Arc::new(parking_lot::RwLock::new(BackendStats::default())),
+            stats: Arc::new(parking_lot::RwLock::new(SolverStats::new())),
         }
     }
 
@@ -79,12 +79,12 @@ impl RefinementZ3Backend {
     pub fn with_checker(checker: SubsumptionChecker) -> Self {
         Self {
             checker,
-            stats: Arc::new(parking_lot::RwLock::new(BackendStats::default())),
+            stats: Arc::new(parking_lot::RwLock::new(SolverStats::new())),
         }
     }
 
     /// Get backend statistics
-    pub fn stats(&self) -> BackendStats {
+    pub fn stats(&self) -> SolverStats {
         self.stats.read().clone()
     }
 
@@ -110,21 +110,12 @@ impl SmtBackend for RefinementZ3Backend {
     fn check(&mut self, expr: &Expr) -> Result<SmtResult, RefinementError> {
         let start = Instant::now();
 
-        // Update stats
-        {
-            let mut stats = self.stats.write();
-            stats.total_queries += 1;
-        }
-
-        // Check if expr => false is valid
-        // If it is, then expr is always false (UNSAT)
-        // If not, then expr can be true (SAT)
+        // Check if expr => false is valid: VALID => expr is UNSAT; INVALID => expr is SAT.
         let false_expr = make_bool_literal(false, expr.span);
         let result = self.checker.check(expr, &false_expr, CheckMode::SmtAllowed);
 
         let elapsed_ms = start.elapsed().as_millis() as u64;
 
-        // Map SubsumptionResult to SmtResult
         let smt_result = match result {
             SubsumptionResult::Syntactic(true) => SmtResult::Unsat,
             SubsumptionResult::Syntactic(false) => SmtResult::Sat,
@@ -133,15 +124,11 @@ impl SmtBackend for RefinementZ3Backend {
             SubsumptionResult::Unknown { .. } => SmtResult::Unknown,
         };
 
-        // Update statistics
-        {
-            let mut stats = self.stats.write();
-            stats.total_time_ms += elapsed_ms;
-            match smt_result {
-                SmtResult::Sat => stats.sat_count += 1,
-                SmtResult::Unsat => stats.unsat_count += 1,
-                SmtResult::Unknown => stats.unknown_count += 1,
-            }
+        let mut stats = self.stats.write();
+        match smt_result {
+            SmtResult::Sat => stats.record_sat(elapsed_ms),
+            SmtResult::Unsat => stats.record_unsat(elapsed_ms),
+            SmtResult::Unknown => stats.record_unknown(elapsed_ms),
         }
 
         Ok(smt_result)
@@ -161,30 +148,17 @@ impl SmtBackend for RefinementZ3Backend {
     ) -> Result<VerificationResult, RefinementError> {
         let start = Instant::now();
 
-        // Update stats
-        {
-            let mut stats = self.stats.write();
-            stats.total_queries += 1;
-        }
-
-        // Build the verification condition
-        // We want to check: assumptions ∧ value ⊨ predicate
-        // Using SubsumptionChecker: check if (assumptions ∧ value) => predicate
-
-        // First, combine assumptions with value
+        // Build VC: check whether (assumptions ∧ value) ⇒ predicate.
         let mut combined = value.clone();
         for assumption in assumptions {
             combined = make_binary_and(combined, assumption.clone());
         }
-
-        // Check subsumption: combined => predicate
         let result = self
             .checker
             .check(&combined, predicate, CheckMode::SmtAllowed);
 
         let elapsed_ms = start.elapsed().as_millis() as u64;
 
-        // Map SubsumptionResult to VerificationResult
         let verification_result = match result {
             SubsumptionResult::Syntactic(true) | SubsumptionResult::Smt { valid: true, .. } => {
                 VerificationResult::Valid
@@ -199,64 +173,14 @@ impl SmtBackend for RefinementZ3Backend {
             },
         };
 
-        // Update statistics
-        {
-            let mut stats = self.stats.write();
-            stats.total_time_ms += elapsed_ms;
-            match &verification_result {
-                VerificationResult::Valid => stats.unsat_count += 1,
-                VerificationResult::Invalid { .. } => stats.sat_count += 1,
-                VerificationResult::Unknown { .. } => stats.unknown_count += 1,
-            }
+        let mut stats = self.stats.write();
+        match &verification_result {
+            VerificationResult::Valid => stats.record_unsat(elapsed_ms),
+            VerificationResult::Invalid { .. } => stats.record_sat(elapsed_ms),
+            VerificationResult::Unknown { .. } => stats.record_unknown(elapsed_ms),
         }
 
         Ok(verification_result)
-    }
-}
-
-/// Performance statistics for Z3 backend
-#[derive(Debug, Clone, Default)]
-pub struct BackendStats {
-    pub total_queries: u64,
-    pub sat_count: u64,
-    pub unsat_count: u64,
-    pub unknown_count: u64,
-    pub total_time_ms: u64,
-}
-
-impl BackendStats {
-    pub fn average_time_ms(&self) -> f64 {
-        if self.total_queries == 0 {
-            0.0
-        } else {
-            self.total_time_ms as f64 / self.total_queries as f64
-        }
-    }
-
-    pub fn success_rate(&self) -> f64 {
-        if self.total_queries == 0 {
-            0.0
-        } else {
-            (self.sat_count + self.unsat_count) as f64 / self.total_queries as f64
-        }
-    }
-
-    pub fn report(&self) -> Text {
-        Text::from(format!(
-            "Z3 Backend Statistics:\n\
-             - Total queries: {}\n\
-             - Sat: {}, Unsat: {}, Unknown: {}\n\
-             - Success rate: {:.1}%\n\
-             - Average time: {:.2}ms\n\
-             - Total time: {}ms",
-            self.total_queries,
-            self.sat_count,
-            self.unsat_count,
-            self.unknown_count,
-            self.success_rate() * 100.0,
-            self.average_time_ms(),
-            self.total_time_ms
-        ))
     }
 }
 
@@ -319,28 +243,5 @@ fn make_binary_and(left: Expr, right: Expr) -> Expr {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_backend_stats_default() {
-        let stats = BackendStats::default();
-        assert_eq!(stats.total_queries, 0);
-        assert_eq!(stats.average_time_ms(), 0.0);
-        assert_eq!(stats.success_rate(), 0.0);
-    }
-
-    #[test]
-    fn test_backend_stats_calculation() {
-        let stats = BackendStats {
-            total_queries: 10,
-            sat_count: 3,
-            unsat_count: 5,
-            unknown_count: 2,
-            total_time_ms: 100,
-        };
-        assert_eq!(stats.average_time_ms(), 10.0);
-        assert_eq!(stats.success_rate(), 0.8);
-    }
-}
+// Stats exercised via the shared `context::SolverStats` tests — no
+// duplicate coverage here.
