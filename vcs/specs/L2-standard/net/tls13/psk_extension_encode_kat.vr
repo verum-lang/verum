@@ -1,0 +1,152 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: tls13, pre_shared_key, psk, encode, rfc8446_4_2_11
+// @timeout: 15000
+// @expected-exit: 0
+
+// RFC 8446 §4.2.11 pre_shared_key extension body on ClientHello:
+//
+//   OfferedPsks ::= {
+//       PskIdentity identities<7..2^16-1>,   -- 1+ identities
+//       PskBinderEntry binders<33..2^16-1>,   -- 1+ binders
+//   }
+//
+//   PskIdentity ::= {
+//       opaque identity<1..2^16-1>,
+//       uint32 obfuscated_ticket_age,
+//   }
+//
+//   PskBinderEntry ::= opaque<32..255>;   -- HMAC-Hash output
+//
+// Binder length prefix is u8; identity length prefix is u16.
+// obfuscated_ticket_age is 4-byte big-endian.
+//
+// This KAT exercises the wire-format helpers that run inside the
+// larger pre_shared_key extension body — the encoders called from
+// the ClientHello builder once binders are computed.
+
+mount core.*;
+mount core.collections.List;
+mount core.net.tls13.handshake.psk.{
+    PskIdentity, OfferedPsks,
+    encode_identities, encode_binders, encode_offered_psks,
+    obfuscated_ticket_age,
+};
+
+fn single_identity_with_zero_age_byte_exact() {
+    let idents: List<PskIdentity> = [
+        PskIdentity {
+            identity:       [0xAB_u8, 0xCD_u8, 0xEF_u8],
+            obfuscated_age: 0_u32,
+        },
+    ];
+    let mut out: List<Byte> = [];
+    encode_identities(&idents, &mut out).unwrap();
+    // Layout: outer u16 list len + (inner u16 identity len + identity + u32 age).
+    // Per-identity size: 2 (len) + 3 (identity) + 4 (age) = 9.
+    // Total with outer list-len: 2 + 9 = 11 bytes.
+    assert(out.len() == 11);
+    assert(out[0] == 0x00_u8 && out[1] == 0x09_u8);    // outer list = 9
+    assert(out[2] == 0x00_u8 && out[3] == 0x03_u8);    // identity u16 len = 3
+    assert(out[4] == 0xAB_u8 && out[5] == 0xCD_u8 && out[6] == 0xEF_u8);
+    // obfuscated_ticket_age big-endian u32 = 0.
+    assert(out[7] == 0x00_u8 && out[8] == 0x00_u8 && out[9] == 0x00_u8 && out[10] == 0x00_u8);
+}
+
+fn two_identities_preserve_order_and_age() {
+    let idents: List<PskIdentity> = [
+        PskIdentity {
+            identity:       [0x01_u8],
+            obfuscated_age: 0x11223344_u32,
+        },
+        PskIdentity {
+            identity:       [0x02_u8, 0x03_u8],
+            obfuscated_age: 0xDEADBEEF_u32,
+        },
+    ];
+    let mut out: List<Byte> = [];
+    encode_identities(&idents, &mut out).unwrap();
+    // Sizes: (2+1+4) + (2+2+4) = 7 + 8 = 15. Total 2+15 = 17.
+    assert(out.len() == 17);
+    assert(out[0] == 0x00_u8 && out[1] == 0x0F_u8);    // outer = 15
+    // First identity: len 1, body [0x01], age 0x11223344.
+    assert(out[2] == 0x00_u8 && out[3] == 0x01_u8);
+    assert(out[4] == 0x01_u8);
+    assert(out[5] == 0x11_u8 && out[6] == 0x22_u8 && out[7] == 0x33_u8 && out[8] == 0x44_u8);
+    // Second identity: len 2, body [0x02 0x03], age 0xDEADBEEF.
+    assert(out[9]  == 0x00_u8 && out[10] == 0x02_u8);
+    assert(out[11] == 0x02_u8 && out[12] == 0x03_u8);
+    assert(out[13] == 0xDE_u8 && out[14] == 0xAD_u8 && out[15] == 0xBE_u8 && out[16] == 0xEF_u8);
+}
+
+fn binders_block_u8_length_prefix_each() {
+    // Two binders — 32-byte SHA-256 MAC (all 0xAA) + 48-byte SHA-384 MAC (all 0xBB).
+    let mut b32: List<Byte> = [];
+    let mut b48: List<Byte> = [];
+    let mut i: Int = 0;
+    while i < 32 { b32.push(0xAA_u8); i = i + 1; }
+    let mut j: Int = 0;
+    while j < 48 { b48.push(0xBB_u8); j = j + 1; }
+    let binders: List<List<Byte>> = [b32, b48];
+    let mut out: List<Byte> = [];
+    encode_binders(&binders, &mut out).unwrap();
+    // Outer u16 list len = (1 + 32) + (1 + 48) = 33 + 49 = 82.
+    // Total = 2 + 82 = 84.
+    assert(out.len() == 84);
+    assert(out[0] == 0x00_u8 && out[1] == 0x52_u8);    // outer = 82
+    assert(out[2] == 0x20_u8);                          // first binder u8 len = 32
+    assert(out[3] == 0xAA_u8);
+    assert(out[34] == 0xAA_u8);
+    assert(out[35] == 0x30_u8);                         // second binder u8 len = 48
+    assert(out[36] == 0xBB_u8);
+    assert(out[83] == 0xBB_u8);
+}
+
+fn full_offered_psks_identities_then_binders() {
+    let idents: List<PskIdentity> = [
+        PskIdentity {
+            identity:       [0x41_u8, 0x42_u8],      // "AB"
+            obfuscated_age: 1000_u32,                  // 0x00 0x00 0x03 0xE8
+        },
+    ];
+    let mut binder: List<Byte> = [];
+    let mut k: Int = 0;
+    while k < 32 { binder.push(0x5A_u8); k = k + 1; }
+    let o = OfferedPsks { identities: idents, binders: [binder] };
+    let mut out: List<Byte> = [];
+    encode_offered_psks(&o, &mut out).unwrap();
+    // Identities block: 2 (outer) + 2 (id_len) + 2 (id) + 4 (age) = 10.
+    // Binders block: 2 (outer) + 1 (u8 len) + 32 (binder) = 35.
+    // Total = 45.
+    assert(out.len() == 45);
+    // obfuscated_age 1000 at offset 6..=9.
+    assert(out[6] == 0x00_u8);
+    assert(out[7] == 0x00_u8);
+    assert(out[8] == 0x03_u8);
+    assert(out[9] == 0xE8_u8);
+    // Binders block starts at offset 10.
+    assert(out[10] == 0x00_u8 && out[11] == 0x21_u8);   // binder block outer = 33
+    assert(out[12] == 0x20_u8);                          // binder u8 len = 32
+    assert(out[13] == 0x5A_u8);
+    assert(out[44] == 0x5A_u8);
+}
+
+fn obfuscated_ticket_age_formula() {
+    // RFC 8446 §4.2.11.1 — obfuscated_age = (elapsed_ms + age_add) mod 2^32.
+    assert(obfuscated_ticket_age(0_u64, 0_u32) == 0_u32);
+    assert(obfuscated_ticket_age(100_u64, 7_u32) == 107_u32);
+    // Wraparound at 2^32 is implicit via UInt32 arithmetic; encoded as-is.
+    assert(obfuscated_ticket_age(1_u64, 0xFFFFFFFF_u32) == 0_u32);
+}
+
+@main
+public fn main() -> Int {
+    single_identity_with_zero_age_byte_exact();
+    two_identities_preserve_order_and_age();
+    binders_block_u8_length_prefix_each();
+    full_offered_psks_identities_then_binders();
+    obfuscated_ticket_age_formula();
+    print("RFC 8446 §4.2.11 pre_shared_key (PSK) extension encode verified");
+    0
+}
