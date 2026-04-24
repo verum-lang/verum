@@ -1,0 +1,139 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: quic, transport_params, encode, kat, rfc9000_18
+// @timeout: 15000
+// @expected-exit: 0
+
+// RFC 9000 §18 Transport Parameter wire format — per parameter:
+//
+//   Transport Parameter {
+//       Parameter ID (i),
+//       Parameter Length (i),     -- byte length of value field
+//       Parameter Value (...),
+//   }
+//
+// Parameter Value is itself a QUIC varint for scalar parameters.
+// A small scalar fits in 1-byte varint form (value < 64), so:
+//
+//   max_idle_timeout = 30ms  →  [0x01] [0x01] [0x1E]   (3 bytes)
+//
+// This KAT pins the exact byte layout for the representative subset
+// of parameters and validates the "empty" marker for boolean-present
+// parameters (disable_active_migration, grease_quic_bit).
+
+mount core.*;
+mount core.collections.List;
+mount core.net.quic.transport_params.{TransportParams, encode, decode};
+
+fn assert_subseq(buf: &[Byte], at: Int, expected: &[Byte]) {
+    let mut i: Int = 0;
+    while i < expected.len() {
+        assert(buf[at + i] == expected[i]);
+        i = i + 1;
+    }
+}
+
+fn minimum_params_emit_scalar_defaults_in_order() {
+    // defaults(): max_idle_timeout=0, max_udp_payload_size=65527,
+    // initial_max_data=0..., active_connection_id_limit=2.
+    // Each scalar parameter emits: id || length || value.
+    // Value 0 is 1-byte varint = 0x00. 65527 is a 2-byte varint
+    // (0x4000 | 65527 - 16384 = 0xBF...) but actually 65527 > 16383
+    // so it needs 4 bytes.  Let's override to small values instead.
+    let mut tp = TransportParams.defaults();
+    tp.max_udp_payload_size = 1200_u64;            // 2-byte varint: 0x44 0xB0
+    tp.initial_max_data      = 5_u64;               // 0x05
+    tp.active_connection_id_limit = 2_u64;          // 0x02
+    tp.max_ack_delay_ms      = 25_u64;              // 0x19
+    tp.ack_delay_exponent    = 3_u8;                // 0x03
+
+    let mut out: List<Byte> = [];
+    encode(&tp, &mut out);
+
+    // First emitted: max_idle_timeout (id=0x01, value=0).
+    //   [0]=0x01 id, [1]=0x01 len, [2]=0x00 value.
+    assert(out[0] == 0x01_u8);
+    assert(out[1] == 0x01_u8);
+    assert(out[2] == 0x00_u8);
+
+    // Second emitted: max_udp_payload_size (id=0x03, value=1200).
+    //   1200 = 0x4B0 → 2-byte varint = 0x44 0xB0.
+    //   [3]=0x03 id, [4]=0x02 len, [5]=0x44, [6]=0xB0.
+    assert(out[3] == 0x03_u8);
+    assert(out[4] == 0x02_u8);
+    assert(out[5] == 0x44_u8);
+    assert(out[6] == 0xB0_u8);
+
+    // Round-trip must succeed.
+    let decoded = decode(out.as_slice()).unwrap();
+    assert(decoded.max_udp_payload_size == 1200_u64);
+    assert(decoded.initial_max_data == 5_u64);
+}
+
+fn disable_active_migration_emits_empty_param() {
+    let mut tp = TransportParams.defaults();
+    tp.max_udp_payload_size = 1200_u64;
+    tp.disable_active_migration = true;
+    let mut out: List<Byte> = [];
+    encode(&tp, &mut out);
+    // Scan for id=0x0c followed by len=0x00 — the "empty-body" marker.
+    let mut found: Bool = false;
+    let mut i: Int = 0;
+    while i + 1 < out.len() {
+        if out[i] == 0x0C_u8 && out[i + 1] == 0x00_u8 {
+            found = true;
+            i = out.len();
+        } else {
+            i = i + 1;
+        }
+    }
+    assert(found);
+}
+
+fn grease_quic_bit_emits_2ab2_id() {
+    // grease_quic_bit id is 0x2AB2 (RFC 9287). As a varint, 2-byte
+    // form is 0x6A 0xB2 (since 0x2AB2 < 16384, fits in 2-byte varint
+    // with top 2 bits = 01).
+    let mut tp = TransportParams.defaults();
+    tp.max_udp_payload_size = 1200_u64;
+    tp.grease_quic_bit = true;
+    let mut out: List<Byte> = [];
+    encode(&tp, &mut out);
+    // Look for the 2-byte id 0x6A 0xB2 followed by length 0x00.
+    let mut found: Bool = false;
+    let mut i: Int = 0;
+    while i + 2 < out.len() {
+        if out[i] == 0x6A_u8 && out[i + 1] == 0xB2_u8 && out[i + 2] == 0x00_u8 {
+            found = true;
+            i = out.len();
+        } else {
+            i = i + 1;
+        }
+    }
+    assert(found);
+}
+
+fn decode_rejects_truncated_parameter() {
+    // A buffer that declares a 4-byte parameter but only has 2 bytes
+    // following must fail.
+    let buf: List<Byte> = [
+        0x01_u8,    // id = max_idle_timeout
+        0x04_u8,    // declared length = 4
+        0x00_u8, 0x00_u8,   // only 2 bytes available
+    ];
+    match decode(buf.as_slice()) {
+        Err(_) => {},
+        Ok(_)  => panic("expected decode to fail on truncated param"),
+    }
+}
+
+@main
+public fn main() -> Int {
+    minimum_params_emit_scalar_defaults_in_order();
+    disable_active_migration_emits_empty_param();
+    grease_quic_bit_emits_2ab2_id();
+    decode_rejects_truncated_parameter();
+    print("RFC 9000 §18 Transport Parameter wire encode KAT verified");
+    0
+}

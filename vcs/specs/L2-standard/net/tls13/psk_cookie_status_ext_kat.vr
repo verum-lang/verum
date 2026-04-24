@@ -1,0 +1,124 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: tls13, extension, psk_ke_modes, cookie, status_request, encode, rfc8446_4_2_9, rfc8446_4_2_2, rfc8446_4_2_5_2
+// @timeout: 15000
+// @expected-exit: 0
+
+// RFC 8446 §4.2.9 psk_key_exchange_modes:
+//   Extension 45 || outer u16 len || inner u8 len || mode_u8 × N
+//     modes:  psk_ke     = 0
+//             psk_dhe_ke = 1
+//
+// RFC 8446 §4.2.2 cookie:
+//   Extension 44 || outer u16 len || inner u16 len || cookie bytes
+//
+// RFC 8446 §4.2.5.2 status_request (OCSP) — RFC 6066 §8 CertificateStatusRequest:
+//   Extension 5  || outer u16 len || status_type u8(=1/ocsp) ||
+//                   responder_id_list_u16 len(=0) || request_exts_u16 len(=0)
+
+mount core.*;
+mount core.collections.List;
+mount core.net.tls13.handshake.extension.{
+    Extension, PskKeMode, encode_extension,
+    EXT_PSK_KEY_EXCHANGE_MODES, EXT_COOKIE, EXT_STATUS_REQUEST,
+};
+
+fn psk_ke_modes_extension_constants() {
+    assert(EXT_PSK_KEY_EXCHANGE_MODES == 45_u16);
+    assert(EXT_COOKIE                 == 44_u16);
+    assert(EXT_STATUS_REQUEST         == 5_u16);
+}
+
+fn psk_ke_modes_single_psk_dhe() {
+    let ext = Extension.PskKeyExchangeModesExt {
+        modes: [PskKeMode.PskDheKe],
+    };
+    let mut out: List<Byte> = [];
+    encode_extension(&ext, &mut out).unwrap();
+    // Layout: ext_type(2) + outer u16(2) + inner u8(1) + mode(1) = 6.
+    assert(out.len() == 6);
+    assert(out[0] == 0x00_u8 && out[1] == 0x2D_u8);    // ext_type = 45
+    assert(out[2] == 0x00_u8 && out[3] == 0x02_u8);    // outer = 2
+    assert(out[4] == 0x01_u8);                         // inner u8 = 1
+    assert(out[5] == 0x01_u8);                         // psk_dhe_ke = 1
+}
+
+fn psk_ke_modes_both_modes_psk_then_dhe() {
+    let ext = Extension.PskKeyExchangeModesExt {
+        modes: [PskKeMode.PskKe, PskKeMode.PskDheKe],
+    };
+    let mut out: List<Byte> = [];
+    encode_extension(&ext, &mut out).unwrap();
+    // ext_type(2) + outer(2) + inner u8(1) + 2 modes(2) = 7.
+    assert(out.len() == 7);
+    assert(out[0] == 0x00_u8 && out[1] == 0x2D_u8);
+    assert(out[2] == 0x00_u8 && out[3] == 0x03_u8);    // outer = 3
+    assert(out[4] == 0x02_u8);                         // inner u8 = 2
+    assert(out[5] == 0x00_u8);                         // psk_ke
+    assert(out[6] == 0x01_u8);                         // psk_dhe_ke
+}
+
+fn cookie_extension_byte_exact() {
+    let cookie: List<Byte> = [0xDE_u8, 0xAD_u8, 0xBE_u8, 0xEF_u8];
+    let ext = Extension.CookieExt { cookie: cookie };
+    let mut out: List<Byte> = [];
+    encode_extension(&ext, &mut out).unwrap();
+    // ext_type(2) + outer(2) + inner u16(2) + 4 bytes = 10.
+    assert(out.len() == 10);
+    assert(out[0] == 0x00_u8 && out[1] == 0x2C_u8);    // ext_type = 44
+    assert(out[2] == 0x00_u8 && out[3] == 0x06_u8);    // outer = 6
+    assert(out[4] == 0x00_u8 && out[5] == 0x04_u8);    // inner cookie len = 4
+    assert(out[6] == 0xDE_u8);
+    assert(out[9] == 0xEF_u8);
+}
+
+fn cookie_extension_empty_is_six_bytes() {
+    let ext = Extension.CookieExt { cookie: [] };
+    let mut out: List<Byte> = [];
+    encode_extension(&ext, &mut out).unwrap();
+    assert(out.len() == 6);
+    assert(out[2] == 0x00_u8 && out[3] == 0x02_u8);    // outer = 2
+    assert(out[4] == 0x00_u8 && out[5] == 0x00_u8);    // inner cookie len = 0
+}
+
+fn status_request_byte_exact() {
+    let ext = Extension.StatusRequestExt;
+    let mut out: List<Byte> = [];
+    encode_extension(&ext, &mut out).unwrap();
+    // Minimal OCSP CertificateStatusRequest per RFC 6066 §8:
+    //   status_type u8 = 1 (ocsp)
+    //   responder_id_list<0..2^16-1> = 0 (empty)
+    //   request_extensions<0..2^16-1> = 0 (empty)
+    // Total body = 1 + 2 + 2 = 5. With ext_type(2) + outer u16(2) = 9.
+    assert(out.len() == 9);
+    assert(out[0] == 0x00_u8 && out[1] == 0x05_u8);    // ext_type = 5
+    assert(out[2] == 0x00_u8 && out[3] == 0x05_u8);    // outer = 5
+    assert(out[4] == 0x01_u8);                         // status_type = ocsp
+    assert(out[5] == 0x00_u8 && out[6] == 0x00_u8);    // responder_id_list empty
+    assert(out[7] == 0x00_u8 && out[8] == 0x00_u8);    // request_extensions empty
+}
+
+fn post_handshake_auth_is_zero_length_body() {
+    // RFC 8446 §4.2.6 — post_handshake_auth is always zero-length.
+    let ext = Extension.PostHandshakeAuthExt;
+    let mut out: List<Byte> = [];
+    encode_extension(&ext, &mut out).unwrap();
+    // ext_type(2) + outer u16 len = 0(2) = 4.
+    assert(out.len() == 4);
+    assert(out[0] == 0x00_u8 && out[1] == 0x31_u8);    // ext_type = 49
+    assert(out[2] == 0x00_u8 && out[3] == 0x00_u8);    // outer = 0
+}
+
+@main
+public fn main() -> Int {
+    psk_ke_modes_extension_constants();
+    psk_ke_modes_single_psk_dhe();
+    psk_ke_modes_both_modes_psk_then_dhe();
+    cookie_extension_byte_exact();
+    cookie_extension_empty_is_six_bytes();
+    status_request_byte_exact();
+    post_handshake_auth_is_zero_length_body();
+    print("RFC 8446 §4.2.2 / §4.2.5.2 / §4.2.6 / §4.2.9 extension encode verified");
+    0
+}
