@@ -1,0 +1,118 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, context_api, user_fn, aux_data, result, capi
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.context_api.result.{
+    FnResult,
+    FrNull, FrInt, FrDouble, FrText, FrBlob, FrZeroBlob, FrError, FrSubtype,
+    result_kind_name, is_error, error_numeric,
+};
+mount core.database.sqlite.native.context_api.aux.{
+    AuxSlot, AuxRegistry,
+    new_slot, new_registry,
+};
+mount core.database.sqlite.native.context_api.context.{
+    FunctionContext, new_context,
+};
+mount core.database.sqlite.native.errors.code.{
+    extended_of, PcError,
+};
+mount collections.List;
+mount base.{Bool};
+
+fn test_result_kind_names() {
+    assert(result_kind_name(&FrNull) == "null".clone());
+    assert(result_kind_name(&FrInt(42 as Int64)) == "int".clone());
+    assert(result_kind_name(&FrDouble(3.14)) == "double".clone());
+    assert(result_kind_name(&FrText("x".clone())) == "text".clone());
+    let blob: List<u8> = List.new();
+    assert(result_kind_name(&FrBlob(blob)) == "blob".clone());
+    assert(result_kind_name(&FrZeroBlob(128 as Int64)) == "zeroblob".clone());
+}
+
+fn test_is_error_only_fr_error() {
+    assert(!is_error(&FrNull));
+    assert(!is_error(&FrInt(0 as Int64)));
+    let e: FnResult = FrError {
+        code: extended_of(PcError, 0),
+        message: "bad input".clone(),
+    };
+    assert(is_error(&e));
+    assert(error_numeric(&e) != 0);
+}
+
+fn test_aux_registry_roundtrip() {
+    let mut r = new_registry();
+    let prev = r.set(0, 100 as Int64);
+    assert_eq(prev, 0 as Int64);
+    let again = r.set(0, 200 as Int64);
+    assert_eq(again, 100 as Int64);
+    assert_eq(r.get(0), 200 as Int64);
+    assert_eq(r.get(99), 0 as Int64);
+    assert_eq(r.len(), 1);
+}
+
+fn test_aux_registry_clear() {
+    let mut r = new_registry();
+    let _ = r.set(0, 1 as Int64);
+    let _ = r.set(1, 2 as Int64);
+    r.clear();
+    assert_eq(r.len(), 0);
+    assert_eq(r.get(0), 0 as Int64);
+}
+
+fn test_context_accessors() {
+    let ctx = new_context(7 as Int64, 42 as Int64);
+    assert_eq(ctx.sqlite3_context_db_handle(), 7 as Int64);
+    assert_eq(ctx.sqlite3_user_data(), 42 as Int64);
+    assert_eq(ctx.subtype, 0);
+}
+
+fn test_aggregate_context_allocates_once() {
+    let mut ctx = new_context(1 as Int64, 0 as Int64);
+    let first = ctx.sqlite3_aggregate_context(64);
+    assert_eq(first, 64);
+    // Subsequent calls with N>0 return existing size (no re-alloc).
+    let second = ctx.sqlite3_aggregate_context(128);
+    assert_eq(second, 64);
+    // Query-only with N=0 returns current.
+    let third = ctx.sqlite3_aggregate_context(0);
+    assert_eq(third, 64);
+}
+
+fn test_auxdata_through_context() {
+    let mut ctx = new_context(1 as Int64, 0 as Int64);
+    let prev = ctx.sqlite3_set_auxdata(0, 10 as Int64);
+    assert_eq(prev, 0 as Int64);
+    assert_eq(ctx.sqlite3_get_auxdata(0), 10 as Int64);
+}
+
+fn test_set_result_records_fnresult() {
+    let mut ctx = new_context(1 as Int64, 0 as Int64);
+    ctx.set_result(FrInt(999 as Int64));
+    match ctx.current_result() {
+        FrInt(_) => {},
+        _ => assert(false),
+    }
+}
+
+fn test_result_subtype_records_byte() {
+    let mut ctx = new_context(1 as Int64, 0 as Int64);
+    ctx.sqlite3_result_subtype(74);
+    assert_eq(ctx.subtype, 74);
+}
+
+fn main() {
+    test_result_kind_names();
+    test_is_error_only_fr_error();
+    test_aux_registry_roundtrip();
+    test_aux_registry_clear();
+    test_context_accessors();
+    test_aggregate_context_allocates_once();
+    test_auxdata_through_context();
+    test_set_result_records_fnresult();
+    test_result_subtype_records_byte();
+}

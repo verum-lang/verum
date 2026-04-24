@@ -1,0 +1,91 @@
+// =============================================================================
+// limits_api/category.vr — SQLITE_LIMIT_* categories
+// =============================================================================
+// Spec: SQLite C API
+//
+// Constant values match sqlite3.h exactly.
+// =============================================================================
+
+module core.database.sqlite.native.limits_api.category;
+
+mount core.*;
+mount base.{Text};
+
+public const SQLITE_LIMIT_LENGTH: Int              = 0;
+public const SQLITE_LIMIT_SQL_LENGTH: Int          = 1;
+public const SQLITE_LIMIT_COLUMN: Int              = 2;
+public const SQLITE_LIMIT_EXPR_DEPTH: Int          = 3;
+public const SQLITE_LIMIT_COMPOUND_SELECT: Int     = 4;
+public const SQLITE_LIMIT_VDBE_OP: Int             = 5;
+public const SQLITE_LIMIT_FUNCTION_ARG: Int        = 6;
+public const SQLITE_LIMIT_ATTACHED: Int            = 7;
+public const SQLITE_LIMIT_LIKE_PATTERN_LENGTH: Int = 8;
+public const SQLITE_LIMIT_VARIABLE_NUMBER: Int     = 9;
+public const SQLITE_LIMIT_TRIGGER_DEPTH: Int       = 10;
+public const SQLITE_LIMIT_WORKER_THREADS: Int      = 11;
+
+public type LimitCategory is
+      LcLength
+    | LcSqlLength
+    | LcColumn
+    | LcExprDepth
+    | LcCompoundSelect
+    | LcVdbeOp
+    | LcFunctionArg
+    | LcAttached
+    | LcLikePatternLength
+    | LcVariableNumber
+    | LcTriggerDepth
+    | LcWorkerThreads;
+
+public fn category_numeric(c: &LimitCategory) -> Int {
+    match c {
+        LcLength             => SQLITE_LIMIT_LENGTH,
+        LcSqlLength          => SQLITE_LIMIT_SQL_LENGTH,
+        LcColumn             => SQLITE_LIMIT_COLUMN,
+        LcExprDepth          => SQLITE_LIMIT_EXPR_DEPTH,
+        LcCompoundSelect     => SQLITE_LIMIT_COMPOUND_SELECT,
+        LcVdbeOp             => SQLITE_LIMIT_VDBE_OP,
+        LcFunctionArg        => SQLITE_LIMIT_FUNCTION_ARG,
+        LcAttached           => SQLITE_LIMIT_ATTACHED,
+        LcLikePatternLength  => SQLITE_LIMIT_LIKE_PATTERN_LENGTH,
+        LcVariableNumber     => SQLITE_LIMIT_VARIABLE_NUMBER,
+        LcTriggerDepth       => SQLITE_LIMIT_TRIGGER_DEPTH,
+        LcWorkerThreads      => SQLITE_LIMIT_WORKER_THREADS,
+    }
+}
+
+public fn category_name(c: &LimitCategory) -> Text {
+    match c {
+        LcLength             => "LENGTH".clone(),
+        LcSqlLength          => "SQL_LENGTH".clone(),
+        LcColumn             => "COLUMN".clone(),
+        LcExprDepth          => "EXPR_DEPTH".clone(),
+        LcCompoundSelect     => "COMPOUND_SELECT".clone(),
+        LcVdbeOp             => "VDBE_OP".clone(),
+        LcFunctionArg        => "FUNCTION_ARG".clone(),
+        LcAttached           => "ATTACHED".clone(),
+        LcLikePatternLength  => "LIKE_PATTERN_LENGTH".clone(),
+        LcVariableNumber     => "VARIABLE_NUMBER".clone(),
+        LcTriggerDepth       => "TRIGGER_DEPTH".clone(),
+        LcWorkerThreads      => "WORKER_THREADS".clone(),
+    }
+}
+
+/// Default hard maximum per SQLite source (sqliteLimit.h).
+public fn default_hard_max(c: &LimitCategory) -> Int {
+    match c {
+        LcLength             => 1000000000,
+        LcSqlLength          => 1000000000,
+        LcColumn             => 32767,
+        LcExprDepth          => 1000,
+        LcCompoundSelect     => 500,
+        LcVdbeOp             => 250000000,
+        LcFunctionArg        => 127,
+        LcAttached           => 125,
+        LcLikePatternLength  => 50000,
+        LcVariableNumber     => 32766,
+        LcTriggerDepth       => 1000,
+        LcWorkerThreads      => 0,
+    }
+}

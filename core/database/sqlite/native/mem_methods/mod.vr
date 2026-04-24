@@ -1,0 +1,17 @@
+// =============================================================================
+// core/database/sqlite/native/mem_methods/mod.vr
+// =============================================================================
+// Layer: 7 (façade — sqlite3_mem_methods vtable)
+// Spec: SQLite C API — SQLITE_CONFIG_MALLOC / GETMALLOC.
+//
+// Submodules:
+//   * `vtable`    — MethodSet (xMalloc/xFree/xRealloc/xSize/xRoundup/xInit/xShutdown)
+//   * `stats`     — running totals (alloc/free/current bytes)
+//   * `engine`    — registered methods + invocation helpers
+// =============================================================================
+
+module core.database.sqlite.native.mem_methods;
+
+public module vtable;
+public module stats;
+public module engine;

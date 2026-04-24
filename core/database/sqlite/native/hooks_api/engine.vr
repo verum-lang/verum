@@ -1,0 +1,88 @@
+// =============================================================================
+// hooks_api/engine.vr — install/replace/uninstall hooks
+// =============================================================================
+// Spec: SQLite C API
+//
+// Each slot is (kind × Registration).  install() swaps the old
+// registration out, returning its handle (matches sqlite3_commit_hook
+// "returns previous pArg" semantics).  clear() installs the empty
+// handle and returns the previous.
+// =============================================================================
+
+module core.database.sqlite.native.hooks_api.engine;
+
+mount core.*;
+mount base.{Bool, Text};
+mount core.database.sqlite.native.hooks_api.registration.{
+    Registration, HookKind,
+    HkCommit, HkRollback, HkUpdate, HkPreupdate, HkWal, HkAutovacuumPages,
+    new_registration, is_installed,
+};
+
+public type HooksEngine is {
+    commit: Registration,
+    rollback: Registration,
+    update: Registration,
+    preupdate: Registration,
+    wal: Registration,
+    autovacuum_pages: Registration,
+}
+
+public fn new_engine() -> HooksEngine {
+    HooksEngine {
+        commit:           new_registration(HkCommit,          "".clone(), 0 as Int64),
+        rollback:         new_registration(HkRollback,        "".clone(), 0 as Int64),
+        update:           new_registration(HkUpdate,          "".clone(), 0 as Int64),
+        preupdate:        new_registration(HkPreupdate,       "".clone(), 0 as Int64),
+        wal:              new_registration(HkWal,             "".clone(), 0 as Int64),
+        autovacuum_pages: new_registration(HkAutovacuumPages, "".clone(), 0 as Int64),
+    }
+}
+
+implement HooksEngine {
+    /// Install `reg` into the slot indicated by its kind.  Returns the
+    /// previous handle (0 if nothing was installed).
+    pub fn install(&mut self, reg: Registration) -> Int64 {
+        match &reg.kind {
+            HkCommit => {
+                let prev = self.commit.handle;
+                self.commit = reg;
+                prev
+            }
+            HkRollback => {
+                let prev = self.rollback.handle;
+                self.rollback = reg;
+                prev
+            }
+            HkUpdate => {
+                let prev = self.update.handle;
+                self.update = reg;
+                prev
+            }
+            HkPreupdate => {
+                let prev = self.preupdate.handle;
+                self.preupdate = reg;
+                prev
+            }
+            HkWal => {
+                let prev = self.wal.handle;
+                self.wal = reg;
+                prev
+            }
+            HkAutovacuumPages => {
+                let prev = self.autovacuum_pages.handle;
+                self.autovacuum_pages = reg;
+                prev
+            }
+        }
+    }
+
+    pub fn any_installed(&self) -> Bool {
+        is_installed(&self.commit)
+            || is_installed(&self.rollback)
+            || is_installed(&self.update)
+            || is_installed(&self.preupdate)
+            || is_installed(&self.wal)
+            || is_installed(&self.autovacuum_pages)
+    }
+}

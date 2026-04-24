@@ -1,0 +1,63 @@
+// =============================================================================
+// value_api/value.vr — SqliteValue with flags
+// =============================================================================
+// Spec: SQLite C API
+//
+// A sqlite3_value is a tagged union plus a handful of flags.
+// =============================================================================
+
+module core.database.sqlite.native.value_api.value;
+
+mount core.*;
+mount base.{Bool, Text};
+mount collections.List;
+
+public type ValuePayload is
+      VpInt(Int64)
+    | VpDouble(Float)
+    | VpText(Text)
+    | VpBlob(List<u8>)
+    | VpNull;
+
+public fn payload_byte_len(p: &ValuePayload) -> Int {
+    match p {
+        VpText(t)   => t.len(),
+        VpBlob(b)   => b.len(),
+        _ => 0,
+    }
+}
+
+public type SqliteValue is {
+    payload: ValuePayload,
+    /// Subtype byte 0..255 (sqlite3_value_subtype).  0 = default.
+    subtype: Int,
+    /// True iff this value was bound via sqlite3_bind_* (vs from a
+    /// literal in the SQL source text).  Matches sqlite3_value_frombind.
+    from_bind: Bool,
+    /// UPDATE-optimisation hint (sqlite3_value_nochange).
+    nochange: Bool,
+}
+
+public fn new_int(i: Int64) -> SqliteValue {
+    SqliteValue { payload: VpInt(i), subtype: 0, from_bind: false, nochange: false }
+}
+
+public fn new_double(f: Float) -> SqliteValue {
+    SqliteValue { payload: VpDouble(f), subtype: 0, from_bind: false, nochange: false }
+}
+
+public fn new_text(t: Text) -> SqliteValue {
+    SqliteValue { payload: VpText(t), subtype: 0, from_bind: false, nochange: false }
+}
+
+public fn new_blob(b: List<u8>) -> SqliteValue {
+    SqliteValue { payload: VpBlob(b), subtype: 0, from_bind: false, nochange: false }
+}
+
+public fn new_null() -> SqliteValue {
+    SqliteValue { payload: VpNull, subtype: 0, from_bind: false, nochange: false }
+}
+
+public fn mark_from_bind(v: &mut SqliteValue) { v.from_bind = true; }
+public fn mark_nochange(v: &mut SqliteValue) { v.nochange = true; }
+public fn set_subtype(v: &mut SqliteValue, st: Int) { v.subtype = st; }

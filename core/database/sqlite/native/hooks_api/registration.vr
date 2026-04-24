@@ -1,0 +1,47 @@
+// =============================================================================
+// hooks_api/registration.vr — typed slot descriptors
+// =============================================================================
+// Spec: SQLite C API
+//
+// Each installed hook has a symbolic `tag` (diagnostics) and a
+// pointer-handle treated as opaque by the catalogue.
+// =============================================================================
+
+module core.database.sqlite.native.hooks_api.registration;
+
+mount core.*;
+mount base.{Bool, Text};
+
+public type HookKind is
+      HkCommit
+    | HkRollback
+    | HkUpdate
+    | HkPreupdate
+    | HkWal
+    | HkAutovacuumPages;
+
+public fn kind_name(k: &HookKind) -> Text {
+    match k {
+        HkCommit            => "commit".clone(),
+        HkRollback          => "rollback".clone(),
+        HkUpdate            => "update".clone(),
+        HkPreupdate         => "preupdate".clone(),
+        HkWal               => "wal".clone(),
+        HkAutovacuumPages   => "autovacuum-pages".clone(),
+    }
+}
+
+public type Registration is {
+    kind: HookKind,
+    tag: Text,
+    /// Opaque `pArg` value; 0 => no hook installed.
+    handle: Int64,
+}
+
+public fn new_registration(kind: HookKind, tag: Text, handle: Int64) -> Registration {
+    Registration { kind: kind, tag: tag, handle: handle }
+}
+
+public fn is_installed(r: &Registration) -> Bool {
+    r.handle != (0 as Int64)
+}

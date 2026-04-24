@@ -1,0 +1,56 @@
+// =============================================================================
+// mem_methods/stats.vr — per-vtable accounting
+// =============================================================================
+// Spec: SQLite C API
+//
+// When SQLITE_CONFIG_MEMSTATUS is on, the default allocator keeps
+// these counters; custom allocators may mirror the shape.
+// =============================================================================
+
+module core.database.sqlite.native.mem_methods.stats;
+
+mount core.*;
+mount base.{Bool};
+
+public type MemMethodStats is {
+    malloc_calls: Int64,
+    free_calls: Int64,
+    realloc_calls: Int64,
+    bytes_currently: Int64,
+    bytes_highwater: Int64,
+}
+
+public fn new_stats() -> MemMethodStats {
+    MemMethodStats {
+        malloc_calls: 0 as Int64,
+        free_calls: 0 as Int64,
+        realloc_calls: 0 as Int64,
+        bytes_currently: 0 as Int64,
+        bytes_highwater: 0 as Int64,
+    }
+}
+
+implement MemMethodStats {
+    pub fn record_malloc(&mut self, bytes: Int64) {
+        self.malloc_calls = self.malloc_calls + (1 as Int64);
+        self.bytes_currently = self.bytes_currently + bytes;
+        if self.bytes_currently > self.bytes_highwater {
+            self.bytes_highwater = self.bytes_currently;
+        }
+    }
+
+    pub fn record_free(&mut self, bytes: Int64) {
+        self.free_calls = self.free_calls + (1 as Int64);
+        if self.bytes_currently >= bytes {
+            self.bytes_currently = self.bytes_currently - bytes;
+        } else {
+            self.bytes_currently = 0 as Int64;
+        }
+    }
+
+    pub fn record_realloc(&mut self, old_bytes: Int64, new_bytes: Int64) {
+        self.realloc_calls = self.realloc_calls + (1 as Int64);
+        self.record_free(old_bytes);
+        self.record_malloc(new_bytes);
+    }
+}

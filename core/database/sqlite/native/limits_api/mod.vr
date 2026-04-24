@@ -1,0 +1,25 @@
+// =============================================================================
+// core/database/sqlite/native/limits_api/mod.vr
+// =============================================================================
+// Layer: 7 (façade — sqlite3_limit)
+// Spec: SQLite C API
+//
+//   sqlite3_limit(db, category, n)  → prev value
+//
+// SQLite exposes a fixed set of per-connection numeric caps:
+// LENGTH, SQL_LENGTH, COLUMN, EXPR_DEPTH, COMPOUND_SELECT, VDBE_OP,
+// FUNCTION_ARG, ATTACHED, LIKE_PATTERN_LENGTH, VARIABLE_NUMBER,
+// TRIGGER_DEPTH, WORKER_THREADS.
+//
+// Separate from `limits/` which models RESOURCE quotas (bytes held,
+// warn-then-refuse). `limits_api` is the classical API table.
+//
+// Submodules:
+//   * `category`  — LimitCategory sum
+//   * `budget`    — current + hard-max for each category
+// =============================================================================
+
+module core.database.sqlite.native.limits_api;
+
+public module category;
+public module budget;

@@ -1,0 +1,81 @@
+// =============================================================================
+// context_api/context.vr — FunctionContext record
+// =============================================================================
+// Spec: SQLite C API
+//
+// The runtime hands a FunctionContext to every xFunc / xStep / xFinal
+// invocation.  It carries:
+//   * db_handle id           (sqlite3_context_db_handle)
+//   * user_data pointer      (sqlite3_user_data)
+//   * aggregate context size (sqlite3_aggregate_context)
+//   * aux registry           (sqlite3_get/set_auxdata)
+//   * the emitted result     (sqlite3_result_*)
+//   * a subtype flag         (sqlite3_result_subtype)
+// =============================================================================
+
+module core.database.sqlite.native.context_api.context;
+
+mount core.*;
+mount base.{Bool, Maybe};
+mount core.database.sqlite.native.context_api.result.{
+    FnResult, FrNull,
+};
+mount core.database.sqlite.native.context_api.aux.{
+    AuxRegistry, new_registry,
+};
+
+public type FunctionContext is {
+    db_handle_id: Int64,
+    user_data: Int64,
+    /// Byte-count requested via sqlite3_aggregate_context; 0 means
+    /// no aggregate state allocated yet.
+    aggregate_bytes: Int,
+    aux: AuxRegistry,
+    result: FnResult,
+    /// Most-recently-set subtype byte (0..255); 0 == default.
+    subtype: Int,
+}
+
+public fn new_context(db_handle_id: Int64, user_data: Int64) -> FunctionContext {
+    FunctionContext {
+        db_handle_id: db_handle_id,
+        user_data: user_data,
+        aggregate_bytes: 0,
+        aux: new_registry(),
+        result: FrNull,
+        subtype: 0,
+    }
+}
+
+implement FunctionContext {
+    pub fn sqlite3_context_db_handle(&self) -> Int64 { self.db_handle_id }
+    pub fn sqlite3_user_data(&self) -> Int64 { self.user_data }
+
+    /// Matches sqlite3_aggregate_context(ctx, N): calling with N > 0
+    /// allocates (or returns an existing) zero-initialised slab of N
+    /// bytes.  N == 0 returns the current size without allocating.
+    pub fn sqlite3_aggregate_context(&mut self, n: Int) -> Int {
+        if n > 0 {
+            if self.aggregate_bytes == 0 { self.aggregate_bytes = n; }
+        }
+        self.aggregate_bytes
+    }
+
+    pub fn sqlite3_set_auxdata(&mut self, arg_index: Int, handle: Int64) -> Int64 {
+        self.aux.set(arg_index, handle)
+    }
+
+    pub fn sqlite3_get_auxdata(&self, arg_index: Int) -> Int64 {
+        self.aux.get(arg_index)
+    }
+
+    pub fn set_result(&mut self, r: FnResult) {
+        self.result = r;
+    }
+
+    pub fn sqlite3_result_subtype(&mut self, st: Int) {
+        self.subtype = st;
+    }
+
+    pub fn current_result(&self) -> &FnResult { &self.result }
+}

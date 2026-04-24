@@ -1,0 +1,63 @@
+// =============================================================================
+// pcache_methods/engine.vr — registered vtable + gate
+// =============================================================================
+// Spec: SQLite C API
+// =============================================================================
+
+module core.database.sqlite.native.pcache_methods.engine;
+
+mount core.*;
+mount base.{Bool};
+mount core.database.sqlite.native.pcache_methods.vtable.{
+    MethodSet, default_method_set, is_viable,
+};
+mount core.database.sqlite.native.pcache_methods.flags.{
+    FetchDemand, FdNoAllocate, FdAllocateUnderLimit, FdAllocateAlways,
+};
+
+public type PCacheEngine is {
+    methods: MethodSet,
+    installed: Bool,
+    creates: Int64,
+    fetches_allocated: Int64,
+    fetches_skipped: Int64,
+}
+
+public fn new_engine() -> PCacheEngine {
+    PCacheEngine {
+        methods: default_method_set(),
+        installed: false,
+        creates: 0 as Int64,
+        fetches_allocated: 0 as Int64,
+        fetches_skipped: 0 as Int64,
+    }
+}
+
+implement PCacheEngine {
+    pub fn install(&mut self, m: MethodSet) -> Bool {
+        if !is_viable(&m) { return false; }
+        self.methods = m;
+        self.installed = true;
+        true
+    }
+
+    pub fn note_create(&mut self) {
+        self.creates = self.creates + (1 as Int64);
+    }
+
+    /// Decide whether the fetch will allocate based on demand + cache
+    /// fullness.  Returns true iff a new page will be produced.
+    pub fn will_allocate(&mut self, demand: &FetchDemand, under_limit: Bool) -> Bool {
+        let allocate = match demand {
+            FdNoAllocate          => false,
+            FdAllocateUnderLimit  => under_limit,
+            FdAllocateAlways      => true,
+        };
+        if allocate {
+            self.fetches_allocated = self.fetches_allocated + (1 as Int64);
+        } else {
+            self.fetches_skipped = self.fetches_skipped + (1 as Int64);
+        }
+        allocate
+    }
+}

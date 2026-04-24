@@ -1,0 +1,145 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, result_codes, checkpoint, vtab, changeset, capi
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.result_codes.checkpoint.{
+    CheckpointMode,
+    CmPassive, CmFull, CmRestart, CmTruncate,
+    SQLITE_CHECKPOINT_PASSIVE, SQLITE_CHECKPOINT_FULL,
+    SQLITE_CHECKPOINT_RESTART, SQLITE_CHECKPOINT_TRUNCATE,
+    mode_numeric, mode_name, from_numeric as checkpoint_from_numeric,
+};
+mount core.database.sqlite.native.result_codes.vtab.{
+    ConstraintOp,
+    VcoEq, VcoGt, VcoLimit, VcoOffset, VcoFunction,
+    SQLITE_INDEX_CONSTRAINT_EQ, SQLITE_INDEX_CONSTRAINT_GT,
+    SQLITE_INDEX_CONSTRAINT_LIMIT, SQLITE_INDEX_CONSTRAINT_OFFSET,
+    SQLITE_INDEX_CONSTRAINT_FUNCTION,
+    SQLITE_VTAB_CONSTRAINT_SUPPORT, SQLITE_VTAB_INNOCUOUS,
+    SQLITE_VTAB_DIRECTONLY, SQLITE_VTAB_USES_ALL_SCHEMAS,
+    constraint_numeric, constraint_name,
+};
+mount core.database.sqlite.native.result_codes.changeset.{
+    ConflictKind, ConflictResolution,
+    CkData, CkNotFound, CkConflict, CkConstraint, CkForeignKey,
+    CrOmit, CrReplace, CrAbort,
+    SQLITE_CHANGESET_DATA, SQLITE_CHANGESET_CONFLICT,
+    SQLITE_CHANGESET_OMIT, SQLITE_CHANGESET_REPLACE, SQLITE_CHANGESET_ABORT,
+    kind_numeric, kind_name, resolution_numeric, resolution_name,
+};
+mount core.database.sqlite.native.result_codes.function.{
+    FunctionFlagBits,
+    SQLITE_DETERMINISTIC, SQLITE_DIRECTONLY, SQLITE_INNOCUOUS,
+    SQLITE_SUBTYPE, SQLITE_RESULT_SUBTYPE,
+    new_flag_bits, has,
+    is_deterministic, is_direct_only, is_subtype_aware, is_innocuous, produces_subtype,
+};
+mount base.{Bool};
+
+// -----------------------------------------------------------------------------
+// checkpoint
+// -----------------------------------------------------------------------------
+
+fn test_checkpoint_numeric_matches_c_header() {
+    assert_eq(SQLITE_CHECKPOINT_PASSIVE, 0);
+    assert_eq(SQLITE_CHECKPOINT_FULL, 1);
+    assert_eq(SQLITE_CHECKPOINT_RESTART, 2);
+    assert_eq(SQLITE_CHECKPOINT_TRUNCATE, 3);
+    assert_eq(mode_numeric(&CmPassive), SQLITE_CHECKPOINT_PASSIVE);
+    assert_eq(mode_numeric(&CmTruncate), SQLITE_CHECKPOINT_TRUNCATE);
+}
+
+fn test_checkpoint_from_numeric() {
+    match checkpoint_from_numeric(SQLITE_CHECKPOINT_FULL) { CmFull => {}, _ => assert(false) }
+    match checkpoint_from_numeric(99) { CmPassive => {}, _ => assert(false) }
+}
+
+fn test_checkpoint_names() {
+    assert(mode_name(&CmPassive) == "PASSIVE".clone());
+    assert(mode_name(&CmRestart) == "RESTART".clone());
+}
+
+// -----------------------------------------------------------------------------
+// vtab
+// -----------------------------------------------------------------------------
+
+fn test_constraint_codes_match_c_header() {
+    assert_eq(SQLITE_INDEX_CONSTRAINT_EQ, 2);
+    assert_eq(SQLITE_INDEX_CONSTRAINT_GT, 4);
+    assert_eq(SQLITE_INDEX_CONSTRAINT_LIMIT, 73);
+    assert_eq(SQLITE_INDEX_CONSTRAINT_OFFSET, 74);
+    assert_eq(SQLITE_INDEX_CONSTRAINT_FUNCTION, 150);
+}
+
+fn test_vtab_config_codes() {
+    assert_eq(SQLITE_VTAB_CONSTRAINT_SUPPORT, 1);
+    assert_eq(SQLITE_VTAB_INNOCUOUS, 2);
+    assert_eq(SQLITE_VTAB_DIRECTONLY, 3);
+    assert_eq(SQLITE_VTAB_USES_ALL_SCHEMAS, 4);
+}
+
+fn test_constraint_op_round_trip() {
+    assert_eq(constraint_numeric(&VcoEq), SQLITE_INDEX_CONSTRAINT_EQ);
+    assert_eq(constraint_numeric(&VcoLimit), SQLITE_INDEX_CONSTRAINT_LIMIT);
+    assert_eq(constraint_numeric(&VcoFunction), SQLITE_INDEX_CONSTRAINT_FUNCTION);
+    assert(constraint_name(&VcoGt) == "GT".clone());
+    assert(constraint_name(&VcoOffset) == "OFFSET".clone());
+}
+
+// -----------------------------------------------------------------------------
+// changeset
+// -----------------------------------------------------------------------------
+
+fn test_changeset_kind_codes() {
+    assert_eq(SQLITE_CHANGESET_DATA, 1);
+    assert_eq(SQLITE_CHANGESET_CONFLICT, 3);
+    assert_eq(kind_numeric(&CkData), SQLITE_CHANGESET_DATA);
+    assert_eq(kind_numeric(&CkForeignKey), 5);
+    assert(kind_name(&CkNotFound) == "NOTFOUND".clone());
+    assert(kind_name(&CkConstraint) == "CONSTRAINT".clone());
+}
+
+fn test_changeset_resolution_codes() {
+    assert_eq(SQLITE_CHANGESET_OMIT, 0);
+    assert_eq(SQLITE_CHANGESET_REPLACE, 1);
+    assert_eq(SQLITE_CHANGESET_ABORT, 2);
+    assert_eq(resolution_numeric(&CrOmit), SQLITE_CHANGESET_OMIT);
+    assert(resolution_name(&CrReplace) == "REPLACE".clone());
+    assert(resolution_name(&CrAbort) == "ABORT".clone());
+}
+
+// -----------------------------------------------------------------------------
+// function flags
+// -----------------------------------------------------------------------------
+
+fn test_function_flag_bits_independent() {
+    let f = new_flag_bits(SQLITE_DETERMINISTIC | SQLITE_INNOCUOUS);
+    assert(is_deterministic(&f));
+    assert(is_innocuous(&f));
+    assert(!is_direct_only(&f));
+    assert(!is_subtype_aware(&f));
+    assert(!produces_subtype(&f));
+}
+
+fn test_function_flags_has_matches_raw_bit() {
+    let f = new_flag_bits(SQLITE_RESULT_SUBTYPE);
+    assert(has(&f, SQLITE_RESULT_SUBTYPE));
+    assert(produces_subtype(&f));
+    assert(!has(&f, SQLITE_SUBTYPE));
+}
+
+fn main() {
+    test_checkpoint_numeric_matches_c_header();
+    test_checkpoint_from_numeric();
+    test_checkpoint_names();
+    test_constraint_codes_match_c_header();
+    test_vtab_config_codes();
+    test_constraint_op_round_trip();
+    test_changeset_kind_codes();
+    test_changeset_resolution_codes();
+    test_function_flag_bits_independent();
+    test_function_flags_has_matches_raw_bit();
+}

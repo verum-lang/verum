@@ -1,0 +1,25 @@
+// =============================================================================
+// core/database/sqlite/native/bind_pointer/mod.vr
+// =============================================================================
+// Layer: 7 (façade — typed opaque pointer pass-through)
+// Spec: SQLite C API
+//
+//   sqlite3_bind_pointer(stmt, i, p, type, xDel)
+//   sqlite3_result_pointer(ctx, p, type, xDel)
+//   sqlite3_value_pointer(v, type)
+//
+// The "type" tag is a C-string that both producer and consumer agree
+// on — e.g. "carray", "json", "regexp".  The engine refuses the
+// pointer unless the consumer asks for the exact tag.
+//
+// Submodules:
+//   * `tag`      — well-known PointerTag constants + registry
+//   * `handle`   — TypedPointer (tag + handle id)
+//   * `engine`   — bind/value slot + type-gated fetch
+// =============================================================================
+
+module core.database.sqlite.native.bind_pointer;
+
+public module tag;
+public module handle;
+public module engine;

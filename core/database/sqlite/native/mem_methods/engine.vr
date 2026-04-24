@@ -1,0 +1,50 @@
+// =============================================================================
+// mem_methods/engine.vr — installed vtable + round-up helper
+// =============================================================================
+// Spec: SQLite C API
+// =============================================================================
+
+module core.database.sqlite.native.mem_methods.engine;
+
+mount core.*;
+mount base.{Bool};
+mount core.database.sqlite.native.mem_methods.vtable.{
+    MethodSet, default_method_set, is_viable,
+};
+mount core.database.sqlite.native.mem_methods.stats.{
+    MemMethodStats, new_stats,
+};
+
+public type MemMethodsEngine is {
+    methods: MethodSet,
+    stats: MemMethodStats,
+    installed: Bool,
+}
+
+public fn new_engine() -> MemMethodsEngine {
+    MemMethodsEngine {
+        methods: default_method_set(),
+        stats: new_stats(),
+        installed: false,
+    }
+}
+
+implement MemMethodsEngine {
+    /// Accept the override iff the method set is viable.  Returns
+    /// true on success.
+    pub fn install(&mut self, m: MethodSet) -> Bool {
+        if !is_viable(&m) { return false; }
+        self.methods = m;
+        self.installed = true;
+        true
+    }
+
+    pub fn is_installed(&self) -> Bool { self.installed }
+}
+
+/// SQLite rounds requests up to the next multiple of 8 by default.
+public fn default_roundup(n: Int) -> Int {
+    if n <= 0 { return 0; }
+    let rem = n - ((n / 8) * 8);
+    if rem == 0 { n } else { n + (8 - rem) }
+}

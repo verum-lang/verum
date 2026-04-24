@@ -236,3 +236,19 @@ public module create_function;
 public module create_collation;
 // - vtab_helpers: sqlite3_overload_function + _vtab_distinct / _nochange / _on_conflict / _in_iter
 public module vtab_helpers;
+// - hooks_api: sqlite3_commit_hook / _rollback_hook / _update_hook / _preupdate_hook / _wal_hook
+public module hooks_api;
+// - context_api: sqlite3_context_* — user_data / aggregate_context / result* / aux_data / subtype
+public module context_api;
+// - value_api: sqlite3_value_* — type/int/double/text/blob/subtype/frombind/nochange
+public module value_api;
+// - bind_pointer: sqlite3_bind_pointer / _result_pointer / _value_pointer — typed opaque pass-through
+public module bind_pointer;
+// - mem_methods: sqlite3_mem_methods — custom allocator vtable for SQLITE_CONFIG_MALLOC
+public module mem_methods;
+// - pcache_methods: sqlite3_pcache_methods2 — custom page cache vtable for SQLITE_CONFIG_PCACHE2
+public module pcache_methods;
+// - result_codes: SQLITE_CHECKPOINT_* / VTAB_* / CHANGESET_* / fn-flags constant families (App D)
+public module result_codes;
+// - limits_api: sqlite3_limit — per-connection numeric caps (LENGTH/COLUMN/EXPR_DEPTH/…)
+public module limits_api;

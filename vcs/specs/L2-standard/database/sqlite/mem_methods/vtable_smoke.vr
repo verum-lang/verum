@@ -1,0 +1,89 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, mem_methods, allocator, capi
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.mem_methods.vtable.{
+    MethodSet, default_method_set, is_viable, missing_methods,
+};
+mount core.database.sqlite.native.mem_methods.stats.{
+    MemMethodStats, new_stats,
+};
+mount core.database.sqlite.native.mem_methods.engine.{
+    MemMethodsEngine, new_engine, default_roundup,
+};
+mount base.{Bool};
+
+fn test_default_method_set_is_viable() {
+    let m = default_method_set();
+    assert(is_viable(&m));
+}
+
+fn test_missing_malloc_not_viable() {
+    let mut m = default_method_set();
+    m.has_malloc = false;
+    assert(!is_viable(&m));
+    assert(missing_methods(&m) == "xMalloc".clone());
+}
+
+fn test_missing_free_reports_free() {
+    let mut m = default_method_set();
+    m.has_free = false;
+    assert(!is_viable(&m));
+    assert(missing_methods(&m) == "xFree".clone());
+}
+
+fn test_default_roundup_multiples_of_8() {
+    assert_eq(default_roundup(0), 0);
+    assert_eq(default_roundup(1), 8);
+    assert_eq(default_roundup(8), 8);
+    assert_eq(default_roundup(9), 16);
+    assert_eq(default_roundup(17), 24);
+}
+
+fn test_stats_record_malloc_and_free() {
+    let mut s = new_stats();
+    s.record_malloc(100 as Int64);
+    s.record_malloc(50 as Int64);
+    assert_eq(s.bytes_currently, 150 as Int64);
+    assert_eq(s.bytes_highwater, 150 as Int64);
+    s.record_free(100 as Int64);
+    assert_eq(s.bytes_currently, 50 as Int64);
+    // Highwater sticks at the peak.
+    assert_eq(s.bytes_highwater, 150 as Int64);
+}
+
+fn test_stats_record_realloc_shifts_bytes() {
+    let mut s = new_stats();
+    s.record_realloc(32 as Int64, 64 as Int64);
+    assert_eq(s.bytes_currently, 32 as Int64);
+    assert_eq(s.realloc_calls, 1 as Int64);
+}
+
+fn test_engine_install_accepts_viable() {
+    let mut e = new_engine();
+    assert(!e.is_installed());
+    assert(e.install(default_method_set()));
+    assert(e.is_installed());
+}
+
+fn test_engine_install_rejects_non_viable() {
+    let mut e = new_engine();
+    let mut m = default_method_set();
+    m.has_realloc = false;
+    assert(!e.install(m));
+    assert(!e.is_installed());
+}
+
+fn main() {
+    test_default_method_set_is_viable();
+    test_missing_malloc_not_viable();
+    test_missing_free_reports_free();
+    test_default_roundup_multiples_of_8();
+    test_stats_record_malloc_and_free();
+    test_stats_record_realloc_shifts_bytes();
+    test_engine_install_accepts_viable();
+    test_engine_install_rejects_non_viable();
+}

@@ -1,0 +1,122 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, value_api, datatype, user_fn, capi
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.value_api.datatype.{
+    Datatype, DtInteger, DtFloat, DtText, DtBlob, DtNull,
+    SQLITE_INTEGER, SQLITE_FLOAT, SQLITE_TEXT, SQLITE_BLOB, SQLITE_NULL,
+    datatype_numeric, datatype_name, from_numeric,
+};
+mount core.database.sqlite.native.value_api.value.{
+    SqliteValue, ValuePayload,
+    VpInt, VpDouble, VpText, VpBlob, VpNull,
+    new_int, new_double, new_text, new_blob, new_null,
+    mark_from_bind, mark_nochange, set_subtype,
+};
+mount core.database.sqlite.native.value_api.engine.{
+    sqlite3_value_type, sqlite3_value_numeric_type,
+    sqlite3_value_int, sqlite3_value_int64, sqlite3_value_double,
+    sqlite3_value_text, sqlite3_value_bytes,
+    sqlite3_value_subtype, sqlite3_value_frombind, sqlite3_value_nochange,
+};
+mount collections.List;
+mount base.{Bool};
+
+fn test_datatype_constants_match_sqlite_h() {
+    assert_eq(SQLITE_INTEGER, 1);
+    assert_eq(SQLITE_FLOAT, 2);
+    assert_eq(SQLITE_TEXT, 3);
+    assert_eq(SQLITE_BLOB, 4);
+    assert_eq(SQLITE_NULL, 5);
+}
+
+fn test_datatype_numeric_round_trip() {
+    match from_numeric(1) { DtInteger => {}, _ => assert(false) }
+    match from_numeric(5) { DtNull    => {}, _ => assert(false) }
+    assert_eq(datatype_numeric(&DtInteger), 1);
+    assert_eq(datatype_numeric(&DtNull), 5);
+}
+
+fn test_datatype_names() {
+    assert(datatype_name(&DtInteger) == "INTEGER".clone());
+    assert(datatype_name(&DtFloat)   == "FLOAT".clone());
+    assert(datatype_name(&DtText)    == "TEXT".clone());
+    assert(datatype_name(&DtBlob)    == "BLOB".clone());
+    assert(datatype_name(&DtNull)    == "NULL".clone());
+}
+
+fn test_value_type_dispatch() {
+    let v_i = new_int(42 as Int64);
+    assert_eq(sqlite3_value_type(&v_i), SQLITE_INTEGER);
+    let v_d = new_double(3.14);
+    assert_eq(sqlite3_value_type(&v_d), SQLITE_FLOAT);
+    let v_t = new_text("x".clone());
+    assert_eq(sqlite3_value_type(&v_t), SQLITE_TEXT);
+    let v_n = new_null();
+    assert_eq(sqlite3_value_type(&v_n), SQLITE_NULL);
+}
+
+fn test_value_accessors_ints_and_doubles() {
+    let v = new_int(17 as Int64);
+    assert_eq(sqlite3_value_int(&v), 17);
+    assert_eq(sqlite3_value_int64(&v), 17 as Int64);
+    // Int → Float coercion.
+    assert_eq(sqlite3_value_double(&v) as Int, 17);
+}
+
+fn test_value_text_and_bytes() {
+    let v = new_text("hello".clone());
+    assert(sqlite3_value_text(&v) == "hello".clone());
+    assert_eq(sqlite3_value_bytes(&v), 5);
+}
+
+fn test_value_blob_bytes_counts() {
+    let mut b: List<u8> = List.new();
+    b.push(0x00 as u8);
+    b.push(0xFF as u8);
+    b.push(0xAA as u8);
+    let v = new_blob(b);
+    assert_eq(sqlite3_value_bytes(&v), 3);
+}
+
+fn test_value_from_bind_flag() {
+    let mut v = new_int(1 as Int64);
+    assert_eq(sqlite3_value_frombind(&v), 0);
+    mark_from_bind(&mut v);
+    assert_eq(sqlite3_value_frombind(&v), 1);
+}
+
+fn test_value_nochange_flag() {
+    let mut v = new_int(1 as Int64);
+    assert_eq(sqlite3_value_nochange(&v), 0);
+    mark_nochange(&mut v);
+    assert_eq(sqlite3_value_nochange(&v), 1);
+}
+
+fn test_value_subtype() {
+    let mut v = new_int(1 as Int64);
+    set_subtype(&mut v, 74);
+    assert_eq(sqlite3_value_subtype(&v), 74);
+}
+
+fn test_numeric_type_matches_payload_kind() {
+    let v = new_double(2.5);
+    assert_eq(sqlite3_value_numeric_type(&v), SQLITE_FLOAT);
+}
+
+fn main() {
+    test_datatype_constants_match_sqlite_h();
+    test_datatype_numeric_round_trip();
+    test_datatype_names();
+    test_value_type_dispatch();
+    test_value_accessors_ints_and_doubles();
+    test_value_text_and_bytes();
+    test_value_blob_bytes_counts();
+    test_value_from_bind_flag();
+    test_value_nochange_flag();
+    test_value_subtype();
+    test_numeric_type_matches_payload_kind();
+}

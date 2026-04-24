@@ -1,0 +1,56 @@
+// =============================================================================
+// hooks_api/op.vr — update/preupdate operation taxonomy
+// =============================================================================
+// Spec: SQLite C API
+//
+// update_hook fires with op ∈ {INSERT, UPDATE, DELETE}; preupdate_hook
+// additionally exposes PREUPDATE_* codes for the row-id slots.
+//
+// Integer constants match sqlite3.h:
+//   SQLITE_INSERT = 18
+//   SQLITE_UPDATE = 23
+//   SQLITE_DELETE = 9
+// =============================================================================
+
+module core.database.sqlite.native.hooks_api.op;
+
+mount core.*;
+mount base.{Bool, Text};
+
+public type UpdateOp is
+      UoInsert
+    | UoUpdate
+    | UoDelete;
+
+public const SQLITE_INSERT: Int = 18;
+public const SQLITE_UPDATE: Int = 23;
+public const SQLITE_DELETE: Int = 9;
+
+public fn op_numeric(o: &UpdateOp) -> Int {
+    match o {
+        UoInsert => SQLITE_INSERT,
+        UoUpdate => SQLITE_UPDATE,
+        UoDelete => SQLITE_DELETE,
+    }
+}
+
+public fn op_name(o: &UpdateOp) -> Text {
+    match o {
+        UoInsert => "INSERT".clone(),
+        UoUpdate => "UPDATE".clone(),
+        UoDelete => "DELETE".clone(),
+    }
+}
+
+public fn from_numeric(n: Int) -> UpdateOp {
+    if n == SQLITE_INSERT { return UoInsert; }
+    if n == SQLITE_UPDATE { return UoUpdate; }
+    UoDelete
+}
+
+public fn is_write(o: &UpdateOp) -> Bool {
+    match o {
+        UoInsert | UoUpdate => true,
+        UoDelete => true,
+    }
+}

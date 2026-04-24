@@ -1,0 +1,51 @@
+// =============================================================================
+// value_api/datatype.vr — SQLITE_INTEGER/FLOAT/TEXT/BLOB/NULL
+// =============================================================================
+// Spec: SQLite C API
+// =============================================================================
+
+module core.database.sqlite.native.value_api.datatype;
+
+mount core.*;
+mount base.{Text};
+
+public const SQLITE_INTEGER: Int = 1;
+public const SQLITE_FLOAT: Int   = 2;
+public const SQLITE_TEXT: Int    = 3;
+public const SQLITE_BLOB: Int    = 4;
+public const SQLITE_NULL: Int    = 5;
+
+public type Datatype is
+      DtInteger
+    | DtFloat
+    | DtText
+    | DtBlob
+    | DtNull;
+
+public fn datatype_numeric(d: &Datatype) -> Int {
+    match d {
+        DtInteger => SQLITE_INTEGER,
+        DtFloat   => SQLITE_FLOAT,
+        DtText    => SQLITE_TEXT,
+        DtBlob    => SQLITE_BLOB,
+        DtNull    => SQLITE_NULL,
+    }
+}
+
+public fn datatype_name(d: &Datatype) -> Text {
+    match d {
+        DtInteger => "INTEGER".clone(),
+        DtFloat   => "FLOAT".clone(),
+        DtText    => "TEXT".clone(),
+        DtBlob    => "BLOB".clone(),
+        DtNull    => "NULL".clone(),
+    }
+}
+
+public fn from_numeric(n: Int) -> Datatype {
+    if n == SQLITE_INTEGER { return DtInteger; }
+    if n == SQLITE_FLOAT   { return DtFloat; }
+    if n == SQLITE_TEXT    { return DtText; }
+    if n == SQLITE_BLOB    { return DtBlob; }
+    DtNull
+}

@@ -1,0 +1,27 @@
+// =============================================================================
+// core/database/sqlite/native/hooks_api/mod.vr
+// =============================================================================
+// Layer: 7 (façade — public hook-registration C-API)
+// Spec: SQLite C API — §19.5
+//
+//   sqlite3_commit_hook(db, xCb, pArg)         → prev callback
+//   sqlite3_rollback_hook(db, xCb, pArg)       → prev
+//   sqlite3_update_hook(db, xCb, pArg)         → prev
+//   sqlite3_preupdate_hook(db, xCb, pArg)      → prev
+//   sqlite3_wal_hook(db, xCb, pArg)            → prev
+//   sqlite3_autovacuum_pages(db, xCb, pArg, xDestroy)
+//
+// Complements `ext/hooks.vr` protocols; this catalogue models the
+// public registration + slot-swap semantics.
+//
+// Submodules:
+//   * `registration` — typed slot for each hook
+//   * `op`           — UpdateOp / ConflictOp taxonomy used by hooks
+//   * `engine`       — installs + replaces hooks, returns prev handle
+// =============================================================================
+
+module core.database.sqlite.native.hooks_api;
+
+public module registration;
+public module op;
+public module engine;

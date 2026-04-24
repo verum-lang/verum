@@ -1,0 +1,41 @@
+// =============================================================================
+// result_codes/function.vr — function-registration flag constants
+// =============================================================================
+// Spec: SQLite C API
+//
+// Flags passed in the `eTextRep` argument of sqlite3_create_function:
+//   SQLITE_DETERMINISTIC  0x000000800
+//   SQLITE_DIRECTONLY     0x000080000
+//   SQLITE_SUBTYPE        0x000100000
+//   SQLITE_INNOCUOUS      0x000200000
+//   SQLITE_RESULT_SUBTYPE 0x001000000
+// =============================================================================
+
+module core.database.sqlite.native.result_codes.function;
+
+mount core.*;
+mount base.{Bool};
+
+public const SQLITE_DETERMINISTIC: Int    = 0x000000800;
+public const SQLITE_DIRECTONLY: Int       = 0x000080000;
+public const SQLITE_SUBTYPE: Int          = 0x000100000;
+public const SQLITE_INNOCUOUS: Int        = 0x000200000;
+public const SQLITE_RESULT_SUBTYPE: Int   = 0x001000000;
+
+public type FunctionFlagBits is {
+    bits: Int,
+}
+
+public fn new_flag_bits(bits: Int) -> FunctionFlagBits {
+    FunctionFlagBits { bits: bits }
+}
+
+public fn has(f: &FunctionFlagBits, bit: Int) -> Bool {
+    (f.bits & bit) != 0
+}
+
+public fn is_deterministic(f: &FunctionFlagBits) -> Bool { has(f, SQLITE_DETERMINISTIC) }
+public fn is_direct_only(f: &FunctionFlagBits) -> Bool { has(f, SQLITE_DIRECTONLY) }
+public fn is_subtype_aware(f: &FunctionFlagBits) -> Bool { has(f, SQLITE_SUBTYPE) }
+public fn is_innocuous(f: &FunctionFlagBits) -> Bool { has(f, SQLITE_INNOCUOUS) }
+public fn produces_subtype(f: &FunctionFlagBits) -> Bool { has(f, SQLITE_RESULT_SUBTYPE) }

@@ -1,0 +1,95 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, limits_api, sqlite3_limit, capi
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.limits_api.category.{
+    LimitCategory,
+    LcLength, LcSqlLength, LcColumn, LcExprDepth, LcCompoundSelect,
+    LcVdbeOp, LcFunctionArg, LcAttached, LcLikePatternLength,
+    LcVariableNumber, LcTriggerDepth, LcWorkerThreads,
+    SQLITE_LIMIT_LENGTH, SQLITE_LIMIT_COLUMN, SQLITE_LIMIT_FUNCTION_ARG,
+    SQLITE_LIMIT_ATTACHED, SQLITE_LIMIT_VARIABLE_NUMBER,
+    SQLITE_LIMIT_WORKER_THREADS,
+    category_numeric, category_name, default_hard_max,
+};
+mount core.database.sqlite.native.limits_api.budget.{
+    LimitBudget, new_budget,
+};
+mount base.{Bool};
+
+fn test_category_numeric_matches_c_header() {
+    assert_eq(SQLITE_LIMIT_LENGTH, 0);
+    assert_eq(SQLITE_LIMIT_COLUMN, 2);
+    assert_eq(SQLITE_LIMIT_FUNCTION_ARG, 6);
+    assert_eq(SQLITE_LIMIT_ATTACHED, 7);
+    assert_eq(SQLITE_LIMIT_VARIABLE_NUMBER, 9);
+    assert_eq(SQLITE_LIMIT_WORKER_THREADS, 11);
+    assert_eq(category_numeric(&LcLength), SQLITE_LIMIT_LENGTH);
+    assert_eq(category_numeric(&LcWorkerThreads), SQLITE_LIMIT_WORKER_THREADS);
+}
+
+fn test_category_names() {
+    assert(category_name(&LcLength) == "LENGTH".clone());
+    assert(category_name(&LcFunctionArg) == "FUNCTION_ARG".clone());
+    assert(category_name(&LcExprDepth) == "EXPR_DEPTH".clone());
+}
+
+fn test_default_hard_max_known_values() {
+    assert_eq(default_hard_max(&LcColumn), 32767);
+    assert_eq(default_hard_max(&LcFunctionArg), 127);
+    assert_eq(default_hard_max(&LcExprDepth), 1000);
+    assert_eq(default_hard_max(&LcTriggerDepth), 1000);
+    assert_eq(default_hard_max(&LcWorkerThreads), 0);
+}
+
+fn test_budget_get_returns_hard_max_initially() {
+    let b = new_budget();
+    assert_eq(b.get(&LcColumn), 32767);
+    assert_eq(b.get(&LcFunctionArg), 127);
+}
+
+fn test_sqlite3_limit_negative_queries() {
+    let mut b = new_budget();
+    let prev = b.sqlite3_limit(&LcColumn, -1);
+    assert_eq(prev, 32767);
+    assert_eq(b.get(&LcColumn), 32767);
+}
+
+fn test_sqlite3_limit_clamps_over_hard_max() {
+    let mut b = new_budget();
+    let _ = b.sqlite3_limit(&LcColumn, 100000);
+    // Clamped to 32767 (the hard max).
+    assert_eq(b.get(&LcColumn), 32767);
+}
+
+fn test_sqlite3_limit_sets_below_hard_max() {
+    let mut b = new_budget();
+    let prev = b.sqlite3_limit(&LcColumn, 256);
+    assert_eq(prev, 32767);
+    assert_eq(b.get(&LcColumn), 256);
+    let prev2 = b.sqlite3_limit(&LcColumn, 128);
+    assert_eq(prev2, 256);
+}
+
+fn test_sqlite3_limit_categories_are_independent() {
+    let mut b = new_budget();
+    let _ = b.sqlite3_limit(&LcColumn, 100);
+    let _ = b.sqlite3_limit(&LcExprDepth, 50);
+    assert_eq(b.get(&LcColumn), 100);
+    assert_eq(b.get(&LcExprDepth), 50);
+    assert_eq(b.get(&LcFunctionArg), 127);
+}
+
+fn main() {
+    test_category_numeric_matches_c_header();
+    test_category_names();
+    test_default_hard_max_known_values();
+    test_budget_get_returns_hard_max_initially();
+    test_sqlite3_limit_negative_queries();
+    test_sqlite3_limit_clamps_over_hard_max();
+    test_sqlite3_limit_sets_below_hard_max();
+    test_sqlite3_limit_categories_are_independent();
+}

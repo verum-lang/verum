@@ -1,0 +1,100 @@
+// =============================================================================
+// result_codes/vtab.vr — SQLITE_VTAB_* constraint flags
+// =============================================================================
+// Spec: SQLite C API — sqlite3_vtab_config + xBestIndex.
+//
+// SQLITE_INDEX_CONSTRAINT_{EQ,GT,LE,LT,GE,MATCH,LIKE,GLOB,REGEXP,NE,
+// ISNOT,ISNOTNULL,ISNULL,IS,LIMIT,OFFSET,FUNCTION}
+// =============================================================================
+
+module core.database.sqlite.native.result_codes.vtab;
+
+mount core.*;
+mount base.{Text};
+
+public const SQLITE_INDEX_CONSTRAINT_EQ: Int          = 2;
+public const SQLITE_INDEX_CONSTRAINT_GT: Int          = 4;
+public const SQLITE_INDEX_CONSTRAINT_LE: Int          = 8;
+public const SQLITE_INDEX_CONSTRAINT_LT: Int          = 16;
+public const SQLITE_INDEX_CONSTRAINT_GE: Int          = 32;
+public const SQLITE_INDEX_CONSTRAINT_MATCH: Int       = 64;
+public const SQLITE_INDEX_CONSTRAINT_LIKE: Int        = 65;
+public const SQLITE_INDEX_CONSTRAINT_GLOB: Int        = 66;
+public const SQLITE_INDEX_CONSTRAINT_REGEXP: Int      = 67;
+public const SQLITE_INDEX_CONSTRAINT_NE: Int          = 68;
+public const SQLITE_INDEX_CONSTRAINT_ISNOT: Int       = 69;
+public const SQLITE_INDEX_CONSTRAINT_ISNOTNULL: Int   = 70;
+public const SQLITE_INDEX_CONSTRAINT_ISNULL: Int      = 71;
+public const SQLITE_INDEX_CONSTRAINT_IS: Int          = 72;
+public const SQLITE_INDEX_CONSTRAINT_LIMIT: Int       = 73;
+public const SQLITE_INDEX_CONSTRAINT_OFFSET: Int      = 74;
+public const SQLITE_INDEX_CONSTRAINT_FUNCTION: Int    = 150;
+
+// sqlite3_vtab_config second argument.
+public const SQLITE_VTAB_CONSTRAINT_SUPPORT: Int      = 1;
+public const SQLITE_VTAB_INNOCUOUS: Int               = 2;
+public const SQLITE_VTAB_DIRECTONLY: Int              = 3;
+public const SQLITE_VTAB_USES_ALL_SCHEMAS: Int        = 4;
+
+public type ConstraintOp is
+      VcoEq
+    | VcoGt
+    | VcoLe
+    | VcoLt
+    | VcoGe
+    | VcoMatch
+    | VcoLike
+    | VcoGlob
+    | VcoRegexp
+    | VcoNe
+    | VcoIsNot
+    | VcoIsNotNull
+    | VcoIsNull
+    | VcoIs
+    | VcoLimit
+    | VcoOffset
+    | VcoFunction;
+
+public fn constraint_numeric(c: &ConstraintOp) -> Int {
+    match c {
+        VcoEq          => SQLITE_INDEX_CONSTRAINT_EQ,
+        VcoGt          => SQLITE_INDEX_CONSTRAINT_GT,
+        VcoLe          => SQLITE_INDEX_CONSTRAINT_LE,
+        VcoLt          => SQLITE_INDEX_CONSTRAINT_LT,
+        VcoGe          => SQLITE_INDEX_CONSTRAINT_GE,
+        VcoMatch       => SQLITE_INDEX_CONSTRAINT_MATCH,
+        VcoLike        => SQLITE_INDEX_CONSTRAINT_LIKE,
+        VcoGlob        => SQLITE_INDEX_CONSTRAINT_GLOB,
+        VcoRegexp      => SQLITE_INDEX_CONSTRAINT_REGEXP,
+        VcoNe          => SQLITE_INDEX_CONSTRAINT_NE,
+        VcoIsNot       => SQLITE_INDEX_CONSTRAINT_ISNOT,
+        VcoIsNotNull   => SQLITE_INDEX_CONSTRAINT_ISNOTNULL,
+        VcoIsNull      => SQLITE_INDEX_CONSTRAINT_ISNULL,
+        VcoIs          => SQLITE_INDEX_CONSTRAINT_IS,
+        VcoLimit       => SQLITE_INDEX_CONSTRAINT_LIMIT,
+        VcoOffset      => SQLITE_INDEX_CONSTRAINT_OFFSET,
+        VcoFunction    => SQLITE_INDEX_CONSTRAINT_FUNCTION,
+    }
+}
+
+public fn constraint_name(c: &ConstraintOp) -> Text {
+    match c {
+        VcoEq          => "EQ".clone(),
+        VcoGt          => "GT".clone(),
+        VcoLe          => "LE".clone(),
+        VcoLt          => "LT".clone(),
+        VcoGe          => "GE".clone(),
+        VcoMatch       => "MATCH".clone(),
+        VcoLike        => "LIKE".clone(),
+        VcoGlob        => "GLOB".clone(),
+        VcoRegexp      => "REGEXP".clone(),
+        VcoNe          => "NE".clone(),
+        VcoIsNot       => "ISNOT".clone(),
+        VcoIsNotNull   => "ISNOTNULL".clone(),
+        VcoIsNull      => "ISNULL".clone(),
+        VcoIs          => "IS".clone(),
+        VcoLimit       => "LIMIT".clone(),
+        VcoOffset      => "OFFSET".clone(),
+        VcoFunction    => "FUNCTION".clone(),
+    }
+}

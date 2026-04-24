@@ -1,0 +1,114 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, hooks_api, commit, rollback, update, capi
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.hooks_api.registration.{
+    Registration, HookKind,
+    HkCommit, HkRollback, HkUpdate, HkPreupdate, HkWal, HkAutovacuumPages,
+    kind_name, new_registration, is_installed,
+};
+mount core.database.sqlite.native.hooks_api.op.{
+    UpdateOp, UoInsert, UoUpdate, UoDelete,
+    SQLITE_INSERT, SQLITE_UPDATE, SQLITE_DELETE,
+    op_numeric, op_name, from_numeric, is_write,
+};
+mount core.database.sqlite.native.hooks_api.engine.{
+    HooksEngine, new_engine,
+};
+mount base.{Bool};
+
+fn test_kind_names() {
+    assert(kind_name(&HkCommit) == "commit".clone());
+    assert(kind_name(&HkWal) == "wal".clone());
+    assert(kind_name(&HkAutovacuumPages) == "autovacuum-pages".clone());
+}
+
+fn test_registration_default_not_installed() {
+    let r = new_registration(HkCommit, "".clone(), 0 as Int64);
+    assert(!is_installed(&r));
+}
+
+fn test_registration_nonzero_handle_installed() {
+    let r = new_registration(HkCommit, "t".clone(), 42 as Int64);
+    assert(is_installed(&r));
+}
+
+fn test_update_op_numeric_matches_c_header() {
+    assert_eq(op_numeric(&UoInsert), SQLITE_INSERT);
+    assert_eq(op_numeric(&UoUpdate), SQLITE_UPDATE);
+    assert_eq(op_numeric(&UoDelete), SQLITE_DELETE);
+    assert_eq(SQLITE_INSERT, 18);
+    assert_eq(SQLITE_UPDATE, 23);
+    assert_eq(SQLITE_DELETE, 9);
+}
+
+fn test_update_op_from_numeric() {
+    match from_numeric(SQLITE_INSERT) { UoInsert => {}, _ => assert(false) }
+    match from_numeric(SQLITE_UPDATE) { UoUpdate => {}, _ => assert(false) }
+    match from_numeric(SQLITE_DELETE) { UoDelete => {}, _ => assert(false) }
+}
+
+fn test_update_op_names() {
+    assert(op_name(&UoInsert) == "INSERT".clone());
+    assert(op_name(&UoUpdate) == "UPDATE".clone());
+    assert(op_name(&UoDelete) == "DELETE".clone());
+}
+
+fn test_is_write_always_true() {
+    // update_hook only fires on writes.
+    assert(is_write(&UoInsert));
+    assert(is_write(&UoUpdate));
+    assert(is_write(&UoDelete));
+}
+
+fn test_engine_none_installed_initially() {
+    let e = new_engine();
+    assert(!e.any_installed());
+}
+
+fn test_install_returns_prev_and_swaps() {
+    let mut e = new_engine();
+    let first = new_registration(HkCommit, "first".clone(), 1 as Int64);
+    let prev1 = e.install(first);
+    assert_eq(prev1, 0 as Int64);
+    let second = new_registration(HkCommit, "second".clone(), 2 as Int64);
+    let prev2 = e.install(second);
+    assert_eq(prev2, 1 as Int64);
+    assert(e.any_installed());
+}
+
+fn test_install_different_kinds_independently() {
+    let mut e = new_engine();
+    let _ = e.install(new_registration(HkCommit, "c".clone(), 1 as Int64));
+    let _ = e.install(new_registration(HkUpdate, "u".clone(), 2 as Int64));
+    let _ = e.install(new_registration(HkWal,    "w".clone(), 3 as Int64));
+    assert(is_installed(&e.commit));
+    assert(is_installed(&e.update));
+    assert(is_installed(&e.wal));
+    assert(!is_installed(&e.rollback));
+}
+
+fn test_uninstall_via_zero_handle() {
+    let mut e = new_engine();
+    let _ = e.install(new_registration(HkCommit, "c".clone(), 7 as Int64));
+    let prev = e.install(new_registration(HkCommit, "".clone(), 0 as Int64));
+    assert_eq(prev, 7 as Int64);
+    assert(!is_installed(&e.commit));
+}
+
+fn main() {
+    test_kind_names();
+    test_registration_default_not_installed();
+    test_registration_nonzero_handle_installed();
+    test_update_op_numeric_matches_c_header();
+    test_update_op_from_numeric();
+    test_update_op_names();
+    test_is_write_always_true();
+    test_engine_none_installed_initially();
+    test_install_returns_prev_and_swaps();
+    test_install_different_kinds_independently();
+    test_uninstall_via_zero_handle();
+}

@@ -1,0 +1,67 @@
+// =============================================================================
+// context_api/aux.vr — sqlite3_get_auxdata / _set_auxdata
+// =============================================================================
+// Spec: SQLite C API
+//
+// Functions store per-argument auxiliary data keyed by argument index;
+// SQLite frees each slot when the statement is reset or when the same
+// slot is overwritten.
+// =============================================================================
+
+module core.database.sqlite.native.context_api.aux;
+
+mount core.*;
+mount base.{Bool, Maybe};
+mount collections.List;
+
+public type AuxSlot is {
+    arg_index: Int,
+    handle: Int64,   // opaque pointer
+}
+
+public fn new_slot(arg_index: Int, handle: Int64) -> AuxSlot {
+    AuxSlot { arg_index: arg_index, handle: handle }
+}
+
+public type AuxRegistry is {
+    slots: List<AuxSlot>,
+}
+
+public fn new_registry() -> AuxRegistry {
+    AuxRegistry { slots: List.new() }
+}
+
+implement AuxRegistry {
+    /// Returns previous handle at this index (0 if fresh) — mirrors
+    /// sqlite3_set_auxdata's xDelete semantics (caller frees).
+    pub fn set(&mut self, arg_index: Int, handle: Int64) -> Int64 {
+        let mut i: Int = 0;
+        while i < self.slots.len() {
+            if self.slots.get(i).arg_index == arg_index {
+                let prev = self.slots.get(i).handle;
+                self.slots.get_mut(i).handle = handle;
+                return prev;
+            }
+            i = i + 1;
+        }
+        self.slots.push(new_slot(arg_index, handle));
+        0 as Int64
+    }
+
+    pub fn get(&self, arg_index: Int) -> Int64 {
+        let mut i: Int = 0;
+        while i < self.slots.len() {
+            if self.slots.get(i).arg_index == arg_index {
+                return self.slots.get(i).handle;
+            }
+            i = i + 1;
+        }
+        0 as Int64
+    }
+
+    pub fn clear(&mut self) {
+        self.slots = List.new();
+    }
+
+    pub fn len(&self) -> Int { self.slots.len() }
+}

@@ -1,0 +1,65 @@
+// =============================================================================
+// pcache_methods/vtable.vr — sqlite3_pcache_methods2 shape
+// =============================================================================
+// Spec: SQLite C API
+// =============================================================================
+
+module core.database.sqlite.native.pcache_methods.vtable;
+
+mount core.*;
+mount base.{Bool, Text};
+
+public type MethodSet is {
+    has_init: Bool,
+    has_shutdown: Bool,
+    has_create: Bool,
+    has_cachesize: Bool,
+    has_pagecount: Bool,
+    has_fetch: Bool,
+    has_unpin: Bool,
+    has_rekey: Bool,
+    has_truncate: Bool,
+    has_destroy: Bool,
+    has_shrink: Bool,
+    app_data: Int64,
+}
+
+public fn default_method_set() -> MethodSet {
+    MethodSet {
+        has_init:      true,
+        has_shutdown:  true,
+        has_create:    true,
+        has_cachesize: true,
+        has_pagecount: true,
+        has_fetch:     true,
+        has_unpin:     true,
+        has_rekey:     true,
+        has_truncate:  true,
+        has_destroy:   true,
+        has_shrink:    false,     // optional in v2
+        app_data:      0 as Int64,
+    }
+}
+
+/// Minimum viable vtable: xCreate + xCachesize + xPagecount +
+/// xFetch + xUnpin + xTruncate + xDestroy are mandatory.
+public fn is_viable(m: &MethodSet) -> Bool {
+    m.has_create
+        && m.has_cachesize
+        && m.has_pagecount
+        && m.has_fetch
+        && m.has_unpin
+        && m.has_truncate
+        && m.has_destroy
+}
+
+public fn missing(m: &MethodSet) -> Text {
+    if !m.has_create    { return "xCreate".clone(); }
+    if !m.has_cachesize { return "xCachesize".clone(); }
+    if !m.has_pagecount { return "xPagecount".clone(); }
+    if !m.has_fetch     { return "xFetch".clone(); }
+    if !m.has_unpin     { return "xUnpin".clone(); }
+    if !m.has_truncate  { return "xTruncate".clone(); }
+    if !m.has_destroy   { return "xDestroy".clone(); }
+    "".clone()
+}

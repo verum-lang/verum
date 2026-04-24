@@ -1,0 +1,54 @@
+// =============================================================================
+// context_api/result.vr — sqlite3_result_* variant
+// =============================================================================
+// Spec: SQLite C API
+//
+// Every sqlite3_result_* call produces one `FnResult`.  The engine
+// marshals this into the column value of the row being built.
+// =============================================================================
+
+module core.database.sqlite.native.context_api.result;
+
+mount core.*;
+mount base.{Bool, Text};
+mount collections.List;
+mount core.database.sqlite.native.errors.code.{
+    ExtendedCode, extended_numeric,
+};
+
+public type FnResult is
+      FrNull
+    | FrInt(Int64)
+    | FrDouble(Float)
+    | FrText(Text)
+    | FrBlob(List<u8>)
+    | FrZeroBlob(Int64)
+    | FrError { code: ExtendedCode, message: Text }
+    | FrSubtype { inner: Int64, subtype: Int };
+
+public fn result_kind_name(r: &FnResult) -> Text {
+    match r {
+        FrNull       => "null".clone(),
+        FrInt(_)     => "int".clone(),
+        FrDouble(_)  => "double".clone(),
+        FrText(_)    => "text".clone(),
+        FrBlob(_)    => "blob".clone(),
+        FrZeroBlob(_)=> "zeroblob".clone(),
+        FrError { .. }  => "error".clone(),
+        FrSubtype { .. } => "subtype".clone(),
+    }
+}
+
+public fn is_error(r: &FnResult) -> Bool {
+    match r {
+        FrError { .. } => true,
+        _ => false,
+    }
+}
+
+public fn error_numeric(r: &FnResult) -> Int {
+    match r {
+        FrError { code, .. } => extended_numeric(code),
+        _ => 0,
+    }
+}

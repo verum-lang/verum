@@ -1,0 +1,23 @@
+// =============================================================================
+// core/database/sqlite/native/pcache_methods/mod.vr
+// =============================================================================
+// Layer: 7 (façade — sqlite3_pcache_methods2 vtable)
+// Spec: SQLite C API — SQLITE_CONFIG_PCACHE2 / GETPCACHE2.
+//
+// Models the structure and behaviour required of a pluggable page
+// cache.  The v2 methods set is documented in sqlite3.h:
+//
+//   xInit / xShutdown / xCreate / xCachesize / xPagecount
+//   xFetch / xUnpin / xRekey / xTruncate / xDestroy / xShrink
+//
+// Submodules:
+//   * `vtable`   — MethodSet
+//   * `flags`    — CreateFlags (purgeable/bPurgeable, noFree, etc.)
+//   * `engine`   — registered methods + create/unpin semantics gate
+// =============================================================================
+
+module core.database.sqlite.native.pcache_methods;
+
+public module vtable;
+public module flags;
+public module engine;

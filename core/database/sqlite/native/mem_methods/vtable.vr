@@ -1,0 +1,63 @@
+// =============================================================================
+// mem_methods/vtable.vr — sqlite3_mem_methods shape
+// =============================================================================
+// Spec: SQLite C API
+//
+// The C struct is:
+//   void *(*xMalloc)(int);
+//   void  (*xFree)(void*);
+//   void *(*xRealloc)(void*, int);
+//   int   (*xSize)(void*);
+//   int   (*xRoundup)(int);
+//   int   (*xInit)(void*);
+//   void  (*xShutdown)(void*);
+//   void  *pAppData;
+//
+// We model each callback as an installed / not-installed flag; the
+// runtime plugs in real closures.  The catalogue owns *structure*,
+// not function pointers.
+// =============================================================================
+
+module core.database.sqlite.native.mem_methods.vtable;
+
+mount core.*;
+mount base.{Bool, Text};
+
+public type MethodSet is {
+    has_malloc: Bool,
+    has_free: Bool,
+    has_realloc: Bool,
+    has_size: Bool,
+    has_roundup: Bool,
+    has_init: Bool,
+    has_shutdown: Bool,
+    app_data: Int64,
+}
+
+public fn default_method_set() -> MethodSet {
+    MethodSet {
+        has_malloc:   true,
+        has_free:     true,
+        has_realloc:  true,
+        has_size:     true,
+        has_roundup:  true,
+        has_init:     false,
+        has_shutdown: false,
+        app_data:     0 as Int64,
+    }
+}
+
+/// Minimum viable vtable: malloc + free + realloc + size + roundup.
+/// SQLite rejects the registration if any of these is missing.
+public fn is_viable(m: &MethodSet) -> Bool {
+    m.has_malloc && m.has_free && m.has_realloc && m.has_size && m.has_roundup
+}
+
+public fn missing_methods(m: &MethodSet) -> Text {
+    if !m.has_malloc  { return "xMalloc".clone(); }
+    if !m.has_free    { return "xFree".clone(); }
+    if !m.has_realloc { return "xRealloc".clone(); }
+    if !m.has_size    { return "xSize".clone(); }
+    if !m.has_roundup { return "xRoundup".clone(); }
+    "".clone()
+}

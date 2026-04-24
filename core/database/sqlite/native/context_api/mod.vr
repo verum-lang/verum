@@ -1,0 +1,25 @@
+// =============================================================================
+// core/database/sqlite/native/context_api/mod.vr
+// =============================================================================
+// Layer: 7 (façade — sqlite3_context_* surface)
+// Spec: SQLite C API — user-defined function runtime context.
+//
+//   sqlite3_context_db_handle(ctx)      → owning connection
+//   sqlite3_user_data(ctx)              → user-supplied pointer
+//   sqlite3_aggregate_context(ctx, n)   → per-aggregate scratch slab
+//   sqlite3_get_auxdata / _set_auxdata  → per-arg auxiliary data
+//   sqlite3_result_*                    → set the function result
+//   sqlite3_result_subtype(ctx, st)     → mark result subtype
+//   sqlite3_vtab_nochange(ctx)          → UPDATE-optimisation hint
+//
+// Submodules:
+//   * `result`   — typed Result sum returned to the engine
+//   * `aux`      — per-argument auxiliary data slot
+//   * `context`  — the FunctionContext record + accessors
+// =============================================================================
+
+module core.database.sqlite.native.context_api;
+
+public module result;
+public module aux;
+public module context;

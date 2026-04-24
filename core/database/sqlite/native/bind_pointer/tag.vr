@@ -1,0 +1,58 @@
+// =============================================================================
+// bind_pointer/tag.vr — well-known pointer-type tags
+// =============================================================================
+// Spec: SQLite C API.  The "type" C-string is conventionally a short
+// ASCII name.  A registry lets catalogue-aware code reserve tags to
+// prevent accidental collisions.
+// =============================================================================
+
+module core.database.sqlite.native.bind_pointer.tag;
+
+mount core.*;
+mount base.{Bool, Text};
+mount collections.List;
+
+/// Well-known tags from the SQLite source tree.
+public fn tag_carray() -> Text  { "carray".clone() }
+public fn tag_json()   -> Text  { "json".clone() }
+public fn tag_regexp() -> Text  { "regexp".clone() }
+public fn tag_series() -> Text  { "series".clone() }
+
+public type PointerTag is { name: Text }
+
+public fn new_tag(name: Text) -> PointerTag {
+    PointerTag { name: name }
+}
+
+/// Two tags match iff they are byte-equal; the C-API compares with
+/// strcmp on the raw tag bytes.
+public fn tags_match(a: &PointerTag, b: &PointerTag) -> Bool {
+    a.name == b.name
+}
+
+public type TagRegistry is {
+    tags: List<PointerTag>,
+}
+
+public fn new_registry() -> TagRegistry {
+    TagRegistry { tags: List.new() }
+}
+
+implement TagRegistry {
+    pub fn register(&mut self, name: Text) -> Bool {
+        if self.contains(&name) { return false; }
+        self.tags.push(new_tag(name));
+        true
+    }
+
+    pub fn contains(&self, name: &Text) -> Bool {
+        let mut i: Int = 0;
+        while i < self.tags.len() {
+            if self.tags.get(i).name == *name { return true; }
+            i = i + 1;
+        }
+        false
+    }
+
+    pub fn len(&self) -> Int { self.tags.len() }
+}

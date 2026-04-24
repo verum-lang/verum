@@ -1,0 +1,27 @@
+// =============================================================================
+// core/database/sqlite/native/value_api/mod.vr
+// =============================================================================
+// Layer: 7 (façade — sqlite3_value_* accessors)
+// Spec: SQLite C API
+//
+//   sqlite3_value_type(v)         → SQLITE_{INTEGER/FLOAT/TEXT/BLOB/NULL}
+//   sqlite3_value_numeric_type(v) → best guess after type coercion
+//   sqlite3_value_int / int64 / double / text / text16 / blob / bytes
+//   sqlite3_value_subtype(v)
+//   sqlite3_value_nochange(v)
+//   sqlite3_value_frombind(v)     → 1 iff value was bound vs literal
+//
+// Complements `column/` which is the row-oriented read side; this
+// catalogue handles the value-object passed into xFunc / xStep.
+//
+// Submodules:
+//   * `datatype`  — SQLITE_INTEGER/FLOAT/TEXT/BLOB/NULL constants + enum
+//   * `value`     — SqliteValue variant + flags (subtype, from_bind, nochange)
+//   * `engine`    — C-API-aligned accessors
+// =============================================================================
+
+module core.database.sqlite.native.value_api;
+
+public module datatype;
+public module value;
+public module engine;

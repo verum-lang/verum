@@ -1,0 +1,42 @@
+// =============================================================================
+// pcache_methods/flags.vr — xCreate / xFetch flag constants
+// =============================================================================
+// Spec: SQLite C API
+// =============================================================================
+
+module core.database.sqlite.native.pcache_methods.flags;
+
+mount core.*;
+mount base.{Bool};
+
+/// Flags passed to xCreate.
+public type CreateFlags is {
+    purgeable: Bool,
+}
+
+public fn new_create_flags(purgeable: Bool) -> CreateFlags {
+    CreateFlags { purgeable: purgeable }
+}
+
+/// xFetch `createFlag` argument:
+///   0 → do not allocate a new page
+///   1 → allocate if the cache is under its limit
+///   2 → allocate regardless of limit (last-resort)
+public type FetchDemand is
+      FdNoAllocate
+    | FdAllocateUnderLimit
+    | FdAllocateAlways;
+
+public fn fetch_demand_numeric(d: &FetchDemand) -> Int {
+    match d {
+        FdNoAllocate          => 0,
+        FdAllocateUnderLimit  => 1,
+        FdAllocateAlways      => 2,
+    }
+}
+
+public fn fetch_demand_from_numeric(n: Int) -> FetchDemand {
+    if n == 0 { return FdNoAllocate; }
+    if n == 1 { return FdAllocateUnderLimit; }
+    FdAllocateAlways
+}

@@ -1,0 +1,95 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, pcache_methods, page_cache, capi
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.pcache_methods.vtable.{
+    MethodSet, default_method_set, is_viable, missing,
+};
+mount core.database.sqlite.native.pcache_methods.flags.{
+    CreateFlags, FetchDemand,
+    FdNoAllocate, FdAllocateUnderLimit, FdAllocateAlways,
+    new_create_flags, fetch_demand_numeric, fetch_demand_from_numeric,
+};
+mount core.database.sqlite.native.pcache_methods.engine.{
+    PCacheEngine, new_engine,
+};
+mount base.{Bool};
+
+fn test_default_method_set_is_viable() {
+    let m = default_method_set();
+    assert(is_viable(&m));
+}
+
+fn test_missing_fetch_makes_it_non_viable() {
+    let mut m = default_method_set();
+    m.has_fetch = false;
+    assert(!is_viable(&m));
+    assert(missing(&m) == "xFetch".clone());
+}
+
+fn test_create_flags_purgeable() {
+    let cf = new_create_flags(true);
+    assert(cf.purgeable);
+}
+
+fn test_fetch_demand_numeric() {
+    assert_eq(fetch_demand_numeric(&FdNoAllocate), 0);
+    assert_eq(fetch_demand_numeric(&FdAllocateUnderLimit), 1);
+    assert_eq(fetch_demand_numeric(&FdAllocateAlways), 2);
+}
+
+fn test_fetch_demand_from_numeric() {
+    match fetch_demand_from_numeric(0) { FdNoAllocate         => {}, _ => assert(false) }
+    match fetch_demand_from_numeric(1) { FdAllocateUnderLimit => {}, _ => assert(false) }
+    match fetch_demand_from_numeric(2) { FdAllocateAlways     => {}, _ => assert(false) }
+    match fetch_demand_from_numeric(9) { FdAllocateAlways     => {}, _ => assert(false) }
+}
+
+fn test_engine_install_requires_viable() {
+    let mut e = new_engine();
+    let mut m = default_method_set();
+    m.has_create = false;
+    assert(!e.install(m));
+    assert(e.install(default_method_set()));
+}
+
+fn test_will_allocate_no_allocate_never_allocates() {
+    let mut e = new_engine();
+    assert(!e.will_allocate(&FdNoAllocate, true));
+    assert_eq(e.fetches_skipped, 1 as Int64);
+}
+
+fn test_will_allocate_under_limit_gated_by_flag() {
+    let mut e = new_engine();
+    assert(e.will_allocate(&FdAllocateUnderLimit, true));
+    assert(!e.will_allocate(&FdAllocateUnderLimit, false));
+}
+
+fn test_will_allocate_always_ignores_limit() {
+    let mut e = new_engine();
+    assert(e.will_allocate(&FdAllocateAlways, false));
+    assert_eq(e.fetches_allocated, 1 as Int64);
+}
+
+fn test_note_create_increments_counter() {
+    let mut e = new_engine();
+    e.note_create();
+    e.note_create();
+    assert_eq(e.creates, 2 as Int64);
+}
+
+fn main() {
+    test_default_method_set_is_viable();
+    test_missing_fetch_makes_it_non_viable();
+    test_create_flags_purgeable();
+    test_fetch_demand_numeric();
+    test_fetch_demand_from_numeric();
+    test_engine_install_requires_viable();
+    test_will_allocate_no_allocate_never_allocates();
+    test_will_allocate_under_limit_gated_by_flag();
+    test_will_allocate_always_ignores_limit();
+    test_note_create_increments_counter();
+}

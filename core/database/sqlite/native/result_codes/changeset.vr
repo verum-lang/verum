@@ -1,0 +1,69 @@
+// =============================================================================
+// result_codes/changeset.vr — SQLITE_CHANGESET_* conflict codes
+// =============================================================================
+// Spec: SQLite C API — session/changeset apply conflict callback.
+// =============================================================================
+
+module core.database.sqlite.native.result_codes.changeset;
+
+mount core.*;
+mount base.{Text};
+
+public const SQLITE_CHANGESET_DATA: Int         = 1;
+public const SQLITE_CHANGESET_NOTFOUND: Int     = 2;
+public const SQLITE_CHANGESET_CONFLICT: Int     = 3;
+public const SQLITE_CHANGESET_CONSTRAINT: Int   = 4;
+public const SQLITE_CHANGESET_FOREIGN_KEY: Int  = 5;
+
+// xConflict return values.
+public const SQLITE_CHANGESET_OMIT: Int     = 0;
+public const SQLITE_CHANGESET_REPLACE: Int  = 1;
+public const SQLITE_CHANGESET_ABORT: Int    = 2;
+
+public type ConflictKind is
+      CkData
+    | CkNotFound
+    | CkConflict
+    | CkConstraint
+    | CkForeignKey;
+
+public fn kind_numeric(k: &ConflictKind) -> Int {
+    match k {
+        CkData       => SQLITE_CHANGESET_DATA,
+        CkNotFound   => SQLITE_CHANGESET_NOTFOUND,
+        CkConflict   => SQLITE_CHANGESET_CONFLICT,
+        CkConstraint => SQLITE_CHANGESET_CONSTRAINT,
+        CkForeignKey => SQLITE_CHANGESET_FOREIGN_KEY,
+    }
+}
+
+public fn kind_name(k: &ConflictKind) -> Text {
+    match k {
+        CkData       => "DATA".clone(),
+        CkNotFound   => "NOTFOUND".clone(),
+        CkConflict   => "CONFLICT".clone(),
+        CkConstraint => "CONSTRAINT".clone(),
+        CkForeignKey => "FOREIGN_KEY".clone(),
+    }
+}
+
+public type ConflictResolution is
+      CrOmit
+    | CrReplace
+    | CrAbort;
+
+public fn resolution_numeric(r: &ConflictResolution) -> Int {
+    match r {
+        CrOmit    => SQLITE_CHANGESET_OMIT,
+        CrReplace => SQLITE_CHANGESET_REPLACE,
+        CrAbort   => SQLITE_CHANGESET_ABORT,
+    }
+}
+
+public fn resolution_name(r: &ConflictResolution) -> Text {
+    match r {
+        CrOmit    => "OMIT".clone(),
+        CrReplace => "REPLACE".clone(),
+        CrAbort   => "ABORT".clone(),
+    }
+}

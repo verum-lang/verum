@@ -1,0 +1,43 @@
+// =============================================================================
+// bind_pointer/handle.vr — TypedPointer descriptor
+// =============================================================================
+// Spec: SQLite C API
+//
+// A typed pointer is (tag, handle, deleter_installed).  `handle == 0`
+// means "no pointer bound to this slot".
+// =============================================================================
+
+module core.database.sqlite.native.bind_pointer.handle;
+
+mount core.*;
+mount base.{Bool};
+mount core.database.sqlite.native.bind_pointer.tag.{
+    PointerTag, new_tag, tags_match,
+};
+
+public type TypedPointer is {
+    tag: PointerTag,
+    handle: Int64,
+    /// True iff the caller supplied an xDel — when SQLite releases
+    /// the slot it calls the deleter.
+    has_deleter: Bool,
+}
+
+public fn new_pointer(tag: base.Text, handle: Int64, has_deleter: Bool) -> TypedPointer {
+    TypedPointer { tag: new_tag(tag), handle: handle, has_deleter: has_deleter }
+}
+
+public fn empty_pointer() -> TypedPointer {
+    TypedPointer { tag: new_tag("".clone()), handle: 0 as Int64, has_deleter: false }
+}
+
+public fn is_empty(p: &TypedPointer) -> Bool {
+    p.handle == (0 as Int64)
+}
+
+/// Fetch the handle iff the requested tag matches the stored tag.
+/// Mirrors sqlite3_value_pointer's "returns NULL unless types match".
+public fn fetch_if_match(p: &TypedPointer, want: &PointerTag) -> Int64 {
+    if is_empty(p) { return 0 as Int64; }
+    if tags_match(&p.tag, want) { p.handle } else { 0 as Int64 }
+}

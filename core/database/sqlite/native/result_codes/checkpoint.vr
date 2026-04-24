@@ -1,0 +1,46 @@
+// =============================================================================
+// result_codes/checkpoint.vr — SQLITE_CHECKPOINT_* modes
+// =============================================================================
+// Spec: SQLite C API — sqlite3_wal_checkpoint_v2.
+// =============================================================================
+
+module core.database.sqlite.native.result_codes.checkpoint;
+
+mount core.*;
+mount base.{Text};
+
+public const SQLITE_CHECKPOINT_PASSIVE: Int  = 0;
+public const SQLITE_CHECKPOINT_FULL: Int     = 1;
+public const SQLITE_CHECKPOINT_RESTART: Int  = 2;
+public const SQLITE_CHECKPOINT_TRUNCATE: Int = 3;
+
+public type CheckpointMode is
+      CmPassive
+    | CmFull
+    | CmRestart
+    | CmTruncate;
+
+public fn mode_numeric(m: &CheckpointMode) -> Int {
+    match m {
+        CmPassive  => SQLITE_CHECKPOINT_PASSIVE,
+        CmFull     => SQLITE_CHECKPOINT_FULL,
+        CmRestart  => SQLITE_CHECKPOINT_RESTART,
+        CmTruncate => SQLITE_CHECKPOINT_TRUNCATE,
+    }
+}
+
+public fn mode_name(m: &CheckpointMode) -> Text {
+    match m {
+        CmPassive  => "PASSIVE".clone(),
+        CmFull     => "FULL".clone(),
+        CmRestart  => "RESTART".clone(),
+        CmTruncate => "TRUNCATE".clone(),
+    }
+}
+
+public fn from_numeric(n: Int) -> CheckpointMode {
+    if n == SQLITE_CHECKPOINT_TRUNCATE { return CmTruncate; }
+    if n == SQLITE_CHECKPOINT_RESTART  { return CmRestart; }
+    if n == SQLITE_CHECKPOINT_FULL     { return CmFull; }
+    CmPassive
+}

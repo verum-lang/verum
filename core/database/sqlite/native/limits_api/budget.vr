@@ -1,0 +1,102 @@
+// =============================================================================
+// limits_api/budget.vr — per-connection limit table
+// =============================================================================
+// Spec: SQLite C API
+//
+// The engine stores one budget per category.  sqlite3_limit(db, cat, n)
+// returns the PREVIOUS value and sets a new one clamped to the
+// category's hard maximum.  A negative `n` queries without writing.
+// =============================================================================
+
+module core.database.sqlite.native.limits_api.budget;
+
+mount core.*;
+mount base.{Bool};
+mount core.database.sqlite.native.limits_api.category.{
+    LimitCategory,
+    LcLength, LcSqlLength, LcColumn, LcExprDepth, LcCompoundSelect,
+    LcVdbeOp, LcFunctionArg, LcAttached, LcLikePatternLength,
+    LcVariableNumber, LcTriggerDepth, LcWorkerThreads,
+    default_hard_max,
+};
+
+public type LimitBudget is {
+    length: Int,
+    sql_length: Int,
+    column: Int,
+    expr_depth: Int,
+    compound_select: Int,
+    vdbe_op: Int,
+    function_arg: Int,
+    attached: Int,
+    like_pattern_length: Int,
+    variable_number: Int,
+    trigger_depth: Int,
+    worker_threads: Int,
+}
+
+public fn new_budget() -> LimitBudget {
+    LimitBudget {
+        length:              default_hard_max(&LcLength),
+        sql_length:          default_hard_max(&LcSqlLength),
+        column:              default_hard_max(&LcColumn),
+        expr_depth:          default_hard_max(&LcExprDepth),
+        compound_select:     default_hard_max(&LcCompoundSelect),
+        vdbe_op:             default_hard_max(&LcVdbeOp),
+        function_arg:        default_hard_max(&LcFunctionArg),
+        attached:            default_hard_max(&LcAttached),
+        like_pattern_length: default_hard_max(&LcLikePatternLength),
+        variable_number:     default_hard_max(&LcVariableNumber),
+        trigger_depth:       default_hard_max(&LcTriggerDepth),
+        worker_threads:      default_hard_max(&LcWorkerThreads),
+    }
+}
+
+fn clamp(requested: Int, hard_max: Int) -> Int {
+    if requested > hard_max { return hard_max; }
+    if requested < 0 { return 0; }
+    requested
+}
+
+implement LimitBudget {
+    pub fn get(&self, c: &LimitCategory) -> Int {
+        match c {
+            LcLength             => self.length,
+            LcSqlLength          => self.sql_length,
+            LcColumn             => self.column,
+            LcExprDepth          => self.expr_depth,
+            LcCompoundSelect     => self.compound_select,
+            LcVdbeOp             => self.vdbe_op,
+            LcFunctionArg        => self.function_arg,
+            LcAttached           => self.attached,
+            LcLikePatternLength  => self.like_pattern_length,
+            LcVariableNumber     => self.variable_number,
+            LcTriggerDepth       => self.trigger_depth,
+            LcWorkerThreads      => self.worker_threads,
+        }
+    }
+
+    /// Matches sqlite3_limit: negative `n` queries, non-negative sets
+    /// after clamping.  Returns the PREVIOUS value.
+    pub fn sqlite3_limit(&mut self, c: &LimitCategory, n: Int) -> Int {
+        let prev = self.get(c);
+        if n < 0 { return prev; }
+        let hard = default_hard_max(c);
+        let clamped = clamp(n, hard);
+        match c {
+            LcLength             => self.length = clamped,
+            LcSqlLength          => self.sql_length = clamped,
+            LcColumn             => self.column = clamped,
+            LcExprDepth          => self.expr_depth = clamped,
+            LcCompoundSelect     => self.compound_select = clamped,
+            LcVdbeOp             => self.vdbe_op = clamped,
+            LcFunctionArg        => self.function_arg = clamped,
+            LcAttached           => self.attached = clamped,
+            LcLikePatternLength  => self.like_pattern_length = clamped,
+            LcVariableNumber     => self.variable_number = clamped,
+            LcTriggerDepth       => self.trigger_depth = clamped,
+            LcWorkerThreads      => self.worker_threads = clamped,
+        }
+        prev
+    }
+}
