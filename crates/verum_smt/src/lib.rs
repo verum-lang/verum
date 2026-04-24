@@ -162,6 +162,7 @@ pub mod user_tactic; // Phase D.4: surface tactic DSL → Z3 combinator bridge
 pub mod tactic_registry; // Task #87: cog-level registry for user-authored tactic packages
 pub mod tactic_laws; // Task #86: algebraic laws for tactic combinators + normalize()
 pub mod smtlib_check; // Task #67: direct SMT-LIB file check for --check-smt-formula
+pub mod solver_diagnostics; // Task #67/#93: env-var consumer side for --dump-smt + --solver-protocol
 pub mod cubical_tactic; // Phase D.4 extension: cubical/category/descent tactic runtime bridge
 pub mod proof_extraction_bridge; // Phase D.5: proof term extraction + certificate export
 pub mod unsat_core;

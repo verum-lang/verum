@@ -77,12 +77,19 @@ pub fn check_smtlib_string(
 }
 
 fn check_via_z3(content: &str, timeout_s: u64) -> CheckVerdict {
+    use crate::solver_diagnostics;
     use z3::{with_z3_config, Config, Solver};
+
+    // Protocol trace + query dump on the VERUM_SOLVER_PROTOCOL /
+    // VERUM_DUMP_SMT_DIR side channels. Both are no-ops when
+    // disabled so the pay-for-only-what-you-use contract holds.
+    solver_diagnostics::log_send(content);
+    solver_diagnostics::dump_smt_query("smtlib-check", content);
 
     let mut cfg = Config::new();
     cfg.set_timeout_msec(timeout_s.saturating_mul(1000));
 
-    with_z3_config(&cfg, || {
+    let verdict = with_z3_config(&cfg, || {
         let solver = Solver::new();
         // `from_string` consumes raw SMT-LIB 2 and applies
         // declarations + assertions to the current solver state.
@@ -93,7 +100,10 @@ fn check_via_z3(content: &str, timeout_s: u64) -> CheckVerdict {
             z3::SatResult::Unsat => CheckVerdict::Unsat,
             z3::SatResult::Unknown => CheckVerdict::Unknown,
         }
-    })
+    });
+
+    solver_diagnostics::log_recv(verdict.as_str());
+    verdict
 }
 
 #[cfg(test)]
