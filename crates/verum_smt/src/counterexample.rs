@@ -64,6 +64,49 @@ impl CounterExample {
         self.assignments.len() == 1
     }
 
+    /// Apply a *syntactic* minimization pass — drop every
+    /// assignment whose variable name does not appear in the
+    /// violated constraint string.
+    ///
+    /// This is the cheap, no-callback minimizer: it's pure, it
+    /// needs no re-solve, and it produces the smallest
+    /// counterexample that still mentions every variable the
+    /// violation actually depends on. Z3 often reports a full
+    /// model including unrelated bindings (e.g. helper predicate
+    /// constants the user never wrote); those are noise.
+    ///
+    /// The semantic minimizer (`CounterExampleMinimizer::minimize`)
+    /// is strictly more powerful but requires a re-solve
+    /// callback — use it when the caller has solver access.
+    /// This syntactic pass is the always-available default.
+    ///
+    /// After the pass runs, `description` is regenerated so the
+    /// human-readable form matches the pruned assignment set.
+    pub fn minimize_syntactic(mut self) -> Self {
+        let constraint_str = self.violated_constraint.as_str().to_string();
+        let mut pruned: Map<Text, CounterExampleValue> = Map::new();
+        for (name, value) in self.assignments.iter() {
+            // Conservative name-match: we look for the variable
+            // name surrounded by whitespace / parens / operators.
+            // False positives are fine (we keep the variable);
+            // false negatives (dropping a used variable) would
+            // be a correctness bug, so we err toward inclusion.
+            if constraint_mentions_var(&constraint_str, name.as_str()) {
+                pruned.insert(name.clone(), value.clone());
+            }
+        }
+        // If pruning would remove everything (e.g. constraint is a
+        // constant literal), keep the original assignments — a
+        // zero-assignment counterexample is less useful than the
+        // unpruned form.
+        if !pruned.is_empty() {
+            self.assignments = pruned;
+            self.description =
+                Self::generate_description(&self.assignments, &self.violated_constraint);
+        }
+        self
+    }
+
     /// Format for display with suggestions.
     pub fn format_with_suggestions(&self, suggestions: &[Text]) -> Text {
         let mut output = Text::new();
@@ -850,5 +893,116 @@ impl fmt::Display for FailureCategory {
             Self::NegativeValue => write!(f, "Negative Value"),
             Self::Other => write!(f, "Other"),
         }
+    }
+}
+
+/// Conservative "does this constraint string mention `var`?" test.
+///
+/// Used by `CounterExample::minimize_syntactic` to decide which
+/// assignments to keep. We require the variable name to be
+/// surrounded by non-identifier characters (or start/end of
+/// string) — so `x` appearing as a substring of `xyz` does NOT
+/// count. False positives (keeping an unused variable) are cheap;
+/// false negatives (dropping a used variable) would be a
+/// correctness bug, so we stay conservative.
+fn constraint_mentions_var(constraint: &str, var_name: &str) -> bool {
+    if var_name.is_empty() {
+        return false;
+    }
+    let bytes = constraint.as_bytes();
+    let n = constraint.len();
+    let m = var_name.len();
+    if m > n {
+        return false;
+    }
+
+    let is_ident_char = |c: u8| c.is_ascii_alphanumeric() || c == b'_';
+
+    let mut i = 0;
+    while i + m <= n {
+        if &bytes[i..i + m] == var_name.as_bytes() {
+            let left_ok = i == 0 || !is_ident_char(bytes[i - 1]);
+            let right_ok = i + m == n || !is_ident_char(bytes[i + m]);
+            if left_ok && right_ok {
+                return true;
+            }
+        }
+        i += 1;
+    }
+    false
+}
+
+#[cfg(test)]
+mod minimize_tests {
+    use super::*;
+
+    #[test]
+    fn mentions_var_matches_word_boundary() {
+        assert!(constraint_mentions_var("x > 0", "x"));
+        assert!(constraint_mentions_var("(x + y) <= z", "y"));
+        assert!(constraint_mentions_var("foo(x)", "foo"));
+        // Substring match must NOT count:
+        assert!(!constraint_mentions_var("xyz > 0", "x"));
+        assert!(!constraint_mentions_var("foobar", "foo"));
+    }
+
+    #[test]
+    fn minimize_drops_unused_variables() {
+        let mut assignments = Map::new();
+        assignments.insert(Text::from("x"), CounterExampleValue::Int(5));
+        assignments.insert(Text::from("unused"), CounterExampleValue::Int(999));
+        let ce = CounterExample::new(assignments, Text::from("x > 10"));
+
+        let min = ce.minimize_syntactic();
+        assert!(
+            min.get("x").is_some(),
+            "x is mentioned — must be preserved"
+        );
+        assert!(
+            min.get("unused").is_none(),
+            "`unused` is not mentioned — must be dropped"
+        );
+    }
+
+    #[test]
+    fn minimize_keeps_everything_if_constraint_mentions_nothing() {
+        let mut assignments = Map::new();
+        assignments.insert(Text::from("x"), CounterExampleValue::Int(5));
+        // Constraint doesn't mention any variable.
+        let ce = CounterExample::new(assignments, Text::from("false"));
+
+        let min = ce.minimize_syntactic();
+        // Fallback preserves the original assignments rather than
+        // produce an empty (useless) counterexample.
+        assert!(min.get("x").is_some());
+    }
+
+    #[test]
+    fn minimize_regenerates_description_post_prune() {
+        let mut assignments = Map::new();
+        assignments.insert(Text::from("x"), CounterExampleValue::Int(5));
+        assignments.insert(Text::from("junk"), CounterExampleValue::Int(0));
+        let ce = CounterExample::new(assignments, Text::from("x > 10"));
+
+        let min = ce.minimize_syntactic();
+        let desc = min.description.as_str();
+        assert!(desc.contains("x = 5"), "description missing x: {}", desc);
+        assert!(
+            !desc.contains("junk = 0"),
+            "description should not mention pruned variable: {}",
+            desc
+        );
+    }
+
+    #[test]
+    fn minimize_preserves_variables_mentioned_via_function_call() {
+        let mut assignments = Map::new();
+        assignments.insert(Text::from("list"), CounterExampleValue::Int(0));
+        assignments.insert(Text::from("other"), CounterExampleValue::Int(0));
+        let ce = CounterExample::new(assignments, Text::from("len(list) == 0"));
+
+        let min = ce.minimize_syntactic();
+        assert!(min.get("list").is_some());
+        assert!(min.get("other").is_none());
     }
 }
