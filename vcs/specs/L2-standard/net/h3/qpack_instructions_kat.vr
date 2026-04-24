@@ -1,0 +1,160 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: h3, qpack, instructions, encode, rfc9204_4_3
+// @timeout: 15000
+// @expected-exit: 0
+
+// RFC 9204 §4.3 QPACK encoder/decoder-stream instructions.
+//
+// Encoder stream (§4.3.1):
+//   * Set Dynamic Table Capacity  — 001xxxxx (5-bit prefix integer)
+//   * Insert with Name Reference  — 1Txxxxxx (T = static-ref bit, 6-bit prefix)
+//   * Insert with Literal Name    — 01Hxxxxx (H = huffman bit, 5-bit prefix)
+//   * Duplicate                   — 000xxxxx (5-bit prefix)
+//
+// Decoder stream (§4.3.2):
+//   * Section Acknowledgement     — 1xxxxxxx (7-bit prefix)
+//   * Stream Cancellation         — 01xxxxxx (6-bit prefix)
+//   * Insert Count Increment      — 00xxxxxx (6-bit prefix)
+//
+// All values chosen here are < 2^5 (or < 2^7) so the entire instruction
+// fits in a single byte — byte position equals logical field position.
+
+mount core.*;
+mount core.collections.List;
+mount core.net.h3.qpack.instructions.{
+    EncoderInstruction, DecoderInstruction,
+    encode_encoder, decode_encoder,
+    encode_decoder, decode_decoder,
+};
+
+fn set_capacity_opcode_is_0x20_prefix5() {
+    // SetCapacity(0) — bits 001 00000 = 0x20.
+    let mut out: List<Byte> = [];
+    encode_encoder(&EncoderInstruction.SetCapacity(0_u64), &mut out);
+    assert(out.len() == 1);
+    assert(out[0] == 0x20_u8);
+    // SetCapacity(10) fits in 5-bit prefix directly — 0x20 | 0x0A = 0x2A.
+    let mut out2: List<Byte> = [];
+    encode_encoder(&EncoderInstruction.SetCapacity(10_u64), &mut out2);
+    assert(out2.len() == 1);
+    assert(out2[0] == 0x2A_u8);
+}
+
+fn set_capacity_overflows_prefix_into_continuation() {
+    // SetCapacity(31) is the 5-bit prefix cap — still fits inline as 0x3F.
+    // SetCapacity(32) must spill to a 2-byte encoding: 0x3F 0x01
+    // (value = 31 + decoded continuation 1 = 32).
+    let mut out: List<Byte> = [];
+    encode_encoder(&EncoderInstruction.SetCapacity(31_u64), &mut out);
+    assert(out.len() == 1);
+    assert(out[0] == 0x3F_u8);
+    let mut out2: List<Byte> = [];
+    encode_encoder(&EncoderInstruction.SetCapacity(32_u64), &mut out2);
+    assert(out2.len() == 2);
+    assert(out2[0] == 0x3F_u8);
+    assert(out2[1] == 0x01_u8);
+}
+
+fn duplicate_opcode_is_0x00_prefix5() {
+    // Duplicate(index) — bits 000 xxxxx = 0x00 base.
+    let mut out: List<Byte> = [];
+    encode_encoder(&EncoderInstruction.Duplicate(3_u64), &mut out);
+    assert(out.len() == 1);
+    assert(out[0] == 0x03_u8);
+}
+
+fn insert_with_static_name_ref_sets_T_bit() {
+    // is_static=true → opcode byte = 0xC0 base; static index 0 stays as 0xC0.
+    let value: List<Byte> = [0x2F_u8];   // "/" — a single short byte
+    let instr = EncoderInstruction.InsertWithNameRef {
+        is_static:  true,
+        name_index: 0_u64,
+        value:      value,
+    };
+    let mut out: List<Byte> = [];
+    encode_encoder(&instr, &mut out);
+    // First byte must have both 0x80 (opcode high bit) and 0x40 (T bit) set.
+    assert((out[0] & 0x80_u8) == 0x80_u8);
+    assert((out[0] & 0x40_u8) == 0x40_u8);
+}
+
+fn insert_with_dynamic_name_ref_clears_T_bit() {
+    // is_static=false → opcode base 0x80; T bit clear.
+    let value: List<Byte> = [0x31_u8];
+    let instr = EncoderInstruction.InsertWithNameRef {
+        is_static:  false,
+        name_index: 0_u64,
+        value:      value,
+    };
+    let mut out: List<Byte> = [];
+    encode_encoder(&instr, &mut out);
+    assert((out[0] & 0x80_u8) == 0x80_u8);    // opcode bit set
+    assert((out[0] & 0x40_u8) == 0_u8);        // T bit clear
+}
+
+fn decoder_section_ack_high_bit_is_opcode() {
+    // SectionAck uses 1xxxxxxx (7-bit prefix) — stream_id 5 encodes to 0x85.
+    let mut out: List<Byte> = [];
+    encode_decoder(&DecoderInstruction.SectionAck(5_u64), &mut out);
+    assert(out.len() == 1);
+    assert(out[0] == 0x85_u8);
+    assert((out[0] & 0x80_u8) == 0x80_u8);
+}
+
+fn decoder_stream_cancel_uses_6bit_prefix_with_01_top() {
+    // StreamCancel — 01xxxxxx, prefix=6. stream_id 2 → 0x42.
+    let mut out: List<Byte> = [];
+    encode_decoder(&DecoderInstruction.StreamCancel(2_u64), &mut out);
+    assert(out.len() == 1);
+    assert(out[0] == 0x42_u8);
+    assert((out[0] & 0xC0_u8) == 0x40_u8);
+}
+
+fn decoder_insert_count_increment_uses_6bit_prefix_with_00_top() {
+    // InsertCountIncrement — 00xxxxxx, prefix=6. value 1 → 0x01.
+    let mut out: List<Byte> = [];
+    encode_decoder(&DecoderInstruction.InsertCountIncrement(1_u64), &mut out);
+    assert(out.len() == 1);
+    assert(out[0] == 0x01_u8);
+    assert((out[0] & 0xC0_u8) == 0_u8);
+}
+
+fn encoder_instruction_roundtrip_set_capacity() {
+    let mut out: List<Byte> = [];
+    encode_encoder(&EncoderInstruction.SetCapacity(64_u64), &mut out);
+    let (decoded, next) = decode_encoder(out.as_slice(), 0).unwrap();
+    assert(next == out.len());
+    match decoded {
+        EncoderInstruction.SetCapacity(cap) => assert(cap == 64_u64),
+        _ => panic("expected SetCapacity"),
+    }
+}
+
+fn decoder_instruction_roundtrip_stream_cancel() {
+    let mut out: List<Byte> = [];
+    encode_decoder(&DecoderInstruction.StreamCancel(63_u64), &mut out);
+    let (decoded, next) = decode_decoder(out.as_slice(), 0).unwrap();
+    assert(next == out.len());
+    match decoded {
+        DecoderInstruction.StreamCancel(sid) => assert(sid == 63_u64),
+        _ => panic("expected StreamCancel"),
+    }
+}
+
+@main
+public fn main() -> Int {
+    set_capacity_opcode_is_0x20_prefix5();
+    set_capacity_overflows_prefix_into_continuation();
+    duplicate_opcode_is_0x00_prefix5();
+    insert_with_static_name_ref_sets_T_bit();
+    insert_with_dynamic_name_ref_clears_T_bit();
+    decoder_section_ack_high_bit_is_opcode();
+    decoder_stream_cancel_uses_6bit_prefix_with_01_top();
+    decoder_insert_count_increment_uses_6bit_prefix_with_00_top();
+    encoder_instruction_roundtrip_set_capacity();
+    decoder_instruction_roundtrip_stream_cancel();
+    print("RFC 9204 §4.3 QPACK instruction encode byte-exact KAT verified");
+    0
+}
