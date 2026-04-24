@@ -225,6 +225,9 @@ impl From<TypeError> for VerumError {
             TypeError::TypeCycle { cycle_path, .. } => VerumError::Other {
                 message: format!("cyclic type definition detected: {}", cycle_path).into(),
             },
+            TypeError::ImportCycle { cycle_path, .. } => VerumError::Other {
+                message: format!("E0811: import cycle detected: {}", cycle_path).into(),
+            },
             TypeError::UnresolvedPlaceholder { name, .. } => VerumError::Other {
                 message: format!("unresolved type placeholder: {}", name).into(),
             },

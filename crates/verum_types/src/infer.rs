@@ -598,6 +598,22 @@ pub struct TypeChecker {
     /// When a circular import is detected, a warning is issued and the import is skipped.
     /// Circular import handling: detection and error reporting for cyclic module dependencies — Circular Import Handling
     imports_in_progress: std::collections::HashSet<(Text, Text)>,
+    /// Set of module paths currently being glob-expanded (`mount foo.*`).
+    /// Prevents unbounded recursion when a module's glob expansion transitively
+    /// re-enters the same module via `public mount .sibling;` re-exports.
+    /// Visit order is preserved so the error path reads "A → B → A".
+    /// Guarded by: `import_all_from_module`, `import_all_from_inline_module`.
+    /// Emits: `TypeError::ImportCycle` (E0811).
+    glob_imports_in_progress: std::collections::HashSet<Text>,
+    /// Visit-order trace of glob expansions currently on the stack — used to
+    /// render the cycle path in the `ImportCycle` diagnostic. Invariant:
+    /// the HashSet above contains exactly the entries of this Vec.
+    glob_imports_stack: Vec<Text>,
+    /// Set of (module_path, item_name) pairs currently being resolved via
+    /// re-export chains (`resolve_export_kind_with_reexports` /
+    /// `find_function_with_source_module`). Prevents unbounded recursion when
+    /// A re-exports via B and B re-exports via A for the same item name.
+    reexport_resolution_in_progress: std::collections::HashSet<(Text, Text)>,
     /// Tracks imported names and their source modules for ambiguity detection.
     /// Maps name -> list of source module paths.
     /// If a name has more than one source, it's ambiguous.
@@ -1031,6 +1047,9 @@ impl TypeChecker {
             in_impl_block: false,
             types_being_registered: std::collections::HashSet::new(),
             imports_in_progress: std::collections::HashSet::new(),
+            glob_imports_in_progress: std::collections::HashSet::new(),
+            glob_imports_stack: Vec::new(),
+            reexport_resolution_in_progress: std::collections::HashSet::new(),
             imported_names: Map::new(),
             constants_being_evaluated: std::collections::HashSet::new(),
             constant_dependencies: Map::new(),
@@ -1209,6 +1228,9 @@ impl TypeChecker {
             in_impl_block: false,
             types_being_registered: std::collections::HashSet::new(),
             imports_in_progress: std::collections::HashSet::new(),
+            glob_imports_in_progress: std::collections::HashSet::new(),
+            glob_imports_stack: Vec::new(),
+            reexport_resolution_in_progress: std::collections::HashSet::new(),
             imported_names: Map::new(),
             constants_being_evaluated: std::collections::HashSet::new(),
             constant_dependencies: Map::new(),
@@ -1782,6 +1804,9 @@ impl TypeChecker {
             in_impl_block: false,
             types_being_registered: std::collections::HashSet::new(),
             imports_in_progress: std::collections::HashSet::new(),
+            glob_imports_in_progress: std::collections::HashSet::new(),
+            glob_imports_stack: Vec::new(),
+            reexport_resolution_in_progress: std::collections::HashSet::new(),
             imported_names: Map::new(),
             constants_being_evaluated: std::collections::HashSet::new(),
             constant_dependencies: Map::new(),
@@ -1891,6 +1916,9 @@ impl TypeChecker {
             in_impl_block: false,
             types_being_registered: std::collections::HashSet::new(),
             imports_in_progress: std::collections::HashSet::new(),
+            glob_imports_in_progress: std::collections::HashSet::new(),
+            glob_imports_stack: Vec::new(),
+            reexport_resolution_in_progress: std::collections::HashSet::new(),
             imported_names: Map::new(),
             constants_being_evaluated: std::collections::HashSet::new(),
             constant_dependencies: Map::new(),
@@ -2001,6 +2029,9 @@ impl TypeChecker {
             in_impl_block: false,
             types_being_registered: std::collections::HashSet::new(),
             imports_in_progress: std::collections::HashSet::new(),
+            glob_imports_in_progress: std::collections::HashSet::new(),
+            glob_imports_stack: Vec::new(),
+            reexport_resolution_in_progress: std::collections::HashSet::new(),
             imported_names: Map::new(),
             constants_being_evaluated: std::collections::HashSet::new(),
             constant_dependencies: Map::new(),
@@ -28095,6 +28126,43 @@ impl TypeChecker {
     ///
     /// Name resolution across modules: qualified paths, import disambiguation, re-exports, path resolution in imports — Glob Imports
     fn import_all_from_inline_module(&mut self, module_name: &str) -> Result<()> {
+        // Cycle guard: matches `import_all_from_module`. Prevents unbounded
+        // recursion when an inline module's glob expansion re-enters itself
+        // via transitive re-exports.
+        let module_key: Text = verum_common::Text::from(module_name);
+        if self.glob_imports_in_progress.contains(&module_key) {
+            let mut modules_in_cycle: List<Text> = List::new();
+            let mut in_cycle = false;
+            for m in &self.glob_imports_stack {
+                if m == &module_key {
+                    in_cycle = true;
+                }
+                if in_cycle {
+                    modules_in_cycle.push(m.clone());
+                }
+            }
+            modules_in_cycle.push(module_key.clone());
+            let cycle_path: Text = modules_in_cycle
+                .iter()
+                .map(|m| m.as_str())
+                .collect::<Vec<_>>()
+                .join(" -> ")
+                .into();
+            return Err(crate::TypeError::ImportCycle {
+                cycle_path,
+                modules_in_cycle,
+                span: verum_ast::span::Span::dummy(),
+            });
+        }
+        self.glob_imports_in_progress.insert(module_key.clone());
+        self.glob_imports_stack.push(module_key.clone());
+        let result = self.import_all_from_inline_module_impl(module_name);
+        self.glob_imports_stack.pop();
+        self.glob_imports_in_progress.remove(&module_key);
+        result
+    }
+
+    fn import_all_from_inline_module_impl(&mut self, module_name: &str) -> Result<()> {
         let module = self
             .inline_modules
             .get(&verum_common::Text::from(module_name))
@@ -32093,6 +32161,28 @@ impl TypeChecker {
         current_module_path: &Text,
         registry: &verum_modules::ModuleRegistry,
     ) -> Option<(Type, List<TypeVar>, Text)> {
+        // Cycle guard: if we're already walking re-exports for this
+        // (module, item) pair higher up the call stack, bail out. Returning
+        // None is safe — the caller falls through to its next strategy.
+        let key = (current_module_path.clone(), Text::from(func_name));
+        if !self.reexport_resolution_in_progress.insert(key.clone()) {
+            return None;
+        }
+
+        let result = self.find_function_with_source_module_impl(
+            ast, func_name, current_module_path, registry,
+        );
+        self.reexport_resolution_in_progress.remove(&key);
+        result
+    }
+
+    fn find_function_with_source_module_impl(
+        &mut self,
+        ast: &verum_ast::Module,
+        func_name: &str,
+        current_module_path: &Text,
+        registry: &verum_modules::ModuleRegistry,
+    ) -> Option<(Type, List<TypeVar>, Text)> {
         use verum_ast::ItemKind;
         use verum_ast::decl::{MountTreeKind, Visibility as AstVisibility};
         use verum_ast::ty::PathSegment;
@@ -32332,11 +32422,17 @@ impl TypeChecker {
         current_module_path: &Text,
         registry: &verum_modules::ModuleRegistry,
     ) -> Option<verum_modules::ExportKind> {
+        // Thread a fresh visited-set through the recursion so that ring-shaped
+        // `public mount` re-exports (A re-exports B re-exports A for the same
+        // item name) terminate with None instead of blowing the stack.
+        let mut visited: std::collections::HashSet<(Text, Text)> =
+            std::collections::HashSet::new();
         self.resolve_export_kind_with_reexports_inner(
             ast,
             item_name,
             current_module_path,
             registry,
+            &mut visited,
         )
     }
 
@@ -32347,7 +32443,16 @@ impl TypeChecker {
         item_name: &str,
         current_module_path: &Text,
         registry: &verum_modules::ModuleRegistry,
+        visited: &mut std::collections::HashSet<(Text, Text)>,
     ) -> Option<verum_modules::ExportKind> {
+        // Cycle guard: already walking this (module, item) on our stack.
+        // Returning None here is safe — it causes the caller to fall through
+        // to the actual ExportKind in the export table, which is the correct
+        // fallback when we cannot prove a different kind via re-export.
+        let key = (current_module_path.clone(), Text::from(item_name));
+        if !visited.insert(key) {
+            return None;
+        }
         use verum_ast::ItemKind;
         use verum_ast::decl::{MountTreeKind, Visibility as AstVisibility};
         use verum_ast::ty::PathSegment;
@@ -32503,13 +32608,16 @@ impl TypeChecker {
                             // If the source's kind is also Type, we may need to recurse
                             // (in case of chained re-exports)
                             if exported.kind == ExportKind::Type {
-                                // Recurse to find the actual kind
+                                // Recurse to find the actual kind — inner form
+                                // so the visited-set is threaded and ring-shaped
+                                // re-exports terminate instead of stack-overflowing.
                                 let source_path_text = verum_common::Text::from(source_path.clone());
-                                if let Some(actual_kind) = self.resolve_export_kind_with_reexports(
+                                if let Some(actual_kind) = self.resolve_export_kind_with_reexports_inner(
                                     &source_module.ast,
                                     item_name,
                                     &source_path_text,
                                     registry,
+                                    visited,
                                 ) {
                                     return Some(actual_kind);
                                 }
@@ -32518,11 +32626,12 @@ impl TypeChecker {
                         }
                         // If not in export table, try to resolve from the source AST
                         let source_path_text = verum_common::Text::from(source_path.clone());
-                        if let Some(kind) = self.resolve_export_kind_with_reexports(
+                        if let Some(kind) = self.resolve_export_kind_with_reexports_inner(
                             &source_module.ast,
                             item_name,
                             &source_path_text,
                             registry,
+                            visited,
                         ) {
                             return Some(kind);
                         }
@@ -33650,6 +33759,50 @@ impl TypeChecker {
     }
 
     fn import_all_from_module(
+        &mut self,
+        module_path: &Text,
+        registry: &verum_modules::ModuleRegistry,
+    ) -> Result<()> {
+        // Cycle guard: if `module_path` is already being glob-expanded higher
+        // up the call stack, re-entering it would recurse unbounded. Emit
+        // E0811 with the full visit path and bail out of the inner expansion
+        // (the outer expansion continues). Spec: CLAUDE.md § CRITICAL: Verum
+        // Grammar — `mount` semantics must not crash on cyclic topology.
+        if self.glob_imports_in_progress.contains(module_path) {
+            let mut modules_in_cycle: List<Text> = List::new();
+            let mut in_cycle = false;
+            for m in &self.glob_imports_stack {
+                if m == module_path {
+                    in_cycle = true;
+                }
+                if in_cycle {
+                    modules_in_cycle.push(m.clone());
+                }
+            }
+            modules_in_cycle.push(module_path.clone());
+            let cycle_path: Text = modules_in_cycle
+                .iter()
+                .map(|m| m.as_str())
+                .collect::<Vec<_>>()
+                .join(" -> ")
+                .into();
+            return Err(crate::TypeError::ImportCycle {
+                cycle_path,
+                modules_in_cycle,
+                span: verum_ast::span::Span::dummy(),
+            });
+        }
+
+        // Push onto the cycle-tracking stack, ensuring we pop on every exit.
+        self.glob_imports_in_progress.insert(module_path.clone());
+        self.glob_imports_stack.push(module_path.clone());
+        let result = self.import_all_from_module_impl(module_path, registry);
+        self.glob_imports_stack.pop();
+        self.glob_imports_in_progress.remove(module_path);
+        result
+    }
+
+    fn import_all_from_module_impl(
         &mut self,
         module_path: &Text,
         registry: &verum_modules::ModuleRegistry,
@@ -55279,3 +55432,159 @@ fn resolve_primitive_method(recv_ty: &Type, method: &str, arg_count: usize) -> O
 
 
 // Tests moved to tests/infer_tests.rs
+
+// ---------------------------------------------------------------------------
+// Mount-cycle-detection regression tests (SIGBUS fix, 2026-04-24).
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod mount_cycle_tests {
+    //! Regression: when a stdlib module's glob expansion re-enters itself via
+    //! `public mount` re-exports the interpreter used to SIGBUS with ~900k
+    //! `__mh_execute_header` frames. The compiler now guards every glob-
+    //! expansion entry point with a `HashSet<Text>` visited-set and emits
+    //! `TypeError::ImportCycle` (E0811) when the set re-enters.
+
+    use super::TypeChecker;
+    use crate::TypeError;
+    use verum_ast::decl::{ModuleDecl, MountDecl, MountTree, MountTreeKind, Visibility};
+    use verum_ast::span::Span;
+    use verum_ast::ty::{Ident, Path, PathSegment};
+    use verum_common::{List, Maybe, Text};
+
+    fn mount_glob_decl(path_str: &str) -> MountDecl {
+        let span = Span::dummy();
+        let segments: List<PathSegment> = path_str
+            .split('.')
+            .map(|seg| PathSegment::Name(Ident::new(seg, span)))
+            .collect();
+        MountDecl {
+            visibility: Visibility::Private,
+            tree: MountTree {
+                kind: MountTreeKind::Glob(Path::new(segments, span)),
+                alias: Maybe::None,
+                span,
+            },
+            alias: Maybe::None,
+            span,
+        }
+    }
+
+    fn make_module(name: &str) -> ModuleDecl {
+        let span = Span::dummy();
+        ModuleDecl {
+            name: Ident::new(name, span),
+            visibility: Visibility::Public,
+            items: Maybe::Some(List::new()),
+            profile: Maybe::None,
+            features: Maybe::None,
+            contexts: List::new(),
+            span,
+        }
+    }
+
+    /// Direct test: calling `import_all_from_inline_module` for a module
+    /// whose path is already on the glob-in-progress stack must return
+    /// `TypeError::ImportCycle`, not stack-overflow.
+    #[test]
+    fn inline_module_cycle_returns_import_cycle_error() {
+        let mut checker = TypeChecker::new();
+        let key: Text = "cog.loopy".into();
+
+        // Register an empty inline module so the code path doesn't bail early
+        // with "module not found".
+        checker
+            .inline_modules
+            .insert(key.clone(), make_module("loopy"));
+
+        // Seed the glob-in-progress set to simulate being mid-expansion of
+        // this module (as would happen if the caller is one stack frame up).
+        checker.glob_imports_in_progress.insert(key.clone());
+        checker.glob_imports_stack.push(key.clone());
+
+        // Recursively entering the same module must produce E0811, not SIGBUS.
+        let err = checker
+            .import_all_from_inline_module(key.as_str())
+            .expect_err("expected ImportCycle error on re-entry");
+
+        match err {
+            TypeError::ImportCycle {
+                cycle_path,
+                modules_in_cycle,
+                ..
+            } => {
+                assert!(
+                    cycle_path.as_str().contains("loopy"),
+                    "cycle_path should mention the looping module, got: {}",
+                    cycle_path
+                );
+                assert!(
+                    modules_in_cycle
+                        .iter()
+                        .any(|m| m.as_str() == "cog.loopy"),
+                    "modules_in_cycle should include cog.loopy, got: {:?}",
+                    modules_in_cycle
+                );
+            }
+            other => panic!("expected ImportCycle, got: {:?}", other),
+        }
+    }
+
+    /// Direct test: `import_all_from_module` (registry-backed path) is
+    /// symmetrically guarded.
+    #[test]
+    fn registry_module_cycle_returns_import_cycle_error() {
+        let mut checker = TypeChecker::new();
+        let key: Text = "core.loopy".into();
+
+        // Simulate being mid-expansion.
+        checker.glob_imports_in_progress.insert(key.clone());
+        checker.glob_imports_stack.push(key.clone());
+
+        let registry = verum_modules::ModuleRegistry::new();
+        let err = checker
+            .import_all_from_module(&key, &registry)
+            .expect_err("expected ImportCycle error on re-entry");
+
+        assert!(matches!(err, TypeError::ImportCycle { .. }));
+    }
+
+    /// Positive control: a fresh checker (no in-progress cycle) must NOT
+    /// produce ImportCycle — the guard triggers only on actual re-entry.
+    #[test]
+    fn non_cyclic_inline_mount_does_not_trigger_guard() {
+        let mut checker = TypeChecker::new();
+        let key: Text = "cog.fine".into();
+        checker
+            .inline_modules
+            .insert(key.clone(), make_module("fine"));
+
+        // No seeding — this is a clean call.
+        let result = checker.import_all_from_inline_module(key.as_str());
+        assert!(
+            result.is_ok(),
+            "clean inline-module glob should not be flagged as a cycle, got {:?}",
+            result
+        );
+
+        // After the call the guard must have cleaned up after itself.
+        assert!(
+            !checker.glob_imports_in_progress.contains(&key),
+            "glob_imports_in_progress must drop key on exit"
+        );
+        assert!(
+            checker.glob_imports_stack.is_empty(),
+            "glob_imports_stack must be empty after clean exit"
+        );
+    }
+
+    /// Compile-time regression: ensure the MountDecl helper builds a glob
+    /// that actually lowers to MountTreeKind::Glob (guards against silent
+    /// grammar drift inside the test harness).
+    #[test]
+    fn mount_glob_decl_helper_produces_glob_kind() {
+        let decl = mount_glob_decl("core.action");
+        assert!(matches!(decl.tree.kind, MountTreeKind::Glob(_)));
+    }
+}
+

@@ -904,6 +904,29 @@ pub enum TypeError {
         span: verum_ast::span::Span,
     },
 
+    /// Error: a `mount` / glob / re-export expansion re-entered a module
+    /// that was already being expanded on the same call stack.
+    ///
+    /// The canonical triggers are:
+    ///   * `module core.X;  mount core.*;`  combined with a sibling
+    ///     `public mount core.X.sub;` — the glob pulls `core.X` back
+    ///     into its own expansion.
+    ///   * `public mount .foo;` / `public mount .bar;` chains that
+    ///     re-export an item through a ring of siblings.
+    ///
+    /// Without this guard the expansion recursed unbounded and blew
+    /// the stack as a SIGBUS. Cycles are almost always programmer
+    /// error, so we surface them as a hard diagnostic (`E0811`) rather
+    /// than silently breaking and losing the signal.
+    #[error("import cycle detected: module '{cycle_path}' cycles through mount expansion")]
+    ImportCycle {
+        /// The cycle path, e.g., "core.action -> core.action.primitives -> core.action"
+        cycle_path: Text,
+        /// The module paths involved in the cycle, in visit order.
+        modules_in_cycle: List<Text>,
+        span: verum_ast::span::Span,
+    },
+
     #[error("unresolved type placeholder: {name}")]
     UnresolvedPlaceholder {
         name: Text,
@@ -1817,6 +1840,7 @@ impl TypeError {
             TryInNonResultContext { span, .. } => *span,
             NotResultOrMaybe { span, .. } => *span,
             TypeCycle { span, .. } => *span,
+            ImportCycle { span, .. } => *span,
             UnresolvedPlaceholder { span, .. } => *span,
             IncompleteTypeReference { span, .. } => *span,
             NonContextProtocolInUsing { span, .. } => *span,
@@ -2650,6 +2674,34 @@ impl TypeError {
                      help: recursive types must use indirection (e.g., Box<Self>) to have finite size"
                 );
                 let mut builder = DiagnosticBuilder::error().message(msg);
+                if let Some(diag_span) = convert_span(*span) {
+                    builder = builder.span(diag_span);
+                }
+                builder.build()
+            }
+
+            ImportCycle {
+                cycle_path,
+                modules_in_cycle,
+                span,
+            } => {
+                let mut msg = format!(
+                    "import cycle detected: mount expansion re-entered '{}'\n  \
+                     The following modules form a cycle:\n",
+                    cycle_path
+                );
+                for m in modules_in_cycle {
+                    msg.push_str(&format!("    - {}\n", m));
+                }
+                msg.push_str(
+                    "  help: a module cannot glob-import (`mount core.*`) a path that transitively \
+                     re-exports that same module via `public mount`.\n  \
+                     help: import specific items (`mount core.base.{Int, Text}`) instead of a glob, \
+                     or remove the re-export that closes the cycle."
+                );
+                let mut builder = DiagnosticBuilder::error()
+                    .code("E0811")
+                    .message(msg);
                 if let Some(diag_span) = convert_span(*span) {
                     builder = builder.span(diag_span);
                 }
