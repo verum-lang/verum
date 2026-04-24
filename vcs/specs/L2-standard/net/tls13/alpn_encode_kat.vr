@@ -1,0 +1,113 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: tls13, alpn, rfc7301, encode, kat
+// @timeout: 15000
+// @expected-exit: 0
+
+// RFC 7301 ALPN extension byte-exact KAT:
+//
+//   Extension {
+//       ExtensionType ext_type = application_layer_protocol_negotiation (16);
+//       opaque<2..2^16-1> extension_data = u16_length_prefixed(
+//           ProtocolName protocol_name_list<2..2^16-1>;
+//           ProtocolName ::= opaque<1..255>;
+//       );
+//   }
+//
+// Example wire for ["h2", "http/1.1"]:
+//   00 10                               ext_type = 16
+//   00 0E                               outer len = 14
+//   00 0C                               inner list len = 12
+//   02 68 32                            "h2"
+//   08 68 74 74 70 2F 31 2E 31          "http/1.1"
+
+mount core.*;
+mount core.collections.List;
+mount core.net.tls13.handshake.extension.{
+    Extension, encode_extension, EXT_ALPN,
+};
+
+fn ext_alpn_constant_is_16() {
+    assert(EXT_ALPN == 16_u16);
+}
+
+fn alpn_h2_http11_byte_exact() {
+    // ALPN payloads are raw ASCII; build the two protocol bytes lists.
+    let h2: List<Byte> = [0x68_u8, 0x32_u8];    // "h2"
+    let http11: List<Byte> = [
+        0x68_u8, 0x74_u8, 0x74_u8, 0x70_u8,
+        0x2F_u8, 0x31_u8, 0x2E_u8, 0x31_u8,
+    ];
+    let ext = Extension.AlpnExt { protocols: [h2.clone(), http11.clone()] };
+    let mut out: List<Byte> = [];
+    encode_extension(&ext, &mut out).unwrap();
+
+    // Expected 18 bytes.
+    assert(out.len() == 18);
+    assert(out[0]  == 0x00_u8 && out[1]  == 0x10_u8);    // ext_type
+    assert(out[2]  == 0x00_u8 && out[3]  == 0x0E_u8);    // outer len = 14
+    assert(out[4]  == 0x00_u8 && out[5]  == 0x0C_u8);    // inner list len = 12
+    assert(out[6]  == 0x02_u8);                           // "h2" len
+    assert(out[7]  == 0x68_u8 && out[8] == 0x32_u8);     // "h2"
+    assert(out[9]  == 0x08_u8);                           // "http/1.1" len
+    assert(out[10] == 0x68_u8);                           // 'h'
+    assert(out[11] == 0x74_u8);                           // 't'
+    assert(out[17] == 0x31_u8);                           // '1'
+}
+
+fn alpn_single_h3_protocol() {
+    // ["h3"] → ext_type 00 10 | outer len 5 | inner 3 | "h3" (1+2=3 bytes).
+    let h3: List<Byte> = [0x68_u8, 0x33_u8];
+    let ext = Extension.AlpnExt { protocols: [h3] };
+    let mut out: List<Byte> = [];
+    encode_extension(&ext, &mut out).unwrap();
+    assert(out.len() == 9);
+    assert(out[0] == 0x00_u8 && out[1] == 0x10_u8);
+    assert(out[2] == 0x00_u8 && out[3] == 0x05_u8);       // outer 5
+    assert(out[4] == 0x00_u8 && out[5] == 0x03_u8);       // inner 3
+    assert(out[6] == 0x02_u8);                             // "h3" len
+    assert(out[7] == 0x68_u8);                             // 'h'
+    assert(out[8] == 0x33_u8);                             // '3'
+}
+
+fn alpn_protocol_order_is_preserved() {
+    // Reverse order from the first test — outer bytes must change.
+    let h2: List<Byte> = [0x68_u8, 0x32_u8];
+    let http11: List<Byte> = [
+        0x68_u8, 0x74_u8, 0x74_u8, 0x70_u8,
+        0x2F_u8, 0x31_u8, 0x2E_u8, 0x31_u8,
+    ];
+    let rev_ext = Extension.AlpnExt { protocols: [http11.clone(), h2.clone()] };
+    let mut out: List<Byte> = [];
+    encode_extension(&rev_ext, &mut out).unwrap();
+    // "http/1.1" comes first now: byte 6 = 0x08 (len).
+    assert(out[6]  == 0x08_u8);
+    assert(out[7]  == 0x68_u8 && out[8] == 0x74_u8);      // 'h' 't'
+    // Then "h2" at byte 15.
+    assert(out[15] == 0x02_u8);
+    assert(out[16] == 0x68_u8 && out[17] == 0x32_u8);
+}
+
+fn alpn_single_byte_protocol_name() {
+    // Shortest legal ProtocolName — 1 byte. RFC 7301: "opaque<1..255>".
+    let one: List<Byte> = [0x5A_u8];    // 'Z'
+    let ext = Extension.AlpnExt { protocols: [one] };
+    let mut out: List<Byte> = [];
+    encode_extension(&ext, &mut out).unwrap();
+    // ext_type(2) + outer(2) + inner(2) + u8_len(1) + 1 = 8.
+    assert(out.len() == 8);
+    assert(out[6] == 0x01_u8);
+    assert(out[7] == 0x5A_u8);
+}
+
+@main
+public fn main() -> Int {
+    ext_alpn_constant_is_16();
+    alpn_h2_http11_byte_exact();
+    alpn_single_h3_protocol();
+    alpn_protocol_order_is_preserved();
+    alpn_single_byte_protocol_name();
+    print("RFC 7301 ALPN extension encode byte-exact KAT verified");
+    0
+}
