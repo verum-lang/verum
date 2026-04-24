@@ -1,0 +1,81 @@
+// Per-conflict disposition + policy-aggregate outcomes.
+
+module core.database.sqlite.native.changeset_apply_policy.policy;
+
+mount core.database.sqlite.native.changeset_apply_policy.flags.{
+    is_set, f_nosavepoint, f_invert, f_ignorenoop, f_fknoaction,
+    skips_savepoint, inverts_changeset,
+};
+mount base.{Bool, Int64, Text};
+
+public type Disposition is
+    | DpOmit       // xConflict returned SQLITE_CHANGESET_OMIT (0)
+    | DpReplace    // SQLITE_CHANGESET_REPLACE (1)
+    | DpAbort      // SQLITE_CHANGESET_ABORT (2)
+    ;
+
+public fn code(d: &Disposition) -> Int {
+    match d {
+        DpOmit    => 0,
+        DpReplace => 1,
+        DpAbort   => 2,
+    }
+}
+
+public fn default_disposition() -> Disposition { DpAbort }
+
+public fn disposition_name(d: &Disposition) -> Text {
+    match d {
+        DpOmit    => "OMIT".clone(),
+        DpReplace => "REPLACE".clone(),
+        DpAbort   => "ABORT".clone(),
+    }
+}
+
+public fn is_terminal(d: &Disposition) -> Bool {
+    match d { DpAbort => true, _ => false }
+}
+
+public fn keeps_going(d: &Disposition) -> Bool {
+    !is_terminal(d)
+}
+
+// Aggregate outcome after running through a changeset — a single ABORT wins.
+public type ApplyOutcome is
+    | AoOk
+    | AoOkWithSkips(Int64)       // number of omitted entries
+    | AoAborted
+    ;
+
+public fn outcome_name(o: &ApplyOutcome) -> Text {
+    match o {
+        AoOk              => "ok".clone(),
+        AoOkWithSkips(_)  => "ok_with_skips".clone(),
+        AoAborted         => "aborted".clone(),
+    }
+}
+
+public fn summarise(
+    any_aborted: Bool,
+    omit_count: Int64,
+) -> ApplyOutcome {
+    if any_aborted { return AoAborted; }
+    if omit_count > (0 as Int64) { return AoOkWithSkips(omit_count); }
+    AoOk
+}
+
+public fn omit_count(o: &ApplyOutcome) -> Int64 {
+    match o {
+        AoOkWithSkips(n) => n.clone(),
+        _                => 0 as Int64,
+    }
+}
+
+// Savepoint usage is determined by flags.
+public fn wraps_in_savepoint(flags: Int64) -> Bool {
+    !skips_savepoint(flags)
+}
+
+public fn reverses_direction(flags: Int64) -> Bool {
+    inverts_changeset(flags)
+}

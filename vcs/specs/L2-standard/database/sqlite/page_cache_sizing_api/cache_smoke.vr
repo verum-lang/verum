@@ -1,0 +1,79 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, page_cache_sizing_api, pragma
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.page_cache_sizing_api.cache_size.{
+    default_value,
+    Interpretation, InPages, InKib,
+    classify, interp_name,
+    effective_page_count, is_unlimited,
+    min_pages, is_below_minimum,
+};
+mount base.{Bool};
+
+fn test_default_value() {
+    assert_eq(default_value(), -2000);    // -2000 → 2000 KiB
+}
+
+fn test_classify_positive_is_pages() {
+    match classify(100)  { InPages(n) => assert_eq(n, 100), _ => assert(false) }
+    match classify(0)    { InPages(n) => assert_eq(n, 0),   _ => assert(false) }
+}
+
+fn test_classify_negative_is_kib() {
+    match classify(-2000) { InKib(n) => assert_eq(n, 2000), _ => assert(false) }
+    match classify(-500)  { InKib(n) => assert_eq(n, 500),  _ => assert(false) }
+}
+
+fn test_interp_names() {
+    assert(interp_name(&InPages(1)) == "pages".clone());
+    assert(interp_name(&InKib(1))   == "kib".clone());
+}
+
+fn test_effective_page_count_positive() {
+    assert_eq(effective_page_count(100, 4096), 100);
+    assert_eq(effective_page_count(0, 4096), 0);
+}
+
+fn test_effective_page_count_kib_mode() {
+    // -2000 KiB / 4096-byte pages = (2000*1024)/4096 = 500 pages
+    assert_eq(effective_page_count(-2000, 4096), 500);
+    // -1000 KiB / 1024-byte pages = 1000 pages
+    assert_eq(effective_page_count(-1000, 1024), 1000);
+}
+
+fn test_effective_page_count_bad_page_size() {
+    assert_eq(effective_page_count(-2000, 0), 0);
+    assert_eq(effective_page_count(-2000, -1), 0);
+}
+
+fn test_is_unlimited() {
+    assert(is_unlimited(0));
+    assert(!is_unlimited(100));
+    assert(!is_unlimited(-100));
+}
+
+fn test_min_pages_and_below_minimum() {
+    assert_eq(min_pages(), 10);
+    // 5 pages from positive → below minimum
+    assert(is_below_minimum(5, 4096));
+    assert(!is_below_minimum(10, 4096));
+    assert(!is_below_minimum(100, 4096));
+    // Unlimited (0) is not "below minimum" since effective = 0
+    assert(!is_below_minimum(0, 4096));
+}
+
+fn main() {
+    test_default_value();
+    test_classify_positive_is_pages();
+    test_classify_negative_is_kib();
+    test_interp_names();
+    test_effective_page_count_positive();
+    test_effective_page_count_kib_mode();
+    test_effective_page_count_bad_page_size();
+    test_is_unlimited();
+    test_min_pages_and_below_minimum();
+}

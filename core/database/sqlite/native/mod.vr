@@ -684,3 +684,19 @@ public module readonly_db_detect;
 public module temp_store_policy;
 // - create_table_default_cols: implicit rowid aliases + CREATE-AS-SELECT column inference
 public module create_table_default_cols;
+// - vfs_xsleep_api: sqlite3_vfs.xSleep microsecond request + clock-resolution round-up
+public module vfs_xsleep_api;
+// - sqlite_version_fmt: libversion_number encode/decode + dotted-text + at_least
+public module sqlite_version_fmt;
+// - page_cache_sizing_api: PRAGMA cache_size — pages vs KiB interpretation
+public module page_cache_sizing_api;
+// - pragma_synchronous_mode: 4-mode OFF/NORMAL/FULL/EXTRA + per-mode fsync rules
+public module pragma_synchronous_mode;
+// - vtab_update_api: xUpdate argc signature → 4-way op (DELETE/INSERT/UPDATE/UPDATE_ROWID)
+public module vtab_update_api;
+// - limit_clause_validator: LIMIT/OFFSET resolve (NULL + negative → unbounded/0)
+public module limit_clause_validator;
+// - order_by_term_api: ASC/DESC + NullPolicy + collate + output-index/alias target
+public module order_by_term_api;
+// - changeset_apply_policy: 4-bit APPLY_* flags + disposition + apply outcome
+public module changeset_apply_policy;

@@ -1,0 +1,46 @@
+// PRAGMA cache_size interpretation + page count computation.
+
+module core.database.sqlite.native.page_cache_sizing_api.cache_size;
+
+mount base.{Bool, Int64, Text};
+
+// Default cache_size per §18.4: -2000 = 2000 KiB.
+public fn default_value() -> Int { -2000 }
+
+public type Interpretation is
+    | InPages(Int)        // positive: literal page count
+    | InKib(Int)          // negative: KiB budget
+    ;
+
+public fn classify(n: Int) -> Interpretation {
+    if n >= 0 { InPages(n) } else { InKib(-n) }
+}
+
+public fn interp_name(i: &Interpretation) -> Text {
+    match i {
+        InPages(_) => "pages".clone(),
+        InKib(_)   => "kib".clone(),
+    }
+}
+
+// Effective page count given page_size (bytes).
+public fn effective_page_count(pragma_value: Int, page_size_bytes: Int) -> Int {
+    if pragma_value >= 0 { return pragma_value; }
+    if page_size_bytes <= 0 { return 0; }
+    let kib = (-pragma_value) as Int64;
+    let bytes = kib * (1024 as Int64);
+    let pages = bytes / (page_size_bytes as Int64);
+    pages as Int
+}
+
+public fn is_unlimited(pragma_value: Int) -> Bool {
+    pragma_value == 0
+}
+
+// Minimum viable cache size per SQLite (10 pages).
+public fn min_pages() -> Int { 10 }
+
+public fn is_below_minimum(pragma_value: Int, page_size_bytes: Int) -> Bool {
+    let n = effective_page_count(pragma_value, page_size_bytes);
+    n > 0 && n < min_pages()
+}

@@ -1,0 +1,66 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, vtab_update_api, vtab
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.vtab_update_api.op.{
+    VtabUpdateOp, VuDelete, VuInsert, VuUpdateSameRowid, VuUpdateWithRowidChange,
+    op_name, is_insert, is_delete, is_update, changes_rowid,
+    classify, value_column_offset,
+};
+mount base.{Bool};
+
+fn test_op_names() {
+    assert(op_name(&VuDelete)                == "DELETE".clone());
+    assert(op_name(&VuInsert)                == "INSERT".clone());
+    assert(op_name(&VuUpdateSameRowid)       == "UPDATE".clone());
+    assert(op_name(&VuUpdateWithRowidChange) == "UPDATE_ROWID".clone());
+}
+
+fn test_classifiers() {
+    assert(is_delete(&VuDelete));
+    assert(is_insert(&VuInsert));
+    assert(is_update(&VuUpdateSameRowid));
+    assert(is_update(&VuUpdateWithRowidChange));
+    assert(!is_update(&VuDelete));
+    assert(changes_rowid(&VuUpdateWithRowidChange));
+    assert(!changes_rowid(&VuUpdateSameRowid));
+    assert(!changes_rowid(&VuInsert));
+}
+
+fn test_classify_argc_is_one_is_delete() {
+    match classify(true, false, false) { VuDelete => {}, _ => assert(false) }
+    // argv[0] flags ignored when argc==1
+    match classify(true, true, true)   { VuDelete => {}, _ => assert(false) }
+}
+
+fn test_classify_argc_more_insert() {
+    match classify(false, true, false) { VuInsert => {}, _ => assert(false) }
+    match classify(false, true, true)  { VuInsert => {}, _ => assert(false) }
+}
+
+fn test_classify_argc_more_update_same_rowid() {
+    match classify(false, false, true) { VuUpdateSameRowid => {}, _ => assert(false) }
+}
+
+fn test_classify_argc_more_update_rowid_change() {
+    match classify(false, false, false) {
+        VuUpdateWithRowidChange => {}, _ => assert(false),
+    }
+}
+
+fn test_value_column_offset() {
+    assert_eq(value_column_offset(), 2);
+}
+
+fn main() {
+    test_op_names();
+    test_classifiers();
+    test_classify_argc_is_one_is_delete();
+    test_classify_argc_more_insert();
+    test_classify_argc_more_update_same_rowid();
+    test_classify_argc_more_update_rowid_change();
+    test_value_column_offset();
+}

@@ -1,0 +1,16 @@
+// =============================================================================
+// core/database/sqlite/native/limit_clause_validator/mod.vr
+// =============================================================================
+// LIMIT / OFFSET clause validation — SQLite coerces negatives and overflow.
+// Spec §13.8 — LIMIT semantics.
+//
+// Rules:
+//   * LIMIT NULL or LIMIT -1  → no limit
+//   * LIMIT <0                → same as LIMIT -1 (no limit)
+//   * OFFSET NULL             → OFFSET 0
+//   * OFFSET <0               → clamped to 0
+// =============================================================================
+
+module core.database.sqlite.native.limit_clause_validator;
+
+public module clause;

@@ -1,0 +1,11 @@
+// =============================================================================
+// core/database/sqlite/native/vfs_xsleep_api/mod.vr
+// =============================================================================
+// sqlite3_vfs.xSleep — semantic unit is microseconds; VFS may round up to its
+// clock resolution. Return value = actual microseconds slept.
+// Spec §7.4 — VFS xSleep.
+// =============================================================================
+
+module core.database.sqlite.native.vfs_xsleep_api;
+
+public module request;

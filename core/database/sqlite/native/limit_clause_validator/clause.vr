@@ -1,0 +1,56 @@
+// LIMIT / OFFSET resolved values.
+
+module core.database.sqlite.native.limit_clause_validator.clause;
+
+mount base.{Bool, Int64, Maybe};
+
+public type LimitClause is {
+    has_limit: Bool,
+    effective_limit: Int64,      // -1 if unbounded
+    effective_offset: Int64,
+};
+
+public fn unbounded() -> LimitClause {
+    LimitClause {
+        has_limit: false,
+        effective_limit: -1 as Int64,
+        effective_offset: 0 as Int64,
+    }
+}
+
+public fn resolve(limit: &Maybe<Int64>, offset: &Maybe<Int64>) -> LimitClause {
+    let (has, eff_limit) = match limit {
+        Maybe.None    => (false, -1 as Int64),
+        Maybe.Some(n) => {
+            if *n < (0 as Int64) { (false, -1 as Int64) } else { (true, *n) }
+        },
+    };
+    let eff_offset = match offset {
+        Maybe.None    => 0 as Int64,
+        Maybe.Some(n) => if *n < (0 as Int64) { 0 as Int64 } else { *n },
+    };
+    LimitClause {
+        has_limit: has,
+        effective_limit: eff_limit,
+        effective_offset: eff_offset,
+    }
+}
+
+public fn is_unbounded(c: &LimitClause) -> Bool {
+    !c.has_limit
+}
+
+public fn emits_zero_rows(c: &LimitClause) -> Bool {
+    c.has_limit && c.effective_limit == (0 as Int64)
+}
+
+public fn applies_offset(c: &LimitClause) -> Bool {
+    c.effective_offset > (0 as Int64)
+}
+
+// SQLite grammar caps OFFSET at Int64-max; we expose the check.
+public fn int64_max() -> Int64 { 0x7FFFFFFFFFFFFFFF as Int64 }
+
+public fn offset_overflows_after_n(c: &LimitClause, rows_seen: Int64) -> Bool {
+    rows_seen > int64_max() - c.effective_offset
+}

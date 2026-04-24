@@ -1,0 +1,85 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, pragma_synchronous_mode, pragma
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.pragma_synchronous_mode.mode.{
+    SyncMode, SmOff, SmNormal, SmFull, SmExtra,
+    code, from_code, mode_name,
+    fsyncs_per_commit, fsyncs_master_journal,
+    recommended_default_wal, recommended_default_rollback,
+    is_safe_on_power_loss, ordering_rank, is_stricter_than,
+};
+mount base.{Bool, Maybe};
+
+fn test_codes() {
+    assert_eq(code(&SmOff),    0);
+    assert_eq(code(&SmNormal), 1);
+    assert_eq(code(&SmFull),   2);
+    assert_eq(code(&SmExtra),  3);
+}
+
+fn test_round_trip() {
+    match from_code(0) {
+        Maybe.Some(m) => match &m { SmOff => {}, _ => assert(false) },
+        Maybe.None => assert(false),
+    }
+    match from_code(3) {
+        Maybe.Some(m) => match &m { SmExtra => {}, _ => assert(false) },
+        Maybe.None => assert(false),
+    }
+    match from_code(4) { Maybe.None => {}, Maybe.Some(_) => assert(false) }
+}
+
+fn test_mode_names() {
+    assert(mode_name(&SmOff)    == "OFF".clone());
+    assert(mode_name(&SmNormal) == "NORMAL".clone());
+    assert(mode_name(&SmFull)   == "FULL".clone());
+    assert(mode_name(&SmExtra)  == "EXTRA".clone());
+}
+
+fn test_fsyncs_per_commit() {
+    assert(!fsyncs_per_commit(&SmOff));
+    assert(!fsyncs_per_commit(&SmNormal));
+    assert(fsyncs_per_commit(&SmFull));
+    assert(fsyncs_per_commit(&SmExtra));
+}
+
+fn test_fsyncs_master_journal_only_extra() {
+    assert(fsyncs_master_journal(&SmExtra));
+    assert(!fsyncs_master_journal(&SmFull));
+    assert(!fsyncs_master_journal(&SmOff));
+}
+
+fn test_recommended_defaults() {
+    match recommended_default_wal()      { SmNormal => {}, _ => assert(false) }
+    match recommended_default_rollback() { SmFull   => {}, _ => assert(false) }
+}
+
+fn test_is_safe_on_power_loss() {
+    assert(!is_safe_on_power_loss(&SmOff));
+    assert(is_safe_on_power_loss(&SmNormal));
+    assert(is_safe_on_power_loss(&SmFull));
+}
+
+fn test_ordering_and_stricter() {
+    assert(ordering_rank(&SmOff) < ordering_rank(&SmNormal));
+    assert(ordering_rank(&SmNormal) < ordering_rank(&SmFull));
+    assert(ordering_rank(&SmFull) < ordering_rank(&SmExtra));
+    assert(is_stricter_than(&SmExtra, &SmFull));
+    assert(is_stricter_than(&SmFull, &SmOff));
+    assert(!is_stricter_than(&SmOff, &SmNormal));
+}
+
+fn main() {
+    test_codes();
+    test_round_trip();
+    test_mode_names();
+    test_fsyncs_per_commit();
+    test_fsyncs_master_journal_only_extra();
+    test_recommended_defaults();
+    test_is_safe_on_power_loss();
+    test_ordering_and_stricter();
+}

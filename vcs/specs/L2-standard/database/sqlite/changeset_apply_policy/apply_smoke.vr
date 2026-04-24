@@ -1,0 +1,115 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, changeset_apply_policy, session
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.changeset_apply_policy.flags.{
+    f_nosavepoint, f_invert, f_ignorenoop, f_fknoaction,
+    is_set, set, clear,
+    skips_savepoint, inverts_changeset, ignores_noop, suppresses_fk_action,
+    is_known_only, well_known_bit_count,
+};
+mount core.database.sqlite.native.changeset_apply_policy.policy.{
+    Disposition, DpOmit, DpReplace, DpAbort,
+    code as disposition_code, default_disposition,
+    disposition_name, is_terminal, keeps_going,
+    ApplyOutcome, AoOk, AoOkWithSkips, AoAborted,
+    outcome_name, summarise, omit_count,
+    wraps_in_savepoint, reverses_direction,
+};
+mount base.{Bool, Int64};
+
+fn test_flag_constants() {
+    assert_eq(f_nosavepoint(), 0x01 as Int64);
+    assert_eq(f_invert(),      0x02 as Int64);
+    assert_eq(f_ignorenoop(),  0x04 as Int64);
+    assert_eq(f_fknoaction(),  0x08 as Int64);
+    assert_eq(well_known_bit_count(), 4);
+}
+
+fn test_flag_ops() {
+    let fl = set(set(0 as Int64, f_invert()), f_fknoaction());
+    assert(is_set(fl, f_invert()));
+    assert(is_set(fl, f_fknoaction()));
+    assert(!is_set(fl, f_nosavepoint()));
+    let cleared = clear(fl, f_invert());
+    assert(!is_set(cleared, f_invert()));
+}
+
+fn test_flag_classifiers() {
+    assert(skips_savepoint(f_nosavepoint()));
+    assert(inverts_changeset(f_invert()));
+    assert(ignores_noop(f_ignorenoop()));
+    assert(suppresses_fk_action(f_fknoaction()));
+    assert(!skips_savepoint(0 as Int64));
+}
+
+fn test_is_known_only() {
+    assert(is_known_only(0 as Int64));
+    assert(is_known_only(f_nosavepoint() | f_invert()));
+    assert(!is_known_only(0x10 as Int64));
+}
+
+fn test_disposition_codes() {
+    assert_eq(disposition_code(&DpOmit),    0);
+    assert_eq(disposition_code(&DpReplace), 1);
+    assert_eq(disposition_code(&DpAbort),   2);
+}
+
+fn test_default_disposition() {
+    match default_disposition() { DpAbort => {}, _ => assert(false) }
+}
+
+fn test_disposition_names_and_flags() {
+    assert(disposition_name(&DpOmit) == "OMIT".clone());
+    assert(is_terminal(&DpAbort));
+    assert(!is_terminal(&DpOmit));
+    assert(keeps_going(&DpReplace));
+    assert(!keeps_going(&DpAbort));
+}
+
+fn test_summarise_outcomes() {
+    match summarise(false, 0 as Int64) { AoOk => {}, _ => assert(false) }
+    match summarise(false, 5 as Int64) {
+        AoOkWithSkips(n) => assert_eq(n, 5 as Int64),
+        _ => assert(false),
+    }
+    match summarise(true, 10 as Int64) { AoAborted => {}, _ => assert(false) }
+    // Abort wins over skips.
+    match summarise(true, 0 as Int64) { AoAborted => {}, _ => assert(false) }
+}
+
+fn test_omit_count_projection() {
+    assert_eq(omit_count(&AoOk), 0 as Int64);
+    assert_eq(omit_count(&AoOkWithSkips(7 as Int64)), 7 as Int64);
+    assert_eq(omit_count(&AoAborted), 0 as Int64);
+}
+
+fn test_savepoint_and_direction_flags() {
+    assert(wraps_in_savepoint(0 as Int64));
+    assert(!wraps_in_savepoint(f_nosavepoint()));
+    assert(reverses_direction(f_invert()));
+    assert(!reverses_direction(0 as Int64));
+}
+
+fn test_outcome_names() {
+    assert(outcome_name(&AoOk)                 == "ok".clone());
+    assert(outcome_name(&AoOkWithSkips(1 as Int64)) == "ok_with_skips".clone());
+    assert(outcome_name(&AoAborted)            == "aborted".clone());
+}
+
+fn main() {
+    test_flag_constants();
+    test_flag_ops();
+    test_flag_classifiers();
+    test_is_known_only();
+    test_disposition_codes();
+    test_default_disposition();
+    test_disposition_names_and_flags();
+    test_summarise_outcomes();
+    test_omit_count_projection();
+    test_savepoint_and_direction_flags();
+    test_outcome_names();
+}

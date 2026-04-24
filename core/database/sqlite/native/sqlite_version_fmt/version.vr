@@ -1,0 +1,77 @@
+// Version struct + encode/decode helpers.
+
+module core.database.sqlite.native.sqlite_version_fmt.version;
+
+mount base.{Bool, Int64, Text};
+
+public type Version is {
+    major: Int,
+    minor: Int,
+    patch: Int,
+};
+
+public fn new(major: Int, minor: Int, patch: Int) -> Version {
+    Version { major: major, minor: minor, patch: patch }
+}
+
+public fn libversion_number(v: &Version) -> Int64 {
+    (v.major as Int64) * (1000000 as Int64)
+        + (v.minor as Int64) * (1000 as Int64)
+        + (v.patch as Int64)
+}
+
+public fn from_libversion_number(n: Int64) -> Version {
+    let major = (n / (1000000 as Int64)) as Int;
+    let rest = n - (major as Int64) * (1000000 as Int64);
+    let minor = (rest / (1000 as Int64)) as Int;
+    let patch = (rest - (minor as Int64) * (1000 as Int64)) as Int;
+    new(major, minor, patch)
+}
+
+// Emit small non-negative integer as Text.
+fn int_to_text(n: Int) -> Text {
+    if n == 0 { return "0".clone(); }
+    let mut v: Int = if n < 0 { -n } else { n };
+    let mut digits = "".clone();
+    while v > 0 {
+        let d = (v % 10) as u8;
+        digits.push_byte((d + 0x30 as u8) as u8);
+        v = v / 10;
+    }
+    let bs = digits.as_bytes();
+    let mut out = "".clone();
+    if n < 0 { out.push_byte(0x2D as u8); }
+    let mut i: Int = bs.len() - 1;
+    while i >= 0 {
+        out.push_byte(bs[i]);
+        i = i - 1;
+    }
+    out
+}
+
+public fn to_dotted_text(v: &Version) -> Text {
+    let mut out = "".clone();
+    out = out + int_to_text(v.major);
+    out.push_byte(0x2E as u8);
+    out = out + int_to_text(v.minor);
+    out.push_byte(0x2E as u8);
+    out = out + int_to_text(v.patch);
+    out
+}
+
+public fn at_least(v: &Version, major: Int, minor: Int, patch: Int) -> Bool {
+    if v.major > major { return true; }
+    if v.major < major { return false; }
+    if v.minor > minor { return true; }
+    if v.minor < minor { return false; }
+    v.patch >= patch
+}
+
+public fn before(v: &Version, major: Int, minor: Int, patch: Int) -> Bool {
+    !at_least(v, major, minor, patch)
+}
+
+// SQLite 3.0.0 and later use the major=3 namespace.
+public fn is_sqlite3_family(v: &Version) -> Bool {
+    v.major == 3
+}

@@ -1,0 +1,102 @@
+// ORDER BY resolved term.
+
+module core.database.sqlite.native.order_by_term_api.term;
+
+mount base.{Bool, Text};
+
+public type NullPolicy is
+    | NpFirst
+    | NpLast
+    | NpDefault
+    ;
+
+public fn null_policy_name(p: &NullPolicy) -> Text {
+    match p {
+        NpFirst   => "FIRST".clone(),
+        NpLast    => "LAST".clone(),
+        NpDefault => "DEFAULT".clone(),
+    }
+}
+
+// Resolve default policy: ASC→FIRST, DESC→LAST.
+public fn resolve_null_policy(p: &NullPolicy, ascending: Bool) -> NullPolicy {
+    match p {
+        NpDefault => if ascending { NpFirst } else { NpLast },
+        NpFirst   => NpFirst,
+        NpLast    => NpLast,
+    }
+}
+
+// Target of the ORDER BY term — an output column alias / index / expression.
+public type Target is
+    | TgOutputColumnIndex(Int)    // SELECT x AS a, y; ORDER BY 1 → index 1
+    | TgOutputAlias(Text)         // ORDER BY a (matches alias)
+    | TgExpression                // expr not matching any output column
+    ;
+
+public fn target_name(t: &Target) -> Text {
+    match t {
+        TgOutputColumnIndex(_) => "column_index".clone(),
+        TgOutputAlias(_)       => "alias".clone(),
+        TgExpression           => "expression".clone(),
+    }
+}
+
+public fn is_index_ref(t: &Target) -> Bool {
+    match t { TgOutputColumnIndex(_) => true, _ => false }
+}
+
+public fn is_alias_ref(t: &Target) -> Bool {
+    match t { TgOutputAlias(_) => true, _ => false }
+}
+
+public type OrderByTerm is {
+    target: Target,
+    ascending: Bool,
+    null_policy: NullPolicy,
+    collation: Text,
+};
+
+public fn asc_term(target: Target) -> OrderByTerm {
+    OrderByTerm {
+        target: target,
+        ascending: true,
+        null_policy: NpDefault,
+        collation: "".clone(),
+    }
+}
+
+public fn desc_term(target: Target) -> OrderByTerm {
+    OrderByTerm {
+        target: target,
+        ascending: false,
+        null_policy: NpDefault,
+        collation: "".clone(),
+    }
+}
+
+public fn with_null_policy(mut t: OrderByTerm, p: NullPolicy) -> OrderByTerm {
+    t.null_policy = p;
+    t
+}
+
+public fn with_collation(mut t: OrderByTerm, c: Text) -> OrderByTerm {
+    t.collation = c;
+    t
+}
+
+public fn effective_null_policy(t: &OrderByTerm) -> NullPolicy {
+    resolve_null_policy(&t.null_policy, t.ascending)
+}
+
+public fn has_explicit_collation(t: &OrderByTerm) -> Bool {
+    t.collation.len() > 0
+}
+
+// Validate term: output-column index must be in [1, n_output].
+public fn index_is_valid(t: &OrderByTerm, n_output: Int) -> Bool {
+    match &t.target {
+        TgOutputColumnIndex(i) => *i >= 1 && *i <= n_output,
+        _ => true,
+    }
+}

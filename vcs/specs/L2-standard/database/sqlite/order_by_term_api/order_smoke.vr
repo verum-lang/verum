@@ -1,0 +1,86 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, order_by_term_api, sql
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.order_by_term_api.term.{
+    NullPolicy, NpFirst, NpLast, NpDefault,
+    null_policy_name, resolve_null_policy,
+    Target, TgOutputColumnIndex, TgOutputAlias, TgExpression,
+    target_name, is_index_ref, is_alias_ref,
+    OrderByTerm,
+    asc_term, desc_term, with_null_policy, with_collation,
+    effective_null_policy, has_explicit_collation, index_is_valid,
+};
+mount base.{Bool};
+
+fn test_null_policy_names() {
+    assert(null_policy_name(&NpFirst)   == "FIRST".clone());
+    assert(null_policy_name(&NpLast)    == "LAST".clone());
+    assert(null_policy_name(&NpDefault) == "DEFAULT".clone());
+}
+
+fn test_resolve_null_policy_defaults() {
+    match resolve_null_policy(&NpDefault, true)  { NpFirst => {}, _ => assert(false) }
+    match resolve_null_policy(&NpDefault, false) { NpLast  => {}, _ => assert(false) }
+    // Explicit policy preserved.
+    match resolve_null_policy(&NpFirst, false) { NpFirst => {}, _ => assert(false) }
+    match resolve_null_policy(&NpLast,  true)  { NpLast  => {}, _ => assert(false) }
+}
+
+fn test_target_names_and_classifiers() {
+    assert(target_name(&TgOutputColumnIndex(1)) == "column_index".clone());
+    assert(target_name(&TgOutputAlias("a".clone())) == "alias".clone());
+    assert(target_name(&TgExpression) == "expression".clone());
+    assert(is_index_ref(&TgOutputColumnIndex(1)));
+    assert(!is_index_ref(&TgOutputAlias("a".clone())));
+    assert(is_alias_ref(&TgOutputAlias("a".clone())));
+}
+
+fn test_asc_desc_constructors() {
+    let a = asc_term(TgOutputAlias("col".clone()));
+    assert(a.ascending);
+    match a.null_policy { NpDefault => {}, _ => assert(false) }
+    let d = desc_term(TgOutputColumnIndex(2));
+    assert(!d.ascending);
+}
+
+fn test_with_null_policy_and_collation() {
+    let t0 = asc_term(TgOutputAlias("col".clone()));
+    let t1 = with_null_policy(t0, NpLast);
+    let t2 = with_collation(t1, "NOCASE".clone());
+    match t2.null_policy { NpLast => {}, _ => assert(false) }
+    assert(has_explicit_collation(&t2));
+    assert(t2.collation == "NOCASE".clone());
+}
+
+fn test_effective_null_policy_resolution() {
+    let t = asc_term(TgExpression);
+    match effective_null_policy(&t) { NpFirst => {}, _ => assert(false) }
+    let t2 = desc_term(TgExpression);
+    match effective_null_policy(&t2) { NpLast => {}, _ => assert(false) }
+}
+
+fn test_index_is_valid_bounds() {
+    let t_idx = asc_term(TgOutputColumnIndex(3));
+    assert(index_is_valid(&t_idx, 5));
+    assert(index_is_valid(&t_idx, 3));
+    assert(!index_is_valid(&t_idx, 2));
+    let t_zero = asc_term(TgOutputColumnIndex(0));
+    assert(!index_is_valid(&t_zero, 5));
+    // Non-index targets always pass.
+    let t_alias = asc_term(TgOutputAlias("a".clone()));
+    assert(index_is_valid(&t_alias, 0));
+}
+
+fn main() {
+    test_null_policy_names();
+    test_resolve_null_policy_defaults();
+    test_target_names_and_classifiers();
+    test_asc_desc_constructors();
+    test_with_null_policy_and_collation();
+    test_effective_null_policy_resolution();
+    test_index_is_valid_bounds();
+}

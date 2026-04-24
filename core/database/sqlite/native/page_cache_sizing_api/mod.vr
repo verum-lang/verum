@@ -1,0 +1,10 @@
+// =============================================================================
+// core/database/sqlite/native/page_cache_sizing_api/mod.vr
+// =============================================================================
+// PRAGMA cache_size — positive value = pages, negative = KiB.
+// Spec §18.4 — cache_size.
+// =============================================================================
+
+module core.database.sqlite.native.page_cache_sizing_api;
+
+public module cache_size;

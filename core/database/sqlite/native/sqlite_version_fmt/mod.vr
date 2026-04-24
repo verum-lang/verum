@@ -1,0 +1,15 @@
+// =============================================================================
+// core/database/sqlite/native/sqlite_version_fmt/mod.vr
+// =============================================================================
+// SQLITE_VERSION / sqlite3_libversion_number formatting.
+// Spec §7.1 — version / source id.
+//
+// Rules:
+//   libversion_number = major*1000000 + minor*1000 + patch
+//   SQLITE_VERSION    = "X.Y.Z" (or "X.Y.Z.W" for dev builds)
+//   SQLITE_SOURCE_ID  = "YYYY-MM-DD HH:MM:SS hash"
+// =============================================================================
+
+module core.database.sqlite.native.sqlite_version_fmt;
+
+public module version;

@@ -1,0 +1,15 @@
+// =============================================================================
+// core/database/sqlite/native/pragma_synchronous_mode/mod.vr
+// =============================================================================
+// PRAGMA synchronous — fsync granularity per commit.
+// Spec §18.4 — synchronous.
+//
+//   0 / OFF    — no fsync (fastest; may corrupt on power loss)
+//   1 / NORMAL — fsync at critical moments (default in WAL)
+//   2 / FULL   — fsync each commit (safe; slower)
+//   3 / EXTRA  — FULL + fsync master-journal on multi-db commit
+// =============================================================================
+
+module core.database.sqlite.native.pragma_synchronous_mode;
+
+public module mode;

@@ -1,0 +1,10 @@
+// =============================================================================
+// core/database/sqlite/native/order_by_term_api/mod.vr
+// =============================================================================
+// ORDER BY term — resolution + ASC/DESC + collate override + NULLS policy.
+// Spec §13.7 — ORDER BY.
+// =============================================================================
+
+module core.database.sqlite.native.order_by_term_api;
+
+public module term;

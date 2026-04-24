@@ -1,0 +1,60 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, vfs_xsleep_api, vfs
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.vfs_xsleep_api.request.{
+    ClockResolution, CrMicroseconds, CrMilliseconds, CrCentiseconds,
+    resolution_microseconds,
+    actual_sleep_us, is_subsecond, is_yield_request, default_resolution,
+};
+mount base.{Bool, Int64};
+
+fn test_resolution_microseconds() {
+    assert_eq(resolution_microseconds(&CrMicroseconds),   1 as Int64);
+    assert_eq(resolution_microseconds(&CrMilliseconds),   1000 as Int64);
+    assert_eq(resolution_microseconds(&CrCentiseconds),  10000 as Int64);
+}
+
+fn test_default_resolution() {
+    match default_resolution() { CrMilliseconds => {}, _ => assert(false) }
+}
+
+fn test_actual_sleep_rounds_up() {
+    // Request 500us with millisecond clock → 1000us
+    assert_eq(actual_sleep_us(500 as Int64, &CrMilliseconds), 1000 as Int64);
+    // Exact multiple stays
+    assert_eq(actual_sleep_us(2000 as Int64, &CrMilliseconds), 2000 as Int64);
+    // Request 1us with centisecond clock → 10000us
+    assert_eq(actual_sleep_us(1 as Int64, &CrCentiseconds), 10000 as Int64);
+    // Microsecond clock passes through
+    assert_eq(actual_sleep_us(42 as Int64, &CrMicroseconds), 42 as Int64);
+}
+
+fn test_actual_sleep_zero_or_negative() {
+    assert_eq(actual_sleep_us(0 as Int64, &CrMilliseconds),   0 as Int64);
+    assert_eq(actual_sleep_us(-1 as Int64, &CrMilliseconds),  0 as Int64);
+}
+
+fn test_is_subsecond() {
+    assert(is_subsecond(500000 as Int64));
+    assert(!is_subsecond(1000000 as Int64));
+    assert(!is_subsecond(5000000 as Int64));
+}
+
+fn test_is_yield_request() {
+    assert(is_yield_request(0 as Int64));
+    assert(!is_yield_request(1 as Int64));
+    assert(!is_yield_request(-5 as Int64));
+}
+
+fn main() {
+    test_resolution_microseconds();
+    test_default_resolution();
+    test_actual_sleep_rounds_up();
+    test_actual_sleep_zero_or_negative();
+    test_is_subsecond();
+    test_is_yield_request();
+}

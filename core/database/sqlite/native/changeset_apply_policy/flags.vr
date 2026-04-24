@@ -1,0 +1,29 @@
+// SQLITE_CHANGESETAPPLY_* flag bits.
+
+module core.database.sqlite.native.changeset_apply_policy.flags;
+
+mount base.{Bool, Int64};
+
+public fn f_nosavepoint() -> Int64 { 0x01 as Int64 }
+public fn f_invert()      -> Int64 { 0x02 as Int64 }
+public fn f_ignorenoop()  -> Int64 { 0x04 as Int64 }
+public fn f_fknoaction()  -> Int64 { 0x08 as Int64 }
+
+public fn is_set(flags: Int64, bit: Int64) -> Bool {
+    (flags & bit) != (0 as Int64)
+}
+
+public fn set(flags: Int64, bit: Int64) -> Int64 { flags | bit }
+public fn clear(flags: Int64, bit: Int64) -> Int64 { flags & !bit }
+
+public fn skips_savepoint(flags: Int64) -> Bool { is_set(flags, f_nosavepoint()) }
+public fn inverts_changeset(flags: Int64) -> Bool { is_set(flags, f_invert()) }
+public fn ignores_noop(flags: Int64) -> Bool { is_set(flags, f_ignorenoop()) }
+public fn suppresses_fk_action(flags: Int64) -> Bool { is_set(flags, f_fknoaction()) }
+
+public fn is_known_only(flags: Int64) -> Bool {
+    let mask = f_nosavepoint() | f_invert() | f_ignorenoop() | f_fknoaction();
+    (flags & !mask) == (0 as Int64)
+}
+
+public fn well_known_bit_count() -> Int { 4 }

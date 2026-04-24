@@ -1,0 +1,59 @@
+// Decoded xUpdate operation taxonomy.
+
+module core.database.sqlite.native.vtab_update_api.op;
+
+mount base.{Bool, Text};
+
+public type VtabUpdateOp is
+    | VuDelete                       // argc == 1
+    | VuInsert                       // argc > 1, argv[0] is NULL
+    | VuUpdateSameRowid              // argv[0] non-null AND equals argv[1]
+    | VuUpdateWithRowidChange        // argv[0] non-null AND differs from argv[1]
+    ;
+
+public fn op_name(o: &VtabUpdateOp) -> Text {
+    match o {
+        VuDelete                 => "DELETE".clone(),
+        VuInsert                 => "INSERT".clone(),
+        VuUpdateSameRowid        => "UPDATE".clone(),
+        VuUpdateWithRowidChange  => "UPDATE_ROWID".clone(),
+    }
+}
+
+public fn is_insert(o: &VtabUpdateOp) -> Bool {
+    match o { VuInsert => true, _ => false }
+}
+
+public fn is_delete(o: &VtabUpdateOp) -> Bool {
+    match o { VuDelete => true, _ => false }
+}
+
+public fn is_update(o: &VtabUpdateOp) -> Bool {
+    match o {
+        VuUpdateSameRowid       => true,
+        VuUpdateWithRowidChange => true,
+        _                       => false,
+    }
+}
+
+public fn changes_rowid(o: &VtabUpdateOp) -> Bool {
+    match o { VuUpdateWithRowidChange => true, _ => false }
+}
+
+// Classify given argc and two equality flags about argv[0].
+//   argc_is_one              — argc == 1 → DELETE
+//   argv0_is_null            — argv[0] is NULL
+//   argv0_equals_argv1       — argv[0] == argv[1] (when argc > 1)
+public fn classify(
+    argc_is_one: Bool,
+    argv0_is_null: Bool,
+    argv0_equals_argv1: Bool,
+) -> VtabUpdateOp {
+    if argc_is_one { return VuDelete; }
+    if argv0_is_null { return VuInsert; }
+    if argv0_equals_argv1 { VuUpdateSameRowid } else { VuUpdateWithRowidChange }
+}
+
+// How many columns does the vtab receive past argv[1] (the post-update rowid)?
+// Caller must know vtab column count to fill this in; helper returns the offset.
+public fn value_column_offset() -> Int { 2 }

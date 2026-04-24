@@ -1,0 +1,13 @@
+// =============================================================================
+// core/database/sqlite/native/changeset_apply_policy/mod.vr
+// =============================================================================
+// sqlite3changeset_apply per-conflict policy — the xConflict callback returns
+// OMIT / REPLACE / ABORT, and sqlite3changeset_apply_v2 accepts flag bits
+// SQLITE_CHANGESETAPPLY_NOSAVEPOINT / _INVERT / _IGNORENOOP / _FKNOACTION.
+// Spec §22 — session extension.
+// =============================================================================
+
+module core.database.sqlite.native.changeset_apply_policy;
+
+public module flags;
+public module policy;

@@ -1,0 +1,16 @@
+// =============================================================================
+// core/database/sqlite/native/vtab_update_api/mod.vr
+// =============================================================================
+// sqlite3_module.xUpdate argc signature — decoded from argc + argv[0] + argv[1].
+// Spec §16.1.9 — vtab xUpdate.
+//
+// Rules:
+//   argc == 1             → DELETE (argv[0] = rowid)
+//   argc > 1, argv[0]==NULL → INSERT
+//   argc > 1, argv[0]!=NULL, argv[0]==argv[1] → plain UPDATE
+//   argc > 1, argv[0]!=NULL, argv[0]!=argv[1] → UPDATE with rowid change
+// =============================================================================
+
+module core.database.sqlite.native.vtab_update_api;
+
+public module op;
