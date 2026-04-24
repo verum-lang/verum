@@ -1,0 +1,82 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: tls13, ticket, issue_options, rfc8446_4_6_1, builder
+// @timeout: 15000
+// @expected-exit: 0
+
+// RFC 8446 §4.6.1 IssueOptions — per-ticket server knobs:
+//
+//   * default() — 7-day (604800s) lifetime, 0 bytes of 0-RTT budget,
+//     empty ALPN (caller pins later via with_alpn).
+//   * Builder chain preserves prior fields across calls.
+//   * Post-handshake tickets capped at 7 days (RFC 8446 §4.6.1 para 1).
+
+mount core.*;
+mount core.collections.List;
+mount core.net.tls13.handshake.ticket_issuer.{IssueOptions};
+
+fn defaults_match_rfc_4_6_1() {
+    let o = IssueOptions.default();
+    // 7 days = 7 × 86400 = 604_800 seconds.
+    assert(o.lifetime_seconds == 604_800_u32);
+    // Safe default — 0-RTT disabled until operator explicitly enables.
+    assert(o.max_early_data_size == 0_u32);
+    // No ALPN pin by default.
+    assert(o.alpn.len() == 0);
+}
+
+fn with_lifetime_overrides_default() {
+    let o = IssueOptions.default().with_lifetime(3_600_u32);
+    assert(o.lifetime_seconds == 3_600_u32);
+    // Other fields inherited from default.
+    assert(o.max_early_data_size == 0_u32);
+    assert(o.alpn.len() == 0);
+}
+
+fn with_0rtt_budget_sets_max_early_data_size() {
+    let o = IssueOptions.default().with_0rtt_budget(16_384_u32);
+    assert(o.max_early_data_size == 16_384_u32);
+    assert(o.lifetime_seconds == 604_800_u32);    // still default
+}
+
+fn with_alpn_pins_protocol() {
+    // "h3" = 0x68 0x33
+    let alpn: List<Byte> = [0x68_u8, 0x33_u8];
+    let o = IssueOptions.default().with_alpn(alpn);
+    assert(o.alpn.len() == 2);
+    assert(o.alpn[0] == 0x68_u8);
+    assert(o.alpn[1] == 0x33_u8);
+}
+
+fn builder_chain_combines_all_three_setters() {
+    let alpn: List<Byte> = [0x68_u8, 0x33_u8];
+    let o = IssueOptions.default()
+        .with_lifetime(1_800_u32)
+        .with_0rtt_budget(8_192_u32)
+        .with_alpn(alpn);
+    assert(o.lifetime_seconds == 1_800_u32);
+    assert(o.max_early_data_size == 8_192_u32);
+    assert(o.alpn.len() == 2);
+    assert(o.alpn[0] == 0x68_u8);
+}
+
+fn zero_lifetime_allowed_by_builder() {
+    // The builder does not enforce RFC's "MUST NOT exceed 7 days" —
+    // that's a server-policy decision. A 0 lifetime is the "do not
+    // issue tickets" signal some stacks use; must round-trip.
+    let o = IssueOptions.default().with_lifetime(0_u32);
+    assert(o.lifetime_seconds == 0_u32);
+}
+
+@main
+public fn main() -> Int {
+    defaults_match_rfc_4_6_1();
+    with_lifetime_overrides_default();
+    with_0rtt_budget_sets_max_early_data_size();
+    with_alpn_pins_protocol();
+    builder_chain_combines_all_three_setters();
+    zero_lifetime_allowed_by_builder();
+    print("RFC 8446 §4.6.1 IssueOptions builder verified");
+    0
+}

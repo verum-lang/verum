@@ -1,0 +1,123 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: x509, chain, errors, rfc5280_6_1
+// @timeout: 15000
+// @expected-exit: 0
+
+// RFC 5280 §6.1.3 certificate-chain validation — each failure mode
+// is surfaced as a distinct ChainError variant. This test pins:
+//
+//   * Every variant is constructible.
+//   * Variants with a payload expose the carried index / value.
+//   * A total match over the ADT distinguishes all 12 variants.
+
+mount core.*;
+mount core.security.x509.chain.{ChainError};
+
+fn all_variants_constructible() {
+    let _a: ChainError = ChainError.EmptyChain;
+    let _b: ChainError = ChainError.UnknownIssuer;
+    let _c: ChainError = ChainError.IssuerSubjectMismatch(2);
+    let _d: ChainError = ChainError.NotYetValid(0);
+    let _e: ChainError = ChainError.Expired(1);
+    let _f: ChainError = ChainError.BadSignature(3);
+    let _g: ChainError = ChainError.NonCaIssuer(1);
+    let _h: ChainError = ChainError.NoKeyCertSign(2);
+    let _i: ChainError = ChainError.PathLenExceeded;
+    let _j: ChainError = ChainError.HostnameMismatch;
+    let _k: ChainError = ChainError.NameConstraintViolation;
+    let _l: ChainError = ChainError.EkuMismatch;
+    let _m: ChainError = ChainError.UnsupportedAlgorithm(0);
+}
+
+fn indexed_variants_expose_their_position() {
+    let e = ChainError.BadSignature(5);
+    match e {
+        ChainError.BadSignature(idx) => assert(idx == 5),
+        _ => panic("expected BadSignature(5)"),
+    }
+    let v = ChainError.NotYetValid(0);
+    match v {
+        ChainError.NotYetValid(idx) => assert(idx == 0),
+        _ => panic("expected NotYetValid(0)"),
+    }
+    let u = ChainError.UnsupportedAlgorithm(12);
+    match u {
+        ChainError.UnsupportedAlgorithm(i) => assert(i == 12),
+        _ => panic("expected UnsupportedAlgorithm(12)"),
+    }
+}
+
+fn variants_are_tagged_distinctly() {
+    let errs: [ChainError; 13] = [
+        ChainError.EmptyChain,
+        ChainError.UnknownIssuer,
+        ChainError.IssuerSubjectMismatch(0),
+        ChainError.NotYetValid(0),
+        ChainError.Expired(0),
+        ChainError.BadSignature(0),
+        ChainError.NonCaIssuer(0),
+        ChainError.NoKeyCertSign(0),
+        ChainError.PathLenExceeded,
+        ChainError.HostnameMismatch,
+        ChainError.NameConstraintViolation,
+        ChainError.EkuMismatch,
+        ChainError.UnsupportedAlgorithm(0),
+    ];
+    let mut tags: [Int; 13] = [0; 13];
+    let mut i: Int = 0;
+    while i < 13 {
+        tags[i] = match errs[i] {
+            ChainError.EmptyChain                  => 1,
+            ChainError.UnknownIssuer               => 2,
+            ChainError.IssuerSubjectMismatch(_)    => 3,
+            ChainError.NotYetValid(_)              => 4,
+            ChainError.Expired(_)                  => 5,
+            ChainError.BadSignature(_)             => 6,
+            ChainError.NonCaIssuer(_)              => 7,
+            ChainError.NoKeyCertSign(_)            => 8,
+            ChainError.PathLenExceeded             => 9,
+            ChainError.HostnameMismatch            => 10,
+            ChainError.NameConstraintViolation     => 11,
+            ChainError.EkuMismatch                 => 12,
+            ChainError.UnsupportedAlgorithm(_)     => 13,
+        };
+        i = i + 1;
+    }
+    let mut j: Int = 0;
+    while j < 13 {
+        let mut k: Int = j + 1;
+        while k < 13 {
+            assert(tags[j] != tags[k]);
+            k = k + 1;
+        }
+        j = j + 1;
+    }
+}
+
+fn path_len_and_name_constraint_are_unit_variants() {
+    // PathLenExceeded and NameConstraintViolation are payloadless —
+    // the validator raises them before it knows which specific cert
+    // caused the violation at RFC 5280 §6.1.4 processing.
+    let _ple: ChainError = ChainError.PathLenExceeded;
+    let _ncv: ChainError = ChainError.NameConstraintViolation;
+    match _ple {
+        ChainError.PathLenExceeded => {},
+        _ => panic("PathLenExceeded must match as unit variant"),
+    }
+    match _ncv {
+        ChainError.NameConstraintViolation => {},
+        _ => panic("NameConstraintViolation must match as unit variant"),
+    }
+}
+
+@main
+public fn main() -> Int {
+    all_variants_constructible();
+    indexed_variants_expose_their_position();
+    variants_are_tagged_distinctly();
+    path_len_and_name_constraint_are_unit_variants();
+    print("RFC 5280 §6.1.3 ChainError variants verified");
+    0
+}
