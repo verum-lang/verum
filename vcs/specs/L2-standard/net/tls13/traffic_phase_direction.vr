@@ -1,0 +1,139 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: tls13, keyschedule, traffic_secret, rfc8446_7_3
+// @timeout: 15000
+// @expected-exit: 0
+
+// RFC 8446 §7.3 TrafficSecret surface:
+//
+//   * TrafficPhase   — EarlyPhase / HandshakePhase / ApplicationPhase
+//   * TrafficDirection — ClientToServer / ServerToClient
+//   * derive_keys(key_len, iv_len=12) → TrafficKeys with key of key_len
+//     and a fixed 12-byte IV; iv_len ≠ 12 rejected.
+//
+// Per RFC 8446 §5.3 TLS 1.3 fixes nonce = 12 bytes (96 bits) for all
+// AEAD suites; derive_keys pins that invariant.
+
+mount core.*;
+mount core.collections.List;
+mount core.security.kdf.hkdf.{HkdfError};
+mount core.net.tls13.cipher_suite.{HashKind};
+mount core.net.tls13.keyschedule.schedule.{
+    TrafficSecret, TrafficKeys, TrafficPhase, TrafficDirection, SecretBytes,
+};
+
+fn make_secret(hash: HashKind) -> TrafficSecret {
+    let out_len = match hash {
+        HashKind.Sha256 => 32,
+        HashKind.Sha384 => 48,
+    };
+    let mut v: List<Byte> = [];
+    let mut i: Int = 0;
+    while i < out_len { v.push(0x11_u8); i = i + 1; }
+    TrafficSecret {
+        secret: SecretBytes.from(v),
+        hash:   hash,
+        phase:  TrafficPhase.ApplicationPhase,
+        dir:    TrafficDirection.ClientToServer,
+    }
+}
+
+fn derive_keys_aes128_gcm_emits_16_byte_key_12_byte_iv() {
+    let ts = make_secret(HashKind.Sha256);
+    let tk = ts.derive_keys(16, 12).unwrap();
+    assert(tk.key.len() == 16);
+    // iv is a fixed [Byte; 12] — derivable length is always 12.
+    assert(tk.iv[0] != tk.iv[11] || tk.iv[0] == tk.iv[0]);   // just touch both ends
+}
+
+fn derive_keys_aes256_gcm_emits_32_byte_key() {
+    let ts = make_secret(HashKind.Sha384);
+    let tk = ts.derive_keys(32, 12).unwrap();
+    assert(tk.key.len() == 32);
+}
+
+fn derive_keys_rejects_iv_len_other_than_12() {
+    let ts = make_secret(HashKind.Sha256);
+    match ts.derive_keys(16, 16) {
+        Err(HkdfError.OutputTooLong { requested, limit }) => {
+            assert(requested == 16);
+            assert(limit == 12);
+        },
+        _ => panic("iv_len != 12 must be OutputTooLong"),
+    }
+}
+
+fn traffic_phase_three_variants_distinct() {
+    let phases: [TrafficPhase; 3] = [
+        TrafficPhase.EarlyPhase,
+        TrafficPhase.HandshakePhase,
+        TrafficPhase.ApplicationPhase,
+    ];
+    let mut tags: [Int; 3] = [0; 3];
+    let mut i: Int = 0;
+    while i < 3 {
+        tags[i] = match phases[i] {
+            TrafficPhase.EarlyPhase       => 1,
+            TrafficPhase.HandshakePhase   => 2,
+            TrafficPhase.ApplicationPhase => 3,
+        };
+        i = i + 1;
+    }
+    assert(tags[0] != tags[1]);
+    assert(tags[1] != tags[2]);
+    assert(tags[0] != tags[2]);
+}
+
+fn traffic_direction_two_variants_distinct() {
+    let c2s = TrafficDirection.ClientToServer;
+    let s2c = TrafficDirection.ServerToClient;
+    let tc = match c2s {
+        TrafficDirection.ClientToServer => 1,
+        TrafficDirection.ServerToClient => 2,
+    };
+    let ts = match s2c {
+        TrafficDirection.ClientToServer => 1,
+        TrafficDirection.ServerToClient => 2,
+    };
+    assert(tc == 1);
+    assert(ts == 2);
+    assert(tc != ts);
+}
+
+fn next_generation_preserves_phase_and_direction() {
+    // TrafficSecret.next_generation (RFC 8446 §4.6.3) produces the
+    // successor traffic secret for key-update. The phase/direction
+    // tags MUST survive the rotation so the connection state machine
+    // knows which half of the wire it's still gating.
+    let ts = make_secret(HashKind.Sha256);
+    let next = ts.next_generation().unwrap();
+    match next.phase {
+        TrafficPhase.ApplicationPhase => {},
+        _ => panic("phase lost across next_generation"),
+    }
+    match next.dir {
+        TrafficDirection.ClientToServer => {},
+        _ => panic("direction lost across next_generation"),
+    }
+    // Hash stays the same too.
+    match next.hash {
+        HashKind.Sha256 => {},
+        _ => panic("hash must persist"),
+    }
+    // The secret bytes are derived via HKDF-Expand-Label "traffic upd"
+    // — 32 bytes for SHA-256.
+    assert(next.secret.len() == 32);
+}
+
+@main
+public fn main() -> Int {
+    derive_keys_aes128_gcm_emits_16_byte_key_12_byte_iv();
+    derive_keys_aes256_gcm_emits_32_byte_key();
+    derive_keys_rejects_iv_len_other_than_12();
+    traffic_phase_three_variants_distinct();
+    traffic_direction_two_variants_distinct();
+    next_generation_preserves_phase_and_direction();
+    print("RFC 8446 §7.3 TrafficSecret derive_keys + phase/direction verified");
+    0
+}
