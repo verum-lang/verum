@@ -2388,12 +2388,36 @@ impl<'a> RecursiveParser<'a> {
                 })
             }
 
-            // Explicit failure with a diagnostic message:
-            //   `fail("reason")` or `fail(f"tmpl {x}")`
+            // Explicit failure with an optional diagnostic message:
+            //   `fail`                — bare, empty message (identity element
+            //                           for OrElse; used in stdlib combinators)
+            //   `fail("reason")`      — parenthesised message
+            //   `fail(f"tmpl {x}")`   — formatted message
+            //   `fail msg`            — prefix form
             Some(TokenKind::Ident(name)) if name.as_str() == "fail" => {
                 self.stream.advance();
-                // Accept `fail(msg)` or `fail msg`.
-                let message = if self.stream.consume(&TokenKind::LParen).is_some() {
+                let span = self.stream.current_span();
+                // Treat `fail` as bare whenever what follows doesn't start a
+                // message expression — a sequence terminator, block end, or
+                // tactic-structural token.
+                let bare = matches!(
+                    self.stream.peek_kind(),
+                    Some(TokenKind::Semicolon)
+                        | Some(TokenKind::Comma)
+                        | Some(TokenKind::RBrace)
+                        | Some(TokenKind::RParen)
+                        | Some(TokenKind::RBracket)
+                        | Some(TokenKind::Eof)
+                        | None,
+                );
+                let message = if bare {
+                    verum_ast::expr::Expr::literal(
+                        verum_ast::literal::Literal::string(
+                            verum_common::Text::from(""),
+                            span,
+                        ),
+                    )
+                } else if self.stream.consume(&TokenKind::LParen).is_some() {
                     let msg = self.parse_expr()?;
                     self.stream.expect(TokenKind::RParen)?;
                     msg
@@ -2738,18 +2762,25 @@ impl<'a> RecursiveParser<'a> {
                 Ok(TacticExpr::Sorry)
             }
 
-            // First/alternative tactics. Grammar allows two forms:
-            //   `first [ t1, t2, t3 ]`  — comma-separated, matches Lean/Coq list syntax
-            //   `first { t1; t2; t3 }`  — block form, matches verum.ebnf §2.19.7
-            // Both desugar to TacticExpr::Alt(...).
-            Some(TokenKind::Ident(name)) if name.as_str() == "first" => {
+            // First/alternative tactics. Grammar allows three forms:
+            //   `first [ t1, t2, t3 ]`  — comma-separated, Lean/Coq list syntax
+            //   `first { t1; t2; t3 }`  — block form, verum.ebnf §2.19.7
+            //   `first(xs)`              — dynamic list argument (user-defined
+            //                              wrapper in stdlib), falls through to
+            //                              the generic Named-tactic path so it
+            //                              can carry a runtime `List<Tactic>`.
+            // Literal forms desugar to TacticExpr::Alt; the dynamic form stays
+            // as Named so the tactic runtime can unpack the list at apply-time.
+            Some(TokenKind::Ident(name)) if name.as_str() == "first"
+                && matches!(self.stream.peek_nth_kind(1),
+                            Some(TokenKind::LBrace) | Some(TokenKind::LBracket)) =>
+            {
                 self.stream.advance();
                 if self.stream.check(&TokenKind::LBrace) {
                     self.stream.advance();
                     let mut tactics = Vec::new();
                     while !self.stream.check(&TokenKind::RBrace) && !self.stream.at_end() {
                         tactics.push(self.parse_tactic_expr()?);
-                        // Accept `;` or `,` as separator; trailing separator is allowed.
                         if self.stream.consume(&TokenKind::Semicolon).is_none() {
                             self.stream.consume(&TokenKind::Comma);
                         }

@@ -118,6 +118,22 @@ fn tactic_repeat_n_with_int_param() {
     .unwrap();
 }
 
+#[test]
+fn tactic_bare_fail_no_message() {
+    // `fail` without a message — identity element for OrElse.
+    // Stdlib `core.proof.tactics.combinators` at line 27.
+    parse_ok("tactic fail() { fail }").unwrap();
+}
+
+#[test]
+fn tactic_first_of_with_list_arg() {
+    // `first(expr)` — dynamic form dispatched through the generic
+    // Named-tactic path; needed by `tactic first_of(alternatives:
+    // List<Tactic>) { first(alternatives) }`.
+    parse_ok("tactic first_of(alternatives: List<Tactic>) { first(alternatives) }")
+        .unwrap();
+}
+
 // -- core.proof.tactics.meta ---------------------------------------
 
 #[test]
