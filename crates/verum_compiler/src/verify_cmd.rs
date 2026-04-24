@@ -744,7 +744,11 @@ impl<'s> VerifyCommand<'s> {
         // `result == body` so the SMT can check ensures against the actual
         // return value rather than an unconstrained fresh variable.
         if has_ensures {
-            let post_start = Instant::now();
+            // Per-ensures timings are recorded inside
+            // verify_postconditions (one row per clause),
+            // so no aggregate "postcondition" record here —
+            // that would double-count when a function has
+            // multiple ensures clauses.
             let post_result = self.verify_postconditions(
                 &ctx,
                 &mut translator,
@@ -754,7 +758,6 @@ impl<'s> VerifyCommand<'s> {
                 timeout,
                 reflection_registry,
             );
-            self.record_obligation("postcondition", post_start.elapsed());
             match post_result {
                 Ok(()) => debug!("Postconditions verified for {}", func.name),
                 Err(VerifyError::Timeout) => {
@@ -1261,7 +1264,8 @@ impl<'s> VerifyCommand<'s> {
 
         // For each postcondition, try to find a counterexample
         // (i.e., check if NOT(postcondition) is satisfiable)
-        for ens in ensures {
+        for (ens_idx, ens) in ensures.iter().enumerate() {
+            let ens_start = Instant::now();
             match translator.translate_expr(ens) {
                 Ok(z3_expr) => {
                     if let Some(bool_expr) = z3_expr.as_bool() {
@@ -1354,6 +1358,14 @@ impl<'s> VerifyCommand<'s> {
                     ));
                 }
             }
+            // Per-ensures timing — each clause lands as its own
+            // obligation row in the `--profile-obligation`
+            // breakdown. Label is `ensures[i]` so multi-clause
+            // functions surface which specific clause dominates.
+            self.record_obligation(
+                &format!("ensures[{}]", ens_idx),
+                ens_start.elapsed(),
+            );
         }
 
         Ok(())
