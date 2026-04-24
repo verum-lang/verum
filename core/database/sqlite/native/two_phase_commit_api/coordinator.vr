@@ -1,0 +1,88 @@
+// 2PC coordinator state.
+
+module core.database.sqlite.native.two_phase_commit_api.coordinator;
+
+mount core.database.sqlite.native.two_phase_commit_api.phase.{
+    TpcPhase, PhIdle, PhWriteSubJournals, PhMasterJournalCreated,
+    PhCommitEachDb, PhDropMasterJournal, PhCompleted, PhAborted,
+    is_phase_one, is_phase_two, is_terminal, abort_requires_recovery,
+};
+mount base.{Bool, Int64};
+
+public type TpcCoordinator is {
+    phase: TpcPhase,
+    attached_db_count: Int,
+    dbs_committed: Int,
+    sub_journals_unlinked: Int,
+    master_journal_unlinked: Bool,
+};
+
+public fn start(attached_db_count: Int) -> TpcCoordinator {
+    TpcCoordinator {
+        phase: PhWriteSubJournals,
+        attached_db_count: attached_db_count,
+        dbs_committed: 0,
+        sub_journals_unlinked: 0,
+        master_journal_unlinked: false,
+    }
+}
+
+public fn is_multi_db(c: &TpcCoordinator) -> Bool {
+    c.attached_db_count > 1
+}
+
+public fn advance_to_master_created(mut c: TpcCoordinator) -> TpcCoordinator {
+    c.phase = PhMasterJournalCreated;
+    c
+}
+
+public fn advance_to_commit(mut c: TpcCoordinator) -> TpcCoordinator {
+    c.phase = PhCommitEachDb;
+    c
+}
+
+public fn record_db_commit(mut c: TpcCoordinator) -> TpcCoordinator {
+    c.dbs_committed = c.dbs_committed + 1;
+    c
+}
+
+public fn advance_to_drop(mut c: TpcCoordinator) -> TpcCoordinator {
+    c.phase = PhDropMasterJournal;
+    c
+}
+
+public fn record_subjournal_unlink(mut c: TpcCoordinator) -> TpcCoordinator {
+    c.sub_journals_unlinked = c.sub_journals_unlinked + 1;
+    c
+}
+
+public fn record_master_unlink(mut c: TpcCoordinator) -> TpcCoordinator {
+    c.master_journal_unlinked = true;
+    c
+}
+
+public fn complete(mut c: TpcCoordinator) -> TpcCoordinator {
+    c.phase = PhCompleted;
+    c
+}
+
+public fn abort(mut c: TpcCoordinator) -> TpcCoordinator {
+    c.phase = PhAborted;
+    c
+}
+
+public fn all_dbs_committed(c: &TpcCoordinator) -> Bool {
+    c.dbs_committed >= c.attached_db_count
+}
+
+public fn all_sub_journals_unlinked(c: &TpcCoordinator) -> Bool {
+    c.sub_journals_unlinked >= c.attached_db_count
+}
+
+public fn needs_recovery_on_abort(c: &TpcCoordinator) -> Bool {
+    abort_requires_recovery(&c.phase)
+}
+
+public fn can_finish(c: &TpcCoordinator) -> Bool {
+    all_dbs_committed(c) && all_sub_journals_unlinked(c) && c.master_journal_unlinked
+}

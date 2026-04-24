@@ -1,0 +1,106 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, window_partition_api, window
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.window_partition_api.boundary.{
+    BoundaryVerdict, BvSameRow, BvSamePartition, BvNewPartition,
+    verdict_name, needs_reset, compare_keys, first_row_verdict,
+};
+mount core.database.sqlite.native.window_partition_api.runner.{
+    WindowRunner, fresh, feed, rows_in_current, partition_count,
+};
+mount base.{Bool, Int64};
+mount core.collections.list.{List};
+
+fn test_verdict_names() {
+    assert(verdict_name(&BvSameRow)       == "first".clone());
+    assert(verdict_name(&BvSamePartition) == "continue".clone());
+    assert(verdict_name(&BvNewPartition)  == "boundary".clone());
+}
+
+fn test_needs_reset_only_new() {
+    assert(needs_reset(&BvNewPartition));
+    assert(!needs_reset(&BvSamePartition));
+    assert(!needs_reset(&BvSameRow));
+}
+
+fn test_compare_keys_empty() {
+    let a: List<Text> = [].clone() as List<Text>;
+    let b: List<Text> = [].clone() as List<Text>;
+    match compare_keys(&a, &b) { BvSamePartition => {}, _ => assert(false) }
+}
+
+fn test_compare_keys_same() {
+    let a: List<Text> = ["x".clone(), "1".clone()].clone() as List<Text>;
+    let b: List<Text> = ["x".clone(), "1".clone()].clone() as List<Text>;
+    match compare_keys(&a, &b) { BvSamePartition => {}, _ => assert(false) }
+}
+
+fn test_compare_keys_different_value() {
+    let a: List<Text> = ["x".clone(), "1".clone()].clone() as List<Text>;
+    let b: List<Text> = ["x".clone(), "2".clone()].clone() as List<Text>;
+    match compare_keys(&a, &b) { BvNewPartition => {}, _ => assert(false) }
+}
+
+fn test_compare_keys_different_arity() {
+    let a: List<Text> = ["x".clone()].clone() as List<Text>;
+    let b: List<Text> = ["x".clone(), "1".clone()].clone() as List<Text>;
+    match compare_keys(&a, &b) { BvNewPartition => {}, _ => assert(false) }
+}
+
+fn test_first_row_verdict_is_same_row() {
+    match first_row_verdict() { BvSameRow => {}, _ => assert(false) }
+}
+
+fn test_runner_fresh_is_empty() {
+    let r = fresh();
+    assert(!r.initialised);
+    assert_eq(r.partitions_seen, 0 as Int64);
+    assert_eq(r.rows_total, 0 as Int64);
+}
+
+fn test_runner_feed_first_row() {
+    let k: List<Text> = ["a".clone()].clone() as List<Text>;
+    let (r, v) = feed(fresh(), k);
+    match v { BvSameRow => {}, _ => assert(false) }
+    assert(r.initialised);
+    assert_eq(partition_count(&r), 1 as Int64);
+    assert_eq(r.rows_total, 1 as Int64);
+}
+
+fn test_runner_feed_same_key_continues() {
+    let k1: List<Text> = ["a".clone()].clone() as List<Text>;
+    let k2: List<Text> = ["a".clone()].clone() as List<Text>;
+    let (r1, _) = feed(fresh(), k1);
+    let (r2, v2) = feed(r1, k2);
+    match v2 { BvSamePartition => {}, _ => assert(false) }
+    assert_eq(rows_in_current(&r2), 2 as Int64);
+    assert_eq(partition_count(&r2), 1 as Int64);
+}
+
+fn test_runner_feed_new_key_resets() {
+    let k1: List<Text> = ["a".clone()].clone() as List<Text>;
+    let k2: List<Text> = ["b".clone()].clone() as List<Text>;
+    let (r1, _) = feed(fresh(), k1);
+    let (r2, v2) = feed(r1, k2);
+    match v2 { BvNewPartition => {}, _ => assert(false) }
+    assert_eq(rows_in_current(&r2), 1 as Int64);
+    assert_eq(partition_count(&r2), 2 as Int64);
+}
+
+fn main() {
+    test_verdict_names();
+    test_needs_reset_only_new();
+    test_compare_keys_empty();
+    test_compare_keys_same();
+    test_compare_keys_different_value();
+    test_compare_keys_different_arity();
+    test_first_row_verdict_is_same_row();
+    test_runner_fresh_is_empty();
+    test_runner_feed_first_row();
+    test_runner_feed_same_key_continues();
+    test_runner_feed_new_key_resets();
+}

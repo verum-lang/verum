@@ -1,0 +1,71 @@
+// Eligibility classifier + blocker taxonomy.
+
+module core.database.sqlite.native.truncate_optimization.eligibility;
+
+mount base.{Bool, Text};
+
+public type Features is {
+    has_where_clause: Bool,
+    has_delete_trigger: Bool,
+    has_foreign_key_referring_in: Bool,
+    is_vtab: Bool,
+    count_changes_requested: Bool,
+    has_returning: Bool,
+    on_conflict_replace_exists: Bool,
+};
+
+public fn zero() -> Features {
+    Features {
+        has_where_clause: false,
+        has_delete_trigger: false,
+        has_foreign_key_referring_in: false,
+        is_vtab: false,
+        count_changes_requested: false,
+        has_returning: false,
+        on_conflict_replace_exists: false,
+    }
+}
+
+public type Verdict is
+    | VdEligible
+    | VdBlockedByWhere
+    | VdBlockedByTrigger
+    | VdBlockedByFkIn
+    | VdBlockedByVtab
+    | VdBlockedByCountChanges
+    | VdBlockedByReturning
+    ;
+
+public fn verdict_name(v: &Verdict) -> Text {
+    match v {
+        VdEligible                 => "eligible".clone(),
+        VdBlockedByWhere           => "where_clause".clone(),
+        VdBlockedByTrigger         => "trigger".clone(),
+        VdBlockedByFkIn            => "fk_in".clone(),
+        VdBlockedByVtab            => "vtab".clone(),
+        VdBlockedByCountChanges    => "count_changes".clone(),
+        VdBlockedByReturning       => "returning".clone(),
+    }
+}
+
+public fn is_eligible(v: &Verdict) -> Bool {
+    match v { VdEligible => true, _ => false }
+}
+
+// Classify — first blocker wins; empty blockers → eligible.
+public fn classify(f: &Features) -> Verdict {
+    if f.has_where_clause              { return VdBlockedByWhere; }
+    if f.has_delete_trigger            { return VdBlockedByTrigger; }
+    if f.has_foreign_key_referring_in  { return VdBlockedByFkIn; }
+    if f.is_vtab                       { return VdBlockedByVtab; }
+    if f.count_changes_requested       { return VdBlockedByCountChanges; }
+    if f.has_returning                 { return VdBlockedByReturning; }
+    VdEligible
+}
+
+// When REPLACE on-conflict is used within a trigger body, we treat it as
+// blocker only when the trigger fires (which is already covered). Standalone
+// REPLACE with no trigger is still eligible.
+public fn is_replace_alone_ok(f: &Features) -> Bool {
+    f.on_conflict_replace_exists && !f.has_delete_trigger
+}

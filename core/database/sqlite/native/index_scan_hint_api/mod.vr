@@ -1,0 +1,14 @@
+// =============================================================================
+// core/database/sqlite/native/index_scan_hint_api/mod.vr
+// =============================================================================
+// xBestIndex scan-hint flag bitmap — SQLITE_INDEX_SCAN_UNIQUE and friends.
+// Spec §16.1.5 — vtab scan flags.
+//
+// Set by xBestIndex on sqlite3_index_info.idxFlags:
+//   SQLITE_INDEX_SCAN_UNIQUE (0x01) — lookup returns at most 1 row
+//   SQLITE_INDEX_SCAN_HEX    (0x02) — idxNum is hex-coded for display
+// =============================================================================
+
+module core.database.sqlite.native.index_scan_hint_api;
+
+public module flag;

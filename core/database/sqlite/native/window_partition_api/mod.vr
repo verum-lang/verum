@@ -1,0 +1,12 @@
+// =============================================================================
+// core/database/sqlite/native/window_partition_api/mod.vr
+// =============================================================================
+// Window-function PARTITION BY semantics — detect partition boundary on scan
+// and reset per-partition aggregate state.
+// Spec §13.7 — window execution.
+// =============================================================================
+
+module core.database.sqlite.native.window_partition_api;
+
+public module boundary;
+public module runner;

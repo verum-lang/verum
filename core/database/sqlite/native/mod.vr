@@ -620,3 +620,19 @@ public module recursive_cte_queue;
 public module nocase_ascii_fold;
 // - integrity_walker_api: 8-kind FindingKind + severity rank + pragma_output_line_count
 public module integrity_walker_api;
+// - index_scan_hint_api: xBestIndex SCAN_UNIQUE + SCAN_HEX flag bits
+public module index_scan_hint_api;
+// - window_partition_api: PARTITION BY boundary detector + per-window runner
+public module window_partition_api;
+// - truncate_optimization: DELETE-without-WHERE → btreeClearTable eligibility
+public module truncate_optimization;
+// - schema_cookie_api: schema_cookie bump + prepared-stmt reprepare verdict
+public module schema_cookie_api;
+// - two_phase_commit_api: 7-phase multi-DB 2PC + coordinator state machine
+public module two_phase_commit_api;
+// - explain_opcode_dump: EXPLAIN row (addr/opcode/p1/p2/p3/p4/p5/comment) + pipe formatter
+public module explain_opcode_dump;
+// - float_literal_guard: REAL literal INTEGER/REAL storage-class + Double range
+public module float_literal_guard;
+// - update_hook_payload: sqlite3_update_hook event (op + db_name + table + rowid)
+public module update_hook_payload;

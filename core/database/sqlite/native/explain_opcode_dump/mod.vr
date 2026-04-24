@@ -1,0 +1,13 @@
+// =============================================================================
+// core/database/sqlite/native/explain_opcode_dump/mod.vr
+// =============================================================================
+// EXPLAIN output — per-row VDBE opcode dump formatter (matches SQLite shell).
+// Spec §22.3 — EXPLAIN output.
+//
+// Columns: addr | opcode | p1 | p2 | p3 | p4 | p5 | comment
+// =============================================================================
+
+module core.database.sqlite.native.explain_opcode_dump;
+
+public module row;
+public module formatter;

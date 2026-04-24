@@ -1,0 +1,64 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, index_scan_hint_api, vtab
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.index_scan_hint_api.flag.{
+    f_unique, f_hex,
+    is_unique, is_hex, set, clear,
+    promises_single_row, is_known_only, well_known_bit_count,
+};
+mount base.{Bool, Int64};
+
+fn test_flag_constants() {
+    assert_eq(f_unique(), 0x01 as Int64);
+    assert_eq(f_hex(),    0x02 as Int64);
+    assert_eq(well_known_bit_count(), 2);
+}
+
+fn test_is_unique_and_is_hex() {
+    let v = f_unique();
+    assert(is_unique(v));
+    assert(!is_hex(v));
+    let h = f_hex();
+    assert(is_hex(h));
+    assert(!is_unique(h));
+    let both = f_unique() | f_hex();
+    assert(is_unique(both));
+    assert(is_hex(both));
+}
+
+fn test_set_and_clear() {
+    let mut v: Int64 = 0 as Int64;
+    v = set(v, f_unique());
+    assert(is_unique(v));
+    v = set(v, f_hex());
+    assert(is_hex(v));
+    v = clear(v, f_unique());
+    assert(!is_unique(v));
+    assert(is_hex(v));
+}
+
+fn test_promises_single_row() {
+    assert(promises_single_row(f_unique()));
+    assert(!promises_single_row(f_hex()));
+    assert(!promises_single_row(0 as Int64));
+}
+
+fn test_is_known_only_rejects_extraneous_bits() {
+    assert(is_known_only(0 as Int64));
+    assert(is_known_only(f_unique()));
+    assert(is_known_only(f_unique() | f_hex()));
+    // bit 4 is not defined
+    assert(!is_known_only(0x10 as Int64));
+}
+
+fn main() {
+    test_flag_constants();
+    test_is_unique_and_is_hex();
+    test_set_and_clear();
+    test_promises_single_row();
+    test_is_known_only_rejects_extraneous_bits();
+}

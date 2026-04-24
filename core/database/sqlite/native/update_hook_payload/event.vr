@@ -1,0 +1,60 @@
+// Update-hook event record.
+
+module core.database.sqlite.native.update_hook_payload.event;
+
+mount base.{Bool, Text, Int64};
+
+public type UpdateOp is
+    | UoInsert      // SQLITE_INSERT = 18
+    | UoUpdate      // SQLITE_UPDATE = 23
+    | UoDelete      // SQLITE_DELETE =  9
+    ;
+
+public fn op_code(o: &UpdateOp) -> Int {
+    match o {
+        UoInsert => 18,
+        UoUpdate => 23,
+        UoDelete =>  9,
+    }
+}
+
+public fn op_name(o: &UpdateOp) -> Text {
+    match o {
+        UoInsert => "INSERT".clone(),
+        UoUpdate => "UPDATE".clone(),
+        UoDelete => "DELETE".clone(),
+    }
+}
+
+public fn is_insert(o: &UpdateOp) -> Bool { match o { UoInsert => true, _ => false } }
+public fn is_update(o: &UpdateOp) -> Bool { match o { UoUpdate => true, _ => false } }
+public fn is_delete(o: &UpdateOp) -> Bool { match o { UoDelete => true, _ => false } }
+
+public type UpdateEvent is {
+    op: UpdateOp,
+    db_name: Text,      // "main" / "temp" / attached name
+    table: Text,
+    rowid: Int64,
+};
+
+public fn event(op: UpdateOp, db_name: Text, table: Text, rowid: Int64) -> UpdateEvent {
+    UpdateEvent { op: op, db_name: db_name, table: table, rowid: rowid }
+}
+
+public fn is_main_db(e: &UpdateEvent) -> Bool {
+    e.db_name == "main".clone()
+}
+
+public fn is_temp_db(e: &UpdateEvent) -> Bool {
+    e.db_name == "temp".clone()
+}
+
+public fn is_attached_db(e: &UpdateEvent) -> Bool {
+    !is_main_db(e) && !is_temp_db(e)
+}
+
+// Note: the update-hook is NOT invoked for FK cascades, trigger-caused
+// changes, or vtab INSTEAD OF — document that invariant.
+public fn is_direct_user_change(e: &UpdateEvent) -> Bool {
+    true   // hook fires only for direct writes; included for clarity
+}

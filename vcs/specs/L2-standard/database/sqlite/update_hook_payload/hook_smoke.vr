@@ -1,0 +1,78 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, update_hook_payload, hooks
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.update_hook_payload.event.{
+    UpdateOp, UoInsert, UoUpdate, UoDelete,
+    op_code, op_name, is_insert, is_update, is_delete,
+    UpdateEvent, event,
+    is_main_db, is_temp_db, is_attached_db,
+    is_direct_user_change,
+};
+mount base.{Bool, Int64};
+
+fn test_op_codes() {
+    assert_eq(op_code(&UoInsert), 18);
+    assert_eq(op_code(&UoUpdate), 23);
+    assert_eq(op_code(&UoDelete),  9);
+}
+
+fn test_op_names() {
+    assert(op_name(&UoInsert) == "INSERT".clone());
+    assert(op_name(&UoUpdate) == "UPDATE".clone());
+    assert(op_name(&UoDelete) == "DELETE".clone());
+}
+
+fn test_op_classifiers() {
+    assert(is_insert(&UoInsert));
+    assert(!is_insert(&UoUpdate));
+    assert(is_update(&UoUpdate));
+    assert(is_delete(&UoDelete));
+}
+
+fn test_event_constructor() {
+    let e = event(UoInsert, "main".clone(), "users".clone(), 42 as Int64);
+    assert_eq(e.rowid, 42 as Int64);
+    assert(e.table == "users".clone());
+    match e.op { UoInsert => {}, _ => assert(false) }
+}
+
+fn test_main_db_flag() {
+    let e = event(UoInsert, "main".clone(), "t".clone(), 1 as Int64);
+    assert(is_main_db(&e));
+    assert(!is_temp_db(&e));
+    assert(!is_attached_db(&e));
+}
+
+fn test_temp_db_flag() {
+    let e = event(UoDelete, "temp".clone(), "t".clone(), 1 as Int64);
+    assert(is_temp_db(&e));
+    assert(!is_main_db(&e));
+    assert(!is_attached_db(&e));
+}
+
+fn test_attached_db_flag() {
+    let e = event(UoUpdate, "aux1".clone(), "t".clone(), 1 as Int64);
+    assert(is_attached_db(&e));
+    assert(!is_main_db(&e));
+    assert(!is_temp_db(&e));
+}
+
+fn test_direct_user_change_marker() {
+    let e = event(UoInsert, "main".clone(), "t".clone(), 1 as Int64);
+    assert(is_direct_user_change(&e));
+}
+
+fn main() {
+    test_op_codes();
+    test_op_names();
+    test_op_classifiers();
+    test_event_constructor();
+    test_main_db_flag();
+    test_temp_db_flag();
+    test_attached_db_flag();
+    test_direct_user_change_marker();
+}

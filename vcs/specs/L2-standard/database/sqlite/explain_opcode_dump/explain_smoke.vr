@@ -1,0 +1,83 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, explain_opcode_dump, vdbe
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.explain_opcode_dump.row.{
+    ExplainRow,
+    new, with_operands, with_p4, with_p5, with_comment,
+    has_p4, has_p5, has_comment, column_count,
+};
+mount core.database.sqlite.native.explain_opcode_dump.formatter.{
+    format_row, has_trailing_comment_column,
+};
+mount base.{Bool};
+
+fn test_defaults() {
+    let r = new(0, "Init".clone());
+    assert_eq(r.p1, 0);
+    assert_eq(r.p2, 0);
+    assert_eq(r.p3, 0);
+    assert(!has_p4(&r));
+    assert(!has_p5(&r));
+    assert(!has_comment(&r));
+}
+
+fn test_with_operands() {
+    let r = with_operands(new(1, "OpenRead".clone()), 1, 2, 3);
+    assert_eq(r.p1, 1);
+    assert_eq(r.p2, 2);
+    assert_eq(r.p3, 3);
+}
+
+fn test_with_p4_p5_comment() {
+    let r0 = new(2, "String8".clone());
+    let r1 = with_p4(r0, "hello".clone());
+    let r2 = with_p5(r1, 7);
+    let r3 = with_comment(r2, "set constant".clone());
+    assert(has_p4(&r3));
+    assert(has_p5(&r3));
+    assert(has_comment(&r3));
+    assert(has_trailing_comment_column(&r3));
+}
+
+fn test_column_count_matches_header() {
+    assert_eq(column_count(), 8);
+}
+
+fn test_format_bare_row() {
+    let r = new(5, "Halt".clone());
+    let s = format_row(&r);
+    assert(s == "5|Halt|0|0|0||0".clone());
+}
+
+fn test_format_row_with_operands_and_p4() {
+    let r = with_p4(with_operands(new(3, "Column".clone()), 0, 1, 2), "id".clone());
+    let s = format_row(&r);
+    assert(s == "3|Column|0|1|2|id|0".clone());
+}
+
+fn test_format_row_with_comment_has_trailing_column() {
+    let r = with_comment(new(4, "Next".clone()), "advance".clone());
+    let s = format_row(&r);
+    assert(s == "4|Next|0|0|0||0|advance".clone());
+}
+
+fn test_negative_addr_is_minus_prefixed() {
+    let r = new(-7, "Reset".clone());
+    let s = format_row(&r);
+    assert(s == "-7|Reset|0|0|0||0".clone());
+}
+
+fn main() {
+    test_defaults();
+    test_with_operands();
+    test_with_p4_p5_comment();
+    test_column_count_matches_header();
+    test_format_bare_row();
+    test_format_row_with_operands_and_p4();
+    test_format_row_with_comment_has_trailing_column();
+    test_negative_addr_is_minus_prefixed();
+}

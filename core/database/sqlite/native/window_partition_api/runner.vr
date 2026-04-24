@@ -1,0 +1,61 @@
+// Per-window runner state.
+
+module core.database.sqlite.native.window_partition_api.runner;
+
+mount core.database.sqlite.native.window_partition_api.boundary.{
+    BoundaryVerdict, BvSameRow, BvSamePartition, BvNewPartition,
+    compare_keys, needs_reset,
+};
+mount base.{Bool, Int64, Text};
+mount core.collections.list.{List};
+
+public type WindowRunner is {
+    partition_key: List<Text>,       // previous row's PARTITION BY key
+    row_index_in_partition: Int64,   // 0 at start of partition
+    partitions_seen: Int64,
+    rows_total: Int64,
+    initialised: Bool,
+};
+
+public fn fresh() -> WindowRunner {
+    WindowRunner {
+        partition_key: [].clone() as List<Text>,
+        row_index_in_partition: 0 as Int64,
+        partitions_seen: 0 as Int64,
+        rows_total: 0 as Int64,
+        initialised: false,
+    }
+}
+
+public fn feed(mut r: WindowRunner, next_key: List<Text>) -> (WindowRunner, BoundaryVerdict) {
+    r.rows_total = r.rows_total + (1 as Int64);
+    if !r.initialised {
+        r.partition_key = next_key;
+        r.row_index_in_partition = 0 as Int64;
+        r.partitions_seen = 1 as Int64;
+        r.initialised = true;
+        return (r, BvSameRow);
+    }
+    let v = compare_keys(&r.partition_key, &next_key);
+    match v {
+        BvSamePartition => {
+            r.row_index_in_partition = r.row_index_in_partition + (1 as Int64);
+            (r, BvSamePartition)
+        },
+        BvNewPartition => {
+            r.partition_key = next_key;
+            r.row_index_in_partition = 0 as Int64;
+            r.partitions_seen = r.partitions_seen + (1 as Int64);
+            (r, BvNewPartition)
+        },
+        BvSameRow => (r, BvSameRow),
+    }
+}
+
+public fn rows_in_current(r: &WindowRunner) -> Int64 {
+    r.row_index_in_partition + (1 as Int64)
+}
+
+public fn partition_count(r: &WindowRunner) -> Int64 {
+    r.partitions_seen
+}

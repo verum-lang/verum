@@ -1,0 +1,31 @@
+// Scan-hint flag bits.
+
+module core.database.sqlite.native.index_scan_hint_api.flag;
+
+mount base.{Bool, Int64};
+
+public fn f_unique() -> Int64 { 0x01 as Int64 }
+public fn f_hex()    -> Int64 { 0x02 as Int64 }
+
+public fn is_unique(flags: Int64) -> Bool {
+    (flags & f_unique()) != (0 as Int64)
+}
+
+public fn is_hex(flags: Int64) -> Bool {
+    (flags & f_hex()) != (0 as Int64)
+}
+
+public fn set(flags: Int64, bit: Int64) -> Int64 { flags | bit }
+public fn clear(flags: Int64, bit: Int64) -> Int64 { flags & !bit }
+
+// "At most one row" inferred by UNIQUE flag — used by planner to skip sort.
+public fn promises_single_row(flags: Int64) -> Bool {
+    is_unique(flags)
+}
+
+// Well-formed flag mask — only the two known bits set.
+public fn is_known_only(flags: Int64) -> Bool {
+    (flags & !(f_unique() | f_hex())) == (0 as Int64)
+}
+
+public fn well_known_bit_count() -> Int { 2 }

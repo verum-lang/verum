@@ -1,0 +1,12 @@
+// =============================================================================
+// core/database/sqlite/native/schema_cookie_api/mod.vr
+// =============================================================================
+// Schema cookie — u32 counter at file-header offset 40 (meta[0]) that
+// increments on every DDL. Prepared statements bind to a snapshot of the
+// cookie; if it changes, the statement is re-prepared automatically.
+// Spec §17.1 — schema + cookie.
+// =============================================================================
+
+module core.database.sqlite.native.schema_cookie_api;
+
+public module cookie;

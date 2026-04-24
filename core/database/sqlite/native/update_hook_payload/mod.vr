@@ -1,0 +1,11 @@
+// =============================================================================
+// core/database/sqlite/native/update_hook_payload/mod.vr
+// =============================================================================
+// sqlite3_update_hook row payload — the per-row (op, db, table, rowid) tuple
+// delivered to the user's hook.
+// Spec §15.8 — update_hook.
+// =============================================================================
+
+module core.database.sqlite.native.update_hook_payload;
+
+public module event;

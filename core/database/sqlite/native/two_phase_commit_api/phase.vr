@@ -1,0 +1,60 @@
+// 2PC phase taxonomy.
+
+module core.database.sqlite.native.two_phase_commit_api.phase;
+
+mount base.{Bool, Text};
+
+public type TpcPhase is
+    | PhIdle
+    | PhWriteSubJournals       // phase-1: journals written + fsync
+    | PhMasterJournalCreated   // phase-1b: master journal with sub-journal paths
+    | PhCommitEachDb           // phase-2a: apply to each DB file
+    | PhDropMasterJournal      // phase-2b: unlink master + sub journals
+    | PhCompleted
+    | PhAborted
+    ;
+
+public fn phase_name(p: &TpcPhase) -> Text {
+    match p {
+        PhIdle                 => "idle".clone(),
+        PhWriteSubJournals     => "write_sub_journals".clone(),
+        PhMasterJournalCreated => "master_journal_created".clone(),
+        PhCommitEachDb         => "commit_each_db".clone(),
+        PhDropMasterJournal    => "drop_master_journal".clone(),
+        PhCompleted            => "completed".clone(),
+        PhAborted              => "aborted".clone(),
+    }
+}
+
+public fn is_terminal(p: &TpcPhase) -> Bool {
+    match p {
+        PhCompleted => true,
+        PhAborted   => true,
+        _           => false,
+    }
+}
+
+// Abort from phase 1 rolls back; abort from phase 2 needs crash recovery.
+public fn abort_requires_recovery(p: &TpcPhase) -> Bool {
+    match p {
+        PhCommitEachDb      => true,
+        PhDropMasterJournal => true,
+        _                   => false,
+    }
+}
+
+public fn is_phase_one(p: &TpcPhase) -> Bool {
+    match p {
+        PhWriteSubJournals     => true,
+        PhMasterJournalCreated => true,
+        _                      => false,
+    }
+}
+
+public fn is_phase_two(p: &TpcPhase) -> Bool {
+    match p {
+        PhCommitEachDb      => true,
+        PhDropMasterJournal => true,
+        _                   => false,
+    }
+}

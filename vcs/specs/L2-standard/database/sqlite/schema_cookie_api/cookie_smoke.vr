@@ -1,0 +1,74 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, schema_cookie_api, schema
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.schema_cookie_api.cookie.{
+    SchemaCookie,
+    fresh, new_at, bump, matches, snapshot_for_prepare, wraps_at,
+    InvalidateVerdict, IvCompatible, IvNeedsReprepare,
+    verdict_name, classify, is_reprepare,
+};
+mount base.{Bool, Int64};
+
+fn test_fresh_starts_at_zero() {
+    let c = fresh();
+    assert_eq(c.value, 0 as u32);
+    assert_eq(c.ddl_events, 0 as Int64);
+}
+
+fn test_new_at_sets_value() {
+    let c = new_at(42 as u32);
+    assert_eq(c.value, 42 as u32);
+    assert_eq(c.ddl_events, 0 as Int64);
+}
+
+fn test_bump_increments() {
+    let c = bump(fresh());
+    assert_eq(c.value, 1 as u32);
+    assert_eq(c.ddl_events, 1 as Int64);
+    let c2 = bump(bump(c));
+    assert_eq(c2.value, 3 as u32);
+    assert_eq(c2.ddl_events, 3 as Int64);
+}
+
+fn test_matches_and_snapshot() {
+    let c = bump(bump(fresh()));
+    let snap = snapshot_for_prepare(&c);
+    assert(matches(&c, snap));
+    assert(!matches(&c, 0 as u32));
+}
+
+fn test_classify_compatible_vs_reprepare() {
+    let c = bump(fresh());
+    let snap = snapshot_for_prepare(&c);
+    match classify(&c, snap) { IvCompatible => {}, _ => assert(false) }
+    // After another bump the old snapshot no longer matches.
+    let c2 = bump(c);
+    match classify(&c2, snap) { IvNeedsReprepare => {}, _ => assert(false) }
+    assert(is_reprepare(&classify(&c2, snap)));
+}
+
+fn test_verdict_names() {
+    assert(verdict_name(&IvCompatible)     == "compatible".clone());
+    assert(verdict_name(&IvNeedsReprepare) == "needs_reprepare".clone());
+}
+
+fn test_wraps_at_sentinel() {
+    let c = new_at(0xFFFFFFFF as u32);
+    assert(wraps_at(&c));
+    let c2 = new_at(0 as u32);
+    assert(!wraps_at(&c2));
+}
+
+fn main() {
+    test_fresh_starts_at_zero();
+    test_new_at_sets_value();
+    test_bump_increments();
+    test_matches_and_snapshot();
+    test_classify_compatible_vs_reprepare();
+    test_verdict_names();
+    test_wraps_at_sentinel();
+}

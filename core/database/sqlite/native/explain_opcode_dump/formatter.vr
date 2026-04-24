@@ -1,0 +1,58 @@
+// Pipe-separated formatter matching shell output.
+
+module core.database.sqlite.native.explain_opcode_dump.formatter;
+
+mount core.database.sqlite.native.explain_opcode_dump.row.{
+    ExplainRow, has_p4, has_p5, has_comment,
+};
+mount base.{Bool, Text, Int64};
+
+// Emit base-10 integer as Text (small positive numbers only; negatives and
+// big values are represented with a minus sign and digits).
+fn int_to_text(n: Int) -> Text {
+    if n == 0 { return "0".clone(); }
+    let mut v: Int = if n < 0 { -n } else { n };
+    let mut digits = "".clone();
+    while v > 0 {
+        let d = (v % 10) as u8;
+        digits.push_byte((d + 0x30 as u8) as u8);
+        v = v / 10;
+    }
+    // Reverse digits.
+    let bs = digits.as_bytes();
+    let mut out = "".clone();
+    if n < 0 { out.push_byte(0x2D as u8); }
+    let mut i: Int = bs.len() - 1;
+    while i >= 0 {
+        out.push_byte(bs[i]);
+        i = i - 1;
+    }
+    out
+}
+
+public fn format_row(r: &ExplainRow) -> Text {
+    let sep = "|".clone();
+    let mut out = "".clone();
+    out = out + int_to_text(r.addr);
+    out = out + sep.clone();
+    out = out + r.opcode.clone();
+    out = out + sep.clone();
+    out = out + int_to_text(r.p1);
+    out = out + sep.clone();
+    out = out + int_to_text(r.p2);
+    out = out + sep.clone();
+    out = out + int_to_text(r.p3);
+    out = out + sep.clone();
+    out = out + r.p4.clone();
+    out = out + sep.clone();
+    out = out + int_to_text(r.p5);
+    if has_comment(r) {
+        out = out + sep.clone();
+        out = out + r.comment.clone();
+    }
+    out
+}
+
+public fn has_trailing_comment_column(r: &ExplainRow) -> Bool {
+    has_comment(r)
+}

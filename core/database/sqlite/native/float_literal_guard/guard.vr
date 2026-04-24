@@ -1,0 +1,55 @@
+// REAL-literal storage-class decision.
+
+module core.database.sqlite.native.float_literal_guard.guard;
+
+mount base.{Bool, Int64, Text};
+
+// SQLite stores a REAL literal whose fractional part is 0 and whose value
+// fits in Int64 as an INTEGER (to save bytes).
+public type StorageClass is
+    | ScInteger       // fractional part is zero + fits Int64
+    | ScReal          // otherwise
+    ;
+
+public fn class_name(s: &StorageClass) -> Text {
+    match s {
+        ScInteger => "INTEGER".clone(),
+        ScReal    => "REAL".clone(),
+    }
+}
+
+public fn fits_int64(v: Float) -> Bool {
+    // Approximate: Float → Int64 → Float roundtrip equal.
+    let as_i = v as Int64;
+    let back = as_i as Float;
+    back == v
+}
+
+public fn fractional_is_zero(v: Float) -> Bool {
+    let floor = v as Int64;
+    let back = floor as Float;
+    back == v
+}
+
+public fn classify(v: Float) -> StorageClass {
+    if fractional_is_zero(v) && fits_int64(v) {
+        ScInteger
+    } else {
+        ScReal
+    }
+}
+
+// SQLite's display of a REAL value prefers the shortest round-trip decimal.
+// We return a simple flag indicating whether the value is finite.
+public fn is_finite(v: Float) -> Bool {
+    // NaN !=  NaN; ±inf * 0 is NaN.
+    v == v && (v - v) == (0.0 as Float)
+}
+
+// IEEE-754 double min/max bounds.
+public fn min_double() -> Float { -1.7976931348623157e308 as Float }
+public fn max_double() -> Float {  1.7976931348623157e308 as Float }
+
+public fn within_double_range(v: Float) -> Bool {
+    is_finite(v) && v >= min_double() && v <= max_double()
+}

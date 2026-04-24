@@ -1,0 +1,102 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, two_phase_commit_api, txn
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.two_phase_commit_api.phase.{
+    TpcPhase,
+    PhIdle, PhWriteSubJournals, PhMasterJournalCreated,
+    PhCommitEachDb, PhDropMasterJournal, PhCompleted, PhAborted,
+    phase_name, is_terminal,
+    abort_requires_recovery, is_phase_one, is_phase_two,
+};
+mount core.database.sqlite.native.two_phase_commit_api.coordinator.{
+    TpcCoordinator,
+    start, is_multi_db,
+    advance_to_master_created, advance_to_commit, record_db_commit,
+    advance_to_drop, record_subjournal_unlink, record_master_unlink,
+    complete, abort,
+    all_dbs_committed, all_sub_journals_unlinked,
+    needs_recovery_on_abort, can_finish,
+};
+mount base.{Bool};
+
+fn test_phase_names() {
+    assert(phase_name(&PhIdle)                 == "idle".clone());
+    assert(phase_name(&PhWriteSubJournals)     == "write_sub_journals".clone());
+    assert(phase_name(&PhCommitEachDb)         == "commit_each_db".clone());
+    assert(phase_name(&PhDropMasterJournal)    == "drop_master_journal".clone());
+}
+
+fn test_is_terminal() {
+    assert(is_terminal(&PhCompleted));
+    assert(is_terminal(&PhAborted));
+    assert(!is_terminal(&PhCommitEachDb));
+    assert(!is_terminal(&PhIdle));
+}
+
+fn test_phase_one_vs_two() {
+    assert(is_phase_one(&PhWriteSubJournals));
+    assert(is_phase_one(&PhMasterJournalCreated));
+    assert(!is_phase_one(&PhCommitEachDb));
+    assert(is_phase_two(&PhCommitEachDb));
+    assert(is_phase_two(&PhDropMasterJournal));
+    assert(!is_phase_two(&PhWriteSubJournals));
+}
+
+fn test_abort_requires_recovery_in_phase2() {
+    assert(abort_requires_recovery(&PhCommitEachDb));
+    assert(abort_requires_recovery(&PhDropMasterJournal));
+    assert(!abort_requires_recovery(&PhWriteSubJournals));
+    assert(!abort_requires_recovery(&PhIdle));
+}
+
+fn test_start_and_is_multi_db() {
+    let c = start(3);
+    assert(is_multi_db(&c));
+    match c.phase { PhWriteSubJournals => {}, _ => assert(false) }
+    let single = start(1);
+    assert(!is_multi_db(&single));
+}
+
+fn test_full_happy_path() {
+    let mut c = start(2);
+    c = advance_to_master_created(c);
+    match c.phase { PhMasterJournalCreated => {}, _ => assert(false) }
+    c = advance_to_commit(c);
+    c = record_db_commit(record_db_commit(c));
+    assert(all_dbs_committed(&c));
+    c = advance_to_drop(c);
+    c = record_subjournal_unlink(record_subjournal_unlink(c));
+    assert(all_sub_journals_unlinked(&c));
+    c = record_master_unlink(c);
+    assert(can_finish(&c));
+    c = complete(c);
+    match c.phase { PhCompleted => {}, _ => assert(false) }
+}
+
+fn test_abort_during_phase_two_needs_recovery() {
+    let c = start(2);
+    let c_ph2 = advance_to_commit(advance_to_master_created(c));
+    assert(needs_recovery_on_abort(&c_ph2));
+    let a = abort(c_ph2);
+    match a.phase { PhAborted => {}, _ => assert(false) }
+}
+
+fn test_abort_during_phase_one_clean() {
+    let c = start(2);
+    assert(!needs_recovery_on_abort(&c));
+}
+
+fn main() {
+    test_phase_names();
+    test_is_terminal();
+    test_phase_one_vs_two();
+    test_abort_requires_recovery_in_phase2();
+    test_start_and_is_multi_db();
+    test_full_happy_path();
+    test_abort_during_phase_two_needs_recovery();
+    test_abort_during_phase_one_clean();
+}

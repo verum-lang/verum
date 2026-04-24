@@ -1,0 +1,60 @@
+// Schema-cookie value + bump helpers.
+
+module core.database.sqlite.native.schema_cookie_api.cookie;
+
+mount base.{Bool, Int64, Text};
+
+public type SchemaCookie is {
+    value: u32,
+    ddl_events: Int64,
+};
+
+public fn fresh() -> SchemaCookie {
+    SchemaCookie { value: 0 as u32, ddl_events: 0 as Int64 }
+}
+
+public fn new_at(v: u32) -> SchemaCookie {
+    SchemaCookie { value: v, ddl_events: 0 as Int64 }
+}
+
+// Bump on any DDL — CREATE/ALTER/DROP/ANALYZE etc.
+public fn bump(mut c: SchemaCookie) -> SchemaCookie {
+    c.value = (c.value + (1 as u32)) as u32;
+    c.ddl_events = c.ddl_events + (1 as Int64);
+    c
+}
+
+// Prepared-stmt compatibility check.
+public fn matches(c: &SchemaCookie, snapshot: u32) -> Bool {
+    c.value == snapshot
+}
+
+public fn snapshot_for_prepare(c: &SchemaCookie) -> u32 {
+    c.value
+}
+
+// u32 wraps; SQLite handles wraparound by simply comparing equality, not
+// ordering.
+public fn wraps_at(c: &SchemaCookie) -> Bool {
+    c.value == (0xFFFFFFFF as u32)
+}
+
+public type InvalidateVerdict is
+    | IvCompatible              // cookie match → reuse stmt
+    | IvNeedsReprepare          // cookie changed → re-prepare
+    ;
+
+public fn verdict_name(v: &InvalidateVerdict) -> Text {
+    match v {
+        IvCompatible     => "compatible".clone(),
+        IvNeedsReprepare => "needs_reprepare".clone(),
+    }
+}
+
+public fn classify(c: &SchemaCookie, snapshot: u32) -> InvalidateVerdict {
+    if matches(c, snapshot) { IvCompatible } else { IvNeedsReprepare }
+}
+
+public fn is_reprepare(v: &InvalidateVerdict) -> Bool {
+    match v { IvNeedsReprepare => true, _ => false }
+}

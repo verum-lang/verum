@@ -1,0 +1,74 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, float_literal_guard, literals
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.float_literal_guard.guard.{
+    StorageClass, ScInteger, ScReal,
+    class_name,
+    fits_int64, fractional_is_zero, classify,
+    is_finite, min_double, max_double, within_double_range,
+};
+mount base.{Bool, Int64};
+
+fn test_class_names() {
+    assert(class_name(&ScInteger) == "INTEGER".clone());
+    assert(class_name(&ScReal)    == "REAL".clone());
+}
+
+fn test_fits_int64() {
+    assert(fits_int64(0.0 as Float));
+    assert(fits_int64(42.0 as Float));
+    assert(fits_int64(-1000.0 as Float));
+    // Huge doubles lose precision — not bit-exact round-trip.
+    assert(!fits_int64(1e18 as Float));
+}
+
+fn test_fractional_is_zero() {
+    assert(fractional_is_zero(0.0 as Float));
+    assert(fractional_is_zero(42.0 as Float));
+    assert(!fractional_is_zero(3.14 as Float));
+    assert(!fractional_is_zero(0.5 as Float));
+}
+
+fn test_classify_integer_class() {
+    match classify(0.0 as Float) { ScInteger => {}, _ => assert(false) }
+    match classify(42.0 as Float) { ScInteger => {}, _ => assert(false) }
+    match classify(-1000.0 as Float) { ScInteger => {}, _ => assert(false) }
+}
+
+fn test_classify_real_class() {
+    match classify(3.14 as Float) { ScReal => {}, _ => assert(false) }
+    match classify(0.1 as Float) { ScReal => {}, _ => assert(false) }
+}
+
+fn test_is_finite() {
+    assert(is_finite(0.0 as Float));
+    assert(is_finite(3.14 as Float));
+    assert(is_finite(-1e10 as Float));
+}
+
+fn test_double_range_constants() {
+    assert(min_double() < (0.0 as Float));
+    assert(max_double() > (0.0 as Float));
+    assert(max_double() > min_double());
+}
+
+fn test_within_double_range() {
+    assert(within_double_range(0.0 as Float));
+    assert(within_double_range(1e100 as Float));
+    assert(within_double_range(-1e100 as Float));
+}
+
+fn main() {
+    test_class_names();
+    test_fits_int64();
+    test_fractional_is_zero();
+    test_classify_integer_class();
+    test_classify_real_class();
+    test_is_finite();
+    test_double_range_constants();
+    test_within_double_range();
+}

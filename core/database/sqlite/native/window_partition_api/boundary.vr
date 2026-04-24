@@ -1,0 +1,40 @@
+// Partition-boundary detection.
+
+module core.database.sqlite.native.window_partition_api.boundary;
+
+mount base.{Bool, Text};
+mount core.collections.list.{List};
+
+public type BoundaryVerdict is
+    | BvSameRow              // first row of first partition — no reset
+    | BvSamePartition        // same partition — continue aggregating
+    | BvNewPartition         // partition boundary — reset state
+    ;
+
+public fn verdict_name(v: &BoundaryVerdict) -> Text {
+    match v {
+        BvSameRow       => "first".clone(),
+        BvSamePartition => "continue".clone(),
+        BvNewPartition  => "boundary".clone(),
+    }
+}
+
+public fn needs_reset(v: &BoundaryVerdict) -> Bool {
+    match v { BvNewPartition => true, _ => false }
+}
+
+// Compare two partition-key row vectors; return SAME iff both are empty or
+// element-wise equal (lists are assumed pre-compared as byte sequences).
+public fn compare_keys(prev: &List<Text>, next: &List<Text>) -> BoundaryVerdict {
+    if prev.len() == 0 && next.len() == 0 { return BvSamePartition; }
+    if prev.len() != next.len() { return BvNewPartition; }
+    let mut i: Int = 0;
+    while i < prev.len() {
+        if prev[i] != next[i] { return BvNewPartition; }
+        i = i + 1;
+    }
+    BvSamePartition
+}
+
+// First row in a scan — no prior key exists.
+public fn first_row_verdict() -> BoundaryVerdict { BvSameRow }

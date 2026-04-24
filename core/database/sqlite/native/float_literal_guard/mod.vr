@@ -1,0 +1,11 @@
+// =============================================================================
+// core/database/sqlite/native/float_literal_guard/mod.vr
+// =============================================================================
+// Float-literal precision-guard — SQLite preserves REAL values exactly when
+// they fit in Int64 (and applies REAL affinity otherwise).
+// Spec §14.1.2 — floating-point literals.
+// =============================================================================
+
+module core.database.sqlite.native.float_literal_guard;
+
+public module guard;

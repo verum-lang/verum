@@ -1,0 +1,92 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, truncate_optimization, optimizer
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.truncate_optimization.eligibility.{
+    Features, zero,
+    Verdict,
+    VdEligible, VdBlockedByWhere, VdBlockedByTrigger, VdBlockedByFkIn,
+    VdBlockedByVtab, VdBlockedByCountChanges, VdBlockedByReturning,
+    verdict_name, is_eligible, classify, is_replace_alone_ok,
+};
+mount base.{Bool};
+
+fn test_zero_is_eligible() {
+    let f = zero();
+    match classify(&f) { VdEligible => {}, _ => assert(false) }
+    assert(is_eligible(&classify(&f)));
+}
+
+fn test_blocked_by_where() {
+    let mut f = zero();
+    f.has_where_clause = true;
+    match classify(&f) { VdBlockedByWhere => {}, _ => assert(false) }
+}
+
+fn test_blocked_by_trigger() {
+    let mut f = zero();
+    f.has_delete_trigger = true;
+    match classify(&f) { VdBlockedByTrigger => {}, _ => assert(false) }
+}
+
+fn test_blocked_by_fk_in() {
+    let mut f = zero();
+    f.has_foreign_key_referring_in = true;
+    match classify(&f) { VdBlockedByFkIn => {}, _ => assert(false) }
+}
+
+fn test_blocked_by_vtab() {
+    let mut f = zero();
+    f.is_vtab = true;
+    match classify(&f) { VdBlockedByVtab => {}, _ => assert(false) }
+}
+
+fn test_blocked_by_count_changes() {
+    let mut f = zero();
+    f.count_changes_requested = true;
+    match classify(&f) { VdBlockedByCountChanges => {}, _ => assert(false) }
+}
+
+fn test_blocked_by_returning() {
+    let mut f = zero();
+    f.has_returning = true;
+    match classify(&f) { VdBlockedByReturning => {}, _ => assert(false) }
+}
+
+fn test_first_blocker_wins() {
+    let mut f = zero();
+    f.has_where_clause = true;
+    f.has_delete_trigger = true;
+    // WHERE checked first
+    match classify(&f) { VdBlockedByWhere => {}, _ => assert(false) }
+}
+
+fn test_replace_alone_is_ok() {
+    let mut f = zero();
+    f.on_conflict_replace_exists = true;
+    assert(is_replace_alone_ok(&f));
+    f.has_delete_trigger = true;
+    assert(!is_replace_alone_ok(&f));
+}
+
+fn test_verdict_names() {
+    assert(verdict_name(&VdEligible)              == "eligible".clone());
+    assert(verdict_name(&VdBlockedByWhere)        == "where_clause".clone());
+    assert(verdict_name(&VdBlockedByReturning)    == "returning".clone());
+}
+
+fn main() {
+    test_zero_is_eligible();
+    test_blocked_by_where();
+    test_blocked_by_trigger();
+    test_blocked_by_fk_in();
+    test_blocked_by_vtab();
+    test_blocked_by_count_changes();
+    test_blocked_by_returning();
+    test_first_blocker_wins();
+    test_replace_alone_is_ok();
+    test_verdict_names();
+}

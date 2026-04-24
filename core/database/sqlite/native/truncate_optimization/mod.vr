@@ -1,0 +1,11 @@
+// =============================================================================
+// core/database/sqlite/native/truncate_optimization/mod.vr
+// =============================================================================
+// Truncate-optimization — DELETE FROM <table> (no WHERE, no triggers, no FK)
+// is compiled to a single btreeClearTable opcode instead of a row-by-row scan.
+// Spec §13.5.8 — DELETE optimizations.
+// =============================================================================
+
+module core.database.sqlite.native.truncate_optimization;
+
+public module eligibility;

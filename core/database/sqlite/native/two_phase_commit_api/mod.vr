@@ -1,0 +1,15 @@
+// =============================================================================
+// core/database/sqlite/native/two_phase_commit_api/mod.vr
+// =============================================================================
+// Multi-database two-phase commit — when more than one ATTACHed db is modified,
+// SQLite runs a 2PC using master-journal.
+// Spec §6.8 — two-phase commit.
+//
+// Phase 1: write all sub-journals, fsync, update sqlite_master of each DB.
+// Phase 2: unlink each sub-journal, then unlink the master-journal.
+// =============================================================================
+
+module core.database.sqlite.native.two_phase_commit_api;
+
+public module phase;
+public module coordinator;
