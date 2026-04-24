@@ -1,0 +1,89 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: crypto, x25519, rfc7748, ecdh, kat
+// @timeout: 15000
+// @expected-exit: 0
+
+// RFC 7748 §5 X25519 test vector 1:
+//   scalar      = a546e36bf0527c9d3b16154b82465edd 62144c0ac1fc5a18506a2244ba449ac4
+//   u-coord     = e6db6867583030db3594c1a424b15f7c 726624ec26b3353b10a903a6d0ab1c4c
+//   scalar*u    = c3da55379de9c6908e94ea4df28d084f 32eccf03491c71f754b4075577a28552
+
+mount core.*;
+mount core.collections.List;
+mount core.security.ecc.x25519.{
+    X25519, X25519Error, BASE_POINT,
+};
+
+fn rfc_7748_section_5_vector_1() {
+    let scalar: [Byte; 32] = [
+        0xA5_u8, 0x46_u8, 0xE3_u8, 0x6B_u8, 0xF0_u8, 0x52_u8, 0x7C_u8, 0x9D_u8,
+        0x3B_u8, 0x16_u8, 0x15_u8, 0x4B_u8, 0x82_u8, 0x46_u8, 0x5E_u8, 0xDD_u8,
+        0x62_u8, 0x14_u8, 0x4C_u8, 0x0A_u8, 0xC1_u8, 0xFC_u8, 0x5A_u8, 0x18_u8,
+        0x50_u8, 0x6A_u8, 0x22_u8, 0x44_u8, 0xBA_u8, 0x44_u8, 0x9A_u8, 0xC4_u8,
+    ];
+    let u_coord: [Byte; 32] = [
+        0xE6_u8, 0xDB_u8, 0x68_u8, 0x67_u8, 0x58_u8, 0x30_u8, 0x30_u8, 0xDB_u8,
+        0x35_u8, 0x94_u8, 0xC1_u8, 0xA4_u8, 0x24_u8, 0xB1_u8, 0x5F_u8, 0x7C_u8,
+        0x72_u8, 0x66_u8, 0x24_u8, 0xEC_u8, 0x26_u8, 0xB3_u8, 0x35_u8, 0x3B_u8,
+        0x10_u8, 0xA9_u8, 0x03_u8, 0xA6_u8, 0xD0_u8, 0xAB_u8, 0x1C_u8, 0x4C_u8,
+    ];
+    let expected: [Byte; 32] = [
+        0xC3_u8, 0xDA_u8, 0x55_u8, 0x37_u8, 0x9D_u8, 0xE9_u8, 0xC6_u8, 0x90_u8,
+        0x8E_u8, 0x94_u8, 0xEA_u8, 0x4D_u8, 0xF2_u8, 0x8D_u8, 0x08_u8, 0x4F_u8,
+        0x32_u8, 0xEC_u8, 0xCF_u8, 0x03_u8, 0x49_u8, 0x1C_u8, 0x71_u8, 0xF7_u8,
+        0x54_u8, 0xB4_u8, 0x07_u8, 0x55_u8, 0x77_u8, 0xA2_u8, 0x85_u8, 0x52_u8,
+    ];
+    let sk = X25519.secret_key_from_bytes(&scalar);
+    let ss = X25519.diffie_hellman(&sk, &u_coord).unwrap();
+    let mut i: Int = 0;
+    while i < 32 {
+        assert(ss[i] == expected[i]);
+        i = i + 1;
+    }
+}
+
+fn base_point_is_u_equal_nine() {
+    // RFC 7748 §4.1 base point = 9 little-endian.
+    assert(BASE_POINT[0] == 9_u8);
+    let mut i: Int = 1;
+    while i < 32 {
+        assert(BASE_POINT[i] == 0_u8);
+        i = i + 1;
+    }
+}
+
+fn deterministic_on_identical_inputs() {
+    let sk_bytes: [Byte; 32] = [0x77_u8; 32];
+    let sk = X25519.secret_key_from_bytes(&sk_bytes);
+    let pk1 = X25519.public_key(&sk);
+    let pk2 = X25519.public_key(&sk);
+    let mut i: Int = 0;
+    while i < 32 {
+        assert(pk1[i] == pk2[i]);
+        i = i + 1;
+    }
+}
+
+fn low_order_point_rejected_if_all_zero() {
+    // X25519 with a low-order input u that produces all-zero output
+    // is rejected per RFC 7748 §6.1.
+    let sk_bytes: [Byte; 32] = [0x01_u8; 32];
+    let sk = X25519.secret_key_from_bytes(&sk_bytes);
+    let zero_u: [Byte; 32] = [0_u8; 32];
+    match X25519.diffie_hellman(&sk, &zero_u) {
+        Err(X25519Error.AllZeroOutput) => {},
+        _ => panic("all-zero input must produce AllZeroOutput"),
+    }
+}
+
+@main
+public fn main() -> Int {
+    rfc_7748_section_5_vector_1();
+    base_point_is_u_equal_nine();
+    deterministic_on_identical_inputs();
+    low_order_point_rejected_if_all_zero();
+    print("RFC 7748 X25519 scalarmult KAT verified");
+    0
+}

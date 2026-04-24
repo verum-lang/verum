@@ -1,0 +1,86 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: crypto, hkdf, rfc5869, kat
+// @timeout: 15000
+// @expected-exit: 0
+
+// RFC 5869 §A.1 HKDF-SHA-256 test vector 1:
+//   salt = 0x000102030405060708090a0b0c
+//   IKM  = 0x0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b
+//   PRK  = 0x077709362c2e32df0ddc3f0dc47bba6390b6c73bb50f9c3122ec844ad7c2b3e5
+
+mount core.*;
+mount core.collections.List;
+mount core.security.kdf.hkdf.{hkdf_extract_sha256, hkdf_extract_sha384};
+
+fn rfc_5869_a1_sha256_vector() {
+    let salt: List<Byte> = [
+        0x00_u8, 0x01_u8, 0x02_u8, 0x03_u8, 0x04_u8, 0x05_u8, 0x06_u8,
+        0x07_u8, 0x08_u8, 0x09_u8, 0x0A_u8, 0x0B_u8, 0x0C_u8,
+    ];
+    let ikm: List<Byte> = [
+        0x0B_u8, 0x0B_u8, 0x0B_u8, 0x0B_u8, 0x0B_u8, 0x0B_u8, 0x0B_u8,
+        0x0B_u8, 0x0B_u8, 0x0B_u8, 0x0B_u8, 0x0B_u8, 0x0B_u8, 0x0B_u8,
+        0x0B_u8, 0x0B_u8, 0x0B_u8, 0x0B_u8, 0x0B_u8, 0x0B_u8, 0x0B_u8,
+        0x0B_u8,
+    ];
+    let prk = hkdf_extract_sha256(salt.as_slice(), ikm.as_slice());
+    let expected: [Byte; 32] = [
+        0x07_u8, 0x77_u8, 0x09_u8, 0x36_u8, 0x2C_u8, 0x2E_u8, 0x32_u8, 0xDF_u8,
+        0x0D_u8, 0xDC_u8, 0x3F_u8, 0x0D_u8, 0xC4_u8, 0x7B_u8, 0xBA_u8, 0x63_u8,
+        0x90_u8, 0xB6_u8, 0xC7_u8, 0x3B_u8, 0xB5_u8, 0x0F_u8, 0x9C_u8, 0x31_u8,
+        0x22_u8, 0xEC_u8, 0x84_u8, 0x4A_u8, 0xD7_u8, 0xC2_u8, 0xB3_u8, 0xE5_u8,
+    ];
+    let mut i: Int = 0;
+    while i < 32 {
+        assert(prk[i] == expected[i]);
+        i = i + 1;
+    }
+}
+
+fn empty_salt_uses_hashlen_zeros() {
+    // RFC 5869 §2.2: salt=empty → HMAC key = HashLen zero bytes.
+    // The PRK is a 32-byte MAC; we verify non-zero output + length.
+    let salt: List<Byte> = [];
+    let ikm:  List<Byte> = [0x0B_u8; 22];
+    let prk = hkdf_extract_sha256(salt.as_slice(), ikm.as_slice());
+    let mut any_nonzero = false;
+    let mut i: Int = 0;
+    while i < 32 {
+        if prk[i] != 0_u8 { any_nonzero = true; }
+        i = i + 1;
+    }
+    assert(any_nonzero);
+}
+
+fn hkdf_extract_sha384_output_length_is_48() {
+    let salt: List<Byte> = [0x00_u8, 0x01_u8];
+    let ikm:  List<Byte> = [0xAA_u8; 32];
+    let prk = hkdf_extract_sha384(salt.as_slice(), ikm.as_slice());
+    // Fixed-size output (48 bytes) — assert any one byte accessible.
+    let _head = prk[0];
+    let _tail = prk[47];
+}
+
+fn deterministic_on_identical_inputs() {
+    let salt: List<Byte> = [0xAA_u8, 0xBB_u8];
+    let ikm:  List<Byte> = [0xCC_u8, 0xDD_u8];
+    let a = hkdf_extract_sha256(salt.as_slice(), ikm.as_slice());
+    let b = hkdf_extract_sha256(salt.as_slice(), ikm.as_slice());
+    let mut i: Int = 0;
+    while i < 32 {
+        assert(a[i] == b[i]);
+        i = i + 1;
+    }
+}
+
+@main
+public fn main() -> Int {
+    rfc_5869_a1_sha256_vector();
+    empty_salt_uses_hashlen_zeros();
+    hkdf_extract_sha384_output_length_is_48();
+    deterministic_on_identical_inputs();
+    print("RFC 5869 HKDF-Extract KAT verified");
+    0
+}

@@ -1,0 +1,70 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: crypto, sha384, fips_180_4, kat
+// @timeout: 15000
+// @expected-exit: 0
+
+// FIPS 180-4 SHA-384 test vectors:
+//   SHA-384("")    = 38b060a751ac96384cd9327eb1b1e36a21fdb71114be07434c0cc7bf63f6e1da274edebfe76f65fbd51ad2f14898b95b
+//   SHA-384("abc") = cb00753f45a35e8bb5a03d699ac65007272c32ab0eded1631a8b605a43ff5bed8086072ba1e7cc2358baeca134c825a7
+
+mount core.*;
+mount core.collections.List;
+mount core.security.hash.sha384.{Sha384};
+
+fn sha384_empty_digest() {
+    let empty: List<Byte> = [];
+    let d = Sha384.digest(empty.as_slice());
+    let expected: [Byte; 48] = [
+        0x38_u8, 0xB0_u8, 0x60_u8, 0xA7_u8, 0x51_u8, 0xAC_u8, 0x96_u8, 0x38_u8,
+        0x4C_u8, 0xD9_u8, 0x32_u8, 0x7E_u8, 0xB1_u8, 0xB1_u8, 0xE3_u8, 0x6A_u8,
+        0x21_u8, 0xFD_u8, 0xB7_u8, 0x11_u8, 0x14_u8, 0xBE_u8, 0x07_u8, 0x43_u8,
+        0x4C_u8, 0x0C_u8, 0xC7_u8, 0xBF_u8, 0x63_u8, 0xF6_u8, 0xE1_u8, 0xDA_u8,
+        0x27_u8, 0x4E_u8, 0xDE_u8, 0xBF_u8, 0xE7_u8, 0x6F_u8, 0x65_u8, 0xFB_u8,
+        0xD5_u8, 0x1A_u8, 0xD2_u8, 0xF1_u8, 0x48_u8, 0x98_u8, 0xB9_u8, 0x5B_u8,
+    ];
+    let mut i: Int = 0;
+    while i < 48 {
+        assert(d[i] == expected[i]);
+        i = i + 1;
+    }
+}
+
+fn sha384_abc_digest() {
+    let abc: List<Byte> = [0x61_u8, 0x62_u8, 0x63_u8];
+    let d = Sha384.digest(abc.as_slice());
+    let expected: [Byte; 48] = [
+        0xCB_u8, 0x00_u8, 0x75_u8, 0x3F_u8, 0x45_u8, 0xA3_u8, 0x5E_u8, 0x8B_u8,
+        0xB5_u8, 0xA0_u8, 0x3D_u8, 0x69_u8, 0x9A_u8, 0xC6_u8, 0x50_u8, 0x07_u8,
+        0x27_u8, 0x2C_u8, 0x32_u8, 0xAB_u8, 0x0E_u8, 0xDE_u8, 0xD1_u8, 0x63_u8,
+        0x1A_u8, 0x8B_u8, 0x60_u8, 0x5A_u8, 0x43_u8, 0xFF_u8, 0x5B_u8, 0xED_u8,
+        0x80_u8, 0x86_u8, 0x07_u8, 0x2B_u8, 0xA1_u8, 0xE7_u8, 0xCC_u8, 0x23_u8,
+        0x58_u8, 0xBA_u8, 0xEC_u8, 0xA1_u8, 0x34_u8, 0xC8_u8, 0x25_u8, 0xA7_u8,
+    ];
+    let mut i: Int = 0;
+    while i < 48 {
+        assert(d[i] == expected[i]);
+        i = i + 1;
+    }
+}
+
+fn sha384_deterministic_on_same_input() {
+    let data: List<Byte> = [0x01_u8, 0x02_u8, 0x03_u8, 0x04_u8];
+    let d1 = Sha384.digest(data.as_slice());
+    let d2 = Sha384.digest(data.as_slice());
+    let mut i: Int = 0;
+    while i < 48 {
+        assert(d1[i] == d2[i]);
+        i = i + 1;
+    }
+}
+
+@main
+public fn main() -> Int {
+    sha384_empty_digest();
+    sha384_abc_digest();
+    sha384_deterministic_on_same_input();
+    print("FIPS 180-4 SHA-384 KAT verified");
+    0
+}
