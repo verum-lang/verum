@@ -1,0 +1,41 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L1
+// @tags: action, actic, epsilon, enact, attribute
+// @timeout: 5000
+// @expect: pass
+//
+// VUVA §11.2 Phase 5 E3 — @enact(epsilon …) attribute parses in both the
+// colon- and equals-separated forms, plus the bare-positional fallback.
+// The canonicalisation (ASCII name → Unicode primitive) is exercised by the
+// `verum audit --epsilon` command; here we only assert that the attribute
+// *parses and type-checks* across all three shapes — a compile-time smoke
+// against regressions in the @enact parser path.
+
+mount core.action.primitives;
+
+@enact(epsilon: "ε_prove")
+fn attr_colon_unicode() -> Bool { true }
+
+@enact(epsilon = "ε_observe")
+fn attr_equals_unicode() -> Bool { true }
+
+@enact(epsilon: "epsilon_decide")
+fn attr_colon_ascii() -> Bool { true }
+
+@enact(epsilon = "epsilon_construct")
+fn attr_equals_ascii() -> Bool { true }
+
+@enact("ε_translate")
+fn attr_positional() -> Bool { true }
+
+fn main() {
+    // Sanity: the decorated functions are still callable as ordinary fns;
+    // the @enact marker is consumed at parse time and has no runtime effect.
+    assert(attr_colon_unicode());
+    assert(attr_equals_unicode());
+    assert(attr_colon_ascii());
+    assert(attr_equals_ascii());
+    assert(attr_positional());
+    print("@enact attribute syntax ok");
+}

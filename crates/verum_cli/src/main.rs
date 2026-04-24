@@ -755,6 +755,14 @@ enum Commands {
         #[clap(long)]
         kernel_rules: bool,
 
+        /// Enumerate the ε-distribution (Actic / DC coordinate) of the
+        /// corpus — the dual of `--framework-axioms`. Prints every
+        /// `@enact(epsilon = "...")` marker grouped by ε-primitive
+        /// (VUVA §11.4). Exits non-zero if any malformed marker is
+        /// found (unknown primitive or missing `epsilon = ...` arg).
+        #[clap(long)]
+        epsilon: bool,
+
         /// Output format for the audit report: `plain` (default, human-
         /// readable) or `json` (machine-parseable, stable schema).
         ///
@@ -1807,6 +1815,7 @@ fn run_command(cli: Cli) -> Result<()> {
             direct_only,
             framework_axioms,
             kernel_rules,
+            epsilon,
             format,
         } => {
             let output_format = match format.as_str() {
@@ -1826,6 +1835,8 @@ fn run_command(cli: Cli) -> Result<()> {
                 commands::audit::audit_kernel_rules(output_format)
             } else if framework_axioms {
                 commands::audit::audit_framework_axioms_with_format(output_format)
+            } else if epsilon {
+                commands::audit::audit_epsilon_with_format(output_format)
             } else {
                 let options = commands::audit::AuditOptions {
                     verify_checksums: true,

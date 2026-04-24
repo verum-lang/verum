@@ -153,6 +153,7 @@ pub use typed::{
     // Concurrency attributes
     DeadlockDetectionAttr,
     DifferentiableAttr,
+    EnactAttr,
     FeatureAttr,
     FrameworkAttr,
     HotAttr,

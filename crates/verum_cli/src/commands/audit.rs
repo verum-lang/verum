@@ -985,3 +985,301 @@ fn print_framework_report(
         println!();
     }
 }
+
+// =============================================================================
+// ε-audit — `verum audit --epsilon` (VUVA §11.4 Phase 5 E3)
+//
+// Mirrors the `--framework-axioms` audit but for the DC (Actic) side of
+// the OC/DC duality. Enumerates every `@enact(epsilon = "...")` marker
+// attached to declarations in the current project, grouped by
+// ε-primitive, so a reviewer sees the DC coordinate of the corpus
+// parallel to the OC coordinate produced by `--framework-axioms`.
+//
+// Per VUVA §11.2, the seven canonical primitives are
+//   ε_math, ε_compute, ε_observe, ε_prove,
+//   ε_decide, ε_translate, ε_construct
+// — see `core.action.primitives.Primitive`. Only these seven are
+// recognised. Unknown strings land in the `malformed` bucket with a
+// diagnostic suggesting the expected primitive set.
+// =============================================================================
+
+/// One `@enact(...)` usage collected from the project AST.
+#[derive(Debug, Clone)]
+struct EnactUsage {
+    /// Declared item name (theorem / axiom / lemma / corollary / fn).
+    item_name: Text,
+    /// Source kind label (for diagnostics / reports).
+    item_kind: &'static str,
+    /// File path relative to project root.
+    file: PathBuf,
+}
+
+/// Legacy entry-point for `verum audit --epsilon` with plain output.
+pub fn audit_epsilon() -> Result<()> {
+    audit_epsilon_with_format(AuditFormat::Plain)
+}
+
+/// Entry-point for `verum audit --epsilon [--format FORMAT]`. Mirrors
+/// `audit_framework_axioms_with_format` structurally.
+pub fn audit_epsilon_with_format(format: AuditFormat) -> Result<()> {
+    if matches!(format, AuditFormat::Plain) {
+        ui::step("Enumerating ε-distribution (Actic / DC coordinate)");
+    }
+
+    let manifest_dir = Manifest::find_manifest_dir()?;
+    let vr_files = discover_vr_files(&manifest_dir);
+
+    if vr_files.is_empty() {
+        ui::warn("No .vr files found under the current project.");
+        return Ok(());
+    }
+
+    let mut by_epsilon: BTreeMap<Text, Vec<EnactUsage>> = BTreeMap::new();
+    let mut malformed: Vec<(PathBuf, Text)> = Vec::new();
+    let mut parsed_files = 0usize;
+    let mut skipped_files = 0usize;
+
+    for abs_path in &vr_files {
+        let rel_path = abs_path
+            .strip_prefix(&manifest_dir)
+            .unwrap_or(abs_path)
+            .to_path_buf();
+        let module = match parse_file_for_audit(abs_path) {
+            Ok(m) => m,
+            Err(_) => {
+                skipped_files += 1;
+                continue;
+            }
+        };
+        parsed_files += 1;
+
+        for item in &module.items {
+            // Collect on the outer Item.attributes AND on inner decl
+            // attributes, mirroring the @framework collection path. A
+            // single declaration may have multiple attributes; each is
+            // processed independently.
+            let (kind_label, item_name, decl_attrs): (
+                &'static str,
+                Text,
+                &verum_common::List<verum_ast::attr::Attribute>,
+            ) = match &item.kind {
+                ItemKind::Theorem(decl) => {
+                    ("theorem", decl.name.name.clone(), &decl.attributes)
+                }
+                ItemKind::Lemma(decl) => {
+                    ("lemma", decl.name.name.clone(), &decl.attributes)
+                }
+                ItemKind::Corollary(decl) => {
+                    ("corollary", decl.name.name.clone(), &decl.attributes)
+                }
+                ItemKind::Axiom(decl) => {
+                    ("axiom", decl.name.name.clone(), &decl.attributes)
+                }
+                ItemKind::Function(func) => {
+                    ("fn", func.name.name.clone(), &func.attributes)
+                }
+                _ => continue,
+            };
+            collect_enact_markers_from(
+                &item.attributes,
+                kind_label,
+                &item_name,
+                &rel_path,
+                &mut by_epsilon,
+                &mut malformed,
+            );
+            collect_enact_markers_from(
+                decl_attrs,
+                kind_label,
+                &item_name,
+                &rel_path,
+                &mut by_epsilon,
+                &mut malformed,
+            );
+        }
+    }
+
+    match format {
+        AuditFormat::Plain => {
+            print_epsilon_report(parsed_files, skipped_files, &by_epsilon, &malformed);
+        }
+        AuditFormat::Json => {
+            print_epsilon_report_json(
+                parsed_files,
+                skipped_files,
+                &by_epsilon,
+                &malformed,
+            );
+        }
+    }
+    Ok(())
+}
+
+fn collect_enact_markers_from(
+    attrs: &verum_common::List<verum_ast::attr::Attribute>,
+    kind_label: &'static str,
+    item_name: &Text,
+    rel_path: &Path,
+    by_epsilon: &mut BTreeMap<Text, Vec<EnactUsage>>,
+    malformed: &mut Vec<(PathBuf, Text)>,
+) {
+    use verum_ast::attr::EnactAttr;
+    for attr in attrs.iter() {
+        if !attr.is_named("enact") {
+            continue;
+        }
+        match EnactAttr::from_attribute(attr) {
+            Maybe::Some(ea) => {
+                by_epsilon
+                    .entry(ea.epsilon)
+                    .or_default()
+                    .push(EnactUsage {
+                        item_name: item_name.clone(),
+                        item_kind: kind_label,
+                        file: rel_path.to_path_buf(),
+                    });
+            }
+            Maybe::None => {
+                malformed.push((rel_path.to_path_buf(), item_name.clone()));
+            }
+        }
+    }
+}
+
+fn print_epsilon_report(
+    parsed_files: usize,
+    skipped_files: usize,
+    by_epsilon: &BTreeMap<Text, Vec<EnactUsage>>,
+    malformed: &[(PathBuf, Text)],
+) {
+    println!();
+    println!("{}", "ε-distribution (Actic / DC coordinate)".bold());
+    println!("{}", "─".repeat(40).dimmed());
+    println!(
+        "  Parsed {} .vr file(s), skipped {} unparseable file(s).",
+        parsed_files, skipped_files
+    );
+    println!();
+
+    if by_epsilon.is_empty() {
+        println!("  {} no @enact(epsilon = \"...\") markers found.", "·".dimmed());
+        println!(
+            "  {} the corpus declares no DC-side ε-coordinate; every",
+            "·".dimmed()
+        );
+        println!(
+            "    function's ε will be inferred from its body during"
+        );
+        println!("    compile-time `core.action.verify.verify_epsilon`.");
+        println!();
+    } else {
+        let total_markers: usize = by_epsilon.values().map(|v| v.len()).sum();
+        println!(
+            "  Found {} marker(s) across {} ε-primitive(s):",
+            total_markers.to_string().bold(),
+            by_epsilon.len().to_string().bold()
+        );
+        println!();
+        for (epsilon, uses) in by_epsilon {
+            println!(
+                "  {} {} ({} marker{})",
+                "▸".magenta(),
+                epsilon.as_str().bold(),
+                uses.len(),
+                if uses.len() == 1 { "" } else { "s" }
+            );
+            for u in uses {
+                println!(
+                    "    {} {} {}  —  {}",
+                    "·".dimmed(),
+                    u.item_kind,
+                    u.item_name.as_str().cyan(),
+                    u.file.display()
+                );
+            }
+            println!();
+        }
+    }
+
+    if !malformed.is_empty() {
+        ui::warn(&format!(
+            "{} malformed @enact(...) marker(s) found:",
+            malformed.len()
+        ));
+        for (file, item_name) in malformed {
+            println!(
+                "  · {} on {}  —  expected @enact(epsilon = \"<primitive>\")",
+                file.display(),
+                item_name.as_str()
+            );
+        }
+        println!(
+            "  known primitives: {}",
+            "ε_math, ε_compute, ε_observe, ε_prove, ε_decide, ε_translate, ε_construct"
+                .dimmed()
+        );
+        println!();
+    }
+}
+
+fn print_epsilon_report_json(
+    parsed_files: usize,
+    skipped_files: usize,
+    by_epsilon: &BTreeMap<Text, Vec<EnactUsage>>,
+    malformed: &[(PathBuf, Text)],
+) {
+    // Hand-rolled JSON for deterministic output; mirrors
+    // `print_framework_report_json` so CI consumers see the same
+    // schema shape for OC and DC audits.
+    let mut out = String::new();
+    out.push_str("{\n");
+    out.push_str("  \"schema_version\": 1,\n");
+    out.push_str(&format!("  \"parsed_files\": {},\n", parsed_files));
+    out.push_str(&format!("  \"skipped_files\": {},\n", skipped_files));
+    out.push_str("  \"epsilons\": [\n");
+    let total_eps = by_epsilon.len();
+    for (i, (epsilon, uses)) in by_epsilon.iter().enumerate() {
+        out.push_str("    {\n");
+        out.push_str(&format!(
+            "      \"epsilon\": \"{}\",\n",
+            json_escape(epsilon.as_str())
+        ));
+        out.push_str("      \"usages\": [\n");
+        let total_u = uses.len();
+        for (j, u) in uses.iter().enumerate() {
+            out.push_str("        {\n");
+            out.push_str(&format!(
+                "          \"item_kind\": \"{}\",\n",
+                u.item_kind
+            ));
+            out.push_str(&format!(
+                "          \"item_name\": \"{}\",\n",
+                json_escape(u.item_name.as_str())
+            ));
+            out.push_str(&format!(
+                "          \"file\": \"{}\"\n",
+                json_escape(&u.file.display().to_string())
+            ));
+            out.push_str(if j + 1 == total_u { "        }\n" } else { "        },\n" });
+        }
+        out.push_str("      ]\n");
+        out.push_str(if i + 1 == total_eps { "    }\n" } else { "    },\n" });
+    }
+    out.push_str("  ],\n");
+    out.push_str("  \"malformed\": [\n");
+    for (i, (file, item_name)) in malformed.iter().enumerate() {
+        out.push_str("    {\n");
+        out.push_str(&format!(
+            "      \"file\": \"{}\",\n",
+            json_escape(&file.display().to_string())
+        ));
+        out.push_str(&format!(
+            "      \"item_name\": \"{}\"\n",
+            json_escape(item_name.as_str())
+        ));
+        out.push_str(if i + 1 == malformed.len() { "    }\n" } else { "    },\n" });
+    }
+    out.push_str("  ]\n");
+    out.push_str("}\n");
+    print!("{}", out);
+}

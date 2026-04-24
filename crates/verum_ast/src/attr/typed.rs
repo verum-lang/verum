@@ -4901,3 +4901,160 @@ impl std::fmt::Display for FrameworkAttr {
         write!(f, "@framework({}, \"{}\")", self.name, self.citation)
     }
 }
+
+// =============================================================================
+// ENACTMENT ATTRIBUTION (VUVA §11.4)
+//
+// `@enact(epsilon = "ε_prove")` tags a function / theorem / lemma / axiom
+// declaration with a Diakrisis primitive act on the Actic (DC) side of
+// the OC/DC duality (108.T). Every proof assistant before Verum ships
+// only the object-centric (OC) layer; the `@enact` marker is how Verum
+// exposes the dependency-centric (DC) coordinate of a function as
+// first-class audit data.
+//
+// The seven canonical primitives — ε_math, ε_compute, ε_observe,
+// ε_prove, ε_decide, ε_translate, ε_construct — are defined in
+// `core.action.primitives` and documented in VUVA §11.2. User-defined
+// ε-contracts (composites under `core.action.enactments`) are not
+// supported by this attribute in Phase 5 E3; they are tracked through
+// the per-function enactment inferred from the body.
+//
+// Grammar shape: `@enact(epsilon = <string-literal>)`.
+//
+// Downstream consumers:
+//   * `verum audit --epsilon` — enumerates the ε-distribution across
+//     the corpus, parallel to `verum audit --framework-axioms` for
+//     the OC side.
+//   * `core.action.verify.verify_epsilon` — compile-time consistency
+//     check that the declared ε matches the enactment inferred from
+//     the function body (Phase 5 E3b).
+// =============================================================================
+
+/// Typed form of `@enact(epsilon = "<primitive>")`.
+///
+/// The primitive is one of the seven Diakrisis ε-tags (VUVA §11.2).
+/// Unicode (`ε_prove`) and ASCII (`epsilon_prove`) spellings are both
+/// accepted at parse time; the typed form stores the canonical Unicode
+/// string so `verum audit --epsilon` renders deterministically.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct EnactAttr {
+    /// Canonical ε-primitive identifier, e.g. `"ε_prove"`, `"ε_compute"`.
+    pub epsilon: Text,
+    /// Source span of the `@enact(...)` form.
+    pub span: Span,
+}
+
+impl EnactAttr {
+    /// Construct directly. Prefer `from_attribute` at parse time.
+    pub fn new(epsilon: Text, span: Span) -> Self {
+        Self { epsilon, span }
+    }
+
+    /// Canonicalise an ε-primitive string. Accepts both Unicode
+    /// (`ε_prove`) and ASCII-fallback (`epsilon_prove`) spellings;
+    /// returns the canonical Unicode form, or `None` if the input
+    /// does not match a known primitive.
+    ///
+    /// Mirrors `core.action.primitives.primitive_from_text` but lives
+    /// in AST-layer because the attribute needs to canonicalise at
+    /// parse time before any stdlib fn has been compiled.
+    pub fn canonicalise_primitive(raw: &str) -> Option<&'static str> {
+        match raw {
+            "ε_math"      | "epsilon_math"      => Some("ε_math"),
+            "ε_compute"   | "epsilon_compute"   => Some("ε_compute"),
+            "ε_observe"   | "epsilon_observe"   => Some("ε_observe"),
+            "ε_prove"     | "epsilon_prove"     => Some("ε_prove"),
+            "ε_decide"    | "epsilon_decide"    => Some("ε_decide"),
+            "ε_translate" | "epsilon_translate" => Some("ε_translate"),
+            "ε_construct" | "epsilon_construct" => Some("ε_construct"),
+            _ => None,
+        }
+    }
+
+    /// Try to extract an `EnactAttr` from a generic `Attribute`.
+    ///
+    /// Returns `None` when the attribute name is not `"enact"` or the
+    /// argument shape does not match `epsilon = <string_literal>`. The
+    /// parser accepts named-argument form `epsilon = "..."`; downstream
+    /// emits a diagnostic if the string is not a recognised primitive.
+    pub fn from_attribute(attr: &Attribute) -> Maybe<Self> {
+        if !attr.is_named("enact") {
+            return Maybe::None;
+        }
+        let args = match &attr.args {
+            Maybe::Some(a) => a,
+            Maybe::None => return Maybe::None,
+        };
+        if args.len() != 1 {
+            return Maybe::None;
+        }
+        use crate::expr::{BinOp, Expr, ExprKind};
+        use crate::literal::{LiteralKind, StringLit};
+        // Accepted shapes (all equivalent):
+        //   1. `@enact(epsilon: "ε_prove")` — parser lowers `key: value`
+        //      attribute named-args to `Binary(Assign, Path("epsilon"), Literal)`.
+        //   2. `@enact(epsilon = "ε_prove")` — same lowering via Binary Assign.
+        //   3. `@enact("ε_prove")` — bare positional string literal.
+        // All three land in `args[0]`; walk the shape and pull the string.
+        let raw_opt: Option<Text> = match args.get(0) {
+            // Named form: `epsilon: "..."` or `epsilon = "..."`.
+            Some(Expr {
+                kind: ExprKind::Binary { op: BinOp::Assign, left, right },
+                ..
+            }) => {
+                let key_is_epsilon = match &left.kind {
+                    ExprKind::Path(p) => p
+                        .segments
+                        .last()
+                        .and_then(|seg| match seg {
+                            crate::ty::PathSegment::Name(ident) => {
+                                Some(ident.name.as_str() == "epsilon")
+                            }
+                            _ => None,
+                        })
+                        .unwrap_or(false),
+                    _ => false,
+                };
+                if !key_is_epsilon {
+                    None
+                } else {
+                    match &right.kind {
+                        ExprKind::Literal(lit) => match &lit.kind {
+                            LiteralKind::Text(StringLit::Regular(s))
+                            | LiteralKind::Text(StringLit::MultiLine(s)) => Some(s.clone()),
+                            _ => None,
+                        },
+                        _ => None,
+                    }
+                }
+            }
+            // Positional form: bare string literal.
+            Some(Expr { kind: ExprKind::Literal(lit), .. }) => match &lit.kind {
+                LiteralKind::Text(StringLit::Regular(s))
+                | LiteralKind::Text(StringLit::MultiLine(s)) => Some(s.clone()),
+                _ => None,
+            },
+            _ => None,
+        };
+        let canonical = raw_opt
+            .as_ref()
+            .and_then(|s| Self::canonicalise_primitive(s.as_str()))
+            .map(Text::from);
+        match canonical {
+            Some(c) => Maybe::Some(EnactAttr::new(c, attr.span)),
+            None => Maybe::None,
+        }
+    }
+}
+
+impl Spanned for EnactAttr {
+    fn span(&self) -> Span {
+        self.span
+    }
+}
+
+impl std::fmt::Display for EnactAttr {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "@enact(epsilon = \"{}\")", self.epsilon)
+    }
+}
