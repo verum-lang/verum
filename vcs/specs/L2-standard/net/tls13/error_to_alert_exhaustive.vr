@@ -1,0 +1,106 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: tls13, error, alert, rfc8446_6, exhaustive
+// @timeout: 15000
+// @expected-exit: 0
+
+// RFC 8446 §6 — every TlsError variant maps to the corresponding
+// AlertDescription codepoint. This test pins all 23 named error
+// variants plus the two that deliberately do NOT emit alerts
+// (RemoteAlert, IoError) by asserting the wire u8 codepoint directly.
+
+mount core.*;
+mount core.net.tls13.error.{TlsError};
+mount core.net.tls13.alert.{AlertDescription};
+
+fn check_alert_code(err: TlsError, expected: UInt8, label: &str) {
+    match err.to_alert() {
+        Some(a) => {
+            if a.to_u8() != expected {
+                panic(label);
+            }
+        },
+        None => panic(label),
+    }
+}
+
+fn every_handshake_level_variant_maps() {
+    check_alert_code(TlsError.ProtocolVersion,       70_u8,  "ProtocolVersion");
+    check_alert_code(TlsError.HandshakeFailure,      40_u8,  "HandshakeFailure");
+    check_alert_code(TlsError.UnexpectedMessage,     10_u8,  "UnexpectedMessage");
+    check_alert_code(TlsError.IllegalParameter,      47_u8,  "IllegalParameter");
+    check_alert_code(TlsError.MissingExtension,      109_u8, "MissingExtension");
+    check_alert_code(TlsError.UnsupportedExtension,  110_u8, "UnsupportedExtension");
+    check_alert_code(TlsError.UnrecognizedName,      112_u8, "UnrecognizedName");
+    check_alert_code(TlsError.NoApplicationProtocol, 120_u8, "NoApplicationProtocol");
+    check_alert_code(TlsError.InappropriateFallback, 86_u8,  "InappropriateFallback");
+    check_alert_code(TlsError.InsufficientSecurity,  71_u8,  "InsufficientSecurity");
+}
+
+fn every_certificate_level_variant_maps() {
+    check_alert_code(TlsError.BadCertificate,                42_u8,  "BadCertificate");
+    check_alert_code(TlsError.UnsupportedCertificate,        43_u8,  "UnsupportedCertificate");
+    check_alert_code(TlsError.CertificateRevoked,            44_u8,  "CertificateRevoked");
+    check_alert_code(TlsError.CertificateExpired,            45_u8,  "CertificateExpired");
+    check_alert_code(TlsError.CertificateUnknown,            46_u8,  "CertificateUnknown");
+    check_alert_code(TlsError.UnknownCa,                     48_u8,  "UnknownCa");
+    check_alert_code(TlsError.BadCertificateStatusResponse,  113_u8, "BadCertificateStatusResponse");
+}
+
+fn every_crypto_level_variant_maps() {
+    check_alert_code(TlsError.BadRecordMac,  20_u8, "BadRecordMac");
+    check_alert_code(TlsError.DecryptError,  51_u8, "DecryptError");
+    check_alert_code(TlsError.RecordOverflow, 22_u8, "RecordOverflow");
+    check_alert_code(TlsError.DecodeError,   50_u8, "DecodeError");
+}
+
+fn psk_and_internal_variants_map() {
+    check_alert_code(TlsError.UnknownPskIdentity, 115_u8, "UnknownPskIdentity");
+    check_alert_code(TlsError.InternalError(f"x"), 80_u8, "InternalError");
+}
+
+fn remote_alert_returns_none() {
+    let e = TlsError.RemoteAlert(AlertDescription.HandshakeFailure);
+    match e.to_alert() {
+        None => {},
+        _ => panic("RemoteAlert must not emit outgoing"),
+    }
+}
+
+fn io_error_returns_none() {
+    let e = TlsError.IoError(f"broken pipe");
+    match e.to_alert() {
+        None => {},
+        _ => panic("IoError must not emit outgoing"),
+    }
+}
+
+fn internal_error_preserves_payload_text_through_to_alert() {
+    // InternalError carries a diagnostic Text; the alert codepoint is
+    // stable regardless of the payload (operators rely on this to not
+    // leak state to the peer).
+    let e1 = TlsError.InternalError(f"short text");
+    let e2 = TlsError.InternalError(f"much longer diagnostic text with details");
+    match e1.to_alert() {
+        Some(a) => assert(a.to_u8() == 80_u8),
+        None => panic("e1"),
+    }
+    match e2.to_alert() {
+        Some(a) => assert(a.to_u8() == 80_u8),
+        None => panic("e2"),
+    }
+}
+
+@main
+public fn main() -> Int {
+    every_handshake_level_variant_maps();
+    every_certificate_level_variant_maps();
+    every_crypto_level_variant_maps();
+    psk_and_internal_variants_map();
+    remote_alert_returns_none();
+    io_error_returns_none();
+    internal_error_preserves_payload_text_through_to_alert();
+    print("RFC 8446 §6 TlsError → AlertDescription exhaustive mapping verified");
+    0
+}
