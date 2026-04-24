@@ -1,0 +1,101 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: quic, simnet, deterministic_simulation
+// @timeout: 15000
+// @expected-exit: 0
+
+// Deterministic SimNetwork for QUIC differential testing.
+//   * new() seeds xorshift64 with a non-zero default.
+//   * with_seed(0) → forced to 1 (avoids xorshift64 degeneracy).
+//   * with_loss_rate_bp(b) — b bp out of 10000 (250 ≈ 2.5%).
+//   * should_drop() advances the PRNG deterministically.
+
+mount core.net.quic.transport.abstraction.{SimNetwork};
+
+fn fresh_simnet_counters_are_zero() {
+    let sn = SimNetwork.new();
+    assert(sn.sent_count()    == 0_u64);
+    assert(sn.dropped_count() == 0_u64);
+    assert(sn.inflight_count() == 0);
+}
+
+fn with_seed_zero_forces_one() {
+    // Starting with seed = 0 must not leave the PRNG in a stuck
+    // state (xorshift64 degenerates on all-zero input).
+    let mut a = SimNetwork.new().with_seed(0_u64);
+    let mut b = SimNetwork.new().with_seed(1_u64);
+    // Both should now produce identical should_drop sequences.
+    let mut same_count: Int = 0;
+    let mut i: Int = 0;
+    while i < 64 {
+        let da = a.should_drop();
+        let db = b.should_drop();
+        if da == db { same_count = same_count + 1; }
+        i = i + 1;
+    }
+    // All 64 results must match (deterministic + identical seed).
+    assert(same_count == 64);
+}
+
+fn same_seed_produces_same_drop_sequence() {
+    let mut a = SimNetwork.new().with_seed(42_u64).with_loss_rate_bp(1000_u64);
+    let mut b = SimNetwork.new().with_seed(42_u64).with_loss_rate_bp(1000_u64);
+    let mut matches: Int = 0;
+    let mut i: Int = 0;
+    while i < 256 {
+        let da = a.should_drop();
+        let db = b.should_drop();
+        if da == db { matches = matches + 1; }
+        i = i + 1;
+    }
+    assert(matches == 256);
+}
+
+fn different_seeds_diverge() {
+    let mut a = SimNetwork.new().with_seed(100_u64).with_loss_rate_bp(5000_u64);
+    let mut b = SimNetwork.new().with_seed(200_u64).with_loss_rate_bp(5000_u64);
+    // Over 1024 trials some MUST differ — otherwise the PRNG is
+    // broken (or the streams happen to align, which at 5000 bp is
+    // overwhelmingly unlikely).
+    let mut any_diff = false;
+    let mut i: Int = 0;
+    while i < 1024 {
+        if a.should_drop() != b.should_drop() {
+            any_diff = true;
+            break;
+        }
+        i = i + 1;
+    }
+    assert(any_diff);
+}
+
+fn zero_loss_rate_never_drops() {
+    let mut sn = SimNetwork.new().with_seed(7_u64).with_loss_rate_bp(0_u64);
+    let mut i: Int = 0;
+    while i < 256 {
+        assert(false == sn.should_drop());
+        i = i + 1;
+    }
+}
+
+fn full_loss_rate_always_drops() {
+    let mut sn = SimNetwork.new().with_seed(7_u64).with_loss_rate_bp(10000_u64);
+    let mut i: Int = 0;
+    while i < 256 {
+        assert(sn.should_drop());
+        i = i + 1;
+    }
+}
+
+@main
+public fn main() -> Int {
+    fresh_simnet_counters_are_zero();
+    with_seed_zero_forces_one();
+    same_seed_produces_same_drop_sequence();
+    different_seeds_diverge();
+    zero_loss_rate_never_drops();
+    full_loss_rate_always_drops();
+    print("SimNetwork determinism surface verified");
+    0
+}

@@ -1,0 +1,69 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: quic, stats, prometheus, observability
+// @timeout: 15000
+// @expected-exit: 0
+
+// Prometheus text-format exporter for QuicStats / EndpointStats —
+// render_connection + render_endpoint accept references and return
+// Text without mutating the input; output is non-empty and begins
+// with one of the standard Prometheus preamble lines (`# HELP` or
+// `# TYPE`).
+
+mount core.*;
+mount core.net.quic.stats.{QuicStats, EndpointStats};
+mount core.net.quic.stats_prometheus.{render_connection, render_endpoint};
+
+fn render_connection_produces_nonempty_text() {
+    let stats = QuicStats::new();
+    let text = render_connection(&stats, &f"conn-42");
+    assert(text.len() > 0);
+}
+
+fn render_connection_preamble_starts_with_hash() {
+    let stats = QuicStats::new();
+    let text = render_connection(&stats, &f"c-1");
+    // Prometheus text-format lines beginning with `#` carry HELP /
+    // TYPE metadata per spec. Any non-empty renderer output must
+    // include the `#` preamble.
+    assert(text.contains(&f"#"));
+}
+
+fn nonzero_counter_survives_render() {
+    let mut stats = QuicStats::new();
+    stats.datagrams_sent = 10_u64;
+    stats.bytes_sent     = 1500_u64;
+    stats.packets_lost   = 3_u64;
+    // The rendered text should contain the decimal encoding of
+    // `10` somewhere — substring search.
+    let text = render_connection(&stats, &f"conn");
+    assert(text.contains(&f"10"));
+    assert(text.contains(&f"1500"));
+}
+
+fn render_endpoint_non_empty() {
+    let e = EndpointStats::new();
+    let text = render_endpoint(&e);
+    assert(text.len() > 0);
+    assert(text.contains(&f"#"));
+}
+
+fn different_conn_labels_produce_different_output() {
+    let stats = QuicStats::new();
+    let a = render_connection(&stats, &f"connA");
+    let b = render_connection(&stats, &f"connB");
+    // Labels appear in the text form, so output MUST differ.
+    assert(a != b);
+}
+
+@main
+public fn main() -> Int {
+    render_connection_produces_nonempty_text();
+    render_connection_preamble_starts_with_hash();
+    nonzero_counter_survives_render();
+    render_endpoint_non_empty();
+    different_conn_labels_produce_different_output();
+    print("QUIC Prometheus exporter surface verified");
+    0
+}

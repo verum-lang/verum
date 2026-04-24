@@ -1,0 +1,97 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: h3, qpack, dynamic_table, rfc9204_3_2
+// @timeout: 15000
+// @expected-exit: 0
+
+// RFC 9204 §3.2 QPACK DynamicTable: capacity-bounded FIFO of
+// (name, value) entries. set_capacity updates the target size;
+// can_insert reports whether the entry fits; insert returns an
+// absolute index that monotonically grows.
+
+mount core.collections.List;
+mount core.net.h3.qpack.dynamic_table.{DynamicTable, DynamicTableError, DynEntry};
+
+fn fresh_table_is_empty() {
+    let t = DynamicTable.new(4096_u64);
+    assert(t.max_capacity() == 4096_u64);
+    assert(t.len() == 0);
+    assert(t.insert_count() == 0_u64);
+    assert(t.current_size() == 0_u64);
+}
+
+fn insert_increments_count_and_index() {
+    let mut t = DynamicTable.new(4096_u64);
+    let _ = t.set_capacity(4096_u64);
+    let idx1 = t.insert(f":method", f"GET").unwrap();
+    let idx2 = t.insert(f":status", f"200").unwrap();
+    // RFC 9204 §3.2.4: absolute indices increment per insert.
+    assert(idx2 > idx1);
+    assert(t.insert_count() == 2_u64);
+    assert(t.len() == 2);
+}
+
+fn set_capacity_above_max_errors() {
+    let mut t = DynamicTable.new(4096_u64);
+    match t.set_capacity(8192_u64) {
+        Err(_) => {},
+        _ => panic("capacity > max_capacity must error"),
+    }
+    let _ = t.set_capacity(1024_u64);
+    assert(t.capacity() == 1024_u64);
+}
+
+fn find_matches_exact_pair() {
+    let mut t = DynamicTable.new(4096_u64);
+    let _ = t.set_capacity(4096_u64);
+    let _ = t.insert(f"x-custom", f"v1");
+    let _ = t.insert(f"x-custom", f"v2");
+    match t.find(&f"x-custom", &f"v1") {
+        Some(_) => {},
+        None => panic("must find v1"),
+    }
+    match t.find(&f"x-custom", &f"absent") {
+        None => {},
+        _ => panic("unknown value must be None"),
+    }
+}
+
+fn find_name_returns_matching_index() {
+    let mut t = DynamicTable.new(4096_u64);
+    let _ = t.set_capacity(4096_u64);
+    let _ = t.insert(f":path", f"/");
+    match t.find_name(&f":path") {
+        Some(_) => {},
+        None => panic(":path must resolve"),
+    }
+    match t.find_name(&f":nope") {
+        None => {},
+        _ => panic("unknown name must be None"),
+    }
+}
+
+fn get_by_absolute_roundtrip() {
+    let mut t = DynamicTable.new(4096_u64);
+    let _ = t.set_capacity(4096_u64);
+    let idx = t.insert(f"foo", f"bar").unwrap();
+    match t.get_by_absolute(idx) {
+        Some(e) => {
+            assert(e.name  == f"foo");
+            assert(e.value == f"bar");
+        },
+        None => panic("inserted entry must be retrievable"),
+    }
+}
+
+@main
+public fn main() -> Int {
+    fresh_table_is_empty();
+    insert_increments_count_and_index();
+    set_capacity_above_max_errors();
+    find_matches_exact_pair();
+    find_name_returns_matching_index();
+    get_by_absolute_roundtrip();
+    print("RFC 9204 §3.2 QPACK DynamicTable surface verified");
+    0
+}
