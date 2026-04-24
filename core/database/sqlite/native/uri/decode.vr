@@ -1,0 +1,46 @@
+// =============================================================================
+// uri/decode.vr — percent-decoding
+// =============================================================================
+// Spec: RFC 3986 §2.1
+//
+// Replaces `%xx` triplets with their decoded byte. Invalid sequences
+// (non-hex digit after `%`) are left as-is.
+// =============================================================================
+
+module core.database.sqlite.native.uri.decode;
+
+mount core.*;
+mount base.{Text, Bool};
+mount collections.List;
+
+public fn percent_decode(text: &Text) -> Text {
+    let bs = text.as_bytes();
+    let mut out = Text.new();
+    let mut i: Int = 0;
+    while i < bs.len() {
+        let b = bs[i];
+        if b == (37 as Byte) && (i + 2) < bs.len() && is_hex(bs[i + 1]) && is_hex(bs[i + 2]) {
+            let hi = hex_value(bs[i + 1]);
+            let lo = hex_value(bs[i + 2]);
+            out.push_byte((hi << (4 as Byte)) | lo);
+            i = i + 3;
+        } else {
+            out.push_byte(b);
+            i = i + 1;
+        }
+    }
+    out
+}
+
+fn is_hex(b: Byte) -> Bool {
+    (b >= (48 as Byte) && b <= (57 as Byte))
+        || (b >= (65 as Byte) && b <= (70 as Byte))
+        || (b >= (97 as Byte) && b <= (102 as Byte))
+}
+
+fn hex_value(b: Byte) -> Byte {
+    if b >= (48 as Byte) && b <= (57 as Byte) { b - (48 as Byte) }
+    else if b >= (65 as Byte) && b <= (70 as Byte) { b - (55 as Byte) }
+    else if b >= (97 as Byte) && b <= (102 as Byte) { b - (87 as Byte) }
+    else { 0 as Byte }
+}

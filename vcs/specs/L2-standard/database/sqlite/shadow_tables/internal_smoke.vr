@@ -1,0 +1,196 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, shadow_tables, sqlite_master, sequence, autoindex
+// @timeout: 5000
+// @expected-exit: 0
+//
+// Shadow-table surface:
+//   * MasterTable add / drop / lookup / by_kind / indexes_for
+//   * SequenceTable next_for monotonic + drop_for
+//   * AutoIndexCounter generates sqlite_autoindex_<table>_<n>
+//   * is_autoindex_name predicate
+//   * TempMasterTable scope semantics
+
+mount core.database.sqlite.native.shadow_tables.master.{
+    MasterRowKind, MrkTable, MrkIndex, MrkView, MrkTrigger,
+    MasterRow, master_row,
+    MasterTable, master_table_new,
+    kind_text,
+};
+mount core.database.sqlite.native.shadow_tables.sequence.{
+    SequenceRow, sequence_row,
+    SequenceTable, sequence_table_new,
+};
+mount core.database.sqlite.native.shadow_tables.autoindex.{
+    AutoIndexCounter, counter_new,
+    is_autoindex_name,
+};
+mount core.database.sqlite.native.shadow_tables.temp.{
+    TempMasterTable, temp_master_new,
+    SchemaScope, SsMain, SsTemp,
+    schema_scope_name, resolve_scope,
+};
+mount base.{Some, None, Maybe, Bool};
+
+// -----------------------------------------------------------------------------
+// MasterRowKind / kind_text
+// -----------------------------------------------------------------------------
+
+fn test_kind_text_round_trip() {
+    assert(kind_text(&MrkTable) == "table".clone());
+    assert(kind_text(&MrkIndex) == "index".clone());
+    assert(kind_text(&MrkView) == "view".clone());
+    assert(kind_text(&MrkTrigger) == "trigger".clone());
+}
+
+// -----------------------------------------------------------------------------
+// MasterTable
+// -----------------------------------------------------------------------------
+
+fn test_master_add_and_lookup() {
+    let mut m = master_table_new();
+    m.add(master_row(MrkTable, "users".clone(), "users".clone(), 2 as Int64, "CREATE TABLE users(id INT)".clone()));
+    assert_eq(m.len(), 1);
+    match m.lookup(&"users".clone()) {
+        Some(_) => {},
+        None    => panic("users present"),
+    }
+}
+
+fn test_master_drop_returns_true_when_found() {
+    let mut m = master_table_new();
+    m.add(master_row(MrkTable, "t".clone(), "t".clone(), 2 as Int64, "CREATE TABLE t(x)".clone()));
+    assert(m.drop_by_name(&"t".clone()));
+    assert_eq(m.len(), 0);
+}
+
+fn test_master_drop_missing_returns_false() {
+    let mut m = master_table_new();
+    assert(!m.drop_by_name(&"missing".clone()));
+}
+
+fn test_master_by_kind_filters() {
+    let mut m = master_table_new();
+    m.add(master_row(MrkTable, "t".clone(), "t".clone(), 2 as Int64, "CREATE TABLE t".clone()));
+    m.add(master_row(MrkIndex, "idx".clone(), "t".clone(), 3 as Int64, "CREATE INDEX idx".clone()));
+    m.add(master_row(MrkIndex, "idx2".clone(), "t".clone(), 4 as Int64, "CREATE INDEX idx2".clone()));
+    let indexes = m.by_kind(&MrkIndex);
+    assert_eq(indexes.len(), 2);
+}
+
+fn test_master_indexes_for_table() {
+    let mut m = master_table_new();
+    m.add(master_row(MrkIndex, "ia".clone(), "users".clone(), 3 as Int64, "CREATE INDEX ia".clone()));
+    m.add(master_row(MrkIndex, "ib".clone(), "posts".clone(), 4 as Int64, "CREATE INDEX ib".clone()));
+    let users_idx = m.indexes_for(&"users".clone());
+    assert_eq(users_idx.len(), 1);
+}
+
+// -----------------------------------------------------------------------------
+// SequenceTable
+// -----------------------------------------------------------------------------
+
+fn test_sequence_next_for_monotonic() {
+    let mut s = sequence_table_new();
+    let n1 = s.next_for(&"users".clone(), 5 as Int64);
+    let n2 = s.next_for(&"users".clone(), 5 as Int64);
+    assert(n2 > n1);
+}
+
+fn test_sequence_next_for_uses_observed_max() {
+    let mut s = sequence_table_new();
+    let _ = s.next_for(&"t".clone(), 5 as Int64);
+    let next = s.next_for(&"t".clone(), 100 as Int64);
+    assert_eq(next, 101 as Int64);
+}
+
+fn test_sequence_current_seq_lookup() {
+    let mut s = sequence_table_new();
+    let n = s.next_for(&"t".clone(), 0 as Int64);
+    match s.current_seq(&"t".clone()) {
+        Some(v) => assert_eq(v, n),
+        None    => panic("present"),
+    }
+}
+
+fn test_sequence_drop_for() {
+    let mut s = sequence_table_new();
+    let _ = s.next_for(&"t".clone(), 0 as Int64);
+    assert(s.drop_for(&"t".clone()));
+    assert_eq(s.len(), 0);
+}
+
+// -----------------------------------------------------------------------------
+// AutoIndexCounter
+// -----------------------------------------------------------------------------
+
+fn test_autoindex_first_name() {
+    let mut c = counter_new();
+    let n = c.next_for(&"users".clone());
+    assert(n == "sqlite_autoindex_users_1".clone());
+}
+
+fn test_autoindex_increments() {
+    let mut c = counter_new();
+    let _ = c.next_for(&"users".clone());
+    let n2 = c.next_for(&"users".clone());
+    assert(n2 == "sqlite_autoindex_users_2".clone());
+}
+
+fn test_is_autoindex_name_predicate() {
+    assert(is_autoindex_name(&"sqlite_autoindex_users_1".clone()));
+    assert(!is_autoindex_name(&"my_index".clone()));
+    assert(!is_autoindex_name(&"sqlite_autoindex_".clone()));
+}
+
+// -----------------------------------------------------------------------------
+// TempMasterTable
+// -----------------------------------------------------------------------------
+
+fn test_temp_master_add_and_clear() {
+    let mut t = temp_master_new();
+    t.add(master_row(MrkTable, "tmp".clone(), "tmp".clone(), 2 as Int64, "CREATE TEMP TABLE tmp".clone()));
+    assert_eq(t.len(), 1);
+    t.clear();
+    assert_eq(t.len(), 0);
+}
+
+fn test_resolve_scope_main_default() {
+    match resolve_scope(&"main".clone()) {
+        SsMain => {},
+        _      => panic("main"),
+    }
+}
+
+fn test_resolve_scope_temp() {
+    match resolve_scope(&"temp".clone()) {
+        SsTemp => {},
+        _      => panic("temp"),
+    }
+}
+
+fn test_schema_scope_names() {
+    assert(schema_scope_name(&SsMain) == "main".clone());
+    assert(schema_scope_name(&SsTemp) == "temp".clone());
+}
+
+fn main() {
+    test_kind_text_round_trip();
+    test_master_add_and_lookup();
+    test_master_drop_returns_true_when_found();
+    test_master_drop_missing_returns_false();
+    test_master_by_kind_filters();
+    test_master_indexes_for_table();
+    test_sequence_next_for_monotonic();
+    test_sequence_next_for_uses_observed_max();
+    test_sequence_current_seq_lookup();
+    test_sequence_drop_for();
+    test_autoindex_first_name();
+    test_autoindex_increments();
+    test_is_autoindex_name_predicate();
+    test_temp_master_add_and_clear();
+    test_resolve_scope_main_default();
+    test_resolve_scope_temp();
+    test_schema_scope_names();
+}

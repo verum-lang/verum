@@ -1,0 +1,145 @@
+// =============================================================================
+// dbstat/page_stat.vr — per-page statistics
+// =============================================================================
+// Spec: sqlite-native.md §16.4
+//
+// Each row of the dbstat virtual table is one B-tree page in the
+// database. SQLite's columns are:
+//
+//   name         TEXT      -- table or index name owning the page
+//   path         TEXT      -- '/<n>' = root, '/<n>/<m>' = m-th child of n
+//   pageno       INTEGER   -- 1-based page number
+//   pagetype     TEXT      -- 'internal' / 'leaf' / 'overflow'
+//   ncell        INTEGER   -- # cells on this page
+//   payload      INTEGER   -- bytes of payload on this page
+//   unused       INTEGER   -- unused bytes on this page
+//   mx_payload   INTEGER   -- biggest cell payload on this page
+//   pgoffset     INTEGER   -- byte offset of page in db file
+//   pgsize       INTEGER   -- bytes per page
+//
+// =============================================================================
+
+module core.database.sqlite.native.dbstat.page_stat;
+
+mount core.*;
+mount base.{Text, Bool};
+mount collections.List;
+
+// -----------------------------------------------------------------------------
+// PageType
+// -----------------------------------------------------------------------------
+
+public type PageType is PtInternal | PtLeaf | PtOverflow;
+
+public fn page_type_text(t: &PageType) -> Text {
+    match t {
+        PtInternal => "internal".clone(),
+        PtLeaf     => "leaf".clone(),
+        PtOverflow => "overflow".clone(),
+    }
+}
+
+// -----------------------------------------------------------------------------
+// DbStatRow
+// -----------------------------------------------------------------------------
+
+public type DbStatRow is {
+    name: Text,
+    path: Text,
+    pageno: Int64,
+    pagetype: PageType,
+    ncell: Int,
+    payload: Int,
+    unused: Int,
+    mx_payload: Int,
+    pgoffset: Int64,
+    pgsize: Int,
+}
+
+public fn dbstat_row(
+    name: Text,
+    path: Text,
+    pageno: Int64,
+    pagetype: PageType,
+    ncell: Int,
+    payload: Int,
+    unused: Int,
+    mx_payload: Int,
+    pgoffset: Int64,
+    pgsize: Int,
+) -> DbStatRow {
+    DbStatRow {
+        name: name,
+        path: path,
+        pageno: pageno,
+        pagetype: pagetype,
+        ncell: ncell,
+        payload: payload,
+        unused: unused,
+        mx_payload: mx_payload,
+        pgoffset: pgoffset,
+        pgsize: pgsize,
+    }
+}
+
+implement DbStatRow {
+    /// Fraction of the page that's payload.
+    pub fn fill_ratio(&self) -> Float64 {
+        if self.pgsize == 0 { return 0.0 as Float64; }
+        (self.payload as Float64) / (self.pgsize as Float64)
+    }
+
+    /// Bytes of overhead (page-header + cell-pointer array) =
+    /// pgsize - payload - unused.
+    pub fn overhead(&self) -> Int {
+        let used = self.payload + self.unused;
+        if used > self.pgsize { 0 } else { self.pgsize - used }
+    }
+}
+
+// -----------------------------------------------------------------------------
+// DbStatTable — accumulator
+// -----------------------------------------------------------------------------
+
+public type DbStatTable is { rows: List<DbStatRow> }
+
+public fn dbstat_table_new() -> DbStatTable { DbStatTable { rows: List.new() } }
+
+implement DbStatTable {
+    public fn len(&self) -> Int { self.rows.len() }
+
+    pub fn add(&mut self, r: DbStatRow) { self.rows.push(r); }
+
+    /// Total bytes of payload across every page — used by integrity
+    /// checks to compute live data ratio.
+    pub fn total_payload(&self) -> Int64 {
+        let mut sum: Int64 = 0 as Int64;
+        let mut i: Int = 0;
+        while i < self.rows.len() {
+            sum = sum + (self.rows[i].payload as Int64);
+            i = i + 1;
+        }
+        sum
+    }
+
+    pub fn total_unused(&self) -> Int64 {
+        let mut sum: Int64 = 0 as Int64;
+        let mut i: Int = 0;
+        while i < self.rows.len() {
+            sum = sum + (self.rows[i].unused as Int64);
+            i = i + 1;
+        }
+        sum
+    }
+
+    pub fn page_count_for_kind(&self, want: &PageType) -> Int {
+        let want_text = page_type_text(want);
+        let mut n: Int = 0;
+        let mut i: Int = 0;
+        while i < self.rows.len() {
+            if page_type_text(&self.rows[i].pagetype) == want_text { n = n + 1; }
+            i = i + 1;
+        }
+        n
+    }
+}

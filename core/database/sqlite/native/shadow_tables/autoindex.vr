@@ -1,0 +1,98 @@
+// =============================================================================
+// shadow_tables/autoindex.vr — sqlite_autoindex_<table>_<n> name generator
+// =============================================================================
+// Spec: sqlite-native.md §17 (UNIQUE / PRIMARY KEY constraint indexes)
+//
+// SQLite generates an implicit unique index for each PRIMARY KEY (when
+// not INTEGER PRIMARY KEY) and each UNIQUE constraint. The index name
+// is `sqlite_autoindex_<table_name>_<n>` where `n` is monotonically
+// assigned per table.
+// =============================================================================
+
+module core.database.sqlite.native.shadow_tables.autoindex;
+
+mount core.*;
+mount base.{Text, Bool, Maybe};
+mount collections.List;
+
+public type AutoIndexCounter is { table_to_next: List<TableEntry> }
+
+public type TableEntry is { table: Text, next_n: Int }
+
+public fn counter_new() -> AutoIndexCounter {
+    AutoIndexCounter { table_to_next: List.new() }
+}
+
+implement AutoIndexCounter {
+    /// Issue the next sqlite_autoindex_<table>_<n> name and bump the
+    /// per-table counter.
+    pub fn next_for(&mut self, table: &Text) -> Text {
+        let mut idx: Int = 0;
+        while idx < self.table_to_next.len() {
+            if self.table_to_next[idx].table == *table {
+                let n = self.table_to_next[idx].next_n;
+                self.table_to_next[idx].next_n = n + 1;
+                return render_name(table, n);
+            }
+            idx = idx + 1;
+        }
+        // Unknown table → start from 1.
+        self.table_to_next.push(TableEntry { table: table.clone(), next_n: 2 });
+        render_name(table, 1)
+    }
+
+    pub fn current_count(&self, table: &Text) -> Int {
+        let mut idx: Int = 0;
+        while idx < self.table_to_next.len() {
+            if self.table_to_next[idx].table == *table {
+                return self.table_to_next[idx].next_n - 1;
+            }
+            idx = idx + 1;
+        }
+        0
+    }
+}
+
+fn render_name(table: &Text, n: Int) -> Text {
+    let mut out = "sqlite_autoindex_".clone();
+    push_text(&mut out, table);
+    out.push_byte(95 as Byte);
+    push_int(&mut out, n);
+    out
+}
+
+fn push_text(dst: &mut Text, s: &Text) {
+    let bs = s.as_bytes();
+    let mut i: Int = 0;
+    while i < bs.len() { dst.push_byte(bs[i]); i = i + 1; }
+}
+
+fn push_int(dst: &mut Text, n: Int) {
+    if n == 0 { dst.push_byte(48 as Byte); return; }
+    let mut digits: List<Byte> = List.new();
+    let mut x: Int = if n < 0 { -n } else { n };
+    while x > 0 {
+        digits.push(((x % 10) as Byte) + (48 as Byte));
+        x = x / 10;
+    }
+    if n < 0 { dst.push_byte(45 as Byte); }
+    let mut i: Int = digits.len() - 1;
+    while i >= 0 { dst.push_byte(digits[i]); i = i - 1; }
+}
+
+// -----------------------------------------------------------------------------
+// Predicate — does a name look like an auto-generated index?
+// -----------------------------------------------------------------------------
+
+public fn is_autoindex_name(name: &Text) -> Bool {
+    let bs = name.as_bytes();
+    let prefix = "sqlite_autoindex_".clone();
+    let pb = prefix.as_bytes();
+    if bs.len() <= pb.len() { return false; }
+    let mut i: Int = 0;
+    while i < pb.len() {
+        if bs[i] != pb[i] { return false; }
+        i = i + 1;
+    }
+    true
+}

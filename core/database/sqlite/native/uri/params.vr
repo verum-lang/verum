@@ -1,0 +1,119 @@
+// =============================================================================
+// uri/params.vr — UriParams + recognised key enum
+// =============================================================================
+// Spec: SQLite URI filenames
+// =============================================================================
+
+module core.database.sqlite.native.uri.params;
+
+mount core.*;
+mount base.{Text, Bool, Maybe};
+mount collections.List;
+
+// -----------------------------------------------------------------------------
+// OpenMode
+// -----------------------------------------------------------------------------
+
+public type OpenMode is OmReadOnly | OmReadWrite | OmReadWriteCreate | OmMemory;
+
+public fn open_mode_text(m: &OpenMode) -> Text {
+    match m {
+        OmReadOnly         => "ro".clone(),
+        OmReadWrite        => "rw".clone(),
+        OmReadWriteCreate  => "rwc".clone(),
+        OmMemory           => "memory".clone(),
+    }
+}
+
+public fn parse_mode(text: &Text) -> Maybe<OpenMode> {
+    if *text == "ro".clone()     { return Some(OmReadOnly); }
+    if *text == "rw".clone()     { return Some(OmReadWrite); }
+    if *text == "rwc".clone()    { return Some(OmReadWriteCreate); }
+    if *text == "memory".clone() { return Some(OmMemory); }
+    None
+}
+
+// -----------------------------------------------------------------------------
+// CacheMode
+// -----------------------------------------------------------------------------
+
+public type CacheMode is CmShared | CmPrivate;
+
+public fn cache_mode_text(c: &CacheMode) -> Text {
+    match c {
+        CmShared  => "shared".clone(),
+        CmPrivate => "private".clone(),
+    }
+}
+
+public fn parse_cache(text: &Text) -> Maybe<CacheMode> {
+    if *text == "shared".clone()  { return Some(CmShared); }
+    if *text == "private".clone() { return Some(CmPrivate); }
+    None
+}
+
+// -----------------------------------------------------------------------------
+// QueryParam — generic (key, value) record
+// -----------------------------------------------------------------------------
+
+public type QueryParam is { key: Text, value: Text }
+
+public fn query_param(key: Text, value: Text) -> QueryParam {
+    QueryParam { key: key, value: value }
+}
+
+// -----------------------------------------------------------------------------
+// UriParams — parsed flag bag
+// -----------------------------------------------------------------------------
+
+public type UriParams is {
+    /// VFS module name (None ⇒ default).
+    vfs: Maybe<Text>,
+    mode: Maybe<OpenMode>,
+    cache: Maybe<CacheMode>,
+    /// Powersafe overwrite — None ⇒ VFS default.
+    psow: Maybe<Bool>,
+    nolock: Maybe<Bool>,
+    immutable: Maybe<Bool>,
+    /// Unrecognised query parameters — preserved verbatim.
+    extra: List<QueryParam>,
+}
+
+public fn uri_params_default() -> UriParams {
+    UriParams {
+        vfs: None,
+        mode: None,
+        cache: None,
+        psow: None,
+        nolock: None,
+        immutable: None,
+        extra: List.new(),
+    }
+}
+
+implement UriParams {
+    pub fn merge(&mut self, key: &Text, value: &Text) {
+        if *key == "vfs".clone()     { self.vfs = Some(value.clone()); return; }
+        if *key == "mode".clone()    { self.mode = parse_mode(value); return; }
+        if *key == "cache".clone()   { self.cache = parse_cache(value); return; }
+        if *key == "psow".clone()    { self.psow = Some(parse_bool(value)); return; }
+        if *key == "nolock".clone()  { self.nolock = Some(parse_bool(value)); return; }
+        if *key == "immutable".clone() { self.immutable = Some(parse_bool(value)); return; }
+        self.extra.push(query_param(key.clone(), value.clone()));
+    }
+
+    pub fn known_key_count(&self) -> Int {
+        let mut n: Int = 0;
+        match &self.vfs       { Some(_) => { n = n + 1; } None => {} }
+        match &self.mode      { Some(_) => { n = n + 1; } None => {} }
+        match &self.cache     { Some(_) => { n = n + 1; } None => {} }
+        match &self.psow      { Some(_) => { n = n + 1; } None => {} }
+        match &self.nolock    { Some(_) => { n = n + 1; } None => {} }
+        match &self.immutable { Some(_) => { n = n + 1; } None => {} }
+        n
+    }
+}
+
+fn parse_bool(text: &Text) -> Bool {
+    *text == "1".clone() || *text == "true".clone() || *text == "yes".clone()
+}

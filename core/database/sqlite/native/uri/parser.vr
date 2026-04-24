@@ -1,0 +1,170 @@
+// =============================================================================
+// uri/parser.vr — tokenize + parse a URI string
+// =============================================================================
+// Spec: SQLite URI filenames
+//
+// Grammar accepted (whitespace not significant):
+//
+//   uri := 'file:' [ '//' [ host ] '/' ] path [ '?' query ]
+//   query := pair ('&' pair)*
+//   pair := key '=' value | key
+//
+// Output: `ParsedUri { path, params }`. Path is percent-decoded; the
+// query parameters are routed through `UriParams.merge`.
+// =============================================================================
+
+module core.database.sqlite.native.uri.parser;
+
+mount core.*;
+mount base.{Text, Bool, Maybe};
+mount collections.List;
+mount core.database.sqlite.native.uri.decode.{percent_decode};
+mount core.database.sqlite.native.uri.params.{
+    UriParams, uri_params_default,
+};
+
+// -----------------------------------------------------------------------------
+// ParsedUri + errors
+// -----------------------------------------------------------------------------
+
+public type ParsedUri is {
+    /// Decoded filesystem path (may be empty for `:memory:` URIs).
+    path: Text,
+    params: UriParams,
+    /// True iff the URI used the `file:` scheme (otherwise the input
+    /// was a raw filename and we just round-tripped it).
+    has_scheme: Bool,
+}
+
+public type UriError is
+      UeBadScheme
+    | UeMalformedQuery
+    | UeEmptyPath;
+
+public fn uri_error_name(e: &UriError) -> Text {
+    match e {
+        UeBadScheme       => "bad_scheme".clone(),
+        UeMalformedQuery  => "malformed_query".clone(),
+        UeEmptyPath       => "empty_path".clone(),
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Parse
+// -----------------------------------------------------------------------------
+
+public fn parse(text: &Text) -> base.Result<ParsedUri, UriError> {
+    let bs = text.as_bytes();
+    if bs.len() == 0 {
+        return base.Ok(ParsedUri {
+            path: Text.new(),
+            params: uri_params_default(),
+            has_scheme: false,
+        });
+    }
+
+    if !looks_like_file_scheme(bs) {
+        // Raw filename — return verbatim with default params.
+        return base.Ok(ParsedUri {
+            path: text.clone(),
+            params: uri_params_default(),
+            has_scheme: false,
+        });
+    }
+
+    // Skip "file:" prefix (5 bytes).
+    let mut i: Int = 5;
+    // Optional "//" + authority.
+    if i + 1 < bs.len() && bs[i] == (47 as Byte) && bs[i + 1] == (47 as Byte) {
+        i = i + 2;
+        // Skip authority — anything until next '/'.
+        while i < bs.len() && bs[i] != (47 as Byte) { i = i + 1; }
+    }
+
+    // Path runs until '?' or end.
+    let path_start = i;
+    while i < bs.len() && bs[i] != (63 as Byte) { i = i + 1; }
+    let path_end = i;
+
+    let raw_path = slice_text(text, path_start, path_end);
+    let decoded_path = percent_decode(&raw_path);
+
+    let mut params = uri_params_default();
+    if i < bs.len() && bs[i] == (63 as Byte) {
+        // Query
+        i = i + 1;
+        match parse_query(text, i, bs.len(), &mut params) {
+            base.Ok(_)  => {}
+            base.Err(e) => return base.Err(e),
+        }
+    }
+
+    base.Ok(ParsedUri {
+        path: decoded_path,
+        params: params,
+        has_scheme: true,
+    })
+}
+
+fn parse_query(
+    text: &Text,
+    start: Int, end: Int,
+    params: &mut UriParams,
+) -> base.Result<(), UriError> {
+    let bs = text.as_bytes();
+    let mut i: Int = start;
+    while i < end {
+        let pair_start = i;
+        while i < end && bs[i] != (38 as Byte) { i = i + 1; }
+        let pair_end = i;
+        match parse_pair(text, pair_start, pair_end, params) {
+            base.Ok(_)  => {}
+            base.Err(e) => return base.Err(e),
+        }
+        if i < end && bs[i] == (38 as Byte) { i = i + 1; }
+    }
+    base.Ok(())
+}
+
+fn parse_pair(
+    text: &Text,
+    start: Int, end: Int,
+    params: &mut UriParams,
+) -> base.Result<(), UriError> {
+    if start == end { return base.Ok(()); }
+    let bs = text.as_bytes();
+    let mut sep: Int = -1;
+    let mut i: Int = start;
+    while i < end {
+        if bs[i] == (61 as Byte) { sep = i; break; }
+        i = i + 1;
+    }
+    if sep < 0 {
+        // Key only.
+        let key = percent_decode(&slice_text(text, start, end));
+        let value = Text.new();
+        params.merge(&key, &value);
+    } else {
+        let key = percent_decode(&slice_text(text, start, sep));
+        let value = percent_decode(&slice_text(text, sep + 1, end));
+        params.merge(&key, &value);
+    }
+    base.Ok(())
+}
+
+fn looks_like_file_scheme(bs: List<Byte>) -> Bool {
+    if bs.len() < 5 { return false; }
+    bs[0] == (102 as Byte)         // f
+        && bs[1] == (105 as Byte)  // i
+        && bs[2] == (108 as Byte)  // l
+        && bs[3] == (101 as Byte)  // e
+        && bs[4] == (58 as Byte)   // :
+}
+
+fn slice_text(t: &Text, lo: Int, hi: Int) -> Text {
+    let bs = t.as_bytes();
+    let mut out = Text.new();
+    let mut i: Int = lo;
+    while i < hi && i < bs.len() { out.push_byte(bs[i]); i = i + 1; }
+    out
+}

@@ -1,0 +1,117 @@
+// =============================================================================
+// dbstat/index_info.vr — pragma_index_list + pragma_index_info rows
+// =============================================================================
+// Spec: sqlite-native.md §16.4 / §18
+//
+// Two related table-valued vtabs:
+//
+//   pragma_index_list('t')   — one row per index attached to table t
+//      seq    INTEGER
+//      name   TEXT
+//      unique INTEGER (0/1)
+//      origin TEXT     ('c' / 'u' / 'pk')
+//      partial INTEGER (0/1)
+//
+//   pragma_index_info('idx') — one row per column in idx
+//      seqno INTEGER
+//      cid   INTEGER
+//      name  TEXT
+// =============================================================================
+
+module core.database.sqlite.native.dbstat.index_info;
+
+mount core.*;
+mount base.{Text, Bool};
+mount collections.List;
+
+// -----------------------------------------------------------------------------
+// IndexOrigin — three values matching SQLite CLI output
+// -----------------------------------------------------------------------------
+
+public type IndexOrigin is IoCreated | IoUnique | IoPrimaryKey;
+
+public fn origin_text(o: &IndexOrigin) -> Text {
+    match o {
+        IoCreated     => "c".clone(),
+        IoUnique      => "u".clone(),
+        IoPrimaryKey  => "pk".clone(),
+    }
+}
+
+// -----------------------------------------------------------------------------
+// IndexListRow
+// -----------------------------------------------------------------------------
+
+public type IndexListRow is {
+    seq: Int,
+    name: Text,
+    is_unique: Bool,
+    origin: IndexOrigin,
+    is_partial: Bool,
+}
+
+public fn index_list_row(
+    seq: Int, name: Text, is_unique: Bool, origin: IndexOrigin, is_partial: Bool,
+) -> IndexListRow {
+    IndexListRow {
+        seq: seq,
+        name: name,
+        is_unique: is_unique,
+        origin: origin,
+        is_partial: is_partial,
+    }
+}
+
+// -----------------------------------------------------------------------------
+// IndexInfoRow
+// -----------------------------------------------------------------------------
+
+public type IndexInfoRow is {
+    seqno: Int,
+    cid: Int,
+    name: Text,
+}
+
+public fn index_info_row(seqno: Int, cid: Int, name: Text) -> IndexInfoRow {
+    IndexInfoRow { seqno: seqno, cid: cid, name: name }
+}
+
+// -----------------------------------------------------------------------------
+// IndexInfoSet — column list for one index
+// -----------------------------------------------------------------------------
+
+public type IndexInfoSet is { index_name: Text, rows: List<IndexInfoRow> }
+
+public fn index_info_set(index_name: Text) -> IndexInfoSet {
+    IndexInfoSet { index_name: index_name, rows: List.new() }
+}
+
+implement IndexInfoSet {
+    public fn len(&self) -> Int { self.rows.len() }
+    pub fn add(&mut self, r: IndexInfoRow) { self.rows.push(r); }
+}
+
+// -----------------------------------------------------------------------------
+// IndexListSet — index list for one table
+// -----------------------------------------------------------------------------
+
+public type IndexListSet is { table: Text, rows: List<IndexListRow> }
+
+public fn index_list_set(table: Text) -> IndexListSet {
+    IndexListSet { table: table, rows: List.new() }
+}
+
+implement IndexListSet {
+    public fn len(&self) -> Int { self.rows.len() }
+    pub fn add(&mut self, r: IndexListRow) { self.rows.push(r); }
+
+    pub fn unique_count(&self) -> Int {
+        let mut n: Int = 0;
+        let mut i: Int = 0;
+        while i < self.rows.len() {
+            if self.rows[i].is_unique { n = n + 1; }
+            i = i + 1;
+        }
+        n
+    }
+}

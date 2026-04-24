@@ -1,0 +1,279 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, datetime, julian, iso, modifier, strftime
+// @timeout: 5000
+// @expected-exit: 0
+//
+// Datetime surface:
+//   * Julian-day round-trip (Gregorian → JD → Gregorian)
+//   * is_leap_year / days_in_month
+//   * Instant constructors + julian_real / unix_seconds
+//   * ISO-8601 parser accepts all four forms; renderer round-trips
+//   * Modifier parser + apply (+N days / start_of_month / weekday)
+//   * strftime emits known codes
+
+mount core.database.sqlite.native.datetime.julian.{
+    Ymd, ymd,
+    julian_day_int, julian_to_gregorian,
+    is_leap_year, days_in_month, weekday_for,
+};
+mount core.database.sqlite.native.datetime.instant.{
+    Instant, from_ymd, from_ymd_hms, from_unix_seconds, from_julian_real,
+};
+mount core.database.sqlite.native.datetime.iso.{
+    parse, render,
+    IsoParseError, IpeBadFormat, IpeBadDate, IpeBadTime, IpeOutOfRange,
+};
+mount core.database.sqlite.native.datetime.modifier.{
+    Modifier, MNow, MAddDays, MAddMonths, MStartOfMonth, MStartOfYear, MWeekday,
+    parse as parse_modifier,
+    apply as apply_modifier,
+    modifier_kind_name,
+};
+mount core.database.sqlite.native.datetime.format.{strftime};
+mount base.{Ok, Err, Some, None, Maybe, Bool, Text};
+
+// -----------------------------------------------------------------------------
+// Julian
+// -----------------------------------------------------------------------------
+
+fn test_julian_round_trip_2000_jan_1() {
+    let jd = julian_day_int(2000, 1, 1);
+    let r = julian_to_gregorian(jd);
+    assert_eq(r.year, 2000);
+    assert_eq(r.month, 1);
+    assert_eq(r.day, 1);
+}
+
+fn test_julian_round_trip_leap_day() {
+    let jd = julian_day_int(2024, 2, 29);
+    let r = julian_to_gregorian(jd);
+    assert_eq(r.month, 2);
+    assert_eq(r.day, 29);
+}
+
+fn test_is_leap_year() {
+    assert(is_leap_year(2000));
+    assert(is_leap_year(2024));
+    assert(!is_leap_year(2023));
+    assert(!is_leap_year(1900));
+}
+
+fn test_days_in_month() {
+    assert_eq(days_in_month(2024, 2), 29);
+    assert_eq(days_in_month(2023, 2), 28);
+    assert_eq(days_in_month(2024, 4), 30);
+    assert_eq(days_in_month(2024, 1), 31);
+}
+
+// -----------------------------------------------------------------------------
+// Instant
+// -----------------------------------------------------------------------------
+
+fn test_from_ymd_zero_fraction() {
+    let i = from_ymd(2024, 4, 24);
+    assert_eq(i.frac_day, 0.0 as Float64);
+}
+
+fn test_from_ymd_hms_has_fraction() {
+    let i = from_ymd_hms(2024, 4, 24, 12, 0, 0, 0);
+    assert(i.frac_day > (0.0 as Float64));
+}
+
+fn test_unix_round_trip() {
+    let i = from_unix_seconds(1000000 as Int64);
+    let s = i.unix_seconds();
+    // Tolerate ±1s drift from sub-day arithmetic.
+    let diff = s - (1000000 as Int64);
+    let abs = if diff < (0 as Int64) { -diff } else { diff };
+    assert(abs <= (1 as Int64));
+}
+
+fn test_julian_real_combines_int_and_frac() {
+    let i = from_julian_real(2451545.5 as Float64);
+    let r = i.julian_real();
+    let diff = r - (2451545.5 as Float64);
+    let abs = if diff < (0.0 as Float64) { -diff } else { diff };
+    assert(abs < (0.001 as Float64));
+}
+
+// -----------------------------------------------------------------------------
+// ISO parser
+// -----------------------------------------------------------------------------
+
+fn test_parse_date_only() {
+    match parse(&"2024-04-24".clone()) {
+        Ok(_)  => {},
+        Err(_) => panic("date parses"),
+    }
+}
+
+fn test_parse_date_time_space_separated() {
+    match parse(&"2024-04-24 12:30:45".clone()) {
+        Ok(_)  => {},
+        Err(_) => panic("date+time parses"),
+    }
+}
+
+fn test_parse_date_time_t_separated() {
+    match parse(&"2024-04-24T12:30:45".clone()) {
+        Ok(_)  => {},
+        Err(_) => panic("ISO T form parses"),
+    }
+}
+
+fn test_parse_with_milliseconds() {
+    match parse(&"2024-04-24 12:30:45.123".clone()) {
+        Ok(_)  => {},
+        Err(_) => panic("ms form parses"),
+    }
+}
+
+fn test_parse_rejects_bad_format() {
+    match parse(&"foo".clone()) {
+        Err(_) => {},
+        Ok(_)  => panic("garbage rejected"),
+    }
+}
+
+fn test_parse_rejects_out_of_range_day() {
+    match parse(&"2024-04-32".clone()) {
+        Err(_) => {},
+        Ok(_)  => panic("day=32 rejected"),
+    }
+}
+
+// -----------------------------------------------------------------------------
+// ISO render
+// -----------------------------------------------------------------------------
+
+fn test_render_format_length() {
+    let i = from_ymd_hms(2024, 4, 24, 12, 30, 45, 123);
+    let s = render(&i);
+    assert_eq(s.len(), 23);    // YYYY-MM-DD HH:MM:SS.SSS
+}
+
+// -----------------------------------------------------------------------------
+// Modifier parsing
+// -----------------------------------------------------------------------------
+
+fn test_parse_now() {
+    match parse_modifier(&"now".clone()) {
+        Some(MNow) => {},
+        _          => panic("now"),
+    }
+}
+
+fn test_parse_add_days_positive() {
+    match parse_modifier(&"+5 days".clone()) {
+        Some(MAddDays(n)) => assert_eq(n, 5 as Int64),
+        _                  => panic("+5 days"),
+    }
+}
+
+fn test_parse_add_days_negative() {
+    match parse_modifier(&"-3 days".clone()) {
+        Some(MAddDays(n)) => assert_eq(n, -3 as Int64),
+        _                  => panic("-3 days"),
+    }
+}
+
+fn test_parse_start_of_month() {
+    match parse_modifier(&"start of month".clone()) {
+        Some(MStartOfMonth) => {},
+        _                   => panic("start of month"),
+    }
+}
+
+fn test_parse_weekday() {
+    match parse_modifier(&"weekday 0".clone()) {
+        Some(MWeekday(n)) => assert_eq(n, 0),
+        _                  => panic("weekday 0"),
+    }
+}
+
+fn test_parse_unknown_returns_none() {
+    match parse_modifier(&"galaxy brain".clone()) {
+        None => {},
+        _    => panic("unknown rejected"),
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Modifier apply
+// -----------------------------------------------------------------------------
+
+fn test_apply_add_days_advances_jd() {
+    let i = from_ymd(2024, 4, 24);
+    let i2 = apply_modifier(&i, &MAddDays(7 as Int64), 0 as Int64);
+    assert_eq(i2.jd_int - i.jd_int, 7 as Int64);
+}
+
+fn test_apply_add_months() {
+    let i = from_ymd(2024, 1, 31);
+    let i2 = apply_modifier(&i, &MAddMonths(1), 0 as Int64);
+    let r = i2.ymd_view();
+    assert_eq(r.month, 2);
+    assert_eq(r.day, 29);    // Feb 2024 (leap) clamps from 31
+}
+
+fn test_apply_start_of_year() {
+    let i = from_ymd(2024, 4, 24);
+    let i2 = apply_modifier(&i, &MStartOfYear, 0 as Int64);
+    let r = i2.ymd_view();
+    assert_eq(r.month, 1);
+    assert_eq(r.day, 1);
+}
+
+// -----------------------------------------------------------------------------
+// strftime
+// -----------------------------------------------------------------------------
+
+fn test_strftime_year_month_day() {
+    let i = from_ymd(2024, 4, 24);
+    let s = strftime(&"%Y-%m-%d".clone(), &i);
+    assert(s == "2024-04-24".clone());
+}
+
+fn test_strftime_literal_passthrough() {
+    let i = from_ymd(2024, 4, 24);
+    let s = strftime(&"abc".clone(), &i);
+    assert(s == "abc".clone());
+}
+
+fn test_strftime_percent_literal() {
+    let i = from_ymd(2024, 1, 1);
+    let s = strftime(&"%%".clone(), &i);
+    assert(s == "%".clone());
+}
+
+fn main() {
+    test_julian_round_trip_2000_jan_1();
+    test_julian_round_trip_leap_day();
+    test_is_leap_year();
+    test_days_in_month();
+    test_from_ymd_zero_fraction();
+    test_from_ymd_hms_has_fraction();
+    test_unix_round_trip();
+    test_julian_real_combines_int_and_frac();
+    test_parse_date_only();
+    test_parse_date_time_space_separated();
+    test_parse_date_time_t_separated();
+    test_parse_with_milliseconds();
+    test_parse_rejects_bad_format();
+    test_parse_rejects_out_of_range_day();
+    test_render_format_length();
+    test_parse_now();
+    test_parse_add_days_positive();
+    test_parse_add_days_negative();
+    test_parse_start_of_month();
+    test_parse_weekday();
+    test_parse_unknown_returns_none();
+    test_apply_add_days_advances_jd();
+    test_apply_add_months();
+    test_apply_start_of_year();
+    test_strftime_year_month_day();
+    test_strftime_literal_passthrough();
+    test_strftime_percent_literal();
+}

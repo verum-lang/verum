@@ -1,0 +1,63 @@
+// =============================================================================
+// shadow_tables/temp.vr — sqlite_temp_master
+// =============================================================================
+// Spec: sqlite-native.md §17 (TEMP database)
+//
+// `sqlite_temp_master` has the same shape as `sqlite_master`, but is
+// scoped to the TEMP database (created by `CREATE TEMP TABLE`,
+// `CREATE TEMP VIEW`, etc.) and dropped on Connection close.
+// =============================================================================
+
+module core.database.sqlite.native.shadow_tables.temp;
+
+mount core.*;
+mount base.{Text, Bool};
+mount collections.List;
+mount core.database.sqlite.native.shadow_tables.master.{
+    MasterRow, MasterRowKind, MasterTable, master_table_new,
+};
+
+// -----------------------------------------------------------------------------
+// TempMasterTable — wraps MasterTable with TEMP-scope semantics
+// -----------------------------------------------------------------------------
+
+public type TempMasterTable is { inner: MasterTable }
+
+public fn temp_master_new() -> TempMasterTable {
+    TempMasterTable { inner: master_table_new() }
+}
+
+implement TempMasterTable {
+    public fn len(&self) -> Int { self.inner.len() }
+
+    pub fn add(&mut self, r: MasterRow) { self.inner.add(r); }
+
+    pub fn drop_by_name(&mut self, name: &Text) -> Bool { self.inner.drop_by_name(name) }
+
+    pub fn lookup(&self, name: &Text) -> base.Maybe<MasterRow> { self.inner.lookup(name) }
+
+    pub fn by_kind(&self, kind: &MasterRowKind) -> List<MasterRow> { self.inner.by_kind(kind) }
+
+    /// Empty the table — called on Connection close.
+    pub fn clear(&mut self) { self.inner = master_table_new(); }
+}
+
+// -----------------------------------------------------------------------------
+// Scope predicate — which catalogue does a name route to?
+// -----------------------------------------------------------------------------
+
+public type SchemaScope is SsMain | SsTemp;
+
+public fn schema_scope_name(s: &SchemaScope) -> Text {
+    match s {
+        SsMain => "main".clone(),
+        SsTemp => "temp".clone(),
+    }
+}
+
+/// Resolve `schema.name` style references. Defaults to MAIN if no
+/// schema prefix is present.
+public fn resolve_scope(qualifier: &Text) -> SchemaScope {
+    if *qualifier == "temp".clone() || *qualifier == "TEMP".clone() { return SsTemp; }
+    SsMain
+}

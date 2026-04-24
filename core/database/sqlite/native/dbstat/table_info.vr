@@ -1,0 +1,110 @@
+// =============================================================================
+// dbstat/table_info.vr — pragma_table_info row
+// =============================================================================
+// Spec: sqlite-native.md §16.4 / §18 (PRAGMA table_info)
+//
+// `pragma_table_info('t')` returns one row per column:
+//
+//   cid      INTEGER  -- 0-based column index
+//   name     TEXT     -- column name
+//   type     TEXT     -- declared type (BLOB / TEXT / INTEGER / ...)
+//   notnull  INTEGER  -- 1 if NOT NULL, else 0
+//   dflt_value TEXT   -- DEFAULT clause text (NULL if none)
+//   pk       INTEGER  -- 0 = not PK, 1+ = position in PK
+// =============================================================================
+
+module core.database.sqlite.native.dbstat.table_info;
+
+mount core.*;
+mount base.{Text, Bool, Maybe};
+mount collections.List;
+
+public type TableInfoRow is {
+    cid: Int,
+    name: Text,
+    /// Declared type — empty string for typeless columns.
+    declared_type: Text,
+    not_null: Bool,
+    /// DEFAULT clause text; None ⇒ no default.
+    default_value: Maybe<Text>,
+    /// 0 = not part of PK, 1+ = column position in composite PK.
+    pk_position: Int,
+}
+
+public fn table_info_row(
+    cid: Int,
+    name: Text,
+    declared_type: Text,
+    not_null: Bool,
+    default_value: Maybe<Text>,
+    pk_position: Int,
+) -> TableInfoRow {
+    TableInfoRow {
+        cid: cid,
+        name: name,
+        declared_type: declared_type,
+        not_null: not_null,
+        default_value: default_value,
+        pk_position: pk_position,
+    }
+}
+
+implement TableInfoRow {
+    pub fn is_pk_column(&self) -> Bool { self.pk_position > 0 }
+
+    /// SQLite renders not_null as 0/1 in INTEGER form.
+    pub fn not_null_int(&self) -> Int { if self.not_null { 1 } else { 0 } }
+}
+
+// -----------------------------------------------------------------------------
+// TableInfoSet — one-table view
+// -----------------------------------------------------------------------------
+
+public type TableInfoSet is { table: Text, rows: List<TableInfoRow> }
+
+public fn table_info_set(table: Text) -> TableInfoSet {
+    TableInfoSet { table: table, rows: List.new() }
+}
+
+implement TableInfoSet {
+    public fn len(&self) -> Int { self.rows.len() }
+
+    pub fn add(&mut self, r: TableInfoRow) { self.rows.push(r); }
+
+    pub fn primary_key_columns(&self) -> List<Int> {
+        // Sort by pk_position ascending; we collect, caller sorts if needed.
+        let mut out: List<Int> = List.new();
+        let mut i: Int = 0;
+        while i < self.rows.len() {
+            if self.rows[i].pk_position > 0 { out.push(self.rows[i].cid); }
+            i = i + 1;
+        }
+        out
+    }
+
+    pub fn lookup(&self, name: &Text) -> base.Maybe<TableInfoRow> {
+        let mut i: Int = 0;
+        while i < self.rows.len() {
+            if self.rows[i].name == *name {
+                let r = &self.rows[i];
+                return base.Some(TableInfoRow {
+                    cid: r.cid,
+                    name: r.name.clone(),
+                    declared_type: r.declared_type.clone(),
+                    not_null: r.not_null,
+                    default_value: clone_default(&r.default_value),
+                    pk_position: r.pk_position,
+                });
+            }
+            i = i + 1;
+        }
+        base.None
+    }
+}
+
+fn clone_default(d: &base.Maybe<Text>) -> base.Maybe<Text> {
+    match d {
+        base.Some(t) => base.Some(t.clone()),
+        base.None    => base.None,
+    }
+}

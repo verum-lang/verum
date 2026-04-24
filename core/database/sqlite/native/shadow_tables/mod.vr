@@ -1,0 +1,26 @@
+// =============================================================================
+// core/database/sqlite/native/shadow_tables/mod.vr
+// =============================================================================
+// Layer: 6 (schema housekeeping)
+// Spec: sqlite-native.md §17 (schema management) — internal tables that
+// SQLite automatically maintains:
+//
+//   * `sqlite_master`        — primary schema catalogue (CREATE TABLE/INDEX/VIEW/TRIGGER)
+//   * `sqlite_temp_master`   — same shape, scoped to TEMP database
+//   * `sqlite_sequence`      — AUTOINCREMENT counter per table
+//   * `sqlite_autoindex_*`   — implicit unique-index name generator
+//   * `sqlite_stat1/2/3/4`   — see `statistics/` catalogue
+//
+// Submodules:
+//   * `master`     — sqlite_master row + builder
+//   * `sequence`   — sqlite_sequence + AUTOINCREMENT bookkeeping
+//   * `autoindex`  — sqlite_autoindex_<table>_<n> name generator
+//   * `temp`       — sqlite_temp_master shape + scope predicate
+// =============================================================================
+
+module core.database.sqlite.native.shadow_tables;
+
+public module master;
+public module sequence;
+public module autoindex;
+public module temp;

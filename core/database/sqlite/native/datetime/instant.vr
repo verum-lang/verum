@@ -1,0 +1,124 @@
+// =============================================================================
+// datetime/instant.vr — Instant (julian-day-based common form)
+// =============================================================================
+// Spec: sqlite-native.md §15.6
+//
+// `Instant` is the canonical internal representation: integer julian
+// day + fractional day in [0.0, 1.0). All datetime operations
+// route through Instant (the storage forms TEXT/REAL/INTEGER convert
+// on entry and exit).
+// =============================================================================
+
+module core.database.sqlite.native.datetime.instant;
+
+mount core.*;
+mount base.{Bool};
+mount collections.List;
+mount core.database.sqlite.native.datetime.julian.{
+    Ymd, ymd,
+    julian_day_int, julian_to_gregorian,
+    time_to_day_fraction, day_fraction_to_time, weekday_for,
+};
+
+public type Instant is {
+    /// Integer julian day (noon UTC of the date).
+    jd_int: Int64,
+    /// Fractional day in [0.0, 1.0) — 0.0 = noon UTC of jd_int.
+    /// Storage convention follows SQLite: REAL julian day is the sum
+    /// `jd_int + frac_day`.
+    frac_day: Float64,
+}
+
+public fn instant_at(jd_int: Int64, frac_day: Float64) -> Instant {
+    Instant { jd_int: jd_int, frac_day: normalise(frac_day, jd_int).1.frac_day }
+}
+
+/// Normalise a (jd_int, frac_day) pair so that frac_day ∈ [-0.5, +0.5].
+/// SQLite uses noon-anchored julian days; midnight UTC of day N
+/// becomes (jd_for_noon_of_N, -0.5).
+public fn normalise(frac_day: Float64, jd_int: Int64) -> (Float64, Instant) {
+    let mut f = frac_day;
+    let mut j = jd_int;
+    while f >= (1.0 as Float64) { f = f - (1.0 as Float64); j = j + (1 as Int64); }
+    while f < (0.0 as Float64) { f = f + (1.0 as Float64); j = j - (1 as Int64); }
+    (f, Instant { jd_int: j, frac_day: f })
+}
+
+implement Instant {
+    /// Render as REAL julian day (matches storage form).
+    pub fn julian_real(&self) -> Float64 {
+        (self.jd_int as Float64) + self.frac_day
+    }
+
+    /// Render as Unix epoch seconds.
+    /// Unix epoch = JD 2440587.5 (1970-01-01 00:00:00 UTC).
+    pub fn unix_seconds(&self) -> Int64 {
+        let unix_jd_int: Int64 = 2440587 as Int64;
+        let day_diff = self.jd_int - unix_jd_int;
+        let secs_in_day = (self.frac_day * (86400.0 as Float64)) as Int64;
+        day_diff * (86400 as Int64) + secs_in_day - (43200 as Int64)
+    }
+
+    pub fn ymd_view(&self) -> Ymd { julian_to_gregorian(self.jd_int) }
+
+    pub fn weekday(&self) -> Int { weekday_for(self.jd_int) }
+
+    /// Add `delta_days` to the instant. Returns a fresh Instant.
+    pub fn shift_days(&self, delta_days: Int64) -> Instant {
+        Instant { jd_int: self.jd_int + delta_days, frac_day: self.frac_day }
+    }
+
+    pub fn shift_seconds(&self, delta_secs: Int64) -> Instant {
+        let added = (delta_secs as Float64) / (86400.0 as Float64);
+        let raw_frac = self.frac_day + added;
+        let (norm_frac, _i) = normalise(raw_frac, self.jd_int);
+        let jd_offset = days_carried(raw_frac);
+        Instant {
+            jd_int: self.jd_int + jd_offset,
+            frac_day: norm_frac,
+        }
+    }
+}
+
+fn days_carried(raw_frac: Float64) -> Int64 {
+    if raw_frac >= (1.0 as Float64) {
+        let n = raw_frac as Int64;
+        n
+    } else if raw_frac < (0.0 as Float64) {
+        let r = raw_frac - (1.0 as Float64);
+        r as Int64
+    } else { 0 as Int64 }
+}
+
+// -----------------------------------------------------------------------------
+// Constructors
+// -----------------------------------------------------------------------------
+
+public fn from_ymd(year: Int, month: Int, day: Int) -> Instant {
+    Instant { jd_int: julian_day_int(year, month, day), frac_day: 0.0 as Float64 }
+}
+
+public fn from_ymd_hms(year: Int, month: Int, day: Int, h: Int, m: Int, s: Int, ms: Int) -> Instant {
+    let jd = julian_day_int(year, month, day);
+    let frac = time_to_day_fraction(h, m, s, ms);
+    Instant { jd_int: jd, frac_day: frac }
+}
+
+public fn from_unix_seconds(secs: Int64) -> Instant {
+    let unix_jd_int: Int64 = 2440587 as Int64;
+    let days = secs / (86400 as Int64);
+    let day_remainder = secs - days * (86400 as Int64);
+    let frac = (day_remainder as Float64) / (86400.0 as Float64) + (0.5 as Float64);
+    let (norm_frac, _i) = normalise(frac, unix_jd_int + days);
+    let jd_offset = days_carried(frac);
+    Instant {
+        jd_int: unix_jd_int + days + jd_offset,
+        frac_day: norm_frac,
+    }
+}
+
+public fn from_julian_real(jd: Float64) -> Instant {
+    let int_part: Int64 = jd as Int64;
+    let frac = jd - (int_part as Float64);
+    Instant { jd_int: int_part, frac_day: frac }
+}

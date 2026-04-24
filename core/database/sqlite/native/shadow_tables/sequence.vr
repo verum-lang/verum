@@ -1,0 +1,94 @@
+// =============================================================================
+// shadow_tables/sequence.vr — sqlite_sequence + AUTOINCREMENT
+// =============================================================================
+// Spec: sqlite-native.md §17 (AUTOINCREMENT semantics)
+//
+// sqlite_sequence schema:
+//
+//   CREATE TABLE sqlite_sequence (
+//       name TEXT,
+//       seq  INTEGER
+//   );
+//
+// One row per table that uses AUTOINCREMENT. `seq` records the
+// HIGHEST rowid the table ever had, so a future INSERT can guarantee
+// a strictly greater rowid even after intermediate DELETEs.
+// =============================================================================
+
+module core.database.sqlite.native.shadow_tables.sequence;
+
+mount core.*;
+mount base.{Text, Bool, Maybe};
+mount collections.List;
+
+// -----------------------------------------------------------------------------
+// SequenceRow
+// -----------------------------------------------------------------------------
+
+public type SequenceRow is { name: Text, seq: Int64 }
+
+public fn sequence_row(name: Text, seq: Int64) -> SequenceRow {
+    SequenceRow { name: name, seq: seq }
+}
+
+// -----------------------------------------------------------------------------
+// SequenceTable
+// -----------------------------------------------------------------------------
+
+public type SequenceTable is { rows: List<SequenceRow> }
+
+public fn sequence_table_new() -> SequenceTable {
+    SequenceTable { rows: List.new() }
+}
+
+implement SequenceTable {
+    public fn len(&self) -> Int { self.rows.len() }
+
+    /// Issue the next AUTOINCREMENT value for `table`. The value is
+    /// `max(observed_max, last_seq) + 1`. Updates the row in place
+    /// (creates one if missing).
+    pub fn next_for(&mut self, table: &Text, observed_max: Int64) -> Int64 {
+        let mut i: Int = 0;
+        while i < self.rows.len() {
+            if self.rows[i].name == *table {
+                let prev = if self.rows[i].seq > observed_max {
+                    self.rows[i].seq
+                } else {
+                    observed_max
+                };
+                let next = prev + (1 as Int64);
+                self.rows[i].seq = next;
+                return next;
+            }
+            i = i + 1;
+        }
+        let next = observed_max + (1 as Int64);
+        self.rows.push(sequence_row(table.clone(), next));
+        next
+    }
+
+    /// Read the current high-water mark for a table; `None` if the
+    /// table has never received an AUTOINCREMENT value.
+    pub fn current_seq(&self, table: &Text) -> Maybe<Int64> {
+        let mut i: Int = 0;
+        while i < self.rows.len() {
+            if self.rows[i].name == *table { return Some(self.rows[i].seq); }
+            i = i + 1;
+        }
+        None
+    }
+
+    /// Drop the row for `table` (called when the table is dropped).
+    pub fn drop_for(&mut self, table: &Text) -> Bool {
+        let mut new_rows: List<SequenceRow> = List.new();
+        let mut found = false;
+        let mut i: Int = 0;
+        while i < self.rows.len() {
+            if self.rows[i].name == *table { found = true; }
+            else { new_rows.push(sequence_row(self.rows[i].name.clone(), self.rows[i].seq)); }
+            i = i + 1;
+        }
+        self.rows = new_rows;
+        found
+    }
+}

@@ -1,0 +1,123 @@
+// =============================================================================
+// dbstat/foreign_key_info.vr — pragma_foreign_key_list row
+// =============================================================================
+// Spec: sqlite-native.md §16.4 / §17.4 (foreign keys)
+//
+// `pragma_foreign_key_list('t')` returns one row per (foreign key, column):
+//
+//   id        INTEGER  -- FK group id
+//   seq       INTEGER  -- column position within the FK
+//   table     TEXT     -- referenced table
+//   from      TEXT     -- referencing column in t
+//   to        TEXT     -- referenced column in `table`
+//   on_update TEXT     -- 'NO ACTION' / 'RESTRICT' / 'SET NULL' / 'SET DEFAULT' / 'CASCADE'
+//   on_delete TEXT     -- same enum
+//   match     TEXT     -- 'NONE' / 'PARTIAL' / 'FULL'
+// =============================================================================
+
+module core.database.sqlite.native.dbstat.foreign_key_info;
+
+mount core.*;
+mount base.{Text, Bool};
+mount collections.List;
+
+// -----------------------------------------------------------------------------
+// FkAction taxonomy
+// -----------------------------------------------------------------------------
+
+public type FkAction is
+      FaNoAction
+    | FaRestrict
+    | FaSetNull
+    | FaSetDefault
+    | FaCascade;
+
+public fn fk_action_text(a: &FkAction) -> Text {
+    match a {
+        FaNoAction    => "NO ACTION".clone(),
+        FaRestrict    => "RESTRICT".clone(),
+        FaSetNull     => "SET NULL".clone(),
+        FaSetDefault  => "SET DEFAULT".clone(),
+        FaCascade     => "CASCADE".clone(),
+    }
+}
+
+public type FkMatch is FmNone | FmPartial | FmFull;
+
+public fn fk_match_text(m: &FkMatch) -> Text {
+    match m {
+        FmNone     => "NONE".clone(),
+        FmPartial  => "PARTIAL".clone(),
+        FmFull     => "FULL".clone(),
+    }
+}
+
+// -----------------------------------------------------------------------------
+// ForeignKeyRow
+// -----------------------------------------------------------------------------
+
+public type ForeignKeyRow is {
+    /// FK group id — multi-column FKs share an id, with `seq`
+    /// distinguishing the columns.
+    id: Int,
+    seq: Int,
+    referenced_table: Text,
+    from_column: Text,
+    to_column: Text,
+    on_update: FkAction,
+    on_delete: FkAction,
+    match_kind: FkMatch,
+}
+
+public fn foreign_key_row(
+    id: Int, seq: Int,
+    referenced_table: Text,
+    from_column: Text, to_column: Text,
+    on_update: FkAction, on_delete: FkAction,
+    match_kind: FkMatch,
+) -> ForeignKeyRow {
+    ForeignKeyRow {
+        id: id,
+        seq: seq,
+        referenced_table: referenced_table,
+        from_column: from_column,
+        to_column: to_column,
+        on_update: on_update,
+        on_delete: on_delete,
+        match_kind: match_kind,
+    }
+}
+
+// -----------------------------------------------------------------------------
+// ForeignKeyListSet — full FK list for one table
+// -----------------------------------------------------------------------------
+
+public type ForeignKeyListSet is { table: Text, rows: List<ForeignKeyRow> }
+
+public fn fk_list_set(table: Text) -> ForeignKeyListSet {
+    ForeignKeyListSet { table: table, rows: List.new() }
+}
+
+implement ForeignKeyListSet {
+    public fn len(&self) -> Int { self.rows.len() }
+
+    pub fn add(&mut self, r: ForeignKeyRow) { self.rows.push(r); }
+
+    /// Count distinct FK groups (each `id` represents one CONSTRAINT).
+    pub fn fk_group_count(&self) -> Int {
+        let mut seen_ids: List<Int> = List.new();
+        let mut i: Int = 0;
+        while i < self.rows.len() {
+            let id = self.rows[i].id;
+            let mut is_new = true;
+            let mut k: Int = 0;
+            while k < seen_ids.len() {
+                if seen_ids[k] == id { is_new = false; break; }
+                k = k + 1;
+            }
+            if is_new { seen_ids.push(id); }
+            i = i + 1;
+        }
+        seen_ids.len()
+    }
+}

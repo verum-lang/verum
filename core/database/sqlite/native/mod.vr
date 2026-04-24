@@ -148,3 +148,11 @@ public module rtree;
 public module statistics;
 // - integrity: integrity_check / quick_check / FK_check / cell_size_check (§10.7)
 public module integrity;
+// - shadow_tables: sqlite_master / sqlite_sequence / sqlite_temp_master / autoindex
+public module shadow_tables;
+// - dbstat: per-page stats vtab + pragma_* table-valued vtabs + generate_series (§16.4)
+public module dbstat;
+// - datetime: julian + ISO-8601 + modifier + strftime (§15.6)
+public module datetime;
+// - uri: SQLite file: URI parser + UriParams (§7.6 sqlite3_open_v2)
+public module uri;

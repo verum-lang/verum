@@ -1,0 +1,152 @@
+// =============================================================================
+// shadow_tables/master.vr — sqlite_master row + builder
+// =============================================================================
+// Spec: sqlite-native.md §17
+//
+// sqlite_master schema (verbatim from C-SQLite):
+//
+//   CREATE TABLE sqlite_master (
+//       type     TEXT,        -- 'table' / 'index' / 'view' / 'trigger'
+//       name     TEXT,        -- object name
+//       tbl_name TEXT,        -- table the object is associated with
+//       rootpage INTEGER,     -- root page in btree (0 for view/trigger)
+//       sql      TEXT         -- the CREATE statement
+//   );
+//
+// Every CREATE statement appends one row; every DROP removes it.
+// =============================================================================
+
+module core.database.sqlite.native.shadow_tables.master;
+
+mount core.*;
+mount base.{Text, Bool, Maybe};
+mount collections.List;
+
+// -----------------------------------------------------------------------------
+// MasterRowKind
+// -----------------------------------------------------------------------------
+
+public type MasterRowKind is
+      MrkTable
+    | MrkIndex
+    | MrkView
+    | MrkTrigger;
+
+public fn kind_text(k: &MasterRowKind) -> Text {
+    match k {
+        MrkTable    => "table".clone(),
+        MrkIndex    => "index".clone(),
+        MrkView     => "view".clone(),
+        MrkTrigger  => "trigger".clone(),
+    }
+}
+
+// -----------------------------------------------------------------------------
+// MasterRow
+// -----------------------------------------------------------------------------
+
+public type MasterRow is {
+    kind: MasterRowKind,
+    name: Text,
+    /// For indexes/triggers/views — the parent table they attach to.
+    /// For tables — equal to `name`.
+    tbl_name: Text,
+    /// Root page for tables/indexes; 0 for views/triggers.
+    rootpage: Int64,
+    /// Original CREATE statement.
+    sql: Text,
+}
+
+public fn master_row(
+    kind: MasterRowKind,
+    name: Text,
+    tbl_name: Text,
+    rootpage: Int64,
+    sql: Text,
+) -> MasterRow {
+    MasterRow { kind: kind, name: name, tbl_name: tbl_name, rootpage: rootpage, sql: sql }
+}
+
+// -----------------------------------------------------------------------------
+// MasterTable — in-memory mirror of sqlite_master rows
+// -----------------------------------------------------------------------------
+
+public type MasterTable is { rows: List<MasterRow> }
+
+public fn master_table_new() -> MasterTable { MasterTable { rows: List.new() } }
+
+implement MasterTable {
+    public fn len(&self) -> Int { self.rows.len() }
+
+    pub fn add(&mut self, r: MasterRow) { self.rows.push(r); }
+
+    pub fn drop_by_name(&mut self, name: &Text) -> Bool {
+        let mut new_rows: List<MasterRow> = List.new();
+        let mut found = false;
+        let mut i: Int = 0;
+        while i < self.rows.len() {
+            if self.rows[i].name == *name { found = true; }
+            else { new_rows.push(clone_row(&self.rows[i])); }
+            i = i + 1;
+        }
+        self.rows = new_rows;
+        found
+    }
+
+    pub fn lookup(&self, name: &Text) -> Maybe<MasterRow> {
+        let mut i: Int = 0;
+        while i < self.rows.len() {
+            if self.rows[i].name == *name {
+                return Some(clone_row(&self.rows[i]));
+            }
+            i = i + 1;
+        }
+        None
+    }
+
+    /// Rows of a particular kind, in insertion order.
+    pub fn by_kind(&self, kind: &MasterRowKind) -> List<MasterRow> {
+        let want = kind_text(kind);
+        let mut out: List<MasterRow> = List.new();
+        let mut i: Int = 0;
+        while i < self.rows.len() {
+            if kind_text(&self.rows[i].kind) == want { out.push(clone_row(&self.rows[i])); }
+            i = i + 1;
+        }
+        out
+    }
+
+    /// Indexes attached to `table_name`.
+    pub fn indexes_for(&self, table_name: &Text) -> List<MasterRow> {
+        let mut out: List<MasterRow> = List.new();
+        let mut i: Int = 0;
+        while i < self.rows.len() {
+            let r = &self.rows[i];
+            match &r.kind {
+                MrkIndex => if r.tbl_name == *table_name { out.push(clone_row(r)); },
+                _        => {}
+            }
+            i = i + 1;
+        }
+        out
+    }
+}
+
+fn clone_row(r: &MasterRow) -> MasterRow {
+    MasterRow {
+        kind: clone_kind(&r.kind),
+        name: r.name.clone(),
+        tbl_name: r.tbl_name.clone(),
+        rootpage: r.rootpage,
+        sql: r.sql.clone(),
+    }
+}
+
+fn clone_kind(k: &MasterRowKind) -> MasterRowKind {
+    match k {
+        MrkTable    => MrkTable,
+        MrkIndex    => MrkIndex,
+        MrkView     => MrkView,
+        MrkTrigger  => MrkTrigger,
+    }
+}

@@ -1,0 +1,189 @@
+// =============================================================================
+// datetime/iso.vr — ISO-8601 parser + renderer
+// =============================================================================
+// Spec: sqlite-native.md §15.6
+//
+// Two grammars accepted:
+//
+//   `YYYY-MM-DD`                                   (date only)
+//   `YYYY-MM-DD HH:MM[:SS[.SSS]]`                  (date + time, sep=space|'T')
+//   `HH:MM:SS[.SSS]`                               (time only)
+//
+// Renderer: emits canonical `YYYY-MM-DD HH:MM:SS.SSS` (always 23 chars
+// for date+time form).
+// =============================================================================
+
+module core.database.sqlite.native.datetime.iso;
+
+mount core.*;
+mount base.{Text, Bool};
+mount collections.List;
+mount core.database.sqlite.native.datetime.instant.{
+    Instant, from_ymd, from_ymd_hms,
+};
+
+// -----------------------------------------------------------------------------
+// IsoParseResult
+// -----------------------------------------------------------------------------
+
+public type IsoParseError is
+      IpeBadFormat
+    | IpeBadDate
+    | IpeBadTime
+    | IpeOutOfRange;
+
+public fn parse_error_name(e: &IsoParseError) -> Text {
+    match e {
+        IpeBadFormat   => "bad_format".clone(),
+        IpeBadDate     => "bad_date".clone(),
+        IpeBadTime     => "bad_time".clone(),
+        IpeOutOfRange  => "out_of_range".clone(),
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Parse
+// -----------------------------------------------------------------------------
+
+public fn parse(text: &Text) -> base.Result<Instant, IsoParseError> {
+    let bs = text.as_bytes();
+    if bs.len() < 5 { return base.Err(IpeBadFormat); }
+
+    // Date-only: 10 bytes "YYYY-MM-DD".
+    if bs.len() == 10 {
+        return parse_date(&bs);
+    }
+    // Date + time: ≥ 16 bytes "YYYY-MM-DD HH:MM".
+    if bs.len() >= 16 && (bs[10] == (32 as Byte) || bs[10] == (84 as Byte)) {
+        return parse_datetime(&bs);
+    }
+    // Time-only — first byte is a digit and there's a `:` at offset 2.
+    if bs.len() >= 5 && is_digit(bs[0]) && bs[2] == (58 as Byte) {
+        return parse_time_only(&bs);
+    }
+    base.Err(IpeBadFormat)
+}
+
+fn parse_date(bs: &List<Byte>) -> base.Result<Instant, IsoParseError> {
+    if bs[4] != (45 as Byte) || bs[7] != (45 as Byte) { return base.Err(IpeBadFormat); }
+    let year = match parse_int_at(bs, 0, 4) { base.Some(v) => v, base.None => return base.Err(IpeBadDate) };
+    let month = match parse_int_at(bs, 5, 2) { base.Some(v) => v, base.None => return base.Err(IpeBadDate) };
+    let day = match parse_int_at(bs, 8, 2) { base.Some(v) => v, base.None => return base.Err(IpeBadDate) };
+    if !valid_ymd(year, month, day) { return base.Err(IpeOutOfRange); }
+    base.Ok(from_ymd(year, month, day))
+}
+
+fn parse_datetime(bs: &List<Byte>) -> base.Result<Instant, IsoParseError> {
+    if bs[4] != (45 as Byte) || bs[7] != (45 as Byte) { return base.Err(IpeBadFormat); }
+    if bs[13] != (58 as Byte) { return base.Err(IpeBadFormat); }
+    let year = match parse_int_at(bs, 0, 4) { base.Some(v) => v, base.None => return base.Err(IpeBadDate) };
+    let month = match parse_int_at(bs, 5, 2) { base.Some(v) => v, base.None => return base.Err(IpeBadDate) };
+    let day = match parse_int_at(bs, 8, 2) { base.Some(v) => v, base.None => return base.Err(IpeBadDate) };
+    let h = match parse_int_at(bs, 11, 2) { base.Some(v) => v, base.None => return base.Err(IpeBadTime) };
+    let m = match parse_int_at(bs, 14, 2) { base.Some(v) => v, base.None => return base.Err(IpeBadTime) };
+    let mut s: Int = 0;
+    let mut ms: Int = 0;
+    if bs.len() >= 19 && bs[16] == (58 as Byte) {
+        match parse_int_at(bs, 17, 2) {
+            base.Some(v) => { s = v; }
+            base.None    => return base.Err(IpeBadTime),
+        }
+    }
+    if bs.len() >= 23 && bs[19] == (46 as Byte) {
+        match parse_int_at(bs, 20, 3) {
+            base.Some(v) => { ms = v; }
+            base.None    => {}
+        }
+    }
+    if !valid_ymd(year, month, day) { return base.Err(IpeOutOfRange); }
+    if !valid_hms(h, m, s) { return base.Err(IpeOutOfRange); }
+    base.Ok(from_ymd_hms(year, month, day, h, m, s, ms))
+}
+
+fn parse_time_only(bs: &List<Byte>) -> base.Result<Instant, IsoParseError> {
+    if bs[2] != (58 as Byte) { return base.Err(IpeBadFormat); }
+    let h = match parse_int_at(bs, 0, 2) { base.Some(v) => v, base.None => return base.Err(IpeBadTime) };
+    let m = match parse_int_at(bs, 3, 2) { base.Some(v) => v, base.None => return base.Err(IpeBadTime) };
+    let mut s: Int = 0;
+    let mut ms: Int = 0;
+    if bs.len() >= 8 && bs[5] == (58 as Byte) {
+        match parse_int_at(bs, 6, 2) {
+            base.Some(v) => { s = v; }
+            base.None    => return base.Err(IpeBadTime),
+        }
+    }
+    if bs.len() >= 12 && bs[8] == (46 as Byte) {
+        match parse_int_at(bs, 9, 3) {
+            base.Some(v) => { ms = v; }
+            base.None    => {}
+        }
+    }
+    if !valid_hms(h, m, s) { return base.Err(IpeOutOfRange); }
+    // Date-less times anchor at 2000-01-01.
+    base.Ok(from_ymd_hms(2000, 1, 1, h, m, s, ms))
+}
+
+fn parse_int_at(bs: &List<Byte>, off: Int, width: Int) -> base.Maybe<Int> {
+    let mut acc: Int = 0;
+    let mut i: Int = 0;
+    while i < width {
+        if off + i >= bs.len() { return base.None; }
+        let b = bs[off + i];
+        if !is_digit(b) { return base.None; }
+        acc = acc * 10 + ((b - (48 as Byte)) as Int);
+        i = i + 1;
+    }
+    base.Some(acc)
+}
+
+fn is_digit(b: Byte) -> Bool {
+    b >= (48 as Byte) && b <= (57 as Byte)
+}
+
+fn valid_ymd(y: Int, m: Int, d: Int) -> Bool {
+    if y < 1 || y > 9999 { return false; }
+    if m < 1 || m > 12 { return false; }
+    if d < 1 || d > 31 { return false; }
+    true
+}
+
+fn valid_hms(h: Int, m: Int, s: Int) -> Bool {
+    h >= 0 && h <= 23 && m >= 0 && m <= 59 && s >= 0 && s <= 60
+}
+
+// -----------------------------------------------------------------------------
+// Render
+// -----------------------------------------------------------------------------
+
+public fn render(instant: &Instant) -> Text {
+    let ymd = instant.ymd_view();
+    let (h, m, s, ms) = core.database.sqlite.native.datetime.julian.day_fraction_to_time(instant.frac_day);
+    let mut out = Text.new();
+    push_int_padded(&mut out, ymd.year, 4);
+    out.push_byte(45 as Byte);
+    push_int_padded(&mut out, ymd.month, 2);
+    out.push_byte(45 as Byte);
+    push_int_padded(&mut out, ymd.day, 2);
+    out.push_byte(32 as Byte);
+    push_int_padded(&mut out, h, 2);
+    out.push_byte(58 as Byte);
+    push_int_padded(&mut out, m, 2);
+    out.push_byte(58 as Byte);
+    push_int_padded(&mut out, s, 2);
+    out.push_byte(46 as Byte);
+    push_int_padded(&mut out, ms, 3);
+    out
+}
+
+fn push_int_padded(dst: &mut Text, n: Int, width: Int) {
+    let mut digits: List<Byte> = List.new();
+    let mut x: Int = if n < 0 { 0 } else { n };
+    if x == 0 { digits.push(48 as Byte); }
+    while x > 0 {
+        digits.push(((x % 10) as Byte) + (48 as Byte));
+        x = x / 10;
+    }
+    while digits.len() < width { digits.push(48 as Byte); }
+    let mut i: Int = digits.len() - 1;
+    while i >= 0 { dst.push_byte(digits[i]); i = i - 1; }
+}

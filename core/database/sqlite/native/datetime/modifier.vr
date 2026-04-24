@@ -1,0 +1,248 @@
+// =============================================================================
+// datetime/modifier.vr — date/time modifiers
+// =============================================================================
+// Spec: sqlite-native.md §15.6 (date/time modifiers)
+//
+// Each `Modifier` shifts an `Instant`. Recognised modifier strings:
+//
+//   'now'                 — replace with current wall-clock instant
+//   '+N days'             — add N days
+//   '-N days'             — subtract N days
+//   '+N hours'            — add N hours
+//   '-N hours'            — subtract N hours
+//   '+N minutes'          — etc.
+//   '+N seconds'
+//   '+N months'           — calendar month add (with day clamping)
+//   '+N years'            — calendar year add (with leap-day clamping)
+//   'start of month'      — set day = 1, time = 00:00:00
+//   'start of year'       — set month = 1, day = 1, time = 00:00:00
+//   'start of day'        — set time = 00:00:00
+//   'weekday N'           — advance to the next weekday N (0=Sunday)
+//   'unixepoch'           — REAL value is interpreted as unix seconds
+//   'utc' / 'localtime'   — timezone shift (not modelled here)
+// =============================================================================
+
+module core.database.sqlite.native.datetime.modifier;
+
+mount core.*;
+mount base.{Text, Bool, Maybe};
+mount collections.List;
+mount core.database.sqlite.native.datetime.instant.{
+    Instant, from_ymd_hms, from_unix_seconds,
+};
+mount core.database.sqlite.native.datetime.julian.{
+    julian_day_int, julian_to_gregorian, day_fraction_to_time, weekday_for,
+    days_in_month,
+};
+
+// -----------------------------------------------------------------------------
+// Modifier
+// -----------------------------------------------------------------------------
+
+public type Modifier is
+      MNow
+    | MAddDays(Int64)
+    | MAddHours(Int64)
+    | MAddMinutes(Int64)
+    | MAddSeconds(Int64)
+    | MAddMonths(Int)
+    | MAddYears(Int)
+    | MStartOfDay
+    | MStartOfMonth
+    | MStartOfYear
+    | MWeekday(Int)
+    | MUnixEpoch
+    | MUtc
+    | MLocaltime;
+
+public fn modifier_kind_name(m: &Modifier) -> Text {
+    match m {
+        MNow              => "now".clone(),
+        MAddDays(_)       => "add_days".clone(),
+        MAddHours(_)      => "add_hours".clone(),
+        MAddMinutes(_)    => "add_minutes".clone(),
+        MAddSeconds(_)    => "add_seconds".clone(),
+        MAddMonths(_)     => "add_months".clone(),
+        MAddYears(_)      => "add_years".clone(),
+        MStartOfDay       => "start_of_day".clone(),
+        MStartOfMonth     => "start_of_month".clone(),
+        MStartOfYear      => "start_of_year".clone(),
+        MWeekday(_)       => "weekday".clone(),
+        MUnixEpoch        => "unixepoch".clone(),
+        MUtc              => "utc".clone(),
+        MLocaltime        => "localtime".clone(),
+    }
+}
+
+// -----------------------------------------------------------------------------
+// parse — Text → Maybe<Modifier>
+// -----------------------------------------------------------------------------
+
+public fn parse(text: &Text) -> Maybe<Modifier> {
+    if *text == "now".clone() { return Some(MNow); }
+    if *text == "start of day".clone() { return Some(MStartOfDay); }
+    if *text == "start of month".clone() { return Some(MStartOfMonth); }
+    if *text == "start of year".clone() { return Some(MStartOfYear); }
+    if *text == "unixepoch".clone() { return Some(MUnixEpoch); }
+    if *text == "utc".clone() { return Some(MUtc); }
+    if *text == "localtime".clone() { return Some(MLocaltime); }
+
+    // weekday N
+    if starts_with(text, &"weekday ".clone()) {
+        let suffix = drop_prefix(text, 8);
+        match parse_int_text(&suffix) {
+            Some(n) => if n >= 0 && n <= 6 { return Some(MWeekday(n)); }
+            None    => {}
+        }
+    }
+
+    // +N <unit> / -N <unit>
+    let bs = text.as_bytes();
+    if bs.len() < 3 { return None; }
+    let signed = bs[0] == (43 as Byte) || bs[0] == (45 as Byte);
+    if !signed { return None; }
+    let neg = bs[0] == (45 as Byte);
+
+    // Find the space separator.
+    let mut sep: Int = -1;
+    let mut i: Int = 1;
+    while i < bs.len() {
+        if bs[i] == (32 as Byte) { sep = i; break; }
+        i = i + 1;
+    }
+    if sep < 0 { return None; }
+
+    let n_text = slice_text(text, 1, sep);
+    let unit = slice_text(text, sep + 1, bs.len());
+    let n_int = match parse_int_text(&n_text) {
+        Some(v) => v,
+        None    => return None,
+    };
+    let signed_n = if neg { -n_int } else { n_int };
+
+    if unit == "days".clone() || unit == "day".clone() {
+        return Some(MAddDays(signed_n as Int64));
+    }
+    if unit == "hours".clone() || unit == "hour".clone() {
+        return Some(MAddHours(signed_n as Int64));
+    }
+    if unit == "minutes".clone() || unit == "minute".clone() {
+        return Some(MAddMinutes(signed_n as Int64));
+    }
+    if unit == "seconds".clone() || unit == "second".clone() {
+        return Some(MAddSeconds(signed_n as Int64));
+    }
+    if unit == "months".clone() || unit == "month".clone() {
+        return Some(MAddMonths(signed_n));
+    }
+    if unit == "years".clone() || unit == "year".clone() {
+        return Some(MAddYears(signed_n));
+    }
+    None
+}
+
+// -----------------------------------------------------------------------------
+// apply — shift an Instant by a Modifier
+// -----------------------------------------------------------------------------
+
+public fn apply(inst: &Instant, m: &Modifier, now_ns: Int64) -> Instant {
+    match m {
+        MNow => from_unix_seconds(now_ns / (1_000_000_000 as Int64)),
+        MAddDays(n)     => Instant { jd_int: inst.jd_int + (*n), frac_day: inst.frac_day },
+        MAddHours(n)    => inst.shift_seconds((*n) * (3600 as Int64)),
+        MAddMinutes(n)  => inst.shift_seconds((*n) * (60 as Int64)),
+        MAddSeconds(n)  => inst.shift_seconds(*n),
+        MAddMonths(n)   => add_months(inst, *n),
+        MAddYears(n)    => add_months(inst, (*n) * 12),
+        MStartOfDay     => Instant { jd_int: inst.jd_int, frac_day: 0.0 as Float64 },
+        MStartOfMonth   => start_of_month(inst),
+        MStartOfYear    => start_of_year(inst),
+        MWeekday(target)=> shift_to_weekday(inst, *target),
+        MUnixEpoch      => clone_instant(inst),
+        MUtc            => clone_instant(inst),
+        MLocaltime      => clone_instant(inst),
+    }
+}
+
+fn clone_instant(i: &Instant) -> Instant {
+    Instant { jd_int: i.jd_int, frac_day: i.frac_day }
+}
+
+fn add_months(inst: &Instant, delta_months: Int) -> Instant {
+    let ymd = inst.ymd_view();
+    let total = ymd.year * 12 + (ymd.month - 1) + delta_months;
+    let new_year = total / 12;
+    let new_month = total - new_year * 12 + 1;
+    let dim = days_in_month(new_year, new_month);
+    let new_day = if ymd.day > dim { dim } else { ymd.day };
+    let (h, m, s, ms) = day_fraction_to_time(inst.frac_day);
+    from_ymd_hms(new_year, new_month, new_day, h, m, s, ms)
+}
+
+fn start_of_month(inst: &Instant) -> Instant {
+    let ymd = inst.ymd_view();
+    Instant {
+        jd_int: julian_day_int(ymd.year, ymd.month, 1),
+        frac_day: 0.0 as Float64,
+    }
+}
+
+fn start_of_year(inst: &Instant) -> Instant {
+    let ymd = inst.ymd_view();
+    Instant {
+        jd_int: julian_day_int(ymd.year, 1, 1),
+        frac_day: 0.0 as Float64,
+    }
+}
+
+fn shift_to_weekday(inst: &Instant, target: Int) -> Instant {
+    let cur = weekday_for(inst.jd_int);
+    let mut delta = target - cur;
+    if delta < 0 { delta = delta + 7; }
+    Instant { jd_int: inst.jd_int + (delta as Int64), frac_day: inst.frac_day }
+}
+
+// -----------------------------------------------------------------------------
+// Helpers
+// -----------------------------------------------------------------------------
+
+fn starts_with(t: &Text, prefix: &Text) -> Bool {
+    let bs = t.as_bytes();
+    let pb = prefix.as_bytes();
+    if bs.len() < pb.len() { return false; }
+    let mut i: Int = 0;
+    while i < pb.len() {
+        if bs[i] != pb[i] { return false; }
+        i = i + 1;
+    }
+    true
+}
+
+fn drop_prefix(t: &Text, n: Int) -> Text {
+    let bs = t.as_bytes();
+    let mut out = Text.new();
+    let mut i: Int = n;
+    while i < bs.len() { out.push_byte(bs[i]); i = i + 1; }
+    out
+}
+
+fn slice_text(t: &Text, lo: Int, hi: Int) -> Text {
+    let bs = t.as_bytes();
+    let mut out = Text.new();
+    let mut i: Int = lo;
+    while i < hi && i < bs.len() { out.push_byte(bs[i]); i = i + 1; }
+    out
+}
+
+fn parse_int_text(t: &Text) -> Maybe<Int> {
+    let bs = t.as_bytes();
+    if bs.len() == 0 { return None; }
+    let mut i: Int = 0;
+    let mut acc: Int = 0;
+    while i < bs.len() {
+        if bs[i] < (48 as Byte) || bs[i] > (57 as Byte) { return None; }
+        acc = acc * 10 + ((bs[i] - (48 as Byte)) as Int);
+        i = i + 1;
+    }
+    Some(acc)
+}

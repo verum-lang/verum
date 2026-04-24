@@ -1,0 +1,31 @@
+// =============================================================================
+// core/database/sqlite/native/uri/mod.vr
+// =============================================================================
+// Layer: 7 (façade — sqlite3_open_v2)
+// Spec: SQLite URI filenames (https://www.sqlite.org/uri.html)
+//
+// `sqlite3_open_v2` accepts URIs of the form:
+//
+//   file:[//[host/]]path[?query]
+//
+// where `query` is a `&`-separated list of `key[=value]` pairs.
+// Recognised keys:
+//
+//   * `vfs`        — name of a registered VFS module
+//   * `mode`       — ro / rw / rwc / memory
+//   * `cache`      — shared / private
+//   * `psow`       — 0 / 1 (powersafe overwrite)
+//   * `nolock`     — 0 / 1
+//   * `immutable`  — 0 / 1
+//
+// Submodules:
+//   * `parser`     — tokenize + parse a URI string
+//   * `params`     — UriParams record + recognised-key enum
+//   * `decode`     — percent-decoding
+// =============================================================================
+
+module core.database.sqlite.native.uri;
+
+public module decode;
+public module params;
+public module parser;

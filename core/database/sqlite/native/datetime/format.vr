@@ -1,0 +1,147 @@
+// =============================================================================
+// datetime/format.vr — strftime-style formatter
+// =============================================================================
+// Spec: sqlite-native.md §15.6 (strftime)
+//
+// SQLite's strftime supports a subset of the POSIX format codes:
+//
+//   %Y — year (4 digits)              %m — month (01-12)
+//   %d — day of month (01-31)         %H — hour (00-23)
+//   %M — minute (00-59)               %S — second (00-59)
+//   %f — fractional second (SS.SSS)   %j — day of year (001-366)
+//   %J — Julian day number (REAL)     %s — Unix epoch seconds
+//   %w — day of week (0=Sunday, 6=Saturday)
+//   %% — literal %
+//
+// Anything else is copied verbatim.
+// =============================================================================
+
+module core.database.sqlite.native.datetime.format;
+
+mount core.*;
+mount base.{Text, Bool};
+mount collections.List;
+mount core.database.sqlite.native.datetime.instant.{Instant};
+mount core.database.sqlite.native.datetime.julian.{
+    Ymd, julian_to_gregorian, day_fraction_to_time, weekday_for, julian_day_int,
+};
+
+public fn strftime(format: &Text, instant: &Instant) -> Text {
+    let bs = format.as_bytes();
+    let mut out = Text.new();
+    let ymd = instant.ymd_view();
+    let (h, m, s, ms) = day_fraction_to_time(instant.frac_day);
+
+    let mut i: Int = 0;
+    while i < bs.len() {
+        if bs[i] == (37 as Byte) && (i + 1) < bs.len() {
+            let code = bs[i + 1];
+            apply_code(code, &ymd, h, m, s, ms, instant, &mut out);
+            i = i + 2;
+        } else {
+            out.push_byte(bs[i]);
+            i = i + 1;
+        }
+    }
+    out
+}
+
+fn apply_code(
+    code: Byte,
+    ymd: &Ymd,
+    h: Int, m: Int, s: Int, ms: Int,
+    instant: &Instant,
+    out: &mut Text,
+) {
+    if code == (89 as Byte) {        // %Y
+        push_int_padded(out, ymd.year, 4);
+    } else if code == (109 as Byte) {  // %m
+        push_int_padded(out, ymd.month, 2);
+    } else if code == (100 as Byte) {  // %d
+        push_int_padded(out, ymd.day, 2);
+    } else if code == (72 as Byte) {   // %H
+        push_int_padded(out, h, 2);
+    } else if code == (77 as Byte) {   // %M
+        push_int_padded(out, m, 2);
+    } else if code == (83 as Byte) {   // %S
+        push_int_padded(out, s, 2);
+    } else if code == (102 as Byte) {  // %f
+        push_int_padded(out, s, 2);
+        out.push_byte(46 as Byte);
+        push_int_padded(out, ms, 3);
+    } else if code == (106 as Byte) {  // %j  day-of-year
+        let yday = day_of_year(ymd);
+        push_int_padded(out, yday, 3);
+    } else if code == (74 as Byte) {   // %J  julian
+        push_real(out, instant.julian_real());
+    } else if code == (115 as Byte) {  // %s  unix epoch
+        push_int64(out, instant.unix_seconds());
+    } else if code == (119 as Byte) {  // %w  weekday
+        push_int_padded(out, weekday_for(instant.jd_int), 1);
+    } else if code == (37 as Byte) {   // %%
+        out.push_byte(37 as Byte);
+    } else {
+        out.push_byte(37 as Byte);
+        out.push_byte(code);
+    }
+}
+
+fn day_of_year(ymd: &Ymd) -> Int {
+    let jan1 = julian_day_int(ymd.year, 1, 1);
+    let cur = julian_day_int(ymd.year, ymd.month, ymd.day);
+    ((cur - jan1) as Int) + 1
+}
+
+// -----------------------------------------------------------------------------
+// numeric helpers
+// -----------------------------------------------------------------------------
+
+fn push_int_padded(dst: &mut Text, n: Int, width: Int) {
+    let mut digits: List<Byte> = List.new();
+    let mut x: Int = if n < 0 { 0 } else { n };
+    if x == 0 { digits.push(48 as Byte); }
+    while x > 0 {
+        digits.push(((x % 10) as Byte) + (48 as Byte));
+        x = x / 10;
+    }
+    while digits.len() < width { digits.push(48 as Byte); }
+    let mut i: Int = digits.len() - 1;
+    while i >= 0 { dst.push_byte(digits[i]); i = i - 1; }
+}
+
+fn push_int64(dst: &mut Text, n: Int64) {
+    if n == (0 as Int64) { dst.push_byte(48 as Byte); return; }
+    let neg = n < (0 as Int64);
+    let mut x: Int64 = if neg { -n } else { n };
+    let mut digits: List<Byte> = List.new();
+    while x > (0 as Int64) {
+        let d: Byte = (((x as Int) % 10) as Byte);
+        digits.push(d + (48 as Byte));
+        x = x / (10 as Int64);
+    }
+    if neg { dst.push_byte(45 as Byte); }
+    let mut i: Int = digits.len() - 1;
+    while i >= 0 { dst.push_byte(digits[i]); i = i - 1; }
+}
+
+fn push_real(dst: &mut Text, f: Float64) {
+    let neg = f < (0.0 as Float64);
+    let abs_f = if neg { -f } else { f };
+    let int_part: Int64 = abs_f as Int64;
+    let frac = abs_f - (int_part as Float64);
+    let scaled: Int64 = (frac * (1000000.0 as Float64)) as Int64;
+    if neg { dst.push_byte(45 as Byte); }
+    push_int64(dst, int_part);
+    dst.push_byte(46 as Byte);
+    let mut digits: List<Byte> = List.new();
+    let mut x: Int64 = if scaled < (0 as Int64) { -scaled } else { scaled };
+    let mut placed: Int = 0;
+    while placed < 6 {
+        let d: Byte = (((x as Int) % 10) as Byte);
+        digits.push(d + (48 as Byte));
+        x = x / (10 as Int64);
+        placed = placed + 1;
+    }
+    let mut i: Int = digits.len() - 1;
+    while i >= 0 { dst.push_byte(digits[i]); i = i - 1; }
+}

@@ -1,0 +1,115 @@
+// =============================================================================
+// datetime/julian.vr — Julian Day calculations
+// =============================================================================
+// Spec: sqlite-native.md §15.6
+//
+// Julian Day = continuous count of days since noon UTC on 1 Jan 4713 BC
+// (proleptic Julian calendar). The conversion uses the well-known
+// Fliegel & Van Flandern algorithm.
+//
+// JD for noon → exactly an integer; JD at any other time has a
+// fractional part (e.g. midnight UTC = JD - 0.5).
+// =============================================================================
+
+module core.database.sqlite.native.datetime.julian;
+
+mount core.*;
+mount base.{Bool};
+mount collections.List;
+
+// -----------------------------------------------------------------------------
+// julian_day_int — Fliegel & Van Flandern (1968)
+// -----------------------------------------------------------------------------
+
+/// Returns the integer Julian Day number at noon UTC of (year, month, day).
+/// Year is the Gregorian (proleptic) year; month is 1..12; day is 1..31.
+public fn julian_day_int(year: Int, month: Int, day: Int) -> Int64 {
+    let y = year as Int64;
+    let m = month as Int64;
+    let d = day as Int64;
+    let a = ((14 as Int64) - m) / (12 as Int64);
+    let yp = y + (4800 as Int64) - a;
+    let mp = m + (12 as Int64) * a - (3 as Int64);
+    d + ((153 as Int64) * mp + (2 as Int64)) / (5 as Int64)
+        + (365 as Int64) * yp
+        + yp / (4 as Int64)
+        - yp / (100 as Int64)
+        + yp / (400 as Int64)
+        - (32045 as Int64)
+}
+
+// -----------------------------------------------------------------------------
+// julian_to_gregorian — inverse direction
+// -----------------------------------------------------------------------------
+
+public type Ymd is { year: Int, month: Int, day: Int }
+
+public fn ymd(year: Int, month: Int, day: Int) -> Ymd {
+    Ymd { year: year, month: month, day: day }
+}
+
+public fn julian_to_gregorian(jd: Int64) -> Ymd {
+    // Reverse Fliegel/Van Flandern.
+    let a = jd + (32044 as Int64);
+    let b = ((4 as Int64) * a + (3 as Int64)) / (146097 as Int64);
+    let c = a - ((146097 as Int64) * b) / (4 as Int64);
+    let d = ((4 as Int64) * c + (3 as Int64)) / (1461 as Int64);
+    let e = c - ((1461 as Int64) * d) / (4 as Int64);
+    let m = ((5 as Int64) * e + (2 as Int64)) / (153 as Int64);
+    let day = e - ((153 as Int64) * m + (2 as Int64)) / (5 as Int64) + (1 as Int64);
+    let month = m + (3 as Int64) - (12 as Int64) * (m / (10 as Int64));
+    let year = (100 as Int64) * b + d - (4800 as Int64) + (m / (10 as Int64));
+    ymd(year as Int, month as Int, day as Int)
+}
+
+// -----------------------------------------------------------------------------
+// Sub-day fractional component
+// -----------------------------------------------------------------------------
+
+/// Convert (h, m, s, ms) → fractional day in [0.0, 1.0).
+/// h is 0..23; m, s are 0..59; ms is 0..999.
+public fn time_to_day_fraction(h: Int, m: Int, s: Int, ms: Int) -> Float64 {
+    let total_ms = ((h * 3600 + m * 60 + s) * 1000 + ms) as Float64;
+    total_ms / (86400000.0 as Float64)
+}
+
+/// Inverse — extract (h, m, s, ms) from a fractional day.
+public fn day_fraction_to_time(frac: Float64) -> (Int, Int, Int, Int) {
+    let total_ms = (frac * (86400000.0 as Float64)) as Int64;
+    let ms = (total_ms % (1000 as Int64)) as Int;
+    let total_s = total_ms / (1000 as Int64);
+    let s = (total_s % (60 as Int64)) as Int;
+    let total_m = total_s / (60 as Int64);
+    let m = (total_m % (60 as Int64)) as Int;
+    let h = (total_m / (60 as Int64)) as Int;
+    (h, m, s, ms)
+}
+
+// -----------------------------------------------------------------------------
+// Day-of-week (0 = Sunday, 6 = Saturday) — SQLite's `strftime('%w')` enum
+// -----------------------------------------------------------------------------
+
+public fn weekday_for(jd: Int64) -> Int {
+    // JD = 0 is Monday (1) at noon. SQLite's strftime('%w') is 0..6
+    // with 0 = Sunday — we apply the conventional offset here.
+    let r = (jd + (1 as Int64)) % (7 as Int64);
+    let n = if r < (0 as Int64) { r + (7 as Int64) } else { r };
+    n as Int
+}
+
+// -----------------------------------------------------------------------------
+// is_leap_year
+// -----------------------------------------------------------------------------
+
+public fn is_leap_year(year: Int) -> Bool {
+    (year % 4 == 0 && year % 100 != 0) || (year % 400 == 0)
+}
+
+public fn days_in_month(year: Int, month: Int) -> Int {
+    match month {
+        1 => 31, 3 => 31, 5 => 31, 7 => 31, 8 => 31, 10 => 31, 12 => 31,
+        4 => 30, 6 => 30, 9 => 30, 11 => 30,
+        2 => if is_leap_year(year) { 29 } else { 28 },
+        _ => 0,
+    }
+}

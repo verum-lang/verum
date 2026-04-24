@@ -1,0 +1,214 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, dbstat, page_stat, table_info, index_info, fk_info, series
+// @timeout: 5000
+// @expected-exit: 0
+//
+// dbstat surface:
+//   * DbStatRow fill_ratio + overhead arithmetic
+//   * DbStatTable totals + page_count_for_kind
+//   * TableInfoRow PK predicate + not_null_int rendering
+//   * IndexListRow / IndexListSet unique counter
+//   * ForeignKeyListSet fk_group_count
+//   * SeriesCursor lifecycle (next/at_eof) + estimate_row_count
+
+mount core.database.sqlite.native.dbstat.page_stat.{
+    PageType, PtInternal, PtLeaf, PtOverflow,
+    DbStatRow, dbstat_row,
+    DbStatTable, dbstat_table_new,
+    page_type_text,
+};
+mount core.database.sqlite.native.dbstat.table_info.{
+    TableInfoRow, table_info_row,
+    TableInfoSet, table_info_set,
+};
+mount core.database.sqlite.native.dbstat.index_info.{
+    IndexOrigin, IoCreated, IoUnique, IoPrimaryKey,
+    IndexListRow, index_list_row,
+    IndexListSet, index_list_set,
+    IndexInfoRow, index_info_row,
+    IndexInfoSet, index_info_set,
+    origin_text,
+};
+mount core.database.sqlite.native.dbstat.foreign_key_info.{
+    FkAction, FaNoAction, FaRestrict, FaCascade,
+    FkMatch, FmNone,
+    ForeignKeyRow, foreign_key_row,
+    ForeignKeyListSet, fk_list_set,
+    fk_action_text, fk_match_text,
+};
+mount core.database.sqlite.native.dbstat.series.{
+    SeriesParams, series_params, series_default_step,
+    SeriesCursor, cursor_open,
+    estimate_row_count,
+};
+mount base.{Some, None, Maybe, Bool};
+
+// -----------------------------------------------------------------------------
+// page_stat
+// -----------------------------------------------------------------------------
+
+fn make_row(kind: PageType, payload: Int, unused: Int, pgsize: Int) -> DbStatRow {
+    dbstat_row("t".clone(), "/1".clone(), 1 as Int64, kind, 4, payload, unused, payload, 4096 as Int64, pgsize)
+}
+
+fn test_dbstat_fill_ratio() {
+    let r = make_row(PtLeaf, 2048, 1024, 4096);
+    let ratio = r.fill_ratio();
+    assert(ratio > (0.4 as Float64));
+    assert(ratio < (0.6 as Float64));
+}
+
+fn test_dbstat_overhead() {
+    let r = make_row(PtLeaf, 2048, 1024, 4096);
+    assert_eq(r.overhead(), 1024);
+}
+
+fn test_dbstat_table_totals() {
+    let mut t = dbstat_table_new();
+    t.add(make_row(PtLeaf, 1024, 100, 4096));
+    t.add(make_row(PtInternal, 512, 200, 4096));
+    assert_eq(t.total_payload(), 1536 as Int64);
+    assert_eq(t.total_unused(), 300 as Int64);
+}
+
+fn test_dbstat_page_count_per_kind() {
+    let mut t = dbstat_table_new();
+    t.add(make_row(PtLeaf, 1024, 100, 4096));
+    t.add(make_row(PtLeaf, 1024, 100, 4096));
+    t.add(make_row(PtInternal, 512, 200, 4096));
+    assert_eq(t.page_count_for_kind(&PtLeaf), 2);
+    assert_eq(t.page_count_for_kind(&PtInternal), 1);
+    assert_eq(t.page_count_for_kind(&PtOverflow), 0);
+}
+
+fn test_page_type_text() {
+    assert(page_type_text(&PtInternal) == "internal".clone());
+    assert(page_type_text(&PtLeaf) == "leaf".clone());
+    assert(page_type_text(&PtOverflow) == "overflow".clone());
+}
+
+// -----------------------------------------------------------------------------
+// table_info
+// -----------------------------------------------------------------------------
+
+fn test_table_info_pk_predicate() {
+    let r = table_info_row(0, "id".clone(), "INTEGER".clone(), true, None, 1);
+    assert(r.is_pk_column());
+    assert_eq(r.not_null_int(), 1);
+}
+
+fn test_table_info_set_collects_pk_columns() {
+    let mut t = table_info_set("users".clone());
+    t.add(table_info_row(0, "id".clone(), "INTEGER".clone(), true, None, 1));
+    t.add(table_info_row(1, "name".clone(), "TEXT".clone(), false, None, 0));
+    let pks = t.primary_key_columns();
+    assert_eq(pks.len(), 1);
+}
+
+fn test_table_info_lookup() {
+    let mut t = table_info_set("users".clone());
+    t.add(table_info_row(0, "id".clone(), "INTEGER".clone(), true, None, 1));
+    match t.lookup(&"id".clone()) {
+        Some(_) => {},
+        None    => panic("present"),
+    }
+}
+
+// -----------------------------------------------------------------------------
+// index_info
+// -----------------------------------------------------------------------------
+
+fn test_index_origin_text() {
+    assert(origin_text(&IoCreated) == "c".clone());
+    assert(origin_text(&IoUnique) == "u".clone());
+    assert(origin_text(&IoPrimaryKey) == "pk".clone());
+}
+
+fn test_index_list_unique_count() {
+    let mut s = index_list_set("users".clone());
+    s.add(index_list_row(0, "ia".clone(), true, IoCreated, false));
+    s.add(index_list_row(1, "ib".clone(), false, IoCreated, false));
+    s.add(index_list_row(2, "ic".clone(), true, IoUnique, false));
+    assert_eq(s.unique_count(), 2);
+}
+
+fn test_index_info_set_add() {
+    let mut s = index_info_set("ia".clone());
+    s.add(index_info_row(0, 1, "name".clone()));
+    assert_eq(s.len(), 1);
+}
+
+// -----------------------------------------------------------------------------
+// foreign_key_info
+// -----------------------------------------------------------------------------
+
+fn test_fk_action_text() {
+    assert(fk_action_text(&FaNoAction) == "NO ACTION".clone());
+    assert(fk_action_text(&FaRestrict) == "RESTRICT".clone());
+    assert(fk_action_text(&FaCascade) == "CASCADE".clone());
+}
+
+fn test_fk_match_text() {
+    assert(fk_match_text(&FmNone) == "NONE".clone());
+}
+
+fn test_fk_group_count_dedups_id() {
+    let mut s = fk_list_set("posts".clone());
+    s.add(foreign_key_row(0, 0, "users".clone(), "user_id".clone(), "id".clone(), FaNoAction, FaCascade, FmNone));
+    s.add(foreign_key_row(0, 1, "users".clone(), "user_org_id".clone(), "org_id".clone(), FaNoAction, FaCascade, FmNone));
+    s.add(foreign_key_row(1, 0, "tags".clone(), "tag_id".clone(), "id".clone(), FaNoAction, FaRestrict, FmNone));
+    assert_eq(s.fk_group_count(), 2);
+}
+
+// -----------------------------------------------------------------------------
+// generate_series
+// -----------------------------------------------------------------------------
+
+fn test_series_default_step() {
+    assert_eq(series_default_step(), 1 as Int64);
+}
+
+fn test_series_cursor_emits_range() {
+    let p = series_params(1 as Int64, 5 as Int64, 1 as Int64);
+    let mut c = cursor_open(p);
+    let mut count: Int = 0;
+    while !c.at_eof() && count < 10 {
+        c.next();
+        count = count + 1;
+    }
+    assert_eq(count, 5);
+}
+
+fn test_series_estimate_row_count() {
+    let p = series_params(1 as Int64, 10 as Int64, 1 as Int64);
+    assert_eq(estimate_row_count(&p), 10 as Int64);
+}
+
+fn test_series_negative_step() {
+    let p = series_params(10 as Int64, 1 as Int64, -1 as Int64);
+    let c = cursor_open(p);
+    assert(!c.at_eof());
+}
+
+fn main() {
+    test_dbstat_fill_ratio();
+    test_dbstat_overhead();
+    test_dbstat_table_totals();
+    test_dbstat_page_count_per_kind();
+    test_page_type_text();
+    test_table_info_pk_predicate();
+    test_table_info_set_collects_pk_columns();
+    test_table_info_lookup();
+    test_index_origin_text();
+    test_index_list_unique_count();
+    test_index_info_set_add();
+    test_fk_action_text();
+    test_fk_match_text();
+    test_fk_group_count_dedups_id();
+    test_series_default_step();
+    test_series_cursor_emits_range();
+    test_series_estimate_row_count();
+    test_series_negative_step();
+}

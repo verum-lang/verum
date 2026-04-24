@@ -1,0 +1,31 @@
+// =============================================================================
+// core/database/sqlite/native/datetime/mod.vr
+// =============================================================================
+// Layer: 5 (built-in scalar fn backing)
+// Spec: sqlite-native.md §15.6 (date/time details)
+//
+// SQLite stores dates in three forms; loom mirrors the same:
+//
+//   * `TEXT`    — ISO 8601 string `YYYY-MM-DD HH:MM:SS.SSS`
+//   * `REAL`    — Julian day number
+//   * `INTEGER` — Unix epoch seconds
+//
+// `date()` / `time()` / `datetime()` accept modifier strings that
+// shift the value: `'now'`, `'+N days'`, `'start of month'`,
+// `'weekday N'`, etc.
+//
+// Submodules:
+//   * `instant`     — Instant (julian-day-based common form) + conversions
+//   * `iso`         — ISO-8601 parser + renderer
+//   * `julian`      — julian_day(year, month, day) + Gregorian round-trip
+//   * `modifier`    — Modifier AST + parse + apply
+//   * `format`      — strftime-style formatter
+// =============================================================================
+
+module core.database.sqlite.native.datetime;
+
+public module instant;
+public module iso;
+public module julian;
+public module modifier;
+public module format;

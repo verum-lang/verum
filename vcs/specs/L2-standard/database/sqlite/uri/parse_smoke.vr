@@ -1,0 +1,195 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, uri, parser, params, decode
+// @timeout: 5000
+// @expected-exit: 0
+//
+// URI surface:
+//   * percent_decode handles %20 / %xx / non-hex passthrough
+//   * UriParams.merge routes vfs/mode/cache/psow/nolock/immutable
+//   * parse() handles raw filename, file: scheme, query string
+
+mount core.database.sqlite.native.uri.decode.{percent_decode};
+mount core.database.sqlite.native.uri.params.{
+    OpenMode, OmReadOnly, OmReadWrite, OmReadWriteCreate, OmMemory,
+    CacheMode, CmShared, CmPrivate,
+    QueryParam, query_param,
+    UriParams, uri_params_default,
+    open_mode_text, cache_mode_text, parse_mode, parse_cache,
+};
+mount core.database.sqlite.native.uri.parser.{
+    ParsedUri, UriError,
+    UeBadScheme, UeMalformedQuery, UeEmptyPath,
+    parse, uri_error_name,
+};
+mount base.{Ok, Err, Some, None, Maybe, Bool};
+
+// -----------------------------------------------------------------------------
+// percent_decode
+// -----------------------------------------------------------------------------
+
+fn test_decode_percent_space() {
+    let out = percent_decode(&"hello%20world".clone());
+    assert(out == "hello world".clone());
+}
+
+fn test_decode_percent_passthrough_invalid() {
+    let out = percent_decode(&"abc%zz".clone());
+    assert(out == "abc%zz".clone());
+}
+
+fn test_decode_no_percent_round_trip() {
+    let out = percent_decode(&"plain".clone());
+    assert(out == "plain".clone());
+}
+
+// -----------------------------------------------------------------------------
+// OpenMode / CacheMode round-trip
+// -----------------------------------------------------------------------------
+
+fn test_open_mode_text() {
+    assert(open_mode_text(&OmReadOnly) == "ro".clone());
+    assert(open_mode_text(&OmReadWrite) == "rw".clone());
+    assert(open_mode_text(&OmReadWriteCreate) == "rwc".clone());
+    assert(open_mode_text(&OmMemory) == "memory".clone());
+}
+
+fn test_parse_mode_recognises_all() {
+    match parse_mode(&"ro".clone()) { Some(_) => {}, None => panic("ro") }
+    match parse_mode(&"rw".clone()) { Some(_) => {}, None => panic("rw") }
+    match parse_mode(&"rwc".clone()) { Some(_) => {}, None => panic("rwc") }
+    match parse_mode(&"memory".clone()) { Some(_) => {}, None => panic("memory") }
+}
+
+fn test_parse_mode_unknown_none() {
+    match parse_mode(&"foo".clone()) { None => {}, _ => panic("none") }
+}
+
+fn test_cache_mode_text() {
+    assert(cache_mode_text(&CmShared) == "shared".clone());
+    assert(cache_mode_text(&CmPrivate) == "private".clone());
+}
+
+fn test_parse_cache_recognises() {
+    match parse_cache(&"shared".clone()) { Some(_) => {}, None => panic("shared") }
+    match parse_cache(&"private".clone()) { Some(_) => {}, None => panic("private") }
+    match parse_cache(&"foo".clone()) { None => {}, _ => panic("none") }
+}
+
+// -----------------------------------------------------------------------------
+// UriParams.merge routing
+// -----------------------------------------------------------------------------
+
+fn test_merge_known_keys_set_typed_fields() {
+    let mut p = uri_params_default();
+    p.merge(&"vfs".clone(), &"unix".clone());
+    p.merge(&"mode".clone(), &"rw".clone());
+    p.merge(&"cache".clone(), &"shared".clone());
+    p.merge(&"psow".clone(), &"1".clone());
+    p.merge(&"nolock".clone(), &"true".clone());
+    p.merge(&"immutable".clone(), &"yes".clone());
+    assert_eq(p.known_key_count(), 6);
+}
+
+fn test_merge_unknown_pushed_to_extra() {
+    let mut p = uri_params_default();
+    p.merge(&"foo".clone(), &"bar".clone());
+    assert_eq(p.extra.len(), 1);
+}
+
+// -----------------------------------------------------------------------------
+// Parser
+// -----------------------------------------------------------------------------
+
+fn test_parse_raw_filename_passes_through() {
+    match parse(&"db.sqlite".clone()) {
+        Ok(parsed) => {
+            assert(!parsed.has_scheme);
+            assert(parsed.path == "db.sqlite".clone());
+        }
+        Err(_) => panic("raw filename"),
+    }
+}
+
+fn test_parse_file_scheme_extracts_path() {
+    match parse(&"file:/tmp/db.sqlite".clone()) {
+        Ok(parsed) => {
+            assert(parsed.has_scheme);
+            assert(parsed.path == "/tmp/db.sqlite".clone());
+        }
+        Err(_) => panic("file: scheme"),
+    }
+}
+
+fn test_parse_query_string_routes_params() {
+    match parse(&"file:/db?mode=ro&cache=shared".clone()) {
+        Ok(parsed) => {
+            assert(parsed.has_scheme);
+            match &parsed.params.mode {
+                Some(_) => {},
+                None    => panic("mode set"),
+            }
+            match &parsed.params.cache {
+                Some(_) => {},
+                None    => panic("cache set"),
+            }
+        }
+        Err(_) => panic("query parses"),
+    }
+}
+
+fn test_parse_authority_skipped() {
+    match parse(&"file:///tmp/db".clone()) {
+        Ok(parsed) => {
+            assert(parsed.path == "/tmp/db".clone());
+        }
+        Err(_) => panic("authority parses"),
+    }
+}
+
+fn test_parse_percent_decoded_path() {
+    match parse(&"file:/path%20with%20space".clone()) {
+        Ok(parsed) => {
+            assert(parsed.path == "/path with space".clone());
+        }
+        Err(_) => panic("percent decoded"),
+    }
+}
+
+fn test_parse_unrecognised_query_keeps_extra() {
+    match parse(&"file:/db?foo=bar".clone()) {
+        Ok(parsed) => {
+            assert_eq(parsed.params.extra.len(), 1);
+        }
+        Err(_) => panic("extra preserved"),
+    }
+}
+
+fn test_uri_error_names_unique() {
+    let n1 = uri_error_name(&UeBadScheme);
+    let n2 = uri_error_name(&UeMalformedQuery);
+    let n3 = uri_error_name(&UeEmptyPath);
+    assert(n1 != n2);
+    assert(n2 != n3);
+}
+
+fn main() {
+    test_decode_percent_space();
+    test_decode_percent_passthrough_invalid();
+    test_decode_no_percent_round_trip();
+    test_open_mode_text();
+    test_parse_mode_recognises_all();
+    test_parse_mode_unknown_none();
+    test_cache_mode_text();
+    test_parse_cache_recognises();
+    test_merge_known_keys_set_typed_fields();
+    test_merge_unknown_pushed_to_extra();
+    test_parse_raw_filename_passes_through();
+    test_parse_file_scheme_extracts_path();
+    test_parse_query_string_routes_params();
+    test_parse_authority_skipped();
+    test_parse_percent_decoded_path();
+    test_parse_unrecognised_query_keeps_extra();
+    test_uri_error_names_unique();
+}

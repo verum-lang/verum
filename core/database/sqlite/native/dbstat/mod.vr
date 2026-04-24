@@ -1,0 +1,31 @@
+// =============================================================================
+// core/database/sqlite/native/dbstat/mod.vr
+// =============================================================================
+// Layer: 5 (built-in vtab)
+// Spec: sqlite-native.md §16.4 (dbstat + pragma_* table-valued vtabs)
+//
+// Five built-in introspection vtabs:
+//
+//   * `dbstat`               — per-page stats (page-type/cell count/payload size/
+//                              unused space)
+//   * `pragma_table_info`    — column list per table
+//   * `pragma_index_list`    — index list per table
+//   * `pragma_index_info`    — column list per index
+//   * `pragma_foreign_key_list` — FK refs per table
+//   * `generate_series`      — numeric range as a table-valued function
+//
+// Submodules:
+//   * `page_stat`        — DbStatRow + page-type taxonomy
+//   * `table_info`       — pragma_table_info row
+//   * `index_info`       — pragma_index_list + pragma_index_info rows
+//   * `foreign_key_info` — pragma_foreign_key_list row
+//   * `series`           — generate_series state
+// =============================================================================
+
+module core.database.sqlite.native.dbstat;
+
+public module page_stat;
+public module table_info;
+public module index_info;
+public module foreign_key_info;
+public module series;
