@@ -954,34 +954,18 @@ pub mod cbgr_integration {
     }
 }
 
-/// Integration helpers for SMT verification errors
-pub mod smt_integration {
-    #[cfg(feature = "smt-integration")]
-    use super::ErrorWithContext;
-
-    /// Type alias for SMT operations with context
-    #[cfg(feature = "smt-integration")]
-    pub type SmtResult<T> = Result<T, ErrorWithContext<verum_smt::Error>>;
-
-    /// Example usage pattern for SMT operations
-    ///
-    /// ```rust,ignore
-    /// use verum_diagnostics::context_protocol::smt_integration::*;
-    ///
-    /// fn verify_with_context(constraint: &Constraint) -> SmtResult<Proof> {
-    ///     smt_verify(constraint)
-    ///         .with_context(|| format!(
-    ///             "Failed to verify constraint: {}\nSolver: {}\nTimeout: {}ms",
-    ///             constraint,
-    ///             solver_name(),
-    ///             timeout_ms()
-    ///         ))?
-    /// }
-    /// ```
-    pub fn example_usage() {
-        // This is just documentation, no actual code
-    }
-}
+// The former `smt_integration` submodule — a decorative
+// type alias (`SmtResult<T> = Result<T,
+// ErrorWithContext<verum_smt::Error>>`) plus a doc-only
+// example — was removed to break the
+// `verum_diagnostics → verum_smt → verum_types →
+// verum_diagnostics` optional-edge cycle. Downstream
+// crates that need an SMT-error-contextualised result
+// type use the generic `ErrorWithContext<E>` above,
+// parameterised on their own SMT error type (e.g.
+// `ErrorWithContext<verum_smt::Cvc5Error>`). No public
+// API is lost — every caller can write their own
+// specialisation in one line.
 
 #[cfg(test)]
 mod tests {
