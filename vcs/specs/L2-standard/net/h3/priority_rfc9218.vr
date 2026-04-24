@@ -1,0 +1,121 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: h3, priority, rfc9218, structured_header
+// @timeout: 15000
+// @expected-exit: 0
+
+// RFC 9218 HTTP Priority: `Priority:` header + PRIORITY_UPDATE frame.
+// urgency ∈ [0, 7] (0 = most urgent); `i` = incremental flag;
+// defaults urgency=3, i=false.
+
+mount core.*;
+mount core.collections.List;
+mount core.net.h3.priority.{
+    H3Priority, PriorityParseError, PriorityUpdate, PriorityUpdateTarget,
+    DEFAULT_URGENCY, MAX_URGENCY,
+    parse_header, encode_header,
+    PRIORITY_UPDATE_REQUEST, PRIORITY_UPDATE_PUSH,
+};
+
+fn defaults_match_rfc_9218() {
+    assert(DEFAULT_URGENCY == 3_u8);
+    assert(MAX_URGENCY     == 7_u8);
+    let d = H3Priority.default();
+    assert(d.urgency == 3_u8);
+    assert(d.incremental == false);
+}
+
+fn new_clamps_out_of_range_urgency() {
+    let p = H3Priority.new(99_u8, true);
+    assert(p.urgency == MAX_URGENCY);
+    assert(p.incremental == true);
+}
+
+fn beats_lower_urgency() {
+    let hi = H3Priority.new(0_u8, false);
+    let lo = H3Priority.new(5_u8, false);
+    assert(hi.beats(&lo));
+    assert(false == lo.beats(&hi));
+}
+
+fn beats_ties_on_urgency_prefers_contiguous() {
+    let contig = H3Priority.new(3_u8, false);
+    let incr   = H3Priority.new(3_u8, true);
+    assert(contig.beats(&incr));
+    assert(false == incr.beats(&contig));
+}
+
+fn parse_header_u5() {
+    let h: List<Byte> = [0x75_u8, 0x3D_u8, 0x35_u8];   // "u=5"
+    let p = parse_header(h.as_slice()).unwrap();
+    assert(p.urgency == 5_u8);
+    assert(false == p.incremental);
+}
+
+fn parse_header_rejects_over_7_urgency() {
+    let h: List<Byte> = [0x75_u8, 0x3D_u8, 0x38_u8];   // "u=8"
+    match parse_header(h.as_slice()) {
+        Err(PriorityParseError.UrgencyOutOfRange(v)) => assert(v == 8),
+        _ => panic("u=8 must be UrgencyOutOfRange"),
+    }
+}
+
+fn parse_header_incremental_bare_flag() {
+    let h: List<Byte> = [0x69_u8];                     // "i"
+    let p = parse_header(h.as_slice()).unwrap();
+    assert(p.incremental);
+    assert(p.urgency == DEFAULT_URGENCY);
+}
+
+fn parse_header_combined_u_and_i() {
+    // "u=1, i"
+    let h: List<Byte> = [
+        0x75_u8, 0x3D_u8, 0x31_u8,
+        0x2C_u8, 0x20_u8, 0x69_u8,
+    ];
+    let p = parse_header(h.as_slice()).unwrap();
+    assert(p.urgency == 1_u8);
+    assert(p.incremental);
+}
+
+fn encode_header_roundtrips_via_parse() {
+    let p = H3Priority.new(2_u8, true);
+    let wire = encode_header(&p);
+    let parsed = parse_header(wire.as_slice()).unwrap();
+    assert(parsed.urgency == 2_u8);
+    assert(parsed.incremental);
+}
+
+fn priority_update_frame_type_constants() {
+    // RFC 9218 §7.2 + IANA: PRIORITY_UPDATE frame types.
+    assert(PRIORITY_UPDATE_REQUEST == 0xF0700_u64);
+    assert(PRIORITY_UPDATE_PUSH    == 0xF0701_u64);
+}
+
+fn priority_update_with_priority_roundtrips() {
+    let p = H3Priority.new(1_u8, false);
+    let upd = PriorityUpdate.with_priority(
+        PriorityUpdateTarget.RequestStream(42_u64),
+        &p,
+    );
+    let got = upd.priority().unwrap();
+    assert(got.urgency == 1_u8);
+}
+
+@main
+public fn main() -> Int {
+    defaults_match_rfc_9218();
+    new_clamps_out_of_range_urgency();
+    beats_lower_urgency();
+    beats_ties_on_urgency_prefers_contiguous();
+    parse_header_u5();
+    parse_header_rejects_over_7_urgency();
+    parse_header_incremental_bare_flag();
+    parse_header_combined_u_and_i();
+    encode_header_roundtrips_via_parse();
+    priority_update_frame_type_constants();
+    priority_update_with_priority_roundtrips();
+    print("RFC 9218 HTTP Priority surface verified");
+    0
+}
