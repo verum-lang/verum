@@ -110,16 +110,10 @@ pub mod solver;
 pub mod subsumption;
 pub mod translate;
 // Enabled 2026-04-24 after the `verum_types ↔ verum_smt` cycle was broken.
-//
-// TODO(cycle-break): The legacy `type_translator.rs` file was authored
-// against a snapshot of `verum_types::ty::Type` that no longer matches
-// reality — it references removed enum variants (`Unknown`, `ExtensibleRecord`,
-// `VolatilePointer`, `DynProtocol`, `PathType`), uses `UniverseLevel::Max(u32,u32)`
-// in a way that no longer type-checks on current rustc, and references
-// `verum_types::ty::TypeKind` which does not exist. Re-enable after the
-// module is rewritten against the present `Type` shape — the cycle break
-// itself is now complete.
-// pub mod type_translator; // verum_types::Type to Z3 translation (dependent types)
+// Rewritten to match the current `verum_types::ty::Type` enum shape: bare
+// variants (no `TypeKind` indirection), all new cubical/HIT/capability
+// variants handled.
+pub mod type_translator; // verum_types::Type to Z3 translation (dependent types)
 
 // Concrete implementations of traits defined in verum_types (migrated
 // from `verum_types::{smt_backend, dependent_integration, exhaustiveness::smt}`
