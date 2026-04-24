@@ -1,0 +1,17 @@
+// =============================================================================
+// core/database/sqlite/native/prepare/mod.vr
+// =============================================================================
+// Layer: 7 (façade — sqlite3_prepare_v2 / _v3)
+// Spec: SQLite C API
+//
+// Submodules:
+//   * `flags`    — SQLITE_PREPARE_* flags (v3 only)
+//   * `request`  — PrepareRequest (sql + flags + tail-pointer)
+//   * `result`   — PrepareResult (stmt id + tail offset OR error)
+// =============================================================================
+
+module core.database.sqlite.native.prepare;
+
+public module flags;
+public module request;
+public module result;

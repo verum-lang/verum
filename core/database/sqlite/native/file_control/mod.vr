@@ -1,0 +1,21 @@
+// =============================================================================
+// core/database/sqlite/native/file_control/mod.vr
+// =============================================================================
+// Layer: 7 (façade — sqlite3_file_control)
+// Spec: SQLite C API
+//
+// Pass-through to the active VFS's `xFileControl`.  The opcodes are
+// ~60 SQLITE_FCNTL_* values; we enumerate the documented ones and
+// fall back to FcUnknown for unknown numbers.
+//
+// Submodules:
+//   * `opcode`  — SQLITE_FCNTL_* opcode taxonomy
+//   * `request` — schema + opcode + payload pointer (opaque here)
+//   * `result`  — normalised outcome
+// =============================================================================
+
+module core.database.sqlite.native.file_control;
+
+public module opcode;
+public module request;
+public module result;

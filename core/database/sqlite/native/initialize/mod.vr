@@ -1,0 +1,19 @@
+// =============================================================================
+// core/database/sqlite/native/initialize/mod.vr
+// =============================================================================
+// Layer: 7 (façade — sqlite3_initialize sequence)
+// Spec: SQLite C API
+//
+// The partner of `shutdown/`: walks the same 5 subsystems in ascending
+// order (mutex → mem → page → pcache → heap) and records the step at
+// which a fault occurred, if any.
+//
+// Submodules:
+//   * `phase`  — ongoing initialization phase (Init/Bringing/Running)
+//   * `engine` — driver + step counter + fault record
+// =============================================================================
+
+module core.database.sqlite.native.initialize;
+
+public module phase;
+public module engine;

@@ -1,0 +1,53 @@
+// =============================================================================
+// finalize/outcome.vr — action outcome
+// =============================================================================
+// Spec: SQLite C API
+//
+// sqlite3_finalize / _reset return either SQLITE_OK or the error code
+// produced by the LAST sqlite3_step that failed — a "sticky" error
+// semantics.  clear_bindings always returns SQLITE_OK.
+// =============================================================================
+
+module core.database.sqlite.native.finalize.outcome;
+
+mount core.*;
+mount base.{Bool, Text};
+mount core.database.sqlite.native.errors.code.{
+    ExtendedCode, PrimaryCode, PcOk, extended_of, extended_numeric,
+    primary_is_success,
+};
+mount core.database.sqlite.native.finalize.action.{
+    FinalizeAction,
+};
+
+public type FinalizeOutcome is
+      FoOk
+    | FoSticky { code: ExtendedCode, reason: Text };
+
+public fn is_ok(o: &FinalizeOutcome) -> Bool {
+    match o {
+        FoOk => true,
+        _ => false,
+    }
+}
+
+public fn outcome_code(o: &FinalizeOutcome) -> Int {
+    match o {
+        FoOk => 0,
+        FoSticky { code, .. } => extended_numeric(code),
+    }
+}
+
+public fn outcome_reason(o: &FinalizeOutcome) -> Text {
+    match o {
+        FoOk => "".clone(),
+        FoSticky { reason, .. } => reason.clone(),
+    }
+}
+
+/// Build an outcome from the sticky-last-step code.  A success code
+/// (OK/ROW/DONE) collapses to FoOk regardless of action.
+public fn from_last_step(primary: &PrimaryCode, code: ExtendedCode, reason: Text) -> FinalizeOutcome {
+    if primary_is_success(primary) { return FoOk; }
+    FoSticky { code: code, reason: reason }
+}

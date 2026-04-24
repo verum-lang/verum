@@ -1,0 +1,17 @@
+// =============================================================================
+// core/database/sqlite/native/open_v2/mod.vr
+// =============================================================================
+// Layer: 7 (façade — connection-open surface)
+// Spec: SQLite C API — sqlite3_open / sqlite3_open_v2.
+//
+// Submodules:
+//   * `flags`   — SQLITE_OPEN_* bitset
+//   * `target`  — resolved open target (file / memdb / uri / temp)
+//   * `result`  — OpenResult sum
+// =============================================================================
+
+module core.database.sqlite.native.open_v2;
+
+public module flags;
+public module target;
+public module result;

@@ -1,0 +1,111 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, memory_stats, counter, release, capi
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.memory_stats.counter.{
+    MemoryCounter, new_counter,
+};
+mount core.database.sqlite.native.memory_stats.release.{
+    RelaxationAttempt, RelaxationTarget,
+    RtGlobal, RtDatabase,
+    new_attempt, record_release, attempt_met_quota,
+};
+mount core.database.sqlite.native.memory_stats.engine.{
+    sqlite3_memory_used, sqlite3_memory_highwater,
+    sqlite3_hard_heap_limit64, sqlite3_soft_heap_limit64,
+};
+mount base.{Bool};
+
+fn test_new_counter_is_zero() {
+    let c = new_counter();
+    assert_eq(sqlite3_memory_used(&c), 0 as Int64);
+}
+
+fn test_alloc_grows_bytes_and_highwater() {
+    let mut c = new_counter();
+    c.on_alloc(100 as Int64);
+    c.on_alloc(50 as Int64);
+    assert_eq(sqlite3_memory_used(&c), 150 as Int64);
+    let hw = sqlite3_memory_highwater(&mut c, false);
+    assert_eq(hw, 150 as Int64);
+}
+
+fn test_free_then_highwater_sticks() {
+    let mut c = new_counter();
+    c.on_alloc(100 as Int64);
+    c.on_free(100 as Int64);
+    assert_eq(sqlite3_memory_used(&c), 0 as Int64);
+    let hw = sqlite3_memory_highwater(&mut c, false);
+    assert_eq(hw, 100 as Int64);
+}
+
+fn test_highwater_reset_after_read() {
+    let mut c = new_counter();
+    c.on_alloc(40 as Int64);
+    let _ = sqlite3_memory_highwater(&mut c, true);
+    // After reset, highwater equals current bytes_used.
+    let hw2 = sqlite3_memory_highwater(&mut c, false);
+    assert_eq(hw2, 40 as Int64);
+}
+
+fn test_hard_limit_setter_returns_prev() {
+    let mut c = new_counter();
+    let prev = sqlite3_hard_heap_limit64(&mut c, 1024 as Int64);
+    assert_eq(prev, 0 as Int64);
+    let prev2 = sqlite3_hard_heap_limit64(&mut c, 2048 as Int64);
+    assert_eq(prev2, 1024 as Int64);
+}
+
+fn test_soft_limit_triggers_over_soft() {
+    let mut c = new_counter();
+    let _ = sqlite3_soft_heap_limit64(&mut c, 100 as Int64);
+    c.on_alloc(150 as Int64);
+    assert(c.is_over_soft_limit());
+}
+
+fn test_hard_limit_blocks_alloc() {
+    let mut c = new_counter();
+    let _ = sqlite3_hard_heap_limit64(&mut c, 200 as Int64);
+    c.on_alloc(150 as Int64);
+    assert(c.allocation_would_exceed_hard(60 as Int64));
+    assert(!c.allocation_would_exceed_hard(40 as Int64));
+}
+
+fn test_free_underflow_clamps() {
+    let mut c = new_counter();
+    c.on_alloc(10 as Int64);
+    c.on_free(50 as Int64);
+    assert_eq(sqlite3_memory_used(&c), 0 as Int64);
+}
+
+fn test_relaxation_attempt_records_releases() {
+    let mut a = new_attempt(RtGlobal, 100 as Int64);
+    record_release(&mut a, 40 as Int64);
+    assert(!attempt_met_quota(&a));
+    record_release(&mut a, 70 as Int64);
+    assert(attempt_met_quota(&a));
+}
+
+fn test_relaxation_database_target() {
+    let a = new_attempt(RtDatabase(7 as Int64), 50 as Int64);
+    match &a.target {
+        RtDatabase(_) => {},
+        _ => assert(false),
+    }
+}
+
+fn main() {
+    test_new_counter_is_zero();
+    test_alloc_grows_bytes_and_highwater();
+    test_free_then_highwater_sticks();
+    test_highwater_reset_after_read();
+    test_hard_limit_setter_returns_prev();
+    test_soft_limit_triggers_over_soft();
+    test_hard_limit_blocks_alloc();
+    test_free_underflow_clamps();
+    test_relaxation_attempt_records_releases();
+    test_relaxation_database_target();
+}

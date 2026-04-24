@@ -1,0 +1,109 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, config, global_op, db_op, engine, capi
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.config.global_op.{
+    GlobalConfigOp,
+    CgSingleThread, CgMultiThread, CgSerialized,
+    CgLog, CgMmapSize, CgUri, CgUnknown,
+    op_numeric as global_numeric, op_name as global_name,
+};
+mount core.database.sqlite.native.config.db_op.{
+    DbConfigOp,
+    DbcMainDbName, DbcEnableFkey, DbcDefensive, DbcReverseScanOrder, DbcUnknown,
+    op_numeric as db_numeric, op_name as db_name,
+};
+mount core.database.sqlite.native.config.value.{
+    ConfigValue,
+    CvBool, CvInt, CvInt64, CvText, CvAbsent,
+    value_kind_name, as_bool, as_int,
+};
+mount core.database.sqlite.native.config.engine.{
+    ConfigEngine, EnginePhase,
+    EpPreInit, EpRunning, EpShuttingDown,
+    new_engine,
+};
+mount base.{Bool};
+
+fn test_global_op_numeric_matches_header() {
+    assert_eq(global_numeric(&CgSingleThread), 1);
+    assert_eq(global_numeric(&CgMultiThread), 2);
+    assert_eq(global_numeric(&CgSerialized), 3);
+    assert_eq(global_numeric(&CgLog), 16);
+    assert_eq(global_numeric(&CgUri), 17);
+    assert_eq(global_numeric(&CgMmapSize), 22);
+    assert_eq(global_numeric(&CgUnknown(999)), 999);
+}
+
+fn test_global_op_name_includes_prefix() {
+    assert(global_name(&CgLog) == "SQLITE_CONFIG_LOG".clone());
+    assert(global_name(&CgUri) == "SQLITE_CONFIG_URI".clone());
+}
+
+fn test_db_op_numeric_matches_header() {
+    assert_eq(db_numeric(&DbcMainDbName), 1000);
+    assert_eq(db_numeric(&DbcEnableFkey), 1002);
+    assert_eq(db_numeric(&DbcDefensive), 1010);
+    assert_eq(db_numeric(&DbcReverseScanOrder), 1019);
+    assert_eq(db_numeric(&DbcUnknown(9999)), 9999);
+}
+
+fn test_db_op_name_includes_prefix() {
+    assert(db_name(&DbcEnableFkey) == "SQLITE_DBCONFIG_ENABLE_FKEY".clone());
+}
+
+fn test_value_casts() {
+    let v_bool = CvBool(true);
+    assert(as_bool(&v_bool));
+    assert_eq(as_int(&v_bool), 1);
+
+    let v_int = CvInt(42);
+    assert(as_bool(&v_int));
+    assert_eq(as_int(&v_int), 42);
+
+    let v_int64 = CvInt64(0 as Int64);
+    assert(!as_bool(&v_int64));
+    assert_eq(as_int(&v_int64), 0);
+
+    let v_text = CvText("x".clone());
+    assert_eq(as_int(&v_text), 0);
+    assert(value_kind_name(&v_text) == "text".clone());
+
+    assert(value_kind_name(&CvAbsent) == "absent".clone());
+}
+
+fn test_engine_pre_init_accepts_global() {
+    let mut e = new_engine();
+    assert(e.accept_global());
+    assert_eq(e.global_ops_applied, 1);
+}
+
+fn test_engine_post_init_rejects_global() {
+    let mut e = new_engine();
+    e.mark_initialized();
+    assert(!e.accept_global());
+    assert_eq(e.global_ops_applied, 0);
+}
+
+fn test_engine_db_always_accepted_until_shutdown() {
+    let mut e = new_engine();
+    assert(e.accept_db());
+    e.mark_initialized();
+    assert(e.accept_db());
+    e.mark_shutting_down();
+    assert(!e.accept_db());
+}
+
+fn main() {
+    test_global_op_numeric_matches_header();
+    test_global_op_name_includes_prefix();
+    test_db_op_numeric_matches_header();
+    test_db_op_name_includes_prefix();
+    test_value_casts();
+    test_engine_pre_init_accepts_global();
+    test_engine_post_init_rejects_global();
+    test_engine_db_always_accepted_until_shutdown();
+}

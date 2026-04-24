@@ -1,0 +1,20 @@
+// =============================================================================
+// core/database/sqlite/native/threadsafe/mod.vr
+// =============================================================================
+// Layer: 7 (façade — sqlite3_threadsafe + thread-safety mode)
+// Spec: SQLite C API
+//
+// sqlite3_threadsafe() returns one of:
+//   0 — compiled single-thread (not safe to share across threads)
+//   1 — compiled multi-thread (connection-level safety; mutexed)
+//   2 — compiled multi-thread (no mutexes; callers coordinate)
+//
+// Submodules:
+//   * `mode`    — Mode sum + numeric code
+//   * `engine`  — Mode-at-compile-time + run-time override helpers
+// =============================================================================
+
+module core.database.sqlite.native.threadsafe;
+
+public module mode;
+public module engine;

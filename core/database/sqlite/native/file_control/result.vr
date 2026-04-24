@@ -1,0 +1,46 @@
+// =============================================================================
+// file_control/result.vr — FileCtrlResult outcome
+// =============================================================================
+// Spec: SQLite C API
+//
+// The VFS returns SQLITE_OK, SQLITE_NOTFOUND (opcode not recognised),
+// or another error code.  SQLITE_NOTFOUND is NOT an error — it's how
+// chains cascade through the VFS stack.
+// =============================================================================
+
+module core.database.sqlite.native.file_control.result;
+
+mount core.*;
+mount base.{Bool, Text};
+mount core.database.sqlite.native.errors.code.{
+    ExtendedCode, PrimaryCode, PcOk, PcNotFound, extended_of, extended_numeric,
+};
+
+public type FileCtrlResult is
+      FrOk
+    | FrNotFound
+    | FrFailed { code: ExtendedCode, reason: Text };
+
+public fn is_ok(r: &FileCtrlResult) -> Bool {
+    match r {
+        FrOk => true,
+        _ => false,
+    }
+}
+
+/// True iff the opcode is unsupported by this VFS — callers that walk
+/// a VFS chain should try the next link.
+public fn should_cascade(r: &FileCtrlResult) -> Bool {
+    match r {
+        FrNotFound => true,
+        _ => false,
+    }
+}
+
+public fn result_code(r: &FileCtrlResult) -> Int {
+    match r {
+        FrOk => 0,
+        FrNotFound => 12,  // SQLITE_NOTFOUND
+        FrFailed { code, .. } => extended_numeric(code),
+    }
+}

@@ -1,0 +1,58 @@
+// =============================================================================
+// open_v2/target.vr — resolved open target
+// =============================================================================
+// Spec: SQLite C API — sqlite3_open family.  The filename argument can
+// be a regular path, `:memory:`, empty (temp DB), or a `file:` URI.
+// The target catalogue resolves each form without opening anything.
+// =============================================================================
+
+module core.database.sqlite.native.open_v2.target;
+
+mount core.*;
+mount base.{Bool, Text};
+
+public type OpenTarget is
+      OtFile(Text)         // regular path
+    | OtMemory             // ":memory:"
+    | OtTemporary          // empty filename
+    | OtUri(Text);         // "file:…"
+
+public fn target_name(t: &OpenTarget) -> Text {
+    match t {
+        OtFile(_)    => "file".clone(),
+        OtMemory     => "memory".clone(),
+        OtTemporary  => "temporary".clone(),
+        OtUri(_)     => "uri".clone(),
+    }
+}
+
+public fn target_path(t: &OpenTarget) -> Text {
+    match t {
+        OtFile(p)    => p.clone(),
+        OtMemory     => ":memory:".clone(),
+        OtTemporary  => "".clone(),
+        OtUri(u)     => u.clone(),
+    }
+}
+
+fn starts_with(s: &Text, prefix: &Text) -> Bool {
+    let sb = s.bytes();
+    let pb = prefix.bytes();
+    let n = pb.len();
+    if sb.len() < n { return false; }
+    let mut i: Int = 0;
+    while i < n {
+        if *sb.get(i) != *pb.get(i) { return false; }
+        i = i + 1;
+    }
+    true
+}
+
+public fn parse_target(filename: Text, uri_enabled: Bool) -> OpenTarget {
+    if filename.len() == 0 { return OtTemporary; }
+    if filename == ":memory:".clone() { return OtMemory; }
+    if uri_enabled && starts_with(&filename, &"file:".clone()) {
+        return OtUri(filename);
+    }
+    OtFile(filename)
+}

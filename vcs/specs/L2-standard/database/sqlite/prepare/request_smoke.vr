@@ -1,0 +1,109 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, prepare, flags, request, result, capi
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.prepare.flags.{
+    PrepareFlags,
+    SQLITE_PREPARE_PERSISTENT, SQLITE_PREPARE_NORMALIZE, SQLITE_PREPARE_NO_VTAB,
+    new_flags, empty_flags,
+    has, wants_persistent, wants_normalize, forbids_vtab,
+};
+mount core.database.sqlite.native.prepare.request.{
+    PrepareRequest, PrepareApiVersion,
+    PavV1, PavV2, PavV3,
+    api_version_name, new_request, new_v3_request,
+};
+mount core.database.sqlite.native.prepare.result.{
+    PrepareResult,
+    PrPrepared, PrEmpty, PrFailed,
+    result_name, is_success, extended_code, tail_offset_or_zero, error_offset_or_neg1,
+};
+mount core.database.sqlite.native.errors.code.{
+    extended_of, PcError,
+};
+mount base.{Bool};
+
+fn test_empty_flags_has_nothing() {
+    let f = empty_flags();
+    assert(!wants_persistent(&f));
+    assert(!wants_normalize(&f));
+    assert(!forbids_vtab(&f));
+}
+
+fn test_persistent_flag_detected() {
+    let f = new_flags(SQLITE_PREPARE_PERSISTENT);
+    assert(wants_persistent(&f));
+    assert(!wants_normalize(&f));
+}
+
+fn test_normalize_and_no_vtab_flags() {
+    let f = new_flags(SQLITE_PREPARE_NORMALIZE | SQLITE_PREPARE_NO_VTAB);
+    assert(wants_normalize(&f));
+    assert(forbids_vtab(&f));
+}
+
+fn test_request_v2_defaults() {
+    let r = new_request("SELECT 1".clone());
+    match &r.api_version {
+        PavV2 => {},
+        _ => assert(false),
+    }
+    assert_eq(r.sql_bytes, -1);
+}
+
+fn test_request_v3_carries_flags() {
+    let r = new_v3_request("SELECT 1".clone(), new_flags(SQLITE_PREPARE_PERSISTENT));
+    match &r.api_version {
+        PavV3 => {},
+        _ => assert(false),
+    }
+    assert(wants_persistent(&r.flags));
+}
+
+fn test_api_version_names() {
+    assert(api_version_name(&PavV1) == "v1".clone());
+    assert(api_version_name(&PavV2) == "v2".clone());
+    assert(api_version_name(&PavV3) == "v3".clone());
+}
+
+fn test_result_prepared_success_and_tail() {
+    let r: PrepareResult = PrPrepared { stmt_id: 5 as Int64, tail_offset: 17 };
+    assert(is_success(&r));
+    assert_eq(tail_offset_or_zero(&r), 17);
+    assert_eq(error_offset_or_neg1(&r), -1);
+    assert_eq(extended_code(&r), 0);
+    assert(result_name(&r) == "prepared".clone());
+}
+
+fn test_result_empty_is_success_no_tail() {
+    let r: PrepareResult = PrEmpty;
+    assert(is_success(&r));
+    assert_eq(tail_offset_or_zero(&r), 0);
+}
+
+fn test_result_failed_carries_offset_and_code() {
+    let r: PrepareResult = PrFailed {
+        code: extended_of(PcError, 0),
+        reason: "syntax".clone(),
+        error_offset: 4,
+    };
+    assert(!is_success(&r));
+    assert_eq(error_offset_or_neg1(&r), 4);
+    assert(extended_code(&r) != 0);
+    assert(result_name(&r) == "failed".clone());
+}
+
+fn main() {
+    test_empty_flags_has_nothing();
+    test_persistent_flag_detected();
+    test_normalize_and_no_vtab_flags();
+    test_request_v2_defaults();
+    test_request_v3_carries_flags();
+    test_api_version_names();
+    test_result_prepared_success_and_tail();
+    test_result_empty_is_success_no_tail();
+    test_result_failed_carries_offset_and_code();
+}

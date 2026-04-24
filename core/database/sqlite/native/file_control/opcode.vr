@@ -1,0 +1,124 @@
+// =============================================================================
+// file_control/opcode.vr — SQLITE_FCNTL_* taxonomy
+// =============================================================================
+// Spec: SQLite C API — sqlite3_file_control(db, zDbName, op, pArg).
+// =============================================================================
+
+module core.database.sqlite.native.file_control.opcode;
+
+mount core.*;
+mount base.{Bool, Text};
+
+public type FileCtrlOp is
+      FcLockstate                //  1
+    | FcGetLockproxyfile         //  2
+    | FcSetLockproxyfile         //  3
+    | FcLastErrno                //  4
+    | FcSizeHint                 //  5
+    | FcChunkSize                //  6
+    | FcFileSize                 //  7
+    | FcSyncOmitted              //  8
+    | FcWin32AvRetry             //  9
+    | FcPersistWal               // 10
+    | FcOverwrite                // 11
+    | FcVfsname                  // 12
+    | FcPowersafeOverwrite       // 13
+    | FcPragma                   // 14
+    | FcBusyhandler              // 15
+    | FcTempFilename             // 16
+    | FcMmapSize                 // 18
+    | FcTraceBufSize             // 19
+    | FcHasMoved                 // 20
+    | FcSync                     // 21
+    | FcCommitPhasetwo           // 22
+    | FcWin32SetHandle           // 23
+    | FcWalBlock                 // 24
+    | FcZipvfsOnly               // 25
+    | FcRbu                      // 26
+    | FcVfsPointer               // 27
+    | FcJournalPointer           // 28
+    | FcWinEpochCalled           // 29
+    | FcWin32GetHandle           // 30
+    | FcPdb                      // 31
+    | FcBeginAtomicWrite         // 32
+    | FcCommitAtomicWrite        // 33
+    | FcRollbackAtomicWrite      // 34
+    | FcLockTimeout              // 35
+    | FcDataVersion              // 36
+    | FcSizeLimit                // 37
+    | FcCkptDone                 // 38
+    | FcReserveBytes             // 39
+    | FcCkptStart                // 40
+    | FcResetCache               // 41
+    | FcExtraThread              // 42
+    | FcUnknown(Int);
+
+public fn op_numeric(op: &FileCtrlOp) -> Int {
+    match op {
+        FcLockstate             => 1,
+        FcGetLockproxyfile      => 2,
+        FcSetLockproxyfile      => 3,
+        FcLastErrno             => 4,
+        FcSizeHint              => 5,
+        FcChunkSize             => 6,
+        FcFileSize              => 7,
+        FcSyncOmitted           => 8,
+        FcWin32AvRetry          => 9,
+        FcPersistWal            => 10,
+        FcOverwrite             => 11,
+        FcVfsname               => 12,
+        FcPowersafeOverwrite    => 13,
+        FcPragma                => 14,
+        FcBusyhandler           => 15,
+        FcTempFilename          => 16,
+        FcMmapSize              => 18,
+        FcTraceBufSize          => 19,
+        FcHasMoved              => 20,
+        FcSync                  => 21,
+        FcCommitPhasetwo        => 22,
+        FcWin32SetHandle        => 23,
+        FcWalBlock              => 24,
+        FcZipvfsOnly            => 25,
+        FcRbu                   => 26,
+        FcVfsPointer            => 27,
+        FcJournalPointer        => 28,
+        FcWinEpochCalled        => 29,
+        FcWin32GetHandle        => 30,
+        FcPdb                   => 31,
+        FcBeginAtomicWrite      => 32,
+        FcCommitAtomicWrite     => 33,
+        FcRollbackAtomicWrite   => 34,
+        FcLockTimeout           => 35,
+        FcDataVersion           => 36,
+        FcSizeLimit             => 37,
+        FcCkptDone              => 38,
+        FcReserveBytes          => 39,
+        FcCkptStart             => 40,
+        FcResetCache            => 41,
+        FcExtraThread           => 42,
+        FcUnknown(n)            => *n,
+    }
+}
+
+public fn op_name(op: &FileCtrlOp) -> Text {
+    match op {
+        FcLockstate             => "SQLITE_FCNTL_LOCKSTATE".clone(),
+        FcPragma                => "SQLITE_FCNTL_PRAGMA".clone(),
+        FcSync                  => "SQLITE_FCNTL_SYNC".clone(),
+        FcMmapSize              => "SQLITE_FCNTL_MMAP_SIZE".clone(),
+        FcPersistWal            => "SQLITE_FCNTL_PERSIST_WAL".clone(),
+        FcBusyhandler           => "SQLITE_FCNTL_BUSYHANDLER".clone(),
+        FcVfsname               => "SQLITE_FCNTL_VFSNAME".clone(),
+        FcDataVersion           => "SQLITE_FCNTL_DATA_VERSION".clone(),
+        FcReserveBytes          => "SQLITE_FCNTL_RESERVE_BYTES".clone(),
+        _                       => "SQLITE_FCNTL".clone(),
+    }
+}
+
+public fn is_writable(op: &FileCtrlOp) -> Bool {
+    match op {
+        FcSizeHint | FcChunkSize | FcPersistWal | FcMmapSize
+        | FcReserveBytes | FcSync | FcResetCache => true,
+        _ => false,
+    }
+}

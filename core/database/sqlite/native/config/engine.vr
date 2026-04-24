@@ -1,0 +1,61 @@
+// =============================================================================
+// config/engine.vr — staged-state engine + initialize gate
+// =============================================================================
+// Spec: SQLite C API
+//
+// `sqlite3_config` may only be invoked BEFORE sqlite3_initialize() —
+// the engine rejects post-init writes with SQLITE_MISUSE.
+// Per-db `sqlite3_db_config` may be invoked any time, but only while
+// the connection is idle.
+// =============================================================================
+
+module core.database.sqlite.native.config.engine;
+
+mount core.*;
+mount base.{Bool};
+
+public type EnginePhase is
+      EpPreInit
+    | EpRunning
+    | EpShuttingDown;
+
+public type ConfigEngine is {
+    phase: EnginePhase,
+    /// Number of global config ops applied (monotone).
+    global_ops_applied: Int,
+    /// Number of db config ops applied (monotone).
+    db_ops_applied: Int,
+}
+
+public fn new_engine() -> ConfigEngine {
+    ConfigEngine {
+        phase: EpPreInit,
+        global_ops_applied: 0,
+        db_ops_applied: 0,
+    }
+}
+
+implement ConfigEngine {
+    pub fn mark_initialized(&mut self) { self.phase = EpRunning; }
+    pub fn mark_shutting_down(&mut self) { self.phase = EpShuttingDown; }
+
+    pub fn accept_global(&mut self) -> Bool {
+        match self.phase {
+            EpPreInit => {
+                self.global_ops_applied = self.global_ops_applied + 1;
+                true
+            }
+            _ => false,
+        }
+    }
+
+    pub fn accept_db(&mut self) -> Bool {
+        match self.phase {
+            EpShuttingDown => false,
+            _ => {
+                self.db_ops_applied = self.db_ops_applied + 1;
+                true
+            }
+        }
+    }
+}

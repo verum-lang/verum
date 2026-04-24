@@ -1,0 +1,88 @@
+// =============================================================================
+// initialize/engine.vr — sqlite3_initialize driver
+// =============================================================================
+// Spec: SQLite C API
+//
+// Walks `shutdown/subsystem.init_order` once.  Idempotent: a second
+// call with phase=IpRunning is a SQLITE_OK no-op.
+// =============================================================================
+
+module core.database.sqlite.native.initialize.engine;
+
+mount core.*;
+mount base.{Bool, Text};
+mount collections.List;
+mount core.database.sqlite.native.shutdown.subsystem.{
+    Subsystem, subsystem_name, init_order,
+};
+mount core.database.sqlite.native.initialize.phase.{
+    InitPhase, IpFresh, IpBringing, IpRunning, IpFailed,
+    is_ready, is_terminal,
+};
+
+public type InitEngine is {
+    phase: InitPhase,
+    /// Number of subsystems successfully brought up so far.
+    completed: Int,
+    /// Monotone counter of sqlite3_initialize invocations (all, not
+    /// just the first).  Lets callers audit the no-op path.
+    calls: Int64,
+}
+
+public fn new_engine() -> InitEngine {
+    InitEngine { phase: IpFresh, completed: 0, calls: 0 as Int64 }
+}
+
+implement InitEngine {
+    pub fn is_ready(&self) -> Bool { is_ready(&self.phase) }
+
+    /// Record the start of work on `sub`.  Returns true iff the engine
+    /// actually needs to do something; false if already running.
+    pub fn begin(&mut self, sub: Subsystem) -> Bool {
+        self.calls = self.calls + (1 as Int64);
+        if self.is_ready() { return false; }
+        self.phase = IpBringing(sub);
+        true
+    }
+
+    /// Record successful completion of the current subsystem.  Caller
+    /// bumps `completed` count and transitions to IpRunning when the
+    /// last subsystem is finished.
+    pub fn finish_current(&mut self, is_last: Bool) {
+        self.completed = self.completed + 1;
+        if is_last { self.phase = IpRunning; }
+    }
+
+    pub fn fail(&mut self, reason: Text) {
+        self.phase = IpFailed(reason);
+    }
+
+    /// Total number of subsystems per init_order.
+    pub fn total_subsystems(&self) -> Int { init_order().len() }
+}
+
+/// Simulate a full bring-up starting from IpFresh.  Returns the final
+/// engine so callers can inspect `calls` / `completed`.
+public fn drive_full(engine: &mut InitEngine) -> Bool {
+    let order = init_order();
+    let n = order.len();
+    if n == 0 { return true; }
+    let mut i: Int = 0;
+    while i < n {
+        let sub = clone_subsystem(&order[i]);
+        let _ = engine.begin(sub);
+        engine.finish_current(i == n - 1);
+        i = i + 1;
+    }
+    engine.is_ready()
+}
+
+fn clone_subsystem(s: &Subsystem) -> Subsystem {
+    match s {
+        core.database.sqlite.native.shutdown.subsystem.SsMutex  => core.database.sqlite.native.shutdown.subsystem.SsMutex,
+        core.database.sqlite.native.shutdown.subsystem.SsMem    => core.database.sqlite.native.shutdown.subsystem.SsMem,
+        core.database.sqlite.native.shutdown.subsystem.SsPcache => core.database.sqlite.native.shutdown.subsystem.SsPcache,
+        core.database.sqlite.native.shutdown.subsystem.SsPage   => core.database.sqlite.native.shutdown.subsystem.SsPage,
+        core.database.sqlite.native.shutdown.subsystem.SsHeap   => core.database.sqlite.native.shutdown.subsystem.SsHeap,
+    }
+}

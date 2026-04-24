@@ -1,0 +1,42 @@
+// =============================================================================
+// prepare/flags.vr — SQLITE_PREPARE_* bits
+// =============================================================================
+// Spec: SQLite C API — sqlite3_prepare_v3.
+// =============================================================================
+
+module core.database.sqlite.native.prepare.flags;
+
+mount core.*;
+mount base.{Bool};
+
+public const SQLITE_PREPARE_PERSISTENT: Int = 0x01;
+public const SQLITE_PREPARE_NORMALIZE: Int  = 0x02;
+public const SQLITE_PREPARE_NO_VTAB: Int    = 0x04;
+
+public type PrepareFlags is {
+    bits: Int,
+}
+
+public fn new_flags(bits: Int) -> PrepareFlags {
+    PrepareFlags { bits: bits }
+}
+
+public fn empty_flags() -> PrepareFlags {
+    PrepareFlags { bits: 0 }
+}
+
+public fn has(f: &PrepareFlags, bit: Int) -> Bool {
+    (f.bits & bit) != 0
+}
+
+public fn wants_persistent(f: &PrepareFlags) -> Bool {
+    has(f, SQLITE_PREPARE_PERSISTENT)
+}
+
+public fn wants_normalize(f: &PrepareFlags) -> Bool {
+    has(f, SQLITE_PREPARE_NORMALIZE)
+}
+
+public fn forbids_vtab(f: &PrepareFlags) -> Bool {
+    has(f, SQLITE_PREPARE_NO_VTAB)
+}

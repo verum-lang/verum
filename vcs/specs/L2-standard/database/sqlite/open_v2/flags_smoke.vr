@@ -1,0 +1,129 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, open_v2, flags, target, capi
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.open_v2.flags.{
+    OpenFlags,
+    SQLITE_OPEN_READONLY, SQLITE_OPEN_READWRITE, SQLITE_OPEN_CREATE,
+    SQLITE_OPEN_MEMORY, SQLITE_OPEN_URI,
+    SQLITE_OPEN_NOMUTEX, SQLITE_OPEN_FULLMUTEX,
+    SQLITE_OPEN_SHAREDCACHE, SQLITE_OPEN_PRIVATECACHE,
+    new_flags, default_rw_create, readonly_flags, memory_flags,
+    has, is_readonly, is_memory, is_uri_enabled, is_valid,
+};
+mount core.database.sqlite.native.open_v2.target.{
+    OpenTarget,
+    OtFile, OtMemory, OtTemporary, OtUri,
+    target_name, target_path, parse_target,
+};
+mount core.database.sqlite.native.open_v2.result.{
+    OpenResult, OrOpened, OrFailed,
+    result_is_ok, result_extended_code, result_reason, validate,
+};
+mount core.database.sqlite.native.errors.code.{
+    extended_of, PcCantOpen,
+};
+mount base.{Bool};
+
+fn test_default_rw_create_has_both_bits() {
+    let f = default_rw_create();
+    assert(has(&f, SQLITE_OPEN_READWRITE));
+    assert(has(&f, SQLITE_OPEN_CREATE));
+    assert(!is_readonly(&f));
+}
+
+fn test_readonly_flags_set_only_ro() {
+    let f = readonly_flags();
+    assert(is_readonly(&f));
+    assert(!has(&f, SQLITE_OPEN_READWRITE));
+}
+
+fn test_memory_flags_carries_memory_bit() {
+    let f = memory_flags();
+    assert(is_memory(&f));
+}
+
+fn test_ro_and_rw_together_is_invalid() {
+    let f = new_flags(SQLITE_OPEN_READONLY | SQLITE_OPEN_READWRITE);
+    assert(!is_valid(&f));
+}
+
+fn test_shared_and_private_cache_together_invalid() {
+    let f = new_flags(SQLITE_OPEN_SHAREDCACHE | SQLITE_OPEN_PRIVATECACHE);
+    assert(!is_valid(&f));
+}
+
+fn test_nomutex_and_fullmutex_together_invalid() {
+    let f = new_flags(SQLITE_OPEN_NOMUTEX | SQLITE_OPEN_FULLMUTEX);
+    assert(!is_valid(&f));
+}
+
+fn test_parse_target_memory() {
+    let t = parse_target(":memory:".clone(), false);
+    match &t {
+        OtMemory => {},
+        _ => assert(false),
+    }
+    assert(target_name(&t) == "memory".clone());
+}
+
+fn test_parse_target_temporary_on_empty() {
+    let t = parse_target("".clone(), false);
+    match &t {
+        OtTemporary => {},
+        _ => assert(false),
+    }
+}
+
+fn test_parse_target_file_when_uri_disabled() {
+    let t = parse_target("file:/tmp/x.db".clone(), false);
+    match &t {
+        OtFile(_) => {},
+        _ => assert(false),
+    }
+}
+
+fn test_parse_target_uri_when_enabled() {
+    let t = parse_target("file:/tmp/x.db".clone(), true);
+    match &t {
+        OtUri(_) => {},
+        _ => assert(false),
+    }
+    assert(target_name(&t) == "uri".clone());
+}
+
+fn test_result_is_ok_and_codes() {
+    let opened: OpenResult = OrOpened { handle: 7 as Int64, target: OtMemory };
+    assert(result_is_ok(&opened));
+    assert_eq(result_extended_code(&opened), 0);
+
+    let failed: OpenResult = OrFailed {
+        code: extended_of(PcCantOpen, 0),
+        reason: "bad path".clone(),
+    };
+    assert(!result_is_ok(&failed));
+    assert(result_extended_code(&failed) != 0);
+    assert(result_reason(&failed).len() > 0);
+}
+
+fn test_validate_wrapper() {
+    assert(validate(&default_rw_create()));
+}
+
+fn main() {
+    test_default_rw_create_has_both_bits();
+    test_readonly_flags_set_only_ro();
+    test_memory_flags_carries_memory_bit();
+    test_ro_and_rw_together_is_invalid();
+    test_shared_and_private_cache_together_invalid();
+    test_nomutex_and_fullmutex_together_invalid();
+    test_parse_target_memory();
+    test_parse_target_temporary_on_empty();
+    test_parse_target_file_when_uri_disabled();
+    test_parse_target_uri_when_enabled();
+    test_result_is_ok_and_codes();
+    test_validate_wrapper();
+}

@@ -1,0 +1,88 @@
+// =============================================================================
+// config/db_op.vr — SQLITE_DBCONFIG_* opcodes
+// =============================================================================
+// Spec: SQLite C API — sqlite3_db_config(db, op, …).
+//
+// These are per-connection; may be called before or after
+// sqlite3_initialize but always before any sqlite3_step on the db.
+// =============================================================================
+
+module core.database.sqlite.native.config.db_op;
+
+mount core.*;
+mount base.{Text};
+
+public type DbConfigOp is
+      DbcMainDbName              // 1000
+    | DbcLookaside               // 1001
+    | DbcEnableFkey              // 1002
+    | DbcEnableTrigger           // 1003
+    | DbcEnableFts3Tokenizer     // 1004
+    | DbcEnableLoadExtension     // 1005
+    | DbcNoCkptOnClose           // 1006
+    | DbcEnableQpsg              // 1007
+    | DbcTriggerEqp              // 1008
+    | DbcResetDatabase           // 1009
+    | DbcDefensive               // 1010
+    | DbcWritableSchema          // 1011
+    | DbcLegacyAlterTable        // 1012
+    | DbcDqsDml                  // 1013
+    | DbcDqsDdl                  // 1014
+    | DbcEnableView              // 1015
+    | DbcLegacyFileFormat        // 1016
+    | DbcTrustedSchema           // 1017
+    | DbcStmtScanstatus          // 1018
+    | DbcReverseScanOrder        // 1019
+    | DbcUnknown(Int);
+
+public fn op_numeric(op: &DbConfigOp) -> Int {
+    match op {
+        DbcMainDbName           => 1000,
+        DbcLookaside            => 1001,
+        DbcEnableFkey           => 1002,
+        DbcEnableTrigger        => 1003,
+        DbcEnableFts3Tokenizer  => 1004,
+        DbcEnableLoadExtension  => 1005,
+        DbcNoCkptOnClose        => 1006,
+        DbcEnableQpsg           => 1007,
+        DbcTriggerEqp           => 1008,
+        DbcResetDatabase        => 1009,
+        DbcDefensive            => 1010,
+        DbcWritableSchema       => 1011,
+        DbcLegacyAlterTable     => 1012,
+        DbcDqsDml               => 1013,
+        DbcDqsDdl               => 1014,
+        DbcEnableView           => 1015,
+        DbcLegacyFileFormat     => 1016,
+        DbcTrustedSchema        => 1017,
+        DbcStmtScanstatus       => 1018,
+        DbcReverseScanOrder     => 1019,
+        DbcUnknown(n)           => *n,
+    }
+}
+
+public fn op_name(op: &DbConfigOp) -> Text {
+    match op {
+        DbcMainDbName           => "SQLITE_DBCONFIG_MAINDBNAME".clone(),
+        DbcLookaside            => "SQLITE_DBCONFIG_LOOKASIDE".clone(),
+        DbcEnableFkey           => "SQLITE_DBCONFIG_ENABLE_FKEY".clone(),
+        DbcEnableTrigger        => "SQLITE_DBCONFIG_ENABLE_TRIGGER".clone(),
+        DbcEnableFts3Tokenizer  => "SQLITE_DBCONFIG_ENABLE_FTS3_TOKENIZER".clone(),
+        DbcEnableLoadExtension  => "SQLITE_DBCONFIG_ENABLE_LOAD_EXTENSION".clone(),
+        DbcNoCkptOnClose        => "SQLITE_DBCONFIG_NO_CKPT_ON_CLOSE".clone(),
+        DbcEnableQpsg           => "SQLITE_DBCONFIG_ENABLE_QPSG".clone(),
+        DbcTriggerEqp           => "SQLITE_DBCONFIG_TRIGGER_EQP".clone(),
+        DbcResetDatabase        => "SQLITE_DBCONFIG_RESET_DATABASE".clone(),
+        DbcDefensive            => "SQLITE_DBCONFIG_DEFENSIVE".clone(),
+        DbcWritableSchema       => "SQLITE_DBCONFIG_WRITABLE_SCHEMA".clone(),
+        DbcLegacyAlterTable     => "SQLITE_DBCONFIG_LEGACY_ALTER_TABLE".clone(),
+        DbcDqsDml               => "SQLITE_DBCONFIG_DQS_DML".clone(),
+        DbcDqsDdl               => "SQLITE_DBCONFIG_DQS_DDL".clone(),
+        DbcEnableView           => "SQLITE_DBCONFIG_ENABLE_VIEW".clone(),
+        DbcLegacyFileFormat     => "SQLITE_DBCONFIG_LEGACY_FILE_FORMAT".clone(),
+        DbcTrustedSchema        => "SQLITE_DBCONFIG_TRUSTED_SCHEMA".clone(),
+        DbcStmtScanstatus       => "SQLITE_DBCONFIG_STMT_SCANSTATUS".clone(),
+        DbcReverseScanOrder     => "SQLITE_DBCONFIG_REVERSE_SCANORDER".clone(),
+        DbcUnknown(_)           => "SQLITE_DBCONFIG_UNKNOWN".clone(),
+    }
+}

@@ -1,0 +1,59 @@
+// =============================================================================
+// prepare/result.vr — PrepareResult
+// =============================================================================
+// Spec: SQLite C API — sqlite3_prepare[_v2|_v3].
+//
+// On success: stmt id + byte-offset of the start of the next statement
+// (or 0 if this was the last statement in the buffer).
+// On failure: extended code + diagnostic text + error-offset in the sql.
+// =============================================================================
+
+module core.database.sqlite.native.prepare.result;
+
+mount core.*;
+mount base.{Bool, Text};
+mount core.database.sqlite.native.errors.code.{
+    ExtendedCode, extended_numeric,
+};
+
+public type PrepareResult is
+      PrPrepared { stmt_id: Int64, tail_offset: Int }
+    | PrEmpty                                              // whitespace/comment-only input
+    | PrFailed { code: ExtendedCode, reason: Text, error_offset: Int };
+
+public fn result_name(r: &PrepareResult) -> Text {
+    match r {
+        PrPrepared { .. } => "prepared".clone(),
+        PrEmpty           => "empty".clone(),
+        PrFailed { .. }   => "failed".clone(),
+    }
+}
+
+public fn is_success(r: &PrepareResult) -> Bool {
+    match r {
+        PrPrepared { .. } | PrEmpty => true,
+        _ => false,
+    }
+}
+
+public fn extended_code(r: &PrepareResult) -> Int {
+    match r {
+        PrPrepared { .. } => 0,
+        PrEmpty           => 0,
+        PrFailed { code, .. } => extended_numeric(code),
+    }
+}
+
+public fn tail_offset_or_zero(r: &PrepareResult) -> Int {
+    match r {
+        PrPrepared { tail_offset, .. } => *tail_offset,
+        _ => 0,
+    }
+}
+
+public fn error_offset_or_neg1(r: &PrepareResult) -> Int {
+    match r {
+        PrFailed { error_offset, .. } => *error_offset,
+        _ => -1,
+    }
+}

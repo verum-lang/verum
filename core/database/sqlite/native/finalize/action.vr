@@ -1,0 +1,44 @@
+// =============================================================================
+// finalize/action.vr — which statement-lifecycle action
+// =============================================================================
+// Spec: SQLite C API
+//
+// Three distinct actions share a family:
+//
+//   * sqlite3_finalize         — destroy stmt + release VM + budgets
+//   * sqlite3_reset            — rewind stmt + re-arm for next sqlite3_step
+//   * sqlite3_clear_bindings   — reset all bound parameters to NULL
+// =============================================================================
+
+module core.database.sqlite.native.finalize.action;
+
+mount core.*;
+mount base.{Bool, Text};
+
+public type FinalizeAction is
+      FaFinalize
+    | FaReset
+    | FaClearBindings;
+
+public fn action_name(a: &FinalizeAction) -> Text {
+    match a {
+        FaFinalize       => "finalize".clone(),
+        FaReset          => "reset".clone(),
+        FaClearBindings  => "clear_bindings".clone(),
+    }
+}
+
+public fn destroys_stmt(a: &FinalizeAction) -> Bool {
+    match a {
+        FaFinalize => true,
+        _ => false,
+    }
+}
+
+public fn preserves_bindings(a: &FinalizeAction) -> Bool {
+    match a {
+        FaFinalize       => false,
+        FaReset          => true,
+        FaClearBindings  => false,
+    }
+}

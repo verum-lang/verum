@@ -1,0 +1,58 @@
+// =============================================================================
+// prepare/request.vr — PrepareRequest
+// =============================================================================
+// Spec: SQLite C API — sqlite3_prepare[_v2|_v3].
+//
+// One sqlite3_prepare call takes a SQL buffer + flags; only a prefix
+// up to the first statement terminator is compiled.  The rest is
+// returned via a tail pointer so callers can loop over multi-stmt
+// scripts.
+// =============================================================================
+
+module core.database.sqlite.native.prepare.request;
+
+mount core.*;
+mount base.{Bool, Text};
+mount core.database.sqlite.native.prepare.flags.{
+    PrepareFlags, empty_flags,
+};
+
+public type PrepareApiVersion is
+      PavV1             // sqlite3_prepare
+    | PavV2             // sqlite3_prepare_v2
+    | PavV3;            // sqlite3_prepare_v3 (with flags)
+
+public fn api_version_name(v: &PrepareApiVersion) -> Text {
+    match v {
+        PavV1 => "v1".clone(),
+        PavV2 => "v2".clone(),
+        PavV3 => "v3".clone(),
+    }
+}
+
+public type PrepareRequest is {
+    sql: Text,
+    flags: PrepareFlags,
+    api_version: PrepareApiVersion,
+    /// If negative, the engine reads until the first NUL byte.
+    /// Otherwise exactly `sql_bytes` bytes are consumed.
+    sql_bytes: Int,
+}
+
+public fn new_request(sql: Text) -> PrepareRequest {
+    PrepareRequest {
+        sql: sql,
+        flags: empty_flags(),
+        api_version: PavV2,
+        sql_bytes: -1,
+    }
+}
+
+public fn new_v3_request(sql: Text, flags: PrepareFlags) -> PrepareRequest {
+    PrepareRequest {
+        sql: sql,
+        flags: flags,
+        api_version: PavV3,
+        sql_bytes: -1,
+    }
+}

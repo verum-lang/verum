@@ -1,0 +1,49 @@
+// =============================================================================
+// initialize/phase.vr — ongoing initialization phase
+// =============================================================================
+// Spec: SQLite C API
+//
+// Three coarse phases:
+//
+//   * `IpFresh`              — `sqlite3_initialize` has not been called
+//   * `IpBringing(subsys)`   — subsystem `subsys` is being initialised
+//   * `IpRunning`            — all subsystems up; calls are no-ops
+//   * `IpFailed(reason)`     — a subsystem failed during bring-up
+// =============================================================================
+
+module core.database.sqlite.native.initialize.phase;
+
+mount core.*;
+mount base.{Bool, Text};
+mount core.database.sqlite.native.shutdown.subsystem.{
+    Subsystem, subsystem_name,
+};
+
+public type InitPhase is
+      IpFresh
+    | IpBringing(Subsystem)
+    | IpRunning
+    | IpFailed(Text);
+
+public fn phase_name(p: &InitPhase) -> Text {
+    match p {
+        IpFresh         => "fresh".clone(),
+        IpBringing(_)   => "bringing".clone(),
+        IpRunning       => "running".clone(),
+        IpFailed(_)     => "failed".clone(),
+    }
+}
+
+public fn is_ready(p: &InitPhase) -> Bool {
+    match p {
+        IpRunning => true,
+        _ => false,
+    }
+}
+
+public fn is_terminal(p: &InitPhase) -> Bool {
+    match p {
+        IpRunning | IpFailed(_) => true,
+        _ => false,
+    }
+}

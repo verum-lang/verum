@@ -1,0 +1,36 @@
+// =============================================================================
+// memory_stats/release.vr — sqlite3_release_memory result
+// =============================================================================
+// Spec: SQLite C API
+//
+// sqlite3_release_memory(N) asks the engine to free at least N bytes;
+// returns the number of bytes actually released (may be less than N or
+// even 0 if nothing is reclaimable).
+// =============================================================================
+
+module core.database.sqlite.native.memory_stats.release;
+
+mount core.*;
+mount base.{Bool};
+
+public type RelaxationTarget is
+      RtGlobal
+    | RtDatabase(Int64);
+
+public type RelaxationAttempt is {
+    target: RelaxationTarget,
+    requested: Int64,
+    released: Int64,
+}
+
+public fn new_attempt(target: RelaxationTarget, requested: Int64) -> RelaxationAttempt {
+    RelaxationAttempt { target: target, requested: requested, released: 0 as Int64 }
+}
+
+public fn record_release(a: &mut RelaxationAttempt, bytes: Int64) {
+    a.released = a.released + bytes;
+}
+
+public fn attempt_met_quota(a: &RelaxationAttempt) -> Bool {
+    a.released >= a.requested
+}

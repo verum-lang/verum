@@ -1,0 +1,99 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, initialize, bringup, capi
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.initialize.phase.{
+    InitPhase,
+    IpFresh, IpBringing, IpRunning, IpFailed,
+    phase_name, is_ready, is_terminal,
+};
+mount core.database.sqlite.native.initialize.engine.{
+    InitEngine, new_engine, drive_full,
+};
+mount core.database.sqlite.native.shutdown.subsystem.{
+    Subsystem, SsMutex, SsMem, SsPage, SsPcache, SsHeap,
+};
+mount base.{Bool};
+
+fn test_phase_names() {
+    assert(phase_name(&IpFresh) == "fresh".clone());
+    assert(phase_name(&IpRunning) == "running".clone());
+    assert(phase_name(&IpFailed("x".clone())) == "failed".clone());
+}
+
+fn test_is_ready_only_running() {
+    assert(is_ready(&IpRunning));
+    assert(!is_ready(&IpFresh));
+    assert(!is_ready(&IpBringing(SsMutex)));
+}
+
+fn test_is_terminal_running_or_failed() {
+    assert(is_terminal(&IpRunning));
+    assert(is_terminal(&IpFailed("x".clone())));
+    assert(!is_terminal(&IpFresh));
+    assert(!is_terminal(&IpBringing(SsMem)));
+}
+
+fn test_engine_fresh_not_ready() {
+    let e = new_engine();
+    assert(!e.is_ready());
+    assert_eq(e.completed, 0);
+    assert_eq(e.calls, 0 as Int64);
+}
+
+fn test_engine_begin_first_time_returns_true() {
+    let mut e = new_engine();
+    let acted = e.begin(SsMutex);
+    assert(acted);
+    assert_eq(e.calls, 1 as Int64);
+}
+
+fn test_engine_begin_when_ready_is_noop() {
+    let mut e = new_engine();
+    let _ = e.begin(SsMutex);
+    e.finish_current(false);
+    let _ = e.begin(SsMem);
+    e.finish_current(false);
+    let _ = e.begin(SsPage);
+    e.finish_current(false);
+    let _ = e.begin(SsPcache);
+    e.finish_current(false);
+    let _ = e.begin(SsHeap);
+    e.finish_current(true);
+    assert(e.is_ready());
+    // Now a repeat call is a no-op:
+    let noop = e.begin(SsMutex);
+    assert(!noop);
+    assert_eq(e.calls, 6 as Int64);
+}
+
+fn test_drive_full_reaches_running() {
+    let mut e = new_engine();
+    let ok = drive_full(&mut e);
+    assert(ok);
+    assert(e.is_ready());
+    assert_eq(e.completed, e.total_subsystems());
+}
+
+fn test_fail_preserves_completed_count() {
+    let mut e = new_engine();
+    let _ = e.begin(SsMutex);
+    e.finish_current(false);
+    e.fail("mem init failed".clone());
+    assert(!e.is_ready());
+    assert_eq(e.completed, 1);
+}
+
+fn main() {
+    test_phase_names();
+    test_is_ready_only_running();
+    test_is_terminal_running_or_failed();
+    test_engine_fresh_not_ready();
+    test_engine_begin_first_time_returns_true();
+    test_engine_begin_when_ready_is_noop();
+    test_drive_full_reaches_running();
+    test_fail_preserves_completed_count();
+}

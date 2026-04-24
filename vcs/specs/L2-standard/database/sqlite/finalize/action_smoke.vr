@@ -1,0 +1,75 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, finalize, reset, clear_bindings, capi
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.finalize.action.{
+    FinalizeAction,
+    FaFinalize, FaReset, FaClearBindings,
+    action_name, destroys_stmt, preserves_bindings,
+};
+mount core.database.sqlite.native.finalize.outcome.{
+    FinalizeOutcome, FoOk, FoSticky,
+    is_ok, outcome_code, outcome_reason, from_last_step,
+};
+mount core.database.sqlite.native.errors.code.{
+    PrimaryCode, PcOk, PcError, extended_of,
+};
+mount base.{Bool};
+
+fn test_action_names() {
+    assert(action_name(&FaFinalize) == "finalize".clone());
+    assert(action_name(&FaReset) == "reset".clone());
+    assert(action_name(&FaClearBindings) == "clear_bindings".clone());
+}
+
+fn test_destroys_stmt_only_finalize() {
+    assert(destroys_stmt(&FaFinalize));
+    assert(!destroys_stmt(&FaReset));
+    assert(!destroys_stmt(&FaClearBindings));
+}
+
+fn test_preserves_bindings_only_reset() {
+    assert(preserves_bindings(&FaReset));
+    assert(!preserves_bindings(&FaFinalize));
+    assert(!preserves_bindings(&FaClearBindings));
+}
+
+fn test_fo_ok_is_ok_and_zero() {
+    let o = FoOk;
+    assert(is_ok(&o));
+    assert_eq(outcome_code(&o), 0);
+    assert_eq(outcome_reason(&o).len(), 0);
+}
+
+fn test_fo_sticky_carries_code_and_reason() {
+    let o: FinalizeOutcome = FoSticky {
+        code: extended_of(PcError, 0),
+        reason: "step failed".clone(),
+    };
+    assert(!is_ok(&o));
+    assert(outcome_code(&o) != 0);
+    assert(outcome_reason(&o).len() > 0);
+}
+
+fn test_from_last_step_success_collapses() {
+    let o = from_last_step(&PcOk, extended_of(PcOk, 0), "".clone());
+    assert(is_ok(&o));
+}
+
+fn test_from_last_step_error_preserved() {
+    let o = from_last_step(&PcError, extended_of(PcError, 0), "boom".clone());
+    assert(!is_ok(&o));
+}
+
+fn main() {
+    test_action_names();
+    test_destroys_stmt_only_finalize();
+    test_preserves_bindings_only_reset();
+    test_fo_ok_is_ok_and_zero();
+    test_fo_sticky_carries_code_and_reason();
+    test_from_last_step_success_collapses();
+    test_from_last_step_error_preserved();
+}

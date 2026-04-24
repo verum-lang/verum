@@ -1,0 +1,80 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, threadsafe, mode, engine, capi
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.threadsafe.mode.{
+    TsMode,
+    TsSingleThread, TsMultiThread, TsSerialized,
+    mode_numeric, mode_name,
+    mode_requires_mutex, mode_allows_shared_handle,
+    from_numeric,
+};
+mount core.database.sqlite.native.threadsafe.engine.{
+    ThreadsafeEngine, new_engine,
+};
+mount base.{Bool};
+
+fn test_mode_numeric_matches_c_header() {
+    assert_eq(mode_numeric(&TsSingleThread), 0);
+    assert_eq(mode_numeric(&TsSerialized), 1);
+    assert_eq(mode_numeric(&TsMultiThread), 2);
+}
+
+fn test_mode_names() {
+    assert(mode_name(&TsSingleThread) == "single-thread".clone());
+    assert(mode_name(&TsMultiThread) == "multi-thread".clone());
+    assert(mode_name(&TsSerialized) == "serialized".clone());
+}
+
+fn test_mode_requires_mutex_only_serialized() {
+    assert(mode_requires_mutex(&TsSerialized));
+    assert(!mode_requires_mutex(&TsMultiThread));
+    assert(!mode_requires_mutex(&TsSingleThread));
+}
+
+fn test_mode_allows_shared_handle_only_serialized() {
+    assert(mode_allows_shared_handle(&TsSerialized));
+    assert(!mode_allows_shared_handle(&TsMultiThread));
+}
+
+fn test_from_numeric_round_trip() {
+    match from_numeric(0) { TsSingleThread => {}, _ => assert(false) }
+    match from_numeric(1) { TsSerialized   => {}, _ => assert(false) }
+    match from_numeric(2) { TsMultiThread  => {}, _ => assert(false) }
+    match from_numeric(99) { TsMultiThread => {}, _ => assert(false) }
+}
+
+fn test_engine_allows_downgrade_from_serialized() {
+    let mut e = new_engine(TsSerialized);
+    assert_eq(e.effective_numeric(), mode_numeric(&TsSerialized));
+    assert(e.request(TsMultiThread));
+    assert_eq(e.effective_numeric(), mode_numeric(&TsMultiThread));
+    assert(e.request(TsSingleThread));
+    assert_eq(e.effective_numeric(), mode_numeric(&TsSingleThread));
+}
+
+fn test_engine_rejects_upgrade() {
+    let mut e = new_engine(TsSingleThread);
+    assert(!e.request(TsMultiThread));
+    assert(!e.request(TsSerialized));
+    assert_eq(e.effective_numeric(), mode_numeric(&TsSingleThread));
+}
+
+fn test_engine_same_mode_always_ok() {
+    let mut e = new_engine(TsMultiThread);
+    assert(e.request(TsMultiThread));
+}
+
+fn main() {
+    test_mode_numeric_matches_c_header();
+    test_mode_names();
+    test_mode_requires_mutex_only_serialized();
+    test_mode_allows_shared_handle_only_serialized();
+    test_from_numeric_round_trip();
+    test_engine_allows_downgrade_from_serialized();
+    test_engine_rejects_upgrade();
+    test_engine_same_mode_always_ok();
+}

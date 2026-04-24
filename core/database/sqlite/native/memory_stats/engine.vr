@@ -1,0 +1,34 @@
+// =============================================================================
+// memory_stats/engine.vr — global + per-db wrappers
+// =============================================================================
+// Spec: SQLite C API
+//
+// The public C-API calls map onto a `MemoryCounter` with four helpers
+// below + `memory_stats.release` for release attempts.
+// =============================================================================
+
+module core.database.sqlite.native.memory_stats.engine;
+
+mount core.*;
+mount base.{Bool};
+mount core.database.sqlite.native.memory_stats.counter.{
+    MemoryCounter,
+};
+
+public fn sqlite3_memory_used(c: &MemoryCounter) -> Int64 {
+    c.bytes_used
+}
+
+public fn sqlite3_memory_highwater(c: &mut MemoryCounter, reset_flag: Bool) -> Int64 {
+    let hw = c.highwater;
+    if reset_flag { c.reset_highwater(); }
+    hw
+}
+
+public fn sqlite3_hard_heap_limit64(c: &mut MemoryCounter, n: Int64) -> Int64 {
+    c.set_hard_limit(n)
+}
+
+public fn sqlite3_soft_heap_limit64(c: &mut MemoryCounter, n: Int64) -> Int64 {
+    c.set_soft_limit(n)
+}

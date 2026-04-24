@@ -1,0 +1,116 @@
+// =============================================================================
+// config/global_op.vr — SQLITE_CONFIG_* opcodes
+// =============================================================================
+// Spec: SQLite C API — sqlite3_config(op, …).
+//
+// These must be set before sqlite3_initialize().  We model the
+// documented subset as a variant; unknown codes pass through via
+// `CgUnknown(code)`.
+// =============================================================================
+
+module core.database.sqlite.native.config.global_op;
+
+mount core.*;
+mount base.{Text};
+
+public type GlobalConfigOp is
+      CgSingleThread        //  1
+    | CgMultiThread         //  2
+    | CgSerialized          //  3
+    | CgMalloc              //  4
+    | CgGetMalloc           //  5
+    | CgScratch             //  6  (deprecated)
+    | CgPageCache           //  7
+    | CgHeap                //  8
+    | CgMemStatus           //  9
+    | CgMutex               // 10
+    | CgGetMutex            // 11
+    | CgLookaside           // 13
+    | CgPcache              // 14  (deprecated)
+    | CgGetPcache           // 15  (deprecated)
+    | CgLog                 // 16
+    | CgUri                 // 17
+    | CgPcache2             // 18
+    | CgGetPcache2          // 19
+    | CgCoveringIndexScan   // 20
+    | CgSqllog              // 21
+    | CgMmapSize            // 22
+    | CgWin32HeapSize       // 23
+    | CgPcacheHdrSz         // 24
+    | CgPmaSz               // 25
+    | CgStmtjrnlSpill       // 26
+    | CgSmallMalloc         // 27
+    | CgSortPmasz           // 28
+    | CgMemdbMaxsize        // 29
+    | CgRowidInView         // 30
+    | CgUnknown(Int);
+
+public fn op_numeric(op: &GlobalConfigOp) -> Int {
+    match op {
+        CgSingleThread      => 1,
+        CgMultiThread       => 2,
+        CgSerialized        => 3,
+        CgMalloc            => 4,
+        CgGetMalloc         => 5,
+        CgScratch           => 6,
+        CgPageCache         => 7,
+        CgHeap              => 8,
+        CgMemStatus         => 9,
+        CgMutex             => 10,
+        CgGetMutex          => 11,
+        CgLookaside         => 13,
+        CgPcache            => 14,
+        CgGetPcache         => 15,
+        CgLog               => 16,
+        CgUri               => 17,
+        CgPcache2           => 18,
+        CgGetPcache2        => 19,
+        CgCoveringIndexScan => 20,
+        CgSqllog            => 21,
+        CgMmapSize          => 22,
+        CgWin32HeapSize     => 23,
+        CgPcacheHdrSz       => 24,
+        CgPmaSz             => 25,
+        CgStmtjrnlSpill     => 26,
+        CgSmallMalloc       => 27,
+        CgSortPmasz         => 28,
+        CgMemdbMaxsize      => 29,
+        CgRowidInView       => 30,
+        CgUnknown(n)        => *n,
+    }
+}
+
+public fn op_name(op: &GlobalConfigOp) -> Text {
+    match op {
+        CgSingleThread      => "SQLITE_CONFIG_SINGLETHREAD".clone(),
+        CgMultiThread       => "SQLITE_CONFIG_MULTITHREAD".clone(),
+        CgSerialized        => "SQLITE_CONFIG_SERIALIZED".clone(),
+        CgMalloc            => "SQLITE_CONFIG_MALLOC".clone(),
+        CgGetMalloc         => "SQLITE_CONFIG_GETMALLOC".clone(),
+        CgScratch           => "SQLITE_CONFIG_SCRATCH".clone(),
+        CgPageCache         => "SQLITE_CONFIG_PAGECACHE".clone(),
+        CgHeap              => "SQLITE_CONFIG_HEAP".clone(),
+        CgMemStatus         => "SQLITE_CONFIG_MEMSTATUS".clone(),
+        CgMutex             => "SQLITE_CONFIG_MUTEX".clone(),
+        CgGetMutex          => "SQLITE_CONFIG_GETMUTEX".clone(),
+        CgLookaside         => "SQLITE_CONFIG_LOOKASIDE".clone(),
+        CgPcache            => "SQLITE_CONFIG_PCACHE".clone(),
+        CgGetPcache         => "SQLITE_CONFIG_GETPCACHE".clone(),
+        CgLog               => "SQLITE_CONFIG_LOG".clone(),
+        CgUri               => "SQLITE_CONFIG_URI".clone(),
+        CgPcache2           => "SQLITE_CONFIG_PCACHE2".clone(),
+        CgGetPcache2        => "SQLITE_CONFIG_GETPCACHE2".clone(),
+        CgCoveringIndexScan => "SQLITE_CONFIG_COVERING_INDEX_SCAN".clone(),
+        CgSqllog            => "SQLITE_CONFIG_SQLLOG".clone(),
+        CgMmapSize          => "SQLITE_CONFIG_MMAP_SIZE".clone(),
+        CgWin32HeapSize     => "SQLITE_CONFIG_WIN32_HEAPSIZE".clone(),
+        CgPcacheHdrSz       => "SQLITE_CONFIG_PCACHE_HDRSZ".clone(),
+        CgPmaSz             => "SQLITE_CONFIG_PMASZ".clone(),
+        CgStmtjrnlSpill     => "SQLITE_CONFIG_STMTJRNL_SPILL".clone(),
+        CgSmallMalloc       => "SQLITE_CONFIG_SMALL_MALLOC".clone(),
+        CgSortPmasz         => "SQLITE_CONFIG_SORTERREF_SIZE".clone(),
+        CgMemdbMaxsize      => "SQLITE_CONFIG_MEMDB_MAXSIZE".clone(),
+        CgRowidInView       => "SQLITE_CONFIG_ROWID_IN_VIEW".clone(),
+        CgUnknown(_)        => "SQLITE_CONFIG_UNKNOWN".clone(),
+    }
+}

@@ -1,0 +1,46 @@
+// =============================================================================
+// config/value.vr — typed ConfigValue payload
+// =============================================================================
+// Spec: SQLite C API — sqlite3_config / sqlite3_db_config accept
+// varargs per opcode; this catalogue models the union with a variant.
+// =============================================================================
+
+module core.database.sqlite.native.config.value;
+
+mount core.*;
+mount base.{Bool, Text};
+
+public type ConfigValue is
+      CvBool(Bool)
+    | CvInt(Int)
+    | CvInt64(Int64)
+    | CvText(Text)
+    | CvAbsent;
+
+public fn value_kind_name(v: &ConfigValue) -> Text {
+    match v {
+        CvBool(_)   => "bool".clone(),
+        CvInt(_)    => "int".clone(),
+        CvInt64(_)  => "int64".clone(),
+        CvText(_)   => "text".clone(),
+        CvAbsent    => "absent".clone(),
+    }
+}
+
+public fn as_bool(v: &ConfigValue) -> Bool {
+    match v {
+        CvBool(b)   => *b,
+        CvInt(i)    => *i != 0,
+        CvInt64(i)  => *i != (0 as Int64),
+        _           => false,
+    }
+}
+
+public fn as_int(v: &ConfigValue) -> Int {
+    match v {
+        CvInt(i)    => *i,
+        CvInt64(i)  => *i as Int,
+        CvBool(b)   => if *b { 1 } else { 0 },
+        _           => 0,
+    }
+}

@@ -1,0 +1,24 @@
+// =============================================================================
+// core/database/sqlite/native/memory_stats/mod.vr
+// =============================================================================
+// Layer: 7 (façade — global + per-db memory accounting)
+// Spec: SQLite C API
+//
+//   sqlite3_memory_used()       → total bytes in use
+//   sqlite3_memory_highwater()  → highwater since last reset
+//   sqlite3_release_memory(N)   → attempt to release ≥N bytes globally
+//   sqlite3_db_release_memory() → same, per-connection
+//   sqlite3_hard_heap_limit64   → cap global allocations
+//   sqlite3_soft_heap_limit64   → trigger releases above limit
+//
+// Submodules:
+//   * `counter` — running bytes_used + highwater
+//   * `release` — RelaxationAttempt result
+//   * `engine`  — per-db + global wired together
+// =============================================================================
+
+module core.database.sqlite.native.memory_stats;
+
+public module counter;
+public module release;
+public module engine;

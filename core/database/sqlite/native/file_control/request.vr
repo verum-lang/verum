@@ -1,0 +1,31 @@
+// =============================================================================
+// file_control/request.vr — FileCtrlRequest descriptor
+// =============================================================================
+// Spec: SQLite C API — sqlite3_file_control(db, zDbName, op, pArg).
+//
+// `schema_name` = "main", "temp", or an ATTACH-ed name.
+// `payload_ptr` is an opaque integer handle — the catalogue does not
+// model the varargs union; downstream modules provide typed wrappers.
+// =============================================================================
+
+module core.database.sqlite.native.file_control.request;
+
+mount core.*;
+mount base.{Text};
+mount core.database.sqlite.native.file_control.opcode.{
+    FileCtrlOp,
+};
+
+public type FileCtrlRequest is {
+    schema_name: Text,
+    op: FileCtrlOp,
+    payload_ptr: Int64,
+}
+
+public fn new_request(schema_name: Text, op: FileCtrlOp, payload_ptr: Int64) -> FileCtrlRequest {
+    FileCtrlRequest { schema_name: schema_name, op: op, payload_ptr: payload_ptr }
+}
+
+public fn main_db_request(op: FileCtrlOp, payload_ptr: Int64) -> FileCtrlRequest {
+    new_request("main".clone(), op, payload_ptr)
+}

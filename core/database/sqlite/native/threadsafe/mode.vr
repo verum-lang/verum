@@ -1,0 +1,56 @@
+// =============================================================================
+// threadsafe/mode.vr — thread-safety compile/runtime mode
+// =============================================================================
+// Spec: SQLite C API
+//
+//   SingleThread — no locking; every call must be on the creator thread
+//   MultiThread  — multiple threads safe as long as no single DB handle
+//                  is accessed from two threads concurrently
+//   Serialized   — all sqlite3_* calls fully serialised by internal mutexes
+// =============================================================================
+
+module core.database.sqlite.native.threadsafe.mode;
+
+mount core.*;
+mount base.{Bool, Text};
+
+public type TsMode is
+      TsSingleThread
+    | TsMultiThread
+    | TsSerialized;
+
+public fn mode_numeric(m: &TsMode) -> Int {
+    match m {
+        TsSingleThread => 0,
+        TsMultiThread  => 2,
+        TsSerialized   => 1,
+    }
+}
+
+public fn mode_name(m: &TsMode) -> Text {
+    match m {
+        TsSingleThread => "single-thread".clone(),
+        TsMultiThread  => "multi-thread".clone(),
+        TsSerialized   => "serialized".clone(),
+    }
+}
+
+public fn mode_requires_mutex(m: &TsMode) -> Bool {
+    match m {
+        TsSerialized => true,
+        _ => false,
+    }
+}
+
+public fn mode_allows_shared_handle(m: &TsMode) -> Bool {
+    match m {
+        TsSerialized => true,
+        _ => false,
+    }
+}
+
+public fn from_numeric(code: Int) -> TsMode {
+    if code == 0 { return TsSingleThread; }
+    if code == 1 { return TsSerialized; }
+    TsMultiThread
+}

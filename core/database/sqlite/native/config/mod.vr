@@ -1,0 +1,19 @@
+// =============================================================================
+// core/database/sqlite/native/config/mod.vr
+// =============================================================================
+// Layer: 7 (façade — sqlite3_config / sqlite3_db_config)
+// Spec: SQLite C API.
+//
+// Submodules:
+//   * `global_op`  — SQLITE_CONFIG_* opcode taxonomy
+//   * `db_op`      — SQLITE_DBCONFIG_* opcode taxonomy
+//   * `value`      — ConfigValue: typed integer/bool/text/mixed payload
+//   * `engine`     — staged-state before/after sqlite3_initialize gate
+// =============================================================================
+
+module core.database.sqlite.native.config;
+
+public module global_op;
+public module db_op;
+public module value;
+public module engine;

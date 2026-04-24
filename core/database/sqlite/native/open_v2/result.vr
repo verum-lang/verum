@@ -1,0 +1,51 @@
+// =============================================================================
+// open_v2/result.vr — outcome of sqlite3_open_v2
+// =============================================================================
+// Spec: SQLite C API.  A successful open returns SQLITE_OK + a db
+// handle; failures surface a primary-code error (possibly with
+// extended extension).
+// =============================================================================
+
+module core.database.sqlite.native.open_v2.result;
+
+mount core.*;
+mount base.{Bool, Text};
+mount core.database.sqlite.native.errors.code.{
+    ExtendedCode, extended_numeric,
+};
+mount core.database.sqlite.native.open_v2.flags.{
+    OpenFlags, is_valid,
+};
+mount core.database.sqlite.native.open_v2.target.{
+    OpenTarget,
+};
+
+public type OpenResult is
+      OrOpened { handle: Int64, target: OpenTarget }
+    | OrFailed { code: ExtendedCode, reason: Text };
+
+public fn result_is_ok(r: &OpenResult) -> Bool {
+    match r {
+        OrOpened { .. } => true,
+        _ => false,
+    }
+}
+
+/// Numeric extended code (0 for OrOpened).
+public fn result_extended_code(r: &OpenResult) -> Int {
+    match r {
+        OrOpened { .. } => 0,
+        OrFailed { code, .. } => extended_numeric(code),
+    }
+}
+
+public fn result_reason(r: &OpenResult) -> Text {
+    match r {
+        OrOpened { .. } => "".clone(),
+        OrFailed { reason, .. } => reason.clone(),
+    }
+}
+
+public fn validate(flags: &OpenFlags) -> Bool {
+    is_valid(flags)
+}

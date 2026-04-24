@@ -1,0 +1,96 @@
+// =============================================================================
+// open_v2/flags.vr — SQLITE_OPEN_* bitmap
+// =============================================================================
+// Spec: SQLite C API.  These mirror the sqlite3.h constants 1:1.
+// =============================================================================
+
+module core.database.sqlite.native.open_v2.flags;
+
+mount core.*;
+mount base.{Bool};
+
+// Access-mode bits (mutually exclusive)
+public const SQLITE_OPEN_READONLY: Int          = 0x00000001;
+public const SQLITE_OPEN_READWRITE: Int         = 0x00000002;
+public const SQLITE_OPEN_CREATE: Int            = 0x00000004;
+
+// Deletion / uri / memory
+public const SQLITE_OPEN_DELETEONCLOSE: Int     = 0x00000008;
+public const SQLITE_OPEN_EXCLUSIVE: Int         = 0x00000010;
+public const SQLITE_OPEN_AUTOPROXY: Int         = 0x00000020;
+public const SQLITE_OPEN_URI: Int               = 0x00000040;
+public const SQLITE_OPEN_MEMORY: Int            = 0x00000080;
+
+// Temporary flavors
+public const SQLITE_OPEN_MAIN_DB: Int           = 0x00000100;
+public const SQLITE_OPEN_TEMP_DB: Int           = 0x00000200;
+public const SQLITE_OPEN_TRANSIENT_DB: Int      = 0x00000400;
+public const SQLITE_OPEN_MAIN_JOURNAL: Int      = 0x00000800;
+public const SQLITE_OPEN_TEMP_JOURNAL: Int      = 0x00001000;
+public const SQLITE_OPEN_SUBJOURNAL: Int        = 0x00002000;
+public const SQLITE_OPEN_SUPER_JOURNAL: Int     = 0x00004000;
+
+// Threading
+public const SQLITE_OPEN_NOMUTEX: Int           = 0x00008000;
+public const SQLITE_OPEN_FULLMUTEX: Int         = 0x00010000;
+
+// Cache mode
+public const SQLITE_OPEN_SHAREDCACHE: Int       = 0x00020000;
+public const SQLITE_OPEN_PRIVATECACHE: Int      = 0x00040000;
+
+// WAL
+public const SQLITE_OPEN_WAL: Int               = 0x00080000;
+
+// Follow symlinks / nofollow
+public const SQLITE_OPEN_NOFOLLOW: Int          = 0x01000000;
+public const SQLITE_OPEN_EXRESCODE: Int         = 0x02000000;
+
+public type OpenFlags is {
+    bits: Int,
+}
+
+public fn new_flags(bits: Int) -> OpenFlags {
+    OpenFlags { bits: bits }
+}
+
+public fn default_rw_create() -> OpenFlags {
+    new_flags(SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE)
+}
+
+public fn readonly_flags() -> OpenFlags {
+    new_flags(SQLITE_OPEN_READONLY)
+}
+
+public fn memory_flags() -> OpenFlags {
+    new_flags(SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE | SQLITE_OPEN_MEMORY)
+}
+
+public fn has(f: &OpenFlags, bit: Int) -> Bool {
+    (f.bits & bit) != 0
+}
+
+public fn is_readonly(f: &OpenFlags) -> Bool {
+    has(f, SQLITE_OPEN_READONLY)
+}
+
+public fn is_memory(f: &OpenFlags) -> Bool {
+    has(f, SQLITE_OPEN_MEMORY)
+}
+
+public fn is_uri_enabled(f: &OpenFlags) -> Bool {
+    has(f, SQLITE_OPEN_URI)
+}
+
+/// Reject conflicting access-mode bits (all three set at once etc.).
+public fn is_valid(f: &OpenFlags) -> Bool {
+    let rw = has(f, SQLITE_OPEN_READWRITE);
+    let ro = has(f, SQLITE_OPEN_READONLY);
+    if rw && ro { return false; }
+    let shared = has(f, SQLITE_OPEN_SHAREDCACHE);
+    let private_cache = has(f, SQLITE_OPEN_PRIVATECACHE);
+    if shared && private_cache { return false; }
+    let nomu = has(f, SQLITE_OPEN_NOMUTEX);
+    let fullmu = has(f, SQLITE_OPEN_FULLMUTEX);
+    if nomu && fullmu { return false; }
+    true
+}

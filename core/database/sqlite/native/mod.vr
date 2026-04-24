@@ -204,3 +204,19 @@ public module exec;
 public module log;
 // - stmt_introspect: sqlite3_stmt_busy / _readonly / _explain / _sql / _status
 public module stmt_introspect;
+// - open_v2: sqlite3_open / _open_v2 — flags/target/result for connection-open
+public module open_v2;
+// - prepare: sqlite3_prepare / _v2 / _v3 — flags/request/result
+public module prepare;
+// - finalize: sqlite3_finalize / _reset / _clear_bindings — action/outcome
+public module finalize;
+// - config: sqlite3_config (global_op) / _db_config (db_op) + typed value + engine
+public module config;
+// - initialize: sqlite3_initialize — phase + engine (partner of shutdown)
+public module initialize;
+// - file_control: sqlite3_file_control — opcode/request/result pass-through
+public module file_control;
+// - memory_stats: sqlite3_memory_used / _highwater / _release_memory / _heap_limit
+public module memory_stats;
+// - threadsafe: sqlite3_threadsafe — compile-time floor + runtime effective mode
+public module threadsafe;
