@@ -1,0 +1,100 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: tls13, extension, rfc8446_4_2, rfc9001_8_2, iana
+// @timeout: 15000
+// @expected-exit: 0
+
+// RFC 8446 §4.2 + auxiliary RFC extension registry — TLS extension
+// u16 IDs. Every value MUST match the IANA TLS ExtensionType registry.
+
+mount core.*;
+mount core.net.tls13.handshake.extension.{
+    EXT_SERVER_NAME,
+    EXT_MAX_FRAGMENT_LENGTH,
+    EXT_STATUS_REQUEST,
+    EXT_SUPPORTED_GROUPS,
+    EXT_SIGNATURE_ALGORITHMS,
+    EXT_USE_SRTP,
+    EXT_HEARTBEAT,
+    EXT_ALPN,
+    EXT_SIGNED_CERTIFICATE_TIMESTAMP,
+    EXT_CLIENT_CERTIFICATE_TYPE,
+    EXT_SERVER_CERTIFICATE_TYPE,
+    EXT_PADDING,
+    EXT_RECORD_SIZE_LIMIT,
+    EXT_COMPRESS_CERTIFICATE,
+    EXT_PRE_SHARED_KEY,
+    EXT_EARLY_DATA,
+    EXT_SUPPORTED_VERSIONS,
+    EXT_COOKIE,
+    EXT_PSK_KEY_EXCHANGE_MODES,
+    EXT_CERTIFICATE_AUTHORITIES,
+    EXT_OID_FILTERS,
+    EXT_POST_HANDSHAKE_AUTH,
+    EXT_SIGNATURE_ALGORITHMS_CERT,
+    EXT_KEY_SHARE,
+    EXT_QUIC_TRANSPORT_PARAMETERS,
+};
+
+fn rfc_8446_extension_ids() {
+    // §4.2.1 table (most common).
+    assert(EXT_SERVER_NAME                   == 0_u16);
+    assert(EXT_MAX_FRAGMENT_LENGTH           == 1_u16);
+    assert(EXT_STATUS_REQUEST                == 5_u16);
+    assert(EXT_SUPPORTED_GROUPS              == 10_u16);
+    assert(EXT_SIGNATURE_ALGORITHMS          == 13_u16);
+    assert(EXT_USE_SRTP                      == 14_u16);
+    assert(EXT_HEARTBEAT                     == 15_u16);
+    assert(EXT_ALPN                          == 16_u16);
+    assert(EXT_SIGNED_CERTIFICATE_TIMESTAMP  == 18_u16);
+    assert(EXT_CLIENT_CERTIFICATE_TYPE       == 19_u16);
+    assert(EXT_SERVER_CERTIFICATE_TYPE       == 20_u16);
+    assert(EXT_PADDING                       == 21_u16);
+    assert(EXT_COMPRESS_CERTIFICATE          == 27_u16);
+    assert(EXT_RECORD_SIZE_LIMIT             == 28_u16);
+    assert(EXT_PRE_SHARED_KEY                == 41_u16);
+    assert(EXT_EARLY_DATA                    == 42_u16);
+    assert(EXT_SUPPORTED_VERSIONS            == 43_u16);
+    assert(EXT_COOKIE                        == 44_u16);
+    assert(EXT_PSK_KEY_EXCHANGE_MODES        == 45_u16);
+    assert(EXT_CERTIFICATE_AUTHORITIES       == 47_u16);
+    assert(EXT_OID_FILTERS                   == 48_u16);
+    assert(EXT_POST_HANDSHAKE_AUTH           == 49_u16);
+    assert(EXT_SIGNATURE_ALGORITHMS_CERT     == 50_u16);
+    assert(EXT_KEY_SHARE                     == 51_u16);
+    // RFC 9001 §8.2 QUIC carrier.
+    assert(EXT_QUIC_TRANSPORT_PARAMETERS     == 57_u16);
+}
+
+fn extension_ids_are_pairwise_distinct() {
+    let ids: [UInt16; 25] = [
+        EXT_SERVER_NAME, EXT_MAX_FRAGMENT_LENGTH, EXT_STATUS_REQUEST,
+        EXT_SUPPORTED_GROUPS, EXT_SIGNATURE_ALGORITHMS, EXT_USE_SRTP,
+        EXT_HEARTBEAT, EXT_ALPN, EXT_SIGNED_CERTIFICATE_TIMESTAMP,
+        EXT_CLIENT_CERTIFICATE_TYPE, EXT_SERVER_CERTIFICATE_TYPE,
+        EXT_PADDING, EXT_COMPRESS_CERTIFICATE, EXT_RECORD_SIZE_LIMIT,
+        EXT_PRE_SHARED_KEY, EXT_EARLY_DATA, EXT_SUPPORTED_VERSIONS,
+        EXT_COOKIE, EXT_PSK_KEY_EXCHANGE_MODES,
+        EXT_CERTIFICATE_AUTHORITIES, EXT_OID_FILTERS,
+        EXT_POST_HANDSHAKE_AUTH, EXT_SIGNATURE_ALGORITHMS_CERT,
+        EXT_KEY_SHARE, EXT_QUIC_TRANSPORT_PARAMETERS,
+    ];
+    let mut i: Int = 0;
+    while i < 25 {
+        let mut j: Int = i + 1;
+        while j < 25 {
+            assert(ids[i] != ids[j]);
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+}
+
+@main
+public fn main() -> Int {
+    rfc_8446_extension_ids();
+    extension_ids_are_pairwise_distinct();
+    print("RFC 8446 §4.2 TLS extension IDs verified");
+    0
+}
