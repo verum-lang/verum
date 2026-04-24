@@ -160,7 +160,29 @@ pub enum CompileResult {
 /// This is the main entry point: takes a `TacticExpr` from the parser
 /// and produces a `TacticCombinator` that can be executed by
 /// `tactics.rs::apply_combinator()`.
+///
+/// Post-processing: every successful compile result runs through
+/// `tactic_laws::normalize` so Quote/Unquote/GoalIntro artefacts
+/// from the parser (which compile to skip no-ops) collapse out of
+/// the tree before the executor sees it. Skipping the normalize
+/// step was leaving `AndThen(skip, body)` dispatches in every
+/// meta-programmed tactic, paying an executor step for zero work.
 pub fn compile_tactic(expr: &TacticExpr) -> CompileResult {
+    let result = compile_tactic_raw(expr);
+    // Only normalise on the Ok path — passing-through the error
+    // variants unchanged keeps the diagnostic surface stable.
+    match result {
+        CompileResult::Ok(combinator) => {
+            CompileResult::Ok(crate::tactic_laws::normalize(combinator))
+        }
+        err => err,
+    }
+}
+
+/// The raw (pre-normalize) compilation — used internally by
+/// recursive compile paths that want to avoid double-normalize
+/// work on sub-trees. External callers should use `compile_tactic`.
+fn compile_tactic_raw(expr: &TacticExpr) -> CompileResult {
     match expr {
         TacticExpr::Named(name) => compile_named_tactic(name),
 
