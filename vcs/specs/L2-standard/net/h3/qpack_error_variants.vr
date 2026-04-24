@@ -1,0 +1,205 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: h3, qpack, errors, rfc9204
+// @timeout: 15000
+// @expected-exit: 0
+
+// RFC 9204 QPACK error surface — pin the five error enums that the
+// encoder/decoder/session machinery exposes:
+//
+//   * IntError            (integer.vr)        — 2 variants
+//   * HuffError           (huffman.vr)        — TBD variants
+//   * InstrError          (instructions.vr)   — 4 variants
+//   * QpackDecodeError    (decoder.vr)        — 5 variants
+//   * DynamicTableError   (dynamic_table.vr)  — 7 variants
+//   * QpackSessionError   (session.vr)        — 7 variants with wraps
+//
+// Every variant must be constructible and distinct under a total match,
+// so consumer code catching specific qpack failure modes never drifts.
+
+mount core.*;
+mount core.net.h3.qpack.integer.{IntError};
+mount core.net.h3.qpack.instructions.{InstrError};
+mount core.net.h3.qpack.decoder.{QpackDecodeError};
+mount core.net.h3.qpack.dynamic_table.{DynamicTableError};
+mount core.net.h3.qpack.session.{QpackSessionError};
+
+fn int_error_two_variants_distinct() {
+    let a = IntError.Truncated;
+    let b = IntError.Overflow;
+    let ta = match a {
+        IntError.Truncated => 1,
+        IntError.Overflow  => 2,
+    };
+    let tb = match b {
+        IntError.Truncated => 1,
+        IntError.Overflow  => 2,
+    };
+    assert(ta != tb);
+}
+
+fn instr_error_four_variants_distinct() {
+    let errs: [InstrError; 4] = [
+        InstrError.Truncated,
+        InstrError.HuffmanError,
+        InstrError.IntegerError,
+        InstrError.UnknownOpcode,
+    ];
+    let mut tags: [Int; 4] = [0; 4];
+    let mut i: Int = 0;
+    while i < 4 {
+        tags[i] = match errs[i] {
+            InstrError.Truncated     => 1,
+            InstrError.HuffmanError  => 2,
+            InstrError.IntegerError  => 3,
+            InstrError.UnknownOpcode => 4,
+        };
+        i = i + 1;
+    }
+    let mut j: Int = 0;
+    while j < 4 {
+        let mut k: Int = j + 1;
+        while k < 4 {
+            assert(tags[j] != tags[k]);
+            k = k + 1;
+        }
+        j = j + 1;
+    }
+}
+
+fn qpack_decode_error_five_variants_distinct() {
+    let errs: [QpackDecodeError; 5] = [
+        QpackDecodeError.Truncated,
+        QpackDecodeError.InvalidIndex(42_u64),
+        QpackDecodeError.DynamicTableNotSupported,
+        QpackDecodeError.HuffmanError,
+        QpackDecodeError.IntegerError,
+    ];
+    let mut tags: [Int; 5] = [0; 5];
+    let mut i: Int = 0;
+    while i < 5 {
+        tags[i] = match errs[i] {
+            QpackDecodeError.Truncated                => 1,
+            QpackDecodeError.InvalidIndex(_)          => 2,
+            QpackDecodeError.DynamicTableNotSupported => 3,
+            QpackDecodeError.HuffmanError             => 4,
+            QpackDecodeError.IntegerError             => 5,
+        };
+        i = i + 1;
+    }
+    let mut j: Int = 0;
+    while j < 5 {
+        let mut k: Int = j + 1;
+        while k < 5 {
+            assert(tags[j] != tags[k]);
+            k = k + 1;
+        }
+        j = j + 1;
+    }
+}
+
+fn qpack_decode_invalid_index_carries_payload() {
+    let e = QpackDecodeError.InvalidIndex(0xDEADBEEF_u64);
+    match e {
+        QpackDecodeError.InvalidIndex(v) => assert(v == 0xDEADBEEF_u64),
+        _ => panic("expected InvalidIndex(payload)"),
+    }
+}
+
+fn dynamic_table_error_seven_variants_distinct() {
+    let errs: [DynamicTableError; 7] = [
+        DynamicTableError.CapacityExceedsSettings,
+        DynamicTableError.EntryTooLarge,
+        DynamicTableError.EvictionBlocked,
+        DynamicTableError.InvalidAbsIndex,
+        DynamicTableError.InvalidNameRef,
+        DynamicTableError.EntryEvicted,
+        DynamicTableError.RefUnderflow,
+    ];
+    let mut tags: [Int; 7] = [0; 7];
+    let mut i: Int = 0;
+    while i < 7 {
+        tags[i] = match errs[i] {
+            DynamicTableError.CapacityExceedsSettings => 1,
+            DynamicTableError.EntryTooLarge           => 2,
+            DynamicTableError.EvictionBlocked         => 3,
+            DynamicTableError.InvalidAbsIndex         => 4,
+            DynamicTableError.InvalidNameRef          => 5,
+            DynamicTableError.EntryEvicted            => 6,
+            DynamicTableError.RefUnderflow            => 7,
+        };
+        i = i + 1;
+    }
+    let mut j: Int = 0;
+    while j < 7 {
+        let mut k: Int = j + 1;
+        while k < 7 {
+            assert(tags[j] != tags[k]);
+            k = k + 1;
+        }
+        j = j + 1;
+    }
+}
+
+fn qpack_session_error_wraps_nested_enums() {
+    // QpackSessionError funnels four sub-sums into distinguishable variants.
+    let e1 = QpackSessionError.EncoderInstrError(InstrError.Truncated);
+    let e2 = QpackSessionError.DecoderInstrError(InstrError.HuffmanError);
+    let e3 = QpackSessionError.DynamicTable(DynamicTableError.EntryTooLarge);
+    let e4 = QpackSessionError.FieldDecode(QpackDecodeError.Truncated);
+    let e5 = QpackSessionError.IntegerError;
+    let e6 = QpackSessionError.HuffmanError;
+    let e7 = QpackSessionError.InvalidState;
+
+    let errs: [QpackSessionError; 7] = [e1, e2, e3, e4, e5, e6, e7];
+    let mut tags: [Int; 7] = [0; 7];
+    let mut i: Int = 0;
+    while i < 7 {
+        tags[i] = match errs[i] {
+            QpackSessionError.EncoderInstrError(_) => 1,
+            QpackSessionError.DecoderInstrError(_) => 2,
+            QpackSessionError.DynamicTable(_)      => 3,
+            QpackSessionError.FieldDecode(_)       => 4,
+            QpackSessionError.IntegerError         => 5,
+            QpackSessionError.HuffmanError         => 6,
+            QpackSessionError.InvalidState         => 7,
+        };
+        i = i + 1;
+    }
+    let mut j: Int = 0;
+    while j < 7 {
+        let mut k: Int = j + 1;
+        while k < 7 {
+            assert(tags[j] != tags[k]);
+            k = k + 1;
+        }
+        j = j + 1;
+    }
+}
+
+fn qpack_session_error_payload_extraction() {
+    let e = QpackSessionError.DynamicTable(DynamicTableError.EntryTooLarge);
+    match e {
+        QpackSessionError.DynamicTable(inner) => {
+            match inner {
+                DynamicTableError.EntryTooLarge => {},
+                _ => panic("expected EntryTooLarge"),
+            }
+        },
+        _ => panic("expected DynamicTable wrap"),
+    }
+}
+
+@main
+public fn main() -> Int {
+    int_error_two_variants_distinct();
+    instr_error_four_variants_distinct();
+    qpack_decode_error_five_variants_distinct();
+    qpack_decode_invalid_index_carries_payload();
+    dynamic_table_error_seven_variants_distinct();
+    qpack_session_error_wraps_nested_enums();
+    qpack_session_error_payload_extraction();
+    print("RFC 9204 QPACK error enum variants verified");
+    0
+}
