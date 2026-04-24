@@ -34,7 +34,7 @@ redis-cache = ["redis", "tokio"]
 verum_ast = { workspace = true }
 verum_common = { workspace = true }
 verum_error = { workspace = true }
-# verum_types = { workspace = true }  # DISABLED: Circular dependency (verum_types -> verum_diagnostics -> verum_smt)
+# verum_types = { workspace = true }  # DISABLED: circular dep — verum_types imports from verum_smt via smt_backend / dependent_integration / exhaustiveness::smt / type_level_computation / subtype. Unlocking needs those 5 sites migrated to verum_compiler (or a new verum_smt_integration crate).
 verum_protocol_types = { workspace = true }
 z3 = { workspace = true }
 z3-sys = { workspace = true }
