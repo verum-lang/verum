@@ -1,0 +1,136 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: quic, frame, decoder, errors, rfc9000_19
+// @timeout: 15000
+// @expected-exit: 0
+
+// RFC 9000 §19 frame decoder — pin the four failure modes the decoder
+// surfaces through FrameError:
+//
+//   * Truncated   — buffer ended before the expected frame bytes.
+//   * InvalidType — first-byte frame code is not in the IANA registry.
+//   * InvalidValue(msg) — per-frame sanity-check rejection
+//                         (e.g. ACK first-range underflow).
+//   * VarintFailure — a QUIC varint failed to decode.
+//
+// These map onto TransportError.FRAME_ENCODING_ERROR / PROTOCOL_VIOLATION
+// at the connection layer.
+
+mount core.*;
+mount core.collections.List;
+mount core.net.quic.frame.{Frame, FrameError, decode_frame, decode_all_frames};
+
+fn empty_buffer_at_pos_0_is_truncated() {
+    let empty: List<Byte> = [];
+    match decode_frame(empty.as_slice(), 0) {
+        Err(FrameError.Truncated) => {},
+        _ => panic("decode_frame on empty buffer must return Truncated"),
+    }
+}
+
+fn unknown_frame_type_is_invalid_type() {
+    // 0x31 (= 49) is the DATAGRAM-with-length frame and IS registered,
+    // but 0x40 (64) is not. Encoded as a 1-byte varint: 0x40 = two-byte
+    // form → 0x40 0x40. Use plain 0x1F which is reserved/unknown in
+    // QUIC v1. 0x1F = 31 → above HANDSHAKE_DONE (30), unused in v1.
+    let buf: List<Byte> = [0x1F_u8];
+    match decode_frame(buf.as_slice(), 0) {
+        Err(FrameError.InvalidType(code)) => assert(code == 31_u64),
+        _ => panic("unknown frame type 0x1F must be InvalidType"),
+    }
+}
+
+fn far_unknown_frame_type_is_invalid_type() {
+    // 0x40 = varint prefix 01 — two-byte form, decodes to 0x0000.
+    // Use a single-byte 0x3A = 58 instead (in the gap 31..47).
+    let buf: List<Byte> = [0x3A_u8];
+    match decode_frame(buf.as_slice(), 0) {
+        Err(FrameError.InvalidType(code)) => assert(code == 58_u64),
+        _ => panic("0x3A must be InvalidType"),
+    }
+}
+
+fn padding_run_is_never_invalid_type() {
+    // 0x00 is PADDING — a run of zero bytes aggregates into PaddingRun.
+    let buf: List<Byte> = [0_u8, 0_u8, 0_u8, 0_u8];
+    let (frame, new_pos) = decode_frame(buf.as_slice(), 0).unwrap();
+    assert(new_pos == 4);
+    match frame {
+        Frame.PaddingRun(n) => assert(n == 4),
+        _ => panic("expected PaddingRun(4)"),
+    }
+}
+
+fn ping_frame_decodes_clean() {
+    let buf: List<Byte> = [0x01_u8];
+    let (frame, new_pos) = decode_frame(buf.as_slice(), 0).unwrap();
+    assert(new_pos == 1);
+    match frame {
+        Frame.PingFrame => {},
+        _ => panic("expected PingFrame"),
+    }
+}
+
+fn ack_with_first_range_underflow_is_invalid_value() {
+    // ACK (type 2) with largest=5 + delay=0 + range_count=0 + first_len=10.
+    // first_len > largest → InvalidValue.
+    let buf: List<Byte> = [
+        0x02_u8,     // ACK frame type
+        0x05_u8,     // largest = 5 (single-byte varint)
+        0x00_u8,     // ack_delay = 0
+        0x00_u8,     // range_count = 0
+        0x0A_u8,     // first_len = 10 — underflows (10 > 5)
+    ];
+    match decode_frame(buf.as_slice(), 0) {
+        Err(FrameError.InvalidValue(_)) => {},
+        _ => panic("first_len > largest must be InvalidValue"),
+    }
+}
+
+fn truncated_payload_after_known_type_is_truncated() {
+    // MAX_DATA (type 16 = 0x10) expects a varint; buffer just has the
+    // type byte with no payload — Truncated through quic_decode failure
+    // → VarintFailure (decode ran past end of buffer).
+    let buf: List<Byte> = [0x10_u8];
+    match decode_frame(buf.as_slice(), 0) {
+        Err(FrameError.VarintFailure) => {},
+        Err(FrameError.Truncated) => {},
+        _ => panic("missing MAX_DATA payload must be Truncated/VarintFailure"),
+    }
+}
+
+fn decode_all_stops_on_first_error() {
+    // PING + then an invalid type. decode_all_frames must return Err —
+    // not a partial list.
+    let buf: List<Byte> = [0x01_u8, 0x1F_u8];
+    match decode_all_frames(&buf) {
+        Err(FrameError.InvalidType(code)) => assert(code == 31_u64),
+        _ => panic("decode_all_frames must surface InvalidType"),
+    }
+}
+
+fn decode_all_accepts_pure_padding() {
+    let buf: List<Byte> = [0_u8, 0_u8, 0_u8];
+    let frames = decode_all_frames(&buf).unwrap();
+    assert(frames.len() == 1);
+    match &frames[0] {
+        Frame.PaddingRun(n) => assert(*n == 3),
+        _ => panic("all-zero buffer must be a single PaddingRun(3)"),
+    }
+}
+
+@main
+public fn main() -> Int {
+    empty_buffer_at_pos_0_is_truncated();
+    unknown_frame_type_is_invalid_type();
+    far_unknown_frame_type_is_invalid_type();
+    padding_run_is_never_invalid_type();
+    ping_frame_decodes_clean();
+    ack_with_first_range_underflow_is_invalid_value();
+    truncated_payload_after_known_type_is_truncated();
+    decode_all_stops_on_first_error();
+    decode_all_accepts_pure_padding();
+    print("RFC 9000 §19 frame decoder error surface verified");
+    0
+}
