@@ -1,0 +1,51 @@
+// =============================================================================
+// lockfile/region.vr — byte-range lock constants
+// =============================================================================
+// Spec: sqlite-native.md §7.4
+// =============================================================================
+
+module core.database.sqlite.native.lockfile.region;
+
+mount core.*;
+mount base.{Bool};
+
+// SQLite places the lock byte-range at a 1 GiB-offset to keep it
+// outside any plausible database file. Constants are absolute byte
+// offsets within the file.
+public const PENDING_BYTE: Int64       = 0x40000000 as Int64;
+public const RESERVED_BYTE: Int64      = 0x40000001 as Int64;
+public const SHARED_FIRST: Int64       = 0x40000002 as Int64;
+public const SHARED_SIZE: Int64        = 510 as Int64;
+
+public type LockRegion is { offset: Int64, length: Int64 }
+
+public fn lock_region(offset: Int64, length: Int64) -> LockRegion {
+    LockRegion { offset: offset, length: length }
+}
+
+public fn pending_region() -> LockRegion { lock_region(PENDING_BYTE, 1 as Int64) }
+public fn reserved_region() -> LockRegion { lock_region(RESERVED_BYTE, 1 as Int64) }
+
+public fn shared_region_full() -> LockRegion {
+    lock_region(SHARED_FIRST, SHARED_SIZE)
+}
+
+/// Pick a single byte within the SHARED region — typical Posix
+/// implementations choose by `(getpid() % SHARED_SIZE)`. Caller does
+/// the actual selection.
+public fn shared_region_for_byte(offset_within: Int64) -> LockRegion {
+    let off = if offset_within < (0 as Int64) { 0 as Int64 }
+              else if offset_within >= SHARED_SIZE { SHARED_SIZE - (1 as Int64) }
+              else { offset_within };
+    lock_region(SHARED_FIRST + off, 1 as Int64)
+}
+
+implement LockRegion {
+    pub fn end_offset(&self) -> Int64 { self.offset + self.length }
+
+    pub fn overlaps(&self, other: &LockRegion) -> Bool {
+        let self_end = self.end_offset();
+        let other_end = other.end_offset();
+        self.offset < other_end && other.offset < self_end
+    }
+}

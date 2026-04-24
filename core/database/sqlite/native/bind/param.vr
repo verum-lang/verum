@@ -1,0 +1,70 @@
+// =============================================================================
+// bind/param.vr — TypedParam sum
+// =============================================================================
+// Spec: SQLite C API
+//
+// `TypedParam` matches the union of every value the user can hand to
+// sqlite3_bind_*. SQLite's storage classes are NULL/INTEGER/REAL/TEXT/
+// BLOB; we add `ZeroBlob(n)` so the `sqlite3_bind_zeroblob(stmt, idx, n)`
+// path doesn't allocate `n` zero bytes up-front.
+// =============================================================================
+
+module core.database.sqlite.native.bind.param;
+
+mount core.*;
+mount base.{Text, Bool};
+mount collections.List;
+
+public type TypedParam is
+      TpNull
+    | TpInt64(Int64)
+    | TpReal(Float64)
+    | TpText(Text)
+    | TpBlob(List<Byte>)
+    | TpZeroBlob(Int);          // n bytes — runtime materialisation
+
+public fn param_kind_name(p: &TypedParam) -> Text {
+    match p {
+        TpNull        => "NULL".clone(),
+        TpInt64(_)    => "INTEGER".clone(),
+        TpReal(_)     => "REAL".clone(),
+        TpText(_)     => "TEXT".clone(),
+        TpBlob(_)     => "BLOB".clone(),
+        TpZeroBlob(_) => "ZEROBLOB".clone(),
+    }
+}
+
+/// Resolved byte-size: ZeroBlob is `n`, others use the actual payload.
+public fn param_byte_size(p: &TypedParam) -> Int {
+    match p {
+        TpNull          => 0,
+        TpInt64(_)      => 8,
+        TpReal(_)       => 8,
+        TpText(t)       => t.len(),
+        TpBlob(b)       => b.len(),
+        TpZeroBlob(n)   => *n,
+    }
+}
+
+public fn is_null_param(p: &TypedParam) -> Bool {
+    match p {
+        TpNull => true,
+        _      => false,
+    }
+}
+
+public fn clone_param(p: &TypedParam) -> TypedParam {
+    match p {
+        TpNull          => TpNull,
+        TpInt64(n)      => TpInt64(*n),
+        TpReal(f)       => TpReal(*f),
+        TpText(t)       => TpText(t.clone()),
+        TpBlob(b)       => {
+            let mut copy: List<Byte> = List.new();
+            let mut i: Int = 0;
+            while i < b.len() { copy.push(b[i]); i = i + 1; }
+            TpBlob(copy)
+        }
+        TpZeroBlob(n)   => TpZeroBlob(*n),
+    }
+}

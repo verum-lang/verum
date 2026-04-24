@@ -1,0 +1,100 @@
+// =============================================================================
+// column/row.vr — ResultRow read-side accessor
+// =============================================================================
+// Spec: SQLite C API — sqlite3_column_*
+//
+// `ResultRow` ties a `ColumnSpecList` (the header — set once at
+// prepare time) to a `List<ColumnValue>` (the values — refreshed at
+// each sqlite3_step return). The L7 façade hands these to the user
+// behind a stable API.
+// =============================================================================
+
+module core.database.sqlite.native.column.row;
+
+mount core.*;
+mount base.{Text, Bool, Maybe};
+mount collections.List;
+mount core.database.sqlite.native.column.value.{
+    ColumnValue, CvNull, type_code, type_name, byte_size, clone_value,
+};
+mount core.database.sqlite.native.column.spec.{
+    ColumnSpec, ColumnSpecList, spec_list_empty,
+};
+mount core.database.sqlite.native.column.coerce.{
+    to_int64, to_double, to_text, to_blob,
+};
+
+public type ResultRow is {
+    specs: ColumnSpecList,
+    values: List<ColumnValue>,
+}
+
+public fn result_row_with(specs: ColumnSpecList, values: List<ColumnValue>) -> ResultRow {
+    ResultRow { specs: specs, values: values }
+}
+
+public fn empty_row() -> ResultRow {
+    ResultRow { specs: spec_list_empty(), values: List.new() }
+}
+
+implement ResultRow {
+    pub fn column_count(&self) -> Int { self.values.len() }
+
+    pub fn lookup_value(&self, idx: Int) -> Maybe<ColumnValue> {
+        if idx < 0 || idx >= self.values.len() { return None; }
+        Some(clone_value(&self.values[idx]))
+    }
+
+    pub fn lookup_spec(&self, idx: Int) -> Maybe<ColumnSpec> { self.specs.lookup(idx) }
+
+    pub fn type_at(&self, idx: Int) -> Int {
+        match self.lookup_value(idx) {
+            Some(v) => type_code(&v),
+            None    => 5,    // SQLITE_NULL
+        }
+    }
+
+    pub fn name_at(&self, idx: Int) -> Text {
+        match self.lookup_spec(idx) {
+            Some(s) => s.name,
+            None    => Text.new(),
+        }
+    }
+
+    /// Coerced int64 access (sqlite3_column_int64).
+    pub fn int64_at(&self, idx: Int) -> Int64 {
+        match self.lookup_value(idx) {
+            Some(v) => to_int64(&v),
+            None    => 0 as Int64,
+        }
+    }
+
+    /// Coerced double access.
+    pub fn double_at(&self, idx: Int) -> Float64 {
+        match self.lookup_value(idx) {
+            Some(v) => to_double(&v),
+            None    => 0.0 as Float64,
+        }
+    }
+
+    pub fn text_at(&self, idx: Int) -> Text {
+        match self.lookup_value(idx) {
+            Some(v) => to_text(&v),
+            None    => Text.new(),
+        }
+    }
+
+    pub fn blob_at(&self, idx: Int) -> List<Byte> {
+        match self.lookup_value(idx) {
+            Some(v) => to_blob(&v),
+            None    => List.new(),
+        }
+    }
+
+    pub fn bytes_at(&self, idx: Int) -> Int {
+        match self.lookup_value(idx) {
+            Some(v) => byte_size(&v),
+            None    => 0,
+        }
+    }
+}

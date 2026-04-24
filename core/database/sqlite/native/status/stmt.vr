@@ -1,0 +1,82 @@
+// =============================================================================
+// status/stmt.vr — StmtStatus aggregator (per-PreparedStatement)
+// =============================================================================
+// Spec: SQLite C API — sqlite3_stmt_status
+// =============================================================================
+
+module core.database.sqlite.native.status.stmt;
+
+mount core.*;
+mount base.{Bool};
+mount core.database.sqlite.native.status.kind.{
+    StmtKind, SsFullscanStep, SsSort, SsAutoindex, SsVmStep,
+    SsReprepare, SsRun, SsFilterMiss, SsFilterHit,
+};
+mount core.database.sqlite.native.status.counter.{Counter, counter_zero};
+
+public type StmtStatus is {
+    fullscan_step: Counter,
+    sort: Counter,
+    autoindex: Counter,
+    vm_step: Counter,
+    reprepare: Counter,
+    run: Counter,
+    filter_miss: Counter,
+    filter_hit: Counter,
+}
+
+public fn stmt_status_new() -> StmtStatus {
+    StmtStatus {
+        fullscan_step: counter_zero(),
+        sort: counter_zero(),
+        autoindex: counter_zero(),
+        vm_step: counter_zero(),
+        reprepare: counter_zero(),
+        run: counter_zero(),
+        filter_miss: counter_zero(),
+        filter_hit: counter_zero(),
+    }
+}
+
+implement StmtStatus {
+    pub fn read(&self, kind: &StmtKind) -> (Int64, Int64) {
+        match kind {
+            SsFullscanStep => self.fullscan_step.snapshot(),
+            SsSort         => self.sort.snapshot(),
+            SsAutoindex    => self.autoindex.snapshot(),
+            SsVmStep       => self.vm_step.snapshot(),
+            SsReprepare    => self.reprepare.snapshot(),
+            SsRun          => self.run.snapshot(),
+            SsFilterMiss   => self.filter_miss.snapshot(),
+            SsFilterHit    => self.filter_hit.snapshot(),
+        }
+    }
+
+    pub fn reset_high_water(&mut self, kind: &StmtKind) {
+        match kind {
+            SsFullscanStep => self.fullscan_step.reset_high_water(),
+            SsSort         => self.sort.reset_high_water(),
+            SsAutoindex    => self.autoindex.reset_high_water(),
+            SsVmStep       => self.vm_step.reset_high_water(),
+            SsReprepare    => self.reprepare.reset_high_water(),
+            SsRun          => self.run.reset_high_water(),
+            SsFilterMiss   => self.filter_miss.reset_high_water(),
+            SsFilterHit    => self.filter_hit.reset_high_water(),
+        }
+    }
+
+    pub fn note_full_scan_step(&mut self) { self.fullscan_step.add(1 as Int64); }
+    pub fn note_sort(&mut self) { self.sort.add(1 as Int64); }
+    pub fn note_autoindex(&mut self) { self.autoindex.add(1 as Int64); }
+    pub fn note_vm_step(&mut self) { self.vm_step.add(1 as Int64); }
+    pub fn note_reprepare(&mut self) { self.reprepare.add(1 as Int64); }
+    pub fn note_run(&mut self) { self.run.add(1 as Int64); }
+    pub fn note_filter_hit(&mut self) { self.filter_hit.add(1 as Int64); }
+    pub fn note_filter_miss(&mut self) { self.filter_miss.add(1 as Int64); }
+
+    /// Cheap "did this statement spend more time in scans than indexed
+    /// access" predicate.
+    pub fn is_scan_heavy(&self) -> Bool {
+        self.fullscan_step.current > (self.vm_step.current / (10 as Int64))
+    }
+}

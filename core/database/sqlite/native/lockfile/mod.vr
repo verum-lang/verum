@@ -1,0 +1,27 @@
+// =============================================================================
+// core/database/sqlite/native/lockfile/mod.vr
+// =============================================================================
+// Layer: 0 (VFS support)
+// Spec: sqlite-native.md §7.4 (five-state locking)
+//
+// SQLite uses a clever scheme to multiplex 5 lock states onto Posix
+// byte-range locks (single-writer model):
+//
+//   * `PENDING_BYTE`    — byte 0x40000000 (1 GiB offset). Held briefly
+//                          when transitioning into PENDING state.
+//   * `RESERVED_BYTE`   — byte 0x40000001. Held to indicate "I will
+//                          eventually upgrade to EXCLUSIVE".
+//   * `SHARED_FIRST`    — byte 0x40000002 — start of the SHARED region.
+//   * `SHARED_SIZE`     — 510 bytes. Each reader takes one byte.
+//
+// Submodules:
+//   * `region`   — Byte-range constants
+//   * `state`    — LockState (NONE/SHARED/RESERVED/PENDING/EXCLUSIVE)
+//   * `transition` — valid transition matrix + LockTransitionPlan
+// =============================================================================
+
+module core.database.sqlite.native.lockfile;
+
+public module region;
+public module state;
+public module transition;

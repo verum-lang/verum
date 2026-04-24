@@ -1,0 +1,209 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, column, result_row, coerce
+// @timeout: 5000
+// @expected-exit: 0
+//
+// column/ surface:
+//   * ColumnValue type_code/type_name/byte_size/is_null
+//   * ColumnSpec is_table_column predicate
+//   * ColumnSpecList find_by_name + lookup
+//   * to_int64/to_double/to_text coercions
+//   * ResultRow accessor parity with the sqlite3_column_* family
+
+mount core.database.sqlite.native.column.value.{
+    ColumnValue, CvNull, CvInt64, CvReal, CvText, CvBlob,
+    type_code, type_name, byte_size, is_null, clone_value,
+    SQLITE_INTEGER, SQLITE_FLOAT, SQLITE_TEXT, SQLITE_BLOB, SQLITE_NULL,
+};
+mount core.database.sqlite.native.column.spec.{
+    ColumnSpec, column_spec,
+    ColumnSpecList, spec_list_empty,
+};
+mount core.database.sqlite.native.column.coerce.{
+    to_int64, to_double, to_text, to_blob,
+};
+mount core.database.sqlite.native.column.row.{
+    ResultRow, result_row_with, empty_row,
+};
+mount base.{Some, None, Maybe, Bool, Text};
+
+// -----------------------------------------------------------------------------
+// ColumnValue
+// -----------------------------------------------------------------------------
+
+fn test_type_codes_match_sqlite() {
+    assert_eq(type_code(&CvInt64(0 as Int64)), SQLITE_INTEGER);
+    assert_eq(type_code(&CvReal(0.0 as Float64)), SQLITE_FLOAT);
+    assert_eq(type_code(&CvText("a".clone())), SQLITE_TEXT);
+    assert_eq(type_code(&CvNull), SQLITE_NULL);
+}
+
+fn test_type_names_match_sqlite() {
+    assert(type_name(&CvNull) == "NULL".clone());
+    assert(type_name(&CvInt64(0 as Int64)) == "INTEGER".clone());
+    assert(type_name(&CvReal(0.0 as Float64)) == "REAL".clone());
+    assert(type_name(&CvText("a".clone())) == "TEXT".clone());
+}
+
+fn test_byte_size_zero_for_scalar() {
+    assert_eq(byte_size(&CvNull), 0);
+    assert_eq(byte_size(&CvInt64(0 as Int64)), 0);
+}
+
+fn test_byte_size_text_blob() {
+    assert_eq(byte_size(&CvText("hello".clone())), 5);
+    let mut b: List<Byte> = List.new();
+    b.push(0xDE as Byte);
+    b.push(0xAD as Byte);
+    assert_eq(byte_size(&CvBlob(b)), 2);
+}
+
+fn test_is_null() {
+    assert(is_null(&CvNull));
+    assert(!is_null(&CvInt64(7 as Int64)));
+}
+
+// -----------------------------------------------------------------------------
+// ColumnSpec
+// -----------------------------------------------------------------------------
+
+fn make_spec(name: Text, table: Text) -> ColumnSpec {
+    column_spec(name, "INTEGER".clone(), "main".clone(), table, "id".clone(), false)
+}
+
+fn test_is_table_column_when_table_set() {
+    let s = make_spec("id".clone(), "users".clone());
+    assert(s.is_table_column());
+}
+
+fn test_is_table_column_false_when_table_empty() {
+    let s = make_spec("expr".clone(), "".clone());
+    assert(!s.is_table_column());
+}
+
+fn test_spec_list_find_by_name() {
+    let mut l = spec_list_empty();
+    l.add(make_spec("id".clone(), "users".clone()));
+    l.add(make_spec("name".clone(), "users".clone()));
+    match l.find_by_name(&"name".clone()) {
+        Some(idx) => assert_eq(idx, 1),
+        None      => panic("name found"),
+    }
+}
+
+fn test_spec_list_lookup_out_of_range() {
+    let l = spec_list_empty();
+    match l.lookup(0) {
+        None    => {},
+        Some(_) => panic("none"),
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Coercions
+// -----------------------------------------------------------------------------
+
+fn test_to_int64_from_real_truncates() {
+    assert_eq(to_int64(&CvReal(3.7 as Float64)), 3 as Int64);
+}
+
+fn test_to_int64_from_text() {
+    assert_eq(to_int64(&CvText("42".clone())), 42 as Int64);
+}
+
+fn test_to_int64_negative_text() {
+    assert_eq(to_int64(&CvText("-7".clone())), -7 as Int64);
+}
+
+fn test_to_text_from_int64() {
+    assert(to_text(&CvInt64(42 as Int64)) == "42".clone());
+}
+
+fn test_to_text_from_null_empty() {
+    assert_eq(to_text(&CvNull).len(), 0);
+}
+
+fn test_to_double_from_text() {
+    let v = to_double(&CvText("3.5".clone()));
+    let diff = if v > (3.5 as Float64) { v - (3.5 as Float64) } else { (3.5 as Float64) - v };
+    assert(diff < (0.001 as Float64));
+}
+
+fn test_to_blob_passthrough() {
+    let mut b: List<Byte> = List.new();
+    b.push(0xAB as Byte);
+    let out = to_blob(&CvBlob(b));
+    assert_eq(out.len(), 1);
+}
+
+// -----------------------------------------------------------------------------
+// ResultRow
+// -----------------------------------------------------------------------------
+
+fn make_row() -> ResultRow {
+    let mut specs = spec_list_empty();
+    specs.add(make_spec("id".clone(), "users".clone()));
+    specs.add(make_spec("name".clone(), "users".clone()));
+    let mut vals: List<ColumnValue> = List.new();
+    vals.push(CvInt64(7 as Int64));
+    vals.push(CvText("Ada".clone()));
+    result_row_with(specs, vals)
+}
+
+fn test_result_row_column_count() {
+    let r = make_row();
+    assert_eq(r.column_count(), 2);
+}
+
+fn test_result_row_int64_at() {
+    let r = make_row();
+    assert_eq(r.int64_at(0), 7 as Int64);
+}
+
+fn test_result_row_text_at() {
+    let r = make_row();
+    assert(r.text_at(1) == "Ada".clone());
+}
+
+fn test_result_row_type_at() {
+    let r = make_row();
+    assert_eq(r.type_at(0), SQLITE_INTEGER);
+    assert_eq(r.type_at(1), SQLITE_TEXT);
+}
+
+fn test_result_row_name_at() {
+    let r = make_row();
+    assert(r.name_at(1) == "name".clone());
+}
+
+fn test_empty_row_zero_columns() {
+    let r = empty_row();
+    assert_eq(r.column_count(), 0);
+}
+
+fn main() {
+    test_type_codes_match_sqlite();
+    test_type_names_match_sqlite();
+    test_byte_size_zero_for_scalar();
+    test_byte_size_text_blob();
+    test_is_null();
+    test_is_table_column_when_table_set();
+    test_is_table_column_false_when_table_empty();
+    test_spec_list_find_by_name();
+    test_spec_list_lookup_out_of_range();
+    test_to_int64_from_real_truncates();
+    test_to_int64_from_text();
+    test_to_int64_negative_text();
+    test_to_text_from_int64();
+    test_to_text_from_null_empty();
+    test_to_double_from_text();
+    test_to_blob_passthrough();
+    test_result_row_column_count();
+    test_result_row_int64_at();
+    test_result_row_text_at();
+    test_result_row_type_at();
+    test_result_row_name_at();
+    test_empty_row_zero_columns();
+}

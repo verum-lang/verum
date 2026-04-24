@@ -1,0 +1,154 @@
+// =============================================================================
+// status/kind.vr — StatusKind taxonomy
+// =============================================================================
+// Spec: SQLite C API — SQLITE_STATUS_* / SQLITE_DBSTATUS_* / SQLITE_STMTSTATUS_*
+//
+// Each variant matches an SQLite-defined counter. Numeric codes are
+// from sqlite3.h (verbatim).
+// =============================================================================
+
+module core.database.sqlite.native.status.kind;
+
+mount core.*;
+mount base.{Text, Bool};
+
+// -----------------------------------------------------------------------------
+// ProcessKind — sqlite3_status64
+// -----------------------------------------------------------------------------
+
+public type ProcessKind is
+      PsMemoryUsed                 // SQLITE_STATUS_MEMORY_USED         = 0
+    | PsPagecacheUsed              // SQLITE_STATUS_PAGECACHE_USED      = 1
+    | PsPagecacheOverflow          // SQLITE_STATUS_PAGECACHE_OVERFLOW  = 2
+    | PsScratchUsed                // SQLITE_STATUS_SCRATCH_USED        = 3 (deprecated)
+    | PsScratchOverflow            // SQLITE_STATUS_SCRATCH_OVERFLOW    = 4 (deprecated)
+    | PsMallocSize                 // SQLITE_STATUS_MALLOC_SIZE         = 5
+    | PsParserStack                // SQLITE_STATUS_PARSER_STACK        = 6
+    | PsPagecacheSize              // SQLITE_STATUS_PAGECACHE_SIZE      = 7
+    | PsScratchSize                // SQLITE_STATUS_SCRATCH_SIZE        = 8
+    | PsMallocCount;               // SQLITE_STATUS_MALLOC_COUNT        = 9
+
+public fn process_code(k: &ProcessKind) -> Int {
+    match k {
+        PsMemoryUsed         => 0,
+        PsPagecacheUsed      => 1,
+        PsPagecacheOverflow  => 2,
+        PsScratchUsed        => 3,
+        PsScratchOverflow    => 4,
+        PsMallocSize         => 5,
+        PsParserStack        => 6,
+        PsPagecacheSize      => 7,
+        PsScratchSize        => 8,
+        PsMallocCount        => 9,
+    }
+}
+
+public fn process_name(k: &ProcessKind) -> Text {
+    match k {
+        PsMemoryUsed         => "memory_used".clone(),
+        PsPagecacheUsed      => "pagecache_used".clone(),
+        PsPagecacheOverflow  => "pagecache_overflow".clone(),
+        PsScratchUsed        => "scratch_used".clone(),
+        PsScratchOverflow    => "scratch_overflow".clone(),
+        PsMallocSize         => "malloc_size".clone(),
+        PsParserStack        => "parser_stack".clone(),
+        PsPagecacheSize      => "pagecache_size".clone(),
+        PsScratchSize        => "scratch_size".clone(),
+        PsMallocCount        => "malloc_count".clone(),
+    }
+}
+
+// -----------------------------------------------------------------------------
+// DbKind — sqlite3_db_status
+// -----------------------------------------------------------------------------
+
+public type DbKind is
+      DsLookasideUsed              // SQLITE_DBSTATUS_LOOKASIDE_USED       = 0
+    | DsCacheUsed                  // SQLITE_DBSTATUS_CACHE_USED           = 1
+    | DsSchemaUsed                 // SQLITE_DBSTATUS_SCHEMA_USED          = 2
+    | DsStmtUsed                   // SQLITE_DBSTATUS_STMT_USED            = 3
+    | DsLookasideHit               // SQLITE_DBSTATUS_LOOKASIDE_HIT        = 4
+    | DsLookasideMissSize          // SQLITE_DBSTATUS_LOOKASIDE_MISS_SIZE  = 5
+    | DsLookasideMissFull          // SQLITE_DBSTATUS_LOOKASIDE_MISS_FULL  = 6
+    | DsCacheHit                   // SQLITE_DBSTATUS_CACHE_HIT            = 7
+    | DsCacheMiss                  // SQLITE_DBSTATUS_CACHE_MISS           = 8
+    | DsCacheWrite                 // SQLITE_DBSTATUS_CACHE_WRITE          = 9
+    | DsDeferredFks                // SQLITE_DBSTATUS_DEFERRED_FKS         = 10
+    | DsCacheUsedShared            // SQLITE_DBSTATUS_CACHE_USED_SHARED    = 11
+    | DsCacheSpill;                // SQLITE_DBSTATUS_CACHE_SPILL          = 12
+
+public fn db_code(k: &DbKind) -> Int {
+    match k {
+        DsLookasideUsed       => 0,
+        DsCacheUsed           => 1,
+        DsSchemaUsed          => 2,
+        DsStmtUsed            => 3,
+        DsLookasideHit        => 4,
+        DsLookasideMissSize   => 5,
+        DsLookasideMissFull   => 6,
+        DsCacheHit            => 7,
+        DsCacheMiss           => 8,
+        DsCacheWrite          => 9,
+        DsDeferredFks         => 10,
+        DsCacheUsedShared     => 11,
+        DsCacheSpill          => 12,
+    }
+}
+
+public fn db_name(k: &DbKind) -> Text {
+    match k {
+        DsLookasideUsed       => "lookaside_used".clone(),
+        DsCacheUsed           => "cache_used".clone(),
+        DsSchemaUsed          => "schema_used".clone(),
+        DsStmtUsed            => "stmt_used".clone(),
+        DsLookasideHit        => "lookaside_hit".clone(),
+        DsLookasideMissSize   => "lookaside_miss_size".clone(),
+        DsLookasideMissFull   => "lookaside_miss_full".clone(),
+        DsCacheHit            => "cache_hit".clone(),
+        DsCacheMiss           => "cache_miss".clone(),
+        DsCacheWrite          => "cache_write".clone(),
+        DsDeferredFks         => "deferred_fks".clone(),
+        DsCacheUsedShared     => "cache_used_shared".clone(),
+        DsCacheSpill          => "cache_spill".clone(),
+    }
+}
+
+// -----------------------------------------------------------------------------
+// StmtKind — sqlite3_stmt_status
+// -----------------------------------------------------------------------------
+
+public type StmtKind is
+      SsFullscanStep               // SQLITE_STMTSTATUS_FULLSCAN_STEP   = 1
+    | SsSort                       // SQLITE_STMTSTATUS_SORT            = 2
+    | SsAutoindex                  // SQLITE_STMTSTATUS_AUTOINDEX       = 3
+    | SsVmStep                     // SQLITE_STMTSTATUS_VM_STEP         = 4
+    | SsReprepare                  // SQLITE_STMTSTATUS_REPREPARE       = 5
+    | SsRun                        // SQLITE_STMTSTATUS_RUN             = 6
+    | SsFilterMiss                 // SQLITE_STMTSTATUS_FILTER_MISS     = 7
+    | SsFilterHit;                 // SQLITE_STMTSTATUS_FILTER_HIT      = 8
+
+public fn stmt_code(k: &StmtKind) -> Int {
+    match k {
+        SsFullscanStep => 1,
+        SsSort         => 2,
+        SsAutoindex    => 3,
+        SsVmStep       => 4,
+        SsReprepare    => 5,
+        SsRun          => 6,
+        SsFilterMiss   => 7,
+        SsFilterHit    => 8,
+    }
+}
+
+public fn stmt_name(k: &StmtKind) -> Text {
+    match k {
+        SsFullscanStep => "fullscan_step".clone(),
+        SsSort         => "sort".clone(),
+        SsAutoindex    => "autoindex".clone(),
+        SsVmStep       => "vm_step".clone(),
+        SsReprepare    => "reprepare".clone(),
+        SsRun          => "run".clone(),
+        SsFilterMiss   => "filter_miss".clone(),
+        SsFilterHit    => "filter_hit".clone(),
+    }
+}

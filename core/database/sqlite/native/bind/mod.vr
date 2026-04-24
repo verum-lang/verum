@@ -1,0 +1,23 @@
+// =============================================================================
+// core/database/sqlite/native/bind/mod.vr
+// =============================================================================
+// Layer: 6 (per-Connection — sqlite3_bind_* surface)
+// Spec: SQLite C API — `sqlite3_bind_int64`, `sqlite3_bind_text`,
+// `sqlite3_bind_blob`, `sqlite3_bind_zeroblob`, `sqlite3_bind_null`,
+// `sqlite3_bind_value`, `sqlite3_bind_parameter_count`,
+// `sqlite3_bind_parameter_index`, `sqlite3_bind_parameter_name`,
+// `sqlite3_clear_bindings`, `sqlite3_reset`.
+//
+// Submodules:
+//   * `param`    — TypedParam sum (Int64/Real/Text/Blob/Null/ZeroBlob)
+//   * `index`    — parameter resolution: `?` / `?N` / `:name` / `$name` / `@name`
+//   * `bindset`  — per-statement BindSet collection + resize/clear/reset
+//   * `error`    — BindError taxonomy
+// =============================================================================
+
+module core.database.sqlite.native.bind;
+
+public module param;
+public module index;
+public module bindset;
+public module error;

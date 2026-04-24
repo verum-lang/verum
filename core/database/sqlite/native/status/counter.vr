@@ -1,0 +1,67 @@
+// =============================================================================
+// status/counter.vr — Counter w/ value + high-water-mark
+// =============================================================================
+// Spec: SQLite C API
+//
+// SQLite's counter API returns BOTH the current value and the
+// high-water-mark since the last reset. `Counter.observe(v)` advances
+// both; `reset_high_water` clears just the HWM.
+// =============================================================================
+
+module core.database.sqlite.native.status.counter;
+
+mount core.*;
+mount base.{Bool};
+
+public type Counter is {
+    current: Int64,
+    high_water: Int64,
+}
+
+public fn counter_zero() -> Counter {
+    Counter { current: 0 as Int64, high_water: 0 as Int64 }
+}
+
+implement Counter {
+    pub fn observe(&mut self, v: Int64) {
+        self.current = v;
+        if v > self.high_water { self.high_water = v; }
+    }
+
+    pub fn add(&mut self, delta: Int64) {
+        self.current = self.current + delta;
+        if self.current > self.high_water { self.high_water = self.current; }
+    }
+
+    pub fn sub(&mut self, delta: Int64) {
+        self.current = self.current - delta;
+        // sub never advances HWM.
+    }
+
+    /// SQLite's reset semantics: leave `current` alone; clear `high_water`
+    /// to `current`.
+    pub fn reset_high_water(&mut self) { self.high_water = self.current; }
+
+    pub fn snapshot(&self) -> (Int64, Int64) { (self.current, self.high_water) }
+}
+
+// -----------------------------------------------------------------------------
+// CounterPair — for counters where both directions matter (hits/misses)
+// -----------------------------------------------------------------------------
+
+public type CounterPair is { hits: Counter, misses: Counter }
+
+public fn counter_pair_zero() -> CounterPair {
+    CounterPair { hits: counter_zero(), misses: counter_zero() }
+}
+
+implement CounterPair {
+    pub fn note_hit(&mut self) { self.hits.add(1 as Int64); }
+    pub fn note_miss(&mut self) { self.misses.add(1 as Int64); }
+
+    pub fn ratio(&self) -> Float64 {
+        let total = self.hits.current + self.misses.current;
+        if total == (0 as Int64) { return 0.0 as Float64; }
+        (self.hits.current as Float64) / (total as Float64)
+    }
+}

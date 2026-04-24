@@ -164,3 +164,11 @@ public module prng;
 public module trace;
 // - journal_mode: JournalMode taxonomy + per-mode semantics + transition plans (§18.4)
 public module journal_mode;
+// - bind: sqlite3_bind_* surface — TypedParam + ParamIndex + BindSet
+public module bind;
+// - column: sqlite3_column_* surface — ColumnValue + ColumnSpec + ResultRow
+public module column;
+// - status: sqlite3_status / db_status / stmt_status counters
+public module status;
+// - lockfile: SQLite reserved-byte lock scheme + LockState + transition plans (§7.4)
+public module lockfile;

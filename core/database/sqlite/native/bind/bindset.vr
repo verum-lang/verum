@@ -1,0 +1,110 @@
+// =============================================================================
+// bind/bindset.vr — per-statement BindSet
+// =============================================================================
+// Spec: SQLite C API
+//
+// `BindSet` is the array-of-TypedParam attached to one PreparedStatement.
+// Operations:
+//
+//   * `bind(idx, param)`   — set slot
+//   * `clear()`            — sqlite3_clear_bindings — set every slot to NULL
+//   * `reset()`            — sqlite3_reset — clear executed-row state
+//                             (NOT bindings; matches SQLite semantics)
+//   * `lookup(idx)`        — read slot
+// =============================================================================
+
+module core.database.sqlite.native.bind.bindset;
+
+mount core.*;
+mount base.{Text, Bool, Maybe};
+mount collections.List;
+mount core.database.sqlite.native.bind.param.{
+    TypedParam, TpNull, clone_param, is_null_param, param_byte_size,
+};
+mount core.database.sqlite.native.bind.error.{
+    BindError, BeRange, BeStmtBusy, BeTooLarge,
+};
+
+// -----------------------------------------------------------------------------
+// BindSet
+// -----------------------------------------------------------------------------
+
+public type BindSet is {
+    /// Always sized to highest_index — entries default to TpNull.
+    slots: List<TypedParam>,
+    /// True iff a step is in progress; bind operations are forbidden.
+    step_in_progress: Bool,
+    /// Maximum payload size accepted (default 1 GiB; SQLITE_LIMIT_LENGTH).
+    max_payload_bytes: Int,
+}
+
+public const DEFAULT_MAX_PAYLOAD_BYTES: Int = 1_000_000_000;    // 1 GB ish
+
+public fn bindset_new(parameter_count: Int) -> BindSet {
+    let mut slots: List<TypedParam> = List.new();
+    let mut i: Int = 0;
+    while i < parameter_count { slots.push(TpNull); i = i + 1; }
+    BindSet {
+        slots: slots,
+        step_in_progress: false,
+        max_payload_bytes: DEFAULT_MAX_PAYLOAD_BYTES,
+    }
+}
+
+implement BindSet {
+    public fn parameter_count(&self) -> Int { self.slots.len() }
+
+    pub fn note_step_started(&mut self) { self.step_in_progress = true; }
+    pub fn note_step_finished(&mut self) { self.step_in_progress = false; }
+
+    /// `idx` is 1-based.
+    pub fn bind(&mut self, idx: Int, value: TypedParam) -> base.Result<(), BindError> {
+        if self.step_in_progress { return base.Err(BeStmtBusy); }
+        if idx < 1 || idx > self.slots.len() { return base.Err(BeRange(idx)); }
+        let size = param_byte_size(&value);
+        if size > self.max_payload_bytes { return base.Err(BeTooLarge(size)); }
+        self.slots[idx - 1] = value;
+        base.Ok(())
+    }
+
+    pub fn lookup(&self, idx: Int) -> Maybe<TypedParam> {
+        if idx < 1 || idx > self.slots.len() { return None; }
+        Some(clone_param(&self.slots[idx - 1]))
+    }
+
+    /// sqlite3_clear_bindings — set every slot to NULL.
+    pub fn clear(&mut self) {
+        let mut i: Int = 0;
+        while i < self.slots.len() {
+            self.slots[i] = TpNull;
+            i = i + 1;
+        }
+    }
+
+    /// Count slots that are currently non-NULL.
+    pub fn populated_count(&self) -> Int {
+        let mut n: Int = 0;
+        let mut i: Int = 0;
+        while i < self.slots.len() {
+            if !is_null_param(&self.slots[i]) { n = n + 1; }
+            i = i + 1;
+        }
+        n
+    }
+
+    /// Returns true iff ALL slots are non-NULL — useful guard before
+    /// the first sqlite3_step.
+    pub fn fully_bound(&self) -> Bool {
+        let mut i: Int = 0;
+        while i < self.slots.len() {
+            if is_null_param(&self.slots[i]) { return false; }
+            i = i + 1;
+        }
+        true
+    }
+
+    /// sqlite3_reset — bindings are PRESERVED; only execution state is
+    /// cleared. We model this as a no-op for the BindSet (caller flips
+    /// step_in_progress on the surrounding PreparedStatement).
+    pub fn reset(&mut self) { self.step_in_progress = false; }
+}

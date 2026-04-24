@@ -1,0 +1,70 @@
+// =============================================================================
+// lockfile/state.vr — five-state LockState
+// =============================================================================
+// Spec: sqlite-native.md §7.4
+//
+// Five lock states (matches xLock/xUnlock taxonomy in VFS):
+//
+//   * `LkNone`       — no lock held; no I/O permitted
+//   * `LkShared`     — readers only; many holders allowed
+//   * `LkReserved`   — one reader signalling intent to write
+//   * `LkPending`    — held briefly during shared→exclusive upgrade;
+//                       blocks new shared lockers
+//   * `LkExclusive`  — sole writer; all other holders evicted
+// =============================================================================
+
+module core.database.sqlite.native.lockfile.state;
+
+mount core.*;
+mount base.{Text, Bool};
+
+public type LockState is LkNone | LkShared | LkReserved | LkPending | LkExclusive;
+
+public fn state_name(s: &LockState) -> Text {
+    match s {
+        LkNone        => "NONE".clone(),
+        LkShared      => "SHARED".clone(),
+        LkReserved    => "RESERVED".clone(),
+        LkPending     => "PENDING".clone(),
+        LkExclusive   => "EXCLUSIVE".clone(),
+    }
+}
+
+/// Numeric rank — used to compare "is at least as strong as".
+public fn state_rank(s: &LockState) -> Int {
+    match s {
+        LkNone       => 0,
+        LkShared     => 1,
+        LkReserved   => 2,
+        LkPending    => 3,
+        LkExclusive  => 4,
+    }
+}
+
+public fn at_least(have: &LockState, want: &LockState) -> Bool {
+    state_rank(have) >= state_rank(want)
+}
+
+public fn permits_read(s: &LockState) -> Bool {
+    match s {
+        LkNone => false,
+        _      => true,
+    }
+}
+
+public fn permits_write(s: &LockState) -> Bool {
+    match s {
+        LkExclusive => true,
+        _           => false,
+    }
+}
+
+public fn permits_concurrent_readers(s: &LockState) -> Bool {
+    // SHARED + RESERVED both let other readers acquire SHARED;
+    // PENDING blocks new readers; EXCLUSIVE is sole holder.
+    match s {
+        LkShared   => true,
+        LkReserved => true,
+        _          => false,
+    }
+}

@@ -1,0 +1,79 @@
+// =============================================================================
+// status/database.vr — DbStatus aggregator (per-Connection)
+// =============================================================================
+// Spec: SQLite C API — sqlite3_db_status
+// =============================================================================
+
+module core.database.sqlite.native.status.database;
+
+mount core.*;
+mount base.{Bool};
+mount core.database.sqlite.native.status.kind.{
+    DbKind,
+    DsLookasideUsed, DsCacheUsed, DsSchemaUsed, DsStmtUsed,
+    DsLookasideHit, DsLookasideMissSize, DsLookasideMissFull,
+    DsCacheHit, DsCacheMiss, DsCacheWrite, DsDeferredFks,
+    DsCacheUsedShared, DsCacheSpill,
+};
+mount core.database.sqlite.native.status.counter.{
+    Counter, CounterPair, counter_zero, counter_pair_zero,
+};
+
+public type DbStatus is {
+    lookaside_used: Counter,
+    schema_used: Counter,
+    stmt_used: Counter,
+    cache_used: Counter,
+    cache_used_shared: Counter,
+    cache_spill: Counter,
+    deferred_fks: Counter,
+    /// Hit/miss pairs.
+    lookaside: CounterPair,
+    cache: CounterPair,
+    /// Cache writes — incremented per dirty page write-back.
+    cache_writes: Counter,
+}
+
+public fn db_status_new() -> DbStatus {
+    DbStatus {
+        lookaside_used: counter_zero(),
+        schema_used: counter_zero(),
+        stmt_used: counter_zero(),
+        cache_used: counter_zero(),
+        cache_used_shared: counter_zero(),
+        cache_spill: counter_zero(),
+        deferred_fks: counter_zero(),
+        lookaside: counter_pair_zero(),
+        cache: counter_pair_zero(),
+        cache_writes: counter_zero(),
+    }
+}
+
+implement DbStatus {
+    pub fn read(&self, kind: &DbKind) -> (Int64, Int64) {
+        match kind {
+            DsLookasideUsed       => self.lookaside_used.snapshot(),
+            DsCacheUsed           => self.cache_used.snapshot(),
+            DsSchemaUsed          => self.schema_used.snapshot(),
+            DsStmtUsed            => self.stmt_used.snapshot(),
+            DsLookasideHit        => self.lookaside.hits.snapshot(),
+            DsLookasideMissSize   => (0 as Int64, 0 as Int64),
+            DsLookasideMissFull   => self.lookaside.misses.snapshot(),
+            DsCacheHit            => self.cache.hits.snapshot(),
+            DsCacheMiss           => self.cache.misses.snapshot(),
+            DsCacheWrite          => self.cache_writes.snapshot(),
+            DsDeferredFks         => self.deferred_fks.snapshot(),
+            DsCacheUsedShared     => self.cache_used_shared.snapshot(),
+            DsCacheSpill          => self.cache_spill.snapshot(),
+        }
+    }
+
+    pub fn note_lookaside_hit(&mut self) { self.lookaside.note_hit(); }
+    pub fn note_lookaside_miss(&mut self) { self.lookaside.note_miss(); }
+    pub fn note_cache_hit(&mut self) { self.cache.note_hit(); }
+    pub fn note_cache_miss(&mut self) { self.cache.note_miss(); }
+    pub fn note_cache_write(&mut self) { self.cache_writes.add(1 as Int64); }
+    pub fn note_cache_spill(&mut self) { self.cache_spill.add(1 as Int64); }
+
+    pub fn cache_hit_ratio(&self) -> Float64 { self.cache.ratio() }
+}

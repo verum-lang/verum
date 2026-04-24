@@ -1,0 +1,94 @@
+// =============================================================================
+// column/spec.vr — ColumnSpec metadata
+// =============================================================================
+// Spec: SQLite C API
+//
+// `ColumnSpec` mirrors what sqlite3_column_name + decltype + database/
+// table/origin_name expose. Most planners produce this from the L5
+// resolved AST during prepare; the L7 façade serves it up via the C
+// API later.
+// =============================================================================
+
+module core.database.sqlite.native.column.spec;
+
+mount core.*;
+mount base.{Text, Bool, Maybe};
+mount collections.List;
+
+public type ColumnSpec is {
+    /// Name as the user sees it (column-alias if AS … was used).
+    name: Text,
+    /// Declared type from the CREATE TABLE statement (empty Text for
+    /// expression-only columns).
+    decltype: Text,
+    /// Schema this column lives in — typically "main" or "temp".
+    database_name: Text,
+    /// Table the column originated from (empty for expression columns).
+    table_name: Text,
+    /// Column name in the underlying table (may differ from `name` after
+    /// aliasing).
+    origin_name: Text,
+    /// True if SQLite was able to prove the column never produces NULL.
+    not_null: Bool,
+}
+
+public fn column_spec(
+    name: Text,
+    decltype: Text,
+    database_name: Text,
+    table_name: Text,
+    origin_name: Text,
+    not_null: Bool,
+) -> ColumnSpec {
+    ColumnSpec {
+        name: name,
+        decltype: decltype,
+        database_name: database_name,
+        table_name: table_name,
+        origin_name: origin_name,
+        not_null: not_null,
+    }
+}
+
+implement ColumnSpec {
+    /// True iff this column is sourced from a real table (not an
+    /// expression / aggregate / scalar-fn result).
+    pub fn is_table_column(&self) -> Bool { self.table_name.len() > 0 }
+}
+
+// -----------------------------------------------------------------------------
+// ColumnSpecList — fixed-size header for a result row
+// -----------------------------------------------------------------------------
+
+public type ColumnSpecList is { specs: List<ColumnSpec> }
+
+public fn spec_list_empty() -> ColumnSpecList { ColumnSpecList { specs: List.new() } }
+
+implement ColumnSpecList {
+    public fn count(&self) -> Int { self.specs.len() }
+
+    pub fn add(&mut self, s: ColumnSpec) { self.specs.push(s); }
+
+    pub fn lookup(&self, idx: Int) -> Maybe<ColumnSpec> {
+        if idx < 0 || idx >= self.specs.len() { return None; }
+        let s = &self.specs[idx];
+        Some(column_spec(
+            s.name.clone(),
+            s.decltype.clone(),
+            s.database_name.clone(),
+            s.table_name.clone(),
+            s.origin_name.clone(),
+            s.not_null,
+        ))
+    }
+
+    /// Find the first column whose name == `want`. Returns 0-based idx.
+    pub fn find_by_name(&self, want: &Text) -> Maybe<Int> {
+        let mut i: Int = 0;
+        while i < self.specs.len() {
+            if self.specs[i].name == *want { return Some(i); }
+            i = i + 1;
+        }
+        None
+    }
+}

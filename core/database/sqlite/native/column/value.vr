@@ -1,0 +1,85 @@
+// =============================================================================
+// column/value.vr — ColumnValue sum
+// =============================================================================
+// Spec: SQLite C API — sqlite3_column_*
+//
+// `ColumnValue` matches SQLite's five storage classes. The five
+// type-codes:
+//
+//   SQLITE_INTEGER = 1
+//   SQLITE_FLOAT   = 2
+//   SQLITE_TEXT    = 3
+//   SQLITE_BLOB    = 4
+//   SQLITE_NULL    = 5
+//
+// =============================================================================
+
+module core.database.sqlite.native.column.value;
+
+mount core.*;
+mount base.{Text, Bool};
+mount collections.List;
+
+public type ColumnValue is
+      CvNull
+    | CvInt64(Int64)
+    | CvReal(Float64)
+    | CvText(Text)
+    | CvBlob(List<Byte>);
+
+public const SQLITE_INTEGER: Int = 1;
+public const SQLITE_FLOAT: Int   = 2;
+public const SQLITE_TEXT: Int    = 3;
+public const SQLITE_BLOB: Int    = 4;
+public const SQLITE_NULL: Int    = 5;
+
+public fn type_code(v: &ColumnValue) -> Int {
+    match v {
+        CvNull       => SQLITE_NULL,
+        CvInt64(_)   => SQLITE_INTEGER,
+        CvReal(_)    => SQLITE_FLOAT,
+        CvText(_)    => SQLITE_TEXT,
+        CvBlob(_)    => SQLITE_BLOB,
+    }
+}
+
+public fn type_name(v: &ColumnValue) -> Text {
+    match v {
+        CvNull       => "NULL".clone(),
+        CvInt64(_)   => "INTEGER".clone(),
+        CvReal(_)    => "REAL".clone(),
+        CvText(_)    => "TEXT".clone(),
+        CvBlob(_)    => "BLOB".clone(),
+    }
+}
+
+public fn is_null(v: &ColumnValue) -> Bool {
+    match v {
+        CvNull => true,
+        _      => false,
+    }
+}
+
+/// sqlite3_column_bytes — returns 0 for NULL/INTEGER/REAL.
+public fn byte_size(v: &ColumnValue) -> Int {
+    match v {
+        CvText(t) => t.len(),
+        CvBlob(b) => b.len(),
+        _         => 0,
+    }
+}
+
+public fn clone_value(v: &ColumnValue) -> ColumnValue {
+    match v {
+        CvNull     => CvNull,
+        CvInt64(n) => CvInt64(*n),
+        CvReal(f)  => CvReal(*f),
+        CvText(t)  => CvText(t.clone()),
+        CvBlob(b)  => {
+            let mut copy: List<Byte> = List.new();
+            let mut i: Int = 0;
+            while i < b.len() { copy.push(b[i]); i = i + 1; }
+            CvBlob(copy)
+        }
+    }
+}

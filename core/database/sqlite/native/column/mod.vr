@@ -1,0 +1,23 @@
+// =============================================================================
+// core/database/sqlite/native/column/mod.vr
+// =============================================================================
+// Layer: 6 (per-Connection — sqlite3_column_* surface)
+// Spec: SQLite C API — `sqlite3_column_int64`, `sqlite3_column_text`,
+// `sqlite3_column_blob`, `sqlite3_column_type`, `sqlite3_column_count`,
+// `sqlite3_column_name`, `sqlite3_column_decltype`,
+// `sqlite3_column_database_name`, `sqlite3_column_table_name`,
+// `sqlite3_column_origin_name`.
+//
+// Submodules:
+//   * `value`     — ColumnValue sum (Int64/Real/Text/Blob/Null)
+//   * `spec`      — ColumnSpec metadata (name + decltype + nullability + origin)
+//   * `row`       — ResultRow read-side accessor
+//   * `coerce`    — typed-coerce helpers (text→int64, real→int64 truncation, …)
+// =============================================================================
+
+module core.database.sqlite.native.column;
+
+public module value;
+public module spec;
+public module row;
+public module coerce;

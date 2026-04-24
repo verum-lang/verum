@@ -1,0 +1,145 @@
+// =============================================================================
+// lockfile/transition.vr — valid transitions + LockTransitionPlan
+// =============================================================================
+// Spec: sqlite-native.md §7.4
+//
+// Transition matrix (rows = current state, cols = target state):
+//
+//                NONE  SHARED  RESERVED  PENDING  EXCLUSIVE
+//   NONE         ✓     ✓       ✗         ✗        ✗
+//   SHARED       ✓     ✓       ✓         ✓        ✓ (via PENDING)
+//   RESERVED     ✓     ✓       ✓         ✓        ✓ (via PENDING)
+//   PENDING      ✓     ✓       ✓         ✓        ✓
+//   EXCLUSIVE    ✓     ✓       ✗         ✗        ✓
+//
+// Each transition emits a sequence of byte-range operations the VFS
+// must perform (acquire/release on PENDING_BYTE / RESERVED_BYTE /
+// SHARED region).
+// =============================================================================
+
+module core.database.sqlite.native.lockfile.transition;
+
+mount core.*;
+mount base.{Text, Bool};
+mount collections.List;
+mount core.database.sqlite.native.lockfile.state.{
+    LockState, LkNone, LkShared, LkReserved, LkPending, LkExclusive,
+    state_rank, state_name,
+};
+mount core.database.sqlite.native.lockfile.region.{
+    LockRegion, pending_region, reserved_region, shared_region_full,
+};
+
+// -----------------------------------------------------------------------------
+// LockOp — primitive op the VFS executes
+// -----------------------------------------------------------------------------
+
+public type LockOp is
+      LoAcquireExclusive(LockRegion)
+    | LoAcquireShared(LockRegion)
+    | LoRelease(LockRegion)
+    | LoUpgradeShared(LockRegion);
+
+public fn op_kind_name(o: &LockOp) -> Text {
+    match o {
+        LoAcquireExclusive(_) => "acquire_excl".clone(),
+        LoAcquireShared(_)    => "acquire_shared".clone(),
+        LoRelease(_)          => "release".clone(),
+        LoUpgradeShared(_)    => "upgrade_shared".clone(),
+    }
+}
+
+// -----------------------------------------------------------------------------
+// LockTransitionPlan
+// -----------------------------------------------------------------------------
+
+public type LockTransitionPlan is {
+    from_state: LockState,
+    to_state: LockState,
+    ops: List<LockOp>,
+    valid: Bool,
+}
+
+public fn plan_for(from_state: LockState, to_state: LockState) -> LockTransitionPlan {
+    let valid = is_valid_transition(&from_state, &to_state);
+    if !valid {
+        return LockTransitionPlan {
+            from_state: from_state,
+            to_state: to_state,
+            ops: List.new(),
+            valid: false,
+        };
+    }
+    let ops = derive_ops(&from_state, &to_state);
+    LockTransitionPlan {
+        from_state: from_state,
+        to_state: to_state,
+        ops: ops,
+        valid: true,
+    }
+}
+
+public fn is_valid_transition(from: &LockState, to: &LockState) -> Bool {
+    // Block illegal direct upgrades from NONE: cannot jump to RESERVED/
+    // PENDING/EXCLUSIVE without first acquiring SHARED.
+    match from {
+        LkNone => match to {
+            LkNone | LkShared => true,
+            _                  => false,
+        },
+        // EXCLUSIVE cannot directly go to RESERVED/PENDING.
+        LkExclusive => match to {
+            LkExclusive | LkShared | LkNone => true,
+            _                                => false,
+        },
+        // SHARED / RESERVED / PENDING can move to any state.
+        _ => true,
+    }
+}
+
+// -----------------------------------------------------------------------------
+// derive_ops — emit primitive ops for the chosen transition
+// -----------------------------------------------------------------------------
+
+fn derive_ops(from: &LockState, to: &LockState) -> List<LockOp> {
+    let mut out: List<LockOp> = List.new();
+    let f = state_rank(from);
+    let t = state_rank(to);
+    if f == t { return out; }
+    if t > f {
+        // Upgrading.
+        match to {
+            LkShared      => { out.push(LoAcquireShared(shared_region_full())); }
+            LkReserved    => { out.push(LoAcquireExclusive(reserved_region())); }
+            LkPending     => {
+                // Acquire pending if not held; release SHARED for upgrade path.
+                out.push(LoAcquireExclusive(pending_region()));
+            }
+            LkExclusive   => {
+                out.push(LoAcquireExclusive(pending_region()));
+                out.push(LoUpgradeShared(shared_region_full()));
+            }
+            _ => {}
+        }
+    } else {
+        // Downgrading.
+        match to {
+            LkShared      => {
+                // Release RESERVED + PENDING + EXCLUSIVE-region as required.
+                out.push(LoRelease(pending_region()));
+                out.push(LoRelease(reserved_region()));
+            }
+            LkNone        => {
+                out.push(LoRelease(pending_region()));
+                out.push(LoRelease(reserved_region()));
+                out.push(LoRelease(shared_region_full()));
+            }
+            _ => {}
+        }
+    }
+    out
+}
+
+implement LockTransitionPlan {
+    pub fn op_count(&self) -> Int { self.ops.len() }
+}

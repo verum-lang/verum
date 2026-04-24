@@ -1,0 +1,203 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, bind, parameter, typed_param, bindset, error
+// @timeout: 5000
+// @expected-exit: 0
+//
+// bind/ surface:
+//   * TypedParam variants + byte_size + null predicate
+//   * ParamIndex add_anonymous / add_numbered / add_named (dedup)
+//   * find_by_name + lookup
+//   * BindSet bind / lookup / clear / fully_bound
+//   * BindError taxonomy + sqlite_error_code mapping
+
+mount core.database.sqlite.native.bind.param.{
+    TypedParam, TpNull, TpInt64, TpReal, TpText, TpBlob, TpZeroBlob,
+    param_kind_name, param_byte_size, is_null_param, clone_param,
+};
+mount core.database.sqlite.native.bind.index.{
+    ParamForm, PfAnonymous, PfNumbered, PfNamedColon, PfNamedDollar, PfNamedAt,
+    ParamSpec, param_spec, ParamIndex, param_index_empty,
+    form_name, form_kind_name,
+};
+mount core.database.sqlite.native.bind.bindset.{
+    BindSet, bindset_new, DEFAULT_MAX_PAYLOAD_BYTES,
+};
+mount core.database.sqlite.native.bind.error.{
+    BindError, BeRange, BeWrongType, BeUnknownName, BeStmtBusy, BeTooLarge,
+    bind_error_kind, sqlite_error_code,
+};
+mount base.{Ok, Err, Some, None, Maybe, Bool};
+
+// -----------------------------------------------------------------------------
+// TypedParam
+// -----------------------------------------------------------------------------
+
+fn test_param_kind_names() {
+    assert(param_kind_name(&TpNull) == "NULL".clone());
+    assert(param_kind_name(&TpInt64(0 as Int64)) == "INTEGER".clone());
+    assert(param_kind_name(&TpReal(0.0 as Float64)) == "REAL".clone());
+    assert(param_kind_name(&TpText("a".clone())) == "TEXT".clone());
+}
+
+fn test_param_byte_size() {
+    assert_eq(param_byte_size(&TpNull), 0);
+    assert_eq(param_byte_size(&TpInt64(0 as Int64)), 8);
+    assert_eq(param_byte_size(&TpReal(0.0 as Float64)), 8);
+    assert_eq(param_byte_size(&TpText("hello".clone())), 5);
+    assert_eq(param_byte_size(&TpZeroBlob(1024)), 1024);
+}
+
+fn test_is_null_param() {
+    assert(is_null_param(&TpNull));
+    assert(!is_null_param(&TpInt64(7 as Int64)));
+}
+
+// -----------------------------------------------------------------------------
+// ParamIndex
+// -----------------------------------------------------------------------------
+
+fn test_anonymous_returns_sequential_index() {
+    let mut p = param_index_empty();
+    let i1 = p.add_anonymous();
+    let i2 = p.add_anonymous();
+    assert_eq(i1, 1);
+    assert_eq(i2, 2);
+}
+
+fn test_named_dedup() {
+    let mut p = param_index_empty();
+    let a = p.add_named(PfNamedColon("foo".clone()));
+    let b = p.add_named(PfNamedColon("foo".clone()));
+    assert_eq(a, b);
+}
+
+fn test_named_distinct_for_different_names() {
+    let mut p = param_index_empty();
+    let a = p.add_named(PfNamedColon("foo".clone()));
+    let b = p.add_named(PfNamedColon("bar".clone()));
+    assert(a != b);
+}
+
+fn test_form_name_includes_prefix() {
+    match form_name(&PfNamedColon("foo".clone())) {
+        Some(n) => assert(n == ":foo".clone()),
+        None    => panic("colon name has prefix"),
+    }
+    match form_name(&PfNamedDollar("foo".clone())) {
+        Some(n) => assert(n == "$foo".clone()),
+        None    => panic("dollar name has prefix"),
+    }
+    match form_name(&PfNamedAt("foo".clone())) {
+        Some(n) => assert(n == "@foo".clone()),
+        None    => panic("at name has prefix"),
+    }
+}
+
+fn test_find_by_name_after_register() {
+    let mut p = param_index_empty();
+    let _ = p.add_named(PfNamedColon("foo".clone()));
+    match p.find_by_name(&":foo".clone()) {
+        Some(_) => {},
+        None    => panic("found"),
+    }
+}
+
+fn test_highest_index_tracks_anonymous_and_numbered() {
+    let mut p = param_index_empty();
+    p.add_anonymous();
+    p.add_numbered(7);
+    p.add_anonymous();
+    assert_eq(p.highest_index(), 7);
+}
+
+// -----------------------------------------------------------------------------
+// BindSet
+// -----------------------------------------------------------------------------
+
+fn test_bindset_initial_all_null() {
+    let bs = bindset_new(3);
+    assert_eq(bs.parameter_count(), 3);
+    assert_eq(bs.populated_count(), 0);
+    assert(!bs.fully_bound());
+}
+
+fn test_bindset_bind_and_lookup() {
+    let mut bs = bindset_new(2);
+    let _ = bs.bind(1, TpInt64(42 as Int64));
+    match bs.lookup(1) {
+        Some(_) => {},
+        None    => panic("slot 1 set"),
+    }
+    assert_eq(bs.populated_count(), 1);
+}
+
+fn test_bindset_bind_out_of_range() {
+    let mut bs = bindset_new(2);
+    match bs.bind(5, TpNull) {
+        Err(BeRange(_)) => {},
+        _               => panic("range error"),
+    }
+}
+
+fn test_bindset_bind_when_step_in_progress() {
+    let mut bs = bindset_new(1);
+    bs.note_step_started();
+    match bs.bind(1, TpNull) {
+        Err(BeStmtBusy) => {},
+        _               => panic("stmt busy"),
+    }
+}
+
+fn test_bindset_clear_resets_to_null() {
+    let mut bs = bindset_new(2);
+    let _ = bs.bind(1, TpInt64(42 as Int64));
+    bs.clear();
+    assert_eq(bs.populated_count(), 0);
+}
+
+fn test_bindset_fully_bound() {
+    let mut bs = bindset_new(2);
+    let _ = bs.bind(1, TpInt64(1 as Int64));
+    let _ = bs.bind(2, TpText("x".clone()));
+    assert(bs.fully_bound());
+}
+
+// -----------------------------------------------------------------------------
+// BindError
+// -----------------------------------------------------------------------------
+
+fn test_error_kind_names_unique() {
+    let n1 = bind_error_kind(&BeRange(1));
+    let n2 = bind_error_kind(&BeStmtBusy);
+    let n3 = bind_error_kind(&BeTooLarge(0));
+    assert(n1 != n2);
+    assert(n2 != n3);
+}
+
+fn test_sqlite_error_code_mapping() {
+    assert_eq(sqlite_error_code(&BeRange(1)), 25);     // SQLITE_RANGE
+    assert_eq(sqlite_error_code(&BeStmtBusy), 5);      // SQLITE_BUSY
+    assert_eq(sqlite_error_code(&BeTooLarge(0)), 18);  // SQLITE_TOOBIG
+}
+
+fn main() {
+    test_param_kind_names();
+    test_param_byte_size();
+    test_is_null_param();
+    test_anonymous_returns_sequential_index();
+    test_named_dedup();
+    test_named_distinct_for_different_names();
+    test_form_name_includes_prefix();
+    test_find_by_name_after_register();
+    test_highest_index_tracks_anonymous_and_numbered();
+    test_bindset_initial_all_null();
+    test_bindset_bind_and_lookup();
+    test_bindset_bind_out_of_range();
+    test_bindset_bind_when_step_in_progress();
+    test_bindset_clear_resets_to_null();
+    test_bindset_fully_bound();
+    test_error_kind_names_unique();
+    test_sqlite_error_code_mapping();
+}

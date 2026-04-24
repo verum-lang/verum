@@ -1,0 +1,170 @@
+// =============================================================================
+// bind/index.vr — parameter index resolution
+// =============================================================================
+// Spec: SQLite C API
+//
+// Five SQL forms map onto the same 1-based parameter index:
+//
+//   `?`              — auto-numbered (next free index)
+//   `?N`             — explicit numbered position
+//   `:name`          — named (colon)
+//   `$name`          — named (dollar — Tcl convention)
+//   `@name`          — named (at — sqlite extension)
+//
+// `ParamSpec` records ONE source-form occurrence; `ParamIndex` is the
+// per-statement collection that lets the binder resolve `name → 1-based idx`.
+// =============================================================================
+
+module core.database.sqlite.native.bind.index;
+
+mount core.*;
+mount base.{Text, Bool, Maybe};
+mount collections.List;
+
+// -----------------------------------------------------------------------------
+// ParamForm — which syntactic shape was used at the call site
+// -----------------------------------------------------------------------------
+
+public type ParamForm is
+      PfAnonymous              // `?`
+    | PfNumbered(Int)          // `?N`
+    | PfNamedColon(Text)       // `:name`
+    | PfNamedDollar(Text)      // `$name`
+    | PfNamedAt(Text);         // `@name`
+
+public fn form_kind_name(f: &ParamForm) -> Text {
+    match f {
+        PfAnonymous      => "anonymous".clone(),
+        PfNumbered(_)    => "numbered".clone(),
+        PfNamedColon(_)  => "named_colon".clone(),
+        PfNamedDollar(_) => "named_dollar".clone(),
+        PfNamedAt(_)     => "named_at".clone(),
+    }
+}
+
+public fn form_name(f: &ParamForm) -> Maybe<Text> {
+    match f {
+        PfNamedColon(n)  => Some(prefix_with(58 as Byte, n)),
+        PfNamedDollar(n) => Some(prefix_with(36 as Byte, n)),
+        PfNamedAt(n)     => Some(prefix_with(64 as Byte, n)),
+        _                => None,
+    }
+}
+
+fn prefix_with(b: Byte, name: &Text) -> Text {
+    let mut t = Text.new();
+    t.push_byte(b);
+    let bs = name.as_bytes();
+    let mut i: Int = 0;
+    while i < bs.len() { t.push_byte(bs[i]); i = i + 1; }
+    t
+}
+
+// -----------------------------------------------------------------------------
+// ParamSpec — one occurrence in the parsed SQL
+// -----------------------------------------------------------------------------
+
+public type ParamSpec is {
+    /// 1-based index into the parameter array.
+    index: Int,
+    form: ParamForm,
+}
+
+public fn param_spec(index: Int, form: ParamForm) -> ParamSpec {
+    ParamSpec { index: index, form: form }
+}
+
+// -----------------------------------------------------------------------------
+// ParamIndex — per-statement registry
+// -----------------------------------------------------------------------------
+
+public type ParamIndex is { specs: List<ParamSpec> }
+
+public fn param_index_empty() -> ParamIndex { ParamIndex { specs: List.new() } }
+
+implement ParamIndex {
+    public fn count(&self) -> Int { self.specs.len() }
+
+    /// Add a `?` (anonymous). The new index is `count() + 1`.
+    pub fn add_anonymous(&mut self) -> Int {
+        let idx = self.specs.len() + 1;
+        self.specs.push(param_spec(idx, PfAnonymous));
+        idx
+    }
+
+    /// Add a `?N` (explicit numbered).
+    pub fn add_numbered(&mut self, n: Int) {
+        self.specs.push(param_spec(n, PfNumbered(n)));
+    }
+
+    /// Add a named parameter; if the name was already seen, return its
+    /// previously-assigned index (SQLite's behaviour: `:foo` mentioned
+    /// twice gets ONE binding slot).
+    pub fn add_named(&mut self, form: ParamForm) -> Int {
+        match form_name(&form) {
+            Some(name) => {
+                match self.find_by_name(&name) {
+                    Some(s) => return s.index,
+                    None    => {}
+                }
+                let idx = self.specs.len() + 1;
+                self.specs.push(param_spec(idx, form));
+                idx
+            }
+            None => {
+                let idx = self.specs.len() + 1;
+                self.specs.push(param_spec(idx, form));
+                idx
+            }
+        }
+    }
+
+    /// Look up by 1-based index.
+    pub fn lookup(&self, index: Int) -> Maybe<ParamSpec> {
+        let mut i: Int = 0;
+        while i < self.specs.len() {
+            if self.specs[i].index == index {
+                let s = &self.specs[i];
+                return Some(param_spec(s.index, clone_form(&s.form)));
+            }
+            i = i + 1;
+        }
+        None
+    }
+
+    pub fn find_by_name(&self, full_name: &Text) -> Maybe<ParamSpec> {
+        let mut i: Int = 0;
+        while i < self.specs.len() {
+            match form_name(&self.specs[i].form) {
+                Some(n) => if n == *full_name {
+                    let s = &self.specs[i];
+                    return Some(param_spec(s.index, clone_form(&s.form)));
+                }
+                None => {}
+            }
+            i = i + 1;
+        }
+        None
+    }
+
+    /// Highest registered index — equivalent to sqlite3_bind_parameter_count.
+    pub fn highest_index(&self) -> Int {
+        let mut max: Int = 0;
+        let mut i: Int = 0;
+        while i < self.specs.len() {
+            if self.specs[i].index > max { max = self.specs[i].index; }
+            i = i + 1;
+        }
+        max
+    }
+}
+
+fn clone_form(f: &ParamForm) -> ParamForm {
+    match f {
+        PfAnonymous      => PfAnonymous,
+        PfNumbered(n)    => PfNumbered(*n),
+        PfNamedColon(n)  => PfNamedColon(n.clone()),
+        PfNamedDollar(n) => PfNamedDollar(n.clone()),
+        PfNamedAt(n)     => PfNamedAt(n.clone()),
+    }
+}

@@ -1,0 +1,83 @@
+// =============================================================================
+// status/process.vr — ProcessStatus aggregator
+// =============================================================================
+// Spec: SQLite C API — sqlite3_status64
+// =============================================================================
+
+module core.database.sqlite.native.status.process;
+
+mount core.*;
+mount base.{Bool, Maybe};
+mount collections.List;
+mount core.database.sqlite.native.status.kind.{
+    ProcessKind,
+    PsMemoryUsed, PsPagecacheUsed, PsPagecacheOverflow,
+    PsScratchUsed, PsScratchOverflow, PsMallocSize, PsParserStack,
+    PsPagecacheSize, PsScratchSize, PsMallocCount,
+    process_code, process_name,
+};
+mount core.database.sqlite.native.status.counter.{Counter, counter_zero};
+
+public type ProcessStatus is {
+    memory_used: Counter,
+    pagecache_used: Counter,
+    pagecache_overflow: Counter,
+    pagecache_size: Counter,
+    malloc_size: Counter,
+    malloc_count: Counter,
+    parser_stack: Counter,
+}
+
+public fn process_status_new() -> ProcessStatus {
+    ProcessStatus {
+        memory_used: counter_zero(),
+        pagecache_used: counter_zero(),
+        pagecache_overflow: counter_zero(),
+        pagecache_size: counter_zero(),
+        malloc_size: counter_zero(),
+        malloc_count: counter_zero(),
+        parser_stack: counter_zero(),
+    }
+}
+
+implement ProcessStatus {
+    /// Mirror of sqlite3_status64(op, *p, *pHwm, resetFlag).
+    pub fn read(&self, kind: &ProcessKind) -> (Int64, Int64) {
+        match kind {
+            PsMemoryUsed         => self.memory_used.snapshot(),
+            PsPagecacheUsed      => self.pagecache_used.snapshot(),
+            PsPagecacheOverflow  => self.pagecache_overflow.snapshot(),
+            PsPagecacheSize      => self.pagecache_size.snapshot(),
+            PsMallocSize         => self.malloc_size.snapshot(),
+            PsMallocCount        => self.malloc_count.snapshot(),
+            PsParserStack        => self.parser_stack.snapshot(),
+            _                     => (0 as Int64, 0 as Int64),
+        }
+    }
+
+    pub fn reset_high_water(&mut self, kind: &ProcessKind) {
+        match kind {
+            PsMemoryUsed         => self.memory_used.reset_high_water(),
+            PsPagecacheUsed      => self.pagecache_used.reset_high_water(),
+            PsPagecacheOverflow  => self.pagecache_overflow.reset_high_water(),
+            PsPagecacheSize      => self.pagecache_size.reset_high_water(),
+            PsMallocSize         => self.malloc_size.reset_high_water(),
+            PsMallocCount        => self.malloc_count.reset_high_water(),
+            PsParserStack        => self.parser_stack.reset_high_water(),
+            _                     => {}
+        }
+    }
+
+    /// Allocation tracking — bumps both memory_used and malloc_count.
+    pub fn note_allocation(&mut self, bytes: Int64) {
+        self.memory_used.add(bytes);
+        self.malloc_count.add(1 as Int64);
+        if bytes > self.malloc_size.current {
+            self.malloc_size.observe(bytes);
+        }
+    }
+
+    pub fn note_free(&mut self, bytes: Int64) {
+        self.memory_used.sub(bytes);
+    }
+}

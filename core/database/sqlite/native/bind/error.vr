@@ -1,0 +1,50 @@
+// =============================================================================
+// bind/error.vr — BindError taxonomy
+// =============================================================================
+// Spec: SQLite C API
+//
+// Five flavours of error the binder can raise:
+//
+//   * `BeRange`       — index < 1 or > sqlite3_bind_parameter_count
+//   * `BeWrongType`   — refused by an explicit ColumnSpec type check
+//   * `BeUnknownName` — `:foo` mentioned but not present in SQL
+//   * `BeStmtBusy`    — sqlite3_step in progress; bind not allowed
+//   * `BeTooLarge`    — bound payload exceeds SQLITE_LIMIT_LENGTH
+// =============================================================================
+
+module core.database.sqlite.native.bind.error;
+
+mount core.*;
+mount base.{Text, Bool};
+
+public type BindError is
+      BeRange(Int)              // offending index
+    | BeWrongType(Text, Text)   // (declared_type, actual_type)
+    | BeUnknownName(Text)
+    | BeStmtBusy
+    | BeTooLarge(Int);          // payload bytes
+
+public fn bind_error_kind(e: &BindError) -> Text {
+    match e {
+        BeRange(_)         => "range".clone(),
+        BeWrongType(_, _)  => "wrong_type".clone(),
+        BeUnknownName(_)   => "unknown_name".clone(),
+        BeStmtBusy         => "stmt_busy".clone(),
+        BeTooLarge(_)      => "too_large".clone(),
+    }
+}
+
+/// Map onto the closest SQLite error code:
+///   SQLITE_RANGE  = 25
+///   SQLITE_MISUSE = 21
+///   SQLITE_TOOBIG = 18
+///   SQLITE_BUSY   = 5
+public fn sqlite_error_code(e: &BindError) -> Int {
+    match e {
+        BeRange(_)         => 25,
+        BeWrongType(_, _)  => 21,
+        BeUnknownName(_)   => 25,
+        BeStmtBusy         => 5,
+        BeTooLarge(_)      => 18,
+    }
+}

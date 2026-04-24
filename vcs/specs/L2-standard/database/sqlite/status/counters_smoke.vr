@@ -1,0 +1,206 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, status, counter, db_status, stmt_status
+// @timeout: 5000
+// @expected-exit: 0
+//
+// status/ surface:
+//   * StatusKind code → name round-trip
+//   * Counter observe / add / sub + high-water-mark semantics
+//   * CounterPair hit/miss ratio
+//   * ProcessStatus note_allocation / note_free arithmetic
+//   * DbStatus cache_hit_ratio + counters
+//   * StmtStatus is_scan_heavy classifier
+
+mount core.database.sqlite.native.status.kind.{
+    ProcessKind, PsMemoryUsed, PsPagecacheUsed, PsMallocCount,
+    DbKind, DsCacheHit, DsCacheMiss, DsCacheUsed,
+    StmtKind, SsFullscanStep, SsVmStep,
+    process_code, process_name, db_code, db_name, stmt_code, stmt_name,
+};
+mount core.database.sqlite.native.status.counter.{
+    Counter, counter_zero,
+    CounterPair, counter_pair_zero,
+};
+mount core.database.sqlite.native.status.process.{
+    ProcessStatus, process_status_new,
+};
+mount core.database.sqlite.native.status.database.{
+    DbStatus, db_status_new,
+};
+mount core.database.sqlite.native.status.stmt.{
+    StmtStatus, stmt_status_new,
+};
+mount base.{Bool};
+
+// -----------------------------------------------------------------------------
+// Kind taxonomy
+// -----------------------------------------------------------------------------
+
+fn test_process_codes_distinct() {
+    assert_eq(process_code(&PsMemoryUsed), 0);
+    assert_eq(process_code(&PsPagecacheUsed), 1);
+    assert_eq(process_code(&PsMallocCount), 9);
+}
+
+fn test_process_names_unique() {
+    assert(process_name(&PsMemoryUsed) == "memory_used".clone());
+    assert(process_name(&PsPagecacheUsed) == "pagecache_used".clone());
+}
+
+fn test_db_codes_distinct() {
+    assert_eq(db_code(&DsCacheHit), 7);
+    assert_eq(db_code(&DsCacheMiss), 8);
+}
+
+fn test_stmt_codes_distinct() {
+    assert_eq(stmt_code(&SsFullscanStep), 1);
+    assert_eq(stmt_code(&SsVmStep), 4);
+}
+
+// -----------------------------------------------------------------------------
+// Counter
+// -----------------------------------------------------------------------------
+
+fn test_counter_observe_advances_hwm() {
+    let mut c = counter_zero();
+    c.observe(50 as Int64);
+    let (cur, hwm) = c.snapshot();
+    assert_eq(cur, 50 as Int64);
+    assert_eq(hwm, 50 as Int64);
+}
+
+fn test_counter_add_sub() {
+    let mut c = counter_zero();
+    c.add(100 as Int64);
+    c.sub(40 as Int64);
+    let (cur, hwm) = c.snapshot();
+    assert_eq(cur, 60 as Int64);
+    assert_eq(hwm, 100 as Int64);    // sub doesn't move HWM
+}
+
+fn test_counter_reset_high_water() {
+    let mut c = counter_zero();
+    c.observe(100 as Int64);
+    c.observe(20 as Int64);
+    c.reset_high_water();
+    let (cur, hwm) = c.snapshot();
+    assert_eq(cur, 20 as Int64);
+    assert_eq(hwm, 20 as Int64);
+}
+
+fn test_counter_pair_ratio() {
+    let mut p = counter_pair_zero();
+    p.note_hit();
+    p.note_hit();
+    p.note_hit();
+    p.note_miss();
+    let r = p.ratio();
+    assert(r > (0.7 as Float64));
+    assert(r < (0.8 as Float64));
+}
+
+// -----------------------------------------------------------------------------
+// ProcessStatus
+// -----------------------------------------------------------------------------
+
+fn test_process_note_allocation_increments_memory() {
+    let mut p = process_status_new();
+    p.note_allocation(1024 as Int64);
+    p.note_allocation(2048 as Int64);
+    let (cur, _) = p.read(&PsMemoryUsed);
+    assert_eq(cur, 3072 as Int64);
+}
+
+fn test_process_note_free_subtracts() {
+    let mut p = process_status_new();
+    p.note_allocation(2048 as Int64);
+    p.note_free(1024 as Int64);
+    let (cur, _) = p.read(&PsMemoryUsed);
+    assert_eq(cur, 1024 as Int64);
+}
+
+fn test_process_malloc_count_advances() {
+    let mut p = process_status_new();
+    p.note_allocation(64 as Int64);
+    p.note_allocation(64 as Int64);
+    let (cur, _) = p.read(&PsMallocCount);
+    assert_eq(cur, 2 as Int64);
+}
+
+// -----------------------------------------------------------------------------
+// DbStatus
+// -----------------------------------------------------------------------------
+
+fn test_db_cache_hit_ratio() {
+    let mut d = db_status_new();
+    d.note_cache_hit();
+    d.note_cache_hit();
+    d.note_cache_hit();
+    d.note_cache_miss();
+    let r = d.cache_hit_ratio();
+    assert(r > (0.7 as Float64));
+}
+
+fn test_db_cache_writes_increment() {
+    let mut d = db_status_new();
+    d.note_cache_write();
+    d.note_cache_write();
+    let (cur, _) = d.read(&DsCacheHit);
+    assert_eq(cur, 0 as Int64);   // hits separately tracked
+}
+
+fn test_db_cache_used_starts_zero() {
+    let d = db_status_new();
+    let (cur, _) = d.read(&DsCacheUsed);
+    assert_eq(cur, 0 as Int64);
+}
+
+// -----------------------------------------------------------------------------
+// StmtStatus
+// -----------------------------------------------------------------------------
+
+fn test_stmt_status_increment_full_scan() {
+    let mut s = stmt_status_new();
+    s.note_full_scan_step();
+    s.note_full_scan_step();
+    let (cur, _) = s.read(&SsFullscanStep);
+    assert_eq(cur, 2 as Int64);
+}
+
+fn test_stmt_is_scan_heavy_when_majority_scans() {
+    let mut s = stmt_status_new();
+    s.note_full_scan_step();
+    s.note_full_scan_step();
+    s.note_vm_step();
+    assert(s.is_scan_heavy());
+}
+
+fn test_stmt_is_scan_heavy_false_when_indexed() {
+    let mut s = stmt_status_new();
+    let mut i: Int = 0;
+    while i < 100 { s.note_vm_step(); i = i + 1; }
+    s.note_full_scan_step();
+    assert(!s.is_scan_heavy());
+}
+
+fn main() {
+    test_process_codes_distinct();
+    test_process_names_unique();
+    test_db_codes_distinct();
+    test_stmt_codes_distinct();
+    test_counter_observe_advances_hwm();
+    test_counter_add_sub();
+    test_counter_reset_high_water();
+    test_counter_pair_ratio();
+    test_process_note_allocation_increments_memory();
+    test_process_note_free_subtracts();
+    test_process_malloc_count_advances();
+    test_db_cache_hit_ratio();
+    test_db_cache_writes_increment();
+    test_db_cache_used_starts_zero();
+    test_stmt_status_increment_full_scan();
+    test_stmt_is_scan_heavy_when_majority_scans();
+    test_stmt_is_scan_heavy_false_when_indexed();
+}

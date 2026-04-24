@@ -1,0 +1,29 @@
+// =============================================================================
+// core/database/sqlite/native/status/mod.vr
+// =============================================================================
+// Layer: 7 (façade — sqlite3_status surface)
+// Spec: SQLite C API — `sqlite3_status64`, `sqlite3_db_status`,
+// `sqlite3_stmt_status`.
+//
+// Three counter universes:
+//
+//   * `process` — process-global (memory_used / page_cache_used /
+//                  scratch / pager / lookaside)
+//   * `database`— per-Connection (cache_used / schema_used / lookaside_used / …)
+//   * `stmt`    — per-PreparedStatement (full_scan / sort / autoindex / vm_step)
+//
+// Submodules:
+//   * `kind`    — StatusKind taxonomy (matches SQLITE_STATUS_* / SQLITE_DBSTATUS_*)
+//   * `counter` — Counter w/ value + high-water-mark + reset semantics
+//   * `process` — ProcessStatus aggregator
+//   * `database`— DbStatus aggregator
+//   * `stmt`    — StmtStatus aggregator
+// =============================================================================
+
+module core.database.sqlite.native.status;
+
+public module kind;
+public module counter;
+public module process;
+public module database;
+public module stmt;

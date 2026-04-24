@@ -1,0 +1,184 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, lockfile, region, lock_state, transition
+// @timeout: 5000
+// @expected-exit: 0
+//
+// lockfile/ surface:
+//   * Constants match SQLite (PENDING_BYTE etc.)
+//   * LockRegion overlap predicate
+//   * LockState rank monotone + read/write/concurrent predicates
+//   * Transition matrix accepts SHARED→EXCLUSIVE, rejects NONE→RESERVED
+//   * Plan emits ops for upgrade and release
+
+mount core.database.sqlite.native.lockfile.region.{
+    LockRegion, lock_region,
+    PENDING_BYTE, RESERVED_BYTE, SHARED_FIRST, SHARED_SIZE,
+    pending_region, reserved_region, shared_region_full, shared_region_for_byte,
+};
+mount core.database.sqlite.native.lockfile.state.{
+    LockState, LkNone, LkShared, LkReserved, LkPending, LkExclusive,
+    state_name, state_rank, at_least,
+    permits_read, permits_write, permits_concurrent_readers,
+};
+mount core.database.sqlite.native.lockfile.transition.{
+    LockOp, LoAcquireExclusive, LoAcquireShared, LoRelease, LoUpgradeShared,
+    LockTransitionPlan, plan_for, is_valid_transition,
+    op_kind_name,
+};
+mount base.{Bool};
+
+// -----------------------------------------------------------------------------
+// Region constants
+// -----------------------------------------------------------------------------
+
+fn test_lock_constants_match_sqlite() {
+    assert_eq(PENDING_BYTE, 0x40000000 as Int64);
+    assert_eq(RESERVED_BYTE, 0x40000001 as Int64);
+    assert_eq(SHARED_FIRST, 0x40000002 as Int64);
+    assert_eq(SHARED_SIZE, 510 as Int64);
+}
+
+fn test_pending_region_size() {
+    let r = pending_region();
+    assert_eq(r.length, 1 as Int64);
+}
+
+fn test_shared_region_full_size() {
+    let r = shared_region_full();
+    assert_eq(r.length, SHARED_SIZE);
+}
+
+fn test_shared_region_for_byte_clamps() {
+    let r = shared_region_for_byte(SHARED_SIZE * (10 as Int64));
+    assert(r.offset < SHARED_FIRST + SHARED_SIZE);
+}
+
+// -----------------------------------------------------------------------------
+// LockRegion overlap
+// -----------------------------------------------------------------------------
+
+fn test_lock_region_overlap_self() {
+    let r = pending_region();
+    let r2 = pending_region();
+    assert(r.overlaps(&r2));
+}
+
+fn test_lock_region_no_overlap() {
+    let p = pending_region();
+    let s = shared_region_full();
+    // pending byte sits BEFORE the shared region — no overlap.
+    assert(!p.overlaps(&s));
+}
+
+// -----------------------------------------------------------------------------
+// LockState
+// -----------------------------------------------------------------------------
+
+fn test_state_rank_monotonic() {
+    assert(state_rank(&LkNone) < state_rank(&LkShared));
+    assert(state_rank(&LkShared) < state_rank(&LkReserved));
+    assert(state_rank(&LkReserved) < state_rank(&LkPending));
+    assert(state_rank(&LkPending) < state_rank(&LkExclusive));
+}
+
+fn test_at_least_predicate() {
+    assert(at_least(&LkExclusive, &LkShared));
+    assert(at_least(&LkShared, &LkShared));
+    assert(!at_least(&LkShared, &LkExclusive));
+}
+
+fn test_permits_read() {
+    assert(!permits_read(&LkNone));
+    assert(permits_read(&LkShared));
+    assert(permits_read(&LkExclusive));
+}
+
+fn test_permits_write_only_exclusive() {
+    assert(permits_write(&LkExclusive));
+    assert(!permits_write(&LkReserved));
+    assert(!permits_write(&LkShared));
+}
+
+fn test_permits_concurrent_readers() {
+    assert(permits_concurrent_readers(&LkShared));
+    assert(permits_concurrent_readers(&LkReserved));
+    assert(!permits_concurrent_readers(&LkPending));
+    assert(!permits_concurrent_readers(&LkExclusive));
+}
+
+fn test_state_names_unique() {
+    assert(state_name(&LkNone) == "NONE".clone());
+    assert(state_name(&LkShared) == "SHARED".clone());
+    assert(state_name(&LkExclusive) == "EXCLUSIVE".clone());
+}
+
+// -----------------------------------------------------------------------------
+// Transition matrix
+// -----------------------------------------------------------------------------
+
+fn test_transition_none_to_shared_valid() {
+    assert(is_valid_transition(&LkNone, &LkShared));
+}
+
+fn test_transition_none_to_reserved_invalid() {
+    assert(!is_valid_transition(&LkNone, &LkReserved));
+}
+
+fn test_transition_shared_to_exclusive_valid() {
+    assert(is_valid_transition(&LkShared, &LkExclusive));
+}
+
+fn test_transition_exclusive_to_reserved_invalid() {
+    assert(!is_valid_transition(&LkExclusive, &LkReserved));
+}
+
+fn test_plan_for_invalid_marks_invalid() {
+    let p = plan_for(LkNone, LkReserved);
+    assert(!p.valid);
+    assert_eq(p.op_count(), 0);
+}
+
+fn test_plan_for_shared_to_exclusive_emits_ops() {
+    let p = plan_for(LkShared, LkExclusive);
+    assert(p.valid);
+    assert(p.op_count() > 0);
+}
+
+fn test_plan_for_release_to_none() {
+    let p = plan_for(LkExclusive, LkNone);
+    assert(p.valid);
+    assert(p.op_count() > 0);
+}
+
+fn test_op_kind_names_unique() {
+    let n1 = op_kind_name(&LoAcquireExclusive(pending_region()));
+    let n2 = op_kind_name(&LoAcquireShared(shared_region_full()));
+    let n3 = op_kind_name(&LoRelease(reserved_region()));
+    assert(n1 != n2);
+    assert(n2 != n3);
+}
+
+fn main() {
+    test_lock_constants_match_sqlite();
+    test_pending_region_size();
+    test_shared_region_full_size();
+    test_shared_region_for_byte_clamps();
+    test_lock_region_overlap_self();
+    test_lock_region_no_overlap();
+    test_state_rank_monotonic();
+    test_at_least_predicate();
+    test_permits_read();
+    test_permits_write_only_exclusive();
+    test_permits_concurrent_readers();
+    test_state_names_unique();
+    test_transition_none_to_shared_valid();
+    test_transition_none_to_reserved_invalid();
+    test_transition_shared_to_exclusive_valid();
+    test_transition_exclusive_to_reserved_invalid();
+    test_plan_for_invalid_marks_invalid();
+    test_plan_for_shared_to_exclusive_emits_ops();
+    test_plan_for_release_to_none();
+    test_op_kind_names_unique();
+}
