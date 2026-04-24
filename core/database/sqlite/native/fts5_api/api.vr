@@ -1,0 +1,58 @@
+// =============================================================================
+// fts5_api/api.vr — sqlite3_fts5_api vtable shape
+// =============================================================================
+// Spec: fts5.h
+//
+//   struct fts5_api {
+//     int iVersion;          /* 3 in current releases */
+//     int (*xCreateTokenizer)(...);
+//     int (*xFindTokenizer)(...);
+//     int (*xCreateFunction)(...);
+//     int (*xCreateTokenizer_v2)(...);      /* iVersion >= 3 */
+//     int (*xFindTokenizer_v2)(...);        /* iVersion >= 3 */
+//   };
+//
+// The catalogue stores which slots the runtime has bound.
+// =============================================================================
+
+module core.database.sqlite.native.fts5_api.api;
+
+mount core.*;
+mount base.{Bool};
+
+public type Fts5Api is {
+    /// Vtable version field; 1, 2, or 3 — iVersion >= 3 unlocks the
+    /// `_v2` registration variants.
+    i_version: Int,
+    has_create_tokenizer: Bool,
+    has_find_tokenizer: Bool,
+    has_create_function: Bool,
+    has_create_tokenizer_v2: Bool,
+    has_find_tokenizer_v2: Bool,
+}
+
+public fn default_api() -> Fts5Api {
+    Fts5Api {
+        i_version: 3,
+        has_create_tokenizer: true,
+        has_find_tokenizer: true,
+        has_create_function: true,
+        has_create_tokenizer_v2: true,
+        has_find_tokenizer_v2: true,
+    }
+}
+
+public fn legacy_v1_api() -> Fts5Api {
+    Fts5Api {
+        i_version: 1,
+        has_create_tokenizer: true,
+        has_find_tokenizer: true,
+        has_create_function: true,
+        has_create_tokenizer_v2: false,
+        has_find_tokenizer_v2: false,
+    }
+}
+
+public fn supports_v2_tokenizer(a: &Fts5Api) -> Bool {
+    a.i_version >= 3 && a.has_create_tokenizer_v2
+}

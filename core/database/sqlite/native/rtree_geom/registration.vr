@@ -1,0 +1,75 @@
+// =============================================================================
+// rtree_geom/registration.vr — geometry + query callback registry
+// =============================================================================
+// Spec: SQLite C API — rtree.h
+// =============================================================================
+
+module core.database.sqlite.native.rtree_geom.registration;
+
+mount core.*;
+mount base.{Bool, Text};
+mount collections.List;
+
+public type GeomKind is
+      GkGeometry         // classical xGeom returning Inside / Outside
+    | GkQuery;           // xQueryFunc returning Inside / Partial / Outside
+
+public fn kind_name(k: &GeomKind) -> Text {
+    match k {
+        GkGeometry => "geometry".clone(),
+        GkQuery    => "query".clone(),
+    }
+}
+
+public type Decl is {
+    name: Text,
+    kind: GeomKind,
+    context: Int64,
+    /// True iff the caller supplied an xDestructor (query-callback only).
+    has_destructor: Bool,
+}
+
+public fn new_decl(name: Text, kind: GeomKind, context: Int64) -> Decl {
+    Decl { name: name, kind: kind, context: context, has_destructor: false }
+}
+
+public fn with_destructor(d: &mut Decl, has: Bool) {
+    d.has_destructor = has;
+}
+
+public type RtreeGeomRegistry is {
+    decls: List<Decl>,
+}
+
+public fn new_registry() -> RtreeGeomRegistry {
+    RtreeGeomRegistry { decls: List.new() }
+}
+
+implement RtreeGeomRegistry {
+    pub fn register(&mut self, d: Decl) -> Bool {
+        let mut i: Int = 0;
+        while i < self.decls.len() {
+            let existing = self.decls.get(i);
+            if existing.name == d.name
+               && kind_name(&existing.kind) == kind_name(&d.kind) {
+                return false;
+            }
+            i = i + 1;
+        }
+        self.decls.push(d);
+        true
+    }
+
+    pub fn find(&self, name: &Text, kind: &GeomKind) -> Int {
+        let want = kind_name(kind);
+        let mut i: Int = 0;
+        while i < self.decls.len() {
+            let d = self.decls.get(i);
+            if d.name == *name && kind_name(&d.kind) == want { return i; }
+            i = i + 1;
+        }
+        -1
+    }
+
+    pub fn len(&self) -> Int { self.decls.len() }
+}

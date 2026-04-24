@@ -300,3 +300,19 @@ public module temp_path;
 public module trace_v2_api;
 // - commit_phasetwo: two-phase commit state machine + SQLITE_FCNTL_COMMIT_PHASETWO integration
 public module commit_phasetwo;
+// - fts5_api: sqlite3_fts5_api — xCreateTokenizer / xCreateFunction registration vtable
+public module fts5_api;
+// - rtree_geom: sqlite3_rtree_geometry_callback / _rtree_query_callback — MATCH callbacks
+public module rtree_geom;
+// - client_data: sqlite3_get_clientdata / _set_clientdata — per-conn named-pointer slots (3.44+)
+public module client_data;
+// - declare_vtab_api: sqlite3_declare_vtab — CREATE TABLE schema announcement
+public module declare_vtab_api;
+// - column_origin: sqlite3_column_{origin,database,table}_name + _decltype — column-origin reflection
+public module column_origin;
+// - scanstatus_v2: sqlite3_stmt_scanstatus_v2 + _reset — explain-analyze scan stats
+public module scanstatus_v2;
+// - interrupt_deadline: deadline-driven cancellation (higher-level composition over interrupt/)
+public module interrupt_deadline;
+// - cksm_file: SQLITE_FCNTL_CKSM_FILE + _RESERVE_BYTES — per-page checksum verify
+public module cksm_file;

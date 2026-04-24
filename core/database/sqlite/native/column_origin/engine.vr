@@ -1,0 +1,65 @@
+// =============================================================================
+// column_origin/engine.vr — per-column origin table
+// =============================================================================
+// Spec: SQLite C API
+// =============================================================================
+
+module core.database.sqlite.native.column_origin.engine;
+
+mount core.*;
+mount base.{Bool, Maybe, Text};
+mount collections.List;
+mount core.database.sqlite.native.column_origin.info.{
+    ColumnOriginInfo, derived_expression,
+};
+
+public type ColumnOriginTable is {
+    columns: List<ColumnOriginInfo>,
+    /// Mirrors SQLITE_ENABLE_COLUMN_METADATA — if false, all accessors
+    /// return empty strings.
+    metadata_enabled: Bool,
+}
+
+public fn new_table(metadata_enabled: Bool) -> ColumnOriginTable {
+    ColumnOriginTable {
+        columns: List.new(),
+        metadata_enabled: metadata_enabled,
+    }
+}
+
+implement ColumnOriginTable {
+    pub fn push(&mut self, info: ColumnOriginInfo) {
+        self.columns.push(info);
+    }
+
+    fn fetch(&self, col: Int) -> ColumnOriginInfo {
+        if col < 0 || col >= self.columns.len() || !self.metadata_enabled {
+            return derived_expression();
+        }
+        let entry = self.columns.get(col);
+        ColumnOriginInfo {
+            database: entry.database.clone(),
+            table: entry.table.clone(),
+            origin: entry.origin.clone(),
+            decltype: entry.decltype.clone(),
+        }
+    }
+
+    pub fn sqlite3_column_database_name(&self, col: Int) -> Text {
+        self.fetch(col).database
+    }
+
+    pub fn sqlite3_column_table_name(&self, col: Int) -> Text {
+        self.fetch(col).table
+    }
+
+    pub fn sqlite3_column_origin_name(&self, col: Int) -> Text {
+        self.fetch(col).origin
+    }
+
+    pub fn sqlite3_column_decltype(&self, col: Int) -> Text {
+        self.fetch(col).decltype
+    }
+
+    pub fn len(&self) -> Int { self.columns.len() }
+}

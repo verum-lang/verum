@@ -1,0 +1,61 @@
+// =============================================================================
+// interrupt_deadline/engine.vr — tick driver
+// =============================================================================
+// Spec: higher-level composition over `interrupt/` + `progress/`.
+//
+// The engine exposes a `tick(now_ns)` operation that the runtime
+// should call on the same cadence as the progress handler.  When the
+// deadline elapses, the engine asks the caller's `on_fire` closure to
+// actually interrupt (so the catalogue avoids bundling an
+// InterruptToken edge).
+// =============================================================================
+
+module core.database.sqlite.native.interrupt_deadline.engine;
+
+mount core.*;
+mount base.{Bool};
+mount core.database.sqlite.native.interrupt_deadline.deadline.{
+    Deadline, disarmed, armed_at, has_elapsed, remaining_ns,
+};
+
+public type DeadlineEngine is {
+    deadline: Deadline,
+    fired: Bool,
+    /// Total number of ticks observed since arming.
+    ticks_observed: Int64,
+}
+
+public fn new_engine() -> DeadlineEngine {
+    DeadlineEngine {
+        deadline: disarmed(),
+        fired: false,
+        ticks_observed: 0 as Int64,
+    }
+}
+
+implement DeadlineEngine {
+    pub fn arm(&mut self, absolute_ns: Int64) {
+        self.deadline = armed_at(absolute_ns);
+        self.fired = false;
+        self.ticks_observed = 0 as Int64;
+    }
+
+    pub fn disarm(&mut self) {
+        self.deadline.armed = false;
+    }
+
+    /// Observe a tick.  Returns true iff this tick caused the deadline
+    /// to fire for the first time.
+    pub fn tick(&mut self, now_ns: Int64, on_fire: fn()) -> Bool {
+        self.ticks_observed = self.ticks_observed + (1 as Int64);
+        if self.fired { return false; }
+        if !has_elapsed(&self.deadline, now_ns) { return false; }
+        self.fired = true;
+        (on_fire)();
+        true
+    }
+
+    pub fn remaining_ns_at(&self, now_ns: Int64) -> Int64 {
+        remaining_ns(&self.deadline, now_ns)
+    }
+}

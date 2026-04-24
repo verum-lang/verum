@@ -1,0 +1,65 @@
+// =============================================================================
+// scanstatus_v2/flags.vr — SCANSTAT_* fields + invocation flags
+// =============================================================================
+// Spec: SQLite C API
+// =============================================================================
+
+module core.database.sqlite.native.scanstatus_v2.flags;
+
+mount core.*;
+mount base.{Bool, Text};
+
+public const SQLITE_SCANSTAT_NLOOP: Int    = 0;
+public const SQLITE_SCANSTAT_NVISIT: Int   = 1;
+public const SQLITE_SCANSTAT_EST: Int      = 2;
+public const SQLITE_SCANSTAT_NAME: Int     = 3;
+public const SQLITE_SCANSTAT_EXPLAIN: Int  = 4;
+public const SQLITE_SCANSTAT_SELECTID: Int = 5;
+public const SQLITE_SCANSTAT_PARENTID: Int = 6;
+public const SQLITE_SCANSTAT_NCYCLE: Int   = 7;
+
+// v2 invocation flag.
+public const SQLITE_SCANSTAT_COMPLEX: Int  = 0x0001;
+
+public type ScanField is
+      SfNLoop
+    | SfNVisit
+    | SfEst
+    | SfName
+    | SfExplain
+    | SfSelectId
+    | SfParentId
+    | SfNCycle;
+
+public fn field_numeric(f: &ScanField) -> Int {
+    match f {
+        SfNLoop    => SQLITE_SCANSTAT_NLOOP,
+        SfNVisit   => SQLITE_SCANSTAT_NVISIT,
+        SfEst      => SQLITE_SCANSTAT_EST,
+        SfName     => SQLITE_SCANSTAT_NAME,
+        SfExplain  => SQLITE_SCANSTAT_EXPLAIN,
+        SfSelectId => SQLITE_SCANSTAT_SELECTID,
+        SfParentId => SQLITE_SCANSTAT_PARENTID,
+        SfNCycle   => SQLITE_SCANSTAT_NCYCLE,
+    }
+}
+
+public fn field_name(f: &ScanField) -> Text {
+    match f {
+        SfNLoop    => "nLoop".clone(),
+        SfNVisit   => "nVisit".clone(),
+        SfEst      => "nEst".clone(),
+        SfName     => "zName".clone(),
+        SfExplain  => "zExplain".clone(),
+        SfSelectId => "iSelectId".clone(),
+        SfParentId => "iParentId".clone(),
+        SfNCycle   => "nCycle".clone(),
+    }
+}
+
+public fn field_is_numeric(f: &ScanField) -> Bool {
+    match f {
+        SfName | SfExplain => false,
+        _ => true,
+    }
+}

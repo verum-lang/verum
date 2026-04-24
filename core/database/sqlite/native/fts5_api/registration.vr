@@ -1,0 +1,77 @@
+// =============================================================================
+// fts5_api/registration.vr — tokenizer / aux-fn registration records
+// =============================================================================
+// Spec: fts5.h
+//
+// Tokenizer registration is (name, pUserData, pTokenizer) and bumps a
+// name-keyed registry.  Auxiliary-function registration similarly is
+// (name, pUserData, xFunc).
+// =============================================================================
+
+module core.database.sqlite.native.fts5_api.registration;
+
+mount core.*;
+mount base.{Bool, Text};
+mount collections.List;
+
+public type TokenizerDecl is {
+    name: Text,
+    /// Opaque user-data pointer id (0 means NULL).
+    user_data: Int64,
+    /// True for v2 tokenizers (supports locale-aware tokenization).
+    v2: Bool,
+}
+
+public fn tokenizer_decl(name: Text, user_data: Int64, v2: Bool) -> TokenizerDecl {
+    TokenizerDecl { name: name, user_data: user_data, v2: v2 }
+}
+
+public type AuxFnDecl is {
+    name: Text,
+    user_data: Int64,
+}
+
+public fn aux_fn_decl(name: Text, user_data: Int64) -> AuxFnDecl {
+    AuxFnDecl { name: name, user_data: user_data }
+}
+
+public type Fts5Registry is {
+    tokenizers: List<TokenizerDecl>,
+    aux_fns: List<AuxFnDecl>,
+}
+
+public fn new_registry() -> Fts5Registry {
+    Fts5Registry { tokenizers: List.new(), aux_fns: List.new() }
+}
+
+implement Fts5Registry {
+    pub fn register_tokenizer(&mut self, d: TokenizerDecl) -> Bool {
+        if self.find_tokenizer(&d.name) >= 0 { return false; }
+        self.tokenizers.push(d);
+        true
+    }
+
+    pub fn find_tokenizer(&self, name: &Text) -> Int {
+        let mut i: Int = 0;
+        while i < self.tokenizers.len() {
+            if self.tokenizers.get(i).name == *name { return i; }
+            i = i + 1;
+        }
+        -1
+    }
+
+    pub fn register_aux(&mut self, d: AuxFnDecl) -> Bool {
+        if self.find_aux(&d.name) >= 0 { return false; }
+        self.aux_fns.push(d);
+        true
+    }
+
+    pub fn find_aux(&self, name: &Text) -> Int {
+        let mut i: Int = 0;
+        while i < self.aux_fns.len() {
+            if self.aux_fns.get(i).name == *name { return i; }
+            i = i + 1;
+        }
+        -1
+    }
+}

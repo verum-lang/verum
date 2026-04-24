@@ -1,0 +1,86 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, rtree_geom, extension, capi
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.rtree_geom.registration.{
+    GeomKind, GkGeometry, GkQuery,
+    Decl, RtreeGeomRegistry,
+    kind_name, new_decl, with_destructor, new_registry,
+};
+mount core.database.sqlite.native.rtree_geom.verdict.{
+    RtreeVerdict, RvNotWithin, RvPartlyWithin, RvFullyWithin,
+    verdict_numeric, verdict_name, permits_skip_children, from_numeric,
+};
+mount base.{Bool};
+
+fn test_kind_names() {
+    assert(kind_name(&GkGeometry) == "geometry".clone());
+    assert(kind_name(&GkQuery) == "query".clone());
+}
+
+fn test_decl_without_destructor_defaults_false() {
+    let d = new_decl("in_box".clone(), GkGeometry, 42 as Int64);
+    assert(!d.has_destructor);
+}
+
+fn test_with_destructor_toggles_flag() {
+    let mut d = new_decl("in_box".clone(), GkQuery, 42 as Int64);
+    with_destructor(&mut d, true);
+    assert(d.has_destructor);
+}
+
+fn test_registry_register_and_find() {
+    let mut r = new_registry();
+    let _ = r.register(new_decl("in_box".clone(), GkGeometry, 0 as Int64));
+    let _ = r.register(new_decl("in_box".clone(), GkQuery, 0 as Int64));
+    assert_eq(r.len(), 2);
+    assert_eq(r.find(&"in_box".clone(), &GkGeometry), 0);
+    assert_eq(r.find(&"in_box".clone(), &GkQuery), 1);
+    assert_eq(r.find(&"missing".clone(), &GkQuery), -1);
+}
+
+fn test_registry_rejects_same_name_and_kind() {
+    let mut r = new_registry();
+    let _ = r.register(new_decl("in_box".clone(), GkGeometry, 0 as Int64));
+    assert(!r.register(new_decl("in_box".clone(), GkGeometry, 1 as Int64)));
+}
+
+fn test_verdict_numeric() {
+    assert_eq(verdict_numeric(&RvNotWithin), 0);
+    assert_eq(verdict_numeric(&RvPartlyWithin), 1);
+    assert_eq(verdict_numeric(&RvFullyWithin), 2);
+}
+
+fn test_verdict_names() {
+    assert(verdict_name(&RvFullyWithin) == "inside".clone());
+    assert(verdict_name(&RvPartlyWithin) == "partial".clone());
+    assert(verdict_name(&RvNotWithin) == "outside".clone());
+}
+
+fn test_permits_skip_only_outside_and_inside() {
+    assert(permits_skip_children(&RvNotWithin));
+    assert(permits_skip_children(&RvFullyWithin));
+    assert(!permits_skip_children(&RvPartlyWithin));
+}
+
+fn test_verdict_from_numeric() {
+    match from_numeric(2) { RvFullyWithin  => {}, _ => assert(false) }
+    match from_numeric(1) { RvPartlyWithin => {}, _ => assert(false) }
+    match from_numeric(0) { RvNotWithin    => {}, _ => assert(false) }
+    match from_numeric(99){ RvNotWithin    => {}, _ => assert(false) }
+}
+
+fn main() {
+    test_kind_names();
+    test_decl_without_destructor_defaults_false();
+    test_with_destructor_toggles_flag();
+    test_registry_register_and_find();
+    test_registry_rejects_same_name_and_kind();
+    test_verdict_numeric();
+    test_verdict_names();
+    test_permits_skip_only_outside_and_inside();
+    test_verdict_from_numeric();
+}

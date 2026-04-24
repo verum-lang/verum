@@ -1,0 +1,49 @@
+// =============================================================================
+// rtree_geom/verdict.vr — RtreeVerdict sum
+// =============================================================================
+// Spec: SQLite C API — rtree.h
+//
+// xQueryFunc returns one of:
+//   NOT_WITHIN = 0  (outside)
+//   PARTLY_WITHIN = 1 (overlap; recurse)
+//   FULLY_WITHIN = 2  (fully inside; inline children)
+// =============================================================================
+
+module core.database.sqlite.native.rtree_geom.verdict;
+
+mount core.*;
+mount base.{Bool, Text};
+
+public type RtreeVerdict is
+      RvNotWithin
+    | RvPartlyWithin
+    | RvFullyWithin;
+
+public fn verdict_numeric(v: &RtreeVerdict) -> Int {
+    match v {
+        RvNotWithin    => 0,
+        RvPartlyWithin => 1,
+        RvFullyWithin  => 2,
+    }
+}
+
+public fn verdict_name(v: &RtreeVerdict) -> Text {
+    match v {
+        RvNotWithin    => "outside".clone(),
+        RvPartlyWithin => "partial".clone(),
+        RvFullyWithin  => "inside".clone(),
+    }
+}
+
+public fn permits_skip_children(v: &RtreeVerdict) -> Bool {
+    match v {
+        RvNotWithin | RvFullyWithin => true,
+        RvPartlyWithin => false,
+    }
+}
+
+public fn from_numeric(n: Int) -> RtreeVerdict {
+    if n == 2 { return RvFullyWithin; }
+    if n == 1 { return RvPartlyWithin; }
+    RvNotWithin
+}

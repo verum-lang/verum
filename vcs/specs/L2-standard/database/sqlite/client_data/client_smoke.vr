@@ -1,0 +1,85 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, client_data, capi
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.client_data.slot.{
+    Slot, new_slot, is_unset,
+};
+mount core.database.sqlite.native.client_data.registry.{
+    ClientDataRegistry, new_registry,
+};
+mount base.{Bool};
+
+fn test_new_slot_with_nonzero_not_unset() {
+    let s = new_slot("k".clone(), 42 as Int64, false);
+    assert(!is_unset(&s));
+}
+
+fn test_new_slot_zero_handle_is_unset() {
+    let s = new_slot("k".clone(), 0 as Int64, false);
+    assert(is_unset(&s));
+}
+
+fn test_registry_set_then_get() {
+    let mut r = new_registry();
+    r.sqlite3_set_clientdata("cfg".clone(), 100 as Int64, false);
+    assert_eq(r.sqlite3_get_clientdata(&"cfg".clone()), 100 as Int64);
+}
+
+fn test_registry_get_missing_returns_zero() {
+    let r = new_registry();
+    assert_eq(r.sqlite3_get_clientdata(&"missing".clone()), 0 as Int64);
+}
+
+fn test_registry_overwrite_fires_destructor() {
+    let mut r = new_registry();
+    r.sqlite3_set_clientdata("cfg".clone(), 100 as Int64, true);
+    r.sqlite3_set_clientdata("cfg".clone(), 200 as Int64, false);
+    assert_eq(r.destructors_invoked, 1 as Int64);
+    assert_eq(r.sqlite3_get_clientdata(&"cfg".clone()), 200 as Int64);
+}
+
+fn test_registry_overwrite_without_destructor() {
+    let mut r = new_registry();
+    r.sqlite3_set_clientdata("cfg".clone(), 100 as Int64, false);
+    r.sqlite3_set_clientdata("cfg".clone(), 200 as Int64, true);
+    assert_eq(r.destructors_invoked, 0 as Int64);
+}
+
+fn test_registry_clear_removes_slot() {
+    let mut r = new_registry();
+    r.sqlite3_set_clientdata("cfg".clone(), 100 as Int64, true);
+    assert(r.clear(&"cfg".clone()));
+    assert_eq(r.len(), 0);
+    assert_eq(r.destructors_invoked, 1 as Int64);
+}
+
+fn test_registry_clear_absent_returns_false() {
+    let mut r = new_registry();
+    assert(!r.clear(&"absent".clone()));
+}
+
+fn test_registry_close_fires_all_destructors() {
+    let mut r = new_registry();
+    r.sqlite3_set_clientdata("a".clone(), 1 as Int64, true);
+    r.sqlite3_set_clientdata("b".clone(), 2 as Int64, true);
+    r.sqlite3_set_clientdata("c".clone(), 3 as Int64, false);
+    r.close();
+    assert_eq(r.len(), 0);
+    assert_eq(r.destructors_invoked, 2 as Int64);
+}
+
+fn main() {
+    test_new_slot_with_nonzero_not_unset();
+    test_new_slot_zero_handle_is_unset();
+    test_registry_set_then_get();
+    test_registry_get_missing_returns_zero();
+    test_registry_overwrite_fires_destructor();
+    test_registry_overwrite_without_destructor();
+    test_registry_clear_removes_slot();
+    test_registry_clear_absent_returns_false();
+    test_registry_close_fires_all_destructors();
+}

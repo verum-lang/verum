@@ -1,0 +1,47 @@
+// =============================================================================
+// scanstatus_v2/reset.vr — sqlite3_stmt_scanstatus_reset
+// =============================================================================
+// Spec: SQLite C API
+//
+// Resets the per-opcode scan counters on a prepared statement without
+// finalizing or rewinding the VM.  Useful between EXPLAIN ANALYZE
+// measurement passes.
+// =============================================================================
+
+module core.database.sqlite.native.scanstatus_v2.reset;
+
+mount core.*;
+mount base.{Bool};
+
+public type ResetScope is
+      RsAll                    // clear every scan-status counter
+    | RsOp(Int);               // clear only the counter for this scan index
+
+public type ResetEngine is {
+    reset_all_count: Int64,
+    reset_op_count: Int64,
+}
+
+public fn new_engine() -> ResetEngine {
+    ResetEngine {
+        reset_all_count: 0 as Int64,
+        reset_op_count: 0 as Int64,
+    }
+}
+
+implement ResetEngine {
+    pub fn sqlite3_stmt_scanstatus_reset(&mut self, scope: &ResetScope) {
+        match scope {
+            RsAll => {
+                self.reset_all_count = self.reset_all_count + (1 as Int64);
+            }
+            RsOp(_) => {
+                self.reset_op_count = self.reset_op_count + (1 as Int64);
+            }
+        }
+    }
+
+    pub fn total_resets(&self) -> Int64 {
+        self.reset_all_count + self.reset_op_count
+    }
+}

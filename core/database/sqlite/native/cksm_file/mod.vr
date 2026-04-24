@@ -1,0 +1,23 @@
+// =============================================================================
+// core/database/sqlite/native/cksm_file/mod.vr
+// =============================================================================
+// Layer: 7 (façade — SQLITE_FCNTL_CKSM_FILE integration)
+// Spec: SQLite C API
+//
+//   SQLITE_FCNTL_CKSM_FILE = 43      — verify page checksums across db
+//   SQLITE_FCNTL_RESERVE_BYTES = 39  — read/write the "bytes reserved
+//                                      at end of each page" header field
+//
+// When the db is created with `PRAGMA reserve_bytes = 8` (+ an 8-byte
+// per-page checksum), SQLITE_FCNTL_CKSM_FILE rescans the file and
+// flags any mismatches.
+//
+// Submodules:
+//   * `status`   — Status sum NotChecked / Verified / Corrupted(pages…)
+//   * `engine`   — verify driver + reserve-bytes slot
+// =============================================================================
+
+module core.database.sqlite.native.cksm_file;
+
+public module status;
+public module engine;

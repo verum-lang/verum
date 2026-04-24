@@ -1,0 +1,44 @@
+// =============================================================================
+// declare_vtab_api/declaration.vr — DeclarationText
+// =============================================================================
+// Spec: SQLite C API
+// =============================================================================
+
+module core.database.sqlite.native.declare_vtab_api.declaration;
+
+mount core.*;
+mount base.{Bool, Text};
+
+public type DeclarationText is {
+    sql: Text,
+    /// Monotone tag (e.g. schema version when accepted).
+    tag: Int64,
+}
+
+public fn new_declaration(sql: Text, tag: Int64) -> DeclarationText {
+    DeclarationText { sql: sql, tag: tag }
+}
+
+/// Trivial shape check: must start with "CREATE" (after stripping
+/// leading whitespace).  Full parsing lives in l5_sql.
+public fn looks_like_create_table(d: &DeclarationText) -> Bool {
+    let bs = d.sql.as_bytes();
+    let mut i: Int = 0;
+    while i < bs.len() {
+        let b = bs[i];
+        if b != (0x20 as u8) && b != (0x09 as u8)
+           && b != (0x0A as u8) && b != (0x0D as u8) { break; }
+        i = i + 1;
+    }
+    let prefix = "CREATE".clone();
+    let pb = prefix.as_bytes();
+    if bs.len() - i < pb.len() { return false; }
+    let mut j: Int = 0;
+    while j < pb.len() {
+        let mut b = bs[i + j];
+        if b >= (0x61 as u8) && b <= (0x7A as u8) { b = b - (0x20 as u8); }
+        if b != pb[j] { return false; }
+        j = j + 1;
+    }
+    true
+}

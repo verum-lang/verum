@@ -1,0 +1,104 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, interrupt_deadline, cancellation, capi
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.interrupt_deadline.deadline.{
+    Deadline,
+    disarmed, armed_at, disarm, has_elapsed, remaining_ns,
+};
+mount core.database.sqlite.native.interrupt_deadline.engine.{
+    DeadlineEngine, new_engine,
+};
+mount base.{Bool};
+
+fn noop() {}
+
+fn test_disarmed_never_elapsed() {
+    let d = disarmed();
+    assert(!has_elapsed(&d, 1_000_000_000 as Int64));
+    assert_eq(remaining_ns(&d, 0 as Int64), 0 as Int64);
+}
+
+fn test_armed_at_elapses_after_deadline() {
+    let d = armed_at(1000 as Int64);
+    assert(!has_elapsed(&d, 500 as Int64));
+    assert(has_elapsed(&d, 1000 as Int64));
+    assert(has_elapsed(&d, 2000 as Int64));
+}
+
+fn test_armed_at_normalises_negative_to_zero() {
+    let d = armed_at(-5 as Int64);
+    assert(has_elapsed(&d, 0 as Int64));
+}
+
+fn test_disarm_cancels() {
+    let mut d = armed_at(1000 as Int64);
+    disarm(&mut d);
+    assert(!has_elapsed(&d, 5000 as Int64));
+}
+
+fn test_remaining_ns_before_deadline() {
+    let d = armed_at(1000 as Int64);
+    assert_eq(remaining_ns(&d, 200 as Int64), 800 as Int64);
+}
+
+fn test_remaining_ns_after_deadline_zero() {
+    let d = armed_at(1000 as Int64);
+    assert_eq(remaining_ns(&d, 1500 as Int64), 0 as Int64);
+}
+
+fn test_engine_arm_initialises() {
+    let mut e = new_engine();
+    e.arm(5000 as Int64);
+    assert(!e.fired);
+    assert_eq(e.ticks_observed, 0 as Int64);
+}
+
+fn test_engine_tick_before_deadline_no_fire() {
+    let mut e = new_engine();
+    e.arm(5000 as Int64);
+    let fired = e.tick(100 as Int64, noop);
+    assert(!fired);
+    assert_eq(e.ticks_observed, 1 as Int64);
+    assert(!e.fired);
+}
+
+fn test_engine_tick_after_deadline_fires_once() {
+    let mut e = new_engine();
+    e.arm(1000 as Int64);
+    assert(e.tick(1500 as Int64, noop));
+    assert(e.fired);
+    // Second tick should NOT re-fire.
+    assert(!e.tick(2000 as Int64, noop));
+}
+
+fn test_engine_disarm_prevents_fire() {
+    let mut e = new_engine();
+    e.arm(1000 as Int64);
+    e.disarm();
+    assert(!e.tick(5000 as Int64, noop));
+    assert(!e.fired);
+}
+
+fn test_engine_remaining_ns_via_engine() {
+    let mut e = new_engine();
+    e.arm(2000 as Int64);
+    assert_eq(e.remaining_ns_at(500 as Int64), 1500 as Int64);
+}
+
+fn main() {
+    test_disarmed_never_elapsed();
+    test_armed_at_elapses_after_deadline();
+    test_armed_at_normalises_negative_to_zero();
+    test_disarm_cancels();
+    test_remaining_ns_before_deadline();
+    test_remaining_ns_after_deadline_zero();
+    test_engine_arm_initialises();
+    test_engine_tick_before_deadline_no_fire();
+    test_engine_tick_after_deadline_fires_once();
+    test_engine_disarm_prevents_fire();
+    test_engine_remaining_ns_via_engine();
+}

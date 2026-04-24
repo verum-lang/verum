@@ -1,0 +1,22 @@
+// =============================================================================
+// core/database/sqlite/native/rtree_geom/mod.vr
+// =============================================================================
+// Layer: 7 (façade — R-tree custom geometry callbacks)
+// Spec: SQLite C API — rtree.h
+//
+//   sqlite3_rtree_geometry_callback(db, zGeom, xGeom, pContext)
+//   sqlite3_rtree_query_callback(db, zQueryFunc, xQueryFunc, pContext,
+//                                 xDestructor)
+//
+// Both install named callback pairs used inside MATCH constraints on
+// r-tree vtab columns.
+//
+// Submodules:
+//   * `registration`  — Decl record + Registry
+//   * `verdict`       — RtreeVerdict sum (Inside/Partial/Outside)
+// =============================================================================
+
+module core.database.sqlite.native.rtree_geom;
+
+public module registration;
+public module verdict;

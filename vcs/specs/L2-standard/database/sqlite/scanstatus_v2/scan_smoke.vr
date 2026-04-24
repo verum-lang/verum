@@ -1,0 +1,101 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, scanstatus_v2, scan_stats, capi
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.scanstatus_v2.flags.{
+    ScanField,
+    SfNLoop, SfNVisit, SfEst, SfName, SfExplain, SfSelectId, SfParentId, SfNCycle,
+    SQLITE_SCANSTAT_NLOOP, SQLITE_SCANSTAT_NAME, SQLITE_SCANSTAT_NCYCLE,
+    SQLITE_SCANSTAT_COMPLEX,
+    field_numeric, field_name, field_is_numeric,
+};
+mount core.database.sqlite.native.scanstatus_v2.fetch.{
+    FetchRequest, ScanValue,
+    SvInt64, SvText, SvUnknown,
+    new_request, with_complex, wants_complex,
+    is_numeric, value_matches_field,
+};
+mount core.database.sqlite.native.scanstatus_v2.reset.{
+    ResetScope, ResetEngine,
+    RsAll, RsOp,
+    new_engine,
+};
+mount base.{Bool};
+
+fn test_field_numeric_matches_c_header() {
+    assert_eq(field_numeric(&SfNLoop), 0);
+    assert_eq(field_numeric(&SfNVisit), 1);
+    assert_eq(field_numeric(&SfEst), 2);
+    assert_eq(field_numeric(&SfName), 3);
+    assert_eq(field_numeric(&SfNCycle), 7);
+    assert_eq(SQLITE_SCANSTAT_NLOOP, 0);
+    assert_eq(SQLITE_SCANSTAT_NCYCLE, 7);
+    assert_eq(SQLITE_SCANSTAT_COMPLEX, 1);
+}
+
+fn test_field_name() {
+    assert(field_name(&SfName) == "zName".clone());
+    assert(field_name(&SfExplain) == "zExplain".clone());
+    assert(field_name(&SfNCycle) == "nCycle".clone());
+}
+
+fn test_field_is_numeric_text_fields() {
+    assert(field_is_numeric(&SfNLoop));
+    assert(field_is_numeric(&SfSelectId));
+    assert(!field_is_numeric(&SfName));
+    assert(!field_is_numeric(&SfExplain));
+}
+
+fn test_new_request_defaults_no_complex() {
+    let r = new_request(0, SfNLoop);
+    assert(!wants_complex(&r));
+    assert_eq(r.scan_index, 0);
+}
+
+fn test_with_complex_sets_flag() {
+    let mut r = new_request(0, SfNLoop);
+    with_complex(&mut r);
+    assert(wants_complex(&r));
+}
+
+fn test_scan_value_numeric_predicate() {
+    assert(is_numeric(&SvInt64(1 as Int64)));
+    assert(!is_numeric(&SvText("x".clone())));
+    assert(!is_numeric(&SvUnknown));
+}
+
+fn test_value_matches_numeric_field() {
+    assert(value_matches_field(&SvInt64(1 as Int64), &SfNLoop));
+    assert(!value_matches_field(&SvText("x".clone()), &SfNLoop));
+    assert(!value_matches_field(&SvUnknown, &SfNLoop));
+}
+
+fn test_value_matches_text_field() {
+    assert(value_matches_field(&SvText("t".clone()), &SfName));
+    assert(!value_matches_field(&SvInt64(0 as Int64), &SfName));
+}
+
+fn test_reset_engine_counts() {
+    let mut e = new_engine();
+    e.sqlite3_stmt_scanstatus_reset(&RsAll);
+    e.sqlite3_stmt_scanstatus_reset(&RsOp(2));
+    e.sqlite3_stmt_scanstatus_reset(&RsOp(5));
+    assert_eq(e.reset_all_count, 1 as Int64);
+    assert_eq(e.reset_op_count, 2 as Int64);
+    assert_eq(e.total_resets(), 3 as Int64);
+}
+
+fn main() {
+    test_field_numeric_matches_c_header();
+    test_field_name();
+    test_field_is_numeric_text_fields();
+    test_new_request_defaults_no_complex();
+    test_with_complex_sets_flag();
+    test_scan_value_numeric_predicate();
+    test_value_matches_numeric_field();
+    test_value_matches_text_field();
+    test_reset_engine_counts();
+}

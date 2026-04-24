@@ -1,0 +1,23 @@
+// =============================================================================
+// core/database/sqlite/native/interrupt_deadline/mod.vr
+// =============================================================================
+// Layer: 7 (façade — deadline-driven interrupt)
+// Spec: higher-level composition over `interrupt/` + `progress/`.
+//
+// Embedders commonly want "abort after wall-clock deadline T";
+// sqlite3_interrupt by itself is fire-and-forget.  This catalogue
+// wraps:
+//
+//   * an absolute-ns deadline,
+//   * a progress-handler tick,
+//   * an interrupt token to fire once the tick observes `now >= deadline`.
+//
+// Submodules:
+//   * `deadline`   — Deadline (absolute ns + armed flag)
+//   * `engine`     — Engine driving tick → fire on elapse
+// =============================================================================
+
+module core.database.sqlite.native.interrupt_deadline;
+
+public module deadline;
+public module engine;

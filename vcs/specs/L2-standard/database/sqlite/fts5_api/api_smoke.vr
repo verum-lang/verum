@@ -1,0 +1,63 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, fts5_api, extension, capi
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.fts5_api.api.{
+    Fts5Api, default_api, legacy_v1_api, supports_v2_tokenizer,
+};
+mount core.database.sqlite.native.fts5_api.registration.{
+    TokenizerDecl, AuxFnDecl, Fts5Registry,
+    tokenizer_decl, aux_fn_decl, new_registry,
+};
+mount base.{Bool};
+
+fn test_default_api_version_three() {
+    let a = default_api();
+    assert_eq(a.i_version, 3);
+    assert(supports_v2_tokenizer(&a));
+}
+
+fn test_legacy_v1_does_not_support_v2() {
+    let a = legacy_v1_api();
+    assert_eq(a.i_version, 1);
+    assert(!supports_v2_tokenizer(&a));
+}
+
+fn test_register_tokenizer_unique() {
+    let mut r = new_registry();
+    assert(r.register_tokenizer(tokenizer_decl("unicode61".clone(), 0 as Int64, true)));
+    assert(!r.register_tokenizer(tokenizer_decl("unicode61".clone(), 0 as Int64, false)));
+}
+
+fn test_find_tokenizer_by_name() {
+    let mut r = new_registry();
+    let _ = r.register_tokenizer(tokenizer_decl("porter".clone(), 1 as Int64, false));
+    assert_eq(r.find_tokenizer(&"porter".clone()), 0);
+    assert_eq(r.find_tokenizer(&"missing".clone()), -1);
+}
+
+fn test_register_aux_fn_unique() {
+    let mut r = new_registry();
+    assert(r.register_aux(aux_fn_decl("bm25".clone(), 0 as Int64)));
+    assert(!r.register_aux(aux_fn_decl("bm25".clone(), 0 as Int64)));
+}
+
+fn test_find_aux_by_name() {
+    let mut r = new_registry();
+    let _ = r.register_aux(aux_fn_decl("bm25".clone(), 0 as Int64));
+    let _ = r.register_aux(aux_fn_decl("highlight".clone(), 0 as Int64));
+    assert_eq(r.find_aux(&"bm25".clone()), 0);
+    assert_eq(r.find_aux(&"highlight".clone()), 1);
+}
+
+fn main() {
+    test_default_api_version_three();
+    test_legacy_v1_does_not_support_v2();
+    test_register_tokenizer_unique();
+    test_find_tokenizer_by_name();
+    test_register_aux_fn_unique();
+    test_find_aux_by_name();
+}

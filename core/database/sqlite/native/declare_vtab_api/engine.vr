@@ -1,0 +1,73 @@
+// =============================================================================
+// declare_vtab_api/engine.vr — per-vtab schema cache
+// =============================================================================
+// Spec: SQLite C API
+// =============================================================================
+
+module core.database.sqlite.native.declare_vtab_api.engine;
+
+mount core.*;
+mount base.{Bool, Maybe, Text};
+mount collections.List;
+mount core.database.sqlite.native.declare_vtab_api.declaration.{
+    DeclarationText, new_declaration, looks_like_create_table,
+};
+
+public type VtabDeclaration is {
+    /// Lowercased vtab name (e.g. "series", "rtree_index").
+    vtab_name: Text,
+    declaration: DeclarationText,
+}
+
+public type DeclareVtabEngine is {
+    declarations: List<VtabDeclaration>,
+    /// Total successful sqlite3_declare_vtab calls.
+    accepted: Int64,
+    /// Total rejected calls (malformed CREATE TABLE).
+    rejected: Int64,
+}
+
+public fn new_engine() -> DeclareVtabEngine {
+    DeclareVtabEngine {
+        declarations: List.new(),
+        accepted: 0 as Int64,
+        rejected: 0 as Int64,
+    }
+}
+
+public type DeclareOutcome is
+      DoAccepted
+    | DoRejected(Text);
+
+public fn outcome_is_ok(o: &DeclareOutcome) -> Bool {
+    match o {
+        DoAccepted => true,
+        _ => false,
+    }
+}
+
+implement DeclareVtabEngine {
+    pub fn sqlite3_declare_vtab(&mut self, vtab_name: Text, sql: Text, tag: Int64) -> DeclareOutcome {
+        let decl = new_declaration(sql, tag);
+        if !looks_like_create_table(&decl) {
+            self.rejected = self.rejected + (1 as Int64);
+            return DoRejected("expected CREATE TABLE".clone());
+        }
+        self.declarations.push(VtabDeclaration { vtab_name: vtab_name, declaration: decl });
+        self.accepted = self.accepted + (1 as Int64);
+        DoAccepted
+    }
+
+    pub fn find_declaration(&self, vtab_name: &Text) -> Maybe<Int> {
+        let mut i: Int = 0;
+        while i < self.declarations.len() {
+            if self.declarations.get(i).vtab_name == *vtab_name {
+                return Maybe.Some(i);
+            }
+            i = i + 1;
+        }
+        Maybe.None
+    }
+
+    pub fn len(&self) -> Int { self.declarations.len() }
+}

@@ -1,0 +1,23 @@
+// =============================================================================
+// core/database/sqlite/native/column_origin/mod.vr
+// =============================================================================
+// Layer: 7 (façade — column-origin reflection)
+// Spec: SQLite C API
+//
+//   sqlite3_column_database_name(stmt, col)  → schema
+//   sqlite3_column_table_name(stmt, col)     → source table
+//   sqlite3_column_origin_name(stmt, col)    → source column
+//   sqlite3_column_decltype(stmt, col)       → declared type
+//
+// Needs the SQLITE_ENABLE_COLUMN_METADATA compile option; otherwise
+// all accessors return NULL.
+//
+// Submodules:
+//   * `info`     — ColumnOriginInfo record
+//   * `engine`   — per-column table keyed by 0-based column index
+// =============================================================================
+
+module core.database.sqlite.native.column_origin;
+
+public module info;
+public module engine;

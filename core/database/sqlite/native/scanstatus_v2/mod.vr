@@ -1,0 +1,24 @@
+// =============================================================================
+// core/database/sqlite/native/scanstatus_v2/mod.vr
+// =============================================================================
+// Layer: 7 (façade — sqlite3_stmt_scanstatus_v2)
+// Spec: SQLite C API
+//
+//   sqlite3_stmt_scanstatus_v2(stmt, idx, op, flags, pOut)
+//   sqlite3_stmt_scanstatus_reset(stmt)
+//
+// Complements stmt_introspect/counter (which handles sqlite3_stmt_status
+// counters) with the scan-level detail the optimizer emits during
+// explain-analyze.
+//
+// Submodules:
+//   * `flags`    — SQLITE_SCANSTAT_* constants
+//   * `fetch`    — FetchRequest + typed Value sum
+//   * `reset`    — ResetRequest (per-stmt or per-op)
+// =============================================================================
+
+module core.database.sqlite.native.scanstatus_v2;
+
+public module flags;
+public module fetch;
+public module reset;

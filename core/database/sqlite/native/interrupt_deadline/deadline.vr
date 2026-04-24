@@ -1,0 +1,44 @@
+// =============================================================================
+// interrupt_deadline/deadline.vr — Deadline descriptor
+// =============================================================================
+// Spec: higher-level cancellation.
+// =============================================================================
+
+module core.database.sqlite.native.interrupt_deadline.deadline;
+
+mount core.*;
+mount base.{Bool};
+
+public type Deadline is {
+    /// Absolute monotonic ns at which interruption fires.  0 means
+    /// "disarmed"; negative values are normalised to 0.
+    absolute_ns: Int64,
+    /// Set via `disarm` — allows the embedder to cancel the deadline
+    /// without waiting for the callback to observe.
+    armed: Bool,
+}
+
+public fn disarmed() -> Deadline {
+    Deadline { absolute_ns: 0 as Int64, armed: false }
+}
+
+public fn armed_at(absolute_ns: Int64) -> Deadline {
+    let at = if absolute_ns < (0 as Int64) { 0 as Int64 } else { absolute_ns };
+    Deadline { absolute_ns: at, armed: true }
+}
+
+public fn disarm(d: &mut Deadline) {
+    d.armed = false;
+}
+
+public fn has_elapsed(d: &Deadline, now_ns: Int64) -> Bool {
+    d.armed && now_ns >= d.absolute_ns
+}
+
+/// Remaining time until the deadline fires; zero if already elapsed or
+/// disarmed.
+public fn remaining_ns(d: &Deadline, now_ns: Int64) -> Int64 {
+    if !d.armed { return 0 as Int64; }
+    if now_ns >= d.absolute_ns { return 0 as Int64; }
+    d.absolute_ns - now_ns
+}

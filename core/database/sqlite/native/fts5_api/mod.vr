@@ -1,0 +1,24 @@
+// =============================================================================
+// core/database/sqlite/native/fts5_api/mod.vr
+// =============================================================================
+// Layer: 7 (façade — fts5 extension's own registration API)
+// Spec: SQLite C API — sqlite3ext.h / fts5.h
+//
+// The FTS5 extension exposes its own C-API vtable:
+//
+//   xCreateTokenizer_v2 / xCreateTokenizer
+//   xFindTokenizer_v2   / xFindTokenizer
+//   xCreateFunction
+//
+// Client code retrieves the vtable via `SELECT fts5(?1)` and then
+// registers bespoke tokenizers + auxiliary functions.
+//
+// Submodules:
+//   * `api`           — Fts5Api descriptor (vtable shape + iVersion)
+//   * `registration`  — tokenizer / function registration records
+// =============================================================================
+
+module core.database.sqlite.native.fts5_api;
+
+public module api;
+public module registration;

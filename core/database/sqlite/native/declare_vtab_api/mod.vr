@@ -1,0 +1,21 @@
+// =============================================================================
+// core/database/sqlite/native/declare_vtab_api/mod.vr
+// =============================================================================
+// Layer: 7 (façade — sqlite3_declare_vtab)
+// Spec: SQLite C API
+//
+//   sqlite3_declare_vtab(db, zSQL)
+//
+// A virtual-table module calls this inside its xCreate / xConnect
+// method to announce the schema.  `zSQL` is a CREATE TABLE statement
+// that SQLite parses, caches, and uses for schema introspection.
+//
+// Submodules:
+//   * `declaration`   — DeclarationText record w/ parse timestamp
+//   * `engine`        — per-vtab schema cache
+// =============================================================================
+
+module core.database.sqlite.native.declare_vtab_api;
+
+public module declaration;
+public module engine;

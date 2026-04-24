@@ -1,0 +1,48 @@
+// =============================================================================
+// column_origin/info.vr — ColumnOriginInfo
+// =============================================================================
+// Spec: SQLite C API
+// =============================================================================
+
+module core.database.sqlite.native.column_origin.info;
+
+mount core.*;
+mount base.{Bool, Maybe, Text};
+
+public type ColumnOriginInfo is {
+    /// Source schema ("main", "temp", ATTACH-ed).
+    database: Text,
+    /// Source table — empty if the column is a computed expression.
+    table: Text,
+    /// Source column — empty if derived.
+    origin: Text,
+    /// Declared type (e.g. "INTEGER").
+    decltype: Text,
+}
+
+public fn new_info(
+    database: Text,
+    table: Text,
+    origin: Text,
+    decltype: Text,
+) -> ColumnOriginInfo {
+    ColumnOriginInfo {
+        database: database,
+        table: table,
+        origin: origin,
+        decltype: decltype,
+    }
+}
+
+public fn derived_expression() -> ColumnOriginInfo {
+    ColumnOriginInfo {
+        database: "".clone(),
+        table: "".clone(),
+        origin: "".clone(),
+        decltype: "".clone(),
+    }
+}
+
+public fn is_derived(c: &ColumnOriginInfo) -> Bool {
+    c.table.len() == 0 && c.origin.len() == 0
+}

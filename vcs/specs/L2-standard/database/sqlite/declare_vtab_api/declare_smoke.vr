@@ -1,0 +1,90 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, declare_vtab_api, vtab, capi
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.declare_vtab_api.declaration.{
+    DeclarationText, new_declaration, looks_like_create_table,
+};
+mount core.database.sqlite.native.declare_vtab_api.engine.{
+    DeclareVtabEngine, VtabDeclaration, DeclareOutcome,
+    DoAccepted, DoRejected,
+    new_engine, outcome_is_ok,
+};
+mount base.{Bool, Maybe};
+
+fn test_looks_like_create_table_accepts() {
+    let d = new_declaration("CREATE TABLE t(x, y)".clone(), 1 as Int64);
+    assert(looks_like_create_table(&d));
+}
+
+fn test_looks_like_create_table_strips_leading_ws() {
+    let d = new_declaration("   \n\t CREATE TABLE x(a)".clone(), 1 as Int64);
+    assert(looks_like_create_table(&d));
+}
+
+fn test_looks_like_create_table_case_insensitive() {
+    let d = new_declaration("create table x(a)".clone(), 1 as Int64);
+    assert(looks_like_create_table(&d));
+}
+
+fn test_looks_like_create_table_rejects_select() {
+    let d = new_declaration("SELECT 1".clone(), 1 as Int64);
+    assert(!looks_like_create_table(&d));
+}
+
+fn test_engine_accepts_create() {
+    let mut e = new_engine();
+    let outcome = e.sqlite3_declare_vtab(
+        "my_vtab".clone(),
+        "CREATE TABLE x(a, b)".clone(),
+        1 as Int64,
+    );
+    assert(outcome_is_ok(&outcome));
+    assert_eq(e.accepted, 1 as Int64);
+}
+
+fn test_engine_rejects_non_create() {
+    let mut e = new_engine();
+    let outcome = e.sqlite3_declare_vtab(
+        "my_vtab".clone(),
+        "SELECT 1".clone(),
+        1 as Int64,
+    );
+    assert(!outcome_is_ok(&outcome));
+    assert_eq(e.rejected, 1 as Int64);
+}
+
+fn test_engine_find_by_vtab_name() {
+    let mut e = new_engine();
+    let _ = e.sqlite3_declare_vtab("a".clone(), "CREATE TABLE a(x)".clone(), 1 as Int64);
+    let _ = e.sqlite3_declare_vtab("b".clone(), "CREATE TABLE b(x)".clone(), 2 as Int64);
+    match e.find_declaration(&"b".clone()) {
+        Maybe.Some(i) => assert_eq(i, 1),
+        Maybe.None => assert(false),
+    }
+    match e.find_declaration(&"missing".clone()) {
+        Maybe.None => {},
+        Maybe.Some(_) => assert(false),
+    }
+}
+
+fn test_engine_length_grows_on_accept() {
+    let mut e = new_engine();
+    let _ = e.sqlite3_declare_vtab("a".clone(), "CREATE TABLE a(x)".clone(), 1 as Int64);
+    let _ = e.sqlite3_declare_vtab("b".clone(), "SELECT 1".clone(), 2 as Int64);
+    assert_eq(e.len(), 1);
+}
+
+fn main() {
+    test_looks_like_create_table_accepts();
+    test_looks_like_create_table_strips_leading_ws();
+    test_looks_like_create_table_case_insensitive();
+    test_looks_like_create_table_rejects_select();
+    test_engine_accepts_create();
+    test_engine_rejects_non_create();
+    test_engine_find_by_vtab_name();
+    test_engine_length_grows_on_accept();
+}

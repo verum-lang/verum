@@ -1,0 +1,53 @@
+// =============================================================================
+// scanstatus_v2/fetch.vr — FetchRequest + ScanValue
+// =============================================================================
+// Spec: SQLite C API
+// =============================================================================
+
+module core.database.sqlite.native.scanstatus_v2.fetch;
+
+mount core.*;
+mount base.{Bool, Text};
+mount core.database.sqlite.native.scanstatus_v2.flags.{
+    ScanField, SQLITE_SCANSTAT_COMPLEX, field_is_numeric,
+};
+
+public type FetchRequest is {
+    scan_index: Int,        // 0-based loop index
+    field: ScanField,
+    flags: Int,             // bitmap of SQLITE_SCANSTAT_COMPLEX etc.
+}
+
+public fn new_request(scan_index: Int, field: ScanField) -> FetchRequest {
+    FetchRequest { scan_index: scan_index, field: field, flags: 0 }
+}
+
+public fn with_complex(r: &mut FetchRequest) {
+    r.flags = r.flags | SQLITE_SCANSTAT_COMPLEX;
+}
+
+public fn wants_complex(r: &FetchRequest) -> Bool {
+    (r.flags & SQLITE_SCANSTAT_COMPLEX) != 0
+}
+
+public type ScanValue is
+      SvInt64(Int64)
+    | SvText(Text)
+    | SvUnknown;
+
+public fn is_numeric(v: &ScanValue) -> Bool {
+    match v {
+        SvInt64(_) => true,
+        _ => false,
+    }
+}
+
+/// True iff `value` is the appropriate shape for the requested field.
+public fn value_matches_field(v: &ScanValue, f: &ScanField) -> Bool {
+    let want_numeric = field_is_numeric(f);
+    match v {
+        SvInt64(_)  => want_numeric,
+        SvText(_)   => !want_numeric,
+        SvUnknown   => false,
+    }
+}

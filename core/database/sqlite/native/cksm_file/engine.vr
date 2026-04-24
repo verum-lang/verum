@@ -1,0 +1,68 @@
+// =============================================================================
+// cksm_file/engine.vr — CksmEngine
+// =============================================================================
+// Spec: SQLite C API
+//
+// The engine holds:
+//   * `reserve_bytes` — size of the trailer SQLite leaves on every page
+//                       (classically 0, 8 when checksumming is active).
+//   * `status`        — most recent verify result.
+// =============================================================================
+
+module core.database.sqlite.native.cksm_file.engine;
+
+mount core.*;
+mount base.{Bool};
+mount collections.List;
+mount core.database.sqlite.native.cksm_file.status.{
+    CksmStatus, CsNotChecked, CsVerified, CsCorrupted,
+};
+
+public const SQLITE_FCNTL_CKSM_FILE: Int      = 43;
+public const SQLITE_FCNTL_RESERVE_BYTES: Int  = 39;
+
+public type CksmEngine is {
+    reserve_bytes: Int,
+    status: CksmStatus,
+    verify_count: Int64,
+}
+
+public fn new_engine() -> CksmEngine {
+    CksmEngine {
+        reserve_bytes: 0,
+        status: CsNotChecked,
+        verify_count: 0 as Int64,
+    }
+}
+
+implement CksmEngine {
+    pub fn set_reserve_bytes(&mut self, n: Int) -> Bool {
+        if n < 0 || n > 255 { return false; }
+        self.reserve_bytes = n;
+        true
+    }
+
+    pub fn checksumming_enabled(&self) -> Bool {
+        self.reserve_bytes >= 8
+    }
+
+    /// Drive a verify pass.  Returns the sqlite3 result code:
+    /// SQLITE_OK (0) on success, SQLITE_CORRUPT (11) on mismatch.
+    pub fn sqlite3_file_control_cksm_file(
+        &mut self,
+        total_pages: Int64,
+        corrupt_pages: List<Int64>,
+    ) -> Int {
+        self.verify_count = self.verify_count + (1 as Int64);
+        if corrupt_pages.len() == 0 {
+            self.status = CsVerified(total_pages);
+            return 0;
+        }
+        let verified = total_pages - (corrupt_pages.len() as Int64);
+        self.status = CsCorrupted {
+            corrupt_pages: corrupt_pages,
+            verified: if verified < (0 as Int64) { 0 as Int64 } else { verified },
+        };
+        11   // SQLITE_CORRUPT
+    }
+}

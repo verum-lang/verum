@@ -1,0 +1,38 @@
+// =============================================================================
+// cksm_file/status.vr — CksmStatus sum
+// =============================================================================
+// Spec: SQLite C API
+// =============================================================================
+
+module core.database.sqlite.native.cksm_file.status;
+
+mount core.*;
+mount base.{Bool, Text};
+mount collections.List;
+
+public type CksmStatus is
+      CsNotChecked
+    | CsVerified(Int64)                // total pages verified
+    | CsCorrupted { corrupt_pages: List<Int64>, verified: Int64 };
+
+public fn status_name(s: &CksmStatus) -> Text {
+    match s {
+        CsNotChecked          => "not-checked".clone(),
+        CsVerified(_)         => "verified".clone(),
+        CsCorrupted { .. }    => "corrupted".clone(),
+    }
+}
+
+public fn is_ok(s: &CksmStatus) -> Bool {
+    match s {
+        CsVerified(_) => true,
+        _ => false,
+    }
+}
+
+public fn corrupt_count(s: &CksmStatus) -> Int {
+    match s {
+        CsCorrupted { corrupt_pages, .. } => corrupt_pages.len(),
+        _ => 0,
+    }
+}
