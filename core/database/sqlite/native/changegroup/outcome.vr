@@ -1,0 +1,52 @@
+// =============================================================================
+// changegroup/outcome.vr — normalized add + output outcomes
+// =============================================================================
+// Spec: SQLite C API
+// =============================================================================
+
+module core.database.sqlite.native.changegroup.outcome;
+
+mount core.*;
+mount base.{Bool, Text};
+mount core.database.sqlite.native.errors.code.{
+    ExtendedCode, extended_numeric,
+};
+
+public type AddOutcome is
+      AdOk
+    | AdSchemaMismatch(Text)
+    | AdFailed { code: ExtendedCode, reason: Text };
+
+public type OutputOutcome is
+      OoOk { byte_count: Int64 }
+    | OoEmpty
+    | OoFailed { code: ExtendedCode, reason: Text };
+
+public fn add_is_ok(a: &AddOutcome) -> Bool {
+    match a {
+        AdOk => true,
+        _ => false,
+    }
+}
+
+public fn output_is_ok(o: &OutputOutcome) -> Bool {
+    match o {
+        OoOk { .. } | OoEmpty => true,
+        _ => false,
+    }
+}
+
+public fn add_numeric(a: &AddOutcome) -> Int {
+    match a {
+        AdOk => 0,
+        AdSchemaMismatch(_) => 20,   // SQLITE_MISMATCH
+        AdFailed { code, .. } => extended_numeric(code),
+    }
+}
+
+public fn output_bytes(o: &OutputOutcome) -> Int64 {
+    match o {
+        OoOk { byte_count } => *byte_count,
+        _ => 0 as Int64,
+    }
+}

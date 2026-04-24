@@ -1,0 +1,52 @@
+// =============================================================================
+// drop_modules/keep_list.vr — names NOT to drop
+// =============================================================================
+// Spec: SQLite C API
+// =============================================================================
+
+module core.database.sqlite.native.drop_modules.keep_list;
+
+mount core.*;
+mount base.{Bool, Text};
+mount collections.List;
+
+public type KeepList is {
+    names: List<Text>,
+}
+
+public fn new_keep_list() -> KeepList {
+    KeepList { names: List.new() }
+}
+
+public fn from_names(names: List<Text>) -> KeepList {
+    KeepList { names: names }
+}
+
+public fn recommended_safe_keep() -> KeepList {
+    let mut names: List<Text> = List.new();
+    names.push("fts5".clone());
+    names.push("rtree".clone());
+    names.push("json1".clone());
+    names.push("carray".clone());
+    names.push("generate_series".clone());
+    KeepList { names: names }
+}
+
+implement KeepList {
+    pub fn contains(&self, name: &Text) -> Bool {
+        let mut i: Int = 0;
+        while i < self.names.len() {
+            if self.names.get(i) == name { return true; }
+            i = i + 1;
+        }
+        false
+    }
+
+    pub fn add(&mut self, name: Text) -> Bool {
+        if self.contains(&name) { return false; }
+        self.names.push(name);
+        true
+    }
+
+    pub fn len(&self) -> Int { self.names.len() }
+}

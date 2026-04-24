@@ -1,0 +1,100 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, changegroup, fusion, capi
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.changegroup.group.{
+    Changegroup, new_group,
+};
+mount core.database.sqlite.native.changegroup.ingest.{
+    IngestKind, IkBuffered, IkIterator,
+    ingest_name, ingest_size,
+};
+mount core.database.sqlite.native.changegroup.outcome.{
+    AddOutcome, AdOk, AdSchemaMismatch, AdFailed,
+    OutputOutcome, OoOk, OoEmpty, OoFailed,
+    add_is_ok, output_is_ok, add_numeric, output_bytes,
+};
+mount core.database.sqlite.native.errors.code.{
+    extended_of, PcError,
+};
+mount base.{Bool};
+
+fn test_new_group_fresh() {
+    let g = new_group(1 as Int64);
+    assert(!g.has_schema());
+    assert_eq(g.output_bytes_estimate, 0 as Int64);
+    assert(!g.released);
+}
+
+fn test_attach_schema_and_note_table() {
+    let mut g = new_group(1 as Int64);
+    g.attach_schema(99 as Int64);
+    assert(g.has_schema());
+    g.note_table("users".clone());
+    g.note_table("users".clone());  // idempotent
+    assert_eq(g.tables.len(), 1);
+    g.note_table("posts".clone());
+    assert_eq(g.tables.len(), 2);
+}
+
+fn test_note_bytes_accumulates() {
+    let mut g = new_group(1 as Int64);
+    g.note_bytes(128 as Int64);
+    g.note_bytes(64 as Int64);
+    assert_eq(g.output_bytes_estimate, 192 as Int64);
+}
+
+fn test_ingest_name_and_size() {
+    assert(ingest_name(&IkBuffered(1024 as Int64)) == "buffered".clone());
+    assert(ingest_name(&IkIterator(42 as Int64)) == "iterator".clone());
+    assert_eq(ingest_size(&IkBuffered(1024 as Int64)), 1024 as Int64);
+    assert_eq(ingest_size(&IkIterator(42 as Int64)), 0 as Int64);
+}
+
+fn test_add_is_ok() {
+    assert(add_is_ok(&AdOk));
+    assert(!add_is_ok(&AdSchemaMismatch("t".clone())));
+}
+
+fn test_add_numeric() {
+    assert_eq(add_numeric(&AdOk), 0);
+    assert_eq(add_numeric(&AdSchemaMismatch("t".clone())), 20);
+    let failed: AddOutcome = AdFailed {
+        code: extended_of(PcError, 0),
+        reason: "x".clone(),
+    };
+    assert(add_numeric(&failed) != 0);
+}
+
+fn test_output_is_ok_and_bytes() {
+    let ok: OutputOutcome = OoOk { byte_count: 4096 as Int64 };
+    assert(output_is_ok(&ok));
+    assert_eq(output_bytes(&ok), 4096 as Int64);
+    assert(output_is_ok(&OoEmpty));
+    assert_eq(output_bytes(&OoEmpty), 0 as Int64);
+    let failed: OutputOutcome = OoFailed {
+        code: extended_of(PcError, 0),
+        reason: "x".clone(),
+    };
+    assert(!output_is_ok(&failed));
+}
+
+fn test_release_flag() {
+    let mut g = new_group(1 as Int64);
+    g.release();
+    assert(g.released);
+}
+
+fn main() {
+    test_new_group_fresh();
+    test_attach_schema_and_note_table();
+    test_note_bytes_accumulates();
+    test_ingest_name_and_size();
+    test_add_is_ok();
+    test_add_numeric();
+    test_output_is_ok_and_bytes();
+    test_release_flag();
+}

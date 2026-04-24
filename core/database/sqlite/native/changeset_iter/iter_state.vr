@@ -1,0 +1,51 @@
+// =============================================================================
+// changeset_iter/iter_state.vr — iterator driver state
+// =============================================================================
+// Spec: SQLite C API
+//
+// sqlite3changeset_next returns one of SQLITE_ROW (100), SQLITE_DONE
+// (101), or an error code.  We wrap that into a typed state.
+// =============================================================================
+
+module core.database.sqlite.native.changeset_iter.iter_state;
+
+mount core.*;
+mount base.{Bool, Text};
+
+public type IteratorState is
+      IsStart              // before first `next` call
+    | IsRowAvailable       // last `next` returned ROW
+    | IsDone
+    | IsFailed(Text);
+
+public const SQLITE_ROW: Int  = 100;
+public const SQLITE_DONE: Int = 101;
+
+public fn state_name(s: &IteratorState) -> Text {
+    match s {
+        IsStart           => "start".clone(),
+        IsRowAvailable    => "row".clone(),
+        IsDone            => "done".clone(),
+        IsFailed(_)       => "failed".clone(),
+    }
+}
+
+public fn has_row(s: &IteratorState) -> Bool {
+    match s {
+        IsRowAvailable => true,
+        _ => false,
+    }
+}
+
+public fn is_terminal(s: &IteratorState) -> Bool {
+    match s {
+        IsDone | IsFailed(_) => true,
+        _ => false,
+    }
+}
+
+public fn from_next_code(code: Int, error_message: Text) -> IteratorState {
+    if code == SQLITE_ROW  { return IsRowAvailable; }
+    if code == SQLITE_DONE { return IsDone; }
+    IsFailed(error_message)
+}

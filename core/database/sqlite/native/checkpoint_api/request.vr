@@ -1,0 +1,33 @@
+// =============================================================================
+// checkpoint_api/request.vr — CheckpointRequest
+// =============================================================================
+// Spec: SQLite C API
+// =============================================================================
+
+module core.database.sqlite.native.checkpoint_api.request;
+
+mount core.*;
+mount base.{Text};
+mount core.database.sqlite.native.result_codes.checkpoint.{
+    CheckpointMode, CmPassive,
+};
+
+public type CheckpointRequest is {
+    /// Schema name or "" for "all attached databases".
+    schema_name: Text,
+    mode: CheckpointMode,
+}
+
+public fn new_request(schema_name: Text, mode: CheckpointMode) -> CheckpointRequest {
+    CheckpointRequest { schema_name: schema_name, mode: mode }
+}
+
+/// Convenience: the classical passive checkpoint on "main".
+public fn passive_main() -> CheckpointRequest {
+    CheckpointRequest { schema_name: "main".clone(), mode: CmPassive }
+}
+
+/// Convenience: passive checkpoint across every attached schema.
+public fn passive_all() -> CheckpointRequest {
+    CheckpointRequest { schema_name: "".clone(), mode: CmPassive }
+}

@@ -1,0 +1,53 @@
+// =============================================================================
+// checkpoint_api/progress.vr — CheckpointProgress
+// =============================================================================
+// Spec: SQLite C API
+//
+// sqlite3_wal_checkpoint_v2 populates two outputs:
+//
+//   nLog  — number of frames in the WAL at the moment of the call
+//           (-1 if the schema name did not match a WAL-mode DB)
+//   nCkpt — number of frames that were actually backfilled into the
+//           main database (-1 under the same mismatch case)
+//
+// Both may be -1 on error paths.
+// =============================================================================
+
+module core.database.sqlite.native.checkpoint_api.progress;
+
+mount core.*;
+mount base.{Bool};
+
+public type CheckpointProgress is {
+    pages_in_wal: Int,
+    pages_checkpointed: Int,
+}
+
+public fn new_progress(pages_in_wal: Int, pages_checkpointed: Int) -> CheckpointProgress {
+    CheckpointProgress {
+        pages_in_wal: pages_in_wal,
+        pages_checkpointed: pages_checkpointed,
+    }
+}
+
+public fn progress_ok() -> CheckpointProgress {
+    CheckpointProgress { pages_in_wal: 0, pages_checkpointed: 0 }
+}
+
+public fn progress_unknown() -> CheckpointProgress {
+    CheckpointProgress { pages_in_wal: -1, pages_checkpointed: -1 }
+}
+
+/// True iff the progress report reflects a run that actually
+/// observed WAL frames (both values non-negative).
+public fn is_measured(p: &CheckpointProgress) -> Bool {
+    p.pages_in_wal >= 0 && p.pages_checkpointed >= 0
+}
+
+/// Return the number of frames remaining to be backfilled; 0 when
+/// checkpointed caught up with the WAL.
+public fn remaining_frames(p: &CheckpointProgress) -> Int {
+    if !is_measured(p) { return -1; }
+    if p.pages_in_wal <= p.pages_checkpointed { return 0; }
+    p.pages_in_wal - p.pages_checkpointed
+}

@@ -1,0 +1,40 @@
+// =============================================================================
+// drop_modules/plan.vr — drop plan given current registry
+// =============================================================================
+// Spec: SQLite C API
+// =============================================================================
+
+module core.database.sqlite.native.drop_modules.plan;
+
+mount core.*;
+mount base.{Text};
+mount collections.List;
+mount core.database.sqlite.native.drop_modules.keep_list.{
+    KeepList, contains,
+};
+
+public type DropPlan is {
+    /// Names that WILL be dropped (registry \ keep).
+    to_drop: List<Text>,
+    /// Names that will be preserved (intersection of registry ∩ keep).
+    to_keep: List<Text>,
+}
+
+public fn build_plan(registry: &List<Text>, keep: &KeepList) -> DropPlan {
+    let mut to_drop: List<Text> = List.new();
+    let mut to_keep: List<Text> = List.new();
+    let mut i: Int = 0;
+    while i < registry.len() {
+        let name = registry.get(i);
+        if contains(keep, name) {
+            to_keep.push(name.clone());
+        } else {
+            to_drop.push(name.clone());
+        }
+        i = i + 1;
+    }
+    DropPlan { to_drop: to_drop, to_keep: to_keep }
+}
+
+public fn drop_count(p: &DropPlan) -> Int { p.to_drop.len() }
+public fn keep_count(p: &DropPlan) -> Int { p.to_keep.len() }

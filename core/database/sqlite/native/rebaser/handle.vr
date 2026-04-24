@@ -1,0 +1,37 @@
+// =============================================================================
+// rebaser/handle.vr — Rebaser descriptor
+// =============================================================================
+// Spec: SQLite C API — session extension.
+// =============================================================================
+
+module core.database.sqlite.native.rebaser.handle;
+
+mount core.*;
+mount base.{Bool};
+
+public type Rebaser is {
+    id: Int64,
+    /// True once sqlite3rebaser_configure has been called.
+    configured: Bool,
+    /// Number of changes rebased so far (audit counter).
+    rebased_count: Int64,
+    released: Bool,
+}
+
+public fn new_rebaser(id: Int64) -> Rebaser {
+    Rebaser {
+        id: id,
+        configured: false,
+        rebased_count: 0 as Int64,
+        released: false,
+    }
+}
+
+implement Rebaser {
+    pub fn mark_configured(&mut self) { self.configured = true; }
+    pub fn note_change(&mut self) {
+        self.rebased_count = self.rebased_count + (1 as Int64);
+    }
+    pub fn release(&mut self) { self.released = true; }
+    pub fn is_live(&self) -> Bool { !self.released }
+}

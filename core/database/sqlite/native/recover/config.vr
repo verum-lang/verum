@@ -1,0 +1,51 @@
+// =============================================================================
+// recover/config.vr — SQLITE_RECOVER_* config opcodes
+// =============================================================================
+// Spec: SQLite C API — recover extension.
+//
+//   SQLITE_RECOVER_LOST_AND_FOUND     = 1   — name of "lost_and_found" table
+//   SQLITE_RECOVER_FREELIST_CORRUPT   = 2   — permit recovery past freelist corruption
+//   SQLITE_RECOVER_ROWIDS             = 3   — invent rowids for WITHOUT ROWID defects
+//   SQLITE_RECOVER_SLOWINDEXES        = 4   — re-create indexes (slow path)
+// =============================================================================
+
+module core.database.sqlite.native.recover.config;
+
+mount core.*;
+mount base.{Bool, Text};
+
+public const SQLITE_RECOVER_LOST_AND_FOUND: Int   = 1;
+public const SQLITE_RECOVER_FREELIST_CORRUPT: Int = 2;
+public const SQLITE_RECOVER_ROWIDS: Int           = 3;
+public const SQLITE_RECOVER_SLOWINDEXES: Int      = 4;
+
+public type ConfigOp is
+      CoLostAndFound
+    | CoFreelistCorrupt
+    | CoRowids
+    | CoSlowIndexes;
+
+public fn op_numeric(o: &ConfigOp) -> Int {
+    match o {
+        CoLostAndFound    => SQLITE_RECOVER_LOST_AND_FOUND,
+        CoFreelistCorrupt => SQLITE_RECOVER_FREELIST_CORRUPT,
+        CoRowids          => SQLITE_RECOVER_ROWIDS,
+        CoSlowIndexes     => SQLITE_RECOVER_SLOWINDEXES,
+    }
+}
+
+public fn op_name(o: &ConfigOp) -> Text {
+    match o {
+        CoLostAndFound    => "LOST_AND_FOUND".clone(),
+        CoFreelistCorrupt => "FREELIST_CORRUPT".clone(),
+        CoRowids          => "ROWIDS".clone(),
+        CoSlowIndexes     => "SLOWINDEXES".clone(),
+    }
+}
+
+public fn op_takes_string(o: &ConfigOp) -> Bool {
+    match o {
+        CoLostAndFound => true,
+        _ => false,
+    }
+}

@@ -1,0 +1,104 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, rebaser, replication, capi
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.rebaser.handle.{
+    Rebaser, new_rebaser,
+};
+mount core.database.sqlite.native.rebaser.config.{
+    PriorRebase, new_prior_rebase, prior_is_empty, prior_byte_len,
+};
+mount core.database.sqlite.native.rebaser.outcome.{
+    RebaseOutcome, RoOk, RoNotConfigured, RoFailed,
+    is_ok, outcome_numeric, bytes_produced, changes_consumed,
+};
+mount core.database.sqlite.native.errors.code.{
+    extended_of, PcError,
+};
+mount collections.List;
+mount base.{Bool};
+
+fn test_new_rebaser_not_configured() {
+    let r = new_rebaser(1 as Int64);
+    assert(!r.configured);
+    assert_eq(r.rebased_count, 0 as Int64);
+    assert(r.is_live());
+}
+
+fn test_mark_configured() {
+    let mut r = new_rebaser(1 as Int64);
+    r.mark_configured();
+    assert(r.configured);
+}
+
+fn test_note_change_increments() {
+    let mut r = new_rebaser(1 as Int64);
+    r.note_change();
+    r.note_change();
+    assert_eq(r.rebased_count, 2 as Int64);
+}
+
+fn test_release_flag() {
+    let mut r = new_rebaser(1 as Int64);
+    r.release();
+    assert(!r.is_live());
+}
+
+fn test_prior_rebase_empty() {
+    let bytes: List<u8> = List.new();
+    let p = new_prior_rebase(bytes);
+    assert(prior_is_empty(&p));
+    assert_eq(prior_byte_len(&p), 0);
+}
+
+fn test_prior_rebase_nonempty() {
+    let mut bytes: List<u8> = List.new();
+    bytes.push(0x01 as u8);
+    bytes.push(0x02 as u8);
+    bytes.push(0x03 as u8);
+    let p = new_prior_rebase(bytes);
+    assert(!prior_is_empty(&p));
+    assert_eq(prior_byte_len(&p), 3);
+}
+
+fn test_outcome_ok_returns_counters() {
+    let o: RebaseOutcome = RoOk {
+        byte_count: 512 as Int64,
+        changes_consumed: 5 as Int64,
+    };
+    assert(is_ok(&o));
+    assert_eq(outcome_numeric(&o), 0);
+    assert_eq(bytes_produced(&o), 512 as Int64);
+    assert_eq(changes_consumed(&o), 5 as Int64);
+}
+
+fn test_outcome_not_configured_is_misuse() {
+    let o: RebaseOutcome = RoNotConfigured;
+    assert(!is_ok(&o));
+    assert_eq(outcome_numeric(&o), 21);  // SQLITE_MISUSE
+}
+
+fn test_outcome_failed_surfaces_code() {
+    let o: RebaseOutcome = RoFailed {
+        code: extended_of(PcError, 0),
+        reason: "boom".clone(),
+    };
+    assert(!is_ok(&o));
+    assert(outcome_numeric(&o) != 0);
+    assert_eq(bytes_produced(&o), 0 as Int64);
+}
+
+fn main() {
+    test_new_rebaser_not_configured();
+    test_mark_configured();
+    test_note_change_increments();
+    test_release_flag();
+    test_prior_rebase_empty();
+    test_prior_rebase_nonempty();
+    test_outcome_ok_returns_counters();
+    test_outcome_not_configured_is_misuse();
+    test_outcome_failed_surfaces_code();
+}

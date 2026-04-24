@@ -1,0 +1,29 @@
+// =============================================================================
+// core/database/sqlite/native/changegroup/mod.vr
+// =============================================================================
+// Layer: 7 (façade — sqlite3changegroup_* surface)
+// Spec: SQLite C API — session extension.
+//
+// A "changegroup" is an ordered fusion of multiple changesets.  The
+// xAdd family can feed either buffered changesets or live iterators;
+// xOutput serialises the merged result.
+//
+//   sqlite3changegroup_new(&out)
+//   sqlite3changegroup_schema(group, db, schema)
+//   sqlite3changegroup_add(group, nSz, pBuf)
+//   sqlite3changegroup_add_change(group, iter)
+//   sqlite3changegroup_output(group, &sz, &out)
+//   sqlite3changegroup_output_strm(group, xOutput, pOut)
+//   sqlite3changegroup_delete(group)
+//
+// Submodules:
+//   * `group`      — Changegroup descriptor
+//   * `ingest`     — IngestKind (buffered / iterator)
+//   * `outcome`    — AddOutcome / OutputOutcome
+// =============================================================================
+
+module core.database.sqlite.native.changegroup;
+
+public module group;
+public module ingest;
+public module outcome;

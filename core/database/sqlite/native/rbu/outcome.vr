@@ -1,0 +1,56 @@
+// =============================================================================
+// rbu/outcome.vr — step / close outcome
+// =============================================================================
+// Spec: SQLite C API
+//
+// sqlite3rbu_step returns one of SQLITE_OK / SQLITE_DONE / error code;
+// sqlite3rbu_close returns SQLITE_OK / SQLITE_DONE (success) or
+// SQLITE_NOMEM / error with an errmsg.
+// =============================================================================
+
+module core.database.sqlite.native.rbu.outcome;
+
+mount core.*;
+mount base.{Bool, Text};
+mount core.database.sqlite.native.errors.code.{
+    ExtendedCode, extended_numeric,
+};
+
+public type StepOutcome is
+      SoMoreWork
+    | SoDone
+    | SoFailed { code: ExtendedCode, reason: Text };
+
+public fn step_is_ok(s: &StepOutcome) -> Bool {
+    match s {
+        SoMoreWork | SoDone => true,
+        _ => false,
+    }
+}
+
+public fn step_is_done(s: &StepOutcome) -> Bool {
+    match s {
+        SoDone => true,
+        _ => false,
+    }
+}
+
+public type CloseOutcome is
+      CoOk
+    | CoDoneAtLast
+    | CoFailed { code: ExtendedCode, reason: Text };
+
+public fn close_is_ok(c: &CloseOutcome) -> Bool {
+    match c {
+        CoOk | CoDoneAtLast => true,
+        _ => false,
+    }
+}
+
+public fn close_numeric(c: &CloseOutcome) -> Int {
+    match c {
+        CoOk => 0,
+        CoDoneAtLast => 101,  // SQLITE_DONE
+        CoFailed { code, .. } => extended_numeric(code),
+    }
+}

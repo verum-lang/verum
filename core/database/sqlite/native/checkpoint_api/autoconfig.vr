@@ -1,0 +1,45 @@
+// =============================================================================
+// checkpoint_api/autoconfig.vr — sqlite3_wal_autocheckpoint policy
+// =============================================================================
+// Spec: SQLite C API
+//
+// sqlite3_wal_autocheckpoint(db, N):
+//   * N > 0  → a passive checkpoint runs when the WAL reaches N pages
+//   * N == 0 → autocheckpointing is disabled entirely
+//   * N < 0  → no change; reserved
+//
+// Default threshold per SQLite source: 1000 pages (≈4 MiB at 4 KiB
+// page size).
+// =============================================================================
+
+module core.database.sqlite.native.checkpoint_api.autoconfig;
+
+mount core.*;
+mount base.{Bool};
+
+public const DEFAULT_AUTOCHECKPOINT_PAGES: Int = 1000;
+
+public type AutoCheckpoint is {
+    threshold_pages: Int,
+}
+
+public fn new_autocheckpoint(threshold_pages: Int) -> AutoCheckpoint {
+    AutoCheckpoint { threshold_pages: threshold_pages }
+}
+
+public fn default_autocheckpoint() -> AutoCheckpoint {
+    AutoCheckpoint { threshold_pages: DEFAULT_AUTOCHECKPOINT_PAGES }
+}
+
+public fn disabled() -> AutoCheckpoint {
+    AutoCheckpoint { threshold_pages: 0 }
+}
+
+public fn is_disabled(a: &AutoCheckpoint) -> Bool {
+    a.threshold_pages <= 0
+}
+
+public fn should_fire(a: &AutoCheckpoint, wal_pages: Int) -> Bool {
+    if is_disabled(a) { return false; }
+    wal_pages >= a.threshold_pages
+}

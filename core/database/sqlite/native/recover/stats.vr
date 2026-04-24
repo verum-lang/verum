@@ -1,0 +1,47 @@
+// =============================================================================
+// recover/stats.vr — running recovery statistics
+// =============================================================================
+// Spec: SQLite C API
+//
+// Not part of the public sqlite3_recover API surface, but useful for
+// progress reporting while driving sqlite3_recover_step in a loop.
+// =============================================================================
+
+module core.database.sqlite.native.recover.stats;
+
+mount core.*;
+mount base.{Bool};
+
+public type RecoveryStats is {
+    pages_read: Int64,
+    rows_recovered: Int64,
+    rows_rejected: Int64,
+    errors_encountered: Int64,
+}
+
+public fn new_stats() -> RecoveryStats {
+    RecoveryStats {
+        pages_read: 0 as Int64,
+        rows_recovered: 0 as Int64,
+        rows_rejected: 0 as Int64,
+        errors_encountered: 0 as Int64,
+    }
+}
+
+implement RecoveryStats {
+    pub fn note_page(&mut self) {
+        self.pages_read = self.pages_read + (1 as Int64);
+    }
+    pub fn note_row(&mut self) {
+        self.rows_recovered = self.rows_recovered + (1 as Int64);
+    }
+    pub fn note_rejected(&mut self) {
+        self.rows_rejected = self.rows_rejected + (1 as Int64);
+    }
+    pub fn note_error(&mut self) {
+        self.errors_encountered = self.errors_encountered + (1 as Int64);
+    }
+    pub fn total_rows(&self) -> Int64 {
+        self.rows_recovered + self.rows_rejected
+    }
+}

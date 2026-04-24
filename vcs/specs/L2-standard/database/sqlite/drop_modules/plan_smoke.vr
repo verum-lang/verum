@@ -1,0 +1,96 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, drop_modules, vtab, security, capi
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.drop_modules.keep_list.{
+    KeepList, new_keep_list, from_names, recommended_safe_keep,
+};
+mount core.database.sqlite.native.drop_modules.plan.{
+    DropPlan, build_plan, drop_count, keep_count,
+};
+mount collections.List;
+mount base.{Bool};
+
+fn test_empty_keep_list() {
+    let k = new_keep_list();
+    assert(!k.contains(&"fts5".clone()));
+    assert_eq(k.len(), 0);
+}
+
+fn test_recommended_safe_keep_contains_fts5() {
+    let k = recommended_safe_keep();
+    assert(k.contains(&"fts5".clone()));
+    assert(k.contains(&"rtree".clone()));
+    assert(k.contains(&"json1".clone()));
+    assert(!k.contains(&"sqlite_dbpage".clone()));
+}
+
+fn test_add_is_idempotent() {
+    let mut k = new_keep_list();
+    assert(k.add("fts5".clone()));
+    assert(!k.add("fts5".clone()));   // duplicate rejected
+    assert_eq(k.len(), 1);
+}
+
+fn test_from_names_preserves_order() {
+    let mut names: List<Text> = List.new();
+    names.push("alpha".clone());
+    names.push("beta".clone());
+    let k = from_names(names);
+    assert(k.contains(&"alpha".clone()));
+    assert(k.contains(&"beta".clone()));
+}
+
+fn test_build_plan_splits_registry() {
+    let mut registry: List<Text> = List.new();
+    registry.push("fts5".clone());
+    registry.push("rtree".clone());
+    registry.push("sqlite_dbpage".clone());
+    registry.push("sqlite_stmt".clone());
+    let keep = recommended_safe_keep();
+    let plan = build_plan(&registry, &keep);
+    assert_eq(keep_count(&plan), 2);    // fts5 + rtree
+    assert_eq(drop_count(&plan), 2);    // sqlite_dbpage + sqlite_stmt
+}
+
+fn test_build_plan_empty_registry() {
+    let registry: List<Text> = List.new();
+    let keep = recommended_safe_keep();
+    let plan = build_plan(&registry, &keep);
+    assert_eq(keep_count(&plan), 0);
+    assert_eq(drop_count(&plan), 0);
+}
+
+fn test_build_plan_all_kept() {
+    let mut registry: List<Text> = List.new();
+    registry.push("fts5".clone());
+    registry.push("rtree".clone());
+    let keep = recommended_safe_keep();
+    let plan = build_plan(&registry, &keep);
+    assert_eq(drop_count(&plan), 0);
+    assert_eq(keep_count(&plan), 2);
+}
+
+fn test_build_plan_empty_keep() {
+    let mut registry: List<Text> = List.new();
+    registry.push("mod_a".clone());
+    registry.push("mod_b".clone());
+    let keep = new_keep_list();
+    let plan = build_plan(&registry, &keep);
+    assert_eq(drop_count(&plan), 2);
+    assert_eq(keep_count(&plan), 0);
+}
+
+fn main() {
+    test_empty_keep_list();
+    test_recommended_safe_keep_contains_fts5();
+    test_add_is_idempotent();
+    test_from_names_preserves_order();
+    test_build_plan_splits_registry();
+    test_build_plan_empty_registry();
+    test_build_plan_all_kept();
+    test_build_plan_empty_keep();
+}

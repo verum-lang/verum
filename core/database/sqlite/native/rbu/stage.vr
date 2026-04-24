@@ -1,0 +1,64 @@
+// =============================================================================
+// rbu/stage.vr — SQLITE_RBU_STATE_* stages
+// =============================================================================
+// Spec: SQLite C API — rbu.h
+//
+//   SQLITE_RBU_STATE_OAL       = 1   -- applying updates to OAL
+//   SQLITE_RBU_STATE_MOVE      = 2   -- moving the OAL to WAL
+//   SQLITE_RBU_STATE_CHECKPOINT = 3  -- checkpointing WAL
+//   SQLITE_RBU_STATE_DONE      = 4
+//   SQLITE_RBU_STATE_ERROR     = 5
+// =============================================================================
+
+module core.database.sqlite.native.rbu.stage;
+
+mount core.*;
+mount base.{Bool, Text};
+
+public const SQLITE_RBU_STATE_OAL: Int        = 1;
+public const SQLITE_RBU_STATE_MOVE: Int       = 2;
+public const SQLITE_RBU_STATE_CHECKPOINT: Int = 3;
+public const SQLITE_RBU_STATE_DONE: Int       = 4;
+public const SQLITE_RBU_STATE_ERROR: Int      = 5;
+
+public type RbuStage is
+      RsOal
+    | RsMove
+    | RsCheckpoint
+    | RsDone
+    | RsError;
+
+public fn stage_numeric(s: &RbuStage) -> Int {
+    match s {
+        RsOal         => SQLITE_RBU_STATE_OAL,
+        RsMove        => SQLITE_RBU_STATE_MOVE,
+        RsCheckpoint  => SQLITE_RBU_STATE_CHECKPOINT,
+        RsDone        => SQLITE_RBU_STATE_DONE,
+        RsError       => SQLITE_RBU_STATE_ERROR,
+    }
+}
+
+public fn stage_name(s: &RbuStage) -> Text {
+    match s {
+        RsOal         => "oal".clone(),
+        RsMove        => "move".clone(),
+        RsCheckpoint  => "checkpoint".clone(),
+        RsDone        => "done".clone(),
+        RsError       => "error".clone(),
+    }
+}
+
+public fn is_terminal(s: &RbuStage) -> Bool {
+    match s {
+        RsDone | RsError => true,
+        _ => false,
+    }
+}
+
+public fn from_numeric(n: Int) -> RbuStage {
+    if n == SQLITE_RBU_STATE_MOVE       { return RsMove; }
+    if n == SQLITE_RBU_STATE_CHECKPOINT { return RsCheckpoint; }
+    if n == SQLITE_RBU_STATE_DONE       { return RsDone; }
+    if n == SQLITE_RBU_STATE_ERROR      { return RsError; }
+    RsOal
+}

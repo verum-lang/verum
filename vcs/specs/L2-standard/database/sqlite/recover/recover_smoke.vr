@@ -1,0 +1,116 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, recover, corruption, capi
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.recover.handle.{
+    Recover, new_recover, new_callback_recover,
+};
+mount core.database.sqlite.native.recover.config.{
+    ConfigOp,
+    CoLostAndFound, CoFreelistCorrupt, CoRowids, CoSlowIndexes,
+    SQLITE_RECOVER_LOST_AND_FOUND, SQLITE_RECOVER_FREELIST_CORRUPT,
+    SQLITE_RECOVER_ROWIDS, SQLITE_RECOVER_SLOWINDEXES,
+    op_numeric, op_name, op_takes_string,
+};
+mount core.database.sqlite.native.recover.stats.{
+    RecoveryStats, new_stats,
+};
+mount core.database.sqlite.native.recover.outcome.{
+    StepOutcome, SoMoreWork, SoDone, SoFailed,
+    FinishOutcome, FoOk, FoFailed,
+    step_is_ok, step_is_done, finish_is_ok, finish_numeric,
+};
+mount core.database.sqlite.native.errors.code.{
+    extended_of, PcCorrupt,
+};
+mount base.{Bool};
+
+fn test_recover_default_uri_form() {
+    let r = new_recover(1 as Int64, "main".clone(), "file:recovered.db".clone());
+    assert(!r.sql_callback_form);
+    assert(r.is_live());
+}
+
+fn test_recover_callback_form() {
+    let r = new_callback_recover(2 as Int64, "main".clone());
+    assert(r.sql_callback_form);
+    assert(r.target_uri.len() == 0);
+}
+
+fn test_recover_finish() {
+    let mut r = new_recover(1 as Int64, "main".clone(), "".clone());
+    r.finish();
+    assert(!r.is_live());
+}
+
+fn test_config_op_numeric_matches_c_header() {
+    assert_eq(op_numeric(&CoLostAndFound), SQLITE_RECOVER_LOST_AND_FOUND);
+    assert_eq(op_numeric(&CoFreelistCorrupt), SQLITE_RECOVER_FREELIST_CORRUPT);
+    assert_eq(op_numeric(&CoRowids), SQLITE_RECOVER_ROWIDS);
+    assert_eq(op_numeric(&CoSlowIndexes), SQLITE_RECOVER_SLOWINDEXES);
+    assert_eq(SQLITE_RECOVER_LOST_AND_FOUND, 1);
+    assert_eq(SQLITE_RECOVER_SLOWINDEXES, 4);
+}
+
+fn test_config_op_takes_string_only_lost_and_found() {
+    assert(op_takes_string(&CoLostAndFound));
+    assert(!op_takes_string(&CoFreelistCorrupt));
+    assert(!op_takes_string(&CoRowids));
+}
+
+fn test_config_op_names() {
+    assert(op_name(&CoLostAndFound) == "LOST_AND_FOUND".clone());
+    assert(op_name(&CoSlowIndexes) == "SLOWINDEXES".clone());
+}
+
+fn test_stats_counters() {
+    let mut s = new_stats();
+    s.note_page();
+    s.note_page();
+    s.note_row();
+    s.note_rejected();
+    s.note_error();
+    assert_eq(s.pages_read, 2 as Int64);
+    assert_eq(s.rows_recovered, 1 as Int64);
+    assert_eq(s.rows_rejected, 1 as Int64);
+    assert_eq(s.errors_encountered, 1 as Int64);
+    assert_eq(s.total_rows(), 2 as Int64);
+}
+
+fn test_step_outcome_classification() {
+    assert(step_is_ok(&SoMoreWork));
+    assert(step_is_ok(&SoDone));
+    assert(step_is_done(&SoDone));
+    assert(!step_is_done(&SoMoreWork));
+    let failed: StepOutcome = SoFailed {
+        code: extended_of(PcCorrupt, 0),
+        reason: "corrupt".clone(),
+    };
+    assert(!step_is_ok(&failed));
+}
+
+fn test_finish_outcome_classification() {
+    assert(finish_is_ok(&FoOk));
+    assert_eq(finish_numeric(&FoOk), 0);
+    let failed: FinishOutcome = FoFailed {
+        code: extended_of(PcCorrupt, 0),
+        reason: "corrupt".clone(),
+    };
+    assert(!finish_is_ok(&failed));
+    assert(finish_numeric(&failed) != 0);
+}
+
+fn main() {
+    test_recover_default_uri_form();
+    test_recover_callback_form();
+    test_recover_finish();
+    test_config_op_numeric_matches_c_header();
+    test_config_op_takes_string_only_lost_and_found();
+    test_config_op_names();
+    test_stats_counters();
+    test_step_outcome_classification();
+    test_finish_outcome_classification();
+}

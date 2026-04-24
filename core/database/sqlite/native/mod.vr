@@ -252,3 +252,19 @@ public module pcache_methods;
 public module result_codes;
 // - limits_api: sqlite3_limit — per-connection numeric caps (LENGTH/COLUMN/EXPR_DEPTH/…)
 public module limits_api;
+// - session_api: sqlite3session_* (create/attach/changeset/patchset/diff/delete/config)
+public module session_api;
+// - changeset_iter: sqlite3changeset_* (start/next/op/old/new/conflict/apply/invert/concat)
+public module changeset_iter;
+// - changegroup: sqlite3changegroup_* (new/schema/add/add_change/output/delete)
+public module changegroup;
+// - rebaser: sqlite3rebaser_* (create/configure/rebase/delete) — for bidirectional replication
+public module rebaser;
+// - rbu: sqlite3rbu_* (Resumable Bulk Update) — open/step/close/state/bp_progress
+public module rbu;
+// - recover: sqlite3_recover_* — init/config/step/errmsg/finish + SQLITE_RECOVER_* opcodes
+public module recover;
+// - drop_modules: sqlite3_drop_modules — keep-list + computed drop plan for security hardening
+public module drop_modules;
+// - checkpoint_api: sqlite3_wal_checkpoint / _v2 / _autocheckpoint — request + progress + auto-threshold
+public module checkpoint_api;

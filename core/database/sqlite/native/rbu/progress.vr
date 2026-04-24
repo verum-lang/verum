@@ -1,0 +1,46 @@
+// =============================================================================
+// rbu/progress.vr — sqlite3rbu_bp_progress counters
+// =============================================================================
+// Spec: SQLite C API — rbu.h
+//
+// sqlite3rbu_bp_progress writes two integers:
+//   * one  = number of update DB source rows processed
+//   * two  = number of target DB checkpoint pages
+//
+// Both are unbounded upward counters — they only monotonically
+// increase across resumes.
+// =============================================================================
+
+module core.database.sqlite.native.rbu.progress;
+
+mount core.*;
+mount base.{Bool};
+
+public type BpProgress is {
+    source_rows: Int64,
+    checkpoint_pages: Int64,
+}
+
+public fn new_progress() -> BpProgress {
+    BpProgress {
+        source_rows: 0 as Int64,
+        checkpoint_pages: 0 as Int64,
+    }
+}
+
+implement BpProgress {
+    pub fn note_source(&mut self, n: Int64) {
+        self.source_rows = self.source_rows + n;
+    }
+
+    pub fn note_checkpoint(&mut self, n: Int64) {
+        self.checkpoint_pages = self.checkpoint_pages + n;
+    }
+}
+
+/// True iff progress changed between two snapshots — caller uses this
+/// for "make forward progress" checks when calling step repeatedly.
+public fn progressed(before: &BpProgress, after: &BpProgress) -> Bool {
+    after.source_rows > before.source_rows
+        || after.checkpoint_pages > before.checkpoint_pages
+}

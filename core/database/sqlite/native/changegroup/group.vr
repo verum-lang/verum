@@ -1,0 +1,59 @@
+// =============================================================================
+// changegroup/group.vr — Changegroup descriptor
+// =============================================================================
+// Spec: SQLite C API
+// =============================================================================
+
+module core.database.sqlite.native.changegroup.group;
+
+mount core.*;
+mount base.{Bool, Maybe, Text};
+mount collections.List;
+
+public type Changegroup is {
+    id: Int64,
+    /// Optional schema handle for schema-aware fusion.
+    schema_db: Maybe<Int64>,
+    /// Tables referenced by any added change.
+    tables: List<Text>,
+    /// Running aggregate size in bytes (output size estimate).
+    output_bytes_estimate: Int64,
+    released: Bool,
+}
+
+public fn new_group(id: Int64) -> Changegroup {
+    Changegroup {
+        id: id,
+        schema_db: Maybe.None,
+        tables: List.new(),
+        output_bytes_estimate: 0 as Int64,
+        released: false,
+    }
+}
+
+implement Changegroup {
+    pub fn attach_schema(&mut self, db: Int64) {
+        self.schema_db = Maybe.Some(db);
+    }
+
+    pub fn note_table(&mut self, table: Text) {
+        let mut i: Int = 0;
+        while i < self.tables.len() {
+            if self.tables.get(i) == &table { return; }
+            i = i + 1;
+        }
+        self.tables.push(table);
+    }
+
+    pub fn note_bytes(&mut self, delta: Int64) {
+        self.output_bytes_estimate = self.output_bytes_estimate + delta;
+    }
+
+    pub fn release(&mut self) { self.released = true; }
+    pub fn has_schema(&self) -> Bool {
+        match &self.schema_db {
+            Maybe.Some(_) => true,
+            Maybe.None => false,
+        }
+    }
+}

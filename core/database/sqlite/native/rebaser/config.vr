@@ -1,0 +1,32 @@
+// =============================================================================
+// rebaser/config.vr — prior-rebase info feed
+// =============================================================================
+// Spec: SQLite C API
+//
+// sqlite3rebaser_configure accepts the opaque "rebase blob" emitted
+// by sqlite3changeset_apply_v2 so the rebaser knows which remote
+// operations were previously replaced / omitted.
+// =============================================================================
+
+module core.database.sqlite.native.rebaser.config;
+
+mount core.*;
+mount base.{Bool};
+mount collections.List;
+
+public type PriorRebase is {
+    /// Opaque blob emitted by sqlite3changeset_apply_v2.
+    bytes: List<u8>,
+}
+
+public fn new_prior_rebase(bytes: List<u8>) -> PriorRebase {
+    PriorRebase { bytes: bytes }
+}
+
+public fn prior_is_empty(p: &PriorRebase) -> Bool {
+    p.bytes.len() == 0
+}
+
+public fn prior_byte_len(p: &PriorRebase) -> Int {
+    p.bytes.len()
+}

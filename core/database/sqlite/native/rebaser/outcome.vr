@@ -1,0 +1,47 @@
+// =============================================================================
+// rebaser/outcome.vr — rebase result
+// =============================================================================
+// Spec: SQLite C API
+// =============================================================================
+
+module core.database.sqlite.native.rebaser.outcome;
+
+mount core.*;
+mount base.{Bool, Text};
+mount core.database.sqlite.native.errors.code.{
+    ExtendedCode, extended_numeric,
+};
+
+public type RebaseOutcome is
+      RoOk { byte_count: Int64, changes_consumed: Int64 }
+    | RoNotConfigured
+    | RoFailed { code: ExtendedCode, reason: Text };
+
+public fn is_ok(r: &RebaseOutcome) -> Bool {
+    match r {
+        RoOk { .. } => true,
+        _ => false,
+    }
+}
+
+public fn outcome_numeric(r: &RebaseOutcome) -> Int {
+    match r {
+        RoOk { .. } => 0,
+        RoNotConfigured => 21,   // SQLITE_MISUSE
+        RoFailed { code, .. } => extended_numeric(code),
+    }
+}
+
+public fn bytes_produced(r: &RebaseOutcome) -> Int64 {
+    match r {
+        RoOk { byte_count, .. } => *byte_count,
+        _ => 0 as Int64,
+    }
+}
+
+public fn changes_consumed(r: &RebaseOutcome) -> Int64 {
+    match r {
+        RoOk { changes_consumed, .. } => *changes_consumed,
+        _ => 0 as Int64,
+    }
+}

@@ -1,0 +1,43 @@
+// =============================================================================
+// session_api/outcome.vr — normalised outcome
+// =============================================================================
+// Spec: SQLite C API
+// =============================================================================
+
+module core.database.sqlite.native.session_api.outcome;
+
+mount core.*;
+mount base.{Bool, Text};
+mount core.database.sqlite.native.errors.code.{
+    ExtendedCode, extended_numeric,
+};
+
+public type SessionOutcome is
+      SoOk
+    | SoEmpty
+    | SoNotAttached(Text)
+    | SoFailed { code: ExtendedCode, reason: Text };
+
+public fn is_ok(o: &SessionOutcome) -> Bool {
+    match o {
+        SoOk | SoEmpty => true,
+        _ => false,
+    }
+}
+
+public fn outcome_numeric(o: &SessionOutcome) -> Int {
+    match o {
+        SoOk => 0,
+        SoEmpty => 0,
+        SoNotAttached(_) => 1,   // SQLITE_ERROR
+        SoFailed { code, .. } => extended_numeric(code),
+    }
+}
+
+public fn outcome_reason(o: &SessionOutcome) -> Text {
+    match o {
+        SoOk | SoEmpty => "".clone(),
+        SoNotAttached(t) => t.clone(),
+        SoFailed { reason, .. } => reason.clone(),
+    }
+}

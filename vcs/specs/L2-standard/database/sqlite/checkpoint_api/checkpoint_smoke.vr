@@ -1,0 +1,100 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, checkpoint_api, wal, autocheckpoint, capi
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.checkpoint_api.request.{
+    CheckpointRequest, new_request, passive_main, passive_all,
+};
+mount core.database.sqlite.native.checkpoint_api.progress.{
+    CheckpointProgress,
+    new_progress, progress_ok, progress_unknown,
+    is_measured, remaining_frames,
+};
+mount core.database.sqlite.native.checkpoint_api.autoconfig.{
+    AutoCheckpoint,
+    DEFAULT_AUTOCHECKPOINT_PAGES,
+    new_autocheckpoint, default_autocheckpoint, disabled,
+    is_disabled, should_fire,
+};
+mount core.database.sqlite.native.result_codes.checkpoint.{
+    CheckpointMode, CmPassive, CmFull, CmRestart, CmTruncate,
+};
+mount base.{Bool};
+
+fn test_passive_main_targets_main_schema() {
+    let r = passive_main();
+    assert(r.schema_name == "main".clone());
+    match &r.mode { CmPassive => {}, _ => assert(false) }
+}
+
+fn test_passive_all_empty_schema() {
+    let r = passive_all();
+    assert(r.schema_name.len() == 0);
+}
+
+fn test_new_request_with_truncate_mode() {
+    let r = new_request("aux1".clone(), CmTruncate);
+    assert(r.schema_name == "aux1".clone());
+    match &r.mode { CmTruncate => {}, _ => assert(false) }
+}
+
+fn test_progress_ok_is_measured() {
+    let p = progress_ok();
+    assert(is_measured(&p));
+    assert_eq(remaining_frames(&p), 0);
+}
+
+fn test_progress_unknown_not_measured() {
+    let p = progress_unknown();
+    assert(!is_measured(&p));
+    assert_eq(remaining_frames(&p), -1);
+}
+
+fn test_remaining_frames_nonzero() {
+    let p = new_progress(128, 64);
+    assert_eq(remaining_frames(&p), 64);
+}
+
+fn test_remaining_frames_zero_when_caught_up() {
+    let p = new_progress(100, 100);
+    assert_eq(remaining_frames(&p), 0);
+    let p2 = new_progress(100, 120);
+    // Checkpointed beyond pages_in_wal → treat as 0.
+    assert_eq(remaining_frames(&p2), 0);
+}
+
+fn test_default_autocheckpoint_threshold() {
+    let a = default_autocheckpoint();
+    assert(!is_disabled(&a));
+    assert_eq(a.threshold_pages, DEFAULT_AUTOCHECKPOINT_PAGES);
+    assert_eq(DEFAULT_AUTOCHECKPOINT_PAGES, 1000);
+}
+
+fn test_disabled_autocheckpoint() {
+    let a = disabled();
+    assert(is_disabled(&a));
+    assert(!should_fire(&a, 10000));
+}
+
+fn test_should_fire_at_threshold() {
+    let a = new_autocheckpoint(1000);
+    assert(!should_fire(&a, 999));
+    assert(should_fire(&a, 1000));
+    assert(should_fire(&a, 1500));
+}
+
+fn main() {
+    test_passive_main_targets_main_schema();
+    test_passive_all_empty_schema();
+    test_new_request_with_truncate_mode();
+    test_progress_ok_is_measured();
+    test_progress_unknown_not_measured();
+    test_remaining_frames_nonzero();
+    test_remaining_frames_zero_when_caught_up();
+    test_default_autocheckpoint_threshold();
+    test_disabled_autocheckpoint();
+    test_should_fire_at_threshold();
+}

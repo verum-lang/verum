@@ -1,0 +1,56 @@
+// =============================================================================
+// session_api/op.vr — SessionOp taxonomy
+// =============================================================================
+// Spec: SQLite C API — session extension.
+// =============================================================================
+
+module core.database.sqlite.native.session_api.op;
+
+mount core.*;
+mount base.{Bool, Text};
+
+public type SessionOp is
+      SoCreate
+    | SoAttach
+    | SoEnable
+    | SoIndirect
+    | SoTableFilter
+    | SoChangeset
+    | SoPatchset
+    | SoDiff
+    | SoDelete
+    | SoIsEmpty
+    | SoConfigSizeLimit
+    | SoConfigObjectConfig;
+
+public fn op_name(o: &SessionOp) -> Text {
+    match o {
+        SoCreate             => "session_create".clone(),
+        SoAttach             => "session_attach".clone(),
+        SoEnable             => "session_enable".clone(),
+        SoIndirect           => "session_indirect".clone(),
+        SoTableFilter        => "session_table_filter".clone(),
+        SoChangeset          => "session_changeset".clone(),
+        SoPatchset           => "session_patchset".clone(),
+        SoDiff               => "session_diff".clone(),
+        SoDelete             => "session_delete".clone(),
+        SoIsEmpty            => "session_isempty".clone(),
+        SoConfigSizeLimit    => "session_config_size_limit".clone(),
+        SoConfigObjectConfig => "session_object_config".clone(),
+    }
+}
+
+public fn is_producing(o: &SessionOp) -> Bool {
+    match o {
+        SoChangeset | SoPatchset | SoDiff => true,
+        _ => false,
+    }
+}
+
+public fn is_mutating(o: &SessionOp) -> Bool {
+    match o {
+        SoAttach | SoEnable | SoIndirect | SoTableFilter
+        | SoDelete | SoConfigSizeLimit | SoConfigObjectConfig => true,
+        _ => false,
+    }
+}

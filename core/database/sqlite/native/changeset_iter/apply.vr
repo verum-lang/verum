@@ -1,0 +1,68 @@
+// =============================================================================
+// changeset_iter/apply.vr — sqlite3changeset_apply outcome
+// =============================================================================
+// Spec: SQLite C API
+//
+// sqlite3changeset_apply's xFilter + xConflict callbacks return
+// integers; we wrap them into typed verdicts.
+// =============================================================================
+
+module core.database.sqlite.native.changeset_iter.apply;
+
+mount core.*;
+mount base.{Bool, Text};
+mount core.database.sqlite.native.result_codes.changeset.{
+    ConflictKind, ConflictResolution, CrOmit, CrReplace, CrAbort,
+};
+
+public type FilterVerdict is
+      FvInclude
+    | FvExclude;
+
+public fn filter_numeric(f: &FilterVerdict) -> Int {
+    match f {
+        FvInclude => 1,
+        FvExclude => 0,
+    }
+}
+
+public type ApplyFlags is {
+    /// SQLITE_CHANGESETAPPLY_NOSAVEPOINT (1 << 0)
+    no_savepoint: Bool,
+    /// SQLITE_CHANGESETAPPLY_INVERT     (1 << 1)
+    invert: Bool,
+    /// SQLITE_CHANGESETAPPLY_IGNORENOOP (1 << 2)
+    ignore_noop: Bool,
+    /// SQLITE_CHANGESETAPPLY_FKNOACTION (1 << 3)
+    fk_no_action: Bool,
+}
+
+public fn default_apply_flags() -> ApplyFlags {
+    ApplyFlags {
+        no_savepoint: false,
+        invert: false,
+        ignore_noop: false,
+        fk_no_action: false,
+    }
+}
+
+public fn flags_numeric(f: &ApplyFlags) -> Int {
+    let mut v: Int = 0;
+    if f.no_savepoint { v = v | 1; }
+    if f.invert       { v = v | 2; }
+    if f.ignore_noop  { v = v | 4; }
+    if f.fk_no_action { v = v | 8; }
+    v
+}
+
+public type ApplyOutcome is
+      AoOk
+    | AoAborted(Text)
+    | AoPartial { rows_applied: Int64, rows_rejected: Int64 };
+
+public fn is_ok(o: &ApplyOutcome) -> Bool {
+    match o {
+        AoOk => true,
+        _ => false,
+    }
+}

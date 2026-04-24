@@ -1,0 +1,127 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, rbu, resumable_bulk_update, capi
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.rbu.stage.{
+    RbuStage, RsOal, RsMove, RsCheckpoint, RsDone, RsError,
+    SQLITE_RBU_STATE_OAL, SQLITE_RBU_STATE_MOVE,
+    SQLITE_RBU_STATE_CHECKPOINT, SQLITE_RBU_STATE_DONE, SQLITE_RBU_STATE_ERROR,
+    stage_numeric, stage_name, is_terminal, from_numeric,
+};
+mount core.database.sqlite.native.rbu.progress.{
+    BpProgress, new_progress, progressed,
+};
+mount core.database.sqlite.native.rbu.handle.{
+    Rbu, new_rbu,
+};
+mount core.database.sqlite.native.rbu.outcome.{
+    StepOutcome, SoMoreWork, SoDone, SoFailed,
+    CloseOutcome, CoOk, CoDoneAtLast, CoFailed,
+    step_is_ok, step_is_done, close_is_ok, close_numeric,
+};
+mount core.database.sqlite.native.errors.code.{
+    extended_of, PcIoErr,
+};
+mount base.{Bool};
+
+fn test_stage_numeric_matches_c_header() {
+    assert_eq(stage_numeric(&RsOal), SQLITE_RBU_STATE_OAL);
+    assert_eq(stage_numeric(&RsMove), SQLITE_RBU_STATE_MOVE);
+    assert_eq(stage_numeric(&RsCheckpoint), SQLITE_RBU_STATE_CHECKPOINT);
+    assert_eq(stage_numeric(&RsDone), SQLITE_RBU_STATE_DONE);
+    assert_eq(stage_numeric(&RsError), SQLITE_RBU_STATE_ERROR);
+    assert_eq(SQLITE_RBU_STATE_OAL, 1);
+    assert_eq(SQLITE_RBU_STATE_ERROR, 5);
+}
+
+fn test_stage_names_and_terminal() {
+    assert(stage_name(&RsOal) == "oal".clone());
+    assert(stage_name(&RsCheckpoint) == "checkpoint".clone());
+    assert(!is_terminal(&RsOal));
+    assert(!is_terminal(&RsMove));
+    assert(is_terminal(&RsDone));
+    assert(is_terminal(&RsError));
+}
+
+fn test_stage_from_numeric_round_trip() {
+    match from_numeric(SQLITE_RBU_STATE_OAL)        { RsOal        => {}, _ => assert(false) }
+    match from_numeric(SQLITE_RBU_STATE_MOVE)       { RsMove       => {}, _ => assert(false) }
+    match from_numeric(SQLITE_RBU_STATE_CHECKPOINT) { RsCheckpoint => {}, _ => assert(false) }
+    match from_numeric(SQLITE_RBU_STATE_DONE)       { RsDone       => {}, _ => assert(false) }
+    match from_numeric(SQLITE_RBU_STATE_ERROR)      { RsError      => {}, _ => assert(false) }
+}
+
+fn test_progress_monotone() {
+    let mut p = new_progress();
+    p.note_source(10 as Int64);
+    p.note_source(5 as Int64);
+    assert_eq(p.source_rows, 15 as Int64);
+    p.note_checkpoint(2 as Int64);
+    assert_eq(p.checkpoint_pages, 2 as Int64);
+}
+
+fn test_progressed_detects_change() {
+    let before = new_progress();
+    let mut after = new_progress();
+    assert(!progressed(&before, &after));
+    after.note_source(1 as Int64);
+    assert(progressed(&before, &after));
+}
+
+fn test_rbu_handle_defaults_to_oal() {
+    let r = new_rbu(1 as Int64, "target.db".clone(), "rbu.db".clone());
+    match &r.stage { RsOal => {}, _ => assert(false) }
+    assert(r.is_live());
+    assert_eq(r.steps_taken, 0 as Int64);
+}
+
+fn test_rbu_advance_and_step_tracking() {
+    let mut r = new_rbu(1 as Int64, "t.db".clone(), "u.db".clone());
+    r.advance_to(RsMove);
+    r.note_step();
+    r.note_step();
+    assert_eq(r.steps_taken, 2 as Int64);
+    r.close();
+    assert(!r.is_live());
+}
+
+fn test_step_outcome_classification() {
+    assert(step_is_ok(&SoMoreWork));
+    assert(step_is_ok(&SoDone));
+    assert(step_is_done(&SoDone));
+    assert(!step_is_done(&SoMoreWork));
+    let failed: StepOutcome = SoFailed {
+        code: extended_of(PcIoErr, 0),
+        reason: "io".clone(),
+    };
+    assert(!step_is_ok(&failed));
+    assert(!step_is_done(&failed));
+}
+
+fn test_close_outcome_classification() {
+    assert(close_is_ok(&CoOk));
+    assert(close_is_ok(&CoDoneAtLast));
+    assert_eq(close_numeric(&CoOk), 0);
+    assert_eq(close_numeric(&CoDoneAtLast), 101);
+    let failed: CloseOutcome = CoFailed {
+        code: extended_of(PcIoErr, 0),
+        reason: "io".clone(),
+    };
+    assert(!close_is_ok(&failed));
+    assert(close_numeric(&failed) != 0);
+}
+
+fn main() {
+    test_stage_numeric_matches_c_header();
+    test_stage_names_and_terminal();
+    test_stage_from_numeric_round_trip();
+    test_progress_monotone();
+    test_progressed_detects_change();
+    test_rbu_handle_defaults_to_oal();
+    test_rbu_advance_and_step_tracking();
+    test_step_outcome_classification();
+    test_close_outcome_classification();
+}

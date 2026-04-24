@@ -1,0 +1,31 @@
+// =============================================================================
+// changegroup/ingest.vr — kinds of input
+// =============================================================================
+// Spec: SQLite C API
+//
+// sqlite3changegroup_add feeds a buffered changeset blob;
+// sqlite3changegroup_add_change feeds a live iterator.
+// =============================================================================
+
+module core.database.sqlite.native.changegroup.ingest;
+
+mount core.*;
+mount base.{Text};
+
+public type IngestKind is
+      IkBuffered(Int64)       // byte-length of the buffered changeset
+    | IkIterator(Int64);      // iterator handle id
+
+public fn ingest_name(k: &IngestKind) -> Text {
+    match k {
+        IkBuffered(_) => "buffered".clone(),
+        IkIterator(_) => "iterator".clone(),
+    }
+}
+
+public fn ingest_size(k: &IngestKind) -> Int64 {
+    match k {
+        IkBuffered(n) => *n,
+        IkIterator(_) => 0 as Int64,
+    }
+}

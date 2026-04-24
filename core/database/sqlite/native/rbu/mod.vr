@@ -1,0 +1,31 @@
+// =============================================================================
+// core/database/sqlite/native/rbu/mod.vr
+// =============================================================================
+// Layer: 7 (façade — sqlite3rbu_* Resumable Bulk Update)
+// Spec: SQLite C API — rbu extension.
+//
+// RBU applies a large batch of writes to a target database by staging
+// them in a separate "update DB" file, then migrating rows in small
+// page-sized steps that can be interrupted / resumed.
+//
+//   sqlite3rbu_open(target, rbuDb, stateDb)
+//   sqlite3rbu_vacuum(target, stateDb)
+//   sqlite3rbu_step(rbu)
+//   sqlite3rbu_state(rbu)
+//   sqlite3rbu_bp_progress(rbu, &nOne, &nTwo)
+//   sqlite3rbu_savestate(rbu)
+//   sqlite3rbu_close(rbu, &errmsg)
+//
+// Submodules:
+//   * `stage`    — RBU_STAGE_* constants + typed sum
+//   * `progress` — byte / page counters
+//   * `handle`   — Rbu descriptor
+//   * `outcome`  — step / close outcome
+// =============================================================================
+
+module core.database.sqlite.native.rbu;
+
+public module stage;
+public module progress;
+public module handle;
+public module outcome;

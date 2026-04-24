@@ -1,0 +1,61 @@
+// =============================================================================
+// session_api/handle.vr — Session descriptor
+// =============================================================================
+// Spec: SQLite C API — session extension.
+// =============================================================================
+
+module core.database.sqlite.native.session_api.handle;
+
+mount core.*;
+mount base.{Bool, Maybe, Text};
+mount collections.List;
+
+public type Session is {
+    id: Int64,
+    /// "main" / "temp" / ATTACH-ed schema.
+    schema: Text,
+    /// True ⇔ `sqlite3session_enable(sess, 1)` and never disabled since.
+    enabled: Bool,
+    /// If true, every change is tagged as "indirect" (trigger-caused) —
+    /// sqlite3session_indirect.
+    indirect: Bool,
+    /// List of attached table names.
+    attached_tables: List<Text>,
+    /// True once sqlite3session_delete has been called.
+    released: Bool,
+}
+
+public fn new_session(id: Int64, schema: Text) -> Session {
+    Session {
+        id: id,
+        schema: schema,
+        enabled: true,
+        indirect: false,
+        attached_tables: List.new(),
+        released: false,
+    }
+}
+
+implement Session {
+    pub fn enable(&mut self, on: Bool) { self.enabled = on; }
+    pub fn set_indirect(&mut self, on: Bool) { self.indirect = on; }
+
+    pub fn attach(&mut self, table: Text) -> Bool {
+        if self.has_table(&table) { return false; }
+        self.attached_tables.push(table);
+        true
+    }
+
+    pub fn has_table(&self, table: &Text) -> Bool {
+        let mut i: Int = 0;
+        while i < self.attached_tables.len() {
+            if self.attached_tables.get(i) == table { return true; }
+            i = i + 1;
+        }
+        false
+    }
+
+    pub fn release(&mut self) { self.released = true; }
+
+    pub fn is_empty(&self) -> Bool { self.attached_tables.len() == 0 }
+}

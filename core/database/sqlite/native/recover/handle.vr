@@ -1,0 +1,46 @@
+// =============================================================================
+// recover/handle.vr — Recover descriptor
+// =============================================================================
+// Spec: SQLite C API — recover extension.
+// =============================================================================
+
+module core.database.sqlite.native.recover.handle;
+
+mount core.*;
+mount base.{Bool, Maybe, Text};
+
+public type Recover is {
+    id: Int64,
+    /// Schema name within the source DB (usually "main").
+    source_schema: Text,
+    /// URI for the output database (empty if using the SQL-callback form).
+    target_uri: Text,
+    /// True iff created with sqlite3_recover_init_sql (callback form).
+    sql_callback_form: Bool,
+    finished: Bool,
+}
+
+public fn new_recover(id: Int64, source_schema: Text, target_uri: Text) -> Recover {
+    Recover {
+        id: id,
+        source_schema: source_schema,
+        target_uri: target_uri,
+        sql_callback_form: false,
+        finished: false,
+    }
+}
+
+public fn new_callback_recover(id: Int64, source_schema: Text) -> Recover {
+    Recover {
+        id: id,
+        source_schema: source_schema,
+        target_uri: "".clone(),
+        sql_callback_form: true,
+        finished: false,
+    }
+}
+
+implement Recover {
+    pub fn finish(&mut self) { self.finished = true; }
+    pub fn is_live(&self) -> Bool { !self.finished }
+}

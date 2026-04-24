@@ -1,0 +1,22 @@
+// =============================================================================
+// core/database/sqlite/native/drop_modules/mod.vr
+// =============================================================================
+// Layer: 7 (façade — sqlite3_drop_modules)
+// Spec: SQLite C API
+//
+//   sqlite3_drop_modules(db, azKeep)
+//
+// De-registers every vtab module installed on the connection EXCEPT
+// the ones whose name is in `azKeep`.  Used to build security-
+// hardened configurations by dropping risky modules like
+// `sqlite_dbpage` while keeping `fts5` / `rtree`.
+//
+// Submodules:
+//   * `keep_list`  — names to preserve
+//   * `plan`       — names that will be dropped given the current registry
+// =============================================================================
+
+module core.database.sqlite.native.drop_modules;
+
+public module keep_list;
+public module plan;

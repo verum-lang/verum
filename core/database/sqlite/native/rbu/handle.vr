@@ -1,0 +1,59 @@
+// =============================================================================
+// rbu/handle.vr — Rbu descriptor
+// =============================================================================
+// Spec: SQLite C API
+// =============================================================================
+
+module core.database.sqlite.native.rbu.handle;
+
+mount core.*;
+mount base.{Bool, Maybe, Text};
+mount core.database.sqlite.native.rbu.stage.{
+    RbuStage, RsOal,
+};
+mount core.database.sqlite.native.rbu.progress.{
+    BpProgress, new_progress,
+};
+
+public type Rbu is {
+    id: Int64,
+    target_db: Text,
+    rbu_db: Text,
+    /// Optional state DB path; None → "embedded" state (stored in rbu_db).
+    state_db: Maybe<Text>,
+    stage: RbuStage,
+    progress: BpProgress,
+    steps_taken: Int64,
+    closed: Bool,
+}
+
+public fn new_rbu(id: Int64, target_db: Text, rbu_db: Text) -> Rbu {
+    Rbu {
+        id: id,
+        target_db: target_db,
+        rbu_db: rbu_db,
+        state_db: Maybe.None,
+        stage: RsOal,
+        progress: new_progress(),
+        steps_taken: 0 as Int64,
+        closed: false,
+    }
+}
+
+implement Rbu {
+    pub fn with_state_db(&mut self, path: Text) {
+        self.state_db = Maybe.Some(path);
+    }
+
+    pub fn advance_to(&mut self, stage: RbuStage) {
+        self.stage = stage;
+    }
+
+    pub fn note_step(&mut self) {
+        self.steps_taken = self.steps_taken + (1 as Int64);
+    }
+
+    pub fn close(&mut self) { self.closed = true; }
+
+    pub fn is_live(&self) -> Bool { !self.closed }
+}

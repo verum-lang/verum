@@ -1,0 +1,26 @@
+// =============================================================================
+// core/database/sqlite/native/recover/mod.vr
+// =============================================================================
+// Layer: 7 (façade — sqlite3_recover_* extension)
+// Spec: SQLite C API — recover extension.
+//
+//   sqlite3_recover_init(db, zDb, zUri)
+//   sqlite3_recover_init_sql(db, zDb, xSql, pSqlCtx)
+//   sqlite3_recover_config(rec, op, value)
+//   sqlite3_recover_step(rec)
+//   sqlite3_recover_errcode(rec) / _errmsg(rec)
+//   sqlite3_recover_finish(rec)
+//
+// Submodules:
+//   * `handle`    — Recover descriptor
+//   * `config`    — SQLITE_RECOVER_* config opcodes
+//   * `stats`     — recovered rows / pages read / errors
+//   * `outcome`   — step/finish outcome
+// =============================================================================
+
+module core.database.sqlite.native.recover;
+
+public module handle;
+public module config;
+public module stats;
+public module outcome;

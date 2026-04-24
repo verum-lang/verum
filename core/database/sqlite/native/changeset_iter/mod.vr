@@ -1,0 +1,25 @@
+// =============================================================================
+// core/database/sqlite/native/changeset_iter/mod.vr
+// =============================================================================
+// Layer: 7 (façade — sqlite3changeset_* iterator)
+// Spec: SQLite C API — session extension.
+//
+//   sqlite3changeset_start / _start_v2
+//   sqlite3changeset_next     → SQLITE_ROW / DONE / error
+//   sqlite3changeset_op       → table / nCol / op / bIndirect
+//   sqlite3changeset_pk
+//   sqlite3changeset_old / _new
+//   sqlite3changeset_conflict / _fk_conflicts
+//   sqlite3changeset_finalize / _apply / _apply_v2 / _invert / _concat
+//
+// Submodules:
+//   * `iter_state`  — IteratorState sum (Start/Row/Done/Failed)
+//   * `op`          — ChangeOp (Insert/Update/Delete) + column shape
+//   * `apply`       — ApplyVerdict (Ok/Abort/Omit)
+// =============================================================================
+
+module core.database.sqlite.native.changeset_iter;
+
+public module iter_state;
+public module op;
+public module apply;

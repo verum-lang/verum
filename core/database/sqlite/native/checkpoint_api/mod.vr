@@ -1,0 +1,27 @@
+// =============================================================================
+// core/database/sqlite/native/checkpoint_api/mod.vr
+// =============================================================================
+// Layer: 7 (façade — public checkpoint API)
+// Spec: SQLite C API — WAL checkpointing.
+//
+//   sqlite3_wal_checkpoint(db, zDb)             → ok / busy
+//   sqlite3_wal_checkpoint_v2(db, zDb, eMode,
+//                              &nLog, &nCkpt)   → detailed progress
+//   sqlite3_wal_autocheckpoint(db, N)
+//   sqlite3_wal_hook(db, xCb, pArg)             → see hooks_api
+//
+// Complements `walblock/` (which models the mode sum + engine
+// internals) with the public API surface — request, progress report,
+// autocheckpoint threshold.
+//
+// Submodules:
+//   * `request`    — CheckpointRequest (schema + mode)
+//   * `progress`   — CheckpointProgress (pages_in_wal, pages_checkpointed)
+//   * `autoconfig` — Autocheckpoint threshold policy
+// =============================================================================
+
+module core.database.sqlite.native.checkpoint_api;
+
+public module request;
+public module progress;
+public module autoconfig;

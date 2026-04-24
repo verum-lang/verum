@@ -1,0 +1,124 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, changeset_iter, next, apply, capi
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.changeset_iter.iter_state.{
+    IteratorState, IsStart, IsRowAvailable, IsDone, IsFailed,
+    SQLITE_ROW, SQLITE_DONE,
+    state_name, has_row, is_terminal, from_next_code,
+};
+mount core.database.sqlite.native.changeset_iter.op.{
+    ChangeOp, CoInsert, CoUpdate, CoDelete,
+    SQLITE_INSERT, SQLITE_UPDATE, SQLITE_DELETE,
+    op_numeric, op_name, from_numeric,
+    has_old_values, has_new_values,
+    ChangeHeader, new_header,
+};
+mount core.database.sqlite.native.changeset_iter.apply.{
+    FilterVerdict, FvInclude, FvExclude, filter_numeric,
+    ApplyFlags, default_apply_flags, flags_numeric,
+    ApplyOutcome, AoOk, AoAborted, AoPartial, is_ok,
+};
+mount base.{Bool};
+
+fn test_state_names() {
+    assert(state_name(&IsStart) == "start".clone());
+    assert(state_name(&IsRowAvailable) == "row".clone());
+    assert(state_name(&IsDone) == "done".clone());
+    assert(state_name(&IsFailed("x".clone())) == "failed".clone());
+}
+
+fn test_has_row_and_terminal() {
+    assert(!has_row(&IsStart));
+    assert(has_row(&IsRowAvailable));
+    assert(!has_row(&IsDone));
+    assert(!is_terminal(&IsStart));
+    assert(!is_terminal(&IsRowAvailable));
+    assert(is_terminal(&IsDone));
+    assert(is_terminal(&IsFailed("x".clone())));
+}
+
+fn test_from_next_code() {
+    match from_next_code(SQLITE_ROW, "".clone())  { IsRowAvailable => {}, _ => assert(false) }
+    match from_next_code(SQLITE_DONE, "".clone()) { IsDone         => {}, _ => assert(false) }
+    match from_next_code(1, "boom".clone())       { IsFailed(_)    => {}, _ => assert(false) }
+}
+
+fn test_change_op_numeric_matches_c_header() {
+    assert_eq(op_numeric(&CoInsert), SQLITE_INSERT);
+    assert_eq(op_numeric(&CoUpdate), SQLITE_UPDATE);
+    assert_eq(op_numeric(&CoDelete), SQLITE_DELETE);
+    assert_eq(SQLITE_INSERT, 18);
+    assert_eq(SQLITE_UPDATE, 23);
+    assert_eq(SQLITE_DELETE, 9);
+}
+
+fn test_change_op_name() {
+    assert(op_name(&CoInsert) == "INSERT".clone());
+    assert(op_name(&CoDelete) == "DELETE".clone());
+}
+
+fn test_change_op_old_new_presence() {
+    assert(!has_old_values(&CoInsert));
+    assert(has_new_values(&CoInsert));
+    assert(has_old_values(&CoUpdate));
+    assert(has_new_values(&CoUpdate));
+    assert(has_old_values(&CoDelete));
+    assert(!has_new_values(&CoDelete));
+}
+
+fn test_change_op_from_numeric() {
+    match from_numeric(SQLITE_INSERT) { CoInsert => {}, _ => assert(false) }
+    match from_numeric(SQLITE_UPDATE) { CoUpdate => {}, _ => assert(false) }
+    match from_numeric(SQLITE_DELETE) { CoDelete => {}, _ => assert(false) }
+}
+
+fn test_change_header_record() {
+    let h = new_header("users".clone(), 3, CoUpdate, true);
+    assert(h.table == "users".clone());
+    assert_eq(h.n_col, 3);
+    assert(h.indirect);
+}
+
+fn test_filter_verdict_numeric() {
+    assert_eq(filter_numeric(&FvInclude), 1);
+    assert_eq(filter_numeric(&FvExclude), 0);
+}
+
+fn test_apply_flags_bit_packing() {
+    let mut f = default_apply_flags();
+    f.no_savepoint = true;
+    f.invert = true;
+    let n = flags_numeric(&f);
+    assert(n == 3);
+    f.ignore_noop = true;
+    f.fk_no_action = true;
+    assert_eq(flags_numeric(&f), 15);
+}
+
+fn test_apply_outcome_is_ok() {
+    assert(is_ok(&AoOk));
+    assert(!is_ok(&AoAborted("boom".clone())));
+    let p: ApplyOutcome = AoPartial {
+        rows_applied: 5 as Int64,
+        rows_rejected: 2 as Int64,
+    };
+    assert(!is_ok(&p));
+}
+
+fn main() {
+    test_state_names();
+    test_has_row_and_terminal();
+    test_from_next_code();
+    test_change_op_numeric_matches_c_header();
+    test_change_op_name();
+    test_change_op_old_new_presence();
+    test_change_op_from_numeric();
+    test_change_header_record();
+    test_filter_verdict_numeric();
+    test_apply_flags_bit_packing();
+    test_apply_outcome_is_ok();
+}

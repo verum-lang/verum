@@ -1,0 +1,53 @@
+// =============================================================================
+// recover/outcome.vr — step / finish outcomes
+// =============================================================================
+// Spec: SQLite C API
+//
+// sqlite3_recover_step returns SQLITE_OK / DONE / ERROR;
+// sqlite3_recover_finish returns SQLITE_OK (success) or SQLITE_ERROR.
+// =============================================================================
+
+module core.database.sqlite.native.recover.outcome;
+
+mount core.*;
+mount base.{Bool, Text};
+mount core.database.sqlite.native.errors.code.{
+    ExtendedCode, extended_numeric,
+};
+
+public type StepOutcome is
+      SoMoreWork
+    | SoDone
+    | SoFailed { code: ExtendedCode, reason: Text };
+
+public fn step_is_ok(s: &StepOutcome) -> Bool {
+    match s {
+        SoMoreWork | SoDone => true,
+        _ => false,
+    }
+}
+
+public fn step_is_done(s: &StepOutcome) -> Bool {
+    match s {
+        SoDone => true,
+        _ => false,
+    }
+}
+
+public type FinishOutcome is
+      FoOk
+    | FoFailed { code: ExtendedCode, reason: Text };
+
+public fn finish_is_ok(f: &FinishOutcome) -> Bool {
+    match f {
+        FoOk => true,
+        _ => false,
+    }
+}
+
+public fn finish_numeric(f: &FinishOutcome) -> Int {
+    match f {
+        FoOk => 0,
+        FoFailed { code, .. } => extended_numeric(code),
+    }
+}

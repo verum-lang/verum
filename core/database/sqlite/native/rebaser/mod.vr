@@ -1,0 +1,27 @@
+// =============================================================================
+// core/database/sqlite/native/rebaser/mod.vr
+// =============================================================================
+// Layer: 7 (façade — sqlite3rebaser_* surface)
+// Spec: SQLite C API — session extension.
+//
+// Rebasing re-interprets a REMOTE changeset against the outcome of a
+// LOCAL changeset that has already been applied.  Used by
+// bidirectional replication pipelines to repair divergence:
+//
+//   sqlite3rebaser_create(&out)
+//   sqlite3rebaser_configure(reb, nRebase, pRebase)     // prior rebase info
+//   sqlite3rebaser_rebase(reb, nIn, pIn, &nOut, &pOut)   // in-memory
+//   sqlite3rebaser_rebase_strm(reb, xInput, pIn, xOutput, pOut)
+//   sqlite3rebaser_delete(reb)
+//
+// Submodules:
+//   * `handle`   — Rebaser descriptor
+//   * `config`   — prior-rebase info feed
+//   * `outcome`  — rebase result
+// =============================================================================
+
+module core.database.sqlite.native.rebaser;
+
+public module handle;
+public module config;
+public module outcome;

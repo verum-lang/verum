@@ -1,0 +1,100 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, session_api, changeset, patchset, capi
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.session_api.handle.{
+    Session, new_session,
+};
+mount core.database.sqlite.native.session_api.op.{
+    SessionOp,
+    SoCreate, SoAttach, SoEnable, SoIndirect, SoTableFilter,
+    SoChangeset, SoPatchset, SoDiff, SoDelete, SoIsEmpty,
+    SoConfigSizeLimit, SoConfigObjectConfig,
+    op_name, is_producing, is_mutating,
+};
+mount core.database.sqlite.native.session_api.outcome.{
+    SessionOutcome, SoOk, SoEmpty, SoNotAttached, SoFailed,
+    is_ok, outcome_numeric, outcome_reason,
+};
+mount core.database.sqlite.native.errors.code.{
+    extended_of, PcError,
+};
+mount base.{Bool};
+
+fn test_session_default_enabled_no_tables() {
+    let s = new_session(1 as Int64, "main".clone());
+    assert(s.enabled);
+    assert(!s.indirect);
+    assert(s.is_empty());
+}
+
+fn test_session_attach_unique() {
+    let mut s = new_session(1 as Int64, "main".clone());
+    assert(s.attach("users".clone()));
+    assert(s.has_table(&"users".clone()));
+    assert(!s.attach("users".clone()));  // idempotent reject
+}
+
+fn test_session_enable_toggles_and_indirect() {
+    let mut s = new_session(1 as Int64, "main".clone());
+    s.enable(false);
+    assert(!s.enabled);
+    s.set_indirect(true);
+    assert(s.indirect);
+}
+
+fn test_session_release_flag() {
+    let mut s = new_session(1 as Int64, "main".clone());
+    assert(!s.released);
+    s.release();
+    assert(s.released);
+}
+
+fn test_op_names_and_flags() {
+    assert(op_name(&SoCreate) == "session_create".clone());
+    assert(op_name(&SoChangeset) == "session_changeset".clone());
+    assert(is_producing(&SoChangeset));
+    assert(is_producing(&SoPatchset));
+    assert(is_producing(&SoDiff));
+    assert(!is_producing(&SoIsEmpty));
+    assert(is_mutating(&SoAttach));
+    assert(is_mutating(&SoEnable));
+    assert(is_mutating(&SoConfigSizeLimit));
+    assert(!is_mutating(&SoIsEmpty));
+    assert(!is_mutating(&SoChangeset));
+    assert(op_name(&SoConfigObjectConfig) == "session_object_config".clone());
+    assert(op_name(&SoIndirect) == "session_indirect".clone());
+    assert(op_name(&SoTableFilter) == "session_table_filter".clone());
+    assert(op_name(&SoDelete) == "session_delete".clone());
+}
+
+fn test_outcome_is_ok_of_ok_and_empty() {
+    assert(is_ok(&SoOk));
+    assert(is_ok(&SoEmpty));
+    assert(!is_ok(&SoNotAttached("t".clone())));
+}
+
+fn test_outcome_numeric_and_reason() {
+    assert_eq(outcome_numeric(&SoOk), 0);
+    assert_eq(outcome_numeric(&SoEmpty), 0);
+    assert_eq(outcome_numeric(&SoNotAttached("t".clone())), 1);
+    let failed: SessionOutcome = SoFailed {
+        code: extended_of(PcError, 0),
+        reason: "bad".clone(),
+    };
+    assert(outcome_numeric(&failed) != 0);
+    assert(outcome_reason(&failed).len() > 0);
+}
+
+fn main() {
+    test_session_default_enabled_no_tables();
+    test_session_attach_unique();
+    test_session_enable_toggles_and_indirect();
+    test_session_release_flag();
+    test_op_names_and_flags();
+    test_outcome_is_ok_of_ok_and_empty();
+    test_outcome_numeric_and_reason();
+}

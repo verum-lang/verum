@@ -1,0 +1,74 @@
+// =============================================================================
+// changeset_iter/op.vr — ChangeOp + column shapes
+// =============================================================================
+// Spec: SQLite C API
+//
+//   sqlite3changeset_op returns (op, ncol, zTab, bIndirect):
+//     op       ∈ {SQLITE_INSERT, SQLITE_UPDATE, SQLITE_DELETE}
+//     ncol     = number of columns in the table
+//     zTab     = table name
+//     bIndirect = 1 if the change was applied indirectly (by a trigger)
+// =============================================================================
+
+module core.database.sqlite.native.changeset_iter.op;
+
+mount core.*;
+mount base.{Bool, Text};
+
+public type ChangeOp is
+      CoInsert
+    | CoUpdate
+    | CoDelete;
+
+public const SQLITE_INSERT: Int = 18;
+public const SQLITE_UPDATE: Int = 23;
+public const SQLITE_DELETE: Int = 9;
+
+public fn op_numeric(o: &ChangeOp) -> Int {
+    match o {
+        CoInsert => SQLITE_INSERT,
+        CoUpdate => SQLITE_UPDATE,
+        CoDelete => SQLITE_DELETE,
+    }
+}
+
+public fn op_name(o: &ChangeOp) -> Text {
+    match o {
+        CoInsert => "INSERT".clone(),
+        CoUpdate => "UPDATE".clone(),
+        CoDelete => "DELETE".clone(),
+    }
+}
+
+public fn from_numeric(n: Int) -> ChangeOp {
+    if n == SQLITE_INSERT { return CoInsert; }
+    if n == SQLITE_DELETE { return CoDelete; }
+    CoUpdate
+}
+
+/// Which of the `old` / `new` column tables are populated for this
+/// operation.
+public fn has_old_values(o: &ChangeOp) -> Bool {
+    match o {
+        CoUpdate | CoDelete => true,
+        CoInsert => false,
+    }
+}
+
+public fn has_new_values(o: &ChangeOp) -> Bool {
+    match o {
+        CoInsert | CoUpdate => true,
+        CoDelete => false,
+    }
+}
+
+public type ChangeHeader is {
+    table: Text,
+    n_col: Int,
+    op: ChangeOp,
+    indirect: Bool,
+}
+
+public fn new_header(table: Text, n_col: Int, op: ChangeOp, indirect: Bool) -> ChangeHeader {
+    ChangeHeader { table: table, n_col: n_col, op: op, indirect: indirect }
+}
