@@ -1,0 +1,114 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: quic, rtt, rfc9002_5_3, ewma
+// @timeout: 15000
+// @expected-exit: 0
+
+// RFC 9002 §5.3 RttEstimator:
+//   first sample  : smoothed = sample; rttvar = sample/2; min_rtt = sample
+//   subsequent    : rttvar   = (3/4)*rttvar + (1/4)*|smoothed - adjusted|
+//                   smoothed = (7/8)*smoothed + (1/8)*adjusted
+//                   min_rtt is monotone-non-increasing
+//   ack_delay     : subtracted from latest when that keeps ≥ min_rtt
+//
+// Numbers are exercised in microseconds so the shift-based math is
+// lossless.
+
+mount core.*;
+mount core.net.quic.recovery.rtt.{RttEstimator};
+mount core.time.duration.{Duration};
+
+fn fresh_estimator_has_no_sample() {
+    let est = RttEstimator.new();
+    assert(est.has_first_sample() == false);
+    // RFC 9002 §5.3: kInitialRtt = 333 ms seeds smoothed pre-sample.
+    assert(est.smoothed() == Duration.from_micros(333_000));
+    // rttvar = smoothed / 2 = 166.5 ms rounded to 166500 µs.
+    assert(est.rttvar()   == Duration.from_micros(166_500));
+}
+
+fn first_sample_initializes_all_fields() {
+    let mut est = RttEstimator.new();
+    est.on_rtt_sample(20_000_u64, 0_u64);   // 20 ms
+    assert(est.has_first_sample());
+    assert(est.latest()   == Duration.from_micros(20_000));
+    assert(est.smoothed() == Duration.from_micros(20_000));
+    assert(est.rttvar()   == Duration.from_micros(10_000));
+    assert(est.min_rtt()  == Duration.from_micros(20_000));
+}
+
+fn second_sample_applies_ewma() {
+    let mut est = RttEstimator.new();
+    est.on_rtt_sample(20_000_u64, 0_u64);   // seed
+    est.on_rtt_sample(40_000_u64, 0_u64);   // latest = 40 ms, no ack_delay
+    // After 2nd sample:
+    //   diff       = |20_000 - 40_000|  = 20_000
+    //   rttvar     = (3*10_000 + 20_000) / 4 = 12_500
+    //   smoothed   = (7*20_000 + 40_000) / 8 = 22_500
+    assert(est.smoothed() == Duration.from_micros(22_500));
+    assert(est.rttvar()   == Duration.from_micros(12_500));
+    // min_rtt does not grow.
+    assert(est.min_rtt()  == Duration.from_micros(20_000));
+}
+
+fn min_rtt_tracks_downward_only() {
+    let mut est = RttEstimator.new();
+    est.on_rtt_sample(50_000_u64, 0_u64);   // min = 50 ms
+    est.on_rtt_sample(75_000_u64, 0_u64);   // min stays
+    assert(est.min_rtt() == Duration.from_micros(50_000));
+    est.on_rtt_sample(30_000_u64, 0_u64);   // min drops
+    assert(est.min_rtt() == Duration.from_micros(30_000));
+    // And never grows again even under larger samples.
+    est.on_rtt_sample(100_000_u64, 0_u64);
+    assert(est.min_rtt() == Duration.from_micros(30_000));
+}
+
+fn ack_delay_applied_when_above_min_rtt_floor() {
+    let mut est = RttEstimator.new();
+    est.on_rtt_sample(20_000_u64, 0_u64);   // min = 20 ms
+    // latest = 30 ms, ack_delay = 5 ms.
+    // latest - min_rtt = 10_000 ≥ ack_delay = 5_000 → subtract.
+    // adjusted = 30_000 - 5_000 = 25_000
+    //   diff     = |20_000 - 25_000| = 5_000
+    //   rttvar   = (3*10_000 + 5_000)/4 = 8_750
+    //   smoothed = (7*20_000 + 25_000)/8 = 20_625
+    est.on_rtt_sample(30_000_u64, 5_000_u64);
+    assert(est.smoothed() == Duration.from_micros(20_625));
+    assert(est.rttvar()   == Duration.from_micros(8_750));
+}
+
+fn ack_delay_ignored_when_it_would_dip_below_min_rtt() {
+    let mut est = RttEstimator.new();
+    est.on_rtt_sample(20_000_u64, 0_u64);   // min = 20 ms
+    // latest = 22 ms, ack_delay = 5 ms.
+    // latest - min_rtt = 2_000 < ack_delay = 5_000 → keep raw 22_000.
+    // adjusted = 22_000
+    //   diff     = |20_000 - 22_000| = 2_000
+    //   rttvar   = (3*10_000 + 2_000)/4 = 8_000
+    //   smoothed = (7*20_000 + 22_000)/8 = 20_250
+    est.on_rtt_sample(22_000_u64, 5_000_u64);
+    assert(est.smoothed() == Duration.from_micros(20_250));
+    assert(est.rttvar()   == Duration.from_micros(8_000));
+}
+
+fn latest_always_reflects_last_sample() {
+    let mut est = RttEstimator.new();
+    est.on_rtt_sample(10_000_u64, 0_u64);
+    est.on_rtt_sample(99_000_u64, 500_u64);
+    // latest_us is the raw sample, not adjusted.
+    assert(est.latest() == Duration.from_micros(99_000));
+}
+
+@main
+public fn main() -> Int {
+    fresh_estimator_has_no_sample();
+    first_sample_initializes_all_fields();
+    second_sample_applies_ewma();
+    min_rtt_tracks_downward_only();
+    ack_delay_applied_when_above_min_rtt_floor();
+    ack_delay_ignored_when_it_would_dip_below_min_rtt();
+    latest_always_reflects_last_sample();
+    print("RFC 9002 §5.3 RttEstimator EWMA progression verified");
+    0
+}

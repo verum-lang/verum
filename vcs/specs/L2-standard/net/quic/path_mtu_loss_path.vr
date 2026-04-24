@@ -1,0 +1,103 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: quic, path_mtu, dplpmtud, loss, rfc8899_5_1_4
+// @timeout: 15000
+// @expected-exit: 0
+
+// RFC 8899 §5.1.4 — after a probe is lost the DPLPMTUD state machine
+// retries up to MAX_PROBES times at the same probed_size; on the
+// MAX_PROBES+1 loss it declares the size unreachable and transitions
+// to ErrorDown(BASE_PLPMTU). This test pins the retry counter, the
+// size-freeze, and the final backoff.
+
+mount core.*;
+mount core.time.instant.{Instant};
+mount core.net.quic.path_mtu.{
+    PmtuTracker, PmtuState,
+    BASE_PLPMTU, ETHERNET_PLPMTU, MAX_PROBES,
+};
+
+fn first_loss_keeps_probe_size_and_bumps_counter() {
+    let mut t = PmtuTracker.new(Instant.now());
+    t.begin_search(ETHERNET_PLPMTU);
+    // begin_search sets probes_sent=1.
+    t.on_probe_lost();
+    match &t.state {
+        PmtuState.Search { probed_size, probes_sent } => {
+            assert(*probed_size == ETHERNET_PLPMTU);
+            assert(*probes_sent == 2);
+        },
+        _ => panic("first loss must keep Search and bump probes_sent to 2"),
+    }
+    // current_plpmtu stays at BASE until a successful probe.
+    assert(t.plpmtu() == BASE_PLPMTU);
+}
+
+fn third_loss_triggers_error_down() {
+    let mut t = PmtuTracker.new(Instant.now());
+    t.begin_search(ETHERNET_PLPMTU);   // probes_sent = 1
+    t.on_probe_lost();                  // probes_sent = 2
+    t.on_probe_lost();                  // probes_sent = 3 (= MAX_PROBES)
+    match &t.state {
+        PmtuState.Search { probed_size: _, probes_sent } => {
+            assert(*probes_sent == 3);
+        },
+        _ => panic("after 2 losses still Search at probes_sent=3"),
+    }
+    t.on_probe_lost();                  // probes_sent+1 = 4 > MAX_PROBES
+    match &t.state {
+        PmtuState.ErrorDown { next_probe } => {
+            assert(*next_probe == BASE_PLPMTU);
+        },
+        _ => panic("4th loss must declare ErrorDown"),
+    }
+    // After ErrorDown, clamp_send_size still respects the last confirmed
+    // PLPMTU (which was never raised) — stays at BASE.
+    assert(t.plpmtu() == BASE_PLPMTU);
+}
+
+fn error_down_freezes_further_losses() {
+    let mut t = PmtuTracker.new(Instant.now());
+    t.begin_search(ETHERNET_PLPMTU);
+    t.on_probe_lost();
+    t.on_probe_lost();
+    t.on_probe_lost();
+    t.on_probe_lost();
+    // Already ErrorDown — another loss is a no-op by state-machine
+    // contract (the Search arm is the only one that reacts).
+    let snapshot_before: Int = match &t.state {
+        PmtuState.ErrorDown { next_probe } => *next_probe,
+        _ => { panic("expected ErrorDown"); -1 },
+    };
+    t.on_probe_lost();
+    let snapshot_after: Int = match &t.state {
+        PmtuState.ErrorDown { next_probe } => *next_probe,
+        _ => { panic("must still be ErrorDown"); -1 },
+    };
+    assert(snapshot_before == snapshot_after);
+}
+
+fn ack_after_losses_resets_progress() {
+    let mut t = PmtuTracker.new(Instant.now());
+    t.begin_search(ETHERNET_PLPMTU);
+    t.on_probe_lost();
+    t.on_probe_lost();
+    // Before MAX_PROBES — an ack must still be observable.
+    t.on_probe_acked(ETHERNET_PLPMTU, Instant.now());
+    assert(t.plpmtu() == ETHERNET_PLPMTU);
+    match t.state {
+        PmtuState.SearchComplete { .. } => {},
+        _ => panic("ack before MAX_PROBES must flip to SearchComplete"),
+    }
+}
+
+@main
+public fn main() -> Int {
+    first_loss_keeps_probe_size_and_bumps_counter();
+    third_loss_triggers_error_down();
+    error_down_freezes_further_losses();
+    ack_after_losses_resets_progress();
+    print("RFC 8899 §5.1.4 PMTU loss-path transitions verified");
+    0
+}
