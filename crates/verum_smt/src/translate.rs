@@ -3903,6 +3903,123 @@ impl PatternTrigger {
             PatternTrigger::BinaryOp { .. } => 50,
         }
     }
+
+    /// Diagnose this trigger against the quantifier's bound-variable
+    /// set. Returns a list of diagnostics describing structural
+    /// defects that would make Z3 either ignore the trigger or
+    /// generate a matching loop.
+    ///
+    /// The diagnostic surface is the fundamental fix for the
+    /// "quantifier performance cliff": users (and the auto-extractor)
+    /// sometimes ship triggers that look right but silently fail to
+    /// instantiate because they don't cover every bound variable,
+    /// or they rely on an interpreted operator (Z3 never
+    /// instantiates on interpreted heads). This function lets both
+    /// the auto-extractor and user-provided `@trigger(…)` terms
+    /// (once the grammar is wired) emit actionable diagnostics
+    /// instead of silently degrading into full-quantifier search.
+    ///
+    /// Empty return = trigger is valid.
+    ///
+    /// See `docs/verification/performance.md §4` (trigger
+    /// troubleshooting).
+    pub fn diagnose_against(&self, bound_vars: &[Text]) -> Vec<TriggerDiagnostic> {
+        let mut diags = Vec::new();
+
+        // Diagnostic 1: trigger must mention at least one bound var.
+        // A trigger that references no bound variables never fires.
+        let refs = self.bound_var_refs();
+        if refs.is_empty() {
+            diags.push(TriggerDiagnostic::NoBoundVarsReferenced);
+        }
+
+        // Diagnostic 2: trigger should cover every bound variable.
+        // If it mentions only a subset, Z3 can only instantiate the
+        // covered variables — the others are left existentially
+        // quantified, which often means the quantifier doesn't
+        // actually fire.
+        let covered: std::collections::HashSet<&str> =
+            refs.iter().map(|t| t.as_str()).collect();
+        let missing: Vec<Text> = bound_vars
+            .iter()
+            .filter(|v| !covered.contains(v.as_str()))
+            .cloned()
+            .collect();
+        if !missing.is_empty() {
+            diags.push(TriggerDiagnostic::MissingBoundVars(missing));
+        }
+
+        // Diagnostic 3: interpreted-head triggers never fire in Z3.
+        // Arithmetic `x + y` / `x <= y` / `x = y` are interpreted.
+        // Z3 does not instantiate on interpreted heads — a BinaryOp
+        // trigger is therefore *always* dead code. Flag it so the
+        // caller either wraps the operand in an uninterpreted
+        // function or drops the trigger entirely.
+        if matches!(self, PatternTrigger::BinaryOp { .. }) {
+            diags.push(TriggerDiagnostic::InterpretedHead);
+        }
+
+        diags
+    }
+}
+
+/// A single defect found by [`PatternTrigger::diagnose_against`].
+///
+/// Emitted into the W502 / W503 / W504 diagnostic surface when the
+/// `@trigger(…)` attribute is enabled and a trigger fails
+/// validation. Each variant carries enough context for the
+/// compiler's diagnostic renderer to produce an actionable message
+/// pointing at the trigger's source span.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TriggerDiagnostic {
+    /// The trigger references no bound variables — it will never
+    /// fire. Usually a sign the user meant to match an outer-scope
+    /// term and the trigger syntax is off.
+    NoBoundVarsReferenced,
+
+    /// The trigger only partially covers the quantified variables;
+    /// listed variables are not mentioned. Z3 cannot instantiate
+    /// the missing variables through this trigger alone.
+    MissingBoundVars(Vec<Text>),
+
+    /// The trigger's outermost head is an interpreted operator
+    /// (arithmetic `+` / `*` / `<=`, Boolean `and` / `or`,
+    /// equality `=`). Z3 never instantiates on interpreted heads,
+    /// so an interpreted-head trigger is dead code.
+    InterpretedHead,
+}
+
+impl TriggerDiagnostic {
+    /// A short machine-readable tag for the diagnostic, used by
+    /// the CLI / LSP renderers to key their explanation strings.
+    pub fn tag(&self) -> &'static str {
+        match self {
+            Self::NoBoundVarsReferenced => "W502",
+            Self::MissingBoundVars(_) => "W503",
+            Self::InterpretedHead => "W504",
+        }
+    }
+
+    /// Human-readable single-line summary.
+    pub fn summary(&self) -> Text {
+        match self {
+            Self::NoBoundVarsReferenced => Text::from(
+                "trigger references no bound variables — it will never fire",
+            ),
+            Self::MissingBoundVars(missing) => Text::from(format!(
+                "trigger does not cover bound variable(s): {}",
+                missing
+                    .iter()
+                    .map(|v| v.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            )),
+            Self::InterpretedHead => Text::from(
+                "trigger's outermost head is an interpreted operator — \
+                 Z3 never instantiates on interpreted heads",
+            ),
+        }
+    }
 }
 
 /// Pattern extraction context for traversing quantifier bodies
@@ -4768,5 +4885,106 @@ impl<'ctx> Translator<'ctx> {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod trigger_diagnostic_tests {
+    use super::*;
+
+    fn sample_trigger_with_refs(refs: Vec<&str>) -> PatternTrigger {
+        // Build a FunctionApp trigger whose bound_var_refs is the
+        // given list. Args are unused by the diagnostic path so we
+        // can leave them empty.
+        let mut refs_list = List::new();
+        for r in refs {
+            refs_list.push(Text::from(r));
+        }
+        PatternTrigger::FunctionApp {
+            func_name: Text::from("f"),
+            args: List::new(),
+            bound_var_refs: refs_list,
+        }
+    }
+
+    #[test]
+    fn trigger_with_no_refs_emits_w502() {
+        let t = sample_trigger_with_refs(vec![]);
+        let bound_vars = vec![Text::from("x")];
+        let diags = t.diagnose_against(&bound_vars);
+        assert!(
+            diags
+                .iter()
+                .any(|d| matches!(d, TriggerDiagnostic::NoBoundVarsReferenced)),
+            "expected NoBoundVarsReferenced diagnostic"
+        );
+        assert_eq!(diags[0].tag(), "W502");
+    }
+
+    #[test]
+    fn trigger_missing_bound_var_emits_w503() {
+        let t = sample_trigger_with_refs(vec!["x"]);
+        let bound_vars = vec![Text::from("x"), Text::from("y"), Text::from("z")];
+        let diags = t.diagnose_against(&bound_vars);
+        let missing = diags.iter().find_map(|d| match d {
+            TriggerDiagnostic::MissingBoundVars(m) => Some(m.clone()),
+            _ => None,
+        });
+        let missing = missing.expect("expected MissingBoundVars diagnostic");
+        let missing_names: Vec<&str> = missing.iter().map(|t| t.as_str()).collect();
+        assert!(missing_names.contains(&"y"));
+        assert!(missing_names.contains(&"z"));
+        assert!(!missing_names.contains(&"x"));
+    }
+
+    #[test]
+    fn interpreted_head_trigger_emits_w504() {
+        use verum_ast::literal::Literal;
+        use verum_ast::span::Span;
+        let lit_zero = Expr::literal(Literal::int(0, Span::dummy()));
+        let t = PatternTrigger::BinaryOp {
+            op: BinOp::Add,
+            left: Box::new(lit_zero.clone()),
+            right: Box::new(lit_zero),
+            bound_var_refs: {
+                let mut l = List::new();
+                l.push(Text::from("x"));
+                l
+            },
+        };
+        let bound_vars = vec![Text::from("x")];
+        let diags = t.diagnose_against(&bound_vars);
+        assert!(
+            diags
+                .iter()
+                .any(|d| matches!(d, TriggerDiagnostic::InterpretedHead)),
+            "expected InterpretedHead diagnostic for BinaryOp trigger"
+        );
+        let w504 = diags
+            .iter()
+            .find(|d| matches!(d, TriggerDiagnostic::InterpretedHead))
+            .unwrap();
+        assert_eq!(w504.tag(), "W504");
+    }
+
+    #[test]
+    fn valid_trigger_emits_no_diagnostics() {
+        let t = sample_trigger_with_refs(vec!["x", "y"]);
+        let bound_vars = vec![Text::from("x"), Text::from("y")];
+        let diags = t.diagnose_against(&bound_vars);
+        assert!(
+            diags.is_empty(),
+            "valid trigger should produce no diagnostics, got {:?}",
+            diags
+        );
+    }
+
+    #[test]
+    fn diagnostic_summary_mentions_missing_variable_names() {
+        let diag =
+            TriggerDiagnostic::MissingBoundVars(vec![Text::from("a"), Text::from("b")]);
+        let msg = diag.summary();
+        assert!(msg.as_str().contains("a"));
+        assert!(msg.as_str().contains("b"));
     }
 }
