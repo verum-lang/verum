@@ -1,0 +1,250 @@
+// =============================================================================
+// security/x509/ocsp.vr — OCSP client + stapling (RFC 6960)
+// =============================================================================
+// Layer: 3 (Certificate)
+// =============================================================================
+//
+// RFC 6960 Online Certificate Status Protocol:
+//
+//   OCSPRequest ::= SEQUENCE {
+//       tbsRequest      TBSRequest,
+//       optionalSignature [0] EXPLICIT Signature OPTIONAL
+//   }
+//
+//   OCSPResponse ::= SEQUENCE {
+//       responseStatus   OCSPResponseStatus,
+//       responseBytes  [0] EXPLICIT ResponseBytes OPTIONAL
+//   }
+//
+//   ResponseBytes ::= SEQUENCE {
+//       responseType  OBJECT IDENTIFIER,    -- id-pkix-ocsp-basic
+//       response      OCTET STRING          -- DER BasicOCSPResponse
+//   }
+//
+//   BasicOCSPResponse ::= SEQUENCE {
+//       tbsResponseData         ResponseData,
+//       signatureAlgorithm      AlgorithmIdentifier,
+//       signature               BIT STRING,
+//       certs               [0] EXPLICIT SEQUENCE OF Certificate OPTIONAL
+//   }
+//
+//   ResponseData ::= SEQUENCE {
+//       version          [0] EXPLICIT Version DEFAULT v1,
+//       responderID          ResponderID,
+//       producedAt           GeneralizedTime,
+//       responses            SEQUENCE OF SingleResponse,
+//       responseExtensions [1] EXPLICIT Extensions OPTIONAL
+//   }
+//
+//   SingleResponse ::= SEQUENCE {
+//       certID                       CertID,
+//       certStatus                   CertStatus,
+//       thisUpdate                   GeneralizedTime,
+//       nextUpdate       [0] EXPLICIT GeneralizedTime OPTIONAL,
+//       singleExtensions [1] EXPLICIT Extensions OPTIONAL
+//   }
+//
+//   CertStatus ::= CHOICE {
+//       good     [0] IMPLICIT NULL,
+//       revoked  [1] IMPLICIT RevokedInfo,
+//       unknown  [2] IMPLICIT UnknownInfo
+//   }
+//
+// Scaffold scope:
+//
+//   * `OcspResponseStatus` / `CertStatus` enums.
+//   * `OcspResponse` + `BasicOcspResponse` + `SingleResponse` records.
+//   * `parse_ocsp_response(der)` — returns scaffold error until v1.1
+//     (the DerReader + Name/Time/Extension integration pass).
+//
+// Integration with `x509.chain`: after a chain is built, each non-
+// leaf certificate is checked against a fresh or stapled OCSP
+// response via `check_cert_status(cert, ocsp)`.
+//
+// =============================================================================
+
+module core.security.x509.ocsp;
+
+mount core.*;
+mount core.collections.List;
+mount core.encoding.der.{DerError, Time};
+
+// =============================================================================
+// Top-level response status (RFC 6960 §4.2.1)
+// =============================================================================
+
+public type OcspResponseStatus is
+      Successful              // 0
+    | MalformedRequest        // 1
+    | InternalError           // 2
+    | TryLater                // 3
+    // 4 is reserved
+    | SigRequired             // 5
+    | Unauthorized            // 6
+    | UnknownStatus(UInt8);
+
+implement OcspResponseStatus {
+    public fn to_u8(&self) -> UInt8 {
+        match self {
+            OcspResponseStatus.Successful         => 0_u8,
+            OcspResponseStatus.MalformedRequest   => 1_u8,
+            OcspResponseStatus.InternalError      => 2_u8,
+            OcspResponseStatus.TryLater           => 3_u8,
+            OcspResponseStatus.SigRequired        => 5_u8,
+            OcspResponseStatus.Unauthorized       => 6_u8,
+            OcspResponseStatus.UnknownStatus(v)   => *v,
+        }
+    }
+
+    public fn from_u8(v: UInt8) -> OcspResponseStatus {
+        match v {
+            0_u8 => OcspResponseStatus.Successful,
+            1_u8 => OcspResponseStatus.MalformedRequest,
+            2_u8 => OcspResponseStatus.InternalError,
+            3_u8 => OcspResponseStatus.TryLater,
+            5_u8 => OcspResponseStatus.SigRequired,
+            6_u8 => OcspResponseStatus.Unauthorized,
+            _    => OcspResponseStatus.UnknownStatus(v),
+        }
+    }
+}
+
+// =============================================================================
+// Per-cert status (RFC 6960 §4.2.1 SingleResponse.certStatus)
+// =============================================================================
+
+public type CrlReason is
+      Unspecified
+    | KeyCompromise
+    | CaCompromise
+    | AffiliationChanged
+    | Superseded
+    | CessationOfOperation
+    | CertificateHold
+    | RemoveFromCrl
+    | PrivilegeWithdrawn
+    | AaCompromise
+    | UnknownReason(UInt32);
+
+public type CertStatus is
+      Good
+    | Revoked { revocation_time: Time, reason: Maybe<CrlReason> }
+    | Unknown;
+
+// =============================================================================
+// SingleResponse — per-certificate reply
+// =============================================================================
+
+public type CertId is {
+    /// Raw hashAlgorithm DER — BIT STRING identifier.
+    raw_hash_algorithm: List<Byte>,
+    issuer_name_hash:   List<Byte>,
+    issuer_key_hash:    List<Byte>,
+    serial_number:      List<Byte>,
+};
+
+public type SingleResponse is {
+    cert_id:        CertId,
+    cert_status:    CertStatus,
+    this_update:    Time,
+    next_update:    Maybe<Time>,
+};
+
+// =============================================================================
+// BasicOCSPResponse — the signed payload
+// =============================================================================
+
+public type ResponderId is
+      ByName(List<Byte>)       // Name DER
+    | ByKey([Byte; 20]);        // 160-bit SHA-1 of responder pubkey
+
+public type BasicOcspResponse is {
+    /// Version: 1 by default (v1 in the wire is integer 0).
+    version:        UInt32,
+    responder_id:   ResponderId,
+    produced_at:    Time,
+    responses:      List<SingleResponse>,
+    /// Raw signatureAlgorithm DER.
+    raw_signature_algorithm: List<Byte>,
+    /// Raw signature BIT STRING payload (value).
+    signature:      List<Byte>,
+    /// Optional responder cert chain.
+    certs:          List<List<Byte>>,
+};
+
+// =============================================================================
+// OCSPResponse — outermost wrapper
+// =============================================================================
+
+public type OcspResponse is {
+    status:  OcspResponseStatus,
+    /// None iff status != Successful (RFC 6960 §4.2.1).
+    basic:   Maybe<BasicOcspResponse>,
+};
+
+public type OcspError is
+      DerParseError(DerError)
+    | BadStatus(UInt8)
+    | BadStructure(Text)
+    | SignatureNotVerified
+    | ResponderNotTrusted
+    | ResponseExpired
+    | Truncated;
+
+// =============================================================================
+// Parser (scaffold — v1.1 will integrate DerReader + algorithm + Name parsing)
+// =============================================================================
+
+public fn parse_ocsp_response(_der: &[Byte]) -> Result<OcspResponse, OcspError> {
+    Err(OcspError.BadStructure(Text.from_str("parse_ocsp_response scaffold — v1.1 deliverable")))
+}
+
+// =============================================================================
+// check_cert_status — chain-validation helper
+// =============================================================================
+
+/// Look up the status for `serial` in a parsed BasicOcspResponse.
+/// Returns `None` if the responder did not include a SingleResponse
+/// for that serial.
+public fn find_single_response<'a>(
+    basic: &'a BasicOcspResponse,
+    serial: &[Byte],
+) -> Maybe<&'a SingleResponse> {
+    let mut i: Int = 0;
+    while i < basic.responses.len() {
+        let sr = &basic.responses[i];
+        if serials_equal(sr.cert_id.serial_number.as_slice(), serial) {
+            return Some(sr);
+        }
+        i = i + 1;
+    }
+    None
+}
+
+fn serials_equal(a: &[Byte], b: &[Byte]) -> Bool {
+    if a.len() != b.len() { return false; }
+    let mut i: Int = 0;
+    let mut diff: UInt8 = 0_u8;
+    while i < a.len() {
+        diff = diff | (a[i] ^ b[i]);
+        i = i + 1;
+    }
+    diff == 0_u8
+}
+
+/// Decode the numeric reason code field from a `revoked` SingleResponse.
+public fn decode_crl_reason(code: UInt32) -> CrlReason {
+    match code {
+        0_u32  => CrlReason.Unspecified,
+        1_u32  => CrlReason.KeyCompromise,
+        2_u32  => CrlReason.CaCompromise,
+        3_u32  => CrlReason.AffiliationChanged,
+        4_u32  => CrlReason.Superseded,
+        5_u32  => CrlReason.CessationOfOperation,
+        6_u32  => CrlReason.CertificateHold,
+        8_u32  => CrlReason.RemoveFromCrl,
+        9_u32  => CrlReason.PrivilegeWithdrawn,
+        10_u32 => CrlReason.AaCompromise,
+        other  => CrlReason.UnknownReason(other),
+    }
+}

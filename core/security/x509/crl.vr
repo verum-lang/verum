@@ -1,0 +1,160 @@
+// =============================================================================
+// security/x509/crl.vr — Certificate Revocation List (RFC 5280 §5)
+// =============================================================================
+// Layer: 3 (Certificate)
+// =============================================================================
+//
+// RFC 5280 §5 CRL (Certificate Revocation List) structure:
+//
+//   CertificateList ::= SEQUENCE {
+//       tbsCertList          TBSCertList,
+//       signatureAlgorithm   AlgorithmIdentifier,
+//       signatureValue       BIT STRING
+//   }
+//
+//   TBSCertList ::= SEQUENCE {
+//       version                 Version OPTIONAL,   -- v2 (integer 1)
+//       signature               AlgorithmIdentifier,
+//       issuer                  Name,
+//       thisUpdate              Time,
+//       nextUpdate              Time OPTIONAL,
+//       revokedCertificates     SEQUENCE OF SEQUENCE {
+//           userCertificate     CertificateSerialNumber,   -- INTEGER
+//           revocationDate      Time,
+//           crlEntryExtensions  Extensions OPTIONAL
+//       } OPTIONAL,
+//       crlExtensions           [0] EXPLICIT Extensions OPTIONAL
+//   }
+//
+// This module implements the TBSCertList parser — enough to recognise
+// revoked serial numbers for chain validation. Full signature
+// verification is a v1.1 deliverable; the scaffold exposes the ADT +
+// per-entry iteration + lookup by-serial.
+//
+// OCSP is the primary revocation source for WebPKI; CRL is the
+// fallback for long-lived certs and private PKI deployments.
+//
+// =============================================================================
+
+module core.security.x509.crl;
+
+mount core.*;
+mount core.collections.List;
+mount core.encoding.der.{DerReader, DerError, Time};
+
+// =============================================================================
+// ADT
+// =============================================================================
+
+public type CrlReason is
+      Unspecified
+    | KeyCompromise
+    | CaCompromise
+    | AffiliationChanged
+    | Superseded
+    | CessationOfOperation
+    | CertificateHold
+    | RemoveFromCrl
+    | PrivilegeWithdrawn
+    | AaCompromise
+    | UnknownReason(UInt32);
+
+public type RevokedEntry is {
+    /// Raw serial-number bytes from the INTEGER field; compare
+    /// bitwise against the subject cert's serial during chain
+    /// validation.
+    serial_number: List<Byte>,
+    revocation_date: Time,
+    /// RFC 5280 §5.3.1 CRL entry extensions: reasonCode, invalidityDate,
+    /// certificateIssuer. Kept opaque here; specific accessors live
+    /// in the verify code path.
+    raw_entry_extensions: Maybe<List<Byte>>,
+};
+
+public type CertificateList is {
+    /// Version number: v1 (absent) = 0; v2 (integer) = 1.
+    /// RFC 5280 §5.1.1 mandates v2 when any extensions are present.
+    version: UInt32,
+    /// Raw issuer Name DER — opaque here. Chain validation matches
+    /// bitwise against the issuer cert's subject Name.
+    issuer_der: List<Byte>,
+    this_update: Time,
+    next_update: Maybe<Time>,
+    revoked:     List<RevokedEntry>,
+    /// Raw crlExtensions DER. v1.1 extracts AuthorityKeyIdentifier +
+    /// CRLNumber + IssuingDistributionPoint; the scaffold keeps the
+    /// bytes opaque.
+    raw_crl_extensions: Maybe<List<Byte>>,
+};
+
+public type CrlError is
+      DerParseError(DerError)
+    | BadStructure(Text)
+    | Truncated;
+
+// =============================================================================
+// Parser (TBSCertList DER → CertificateList)
+// =============================================================================
+//
+// The scaffold understands enough DER to walk TBSCertList and extract
+// the revoked-certificate serials. Full Name / Time / Extension
+// parsing is delegated to existing `x509.name.*` / `x509.time.*` /
+// `x509.ext.*` helpers in the v1.1 integration pass.
+
+public fn parse_crl(_der: &[Byte]) -> Result<CertificateList, CrlError> {
+    // The wiring to DerReader + Name/Time/Extension helpers lands
+    // in v1.1. Until then: surface the scaffold so consumer code
+    // can match on `CertificateList` / `RevokedEntry` already.
+    Err(CrlError.BadStructure(Text.from_str("parse_crl scaffold — v1.1 deliverable")))
+}
+
+// =============================================================================
+// Lookup helpers (used by chain validation)
+// =============================================================================
+
+/// Constant-time-ish bytes-equal for serial-number comparison. A CRL
+/// can carry thousands of revoked entries; the chain verifier
+/// iterates once per check.
+public fn serials_equal(a: &[Byte], b: &[Byte]) -> Bool {
+    if a.len() != b.len() { return false; }
+    let mut i: Int = 0;
+    let mut diff: UInt8 = 0_u8;
+    while i < a.len() {
+        diff = diff | (a[i] ^ b[i]);
+        i = i + 1;
+    }
+    diff == 0_u8
+}
+
+/// Return Some(entry) if `serial` appears in the CRL, None otherwise.
+public fn find_revoked<'a>(
+    crl: &'a CertificateList,
+    serial: &[Byte],
+) -> Maybe<&'a RevokedEntry> {
+    let mut i: Int = 0;
+    while i < crl.revoked.len() {
+        if serials_equal(crl.revoked[i].serial_number.as_slice(), serial) {
+            return Some(&crl.revoked[i]);
+        }
+        i = i + 1;
+    }
+    None
+}
+
+/// Decode the low-byte-integer CRL reason-code into the enum.
+/// RFC 5280 §5.3.1 — enumerated { 0..10 excluding 7 }.
+public fn decode_reason(code: UInt32) -> CrlReason {
+    match code {
+        0_u32 => CrlReason.Unspecified,
+        1_u32 => CrlReason.KeyCompromise,
+        2_u32 => CrlReason.CaCompromise,
+        3_u32 => CrlReason.AffiliationChanged,
+        4_u32 => CrlReason.Superseded,
+        5_u32 => CrlReason.CessationOfOperation,
+        6_u32 => CrlReason.CertificateHold,
+        8_u32 => CrlReason.RemoveFromCrl,
+        9_u32 => CrlReason.PrivilegeWithdrawn,
+        10_u32 => CrlReason.AaCompromise,
+        other => CrlReason.UnknownReason(other),
+    }
+}

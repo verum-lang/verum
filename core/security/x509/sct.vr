@@ -1,0 +1,223 @@
+// =============================================================================
+// security/x509/sct.vr — Signed Certificate Timestamp (RFC 6962)
+// =============================================================================
+// Layer: 3 (Certificate)
+// =============================================================================
+//
+// RFC 6962 Certificate Transparency: every publicly-trusted
+// certificate MUST carry at least two SCTs from independent CT logs
+// (current Chrome / Apple policy). SCTs are delivered three ways:
+//
+//   1. Embedded in a TLS extension (signed_certificate_timestamp,
+//      TLS extension type 0x0012, RFC 6962 §3.3.1).
+//   2. Stapled via OCSP (CertificateStatusRequestItemV2, §3.3.2).
+//   3. Embedded in the certificate as an X.509 extension
+//      `id-embedded-sct-list` OID = 1.3.6.1.4.1.11129.2.4.2 (§3.3).
+//
+// This module implements method (3) — the on-cert embedded list.
+// Method (1) and (2) parse the same `SignedCertificateTimestamp`
+// structure and can share this code path.
+//
+// `SignedCertificateTimestamp` wire format (TLS-encoded, RFC 6962
+// §3.2):
+//
+//   struct {
+//       Version sct_version;            // uint8; v1 = 0
+//       LogID log_id;                    // opaque[32] — SHA-256 of log pubkey
+//       uint64 timestamp;                // ms since epoch
+//       CtExtensions extensions;         // opaque<0..2^16-1>
+//       digitally-signed struct {
+//           Version sct_version;
+//           SignatureType signature_type;  // uint8; 0 = certificate_timestamp
+//           uint64 timestamp;
+//           LogEntryType entry_type;       // uint16; 0 = x509_entry,
+//                                          //         1 = precert_entry
+//           select (entry_type) {
+//               case x509_entry:    ASN.1Cert certificate;
+//               case precert_entry: PreCert tbs_certificate;
+//           };
+//           CtExtensions extensions;
+//       } signature;
+//   } SignedCertificateTimestamp;
+//
+// Scaffold scope:
+//
+//   * `Sct` record with the five header fields + the encoded signature.
+//   * `parse_sct(buf)` / `parse_sct_list(buf)` — TLS-opaque framing.
+//   * `parse_embedded_sct_list_from_ext(ext_value)` — unwraps the
+//     double OCTET STRING indirection (cert extensions carry the
+//     SCT list as OCTET STRING wrapping the TLS-encoded list).
+//
+// Signature verification against a CT log's public key is a v1.1
+// deliverable — the scaffold lays the ADT so that consumer code can
+// already match on `Sct.log_id` / `timestamp` / etc.
+//
+// =============================================================================
+
+module core.security.x509.sct;
+
+mount core.*;
+mount core.collections.List;
+
+public type SctVersion is V1 | Unknown(UInt8);
+
+public type LogEntryType is X509Entry | PreCertEntry | UnknownEntryType(UInt16);
+
+public type SignatureType is
+      CertificateTimestamp
+    | UnknownSignatureType(UInt8);
+
+public type Sct is {
+    version:     SctVersion,
+    log_id:      [Byte; 32],
+    timestamp:   UInt64,
+    extensions:  List<Byte>,
+    /// Raw TLS 1.2 DigitallySigned bytes: 2-byte HashAlg + SignatureAlg
+    /// + 2-byte signature-length + signature. Verified against the log
+    /// pubkey in `verify_sct`.
+    signature:   List<Byte>,
+};
+
+public type SctError is
+      Truncated
+    | UnknownVersion(UInt8)
+    | BadExtensionStructure
+    | BadSignatureLength;
+
+// =============================================================================
+// Byte readers (big-endian helpers)
+// =============================================================================
+
+fn take_u8(buf: &[Byte], pos: Int) -> Result<(UInt8, Int), SctError> {
+    if pos >= buf.len() { return Err(SctError.Truncated); }
+    Ok((buf[pos] as UInt8, pos + 1))
+}
+
+fn take_u16(buf: &[Byte], pos: Int) -> Result<(UInt16, Int), SctError> {
+    if pos + 2 > buf.len() { return Err(SctError.Truncated); }
+    let v = ((buf[pos] as UInt16) << 8_u32) | (buf[pos + 1] as UInt16);
+    Ok((v, pos + 2))
+}
+
+fn take_u64(buf: &[Byte], pos: Int) -> Result<(UInt64, Int), SctError> {
+    if pos + 8 > buf.len() { return Err(SctError.Truncated); }
+    let mut v: UInt64 = 0_u64;
+    let mut i: Int = 0;
+    while i < 8 {
+        v = (v << 8_u32) | (buf[pos + i] as UInt64);
+        i = i + 1;
+    }
+    Ok((v, pos + 8))
+}
+
+fn take_32(buf: &[Byte], pos: Int) -> Result<([Byte; 32], Int), SctError> {
+    if pos + 32 > buf.len() { return Err(SctError.Truncated); }
+    let mut out: [Byte; 32] = [0_u8; 32];
+    let mut i: Int = 0;
+    while i < 32 {
+        out[i] = buf[pos + i];
+        i = i + 1;
+    }
+    Ok((out, pos + 32))
+}
+
+fn take_opaque_u16(buf: &[Byte], pos: Int) -> Result<(List<Byte>, Int), SctError> {
+    let (len, p1) = take_u16(buf, pos)?;
+    let end = p1 + (len as Int);
+    if end > buf.len() { return Err(SctError.Truncated); }
+    let mut out: List<Byte> = [];
+    let mut i: Int = p1;
+    while i < end {
+        out.push(buf[i]);
+        i = i + 1;
+    }
+    Ok((out, end))
+}
+
+// =============================================================================
+// parse_sct — single SignedCertificateTimestamp
+// =============================================================================
+
+public fn parse_sct(buf: &[Byte]) -> Result<Sct, SctError> {
+    let (version_byte, p1) = take_u8(buf, 0)?;
+    let version = match version_byte {
+        0_u8 => SctVersion.V1,
+        other => SctVersion.Unknown(other),
+    };
+    let (log_id, p2) = take_32(buf, p1)?;
+    let (timestamp, p3) = take_u64(buf, p2)?;
+    let (extensions, p4) = take_opaque_u16(buf, p3)?;
+    // The remaining bytes are the DigitallySigned signature blob.
+    let mut signature: List<Byte> = [];
+    let mut i: Int = p4;
+    while i < buf.len() {
+        signature.push(buf[i]);
+        i = i + 1;
+    }
+    Ok(Sct {
+        version:    version,
+        log_id:     log_id,
+        timestamp:  timestamp,
+        extensions: extensions,
+        signature:  signature,
+    })
+}
+
+// =============================================================================
+// parse_sct_list — TLS-opaque<2^16-1> of TLS-opaque<2^16-1> SCTs
+// (RFC 6962 §3.3)
+// =============================================================================
+
+public fn parse_sct_list(buf: &[Byte]) -> Result<List<Sct>, SctError> {
+    let (total_len, p1) = take_u16(buf, 0)?;
+    let end = p1 + (total_len as Int);
+    if end > buf.len() { return Err(SctError.Truncated); }
+    let mut out: List<Sct> = [];
+    let mut pos = p1;
+    while pos < end {
+        let (sct_len, q) = take_u16(buf, pos)?;
+        let sct_end = q + (sct_len as Int);
+        if sct_end > end { return Err(SctError.Truncated); }
+        let mut slice: List<Byte> = [];
+        let mut i: Int = q;
+        while i < sct_end {
+            slice.push(buf[i]);
+            i = i + 1;
+        }
+        out.push(parse_sct(slice.as_slice())?);
+        pos = sct_end;
+    }
+    Ok(out)
+}
+
+// =============================================================================
+// parse_embedded_sct_list_from_ext — peel one OCTET STRING then
+// delegate to parse_sct_list
+// =============================================================================
+//
+// The X.509 extension value carries an outer OCTET STRING whose
+// contents are the TLS-encoded SCT list. The ASN.1 DER tag for
+// OCTET STRING is 0x04 (primitive).
+
+public fn parse_embedded_sct_list_from_ext(ext_value: &[Byte]) -> Result<List<Sct>, SctError> {
+    if ext_value.len() < 2 { return Err(SctError.Truncated); }
+    if ext_value[0] != 0x04_u8 { return Err(SctError.BadExtensionStructure); }
+    // Short-form DER length only here (SCT lists under 128 bytes) —
+    // long-form DER length unwrap is left for the full DerReader path.
+    let len_byte = ext_value[1];
+    if (len_byte & 0x80_u8) != 0_u8 {
+        return Err(SctError.BadExtensionStructure);
+    }
+    let payload_start = 2;
+    let payload_end = payload_start + (len_byte as Int);
+    if payload_end > ext_value.len() {
+        return Err(SctError.Truncated);
+    }
+    let mut inner: List<Byte> = [];
+    let mut i: Int = payload_start;
+    while i < payload_end {
+        inner.push(ext_value[i]);
+        i = i + 1;
+    }
+    parse_sct_list(inner.as_slice())
+}

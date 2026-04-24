@@ -1,0 +1,61 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: x509, crl, revocation, rfc5280_5
+// @timeout: 15000
+// @expected-exit: 0
+
+// CRL (RFC 5280 §5) parser scaffold — ADT + serials_equal + reason-code
+// decode + find_revoked.
+
+mount core.*;
+mount core.collections.List;
+mount core.security.x509.crl.{
+    CertificateList, RevokedEntry, CrlError, CrlReason,
+    parse_crl, serials_equal, find_revoked, decode_reason,
+};
+
+fn serials_equal_handles_length_and_content() {
+    let a: List<Byte> = [0x01_u8, 0x02_u8, 0x03_u8];
+    let b: List<Byte> = [0x01_u8, 0x02_u8, 0x03_u8];
+    let c: List<Byte> = [0x01_u8, 0x02_u8, 0x04_u8];
+    let d: List<Byte> = [0x01_u8, 0x02_u8];
+    assert(serials_equal(a.as_slice(), b.as_slice()));
+    assert(false == serials_equal(a.as_slice(), c.as_slice()));
+    assert(false == serials_equal(a.as_slice(), d.as_slice()));
+}
+
+fn decode_reason_maps_all_rfc_codes() {
+    match decode_reason(0_u32) { CrlReason.Unspecified => {}, _ => panic("0") }
+    match decode_reason(1_u32) { CrlReason.KeyCompromise => {}, _ => panic("1") }
+    match decode_reason(2_u32) { CrlReason.CaCompromise => {}, _ => panic("2") }
+    match decode_reason(3_u32) { CrlReason.AffiliationChanged => {}, _ => panic("3") }
+    match decode_reason(4_u32) { CrlReason.Superseded => {}, _ => panic("4") }
+    match decode_reason(5_u32) { CrlReason.CessationOfOperation => {}, _ => panic("5") }
+    match decode_reason(6_u32) { CrlReason.CertificateHold => {}, _ => panic("6") }
+    // 7 is reserved — absent from enum.
+    match decode_reason(8_u32) { CrlReason.RemoveFromCrl => {}, _ => panic("8") }
+    match decode_reason(9_u32) { CrlReason.PrivilegeWithdrawn => {}, _ => panic("9") }
+    match decode_reason(10_u32) { CrlReason.AaCompromise => {}, _ => panic("10") }
+    match decode_reason(255_u32) {
+        CrlReason.UnknownReason(c) => assert(c == 255_u32),
+        _ => panic("255 should be UnknownReason"),
+    }
+}
+
+fn parse_crl_scaffold_returns_err() {
+    let der: List<Byte> = [0x30_u8, 0x00_u8];   // empty SEQUENCE
+    match parse_crl(der.as_slice()) {
+        Err(CrlError.BadStructure(_)) => {},
+        _ => panic("scaffold should return BadStructure"),
+    }
+}
+
+@main
+public fn main() -> Int {
+    serials_equal_handles_length_and_content();
+    decode_reason_maps_all_rfc_codes();
+    parse_crl_scaffold_returns_err();
+    print("RFC 5280 §5 CRL parser scaffold verified");
+    0
+}

@@ -1,0 +1,113 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: x509, sct, certificate_transparency, rfc6962
+// @timeout: 15000
+// @expected-exit: 0
+
+// Signed Certificate Timestamp (RFC 6962) parser scaffold — ADT
+// surface + parse helpers.
+
+mount core.*;
+mount core.collections.List;
+mount core.security.x509.sct.{
+    Sct, SctVersion, SctError,
+    parse_sct, parse_sct_list, parse_embedded_sct_list_from_ext,
+};
+
+fn minimal_sct_bytes() -> List<Byte> {
+    // Single SCT:
+    //   version = 0 (v1)
+    //   log_id   = 32 bytes of 0xAA
+    //   timestamp = 0x00...00
+    //   extensions: opaque<u16> = 0-length
+    //   signature: 2-byte hash-alg + 2-byte sig-alg + 2-byte len (= 0)
+    let mut v: List<Byte> = [];
+    v.push(0x00_u8);                               // version v1
+    let mut i: Int = 0;
+    while i < 32 { v.push(0xAA_u8); i = i + 1; }   // log_id
+    let mut j: Int = 0;
+    while j < 8 { v.push(0x00_u8); j = j + 1; }    // timestamp = 0
+    v.push(0x00_u8); v.push(0x00_u8);              // extensions len = 0
+    v.push(0x04_u8); v.push(0x03_u8);              // DigitallySigned — ECDSA/SHA-256
+    v.push(0x00_u8); v.push(0x00_u8);              // sig len = 0 (scaffold)
+    v
+}
+
+fn parse_single_sct_surface() {
+    let bytes = minimal_sct_bytes();
+    let sct = parse_sct(bytes.as_slice()).unwrap();
+    match sct.version {
+        SctVersion.V1 => {},
+        _ => panic("expected V1"),
+    }
+    assert(sct.timestamp == 0_u64);
+    assert(sct.extensions.len() == 0);
+    // DigitallySigned blob = 6 bytes (2 HashAlg + 2 SigAlg + 2 len=0).
+    assert(sct.signature.len() == 6);
+}
+
+fn parse_sct_list_two_entries() {
+    // list_len = 2 × (2-byte sct_len + sct_bytes)
+    let one = minimal_sct_bytes();
+    let sct_len = one.len() as UInt16;
+
+    let mut list: List<Byte> = [];
+    let total_len: UInt16 = ((sct_len + 2_u16) * 2_u16) as UInt16;
+    list.push(((total_len >> 8_u32) & 0xFF_u16) as Byte);
+    list.push((total_len & 0xFF_u16) as Byte);
+
+    let mut k: Int = 0;
+    while k < 2 {
+        list.push(((sct_len >> 8_u32) & 0xFF_u16) as Byte);
+        list.push((sct_len & 0xFF_u16) as Byte);
+        let mut m: Int = 0;
+        while m < one.len() { list.push(one[m]); m = m + 1; }
+        k = k + 1;
+    }
+
+    let scts = parse_sct_list(list.as_slice()).unwrap();
+    assert(scts.len() == 2);
+}
+
+fn embedded_octet_string_peeled() {
+    // Outer OCTET STRING: tag 0x04 + short length + sct_list payload.
+    let one = minimal_sct_bytes();
+    let sct_len = one.len() as UInt16;
+
+    let mut list_payload: List<Byte> = [];
+    let total_len: UInt16 = sct_len + 2_u16;
+    list_payload.push(((total_len >> 8_u32) & 0xFF_u16) as Byte);
+    list_payload.push((total_len & 0xFF_u16) as Byte);
+    list_payload.push(((sct_len >> 8_u32) & 0xFF_u16) as Byte);
+    list_payload.push((sct_len & 0xFF_u16) as Byte);
+    let mut m: Int = 0;
+    while m < one.len() { list_payload.push(one[m]); m = m + 1; }
+
+    let mut ext: List<Byte> = [];
+    ext.push(0x04_u8);
+    ext.push(list_payload.len() as Byte);
+    let mut k: Int = 0;
+    while k < list_payload.len() { ext.push(list_payload[k]); k = k + 1; }
+
+    let scts = parse_embedded_sct_list_from_ext(ext.as_slice()).unwrap();
+    assert(scts.len() == 1);
+}
+
+fn malformed_returns_err() {
+    let truncated: List<Byte> = [0x00_u8, 0x01_u8];
+    match parse_sct(truncated.as_slice()) {
+        Err(SctError.Truncated) => {},
+        _ => panic("expected Truncated"),
+    }
+}
+
+@main
+public fn main() -> Int {
+    parse_single_sct_surface();
+    parse_sct_list_two_entries();
+    embedded_octet_string_peeled();
+    malformed_returns_err();
+    print("RFC 6962 SCT parser scaffold verified");
+    0
+}

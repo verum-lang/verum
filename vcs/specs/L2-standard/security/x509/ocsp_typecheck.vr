@@ -1,0 +1,121 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: x509, ocsp, rfc6960, revocation
+// @timeout: 15000
+// @expected-exit: 0
+
+// OCSP (RFC 6960) scaffold — OcspResponseStatus / CertStatus /
+// SingleResponse ADT surface + helpers.
+
+mount core.*;
+mount core.collections.List;
+mount core.security.x509.ocsp.{
+    OcspResponseStatus, CertStatus, CrlReason,
+    OcspResponse, OcspError, BasicOcspResponse,
+    SingleResponse, CertId, ResponderId,
+    parse_ocsp_response, find_single_response, decode_crl_reason,
+};
+mount core.encoding.der.{Time};
+
+fn response_status_codepoints_match_rfc() {
+    assert(OcspResponseStatus.Successful.to_u8()       == 0_u8);
+    assert(OcspResponseStatus.MalformedRequest.to_u8() == 1_u8);
+    assert(OcspResponseStatus.InternalError.to_u8()    == 2_u8);
+    assert(OcspResponseStatus.TryLater.to_u8()         == 3_u8);
+    // 4 reserved — gap skipped.
+    assert(OcspResponseStatus.SigRequired.to_u8()      == 5_u8);
+    assert(OcspResponseStatus.Unauthorized.to_u8()     == 6_u8);
+
+    match OcspResponseStatus.from_u8(0_u8) { OcspResponseStatus.Successful => {}, _ => panic("0") }
+    match OcspResponseStatus.from_u8(3_u8) { OcspResponseStatus.TryLater => {}, _ => panic("3") }
+    match OcspResponseStatus.from_u8(4_u8) {
+        OcspResponseStatus.UnknownStatus(c) => assert(c == 4_u8),
+        _ => panic("4 should be UnknownStatus"),
+    }
+    match OcspResponseStatus.from_u8(255_u8) {
+        OcspResponseStatus.UnknownStatus(c) => assert(c == 255_u8),
+        _ => panic("255 should be UnknownStatus"),
+    }
+}
+
+fn decode_crl_reason_maps_all_codes() {
+    match decode_crl_reason(0_u32)  { CrlReason.Unspecified => {}, _ => panic("0") }
+    match decode_crl_reason(1_u32)  { CrlReason.KeyCompromise => {}, _ => panic("1") }
+    match decode_crl_reason(6_u32)  { CrlReason.CertificateHold => {}, _ => panic("6") }
+    match decode_crl_reason(10_u32) { CrlReason.AaCompromise => {}, _ => panic("10") }
+    match decode_crl_reason(99_u32) {
+        CrlReason.UnknownReason(c) => assert(c == 99_u32),
+        _ => panic("99"),
+    }
+}
+
+fn parse_ocsp_response_scaffold_reports_structure_error() {
+    let der: List<Byte> = [0x30_u8, 0x00_u8];
+    match parse_ocsp_response(der.as_slice()) {
+        Err(OcspError.BadStructure(_)) => {},
+        _ => panic("scaffold must return BadStructure"),
+    }
+}
+
+fn find_single_response_matches_serial() {
+    let cid_a = CertId {
+        raw_hash_algorithm: [],
+        issuer_name_hash:   [],
+        issuer_key_hash:    [],
+        serial_number:      [0x01_u8, 0x02_u8, 0x03_u8],
+    };
+    let cid_b = CertId {
+        raw_hash_algorithm: [],
+        issuer_name_hash:   [],
+        issuer_key_hash:    [],
+        serial_number:      [0x04_u8, 0x05_u8, 0x06_u8],
+    };
+    let sr_a = SingleResponse {
+        cert_id: cid_a, cert_status: CertStatus.Good,
+        this_update: Time { year: 2024_u32, month: 1_u8, day: 1_u8, hour: 0_u8, minute: 0_u8, second: 0_u8 },
+        next_update: None,
+    };
+    let sr_b = SingleResponse {
+        cert_id: cid_b, cert_status: CertStatus.Unknown,
+        this_update: Time { year: 2024_u32, month: 1_u8, day: 1_u8, hour: 0_u8, minute: 0_u8, second: 0_u8 },
+        next_update: None,
+    };
+    let responses: List<SingleResponse> = [sr_a, sr_b];
+    let basic = BasicOcspResponse {
+        version:      0_u32,
+        responder_id: ResponderId.ByName([]),
+        produced_at:  Time { year: 2024_u32, month: 1_u8, day: 1_u8, hour: 0_u8, minute: 0_u8, second: 0_u8 },
+        responses:    responses,
+        raw_signature_algorithm: [],
+        signature:    [],
+        certs:        [],
+    };
+
+    let serial_b: List<Byte> = [0x04_u8, 0x05_u8, 0x06_u8];
+    match find_single_response(&basic, serial_b.as_slice()) {
+        Some(sr) => {
+            match sr.cert_status {
+                CertStatus.Unknown => {},
+                _ => panic("expected Unknown"),
+            }
+        },
+        None => panic("must find the B response"),
+    }
+
+    let serial_missing: List<Byte> = [0xFF_u8];
+    match find_single_response(&basic, serial_missing.as_slice()) {
+        None => {},
+        _ => panic("missing serial must return None"),
+    }
+}
+
+@main
+public fn main() -> Int {
+    response_status_codepoints_match_rfc();
+    decode_crl_reason_maps_all_codes();
+    parse_ocsp_response_scaffold_reports_structure_error();
+    find_single_response_matches_serial();
+    print("RFC 6960 OCSP scaffold surface verified");
+    0
+}
