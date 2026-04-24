@@ -65,6 +65,8 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use verum_common::{Heap, List, Maybe, Text};
 
+pub mod proof_tree;
+
 // =============================================================================
 // CoreTerm — the explicit calculus
 // =============================================================================
