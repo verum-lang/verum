@@ -1,0 +1,122 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, journal_header_api, pager
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.journal_header_api.constants.{
+    header_size, magic_bytes, magic_size,
+    min_sector_size, max_sector_size, is_valid_sector_size,
+};
+mount core.database.sqlite.native.journal_header_api.header.{
+    JournalHeader,
+    new,
+    size_on_disk, is_unknown_length,
+    is_valid_page_size, is_valid_sector, magic_matches,
+};
+mount base.{Bool};
+mount core.collections.list.{List};
+
+fn test_sizes() {
+    assert_eq(header_size(), 28);
+    assert_eq(magic_size(), 8);
+    assert_eq(size_on_disk(), 28);
+}
+
+fn test_magic_bytes_sequence() {
+    let bs = magic_bytes();
+    assert_eq(bs.len(), 8);
+    assert_eq(bs[0], 0xD9 as u8);
+    assert_eq(bs[1], 0xD5 as u8);
+    assert_eq(bs[2], 0x05 as u8);
+    assert_eq(bs[3], 0xF9 as u8);
+    assert_eq(bs[4], 0x20 as u8);
+    assert_eq(bs[5], 0xA1 as u8);
+    assert_eq(bs[6], 0x63 as u8);
+    assert_eq(bs[7], 0xD7 as u8);
+}
+
+fn test_sector_size_range() {
+    assert_eq(min_sector_size(), 512);
+    assert_eq(max_sector_size(), 65536);
+    assert(is_valid_sector_size(512));
+    assert(is_valid_sector_size(4096));
+    assert(is_valid_sector_size(65536));
+    assert(!is_valid_sector_size(256));
+    assert(!is_valid_sector_size(1000));
+    assert(!is_valid_sector_size(131072));
+}
+
+fn test_header_unknown_length() {
+    let h = new(
+        0xFFFFFFFF as u32, 7 as u32, 100 as u32,
+        4096 as u32, 4096 as u32,
+    );
+    assert(is_unknown_length(&h));
+    let h2 = new(
+        5 as u32, 7 as u32, 100 as u32,
+        4096 as u32, 4096 as u32,
+    );
+    assert(!is_unknown_length(&h2));
+}
+
+fn test_header_page_size_validation() {
+    let h = new(
+        0 as u32, 0 as u32, 0 as u32,
+        4096 as u32, 4096 as u32,
+    );
+    assert(is_valid_page_size(&h));
+    let h_sentinel = new(
+        0 as u32, 0 as u32, 0 as u32,
+        4096 as u32, 1 as u32,
+    );
+    assert(is_valid_page_size(&h_sentinel));
+    let bad = new(
+        0 as u32, 0 as u32, 0 as u32,
+        4096 as u32, 256 as u32,
+    );
+    assert(!is_valid_page_size(&bad));
+}
+
+fn test_header_sector_validation() {
+    let good = new(
+        0 as u32, 0 as u32, 0 as u32,
+        4096 as u32, 4096 as u32,
+    );
+    assert(is_valid_sector(&good));
+    let bad = new(
+        0 as u32, 0 as u32, 0 as u32,
+        300 as u32, 4096 as u32,
+    );
+    assert(!is_valid_sector(&bad));
+}
+
+fn test_magic_matches() {
+    let good = magic_bytes();
+    assert(magic_matches(&good));
+    let mut bad: List<u8> = [].clone() as List<u8>;
+    bad.push(0xD9 as u8);
+    bad.push(0xD5 as u8);
+    bad.push(0x05 as u8);
+    bad.push(0xFF as u8);    // diverges at byte 3
+    bad.push(0x20 as u8);
+    bad.push(0xA1 as u8);
+    bad.push(0x63 as u8);
+    bad.push(0xD7 as u8);
+    assert(!magic_matches(&bad));
+    // short buffer
+    let mut tiny: List<u8> = [].clone() as List<u8>;
+    tiny.push(0xD9 as u8);
+    assert(!magic_matches(&tiny));
+}
+
+fn main() {
+    test_sizes();
+    test_magic_bytes_sequence();
+    test_sector_size_range();
+    test_header_unknown_length();
+    test_header_page_size_validation();
+    test_header_sector_validation();
+    test_magic_matches();
+}

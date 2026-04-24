@@ -1,0 +1,41 @@
+// Journal-header constants.
+
+module core.database.sqlite.native.journal_header_api.constants;
+
+mount base.{Bool};
+mount core.collections.list.{List};
+
+public fn header_size() -> Int { 28 }
+
+// Magic bytes: 0xD9,0xD5,0x05,0xF9,0x20,0xA1,0x63,0xD7.
+public fn magic_bytes() -> List<u8> {
+    let mut out: List<u8> = [].clone() as List<u8>;
+    out.push(0xD9 as u8);
+    out.push(0xD5 as u8);
+    out.push(0x05 as u8);
+    out.push(0xF9 as u8);
+    out.push(0x20 as u8);
+    out.push(0xA1 as u8);
+    out.push(0x63 as u8);
+    out.push(0xD7 as u8);
+    out
+}
+
+public fn magic_size() -> Int { 8 }
+
+// Minimum sector size SQLite considers — 512 bytes.
+public fn min_sector_size() -> Int { 512 }
+
+// Maximum practical sector size — 65536.
+public fn max_sector_size() -> Int { 65536 }
+
+public fn is_valid_sector_size(n: Int) -> Bool {
+    if n < min_sector_size() { return false; }
+    if n > max_sector_size() { return false; }
+    let mut x = n;
+    while x > 1 {
+        if (x % 2) != 0 { return false; }
+        x = x / 2;
+    }
+    true
+}

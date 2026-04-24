@@ -1,0 +1,12 @@
+// =============================================================================
+// core/database/sqlite/native/cursor_hint_codes/mod.vr
+// =============================================================================
+// B-tree cursor hint taxonomy — BTREE_HINT_RANGE / BTREE_HINT_FLAGS + flag bits
+// SQLite passes to xCursorHint on a vtab cursor (3.8.4+).
+// Spec §12.5 — cursor optimization.
+// =============================================================================
+
+module core.database.sqlite.native.cursor_hint_codes;
+
+public module hint;
+public module flag;

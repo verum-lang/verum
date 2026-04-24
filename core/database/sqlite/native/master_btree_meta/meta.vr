@@ -1,0 +1,68 @@
+// B-tree "meta[]" slot array in the database file header.
+
+module core.database.sqlite.native.master_btree_meta.meta;
+
+mount base.{Bool, Text, Int64, Maybe};
+
+public type MetaSlot is
+    | MsSchemaCookie           //  0
+    | MsSchemaFormat           //  1  1..4
+    | MsDefaultCacheSize       //  2
+    | MsLargestRootPage        //  3
+    | MsTextEncoding           //  4  1=utf8, 2=utf16le, 3=utf16be
+    | MsUserVersion            //  5
+    | MsIncrementalVacuumMode  //  6
+    | MsApplicationId          //  7
+    | MsVersionValidFor        // 15
+    ;
+
+public fn slot_index(s: &MetaSlot) -> Int {
+    match s {
+        MsSchemaCookie          => 0,
+        MsSchemaFormat          => 1,
+        MsDefaultCacheSize      => 2,
+        MsLargestRootPage       => 3,
+        MsTextEncoding          => 4,
+        MsUserVersion           => 5,
+        MsIncrementalVacuumMode => 6,
+        MsApplicationId         => 7,
+        MsVersionValidFor       => 15,
+    }
+}
+
+public fn slot_name(s: &MetaSlot) -> Text {
+    match s {
+        MsSchemaCookie          => "schema_cookie".clone(),
+        MsSchemaFormat          => "schema_format".clone(),
+        MsDefaultCacheSize      => "default_cache_size".clone(),
+        MsLargestRootPage       => "largest_root_page".clone(),
+        MsTextEncoding          => "text_encoding".clone(),
+        MsUserVersion           => "user_version".clone(),
+        MsIncrementalVacuumMode => "incremental_vacuum".clone(),
+        MsApplicationId         => "application_id".clone(),
+        MsVersionValidFor       => "version_valid_for".clone(),
+    }
+}
+
+public fn slot_from_index(idx: Int) -> Maybe<MetaSlot> {
+    if idx == 0  { return Maybe.Some(MsSchemaCookie); }
+    if idx == 1  { return Maybe.Some(MsSchemaFormat); }
+    if idx == 2  { return Maybe.Some(MsDefaultCacheSize); }
+    if idx == 3  { return Maybe.Some(MsLargestRootPage); }
+    if idx == 4  { return Maybe.Some(MsTextEncoding); }
+    if idx == 5  { return Maybe.Some(MsUserVersion); }
+    if idx == 6  { return Maybe.Some(MsIncrementalVacuumMode); }
+    if idx == 7  { return Maybe.Some(MsApplicationId); }
+    if idx == 15 { return Maybe.Some(MsVersionValidFor); }
+    Maybe.None
+}
+
+// Text-encoding meta[4] value for a given encoding constant — 1/2/3 per sqlite.
+public fn text_encoding_is_valid(code: Int64) -> Bool {
+    code == (1 as Int64) || code == (2 as Int64) || code == (3 as Int64)
+}
+
+// Schema format 1..4 — 4 means WITHOUT ROWID tables supported.
+public fn schema_format_supports_without_rowid(fmt: Int64) -> Bool {
+    fmt >= (4 as Int64)
+}

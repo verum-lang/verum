@@ -1,0 +1,17 @@
+// =============================================================================
+// core/database/sqlite/native/vacuum_into_api/mod.vr
+// =============================================================================
+// VACUUM INTO (SQLite 3.27+):
+//
+//   VACUUM [schema_name] INTO 'filename';
+//
+// Writes a defragmented snapshot of the database to a new file without
+// disturbing the live connection's schema or data. When combined with a
+// schema-name it can snapshot an ATTACHed database.
+// Spec §10.5 — VACUUM.
+// =============================================================================
+
+module core.database.sqlite.native.vacuum_into_api;
+
+public module mode;
+public module spec;

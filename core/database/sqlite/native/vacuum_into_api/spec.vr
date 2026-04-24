@@ -1,0 +1,55 @@
+// VACUUM INTO spec.
+
+module core.database.sqlite.native.vacuum_into_api.spec;
+
+mount core.database.sqlite.native.vacuum_into_api.mode.{
+    VacuumMode, VmInPlace, VmInto,
+    requires_exclusive_on_source, produces_new_file,
+};
+mount base.{Bool, Text};
+
+public type VacuumSpec is {
+    mode: VacuumMode,
+    schema_name: Text,        // e.g. "main", "aux1"; "" = implicit main
+    target_filename: Text,    // empty for in-place
+};
+
+public fn in_place() -> VacuumSpec {
+    VacuumSpec {
+        mode: VmInPlace,
+        schema_name: "".clone(),
+        target_filename: "".clone(),
+    }
+}
+
+public fn into_file(filename: Text) -> VacuumSpec {
+    VacuumSpec {
+        mode: VmInto,
+        schema_name: "".clone(),
+        target_filename: filename,
+    }
+}
+
+public fn with_schema(mut s: VacuumSpec, schema: Text) -> VacuumSpec {
+    s.schema_name = schema;
+    s
+}
+
+public fn is_well_formed(s: &VacuumSpec) -> Bool {
+    match s.mode {
+        VmInPlace => s.target_filename.len() == 0,
+        VmInto    => s.target_filename.len() > 0,
+    }
+}
+
+public fn touches_attached_db(s: &VacuumSpec) -> Bool {
+    s.schema_name.len() > 0 && s.schema_name != "main".clone()
+}
+
+public fn needs_exclusive_source(s: &VacuumSpec) -> Bool {
+    requires_exclusive_on_source(&s.mode)
+}
+
+public fn outputs_new_file(s: &VacuumSpec) -> Bool {
+    produces_new_file(&s.mode)
+}

@@ -1,0 +1,72 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, freelist_api, pager
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.freelist_api.kind.{
+    FreePageKind, FkTrunk, FkLeaf,
+    kind_name, is_trunk,
+    trunk_header_size, trunk_leaf_slot_size, max_leaves_in_trunk,
+};
+mount core.database.sqlite.native.freelist_api.trunk.{
+    TrunkHeader,
+    new, is_last_trunk, is_empty_trunk, fits_on_page,
+    leaf_byte_offset, footprint_bytes,
+};
+mount base.{Bool};
+
+fn test_kind_names() {
+    assert(kind_name(&FkTrunk) == "trunk".clone());
+    assert(kind_name(&FkLeaf)  == "leaf".clone());
+    assert(is_trunk(&FkTrunk));
+    assert(!is_trunk(&FkLeaf));
+}
+
+fn test_trunk_constants() {
+    assert_eq(trunk_header_size(), 8);
+    assert_eq(trunk_leaf_slot_size(), 4);
+}
+
+fn test_max_leaves_per_page() {
+    // 4096-byte page: (4096 - 8) / 4 = 1022 leaves
+    assert_eq(max_leaves_in_trunk(4096), 1022);
+    assert_eq(max_leaves_in_trunk(1024), 254);
+    assert_eq(max_leaves_in_trunk(512),  126);
+}
+
+fn test_trunk_header_flags() {
+    let last = new(10 as u32, 0 as u32, 5 as u32);
+    assert(is_last_trunk(&last));
+    assert(!is_empty_trunk(&last));
+    let empty = new(1 as u32, 0 as u32, 0 as u32);
+    assert(is_empty_trunk(&empty));
+    let mid = new(1 as u32, 2 as u32, 100 as u32);
+    assert(!is_last_trunk(&mid));
+}
+
+fn test_fits_on_page() {
+    let h = new(1 as u32, 0 as u32, 100 as u32);
+    assert(fits_on_page(&h, 4096));
+    let too_big = new(1 as u32, 0 as u32, 2000 as u32);
+    assert(!fits_on_page(&too_big, 4096));
+}
+
+fn test_leaf_byte_offset_and_footprint() {
+    assert_eq(leaf_byte_offset(0), 8);
+    assert_eq(leaf_byte_offset(1), 12);
+    assert_eq(leaf_byte_offset(5), 28);
+    assert_eq(footprint_bytes(0 as u32), 8);
+    assert_eq(footprint_bytes(5 as u32), 28);
+    assert_eq(footprint_bytes(100 as u32), 408);
+}
+
+fn main() {
+    test_kind_names();
+    test_trunk_constants();
+    test_max_leaves_per_page();
+    test_trunk_header_flags();
+    test_fits_on_page();
+    test_leaf_byte_offset_and_footprint();
+}

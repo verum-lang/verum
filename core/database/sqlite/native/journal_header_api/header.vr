@@ -1,0 +1,69 @@
+// Journal-segment header record.
+
+module core.database.sqlite.native.journal_header_api.header;
+
+mount core.database.sqlite.native.journal_header_api.constants.{
+    header_size, magic_bytes, magic_size, is_valid_sector_size,
+};
+mount base.{Bool};
+mount core.collections.list.{List};
+
+public type JournalHeader is {
+    page_count: u32,        // 0xFFFFFFFF means "unknown — scan until EOF"
+    checksum_nonce: u32,
+    db_pages_initial: u32,
+    sector_size: u32,
+    page_size: u32,
+};
+
+public fn new(
+    page_count: u32,
+    checksum_nonce: u32,
+    db_pages_initial: u32,
+    sector_size: u32,
+    page_size: u32,
+) -> JournalHeader {
+    JournalHeader {
+        page_count: page_count,
+        checksum_nonce: checksum_nonce,
+        db_pages_initial: db_pages_initial,
+        sector_size: sector_size,
+        page_size: page_size,
+    }
+}
+
+public fn size_on_disk() -> Int { header_size() }
+
+// page_count == 0xFFFFFFFF is the "unknown — pre-sync crash" sentinel.
+public fn is_unknown_length(h: &JournalHeader) -> Bool {
+    h.page_count == (0xFFFFFFFF as u32)
+}
+
+public fn is_valid_page_size(h: &JournalHeader) -> Bool {
+    let ps = h.page_size as Int;
+    if ps == 1 { return true; }   // sentinel for 65536
+    if ps < 512 { return false; }
+    if ps > 65536 { return false; }
+    let mut x = ps;
+    while x > 1 {
+        if (x % 2) != 0 { return false; }
+        x = x / 2;
+    }
+    true
+}
+
+public fn is_valid_sector(h: &JournalHeader) -> Bool {
+    is_valid_sector_size(h.sector_size as Int)
+}
+
+// Check magic prefix against the 8-byte expected sequence.
+public fn magic_matches(actual: &List<u8>) -> Bool {
+    let exp = magic_bytes();
+    if actual.len() < magic_size() { return false; }
+    let mut i: Int = 0;
+    while i < magic_size() {
+        if actual[i] != exp[i] { return false; }
+        i = i + 1;
+    }
+    true
+}

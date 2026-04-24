@@ -1,0 +1,48 @@
+// Overflow-chain iteration bookkeeping.
+
+module core.database.sqlite.native.overflow_page_api.chain;
+
+mount core.database.sqlite.native.overflow_page_api.layout.{
+    header_size, usable_payload, needs_overflow,
+};
+mount base.{Bool};
+
+public type OverflowCursor is {
+    first_page: u32,
+    current_page: u32,
+    bytes_remaining: Int,
+    bytes_consumed: Int,
+};
+
+public fn start(first_page: u32, payload_total: Int) -> OverflowCursor {
+    OverflowCursor {
+        first_page: first_page,
+        current_page: first_page,
+        bytes_remaining: payload_total,
+        bytes_consumed: 0,
+    }
+}
+
+public fn is_exhausted(c: &OverflowCursor) -> Bool {
+    c.bytes_remaining <= 0
+}
+
+public fn advance_to(mut c: OverflowCursor, next_page: u32, bytes_read: Int) -> OverflowCursor {
+    c.current_page = next_page;
+    c.bytes_consumed = c.bytes_consumed + bytes_read;
+    c.bytes_remaining = c.bytes_remaining - bytes_read;
+    c
+}
+
+public fn pages_walked(c: &OverflowCursor) -> Int {
+    // first page counts once at start.
+    if c.first_page == (0 as u32) { 0 } else { 1 }
+}
+
+// Compute number of overflow pages needed for `remaining_payload` bytes given
+// a page size and reserved-bytes tail.
+public fn pages_needed(remaining_payload: Int, page_size: Int, reserved_bytes: Int) -> Int {
+    let per_page = usable_payload(page_size, reserved_bytes);
+    if per_page <= 0 { return 0; }
+    (remaining_payload + per_page - 1) / per_page
+}

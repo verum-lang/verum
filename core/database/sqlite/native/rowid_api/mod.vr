@@ -1,0 +1,12 @@
+// =============================================================================
+// core/database/sqlite/native/rowid_api/mod.vr
+// =============================================================================
+// Rowid semantics — classic rowid tables vs WITHOUT ROWID + INTEGER PRIMARY KEY
+// aliasing + AUTOINCREMENT.
+// Spec §17.9 — rowid and primary keys.
+// =============================================================================
+
+module core.database.sqlite.native.rowid_api;
+
+public module kind;
+public module policy;

@@ -1,0 +1,26 @@
+// =============================================================================
+// core/database/sqlite/native/master_btree_meta/mod.vr
+// =============================================================================
+// sqlite_schema / sqlite_master row shape — the per-connection self-describing
+// catalogue table.
+// Spec §17 — schema.
+//
+// sqlite_schema(type TEXT, name TEXT, tbl_name TEXT, rootpage INTEGER, sql TEXT)
+//
+// Also covers the B-tree header "meta array" (100-byte file header offsets 24-99):
+//   meta[0] schema_cookie
+//   meta[1] schema_format
+//   meta[2] default page_cache_size
+//   meta[3] largest root page
+//   meta[4] text encoding (1=utf8, 2=utf16le, 3=utf16be)
+//   meta[5] user_version
+//   meta[6] incremental_vacuum_mode
+//   meta[7] application_id
+//   meta[8..14] reserved
+//   meta[15] version-valid-for counter
+// =============================================================================
+
+module core.database.sqlite.native.master_btree_meta;
+
+public module row;
+public module meta;

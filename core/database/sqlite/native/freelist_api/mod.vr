@@ -1,0 +1,16 @@
+// =============================================================================
+// core/database/sqlite/native/freelist_api/mod.vr
+// =============================================================================
+// SQLite free-page list (trunk + leaves).
+// Spec §10.5 + §12.6 — free-page tracking.
+//
+// File-header offset 32 holds the first-free-page number;
+// offset 36 holds the total free-page count. The trunk page at that
+// rootpage points forward to the next trunk and stores leaf pages in
+// slots [2..N].
+// =============================================================================
+
+module core.database.sqlite.native.freelist_api;
+
+public module kind;
+public module trunk;

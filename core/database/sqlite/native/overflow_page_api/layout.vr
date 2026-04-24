@@ -1,0 +1,50 @@
+// Per-overflow-page layout constants + predicates.
+
+module core.database.sqlite.native.overflow_page_api.layout;
+
+mount base.{Bool};
+
+// Each overflow page starts with a 4-byte big-endian page-number pointer to
+// the next overflow page (0 = terminator).
+public fn header_size() -> Int { 4 }
+
+// Usable payload bytes on an overflow page = page_size - header - reserved.
+public fn usable_payload(page_size: Int, reserved_bytes: Int) -> Int {
+    page_size - header_size() - reserved_bytes
+}
+
+// SQLite minimum-local / maximum-local payload rules (§12.3):
+//   max_local = ((usable_size - 12) * 64 / 255) - 23
+//   min_local = ((usable_size - 12) * 32 / 255) - 23
+// (using usable_size = page_size - reserved_bytes)
+public fn max_local(page_size: Int, reserved_bytes: Int) -> Int {
+    let usable = page_size - reserved_bytes;
+    ((usable - 12) * 64 / 255) - 23
+}
+
+public fn min_local(page_size: Int, reserved_bytes: Int) -> Int {
+    let usable = page_size - reserved_bytes;
+    ((usable - 12) * 32 / 255) - 23
+}
+
+// A payload requires overflow when payload_size > max_local.
+public fn needs_overflow(payload_size: Int, page_size: Int, reserved_bytes: Int) -> Bool {
+    payload_size > max_local(page_size, reserved_bytes)
+}
+
+// Bytes stored inline for an overflowing payload — clipped by the min_local /
+// max_local balance so per-page utilization stays above the min threshold.
+public fn inline_bytes_for_overflow(
+    payload_size: Int,
+    page_size: Int,
+    reserved_bytes: Int,
+) -> Int {
+    let min_l = min_local(page_size, reserved_bytes);
+    let max_l = max_local(page_size, reserved_bytes);
+    let usable = page_size - reserved_bytes;
+    let surplus = usable - 12;
+    // SQLite: local = min_local + (payload_size - min_local) mod (usable - 4)
+    // clipped by max_local.
+    let cand = min_l + ((payload_size - min_l) % (surplus - 4 + 12));
+    if cand > max_l { max_l } else { cand }
+}

@@ -1,0 +1,95 @@
+// sqlite_schema row shape.
+
+module core.database.sqlite.native.master_btree_meta.row;
+
+mount base.{Bool, Text, Int64};
+
+public type SchemaKind is
+    | SkTable
+    | SkIndex
+    | SkView
+    | SkTrigger
+    ;
+
+public fn kind_name(k: &SchemaKind) -> Text {
+    match k {
+        SkTable   => "table".clone(),
+        SkIndex   => "index".clone(),
+        SkView    => "view".clone(),
+        SkTrigger => "trigger".clone(),
+    }
+}
+
+public fn uses_rootpage(k: &SchemaKind) -> Bool {
+    match k {
+        SkTable => true,
+        SkIndex => true,
+        _       => false,
+    }
+}
+
+public type SchemaRow is {
+    kind: SchemaKind,
+    name: Text,
+    tbl_name: Text,       // for index/trigger — references owning table
+    rootpage: Int64,      // 0 for view / trigger
+    sql: Text,            // original CREATE statement text
+};
+
+public fn new_table(name: Text, rootpage: Int64, sql: Text) -> SchemaRow {
+    SchemaRow {
+        kind: SkTable,
+        name: name.clone(),
+        tbl_name: name,
+        rootpage: rootpage,
+        sql: sql,
+    }
+}
+
+public fn new_index(name: Text, tbl_name: Text, rootpage: Int64, sql: Text) -> SchemaRow {
+    SchemaRow {
+        kind: SkIndex,
+        name: name,
+        tbl_name: tbl_name,
+        rootpage: rootpage,
+        sql: sql,
+    }
+}
+
+public fn new_view(name: Text, sql: Text) -> SchemaRow {
+    SchemaRow {
+        kind: SkView,
+        name: name.clone(),
+        tbl_name: name,
+        rootpage: 0 as Int64,
+        sql: sql,
+    }
+}
+
+public fn new_trigger(name: Text, tbl_name: Text, sql: Text) -> SchemaRow {
+    SchemaRow {
+        kind: SkTrigger,
+        name: name,
+        tbl_name: tbl_name,
+        rootpage: 0 as Int64,
+        sql: sql,
+    }
+}
+
+public fn has_storage(r: &SchemaRow) -> Bool {
+    uses_rootpage(&r.kind)
+}
+
+// An internal-autoindex row has name "sqlite_autoindex_TABLE_N" — enforced at
+// parse time by the shadow-table rules.
+public fn is_internal_autoindex(r: &SchemaRow) -> Bool {
+    let bs = r.name.as_bytes();
+    let prefix = "sqlite_autoindex_".clone().as_bytes();
+    if bs.len() < prefix.len() { return false; }
+    let mut i: Int = 0;
+    while i < prefix.len() {
+        if bs[i] != prefix[i] { return false; }
+        i = i + 1;
+    }
+    true
+}

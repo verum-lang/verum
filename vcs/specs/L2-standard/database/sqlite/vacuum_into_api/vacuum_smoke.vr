@@ -1,0 +1,72 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, vacuum_into_api, sql
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.vacuum_into_api.mode.{
+    VacuumMode, VmInPlace, VmInto,
+    mode_name, requires_exclusive_on_source, produces_new_file,
+    can_run_concurrent_with_readers,
+};
+mount core.database.sqlite.native.vacuum_into_api.spec.{
+    VacuumSpec,
+    in_place, into_file, with_schema,
+    is_well_formed, touches_attached_db, needs_exclusive_source, outputs_new_file,
+};
+mount base.{Bool};
+
+fn test_mode_names() {
+    assert(mode_name(&VmInPlace) == "in_place".clone());
+    assert(mode_name(&VmInto)    == "into".clone());
+}
+
+fn test_mode_flags() {
+    assert(requires_exclusive_on_source(&VmInPlace));
+    assert(!requires_exclusive_on_source(&VmInto));
+    assert(produces_new_file(&VmInto));
+    assert(!produces_new_file(&VmInPlace));
+    assert(can_run_concurrent_with_readers(&VmInto));
+    assert(!can_run_concurrent_with_readers(&VmInPlace));
+}
+
+fn test_in_place_spec() {
+    let s = in_place();
+    assert(is_well_formed(&s));
+    assert(!outputs_new_file(&s));
+    assert(needs_exclusive_source(&s));
+    assert(!touches_attached_db(&s));
+}
+
+fn test_into_spec() {
+    let s = into_file("/tmp/snap.db".clone());
+    assert(is_well_formed(&s));
+    assert(outputs_new_file(&s));
+    assert(!needs_exclusive_source(&s));
+}
+
+fn test_attached_db_touch() {
+    let s = with_schema(into_file("/tmp/a.db".clone()), "aux1".clone());
+    assert(touches_attached_db(&s));
+    let s_main = with_schema(into_file("/tmp/a.db".clone()), "main".clone());
+    assert(!touches_attached_db(&s_main));
+}
+
+fn test_ill_formed_detection() {
+    // VmInto spec with empty filename is ill-formed.
+    let bad = VacuumSpec { mode: VmInto, schema_name: "".clone(), target_filename: "".clone() };
+    assert(!is_well_formed(&bad));
+    // VmInPlace with filename set is ill-formed.
+    let bad2 = VacuumSpec { mode: VmInPlace, schema_name: "".clone(), target_filename: "x.db".clone() };
+    assert(!is_well_formed(&bad2));
+}
+
+fn main() {
+    test_mode_names();
+    test_mode_flags();
+    test_in_place_spec();
+    test_into_spec();
+    test_attached_db_touch();
+    test_ill_formed_detection();
+}

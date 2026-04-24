@@ -1,0 +1,120 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, master_btree_meta, schema
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.master_btree_meta.row.{
+    SchemaKind, SkTable, SkIndex, SkView, SkTrigger,
+    kind_name, uses_rootpage,
+    SchemaRow,
+    new_table, new_index, new_view, new_trigger,
+    has_storage, is_internal_autoindex,
+};
+mount core.database.sqlite.native.master_btree_meta.meta.{
+    MetaSlot,
+    MsSchemaCookie, MsSchemaFormat, MsDefaultCacheSize, MsLargestRootPage,
+    MsTextEncoding, MsUserVersion, MsIncrementalVacuumMode,
+    MsApplicationId, MsVersionValidFor,
+    slot_index, slot_name, slot_from_index,
+    text_encoding_is_valid, schema_format_supports_without_rowid,
+};
+mount base.{Bool, Int64, Maybe};
+
+fn test_kind_names() {
+    assert(kind_name(&SkTable)   == "table".clone());
+    assert(kind_name(&SkIndex)   == "index".clone());
+    assert(kind_name(&SkView)    == "view".clone());
+    assert(kind_name(&SkTrigger) == "trigger".clone());
+}
+
+fn test_uses_rootpage() {
+    assert(uses_rootpage(&SkTable));
+    assert(uses_rootpage(&SkIndex));
+    assert(!uses_rootpage(&SkView));
+    assert(!uses_rootpage(&SkTrigger));
+}
+
+fn test_row_constructors() {
+    let t = new_table("users".clone(), 5 as Int64, "CREATE TABLE users(id INTEGER)".clone());
+    assert(has_storage(&t));
+    assert_eq(t.rootpage, 5 as Int64);
+    assert(t.name == t.tbl_name);
+
+    let i = new_index("idx_x".clone(), "users".clone(), 7 as Int64, "CREATE INDEX ...".clone());
+    assert(has_storage(&i));
+    assert(i.tbl_name == "users".clone());
+
+    let v = new_view("v1".clone(), "CREATE VIEW v1 AS SELECT 1".clone());
+    assert(!has_storage(&v));
+    assert_eq(v.rootpage, 0 as Int64);
+
+    let tr = new_trigger("t1".clone(), "users".clone(), "CREATE TRIGGER t1 ...".clone());
+    assert(!has_storage(&tr));
+}
+
+fn test_internal_autoindex() {
+    let i1 = new_index("sqlite_autoindex_users_1".clone(), "users".clone(), 3 as Int64, "".clone());
+    assert(is_internal_autoindex(&i1));
+    let i2 = new_index("my_idx".clone(), "users".clone(), 4 as Int64, "CREATE INDEX ...".clone());
+    assert(!is_internal_autoindex(&i2));
+}
+
+fn test_meta_slot_indices() {
+    assert_eq(slot_index(&MsSchemaCookie),          0);
+    assert_eq(slot_index(&MsSchemaFormat),          1);
+    assert_eq(slot_index(&MsDefaultCacheSize),      2);
+    assert_eq(slot_index(&MsLargestRootPage),       3);
+    assert_eq(slot_index(&MsTextEncoding),          4);
+    assert_eq(slot_index(&MsUserVersion),           5);
+    assert_eq(slot_index(&MsIncrementalVacuumMode), 6);
+    assert_eq(slot_index(&MsApplicationId),         7);
+    assert_eq(slot_index(&MsVersionValidFor),       15);
+}
+
+fn test_slot_names() {
+    assert(slot_name(&MsSchemaCookie) == "schema_cookie".clone());
+    assert(slot_name(&MsUserVersion)  == "user_version".clone());
+    assert(slot_name(&MsVersionValidFor) == "version_valid_for".clone());
+}
+
+fn test_slot_round_trip() {
+    match slot_from_index(0) {
+        Maybe.Some(s) => match &s { MsSchemaCookie => {}, _ => assert(false) },
+        Maybe.None => assert(false),
+    }
+    match slot_from_index(15) {
+        Maybe.Some(s) => match &s { MsVersionValidFor => {}, _ => assert(false) },
+        Maybe.None => assert(false),
+    }
+    // unused slot 8..14 returns None.
+    match slot_from_index(8)  { Maybe.None => {}, Maybe.Some(_) => assert(false) }
+    match slot_from_index(14) { Maybe.None => {}, Maybe.Some(_) => assert(false) }
+}
+
+fn test_text_encoding_valid() {
+    assert(text_encoding_is_valid(1 as Int64));
+    assert(text_encoding_is_valid(2 as Int64));
+    assert(text_encoding_is_valid(3 as Int64));
+    assert(!text_encoding_is_valid(0 as Int64));
+    assert(!text_encoding_is_valid(4 as Int64));
+}
+
+fn test_schema_format_without_rowid() {
+    assert(schema_format_supports_without_rowid(4 as Int64));
+    assert(!schema_format_supports_without_rowid(3 as Int64));
+    assert(!schema_format_supports_without_rowid(1 as Int64));
+}
+
+fn main() {
+    test_kind_names();
+    test_uses_rootpage();
+    test_row_constructors();
+    test_internal_autoindex();
+    test_meta_slot_indices();
+    test_slot_names();
+    test_slot_round_trip();
+    test_text_encoding_valid();
+    test_schema_format_without_rowid();
+}

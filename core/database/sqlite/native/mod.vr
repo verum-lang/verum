@@ -492,3 +492,19 @@ public module stmt_status_op_codes;
 public module sqlite_db_config_op;
 // - changeset_op_codes: SQLITE_INSERT/UPDATE/DELETE + 5-way conflict reason + 3-way disposition
 public module changeset_op_codes;
+// - vdbe_register_model: Mem cell kind + MEM_* flags + null/int/real/str/blob ctor
+public module vdbe_register_model;
+// - cursor_hint_codes: BTREE_HINT_RANGE / BTREE_HINT_FLAGS + SEEK_EQ / BULK_LOAD bits
+public module cursor_hint_codes;
+// - vacuum_into_api: VACUUM [schema] INTO 'file' — mode + spec + concurrency-with-readers
+public module vacuum_into_api;
+// - master_btree_meta: sqlite_schema row + file-header meta[] slot taxonomy (0-7,15)
+public module master_btree_meta;
+// - rowid_api: classic/intpk-alias/autoincrement/without-rowid + allocation scheme
+public module rowid_api;
+// - freelist_api: trunk vs leaf free-page kinds + trunk header (next_trunk + leaf_count)
+public module freelist_api;
+// - overflow_page_api: overflow chain header + min_local / max_local payload balance
+public module overflow_page_api;
+// - journal_header_api: rollback-journal 28-byte header + magic 0xD9D505F920A163D7
+public module journal_header_api;

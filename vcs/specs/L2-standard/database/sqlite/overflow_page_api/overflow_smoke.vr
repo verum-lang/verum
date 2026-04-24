@@ -1,0 +1,92 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, overflow_page_api, btree
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.overflow_page_api.layout.{
+    header_size, usable_payload, max_local, min_local,
+    needs_overflow, inline_bytes_for_overflow,
+};
+mount core.database.sqlite.native.overflow_page_api.chain.{
+    OverflowCursor,
+    start, is_exhausted, advance_to, pages_walked, pages_needed,
+};
+mount base.{Bool};
+
+fn test_header_size() {
+    assert_eq(header_size(), 4);
+}
+
+fn test_usable_payload() {
+    assert_eq(usable_payload(4096, 0), 4092);
+    assert_eq(usable_payload(4096, 8), 4084);
+}
+
+fn test_min_max_local_on_4k() {
+    // max_local @ 4096, reserved=0: ((4084 * 64)/255) - 23 = 1024
+    let ml = max_local(4096, 0);
+    assert(ml > 1000);
+    assert(ml < 1100);
+    // min_local @ 4096, reserved=0: ((4084 * 32)/255) - 23 ≈ 489
+    let min_l = min_local(4096, 0);
+    assert(min_l > 450);
+    assert(min_l < 540);
+    assert(ml > min_l);
+}
+
+fn test_needs_overflow() {
+    assert(!needs_overflow(100, 4096, 0));
+    assert(!needs_overflow(1000, 4096, 0));
+    assert(needs_overflow(5000, 4096, 0));
+    assert(needs_overflow(10000, 4096, 0));
+}
+
+fn test_inline_bytes_is_bounded() {
+    let inline = inline_bytes_for_overflow(10000, 4096, 0);
+    let max_l = max_local(4096, 0);
+    let min_l = min_local(4096, 0);
+    assert(inline <= max_l);
+    assert(inline >= min_l);
+}
+
+fn test_cursor_start_and_advance() {
+    let c0 = start(42 as u32, 10000);
+    assert(!is_exhausted(&c0));
+    assert_eq(c0.bytes_consumed, 0);
+    assert_eq(c0.bytes_remaining, 10000);
+    let c1 = advance_to(c0, 43 as u32, 4000);
+    assert_eq(c1.current_page, 43 as u32);
+    assert_eq(c1.bytes_consumed, 4000);
+    assert_eq(c1.bytes_remaining, 6000);
+    assert(!is_exhausted(&c1));
+    let c2 = advance_to(c1, 0 as u32, 6000);
+    assert(is_exhausted(&c2));
+}
+
+fn test_pages_walked() {
+    let c = start(0 as u32, 100);
+    assert_eq(pages_walked(&c), 0);
+    let c2 = start(42 as u32, 100);
+    assert_eq(pages_walked(&c2), 1);
+}
+
+fn test_pages_needed() {
+    // usable_payload = 4092; 10000 bytes / 4092 = 3 pages
+    assert_eq(pages_needed(10000, 4096, 0), 3);
+    assert_eq(pages_needed(0, 4096, 0), 0);
+    assert_eq(pages_needed(4092, 4096, 0), 1);
+    assert_eq(pages_needed(4093, 4096, 0), 2);
+}
+
+fn main() {
+    test_header_size();
+    test_usable_payload();
+    test_min_max_local_on_4k();
+    test_needs_overflow();
+    test_inline_bytes_is_bounded();
+    test_cursor_start_and_advance();
+    test_pages_walked();
+    test_pages_needed();
+}

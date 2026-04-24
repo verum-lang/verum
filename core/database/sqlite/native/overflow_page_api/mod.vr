@@ -1,0 +1,15 @@
+// =============================================================================
+// core/database/sqlite/native/overflow_page_api/mod.vr
+// =============================================================================
+// Overflow-page chain for large row payloads.
+// Spec §12.3 — overflow pages.
+//
+// A B-tree leaf cell that can't fit its full payload inline stores the first
+// `local_bytes` bytes on the page, then points to an overflow page. Each
+// overflow page has a 4-byte next-page header followed by payload bytes.
+// =============================================================================
+
+module core.database.sqlite.native.overflow_page_api;
+
+public module layout;
+public module chain;

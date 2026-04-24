@@ -1,0 +1,15 @@
+// =============================================================================
+// core/database/sqlite/native/vdbe_register_model/mod.vr
+// =============================================================================
+// VDBE register-cell (Mem) model — tagged value + flag bits.
+// Spec §11.2 — VDBE registers.
+//
+// A Mem cell carries at most one payload variant plus a flag bitmap tracking
+// encoding / subtype / ownership.
+// =============================================================================
+
+module core.database.sqlite.native.vdbe_register_model;
+
+public module kind;
+public module flags;
+public module cell;

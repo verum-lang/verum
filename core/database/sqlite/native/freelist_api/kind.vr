@@ -1,0 +1,33 @@
+// Free-page kind.
+
+module core.database.sqlite.native.freelist_api.kind;
+
+mount base.{Bool, Text};
+
+public type FreePageKind is
+    | FkTrunk        // first 8 bytes: next_trunk + leaf_count; then leaf array
+    | FkLeaf         // plain leaf; not formatted
+    ;
+
+public fn kind_name(k: &FreePageKind) -> Text {
+    match k {
+        FkTrunk => "trunk".clone(),
+        FkLeaf  => "leaf".clone(),
+    }
+}
+
+public fn is_trunk(k: &FreePageKind) -> Bool {
+    match k { FkTrunk => true, _ => false }
+}
+
+// The first 8 bytes of a trunk page are reserved — next-trunk (u32) and
+// leaf-count (u32).
+public fn trunk_header_size() -> Int { 8 }
+
+// Each leaf slot in a trunk is 4 bytes.
+public fn trunk_leaf_slot_size() -> Int { 4 }
+
+// Maximum leaves a trunk can hold: (page_size - header) / 4
+public fn max_leaves_in_trunk(page_size: Int) -> Int {
+    (page_size - trunk_header_size()) / trunk_leaf_slot_size()
+}

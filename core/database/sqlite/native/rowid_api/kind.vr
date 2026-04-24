@@ -1,0 +1,43 @@
+// Rowid-table-ness classification.
+
+module core.database.sqlite.native.rowid_api.kind;
+
+mount base.{Bool, Text};
+
+public type RowidKind is
+    | RkClassic              // has a rowid column (implicit or INTEGER PRIMARY KEY alias)
+    | RkIntPkAlias           // INTEGER PRIMARY KEY column is the rowid alias
+    | RkAutoincrement        // INTEGER PRIMARY KEY AUTOINCREMENT — uses sqlite_sequence
+    | RkWithoutRowid         // WITHOUT ROWID — PK is the tree key
+    ;
+
+public fn kind_name(k: &RowidKind) -> Text {
+    match k {
+        RkClassic        => "classic".clone(),
+        RkIntPkAlias     => "int_pk_alias".clone(),
+        RkAutoincrement  => "autoincrement".clone(),
+        RkWithoutRowid   => "without_rowid".clone(),
+    }
+}
+
+public fn has_rowid(k: &RowidKind) -> Bool {
+    match k { RkWithoutRowid => false, _ => true }
+}
+
+public fn uses_sqlite_sequence(k: &RowidKind) -> Bool {
+    match k { RkAutoincrement => true, _ => false }
+}
+
+public fn pk_is_rowid_alias(k: &RowidKind) -> Bool {
+    match k {
+        RkIntPkAlias    => true,
+        RkAutoincrement => true,
+        _               => false,
+    }
+}
+
+// Rowid-less tables can't be referenced by other tables via ROWID; they can
+// still be referenced via FOREIGN KEY to their PK columns.
+public fn can_be_fk_target_via_rowid(k: &RowidKind) -> Bool {
+    has_rowid(k)
+}

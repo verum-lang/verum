@@ -1,0 +1,38 @@
+// Cursor hint kinds.
+
+module core.database.sqlite.native.cursor_hint_codes.hint;
+
+mount base.{Bool, Text, Maybe};
+
+public type CursorHint is
+    | ChRange       // BTREE_HINT_RANGE = 1 — WHERE predicate filter
+    | ChFlags       // BTREE_HINT_FLAGS = 2 — bitmap of ChFlag bits
+    ;
+
+public fn hint_code(h: &CursorHint) -> Int {
+    match h {
+        ChRange => 1,
+        ChFlags => 2,
+    }
+}
+
+public fn from_code(code: Int) -> Maybe<CursorHint> {
+    if code == 1 { return Maybe.Some(ChRange); }
+    if code == 2 { return Maybe.Some(ChFlags); }
+    Maybe.None
+}
+
+public fn hint_name(h: &CursorHint) -> Text {
+    match h {
+        ChRange => "BTREE_HINT_RANGE".clone(),
+        ChFlags => "BTREE_HINT_FLAGS".clone(),
+    }
+}
+
+public fn carries_expression(h: &CursorHint) -> Bool {
+    match h { ChRange => true, _ => false }
+}
+
+public fn carries_bitmap(h: &CursorHint) -> Bool {
+    match h { ChFlags => true, _ => false }
+}

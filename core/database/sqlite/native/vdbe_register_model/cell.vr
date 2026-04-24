@@ -1,0 +1,107 @@
+// Mem cell — kind-discriminated variant + flags bitmap.
+
+module core.database.sqlite.native.vdbe_register_model.cell;
+
+mount core.database.sqlite.native.vdbe_register_model.kind.{
+    MemKind, MkNull, MkInt, MkReal, MkStr, MkBlob, MkRowSet, MkFrame, MkUndefined,
+    is_sql_value, is_numeric, is_payload_bearing,
+};
+mount core.database.sqlite.native.vdbe_register_model.flags.{
+    f_null, f_int, f_real, f_str, f_blob, ownership_bits_valid,
+};
+mount base.{Bool, Int64};
+
+public type MemCell is {
+    kind: MemKind,
+    flags: Int64,
+    int_val: Int64,
+    real_val: Float,
+    byte_len: Int,        // for str / blob
+    subtype: Int,         // user-fn subtype (-1 = none)
+};
+
+public fn null_cell() -> MemCell {
+    MemCell {
+        kind: MkNull,
+        flags: f_null(),
+        int_val: 0 as Int64,
+        real_val: 0.0 as Float,
+        byte_len: 0,
+        subtype: -1,
+    }
+}
+
+public fn int_cell(v: Int64) -> MemCell {
+    MemCell {
+        kind: MkInt,
+        flags: f_int(),
+        int_val: v,
+        real_val: 0.0 as Float,
+        byte_len: 0,
+        subtype: -1,
+    }
+}
+
+public fn real_cell(v: Float) -> MemCell {
+    MemCell {
+        kind: MkReal,
+        flags: f_real(),
+        int_val: 0 as Int64,
+        real_val: v,
+        byte_len: 0,
+        subtype: -1,
+    }
+}
+
+public fn str_cell(n_bytes: Int) -> MemCell {
+    MemCell {
+        kind: MkStr,
+        flags: f_str(),
+        int_val: 0 as Int64,
+        real_val: 0.0 as Float,
+        byte_len: n_bytes,
+        subtype: -1,
+    }
+}
+
+public fn blob_cell(n_bytes: Int) -> MemCell {
+    MemCell {
+        kind: MkBlob,
+        flags: f_blob(),
+        int_val: 0 as Int64,
+        real_val: 0.0 as Float,
+        byte_len: n_bytes,
+        subtype: -1,
+    }
+}
+
+public fn is_null(c: &MemCell) -> Bool {
+    match c.kind { MkNull => true, _ => false }
+}
+
+public fn is_numeric_cell(c: &MemCell) -> Bool {
+    is_numeric(&c.kind)
+}
+
+public fn carries_payload(c: &MemCell) -> Bool {
+    is_payload_bearing(&c.kind)
+}
+
+public fn is_user_visible(c: &MemCell) -> Bool {
+    is_sql_value(&c.kind)
+}
+
+// Flag bitmap sanity — ownership bits must be mutually exclusive.
+public fn flags_consistent(c: &MemCell) -> Bool {
+    ownership_bits_valid(c.flags)
+}
+
+public fn reset_to_null(mut c: MemCell) -> MemCell {
+    c.kind = MkNull;
+    c.flags = f_null();
+    c.int_val = 0 as Int64;
+    c.real_val = 0.0 as Float;
+    c.byte_len = 0;
+    c.subtype = -1;
+    c
+}

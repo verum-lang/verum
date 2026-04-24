@@ -1,0 +1,31 @@
+// BTREE_SEEK_EQ / BTREE_BULKLOAD / BTREE_HINT_FLAGS bit set.
+
+module core.database.sqlite.native.cursor_hint_codes.flag;
+
+mount base.{Bool, Int64};
+
+// Per sqlite3.h — matches BTREE_SEEK_EQ etc.
+public fn f_seek_eq()   -> Int64 { 0x02 as Int64 }
+public fn f_bulk_load() -> Int64 { 0x04 as Int64 }
+public fn f_omit_journal() -> Int64 { 0x08 as Int64 }
+public fn f_no_mutex()     -> Int64 { 0x10 as Int64 }
+
+public fn is_set(flags: Int64, bit: Int64) -> Bool {
+    (flags & bit) != (0 as Int64)
+}
+
+public fn set_bit(flags: Int64, bit: Int64) -> Int64 {
+    flags | bit
+}
+
+public fn clear_bit(flags: Int64, bit: Int64) -> Int64 {
+    flags & !bit
+}
+
+public fn expects_unique_key(flags: Int64) -> Bool {
+    is_set(flags, f_seek_eq())
+}
+
+public fn expects_bulk_load(flags: Int64) -> Bool {
+    is_set(flags, f_bulk_load())
+}

@@ -1,0 +1,50 @@
+// Mem-cell flag bitmap (MEM_* constants from sqliteInt.h).
+
+module core.database.sqlite.native.vdbe_register_model.flags;
+
+mount base.{Bool, Int64};
+
+// Flag bit constants mirroring sqliteInt.h MEM_* — only the commonly-needed
+// ones; internal bits like MEM_AffMask are opaque.
+public fn f_null()      -> Int64 { 0x0001 as Int64 }
+public fn f_str()       -> Int64 { 0x0002 as Int64 }
+public fn f_int()       -> Int64 { 0x0004 as Int64 }
+public fn f_real()      -> Int64 { 0x0008 as Int64 }
+public fn f_blob()      -> Int64 { 0x0010 as Int64 }
+public fn f_term()      -> Int64 { 0x0200 as Int64 }  // string is NUL-terminated
+public fn f_dyn()       -> Int64 { 0x0400 as Int64 }  // owns the buffer (sqlite_free)
+public fn f_static()    -> Int64 { 0x0800 as Int64 }  // buffer is static (no free)
+public fn f_ephemeral() -> Int64 { 0x1000 as Int64 }  // buffer from btree cursor
+public fn f_agg()       -> Int64 { 0x2000 as Int64 }  // aggregate context
+public fn f_zeroblob()  -> Int64 { 0x4000 as Int64 }  // zero-filled blob
+public fn f_subtype()   -> Int64 { 0x10000 as Int64 } // subtype is valid
+
+public fn is_set(flags: Int64, bit: Int64) -> Bool {
+    (flags & bit) != (0 as Int64)
+}
+
+public fn set_bit(flags: Int64, bit: Int64) -> Int64 {
+    flags | bit
+}
+
+public fn clear_bit(flags: Int64, bit: Int64) -> Int64 {
+    flags & !bit
+}
+
+// Ownership classification — exactly one of: dyn | static | ephemeral | none.
+public fn owns_buffer(flags: Int64) -> Bool { is_set(flags, f_dyn()) }
+public fn is_static_buffer(flags: Int64) -> Bool { is_set(flags, f_static()) }
+public fn is_ephemeral_buffer(flags: Int64) -> Bool { is_set(flags, f_ephemeral()) }
+
+// Validity invariant: buffer-ownership bits are mutually exclusive.
+public fn ownership_bits_valid(flags: Int64) -> Bool {
+    let mut n: Int = 0;
+    if owns_buffer(flags)         { n = n + 1; }
+    if is_static_buffer(flags)    { n = n + 1; }
+    if is_ephemeral_buffer(flags) { n = n + 1; }
+    n <= 1
+}
+
+public fn is_null_flag(flags: Int64) -> Bool { is_set(flags, f_null()) }
+public fn is_zeroblob_flag(flags: Int64) -> Bool { is_set(flags, f_zeroblob()) }
+public fn is_subtype_valid(flags: Int64) -> Bool { is_set(flags, f_subtype()) }

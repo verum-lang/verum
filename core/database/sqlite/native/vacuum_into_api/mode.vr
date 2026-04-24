@@ -1,0 +1,31 @@
+// VACUUM operation mode.
+
+module core.database.sqlite.native.vacuum_into_api.mode;
+
+mount base.{Bool, Text};
+
+public type VacuumMode is
+    | VmInPlace     // VACUUM — rebuild current database in place
+    | VmInto        // VACUUM INTO 'file' — write a new copy
+    ;
+
+public fn mode_name(m: &VacuumMode) -> Text {
+    match m {
+        VmInPlace => "in_place".clone(),
+        VmInto    => "into".clone(),
+    }
+}
+
+// In-place VACUUM requires an exclusive write lock; VACUUM INTO only requires
+// a read snapshot on the source plus a freshly-created target file.
+public fn requires_exclusive_on_source(m: &VacuumMode) -> Bool {
+    match m { VmInPlace => true, _ => false }
+}
+
+public fn produces_new_file(m: &VacuumMode) -> Bool {
+    match m { VmInto => true, _ => false }
+}
+
+public fn can_run_concurrent_with_readers(m: &VacuumMode) -> Bool {
+    match m { VmInto => true, _ => false }
+}

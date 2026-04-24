@@ -1,0 +1,90 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, rowid_api, btree
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.rowid_api.kind.{
+    RowidKind, RkClassic, RkIntPkAlias, RkAutoincrement, RkWithoutRowid,
+    kind_name, has_rowid, uses_sqlite_sequence, pk_is_rowid_alias,
+    can_be_fk_target_via_rowid,
+};
+mount core.database.sqlite.native.rowid_api.policy.{
+    rowid_max, is_valid_rowid,
+    AllocScheme, AsMaxPlusOne, AsRandomRetry, AsSequenceColumn, AsPkDerived,
+    scheme_for, is_monotonic, needs_sqlite_sequence_row, requires_rescan_on_collision,
+};
+mount base.{Bool, Int64};
+
+fn test_kind_names() {
+    assert(kind_name(&RkClassic)       == "classic".clone());
+    assert(kind_name(&RkIntPkAlias)    == "int_pk_alias".clone());
+    assert(kind_name(&RkAutoincrement) == "autoincrement".clone());
+    assert(kind_name(&RkWithoutRowid)  == "without_rowid".clone());
+}
+
+fn test_has_rowid_set() {
+    assert(has_rowid(&RkClassic));
+    assert(has_rowid(&RkIntPkAlias));
+    assert(has_rowid(&RkAutoincrement));
+    assert(!has_rowid(&RkWithoutRowid));
+}
+
+fn test_sqlite_sequence_only_autoinc() {
+    assert(uses_sqlite_sequence(&RkAutoincrement));
+    assert(!uses_sqlite_sequence(&RkClassic));
+    assert(!uses_sqlite_sequence(&RkIntPkAlias));
+}
+
+fn test_pk_is_rowid_alias_set() {
+    assert(pk_is_rowid_alias(&RkIntPkAlias));
+    assert(pk_is_rowid_alias(&RkAutoincrement));
+    assert(!pk_is_rowid_alias(&RkClassic));
+    assert(!pk_is_rowid_alias(&RkWithoutRowid));
+}
+
+fn test_fk_target_via_rowid() {
+    assert(can_be_fk_target_via_rowid(&RkClassic));
+    assert(!can_be_fk_target_via_rowid(&RkWithoutRowid));
+}
+
+fn test_rowid_range() {
+    assert_eq(rowid_max(), 0x7FFFFFFFFFFFFFFF as Int64);
+    assert(is_valid_rowid(0 as Int64));
+    assert(is_valid_rowid(rowid_max()));
+    assert(is_valid_rowid(-1 as Int64));   // negative rowids are allowed
+}
+
+fn test_scheme_selection() {
+    // classic, not at max → MaxPlusOne
+    match scheme_for(&RkClassic, false) { AsMaxPlusOne => {}, _ => assert(false) }
+    // classic, at max → RandomRetry
+    match scheme_for(&RkClassic, true) { AsRandomRetry => {}, _ => assert(false) }
+    // autoincrement always uses sequence column regardless of max
+    match scheme_for(&RkAutoincrement, false) { AsSequenceColumn => {}, _ => assert(false) }
+    match scheme_for(&RkAutoincrement, true)  { AsSequenceColumn => {}, _ => assert(false) }
+    // without rowid always pk-derived
+    match scheme_for(&RkWithoutRowid, false) { AsPkDerived => {}, _ => assert(false) }
+}
+
+fn test_scheme_classifiers() {
+    assert(is_monotonic(&AsMaxPlusOne));
+    assert(is_monotonic(&AsSequenceColumn));
+    assert(!is_monotonic(&AsRandomRetry));
+    assert(needs_sqlite_sequence_row(&AsSequenceColumn));
+    assert(!needs_sqlite_sequence_row(&AsMaxPlusOne));
+    assert(requires_rescan_on_collision(&AsRandomRetry));
+    assert(!requires_rescan_on_collision(&AsMaxPlusOne));
+}
+
+fn main() {
+    test_kind_names();
+    test_has_rowid_set();
+    test_sqlite_sequence_only_autoinc();
+    test_pk_is_rowid_alias_set();
+    test_fk_target_via_rowid();
+    test_rowid_range();
+    test_scheme_selection();
+    test_scheme_classifiers();
+}

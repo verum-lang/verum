@@ -1,0 +1,73 @@
+// Mem-cell type kind — roughly mirrors MEM_Null / MEM_Int / MEM_Real / MEM_Str / MEM_Blob.
+
+module core.database.sqlite.native.vdbe_register_model.kind;
+
+mount base.{Bool, Text};
+
+public type MemKind is
+    | MkNull
+    | MkInt
+    | MkReal
+    | MkStr
+    | MkBlob
+    | MkRowSet          // MEM_RowSet — multi-table rowid set
+    | MkFrame           // MEM_Frame — subprogram frame pointer
+    | MkUndefined       // uninitialized
+    ;
+
+public fn kind_name(k: &MemKind) -> Text {
+    match k {
+        MkNull      => "null".clone(),
+        MkInt       => "int".clone(),
+        MkReal      => "real".clone(),
+        MkStr       => "str".clone(),
+        MkBlob      => "blob".clone(),
+        MkRowSet    => "rowset".clone(),
+        MkFrame     => "frame".clone(),
+        MkUndefined => "undefined".clone(),
+    }
+}
+
+public fn is_numeric(k: &MemKind) -> Bool {
+    match k {
+        MkInt  => true,
+        MkReal => true,
+        _      => false,
+    }
+}
+
+public fn is_textual(k: &MemKind) -> Bool {
+    match k { MkStr => true, _ => false }
+}
+
+public fn is_payload_bearing(k: &MemKind) -> Bool {
+    match k {
+        MkStr  => true,
+        MkBlob => true,
+        _      => false,
+    }
+}
+
+public fn is_sql_value(k: &MemKind) -> Bool {
+    // A Mem cell exposed to user functions is one of the 5 SQL types.
+    match k {
+        MkNull => true,
+        MkInt  => true,
+        MkReal => true,
+        MkStr  => true,
+        MkBlob => true,
+        _      => false,
+    }
+}
+
+// SQLITE_INTEGER / _FLOAT / _TEXT / _BLOB / _NULL numeric values.
+public fn sqlite_type_code(k: &MemKind) -> Int {
+    match k {
+        MkInt  => 1,
+        MkReal => 2,
+        MkStr  => 3,
+        MkBlob => 4,
+        MkNull => 5,
+        _      => 0,
+    }
+}

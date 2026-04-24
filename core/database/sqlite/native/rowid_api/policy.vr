@@ -1,0 +1,52 @@
+// Rowid allocation policy.
+
+module core.database.sqlite.native.rowid_api.policy;
+
+mount core.database.sqlite.native.rowid_api.kind.{
+    RowidKind, RkClassic, RkIntPkAlias, RkAutoincrement, RkWithoutRowid,
+    has_rowid, uses_sqlite_sequence,
+};
+mount base.{Bool, Int64};
+
+// Max signed 64-bit positive value.
+public fn rowid_max() -> Int64 { 0x7FFFFFFFFFFFFFFF as Int64 }
+
+// Rowid 0 is valid; negative rowids are allowed.
+public fn is_valid_rowid(r: Int64) -> Bool {
+    r <= rowid_max()
+}
+
+// Classic rowid allocation: one past the current max, or a random retry on
+// collision. AUTOINCREMENT always monotonically increments via sqlite_sequence.
+public type AllocScheme is
+    | AsMaxPlusOne        // classic
+    | AsRandomRetry       // used when max == rowid_max() to avoid overflow
+    | AsSequenceColumn    // AUTOINCREMENT — read sqlite_sequence
+    | AsPkDerived         // WITHOUT ROWID — no separate rowid
+    ;
+
+public fn scheme_for(k: &RowidKind, at_rowid_max: Bool) -> AllocScheme {
+    match k {
+        RkWithoutRowid   => AsPkDerived,
+        RkAutoincrement  => AsSequenceColumn,
+        _                => {
+            if at_rowid_max { AsRandomRetry } else { AsMaxPlusOne }
+        },
+    }
+}
+
+public fn is_monotonic(a: &AllocScheme) -> Bool {
+    match a {
+        AsMaxPlusOne     => true,
+        AsSequenceColumn => true,
+        _                => false,
+    }
+}
+
+public fn needs_sqlite_sequence_row(a: &AllocScheme) -> Bool {
+    match a { AsSequenceColumn => true, _ => false }
+}
+
+public fn requires_rescan_on_collision(a: &AllocScheme) -> Bool {
+    match a { AsRandomRetry => true, _ => false }
+}

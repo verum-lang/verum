@@ -1,0 +1,129 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, vdbe_register_model, vdbe
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.vdbe_register_model.kind.{
+    MemKind, MkNull, MkInt, MkReal, MkStr, MkBlob, MkRowSet, MkFrame, MkUndefined,
+    kind_name, is_numeric, is_textual, is_payload_bearing, is_sql_value, sqlite_type_code,
+};
+mount core.database.sqlite.native.vdbe_register_model.flags.{
+    f_null, f_int, f_real, f_str, f_blob, f_dyn, f_static, f_ephemeral,
+    is_set, set_bit, clear_bit,
+    owns_buffer, is_static_buffer, is_ephemeral_buffer, ownership_bits_valid,
+    is_null_flag, is_zeroblob_flag,
+};
+mount core.database.sqlite.native.vdbe_register_model.cell.{
+    MemCell,
+    null_cell, int_cell, real_cell, str_cell, blob_cell,
+    is_null, is_numeric_cell, carries_payload, is_user_visible,
+    flags_consistent, reset_to_null,
+};
+mount base.{Bool, Int64};
+
+fn test_kind_classifications() {
+    assert(is_numeric(&MkInt));
+    assert(is_numeric(&MkReal));
+    assert(!is_numeric(&MkStr));
+    assert(is_textual(&MkStr));
+    assert(!is_textual(&MkBlob));
+    assert(is_payload_bearing(&MkStr));
+    assert(is_payload_bearing(&MkBlob));
+    assert(!is_payload_bearing(&MkInt));
+}
+
+fn test_sql_value_set() {
+    assert(is_sql_value(&MkNull));
+    assert(is_sql_value(&MkInt));
+    assert(is_sql_value(&MkStr));
+    assert(!is_sql_value(&MkRowSet));
+    assert(!is_sql_value(&MkFrame));
+    assert(!is_sql_value(&MkUndefined));
+}
+
+fn test_sqlite_type_codes() {
+    assert_eq(sqlite_type_code(&MkInt),  1);
+    assert_eq(sqlite_type_code(&MkReal), 2);
+    assert_eq(sqlite_type_code(&MkStr),  3);
+    assert_eq(sqlite_type_code(&MkBlob), 4);
+    assert_eq(sqlite_type_code(&MkNull), 5);
+    assert_eq(sqlite_type_code(&MkFrame), 0);
+}
+
+fn test_flag_set_clear() {
+    let mut fl: Int64 = 0 as Int64;
+    fl = set_bit(fl, f_int());
+    assert(is_set(fl, f_int()));
+    fl = clear_bit(fl, f_int());
+    assert(!is_set(fl, f_int()));
+}
+
+fn test_ownership_mutually_exclusive() {
+    assert(ownership_bits_valid(0 as Int64));
+    assert(ownership_bits_valid(f_dyn()));
+    assert(ownership_bits_valid(f_static()));
+    assert(ownership_bits_valid(f_ephemeral()));
+    let bad = f_dyn() | f_static();
+    assert(!ownership_bits_valid(bad));
+    let bad2 = f_dyn() | f_ephemeral();
+    assert(!ownership_bits_valid(bad2));
+}
+
+fn test_cell_constructors() {
+    let n = null_cell();
+    assert(is_null(&n));
+    assert(!is_numeric_cell(&n));
+    assert(is_null_flag(n.flags));
+    let i = int_cell(42 as Int64);
+    assert(is_numeric_cell(&i));
+    assert_eq(i.int_val, 42 as Int64);
+    let r = real_cell(3.14 as Float);
+    assert(is_numeric_cell(&r));
+    let s = str_cell(10);
+    assert(carries_payload(&s));
+    assert_eq(s.byte_len, 10);
+    let b = blob_cell(20);
+    assert(carries_payload(&b));
+    assert_eq(b.byte_len, 20);
+}
+
+fn test_is_user_visible() {
+    assert(is_user_visible(&null_cell()));
+    assert(is_user_visible(&int_cell(0 as Int64)));
+    assert(is_user_visible(&str_cell(0)));
+}
+
+fn test_flags_consistent_on_constructed() {
+    assert(flags_consistent(&null_cell()));
+    assert(flags_consistent(&int_cell(1 as Int64)));
+    assert(flags_consistent(&str_cell(0)));
+}
+
+fn test_reset_to_null() {
+    let c = int_cell(99 as Int64);
+    let r = reset_to_null(c);
+    assert(is_null(&r));
+    assert_eq(r.byte_len, 0);
+    assert_eq(r.int_val, 0 as Int64);
+}
+
+fn test_kind_name_stability() {
+    assert(kind_name(&MkNull) == "null".clone());
+    assert(kind_name(&MkFrame) == "frame".clone());
+    assert(kind_name(&MkUndefined) == "undefined".clone());
+}
+
+fn main() {
+    test_kind_classifications();
+    test_sql_value_set();
+    test_sqlite_type_codes();
+    test_flag_set_clear();
+    test_ownership_mutually_exclusive();
+    test_cell_constructors();
+    test_is_user_visible();
+    test_flags_consistent_on_constructed();
+    test_reset_to_null();
+    test_kind_name_stability();
+}

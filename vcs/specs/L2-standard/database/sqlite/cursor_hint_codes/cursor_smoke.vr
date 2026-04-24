@@ -1,0 +1,75 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, cursor_hint_codes, btree
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.cursor_hint_codes.hint.{
+    CursorHint, ChRange, ChFlags,
+    hint_code, from_code, hint_name, carries_expression, carries_bitmap,
+};
+mount core.database.sqlite.native.cursor_hint_codes.flag.{
+    f_seek_eq, f_bulk_load, f_omit_journal, f_no_mutex,
+    is_set, set_bit, clear_bit,
+    expects_unique_key, expects_bulk_load,
+};
+mount base.{Bool, Int64, Maybe};
+
+fn test_hint_codes() {
+    assert_eq(hint_code(&ChRange), 1);
+    assert_eq(hint_code(&ChFlags), 2);
+}
+
+fn test_hint_round_trip() {
+    match from_code(1) {
+        Maybe.Some(h) => match &h { ChRange => {}, _ => assert(false) },
+        Maybe.None => assert(false),
+    }
+    match from_code(2) {
+        Maybe.Some(h) => match &h { ChFlags => {}, _ => assert(false) },
+        Maybe.None => assert(false),
+    }
+    match from_code(99) { Maybe.None => {}, Maybe.Some(_) => assert(false) }
+}
+
+fn test_hint_names() {
+    assert(hint_name(&ChRange) == "BTREE_HINT_RANGE".clone());
+    assert(hint_name(&ChFlags) == "BTREE_HINT_FLAGS".clone());
+}
+
+fn test_carries_classifiers() {
+    assert(carries_expression(&ChRange));
+    assert(!carries_expression(&ChFlags));
+    assert(carries_bitmap(&ChFlags));
+    assert(!carries_bitmap(&ChRange));
+}
+
+fn test_flag_constants() {
+    assert_eq(f_seek_eq(),   0x02 as Int64);
+    assert_eq(f_bulk_load(), 0x04 as Int64);
+    assert_eq(f_omit_journal(), 0x08 as Int64);
+    assert_eq(f_no_mutex(), 0x10 as Int64);
+}
+
+fn test_flag_ops() {
+    let mut fl: Int64 = 0 as Int64;
+    fl = set_bit(fl, f_seek_eq());
+    assert(is_set(fl, f_seek_eq()));
+    assert(!is_set(fl, f_bulk_load()));
+    fl = set_bit(fl, f_bulk_load());
+    assert(expects_unique_key(fl));
+    assert(expects_bulk_load(fl));
+    fl = clear_bit(fl, f_seek_eq());
+    assert(!expects_unique_key(fl));
+    assert(expects_bulk_load(fl));
+}
+
+fn main() {
+    test_hint_codes();
+    test_hint_round_trip();
+    test_hint_names();
+    test_carries_classifiers();
+    test_flag_constants();
+    test_flag_ops();
+}

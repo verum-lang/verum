@@ -1,0 +1,21 @@
+// =============================================================================
+// core/database/sqlite/native/journal_header_api/mod.vr
+// =============================================================================
+// Rollback-journal header — per-segment 28-byte header that precedes a batch
+// of page records in a rollback journal file.
+// Spec §6.2 — rollback journal.
+//
+// Header layout (28 bytes):
+//   0-7   magic = 0xD9,0xD5,0x05,0xF9,0x20,0xA1,0x63,0xD7
+//   8-11  page count in this segment
+//   12-15 checksum nonce (random)
+//   16-19 initial size of the DB (in pages)
+//   20-23 sector size
+//   24-27 page size
+//
+// =============================================================================
+
+module core.database.sqlite.native.journal_header_api;
+
+public module constants;
+public module header;

@@ -1,0 +1,45 @@
+// Trunk-page header + leaf-count bookkeeping.
+
+module core.database.sqlite.native.freelist_api.trunk;
+
+mount core.database.sqlite.native.freelist_api.kind.{
+    trunk_header_size, trunk_leaf_slot_size, max_leaves_in_trunk,
+};
+mount base.{Bool, Int64};
+
+public type TrunkHeader is {
+    page_number: u32,
+    next_trunk: u32,       // 0 = terminator
+    leaf_count: u32,
+};
+
+public fn new(page_number: u32, next_trunk: u32, leaf_count: u32) -> TrunkHeader {
+    TrunkHeader {
+        page_number: page_number,
+        next_trunk: next_trunk,
+        leaf_count: leaf_count,
+    }
+}
+
+public fn is_last_trunk(h: &TrunkHeader) -> Bool {
+    h.next_trunk == (0 as u32)
+}
+
+public fn is_empty_trunk(h: &TrunkHeader) -> Bool {
+    h.leaf_count == (0 as u32)
+}
+
+public fn fits_on_page(h: &TrunkHeader, page_size: Int) -> Bool {
+    let max = max_leaves_in_trunk(page_size);
+    (h.leaf_count as Int) <= max
+}
+
+// Byte offset into the trunk page of leaf[i] — header + slot.
+public fn leaf_byte_offset(i: Int) -> Int {
+    trunk_header_size() + i * trunk_leaf_slot_size()
+}
+
+// Total reserved bytes if we store N leaves.
+public fn footprint_bytes(leaf_count: u32) -> Int {
+    trunk_header_size() + (leaf_count as Int) * trunk_leaf_slot_size()
+}
