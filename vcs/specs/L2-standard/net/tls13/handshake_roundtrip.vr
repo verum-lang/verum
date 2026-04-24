@@ -1,0 +1,134 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: tls13, handshake, roundtrip, rfc8446_4
+// @timeout: 15000
+// @expected-exit: 0
+
+// RFC 8446 §4 handshake message encode-decode roundtrip — encode then
+// decode recovers the same variant, preserving the 4-byte type+length
+// header and the body.
+
+mount core.*;
+mount core.collections.List;
+mount core.net.tls13.cipher_suite.{CipherSuite};
+mount core.net.tls13.version.{LEGACY_VERSION_TLS_1_2};
+mount core.net.tls13.handshake.codec.{Reader};
+mount core.net.tls13.handshake.messages.{
+    HandshakeMessage, ClientHello, ServerHello,
+    Finished, KeyUpdate, KeyUpdateRequest,
+    encode_handshake, decode_handshake,
+};
+
+fn client_hello_roundtrip() {
+    let random: [Byte; 32] = [0x11_u8; 32];
+    let ch = ClientHello {
+        legacy_version:             LEGACY_VERSION_TLS_1_2,
+        random:                     random,
+        legacy_session_id:          [0xAA_u8, 0xBB_u8],
+        cipher_suites:              [CipherSuite.TlsAes128GcmSha256],
+        legacy_compression_methods: [0_u8],
+        extensions:                 [],
+    };
+    let mut wire: List<Byte> = [];
+    encode_handshake(&HandshakeMessage.ClientHelloMsg(ch), &mut wire).unwrap();
+    let mut r = Reader.new(wire.as_slice());
+    let decoded = decode_handshake(&mut r).unwrap();
+    match decoded {
+        HandshakeMessage.ClientHelloMsg(ch2) => {
+            // Random survives.
+            let mut i: Int = 0;
+            while i < 32 {
+                assert(ch2.random[i] == 0x11_u8);
+                i = i + 1;
+            }
+            assert(ch2.legacy_session_id.len() == 2);
+            assert(ch2.legacy_session_id[0] == 0xAA_u8);
+            assert(ch2.cipher_suites.len() == 1);
+            assert(ch2.cipher_suites[0].to_u16() == 0x1301_u16);
+        },
+        _ => panic("expected ClientHelloMsg"),
+    }
+}
+
+fn server_hello_roundtrip() {
+    let random: [Byte; 32] = [0x22_u8; 32];
+    let sh = ServerHello {
+        legacy_version:             LEGACY_VERSION_TLS_1_2,
+        random:                     random,
+        legacy_session_id_echo:     [0xDE_u8, 0xAD_u8],
+        cipher_suite:               CipherSuite.TlsChaCha20Poly1305Sha256,
+        legacy_compression_method:  0_u8,
+        extensions:                 [],
+    };
+    let mut wire: List<Byte> = [];
+    encode_handshake(&HandshakeMessage.ServerHelloMsg(sh), &mut wire).unwrap();
+    let mut r = Reader.new(wire.as_slice());
+    let decoded = decode_handshake(&mut r).unwrap();
+    match decoded {
+        HandshakeMessage.ServerHelloMsg(sh2) => {
+            assert(sh2.random[0] == 0x22_u8);
+            assert(sh2.random[31] == 0x22_u8);
+            assert(sh2.legacy_session_id_echo.len() == 2);
+            assert(sh2.cipher_suite.to_u16() == 0x1303_u16);
+        },
+        _ => panic("expected ServerHelloMsg"),
+    }
+}
+
+fn finished_roundtrip_sha256() {
+    let fin = Finished {
+        verify_data: [0x42_u8; 32].to_list(),
+    };
+    let mut wire: List<Byte> = [];
+    encode_handshake(&HandshakeMessage.FinishedMsg(fin), &mut wire).unwrap();
+    let mut r = Reader.new(wire.as_slice());
+    let decoded = decode_handshake(&mut r).unwrap();
+    match decoded {
+        HandshakeMessage.FinishedMsg(f) => {
+            assert(f.verify_data.len() == 32);
+            assert(f.verify_data[0]  == 0x42_u8);
+            assert(f.verify_data[31] == 0x42_u8);
+        },
+        _ => panic("expected FinishedMsg"),
+    }
+}
+
+fn key_update_roundtrip() {
+    let ku = KeyUpdate { request_update: KeyUpdateRequest.UpdateRequested };
+    let mut wire: List<Byte> = [];
+    encode_handshake(&HandshakeMessage.KeyUpdateMsg(ku), &mut wire).unwrap();
+    let mut r = Reader.new(wire.as_slice());
+    let decoded = decode_handshake(&mut r).unwrap();
+    match decoded {
+        HandshakeMessage.KeyUpdateMsg(ku2) => {
+            match ku2.request_update {
+                KeyUpdateRequest.UpdateRequested => {},
+                _ => panic("request_update must round-trip"),
+            }
+        },
+        _ => panic("expected KeyUpdateMsg"),
+    }
+}
+
+fn end_of_early_data_roundtrip() {
+    let mut wire: List<Byte> = [];
+    encode_handshake(&HandshakeMessage.EndOfEarlyDataMsg, &mut wire).unwrap();
+    let mut r = Reader.new(wire.as_slice());
+    let decoded = decode_handshake(&mut r).unwrap();
+    match decoded {
+        HandshakeMessage.EndOfEarlyDataMsg => {},
+        _ => panic("expected EndOfEarlyDataMsg"),
+    }
+}
+
+@main
+public fn main() -> Int {
+    client_hello_roundtrip();
+    server_hello_roundtrip();
+    finished_roundtrip_sha256();
+    key_update_roundtrip();
+    end_of_early_data_roundtrip();
+    print("RFC 8446 §4 handshake encode→decode roundtrip verified");
+    0
+}
