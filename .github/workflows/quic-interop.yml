@@ -1,0 +1,104 @@
+name: QUIC Interop Matrix
+
+on:
+  schedule:
+    # 04:30 UTC every Tuesday — stagger after cert-interop's Monday
+    # slot so CI capacity doesn't double-peak.
+    - cron: "30 4 * * 2"
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: "1"
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Run the QUIC Interop Runner matrix per tls-quic.md §10.4.
+  #
+  # Each {scenario, peer-impl} cell is one job so GH Actions can
+  # parallelise across the workflow. Individual failures do NOT abort
+  # sibling jobs (fail-fast: false) — we want a full matrix picture
+  # even when one impl is temporarily broken.
+  # ---------------------------------------------------------------------------
+  matrix:
+    name: "${{ matrix.scenario }} × ${{ matrix.impl }}"
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        scenario:
+          - handshake
+          - versionneg
+          - retry
+          - resumption
+          - zerortt
+          - blackhole
+          - multiconnect
+          - chacha20
+          - handshakeloss
+          - transfer
+          - transfercorruption
+          - transferloss
+          - http3
+          - rebinding-addr
+          - rebinding-port
+        impl:
+          - ngtcp2
+          - picoquic
+          - quiche
+          - msquic
+          - mvfst
+          - aioquic
+          - s2n-quic
+          - neqo
+          - go-quiche
+          - kwik
+    steps:
+      - uses: actions/checkout@v4
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: quic-interop-${{ hashFiles('Cargo.lock') }}
+      - name: Build warp binaries
+        run: cargo build --release -p verum_cli
+      - name: Clone interop-runner-containers
+        run: |
+          git clone --depth=1 \
+            https://github.com/quic-interop/quic-interop-runner.git \
+            ../interop-runner-containers || true
+      - name: Run ${{ matrix.scenario }} × ${{ matrix.impl }}
+        run: bash vcs/interop/run-scenario.sh ${{ matrix.scenario }} ${{ matrix.impl }}
+      - name: Upload logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: interop-${{ matrix.scenario }}-${{ matrix.impl }}-logs
+          path: vcs/interop/results/
+
+  # ---------------------------------------------------------------------------
+  # Aggregate the matrix into a single matrix.json — rendered into the
+  # green-square dashboard consumed by release-engineering.
+  # ---------------------------------------------------------------------------
+  aggregate:
+    name: Aggregate grid
+    runs-on: ubuntu-latest
+    needs: matrix
+    if: always()
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download all logs
+        uses: actions/download-artifact@v4
+        with:
+          path: interop-logs/
+      - name: Build matrix.json
+        run: bash vcs/interop/run-matrix.sh || true
+      - name: Upload matrix.json
+        uses: actions/upload-artifact@v4
+        with:
+          name: quic-interop-matrix
+          path: vcs/interop/results/matrix.json
