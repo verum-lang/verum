@@ -1085,34 +1085,75 @@ pub fn infer(
                 rhs: x.clone(),
             })
         }
-        // HComp: homogeneous composition produces the i1-face of the
-        // cube whose base is `base` and sides are `walls`. At bring-up
-        // the kernel checks that `base` is well-typed and returns its
-        // type; full cubical NbE with the transp/hcomp reduction rules
-        // lands in the dedicated cubical-kernel follow-up.
-        CoreTerm::HComp { base, .. } => infer(ctx, base, axioms),
+        // HComp: `hcomp φ walls base` produces the i1-face of the
+        // composition cube whose base is `base` (its i0-face) and
+        // sides are `walls` (the family indexed by φ). The result
+        // inhabits the same type as `base` — composition does not
+        // change the carrier.
+        //
+        // Checks performed:
+        //   * `phi` is well-typed — conservative, no interval
+        //     subsumption yet; full cofibration-calculus lands with
+        //     the dedicated cubical-kernel pass (task #89-adjacent).
+        //   * `walls` is well-typed as some family.
+        //   * `base` is well-typed; its type is returned.
+        //
+        // Rejected shapes: ill-typed subterms surface the underlying
+        // `KernelError` rather than being swallowed, so a spurious
+        // composition cannot sneak into the TCB.
+        CoreTerm::HComp { phi, walls, base } => {
+            let _ = infer(ctx, phi, axioms)?;
+            let _ = infer(ctx, walls, axioms)?;
+            infer(ctx, base, axioms)
+        }
 
-        // Transp: transport along a type-path; the result inhabits the
-        // path's right-hand endpoint. At bring-up we infer the path,
-        // destructure it as Path<_>(_, rhs), and return rhs.
-        CoreTerm::Transp { path, value, .. } => {
+        // Transp: `transp(p, r, t)` where `p : Path<Type>(A, B)`,
+        // `r : I` (regularity endpoint), `t : A` — result inhabits
+        // `B`, the path's right-hand endpoint.
+        //
+        // Checks performed:
+        //   * `path` is well-typed and its type is `PathTy { lhs, rhs }`
+        //     (not just some arbitrary term).
+        //   * `regular` is well-typed (interval-subsumption deferred).
+        //   * `value` is well-typed; result type is the path's `rhs`.
+        //
+        // On a non-PathTy path type (e.g. a neutral whose head is
+        // still an unsolved type-meta), we conservatively fall back
+        // to the `value`'s own type — the alternative would be
+        // rejecting every proof-in-progress transp, which blocks
+        // bring-up. The full cubical pass will tighten this to a
+        // hard error.
+        CoreTerm::Transp { path, regular, value } => {
             let path_ty = infer(ctx, path, axioms)?;
+            let _ = infer(ctx, regular, axioms)?;
             match path_ty {
                 CoreTerm::PathTy { rhs, .. } => Ok((*rhs).clone()),
-                other => {
-                    // If the path isn't a PathTy in its type (e.g. it's
-                    // a neutral), we conservatively return the value's
-                    // type so the rule closes over bring-up examples.
-                    let _ = other;
-                    infer(ctx, value, axioms)
-                }
+                _ => infer(ctx, value, axioms),
             }
         }
 
-        // Glue: Glue<A>(phi, T, e) : Type at the universe of A.
-        CoreTerm::Glue { carrier, .. } => {
+        // Glue: `Glue<A>(φ, T, e) : Type_n` where A is the carrier
+        // type in `Type_n`, φ is the face formula, T is the partial
+        // type family on φ, and e is the equivalence family between
+        // T and A on φ.
+        //
+        // Checks performed:
+        //   * `carrier` is in a universe; its level determines the
+        //     Glue type's universe.
+        //   * `phi`, `fiber`, `equiv` are each well-typed under the
+        //     current context.
+        //
+        // Full univalence computation (Glue-beta, φ-equiv coherence,
+        // unglue) lands in the cubical-kernel follow-up — at this
+        // phase the kernel certifies that the Glue constructor was
+        // assembled from well-typed pieces and is a type at the
+        // right universe level.
+        CoreTerm::Glue { carrier, phi, fiber, equiv } => {
             let carrier_univ = infer(ctx, carrier, axioms)?;
             let carrier_level = universe_level(&carrier_univ)?;
+            let _ = infer(ctx, phi, axioms)?;
+            let _ = infer(ctx, fiber, axioms)?;
+            let _ = infer(ctx, equiv, axioms)?;
             Ok(CoreTerm::Universe(carrier_level))
         }
 
@@ -2239,18 +2280,38 @@ mod tests {
         assert_eq!(ty, CoreTerm::Universe(UniverseLevel::Concrete(0)));
     }
 
-    /// `hcomp φ walls tt : Unit`.
+    /// `hcomp φ walls tt : Unit`. The strengthened rule requires
+    /// phi/walls to be well-typed; bind them in the context so
+    /// inference succeeds.
     #[test]
     fn hcomp_infers_base_type() {
         let mut reg = AxiomRegistry::new();
         let tt = tt_axiom(&mut reg);
+        let ctx = Context::new()
+            .extend(Text::from("phi"), unit_ty())
+            .extend(Text::from("walls"), unit_ty());
         let hc = CoreTerm::HComp {
             phi: Heap::new(CoreTerm::Var(Text::from("phi"))),
             walls: Heap::new(CoreTerm::Var(Text::from("walls"))),
             base: Heap::new(tt),
         };
-        let ty = infer(&Context::new(), &hc, &reg).unwrap();
+        let ty = infer(&ctx, &hc, &reg).unwrap();
         assert_eq!(ty, unit_ty());
+    }
+
+    /// HComp with an ill-typed `phi` is rejected — the strengthened
+    /// rule no longer swallows subterm errors.
+    #[test]
+    fn hcomp_rejects_unbound_phi() {
+        let mut reg = AxiomRegistry::new();
+        let tt = tt_axiom(&mut reg);
+        let hc = CoreTerm::HComp {
+            phi: Heap::new(CoreTerm::Var(Text::from("phi_unbound"))),
+            walls: Heap::new(tt.clone()),
+            base: Heap::new(tt),
+        };
+        let err = infer(&Context::new(), &hc, &reg).unwrap_err();
+        assert!(matches!(err, KernelError::UnboundVariable(_)));
     }
 
     /// `transp path r tt` — returns the path's right endpoint type.
@@ -2258,6 +2319,7 @@ mod tests {
     fn transp_returns_path_rhs_type() {
         let mut reg = AxiomRegistry::new();
         let tt = tt_axiom(&mut reg);
+        let ctx = Context::new().extend(Text::from("r"), unit_ty());
         let path = CoreTerm::PathTy {
             carrier: Heap::new(CoreTerm::Universe(UniverseLevel::Concrete(0))),
             lhs: Heap::new(unit_ty()),
@@ -2268,22 +2330,86 @@ mod tests {
             regular: Heap::new(CoreTerm::Var(Text::from("r"))),
             value: Heap::new(tt),
         };
-        let ty = infer(&Context::new(), &tr, &reg).unwrap();
+        let ty = infer(&ctx, &tr, &reg).unwrap();
         assert_eq!(ty, unit_ty());
+    }
+
+    /// Transp with an unbound regular endpoint is rejected.
+    #[test]
+    fn transp_rejects_unbound_regular() {
+        let mut reg = AxiomRegistry::new();
+        let tt = tt_axiom(&mut reg);
+        let path = CoreTerm::PathTy {
+            carrier: Heap::new(CoreTerm::Universe(UniverseLevel::Concrete(0))),
+            lhs: Heap::new(unit_ty()),
+            rhs: Heap::new(unit_ty()),
+        };
+        let tr = CoreTerm::Transp {
+            path: Heap::new(path),
+            regular: Heap::new(CoreTerm::Var(Text::from("r_unbound"))),
+            value: Heap::new(tt),
+        };
+        let err = infer(&Context::new(), &tr, &reg).unwrap_err();
+        assert!(matches!(err, KernelError::UnboundVariable(_)));
     }
 
     /// `Glue<Unit>(…)` inhabits the universe of its carrier.
     #[test]
     fn glue_returns_carrier_universe() {
         let ax = AxiomRegistry::new();
+        let ctx = Context::new()
+            .extend(Text::from("phi"), unit_ty())
+            .extend(Text::from("fiber"), unit_ty())
+            .extend(Text::from("equiv"), unit_ty());
         let g = CoreTerm::Glue {
             carrier: Heap::new(unit_ty()),
             phi: Heap::new(CoreTerm::Var(Text::from("phi"))),
             fiber: Heap::new(CoreTerm::Var(Text::from("fiber"))),
             equiv: Heap::new(CoreTerm::Var(Text::from("equiv"))),
         };
-        let ty = infer(&Context::new(), &g, &ax).unwrap();
+        let ty = infer(&ctx, &g, &ax).unwrap();
         assert_eq!(ty, CoreTerm::Universe(UniverseLevel::Concrete(0)));
+    }
+
+    /// Glue whose equiv is ill-typed — rejected.
+    #[test]
+    fn glue_rejects_unbound_equiv() {
+        let ax = AxiomRegistry::new();
+        let ctx = Context::new()
+            .extend(Text::from("phi"), unit_ty())
+            .extend(Text::from("fiber"), unit_ty());
+        let g = CoreTerm::Glue {
+            carrier: Heap::new(unit_ty()),
+            phi: Heap::new(CoreTerm::Var(Text::from("phi"))),
+            fiber: Heap::new(CoreTerm::Var(Text::from("fiber"))),
+            equiv: Heap::new(CoreTerm::Var(Text::from("equiv_unbound"))),
+        };
+        let err = infer(&ctx, &g, &ax).unwrap_err();
+        assert!(matches!(err, KernelError::UnboundVariable(_)));
+    }
+
+    /// Glue whose carrier is not in a universe is rejected.
+    #[test]
+    fn glue_rejects_non_universe_carrier() {
+        let mut reg = AxiomRegistry::new();
+        // tt is of type Unit, which is not a universe.
+        let tt = tt_axiom(&mut reg);
+        let ctx = Context::new()
+            .extend(Text::from("phi"), unit_ty())
+            .extend(Text::from("fiber"), unit_ty())
+            .extend(Text::from("equiv"), unit_ty());
+        let g = CoreTerm::Glue {
+            // Glue expects carrier to inhabit a universe. `tt : Unit`
+            // inhabits Unit (a type), not a universe, so
+            // `universe_level` rejects it.
+            carrier: Heap::new(tt),
+            phi: Heap::new(CoreTerm::Var(Text::from("phi"))),
+            fiber: Heap::new(CoreTerm::Var(Text::from("fiber"))),
+            equiv: Heap::new(CoreTerm::Var(Text::from("equiv"))),
+        };
+        // This should fail because tt's type (Unit) is not a universe.
+        let res = infer(&ctx, &g, &reg);
+        assert!(res.is_err());
     }
 
     /// `elim e motive cases : motive e` — shape-level Elim rule.
