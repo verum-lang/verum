@@ -1,0 +1,66 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: h3, qpack, encoder, decoder, rfc9204, roundtrip
+// @timeout: 15000
+// @expected-exit: 0
+
+// RFC 9204 QPACK encoder → decoder round-trip over the field-section
+// representation. Warp's v1 encoder operates in static-table-only
+// mode (no dynamic-table inserts), which is the interoperable
+// baseline for every H3 endpoint.
+
+mount core.*;
+mount core.collections.List;
+mount core.net.h3.qpack.decoder.{HeaderField, decode_field_section};
+mount core.net.h3.qpack.encoder.{encode_field_section};
+
+fn fields_equal(a: &HeaderField, b: &HeaderField) -> Bool {
+    a.name == b.name && a.value == b.value
+}
+
+fn assert_roundtrip(headers: List<HeaderField>) {
+    let wire = encode_field_section(&headers);
+    let decoded = decode_field_section(wire.as_slice()).unwrap();
+    assert(decoded.len() == headers.len());
+    let mut i: Int = 0;
+    while i < headers.len() {
+        assert(fields_equal(&decoded[i], &headers[i]));
+        i = i + 1;
+    }
+}
+
+fn static_pseudoheader_roundtrip() {
+    let hs: List<HeaderField> = [
+        HeaderField { name: f":method",   value: f"GET" },
+        HeaderField { name: f":scheme",   value: f"https" },
+        HeaderField { name: f":authority", value: f"example.com" },
+        HeaderField { name: f":path",     value: f"/" },
+    ];
+    assert_roundtrip(hs);
+}
+
+fn response_with_literal_fields_roundtrip() {
+    let hs: List<HeaderField> = [
+        HeaderField { name: f":status",      value: f"200" },
+        HeaderField { name: f"content-type", value: f"application/json" },
+        HeaderField { name: f"x-app-id",     value: f"warp-prod-1" },
+    ];
+    assert_roundtrip(hs);
+}
+
+fn empty_header_section_roundtrip() {
+    let hs: List<HeaderField> = [];
+    let wire = encode_field_section(&hs);
+    let decoded = decode_field_section(wire.as_slice()).unwrap();
+    assert(decoded.len() == 0);
+}
+
+@main
+public fn main() -> Int {
+    static_pseudoheader_roundtrip();
+    response_with_literal_fields_roundtrip();
+    empty_header_section_roundtrip();
+    print("RFC 9204 QPACK encoder/decoder round-trip verified");
+    0
+}
