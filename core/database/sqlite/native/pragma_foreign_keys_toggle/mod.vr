@@ -1,0 +1,15 @@
+// =============================================================================
+// core/database/sqlite/native/pragma_foreign_keys_toggle/mod.vr
+// =============================================================================
+// PRAGMA foreign_keys — per-connection FK enforcement toggle.
+// Spec §18.4 — foreign_keys.
+//
+// Rules:
+//   * Default OFF in SQLite (for backward compatibility with 3.6 and older).
+//   * Enabling mid-transaction has no effect until the transaction closes.
+//   * Disabling inside a transaction is allowed but discouraged.
+// =============================================================================
+
+module core.database.sqlite.native.pragma_foreign_keys_toggle;
+
+public module toggle;

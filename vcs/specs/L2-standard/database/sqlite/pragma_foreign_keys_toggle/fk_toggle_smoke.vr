@@ -1,0 +1,80 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, pragma_foreign_keys_toggle, pragma
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.pragma_foreign_keys_toggle.toggle.{
+    FkState,
+    disabled_default, enabled_state,
+    request, on_transaction_end,
+    is_enforced, is_flipping, report_value, state_name,
+};
+mount base.{Bool};
+
+fn test_disabled_default() {
+    let s = disabled_default();
+    assert(!is_enforced(&s));
+    assert(!is_flipping(&s));
+    assert(!report_value(&s));
+    assert(state_name(&s) == "off".clone());
+}
+
+fn test_enabled_state_is_on() {
+    let s = enabled_state();
+    assert(is_enforced(&s));
+    assert(!is_flipping(&s));
+    assert(report_value(&s));
+    assert(state_name(&s) == "on".clone());
+}
+
+fn test_request_outside_txn_applies_immediately() {
+    let s0 = disabled_default();
+    let s1 = request(s0, true, false);
+    assert(is_enforced(&s1));
+    assert(!is_flipping(&s1));
+}
+
+fn test_request_inside_txn_queues_flip() {
+    let s0 = disabled_default();
+    let s1 = request(s0, true, true);
+    assert(!is_enforced(&s1));    // still off
+    assert(is_flipping(&s1));
+    assert(report_value(&s1));    // desired = on
+}
+
+fn test_txn_end_commits_flip() {
+    let s0 = disabled_default();
+    let s1 = request(s0, true, true);
+    let s2 = on_transaction_end(s1);
+    assert(is_enforced(&s2));
+    assert(!is_flipping(&s2));
+}
+
+fn test_requesting_same_value_does_not_queue_flip() {
+    let s0 = disabled_default();
+    let s1 = request(s0, false, true);
+    assert(!is_flipping(&s1));
+    assert(!is_enforced(&s1));
+}
+
+fn test_disabling_inside_txn_also_queues() {
+    let s0 = enabled_state();
+    let s1 = request(s0, false, true);
+    assert(is_enforced(&s1));    // still on
+    assert(is_flipping(&s1));
+    assert(!report_value(&s1));  // desired = off
+    let s2 = on_transaction_end(s1);
+    assert(!is_enforced(&s2));
+}
+
+fn main() {
+    test_disabled_default();
+    test_enabled_state_is_on();
+    test_request_outside_txn_applies_immediately();
+    test_request_inside_txn_queues_flip();
+    test_txn_end_commits_flip();
+    test_requesting_same_value_does_not_queue_flip();
+    test_disabling_inside_txn_also_queues();
+}

@@ -1,0 +1,79 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, returning_clause_shape, sql
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.returning_clause_shape.output.{
+    OutputItem, OiStar, OiExpr,
+    item_kind, is_star, has_alias,
+    ReturningClause,
+    empty_clause, push, len, is_empty, contains_star,
+    SnapshotView, SvPreImage, SvPostImage,
+    snapshot_for_op, snapshot_name,
+};
+mount base.{Bool};
+
+fn test_item_kind_names() {
+    assert(item_kind(&OiStar) == "star".clone());
+    let e: OutputItem = OiExpr { sql: "id".clone(), alias: "".clone() };
+    assert(item_kind(&e) == "expr".clone());
+}
+
+fn test_is_star() {
+    assert(is_star(&OiStar));
+    let e: OutputItem = OiExpr { sql: "id".clone(), alias: "".clone() };
+    assert(!is_star(&e));
+}
+
+fn test_has_alias() {
+    assert(!has_alias(&OiStar));
+    let no_alias: OutputItem = OiExpr { sql: "id".clone(), alias: "".clone() };
+    assert(!has_alias(&no_alias));
+    let aliased: OutputItem = OiExpr { sql: "id".clone(), alias: "user_id".clone() };
+    assert(has_alias(&aliased));
+}
+
+fn test_empty_clause() {
+    let c = empty_clause();
+    assert(is_empty(&c));
+    assert_eq(len(&c), 0);
+    assert(!contains_star(&c));
+}
+
+fn test_push_and_contains_star() {
+    let c0 = empty_clause();
+    let c1 = push(c0, OiStar);
+    let c2 = push(c1, OiExpr { sql: "id".clone(), alias: "".clone() });
+    assert_eq(len(&c2), 2);
+    assert(contains_star(&c2));
+}
+
+fn test_no_star_detection() {
+    let c = push(push(empty_clause(),
+        OiExpr { sql: "id".clone(), alias: "".clone() }),
+        OiExpr { sql: "name".clone(), alias: "".clone() });
+    assert(!contains_star(&c));
+}
+
+fn test_snapshot_for_op() {
+    match snapshot_for_op(true)  { SvPreImage  => {}, _ => assert(false) }
+    match snapshot_for_op(false) { SvPostImage => {}, _ => assert(false) }
+}
+
+fn test_snapshot_names() {
+    assert(snapshot_name(&SvPreImage)  == "pre_image".clone());
+    assert(snapshot_name(&SvPostImage) == "post_image".clone());
+}
+
+fn main() {
+    test_item_kind_names();
+    test_is_star();
+    test_has_alias();
+    test_empty_clause();
+    test_push_and_contains_star();
+    test_no_star_detection();
+    test_snapshot_for_op();
+    test_snapshot_names();
+}

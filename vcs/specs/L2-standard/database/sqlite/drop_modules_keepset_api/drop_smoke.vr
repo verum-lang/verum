@@ -1,0 +1,80 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, drop_modules_keepset_api, security
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.drop_modules_keepset_api.keepset.{
+    KeepSet,
+    empty, from_list,
+    size, is_empty, contains,
+    compute_drop_plan, drops_all,
+    default_builtin_keepable,
+};
+mount base.{Bool};
+mount core.collections.list.{List};
+
+fn test_empty_keepset_drops_all() {
+    let k = empty();
+    assert(is_empty(&k));
+    assert(drops_all(&k));
+    assert_eq(size(&k), 0);
+}
+
+fn test_from_list_and_contains() {
+    let names: List<Text> = ["fts5".clone(), "rtree".clone()].clone() as List<Text>;
+    let k = from_list(names);
+    assert_eq(size(&k), 2);
+    assert(contains(&k, &"fts5".clone()));
+    assert(contains(&k, &"rtree".clone()));
+    assert(!contains(&k, &"dbstat".clone()));
+}
+
+fn test_compute_drop_plan_basics() {
+    let keep: List<Text> = ["fts5".clone()].clone() as List<Text>;
+    let registered: List<Text> = [
+        "fts5".clone(), "rtree".clone(), "json_each".clone(),
+    ].clone() as List<Text>;
+    let k = from_list(keep);
+    let plan = compute_drop_plan(&k, &registered);
+    assert_eq(plan.len(), 2);
+    assert(plan[0] == "rtree".clone());
+    assert(plan[1] == "json_each".clone());
+}
+
+fn test_compute_drop_plan_empty_keep_drops_all() {
+    let registered: List<Text> = ["a".clone(), "b".clone()].clone() as List<Text>;
+    let k = empty();
+    let plan = compute_drop_plan(&k, &registered);
+    assert_eq(plan.len(), 2);
+}
+
+fn test_compute_drop_plan_noop_when_all_kept() {
+    let registered: List<Text> = ["a".clone(), "b".clone()].clone() as List<Text>;
+    let keep: List<Text> = ["a".clone(), "b".clone(), "c".clone()].clone() as List<Text>;
+    let k = from_list(keep);
+    let plan = compute_drop_plan(&k, &registered);
+    assert_eq(plan.len(), 0);
+}
+
+fn test_default_builtin_keepable_includes_fts5() {
+    let l = default_builtin_keepable();
+    assert(l.len() >= 6);
+    let mut found = false;
+    let mut i: Int = 0;
+    while i < l.len() {
+        if l[i] == "fts5".clone() { found = true; i = l.len(); }
+        else { i = i + 1; }
+    }
+    assert(found);
+}
+
+fn main() {
+    test_empty_keepset_drops_all();
+    test_from_list_and_contains();
+    test_compute_drop_plan_basics();
+    test_compute_drop_plan_empty_keep_drops_all();
+    test_compute_drop_plan_noop_when_all_kept();
+    test_default_builtin_keepable_includes_fts5();
+}

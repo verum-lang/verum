@@ -1,0 +1,66 @@
+// INSERT-OR verb taxonomy.
+
+module core.database.sqlite.native.insert_on_conflict_api.verb;
+
+mount base.{Bool, Text, Maybe};
+
+public type OrVerb is
+    | OvAbort
+    | OvFail
+    | OvIgnore
+    | OvReplace
+    | OvRollback
+    ;
+
+public fn verb_code(v: &OrVerb) -> Int {
+    // Matches ON CONFLICT ROLLBACK/ABORT/FAIL/IGNORE/REPLACE numbering.
+    match v {
+        OvRollback => 1,
+        OvAbort    => 2,
+        OvFail     => 3,
+        OvIgnore   => 4,
+        OvReplace  => 5,
+    }
+}
+
+public fn verb_name(v: &OrVerb) -> Text {
+    match v {
+        OvAbort    => "ABORT".clone(),
+        OvFail     => "FAIL".clone(),
+        OvIgnore   => "IGNORE".clone(),
+        OvReplace  => "REPLACE".clone(),
+        OvRollback => "ROLLBACK".clone(),
+    }
+}
+
+public fn default_verb() -> OrVerb { OvAbort }
+
+public fn from_keyword(kw: &Text) -> Maybe<OrVerb> {
+    if *kw == "ABORT".clone()    { return Maybe.Some(OvAbort); }
+    if *kw == "FAIL".clone()     { return Maybe.Some(OvFail); }
+    if *kw == "IGNORE".clone()   { return Maybe.Some(OvIgnore); }
+    if *kw == "REPLACE".clone()  { return Maybe.Some(OvReplace); }
+    if *kw == "ROLLBACK".clone() { return Maybe.Some(OvRollback); }
+    Maybe.None
+}
+
+public fn skips_offending_row(v: &OrVerb) -> Bool {
+    match v { OvIgnore => true, _ => false }
+}
+
+public fn deletes_conflicting_row(v: &OrVerb) -> Bool {
+    match v { OvReplace => true, _ => false }
+}
+
+public fn aborts_txn(v: &OrVerb) -> Bool {
+    match v { OvRollback => true, _ => false }
+}
+
+public fn keeps_partial_changes(v: &OrVerb) -> Bool {
+    match v { OvFail => true, _ => false }
+}
+
+// Positive total ordering — strictness rank useful for planner heuristics.
+public fn strictness_rank(v: &OrVerb) -> Int {
+    verb_code(v)
+}

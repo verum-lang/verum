@@ -1,0 +1,19 @@
+// =============================================================================
+// core/database/sqlite/native/scanstatus_v2_op_codes/mod.vr
+// =============================================================================
+// sqlite3_stmt_scanstatus_v2 — per-loop scan statistics opcodes.
+// Spec §22 — stmt_scanstatus_v2.
+//
+//   SQLITE_SCANSTAT_NLOOP    = 0  // loop executions
+//   SQLITE_SCANSTAT_NVISIT   = 1  // rows visited
+//   SQLITE_SCANSTAT_EST      = 2  // estimated rows per loop
+//   SQLITE_SCANSTAT_NAME     = 3  // loop name
+//   SQLITE_SCANSTAT_EXPLAIN  = 4  // explain text
+//   SQLITE_SCANSTAT_SELECTID = 5  // select-id (v2)
+//   SQLITE_SCANSTAT_PARENTID = 6  // parent-id (v2)
+//   SQLITE_SCANSTAT_NCYCLE   = 7  // cycle count (v2)
+// =============================================================================
+
+module core.database.sqlite.native.scanstatus_v2_op_codes;
+
+public module op;

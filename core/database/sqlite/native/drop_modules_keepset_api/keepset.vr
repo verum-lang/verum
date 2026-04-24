@@ -1,0 +1,63 @@
+// Keep-list + drop-plan derivation.
+
+module core.database.sqlite.native.drop_modules_keepset_api.keepset;
+
+mount base.{Bool, Text};
+mount core.collections.list.{List};
+
+public type KeepSet is {
+    keep: List<Text>,
+};
+
+public fn empty() -> KeepSet {
+    KeepSet { keep: [].clone() as List<Text> }
+}
+
+public fn from_list(names: List<Text>) -> KeepSet {
+    KeepSet { keep: names }
+}
+
+public fn size(k: &KeepSet) -> Int { k.keep.len() }
+
+public fn is_empty(k: &KeepSet) -> Bool { k.keep.len() == 0 }
+
+fn list_contains(l: &List<Text>, s: &Text) -> Bool {
+    let mut i: Int = 0;
+    while i < l.len() {
+        if l[i] == *s { return true; }
+        i = i + 1;
+    }
+    false
+}
+
+public fn contains(k: &KeepSet, name: &Text) -> Bool {
+    list_contains(&k.keep, name)
+}
+
+// Given the set of currently-registered modules, compute the drop-plan.
+public fn compute_drop_plan(k: &KeepSet, registered: &List<Text>) -> List<Text> {
+    let mut out: List<Text> = [].clone() as List<Text>;
+    let mut i: Int = 0;
+    while i < registered.len() {
+        if !contains(k, &registered[i]) {
+            out.push(registered[i].clone());
+        }
+        i = i + 1;
+    }
+    out
+}
+
+// sqlite3_drop_modules(db, NULL) drops ALL → empty keep-set.
+public fn drops_all(k: &KeepSet) -> Bool { is_empty(k) }
+
+// Built-in module names always present when compiled in.
+public fn default_builtin_keepable() -> List<Text> {
+    let mut out: List<Text> = [].clone() as List<Text>;
+    out.push("fts5".clone());
+    out.push("fts4".clone());
+    out.push("rtree".clone());
+    out.push("dbstat".clone());
+    out.push("json_each".clone());
+    out.push("json_tree".clone());
+    out
+}

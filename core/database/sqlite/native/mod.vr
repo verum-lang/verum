@@ -700,3 +700,19 @@ public module limit_clause_validator;
 public module order_by_term_api;
 // - changeset_apply_policy: 4-bit APPLY_* flags + disposition + apply outcome
 public module changeset_apply_policy;
+// - drop_modules_keepset_api: sqlite3_drop_modules keep-list + drop-plan derivation
+public module drop_modules_keepset_api;
+// - declared_type_parser_api: VARCHAR(255)/DECIMAL(10,2) parser → (base, size, scale)
+public module declared_type_parser_api;
+// - compound_select_api: UNION / UNION ALL / INTERSECT / EXCEPT + chain+commutativity rules
+public module compound_select_api;
+// - insert_on_conflict_api: INSERT OR {ABORT/FAIL/IGNORE/REPLACE/ROLLBACK} verb taxonomy
+public module insert_on_conflict_api;
+// - returning_clause_shape: RETURNING list + OiStar/OiExpr + pre/post-image snapshot view
+public module returning_clause_shape;
+// - scanstatus_v2_op_codes: SQLITE_SCANSTAT_* 8-entry opcode (NLOOP=0 .. NCYCLE=7) + v2-subset
+public module scanstatus_v2_op_codes;
+// - pragma_query_only_api: 6-cat StmtCategory + stmt_allowed gate + SQLITE_READONLY=8
+public module pragma_query_only_api;
+// - pragma_foreign_keys_toggle: desired/effective/pending_flip txn-boundary toggler
+public module pragma_foreign_keys_toggle;

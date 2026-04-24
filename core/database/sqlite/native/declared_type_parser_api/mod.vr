@@ -1,0 +1,15 @@
+// =============================================================================
+// core/database/sqlite/native/declared_type_parser_api/mod.vr
+// =============================================================================
+// Declared-type string parser — "VARCHAR(255)", "DECIMAL(10, 2)", "INTEGER".
+// Spec §17.2 — CREATE TABLE column types.
+//
+// SQLite stores the raw declared-type string; only the affinity classifier
+// (affinity_matrix_api) actually inspects it. This catalogue parses it into
+// (base_name, size_hint, scale_hint) for the reflection APIs
+// (sqlite3_column_decltype + sqlite3_table_column_metadata).
+// =============================================================================
+
+module core.database.sqlite.native.declared_type_parser_api;
+
+public module parsed;

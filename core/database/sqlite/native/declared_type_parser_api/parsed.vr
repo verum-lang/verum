@@ -1,0 +1,107 @@
+// Declared-type parser.
+
+module core.database.sqlite.native.declared_type_parser_api.parsed;
+
+mount base.{Bool, Int64, Text};
+
+public type ParsedType is {
+    base_name: Text,        // "VARCHAR", "INTEGER", etc.
+    size_hint: Int64,       // -1 if absent
+    scale_hint: Int64,      // -1 if absent
+};
+
+public fn empty() -> ParsedType {
+    ParsedType {
+        base_name: "".clone(),
+        size_hint: -1 as Int64,
+        scale_hint: -1 as Int64,
+    }
+}
+
+fn is_space(b: u8) -> Bool {
+    b == 0x20 as u8 || b == 0x09 as u8 || b == 0x0A as u8 || b == 0x0D as u8
+}
+
+fn is_digit(b: u8) -> Bool {
+    b >= 0x30 as u8 && b <= 0x39 as u8
+}
+
+fn is_ident_body(b: u8) -> Bool {
+    (b >= 0x41 as u8 && b <= 0x5A as u8)
+        || (b >= 0x61 as u8 && b <= 0x7A as u8)
+        || b == 0x5F as u8
+        || is_digit(b)
+}
+
+// Parse a u32 starting at `i`; returns (value, next_i).
+fn parse_u32(bs: &List<u8>, i: Int) -> (Int64, Int) {
+    let mut j: Int = i;
+    let mut v: Int64 = 0 as Int64;
+    while j < bs.len() && is_digit(bs[j]) {
+        let d = (bs[j] - (0x30 as u8)) as Int64;
+        v = v * (10 as Int64) + d;
+        j = j + 1;
+    }
+    (v, j)
+}
+
+public fn parse(raw: &Text) -> ParsedType {
+    let bs = raw.as_bytes();
+    let mut i: Int = 0;
+    // Skip leading whitespace.
+    while i < bs.len() && is_space(bs[i]) { i = i + 1; }
+    // Collect base identifier (may contain spaces for "DOUBLE PRECISION").
+    let mut name = "".clone();
+    while i < bs.len() && bs[i] != (0x28 as u8) {
+        if is_space(bs[i]) {
+            // Peek ahead: continuation only if followed by another ident byte.
+            let mut j: Int = i + 1;
+            while j < bs.len() && is_space(bs[j]) { j = j + 1; }
+            if j < bs.len() && is_ident_body(bs[j]) {
+                name.push_byte(0x20 as u8);
+                i = j;
+            } else {
+                i = bs.len();
+            }
+        } else {
+            name.push_byte(bs[i]);
+            i = i + 1;
+        }
+    }
+    let mut result = empty();
+    result.base_name = name;
+    // Optional "(N)" or "(N, M)".
+    if i < bs.len() && bs[i] == (0x28 as u8) {
+        i = i + 1;
+        while i < bs.len() && is_space(bs[i]) { i = i + 1; }
+        if i < bs.len() && is_digit(bs[i]) {
+            let (v, next) = parse_u32(&bs, i);
+            result.size_hint = v;
+            i = next;
+        }
+        while i < bs.len() && is_space(bs[i]) { i = i + 1; }
+        if i < bs.len() && bs[i] == (0x2C as u8) {
+            i = i + 1;
+            while i < bs.len() && is_space(bs[i]) { i = i + 1; }
+            if i < bs.len() && is_digit(bs[i]) {
+                let (v2, _) = parse_u32(&bs, i);
+                result.scale_hint = v2;
+            }
+        }
+    }
+    result
+}
+
+public fn has_size_hint(p: &ParsedType) -> Bool {
+    p.size_hint >= (0 as Int64)
+}
+
+public fn has_scale_hint(p: &ParsedType) -> Bool {
+    p.scale_hint >= (0 as Int64)
+}
+
+public fn has_parens(p: &ParsedType) -> Bool {
+    has_size_hint(p) || has_scale_hint(p)
+}
+
+mount core.collections.list.{List};

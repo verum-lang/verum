@@ -1,0 +1,13 @@
+// =============================================================================
+// core/database/sqlite/native/returning_clause_shape/mod.vr
+// =============================================================================
+// RETURNING clause (SQLite 3.35+) — output-column list expr + optional alias.
+// Spec §17.2.3 — RETURNING.
+//
+// INSERT / UPDATE / DELETE may append:
+//   RETURNING expr_list [AS alias_list] ...
+// =============================================================================
+
+module core.database.sqlite.native.returning_clause_shape;
+
+public module output;

@@ -1,0 +1,74 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, compound_select_api, sql
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.compound_select_api.op.{
+    CompoundOp, CoUnion, CoUnionAll, CoIntersect, CoExcept,
+    op_name, from_keyword,
+    deduplicates, preserves_duplicates,
+    is_commutative, requires_dedup_pass, allows_direct_chain,
+};
+mount base.{Bool, Maybe};
+
+fn test_op_names() {
+    assert(op_name(&CoUnion)     == "UNION".clone());
+    assert(op_name(&CoUnionAll)  == "UNION ALL".clone());
+    assert(op_name(&CoIntersect) == "INTERSECT".clone());
+    assert(op_name(&CoExcept)    == "EXCEPT".clone());
+}
+
+fn test_from_keyword() {
+    match from_keyword(&"UNION".clone()) {
+        Maybe.Some(o) => match &o { CoUnion => {}, _ => assert(false) },
+        Maybe.None => assert(false),
+    }
+    match from_keyword(&"UNION ALL".clone()) {
+        Maybe.Some(o) => match &o { CoUnionAll => {}, _ => assert(false) },
+        Maybe.None => assert(false),
+    }
+    match from_keyword(&"INTERSECT".clone()) {
+        Maybe.Some(o) => match &o { CoIntersect => {}, _ => assert(false) },
+        Maybe.None => assert(false),
+    }
+    match from_keyword(&"EXCEPT".clone()) {
+        Maybe.Some(o) => match &o { CoExcept => {}, _ => assert(false) },
+        Maybe.None => assert(false),
+    }
+    match from_keyword(&"XYZ".clone()) { Maybe.None => {}, Maybe.Some(_) => assert(false) }
+}
+
+fn test_deduplication() {
+    assert(deduplicates(&CoUnion));
+    assert(!deduplicates(&CoUnionAll));
+    assert(deduplicates(&CoIntersect));
+    assert(deduplicates(&CoExcept));
+    assert(preserves_duplicates(&CoUnionAll));
+    assert(!preserves_duplicates(&CoUnion));
+    assert(requires_dedup_pass(&CoUnion));
+    assert(!requires_dedup_pass(&CoUnionAll));
+}
+
+fn test_commutative_only_not_except() {
+    assert(is_commutative(&CoUnion));
+    assert(is_commutative(&CoUnionAll));
+    assert(is_commutative(&CoIntersect));
+    assert(!is_commutative(&CoExcept));
+}
+
+fn test_direct_chain_same_op_only() {
+    assert(allows_direct_chain(&CoUnion, &CoUnion));
+    assert(allows_direct_chain(&CoUnionAll, &CoUnionAll));
+    assert(!allows_direct_chain(&CoUnion, &CoUnionAll));
+    assert(!allows_direct_chain(&CoIntersect, &CoExcept));
+}
+
+fn main() {
+    test_op_names();
+    test_from_keyword();
+    test_deduplication();
+    test_commutative_only_not_except();
+    test_direct_chain_same_op_only();
+}

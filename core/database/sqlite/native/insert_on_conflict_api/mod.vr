@@ -1,0 +1,10 @@
+// =============================================================================
+// core/database/sqlite/native/insert_on_conflict_api/mod.vr
+// =============================================================================
+// INSERT OR {REPLACE | IGNORE | ABORT | FAIL | ROLLBACK} verb selector.
+// Spec §17.2 — INSERT conflict-resolution.
+// =============================================================================
+
+module core.database.sqlite.native.insert_on_conflict_api;
+
+public module verb;

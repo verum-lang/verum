@@ -1,0 +1,65 @@
+// query_only state + permitted-statement classifier.
+
+module core.database.sqlite.native.pragma_query_only_api.toggle;
+
+mount base.{Bool, Text};
+
+public type QueryOnlyState is {
+    enabled: Bool,
+};
+
+public fn disabled() -> QueryOnlyState {
+    QueryOnlyState { enabled: false }
+}
+
+public fn enabled_state() -> QueryOnlyState {
+    QueryOnlyState { enabled: true }
+}
+
+public fn flip(mut s: QueryOnlyState) -> QueryOnlyState {
+    s.enabled = !s.enabled;
+    s
+}
+
+public fn is_readonly_session(s: &QueryOnlyState) -> Bool {
+    s.enabled
+}
+
+public type StmtCategory is
+    | ScSelect           // SELECT
+    | ScPragmaRead       // PRAGMA that only reads state
+    | ScPragmaWrite      // PRAGMA that mutates
+    | ScDml              // INSERT / UPDATE / DELETE
+    | ScDdl              // CREATE / ALTER / DROP
+    | ScSessionCtrl      // BEGIN / COMMIT / ROLLBACK / SAVEPOINT
+    ;
+
+public fn cat_name(c: &StmtCategory) -> Text {
+    match c {
+        ScSelect       => "select".clone(),
+        ScPragmaRead   => "pragma_read".clone(),
+        ScPragmaWrite  => "pragma_write".clone(),
+        ScDml          => "dml".clone(),
+        ScDdl          => "ddl".clone(),
+        ScSessionCtrl  => "session_ctrl".clone(),
+    }
+}
+
+public fn is_write_like(c: &StmtCategory) -> Bool {
+    match c {
+        ScDml         => true,
+        ScDdl         => true,
+        ScPragmaWrite => true,
+        _             => false,
+    }
+}
+
+// When query_only is ON, writes are refused with SQLITE_READONLY (8).
+public fn stmt_allowed(s: &QueryOnlyState, c: &StmtCategory) -> Bool {
+    if !s.enabled { return true; }
+    !is_write_like(c)
+}
+
+public fn refusal_code(s: &QueryOnlyState, c: &StmtCategory) -> Int {
+    if stmt_allowed(s, c) { 0 } else { 8 }    // SQLITE_READONLY
+}

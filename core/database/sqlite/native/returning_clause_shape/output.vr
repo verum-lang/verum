@@ -1,0 +1,73 @@
+// RETURNING output column.
+
+module core.database.sqlite.native.returning_clause_shape.output;
+
+mount base.{Bool, Text};
+mount core.collections.list.{List};
+
+public type OutputItem is
+    | OiStar                      // RETURNING *
+    | OiExpr { sql: Text, alias: Text }
+    ;
+
+public fn item_kind(o: &OutputItem) -> Text {
+    match o {
+        OiStar       => "star".clone(),
+        OiExpr { .. } => "expr".clone(),
+    }
+}
+
+public fn is_star(o: &OutputItem) -> Bool {
+    match o { OiStar => true, _ => false }
+}
+
+public fn has_alias(o: &OutputItem) -> Bool {
+    match o {
+        OiExpr { sql: _, alias } => alias.len() > 0,
+        OiStar => false,
+    }
+}
+
+public type ReturningClause is {
+    items: List<OutputItem>,
+};
+
+public fn empty_clause() -> ReturningClause {
+    ReturningClause { items: [].clone() as List<OutputItem> }
+}
+
+public fn push(mut c: ReturningClause, i: OutputItem) -> ReturningClause {
+    c.items.push(i);
+    c
+}
+
+public fn len(c: &ReturningClause) -> Int { c.items.len() }
+
+public fn is_empty(c: &ReturningClause) -> Bool { c.items.len() == 0 }
+
+public fn contains_star(c: &ReturningClause) -> Bool {
+    let mut i: Int = 0;
+    while i < c.items.len() {
+        if is_star(&c.items[i]) { return true; }
+        i = i + 1;
+    }
+    false
+}
+
+// Per §17.2.3, RETURNING on a DELETE always observes the pre-image; on
+// INSERT/UPDATE it observes the post-image.
+public type SnapshotView is
+    | SvPreImage          // for DELETE
+    | SvPostImage         // for INSERT and UPDATE
+    ;
+
+public fn snapshot_for_op(is_delete: Bool) -> SnapshotView {
+    if is_delete { SvPreImage } else { SvPostImage }
+}
+
+public fn snapshot_name(s: &SnapshotView) -> Text {
+    match s {
+        SvPreImage  => "pre_image".clone(),
+        SvPostImage => "post_image".clone(),
+    }
+}

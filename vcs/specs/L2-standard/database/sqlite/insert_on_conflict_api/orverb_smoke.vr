@@ -1,0 +1,83 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, insert_on_conflict_api, sql
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.insert_on_conflict_api.verb.{
+    OrVerb, OvAbort, OvFail, OvIgnore, OvReplace, OvRollback,
+    verb_code, verb_name, default_verb, from_keyword,
+    skips_offending_row, deletes_conflicting_row,
+    aborts_txn, keeps_partial_changes, strictness_rank,
+};
+mount base.{Bool, Maybe};
+
+fn test_verb_codes_match_conflict_action() {
+    assert_eq(verb_code(&OvRollback), 1);
+    assert_eq(verb_code(&OvAbort),    2);
+    assert_eq(verb_code(&OvFail),     3);
+    assert_eq(verb_code(&OvIgnore),   4);
+    assert_eq(verb_code(&OvReplace),  5);
+}
+
+fn test_verb_names() {
+    assert(verb_name(&OvAbort)    == "ABORT".clone());
+    assert(verb_name(&OvReplace)  == "REPLACE".clone());
+    assert(verb_name(&OvRollback) == "ROLLBACK".clone());
+}
+
+fn test_default_is_abort() {
+    match default_verb() { OvAbort => {}, _ => assert(false) }
+}
+
+fn test_from_keyword() {
+    match from_keyword(&"ABORT".clone()) {
+        Maybe.Some(v) => match &v { OvAbort => {}, _ => assert(false) },
+        Maybe.None => assert(false),
+    }
+    match from_keyword(&"REPLACE".clone()) {
+        Maybe.Some(v) => match &v { OvReplace => {}, _ => assert(false) },
+        Maybe.None => assert(false),
+    }
+    match from_keyword(&"UNKNOWN".clone()) { Maybe.None => {}, Maybe.Some(_) => assert(false) }
+}
+
+fn test_skips_offending_row() {
+    assert(skips_offending_row(&OvIgnore));
+    assert(!skips_offending_row(&OvAbort));
+    assert(!skips_offending_row(&OvReplace));
+}
+
+fn test_deletes_conflicting_row() {
+    assert(deletes_conflicting_row(&OvReplace));
+    assert(!deletes_conflicting_row(&OvIgnore));
+}
+
+fn test_aborts_txn_only_rollback() {
+    assert(aborts_txn(&OvRollback));
+    assert(!aborts_txn(&OvAbort));
+    assert(!aborts_txn(&OvFail));
+}
+
+fn test_keeps_partial_changes_only_fail() {
+    assert(keeps_partial_changes(&OvFail));
+    assert(!keeps_partial_changes(&OvAbort));
+}
+
+fn test_strictness_rank_monotonic() {
+    assert(strictness_rank(&OvRollback) < strictness_rank(&OvReplace));
+    assert(strictness_rank(&OvAbort) < strictness_rank(&OvIgnore));
+}
+
+fn main() {
+    test_verb_codes_match_conflict_action();
+    test_verb_names();
+    test_default_is_abort();
+    test_from_keyword();
+    test_skips_offending_row();
+    test_deletes_conflicting_row();
+    test_aborts_txn_only_rollback();
+    test_keeps_partial_changes_only_fail();
+    test_strictness_rank_monotonic();
+}

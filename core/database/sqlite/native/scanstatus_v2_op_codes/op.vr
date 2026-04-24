@@ -1,0 +1,79 @@
+// SQLITE_SCANSTAT_* taxonomy.
+
+module core.database.sqlite.native.scanstatus_v2_op_codes.op;
+
+mount base.{Bool, Text, Maybe};
+
+public type ScanStat is
+    | SsNloop        // 0
+    | SsNvisit       // 1
+    | SsEst          // 2
+    | SsName         // 3
+    | SsExplain      // 4
+    | SsSelectid     // 5 (v2)
+    | SsParentid     // 6 (v2)
+    | SsNcycle       // 7 (v2)
+    ;
+
+public fn op_code(o: &ScanStat) -> Int {
+    match o {
+        SsNloop    => 0,
+        SsNvisit   => 1,
+        SsEst      => 2,
+        SsName     => 3,
+        SsExplain  => 4,
+        SsSelectid => 5,
+        SsParentid => 6,
+        SsNcycle   => 7,
+    }
+}
+
+public fn from_code(c: Int) -> Maybe<ScanStat> {
+    if c == 0 { return Maybe.Some(SsNloop); }
+    if c == 1 { return Maybe.Some(SsNvisit); }
+    if c == 2 { return Maybe.Some(SsEst); }
+    if c == 3 { return Maybe.Some(SsName); }
+    if c == 4 { return Maybe.Some(SsExplain); }
+    if c == 5 { return Maybe.Some(SsSelectid); }
+    if c == 6 { return Maybe.Some(SsParentid); }
+    if c == 7 { return Maybe.Some(SsNcycle); }
+    Maybe.None
+}
+
+public fn op_name(o: &ScanStat) -> Text {
+    match o {
+        SsNloop    => "NLOOP".clone(),
+        SsNvisit   => "NVISIT".clone(),
+        SsEst      => "EST".clone(),
+        SsName     => "NAME".clone(),
+        SsExplain  => "EXPLAIN".clone(),
+        SsSelectid => "SELECTID".clone(),
+        SsParentid => "PARENTID".clone(),
+        SsNcycle   => "NCYCLE".clone(),
+    }
+}
+
+// V2 subset — scanstatus_v2 added these 3 over the original.
+public fn is_v2_only(o: &ScanStat) -> Bool {
+    match o {
+        SsSelectid => true,
+        SsParentid => true,
+        SsNcycle   => true,
+        _          => false,
+    }
+}
+
+// Codes that return a text string (vs integer).
+public fn returns_text(o: &ScanStat) -> Bool {
+    match o {
+        SsName    => true,
+        SsExplain => true,
+        _         => false,
+    }
+}
+
+public fn returns_integer(o: &ScanStat) -> Bool {
+    !returns_text(o)
+}
+
+public fn well_known_count() -> Int { 8 }

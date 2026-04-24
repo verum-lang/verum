@@ -1,0 +1,11 @@
+// =============================================================================
+// core/database/sqlite/native/drop_modules_keepset_api/mod.vr
+// =============================================================================
+// sqlite3_drop_modules — drop all virtual-table modules EXCEPT the names in a
+// keep-list. Used for security hardening (disable fts5/rtree on untrusted DB).
+// Spec §16.1.11 — sqlite3_drop_modules.
+// =============================================================================
+
+module core.database.sqlite.native.drop_modules_keepset_api;
+
+public module keepset;

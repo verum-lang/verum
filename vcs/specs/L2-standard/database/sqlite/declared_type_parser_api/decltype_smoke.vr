@@ -1,0 +1,72 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, declared_type_parser_api, types
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.declared_type_parser_api.parsed.{
+    ParsedType, empty,
+    parse, has_size_hint, has_scale_hint, has_parens,
+};
+mount base.{Bool, Int64};
+
+fn test_empty_defaults() {
+    let p = empty();
+    assert(p.base_name == "".clone());
+    assert(!has_size_hint(&p));
+    assert(!has_scale_hint(&p));
+    assert(!has_parens(&p));
+}
+
+fn test_parse_plain_type() {
+    let p = parse(&"INTEGER".clone());
+    assert(p.base_name == "INTEGER".clone());
+    assert(!has_size_hint(&p));
+    assert(!has_scale_hint(&p));
+}
+
+fn test_parse_with_size() {
+    let p = parse(&"VARCHAR(255)".clone());
+    assert(p.base_name == "VARCHAR".clone());
+    assert(has_size_hint(&p));
+    assert_eq(p.size_hint, 255 as Int64);
+    assert(!has_scale_hint(&p));
+}
+
+fn test_parse_with_scale() {
+    let p = parse(&"DECIMAL(10, 2)".clone());
+    assert(p.base_name == "DECIMAL".clone());
+    assert(has_size_hint(&p));
+    assert_eq(p.size_hint, 10 as Int64);
+    assert(has_scale_hint(&p));
+    assert_eq(p.scale_hint, 2 as Int64);
+    assert(has_parens(&p));
+}
+
+fn test_parse_double_precision_with_space() {
+    let p = parse(&"DOUBLE PRECISION".clone());
+    assert(p.base_name == "DOUBLE PRECISION".clone());
+    assert(!has_size_hint(&p));
+}
+
+fn test_parse_with_leading_whitespace() {
+    let p = parse(&"   TEXT".clone());
+    assert(p.base_name == "TEXT".clone());
+}
+
+fn test_parse_empty_string() {
+    let p = parse(&"".clone());
+    assert(p.base_name == "".clone());
+    assert(!has_parens(&p));
+}
+
+fn main() {
+    test_empty_defaults();
+    test_parse_plain_type();
+    test_parse_with_size();
+    test_parse_with_scale();
+    test_parse_double_precision_with_space();
+    test_parse_with_leading_whitespace();
+    test_parse_empty_string();
+}

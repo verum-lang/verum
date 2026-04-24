@@ -1,0 +1,51 @@
+// PRAGMA foreign_keys toggle + apply-timing gate.
+
+module core.database.sqlite.native.pragma_foreign_keys_toggle.toggle;
+
+mount base.{Bool, Text};
+
+public type FkState is {
+    desired: Bool,        // what the user asked for
+    effective: Bool,      // what is actually enforced right now
+    pending_flip: Bool,   // change queued for next txn boundary
+};
+
+public fn disabled_default() -> FkState {
+    FkState { desired: false, effective: false, pending_flip: false }
+}
+
+public fn enabled_state() -> FkState {
+    FkState { desired: true, effective: true, pending_flip: false }
+}
+
+// PRAGMA foreign_keys = N outside a transaction: apply immediately.
+// Inside a transaction: record the desired value + mark pending_flip.
+public fn request(mut s: FkState, new_val: Bool, in_transaction: Bool) -> FkState {
+    s.desired = new_val;
+    if in_transaction {
+        s.pending_flip = new_val != s.effective;
+    } else {
+        s.effective = new_val;
+        s.pending_flip = false;
+    }
+    s
+}
+
+// Transaction boundary hook: if a flip is pending, commit it now.
+public fn on_transaction_end(mut s: FkState) -> FkState {
+    if s.pending_flip {
+        s.effective = s.desired;
+        s.pending_flip = false;
+    }
+    s
+}
+
+public fn is_enforced(s: &FkState) -> Bool { s.effective }
+public fn is_flipping(s: &FkState) -> Bool { s.pending_flip }
+
+// Reading PRAGMA foreign_keys reports the desired value (not effective).
+public fn report_value(s: &FkState) -> Bool { s.desired }
+
+public fn state_name(s: &FkState) -> Text {
+    if s.effective { "on".clone() } else { "off".clone() }
+}

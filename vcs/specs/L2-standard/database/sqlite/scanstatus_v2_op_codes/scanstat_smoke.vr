@@ -1,0 +1,88 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, scanstatus_v2_op_codes, capi
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.scanstatus_v2_op_codes.op.{
+    ScanStat,
+    SsNloop, SsNvisit, SsEst, SsName, SsExplain,
+    SsSelectid, SsParentid, SsNcycle,
+    op_code, from_code, op_name,
+    is_v2_only, returns_text, returns_integer, well_known_count,
+};
+mount base.{Bool, Maybe};
+
+fn test_op_codes_0_to_7() {
+    assert_eq(op_code(&SsNloop),    0);
+    assert_eq(op_code(&SsNvisit),   1);
+    assert_eq(op_code(&SsEst),      2);
+    assert_eq(op_code(&SsName),     3);
+    assert_eq(op_code(&SsExplain),  4);
+    assert_eq(op_code(&SsSelectid), 5);
+    assert_eq(op_code(&SsParentid), 6);
+    assert_eq(op_code(&SsNcycle),   7);
+}
+
+fn test_from_code_round_trip() {
+    match from_code(0) {
+        Maybe.Some(o) => match &o { SsNloop => {}, _ => assert(false) },
+        Maybe.None => assert(false),
+    }
+    match from_code(3) {
+        Maybe.Some(o) => match &o { SsName => {}, _ => assert(false) },
+        Maybe.None => assert(false),
+    }
+    match from_code(7) {
+        Maybe.Some(o) => match &o { SsNcycle => {}, _ => assert(false) },
+        Maybe.None => assert(false),
+    }
+    match from_code(8) { Maybe.None => {}, Maybe.Some(_) => assert(false) }
+}
+
+fn test_op_names() {
+    assert(op_name(&SsNloop)    == "NLOOP".clone());
+    assert(op_name(&SsExplain)  == "EXPLAIN".clone());
+    assert(op_name(&SsSelectid) == "SELECTID".clone());
+}
+
+fn test_v2_only_set() {
+    assert(is_v2_only(&SsSelectid));
+    assert(is_v2_only(&SsParentid));
+    assert(is_v2_only(&SsNcycle));
+    assert(!is_v2_only(&SsNloop));
+    assert(!is_v2_only(&SsName));
+}
+
+fn test_returns_text_set() {
+    assert(returns_text(&SsName));
+    assert(returns_text(&SsExplain));
+    assert(!returns_text(&SsNloop));
+    assert(!returns_text(&SsSelectid));
+}
+
+fn test_returns_integer_is_complement() {
+    assert(returns_integer(&SsNloop));
+    assert(returns_integer(&SsNvisit));
+    assert(returns_integer(&SsEst));
+    assert(returns_integer(&SsSelectid));
+    assert(returns_integer(&SsParentid));
+    assert(returns_integer(&SsNcycle));
+    assert(!returns_integer(&SsName));
+    assert(!returns_integer(&SsExplain));
+}
+
+fn test_well_known_count() {
+    assert_eq(well_known_count(), 8);
+}
+
+fn main() {
+    test_op_codes_0_to_7();
+    test_from_code_round_trip();
+    test_op_names();
+    test_v2_only_set();
+    test_returns_text_set();
+    test_returns_integer_is_complement();
+    test_well_known_count();
+}

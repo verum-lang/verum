@@ -1,0 +1,10 @@
+// =============================================================================
+// core/database/sqlite/native/compound_select_api/mod.vr
+// =============================================================================
+// Compound SELECT operators — UNION / UNION ALL / INTERSECT / EXCEPT.
+// Spec §13.6 — compound selects.
+// =============================================================================
+
+module core.database.sqlite.native.compound_select_api;
+
+public module op;

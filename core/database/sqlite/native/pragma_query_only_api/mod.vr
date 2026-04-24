@@ -1,0 +1,10 @@
+// =============================================================================
+// core/database/sqlite/native/pragma_query_only_api/mod.vr
+// =============================================================================
+// PRAGMA query_only — per-connection read-only toggle.
+// Spec §18.4 — query_only.
+// =============================================================================
+
+module core.database.sqlite.native.pragma_query_only_api;
+
+public module toggle;

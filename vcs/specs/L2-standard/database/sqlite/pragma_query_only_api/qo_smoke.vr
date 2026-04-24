@@ -1,0 +1,70 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, pragma_query_only_api, pragma
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.pragma_query_only_api.toggle.{
+    QueryOnlyState,
+    disabled, enabled_state, flip, is_readonly_session,
+    StmtCategory,
+    ScSelect, ScPragmaRead, ScPragmaWrite, ScDml, ScDdl, ScSessionCtrl,
+    cat_name, is_write_like,
+    stmt_allowed, refusal_code,
+};
+mount base.{Bool};
+
+fn test_disabled_defaults_allow_everything() {
+    let s = disabled();
+    assert(!is_readonly_session(&s));
+    assert(stmt_allowed(&s, &ScDml));
+    assert(stmt_allowed(&s, &ScDdl));
+    assert(stmt_allowed(&s, &ScSelect));
+    assert_eq(refusal_code(&s, &ScDml), 0);
+}
+
+fn test_enabled_blocks_writes() {
+    let s = enabled_state();
+    assert(is_readonly_session(&s));
+    assert(!stmt_allowed(&s, &ScDml));
+    assert(!stmt_allowed(&s, &ScDdl));
+    assert(!stmt_allowed(&s, &ScPragmaWrite));
+    assert(stmt_allowed(&s, &ScSelect));
+    assert(stmt_allowed(&s, &ScPragmaRead));
+    assert(stmt_allowed(&s, &ScSessionCtrl));
+    assert_eq(refusal_code(&s, &ScDml), 8);
+    assert_eq(refusal_code(&s, &ScSelect), 0);
+}
+
+fn test_flip_toggles() {
+    let s0 = disabled();
+    let s1 = flip(s0);
+    assert(is_readonly_session(&s1));
+    let s2 = flip(s1);
+    assert(!is_readonly_session(&s2));
+}
+
+fn test_cat_names() {
+    assert(cat_name(&ScSelect)      == "select".clone());
+    assert(cat_name(&ScPragmaRead)  == "pragma_read".clone());
+    assert(cat_name(&ScDml)         == "dml".clone());
+    assert(cat_name(&ScDdl)         == "ddl".clone());
+}
+
+fn test_is_write_like_set() {
+    assert(is_write_like(&ScDml));
+    assert(is_write_like(&ScDdl));
+    assert(is_write_like(&ScPragmaWrite));
+    assert(!is_write_like(&ScSelect));
+    assert(!is_write_like(&ScPragmaRead));
+    assert(!is_write_like(&ScSessionCtrl));
+}
+
+fn main() {
+    test_disabled_defaults_allow_everything();
+    test_enabled_blocks_writes();
+    test_flip_toggles();
+    test_cat_names();
+    test_is_write_like_set();
+}
