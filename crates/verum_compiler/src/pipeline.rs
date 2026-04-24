@@ -5509,6 +5509,43 @@ impl<'s> CompilationPipeline<'s> {
         Ok(())
     }
 
+    /// Stdlib-hazard lint pass.
+    ///
+    /// Pure AST walk; runs before type checking so the user sees
+    /// W05xx warnings even when the module has type errors that
+    /// would stop the pipeline at `phase_type_check`. Findings
+    /// are emitted as warning-level diagnostics and never fail
+    /// the build (the lint's `default_level()` is `Warn`); CI
+    /// teams that want stricter enforcement set `-Dmap_get_hazard`
+    /// in their lint configuration.
+    fn phase_stdlib_lints(&mut self, module: &Module) {
+        use crate::lint::{
+            walk_module_for_stdlib_hazards, StdlibLintFinding,
+        };
+        let findings: Vec<StdlibLintFinding> =
+            walk_module_for_stdlib_hazards(module);
+        for finding in findings {
+            let summary_text = finding.lint.summary();
+            let diag = verum_diagnostics::DiagnosticBuilder::warning()
+                .code(finding.lint.warning_code())
+                .message(format!(
+                    "{} (`{}`)",
+                    summary_text,
+                    finding.lint.name()
+                ))
+                .span(super::phases::ast_span_to_diagnostic_span(
+                    finding.span,
+                    None,
+                ))
+                .help(
+                    "Prefer `get_optional(key)` for presence semantics or \
+                     `get_or(key, default)` for an explicit fallback.",
+                )
+                .build();
+            self.session.emit_diagnostic(diag);
+        }
+    }
+
     /// Phase 3: Type checking
     fn phase_type_check(&mut self, module: &Module) -> Result<()> {
         debug!("Type checking module");
@@ -5519,6 +5556,11 @@ impl<'s> CompilationPipeline<'s> {
         // the gate active. Idempotent — running twice costs one extra
         // walk on the fast path (no violations).
         self.phase_safety_gate(module)?;
+
+        // Stdlib-hazard lint pass — AST-only, emits W05xx
+        // warnings. Runs before type checking so users see the
+        // hazards even when the module has unrelated type errors.
+        self.phase_stdlib_lints(module);
 
         let start = Instant::now();
 
