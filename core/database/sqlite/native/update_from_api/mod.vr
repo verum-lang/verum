@@ -1,0 +1,18 @@
+// =============================================================================
+// core/database/sqlite/native/update_from_api/mod.vr
+// =============================================================================
+// UPDATE ... FROM — SQLite 3.33+ cross-table UPDATE with a FROM clause.
+// Spec §17.2.2 — UPDATE with join source.
+//
+//   UPDATE target SET col = src.col
+//     FROM src
+//     WHERE target.id = src.id;
+//
+// The FROM clause lets UPDATE join one or more source rowsets against the
+// target without a correlated subquery.
+// =============================================================================
+
+module core.database.sqlite.native.update_from_api;
+
+public module source;
+public module spec;

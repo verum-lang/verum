@@ -1,0 +1,43 @@
+// What kind of source the predicate is being pushed into.
+
+module core.database.sqlite.native.pushdown_filter_api.target;
+
+mount base.{Bool, Text};
+
+public type PushTarget is
+    | PtSubquery          // inline SELECT in the FROM clause
+    | PtView              // materialized or inlined view
+    | PtVtab              // virtual-table xBestIndex
+    | PtUnionBranch       // left or right branch of UNION / UNION ALL
+    | PtCte               // with or without MATERIALIZED
+    ;
+
+public fn target_name(t: &PushTarget) -> Text {
+    match t {
+        PtSubquery    => "subquery".clone(),
+        PtView        => "view".clone(),
+        PtVtab        => "vtab".clone(),
+        PtUnionBranch => "union_branch".clone(),
+        PtCte         => "cte".clone(),
+    }
+}
+
+public fn supports_pushdown(t: &PushTarget) -> Bool {
+    match t {
+        PtSubquery    => true,
+        PtView        => true,
+        PtVtab        => true,
+        PtUnionBranch => true,
+        _             => false,   // CTE pushdown is conditional — see eligibility
+    }
+}
+
+// Vtabs expose predicates via xBestIndex; other sources inline the predicate
+// into the child SELECT's WHERE.
+public fn goes_through_best_index(t: &PushTarget) -> Bool {
+    match t { PtVtab => true, _ => false }
+}
+
+public fn is_compound_target(t: &PushTarget) -> Bool {
+    match t { PtUnionBranch => true, _ => false }
+}

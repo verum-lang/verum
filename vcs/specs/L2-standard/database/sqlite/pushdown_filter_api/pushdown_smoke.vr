@@ -1,0 +1,127 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, pushdown_filter_api, optimizer
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.pushdown_filter_api.target.{
+    PushTarget, PtSubquery, PtView, PtVtab, PtUnionBranch, PtCte,
+    target_name, supports_pushdown, goes_through_best_index, is_compound_target,
+};
+mount core.database.sqlite.native.pushdown_filter_api.eligibility.{
+    PredicateFeatures, zeroed as pred_zeroed,
+    SourceFeatures, source_zeroed,
+    Verdict,
+    VdPushdown, VdCannotPushOuterRef, VdCannotPushAggregate, VdCannotPushLimit,
+    VdCannotPushMaterializedCte, VdCannotPushRecursive, VdCannotPushNonDeterministic,
+    verdict_name, is_success, classify,
+};
+mount base.{Bool};
+
+fn test_target_names() {
+    assert(target_name(&PtSubquery) == "subquery".clone());
+    assert(target_name(&PtVtab) == "vtab".clone());
+    assert(target_name(&PtCte) == "cte".clone());
+}
+
+fn test_supports_pushdown() {
+    assert(supports_pushdown(&PtSubquery));
+    assert(supports_pushdown(&PtView));
+    assert(supports_pushdown(&PtVtab));
+    assert(supports_pushdown(&PtUnionBranch));
+    // CTE is conditional — supports_pushdown returns false by default.
+    assert(!supports_pushdown(&PtCte));
+}
+
+fn test_goes_through_best_index() {
+    assert(goes_through_best_index(&PtVtab));
+    assert(!goes_through_best_index(&PtSubquery));
+}
+
+fn test_is_compound_target() {
+    assert(is_compound_target(&PtUnionBranch));
+    assert(!is_compound_target(&PtSubquery));
+}
+
+fn test_classify_simple_pushdown() {
+    let pf = pred_zeroed();
+    let sf = source_zeroed();
+    match classify(&PtSubquery, &pf, &sf) {
+        VdPushdown => {}, _ => assert(false),
+    }
+}
+
+fn test_classify_outer_ref_rejected() {
+    let mut pf = pred_zeroed();
+    pf.references_outer = true;
+    let sf = source_zeroed();
+    match classify(&PtSubquery, &pf, &sf) {
+        VdCannotPushOuterRef => {}, _ => assert(false),
+    }
+}
+
+fn test_classify_non_deterministic_rejected() {
+    let mut pf = pred_zeroed();
+    pf.is_deterministic = false;
+    let sf = source_zeroed();
+    match classify(&PtView, &pf, &sf) {
+        VdCannotPushNonDeterministic => {}, _ => assert(false),
+    }
+}
+
+fn test_classify_limit_rejected() {
+    let pf = pred_zeroed();
+    let mut sf = source_zeroed();
+    sf.has_limit = true;
+    match classify(&PtSubquery, &pf, &sf) {
+        VdCannotPushLimit => {}, _ => assert(false),
+    }
+}
+
+fn test_classify_cte_materialized_rejected() {
+    let pf = pred_zeroed();
+    let mut sf = source_zeroed();
+    sf.has_materialized_hint = true;
+    match classify(&PtCte, &pf, &sf) {
+        VdCannotPushMaterializedCte => {}, _ => assert(false),
+    }
+}
+
+fn test_classify_cte_recursive_rejected() {
+    let pf = pred_zeroed();
+    let mut sf = source_zeroed();
+    sf.is_recursive_cte = true;
+    match classify(&PtCte, &pf, &sf) {
+        VdCannotPushRecursive => {}, _ => assert(false),
+    }
+}
+
+fn test_classify_cte_plain_pushes() {
+    let pf = pred_zeroed();
+    let sf = source_zeroed();
+    match classify(&PtCte, &pf, &sf) {
+        VdPushdown => {}, _ => assert(false),
+    }
+}
+
+fn test_verdict_success_predicate() {
+    let pf = pred_zeroed();
+    let sf = source_zeroed();
+    assert(is_success(&classify(&PtVtab, &pf, &sf)));
+}
+
+fn main() {
+    test_target_names();
+    test_supports_pushdown();
+    test_goes_through_best_index();
+    test_is_compound_target();
+    test_classify_simple_pushdown();
+    test_classify_outer_ref_rejected();
+    test_classify_non_deterministic_rejected();
+    test_classify_limit_rejected();
+    test_classify_cte_materialized_rejected();
+    test_classify_cte_recursive_rejected();
+    test_classify_cte_plain_pushes();
+    test_verdict_success_predicate();
+}

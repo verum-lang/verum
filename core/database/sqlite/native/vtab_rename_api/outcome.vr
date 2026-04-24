@@ -1,0 +1,42 @@
+// xRename outcome taxonomy.
+
+module core.database.sqlite.native.vtab_rename_api.outcome;
+
+mount base.{Bool, Text};
+
+public type RenameOutcome is
+    | RoOk                 // SQLITE_OK — shadow tables updated
+    | RoReadonlyModule     // module declared without xRename — ALTER rejected
+    | RoShadowLocked       // module refused because shadow tables are open
+    | RoInvalidName        // module rejected the target name
+    | RoIoError            // transient IO error — may retry
+    ;
+
+public fn outcome_name(o: &RenameOutcome) -> Text {
+    match o {
+        RoOk             => "OK".clone(),
+        RoReadonlyModule => "READONLY_MODULE".clone(),
+        RoShadowLocked   => "SHADOW_LOCKED".clone(),
+        RoInvalidName    => "INVALID_NAME".clone(),
+        RoIoError        => "IO_ERROR".clone(),
+    }
+}
+
+public fn is_success(o: &RenameOutcome) -> Bool {
+    match o { RoOk => true, _ => false }
+}
+
+public fn is_retryable(o: &RenameOutcome) -> Bool {
+    match o { RoIoError => true, _ => false }
+}
+
+public fn is_module_defect(o: &RenameOutcome) -> Bool {
+    match o { RoReadonlyModule => true, _ => false }
+}
+
+public fn is_caller_fault(o: &RenameOutcome) -> Bool {
+    match o { RoInvalidName => true, _ => false }
+}
+
+// Modules without an xRename declared are readonly-module on ALTER RENAME.
+public fn when_xrename_is_null() -> RenameOutcome { RoReadonlyModule }

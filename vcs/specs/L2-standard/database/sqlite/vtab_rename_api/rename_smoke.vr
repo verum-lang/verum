@@ -1,0 +1,61 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, vtab_rename_api, vtab
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.vtab_rename_api.outcome.{
+    RenameOutcome,
+    RoOk, RoReadonlyModule, RoShadowLocked, RoInvalidName, RoIoError,
+    outcome_name, is_success, is_retryable, is_module_defect, is_caller_fault,
+    when_xrename_is_null,
+};
+mount base.{Bool};
+
+fn test_outcome_names() {
+    assert(outcome_name(&RoOk)              == "OK".clone());
+    assert(outcome_name(&RoReadonlyModule)  == "READONLY_MODULE".clone());
+    assert(outcome_name(&RoShadowLocked)    == "SHADOW_LOCKED".clone());
+    assert(outcome_name(&RoInvalidName)     == "INVALID_NAME".clone());
+    assert(outcome_name(&RoIoError)         == "IO_ERROR".clone());
+}
+
+fn test_is_success_only_ok() {
+    assert(is_success(&RoOk));
+    assert(!is_success(&RoReadonlyModule));
+    assert(!is_success(&RoIoError));
+}
+
+fn test_retryable_only_io() {
+    assert(is_retryable(&RoIoError));
+    assert(!is_retryable(&RoReadonlyModule));
+    assert(!is_retryable(&RoOk));
+}
+
+fn test_module_defect_only_readonly() {
+    assert(is_module_defect(&RoReadonlyModule));
+    assert(!is_module_defect(&RoShadowLocked));
+}
+
+fn test_caller_fault_only_invalid_name() {
+    assert(is_caller_fault(&RoInvalidName));
+    assert(!is_caller_fault(&RoIoError));
+    assert(!is_caller_fault(&RoOk));
+}
+
+fn test_null_xrename_maps_to_readonly() {
+    match when_xrename_is_null() {
+        RoReadonlyModule => {},
+        _                => assert(false),
+    }
+}
+
+fn main() {
+    test_outcome_names();
+    test_is_success_only_ok();
+    test_retryable_only_io();
+    test_module_defect_only_readonly();
+    test_caller_fault_only_invalid_name();
+    test_null_xrename_maps_to_readonly();
+}

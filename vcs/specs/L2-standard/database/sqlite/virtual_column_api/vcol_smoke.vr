@@ -1,0 +1,109 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, virtual_column_api, vtab
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.virtual_column_api.kind.{
+    VtabColumnKind, VckNormal, VckHidden, VckGeneratedVirtual, VckGeneratedStored,
+    kind_name, is_hidden, is_generated, is_stored,
+    in_star_expansion, is_indexable,
+};
+mount core.database.sqlite.native.virtual_column_api.spec.{
+    VtabColumnSpec,
+    normal, hidden, generated_virtual, generated_stored,
+    with_primary_key, with_unique,
+    eligible_for_star, stored_on_disk, can_participate_in_pk,
+};
+mount base.{Bool};
+
+fn test_kind_names() {
+    assert(kind_name(&VckNormal)           == "normal".clone());
+    assert(kind_name(&VckHidden)           == "hidden".clone());
+    assert(kind_name(&VckGeneratedVirtual) == "generated_virtual".clone());
+    assert(kind_name(&VckGeneratedStored)  == "generated_stored".clone());
+}
+
+fn test_is_hidden_set() {
+    assert(is_hidden(&VckHidden));
+    assert(!is_hidden(&VckNormal));
+    assert(!is_hidden(&VckGeneratedVirtual));
+}
+
+fn test_is_generated_set() {
+    assert(is_generated(&VckGeneratedVirtual));
+    assert(is_generated(&VckGeneratedStored));
+    assert(!is_generated(&VckNormal));
+    assert(!is_generated(&VckHidden));
+}
+
+fn test_is_stored_set() {
+    assert(is_stored(&VckNormal));
+    assert(is_stored(&VckHidden));
+    assert(is_stored(&VckGeneratedStored));
+    assert(!is_stored(&VckGeneratedVirtual));
+}
+
+fn test_in_star_expansion_excludes_hidden() {
+    assert(in_star_expansion(&VckNormal));
+    assert(!in_star_expansion(&VckHidden));
+    assert(in_star_expansion(&VckGeneratedVirtual));
+}
+
+fn test_is_indexable_all_kinds_ok() {
+    assert(is_indexable(&VckNormal));
+    assert(is_indexable(&VckGeneratedStored));
+    assert(is_indexable(&VckGeneratedVirtual));
+    assert(is_indexable(&VckHidden));
+}
+
+fn test_spec_constructors() {
+    let n = normal("id".clone(), "INTEGER".clone());
+    match n.kind { VckNormal => {}, _ => assert(false) }
+    assert(!n.is_primary_key);
+    let h = hidden("json".clone(), "TEXT".clone());
+    match h.kind { VckHidden => {}, _ => assert(false) }
+    let gv = generated_virtual("doubled".clone(), "INTEGER".clone());
+    match gv.kind { VckGeneratedVirtual => {}, _ => assert(false) }
+    let gs = generated_stored("squared".clone(), "INTEGER".clone());
+    match gs.kind { VckGeneratedStored => {}, _ => assert(false) }
+}
+
+fn test_with_primary_key_and_unique() {
+    let c = with_unique(with_primary_key(normal("id".clone(), "INTEGER".clone())));
+    assert(c.is_primary_key);
+    assert(c.is_unique);
+}
+
+fn test_eligible_for_star() {
+    assert(eligible_for_star(&normal("n".clone(), "TEXT".clone())));
+    assert(!eligible_for_star(&hidden("h".clone(), "TEXT".clone())));
+}
+
+fn test_stored_on_disk() {
+    assert(stored_on_disk(&normal("n".clone(), "TEXT".clone())));
+    assert(!stored_on_disk(&generated_virtual("g".clone(), "INT".clone())));
+    assert(stored_on_disk(&generated_stored("g".clone(), "INT".clone())));
+}
+
+fn test_can_participate_in_pk() {
+    assert(can_participate_in_pk(&normal("id".clone(), "INTEGER".clone())));
+    assert(can_participate_in_pk(&generated_stored("g".clone(), "INT".clone())));
+    assert(!can_participate_in_pk(&hidden("h".clone(), "TEXT".clone())));
+    assert(!can_participate_in_pk(&generated_virtual("g".clone(), "INT".clone())));
+}
+
+fn main() {
+    test_kind_names();
+    test_is_hidden_set();
+    test_is_generated_set();
+    test_is_stored_set();
+    test_in_star_expansion_excludes_hidden();
+    test_is_indexable_all_kinds_ok();
+    test_spec_constructors();
+    test_with_primary_key_and_unique();
+    test_eligible_for_star();
+    test_stored_on_disk();
+    test_can_participate_in_pk();
+}

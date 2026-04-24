@@ -1,0 +1,49 @@
+// DQS → identifier-vs-string resolver.
+
+module core.database.sqlite.native.double_quoted_string_api.resolver;
+
+mount core.database.sqlite.native.double_quoted_string_api.context.{
+    DqsConfig, StmtKind, SkDml, SkDdl, SkPragma,
+    dml_enabled, ddl_enabled,
+};
+mount base.{Bool, Text};
+
+public type Resolution is
+    | RsIdentifier             // "name" is an identifier (expected form)
+    | RsStringLiteralLegacy    // "name" is treated as string literal (legacy DQS)
+    | RsError                  // rejected — identifier unresolved, DQS disabled
+    ;
+
+public fn resolution_name(r: &Resolution) -> Text {
+    match r {
+        RsIdentifier           => "identifier".clone(),
+        RsStringLiteralLegacy  => "string_literal_legacy".clone(),
+        RsError                => "error".clone(),
+    }
+}
+
+public fn is_legacy_fallback(r: &Resolution) -> Bool {
+    match r { RsStringLiteralLegacy => true, _ => false }
+}
+
+public fn is_error(r: &Resolution) -> Bool {
+    match r { RsError => true, _ => false }
+}
+
+// Resolve a "quoted" token:
+//   * if it names a column / alias / table / identifier currently in scope → identifier
+//   * else if the current stmt-kind has DQS enabled → legacy string literal
+//   * else → error
+public fn resolve(
+    cfg: &DqsConfig,
+    kind: &StmtKind,
+    identifier_in_scope: Bool,
+) -> Resolution {
+    if identifier_in_scope { return RsIdentifier; }
+    let allowed = match kind {
+        SkDml    => dml_enabled(cfg),
+        SkDdl    => ddl_enabled(cfg),
+        SkPragma => false,          // PRAGMA never accepts legacy DQS
+    };
+    if allowed { RsStringLiteralLegacy } else { RsError }
+}

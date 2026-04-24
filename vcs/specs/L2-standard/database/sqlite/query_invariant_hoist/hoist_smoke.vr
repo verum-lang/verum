@@ -1,0 +1,108 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, query_invariant_hoist, optimizer
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.query_invariant_hoist.dependency.{
+    DepSet,
+    constant_dep, cursor_dep, random_dep, join,
+    is_constant, is_invariant_at_loop, depends_only_outside,
+};
+mount core.database.sqlite.native.query_invariant_hoist.plan.{
+    HoistPlan,
+    HpHoistToStmtSetup, HpHoistToLoopEntry, HpHoistToInnerEntry, HpKeepInline,
+    plan_name, is_hoistable, classify,
+};
+mount base.{Bool, Int64};
+
+fn test_plan_names() {
+    assert(plan_name(&HpHoistToStmtSetup)  == "stmt_setup".clone());
+    assert(plan_name(&HpHoistToLoopEntry)  == "loop_entry".clone());
+    assert(plan_name(&HpHoistToInnerEntry) == "inner_entry".clone());
+    assert(plan_name(&HpKeepInline)        == "inline".clone());
+}
+
+fn test_is_hoistable() {
+    assert(is_hoistable(&HpHoistToStmtSetup));
+    assert(is_hoistable(&HpHoistToLoopEntry));
+    assert(is_hoistable(&HpHoistToInnerEntry));
+    assert(!is_hoistable(&HpKeepInline));
+}
+
+fn test_constant_dep_is_constant() {
+    let d = constant_dep();
+    assert(is_constant(&d));
+}
+
+fn test_cursor_and_random_dep_are_not_constant() {
+    assert(!is_constant(&cursor_dep(1 as Int64)));
+    assert(!is_constant(&random_dep()));
+}
+
+fn test_join_merges_bits_and_random_flag() {
+    let a = cursor_dep(0x1 as Int64);
+    let b = cursor_dep(0x4 as Int64);
+    let j = join(&a, &b);
+    assert_eq(j.cursor_bits, 0x5 as Int64);
+    assert(!j.references_random);
+    let r = random_dep();
+    let j2 = join(&j, &r);
+    assert(j2.references_random);
+}
+
+fn test_is_invariant_at_loop() {
+    let d = cursor_dep(0x2 as Int64);   // references cursor 1
+    // inner cursor is bit 0 → invariant since d doesn't reference cursor 0
+    assert(is_invariant_at_loop(&d, 0x1 as Int64));
+    // inner cursor is bit 1 → NOT invariant
+    assert(!is_invariant_at_loop(&d, 0x2 as Int64));
+    // random is never invariant
+    assert(!is_invariant_at_loop(&random_dep(), 0x1 as Int64));
+}
+
+fn test_depends_only_outside() {
+    let d = cursor_dep(0x2 as Int64);
+    assert(depends_only_outside(&d, 0x1 as Int64));
+    assert(!depends_only_outside(&d, 0x2 as Int64));
+}
+
+fn test_classify_constant_goes_to_stmt_setup() {
+    let d = constant_dep();
+    let p = classify(&d, 0 as Int64, 0x1 as Int64);
+    match p { HpHoistToStmtSetup => {}, _ => assert(false) }
+}
+
+fn test_classify_random_stays_inline() {
+    let d = random_dep();
+    let p = classify(&d, 0 as Int64, 0x1 as Int64);
+    match p { HpKeepInline => {}, _ => assert(false) }
+}
+
+fn test_classify_references_inner_is_inline() {
+    let d = cursor_dep(0x1 as Int64);
+    let p = classify(&d, 0 as Int64, 0x1 as Int64);
+    match p { HpKeepInline => {}, _ => assert(false) }
+}
+
+fn test_classify_outer_dep_hoists_to_loop_entry() {
+    let d = cursor_dep(0x2 as Int64);
+    // outer_mask covers bit 1
+    let p = classify(&d, 0x2 as Int64, 0x1 as Int64);
+    match p { HpHoistToLoopEntry => {}, _ => assert(false) }
+}
+
+fn main() {
+    test_plan_names();
+    test_is_hoistable();
+    test_constant_dep_is_constant();
+    test_cursor_and_random_dep_are_not_constant();
+    test_join_merges_bits_and_random_flag();
+    test_is_invariant_at_loop();
+    test_depends_only_outside();
+    test_classify_constant_goes_to_stmt_setup();
+    test_classify_random_stays_inline();
+    test_classify_references_inner_is_inline();
+    test_classify_outer_dep_hoists_to_loop_entry();
+}

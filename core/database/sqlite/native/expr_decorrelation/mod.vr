@@ -1,0 +1,17 @@
+// =============================================================================
+// core/database/sqlite/native/expr_decorrelation/mod.vr
+// =============================================================================
+// Correlated-subquery decorrelation — planner pass that rewrites
+// `WHERE col IN (SELECT x FROM ... WHERE y = outer.z)` as a semi-join.
+// Spec §13.5 — optimizer.
+//
+// Preconditions (subset):
+//   * correlation references are equality-form
+//   * the inner query has no aggregate / DISTINCT depending on outer
+//   * inner LIMIT matches at most 1 row when used in scalar position
+// =============================================================================
+
+module core.database.sqlite.native.expr_decorrelation;
+
+public module position;
+public module eligibility;

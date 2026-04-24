@@ -1,0 +1,88 @@
+// Predicate + source feature combination → pushdown eligibility verdict.
+
+module core.database.sqlite.native.pushdown_filter_api.eligibility;
+
+mount core.database.sqlite.native.pushdown_filter_api.target.{
+    PushTarget, PtSubquery, PtView, PtVtab, PtUnionBranch, PtCte,
+    supports_pushdown,
+};
+mount base.{Bool, Text};
+
+public type PredicateFeatures is {
+    references_outer: Bool,
+    is_deterministic: Bool,
+    has_aggregate: Bool,
+    includes_subquery: Bool,
+};
+
+public fn zeroed() -> PredicateFeatures {
+    PredicateFeatures {
+        references_outer: false,
+        is_deterministic: true,
+        has_aggregate: false,
+        includes_subquery: false,
+    }
+}
+
+public type SourceFeatures is {
+    has_aggregate: Bool,
+    has_distinct: Bool,
+    has_limit: Bool,
+    is_recursive_cte: Bool,
+    has_materialized_hint: Bool,
+};
+
+public fn source_zeroed() -> SourceFeatures {
+    SourceFeatures {
+        has_aggregate: false,
+        has_distinct: false,
+        has_limit: false,
+        is_recursive_cte: false,
+        has_materialized_hint: false,
+    }
+}
+
+public type Verdict is
+    | VdPushdown          // safe to push
+    | VdCannotPushOuterRef // predicate mentions outer columns — not pushable
+    | VdCannotPushAggregate
+    | VdCannotPushLimit
+    | VdCannotPushMaterializedCte
+    | VdCannotPushRecursive
+    | VdCannotPushNonDeterministic
+    ;
+
+public fn verdict_name(v: &Verdict) -> Text {
+    match v {
+        VdPushdown                    => "push".clone(),
+        VdCannotPushOuterRef          => "cannot_outer_ref".clone(),
+        VdCannotPushAggregate         => "cannot_aggregate".clone(),
+        VdCannotPushLimit             => "cannot_limit".clone(),
+        VdCannotPushMaterializedCte   => "cannot_materialized_cte".clone(),
+        VdCannotPushRecursive         => "cannot_recursive".clone(),
+        VdCannotPushNonDeterministic  => "cannot_non_det".clone(),
+    }
+}
+
+public fn is_success(v: &Verdict) -> Bool {
+    match v { VdPushdown => true, _ => false }
+}
+
+public fn classify(t: &PushTarget, pf: &PredicateFeatures, sf: &SourceFeatures) -> Verdict {
+    if pf.references_outer { return VdCannotPushOuterRef; }
+    if !pf.is_deterministic { return VdCannotPushNonDeterministic; }
+    if pf.has_aggregate { return VdCannotPushAggregate; }
+    if sf.has_limit { return VdCannotPushLimit; }
+    if sf.has_aggregate { return VdCannotPushAggregate; }
+    match t {
+        PtCte => {
+            if sf.is_recursive_cte { return VdCannotPushRecursive; }
+            if sf.has_materialized_hint { return VdCannotPushMaterializedCte; }
+            VdPushdown
+        },
+        _ => {
+            if !supports_pushdown(t) { return VdCannotPushMaterializedCte; }
+            VdPushdown
+        },
+    }
+}

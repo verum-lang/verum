@@ -1,0 +1,85 @@
+// Vtab column spec.
+
+module core.database.sqlite.native.virtual_column_api.spec;
+
+mount core.database.sqlite.native.virtual_column_api.kind.{
+    VtabColumnKind, VckNormal, VckHidden, VckGeneratedVirtual, VckGeneratedStored,
+    is_hidden, is_generated, is_stored, in_star_expansion, is_indexable,
+};
+mount base.{Bool, Text};
+
+public type VtabColumnSpec is {
+    name: Text,
+    declared_type: Text,
+    kind: VtabColumnKind,
+    is_primary_key: Bool,
+    is_unique: Bool,
+};
+
+public fn normal(name: Text, ty: Text) -> VtabColumnSpec {
+    VtabColumnSpec {
+        name: name,
+        declared_type: ty,
+        kind: VckNormal,
+        is_primary_key: false,
+        is_unique: false,
+    }
+}
+
+public fn hidden(name: Text, ty: Text) -> VtabColumnSpec {
+    VtabColumnSpec {
+        name: name,
+        declared_type: ty,
+        kind: VckHidden,
+        is_primary_key: false,
+        is_unique: false,
+    }
+}
+
+public fn generated_virtual(name: Text, ty: Text) -> VtabColumnSpec {
+    VtabColumnSpec {
+        name: name,
+        declared_type: ty,
+        kind: VckGeneratedVirtual,
+        is_primary_key: false,
+        is_unique: false,
+    }
+}
+
+public fn generated_stored(name: Text, ty: Text) -> VtabColumnSpec {
+    VtabColumnSpec {
+        name: name,
+        declared_type: ty,
+        kind: VckGeneratedStored,
+        is_primary_key: false,
+        is_unique: false,
+    }
+}
+
+public fn with_primary_key(mut s: VtabColumnSpec) -> VtabColumnSpec {
+    s.is_primary_key = true;
+    s
+}
+
+public fn with_unique(mut s: VtabColumnSpec) -> VtabColumnSpec {
+    s.is_unique = true;
+    s
+}
+
+public fn eligible_for_star(s: &VtabColumnSpec) -> Bool {
+    in_star_expansion(&s.kind)
+}
+
+public fn stored_on_disk(s: &VtabColumnSpec) -> Bool {
+    is_stored(&s.kind)
+}
+
+// Only normal + stored-generated are allowed in PRIMARY KEY; virtual/hidden
+// cannot be unless the vtab explicitly opts in.
+public fn can_participate_in_pk(s: &VtabColumnSpec) -> Bool {
+    match s.kind {
+        VckNormal          => true,
+        VckGeneratedStored => true,
+        _                  => false,
+    }
+}

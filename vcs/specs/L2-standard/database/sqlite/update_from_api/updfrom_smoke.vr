@@ -1,0 +1,95 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, update_from_api, sql
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.update_from_api.source.{
+    SourceKind, SkTable, SkSubquery, SkCte, SkVtab,
+    source_kind_name, source_name,
+    is_materialized_implicitly, can_be_written_to_by_self_join,
+};
+mount core.database.sqlite.native.update_from_api.spec.{
+    UpdateFromSpec,
+    new, with_alias, push_source,
+    source_count, has_where, target_appears_in_sources, is_well_formed,
+    effective_target_ref,
+};
+mount base.{Bool};
+
+fn test_source_kind_names() {
+    assert(source_kind_name(&SkTable("t".clone()))    == "table".clone());
+    assert(source_kind_name(&SkSubquery("s".clone())) == "subquery".clone());
+    assert(source_kind_name(&SkCte("c".clone()))      == "cte".clone());
+    assert(source_kind_name(&SkVtab("v".clone()))     == "vtab".clone());
+}
+
+fn test_source_name_projection() {
+    assert(source_name(&SkTable("users".clone()))    == "users".clone());
+    assert(source_name(&SkSubquery("(sub)".clone())) == "(sub)".clone());
+}
+
+fn test_subquery_is_materialized_implicitly() {
+    assert(is_materialized_implicitly(&SkSubquery("x".clone())));
+    assert(!is_materialized_implicitly(&SkTable("t".clone())));
+    assert(!is_materialized_implicitly(&SkCte("c".clone())));
+}
+
+fn test_only_tables_can_self_join() {
+    assert(can_be_written_to_by_self_join(&SkTable("t".clone())));
+    assert(!can_be_written_to_by_self_join(&SkVtab("v".clone())));
+    assert(!can_be_written_to_by_self_join(&SkCte("c".clone())));
+}
+
+fn test_spec_defaults() {
+    let s = new("users".clone(), "users.id = src.id".clone());
+    assert(s.target_alias == "".clone());
+    assert_eq(source_count(&s), 0);
+    assert(has_where(&s));
+    assert_eq(effective_target_ref(&s), "users".clone());
+}
+
+fn test_spec_with_alias_uses_alias() {
+    let s = with_alias(new("users".clone(), "".clone()), "u".clone());
+    assert_eq(effective_target_ref(&s), "u".clone());
+}
+
+fn test_push_source_and_count() {
+    let s0 = new("t".clone(), "".clone());
+    let s1 = push_source(s0, SkTable("src".clone()));
+    let s2 = push_source(s1, SkSubquery("(SELECT ...)".clone()));
+    assert_eq(source_count(&s2), 2);
+}
+
+fn test_target_appears_in_sources_rejects_self_table() {
+    let s0 = new("users".clone(), "".clone());
+    let s1 = push_source(s0, SkTable("users".clone()));
+    assert(target_appears_in_sources(&s1));
+    assert(!is_well_formed(&s1));
+}
+
+fn test_target_in_vtab_source_is_allowed() {
+    // SkVtab cannot self-join per the classifier → target_appears_in_sources false.
+    let s = push_source(new("users".clone(), "".clone()), SkVtab("users".clone()));
+    assert(!target_appears_in_sources(&s));
+    assert(is_well_formed(&s));
+}
+
+fn test_well_formed_requires_nonempty_target() {
+    let bad = new("".clone(), "".clone());
+    assert(!is_well_formed(&bad));
+}
+
+fn main() {
+    test_source_kind_names();
+    test_source_name_projection();
+    test_subquery_is_materialized_implicitly();
+    test_only_tables_can_self_join();
+    test_spec_defaults();
+    test_spec_with_alias_uses_alias();
+    test_push_source_and_count();
+    test_target_appears_in_sources_rejects_self_table();
+    test_target_in_vtab_source_is_allowed();
+    test_well_formed_requires_nonempty_target();
+}

@@ -1,0 +1,11 @@
+// =============================================================================
+// core/database/sqlite/native/vtab_rename_api/mod.vr
+// =============================================================================
+// sqlite3_module.xRename — called during ALTER TABLE ... RENAME TO to let a
+// virtual-table module update its backing store's naming.
+// Spec §16.1.7 — vtab rename protocol.
+// =============================================================================
+
+module core.database.sqlite.native.vtab_rename_api;
+
+public module outcome;

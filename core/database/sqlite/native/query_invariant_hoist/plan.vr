@@ -1,0 +1,44 @@
+// Hoist-plan outcome: where to place the compute-once.
+
+module core.database.sqlite.native.query_invariant_hoist.plan;
+
+mount core.database.sqlite.native.query_invariant_hoist.dependency.{
+    DepSet, is_constant, is_invariant_at_loop, depends_only_outside,
+};
+mount base.{Bool, Text, Int64};
+
+public type HoistPlan is
+    | HpHoistToStmtSetup      // compute once at stmt prepare
+    | HpHoistToLoopEntry      // compute at outer-loop setup
+    | HpHoistToInnerEntry     // at the current loop's prologue but before the row-step
+    | HpKeepInline            // must re-evaluate per row
+    ;
+
+public fn plan_name(p: &HoistPlan) -> Text {
+    match p {
+        HpHoistToStmtSetup   => "stmt_setup".clone(),
+        HpHoistToLoopEntry   => "loop_entry".clone(),
+        HpHoistToInnerEntry  => "inner_entry".clone(),
+        HpKeepInline         => "inline".clone(),
+    }
+}
+
+public fn is_hoistable(p: &HoistPlan) -> Bool {
+    match p { HpKeepInline => false, _ => true }
+}
+
+// Given the dependency of an expression + the per-cursor bit of each live loop,
+// pick the outermost hoist point.
+public fn classify(d: &DepSet, outer_mask: Int64, inner_bit: Int64) -> HoistPlan {
+    if is_constant(d) { return HpHoistToStmtSetup; }
+    if d.references_random { return HpKeepInline; }
+    if (d.cursor_bits & inner_bit) != (0 as Int64) { return HpKeepInline; }
+    // Depends on some outer cursor but not the current inner cursor.
+    if depends_only_outside(d, inner_bit) {
+        if (d.cursor_bits & outer_mask) == (0 as Int64) {
+            return HpHoistToStmtSetup;
+        }
+        return HpHoistToLoopEntry;
+    }
+    HpHoistToInnerEntry
+}

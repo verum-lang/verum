@@ -1,0 +1,46 @@
+// Subquery position in the outer query — determines what decorrelation shape applies.
+
+module core.database.sqlite.native.expr_decorrelation.position;
+
+mount base.{Bool, Text};
+
+public type SubqueryPosition is
+    | SpWhereIn           // WHERE col IN (SELECT ...)
+    | SpWhereExists       // WHERE EXISTS (SELECT ...)
+    | SpWhereNotExists    // WHERE NOT EXISTS (SELECT ...)
+    | SpSelectScalar      // SELECT (SELECT ...) FROM ...
+    | SpFromTable         // FROM (SELECT ...) — not correlated
+    ;
+
+public fn position_name(p: &SubqueryPosition) -> Text {
+    match p {
+        SpWhereIn         => "where_in".clone(),
+        SpWhereExists     => "where_exists".clone(),
+        SpWhereNotExists  => "where_not_exists".clone(),
+        SpSelectScalar    => "select_scalar".clone(),
+        SpFromTable       => "from_table".clone(),
+    }
+}
+
+// Which positions become a semi-join after decorrelation.
+public fn is_semijoin_shape(p: &SubqueryPosition) -> Bool {
+    match p {
+        SpWhereIn     => true,
+        SpWhereExists => true,
+        _             => false,
+    }
+}
+
+public fn is_anti_semijoin_shape(p: &SubqueryPosition) -> Bool {
+    match p { SpWhereNotExists => true, _ => false }
+}
+
+// A scalar subquery must return at most one row per outer row.
+public fn requires_at_most_one_row(p: &SubqueryPosition) -> Bool {
+    match p { SpSelectScalar => true, _ => false }
+}
+
+// FROM-table subqueries are already uncorrelated by construction.
+public fn is_already_uncorrelated(p: &SubqueryPosition) -> Bool {
+    match p { SpFromTable => true, _ => false }
+}

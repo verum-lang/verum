@@ -1,0 +1,54 @@
+// Per-vtab column visibility + storage kind.
+
+module core.database.sqlite.native.virtual_column_api.kind;
+
+mount base.{Bool, Text};
+
+public type VtabColumnKind is
+    | VckNormal           // normal column
+    | VckHidden           // HIDDEN — invisible to SELECT *, must name explicitly
+    | VckGeneratedVirtual // GENERATED ALWAYS AS (...) VIRTUAL
+    | VckGeneratedStored  // GENERATED ALWAYS AS (...) STORED
+    ;
+
+public fn kind_name(k: &VtabColumnKind) -> Text {
+    match k {
+        VckNormal            => "normal".clone(),
+        VckHidden            => "hidden".clone(),
+        VckGeneratedVirtual  => "generated_virtual".clone(),
+        VckGeneratedStored   => "generated_stored".clone(),
+    }
+}
+
+public fn is_hidden(k: &VtabColumnKind) -> Bool {
+    match k { VckHidden => true, _ => false }
+}
+
+public fn is_generated(k: &VtabColumnKind) -> Bool {
+    match k {
+        VckGeneratedVirtual => true,
+        VckGeneratedStored  => true,
+        _                   => false,
+    }
+}
+
+public fn is_stored(k: &VtabColumnKind) -> Bool {
+    match k {
+        VckNormal          => true,
+        VckHidden          => true,
+        VckGeneratedStored => true,
+        _                  => false,
+    }
+}
+
+// Columns visible to SELECT * — everything except HIDDEN.
+public fn in_star_expansion(k: &VtabColumnKind) -> Bool {
+    !is_hidden(k)
+}
+
+// Indexable columns can appear in a vtab's xBestIndex constraint list.
+// Generated VIRTUAL columns are indexable only if the backing expression
+// is deterministic — conservatively we mark them indexable.
+public fn is_indexable(k: &VtabColumnKind) -> Bool {
+    match k { VckGeneratedStored => true, VckGeneratedVirtual => true, _ => true }
+}

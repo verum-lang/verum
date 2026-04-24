@@ -1,0 +1,40 @@
+// Source-row reference in an UPDATE-FROM.
+
+module core.database.sqlite.native.update_from_api.source;
+
+mount base.{Bool, Text};
+
+public type SourceKind is
+    | SkTable(Text)          // plain table reference
+    | SkSubquery(Text)       // (SELECT ...) AS alias
+    | SkCte(Text)            // reference to WITH CTE
+    | SkVtab(Text)           // virtual table / table-valued function
+    ;
+
+public fn source_kind_name(s: &SourceKind) -> Text {
+    match s {
+        SkTable(_)    => "table".clone(),
+        SkSubquery(_) => "subquery".clone(),
+        SkCte(_)      => "cte".clone(),
+        SkVtab(_)     => "vtab".clone(),
+    }
+}
+
+public fn source_name(s: &SourceKind) -> Text {
+    match s {
+        SkTable(n)    => n.clone(),
+        SkSubquery(n) => n.clone(),
+        SkCte(n)      => n.clone(),
+        SkVtab(n)     => n.clone(),
+    }
+}
+
+public fn is_materialized_implicitly(s: &SourceKind) -> Bool {
+    match s { SkSubquery(_) => true, _ => false }
+}
+
+public fn can_be_written_to_by_self_join(s: &SourceKind) -> Bool {
+    // A plain table + a table-valued-function may also be the target of the
+    // UPDATE — SQLite rejects that at compile time.
+    match s { SkTable(_) => true, _ => false }
+}

@@ -1,0 +1,13 @@
+// =============================================================================
+// core/database/sqlite/native/index_key_sort_api/mod.vr
+// =============================================================================
+// Index-key sort order — per-column ASC/DESC + NULLS FIRST/LAST policy.
+// Spec §13.3 — index variants.
+//
+// CREATE INDEX ... ON t(col1 ASC, col2 DESC NULLS FIRST);
+// =============================================================================
+
+module core.database.sqlite.native.index_key_sort_api;
+
+public module nulls_policy;
+public module key_column;

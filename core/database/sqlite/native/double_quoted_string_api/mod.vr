@@ -1,0 +1,16 @@
+// =============================================================================
+// core/database/sqlite/native/double_quoted_string_api/mod.vr
+// =============================================================================
+// Double-quoted string literal (DQS) handling — SQLite's legacy "string" vs
+// "identifier" resolution.
+// Spec §14.1.3 — double-quoted string literals.
+//
+// SQLITE_DBCONFIG_DQS_DML / _DQS_DDL control whether "name" inside a DML or
+// DDL statement is treated as a string literal when not a valid identifier.
+// Modern apps should always disable both.
+// =============================================================================
+
+module core.database.sqlite.native.double_quoted_string_api;
+
+public module context;
+public module resolver;

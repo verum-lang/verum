@@ -1,0 +1,43 @@
+// DBCONFIG + SQL-context state for DQS resolution.
+
+module core.database.sqlite.native.double_quoted_string_api.context;
+
+mount base.{Bool, Text};
+
+public type DqsConfig is {
+    dqs_dml: Bool,    // SQLITE_DBCONFIG_DQS_DML — default false on fresh DB
+    dqs_ddl: Bool,    // SQLITE_DBCONFIG_DQS_DDL — default true historically
+};
+
+public fn defensive_default() -> DqsConfig {
+    DqsConfig { dqs_dml: false, dqs_ddl: false }
+}
+
+public fn legacy_default() -> DqsConfig {
+    DqsConfig { dqs_dml: false, dqs_ddl: true }
+}
+
+public fn fully_permissive() -> DqsConfig {
+    DqsConfig { dqs_dml: true, dqs_ddl: true }
+}
+
+public fn dml_enabled(c: &DqsConfig) -> Bool { c.dqs_dml }
+public fn ddl_enabled(c: &DqsConfig) -> Bool { c.dqs_ddl }
+
+public fn all_disabled(c: &DqsConfig) -> Bool {
+    !c.dqs_dml && !c.dqs_ddl
+}
+
+public type StmtKind is
+    | SkDml                 // SELECT / INSERT / UPDATE / DELETE
+    | SkDdl                 // CREATE / ALTER / DROP
+    | SkPragma              // PRAGMA
+    ;
+
+public fn stmt_kind_name(s: &StmtKind) -> Text {
+    match s {
+        SkDml    => "DML".clone(),
+        SkDdl    => "DDL".clone(),
+        SkPragma => "PRAGMA".clone(),
+    }
+}

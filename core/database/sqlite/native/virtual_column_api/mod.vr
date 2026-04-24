@@ -1,0 +1,17 @@
+// =============================================================================
+// core/database/sqlite/native/virtual_column_api/mod.vr
+// =============================================================================
+// Virtual-table column kind + flags (HIDDEN / VIRTUAL / STORED).
+// Spec §16.1.3 — vtab column shape.
+//
+// A vtab may expose:
+//   * normal columns — visible + indexable
+//   * HIDDEN columns — only visible when named explicitly (json_each "json")
+//   * VIRTUAL generated columns — computed on read
+//   * STORED generated columns — computed on write, persisted
+// =============================================================================
+
+module core.database.sqlite.native.virtual_column_api;
+
+public module kind;
+public module spec;

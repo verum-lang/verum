@@ -1,0 +1,71 @@
+// UPDATE ... FROM spec.
+
+module core.database.sqlite.native.update_from_api.spec;
+
+mount core.database.sqlite.native.update_from_api.source.{
+    SourceKind, SkTable, SkSubquery, SkCte, SkVtab,
+    source_name, can_be_written_to_by_self_join,
+};
+mount base.{Bool, Text};
+mount core.collections.list.{List};
+
+public type UpdateFromSpec is {
+    target_table: Text,
+    target_alias: Text,
+    sources: List<SourceKind>,
+    where_sql: Text,
+};
+
+public fn new(target_table: Text, where_sql: Text) -> UpdateFromSpec {
+    UpdateFromSpec {
+        target_table: target_table,
+        target_alias: "".clone(),
+        sources: [].clone() as List<SourceKind>,
+        where_sql: where_sql,
+    }
+}
+
+public fn with_alias(mut s: UpdateFromSpec, alias: Text) -> UpdateFromSpec {
+    s.target_alias = alias;
+    s
+}
+
+public fn push_source(mut s: UpdateFromSpec, src: SourceKind) -> UpdateFromSpec {
+    s.sources.push(src);
+    s
+}
+
+public fn source_count(s: &UpdateFromSpec) -> Int { s.sources.len() }
+
+public fn has_where(s: &UpdateFromSpec) -> Bool { s.where_sql.len() > 0 }
+
+public fn target_appears_in_sources(s: &UpdateFromSpec) -> Bool {
+    let mut i: Int = 0;
+    while i < s.sources.len() {
+        if !can_be_written_to_by_self_join(&s.sources[i]) {
+            i = i + 1;
+        } else {
+            if source_name(&s.sources[i]) == s.target_table {
+                return true;
+            }
+            i = i + 1;
+        }
+    }
+    false
+}
+
+// SQLite rejects UPDATE target ... FROM target (same table twice).
+public fn is_well_formed(s: &UpdateFromSpec) -> Bool {
+    if s.target_table.len() == 0 { return false; }
+    if target_appears_in_sources(s) { return false; }
+    true
+}
+
+// Effective alias for the target — explicit alias or the table name.
+public fn effective_target_ref(s: &UpdateFromSpec) -> Text {
+    if s.target_alias.len() > 0 {
+        s.target_alias.clone()
+    } else {
+        s.target_table.clone()
+    }
+}

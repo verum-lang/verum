@@ -1,0 +1,12 @@
+// =============================================================================
+// core/database/sqlite/native/pushdown_filter_api/mod.vr
+// =============================================================================
+// Predicate pushdown — sending WHERE terms down into subqueries, vtabs, and
+// UNION branches so the source can filter rows before the outer loop sees them.
+// Spec §13.5 — optimizer.
+// =============================================================================
+
+module core.database.sqlite.native.pushdown_filter_api;
+
+public module target;
+public module eligibility;

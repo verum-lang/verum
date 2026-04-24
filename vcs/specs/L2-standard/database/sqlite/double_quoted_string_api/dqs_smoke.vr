@@ -1,0 +1,92 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, double_quoted_string_api, lexer
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.double_quoted_string_api.context.{
+    DqsConfig,
+    defensive_default, legacy_default, fully_permissive,
+    dml_enabled, ddl_enabled, all_disabled,
+    StmtKind, SkDml, SkDdl, SkPragma, stmt_kind_name,
+};
+mount core.database.sqlite.native.double_quoted_string_api.resolver.{
+    Resolution, RsIdentifier, RsStringLiteralLegacy, RsError,
+    resolution_name, is_legacy_fallback, is_error,
+    resolve,
+};
+mount base.{Bool};
+
+fn test_default_configs() {
+    let d = defensive_default();
+    assert(!dml_enabled(&d));
+    assert(!ddl_enabled(&d));
+    assert(all_disabled(&d));
+    let l = legacy_default();
+    assert(!dml_enabled(&l));
+    assert(ddl_enabled(&l));
+    assert(!all_disabled(&l));
+    let p = fully_permissive();
+    assert(dml_enabled(&p));
+    assert(ddl_enabled(&p));
+}
+
+fn test_stmt_kind_names() {
+    assert(stmt_kind_name(&SkDml)    == "DML".clone());
+    assert(stmt_kind_name(&SkDdl)    == "DDL".clone());
+    assert(stmt_kind_name(&SkPragma) == "PRAGMA".clone());
+}
+
+fn test_resolution_names() {
+    assert(resolution_name(&RsIdentifier)          == "identifier".clone());
+    assert(resolution_name(&RsStringLiteralLegacy) == "string_literal_legacy".clone());
+    assert(resolution_name(&RsError)               == "error".clone());
+}
+
+fn test_resolve_identifier_in_scope_wins() {
+    let c = fully_permissive();
+    match resolve(&c, &SkDml, true) { RsIdentifier => {}, _ => assert(false) }
+    match resolve(&c, &SkPragma, true) { RsIdentifier => {}, _ => assert(false) }
+}
+
+fn test_resolve_legacy_fallback_when_permitted() {
+    let l = legacy_default();
+    // DDL allows DQS in legacy mode; DML does not.
+    match resolve(&l, &SkDdl, false) { RsStringLiteralLegacy => {}, _ => assert(false) }
+    match resolve(&l, &SkDml, false) { RsError => {}, _ => assert(false) }
+}
+
+fn test_pragma_never_permits_legacy_dqs() {
+    let p = fully_permissive();
+    match resolve(&p, &SkPragma, false) { RsError => {}, _ => assert(false) }
+}
+
+fn test_fully_disabled_rejects_missing_identifier() {
+    let d = defensive_default();
+    match resolve(&d, &SkDml, false) { RsError => {}, _ => assert(false) }
+    match resolve(&d, &SkDdl, false) { RsError => {}, _ => assert(false) }
+}
+
+fn test_is_legacy_fallback_predicate() {
+    assert(is_legacy_fallback(&RsStringLiteralLegacy));
+    assert(!is_legacy_fallback(&RsIdentifier));
+    assert(!is_legacy_fallback(&RsError));
+}
+
+fn test_is_error_predicate() {
+    assert(is_error(&RsError));
+    assert(!is_error(&RsIdentifier));
+}
+
+fn main() {
+    test_default_configs();
+    test_stmt_kind_names();
+    test_resolution_names();
+    test_resolve_identifier_in_scope_wins();
+    test_resolve_legacy_fallback_when_permitted();
+    test_pragma_never_permits_legacy_dqs();
+    test_fully_disabled_rejects_missing_identifier();
+    test_is_legacy_fallback_predicate();
+    test_is_error_predicate();
+}

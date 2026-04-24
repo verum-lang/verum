@@ -1,0 +1,91 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, index_key_sort_api, index
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.index_key_sort_api.nulls_policy.{
+    NullsPolicy, NpFirst, NpLast, NpDefault,
+    policy_name, resolve, is_explicit, compare_null_vs_val,
+};
+mount core.database.sqlite.native.index_key_sort_api.key_column.{
+    KeyColumn,
+    asc, desc, with_nulls, with_collation,
+    effective_nulls_policy, has_explicit_nulls_policy, has_custom_collation,
+};
+mount base.{Bool};
+
+fn test_policy_names() {
+    assert(policy_name(&NpFirst)   == "NULLS FIRST".clone());
+    assert(policy_name(&NpLast)    == "NULLS LAST".clone());
+    assert(policy_name(&NpDefault) == "DEFAULT".clone());
+}
+
+fn test_is_explicit() {
+    assert(!is_explicit(&NpDefault));
+    assert(is_explicit(&NpFirst));
+    assert(is_explicit(&NpLast));
+}
+
+fn test_resolve_default_asc_is_first() {
+    match resolve(&NpDefault, true) { NpFirst => {}, _ => assert(false) }
+}
+
+fn test_resolve_default_desc_is_last() {
+    match resolve(&NpDefault, false) { NpLast => {}, _ => assert(false) }
+}
+
+fn test_resolve_explicit_preserved() {
+    match resolve(&NpFirst, false) { NpFirst => {}, _ => assert(false) }
+    match resolve(&NpLast, true)   { NpLast  => {}, _ => assert(false) }
+}
+
+fn test_compare_null_vs_val() {
+    // both NULL → 0
+    assert_eq(compare_null_vs_val(true, true, &NpDefault, true), 0);
+    // ASC + default → NULLS FIRST
+    assert(compare_null_vs_val(true, false, &NpDefault, true) < 0);
+    assert(compare_null_vs_val(false, true, &NpDefault, true) > 0);
+    // DESC + default → NULLS LAST
+    assert(compare_null_vs_val(true, false, &NpDefault, false) > 0);
+    // explicit NpFirst overrides desc
+    assert(compare_null_vs_val(true, false, &NpFirst, false) < 0);
+}
+
+fn test_asc_desc_constructors() {
+    let c = asc("id".clone());
+    assert(c.ascending);
+    match c.nulls_policy { NpDefault => {}, _ => assert(false) }
+    let d = desc("id".clone());
+    assert(!d.ascending);
+}
+
+fn test_with_nulls_and_collation() {
+    let c0 = asc("name".clone());
+    let c1 = with_nulls(c0, NpLast);
+    let c2 = with_collation(c1, "NOCASE".clone());
+    match c2.nulls_policy { NpLast => {}, _ => assert(false) }
+    assert(has_explicit_nulls_policy(&c2));
+    assert(has_custom_collation(&c2));
+    assert(c2.collation == "NOCASE".clone());
+}
+
+fn test_effective_nulls_policy() {
+    let c = asc("id".clone());
+    match effective_nulls_policy(&c) { NpFirst => {}, _ => assert(false) }
+    let d = desc("id".clone());
+    match effective_nulls_policy(&d) { NpLast => {}, _ => assert(false) }
+}
+
+fn main() {
+    test_policy_names();
+    test_is_explicit();
+    test_resolve_default_asc_is_first();
+    test_resolve_default_desc_is_last();
+    test_resolve_explicit_preserved();
+    test_compare_null_vs_val();
+    test_asc_desc_constructors();
+    test_with_nulls_and_collation();
+    test_effective_nulls_policy();
+}

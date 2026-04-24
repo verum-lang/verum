@@ -1,0 +1,76 @@
+// Per-subquery eligibility check — combine position + inner-query features.
+
+module core.database.sqlite.native.expr_decorrelation.eligibility;
+
+mount core.database.sqlite.native.expr_decorrelation.position.{
+    SubqueryPosition, SpWhereIn, SpWhereExists, SpWhereNotExists, SpSelectScalar, SpFromTable,
+    is_semijoin_shape, requires_at_most_one_row, is_already_uncorrelated,
+};
+mount base.{Bool, Text};
+
+public type InnerFeatures is {
+    has_aggregate: Bool,
+    has_distinct: Bool,
+    has_order_by: Bool,
+    has_limit: Bool,
+    inner_correlates_to_outer: Bool,
+    correlation_is_equality_only: Bool,
+};
+
+public fn zeroed() -> InnerFeatures {
+    InnerFeatures {
+        has_aggregate: false,
+        has_distinct: false,
+        has_order_by: false,
+        has_limit: false,
+        inner_correlates_to_outer: false,
+        correlation_is_equality_only: false,
+    }
+}
+
+public type Verdict is
+    | VdAlreadyUncorrelated   // FROM-subquery — no work needed
+    | VdSkipNotCorrelated     // inner never references outer — no need to decorrelate
+    | VdDecorrelate           // decorrelate succeeded — will become semi-join / anti-semi
+    | VdSkipAggregate         // inner aggregates outer-dependent — can't lift safely
+    | VdSkipLimit             // inner LIMIT — semantic mismatch with join
+    | VdSkipNonEqualityCorr   // correlation uses < / <= / BETWEEN — not sargable semi-join
+    | VdSkipScalarUnsafe      // scalar position but inner may produce > 1 row
+    ;
+
+public fn verdict_name(v: &Verdict) -> Text {
+    match v {
+        VdAlreadyUncorrelated  => "already_uncorrelated".clone(),
+        VdSkipNotCorrelated    => "skip_not_correlated".clone(),
+        VdDecorrelate          => "decorrelate".clone(),
+        VdSkipAggregate        => "skip_aggregate".clone(),
+        VdSkipLimit            => "skip_limit".clone(),
+        VdSkipNonEqualityCorr  => "skip_non_eq".clone(),
+        VdSkipScalarUnsafe     => "skip_scalar_unsafe".clone(),
+    }
+}
+
+public fn is_success(v: &Verdict) -> Bool {
+    match v { VdDecorrelate => true, _ => false }
+}
+
+public fn classify(p: &SubqueryPosition, f: &InnerFeatures) -> Verdict {
+    if is_already_uncorrelated(p) { return VdAlreadyUncorrelated; }
+    if !f.inner_correlates_to_outer { return VdSkipNotCorrelated; }
+    if f.has_aggregate { return VdSkipAggregate; }
+    if f.has_limit { return VdSkipLimit; }
+    if !f.correlation_is_equality_only { return VdSkipNonEqualityCorr; }
+    // For scalar subqueries: inner must be 1-row — we approximate by
+    // requiring no aggregate + rely on uniqueness of the keys; if
+    // `has_distinct` is false and ORDER BY absent, we accept.
+    match p {
+        SpSelectScalar => {
+            if f.has_distinct { return VdDecorrelate; }     // DISTINCT bounds to 1 per key
+            if f.has_order_by { return VdSkipScalarUnsafe; }
+        },
+        _ => {}
+    }
+    if is_semijoin_shape(p) { return VdDecorrelate; }
+    match p { SpWhereNotExists => return VdDecorrelate, _ => {} }
+    VdDecorrelate
+}

@@ -1,0 +1,48 @@
+// Dependency description — which cursors the expression references.
+
+module core.database.sqlite.native.query_invariant_hoist.dependency;
+
+mount base.{Bool, Int64};
+
+public type DepSet is {
+    cursor_bits: Int64,   // bitset of referenced cursors
+    references_random: Bool,
+};
+
+public fn constant_dep() -> DepSet {
+    DepSet { cursor_bits: 0 as Int64, references_random: false }
+}
+
+public fn cursor_dep(bit: Int64) -> DepSet {
+    DepSet { cursor_bits: bit, references_random: false }
+}
+
+public fn random_dep() -> DepSet {
+    DepSet { cursor_bits: 0 as Int64, references_random: true }
+}
+
+public fn join(a: &DepSet, b: &DepSet) -> DepSet {
+    DepSet {
+        cursor_bits: a.cursor_bits | b.cursor_bits,
+        references_random: a.references_random || b.references_random,
+    }
+}
+
+public fn is_constant(d: &DepSet) -> Bool {
+    d.cursor_bits == (0 as Int64) && !d.references_random
+}
+
+// Given an expression with `d` and a loop that iterates over `inner_bit`, the
+// expression is inner-invariant iff `d` does not reference `inner_bit` AND is
+// not random.
+public fn is_invariant_at_loop(d: &DepSet, inner_bit: Int64) -> Bool {
+    if d.references_random { return false; }
+    (d.cursor_bits & inner_bit) == (0 as Int64)
+}
+
+// An outer-loop-invariant expression depends only on cursors *outside* the
+// loop currently being emitted.
+public fn depends_only_outside(d: &DepSet, inner_mask: Int64) -> Bool {
+    if d.references_random { return false; }
+    (d.cursor_bits & inner_mask) == (0 as Int64)
+}

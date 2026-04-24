@@ -1,0 +1,56 @@
+// Per-column index sort spec.
+
+module core.database.sqlite.native.index_key_sort_api.key_column;
+
+mount core.database.sqlite.native.index_key_sort_api.nulls_policy.{
+    NullsPolicy, NpFirst, NpLast, NpDefault,
+    resolve, is_explicit,
+};
+mount base.{Bool, Text};
+
+public type KeyColumn is {
+    name: Text,
+    ascending: Bool,
+    nulls_policy: NullsPolicy,
+    collation: Text,
+};
+
+public fn asc(name: Text) -> KeyColumn {
+    KeyColumn {
+        name: name,
+        ascending: true,
+        nulls_policy: NpDefault,
+        collation: "".clone(),
+    }
+}
+
+public fn desc(name: Text) -> KeyColumn {
+    KeyColumn {
+        name: name,
+        ascending: false,
+        nulls_policy: NpDefault,
+        collation: "".clone(),
+    }
+}
+
+public fn with_nulls(mut c: KeyColumn, p: NullsPolicy) -> KeyColumn {
+    c.nulls_policy = p;
+    c
+}
+
+public fn with_collation(mut c: KeyColumn, coll: Text) -> KeyColumn {
+    c.collation = coll;
+    c
+}
+
+public fn effective_nulls_policy(c: &KeyColumn) -> NullsPolicy {
+    resolve(&c.nulls_policy, c.ascending)
+}
+
+public fn has_explicit_nulls_policy(c: &KeyColumn) -> Bool {
+    is_explicit(&c.nulls_policy)
+}
+
+public fn has_custom_collation(c: &KeyColumn) -> Bool {
+    c.collation.len() > 0
+}

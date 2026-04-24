@@ -572,3 +572,19 @@ public module keyword_conflict_table;
 public module prefix_like_opt;
 // - integer_overflow_api: checked add/sub/mul/div/neg + 3-policy taxonomy
 public module integer_overflow_api;
+// - vtab_rename_api: xRename 5-outcome (OK / readonly-mod / shadow-locked / invalid / IO err)
+public module vtab_rename_api;
+// - update_from_api: UPDATE ... FROM 4-kind source + self-join rejection
+public module update_from_api;
+// - expr_decorrelation: 5-position × inner-features → 7-verdict decorrelation classifier
+public module expr_decorrelation;
+// - index_key_sort_api: per-column ASC/DESC + NULLS FIRST/LAST/DEFAULT policy
+public module index_key_sort_api;
+// - query_invariant_hoist: DepSet bitset + 4-target hoist plan (stmt/loop/inner/inline)
+public module query_invariant_hoist;
+// - virtual_column_api: vtab 4-kind col (normal/hidden/gen-virtual/gen-stored) + spec
+public module virtual_column_api;
+// - pushdown_filter_api: 5-target × predicate-features → 7-verdict pushdown classifier
+public module pushdown_filter_api;
+// - double_quoted_string_api: DQS_DML / DQS_DDL config + 3-way resolver (ident / legacy / error)
+public module double_quoted_string_api;

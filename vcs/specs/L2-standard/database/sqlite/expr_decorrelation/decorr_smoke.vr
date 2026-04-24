@@ -1,0 +1,144 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: sqlite, expr_decorrelation, optimizer
+// @timeout: 5000
+// @expected-exit: 0
+
+mount core.database.sqlite.native.expr_decorrelation.position.{
+    SubqueryPosition, SpWhereIn, SpWhereExists, SpWhereNotExists, SpSelectScalar, SpFromTable,
+    position_name,
+    is_semijoin_shape, is_anti_semijoin_shape,
+    requires_at_most_one_row, is_already_uncorrelated,
+};
+mount core.database.sqlite.native.expr_decorrelation.eligibility.{
+    InnerFeatures, zeroed,
+    Verdict,
+    VdAlreadyUncorrelated, VdSkipNotCorrelated, VdDecorrelate,
+    VdSkipAggregate, VdSkipLimit, VdSkipNonEqualityCorr, VdSkipScalarUnsafe,
+    verdict_name, is_success, classify,
+};
+mount base.{Bool};
+
+fn test_position_names() {
+    assert(position_name(&SpWhereIn) == "where_in".clone());
+    assert(position_name(&SpWhereNotExists) == "where_not_exists".clone());
+    assert(position_name(&SpFromTable) == "from_table".clone());
+}
+
+fn test_semijoin_and_anti_semi_shapes() {
+    assert(is_semijoin_shape(&SpWhereIn));
+    assert(is_semijoin_shape(&SpWhereExists));
+    assert(!is_semijoin_shape(&SpWhereNotExists));
+    assert(is_anti_semijoin_shape(&SpWhereNotExists));
+    assert(!is_anti_semijoin_shape(&SpWhereExists));
+}
+
+fn test_requires_at_most_one_row() {
+    assert(requires_at_most_one_row(&SpSelectScalar));
+    assert(!requires_at_most_one_row(&SpWhereIn));
+}
+
+fn test_from_table_already_uncorrelated() {
+    assert(is_already_uncorrelated(&SpFromTable));
+    assert(!is_already_uncorrelated(&SpWhereIn));
+}
+
+fn test_classify_from_table() {
+    let f = zeroed();
+    match classify(&SpFromTable, &f) {
+        VdAlreadyUncorrelated => {}, _ => assert(false),
+    }
+}
+
+fn test_classify_uncorrelated_subquery_is_skipped() {
+    let f = zeroed();   // inner_correlates_to_outer = false
+    match classify(&SpWhereIn, &f) {
+        VdSkipNotCorrelated => {}, _ => assert(false),
+    }
+}
+
+fn test_classify_aggregate_rejected() {
+    let mut f = zeroed();
+    f.inner_correlates_to_outer = true;
+    f.correlation_is_equality_only = true;
+    f.has_aggregate = true;
+    match classify(&SpWhereIn, &f) {
+        VdSkipAggregate => {}, _ => assert(false),
+    }
+}
+
+fn test_classify_limit_rejected() {
+    let mut f = zeroed();
+    f.inner_correlates_to_outer = true;
+    f.correlation_is_equality_only = true;
+    f.has_limit = true;
+    match classify(&SpWhereIn, &f) {
+        VdSkipLimit => {}, _ => assert(false),
+    }
+}
+
+fn test_classify_non_equality_rejected() {
+    let mut f = zeroed();
+    f.inner_correlates_to_outer = true;
+    f.correlation_is_equality_only = false;
+    match classify(&SpWhereExists, &f) {
+        VdSkipNonEqualityCorr => {}, _ => assert(false),
+    }
+}
+
+fn test_classify_simple_decorrelate() {
+    let mut f = zeroed();
+    f.inner_correlates_to_outer = true;
+    f.correlation_is_equality_only = true;
+    match classify(&SpWhereIn, &f) {
+        VdDecorrelate => {}, _ => assert(false),
+    }
+    let v = classify(&SpWhereIn, &f);
+    assert(is_success(&v));
+}
+
+fn test_classify_scalar_with_order_by_unsafe() {
+    let mut f = zeroed();
+    f.inner_correlates_to_outer = true;
+    f.correlation_is_equality_only = true;
+    f.has_order_by = true;
+    match classify(&SpSelectScalar, &f) {
+        VdSkipScalarUnsafe => {}, _ => assert(false),
+    }
+}
+
+fn test_classify_scalar_with_distinct_ok() {
+    let mut f = zeroed();
+    f.inner_correlates_to_outer = true;
+    f.correlation_is_equality_only = true;
+    f.has_distinct = true;
+    match classify(&SpSelectScalar, &f) {
+        VdDecorrelate => {}, _ => assert(false),
+    }
+}
+
+fn test_classify_not_exists_decorrelates() {
+    let mut f = zeroed();
+    f.inner_correlates_to_outer = true;
+    f.correlation_is_equality_only = true;
+    match classify(&SpWhereNotExists, &f) {
+        VdDecorrelate => {}, _ => assert(false),
+    }
+}
+
+fn main() {
+    test_position_names();
+    test_semijoin_and_anti_semi_shapes();
+    test_requires_at_most_one_row();
+    test_from_table_already_uncorrelated();
+    test_classify_from_table();
+    test_classify_uncorrelated_subquery_is_skipped();
+    test_classify_aggregate_rejected();
+    test_classify_limit_rejected();
+    test_classify_non_equality_rejected();
+    test_classify_simple_decorrelate();
+    test_classify_scalar_with_order_by_unsafe();
+    test_classify_scalar_with_distinct_ok();
+    test_classify_not_exists_decorrelates();
+}

@@ -1,0 +1,18 @@
+// =============================================================================
+// core/database/sqlite/native/query_invariant_hoist/mod.vr
+// =============================================================================
+// Invariant-expression hoisting — move expressions whose value doesn't depend
+// on the loop cursor out of the row loop, compute once, store in a register.
+// Spec §13.5 — optimizer.
+//
+// Hoistable expressions (examples):
+//   * literal constants
+//   * bind parameters
+//   * deterministic fn calls on constants
+//   * outer-loop column references (for inner-loop hoist)
+// =============================================================================
+
+module core.database.sqlite.native.query_invariant_hoist;
+
+public module dependency;
+public module plan;

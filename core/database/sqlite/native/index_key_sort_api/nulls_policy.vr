@@ -1,0 +1,45 @@
+// NULLS FIRST / NULLS LAST policy.
+
+module core.database.sqlite.native.index_key_sort_api.nulls_policy;
+
+mount base.{Bool, Text};
+
+public type NullsPolicy is
+    | NpFirst
+    | NpLast
+    | NpDefault        // SQLite's default: NULLs sort as smallest → FIRST for ASC, LAST for DESC
+    ;
+
+public fn policy_name(p: &NullsPolicy) -> Text {
+    match p {
+        NpFirst   => "NULLS FIRST".clone(),
+        NpLast    => "NULLS LAST".clone(),
+        NpDefault => "DEFAULT".clone(),
+    }
+}
+
+// Resolve the default policy given the ASC/DESC direction.
+public fn resolve(p: &NullsPolicy, asc: Bool) -> NullsPolicy {
+    match p {
+        NpDefault => if asc { NpFirst } else { NpLast },
+        NpFirst   => NpFirst,
+        NpLast    => NpLast,
+    }
+}
+
+public fn is_explicit(p: &NullsPolicy) -> Bool {
+    match p { NpDefault => false, _ => true }
+}
+
+// Compare two cells where at least one is NULL. Returns -1 / 0 / 1.
+// Both NULL → 0; NULL in FIRST mode sorts less than non-NULL; in LAST mode sorts greater.
+public fn compare_null_vs_val(a_is_null: Bool, b_is_null: Bool, policy: &NullsPolicy, asc: Bool) -> Int {
+    if a_is_null && b_is_null { return 0; }
+    let resolved = resolve(policy, asc);
+    let null_is_smaller = match resolved { NpFirst => true, _ => false };
+    if a_is_null {
+        if null_is_smaller { -1 } else { 1 }
+    } else {
+        if null_is_smaller { 1 } else { -1 }
+    }
+}
