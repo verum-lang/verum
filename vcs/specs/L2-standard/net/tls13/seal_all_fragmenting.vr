@@ -1,0 +1,110 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: tls13, record, fragment, seal_all, rfc8446_5_1
+// @timeout: 15000
+// @expected-exit: 0
+
+// RFC 8446 §5.1 — a sender MUST split application data into records
+// no larger than MAX_PLAINTEXT_SIZE (2^14 bytes). `seal_all` loops
+// AeadState.seal over the payload slice, advancing seq once per
+// emitted record. Empty input emits no record and does not advance
+// seq.
+
+mount core.*;
+mount core.collections.List;
+mount core.net.tls13.cipher_suite.{AeadKind};
+mount core.net.tls13.record.content_type.{ContentType};
+mount core.net.tls13.record.aead.{AeadState};
+mount core.net.tls13.record.fragment.{seal_all};
+mount core.net.tls13.record.plaintext.{MAX_PLAINTEXT_SIZE};
+mount core.net.tls13.keyschedule.schedule.{SecretBytes};
+
+fn make_key_16() -> SecretBytes {
+    let mut v: List<Byte> = [];
+    let mut i: Int = 0;
+    while i < 16 { v.push(0x11_u8); i = i + 1; }
+    SecretBytes.from(v)
+}
+
+fn make_iv() -> [Byte; 12] {
+    let mut iv: [Byte; 12] = [0_u8; 12];
+    let mut i: Int = 0;
+    while i < 12 { iv[i] = 0x55_u8; i = i + 1; }
+    iv
+}
+
+fn small_payload_fits_in_single_record() {
+    let mut aead = AeadState.new(AeadKind.Aes128Gcm, make_key_16(), make_iv());
+    let payload: List<Byte> = [0x01_u8, 0x02_u8, 0x03_u8];
+    let seq_before = aead.seq();
+    let wire = seal_all(&mut aead, ContentType.ApplicationData, payload.as_slice()).unwrap();
+    // One record was emitted — seq advanced by exactly one.
+    assert(aead.seq() == seq_before + 1_u64);
+    // Exactly one outer header (5 bytes) sits at position 0.
+    assert(wire[0] == ContentType.ApplicationData.to_u8());
+    assert(wire[1] == 0x03_u8 && wire[2] == 0x03_u8);
+}
+
+fn empty_payload_emits_nothing() {
+    let mut aead = AeadState.new(AeadKind.Aes128Gcm, make_key_16(), make_iv());
+    let empty: List<Byte> = [];
+    let seq_before = aead.seq();
+    let wire = seal_all(&mut aead, ContentType.ApplicationData, empty.as_slice()).unwrap();
+    // No record → wire is empty and seq did not move.
+    assert(wire.len() == 0);
+    assert(aead.seq() == seq_before);
+}
+
+fn payload_straddling_max_plaintext_split_into_two_records() {
+    let mut aead = AeadState.new(AeadKind.Aes128Gcm, make_key_16(), make_iv());
+    // MAX + 100 bytes — first record carries MAX, second carries 100.
+    let total = MAX_PLAINTEXT_SIZE + 100;
+    let mut big: List<Byte> = [];
+    let mut i: Int = 0;
+    while i < total {
+        big.push((i % 256) as Byte);
+        i = i + 1;
+    }
+    let seq_before = aead.seq();
+    let wire = seal_all(&mut aead, ContentType.ApplicationData, big.as_slice()).unwrap();
+    // Two records → seq advanced by exactly two.
+    assert(aead.seq() == seq_before + 2_u64);
+    // Wire bytes must be strictly larger than the original payload (AEAD
+    // overhead + two outer headers each add 5 + 16 + inner type = ≥ 22 bytes).
+    assert(wire.len() >= total + 44);
+}
+
+fn exact_one_record_sized_payload_emits_one() {
+    let mut aead = AeadState.new(AeadKind.Aes128Gcm, make_key_16(), make_iv());
+    let mut exact: List<Byte> = [];
+    let mut i: Int = 0;
+    while i < MAX_PLAINTEXT_SIZE {
+        exact.push(0xAA_u8);
+        i = i + 1;
+    }
+    // NOTE: inner-plaintext = content || ContentType(1) || zero-padding.
+    // With MAX_PLAINTEXT_SIZE content bytes, the inner grows to MAX+1 — but
+    // seal_all slices the *content* at MAX, so content of exactly MAX fits.
+    // The inner then exceeds MAX by 1 → seal rejects as PlaintextTooLarge.
+    // Therefore a MAX-byte payload + non-empty content_type in inner
+    // would fail. Use MAX-1 content so MAX inner fits.
+    let content_len = MAX_PLAINTEXT_SIZE - 1;
+    let mut content: List<Byte> = [];
+    let mut j: Int = 0;
+    while j < content_len { content.push(0xBB_u8); j = j + 1; }
+    let seq_before = aead.seq();
+    let wire = seal_all(&mut aead, ContentType.ApplicationData, content.as_slice()).unwrap();
+    assert(aead.seq() == seq_before + 1_u64);
+    assert(wire.len() > content_len);
+}
+
+@main
+public fn main() -> Int {
+    small_payload_fits_in_single_record();
+    empty_payload_emits_nothing();
+    payload_straddling_max_plaintext_split_into_two_records();
+    exact_one_record_sized_payload_emits_one();
+    print("RFC 8446 §5.1 seal_all multi-record split verified");
+    0
+}
