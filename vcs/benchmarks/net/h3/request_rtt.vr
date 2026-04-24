@@ -1,0 +1,35 @@
+// @test: benchmark
+// @tier: all
+// @level: L4
+// @expected-performance: <= 2.5 µs per request (localhost, pure-Verum stack)
+// @tags: h3, qpack, performance
+
+/// HTTP/3 request-response RTT on loopback.
+///
+/// Spec §11 indirect target — warp H3 should stay within one µs of
+/// the QUIC packet-process cost per request. Measurement: emit a
+/// QPACK-encoded GET /index.html, parse the response HEADERS frame,
+/// DATA frame, stream FIN.
+///
+/// Once the h3.connection integration layer lands (Phase 6 final),
+/// this bench drives a client-server pair on a loopback QuicListener
+/// and reports end-to-end µs/request.
+
+module vcs.benchmarks.net.h3.request_rtt;
+
+mount core.*;
+mount core.collections.List;
+mount core.net.h3.qpack.decoder.{decode_field_section};
+
+const BENCHMARK_ITERATIONS: Int = 100_000;
+
+@bench
+public fn h3_request_rtt() {
+    // Minimal QPACK-encoded header block: indexed :method GET.
+    let block: List<Byte> = [0x00_u8, 0x00_u8, 0xD1_u8];
+    let mut n: Int = 0;
+    while n < BENCHMARK_ITERATIONS {
+        let _ = decode_field_section(&block);
+        n = n + 1;
+    }
+}

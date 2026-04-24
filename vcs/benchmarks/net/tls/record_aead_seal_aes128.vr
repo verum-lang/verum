@@ -1,0 +1,46 @@
+// @test: benchmark
+// @tier: all
+// @level: L4
+// @expected-performance: >= 3 GB/s w/o AES-NI; >= 10 GB/s w/ AES-NI
+// @tags: tls13, aead, aes_gcm, performance, phase7, scaffold
+
+/// TLS 1.3 record AEAD seal — AES-128-GCM throughput scaffold.
+///
+/// Spec §11 target: ≥ 3 GB/s on server-grade x86_64 without AES-NI
+/// intrinsics, ≥ 10 GB/s with AES-NI (Phase 7, Ice Lake / Zen 4).
+///
+/// The measurement body becomes active once the Phase 7 AES-NI
+/// lowering lands and the `Aes128Gcm` type is addressable from a
+/// bench module without colliding with the `AeadKind` variant of
+/// the same name (tracked in memory/feedback_explicit_mount_glob_shadow.md).
+///
+/// Until then this file exists as a §11 target declaration so the
+/// vbench scheduler can see the benchmark and honor the expected-
+/// performance tag.
+
+module vcs.benchmarks.net.tls.record_aead_seal_aes128;
+
+mount core.collections.List;
+
+const BENCHMARK_ITERATIONS: Int = 10_000;
+const PAYLOAD_BYTES:        Int = 16_384;
+
+@bench
+public fn record_aead_seal_aes128() {
+    let mut plaintext: List<Byte> = [];
+    let mut i: Int = 0;
+    while i < PAYLOAD_BYTES {
+        plaintext.push((i & 0xFF_u32) as Byte);
+        i = i + 1;
+    }
+    // Body stubbed — see module comment.
+    let mut n: Int = 0;
+    while n < BENCHMARK_ITERATIONS {
+        // Placeholder: copy into a fresh list, measuring baseline
+        // alloc + bytes-touch cost until the AEAD seal is wired.
+        let mut out: List<Byte> = [];
+        let mut j: Int = 0;
+        while j < plaintext.len() { out.push(plaintext[j]); j = j + 1; }
+        n = n + 1;
+    }
+}
