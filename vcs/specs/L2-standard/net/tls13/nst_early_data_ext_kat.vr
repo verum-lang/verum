@@ -1,0 +1,138 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: tls13, new_session_ticket, early_data, extension, encode, rfc8446_4_6_1
+// @timeout: 15000
+// @expected-exit: 0
+
+// RFC 8446 §4.6.1 NewSessionTicket extension semantics — when a
+// server issues a ticket that authorises 0-RTT early_data, it
+// attaches an `early_data` extension whose body is a uint32
+// `max_early_data_size` (in bytes).
+//
+// §4.2.10 "early_data" extension — the same extension type (42)
+// serves three purposes depending on carrier:
+//
+//   * ClientHello:            EarlyDataIndication.EarlyDataClient   (empty body)
+//   * EncryptedExtensions:    EarlyDataIndication.EarlyDataClient   (empty body)
+//   * NewSessionTicket:       EarlyDataIndication.EarlyDataTicket { size: u32 }
+
+mount core.*;
+mount core.collections.List;
+mount core.net.tls13.handshake.codec.{Reader};
+mount core.net.tls13.handshake.messages.{
+    HandshakeMessage, NewSessionTicket, encode_handshake, decode_handshake,
+    HST_NEW_SESSION_TICKET,
+};
+mount core.net.tls13.handshake.extension.{Extension, EarlyDataIndication};
+
+fn nst_with_early_data_ticket_byte_exact() {
+    // max_early_data_size = 16_384 (0x00004000) — typical first-RTT budget.
+    let early = Extension.EarlyDataExt(
+        EarlyDataIndication.EarlyDataTicket { max_early_data_size: 16_384_u32 }
+    );
+    let nst = NewSessionTicket {
+        ticket_lifetime: 7_200_u32,               // 2h (0x00001C20)
+        ticket_age_add:  0xABCDEF01_u32,
+        ticket_nonce:    [0x42_u8, 0x43_u8],
+        ticket:          [0x01_u8; 16].to_list(),
+        extensions:      [early],
+    };
+    let mut out: List<Byte> = [];
+    encode_handshake(&HandshakeMessage.NewSessionTicketMsg(nst), &mut out).unwrap();
+    // Layout:
+    //   [0]       type = 4 (HST_NEW_SESSION_TICKET)
+    //   [1..4]    body length u24
+    //   [4..8]    lifetime = 7200 = 0x00 0x00 0x1C 0x20
+    //   [8..12]   age_add = 0xAB CD EF 01
+    //   [12]      nonce u8 len = 2
+    //   [13..15]  nonce = 0x42 0x43
+    //   [15..17]  ticket u16 len = 16
+    //   [17..33]  ticket = 16 × 0x01
+    //   [33..35]  extensions u16 block len
+    //   [35..37]  early_data ext_type = 42 = 0x00 0x2A
+    //   [37..39]  ext body len = 4
+    //   [39..43]  max_early_data_size = 0x00 0x00 0x40 0x00 (16384)
+    // Total = 43.
+    assert(out.len() == 43);
+    assert(out[0] == HST_NEW_SESSION_TICKET);
+    // Body length = 39.
+    assert(out[1] == 0x00_u8 && out[2] == 0x00_u8 && out[3] == 0x27_u8);
+    // Lifetime
+    assert(out[4] == 0x00_u8 && out[5] == 0x00_u8);
+    assert(out[6] == 0x1C_u8 && out[7] == 0x20_u8);
+    // age_add
+    assert(out[8]  == 0xAB_u8 && out[9]  == 0xCD_u8);
+    assert(out[10] == 0xEF_u8 && out[11] == 0x01_u8);
+    // Nonce
+    assert(out[12] == 0x02_u8);
+    assert(out[13] == 0x42_u8 && out[14] == 0x43_u8);
+    // Ticket length + body
+    assert(out[15] == 0x00_u8 && out[16] == 0x10_u8);
+    assert(out[17] == 0x01_u8);
+    assert(out[32] == 0x01_u8);
+    // Extensions block: 8 bytes (ext_type 2 + len 2 + body 4).
+    assert(out[33] == 0x00_u8 && out[34] == 0x08_u8);
+    // early_data ext_type = 42.
+    assert(out[35] == 0x00_u8 && out[36] == 0x2A_u8);
+    assert(out[37] == 0x00_u8 && out[38] == 0x04_u8);
+    // max_early_data_size = 16384 = 0x00 0x00 0x40 0x00.
+    assert(out[39] == 0x00_u8 && out[40] == 0x00_u8);
+    assert(out[41] == 0x40_u8 && out[42] == 0x00_u8);
+}
+
+fn nst_early_data_decode_roundtrip() {
+    let early = Extension.EarlyDataExt(
+        EarlyDataIndication.EarlyDataTicket { max_early_data_size: 65_536_u32 }
+    );
+    let nst = NewSessionTicket {
+        ticket_lifetime: 600_u32,
+        ticket_age_add:  42_u32,
+        ticket_nonce:    [0xAA_u8],
+        ticket:          [0xBB_u8, 0xCC_u8],
+        extensions:      [early],
+    };
+    let mut wire: List<Byte> = [];
+    encode_handshake(&HandshakeMessage.NewSessionTicketMsg(nst), &mut wire).unwrap();
+    let mut r = Reader.new(wire.as_slice());
+    let parsed = decode_handshake(&mut r).unwrap();
+    match parsed {
+        HandshakeMessage.NewSessionTicketMsg(nst2) => {
+            assert(nst2.ticket_lifetime == 600_u32);
+            assert(nst2.ticket_age_add == 42_u32);
+            assert(nst2.extensions.len() == 1);
+        },
+        _ => panic("expected NewSessionTicketMsg"),
+    }
+}
+
+fn nst_early_data_with_max_size_u32_max() {
+    // Upper bound: max_early_data_size = 2^32 - 1 = 0xFFFFFFFF.
+    // Tests big-endian encoding of a maxed uint32 in the ext body.
+    let early = Extension.EarlyDataExt(
+        EarlyDataIndication.EarlyDataTicket { max_early_data_size: 0xFFFFFFFF_u32 }
+    );
+    let nst = NewSessionTicket {
+        ticket_lifetime: 1_u32,
+        ticket_age_add:  0_u32,
+        ticket_nonce:    [],
+        ticket:          [0x00_u8],
+        extensions:      [early],
+    };
+    let mut out: List<Byte> = [];
+    encode_handshake(&HandshakeMessage.NewSessionTicketMsg(nst), &mut out).unwrap();
+    // early_data body = 4 bytes of 0xFF. Find them at the tail.
+    assert(out[out.len() - 4] == 0xFF_u8);
+    assert(out[out.len() - 3] == 0xFF_u8);
+    assert(out[out.len() - 2] == 0xFF_u8);
+    assert(out[out.len() - 1] == 0xFF_u8);
+}
+
+@main
+public fn main() -> Int {
+    nst_with_early_data_ticket_byte_exact();
+    nst_early_data_decode_roundtrip();
+    nst_early_data_with_max_size_u32_max();
+    print("RFC 8446 §4.6.1 NST + §4.2.10 early_data ticket ext encode verified");
+    0
+}
